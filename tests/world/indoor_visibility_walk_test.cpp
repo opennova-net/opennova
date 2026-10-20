@@ -1,5 +1,7 @@
-// The indoor-visibility walk on the retail data (the "occlusion issues in a
-// building" report): boot a retail mission on the headless rig, pick an
+// The indoor-visibility walk (the "occlusion issues in a building" report) on
+// the mission set's training grounds in miniature (indoor.bms: 00TRa's armory
+// door; spawn.bms: CP03's spawn inside HN_Bld1's door; both over the minted
+// enterable hut): boot the mission on the headless rig, pick an
 // enterable building with blink boxes and portal records, walk the local
 // player from outside through its doorway into the interior and back out, and
 // after every logic tick run the render-occlusion frame over the camera the
@@ -15,16 +17,15 @@
 // visibility verdict toggling more than once over a monotonic walk.
 // Symptom (A) "things inside can't be seen from inside": an entity inside
 // the building culled from inside while it draws from outside looking in.
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying the mission).
 //
-// Options: --bms <file> (default 00TRa.bms), --list (print the buildings),
+// Options: --bms <file> (default indoor.bms), --list (print the buildings),
 // --bms-id <id> (the building), --door <record> (its type-2 record),
 // --tp (the debug on-foot chase camera; default the on-foot first person),
 // --route x,y;x,y;... (walk these mission waypoints after the door legs),
 // --span <u> / --inside <u> (how far outside / inside the door plane the legs
 // run), --verbose (one line per tick).
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <runtime/inmatch/occlusion_collect.h> // the shell's entity collect
 #include <runtime/mission/collision_resolve.h>
@@ -70,7 +71,7 @@ bool expect(bool cond, const char *msg) {
 }
 
 struct Options {
-	std::string bms = "00TRa.bms";
+	std::string bms = "indoor.bms";
 	bool list = false;
 	bool scan = false;
 	bool spawn = false;   // --spawn: the authored spawn's verdicts over a look-around
@@ -79,7 +80,7 @@ struct Options {
 	int idle = 0;         // --idle N: stand still at the spawn for N ticks first
 	bool why = false;     // --why: the spawn facing's per-entity verdicts
 	bool eye = false;     // --eye: the FP eye vs retail's composition chain at pitch -20/0/+20
-	bool retail_truth = false; // --retail-truth: assert what retail draws at the CP03 spawn poses
+	bool spawn_truth = false; // --spawn-truth: assert what the spawn's poses draw (CP03's law)
 	float sweep_step = 0.0f;   // --sweep-out <u>: settled static poses out through the door (no walk)
 	int bms_id = 0;
 	int door = -1;
@@ -98,7 +99,7 @@ void mission_from_render(const float r[3], float out[3]) {
 	out[2] = r[1];
 }
 
-std::string item_label(testrig::RetailMissionRig &rig, const w::Entity &e) {
+std::string item_label(testrig::MissionRig &rig, const w::Entity &e) {
 	const def::DefItemsFile *items = rig.items_table();
 	if (items == nullptr) return "?";
 	const def::DefItemDef *d = mission::find_item_def(
@@ -124,7 +125,7 @@ struct DoorRecord {
 	float min_z = 0.0f, max_z = 0.0f;
 };
 
-std::vector<DoorRecord> portal_records(testrig::RetailMissionRig &rig, const w::Entity &e) {
+std::vector<DoorRecord> portal_records(testrig::MissionRig &rig, const w::Entity &e) {
 	std::vector<DoorRecord> out;
 	const w::OcclusionModel *m = rig.occlusion.model(rig.occlusion.instance_model_id(e.handle));
 	if (m == nullptr) return out;
@@ -162,14 +163,14 @@ std::vector<DoorRecord> portal_records(testrig::RetailMissionRig &rig, const w::
 	return out;
 }
 
-w::BlinkAccum point_query(testrig::RetailMissionRig &rig, const float p[3]) {
+w::BlinkAccum point_query(testrig::MissionRig &rig, const float p[3]) {
 	const int32_t pf[3] = {w::to_fixed(p[0]), w::to_fixed(p[1]), w::to_fixed(p[2])};
 	w::BlinkAccum acc;
 	rig.collision.query_blink_boxes_at_point(rig.world, pf, acc);
 	return acc;
 }
 
-void list_buildings(testrig::RetailMissionRig &rig) {
+void list_buildings(testrig::MissionRig &rig) {
 	const w::Vec3 spawn = rig.local.player_position();
 	rig.world.registry.for_each([&](const w::Entity &e) {
 		if (e.kind != w::EntityKind::Building) return;
@@ -238,7 +239,7 @@ struct Frame {
 // watched entity, the slots whose silhouette fully holds its sphere (the
 // render_TOC slot leg before the 8-corner refinement and the viewthru rescue;
 // a type-1 slot counts only while its building carries the bit-31 marker).
-std::string slot_probe(testrig::RetailMissionRig &rig, const w::OcclusionFrameCamera &cam) {
+std::string slot_probe(testrig::MissionRig &rig, const w::OcclusionFrameCamera &cam) {
 	struct Slot {
 		w::EntityHandle h;
 		int bms = 0;
@@ -373,7 +374,7 @@ std::string slot_probe(testrig::RetailMissionRig &rig, const w::OcclusionFrameCa
 // the silhouette build's classification (front = n.(v0 - eye) > 0 per face;
 // back faces feed the cancelled edge list) — a camera inside a closed hull
 // sees every face front, so the record yields face planes and no edge planes.
-std::string occluder_probe(testrig::RetailMissionRig &rig, const w::Entity &bldg,
+std::string occluder_probe(testrig::MissionRig &rig, const w::Entity &bldg,
 		const w::OcclusionFrameCamera &cam) {
 	const w::OcclusionModel *m = rig.occlusion.model(rig.occlusion.instance_model_id(bldg.handle));
 	if (m == nullptr) return "";
@@ -492,7 +493,7 @@ std::string occluder_probe(testrig::RetailMissionRig &rig, const w::Entity &bldg
 }
 
 // One render-occlusion frame over the camera the game draws with.
-bool run_frame(testrig::RetailMissionRig &rig, const w::Entity &bldg, const DoorRecord &door,
+bool run_frame(testrig::MissionRig &rig, const w::Entity &bldg, const DoorRecord &door,
 		const float inward[3], Frame &out) {
 	const w::LocalPlayerViewFrame f = rig.local.view_frame();
 	if (!f.camera_pose_valid) return false;
@@ -668,7 +669,7 @@ LegFlips report_leg(const std::vector<Frame> &frames, bool verbose) {
 
 // Walk one leg holding forward until `done` says stop (or max ticks).
 template <typename Done>
-std::vector<Frame> walk(testrig::RetailMissionRig &rig, const w::Entity &bldg,
+std::vector<Frame> walk(testrig::MissionRig &rig, const w::Entity &bldg,
 		const DoorRecord &door, const float inward[3], int max_ticks, Done done) {
 	std::vector<Frame> frames;
 	rig.local.input.forward = true;
@@ -695,7 +696,7 @@ int main(int argc, char **argv) {
 		else if (a == "--spawn") opt.spawn = true;
 		else if (a == "--why") opt.why = true;
 		else if (a == "--eye") opt.eye = true;
-		else if (a == "--retail-truth") opt.retail_truth = true;
+		else if (a == "--spawn-truth") opt.spawn_truth = true;
 		else if (a == "--sweep-out" && i + 1 < argc) opt.sweep_step = static_cast<float>(std::atof(argv[++i]));
 		else if (a == "--idle" && i + 1 < argc) opt.idle = std::atoi(argv[++i]);
 		else if (a == "--radius" && i + 1 < argc) opt.radius = static_cast<float>(std::atof(argv[++i]));
@@ -724,11 +725,13 @@ int main(int argc, char **argv) {
 			}
 		}
 	}
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying the mission)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("indoor_visibility");
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, opt.bms.c_str(), error)) return retail::skip(error.c_str());
+	if (!expect(root.ok() && rig.open(root.path(), opt.bms.c_str(), error), "the mission opens")) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
 	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
@@ -903,40 +906,39 @@ int main(int argc, char **argv) {
 						rig.occlusion.building_visible(e.handle), rig.occlusion.section_mask(e.handle));
 			});
 		}
-		if (opt.retail_truth) {
-			// What retail draws at the Ghost Harvest spawn, read from onhook
-			// captures of the retail host (the player deployed at its authored
-			// spawn (1161.5025, 436.5958, 21.8551), matching this rig's to 1 mm):
-			//  - facing west through HN_Bld1's west door (the type-2 record on
-			//    x = 1161.30), with the eye 0.06..0.18 u INSIDE that plane at the
-			//    spawn and two doorway steps: the hangar Mhangar2 (bms 297) and
-			//    the buggy Dbuggy1 (bms 2539) outside draw, as at pitch -20/+20;
-			//  - facing north from the spawn: the armory crate Armry03 (bms 2538,
-			//    an items.def DECORATION inside the room, section 5), the hangar
-			//    and the light post Lpost01 (bms 672) draw.
-			struct RetailPose {
-				const char *capture;
-				float body_x;
+		if (opt.spawn_truth) {
+			// What retail draws at CP03's deployed spawn, read from onhook captures
+			// of the retail host (the player 0.20 inside HN_Bld1's west door's
+			// plane): facing out through the door, at the spawn and two doorway
+			// steps (0.30 and 0.15 inside) and at pitch -20, the hangar and the
+			// buggy outside draw; at pitch +20 the hangar alone; facing along the
+			// wall past the window, the armory crate inside, the hangar and the
+			// light post outside. spawn.bms lays the same out by the same bms ids
+			// at its hut's doorway (the start 0.20 inside the doorway's plane,
+			// facing out along mission +y; the window on the -x side), and its
+			// poses must draw the same sets.
+			struct SpawnPose {
+				const char *name;
+				float dy; // out along +y from the spawn
 				double yaw, pitch;
 				std::vector<int> drawn;
 			};
-			const std::vector<RetailPose> poses = {
-					{"r_spawn_1 (the deployed spawn)", 1161.5025f, 270.0, 0.0, {297, 2539}},
-					{"r_walk_1161.60", 1161.60f, 270.0, 0.0, {297, 2539}},
-					{"r_walk_1161.45", 1161.45f, 270.0, 0.0, {297, 2539}},
-					{"r_w_m20", 1161.5025f, 270.0, -20.0, {297, 2539}},
-					{"r_w_p20", 1161.5025f, 270.0, 20.0, {297}},
-					{"r_n_0", 1161.5025f, 0.0, 0.0, {297, 672, 2538}},
+			const std::vector<SpawnPose> poses = {
+					{"the spawn, facing out", 0.0f, 0.0, 0.0, {297, 2539}},
+					{"0.30 inside, facing out", -0.10f, 0.0, 0.0, {297, 2539}},
+					{"0.15 inside, facing out", 0.05f, 0.0, 0.0, {297, 2539}},
+					{"pitch -20", 0.0f, 0.0, -20.0, {297, 2539}},
+					{"pitch +20", 0.0f, 0.0, 20.0, {297}},
+					{"facing the window", 0.0f, 270.0, 0.0, {297, 672, 2538}},
 			};
-			if (!expect(opt.bms == "CP03.bms", "--retail-truth carries the CP03 captures")) return 1;
-			for (const RetailPose &pose : poses) {
-				rig.local.teleport_local_player(w::Vec3{pose.body_x, 436.5958f, 21.8551f}, pose.yaw,
-						pose.pitch);
+			if (!expect(opt.bms == "spawn.bms", "--spawn-truth carries spawn.bms's poses")) return 1;
+			for (const SpawnPose &pose : poses) {
+				rig.local.teleport_local_player(w::Vec3{sp.x, sp.y + pose.dy, sp.z}, pose.yaw, pose.pitch);
 				rig.tick(2);
 				Frame fr;
-				if (!expect(run_frame(rig, *nb, none, fwd, fr), "the retail pose has a camera")) continue;
-				std::printf("retail-truth: %s body x %.4f eye (%.4f, %.4f, %.4f) yaw %.0f pitch %.0f in=%d ext=%d wg=%d mask 0x%08X vis_bldg=%d\n",
-						pose.capture, fr.pos[0], fr.eye[0], fr.eye[1], fr.eye[2], pose.yaw, pose.pitch,
+				if (!expect(run_frame(rig, *nb, none, fwd, fr), "the pose has a camera")) continue;
+				std::printf("spawn-truth: %s body x %.4f eye (%.4f, %.4f, %.4f) yaw %.0f pitch %.0f in=%d ext=%d wg=%d mask 0x%08X vis_bldg=%d\n",
+						pose.name, fr.pos[0], fr.eye[0], fr.eye[1], fr.eye[2], pose.yaw, pose.pitch,
 						fr.camera_indoors, fr.exterior_visible, fr.window_groups, fr.bldg_mask,
 						fr.visible_buildings);
 				for (const int id : pose.drawn) {
@@ -945,9 +947,9 @@ int main(int argc, char **argv) {
 						if (e.bms_id == id) present = true;
 					});
 					const bool drawn = present && fr.culled.count(id) == 0 && fr.hidden_buildings.count(id) == 0;
-					std::printf("retail-truth:   bms %d %s\n", id, drawn ? "drawn" : "NOT DRAWN");
+					std::printf("spawn-truth:   bms %d %s\n", id, drawn ? "drawn" : "NOT DRAWN");
 					char msg[160];
-					std::snprintf(msg, sizeof(msg), "%s: bms %d draws as in retail", pose.capture, id);
+					std::snprintf(msg, sizeof(msg), "%s: bms %d draws as at CP03's spawn", pose.name, id);
 					expect(drawn, msg);
 				}
 			}

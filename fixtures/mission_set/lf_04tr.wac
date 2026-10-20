@@ -1,0 +1,5 @@
+If true(bluekills) then
+		Lose (1)
+Else if true(greenkills) then
+		Lose (0)
+endif

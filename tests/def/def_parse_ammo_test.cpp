@@ -11,10 +11,10 @@
 using namespace opennova::def;
 
 int main() {
-    /* fixtures/def/ammo.def: the authored ammo blocks (the shipped table's grammar, the
+    /* fixtures/def/parse_ammo.def: the authored ammo blocks (the shipped table's grammar, the
        witnessed values) its per-round pins read; the digit-walker block below runs beside
        them. */
-    const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/ammo.def";
+    const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/parse_ammo.def";
     const char *path = fixture.c_str();
 
     DefAmmoFile ammo;

@@ -1,4 +1,6 @@
-// 01TR ("Training: Land Vehicles") on the retail data: the Drivable Dune
+// 01TR ("Training: Land Vehicles") in miniature (the mission set's land_vehicles.bms:
+// the minted mbuggy in the shipped Dbuggy1's shape, its gun child the synthetic mount
+// in the shipped B50Cal's articulation): the Drivable Dune
 // Buggy (items.def 101291) parked by the spawn carries an addeweap gun child
 // (ewep01 -> 101419). Two USE-ITEM facts the retail engine holds:
 //
@@ -12,12 +14,15 @@
 //   * the gun child rides the driven buggy (pose_emplacement_attachments over
 //     the authored userpoint), so it never falls behind a moving carrier.
 //
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms).
-#include "common/retail_mission_files.h"
+// And a wall-contact fact: the motorcycle parked west of the start (SSN 311)
+// driven head-on at the boulder there (SSN 310) stops against the rock.
+//
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/player_weapon.h>
-#include "common/retail_paths.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -37,7 +42,7 @@ bool expect(bool cond, const char *msg) {
 
 constexpr int kBuggyTypeId = 1291; // items.def 101291 "Drivable Dune Buggy"
 
-const w::Entity *nearest_buggy(testrig::RetailMissionRig &rig, const w::Vec3 &from) {
+const w::Entity *nearest_buggy(testrig::MissionRig &rig, const w::Vec3 &from) {
 	const w::Entity *best = nullptr;
 	float best_d = 1e30f;
 	rig.world.registry.for_each([&](const w::Entity &e) {
@@ -51,7 +56,7 @@ const w::Entity *nearest_buggy(testrig::RetailMissionRig &rig, const w::Vec3 &fr
 	return best;
 }
 
-const w::Entity *gun_child_of(testrig::RetailMissionRig &rig, w::EntityHandle carrier) {
+const w::Entity *gun_child_of(testrig::MissionRig &rig, w::EntityHandle carrier) {
 	const w::Entity *found = nullptr;
 	rig.world.registry.for_each([&](const w::Entity &e) {
 		if (found == nullptr && e.emplacement_parent == carrier) found = &e;
@@ -59,16 +64,62 @@ const w::Entity *gun_child_of(testrig::RetailMissionRig &rig, w::EntityHandle ca
 	return found;
 }
 
+constexpr uint16_t kBoulderSsn = 310;   // land_vehicles.bms's rock formation
+constexpr uint16_t kMotorcycleSsn = 311; // land_vehicles.bms's parked motorcycle
+constexpr float kBoulderRadius = 2.3f;   // the minted rock's upper ring (mrock.3di)
+
+// One drive at the boulder: the driven vehicle set down `back` units short of the rock's centre
+// along `heading` (a planar unit vector, the way its nose points), then held on forward for
+// `ticks`. `start`/`end` are the hull's distance along the heading from the rock's centre
+// (negative: short of it); `closest` the nearest its centre came to the rock's; `last_second` how
+// far it moved over the run's last 62 ticks, the throttle still held.
+struct BoulderRun {
+	float start = 0.0f, end = 0.0f, closest = 0.0f, last_second = 0.0f;
+};
+
+BoulderRun drive_at_boulder(testrig::MissionRig &rig, w::EntityHandle vehicle, const w::Vec3 &heading, float back,
+		int ticks) {
+	BoulderRun run;
+	const w::Vec3 rock = rig.world.registry.by_net_id(kBoulderSsn)->position;
+	const auto along = [&](const w::Vec3 &p) { return (p.x - rock.x) * heading.x + (p.y - rock.y) * heading.y; };
+	rig.world.commands.set_entity_position(vehicle,
+			w::Vec3{rock.x - heading.x * back, rock.y - heading.y * back, rock.z + 1.5f});
+	rig.tick(62);
+	run.start = along(rig.world.registry.get(vehicle)->position);
+	run.closest = 1.0e30f;
+	rig.local.input.forward = true;
+	w::Vec3 second_before_end{};
+	for (int t = 0; t < ticks; ++t) {
+		if (t == ticks - 62) second_before_end = rig.world.registry.get(vehicle)->position;
+		rig.tick();
+		run.closest = std::min(run.closest, testrig::planar_distance(rig.world.registry.get(vehicle)->position, rock));
+	}
+	rig.local.input.forward = false;
+	run.end = along(rig.world.registry.get(vehicle)->position);
+	run.last_second = testrig::planar_distance(rig.world.registry.get(vehicle)->position, second_before_end);
+	return run;
+}
+
+// The planar unit vector from `a` to `b`.
+w::Vec3 planar_heading(const w::Vec3 &a, const w::Vec3 &b) {
+	const float dx = b.x - a.x, dy = b.y - a.y;
+	const float len = std::sqrt(dx * dx + dy * dy);
+	return len > 0.0f ? w::Vec3{dx / len, dy / len, 0.0f} : w::Vec3{1.0f, 0.0f, 0.0f};
+}
+
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("buggy");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "01TR.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "land_vehicles.bms", error), "land_vehicles.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "01TR boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
@@ -165,6 +216,41 @@ int main() {
 	expect(gun_gap <= 6.0f, "the gun child stays on the driven buggy");
 	expect(gun_moved >= drove - 6.0f, "the gun child moved with the buggy");
 	expect(gun_now->alive && !gun_now->hidden, "the gun child is still live and visible");
+
+	// --- Wall contact: the motorcycle driven head-on at the boulder stops against it. The light
+	// solve's probes meet the rock's flank as wall contacts, the planar push and its second probe
+	// pass move the hull back out each tick, so it never rides into or through the rock.
+	// [orig: Entity_ProcessLightVehiclePhysics @0x479600 -- the five-probe push @0x47A0AF..0x47A0BE]
+	rig.world.vehicles.detach(rig.world.cached.local_player);
+	rig.tick(19);
+	const w::Entity *bike = rig.world.registry.by_net_id(kMotorcycleSsn);
+	if (!expect(bike != nullptr, "the motorcycle SSN 311 is in the world")) return 1;
+	const w::EntityHandle bike_h = bike->handle;
+	const w::Vec3 bike_at = bike->position;
+	rig.world.commands.set_entity_position(
+			rig.world.cached.local_player, w::Vec3{ bike_at.x - 1.0f, bike_at.y, bike_at.z + 1.0f });
+	rig.world.collision->build_initial_tables(rig.world);
+	rig.local.player()->ground_target = {};
+	if (!expect(rig.local.toggle_mount(), "USE mounts the motorcycle")) return 1;
+	rig.tick(31);
+	if (!expect(rig.local.select_numbered_seat(0) || rig.local.player()->mount_target == bike_h,
+				"seat key 1 takes the motorcycle's control seat")) return 1;
+	rig.tick(31);
+	pl = rig.local.player();
+	if (!expect(pl->mounted && pl->mount_target == bike_h, "the player rides the motorcycle")) return 1;
+	const w::Vec3 m0 = rig.world.registry.get(bike_h)->position;
+	rig.local.input.forward = true;
+	rig.tick(62);
+	rig.local.input.forward = false;
+	const w::Vec3 bike_heading = planar_heading(m0, rig.world.registry.get(bike_h)->position);
+	rig.tick(124); // coast to a stop before the run
+	const BoulderRun bike_run = drive_at_boulder(rig, bike_h, bike_heading, 12.0f, 62 * 5);
+	std::printf("motorcycle: at the boulder from %.2f to %.2f along its heading, closest %.2fu, %.2fu in the last second\n",
+			bike_run.start, bike_run.end, bike_run.closest, bike_run.last_second);
+	expect(bike_run.end - bike_run.start >= 4.0f, "the motorcycle drives up to the boulder");
+	expect(bike_run.last_second < 0.5f, "the motorcycle is held at the boulder, its throttle still open");
+	expect(bike_run.closest >= kBoulderRadius, "the motorcycle never enters the boulder");
+	expect(bike_run.end < 0.0f, "the motorcycle stops short of the boulder, not past it");
 	std::printf("buggy_01tr: %s\n", failures == 0 ? "OK" : "FAILED");
 	return failures == 0 ? 0 : 1;
 }

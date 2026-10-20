@@ -1,11 +1,12 @@
 #include <runtime/world/local_player_view.h>
-// P2 round outcome on the retail data: a training mission's witnessed lose
+// P2 round outcome on the training missions' grounds in miniature (the mission
+// set's lf_*.bms, each with its own WAC): a training mission's witnessed lose
 // flow, the sim half (the shell half — the MISSION FAILED screen and ESC to
 // the menu — is godot/tests/game/main_game_lifecycle_test.gd). One executable,
-// one ctest per mission (`--bms <name>`): 04TR's WAC carries both team legs,
-// 00TRa's only `if true(bluekills) then Lose(1)` (`--victim-team 1`; the first
-// mission's authored friendly-fire failure, playthrough gate 8 of
-// docs/world/npc-mission-completion.md):
+// one ctest per mission (`--bms <name>`): lf_04tr's WAC carries both team legs
+// (04TR's), lf_00tra's only `if true(bluekills) then Lose(1)` (00TRa's;
+// `--victim-team 1`; the first mission's authored friendly-fire failure,
+// playthrough gate 8 of docs/world/npc-mission-completion.md):
 //
 //   kill a green/blue PERSON with real player rounds (the local weapon pump
 //   -> RoundSim damage/death chain) ->
@@ -42,9 +43,8 @@
 // retail's airborne Flags mirror [orig: Entity_UpdateInfantryAI @0x4b9910 —
 // the terrain slide block's Flags & 0x90A000 gate @0x4ba89b skips an
 // airborne body], which shifted one squad's timing by a few ticks.
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying the mission).
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <formats/rtxt/rtxt.h>
 
@@ -98,7 +98,7 @@ struct Victim {
 // Nearest live pool-0 person NPC, preferring a LOSE-triggering team (green 0,
 // then blue 1), or only `required_team` when the mission's WAC carries a
 // single leg. The round sim's entity hits scan pool 0 only.
-Victim pick_victim(testrig::RetailMissionRig &rig, const std::set<uint16_t> &blacklist, int required_team) {
+Victim pick_victim(testrig::MissionRig &rig, const std::set<uint16_t> &blacklist, int required_team) {
 	Victim best;
 	const w::Vec3 player = rig.local.player_position();
 	for (int i = 0; i < rig.world.ai.count(); ++i) {
@@ -127,7 +127,7 @@ Victim pick_victim(testrig::RetailMissionRig &rig, const std::set<uint16_t> &bla
 // The rig plus the tick counter the mission budget reads and the outcome
 // effects the round end is judged on.
 struct Run {
-	testrig::RetailMissionRig &rig;
+	testrig::MissionRig &rig;
 	std::vector<w::Effect> seen;
 	int ticks = 0;
 	void tick() {
@@ -146,14 +146,14 @@ struct Run {
 };
 
 // The local fire path uses the current motor's Position + CameraOffset.
-w::Vec3 local_round_origin(const testrig::RetailMissionRig &rig) {
+w::Vec3 local_round_origin(const testrig::MissionRig &rig) {
     const w::Entity *entity = rig.world.registry.get(rig.world.cached.local_player);
     return entity != nullptr ? w::player_eye_position(*entity) : rig.local.player_position();
 }
 
 // The victim's widest posed hit sphere — the same posed sections the round's
 // person leg walks, at their retail effective radius — as the aim point.
-bool victim_torso(testrig::RetailMissionRig &rig, const w::AiEntity &ai, w::Vec3 &out) {
+bool victim_torso(testrig::MissionRig &rig, const w::AiEntity &ai, w::Vec3 &out) {
 	const w::Vec3 vp = testrig::ai_position(ai);
 	const int32_t anchor[3] = {w::to_fixed(vp.x), w::to_fixed(vp.y), w::to_fixed(vp.z)};
 	int32_t best_radius = 0;
@@ -185,7 +185,7 @@ void fixed3(const w::Vec3 &v, int32_t out[3]) {
 	out[2] = w::to_fixed(v.z);
 }
 
-LineOfFire line_of_fire(testrig::RetailMissionRig &rig, const w::Vec3 &origin, const w::Vec3 &torso,
+LineOfFire line_of_fire(testrig::MissionRig &rig, const w::Vec3 &origin, const w::Vec3 &torso,
 		w::EntityHandle victim) {
 	LineOfFire lof;
 	const float len = testrig::distance(origin, torso);
@@ -222,7 +222,7 @@ LineOfFire line_of_fire(testrig::RetailMissionRig &rig, const w::Vec3 &origin, c
 // the first bearing where the line of fire holds once the motor has
 // re-grounded the body. `torso` receives the verified aim point.
 bool stage_shot(Run &run, w::EntityHandle victim, w::Vec3 &torso) {
-	testrig::RetailMissionRig &rig = run.rig;
+	testrig::MissionRig &rig = run.rig;
 	const w::AiEntity *ai = rig.world.ai.for_handle(victim);
 	if (ai == nullptr) return false;
 	const w::Vec3 vp0 = testrig::ai_position(*ai);
@@ -256,7 +256,7 @@ bool stage_shot(Run &run, w::EntityHandle victim, w::Vec3 &torso) {
 // One tap of the trigger aimed at `torso` from the pump's own origin. False
 // when the FSM took no shot (mid-cycle, reloading); true once a round left.
 bool tap_fire(Run &run, const w::Vec3 &torso) {
-	testrig::RetailMissionRig &rig = run.rig;
+	testrig::MissionRig &rig = run.rig;
 	rig.local.aim_at(local_round_origin(rig), torso);
 	const uint32_t serial_before = rig.local.weapon.fired_serial;
 	rig.local.set_weapon_input(true, true, false);
@@ -270,7 +270,7 @@ bool tap_fire(Run &run, const w::Vec3 &torso) {
 // below fire_tick while none landed); true when one of them stopped on
 // `victim`'s posed sections. Every player stop in the window counts, so an
 // earlier miss still in flight can neither mask nor forge this shot's verdict.
-bool scan_stops(const testrig::RetailMissionRig &rig, uint32_t fire_tick, w::EntityHandle victim,
+bool scan_stops(const testrig::MissionRig &rig, uint32_t fire_tick, w::EntityHandle victim,
 		w::RoundDebugEvent &newest) {
 	const w::RoundSim &rs = rig.world.round_sim;
 	bool on_victim = false;
@@ -429,7 +429,7 @@ const char *action_name(int v) {
 // The mission's own string table (<mission>.bin beside the .bms in the mounted
 // root), for the Triggered Text an OutputText action shows
 // [orig: HUD_DisplayTriggeredText @0x51f190 reads "Triggered Text" ID%03i].
-bool load_mission_strings(const testrig::RetailMissionRig &rig, const std::string &bms, rtxt::File &out) {
+bool load_mission_strings(const testrig::MissionRig &rig, const std::string &bms, rtxt::File &out) {
 	std::string bin = bms;
 	const size_t dot = bin.rfind('.');
 	if (dot != std::string::npos) bin.erase(dot);
@@ -440,7 +440,7 @@ bool load_mission_strings(const testrig::RetailMissionRig &rig, const std::strin
 	return rtxt::parse(bytes.data(), bytes.size(), out, error);
 }
 
-void print_event_table(testrig::RetailMissionRig &rig, const std::string &bms) {
+void print_event_table(testrig::MissionRig &rig, const std::string &bms) {
 	const bms::File &m = rig.mission;
 	rtxt::File strings;
 	const bool have_strings = load_mission_strings(rig, bms, strings);
@@ -488,12 +488,12 @@ void print_event_table(testrig::RetailMissionRig &rig, const std::string &bms) {
 // SELF-KILL MODE (`--self-kill`): the local player dies to its own HE grenade
 // blast. No Player definition authors a `score` word, so the kill accounting
 // returns before any tally: bluekills stays 0 and the WAC's
-// `true(bluekills) -> Lose(1)` never fires. 04TR and 05TR author
-// SinglePlayerRespawn, so the death itself ends nothing either.
+// `true(bluekills) -> Lose(1)` never fires. 04TR and 05TR (lf_04tr, lf_05tr)
+// author SinglePlayerRespawn, so the death itself ends nothing either.
 // [orig: Entity_ApplyWeaponDamage @0x4E6BFE -> Score_ProcessKillEvent
 //  @0x4FD400, the victim `score` gate @0x4FD422; Server_CheckWinConditions
 //  SP leg @0x51AD68 (g_BmsAttribFlags & 0x40)]
-int run_self_kill(testrig::RetailMissionRig &rig) {
+int run_self_kill(testrig::MissionRig &rig) {
 	Run run{rig};
 	const w::EntityHandle player = rig.world.cached.local_player;
 	const int ammo_index = rig.world.tables.ammo.index_of("grenadehe");
@@ -539,10 +539,11 @@ int run_self_kill(testrig::RetailMissionRig &rig) {
 // chain under test is the authored one: the quarter pass fires event N, its
 // BlueWin ends the round won, and the engine's win epilog builds its score
 // screen over the mission's own header and tallies. 01TR's only BlueWin is
-// event 38 (bms-event-runtime-re §11.2), gated on events 14, 24, 26, 34 and 36.
+// event 38 (bms-event-runtime-re §11.2), gated on events 14, 24, 26, 34 and 36;
+// lf_01tr carries the same chain at the same indices.
 // [orig: EventAction_Dispatch case 8 @0x45447b -> Server_ProcessRoundEnd(1);
 //  Cine_InitPlayback @0x578390; Cine_EpilogStateMachineUpdate @0x576240]
-int run_win_event(testrig::RetailMissionRig &rig, int win_event) {
+int run_win_event(testrig::MissionRig &rig, int win_event) {
 	Run run{rig};
 	const std::vector<ms::ScriptedEvent> &events = rig.events.events();
 	if (!expect(win_event >= 0 && static_cast<size_t>(win_event) < events.size(),
@@ -612,7 +613,7 @@ int run_win_event(testrig::RetailMissionRig &rig, int win_event) {
 } // namespace
 
 int main(int argc, char **argv) {
-	std::string bms = "04TR.bms";
+	std::string bms = "lf_04tr.bms";
 	int victim_team = -1;
 	bool events_only = false;
 	bool self_kill = false;
@@ -626,8 +627,9 @@ int main(int argc, char **argv) {
 		else if (std::strcmp(argv[i], "--win-event") == 0 && i + 1 < argc) win_event = std::atoi(argv[++i]);
 		else if (std::strcmp(argv[i], "--restart-boot") == 0) restart_boot = true;
 	}
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying the training missions)");
+	test_mission_set::Root root("lose_flow");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	const std::string install = root.path();
 	if (restart_boot) {
 		// RESTART MODE (`--restart-boot`): the mission booted fresh, then again
 		// as the SP restart's boot in the same process (the load parity word
@@ -641,9 +643,9 @@ int main(int argc, char **argv) {
 		std::vector<int> sets[2][3];
 		w::Vec3 spawn[2];
 		for (int pass = 0; pass < 2; ++pass) {
-			testrig::RetailMissionRig r;
+			testrig::MissionRig r;
 			std::string err;
-			if (!r.open(install, bms, err)) return retail::skip(err.c_str());
+			if (!expect(r.open(install, bms, err), "the mission opens")) return 1;
 			testrig::BootOptions o;
 			o.restart = pass == 1;
 			if (!expect(r.boot(o, err), "the mission boots")) return 1;
@@ -674,9 +676,12 @@ int main(int argc, char **argv) {
 			std::printf("lose_flow %s: the restart boot equals the fresh launch\n", bms.c_str());
 		return failures == 0 ? 0 : 1;
 	}
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, bms, error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(install, bms, error), "the mission opens")) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
 	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
@@ -703,7 +708,7 @@ int main(int argc, char **argv) {
 		return rc;
 	}
 
-	// THE FRIENDLY-FIRE GATE on a retail mission. Out of a session the rules
+	// THE FRIENDLY-FIRE GATE. Out of a session the rules
 	// word is the literal 0x4204 [orig: CNapiGameSession_InitRandomSeedOrRequest
 	// @0x51E94B..0x51E957, the +0x2C of the mission-data block that IS
 	// g_RulesFlags @0x24D1E34], whose 0x200 bit protects every same-team pair

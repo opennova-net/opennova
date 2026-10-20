@@ -1,73 +1,424 @@
-// Authored for def_parse_ammo (fixtures/README.md): the ammo blocks its pins read, each holding
-// only the keys the test reads, in the grammar JO's ammo.def is written in (tab runs, a key's
-// case as JO spells it: frndlyTrcrID, tracerRate, Mf_Light, ai_Launcheffect; `flag` lines; an
-// effects_table). Each value is the test's witnessed pin.
-
 ammo AT_NULL
 	velocity			0
+	min_stable_velocity 0
+	max_age				0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
 end
 
 ammo ROCKET
 	frndlyTrcrID		4502
+	max_age				4
+	arm_age				0
 	velocity			390
+	dopplerdiv			3
+	min_stable_velocity 0
+	error				0
+	tumble_error		0.01
+	recoil				0 0 0
+	drag				0.5
+	weight_in_grains	23840
+	min_damage			0
+	max_damage			0
 	penetration_impact	100
 	penetration_kz		100
-
-    ai_launch		GS_AT4
-
+	kztype				rounds_kz_C4
+	kz_minradius		4.0
+	kz_maxradius		20.0
+	kz_damage			200
+	bullet_radius		0.05
 	tracer_type		rocket
-
 	scorch_id 2
-
+	scar_type 2
+	kz_physics	1
 	light_move     6.0   128 120 80
 	light_impact   10.0  255 192 96  0.2
-
 	flag LAWR
 	flag NoGravity
 	flag forcetracer
+end
+
+ammo STINGER
+	frndlyTrcrID		4504
+	max_age				10
+	arm_age				.5
+	velocity			85
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	16000
+	min_damage			3000
+	max_damage			3000
+	penetration_impact	20
+	penetration_kz		20
+	kztype				rounds_kz_C4
+	kz_minradius		2.0
+	kz_maxradius		10.0
+	kz_damage			2250
+	bullet_radius		0.05
+	tracer_type		rocket
+	scorch_id 2
+	scar_type 2
+	kz_physics	1
+	flag LAWR
+	flag NoGravity
+	flag forcetracer
+end
+
+ammo AMMO_KNIFE01
+	max_age				1
+	velocity			1
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			30
+	max_damage			100
+	penetration_impact	0
+	penetration_kz		0
+	flag instantkillzone
+	kztype rounds_kz_Knife
+	kz_damage 200
+	kz_minradius 1.0
+	kz_maxradius 1.8
+	kz_pieslice	 35
+end
+
+ammo AMMO_BERETTA_357
+	max_age				1
+	velocity			457
+	min_stable_velocity 	0
+	error				0
+	tumble_error		0.01
+	drag				0.158
+	weight_in_grains	110
+	min_damage			0
+	max_damage			0
+	recoil				17 24 31
+	penetration_impact	10
+	penetration_kz		10
+	armor_density		8	5	14
+	kztype				rounds_kz_C4
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.0045339
+	scar_type 1
+	tracer_type		stdred stdgreen
+end
+
+ammo AMMO_COLT_45
+	max_age				1
+	velocity			244
+	min_stable_velocity 	0
+	error				0
+	tumble_error		0.01
+	drag				0.165
+	weight_in_grains	230
+	min_damage			0
+	max_damage			0
+	recoil				14 21 28
+	penetration_impact	10
+	penetration_kz		10
+	armor_density		8	5	14
+	kztype				rounds_kz_C4
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.005715
+	scar_type 1
+	tracer_type		stdred stdgreen
 end
 
 ammo AMMO_CAR15_556MM
 	max_age				3
 	arm_age				0
 	velocity			854
+	min_stable_velocity 	0
 	error				0
 	tumble_error		0.01
 	drag				0.255
 	weight_in_grains	62
+	min_damage			0
 	max_damage			0
 	recoil				8 9 11
 	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	14
 	kztype				rounds_kz_C4
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
 	bullet_radius		0.00278
-
 	tracerRate	 3
-
-    ai_launch		GS_M4AI
-	ai_Launcheffect Effect_CAR15MF
-	Mf_Light 100
-
+	scar_type 1
 	tracer_type		stdred stdgreen
 end
 
-ammo claymore
-	frndlyTrcrID		1895
-	foeTrcrID			1895
-	kz_pieslice			24
+ammo AMMO_M16_556MM
+	max_age				3
+	arm_age				0
+	velocity			945
+	min_stable_velocity 	0
+	error				0
+	tumble_error		0.01
+	drag				0.255
+	weight_in_grains	62
+	min_damage			0
+	max_damage			0
+	recoil				8 11 14
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	14
+	kztype				rounds_kz_C4
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00278
+	tracerRate	 3
+	scar_type 1
+	tracer_type		stdred stdgreen
 end
 
-ammo grenadesm
-	frndlyTrcrID		1875
-	max_age		30
-	arm_age		5
+ammo AMMO_AK47_556MM
+	max_age				3
+	arm_age				0
+	velocity			715
+	min_stable_velocity 	0
+	error				0
+	tumble_error		0.01
+	drag				0.252
+	weight_in_grains	110
+	min_damage			0
+	max_damage			0
+	recoil				9 13 17
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	13
+	kztype				rounds_kz_C4
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+	tracerRate	 3
+	scar_type 1
+	tracer_type		stdred stdgreen
+end
+
+ammo AMMO_M203_40MM_NADE
+	frndlyTrcrID		1874
+	max_age				20
+	arm_age				.30
+	velocity			74
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	recoil				28 28 28
+	kztype				rounds_kz_C4
+	kz_minradius		4.0
+	kz_maxradius		10.0
+	kz_damage			150
+	bullet_radius		0.02
+	drag				0.5
+	weight_in_grains	2000
+	min_damage			410
+	max_damage			410
+	penetration_impact	60
+	penetration_kz		60
+	scorch_id 2
+	scar_type 2
+	tracer_type		grenade
+	kz_physics 1
+	flag LAWR
+	flag	IgnorFoilage
+	flag forcetracer
+end
+
+ammo AMMO_60MM_MORTAR
+	frndlyTrcrID		1878
+	max_age				200
+	arm_age				.14
+	velocity			163
+	min_stable_velocity 0
+	error				0
+	tumble_error		0.01
+	drag				0.05
+	weight_in_grains	15000
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	recoil				8 8 8
+	kztype				rounds_kz_C4
+	kz_minradius		6.0
+	kz_maxradius		12.0
+	kz_damage			205
+	kz_physics			1
+	bullet_radius		0.03
+	scorch_id 2
+	scar_type 2
+	tracer_type		grenade
+	flag IgnorFoilage
+	flag forcetracer
+	flag useownmove
+	flag priority
+end
+
+ammo grenadehe
+	frndlyTrcrID		1883
+	max_age		4
+	arm_age		0
 	velocity	30
-
-	effects_table
-		move			Effect_SmokeToss	none				0
-	end
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	recoil		0 0 0
+	penetration_impact	40
+	penetration_kz		40
+	kztype				rounds_kz_C4
+	kz_minradius		6.0
+	kz_maxradius		12.0
+	kz_damage			205
+	kz_physics			1
+	scorch_id	2
+	scar_type	2
+	flag	useownmove
+	flag	IgnorFoilage
+	flag	forcetracer
+	flag	priority
 end
 
-ammo grenadefb
-    kz_physics 3
-    secondary_anim  2
+ammo MK19nade
+	frndlyTrcrID		1874
+	max_age				3
+	arm_age				.13
+	velocity			244
+	min_stable_velocity 	0
+	recoil				8 8 8
+	error				1
+	tumble_error		0.01
+	drag				0.5
+	weight_in_grains	2000
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	kztype				rounds_kz_C4
+	kz_minradius		10.0
+	kz_maxradius		15.0
+	kz_damage			1000
+	bullet_radius		0.02
+	scorch_id 2
+	scar_type 2
+	tracer_type		grenade
+	kz_physics 1
+	flag LAWR
+	flag forcetracer
+	flag ClipWater
+end
+
+ammo wkminirnds
+	max_age				3
+	velocity			853
+	min_stable_velocity 	0
+	error				3
+	tumble_error		0.01
+	drag				0.453
+	weight_in_grains	165
+	min_damage			30
+	max_damage			30
+	penetration_impact	50
+	penetration_kz		50
+	armor_density		15	5	30
+	tracerRate	 3
+	recoil 7 7 7
+	scar_type 1
+	bullet_radius .2
+	tracer_type		stdred stdgreen
+	kztype rounds_kz_C4
+	kz_damage 0
+	kz_minradius .75
+	kz_maxradius .75
+end
+
+ammo 50CAL
+	max_age				3.5
+	velocity			887
+	min_stable_velocity 	0
+	error				3
+	tumble_error		0.01
+	drag				0.295
+	weight_in_grains	500
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	armor_density		15	5	30
+	recoil				7 7 7
+	kztype				rounds_kz_C4
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	tracerRate	 3
+	scar_type 1
+	bullet_radius  0.2
+	tracer_type		stdred stdgreen
+end
+
+ammo SMALLLANDMINE
+	max_age		1
+	arm_age		0
+	velocity	2
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	40
+	penetration_kz		40
+	scorch_id	2
+	scar_type	2
+	flag instantkillzone
+	kztype rounds_kz_C4
+	kz_damage 155
+	kz_minradius 2
+	kz_maxradius 5
+	light_impact   8.0  255 192 96  0.25
+end
+
+ammo LARGELANDMINE
+	max_age		1
+	arm_age		0
+	velocity	2
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	scorch_id	2
+	scar_type	2
+	flag instantkillzone
+	kztype rounds_kz_C4
+	kz_damage 500
+	kz_minradius 4
+	kz_maxradius 8
+	light_impact   8.0  255 192 96  0.25
 end

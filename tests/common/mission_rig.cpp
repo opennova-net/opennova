@@ -1,4 +1,4 @@
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 
 #include <base/io/log.h>
 #include <base/gameprofile/game_type.h>
@@ -9,7 +9,7 @@
 
 namespace opennova::testrig {
 
-RetailMissionRig::RetailMissionRig() {
+MissionRig::MissionRig() {
 	local_role.bind(*this);
 	host_role.bind(*this);
 	host_role.set_kind(inmatch::RoleKind::ListenHost);
@@ -22,7 +22,7 @@ RetailMissionRig::RetailMissionRig() {
 		});
 }
 
-bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
+bool MissionRig::boot(const BootOptions &options, std::string &error) {
 	listen_server = options.listen_server;
 	mission::KernelBootOptions kernel_options;
 	kernel_options.playable = options.playable;
@@ -40,14 +40,14 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 	return mission::MissionKernel::boot(kernel_options, error);
 }
 
-void RetailMissionRig::tick() {
+void MissionRig::tick() {
 	role().run_tick(inmatch::TickInput{});
 	// The frame's render follows its tick: the SP end-of-round cine's render
 	// pass (inmatch::Session runs it after each frame's drain).
 	world.epilog.render_pass();
 }
 
-void RetailMissionRig::tick(int count) {
+void MissionRig::tick(int count) {
 	for (int i = 0; i < count; ++i) tick();
 }
 

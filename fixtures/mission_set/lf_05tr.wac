@@ -1,0 +1,6 @@
+//End the mission if the player kills a friendly
+If true(bluekills) then
+		Lose (1)
+Else if true(greenkills) then
+		Lose (0)
+endif

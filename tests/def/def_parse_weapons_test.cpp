@@ -113,10 +113,10 @@ int main() {
         def_free_weapons(&refused);
     }
 
-    /* fixtures/def/weapon.def: the authored weapon blocks (the shipped table's grammar, the
+    /* fixtures/def/parse_weapon.def: the authored weapon blocks (the shipped table's grammar, the
        witnessed values) its field/pos/sights/actions pins and the memory-parse parity read;
        the inline blocks below run beside them. */
-    const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/weapon.def";
+    const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/parse_weapon.def";
     const char *path = fixture.c_str();
 
     DefWeaponsFile wf;

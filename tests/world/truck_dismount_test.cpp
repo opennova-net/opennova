@@ -1,4 +1,5 @@
-// Asset-gated offline repro of the 00TRg transport-unload pin.
+// Offline repro of the 00TRg transport-unload pin, over the mission set's minted
+// transport truck (fixtures/mission_set/mtruck.3di, in the shipped DTruck1's shape).
 //
 // On a live host (user session probe, 2026-08-22) 13 of 22 AI that dismount a
 // "Drivable Transport Truck" (item 101294, graphic DTruck1) never get more than
@@ -14,7 +15,7 @@
 // through it. EntityCommands::dismount does not reposition the occupant, and
 // neither does retail (@0x4355f0 / @0x4359d0, both read).
 //
-// This harness loads the REAL DTruck1 collision through the real pipeline
+// This harness loads the truck's collision through the real pipeline
 // (ResourceIndex -> assets::AssetStore -> collision_model_from_3di), places the
 // truck at the origin facing +y, drops a capsule at a rear passenger seat and
 // walks it forward at the live root step, resolving every tick exactly as the
@@ -22,7 +23,6 @@
 // converts, its six rear passenger user points read off the model, all six
 // bodies mount and dismount through the real seat machinery); the escape
 // verdict itself stays a printed diagnostic while the divergence is open.
-// Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install).
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -38,7 +38,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
-#include "common/retail_paths.h"
+#include "common/mission_set.h"
 
 using namespace opennova::threedi;
 
@@ -60,25 +60,23 @@ int32_t fx(double v) { return static_cast<int32_t>(v * 65536.0); }
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying the truck models)");
-	const char *dir = install.c_str();
+	test_mission_set::Root root("truck_dismount");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
 	opennova::ResourceIndex index;
-	if (!index.scan(dir)) return retail::skip("a scannable resource index under OPENNOVA_JO_DIR");
+	if (!expect(index.scan(root.path().c_str()), "the staged root scans")) return 1;
 	assets::AssetStore cache{&index};
 
-	const Threedi3di3 *m3 = cache.model("DTruck1").get();
-	if (m3 == nullptr || m3->collision == nullptr)
-		return retail::skip("DTruck1.3di (with collision) on the OPENNOVA_JO_DIR mount");
+	const Threedi3di3 *m3 = cache.model("mtruck").get();
+	if (!expect(m3 != nullptr && m3->collision != nullptr, "mtruck.3di loads with its collision")) return 1;
 	w::CollisionModel model;
 	if (!expect(world::collision_model_from_3di(m3->collision, model,
 	                                                world::model_has_collision(*m3)),
-	            "DTruck1 collision converts")) {
+	            "the truck's collision converts")) {
 		return 1;
 	}
 	expect(!model.sections.empty() && !model.volumes.empty(),
-	       "DTruck1 carries collision sections and volumes");
-	std::printf("DTruck1: %zu sections, %zu volumes\n", model.sections.size(),
+	       "the truck carries collision sections and volumes");
+	std::printf("mtruck: %zu sections, %zu volumes\n", model.sections.size(),
 	            model.volumes.size());
 	std::printf("  model AABB: x=[%.2f..%.2f] y=[%.2f..%.2f] z=[%.2f..%.2f]\n",
 	            model.min[0] / 65536.0, model.max[0] / 65536.0,
@@ -86,8 +84,7 @@ int main() {
 	            model.min[2] / 65536.0, model.max[2] / 65536.0);
 
 	// The authored seat USER POINTS straight off the model -- the source our
-	// extraction reads. Tests whether the z=2.54 our seat table reports is the
-	// model's own or something we introduce.
+	// extraction reads (the minted truck carries the shipped truck's).
 	// SECTION BOUNDS: where the hull sits relative to the model ORIGIN. If the
 	// height range runs ~0..+3 the origin is the vehicle BASE; if it straddles
 	// zero it is the CENTRE. That decides whether the live truck at z=13.06
@@ -111,7 +108,7 @@ int main() {
 		}
 		std::printf("    -> type1=%d other=%d\n", t1, other);
 	}
-	std::printf("  DTruck1 user points: %zu\n", m3->user_point_count);
+	std::printf("  mtruck user points: %zu\n", m3->user_point_count);
 	int passenger_points = 0;
 	for (size_t ui = 0; ui < m3->user_point_count; ++ui) {
 		const ThreediUserPoint &up = m3->user_points[ui];
@@ -128,24 +125,24 @@ int main() {
 	}
 	// The six rear passenger seats the hand-built truck below carries are the
 	// model's own `sitex` user points (the source the seat extraction reads).
-	expect(passenger_points >= 6, "DTruck1 authors at least six sitex passenger points");
+	expect(passenger_points >= 6, "the truck authors at least six sitex passenger points");
 
-	// A SOLDIER's real bound radius, against the 0x10000 (1.0 u) that D-COL-3
-	// hardcodes into the peer-repulsion threshold. Eindo11 is the 00TRg
-	// passenger model (item 102086, graphic Eindo11).
-	if (const Threedi3di3 *sm = cache.model("Eindo11").get()) {
+	// A soldier's bound radius, against the 0x10000 (1.0 u) that D-COL-3
+	// hardcodes into the peer-repulsion threshold: the mission set's soldiers
+	// wear the synthetic person (00TRg's passengers wear Eindo11).
+	if (const Threedi3di3 *sm = cache.model("person").get()) {
 		if (sm->collision != nullptr) {
 			w::CollisionModel smodel;
 			if (world::collision_model_from_3di(sm->collision, smodel,
 			        world::model_has_collision(*sm))) {
-				std::printf("  Eindo11 fallback_bound_radius = %.3f u  (hardcoded 1.000)\n",
+				std::printf("  person fallback_bound_radius = %.3f u  (hardcoded 1.000)\n",
 				            double(smodel.fallback_bound_radius_q16) / 65536.0);
 			}
 		} else {
-			std::printf("  Eindo11 has NO collision block\n");
+			std::printf("  person has NO collision block\n");
 		}
 	} else {
-		std::printf("  Eindo11 model not found\n");
+		std::printf("  person model not found\n");
 	}
 
 	w::World world;
