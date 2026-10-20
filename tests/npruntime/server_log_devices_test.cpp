@@ -141,12 +141,47 @@ void run_the_connect_log() {
 	fs::remove_all(dir, ec);
 }
 
+// The NovaWorld session's stop-hosting line goes straight to _inout.txt under /INOUT, "<time> :
+// <text>" CRLF; with the switch off nothing is written. [orig: CNapiGameSession_HandleServerMessage
+// @0x4D1C50 - g_InoutLogEnabled @0x4D1D79, NapiFile_AppendLine("_inout.txt") @0x4D1DBC]
+void run_the_inout_line() {
+	const std::string text = "NOVAWORLD STOP HOSTING.  nwuservermsgcode=1, nwuservermsgparam1=0, "
+	                         "nwuservermsgparam2=0";
+	const fs::path dir = fresh_dir();
+	{
+		inmatch::ServerLogDevices devices(dir.string());
+		opennova::LogSwitches sw;
+		sw.inout = true;
+		devices.arm(sw);
+		inmatch::server_logs_inout_line(devices.logs(), text);
+	}
+	std::ifstream in(dir / inmatch::kInoutLogFileName, std::ios::binary);
+	const std::string body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	const std::string tail = " : " + text + "\r\n";
+	expect(body.size() > tail.size() &&
+	               body.find(tail) != std::string::npos &&
+	               body.compare(body.size() - tail.size(), tail.size(), tail) == 0,
+	       "the line is appended stamped under /INOUT");
+	in.close();
+	const fs::path off = fresh_dir();
+	{
+		inmatch::ServerLogDevices devices(off.string());
+		devices.arm(opennova::LogSwitches{});
+		inmatch::server_logs_inout_line(devices.logs(), text);
+	}
+	expect(!fs::exists(off / inmatch::kInoutLogFileName), "nothing without /INOUT");
+	std::error_code ec;
+	fs::remove_all(dir, ec);
+	fs::remove_all(off, ec);
+}
+
 } // namespace
 
 int main() {
 	run_the_launch_walk_reads_the_switches();
 	run_the_devices_write_in_the_working_directory();
 	run_the_connect_log();
+	run_the_inout_line();
 	if (failures == 0) std::printf("npruntime_server_log_devices: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

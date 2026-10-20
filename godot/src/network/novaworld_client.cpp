@@ -10,6 +10,7 @@
 
 #include <runtime/inmatch/host_config.h> // transport_bind_ports / gate_bind_ports
 #include <runtime/inmatch/punt_log.h>   // ConnectLog (the gate and connect lines)
+#include <runtime/inmatch/server_files.h> // ServerLogs, server_logs_inout_line
 
 #include <array>
 #include <godot_cpp/classes/http_client.hpp>
@@ -383,7 +384,14 @@ void NovaWorldClient::forget_gate_response() {
 
 namespace {
 opennova::inmatch::ConnectLog *g_process_connect_log = nullptr;
+opennova::inmatch::ServerLogs g_process_server_logs;
+bool g_process_server_logs_set = false;
 } // namespace
+
+void NovaWorldClient::set_process_server_logs(const opennova::inmatch::ServerLogs *logs) {
+	g_process_server_logs_set = logs != nullptr;
+	g_process_server_logs = logs != nullptr ? *logs : opennova::inmatch::ServerLogs{};
+}
 
 void NovaWorldClient::set_process_connect_log(opennova::inmatch::ConnectLog *log) {
 	g_process_connect_log = log;
@@ -1150,6 +1158,10 @@ opennova::NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
 			enter_state(STATE_CONNECTED);
 		}
 		emit_signal("host_failed", opennova::to_gd(tag));
+	};
+	hooks.inout_line = [](const std::string &text) {
+		if (g_process_server_logs_set)
+			opennova::inmatch::server_logs_inout_line(g_process_server_logs, text);
 	};
 	hooks.on_stopped = [this](const std::string &reason) {
 		if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {

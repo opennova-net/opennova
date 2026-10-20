@@ -12,6 +12,7 @@
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/nwu_host_role.h>
 #include <net/novaworld/nwu_lobby_session.h>
+#include <runtime/inmatch/server_files.h> // ServerLogs, server_logs_inout_line
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/punt_log.h> // inmatch::ConnectLog (the gate and connect lines)
 
@@ -39,6 +40,9 @@ struct ListerOptions {
 	// The process's _connectlog.txt the gate and connect lines go to (the server's device; null:
 	// none). It outlives the lister.
 	inmatch::ConnectLog *connect_log = nullptr;
+	// The process's log devices, whose `/INOUT` switch takes the session's stop-hosting line
+	// (inmatch::server_logs_inout_line; null: none). It outlives the lister.
+	const inmatch::ServerLogs *server_logs = nullptr;
 };
 
 // opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account

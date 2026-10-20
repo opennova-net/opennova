@@ -37,6 +37,7 @@
 
 namespace opennova::inmatch {
 class ConnectLog;
+struct ServerLogs;
 } // namespace opennova::inmatch
 
 namespace godot {
@@ -146,6 +147,8 @@ public:
 	// The process's _connectlog.txt (the game world's log device, which `/CONNECTLOG` arms):
 	// the NovaWorld gate and connect lines go to it (null: none).
 	static void set_process_connect_log(opennova::inmatch::ConnectLog *log);
+	// The process's log devices the host role's _inout.txt line goes to (null: none).
+	static void set_process_server_logs(const opennova::inmatch::ServerLogs *logs);
 	// The gate response's GLSVSSREQUEST (its wire bytes; empty without one), which a NovaWorld
 	// join's 0x00 JOIN carries (JoinTarget.glsvss_request, D-NET-723).
 	PackedByteArray get_glsvss_request() const;

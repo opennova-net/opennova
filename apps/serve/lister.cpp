@@ -135,6 +135,10 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 		role_(lobby_, [this]() {
 			NwuHostRole::Hooks hooks;
 			hooks.on_hosting = [this]() { on_listed(); };
+			hooks.inout_line = [this](const std::string &text) {
+				if (options_.server_logs != nullptr)
+					inmatch::server_logs_inout_line(*options_.server_logs, text);
+			};
 			hooks.on_failed = [this](const std::string &tag) {
 				io::logf(LogLevel::kError, "[host] the host request failed: %s", tag.c_str());
 				source_.on_host_result(false, tag);

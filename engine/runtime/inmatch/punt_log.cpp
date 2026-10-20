@@ -224,6 +224,12 @@ void server_logs_punt(const ServerLogs &logs, const NapiNPConnection &conn, cons
 	logs.punt->write_punt(conn.reply.player_slot, conn.reply.player_name, reason, "");
 }
 
+void server_logs_inout_line(const ServerLogs &logs, const std::string &text) {
+	if (!logs.inout_switch || logs.files == nullptr) return;
+	logs.files->write("_inout.txt",
+			napi_time_string(std::time(nullptr)) + " : " + text + kNapiLineEnding, /*append=*/true);
+}
+
 void PuntLog::clear_records() {
 	records_.assign(static_cast<size_t>(kPuntRecordCount), PuntRecord{});
 }

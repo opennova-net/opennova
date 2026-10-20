@@ -151,6 +151,16 @@ bool NwuHostRole::handle_notice(const ClientSession::Notice &notice) {
 		// the hosting stands while its answer is out.
 		return true;
 	case Notice::Kind::StopHosting:
+		// Every ServerStopHosting the session reads writes its triple to _inout.txt under the
+		// switch, whatever the hosting. [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 -
+		//  MsgCode / MsgParam1 / MsgParam2's atol @0x4D1CB3 / @0x4D1CD2 / @0x4D1CF3, "%s : NOVAWORLD
+		//  STOP HOSTING.  nwuservermsgcode=%ld, nwuservermsgparam1=%ld, nwuservermsgparam2=%ld"
+		//  @0x7CC478, the append @0x4D1DBC]
+		if (hooks_.inout_line)
+			hooks_.inout_line("NOVAWORLD STOP HOSTING.  nwuservermsgcode=" +
+					std::to_string(notice.fields.msg_code) + ", nwuservermsgparam1=" +
+					std::to_string(notice.fields.msg_param1) + ", nwuservermsgparam2=" +
+					std::to_string(notice.fields.msg_param2));
 		if (phase_ != Phase::Idle) {
 			phase_ = Phase::Idle;
 			if (hooks_.on_stopped) hooks_.on_stopped(notice.msg_key);

@@ -55,6 +55,9 @@ public:
 		std::function<void(const std::string &)> on_failed;
 		// The service stopped the hosting (ServerStopHosting): its message key.
 		std::function<void(const std::string &)> on_stopped;
+		// One _inout.txt line past its "<time> : " prefix (the embedder's /INOUT device stamps
+		// and appends it; unset: off): every ServerStopHosting's.
+		std::function<void(const std::string &)> inout_line;
 		// A ServerCommand for the hosted match.
 		std::function<void(const ServerCommand &)> on_command;
 		// ServerPlayerEnterResult for a joiner the host announced.

@@ -67,6 +67,12 @@ struct ServerLogs {
 // @0x51A8A4..0x51A8D4 / @0x51A8FA..0x51A915: slot+5, slot+96483, the latch
 // slot+89896, dword_B4C698]. Defined in punt_log.cpp.
 void server_logs_punt(const ServerLogs &logs, const NapiNPConnection &conn, const char *reason);
+// One line appended straight to _inout.txt (not through the protocol's log) under the `/INOUT`
+// switch, "<time> : <text>" as NapiFile_AppendLine writes it: the NovaWorld session's stop-hosting
+// line. [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - g_InoutLogEnabled @0x4D1D79,
+//  Napi_GetTimeString @0x4D1D8C, NapiFile_AppendLine("_inout.txt") @0x4D1DBC]. Defined in
+// punt_log.cpp.
+void server_logs_inout_line(const ServerLogs &logs, const std::string &text);
 // The /PROFILE deploy marker of a player's deploy transaction, after its
 // frontier hint and ahead of its mobile-spawn seat re-pick (null = off)
 // [orig: Server_DeployPlayer @0x517a27..0x517a37 ->

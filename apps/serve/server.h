@@ -295,6 +295,7 @@ private:
 	bool reset_exit_ = false;
 	std::string end_message_;
 	inmatch::ServerLogDevices log_devices_; // the logs the switches armed (server_log_devices.h)
+	inmatch::ServerLogs server_logs_;       // their view the lister's _inout.txt line reads
 	// The working directory as the admin log's device (server_log_devices.h).
 	inmatch::WorkingDirectoryFiles files_;
 	uint32_t main_frame_ = 0;

@@ -923,6 +923,38 @@ std::vector<NapiMessage> client_statements(
 	return out;
 }
 
+// Every ServerStopHosting writes its triple to _inout.txt (the embedder's /INOUT device stamps
+// it), whatever the hosting. [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - the atols
+// @0x4D1CB3 / @0x4D1CD2 / @0x4D1CF3, the format @0x7CC478, the append @0x4D1DBC]
+void check_stop_hosting_inout_line() {
+	Rig rig;
+	const std::vector<uint8_t> auth = bring_to_verify(rig);
+	rig.session.inbound.push_back({ kServer,
+			server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+	rig.lobby.tick(300);
+	std::vector<std::string> inout;
+	std::vector<std::string> stopped;
+	NwuHostRole::Hooks hooks;
+	hooks.inout_line = [&inout](const std::string &text) { inout.push_back(text); };
+	hooks.on_stopped = [&stopped](const std::string &key) { stopped.push_back(key); };
+	NwuHostRole role(rig.lobby, hooks);
+	HostRegistration reg;
+	reg.server_name = "Inout";
+	role.request(reg);
+	rig.lobby.tick(310);
+	rig.session.inbound.push_back({ kServer,
+			server_statement_to(auth, "ServerHostResult", { { "Success", "1" } }, 2) });
+	rig.session.inbound.push_back({ kServer, server_statement_to(auth, "ServerStopHosting",
+			{ { "MsgCode", "1001" }, { "MsgParam1", "2" }, { "MsgParam2", "-3" } }, 3) });
+	rig.lobby.tick(320);
+	if (ClientSession *session = rig.lobby.session())
+		for (const auto &notice : session->take_notices()) role.handle_notice(notice);
+	CHECK((inout == std::vector<std::string>{ "NOVAWORLD STOP HOSTING.  nwuservermsgcode=1001, "
+			"nwuservermsgparam1=2, nwuservermsgparam2=-3" }));
+	CHECK(stopped.size() == 1);
+	rig.lobby.close();
+}
+
 // D-NET-571: the player's ESC during the first connect's poll. The connect poll (session state 1)
 // reads it past its timeout test: its line, the connect's give-up, then the validation wait's
 // escape leg (NWEC41); the verify poll (states 2 and 3) the same with its own lines (NWEC47), the
@@ -1134,6 +1166,7 @@ int main() {
 	check_host_player_add_sends_update();
 	check_connect_or_host_lines();
 	check_escape_legs();
+	check_stop_hosting_inout_line();
 	check_connect_error_tags();
 	check_connect_log_gate_and_connect();
 	check_connect_log_give_ups();
