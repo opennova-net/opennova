@@ -27,15 +27,17 @@ bool slot_active(const NapiNPConnection &conn) {
 	return conn.phase >= ConnectionPhase::PlayerAdded;
 }
 
-// The teardown's Attack-and-Defend arm, on an in-session authority with the
+} // namespace
+
+// See map_change.h. The teardown's Attack-and-Defend arm, on an in-session authority with the
 // launch option set and the Post Menu pending. A SETNEXT latch at a first
 // half's end skips the swap: the half toggle is set and the latch cleared,
 // so the router clears the toggle and advances onto the SETNEXT entry.
-// Otherwise every live slot's team swaps 1 <-> 2 (its side's avatar and spawn
-// selection follow the team at its next spawn), the side-to-team map swaps,
-// and a set latch then sets the toggle and clears itself. The slot's pending
-// team byte (+100568), which the swap takes first when nonzero, is the
-// convert's `spectator_restore_team`; this swap does not read it (D-NET-591).
+// Otherwise every live slot first takes a nonzero restore byte (+100568, the
+// convert's `spectator_restore_team`) as its team (D-NET-591), then its team
+// swaps 1 <-> 2 (its side's avatar and spawn selection follow the team at its
+// next spawn), the side-to-team map swaps, and a set latch then sets the
+// toggle and clears itself.
 // [orig: Game_TeardownMission @0x522435..0x522520 -- the latch test
 //  @0x522448..0x522457, the slot walk @0x52245D..0x5224F4 (live: +4 and the
 //  entity pointer @0x522470..0x522479; the pending team @0x52247B..0x522485;
@@ -45,8 +47,12 @@ bool slot_active(const NapiNPConnection &conn) {
 void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 	if (!rotation.setnext_latch || rotation.is_flipped) {
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!slot_active(conn) || !conn.link.owned_entity.valid() || !conn.assigned_team_valid)
-				continue;
+			if (!slot_active(conn) || !conn.link.owned_entity.valid()) continue;
+			if (conn.spectator_restore_team != 0) {
+				conn.assigned_team = conn.spectator_restore_team;
+				conn.assigned_team_valid = true;
+			}
+			if (!conn.assigned_team_valid) continue;
 			if (conn.assigned_team == 1)
 				conn.assigned_team = 2;
 			else if (conn.assigned_team == 2)
@@ -66,8 +72,6 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 	rotation.is_flipped = true;
 	rotation.setnext_latch = false;
 }
-
-} // namespace
 
 // A kept slot's per-mission state, back to a fresh mission's, around the
 // identity the map change keeps: the connection's keys, sequencing, clocks,
@@ -251,6 +255,30 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	// @0x5245E8; the teardown's own pump @0x522588 precedes the reset].
 	role.pump_load();
 	return MapChangeStep::NextMission;
+}
+
+// See map_change.h.
+// [orig: Server_ResetAllPlayerSlotFrameState @0x4FC320 -- the table test
+//  @0x4FC323, the row walk @0x4FC350..0x4FC3DE; the latch +100567 @0x4FC350,
+//  the restore byte @0x4FC362..0x4FC36A, the slot team test @0x4FC36C, the
+//  clears of +100567, +100579, +97537 and +97536 @0x4FC372..0x4FC384, the
+//  team store @0x4FC38C, the byte's clear @0x4FC398]
+void Server_ResetAllPlayerSlotFrameState(NapiNPServerCtx &ctx) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		const uint8_t restore = conn.spectator_restore_team;
+		if (conn.link.spectator && restore != 0) {
+			// +100579 is never set in JO and +97536 / +97537 follow the latch
+			// here (the 0x0A writer's spectator restamp), so the latch's clear
+			// is the four stores'.
+			const bool teamless = !conn.assigned_team_valid || conn.assigned_team == 0;
+			conn.link.spectator = false;
+			if (teamless) {
+				conn.assigned_team = restore;
+				conn.assigned_team_valid = true;
+			}
+		}
+		conn.spectator_restore_team = 0;
+	}
 }
 
 void init_all_player_entities_for_round(HostRole &role) {

@@ -593,8 +593,13 @@ struct NapiNPConnection {
 	// (server_join_check.h, DFX2-13). [orig: NapiNPPlayer +724 / +728, written by
 	// NapiNPServer_HandlePlayerJoinMessage @0x512b95 / @0x512bce]
 	cdkey::WireKeys cd_keys;
-	// The team restored when the portable player-slot spectator bit is cleared.
-	uint8_t spectator_restore_team = 1;
+	// The slot's restore byte (+100568): the team the spectator convert saves,
+	// 0 on a fresh row (the add's row memset, the slot table's allocation),
+	// which the A-and-D swap and the next mission start read.
+	// [orig: Server_PlayerAdd's memset of the 0x188E8-byte row @0x51CD06;
+	//  Server_AllocatePlayerSlotTable @0x51C1CB; Server_ConvertPlayerToSpectator
+	//  @0x519E5B]
+	uint8_t spectator_restore_team = 0;
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43
 	std::string server_scrk;       // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
 	uint32_t client_ck = 0;        // ClientAuth.ck -> session_id on our S2C

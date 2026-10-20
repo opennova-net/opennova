@@ -5051,6 +5051,11 @@ add_test(NAME person_push COMMAND person_push_test)
 add_executable(npruntime_drowning_class_event_test npruntime/drowning_class_event_test.cpp)
 target_link_libraries(npruntime_drowning_class_event_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_drowning_class_event COMMAND npruntime_drowning_class_event_test)
+# The slot's restore byte across a map change: the A-and-D swap and the mission
+# start's per-slot reset (D-NET-591).
+add_executable(npruntime_restore_team_test npruntime/restore_team_test.cpp)
+target_link_libraries(npruntime_restore_team_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_restore_team COMMAND npruntime_restore_team_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

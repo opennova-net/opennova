@@ -305,6 +305,10 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	map_change.torn_down = false;
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
 	pump_load();
+	// Then the per-slot reset, after the pumps and the mission-data block
+	// [orig: Game_StartMission @0x5248AC..0x5248BC].
+	if (ctx.is_in_session != 0 && ctx.is_authority != 0)
+		inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
 }
 
 // The map change's round init, after the kernel boot's PreMission pass and

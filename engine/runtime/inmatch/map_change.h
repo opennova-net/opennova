@@ -50,6 +50,7 @@ struct GameCfg;
 namespace opennova::inmatch {
 
 class HostRole;
+struct HostRotation;
 struct NapiNPConnection;
 struct HostScreenState;
 struct NapiNPServerCtx;
@@ -93,6 +94,23 @@ MapChangeStep begin_host_map_change(HostRole &role,
 // a new entity for every active slot, a remote one with the slot's class.
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 (the call @0x525BAF)]
 void init_all_player_entities_for_round(HostRole &role);
+
+// The teardown's Attack-and-Defend arm (the map change runs it on an
+// in-session authority with the launch option set): every live slot takes a
+// nonzero restore byte as its team, then swaps 1 <-> 2, with the side-to-team
+// map; a SETNEXT latch at a first half's end skips the swap and sets the toggle.
+// [orig: Game_TeardownMission @0x522435..0x522520]
+void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation);
+
+// Each mission start's per-slot reset on an in-session authority, its
+// spectator leg (D-NET-591): a spectator-latched slot whose restore byte
+// (`spectator_restore_team`) is nonzero leaves the latch and, when its team is
+// 0, takes the byte as its team; every slot's byte then clears. The host's
+// map-change bring-up runs it; a fresh session's table has no latch to clear.
+// [orig: Server_ResetAllPlayerSlotFrameState @0x4FC320, called by
+//  Game_StartMission @0x5248BC behind `cmp is_in_session` @0x5248AC and
+//  `cmp is_authority` @0x5248B4]
+void Server_ResetAllPlayerSlotFrameState(NapiNPServerCtx &ctx);
 
 // A kept slot's per-mission state back to a fresh mission's, around what the
 // map change keeps (its identity, team and kit). [orig:
