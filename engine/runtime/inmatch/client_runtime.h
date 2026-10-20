@@ -1,6 +1,7 @@
 #pragma once
 
 #include <runtime/inmatch/chat_flood.h>
+#include <runtime/inmatch/client_console.h> // the S2C 0x06 echo's command walk (D-NET-710)
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
@@ -940,6 +941,11 @@ private:
 	// The C2S 0x0F self-heal requests the replica fold and the stale-carrier sweep raised,
 	// appended to the one queue where their producer ran.
 	void queue_carrier_repair_requests();
+	// The S2C 0x06 echo of a console line: the client's command walk over it, its
+	// sends queued on this client's connection at the message's place, its lines
+	// posted to the SYSTEM ring (client_console.h, D-NET-710).
+	void run_console_echo(const std::vector<uint8_t> &body);
+	ClientConsoleState console_state_; // the process's console debug words
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

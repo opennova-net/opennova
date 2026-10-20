@@ -441,6 +441,13 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// the same table's row raises the host slot's ack high-water (D-NET-604).
 		// [orig: Client_ProcessNetworkFrame @0x42C1E1; g_NPMsgInfoServer's 0x34
 		//  row @0x82B898 -> NapiNPServerMsg_UpdateAck @0x5024B0]
+		// So do its console line (a session peer's CMD queues the reliable 0x04,
+		// whose handler echoes an untaken line back as S2C 0x06) and the 0x24 its
+		// own client's SERVER / BAN commands send back over the walk; both
+		// handlers read the host context (D-NET-710).
+		// [orig: Client_ProcessConsoleCommand @0x520F29; NapiNPServerMsg_HandleConsoleLine
+		//  @0x5199D0; NapiClientCmd_HandleDebugCommand @0x42c7ec;
+		//  NapiNPServerMsg_0x024 @0x514DC0]
 		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
 		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
 		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
@@ -462,7 +469,8 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE &&
 				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET &&
 				dg.tag != c2s::SPECTATOR_RESPAWN && dg.tag != c2s::CLIENT_QUALITY &&
-				dg.tag != c2s::KEEPALIVE) {
+				dg.tag != c2s::KEEPALIVE && dg.tag != c2s::ADMIN_NETLOG_COMMAND &&
+				dg.tag != c2s::BAN_PUNT_COMMAND) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
@@ -474,7 +482,8 @@ void HostRole::drain_host_client_gameplay_requests() {
 		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
 				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET ||
-				dg.tag == c2s::SPECTATOR_RESPAWN;
+				dg.tag == c2s::SPECTATOR_RESPAWN || dg.tag == c2s::ADMIN_NETLOG_COMMAND ||
+				dg.tag == c2s::BAN_PUNT_COMMAND;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;

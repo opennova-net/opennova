@@ -16,6 +16,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 #include <net/title/title_identity.h> // title_in_match (WEAPON's armory value, DFX2-10)
+#include <runtime/hud/feed_format.h> // kHudColorWhite (g_HUDColors.palette[0])
 #include <runtime/hud/hud_chat_entry.h> // kChatDispatchGlobal, chat_dispatch_flood_color
 
 #include <cstdio>
@@ -680,13 +681,15 @@ bool AdminConsole::local_command(const std::string &line) {
 // queues the line to its own server as reliable C2S 0x04, whose authority half echoes back as
 // S2C 0x06 whatever NETLOG does not take (Server_HandleConsoleCommandMessage); an authority that
 // is not a peer runs the NETLOG handler (a `STAT` prefix taken whole; NETLOG toggling the net
-// log and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute, whose
-// debug commands and key-binding queue are not modeled (D-NET-710). Its one-second guard compares the tick
+// log and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute: its
+// debug commands and the server command table's walk (client_console.h); its key-binding
+// queue is the input layer's (D-NET-710). Its one-second guard compares the tick
 // with the last stamp minus 1000, so it never drops a line.
 // [orig: Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand
 //  @0x520EEC, the peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430,
 //  the authority's Server_HandleAdminNetlogCommand(line, 0) @0x5175D0,
-//  Server_HandleBanPuntCommand(line, 0) @0x50B380, NapiClientCmd_ParseAndExecute @0x4329C0]
+//  Server_HandleBanPuntCommand(line, 0) @0x50B380, NapiClientCmd_ParseAndExecute @0x4329C0
+//  (the call @0x520f70)]
 void AdminConsole::console_command(const std::string &line) {
 	if (local_command(line)) return;
 	if (ctx_.is_mp_session_peer != 0) {
@@ -700,7 +703,20 @@ void AdminConsole::console_command(const std::string &line) {
 	if (ctx_.is_authority == 0) return;
 	std::vector<ProtocolMessage> no_slot_replies;
 	if (Server_HandleAdminNetlogCommand(ctx_, line, nullptr, no_slot_replies)) return;
-	Server_HandleBanPuntCommand(ctx_, line);
+	if (Server_HandleBanPuntCommand(ctx_, line)) return;
+	// The client's command walk ends it (client_console.h): its lines reach the
+	// SYSTEM ring; a host that is not a session peer has no client connection,
+	// so what the walk would queue is sent nowhere.
+	std::vector<std::string> lines;
+	ClientConsoleContext walk;
+	walk.in_session = ctx_.is_in_session != 0;
+	walk.novaworld = ctx_.transport_mode == NetworkType::NovaWorld;
+	walk.authority = true;
+	walk.state = &console_state_;
+	walk.system_lines = &lines;
+	(void)client_parse_and_execute(line, walk);
+	if (seams_.system_message)
+		for (const std::string &text : lines) seams_.system_message(text, hud::kHudColorWhite);
 }
 
 // [orig: CAdminServer_HandleCmdCommand @0x4048D0 — the arguments joined, each followed by one

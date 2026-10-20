@@ -5017,6 +5017,10 @@ add_test(NAME npruntime_joiner_mission_start COMMAND npruntime_joiner_mission_st
 add_executable(npruntime_loaded_model_list_test npruntime/loaded_model_list_test.cpp)
 target_link_libraries(npruntime_loaded_model_list_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_loaded_model_list COMMAND npruntime_loaded_model_list_test)
+# The client's console command walk over the S2C 0x06 echo (D-NET-710).
+add_executable(npruntime_client_console_test npruntime/client_console_test.cpp)
+target_link_libraries(npruntime_client_console_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_client_console COMMAND npruntime_client_console_test)
 
 # --- parity lane L3 (host tick) ---
 # The 0x0A writer's stores on the slot's body, slot by slot (D-NET-439, 461, 462).

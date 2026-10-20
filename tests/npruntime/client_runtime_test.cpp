@@ -3150,6 +3150,56 @@ bool run_host_client_keepalive_rides_the_loopback() {
 	return true;
 }
 
+// D-NET-710: the S2C 0x06 echo of a console line runs the client's command walk at its
+// place: a joiner's GETPLAYERLIST queues C2S 0x22 {0, 23799} and the 0x23 for the frame's
+// boundary; the listen host's own client takes the echo off its loopback and sends its
+// SERVER line's rest back over the local connection as C2S 0x24.
+// [orig: NapiNPClientMsg_HandleChatCommand @0x432BC0 -> NapiClientCmd_ParseAndExecute
+//  @0x4329C0; NapiClientCmd_HandleDebugCommand @0x42c983..0x42c9a9 / @0x42c8f7]
+bool run_console_echo_runs_the_client_walk() {
+	const std::string client_scrk = "CLIENT-CONSOLE-ECHO-SCRK";
+	const std::string server_scrk = "SERVER-CONSOLE-ECHO-SCRK";
+	inmatch::ClientRuntime client("ConsoleEcho", [] { return uint64_t{7000}; });
+	client.set_title(&kJo);
+	client.seed_session(0x434F4E53u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> echo = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::CLIENT_CONSOLE_COMMAND,
+					{'G', 'E', 'T', 'P', 'L', 'A', 'Y', 'E', 'R', 'L', 'I', 'S', 'T', 0})});
+	client.receive(echo.data(), echo.size());
+	std::vector<uint8_t> order;
+	bool sync_body = false;
+	for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+		for (const ProtocolMessage &m : messages) {
+			if (m.tag != 0x22 && m.tag != 0x23) continue;
+			order.push_back(m.tag);
+			if (m.tag == 0x22) sync_body = m.payload == std::vector<uint8_t>{0x00, 0xF7, 0x5C};
+		}
+	}
+	if (!expect(order == std::vector<uint8_t>{0x22, 0x23} && sync_body,
+			"a joiner's echoed GETPLAYERLIST sends 0x22 {0, 0x5CF7} then 0x23"))
+		return false;
+
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	host_view.view().set_mp_session(true);
+	host_loop.host_send(s2c::CLIENT_CONSOLE_COMMAND,
+			{'S', 'E', 'R', 'V', 'E', 'R', ' ', 'B', 'A', 'N', ' ', '1', 0});
+	host_view.Client_ProcessNetworkFrame(1);
+	ns::Datagram datagram;
+	bool saw_line = false;
+	while (host_loop.host_recv(datagram)) {
+		if (datagram.tag == c2s::BAN_PUNT_COMMAND)
+			saw_line = datagram.body == std::vector<uint8_t>{'B', 'A', 'N', ' ', '1', 0};
+	}
+	return expect(saw_line, "the listen client's echoed SERVER line comes back as 0x24");
+}
+
 bool run_host_zone_timer_value_matches_retail_entry() {
 	ns::LoopbackChannel host_loop;
 	inmatch::ClientRuntime host_view(host_loop);
@@ -8128,6 +8178,7 @@ int main() {
 	                run_host_client_discards_authority_owned_reload_echoes() &&
 	                run_host_client_reports_its_quality_over_the_loopback() &&
 	                run_host_client_keepalive_rides_the_loopback() &&
+	                run_console_echo_runs_the_client_walk() &&
 	                run_joiner_weapon_pickup_reaches_the_pipeline() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&

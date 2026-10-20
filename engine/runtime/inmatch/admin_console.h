@@ -10,6 +10,7 @@
 // [orig: CAdminServer_DispatchCommand @0x406720; CAdminServer_HandleStatus @0x402E30]
 
 #include <net/admin/admin_server.h>
+#include <runtime/inmatch/client_console.h> // ClientConsoleState (the console walk's debug words)
 #include <runtime/inmatch/rotation_admin.h>
 
 #include <cstdint>
@@ -135,6 +136,7 @@ private:
 
 	NapiNPServerCtx &ctx_;
 	Seams seams_;
+	ClientConsoleState console_state_; // the process's console debug words (D-NET-710)
 	AdminScene scene_ = AdminScene::GameLoop;
 	uint32_t main_frame_ = 0;
 };

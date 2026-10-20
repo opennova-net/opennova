@@ -510,6 +510,11 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::NETWORK_DELAY:
 	case s2c::PLAYER_NAME:
 		break;
+	// The echo of our console line: no replica state; the client runtime runs its
+	// command walk (inmatch::ClientRuntime::run_console_echo, D-NET-710)
+	// [orig: NapiNPClientMsg_HandleChatCommand @0x432BC0].
+	case s2c::CLIENT_CONSOLE_COMMAND:
+		break;
 	default:
 		// Game-start scalars and other non-entity tags this reducer
 		// does not model.

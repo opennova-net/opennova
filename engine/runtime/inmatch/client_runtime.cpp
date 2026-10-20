@@ -1046,6 +1046,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			while (loopback_->client_recv(datagram)) {
 				if (!apply_zone_timer_body(datagram.tag, datagram.body))
 					view_.apply(datagram.tag, datagram.body);
+				// The host's own console line comes back to its own client too: the
+				// handler has no role gate [orig: NapiNPClientMsg_HandleChatCommand
+				// @0x432BC0; the authority's echo @0x519AB0..0x519AC5].
+				if (datagram.tag == s2c::CLIENT_CONSOLE_COMMAND) run_console_echo(datagram.body);
 				// The host's own client takes its looped-back tick seed like any
 				// client: the clock its own fire is admitted against. A short body
 				// reads 0. [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 --
@@ -1194,6 +1198,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				const uint32_t self_respawns_before =
 						self_row_before ? self_before->respawn_revision : 0u;
 				view_.apply(tb.first, tb.second);
+				// The echo of our console line runs the client's command walk at its
+				// place [orig: NapiNPClientMsg_HandleChatCommand @0x432BC0].
+				if (tb.first == s2c::CLIENT_CONSOLE_COMMAND) run_console_echo(tb.second);
 				// The self record's respawn edge (its dead bit fell while ours was set)
 				// is the local respawn, whose Game_InitNewRound clears the deploy
 				// hold: the release of a deploy that sent no 0x5A, a medic revive's.
@@ -1539,6 +1546,32 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	if (verification_pass) JoinerConnection::step_client_net_frame_counter();
 	lap.mark(devtools::Slot::SIM_CLIENT_SEND);
 	return outbound;
+}
+
+// [orig: NapiNPClientMsg_HandleChatCommand @0x432BC0 -> NapiClientCmd_ParseAndExecute
+//  @0x4329C0 (the call @0x432c12); is_in_session, the transport mode and is_authority as
+//  the walk reads them; Chat_AddMessageChannel2(.., g_HUDColors.palette[0], 930)]
+void ClientRuntime::run_console_echo(const std::vector<uint8_t> &body) {
+	std::vector<ProtocolMessage> sends;
+	std::vector<std::string> lines;
+	ClientConsoleContext ctx;
+	ctx.authority = role_ == Role::HostClient;
+	ctx.in_session = ctx.authority ? view_.mp_session() : joiner_ != nullptr && joiner_->in_session();
+	ctx.novaworld = novaworld_link_.novaworld;
+	ctx.server_commands = &view_.state().server_commands;
+	ctx.state = &console_state_;
+	ctx.queued = &sends;
+	ctx.system_lines = &lines;
+	(void)client_parse_and_execute(client_console_echo_line(body), ctx);
+	for (ProtocolMessage &message : sends) {
+		if (role_ == Role::HostClient)
+			(void)queue_host_message(message.tag, std::move(message.payload));
+		else
+			send_queue_.push_back(std::move(message));
+	}
+	for (std::string &line : lines)
+		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
+				hud::kHudColorWhite, std::move(line), false});
 }
 
 void ClientRuntime::queue_carrier_repair_requests() {
