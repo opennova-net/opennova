@@ -4438,11 +4438,21 @@ opennova_add_gated_test(win_flow_01tr COMMAND lose_flow_test --bms 01TR.bms --wi
 # the fired-event set including event 11's authored activation delay).
 opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bms --restart-boot)
 
-# The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
+# The remote player's reload clip chain and the weapon.def ACTION keys against
+# their tables, each over minted rigs staged into a temp root (the 19-bone
+# person, the 40-bone first-person set) with authored defs.
+foreach(rig_test reload_clips weapon_action_clips)
+    add_executable(anim_${rig_test}_test anim/${rig_test}_test.cpp)
+    target_link_libraries(anim_${rig_test}_test PRIVATE opennova_net opennova_runtime)
+    target_include_directories(anim_${rig_test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(anim_${rig_test}_test PRIVATE cxx_std_17)
+    add_test(NAME anim_${rig_test} COMMAND anim_${rig_test}_test)
+endforeach()
+
+# The def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped
 # without OPENNOVA_JO_ASSETS / OPENNOVA_JO_DIR.
 foreach(gated
-        anim/reload_clips_us01 anim/weapon_action_clips
         npruntime/remote_body_state npruntime/held_weapon_attach npruntime/authored_payload_00trg
         particle/gore_set_catalog)
     get_filename_component(gated_name ${gated} NAME)
@@ -4983,14 +4993,15 @@ endif()
 add_subdirectory(editor)
 
 # The opt-in ragdoll corpses (ADR 0060): the solver, the set and the death
-# clip reading on a synthetic person rig; ragdoll_us01 on retail's own rig.
+# clip reading on a synthetic person rig; ragdoll_person on that rig read from
+# files (the minted person.3di and its rig19 clip set).
 add_executable(ragdoll_test ragdoll/ragdoll_test.cpp)
 target_link_libraries(ragdoll_test PRIVATE opennova_runtime)
 target_include_directories(ragdoll_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ragdoll_test PRIVATE cxx_std_17)
 add_test(NAME ragdoll COMMAND ragdoll_test)
-add_executable(ragdoll_us01_test ragdoll/ragdoll_us01_test.cpp)
-target_link_libraries(ragdoll_us01_test PRIVATE opennova_runtime)
-target_include_directories(ragdoll_us01_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(ragdoll_us01_test PRIVATE cxx_std_17)
-opennova_add_gated_test(ragdoll_us01 COMMAND ragdoll_us01_test)
+add_executable(ragdoll_person_test ragdoll/ragdoll_person_test.cpp)
+target_link_libraries(ragdoll_person_test PRIVATE opennova_runtime)
+target_include_directories(ragdoll_person_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ragdoll_person_test PRIVATE cxx_std_17)
+add_test(NAME ragdoll_person COMMAND ragdoll_person_test)

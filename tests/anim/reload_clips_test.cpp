@@ -1,12 +1,15 @@
-// The remote-player reload asset chain on the retail data: the wire type
-// 0x14B9 resolves to the US01 visual item, its graphic/anim_def name the US01
-// rig, the infantry anim-key table maps 65/66 to reload/reload2, the US01 clip
-// set carries both reload clips with more than one frame, each clip actually
-// moves the pose, and the weapon-channel splice consumes the reload key — the
-// masked forearm leaves the locomotion pose while the reload plays.
-// Gated on OPENNOVA_JO_ASSETS (an extracted JO tree carrying items.def, US01.3di
-// and US01.adm).
-#include "common/retail_paths.h"
+// The remote-player reload asset chain: the wire type 0x14B9 resolves to the
+// player's visual item (105310, the row retail's items.def gives US01, the
+// stock soldier), its graphic/anim_def name the rig, the infantry anim-key
+// table maps 65/66 to reload/reload2, the rig's clip set carries both reload
+// clips with more than one frame, each clip actually moves the pose, and the
+// weapon-channel splice consumes the reload key — the masked forearm leaves the
+// locomotion pose while the reload plays. The rig is the minted 19-bone person
+// (common/rig19_set.h: person.3di and the rig19 clip set) under an authored
+// items.def row.
+#include "common/file_io.h"
+#include "common/rig19_set.h"
+#include "common/temp_dir.h"
 
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
@@ -41,7 +44,7 @@ bool expect(bool cond, const char *msg) {
 }
 
 constexpr int kPlayerRuntimeType = 0x14B9;
-constexpr int kMaskBoneForearm = 10; // BN10, the right forearm
+constexpr int kMaskBoneForearm = 10; // BN11, a forearm the weapon channel masks
 
 bool iequals(const char *a, const char *b) {
 	for (;; ++a, ++b) {
@@ -76,17 +79,29 @@ double max_rot_delta(const std::vector<anim::PoseBone> &a, const std::vector<ani
 
 } // namespace
 
+// The player's visual item as the stock catalog spells it, on our rig.
+constexpr const char *kItemsDef =
+		"begin \"Player #1, Single player\"\r\n"
+		"\tgraphic person\r\n"
+		"\tanim_def rig19\r\n"
+		"\tid 105310\r\n"
+		"\thp 150\r\n"
+		"\ttype person\r\n"
+		"end\r\n";
+
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
-			"OPENNOVA_JO_ASSETS (an extracted JO tree carrying items.def and US01)");
+	test_temp::TempDir root("opennova_reload_clips");
+	const std::vector<uint8_t> items_text(kItemsDef, kItemsDef + std::strlen(kItemsDef));
+	if (!expect(rig19::stage(root.root()) && test_io::write_file(root.file("items.def"), items_text),
+				"the rig and items.def stage"))
+		return 1;
 	ResourceIndex index;
-	if (!index.scan(assets) && !index.scan(assets, std::string(), VfsMountMode::LooseOnly))
-		return retail::skip("a mountable OPENNOVA_JO_ASSETS tree");
+	if (!expect(index.scan(root.root(), std::string(), VfsMountMode::LooseOnly), "the staged rig mounts")) return 1;
 	std::vector<uint8_t> items_bytes;
-	if (!index.read_file("items.def", items_bytes)) return retail::skip("items.def under OPENNOVA_JO_ASSETS");
+	expect(index.read_file("items.def", items_bytes), "items.def reads");
 	DefItemsFile items{};
-	if (def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) != 0)
-		return retail::skip("a parseable items.def");
+	if (!expect(def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0, "items.def parses"))
+		return 1;
 
 	// --- 65/66 are the reload keys.
 	expect(std::strcmp(anim::kAnimSlotNames[world::anim_state::kReload], "reload") == 0,
@@ -103,25 +118,25 @@ int main() {
 	}
 	std::printf("reload_clips: 0x14B9 -> item %d graphic=%s anim_def=%s\n", visual, def->graphic,
 			def->anim_def);
-	expect(iequals(def->graphic, "US01"), "the wire remote player's graphic is US01");
-	expect(std::strlen(def->anim_def) >= 4 && iequals(std::string(def->anim_def, 4).c_str(), "US01"),
-			"the wire remote player's anim_def is US01");
+	expect(visual == 105310, "wire type 0x14B9 resolves to the player's visual item 105310");
+	expect(iequals(def->graphic, "person"), "the wire remote player's graphic is the person model");
+	expect(iequals(def->anim_def, "rig19"), "the wire remote player's anim_def is the rig19 set");
 
-	// --- The rig: US01.3di bone table + US01.adm clips.
+	// --- The rig: person.3di bone table + rig19.adm clips.
 	assets::AssetStore models{&index};
 
 	const Threedi3di3 *model = models.model(def->graphic).get();
-	if (!expect(model != nullptr, "US01.3di loads")) {
+	if (!expect(model != nullptr, "person.3di loads")) {
 		def_free_items(&items);
 		return 1;
 	}
 	std::vector<anim::Vec3> origins;
 	std::vector<int> parents;
-	expect(world::model_bone_table(*model, origins, parents), "US01 carries a bone table");
+	expect(world::model_bone_table(*model, origins, parents), "person carries a bone table");
 	std::string adm(def->anim_def);
 	if (adm.size() < 4 || !iequals(adm.substr(adm.size() - 4).c_str(), ".adm")) adm += ".adm";
 	anim::SkeletalClips clips;
-	if (!expect(clips.load_from_adm(&models, adm, origins, parents), "US01.adm loads over the bone table")) {
+	if (!expect(clips.load_from_adm(&models, adm, origins, parents), "rig19.adm loads over the bone table")) {
 		def_free_items(&items);
 		return 1;
 	}
@@ -134,7 +149,7 @@ int main() {
 	clips.eval_pose("anim_idle", 0.0, 0, idle);
 	for (const char *key : kReloadKeys) {
 		char msg[160];
-		std::snprintf(msg, sizeof(msg), "US01 clip set carries %s", key);
+		std::snprintf(msg, sizeof(msg), "the rig19 clip set carries %s", key);
 		if (!expect(clips.has_clip(key), msg)) continue;
 		const anim::SkeletalClips::LoadedClip *clip = clips.find_clip(key);
 		const uint32_t frames = clip != nullptr ? clip->clip.frame_count : 0;
@@ -170,6 +185,6 @@ int main() {
 		expect(forearm > 5.0, msg);
 	}
 
-	if (failures == 0) std::printf("reload_clips_us01: OK\n");
+	if (failures == 0) std::printf("reload_clips: OK\n");
 	return failures == 0 ? 0 : 1;
 }
