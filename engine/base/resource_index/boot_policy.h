@@ -18,6 +18,8 @@
 //   /UDPNOVAWORLD <address>
 //                 a NovaWorld session server to probe in place of the gate's
 //                 UDPNOVAWORLD entries (up to six).
+//   /GLSVSSRIMS <n>, /GLSVSSAGRMS <n>
+//                 override the gate response's GLSVSSRIMS / GLSVSSAGRMS.
 //   /USEJUNCTION <n>, /CLEARJUNCTION <n>
 //                 override the gate response's USEJUNCTION / CLEARJUNCTION.
 //   --resource-dir <absolute path>
@@ -75,6 +77,7 @@
 // launches share one parser.
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -108,6 +111,8 @@ inline constexpr const char *kLaunchFlagLan = "/LAN";
 inline constexpr const char *kLaunchFlagPostIpAddress = "/POSTIPADDRESS";
 inline constexpr const char *kLaunchFlagPostPortNumber = "/POSTPORTNUMBER";
 inline constexpr const char *kLaunchFlagUdpNovaWorld = "/UDPNOVAWORLD";
+inline constexpr const char *kLaunchFlagGlsvssRims = "/GLSVSSRIMS";
+inline constexpr const char *kLaunchFlagGlsvssAgrms = "/GLSVSSAGRMS";
 inline constexpr const char *kLaunchFlagUseJunction = "/USEJUNCTION";
 inline constexpr const char *kLaunchFlagClearJunction = "/CLEARJUNCTION";
 // The server log switches in retail's spellings, each the whole token in any case:
@@ -201,6 +206,16 @@ struct LaunchFlags {
     //  Napi_CopyString(0xB4BFB0 + count * 32, token, 0x20) @0x4A751C..0x4A7528, the count
     //  @0x4A7530]
     std::vector<std::string> udp_novaworld;
+    // /GLSVSSRIMS <n> and /GLSVSSAGRMS <n>, each the whole token in any case: the CRT atol of
+    // the next token, the last one standing, with the switch's flag set, so the NovaWorld gate
+    // response takes a given one over its own GLSVSSRIMS / GLSVSSAGRMS whatever its value, 0
+    // included (NwuLobbySession::CommandLine). Empty when absent.
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/GLSVSSRIMS" @0x4A753A, the next token
+    //  @0x4A754C..0x4A7557, _atol @0x4A755C into dword_B4C6A0 @0x4A7564, its flag dword_B4C69C
+    //  = 1 @0x4A7569; "/GLSVSSAGRMS" @0x4A756F, _atol @0x4A7591 into dword_B4C6A8 @0x4A7599,
+    //  its flag dword_B4C6A4 = 1 @0x4A759E]
+    std::optional<int> glsvss_rims;
+    std::optional<int> glsvss_agrms;
     // /USEJUNCTION <n> and /CLEARJUNCTION <n>: the CRT atol of the next token, the last one
     // standing, over the gate response's USEJUNCTION / CLEARJUNCTION; -1 (the words' initial
     // value) overrides nothing.

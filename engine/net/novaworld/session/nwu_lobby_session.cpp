@@ -168,10 +168,12 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 }
 
 // The command line's POST pair over the gate's, each only when set (an address that resolves,
-// a nonzero port), as the gate response stores them.
-// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF54B..0x4CF562;
-//  Game_ParseCommandLineAndInit @0x4A7310 - Napi_ResolveAddress(token, 1) @0x4A75C7]
-void NwuLobbySession::apply_command_line_post() {
+// a nonzero port), then its GLSVSS pair, each when its switch was given, as the gate response
+// stores them.
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the POST pair @0x4CF54B..0x4CF562, the
+//  GLSVSS pair under its flags @0x4CF567..0x4CF589; Game_ParseCommandLineAndInit @0x4A7310 -
+//  Napi_ResolveAddress(token, 1) @0x4A75C7]
+void NwuLobbySession::apply_command_line_overrides() {
 	if (!command_line_.post_ip_address.empty()) {
 		const uint32_t ip = resolve_address(command_line_.post_ip_address);
 		if (ip != 0) {
@@ -181,6 +183,10 @@ void NwuLobbySession::apply_command_line_post() {
 	}
 	if (command_line_.post_port_number != 0)
 		gate_response_.post_port = static_cast<uint32_t>(command_line_.post_port_number);
+	if (command_line_.glsvss_rims)
+		gate_response_.glsvss_rims = *command_line_.glsvss_rims;
+	if (command_line_.glsvss_agrms)
+		gate_response_.glsvss_agrms = *command_line_.glsvss_agrms;
 }
 
 void NwuLobbySession::send_gate_probe() {
@@ -439,7 +445,7 @@ void NwuLobbySession::poll_gate() {
 		gate_answered_ = true;
 		gate_probe_datagram_.clear();
 		gate_response_ = parsed;
-		apply_command_line_post();
+		apply_command_line_overrides();
 		if (hooks_.on_gate_response)
 			hooks_.on_gate_response(gate_response_);
 

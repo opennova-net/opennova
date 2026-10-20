@@ -39,8 +39,8 @@ std::string value_after(const std::vector<std::string> &args, const char *flag) 
 // /UDPNOVAWORLD 1.2.3.4` reads "/UDPNOVAWORLD" as the junction word, atol 0, and keeps no
 // entry), and the walk goes on past it. Each value is the token as it stands (no trim); the last
 // one stands, the /UDPNOVAWORLD entries keeping the first six to 31 characters, a seventh's token
-// stepped over all the same. /GLSVSSRIMS and /GLSVSSAGRMS step over their values here, which
-// nothing keeps (D-NET-707). The switches outside this block keep the shared walk (D-GAMECFG-7).
+// stepped over all the same. /GLSVSSRIMS and /GLSVSSAGRMS keep the atol of theirs (D-NET-707).
+// The switches outside this block keep the shared walk (D-GAMECFG-7).
 // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/UDPNOVAWORLD" @0x4A74F1 (the next token
 //  @0x4A7503..0x4A750C, the count test @0x4A750E..0x4A7516, Napi_CopyString(.., 0x20)
 //  @0x4A751C..0x4A7528, the position reloaded @0x4A7536), "/GLSVSSRIMS" @0x4A753A,
@@ -56,8 +56,8 @@ void parse_novaworld_switches(const std::vector<std::string> &args, LaunchFlags 
         };
         if (takes(kLaunchFlagUdpNovaWorld) && f.udp_novaworld.size() < kLaunchUdpNovaWorldMax)
             f.udp_novaworld.push_back(args[i].substr(0, kLaunchUdpNovaWorldChars));
-        takes("/GLSVSSRIMS");
-        takes("/GLSVSSAGRMS");
+        if (takes(kLaunchFlagGlsvssRims)) f.glsvss_rims = io::retail_atol(args[i].c_str());
+        if (takes(kLaunchFlagGlsvssAgrms)) f.glsvss_agrms = io::retail_atol(args[i].c_str());
         if (takes(kLaunchFlagPostIpAddress)) f.post_ip_address = args[i];
         if (takes(kLaunchFlagPostPortNumber)) f.post_port_number = io::retail_atol(args[i].c_str());
         if (takes(kLaunchFlagUseJunction)) f.use_junction = io::retail_atol(args[i].c_str());

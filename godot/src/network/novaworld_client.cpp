@@ -330,6 +330,8 @@ void NovaWorldClient::start() {
 	command_line.post_ip_address = flags.post_ip_address;
 	command_line.post_port_number = flags.post_port_number;
 	command_line.udp_novaworld = flags.udp_novaworld;
+	command_line.glsvss_rims = flags.glsvss_rims;
+	command_line.glsvss_agrms = flags.glsvss_agrms;
 	command_line.use_junction = flags.use_junction;
 	command_line.clear_junction = flags.clear_junction;
 	lobby_.set_command_line(command_line);

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,15 +84,20 @@ public:
 	// (LaunchFlags): the POST address (resolved with DNS on; one that does not resolve overrides
 	// nothing) and port (0 overrides nothing) that replace the gate's POSTIPADDRESS / POSTIPPORT;
 	// the /UDPNOVAWORLD entries, which mark the NWU session in use and are probed in place of the
-	// gate's; and the USEJUNCTION / CLEARJUNCTION overrides (-1 overrides nothing).
+	// gate's; the GLSVSSRIMS / GLSVSSAGRMS a switch gave (unset overrides nothing, any value
+	// set does); and the USEJUNCTION / CLEARJUNCTION overrides (-1 overrides nothing).
 	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - dword_B4C6B0 into dword_B5F490
-	//  @0x4CF54B..0x4CF554, dword_B4C6B4 into dword_B5F494 @0x4CF559..0x4CF562, the command
-	//  line's count dword_B4C71C @0x4CF52E, dword_829F88 / dword_829F8C @0x4CF6ED..0x4CF709;
+	//  @0x4CF54B..0x4CF554, dword_B4C6B4 into dword_B5F494 @0x4CF559..0x4CF562, under
+	//  dword_B4C69C dword_B4C6A0 into dword_B5FF40 @0x4CF567..0x4CF575, under dword_B4C6A4
+	//  dword_B4C6A8 into dword_B5FF44 @0x4CF57A..0x4CF589, the command line's count
+	//  dword_B4C71C @0x4CF52E, dword_829F88 / dword_829F8C @0x4CF6ED..0x4CF709;
 	//  CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the entries @0x4D4A78..0x4D4A9E]
 	struct CommandLine {
 		std::string post_ip_address;
 		int32_t post_port_number = 0;
 		std::vector<std::string> udp_novaworld;
+		std::optional<int32_t> glsvss_rims;
+		std::optional<int32_t> glsvss_agrms;
 		int32_t use_junction = -1;
 		int32_t clear_junction = -1;
 	};
@@ -209,7 +215,7 @@ private:
 	void send_one(const PeerAddr &to, const std::vector<uint8_t> &dg);
 	void poll_gate();
 	// The command line's POST address and port over the gate response's.
-	void apply_command_line_post();
+	void apply_command_line_overrides();
 	void poll_session();
 	void send_gate_probe();
 	bool resolve(const std::string &host, uint16_t port, PeerAddr &out) const;

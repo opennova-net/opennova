@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -410,6 +411,54 @@ int main() {
 				CHECK((seen.post_ip == std::array<uint8_t, 4>{ 10, 1, 2, 3 }) &&
 						seen.post_port == 7000u);
 			}
+			lobby.close();
+		}
+	}
+
+	// D-NET-707: a GLSVSS switch given on the command line stands in for the gate's value, 0
+	// included, whatever the gate sent; one not given leaves the gate's. The session the connect
+	// starts takes the result (begin_session reads the response).
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - under dword_B4C69C dword_B4C6A0 into
+	//  dword_B5FF40 @0x4CF567..0x4CF575, under dword_B4C6A4 dword_B4C6A8 into dword_B5FF44
+	//  @0x4CF57A..0x4CF589]
+	{
+		const std::string body = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
+								 "VAR \"GLSVSSREQUEST\" \"[dfx2]kills\"\r\n"
+								 "VAR \"GLSVSSRIMS\" \"3600000\"\r\n"
+								 "VAR \"GLSVSSAGRMS\" \"45000\"\r\n";
+		struct Case {
+			std::optional<int32_t> rims;
+			std::optional<int32_t> agrms;
+			int32_t want_rims;
+			int32_t want_agrms;
+		};
+		const std::vector<Case> cases = {
+			{ std::nullopt, std::nullopt, 3600000, 45000 },
+			{ 0, std::nullopt, 0, 45000 },
+			{ std::nullopt, 7000, 3600000, 7000 },
+			{ 1000, -5, 1000, -5 },
+		};
+		for (const Case &c : cases) {
+			MemorySocket gate;
+			MemorySocket session;
+			GateResponse seen;
+			NwuLobbySession::Hooks hooks;
+			hooks.on_gate_response = [&seen](const GateResponse &response) { seen = response; };
+			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
+			lobby.set_title(&kJo, kJo.gate_tag);
+			NwuLobbySession::CommandLine switches;
+			switches.glsvss_rims = c.rims;
+			switches.glsvss_agrms = c.agrms;
+			lobby.set_command_line(switches);
+			lobby.open(gate, session);
+			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+			gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
+			lobby.tick(10);
+			CHECK(lobby.session() != nullptr);
+			CHECK(lobby.gate_response().glsvss_rims == c.want_rims);
+			CHECK(lobby.gate_response().glsvss_agrms == c.want_agrms);
+			CHECK(seen.glsvss_rims == c.want_rims && seen.glsvss_agrms == c.want_agrms);
+			CHECK(lobby.gate_response().glsvss_request == "[dfx2]kills");
 			lobby.close();
 		}
 	}
