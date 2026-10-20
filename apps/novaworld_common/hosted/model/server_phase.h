@@ -100,13 +100,15 @@ struct ServerPhase {
 
 ServerPhase server_phase(const PhaseInputs &in);
 
-// Why a stopped or failed server's last run ended: its cause, how its container
-// ended (the code, the OOM flag) and the line the server wrote then ("" for
-// none), or, for an admin (`admin`), the agent's reason it never started (its
-// data could not be fetched), which its owner never reads. Unset for a live
-// server and one with no run.
+// Why a stopped or failed server's last run ended: its cause (a limits stop's
+// with the limit it was past, when its row has one), how its container ended
+// (the code, the OOM flag) and the line the server wrote then ("" for none),
+// or, for an admin (`admin`), the agent's reason it never started (its data
+// could not be fetched), which its owner never reads. Unset for a live server
+// and one with no run.
 struct StoppedBecause {
 	StartCause cause = StartCause::Stop;
+	std::optional<StopLimit> limit;
 	std::optional<int64_t> exit_code;
 	bool oom = false;
 	std::string line;

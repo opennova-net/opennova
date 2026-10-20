@@ -32,6 +32,7 @@ import type {
   HostingEntitlement,
   PinnedTree,
   ServerPhase,
+  StopLimit,
   StoppedBecause,
   PlayerAction,
   PlayerActionReply,
@@ -297,11 +298,20 @@ function parsePhase(value: unknown): ServerPhase | null {
   return phase;
 }
 
+// A limits stop's limit, or null when it is missing or malformed (the
+// generic limits text stands in).
+function parseStopLimit(value: unknown): StopLimit | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.kind !== 'string' || !isCount(v.count)) return null;
+  return { kind: v.kind, count: v.count };
+}
+
 function parseStoppedBecause(value: unknown): StoppedBecause | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || typeof v.cause !== 'string') return null;
   return {
     cause: v.cause,
+    limit: parseStopLimit(v.limit),
     exit_code: Number.isInteger(v.exit_code) ? (v.exit_code as number) : null,
     oom: v.oom === true,
     line: typeof v.line === 'string' ? v.line : '',

@@ -47,7 +47,7 @@
       <!-- Why its last run ended, with the server's own last line. -->
       <div v-if="!server.live && server.stopped_because" class="server-stopped-because space-y-1 text-sm">
         <p class="font-semibold text-ink">Why it stopped</p>
-        <p :class="stoppedBad ? 'text-danger' : 'text-ink'">{{ stoppedBecauseText(server.stopped_because) }}</p>
+        <p :class="stoppedBad ? 'text-danger' : 'text-ink'">{{ stoppedBecauseText(server.stopped_because, scope) }}</p>
         <p v-if="server.stopped_because.line" class="break-words rounded-panel border border-border bg-surface p-2 font-mono text-xs text-ink">
           <span class="sr-only">The server's last line: </span>{{ server.stopped_because.line }}
         </p>

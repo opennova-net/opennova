@@ -227,11 +227,6 @@ struct TransitionOptions {
 };
 bool transition(db::Database &db, int64_t id, State from, State to, const std::string &detail,
 		TransitionOptions options = {});
-// A stop an owner or an admin asks for: a live server not already stopping
-// goes to stopping, with its event. False when there was nothing to stop.
-bool request_stop(db::Database &db, int64_t id, const std::string &detail);
-// Every live server's stop (the admin's kill switch); how many it asked.
-size_t request_stop_all(db::Database &db, const std::string &detail);
 // A running server's restarts back to 0 (its healthy run outlasted the
 // supervisor's restart window); false when it was not running or had none.
 bool reset_restarts(db::Database &db, int64_t id);
@@ -255,7 +250,9 @@ void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::st
 enum class StartCause : uint8_t {
 	Crash, // the server exited, or never came up (its own cause)
 	Fleet, // its machine's cause, or NovaWorld's: a move, no restart counted
-	Stop, // an owner's, an admin's or the service's stop
+	Stop, // the service's stop (an account deleted or no longer active); any before 0021
+	OwnerStop, // its owner's stop
+	AdminStop, // an admin's stop (its own, or every live server's)
 	Update, // the owner's update to its data sets' current data
 	Limits, // its owner's entitlement no longer covers it
 	NoData, // its data set has none
@@ -265,6 +262,32 @@ enum class StartCause : uint8_t {
 };
 const char *start_cause_text(StartCause cause); // "crash", "fleet", ... "data_unavailable"
 std::optional<StartCause> parse_start_cause(std::string_view text);
+
+// The limit a limits stop's server was past (the supervisor's owners' limits):
+// its owner's servers on shared machines, or its owner's dedicated machines with
+// no shared server free to move it to, or no room on the shared machines for
+// it; and how many of them (shared servers, dedicated machines) its owner had.
+enum class LimitKind : uint8_t {
+	SharedServers,
+	NoSharedServer,
+	NoSharedRoom,
+};
+const char *limit_kind_text(LimitKind kind); // "shared_servers", ... "no_shared_room"
+std::optional<LimitKind> parse_limit_kind(std::string_view text);
+struct StopLimit {
+	LimitKind kind = LimitKind::SharedServers;
+	int count = 0;
+};
+
+// A stop asked for: a live server not already stopping goes to stopping, with
+// its event, and its open start (once it is placed) takes `cause`, who or what
+// asked: OwnerStop, AdminStop, Stop (the service's own) or Limits with the
+// `limit` it is past. Its end keeps them. False when there was nothing to stop.
+bool request_stop(db::Database &db, int64_t id, const std::string &detail, StartCause cause,
+		const std::optional<StopLimit> &limit = std::nullopt);
+// Every live server's stop (the admin's kill switch, each AdminStop); how many
+// it asked.
+size_t request_stop_all(db::Database &db, const std::string &detail);
 
 struct ServerStart {
 	int64_t server_id = 0;
@@ -282,7 +305,8 @@ struct ServerStart {
 	std::optional<int64_t> exit_code;
 	bool oom = false;
 	std::string reason; // the server's exit line, or why it never started ("" for none)
-	std::optional<StartCause> cause; // set at its end (limits: when its stop was asked)
+	std::optional<StartCause> cause; // set at its end (a stop's: when the stop was asked)
+	std::optional<StopLimit> limit; // a limits stop's (none before 0021)
 };
 
 // How a start's container ended, as its agent reported it.
@@ -298,13 +322,10 @@ void set_start_files(db::Database &db, int64_t server_id, int64_t generation,
 		std::optional<int64_t> expansion_tree_id, const std::string &log_stream);
 // Its agent reports it running: running_at, once.
 void mark_start_running(db::Database &db, int64_t server_id, int64_t generation);
-// The start ended with `cause` (one already set, a stop's limits, stands) and
-// how its container ended; false when it had ended already.
+// The start ended with `cause` (one already set, a stop's, stands) and how its
+// container ended; false when it had ended already.
 bool end_start(db::Database &db, int64_t server_id, int64_t generation, StartCause cause,
 		const StartExit &exit = {});
-// The cause server `server_id`'s open start will end with, set now unless one is
-// (a stop for its owner's limits, asked before the stop ends it).
-void set_start_cause(db::Database &db, int64_t server_id, StartCause cause);
 // The server's newest `limit` starts, newest first.
 std::vector<ServerStart> list_starts(db::Database &db, int64_t server_id, size_t limit);
 

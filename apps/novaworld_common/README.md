@@ -219,6 +219,10 @@ Service policy (`core/health.*`), what the container runtime and the uptime chec
   around a web task that cannot reach the cache. Both sit outside `/api`
   (`Cache-Control: no-store`), so `ONNET_API_PROXY_ONLY` never refuses them; `GET
   /api/health` stays, a static `{"status":"ok"}` behind the proxy rule.
+- **The probes leave the logs**: web drops Crow's two lines a request (`Request:`,
+  `Response:`) for `/livez` and `/healthz`, and the portal's nginx logs no `/healthz`
+  (`web/nginx.conf`); the other programs' health listener logs no request at all. Every
+  other request keeps its lines.
 - **The heartbeat**, one line on stdout every 60 s, for the log pipeline's metric
   filters: `{"heartbeat":{"program":"<program>",...}}`, the program first, then the
   fields that program knows in this order, then every program's lock failures:
