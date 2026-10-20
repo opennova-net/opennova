@@ -4,7 +4,7 @@
 // d3): the promoted body of the retail-mission test rig, now the single
 // implementation every embedder drives — the Godot Simulation binding (the
 // shell's session roles, which bind a kernel) and the ctests
-// (tests/common/retail_mission_files supplies retail paths only). It owns the
+// (tests/common/mission_rig adds only the role pick a ctest needs). It owns the
 // world and its systems (AI, WAC, BMS events, collision, occlusion), the sim
 // asset caches (models, collision pose, root motion, clip index), the seat
 // specs and ai-profile installs, the terrain field store, the weapon/ammo

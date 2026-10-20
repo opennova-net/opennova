@@ -1,0 +1,19 @@
+description     "Drivable - Little Bird Benches"
+type				HELO
+default_state		HELO_FOLLOWWP
+
+primary_weap		50CAL
+primary_ammo		0
+
+patrol_speed		100
+patrol_altitude		40
+patrol_climb		10
+combat_speed		100
+combat_altitude		40
+combat_climb		10
+
+min_agl				5
+flight_skill		4
+turn_rate			70
+accel_time			20
+use_waypoint_z		1

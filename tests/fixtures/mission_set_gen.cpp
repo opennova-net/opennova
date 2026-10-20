@@ -27,13 +27,16 @@
 #include <formats/rtxt/rtxt.h>
 #include <runtime/anim/anim_slot_names.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -301,7 +304,8 @@ constexpr Vec3 kUp{0.0, 0.0, 1.0};
 // each side 1.25 off the centre line, 0.812 up, 0.8 in radius), each a PANM row on the shipped
 // registers (the front pair steering on VEHICLE_STEERING, every wheel spinning on VEHICLE_WHEELS
 // and travelling on its own VEHICLE_TIRE0n); the shipped user points (the controller ctrlx10, the
-// seven bed and cab passengers sitex00a..g, the exhaust FX01); and a collision object per part,
+// seven bed and cab passengers sitex00a..g, the exhaust FX01); the windshield a glass pane
+// (collision material 15) before the cab, as the shipped cab's glass; and a collision object per part,
 // the wheels' bottoms 0.01 over the origin, the floor of the shipped CMDL bounds (D-VEH-1: the
 // settled origin lands 0.01 under the ground).
 synth3di::Model make_truck() {
@@ -362,6 +366,9 @@ synth3di::Model make_truck() {
 	}
 	const int c_hull = m.add_cobj(0);
 	for (const Box &b : {chassis, cab, wall_l, wall_r, tail}) m.add_face_box(c_hull, b);
+	// The windshield: a glass pane (collision material 15) just ahead of the cab's front.
+	const Vec3 windshield[4] = {{3.05, -1.0, 2.2}, {3.05, 1.0, 2.2}, {3.05, 1.0, 3.2}, {3.05, -1.0, 3.2}};
+	m.add_face_quad(c_hull, windshield, 15);
 	m.add_volume(c_hull, 1, 0, chassis);
 	m.add_volume(c_hull, 1, 0, cab);
 	for (const auto &wheel : wheels) {
@@ -576,6 +583,321 @@ synth3di::Model make_heli() {
 	for (const Box &b : {floor, roof, nose, boom}) m.add_face_box(c, b);
 	m.add_volume(c, 1, 0, floor);
 	m.add_volume(c, 1, 0, nose);
+	return m;
+}
+
+// mzodiac.3di: an inflatable boat in the shape of the shipped Dzdiac1: the hull on part 0; the
+// coxswain's controller ctrlx03 aft and the passengers sitex08 and sitex09; one collision object,
+// its faces the hull's and its type-1 volumes the shipped floor (-1.84..1.68, 0.32 under the origin
+// to 0.11 over it), the two side tubes and the bow.
+synth3di::Model make_zodiac() {
+	synth3di::Model m;
+	m.name = "mzodiac";
+	const int lod = m.add_lod(0, "gnrc");
+	const int paint = m.add_material("FF_ST_OP", "mzodiac.tga");
+	const Box floor = box(-1.84, -0.84, -0.32, 1.68, 0.83, 0.11);
+	const Box tube_r = box(-2.6, -1.31, -0.03, 1.17, -0.76, 0.52);
+	const Box tube_l = box(-2.6, 0.76, -0.03, 1.17, 1.31, 0.52);
+	const Box bow = box(1.56, -0.95, 0.04, 2.54, 0.96, 0.75);
+	const int hull = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {floor, tube_r, tube_l, bow}) m.add_box(lod, hull, paint, b);
+	m.add_panm(lod, hull, 0);
+	m.add_user_point("ctrlx03", Vec3{-1.327, -0.447, 0.581}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sitex08", Vec3{0.282, -0.453, 0.483}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sitex09", Vec3{0.147, 1.043, 0.617}, kForward, 0, synth3di::kUserPointGameplay);
+	const int c = m.add_cobj(0);
+	for (const Box &b : {floor, tube_r, tube_l, bow}) {
+		m.add_face_box(c, b);
+		m.add_volume(c, 1, 0, b);
+	}
+	return m;
+}
+
+// mlcac.3di: a hovercraft in the shape of the shipped Dlcac1: the hull on part 0; the pilot's
+// controller ctrlx11 and the passenger sitex00 by the starboard cab; one collision object, its
+// type-1 volumes the shipped skirt (-15.05..15.81 by -9..9, 0.8 under the origin to 1.02 over it),
+// the deck and the two side structures, over the hull's faces.
+synth3di::Model make_lcac() {
+	synth3di::Model m;
+	m.name = "mlcac";
+	const int lod = m.add_lod(96, "gnrc");
+	const int paint = m.add_material("FF_ST_OP", "mlcac.tga");
+	const Box skirt = box(-15.05, -9.0, -0.8, 15.81, 9.0, 1.02);
+	const Box deck = box(-14.0, -5.4, 1.02, 13.25, 5.4, 2.15);
+	const Box port = box(-8.54, 5.4, 1.16, 10.5, 8.55, 5.39);
+	const Box starboard = box(-8.54, -8.55, 1.16, 6.76, -5.4, 5.39);
+	const int hull = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {skirt, deck, port, starboard}) m.add_box(lod, hull, paint, b);
+	m.add_panm(lod, hull, 0);
+	m.add_user_point("ctrlx11", Vec3{8.722, -6.3, 4.1}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sitex00", Vec3{8.722, -7.65, 4.1}, kForward, 0, synth3di::kUserPointGameplay);
+	const int c = m.add_cobj(0);
+	for (const Box &b : {skirt, deck, port, starboard}) {
+		m.add_face_box(c, b);
+		m.add_volume(c, 1, 0, b);
+	}
+	return m;
+}
+
+// mmarkv.3di: a patrol craft in the shape of the shipped Dmrk51 (the Mark V, and the stand-in the
+// garrison mission's assault boat wears): the hull on part 0; the helm's controller ctrlx22 before
+// the wheelhouse and the four passengers sitex17a..d amidships; one collision object, its type-1
+// volumes the shipped keel (1.72 under the origin), the hull, the stern, the bow and the
+// wheelhouse, over their faces.
+synth3di::Model make_markv() {
+	synth3di::Model m;
+	m.name = "mmarkv";
+	const int lod = m.add_lod(140, "gnrc");
+	const int paint = m.add_material("FF_ST_OP", "mmarkv.tga");
+	const Box keel = box(-2.47, -2.51, -1.72, 13.27, 2.79, -0.77);
+	const Box body = box(-2.41, -2.68, -0.61, 14.01, 2.95, 1.09);
+	const Box stern = box(-5.98, -2.61, -0.73, -2.48, 2.88, 0.98);
+	const Box bow = box(14.0, -2.6, -1.76, 20.69, 2.87, 0.95);
+	const Box wheelhouse = box(10.42, -2.1, 1.09, 13.69, 2.38, 2.29);
+	const int hull = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {keel, body, stern, bow, wheelhouse}) m.add_box(lod, hull, paint, b);
+	m.add_panm(lod, hull, 0);
+	m.add_user_point("ctrlx22", Vec3{10.295, -0.866, 2.035}, kForward, 0, synth3di::kUserPointGameplay);
+	const Vec3 seats[4] = {{7.707, 0.438, 1.703}, {6.761, 0.438, 1.703}, {6.748, -0.151, 1.703}, {7.694, -0.151, 1.703}};
+	const char *const names[4] = {"sitex17a", "sitex17b", "sitex17c", "sitex17d"};
+	for (int s = 0; s < 4; ++s)
+		m.add_user_point(names[s], seats[s], seats[s].y > 0.0 ? Vec3{0.0, 1.0, 0.0} : Vec3{0.0, -1.0, 0.0}, 0,
+				synth3di::kUserPointGameplay);
+	const int c = m.add_cobj(0);
+	for (const Box &b : {keel, body, stern, bow, wheelhouse}) {
+		m.add_face_box(c, b);
+		m.add_volume(c, 1, 0, b);
+	}
+	return m;
+}
+
+// mtripod.3di: a .50 on a tripod in the shape of the shipped E50triB: the tripod on part 0; the
+// traverse on part 1 turning on EWEAP_GUNYAW and the gun on part 2 turning with it and elevating on
+// EWEAP_GUNPITCH, both about the shipped pivot (0.49 forward, 1.31 up); the gunner's Usegun point
+// behind the traverse, and the camera, heat, casing, bullet and flash points on the gun; a
+// collision object per part, the tripod's a type-1 volume.
+synth3di::Model make_tripod() {
+	synth3di::Model m;
+	m.name = "mtripod";
+	const int lod = m.add_lod(76, "gnrc");
+	const int paint = m.add_material("FF_ST_OP", "mtripod.tga");
+	const Vec3 pivot{0.4916, 0.0, 1.308};
+	const Box legs = box(-0.25, -0.56, -0.01, 0.75, 0.56, 0.9);
+	const Box traverse = box(0.3, -0.15, 0.9, 0.7, 0.15, 1.3);
+	const Box gun = box(0.0, -0.1, 1.3, 2.05, 0.1, 1.5);
+	m.add_control_register("HEAT_GLOW");
+	m.add_control_register("EWEAP_GUNYAW");
+	m.add_control_register("EWEAP_GUNPITCH");
+	const int base = m.add_part(lod, 0, Vec3{});
+	m.add_box(lod, base, paint, legs);
+	m.add_panm(lod, base, 0);
+	const int yaw = m.add_part(lod, 0, pivot);
+	m.add_box(lod, yaw, paint, traverse);
+	opennova::threedi::ThreediPartAnimation &turn = m.add_panm(lod, yaw, 0, 0x00010200u);
+	turn.rotation_x = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 256, 0, 16384);
+	const int barrel = m.add_part(lod, 0, pivot);
+	m.add_box(lod, barrel, paint, gun);
+	opennova::threedi::ThreediPartAnimation &aim = m.add_panm(lod, barrel, 0, 0x00010200u);
+	aim.rotation_x = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 256, 0, 16384);
+	aim.rotation_y = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 2, 256, 0, 16384);
+	m.add_user_point("Usegun", Vec3{-0.702, -0.001, 0.861}, kUp, yaw, synth3di::kUserPointGameplay);
+	m.add_user_point("Camera", Vec3{-0.453, -0.001, 1.588}, kForward, barrel, synth3di::kUserPointGameplay);
+	m.add_user_point("heat", Vec3{0.858, 0.002, 1.43}, kUp, barrel, synth3di::kUserPointEffect);
+	m.add_user_point("BCasing", Vec3{0.139, -0.065, 1.431}, Vec3{0.0, -0.819, 0.574}, barrel,
+			synth3di::kUserPointEffect);
+	m.add_user_point("Bullet", Vec3{2.166, 0.003, 1.431}, kForward, barrel, synth3di::kUserPointEffect);
+	m.add_user_point("MFlash01", Vec3{2.043, 0.003, 1.431}, kForward, barrel, synth3di::kUserPointEffect);
+	const int c_base = m.add_cobj(0);
+	m.add_face_box(c_base, legs);
+	m.add_volume(c_base, 1, 0, legs);
+	const int c_yaw = m.add_cobj(yaw, pivot);
+	m.add_face_box(c_yaw, traverse);
+	const int c_gun = m.add_cobj(barrel, pivot);
+	m.add_face_box(c_gun, gun);
+	return m;
+}
+
+// mlbird.3di: a light helicopter in the shape of the shipped DAH62 (the minigun Little Bird): the
+// fuselage on part 0 (its open cockpit between the floor and the roof, its skids 3.23 under the
+// origin), the main rotor on part 1 (HELO_ROTOR) and the tail rotor on part 2 (HELO_TAILROTOR);
+// the pilot's controller ctrlx05 and the co-pilot's sitex04 in the cockpit and the two miniguns'
+// bullet, flash and casing points either side, as the shipped ones; one collision object, the
+// fuselage's and the skids' faces and type-1 volumes.
+synth3di::Model make_little_bird() {
+	synth3di::Model m;
+	m.name = "mlbird";
+	const int lod = m.add_lod(96, "gnrc");
+	const int paint = m.add_material("FF_ST_OP", "mlbird.tga");
+	const Box floor = box(-1.5, -0.7, -2.6, 2.5, 0.7, -2.2);
+	const Box roof = box(-1.5, -0.7, -0.8, 2.0, 0.7, -0.6);
+	const Box tail = box(-1.5, -0.6, -2.2, -0.9, 0.6, -0.8);
+	const Box boom = box(-6.5, -0.2, -1.9, -1.5, 0.2, -1.5);
+	const Box skid_l = box(-1.2, 0.9, -3.23, 1.8, 1.0, -3.1);
+	const Box skid_r = box(-1.2, -1.0, -3.23, 1.8, -0.9, -3.1);
+	const Box struts = box(-0.2, -1.0, -3.1, 0.2, 1.0, -2.6);
+	const int hull = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {floor, roof, tail, boom, skid_l, skid_r, struts}) m.add_box(lod, hull, paint, b);
+	m.add_control_register("HELO_ROTOR");
+	m.add_control_register("HELO_TAILROTOR");
+	m.add_panm(lod, hull, 0);
+	const int rotor = m.add_part(lod, 0, Vec3{});
+	m.add_box(lod, rotor, paint, box(-0.2, -4.0, 0.2, 0.2, 4.0, 0.3));
+	opennova::threedi::ThreediPartAnimation &spin = m.add_panm(lod, rotor, 0, 0x00000200u);
+	spin.rotation_x = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 256, 0, -16338);
+	const Vec3 tail_hub{-6.3, 0.3, -1.4};
+	const int tail_rotor = m.add_part(lod, 0, tail_hub);
+	m.add_box(lod, tail_rotor, paint, box(-6.4, 0.25, -2.0, -6.2, 0.35, -0.8));
+	opennova::threedi::ThreediPartAnimation &tail_spin = m.add_panm(lod, tail_rotor, 0, 0x00000200u);
+	tail_spin.rotation_y = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 256, 0, 16338);
+	m.add_user_point("ctrlx05", Vec3{1.196, 0.444, -1.772}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sitex04", Vec3{1.191, -0.455, -1.771}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("bcasing01", Vec3{0.509, 1.316, -2.848}, Vec3{0.0, 0.966, 0.259}, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("bcasing02", Vec3{0.509, -1.301, -2.848}, Vec3{0.0, -0.966, 0.259}, 0,
+			synth3di::kUserPointGameplay);
+	m.add_user_point("BULLET01", Vec3{1.732, 1.265, -2.648}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("BULLET02", Vec3{1.732, -1.29, -2.648}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("MFLASH01", Vec3{1.637, 1.265, -2.648}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("MFLASH02", Vec3{1.637, -1.29, -2.648}, kForward, 0, synth3di::kUserPointGameplay);
+	const int c = m.add_cobj(0);
+	for (const Box &b : {floor, roof, tail, boom, skid_l, skid_r, struts}) m.add_face_box(c, b);
+	for (const Box &b : {floor, skid_l, skid_r}) m.add_volume(c, 1, 0, b);
+	return m;
+}
+
+// The ramp of mchinook: a wedge from the ground behind the cabin up to the cabin floor, its top
+// plane sloping (the outward normals and the -n.p offsets of the builder's planes).
+void add_ramp_volume(synth3di::Model &m, int cobj, double x0, double x1, double y0, double y1, double z0,
+		double z1) {
+	const auto plane = [](double nx, double ny, double nz, double px, double py, double pz) {
+		opennova::threedi::ThreediBoundingPlane p{};
+		const double qx = opennova::threedi::threedi_q14f(nx), qy = opennova::threedi::threedi_q14f(ny),
+		             qz = opennova::threedi::threedi_q14f(nz);
+		p.normal[0] = static_cast<float>(qx);
+		p.normal[1] = static_cast<float>(qy);
+		p.normal[2] = static_cast<float>(qz);
+		p.radius = opennova::threedi::threedi_q16f(-(qx * px + qy * py + qz * pz));
+		return p;
+	};
+	const double rise = z1 - z0, run = x1 - x0, length = std::sqrt(rise * rise + run * run);
+	std::vector<opennova::threedi::ThreediBoundingPlane> planes = {
+		plane(-rise / length, 0.0, run / length, x0, 0.0, z0), // the sloping top
+		plane(0.0, 0.0, -1.0, 0.0, 0.0, z0),                   // the bottom
+		plane(1.0, 0.0, 0.0, x1, 0.0, 0.0),                    // the cabin end
+		plane(-1.0, 0.0, 0.0, x0, 0.0, 0.0),                   // the ground end
+		plane(0.0, 1.0, 0.0, 0.0, y1, 0.0),
+		plane(0.0, -1.0, 0.0, 0.0, y0, 0.0),
+	};
+	m.add_volume_planes(cobj, 1, 0, box(x0, y0, z0, x1, y1, z1), planes);
+	const Vec3 top[4] = {{x0, y1, z0}, {x0, y0, z0}, {x1, y0, z1}, {x1, y1, z1}};
+	m.add_face_quad(cobj, top);
+}
+
+// mchinook.3di: a tandem-rotor helicopter in the shape of the shipped Dchnk1: the fuselage on part
+// 0 with its origin up at the rotor line, the cabin floor's top 6.23 under it over the shipped
+// floor's extent (-5.22..8.06 along, -2.19..2.37 across), the gear 7.19 under it, the walls and the
+// roof clear of a standing body, the cockpit forward and the ramp sloping from the ground behind
+// the cabin up to its floor; the forward and aft rotors on parts 1 and 2 turning on HELO_ROTOR; the
+// pilot's controller ctrlx05 and the co-pilot's sitex04 in the cockpit and the six troop seats
+// sitex17A..F along the cabin walls at the shipped places; one collision object, the floor, walls,
+// roof and cockpit as faces and type-1 volumes, the ramp a sloped one, and the shipped troop
+// benches along the walls (flags 0x1) and the seats' bases.
+synth3di::Model make_chinook() {
+	synth3di::Model m;
+	m.name = "mchinook";
+	const int lod = m.add_lod(240, "gnrc");
+	const int paint = m.add_material("FF_ST_OP", "mchinook.tga");
+	const Box floor = box(-5.22, -2.19, -7.19, 8.06, 2.37, -6.23);
+	const Box wall_l = box(-7.36, 2.37, -6.23, 8.06, 2.6, -2.8);
+	const Box wall_r = box(-7.36, -2.6, -6.23, 8.06, -2.19, -2.8);
+	const Box roof = box(-8.8, -2.6, -2.8, 9.5, 2.6, -2.5);
+	const Box cockpit_floor = box(8.06, -2.0, -7.0, 11.9, 2.0, -5.6);
+	const Box nose = box(10.5, -1.6, -5.6, 11.9, 1.6, -2.8);
+	const int hull = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {floor, wall_l, wall_r, roof, cockpit_floor, nose}) m.add_box(lod, hull, paint, b);
+	m.add_control_register("HELO_ROTOR");
+	m.add_panm(lod, hull, 0);
+	const Vec3 hubs[2] = {{9.058, 0.0, -0.909}, {-7.023, 0.0, 1.142}};
+	for (const Vec3 &hub : hubs) {
+		const int rotor = m.add_part(lod, 0, hub);
+		m.add_box(lod, rotor, paint, box(hub.x - 0.3, -9.0, hub.z, hub.x + 0.3, 9.0, hub.z + 0.1));
+		opennova::threedi::ThreediPartAnimation &spin = m.add_panm(lod, rotor, 0, 0x00000200u);
+		spin.rotation_x = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 256, 0, -16338);
+	}
+	m.add_user_point("ctrlx05", Vec3{9.009, 1.017, -4.79}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sitex04", Vec3{9.009, -1.017, -4.79}, kForward, 0, synth3di::kUserPointGameplay);
+	const char *const names[6] = {"sitex17A", "sitex17B", "sitex17C", "sitex17D", "sitex17E", "sitex17F"};
+	const double along[3] = {5.953, 5.403, 4.763};
+	for (int s = 0; s < 6; ++s) {
+		const bool port = (s % 2) == 0;
+		m.add_user_point(names[s], Vec3{along[s / 2], port ? 2.032 : -1.981, -5.633},
+				port ? Vec3{0.0, -1.0, 0.0} : Vec3{0.0, 1.0, 0.0}, 0, synth3di::kUserPointGameplay);
+	}
+	const int c = m.add_cobj(0);
+	for (const Box &b : {floor, wall_l, wall_r, roof, cockpit_floor, nose}) {
+		m.add_face_box(c, b);
+		m.add_volume(c, 1, 0, b);
+	}
+	add_ramp_volume(m, c, -8.2, -5.22, -2.0, 2.2, -7.19, -6.23);
+	// The troop benches along the walls (the shipped type-1 volumes, flags 0x1) and the seat bases.
+	m.add_volume(c, 1, 0x1, box(-7.36, 2.17, -6.23, 6.60, 3.36, -4.61));
+	m.add_volume(c, 1, 0x1, box(-7.36, -3.28, -6.23, 6.60, -2.09, -4.61));
+	m.add_volume(c, 1, 0, box(4.56, 1.89, -6.25, 6.17, 2.28, -5.78));
+	m.add_volume(c, 1, 0, box(4.56, -2.19, -6.25, 6.17, -1.88, -5.78));
+	return m;
+}
+
+// mhut.3di: an enterable one-room building in the shape of the shipped ones the indoor-visibility
+// reports came from (00TRa's armory, CP03's HN_Bld1: an LOD of type "bldg"): the shell on part 0
+// and the room on part 1; the room 7.6 by 5.6 and 3 tall, its doorway (1.8 wide, 2.2 tall) in the
+// +x wall and a window (1.2 wide, 1..2.2 up) in the +y wall by the doorway's corner; the shell's walls, lintel and roof as
+// collision faces and type-1 volumes (the doorway open), the room's floor a collision face and its
+// blink box (type 8, flags 0x2E) the room; and the occlusion records in the shipped order: the
+// whole building's open slot (type 1), the wall occluders (type 0: west, south, the north wall's
+// two pieces), the doorway (record 5, type 2, room -> outside, facing out +x), the east wall's two
+// pieces and the window (type 2, room -> outside, facing out +y).
+synth3di::Model make_hut() {
+	synth3di::Model m;
+	m.name = "mhut";
+	const int lod = m.add_lod(0, "bldg");
+	const int exterior = m.add_material("FF_ST_OP", "mhut.tga");
+	const int interior = m.add_material("FF_ST_OP", "mhutin.tga");
+	const Box west = box(-4.0, -3.0, 0.0, -3.8, 3.0, 3.0);
+	const Box south = box(-4.0, -3.0, 0.0, 4.0, -2.8, 3.0);
+	const Box north_w = box(-4.0, 2.8, 0.0, 2.4, 3.0, 3.0);
+	const Box north_e = box(3.6, 2.8, 0.0, 4.0, 3.0, 3.0);
+	const Box sill = box(2.4, 2.8, 0.0, 3.6, 3.0, 1.0);
+	const Box head = box(2.4, 2.8, 2.2, 3.6, 3.0, 3.0);
+	const Box east_s = box(3.8, -3.0, 0.0, 4.0, -0.9, 3.0);
+	const Box east_n = box(3.8, 0.9, 0.0, 4.0, 3.0, 3.0);
+	const Box lintel = box(3.8, -0.9, 2.2, 4.0, 0.9, 3.0);
+	const Box roof = box(-4.2, -3.2, 3.0, 4.2, 3.2, 3.3);
+	const std::vector<Box> shell = {west, south, north_w, north_e, sill, head, east_s, east_n, lintel, roof};
+	const int p_shell = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : shell) m.add_box(lod, p_shell, exterior, b);
+	const int p_room = m.add_part(lod, 0, Vec3{});
+	m.add_box(lod, p_room, interior, box(-3.8, -2.8, 0.0, 3.8, 2.8, 0.02));
+	for (int part = 0; part < 2; ++part) m.add_panm(lod, part, 0);
+	m.add_user_point("Ground", Vec3{}, kUp, 0, synth3di::kUserPointEffect);
+	const int c_shell = m.add_cobj(0);
+	for (const Box &b : shell) {
+		m.add_face_box(c_shell, b);
+		m.add_volume(c_shell, 1, 0, b);
+	}
+	const int c_room = m.add_cobj(0);
+	const Vec3 floor[4] = {{-3.8, -2.8, 0.0}, {3.8, -2.8, 0.0}, {3.8, 2.8, 0.0}, {-3.8, 2.8, 0.0}};
+	m.add_face_quad(c_room, floor);
+	m.add_volume(c_room, 8, 0x2E, box(-3.8, -2.8, 0.0, 3.85, 2.85, 3.0));
+	m.add_occ_box(1, 0, 0, box(-4.0, -3.0, 0.0, 4.0, 3.0, 3.0));
+	m.add_occ_box(0, 0, 0, west);
+	m.add_occ_box(0, 0, 0, south);
+	m.add_occ_box(0, 0, 0, north_w);
+	m.add_occ_box(0, 0, 0, north_e);
+	const Vec3 door[4] = {{4.0, -0.9, 0.0}, {4.0, 0.9, 0.0}, {4.0, 0.9, 2.2}, {4.0, -0.9, 2.2}};
+	m.add_occ_quad(2, 1, 0, door, kForward);
+	m.add_occ_box(0, 0, 0, east_s);
+	m.add_occ_box(0, 0, 0, east_n);
+	const Vec3 window[4] = {{3.6, 3.0, 1.0}, {2.4, 3.0, 1.0}, {2.4, 3.0, 2.2}, {3.6, 3.0, 2.2}};
+	m.add_occ_quad(2, 1, 0, window, Vec3{0.0, 1.0, 0.0});
 	return m;
 }
 
@@ -1093,6 +1415,421 @@ bool build_payload_table(std::vector<uint8_t> &bytes, std::string &err) {
 	return rtxt::parse(bytes.data(), bytes.size(), back, err) && back.entries.size() == table.entries.size();
 }
 
+constexpr int kZodiac = 101293;        // the shipped "Drivable Zodiac" row's id
+constexpr int kLcac = 101296;          // the shipped "Drivable LCAC" row's id
+constexpr int kMarkV = 101299;         // the shipped "Drivable Mark V" row's id
+constexpr int kAssaultBoat = 101303;   // the shipped "Drivable Indonesian Assault Boat" row's id
+constexpr int kTripod50 = 101902;      // the shipped "50cal on 180 tripod" row's id
+constexpr int kChinook = 101300;       // the shipped "Flyable Chinook" row's id
+constexpr int kLittleBird = 101306;    // the shipped "Flyable LITTLE BIRD with miniguns" row's id
+constexpr int kJungleBird = 102272;    // the shipped "Jungle Bird 1" row's id
+constexpr int kJungleHut = 101202;     // the shipped "Jungle Hut 1" row's id
+
+// A record placed at an absolute height `z` (a hull on the water, a body aboard one).
+size_t place_at(bms::File &doc, EntityKind kind, int item_id, double x, double y, double z, int yaw, int32_t id) {
+	const size_t index = place(doc, kind, item_id, static_cast<float>(x), static_cast<float>(y), yaw);
+	bms::Entity &made = (*mission::entities(doc, kind))[index];
+	made.z = bms::to_fixed_16_16(z);
+	made.id = id;
+	return index;
+}
+
+// A soldier command-mounted at spawn on the vehicle of SSN `vehicle` (waypoint_id 125), standing at
+// its hull (`z` absolute), on `team` and in `group`.
+void board_at_spawn(bms::File &doc, int item, double x, double y, double z, int32_t id, int32_t vehicle, uint8_t team,
+		uint8_t group) {
+	const size_t index = place_at(doc, EntityKind::Organic, item, x, y, z, 0, id);
+	bms::Entity &e = doc.organics[index];
+	e.team = team;
+	e.group_id = group;
+	e.waypoint_id = 125;
+	e.wp_number = vehicle;
+}
+
+// `count` empty events (the fillers that keep a scenario's events at its shipped indices).
+bool add_filler_events(bms::File &doc, int count, std::string &err) {
+	for (int i = 0; i < count; ++i)
+		if (!add_event_rows(doc, 0, {}, {}, err)) return false;
+	return true;
+}
+
+// watercraft.bms: 02TR's three water-training hulls by their SSNs, each where 02TR leaves it
+// afloat (the Zodiac SSN 4, the LCAC SSN 7, the Mark V SSN 1182, team 1, at the shipped heights),
+// with the single-player start ashore.
+bool build_watercraft(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Watercraft", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -150.0, -100.0, 0, 1);
+	const struct {
+		int item;
+		double x, y, z;
+		int yaw;
+		int32_t id;
+	} hulls[3] = {{kZodiac, -17.0, 406.0, 13.5, -227, 4}, {kLcac, 31.5, 428.0, 13.33, -155, 7},
+		{kMarkV, 71.5, 292.0, 13.6, -196, 1182}};
+	for (const auto &h : hulls) {
+		const size_t index = place_at(doc, EntityKind::Item, h.item, h.x, h.y, h.z, h.yaw, h.id);
+		doc.items[index].team = 1;
+	}
+	return finish_mission(doc, bytes, err);
+}
+
+constexpr int kIndoSoldierTwo = 101799; // the AK47 soldier the garrison wears throughout
+
+// garrison.bms: 00TRg's defended camp in miniature, its records by their SSNs: the single-player
+// start; three .50 tripods (SSNs 64, 65, 68) and their gunners (51, 37, 35: group 16) ordered onto
+// them at spawn; the truck column (58, 59, 62, 63, transport trucks, and 1664 the armory truck: team
+// 2, group 3) each crewed at spawn, two of them carrying a defender squad (groups 12 and 13); the
+// boats on the shore (60 the assault boat, group 5; the Zodiacs 56 and 57, groups 6 and 7) each
+// crewed at spawn, the Zodiacs' crews the defender groups 14 and 15; a patrol squad (group 20) on
+// its looping path 8; two jungle huts; the column's path 3, the boats' paths 5, 6 and 7,
+// the defenders' paths 15 and 16; and 00TRg's events at their shipped indices: 8 (thirty quanta)
+// sends group 3 down path 3 at 40, 9..15 mark its progress, 18 sends the assault boat down path 5
+// at 30, 19 and 21 (fifteen quanta) the Zodiacs down paths 6 and 7 at 60, and 20 and 22 (a
+// Zodiac at its path's node 6 / 10, one quantum) send group 14 onto path 15 and group 15 onto path
+// 16 on red alert.
+bool build_garrison(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Garrison", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -150.0, -120.0, 0, 1197);
+	// The tripods and their gunners.
+	const struct {
+		double x, y;
+		int yaw;
+		int32_t gun, gunner;
+	} tripods[3] = {{-200.0, -60.0, -59, 64, 51}, {-188.0, -52.0, -220, 65, 37}, {-212.0, -50.0, -69, 68, 35}};
+	for (const auto &t : tripods) {
+		place_on_ground(doc, EntityKind::Item, kTripod50, t.x, t.y, t.yaw, t.gun);
+		const size_t index = place_on_ground(doc, EntityKind::Organic, kIndoSoldierTwo, t.x - 0.7, t.y, t.yaw, t.gunner);
+		bms::Entity &e = doc.organics[index];
+		e.team = 2;
+		e.group_id = 16;
+		e.waypoint_id = 125;
+		e.wp_number = t.gun;
+	}
+	// The truck column and its crews.
+	const struct {
+		int item;
+		int32_t id, crew;
+	} column[5] = {{kTransportTruck, 58, 1480}, {kTransportTruck, 59, 4}, {kTransportTruck, 62, 1482},
+		{kTransportTruck, 63, 1481}, {kArmoryTruck, 1664, 1665}};
+	for (int i = 0; i < 5; ++i) {
+		const double y = -100.0 + 15.0 * i;
+		const size_t truck = place_on_ground(doc, EntityKind::Item, column[i].item, -60.0, y, 0, column[i].id);
+		doc.items[truck].team = 2;
+		doc.items[truck].group_id = 3;
+		name_record(doc.items[truck], "mtruck", "d_5ton");
+		board_at_spawn(doc, kIndoSoldierTwo, -62.5, y, tmap_ground(-62.5, y), column[i].crew, column[i].id, 2, 0);
+	}
+	const int32_t squad12[2] = {19, 22}, squad13[2] = {17, 21};
+	for (int i = 0; i < 2; ++i) {
+		board_at_spawn(doc, kIndoSoldierTwo, -58.0, -100.0 + i, tmap_ground(-58.0, -100.0), squad12[i], 58, 2, 12);
+		board_at_spawn(doc, kIndoSoldierTwo, -58.0, -55.0 + i, tmap_ground(-58.0, -55.0), squad13[i], 63, 2, 13);
+	}
+	// The boats and their crews, on the shore (the rig authors no water plane, as 00TRg's boats rest
+	// on what is under them there), each crewman beside his hull.
+	const struct {
+		int item;
+		double x, y, keel;
+		int yaw;
+		int32_t id;
+		uint8_t group, crew_group;
+		int32_t crew[3];
+	} boats[3] = {{kAssaultBoat, -150.0, 330.0, 1.72, 56, 60, 5, 0, {5, 13, 41}},
+		{kZodiac, -300.0, 320.0, 0.32, 26, 56, 6, 14, {8, 14, 42}},
+		{kZodiac, -200.0, 340.0, 0.32, 54, 57, 7, 15, {6, 10, 40}}};
+	for (const auto &b : boats) {
+		const size_t index = place_on_ground(doc, EntityKind::Item, b.item, b.x, b.y, b.yaw, b.id, b.keel);
+		doc.items[index].team = 2;
+		doc.items[index].group_id = b.group;
+		for (int c = 0; c < 3; ++c)
+			board_at_spawn(doc, kIndoSoldierTwo, b.x - 3.0, b.y - 1.0 + c, tmap_ground(b.x - 3.0, b.y), b.crew[c], b.id,
+					2, b.crew_group);
+	}
+	// The patrol squad on its loop.
+	for (int i = 0; i < 3; ++i) {
+		const size_t index = place_on_ground(doc, EntityKind::Organic, kIndoSoldierTwo, -260.0 + 3.0 * i, -150.0, 90,
+				2900 + i);
+		bms::Entity &e = doc.organics[index];
+		e.team = 2;
+		e.group_id = 20;
+		e.waypoint_id = 8;
+		e.wp_number = 0;
+	}
+	place_on_ground(doc, EntityKind::Building, kJungleHut, -240.0, -90.0, 0, 81);
+	place_on_ground(doc, EntityKind::Building, kJungleHut, -100.0, -150.0, 90, 82);
+	// The paths.
+	if (!add_path(doc, 3, {{-60.0, -20.0}, {-60.0, 20.0}, {-80.0, 60.0}, {-120.0, 90.0}, {-160.0, 110.0},
+			{-200.0, 120.0}, {-240.0, 120.0}}, 1, err, 3300))
+		return false;
+	if (!add_path(doc, 5, {{-140.0, 330.0}, {-120.0, 330.0}, {-100.0, 330.0}, {-80.0, 330.0}, {-60.0, 330.0},
+			{-40.0, 330.0}, {-30.0, 330.0}, {-20.0, 330.0}}, 1, err, 3500))
+		return false;
+	if (!add_path(doc, 6, {{-310.0, 320.0}, {-330.0, 320.0}, {-350.0, 320.0}, {-370.0, 320.0}, {-390.0, 320.0},
+			{-410.0, 320.0}, {-430.0, 320.0}, {-450.0, 320.0}}, 1, err, 3600))
+		return false;
+	if (!add_path(doc, 7, {{-200.0, 350.0}, {-200.0, 360.0}, {-200.0, 370.0}, {-200.0, 380.0}, {-200.0, 390.0},
+			{-200.0, 400.0}, {-200.0, 410.0}, {-200.0, 420.0}, {-200.0, 430.0}, {-200.0, 440.0},
+			{-200.0, 450.0}, {-200.0, 460.0}}, 1, err, 3700))
+		return false;
+	if (!add_path(doc, 8, {{-260.0, -150.0}, {-230.0, -150.0}, {-230.0, -180.0}, {-260.0, -180.0}}, 0, err, 3800))
+		return false;
+	if (!add_path(doc, 15, {{-460.0, 300.0}, {-460.0, 270.0}, {-460.0, 240.0}}, 1, err, 3900)) return false;
+	if (!add_path(doc, 16, {{-210.0, 470.0}, {-230.0, 470.0}, {-250.0, 470.0}}, 1, err, 3950)) return false;
+	// The events, at 00TRg's indices.
+	if (!add_filler_events(doc, 8, err)) return false;
+	if (!add_event_rows(doc, 30, {}, {{1, 0, 3, 3, 0, -1}, {3, 30, 3, 40, -1, -1}}, err)) return false; // 8
+	for (int node = 1; node <= 6; ++node)                                                                 // 9..14
+		if (!add_event_rows(doc, 0, {{1, 7, 3, 3, node, -1}}, {}, err)) return false;
+	if (!add_event_rows(doc, 2, {{1, 7, 3, 3, 6, -1}}, {}, err)) return false;                       // 15
+	if (!add_filler_events(doc, 2, err)) return false;                                                    // 16, 17
+	if (!add_event_rows(doc, 0, {}, {{1, 0, 5, 5, 0, -1}, {3, 30, 5, 30, -1, -1}}, err)) return false;  // 18
+	if (!add_event_rows(doc, 15, {}, {{1, 0, 6, 6, 0, -1}, {3, 30, 6, 60, -1, -1}}, err)) return false; // 19
+	if (!add_event_rows(doc, 1, {{1, 7, 6, 6, 6, -1}}, {{1, 0, 14, 15, 0, -1}, {3, 5, 14, -1, -1, -1}}, err))
+		return false;                                                                                     // 20
+	if (!add_event_rows(doc, 15, {}, {{1, 0, 7, 7, 0, -1}, {3, 30, 6, 60, -1, -1}}, err)) return false; // 21
+	if (!add_event_rows(doc, 1, {{1, 7, 7, 7, 10, -1}}, {{1, 0, 15, 16, -1, -1}, {3, 5, 15, -1, -1, -1}}, err))
+		return false;                                                                                     // 22
+	return finish_mission(doc, bytes, err);
+}
+
+// garrison.bin: its string table (the mission text the boot reads beside it).
+bool build_garrison_table(std::vector<uint8_t> &bytes, std::string &err) {
+	rtxt::File table;
+	table.sections.push_back({"Info", 2});
+	table.entries.push_back({"TITLE", "Garrison", {}, 0});
+	table.entries.push_back({"BRIEFING", "Hold the camp against the boats and the column.", {}, 0});
+	table.sections.push_back({"Locations", 1});
+	table.entries.push_back({"LOCATION001", "Camp", {}, 1});
+	if (!rtxt::write(table, bytes, err)) return false;
+	rtxt::File back;
+	return rtxt::parse(bytes.data(), bytes.size(), back, err) && back.entries.size() == table.entries.size();
+}
+
+// parachute.bms: 09TR's boarding in miniature, its records by their SSNs: the Chinook SSN 4572
+// (group 6, the d_mh6 profile) on the ground facing mission +x with its ramp toward the west and its
+// pilots SSNs 4668 and 4665 beside the cockpit, command-mounted on it at spawn; six
+// friendly soldiers (groups 4 and 5) and the instructor SSN 4664 (group 3) seventy-odd units west of
+// it; the single-player start beside them; paths 2, 3 and 4 (DoesNotLoop) from the soldiers up the
+// ramp into the cabin, path 1 a marker in the cabin, and path 5 the flight out and up;
+// and 09TR's events at their shipped indices: 22..24 (one, two and three quanta) start groups 3, 4
+// and 5 (ChangeGroupAI sub 5, RedirectGroupTo paths 4, 2 and 3); 25 (group 4 at path 2's node 4, a
+// quantum) and 26 (group 5 at path 3's node 4) board groups 4 and 5 onto the Chinook (123); 27 (the
+// same) stops group 3 (path 0); 29 (25 and 27 fired and the player on the Chinook, two quanta)
+// flies group 6 down path 5 at 60.
+bool build_parachute(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Parachute", err)) return false;
+	constexpr double kY = -60.0;
+	constexpr double kGear = 7.19; // the Chinook's gear under its origin
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -330.0, kY - 12.0, 90, 1);
+	const size_t chinook = place_on_ground(doc, EntityKind::Item, kChinook, -250.0, kY, 90, 4572, kGear);
+	doc.items[chinook].team = 1;
+	doc.items[chinook].group_id = 6;
+	name_record(doc.items[chinook], "mchinook", "d_mh6");
+	const struct {
+		double x, y;
+		int32_t id;
+		uint8_t group;
+	} troops[6] = {{-328.0, kY - 6.0, 4661, 5}, {-331.0, kY - 6.0, 4657, 5}, {-335.0, kY - 7.0, 6036, 5},
+		{-331.0, kY - 1.0, 4658, 4}, {-328.0, kY - 1.0, 4659, 4}, {-328.0, kY - 3.5, 4660, 4}};
+	for (const auto &t : troops) {
+		const size_t index = place_on_ground(doc, EntityKind::Organic, kFriendlyM4, t.x, t.y, 90, t.id);
+		doc.organics[index].team = 1;
+		doc.organics[index].group_id = t.group;
+	}
+	// Its pilots, command-mounted at spawn beside the cockpit, as 09TR's crew it (SSNs 4668, 4665).
+	const double pilots[2][2] = {{-241.0, kY + 2.6}, {-241.0, kY - 2.6}};
+	const int32_t pilot_ids[2] = {4668, 4665};
+	for (int i = 0; i < 2; ++i) {
+		const size_t pilot = place_on_ground(doc, EntityKind::Organic, kFriendlySoldier, pilots[i][0], pilots[i][1], 90,
+				pilot_ids[i]);
+		doc.organics[pilot].team = 1;
+		doc.organics[pilot].waypoint_id = 125;
+		doc.organics[pilot].wp_number = 4572;
+	}
+	const size_t instructor = place_on_ground(doc, EntityKind::Organic, kFriendlySoldier, -323.0, kY - 3.0, -90, 4664);
+	doc.organics[instructor].team = 1;
+	doc.organics[instructor].group_id = 3;
+	// The ramp's foot is 8.2 behind the Chinook's origin; node 3 waits behind it.
+	if (!add_path(doc, 1, {{-246.5, kY}}, 3, err, 5018)) return false;
+	// Groups 4's and 5's node 4 lies past the troop seats, so the groups reach it (within their
+	// records' ten-unit waypoint distance) beside the seats they then take.
+	if (!add_path(doc, 2, {{-313.0, kY - 1.0}, {-307.0, kY + 1.0}, {-280.0, kY + 1.0}, {-262.0, kY + 1.0},
+			{-237.0, kY + 1.0}}, 1, err, 4669))
+		return false;
+	if (!add_path(doc, 3, {{-313.0, kY - 4.0}, {-307.0, kY - 1.0}, {-280.0, kY - 1.0}, {-262.0, kY - 1.0},
+			{-237.0, kY - 1.0}}, 1, err, 4674))
+		return false;
+	// The instructor's node 4 lies past the cabin too: he reaches it (within ten units) standing in
+	// the cabin behind the player's spot.
+	if (!add_path(doc, 4, {{-314.5, kY - 3.0}, {-307.0, kY}, {-281.0, kY}, {-263.0, kY}, {-237.5, kY}}, 1, err,
+			4679))
+		return false;
+	const size_t first_flight = doc.markers.size();
+	if (!add_path(doc, 5, {{-220.0, kY - 1.0}, {-174.0, kY - 8.0}, {-150.0, kY - 38.0}, {-136.0, kY - 106.0},
+			{-140.0, kY - 188.0}, {-205.0, kY - 246.0}, {-300.0, kY - 250.0}, {-380.0, kY - 246.0},
+			{-430.0, kY - 180.0}, {-440.0, kY - 60.0}}, 1, err, 4684))
+		return false;
+	const double lifts[10] = {16.0, 20.0, 20.0, 20.0, 20.0, 19.0, 40.0, 60.0, 80.0, 100.0};
+	for (size_t i = 0; i < 10; ++i) {
+		bms::Entity &marker = doc.markers[first_flight + i];
+		marker.z = bms::to_fixed_16_16(tmap_ground(0.0, marker.y / 65536.0) + lifts[i]);
+	}
+	if (!add_filler_events(doc, 22, err)) return false;
+	if (!add_event_rows(doc, 1, {}, {{3, 5, 3, -1, -1, -1}, {1, 0, 3, 4, 0, -1}}, err)) return false; // 22
+	if (!add_event_rows(doc, 2, {}, {{3, 5, 4, -1, -1, -1}, {1, 0, 4, 2, 0, -1}}, err)) return false; // 23
+	if (!add_event_rows(doc, 3, {}, {{3, 5, 5, -1, -1, -1}, {1, 0, 5, 3, 0, -1}}, err)) return false; // 24
+	if (!add_event_rows(doc, 1, {{1, 7, 4, 2, 4, -1}}, {{1, 0, 4, 123, 4572, -1}}, err)) return false; // 25
+	if (!add_event_rows(doc, 0, {{1, 7, 5, 3, 4, -1}}, {{1, 0, 5, 123, 4572, -1}}, err)) return false; // 26
+	if (!add_event_rows(doc, 0, {{1, 7, 5, 3, 4, -1}}, {{1, 0, 3, 0, 0, -1}}, err)) return false;      // 27
+	if (!add_filler_events(doc, 1, err)) return false;                                                    // 28
+	if (!add_event_rows(doc, 2, {{3, 0, 25, -1, -1, -1}, {3, 0, 27, -1, -1, -1}, {7, 39, 4572, -1, -1, -1}},
+			{{1, 0, 6, 5, 0, -1}, {3, 30, 6, 60, -1, -1}}, err))
+		return false; // 29
+	return finish_mission(doc, bytes, err);
+}
+
+// tags.bms: 03TR's ground in miniature: the single-player start; a section of the player's own
+// team (three friendly soldiers); two jungle birds (team 0, the labelable neutral organics 03TR
+// authors); and the minigun Little Bird SSN 41 (team 1) parked on its skids, its cockpit free.
+bool build_tags(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Tags", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -200.0, -100.0, 0, 1);
+	for (int i = 0; i < 3; ++i) {
+		const size_t index = place_on_ground(doc, EntityKind::Organic, kFriendlySoldier, -206.0 + 6.0 * i, -90.0, 180,
+				2000 + i);
+		doc.organics[index].team = 1;
+		doc.organics[index].group_id = 1;
+	}
+	for (int i = 0; i < 2; ++i) {
+		const size_t index = place_on_ground(doc, EntityKind::Organic, kJungleBird, -230.0 + 40.0 * i, -60.0, 0, 4 + i);
+		doc.organics[index].team = 0;
+		doc.organics[index].group_id = 11;
+	}
+	const size_t heli = place_on_ground(doc, EntityKind::Item, kLittleBird, -190.0, -110.0, 0, 41, 3.23);
+	doc.items[heli].team = 1;
+	return finish_mission(doc, bytes, err);
+}
+
+// The lose and win flows' training grounds (lose_flow_test): each the single-player start facing
+// mission +y, the player's own team standing in the open in front of it, and a WAC of its own
+// (authored text beside it). lf_04tr.bms and lf_05tr.bms are 04TR's and 05TR's (SinglePlayerRespawn,
+// both lose legs: three friendly soldiers, team 1); lf_00tra.bms is 00TRa's (the transport truck
+// SSN 11 crewed by the instructor SSN 1 and a friendly soldier beside it, the bluekills leg alone,
+// and four events whose authored activation delays make the fired set grow with the world's age:
+// none, two, five and three quanta); lf_01tr.bms is 01TR's win chain (its event 38, twelve quanta
+// on, BlueWin, gated on events 14, 24, 26, 34 and 36, each a SubGoalWon of subgoals 2, 3, 4, 6 and 7
+// on a trigger that never fires by itself (the player attached to an SSN no record carries), the
+// rest fillers; all eight win and five lose subgoals defined, as 01TR's header).
+bool build_lose_ground(bms::File &doc, const char *name, bool respawn, std::string &err) {
+	if (!begin_mission(doc, name, err)) return false;
+	if (respawn)
+		doc.header.attrib_flags = static_cast<bms::AttribFlags>(static_cast<uint32_t>(doc.header.attrib_flags) |
+				static_cast<uint32_t>(bms::AttribFlags::SinglePlayerRespawn));
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -150.0, -100.0, 0, 1654);
+	return true;
+}
+void add_friendly_squad(bms::File &doc, int32_t first_id) {
+	const double spots[3][2] = {{-156.0, -90.0}, {-150.0, -88.0}, {-144.0, -90.0}};
+	for (int i = 0; i < 3; ++i) {
+		const size_t index = place_on_ground(doc, EntityKind::Organic, kFriendlySoldier, spots[i][0], spots[i][1], 180,
+				first_id + i);
+		doc.organics[index].team = 1;
+		doc.organics[index].group_id = 2;
+	}
+}
+bool build_lf_04tr(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!build_lose_ground(doc, "Lose Flow 04TR", true, err)) return false;
+	add_friendly_squad(doc, 300);
+	return finish_mission(doc, bytes, err);
+}
+bool build_lf_05tr(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!build_lose_ground(doc, "Lose Flow 05TR", true, err)) return false;
+	add_friendly_squad(doc, 400);
+	return finish_mission(doc, bytes, err);
+}
+bool build_lf_00tra(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!build_lose_ground(doc, "Lose Flow 00TRa", false, err)) return false;
+	const size_t truck = place_on_ground(doc, EntityKind::Item, kTransportTruck, -140.0, -80.0, 0, 11);
+	doc.items[truck].team = 1;
+	doc.items[truck].group_id = 3;
+	name_record(doc.items[truck], "mtruck", "d_5ton");
+	place_crewman(doc, -138.0, -82.0, -60, 1, 11, 1);
+	const size_t soldier = place_on_ground(doc, EntityKind::Organic, kFriendlySoldier, -152.0, -90.0, 180, 1715);
+	doc.organics[soldier].team = 1;
+	doc.organics[soldier].group_id = 4;
+	for (const int delay : {0, 2, 5, 3})
+		if (!add_event_rows(doc, delay, {}, {}, err)) return false;
+	return finish_mission(doc, bytes, err);
+}
+bool build_lf_01tr(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!build_lose_ground(doc, "Lose Flow 01TR", false, err)) return false;
+	add_friendly_squad(doc, 500);
+	for (int i = 0; i < 8; ++i) doc.header.win_conditions[i] = static_cast<uint8_t>(i + 1);
+	for (int i = 0; i < 5; ++i) doc.header.lose_conditions[i] = static_cast<uint8_t>(i + 1);
+	const std::map<int, int> subgoals = {{14, 2}, {24, 3}, {26, 4}, {34, 6}, {36, 7}};
+	for (int event = 0; event < 38; ++event) {
+		const auto found = subgoals.find(event);
+		if (found == subgoals.end()) {
+			if (!add_event_rows(doc, 0, {}, {}, err)) return false;
+			continue;
+		}
+		if (!add_event_rows(doc, 0, {{7, 38, 9999, -1, -1, -1}}, {{14, 0, found->second, -1, -1, -1}}, err))
+			return false;
+	}
+	if (!add_event_rows(doc, 12, {{3, 0, 14, -1, -1, -1}, {3, 0, 24, -1, -1, -1}, {3, 0, 26, -1, -1, -1},
+			{3, 0, 34, -1, -1, -1}, {3, 0, 36, -1, -1, -1}}, {{8, 0, -1, -1, -1, -1}}, err))
+		return false; // 38
+	return finish_mission(doc, bytes, err);
+}
+
+constexpr int kArmoryOne = 101125;   // the shipped "Armory Version #1" row's id (00TRa's bms 20)
+constexpr int kMainBuilding = 101115; // the shipped "Two story Main building" row's id (CP03's HN_Bld1)
+constexpr int kSteelHangar = 104209;  // the shipped "Small steel hangar with rounded roof" row's id
+constexpr int kLightPost = 101436;    // the shipped "Weathered light post no light" row's id
+constexpr int kArmoryThree = 101186;  // the shipped "Armory Version #3" row's id
+
+// indoor.bms: 00TRa's armory ground in miniature: the single-player start south-east of the hut
+// (bms 20, its doorway in its east wall) a crate inside it and a soldier of the player's team by
+// its door.
+bool build_indoor(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Indoor", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -185.0, -110.0, 0, 1);
+	place_on_ground(doc, EntityKind::Building, kArmoryOne, -200.0, -100.0, 0, 20);
+	place_on_ground(doc, EntityKind::Building, kLightPost, -202.0, -99.0, 0, 21);
+	const size_t soldier = place_on_ground(doc, EntityKind::Organic, kFriendlySoldier, -193.0, -103.0, 90, 22);
+	doc.organics[soldier].team = 1;
+	return finish_mission(doc, bytes, err);
+}
+
+// spawn.bms: CP03's deployed spawn in miniature: the main building (bms 151, the hut at yaw 0, so its
+// doorway faces mission +y and its window the -x side) with the single-player start 0.2 inside the
+// doorway's plane facing out through it, as CP03's start stands inside HN_Bld1's west door;
+// outside, the dune buggy (2539) straight out from the doorway, the steel hangar (bms 297, over
+// the synthetic armory) out to its left, and the light post (672) beyond the window; inside, the
+// armory crate (2538) before the window.
+bool build_spawn(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Spawn", err)) return false;
+	constexpr double kX = -200.0, kY = -100.0;
+	constexpr double kSpawnY = kY + 3.8; // the doorway's plane is 4 out of the hut's middle
+	place_on_ground(doc, EntityKind::Building, kMainBuilding, kX, kY, 0, 151);
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, kX, kSpawnY, 0, 1);
+	place_on_ground(doc, EntityKind::Building, kSteelHangar, kX - 12.0, kSpawnY + 12.0, 90, 297);
+	const size_t buggy = place_on_ground(doc, EntityKind::Item, kDuneBuggy, kX + 0.4, kSpawnY + 22.0, -194, 2539);
+	name_record(doc.items[buggy], "mbuggy", "d_buggy");
+	place_on_ground(doc, EntityKind::Building, kLightPost, kX - 6.0, kY + 2.2, 0, 672);
+	place_on_ground(doc, EntityKind::Building, kArmoryThree, kX - 2.5, kY + 3.0, 127, 2538);
+	return finish_mission(doc, bytes, err);
+}
+
 // fixtures/bms/synth_areas.bms: a mission whose area triggers take the shape of a shipped
 // training mission's (03TR: thirteen zones over ids 1..15 with gaps, most constrain-Z, flag 2),
 // with the mission boundary (flag 1) beside them and a record in each of the four pools, so its
@@ -1195,6 +1932,26 @@ opennova::bad::BadBuildClip soldier_attack_clip() {
 	return clip;
 }
 
+// The player's run, in the shape of the shipped DT1runF (US01's walk_forward): 38 frames at 0.2055
+// m a frame (7.81 m a loop), the left footstep word 0x1 on frames 0 and 19 and the right 0x2 on 10
+// and 29.
+opennova::bad::BadBuildClip player_run_clip() {
+	opennova::bad::BadBuildClip clip = one_bone_clip("mp_runf", 38, true, 0.95, 0.95, 1.68, 0.2055, 0, 0);
+	for (const uint32_t f : {0u, 19u}) clip.events[f].trigger = 0x1;
+	for (const uint32_t f : {10u, 29u}) clip.events[f].trigger = 0x2;
+	return clip;
+}
+
+// The player's fast runs, in the shape of the shipped RunFastK and RunFastW (US01's run_2 and
+// run_3): 34 frames, 7.84 and 8.36 m a loop, the right footstep word 0x2 on frames 9 and 25 and the
+// left 0x1 on 17 and 33.
+opennova::bad::BadBuildClip player_fast_run_clip(const char *name, double metres) {
+	opennova::bad::BadBuildClip clip = one_bone_clip(name, 34, true, 0.95, 0.95, 1.66, metres / 34.0, 0, 0);
+	for (const uint32_t f : {9u, 25u}) clip.events[f].trigger = 0x2;
+	for (const uint32_t f : {17u, 33u}) clip.events[f].trigger = 0x1;
+	return clip;
+}
+
 // The soldier's clips, in the shape of the shipped soldiers' (Dt1rst, I_idle1, I_walkf and the
 // death matrix's clips): the reset; a standing idle; the walk (152 frames at 0.0619 m a frame, the
 // footstep word 0x2 every 14th frame, as I_walkf authors its eleven); a run; a crouch and a prone
@@ -1219,6 +1976,9 @@ std::vector<opennova::bad::BadBuildClip> soldier_clips() {
 		one_bone_clip("ms_climbdn", 30, true, 1.0, 1.0, 1.76, 0.0, 0, 0, -0.8 / 30.0),
 		one_bone_clip("ms_jump", 20, false, 1.0, 1.0, 1.76, 0.1, 0, 0),
 		one_bone_clip("ms_roll", 30, false, 0.164, 0.164, 0.244, 0.05, 0, 0),
+		player_run_clip(),
+		player_fast_run_clip("mp_runk", 7.84),
+		player_fast_run_clip("mp_runw", 8.36),
 	};
 }
 
@@ -1329,9 +2089,20 @@ bool build_soldier_table(std::vector<uint8_t> &bytes, std::string &err) {
 	return build_body_table(soldier_authors, bytes, err);
 }
 
-// mplayer.adm: the player's.
+// mplayer.adm: the player's, its eight standing moves (US01's walk_* rows) the run and its run_2
+// and run_3 the fast runs.
 bool build_player_table(std::vector<uint8_t> &bytes, std::string &err) {
-	return build_body_table(player_authors, bytes, err);
+	std::vector<std::pair<std::string, std::string>> rows;
+	for (int s = 0; s < 240; ++s) {
+		const std::string slot = opennova::anim::kAnimSlotNames[s];
+		if (!player_authors(slot)) continue;
+		const bool run = slot.rfind("walk_", 0) == 0 && slot.rfind("walk_crouch", 0) != 0 &&
+				slot.rfind("walk_prone", 0) != 0;
+		const char *clip = run ? "mp_runf" : slot == "run_2" ? "mp_runk" : slot == "run_3" ? "mp_runw"
+		                                                                         : soldier_slot_clip(slot);
+		rows.push_back({"anim_" + slot, clip});
+	}
+	return mint_table(rows, soldier_clips(), bytes, err);
 }
 
 // mmedic2.adm (the first teammate medic's, the shipped Medic02 table DeltaMED reads): the
@@ -1373,6 +2144,96 @@ bool mint_clips(const std::vector<opennova::bad::BadBuildClip> &clips, const std
 	return true;
 }
 
+// The D-EVT-7 damaged loadouts (docs/mission/bms-event-runtime-re.md 6.3a): synth_areas.bms's
+// records carrying a three-weapon loadout (WPN_M4AUTO with 6 primary rounds, WPN_colt45, WPN_KNIFE,
+// each with its four strings), its loadout chunk then damaged the three ways shipped missions' are,
+// the header's length of it following. The reader takes each without fault (a missing string reads
+// as empty, D-EVT-7's bound) and the writer gives back the records it read, so each differs from
+// its rewrite in the loadout chunk and that length alone:
+//   loadout_cut_record.bms      the last record cut short before the terminator, its name alone
+//                               (ASP_G8a's and ASR_C2A's shape: the reader takes the terminator
+//                               for its strings);
+//   loadout_past_terminator.bms a record's strings past the terminator (TDH_G1A's);
+//   loadout_unterminated.bms    no terminator (TKR_G3A's and TKX_G5B's).
+enum class LoadoutDamage { CutRecord, PastTerminator, Unterminated };
+
+bool build_damaged_loadout(LoadoutDamage damage, std::vector<uint8_t> &bytes, std::string &err) {
+	std::vector<uint8_t> clean;
+	if (!build_areas_mission(clean, err)) return false;
+	bms::File doc;
+	if (!bms::parse(clean.data(), clean.size(), doc, err)) return false;
+	std::vector<mission::WeaponLoadoutEntry> kit;
+	const char *const names[3] = {"WPN_M4AUTO", "WPN_colt45", "WPN_KNIFE"};
+	for (int i = 0; i < 3; ++i) {
+		mission::WeaponLoadoutEntry entry;
+		entry.name = names[i];
+		entry.ammo_primary = i == 0 ? "6" : "-1";
+		entry.ammo_secondary = "-1";
+		entry.flags = "-1";
+		kit.push_back(entry);
+	}
+	std::string edit_error;
+	if (!mission::set_weapon_loadout(doc, kit, edit_error)) {
+		err = "set_weapon_loadout failed: " + edit_error;
+		return false;
+	}
+	std::vector<uint8_t> whole;
+	if (!bms::write(doc, whole, err)) return false;
+	constexpr size_t kChunkAt = sizeof(bms::Header); // the loadout chunk follows the header
+	constexpr size_t kLengthAt = offsetof(bms::Header, weapon_loadout_chunk_len);
+	const size_t length = size_t(whole[kLengthAt]) | (size_t(whole[kLengthAt + 1]) << 8);
+	const std::vector<uint8_t> chunk(whole.begin() + kChunkAt, whole.begin() + kChunkAt + length);
+	std::vector<uint8_t> damaged;
+	const auto put = [&damaged](const char *text) {
+		damaged.insert(damaged.end(), text, text + std::strlen(text));
+		damaged.push_back(0);
+	};
+	switch (damage) {
+	case LoadoutDamage::CutRecord: {
+		// The first two records as written, then the third's name and the terminator.
+		const std::string last = "WPN_KNIFE";
+		const auto at = std::search(chunk.begin(), chunk.end(), last.begin(), last.end());
+		damaged.assign(chunk.begin(), at);
+		put("WPN_KNIFE");
+		damaged.push_back(0);
+		break;
+	}
+	case LoadoutDamage::PastTerminator:
+		damaged = chunk;
+		put("WPN_GRENADEHE");
+		put("-1");
+		put("-1");
+		break;
+	case LoadoutDamage::Unterminated:
+		damaged.assign(chunk.begin(), chunk.end() - 1);
+		break;
+	}
+	bytes.assign(whole.begin(), whole.begin() + kChunkAt);
+	bytes[kLengthAt] = static_cast<uint8_t>(damaged.size() & 0xFF);
+	bytes[kLengthAt + 1] = static_cast<uint8_t>(damaged.size() >> 8);
+	bytes.insert(bytes.end(), damaged.begin(), damaged.end());
+	bytes.insert(bytes.end(), whole.begin() + kChunkAt + length, whole.end());
+	// The reader takes it, and its rewrite is the clean chunk's records (the cut record's padded).
+	bms::File back;
+	if (!bms::parse(bytes.data(), bytes.size(), back, err)) return false;
+	std::vector<uint8_t> rewrite;
+	if (!bms::write(back, rewrite, err)) return false;
+	if (rewrite == bytes || back.loadout.entries.size() != 3) {
+		err = "the damaged chunk reads back as written";
+		return false;
+	}
+	return true;
+}
+bool build_loadout_cut_record(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_damaged_loadout(LoadoutDamage::CutRecord, bytes, err);
+}
+bool build_loadout_past_terminator(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_damaged_loadout(LoadoutDamage::PastTerminator, bytes, err);
+}
+bool build_loadout_unterminated(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_damaged_loadout(LoadoutDamage::Unterminated, bytes, err);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1389,6 +2250,20 @@ int main(int argc, char **argv) {
 	if (emit(root + "fixtures/bms/synth_logic.bms", mission_bytes, write_mode) != 0) return 1;
 	if (emit(root + "fixtures/bms/synth_logic.bin", table_bytes, write_mode) != 0) return 1;
 	if (emit(root + "fixtures/bms/synth_areas.bms", areas_bytes, write_mode) != 0) return 1;
+	// The D-EVT-7 damaged loadouts.
+	{
+		const struct {
+			const char *file;
+			bool (*build)(std::vector<uint8_t> &, std::string &);
+		} damaged[] = {{"loadout_cut_record.bms", build_loadout_cut_record},
+			{"loadout_past_terminator.bms", build_loadout_past_terminator},
+			{"loadout_unterminated.bms", build_loadout_unterminated}};
+		for (const auto &recipe : damaged) {
+			std::vector<uint8_t> bytes;
+			if (!expect(recipe.build(bytes, err), (std::string(recipe.file) + ": " + err).c_str())) return 1;
+			if (emit(root + "fixtures/bms/" + recipe.file, bytes, write_mode) != 0) return 1;
+		}
+	}
 
 	// The mission set (fixtures/mission_set): its models.
 	const std::string set = root + "fixtures/mission_set/";
@@ -1407,6 +2282,13 @@ int main(int argc, char **argv) {
 		{"mbuggy.3di", make_buggy},
 		{"mlndmine.3di", make_minefield},
 		{"mheli.3di", make_heli},
+		{"mzodiac.3di", make_zodiac},
+		{"mlcac.3di", make_lcac},
+		{"mmarkv.3di", make_markv},
+		{"mtripod.3di", make_tripod},
+		{"mlbird.3di", make_little_bird},
+		{"mchinook.3di", make_chinook},
+		{"mhut.3di", make_hut},
 	};
 	for (const ModelRecipe &recipe : models) {
 		std::vector<uint8_t> bytes;
@@ -1436,6 +2318,17 @@ int main(int argc, char **argv) {
 		{"minimap.bms", build_minimap},
 		{"payload.bms", build_payload},
 		{"payload.bin", build_payload_table},
+		{"watercraft.bms", build_watercraft},
+		{"garrison.bms", build_garrison},
+		{"garrison.bin", build_garrison_table},
+		{"parachute.bms", build_parachute},
+		{"tags.bms", build_tags},
+		{"lf_04tr.bms", build_lf_04tr},
+		{"lf_05tr.bms", build_lf_05tr},
+		{"lf_00tra.bms", build_lf_00tra},
+		{"lf_01tr.bms", build_lf_01tr},
+		{"indoor.bms", build_indoor},
+		{"spawn.bms", build_spawn},
 	};
 	for (const MissionRecipe &recipe : missions) {
 		std::vector<uint8_t> bytes;

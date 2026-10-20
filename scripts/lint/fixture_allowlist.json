@@ -16,6 +16,7 @@
     "fixtures/grm/person.grm",
     "fixtures/mission_set/*.aip",
     "fixtures/mission_set/*.def",
+    "fixtures/mission_set/*.wac",
     "fixtures/mnu/widgets.mnu",
     "fixtures/mnu/all_widgets.mnu",
     "fixtures/mns/test_style.mns",

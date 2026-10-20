@@ -1,7 +1,10 @@
 // Walk onto the 09TR Chinook floor without Use. The mission itself orders six
-// soldiers into seats, leaves the instructor standing, and starts the flight.
+// soldiers into seats, leaves the instructor standing, and starts the flight:
+// 09TR's boarding in miniature (the mission set's parachute.bms, its records
+// and events by 09TR's SSNs and indices, over the minted Chinook in Dchnk1's
+// shape).
 #include "common/mission_rig.h"
-#include "common/retail_paths.h"
+#include "common/mission_set.h"
 #include <runtime/world/vehicle_mount.h>
 #include <cmath>
 #include <cstdio>
@@ -20,13 +23,16 @@ world::Vec3 local_offset(const world::Entity &carrier, world::Vec3 position) {
 }
 }
 int main() {
-    RETAIL_REQUIRE_OR_SKIP(root, retail::assets(), "OPENNOVA_JO_ASSETS with 09TR.bms");
+    test_mission_set::Root root("parachute");
     auto owned = std::make_unique<testrig::MissionRig>();
     auto &r = *owned;
     std::string error;
-    if (!r.open(root, "09TR.bms", error)) return retail::skip(error.c_str());
+    if (!root.ok() || !r.open(root.path(), "parachute.bms", error)) {
+        std::printf("FAIL parachute.bms opens: %s\n", error.c_str());
+        return 1;
+    }
     if (!r.boot(testrig::BootOptions{}, error)) {
-        std::printf("FAIL 09TR boot: %s\n", error.c_str());
+        std::printf("FAIL parachute.bms boot: %s\n", error.c_str());
         return 1;
     }
     r.tick(62);

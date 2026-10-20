@@ -185,14 +185,19 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   authored through the `bms_edit` free functions and written by `bms::write` (four populated
   pools, one item id each, zero-valued optional fields, the minted terrain and
   environment in its header), which `mission_mis_idempotency` round-trips through `.mis`
-  and `mission_corpus` rewrites; the whole shipped corpus is `mission_corpus`'s retail leg
-  (the install's archives, through the VFS).
+  and `mission_corpus` rewrites.
 - `bms/synth_logic.bms`, `bms/synth_logic.bin` — `tests/fixtures/mission_set_gen.cpp`: the
   small mission the mission document and its picture read (every row kind on the minted
   terrain inside mission x, y of -512..512, items whose graphics are `threedi/synth` models,
   a path, two area triggers (zones 20 and 30), two events naming one another, a four-entry loadout, the first
   win and lose directives) through `bms::write`, and its string table (the keys its records
   form: `LOCATION001`, `STRNAME001`, the win and lose directives) through `rtxt::write`.
+- `bms/loadout_cut_record.bms`, `bms/loadout_past_terminator.bms`, `bms/loadout_unterminated.bms` —
+  `tests/fixtures/mission_set_gen.cpp`: synth_areas.bms's records with a three-weapon loadout
+  whose chunk is damaged the three ways shipped missions' are (D-EVT-7: the last record cut short
+  before the terminator, as ASP_G8a's and ASR_C2A's; a record's strings past the terminator, as
+  TDH_G1A's; no terminator, as TKR_G3A's and TKX_G5B's): each reads without fault and differs
+  from its rewrite in the loadout chunk alone; `mission_corpus`'s and the editor's mission rows.
 - `bms/synth_areas.bms` — `tests/fixtures/mission_set_gen.cpp`: a shipped training mission's
   area triggers (03TR's shape: thirteen zones over ids 1..15 with gaps, most constrain-Z) beside
   the mission boundary and a record in each pool, which `mission_mis_idempotency` round-trips
@@ -227,6 +232,13 @@ stands in for.
 | `mladder.3di` | the shipped 8 m ladder's (WLad03): two rails and sixteen rungs as collision faces (poly type 13), one type-1 volume around them and the type-4 climb volume (CL), the flat face 0.37 in front of the rungs; `ladder_00tra`'s |
 | `mlndmine.3di` | the shipped unmarked minefield section's (Lndmine1): one flat 16 x 16 part, its `ground` point, then nine `small` and five `large` mine points in the shipped order and places; one collision object, the slab; `minefield_missions`' |
 | `mheli.3di` | the shipped medevac Black Hawk's (Fblkhawm, the teammate flyover's helicopter): the fuselage and open cabin on part 0, the floor 2.5 under the origin, the main rotor on part 1 on HELO_ROTOR; one collision object, the floor and nose type-1 volumes; `teammate_spawn`'s |
+| `mzodiac.3di` | the shipped Zodiac's (Dzdiac1): the hull on part 0; the coxswain's ctrlx03 and the passengers sitex08 and sitex09; one collision object, the shipped floor, side tubes and bow as type-1 volumes; `watercraft_02tr`'s and the garrison's |
+| `mlcac.3di` | the shipped LCAC's (Dlcac1): the hull on part 0; the pilot's ctrlx11 and the passenger sitex00; one collision object, the shipped skirt, deck and side structures as type-1 volumes; `watercraft_02tr`'s |
+| `mmarkv.3di` | the shipped Mark V's (Dmrk51, and the garrison's assault boat): the hull on part 0; the helm's ctrlx22 and four passengers; one collision object, the shipped keel, hull, stern, bow and wheelhouse as type-1 volumes; `watercraft_02tr`'s and the garrison's |
+| `mtripod.3di` | the shipped .50 on a tripod's (E50triB): the tripod on part 0, the traverse on part 1 (EWEAP_GUNYAW) and the gun on part 2 (EWEAP_GUNPITCH) about the shipped pivot; the gunner's Usegun point and the gun's camera, heat, casing, bullet and flash points; a collision object per part; the garrison's |
+| `mlbird.3di` | the shipped minigun Little Bird's (DAH62): the fuselage with its open cockpit and skids on part 0, the main and tail rotors on parts 1 and 2; the pilot's ctrlx05, the co-pilot's sitex04 and the miniguns' bullet, flash and casing points; one collision object; `training_gameplay`'s |
+| `mchinook.3di` | the shipped Chinook's (Dchnk1): the fuselage on part 0, its cabin floor 6.23 and its gear 7.19 under the origin, the ramp a sloped volume; the rotors on parts 1 and 2; the cockpit's ctrlx05 and sitex04 and the six troop seats sitex17A..F at the shipped places; one collision object, with the shipped troop benches and seat bases; `parachute_09tr`'s |
+| `mhut.3di` | an enterable one-room building in the shape of the shipped ones the indoor-visibility reports came from (00TRa's armory, CP03's HN_Bld1): the shell and the room on parts 0 and 1, a doorway and a window; its collision walls with the doorway open, the room's blink box (type 8), and its occlusion records (the open slot, the wall occluders, the doorway as record 5 and the window, both type 2); the indoor-visibility rows' |
 | `door.3di` | the shipped door building's (IBlock01): a "door" LOD, part 0 a 6 x 6 block house with a doorway in its +x wall, part 1 the door hinged at (2.9, -0.5), its PANM row a rotation on control register 0 (`DOOR_00`) from 0 to -5688; a collision object per part, the door's offset to its hinge; `doors`' |
 
 Its missions, each the scenario of the shipped training mission the test it serves is named
@@ -241,6 +253,12 @@ falling a sixteenth of a unit per unit of mission y):
 | `land_vehicles.bms` | 01TR's opening ground: the single-player start, the dune buggy SSN 300 with its `addeweap` gun child, the player's team's riflemen SSNs 2, 70 and 71 (the shipped records' distances) and five team-2 concrete lane dividers (hp 0) in their arc |
 | `minimap.bms` | 00TRg's pool-2 records in its promote order: two pier building pieces (no minimap marker), the twenty-four records its minimap draws (buildings over the synthetic armory and the armories), then sandbag walls; `minimap_overlay`'s |
 | `payload.bms`, `payload.bin` | 00TRg's two mission payload halves: an AI patrol path and exactly one blue player route (DoesNotLoop, PlayerRoute) over marker 12; its table an 810-character second briefing in our own words (no third) and 00TRg's two deploy-map location labels; `npruntime_authored_payload_00trg`'s |
+| `watercraft.bms` | 02TR's three water-training hulls by their SSNs (the Zodiac 4, the LCAC 7, the Mark V 1182) at the shipped heights |
+| `garrison.bms`, `garrison.bin` | 00TRg's defended camp: its tripods and gunners, truck column and crews, boats and crews (the defender groups), a patrol on its loop, its paths and its events at 00TRg's indices (8, 9..15, 18..22), by 00TRg's SSNs and groups; and its string table; `defense_00trg`, `soak_00trg`, `native_assets_00trg` and `mission_ai_path_conformance`'s |
+| `parachute.bms` | 09TR's boarding: the Chinook SSN 4572 with its two pilots crewing it at spawn, six soldiers in groups 4 and 5, the instructor SSN 4664, their paths up the ramp, the flight path 5 and 09TR's events 22..29 at their indices |
+| `tags.bms` | 03TR's ground: a section of the player's team, two jungle birds (team 0) and the minigun Little Bird SSN 41; `training_gameplay`'s |
+| `lf_04tr.bms`, `lf_05tr.bms`, `lf_00tra.bms`, `lf_01tr.bms` | the lose and win flows' grounds (04TR's, 05TR's, 00TRa's, 01TR's), each beside its own `.wac`: the player's team in the open, SinglePlayerRespawn on 04TR's and 05TR's, 00TRa's crewed truck and its delayed events, 01TR's win event 38 gated on its five SubGoalWon events with all eight win subgoals defined; `lose_flow`'s six rows |
+| `indoor.bms`, `spawn.bms` | 00TRa's armory door (the hut as bms 20) and CP03's deployed spawn (the hut as bms 151, the start 0.2 inside its doorway, the hangar 297, the buggy 2539, the light post 672 and the armory crate 2538 by CP03's ids); the indoor-visibility rows' |
 | `minefield.bms`, `minefield_coop.bms` | 00TRd's and CP09's minefields: three and two unmarked sections in front of the start, the second an objective Co-op mission |
 | `rock_collision.bms` | 00TRg's single-player start (bms 1197) with the rock formation (bms 650) seven units in front of it |
 | `truck_rest.bms` | 00TRa's three parked trucks by their SSNs (11 and 1714 crewed by a command-mounted friendly soldier, 6 empty) around the single-player start |
@@ -251,13 +269,17 @@ soldier's one-bone clips `ms_*.bad` (the reset, the idle, the walk with its foot
 and forward root motion, the run, the crouch and prone poses, the attack with its fire
 words, the guard, the reload, the death, the ladder's hold, climb up and down, the jump and
 the roll), the tables `msoldier.adm` and `E_STAND.adm` (the shipped soldier's slots) and
-`mplayer.adm` (the shipped player's), `mmedic1.adm` and `mmedic2.adm` (the soldier's and the
+`mplayer.adm` (the shipped player's, its standing moves the run `mp_runf.bad` and its run_2 and
+run_3 the fast runs `mp_runk.bad` and `mp_runw.bad`, in the shape of US01's DT1runF, RunFastK and
+RunFastW), `mmedic1.adm` and `mmedic2.adm` (the soldier's and the
 shipped medics' drag poses: the draggee; the dragger's idle and walk), and the first-person M4's clips `mfp_*.bad` and table
 `mfp_m4.adm` (the shipped M4_1st table's slots).
 
 Its authored text: `items.def` (the rows its missions place, by the shipped rows' ids and
 field values over the minted models), `weapon.def` (the knife, the Colt, the M4 with its
-actions and the buggy's emplaced gun, over the minted first-person table) and the AI
-profiles its vehicles name (`d_5ton.aip`, `d_buggy.aip`, and `h_bhawkn.aip`, the teammate
-helicopter's: the shipped profiles' values). Tests read it through `tests/common/mission_set.h`, which stages it beside
+actions, the buggy's emplaced gun, the tripod's .50 and the Little Bird's miniguns, over the
+minted first-person table), `SndProf.def` (the player's footstep sounds), the lose flows' WACs
+(`lf_*.wac`: the shipped training missions' kill-tally lose legs) and the AI
+profiles its vehicles name (`d_5ton.aip`, `d_buggy.aip`, `d_mh6.aip` for the helicopters, and
+`h_bhawkn.aip`, the teammate helicopter's: the shipped profiles' values). Tests read it through `tests/common/mission_set.h`, which stages it beside
 the Tmap terrain, the synthetic models and the authored clips as one loose game root.

@@ -1,11 +1,12 @@
 #include <runtime/world/local_player_view.h>
-// P2 round outcome on the retail data: a training mission's witnessed lose
+// P2 round outcome on the training missions' grounds in miniature (the mission
+// set's lf_*.bms, each with its own WAC): a training mission's witnessed lose
 // flow, the sim half (the shell half — the MISSION FAILED screen and ESC to
 // the menu — is godot/tests/game/main_game_lifecycle_test.gd). One executable,
-// one ctest per mission (`--bms <name>`): 04TR's WAC carries both team legs,
-// 00TRa's only `if true(bluekills) then Lose(1)` (`--victim-team 1`; the first
-// mission's authored friendly-fire failure, playthrough gate 8 of
-// docs/world/npc-mission-completion.md):
+// one ctest per mission (`--bms <name>`): lf_04tr's WAC carries both team legs
+// (04TR's), lf_00tra's only `if true(bluekills) then Lose(1)` (00TRa's;
+// `--victim-team 1`; the first mission's authored friendly-fire failure,
+// playthrough gate 8 of docs/world/npc-mission-completion.md):
 //
 //   kill a green/blue PERSON with real player rounds (the local weapon pump
 //   -> RoundSim damage/death chain) ->
@@ -42,9 +43,8 @@
 // retail's airborne Flags mirror [orig: Entity_UpdateInfantryAI @0x4b9910 —
 // the terrain slide block's Flags & 0x90A000 gate @0x4ba89b skips an
 // airborne body], which shifted one squad's timing by a few ticks.
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying the mission).
 #include "common/mission_rig.h"
-#include "common/retail_paths.h"
+#include "common/mission_set.h"
 
 #include <formats/rtxt/rtxt.h>
 
@@ -488,8 +488,8 @@ void print_event_table(testrig::MissionRig &rig, const std::string &bms) {
 // SELF-KILL MODE (`--self-kill`): the local player dies to its own HE grenade
 // blast. No Player definition authors a `score` word, so the kill accounting
 // returns before any tally: bluekills stays 0 and the WAC's
-// `true(bluekills) -> Lose(1)` never fires. 04TR and 05TR author
-// SinglePlayerRespawn, so the death itself ends nothing either.
+// `true(bluekills) -> Lose(1)` never fires. 04TR and 05TR (lf_04tr, lf_05tr)
+// author SinglePlayerRespawn, so the death itself ends nothing either.
 // [orig: Entity_ApplyWeaponDamage @0x4E6BFE -> Score_ProcessKillEvent
 //  @0x4FD400, the victim `score` gate @0x4FD422; Server_CheckWinConditions
 //  SP leg @0x51AD68 (g_BmsAttribFlags & 0x40)]
@@ -539,7 +539,8 @@ int run_self_kill(testrig::MissionRig &rig) {
 // chain under test is the authored one: the quarter pass fires event N, its
 // BlueWin ends the round won, and the engine's win epilog builds its score
 // screen over the mission's own header and tallies. 01TR's only BlueWin is
-// event 38 (bms-event-runtime-re §11.2), gated on events 14, 24, 26, 34 and 36.
+// event 38 (bms-event-runtime-re §11.2), gated on events 14, 24, 26, 34 and 36;
+// lf_01tr carries the same chain at the same indices.
 // [orig: EventAction_Dispatch case 8 @0x45447b -> Server_ProcessRoundEnd(1);
 //  Cine_InitPlayback @0x578390; Cine_EpilogStateMachineUpdate @0x576240]
 int run_win_event(testrig::MissionRig &rig, int win_event) {
@@ -612,7 +613,7 @@ int run_win_event(testrig::MissionRig &rig, int win_event) {
 } // namespace
 
 int main(int argc, char **argv) {
-	std::string bms = "04TR.bms";
+	std::string bms = "lf_04tr.bms";
 	int victim_team = -1;
 	bool events_only = false;
 	bool self_kill = false;
@@ -626,8 +627,9 @@ int main(int argc, char **argv) {
 		else if (std::strcmp(argv[i], "--win-event") == 0 && i + 1 < argc) win_event = std::atoi(argv[++i]);
 		else if (std::strcmp(argv[i], "--restart-boot") == 0) restart_boot = true;
 	}
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying the training missions)");
+	test_mission_set::Root root("lose_flow");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	const std::string install = root.path();
 	if (restart_boot) {
 		// RESTART MODE (`--restart-boot`): the mission booted fresh, then again
 		// as the SP restart's boot in the same process (the load parity word
@@ -643,7 +645,7 @@ int main(int argc, char **argv) {
 		for (int pass = 0; pass < 2; ++pass) {
 			testrig::MissionRig r;
 			std::string err;
-			if (!r.open(install, bms, err)) return retail::skip(err.c_str());
+			if (!expect(r.open(install, bms, err), "the mission opens")) return 1;
 			testrig::BootOptions o;
 			o.restart = pass == 1;
 			if (!expect(r.boot(o, err), "the mission boots")) return 1;
@@ -676,7 +678,10 @@ int main(int argc, char **argv) {
 	}
 	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, bms, error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(install, bms, error), "the mission opens")) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
 	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
@@ -703,7 +708,7 @@ int main(int argc, char **argv) {
 		return rc;
 	}
 
-	// THE FRIENDLY-FIRE GATE on a retail mission. Out of a session the rules
+	// THE FRIENDLY-FIRE GATE. Out of a session the rules
 	// word is the literal 0x4204 [orig: CNapiGameSession_InitRandomSeedOrRequest
 	// @0x51E94B..0x51E957, the +0x2C of the mission-data block that IS
 	// g_RulesFlags @0x24D1E34], whose 0x200 bit protects every same-team pair

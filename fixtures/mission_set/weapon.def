@@ -175,3 +175,80 @@ weapon "WPN_EMPLCD50NA"
 		anim				anim_wpn_switchfrom
 	end
 end
+
+weapon "WPN_EMP50TRI180"
+	category 11
+	rank     9
+	round_type  "50cal"
+	clipsize    -1
+	startrounds 500
+	error 0.063 0.063 0.063 0.063 0.063 0.063
+	targetpitchmax  45
+	targetpitchmin  45
+	targetyawrange  90
+	launchuserpoint camera
+	animadm mfp_m4
+	gfx1 gun
+	flags auto
+	flags Emplaced
+	action "idle"
+		anim				anim_wpn_idle
+	end
+	action "fire"
+		delayend			auto
+		anim				anim_wpn_fire
+	end
+	action "recoil"
+		delayend			1
+		anim				anim_wpn_recoil
+	end
+	action "switchto"
+		delaystart		1
+		delayend		1
+		anim				anim_wpn_switchto
+	end
+	action "switchfrom"
+		delaystart		1
+		delayend		1
+		anim				anim_wpn_switchfrom
+	end
+end
+
+weapon "WPN_EMINIDFLT"
+	category 11
+	rank     16
+	round_type  "50cal"
+	clipsize    1000
+	startrounds 1000
+	error 0.5 0.5 0.5 0.5 0.5 0.5
+	targetpitchmax  75
+	targetpitchmin  12
+	targetyawrange  75
+	launchuserpoint bullet
+	flags auto
+	flags Emplaced
+	action "idle"
+		anim		  anim_wpn_idle
+	end
+	action "fire"
+		delayend	  1
+	end
+	action "recoil"
+		delaystart    0
+		delayend	  1
+	end
+	action "reload"
+		delayend         0
+	end
+	action "empty"
+		delayend         0
+	end
+	action "switchto"
+		delaystart		1
+		delayend		1
+	end
+	action "switchfrom"
+		delaystart		1
+		delayend		1
+	end
+end

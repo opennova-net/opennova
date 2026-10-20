@@ -1,4 +1,5 @@
-// Wave-1 native assets (ADR 0028 trunk, S3b/S16 full) on the retail data: the
+// Wave-1 native assets (ADR 0028 trunk, S3b/S16 full) on 00TRg's camp in
+// miniature (the mission set's garrison.bms and its garrison.bin): the
 // sim resolves every collision/occlusion .3di through its OWN assets::AssetStore,
 // the boot installs the seat/mount table through the NATIVE extractor, the
 // booted world keeps producing native hitboxes with ZERO provider declines,
@@ -6,12 +7,13 @@
 // and the native inmatch::Session 62.5 Hz bank drives the loop
 // [orig: Game_MainLoop @0x52b630]. The S9 boot's native file resolution (the
 // mission text fallback, the .aip profile speeds) is checked against an
-// independent read of the same files.
-// Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms);
-// the attach count pins the recorded retail value on that tree (859).
+// independent read of the same files. On the shipped 00TRg the native attach
+// sweep attached 859 (the recorded retail value); on garrison.bms the count is
+// the one its records' models give, derived independently below and pinned.
 #include "common/mission_rig.h"
-#include "common/retail_paths.h"
+#include "common/mission_set.h"
 
+#include <runtime/world/model_geometry.h>
 #include <runtime/world/player_spawn.h>
 
 #include <cctype>
@@ -35,7 +37,28 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-constexpr int kExpectAttach = 859;
+// The native attach count on garrison.bms (the independent count below, pinned once).
+constexpr int kExpectAttach = 37;
+
+std::string lower_ascii(std::string s) {
+	for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	return s;
+}
+
+// The attach sweep's independent oracle: every registry entity but a marker whose items.def graphic
+// loads a model carrying a collision block (an organic reads its visual row, which for the
+// garrison's soldiers is its own).
+int expected_attach(testrig::MissionRig &rig) {
+	int count = 0;
+	rig.world.registry.for_each([&](const w::Entity &e) {
+		if (e.kind == w::EntityKind::Marker || rig.items_table() == nullptr) return;
+		const def::DefItemDef *row = mission::find_item_def(*rig.items_table(), e.item_id + mission::kItemIdOffset);
+		if (row == nullptr || row->graphic[0] == '\0') return;
+		const threedi::Threedi3di3 *m3 = rig.assets().model(row->graphic).get();
+		if (m3 != nullptr && m3->collision != nullptr) ++count;
+	});
+	return count;
+}
 
 // The pre-S9 shell resolution of the .aip speed table, the independent
 // reference for the engine's resolve_ai_profiles.
@@ -43,7 +66,7 @@ std::map<std::string, std::pair<int, int>> oracle_aip_speeds(const bms::File &mi
 	std::map<std::string, std::pair<int, int>> out;
 	const auto visit = [&](const std::vector<bms::Entity> &entities) {
 		for (const bms::Entity &e : entities) {
-			std::string profile = retail::lower_ascii(std::string(e.name2, strnlen(e.name2, sizeof(e.name2))));
+			std::string profile = lower_ascii(std::string(e.name2, strnlen(e.name2, sizeof(e.name2))));
 			while (!profile.empty() && std::isspace(static_cast<unsigned char>(profile.back()))) profile.pop_back();
 			if (profile.empty() || out.count(profile)) continue;
 			std::vector<uint8_t> bytes;
@@ -56,7 +79,7 @@ std::map<std::string, std::pair<int, int>> oracle_aip_speeds(const bms::File &mi
 				std::istringstream tokens(line);
 				std::string key, value;
 				if (!(tokens >> key >> value)) continue;
-				key = retail::lower_ascii(key);
+				key = lower_ascii(key);
 				if (key == "patrol_speed") patrol = std::atoi(value.c_str());
 				else if (key == "combat_speed") combat = std::atoi(value.c_str());
 			}
@@ -73,15 +96,19 @@ std::map<std::string, std::pair<int, int>> oracle_aip_speeds(const bms::File &mi
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
-			"OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms)");
+	test_mission_set::Root root("native_assets");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	const std::string assets = root.path();
 	std::string error;
 
 	// --- The bare sim: promote, the native attach sweep, the by-name weapon
 	// install and the session bank.
 	{
 		testrig::MissionRig rig;
-		if (!rig.open(assets, "00TRg.bms", error)) return retail::skip(error.c_str());
+		if (!expect(rig.open(assets, "garrison.bms", error), "garrison.bms opens")) {
+			std::fprintf(stderr, "  %s\n", error.c_str());
+			return 1;
+		}
 		if (!expect(rig.items_ok, "items.def parses from the tree")) return 1;
 		// The bare promote: no seat/mount table (the recorded attach count is
 		// the model sweep alone), no terrain, no scripts, no host session.
@@ -91,18 +118,21 @@ int main() {
 		bare.wac = false;
 		bare.seat_specs = false;
 		bare.listen_server = false;
-		if (!expect(rig.boot(bare, error), "00TRg promotes")) {
+		if (!expect(rig.boot(bare, error), "the mission promotes")) {
 			std::fprintf(stderr, "  %s\n", error.c_str());
 			return 1;
 		}
-		std::printf("native-assets: attached native=%d (expect %d)\n", rig.collision_attached, kExpectAttach);
-		expect(rig.collision_attached == kExpectAttach, "the native attach count matches the recorded retail value");
+		const int independent = expected_attach(rig);
+		std::printf("native-assets: attached native=%d (independent %d, pinned %d)\n", rig.collision_attached,
+				independent, kExpectAttach);
+		expect(rig.collision_attached == independent, "the native attach count matches the independent count");
+		expect(rig.collision_attached == kExpectAttach, "the native attach count matches the pinned value");
 		expect(rig.weapon_defs_ok, "weapon.def loaded from the tree");
 		w::PlayerSpawn spawn;
 		spawn.team = 1;
 		const w::EntityHandle h = w::spawn_player(rig.world, spawn);
 		if (!expect(h.valid(), "spawn_local_player at the origin")) return 1;
-		if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs by name against the retail root")) return 1;
+		if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs by name against the root")) return 1;
 		std::printf("native-assets: m4 by-name: active=%d clip=%d\n", int(rig.local.weapon.active), rig.local.weapon.slot.clip);
 		expect(rig.local.weapon.active, "the by-name install left an active weapon FSM");
 		expect(!rig.install_weapon("WPN_NOT_A_WEAPON"), "an unknown weapon name does not install");
@@ -122,14 +152,14 @@ int main() {
 		expect(session.advance(frame).ticks_run() == 31, "inmatch::Session::advance(2.0) runs 31 ticks (500 ms clamp)");
 	}
 
-	// --- The S9 boot on the retail data through the engine's boot policy: the
+	// --- The S9 boot through the engine's boot policy: the
 	// booted world poses natively end to end, and the native file resolution
 	// matches the independent reads.
 	{
 		testrig::MissionRig rig;
-		if (!rig.open(assets, "00TRg.bms", error)) return retail::skip(error.c_str());
+		if (!expect(rig.open(assets, "garrison.bms", error), "garrison.bms opens")) return 1;
 		testrig::BootOptions options;
-		if (!expect(rig.boot(options, error), "00TRg boots (S9)")) {
+		if (!expect(rig.boot(options, error), "the mission boots (S9)")) {
 			std::fprintf(stderr, "  %s\n", error.c_str());
 			return 1;
 		}
@@ -172,7 +202,7 @@ int main() {
 
 		// The mission text: <mission>.bin when it exists, else medmssn.bin.
 		std::vector<uint8_t> legacy_text;
-		if (rig.index.has_file("00TRg.bin")) rig.index.read_file("00TRg.bin", legacy_text);
+		if (rig.index.has_file("garrison.bin")) rig.index.read_file("garrison.bin", legacy_text);
 		else rig.index.read_file("medmssn.bin", legacy_text);
 		std::printf("native-assets: s9 text=%zu bytes (source %d) vs independent read %zu\n", rig.text_size,
 				rig.text_source, legacy_text.size());
@@ -181,7 +211,7 @@ int main() {
 		const std::map<std::string, std::pair<int, int>> oracle = oracle_aip_speeds(rig.mission, rig.index);
 		std::map<std::string, std::pair<int, int>> native;
 		for (const mission::PromoteOptions::AiProfileRow &row : rig.ai_profiles)
-			native[retail::lower_ascii(row.profile)] = {row.data.patrol_speed, row.data.combat_speed};
+			native[lower_ascii(row.profile)] = {row.data.patrol_speed, row.data.combat_speed};
 		std::printf("native-assets: s9 aip rows native=%zu oracle=%zu\n", native.size(), oracle.size());
 		expect(native.size() == oracle.size(), "the S9 .aip row count matches the independent walk");
 		for (const auto &kv : oracle) {
@@ -194,6 +224,6 @@ int main() {
 		}
 	}
 
-	if (failures == 0) std::printf("native_assets_00trg: the native asset paths hold on the retail tree\n");
+	if (failures == 0) std::printf("native_assets_00trg: the native asset paths hold on the mission set\n");
 	return failures == 0 ? 0 : 1;
 }

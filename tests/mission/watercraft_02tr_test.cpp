@@ -1,8 +1,10 @@
-// The authored water-training hulls must retain support while idling. In
-// particular the selector-zero amphibious LCAC uses the seven-point solve.
-// Isolate the hulls over a zero-height water plane, with no terrain support.
+// The water-training hulls must retain support while idling. In particular
+// the selector-zero amphibious LCAC uses the seven-point solve. Isolate the
+// hulls over a zero-height water plane, with no terrain support: 02TR's three
+// (the mission set's watercraft.bms, by their SSNs, over the minted Zodiac,
+// LCAC and Mark V hulls in the shipped models' shapes).
 #include "common/mission_rig.h"
-#include "common/retail_paths.h"
+#include "common/mission_set.h"
 
 #include <cmath>
 #include <cstdio>
@@ -10,16 +12,18 @@
 
 int main() {
 	using namespace opennova;
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(), "OPENNOVA_JO_DIR (02TR.bms)");
+	test_mission_set::Root root("watercraft");
 	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "02TR.bms", error))
-		return retail::skip(error.c_str());
+	if (!root.ok() || !rig.open(root.path(), "watercraft.bms", error)) {
+		std::fprintf(stderr, "FAIL: watercraft.bms opens: %s\n", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
 	options.wac = false;
 	options.terrain = false;
 	if (!rig.boot(options, error)) {
-		std::fprintf(stderr, "FAIL: 02TR boot: %s\n", error.c_str());
+		std::fprintf(stderr, "FAIL: watercraft.bms boot: %s\n", error.c_str());
 		return 1;
 	}
 	// Production binds the same retained item table for traits, animation,

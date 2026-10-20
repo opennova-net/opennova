@@ -1,0 +1,10 @@
+begin "default"		 default
+end
+
+begin "SP_Player"		 the player's footsteps
+     SSLFootGND     FOOT_DIRT_L
+     SSRFootGND     FOOT_DIRT_R
+     SSLFootOBJ     FOOT_OBJ_L
+     SSRFootOBJ     FOOT_OBJ_R
+     SSFootWater    FOOT_WATER
+end

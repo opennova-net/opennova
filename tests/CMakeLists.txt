@@ -662,7 +662,7 @@ add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
 target_link_libraries(mission_corpus_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(mission_corpus COMMAND mission_corpus_test)
+add_test(NAME mission_corpus COMMAND mission_corpus_test)
 
 # LWF sound-profile tests: byte-exact parse->encode round-trip + mutate-reread
 # over the synthetic fixtures/lwf/menu.lwf; the retail profiles are swept
@@ -4369,22 +4369,7 @@ add_test(NAME npruntime_medic_recipient COMMAND npruntime_medic_recipient_test)
 # fast half of the host-parity loop; --report / --ticks / --bms for diagnosis).
 add_executable(ai_path_conformance_test mission/ai_path_conformance_test.cpp)
 target_link_libraries(ai_path_conformance_test PRIVATE opennova_test_rig)
-opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_test)
-
-# The retail-mission ports of the former in-game probes (ADR 0041: an
-# assertion over the portable engine is a ctest, not a probe), all on the
-# shared rig (common/mission_rig.h). Gated: OPENNOVA_JO_DIR (a packed
-# install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
-foreach(port
-        mission/defense_00trg mission/soak_00trg
-        mission/native_assets_00trg
-        mission/training_gameplay
-        mission/watercraft_02tr mission/parachute_09tr)
-    get_filename_component(port_name ${port} NAME)
-    add_executable(${port_name}_test ${port}_test.cpp)
-    target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
-    opennova_add_gated_test(${port_name} COMMAND ${port_name}_test)
-endforeach()
+add_test(NAME mission_ai_path_conformance COMMAND ai_path_conformance_test)
 
 # The former retail-mission ports over the minted mission set (common/mission_set.h,
 # tests/fixtures/mission_set_gen.cpp): each boots its own mission set mission on the
@@ -4392,7 +4377,9 @@ endforeach()
 foreach(port
         world/truck_rest_00tra world/motorcycle_gravity_06tr world/rock_collision_00trg
         world/ai_corpse world/ai_threat world/ai_muzzle_pose world/ladder_00tra
-        mission/vehicle_ride_00tra mission/buggy_01tr mission/fire_hold_01tr)
+        mission/vehicle_ride_00tra mission/buggy_01tr mission/fire_hold_01tr
+        mission/defense_00trg mission/soak_00trg mission/native_assets_00trg
+        mission/training_gameplay mission/watercraft_02tr mission/parachute_09tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
@@ -4400,16 +4387,17 @@ foreach(port
 endforeach()
 
 # The indoor-visibility walk (the "occlusion issues in a building" report):
-# the local player walked through a retail building's doorway on the shared
-# rig, the render-occlusion frame run over the game's camera every tick
-# (00TRa's armory door), and CP03's authored spawn (a doorway of HN_Bld1)
-# held still and swept. Gated: OPENNOVA_JO_DIR.
+# the local player walked through a building's doorway on the shared rig, the
+# render-occlusion frame run over the game's camera every tick (the mission
+# set's indoor.bms, 00TRa's armory door in miniature), and an authored spawn
+# just inside a doorway (spawn.bms, CP03's at HN_Bld1's door in miniature)
+# held still, posed and swept.
 add_executable(indoor_visibility_walk_test world/indoor_visibility_walk_test.cpp)
 target_link_libraries(indoor_visibility_walk_test PRIVATE opennova_test_rig)
-opennova_add_gated_test(indoor_visibility_walk_00tra
-    COMMAND indoor_visibility_walk_test --bms 00TRa.bms --bms-id 20 --door 5)
-opennova_add_gated_test(indoor_visibility_spawn_cp03
-    COMMAND indoor_visibility_walk_test --bms CP03.bms --spawn --idle 120 --yaw-step 45 --retail-truth)
+add_test(NAME indoor_visibility_walk_00tra
+    COMMAND indoor_visibility_walk_test --bms indoor.bms --bms-id 20 --door 5)
+add_test(NAME indoor_visibility_spawn_cp03
+    COMMAND indoor_visibility_walk_test --bms spawn.bms --spawn --idle 120 --yaw-step 45 --spawn-truth)
 # The blink rules those walks surfaced (synthetic rigs, no data gate): the
 # first-pass-only blink letters, and the parent blink-quad copies (the dropped
 # object, the ewep class callback and move function, a seated rider).
@@ -4418,27 +4406,28 @@ target_link_libraries(indoor_visibility_fixes_test PRIVATE opennova_runtime open
 target_include_directories(indoor_visibility_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME indoor_visibility_fixes COMMAND indoor_visibility_fixes_test)
 
-# The witnessed SP lose flow on the retail data, one executable per training
-# mission's WAC: 04TR carries both team legs, 00TRa only `true(bluekills) ->
-# Lose(1)` (the first mission's friendly-fire failure, the playthrough gate 8
-# of docs/world/npc-mission-completion.md). `--events` prints the mission's
-# BMS event table instead (the playthrough's authored-sequence reference).
+# The witnessed SP lose flow on the training missions' grounds in miniature (the
+# mission set's lf_*.bms, each with its own WAC): lf_04tr carries 04TR's two team
+# legs, lf_00tra 00TRa's only `true(bluekills) -> Lose(1)` (the first mission's
+# friendly-fire failure, the playthrough gate 8 of
+# docs/world/npc-mission-completion.md). `--events` prints the mission's BMS
+# event table instead (the playthrough's authored-sequence reference).
 add_executable(lose_flow_test mission/lose_flow_test.cpp)
 target_link_libraries(lose_flow_test PRIVATE opennova_test_rig)
-opennova_add_gated_test(lose_flow_04tr COMMAND lose_flow_test --bms 04TR.bms)
-opennova_add_gated_test(lose_flow_00tra COMMAND lose_flow_test --bms 00TRa.bms --victim-team 1)
+add_test(NAME lose_flow_04tr COMMAND lose_flow_test --bms lf_04tr.bms)
+add_test(NAME lose_flow_00tra COMMAND lose_flow_test --bms lf_00tra.bms --victim-team 1)
 # `--self-kill`: the player's own HE blast tallies nothing (no Player definition
 # authors a `score`), so the WAC's bluekills lose never fires on it.
-opennova_add_gated_test(lose_flow_04tr_self_kill COMMAND lose_flow_test --bms 04TR.bms --self-kill)
-opennova_add_gated_test(lose_flow_05tr_self_kill COMMAND lose_flow_test --bms 05TR.bms --self-kill)
+add_test(NAME lose_flow_04tr_self_kill COMMAND lose_flow_test --bms lf_04tr.bms --self-kill)
+add_test(NAME lose_flow_05tr_self_kill COMMAND lose_flow_test --bms lf_05tr.bms --self-kill)
 # `--win-event 38`: 01TR's only BlueWin, its five prerequisite events staged with
 # their authored actions; the round ends won and the engine's win epilog builds
 # its score screen over the mission's own tallies.
-opennova_add_gated_test(win_flow_01tr COMMAND lose_flow_test --bms 01TR.bms --win-event 38)
-# `--restart-boot`: 00TRa booted fresh and then as the SP restart's boot; the
+add_test(NAME win_flow_01tr COMMAND lose_flow_test --bms lf_01tr.bms --win-event 38)
+# `--restart-boot`: lf_00tra booted fresh and then as the SP restart's boot; the
 # restarted world equals the fresh launch at the same world ages (the spawn,
-# the fired-event set including event 11's authored activation delay).
-opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bms --restart-boot)
+# the fired-event set its events' authored activation delays grow).
+add_test(NAME restart_boot_00tra COMMAND lose_flow_test --bms lf_00tra.bms --restart-boot)
 
 # The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped
