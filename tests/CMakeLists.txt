@@ -393,6 +393,16 @@ target_compile_features(minimal_3di_gen_test PRIVATE cxx_std_17)
 target_include_directories(minimal_3di_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
 
+# The GUT world model set fixtures/gut (the buildings the GUT render/world
+# suites stand a player in, place decorations inside and open), minted through
+# the same builder and parity writer and byte-compared every run (--write
+# regenerates).
+add_executable(gut_world_gen_test fixtures/gut_world_gen.cpp)
+target_link_libraries(gut_world_gen_test PRIVATE opennova_formats)
+target_compile_features(gut_world_gen_test PRIVATE cxx_std_17)
+target_include_directories(gut_world_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gut_world_gen COMMAND gut_world_gen_test)
+
 # ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
 # set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
 foreach(test comment trim_value parse variants write)
