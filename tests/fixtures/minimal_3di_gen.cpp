@@ -43,8 +43,23 @@
 //            first-person rig's 40 bones (vm40_rig.h: two arms of five
 //            fingers, the receiver, magazine and bolt), each part a cube on
 //            its bone and a collision section of its own carrying one face
-//            quad on its pivot; `bullet` and `MFlash01` on the receiver; the
-//            fixtures/anim/vm40* clip set plays on it
+//            quad on its pivot, the fingers' quads under the 8.8 grid's step
+//            so the grid collapses them (ArmsG's and Mp5b_1st's); `bullet` and
+//            `MFlash01` on the receiver; the fixtures/anim/vm40* clip set plays
+//            on it
+//   heli     Dblkhwk1's layout: tangent frames on every vertex (vflags 0x15),
+//            a hull, a main rotor and its blur sharing one pivot, a tail rotor
+//            and its blur on MTRX frame 1 (the tail rotor's tilted axes), the
+//            rotors register-driven (HELO_ROTOR, HELO_TAILROTOR), three LODs of
+//            which the last holds no part
+//   person_slot2  the person with every limb skinned to two bones by a
+//            strip bone table (vflags 0x55, tangents too), each vertex naming
+//            a third slot past its strip's two-entry table with no weight on it
+//            (FSldr03's), and a CXLT table whose rows are not its sections'
+//            offsets (US01's, ArmsG's, Mp5b_1st's)
+//   person_rest4  the same with an eighth of each vertex's weight, the
+//            remainder the fourth slot takes, on that slot past the table
+//            (SASBODY1's and sasmg's)
 // Outside the set, fixtures/threedi/crate_alphagen24.3di: the crate wearing
 // retail's constant AlphaGen on an opaque material, the MTRL row JOTAC's
 // SCrate1.3di carries (FF_ST_OP, two-sided, alphagen style 24 reg -1 start 128,
@@ -601,8 +616,11 @@ Model make_vm40() {
 				part);
 		m.add_panm(lod, part, parent);
 		const int cobj = m.add_cobj(parent, pivot);
-		const Vec3 quad[4] = {{pivot.x - h, pivot.y - h, pivot.z}, {pivot.x + h, pivot.y - h, pivot.z},
-			{pivot.x + h, pivot.y + h, pivot.z}, {pivot.x - h, pivot.y + h, pivot.z}};
+		// A finger's quad (bones 4..18, 22..36) spans a quarter of the 8.8 grid's step.
+		const bool finger = (i >= 4 && i <= 18) || (i >= 22 && i <= 36);
+		const double q = finger ? 1.0 / 1024.0 : h;
+		const Vec3 quad[4] = {{pivot.x - q, pivot.y - q, pivot.z}, {pivot.x + q, pivot.y - q, pivot.z},
+			{pivot.x + q, pivot.y + q, pivot.z}, {pivot.x - q, pivot.y + q, pivot.z}};
 		m.add_face_quad(cobj, quad);
 	}
 	const vm40_rig::Bone &receiver = rig[vm40_rig::kReceiver];
@@ -610,6 +628,95 @@ Model make_vm40() {
 			vm40_rig::kReceiver, kUserPointEffect);
 	m.add_user_point("MFlash01", Vec3{receiver.pivot[0] + 0.40625, receiver.pivot[1], receiver.pivot[2]}, kForward,
 			vm40_rig::kReceiver, kUserPointEffect);
+	return m;
+}
+
+Model make_heli() {
+	Model m;
+	m.name = "heli";
+	m.tangents = true;
+	const int paint = m.add_material("VS_PHONGT", "heli.tga");
+	{
+		// VS_PHONGT's normal map row (slot 3, type 4), as the stock models carry it.
+		ThreediMaterial &mat = m.materials[paint];
+		ThreediMaterialTexture &t = mat.textures[mat.texture_count++];
+		std::snprintf(t.name, sizeof(t.name), "%s", "heli_n.mdt");
+		t.slot = THREEDI_TEX_SLOT_NORMAL;
+		t.type = THREEDI_TEX_TYPE_NORMAL_MDT;
+	}
+	const int blur = m.add_material("FF_ST_AB", "blur.tga");
+	m.add_control_register("HELO_ROTOR");
+	m.add_control_register("HELO_TAILROTOR");
+	// The tail rotor's frame: its axes turned a quarter about the model's z
+	// (row-major, p' = p * M).
+	ThreediMatrix4x4 tail{};
+	tail.m[1] = 1.0f;
+	tail.m[4] = -1.0f;
+	tail.m[10] = 1.0f;
+	tail.m[15] = 1.0f;
+	m.frames.push_back(tail);
+	const Box hull = box(-6.0, -1.0, 0.0, 4.0, 1.0, 2.5);
+	const Vec3 mast{0.0, 0.0, 3.0}, tail_hub{-8.0, 0.25, 2.0};
+	for (int l = 0; l < 3; ++l) {
+		const int lod = m.add_lod(l == 0 ? 64 : 0);
+		if (l == 2) continue; // the last LOD holds no part
+		const int body = m.add_part(lod, 0, Vec3{});
+		m.add_box(lod, body, paint, hull);
+		const int rotor = m.add_part(lod, 0, mast);
+		m.add_box(lod, rotor, paint, box(-0.25, -0.25, 2.75, 0.25, 0.25, 3.1));
+		const int rotor_blur = m.add_part(lod, 0, mast);
+		m.add_box(lod, rotor_blur, blur, box(-7.0, -7.0, 3.1, 7.0, 7.0, 3.15), true);
+		const int tail_rotor = m.add_part(lod, 0, tail_hub);
+		m.add_box(lod, tail_rotor, paint, box(-8.1, 0.15, 1.9, -7.9, 0.35, 2.1));
+		const int tail_blur = m.add_part(lod, 0, tail_hub);
+		m.add_box(lod, tail_blur, blur, box(-9.0, 0.35, 1.0, -7.0, 0.4, 3.0), true);
+		m.add_panm(lod, body, 0);
+		for (int part : {rotor, rotor_blur}) {
+			ThreediPartAnimation &row = m.add_panm(lod, part, 0, threedi_panm_pack_flags(0, 2, 0, 0));
+			row.rotation_x = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0, 0, 16338);
+		}
+		for (int part : {tail_rotor, tail_blur}) {
+			ThreediPartAnimation &row = m.add_panm(lod, part, 0, threedi_panm_pack_flags(0, 2, 0, 0));
+			row.rotation_y = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16338);
+			row.matrix_index = 1;
+		}
+	}
+	m.add_user_point("ground", Vec3{}, kUp, 0, kUserPointGameplay);
+	const int c_hull = m.add_cobj(0);
+	m.add_face_box(c_hull, hull);
+	m.add_volume(c_hull, 1, 0, hull);
+	return m;
+}
+
+// The person with every limb on a two-bone strip table, `rest` of each vertex's
+// weight on slot 2, past the table (see the set's list above).
+Model make_person_two_bone(const char *name, float rest) {
+	Model m = make_person();
+	m.name = name;
+	m.tangents = true;
+	for (ThreediBuildPart &part : m.lods[0].parts)
+		for (ThreediBuildStrip &strip : part.strips) {
+			const int bone = strip.bone;
+			if (bone <= 0) continue;
+			strip.bone = -1;
+			strip.bone_table = {static_cast<uint8_t>(bone), static_cast<uint8_t>(person_rig::kParents[bone])};
+			for (ThreediVertex &v : strip.vertices) {
+				// Three quarters on the bone, the rest but `rest` on its parent,
+				// `rest` (the remainder) on slot 2, past the table.
+				v.bone_weights[0] = 0.75f;
+				v.bone_weights[1] = 0.25f - rest;
+				v.bone_weights[2] = 0.0f;
+				v.bone_indices[0] = 0;
+				v.bone_indices[1] = 1;
+				v.bone_indices[2] = 0;
+				v.bone_indices[3] = 2;
+				v.is_skinned = 1;
+			}
+		}
+	// CXLT: one row a section, a sixteenth above its offset.
+	m.translations_given = true;
+	for (const opennova::threedi::ThreediBuildCollisionObject &c : m.collision)
+		m.translations.push_back(Vec3{c.offset.x, c.offset.y, c.offset.z + 1.0 / 16.0});
 	return m;
 }
 
@@ -685,6 +792,9 @@ const std::vector<Recipe> &recipes() {
 		{"carrier", make_carrier, nullptr},
 		{"tank", make_tank, nullptr},
 		{"vm40", make_vm40, nullptr},
+		{"heli", make_heli, nullptr},
+		{"person_slot2", [] { return make_person_two_bone("person_slot2", 0.0f); }, nullptr},
+		{"person_rest4", [] { return make_person_two_bone("person_rest4", 0.125f); }, nullptr},
 		// --- CTRL bus (object_data_ctrl_bus_test.gd) ---
 		{"mount_ctrl1_heat_glow", make_mount, [](Model &m) { rename_register(m, 1, "HEAT_GLOW"); }},
 		{"mount_ctrl1_not_retail", make_mount, [](Model &m) { rename_register(m, 1, "NOT_RETAIL"); }},
@@ -916,6 +1026,13 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 		expect(p.parts() == 1 && p.bvols() == 4 && p.model.occlusion_object_count == 0 && p.model.collision->planes != nullptr && p.model.collision->volumes[3].plane_count == 10, name + ": house facts");
 	} else if (base == "bird") {
 		expect(p.model.header.mesh_type == THREEDI_MESH_SKINNED && p.parts() == 9 && p.cobjs() == 9 && p.model.collision->face_count == 18 && p.bvols() == 0, name + ": bird facts");
+	} else if (name == "person_slot2" || name == "person_rest4") {
+		const ThreediLod &lod = p.model.lods[0];
+		expect(lod.vertices.flags == 0x55u && lod.strips[1].bone_table_length == 2 &&
+						lod.vertices.items[lod.strips[1].start_vertex].bone_indices[3] == 2 &&
+						p.model.collision->translation_count == 19 &&
+						p.model.collision->translations[1].translation[2] != p.model.collision->objects[1].offset[2],
+				name + ": two-bone strips, a slot past the table, CXLT off the offsets");
 	} else if (base == "person") {
 		bool ok = p.model.header.mesh_type == THREEDI_MESH_SKINNED && p.parts() == 19 && p.cobjs() == 19 && p.bvols() == 0;
 		if (ok) {
@@ -946,6 +1063,11 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 						p.model.collision->face_count == 80 && p.model.lods[0].render_objects[38].parent_index == 37 &&
 						!std::strcmp(p.point(0), "bullet") && p.model.user_points[0].subobject_index == 37,
 				name + ": vm40 facts");
+	} else if (base == "heli") {
+		expect(p.model.lod_count == 3 && p.parts(0) == 5 && p.parts(2) == 0 && p.model.mtrx.count == 2 &&
+						p.model.lods[0].vertices.flags == 0x15u && p.row(0, 3).matrix_index == 1 &&
+						!std::strcmp(p.reg(1), "HELO_TAILROTOR"),
+				name + ": heli facts");
 	} else if (base == "tank") {
 		expect(p.parts() == 2 && p.cobjs() == 2 && !std::strcmp(p.point(0), "ctrlx25") && !std::strcmp(p.point(1), "ewep01") &&
 						p.model.user_points[1].subobject_index == 1 && p.bvol_type_count(19) == 2,

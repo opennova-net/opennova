@@ -180,12 +180,19 @@ target_link_libraries(threedi_rewrite_test PRIVATE opennova_formats)
 target_include_directories(threedi_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_rewrite COMMAND threedi_rewrite_test)
 
+# The BHD GP models fixtures/threedi_gp (one per construct BHD's 677 ship), minted through
+# the GP writer from common/gp_model_bytes.h and byte-compared every run (--write regenerates).
+add_executable(minimal_gp_gen_test fixtures/minimal_gp_gen.cpp)
+target_link_libraries(minimal_gp_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_gp_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_gp_gen COMMAND minimal_gp_gen_test)
+
 # The BHD-era GP reader and its migration to 3DI3: synthetic GP models built in the test,
-# and every GP model BHD ships (OPENNOVA_JO_ASSETS/fixtures/bhd/3di) migrated and read back.
+# and the minted fixtures/threedi_gp models migrated, read back and lowered.
 add_executable(threedi_gp_test threedi/threedi_gp_test.cpp)
 target_link_libraries(threedi_gp_test PRIVATE opennova_formats)
 target_include_directories(threedi_gp_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(threedi_gp COMMAND threedi_gp_test)
+add_test(NAME threedi_gp COMMAND threedi_gp_test)
 
 # Every committed .bad and .adm under fixtures/anim (one clip per form the shipped
 # clips take among them) through the reader and the writer the editor saves by:

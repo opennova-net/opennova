@@ -56,6 +56,7 @@ const Vector kExpected[] = {
 		{"synth/crate_mtrl0_ab_lum_upl113.3di", 3280u, 0xa359fad884887b6cull},
 		{"synth/crate_mtrl0_ad_lum_upl113.3di", 3280u, 0xbbf62d497efdb0feull},
 		{"synth/gun.3di", 3764u, 0x9fd115f585aaf2f8ull},
+		{"synth/heli.3di", 20736u, 0x9728212e02e2aacaull},
 		{"synth/house.3di", 6956u, 0xf5104533c18c7012ull},
 		{"synth/house_lod0_sine_rotx.3di", 7024u, 0x60d5aaa0a447449aull},
 		{"synth/house_lod0_sine_rotx_uv1.3di", 7024u, 0x9722a8353fe4528bull},
@@ -81,6 +82,8 @@ const Vector kExpected[] = {
 		{"synth/person.3di", 34332u, 0xb3777b26bae17491ull},
 		{"synth/person_mtrl0_ad_lum.3di", 34332u, 0xd16ae75d3c2ad544ull},
 		{"synth/person_part9_trigger_scale.3di", 34356u, 0x4239c06879b11243ull},
+		{"synth/person_rest4.3di", 45276u, 0x7832c15b5cef6b0cull},
+		{"synth/person_slot2.3di", 45276u, 0xf7a78900819d4cdcull},
 		{"synth/pump.3di", 18996u, 0xad8e3dc7e6aa2d85ull},
 		{"synth/pump_anim0_noise_translation.3di", 18996u, 0x534cf46b92aa4f8dull},
 		{"synth/pump_lod0_inert_lod1_sine_rotz.3di", 18452u, 0x33f4097dc5129a18ull},
@@ -92,7 +95,7 @@ const Vector kExpected[] = {
 		{"synth/shed_lght0_sub2_origin_atten100.3di", 5168u, 0x9ca3437021f1b44bull},
 		{"synth/tank.3di", 9560u, 0x5f2bccfb81ba55f4ull},
 		{"synth/tank_special1_slide_ewep01.3di", 9492u, 0x22433bf0787b8099ull},
-		{"synth/vm40.3di", 74548u, 0x91819ec38eba0dffull},
+		{"synth/vm40.3di", 74548u, 0x0f79a7034fef281bull},
 };
 
 // The path of the first chunk whose id, size or payload differs ("" when the

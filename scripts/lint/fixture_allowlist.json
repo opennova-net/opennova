@@ -8,6 +8,7 @@
   ],
   "authored": [
     "fixtures/README.md",
+    "fixtures/anim/forms.adm",
     "fixtures/anim/idle.bad",
     "fixtures/anim/soldier.adm",
     "fixtures/anim/US01.adm",

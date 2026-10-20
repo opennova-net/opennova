@@ -6,11 +6,13 @@
 //         write is a fixed point (writing the re-read clip gives the same bytes).
 //   .adm: the canonical write reads back as the file's rows, and is a fixed point.
 // The files are fixtures/anim: our one-bone clips and tables, the minted
-// person and first-person sets, and one clip per form the shipped clips take
-// that a set does not (tests/fixtures/minimal_bad_gen.cpp: the short, sparse
-// and long channels, a version 0 clip, the exporter's leftovers in the bone
-// rows, a translated clip with no pad row, an X-triplicated rig), which is
-// every form the 477 shipped clips held when this row read them (2026-10-19).
+// person and first-person sets, forms.adm (authored: every line form the 82
+// shipped tables use, their trailing NUL included), and one clip per form the
+// shipped clips take that a set does not (tests/fixtures/minimal_bad_gen.cpp:
+// the short, sparse and long channels, a version 0 clip, the exporter's
+// leftovers in the bone rows, a translated clip with no pad row, an
+// X-triplicated rig), the forms the 477 shipped clips held when this row read
+// them (2026-10-19).
 // The write of each is pinned by its FNV-1a64 below: a vector that moves is a
 // change to the bytes the editor saves, and needs an [orig] witness or a
 // D-entry in the same commit (`anim_rewrite_test --dump` prints the table).
@@ -52,6 +54,7 @@ struct Vector {
 // The write of every fixture, in name order.
 const Vector kExpected[] = {
 		{"US01.adm", 118u, 0x18cf7b7d5f386bf3ull},
+		{"forms.adm", 297u, 0x2476e89144dc7cf0ull},
 		{"idle.bad", 552u, 0xce2eca6bbecc88cdull},
 		{"rig19.adm", 377u, 0x8f0dc1b9a749a337ull},
 		{"rig19_crch.bad", 3344u, 0xf13beeff754681b7ull},
