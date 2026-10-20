@@ -5,7 +5,7 @@
 // another file defines in another case resolves; the gore set the project picks (.ptu, or .ptg with fgn2.bin) is the
 // one that defines; a definition its file never closes registers nothing; an expansion project finds nothing (its base game's
 // files resolve names too). The check's protocol: nothing moved, nothing made again. Through a session: the rows in
-// Problems, and gone once the particle is defined.
+// Problems, and gone once the particle is defined; its two fixes (the particle added, the member taken out).
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/document_types.h>
@@ -17,6 +17,7 @@
 #include <editor/model/text_document.h>
 #include <editor/project/project_document.h>
 #include <editor/session/preferences_store.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -176,12 +177,75 @@ int test_session() {
 	return 0;
 }
 
+// particle.effect_unresolved's two fixes, each an edit of the effect's own file: "Add particle X to <file>" (the block the
+// game's writer makes of the particle at the game's defaults, after the file's last particle) and "Take X out of pdefs"
+// (offered only where another member stays). Each applied through Problems takes its row away; the file reads as the
+// effect naming what it defines.
+int test_fixes() {
+	test_temp::TempDir dir("opennova_editor_particle_project_check_fixes");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Particles"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_text(root + "/particles/a.ptl",
+	                                effect("Smoke", "Puff, ghost, spook") + particle("Puff") + table("grow")) &&
+	            test_io::write_text(root + "/particles/b.ptl", effect("Lone", "nobody")));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const auto row = [&](const std::string &name) -> const Diagnostic * {
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			if (d.code() == std::string("particle.effect_unresolved") && d.message.find("The particle " + name + ",") == 0)
+				return &d;
+		return nullptr;
+	};
+	const auto fix = [&](const std::string &name, const std::string &label) -> std::vector<ProblemFix> {
+		const Diagnostic *d = row(name);
+		std::vector<ProblemFix> out;
+		if (d)
+			for (const ProblemFix &each : fixes_for(*d, session.view()))
+				if (each.label == label) out.push_back(each);
+		return out;
+	};
+	const Diagnostic *ghost = row("ghost"), *nobody = row("nobody");
+	TEST_EXPECT(ghost && ghost->planned.size() == 2 && ghost->planned[0].label == "Add particle ghost to a.ptl" &&
+	            ghost->planned[1].label == "Take ghost out of pdefs");
+	// The effect's one member: no Take, its effect would name none.
+	TEST_EXPECT(nobody && nobody->planned.size() == 1 && nobody->planned[0].label == "Add particle nobody to b.ptl");
+	const std::vector<ProblemFix> add = fix("ghost", "Add particle ghost to a.ptl");
+	TEST_EXPECT(add.size() == 1);
+	if (add.size() != 1) return 1;
+	TEST_EXPECT(editor_test::handle_to_end(session, add.front().request).done());
+	session.run_operations();
+	TEST_EXPECT(!row("ghost") && row("spook"));
+	const std::vector<ProblemFix> take = fix("spook", "Take spook out of pdefs");
+	TEST_EXPECT(take.size() == 1);
+	if (take.size() != 1) return 1;
+	TEST_EXPECT(editor_test::handle_to_end(session, take.front().request).done());
+	session.run_operations();
+	TEST_EXPECT(!row("spook") && row("nobody"));
+	const TextDocument *text = text_of(*session.document_base_for("particles/a.ptl"));
+	TEST_EXPECT(text != nullptr);
+	if (!text) return 1;
+	opennova::particle::ParticleFile read;
+	opennova::particle::ParseError error;
+	TEST_EXPECT(read_particle_text(*text, read, error) && read.effects.size() == 1 &&
+	            read.effects[0].pdefs == std::vector<std::string>({"Puff", "ghost"}) && read.particles.size() == 2 &&
+	            read.particles[1].id == "ghost" && read.tables.size() == 1);
+	// The particle written after the file's last particle, before its table, at the game's defaults.
+	TEST_EXPECT(text->text().find("\tpdefs = Puff, ghost;\r\n") != std::string::npos &&
+	            text->text().find("id\t= ghost;") < text->text().find("[tabledef]") && read.particles[1].emit_dur == 10.0f);
+	std::printf("particle project check fixes: a particle added, a member taken out\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failed = 0;
 	failed += test_check();
 	failed += test_session();
+	failed += test_fixes();
 	if (failed == 0) std::printf("editor particle project check: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

@@ -71,7 +71,10 @@ bool define_particle_effect(const DocumentBase &document, const ReferenceSubject
 // - particle.effect_unresolved: an effect's pdefs member no file defines as a [particledef]. The game resolves an
 //   effect's particles all or none: the first it misses is logged (UNRESOLVED: EFFDEF <effect> missing PARDEF
 //   <particle>) and the effect keeps none of them, so it spawns nothing [orig: CEffectBank_ResolveAllEntries @
-//   0x5E4920, its find CEffectWorld_FindParticleDefByName @ 0x5E41D0, _stricmp @ 0x5E420C];
+//   0x5E4920, its find CEffectWorld_FindParticleDefByName @ 0x5E41D0, _stricmp @ 0x5E420C]. Its fixes, each an edit of
+//   the effect's own file (FindingFix::EditRecord): "Add particle X to <file>", the [particledef] block the engine's
+//   own writer makes of the particle at the game's defaults, after the file's last particle; and "Take X out of
+//   pdefs", where another member stays. A child_id no file defines takes no finding (its miss is unwitnessed);
 // - particle.curve_unresolved: a particle's *_func (its own or a graphic's) naming a table no file defines as a
 //   [tabledef]: the game logs it not found and draws that channel without its curve [orig:
 //   CEffectDef_ResolveTblDefReference @ 0x5E9630, its find CParticleManager_FindTableDefByName @ 0x5E9540].

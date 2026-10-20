@@ -278,13 +278,14 @@ static int test_columns() {
 	// DI-11: what a finding's maker planned with its file at hand (Diagnostic::planned): an id, a name or a key
 	// of its own for a record no lookup finds, an end pose's trigger moved, an entity set where the game grounds it
 	// (DI-28); a variable no menu names, removed; a file's line ends restored to CR LF (the line-ends rule); the .mis
-	// beside a mission (S24 Names): the names that still match taken, or the file written from the mission.
+	// beside a mission (S24 Names): the names that still match taken, or the file written from the mission; an
+	// effect's particle no file defines: the particle added to its file, or taken out of pdefs.
 	TEST_EXPECT(fixed_by(FindingFix::EditRecord) ==
 	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.line_ends",
 	                     "menu.duplicate_screen",
 	                     "menu.duplicate_window", "mission.names_foreign", "mission.names_outside", "mission.names_unmatched",
 	                     "mission.off_ground",
-	                     "mission.ssn_duplicate", "mission.zone_duplicate",
+	                     "mission.ssn_duplicate", "mission.zone_duplicate", "particle.effect_unresolved",
 	                     "strings.key_duplicate", "terrain.foliage_inert", "terrain.no_width", "terrain.refused" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
 	// S25: an empty <mission>.til hiding the terrain's tiles: Delete it.
