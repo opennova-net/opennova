@@ -12,6 +12,7 @@
 #include <runtime/inmatch/server_entity_routes.h>    // the item events, crossings and guidance
 #include <runtime/inmatch/server_entity_state.h>     // the per-slot 0x0A writer (Server_SendEntityStateToPlayer)
 #include <runtime/inmatch/server_spawn.h>            // the spawn pump, the admitted 0x51 spectator converts
+#include <runtime/inmatch/server_squad_registry.h>   // the board rows' squad tags
 #include <runtime/inmatch/server_tick_maintenance.h> // the per-tick and periodic-second maintenance legs
 
 #include <algorithm>
@@ -266,8 +267,13 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	// 0x2B service only cuts chunks from it.
 	// [orig: Server_ProcessRoundEnd @0x5164F0 (the
 	// Server_BuildEndOfRoundScoreboard(1, winTeam) call @0x516590)]
+	// Each row's third string is the tag of the squad node its slot's key finds,
+	// read at the build [orig: Server_BuildEndOfRoundScoreboard @0x5090E8..0x509116].
+	world::MatchResult board = result;
+	for (world::MatchResultPlayer &player : board.players)
+		player.identity.tag = squad_registry_tag_for_slot(ctx, player.identity.slot);
 	ctx.round_end_board_stream =
-			encode_end_round_stats(build_end_round_stats(result));
+			encode_end_round_stats(build_end_round_stats(board));
 	// The header form is session state: the in-session non-team (DM/KOTH
 	// family) header carries the top three frozen-board names/scores instead
 	// of the winner/team-score words. world.rules.mp_session is our SP-as-listen-

@@ -619,6 +619,20 @@ struct NapiNPConnection {
 	//  NapiNPMsg_0x7B_BuildPayload @0x5077ac, NetPacket_SerializePlayerSync0x46
 	//  @0x506070 / @0x506257, CNapiGameSession_SendPlayerAdded @0x4d006c]
 	JoinAccount account;
+	// The player slot's squad key (+0x188DC): the id of the squad registry node
+	// the remote add filed for its account (server_squad_registry.h), 0 for none.
+	// The map change's slot reset keeps it; the disconnect clears it.
+	// [orig: Server_PlayerAdd @0x51CDE0 / @0x51CE2E; Server_HandlePlayerDisconnect
+	//  @0x51B7FD; Server_DisconnectAndResetAllPlayerSlots @0x5163B2..0x516432
+	//  (no +0x188DC store)]
+	int32_t squad_key = 0;
+	// A squad's first slot's own S2C 0x6A {1}, which retail's add sends it between
+	// the add's send-state reset (the settings updates) and the spawn pump's 0x05:
+	// the pump's metadata carries it there (build_spawn_pump_metadata).
+	// [orig: Server_PlayerAdd - CNetPlayer_ResetSendState @0x51CD6A / @0x51CD6F, the
+	//  0x6A @0x51CEEF; CNapiServer_ProcessPendingPlayerSpawns - the add @0x4C903A, the
+	//  0x05 @0x4C909D]
+	std::vector<uint8_t> squad_roster_add_staged;
 	// The node's reject-pending byte: a later joiner's PCID matched this
 	// remote connection's, so the next S2C 0x79 boundary kicks it
 	// (Server_KickDuplicatePcids). Nothing clears it; the kick destroys the node.

@@ -2,6 +2,7 @@
 
 #include <runtime/inmatch/mission_rotation.h> // HostRotation (LASTGAME, the side-to-team map)
 #include <runtime/inmatch/server_chat.h> // broadcast_player_joined_text (the add's 0x32 line)
+#include <runtime/inmatch/server_squad_registry.h>
 #include <runtime/inmatch/server_initial_state.h> // Server_OnPlayerJoin (the 0x0B's join)
 #include <runtime/inmatch/server_message_dispatch.h> // broadcast_player_sync_on_join (the add's 0x46)
 #include <runtime/inmatch/server_files.h> // server_logs_punt (the join's HMCRC / CMCRC lines)
@@ -595,6 +596,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	conn.reply.player_slot_reserved = false;
+	// The remote add's squad leg, once the slot is active; the local arm and
+	// the round init's re-add file nothing (server_squad_registry.h).
+	// [orig: Server_PlayerAdd's remote arm, @0x51CDE0..0x51CEEF; its local arm
+	//  @0x51CC33..0x51CC65 runs none of it]
+	if (!is_host_own && !round_init) Server_FileSquadRegistryNode(ctx, conn);
 	// The /PROFILE roster row, late in the add [orig: Server_PlayerAdd
 	//  @0x51d2fd..0x51d30f -> CServerLog_WritePlayerNameRecord].
 	if (ctx.logs.profile != nullptr) {
@@ -798,6 +804,9 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// dropped and 0x22-retried (D-NET-158).
 				// [orig: Server_PlayerAdd @0x51CBC0 - the 0x32 @0x51D291, the 0x46
 				//  @0x51D2BF / @0x51D2CA, ahead of the bot's join @0x51D2E1]
+				// A squad's first slot announces its squadron first
+				// [orig: @0x51D182..0x51D20E, ahead of the join line @0x51D21E].
+				Server_AnnounceSquadronEntered(ctx, conn);
 				broadcast_player_joined_text(ctx.np_protocol.connection_list, conn);
 				broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list,
 						conn, &world);

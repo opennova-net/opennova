@@ -5,6 +5,7 @@
 #include <runtime/inmatch/server_chat.h>             // broadcast_player_joined/leaving_text (the 0x32 lines)
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the reactive §5.1 replies)
 #include <runtime/inmatch/server_spawn.h>            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
+#include <runtime/inmatch/server_squad_registry.h>   // Server_ReleaseSquadRegistryNode (the disconnect's squad leg)
 
 #include <net/npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
 #include <net/npwire/ingame_message_id.h>
@@ -239,6 +240,10 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// [orig: Server_HandlePlayerDisconnect @0x51b6d3, before the teardown
 		// @0x51b809..0x51b82e].
 		broadcast_player_leaving_text(list, *it);
+		// The squad leg, with the leaver still counted: a squad's last slot
+		// sends its squadron line and the registry removal and frees the node
+		// [orig: Server_HandlePlayerDisconnect @0x51B6D8..0x51B7FD].
+		Server_ReleaseSquadRegistryNode(ctx, *it);
 		const bool freed_pool0_entity = ctx.world != nullptr && owned_entity.valid() &&
 				owned_entity.pool() == 0;
 		const uint16_t freed_pool0_slot =
@@ -1284,8 +1289,8 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// fieldFlags 0x1CF7 over the memset player slot -> the 0x8000 removal record
 	// @0x505ecb..0x505ee0; send_mask 128 @0x51b8bc; the client's apply is
 	// PlayerSlot_ClearAndUnlink @0x431420), led by the 0x32 leave line (@0x51b6d3, see
-	// teardown_connection). Deferred, tracked in D-NET-149: the 0x32 subtype-4 + 0x6A
-	// clan-registry pair (an opennova host keeps no NovaWorld registry) and the team
+	// teardown_connection), and the 0x32 subtype-4 + 0x6A squad-registry pair
+	// (Server_ReleaseSquadRegistryNode). Deferred, tracked in D-NET-149: the team
 	// spawn-token return (@0x51b661..0x51b67a). The 120-second receive-timeout sweep uses
 	// this same teardown path.
 	NapiNPConnection *conn = find_connection(ctx, peer);

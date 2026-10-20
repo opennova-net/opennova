@@ -144,6 +144,10 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// no live-update API is allowed to mutate connection residency mid-match.
 	ctx.np_protocol.connection_list.clear();
 	ctx.np_protocol.next_connection_id = kFirstJoinerDcb;
+	// The previous session's reset freed the squad registry with the slot table
+	// [orig: CNapiGameSession_ResetActiveSession -> Server_ReleaseSessionTables (the call
+	//  @0x4C8AAC) -> CDynBuffer_Clear(&g_SpawnWaveList.field_C) @0x51B505].
+	ctx.squad_registry.clear();
 	start_mission_state(ctx, config);
 	// Retail seeds the process CRT stream from the clock once when the host
 	// allocates its player-slot table and immediately spends one draw on the

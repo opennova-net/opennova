@@ -534,6 +534,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L5 sources ---
     # --- parity lane L7 sources ---
     # --- parity lane L8 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-NEW-L8-2)
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.

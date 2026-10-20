@@ -58,8 +58,8 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 // {name, team} from the disconnect, before the leaver's entity is torn down.
 // The name is the slot's own (the ClientAuth NA the reply echoes); the team
 // the slot's own team byte, not its body's (D-NET-593). The squadron pair
-// 3/4 beside them needs a NovaWorld clan-registry node, which an opennova
-// host never keeps (LAN accounts are 0).
+// 3/4 beside them is the squad registry's (server_squad_registry.h; a LAN
+// host's accounts carry no squad, so it sends neither).
 // [orig: Server_PlayerAdd @0x51d213..0x51d291 (send_mask 0x80, [u8 1][cstr
 //  slot+0x28][u8 slot+0x1A0]; subtype 3 @0x51d174..0x51d20e);
 //  Server_HandlePlayerDisconnect @0x51b69b..0x51b6d3 (send_mask 0x80,

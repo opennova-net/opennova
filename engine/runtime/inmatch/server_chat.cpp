@@ -8,10 +8,12 @@
 #include <formats/def/reserved_items.h>
 #include <net/npwire/ingame_encode.h>   // encode_chat_broadcast / encode_player_downed_state / encode_play_sound
 #include <net/npwire/ingame_message_id.h>
+#include <net/title/title_identity.h> // TitleInMatch::chat_squad_tag_wrapped
 #include <runtime/audio/oneshot_play.h>  // SoundSetIndex (the loaded banks)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <runtime/inmatch/server_console.h>  // the client-less host's CHAT ring
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
+#include <runtime/inmatch/server_squad_registry.h>    // the sender's squad tag
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
@@ -246,9 +248,14 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			channel != 4 && channel != 11 && channel != 2)
 		return replies;
 	std::string formatted = sender.reply.player_name;              // slot+40 @0x5138FE
-	// The squad-tag suffix (slot+100572 -> the squad node's tag +81, chat_squad_tag_text)
-	// [orig: @0x513903..0x513930]: the squad list (Server_PlayerAdd's node, the S2C 0x6A
-	// family) is not modeled on this host, so no sender has one.
+	// The squad-tag suffix: the sender's squad key finds its registry node, whose
+	// tag follows the name [orig: @0x513903..0x513930 — slot+0x188DC, then
+	// CLinkedList_FindByTag, the node's +0x51].
+	if (sender.squad_key != 0) {
+		if (const SquadRegistryNode *node = find_squad_registry_node(ctx, sender.squad_key))
+			formatted += chat_squad_tag_text(node->tag,
+					title_in_match(ctx.np_protocol.identity).chat_squad_tag_wrapped);
+	}
 	if (channel == 2) {
 		const int location = nearest_location_index(world, *sender_entity);
 		if (const std::string *label = location_label(ctx, world, location)) {
@@ -293,8 +300,12 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			admit = recipient_entity != nullptr &&
 					carrier_vehicle(world, *recipient_entity) == sender_carrier;
 			break;
-		case 12: // same squad id (unmodeled: no squads) and !dy — nobody
-			admit = false;
+		case 12: // the same squad key (0 on a LAN host matches 0), then case 2's team
+			// test, and never under the triplet filter, the sender included
+			// [orig: @0x513EAE..0x513EE5 — slot+0x188DC, entity+0x162, +0x178E1,
+			//  +0x188D7, the filter word]
+			admit = !sender_only && recipient.squad_key == sender.squad_key &&
+					(recipient_team == sender_team || recipient.link.spectator);
 			break;
 		case 13: { // within 100 units on every axis [orig: @0x513FC2..0x51401E]
 			if (recipient_entity == nullptr) break;

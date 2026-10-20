@@ -175,14 +175,13 @@ struct MatchPlayerIdentity {
     EntityHandle entity;
     uint8_t slot = 0;
     std::string name;
-    // The 0x56 row's third string: the NovaWorld clan-list node tag (node+81),
-    // keyed by the slot's account netId (+100572) and filled only by a join
-    // carrying a nonzero account id at join+0x1A4 (name join+0x1A8, tag
-    // join+0x1E8). A LAN join carries none, so the host leaves this empty; the
-    // NovaWorld-account join leg is a separate slice. (The row's SECOND string
-    // is the literal empty string on every retail host and has no model field.)
+    // The 0x56 row's third string: the NovaWorld squad node's tag (node+81)
+    // the slot's squad key (+100572) finds, which the host's round end writes
+    // from its squad registry as it builds the board (announce_round_end); a
+    // LAN slot has none. (The row's SECOND string is the literal empty string
+    // on every retail host and has no model field.)
     // [orig: Server_BuildEndOfRoundScoreboard @0x5090D3..@0x509116;
-    // Server_PlayerAdd clan-list leg @0x51CDF0..@0x51CE2E]
+    // Server_PlayerAdd's squad leg @0x51CDF0..@0x51CE2E]
     std::string tag;
 };
 

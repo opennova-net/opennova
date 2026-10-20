@@ -427,6 +427,14 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 	// restriction record returned by the C2S 0x02 handler.
 	messages.push_back(make_protocol_message(s2c::SYNC_TICK, {0x00}));
 	append_connection_settings(config, messages);
+	// A squad's first slot hears its own registry add after the add's send-state
+	// reset and ahead of the 0x05 [orig: Server_PlayerAdd - CNetPlayer_ResetSendState
+	//  @0x51CD6F, the 0x6A @0x51CEEF; the 0x05 @0x4C909D].
+	if (!conn.squad_roster_add_staged.empty()) {
+		messages.push_back(make_protocol_message(
+				s2c::CLAN_ROSTER, std::move(conn.squad_roster_add_staged)));
+		conn.squad_roster_add_staged.clear();
+	}
 	messages.push_back(make_protocol_message(s2c::GAME_START_SIGNAL, {0x01}));
 	// config_bytes[6] is the session's g_SessionDifficulty low byte (the S2C 0x08
 	// record's seventh byte) — the same word the 0x04 hands the joiner.

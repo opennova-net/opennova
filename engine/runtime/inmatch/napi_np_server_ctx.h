@@ -242,10 +242,11 @@ struct NapiNPServerCtx {
 	//  Lobby_UpdateServerInfo's gates @0x4FE8D8..0x4FE8FA]
 	std::function<void()> on_update_server_info;
 	ServerBanLists bans;
-	// The squad registry the C2S 0x4E walk reads (server_message_dispatch.cpp). Retail's player
-	// add files a node for a joiner with a nonzero squad id and the disconnect of a squad's
-	// last slot drops it; this host files none yet, so the registry stays empty, a LAN
-	// host's state. [orig: Server_PlayerAdd @0x51CE16; Server_HandlePlayerDisconnect @0x51B7F5]
+	// The squad registry (server_squad_registry.h): the remote add files a node for a joiner
+	// with a nonzero squad id and the disconnect of a squad's last slot frees it; a LAN
+	// host's stays empty. Read by the C2S 0x4E walk, the chat line's tag and channel 12 and
+	// the 0x56 row's tag. [orig: Server_PlayerAdd @0x51CE16; Server_HandlePlayerDisconnect
+	// @0x51B7F5]
 	std::vector<SquadRegistryNode> squad_registry;
 	GameConfig config;            // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)

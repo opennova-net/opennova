@@ -5132,6 +5132,11 @@ add_test(NAME opennova_serve_inout_switch COMMAND opennova_serve_inout_switch_te
 add_executable(npruntime_rotation_process_words_test npruntime/rotation_process_words_test.cpp)
 target_link_libraries(npruntime_rotation_process_words_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_rotation_process_words COMMAND npruntime_rotation_process_words_test)
+# The host's NovaWorld squad registry (D-NET-NEW-L8-2): the add's fill and its 0x6A / 0x32 sends,
+# the leave's, the map change's survival and the chat and board readers.
+add_executable(npruntime_squad_registry_test npruntime/squad_registry_test.cpp)
+target_link_libraries(npruntime_squad_registry_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_squad_registry COMMAND npruntime_squad_registry_test)
 
 # --- parity lane L9 (NovaWorld) ---
 
