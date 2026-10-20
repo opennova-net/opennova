@@ -1427,6 +1427,11 @@ game data stays in the bucket).
 - **A refused AWS call.** The service logs each failure (`app logs worker`); for an
   `UnauthorizedOperation`, `./deploy/run.sh --deployment <deployment> aws sts decode-authorization-message
   --encoded-message <message>` names the condition that refused it.
+- **A connection's reassembly buffer.** A game server reassembles a joined player's
+  fragmented messages with no size bound, as the original server does (kept on purpose:
+  D-NET-718), so one admitted player can grow its connection's buffer until the server's
+  memory limit ends it. A server whose memory climbs while one player stays connected is
+  that case: punt the player (or restart the server) and ban its PCID if it comes back.
 
 ### The cutover to the fleet program
 
