@@ -75,7 +75,8 @@ struct ClientProcessState {
 	// host's included, with no client runtime): true at the 311th, which zeroes the word before
 	// the session test, so the caller's report (in session, a session peer) is its own.
 	// [orig: Game_ProcessMainFrame @0x526692 (the unconditional call); Client_ProcessNetworkFrame
-	//  @0x42C22D..0x42C23E (the step), @0x42C246 (the zero), @0x42C24C / @0x42C254 (the tests)]
+	//  @0x42C22D..0x42C23E (the step), @0x42C246 (the zero, between the session compare @0x42C240
+	//  and its branch @0x42C24C), the peer compare @0x42C24E (its branch @0x42C254)]
 	bool step_net_quality_report() {
 		if (++net_quality_report_timer <= kNetQualityReportInterval) return false;
 		net_quality_report_timer = 0;

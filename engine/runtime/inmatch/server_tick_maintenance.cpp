@@ -574,10 +574,15 @@ void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 // The ServerPlayerEnterResult for a held joiner: Success admits it into the
 // spawn pump's population (state 6) and sends the 0x02 probe; a failure latches {DC 2, DP1 MsgCode,
 // "NWU:NWPENTERFAIL", DPC 44} and tears the peer down. False when no held
-// connection carries that id.
-// [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — the state-4
-//  gate @0x4D1B3E, SetGameState(6) @0x4D1C11, the failure record
-//  @0x4D1B62..0x4D1BD0, TrySendSessionInit @0x4D1BF7]
+// connection carries that id. The gate is the player's state 4, which only the enter request
+// sets, on a joiner the C2S 0x01 held in state 3 under the ticket gate's three tests
+// (join_tickets_required): player_enter_pending. The success arm's var-list parse ahead of
+// the state store discards every token and clears a word already 0 at the player's create:
+// nothing to port (its reader is WacCmd_PlayerIsGold, ported as 0).
+// [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — the player by connection id
+//  @0x4D1B20, the state-4 gate @0x4D1B40, CNapiNetwork_ParseServerVarList @0x4D1C08,
+//  SetGameState(6) @0x4D1C11, the failure record @0x4D1B62..0x4D1BD0, TrySendSessionInit
+//  @0x4D1BF7; the request's state 4 CNapiNetwork_CheckPlayerTimeouts @0x4C8BCA]
 bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 		bool success, int32_t msg_code, uint32_t now_tick) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {

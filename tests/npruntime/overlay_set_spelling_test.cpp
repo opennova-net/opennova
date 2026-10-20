@@ -50,22 +50,23 @@ std::vector<uint8_t> body(const char *name, int16_t x, int16_t y, int16_t z) {
 } // namespace
 
 int main() {
-	// The mission bank spells the airborne set in lower case; a later bank's own spelling of
-	// the same name loses (the first loaded bank holding the set wins).
-	lwf::File mission_bank;
+	// The catalog is the six global sound-bank slots in slot order: slot 0 spells the airborne set
+	// in lower case; slot 1's own spelling of the same name loses (the first loaded slot holding
+	// the set wins).
+	lwf::File slot0_bank;
 	lwf::Multi airborne;
 	airborne.name = "bodywater1";
-	mission_bank.multis.push_back(airborne);
-	lwf::File global_bank;
+	slot0_bank.multis.push_back(airborne);
+	lwf::File slot1_bank;
 	lwf::Multi airborne_again;
 	airborne_again.name = "BODYWATER1";
 	lwf::Multi wade;
 	wade.name = "Surface_Wtr";
-	global_bank.multis.push_back(airborne_again);
-	global_bank.multis.push_back(wade);
+	slot1_bank.multis.push_back(airborne_again);
+	slot1_bank.multis.push_back(wade);
 	audio::SoundSetIndex sets;
-	sets.add_bank(0, mission_bank);
-	sets.add_bank(1, global_bank);
+	sets.add_bank(0, slot0_bank);
+	sets.add_bank(1, slot1_bank);
 	CHECK(sets.find("BODYWATER1").name == "bodywater1");
 	CHECK(sets.find("surface_wtr").name == "Surface_Wtr");
 
