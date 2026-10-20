@@ -449,7 +449,11 @@ void EditorApp::set_frame_pacing(bool p_on) {
 
 String EditorApp::get_frame_pacing_state() const {
 	if (!frame_pacing_ || !frame_capped_) return "off";
-	return quiet_frames_ >= kQuietFrames ? "idle" : "active";
+	return quiet_frames_ >= quiet_needed_() ? "idle" : "active";
+}
+
+int EditorApp::quiet_needed_() const {
+	return std::max(int(kQuietFrames), display_fps_ / 2);
 }
 
 void EditorApp::release_frame_cap_() {
@@ -465,6 +469,7 @@ bool EditorApp::frame_active_() {
 		if (reason) active_reasons_.push_back(name);
 	};
 	by(root_input_, "input");
+	by(platform_ && platform_->tending(), "tending");
 	by(resized_, "resize");
 	by(wire_asked_, "wire");
 	root_input_ = resized_ = wire_asked_ = false;
@@ -487,14 +492,15 @@ bool EditorApp::frame_active_() {
 // screen), kIdleFps once quiet for kQuietFrames frames.
 void EditorApp::pace_frame_() {
 	if (!frame_pacing_ || !is_inside_tree()) return;
-	const bool was_idle = quiet_frames_ >= kQuietFrames;
-	quiet_frames_ = frame_active_() ? 0 : std::min(quiet_frames_ + 1, kQuietFrames);
-	const bool idle = quiet_frames_ >= kQuietFrames;
+	const int needed = quiet_needed_();
+	const bool was_idle = quiet_frames_ >= needed;
+	quiet_frames_ = frame_active_() ? 0 : std::min(quiet_frames_ + 1, needed);
+	const bool idle = quiet_frames_ >= needed;
 	Engine *engine = Engine::get_singleton();
 	const uint64_t frame = engine->get_process_frames();
 	if (!idle && (display_fps_ == 0 || was_idle || frame - display_read_frame_ >= uint64_t(kFallbackFps))) {
 		const double rate = DisplayServer::get_singleton()->screen_get_refresh_rate();
-		display_fps_ = rate > 0.0 ? int(std::lround(rate)) : kFallbackFps;
+		display_fps_ = rate >= double(kLeastDisplayFps) ? int(std::lround(rate)) : kFallbackFps;
 		display_read_frame_ = frame;
 	}
 	if (!frame_capped_) {

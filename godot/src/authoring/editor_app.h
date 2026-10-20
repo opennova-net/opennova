@@ -113,6 +113,11 @@ public:
 	// display draws no new step, only spends the core (a 360 Hz display held a whole one).
 	static constexpr int kIdleFps = 10;
 	static constexpr int kPreviewFps = 60;
+	// Quiet means kQuietFrames frames in a row, or half a second of the display's frames where it draws faster (a
+	// 360 Hz display's 30 frames are 83 ms, and a double click's second press then came at the idle rate). A
+	// display reporting a rate under kLeastDisplayFps (a remote or virtual one may say 1, the hardware default)
+	// reads as kFallbackFps.
+	static constexpr int kLeastDisplayFps = 24;
 	static constexpr int kFallbackFps = 60;
 	static constexpr int kQuietFrames = 30;
 	void set_frame_pacing(bool p_on);
@@ -314,6 +319,7 @@ private:
 	bool resized_ = false;
 	bool wire_asked_ = false;
 	std::vector<const char *> active_reasons_; // the last frame's reasons it was active by (frame_active_)
+	int quiet_needed_() const;                 // the quiet frames that make the editor idle
 	String settings_path_ = "user://editor_settings.json";
 	PackedStringArray play_engine_args_;
 	FileDialog *picker_ = nullptr;

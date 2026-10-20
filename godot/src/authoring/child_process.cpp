@@ -198,6 +198,11 @@ int64_t ChildProcessPlatform::now_ms() {
 	return ticks_ms();
 }
 
+bool ChildProcessPlatform::tending() {
+	std::lock_guard<std::mutex> lock(mutex_);
+	return behind_.tending() || locked_;
+}
+
 void ChildProcessPlatform::tend() {
 #ifdef _WIN32
 	std::lock_guard<std::mutex> lock(mutex_);
