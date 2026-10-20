@@ -4743,12 +4743,13 @@ target_link_libraries(npruntime_host_punt_test PRIVATE opennova_net opennova_run
 add_test(NAME npruntime_host_punt COMMAND npruntime_host_punt_test)
 
 # The anti-cheat challenge sources computed from definitions (inmatch/integrity_sources.h):
-# the ammo.def and weapon.def table images over synthetic corpora, and over the pinned install's
-# jox01 corpus against the live witness (75 ammo rows, the 0x47724F02 table CRC).
+# the ammo.def and weapon.def table images over synthetic corpora, and over a minted packed install
+# launched with its expansion (the path the pinned install's jox01 corpus matched the live witness on),
+# its CRCs pinned.
 add_executable(npruntime_integrity_sources_test npruntime/integrity_sources_test.cpp)
 target_link_libraries(npruntime_integrity_sources_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_integrity_sources_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(npruntime_integrity_sources COMMAND npruntime_integrity_sources_test)
+add_test(NAME npruntime_integrity_sources COMMAND npruntime_integrity_sources_test)
 
 # Server_TickUpdate's maintenance legs from the jo-c cross-check: the 620-tick spawn
 # protection and its fire clear, the 1 Hz 0x2F flag refresh, the violation sweep's carry
