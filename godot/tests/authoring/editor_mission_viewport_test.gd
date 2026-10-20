@@ -344,6 +344,138 @@ func test_the_mission_builds_over_frames() -> void:
 	assert_eq(String(state.get("status", "")), "ready")
 
 
+## The scale witness: the shipped mission with the most entities (ASH_I1gA.bms, 2,193 entities,
+## the retail leg's measurement) stands as the minted mission grown to that count on the Tmap
+## project, built over the Shell's frames at a budget of 0 (one unit a frame) to `ready`: the units
+## in the build's order, the terrain built, every entity drawn placed (one placement, none lifted or
+## hidden). Prints what the build cost on the frames (frames, frame_us, unit_us, total_us), each
+## label's units and time, and the three longest units: the measurement the first-picture budget
+## and the stepped placement (D5) are read against.
+const LARGEST_MISSION_ENTITIES := 2193
+## How long the picture's build may stand still (no unit run) before it counts as a hang: the build
+## takes as long as it takes while it moves.
+const BUILD_STALL_MS := 120000
+
+
+## The minted mission at `path` grown to `count` entities: rows of the mission's own placed items
+## and buildings (their item ids, so the project's item table draws them) on a 4 u grid beside its
+## first item, alternating three items to one building.
+func _grow_mission(path: String, count: int) -> void:
+	var m := MissionData.new()
+	assert_eq(m.open_file(path), OK)
+	var items: Array = m.get_entity_refs(MissionData.KIND_ITEM)
+	var buildings: Array = m.get_entity_refs(MissionData.KIND_BUILDING)
+	assert_false(items.is_empty(), "the minted mission places items")
+	assert_false(buildings.is_empty(), "the minted mission places buildings")
+	if items.is_empty() or buildings.is_empty():
+		return
+	var origin: Vector3 = (items[0] as EntityRef).position
+	var total := m.get_all_entity_refs().size()
+	var n := 0
+	while total < count:
+		var at := origin + Vector3(4.0 * (n % 48), 4.0 * (n / 48), 0.0)
+		if n % 4 == 3:
+			m.add_entity(MissionData.KIND_BUILDING, (buildings[0] as EntityRef).item_id, at, Vector3.ZERO)
+		else:
+			m.add_entity(MissionData.KIND_ITEM, (items[n % items.size()] as EntityRef).item_id, at, Vector3.ZERO)
+		n += 1
+		total += 1
+	assert_eq(m.get_all_entity_refs().size(), count, "the mission grown to the witnessed scale")
+	assert_eq(m.save_as(path), OK)
+
+
+func test_the_largest_mission_builds() -> void:
+	if _app == null:
+		return
+	var root := EditorFixture.new_project(self, _seam, _dirs, "Largest Mission")
+	EditorFixture.mint_tmap_mission(self, _seam, root, _picture_files())
+	_grow_mission(root.path_join(EditorFixture.MISSION), LARGEST_MISSION_ENTITIES)
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.settled, "a Rescan steps across pumps (S13 A3)")
+
+	_app.build_budget_ms = 0
+	assert_true(_seam.open_document(EditorFixture.MISSION), "the grown mission opens")
+	var path := String(_seam.state(["documents"]).get("documents", {}).get("active", ""))
+	assert_true(path.to_lower().ends_with("synth_logic.bms"), path)
+	_app.pump()
+	var state := _state(path)
+	assert_eq(String(state.get("status", "")), "loading", str(state).left(400))
+	# One unit a frame: what each frame's unit cost is the build's total_us moving, the unit the one
+	# the progress named before it ran (its label is what the next unit makes).
+	var labels: PackedStringArray = []
+	var units_by_label := {}
+	var us_by_label := {}
+	var units: Array = []
+	var built := _build_of(state)
+	var moved_at := Time.get_ticks_msec()
+	while String(state.get("status", "")) == "loading" and Time.get_ticks_msec() - moved_at < BUILD_STALL_MS:
+		var label := String(_progress_of(state).get("label", ""))
+		var done := int(_progress_of(state).get("done", 0))
+		var spent := int(built.get("total_us", 0))
+		await get_tree().process_frame
+		state = _state(path)
+		var now := _build_of(state)
+		var ran := int(_progress_of(state).get("done", done)) - done
+		if String(state.get("status", "")) != "loading":
+			ran = maxi(ran, 1)
+		if ran <= 0:
+			built = now
+			continue
+		moved_at = Time.get_ticks_msec()
+		if labels.is_empty() or labels[labels.size() - 1] != label:
+			labels.append(label)
+		var cost := int(now.get("total_us", spent)) - spent
+		units.append([cost, label, int(units_by_label.get(label, 0)) + 1])
+		units_by_label[label] = int(units_by_label.get(label, 0)) + ran
+		us_by_label[label] = int(us_by_label.get(label, 0)) + cost
+		built = now
+	_app.pump()
+	state = _state(path)
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(400))
+	built = _build_of(state)
+	assert_eq(int(built.get("done", 0)), int(built.get("total", -1)), str(built))
+	assert_eq(int(state.get("builds", 0)), 1)
+	assert_eq(labels, PackedStringArray(["environment", "terrain files", "terrain", "sky", "water", "items", "models",
+			"place", "shadows", "pose"]))
+	for label in ["terrain", "models", "place"]:
+		assert_gt(int(units_by_label.get(label, 0)), 0, "the build's %s units" % label)
+	assert_true(bool(state.get("body", {}).get("ground", false)), "the terrain built: a surface a ray lands on")
+	assert_eq(int(_app.get_mission_device_count(path, "placements")), 1, "one placement")
+	assert_gt(int(_app.get_mission_device_count(path, "placed")), 0, "the entities placed")
+	assert_eq(int(_app.get_mission_device_count(path, "lifted")), 0)
+	assert_eq(int(_app.get_mission_device_count(path, "hidden")), 0)
+
+	units.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) > int(b[0]))
+	var longest := PackedStringArray()
+	for i in mini(3, units.size()):
+		var label := String(units[i][1])
+		longest.append("%s %d of %d, %.1f ms" % [label, int(units[i][2]), int(units_by_label.get(label, 0)),
+				float(units[i][0]) / 1000.0])
+	var by_label := PackedStringArray()
+	for label in labels:
+		by_label.append("%s %d units %.1f ms" % [label, int(units_by_label.get(label, 0)),
+				float(us_by_label.get(label, 0)) / 1000.0])
+	gut.p("%d entities at 0 ms a frame: %d units over %d frames, frame_us %d, unit_us %d, total_us %d; %d placed, %d lifted, place %.1f ms" % [
+			LARGEST_MISSION_ENTITIES, int(built.get("total", 0)), int(built.get("frames", 0)),
+			int(built.get("frame_us", 0)), int(built.get("unit_us", 0)), int(built.get("total_us", 0)),
+			int(_app.get_mission_device_count(path, "placed")), int(_app.get_mission_device_count(path, "lifted")),
+			float(_app.get_mission_device_count(path, "place_us")) / 1000.0])
+	gut.p("  by label: " + ", ".join(by_label))
+	gut.p("  the three longest units: " + ", ".join(longest))
+
+
+## The state's progress ({} for none: a progress is null once ready) and its device's build.
+func _progress_of(state: Dictionary) -> Dictionary:
+	var progress: Variant = state.get("progress")
+	return progress if progress is Dictionary else {}
+
+
+func _build_of(state: Dictionary) -> Dictionary:
+	var device: Variant = state.get("device")
+	var build: Variant = device.get("build") if device is Dictionary else null
+	return build if build is Dictionary else {}
+
+
 ## DI-29: the ground overlay the options ask reaches the device's terrain as an Update: the surface classes'
 ## picture (its size the body's), then the foliage's, then none; the build generation stands.
 func test_the_ground_overlay_tints_the_terrain() -> void:
