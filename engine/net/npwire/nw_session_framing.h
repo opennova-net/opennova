@@ -80,7 +80,9 @@ ConnectionKeys generate_connection_keys(NapiPrng &prng);
 
 // The same draws from the process's one manager PRNG, seeded at first use
 // (napi_prng_platform_seed) and serialized, a connection's key and SCRK under one
-// hold. The game protocol's host key, SK / SCRK and CK / SCRK draw here.
+// hold. The game protocol's host key, SK / SCRK and CK / SCRK draw here, and the
+// NovaWorld lobby connection's CK / SCRK, its protocol made on the same manager
+// (D-NET-704).
 // [orig: NapiNPProtocol_StartServer @0x62b5f5 (the host key); HandleClientJoin and
 //  InitFromSession above]
 uint32_t manager_session_key();
@@ -88,8 +90,8 @@ ConnectionKeys manager_connection_keys();
 
 // An SCRK from the OS CSPRNG, in the generator's charset and 63-draw shape but in
 // no fixed order or length (63 at most): NovaLogic's master service's SCRK, which is
-// not Jointops.exe's code, and the NovaWorld lobby client's, which has not moved
-// to the manager PRNG yet (D-NET-524's residual). The game protocol draws generate_tx_key.
+// not Jointops.exe's code. The game protocol and the NovaWorld lobby client draw
+// generate_tx_key on the manager PRNG (D-NET-524, D-NET-704).
 std::string make_dev_scrk();
 
 // 60-char lowercase-hex NWUID (retail format). Random per session.
@@ -100,9 +102,9 @@ std::string make_dev_nwuid();
 uint32_t make_random_session_u32();
 
 // A session key over an arbitrary 32-bit draw, drawn until nonzero, zero being no key:
-// the NovaWorld master service's SK and the lobby client's CK, which do not draw from
-// the game's manager PRNG (generate_session_key); `draw` unset is
-// make_random_session_u32, a test injecting its own.
+// the NovaWorld master service's SK, which does not draw from the game's manager PRNG
+// (generate_session_key); `draw` unset is make_random_session_u32, a test injecting
+// its own.
 // [orig: NapiNP_GenerateSessionKey @0x61EA70 - the jz @0x61EAC3]
 uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 
