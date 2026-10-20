@@ -24,12 +24,12 @@
 namespace opennova::inmatch {
 
 // The first node whose id equals `squad_id`, null when none.
-// [orig: CLinkedList_FindByTag @0x52B200 — the active list's head (+0x14),
+// [orig: CLinkedList_FindByTag @0x52B200 - the active list's head (+0x14),
 //  next (+8), id (+12)]
 const SquadRegistryNode *find_squad_registry_node(const NapiNPServerCtx &ctx, int32_t squad_id);
 
 // The active player slots whose squad key is `key`; 0 for a key of 0.
-// [orig: CSlotArray152_CountActiveByKey @0x500660 — the key test @0x500669,
+// [orig: CSlotArray152_CountActiveByKey @0x500660 - the key test @0x500669,
 //  the active byte (+4) @0x500690, the key (+0x188DC) @0x50069B]
 int32_t count_active_slots_by_squad_key(const NapiNPServerCtx &ctx, int32_t key);
 
@@ -41,7 +41,7 @@ int32_t count_active_slots_by_squad_key(const NapiNPServerCtx &ctx, int32_t key)
 // active one, S2C 0x6A {1, id, name, tag} goes reliable on send mask 0x1010
 // (the added slot's own copy staged for the spawn pump's metadata). Call it
 // once the slot is active.
-// [orig: Server_PlayerAdd — the clear @0x51CDE0, the net-player and squad-id
+// [orig: Server_PlayerAdd - the clear @0x51CDE0, the net-player and squad-id
 //  tests @0x51CDE6..0x51CDF8, CLinkedList_FindOrCreateByNetId @0x51CE16
 //  (@0x52B540: the copies @0x52B572 / @0x52B58D), the key @0x51CE2E, the count
 //  @0x51CE34..0x51CE3C, the 0x6A @0x51CE42..0x51CEEF]

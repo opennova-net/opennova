@@ -249,7 +249,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 		return replies;
 	std::string formatted = sender.reply.player_name;              // slot+40 @0x5138FE
 	// The squad-tag suffix: the sender's squad key finds its registry node, whose
-	// tag follows the name [orig: @0x513903..0x513930 — slot+0x188DC, then
+	// tag follows the name [orig: @0x513903..0x513930 - slot+0x188DC, then
 	// CLinkedList_FindByTag, the node's +0x51].
 	if (sender.squad_key != 0) {
 		if (const SquadRegistryNode *node = find_squad_registry_node(ctx, sender.squad_key))
@@ -302,7 +302,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			break;
 		case 12: // the same squad key (0 on a LAN host matches 0), then case 2's team
 			// test, and never under the triplet filter, the sender included
-			// [orig: @0x513EAE..0x513EE5 — slot+0x188DC, entity+0x162, +0x178E1,
+			// [orig: @0x513EAE..0x513EE5 - slot+0x188DC, entity+0x162, +0x178E1,
 			//  +0x188D7, the filter word]
 			admit = !sender_only && recipient.squad_key == sender.squad_key &&
 					(recipient_team == sender_team || recipient.link.spectator);

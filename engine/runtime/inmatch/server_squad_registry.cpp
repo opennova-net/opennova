@@ -15,7 +15,7 @@ namespace {
 // connection whose player has a slot (active, not a bot) and reads none of the
 // other bits but 0x10, which leaves out the listen host's own connection. No
 // slot-state test: a squad's first slot hears its own 0x6A while it loads.
-// [orig: NapiNPServer_SendFiltered @0x4C87E0 — the slot gate @0x4C889F, the
+// [orig: NapiNPServer_SendFiltered @0x4C87E0 - the slot gate @0x4C889F, the
 //  0x10 skip @0x4C88F6..0x4C88FA, the 0x1000 test @0x4C89B5..0x4C89B7]
 void send_squad_roster(NapiNPServerCtx &ctx, const ClanRosterUpdate &update,
 		const NapiNPConnection *skip) {
@@ -104,7 +104,7 @@ void Server_ReleaseSquadRegistryNode(NapiNPServerCtx &ctx, NapiNPConnection &lea
 	// The leaver is still active, so its squad's last slot counts 1. Its own
 	// connection would take the sends too, after its disconnect burst, into a
 	// queue its destroy drops; the port leaves it out.
-	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 — the burst
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst
 	//  @0x6253EF..0x625424 ahead of the callback @0x625438]
 	if (count_active_slots_by_squad_key(ctx, leaver.squad_key) <= 1) {
 		if (const SquadRegistryNode *node = find_squad_registry_node(ctx, leaver.squad_key))
