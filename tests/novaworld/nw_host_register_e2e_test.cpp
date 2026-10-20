@@ -809,11 +809,23 @@ int main() {
 
 		// Re-send the byte-identical ClientAuth after sequence one was admitted,
 		// while retaining the first verify reply for delayed delivery.
+		// D-NET-716: the replay is a send alone; it stamps no receive clock, so the
+		// connection's last-seen stays the admitted packet's. [orig:
+		//  NapiNPProtocol_HandleClientJoin @0x62B750 - CNapiNPConnection_SendSessionInit
+		//  (the call @0x62BEE9); CNapiNPConnection_SendSessionInit @0x620EF0 - the
+		//  last-send stamp @0x621314]
+		const opennova::PeerAddr retry_peer{0x0100007Fu, retry_client_port};
+		const auto seen_before = manager.registry().find_by_addr(retry_peer);
+		std::this_thread::sleep_for(30ms);
 		send_retry(client_auth);
 		std::vector<uint8_t> replayed_server_auth;
 		const bool got_replayed_server_auth = receive_retry(replayed_server_auth);
 		expect(got_replayed_server_auth,
 		       "identical ClientAuth retry receives cached ServerAuth");
+		const auto seen_after = manager.registry().find_by_addr(retry_peer);
+		expect(seen_before && seen_after &&
+		               seen_after->last_seen_ms == seen_before->last_seen_ms,
+		       "the cached ServerAuth replay leaves the receive clock alone (D-NET-716)");
 		expect(got_replayed_server_auth &&
 		               replayed_server_auth == first_server_auth,
 		       "identical ClientAuth retry replays byte-identical session material");

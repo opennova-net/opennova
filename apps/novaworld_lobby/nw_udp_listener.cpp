@@ -1293,8 +1293,13 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					cached_server_auth = it->second.server_auth_datagram;
 				}
 			}
+			// The replay is a send alone: retail's retransmit leg re-sends the 0x82 and stamps
+			// its last send (+0x63C), never the receive clock the reap reads (+0x5E8), so a peer
+			// that keeps retransmitting its 0x42 does not keep its row alive (D-NET-716).
+			// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the CI / CK match
+			//  @0x62BECA..0x62BEE6, CNapiNPConnection_SendSessionInit (the call @0x62BEE9), then the
+			//  exit @0x62BEF1; CNapiNPConnection_SendSessionInit @0x620EF0 - the stamp @0x621314]
 			if (live_connection && !cached_server_auth.empty()) {
-				manager_.notify_seen_addr(peer, now_ms());
 				opennova::net::udp_send_to(
 						socket.get(), from, cached_server_auth.data(),
 						cached_server_auth.size());
