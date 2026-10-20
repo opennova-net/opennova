@@ -309,10 +309,12 @@ uint16_t next_maintenance_prng16(world::World &world) {
 }
 
 // The integrity family's slot gate: an active remote slot (not the host's own,
-// +5; the bot byte +0x178E3 has no writer in JO) in state 6 with a live entity.
+// +5; the bot byte +0x178E3 is written only as 0 in JO) in state 6 with a live
+// entity.
 // [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 - active @0x508562,
 //  +5 @0x50856B..0x50856E, +0x178E3 @0x508574, state 6 @0x508580, the entity
-//  @0x50858A]
+//  @0x50858A; the bot byte's one store Server_PlayerAdd @0x51CD77 copies the
+//  add event's +4, zeroed by Server_BuildPlayerInfoAndAdd @0x51D5E9]
 const world::Entity *integrity_player(
 		const NapiNPConnection &conn, const world::World &world) {
 	if (!is_in_match(conn) || slot_is_local(conn) || conn.link.transport == nullptr)
@@ -705,7 +707,7 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 // strictly over six minutes from its state-6 entry stamp, not a spectator. The
 // t7 arm's exclusions, all at the punt and none at the counter: permanent
 // death, the local slot (+0x5, ours the type-1 test), the bot byte (+0x178E3,
-// never set), the spectator latch (+0x188D7) and /NOPUNT (dword_B4C698, not
+// written only as 0), the spectator latch (+0x188D7) and /NOPUNT (dword_B4C698, not
 // modelled); the counter is compared after its increment, so the punt lands
 // after 361 dead seconds.
 // [orig: Server_TickUpdate - the walk @0x51DFB0..0x51E1A5; state 6 and the
