@@ -2090,9 +2090,9 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 		return false;
 	// L's corpse lies 500 u off, its slice built there: no wall.
 	local->position = {540.0f, 30.0f, 0.0f};
-	local_ai->pos[0] = 540 << 16;
-	local_ai->pos[1] = 30 << 16;
-	local_ai->pos[2] = 0;
+	local_ai->self->position.x.q16 = 540 << 16;
+	local_ai->self->position.y.q16 = 30 << 16;
+	local_ai->self->position.z.q16 = 0;
 	h.kernel->collision.rebuild_candidate_slices(world);
 	if (!expect(h.kernel->collision.candidate_count(local->handle) == 0,
 			"slice: the corpse's slice holds no wall"))

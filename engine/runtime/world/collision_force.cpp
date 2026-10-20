@@ -111,7 +111,7 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
     const uint32_t flags = target.flags | target.engine_flags;
     const Entity *owner = world.registry.get(attacker);
     const int32_t owner_group = owner != nullptr ? owner->group_id : 0;
-    const int damage_multiplier = collision_force_body(body->pos, body->heading, flags,
+    const int damage_multiplier = collision_force_body(body->self->position.words().data(), body->heading, flags,
             owner != nullptr ? &owner_group : nullptr, target.group_id, hit_type, force_type,
             source, inf.burn_state, inf.idle_counter, inf.combat_move_timer, inf.vel);
     if (force_type != 3) return;

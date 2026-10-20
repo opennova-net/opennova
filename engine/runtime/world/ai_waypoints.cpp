@@ -82,11 +82,11 @@ int AiSystem::update_waypoint_movement(AiEntity &e, World &world) {
     AiBrain &b = e.brain;
     int32_t moveSpeed = (b.f[AiBrain::kCurState] == 16) ? b.f[AiBrain::kSpeedB]
                                                         : b.f[AiBrain::kSpeedA];
-    int wr = ai_waypoint_update_target(b, e.pos, nav);
+    int wr = ai_waypoint_update_target(b, e.self->position.words().data(), nav);
     if (wr == -1) { // no resolvable waypoint -> freeze at current transform
-        b.f[AiBrain::kWorkPosX] = e.pos[0];
-        b.f[AiBrain::kWorkPosY] = e.pos[1];
-        b.f[AiBrain::kWorkPosZ] = e.pos[2];
+        b.f[AiBrain::kWorkPosX] = e.self->position.x.q16;
+        b.f[AiBrain::kWorkPosY] = e.self->position.y.q16;
+        b.f[AiBrain::kWorkPosZ] = e.self->position.z.q16;
         b.f[AiBrain::kWorkHeading] = e.heading;
         b.f[AiBrain::kWorkPitch] = e.pitch;
         b.f[AiBrain::kWorkRoll] = e.roll;
@@ -109,9 +109,9 @@ int AiSystem::update_waypoint_movement(AiEntity &e, World &world) {
             if ((loopflag & 1) != 0) {                // one-shot: terminate + freeze
                 b.f[AiBrain::kWpType] = 0;            // aiState[13]=0 (path done)
                 b.f[AiBrain::kWpNode] = numKeyframes - 1;
-                b.f[AiBrain::kWorkPosX] = e.pos[0];
-                b.f[AiBrain::kWorkPosY] = e.pos[1];
-                b.f[AiBrain::kWorkPosZ] = e.pos[2];
+                b.f[AiBrain::kWorkPosX] = e.self->position.x.q16;
+                b.f[AiBrain::kWorkPosY] = e.self->position.y.q16;
+                b.f[AiBrain::kWorkPosZ] = e.self->position.z.q16;
                 b.f[AiBrain::kWorkHeading] = e.heading;
                 b.f[AiBrain::kWorkPitch] = e.pitch;
                 b.f[AiBrain::kOutSpeed] = 0;
@@ -159,7 +159,7 @@ int32_t AiSystem::nearest_route_node(const AiEntity &e, uint32_t list) const {
         uint32_t squared = 0;
         for (int axis = 0; axis < 3; ++axis) {
             const int32_t delta = static_cast<int32_t>(
-                    uint32_t(e.pos[axis]) - uint32_t(node.f[axis + 1])) >> 16;
+                    uint32_t(e.self->position.word(axis)) - uint32_t(node.f[axis + 1])) >> 16;
             squared += uint32_t(delta) * uint32_t(delta);
         }
         const int32_t distance = static_cast<int32_t>(squared);
@@ -202,7 +202,7 @@ void AiSystem::copy_route_order_to_brain(AiEntity &e) {
 // [orig: Entity_SetWaypointByTeam @0x43CE36..0x43CE4F; Entity_SetWaypointForTeam
 //  @0x43DE70..0x43DE89; WacCmd_SsnToWp @0x4F1D9F..0x4F1DB9]
 void AiSystem::seed_route_turn_budget(AiEntity &e) {
-    ai_waypoint_update_target(e.brain, e.pos, nav);
+    ai_waypoint_update_target(e.brain, e.self->position.words().data(), nav);
     e.brain.f[AiBrain::kAnimFlag] = route_turn_budget(e.brain, e.heading);
 }
 
@@ -511,7 +511,7 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     // Per-leg turn budget: recomputed whenever the mover's node advance cleared it.
     // [orig: @0x48bc9a-0x48bcd9; ctan @0x489863..0x4898A2]
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
-        ai_waypoint_update_target(b, ve->pos, nav);
+        ai_waypoint_update_target(b, ve->self->position.words().data(), nav);
         b.f[AiBrain::kAnimFlag] = route_turn_budget(b, heading);
     }
 
@@ -604,7 +604,7 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     // @0x48E2D5..0x48E31C — refresh when brain[32] is spent and the waypoint
     // block is live; denom = (brain[35] >> 15) + 32].
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
-        ai_waypoint_update_target(b, ve->pos, nav);
+        ai_waypoint_update_target(b, ve->self->position.words().data(), nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
         const int32_t err = iabs32(io::bam_sub(heading, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = (err / denom) << 4;
@@ -758,7 +758,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 		return;
 	}
 
-	const int32_t ground = m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
+	const int32_t ground = m.ground_cache != INT32_MIN ? m.ground_cache : ve->self->position.z.q16;
 
 	// Parked is `occupant == 0 || Flags & 0x10000002` and nothing else: no hull
 	// or pilot health term. A dead pilot has already left the seat through the
@@ -778,7 +778,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 		//  ground > 0x20000 @0x491C18..0x491C28, `add dword ptr [esi+10h],
 		//  0FFD3F50Ah` @0x491C2A, brain+0x210 = Yaw @0x491C54]
 		if ((veh.flags & kEntityFlagInAir) != 0 &&
-		    io::bam_sub(io::bam_sub(ve->pos[2], m.air_probe_z_off), ground) > 0x20000)
+		    io::bam_sub(io::bam_sub(ve->self->position.z.q16, m.air_probe_z_off), ground) > 0x20000)
 			m.yaw_bam = io::bam_sub(m.yaw_bam, 2886390);
 		m.cmd_speed = 0;
 		m.cmd_lateral_speed = 0;
@@ -821,7 +821,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // [32] = 8 * (|Yaw - brain[21]| / ((brain[35] >> 15) + 32)) — divide THEN
     // x8, unlike the ground leg's 32*err/denom].
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
-        ai_waypoint_update_target(b, ve->pos, nav);
+        ai_waypoint_update_target(b, ve->self->position.words().data(), nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
         const int32_t err = iabs32(io::bam_sub(m.yaw_bam, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = 8 * (err / denom);
@@ -843,7 +843,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     if (b.f[AiBrain::kWpChannel] == 0 && b.f[AiBrain::kWpNode] == 0) node = nullptr;
 	if (node != nullptr && b.f[AiBrain::kCurState] == 7) {
 		// ---- The flight block [orig: @0x491672..0x491998].
-		const int32_t px = ve->pos[0], py = ve->pos[1], pz = ve->pos[2];
+		const int32_t px = ve->self->position.x.q16, py = ve->self->position.y.q16, pz = ve->self->position.z.q16;
         // The node's Z, floored 0x4000 under the hull's own average ground
         // [orig: @0x491672..0x491684].
         int32_t tz = node->f[3];
@@ -930,8 +930,6 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
                     ((static_cast<int64_t>(m.cmd_speed) << 13) + 0x8000) >> 16);
             const int32_t nx = px + ((node->f[1] - px) >> 6);
             const int32_t ny = py + ((node->f[2] - py) >> 6);
-            ve->pos[0] = nx;
-            ve->pos[1] = ny;
             veh.position.x.q16 = nx;
             veh.position.y.q16 = ny;
             m.net_alt_target = ground - 0x2000;

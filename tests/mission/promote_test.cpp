@@ -1258,7 +1258,7 @@ int main() {
     // VEHICLE brain sorts the zeroed record's keys to {0,3,2,1}: ai_brain_rows.)
     CHECK(e0->profile.class_priority[1] == 0);
     CHECK(e0->profile.slot_class[0] == 3);
-    CHECK(e0->pos[0] == 0);               // spawned at origin
+    CHECK(e0->self->position.x.q16 == 0);               // spawned at origin
     CHECK(e0->net_id == 1);               // the AUTHORED record id, copied verbatim
     // The relation group key is the record's command group, not its SSN
     // [orig: Entity_SpawnFromBMSRecord @0x40EBB3..0x40EBB7 -> entity+0x11C].
@@ -1448,9 +1448,9 @@ int main() {
               occ->position.y == 131075.f / 65536.f && occ->position.z == 3.f);
         CHECK(cai.at(0)->slot.f[37] == 125);
         CHECK(cai.at(0)->slot.f[38] == 11);
-        CHECK(cai.at(0)->pos[0] == to_fixed(10.0) + 65530);
-        CHECK(cai.at(0)->pos[1] == 131075);
-        CHECK(cai.at(0)->pos[2] == to_fixed(3.0));
+        CHECK(cai.at(0)->self->position.x.q16 == to_fixed(10.0) + 65530);
+        CHECK(cai.at(0)->self->position.y.q16 == 131075);
+        CHECK(cai.at(0)->self->position.z.q16 == to_fixed(3.0));
     }
 
     {
@@ -1483,7 +1483,7 @@ int main() {
         CHECK(veh != nullptr && !veh->seats[0].occupant.valid());
         CHECK(cai.at(0)->inf.move_mode == 3);       // the board walk is ORDERED
         CHECK(cai.at(0)->inf.at_final_oneshot);     // final-approach gait flag
-        CHECK(cai.at(0)->pos[0] == 0);              // but no clips -> no displacement
+        CHECK(cai.at(0)->self->position.x.q16 == 0);              // but no clips -> no displacement
     }
 
     {
@@ -1693,8 +1693,8 @@ int main() {
         }
         CHECK(walked);                       // unalerted patrol uses the walk gait
         CHECK(max_node >= 2);                // arrived at markers and advanced the route
-        CHECK(e0->pos[0] > (100 << 16));     // physically walked past marker 0
-        CHECK(e0->pos[0] < (300 << 16));     // still on the route, not teleported
+        CHECK(e0->self->position.x.q16 > (100 << 16));     // physically walked past marker 0
+        CHECK(e0->self->position.x.q16 < (300 << 16));     // still on the route, not teleported
         CHECK(held);                         // honored marker 1's movetimer hold
         CHECK(!ai.relmat_calls.empty());     // arrival recorded the relation-matrix marks
         ai.root_motion = nullptr;
@@ -1793,7 +1793,7 @@ int main() {
         for (int t = 0; t < 2600 && occ != nullptr && !occ->mounted; ++t) {
             // Cut displacement once inside the widened 4u ring but still outside
             // the 2u seat ring (seat at x=32 -> cut past x=29).
-            if (!cut && cai.at(0)->pos[0] > (29 << 16)) {
+            if (!cut && cai.at(0)->self->position.x.q16 > (29 << 16)) {
                 cai.root_motion = &hull_src;
 				// Inject the collision resolver's witnessed facing-push latch;
 				// zero root motion alone no longer impersonates a hull contact.

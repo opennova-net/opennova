@@ -10,11 +10,18 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
+#include <array>
 #include <unordered_map>
 
 namespace opennova::world::inspect {
 
 namespace {
+
+// A slot's position words: its entity's (AiEntity::self). A freed slot (owner
+// word 0) belongs to no entity and reads the zeroed words it holds.
+std::array<int32_t, 3> slot_words(const AiEntity &e) {
+	return e.self != nullptr ? e.self->position.words() : std::array<int32_t, 3>{};
+}
 
 Vec3 mission_from_fixed3(const int32_t pos[3]) {
 	return Vec3{io::fp16_16_to_float(pos[0]), io::fp16_16_to_float(pos[1]),
@@ -90,7 +97,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.wire_handle = static_cast<int32_t>(e.handle.packed);
 	d.team = static_cast<int32_t>(e.team);
 	d.ai_health = static_cast<int32_t>(e.health);
-	d.mission_position = mission_from_fixed3(e.pos);
+	d.mission_position = mission_from_fixed3(slot_words(e).data());
 	d.yaw_deg = mission_yaw_deg_from_bam_heading(e.heading);
 	const int32_t state = e.brain.f[AiBrain::kCurState];
 	d.state = state;
@@ -443,7 +450,7 @@ std::vector<EntityRow> entity_directory(const World &world, bool with_brains) {
 			row.team = static_cast<int32_t>(e->team);
 			row.alive = ent ? ent->alive : false;
 			row.hidden = ent ? ent->hidden : false;
-			row.mission_position = mission_from_fixed3(e->pos);
+			row.mission_position = mission_from_fixed3(slot_words(*e).data());
 			out.push_back(std::move(row));
 		}
 	}
@@ -522,7 +529,7 @@ AiDebugReport ai_debug_report(World &world) {
 		row.group_id = ent ? static_cast<int32_t>(ent->group_id) : 0;
 		row.alive = ent ? ent->alive : e->health > 0;
 		row.infantry = e->inf.active;
-		for (int c = 0; c < 3; ++c) row.pos[c] = e->pos[c];
+		for (int c = 0; c < 3; ++c) row.pos[c] = slot_words(*e)[size_t(c)];
 		row.state = e->brain.f[AiBrain::kCurState];
 		row.state_name = ai_state_name(row.state);
 		row.alert = e->slot.bytes()[AiSlot::kAlertByte];
@@ -545,7 +552,7 @@ AiDebugReport ai_debug_report(World &world) {
 			row.target_valid = true;
 			row.target_handle = target.packed;
 			if (const AiEntity *te = ai.for_handle(target)) {
-				for (int c = 0; c < 3; ++c) row.target_pos[c] = te->pos[c];
+				for (int c = 0; c < 3; ++c) row.target_pos[c] = slot_words(*te)[size_t(c)];
 			} else if (const Entity *tw = world.registry.get(target)) {
 				row.target_pos[0] = tw->position.x.q16;
 				row.target_pos[1] = tw->position.y.q16;

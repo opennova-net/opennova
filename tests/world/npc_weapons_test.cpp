@@ -60,7 +60,7 @@ struct Fixture {
         world.ai.attach(shooter);
         auto &b = body();
         b.inf.active = true;
-        b.pos[0] = 100; b.pos[1] = 200; b.pos[2] = 300;
+        b.self->position.x.q16 = 100; b.self->position.y.q16 = 200; b.self->position.z.q16 = 300;
         b.heading = 0x12340000; b.pitch = -0x01230000; b.roll = 0x00780000;
         b.inf.aim_heading = -123; b.inf.aim_pitch = 456;
         b.inf.recoil_pitch = 789; b.inf.aim_established = true;
@@ -240,7 +240,7 @@ static void test_attachment_fallback_and_special_parent() {
     CHECK(pose[0] == 10 * 65536 && pose[1] == 20 * 65536 && pose[2] == 30 * 65536);
     f.world.ai.attach(carrier);
     auto *parent_body = f.world.ai.for_handle(carrier);
-    parent_body->pos[0] = 71; parent_body->pos[1] = 72; parent_body->pos[2] = 73;
+    parent_body->self->position.x.q16 = 71; parent_body->self->position.y.q16 = 72; parent_body->self->position.z.q16 = 73;
     parent_body->heading = 74; parent_body->pitch = 75; parent_body->roll = 76;
     f.world.ai.organic_fire_pose(f.world, f.body(), 0, pose);
     CHECK(pose[0] == 71 && pose[3] == 74 && pose[4] == 75 && pose[5] == 76);

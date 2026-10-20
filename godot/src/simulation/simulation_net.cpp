@@ -184,8 +184,9 @@ void Simulation::print_joiner_net_diagnostic_sample() {
 		if (lae != nullptr)
 			local_state = vformat(
 					" L=(%.1f,%.1f,%.1f) hdg=%d input=0x%02x",
-					lae->pos[0] / 65536.0f, lae->pos[1] / 65536.0f,
-					lae->pos[2] / 65536.0f,
+					lae->self->position.x.q16 / 65536.0f,
+					lae->self->position.y.q16 / 65536.0f,
+					lae->self->position.z.q16 / 65536.0f,
 					static_cast<int64_t>(lae->heading >> 16),
 					static_cast<int64_t>(le ? le->net_move_input : 0));
 	}

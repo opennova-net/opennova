@@ -60,14 +60,14 @@ int AiSystem::update_movement_target(AiEntity &e, World &world) {
 	const int32_t altitude = patrol ? e.profile.patrol_altitude : e.profile.field216;
 	const int32_t climb = patrol ? e.profile.patrol_climb : e.profile.field220;
 	const auto freeze = [&]() {
-		std::copy_n(e.pos, 3, &b.f[AiBrain::kWorkPosX]);
+		std::copy_n(e.self->position.words().data(), 3, &b.f[AiBrain::kWorkPosX]);
 		b.f[AiBrain::kWorkHeading] = e.heading;
 		b.f[AiBrain::kWorkPitch] = e.pitch;
 		b.f[AiBrain::kWorkRoll] = e.roll;
 		b.f[AiBrain::kOutSpeed] = 0;
 		return 0;
 	};
-	if (ai_waypoint_update_target(b, e.pos, nav) == -1)
+	if (ai_waypoint_update_target(b, e.self->position.words().data(), nav) == -1)
 		return freeze();
 	if (b.f[AiBrain::kWpDistance] < b.f[AiBrain::kWpNodeVal]) {
 		const int channel = b.f[AiBrain::kWpChannel];
@@ -131,8 +131,8 @@ Entity *target_entity(World &world, int32_t packed) {
 	return packed != 0 ? world.registry.get(EntityHandle{ uint16_t(packed - 1) }) : nullptr;
 }
 int32_t target_heading(const AiEntity &ai, const Entity &target) {
-	return detail::bearing_bam(bam_sub(target.position.y.q16, ai.pos[1]),
-			bam_sub(target.position.x.q16, ai.pos[0]));
+	return detail::bearing_bam(bam_sub(target.position.y.q16, ai.self->position.y.q16),
+			bam_sub(target.position.x.q16, ai.self->position.x.q16));
 }
 uint32_t folded_angle(int32_t angle) {
 	const uint32_t a = uint32_t(angle) >> 24;
@@ -196,7 +196,7 @@ void AiSystem::enter_aircraft_evade(AiEntity &ai, World &world) {
 	const Entity *entity = world.registry.get(ai.handle);
 	if ((entity != nullptr ? entity->health : ai.health) <= 0) {
 		AiEventEntry event{};
-		event.f[0] = aircraft_ground_height(world, ai, 0) <= ai.pos[2] ? 3 : 4;
+		event.f[0] = aircraft_ground_height(world, ai, 0) <= ai.self->position.z.q16 ? 3 : 4;
 		event.f[1] = index_of(ai) << 16;
 		events.queue(event);
 		return;
@@ -240,7 +240,7 @@ void AiSystem::aircraft_evade_tick(AiEntity &ai, World &world) {
 	const Entity *entity = world.registry.get(ai.handle);
 	if ((entity != nullptr ? entity->health : ai.health) <= 0) {
 		AiEventEntry event{};
-		event.f[0] = aircraft_ground_height(world, ai, 0) <= ai.pos[2] ? 3 : 4;
+		event.f[0] = aircraft_ground_height(world, ai, 0) <= ai.self->position.z.q16 ? 3 : 4;
 		event.f[1] = index_of(ai) << 16;
 		events.queue(event);
 		return;
@@ -321,8 +321,8 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 			b.set_pend((p.flags100 & 2) != 0 ? b.f[AiBrain::kFallback] : 8);
 			return 0;
 		}
-		b.f[AiBrain::kWorkPosX] = ai.pos[0];
-		b.f[AiBrain::kWorkPosY] = ai.pos[1];
+		b.f[AiBrain::kWorkPosX] = ai.self->position.x.q16;
+		b.f[AiBrain::kWorkPosY] = ai.self->position.y.q16;
 		b.f[AiBrain::kWorkPosZ] = bam_add(aircraft_ground_height(world, ai, 327680), 327680);
 		b.f[AiBrain::kWorkHeading] =
 				b.f[AiBrain::kNoTargetIdle] == 0 ? bam_add(ai.heading, INT32_MAX) : ai.heading;
@@ -351,8 +351,8 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 	if (target == nullptr) {
 		if (!plane && b.f[AiBrain::kNoTargetIdle] != 0) {
 			// [orig: @0x4617a2..0x461811]
-			b.f[AiBrain::kWorkPosX] = ai.pos[0];
-			b.f[AiBrain::kWorkPosY] = ai.pos[1];
+			b.f[AiBrain::kWorkPosX] = ai.self->position.x.q16;
+			b.f[AiBrain::kWorkPosY] = ai.self->position.y.q16;
 			b.f[AiBrain::kWorkPosZ] = bam_add(aircraft_ground_height(world, ai, 327680), 327680);
 			b.f[AiBrain::kWorkHeading] = bam_add(ai.heading, 2147483520);
 			b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;
@@ -379,7 +379,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 	const int32_t ground = aircraft_ground_height(world, ai, 0x200000);
 	b.f[AiBrain::kWorkPosZ] = bam_add(b.f[51], plane ? p.field216 : bam_add(ground, p.field216));
 	const int32_t distance =
-			planar_magnitude(bam_sub(tx, ai.pos[0]), bam_sub(ty, ai.pos[1]));
+			planar_magnitude(bam_sub(tx, ai.self->position.x.q16), bam_sub(ty, ai.self->position.y.q16));
 	if (b.f[AiBrain::kNoTargetIdle] != 0) {
 		// The retreat write. The helicopter returns here [orig: @0x461506..0x4615a1];
 		// the plane continues into the common tail below [orig: @0x4619a4..0x461a07,
@@ -439,7 +439,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 					// [orig: fild/fild/fpatan/fmul/fistp @0x461453..0x46148c, folded
 					//  against target Yaw @0x46148c..0x46149e]
 					const int32_t reverse = detail::bearing_bam(
-							bam_sub(ai.pos[1], ty), bam_sub(ai.pos[0], tx));
+							bam_sub(ai.self->position.y.q16, ty), bam_sub(ai.self->position.x.q16, tx));
 					if (angle <= 64 && folded_angle(bam_sub(reverse, target_yaw)) <= 64)
 						b.f[AiBrain::kOutSpeed] = bam_sub(0, b.f[AiBrain::kOutSpeed]);
 				}
@@ -496,7 +496,7 @@ bool AiSystem::aircraft_target_in_sight(AiEntity &ai, World &world) {
 	// empty, so that branch succeeds without testing the secondary weapon.
 	if (b.f[AiBrain::kAmmoA] == 0)
 		return true;
-	int32_t pose[6] = { ai.pos[0], ai.pos[1], ai.pos[2],
+	int32_t pose[6] = { ai.self->position.x.q16, ai.self->position.y.q16, ai.self->position.z.q16,
 		bam_add(ai.profile.fire_a.facing_bam, b.f[AiBrain::kActiveYaw]), ai.pitch, ai.roll };
 	int32_t metrics[6];
 	if (weapon_target_metrics(world, ai, *target, pose, 0, false, metrics))
@@ -585,7 +585,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		if ((p.flags100 & 0x40) == 0)
 			return;
 		const int base = which == 1 ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
-		const int32_t pose[6] = { ai.pos[0], ai.pos[1], ai.pos[2], ai.heading, ai.pitch, ai.roll };
+		const int32_t pose[6] = { ai.self->position.x.q16, ai.self->position.y.q16, ai.self->position.z.q16, ai.heading, ai.pitch, ai.roll };
 		for (int axis = 0; axis < 6; ++axis)
 			b.f[base + axis] = bam_sub(out[axis], pose[axis]);
 	};
@@ -655,7 +655,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 			if (ready(which)) {
 				stamp(which);
 				const int base = which == 1 ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
-				int32_t out[6] = { ai.pos[0], ai.pos[1], ai.pos[2], ai.heading, ai.pitch, ai.roll };
+				int32_t out[6] = { ai.self->position.x.q16, ai.self->position.y.q16, ai.self->position.z.q16, ai.heading, ai.pitch, ai.roll };
 				for (int axis = 0; axis < 6; ++axis)
 					out[axis] = bam_add(out[axis], b.f[base + axis]);
 				shoot(which, out);
@@ -745,7 +745,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 			const int slot = (weapon(1).flags & 1) != 0 ? 1 : (weapon(2).flags & 1) != 0 ? 2 : 0;
 			if (slot == 0)
 				return;
-			int32_t out[6] = { ai.pos[0], ai.pos[1], ai.pos[2], ai.heading, ai.pitch, ai.roll };
+			int32_t out[6] = { ai.self->position.x.q16, ai.self->position.y.q16, ai.self->position.z.q16, ai.heading, ai.pitch, ai.roll };
 			solve_weapon_fire_transform(
 					world, ai, target, weapon(slot), aim_offset(), true, out);
 			save_delta(slot, out);

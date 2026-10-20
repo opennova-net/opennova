@@ -835,8 +835,8 @@ int main(int argc, char **argv) {
 				const w::AiEntity *pa = rig.local.player_ai();
 				const w::LocalPlayerViewFrame vf = rig.local.view_frame();
 				if (pe == nullptr || pa == nullptr || !vf.camera_pose_valid) continue;
-				const int32_t eye0[3] = {pa->pos[0] + pe->eye_offset_x, pa->pos[1] + pe->eye_offset_y,
-						pa->pos[2] + pe->eye_offset_z};
+				const int32_t eye0[3] = {pa->self->position.x.q16 + pe->eye_offset_x, pa->self->position.y.q16 + pe->eye_offset_y,
+						pa->self->position.z.q16 + pe->eye_offset_z};
 				const int32_t hb = w::bam_heading_from_mission_yaw_deg(static_cast<double>(vf.camera.yaw_deg));
 				const int32_t pb = static_cast<int32_t>(std::lround(vf.camera.pitch_deg / w::kDegreesPerBam));
 				const int32_t rb = static_cast<int32_t>(std::lround(vf.camera.roll_deg / w::kDegreesPerBam));
@@ -850,10 +850,10 @@ int main(int argc, char **argv) {
 				const float px[3] = {vf.camera.eye[0], vf.camera.eye[1], vf.camera.eye[2]};
 				const w::BlinkAccum q = point_query(rig, px);
 				std::printf("eye: pitch %+3d | pos (%.4f, %.4f, %.4f) CameraOffset (%.4f, %.4f, %.4f) head-pos (%.4f, %.4f, %.4f)%s\n",
-						pitch, pa->pos[0] / 65536.0, pa->pos[1] / 65536.0, pa->pos[2] / 65536.0,
+						pitch, pa->self->position.x.q16 / 65536.0, pa->self->position.y.q16 / 65536.0, pa->self->position.z.q16 / 65536.0,
 						pe->eye_offset_x / 65536.0, pe->eye_offset_y / 65536.0, pe->eye_offset_z / 65536.0,
-						(head[0] - pa->pos[0]) / 65536.0, (head[1] - pa->pos[1]) / 65536.0,
-						(head[2] - pa->pos[2]) / 65536.0, have_head ? "" : " (no head anchor)");
+						(head[0] - pa->self->position.x.q16) / 65536.0, (head[1] - pa->self->position.y.q16) / 65536.0,
+						(head[2] - pa->self->position.z.q16) / 65536.0, have_head ? "" : " (no head anchor)");
 				std::printf("eye: pitch %+3d | view yaw %.3f pitch %.3f roll %.3f | port eye (%.4f, %.4f, %.4f) retail-chain eye (%.4f, %.4f, %.4f) | diff %.5f u | camera query %s\n",
 						pitch, vf.camera.yaw_deg, vf.camera.pitch_deg, vf.camera.roll_deg, px[0], px[1], px[2],
 						retail_eye[0] / 65536.0, retail_eye[1] / 65536.0, retail_eye[2] / 65536.0,

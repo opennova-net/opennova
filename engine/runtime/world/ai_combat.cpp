@@ -232,10 +232,10 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
         bool team_ok = (c.team != 0 || see_all) && (c.team != e.team || see_all);
         if (!team_ok) continue;
 
-        int32_t bearing = bearing_bam(c.pos[1] - e.pos[1], c.pos[0] - e.pos[0]);
+        int32_t bearing = bearing_bam(c.pos[1] - e.self->position.y.q16, c.pos[0] - e.self->position.x.q16);
         int angle_diff = static_cast<int>(static_cast<uint32_t>(bearing - e.heading) >> 24);
         if (angle_diff >= 0x80) angle_diff = 256 - angle_diff;    // fold to [0,128]
-        int dist = dist3d_units(c.pos, e.pos);
+        int dist = dist3d_units(c.pos, e.self->position.words().data());
 
         // [orig: 0x46722e..0x467291] FOV/range gate FIRST. A candidate outside both gates jumps to
         // the next-candidate skip @0x467097 and never reaches the priority bypass (0x467350) or the best-of
@@ -346,9 +346,9 @@ void AiSystem::clear_entity_references(World &world, EntityHandle removed) {
 // [orig: Entity_GetAttachmentWorldPosition @0x4b2670: the raw copy
 //  @0x4b2767..0x4b278e when index 0 / no graphicModel / no table]
 void AiSystem::weapon_fire_origin(const AiEntity &e, int32_t out[3]) {
-    out[0] = e.pos[0];
-    out[1] = e.pos[1];
-    out[2] = e.pos[2];
+    out[0] = e.self->position.x.q16;
+    out[1] = e.self->position.y.q16;
+    out[2] = e.self->position.z.q16;
 }
 
 void AiSystem::weapon_fire_origin(const Entity &e, int32_t out[3]) {
@@ -434,9 +434,9 @@ int AiSystem::weapon_fire_position(World &world, const AiEntity &e, int32_t out[
         }
         // Any other person: position plus CameraOffset, no phase and no
         // jitter, quality 1 [orig: @0x43B68F..0x43B6B6].
-        out[0] = io::bam_add(e.pos[0], e.inf.eye_offset_x);
-        out[1] = io::bam_add(e.pos[1], e.inf.eye_offset_y);
-        out[2] = io::bam_add(e.pos[2], e.inf.eye_offset_z);
+        out[0] = io::bam_add(e.self->position.x.q16, e.inf.eye_offset_x);
+        out[1] = io::bam_add(e.self->position.y.q16, e.inf.eye_offset_y);
+        out[2] = io::bam_add(e.self->position.z.q16, e.inf.eye_offset_z);
         return 1;
     }
     // No graphic model: the raw position, quality 3 [orig: @0x43B6B7..0x43B6EC].
@@ -572,9 +572,9 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
         if (ally == nullptr || ally->item_id == 0 || h == e.handle ||
                 ally->team != e.team || ally->health <= 0 ||
                 ((ally->flags | ally->engine_flags) & (2u | kEntityFlagPlayer)) != 0) continue;
-        const double dx = io::bam_sub(ally->position.x.q16, e.pos[0]);
-        const double dy = io::bam_sub(ally->position.y.q16, e.pos[1]);
-        const double dz = io::bam_sub(ally->position.z.q16, e.pos[2]);
+        const double dx = io::bam_sub(ally->position.x.q16, e.self->position.x.q16);
+        const double dy = io::bam_sub(ally->position.y.q16, e.self->position.y.q16);
+        const double dz = io::bam_sub(ally->position.z.q16, e.self->position.z.q16);
         if (std::sqrt(dx * dx + dy * dy + dz * dz) >= 6553601.0) continue;
         e.slot.bytes()[AiSlot::kAlertByte] = 2;
         if (AiEntity *brain = for_handle(h)) brain->brain.f[AiBrain::kAlert] = 2;
@@ -737,9 +737,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
     // AIEntity_ProcessWeaponFire @0x472F1D..0x472F4B, @0x473821]; an unseeded
     // caller gets the common copy.
     if (!seeded) {
-        out[0] = e.pos[0];
-        out[1] = e.pos[1];
-        out[2] = e.pos[2];
+        out[0] = e.self->position.x.q16;
+        out[1] = e.self->position.y.q16;
+        out[2] = e.self->position.z.q16;
         out[3] = e.heading;
         out[4] = e.pitch;
         out[5] = e.roll;

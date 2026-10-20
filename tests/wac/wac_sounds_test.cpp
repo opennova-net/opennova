@@ -90,7 +90,7 @@ static void test_target_and_ssn_admission_and_exact_position() {
     f.entity(3, 4);
     f.world.ai.attach(first);
     auto *body = f.world.ai.for_handle(first);
-    body->pos[0] = 16777217; body->pos[1] = -234567; body->pos[2] = 456789;
+    body->self->position.x.q16 = 16777217; body->self->position.y.q16 = -234567; body->self->position.z.q16 = 456789;
     const auto source = f.entity(0, 5, 0, false); // SS2SSN does not require ItemDef
     f.script("sound2tgt(SS_TONE,7) store(v1)\n"
              "sound2tgt(TONE,9) store(v2)\nv3=0\nsound2tgt(v3,7) store(v4)\n"

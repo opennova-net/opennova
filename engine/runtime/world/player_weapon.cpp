@@ -1522,9 +1522,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					io.fired.ammo_index = adm->ammo_index;
 					io.fired.charge = w.pending_throw_charge;
                     io.fired.target_handle = fire_target.packed;
-					io.fired.shooter_pose[0] = p->pos[0];
-					io.fired.shooter_pose[1] = p->pos[1];
-					io.fired.shooter_pose[2] = p->pos[2];
+					io.fired.shooter_pose[0] = p->self->position.x.q16;
+					io.fired.shooter_pose[1] = p->self->position.y.q16;
+					io.fired.shooter_pose[2] = p->self->position.z.q16;
 					io.fired.shooter_pose[3] = p->heading;
 					io.fired.shooter_pose[4] = p->pitch;
 				}

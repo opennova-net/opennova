@@ -18,7 +18,7 @@ struct AiEntity;
 // x87-style sincos at 2^22, truncated, then the (<<15)>>22 pair.
 // [orig: @ 0x4b75b4-0x4b75c7 / 0x4b7666-0x4b7679 / 0x4b76b3-0x4b76c6 /
 //  0x4b7f49-0x4b7f68 / 0x4b7ff3-0x4b8016]
-void ladder_push_back(int32_t pos[3], int32_t yaw_bam);
+void ladder_push_back(EntityPosition &pos, int32_t yaw_bam);
 
 // The shared dismount tail. [orig: Flags &= ~0x100000 @ 0x4b75ca/0x4b767c/
 //  0x4b76c9/0x4b8019]

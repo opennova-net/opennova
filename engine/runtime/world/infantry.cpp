@@ -234,9 +234,9 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
         out_target[0] = n.f[1];
         out_target[1] = n.f[2];
         out_target[2] = n.f[3] + 0x4000;
-        const double dx = static_cast<double>(out_target[0]) - e.pos[0];
-        const double dy = static_cast<double>(out_target[1]) - e.pos[1];
-        int32_t dzi = out_target[2] - e.pos[2];
+        const double dx = static_cast<double>(out_target[0]) - e.self->position.x.q16;
+        const double dy = static_cast<double>(out_target[1]) - e.self->position.y.q16;
+        int32_t dzi = out_target[2] - e.self->position.z.q16;
         dzi = abs_bam(dzi) - 0x10000;
         if (dzi < 0) dzi = 0;
         const double dz = static_cast<double>(dzi);
@@ -617,7 +617,7 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
 
     // The NPC applies wash before animation arbitration. Unlike the player
     // path, its jog/run can select wash_run. [orig: @0x4BD78D..0x4BD7E6]
-    if (world.rotor_wash.nearby_zone(e.pos, 983040)) {
+    if (world.rotor_wash.nearby_zone(e.self->position.words().data(), 983040)) {
         if (target == anim_state::kWalkForward && has(anim_state::kWashWalk))
             target = anim_state::kWashWalk;
         else if ((target == anim_state::kRunForward || target == anim_state::kJogForward) &&
@@ -679,7 +679,7 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
     if (inf.burn_state != 0) {
         const int target = select_infantry_burn(inf, root_motion, true, logic_tick);
         commit_player_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
-                world.rotor_wash.nearby_zone(e.pos, 983040) != 0);
+                world.rotor_wash.nearby_zone(e.self->position.words().data(), 983040) != 0);
         return;
     }
     auto has = [&](int s) {
@@ -784,7 +784,7 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
     }
 
     commit_player_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
-            world.rotor_wash.nearby_zone(e.pos, 983040) != 0);
+            world.rotor_wash.nearby_zone(e.self->position.words().data(), 983040) != 0);
 }
 
 // The lean-angle producer — see the ai.h declaration. Decay runs every body tick for
@@ -864,13 +864,13 @@ void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
 }
 
 
-// See the infantry.h contract: the motor store is the writer of the two-store pair, so a
-// redeploy that only writes the registry Entity is undone by finish_infantry_tick.
+// See the infantry.h contract: the motor's heading/health mirrors are written back by
+// finish_infantry_tick, so a redeploy resets them along with the position words.
 void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
                            int16_t health) {
-    e.pos[0] = pos[0];
-    e.pos[1] = pos[1];
-    e.pos[2] = pos[2];
+    e.self->position.x.q16 = pos[0];
+    e.self->position.y.q16 = pos[1];
+    e.self->position.z.q16 = pos[2];
     e.heading = heading;
     e.pitch = 0;
     e.roll = 0;
@@ -956,8 +956,8 @@ void player_body_waypoint_visits(World &world, const Entity &body) {
         const NavEntry *marker = world.ai.nav.entry(route->entries[node]);
         if (marker == nullptr) continue;
         const uint32_t radius = static_cast<uint32_t>(marker->f[0]);
-        const uint32_t dx = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[1], ai->pos[0])));
-        const uint32_t dy = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[2], ai->pos[1])));
+        const uint32_t dx = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[1], ai->self->position.x.q16)));
+        const uint32_t dy = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[2], ai->self->position.y.q16)));
         if (dx > radius || dy > radius) continue;
         const uint32_t reach = dx > dy ? dx + (dy >> 1) : dy + (dx >> 1);
         if (reach > radius) continue;
@@ -1004,7 +1004,7 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
     const uint32_t flags = entity != nullptr ? entity->flags | entity->engine_flags : 0u;
     terrain::TerrainHeightGradient gradient;
     if (!carried && (flags & 0x90A000u) == 0 && field != nullptr)
-        gradient = terrain::height_field_gradient_fixed(*field, e.pos[0], e.pos[1]);
+        gradient = terrain::height_field_gradient_fixed(*field, e.self->position.x.q16, e.self->position.y.q16);
     const int32_t magnitude = static_cast<int32_t>(std::min(
             std::sqrt(double(gradient.dx) * gradient.dx + double(gradient.dy) * gradient.dy),
             2147418112.0));
@@ -1373,7 +1373,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 ? world.registry.get(tick_entity->mount_target) : nullptr;
         const uint8_t stance_bits = e.inf.stance == InfantryState::Stance::kProne ? 1 :
                 e.inf.stance == InfantryState::Stance::kCrouch ? 2 : 0;
-        emit_stance_change_sound(world, e.handle.packed, e.pos, e.inf.stance_sound_state,
+        emit_stance_change_sound(world, e.handle.packed, e.self->position.words().data(), e.inf.stance_sound_state,
                 stance_bits, tick_flags, parent != nullptr && parent->has_item_def);
     }
 
@@ -1436,7 +1436,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Tick-start pose Z: the resolver's ladder entry gate measures the CL anchor
     // against the pose at the motor head, not the integrated one.
     // [orig: savedLivePose captured @ 0x4b4190-0x4b419c; entry read @ 0x4b327d]
-    const int32_t tick_start_z = e.pos[2];
+    const int32_t tick_start_z = e.self->position.z.q16;
 
     // 1. Death edge, once per life, keyed on the dead bit the edge itself
     // latches (a player body's gate also takes the head's hidden bit, and off
@@ -1498,7 +1498,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             if (ent->blink_hits[0])
                 if (const auto *building = world.registry.get(EntityHandle::make(2, ent->blink_hits[0] >> 20)))
                     building_reverb = building->reverb;
-            world.reverb.update(e.pos, building_reverb);
+            world.reverb.update(e.self->position.words().data(), building_reverb);
         }
         if ((logic_tick & 15u) == 0) world.commands.update_local_location(e.handle);
     }
@@ -1699,13 +1699,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             const LadderResolveIO mounted_lio = make_ladder_resolve_io(e, tick_start_z);
             const devtools::ProfileScope collision_scope(
                     world.profile, devtools::Slot::SIM_AI_INFANTRY_COLLISION);
+            std::array<int32_t, 3> pos = e.self->position.words();
             collision->resolve_entity(
-                    world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
+                    world, e.handle, e.collide_state, pos.data(), inf.vel, inf.vel[2],
                     frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                     entity_is_player_class(world, e.handle), is_authority,
                     logic_tick, inf.anim_state,
                     infantry_anim_flags(inf.anim_state), e.health, nullptr,
                     &mounted_lio, eye_offset, world.profile);
+            e.self->position.set_q16({pos[0], pos[1], pos[2]});
         }
         finish_infantry_tick(e, world);
         return;
@@ -1861,9 +1863,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             wx = 0;
             wy = 0;
         }
-        e.pos[0] += wx + inf.vel[0];
-        e.pos[1] += wy + inf.vel[1];
-        e.pos[2] += dz;
+        e.self->position.x.q16 += wx + inf.vel[0];
+        e.self->position.y.q16 += wy + inf.vel[1];
+        e.self->position.z.q16 += dz;
         root_wx = wx;
         root_wy = wy;
         inf.dbg_root_dx = wx + inf.vel[0]; // debug-card tap (frozen-clump instrument)
@@ -1878,13 +1880,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // @0x4BF14F, the skip `cmp [outYaw],0; jnz loc_4BFC80` @0x4BF6A5..0x4BF6B2,
     // the re-apply @0x4BFC80..0x4BFC86]
     if (!inf.is_local_player && (key & 1u) != 0) {
-        e.pos[2] = io::bam_add(e.pos[2], inf.z_quarter_step);
+        e.self->position.z.q16 = io::bam_add(e.self->position.z.q16, inf.z_quarter_step);
         finish_infantry_tick(e, world);
         return;
     }
     // The even tick's base: Z after the root integrate, before gravity; a
     // landing snap re-saves it below. [orig: @0x4BF6BA]
-    int32_t org1_saved_z = e.pos[2];
+    int32_t org1_saved_z = e.self->position.z.q16;
 
     // 9. Vertical resolve. The original caller passes entityRadius = AnimMap bottom
     // (out[3]) and receives foot clearance from the collision resolver.
@@ -1930,33 +1932,33 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                         (flags & kEntityFlagParachute);
                 if ((flags & kEntityFlagParachute) != 0 && inf.anim_state != anim_state::kParachute)
                     inf.request_body_animation(anim_state::kParachute);
-                if (events.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.pos);
-                if (events.closed) emit_slot_sound(world, e, audio::kSlotChuteClose, e.pos);
-                if (events.flap) emit_slot_sound(world, e, audio::kSlotChuteFlap, e.pos);
-                if (events.free_fall) emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
+                if (events.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.self->position.words().data());
+                if (events.closed) emit_slot_sound(world, e, audio::kSlotChuteClose, e.self->position.words().data());
+                if (events.flap) emit_slot_sound(world, e, audio::kSlotChuteFlap, e.self->position.words().data());
+                if (events.free_fall) emit_slot_sound(world, e, audio::kSlotFreeFall, e.self->position.words().data());
             } else {
                 inf.vel[2] = std::max(inf.vel[2], kTerminalVelZ);
                 if ((logic_tick & 63u) == 0 && inf.vel[2] < -0x3000)
-                    emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
+                    emit_slot_sound(world, e, audio::kSlotFreeFall, e.self->position.words().data());
             }
-            e.pos[2] += inf.vel[2];
+            e.self->position.z.q16 += inf.vel[2];
         } else if ((gravity_flags & kEntityFlagAiClimb) != 0) {
             // The org1 ladder-climb chase replaces gravity: sixteenth-step Z
             // toward the AI move target, capped 0x4000 up, floor -16384 (half
             // the fall terminal), on the even key tick like the gravity it
             // replaces. The order writer rides the AI-order slice.
             // [orig: @ 0x4bf6d2-0x4bf6e5; floor pick @ 0x4bf6e5 + clamp @ 0x4bf7d4]
-            int32_t step = (inf.goal_z - e.pos[2] + 8) >> 4;
+            int32_t step = (inf.goal_z - e.self->position.z.q16 + 8) >> 4;
             if (step > 0x4000) step = 0x4000;
             inf.vel[2] = step;
             if (inf.vel[2] < -16384) inf.vel[2] = -16384;
-            e.pos[2] += 2 * inf.vel[2];
+            e.self->position.z.q16 += 2 * inf.vel[2];
         } else {
             // [orig: Entity_UpdateInfantryAI gate @0x4BF7B8, step @0x4BF7BF,
             //  floor @0x4BF7C9..0x4BF7D6, `pos.z += 2 * slideDecay` @0x4BF7E4..0x4BF7EE]
             if (!gravity_skip) inf.vel[2] -= kGravityStep;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
-            e.pos[2] += 2 * inf.vel[2];
+            e.self->position.z.q16 += 2 * inf.vel[2];
         }
 
         // Foot clearance: with a collision world wired this is the full resolver —
@@ -1966,8 +1968,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // @0x4b2bd0; burns down D-INF-3's terrain-only stand-in]. Without one
         // (headless tests, no placed objects) it is that resolver's ground-settle
         // tail over an empty candidate set.
-        const int32_t pre_resolve_x = e.pos[0]; // debug-card tap
-        const int32_t pre_resolve_y = e.pos[1];
+        const int32_t pre_resolve_x = e.self->position.x.q16; // debug-card tap
+        const int32_t pre_resolve_y = e.self->position.y.q16;
         int32_t foot_clearance;
         if (collision != nullptr && collision->instance_count() != 0) {
             // The climb-motor channels the resolver's CL legs read and write:
@@ -1980,12 +1982,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
             const devtools::ProfileScope collision_scope(
                     world.profile, devtools::Slot::SIM_AI_INFANTRY_COLLISION);
+            std::array<int32_t, 3> pos = e.self->position.words();
             foot_clearance = collision->resolve_entity(
-                world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
+                world, e.handle, e.collide_state, pos.data(), inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                 entity_is_player_class(world, e.handle), is_authority, logic_tick,
                 inf.anim_state, infantry_anim_flags(inf.anim_state), e.health,
                 nullptr, &lio, eye_offset, world.profile);
+            e.self->position.set_q16({pos[0], pos[1], pos[2]});
             // The ladder legs may have written the view channels (the yaw
             // chase, the pitch restore); refresh the mouse-instant mirrors so
             // the render/aim pose and the embedder write-back see them.
@@ -2005,7 +2009,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     ? (tick_entity->flags | tick_entity->engine_flags)
                     : 0u;
             const bool indoors = (settle_flags & kEntityFlagIndoors) != 0;
-            foot_clearance = terrain_settle_clearance(terrain, e.pos, frame.capsule_bottom, indoors);
+            foot_clearance = terrain_settle_clearance(terrain, e.self->position.words().data(), frame.capsule_bottom, indoors);
             // The probe's +0x28 store is unconditional (null on a miss), and
             // this IS the probe over an empty candidate set — clear the link so
             // the footstep pick cannot read a stale platform. [orig: the
@@ -2013,8 +2017,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // @ 0x414370]
             if (Entity *self = world.registry.get(e.handle)) self->ground_target = EntityHandle{};
         }
-        inf.dbg_res_dx = e.pos[0] - pre_resolve_x; // debug-card tap
-        inf.dbg_res_dy = e.pos[1] - pre_resolve_y;
+        inf.dbg_res_dx = e.self->position.x.q16 - pre_resolve_x; // debug-card tap
+        inf.dbg_res_dy = e.self->position.y.q16 - pre_resolve_y;
         inf.dbg_contact_item =
             collision != nullptr ? collision->dbg_last_contact_item : 0;
         // The post-resolve latch state: the resolver cleared and possibly
@@ -2133,11 +2137,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // makes every landing (vel_z <= 0) damaging by (-vel_z) >> 4
             // [orig: org1 @0x4bf82e..0x4bf841 `imul eax, -1057; cmp ecx, eax;
             // jg skip`; org2 @0x4b7d0d..0x4b7d21].
-            e.pos[2] -= foot_clearance;
+            e.self->position.z.q16 -= foot_clearance;
             // org1 re-bases its quarter-step tail on the snapped Z, so a landing
             // lands in full on this tick. [orig: `mov [esp+117Ch+entity], edx`
             // @0x4BF808]
-            if (!inf.is_local_player) org1_saved_z = e.pos[2];
+            if (!inf.is_local_player) org1_saved_z = e.self->position.z.q16;
             const int32_t fall_threshold = -1057 * world.script.wac_values.fallmps;
             const bool fall_charges = inf.is_local_player
                     ? inf.vel[2] <= fall_threshold
@@ -2153,7 +2157,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // POWER pool timers and the type-1/2 zones -- which is unported as
             // a whole, D-INF-28; world-wac-ai-re carries the note.)
             if (inf.is_local_player && fall_charges)
-                player_on_damage_received(world, radar_entity_source(world, e.handle), e.pos);
+                player_on_damage_received(world, radar_entity_source(world, e.handle), e.self->position.words().data());
             if (fall_charges && is_authority &&
                 (tick_flags & kEntityFlagIndestructible) == 0) {
                 int32_t excess = fall_threshold - inf.vel[2];
@@ -2191,7 +2195,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                                     (org1_body ? !org1_dead_now() : e.health > 0)
                                             ? audio::kSlotFallAlive
                                             : audio::kSlotFallDead,
-                                    e.pos);
+                                    e.self->position.words().data());
                 inf.airborne = false;
                 if (tick_entity != nullptr) {
                     tick_entity->flags &= ~kEntityFlagInAir;
@@ -2262,7 +2266,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     // Jumping off the ladder: the 0.5u back-push + unlatch ride
                     // the jump commit. [orig: @ 0x4b7f0c-0x4b7f68 + the shared
                     // tail @ 0x4b8016-0x4b8019]
-                    ladder_push_back(e.pos, inf.body_heading);
+                    ladder_push_back(e.self->position, inf.body_heading);
                     ladder_unlatch(tick_entity);
                 }
             }
@@ -2290,7 +2294,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     emit_slot_sound(world, e,
                                     e.health > 0 ? audio::kSlotFallAlive
                                                  : audio::kSlotFallDead,
-                                    e.pos);
+                                    e.self->position.words().data());
                     inf.airborne = false;
                     if (tick_entity != nullptr) {
                         tick_entity->flags &= ~kEntityFlagInAir;
@@ -2304,8 +2308,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 // [orig: @0x4b7fa8-0x4b8019 -- latched (0x100000) and
                 //  g_LadderContactZ > pos.z]
                 if (on_ladder_now && collision != nullptr &&
-                    collision->last_ladder_frame.anchor[2] > e.pos[2]) {
-                    ladder_push_back(e.pos, inf.body_heading);
+                    collision->last_ladder_frame.anchor[2] > e.self->position.z.q16) {
+                    ladder_push_back(e.self->position, inf.body_heading);
                     ladder_unlatch(tick_entity);
                 }
             }
@@ -2328,8 +2332,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             //  add ecx,2; sar ecx,2; mov [esi+0ACh],ecx; mov [esi+0Ch],eax`,
             //  then the shared add @0x4BFC80..0x4BFC86]
             inf.z_quarter_step = io::bam_sar(
-                    io::bam_add(io::bam_sub(e.pos[2], org1_saved_z), 2), 2);
-            e.pos[2] = io::bam_add(org1_saved_z, inf.z_quarter_step);
+                    io::bam_add(io::bam_sub(e.self->position.z.q16, org1_saved_z), 2), 2);
+            e.self->position.z.q16 = io::bam_add(org1_saved_z, inf.z_quarter_step);
         }
         // org2 water (the LOCAL player body, immediately after its jump block --
         // the same mover-tail placement retail gives it @0x4b8020).
@@ -2353,9 +2357,9 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
             world.pose_provider->resolve_skeletal_anchor(
                     world, e.handle, SkeletalAnchor::Head, head_world)) {
         float head[3] = {
-            static_cast<float>(from_fixed(io::bam_sub(head_world[0], e.pos[0]))),
-            static_cast<float>(from_fixed(io::bam_sub(head_world[1], e.pos[1]))),
-            static_cast<float>(from_fixed(io::bam_sub(head_world[2], e.pos[2])))
+            static_cast<float>(from_fixed(io::bam_sub(head_world[0], e.self->position.x.q16))),
+            static_cast<float>(from_fixed(io::bam_sub(head_world[1], e.self->position.y.q16))),
+            static_cast<float>(from_fixed(io::bam_sub(head_world[2], e.self->position.z.q16)))
         };
         const Entity *reg = world.registry.get(e.handle);
         // The terrain floor is an ABSOLUTE-space rule, so apply it to the
@@ -2365,17 +2369,17 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         //  capsule legs, and @0x4b6908 has no floor of any kind].
         const bool seated = reg != nullptr && reg->mounted;
         if (!seated) {
-            float abs_eye[3] = {static_cast<float>(from_fixed(e.pos[0]) + head[0]),
-                                static_cast<float>(from_fixed(e.pos[1]) + head[1]),
-                                static_cast<float>(from_fixed(e.pos[2]) + head[2])};
+            float abs_eye[3] = {static_cast<float>(from_fixed(e.self->position.x.q16) + head[0]),
+                                static_cast<float>(from_fixed(e.self->position.y.q16) + head[1]),
+                                static_cast<float>(from_fixed(e.self->position.z.q16) + head[2])};
             player_view_floor_eye_to_terrain(
                     terrain,
                     reg != nullptr &&
                             (reg->flags & kEntityFlagIndoors) != 0,
                     abs_eye);
-            head[0] = abs_eye[0] - from_fixed(e.pos[0]);
-            head[1] = abs_eye[1] - from_fixed(e.pos[1]);
-            head[2] = abs_eye[2] - from_fixed(e.pos[2]);
+            head[0] = abs_eye[0] - from_fixed(e.self->position.x.q16);
+            head[1] = abs_eye[1] - from_fixed(e.self->position.y.q16);
+            head[2] = abs_eye[2] - from_fixed(e.self->position.z.q16);
         }
         inf.eye_offset_x = to_fixed(head[0]);
         inf.eye_offset_y = to_fixed(head[1]);
@@ -2432,23 +2436,14 @@ void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {
     InfantryState &inf = e.inf;
     // Mirror the mover-output brain fields the present snapshot reads (kWorkPosZ stays the
     // grounded Z; kOutSpeed reflects motion for anim-slot consumers).
-    e.brain.f[AiBrain::kWorkPosX] = e.pos[0];
-    e.brain.f[AiBrain::kWorkPosY] = e.pos[1];
-    e.brain.f[AiBrain::kWorkPosZ] = e.pos[2];
+    e.brain.f[AiBrain::kWorkPosX] = e.self->position.x.q16;
+    e.brain.f[AiBrain::kWorkPosY] = e.self->position.y.q16;
+    e.brain.f[AiBrain::kWorkPosZ] = e.self->position.z.q16;
     e.brain.f[AiBrain::kWorkHeading] = e.heading;
 
-    // Two-store reconciliation: the motor advances AiEntity.pos/heading (16.16 / BAM32), but
-    // the S2C 0x0A snapshot SERIALIZES the registry Entity (snapshot_of reads Entity.position).
-    // Mirror EVERY motor entity's grounded pose back so the wire — and the listen-server
-    // present that decodes it — carry the current grounded position, not the stale authored
-    // spawn Z (which sank AI organics into the terrain on the wire path). Faithful: the
-    // original engine has ONE Entity Position store that is both mover output and serializer
-    // input; our AiEntity.pos vs registry Entity.position split is the tracked deviation, so
-    // we keep them in sync here. (The direct AI-pool present still reads AiEntity.pos.)
+    // The motor advanced the entity's own Position words through `self` (retail's one store,
+    // both mover output and serializer input); the motor-side heading mirrors back here.
     if (Entity *ent = world.registry.get(e.handle)) {
-        ent->position.x.q16 = e.pos[0];
-        ent->position.y.q16 = e.pos[1];
-        ent->position.z.q16 = e.pos[2];
         // Collision and landing damage mutate the motor-side health field. The original
         // has one Entity store; mirror that result into the registry store consumed by
         // scripts, the HUD, and wire snapshots.

@@ -498,7 +498,7 @@ void JoinerRole::tick_local_weapon() {
 		// @0x422fd5]. The on-foot pump stamps the same 12 on its own witnessed leg.
 		fired.round.subtype = 12;
 		for (int axis = 0; axis < 3; ++axis)
-			fired.shooter_pose[axis] = pilot->pos[axis];
+			fired.shooter_pose[axis] = pilot->self->position.word(axis);
 		fired.shooter_pose[3] = pilot->heading;
 		fired.shooter_pose[4] = pilot->pitch;
 		fires.push_back(fired);

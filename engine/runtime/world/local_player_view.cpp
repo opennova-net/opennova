@@ -369,7 +369,7 @@ bool scope_view_visible(World &world, const LocalPlayerWeapon &w, const PlayerVi
     if (force && v.camera_mode == 0) {
         visible = true;
     } else if (!sighted) {
-        const int32_t position_z = body != nullptr ? body->pos[2] : player.position.z.q16;
+        const int32_t position_z = body != nullptr ? body->self->position.z.q16 : player.position.z.q16;
         const int32_t eye_z = static_cast<int32_t>(
             uint32_t(position_z) + uint32_t(player.eye_offset_z));
         if ((flags & 0x8000u) != 0 || eye_z < world.env.water_z)
@@ -825,11 +825,11 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
         // seat carry's BAM32 Roll, never the whole-degree registry mirror).
         // [orig: not an EWEAP @0x545EB7..0x545EEA; the no-skeleton copy
         //  @0x545F17..0x545F4E]
-        out[0] = io::bam_add(body ? body->pos[0] : rider.position.x.q16,
+        out[0] = io::bam_add(body ? body->self->position.x.q16 : rider.position.x.q16,
                 body ? body->inf.eye_offset_x : rider.eye_offset_x);
-        out[1] = io::bam_add(body ? body->pos[1] : rider.position.y.q16,
+        out[1] = io::bam_add(body ? body->self->position.y.q16 : rider.position.y.q16,
                 body ? body->inf.eye_offset_y : rider.eye_offset_y);
-        out[2] = io::bam_add(body ? body->pos[2] : rider.position.z.q16,
+        out[2] = io::bam_add(body ? body->self->position.z.q16 : rider.position.z.q16,
                 body ? body->inf.eye_offset_z : rider.eye_offset_z);
         out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
         out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
@@ -869,9 +869,9 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
     // writes it through Entity_AttachToBoneAndUpdateTransform @0x5463D0 ->
     // Math_FixedPointMatrixToEulerAngles @0x54656F].
     const AiEntity *body = world.ai.for_handle(rider.handle);
-    out[0] = body ? body->pos[0] : rider.position.x.q16;
-    out[1] = body ? body->pos[1] : rider.position.y.q16;
-    out[2] = body ? body->pos[2] : rider.position.z.q16;
+    out[0] = body ? body->self->position.x.q16 : rider.position.x.q16;
+    out[1] = body ? body->self->position.y.q16 : rider.position.y.q16;
+    out[2] = body ? body->self->position.z.q16 : rider.position.z.q16;
     out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
     out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
     out[5] = body ? body->roll : bam_from_degrees_wrapped(rider.roll);
@@ -1176,7 +1176,7 @@ bool compose_ground_leg(World &world, const AiEntity &p, const Entity &e,
     for (int i = 0; i < 3; ++i) {
         const int32_t lift = static_cast<int32_t>(
                 (static_cast<int64_t>(up[i]) * v.ground_leg_lift_q16 + 0x8000) >> 16);
-        out.eye[i] = static_cast<float>(from_fixed(io::bam_add(p.pos[i], lift)));
+        out.eye[i] = static_cast<float>(from_fixed(io::bam_add(p.self->position.word(i), lift)));
     }
     // The rotation stays the entity's own triple [orig: @0x437D86..0x437D9B].
     out.yaw_deg = static_cast<float>(mission_yaw_deg_from_bam_heading(p.heading));

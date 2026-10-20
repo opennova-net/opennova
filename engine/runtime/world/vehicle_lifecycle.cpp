@@ -55,7 +55,6 @@ void mirror_pose(World &world, Entity &e) {
 	if (AiEntity *ai = world.ai.for_handle(e.handle)) {
 		int32_t pose[6];
 		read_pose(e, pose);
-		std::copy_n(pose, 3, ai->pos);
 		std::copy_n(pose, 3, ai->net_saved_live_pose);
 		ai->heading = pose[3];
 		ai->health = e.health;
@@ -626,11 +625,9 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 		child->veh.air_pitch_rate = dead ? 0 : vehicle.veh.air_pitch_rate;
 		child->veh.air_roll_rate = dead ? 0 : vehicle.veh.air_roll_rate;
 		// One entity struct in retail: a child that carries its own brain reads
-		// the same words through the AiEntity mirrors.
+		// the same angle words through the AiEntity mirrors (its position is the
+		// child's own words, stored above).
 		if (AiEntity *child_ai = world.ai.for_handle(child->handle)) {
-			child_ai->pos[0] = world_point[0];
-			child_ai->pos[1] = world_point[1];
-			child_ai->pos[2] = world_point[2];
 			child_ai->heading = heading;
 			child_ai->pitch = pitch;
 			child_ai->roll = roll;

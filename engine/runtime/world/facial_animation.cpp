@@ -34,7 +34,7 @@ grm::Point offset(const grm::Gesture *g, const std::string &name) {
 
 void position_of(const World &world, const Entity &entity, int32_t out[2]) {
 	if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
-		out[0] = body->pos[0]; out[1] = body->pos[1];
+		out[0] = body->self->position.x.q16; out[1] = body->self->position.y.q16;
 	} else {
 		out[0] = entity.position.x.q16;
 		out[1] = entity.position.y.q16;

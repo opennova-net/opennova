@@ -525,9 +525,9 @@ bool EntityPoseProvider::build_skeletal_bone_matrix(world::World &world,
 	float render_pose[16];
 	render_matrix_from_deformation(deformation, render_pose);
 	const int32_t position[3] = {
-			ai_entity != nullptr ? ai_entity->pos[0] : posed_entity->position.x.q16,
-			ai_entity != nullptr ? ai_entity->pos[1] : posed_entity->position.y.q16,
-			ai_entity != nullptr ? ai_entity->pos[2] : posed_entity->position.z.q16,
+			ai_entity != nullptr ? ai_entity->self->position.x.q16 : posed_entity->position.x.q16,
+			ai_entity != nullptr ? ai_entity->self->position.y.q16 : posed_entity->position.y.q16,
+			ai_entity != nullptr ? ai_entity->self->position.z.q16 : posed_entity->position.z.q16,
 	};
 	const world::CollisionMatrix body_world =
 			world::collision_matrix_from_euler(

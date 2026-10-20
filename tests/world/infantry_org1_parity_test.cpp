@@ -85,8 +85,8 @@ struct Org1Rig {
         AiEntity &e = *w->ai.at(w->ai.attach(handle));
         e.inf.active = true;
         e.health = 100;
-        e.pos[0] = fx(100);
-        e.pos[1] = fx(100);
+        e.self->position.x.q16 = fx(100);
+        e.self->position.y.q16 = fx(100);
         w->ai.terrain = &ground.field;
         w->ai.root_motion = &source;
     }
@@ -114,7 +114,7 @@ struct Org1Rig {
 // @0x4BF6BA, odd skip @0x4BF6A5..0x4BF6B2, tail @0x4BFC65..0x4BFC86]
 void test_org1_fall_takes_the_quarter_step_tail() {
     Org1Rig rig;
-    rig.e().pos[2] = fx(1) + fx(8);
+    rig.e().self->position.z.q16 = fx(1) + fx(8);
     rig.airborne();
     // retail z after ticks 2, 3, 4, 5 and the +0xAC each stored
     const int32_t z[] = {589616, 589408, 588992, 588576};
@@ -122,14 +122,14 @@ void test_org1_fall_takes_the_quarter_step_tail() {
     const int32_t vel[] = {-416, -416, -832, -832};
     for (int i = 0; i < 4; ++i) {
         rig.tick(2u + static_cast<uint32_t>(i));
-        CHECK(rig.e().pos[2] == z[i]);
+        CHECK(rig.e().self->position.z.q16 == z[i]);
         CHECK(rig.e().inf.z_quarter_step == step[i]);
         CHECK(rig.e().inf.vel[2] == vel[i]);
     }
     // After 60 ticks retail has fallen 2.95 u (the doubled integrate alone
     // would have dropped 5.9 u).
     for (uint32_t t = 6; t < 62; ++t) rig.tick(t);
-    CHECK(rig.e().pos[2] == 396384);
+    CHECK(rig.e().self->position.z.q16 == 396384);
     CHECK(rig.e().inf.vel[2] == -12480);
     CHECK(rig.e().inf.airborne);
 }
@@ -142,7 +142,7 @@ void test_org1_fall_takes_the_quarter_step_tail() {
 void test_org1_fall_damage_follows_the_retail_fall() {
     Org1Rig rig;
     rig.w->script.wac_values.fallmps = 13;
-    rig.e().pos[2] = fx(1) + fx(4);
+    rig.e().self->position.z.q16 = fx(1) + fx(4);
     rig.airborne();
     uint32_t landed = 0;
     for (uint32_t t = 2; t < 400 && landed == 0; ++t) {
@@ -151,10 +151,10 @@ void test_org1_fall_damage_follows_the_retail_fall() {
     }
     CHECK(landed == 70);
     CHECK(rig.e().health == 49);
-    CHECK(rig.e().pos[2] == fx(1)); // the landing lands in full: +0xAC is 0 after it
+    CHECK(rig.e().self->position.z.q16 == fx(1)); // the landing lands in full: +0xAC is 0 after it
     CHECK(rig.e().inf.z_quarter_step == 0);
     rig.tick(landed + 1);
-    CHECK(rig.e().pos[2] == fx(1));
+    CHECK(rig.e().self->position.z.q16 == fx(1));
 }
 
 // R3-1 + R3-3: the org1 water block stores the float target and the shared tail
@@ -166,7 +166,7 @@ void test_org1_fall_damage_follows_the_retail_fall() {
 void test_org1_water_settles_through_the_tail() {
     Org1Rig rig;
     rig.w->env.water_z = fx(10);
-    rig.e().pos[2] = fx(8);
+    rig.e().self->position.z.q16 = fx(8);
     rig.e().inf.vel[2] = -8000;
     rig.airborne();
     struct Row { uint32_t tick; int32_t z; int32_t step; };
@@ -179,7 +179,7 @@ void test_org1_water_settles_through_the_tail() {
     for (uint32_t t = 2; t <= 41; ++t) {
         rig.tick(t);
         if (row < sizeof(rows) / sizeof(rows[0]) && rows[row].tick == t) {
-            CHECK(rig.e().pos[2] == rows[row].z);
+            CHECK(rig.e().self->position.z.q16 == rows[row].z);
             CHECK(rig.e().inf.z_quarter_step == rows[row].step);
             ++row;
         }
@@ -196,18 +196,18 @@ void test_org1_water_settles_through_the_tail() {
 // block; odd skip @0x4BF6A5..0x4BF6B2 -> @0x4BFC80]
 void test_org1_climb_chase_runs_on_even_ticks_only() {
     Org1Rig rig;
-    rig.e().pos[2] = fx(3);
+    rig.e().self->position.z.q16 = fx(3);
     rig.e().inf.goal_z = fx(5); // the persisted +0x304 the chase reads @0x4BF6C7
     rig.entity().flags |= kEntityFlagAiClimb;
     rig.tick(2);
     // step = (5u - 3u + 8) >> 4 = 8192; Z += 2 * 8192, then the quarter tail
     CHECK(rig.e().inf.vel[2] == 8192);
     CHECK(rig.e().inf.z_quarter_step == (2 * 8192 + 2) >> 2);
-    const int32_t z_even = rig.e().pos[2];
+    const int32_t z_even = rig.e().self->position.z.q16;
     CHECK(z_even == fx(3) + 4096);
     rig.tick(3);
     CHECK(rig.e().inf.vel[2] == 8192);           // no chase on the odd tick
-    CHECK(rig.e().pos[2] == z_even + 4096);      // only the stored quarter step
+    CHECK(rig.e().self->position.z.q16 == z_even + 4096);      // only the stored quarter step
 }
 
 // ---- the death edge (R3-2, R3-4, R3-5, R7-11) ----
@@ -226,7 +226,7 @@ void arm_death(Org1Rig &rig) {
     rig.e().profile.sound_profile =
             static_cast<int16_t>(rig.w->tables.sound_profiles.index_of("SP_Org1"));
     rig.source.clips.insert({139, 174, 175, 184});
-    rig.e().pos[2] = fx(1); // on its capsule floor
+    rig.e().self->position.z.q16 = fx(1); // on its capsule floor
     rig.entity().health = 0;
     rig.entity().deathtime_ticks = 500;
 }
@@ -322,7 +322,7 @@ void test_org1_fatal_fall_credits_itself() {
     Org1Rig rig;
     rig.w->script.wac_values.fallmps = 13;
     rig.entity().deathtime_ticks = 500; // keep the corpse row after the edge
-    rig.e().pos[2] = fx(1) + fx(6);
+    rig.e().self->position.z.q16 = fx(1) + fx(6);
     rig.airborne();
     uint32_t landed = 0;
     for (uint32_t t = 2; t < 400 && landed == 0; ++t) {
@@ -464,14 +464,14 @@ void test_org1_rider_turns_with_its_carrier() {
 // [orig: Entity_UpdateInfantryAI @0x4B998C..0x4B99CD]
 void test_org1_motor_holds_under_the_epilog() {
     Org1Rig rig;
-    rig.e().pos[2] = fx(1) + fx(8);
+    rig.e().self->position.z.q16 = fx(1) + fx(8);
     rig.airborne();
     rig.w->logic_tick = 2;
     rig.w->process_round_end(2);
     rig.w->epilog.screen_active = true; // the lose cine's build [orig: @0x57450C]
     rig.tick(4); // an even key tick: gravity would run
     CHECK(rig.w->epilog_screen_active());
-    CHECK(rig.e().pos[2] == fx(1) + fx(8));
+    CHECK(rig.e().self->position.z.q16 == fx(1) + fx(8));
     CHECK(rig.e().inf.vel[2] == 0);
 }
 
@@ -500,7 +500,7 @@ void test_org1_afloat_corpse_decays() {
 void test_org1_airborne_edge_stamp() {
     {
         Org1Rig rig; // neither 47 nor 31 authored: the clip stays
-        rig.e().pos[2] = fx(1) + fx(8);
+        rig.e().self->position.z.q16 = fx(1) + fx(8);
         rig.entity().flags |= kEntityFlagParachute;
         rig.tick(2);
         CHECK(rig.e().inf.airborne);
@@ -509,7 +509,7 @@ void test_org1_airborne_edge_stamp() {
     {
         Org1Rig rig; // carried: no stamp
         rig.source.clips.insert(anim_state::kParachute);
-        rig.e().pos[2] = fx(1) + fx(8);
+        rig.e().self->position.z.q16 = fx(1) + fx(8);
         rig.entity().flags |= kEntityFlagParachute | kEntityFlagMounted;
         rig.tick(2);
         CHECK(rig.e().inf.anim_state == anim_state::kIdle);
@@ -517,7 +517,7 @@ void test_org1_airborne_edge_stamp() {
     {
         Org1Rig rig; // 31 only
         rig.source.clips.insert(anim_state::kJumpLoop);
-        rig.e().pos[2] = fx(1) + fx(8);
+        rig.e().self->position.z.q16 = fx(1) + fx(8);
         rig.entity().flags |= kEntityFlagParachute;
         rig.tick(2);
         CHECK(rig.e().inf.anim_state == anim_state::kJumpLoop);
@@ -525,7 +525,7 @@ void test_org1_airborne_edge_stamp() {
     {
         Org1Rig rig; // 47
         rig.source.clips.insert(anim_state::kParachute);
-        rig.e().pos[2] = fx(1) + fx(8);
+        rig.e().self->position.z.q16 = fx(1) + fx(8);
         rig.entity().flags |= kEntityFlagParachute;
         rig.tick(2);
         CHECK(rig.e().inf.anim_state == anim_state::kParachute);
@@ -539,12 +539,12 @@ void test_org1_airborne_edge_stamp() {
 void test_org1_float_reads_this_ticks_eye() {
     Org1Rig rig;
     rig.w->env.water_z = fx(10);
-    rig.e().pos[2] = fx(8);
+    rig.e().self->position.z.q16 = fx(8);
     rig.e().inf.vel[2] = -8000;
     rig.airborne();
     rig.entity().eye_offset_z = 0x20000; // stale
     rig.tick(2);
-    CHECK(rig.e().pos[2] == 552421);
+    CHECK(rig.e().self->position.z.q16 == 552421);
 }
 
 // R3-4 remainder: the org1 edge's unstaged hit callback reads the global hit
@@ -639,7 +639,7 @@ void test_org1_round_leaves_along_this_ticks_look() {
     rig.w->tables.ammo.entries[1].valid = true;
     rig.w->tables.ammo.entries[1].velocity = 620;
     rig.w->tables.ammo.entries[1].max_age_ticks = 100;
-    rig.e().pos[2] = fx(1); // on its capsule floor
+    rig.e().self->position.z.q16 = fx(1); // on its capsule floor
     rig.e().profile.organic.ammo[1] = 1;
     rig.source.events = 0x8; // this odd tick's clip event latches the secondary fire
     rig.e().inf.target_heading = 0x10000000;
@@ -664,7 +664,7 @@ void test_org1_airborne_corpse_tumbles() {
     rig.entity().death_anim_state = 184;
     rig.tick(71); // the edge latches the dead bit
     CHECK((rig.entity().flags & kEntityFlagDead) != 0);
-    rig.e().pos[2] = fx(1) + fx(20);
+    rig.e().self->position.z.q16 = fx(1) + fx(20);
     rig.airborne();
     rig.e().inf.target_heading = 0x1000;
     rig.e().inf.aim_valid = true;
@@ -705,7 +705,7 @@ void test_org1_corpse_aims_along_the_slope() {
 // @0x4BE897..0x4BE8EA]
 void test_org1_torso_roll() {
     Org1Rig rig;
-    rig.e().pos[2] = fx(1);
+    rig.e().self->position.z.q16 = fx(1);
     rig.e().roll = 0x10000000;
     rig.tick(3); // off the slope phase: the roll holds
     // (0x10000000 + 8) >> 4 = 0x01000000 lags the roll by more than the clamp
@@ -713,7 +713,7 @@ void test_org1_torso_roll() {
 
     Org1Rig prone;
     prone.source.clips.insert(anim_state::kIdleProne);
-    prone.e().pos[2] = fx(1);
+    prone.e().self->position.z.q16 = fx(1);
     prone.e().inf.request_body_animation(anim_state::kIdleProne);
     prone.e().inf.torso_roll = 0x100000;
     prone.tick(5);
@@ -733,7 +733,7 @@ void test_org1_fire_latch_is_a_pass_local() {
     rig.w->tables.ammo.entries[1].valid = true;
     rig.w->tables.ammo.entries[1].velocity = 620;
     rig.w->tables.ammo.entries[1].max_age_ticks = 100;
-    rig.e().pos[2] = fx(1);
+    rig.e().self->position.z.q16 = fx(1);
     rig.e().profile.organic.ammo[1] = 1;
     rig.e().inf.fire_secondary_latch = true;
     rig.tick(2);
@@ -748,7 +748,7 @@ void test_org1_fire_latch_is_a_pass_local() {
 // +0x36A @0x4BD356, wasHit @0x4BD6EE]
 void test_org1_ladder_runs_the_selector_tail() {
     Org1Rig rig;
-    rig.e().pos[2] = fx(1);
+    rig.e().self->position.z.q16 = fx(1);
     rig.entity().flags |= kEntityFlagLadderContact;
     rig.e().inf.was_hit = true;
     rig.e().inf.prev_move_mode = 3;
@@ -779,7 +779,7 @@ void test_org1_airborne_body_skips_the_think() {
         deck.primary_occupant = mate_handle;
         const EntityHandle deck_handle = rig.w->registry.spawn(1, deck);
         rig.entity().ground_target = deck_handle;
-        rig.e().pos[2] = fx(1) + fx(8);
+        rig.e().self->position.z.q16 = fx(1) + fx(8);
         rig.airborne();
         if (climb) rig.entity().flags |= kEntityFlagAiClimb;
         rig.e().inf.was_hit = true;

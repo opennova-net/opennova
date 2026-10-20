@@ -16,13 +16,13 @@
 
 namespace opennova::world {
 
-void ladder_push_back(int32_t pos[3], int32_t yaw_bam) {
+void ladder_push_back(EntityPosition &pos, int32_t yaw_bam) {
     const double rad =
         static_cast<double>(yaw_bam) * io::kRadiansPerBamX87;
     const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
     const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
-    pos[0] -= static_cast<int32_t>((static_cast<int64_t>(c) << 15) >> 22);
-    pos[1] -= static_cast<int32_t>((static_cast<int64_t>(s) << 15) >> 22);
+    pos.x.q16 -= static_cast<int32_t>((static_cast<int64_t>(c) << 15) >> 22);
+    pos.y.q16 -= static_cast<int32_t>((static_cast<int64_t>(s) << 15) >> 22);
 }
 
 void ladder_unlatch(Entity *ent) {
@@ -132,10 +132,10 @@ void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
                                io::kRadiansPerBamX87;
             const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
             const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
-            e.pos[0] -= static_cast<int32_t>((57344LL * c) >> 22);
-            e.pos[1] -= static_cast<int32_t>((57344LL * s) >> 22);
-            e.pos[2] += 0x4000;
-            ladder_push_back(e.pos, lf.yaw);
+            e.self->position.x.q16 -= static_cast<int32_t>((57344LL * c) >> 22);
+            e.self->position.y.q16 -= static_cast<int32_t>((57344LL * s) >> 22);
+            e.self->position.z.q16 += 0x4000;
+            ladder_push_back(e.self->position, lf.yaw);
             ladder_unlatch(tick_entity);
             break;
         }
@@ -144,7 +144,7 @@ void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
         case 5:
             // The back fan steps straight off the face.
             // [orig: cases 3-5 @ 0x4b7681-0x4b76cc]
-            ladder_push_back(e.pos, lf.yaw);
+            ladder_push_back(e.self->position, lf.yaw);
             ladder_unlatch(tick_entity);
             break;
         default:
@@ -181,8 +181,8 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
                        io::kRadiansPerBamX87;
     const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
     const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
-    const int32_t probe_x = e.pos[0] + static_cast<int32_t>((81920LL * c) >> 22);
-    const int32_t probe_y = e.pos[1] + static_cast<int32_t>((81920LL * s) >> 22);
+    const int32_t probe_x = e.self->position.x.q16 + static_cast<int32_t>((81920LL * c) >> 22);
+    const int32_t probe_y = e.self->position.y.q16 + static_cast<int32_t>((81920LL * s) >> 22);
     bool held = false;
     if (inf.anim_state != anim_state::kClimbTop) {
         // The congestion hold: a live person near the probe point at or above
@@ -193,7 +193,7 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
                                   ? to_fixed(tick_entity->bound_radius)
                                   : 0;
         held = collision->ladder_person_ahead(world, e.handle, probe_x, probe_y,
-                                              e.pos[2], bound);
+                                              e.self->position.z.q16, bound);
         if (held && root_motion != nullptr &&
             root_motion->has_clip(inf.adm_id, anim_state::kClimbIdle))
             stamp_keep_pending(anim_state::kClimbIdle);
@@ -207,15 +207,15 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
                             io::kRadiansPerBamX87;
         const int32_t lc = static_cast<int32_t>(std::cos(lrad) * io::kQ22One);
         const int32_t ls = static_cast<int32_t>(std::sin(lrad) * io::kQ22One);
-        e.pos[0] += static_cast<int32_t>((static_cast<int64_t>(lc) << 11) >> 22);
-        e.pos[1] += static_cast<int32_t>((static_cast<int64_t>(ls) << 11) >> 22);
+        e.self->position.x.q16 += static_cast<int32_t>((static_cast<int64_t>(lc) << 11) >> 22);
+        e.self->position.y.q16 += static_cast<int32_t>((static_cast<int64_t>(ls) << 11) >> 22);
     }
     // climb_up below (anchor - 0.75u) or when climb_top has no clip; climb_top
     // inside the anchor band. [orig: @ 0x4bfaca-0x4bfad8 — 49152 = 0.75u]
     const bool top_available =
         root_motion != nullptr &&
         root_motion->has_clip(inf.adm_id, anim_state::kClimbTop);
-    const int next = (!top_available || e.pos[2] <= lf.anchor[2] - 49152)
+    const int next = (!top_available || e.self->position.z.q16 <= lf.anchor[2] - 49152)
                          ? anim_state::kClimbUp
                          : anim_state::kClimbTop;
     if (root_motion != nullptr && root_motion->has_clip(inf.adm_id, next))

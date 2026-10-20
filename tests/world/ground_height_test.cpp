@@ -122,18 +122,19 @@ int main() {
     // movers' own, AI_ProcessMovementStep @0x466E19] ----
     {
         World w;
+        w.registry.configure_pool(1, 1); // the brain's row (its position words)
         w.ai.terrain = &f;
         int idx = w.ai.attach(EntityHandle::make(1, 0));
         AiEntity &e = *w.ai.at(idx);
         e.brain.f[AiBrain::kCurState] = 0; // benign default state (nullsub handlers)
-        e.pos[0] = fx(200);
-        e.pos[1] = 0;
-        e.pos[2] = fx(9999); // floating
+        e.self->position.x.q16 = fx(200);
+        e.self->position.y.q16 = 0;
+        e.self->position.z.q16 = fx(9999); // floating
         TickContext ctx{};
         ctx.world = &w;
         ctx.is_authority = true;
         w.update_all_entities(ctx);
-        CHECK(e.pos[2] == fx(9999));
+        CHECK(e.self->position.z.q16 == fx(9999));
         CHECK(e.brain.f[AiBrain::kWorkPosZ] == 0);
     }
 

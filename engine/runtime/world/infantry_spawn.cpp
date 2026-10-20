@@ -224,14 +224,14 @@ void initialize_organic_ai(World &world, Entity &entity) {
     entity.dragger = {};
     entity.dragger_spawn_id = 0;
     body->collide_state.skip_counter = 0;
-    inf.goal_z = body->pos[2]; // [orig: Entity_InitOrganicAI @0x4BFE07]
+    inf.goal_z = body->self->position.z.q16; // [orig: Entity_InitOrganicAI @0x4BFE07]
     inf.magazine = static_cast<int16_t>(body->profile.clip_size);
 
     OrganicSpawnFacts facts;
     facts.route = body->slot.f[35] != 0;
     facts.route_channel = body->slot.f[37];
     facts.flags = flags;
-    facts.rotor_wash = world.rotor_wash.nearby_zone(body->pos, 983040) != 0;
+    facts.rotor_wash = world.rotor_wash.nearby_zone(body->self->position.words().data(), 983040) != 0;
     if (const Entity *parent = world.registry.get(entity.mount_target)) {
         entity.ground_target = parent->ground_target;
         facts.parented = true;
@@ -243,7 +243,6 @@ void initialize_organic_ai(World &world, Entity &entity) {
     // Entity_WarmUpOrganicAnimation @0x4B8B20: secondary then primary,
     // net-ID permutation, vertical root motion only, one final ground solve.
     warm_up_organic_body(world, ai, entity, *body);
-    entity.position.set_q16({body->pos[0], body->pos[1], body->pos[2]});
     // The source is savedLivePose, deliberately not the grounded position; the
     // offset is 3 u along the heading in the Q22 trig of retail's
     // radians-per-BAM double. [orig: Entity_InitOrganicAI @0x4C01CD..0x4C022C,
@@ -288,15 +287,15 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
     entity.objective_death_scored = false;
-    const Vec3 origin = entity.position;
+    // The reset reads the Position words as they stand (no float view): the
+    // savedLivePose and spawn backups are dword copies of them (D-NET-507).
+    const EntityPosition origin = entity.position;
     const int32_t heading = bam_heading_from_mission_yaw_deg(entity.yaw);
     const uint32_t flags = entity.flags | entity.engine_flags;
     AiEntity *body = ai.for_handle(entity.handle);
     if (body != nullptr) {
         for (int axis = 0; axis < 3; ++axis) {
-            const float coordinate = axis == 0 ? origin.x : axis == 1 ? origin.y : origin.z;
-            body->pos[axis] = to_fixed(coordinate);
-            body->net_saved_live_pose[axis] = body->pos[axis];
+            body->net_saved_live_pose[axis] = origin.word(axis);
             body->inf.vel[axis] = 0;
         }
         body->inf.z_quarter_step = 0; // [orig: @0x4B967A]
@@ -338,15 +337,16 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
                     advance_primary_channel(inf, *ai.root_motion, ai.anim_rings, frame);
             }
             if (ai.collision != nullptr) {
+                std::array<int32_t, 3> pos = body->self->position.words();
                 const int32_t clearance = ai.collision->resolve_entity(
-                        world, entity.handle, body->collide_state, body->pos,
+                        world, entity.handle, body->collide_state, pos.data(),
                         inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
                         heading, 0, (flags & kEntityFlagPlayer) != 0,
                         ai.is_authority, world.logic_tick, inf.anim_state,
                         infantry_anim_flags(inf.anim_state), body->health);
-                if (clearance <= 0) body->pos[2] -= clearance;
+                body->self->position.set_q16({pos[0], pos[1], pos[2]});
+                if (clearance <= 0) body->self->position.z.q16 -= clearance;
             }
-            entity.position.set_q16({body->pos[0], body->pos[1], body->pos[2]});
             if (const auto *traits = world.tables.item_death_traits.get(entity.item_id)) {
                 if (!traits->particlespawn.empty()) {
                     DestructionEffectEvent effect;

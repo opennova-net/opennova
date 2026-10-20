@@ -85,11 +85,11 @@ void test_ground_rows_read_the_live_hull_words() {
     // The dying enter and tick hold a moving hull in state 21: no destroy event
     // while the record's speed is >= 1057, whatever the mirrors say.
     {
-        e.net_saved_live_pose[0] = e.pos[0] + 0x10000; // not "still" for the dying tick
+        e.net_saved_live_pose[0] = e.self->position.x.q16 + 0x10000; // not "still" for the dying tick
         const int before = hull.w.ai.events.count();
         hull.w.ai.row(21).enter(ctx);
         CHECK(hull.w.ai.events.count() == before);
-        e.net_saved_live_pose[0] = e.pos[0] + 0x10000;
+        e.net_saved_live_pose[0] = e.self->position.x.q16 + 0x10000;
         hull.w.ai.row(21).tick(ctx);
         CHECK(hull.w.ai.events.count() == before);
     }
@@ -178,7 +178,7 @@ void test_aircraft_dead_enter_wakes_as_team_zero() {
         AiEntity &ai = *w.ai.at(w.ai.attach(h));
         ai.brain.f[AiBrain::kOwner] = 1;
         ai.team = team;
-        ai.pos[0] = static_cast<int32_t>(x * 65536.0f);
+        ai.self->position.x.q16 = static_cast<int32_t>(x * 65536.0f);
         return h;
     };
     const EntityHandle dead = spawn_hull(1, 0.0f);

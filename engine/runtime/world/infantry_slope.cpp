@@ -138,7 +138,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
     // @0x413760; org1 probes @0x4BA1A8, org2 @0x4B6E41]
     auto probe = [&](int32_t dx, int32_t dy) -> int32_t {
         if (collision != nullptr)
-            return collision->raycast_ground(world, e.handle, e.pos, dx, dy,
+            return collision->raycast_ground(world, e.handle, e.self->position.words().data(), dx, dy,
                                              0x4000, 0x20000, nullptr);
         // The bare terrain-only embedder has no collision world: the same ray
         // over an empty candidate set, clipped by the terrain alone (an indoors
@@ -147,8 +147,8 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         // terrain the ray's end comes back.
         // [orig: Entity_RaycastGroundHeight @0x4142C0 -> Entity_RaycastCollision
         //  terrain leg @0x413760; the clipped end returned @0x41430D]
-        const int32_t start[3] = {io::bam_add(e.pos[0], dx), io::bam_add(e.pos[1], dy),
-                                  io::bam_add(e.pos[2], 0x4000)};
+        const int32_t start[3] = {io::bam_add(e.self->position.x.q16, dx), io::bam_add(e.self->position.y.q16, dy),
+                                  io::bam_add(e.self->position.z.q16, 0x4000)};
         int32_t end[3] = {start[0], start[1], io::bam_sub(start[2], 0x20000)};
         if (terrain->valid() && (slope_flags & kEntityFlagIndoors) == 0)
             (void)terrain_clip_segment(*terrain, start, end, end);

@@ -66,7 +66,7 @@ struct Muzzle : IPoseProvider {
     bool resolve_organic_attachment(World &, EntityHandle h, uint8_t, int32_t out[3]) override {
         if (h != body || ai == nullptr) return false;
         const AiEntity *e = ai->for_handle(h);
-        for (int axis = 0; axis < 3; ++axis) out[axis] = e->pos[axis] + offset[axis];
+        for (int axis = 0; axis < 3; ++axis) out[axis] = e->self->position.word(axis) + offset[axis];
         return true;
     }
 };
@@ -127,9 +127,9 @@ struct Rig {
         e->health = 150;
         e->inf.max_health = 150;
         e->inf.adm_id = 1;
-        e->pos[0] = x;
-        e->pos[1] = y;
-        e->pos[2] = z;
+        e->self->position.x.q16 = x;
+        e->self->position.y.q16 = y;
+        e->self->position.z.q16 = z;
         e->slot.f[15] = 8 * 65536;  // attack range
         e->slot.f[16] = 32768;      // min engagement
         e->slot.f[17] = 40 * 65536; // sight
@@ -631,7 +631,7 @@ static void test_route_reads_the_raw_node_word() {
         Rig r(fx(60), 0, 0);
         r.route(0, fx(20));
         r.w.ai.nav.channels[1].entries[0] = 7; // no marker filled pool-3 slot 7
-        r.blue().pos[0] = fx(10);
+        r.blue().self->position.x.q16 = fx(10);
         r.w.ai.infantry_think(r.blue(), r.w);
         CHECK(r.blue().slot.f[35] == 1);
         CHECK(r.blue().inf.move_mode == 3 && r.blue().inf.target_dist == fx(10));
@@ -641,7 +641,7 @@ static void test_route_reads_the_raw_node_word() {
     {
         Rig r(fx(60), 0, 0);
         r.route(fx(10), 0); // blue arrives on node 0 ...
-        r.blue().pos[0] = fx(10);
+        r.blue().self->position.x.q16 = fx(10);
         r.w.ai.nav.channels[1].count = 2;
         r.w.ai.nav.channels[1].entries[1] = 7; // ... and node 1 names an unfilled slot
         r.w.ai.infantry_think(r.blue(), r.w);

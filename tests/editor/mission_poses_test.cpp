@@ -221,7 +221,7 @@ struct WorldPeople {
 		return world::infantry_body_pose(world.ai.for_handle(handle)->inf);
 	}
 	// How far the init lifted the body from its spawn at z 0 (no collision world: no ground solve), metres.
-	double rise(world::EntityHandle handle) { return double(world.ai.for_handle(handle)->pos[2]) / 65536.0; }
+	double rise(world::EntityHandle handle) { return double(world.ai.for_handle(handle)->self->position.z.q16) / 65536.0; }
 };
 
 bool same(const world::InfantryBodyPose &a, const world::InfantryBodyPose &b) {

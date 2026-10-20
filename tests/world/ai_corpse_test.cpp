@@ -58,7 +58,7 @@ bool player_sees(testrig::RetailMissionRig &rig, const w::AiEntity &npc) {
 	if (player == nullptr || rig.world.collision == nullptr) return false;
 	const w::Vec3 eye = w::player_eye_position(*player);
 	const int32_t from[3] = {w::to_fixed(eye.x), w::to_fixed(eye.y), w::to_fixed(eye.z)};
-	const int32_t to[3] = {npc.pos[0], npc.pos[1], npc.pos[2] + w::to_fixed(0.5f)};
+	const int32_t to[3] = {npc.self->position.x.q16, npc.self->position.y.q16, npc.self->position.z.q16 + w::to_fixed(0.5f)};
 	return rig.world.collision->raycast_clear(
 			rig.world, from, to, rig.world.cached.local_player, npc.handle);
 }
@@ -194,7 +194,7 @@ int main() {
 				// Use the same posed section centers the round collision walk tests.
 				int32_t widest = 0;
 				for (const auto &section : rig.world.collision->debug_person_sections(
-							rig.world, tai->pos, w::to_fixed(2.0f), 32)) {
+							rig.world, tai->self->position.words().data(), w::to_fixed(2.0f), 32)) {
 					if (section.handle != target || section.masked || section.radius <= widest) continue;
 					widest = section.radius;
 					chest = {section.center[0] / 65536.0f, section.center[1] / 65536.0f,

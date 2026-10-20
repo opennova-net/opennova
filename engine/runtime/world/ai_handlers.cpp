@@ -387,9 +387,9 @@ struct SmWeapons {
     // The pre-seed every site copies into the out block: entity Position and
     // Yaw/Pitch/Roll [orig: @0x472F1D..0x472F4B].
     void seed(int32_t out[6]) const {
-        out[0] = e.pos[0];
-        out[1] = e.pos[1];
-        out[2] = e.pos[2];
+        out[0] = e.self->position.x.q16;
+        out[1] = e.self->position.y.q16;
+        out[2] = e.self->position.z.q16;
         out[3] = e.heading;
         out[4] = e.pitch;
         out[5] = e.roll;
@@ -719,8 +719,8 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     const int32_t tpos[3] = {tent->position.x.q16,
                              tent->position.y.q16,
                              tent->position.z.q16};
-    const int32_t dy = io::bam_sub(tpos[1], e.pos[1]);
-    const int32_t dx = io::bam_sub(tpos[0], e.pos[0]);
+    const int32_t dy = io::bam_sub(tpos[1], e.self->position.y.q16);
+    const int32_t dx = io::bam_sub(tpos[0], e.self->position.x.q16);
     const int32_t bearing = bearing_bam(dy, dx);
     if ((p.flags100 & 1) != 0) {
         ctx.sys->update_waypoint_movement(e, world); // [orig: @0x473A9C]
@@ -817,9 +817,9 @@ void queue_destroy_event(AiThinkCtx &ctx, AiEntity &e) {
 void h_enter_vehicle_dying(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
-    e.net_saved_live_pose[0] = e.pos[0]; // [orig: savedLivePose = Position @0x494684]
-    e.net_saved_live_pose[1] = e.pos[1];
-    e.net_saved_live_pose[2] = e.pos[2];
+    e.net_saved_live_pose[0] = e.self->position.x.q16; // [orig: savedLivePose = Position @0x494684]
+    e.net_saved_live_pose[1] = e.self->position.y.q16;
+    e.net_saved_live_pose[2] = e.self->position.z.q16;
     if (ctx.world != nullptr) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
             if ((ent->engine_flags & kEntityFlagHusk) == 0) { // [orig: AI_TransitionToDeath_GroundVehicle Flags&4 gate @0x467b32]
@@ -885,9 +885,9 @@ void h_vehicle_dying_tick(AiThinkCtx &ctx) {
 	}
 	const bool stopped = hull_death_speed(ctx.world, e) < 1057; // [orig: @0x467CED..0x467D30]
 	const bool still =
-        std::abs(e.pos[0] - e.net_saved_live_pose[0]) < 1024 &&
-        std::abs(e.pos[1] - e.net_saved_live_pose[1]) < 1024 &&
-        std::abs(e.pos[2] - e.net_saved_live_pose[2]) < 1024;
+        std::abs(e.self->position.x.q16 - e.net_saved_live_pose[0]) < 1024 &&
+        std::abs(e.self->position.y.q16 - e.net_saved_live_pose[1]) < 1024 &&
+        std::abs(e.self->position.z.q16 - e.net_saved_live_pose[2]) < 1024;
     if (stopped || still) {
         queue_destroy_event(ctx, e); // [orig: @0x467dcb]
     } else {
@@ -1012,7 +1012,6 @@ void h_aircraft_land_tick(AiThinkCtx &ctx) {
 		b.f[138] = io::bam_sub(z, ground) >= 327680 ? ai.profile.patrol_climb >> 1 : 2114;
 	else {
 		entity->position.z.q16 = ground;
-		ai.pos[2] = ground;
 		b.f[138] = 0;
 		b.set_pend(14);
 	}

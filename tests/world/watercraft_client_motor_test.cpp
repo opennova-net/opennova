@@ -2044,9 +2044,9 @@ w::Entity *mount_ai_driver(Rig &r) {
 int stage_boat_brain(Rig &r, w::AiSystem &sys, int32_t out_speed) {
 	const int ai_idx = sys.attach(r.boat);
 	w::AiEntity &ve = *sys.at(ai_idx);
-	ve.pos[0] = 100 << 16;
-	ve.pos[1] = 200 << 16;
-	ve.pos[2] = 10 << 16;
+	ve.self->position.x.q16 = 100 << 16;
+	ve.self->position.y.q16 = 200 << 16;
+	ve.self->position.z.q16 = 10 << 16;
 	ve.heading = w::bam_heading_from_mission_yaw_deg(90.0);
 	sys.nav.channels.resize(3);
 	sys.nav.channels[2].count = 1;
@@ -2071,6 +2071,7 @@ bool run_authority_ai_boat_drives_afloat() {
 	set_zodiac_boxes(r.traits);
 	r.traits.player_control = true;
 	w::AiSystem sys;
+	sys.bind_registry(&r.world.registry);
 	const int ai_idx = stage_boat_brain(r, sys, 30 * 293); // PatrolSpeed 30
 	w::AiBrain &b = sys.at(ai_idx)->brain;
 	w::Entity *drv = mount_ai_driver(r);
@@ -2088,9 +2089,9 @@ bool run_authority_ai_boat_drives_afloat() {
 		drove = drove || cmd.ai_drive;
 		r.world.vehicles.tick_watercraft_motor(*boat, r.traits, &cmd);
 		w::AiEntity *ve = sys.for_handle(r.boat);
-		ve->pos[0] = static_cast<int32_t>(boat->position.x * 65536.0f);
-		ve->pos[1] = static_cast<int32_t>(boat->position.y * 65536.0f);
-		ve->pos[2] = static_cast<int32_t>(boat->position.z * 65536.0f);
+		ve->self->position.x.q16 = static_cast<int32_t>(boat->position.x * 65536.0f);
+		ve->self->position.y.q16 = static_cast<int32_t>(boat->position.y * 65536.0f);
+		ve->self->position.z.q16 = static_cast<int32_t>(boat->position.z * 65536.0f);
 		ve->heading = boat->veh.yaw_bam;
 		max_dz = std::max(max_dz, std::abs(boat->position.z - 10.0f));
 	}
@@ -2112,6 +2113,7 @@ bool run_authority_boat_parks_without_controller() {
 	set_zodiac_boxes(r.traits);
 	r.traits.player_control = true;
 	w::AiSystem sys;
+	sys.bind_registry(&r.world.registry);
 	const int ai_idx = stage_boat_brain(r, sys, 30 * 293);
 	w::AiBrain &b = sys.at(ai_idx)->brain;
 	w::Entity *boat = r.world.registry.get(r.boat);
@@ -2258,6 +2260,7 @@ bool run_authority_ai_leg_caps_at_waterspeed() {
 	r.traits.player_control = true;
 	r.traits.water_speed = 5000;
 	w::AiSystem sys;
+	sys.bind_registry(&r.world.registry);
 	const int ai_idx = stage_boat_brain(r, sys, 30000); // out_speed above the cap
 	w::AiBrain &b = sys.at(ai_idx)->brain;
 	b.f[w::AiBrain::kCurState] = 22; // must hand back to 16

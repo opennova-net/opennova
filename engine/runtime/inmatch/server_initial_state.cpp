@@ -728,16 +728,14 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		// The scored arm's warm-up, where the pick left the body (D-NET-431).
 		// [orig: Server_PositionPlayerForSpawn @0x50D572]
 		if (pose.warm_up) world::warm_up_player_body(world, *body);
-		// The motor's copy of the pose follows (our motor keeps its own position and
-		// heading words; the placement writes nothing else).
+		// The motor's heading word and smoothing target follow (the position is
+		// the body's own words; the placement writes nothing else).
 		if (pose.found || pose.warm_up) {
 			if (world::AiEntity *motor = world.ai.for_handle(body->handle)) {
 				const int32_t placed[3] = {
 						body->position.x.q16, body->position.y.q16, body->position.z.q16};
-				for (int axis = 0; axis < 3; ++axis) {
-					motor->pos[axis] = placed[axis];
+				for (int axis = 0; axis < 3; ++axis)
 					motor->net_smooth_target[axis] = placed[axis];
-				}
 				if (pose.found) {
 					motor->heading = pose.heading_bam;
 					motor->net_smooth_heading = pose.heading_bam;

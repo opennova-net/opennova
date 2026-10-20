@@ -90,16 +90,16 @@ bool run_field_mapping() {
 	// must still ride the wire unmasked (the original writes the byte whole).
 	src_e.flags = 0x10u | 0x08u | 0x20u;
 	w::AiEntity src_ae{};
-	src_ae.pos[0] = w::to_fixed(12.5);
-	src_ae.pos[1] = w::to_fixed(-34.0);
-	src_ae.pos[2] = w::to_fixed(5.25);
+	src_e.position.x.q16 = w::to_fixed(12.5);
+	src_e.position.y.q16 = w::to_fixed(-34.0);
+	src_e.position.z.q16 = w::to_fixed(5.25);
 	src_ae.heading = 0x20000000; // BAM32 with zero low-16 -> exact i16 round-trip
 	src_ae.pitch = 0x01000000;
 
 	const nw::PlayerExtendedUplink up =
 			ns::build_player_uplink(source_world, src_e, src_ae);
 	if (!expect(up.carrier_handle == 0xFFFF, "on-foot vehicle handle")) return false;
-	if (!expect(up.pos_x == src_ae.pos[0] && up.pos_y == src_ae.pos[1] && up.pos_z == src_ae.pos[2],
+	if (!expect(up.pos_x == src_e.position.x.q16 && up.pos_y == src_e.position.y.q16 && up.pos_z == src_e.position.z.q16,
 	            "pos = live AiEntity.pos (16.16)")) return false;
 	if (!expect(up.heading == static_cast<int16_t>(src_ae.heading >> 16),
 	            "heading = BAM32 high half")) return false;
@@ -216,7 +216,7 @@ bool run_interest_person_los_takes_the_entity_leg() {
 		if (indoors) self.flags |= w::kEntityFlagIndoors;
 		const w::EntityHandle self_h = world.registry.spawn(0, self);
 		w::AiEntity body{};
-		body.pos[2] = w::to_fixed(5.0);
+		world.registry.get(self_h)->position.z.q16 = w::to_fixed(5.0);
 		ns::UplinkClientInputs inputs;
 		inputs.replica = &replica;
 		inputs.self_wire_handle = 0x0002;
@@ -411,9 +411,9 @@ bool run_roundtrip_to_host_snap() {
 	src_e.body_anim_slot = -1;
 	w::AiEntity src_ae{};
 	const int32_t sx = w::to_fixed(100.0), sy = w::to_fixed(200.0), sz = w::to_fixed(-50.0);
-	src_ae.pos[0] = sx;
-	src_ae.pos[1] = sy;
-	src_ae.pos[2] = sz;
+	src_e.position.x.q16 = sx;
+	src_e.position.y.q16 = sy;
+	src_e.position.z.q16 = sz;
 	src_ae.heading = 0x20000000; // i16 high 0x2000 -> mission yaw 45
 	src_ae.pitch = 0x01000000;
 	const nw::PlayerExtendedUplink up =
@@ -460,7 +460,7 @@ bool run_roundtrip_to_host_snap() {
 	if (!expect(pe->yaw == 45, "host peer yaw = 45 (from the joiner's heading)")) return false;
 	const w::AiEntity *ae = ai.for_handle(ph);
 	if (!expect(ae != nullptr, "host peer has an AiEntity")) return false;
-	if (!expect(ae->pos[0] == sx && ae->pos[1] == sy && ae->pos[2] == sz,
+	if (!expect(ae->self->position.x.q16 == sx && ae->self->position.y.q16 == sy && ae->self->position.z.q16 == sz,
 	            "host peer AiEntity live pos = source (16.16 exact)")) return false;
 	if (!expect(ae->heading == src_ae.heading && ae->pitch == src_ae.pitch,
 	            "host peer heading/pitch round-trip exactly (zero low-16 source)")) return false;
@@ -516,8 +516,8 @@ bool run_mounted_moving_carrier_roundtrip() {
 	source_body->pitch = static_cast<int32_t>(0xF4000000u);
 	if (!expect(source_ai_system.refresh_mounted_pose(*source_body, source),
 	            "initial mounted pose refreshed")) return false;
-	const int32_t initial_x = source_body->pos[0];
-	const int32_t initial_y = source_body->pos[1];
+	const int32_t initial_x = source_body->self->position.x.q16;
+	const int32_t initial_y = source_body->self->position.y.q16;
 
 	// Simulate the carrier's later mover and the joiner's final same-frame seat
 	// refresh. Non-zero pitch/roll ensure the builder and apply use one full frame.
@@ -533,13 +533,13 @@ bool run_mounted_moving_carrier_roundtrip() {
 	source.registry.get(source_player_h)->net_analog_x = -64;
 	source.registry.get(source_player_h)->net_analog_y = 37;
 	source.registry.get(source_player_h)->net_analog_z = -128;
-	if (!expect(source_body->pos[0] != initial_x || source_body->pos[1] != initial_y,
+	if (!expect(source_body->self->position.x.q16 != initial_x || source_body->self->position.y.q16 != initial_y,
 	            "mounted local body followed the moving carrier")) return false;
 	const nw::PlayerExtendedUplink up = ns::build_player_uplink(
 			source, *source.registry.get(source_player_h), *source_body);
 	if (!expect(up.carrier_handle == source_carrier_h.packed,
 	            "mounted uplink carries the actual vehicle handle")) return false;
-	if (!expect(up.pos_x != source_body->pos[0] || up.pos_y != source_body->pos[1],
+	if (!expect(up.pos_x != source_body->self->position.x.q16 || up.pos_y != source_body->self->position.y.q16,
 	            "mounted uplink position is carrier-local, not world")) return false;
 	const int32_t source_carrier_yaw = carrier_heading_bam(*source_carrier);
 	const int32_t expected_local_heading = static_cast<int32_t>(
@@ -585,12 +585,12 @@ bool run_mounted_moving_carrier_roundtrip() {
 	                    host_player->net_analog_y == 37 && host_player->net_analog_z == -128,
 	            "mounted throttle and steering reach authority through the real uplink"))
 		return false;
-	if (!expect(host_body != nullptr && host_body->pos[0] == lifted.x &&
-	                    host_body->pos[1] == lifted.y && host_body->pos[2] == lifted.z,
+	if (!expect(host_body != nullptr && host_body->self->position.x.q16 == lifted.x &&
+	                    host_body->self->position.y.q16 == lifted.y && host_body->self->position.z.q16 == lifted.z,
 	            "host lifts mounted local pose through the full carrier frame")) return false;
-	if (!expect(near_fixed(host_body->pos[0], source_body->pos[0]) &&
-	                    near_fixed(host_body->pos[1], source_body->pos[1]) &&
-	                    near_fixed(host_body->pos[2], source_body->pos[2]),
+	if (!expect(near_fixed(host_body->self->position.x.q16, source_body->self->position.x.q16) &&
+	                    near_fixed(host_body->self->position.y.q16, source_body->self->position.y.q16) &&
+	                    near_fixed(host_body->self->position.z.q16, source_body->self->position.z.q16),
 	            "mounted builder/apply round-trip preserves the source world pose")) return false;
 	const int32_t expected_host_heading = static_cast<int32_t>(
 			(static_cast<uint32_t>(static_cast<uint16_t>(up.heading)) << 16) +
@@ -639,9 +639,9 @@ bool run_ground_target_carrier_roundtrip() {
 			static_cast<uint32_t>(deck_yaw),
 			static_cast<uint32_t>(carrier_axis_bam(source_deck->pitch)),
 			static_cast<uint32_t>(carrier_axis_bam(source_deck->roll)));
-	source_body->pos[0] = source_world_pose.x;
-	source_body->pos[1] = source_world_pose.y;
-	source_body->pos[2] = source_world_pose.z;
+	source_body->self->position.x.q16 = source_world_pose.x;
+	source_body->self->position.y.q16 = source_world_pose.y;
+	source_body->self->position.z.q16 = source_world_pose.z;
 	source_body->heading = static_cast<int32_t>(
 			static_cast<uint32_t>(deck_yaw) + 0x12340000u);
 	source_body->pitch = 0x04000000;
@@ -674,12 +674,12 @@ bool run_ground_target_carrier_roundtrip() {
 			w::to_fixed(deck_seed.position.z), static_cast<uint32_t>(deck_yaw),
 			static_cast<uint32_t>(carrier_axis_bam(deck_seed.pitch)),
 			static_cast<uint32_t>(carrier_axis_bam(deck_seed.roll)));
-	if (!expect(host_body != nullptr && host_body->pos[0] == lifted.x &&
-	                    host_body->pos[1] == lifted.y && host_body->pos[2] == lifted.z,
+	if (!expect(host_body != nullptr && host_body->self->position.x.q16 == lifted.x &&
+	                    host_body->self->position.y.q16 == lifted.y && host_body->self->position.z.q16 == lifted.z,
 	            "authority lifts ground-local pose through the carrier")) return false;
-	if (!expect(near_fixed(host_body->pos[0], source_body->pos[0]) &&
-	                    near_fixed(host_body->pos[1], source_body->pos[1]) &&
-	                    near_fixed(host_body->pos[2], source_body->pos[2]),
+	if (!expect(near_fixed(host_body->self->position.x.q16, source_body->self->position.x.q16) &&
+	                    near_fixed(host_body->self->position.y.q16, source_body->self->position.y.q16) &&
+	                    near_fixed(host_body->self->position.z.q16, source_body->self->position.z.q16),
 	            "ground-target round-trip preserves source world pose")) return false;
 	return expect(host_player != nullptr && !host_player->mounted &&
 	                      host_player->ground_target == host_deck_h,
@@ -873,9 +873,10 @@ bool run_mounted_echo_names_the_seat_ground_link() {
 	self_seed.mount_type = w::SeatType::Driver;
 	const w::EntityHandle self = world.registry.spawn(0, self_seed);
 	w::AiEntity body{};
-	body.pos[0] = w::to_fixed(86.0);
-	body.pos[1] = w::to_fixed(-19.0);
-	body.pos[2] = w::to_fixed(8.0);
+	w::EntityPosition &self_pos = world.registry.get(self)->position;
+	self_pos.x.q16 = w::to_fixed(86.0);
+	self_pos.y.q16 = w::to_fixed(-19.0);
+	self_pos.z.q16 = w::to_fixed(8.0);
 	body.heading = 0x61230000;
 	ns::ClientEntityState echo;
 	echo.handle = 0x0002;
@@ -890,8 +891,8 @@ bool run_mounted_echo_names_the_seat_ground_link() {
 	inputs.self_echo = &echo;
 	const nw::PlayerExtendedUplink open_ground =
 			ns::build_player_uplink(world, *world.registry.get(self), body, inputs);
-	ok &= expect(open_ground.carrier_handle == 0xFFFF && open_ground.pos_x == body.pos[0] &&
-			open_ground.pos_y == body.pos[1] && open_ground.pos_z == body.pos[2] &&
+	ok &= expect(open_ground.carrier_handle == 0xFFFF && open_ground.pos_x == self_pos.x.q16 &&
+			open_ground.pos_y == self_pos.y.q16 && open_ground.pos_z == self_pos.z.q16 &&
 			open_ground.heading == static_cast<int16_t>(body.heading >> 16),
 			"an echo frame on open ground uplinks no carrier and the world pose");
 	// A vehicle standing on a deck: the echo names the deck, in its frame,

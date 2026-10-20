@@ -212,10 +212,10 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     ent->engine_flags = (ent->engine_flags & ~kEntityFlagParachute) | (chute_flags & kEntityFlagParachute);
     if ((chute_flags & kEntityFlagParachute) != 0 && inf.anim_state != anim_state::kParachute)
         inf.request_body_animation(anim_state::kParachute);
-    if (chute.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.pos);
-    if (chute.closed) emit_slot_sound(world, e, audio::kSlotChuteClose, e.pos);
-    if (chute.flap) emit_slot_sound(world, e, audio::kSlotChuteFlap, e.pos);
-    if (chute.free_fall) emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
+    if (chute.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.self->position.words().data());
+    if (chute.closed) emit_slot_sound(world, e, audio::kSlotChuteClose, e.self->position.words().data());
+    if (chute.flap) emit_slot_sound(world, e, audio::kSlotChuteFlap, e.self->position.words().data());
+    if (chute.free_fall) emit_slot_sound(world, e, audio::kSlotFreeFall, e.self->position.words().data());
 
     const bool carried = infantry_follow_carrier(e, world, collision_frame.capsule_bottom, true);
 
@@ -227,24 +227,19 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     const bool resolve_contacts = collision != nullptr && collision->instance_count() != 0;
     if (resolve_contacts) {
         int32_t contact_vel[2] = {0, 0}, contact_vel_z = 0;
-        const int32_t tick_start_z = e.pos[2];
+        const int32_t tick_start_z = e.self->position.z.q16;
         const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
+        std::array<int32_t, 3> pos = e.self->position.words();
         collision->resolve_entity(
-                world, e.handle, e.collide_state, e.pos, contact_vel,
+                world, e.handle, e.collide_state, pos.data(), contact_vel,
                 contact_vel_z,
                 have_collision_frame ? collision_frame.capsule_bottom : 0,
                 have_collision_frame ? collision_frame.capsule_top : 0,
                 e.heading, e.pitch, ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0,
                 is_authority, logic_tick, inf.anim_state,
                 infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio);
+        e.self->position.set_q16({pos[0], pos[1], pos[2]});
         ent->health = e.health;
-    }
-    // Only motor-owned movement writes position back; otherwise retain the
-    // wire-owned registry pose, including in data-less authority fixtures.
-    if (carried || resolve_contacts) {
-        ent->position.x.q16 = e.pos[0];
-        ent->position.y.q16 = e.pos[1];
-        ent->position.z.q16 = e.pos[2];
     }
 
     // Present-pass clip for the host's own third-person view of this peer.

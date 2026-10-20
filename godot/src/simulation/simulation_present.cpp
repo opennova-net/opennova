@@ -572,7 +572,9 @@ Vector3 Simulation::get_entity_position(int p_index) const {
 	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return Vector3();
 	// mission (x, y, z) 16.16 -> Godot (x, z, -y) world units. [orig render remap: (x, z, -y).]
-	return godot_from_fixed3(e->pos);
+	// A freed slot belongs to no entity (its words read zero).
+	if (e->self == nullptr) return Vector3();
+	return godot_from_fixed3(e->self->position.words());
 }
 
 float Simulation::get_entity_yaw_deg(int p_index) const {

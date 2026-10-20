@@ -1703,9 +1703,9 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     seed.group_id = 7;
     const auto person = w.registry.spawn(0, seed);
     w.ai.attach(person);
-    w.ai.for_handle(person)->pos[0] = -2 * 65536;
-    w.ai.for_handle(person)->pos[1] = -3 * 65536;
-    w.ai.for_handle(person)->pos[2] = 4 * 65536;
+    w.ai.for_handle(person)->self->position.x.q16 = -2 * 65536;
+    w.ai.for_handle(person)->self->position.y.q16 = -3 * 65536;
+    w.ai.for_handle(person)->self->position.z.q16 = 4 * 65536;
     seed.net_id = 103; seed.item_type = 1;
     const auto vehicle = w.registry.spawn(1, seed);
     seed.net_id = 104;
@@ -1754,7 +1754,7 @@ static void test_wac_positional_sound_and_teleport_quirk() {
         CHECK(w.registry.get(handle)->position.z == 5.0f);
     }
     CHECK(w.registry.get(person)->health == 80);
-    CHECK(w.ai.for_handle(person)->pos[0] == 20 * 65536);
+    CHECK(w.ai.for_handle(person)->self->position.x.q16 == 20 * 65536);
     CHECK(w.registry.get(itemless)->position.x == -2.0f);
     CHECK(w.diagnostics.empty());
 }

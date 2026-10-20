@@ -9,7 +9,7 @@ void play_at_entity(World &world, const Entity &entity, const std::string &name)
     SoundSlotEvent sound;
     sound.source_handle = entity.handle.packed;
     if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
-        for (int axis = 0; axis < 3; ++axis) sound.pos[axis] = body->pos[axis];
+        for (int axis = 0; axis < 3; ++axis) sound.pos[axis] = body->self->position.word(axis);
     } else {
         sound.pos[0] = entity.position.x.q16;
         sound.pos[1] = entity.position.y.q16;

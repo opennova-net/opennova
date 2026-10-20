@@ -22,7 +22,7 @@ namespace {
 // Preserve the AI position's low bits instead of round-tripping through floats.
 void position_of(const AiSystem &ai, const Entity &entity, int32_t out[3]) {
     if (const AiEntity *body = ai.for_handle(entity.handle)) {
-        std::copy_n(body->pos, 3, out);
+        std::copy_n(body->self->position.words().data(), 3, out);
     } else {
         out[0] = entity.position.x.q16;
         out[1] = entity.position.y.q16;

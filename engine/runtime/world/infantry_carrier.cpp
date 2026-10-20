@@ -27,9 +27,9 @@ static void follow_ground_carrier(AiEntity &e, World &world, int32_t bottom, boo
     int32_t pos[3], yaw, pitch, roll;
     carrier_pose_fixed(*carrier, pos, yaw, pitch, roll);
     if (player_body) {
-        const double dx = double(e.pos[0]) - pos[0];
-        const double dy = double(e.pos[1]) - pos[1];
-        const double dz = double(e.pos[2]) - pos[2];
+        const double dx = double(e.self->position.x.q16) - pos[0];
+        const double dy = double(e.self->position.y.q16) - pos[1];
+        const double dz = double(e.self->position.z.q16) - pos[2];
         const int32_t distance = static_cast<int32_t>(std::min(
                 std::sqrt(dx * dx + dy * dy + dz * dz), 2147418112.0));
         // Only org2 drops an unmounted ground link outside the carrier radius.
@@ -40,7 +40,7 @@ static void follow_ground_carrier(AiEntity &e, World &world, int32_t bottom, boo
         }
     }
     CarrierMotionPose p;
-    std::copy_n(e.pos, 3, p.pos);
+    std::copy_n(e.self->position.words().data(), 3, p.pos);
     // Both inline twins rotate about the animation capsule midpoint, then
     // restore the bias. The standalone shared operation has no such bias.
     // [orig: org1 @0x4BA509 / @0x4BA79B; org2 @0x4B53A1 / @0x4B5649]
@@ -48,7 +48,7 @@ static void follow_ground_carrier(AiEntity &e, World &world, int32_t bottom, boo
     p.yaw_bam = e.heading;
     follow_carrier_motion(*carrier, p);
     p.pos[2] = io::bam_add(p.pos[2], bottom >> 1);
-    std::copy_n(p.pos, 3, e.pos);
+    e.self->position.set_q16({p.pos[0], p.pos[1], p.pos[2]});
     const int32_t dyaw = io::bam_sub(yaw, carrier->saved_live_yaw);
     const int32_t dpitch = p.pitch_bam;
     InfantryState &inf = e.inf;
@@ -78,10 +78,10 @@ static void follow_ground_carrier(AiEntity &e, World &world, int32_t bottom, boo
     else e.pitch = io::bam_add(e.pitch, dpitch);
 }
 bool infantry_follow_carrier(AiEntity &e, World &world, int32_t bottom, bool player_body) {
-    const int32_t before[3] = {e.pos[0], e.pos[1], e.pos[2]};
+    const int32_t before[3] = {e.self->position.x.q16, e.self->position.y.q16, e.self->position.z.q16};
     follow_ground_carrier(e, world, bottom, player_body);
     const Entity *self = world.registry.get(e.handle);
-    const bool moved = e.pos[0] != before[0] || e.pos[1] != before[1] || e.pos[2] != before[2];
+    const bool moved = e.self->position.x.q16 != before[0] || e.self->position.y.q16 != before[1] || e.self->position.z.q16 != before[2];
     if (!player_body || self == nullptr || self->mounted) return moved;
     // Org2 feeds carrier pitch gradually into look, including the residual
     // after walking off. The local input mirror must retain this motor write.

@@ -88,7 +88,6 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         entity.veh.air_roll_bam = 0;
     }
     AiEntity &ai = *world.ai.at(index);
-    std::copy_n(request.pos, 3, ai.pos);
     std::copy_n(request.pos, 3, ai.net_saved_live_pose);
     std::copy_n(request.pos, 3, entity.saved_live_pos);
     entity.saved_live_yaw = request.heading;

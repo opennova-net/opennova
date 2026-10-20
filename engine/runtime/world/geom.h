@@ -8,6 +8,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -86,6 +87,12 @@ struct EntityPosition {
         return *this;
     }
     FixedVec3 q16() const { return {x.q16, y.q16, z.q16}; }
+    // Axis i's word (0 x, 1 y, 2 z), the indexed form of x.q16 / y.q16 / z.q16.
+    int32_t &word(int i) { return i == 0 ? x.q16 : (i == 1 ? y.q16 : z.q16); }
+    int32_t word(int i) const { return i == 0 ? x.q16 : (i == 1 ? y.q16 : z.q16); }
+    // The three words as one array: the form retail hands a callee as
+    // &entity->Position (a const int32_t[3] parameter).
+    std::array<int32_t, 3> words() const { return {x.q16, y.q16, z.q16}; }
     void set_q16(const FixedVec3 &w) {
         x.q16 = w.x;
         y.q16 = w.y;

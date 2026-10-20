@@ -9,7 +9,7 @@ namespace {
 FixedVec3 script_position(const World &world, const Entity &entity) {
     // The motor owns the exact Q16 pose where an organic component exists.
     if (const AiEntity *body = world.ai.for_handle(entity.handle))
-        return {body->pos[0], body->pos[1], body->pos[2]};
+        return {body->self->position.x.q16, body->self->position.y.q16, body->self->position.z.q16};
     return {entity.position.x.q16, entity.position.y.q16, entity.position.z.q16};
 }
 } // namespace

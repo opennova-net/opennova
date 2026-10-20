@@ -727,9 +727,9 @@ int main() {
 	CHECK(near_equal(kernel.local.player_position().y, 200.0f, 0.001f));
 	CHECK(near_equal(kernel.local.player_position().z, 5.0f, 0.001f));
 	if (const w::AiEntity *body = kernel.local.player_ai()) {
-		CHECK(body->pos[0] == 100 << 16);
-		CHECK(body->pos[1] == 200 << 16);
-		CHECK(body->pos[2] == 5 << 16);
+		CHECK(body->self->position.x.q16 == 100 << 16);
+		CHECK(body->self->position.y.q16 == 200 << 16);
+		CHECK(body->self->position.z.q16 == 5 << 16);
 		CHECK(kernel.local.input.look_heading == body->heading);
 	}
 
@@ -741,7 +741,7 @@ int main() {
 		body->inf.vel[2] = -0x8000;
 		const int32_t pos_q16[3] = {819200, -212992, 8437761};
 		CHECK(kernel.local.apply_pose(pos_q16, static_cast<int32_t>(0xC0000000u), -268435456));
-		CHECK(body->pos[0] == 819200 && body->pos[1] == -212992 && body->pos[2] == 8437761);
+		CHECK(body->self->position.x.q16 == 819200 && body->self->position.y.q16 == -212992 && body->self->position.z.q16 == 8437761);
 		CHECK(near_equal(kernel.local.player_position().x, 12.5f, 0.0001f));
 		CHECK(near_equal(kernel.local.player_position().y, -3.25f, 0.0001f));
 		CHECK(body->heading == static_cast<int32_t>(0xC0000000u) && body->pitch == -268435456);
@@ -754,7 +754,7 @@ int main() {
 	// set_entity_position / set_entity_health round-trip the same dual store.
 	kernel.world.commands.set_entity_position(player_h, w::Vec3{50.0f, 60.0f, 2.0f});
 	CHECK(near_equal(kernel.local.player_position().x, 50.0f, 0.001f));
-	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->pos[1] == 60 << 16);
+	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->self->position.y.q16 == 60 << 16);
 	kernel.world.commands.set_entity_health(player_h, 37);
 	CHECK(kernel.local.player_health() == 37);
 	CHECK(kernel.local.player()->alive);

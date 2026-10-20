@@ -320,7 +320,6 @@ void WeaponRange::reset_() {
 		world.ai.attach(soldier_);
 		if (world::AiEntity *body = world.ai.for_handle(soldier_)) {
 			body->inf.active = true;
-			body->pos[2] = q16(kEyeHeight);
 		}
 	}
 	// The shooter: the local player, a person of the player class standing at the range's eye, its eye there (no
@@ -345,7 +344,6 @@ void WeaponRange::reset_() {
 		if (world::AiEntity *body = world.ai.for_handle(shooter)) {
 			body->inf.active = true;
 			body->inf.is_local_player = true;
-			body->pos[2] = q16(kEyeHeight);
 		}
 	}
 	// The target: a building standing `range` metres down the line of fire, its face the surface picked.

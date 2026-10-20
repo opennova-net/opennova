@@ -110,7 +110,7 @@ void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
             Entity seeker = *owner;
             seeker.position = r.pos;
             AiEntity pose;
-            std::copy_n(s.pos, 3, pose.pos);
+            pose.self = &seeker; // the round's words, s.pos (copy_pose)
             pose.heading = s.yaw_bam; pose.pitch = s.pitch_bam; pose.roll = s.roll_bam;
             const EntityHandle chosen = guided_heat_target(world, seeker, pose, ammo);
             in.acquired_target = chosen.packed;

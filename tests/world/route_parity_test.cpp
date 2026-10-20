@@ -87,7 +87,7 @@ void test_single_node_lists_are_one_shot() {
     hull.health = 100;
     const EntityHandle h = w.registry.spawn(1, hull);
     AiEntity &ai = *w.ai.at(w.ai.attach(h));
-    ai.pos[0] = 100 << 16;
+    ai.self->position.x.q16 = 100 << 16;
     AiBrain &b = ai.brain;
     b.f[AiBrain::kCurState] = 16;
     b.f[AiBrain::kSpeedB] = 4096;
@@ -412,27 +412,27 @@ void test_nav_reads_are_unbounded() {
     AiEntity &ai = *w.ai.at(w.ai.attach(h));
 
     // Standing on marker 3, the nearest node of list 1 is its node 33.
-    ai.pos[0] = 300 << 16;
+    ai.self->position.x.q16 = 300 << 16;
     CHECK(w.ai.nearest_route_node(ai, 1) == 33);
     // At the origin, list 4's unfilled slot 40 measures zero: node 1.
-    ai.pos[0] = 0;
-    ai.pos[1] = 10 << 16;
+    ai.self->position.x.q16 = 0;
+    ai.self->position.y.q16 = 10 << 16;
     CHECK(w.ai.nearest_route_node(ai, 4) == 1);
 
     AiBrain &b = ai.brain;
     b.f[AiBrain::kWpType] = 1;
     b.f[AiBrain::kWpChannel] = 1;
     b.f[AiBrain::kWpNode] = 33;
-    CHECK(ai_waypoint_update_target(b, ai.pos, nav) == 0);
+    CHECK(ai_waypoint_update_target(b, ai.self->position.words().data(), nav) == 0);
     CHECK(b.f[AiBrain::kWpResolved] == 3);
     CHECK(b.f[AiBrain::kWpNodeVal] == (4 << 16)); // marker 3's wp_distance 4
     b.f[AiBrain::kWpChannel] = 3;
     b.f[AiBrain::kWpNode] = 5;
-    CHECK(ai_waypoint_update_target(b, ai.pos, nav) == 0);
+    CHECK(ai_waypoint_update_target(b, ai.self->position.words().data(), nav) == 0);
     CHECK(b.f[AiBrain::kWpResolved] == 3);
     b.f[AiBrain::kWpChannel] = 4;
     b.f[AiBrain::kWpNode] = 1;
-    CHECK(ai_waypoint_update_target(b, ai.pos, nav) == 0);
+    CHECK(ai_waypoint_update_target(b, ai.self->position.words().data(), nav) == 0);
     CHECK(b.f[AiBrain::kWpResolved] == 40);
     CHECK(b.f[AiBrain::kWpNodeVal] == 0);
     CHECK(b.f[AiBrain::kWpExtra] == 0);
@@ -573,7 +573,7 @@ void test_parked_airborne_hull_spins() {
         helo.veh.ground_cache = 10 << 16;
         helo.veh.air_probe_z_off = c.probe_off;
         if (c.in_air) helo.flags |= kEntityFlagInAir;
-        r.w.ai.for_handle(r.helo_h)->pos[2] = c.z;
+        r.w.ai.for_handle(r.helo_h)->self->position.z.q16 = c.z;
         r.w.ai.chel_ai_drive(r.w, helo, nullptr, r.traits);
         const int32_t want = c.spins ? 0x10000000 - 2886390 : 0x10000000;
         CHECK(helo.veh.yaw_bam == want);
@@ -602,9 +602,9 @@ void test_flight_floor_is_the_fresh_sample() {
     helo.veh.yaw_seeded = true;
     helo.veh.ground_cache = 5 << 16;
     AiEntity &ai = *r.w.ai.for_handle(r.helo_h);
-    ai.pos[0] = 100 << 16;
-    ai.pos[1] = 20 << 16;
-    ai.pos[2] = z;
+    ai.self->position.x.q16 = 100 << 16;
+    ai.self->position.y.q16 = 20 << 16;
+    ai.self->position.z.q16 = z;
     NavNodeTable &nav = r.w.ai.nav;
     nav.nodes.resize(1);
     nav.nodes[0].f[1] = 102 << 16;
@@ -620,7 +620,7 @@ void test_flight_floor_is_the_fresh_sample() {
     b.f[AiBrain::kOutSpeed] = 65536;
     r.w.ai.chel_ai_drive(r.w, helo, &r.pilot(), r.traits);
     CHECK(helo.veh.cmd_speed == 8192);                        // an eighth
-    CHECK(ai.pos[0] == (100 << 16) + ((2 << 16) >> 6));       // a 64th onto the node
+    CHECK(ai.self->position.x.q16 == (100 << 16) + ((2 << 16) >> 6));       // a 64th onto the node
     CHECK(helo.veh.net_alt_target == (5 << 16) - 0x2000);     // parked on the CACHE
 }
 

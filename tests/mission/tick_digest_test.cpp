@@ -139,9 +139,9 @@ void hash_entity(Digest &d, const w::Entity &e) {
 }
 
 void hash_ai(Digest &d, const w::AiEntity &a) {
-	d.value(a.pos[0]);
-	d.value(a.pos[1]);
-	d.value(a.pos[2]);
+	d.value(a.self->position.x.q16);
+	d.value(a.self->position.y.q16);
+	d.value(a.self->position.z.q16);
 	d.value(a.heading);
 	d.value(a.pitch);
 	d.value(a.roll);

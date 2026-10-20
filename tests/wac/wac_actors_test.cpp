@@ -145,14 +145,14 @@ static void test_force_animation_think_cadence_and_retry() {
 static void test_fall_changes_only_live_z_and_wraps() {
     Fixture f;
     auto &body = f.body();
-    body.pos[0] = 65536; body.pos[1] = -65536; body.pos[2] = 2147418112;
+    body.self->position.x.q16 = 65536; body.self->position.y.q16 = -65536; body.self->position.z.q16 = 2147418112;
     body.inf.vel[2] = -99;
     body.inf.jump_cooldown = 7;
     f.entity().position = {1.0f, -1.0f, 32767.0f};
-    const int32_t expected = static_cast<int32_t>(uint32_t(body.pos[2]) + 0x1F40000u);
+    const int32_t expected = static_cast<int32_t>(uint32_t(body.self->position.z.q16) + 0x1F40000u);
     f.script("fall() store(v1)\n");
     CHECK(f.world.script.vars.get_mission(1) == 1);
-    CHECK(body.pos[0] == 65536 && body.pos[1] == -65536 && body.pos[2] == expected);
+    CHECK(body.self->position.x.q16 == 65536 && body.self->position.y.q16 == -65536 && body.self->position.z.q16 == expected);
     CHECK(f.entity().position.z == float(from_fixed(expected)));
     CHECK(body.inf.vel[2] == -99 && body.inf.jump_cooldown == 7);
     f.world.cached.local_player = {};
@@ -275,7 +275,7 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     f.world.ai.attach(h);
     const int32_t precise[3] = {6553601, 13107203, 1966105};
     auto *target_body = f.world.ai.for_handle(h);
-    for (int axis = 0; axis < 3; ++axis) target_body->pos[axis] = precise[axis];
+    for (int axis = 0; axis < 3; ++axis) target_body->self->position.word(axis) = precise[axis];
     f.entity().health = 0; f.entity().alive = false;
     f.entity().flags = kEntityFlagDead;
     f.entity().yaw = 31; f.entity().pitch = 7; f.entity().roll = -4;
@@ -306,7 +306,7 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     CHECK(f.body().inf.vel[0] == 17 && f.body().inf.vel[1] == -21 &&
           f.body().inf.vel[2] == 91 && f.body().inf.jump_cooldown == 7);
     for (int axis = 0; axis < 3; ++axis) {
-        CHECK(f.body().pos[axis] == precise[axis]);
+        CHECK(f.body().self->position.word(axis) == precise[axis]);
         CHECK(f.body().net_saved_live_pose[axis] == precise[axis]);
         CHECK(f.entity().saved_live_pos[axis] == precise[axis]);
     }

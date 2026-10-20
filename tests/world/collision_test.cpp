@@ -259,12 +259,12 @@ void test_infantry_detour_cache_and_arrival() {
     inf.move_target[1] = fx(30);
     rig.world.ai.infantry_select(brain, rig.world);
     CHECK(inf.detour_target[0] == cached[0] && inf.detour_target[1] == cached[1]);
-    brain.pos[0] = cached[0] - fx(1);
-    brain.pos[1] = cached[1];
-    brain.pos[2] = fx(100); // arrival deliberately ignores height
+    brain.self->position.x.q16 = cached[0] - fx(1);
+    brain.self->position.y.q16 = cached[1];
+    brain.self->position.z.q16 = fx(100); // arrival deliberately ignores height
     rig.world.ai.infantry_select(brain, rig.world);
     CHECK(inf.path_state == 2);
-    brain.pos[0] += fx(0.5);
+    brain.self->position.x.q16 += fx(0.5);
     rig.world.ai.infantry_select(brain, rig.world);
     CHECK(inf.path_state == 0);
     inf.path_state = 2;
@@ -364,8 +364,8 @@ void test_infantry_route_walks_around_wall() {
     ai.root_motion = &source;
     auto &body = *ai.at(ai.attach(rig.soldier));
     body.inf.active = true;
-    body.pos[0] = fx(14);
-    body.pos[1] = fx(10);
+    body.self->position.x.q16 = fx(14);
+    body.self->position.y.q16 = fx(10);
     body.heading = body.inf.body_heading = body.inf.target_heading = INT32_MIN;
     ai.nav.channels.resize(2);
     auto &channel = ai.nav.channels[1];
@@ -394,7 +394,7 @@ void test_infantry_route_walks_around_wall() {
         const Entity *walker = rig.world.registry.get(rig.soldier);
         grounded &= walker != nullptr &&
                 ((walker->flags | walker->engine_flags) & kEntityFlagInAir) == 0;
-        if (std::hypot(double(body.pos[0] - fx(6)), double(body.pos[1] - fx(10))) < fx(0.75)) {
+        if (std::hypot(double(body.self->position.x.q16 - fx(6)), double(body.self->position.y.q16 - fx(10))) < fx(0.75)) {
             arrived = true;
             break;
         }
@@ -6112,6 +6112,7 @@ void test_cached_los_excludes_the_endpoint_carrier() {
     CHECK(mounted != nullptr && mounted->mounted && mounted->mount_target == hull_h);
 
     AiSystem sys;
+    sys.bind_registry(&world.registry);
     sys.terrain = &flat.field;
     sys.collision = &collision;
 

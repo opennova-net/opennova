@@ -150,7 +150,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 			// (world/round_sim.h entity_eye_below_water)
 			// [orig: HUD_DrawCrosshair @0x592b59..0x592b65]
 			const bool below_water = entity_eye_below_water(
-					world, body->pos[2], local != nullptr ? local->eye_offset_z : 0);
+					world, body->self->position.z.q16, local != nullptr ? local->eye_offset_z : 0);
 			if (body->inf.stance == InfantryState::Stance::kProne)
 				category = 0;
 			else if (body->inf.stance == InfantryState::Stance::kCrouch)

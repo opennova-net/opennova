@@ -42,9 +42,9 @@ uint32_t entity_source_id(const Entity &entity) {
 // float mirror.
 void entity_position_q16(const World &world, const Entity &entity, int32_t out[3]) {
 	if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
-		out[0] = body->pos[0];
-		out[1] = body->pos[1];
-		out[2] = body->pos[2];
+		out[0] = body->self->position.x.q16;
+		out[1] = body->self->position.y.q16;
+		out[2] = body->self->position.z.q16;
 		return;
 	}
 	out[0] = entity.position.x.q16;
@@ -196,7 +196,7 @@ void radar_add_blip(World &world, uint32_t source, const int32_t pos[3], int32_t
 	if (local == nullptr) return;
 	const AiEntity *body = world.ai.for_handle(world.cached.local_player);
 	if (body == nullptr) return;
-	radar_add_blip(local->radar, world.rules.mpattrib, body->pos,
+	radar_add_blip(local->radar, world.rules.mpattrib, body->self->position.words().data(),
 			static_cast<uint32_t>(body->heading), source, pos, kind);
 }
 
@@ -376,7 +376,7 @@ int32_t radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_si
 	int32_t aged = 0;
 	if (runs && !local->view.death_screen_active) {
 		// [orig: @0x5a8164..0x5a817d]
-		aged = radar_update_contacts(state, tick, body->pos, static_cast<uint32_t>(body->heading));
+		aged = radar_update_contacts(state, tick, body->self->position.words().data(), static_cast<uint32_t>(body->heading));
 		// The incoming-lock loop: re-registered every pass frame while the
 		// tone word is live, outside the in-game menu pause, on the local
 		// player's own lane at its Position [orig: @0x5a8185..0x5a81bf].
@@ -398,15 +398,15 @@ int32_t radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_si
 		// The death screen skips the pass's own call; the corner map's site
 		// then stands in, a no-op within a tick otherwise
 		// [orig: HUD_DrawMapOverlay @0x5a790a..0x5a791c].
-		aged = radar_update_contacts(state, tick, body->pos, static_cast<uint32_t>(body->heading));
+		aged = radar_update_contacts(state, tick, body->self->position.words().data(), static_cast<uint32_t>(body->heading));
 	}
 	out.red12 = state.red12;
 	out.olive12 = state.olive12;
 	out.red24 = state.red24;
 	out.olive24 = state.olive24;
 	out.rules_no_tracers = (world.rules.mpattrib & kRadarRulesNoTracers) != 0;
-	out.local_x = body->pos[0];
-	out.local_y = body->pos[1];
+	out.local_x = body->self->position.x.q16;
+	out.local_y = body->self->position.y.q16;
 	// The ring reads each listed missile's LIVE position through the stored
 	// pointer [orig: HUD_DrawDirectionalIndicatorRing @0x598279..0x598294].
 	for (int32_t i = 0; i < state.missile_count; ++i) {

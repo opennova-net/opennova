@@ -119,7 +119,7 @@ struct Rig {
         e->health = 100;
         e->profile.sound_profile =
             static_cast<int16_t>(world.tables.sound_profiles.index_of("SP_Test"));
-        e->pos[2] = fx(0.0);
+        e->self->position.z.q16 = fx(0.0);
         src.clips = {anim_state::kIdle, anim_state::kWalkForward};
         e->inf.anim_state = anim_state::kIdle;
         if (local_player) world.cached.local_player = h;
@@ -177,7 +177,7 @@ void test_bodies_update_in_slot_order() {
         e->inf.active = true;
         e->health = 100;
         e->profile.sound_profile = config.profile.sound_profile;
-        e->pos[2] = fx(0.0);
+        e->self->position.z.q16 = fx(0.0);
         e->inf.anim_state = anim_state::kIdle;
     }
     CHECK(rig.ai.index_of(*eb) < rig.ai.index_of(*ea));
@@ -240,7 +240,7 @@ void test_foot_dip_water_and_surface_picks() {
     Rig rig;
     rig.src.events = 0x3; // both feet
     rig.src.capsule_bottom = fx(0.5);
-    rig.e->pos[2] = fx(2.0);
+    rig.e->self->position.z.q16 = fx(2.0);
 
     // Ground: dipped z = 1.5 in the emitted position.
     rig.run(1, 2);
@@ -271,8 +271,8 @@ void test_foot_dip_water_and_surface_picks() {
     rig.world.tables.surface_map.width = 4;
     rig.world.tables.surface_map.height = 4;
     rig.world.tables.surface_map.sector_grid = grid;
-    rig.e->pos[0] = fx(10.0);
-    rig.e->pos[1] = -fx(10.0); // mission y negated in the sampler row math
+    rig.e->self->position.x.q16 = fx(10.0);
+    rig.e->self->position.y.q16 = -fx(10.0); // mission y negated in the sampler row math
     rig.run(5, 6);
     evs = rig.take();
     CHECK(evs.size() == 2);
@@ -291,7 +291,7 @@ void test_foot_obj_pick() {
     Rig rig;
     rig.src.events = 0x3; // both feet
     rig.src.capsule_bottom = fx(0.5);
-    rig.e->pos[2] = fx(2.0);
+    rig.e->self->position.z.q16 = fx(2.0);
     Entity plat;
     plat.health = 100;
     plat.alive = true;
@@ -345,8 +345,8 @@ void test_foot_obj_pick() {
     rig.world.tables.surface_map.width = 4;
     rig.world.tables.surface_map.height = 4;
     rig.world.tables.surface_map.sector_grid = grid;
-    rig.e->pos[0] = fx(10.0);
-    rig.e->pos[1] = -fx(10.0);
+    rig.e->self->position.x.q16 = fx(10.0);
+    rig.e->self->position.y.q16 = -fx(10.0);
     rig.world.registry.get(rig.e->handle)->ground_target = ph;
     rig.run(7, 8);
     evs = rig.take();
@@ -384,9 +384,9 @@ void test_default_profile_fallback() {
 void test_landing_pair_alive_and_dead() {
     Rig rig;
     rig.e->inf.airborne = true;
-    rig.e->pos[0] = fx(10.0);
-    rig.e->pos[1] = fx(10.0);
-    rig.e->pos[2] = fx(0.0); // feet at ground -> clearance <= 0 resolves the landing
+    rig.e->self->position.x.q16 = fx(10.0);
+    rig.e->self->position.y.q16 = fx(10.0);
+    rig.e->self->position.z.q16 = fx(0.0); // feet at ground -> clearance <= 0 resolves the landing
     rig.e->inf.vel[2] = -1000;
     // An EVEN tick: the landing edge (and its sound) is part of org1's
     // gravity/resolver/edge block, which runs on even ticks only
@@ -424,9 +424,9 @@ void test_landing_pair_alive_and_dead() {
     rig2.run(1, 2); // the per-tick corpse block only (the edge is pre-posed)
     rig2.take();
     rig2.e->inf.airborne = true;
-    rig2.e->pos[0] = fx(10.0);
-    rig2.e->pos[1] = fx(10.0);
-    rig2.e->pos[2] = fx(0.0);
+    rig2.e->self->position.x.q16 = fx(10.0);
+    rig2.e->self->position.y.q16 = fx(10.0);
+    rig2.e->self->position.z.q16 = fx(0.0);
     rig2.run(2, 3);
     auto evs2 = rig2.take();
     bool saw_dead = false;

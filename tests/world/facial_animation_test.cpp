@@ -221,13 +221,13 @@ void test_automatic_expression() {
 	body.inf.anim_state = 140; body.inf.body_heading = 0;
 	body.slot.f[17] = 20 * 65536;
 	body.inf.head_look_target = target;
-	other.pos[0] = 65536; other.heading = INT32_MIN;
+	other.self->position.x.q16 = 65536; other.heading = INT32_MIN;
 	f.world.ai.root_motion = &f.motion;
 	infantry_attention_think(f.world.ai, body, f.world, 0x80);
 	CHECK(f.slot(h).automatic == 6);
 	infantry_attention_think(f.world.ai, body, f.world, 0x180);
 	CHECK(f.slot(h).automatic == 7);
-	other.pos[0] = 5 * 65536;
+	other.self->position.x.q16 = 5 * 65536;
 	body.inf.anim_state = 140;
 	infantry_attention_think(f.world.ai, body, f.world, 0x90);
 	CHECK(f.slot(h).automatic == 8); // animation table entry 140

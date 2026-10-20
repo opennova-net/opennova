@@ -203,8 +203,8 @@ int32_t mission_pose_floor_clearance(MissionWorld &world, world::EntityHandle bo
 	const world::AiEntity *row = world.world.ai.for_handle(body);
 	if (row == nullptr) return INT32_MAX;
 	// The body lifted by its rise; the tail's probe from its height raised to the 6144 grid, down 2.0 u.
-	int32_t pos[3] = { row->pos[0], row->pos[1],
-		io::bam_add(row->pos[2], int32_t(std::lround(pose.rise * io::kFp16OneD))) };
+	int32_t pos[3] = { row->self->position.x.q16, row->self->position.y.q16,
+		io::bam_add(row->self->position.z.q16, int32_t(std::lround(pose.rise * io::kFp16OneD))) };
 	const int32_t feet = pos[2] - pose.capsule_bottom;
 	pos[2] = world::ground_probe_origin_z(pos[2]);
 	world::EntityHandle met;

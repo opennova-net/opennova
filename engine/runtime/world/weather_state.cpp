@@ -422,8 +422,6 @@ void WeatherState::apply_quake_jitter(World &world, WeatherTickEvents &events) {
         e.position.x.q16 = io::bam_add(e.position.x.q16, dx);
         e.position.y.q16 = io::bam_add(e.position.y.q16, dy);
         if (AiEntity *a = world.ai.for_handle(e.handle)) {
-            a->pos[0] += dx;
-            a->pos[1] += dy;
             if (heading_bam == nullptr) a->heading += dh;
         }
         if (heading_bam != nullptr) *heading_bam += dh;

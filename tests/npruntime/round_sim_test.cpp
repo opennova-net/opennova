@@ -788,7 +788,7 @@ bool test_spawn_spread_then_recoil() {
 	world.round_sim.reset();
 	body->inf.recoil_pitch = 0;
 	ammo.flags = 0;
-	body->pos[2] = 1 << 16;
+	body->self->position.z.q16 = 1 << 16;
 	world.env.water_z = 2 << 16;
 	const int submerged = world.round_sim.spawn(world, params);
 	if (!expect(submerged >= 0 && body->inf.recoil_pitch == (3 << 20),
@@ -1151,7 +1151,7 @@ struct DismembermentRig {
 
 		const int body_index = ai.attach(victim);
 		w::AiEntity *body = ai.at(body_index);
-		body->pos[0] = 5 * 65536;
+		body->self->position.x.q16 = 5 * 65536;
 		body->heading = 0;
 		body->health = 10;
 		body->inf.active = true;
@@ -2477,7 +2477,7 @@ int main() {
 		w::AiEntity *host_ae = ai.for_handle(ha);
 		if (!expect(host_ae != nullptr && host_ae->inf.active,
 		            "the host player is motor-simulated")) return 1;
-		host_ae->pos[0] = w::to_fixed(12.0);
+		host_ae->self->position.x.q16 = w::to_fixed(12.0);
 		host_ae->inf.stance = w::InfantryState::Stance::kProne;
 		advance_second_boundaries(2);
 		if (!expect(roster[0].link.respawn_delay_seconds == 1 && host->health == 0,
@@ -2515,7 +2515,7 @@ int main() {
 		host_ae = ai.for_handle(ha);
 		if (!expect(host_ae != nullptr, "the respawned host player kept its motor entity"))
 			return 1;
-		if (!expect(host_ae->pos[0] == w::to_fixed(60.0),
+		if (!expect(host_ae->self->position.x.q16 == w::to_fixed(60.0),
 		            "respawn snaps the MOTOR store too, so the mirror cannot revert it"))
 			return 1;
 		if (!expect(host_ae->health == 150, "the motor health store respawns with it"))

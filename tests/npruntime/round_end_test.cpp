@@ -145,13 +145,13 @@ w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
 	body->net_is_remote_peer = true;
 	body->health = entity->health;
 	body->team = entity->team;
-	body->pos[0] = fixed(entity->position.x);
-	body->pos[1] = fixed(entity->position.y);
-	body->pos[2] = fixed(entity->position.z);
+	body->self->position.x.q16 = fixed(entity->position.x);
+	body->self->position.y.q16 = fixed(entity->position.y);
+	body->self->position.z.q16 = fixed(entity->position.z);
 	body->collide_state.prev_valid = true;
 	body->collide_state.prev_pos[0] = fixed(previous_x);
-	body->collide_state.prev_pos[1] = body->pos[1];
-	body->collide_state.prev_pos[2] = body->pos[2];
+	body->collide_state.prev_pos[1] = body->self->position.y.q16;
+	body->collide_state.prev_pos[2] = body->self->position.z.q16;
 	return body;
 }
 
@@ -161,9 +161,9 @@ void move_remote_body(w::World &world, w::AiSystem &ai,
 	w::AiEntity *body = ai.for_handle(handle);
 	if (entity == nullptr || body == nullptr) return;
 	entity->position = position;
-	body->pos[0] = fixed(position.x);
-	body->pos[1] = fixed(position.y);
-	body->pos[2] = fixed(position.z);
+	body->self->position.x.q16 = fixed(position.x);
+	body->self->position.y.q16 = fixed(position.y);
+	body->self->position.z.q16 = fixed(position.z);
 }
 
 void prime_collision_tables(w::World &world, w::CollisionWorld &collision) {

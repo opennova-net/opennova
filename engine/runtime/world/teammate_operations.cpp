@@ -15,7 +15,7 @@ EntityLifetime lifetime(const Entity *entity) {
 }
 std::array<int32_t, 3> position(const World &world, const Entity &entity) {
     if (const AiEntity *ai = world.ai.for_handle(entity.handle))
-        return {ai->pos[0], ai->pos[1], ai->pos[2]};
+        return {ai->self->position.x.q16, ai->self->position.y.q16, ai->self->position.z.q16};
     return {entity.position.x.q16, entity.position.y.q16,
             entity.position.z.q16};
 }
@@ -348,7 +348,7 @@ void TeammateOperations::update(World &world, Slot &slot) {
         if (!air) { slot.state = State::Depart; break; }
         air->brain.f[AiBrain::kWpType] = 3;
         air->brain.f[20] = 1310720;
-        if (air->pos[2] < io::bam_add(slot.goal[2], 2293760)) {
+        if (air->self->position.z.q16 < io::bam_add(slot.goal[2], 2293760)) {
             air->brain.f[19] = io::bam_add(slot.goal[2], 3604480);
         } else {
             air->brain.f[17] = io::bam_add(slot.goal[0], 39321600);

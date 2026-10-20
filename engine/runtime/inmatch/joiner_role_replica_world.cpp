@@ -301,9 +301,6 @@ void JoinerRole::apply_authoritative_health() {
 					local->net_analog_z = 0;
 					world::entity_reset_to_spawn_state(*local);
 
-					local_ai->pos[0] = self->x;
-					local_ai->pos[1] = self->y;
-					local_ai->pos[2] = self->z;
 					local_ai->heading = heading;
 					local_ai->pitch = pitch;
 					local_ai->roll = 0;
@@ -392,9 +389,6 @@ void JoinerRole::apply_world_state_load() {
 					static_cast<double>(ws.pitch_bam) * world::kDegreesPerBam));
 			local->roll = static_cast<int16_t>(std::lround(
 					static_cast<double>(ws.roll_bam) * world::kDegreesPerBam));
-			local_ai->pos[0] = ws.pos_x;
-			local_ai->pos[1] = ws.pos_y;
-			local_ai->pos[2] = ws.pos_z;
 			local_ai->heading = ws.yaw_bam;
 			local_ai->pitch = ws.pitch_bam;
 			local_ai->roll = ws.roll_bam;

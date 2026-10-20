@@ -3070,8 +3070,8 @@ static void test_aircraft_landing_and_navigation_states() {
 	CHECK(b.f[AiBrain::kCurState] == 14 && e.position.z == 0);
 	b.f[AiBrain::kPendState] = 7;
 	w.ai.apply_transition(ai, w);
-	ai.pos[0] = 10 * 65536;
-	ai.pos[1] = 10 * 65536;
+	ai.self->position.x.q16 = 10 * 65536;
+	ai.self->position.y.q16 = 10 * 65536;
 	b.f[AiBrain::kWpType] = 3;
 	b.f[AiBrain::kWpCoordX] = 100 * 65536;
 	b.f[AiBrain::kWpCoordY] = 10 * 65536;
@@ -4205,15 +4205,15 @@ void test_player_blast_and_knife_run_the_waypoint_tail() {
         player.position = knife ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{5.6f, 0.0f, 0.0f};
         const EntityHandle body = w.registry.spawn(0, player);
         AiEntity &ai = *w.ai.at(w.ai.attach(body));
-        ai.pos[0] = to_fixed(player.position.x);
+        ai.self->position.x.q16 = to_fixed(player.position.x);
         ai.slot.f[37] = 3;
         w.ai.nav.channels.resize(4);
         w.ai.nav.channels[3].count = 1;
         w.ai.nav.channels[3].entries[0] = 0;
         w.ai.nav.nodes.resize(1);
         w.ai.nav.nodes[0].f[0] = 0x10000; // radius 1 u, centered on the body
-        w.ai.nav.nodes[0].f[1] = ai.pos[0];
-        w.ai.nav.nodes[0].f[2] = ai.pos[1];
+        w.ai.nav.nodes[0].f[1] = ai.self->position.x.q16;
+        w.ai.nav.nodes[0].f[2] = ai.self->position.y.q16;
         ExplosionEntry e;
         e.pos = Vec3{};
         e.type = knife ? ammo_kz::kKnife : ammo_kz::kStandard;

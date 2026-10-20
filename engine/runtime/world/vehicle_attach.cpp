@@ -186,7 +186,13 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     // The entity's degree mirror as the entity carried it in, before the seat
     // pose rewrites it (the look copy's fallback below, for an entity with no body).
     const int16_t entry_yaw = occ.yaw;
+    // Retail's attach stores no Position: the parent, bone, slot and flags only;
+    // a body's own motor poses it from the seat on its next pass (D-NET-507: the
+    // position is one store now, so the seat pose no longer lands early).
+    // [orig: Entity_AttachToVehicleSlot @0x4946D0 - the stores @0x494752..0x494775]
+    const EntityPosition entry_position = occ.position;
     world.vehicles.pose_mounted_occupant(occ, veh, veh.seats[seat_idx]);
+    if (world.ai.for_handle(occ.handle) != nullptr) occ.position = entry_position;
     // Success clears the movement stance bits and, for the local player, the
     // prone/crouch latches, and copies its Yaw into the look yaw. Neither attach
     // writes Yaw, so the look takes the heading the body carried in (a request's

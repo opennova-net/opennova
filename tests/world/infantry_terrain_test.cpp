@@ -203,9 +203,9 @@ struct Motor {
             e.inf.leg_target[leg] = heading;
         }
         e.heading = io::bam_add(heading, 0x20000000); // independent NPC look
-        e.pos[0] = q16(100);
-        e.pos[1] = -q16(100);
-        e.pos[2] = q16(60);
+        e.self->position.x.q16 = q16(100);
+        e.self->position.y.q16 = -q16(100);
+        e.self->position.z.q16 = q16(60);
         e.health = 100;
         w->tables.terrain = &field.field;
         w->ai.terrain = &field.field;
@@ -227,17 +227,17 @@ void test_motor_gradient_and_rotation() {
         m.entity().engine_flags |= 0x10000;
         m.ai().inf.path_state = 2;
         m.tick();
-        CHECK(m.ai().pos[0] == q16(100) + 1111);
-        CHECK(m.ai().pos[1] == -q16(100) + 2222);
+        CHECK(m.ai().self->position.x.q16 == q16(100) + 1111);
+        CHECK(m.ai().self->position.y.q16 == -q16(100) + 2222);
         CHECK(((m.entity().flags | m.entity().engine_flags) & 0x10000) == 0);
         CHECK(m.ai().inf.path_state == 2); // flat ground does not cancel a cached detour
     }
     {
         Motor m(768, 0);
         m.tick();
-        CHECK(m.ai().pos[0] == q16(100) - 4915);
-        CHECK(m.ai().pos[1] == -q16(100));
-        CHECK(m.ai().pos[2] == q16(60) + 3333); // keep the clip's vertical lane
+        CHECK(m.ai().self->position.x.q16 == q16(100) - 4915);
+        CHECK(m.ai().self->position.y.q16 == -q16(100));
+        CHECK(m.ai().self->position.z.q16 == q16(60) + 3333); // keep the clip's vertical lane
         CHECK(m.ai().inf.vel[2] == -167);
         CHECK(m.ai().inf.path_state == 1);
         CHECK((m.entity().engine_flags & 0x10000) != 0);
@@ -247,8 +247,8 @@ void test_motor_gradient_and_rotation() {
         m.ai().inf.vel[2] = -900;
         m.w->ai.is_authority = false;
         m.tick();
-        CHECK(m.ai().pos[0] == q16(100) + 3276); // exact negative half rounds upward
-        CHECK(m.ai().pos[1] == -q16(100) - 4915);
+        CHECK(m.ai().self->position.x.q16 == q16(100) + 3276); // exact negative half rounds upward
+        CHECK(m.ai().self->position.y.q16 == -q16(100) - 4915);
         CHECK(m.ai().inf.vel[2] == -900);
         CHECK(m.ai().inf.path_state == 1); // motor response also runs on clients
     }
@@ -258,8 +258,8 @@ void test_motor_gradient_and_rotation() {
     for (bool player : {false, true}) {
         Motor m(512, 768, player, 0x40000000);
         m.tick();
-        CHECK(m.ai().pos[0] == q16(100) - (player ? 3277 : 4914));
-        CHECK(m.ai().pos[1] == -q16(100) - (player ? -4915 : 3278));
+        CHECK(m.ai().self->position.x.q16 == q16(100) - (player ? 3277 : 4914));
+        CHECK(m.ai().self->position.y.q16 == -q16(100) - (player ? -4915 : 3278));
         CHECK(m.ai().inf.path_state == (player ? 0 : 1));
         CHECK(m.ai().inf.vel[2] == (player ? -375 : -167));
     }
@@ -282,7 +282,7 @@ void test_suppression_and_carriers() {
         m.entity().engine_flags |= 0x10000;
         m.tick();
         CHECK(((m.entity().flags | m.entity().engine_flags) & 0x10000) == 0);
-        CHECK(m.ai().pos[0] == q16(100) + (blocked == 0x100000u ? 0 : 1111));
+        CHECK(m.ai().self->position.x.q16 == q16(100) + (blocked == 0x100000u ? 0 : 1111));
     }
     // The 0x2000 half of the mask is the motors' own product, written into the
     // registry Flags pair: org1 on its fall edge [orig: @0x4BF8C8..0x4BF8CF],
@@ -295,15 +295,15 @@ void test_suppression_and_carriers() {
         CHECK((m.entity().engine_flags & 0x2000) != 0);
         CHECK(m.ai().inf.airborne);
         m.ai().inf.vel[2] = 0x1600; // an upward impulse the clamp would otherwise eat
-        const int32_t x = m.ai().pos[0];
+        const int32_t x = m.ai().self->position.x.q16;
         m.tick(4);
         CHECK(((m.entity().flags | m.entity().engine_flags) & 0x10000) == 0);
-        CHECK(m.ai().pos[0] == x + 1111);         // the clip root is kept, no slide pair
+        CHECK(m.ai().self->position.x.q16 == x + 1111);         // the clip root is kept, no slide pair
         CHECK(m.ai().inf.vel[2] == 0x1600 - 416); // gravity only, no -167 clamp
     }
     {
         Motor m(0, 0, true); // the jump gate refuses steep ground (0x10000)
-        m.ai().pos[2] = 5000 * 256;
+        m.ai().self->position.z.q16 = 5000 * 256;
         m.ai().inf.jump_requested = true;
         m.tick(1);
         CHECK(m.ai().inf.airborne);
@@ -311,11 +311,11 @@ void test_suppression_and_carriers() {
         CHECK((m.entity().engine_flags & 0x2000) != 0);
         CHECK(m.ai().inf.vel[2] == 0x1600);
         m.field.gradient(100, 100, 768, 0); // the arc now sits over a steep cell
-        const int32_t x = m.ai().pos[0];
+        const int32_t x = m.ai().self->position.x.q16;
         m.tick(2);
         CHECK(((m.entity().flags | m.entity().engine_flags) & 0x10000) == 0);
         CHECK(m.ai().inf.vel[2] == 0x1600 - 208); // no -167 clamp
-        CHECK(m.ai().pos[0] == x + 819);          // (63 * 833) >> 6 momentum, no slide pair
+        CHECK(m.ai().self->position.x.q16 == x + 819);          // (63 * 833) >> 6 momentum, no slide pair
     }
     for (bool player : {false, true}) {
         Motor m(768, 0, player);
@@ -326,7 +326,7 @@ void test_suppression_and_carriers() {
         m.entity().flags |= 0x10000;
         m.entity().engine_flags |= 0x10000;
         m.tick();
-        CHECK(m.ai().pos[0] == q16(100) + 1111);
+        CHECK(m.ai().self->position.x.q16 == q16(100) + 1111);
         CHECK(((m.entity().flags | m.entity().engine_flags) & 0x10000) ==
               (player ? 0u : 0x10000u));
         CHECK(m.ai().inf.path_state == 0);
@@ -337,7 +337,7 @@ void test_suppression_and_carriers() {
     m.entity().engine_flags |= 0x10000;
     m.tick();
     CHECK((m.entity().engine_flags & 0x10000) == 0);
-    CHECK(m.ai().pos[0] == q16(100) + 1111);
+    CHECK(m.ai().self->position.x.q16 == q16(100) + 1111);
 }
 
 
@@ -357,10 +357,10 @@ void test_standing_carrier_motion() {
         }
         stationary.tick();
         moving.tick();
-        CHECK(moving.ai().pos[0] - stationary.ai().pos[0] == q16(3));
-        CHECK(moving.ai().pos[1] - stationary.ai().pos[1] == q16(2));
-        CHECK(moving.ai().pos[2] - stationary.ai().pos[2] == q16(1));
-        CHECK(moving.entity().position.x == world::from_fixed(moving.ai().pos[0]));
+        CHECK(moving.ai().self->position.x.q16 - stationary.ai().self->position.x.q16 == q16(3));
+        CHECK(moving.ai().self->position.y.q16 - stationary.ai().self->position.y.q16 == q16(2));
+        CHECK(moving.ai().self->position.z.q16 - stationary.ai().self->position.z.q16 == q16(1));
+        CHECK(moving.entity().position.x == world::from_fixed(moving.ai().self->position.x.q16));
     }
     // Authority-side remote players retain wire-owned locomotion but consume
     // carrier motion, including without a model collision provider.
@@ -394,7 +394,7 @@ void test_standing_carrier_motion() {
         parent.position.x += 1;
         m.entity().ground_target = h;
         m.tick();
-        CHECK(m.ai().pos[0] == q16(player ? 100 : 101) + 1111);
+        CHECK(m.ai().self->position.x.q16 == q16(player ? 100 : 101) + 1111);
         CHECK(m.entity().ground_target.valid() == !player);
     }
     // Off-deck combat targets keep world aim while the NPC's body follows.
@@ -413,9 +413,9 @@ void test_standing_carrier_motion() {
         if (external_target) m.ai().inf.combat_target = m.w->registry.spawn(0, {});
         m.ai().heading = 0;
         world::infantry_follow_carrier(m.ai(), *m.w, q16(2), false);
-        CHECK(std::abs(m.ai().pos[0] - q16(98)) <= 16);
-        CHECK(std::abs(m.ai().pos[1] + q16(98)) <= 16);
-        CHECK(std::abs(m.ai().pos[2] - q16(60)) <= 16);
+        CHECK(std::abs(m.ai().self->position.x.q16 - q16(98)) <= 16);
+        CHECK(std::abs(m.ai().self->position.y.q16 + q16(98)) <= 16);
+        CHECK(std::abs(m.ai().self->position.z.q16 - q16(60)) <= 16);
         CHECK(m.ai().heading == (external_target ? 0 : 0x40000000));
         CHECK(m.ai().inf.body_heading == 0x40000000);
         CHECK(m.ai().inf.aim_heading == (external_target ? 0 : 0x40000000));
@@ -435,9 +435,9 @@ void test_standing_carrier_motion() {
         m.entity().ground_target = h;
         m.ai().heading = 0;
         world::infantry_follow_carrier(m.ai(), *m.w, q16(2), player);
-        CHECK(std::abs(m.ai().pos[0] - q16(99)) <= 16);
-        CHECK(std::abs(m.ai().pos[1] + q16(100)) <= 16);
-        CHECK(std::abs(m.ai().pos[2] - q16(63)) <= 16);
+        CHECK(std::abs(m.ai().self->position.x.q16 - q16(99)) <= 16);
+        CHECK(std::abs(m.ai().self->position.y.q16 + q16(100)) <= 16);
+        CHECK(std::abs(m.ai().self->position.z.q16 - q16(63)) <= 16);
         CHECK(m.ai().body_pitch == 0x40000000);
         CHECK(m.ai().pitch == (player ? 0x02000000 : 0x40000000));
         CHECK(m.ai().inf.carrier_pitch_lag == (player ? 0x3E000000 : 0));
@@ -453,7 +453,7 @@ void test_standing_carrier_motion() {
 void test_player_jump_uses_current_slope() {
     for (bool steep : {false, true}) {
         Motor m(steep ? 768 : 0, 0, true);
-        m.ai().pos[2] = 5000 * 256; // stand on the raw16=5000 terrain
+        m.ai().self->position.z.q16 = 5000 * 256; // stand on the raw16=5000 terrain
         m.entity().engine_flags |= 0x10000; // previous tick's slide
         m.ai().inf.jump_requested = true;
         m.tick();
@@ -473,7 +473,7 @@ void test_player_jump_uses_current_slope() {
 void test_ground_drop_goes_airborne_without_a_resample() {
     for (bool player : {false, true}) {
         Motor m(0, 0, player);
-        m.ai().pos[2] = 5000 * 256; // stand on the raw16=5000 terrain
+        m.ai().self->position.z.q16 = 5000 * 256; // stand on the raw16=5000 terrain
         const uint32_t first = player ? 1u : 2u; // org1 resolves on even keys only
         m.tick(first);
         CHECK(!m.ai().inf.airborne);
@@ -494,7 +494,7 @@ void test_invalid_field_keeps_the_gravity_step() {
     CHECK(!m.field.field.valid());
     m.tick(1);
     CHECK(m.ai().inf.vel[2] == -208);
-    CHECK(m.ai().pos[2] == q16(60) + 3333 - 208);
+    CHECK(m.ai().self->position.z.q16 == q16(60) + 3333 - 208);
 }
 
 void test_slope_arms_route_detour_before_think() {

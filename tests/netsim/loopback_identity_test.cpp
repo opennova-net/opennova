@@ -1278,7 +1278,7 @@ bool run_apply_player_intent_stages_remote_peer() {
 			static_cast<uint32_t>(static_cast<uint16_t>(wheading)) << 16);
 	const int32_t pitch_bam = static_cast<int32_t>(
 			static_cast<uint32_t>(static_cast<uint16_t>(wpitch)) << 16);
-	if (!expect(ae->pos[0] == wx && ae->pos[1] == wy && ae->pos[2] == wz,
+	if (!expect(ae->self->position.x.q16 == wx && ae->self->position.y.q16 == wy && ae->self->position.z.q16 == wz,
 	            "AiEntity live pos = wire pose")) return false;
 	if (!expect(ae->heading == heading_bam && ae->pitch == pitch_bam,
 	            "AiEntity heading/pitch = i16<<16 (pure widen, no 90-offset)")) return false;
@@ -1325,9 +1325,9 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	w::Entity local_entity;
 	local_entity.item_id = 0x14B9;
 	w::AiEntity local_ai;
-	local_ai.pos[0] = fx(10.0);
-	local_ai.pos[1] = fx(10.0);
-	local_ai.pos[2] = fx(2.0); // > 0xF000 above a zero-height floor
+	local_entity.position.x.q16 = fx(10.0);
+	local_entity.position.y.q16 = fx(10.0);
+	local_entity.position.z.q16 = fx(2.0); // > 0xF000 above a zero-height floor
 	local_entity.net_move_input = w::Entity::kMoveOrderJump;
 	// Deliberately seed the local high bit. build_player_uplink can serialize
 	// only the low state byte; the authority result below must be pose-derived.
@@ -1360,7 +1360,7 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	local_entity.flags = 0;
 	local_entity.net_move_input = 0;
 	local_ai.inf.airborne = false;
-	local_ai.pos[2] = 0;
+	local_entity.position.z.q16 = 0;
 	if (!expect(send_local_pose(), "landing local uplink drained")) return false;
 	if (!expect(!host_ai->inf.airborne &&
 	                    (host_peer->flags & w::kEntityFlagInAir) == 0 &&
@@ -1514,16 +1514,16 @@ bool run_motor_skips_net_peer() {
 	ae->inf.active = true;
 	ae->inf.body_heading = 12345;
 	ae->inf.target_heading = 9999999;
-	ae->pos[0] = 111;
-	ae->pos[1] = 222;
-	ae->pos[2] = 333;
+	ae->self->position.x.q16 = 111;
+	ae->self->position.y.q16 = 222;
+	ae->self->position.z.q16 = 333;
 	ae->heading = 4444;
 	ae->net_is_remote_peer = true;
 	ai.tick_infantry(*ae, world, 0);
 
 	if (!expect(ae->inf.body_heading == 12345 && ae->inf.target_heading == 9999999,
 	            "skip-guard: heading state untouched")) return false;
-	if (!expect(ae->pos[0] == 111 && ae->pos[1] == 222 && ae->pos[2] == 333,
+	if (!expect(ae->self->position.x.q16 == 111 && ae->self->position.y.q16 == 222 && ae->self->position.z.q16 == 333,
 	            "skip-guard: live pos untouched")) return false;
 	if (!expect(ae->heading == 4444, "skip-guard: engine heading untouched")) return false;
 	return true;

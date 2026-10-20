@@ -50,12 +50,12 @@ void spectator_free_fly(World &world, AiEntity &local) {
 			// lower slot having already moved this tick.
 			const AiEntity *body = world.ai.for_handle(s.target_entity);
 			if (body == nullptr) return;
-			for (int i = 0; i < 3; ++i) pos[i] = body->pos[i];
+			for (int i = 0; i < 3; ++i) pos[i] = body->self->position.word(i);
 			yaw_bam = body->heading;
 			pitch_bam = body->pitch;
 			roll_bam = body->roll;
 		}
-		for (int i = 0; i < 3; ++i) local.pos[i] = pos[i];
+		for (int i = 0; i < 3; ++i) local.self->position.word(i) = pos[i];
 		local.heading = yaw_bam;
 		local.pitch = pitch_bam;
 		local.roll = roll_bam;
@@ -81,22 +81,22 @@ void spectator_free_fly(World &world, AiEntity &local) {
 		// [orig: @0x4b2a86..0x4b2ab9].
 		const double heading = yaw + static_cast<double>(dir) * kEighthTurn;
 		const double cos_pitch = std::cos(pitch);
-		local.pos[0] = io::bam_add(local.pos[0],
+		local.self->position.x.q16 = io::bam_add(local.self->position.x.q16,
 				io::retail_ftol_sse2(std::cos(heading) * static_cast<double>(step) * cos_pitch));
-		local.pos[1] = io::bam_add(local.pos[1],
+		local.self->position.y.q16 = io::bam_add(local.self->position.y.q16,
 				io::retail_ftol_sse2(static_cast<double>(step) * std::sin(heading) * cos_pitch));
 		// The climb follows the pitch forward, reverses backward (3, 4, 5) and
 		// is zero strafing (2, 6) [orig: @0x4b2abc..0x4b2add].
 		if (dir >= 3 && dir <= 5) step = -step;
 		else if (dir == 2 || dir == 6) step = 0;
-		local.pos[2] = io::bam_add(local.pos[2],
+		local.self->position.z.q16 = io::bam_add(local.self->position.z.q16,
 				io::retail_ftol_sse2(std::sin(pitch) * static_cast<double>(step)));
 	}
 	// The lean pair rides three quarters of that step down / up — the climb's
 	// sign included [orig: @0x4b2afd..0x4b2b0f].
 	const int32_t vertical = (step * 3) >> 2;
-	if ((move_order & 0x40u) != 0) local.pos[2] = io::bam_sub(local.pos[2], vertical);
-	if ((move_order & 0x80u) != 0) local.pos[2] = io::bam_add(local.pos[2], vertical);
+	if ((move_order & 0x40u) != 0) local.self->position.z.q16 = io::bam_sub(local.self->position.z.q16, vertical);
+	if ((move_order & 0x80u) != 0) local.self->position.z.q16 = io::bam_add(local.self->position.z.q16, vertical);
 	// The turn keys step Yaw and the local look yaw alike, the look keys Pitch
 	// [orig: @0x4b2b13..0x4b2b70].
 	if ((move_order & 0x1000u) != 0) {

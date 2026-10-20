@@ -4341,9 +4341,9 @@ bool check_timed_capture_host_wire_transaction() {
 		body->net_is_remote_peer = true;
 		body->health = 150;
 		body->team = team;
-		body->pos[0] = 20 * 65536;
-		body->pos[1] = 30 * 65536;
-		body->pos[2] = 4 * 65536;
+		body->self->position.x.q16 = 20 * 65536;
+		body->self->position.y.q16 = 30 * 65536;
+		body->self->position.z.q16 = 4 * 65536;
 		return handle;
 	};
 	const auto first = soldier(1);
@@ -4440,9 +4440,9 @@ bool check_timed_capture_host_wire_transaction() {
 
 	world.registry.get(second)->position = {500.0f, 500.0f, 0.0f};
 	opennova::world::AiEntity *second_body = ai.for_handle(second);
-	second_body->pos[0] = 500 * 65536;
-	second_body->pos[1] = 500 * 65536;
-	second_body->pos[2] = 0;
+	second_body->self->position.x.q16 = 500 * 65536;
+	second_body->self->position.y.q16 = 500 * 65536;
+	second_body->self->position.z.q16 = 0;
 	const auto completed = tick_second();
 	const auto complete_50 = bodies(completed, opennova::s2c::TEAM_ASSIGN);
 	const auto complete_53 = bodies(completed, opennova::s2c::ZONE_TIMER_WINDOW);
@@ -4573,9 +4573,9 @@ bool check_numbered_flip_pair_and_banner_wire() {
 		body->net_is_remote_peer = true;
 		body->health = 150;
 		body->team = team;
-		body->pos[0] = x * 65536;
-		body->pos[1] = y * 65536;
-		body->pos[2] = 4 * 65536;
+		body->self->position.x.q16 = x * 65536;
+		body->self->position.y.q16 = y * 65536;
+		body->self->position.z.q16 = 4 * 65536;
 		return handle;
 	};
 	const auto capturer = soldier(1, 20, 30);

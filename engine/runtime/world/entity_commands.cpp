@@ -494,11 +494,6 @@ bool EntityCommands::set_entity_position(EntityHandle h, const Vec3 &mission_pos
     Entity *e = world_.registry.get(h);
     if (!e) return false;
     e->position = mission_pos;
-    if (AiEntity *a = world_.ai.for_handle(h)) {
-        a->pos[0] = static_cast<int32_t>(mission_pos.x * 65536.0f);
-        a->pos[1] = static_cast<int32_t>(mission_pos.y * 65536.0f);
-        a->pos[2] = static_cast<int32_t>(mission_pos.z * 65536.0f);
-    }
     return true;
 }
 
@@ -889,11 +884,7 @@ bool EntityCommands::raise_local_player() {
     // unchecked null-player dereference for headless/script-only worlds.
     Entity *e = world_.registry.get(world_.cached.local_player);
     if (e == nullptr) return false;
-    AiEntity *body = world_.ai.for_handle(e->handle);
-    const int32_t z = body != nullptr ? body->pos[2] : e->position.z.q16;
-    const int32_t raised = static_cast<int32_t>(uint32_t(z) + 0x1F40000u);
-    if (body != nullptr) body->pos[2] = raised;
-    e->position.z.q16 = raised;
+    e->position.z.q16 = static_cast<int32_t>(uint32_t(e->position.z.q16) + 0x1F40000u);
     return true;
 }
 
@@ -922,11 +913,8 @@ bool EntityCommands::teleport_local_to_ssn(EntityTarget ssn) {
     const Entity *target = world_.registry.get(resolve_target(ssn));
     Entity *player = world_.registry.get(world_.cached.local_player);
     if (target == nullptr || player == nullptr) return false;
-    const AiEntity *target_body = world_.ai.for_handle(target->handle);
-    const int32_t pos[3] = {
-        target_body != nullptr ? target_body->pos[0] : target->position.x.q16,
-        target_body != nullptr ? target_body->pos[1] : target->position.y.q16,
-        target_body != nullptr ? target_body->pos[2] : target->position.z.q16};
+    const int32_t pos[3] = {target->position.x.q16, target->position.y.q16,
+                            target->position.z.q16};
     player->health = 20000;
     player->position.set_q16({pos[0], pos[1], pos[2]});
     std::copy_n(pos, 3, player->saved_live_pos);
@@ -934,7 +922,6 @@ bool EntityCommands::teleport_local_to_ssn(EntityTarget ssn) {
     player->ground_target = target->handle;
     if (AiEntity *body = world_.ai.for_handle(player->handle)) {
         body->health = 20000;
-        std::copy_n(pos, 3, body->pos);
         std::copy_n(pos, 3, body->net_saved_live_pose);
     }
     if (world_.collision != nullptr)
@@ -1655,22 +1642,20 @@ const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
 
 // The split-pose translation of retail's teleport stores: retail writes the
 // ONE entity pose the motor reads (Position/Yaw + savedLivePose + the body
-// pose [orig: @0x43e05f..0x43e096]); our AI row carries its own fixed-point
-// mirror of that pose, so a teleport must land there too or the next motor
-// tick snaps back. net_saved_live_pose is retail's savedLivePose.
+// pose [orig: @0x43e05f..0x43e096]); the position is the entity's own words,
+// while our AI row carries its own heading/pitch and savedLivePose mirrors,
+// so a teleport must land there too or the next motor tick snaps back.
+// net_saved_live_pose is retail's savedLivePose.
 void sync_teleported_ai(World &world, const Entity &entity) {
     AiEntity *ae = world.ai.for_handle(entity.handle);
     if (ae == nullptr) return;
-    ae->pos[0] = entity.position.x.q16;
-    ae->pos[1] = entity.position.y.q16;
-    ae->pos[2] = entity.position.z.q16;
     ae->heading = bam_heading_from_mission_yaw_deg(
             static_cast<double>(entity.yaw));
     ae->pitch = bam_from_degrees_wrapped(static_cast<double>(entity.pitch));
     ae->roll = bam_from_degrees_wrapped(static_cast<double>(entity.roll));
-    ae->net_saved_live_pose[0] = ae->pos[0];
-    ae->net_saved_live_pose[1] = ae->pos[1];
-    ae->net_saved_live_pose[2] = ae->pos[2];
+    ae->net_saved_live_pose[0] = ae->self->position.x.q16;
+    ae->net_saved_live_pose[1] = ae->self->position.y.q16;
+    ae->net_saved_live_pose[2] = ae->self->position.z.q16;
 }
 
 // The per-member pose copy the two teleport actions share. Flag tree per

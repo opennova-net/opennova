@@ -773,9 +773,9 @@ bool check_medic_revive_transaction() {
 	victim->position = {12.0f, 34.0f, 5.0f};
 	// The body's own position words: the entity update mirrors them onto the row.
 	if (w::AiEntity *body = f.world.ai.for_handle(f.players[0])) {
-		body->pos[0] = 12 << 16;
-		body->pos[1] = 34 << 16;
-		body->pos[2] = 5 << 16;
+		body->self->position.x.q16 = 12 << 16;
+		body->self->position.y.q16 = 34 << 16;
+		body->self->position.z.q16 = 5 << 16;
 		body->health = 0;
 	}
 	w::MatchRules medic_rules;

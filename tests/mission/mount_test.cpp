@@ -580,23 +580,23 @@ int main() {
         ctx.is_authority = true;
         w.update_all_entities(ctx);
         AiEntity *ae = ai.at(idx);
-        CHECK(ae->pos[0] == to_fixed(10.0));
-        CHECK(ae->pos[1] == to_fixed(20.0));
-        CHECK(ae->pos[2] == to_fixed(5.0));
+        CHECK(ae->self->position.x.q16 == to_fixed(10.0));
+        CHECK(ae->self->position.y.q16 == to_fixed(20.0));
+        CHECK(ae->self->position.z.q16 == to_fixed(5.0));
         CHECK(ae->inf.anim_state == 67); // anim_emplaced request
         CHECK(ae->inf.clip_phase == 42); // data-less body keeps its current channel
 
         // Move the gun -> the gunner follows next tick.
         w.registry.get(gh)->position = {30.f, 40.f, 5.f};
         w.update_all_entities(ctx);
-        CHECK(ae->pos[0] == to_fixed(30.0));
-        CHECK(ae->pos[1] == to_fixed(40.0));
+        CHECK(ae->self->position.x.q16 == to_fixed(30.0));
+        CHECK(ae->self->position.y.q16 == to_fixed(40.0));
 
         // Even with a locomotion target set, a mounted gunner does NOT path-follow.
         ae->brain.f[AiBrain::kOutSpeed] = 9999;
         ae->brain.f[AiBrain::kWorkPosX] = to_fixed(999.0);
         w.update_all_entities(ctx);
-        CHECK(ae->pos[0] == to_fixed(30.0)); // still seated, not moved toward 999
+        CHECK(ae->self->position.x.q16 == to_fixed(30.0)); // still seated, not moved toward 999
 
         // Vehicle gone -> auto-dismount, occupant resumes normal AI.
         w.registry.despawn(gh);
@@ -804,6 +804,7 @@ int main() {
         w.registry.configure_pool(0, 16);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         AiSystem ai;
+        ai.bind_registry(&w.registry);
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;

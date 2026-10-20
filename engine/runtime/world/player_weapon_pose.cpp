@@ -147,9 +147,9 @@ void local_weapon_fire_pose(World &world, const LocalPlayerWeapon &weapon,
     // On-foot position + CameraOffset and undoubled recoil pitch.
     // [orig: @0x4DC847..0x4DC880]
     const AiEntity *body = world.ai.for_handle(shooter->handle);
-    out[0] = io::bam_add(body ? body->pos[0] : shooter->position.x.q16, body ? body->inf.eye_offset_x : shooter->eye_offset_x);
-    out[1] = io::bam_add(body ? body->pos[1] : shooter->position.y.q16, body ? body->inf.eye_offset_y : shooter->eye_offset_y);
-    out[2] = io::bam_add(body ? body->pos[2] : shooter->position.z.q16, body ? body->inf.eye_offset_z : shooter->eye_offset_z);
+    out[0] = io::bam_add(body ? body->self->position.x.q16 : shooter->position.x.q16, body ? body->inf.eye_offset_x : shooter->eye_offset_x);
+    out[1] = io::bam_add(body ? body->self->position.y.q16 : shooter->position.y.q16, body ? body->inf.eye_offset_y : shooter->eye_offset_y);
+    out[2] = io::bam_add(body ? body->self->position.z.q16 : shooter->position.z.q16, body ? body->inf.eye_offset_z : shooter->eye_offset_z);
     out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(shooter->yaw);
     out[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch) : bam_from_degrees_wrapped(shooter->pitch);
     out[5] = body ? body->roll : bam_from_degrees_wrapped(shooter->roll);

@@ -82,9 +82,9 @@ void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const 
     if (player_body) {
         SoundSlotEvent scream;
         scream.source_handle = e.handle.packed;
-        scream.pos[0] = e.pos[0];
-        scream.pos[1] = e.pos[1];
-        scream.pos[2] = e.pos[2];
+        scream.pos[0] = e.self->position.x.q16;
+        scream.pos[1] = e.self->position.y.q16;
+        scream.pos[2] = e.self->position.z.q16;
         scream.slot = static_cast<uint8_t>(
                 night_death ? audio::kSlotNightDeath : audio::kSlotDeath);
         audio::compose_entity_sound_set(
@@ -96,7 +96,7 @@ void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const 
     } else {
         ai.emit_slot_sound(world, e,
                            night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
-                           e.pos);
+                           e.self->position.words().data());
     }
 }
 

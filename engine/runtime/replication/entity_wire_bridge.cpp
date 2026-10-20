@@ -1004,16 +1004,14 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 		if (we->category < 11) ent->equipped_adm_index = intent.equipped_adm_index;
 	}
 
-	// 5. Mirror the engine-frame store (AiEntity) and stage the smooth-target the CLIENT
-	//    interpolation consumes; mark the entity net-snapped so the infantry motor SKIPS it
-	//    (the host does not re-simulate a read-applied peer). [orig: case 4 staging +0x234/
-	//    240/244 @0x4c2042-0x4c205e, live +4/+0x10/+0x14 mirror, progress +0x27C=0 @0x4c20a9;
-	//    motor skip @0x4b9a03.] No AiEntity (peer not AI-attached) -> registry snap stands alone.
+	// 5. Mirror the engine-frame heading words (AiEntity; the live +4/+8/+0xC are the entity's
+	//    own, stored above) and stage the smooth-target the CLIENT interpolation consumes; mark
+	//    the entity net-snapped so the infantry motor SKIPS it (the host does not re-simulate a
+	//    read-applied peer). [orig: case 4 staging +0x234/240/244 @0x4c2042-0x4c205e, live
+	//    +0x10/+0x14 mirror, progress +0x27C=0 @0x4c20a9; motor skip @0x4b9a03.] No AiEntity
+	//    (peer not AI-attached) -> registry snap stands alone.
 	if (world::AiEntity *ae = world.ai.for_handle(ent->handle)) {
 		ae->net_is_remote_peer = true;
-		ae->pos[0] = wire_x; // live +4/+8/+0xC (world — the grounded branch already lifted)
-		ae->pos[1] = wire_y;
-		ae->pos[2] = wire_z;
 		ae->heading = heading_bam; // live +0x10 (carrier-composed when grounded)
 		ae->pitch = pitch_bam;     // live +0x14
 		ae->net_smooth_target[0] = wire_x; // +0x234
@@ -1039,7 +1037,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 		bool clear_airborne = grounded || ent->mounted;
 		bool set_airborne = false;
 		if (!clear_airborne && world.tables.terrain != nullptr && world.tables.terrain->valid()) {
-			const int32_t start[3] = {ae->pos[0], ae->pos[1], world::ground_probe_origin_z(ae->pos[2])};
+			const int32_t start[3] = {ae->self->position.x.q16, ae->self->position.y.q16, world::ground_probe_origin_z(ae->self->position.z.q16)};
 			int32_t end[3] = {start[0], start[1], start[2] - 0x20000};
 			(void)world::terrain_clip_segment(*world.tables.terrain, start, end, end);
 			const int32_t ground = end[2];
@@ -1139,11 +1137,11 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 		// Distance in tiles: |d| with z halved, less the entity's boundRadius.
 		// [orig: @0x50E033..0x50E0B3]
 		const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(row->x) -
-				static_cast<uint32_t>(ae.pos[0]));
+				static_cast<uint32_t>(e.position.x.q16));
 		const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(row->y) -
-				static_cast<uint32_t>(ae.pos[1]));
+				static_cast<uint32_t>(e.position.y.q16));
 		const int32_t dz = static_cast<int32_t>(static_cast<uint32_t>(row->z) -
-				static_cast<uint32_t>(ae.pos[2]));
+				static_cast<uint32_t>(e.position.z.q16));
 		const int32_t dz_half = dz >> 1;
 		const double dxd = dx, dyd = dy, dzhd = dz_half;
 		const double dist3 = std::min(std::sqrt(dzhd * dzhd + dxd * dxd + dyd * dyd), kMaxDistance);
@@ -1190,12 +1188,12 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 				person.indoors = (row->rm_entity_flags & world::kEntityFlagIndoors) != 0;
 				if (row->carrier_handle != world::EntityHandle::kInvalid && row->mount_bone != 0)
 					person.parent = world::EntityHandle{row->carrier_handle};
-				los = world.collision->wire_person_los_clear(world, e.handle, person, ae.pos, end, 0,
+				los = world.collision->wire_person_los_clear(world, e.handle, person, e.position.words().data(), end, 0,
 						false) ? 1 : 0;
 			} else {
 				los = world.collision->entity_los_clear(world, e.handle,
 						native != nullptr ? native->handle : world::EntityHandle{},
-						ae.pos, end, 0, false) ? 1 : 0;
+						e.position.words().data(), end, 0, false) ? 1 : 0;
 			}
 		}
 		const int32_t target = row->handle == player_target.packed ? 1 : 0;
@@ -1255,13 +1253,13 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
                                          const world::AiEntity &ae,
                                          const UplinkClientInputs &interest) {
 	PlayerExtendedUplink up; // wire defaults include the no-carrier handle 0xFFFF
-	// Live engine-frame pose (the AiEntity store apply_player_intent SNAPs back on receive):
-	// pos[] is already i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
+	// Live engine-frame pose (the stores apply_player_intent SNAPs back on receive): the
+	// entity's own Position words, i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
 	// (the exact inverse of apply_player_intent's `intent.heading << 16`). [orig: case 4
 	// @0x4c1da6/@0x4c1dca + the live +4/+8/+0xC pos store.]
-	up.pos_x = ae.pos[0];
-	up.pos_y = ae.pos[1];
-	up.pos_z = ae.pos[2];
+	up.pos_x = e.position.x.q16;
+	up.pos_y = e.position.y.q16;
+	up.pos_z = e.position.z.q16;
 	up.heading = static_cast<int16_t>(ae.heading >> 16);
 	up.pitch = static_cast<int16_t>(ae.pitch >> 16);
 	// Retail's op-3 builder reads groundEntity (+0x28) alone, which the player
@@ -1298,7 +1296,7 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
 	if (const world::Entity *carrier = world.registry.get(carrier_handle)) {
 		const int32_t carrier_yaw_bam = carrier_heading_bam(*carrier);
 		const WorldPose local = network_transform_world_to_local(
-				ae.pos[0], ae.pos[1], ae.pos[2],
+				e.position.x.q16, e.position.y.q16, e.position.z.q16,
 				carrier->position.x.q16,
 				carrier->position.y.q16,
 				carrier->position.z.q16,

@@ -54,7 +54,7 @@ struct Fixture {
         e.health = 100;
         e.net_id = 8;
         e.team = 1;
-        e.pos[2] = fixed(2);
+        e.self->position.z.q16 = fixed(2);
         e.slot.f[17] = fixed(20);
         e.slot.f[1] = 1; // Disable the separate combat query.
     }
@@ -244,9 +244,9 @@ static void test_eye_tracking_clip_availability_and_cleanup() {
     const auto reset = cleanup.person({3, 1, 2});
     const int index = cleanup.world.ai.attach(reset);
     cleanup.world.ai.at(index)->inf.active = true;
-    cleanup.world.ai.at(index)->pos[0] = fixed(3);
-    cleanup.world.ai.at(index)->pos[1] = fixed(1);
-    cleanup.world.ai.at(index)->pos[2] = fixed(2);
+    cleanup.world.ai.at(index)->self->position.x.q16 = fixed(3);
+    cleanup.world.ai.at(index)->self->position.y.q16 = fixed(1);
+    cleanup.world.ai.at(index)->self->position.z.q16 = fixed(2);
     cleanup.tick(512);
     CHECK(cleanup.body().inf.head_look_target == reset);
     entity_reset_to_spawn_state(cleanup.world, *cleanup.world.registry.get(reset));
@@ -327,7 +327,7 @@ static void test_look_does_not_steer_root_motion() {
     body.heading = body.inf.aim_heading = 0x20000000; // Looking 45 degrees right.
     f.tick(513); // No new think overwrites the desired gaze.
     CHECK(body.inf.body_heading == 0 && body.heading == 0x20000000);
-    CHECK(body.pos[0] == 0x4000 && body.pos[1] == 0);
+    CHECK(body.self->position.x.q16 == 0x4000 && body.self->position.y.q16 == 0);
     body.inf.target_heading = 0x20000000;
     body.heading = 0x10000000;
     body.inf.aim_heading = 337708816; // Existing look offset plus the body turn.

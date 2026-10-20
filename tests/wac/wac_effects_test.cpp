@@ -181,7 +181,7 @@ static void test_rain_random_and_exact_motor_pose() {
     f.world.cached.local_player = local;
     f.world.ai.attach(local);
     auto &body = *f.world.ai.for_handle(local);
-    body.pos[0] = 10 * 65536 + 7; body.pos[1] = 20 * 65536 + 9; body.pos[2] = 30 * 65536 + 11;
+    body.self->position.x.q16 = 10 * 65536 + 7; body.self->position.y.q16 = 20 * 65536 + 9; body.self->position.z.q16 = 30 * 65536 + 11;
     body.heading = 0; body.body_pitch = int32_t(0x40000000u);
     f.script("fx2ssn(FLASH,1)\n");
     CHECK(f.world.out.script_effects[0].position[0] == 10 * 65536 + 7);

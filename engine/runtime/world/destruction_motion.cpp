@@ -57,9 +57,6 @@ void entity_process_falling_death(
 	if (AiEntity *body = world.ai.for_handle(e.handle)) {
 		for (int axis = 0; axis < 3; ++axis)
 			body->net_saved_live_pose[axis] = e.saved_live_pos[axis];
-		body->pos[0] = e.position.x.q16;
-		body->pos[1] = e.position.y.q16;
-		body->pos[2] = e.position.z.q16;
 		body->vel_x = m.vel_x;
 		body->vel_y = m.vel_y;
 	}

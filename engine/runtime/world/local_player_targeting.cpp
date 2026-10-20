@@ -153,9 +153,9 @@ void LocalPlayer::update_aim_target() {
         // its wire row instead. [orig: headLookTarget @0x4b4f75 / @0x4b5036]
         aim_wire_person_ = hit.wire_person_handle;
         for (int i = 0; i < 3; ++i) body->inf.aim_point[i] = hit.position_q16[i];
-        const double dx = double(hit.position_q16.x) - body->pos[0];
-        const double dy = double(hit.position_q16.y) - body->pos[1];
-        const double dz = double(hit.position_q16.z) - body->pos[2];
+        const double dx = double(hit.position_q16.x) - body->self->position.x.q16;
+        const double dy = double(hit.position_q16.y) - body->self->position.y.q16;
+        const double dz = double(hit.position_q16.z) - body->self->position.z.q16;
         weapon.aim_range_q16 = static_cast<int32_t>(std::min(std::sqrt(dx*dx+dy*dy+dz*dz), 2147418112.0));
         const bool allowed = !weapon.active || (weapon.def.flags2 & 0x20) == 0 || local_player_can_fire();
         if (allowed && weapon.active) {

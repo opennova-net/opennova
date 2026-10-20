@@ -1164,14 +1164,13 @@ struct AiEntity;
 // Snap a motor-driven infantry entity back to a deployed pose, standing and idle.
 //
 // The original has ONE Entity store, so its respawn writes Position/Yaw/Health once and
-// the mover reads them back. Our AiEntity motor store is a tracked split of that store
-// (see finish_infantry_tick's two-store reconciliation), and the motor is the WRITER of
-// the pair: it mirrors AiEntity.pos/heading into the registry Entity every tick. A
-// respawn that touches only the registry Entity is therefore silently reverted on the
-// next tick, leaving the body at the corpse pose. Anything that redeploys a
-// motor-simulated entity must reset BOTH stores, which is what this does for the motor
-// half — velocities, the interpolation staging, the collide cache, and the InfantryState
-// pose/stance/anim latches that would otherwise keep the death clip.
+// the mover reads them back. The position is that one store here too (the entity's words,
+// through AiEntity::self); the motor's heading/health mirrors and its latches are not, and
+// the motor writes them back into the registry Entity every tick. A respawn that touches
+// only the registry Entity would leave the body at the corpse pose and heading, so this
+// resets the motor half — the position words, heading, velocities, the interpolation
+// staging, the collide cache, and the InfantryState pose/stance/anim latches that would
+// otherwise keep the death clip.
 //
 // [orig: the deploy flow places the entity, then Entity_ResetToSpawnState @ 0x4B9610
 //  re-records Position and reseeds the body-anim channel; the death-family anim latch it

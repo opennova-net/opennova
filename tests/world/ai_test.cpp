@@ -52,6 +52,7 @@ void test_vehicle_death_rows() {
         const EntityHandle h = w.registry.spawn(1, seed);
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         sys.is_authority = true;
         int idx = sys.attach(h);
         AiEntity &e = *sys.at(idx);
@@ -103,11 +104,13 @@ void test_vehicle_death_rows() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(1, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(1, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = 21;
         e.vel_x = 5000; e.vel_y = 0;             // fast
-        e.pos[0] = 100000;                        // far from the (0-init) death pose
+        e.self->position.x.q16 = 100000;                        // far from the (0-init) death pose
         e.net_saved_live_pose[0] = 0;
         e.brain.f[AiBrain::kWorkPitch] = 7;
         e.brain.f[AiBrain::kWorkRoll] = 7;
@@ -156,6 +159,7 @@ void test_vehicle_death_states_send_kill_record() {
         const EntityHandle h = w.registry.spawn(1, seed);
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         sys.is_authority = w.rules.logic_authority;
         AiEntity &e = *sys.at(sys.attach(h));
         e.team = 1;
@@ -219,11 +223,12 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     w->tables.ammo.entries[1].max_age_ticks = 100;
 
     AiSystem sys;
+    sys.bind_registry(&w->registry);
     int idx = sys.attach(h);
     AiEntity &e = *sys.at(idx);
-    e.pos[0] = 10 << 16;
-    e.pos[1] = 20 << 16;
-    e.pos[2] = 5 << 16;
+    e.self->position.x.q16 = 10 << 16;
+    e.self->position.y.q16 = 20 << 16;
+    e.self->position.z.q16 = 5 << 16;
     e.profile.organic.ammo.fill(1);
     e.profile.organic.launch = {1, 2, 3};
 
@@ -265,12 +270,13 @@ static void test_weapon_fire_origin_fallback_chain() {
     World w;
     w.registry.configure_pool(0, 4);
     AiSystem sys;
+    sys.bind_registry(&w.registry);
     EntityHandle h = EntityHandle::make(0, 1);
     int idx = sys.attach(h);
     AiEntity &e = *sys.at(idx);
-    e.pos[0] = 10 << 16;
-    e.pos[1] = 20 << 16;
-    e.pos[2] = 5 << 16;
+    e.self->position.x.q16 = 10 << 16;
+    e.self->position.y.q16 = 20 << 16;
+    e.self->position.z.q16 = 5 << 16;
 
     int32_t out[3];
     AiSystem::weapon_fire_origin(e, out);
@@ -326,14 +332,15 @@ static void test_los_endpoints_use_muzzle_stamp() {
     World w;
     w.registry.configure_pool(0, 4);
     AiSystem sys;
+    sys.bind_registry(&w.registry);
     sys.terrain = &band.field;
     EntityHandle ha = EntityHandle::make(0, 0);
     EntityHandle hb = EntityHandle::make(0, 1);
     int ia = sys.attach(ha);
     AiEntity &a = *sys.at(ia);
-    a.pos[0] = 2 << 16;
-    a.pos[1] = 100 << 16;
-    a.pos[2] = 0;
+    a.self->position.x.q16 = 2 << 16;
+    a.self->position.y.q16 = 100 << 16;
+    a.self->position.z.q16 = 0;
 
     Entity target{};
     target.position = Vec3{20.0f, 100.0f, 0.0f};
@@ -372,6 +379,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     CollisionWorld collision;
     w.collision = &collision;
     AiSystem sys;
+    sys.bind_registry(&w.registry);
 
     Entity veh_seed{};
     veh_seed.kind = EntityKind::Item;
@@ -441,10 +449,11 @@ static void test_aim_origin_takes_the_non_person_leg() {
     sys.weapon_aim_origin(w, target, out);
     CHECK(out[0] == 96256 && out[1] == 98304 && out[2] == 131072);
 
-    // During the motor, the live fixed-point body/eye leads its registry mirror.
+    // The attached body's position is the entity's own words (one store, as
+    // retail's): the person leg and the raw origin read the same words.
     const int body_index = sys.attach(person);
     AiEntity &body = *sys.at(body_index);
-    body.pos[0] = 17; body.pos[1] = 29; body.pos[2] = 41;
+    body.self->position.x.q16 = 17; body.self->position.y.q16 = 29; body.self->position.z.q16 = 41;
     body.inf.eye_offset_x = -3; body.inf.eye_offset_y = -5; body.inf.eye_offset_z = 7;
     target.net_id = 0;
     w.logic_tick = 128;
@@ -452,7 +461,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     CHECK(out[0] == -4080 && out[1] == -2021 && out[2] == 44);
     target.has_item_def = false; // kind alone never selects the person leg
     sys.weapon_aim_origin(w, target, out);
-    CHECK(out[0] == 65536 && out[1] == 131072 && out[2] == 0);
+    CHECK(out[0] == 17 && out[1] == 29 && out[2] == 41);
     w.pose_provider = nullptr;
 }
 
@@ -513,7 +522,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     npc.inf.active = true;
     npc.team = 1;
     npc.net_id = 0x11;
-    npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 0;
+    npc.self->position.x.q16 = 0; npc.self->position.y.q16 = 0; npc.self->position.z.q16 = 0;
     npc.profile.organic.launch[1] = 2;
     npc.slot.f[10] = 0; // zero aim error: the pitch pin is exact
     npc.slot.f[11] = 0;
@@ -577,6 +586,7 @@ static void test_sm_turret_fire() {
         w = std::make_unique<World>();
         w->registry.configure_pool(0, 8);
         w->registry.configure_pool(1, 8);
+        sys.bind_registry(&w->registry);
         w->tables.ammo.entries.resize(2);
         w->tables.ammo.entries[1].valid = true;
         w->tables.ammo.entries[1].velocity = 620;
@@ -593,9 +603,9 @@ static void test_sm_turret_fire() {
         sys.is_authority = true;
         int idx = sys.attach(sh);
         e = sys.at(idx);
-        e->pos[0] = 0;
-        e->pos[1] = 0;
-        e->pos[2] = 0;
+        e->self->position.x.q16 = 0;
+        e->self->position.y.q16 = 0;
+        e->self->position.z.q16 = 0;
         e->heading = 0; // facing +X = the bearing to the target
         e->brain.f[AiBrain::kCurState] = kAiGroundCombat;
         e->brain.f[AiBrain::kStep] = 16;
@@ -700,6 +710,7 @@ static void test_sm_fire_stamps_the_hull_adm_byte() {
         AiEntity *e = nullptr;
         EntityHandle hull;
         Rig() {
+            sys.bind_registry(&w->registry);
             w->registry.configure_pool(0, 8);
             w->registry.configure_pool(1, 8);
             w->tables.ammo.entries.resize(3);
@@ -845,6 +856,7 @@ static void test_entity_update_stamps_the_session_fact() {
     w.rules.mp_session = true;
     w.update_all_entities(ctx);
     CHECK(w.ai.is_in_session);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     AiEntity &e = *w.ai.at(w.ai.attach(EntityHandle::make(0, 0)));
     e.health = 100;
     e.vel_x = 2000;
@@ -898,7 +910,7 @@ static void test_round_hit_reaches_the_same_pass_body_update() {
     victim.health = 1000;
     victim.team = 2;
     victim.net_id = 0x21;
-    victim.pos[0] = 20 << 16;
+    victim.self->position.x.q16 = 20 << 16;
 
     RoundSpawnParams shot;
     shot.owner = shooter_h;
@@ -965,7 +977,7 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     victim.health = 10;
     victim.team = 2;
     victim.net_id = 0x21;
-    victim.pos[0] = 20 << 16;
+    victim.self->position.x.q16 = 20 << 16;
 
     TickContext tick{};
     tick.world = &w;
@@ -987,8 +999,8 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     // A dismemberment piece may attach a brain and move the AI array: re-read
     // the victim's brain.
     AiEntity &corpse = *ai.for_handle(victim_h);
-    const int32_t transition_x = corpse.pos[0];
-    const int32_t transition_z = corpse.pos[2];
+    const int32_t transition_x = corpse.self->position.x.q16;
+    const int32_t transition_z = corpse.self->position.z.q16;
     tick.logic_tick = 2;
     w.update_all_entities(tick);
 
@@ -996,20 +1008,20 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     CHECK(corpse.inf.body_clip_state() == anim_state::kIdle);
     CHECK(corpse.inf.clip_phase == 2);
     CHECK(corpse.inf.anim_blend_weight == 1.0f);
-    CHECK(corpse.pos[0] == transition_x);
-    CHECK(corpse.pos[2] == transition_z);
+    CHECK(corpse.self->position.x.q16 == transition_x);
+    CHECK(corpse.self->position.z.q16 == transition_z);
 
-    const int32_t blend_x = corpse.pos[0];
-    const int32_t blend_z = corpse.pos[2];
+    const int32_t blend_x = corpse.self->position.x.q16;
+    const int32_t blend_z = corpse.self->position.z.q16;
     tick.logic_tick = 3;
     w.update_all_entities(tick);
 
     CHECK(corpse.inf.clip_phase == 1);
     CHECK(corpse.inf.anim_blend_weight == 0.1f);
-    CHECK(corpse.pos[0] - blend_x == DeathTransitionRootSource::kFirstBlendDx);
-    if (corpse.pos[2] - blend_z != DeathTransitionRootSource::kFirstBlendDz) {
+    CHECK(corpse.self->position.x.q16 - blend_x == DeathTransitionRootSource::kFirstBlendDx);
+    if (corpse.self->position.z.q16 - blend_z != DeathTransitionRootSource::kFirstBlendDz) {
         std::printf("first death blend position jump: dz=%d, expected blended dz=%d\n",
-                    corpse.pos[2] - blend_z, DeathTransitionRootSource::kFirstBlendDz);
+                    corpse.self->position.z.q16 - blend_z, DeathTransitionRootSource::kFirstBlendDz);
         ++failures;
     }
 }
@@ -1614,7 +1626,7 @@ static void test_weapon_fire_position_legs() {
     const int veh_index = sys.attach(veh_h);
     AiEntity &person = *sys.at(person_index);
     configure_rifleman(person, 0x11, 1);
-    person.pos[0] = 1 << 16; person.pos[1] = 2 << 16; person.pos[2] = 3 << 16;
+    person.self->position.x.q16 = 1 << 16; person.self->position.y.q16 = 2 << 16; person.self->position.z.q16 = 3 << 16;
     person.inf.eye_offset_x = 0x100;
     person.inf.eye_offset_y = -0x200;
     person.inf.eye_offset_z = 0x18000;
@@ -1663,11 +1675,11 @@ static void test_weapon_fire_position_legs() {
     // Without the EWeap attrib the seat's parent is no gun: the CameraOffset leg.
     w->registry.get(provider.gun)->item_attrib = 0;
     CHECK(sys.weapon_fire_position(*w, person, out) == 1);
-    CHECK(out[0] == person.pos[0] + 0x100 && out[2] == person.pos[2] + 0x18000);
+    CHECK(out[0] == person.self->position.x.q16 + 0x100 && out[2] == person.self->position.z.q16 + 0x18000);
 
     // A non-person without a model: the raw position.
     AiEntity &veh = *sys.at(veh_index);
-    veh.pos[0] = 10 << 16; veh.pos[1] = 20 << 16; veh.pos[2] = 30 << 16;
+    veh.self->position.x.q16 = 10 << 16; veh.self->position.y.q16 = 20 << 16; veh.self->position.z.q16 = 30 << 16;
     CHECK(sys.weapon_fire_position(*w, veh, out) == 3);
     CHECK(out[0] == (10 << 16) && out[1] == (20 << 16) && out[2] == (30 << 16));
     // A model without a LOOK point: the position raised 0.75 u.
@@ -1800,8 +1812,8 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         ai.terrain = &ridge.field;
         AiEntity &npc = *ai.at(ai.attach(npc_h));
         configure_rifleman(npc, 0x11, 1);
-        npc.pos[0] = 2 << 16;
-        npc.pos[1] = 100 << 16;
+        npc.self->position.x.q16 = 2 << 16;
+        npc.self->position.y.q16 = 100 << 16;
         npc.profile.organic.ammo.fill(0);
         CHECK(w->commands.mount(0x11, 0x31));
         CHECK(w->registry.get(point.gun)->primary_weapon_slot.clip == (cannon ? 1 : -1));
@@ -1811,7 +1823,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         int32_t aim[3], from[3];
         ai.weapon_aim_origin(*w, *w->registry.get(enemy_h), aim);
         for (const int32_t lift : {0, 1 << 16}) {
-            from[0] = npc.pos[0]; from[1] = npc.pos[1]; from[2] = npc.pos[2] + lift;
+            from[0] = npc.self->position.x.q16; from[1] = npc.self->position.y.q16; from[2] = npc.self->position.z.q16 + lift;
             CHECK(!ai.line_of_sight_clear(*w, from, aim, npc_h, enemy_h));
         }
         CHECK(ai.weapon_fire_position(*w, npc, from) == 1);
@@ -1892,14 +1904,14 @@ static void test_infantry_floats_and_splashes_once() {
     // Shallower than the hysteresis gap: retail does NOT start floating here, so
     // a body wading the very edge of a river neither latches nor splashes. This
     // is the assertion a naive `z < water` port fails.
-    npc.pos[2] = w->env.water_z - to_fixed(0.3);
+    npc.self->position.z.q16 = w->env.water_z - to_fixed(0.3);
     ai.infantry_water_block(npc, *w, ent, 0, 1);
     CHECK(w->out.water_crossings.events.empty());
     CHECK((ent->flags & kEntityFlagDrowning) == 0);
 
     // Past the gap, walking (not airborne): one crossing, carrying the wade sound.
-    npc.pos[2] = w->env.water_z - to_fixed(1.0);
-    const int32_t sank_to = npc.pos[2];
+    npc.self->position.z.q16 = w->env.water_z - to_fixed(1.0);
+    const int32_t sank_to = npc.self->position.z.q16;
     ai.infantry_water_block(npc, *w, ent, 0, 1);
     CHECK(w->out.water_crossings.events.size() == 1);
     CHECK(!w->out.water_crossings.events[0].airborne);
@@ -1909,27 +1921,27 @@ static void test_infantry_floats_and_splashes_once() {
     // stores the float target outright; the motor's +0xAC quarter-step tail that
     // follows it is what paces the settle (infantry_org1_parity). [orig:
     // Entity_UpdateInfantryAI store @0x4BFB84, tail @0x4BFC65..0x4BFC86]
-    CHECK(npc.pos[2] > sank_to);
+    CHECK(npc.self->position.z.q16 > sank_to);
 
     // Still under, still latched: the host drained the queue and nothing refills it.
     w->out.water_crossings.clear();
     for (int i = 0; i < 8; ++i) ai.infantry_water_block(npc, *w, ent, 0, 2 + i);
     CHECK(w->out.water_crossings.events.empty());
     // He sits at the float target, just under the plane within the bob's amplitude.
-    const int32_t settled = npc.pos[2] - w->env.water_z;
+    const int32_t settled = npc.self->position.z.q16 - w->env.water_z;
     CHECK(settled < 0 && settled > -to_fixed(1.0));
     std::printf("  [inf-water] settled %.3f u under the plane\n",
                 static_cast<double>(settled) / 65536.0);
 
     // Out of the water clears the latch, so the next entry can splash again.
-    npc.pos[2] = w->env.water_z + to_fixed(0.5);
+    npc.self->position.z.q16 = w->env.water_z + to_fixed(0.5);
     ai.infantry_water_block(npc, *w, ent, 0, 20);
     CHECK((ent->flags & kEntityFlagDrowning) == 0);
 
     // Now the same body arrives from the AIR. Same family, same plane, DIFFERENT
     // sound - the selector retail actually uses.
     ent->flags |= kEntityFlagInAir;
-    npc.pos[2] = w->env.water_z - to_fixed(1.0);
+    npc.self->position.z.q16 = w->env.water_z - to_fixed(1.0);
     ai.infantry_water_block(npc, *w, ent, 0, 21);
     CHECK(w->out.water_crossings.events.size() == 1);
     CHECK(w->out.water_crossings.events[0].airborne);
@@ -2761,7 +2773,7 @@ static void test_aircraft_combat_states() {
 	sys.is_authority = true;
 	auto &b = ai.brain;
 	ai.health = 500;
-	ai.pos[2] = 10 << 16;
+	ai.self->position.z.q16 = 10 << 16;
 	ai.team = 1;
 	ai.profile.type = 1;
 	ai.profile.field220 = 6000;
@@ -2798,8 +2810,8 @@ static void test_aircraft_combat_states() {
 	CHECK((b.bytes()[AiBrain::kBoneFlagByte] & 0x40) != 0);
 	// A moving, rolling hull continues the saved six-component burst without
 	// solving again or consuming scatter randomness.
-	ai.pos[0] = 4 << 16;
-	ai.pos[2] = 15 << 16;
+	ai.self->position.x.q16 = 4 << 16;
+	ai.self->position.z.q16 = 15 << 16;
 	ai.heading = 12345;
 	ai.pitch = 23456;
 	ai.roll = 34567;
@@ -2807,15 +2819,15 @@ static void test_aircraft_combat_states() {
 	sys.row(8).tick(ctx);
 	CHECK(w.out.rounds.count == 2 && b.f[AiBrain::kAmmoA] == 2);
 	if (w.out.rounds.count == 2) {
-		CHECK(w.out.rounds.records[1].origin_z == ai.pos[2] + saved_z);
+		CHECK(w.out.rounds.records[1].origin_z == ai.self->position.z.q16 + saved_z);
 		CHECK(w.out.rounds.records[1].dir_yaw == ai.heading + b.f[AiBrain::kSavedDeltaA + 3]);
 		CHECK(w.out.rounds.records[1].dir_pitch == ai.pitch + b.f[AiBrain::kSavedDeltaA + 4]);
 	}
 	CHECK(sys.prng_a == random_before);
 	// Secondary processed fire omits the primary fire bit and perfect-aim
 	// scatter; the secondary continuation site still draws its two values.
-	ai.pos[0] = 0;
-	ai.pos[2] = 10 << 16;
+	ai.self->position.x.q16 = 0;
+	ai.self->position.z.q16 = 10 << 16;
 	ai.heading = ai.pitch = ai.roll = 0;
 	ai.profile.flags100 = 0;
 	b.f[AiBrain::kBurstWindow] = 0;
@@ -2904,7 +2916,7 @@ static void test_aircraft_fire_stamps_the_hull_adm_byte() {
 	sys.is_authority = true;
 	auto &b = ai.brain;
 	ai.health = 500;
-	ai.pos[2] = 10 << 16;
+	ai.self->position.z.q16 = 10 << 16;
 	ai.team = 1;
 	ai.profile.type = 1;
 	ai.profile.field220 = 6000;
@@ -2987,7 +2999,7 @@ static void test_vehicle_weapon_pose_and_target_cleanup() {
 	sys.attach(th);
 	AiEntity &ai = *sys.for_handle(sh);
 	auto &b = ai.brain;
-	ai.pos[2] = 10 << 16;
+	ai.self->position.z.q16 = 10 << 16;
 	ai.pitch = 0x10000000;
 	ai.roll = 0x20000000;
 	ai.profile.fire_a.flags = 0x10;
@@ -3063,6 +3075,7 @@ static void test_vehicle_class_state_machine_gates() {
 	const EntityHandle crew = w.registry.spawn(0, crew_seed);
 	auto sys_heap = std::make_unique<AiSystem>();
 	AiSystem &sys = *sys_heap;
+	sys.bind_registry(&w.registry);
 	const int idx = sys.attach(hull);
 	AiEntity &e = *sys.at(idx);
 	e.health = 100;
@@ -3250,7 +3263,7 @@ struct AircraftRig {
 		ai = sys.at(sys.attach(hull_h));
 		sys.is_authority = true;
 		ai->health = 500;
-		ai->pos[2] = 10 << 16;
+		ai->self->position.z.q16 = 10 << 16;
 		ai->team = 1;
 		ai->profile.type = 1;
 		ai->profile.field220 = 6000;
@@ -3573,6 +3586,9 @@ int main() {
     {
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        auto rows_heap = std::make_unique<World>(); // the brain's row (its position words)
+        rows_heap->registry.configure_pool(0, 8);
+        sys.bind_registry(&rows_heap->registry);
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kStep] = 64;
@@ -3633,6 +3649,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -3654,6 +3672,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -3674,6 +3694,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -3706,6 +3728,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = true;
         const auto alert_event = [](int idx, int32_t level) {
             AiEventEntry ev{};
@@ -3789,6 +3813,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiHeloLand; // 6
@@ -3817,6 +3843,7 @@ int main() {
 
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         sys.is_authority = true;
         int idx = sys.attach(h);
         AiEntity &e = *sys.at(idx);
@@ -3909,6 +3936,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].loopflag = 0;
@@ -3954,6 +3983,8 @@ int main() {
             World &w = *w_heap;
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
+            w.registry.configure_pool(0, 8); // the brain's row (its position words)
             sys.nav.channels.resize(2);
             sys.nav.channels[1].count = 3;
             sys.nav.channels[1].loopflag = loopflag;
@@ -3991,6 +4022,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.nodes.resize(1);
         sys.nav.nodes[0] = NavEntry{{0, 100, 0, 0, 0}};
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -4014,6 +4047,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
@@ -4037,6 +4072,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].entries[0] = 10;
@@ -4064,6 +4101,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].entries[0] = 10;
@@ -4101,9 +4140,11 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
-        e.pos[0] = 11; e.pos[1] = 22; e.pos[2] = 33;
+        e.self->position.x.q16 = 11; e.self->position.y.q16 = 22; e.self->position.z.q16 = 33;
         e.heading = 44; e.pitch = 55; e.roll = 66;
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
         e.brain.f[AiBrain::kWpType] = 1;
@@ -4142,6 +4183,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.nodes.resize(1);
         sys.nav.nodes[0] = NavEntry{{0, 0, 0, 0, 0}};
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -4206,6 +4249,9 @@ int main() {
     {
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        auto rows_heap = std::make_unique<World>(); // the scanner's row (its position words)
+        rows_heap->registry.configure_pool(0, 8);
+        sys.bind_registry(&rows_heap->registry);
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.heading = 0;
@@ -4316,6 +4362,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             AiTarget out{};
             CHECK(sys.acquire_target(w, e, out) == false);
@@ -4329,6 +4376,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             AiTarget out{};
@@ -4344,6 +4392,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[2] = 100;
             AiTarget out{};
@@ -4360,6 +4409,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[0] = 100;
             // Kill the pool-1 vehicle so the pool-0 player leg decides.
@@ -4383,6 +4433,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[3] = 100;
             AiTarget out{};
@@ -4399,6 +4450,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             w.registry.get(EntityHandle::make(1, 0))->radar_sig = 0;
@@ -4414,6 +4466,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             w.process_round_end(0);
@@ -4429,6 +4482,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             Entity far_vehicle;
@@ -4451,6 +4505,9 @@ int main() {
         {
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            auto rows_heap = std::make_unique<World>(); // the scanner's row (its position words)
+            rows_heap->registry.configure_pool(0, 8);
+            sys.bind_registry(&rows_heap->registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             AiCandidate a{};
             a.handle = EntityHandle::make(1, 1);
@@ -4480,6 +4537,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = false;
         sys.is_in_session = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -4504,6 +4563,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         w.prng16_state = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -4536,6 +4597,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.prng_a = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -4550,6 +4613,8 @@ int main() {
         // Now with a base delay: branch A jitters via stream A (49) and advances it.
         auto sys2_heap = std::make_unique<AiSystem>();
         AiSystem &sys2 = *sys2_heap;
+        sys2.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys2.prng_a = 1;
         int i2 = sys2.attach(EntityHandle::make(0, 0));
         AiEntity &e2 = *sys2.at(i2);
@@ -4584,6 +4649,7 @@ int main() {
 
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         int idx = sys.attach(self_h);
         AiEntity &e = *sys.at(idx);
         e.team = 1;
@@ -4615,6 +4681,7 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         // The arrival proximity is the def turn-rate word (itemDef+0x924), read
         // live from the entity's def [orig: @0x457DCB..0x457DCE].
         w.registry.configure_pool(1, 1);
@@ -4663,6 +4730,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundEvade;
@@ -4688,6 +4757,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
 
@@ -4733,9 +4804,10 @@ int main() {
     {
         auto w_heap = std::make_unique<World>();
         World &w = *w_heap;
+        w.registry.configure_pool(1, 8); // the brain's row (its position words)
         int idx = w.ai.attach(EntityHandle::make(1, 0));
         AiEntity &e = *w.ai.at(idx);
-        e.pos[0] = 0; e.pos[1] = 0; e.pos[2] = 7 << 16;
+        e.self->position.x.q16 = 0; e.self->position.y.q16 = 0; e.self->position.z.q16 = 7 << 16;
         e.brain.f[AiBrain::kOutSpeed] = 3;
         e.brain.f[AiBrain::kWorkPosX] = 100 << 16;
         e.brain.f[AiBrain::kWorkPosY] = 0;
@@ -4745,9 +4817,9 @@ int main() {
         ctx.world = &w;
         ctx.is_authority = true;
         w.update_all_entities(ctx);
-        CHECK(e.pos[0] == 0);
-        CHECK(e.pos[1] == 0);
-        CHECK(e.pos[2] == (7 << 16));
+        CHECK(e.self->position.x.q16 == 0);
+        CHECK(e.self->position.y.q16 == 0);
+        CHECK(e.self->position.z.q16 == (7 << 16));
         CHECK(e.heading == heading);
     }
 
@@ -4840,7 +4912,7 @@ int main() {
         npc.inf.active = true;
         npc.team = 1;
         npc.net_id = 0x11;
-        npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 40 << 16;
+        npc.self->position.x.q16 = 0; npc.self->position.y.q16 = 0; npc.self->position.z.q16 = 40 << 16;
         npc.profile.organic.ammo.fill(1); // -> w.tables.ammo[1]
         npc.profile.organic.launch = {1, 2, 3};
         npc.profile.clip_size = 30;

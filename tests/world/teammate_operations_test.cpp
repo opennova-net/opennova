@@ -25,13 +25,13 @@ struct Factory : ITeammateSpawner {
         if (int(requests.size()) == fail_request) return {};
         Entity seed; seed.kind = r.helicopter ? EntityKind::Item : EntityKind::Organic;
         seed.item_id = r.item_type; seed.net_id = r.ssn; seed.team = 1; seed.has_item_def = true;
-        seed.position = {r.pos[0] / 65536.0f, r.pos[1] / 65536.0f, r.pos[2] / 65536.0f};
+        seed.position.set_q16({r.pos[0], r.pos[1], r.pos[2]});
         seed.yaw = float(mission_yaw_deg_from_bam_heading(r.heading));
         seed.spawn_origin = kSpawnOriginNone;
         const EntityHandle h = world.registry.spawn(r.helicopter ? 1 : 0, seed);
         if (!h.valid()) return h;
         AiEntity &ai = *world.ai.at(world.ai.attach(h));
-        std::copy_n(r.pos, 3, ai.pos); ai.heading = r.heading; ai.net_id = r.ssn;
+        ai.heading = r.heading; ai.net_id = r.ssn;
         ai.inf.active = !r.helicopter;
         return h;
     }
@@ -51,7 +51,7 @@ struct Fixture {
         seed.position = {10, 20, 3};
         patient = world.registry.spawn(0, seed);
         AiEntity &ai = *world.ai.at(world.ai.attach(patient));
-        ai.pos[0] = 10 * 65536; ai.pos[1] = 20 * 65536; ai.pos[2] = 3 * 65536;
+        ai.self->position.x.q16 = 10 * 65536; ai.self->position.y.q16 = 20 * 65536; ai.self->position.z.q16 = 3 * 65536;
         seed.kind = EntityKind::Marker; seed.item_id = 6088; seed.net_id = 500; seed.wp_number = 9;
         seed.has_item_def = true; seed.yaw = 90;
         marker = world.registry.spawn(3, seed);
@@ -67,7 +67,7 @@ struct Fixture {
     Entity &first() { return *world.registry.get(slot().first); }
     Entity &second() { return *world.registry.get(slot().second); }
     void move(EntityHandle h, int32_t x, int32_t y, int32_t z) {
-        AiEntity &ai = *world.ai.for_handle(h); ai.pos[0] = x; ai.pos[1] = y; ai.pos[2] = z;
+        AiEntity &ai = *world.ai.for_handle(h); ai.self->position.x.q16 = x; ai.self->position.y.q16 = y; ai.self->position.z.q16 = z;
         world.registry.get(h)->position = {x / 65536.0f, y / 65536.0f, z / 65536.0f};
     }
     bool active_trigger(int sub) {
@@ -118,9 +118,9 @@ void test_complete_sequence_and_boundaries() {
     CHECK(f.air().brain.f[19] == 3 * 65536 && f.world.ai.events.at(3).f[3] == 0);
     auto slot = f.slot();
     Entity *heli = f.world.registry.get(slot.helicopter);
-    heli->saved_live_pos[2] = f.air().pos[2] - 1;
+    heli->saved_live_pos[2] = f.air().self->position.z.q16 - 1;
     f.tick(); CHECK(f.slot().state == State::Land);
-    heli->saved_live_pos[2] = f.air().pos[2];
+    heli->saved_live_pos[2] = f.air().self->position.z.q16;
     f.tick(); CHECK(f.slot().state == State::ApproachPatient);
     AiEntity *medic = f.world.ai.for_handle(slot.first.handle);
     CHECK(medic->slot.f[37] == 125 && medic->slot.f[38] == 73);
@@ -136,7 +136,7 @@ void test_complete_sequence_and_boundaries() {
     CHECK(f.world.registry.get(f.patient)->dragger == slot.first.handle);
     CHECK(f.world.registry.get(f.patient)->dragger_spawn_id == f.first().registry_spawn_id);
     CHECK((f.first().flags & 0x40) == 0 && medic->slot.f[38] == 11000);
-    const auto hx = f.air().pos[0], hy = f.air().pos[1], hz = f.air().pos[2];
+    const auto hx = f.air().self->position.x.q16, hy = f.air().self->position.y.q16, hz = f.air().self->position.z.q16;
     f.move(slot.first.handle, hx + 3 * 65536, hy, hz);
     f.move(slot.second.handle, hx + 65536, hy, hz);
     f.tick(); CHECK(f.slot().state == State::Return); // second alone cannot lead departure

@@ -448,9 +448,9 @@ void test_remote_player_control_seat_preserves_wire_look() {
         CHECK(w.registry.get(player_h)->yaw == 45);
         CHECK(body.inf.body_heading == 835125248); // ((70 << 16) / 360) << 16
         const Entity *mounted = w.registry.get(player_h);
-        CHECK(body.pos[0] == to_fixed(mounted->position.x));
-        CHECK(body.pos[1] == to_fixed(mounted->position.y));
-        CHECK(body.pos[2] == to_fixed(mounted->position.z));
+        CHECK(body.self->position.x.q16 == to_fixed(mounted->position.x));
+        CHECK(body.self->position.y.q16 == to_fixed(mounted->position.y));
+        CHECK(body.self->position.z.q16 == to_fixed(mounted->position.z));
     }
 }
 
@@ -538,7 +538,18 @@ void test_live_pose_provider_and_static_fallback() {
         body->inf.anim_state = anim_state::kIdleCrouch;
 
         CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
-        check_pose(*w.registry.get(occupant_h), provider.pose);
+        // The attach stores no Position: the bodied occupant keeps its words
+        // until its motor's seat block poses it on the next pass (below); its
+        // attitude mirrors take the seat's. [orig: Entity_AttachToVehicleSlot
+        // @0x4946D0 - the stores @0x494752..0x494775]
+        {
+            const Entity &attached = *w.registry.get(occupant_h);
+            CHECK(attached.position.x.q16 == 0 && attached.position.y.q16 == 0 &&
+                  attached.position.z.q16 == 0);
+            CHECK(attached.yaw == std::lround(mission_yaw_deg_from_bam_heading(provider.pose.heading)));
+            CHECK(attached.pitch == std::lround(provider.pose.pitch * kDegreesPerBam));
+            CHECK(attached.roll == std::lround(provider.pose.roll * kDegreesPerBam));
+        }
 
         // The carrier changes the BODY frame; idle LOOK remains independent.
         body->heading = body->inf.aim_heading = 0;
@@ -553,9 +564,9 @@ void test_live_pose_provider_and_static_fallback() {
         expected.heading = 0; // BAM look 0, while the seated body faces yaw 44.
         check_pose(*mounted, expected);
         CHECK(body->heading == 0 && !body->inf.aim_valid);
-        CHECK(body->pos[0] == to_fixed(31.5));
-        CHECK(body->pos[1] == to_fixed(32.25));
-        CHECK(body->pos[2] == to_fixed(33.75));
+        CHECK(body->self->position.x.q16 == to_fixed(31.5));
+        CHECK(body->self->position.y.q16 == to_fixed(32.25));
+        CHECK(body->self->position.z.q16 == to_fixed(33.75));
         CHECK(body->inf.body_heading == provider.pose.heading);
         CHECK(body->body_pitch == provider.pose.pitch);
         CHECK(body->roll == provider.pose.roll);
@@ -625,8 +636,8 @@ void test_live_pose_provider_and_static_fallback() {
         CHECK(std::abs(mounted->position.x - 2.0f) < 0.0001f);
         CHECK(std::abs(mounted->position.y - 1.0f) < 0.0001f);
         CHECK(std::abs(mounted->position.z - 41.0f) < 0.0001f);
-        CHECK(body->pos[0] == to_fixed(2.0));
-        CHECK(body->pos[1] == to_fixed(1.0));
+        CHECK(body->self->position.x.q16 == to_fixed(2.0));
+        CHECK(body->self->position.y.q16 == to_fixed(1.0));
         CHECK(mounted->yaw == 87); // independent chased look, not provider body yaw 12
         CHECK(mounted->pitch == 21);
         CHECK(mounted->roll == -30);
@@ -1961,9 +1972,9 @@ void test_ai_authored_entry_claim_and_stages() {
 	brain.slot.f[37] = 125;
 	brain.slot.f[38] = 11;
 	const auto move = [&](int x, int y) {
-		brain.pos[0] = x * 65536;
-		brain.pos[1] = y * 65536;
-		brain.pos[2] = 10 * 65536;
+		brain.self->position.x.q16 = x * 65536;
+		brain.self->position.y.q16 = y * 65536;
+		brain.self->position.z.q16 = 10 * 65536;
 		r.player().position = { float(x), float(y), 10 };
 	};
 	move(100, 210);
@@ -2012,9 +2023,9 @@ void test_ai_boarding_moving_and_destroyed_carrier_admission() {
 	auto &brain = *r.sys.at(r.sys.attach(r.player_h));
 	brain.slot.f[37] = 125;
 	brain.slot.f[38] = 11;
-	brain.pos[0] = 100 * 65536;
-	brain.pos[1] = 200 * 65536;
-	brain.pos[2] = 10 * 65536;
+	brain.self->position.x.q16 = 100 * 65536;
+	brain.self->position.y.q16 = 200 * 65536;
+	brain.self->position.z.q16 = 10 * 65536;
 	r.player().spawn_position = { 100, 200, 10 };
 	r.sys.infantry_think(brain, r.w);
 	CHECK(brain.inf.move_mode == 0);
@@ -2022,14 +2033,14 @@ void test_ai_boarding_moving_and_destroyed_carrier_admission() {
 	CHECK(r.player().health > 0);
 	r.veh().health = 0;
 	r.veh().last_attacker = r.veh_h;
-	brain.pos[0] += 9 * 65536;
+	brain.self->position.x.q16 += 9 * 65536;
 	r.sys.infantry_think(brain, r.w);
 	CHECK(r.player().health > 0); // zero health alone is not the dead bit [orig: @0x4BB211]
-	brain.pos[0] -= 9 * 65536;
+	brain.self->position.x.q16 -= 9 * 65536;
 	r.veh().engine_flags |= kEntityFlagDead;
 	r.sys.infantry_think(brain, r.w);
 	CHECK(r.player().health > 0); // dead carrier, walker still at spawn
-	brain.pos[0] += 9 * 65536;
+	brain.self->position.x.q16 += 9 * 65536;
 	r.sys.infantry_think(brain, r.w);
 	CHECK(r.player().health == 0);
 	CHECK(r.player().last_attacker == r.veh_h);
@@ -2591,9 +2602,9 @@ void test_ai_drive_leg() {
     // Brain for the truck with a live nav waypoint straight ahead (+x).
     const int ai_idx = r.sys.attach(r.veh_h);
     AiEntity &ve = *r.sys.at(ai_idx);
-    ve.pos[0] = 100 << 16;
-    ve.pos[1] = 200 << 16;
-    ve.pos[2] = 10 << 16;
+    ve.self->position.x.q16 = 100 << 16;
+    ve.self->position.y.q16 = 200 << 16;
+    ve.self->position.z.q16 = 10 << 16;
     ve.heading = bam_heading_from_mission_yaw_deg(90.0); // face +x in mission space
     r.sys.nav.channels.resize(3);
     r.sys.nav.channels[2].count = 1;
@@ -2641,9 +2652,9 @@ void test_ai_drive_leg() {
         drove = drove || cmd.ai_drive;
         r.w.vehicles.tick_motor(r.veh(), t, &cmd);
         AiEntity *ve2 = r.sys.for_handle(r.veh_h);
-        ve2->pos[0] = static_cast<int32_t>(r.veh().position.x * 65536.0f);
-        ve2->pos[1] = static_cast<int32_t>(r.veh().position.y * 65536.0f);
-        ve2->pos[2] = static_cast<int32_t>(r.veh().position.z * 65536.0f);
+        ve2->self->position.x.q16 = static_cast<int32_t>(r.veh().position.x * 65536.0f);
+        ve2->self->position.y.q16 = static_cast<int32_t>(r.veh().position.y * 65536.0f);
+        ve2->self->position.z.q16 = static_cast<int32_t>(r.veh().position.z * 65536.0f);
         ve2->heading = r.veh().veh.yaw_bam;
     }
     CHECK(drove);
@@ -2682,9 +2693,9 @@ void test_ai_drive_avoid_brake() {
     r.w.vehicles.traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
     AiEntity &ve = *r.sys.at(ai_idx);
-    ve.pos[0] = 100 << 16;
-    ve.pos[1] = 200 << 16;
-    ve.pos[2] = 10 << 16;
+    ve.self->position.x.q16 = 100 << 16;
+    ve.self->position.y.q16 = 200 << 16;
+    ve.self->position.z.q16 = 10 << 16;
     r.sys.nav.channels.resize(3);
     r.sys.nav.channels[2].count = 1;
     r.sys.nav.channels[2].entries[0] = 0;
@@ -3055,9 +3066,9 @@ struct DriveRig {
         t.family = family;
         r.w.vehicles.traits.set(r.veh().item_id, t);
         AiEntity &ve = *r.sys.at(r.sys.attach(r.veh_h));
-        ve.pos[0] = 100 << 16;
-        ve.pos[1] = 200 << 16;
-        ve.pos[2] = 10 << 16;
+        ve.self->position.x.q16 = 100 << 16;
+        ve.self->position.y.q16 = 200 << 16;
+        ve.self->position.z.q16 = 10 << 16;
         r.sys.nav.channels.resize(3);
         r.sys.nav.channels[2].count = 1;
         r.sys.nav.channels[2].entries[0] = 0;
@@ -3246,9 +3257,9 @@ struct HeloRig {
         const int ai_idx = r.sys.attach(r.veh_h);
         ve = r.sys.at(ai_idx);
         ve->profile.type = 1; // the helo profile class
-        ve->pos[0] = to_fixed(r.veh().position.x);
-        ve->pos[1] = to_fixed(r.veh().position.y);
-        ve->pos[2] = to_fixed(r.veh().position.z);
+        ve->self->position.x.q16 = to_fixed(r.veh().position.x);
+        ve->self->position.y.q16 = to_fixed(r.veh().position.y);
+        ve->self->position.z.q16 = to_fixed(r.veh().position.z);
         r.veh().spawn_position = r.veh().position;
         r.veh().bound_radius = 6.0f;
         if (rotor_full) rotor_spawn_full(r.veh().veh.part_spin);
@@ -3393,8 +3404,8 @@ void test_redirect_and_speed_commands() {
     r.veh().group_id = 3; // 00TRa's truck group
     const int ai_idx = r.sys.attach(r.veh_h);
     AiEntity &ve = *r.sys.at(ai_idx);
-    ve.pos[0] = 100 << 16;
-    ve.pos[1] = 200 << 16;
+    ve.self->position.x.q16 = 100 << 16;
+    ve.self->position.y.q16 = 200 << 16;
     ve.net_id = 11;
     r.sys.nav.channels.resize(3);
     r.sys.nav.channels[2].count = 2;
@@ -3506,9 +3517,9 @@ void test_ai_drive_budget_divides_first() {
     const VehicleTraits t = truck_traits();
     r.w.vehicles.traits.set(r.veh().item_id, t);
     AiEntity &ve = *r.sys.at(r.sys.attach(r.veh_h));
-    ve.pos[0] = 100 << 16;
-    ve.pos[1] = 200 << 16;
-    ve.pos[2] = 10 << 16;
+    ve.self->position.x.q16 = 100 << 16;
+    ve.self->position.y.q16 = 200 << 16;
+    ve.self->position.z.q16 = 10 << 16;
     r.sys.nav.channels.resize(3);
     r.sys.nav.channels[2].count = 1;
     r.sys.nav.channels[2].entries[0] = 0;
@@ -3928,9 +3939,9 @@ void test_vehicle_hull_stops_at_building() {
     // drives straight through x=150.
     const int ai_idx = r.sys.attach(r.veh_h);
     AiEntity &ve = *r.sys.at(ai_idx);
-    ve.pos[0] = 100 << 16;
-    ve.pos[1] = 200 << 16;
-    ve.pos[2] = 10 << 16;
+    ve.self->position.x.q16 = 100 << 16;
+    ve.self->position.y.q16 = 200 << 16;
+    ve.self->position.z.q16 = 10 << 16;
     ve.heading = bam_heading_from_mission_yaw_deg(90.0); // face +x
     r.sys.nav.channels.resize(3);
     r.sys.nav.channels[2].count = 1;
@@ -3991,9 +4002,9 @@ void test_vehicle_hull_stops_at_building() {
 		stamp_saved_live_pose(r.veh());
 		r.w.vehicles.tick_motor(r.veh(), t, &cmd);
 		AiEntity *ve2 = r.sys.for_handle(r.veh_h);
-        ve2->pos[0] = static_cast<int32_t>(r.veh().position.x * 65536.0f);
-        ve2->pos[1] = static_cast<int32_t>(r.veh().position.y * 65536.0f);
-        ve2->pos[2] = static_cast<int32_t>(r.veh().position.z * 65536.0f);
+        ve2->self->position.x.q16 = static_cast<int32_t>(r.veh().position.x * 65536.0f);
+        ve2->self->position.y.q16 = static_cast<int32_t>(r.veh().position.y * 65536.0f);
+        ve2->self->position.z.q16 = static_cast<int32_t>(r.veh().position.z * 65536.0f);
         ve2->heading = r.veh().veh.yaw_bam;
     }
 	// The wall's near face is x=148; the front wheel/hull probes hold the truck
@@ -4366,15 +4377,15 @@ static void test_board_pass_stays_on_foot() {
             r.veh(), r.veh().seats[static_cast<size_t>(best.seat_index)].seat_local);
     // One unit off the seat point, inside the two-unit arrival ring.
     const int32_t start[3] = {to_fixed(seat.x + 1.0f), to_fixed(seat.y), to_fixed(seat.z)};
-    std::copy_n(start, 3, body.pos);
+    body.self->position.set_q16({start[0], start[1], start[2]});
     r.player().position = {seat.x + 1.0f, seat.y, seat.z};
     r.sys.is_authority = true;
     r.sys.tick_infantry(body, r.w, 16);
     CHECK(r.player().mounted);
-    CHECK(body.pos[0] == start[0] && body.pos[1] == start[1]);
+    CHECK(body.self->position.x.q16 == start[0] && body.self->position.y.q16 == start[1]);
     r.sys.tick_infantry(body, r.w, 17);
-    CHECK(std::abs(body.pos[0] - to_fixed(seat.x)) <= 2);
-    CHECK(std::abs(body.pos[1] - to_fixed(seat.y)) <= 2);
+    CHECK(std::abs(body.self->position.x.q16 - to_fixed(seat.x)) <= 2);
+    CHECK(std::abs(body.self->position.y.q16 - to_fixed(seat.y)) <= 2);
 }
 
 // A rider its seat-bone lookup drops still runs the seat block's tail: its
@@ -4493,7 +4504,7 @@ static void test_board_pass_on_an_attached_gun_stays_on_foot() {
     body.slot.f[37] = kCommandAttachAnySeat;
     body.slot.f[38] = 31;
     const int32_t start[3] = {to_fixed(point.x + 0.5f), to_fixed(point.y), to_fixed(point.z)};
-    std::copy_n(start, 3, body.pos);
+    body.self->position.set_q16({start[0], start[1], start[2]});
     TickContext ctx{};
     ctx.world = &w;
     ctx.is_authority = true;
@@ -4501,10 +4512,10 @@ static void test_board_pass_on_an_attached_gun_stays_on_foot() {
     w.update_all_entities(ctx);
     CHECK(w.registry.get(soldier_h)->mounted);
     CHECK(w.registry.get(soldier_h)->mount_target == gun_h);
-    CHECK(body.pos[0] == start[0] && body.pos[1] == start[1]);
+    CHECK(body.self->position.x.q16 == start[0] && body.self->position.y.q16 == start[1]);
     ctx.logic_tick = 17;
     w.update_all_entities(ctx);
-    CHECK(std::abs(body.pos[0] - to_fixed(point.x)) <= 2);
+    CHECK(std::abs(body.self->position.x.q16 - to_fixed(point.x)) <= 2);
 }
 
 // An NPC's ordinary seat resolves through the carrier's seat bone. When that

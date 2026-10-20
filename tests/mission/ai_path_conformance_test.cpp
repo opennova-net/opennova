@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
 	for (int i = 0; i < n; ++i) {
 		const w::AiEntity *e = ai.at(i);
 		if (e == nullptr) continue;
-		for (int k = 0; k < 3; ++k) start[size_t(i) * 3 + k] = e->pos[k];
+		for (int k = 0; k < 3; ++k) start[size_t(i) * 3 + k] = e->self->position.word(k);
 	}
 
 	// 2500 ticks = ~40 s of mission time at the 62.5 Hz logic rate — long
@@ -212,8 +212,8 @@ int main(int argc, char **argv) {
 	std::vector<int32_t> prev(size_t(ai.count()) * 2, 0);
 	for (int i = 0; i < ai.count(); ++i) {
 		if (const w::AiEntity *e = ai.at(i)) {
-			prev[size_t(i) * 2] = e->pos[0];
-			prev[size_t(i) * 2 + 1] = e->pos[1];
+			prev[size_t(i) * 2] = e->self->position.x.q16;
+			prev[size_t(i) * 2 + 1] = e->self->position.y.q16;
 		}
 	}
 
@@ -243,11 +243,11 @@ int main(int argc, char **argv) {
 		for (int i = 0; i < live; ++i) {
 			const w::AiEntity *e = ai.at(i);
 			if (e == nullptr) continue;
-			const double dx = (double(e->pos[0]) - prev[size_t(i) * 2]) / 65536.0;
-			const double dy = (double(e->pos[1]) - prev[size_t(i) * 2 + 1]) / 65536.0;
+			const double dx = (double(e->self->position.x.q16) - prev[size_t(i) * 2]) / 65536.0;
+			const double dy = (double(e->self->position.y.q16) - prev[size_t(i) * 2 + 1]) / 65536.0;
 			ai_path[size_t(i)] += std::sqrt(dx * dx + dy * dy);
-			prev[size_t(i) * 2] = e->pos[0];
-			prev[size_t(i) * 2 + 1] = e->pos[1];
+			prev[size_t(i) * 2] = e->self->position.x.q16;
+			prev[size_t(i) * 2 + 1] = e->self->position.y.q16;
 		}
 	}
 
@@ -318,7 +318,7 @@ int main(int argc, char **argv) {
 		const w::AiEntity *e = ai.at(i);
 		if (e == nullptr) continue;
 		const double travel = (i < int(ai_path.size())) ? ai_path[size_t(i)]
-				: dist2d_units(e->pos, &start[size_t(i) * 3]);
+				: dist2d_units(e->self->position.words().data(), &start[size_t(i) * 3]);
 		if (travel > kMovedUnits) ++moved; else ++still;
 		if (report) {
 			// The AUTHORED routing inputs, straight off the BMS organic record,
@@ -495,8 +495,8 @@ int main(int argc, char **argv) {
 				++with_t;
 				const w::Entity *tg = world.registry.get(e->inf.combat_target);
 				if (tg == nullptr) continue;
-				const double dx = double(int32_t(tg->position.x * 65536.0f)) - e->pos[0];
-				const double dy = double(int32_t(tg->position.y * 65536.0f)) - e->pos[1];
+				const double dx = double(int32_t(tg->position.x * 65536.0f)) - e->self->position.x.q16;
+				const double dy = double(int32_t(tg->position.y * 65536.0f)) - e->self->position.y.q16;
 				const double d = std::sqrt(dx * dx + dy * dy);
 				if (d >= double(e->slot.f[15])) ++out_of_range; else ++in_range;
 			}
@@ -553,8 +553,8 @@ int main(int argc, char **argv) {
 					vc = vb->brain.f[w::AiBrain::kWpChannel];
 					vn = vb->brain.f[w::AiBrain::kWpNode];
 					vmm = vb->inf.move_mode;
-					aix = vb->pos[0] / 65536.0;
-					aiy = vb->pos[1] / 65536.0;
+					aix = vb->self->position.x.q16 / 65536.0;
+					aiy = vb->self->position.y.q16 / 65536.0;
 				}
 			}
 			int nseat[6] = {0,0,0,0,0,0};

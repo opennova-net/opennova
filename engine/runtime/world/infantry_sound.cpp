@@ -104,7 +104,7 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
     // tick's resolve, the same order as org1 (sound block @0x4bf23e precedes
     // the resolve tail @0x4bf7b8+). Mounted bodies never reach here — seat
     // clips author no foot-event bits.
-    const int32_t feet[3] = {e.pos[0], e.pos[1], e.pos[2] - capsule_bottom};
+    const int32_t feet[3] = {e.self->position.x.q16, e.self->position.y.q16, e.self->position.z.q16 - capsule_bottom};
     const bool any_foot = (ev & (anim::kAnimEventFootLeft | anim::kAnimEventFootRight)) != 0;
     const Entity *went = any_foot ? world.registry.get(e.handle) : nullptr;
     const int32_t surface = any_foot
@@ -113,7 +113,7 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
     const int count = anim_event_sounds(ev, feet[2], world.env.water_z,
             went != nullptr && went->ground_target.valid(), surface, sounds);
     for (int i = 0; i < count; ++i)
-        emit_slot_sound(world, e, sounds[i].slot, sounds[i].foot < 0 ? e.pos : feet);
+        emit_slot_sound(world, e, sounds[i].slot, sounds[i].foot < 0 ? e.self->position.words().data() : feet);
 }
 
 int anim_event_sounds(uint32_t word, int32_t feet_z, int32_t water_z, bool on_entity,

@@ -238,10 +238,10 @@ void test_crosshair_spread_rows() {
 	// no authored water (the plane at 0) an eye below Z 0 is under it too.
 	// [orig: HUD_DrawCrosshair @0x592B59..0x592B65, no unauthored-plane test]
 	CHECK(rig.w.env.water_z == 0);
-	const int32_t body_z = body.pos[2];
-	body.pos[2] = -(1 << 16);
+	const int32_t body_z = body.self->position.z.q16;
+	body.self->position.z.q16 = -(1 << 16);
 	CHECK(rig.view().hud_spread_row == 2);
-	body.pos[2] = body_z;
+	body.self->position.z.q16 = body_z;
 	CHECK(rig.view().hud_spread_row == 0);
 	// An airborne body and the in-air flag keep the stance row: the crosshair
 	// tests neither. The parachute, drowning and ladder-contact bits force

@@ -154,6 +154,7 @@ void aircraft_recovery_vectors() {
     };
     auto world = std::make_unique<World>();
     auto &w = *world;
+    w.registry.configure_pool(1, 8); // the brain's row (its position words)
     const int first = w.ai.attach(EntityHandle::make(1, 0));
     const int second = w.ai.attach(EntityHandle::make(1, 1));
     for (const auto &v : cases) {

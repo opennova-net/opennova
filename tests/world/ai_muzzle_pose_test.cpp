@@ -95,16 +95,16 @@ int main() {
                 rig.world, e->handle, 0, indexed), "point zero takes the caller's fallback");
         if (stamped == 1 && indexed_ok) {
             w::AiEntity *live = rig.world.ai.for_handle(e->handle);
-            const int32_t saved_x = live->pos[0];
+            const int32_t saved_x = live->self->position.x.q16;
             // One whole unit survives the skeletal float-matrix conversion
             // exactly at CP01's coordinates; sub-unit Q16 deltas round there.
-            live->pos[0] += 65536; // motor position leads the registry/presentation mirror
+            live->self->position.x.q16 += 65536; // motor position leads the registry/presentation mirror
             const bool moved = rig.world.pose_provider->resolve_organic_attachment(
                     rig.world, e->handle, e->profile.organic.launch[0], indexed);
             expect(moved && indexed[0] == out[0] + 65536 &&
                     indexed[1] == out[1] && indexed[2] == out[2],
                     "attachment queries use the live fixed-point motor position");
-            live->pos[0] = saved_x;
+            live->self->position.x.q16 = saved_x;
         }
         int32_t head[3], hand[3];
         const bool anchors = rig.world.pose_provider->resolve_skeletal_anchor(

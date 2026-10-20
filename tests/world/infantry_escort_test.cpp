@@ -36,7 +36,7 @@ struct Anchors : IPoseProvider {
         if (!enabled) return false;
         const AiEntity *body = world.ai.for_handle(h);
         if (!body) return false;
-        std::copy_n(body->pos, 3, out);
+        std::copy_n(body->self->position.words().data(), 3, out);
         if (anchor == SkeletalAnchor::Head) {
             ++head_queries; out[0] += fx(.25f); out[1] += fx(.5f); out[2] += fx(1);
         } else {
@@ -68,7 +68,7 @@ struct Fixture {
         body.net_id = seed.net_id; body.health = 100; body.inf.active = true;
         body.inf.adm_id = 1; body.inf.max_health = 100;
         body.inf.anim_state = 43; body.inf.anim_pending = 0;
-        body.pos[0] = fx(x); body.pos[1] = fx(y); body.pos[2] = fx(z);
+        body.self->position.x.q16 = fx(x); body.self->position.y.q16 = fx(y); body.self->position.z.q16 = fx(z);
         return h;
     }
     AiEntity &body(EntityHandle h) { return *world.ai.for_handle(h); }
@@ -101,19 +101,19 @@ void test_escort_approach_boundaries() {
     CHECK(f.body(medic).inf.move_target[2] == fx(2.5f));
     // Offset distance is NOT fed back into the far arrival test.
     CHECK(f.body(medic).inf.target_dist == static_cast<int32_t>(std::sqrt(116.0) * 65536));
-    f.body(medic).pos[0] = fx(-6); f.body(medic).pos[2] = fx(5);
+    f.body(medic).self->position.x.q16 = fx(-6); f.body(medic).self->position.z.q16 = fx(5);
     f.order(medic, heli);
     CHECK(std::abs(f.body(medic).inf.move_target[1] + fx(2)) <= 1);
     CHECK(f.body(medic).inf.move_target[2] == fx(5));
-    f.body(medic).pos[0] = fx(-4);
+    f.body(medic).self->position.x.q16 = fx(-4);
     f.order(medic, heli);
     CHECK(std::abs(f.body(medic).inf.move_target[1] - fx(.75f)) <= 1);
     CHECK(f.body(medic).inf.move_target[2] == fx(3.25f));
-    f.body(helper).pos[0] = fx(-3); f.body(helper).pos[2] = fx(5);
+    f.body(helper).self->position.x.q16 = fx(-3); f.body(helper).self->position.z.q16 = fx(5);
     f.order(helper, heli);
     CHECK(f.body(helper).inf.arrival_radius == fx(1));
     CHECK(f.body(helper).inf.move_target[2] == fx(3.5f));
-    f.body(helper).pos[0] = fx(-1);
+    f.body(helper).self->position.x.q16 = fx(-1);
     f.order(helper, heli);
     CHECK(f.body(helper).inf.arrival_radius == 106496);
     CHECK(f.body(helper).inf.move_target[0] == 122880);
@@ -151,10 +151,10 @@ void test_backward_drag_gait_and_root_motion() {
     CHECK(io::bam_abs(io::bam_sub(b.inf.target_heading, INT32_MIN)) < 100000000);
     CHECK(b.inf.anim_state == 138);
     CHECK(b.inf.aim_override && b.inf.aim_pitch == 0);
-    const int32_t before = b.pos[0];
+    const int32_t before = b.self->position.x.q16;
     // This entity's staggered think is tick 0 mod 16. Tick 1 runs its motor.
     f.world.ai.tick_infantry(b, f.world, 1);
-    CHECK(b.pos[0] > before);
+    CHECK(b.self->position.x.q16 > before);
     b.inf.move_mode = 0; b.inf.target_dist = 0; b.inf.anim_state = 43;
     f.world.ai.infantry_select(b, f.world);
     CHECK(b.inf.anim_state == 137);
@@ -175,8 +175,8 @@ void test_corpse_hand_follow_and_lifetime() {
     b.inf.aim_valid = true; // died holding an aim solution (aimFlag set)
     f.body(medic).inf.body_heading = 9876543;
     f.world.ai.tick_infantry(b, f.world, 1);
-    CHECK(b.pos[0] == fx(2.5f) && b.pos[1] == fx(2.75f));
-    CHECK(b.pos[2] == 0); // ground/gravity, never teleported to the hand's Z
+    CHECK(b.self->position.x.q16 == fx(2.5f) && b.self->position.y.q16 == fx(2.75f));
+    CHECK(b.self->position.z.q16 == 0); // ground/gravity, never teleported to the hand's Z
     CHECK(b.inf.anim_state == 139 && b.inf.anim_pending == 0);
     CHECK(b.inf.aim_heading == 9876543);
     // The drag clears aimFlag [orig: @0x4B9E30], so the same tick's look chase
@@ -195,12 +195,12 @@ void test_corpse_hand_follow_and_lifetime() {
     CHECK(!f.entity(patient).dragger.valid());
     f.world.restore(baseline);
     CHECK(f.entity(patient).dragger == medic);
-    const int32_t before_x = f.body(patient).pos[0];
+    const int32_t before_x = f.body(patient).self->position.x.q16;
     f.world.registry.despawn(medic);
     const auto replacement = f.person(12000, 100, 100);
     CHECK(replacement == medic);
     f.world.ai.tick_infantry(f.body(patient), f.world, 2);
-    CHECK(f.body(patient).pos[0] == before_x);
+    CHECK(f.body(patient).self->position.x.q16 == before_x);
 }
 
 void test_draggee_clip_and_dead_medic_gates() {
@@ -212,11 +212,11 @@ void test_draggee_clip_and_dead_medic_gates() {
     f.entity(patient).flags = kEntityFlagDead; b.inf.anim_state = 198;
     f.motion.missing.insert(139);
     f.world.ai.tick_infantry(b, f.world, 1);
-    CHECK(b.pos[0] == 0 && b.inf.anim_state == 198);
+    CHECK(b.self->position.x.q16 == 0 && b.inf.anim_state == 198);
     f.motion.missing.clear();
     f.entity(medic).flags |= kEntityFlagDead;
     f.world.ai.tick_infantry(b, f.world, 2);
-    CHECK(b.pos[0] == 0 && f.anchors.hand_queries == 0);
+    CHECK(b.self->position.x.q16 == 0 && f.anchors.hand_queries == 0);
 }
 } // namespace
 int main() {

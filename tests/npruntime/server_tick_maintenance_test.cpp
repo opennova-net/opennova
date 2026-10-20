@@ -475,7 +475,7 @@ bool check_recount_precedes_the_entity_update() {
 		body.health = 5;
 		body.team = 2;
 		body.net_id = net_id;
-		body.pos[0] = static_cast<int32_t>(x * 65536.0f);
+		body.self->position.x.q16 = static_cast<int32_t>(x * 65536.0f);
 		return h;
 	};
 	const w::EntityHandle victim = spawn_member(5.0f, 0x21);

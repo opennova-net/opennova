@@ -85,9 +85,9 @@ Step free_step(int dir, bool moving, uint8_t stance_bits, bool su, int32_t pitch
 	b.pitch = pitch;
 	b.inf.look_pitch = pitch;
 	rig.move_order(dir, moving, stance_bits, view_keys, lean_left, lean_right);
-	const int32_t x0 = b.pos[0], y0 = b.pos[1], z0 = b.pos[2];
+	const int32_t x0 = b.self->position.x.q16, y0 = b.self->position.y.q16, z0 = b.self->position.z.q16;
 	rig.tick();
-	return {b.pos[0] - x0, b.pos[1] - y0, b.pos[2] - z0, b.heading, b.pitch - pitch};
+	return {b.self->position.x.q16 - x0, b.self->position.y.q16 - y0, b.self->position.z.q16 - z0, b.heading, b.pitch - pitch};
 }
 
 } // namespace
@@ -101,14 +101,14 @@ int main() {
 		target->heading = 0x12345678;
 		target->pitch = 0x01000000;
 		target->roll = -0x00200000;
-		const int32_t tx = target->pos[0], ty = target->pos[1], tz = target->pos[2];
+		const int32_t tx = target->self->position.x.q16, ty = target->self->position.y.q16, tz = target->self->position.z.q16;
 		rig.world.spectator.death_screen = true;
 		rig.world.spectator.submode = 1;
 		rig.world.spectator.has_target = true;
 		rig.world.spectator.target_entity = rig.remote;
 		rig.tick();
 		// The local slot (0) runs before the target's (1): the pre-tick pose.
-		CHECK(rig.body().pos[0] == tx && rig.body().pos[1] == ty && rig.body().pos[2] == tz);
+		CHECK(rig.body().self->position.x.q16 == tx && rig.body().self->position.y.q16 == ty && rig.body().self->position.z.q16 == tz);
 		CHECK(rig.body().heading == 0x12345678);
 		CHECK(rig.body().pitch == 0x01000000);
 		CHECK(rig.body().roll == -0x00200000);
@@ -133,20 +133,20 @@ int main() {
 		s.target_pitch = -0x01000000;
 		s.target_roll = 0x00100000;
 		rig.tick();
-		CHECK(rig.body().pos[0] == 0x100000 && rig.body().pos[1] == -0x200000 &&
-				rig.body().pos[2] == 0x30000);
+		CHECK(rig.body().self->position.x.q16 == 0x100000 && rig.body().self->position.y.q16 == -0x200000 &&
+				rig.body().self->position.z.q16 == 0x30000);
 		CHECK(rig.body().heading == 0x40000000 && rig.body().pitch == -0x01000000 &&
 				rig.body().roll == 0x00100000);
 	}
 	// --- a target sub-mode without a target holds the entity still ----------
 	{
 		Rig rig;
-		const int32_t x0 = rig.body().pos[0], z0 = rig.body().pos[2];
+		const int32_t x0 = rig.body().self->position.x.q16, z0 = rig.body().self->position.z.q16;
 		rig.world.spectator.death_screen = true;
 		rig.world.spectator.submode = 1;
 		rig.move_order(0, true);
 		rig.tick();
-		CHECK(rig.body().pos[0] == x0 && rig.body().pos[2] == z0);
+		CHECK(rig.body().self->position.x.q16 == x0 && rig.body().self->position.z.q16 == z0);
 	}
 	// --- the free arm: the speeds ------------------------------------------
 	{

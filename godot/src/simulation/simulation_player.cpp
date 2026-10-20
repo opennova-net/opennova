@@ -157,9 +157,9 @@ bool Simulation::local_player_position_q16(int32_t (&r_pos)[3]) const {
 	if (!kernel_->world.cached.local_player.valid()) return false;
 	const AiEntity *body = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (body == nullptr) return false;
-	r_pos[0] = body->pos[0];
-	r_pos[1] = body->pos[1];
-	r_pos[2] = body->pos[2];
+	r_pos[0] = body->self->position.x.q16;
+	r_pos[1] = body->self->position.y.q16;
+	r_pos[2] = body->self->position.z.q16;
 	return true;
 }
 

@@ -19,7 +19,7 @@ void anchor_of(World &world, const Entity &entity, SkeletalAnchor anchor, int32_
     if (world.pose_provider &&
             world.pose_provider->resolve_skeletal_anchor(world, entity.handle, anchor, out)) return;
     if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
-        std::copy_n(body->pos, 3, out);
+        std::copy_n(body->self->position.words().data(), 3, out);
     } else {
         out[0] = entity.position.x.q16;
         out[1] = entity.position.y.q16;
@@ -36,9 +36,9 @@ void offset_goal(int32_t goal[3], int32_t heading, int32_t amount) {
     goal[1] = io::bam_add(goal[1], static_cast<int32_t>((int64_t(s) * amount) >> 22));
 }
 int32_t weighted_distance(const AiEntity &e, const int32_t goal[3]) {
-    const int32_t dx = io::bam_sub(goal[0], e.pos[0]);
-    const int32_t dy = io::bam_sub(goal[1], e.pos[1]);
-    const int32_t dz = io::bam_sar(io::bam_sub(goal[2], e.pos[2]), 3);
+    const int32_t dx = io::bam_sub(goal[0], e.self->position.x.q16);
+    const int32_t dy = io::bam_sub(goal[1], e.self->position.y.q16);
+    const int32_t dz = io::bam_sar(io::bam_sub(goal[2], e.self->position.z.q16), 3);
     return static_cast<int32_t>(std::min(2147418112.0,
             std::sqrt(double(dx) * dx + double(dy) * dy + double(dz) * dz)));
 }
@@ -116,9 +116,8 @@ bool infantry_drag_corpse(AiEntity &e, World &world) {
     int32_t hand[3], head[3];
     anchor_of(world, *dragger, SkeletalAnchor::HeldWeapon, hand);
     anchor_of(world, *self, SkeletalAnchor::Head, head);
-    e.pos[0] = io::bam_add(e.pos[0], io::bam_sub(hand[0], head[0]));
-    e.pos[1] = io::bam_add(e.pos[1], io::bam_sub(hand[1], head[1]));
-    self->position.set_q16({e.pos[0], e.pos[1], e.pos[2]});
+    e.self->position.x.q16 = io::bam_add(e.self->position.x.q16, io::bam_sub(hand[0], head[0]));
+    e.self->position.y.q16 = io::bam_add(e.self->position.y.q16, io::bam_sub(hand[1], head[1]));
     const AiEntity *body = world.ai.for_handle(dragger->handle);
     e.inf.target_heading = e.inf.aim_heading = body ? body->inf.body_heading
             : heading_of(world, *dragger);

@@ -140,8 +140,8 @@ int promotion_and_streams_keep_the_words() {
 	            "the spawn backup keeps the words"))
 		return 1;
 	const w::AiEntity *ai = world->ai.for_handle(organic);
-	if (!expect(ai != nullptr && ai->pos[0] == kAshJoinerX && ai->pos[1] == kTdhHostY &&
-	                    ai->pos[2] == kFarZ,
+	if (!expect(ai != nullptr && ai->self->position.x.q16 == kAshJoinerX && ai->self->position.y.q16 == kTdhHostY &&
+	                    ai->self->position.z.q16 == kFarZ,
 	            "the AI slot takes the entity's words"))
 		return 1;
 

@@ -352,11 +352,9 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // ((90 - yaw)<<16/360)<<16, spawn_angle_bam]. The waypoint mover writes the same engine frame (atan2(dY,dX) bearing
     // into kWorkHeading), so storing the seed in the engine frame keeps a unit's facing consistent
     // whether parked or moving; the present pass converts engine-heading -> mission yaw for the basis.
-    // The slot takes the entity's position words raw (D-NET-507).
-    // [orig: Entity_InitFromModel @0x40E113..0x40E127]
-    ae.pos[0] = e.x;
-    ae.pos[1] = e.y;
-    ae.pos[2] = e.z;
+    // The position is the entity's own words (the record's, raw), read through ae.self; the
+    // slot's spawn copy of them is Entity::spawn_position (D-NET-507).
+    // [orig: Entity_SpawnFromBMSRecord @0x40EB33; Entity_InitFromModel @0x40E113..0x40E127]
     ae.heading = spawn_angle_bam(90 - e.yaw);
     ae.team = e.team;
 

@@ -409,7 +409,7 @@ int main() {
         in.forward = true;
         in.look_heading = ae.heading; // walk along the spawn facing
 
-        const int32_t x0 = ae.pos[0], y0 = ae.pos[1];
+        const int32_t x0 = ae.self->position.x.q16, y0 = ae.self->position.y.q16;
         for (int i = 0; i < 30; ++i) {
             submit_player_input(ae, in); // re-assert each frame (as the controller would)
             TickContext ctx;
@@ -419,12 +419,12 @@ int main() {
             w.update_all_entities(ctx);
         }
 
-        CHECK(ae.pos[0] != x0 || ae.pos[1] != y0); // moved
+        CHECK(ae.self->position.x.q16 != x0 || ae.self->position.y.q16 != y0); // moved
         const Entity *e = w.registry.get(h);
         CHECK(e != nullptr);
-        CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[0])) - e->position.x) < 0.01f);
-        CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[1])) - e->position.y) < 0.01f);
-        CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[2])) - e->position.z) < 0.01f);
+        CHECK(std::fabs(static_cast<float>(from_fixed(ae.self->position.x.q16)) - e->position.x) < 0.01f);
+        CHECK(std::fabs(static_cast<float>(from_fixed(ae.self->position.y.q16)) - e->position.y) < 0.01f);
+        CHECK(std::fabs(static_cast<float>(from_fixed(ae.self->position.z.q16)) - e->position.z) < 0.01f);
     }
 
     // --- player movement uses real 8-way clip states. Facing stays fixed; left input selects
@@ -455,8 +455,8 @@ int main() {
 
         CHECK(ae.inf.anim_state == anim_state::kWalkForward + 6);
         CHECK(ae.inf.body_heading == 0x30000000);
-        CHECK(ae.pos[0] == 0);
-        CHECK(ae.pos[1] == 0);
+        CHECK(ae.self->position.x.q16 == 0);
+        CHECK(ae.self->position.y.q16 == 0);
         CHECK(ae.inf.body_clip_state() == anim_state::kIdle);
         CHECK(ae.inf.anim_blend_weight == 1.0f);
 
@@ -464,8 +464,8 @@ int main() {
         submit_player_input(ae, in);
         w.update_all_entities(ctx);
         CHECK(ae.inf.body_heading == 0x2D000000);
-        CHECK(ae.pos[0] == -2017);
-        CHECK(ae.pos[1] == 835);
+        CHECK(ae.self->position.x.q16 == -2017);
+        CHECK(ae.self->position.y.q16 == 835);
         CHECK(ae.inf.anim_blend_weight == (1.0f / 15.0f));
     }
 
@@ -488,17 +488,17 @@ int main() {
         AiEntity &ae = *ai.at(ai.attach(h));
         ae.net_id = 7;
         ae.inf.active = true; // a plain AI organic — NOT is_local_player
-        ae.pos[0] = to_fixed(11.0f);
-        ae.pos[1] = to_fixed(22.0f);
-        ae.pos[2] = to_fixed(33.0f); // motor-advanced pose, distinct from the authored spawn
+        ae.self->position.x.q16 = to_fixed(11.0f);
+        ae.self->position.y.q16 = to_fixed(22.0f);
+        ae.self->position.z.q16 = to_fixed(33.0f); // motor-advanced pose, distinct from the authored spawn
         TickContext ctx;
         ctx.world = &w;
         ctx.logic_tick = 0;
         ctx.is_authority = true;
         w.update_all_entities(ctx);
         const Entity *e = w.registry.get(h);
-        CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[0])) - e->position.x) < 0.01f);
-        CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[2])) - e->position.z) < 0.01f);
+        CHECK(std::fabs(static_cast<float>(from_fixed(ae.self->position.x.q16)) - e->position.x) < 0.01f);
+        CHECK(std::fabs(static_cast<float>(from_fixed(ae.self->position.z.q16)) - e->position.z) < 0.01f);
         CHECK(std::fabs(e->position.z - 33.0f) < 0.01f); // mirrored, not the authored 3.0
     }
 

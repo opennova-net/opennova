@@ -39,7 +39,7 @@ struct Rig {
         world.ai.attach(shooter);
         auto &b = *world.ai.for_handle(shooter);
         b.inf.active = true; b.inf.is_local_player = true;
-        b.pos[0] = 10*65536; b.pos[1] = 20*65536; b.pos[2] = 3*65536;
+        b.self->position.x.q16 = 10*65536; b.self->position.y.q16 = 20*65536; b.self->position.z.q16 = 3*65536;
         world.tables.weapons.entries.resize(2);
         auto &weapon = world.tables.weapons.entries[1];
         weapon.valid = true; weapon.name = "WPN_SPECIAL"; weapon.ammo_index = 1;

@@ -105,7 +105,7 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     AiEntity *body = lw.ai.for_handle(lw.local);
     body->inf.active = true;
     body->inf.is_local_player = true;
-    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    body->self->position.x.q16 = 10 * 65536; body->self->position.y.q16 = 20 * 65536; body->self->position.z.q16 = 3 * 65536;
     Entity &rider = lw.entity();
     rider.has_item_def = true;
     rider.item_type = 3;
@@ -257,7 +257,7 @@ void test_seat_bone_pose_rider_legs() {
     lw.ai.attach(lw.local);
     AiEntity *body = lw.ai.for_handle(lw.local);
     body->inf.active = true;
-    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    body->self->position.x.q16 = 10 * 65536; body->self->position.y.q16 = 20 * 65536; body->self->position.z.q16 = 3 * 65536;
     body->heading = 0x12345678;
     body->pitch = 0x01000000;
     body->roll = bam_from_degrees_wrapped(1.3);
@@ -304,7 +304,7 @@ void test_unadmitted_seat_takes_the_ground_or_person_leg() {
     AiEntity *body = lw.ai.for_handle(lw.local);
     body->inf.active = true;
     body->inf.is_local_player = true;
-    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    body->self->position.x.q16 = 10 * 65536; body->self->position.y.q16 = 20 * 65536; body->self->position.z.q16 = 3 * 65536;
     body->heading = 0x40000000; // mission yaw 0: the view faces +Y
     body->roll = bam_from_degrees_wrapped(1.25);
     body->inf.torso_roll = bam_from_degrees_wrapped(4.0);
@@ -345,7 +345,7 @@ void test_unadmitted_seat_takes_the_ground_or_person_leg() {
     CHECK(view.ground_leg_lift_q16 == 0x18000);
     for (int i = 0; i < 3; ++i) {
         const int32_t lift = static_cast<int32_t>((int64_t(up[i]) * 0x18000 + 0x8000) >> 16);
-        CHECK(near(frame.camera.eye[i], static_cast<float>((body->pos[i] + lift) / 65536.0)));
+        CHECK(near(frame.camera.eye[i], static_cast<float>((body->self->position.word(i) + lift) / 65536.0)));
     }
     CHECK(near(frame.camera.roll_deg, 1.25f));
     CHECK(near(frame.camera.pitch_deg, 0.0f));
@@ -1386,7 +1386,7 @@ void test_water_scope_legs() {
         }
         // One body water block, then the view tick that runs its legs.
         void tick(int32_t z, int32_t eye) {
-            body->pos[2] = z;
+            body->self->position.z.q16 = z;
             body->inf.eye_offset_z = eye;
             lw.ai.player_water_block(*body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
             local_player_view_tick(&lw.w, v, t, s, &w);
@@ -1407,7 +1407,7 @@ void test_water_scope_legs() {
     // latch is set by the time the view tick runs it.
     {
         Rig r(elevation);
-        r.body->pos[2] = deep;
+        r.body->self->position.z.q16 = deep;
         r.lw.ai.player_water_block(*r.body, r.lw.w, &r.lw.entity(), 0, true, r.lw.w.logic_tick);
         const WaterScopeLegs &legs = r.lw.w.out.water_scope_legs;
         CHECK(legs.count == 2 && legs.legs[0].kind == Kind::Entry && legs.legs[1].kind == Kind::Eye);
@@ -1437,7 +1437,7 @@ void test_water_scope_legs() {
     {
         Rig r(elevation);
         r.lw.entity().flags |= kEntityFlagDrowning;
-        r.body->pos[2] = deep;
+        r.body->self->position.z.q16 = deep;
         r.body->inf.eye_offset_z = to_fixed(4.0);
         r.lw.ai.player_water_block(*r.body, r.lw.w, &r.lw.entity(), 0, true, r.lw.w.logic_tick);
         CHECK(r.lw.w.out.water_scope_legs.count == 1);
@@ -1503,7 +1503,7 @@ void test_water_scope_legs() {
         lw.w.out.tip_events.clear();
         w.slot.phase = weapon_phase::kDone;
         w.slot.next = weapon_action::kIdle;
-        body.pos[2] = deep;
+        body.self->position.z.q16 = deep;
         lw.ai.player_water_block(body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
         local_player_view_tick(&lw.w, v, t, s, &w);
         CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
@@ -1524,9 +1524,9 @@ void test_water_scope_legs() {
         lw.entity().flags |= kEntityFlagDrowning;
         lw.entity().eye_offset_z = 0;
         body.inf.eye_offset_z = to_fixed(1.6);
-        body.pos[2] = to_fixed(4.9);
+        body.self->position.z.q16 = to_fixed(4.9);
         lw.ai.player_water_block(body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
-        CHECK(body.pos[2] == to_fixed(5.0) + (-1225 >> 1) - (to_fixed(1.6) >> 1));
+        CHECK(body.self->position.z.q16 == to_fixed(5.0) + (-1225 >> 1) - (to_fixed(1.6) >> 1));
     }
 }
 
@@ -2829,7 +2829,7 @@ void test_target_lock_cadence_and_audio() {
     lw.w.collision = &collision;
     lw.ai.attach(lw.local);
     AiEntity &body = *lw.ai.for_handle(lw.local);
-    body.pos[0] = 10 << 16; body.pos[1] = 20 << 16; body.pos[2] = 3 << 16;
+    body.self->position.x.q16 = 10 << 16; body.self->position.y.q16 = 20 << 16; body.self->position.z.q16 = 3 << 16;
     body.team = 1; lw.entity().team = 1;
     LocalPlayer local(lw.w);
     local.weapon.active = true;

@@ -52,7 +52,7 @@ struct LocalWorld {
     AiEntity &body() {
         ai.attach(local);
         AiEntity &b = *ai.for_handle(local);
-        b.pos[0] = 10 << 16; b.pos[1] = 20 << 16; b.pos[2] = 3 << 16;
+        b.self->position.x.q16 = 10 << 16; b.self->position.y.q16 = 20 << 16; b.self->position.z.q16 = 3 << 16;
         return b;
     }
 };
@@ -125,7 +125,7 @@ void test_weapon_view_ray_takes_the_scope_zero_back_out() {
     local.weapon.def.flags = DEF_WEAPON_FLAG_FORCESCOPED; // the CanFire pin
     local.weapon.slot.zero_pitch = bam_from_degrees_wrapped(4.0);
     CHECK(local.local_player_can_fire());
-    const int32_t origin[3] = {body.pos[0], body.pos[1], body.pos[2]};
+    const int32_t origin[3] = {body.self->position.x.q16, body.self->position.y.q16, body.self->position.z.q16};
     const int32_t forward[3] = {1000 << 16, 0, 0};
     const auto endpoint_for = [&](int32_t pitch, int32_t out[3]) {
         collision_matrix_from_euler(body.heading, pitch, body.roll, origin)

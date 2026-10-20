@@ -47,7 +47,7 @@ constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4B80F3..0x4B810E 
 // Player_ToggleWeaponScope call @0x4b83a3].
 void record_eye_scope_leg(World &world, const AiEntity &e, const Entity &body, int32_t water) {
     if (e.handle != world.cached.local_player) return;
-    const int32_t eye_z = static_cast<int32_t>(uint32_t(e.pos[2]) + uint32_t(e.inf.eye_offset_z));
+    const int32_t eye_z = static_cast<int32_t>(uint32_t(e.self->position.z.q16) + uint32_t(e.inf.eye_offset_z));
     if (eye_z >= water) return;
     world.out.water_scope_legs.push(WaterScopeLeg::Kind::Eye, body.flags | body.engine_flags,
                                     e.inf.airborne);
@@ -88,7 +88,7 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
 
     const uint32_t flags = tick_entity->flags;
     const bool was_afloat = (flags & kEntityFlagDrowning) != 0;
-    const int32_t entry_z = e.pos[2] + (was_afloat ? 0 : kWaterFloatHysteresis);
+    const int32_t entry_z = e.self->position.z.q16 + (was_afloat ? 0 : kWaterFloatHysteresis);
     if (entry_z >= water || (flags & kEntityFlagLadderContact) != 0) {
         tick_entity->flags = flags & ~kEntityFlagDrowning; // [orig: the 0xFFDF7FFF clear —
         return;                                            //  its 0x200000 half is the player's
@@ -101,7 +101,7 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
     int32_t depth = capsule_bottom;
     if (depth > 0) depth = 0;                       // [orig: the `> 0 -> 0` clamp]
     const int32_t phase =
-            ((e.pos[1] + e.pos[0]) >> 12) + 4 * static_cast<int32_t>(logic_tick);
+            ((e.self->position.y.q16 + e.self->position.x.q16) >> 12) + 4 * static_cast<int32_t>(logic_tick);
     const int32_t bob = static_cast<int32_t>(
             std::sin(static_cast<double>(phase) * kWaterBobPhaseScale) * kWaterBobAmplitude);
     // The eye height is this tick's restamp (the motor's +0x74), not last tick's
@@ -113,7 +113,7 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
     // own airborne bit: a soldier who WADED in and one who JUMPED in are heard
     // differently. Position is the body's XY at the PLANE, not at its own Z.
     if (!was_afloat) {
-        world.out.water_crossings.add(e.pos[0], e.pos[1], water,
+        world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16, water,
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
     }
     tick_entity->flags = (flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
@@ -122,7 +122,7 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
 
     // The target is stored outright; the motor's quarter-step tail that follows
     // this block turns it into the settle. [orig: `mov [esi+0Ch], eax` @0x4bfb84]
-    e.pos[2] = target;
+    e.self->position.z.q16 = target;
 }
 
 // The org2 (player body) water block -- see the ai.h declaration. Same
@@ -151,7 +151,7 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
     const bool was_afloat = (flags & kEntityFlagDrowning) != 0;
     // [orig: @0x4b8020-0x4b804d `z - 0xA000*((Flags>>15)&1) + 0xA000 >= water
     //  || (Flags & 0x100000)` -> `Flags &= 0xFFDF7FFF`]
-    const int32_t entry_z = e.pos[2] + (was_afloat ? 0 : kWaterFloatHysteresis);
+    const int32_t entry_z = e.self->position.z.q16 + (was_afloat ? 0 : kWaterFloatHysteresis);
     if (entry_z >= water || (flags & kEntityFlagLadderContact) != 0) {
         tick_entity->flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
         tick_entity->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
@@ -169,7 +169,7 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
     int32_t base;
     if (inf.is_local_player) {
         const int32_t phase =
-                ((e.pos[0] + e.pos[1]) >> 12) + 4 * static_cast<int32_t>(logic_tick);
+                ((e.self->position.x.q16 + e.self->position.y.q16) >> 12) + 4 * static_cast<int32_t>(logic_tick);
         const int32_t bob = static_cast<int32_t>(
                 std::sin(static_cast<double>(phase) * kWaterBobPhaseScale) * -kWaterBobAmplitude);
         base = -kWaterFloatSink - bob + depth;
@@ -192,7 +192,7 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
 
     // The buoyant rise and the velocity-triplet drag. [orig: @0x4b8124-0x4b8163]
     const int32_t base_q = base >> 4;
-    e.pos[2] += (base_q < 0 ? -base_q : base_q) + pitch_term + kWaterRiseBias;
+    e.self->position.z.q16 += (base_q < 0 ? -base_q : base_q) + pitch_term + kWaterRiseBias;
     inf.vel[0] -= (inf.vel[0] + 16) >> 5;
     inf.vel[1] -= (inf.vel[1] + 16) >> 5;
     inf.vel[2] -= (inf.vel[2] + 16) >> 5;
@@ -203,24 +203,24 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
     // mirror the tick publishes after this block. [orig: `mov edx, [esi+74h]`
     // @0x4b8146, the line @0x4b815b..0x4b8169; @0x4b8169-0x4b81f5]
     const int32_t surf = water + (base >> 1) - (inf.eye_offset_z >> 1);
-    if (e.pos[2] < surf) {
-        if (e.pos[2] < surf - kWaterDiveDepth &&
+    if (e.self->position.z.q16 < surf) {
+        if (e.self->position.z.q16 < surf - kWaterDiveDepth &&
             (flags & kEntityFlagDiveLatch) == 0) {
             tick_entity->flags |= kEntityFlagDiveLatch;
             tick_entity->engine_flags |= kEntityFlagDiveLatch;
-            world.out.water_crossings.add(e.pos[0], e.pos[1], water, /*airborne=*/false);
+            world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16, water, /*airborne=*/false);
         }
     } else {
         tick_entity->flags &= ~kEntityFlagDiveLatch;
         tick_entity->engine_flags &= ~kEntityFlagDiveLatch;
-        e.pos[2] = surf;
+        e.self->position.z.q16 = surf;
     }
 
     // The entry splash, once, selected by the was-airborne bit; then the latch
     // `(Flags & ~0x2000) | 0x8000` -- swimming overrides airborne.
     // [orig: @0x4b8182 / @0x4b8363]
     if (!was_afloat) {
-        world.out.water_crossings.add(e.pos[0], e.pos[1], water,
+        world.out.water_crossings.add(e.self->position.x.q16, e.self->position.y.q16, water,
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
     }
     // Between them the local body's scope legs, each a toggle call the view

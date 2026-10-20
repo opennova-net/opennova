@@ -187,8 +187,8 @@ struct UplinkClientInputs {
 // The JOINER-side inverse of apply_player_intent: synthesize the C2S 0x0C extended
 // (type-10) player-uplink BODY (the 43-byte PlayerExtendedUplink) from the joiner's own
 // live local-player state, sent each frame so the HOST SNAPs it via apply_player_intent.
-// Position is the live engine-frame AiEntity.pos[] (i32 16.16 — the exact store the host
-// writes back); heading/pitch are the BAM32 high half (the inverse of apply_player_intent's
+// Position is the local player's own live Position words (i32 16.16, read through the
+// AI slot's entity, the store the host writes back); heading/pitch are the BAM32 high half (the inverse of apply_player_intent's
 // `intent.heading << 16`). A live mount_target wins over ground_target; when the selected
 // carrier resolves in `world`, the handle plus carrier-local position/heading are emitted.
 // Otherwise the existing FFFF/world-pose form is retained. The trailing four

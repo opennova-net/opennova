@@ -464,9 +464,9 @@ void test_attached_turret_slews_once_per_world_tick() {
         CHECK(r.gun().emplaced_gun_yaw_word == 0x93);
         CHECK(r.body->heading == look);
         if (attached) {
-            CHECK(r.body->pos[0] == to_fixed(8));
-            CHECK(r.body->pos[1] == to_fixed(12));
-            CHECK(r.body->pos[2] == to_fixed(4));
+            CHECK(r.body->self->position.x.q16 == to_fixed(8));
+            CHECK(r.body->self->position.y.q16 == to_fixed(12));
+            CHECK(r.body->self->position.z.q16 == to_fixed(4));
         }
         r.w.run_logic_tick(true);
         CHECK(r.gun().emplaced_gun_yaw_word == 0x126);

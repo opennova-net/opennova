@@ -181,7 +181,7 @@ struct Rig {
 		enemy = world->registry.spawn(0, seed);
 		world->ai.attach(self);
 		if (AiEntity *body = world->ai.for_handle(self)) {
-			body->pos[0] = body->pos[1] = body->pos[2] = 0;
+			body->self->position.x.q16 = body->self->position.y.q16 = body->self->position.z.q16 = 0;
 			body->heading = 0; // facing east: yaw 0
 		}
 		world->cached.local_player = self;

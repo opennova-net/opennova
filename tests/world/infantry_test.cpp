@@ -178,7 +178,9 @@ struct BlendProbeSource : IRootMotionSource {
 test_world::ChannelClipSource channel_only;
 AiEntity *soldier(AiSystem &ai) {
     if (ai.root_motion == nullptr) ai.root_motion = &channel_only;
-    int idx = ai.attach(EntityHandle::make(0, 0));
+    // Each soldier is its own pool-0 row (its own position words): the first
+    // takes row 0, a second row 1, and so on.
+    int idx = ai.attach(EntityHandle::make(0, ai.count()));
     AiEntity *e = ai.at(idx);
     e->inf.active = true;
     return e;
@@ -283,27 +285,29 @@ void test_motor_samples_existing_clip_before_selection() {
     for (const bool local : {false, true}) {
         auto world = std::make_unique<World>();
         auto ai = std::make_unique<AiSystem>();
+        ai->bind_registry(&world->registry);
+        world->registry.configure_pool(0, 8); // the brain's row (its position words)
         Source source;
         source.clips = {anim_state::kIdle, anim_state::kWalkForward};
         ai->root_motion = &source;
         AiEntity *body = soldier(*ai);
         body->inf.is_local_player = local;
         body->health = 100;
-        body->pos[0] = fx(100);
+        body->self->position.x.q16 = fx(100);
         body->inf.player_moving = local;
         if (!local) route(*ai, body, {node(fx(200), 0, fx(2))}, 0);
-        const int32_t before = body->pos[0];
+        const int32_t before = body->self->position.x.q16;
         run_ticks(*ai, *world, 0, 1);
         CHECK(body->inf.anim_state == anim_state::kWalkForward);
         CHECK(std::find(source.sampled.begin(), source.sampled.end(),
                         anim_state::kWalkForward) == source.sampled.end());
-        CHECK(body->pos[0] == before);
+        CHECK(body->self->position.x.q16 == before);
         CHECK(body->inf.clip_phase == 1);
         source.sampled.clear();
         run_ticks(*ai, *world, 1, 2);
         CHECK(std::find(source.sampled.begin(), source.sampled.end(),
                         anim_state::kWalkForward) != source.sampled.end());
-        CHECK(body->pos[0] > before);
+        CHECK(body->self->position.x.q16 > before);
         CHECK(body->inf.body_clip_state() == anim_state::kWalkForward);
         body->inf.request_body_animation(anim_state::kIdle2);
         body->inf.request_body_animation(anim_state::kWalkForward);
@@ -391,6 +395,7 @@ void test_hurt_volume_updates_registry_health() {
     collision.assign_entity(hazard_handle, model_id);
 
     AiSystem ai;
+    ai.bind_registry(&world.registry);
     ai.terrain = &flat.field;
     ai.collision = &collision;
     TestSource source;
@@ -404,9 +409,9 @@ void test_hurt_volume_updates_registry_health() {
     // Registry health is the canonical HUD/wire/script value. Leave the motor
     // deliberately stale to prove the tick hydrates it before applying damage.
     motor->health = 100;
-    motor->pos[0] = fx(10.0);
-    motor->pos[1] = fx(10.0);
-    motor->pos[2] = fx(0.5);
+    motor->self->position.x.q16 = fx(10.0);
+    motor->self->position.y.q16 = fx(10.0);
+    motor->self->position.z.q16 = fx(0.5);
 
     // Candidate slices mature on the seventeenth build. The type-18 contact then removes
     // the soldier's final HP through the normal authority tick.
@@ -448,6 +453,7 @@ void test_remote_player_body_publishes_exact_change_team_contact() {
     world.collision = &collision;
 
     AiSystem ai;
+    ai.bind_registry(&world.registry);
     ai.collision = &collision;
     TestSource source;
     source.clips = {anim_state::kIdle};
@@ -456,9 +462,9 @@ void test_remote_player_body_publishes_exact_change_team_contact() {
     body->inf.active = true;
     body->net_is_remote_peer = true;
     body->health = 100;
-    body->pos[0] = fx(10.0);
-    body->pos[1] = fx(10.0);
-    body->pos[2] = fx(0.5);
+    body->self->position.x.q16 = fx(10.0);
+    body->self->position.y.q16 = fx(10.0);
+    body->self->position.z.q16 = fx(0.5);
 
     // The seventeenth pool build publishes the source's candidate slice; tick
     // 22 is the next full resolve after the retail 11-on/10-off idle throttle.
@@ -567,6 +573,7 @@ struct ClimbRig {
     AiEntity *m = nullptr;
 
     explicit ClimbRig(bool local_player = true, bool with_backing = true) {
+        ai.bind_registry(&world.registry);
         world.registry.configure_pool(0, 4);
         world.registry.configure_pool(2, 4);
         Entity ladder;
@@ -610,9 +617,9 @@ struct ClimbRig {
         m->inf.leg_target[0] = m->inf.leg_target[1] = static_cast<int32_t>(0x80000000u);
         m->inf.look_pitch = 0x8000000; // looking up
         m->heading = static_cast<int32_t>(0x80000000u);
-        m->pos[0] = fx(10.6);
-        m->pos[1] = fx(10.0);
-        m->pos[2] = 0;
+        m->self->position.x.q16 = fx(10.6);
+        m->self->position.y.q16 = fx(10.0);
+        m->self->position.z.q16 = 0;
         // Mature the candidate slices before the first motor tick.
         for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
     }
@@ -630,7 +637,7 @@ void test_player_ladder_climb_cycle() {
     run_ticks(rig.ai, rig.world, 0, 1);
     Entity *pe = rig.world.registry.get(rig.player_h);
     CHECK((pe->flags & kEntityFlagLadderContact) != 0);
-    CHECK(m->pos[2] == 20480 - 208);
+    CHECK(m->self->position.z.q16 == 20480 - 208);
 
     // t1..: the climb block owns the state — forward + looking up = climb_up,
     // never airborne, vertical velocity pinned, the clip's dz lane climbs while
@@ -640,14 +647,14 @@ void test_player_ladder_climb_cycle() {
     CHECK(m->inf.anim_state == anim_state::kClimbUp);
     CHECK(!m->inf.airborne);
     CHECK(m->inf.vel[2] == 0);
-    const int32_t z_mark = m->pos[2];
+    const int32_t z_mark = m->self->position.z.q16;
     run_ticks(rig.ai, rig.world, 2, 21);
-    CHECK(m->pos[2] > z_mark + fx(1.0));
+    CHECK(m->self->position.z.q16 > z_mark + fx(1.0));
     // The facing press settles against the anchor chase + the backing solid:
     // the body stays pinned to the ladder column (no drift-through, no
     // runaway), at an equilibrium x the synthetic geometry sets.
-    CHECK(std::abs(m->pos[0] - fx(10.0)) < fx(0.5));
-    CHECK(std::abs(m->pos[1] - fx(10.0)) < fx(0.1));
+    CHECK(std::abs(m->self->position.x.q16 - fx(10.0)) < fx(0.5));
+    CHECK(std::abs(m->self->position.y.q16 - fx(10.0)) < fx(0.1));
     CHECK((pe->flags & kEntityFlagInAir) == 0);
 
     // Look down ⇒ climb_down; release the stick ⇒ climb_idle holds.
@@ -661,18 +668,18 @@ void test_player_ladder_climb_cycle() {
     // lane blends out over the 10-tick window), then the height must hold
     // EXACTLY — gravity is off while latched.
     run_ticks(rig.ai, rig.world, 23, 35);
-    const int32_t hold_z = m->pos[2];
+    const int32_t hold_z = m->self->position.z.q16;
     run_ticks(rig.ai, rig.world, 35, 39);
-    CHECK(m->pos[2] == hold_z);
+    CHECK(m->self->position.z.q16 == hold_z);
 
     // The back fan steps off the +X face and drops the latch (looking down
     // keeps the entry gate from instantly re-latching).
     m->inf.player_moving = true;
     m->inf.player_move_dir_index = 4;
-    const int32_t x_before = m->pos[0];
+    const int32_t x_before = m->self->position.x.q16;
     run_ticks(rig.ai, rig.world, 39, 40);
     CHECK((pe->flags & kEntityFlagLadderContact) == 0);
-    CHECK(m->pos[0] > x_before); // pushed away from the -X-facing ladder
+    CHECK(m->self->position.x.q16 > x_before); // pushed away from the -X-facing ladder
 }
 
 void test_player_ladder_bottom_exit_and_jump_off() {
@@ -694,8 +701,8 @@ void test_player_ladder_bottom_exit_and_jump_off() {
         run_ticks(rig.ai, rig.world, static_cast<uint32_t>(t),
                   static_cast<uint32_t>(t + 1));
     CHECK((pe->flags & kEntityFlagLadderContact) == 0);
-    CHECK(m->pos[2] == 0);            // grounded at the terrain floor
-    CHECK(m->pos[0] > fx(10.375));    // stepped back off the face (+X)
+    CHECK(m->self->position.z.q16 == 0);            // grounded at the terrain floor
+    CHECK(m->self->position.x.q16 > fx(10.375));    // stepped back off the face (+X)
 
     // Jump-off: re-enter (look up), then jump — the commit pushes back and
     // unlatches in the same tick.
@@ -708,12 +715,12 @@ void test_player_ladder_bottom_exit_and_jump_off() {
     CHECK((je->flags & kEntityFlagLadderContact) != 0);
     j->inf.player_moving = false;
     j->inf.jump_requested = true;
-    const int32_t jx_before = j->pos[0];
+    const int32_t jx_before = j->self->position.x.q16;
     run_ticks(jump_rig.ai, jump_rig.world, 6, 7);
     CHECK((je->flags & kEntityFlagLadderContact) == 0);
     CHECK(j->inf.airborne);
     CHECK(j->inf.anim_state == anim_state::kJumpStart);
-    CHECK(j->pos[0] > jx_before);
+    CHECK(j->self->position.x.q16 > jx_before);
 }
 
 void test_org1_ladder_hold_press_and_top_select() {
@@ -725,8 +732,8 @@ void test_org1_ladder_hold_press_and_top_select() {
     // separate slice).
     ClimbRig rig(/*local_player=*/false);
     AiEntity *m = rig.m;
-    m->pos[0] = fx(10.5);
-    m->pos[2] = fx(1.5);
+    m->self->position.x.q16 = fx(10.5);
+    m->self->position.z.q16 = fx(1.5);
     // Start misaligned: the AI hard-set snaps every heading channel to the
     // frame yaw on the first latched resolve. [orig: @ 0x4b33da-0x4b33fa]
     m->heading = 0x40000000;
@@ -746,18 +753,18 @@ void test_org1_ladder_hold_press_and_top_select() {
     // The org1 ladder block runs on EVEN key ticks only: an odd tick jumps
     // past it to the vertical tail. [orig: Entity_UpdateInfantryAI odd skip
     // @0x4BF6A5..0x4BF6B2 -> @0x4BFC80, past the block @0x4BF907]
-    m->pos[2] = fx(2.5);
+    m->self->position.z.q16 = fx(2.5);
     run_ticks(rig.ai, rig.world, 1, 2);
     CHECK(m->inf.anim_state == anim_state::kClimbUp); // odd tick: no select
 
     // Inside the anchor band the select promotes to climb_top.
-    m->pos[2] = fx(2.5);
+    m->self->position.z.q16 = fx(2.5);
     run_ticks(rig.ai, rig.world, 2, 3);
     CHECK(m->inf.anim_state == anim_state::kClimbTop);
 
     // A live person at the probe point (1.25u along the body heading) with an
     // overlapping Z band holds the climb at climb_idle.
-    m->pos[2] = fx(1.5);
+    m->self->position.z.q16 = fx(1.5);
     run_ticks(rig.ai, rig.world, 3, 5); // resettle into climb_up first
     CHECK(m->inf.anim_state == anim_state::kClimbUp);
     Entity blocker;
@@ -779,9 +786,9 @@ void test_org1_ladder_hold_press_and_top_select() {
     // the read @0x4BF6C7]
     pe->flags |= kEntityFlagAiClimb;
     m->inf.goal_z = fx(5.0);
-    const int32_t z_before = m->pos[2];
+    const int32_t z_before = m->self->position.z.q16;
     run_ticks(rig.ai, rig.world, 7, 9);
-    CHECK(m->pos[2] > z_before);
+    CHECK(m->self->position.z.q16 > z_before);
     CHECK(m->inf.vel[2] <= 0x4000);
 }
 
@@ -801,16 +808,16 @@ void test_player_ladder_side_dismounts_and_view_clamp() {
         CHECK((pe->flags & kEntityFlagLadderContact) != 0);
         m->inf.look_pitch = -0x8000000;
         run_ticks(rig.ai, rig.world, 4, 5); // settle into climb_down, still latched
-        const int32_t x0 = m->pos[0];
-        const int32_t y0 = m->pos[1];
+        const int32_t x0 = m->self->position.x.q16;
+        const int32_t y0 = m->self->position.y.q16;
         m->inf.player_move_dir_index = dir;
         run_ticks(rig.ai, rig.world, 5, 6);
         CHECK((pe->flags & kEntityFlagLadderContact) == 0);
-        CHECK(m->pos[0] > x0 + fx(0.3)); // the 0.5u face push, away from -X
+        CHECK(m->self->position.x.q16 > x0 + fx(0.3)); // the 0.5u face push, away from -X
         if (dir == 2)
-            CHECK(m->pos[1] < y0 - fx(0.6)); // sin(90°) lateral, one way
+            CHECK(m->self->position.y.q16 < y0 - fx(0.6)); // sin(90°) lateral, one way
         else
-            CHECK(m->pos[1] > y0 + fx(0.6)); // sin(−90°) lateral, mirrored
+            CHECK(m->self->position.y.q16 > y0 + fx(0.6)); // sin(−90°) lateral, mirrored
     }
 
     // The ±120° view clamp while latched [orig: gate @ 0x4b4978; clamp
@@ -835,7 +842,7 @@ void test_player_ladder_side_dismounts_and_view_clamp() {
 
     // Unlatched control: teleport clear of the slab; the same offset survives
     // untouched (no clamp, no resolver view chase).
-    cm->pos[0] = fx(30.0);
+    cm->self->position.x.q16 = fx(30.0);
     ce->position.x = 30.0f;
     for (int i = 0; i < 17; ++i) crig.collision.build_tick_tables(crig.world);
     run_ticks(crig.ai, crig.world, 5, 6); // the latch drops (no contact)
@@ -856,8 +863,8 @@ void test_org1_bare_cl_facing_press_drift() {
     // alone. Deleting the org1 press drops the 3-tick drift under the bound.
     ClimbRig rig(/*local_player=*/false, /*with_backing=*/false);
     AiEntity *m = rig.m;
-    m->pos[0] = fx(10.4);
-    m->pos[2] = fx(1.5);
+    m->self->position.x.q16 = fx(10.4);
+    m->self->position.z.q16 = fx(1.5);
     Entity *pe = rig.world.registry.get(rig.player_h);
     pe->position.x = 10.4f;
     pe->position.z = 1.5f;
@@ -870,7 +877,7 @@ void test_org1_bare_cl_facing_press_drift() {
     // and the org1 press below runs. [orig: dword_B57C8C = nonzero-total
     // store @ 0x4b3a62]
     CHECK(!rig.collision.resolver_applied_push);
-    const int32_t x0 = m->pos[0];
+    const int32_t x0 = m->self->position.x.q16;
     // Ticks 1..6 so the window contains THREE EVEN ticks (2, 4, 6). This body
     // is an NPC, and org1's resolver + press block runs on even ticks only
     // [orig: gate kong 155809 under `outYaw.X = tickCounter & 1` kong
@@ -882,7 +889,7 @@ void test_org1_bare_cl_facing_press_drift() {
     // 3 presses of resolver (−0.0625) + org1 press (−0.03125) less the
     // anchor chase-back: comfortably past 0.22u; without the org1 press the
     // same window moves under 0.19u.
-    CHECK(m->pos[0] < x0 - fx(0.22));
+    CHECK(m->self->position.x.q16 < x0 - fx(0.22));
 }
 
 void test_registry_max_health_drives_wounded_gait() {
@@ -895,6 +902,7 @@ void test_registry_max_health_drives_wounded_gait() {
     const EntityHandle handle = world.registry.spawn(0, infantry);
 
     AiSystem ai;
+    ai.bind_registry(&world.registry);
     TestSource source;
     source.clips = {anim_state::kWalkForward, anim_state::kWoundedWalk};
     ai.root_motion = &source;
@@ -932,6 +940,7 @@ void test_remote_player_body_anim() {
     CHECK(ent != nullptr);
 
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     TestSource src;
     for (int s = 1; s <= 8; ++s) src.clips.insert(s);          // stand walk block
     for (int s = 11; s <= 18; ++s) src.clips.insert(s);        // crouch walk block
@@ -1035,6 +1044,7 @@ void test_remote_player_same_tick_prone_jump_is_rejected() {
     CHECK(ent != nullptr);
 
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
     ai.root_motion = &src;
@@ -1071,6 +1081,7 @@ void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
     CHECK(ent != nullptr);
 
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
     ai.root_motion = &src;
@@ -1117,6 +1128,7 @@ void test_remote_player_jump_respects_world_state_flag_gates() {
     CHECK(ent != nullptr);
 
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
     ai.root_motion = &src;
@@ -1172,6 +1184,7 @@ void test_remote_player_jump_hold_release_cooldown_matches_retail() {
     CHECK(ent != nullptr);
 
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
     ai.root_motion = &src;
@@ -1216,6 +1229,7 @@ void test_local_player_jump_respects_world_state_flag_gates() {
     CHECK(ent != nullptr);
 
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     ai.terrain = &flat.field;
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
@@ -1223,9 +1237,9 @@ void test_local_player_jump_respects_world_state_flag_gates() {
     AiEntity *e = soldier(ai);
     e->inf.is_local_player = true;
     e->health = 100;
-    e->pos[0] = fx(100);
-    e->pos[1] = fx(100);
-    e->pos[2] = floor_z;
+    e->self->position.x.q16 = fx(100);
+    e->self->position.y.q16 = fx(100);
+    e->self->position.z.q16 = floor_z;
     run_ticks(ai, w, 0, 2); // seed the terrain cache and settle
 
     // Terrain-slide 0x10000 is produced/cleared before the jump gate; the
@@ -1242,7 +1256,7 @@ void test_local_player_jump_respects_world_state_flag_gates() {
         // A body presenting 0x2000 hovers within the airborne gap so neither
         // edge rewrites the word this tick; the grounded case is the landing
         // leg's own scenario (test_local_player_stale_airborne_word_lands_first).
-        e->pos[2] = floor_z + (blocked == kEntityFlagInAir ? fx(0.5) : 0);
+        e->self->position.z.q16 = floor_z + (blocked == kEntityFlagInAir ? fx(0.5) : 0);
         ent->engine_flags = blocked;
         e->inf.jump_requested = true;
         run_ticks(ai, w, tick, tick + 1);
@@ -1287,6 +1301,7 @@ struct LandingRig {
     AiEntity *e = nullptr;
 
     explicit LandingRig(bool local = true) {
+        ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 4);
         w.tables.sound_profiles.parse(kLandingProfiles, sizeof(kLandingProfiles) - 1);
         Entity seed;
@@ -1301,9 +1316,9 @@ struct LandingRig {
         e = soldier(ai);
         e->inf.is_local_player = local;
         e->health = 100;
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = floor_z;
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = floor_z;
         run_ticks(ai, w, 0, 2); // seed the terrain cache and settle
     }
     uint32_t in_air() const { return (ent->flags | ent->engine_flags) & kEntityFlagInAir; }
@@ -1360,7 +1375,7 @@ void test_local_player_landing_tick_defers_a_held_jump() {
     CHECK(landing_tick != 0);
     // T: snapped, vel_z = 0, the cooldown still 0, the thump played, the word
     // and the mirror clear, and NO launch.
-    CHECK(r.e->pos[2] == r.floor_z);
+    CHECK(r.e->self->position.z.q16 == r.floor_z);
     CHECK(r.e->inf.vel[2] == 0);
     CHECK(r.e->inf.jump_cooldown == 0);
     CHECK(!r.e->inf.airborne);
@@ -1399,7 +1414,7 @@ void test_local_player_stale_airborne_word_lands_first() {
     run_ticks(r.ai, r.w, 2, 3);
     CHECK(r.e->inf.jump_cooldown == 0);
     CHECK(r.e->inf.vel[2] == 0);
-    CHECK(r.e->pos[2] == r.floor_z);
+    CHECK(r.e->self->position.z.q16 == r.floor_z);
     CHECK(r.in_air() == 0);
     CHECK(r.take_landings() == 1);
     r.e->inf.jump_requested = true;
@@ -1428,7 +1443,7 @@ void test_ledge_edge_carried_bit_by_motor() {
         r.ent->mount_target = seat_link;
         r.ent->mount_seat = 2;
         r.ent->mount_bone = 7;
-        r.e->pos[2] = r.floor_z + fx(3); // past the 0xF000 gap: the edge fires
+        r.e->self->position.z.q16 = r.floor_z + fx(3); // past the 0xF000 gap: the edge fires
         r.e->inf.airborne = false;
         run_ticks(r.ai, r.w, 2, 3); // an even tick: org1's edge block runs
         CHECK(r.e->inf.airborne);
@@ -1460,6 +1475,7 @@ void test_local_player_uplink_carries_the_jump_bit() {
     CHECK(ent != nullptr);
 
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     TestSource src;
     src.clips.insert(anim_state::kIdle);
     src.clips.insert(anim_state::kJumpStart);
@@ -1499,6 +1515,7 @@ void test_local_recoil_kick_persists_in_the_look() {
     CHECK(w.registry.get(w.registry.spawn(0, seed)) != nullptr);
 
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     TestSource src;
     src.clips.insert(anim_state::kIdle);
     ai.root_motion = &src;
@@ -1534,6 +1551,8 @@ void test_player_body_chase_crosses_the_bam_seam() {
     // instead of sweeping the long way around; the body midpoint crosses with them.
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     TestSource src;
     src.clips.insert(anim_state::kIdle);
     src.clips.insert(anim_state::kIdle2);
@@ -1574,6 +1593,8 @@ void test_player_body_chase_crosses_the_bam_seam() {
 void test_player_root_uses_motor_head_body_heading() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     BlendProbeSource src;
     src.frames[anim_state::kIdle].dx = 0x4000;
     ai.root_motion = &src;
@@ -1587,13 +1608,13 @@ void test_player_root_uses_motor_head_body_heading() {
 
     CHECK(e->heading == 0x40000000);
     CHECK(e->inf.body_heading == 0x10000000);
-    CHECK(e->pos[0] == 0x4000);
-    CHECK(e->pos[1] == 0);
+    CHECK(e->self->position.x.q16 == 0x4000);
+    CHECK(e->self->position.y.q16 == 0);
 
     run_ticks(ai, w, 2, 3);
     CHECK(e->inf.body_heading > 0x10000000);
-    CHECK(e->pos[0] == 0x4000 + 15136);
-    CHECK(e->pos[1] == 6269);
+    CHECK(e->self->position.x.q16 == 0x4000 + 15136);
+    CHECK(e->self->position.y.q16 == 6269);
 }
 
 void test_player_body_chase_and_legs() {
@@ -1602,6 +1623,8 @@ void test_player_body_chase_and_legs() {
 
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     TestSource src;
     src.clips.insert(anim_state::kIdle);
     src.clips.insert(anim_state::kIdle2);
@@ -1662,6 +1685,8 @@ void test_npc_ledge_fall_keeps_clip() {
     Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     ai.terrain = &ground0.field;
     TestSource src;
     // kJumpLoop is AVAILABLE — proving the no-stamp is the parachute gate, not
@@ -1672,7 +1697,7 @@ void test_npc_ledge_fall_keeps_clip() {
     e->health = 100;
     e->inf.is_local_player = false;
     route(ai, e, {node(fx(500), 0, fx(1))}, 0);
-    e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = fx(80); // 80u off the floor
+    e->self->position.x.q16 = fx(100); e->self->position.y.q16 = fx(100); e->self->position.z.q16 = fx(80); // 80u off the floor
 
     run_ticks(ai, w, 0, 1); // think commits the walk, then the fall edge fires
     CHECK(e->inf.airborne);
@@ -1702,6 +1727,7 @@ void test_parachute_deployment_and_descent() {
     player.health = 100;
     const auto h = w.registry.spawn(0, player);
     AiSystem ai;
+    ai.bind_registry(&w.registry);
     ai.terrain = &flat.field;
     TestSource src;
     src.clips = {31,43,44,47};
@@ -1709,7 +1735,7 @@ void test_parachute_deployment_and_descent() {
     AiEntity *e = soldier(ai);
     CHECK(e->handle == h);
     e->health = 100;
-    e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = fx(80);
+    e->self->position.x.q16 = fx(100); e->self->position.y.q16 = fx(100); e->self->position.z.q16 = fx(80);
     e->inf.is_local_player = true;
     e->inf.airborne = true;
     e->inf.anim_state = anim_state::kJumpLoop;
@@ -1718,12 +1744,12 @@ void test_parachute_deployment_and_descent() {
     CHECK((w.registry.get(h)->flags & kEntityFlagParachute) != 0);
     CHECK((w.registry.get(h)->carry_flags & 0x10u) == 0);
     CHECK(e->inf.vel[2] == -0x3800 + 0x29C);
-    CHECK(e->pos[2] == fx(80) - 0x3800 + 0x29C);
+    CHECK(e->self->position.z.q16 == fx(80) - 0x3800 + 0x29C);
     CHECK(e->inf.anim_state == 47);
     run_ticks(ai, w, 2, 100);
     CHECK(e->inf.vel[2] >= -0x1C00 - 208);
-    CHECK(e->pos[2] > fx(50));
-    e->pos[2] = 0;
+    CHECK(e->self->position.z.q16 > fx(50));
+    e->self->position.z.q16 = 0;
     run_ticks(ai, w, 100, 103);
     CHECK((w.registry.get(h)->flags & kEntityFlagParachute) == 0);
     CHECK((w.registry.get(h)->carry_flags & 0x20u) == 0);
@@ -1733,6 +1759,8 @@ void test_dead_player_ledge_fall_edge_is_suppressed() {
     Field ground0([](int) { return static_cast<uint16_t>(0); });
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     ai.terrain = &ground0.field;
     TestSource src;
     src.clips = {anim_state::kDeathFire, anim_state::kJumpLoop};
@@ -1742,9 +1770,9 @@ void test_dead_player_ledge_fall_edge_is_suppressed() {
     e->inf.is_local_player = true;
     e->inf.anim_state = anim_state::kDeathFire; // already on the death-family path
     e->inf.anim_pending = 123;
-    e->pos[0] = fx(100);
-    e->pos[1] = fx(100);
-    e->pos[2] = fx(80);
+    e->self->position.x.q16 = fx(100);
+    e->self->position.y.q16 = fx(100);
+    e->self->position.z.q16 = fx(80);
 
     run_ticks(ai, w, 0, 1);
 
@@ -1793,6 +1821,7 @@ void test_player_idle_skip_throttle_no_bounce() {
     collision.assign_entity(bh, model_id);
 
     AiSystem ai;
+    ai.bind_registry(&world.registry);
     ai.terrain = &flat.field;
     ai.collision = &collision;
     TestSource source;
@@ -1803,21 +1832,21 @@ void test_player_idle_skip_throttle_no_bounce() {
     e->inf.active = true;
     e->inf.is_local_player = true;
     e->health = 100;
-    e->pos[0] = fx(10.0);
-    e->pos[1] = fx(10.0);
-    e->pos[2] = fx(0.05);
+    e->self->position.x.q16 = fx(10.0);
+    e->self->position.y.q16 = fx(10.0);
+    e->self->position.z.q16 = fx(0.05);
 
     run_ticks(ai, world, 0, 80); // pin onto the floor + pass the first 64-gate
-    const int32_t settled = e->pos[2];
+    const int32_t settled = e->self->position.z.q16;
     int32_t min_z = settled;
     int32_t max_z = settled;
     for (uint32_t t = 80; t < 400; ++t) { // several 64-tick windows + skip bands
         run_ticks(ai, world, t, t + 1);
-        if (e->pos[2] < min_z) min_z = e->pos[2];
-        if (e->pos[2] > max_z) max_z = e->pos[2];
+        if (e->self->position.z.q16 < min_z) min_z = e->self->position.z.q16;
+        if (e->self->position.z.q16 > max_z) max_z = e->self->position.z.q16;
     }
     CHECK(max_z - min_z <= 208); // post-tick z pinned: no rise, no sawtooth
-    CHECK(std::abs(e->pos[2] - settled) <= 208);
+    CHECK(std::abs(e->self->position.z.q16 - settled) <= 208);
 }
 
 // The local player's WATER channel + swim selection: a player body standing on a
@@ -1855,6 +1884,7 @@ void test_local_player_swims_on_the_plane() {
     collision.assign_entity(bh, model_id);
 
     AiSystem ai;
+    ai.bind_registry(&world.registry);
     ai.terrain = &flat.field;
     ai.collision = &collision;
     TestSource source;
@@ -1867,9 +1897,9 @@ void test_local_player_swims_on_the_plane() {
     e->inf.active = true;
     e->inf.is_local_player = true;
     e->health = 100;
-    e->pos[0] = fx(10.0);
-    e->pos[1] = fx(10.0);
-    e->pos[2] = fx(0.05);
+    e->self->position.x.q16 = fx(10.0);
+    e->self->position.y.q16 = fx(10.0);
+    e->self->position.z.q16 = fx(0.05);
 
     Entity *ent = world.registry.get(ph);
     CHECK(ent != nullptr);
@@ -1893,31 +1923,31 @@ void test_local_player_swims_on_the_plane() {
     // |base>>4| + 0x70 (base = -1225 -/+ the bob, zero capsule bottom here) --
     // a bounded step, never a snap, never back toward the bed -- and no
     // re-splash while afloat.
-    int32_t prev_z = e->pos[2];
+    int32_t prev_z = e->self->position.z.q16;
     for (uint32_t t = 1; t < 64; ++t) {
         run_ticks(ai, world, t, t + 1);
-        const int32_t dz = e->pos[2] - prev_z;
+        const int32_t dz = e->self->position.z.q16 - prev_z;
         // The rise step is 112..265 (the bob swings |base>>4| through 0..153);
         // the entry tick's gravity velocity (-208, decayed by the drag) still
         // integrates underneath it for the first ticks, so pin the bound and
         // the sign, not the exact step.
         CHECK(dz > 0 && dz <= 0x70 + ((1225 + 1224) >> 4) + 1);
-        prev_z = e->pos[2];
+        prev_z = e->self->position.z.q16;
     }
     CHECK((ent->flags & kEntityFlagDrowning) != 0);
     CHECK(world.out.water_crossings.events.size() == 2);
 
     // Near the surface: the line water + base/2 - eye/2 clamps from above and
     // clears the dive bit; the body rides UNDER the plane, not on the bed.
-    e->pos[2] = fx(4.9);
+    e->self->position.z.q16 = fx(4.9);
     ent->position.z = 4.9f;
     run_ticks(ai, world, 64, 90); // a few rise steps reach the line
-    CHECK(e->pos[2] < fx(5.0));
-    CHECK(e->pos[2] > fx(4.0));
+    CHECK(e->self->position.z.q16 < fx(5.0));
+    CHECK(e->self->position.z.q16 > fx(4.0));
     CHECK((ent->flags & 0x200000u) == 0);
-    const int32_t surfaced = e->pos[2];
+    const int32_t surfaced = e->self->position.z.q16;
     run_ticks(ai, world, 90, 130);
-    CHECK(std::abs(e->pos[2] - surfaced) <= 1224); // held at the line (+- the bob)
+    CHECK(std::abs(e->self->position.z.q16 - surfaced) <= 1224); // held at the line (+- the bob)
 
     // Selection: idle -> swim_idle 36, straight (no gait, no arbitration).
     CHECK(e->inf.anim_state == anim_state::kSwimIdle);
@@ -1958,7 +1988,7 @@ void test_local_player_swims_on_the_plane() {
     // first tick at or above the plane clears the float + dive bits, the short
     // fall lands, and the land idle resumes.
     world.env.water_z = fx(-5.0);
-    e->pos[2] = fx(0.5);
+    e->self->position.z.q16 = fx(0.5);
     ent->position.z = 0.5f;
     run_ticks(ai, world, 150, 151);
     CHECK((ent->flags & (kEntityFlagDrowning | 0x200000u)) == 0);
@@ -1981,6 +2011,8 @@ void test_local_player_swims_on_the_plane() {
 void test_player_weapon_channel() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     TestSource src;
     src.clips.insert(anim_state::kWalkForward);
     src.clips.insert(anim_state::kIdle);
@@ -2065,6 +2097,8 @@ void test_player_weapon_channel() {
 void test_player_weapon_channel_blend_window() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     TestSource src;
     src.clips.insert(anim_state::kIdle);
     src.clips.insert(anim_state::kWalkForward);
@@ -2206,6 +2240,8 @@ void test_player_weapon_channel_variant_ring() {
     };
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     RingSource src;
     src.clips.insert(anim_state::kIdle);
     src.clips.insert(anim_state::kWalkForward);
@@ -2306,6 +2342,8 @@ void test_npc_channels_share_the_adm_variant_ring_heads() {
     };
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     RingSource src;
     src.clips = {anim_state::kIdle, anim_state::kAttack};
     ai.root_motion = &src;
@@ -2559,6 +2597,8 @@ void test_secondary_loop_wrap_shares_the_ring_heads() {
 void test_player_weapon_hold_kinds() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     TestSource src;
     src.clips.insert(anim_state::kIdle);
     src.clips.insert(anim_state::kIdle2);
@@ -2634,6 +2674,8 @@ void test_player_weapon_hold_kinds() {
 void test_player_weapon_attack_stamp() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     TestSource src;
     src.clips.insert(anim_state::kIdle);
     src.clips.insert(anim_state::kIdle2);
@@ -2706,6 +2748,8 @@ void test_player_weapon_attack_stamp() {
 void test_player_arms_dip() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     TestSource src;
     src.clips.insert(anim_state::kIdle);
     src.clips.insert(anim_state::kIdle2);
@@ -2737,6 +2781,8 @@ void test_player_arms_dip() {
 void test_player_weapon_channel_ticks_while_dead() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kDeathFire, anim_state::kReload};
     src.lengths[anim_state::kReload] = 20;
@@ -2770,6 +2816,8 @@ void test_player_weapon_channel_ticks_while_dead() {
 void test_ai_weapon_channel_mirrors_primary_before_advance() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     ai.is_authority = true;
     TestSource src;
     src.clips.insert(anim_state::kIdle);
@@ -2867,6 +2915,8 @@ void test_slope_standing_camera_stays_level() {
     GentleRamp ramp;
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     ai.terrain = &ramp.field;
     TestSource src;
     src.clips = {anim_state::kIdle};
@@ -2879,16 +2929,16 @@ void test_slope_standing_camera_stays_level() {
     e->heading = 0x40000000;
     e->inf.body_heading = 0x40000000;
     e->inf.target_heading = 0x40000000;
-    e->pos[0] = fx(100);
-    e->pos[1] = fx(100);
-    e->pos[2] = fx(25) + kFloorStand; // ground at x=100 on the 0.25 ramp
+    e->self->position.x.q16 = fx(100);
+    e->self->position.y.q16 = fx(100);
+    e->self->position.z.q16 = fx(25) + kFloorStand; // ground at x=100 on the 0.25 ramp
 
     run_ticks(ai, w, 0, 240);
     CHECK(e->roll == 0);
     CHECK(e->body_pitch == 0);
     CHECK(e->inf.torso_roll == 0);
     CHECK(e->inf.vel[0] == 0 && e->inf.vel[1] == 0); // no slide for a stander
-    CHECK(e->pos[0] == fx(100));                     // ...so no drift either
+    CHECK(e->self->position.x.q16 == fx(100));                     // ...so no drift either
 }
 
 // The org2 conform leg: the same slope, PRONE. The body roll quarter-chases the
@@ -2900,6 +2950,8 @@ void test_slope_prone_body_conforms_org2() {
     GentleRamp ramp;
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     ai.terrain = &ramp.field;
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kIdleProne};
@@ -2912,9 +2964,9 @@ void test_slope_prone_body_conforms_org2() {
     e->heading = 0x40000000;
     e->inf.body_heading = 0x40000000;
     e->inf.target_heading = 0x40000000;
-    e->pos[0] = fx(100);
-    e->pos[1] = fx(100);
-    e->pos[2] = fx(25) + kFloorStand;
+    e->self->position.x.q16 = fx(100);
+    e->self->position.y.q16 = fx(100);
+    e->self->position.z.q16 = fx(25) + kFloorStand;
 
     // First pass (t=0, even tick): lateral probes at +-0.0859375u see dh = -2816 ->
     // roll_slope = trunc(atan2(-2816, 11264) * 683565275.5764316) = -167458907
@@ -2942,12 +2994,14 @@ void test_slope_pass_org1_selector_and_chase() {
     });
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     ai.terrain = &ramp.field;
     AiEntity *e = soldier(ai);
     e->health = 100;
-    e->pos[0] = fx(100);
-    e->pos[1] = fx(100);
-    e->pos[2] = fx(100) + kFloorStand;
+    e->self->position.x.q16 = fx(100);
+    e->self->position.y.q16 = fx(100);
+    e->self->position.z.q16 = fx(100) + kFloorStand;
 
     // Prone crawl (19, flags 0x603 bit 2): conform. Probes see the 0.6875u rise ->
     // pitch slope 45056<<14 clamped to 656175520, over the 0x22222200 threshold ->
@@ -3008,13 +3062,15 @@ void test_slope_pass_org1_wraps_its_32_bit_slopes() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &steep.field;
         AiEntity *e = soldier(ai);
         e->health = 100;
         e->heading = 0x40000000; // facing +Y: the lateral probe pair runs along X
-        e->pos[0] = fx(20);
-        e->pos[1] = fx(20);
-        e->pos[2] = fx(80) + fx(0.5); // both lateral columns inside the 2 u ray
+        e->self->position.x.q16 = fx(20);
+        e->self->position.y.q16 = fx(20);
+        e->self->position.z.q16 = fx(80) + fx(0.5); // both lateral columns inside the 2 u ray
         e->inf.anim_state = anim_state::kWalkProneForward; // conform
         ai.infantry_slope_pass(*e, w, 0, 0);
         // left - right = -0xB000: <<16 wraps to +0x50000000, clamped to +656175520
@@ -3023,6 +3079,8 @@ void test_slope_pass_org1_wraps_its_32_bit_slopes() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TerrainHeightField no_ground; // no height field: every probe misses
         ai.terrain = &no_ground;
         AiEntity *e = soldier(ai);
@@ -3045,6 +3103,8 @@ void test_slope_pass_org2_airborne_corpse_tumbles() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true;
@@ -3084,6 +3144,8 @@ void test_slope_pass_org2_airborne_corpse_tumbles() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         TestSource src;
         src.clips = {anim_state::kDeathFire};
@@ -3093,9 +3155,9 @@ void test_slope_pass_org2_airborne_corpse_tumbles() {
         e->inf.is_local_player = true;
         e->inf.airborne = true;
         e->inf.anim_state = anim_state::kDeathFire;
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(80);
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(80);
         run_ticks(ai, w, 0, 1);
         CHECK(e->pitch == 0x0FFFFFF0 && e->inf.look_pitch == 0x0FFFFFF0);
     }
@@ -3141,6 +3203,7 @@ void test_death_presentation() {
         ent->death_anim_state = 189; // death_bullet_head_right, staged by the kill
         auto ai_heap = std::make_unique<AiSystem>();
         AiSystem &ai = *ai_heap;
+        ai.bind_registry(&w.registry);
         TestSource src;
         src.clips = {189};
         ai.root_motion = &src;
@@ -3191,6 +3254,7 @@ void test_death_presentation() {
         const EntityHandle h = w.registry.spawn(0, seed);
         auto ai_heap = std::make_unique<AiSystem>();
         AiSystem &ai = *ai_heap;
+        ai.bind_registry(&w.registry);
         soldier(ai);
         run_ticks(ai, w, 1, 40);
         Entity *ent = w.registry.get(h);
@@ -3216,6 +3280,7 @@ void test_death_presentation() {
         w.cached.local_player = ph;
         auto ai_heap = std::make_unique<AiSystem>();
         AiSystem &ai = *ai_heap;
+        ai.bind_registry(&w.registry);
         soldier(ai);
         run_ticks(ai, w, 1, 30);
         Entity *ent = w.registry.get(h);
@@ -3264,9 +3329,9 @@ struct NpcRespawnRig {
         entity().alive = false;
         entity().death_anim_state = 174;
         entity().position = {50.0f, 20.0f, 8.0f};
-        body().pos[0] = fx(50);
-        body().pos[1] = fx(20);
-        body().pos[2] = fx(8);
+        body().self->position.x.q16 = fx(50);
+        body().self->position.y.q16 = fx(20);
+        body().self->position.z.q16 = fx(8);
         body().inf.reset_body_animation(44);
     }
     void tick(uint32_t from, uint32_t end) { run_ticks(storage->ai, *storage, from, end); }
@@ -3479,6 +3544,8 @@ void test_primary_body_blend_windows_keep_independent_playheads() {
     auto exercise = [](int target_state, const auto &expected_weights) {
         auto w = std::make_unique<World>();
         auto ai = std::make_unique<AiSystem>();
+        ai->bind_registry(&w->registry);
+        w->registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kIdle, target_state};
         ai->root_motion = &src;
@@ -3528,6 +3595,8 @@ void test_primary_body_mid_blend_retarget_keeps_original_primary() {
 
     auto w = std::make_unique<World>();
     auto ai = std::make_unique<AiSystem>();
+    ai->bind_registry(&w->registry);
+    w->registry.configure_pool(0, 8); // the brain's row (its position words)
     BlendProbeSource src;
     src.frames[kPrimary].dx = 100;
     src.frames[kPrimary].events = 0x4u;
@@ -3560,10 +3629,10 @@ void test_primary_body_mid_blend_retarget_keeps_original_primary() {
     CHECK(e->inf.clip_phase == 0);
     CHECK(e->inf.anim_blend_weight == 0.0f);
 
-    const int32_t x_before = e->pos[0];
+    const int32_t x_before = e->self->position.x.q16;
     ctx.logic_tick = 5;
     step_organics(*ai, *w, ctx);
-    CHECK(e->pos[0] - x_before == 120); // .9*A(100) + .1*C(300), not .9*B + .1*C
+    CHECK(e->self->position.x.q16 - x_before == 120); // .9*A(100) + .1*C(300), not .9*B + .1*C
     CHECK(e->inf.anim_prev_clip_phase == 5);
     CHECK(e->inf.clip_phase == 1);
     CHECK(e->inf.anim_blend_weight == 0.1f);
@@ -3589,6 +3658,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     const EntityHandle handle = w->registry.spawn(0, seed);
 
     auto ai = std::make_unique<AiSystem>();
+    ai->bind_registry(&w->registry);
     BlendProbeSource src;
     src.frames[kPrimary].dx = 100;
     src.frames[kPrimary].events = 0x1u;
@@ -3615,11 +3685,11 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     ent->health = 0;
     ent->death_anim_state = kDeath;
     e->health = 0;
-    const int32_t kill_x = e->pos[0];
+    const int32_t kill_x = e->self->position.x.q16;
     ctx.logic_tick = 5;
     step_organics(*ai, *w, ctx);
 
-    CHECK(e->pos[0] - kill_x == 150); // the existing A/B blend advances from .4 to .5
+    CHECK(e->self->position.x.q16 - kill_x == 150); // the existing A/B blend advances from .4 to .5
     CHECK(e->inf.last_events == 0x2u);
     CHECK(e->inf.anim_prev == kPrimary);
     CHECK(e->inf.anim_prev_clip_phase == 5);
@@ -3628,10 +3698,10 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     CHECK(e->inf.clip_phase == 5);
     CHECK(e->inf.anim_blend_weight == 0.5f);
 
-    const int32_t blend_x = e->pos[0];
+    const int32_t blend_x = e->self->position.x.q16;
     ctx.logic_tick = 6;
     step_organics(*ai, *w, ctx);
-    CHECK(e->pos[0] - blend_x == 120); // the replacement starts as .9*A + .1*death
+    CHECK(e->self->position.x.q16 - blend_x == 120); // the replacement starts as .9*A + .1*death
     CHECK(e->inf.last_events == 0x4u);
     CHECK(e->inf.anim_prev_clip_phase == 6);
     CHECK(e->inf.clip_phase == 1);
@@ -3686,6 +3756,8 @@ void test_gait_stance_transition_insert() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kStop,
                      anim_state::kWalkCrouchForward, anim_state::kWalkProneForward,
@@ -3728,6 +3800,8 @@ void test_gait_stance_transition_insert() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kStop,
                      anim_state::kWalkCrouchForward, anim_state::kWalkProneForward,
@@ -3756,6 +3830,8 @@ void test_gait_stance_transition_insert() {
 void test_eye_offset_restamp() {
     World w;
     AiSystem ai;
+    ai.bind_registry(&w.registry);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     struct CapsuleSource : IRootMotionSource {
         int32_t bottom = 0;
         int32_t top = 0;
@@ -3806,17 +3882,17 @@ void test_eye_offset_restamp() {
             CHECK(anchor == SkeletalAnchor::Head);
             if (!available) return false;
             sampled_phase = body->inf.clip_phase;
-            out[0] = body->pos[0] + static_cast<int32_t>(offset.x * 65536.0f);
-            out[1] = body->pos[1] + static_cast<int32_t>(offset.y * 65536.0f);
-            out[2] = body->pos[2] + static_cast<int32_t>(offset.z * 65536.0f);
+            out[0] = body->self->position.x.q16 + static_cast<int32_t>(offset.x * 65536.0f);
+            out[1] = body->self->position.y.q16 + static_cast<int32_t>(offset.y * 65536.0f);
+            out[2] = body->self->position.z.q16 + static_cast<int32_t>(offset.z * 65536.0f);
             return true;
         }
     } pose;
     pose.body = e;
     w.pose_provider = &pose;
-    e->pos[0] = fx(10);
-    e->pos[1] = fx(20);
-    e->pos[2] = fx(5);
+    e->self->position.x.q16 = fx(10);
+    e->self->position.y.q16 = fx(20);
+    e->self->position.z.q16 = fx(5);
     run_ticks(ai, w, 6, 8);
     CHECK(pose.sampled_phase == e->inf.clip_phase);
     CHECK(reg->eye_offset_x == fx(1) / 4);
@@ -3881,13 +3957,15 @@ void test_infantry_parity_pins_2026_08_28() {
         const int32_t floor_z = fx(50) + kFloorStand;
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true; // the motor runs locally for the joiner's own body
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(200);
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(200);
         e->health = 30000;
         TickContext ctx;
         ctx.world = &w;
@@ -3896,7 +3974,7 @@ void test_infantry_parity_pins_2026_08_28() {
             ctx.logic_tick = t;
             step_organics(ai, w, ctx);
         }
-        CHECK(e->pos[2] == floor_z);
+        CHECK(e->self->position.z.q16 == floor_z);
         CHECK(e->health == 30000);
     }
     // An Indestructible (0x4000000) body lands unharmed on the authority.
@@ -3906,6 +3984,7 @@ void test_infantry_parity_pins_2026_08_28() {
         World w;
         w.registry.configure_pool(0, 4);
         AiSystem ai;
+        ai.bind_registry(&w.registry);
         ai.terrain = &flat.field;
         ai.root_motion = &channel_only;
         w.script.wac_values.fallmps = 1;
@@ -3916,14 +3995,14 @@ void test_infantry_parity_pins_2026_08_28() {
         body.position = {100.0f, 100.0f, 200.0f};
         AiEntity *e = ai.at(ai.attach(w.registry.spawn(0, body)));
         e->inf.active = true;
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(200);
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(200);
         e->health = 30000;
         // The org1 +0xAC quarter-step tail makes the 150 u drop take ~680
         // ticks. [orig: Entity_UpdateInfantryAI tail @0x4BFC65..0x4BFC86]
         run_ticks(ai, w, 0, 900);
-        CHECK(e->pos[2] == floor_z);
+        CHECK(e->self->position.z.q16 == floor_z);
         CHECK(e->health == 30000);
     }
     // A waypoint wait of 1..7 ticks computes to a 0 cooldown and the body walks
@@ -3931,6 +4010,8 @@ void test_infantry_parity_pins_2026_08_28() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         AiEntity *e = soldier(ai);
         route(ai, e, {node(0, 0, fx(1), 0, 3), node(fx(500), 0, fx(1))}, 0);
         run_ticks(ai, w, 0, 1);
@@ -3941,6 +4022,8 @@ void test_infantry_parity_pins_2026_08_28() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         AiEntity *e = soldier(ai);
         route(ai, e, {node(0, 0, fx(1), 0, 20), node(fx(500), 0, fx(1))}, 0);
         run_ticks(ai, w, 0, 1);
@@ -3952,6 +4035,8 @@ void test_infantry_parity_pins_2026_08_28() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kIdle, anim_state::kIdle2, anim_state::kIdle3,
                      anim_state::kWalkForward, anim_state::kRunForward};
@@ -3977,6 +4062,8 @@ void test_infantry_parity_pins_2026_08_28() {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kIdle, anim_state::kIdle2, anim_state::kCoverIdle,
                      anim_state::kWalkForward, anim_state::kRunForward, anim_state::kCoverRun};
@@ -4025,7 +4112,7 @@ void test_pre_attack_wins_when_previously_idle() {
         e->team = team;
         e->health = 150;
         e->inf.max_health = 150;
-        e->pos[0] = x;
+        e->self->position.x.q16 = x;
         e->slot.f[15] = 8 * 65536;
         e->slot.f[16] = 4 * 65536;
         e->slot.f[17] = 40 * 65536;
@@ -4079,6 +4166,8 @@ void test_pre_attack_wins_when_previously_idle() {
 void test_combat_think_uses_sixteen_tick_cadence() {
     World world;
     AiSystem ai;
+    ai.bind_registry(&world.registry);
+    world.registry.configure_pool(0, 8); // the brain's row (its position words)
     AiEntity *body = soldier(ai);
     body->inf.damage_timer = 10;
     run_ticks(ai, world, 0, 1);
@@ -4118,9 +4207,9 @@ void test_combat_fixture_acquires_a_target() {
         e->team = team;
         e->health = 150;
         e->inf.max_health = 150;
-        e->pos[0] = x;
-        e->pos[1] = 0;
-        e->pos[2] = 0;
+        e->self->position.x.q16 = x;
+        e->self->position.y.q16 = 0;
+        e->self->position.z.q16 = 0;
         // Engagement bands: attack 8 u, min-engage 4 u, sight 40 u.
         e->slot.f[15] = 8 * 65536;
         e->slot.f[16] = 4 * 65536;
@@ -4192,7 +4281,7 @@ void test_out_of_range_enemy_is_approached() {
         e->team = team;
         e->health = 150;
         e->inf.max_health = 150;
-        e->pos[0] = x;
+        e->self->position.x.q16 = x;
         e->slot.f[15] = 65536;      // attack range 1 u -> the 2 u enemy is OUTSIDE
         e->slot.f[16] = 32768;      // min-engage 0.5 u -> and beyond it, so: approach
         e->slot.f[17] = 40 * 65536; // sight
@@ -4207,7 +4296,7 @@ void test_out_of_range_enemy_is_approached() {
     double closest = 1e30;
     for (uint32_t tick = 0; tick < 96; ++tick) {
         run_ticks(ai, w, tick, tick + 1);
-        closest = std::min(closest, std::hypot(double(blue->pos[0] - red->pos[0]), double(blue->pos[1] - red->pos[1])));
+        closest = std::min(closest, std::hypot(double(blue->self->position.x.q16 - red->self->position.x.q16), double(blue->self->position.y.q16 - red->self->position.y.q16)));
         if (saw_approach && blue->inf.move_mode == 7) saw_fight_after_approach = true;
         if (blue->inf.move_mode == 1) {
             saw_approach = true;
@@ -4427,18 +4516,18 @@ static void test_find_and_use_attachment_motor() {
     w.ai.tick_infantry(e, w, 8);
     CHECK(e.inf.move_mode == 6);
     CHECK(e.inf.arrival_radius == fx(1));
-    CHECK(e.pos[0] == 0); // selection requests movement; this tick sampled idle
+    CHECK(e.self->position.x.q16 == 0); // selection requests movement; this tick sampled idle
     CHECK(e.inf.body_clip_state() == anim_state::kIdle);
-    const int32_t before_x = e.pos[0], before_z = e.pos[2];
+    const int32_t before_x = e.self->position.x.q16, before_z = e.self->position.z.q16;
     const int32_t before_phase = e.inf.clip_phase;
     CHECK(w.commands.apply_ai_command(42, EntityCommands::kAiNodePath, 1, 0, 0));
     w.ai.tick_infantry(e, w, 9);
-    CHECK(e.pos[0] == before_x && e.pos[2] == before_z);
+    CHECK(e.self->position.x.q16 == before_x && e.self->position.z.q16 == before_z);
     CHECK(e.inf.clip_phase == before_phase);
     CHECK(w.commands.apply_ai_command(42, EntityCommands::kAiNodePath, 0, 0, 0));
     for (uint32_t tick = 10; tick < 220; ++tick) w.ai.tick_infantry(e, w, tick);
-    CHECK(e.pos[0] == pose.point[0] && e.pos[1] == pose.point[1]);
-    CHECK(std::abs(e.pos[2] - pose.point[2]) <= 4);
+    CHECK(e.self->position.x.q16 == pose.point[0] && e.self->position.y.q16 == pose.point[1]);
+    CHECK(std::abs(e.self->position.z.q16 - pose.point[2]) <= 4);
     CHECK(e.inf.anim_state == 150);
     CHECK(e.inf.move_mode == 0);
     CHECK(e.inf.aim_heading == 0 && e.inf.aim_pitch == 0);
@@ -4536,7 +4625,7 @@ static void test_downwash_query_and_body_selection() {
         body.inf.max_health = 100;
         body.health = 100;
         body.slot = AiSlot{};
-        body.pos[0] = body.pos[1] = body.pos[2] = 0;
+        body.self->position.x.q16 = body.self->position.y.q16 = body.self->position.z.q16 = 0;
     };
     reset();
     world.ai.infantry_select(body, world);
@@ -4706,7 +4795,7 @@ static void test_aimed_think_clears_stale_detour_state() {
                 e->team = team;
                 e->health = 150;
                 e->inf.max_health = 150;
-                e->pos[0] = x;
+                e->self->position.x.q16 = x;
                 e->slot.f[15] = 65536;      // attack range 1 u -> the 2 u enemy is OUTSIDE
                 e->slot.f[16] = 32768;      // min-engage 0.5 u -> and beyond it, so: approach
                 e->slot.f[17] = 40 * 65536; // sight
@@ -4826,8 +4915,8 @@ static void test_walking_aim_gates_on_the_body_cone() {
                 e->team = team;
                 e->health = 150;
                 e->inf.max_health = 150;
-                e->pos[0] = x;
-                e->pos[1] = y;
+                e->self->position.x.q16 = x;
+                e->self->position.y.q16 = y;
                 e->slot.f[11] = kAcc;       // accuracy B: this target was never fired at
                 e->slot.f[15] = 8 * 65536;  // attack range 8 u: the 2 u enemy is inside
                 e->slot.f[16] = 32768;      // min-engage 0.5 u
@@ -4920,9 +5009,9 @@ struct AimRig {
             e->team = team;
             e->health = 150;
             e->inf.max_health = 150;
-            e->pos[0] = x;
-            e->pos[1] = y;
-            e->pos[2] = z;
+            e->self->position.x.q16 = x;
+            e->self->position.y.q16 = y;
+            e->self->position.z.q16 = z;
             e->slot.f[15] = 8 * 65536;
             e->slot.f[16] = 32768;
             e->slot.f[17] = 40 * 65536;
@@ -5059,7 +5148,7 @@ static void test_short_phase_scan_miss_keeps_the_held_target() {
         e->team = team;
         e->health = 150;
         e->inf.max_health = 150;
-        e->pos[0] = x;
+        e->self->position.x.q16 = x;
         e->slot.f[15] = 8 * 65536;  // attack range
         e->slot.f[16] = 32768;      // min-engage
         e->slot.f[17] = 40 * 65536; // sight 40 u: calm-halved to 20 u
@@ -5086,7 +5175,7 @@ static void test_short_phase_scan_miss_keeps_the_held_target() {
     // Beyond the alerted full range (40 u, no calm halving while the damage
     // timer runs) and the 0x280000 scan cap: a phase-1 miss still keeps it; the
     // phase-0 miss reaches the clear.
-    red->pos[0] = 50 * 65536;
+    red->self->position.x.q16 = 50 * 65536;
     w.registry.get(red->handle)->position.x = 50.0f;
     scan(1);
     CHECK(blue->inf.combat_target == red->handle);
@@ -5154,9 +5243,9 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
         e->team = team;
         e->health = 150;
         e->inf.max_health = 150;
-        e->pos[0] = fx(x);
-        e->pos[1] = fx(y);
-        e->pos[2] = fx(z);
+        e->self->position.x.q16 = fx(x);
+        e->self->position.y.q16 = fx(y);
+        e->self->position.z.q16 = fx(z);
         e->slot.f[15] = 65536;      // attack range 1 u
         e->slot.f[16] = 32768;      // min-engage 0.5 u
         e->slot.f[17] = 40 * 65536; // sight
@@ -5179,21 +5268,21 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
     // The approach's goal Z (the enemy's, rayEnd.Z @0x4bc302) never reaches
     // +0x304: the stamp's S Z stays the floor.
     CHECK(self->inf.goal_z == 0);
-    CHECK(self->pos[0] == fx(30) && self->pos[1] == fx(30));
+    CHECK(self->self->position.x.q16 == fx(30) && self->self->position.y.q16 == fx(30));
     // Knock the body 8 u east of the S point. Every tick between thinks the
     // chase pulls X/Y an eighth of the way back [orig: @0x4bf636..0x4bf65f] and
     // floors Z at the goal Z [orig: @0x4bf653..0x4bf664]; nothing else moves it
     // (no root step, no terrain to resolve against).
-    self->pos[0] += fx(8);
-    int32_t x = self->pos[0];
+    self->self->position.x.q16 += fx(8);
+    int32_t x = self->self->position.x.q16;
     for (uint32_t tick = 33; tick < 48; ++tick) {
         const int32_t expected = opennova::io::bam_add(
                 x, opennova::io::bam_sar(opennova::io::bam_sub(fx(30), x), 3));
         run_ticks(w.ai, w, tick, tick + 1);
-        CHECK(self->pos[0] == expected);
-        CHECK(self->pos[1] == fx(30));
-        CHECK(self->pos[2] == 0);
-        x = self->pos[0];
+        CHECK(self->self->position.x.q16 == expected);
+        CHECK(self->self->position.y.q16 == fx(30));
+        CHECK(self->self->position.z.q16 == 0);
+        x = self->self->position.x.q16;
     }
     CHECK(w.registry.get(handle)->attach_parent == handle);
     CHECK(self->inf.move_mode == 0 && self->inf.anim_state == anim_state::kGuard);
@@ -5260,6 +5349,7 @@ void test_slope_probes_include_candidate_models() {
  world.collision = &collision;
  collision.assign_entity(support,collision.add_model(hurt_box_model(1)));
  AiSystem ai;
+ ai.bind_registry(&world.registry);
  ai.terrain = &flat.field;
  ai.collision = &collision;
  auto *e = ai.at(ai.attach(source));
@@ -5268,12 +5358,12 @@ void test_slope_probes_include_candidate_models() {
  e->inf.anim_state = anim_state::kIdleProne;
  e->health = 100;
  e->heading = 0;
- e->pos[0] = 10 * 65536;
- e->pos[1] = 10 * 65536;
- e->pos[2] = 3 * 65536;
+ e->self->position.x.q16 = 10 * 65536;
+ e->self->position.y.q16 = 10 * 65536;
+ e->self->position.z.q16 = 3 * 65536;
  for (int i=0;i<17;++i) collision.build_tick_tables(world);
- const int32_t front = collision.raycast_ground(world,source,e->pos,22528,0,0x4000,0x20000,nullptr);
- const int32_t rear = collision.raycast_ground(world,source,e->pos,-22528,0,0x4000,0x20000,nullptr);
+ const int32_t front = collision.raycast_ground(world,source,e->self->position.words().data(),22528,0,0x4000,0x20000,nullptr);
+ const int32_t rear = collision.raycast_ground(world,source,e->self->position.words().data(),-22528,0,0x4000,0x20000,nullptr);
  CHECK(front != rear && front > 65536 && rear > 65536);
  ai.infantry_slope_pass(*e,world,0,0);
  CHECK(e->body_pitch != 0);
@@ -5319,6 +5409,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         AiEntity *e = soldier(ai);
         e->inf.target_heading = 0x40000000; // 90 deg: quarter-step would be 268435456 -> clamped
         run_ticks(ai, w, 1, 2);
@@ -5334,6 +5426,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         AiEntity *e = soldier(ai);
         e->inf.target_heading = -0x40000000; // negative side clamps symmetrically
         run_ticks(ai, w, 1, 2);
@@ -5345,6 +5439,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle,
                      anim_state::kStop};
@@ -5360,6 +5456,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle,
                      anim_state::kStop};
@@ -5378,6 +5476,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle,
                      anim_state::kStop, anim_state::kWoundedWalk, anim_state::kWoundedRun};
@@ -5433,6 +5533,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kJogForward,
                      anim_state::kIdle};
@@ -5445,6 +5547,8 @@ int main(int argc, char **argv) {
     {
         World w; // jog clip missing -> falls back to run
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle};
         ai.root_motion = &src;
@@ -5456,6 +5560,8 @@ int main(int argc, char **argv) {
     {
         World w; // far approach (dist > 4.125u) skips the jog entirely
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kJogForward,
                      anim_state::kIdle};
@@ -5468,6 +5574,8 @@ int main(int argc, char **argv) {
     {
         World w; // wide arrival radius (>= 2.125u) doesn't jog
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kJogForward,
                      anim_state::kIdle};
@@ -5483,6 +5591,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kJogForward,
                      anim_state::kIdle, anim_state::kStop};
@@ -5500,7 +5610,7 @@ int main(int argc, char **argv) {
         // That tick starts the 10-tick walk->idle blend, whose retained primary root
         // carries the body a bounded distance beyond the radius edge.
         run_ticks(ai, w, 0, 33);
-        CHECK(e->pos[0] == 204793);                 // the arrival tick still samples walk
+        CHECK(e->self->position.x.q16 == 204793);                 // the arrival tick still samples walk
         CHECK(e->inf.wait_cooldown == 16);          // (248 + 8) >> 4, stamped at t=32
         CHECK(e->slot.f[38] == 1);                  // advanced past node0
         CHECK(ai.relmat_calls.size() == 2);         // SetBitB + SetBitA at the arrival
@@ -5510,12 +5620,12 @@ int main(int argc, char **argv) {
         CHECK(w.script.relations.single_visited(8, 1, 0));
 
         run_ticks(ai, w, 33, 200); // mid-hold: standing in idle, cooldown draining
-        CHECK(e->pos[0] == 241653);                 // walk->idle blend has settled
+        CHECK(e->self->position.x.q16 == 241653);                 // walk->idle blend has settled
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown == 6);
 
         run_ticks(ai, w, 200, 320); // hold expires; the next approach is still moving
-        CHECK(e->pos[0] == 458737);
+        CHECK(e->self->position.x.q16 == 458737);
         CHECK(e->slot.f[38] == 1);
         CHECK(e->inf.anim_state == anim_state::kJogForward);
         CHECK(e->inf.wait_cooldown == 0);
@@ -5525,17 +5635,17 @@ int main(int argc, char **argv) {
         // turn. Pin the resulting arrival and then its stationary one-shot hold
         // (the root rotates by retail's dbl_7C3608 trig, @0x4BF001).
         run_ticks(ai, w, 320, 1200);
-        CHECK(e->pos[0] == 437271);
-        CHECK(e->pos[1] == -38978);
+        CHECK(e->self->position.x.q16 == 437271);
+        CHECK(e->self->position.y.q16 == -38978);
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown == 13);
         CHECK(w.script.relations.group_visited(4, 1, 1));
         CHECK(w.script.relations.single_visited(8, 1, 1));
-        CHECK(std::hypot(double(e->pos[0] - fx(6)), double(e->pos[1])) < fx(1));
+        CHECK(std::hypot(double(e->self->position.x.q16 - fx(6)), double(e->self->position.y.q16)) < fx(1));
         const size_t marks = ai.relmat_calls.size();
         run_ticks(ai, w, 1200, 1400);
-        CHECK(e->pos[0] == 437271);
-        CHECK(e->pos[1] == -38978);
+        CHECK(e->self->position.x.q16 == 437271);
+        CHECK(e->self->position.y.q16 == -38978);
         CHECK(ai.relmat_calls.size() > marks); // re-arrivals keep marking the matrix
 
     }
@@ -5545,6 +5655,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kStop};
         ai.root_motion = &src;
@@ -5556,7 +5668,7 @@ int main(int argc, char **argv) {
         run_ticks(ai, w, 0, 120);
         CHECK(e->inf.target_heading == 0x20000000);
         CHECK(std::abs(e->inf.body_heading - 0x20000000) <= 2);
-        CHECK(e->pos[0] == 0 && e->pos[1] == 0);       // never walked
+        CHECK(e->self->position.x.q16 == 0 && e->self->position.y.q16 == 0);       // never walked
     }
 
     // ---- commit rules against the real flag table ----
@@ -5565,6 +5677,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kIdle};
         ai.root_motion = &src;
@@ -5577,6 +5691,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kIdle};
         ai.root_motion = &src;
@@ -5602,6 +5718,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai; // no source: the witnessed generic selection stands
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         AiEntity *e = soldier(ai);
         e->health = 0;
         run_ticks(ai, w, 1, 2);
@@ -5617,6 +5735,8 @@ int main(int argc, char **argv) {
         //  @0x4B9D06]
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kDeathBulletBase + 4}; // death_bullet_torso_forward
         ai.root_motion = &src;
@@ -5630,25 +5750,29 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kJumpLoop};
         ai.root_motion = &src;
         AiEntity *e = soldier(ai);
         e->inf.anim_state = anim_state::kJumpLoop;
         run_ticks(ai, w, 1, 16); // 15 non-think ticks at heading 0
-        CHECK(e->pos[0] == 15 * 1024);
-        CHECK(e->pos[1] == 0);
+        CHECK(e->self->position.x.q16 == 15 * 1024);
+        CHECK(e->self->position.y.q16 == 0);
     }
 
     // ---- no clip source: the selector holds and nothing moves ----
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         AiEntity *e = soldier(ai);
         route(ai, e, {node(fx(500), 0, fx(1))}, 0);
         run_ticks(ai, w, 0, 50);
         CHECK(e->inf.anim_state == anim_state::kIdle);
-        CHECK(e->pos[0] == 0);
+        CHECK(e->self->position.x.q16 == 0);
     }
 
     // ---- gravity: -416 per even key tick to terminal -32768 (pos.z += 2*vel_z,
@@ -5662,12 +5786,14 @@ int main(int argc, char **argv) {
 
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(200); // 145u above the floor: reaches terminal velocity
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(200); // 145u above the floor: reaches terminal velocity
         e->health = 30000;
 
         // The +0xAC quarter-step tail moves the NPC about vel_z per two ticks,
@@ -5683,7 +5809,7 @@ int main(int argc, char **argv) {
             if (e->inf.vel[2] < min_vel) min_vel = e->inf.vel[2];
         }
         CHECK(min_vel == kTerminal);
-        CHECK(e->pos[2] == floor_z);
+        CHECK(e->self->position.z.q16 == floor_z);
         CHECK(e->inf.vel[0] == 0 && e->inf.vel[1] == 0 && e->inf.vel[2] == 0);
         CHECK(e->health == 30000 - ((-1057 - kTerminal) >> 4)); // 30000 - 1981
     }
@@ -5693,14 +5819,16 @@ int main(int argc, char **argv) {
 
         World w; // a hop (2 gravity steps, vel -832 > -1057) lands without damage
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = floor_z + 2000;
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = floor_z + 2000;
         run_ticks(ai, w, 0, 10);
-        CHECK(e->pos[2] == floor_z);
+        CHECK(e->self->position.z.q16 == floor_z);
         CHECK(e->health == 100);
     }
     {
@@ -5714,12 +5842,14 @@ int main(int argc, char **argv) {
         // skip` -- no compare against 0].
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         w.script.wac_values.fallmps = 0;
         AiEntity *e = soldier(ai);
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = floor_z + fx(3); // past the 0xF000 airborne gap
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = floor_z + fx(3); // past the 0xF000 airborne gap
         e->health = 30000;
         int32_t min_vel = 0;
         TickContext ctx;
@@ -5730,7 +5860,7 @@ int main(int argc, char **argv) {
             step_organics(ai, w, ctx);
             if (e->inf.vel[2] < min_vel) min_vel = e->inf.vel[2];
         }
-        CHECK(e->pos[2] == floor_z);
+        CHECK(e->self->position.z.q16 == floor_z);
         CHECK(min_vel < 0);
         // The landing tick integrates one more -416 gravity step before the
         // clearance check, so the sampled minimum is one step short of the
@@ -5748,15 +5878,17 @@ int main(int argc, char **argv) {
         Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &ground0.field;
 
         soldier(ai); // index 0: NPC (is_local_player defaults false)
         soldier(ai); // index 1: player (attach may realloc the AI vector — set fields AFTER both)
         ai.at(0)->health = 100;
-        ai.at(0)->pos[0] = fx(100); ai.at(0)->pos[1] = fx(100); ai.at(0)->pos[2] = fx(100); // high up
+        ai.at(0)->self->position.x.q16 = fx(100); ai.at(0)->self->position.y.q16 = fx(100); ai.at(0)->self->position.z.q16 = fx(100); // high up
         ai.at(1)->health = 100;
         ai.at(1)->inf.is_local_player = true;
-        ai.at(1)->pos[0] = fx(120); ai.at(1)->pos[1] = fx(120); ai.at(1)->pos[2] = fx(100);
+        ai.at(1)->self->position.x.q16 = fx(120); ai.at(1)->self->position.y.q16 = fx(120); ai.at(1)->self->position.z.q16 = fx(100);
 
         // ORG1 RUNS ITS VERTICAL BLOCK ON EVEN KEY TICKS ONLY, org2 every
         // tick. The org1 even tick keeps a quarter of its Z change,
@@ -5765,23 +5897,23 @@ int main(int argc, char **argv) {
         // no such gate and integrates `pos.z += vel` once per tick.
         // [orig: outYaw = key & 1 @0x4BF146; odd skip @0x4BF6A5..0x4BF6B2;
         //  gravity @0x4BF7BF; integrate @0x4BF7EC; tail @0x4BFC65..0x4BFC86]
-        const int32_t npc_z0 = ai.at(0)->pos[2];
+        const int32_t npc_z0 = ai.at(0)->self->position.z.q16;
         run_ticks(ai, w, 0, 1); // tick 0 EVEN: both fall (100u up, stay airborne)
         CHECK(ai.at(0)->inf.vel[2] == -416); // NPC: the even-tick step
         CHECK(ai.at(1)->inf.vel[2] == -208); // player: the org2 half-step, same tick
-        CHECK(ai.at(0)->pos[2] == npc_z0 - 208); // (2 * -416 + 2) >> 2
-        const int32_t npc_z = ai.at(0)->pos[2];
-        const int32_t ply_z = ai.at(1)->pos[2];
+        CHECK(ai.at(0)->self->position.z.q16 == npc_z0 - 208); // (2 * -416 + 2) >> 2
+        const int32_t npc_z = ai.at(0)->self->position.z.q16;
+        const int32_t ply_z = ai.at(1)->self->position.z.q16;
 
         run_ticks(ai, w, 1, 2); // tick 1 ODD: org1 re-applies +0xAC, org2 falls
         CHECK(ai.at(0)->inf.vel[2] == -416);  // NPC unchanged — no gravity this tick
-        CHECK(ai.at(0)->pos[2] == npc_z - 208); // only the stored quarter step
+        CHECK(ai.at(0)->self->position.z.q16 == npc_z - 208); // only the stored quarter step
         CHECK(ai.at(1)->inf.vel[2] == -2 * 208);
-        CHECK(ai.at(1)->pos[2] == ply_z + (-2 * 208)); // pos.z += vel (org2)
+        CHECK(ai.at(1)->self->position.z.q16 == ply_z + (-2 * 208)); // pos.z += vel (org2)
 
         run_ticks(ai, w, 2, 3); // tick 2 EVEN: org1 accumulates and integrates
         CHECK(ai.at(0)->inf.vel[2] == -2 * 416);
-        CHECK(ai.at(0)->pos[2] == npc_z - 208 - 416); // (2 * -832 + 2) >> 2
+        CHECK(ai.at(0)->self->position.z.q16 == npc_z - 208 - 416); // (2 * -832 + 2) >> 2
     }
 
     // ---- slope pass through the motor: a live STANDING soldier holds steep ground —
@@ -5797,16 +5929,18 @@ int main(int argc, char **argv) {
         });
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &ramp.field;
         AiEntity *e = soldier(ai);
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(100) + kFloorStand; // standing on the slope
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(100) + kFloorStand; // standing on the slope
 
         run_ticks(ai, w, 0, 80);
-        CHECK(e->pos[0] == fx(100));               // no downhill drift
-        CHECK(e->pos[1] == fx(100));
-        CHECK(e->pos[2] == fx(100) + kFloorStand); // stays on the floor
+        CHECK(e->self->position.x.q16 == fx(100));               // no downhill drift
+        CHECK(e->self->position.y.q16 == fx(100));
+        CHECK(e->self->position.z.q16 == fx(100) + kFloorStand); // stays on the floor
         CHECK(e->inf.vel[0] == 0 && e->inf.vel[1] == 0);
         CHECK(e->pitch == 0);
         CHECK(e->body_pitch == 0);
@@ -5825,14 +5959,16 @@ int main(int argc, char **argv) {
 
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         ai.root_motion = &src;
         AiEntity *e = soldier(ai);
         e->health = 100;
         e->inf.anim_state = anim_state::kIdle;
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(200); // dropped well above the floor
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(200); // dropped well above the floor
 
         // is_authority=false so think/select never retargets the held idle clip; the ground
         // clamp itself has no authority gate, so the soldier still settles. The org1 +0xAC
@@ -5846,7 +5982,7 @@ int main(int argc, char **argv) {
             step_organics(ai, w, ctx);
         }
 
-        CHECK(e->pos[2] == fx(50) + fx(1)); // ground + capsule_bottom, not ground + 0x50000
+        CHECK(e->self->position.z.q16 == fx(50) + fx(1)); // ground + capsule_bottom, not ground + 0x50000
     }
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
@@ -5856,14 +5992,16 @@ int main(int argc, char **argv) {
 
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         ai.root_motion = &src;
         AiEntity *e = soldier(ai);
         e->health = 100;
         e->inf.anim_state = anim_state::kIdle;
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(50) + fx(1) + 0x8000; // positive foot gap, but <= 0xF000
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(50) + fx(1) + 0x8000; // positive foot gap, but <= 0xF000
 
         // NOTE: an EVEN tick — org1's gravity/resolver/edge block runs on even
         // ticks only [orig: gate kong 155809 under `outYaw.X = tickCounter & 1`
@@ -5874,8 +6012,8 @@ int main(int argc, char **argv) {
         // The even-tick NPC gravity (D-INF-10) steps pos.z down one step and the +0xAC tail keeps
         // a quarter of it, but the small positive foot clearance (<= 0xF000) is otherwise left
         // alone — NOT snapped to the floor, NOT airborne. [orig: tail @0x4BFC65..0x4BFC86]
-        CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 208);
-        CHECK(e->pos[2] > fx(50) + fx(1)); // still above the floor (clearance not snapped)
+        CHECK(e->self->position.z.q16 == fx(50) + fx(1) + 0x8000 - 208);
+        CHECK(e->self->position.z.q16 > fx(50) + fx(1)); // still above the floor (clearance not snapped)
         CHECK(!e->inf.airborne);
     }
     {
@@ -5886,14 +6024,16 @@ int main(int argc, char **argv) {
 
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         ai.root_motion = &src;
         AiEntity *e = soldier(ai);
         e->health = 100;
         e->inf.anim_state = anim_state::kIdle;
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(50) + fx(1) - 0x1000; // foot penetrates the ground
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(50) + fx(1) - 0x1000; // foot penetrates the ground
 
         // NOTE: an EVEN tick — org1's gravity/resolver/edge block runs on even
         // ticks only [orig: gate kong 155809 under `outYaw.X = tickCounter & 1`
@@ -5901,7 +6041,7 @@ int main(int argc, char **argv) {
         // the cadence, so it is phased onto a tick where the block executes.
         run_ticks(ai, w, 0, 1);
 
-        CHECK(e->pos[2] == fx(50) + fx(1)); // only negative/zero clearance lifts
+        CHECK(e->self->position.z.q16 == fx(50) + fx(1)); // only negative/zero clearance lifts
     }
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
@@ -5911,14 +6051,16 @@ int main(int argc, char **argv) {
 
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         ai.root_motion = &src;
         AiEntity *e = soldier(ai);
         e->health = 100;
         e->inf.anim_state = anim_state::kIdle;
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(50) + fx(1);
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(50) + fx(1);
         e->inf.vel[0] = 64;
         e->inf.vel[1] = -64;
 
@@ -5941,13 +6083,15 @@ int main(int argc, char **argv) {
         src.capsule_bottom = fx(1);
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         ai.root_motion = &src;
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true;
         e->health = 100;
         e->inf.anim_state = anim_state::kIdle;
-        e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = fx(50) + fx(1);
+        e->self->position.x.q16 = fx(100); e->self->position.y.q16 = fx(100); e->self->position.z.q16 = fx(50) + fx(1);
 
         run_ticks(ai, w, 0, 1); // settle grounded
         CHECK(!e->inf.airborne);
@@ -5974,14 +6118,16 @@ int main(int argc, char **argv) {
         src.capsule_bottom = fx(1);
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &low.field;
         ai.root_motion = &src;
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true;
         e->health = 100;
         e->inf.anim_state = anim_state::kIdle;
-        e->pos[0] = fx(100); e->pos[1] = fx(100);
-        e->pos[2] = fx(200); // far above the field: stays airborne
+        e->self->position.x.q16 = fx(100); e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(200); // far above the field: stays airborne
         e->inf.airborne = true;
         e->inf.player_moving = true;
         e->inf.player_move_dir_index = 0;
@@ -6028,6 +6174,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle,
                      anim_state::kStop, anim_state::kWalkCrouchForward, anim_state::kWalkProneForward,
@@ -6075,6 +6223,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kWalkForward + 4,
                      anim_state::kIdle, anim_state::kRun2, anim_state::kRun3,
@@ -6125,6 +6275,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kIdleProne,
                      anim_state::kRollLeft, anim_state::kRollRight};
@@ -6177,6 +6329,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kIdle, anim_state::kIdleProne, anim_state::kRollLeft};
         ai.root_motion = &src;
@@ -6218,6 +6372,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kIdle}; // no crouch/prone clips
         ai.root_motion = &src;
@@ -6235,6 +6391,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kWalkCrouchForward,
                      anim_state::kIdle, anim_state::kIdleCrouch};
@@ -6260,6 +6418,8 @@ int main(int argc, char **argv) {
         const int32_t floor_z = fx(50);
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         TestSource src;
         src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kJumpLoop};
@@ -6267,12 +6427,12 @@ int main(int argc, char **argv) {
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true;
         e->health = 100;
-        e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = floor_z;
+        e->self->position.x.q16 = fx(100); e->self->position.y.q16 = fx(100); e->self->position.z.q16 = floor_z;
 
         e->inf.player_moving = true;           // running jump: root step carries 3/4
         run_ticks(ai, w, 0, 2);               // settle on the ground first
         CHECK(!e->inf.airborne);
-        CHECK(e->pos[2] == floor_z);
+        CHECK(e->self->position.z.q16 == floor_z);
 
         e->inf.jump_requested = true;
         run_ticks(ai, w, 2, 3);               // the jump tick: impulse after the resolve
@@ -6289,7 +6449,7 @@ int main(int argc, char **argv) {
         CHECK(e->inf.vel[0] == 1638);
         run_ticks(ai, w, 3, 4);
         CHECK(e->inf.vel[2] == 0x1600 - 208); // org2 per-tick gravity
-        CHECK(e->pos[2] > floor_z);           // rising
+        CHECK(e->self->position.z.q16 > floor_z);           // rising
 
         // Model a genuinely HELD key: the host reapplies the level input before every
         // motor tick. The cooldown parks at 1 and the grounded player never auto-repeats.
@@ -6298,7 +6458,7 @@ int main(int argc, char **argv) {
             run_ticks(ai, w, t, t + 1);
         }
         CHECK(!e->inf.airborne);
-        CHECK(e->pos[2] == floor_z);
+        CHECK(e->self->position.z.q16 == floor_z);
         CHECK(e->inf.jump_cooldown == 1);     // held-at-1 latch: no auto-repeat
 
         run_ticks(ai, w, 100, 101);           // release edge
@@ -6319,6 +6479,8 @@ int main(int argc, char **argv) {
     {
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         // A source whose clip carries a forward step for EVERY state: the motor consumes it
         // even while the selected state is idle, matching the original's unconditional root
         // integration. Real idle clips may author zero mean root velocity; the gate is data.
@@ -6336,17 +6498,17 @@ int main(int argc, char **argv) {
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true;
         e->health = 100;
-        e->pos[0] = fx(10);
+        e->self->position.x.q16 = fx(10);
 
         e->inf.move_mode = 0; e->inf.target_dist = 0; // idle: no move order
         run_ticks(ai, w, 0, 8);
         CHECK(e->inf.anim_state == anim_state::kIdle);
-        CHECK(e->pos[0] == fx(10) + 8 * 0x2000);
+        CHECK(e->self->position.x.q16 == fx(10) + 8 * 0x2000);
 
         e->inf.player_moving = true; // forward: the every-clip source promotes to run_3
         run_ticks(ai, w, 8, 14);
         CHECK(e->inf.anim_state == anim_state::kRun3);
-        CHECK(e->pos[0] > fx(10)); // a movement state DOES translate the same clip step
+        CHECK(e->self->position.x.q16 > fx(10)); // a movement state DOES translate the same clip step
     }
 
     // ---- per-ADM root motion: each soldier uses its own clip set for both movement and
@@ -6380,6 +6542,8 @@ int main(int argc, char **argv) {
 
         World w;
         AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         ai.terrain = &flat.field;
         ai.root_motion = &src;
         soldier(ai);
@@ -6388,17 +6552,20 @@ int main(int argc, char **argv) {
         AiEntity *crouch = ai.at(1);
         stand->handle = EntityHandle::make(0, 0);
         crouch->handle = EntityHandle::make(0, 1);
+        // Each body is its own row (its own position words).
+        stand->self = w.registry.row_storage(stand->handle);
+        crouch->self = w.registry.row_storage(crouch->handle);
 
         stand->inf.is_local_player = true;
         stand->health = 100;
-        stand->pos[0] = fx(100); stand->pos[1] = fx(100); stand->pos[2] = fx(50);
+        stand->self->position.x.q16 = fx(100); stand->self->position.y.q16 = fx(100); stand->self->position.z.q16 = fx(50);
         stand->inf.adm_id = 0;
         stand->inf.player_moving = true;
         stand->inf.anim_state = anim_state::kWalkForward;
 
         crouch->inf.is_local_player = true;
         crouch->health = 100;
-        crouch->pos[0] = fx(100); crouch->pos[1] = fx(100); crouch->pos[2] = fx(50);
+        crouch->self->position.x.q16 = fx(100); crouch->self->position.y.q16 = fx(100); crouch->self->position.z.q16 = fx(50);
         crouch->inf.adm_id = 1;
         crouch->inf.stance = InfantryState::Stance::kCrouch;
         crouch->inf.player_moving = true;
@@ -6408,10 +6575,10 @@ int main(int argc, char **argv) {
 
         CHECK(stand->inf.anim_state == anim_state::kWalkForward);
         CHECK(crouch->inf.anim_state == anim_state::kWalkCrouchForward);
-        CHECK(stand->pos[0] == fx(100) + 3 * src.step[0]);
-        CHECK(crouch->pos[0] == fx(100) + 3 * src.step[1]);
-        CHECK(stand->pos[2] == fx(50) + src.capsule[0]);
-        CHECK(crouch->pos[2] == fx(50) + src.capsule[1]);
+        CHECK(stand->self->position.x.q16 == fx(100) + 3 * src.step[0]);
+        CHECK(crouch->self->position.x.q16 == fx(100) + 3 * src.step[1]);
+        CHECK(stand->self->position.z.q16 == fx(50) + src.capsule[0]);
+        CHECK(crouch->self->position.z.q16 == fx(50) + src.capsule[1]);
     }
 
     // ---- body-anim slot mapping: the motor's clip state -> present-pass BodyAnim slot ----

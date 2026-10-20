@@ -107,7 +107,7 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 	};
 	const int stage = inf.board_entry_stage;
 	if (stage > 6) {
-		std::copy_n(e.pos, 3, goal);
+		std::copy_n(e.self->position.words().data(), 3, goal);
 		radius = 0x10000;
 		--inf.board_entry_stage;
 	} else if (stage > 4) {
@@ -132,12 +132,12 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 				if (stage == 2) {
 					inf.board_entry_stage = 3;
 					if (get('E')) {
-						e.pos[0] += (point[0] - e.pos[0]) >> 3;
-						e.pos[1] += (point[1] - e.pos[1]) >> 3;
+						e.self->position.x.q16 += (point[0] - e.self->position.x.q16) >> 3;
+						e.self->position.y.q16 += (point[1] - e.self->position.y.q16) >> 3;
 					}
 				}
 			} else {
-				std::copy_n(e.pos, 3, goal);
+				std::copy_n(e.self->position.words().data(), 3, goal);
 				radius = 90112;
 				inf.board_entry_stage = 3;
 				// The S yaw lands in the target heading and the think-entry
@@ -174,9 +174,9 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 					}
 				}
 				if (std::abs(int64_t(diff)) < 0x2D82D80) {
-					e.pos[0] = sx;
-					e.pos[1] = sy;
-					e.pos[2] = std::max(e.pos[2], sz);
+					e.self->position.x.q16 = sx;
+					e.self->position.y.q16 = sy;
+					e.self->position.z.q16 = std::max(e.self->position.z.q16, sz);
                     self.attach_parent = {};
 				}
 			}
@@ -186,12 +186,12 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 		radius = 57344;
 		inf.board_entry_stage = 1;
 		inf.board_anim = anim_state::kStop;
-		const double dx = target.position.x * 65536.0 - e.pos[0];
-		const double dy = target.position.y * 65536.0 - e.pos[1];
+		const double dx = target.position.x * 65536.0 - e.self->position.x.q16;
+		const double dy = target.position.y * 65536.0 - e.self->position.y.q16;
 		const int32_t bound = io::float_to_fp16_16(target.bound_radius) + 0x10000;
 		if (std::hypot(dx, dy) < bound && world.collision &&
 				!world.collision->entity_los_clear(
-						world, self.handle, self.handle, e.pos, goal, 0x4000, true)) {
+						world, self.handle, self.handle, e.self->position.words().data(), goal, 0x4000, true)) {
 			// Walk around the near side of the target's bound when the E point
 			// is hidden by its hull. [orig: @0x4BB4A2..0x4BB591]
 			const int32_t yaw =
@@ -208,7 +208,6 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 			radius = 0;
 		}
 	}
-	self.position.set_q16({e.pos[0], e.pos[1], e.pos[2]});
 }
 } // namespace
 
@@ -258,11 +257,11 @@ InfantryAttachmentPose infantry_attachment_pose(AiEntity &e, World &world) {
     if ((parent->item_attrib & 0x1000u) != 0) {
         if (AiEntity *controller = world.ai.for_handle(parent->handle)) {
             result.point[2] = controller->brain.f[141];
-            controller->brain.f[142] = std::min(controller->brain.f[142], e.pos[2]);
+            controller->brain.f[142] = std::min(controller->brain.f[142], e.self->position.z.q16);
         }
     }
-    const double dx = io::bam_sub(point[0], e.pos[0]);
-    const double dy = io::bam_sub(point[1], e.pos[1]);
+    const double dx = io::bam_sub(point[0], e.self->position.x.q16);
+    const double dy = io::bam_sub(point[1], e.self->position.y.q16);
     result.distance = static_cast<int32_t>(std::min(std::hypot(dx, dy), 2147418112.0));
     self->flags &= ~kEntityFlagMounted;
     self->engine_flags &= ~kEntityFlagMounted;
@@ -313,24 +312,24 @@ bool infantry_attachment_move(AiEntity &e, World &world, const InfantryAttachmen
         // Eighth-step X/Y toward the stamped S point, Z floored at the goal Z.
         // [orig: gate @0x4BF625..0x4BF62D; x/y @0x4BF636/0x4BF63C; z @0x4BF653..0x4BF664]
         for (int axis = 0; axis < 2; ++axis)
-            e.pos[axis] = io::bam_add(e.pos[axis],
-                    io::bam_sar(io::bam_sub(inf.self_attach_point[axis], e.pos[axis]), 3));
-        e.pos[2] = std::max(e.pos[2], inf.goal_z);
+            e.self->position.word(axis) = io::bam_add(e.self->position.word(axis),
+                    io::bam_sar(io::bam_sub(inf.self_attach_point[axis], e.self->position.word(axis)), 3));
+        e.self->position.z.q16 = std::max(e.self->position.z.q16, inf.goal_z);
         return false; // self-attachment still executes the ordinary root/vertical tail
     }
     if (!pose.parent.valid() || self->attach_bone == 0 || pose.distance >= 147456) return false;
     inf.vel[0] = inf.vel[1] = 0;
     for (int axis = 0; axis < 2; ++axis) {
-        if (pose.distance < 0x4000) e.pos[axis] = pose.point[axis];
-        else e.pos[axis] = io::bam_add(e.pos[axis],
-                io::bam_sar(io::bam_add(io::bam_sub(pose.point[axis], e.pos[axis]), 8), 4));
+        if (pose.distance < 0x4000) e.self->position.word(axis) = pose.point[axis];
+        else e.self->position.word(axis) = io::bam_add(e.self->position.word(axis),
+                io::bam_sar(io::bam_add(io::bam_sub(pose.point[axis], e.self->position.word(axis)), 8), 4));
     }
-    if (e.pos[2] <= io::bam_add(pose.point[2], 49152))
-        e.pos[2] = io::bam_add(e.pos[2],
-                io::bam_sar(io::bam_add(io::bam_sub(pose.point[2], e.pos[2]), 4), 3));
+    if (e.self->position.z.q16 <= io::bam_add(pose.point[2], 49152))
+        e.self->position.z.q16 = io::bam_add(e.self->position.z.q16,
+                io::bam_sar(io::bam_add(io::bam_sub(pose.point[2], e.self->position.z.q16), 4), 3));
     else {
         inf.vel[2] = std::max(io::bam_sub(inf.vel[2], 167), -18432);
-        e.pos[2] = io::bam_add(e.pos[2], inf.vel[2]);
+        e.self->position.z.q16 = io::bam_add(e.self->position.z.q16, inf.vel[2]);
     }
     return true; // skips both ordinary root translation and vertical collision
 }
@@ -363,7 +362,7 @@ void AiSystem::infantry_command_think(AiEntity &e, World &world, int32_t &entry_
         int32_t tgt[3] = {player->position.x.q16,
                           player->position.y.q16,
                           player->position.z.q16};
-        const int32_t dist = board_dist(e.pos, tgt);
+        const int32_t dist = board_dist(e.self->position.words().data(), tgt);
         int32_t radius = 0x40000;
         if (inf.combat_target.valid() &&
             inf.combat_target == world.cached.local_player)
@@ -434,10 +433,10 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 		bool killed = false;
 		// The dead bit alone decides [orig: `test byte [edx+24h],2` @0x4BB211].
 		if (((target->flags | target->engine_flags) & kEntityFlagDead) != 0) {
-			const double dx = self->spawn_position.x.q16 - int64_t(e.pos[0]);
-			const double dy = self->spawn_position.y.q16 - int64_t(e.pos[1]);
+			const double dx = self->spawn_position.x.q16 - int64_t(e.self->position.x.q16);
+			const double dy = self->spawn_position.y.q16 - int64_t(e.self->position.y.q16);
 			const double dz =
-					(self->spawn_position.z.q16 - int64_t(e.pos[2])) >> 1;
+					(self->spawn_position.z.q16 - int64_t(e.self->position.z.q16)) >> 1;
 			if (std::trunc(std::sqrt(dx * dx + dy * dy + dz * dz)) > 0x80000) {
 				self->health = e.health = 0;
 				self->last_attacker = target->last_attacker;
@@ -445,7 +444,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 			}
 		}
 		if (!killed) {
-			std::copy_n(e.pos, 3, goal);
+			std::copy_n(e.self->position.words().data(), 3, goal);
 			radius = 0x7D0000;
 		}
 	} else if (entry_type) {
@@ -453,7 +452,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 	}
 	// The common goal tail: moveMode 3 at the measured distance and the
 	// final-approach local, then the escort legs. [orig: @0x4BB5A1..0x4BB620]
-	int32_t dist = board_dist(e.pos, goal);
+	int32_t dist = board_dist(e.self->position.words().data(), goal);
 	inf.move_mode = 3;
 	inf.target_dist = dist;
 	inf.at_final_oneshot = true;

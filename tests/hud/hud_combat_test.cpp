@@ -323,7 +323,7 @@ static void world_feeds() {
 	world.cached.local_player = player;
 	world.ai.attach(player);
 	auto *body = world.ai.for_handle(player);
-	body->pos[2] = 10 << 16;
+	body->self->position.z.q16 = 10 << 16;
 	body->heading = 0;
 	auto *p = world.registry.get(player);
 	seed.position = { 100, 0, 10 };

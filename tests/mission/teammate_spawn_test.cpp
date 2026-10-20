@@ -161,7 +161,7 @@ int main() {
         CHECK(rig.world.registry.get(slot.first)->spawn_phase == 63);
         CHECK(rig.world.registry.get(slot.helicopter)->spawn_origin == w::kSpawnOriginNone);
         CHECK(rig.world.vehicles.traits.get(1281) != nullptr);
-        const int32_t initial_x = heli->pos[0];
+        const int32_t initial_x = heli->self->position.x.q16;
         rig.tick(125);
         heli = rig.world.ai.for_handle(slot.helicopter.handle);
         // The authored helicopter has no PlayerControl: its initial queued
@@ -196,7 +196,7 @@ int main() {
         CHECK(rig.world.teammates.count() == 1);
         CHECK(rig.world.registry.live_count() == baseline_count);
         CHECK(rig.world.script.heli_lift_active_count == 1);
-        CHECK(rig.world.ai.for_handle(slot.helicopter.handle)->pos[0] == initial_x);
+        CHECK(rig.world.ai.for_handle(slot.helicopter.handle)->self->position.x.q16 == initial_x);
     }
     for (const auto &gap : rig.world.diagnostics.gaps())
         CHECK(gap.origin.kind != w::RuntimeGapKind::BmsAction || gap.origin.code != 39);

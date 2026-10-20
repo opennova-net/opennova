@@ -264,7 +264,7 @@ void LocalPlayer::place_on_composed_view() {
 	// [orig: @0x52b087..0x52b0b7 — g_ViewPos less CameraOffset (+0x6C..+0x74)]
 	const int32_t offset[3] = {e->eye_offset_x, e->eye_offset_y, e->eye_offset_z};
 	for (int axis = 0; axis < 3; ++axis)
-		p->pos[axis] = io::bam_sub(w::to_fixed(pose.eye[axis]), offset[axis]);
+		p->self->position.word(axis) = io::bam_sub(w::to_fixed(pose.eye[axis]), offset[axis]);
 	// [orig: @0x52b0ba..0x52b0ee — Yaw and g_LocalPlayerLookYaw = g_ViewRotYaw,
 	//  Pitch, Roll]. The port's view words are the composed mission angles.
 	const int32_t heading = w::bam_heading_from_mission_yaw_deg(pose.yaw_deg);
@@ -279,7 +279,6 @@ void LocalPlayer::place_on_composed_view() {
 	p->inf.look_pitch = pitch;
 	input.look_heading = heading;
 	input.look_pitch = pitch;
-	e->position.set_q16({p->pos[0], p->pos[1], p->pos[2]});
 	e->yaw = static_cast<int16_t>(std::lround(
 			w::normalize_mission_yaw_deg(w::mission_yaw_deg_from_bam_heading(heading))));
 }
@@ -300,9 +299,6 @@ void LocalPlayer::teleport_local_player(const w::Vec3 &mission_pos, double yaw_d
 	w::AiEntity *p = player_ai();
 	if (e == nullptr || p == nullptr) return;
 	e->position = mission_pos;
-	p->pos[0] = w::to_fixed(mission_pos.x);
-	p->pos[1] = w::to_fixed(mission_pos.y);
-	p->pos[2] = w::to_fixed(mission_pos.z);
 	p->heading = w::bam_heading_from_mission_yaw_deg(yaw_deg);
 	p->pitch = static_cast<int32_t>(pitch_deg / w::kDegreesPerBam);
 	// The input-owned view mirrors, or the next pre-tick snaps the view back.
@@ -326,11 +322,10 @@ bool LocalPlayer::apply_pose(const int32_t (&position_q16)[3], int32_t heading_b
 	// The bridge's person writes: Position, Rotation.X/Y, AirVelocity
 	// (onhook/src/debug/debug_bridge.c ApplyPose; GamePerson +0x04 / +0x10 /
 	// +0x98, the organic's InfantryState::vel triple).
-	for (int axis = 0; axis < 3; ++axis) p->pos[axis] = position_q16[axis];
+	for (int axis = 0; axis < 3; ++axis) p->self->position.word(axis) = position_q16[axis];
 	p->heading = heading_bam;
 	p->pitch = pitch_bam;
 	p->inf.vel[0] = p->inf.vel[1] = p->inf.vel[2] = 0;
-	e->position.set_q16({p->pos[0], p->pos[1], p->pos[2]});
 	p->inf.target_heading = heading_bam;
 	p->inf.look_pitch = pitch_bam;
 	input.look_heading = heading_bam;

@@ -314,8 +314,7 @@ bool MissionShots::build_(Run &run) {
 			world::AiEntity *body = placed.ai.for_handle(entity.handle);
 			world::Entity *row = placed.registry.get(entity.handle);
 			if (!body || !row) return;
-			body->pos[2] = io::bam_add(body->pos[2], int32_t(std::lround(person.lift * io::kFp16OneD)));
-			row->position.z.q16 = body->pos[2];
+			body->self->position.z.q16 = io::bam_add(body->self->position.z.q16, int32_t(std::lround(person.lift * io::kFp16OneD)));
 			run.people.push_back({ entity.handle.packed, mark->row });
 		});
 	});

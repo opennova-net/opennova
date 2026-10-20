@@ -148,9 +148,9 @@ static void test_rain_rng_exact_pose_and_restore() {
     f.world.cached.local_player = local;
     f.world.ai.attach(local);
     auto &body = *f.world.ai.for_handle(local);
-    body.pos[0] = 100 * 65536 + 7;
-    body.pos[1] = 200 * 65536 + 9;
-    body.pos[2] = 5 * 65536 + 11;
+    body.self->position.x.q16 = 100 * 65536 + 7;
+    body.self->position.y.q16 = 200 * 65536 + 9;
+    body.self->position.z.q16 = 5 * 65536 + 11;
     const Program p = f.compile_script("ammorain(SCRIPT) store(v1)\n");
     CHECK(p.ok());
     WacVm vm; vm.load(p);

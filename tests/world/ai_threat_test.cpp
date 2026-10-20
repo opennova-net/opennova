@@ -103,7 +103,7 @@ int main() {
 			continue;
 		const int32_t from[3] = { int32_t(start.x * 65536), int32_t(start.y * 65536),
 			int32_t((start.z + 0.8f) * 65536) };
-		const int32_t to[3] = { first.ai->pos[0], first.ai->pos[1], first.ai->pos[2] + 52428 };
+		const int32_t to[3] = { first.ai->self->position.x.q16, first.ai->self->position.y.q16, first.ai->self->position.z.q16 + 52428 };
 		if (!rig.world.ai.line_of_sight_clear(
 					rig.world, from, to, rig.world.cached.local_player, first.entity->handle))
 			continue;

@@ -236,8 +236,8 @@ int main() {
 		CHECK(near_equal(kernel.local.player_position().y, spawn_pos.y, 0.001f));
 		CHECK(near_equal(kernel.local.player_position().z, spawn_pos.z, 0.001f));
 		if (const w::AiEntity *body = kernel.local.player_ai()) {
-			CHECK(near_equal(body->pos[0] / 65536.0f, spawn_pos.x, 0.01f));
-			CHECK(near_equal(body->pos[1] / 65536.0f, spawn_pos.y, 0.01f));
+			CHECK(near_equal(body->self->position.x.q16 / 65536.0f, spawn_pos.x, 0.01f));
+			CHECK(near_equal(body->self->position.y.q16 / 65536.0f, spawn_pos.y, 0.01f));
 		}
 		CHECK(kernel.world.script.vars.get_mission(3) == 0);
 		// The restart lands on the play-start score block and masks, the
@@ -532,7 +532,7 @@ int main() {
 		CHECK(kernel.world.logic_tick == tick0 + 1);
 		kernel.local.teleport_local_player(w::Vec3{7.0f, 8.0f, 9.0f}, 0.0, 0.0);
 		CHECK(near_equal(kernel.local.player_position().z, 9.0f, 0.001f));
-		if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->pos[2] == 9 << 16);
+		if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->self->position.z.q16 == 9 << 16);
 		tick_no_net(kernel);
 		CHECK(kernel.world.logic_tick == tick0 + 2);
 	}

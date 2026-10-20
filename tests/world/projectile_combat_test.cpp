@@ -3351,8 +3351,8 @@ void test_round_hit_runs_the_player_waypoint_tail() {
     nav.channels[3].entries[0] = 0;
     nav.nodes.resize(1);
     nav.nodes[0].f[0] = 0x10000; // radius 1 u, centered on the body
-    nav.nodes[0].f[1] = body->pos[0];
-    nav.nodes[0].f[2] = body->pos[1];
+    nav.nodes[0].f[1] = body->self->position.x.q16;
+    nav.nodes[0].f[2] = body->self->position.y.q16;
     r->fire_and_tick();
     CHECK(v->spawn_phase == 64);
     CHECK(r->world.script.relations.single_visited(7, 3, 0));

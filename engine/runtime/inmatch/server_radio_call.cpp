@@ -165,11 +165,11 @@ void designation_point(world::World &world, const world::Entity &sender, int32_t
 		// On foot: Position + CameraOffset, (Yaw, Pitch + pitchBlend, Roll)
 		// [orig: @0x4dc847..0x4dc880].
 		const world::AiEntity *body = world.ai.for_handle(sender.handle);
-		fire[0] = io::bam_add(body ? body->pos[0] : sender.position.x.q16,
+		fire[0] = io::bam_add(body ? body->self->position.x.q16 : sender.position.x.q16,
 				body ? body->inf.eye_offset_x : sender.eye_offset_x);
-		fire[1] = io::bam_add(body ? body->pos[1] : sender.position.y.q16,
+		fire[1] = io::bam_add(body ? body->self->position.y.q16 : sender.position.y.q16,
 				body ? body->inf.eye_offset_y : sender.eye_offset_y);
-		fire[2] = io::bam_add(body ? body->pos[2] : sender.position.z.q16,
+		fire[2] = io::bam_add(body ? body->self->position.z.q16 : sender.position.z.q16,
 				body ? body->inf.eye_offset_z : sender.eye_offset_z);
 		fire[3] = body ? body->heading : world::bam_heading_from_mission_yaw_deg(sender.yaw);
 		fire[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch)

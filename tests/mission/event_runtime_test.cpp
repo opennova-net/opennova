@@ -161,6 +161,7 @@ static void test_wac_accuracyspread_drives_npc_aim() {
     const world::EntityHandle npc_h = w.registry.spawn(0, npc_seed);
 
     world::AiSystem ai;
+    ai.bind_registry(&w.registry);
     const int ai_index = ai.attach(npc_h);
     world::AiEntity &npc = *ai.at(ai_index);
     npc.team = 1;
@@ -886,8 +887,8 @@ static void test_redirect_actions_preserve_authored_node() {
     const int second_ai_index = ai.attach(second_h);
     world::AiEntity &first_ai = *ai.at(first_ai_index);
     world::AiEntity &second_ai = *ai.at(second_ai_index);
-    first_ai.pos[0] = 90 << 16;
-    second_ai.pos[0] = 10 << 16;
+    first_ai.self->position.x.q16 = 90 << 16;
+    second_ai.self->position.x.q16 = 10 << 16;
     ai.nav.channels.resize(3);
     ai.nav.channels[2].count = 2;
     ai.nav.channels[2].entries[0] = 0;
@@ -922,8 +923,8 @@ static void test_redirect_actions_preserve_authored_node() {
 
     // Arrival closes the mission loop: the mover must use the live registry's
     // script-facing group/SSN keys, not the provisional AiEntity mirrors.
-    first_ai.pos[0] = 0;
-    second_ai.pos[0] = 100 << 16;
+    first_ai.self->position.x.q16 = 0;
+    second_ai.self->position.x.q16 = 100 << 16;
     ai.update_waypoint_movement(first_ai, w);
     ai.update_waypoint_movement(second_ai, w);
     CHECK(w.script.relations.group_visited(3, 2, 0));
@@ -2801,9 +2802,9 @@ static void test_structural_bms_actions() {
            world::kEntityFlagMatrixBuilt) == 0);
     CHECK((w.registry.get(pool2_h)->engine_flags &
            world::kEntityFlagMatrixBuilt) == 0);
-    CHECK(pool1_ai.pos[0] == (10 << 16));
-    CHECK(pool1_ai.pos[1] == (20 << 16));
-    CHECK(pool1_ai.pos[2] == (30 << 16));
+    CHECK(pool1_ai.self->position.x.q16 == (10 << 16));
+    CHECK(pool1_ai.self->position.y.q16 == (20 << 16));
+    CHECK(pool1_ai.self->position.z.q16 == (30 << 16));
     CHECK(pool1_ai.heading ==
           world::bam_heading_from_mission_yaw_deg(45.0));
 

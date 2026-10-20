@@ -162,8 +162,8 @@ struct Harness {
 		const w::Vec3 after = kernel->local.player_position();
 		CHECK(std::hypot(after.x - before.x, after.y - before.y) > 0.01f);
 		const w::AiEntity *body = kernel->local.player_ai();
-		CHECK(std::fabs(after.x - body->pos[0] / 65536.0f) < 0.01f);
-		CHECK(std::fabs(after.y - body->pos[1] / 65536.0f) < 0.01f);
+		CHECK(std::fabs(after.x - body->self->position.x.q16 / 65536.0f) < 0.01f);
+		CHECK(std::fabs(after.y - body->self->position.y.q16 / 65536.0f) < 0.01f);
 	}
 };
 
@@ -228,7 +228,7 @@ void initialized_before_premission_and_retry(Assets &assets) {
         CHECK(h.kernel->restore_baseline());
         verify();
         CHECK(world.ai.for_handle(handle)->inf.clip_phase == initial.inf.clip_phase);
-        CHECK(world.ai.for_handle(handle)->pos[2] == initial.pos[2]);
+        CHECK(world.ai.for_handle(handle)->self->position.z.q16 == initial.self->position.z.q16);
         CHECK(world.registry.get(handle)->spawn_position.z == spawn.z);
     }
 }
