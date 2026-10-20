@@ -122,7 +122,6 @@ std::unique_ptr<ViewportModel> EffectViewport::make(const std::string &path) {
 ViewportStatus EffectViewport::status() const {
 	switch (reason_) {
 	case EffectViewStatus::Ready: return ViewportStatus::Ready;
-	case EffectViewStatus::Unreadable:
 	case EffectViewStatus::SpawnsNothing: return ViewportStatus::Failed;
 	case EffectViewStatus::NoProject:
 	case EffectViewStatus::NoFile:
@@ -135,7 +134,6 @@ std::string EffectViewport::message() const {
 	switch (reason_) {
 	case EffectViewStatus::NoProject: return "Open a project to preview its particle effects.";
 	case EffectViewStatus::NoFile: return "Open a particle file to preview its effects.";
-	case EffectViewStatus::Unreadable: return "The game's particle reader does not read this file: " + detail_;
 	case EffectViewStatus::NoEffect: return "The file defines no effect: an [effectdef] block with an id names one.";
 	case EffectViewStatus::SpawnsNothing: return detail_;
 	case EffectViewStatus::Ready: break;
@@ -157,8 +155,7 @@ ViewportAction EffectViewport::stop_(EffectViewStatus reason, const std::string 
 	const bool held = playback_.scene() != nullptr || scene_handed_;
 	playback_.close();
 	closure_ = particle::EffectClosure();
-	// A file that does not read keeps the effect it showed: read again, it shows it on (no seek).
-	if (reason != EffectViewStatus::Unreadable) shown_.clear();
+	shown_.clear();
 	scene_handed_ = false;
 	shown_none();
 	return held ? ViewportAction::Clear : ViewportAction::Keep;
@@ -186,20 +183,12 @@ ViewportAction EffectViewport::follow_(const ViewportInput &input, PreviewClock 
 			document.load_generation() != file_load_ || document.revision() != file_revision_;
 	if (reread) {
 		file_ = particle::ParticleFile();
-		file_error_ = particle::ParseError();
-		file_read_ = read_particle_text(*text, file_, file_error_);
+		particle::ParseError error;
+		read_particle_text(*text, file_, error); // the game's reader refuses no text
 		file_known_ = true;
 		file_identity_ = document.identity();
 		file_load_ = document.load_generation();
 		file_revision_ = document.revision();
-	}
-	if (!file_read_) {
-		effects_.clear();
-		revealed_line_ = 0;
-		const std::string where = file_error_.line > 0 ? " (line " + std::to_string(file_error_.line) + ")" : std::string();
-		const ViewportAction action = stop_(EffectViewStatus::Unreadable, file_error_.message + where + ".");
-		shown(document);
-		return action;
 	}
 	const particle::ParticleFile &file = file_;
 	// Each effect, and whether the catalog spawns this definition for its name: no earlier file of the

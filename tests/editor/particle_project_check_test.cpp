@@ -3,7 +3,7 @@
 // every file's, without case. An effect's particle no file defines (particle.effect_unresolved: the game empties the
 // effect) and a particle's curve table no file defines (particle.curve_unresolved), each a warning at the name; a name
 // another file defines in another case resolves; the gore set the project picks (.ptu, or .ptg with fgn2.bin) is the
-// one that defines; a file the reader stops in defines nothing; an expansion project finds nothing (its base game's
+// one that defines; a definition its file never closes registers nothing; an expansion project finds nothing (its base game's
 // files resolve names too). The check's protocol: nothing moved, nothing made again. Through a session: the rows in
 // Problems, and gone once the particle is defined.
 #include <editor/assets/asset_registry.h>
@@ -35,26 +35,26 @@ using namespace opennova::editor;
 namespace {
 
 std::string effect(const std::string &id, const std::string &pdefs) {
-	return "[effectdef]\n{\n\tid = " + id + ";\n\tpdefs = " + pdefs + ";\n}\n\n";
+	return "[effectdef]\r\n{\r\n\tid = " + id + ";\r\n\tpdefs = " + pdefs + ";\r\n}\r\n\r\n";
 }
 
 std::string particle(const std::string &id, const std::string &keys = std::string()) {
-	return "[particledef]\n{\n\tid = " + id + ";\n" + keys + "}\n\n";
+	return "[particledef]\r\n{\r\n\tid = " + id + ";\r\n" + keys + "}\r\n\r\n";
 }
 
 std::string table(const std::string &id) {
-	std::string out = "[tabledef]\n{\n\tid = " + id + ";\n";
-	for (int row = 1; row <= 32; ++row) out += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\n";
-	return out + "}\n\n";
+	std::string out = "[tabledef]\r\n{\r\n\tid = " + id + ";\r\n";
+	for (int row = 1; row <= 32; ++row) out += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\r\n";
+	return out + "}\r\n\r\n";
 }
 
 // a.ptl: Smoke names PUFF (b.ptl's Puff, another case) and ghost (none); Fine names puff alone; Gore names the .ptu's
-// particle, German the .ptg's, Broken the particle of the file the reader stops in. b.ptl: Puff's scale curve names
+// particle, German the .ptg's, Broken the particle of the block its file never closes. b.ptl: Puff's scale curve names
 // tables.ptl's grow in another case, its alpha curve a table none defines, its first graphic's red curve another.
 const std::string kA = effect("Smoke", "PUFF, ghost") + effect("Fine", "puff") + effect("Gore", "goreonly") +
                        effect("German", "germanonly") + effect("Broken", "brokenpart");
-const std::string kB = particle("Puff", "\tscale_func = GROW;\n\talpha_func = missingtable reverse;\n"
-                                        "\tgraphic1 = dot.tga, additive;\n\tg1_red_func = nothere;\n");
+const std::string kB = particle("Puff", "\tscale_func = GROW;\r\n\talpha_func = missingtable reverse;\r\n"
+                                        "\tgraphic1 = dot.tga, additive;\r\n\tg1_red_func = nothere;\r\n");
 
 struct Found {
 	std::string code, asset, name;
@@ -93,7 +93,7 @@ int test_check() {
 	            test_io::write_text(root + "/particles/tables.ptl", table("grow")) &&
 	            test_io::write_text(root + "/particles/gore.ptu", particle("goreonly")) &&
 	            test_io::write_text(root + "/particles/gore.ptg", particle("germanonly")) &&
-	            test_io::write_text(root + "/particles/broken.ptl", "[particledef]\n{\n\tid = brokenpart;\n"));
+	            test_io::write_text(root + "/particles/broken.ptl", "[particledef]\r\n{\r\n\tid = brokenpart;\r\n"));
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const DocumentType *type = document_type_for(AssetKind::Particles);
 	TEST_EXPECT(type && type->project_check);

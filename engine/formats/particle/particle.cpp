@@ -58,10 +58,6 @@ const TableDef *ParticleFile::find_table(std::string_view id) const noexcept {
 
 namespace {
 
-bool icontains(std::string_view haystack, std::string_view needle) noexcept {
-	return strutil::ifind(haystack, needle) != std::string_view::npos;
-}
-
 // [orig: g_ParticleFlagTable @ 0x5ba500 (ParticleEdit_v1_1.exe, cnt dword_5BC2E8=29)]; JO's
 // [orig: @ 0x846A18]
 // 29 entries in engine table order (the write order). HAZE (idx 9), BELOWH20
@@ -109,12 +105,14 @@ constexpr std::array<std::pair<const char *, std::uint32_t>, 5> kMoveEntries = {
 	{"ORBIT",     move_flag::Orbit},
 }};
 
+// Every entry whose name is in the text, by substring and with case [orig: FlagTable_ParseFromString
+// @ 0x5df970, strstr @ 0x5df995].
 template <std::size_t N>
 std::uint32_t parse_flag_table(std::string_view raw,
 		const std::array<std::pair<const char *, std::uint32_t>, N> &entries) noexcept {
 	std::uint32_t bits = 0;
 	for (const auto &entry : entries) {
-		if (icontains(raw, entry.first)) {
+		if (raw.find(entry.first) != std::string_view::npos) {
 			bits |= entry.second;
 		}
 	}
@@ -173,15 +171,17 @@ BlendMode parse_blend_mode(std::string_view raw) noexcept {
 	// distort=7 is a Jointops-era addition). CParticleDefEntry_ParseBlendMode uses chained strstr — first
 	// match wins. Order matters because "bump" is a substring of "bumpadd";
 	// engine checks "bump" first and would return Bump for "bumpadd". Match
-	// the engine exactly so corpus parses identically.
-	if (icontains(raw, "additive")) return BlendMode::Additive;
-	if (icontains(raw, "blend"))    return BlendMode::Blend;
-	if (icontains(raw, "premult"))  return BlendMode::Premult;
-	if (icontains(raw, "bump"))     return BlendMode::Bump;
-	if (icontains(raw, "mod"))      return BlendMode::Mod;
-	if (icontains(raw, "mod2x"))    return BlendMode::Mod2x;     // unreachable per engine; kept for completeness
-	if (icontains(raw, "bumpadd"))  return BlendMode::Bumpadd;   // ditto
-	if (icontains(raw, "distort"))  return BlendMode::Distort;
+	// the engine exactly so corpus parses identically. strstr is case-sensitive: "Additive" is none of
+	// them, Blend [orig: @ 0x5e29f0, strstr per word].
+	const auto has = [raw](const char *word) { return raw.find(word) != std::string_view::npos; };
+	if (has("additive")) return BlendMode::Additive;
+	if (has("blend"))    return BlendMode::Blend;
+	if (has("premult"))  return BlendMode::Premult;
+	if (has("bump"))     return BlendMode::Bump;
+	if (has("mod"))      return BlendMode::Mod;
+	if (has("mod2x"))    return BlendMode::Mod2x;     // unreachable per engine; kept for completeness
+	if (has("bumpadd"))  return BlendMode::Bumpadd;   // ditto
+	if (has("distort"))  return BlendMode::Distort;
 	return BlendMode::Blend;
 }
 
@@ -246,22 +246,25 @@ void bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexce
 	// `id = table11Alt` — an exact compare leaves green unbaked (constant 255)
 	// while red/alpha fade, tinting aging fire sprites green.
 	// TableDef+0x248 is the transform mask (inverse=1, reverse=2), not an
-	// owner. An unmodified reference returns the FIRST base match. A modified
-	// reference scans every base match, remembers the LAST one, then clones
-	// and transforms it [orig: @ 0x5e95b8..0x5e960b; transform @ 0x5e2700].
-	const bool modified = curve.reverse || curve.inverse;
+	// owner. The walk returns the FIRST name match whose flags equal the
+	// reference's mask, as it is (a base table for an unmodified reference, a
+	// table whose rows ran into its flags for a modified one); else, for a
+	// modified reference, it clones and transforms the LAST match of flags 0
+	// [orig: @ 0x5e95b8..0x5e960b — `table_def[146] == mask` @ 0x5e95c0, the
+	// flags-0 match kept @ 0x5e95c6; transform @ 0x5e2700]. A mask of 0 that
+	// finds no table of flags 0 resolves none.
+	const std::uint32_t mask = (curve.inverse ? 0x01u : 0u) | (curve.reverse ? 0x02u : 0u);
 	const TableDef *base_match = nullptr;
 	for (const TableDef &table : tables) {
-		if (strutil::iequals(table.id, curve.name)) {
-			if (!modified) {
-				bake_curve_lut(table, false, false, curve.baked_lut);
-				curve.baked = true;
-				return;
-			}
-			base_match = &table;
+		if (!strutil::iequals(table.id, curve.name)) continue;
+		if (table.flags == mask) {
+			bake_curve_lut(table, false, false, curve.baked_lut);
+			curve.baked = true;
+			return;
 		}
+		if (table.flags == 0) base_match = &table;
 	}
-	if (base_match != nullptr) {
+	if (base_match != nullptr && mask != 0) {
 		bake_curve_lut(*base_match, curve.reverse, curve.inverse,
 				curve.baked_lut);
 		curve.baked = true;

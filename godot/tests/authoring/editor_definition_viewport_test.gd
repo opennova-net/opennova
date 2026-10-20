@@ -42,7 +42,7 @@ func _new_project() -> void:
 	assert_true(_seam.new_project(dir, "Definition Viewport"))
 	TestFs.write_bytes(self, dir.path_join("models/crate.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
 	TestFs.write_bytes(self, dir.path_join("models/armory.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(ARMORY)))
-	TestFs.write_bytes(self, dir.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("particles/puff.ptl"), TestFs.crlf(_ptl()).to_utf8_buffer())
 	var dot := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga"))
 	assert_gt(dot.size(), 18, "the fixture's particle graphic reads")
 	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"), dot)
@@ -238,7 +238,7 @@ func test_a_weapon_fires_in_first_person() -> void:
 			+ "define arms A1\n{\n\tname AV_A\n\tgraphic arms.3di\n\tcamo 1 2 3\n}\n"
 			+ "nationality 0 AV_GOOD\n{\n\talignment good\n\tdivision 0 AV_DIV\n\t{\n\t\tcombo 1 H1 B1 A1\n\t}\n}\n")
 			.to_utf8_buffer())
-	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), TestFs.crlf(_ptl()).to_utf8_buffer())
 	TestFs.write_bytes(self, root.path_join("particles/particle_dot.tga"),
 			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
 	TestFs.write_bytes(self, root.path_join("sounds/gs_test.wav"), TestFs.wave_bytes(0.2))
@@ -349,7 +349,7 @@ func test_an_ammo_plays_its_impact_rows() -> void:
 			+ "\t\tplayer none none 0\n\t\tzip none none 0\n\t\tobj Puff none 15\n\t\tdirt Puff none 15\n\tend\nend\n"
 			+ "ammo AMMO_T\n\tvelocity 600\n\tmax_age 3\n\tweight_in_grains 62\n\tscar_type 1\n\teffects_table\n"
 			+ "\t\tmetal Puff none 15\n\tend\nend\n").to_utf8_buffer())
-	TestFs.write_bytes(self, dir.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("particles/puff.ptl"), TestFs.crlf(_ptl()).to_utf8_buffer())
 	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"),
 			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))

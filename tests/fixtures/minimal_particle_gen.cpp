@@ -6,12 +6,17 @@
 //   synth_smallest.ptl       one [tabledef] and nothing else
 //   synth_table_handles.ptl  a [tabledef] plus its [tabledef_edithandles]
 //   synth_multi_section.ptl  seven [effectdef]s over one "blank" particle
-//                            (an empty graphic texture) and one textured one
+//                            (a placeholder texture) and one textured one
 //   synth_multi_layer.ptl    four effects; a three-layer particle with per-layer
 //                            colour overrides and curves, and a one-layer one
-//   synth_minimal_effect.ptl the Buildup effect over the "Buildup dots"
+//   synth_minimal_effect.ptl the Buildup effect over the "Buildup_dots"
 //                            particle (a gravitating top-aligned burst) that
 //                            the authored gorehit.ptu also references
+//
+// Each model is one the game's reader gives back as it is: every name one word
+// (the tokenizer ends a word at a blank), each layer holding the particle's
+// curves its graphicN line copies, a texture on every layer (an empty one reads
+// as the blend word after it), flip_frames 1 on every layer but the last.
 //
 // No retail file is carried: the shipped .ptl corpus is the OPENNOVA_JO_ASSETS
 // leg of particle_smoke_all_fixtures.
@@ -120,7 +125,6 @@ GraphicLayer &layer(ParticleDef &p, int index, const char *texture, BlendMode mo
 	g.present = true;
 	g.texture = texture;
 	g.blend_mode = mode;
-	g.blend_mode_raw = blend_mode_name(mode);
 	g.flip_frames = 1;
 	g.flip_rate = 8;
 	g.alpha = p.alpha;
@@ -130,6 +134,12 @@ GraphicLayer &layer(ParticleDef &p, int index, const char *texture, BlendMode mo
 	g.color2 = p.color2;
 	g.color3 = p.color3;
 	g.color4 = p.color4;
+	// The particle's curves as the graphicN line copies them (parser.cpp graphic_decl).
+	g.scale_func = p.scale_func;
+	g.alpha_func = p.alpha_func;
+	g.red_func = p.red_func;
+	g.green_func = p.green_func;
+	g.blue_func = p.blue_func;
 	return g;
 }
 
@@ -157,9 +167,9 @@ ParticleFile make_multi_section() {
 	static const char *const kEffects[] = {"stockeffect", "synth_burst", "synth_ring", "synth_dust",
 	                                       "synth_spray", "synth_wake",  "synth_smoke"};
 	for (const char *id : kEffects) f.effects.push_back(effect(id, {"blank"}));
-	// "blank": a declared graphic with no texture, the default blend.
+	// "blank": a declared graphic of a placeholder texture, the default blend.
 	ParticleDef blank = base_particle("blank");
-	layer(blank, 1, "", BlendMode::Blend);
+	layer(blank, 1, "blank.tga", BlendMode::Blend);
 	f.particles.push_back(blank);
 	ParticleDef flare = base_particle("synth_flare");
 	flare.age = 0.25f;
@@ -199,7 +209,6 @@ ParticleFile make_multi_layer() {
 	puf.color4 = rgb(120, 100, 80);
 	GraphicLayer &g1 = layer(puf, 1, "puf_a.tga", BlendMode::Blend);
 	g1.color1 = rgb(200, 160, 120);
-	g1.color_overrides_set = true;
 	g1.alpha_func = curve("synth_fade");
 	g1.scale_func = curve("synth_grow", true);
 	layer(puf, 2, "puf_b.tga", BlendMode::Blend);
@@ -238,10 +247,10 @@ ParticleFile make_multi_layer() {
 
 ParticleFile make_minimal_effect() {
 	ParticleFile f;
-	f.effects.push_back(effect("Buildup", {"Buildup dots"}));
+	f.effects.push_back(effect("Buildup", {"Buildup_dots"}));
 	// A top-aligned gravitating burst from a 10 x 10 box, curves on scale and
 	// the colour channels, one additive layer at twice the base scale.
-	ParticleDef dots = base_particle("Buildup dots");
+	ParticleDef dots = base_particle("Buildup_dots");
 	dots.flags = particle_flag::TopAlign;
 	dots.move = move_flag::Gravitate;
 	dots.emit_dur = 60.0f;

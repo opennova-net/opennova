@@ -54,8 +54,8 @@ int main() {
 	// The shipped boatwake.ptl closes its edithandles block with `};` after the
 	// `}`: the stray `;` must not blow up the section parser.
 	const char *stray_terminator =
-			"[tabledef]\n{\n\tid = stray;\n\ttl1 = 1, 2, 3, 4, 5, 6, 7, 8;\n}\n"
-			"[tabledef_edithandles]\n{\n\ttableid = stray;\n\thandlecount = 0;\n\ttightness = 0;\n};\n";
+			"[tabledef]\r\n{\r\n\tid = stray;\r\n\ttl1 = 1, 2, 3, 4, 5, 6, 7, 8;\r\n}\r\n"
+			"[tabledef_edithandles]\r\n{\r\n\ttableid = stray;\r\n\thandlecount = 0;\r\n\ttightness = 0;\r\n};\r\n";
 	opennova::particle::ParticleFile stray;
 	if (!opennova::particle::load_particles_from_buffer(stray_terminator, std::strlen(stray_terminator), stray,
 			error)) {

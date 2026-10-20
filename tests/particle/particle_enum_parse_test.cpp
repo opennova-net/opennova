@@ -65,6 +65,14 @@ int main() {
 	if (!expect(parse_move_bits("UNKNOWN")   == 0,                    "unknown move = 0 bits")) return 1;
 
 	if (!expect(parse_particle_flags("TOPALIGN") == particle_flag::TopAlign, "TOPALIGN")) return 1;
+	// The table's names are found with case [orig: FlagTable_ParseFromString @ 0x5df970, strstr @ 0x5df995], and a
+	// name holding another sets both (FOCALWINDFORCEAGING holds FOCALWIND); the blend words likewise [orig:
+	// CParticleDefEntry_ParseBlendMode @ 0x5e29f0].
+	if (!expect(parse_particle_flags("topalign") == 0, "a lowercase name sets no bit")) return 1;
+	if (!expect(parse_particle_flags("FOCALWINDFORCEAGING ") ==
+						(particle_flag::FocalWind | particle_flag::FocalWindForceAging),
+				"a name holding another sets both")) return 1;
+	if (!expect(parse_blend_mode("Additive") == BlendMode::Blend, "a capitalised blend word is none: Blend")) return 1;
 	const std::uint32_t both = parse_particle_flags("EMITVECTOR AMBIENTCOLOR");
 	if (!expect((both & particle_flag::EmitVector) != 0,   "EMITVECTOR bit")) return 1;
 	if (!expect((both & particle_flag::AmbientColor) != 0, "AMBIENTCOLOR bit")) return 1;
@@ -80,8 +88,8 @@ int main() {
 	// 3. Fixture-driven projections — synth_minimal_effect.ptl: flags=TOPALIGN, move=GRAVITATE,
 	// graphic1 = spark.tga, additive; scale_func = synth_grow reverse;
 	const ParticleFile buildup = load("synth_minimal_effect.ptl");
-	const ParticleDef *p = buildup.find_particle("Buildup dots");
-	if (!expect(p != nullptr, "Buildup dots resolves")) return 1;
+	const ParticleDef *p = buildup.find_particle("Buildup_dots");
+	if (!expect(p != nullptr, "Buildup_dots resolves")) return 1;
 	if (!expect(p->flags == particle_flag::TopAlign, "buildup flags = TopAlign bit")) return 1;
 	if (!expect(p->move == move_flag::Gravitate, "buildup move = Gravitate bit")) return 1;
 	if (!expect(p->scale_func.reverse && !p->scale_func.inverse, "scale_func reverse only")) return 1;

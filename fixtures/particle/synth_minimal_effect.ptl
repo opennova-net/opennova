@@ -2,13 +2,13 @@
 [effectdef]
 {
 	id = Buildup;
-	pdefs = Buildup dots;
+	pdefs = Buildup_dots;
 
 }
 
 [particledef]
 {
-id	= Buildup dots;
+id	= Buildup_dots;
 flags	=  TOPALIGN ;
 move	=  GRAVITATE ;
 lod	= 0.000;

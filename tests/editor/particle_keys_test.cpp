@@ -237,8 +237,9 @@ int test_retail() {
 			}
 	}
 	std::printf("retail: %zu particle files, %zu blocks, %zu keys at their spans\n", files, blocks, keys);
-	// The install's counts, pinned (Joint Operations: Combined Arms, its base's particle files of every extension).
-	TEST_EXPECT(files == 85 && blocks == 2895 && keys == 123369);
+	// The install's counts, pinned (Joint Operations: Combined Arms, its base's particle files of every extension);
+	// its four effect blocks of no pdefs line are no block (the game makes no effect of them).
+	TEST_EXPECT(files == 85 && blocks == 2891 && keys == 123365);
 	return 0;
 }
 

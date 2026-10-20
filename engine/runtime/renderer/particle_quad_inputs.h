@@ -59,7 +59,7 @@ struct ParticleQuadInputs {
 };
 
 // One particle's quad inputs. `graphic` is the layer the particle drew at
-// spawn (its curves fall back to the definition's when the layer bakes none),
+// spawn (its own curves, the definition's being no fallback),
 // `ambient_tinted` the definition's particle_def_ambient_tinted, and
 // `view_rows` the row-major world-to-view basis of the view the quad is built
 // for (the LitColor light and the camera-facing TOPALIGN heading read it).

@@ -61,10 +61,16 @@ Error ParticleFile::load_from_file(const String &path) {
 }
 
 Error ParticleFile::load_from_buffer(const PackedByteArray &bytes, const String &display_path) {
+	opennova::particle::ParticleReadState state;
+	return load_from_buffer_after(bytes, display_path, state);
+}
+
+Error ParticleFile::load_from_buffer_after(const PackedByteArray &bytes, const String &display_path,
+		opennova::particle::ParticleReadState &state) {
 	opennova::particle::ParticleFile parsed;
 	opennova::particle::ParseError err;
-	if (!opennova::particle::load_particles_from_buffer(
-			reinterpret_cast<const char *>(bytes.ptr()), static_cast<std::size_t>(bytes.size()), parsed, err)) {
+	if (!opennova::particle::load_particles_from_buffer(reinterpret_cast<const char *>(bytes.ptr()),
+				static_cast<std::size_t>(bytes.size()), parsed, state, err)) {
 		UtilityFunctions::push_warning(opennova::to_gd("ptl load failed at line " + std::to_string(err.line) + ": " + err.message));
 		return ERR_FILE_CANT_READ;
 	}

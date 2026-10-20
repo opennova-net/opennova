@@ -42,7 +42,7 @@ func _new_project() -> String:
 	var dir := OS.get_cache_dir().path_join("opennova editor effect project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Effect Viewport"))
-	TestFs.write_bytes(self, dir.path_join(PTL), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join(PTL), TestFs.crlf(_ptl()).to_utf8_buffer())
 	var dot := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga"))
 	assert_gt(dot.size(), 18, "the fixture's particle graphic reads")
 	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"), dot)

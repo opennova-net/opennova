@@ -352,7 +352,8 @@ static int test_sound_and_effect() {
 	Fixture f("opennova_editor_add_there_sound");
 	TEST_EXPECT(test_io::write_file(f.root + "/aside.lwf", editor_test::sound_bank_of({"ASIDE"})) &&
 	            test_io::write_file(f.root + "/game.lwf", editor_test::sound_bank_of({"FIRE"})));
-	TEST_EXPECT(test_io::write_text(f.root + "/fx.ptl", "[effectdef]\n{\n\tid = FX_OTHER;\n}\n\n[particledef]\n{\n\tid = puff;\n}\n"));
+	TEST_EXPECT(test_io::write_text(f.root + "/fx.ptl",
+	                                "[effectdef]\n{\n\tid = FX_OTHER;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n}\n"));
 	editor_test::handle_to_end(f.session, request::rescan());
 	const std::string too_long(24, 'Q');
 	TEST_EXPECT(f.edit_file("items.def", row_with(node_kind(CatalogKind::Item), "display_name", "Door",
@@ -378,10 +379,13 @@ static int test_sound_and_effect() {
 	TEST_EXPECT(f.apply(*fix, ReferenceKind::Particle, "FX_DI15"));
 	const DocumentBase *document = f.session.document_base_for(particles);
 	const TextDocument *text = document ? text_of(*document) : nullptr;
+	// The file staged CR LF (test_io::staged), the block in its line ends, a pdefs line of no particle: the game's
+	// reader makes an effect only at its pdefs line.
 	TEST_EXPECT(text && text->text() ==
-	                            "[effectdef]\n{\n\tid = FX_OTHER;\n}\n\n[effectdef]\n{\n\tid = FX_DI15;\n\n}\n\n[particledef]\n{\n\tid = puff;\n}\n");
+	                            "[effectdef]\r\n{\r\n\tid = FX_OTHER;\r\n\tpdefs = puff;\r\n}\r\n\r\n[effectdef]\r\n{\r\n"
+	                            "\tid = FX_DI15;\r\n\tpdefs = ;\r\n\r\n}\r\n\r\n[particledef]\r\n{\r\n\tid = puff;\r\n}\r\n");
 	const std::vector<ViewEvent> shown = editor_test::events_after(f.view(), seq, ViewEventKind::RevealText);
-	TEST_EXPECT(shown.size() == 1 && shown[0].path == particles && shown[0].locator == "5:1");
+	TEST_EXPECT(shown.size() == 1 && shown[0].path == particles && shown[0].locator == "6:1");
 	TEST_EXPECT(f.undo(particles, ReferenceKind::Particle, "FX_DI15"));
 	return 0;
 }

@@ -123,7 +123,7 @@ int test_empty_value() {
 	const particle::ParticleDef &def = again.file.particles[0];
 	TEST_EXPECT(def.child_id == "spark" && def.emit_rate == 5.0f && def.unknown_keys.empty());
 	// With a ';' after the blank, the place is the ';' (the value's own start).
-	const std::string semi = "[particledef]\r\n{\r\n\tchild_id = ;\r\n}\r\n";
+	const std::string semi = "[particledef]\r\n{\r\n\tid = a;\r\n\tchild_id = ;\r\n}\r\n";
 	const Parsed with_semi = parsed(semi);
 	const particle::KeyPlace *at = place_of(with_semi.places, BlockKind::Particle, "child_id");
 	TEST_EXPECT(at && at->length == 0 && semi[at->offset] == ';');
@@ -156,7 +156,9 @@ int test_rows() {
 			if (c == '#') c = '2';
 			if (c == '*') c = '7';
 		}
-		const std::string text = "[particledef]\r\n{\r\n\t" + key + " = " + value_of(row.value) + ";\r\n}\r\n";
+		// After an id: the reader reads a particle's keys into the definition an id line opened.
+		const std::string text =
+				"[particledef]\r\n{\r\n\tid = p;\r\n\t" + key + " = " + value_of(row.value) + ";\r\n}\r\n";
 		const particle::ParticleFile file = parsed(text).file;
 		TEST_EXPECT(file.particles.size() == 1);
 		if (file.particles.size() != 1) return 1;
@@ -176,7 +178,7 @@ int test_rows() {
 	            !key_row(BlockKind::Particle, "collide_sound-1"));
 	{
 		const particle::ParticleFile sounds =
-				parsed("[particledef]\r\n{\r\n\tcollide_sound = a;\r\n\tcollide_sound7x = b;\r\n"
+				parsed("[particledef]\r\n{\r\n\tid = s;\r\n\tcollide_sound = a;\r\n\tcollide_sound7x = b;\r\n"
 				       "\tcollide_sound20 = c;\r\n}\r\n").file;
 		TEST_EXPECT(sounds.particles.size() == 1);
 		if (sounds.particles.size() != 1) return 1;
@@ -273,8 +275,10 @@ int test_retail() {
 	}
 	std::printf("  %zu effect files, %zu blocks, %zu keys (%zu effect, %zu particle, %zu table, %zu handles)\n", files,
 	            blocks, keys, by_kind[0], by_kind[1], by_kind[2], by_kind[3]);
-	TEST_EXPECT(files == 85 && blocks == 2895 && keys == 123369);
-	TEST_EXPECT(by_kind[0] == 1098 && by_kind[1] == 104627 && by_kind[2] == 16467 && by_kind[3] == 1177);
+	// Four effect blocks of no pdefs line are no effect to the game, so neither they nor their id keys are placed
+	// (FX50Cal.ptu and .ptg, boat01.ptl, joMuz.ptl) [orig: CParticleTableDef_ParseScriptLine @ 0x5E93CB].
+	TEST_EXPECT(files == 85 && blocks == 2891 && keys == 123365);
+	TEST_EXPECT(by_kind[0] == 1094 && by_kind[1] == 104627 && by_kind[2] == 16467 && by_kind[3] == 1177);
 	return 0;
 }
 

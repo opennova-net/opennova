@@ -31,8 +31,8 @@ bool has_ptl_extension(const std::filesystem::path &path) {
 
 // Parse every .ptl directly under `dir`; returns the number of failures and
 // reports the parsed count. A file whose TableDef rows are not the usual 32
-// is a soft warning (apply_table_key drops malformed rows silently, so the
-// shape is the only tell).
+// is a soft warning (the reader streams any key holding a 't' into a table's
+// 32 rows, so a table of another shape is the reader's own fault).
 int sweep(const std::string &dir, const char *label, int &parsed) {
 	int failures = 0;
 	int row_shape_warnings = 0;

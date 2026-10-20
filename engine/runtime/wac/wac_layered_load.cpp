@@ -50,13 +50,16 @@ void load_script_effect_catalog(const mission::BootFileSource &files,
     // gore_particle_extension picks) interleaved as its archive walk takes them
     // (ResourceIndex::effect_files). [orig: CEffectSystem_Init @0x5F6070]
     const std::string regional = gore_particle_extension(files.has_file(kGoreContentMarker));
+    // One reader state through every file: the effect readers' globals outlive a file
+    // (ParticleReadState).
+    particle::ParticleReadState read_state;
     for (const std::string &name : files.effect_files()) {
         if (!strutil::ends_with_icase(name, ".ptl") && !strutil::ends_with_icase(name, regional)) continue;
         std::vector<uint8_t> bytes;
         particle::ParticleFile document;
         particle::ParseError parse_error;
         if (files.read_file(name, bytes) && particle::load_particles_from_buffer(
-                reinterpret_cast<const char *>(bytes.data()), bytes.size(), document, parse_error)) {
+                reinterpret_cast<const char *>(bytes.data()), bytes.size(), document, read_state, parse_error)) {
             effects.add_document(document);
             if (scene != nullptr) scene->documents.push_back({name, std::move(document)});
         }
