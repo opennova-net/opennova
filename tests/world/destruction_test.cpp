@@ -916,11 +916,13 @@ void test_glass_userpoints_shatter_once_at_authored_radius() {
     CHECK(w.registry.get(building)->broken_glass_point_bits[0] == 0u);
 }
 
-// The death blast's radius falls back from the def kz to the bound radius and,
-// with neither, to one unit.
-// [orig: Entity_InitDeathSounds @0x4939b0 -> the fallback radius legs
-//  @0x4ead12..0x4ead68]
-void test_death_blast_radius_falls_back_to_one_unit() {
+// The death blast's radius falls back from the def kz to the bound word in whole
+// units (an unsigned divide by 0x10000): a bound under one unit queues 0, which
+// leaves the ammo's radius to the drain; nothing floors it to one unit.
+// [orig: Entity_InitDeathSounds @0x4939b0 -> Entity_QueueKzBlastAtUserPoints -
+//  the def +408 test @0x4ead26, `boundRadius / 0x10000` @0x4ead42;
+//  WeaponEffect_QueueExplosion @0x4E8330 stores the float as given @0x4e839d]
+void test_death_blast_radius_falls_back_to_the_bound_word() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
     seed_ammo(w);
@@ -939,7 +941,15 @@ void test_death_blast_radius_falls_back_to_one_unit() {
     destruction_notify_item_damage(w, *item, 1);
     CHECK((item->engine_flags & kEntityFlagDead) != 0);
     CHECK(w.explosions.queue.size() == 1);
-    if (!w.explosions.queue.empty()) CHECK(w.explosions.queue[0].radius_override == 1.0f);
+    if (!w.explosions.queue.empty()) CHECK(w.explosions.queue[0].radius_override == 0.0f);
+    // A bound of 2.75 units queues the whole units, 2.
+    w.explosions.queue.clear();
+    seed.bound_radius.q16 = 0x2C000;
+    Entity *second = w.registry.get(w.registry.spawn(1, seed));
+    second->health = 0;
+    destruction_notify_item_damage(w, *second, 1);
+    CHECK(w.explosions.queue.size() == 1);
+    if (!w.explosions.queue.empty()) CHECK(w.explosions.queue[0].radius_override == 2.0f);
 }
 
 // A blast without NoMItems walks pool 1, but an indestructible item in range
@@ -4718,7 +4728,7 @@ int main() {
     test_destructible_death_chain();
     test_section_debris_samples_collision_faces();
     test_glass_userpoints_shatter_once_at_authored_radius();
-    test_death_blast_radius_falls_back_to_one_unit();
+    test_death_blast_radius_falls_back_to_the_bound_word();
     test_mitem_blast_spares_indestructible_items();
     test_routed_wreck_lands_on_a_posed_model();
     test_synthetic_husk_events_preserve_distinct_handles();
