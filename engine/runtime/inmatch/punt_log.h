@@ -61,6 +61,40 @@ std::string crt_asctime_text(std::time_t t);
 // g_NapiFileLineEnding @0x849d38 -> "\r\n" @0x7c1310].
 inline constexpr const char *kNapiLineEnding = "\r\n";
 
+// The _connectlog.txt debug log: off unless `/CONNECTLOG` armed it, every
+// line `"<time> : <text>"` through NapiFile_AppendLine while it is on
+// [orig: g_ConnectLogEnabled @0xB4C720; its ~80 readers each test it, then
+// Napi_GetTimeString, sprintf("%s : ...") and NapiFile_AppendLine("_connectlog.txt")].
+inline constexpr const char *kConnectLogFile = "_connectlog.txt";
+struct ConnectLogHeader {
+	std::string exe;     // the running executable's basename [orig: Napi_GetExeBasename]
+	std::string version; // the build's "V1.7.5.7" text [orig: byte_B4C0B0 @0x4A7D81]
+	std::string title;   // the game's title [orig: byte_B4C0F0 @0x4A7D37, off_8154D8]
+	std::string ver1;    // the version pair's strings [orig: "3" @0x7C9730]
+	std::string ver2;    // [orig: "2345" @0x7C9714]
+};
+class ConnectLog {
+public:
+	explicit ConnectLog(ServerFileSink &files);
+	// The start, once the command line is read: the file deleted, then the
+	// STARTED line and the EXE, VERSION, TITLE, VER1 and VER2 lines [orig:
+	// Game_ParseCommandLineAndInit @0x4A7E37..0x4A7F8A].
+	void start(const ConnectLogHeader &header);
+	bool enabled() const { return enabled_; }
+	// One `"<time> : <text>"` line while the log is on.
+	void line(const std::string &text);
+	// The server's first new connection: its disabling line, then off for the
+	// process [orig: NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF].
+	void disable_at_server_connection();
+	// The clock tests stub (Napi_GetTimeString's text).
+	void set_clock(std::function<std::string()> now) { now_ = std::move(now); }
+
+private:
+	ServerFileSink &files_;
+	std::function<std::string()> now_;
+	bool enabled_ = false;
+};
+
 // One _PUNT.TXT line, line ending excluded: with a slot
 // `"<time> : NN : \"<name>\" : <reason> : <details>"`, without one
 // `"<time> : <reason> : <details>"` [orig: "%s : %2.2ld : \"%s\" : %s : %s"

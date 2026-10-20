@@ -1,6 +1,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_squad.h> // Server_DissolveSquadOf
 
+#include <runtime/inmatch/punt_log.h>                // ConnectLog (the first connection turns it off)
 #include <runtime/inmatch/server_initial_state.h>    // Server_SendInitialGameStateToPlayer (the §5.2a burst)
 #include <runtime/inmatch/server_chat.h>             // broadcast_player_joined/leaving_text (the 0x32 lines)
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the reactive §5.1 replies)
@@ -946,9 +947,12 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		conn.server_scrk = keys.scrk;
 	}
 	conn.phase = ConnectionPhase::Joined;
-	// The connection is up: the new-connection callback counts a login
+	// The connection is up: the new-connection callback first turns the
+	// _connectlog.txt debug log off for the process, then counts a login
 	// [orig: CNapiNPConnection_OnStateChange @0x6261c6 ->
-	//  NapiNPServer_HandleNewConnection @0x4c8203].
+	//  NapiNPServer_HandleNewConnection @0x4c8054..0x4c80AF, @0x4c8203].
+	if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled())
+		ctx.logs.connect->disable_at_server_connection();
 	++ctx.total_logins;
 	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
 	// is stamped with GetTickCount when the node enters the validating state).

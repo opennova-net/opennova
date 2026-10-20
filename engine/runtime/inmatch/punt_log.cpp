@@ -147,6 +147,39 @@ void PuntLog::append_line(const char *file, const std::string &line) {
 	files_.write(file, line + kNapiLineEnding, /*append=*/true);
 }
 
+ConnectLog::ConnectLog(ServerFileSink &files)
+	: files_(files), now_([] { return napi_time_string(std::time(nullptr)); }) {}
+
+void ConnectLog::start(const ConnectLogHeader &header) {
+	enabled_ = true;
+	files_.remove(kConnectLogFile); // NapiFile_Delete @0x4A7E48
+	const std::string now = now_();
+	// [orig: "%s : * * * * CONNECT LOG STARTED * * * *" @0x7C976C, the append @0x4A7E81;
+	//  "%s : EXE = \"%s\"" @0x4A7EA8; "%s : VERSION = \"%s\"" @0x4A7ED9; "%s : TITLE = \"%s\""
+	//  @0x4A7F0D; "%s : VER1 = \"%s\"" @0x4A7F3E; "%s : VER2 = \"%s\"" @0x4A7F6F]
+	const auto append = [&](const std::string &text) {
+		files_.write(kConnectLogFile, now + " : " + text + kNapiLineEnding, /*append=*/true);
+	};
+	append("* * * * CONNECT LOG STARTED * * * *");
+	append("EXE = \"" + header.exe + "\"");
+	append("VERSION = \"" + header.version + "\"");
+	append("TITLE = \"" + header.title + "\"");
+	append("VER1 = \"" + header.ver1 + "\"");
+	append("VER2 = \"" + header.ver2 + "\"");
+}
+
+void ConnectLog::line(const std::string &text) {
+	if (!enabled_) return;
+	files_.write(kConnectLogFile, now_() + " : " + text + kNapiLineEnding, /*append=*/true);
+}
+
+void ConnectLog::disable_at_server_connection() {
+	// [orig: "%s : NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE."
+	//  @0x4C808F, the append @0x4C80A7, g_ConnectLogEnabled = 0 @0x4C80AF]
+	line("NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.");
+	enabled_ = false;
+}
+
 void PuntLog::arm_punt_log() {
 	files_.remove(kPuntFile);  // [orig: DeleteFileA @0x4a784a / @0x4a7880]
 	punt_armed_ = true;        // [orig: @0x4a7844 / @0x4a787a]

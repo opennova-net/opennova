@@ -115,6 +115,8 @@ inline constexpr const char *kLaunchFlagNovaWorldHost = "--novaworld-host";
 inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 inline constexpr const char *kLaunchFlagNoReload = "/noreload";
+inline constexpr const char *kLaunchFlagConnectLog = "/CONNECTLOG";
+inline constexpr const char *kLaunchFlagNoConnectLog = "/NOCONNECTLOG";
 inline constexpr const char *kLaunchFlagLan = "/LAN";
 inline constexpr const char *kLaunchFlagPostIpAddress = "/POSTIPADDRESS";
 inline constexpr const char *kLaunchFlagPostPortNumber = "/POSTPORTNUMBER";
@@ -142,6 +144,10 @@ struct LogSwitches {
     bool cheat_log = false;
     bool net_log = false;
     bool inout = false;
+    // `/CONNECTLOG` turns the _connectlog.txt debug log on, `/NOCONNECTLOG` off; the last one
+    // read wins, off by default [orig: g_ConnectLogEnabled @0xB4C720 (0 in the image); the
+    // stores @0x4A74AF (1) and @0x4A74C9 (0)].
+    bool connect_log = false;
 };
 
 // Parse one log switch at args[i]: the arguments it took (1, or 2 with its value), 0 when

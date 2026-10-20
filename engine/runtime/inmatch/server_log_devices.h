@@ -13,6 +13,10 @@
 #include <runtime/inmatch/server_files.h>
 #include <runtime/inmatch/server_log_recorder.h>
 
+namespace opennova {
+struct TitleIdentity;
+}
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -33,6 +37,10 @@ private:
 	std::string dir_;
 };
 
+// The _connectlog.txt header of a process speaking `title` (null: JO's): the running
+// executable's basename, the title's version text, its TITLE and its version pair.
+ConnectLogHeader connect_log_header(const TitleIdentity *title);
+
 // The devices the switches arm. The net log is the protocol manager's, which the process
 // always has.
 class ServerLogDevices {
@@ -44,7 +52,9 @@ public:
 	// Arm what the switches name: the punt and cheat logs write their START lines now, as
 	// retail's switch parse does; `/NETLOG`, then a `_DONETLOG.TXT` in the working directory,
 	// turn the net log on.
-	void arm(const LogSwitches &switches);
+	// `/CONNECTLOG` starts _connectlog.txt with `connect_header` after the switch walk
+	// [orig: Game_ParseCommandLineAndInit @0x4A7E37].
+	void arm(const LogSwitches &switches, const ConnectLogHeader &connect_header = {});
 	// The process's network shut down (the game world's exit from the tree, opennova-serve's
 	// exit tail): the protocol's _inout.txt log, then the manager's net
 	// log, each stops and flushes [orig: the protocol's NapiLog_Shutdown(protocol + 0xF80) in
@@ -59,6 +69,7 @@ public:
 	ServerLogs logs();
 	ServerLogRecorder *profile() { return profile_.get(); }
 	PuntLog *punt() { return punt_.get(); }
+	ConnectLog &connect() { return connect_; }
 	WorkingDirectoryFiles &files() { return files_; }
 
 private:
@@ -69,6 +80,7 @@ private:
 	// The protocol's _inout.txt log, which `/INOUT` turns on at the socket open.
 	NapiLog inout_{files_, kInoutLogFileName};
 	bool inout_switch_ = false;
+	ConnectLog connect_{files_};
 };
 
 } // namespace opennova::inmatch

@@ -1,6 +1,9 @@
 #include <runtime/inmatch/server_log_devices.h>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/os_path.h>
+#include <net/novaworld/lobby_identity.h> // read_exe_basename
+#include <net/title/title_identity.h>
 
 #include <cstdio>
 #include <filesystem>
@@ -32,7 +35,21 @@ bool WorkingDirectoryFiles::write(const std::string &name, std::string_view byte
 	return std::fclose(f) == 0 && ok;
 }
 
-void ServerLogDevices::arm(const LogSwitches &switches) {
+ConnectLogHeader connect_log_header(const TitleIdentity *title) {
+	if (title == nullptr) title = title_identity(gameprofile::GAME_JO);
+	ConnectLogHeader header;
+	header.exe = read_exe_basename();
+	if (title != nullptr) {
+		if (const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id))
+			header.version = profile->version_text != nullptr ? profile->version_text : "";
+		header.title = title->connect_log_title != nullptr ? title->connect_log_title : "";
+		header.ver1 = title->ver1 != nullptr ? title->ver1 : "";
+		header.ver2 = title->ver2 != nullptr ? title->ver2 : "";
+	}
+	return header;
+}
+
+void ServerLogDevices::arm(const LogSwitches &switches, const ConnectLogHeader &connect_header) {
 	if (!switches.profile_path.empty())
 		profile_ = std::make_unique<ServerLogRecorder>(files_, switches.profile_path);
 	if (switches.punt_log || switches.cheat_log) {
@@ -48,6 +65,7 @@ void ServerLogDevices::arm(const LogSwitches &switches) {
 	if (files_.exists(kNetLogArmFileName)) net_.set_enabled(true);
 	// g_InoutLogEnabled, which the socket open hands the protocol's log [orig: @0x4A744F].
 	inout_switch_ = switches.inout;
+	if (switches.connect_log) connect_.start(connect_header);
 }
 
 ServerLogs ServerLogDevices::logs() {
@@ -57,6 +75,7 @@ ServerLogs ServerLogDevices::logs() {
 	logs.net = &net_;
 	logs.inout = &inout_;
 	logs.inout_switch = inout_switch_;
+	logs.connect = &connect_;
 	logs.files = &files_;
 	return logs;
 }

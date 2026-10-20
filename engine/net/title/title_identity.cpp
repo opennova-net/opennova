@@ -93,6 +93,8 @@ TitleIdentity jo_row() {
 	//  @0x4cdb9f / @0x4cdbb6 - the literals @0x7c9730 / @0x7c9714]
 	t.ver1 = "3";
 	t.ver2 = "2345";
+	// [orig: Game_ParseCommandLineAndInit @0x4A7D30, off_8154D8's literal, into byte_B4C0F0]
+	t.connect_log_title = "Joint Operations: Typhoon Rising";
 	// [orig: Mission_DeobfuscateDescription @0x4cdbfe]
 	t.product_code = "jop";
 	// [orig: CNapiGateManager_InitDefaults @0x4d14b6, the literal @0x7cc35c]

@@ -13,12 +13,14 @@
 
 #include <base/resource_index/boot_policy.h>
 #include <runtime/inmatch/server_console.h>
+#include <runtime/inmatch/punt_log.h>
 #include <runtime/inmatch/server_log_devices.h>
 
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -85,11 +87,66 @@ void run_the_devices_write_in_the_working_directory() {
 	fs::remove_all(armed, ec);
 }
 
+// _connectlog.txt (D-NET-NEW-L8-8): off by default; /CONNECTLOG on, /NOCONNECTLOG off, the
+// last one read winning; the start deletes the file and writes the STARTED line and the EXE,
+// VERSION, TITLE, VER1 and VER2 lines; every line is "<time> : <text>" CRLF; the server's
+// first new connection writes its disabling line and turns the log off for the process.
+// [orig: g_ConnectLogEnabled @0xB4C720 (0); Game_ParseCommandLineAndInit @0x4A74AF / @0x4A74C9,
+//  @0x4A7E37..0x4A7F8A; NapiFile_AppendLine @0x61C020; NapiNPServer_HandleNewConnection
+//  @0x4C8054..0x4C80AF; CNapiNetwork_OpenTransportSocket @0x4C6BA0..0x4C6BD7]
+void run_the_connect_log() {
+	expect(!opennova::parse_launch_flags({}).log_switches.connect_log, "off by default");
+	expect(opennova::parse_launch_flags({"/connectlog"}).log_switches.connect_log,
+	       "/CONNECTLOG in any case turns it on");
+	expect(!opennova::parse_launch_flags({"/CONNECTLOG", "/NoConnectLog"}).log_switches.connect_log &&
+	               opennova::parse_launch_flags({"/NOCONNECTLOG", "/CONNECTLOG"}).log_switches.connect_log,
+	       "the last of the two wins");
+	const fs::path dir = fresh_dir();
+	std::ofstream(dir / inmatch::kConnectLogFile) << "stale";
+	{
+		inmatch::ServerLogDevices devices(dir.string());
+		devices.connect().set_clock([] { return std::string("Tue Oct 20 12:00:00 2026"); });
+		opennova::LogSwitches sw;
+		sw.connect_log = true;
+		inmatch::ConnectLogHeader header;
+		header.exe = "Jointops.exe";
+		header.version = "V1.7.5.7";
+		header.title = "Joint Operations: Typhoon Rising";
+		header.ver1 = "3";
+		header.ver2 = "2345";
+		devices.arm(sw, header);
+		inmatch::ConnectLog *log = devices.logs().connect;
+		expect(log != nullptr && log->enabled(), "the start turns it on");
+		if (log != nullptr) {
+			log->line("NET SETTING UP SOCKET....");
+			log->disable_at_server_connection();
+			expect(!log->enabled(), "the server's first connection turns it off");
+			log->line("NET SOCKET SETUP [0.0.0.0:32768]");
+		}
+	}
+	std::ifstream in(dir / inmatch::kConnectLogFile, std::ios::binary);
+	const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	const std::string t = "Tue Oct 20 12:00:00 2026 : ";
+	expect(text == t + "* * * * CONNECT LOG STARTED * * * *\r\n" +
+	                       t + "EXE = \"Jointops.exe\"\r\n" +
+	                       t + "VERSION = \"V1.7.5.7\"\r\n" +
+	                       t + "TITLE = \"Joint Operations: Typhoon Rising\"\r\n" +
+	                       t + "VER1 = \"3\"\r\n" +
+	                       t + "VER2 = \"2345\"\r\n" +
+	                       t + "NET SETTING UP SOCKET....\r\n" +
+	                       t + "NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.\r\n",
+	       "the header, a line, the disabling line, and nothing after it");
+	in.close();
+	std::error_code ec;
+	fs::remove_all(dir, ec);
+}
+
 } // namespace
 
 int main() {
 	run_the_launch_walk_reads_the_switches();
 	run_the_devices_write_in_the_working_directory();
+	run_the_connect_log();
 	if (failures == 0) std::printf("npruntime_server_log_devices: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

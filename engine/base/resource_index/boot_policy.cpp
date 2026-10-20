@@ -77,6 +77,10 @@ void parse_log_switches(const std::vector<std::string> &args, LaunchFlags &f) {
     LogSwitches &s = f.log_switches;
     for (std::size_t i = 0; i < args.size(); ++i) {
         if (strutil::iequals(args[i], kLaunchFlagInout)) s.inout = true;
+        // [orig: "/CONNECTLOG" @0x4A74A3 -> 1 @0x4A74AF, else "/NOCONNECTLOG" @0x4A74BD -> 0
+        //  @0x4A74C9, ahead of /PROFILE's step]
+        if (strutil::iequals(args[i], kLaunchFlagConnectLog)) s.connect_log = true;
+        else if (strutil::iequals(args[i], kLaunchFlagNoConnectLog)) s.connect_log = false;
         if (strutil::iequals(args[i], kLaunchFlagProfile) && i + 1 < args.size()) {
             ++i;
             s.profile_path = args[i];
@@ -190,6 +194,15 @@ int parse_log_switch(const std::vector<std::string> &args, std::size_t i, LogSwi
     }
     if (strutil::iequals(a, kLaunchFlagInout)) {
         out.inout = true;
+        return 1;
+    }
+    // [orig: _stricmp(token, "/CONNECTLOG") @0x4A74A3, "/NOCONNECTLOG" @0x4A74BD]
+    if (strutil::iequals(a, kLaunchFlagConnectLog)) {
+        out.connect_log = true;
+        return 1;
+    }
+    if (strutil::iequals(a, kLaunchFlagNoConnectLog)) {
+        out.connect_log = false;
         return 1;
     }
     return 0;

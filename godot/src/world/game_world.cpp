@@ -12,6 +12,7 @@
 
 #include "network/net_session_policy.h"
 #include "resource_index/launch_flags.h" // the server log switches
+#include "resource_index/resource_root.h" // session_title (the connect log header)
 #include "util/string_convert.h"
 #include "network/novaworld_client.h"
 #include <runtime/inmatch/mission_exit.h>
@@ -68,7 +69,11 @@ void GameWorld::_ready() {
 	if (log_devices_ == nullptr) {
 		log_devices_ = std::make_unique<opennova::inmatch::ServerLogDevices>(
 				opennova::to_std(LaunchFlags::working_dir()));
-		log_devices_->arm(LaunchFlags::parsed().log_switches);
+		// `/CONNECTLOG`'s header names the game the process was launched as.
+		std::string title_error;
+		log_devices_->arm(LaunchFlags::parsed().log_switches,
+				opennova::inmatch::connect_log_header(
+						ResourceRoot::session_title(Ref<ResourceRoot>(), title_error)));
 	}
 	// The world's own process step exists for exactly one thing: the joiner
 	// preload wait the session drive steps (switched on by load_as_joiner,

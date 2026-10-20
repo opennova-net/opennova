@@ -37,6 +37,7 @@ public:
 class ServerLogRecorder;
 class PuntLog;
 class NapiLog;
+class ConnectLog;
 struct ServerLogs {
 	ServerLogRecorder *profile = nullptr; // /PROFILE <path> [orig: g_RunningWithProfile @0xb4c500]
 	PuntLog *punt = nullptr;              // /PUNT.TXT, /PUNTLOG, /CHEATLOG
@@ -51,6 +52,8 @@ struct ServerLogs {
 	bool inout_switch = false;
 	// The working directory the console's dumps write to (SAVENFO's debug.nfo).
 	ServerFileSink *files = nullptr;
+	// _connectlog.txt, which `/CONNECTLOG` turns on (punt_log.h ConnectLog).
+	ConnectLog *connect = nullptr;
 };
 
 // Server_WritePuntLog(slot, reason, "") at a punt the host logs: the line goes

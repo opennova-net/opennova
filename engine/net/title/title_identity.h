@@ -130,6 +130,8 @@ struct TitleIdentity {
 	// login's pfid and the web flow's pages.
 	const char *ver1 = nullptr;
 	const char *ver2 = nullptr;
+	// The title the _connectlog.txt header names (its TITLE line).
+	const char *connect_log_title = nullptr;
 	const char *product_code = nullptr;
 	const char *gate_tag = nullptr;
 	const char *gate_tag_keys = nullptr;
