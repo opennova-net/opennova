@@ -64,9 +64,9 @@ struct Rig {
         body().inf.active = true;
         body().net_id = id;
         body().self->position.x.q16 = body().self->position.y.q16 = 8 * 65536;
-        body().net_saved_live_pose[0] = 3 * 65536;
-        body().net_saved_live_pose[1] = 4 * 65536;
-        body().net_saved_live_pose[2] = 5 * 65536;
+        entity().saved_live_pos[0] = 3 * 65536;
+        entity().saved_live_pos[1] = 4 * 65536;
+        entity().saved_live_pos[2] = 5 * 65536;
         body().profile.clip_size = 23;
         body().slot.f[18] = 3 * 62 + 61;
         world.ai.root_motion = &source;

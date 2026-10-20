@@ -817,9 +817,6 @@ void queue_destroy_event(AiThinkCtx &ctx, AiEntity &e) {
 void h_enter_vehicle_dying(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
-    e.net_saved_live_pose[0] = e.self->position.x.q16; // [orig: savedLivePose = Position @0x494684]
-    e.net_saved_live_pose[1] = e.self->position.y.q16;
-    e.net_saved_live_pose[2] = e.self->position.z.q16;
     if (ctx.world != nullptr) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
             if ((ent->engine_flags & kEntityFlagHusk) == 0) { // [orig: AI_TransitionToDeath_GroundVehicle Flags&4 gate @0x467b32]
@@ -885,9 +882,9 @@ void h_vehicle_dying_tick(AiThinkCtx &ctx) {
 	}
 	const bool stopped = hull_death_speed(ctx.world, e) < 1057; // [orig: @0x467CED..0x467D30]
 	const bool still =
-        std::abs(e.self->position.x.q16 - e.net_saved_live_pose[0]) < 1024 &&
-        std::abs(e.self->position.y.q16 - e.net_saved_live_pose[1]) < 1024 &&
-        std::abs(e.self->position.z.q16 - e.net_saved_live_pose[2]) < 1024;
+        std::abs(e.self->position.x.q16 - e.self->saved_live_pos[0]) < 1024 &&
+        std::abs(e.self->position.y.q16 - e.self->saved_live_pos[1]) < 1024 &&
+        std::abs(e.self->position.z.q16 - e.self->saved_live_pos[2]) < 1024;
     if (stopped || still) {
         queue_destroy_event(ctx, e); // [orig: @0x467dcb]
     } else {

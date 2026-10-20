@@ -111,7 +111,7 @@ void test_vehicle_death_rows() {
         e.brain.f[AiBrain::kCurState] = 21;
         e.vel_x = 5000; e.vel_y = 0;             // fast
         e.self->position.x.q16 = 100000;                        // far from the (0-init) death pose
-        e.net_saved_live_pose[0] = 0;
+        e.self->saved_live_pos[0] = 0;
         e.brain.f[AiBrain::kWorkPitch] = 7;
         e.brain.f[AiBrain::kWorkRoll] = 7;
         e.brain.f[AiBrain::kOutSpeed] = 7;

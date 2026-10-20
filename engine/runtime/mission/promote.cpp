@@ -359,16 +359,6 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // [orig: Entity_SpawnFromBMSRecord @0x40EB33; Entity_InitFromModel @0x40E113..0x40E127]
     ae.heading = spawn_angle_bam(90 - e.yaw);
     ae.team = e.team;
-    // savedLivePose (+0x80..+0x88) takes the Position words at the model init,
-    // which runs for every row before the def's init callbacks, so the organic AI
-    // init's aim basis is the spawn position. [orig: Entity_InitFromModel @0x40DC30 -
-    //  `mov ecx, [edi]; mov [esi+80h], ecx` @0x40E14B..0x40E14D, +0x84 @0x40E15D /
-    //  @0x40E160, +0x88 @0x40E153 / @0x40E169; Entity_InitAllFromModels @0x40E460;
-    //  Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8, +0x310 @0x4C01EE, +0x314
-    //  @0x4C01FB]
-    ae.net_saved_live_pose[0] = ae.self->position.x.q16;
-    ae.net_saved_live_pose[1] = ae.self->position.y.q16;
-    ae.net_saved_live_pose[2] = ae.self->position.z.q16;
 
     // [orig Entity_InitVehicleAI: brain[4]=brain[5]=brain[6]=0 @0x46028b..0x460291] initial
     // state 0 (re-stamped with the constant block below for the vehicle family).
@@ -1076,6 +1066,17 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             ++r.spawned;
             if (Entity *spawned = world.registry.get(h)) {
                 initialize_item_seats(*spawned, opts.item_seat_specs);
+                // savedLivePose (+0x80..+0x88) takes the Position words at the
+                // model init, which runs for every row before the def's init
+                // callbacks, so the organic AI init's aim basis is the spawn
+                // position (D-NET-507: the one store). [orig: Entity_InitFromModel
+                //  @0x40DC30 - `mov ecx, [edi]; mov [esi+80h], ecx` @0x40E14B..0x40E14D,
+                //  +0x84 @0x40E15D / @0x40E160, +0x88 @0x40E153 / @0x40E169;
+                //  Entity_InitAllFromModels @0x40E460; Entity_InitOrganicAI
+                //  @0x4BFCC0 - +0x30C @0x4C01E8, +0x310 @0x4C01EE, +0x314 @0x4C01FB]
+                const auto words = spawned->position.words();
+                std::copy_n(words.data(), 3, spawned->saved_live_pos);
+                spawned->saved_live_valid = true;
                 // The spawn-phase stagger: every spawned record takes the load
                 // counter modulo 60 into entity+0x2AC and the counter steps by
                 // 11, so the first blink/indoors refresh of the statics is spread

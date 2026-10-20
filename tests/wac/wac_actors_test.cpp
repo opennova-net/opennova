@@ -308,7 +308,6 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
           f.body().inf.vel[2] == 91 && f.body().inf.jump_cooldown == 7);
     for (int axis = 0; axis < 3; ++axis) {
         CHECK(f.body().self->position.word(axis) == precise[axis]);
-        CHECK(f.body().net_saved_live_pose[axis] == precise[axis]);
         CHECK(f.entity().saved_live_pos[axis] == precise[axis]);
     }
     CHECK(f.entity().position.x == float(from_fixed(precise[0])));

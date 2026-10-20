@@ -898,10 +898,7 @@ bool EntityCommands::teleport_local_to_ssn(EntityTarget ssn) {
     std::copy_n(pos, 3, player->saved_live_pos);
     player->mount_toggle_fallback = target->handle;
     player->ground_target = target->handle;
-    if (AiEntity *body = world_.ai.for_handle(player->handle)) {
-        body->health = 20000;
-        std::copy_n(pos, 3, body->net_saved_live_pose);
-    }
+    if (AiEntity *body = world_.ai.for_handle(player->handle)) body->health = 20000;
     if (world_.collision != nullptr)
         world_.collision->refresh_entity_proximity(world_, *player);
     return true;
@@ -1629,19 +1626,19 @@ const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
 
 // The split-pose translation of retail's teleport stores: retail writes the
 // ONE entity pose the motor reads (Position/Yaw + savedLivePose + the body
-// pose [orig: @0x43e05f..0x43e096]); the position is the entity's own words,
-// while our AI row carries its own heading/pitch and savedLivePose mirrors,
-// so a teleport must land there too or the next motor tick snaps back.
-// net_saved_live_pose is retail's savedLivePose.
-void sync_teleported_ai(World &world, const Entity &entity) {
+// pose [orig: @0x43e05f..0x43e096]); the position is the entity's own words
+// and savedLivePose (+0x80..+0x88) takes them (the one store, D-NET-507),
+// while our AI row carries its own heading/pitch working copies, so a teleport
+// must land there too or the next motor tick snaps back.
+void sync_teleported_ai(World &world, Entity &entity) {
     AiEntity *ae = world.ai.for_handle(entity.handle);
     if (ae == nullptr) return;
     ae->heading = entity.heading;
     ae->pitch = bam_from_degrees_wrapped(static_cast<double>(entity.pitch));
     ae->roll = bam_from_degrees_wrapped(static_cast<double>(entity.roll));
-    ae->net_saved_live_pose[0] = ae->self->position.x.q16;
-    ae->net_saved_live_pose[1] = ae->self->position.y.q16;
-    ae->net_saved_live_pose[2] = ae->self->position.z.q16;
+    const auto words = entity.position.words();
+    std::copy_n(words.data(), 3, entity.saved_live_pos);
+    entity.saved_live_valid = true;
 }
 
 // The per-member pose copy the two teleport actions share. Flag tree per

@@ -1286,8 +1286,15 @@ struct Entity {
     // (current - saved) as the carrier's per-tick delta [orig: the org2 self
     // stamp @0x4b4190; the ride reads @0x4b530b../@0x4ba47f..]. Kept in the
     // ride's units (16.16 position / BAM32 attitude) so rider deltas are
-    // exact. Never-stamped entities (statics, pre-first-tick rows) read as
-    // zero delta via saved_live_valid.
+    // exact. It is the ONE savedLivePose store (D-NET-507): the model init
+    // takes the Position words for every promoted row, the death transforms,
+    // the teleports and the falling death stamp it, the pool-1 blast sweep
+    // stores a tree's blast center in it, and the dying vehicle's still-test,
+    // the organic AI init's aim basis and the section debris read it [orig:
+    // Entity_InitFromModel @0x40E14B..0x40E169; Entity_UpdateDeathTransforms
+    // @0x494684; Projectile_ProcessExplosionQueue @0x4EB555..0x4EB569]. A row
+    // ours never stored (a runtime row before its first stamp) reads as zero
+    // delta via saved_live_valid.
     int32_t saved_live_pos[3] = {};
     int32_t saved_live_yaw = 0;
     int32_t saved_live_pitch = 0;

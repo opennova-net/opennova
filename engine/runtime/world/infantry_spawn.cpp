@@ -248,7 +248,7 @@ void initialize_organic_ai(World &world, Entity &entity) {
     // offset is 3 u along the heading in the Q22 trig of retail's
     // radians-per-BAM double. [orig: Entity_InitOrganicAI @0x4C01CD..0x4C022C,
     //  `fmul dbl_7C3608` @0x4C01DC]
-    std::copy_n(body->net_saved_live_pose, 3, inf.aim_point);
+    std::copy_n(entity.saved_live_pos, 3, inf.aim_point);
     const double radians = double(body->heading) * io::kRadiansPerBamX87;
     inf.aim_point[0] = io::bam_add(inf.aim_point[0],
             int32_t((int64_t(196608) * int32_t(std::cos(radians) * io::kQ22One)) >> 22));

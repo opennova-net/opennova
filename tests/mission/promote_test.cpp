@@ -121,10 +121,17 @@ static void test_bms_record_index_is_pool_slot() {
     CHECK(h31.valid() && h31.pool() == 0 && h31.slot() == 0);
     // The model init's savedLivePose is the placed words, the organic AI init's aim
     // basis [orig: Entity_InitFromModel @0x40E14B..0x40E169].
-    const AiEntity *body = ai->for_handle(h31);
-    CHECK(body != nullptr && body->net_saved_live_pose[0] == ((300 << 16) | 0x1235) &&
-          body->net_saved_live_pose[1] == -((400 << 16) | 0x0C07) &&
-          body->net_saved_live_pose[2] == 0x2A0001);
+    // One store for every row, the item rows included (D-NET-507).
+    (void)ai;
+    const Entity *body = w->registry.get(h31);
+    CHECK(body != nullptr && body->saved_live_valid &&
+          body->saved_live_pos[0] == ((300 << 16) | 0x1235) &&
+          body->saved_live_pos[1] == -((400 << 16) | 0x0C07) &&
+          body->saved_live_pos[2] == 0x2A0001);
+    const Entity *item21 = w->registry.get(h21);
+    CHECK(item21 != nullptr && item21->saved_live_valid &&
+          item21->saved_live_pos[0] == (10 << 16) && item21->saved_live_pos[1] == (20 << 16) &&
+          item21->saved_live_pos[2] == (3 << 16));
 }
 
 static void test_emplacement_attachments() {

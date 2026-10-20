@@ -1564,12 +1564,16 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 }
 
 void entity_update_death_transforms(World &world, Entity &target, bool silent) {
-    // [orig: Entity_UpdateDeathTransforms @ 0x494660 — pose snapshot (the AI
-    // rows already snapshot net_saved_live_pose), then the unitType dispatch,
-    // then the death sounds.]
+    // [orig: Entity_UpdateDeathTransforms @ 0x494660 — pose snapshot, then the
+    // unitType dispatch, then the death sounds.]
     // The refNum group cleanup leads. [orig: @0x494669..0x494673 ->
     // Vehicle_ReleaseEWeapGroupOnDestruction @0x547040]
     if (target.ref_num != 0) world.vehicles.cleanup_destroyed_ref_group(target);
+    // The pose snapshot: savedLivePose (+0x80..+0x88) and the attitude triple
+    // (+0x8C..+0x94) take Position and the Yaw / Pitch / Roll words, the one
+    // store the dying vehicle's still-test reads (D-NET-507). [orig:
+    // @0x49467B..0x4946A4, the +0x80 store @0x494684]
+    stamp_saved_live_pose(target);
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     const int unit_type = traits != nullptr ? traits->unit_type : 0;
     const bool matched_row = unit_type == 1 || unit_type == 2 || unit_type == 3 ||

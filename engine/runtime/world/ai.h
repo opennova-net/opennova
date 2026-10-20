@@ -483,9 +483,6 @@ struct AiEntity {
     int32_t net_smooth_heading = 0;      // entity+0x240 (BAM32; then the heading step)
     int32_t net_smooth_pitch = 0;        // entity+0x244 (BAM32; then the pitch step)
     int16_t net_interp_progress = 0;     // entity+0x27C (reset to 0 on each read-apply)
-    // entity+0x80/+0x84/+0x88: a second store of savedLivePose (the infantry head
-    // stamps Entity::saved_live_pos, which the chase reads).
-    int32_t net_saved_live_pose[3] = {};
     int16_t net_interp_steps = 0;        // entity+0x27E: the chase's step bucket (10 on the authority;
                                          // the client's local body 48 / 512)
 

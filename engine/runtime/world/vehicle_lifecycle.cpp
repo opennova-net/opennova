@@ -55,7 +55,6 @@ void mirror_pose(World &world, Entity &e) {
 	if (AiEntity *ai = world.ai.for_handle(e.handle)) {
 		int32_t pose[6];
 		read_pose(e, pose);
-		std::copy_n(pose, 3, ai->net_saved_live_pose);
 		ai->heading = pose[3];
 		ai->health = e.health;
 		ai->team = e.team;
