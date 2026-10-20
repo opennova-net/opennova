@@ -92,7 +92,15 @@ seen up close.
 - Check each level in the editor's model preview, and in the game at the
   distances the walk picks it: the `object_lod_sweep` probe stands the player at
   each distance and reports the level (`docs/mcp.md`).
-- The original's options can lower the object detail (game.cfg
-  `object_polydetail` 0 to 2), which brings every
-  switch in to 0.17, 0.34 or 0.5 of that distance; OpenNova draws at the
-  highest detail (D-RORD-13).
+- The switch distance above is at the highest object detail (game.cfg
+  `object_polydetail` 3); 0, 1 and 2 bring every switch in to 0.17, 0.34 or 0.5
+  of it. OpenNova
+  reads the profile's detail as the original does (D-RORD-13), and a fresh
+  profile starts at 2 (`renderer::kObjectLodDetailFreshProfile`), so by default
+  the soldier (*r* 1.1) leaves LOD 0 at about 4 m, and the last level's
+  back-off (the unscaled radius against LOD 1's threshold) keeps LOD 1 to about
+  28 m in a 1280-wide window, further in a wider one.
+- A model the player sees close up (the person, in the third-person camera
+  0.6 m behind the head) draws LOD 0 there: thin pieces that decimation tears
+  (webbing, straps, rails) want a closed hull, as `art/onjo1/person/SOURCES.md`
+  describes.

@@ -51,16 +51,32 @@ which keeps those parts whole where a decimated shell folds into shards. Every
 LOD has UV islands of its own in the one atlas (LOD 0 the pack's islands, scaled
 to one texel density with the face at 2.2 times it, packed), and every LOD is
 baked from the dense parts (selected to active, part by part): the colour, the
-specular mask and the tangent-space normals. The face attribute `on_part` on each
+specular mask and the tangent-space normals.
+
+The soldier's helmet, plate carrier and hip pouches at LOD 0, and his helmet at
+LOD 1 and LOD 2, are closed hulls too (2026-10-20): the decimated pack parts had
+torn the carrier's webbing and shoulder straps into loose strips and loops, the
+helmet's side rails into fins, and opened the LOD 1 and LOD 2 helmets over the
+hair, which the close third-person camera shows right behind the head. Each is
+its dense part solidified (4, 5 and 4 mm; the helmet's coarser levels 6 and
+8 mm), voxel remeshed (2.5, 4.5 and 3.5 mm; 6 mm and 1 cm), its specks dropped
+and decimated (1,800, 3,200 and 1,300 triangles; 460 and 190), weighted from the
+dense part (its nearest surface point, the four largest weights, normalized),
+unwrapped (Smart UV Project) and packed into the atlas around every other
+island, which did not move: the helmet at twice and the carrier and pouches at
+1.3 times their old texel density, the islands that look onto the body at about
+a third of it. Those islands alone were baked as above, into the colour, the mask
+and (box-filtered) the normals; every other texel is as it was. `onsoldh` and
+`onsoldb` were cut from `onsold1` again. The face attribute `on_part` on each
 LOD mesh names the part a face came from (`onsold1`: 0 head, 1 helmet, 2 shirt,
 3 vest, 4 hip pouches, 5 trousers, 6 boots, 7 gloves; `onenmy1`: 0 head,
 1 bandana, 2 shirt, 3 chest rig, 4 trousers, 5 boots, 6 hands, 7 rifle).
 
 | Model | LOD 0 | LOD 1 | LOD 2 |
 |---|---|---|---|
-| `onsold1` | 8,598 triangles | 3,076 | 1,228 |
-| `onsoldh` | 1,999 | 697 | 279 |
-| `onsoldb` | 6,599 | 2,379 | 949 |
+| `onsold1` | 11,749 triangles | 3,288 | 1,318 |
+| `onsoldh` | 3,099 | 909 | 369 |
+| `onsoldb` | 8,650 | 2,379 | 949 |
 | `onenmy1` | 8,059 | 2,758 | 1,097 |
 
 (The original's soldiers are 3,000 to 4,600 triangles at LOD 0, `US01` one LOD of
