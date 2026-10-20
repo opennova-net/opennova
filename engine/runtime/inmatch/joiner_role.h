@@ -18,7 +18,6 @@
 // serial its registry-derived caches re-derive from).
 #pragma once
 
-#include <net/novaworld/proxy_rendezvous.h> // ProxyRendezvousConfig (the proxy-assisted join)
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -87,27 +86,6 @@ public:
 	// The title identity every runtime this role creates speaks (ClientRuntime::set_title):
 	// configure before create_runtime. A runtime with none refuses to start.
 	void set_title(const TitleIdentity *title) { title_ = title; }
-	// The proxy-assisted NovaWorld join (the .joi NI/NP/BK next to NK): the game
-	// node the 48-byte rendezvous targets, the relay cookie and the NK relay
-	// endpoint the ordinary dial uses. All six fields set = the rendezvous is
-	// sent to the node every 3000 ms ahead of each announce while the hello is
-	// outstanding; any field missing = no proxy (LAN, or a .joi without them).
-	// The shell installs the engine's own build of them (the typed overload
-	// below, through JoinTarget's ProxyRendezvousConfig); this one takes the
-	// six as text. [orig: CNapiGameSession_InitTransportConnection @0x4c9e10
-	//  install @0x4ca051..0x4ca0c7; the all-six gate
-	//  CNapiNPConnection_PumpEnumeratorAndSend @0x62914f..0x629159]
-	struct JoinProxyOptions {
-		std::string proxy_node_ip;    // NI, a dotted quad
-		uint32_t proxy_node_port = 0; // NP
-		uint32_t proxy_cookie = 0;    // atol(BK)
-		std::string proxy_relay_ip;   // the NK-decoded host, a dotted quad
-		uint32_t proxy_relay_port = 0; // the NK-decoded port
-	};
-	void set_join_proxy(const JoinProxyOptions &options);
-	// The same install from the engine's own build of the six fields
-	// (proxy_rendezvous_from_join over the resolved .joi, net/novaworld/http_flow.h).
-	void set_join_proxy(const ProxyRendezvousConfig &proxy);
 	// The pre-mission subset of the frame: the same socket and runtime advance
 	// the retail connect exchange, but no World exists yet to tick and the
 	// runtime's world-ready gate suppresses the load/spawn drive. The hello
@@ -262,9 +240,6 @@ private:
 	void deposit_inbound();
 	// ClientHello once (Idle -> Hello) on the first armed frame.
 	void send_hello_once();
-	// The proxy rendezvous datagram to the game node, on the enumerator's
-	// 3000 ms interval, ahead of the announce it precedes.
-	void pump_proxy_rendezvous();
 	// Resolve each decoded organic row's adm id once its type is known.
 	void resolve_row_adm_ids();
 	uint64_t infantry_adm_revision_seen_ = 0;
@@ -306,12 +281,6 @@ private:
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};
 	const TitleIdentity *title_ = nullptr; // set_title
-	// The proxy rendezvous: the installed six fields, the node endpoint and
-	// the enumerator's last-send clock (0 = never sent, the first pump sends).
-	// [orig: conn+1464..+1484; enum_info+52 @0x629108/@0x62911f]
-	ProxyRendezvousConfig proxy_{};
-	PeerAddr proxy_node_addr_{};
-	uint64_t proxy_last_send_ms_ = 0;
 	int64_t last_net_us_ = 0;
 	// g_StatsAvgFps / g_StatsCpuPercent as the session last handed them over.
 	int32_t uplink_avg_fps_ = 0;

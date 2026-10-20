@@ -270,6 +270,9 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	add_child(_spectator_probe)
 	_spectator_probe.servers_changed.connect(
 			_on_spectator_preflight_rows.bind(_spectator_probe, target, serial))
+	# A proxy-assisted NovaWorld join's rendezvous rides this enumeration, ahead of
+	# each announce burst; the join from its row sends none (D-NET-712).
+	_spectator_probe.set_proxy_from_target(target)
 	# The enumeration runs under the target's network connect type: a NovaWorld
 	# host's P2 admits only a NovaWorld browse, a LAN host's only a LAN one
 	# (the engine's lan_session_admits_connect_type).

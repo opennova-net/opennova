@@ -748,11 +748,6 @@ public:
 			const String &p_server_password = String(),
 			const String &p_join_password = String());
 	bool is_joiner() const { return session_.kind() == opennova::inmatch::RoleKind::Joiner; }
-	// The proxy-assisted NovaWorld join (JoinTarget's typed ProxyRendezvousConfig):
-	// installs the joiner role's rendezvous config. Call after enable_join and
-	// before the first poll; a missing field sends nothing (the role's all-six
-	// gate), and a sim that is not a joiner installs nothing.
-	void set_join_proxy(const opennova::ProxyRendezvousConfig &p_proxy);
 	// Placed identities retired since the last take (the slot vanished or was
 	// re-typed): the mission root hides their placed representation.
 	PackedInt32Array take_retired_placement_ids();

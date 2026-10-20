@@ -119,55 +119,6 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 	socket_->send_to(host_addr_, dg.data(), dg.size());
 }
 
-// The install: node = inet_addr(NI) / atol(NP), cookie = atol(BK), relay =
-// inet_addr(NK host) / the NK port. A dotted quad that does not parse is
-// retail's INADDR_NONE (0) and leaves the proxy disabled.
-// [orig: CNapiGameSession_InitTransportConnection @0x4ca051..0x4ca0c7]
-void JoinerRole::set_join_proxy(const JoinProxyOptions &options) {
-	ProxyRendezvousConfig proxy;
-	proxy.node_addr = proxy_inet_addr(options.proxy_node_ip);
-	proxy.node_port = options.proxy_node_port;
-	proxy.cookie = options.proxy_cookie;
-	proxy.relay_addr = proxy_inet_addr(options.proxy_relay_ip);
-	proxy.relay_port = options.proxy_relay_port;
-	set_join_proxy(proxy);
-}
-
-void JoinerRole::set_join_proxy(const ProxyRendezvousConfig &proxy) {
-	proxy_ = proxy;
-	// PeerAddr packs octets exactly like the inet_addr dword (first octet in the
-	// low byte), so the node address is the same word.
-	proxy_node_addr_ = PeerAddr{};
-	proxy_node_addr_.ip = proxy_.node_addr;
-	proxy_node_addr_.port = static_cast<uint16_t>(proxy_.node_port & 0xFFFFu);
-	proxy_last_send_ms_ = 0;
-}
-
-// The enumerator pump's rendezvous leg: while the announce is outstanding (the
-// hello not yet answered) and every proxy field is installed, one 48-byte
-// datagram goes to the game node on the 3000 ms announce interval, ahead of
-// the announce itself. The first pump sends at once (no last-send tick); the
-// enumerator stops once a session answered, so a later phase sends nothing.
-// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 — the interval
-//  @0x6290ed (3000 for a dialing host), the `!last_send || elapsed > interval`
-//  arm @0x629119, the all-six gate ending @0x62914f, then
-//  CNapiNPConnection_SendPingPacket @0x61F8C0 (the call @0x629159), then
-//  NapiNPSession_SendAnnouncePacket @0x61FA00 (the call @0x629170); the
-//  enumerator's active flag enum_info+44 is read as "the hello is still being
-//  announced" here]
-void JoinerRole::pump_proxy_rendezvous() {
-	if (socket_ == nullptr || !runtime || !proxy_.enabled()) return;
-	if (started_ && runtime->phase() != JoinerConnection::Phase::Hello) return;
-	const uint64_t now_ms = io::perf_now_us() / 1000u;
-	if (proxy_last_send_ms_ != 0 &&
-			now_ms - proxy_last_send_ms_ <= kProxyRendezvousIntervalMs)
-		return;
-	proxy_last_send_ms_ = now_ms == 0 ? 1 : now_ms;
-	const std::array<uint8_t, kProxyRendezvousDatagramSize> packet =
-			build_proxy_rendezvous_datagram(proxy_);
-	socket_->send_to(proxy_node_addr_, packet.data(), packet.size());
-}
-
 // Drain every datagram pending on the socket into the runtime's recv fold
 // (the witnessed poll-before-logic order [orig: Game_ProcessMainFrame
 // @0x5263f0]).
@@ -184,7 +135,6 @@ void JoinerRole::deposit_inbound() {
 
 void JoinerRole::poll_preload() {
 	if (!runtime) return;
-	pump_proxy_rendezvous();
 	send_hello_once();
 	deposit_inbound();
 	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_))
@@ -684,7 +634,6 @@ void JoinerRole::pump() {
 	devtools::ProfileLap lap(world.profile);
 	wire_frame_providers();
 	resolve_row_adm_ids();
-	pump_proxy_rendezvous();
 	send_hello_once();
 	deposit_inbound();
 	// The frame input reaches L's body BEFORE the client net frame builds

@@ -2110,57 +2110,6 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 			"slice: the release rebuilds L's slice at the redeployed pose");
 }
 
-// The socket seam that also records where each datagram went.
-class TargetSocket final : public opennova::IDatagramSocket {
-public:
-	std::vector<std::pair<PeerAddr, std::vector<uint8_t>>> sent;
-	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
-	void send_to(const PeerAddr &to, const uint8_t *data, std::size_t size) override {
-		sent.emplace_back(to, std::vector<uint8_t>(data, data + size));
-	}
-};
-
-// The proxy-assisted join: with all six proxy fields installed the enumerator
-// pump ships the 48-byte rendezvous to the game node ahead of the hello, once
-// per 3000 ms, and only while the hello is outstanding.
-bool run_proxy_rendezvous_pump() {
-	Harness h;
-	TargetSocket socket;
-	h.role.set_socket(&socket, PeerAddr{0x0A00A8C0u, 32768});
-	inmatch::JoinerRole::JoinProxyOptions proxy;
-	proxy.proxy_node_ip = "10.1.2.3";
-	proxy.proxy_node_port = 4000;
-	proxy.proxy_cookie = 77;
-	proxy.proxy_relay_ip = "192.168.0.9";
-	proxy.proxy_relay_port = 32768;
-	h.role.set_join_proxy(proxy);
-	h.role.poll_preload();
-	h.role.poll_preload();
-	if (!expect(socket.sent.size() == 2, "proxy: one rendezvous and one hello across two preload frames"))
-		return false;
-	const PeerAddr node = peer_addr_from_octets({10, 1, 2, 3}, 4000);
-	const std::vector<uint8_t> &rendezvous = socket.sent[0].second;
-	if (!expect(socket.sent[0].first == node && rendezvous.size() == 48, "proxy: the rendezvous goes to the node first"))
-		return false;
-	const bool layout = rendezvous[0] == 0 && rendezvous[4] == '@' && rendezvous[5] == 0 &&
-			rendezvous[6] == 0x00 && rendezvous[7] == 0x80 &&
-			rendezvous[8] == 192 && rendezvous[9] == 168 && rendezvous[10] == 0 && rendezvous[11] == 9 &&
-			rendezvous[12] == 77 && rendezvous[13] == 0 && rendezvous[14] == 0 && rendezvous[15] == 0 &&
-			rendezvous[47] == 0;
-	if (!expect(layout, "proxy: '@' at 4, the relay port at 6, the relay addr at 8, the cookie at 12"))
-		return false;
-	if (!expect(socket.sent[1].first == PeerAddr{0x0A00A8C0u, 32768}, "proxy: the hello still dials the host"))
-		return false;
-	// A missing field disables the whole install.
-	Harness g;
-	TargetSocket quiet;
-	g.role.set_socket(&quiet, PeerAddr{});
-	proxy.proxy_cookie = 0;
-	g.role.set_join_proxy(proxy);
-	g.role.poll_preload();
-	return expect(quiet.sent.size() == 1, "proxy: no rendezvous without all six fields");
-}
-
 // The Respawn key on a joiner (dispatch 55): past the live-player gate the
 // input reset runs (with L's def bound: the input word cleared, the pack over
 // it, a moving state dropped to the idle 43) and, in a session, one bodiless
@@ -2655,7 +2604,6 @@ int main() {
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
 	ok &= run_tail_armor_lands_on_l();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
-	ok &= run_proxy_rendezvous_pump();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();

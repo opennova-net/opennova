@@ -17,7 +17,9 @@
 
 #include <net/npwire/flat_tlv.h>
 #include <net/npwire/lan_discovery.h>
+#include <net/novaworld/proxy_rendezvous.h>
 #include <net/npwire/net_ports.h>
+#include <net/npwire/peer_addr.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -356,6 +358,55 @@ void test_reply_without_sf_is_listed() {
 
 } // namespace
 
+// D-NET-712: the proxy-assisted NovaWorld join's rendezvous rides the browse. With all six
+// proxy fields installed, every burst opens with the 48-byte rendezvous to the game node and
+// then one announce per port; a field missing installs nothing. The layout is the witnessed
+// SendPingPacket body: '@' at 4, the relay port at 6, the relay address at 8, the cookie at 12.
+// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the six-field gate
+//  @0x629122..0x62914f, CNapiNPConnection_SendPingPacket @0x61F8C0 called @0x629159 ahead of
+//  the announce walk @0x6291c6..0x629268; CNapiNPConnection_SendPingPacket @0x61f8c0 - '@'
+//  @0x61f9ca, the relay port @0x61f9d1, the relay addr @0x61f9d6, the cookie @0x61f9bb]
+void test_proxy_rendezvous_leads_each_burst() {
+    opennova::LanDiscoveryBrowser b;
+    opennova::ProxyRendezvousConfig proxy;
+    proxy.node_addr = proxy_inet_addr("10.1.2.3");
+    proxy.node_port = 4000;
+    proxy.cookie = 77;
+    proxy.relay_addr = proxy_inet_addr("192.168.0.9");
+    proxy.relay_port = 32768;
+    b.set_proxy(proxy);
+    CHECK(b.begin(kJo, 9, 0x0900A8C0u, 32768, 32769, kLanConnectTypeNovaWorld));
+    const std::vector<LanBurstDatagram> burst = b.burst();
+    CHECK(burst.size() == 3);
+    if (burst.size() != 3) return;
+    CHECK(burst[0].rendezvous);
+    CHECK(burst[0].node == peer_addr_from_octets({10, 1, 2, 3}, 4000));
+    const std::vector<uint8_t> &r = burst[0].bytes;
+    CHECK(r.size() == 48);
+    if (r.size() != 48) return;
+    CHECK(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0);
+    CHECK(r[4] == '@' && r[5] == 0);
+    CHECK(r[6] == 0x00 && r[7] == 0x80);
+    CHECK(r[8] == 192 && r[9] == 168 && r[10] == 0 && r[11] == 9);
+    CHECK(r[12] == 77 && r[13] == 0 && r[14] == 0 && r[15] == 0);
+    for (std::size_t i = 16; i < r.size(); ++i) CHECK(r[i] == 0);
+    CHECK(!burst[1].rendezvous && burst[1].port == 32768 && burst[1].bytes == b.probe(32768));
+    CHECK(!burst[2].rendezvous && burst[2].port == 32769 && burst[2].bytes == b.probe(32769));
+    // The re-announce burst repeats the same order.
+    bool due = false;
+    CHECK(b.advance(3.001, due) && due);
+    CHECK(b.burst().size() == 3 && b.burst()[0].rendezvous);
+
+    // Any field missing: announces alone.
+    opennova::LanDiscoveryBrowser plain;
+    proxy.cookie = 0;
+    plain.set_proxy(proxy);
+    CHECK(plain.begin(kJo, 9, kBroadcast, 32768, 32769, kLanConnectTypeLan));
+    const std::vector<LanBurstDatagram> announces = plain.burst();
+    CHECK(announces.size() == 2);
+    for (const LanBurstDatagram &d : announces) CHECK(!d.rendezvous);
+}
+
 int main() {
     test_begin_validates_the_range_and_fixes_one_identity();
     test_each_port_gets_an_announce_naming_its_destination();
@@ -367,6 +418,7 @@ int main() {
     test_window_lists_at_most_thirty_two_hosts();
     test_browse_admits_only_its_network_type();
     test_reply_without_sf_is_listed();
+    test_proxy_rendezvous_leads_each_burst();
     if (failures == 0) std::printf("lan_discovery_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

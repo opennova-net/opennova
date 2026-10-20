@@ -163,12 +163,6 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 		world_->emit_signal(kSignalLoadFailed, "join: could not open the LAN session socket");
 		return ERR_CANT_CONNECT;
 	}
-	// The proxy-assisted NovaWorld join (the .joi NI/NP/BK): the role sends its
-	// rendezvous datagram ahead of the first hello, so this lands before the
-	// first preload poll. Empty on a LAN target.
-	if (p_target->has_join_proxy()) {
-		join_preload_sim_->set_join_proxy(p_target->get_join_proxy());
-	}
 	join_preload_sim_->set_join_world_ready(false);
 	// The JOIN VERSIONCRCSTRING checksum reads the loose
 	// expansion/<name>/version.txt under this install root (D-NET-166).

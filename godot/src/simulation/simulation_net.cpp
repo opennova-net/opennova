@@ -611,10 +611,6 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	return true;
 }
 
-void Simulation::set_join_proxy(const opennova::ProxyRendezvousConfig &p_proxy) {
-	if (joiner_role_ != nullptr) joiner_role_->set_join_proxy(p_proxy);
-}
-
 bool Simulation::is_local_spectator() const {
 	if (is_joiner()) return runtime_ != nullptr && runtime_->is_spectator();
 	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();

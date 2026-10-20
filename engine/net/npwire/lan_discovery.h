@@ -1,5 +1,8 @@
 #pragma once
 
+#include <net/novaworld/proxy_rendezvous.h> // ProxyRendezvousConfig (the proxy-assisted join)
+#include <net/npwire/peer_addr.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -96,6 +99,16 @@ inline constexpr int kLanConnectTypeInternet = 3;
 //  @0x4c4de4 / @0x4c4df1 / @0x4c4dfe]
 bool lan_session_admits_connect_type(int connect_type, uint32_t server_flags);
 
+// One datagram of an enumerator burst, in send order: the proxy rendezvous to
+// the game node (`rendezvous`, sent to `node`), or the announce to the browse
+// target at `port`.
+struct LanBurstDatagram {
+	bool rendezvous = false;
+	PeerAddr node{};
+	int port = 0;
+	std::vector<uint8_t> bytes;
+};
+
 // One discovered host: the reply's source endpoint plus its projected hello.
 struct LanDiscoveryRow {
 	std::string host_ip;
@@ -163,6 +176,26 @@ public:
 	// port as its EIP / EPN (build_lan_discovery_probe).
 	std::vector<uint8_t> probe(int port) const;
 
+	// The proxy-assisted NovaWorld join's six fields (the .joi NI/NP/BK next to NK),
+	// installed on the enumerator with its target; a disabled config (any field
+	// unset, LAN) sends no rendezvous. Kept across begin/stop: the embedder installs
+	// the target's fields before the window begins.
+	// [orig: CNapiGameSession_InitTransportConnection @0x4c9e10 - the install
+	//  @0x4ca040..0x4ca0c7]
+	void set_proxy(const ProxyRendezvousConfig &proxy) { proxy_ = proxy; }
+	const ProxyRendezvousConfig &proxy() const { return proxy_; }
+	// One burst of the enumerator pump, in send order: with all six proxy fields
+	// set, the 48-byte rendezvous to the game node first, then one announce per
+	// port of the range. The embedder sends a burst on begin and whenever
+	// `advance` reports an announce due; a join from a row stops the enumerator,
+	// so no rendezvous follows it (D-NET-712).
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the enumerator
+	//  gate @0x6290e3 (enumerator+44), the six-field gate @0x629122..0x62914f,
+	//  CNapiNPConnection_SendPingPacket @0x61F8C0 called @0x629159 ahead of the
+	//  announce walk @0x6291c6..0x629268; CNapiNetwork_StartClientConnection
+	//  @0x4ca160 - NapiTimer_Stop(enumerator) @0x4ca1d8 clears enumerator+44]
+	std::vector<LanBurstDatagram> burst() const;
+
 	// One outer frame: false once the window has expired (the browse is
 	// stopped); `announce_due` is set when a re-announce burst falls due this
 	// frame (the announce clock restarts from zero, not from the overshoot).
@@ -179,6 +212,7 @@ private:
 	std::vector<LanDiscoveryRow> servers_;
 	std::unordered_map<std::string, size_t> index_by_endpoint_;
 	const TitleIdentity *title_ = nullptr;
+	ProxyRendezvousConfig proxy_{};
 	uint32_t client_index_ = 0;
 	uint32_t enumerate_ip_ = 0;
 	int connect_type_ = kLanConnectTypeLan;

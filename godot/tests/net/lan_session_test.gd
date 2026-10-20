@@ -317,6 +317,19 @@ func test_launch_browse_joins_the_row_on_its_port() -> void:
 	LaunchFlags.clear_args_override()
 
 
+# D-NET-712: the proxy-assisted join's rendezvous rides the browse; the shell
+# installs the target's proxy fields on the enumeration before it starts. A
+# target without them (or none) installs nothing and the browse runs as before.
+func test_proxy_install_from_a_target_without_proxy_is_inert() -> void:
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	browser.set_proxy_from_target(null)
+	browser.set_proxy_from_target(JoinTarget.new())
+	assert_eq(browser.start_browsing("127.0.0.1", 32786, 32786), OK)
+	assert_true(browser.is_browsing())
+	browser.stop()
+
+
 func test_invalid_port_range_fails_without_browsing() -> void:
 	var browser := LanSession.new()
 	add_child_autofree(browser)

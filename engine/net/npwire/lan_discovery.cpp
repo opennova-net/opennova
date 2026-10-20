@@ -6,6 +6,7 @@
 #include <net/title/title_identity.h>
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 namespace opennova {
@@ -146,6 +147,29 @@ std::vector<uint8_t> LanDiscoveryBrowser::probe(int port) const {
 	                                 static_cast<uint32_t>(port < 0 ? 0 : port));
 }
 
+std::vector<LanBurstDatagram> LanDiscoveryBrowser::burst() const {
+	std::vector<LanBurstDatagram> out;
+	if (title_ == nullptr) return out;
+	if (proxy_.enabled()) {
+		LanBurstDatagram rendezvous;
+		rendezvous.rendezvous = true;
+		// PeerAddr packs octets as the inet_addr dword does (first octet low).
+		rendezvous.node.ip = proxy_.node_addr;
+		rendezvous.node.port = static_cast<uint16_t>(proxy_.node_port & 0xFFFFu);
+		const std::array<uint8_t, kProxyRendezvousDatagramSize> bytes =
+				build_proxy_rendezvous_datagram(proxy_);
+		rendezvous.bytes.assign(bytes.begin(), bytes.end());
+		out.push_back(std::move(rendezvous));
+	}
+	for (int port = port_min_; port <= port_max_; ++port) {
+		LanBurstDatagram announce;
+		announce.port = port;
+		announce.bytes = probe(port);
+		out.push_back(std::move(announce));
+	}
+	return out;
+}
+
 void LanDiscoveryBrowser::stop() {
 	browsing_ = false;
 	browse_elapsed_s_ = 0.0;
@@ -165,7 +189,9 @@ bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 	// A cold host that binds its port mid-window is only discoverable because
 	// the enumerator keeps announcing. The re-announce is due strictly after
 	// the interval [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 —
-	// `tick_count - last_send_tick > interval`].
+	// the interval select @0x6290ed (3000 for an enumerator), the last send read
+	// @0x629108, `!last_send || tick_count - last_send_tick > interval` @0x629119,
+	// the restamp @0x62911f].
 	if (announce_elapsed_s_ > kLanAnnounceIntervalSeconds) {
 		announce_elapsed_s_ = 0.0;
 		announce_due = true;

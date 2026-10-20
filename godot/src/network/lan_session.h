@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include "network/join_target.h"
 #include "network/lan_server_row.h"
 #include "resource_index/resource_root.h"
 
@@ -39,6 +40,12 @@ public:
 	// endpoint's preflight as NovaWorld; a host whose P2 names another type is
 	// not listed (lan_session_admits_connect_type).
 	int start_browsing(const String &destination, int port_min, int port_max, int connect_type);
+	// The target's proxy-assisted NovaWorld join fields (JoinTarget's typed
+	// ProxyRendezvousConfig), installed on the browse before it starts: with all
+	// six set, every announce burst goes out behind the 48-byte rendezvous to the
+	// game node (LanDiscoveryBrowser::burst, D-NET-712). A null target or one with
+	// no proxy installs none.
+	void set_proxy_from_target(const Ref<JoinTarget> &target);
 	void stop();
 	TypedArray<LanServerRow> get_servers() const;
 	bool is_browsing() const { return browser_.browsing(); }

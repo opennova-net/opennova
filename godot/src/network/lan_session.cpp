@@ -80,6 +80,7 @@ void LanSession::_bind_methods() {
 			&LanSession::start_browsing,
 			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)),
 			DEFVAL(int(opennova::kLanConnectTypeLan)));
+	ClassDB::bind_method(D_METHOD("set_proxy_from_target", "target"), &LanSession::set_proxy_from_target);
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &LanSession::set_resource_root);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &LanSession::get_resource_root);
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
@@ -155,22 +156,31 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	return static_cast<int>(OK);
 }
 
+void LanSession::set_proxy_from_target(const Ref<JoinTarget> &target) {
+	browser_.set_proxy(target.is_valid() ? target->get_join_proxy() : opennova::ProxyRendezvousConfig{});
+}
+
 int LanSession::send_probe_burst(Error &first_send_error) {
 	int sent = 0;
 	if (!socket_.is_valid()) {
 		return sent;
 	}
-	// One announce per port, each naming its own destination as EIP / EPN
-	// (LanDiscoveryBrowser::probe).
-	for (int port = browser_.port_min(); port <= browser_.port_max(); ++port) {
-		const Error destination_error = socket_->set_dest_address(browse_target_, port);
+	// The enumerator's burst in its order (LanDiscoveryBrowser::burst): the proxy
+	// rendezvous to the game node when installed, then one announce per port, each
+	// naming its own destination as EIP / EPN. `sent` counts the announces.
+	for (const opennova::LanBurstDatagram &datagram : browser_.burst()) {
+		const Error destination_error = datagram.rendezvous
+				? socket_->set_dest_address(
+						opennova::to_gd(opennova::peer_addr_ip_to_string(datagram.node)),
+						datagram.node.port)
+				: socket_->set_dest_address(browse_target_, datagram.port);
 		if (destination_error != OK) {
 			if (first_send_error == OK) first_send_error = destination_error;
 			continue;
 		}
-		const Error send_error = socket_->put_packet(to_packed_bytes(browser_.probe(port)));
+		const Error send_error = socket_->put_packet(to_packed_bytes(datagram.bytes));
 		if (send_error == OK) {
-			++sent;
+			if (!datagram.rendezvous) ++sent;
 		} else if (first_send_error == OK) {
 			first_send_error = send_error;
 		}
