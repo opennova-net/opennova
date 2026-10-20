@@ -282,6 +282,26 @@ fixes `expansion` (`jox01`), `items_sha256` and `host_session_name`, which must 
 SERVER copy's `game.cfg` `game_name` byte for byte (`"Untitled "`, with the
 trailing space), and `server_game_cfg_sha256`, the SERVER `game.cfg` pin.
 
+No game window holds real focus in a cell. A focused retail window centres the
+cursor every frame and reads the offset as mouse look (the focus gate
+`Game_ProcessMainFrame` @0x526401..0x526458, `Input_PumpAndCenterCursor`
+@0x7616D0). Every retail window also clips the cursor to its own rect when it
+leaves a menu (`Game_ClipCursorToGameWindow` @0x4983C0). So with two windows on
+one desktop, the clip one leaves can clamp the other's centring into one
+constant delta every frame: the body's yaw steps every frame and its pitch pins
+at the clamp (i1's and c1's R1 rows). The runner therefore:
+
+- runs a desktop guard job for the whole cell, which hands the foreground to the
+  shell's desktop window and, when Windows keeps a game window in front, posts
+  `WM_KILLFOCUS` to it (`desktop-guard.log`);
+- frees any cursor clip as the steady window opens and posts `WM_KILLFOCUS` to
+  every retail window;
+- records the desktop at both ends of the steady window (`desktop_witness`: the
+  foreground, the clip, each window's rect and centring point, and `clean`, which
+  is false when a focused retail window could not centre).
+
+Scripted input keeps its own virtual focus.
+
 Both hosts run in the SERVER copy: retail's `Jointops.exe` in its install, the
 OpenNova host with `--working-dir` on it (`host_opennova.ps1 -WorkingDir`).
 Each reads the copy's `game.cfg` and `player.sav` at its start and writes them

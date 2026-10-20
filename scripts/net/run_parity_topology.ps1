@@ -820,8 +820,224 @@ function Bind-EffectiveRetailConfig {
     })
 }
 
+# The desktop the game windows share. Retail centres the cursor on its own
+# window every frame while it holds focus (Game_ProcessMainFrame
+# @0x526401..0x526458 -> Input_PumpAndCenterCursor @0x7616D0: SetCursorPos to
+# the client origin + 320,240, then the delta is the last WM_MOUSEMOVE minus
+# 320,240), and confines the cursor system-wide to its window rect whenever it
+# leaves a menu, with no focus check (UI_CloseMenuScreen ->
+# Game_ClipCursorToGameWindow @0x4983C0, ClipCursor @0x4983D8). A clip another
+# window left (a joiner still at its small launch size) clamps the focused
+# window's centring, so it reads one constant delta every frame: its body's
+# yaw steps every frame and its pitch pins at the clamp (the R1 rows of i1 and
+# c1, reproduced by parity-20261020-r1probe2). The runner releases any clip as
+# the steady window opens and records the desktop at both ends of the window;
+# a cell whose focused retail window could not centre is marked unclean.
+$script:DesktopWitness = [ordered]@{}
+function Initialize-DesktopProbe {
+    if ('ParityDesktop' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class ParityDesktop {
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] public static extern bool GetClipCursor(out RECT r);
+    [DllImport("user32.dll", EntryPoint = "ClipCursor")] public static extern bool ReleaseClip(IntPtr r);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    public delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr l);
+    public static List<IntPtr> VisibleWindowsOf(uint pid) {
+        var found = new List<IntPtr>();
+        EnumWindows((h, l) => {
+            uint owner;
+            GetWindowThreadProcessId(h, out owner);
+            if (owner == pid && IsWindowVisible(h)) found.Add(h);
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+}
+'@
+}
+
+function Get-DesktopState {
+    Initialize-DesktopProbe
+    $foreground = [ParityDesktop]::GetForegroundWindow()
+    $foregroundPid = [uint32]0
+    $null = [ParityDesktop]::GetWindowThreadProcessId($foreground, [ref] $foregroundPid)
+    $clip = New-Object ParityDesktop+RECT
+    $null = [ParityDesktop]::GetClipCursor([ref] $clip)
+    $roles = @(
+        @{ role = "retail_host"; process = $script:RetailHostProcess; retail = $true },
+        @{ role = "retail_joiner"; process = $script:RetailJoinerProcess; retail = $true },
+        @{ role = "retail_late_joiner"; process = $script:RetailLateJoinerProcess; retail = $true },
+        @{ role = "opennova_host"; process = $script:OpenNovaHost; retail = $false },
+        @{ role = "opennova_joiner"; process = $script:OpenNovaJoiner; retail = $false }
+    )
+    # A retail process the cell holds no handle for (a path that keeps only the
+    # tool's pid) still centres and clips: every Jointops.exe counts.
+    $known = @($roles | Where-Object { $_.process } | ForEach-Object { [int] $_.process.Id })
+    foreach ($other in @(Get-Process -Name "Jointops" -ErrorAction SilentlyContinue)) {
+        if ($known -notcontains [int] $other.Id) {
+            $roles += @{ role = "retail"; process = $other; retail = $true }
+        }
+    }
+    $windows = @()
+    $clean = $true
+    foreach ($entry in $roles) {
+        if (-not $entry.process) { continue }
+        foreach ($window in [ParityDesktop]::VisibleWindowsOf([uint32] $entry.process.Id)) {
+            $rect = New-Object ParityDesktop+RECT
+            $null = [ParityDesktop]::GetWindowRect($window, [ref] $rect)
+            $origin = New-Object ParityDesktop+POINT
+            $null = [ParityDesktop]::ClientToScreen($window, [ref] $origin)
+            $focused = [uint32] $entry.process.Id -eq $foregroundPid
+            # Retail's centring point; only the focused retail window centres.
+            $warp = if ($entry.retail) { @(($origin.X + 320), ($origin.Y + 240)) } else { $null }
+            $warpInClip = if ($warp) {
+                $warp[0] -ge $clip.L -and $warp[0] -lt $clip.R -and $warp[1] -ge $clip.T -and $warp[1] -lt $clip.B
+            } else { $null }
+            if ($entry.retail -and $focused -and -not $warpInClip) { $clean = $false }
+            $windows += [pscustomobject][ordered]@{
+                role = $entry.role
+                hwnd = [int64] $window
+                retail = [bool] $entry.retail
+                pid = $entry.process.Id
+                rect = @($rect.L, $rect.T, $rect.R, $rect.B)
+                client_origin = @($origin.X, $origin.Y)
+                warp = $warp
+                warp_in_clip = $warpInClip
+                focused = $focused
+            }
+        }
+    }
+    return [pscustomobject][ordered]@{
+        utc = [DateTime]::UtcNow.ToString("o")
+        foreground_pid = $foregroundPid
+        clip = @($clip.L, $clip.T, $clip.R, $clip.B)
+        windows = $windows
+        clean = $clean
+    }
+}
+
+# As the steady window opens: what the desktop held, then any clip released
+# (ClipCursor(NULL), the desktop's state, not the game's code), and every
+# retail window told it has no focus (WM_KILLFOCUS, retail's focus flag
+# cleared @0x762670): a window the guard could not take the foreground from,
+# or one that took focus again while it loaded, centres no more.
+function Reset-DesktopCursor {
+    $before = Get-DesktopState
+    $released = [ParityDesktop]::ReleaseClip([IntPtr]::Zero)
+    $unfocused = 0
+    foreach ($window in @($before.windows | Where-Object { $_.retail })) {
+        if ([ParityDesktop]::PostMessage([IntPtr] $window.hwnd, 0x0008, [IntPtr]::Zero, [IntPtr]::Zero)) { $unfocused++ }
+    }
+    $after = Get-DesktopState
+    $script:DesktopWitness.steady_start = [pscustomobject][ordered]@{
+        found = $before
+        released = [bool] $released
+        retail_windows_unfocused = $unfocused
+        after = $after
+    }
+    Write-Host ("PARITY_RUN_NOTE desktop at the steady start: clip {0} -> {1}, foreground pid {2}" -f
+        ($before.clip -join ","), ($after.clip -join ","), $after.foreground_pid)
+}
+
+# The desktop guard: for the whole cell no game window keeps the foreground.
+# Without real focus a retail window neither centres nor reads a cursor delta
+# (the gate above); scripted input brings its own virtual focus and zeroes
+# the real delta when the window is not really focused. So a clip any window
+# leaves cannot reach a body's look. The guard hands the foreground to the
+# shell's desktop window (GetShellWindow) whenever a Jointops.exe or Godot
+# window holds it, and
+# logs each hand-off.
+$script:DesktopGuard = $null
+$script:DesktopGuardLog = ""
+function Start-DesktopGuard {
+    $script:DesktopGuardLog = Join-Path $RunRoot "desktop-guard.log"
+    $script:DesktopGuard = Start-Job -ArgumentList $script:DesktopGuardLog -ScriptBlock {
+        param([string] $Log)
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ParityDesktopGuard {
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    // A background process may not take the foreground once a launched game
+    // has claimed it: joined to the foreground thread's input, it may.
+    public static bool HandOff(IntPtr foreground, IntPtr target) {
+        uint owner;
+        uint thread = GetWindowThreadProcessId(foreground, out owner);
+        uint self = GetCurrentThreadId();
+        bool attached = thread != 0 && thread != self && AttachThreadInput(self, thread, true);
+        bool ok = SetForegroundWindow(target);
+        if (attached) AttachThreadInput(self, thread, false);
+        return ok;
+    }
+}
+'@
+        $desktop = [ParityDesktopGuard]::GetShellWindow()
+        Add-Content -LiteralPath $Log -Value "$([DateTime]::UtcNow.ToString('o')) guard start desktop=$desktop"
+        # Once per foreground spell: hand the foreground to the desktop; when
+        # Windows refuses (a launched game keeps it), tell the window it lost
+        # focus (WM_KILLFOCUS: retail clears its focus flag, @0x762670), as an
+        # alt-tab away would.
+        $handled = [IntPtr]::Zero
+        while ($true) {
+            $foreground = [ParityDesktopGuard]::GetForegroundWindow()
+            if ($foreground -ne $handled) {
+                $owner = [uint32]0
+                $null = [ParityDesktopGuard]::GetWindowThreadProcessId($foreground, [ref] $owner)
+                $name = try { (Get-Process -Id $owner -ErrorAction Stop).ProcessName } catch { "" }
+                if ($name -eq "Jointops" -or $name -like "Godot*") {
+                    $ok = [ParityDesktopGuard]::HandOff($foreground, $desktop)
+                    Start-Sleep -Milliseconds 50
+                    $still = [ParityDesktopGuard]::GetForegroundWindow() -eq $foreground
+                    $killed = $false
+                    if ($still) {
+                        $killed = [ParityDesktopGuard]::PostMessage($foreground, 0x0008, [IntPtr]::Zero, [IntPtr]::Zero)
+                    }
+                    Add-Content -LiteralPath $Log -Value ("{0} foreground {1} pid={2} hwnd={3} -> desktop ok={4} kept={5} killfocus={6}" -f
+                        [DateTime]::UtcNow.ToString('o'), $name, $owner, $foreground, $ok, $still, $killed)
+                    $handled = $foreground
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+}
+
+function Stop-DesktopGuard {
+    if (-not $script:DesktopGuard) { return }
+    Stop-Job -Job $script:DesktopGuard -ErrorAction SilentlyContinue
+    Remove-Job -Job $script:DesktopGuard -Force -ErrorAction SilentlyContinue
+    $script:DesktopGuard = $null
+}
+
+function Complete-DesktopWitness {
+    $state = Get-DesktopState
+    $script:DesktopWitness.steady_end = $state
+    if (-not $state.clean) {
+        Write-Host ("PARITY_RUN_NOTE desktop UNCLEAN at the steady end: the focused retail window's centre lies outside the cursor clip {0}" -f ($state.clip -join ","))
+    }
+}
+
 function Begin-SteadyWindow {
     if ($script:SteadyStartedUtc) { throw "Steady window was already started" }
+    try { Reset-DesktopCursor }
+    catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady start: $($_.Exception.Message)" }
     $script:SteadyStartedUtc = [DateTime]::UtcNow.ToString("o")
 }
 
@@ -1200,6 +1416,8 @@ function Complete-SteadyWindow {
         throw "Steady window completion is out of order"
     }
     $script:SteadyCompletedUtc = [DateTime]::UtcNow.ToString("o")
+    try { Complete-DesktopWitness }
+    catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady end: $($_.Exception.Message)" }
 }
 
 function Stop-OwnedRetailRun {
@@ -2011,6 +2229,7 @@ try {
     Write-Host "PARITY_RUN_BEGIN topology=$Topology mission=$Mission game_type=$GameType port=$Port resolution=$Resolution joiner_dial=$JoinerDial run=$RunId"
     Assert-UdpPortUnowned
     Save-ServerCopyFiles
+    Start-DesktopGuard
     if ($TimeLimitMinutes -gt 0) { Set-ServerTimeLimit }
     Start-OnHookMcp
 
@@ -2483,6 +2702,8 @@ try {
     }
 }
 finally {
+    try { Stop-DesktopGuard }
+    catch { Add-CleanupFailure "Desktop guard stop failed: $($_.Exception.Message)" }
     if ($script:OpenNovaJoiner) {
         try {
             $null = Stop-OpenNovaJoinerCooperatively
@@ -2702,6 +2923,11 @@ $summary = [pscustomobject]@{
             restored = $_.restored
         }
     })
+    # The shared desktop at the steady window's start (the cursor clip found
+    # and released) and end (clean: the focused retail window could centre).
+    desktop_witness = $(if ($script:DesktopWitness.Count) { [pscustomobject] $script:DesktopWitness } else { $null })
+    # The guard's hand-offs of the foreground from a game window to the desktop.
+    desktop_guard_handoffs = $(if ($script:DesktopGuardLog -and (Test-Path -LiteralPath $script:DesktopGuardLog)) { @(Get-Content -LiteralPath $script:DesktopGuardLog | Where-Object { $_ -like '* foreground *' }).Count } else { $null })
     # The OpenNova host's working directory (OR, OO): the SERVER copy, as
     # retail's host runs in its install.
     opennova_host_working_dir = $(if ($Topology -in @("OR", "OO")) { $ServerDir } else { $null })
