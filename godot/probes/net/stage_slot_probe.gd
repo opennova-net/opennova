@@ -11,13 +11,6 @@ extends GameProbe
 
 const LOCAL_PLAYER_TIMEOUT_MS := 60_000
 
-const RESULT_NAMES := {
-	OK: "staged",
-	ERR_UNAVAILABLE: "no host session",
-	ERR_DOES_NOT_EXIST: "the slot holds no player",
-	ERR_UNCONFIGURED: "the slot's player holds no body",
-	ERR_INVALID_PARAMETER: "the position is outside the 16.16 range",
-}
 
 
 func run(ctx: ProbeContext) -> ProbeVerdict:
@@ -62,8 +55,24 @@ func _stage(sim: Simulation, entry_value: Variant) -> Dictionary:
 	return {
 		"slot": int(slot_value),
 		"position_bms": position,
-		"result": RESULT_NAMES.get(code, "error %d" % code),
+		"result": _result_name(code),
 	}
+
+
+## The binding's Error as the entry's result.
+func _result_name(code: Error) -> String:
+	match code:
+		OK:
+			return "staged"
+		ERR_UNAVAILABLE:
+			return "no host session"
+		ERR_DOES_NOT_EXIST:
+			return "the slot holds no player"
+		ERR_UNCONFIGURED:
+			return "the slot's player holds no body"
+		ERR_INVALID_PARAMETER:
+			return "the position does not fit the fixed-point words"
+	return "error %d" % code
 
 
 ## [x, y, z] (or {x, y, z}) as three floats; [] otherwise.
