@@ -2,9 +2,10 @@ class_name DefFixture
 extends RefCounted
 
 ## Authored test tables for binding and presenter tests. These are deliberately
-## small inputs, not copies of shipped definitions. Retail parser/catalog pins
-## remain in the retail suite. Files exist only because ResourceRoot and the
-## GDExtension loaders exercise the real file-loading boundary.
+## small inputs, not copies of shipped definitions; a test that pins a shipped
+## value authors the rows it reads and stages them with stage_catalog(). Files
+## exist only because ResourceRoot and the GDExtension loaders exercise the real
+## file-loading boundary.
 static var _directory := ""
 
 const HUD := """VEHICLE_HUD

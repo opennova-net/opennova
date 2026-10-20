@@ -1,5 +1,11 @@
 extends GutTest
 
+# The shared minted 19-bone person clip (fixtures/anim/rig19_idle.bad, the
+# retail person rig order synth person.3di authors: 14 = BN15 head), standing
+# where the shipped BINOC.bad stood as every anim row of the rig.
+const RIG_CLIP := "res://../fixtures/anim/rig19_idle.bad"
+const RIG_CLIP_NAME := "rig19_idle.bad"
+
 var staged_dirs: Array[String] = []
 
 
@@ -10,21 +16,17 @@ func after_each() -> void:
 
 
 func test_idle_spotting_drives_bms_and_the_presented_head_on_retry() -> void:
-	var clip_path := RetailData.fixture("bad/BINOC.bad")
-	if clip_path.is_empty():
-		pending(RetailData.fixture_pending_text("bad/BINOC.bad"))
-		return
 	var root_dir := WorldFixture.stage_minimal_root("npc_attention", false, {
 		"items.def": FileAccess.get_file_as_string("res://../fixtures/def/items.def"),
 		"US02.adm": (
-			"anim_reset \"BINOC.bad\"\r\n" +
-			"anim_idle \"BINOC.bad\"\r\n" +
-			"anim_idle_2 \"BINOC.bad\"\r\n" +
-			"anim_idle_look \"BINOC.bad\"\r\n" +
-			"anim_idle_2_look \"BINOC.bad\"\r\n"),
+			"anim_reset \"" + RIG_CLIP_NAME + "\"\r\n" +
+			"anim_idle \"" + RIG_CLIP_NAME + "\"\r\n" +
+			"anim_idle_2 \"" + RIG_CLIP_NAME + "\"\r\n" +
+			"anim_idle_look \"" + RIG_CLIP_NAME + "\"\r\n" +
+			"anim_idle_2_look \"" + RIG_CLIP_NAME + "\"\r\n"),
 	})
 	staged_dirs.append(root_dir)
-	assert_eq(DirAccess.copy_absolute(clip_path, root_dir.path_join("BINOC.bad")), OK)
+	TestFs.copy(self, RIG_CLIP, root_dir.path_join(RIG_CLIP_NAME))
 	assert_eq(DirAccess.copy_absolute(
 			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/person.3di"),
 			root_dir.path_join("US02.3di")), OK)

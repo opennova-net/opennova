@@ -1,5 +1,11 @@
 extends GutTest
 
+# The shared minted 19-bone person clip (fixtures/anim/rig19_idle.bad, the
+# retail person rig order synth person.3di authors: 14 = BN15 head), standing
+# where the shipped BINOC.bad stood as every anim row of the rig.
+const RIG_CLIP := "res://../fixtures/anim/rig19_idle.bad"
+const RIG_CLIP_NAME := "rig19_idle.bad"
+
 var staged_dirs: Array[String] = []
 
 
@@ -12,10 +18,6 @@ func after_each() -> void:
 # JO ships the legacy helper DEFs but no medic ADM/3DI files. This fixture
 # explicitly supplies those assets; it does not claim retail medic coverage.
 func test_bms_helpers_receive_native_animation_and_presentation_on_retry() -> void:
-	var clip_path := RetailData.fixture("bad/BINOC.bad")
-	if clip_path.is_empty():
-		pending(RetailData.fixture_pending_text("bad/BINOC.bad"))
-		return
 	var definitions := FileAccess.get_file_as_string("res://../fixtures/def/items.def")
 	for row in [
 		[104529, "person", "DeltaMED", "Medic02", "org1"],
@@ -32,7 +34,9 @@ func test_bms_helpers_receive_native_animation_and_presentation_on_retry() -> vo
 		if not String(row[4]).is_empty():
 			definitions += "ai_function %s\nmove_function %s\n" % [row[4], row[4]]
 		definitions += "end\n"
-	var animation := "anim_reset \"BINOC.bad\"\r\nanim_idle \"BINOC.bad\"\r\nanim_idle_2 \"BINOC.bad\"\r\n"
+	var animation := ""
+	for key in ["anim_reset", "anim_idle", "anim_idle_2"]:
+		animation += "%s \"%s\"\r\n" % [key, RIG_CLIP_NAME]
 	var root_dir := WorldFixture.stage_minimal_root("teammate_spawn", false, {
 		"items.def": definitions,
 		"Medic01.adm": animation,
@@ -40,7 +44,7 @@ func test_bms_helpers_receive_native_animation_and_presentation_on_retry() -> vo
 		"H_BHawkN.aip": "type HELO\r\nsubtype STD\r\n",
 	})
 	staged_dirs.append(root_dir)
-	assert_eq(DirAccess.copy_absolute(clip_path, root_dir.path_join("BINOC.bad")), OK)
+	TestFs.copy(self, RIG_CLIP, root_dir.path_join(RIG_CLIP_NAME))
 	for model in ["DeltaMED", "Medic01"]:
 		assert_eq(DirAccess.copy_absolute(
 				ProjectSettings.globalize_path("res://../fixtures/threedi/synth/person.3di"),
