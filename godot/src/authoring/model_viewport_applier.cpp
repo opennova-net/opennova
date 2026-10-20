@@ -365,7 +365,7 @@ void ModelViewportApplier::play_clip_(const opennova::editor::ViewportModel &vie
 }
 
 void ModelViewportApplier::apply_held_(const opennova::editor::ViewportModel &viewport) {
-	const opennova::editor::HeldWeapon &held = model_of(viewport).held();
+	const opennova::editor::HeldWeapon &held = model_of(viewport).held_weapon();
 	if (held.serial() != applied_held_) {
 		applied_held_ = held.serial();
 		applied_held_lod_ = -1;
@@ -389,7 +389,7 @@ void ModelViewportApplier::apply_held_(const opennova::editor::ViewportModel &vi
 
 void ModelViewportApplier::place_held_(const opennova::editor::ViewportModel &viewport) {
 	const opennova::editor::ModelViewport &model = model_of(viewport);
-	const opennova::editor::HeldWeapon &held = model.held();
+	const opennova::editor::HeldWeapon &held = model.held_weapon();
 	if (held_->get_object_data().is_null() || !held.model() || data_.is_null() ||
 			!model.skeleton() || model.clip_key().empty()) {
 		held_->set_visible(false);

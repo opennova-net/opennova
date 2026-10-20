@@ -258,7 +258,7 @@ public:
 	// A person's held weapon (DI-13's follow-up, preview/preview_held_weapon): the weapon a body's
 	// row plays with, its third-person model, and the present row's attach the device hangs it by
 	// from the rig's hand.
-	const HeldWeapon &held() const { return held_; }
+	const HeldWeapon &held_weapon() const { return held_weapon_; }
 	// The sets an action's leg plays (its soundset as it begins, its soundsetend as it finishes), once, as a
 	// press of the leg's mark asks; false, with why, for no action tied to the row or a leg it has not.
 	bool press_leg(bool end, audio::SoundSelector &selector, const AssetScan *scan, std::vector<ClipSoundFired> &out,
@@ -421,7 +421,7 @@ private:
 	bool eye_ = false;
 	OrbitCamera eye_camera_;
 	// A person's held weapon (DI-13's follow-up).
-	HeldWeapon held_;
+	HeldWeapon held_weapon_;
 	// An action leg's sound planned (fire_sounds, press_leg).
 	ClipSoundFired plan_leg_(const WeaponActionRun &run, const WeaponActionLeg &leg, int32_t tick, int32_t clip_tick,
 			audio::SoundSelector &selector, const AssetScan *scan) const;

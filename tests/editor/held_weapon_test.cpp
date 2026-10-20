@@ -218,8 +218,8 @@ int test_auto_by_row() {
 		TEST_EXPECT(held.get_bool("drawn", !row.drawn) == row.drawn);
 		TEST_EXPECT(held.get_number("bone", -1) == world::kHeldWeaponBoneIndex);
 		const ModelViewport *model = project.viewport();
-		TEST_EXPECT(
-				model && model->held().active() && (model->held().model() != nullptr) == row.drawn);
+		TEST_EXPECT(model && model->held_weapon().active() &&
+				(model->held_weapon().model() != nullptr) == row.drawn);
 		if (row.drawn) {
 			TEST_EXPECT(held.get("position") && held.get("position")->is_array() &&
 					held.get("screen") && held.get("screen")->is_array());
@@ -264,7 +264,7 @@ int test_auto_by_row() {
 	TEST_EXPECT(held.get_string("weapon", "") == "WPN_RIFLE" && !held.get_bool("drawn", true) &&
 			held.get_string("words", "").find("dead body") != std::string::npos);
 	const ModelViewport *model = project.viewport();
-	TEST_EXPECT(model && !model->held().model());
+	TEST_EXPECT(model && !model->held_weapon().model());
 	return 0;
 }
 
@@ -279,16 +279,16 @@ int test_where_it_hangs() {
 	// The rifle on the walk: the entity frame, the triple at rest.
 	TEST_EXPECT(project.select("anim_walk_forward") && project.hold(0));
 	const ModelViewport *model = project.viewport();
-	TEST_EXPECT(model && model->held().model() && !model->held().hand_frame());
+	TEST_EXPECT(model && model->held_weapon().model() && !model->held_weapon().hand_frame());
 	if (!model)
 		return 1;
-	const float *attach = model->held().attach_deg();
+	const float *attach = model->held_weapon().attach_deg();
 	TEST_EXPECT(std::fabs(attach[0]) < 1e-3 && std::fabs(std::fabs(attach[1]) - 180.0) < 1e-3 &&
 			std::fabs(attach[2]) < 1e-3);
 	std::vector<PreviewJoint> joints = model->joints(project.session.viewports().clock());
 	TEST_EXPECT(joints.size() > size_t(world::kHeldWeaponBoneIndex));
 	HeldWeaponPlace place;
-	TEST_EXPECT(model->held().place(joints, place));
+	TEST_EXPECT(model->held_weapon().place(joints, place));
 	TEST_EXPECT(near(place.muzzle, PreviewVec3{ 0.0f, 0.0f, 1.0f }) &&
 			near(place.up, PreviewVec3{ 0.0f, 1.0f, 0.0f }));
 	const PreviewJoint &hand = joints[size_t(world::kHeldWeaponBoneIndex)];
@@ -312,11 +312,11 @@ int test_where_it_hangs() {
 	// its up.
 	TEST_EXPECT(project.select("anim_knife") && project.hold(0));
 	model = project.viewport();
-	TEST_EXPECT(model && model->held().hand_frame());
+	TEST_EXPECT(model && model->held_weapon().hand_frame());
 	if (!model)
 		return 1;
 	joints = model->joints(project.session.viewports().clock());
-	TEST_EXPECT(model->held().place(joints, place));
+	TEST_EXPECT(model->held_weapon().place(joints, place));
 	const PreviewJoint &knife_hand = joints[size_t(world::kHeldWeaponBoneIndex)];
 	const double z = world::kHeldWeaponHandFrameZRad, y = world::kHeldWeaponHandFrameYRad;
 	const PreviewVec3 muzzle = preview_joint_carry(knife_hand,
@@ -330,15 +330,16 @@ int test_where_it_hangs() {
 	// The reload turns the arms: the weapon follows the hand from frame to frame.
 	TEST_EXPECT(project.select("anim_reload") && project.hold(0));
 	model = project.viewport();
-	TEST_EXPECT(model && model->held().model());
+	TEST_EXPECT(model && model->held_weapon().model());
 	if (!model)
 		return 1;
 	HeldWeaponPlace first, later;
-	TEST_EXPECT(model->held().place(model->joints(project.session.viewports().clock()), first));
+	TEST_EXPECT(
+			model->held_weapon().place(model->joints(project.session.viewports().clock()), first));
 	TEST_EXPECT(project.set(R"({"frame": 10})"));
 	model = project.viewport();
 	TEST_EXPECT(model &&
-			model->held().place(model->joints(project.session.viewports().clock()), later));
+			model->held_weapon().place(model->joints(project.session.viewports().clock()), later));
 	TEST_EXPECT(!near(first.at, later.at, 1e-3));
 	return 0;
 }
@@ -351,13 +352,14 @@ int test_options() {
 	if (!project.made)
 		return 1;
 	const ModelViewport *model = project.viewport();
-	const uint64_t reads = model ? model->held().reads() : 0;
-	const uint64_t serial = model ? model->held().serial() : 0;
+	const uint64_t reads = model ? model->held_weapon().reads() : 0;
+	const uint64_t serial = model ? model->held_weapon().serial() : 0;
 	TEST_EXPECT(model && reads == 1);
 	// The knife's attack is the knife's model: nothing to make again.
 	TEST_EXPECT(project.select("anim_knife_attack"));
 	model = project.viewport();
-	TEST_EXPECT(model && model->held().serial() == serial && model->held().reads() == reads);
+	TEST_EXPECT(model && model->held_weapon().serial() == serial &&
+			model->held_weapon().reads() == reads);
 	// None.
 	TEST_EXPECT(project.held(R"({"weapon": "NONE"})"));
 	JsonValue shown = project.json();
@@ -367,7 +369,7 @@ int test_options() {
 	TEST_EXPECT(held.get_string("weapon", "x").empty() && !held.get_bool("drawn", true) &&
 			held.get_string("chosen", "") == "none");
 	model = project.viewport();
-	TEST_EXPECT(model && !model->held().model() && model->held().serial() != serial);
+	TEST_EXPECT(model && !model->held_weapon().model() && model->held_weapon().serial() != serial);
 	// The knife named on the walk: carried through it, its own hold row on the upper body, so the
 	// hand frame.
 	TEST_EXPECT(project.select("anim_walk_forward") && project.held(R"({"weapon": "wpn_knife"})"));
@@ -390,12 +392,12 @@ int test_options() {
 	TEST_EXPECT(project.held(R"({"weapon": ""})"));
 	// weapon.def moves: the table read again, its models with it.
 	model = project.viewport();
-	const uint64_t before = model ? model->held().reads() : 0;
+	const uint64_t before = model ? model->held_weapon().reads() : 0;
 	TEST_EXPECT(project.write_weapons(
 			std::string(kWeapons) + "\nweapon \"WPN_EXTRA\"\n\tclipsize 5\nend\n"));
 	model = project.viewport();
-	TEST_EXPECT(
-			model && model->held().reads() == before + 1 && model->held().choices().size() == 5);
+	TEST_EXPECT(model && model->held_weapon().reads() == before + 1 &&
+			model->held_weapon().choices().size() == 5);
 	return 0;
 }
 

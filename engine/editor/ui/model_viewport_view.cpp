@@ -501,7 +501,7 @@ void ModelViewportView::Tools::held_weapon(
 	const SessionView &view = workspace.view();
 	ModelViewportOptions options = model.options();
 	HeldWeaponOptions &chosen = options.held;
-	const HeldWeapon &held = model.held();
+	const HeldWeapon &held = model.held_weapon();
 	const HeldWeaponChoice *weapon = held.drawn();
 	const std::string label =
 			(weapon && held.model() ? "Held: " + weapon->name : std::string("Held (none)")) +
@@ -874,7 +874,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	if (model.animating()) sound(workspace, row, model);
 	if (model.animating() && !model.first_person().active()) fire(workspace, row, model);
 	if (model.animating() && model.first_person().active()) first_person(workspace, row, model);
-	if (model.animating() && model.held().active())
+	if (model.animating() && model.held_weapon().active())
 		held_weapon(workspace, row, model);
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");

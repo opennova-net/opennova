@@ -733,7 +733,7 @@ void ModelViewport::reset_animation_() {
 	sound_cursor_ = -1;
 	clip_fire_.clear();
 	first_person_.clear();
-	held_.clear();
+	held_weapon_.clear();
 	eye_ = false;
 }
 
@@ -921,7 +921,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_note_.clear();
 		clip_track_ = ClipSoundTrack();
 		first_person_.clear();
-		held_.clear();
+		held_weapon_.clear();
 		eye_ = false;
 		// Until the first validation has read the project's references, the pairing item may not be read
 		// yet: said so, not that none pairs it (a validation after an edit reads with the graph built).
@@ -1013,7 +1013,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	// A person's held weapon (DI-13's follow-up): the weapon the row plays with, from weapon.def as
 	// the game's load reads it, and the present row's attach (none on a weapon's map, whose first
 	// person draws the gun).
-	const bool held_moved = held_.refresh(view.findings.assets, view.project.scan.get(),
+	const bool held_moved = held_weapon_.refresh(view.findings.assets, view.project.scan.get(),
 			view.findings.graph.get(), sound_sources_.item(), clip_key_,
 			skeleton_ ? skeleton_->bone_count() : 0, first_person_.active(), options_.held);
 	// The clip's fire events (DI-24): what fires them (the item, the body the sounds bind, the rig's model and rig,
@@ -1617,7 +1617,8 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	// it, where it hangs.
 	const std::vector<PreviewJoint> posed = joints(input.clock);
 	animation.set("held",
-			held_weapon_json(held_, options_.held, posed, camera(), size().width, size().height));
+			held_weapon_json(
+					held_weapon_, options_.held, posed, camera(), size().width, size().height));
 	// The rig's bones as the clip poses them now: each by its name, its parent, where its joint
 	// stands and its pixel on the picture.
 	JsonValue bones = JsonValue::make_array();
