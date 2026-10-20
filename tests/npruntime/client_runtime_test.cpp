@@ -6749,12 +6749,11 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 				client_messages[0].payload[2] == 0x22 &&
 				client_messages[0].payload[3] == 0x11 &&
 				client_messages[0].payload[4] == 0x02 &&
-				// dword 2 = the client net-frame counter (no pump ran here -> 0),
+				// dword 2 = the process's net-frame counter (D-NET-733; no state-6
+				// frame ran here, so whatever earlier joins in this process left),
 				// the consumed stats sample — not random filler.
-				client_messages[0].payload[8] == 0x00 &&
-				client_messages[0].payload[9] == 0x00 &&
-				client_messages[0].payload[10] == 0x00 &&
-				client_messages[0].payload[11] == 0x00,
+				io::read_u32_le(client_messages[0].payload.data() + 8) ==
+						inmatch::JoinerConnection::client_net_frame_counter(),
 			"pad-clamp: echo body follows max(12, min(len, 512)) with the 3-dword prefix")) {
 		return false;
 	}

@@ -30,6 +30,8 @@
 //  Client_ProcessNetworkFrame @0x42c3dd]
 
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/joiner_connection.h>
+#include <base/io/le.h>
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/mission_exit.h>
@@ -652,6 +654,46 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 			"loading: the held lists fold at the next frame and draw their 0x22");
 }
 
+// The client's net-frame counter, the C2S 0x02 echo's third dword: one per process, stepped
+// once per pass of the join screen's state-6 wait (the S2C 0x00 answered, the verification
+// value 0) after that pass's receive and send, never reset (D-NET-733).
+// [orig: MultiPlayer_PumpJoinVerificationFrame @0x424740 - the value test @0x424747, ++
+//  g_ClientNetFrameCounter @0x424776; MultiPlayer_JoinSessionStateMachine @0x56A685;
+//  NapiNPClientMsg_HandleJoinResponse - the read @0x42e12d, NetPacket_WritePositionWith-
+//  Padding @0x42e140]
+bool run_the_net_frame_counter_steps_in_the_verification_wait() {
+	Harness h;
+	if (!expect(h.handshake(), "counter: handshake")) return false;
+	(void)h.frame({settings_record(0), settings_record(1)});
+	const uint32_t before = inmatch::JoinerConnection::client_net_frame_counter();
+	(void)h.frame({make_protocol_message(0x00, {})});
+	if (!expect(inmatch::JoinerConnection::client_net_frame_counter() == before,
+			"counter: the frame that answered the S2C 0x00 was no state-6 pass"))
+		return false;
+	for (int i = 0; i < 3; ++i) (void)h.frame();
+	if (!expect(inmatch::JoinerConnection::client_net_frame_counter() == before + 3,
+			"counter: each state-6 frame steps it once"))
+		return false;
+	std::vector<uint8_t> probe(64, 0);
+	probe[8] = 16;
+	const std::vector<std::vector<uint8_t>> sent = h.frame({make_protocol_message(0x02, probe)});
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(sent.size() == 1 && decode_client_session(sent[0], h.auth.scrk, header, messages) &&
+						messages.size() == 1 && messages[0].tag == 0x02 &&
+						messages[0].payload.size() >= 12 &&
+						io::read_u32_le(messages[0].payload.data() + 8) == before + 3,
+			"counter: the echo carries the count before the probe's own pass steps it"))
+		return false;
+	(void)h.frame({make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00})});
+	const uint32_t at_verified = inmatch::JoinerConnection::client_net_frame_counter();
+	(void)h.frame();
+	(void)h.frame();
+	return expect(at_verified == before + 5 &&
+						inmatch::JoinerConnection::client_net_frame_counter() == at_verified,
+			"counter: the verified frames are no state-6 passes");
+}
+
 // The C2S 0x09 needs no S2C 0x16: with no list yet it leaves alone at
 // WaitForDisconnect's first pace, the 0x11 then releases the 0x0A, and a list
 // arriving afterwards draws its one 0x22 per unbound row in a later packet: the
@@ -741,6 +783,7 @@ int main() {
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
+	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");
 	return ok ? 0 : 1;

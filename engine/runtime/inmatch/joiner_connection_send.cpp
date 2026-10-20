@@ -295,9 +295,6 @@ int32_t JoinerConnection::send_pump_loop_pace_ms(SendPumpLoop loop) {
 std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) {
 	std::vector<std::vector<uint8_t>> out;
 	if (session_lost() || phase_ == Phase::Error) return out;
-	// [orig: g_ClientNetFrameCounter @0xA822A4; retail steps it only in
-	//  MultiPlayer_PumpJoinVerificationFrame @0x424740 (@0x424776), a ledgered residual]
-	++net_frame_counter_;
 	if (phase_ == Phase::Hello || phase_ == Phase::Auth) {
 		if (handshake_retry_datagram_.empty()) return out;
 		const uint64_t now_ms = monotonic_milliseconds_();

@@ -1012,6 +1012,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				view_.state().local_clock_ms);
 	lap.mark(devtools::Slot::SIM_CLIENT_SETUP);
 
+	// The join screen's state-6 pass: its pump receives, sends, then steps the process's
+	// net-frame counter, whatever the pass received (D-NET-733) [orig:
+	// MultiPlayer_PumpJoinVerificationFrame @0x424740 - receive @0x42475d, send @0x424767,
+	// ++ @0x424776].
+	const bool verification_pass = role_ == Role::Joiner && joiner_ != nullptr &&
+			joiner_->in_verification_wait();
+
 	// (1) RECV pump — fold S2C into ClientState, recv-before-send [orig: PumpClientProtocolRecv
 	// @0x42c228 runs before the SEND block].
 	if (role_ == Role::HostClient) {
@@ -1500,6 +1507,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	//  Game_ProcessMainFrame: Client_ProcessNetworkFrame @0x526692, then
 	//  Entity_UpdateAllEntities @0x52674b]
 	queue_carrier_repair_requests();
+	if (verification_pass) JoinerConnection::step_client_net_frame_counter();
 	lap.mark(devtools::Slot::SIM_CLIENT_SEND);
 	return outbound;
 }

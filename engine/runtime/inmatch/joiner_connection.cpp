@@ -580,6 +580,22 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	out.outbound.push_back(handshake_retry_datagram_);
 }
 
+namespace {
+// One per process, never reset [orig: g_ClientNetFrameCounter @0xA822A4].
+uint32_t g_client_net_frame_counter = 0;
+} // namespace
+
+uint32_t JoinerConnection::client_net_frame_counter() { return g_client_net_frame_counter; }
+
+void JoinerConnection::step_client_net_frame_counter() { ++g_client_net_frame_counter; }
+
+bool JoinerConnection::in_verification_wait() const {
+	return phase_ == Phase::Driving &&
+			(post_auth_stage_ == PostAuthStage::AwaitPaddingProbe ||
+			 post_auth_stage_ == PostAuthStage::AwaitGameStart) &&
+			verification_value_ == 0;
+}
+
 JoinScreenStage JoinerConnection::join_screen_stage() const {
 	// The enumerate-and-join's browse reads PRE_ENUMSESSION until a session answers
 	// [orig: UI_EnumerateAndJoinSession @0x569f50 - @0x56a0ac..0x56a0b4].
@@ -1152,7 +1168,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				// always ships and the stage always advances — a small or zero padding_len must not
 				// wedge the FSM here.
 				out.outbound.push_back(frame_inner_pending(
-						0x02, build_join_padding_echo(probe, net_frame_counter_)));
+						0x02, build_join_padding_echo(probe, client_net_frame_counter())));
 				post_auth_stage_ = PostAuthStage::AwaitGameStart;
 			}
 		} else if (m.tag == s2c::GAME_START_SIGNAL &&

@@ -706,6 +706,18 @@ public:
 	// accepts, the connect until S2C 0x00, the verification until the S2C 0x01
 	// value reads 1, then the host's queue until S2C 0x05 starts the game.
 	JoinScreenStage join_screen_stage() const;
+	// The join screen's state-6 wait: verification pending (the S2C 0x00 answered, the S2C
+	// 0x01 value still 0), whose every pass pumps once and steps the process's net-frame
+	// counter. [orig: MultiPlayer_JoinSessionStateMachine @0x56A65E..0x56A69C (the loop
+	// while MultiPlayer_PumpJoinVerificationFrame returns 0); MultiPlayer_PumpJoinVerification-
+	// Frame @0x424740 - the verification test @0x424747]
+	bool in_verification_wait() const;
+	// The client's net-frame counter, the padding echo's third dword: one per process,
+	// stepped once per state-6 pass after its receive and send, never reset (D-NET-733).
+	// [orig: g_ClientNetFrameCounter @0xA822A4 - the ++ @0x424776, its one read @0x42e12d
+	//  (NapiNPClientMsg_HandleJoinResponse -> NetPacket_WritePositionWithPadding @0x42e140)]
+	static uint32_t client_net_frame_counter();
+	static void step_client_net_frame_counter();
 	const JoinQueueRecord &join_queue() const { return join_queue_; }
 	// The cs_dir0 values this connection runs under: the template, overlaid by the host's 0x82 CS
 	// block at acceptance and by later cs_dir0 H:0x00 updates (fields 0, 1, 4, 5, 11, 13).
@@ -1084,12 +1096,6 @@ private:
 	// the same S2C 0x04 body at byte 18. A value of 4 walks slots 0..4.
 	// [orig: g_MaxPlayerSlots read at NapiNPClientMsg_PlayerSync @0x431370]
 	uint8_t max_player_slot_ = 0;
-	// Client net-frame counter echoed as the padding echo's third dword, never reset for a
-	// rejoin. Retail steps it only in the join screen's state-6 busy loop; ours on every
-	// pump (a ledgered residual: the retail count is CPU-bound).
-	// [orig: g_ClientNetFrameCounter @0xA822A4, ++ in MultiPlayer_PumpJoinVerificationFrame
-	//  @0x424740 (@0x424776), its one caller MultiPlayer_JoinSessionStateMachine @0x56A685]
-	uint32_t net_frame_counter_ = 0;
 	LoadoutKit loadout_kit_;      // binding-injected submission content (see set_loadout_kit)
 	bool loadout_kit_set_ = false;
 	const world::WeaponTable *weapons_ = nullptr; // set_weapon_table
