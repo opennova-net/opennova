@@ -5060,6 +5060,10 @@ add_test(NAME parked_hull_load COMMAND parked_hull_load_test)
 add_executable(selected_slot_test world/selected_slot_test.cpp)
 target_link_libraries(selected_slot_test PRIVATE opennova_runtime)
 add_test(NAME selected_slot COMMAND selected_slot_test)
+# D-NET-NEW-L7-1: a round_type naming ammo.def's first row is an unknown round.
+add_executable(round_type_index_test world/round_type_index_test.cpp)
+target_link_libraries(round_type_index_test PRIVATE opennova_runtime)
+add_test(NAME round_type_index COMMAND round_type_index_test)
 
 # --- parity lane L8 (round/info/serve) ---
 
