@@ -76,6 +76,9 @@ FieldUse picked_as(const FieldUse &field);
 // and worded by what it names, so a pick writes the number.
 std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Document &document, const NodeAddress &address,
                                             const FieldUse &field, const NameSource *names);
+// The same of a reference no document's record makes (a name a text writes at a span, ReferencePicker's TextPlace: a
+// field of no schema naming its kind in its scope): the graph's names alone, unworded (no record to word them by).
+std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const FieldUse &field, const NameSource *names);
 
 // The characters a reference field's text holds, which the game's reader keeps of a longer name (its width less
 // the terminator: a sound loop's 24 [orig: ItemDef_ParseProperty's strncpy of 0x18 @ 0x49FF08]); 0 for a field

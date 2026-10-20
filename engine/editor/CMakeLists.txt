@@ -478,6 +478,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/project_settings_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_reveal.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_tree.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/script_view.cpp

@@ -18,6 +18,7 @@
 #include <editor/model/field_text.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/project_find.h>
+#include <editor/ui/reference_fields.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/rename_dialog.h>
 #include <editor/ui/text_edit.h>
@@ -202,40 +203,6 @@ void place(ui_kit::WrapRow *row, float width) {
 	else ImGui::SameLine();
 }
 
-// Where a Go to leads, in its tooltip: the file opened at the record, or its page (DI-17).
-std::string go_to_words(const std::vector<ReferenceTarget> &targets) {
-	if (targets.size() > 1) return "Go to one of the " + std::to_string(targets.size()) + " places it leads.";
-	return window_requests::go_to_words(targets.front());
-}
-
-// A reference's Go to, to the places the game's lookup reaches (reference_targets,
-// made only while the tool is hovered, pressed or its menu open): one gone to, or several
-// offered in a menu (a font through a style variable: the variable where the game reads it,
-// or the file its value names). `pressed` is the tool's press; its tooltip is `tip`, then
-// where it leads after `lead`.
-void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value, bool pressed,
-                const std::string &tip, const char *lead) {
-	const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
-	const SessionView &view = workspace.view();
-	if (!view.findings.graph) return;
-	if (pressed || hovered) {
-		const std::vector<ReferenceTarget> targets =
-				reference_targets(*view.findings.graph, *view.project.scan, field, value);
-		if (pressed && targets.size() == 1) go_to(workspace, targets.front());
-		else if (pressed && !targets.empty()) ImGui::OpenPopup("go to");
-		if (hovered)
-			ui_kit::tooltip(targets.empty() ? tip
-			                                : tip + (tip.empty() ? "" : "\n") + lead + go_to_words(targets) +
-			                                          "\nThe keys: F12 with the pointer on the value, or Ctrl+click it; "
-			                                          "Shift+F12 lists its uses.");
-	}
-	if (!ImGui::BeginPopup("go to")) return;
-	for (const ReferenceTarget &target :
-			reference_targets(*view.findings.graph, *view.project.scan, field, value))
-		if (ImGui::MenuItem(target.label.c_str())) go_to(workspace, target);
-	ImGui::EndPopup();
-}
-
 // Whether a reference's Play sounds what it names: a sound set, a wave, or a dialog (DI-32: its lines as the game
 // plays them).
 bool plays_sound(ReferenceKind kind) {
@@ -394,72 +361,6 @@ void reference_tools(Workspace &workspace, ReferencePicker &picker, const Docume
 	// A texture's preview (ADR 0046 S18): the file its loader opens, as that loader loads it; under the
 	// field, or a line high beside its dot in a table's cell.
 	texture_preview::reference_field(workspace, field, value, compact);
-}
-
-// Where a reference's jumps lead (DI-18): what the game's lookup reaches (reference_targets); a name nothing
-// resolves, where it belongs (missing_target: DI-17's Go to that always lands).
-std::vector<ReferenceTarget> jump_targets(const SessionView &view, const FieldUse &field, const Value &value) {
-	std::vector<ReferenceTarget> out = reference_targets(*view.findings.graph, *view.project.scan, field, value);
-	ReferenceTarget home;
-	if (out.empty() && editor::reference_status(*view.findings.graph, field, value) == ReferenceStatus::Missing &&
-	    missing_target(field, value, view, home))
-		out.push_back(std::move(home));
-	return out;
-}
-
-// A reference's jumps over its value's control, drawn just before (DI-18; the control drawn after
-// SetNextItemAllowOverlap): while it is under the pointer or has the keyboard, what F12 (Go to definition) and
-// Shift+F12 (Find usages) act on, the uses those of what it names; with Ctrl held over it a hand, and a click
-// there its Go to, taken from the control under it (an invisible button over it, so the click neither types nor
-// opens a list); and its right-click menu: Go to definition, Find usages, Show in Files.
-void reference_jumps(Workspace &workspace, const FieldUse &field, const Value &value) {
-	const SessionView &view = workspace.view();
-	if (!view.findings.graph || !view.project.scan) return;
-	const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
-	const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_AllowWhenOverlappedByItem);
-	const bool focused = ImGui::IsItemFocused() || ImGui::IsItemActive();
-	const bool menu = ImGui::BeginPopupContextItem("reference jumps");
-	// Over its value with Ctrl held (the click's button over it active through the click, its release too).
-	const bool ctrl = ImGui::GetIO().KeyCtrl && ImGui::IsMouseHoveringRect(min, max) &&
-	                  ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-	if (!hovered && !focused && !menu && !ctrl) return;
-	const std::vector<ReferenceTarget> targets = jump_targets(view, field, value);
-	const auto usages = [&] {
-		ProjectFind::open_usages(workspace, targets.front().file, targets.front().missing ? std::string() : targets.front().locator);
-	};
-	if (menu) {
-		if (targets.empty()) ImGui::TextDisabled("It names nothing the project holds.");
-		for (size_t i = 0; i < targets.size(); ++i) {
-			ImGui::PushID(static_cast<int>(i));
-			const std::string label = targets.size() == 1 ? std::string("Go to definition") : "Go to " + targets[i].label;
-			if (ImGui::MenuItem(label.c_str(), i == 0 ? "F12" : nullptr)) go_to(workspace, targets[i]);
-			ui_kit::tooltip(window_requests::go_to_words(targets[i]) + (i == 0 ? " (F12, or Ctrl+click the value)" : ""));
-			ImGui::PopID();
-		}
-		if (!targets.empty()) {
-			if (ImGui::MenuItem("Find usages", "Shift+F12")) usages();
-			ui_kit::tooltip("Who names " + targets.front().label + ", each a Go to.");
-			const bool reveals = view.allows(EditorRequestKind::ShowInFiles);
-			if (ImGui::MenuItem("Show in Files", nullptr, false, reveals) && reveals)
-				workspace.request(request::show_in_files(targets.front().file));
-			ui_kit::tooltip("Select " + targets.front().file + " in Files.");
-		}
-		ImGui::EndPopup();
-	}
-	if (targets.empty()) return;
-	JumpSubject subject;
-	subject.definition = targets;
-	subject.usages_file = targets.front().file;
-	if (!targets.front().missing) subject.usages_locator = targets.front().locator;
-	subject.pointer = hovered || ctrl;
-	workspace.offer_jump(subject);
-	if (!ctrl) return;
-	// Ctrl held over the value: a hand, and a click goes where it names.
-	ImGui::SetCursorScreenPos(min);
-	const bool clicked = ImGui::InvisibleButton("##ctrl go to", ImVec2(std::max(max.x - min.x, 1.0f), std::max(max.y - min.y, 1.0f)));
-	ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-	ui_kit::tooltip(window_requests::go_to_words(targets.front()) + " (Ctrl+click)");
-	if (clicked) go_to(workspace, targets.front());
 }
 
 // A Files row dropped on a text reference's value: the file set on every target, when it is one

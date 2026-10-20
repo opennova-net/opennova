@@ -19,6 +19,7 @@
 #include <optional>
 #include <set>
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 
 #include <imgui.h>
@@ -65,6 +66,33 @@ void missing_fixes(const SessionView &view, const Document &document, const Node
 	if (missing) fixes = fixes_raised_at_once(fixes_for(finding, view));
 }
 
+// The same of a name a text writes: the finding the graph makes of its edge, else, for a kind the graph finds none of
+// missing (an effect's particle, its file's project check's particle.effect_unresolved), the findings at its place,
+// each with the fixes its maker planned.
+void missing_fixes(const SessionView &view, const TextPlace &place, bool &missing, std::vector<ProblemFix> &fixes) {
+	fixes.clear();
+	missing = false;
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph || place.value.empty() || place.kind == ReferenceKind::None) return;
+	const GraphEdge edge = place.edge();
+	missing = graph->resolve(edge) == ReferenceStatus::Missing;
+	if (!missing) return;
+	Diagnostic finding;
+	if (missing_finding(*graph, edge, finding)) {
+		fixes = fixes_raised_at_once(fixes_for(finding, view));
+		return;
+	}
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (edge.span.line && d.asset == edge.source && d.line == edge.span.line && d.column == edge.span.column)
+			for (ProblemFix &fix : fixes_raised_at_once(fixes_for(d, view))) fixes.push_back(std::move(fix));
+}
+
+// The bytes a name takes in a text written in the game's code page: what a reader's slot holds of it.
+size_t text_bytes(const std::string &name) {
+	std::string stored;
+	return utf8_to_cp1252(name, stored) ? stored.size() : name.size();
+}
+
 // Whether a typed text is a value the field takes as it is (the picker's "Use"): a whole number for a
 // number field, any text for a text one.
 bool typed_takes(const FieldUse &field, const std::string &typed) {
@@ -76,12 +104,36 @@ bool typed_takes(const FieldUse &field, const std::string &typed) {
 
 } // namespace
 
+GraphEdge TextPlace::edge() const {
+	GraphEdge out;
+	out.source = document ? document->path() : std::string();
+	out.record = record;
+	out.field = key;
+	out.kind = kind;
+	out.value = value;
+	out.scope = scope;
+	out.loader_arg = loader_arg;
+	out.span = span;
+	out.width = width;
+	if (span.line) out.locator = TextDocument::locator(span.line, span.column);
+	out.rewritable = true;
+	return out;
+}
+
+FieldUse TextPlace::field() const {
+	FieldUse out;
+	out.reference = kind;
+	out.scope = scope;
+	out.loader_arg = loader_arg;
+	return out;
+}
+
 ReferencePicker::ReferencePicker() = default;
 
 ReferencePicker::~ReferencePicker() = default;
 
 ReferencePicker::ListKey ReferencePicker::cache_key(const SessionView &view,
-		const Document &document) {
+		const DocumentBase &document) {
 	const RevisionKey reads = revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files,
 			ViewConcern::Project, ViewConcern::Preferences});
 	return {reads, document.identity(), document.revision()};
@@ -94,6 +146,7 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	popup.view = &view;
 	popup.key = key;
 	popup.field = field;
+	popup.limit = field_name_limit(field);
 	++lists_made_;
 	// Each name by what it names (ADR 0046 S15: an item id by its catalog's name, an SSN by its entity, the
 	// player first), the name muted beside the words: picker_choices, as the wire's reference_choices.
@@ -114,31 +167,50 @@ void ReferencePicker::refresh_fixes(Popup &popup, const SessionView &view, const
 	popup.view = &view;
 	popup.key = key;
 	popup.field = field;
+	popup.limit = field_name_limit(field);
 	++lists_made_;
 	missing_fixes(view, document, record, field, value, popup.missing, popup.fixes);
 }
 
-void ReferencePicker::draw_fixes(Workspace &workspace, const Document &document, const NodeAddress &record,
-                                 const FieldUse &field, const Value &value, bool open) {
-	if (open) ImGui::OpenPopup("fixes");
-	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("fixes")};
-	const int frame = ImGui::GetFrameCount();
-	let_go(frame);
-	if (!ImGui::BeginPopup("fixes")) {
-		const auto kept = popups_.find(key);
-		if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
-		return;
+void ReferencePicker::refresh(Popup &popup, const SessionView &view, const TextPlace &place, bool choices) {
+	const ListKey key = cache_key(view, *place.document);
+	if (popup.view == &view && popup.key == key) return;
+	popup.view = &view;
+	popup.key = key;
+	popup.field = place.field();
+	popup.limit = place.limit();
+	++lists_made_;
+	popup.choices.clear();
+	if (choices) {
+		std::optional<GraphNameSource> names;
+		if (view.findings.graph) names.emplace(*view.findings.graph);
+		popup.choices = picker_choices(view.findings.graph.get(), popup.field, names ? &*names : nullptr);
 	}
-	prune(workspace.view());
+	missing_fixes(view, place, popup.missing, popup.fixes);
+}
+
+ReferencePicker::Popup &ReferencePicker::opened(const SessionView &view, const Key &key) {
+	prune(view);
 	Popup &popup = popups_[key];
-	popup.drawn = frame;
+	popup.drawn = ImGui::GetFrameCount();
 	if (!popup.view) held_.push_back(key);
-	refresh_fixes(popup, workspace.view(), document, record, field, value);
+	return popup;
+}
+
+void ReferencePicker::closed(const Key &key) {
+	const auto kept = popups_.find(key);
+	if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
+}
+
+namespace {
+
+// A fixes popup's body: whether the value is still missing, and each fix, raised through the workspace.
+void fixes_list(Workspace &workspace, bool missing, const std::vector<ProblemFix> &fixes) {
 	ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "%s",
-	                   !popup.missing ? "The value is no longer missing."
-	                   : popup.fixes.empty() ? "The value is missing; nothing here makes it."
-	                                         : "The value is missing:");
-	for (const ProblemFix &fix : popup.fixes) {
+	                   !missing ? "The value is no longer missing."
+	                   : fixes.empty() ? "The value is missing; nothing here makes it."
+	                                   : "The value is missing:");
+	for (const ProblemFix &fix : fixes) {
 		ImGui::PushID(fix.label.c_str());
 		if (ImGui::Selectable(fix.label.c_str())) {
 			workspace.request(fix.request);
@@ -147,6 +219,31 @@ void ReferencePicker::draw_fixes(Workspace &workspace, const Document &document,
 		ui_kit::tooltip(fix.detail);
 		ImGui::PopID();
 	}
+}
+
+} // namespace
+
+void ReferencePicker::draw_fixes(Workspace &workspace, const Document &document, const NodeAddress &record,
+                                 const FieldUse &field, const Value &value, bool open) {
+	if (open) ImGui::OpenPopup("fixes");
+	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("fixes")};
+	let_go(ImGui::GetFrameCount());
+	if (!ImGui::BeginPopup("fixes")) return closed(key);
+	Popup &popup = opened(workspace.view(), key);
+	refresh_fixes(popup, workspace.view(), document, record, field, value);
+	fixes_list(workspace, popup.missing, popup.fixes);
+	ImGui::EndPopup();
+}
+
+void ReferencePicker::draw_fixes(Workspace &workspace, const TextPlace &place, bool open) {
+	if (!place.document) return;
+	if (open) ImGui::OpenPopup("fixes");
+	const Key key{place.document->identity(), 0, 0, 0, ImGui::GetID("fixes")};
+	let_go(ImGui::GetFrameCount());
+	if (!ImGui::BeginPopup("fixes")) return closed(key);
+	Popup &popup = opened(workspace.view(), key);
+	refresh(popup, workspace.view(), place, false);
+	fixes_list(workspace, popup.missing, popup.fixes);
 	ImGui::EndPopup();
 }
 
@@ -199,19 +296,31 @@ bool ReferencePicker::draw(Workspace &workspace, const Document &document, const
 	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("references")};
 	// A list whose popup is not drawn open goes as any popup of the picker draws: one closed, and
 	// one whose picker the window no longer draws (another record's, of the same popup id or not).
-	const int frame = ImGui::GetFrameCount();
-	let_go(frame);
+	let_go(ImGui::GetFrameCount());
 	if (!ImGui::BeginPopup("references")) {
 		// Closed (or never opened): a list it held goes now, made again as it opens.
-		const auto kept = popups_.find(key);
-		if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
+		closed(key);
 		return false;
 	}
-	prune(workspace.view());
-	Popup &popup = popups_[key];
-	popup.drawn = frame;
-	if (!popup.view) held_.push_back(key);
+	Popup &popup = opened(workspace.view(), key);
 	refresh(popup, workspace.view(), document, record, field, value, others);
+	const bool done = draw_popup(workspace, popup, picked, false);
+	ImGui::EndPopup();
+	return done;
+}
+
+bool ReferencePicker::draw(Workspace &workspace, const TextPlace &place, bool compact, std::string &picked) {
+	if (ImGui::SmallButton(compact ? "..." : "Pick")) ImGui::OpenPopup("references");
+	ui_kit::tooltip("Pick a name the project has.");
+	if (!place.document) return false;
+	const Key key{place.document->identity(), 0, 0, 0, ImGui::GetID("references")};
+	let_go(ImGui::GetFrameCount());
+	if (!ImGui::BeginPopup("references")) {
+		closed(key);
+		return false;
+	}
+	Popup &popup = opened(workspace.view(), key);
+	refresh(popup, workspace.view(), place, true);
 	const bool done = draw_popup(workspace, popup, picked, false);
 	ImGui::EndPopup();
 	return done;
@@ -227,14 +336,10 @@ bool ReferencePicker::draw_field(Workspace &workspace, const Document &document,
 	const std::string shown = mixed ? std::string("(mixed)") : words.text.empty() ? raw : words.text;
 	const std::string muted = mixed || words.text.empty() || words.raw.empty() ? std::string() : words.raw;
 	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("##value")};
-	const int frame = ImGui::GetFrameCount();
-	let_go(frame);
+	let_go(ImGui::GetFrameCount());
 	bool done = false;
 	if (ImGui::BeginCombo("##value", "", int(ImGuiComboFlags_CustomPreview) | int(ImGuiComboFlags_HeightLarge))) {
-		prune(workspace.view());
-		Popup &popup = popups_[key];
-		popup.drawn = frame;
-		if (!popup.view) held_.push_back(key);
+		Popup &popup = opened(workspace.view(), key);
 		// Opened afresh, nothing typed yet: a pick by name starts from every name (the last pick's
 		// words are not kept as a filter).
 		if (ImGui::IsWindowAppearing()) popup.filter[0] = '\0';
@@ -242,8 +347,7 @@ bool ReferencePicker::draw_field(Workspace &workspace, const Document &document,
 		done = draw_popup(workspace, popup, picked, true);
 		ImGui::EndCombo();
 	} else {
-		const auto kept = popups_.find(key);
-		if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
+		closed(key);
 	}
 	// The frame stays the item just drawn once its preview is (EndComboPreview leaves the preview's text the last
 	// item): its tooltip, and what a caller asks of it after (DI-18: a Ctrl+click's button over it, its menu).
@@ -337,7 +441,7 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 	const float thumb = textures ? ImGui::GetTextLineHeight() * 2.0f : 0.0f;
 	const float line = textures ? thumb + ImGui::GetStyle().ItemSpacing.y : ImGui::GetTextLineHeightWithSpacing();
 	const size_t rows = std::clamp<size_t>(shown.size(), 3, textures ? 8 : 14);
-	const size_t limit = field_name_limit(popup.field);
+	const size_t limit = popup.limit;
 	ImGui::BeginChild("names", ImVec2(width, line * float(rows) + ImGui::GetTextLineHeightWithSpacing() * 0.5f),
 	                  ImGuiChildFlags_Borders);
 	int hovered = -1;
@@ -375,7 +479,7 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 			// then what it would be when not found, or that the field cannot hold it whole (DI-09: the game's
 			// reader cuts it, and no lookup finds the cut name); a sound's Play (DI-02's player).
 			const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
-			const bool fits = !limit || strutil::utf8_length(choice.name) <= limit;
+			const bool fits = !limit || (popup.field.schema ? strutil::utf8_length(choice.name) : text_bytes(choice.name)) <= limit;
 			const char *word = !fits ? "too long" : found ? "" : ui_kit::reference_word(choice.status);
 			const bool plays = choice.kind == ReferenceKind::Sound;
 			const float room = ImGui::GetContentRegionAvail().x -
@@ -457,11 +561,30 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 
 bool ReferencePicker::draw_completions(Workspace &workspace, const Document &document, const NodeAddress &record,
                                        const FieldUse &field, const Value &value, std::string &picked) {
+	const auto *text = std::get_if<std::string>(&value);
+	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetItemID()};
+	return completions(workspace, key, field, field_name_limit(field), text ? *text : std::string(), picked,
+	                   [&](const SessionView &view, const NameSource *names) {
+		                   return picker_choices(view.findings.graph.get(), document, record, field, names);
+	                   });
+}
+
+bool ReferencePicker::draw_completions(Workspace &workspace, const TextPlace &place, const std::string &typed,
+                                       std::string &picked) {
+	if (!place.document) return false;
+	const FieldUse field = place.field();
+	const Key key{place.document->identity(), 0, 0, 0, ImGui::GetItemID()};
+	return completions(workspace, key, field, place.limit(), typed, picked, [&](const SessionView &view, const NameSource *names) {
+		return picker_choices(view.findings.graph.get(), field, names);
+	});
+}
+
+bool ReferencePicker::completions(Workspace &workspace, const Key &key, const FieldUse &field, size_t limit,
+                                  const std::string &typed, std::string &picked, const ChoicesOf &choices_of) {
 	// The box's frame: the keys reach it while it has the keyboard, and on the frame Enter lets it go.
 	const bool keyed = ImGui::IsItemActive() || ImGui::IsItemDeactivated();
 	const ImVec2 under(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y);
 	const float width = ImGui::GetItemRectSize().x;
-	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetItemID()};
 	const int frame = ImGui::GetFrameCount();
 	const bool ours = !(completing_.key < key) && !(key < completing_.key) && completing_.drawn >= 0;
 	// Shown while the box has the keyboard, and while the list itself is under the pointer (a click on it takes
@@ -472,8 +595,6 @@ bool ReferencePicker::draw_completions(Workspace &workspace, const Document &doc
 		completing_.key = key;
 	}
 	const SessionView &view = workspace.view();
-	const auto *text = std::get_if<std::string>(&value);
-	const std::string typed = text ? *text : std::string();
 	if (typed != completing_.typed) completing_.cursor = SIZE_MAX;
 	completing_.typed = typed;
 	completing_.drawn = frame;
@@ -485,14 +606,19 @@ bool ReferencePicker::draw_completions(Workspace &workspace, const Document &doc
 	// The names, made again only when what they read moves (the graph, the files, the project, the field's
 	// scope): a key typed changes the document, not them.
 	const RevisionKey reads = revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files, ViewConcern::Project});
-	if (!(completing_.view == reads) || completing_.scope != field.scope || completing_.choices.empty()) {
+	if (!(completing_.view == reads) || completing_.scope != field.scope || completing_.kind != field.reference ||
+	    completing_.choices.empty()) {
 		std::optional<GraphNameSource> names;
 		if (view.findings.graph) names.emplace(*view.findings.graph);
-		completing_.choices = picker_choices(view.findings.graph.get(), document, record, field, names ? &*names : nullptr);
+		completing_.choices = choices_of(view, names ? &*names : nullptr);
 		completing_.view = reads;
 		completing_.scope = field.scope;
+		completing_.kind = field.reference;
 	}
 	std::vector<ReferenceCompletion> completions = complete_reference(completing_.choices, field, typed);
+	// A name the reader's slot holds as bytes of the game's code page (a text place's, TextPlace::limit).
+	if (!field.schema && limit)
+		for (ReferenceCompletion &completion : completions) completion.fits = text_bytes(completion.choice.name) <= limit;
 	// The whole name typed, and nothing else beginning it: nothing to complete.
 	if (completions.empty() || (completions.front().exact && (completions.size() == 1 || !completions[1].prefix))) {
 		completing_.hovered = false;
@@ -510,7 +636,6 @@ bool ReferencePicker::draw_completions(Workspace &workspace, const Document &doc
 		if (enter && completing_.cursor != SIZE_MAX) take = completing_.cursor;
 		if (ImGui::IsKeyPressed(ImGuiKey_Tab, false)) take = completing_.cursor == SIZE_MAX ? 0 : completing_.cursor;
 	}
-	const size_t limit = field_name_limit(field);
 	ImGui::SetNextWindowPos(under);
 	ImGui::SetNextWindowSizeConstraints(ImVec2(std::max(width, ImGui::GetFontSize() * 16.0f), 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 	const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -556,6 +681,10 @@ bool ReferencePicker::draw_completions(Workspace &workspace, const Document &doc
 }
 
 bool ReferencePicker::accept_file(const SessionView &view, const FieldUse &field, std::string &picked) {
+	return accept_file(view, field.reference, field.loader_arg, picked);
+}
+
+bool ReferencePicker::accept_file(const SessionView &view, ReferenceKind kind, int32_t loader_arg, std::string &picked) {
 	if (!ImGui::BeginDragDropTarget()) return false;
 	bool dropped = false;
 	// The file looked at before the drop is accepted: one that does not fit is never accepted.
@@ -566,7 +695,7 @@ bool ReferencePicker::accept_file(const SessionView &view, const FieldUse &field
 		const AssetEntry *entry = nullptr;
 		for (const AssetEntry &candidate : view.project.scan->entries)
 			if (candidate.relative_path == path) entry = &candidate;
-		if (entry && file_serves_reference(entry->kind, field.reference, field.loader_arg) &&
+		if (entry && file_serves_reference(entry->kind, kind, loader_arg) &&
 		    ImGui::AcceptDragDropPayload(kFileDragPayload)) {
 			picked = entry->logical_name;
 			dropped = true;
