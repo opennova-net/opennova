@@ -59,8 +59,8 @@ bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
     // [orig: HostDialog_ReadSettings @0x555940 - GAME_NAME @0x555967 (32),
     //  SERVER_PASSWORD @0x555990 (17), SERVER_MESSAGE @0x5559BC (128), BLUE_PW
     //  @0x555E7F, RED_PW @0x555EA8, SPECTATOR_PW @0x555ED1 (17 each);
-    //  CStaticWnd_GetLabelText @0x657570]; the location's first three characters
-    // [orig: strncpy(country_3C5, item, min(len, 3)) @0x555A72].
+    //  CStaticWnd_GetLabelText @0x657570]; the location's item, its length clamped into 1..3
+    // [orig: strncpy(country_3C5, item, count) @0x555A72].
     if (control == "GAME_NAME") { cfg.game_name = value.substr(0, 32); return true; }
     if (control == "SERVER_PASSWORD") { cfg.mp_host_game_password = value.substr(0, 17); return true; }
     if (control == "SERVER_MESSAGE") { cfg.servermsg = value.substr(0, 128); return true; }
@@ -68,13 +68,18 @@ bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
     if (control == "RED_PW") { cfg.mp_host_side_password_b = value.substr(0, 17); return true; }
     if (control == "SPECTATOR_PW") { cfg.mp_host_spectator_password = value.substr(0, 17); return true; }
     if (control == "GAME_LOCATION") {
-        // strncpy with the item's own length (3 at most) as the count: the item's bytes over the
-        // word's, no NUL, so a shorter item keeps the old word's tail
-        // [orig: HostDialog_ReadSettings @0x555A51 (3), @0x555A58..0x555A69 (strlen),
-        //  @0x555A72 strncpy(country_3C5, item, count)].
-        const size_t count = std::min<size_t>(value.size(), 3);
-        if (cfg.country.size() < count) cfg.country.resize(count);
-        cfg.country.replace(0, count, value, 0, count);
+        // strncpy with the item's length clamped into 1..3 as the count: a 1..3 character item's
+        // bytes over the word's with no NUL, so a shorter item keeps the old word's tail ("DE"
+        // over "USA" reads "DEA"); an empty item copies its NUL alone, so the word reads "".
+        // [orig: HostDialog_ReadSettings @0x555A1B..0x555A72 - the length against 3 @0x555A1B,
+        //  against 1 @0x555A30, `mov ecx, 1` @0x555A35, `mov ecx, 3` @0x555A51, the length
+        //  @0x555A58..0x555A69, strncpy(country_3C5, item, count) @0x555A72]
+        const size_t count = std::clamp<size_t>(value.size(), 1, 3);
+        const size_t copied = std::min(count, value.size());
+        if (cfg.country.size() < copied) cfg.country.resize(copied);
+        cfg.country.replace(0, copied, value, 0, copied);
+        // strncpy pads with NULs up to the count: an item shorter than the count ends the word.
+        if (copied < count) cfg.country.resize(copied);
         return true;
     }
     const int32_t number = edit_integer(value);

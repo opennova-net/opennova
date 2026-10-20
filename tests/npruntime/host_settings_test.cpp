@@ -135,9 +135,13 @@ int main() {
     TEST_EXPECT(cfg.mp_max_players == 64 && shown("MAX_PLAYERS") == "64");
     TEST_EXPECT(read("SERVERTYPE", "0") && shown("SERVERTYPE") == "0");
     TEST_EXPECT(read("GAME_LOCATION", "USA") && shown("GAME_LOCATION") == "USA");
-    // A shorter item copies its own bytes alone, no NUL: "DE" over "USA" leaves "DEA"
-    // [orig: HostDialog_ReadSettings @0x555A51..0x555A72].
+    // The count is the item's length clamped into 1..3: a shorter item copies its own bytes
+    // alone, no NUL: "DE" over "USA" leaves "DEA"; an empty item copies its NUL alone (the
+    // count's floor of 1), so the word reads "" [orig: HostDialog_ReadSettings
+    // @0x555A1B..0x555A72, `mov ecx, 1` @0x555A35].
     TEST_EXPECT(read("GAME_LOCATION", "DE") && cfg.country == "DEA");
+    TEST_EXPECT(read("GAME_LOCATION", "USA") && cfg.country == "USA");
+    TEST_EXPECT(read("GAME_LOCATION", "") && cfg.country.empty() && shown("GAME_LOCATION").empty());
     TEST_EXPECT(read("GAME_LOCATION", "USA") && cfg.country == "USA");
     TEST_EXPECT(read("GAME_NAME", "Night Ops") && shown("GAME_NAME") == "Night Ops");
     TEST_EXPECT(read("CONNECTIONSPEED", "5") && read("MAX_FF_KILLS", "3"));
