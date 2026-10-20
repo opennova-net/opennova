@@ -45,7 +45,7 @@ last key's time; every clip is at 30 fps.
 |---|---|---|
 | `on_knif_anim_reset` | the rest pose | 1 |
 | `on_knif_anim_wpn_idle` | the hold, as the original's `m9k_1i`: the knife upright low on the right (its handle 23 degrees right of the view's centre, the tip 6 degrees above it), the flat to the eye and the edge turned 20 degrees toward it, so its grind catches the light; a breath (at most 5 mm and 1 degree, a 2 s loop) | 60, cyclic |
-| `on_knif_anim_wpn_fire_backhand` | the backhand: across to the left with the wrist turning the edge to the right (frames 2, 3), cut back across to the right (5 to 8), carried through low on the right (10), back to the hold (15) | 15 |
+| `on_knif_anim_wpn_fire_backhand` | the backhand: wound up across to the upper left, the blade laid back to the left and the wrist turned 40 degrees (frames 2, 3), cut down and across to the right, the tip whipping through upright to point right (4 to 7), carried through low on the right (8, 10), back to the hold (15); the flat stays to the eye throughout | 15 |
 | `on_knif_anim_wpn_fire` | the forehand, the original's `m9k_1f` cut: cocked back to the right (2), swept across to the left with the edge leading (4 to 8), carried through low on the left (10), back to the hold (15) | 15 |
 | `on_knif_anim_wpn_switchto` | the draw: up from below the view on the right, the blade turning upright, a little past the hold (10) and settling into it | 21 |
 | `on_knif_anim_wpn_switchfrom` | the holster: tipped right and down out of view | 12 |
