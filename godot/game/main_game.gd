@@ -44,7 +44,7 @@ const PICK_KEY := KEY_F6
 # mouse is released and player input idles. Retail's dead player has no gameplay
 # input anyway — the uplink is held by g_ClientDeployHold and the input legs gate on
 # g_RoundOver — so this state is what makes the spawn list clickable.
-enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND, COMMAND_MAP }
+enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND, COMMAND_MAP, VEHICLE }
 
 @onready var _world: GameWorld = $World
 @onready var _camera: FlyCamera = $Camera3D
@@ -82,6 +82,8 @@ var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
+# The in-world vehicle screen (vehicle.mnu VEHICLE) over the engine's VehicleMenu.
+var _vehicle_menu_presenter: VehicleMenuPresenter
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _command_map_presenter: CommandMapPresenter  # the commander map (cmap.mnu CMAP)
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
@@ -325,6 +327,15 @@ func _ready() -> void:
 			_hud if _hud != null else self)
 	_armory_presenter.opened.connect(func() -> void: _state = State.ARMORY)
 	_armory_presenter.closed.connect(resume)
+	# The vehicle screen over live play, like the armory (VEHICLE holds a screen).
+	_vehicle_menu_presenter = VehicleMenuPresenter.new()
+	_vehicle_menu_presenter.name = "VehicleMenuPresenter"
+	add_child(_vehicle_menu_presenter)
+	_vehicle_menu_presenter.setup(
+			func() -> Simulation: return _world.get_sim() if _world != null else null,
+			_hud if _hud != null else self)
+	_vehicle_menu_presenter.opened.connect(func() -> void: _state = State.VEHICLE)
+	_vehicle_menu_presenter.closed.connect(_leave_screen.bind(State.VEHICLE))
 	# The joiner's deploy-map screen (death.mnu DEATH; net-re 5.61) owns the cursor.
 	_deploy_presenter = DeployScreenPresenter.install(self, _world.world_view(),
 			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
@@ -672,6 +683,8 @@ func shell_state_name() -> String:
 			return "deploy"
 		State.COMMAND_MAP:
 			return "command_map"
+		State.VEHICLE:
+			return "vehicle"
 		_:
 			return "menu"
 
@@ -1548,6 +1561,8 @@ func _on_camera_escape() -> void:
 		resume()
 	elif _state == State.COMMAND_MAP and _command_map_presenter != null:
 		_command_map_presenter.close()
+	elif _state == State.VEHICLE and _vehicle_menu_presenter != null:
+		_vehicle_menu_presenter.close()
 
 
 ## The quit dialog's yes: the Exit Mission tone, then the mission ends and the
@@ -1694,6 +1709,8 @@ func _teardown_world(restart: bool) -> void:
 		_player_presenter.teardown()
 	if _armory_presenter != null:
 		_armory_presenter.teardown()  # the built menu holds the OLD world's resource root
+	if _vehicle_menu_presenter != null:
+		_vehicle_menu_presenter.teardown()
 	if _deploy_presenter != null:
 		_deploy_presenter.teardown()  # same stale-root hazard, and the shell's blanket
 		# HUD visibility toggle would re-show a surviving DEATH shroud next mission
@@ -1851,7 +1868,8 @@ func _process(delta: float) -> void:
 	var dev_tools_open := is_dev_tools_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	var dev_tools_interacting := dev_tools_open and not _dev_tools.is_game_playing()
-	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND, State.COMMAND_MAP] \
+	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND, State.COMMAND_MAP,
+			State.VEHICLE] \
 			or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
@@ -1896,12 +1914,18 @@ func _process(delta: float) -> void:
 		# carries the witness).
 		frame_input = _player_presenter.before_world_tick(
 				delta, player_live, player_live,
-				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP)
+				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
+						or _state == State.VEHICLE)
 		# The held USE row's armory arm took its open in that poll (engine
 		# controls::PlayerActions, through the sim's press latch); the shell
 		# opens what it names.
 		if _player_presenter.take_use_item_armory_request():
 			_open_armory()
+		# The vehicle-loadout arm's open (engine controls::PlayerActions; the team
+		# gate in the router): vehicle.mnu VEHICLE over live play.
+		if _player_presenter.take_use_item_vehicle_menu_request() and _state == State.WORLD \
+				and _vehicle_menu_presenter != null:
+			_vehicle_menu_presenter.open()
 	else:
 		frame_input = MissionFrameInput.new()
 		frame_input.delta_seconds = delta
@@ -1924,7 +1948,7 @@ func _process(delta: float) -> void:
 	var skip_hud := probe_enabled and _perf_probe.skip_hud
 	if _hud_presenter != null and not skip_hud \
 			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND,
-					State.COMMAND_MAP]:
+					State.COMMAND_MAP, State.VEHICLE]:
 		_hud_presenter.tick(is_gameplay_input_active())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0

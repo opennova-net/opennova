@@ -5082,6 +5082,11 @@ add_test(NAME npruntime_joiner_record_flags COMMAND npruntime_joiner_record_flag
 add_executable(netsim_client_replica_census_test netsim/client_replica_census_test.cpp)
 target_link_libraries(netsim_client_replica_census_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_replica_census COMMAND netsim_client_replica_census_test)
+# The vehicle screen (D-NET-NEW-L5-5): the first open's C2S 0x42, the poll's per-frame retry
+# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick.
+add_executable(npruntime_vehicle_menu_test npruntime/vehicle_menu_test.cpp)
+target_link_libraries(npruntime_vehicle_menu_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_vehicle_menu COMMAND npruntime_vehicle_menu_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

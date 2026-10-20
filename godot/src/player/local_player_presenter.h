@@ -239,6 +239,9 @@ public:
 	// The held USE row's armory arm took its open this frame (PlayerInputRouter::
 	// take_armory_request); reading clears it.
 	bool take_use_item_armory_request();
+	// The vehicle-loadout arm's open (PlayerInputRouter::take_vehicle_menu_request);
+	// reading clears it.
+	bool take_use_item_vehicle_menu_request();
 	// A menu close's input reset (PlayerInputRouter::reset_input_state).
 	void reset_input_state();
 	// Mouse-look rides the input router: raw pixel deltas into the SIM's

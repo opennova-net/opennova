@@ -76,6 +76,36 @@ bool Simulation::local_player_vehicle_zone_team_matches() const {
 	return kernel_ && opennova::world::local_player_vehicle_zone_team_matches(kernel_->world);
 }
 
+// The vehicle screen's seam: the engine's inmatch::VehicleMenu on the role's
+// client runtime (the joiner's or the listen host's own) carries every rule.
+bool Simulation::open_vehicle_menu() {
+	if (!kernel_ || runtime_ == nullptr) return false;
+	runtime_->vehicle_menu().open(*runtime_, kernel_->world, kernel_->items_table());
+	return true;
+}
+
+PackedStringArray Simulation::get_vehicle_menu_rows() const {
+	PackedStringArray out;
+	if (runtime_ == nullptr) return out;
+	// The group names are items.def bytes (the machine's codepage).
+	for (const opennova::inmatch::VehicleMenuRow &row : runtime_->vehicle_menu().rows())
+		out.push_back(opennova::cp1252_to_gd(row.text));
+	return out;
+}
+
+int Simulation::get_vehicle_menu_selected_row() const {
+	return runtime_ != nullptr ? runtime_->vehicle_menu().selected_row() : -1;
+}
+
+void Simulation::select_vehicle_menu_row(int p_row) {
+	if (runtime_ != nullptr) runtime_->vehicle_menu().select_row(p_row);
+}
+
+bool Simulation::click_vehicle_menu(bool p_cancel) {
+	if (!kernel_ || runtime_ == nullptr) return false;
+	return runtime_->vehicle_menu().click(*runtime_, kernel_->world, p_cancel);
+}
+
 bool Simulation::local_player_toggle_mount() {
 	// The USE-ITEM mount toggle for the local player — the shell calls this when the
 	// armory/vehicle-zone legs of the key don't apply. [orig: Input_ProcessFrame release

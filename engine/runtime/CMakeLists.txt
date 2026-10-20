@@ -532,6 +532,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L3 sources ---
     # --- parity lane L4 sources ---
     # --- parity lane L5 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5)
     # --- parity lane L7 sources ---
     # --- parity lane L8 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-NEW-L8-2)

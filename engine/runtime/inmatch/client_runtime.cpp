@@ -484,8 +484,17 @@ bool ClientRuntime::begin_mission_reload() {
 	// (JoinerConnection's mission_started) [orig: g_RoundOver, cleared
 	// by Game_StartMission @0x524A1F]; the frame clock runs on.
 	const auto clock = view_.state().local_clock_ms;
+	// The S2C 0x70 table and its received flag are globals no mission start
+	// touches (their writers are the 0x70 handler and the vehicle screen's
+	// first open alone), so the vehicle screen's poll reads the last reply
+	// across the reload. [orig: g_VehicleSpawnAvailabilityReceived 0xA81BB0 --
+	//  stores @0x429ACE / @0x429AE7 / @0x56425D; g_VehicleSpawnAvailabilityCount
+	//  0xA821B8 -- @0x429AC8 / @0x429AE2]
+	replication::ClientVehicleSpawnAvailability vehicle_spawn =
+			std::move(view_.state().vehicle_spawn_availability);
 	view_.state() = replication::ClientState{};
 	view_.state().local_clock_ms = clock;
+	view_.state().vehicle_spawn_availability = std::move(vehicle_spawn);
 	view_.state().spawn_success_gate = true;
 	view_.reset_minimap_overlays();
 	view_.drain_round_events();
@@ -764,6 +773,38 @@ bool ClientRuntime::queue_team_change_request() {
 	}
 	view_.age_minimap_overlays(0x48A8u);
 	return true;
+}
+
+// [orig: NetPacket_SendEmptyType42 @0x42DBE0 -- g_NetMsgLen = 0 @0x42DBF2,
+//  QueueReliableMessage(0x42, 1, 0, .., 0) @0x42DC01]
+bool ClientRuntime::queue_vehicle_spawn_availability_request() {
+	if (queue_host_message(c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {})) return true;
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	send_queue_.push_back(make_protocol_message(c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {}));
+	return true;
+}
+
+// [orig: NetPacket_SendWeaponSelectType40 @0x42DB50 -- the group byte @0x42DB64,
+//  the handle word @0x42DB71, g_NetMsgLen = 3 @0x42DB77, QueueReliableMessage(0x40,
+//  1, 0, .., 3) @0x42DB86]
+bool ClientRuntime::queue_vehicle_spawn_request(uint16_t source_handle, uint8_t type_index) {
+	VehicleSpawnRequest pick;
+	pick.source_handle = source_handle;
+	pick.type_index = type_index;
+	std::vector<uint8_t> body = encode_vehicle_spawn_request(pick);
+	if (queue_host_message(c2s::VEHICLE_SPAWN_REQUEST, body)) return true;
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	send_queue_.push_back(make_protocol_message(c2s::VEHICLE_SPAWN_REQUEST, std::move(body)));
+	return true;
+}
+
+// The joiner's main frame runs only in its game loop (the join screen and the
+// mission start's load run none) [orig: Game_ProcessMainFrame @0x5263F0 ->
+// VehicleMenu_PollAvailability @0x5266A1]; the listen host's role calls it from
+// its own frame.
+void ClientRuntime::poll_vehicle_menu(const world::World &world, const def::DefItemsFile *items) {
+	if (role_ == Role::Joiner && (joiner_ == nullptr || !joiner_->in_game_loop())) return;
+	vehicle_menu_.poll(*this, world, items);
 }
 
 // [orig: Game_ProcessMainFrame — `if (--g_NetQualityUpdateCountdown <= 0) { g_NetQualityUpdateCountdown =

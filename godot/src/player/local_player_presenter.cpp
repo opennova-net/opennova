@@ -441,6 +441,10 @@ bool LocalPlayerPresenter::take_use_item_armory_request() {
 	return input_router_.take_armory_request();
 }
 
+bool LocalPlayerPresenter::take_use_item_vehicle_menu_request() {
+	return input_router_.take_vehicle_menu_request();
+}
+
 void LocalPlayerPresenter::reset_input_state() {
 	input_router_.reset_input_state();
 }
@@ -1215,6 +1219,8 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("consume_use_hold"), &LocalPlayerPresenter::consume_use_hold);
 	ClassDB::bind_method(D_METHOD("take_use_item_armory_request"),
 			&LocalPlayerPresenter::take_use_item_armory_request);
+	ClassDB::bind_method(D_METHOD("take_use_item_vehicle_menu_request"),
+			&LocalPlayerPresenter::take_use_item_vehicle_menu_request);
 	ClassDB::bind_method(D_METHOD("reset_input_state"), &LocalPlayerPresenter::reset_input_state);
 	ClassDB::bind_method(D_METHOD("handle_input", "event", "active"), &LocalPlayerPresenter::handle_input);
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);

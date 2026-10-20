@@ -12,6 +12,7 @@
 #include <runtime/replication/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
 #include <runtime/replication/net_quality.h>             // the CNetQuality window (the client half)
 #include <runtime/inmatch/session_transport.h>        // ISessionTransport
+#include <runtime/inmatch/vehicle_menu.h>             // VehicleMenu (vehicle.mnu VEHICLE)
 
 #include <net/npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
@@ -53,6 +54,7 @@
 // [orig: Client_ProcessNetworkFrame @0x42c180; PumpClientProtocolRecv @0x42c228 / Send @0x42c4bc;
 //  Player_BuildTag0CInputBody @0x42a550; docs/net §5.44]. No socket I/O lives here.
 namespace opennova::world { class World; }
+namespace opennova::def { struct DefItemsFile; }
 
 namespace opennova::inmatch {
 
@@ -359,6 +361,29 @@ public:
 	//  CNapiNetwork_QueueReliableMessage(0x4D, 1, 0, .., 0) @0x42DDB1),
 	//  MapOverlay_UpdateTimers(0x48A8) @0x5535C4]
 	bool queue_team_change_request();
+	// THE VEHICLE SCREEN'S SENDS (inmatch/vehicle_menu.h): the availability ask
+	// C2S 0x42 (no body) and the spawn pick C2S 0x40 [u16 bay][u8 group], each
+	// one reliable message with no finite lifetime (a joiner's held one-shot
+	// queue; the listen host's own client over its loopback to its own
+	// server). False when no session carries it.
+	// [orig: NetPacket_SendEmptyType42 @0x42DBE0 -- QueueReliableMessage(0x42,
+	//  1, 0, .., 0) @0x42DC01; NetPacket_SendWeaponSelectType40 @0x42DB50 (a
+	//  misnomer) -- the body @0x42DB64..0x42DB77, QueueReliableMessage(0x40,
+	//  1, 0, .., 3) @0x42DB86]
+	bool queue_vehicle_spawn_availability_request();
+	bool queue_vehicle_spawn_request(uint16_t source_handle, uint8_t type_index);
+	// The S2C 0x70 received flag the screen's first open clears ahead of its
+	// ask [orig: VehicleMenu_Open @0x56425D].
+	void clear_vehicle_spawn_availability_received() {
+		view_.state().vehicle_spawn_availability.received = false;
+	}
+	// The vehicle screen's state, which outlives every mission reload on this
+	// connection as retail's scene-lifetime globals do; its poll runs once per
+	// main frame of the game loop, after the client net frame (the roles call
+	// poll_vehicle_menu there).
+	VehicleMenu &vehicle_menu() { return vehicle_menu_; }
+	const VehicleMenu &vehicle_menu() const { return vehicle_menu_; }
+	void poll_vehicle_menu(const world::World &world, const def::DefItemsFile *items);
 	// The main loop's measured frame rate for the quality metric's
 	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
 	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its
@@ -1010,6 +1035,8 @@ private:
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the
 	// determinism contract of the replay path — seed_session is "for replay/parity only").
 	bool replay_mode_ = false;
+	// The vehicle screen's scene-lifetime state (vehicle_menu.h).
+	VehicleMenu vehicle_menu_;
 };
 
 // The voice-macro key's A&S context: the speaker stands inside the nearest

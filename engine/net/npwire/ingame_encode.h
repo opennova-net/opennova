@@ -548,7 +548,7 @@ std::vector<uint8_t> encode_door_slot_action(const DoorSlotAction &action);
 std::vector<uint8_t> encode_vehicle_spawn_availability(const VehicleSpawnAvailabilityList &list);
 
 // C2S 0x40 VEHICLE-SPAWN REQUEST — `[u16 sourceHandle][u8 typeIndex]` (3 B), the inverse
-// of decode_vehicle_spawn_request. The retail sender is the vehicle.mnu pick (unported);
+// of decode_vehicle_spawn_request. The retail sender is the vehicle.mnu pick (inmatch::VehicleMenu);
 // the layout is the host reader's. [orig: NapiNPServerMsg_HandleVehicleSpawnRequest
 // @0x51C4C0 reads @0x51c515..0x51c52a]
 std::vector<uint8_t> encode_vehicle_spawn_request(const VehicleSpawnRequest &request);

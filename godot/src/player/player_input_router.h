@@ -63,6 +63,10 @@ public:
 	// (controls::PlayerAction::OpenArmory); reading clears it. The shell
 	// opens weapon.mnu's WEAPON screen.
 	bool take_armory_request();
+	// The vehicle-loadout arm took its open on the last frame's poll
+	// (controls::PlayerAction::OpenVehicleMenu); reading clears it. The shell
+	// opens vehicle.mnu's VEHICLE screen.
+	bool take_vehicle_menu_request();
 	// A menu close's input reset: the key state (ControlsModel::reset_key_state),
 	// the key-press latch (controls::PlayerActions::clear_key_press_latches)
 	// and the deferred queue (Simulation::clear_deferred_input).
@@ -87,6 +91,7 @@ private:
 	Ref<HudToggles> hud_toggles_;
 	opennova::controls::PlayerActions actions_;
 	bool armory_requested_ = false;
+	bool vehicle_menu_requested_ = false;
 	// The wheel notch remainder. Retail clears it only at process start, so it
 	// survives the reset-state path like the switch latches.
 	opennova::controls::WheelRemainder wheel_;

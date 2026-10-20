@@ -715,6 +715,10 @@ void HostRole::run_tick(const TickInput &input) {
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
 		state.client_runtime->flush_host_sends(); // the receive handlers' own sends
+		// The vehicle screen's poll after the client net frame, its 0x42 left
+		// for the next frame's send (vehicle_menu.h) [orig: Game_ProcessMainFrame --
+		//  VehicleMenu_PollAvailability @0x5266A1, ahead of Server_TickUpdate @0x5266B6].
+		state.client_runtime->poll_vehicle_menu(kernel.world, kernel.items_table());
 		state.client_runtime->raise_net_quality_link_errors(ctx.net_quality_link_errors);
 		// The own client's 0x0F copies its location names, each cut to its
 		// slot, into the one g_LocationNames the spawn filled, so the host's

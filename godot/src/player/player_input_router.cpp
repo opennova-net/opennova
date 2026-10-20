@@ -70,8 +70,10 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		// Sent over the session; the router closes the menu beside it.
 		case Action::EmotePick: p_sim.send_voice_menu_pick(false, p_request.value); break;
 		case Action::RadioPick: p_sim.send_voice_menu_pick(true, p_request.value); break;
-		// The shell opens the screen (PlayerInputRouter::take_armory_request).
+		// The shell opens the screen (PlayerInputRouter::take_armory_request /
+		// take_vehicle_menu_request).
 		case Action::OpenArmory: break;
+		case Action::OpenVehicleMenu: break;
 	}
 }
 
@@ -204,6 +206,12 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		switch (action_sim->take_use_item_press()) {
 			case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
 			case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;
+			// The vehicle-loadout arm opens vehicle.mnu when the ground's team
+			// byte is 0 or the player's, else takes the press (engine
+			// local_player_vehicle_zone_team_matches carries the witness).
+			case Simulation::USE_ITEM_ARM_VEHICLE_LOADOUT:
+				return action_sim->local_player_vehicle_zone_team_matches() ? Arm::kOpenVehicleMenu
+				                                                            : Arm::kTaken;
 			default: return Arm::kTaken;
 		}
 	};
@@ -222,6 +230,10 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 			hud_toggles_->close_voice_menu(radio);
 		if (request.action == opennova::controls::PlayerAction::OpenArmory) {
 			armory_requested_ = true;
+			continue;
+		}
+		if (request.action == opennova::controls::PlayerAction::OpenVehicleMenu) {
+			vehicle_menu_requested_ = true;
 			continue;
 		}
 		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
@@ -243,6 +255,12 @@ void PlayerInputRouter::consume_use_hold() {
 bool PlayerInputRouter::take_armory_request() {
 	const bool requested = armory_requested_;
 	armory_requested_ = false;
+	return requested;
+}
+
+bool PlayerInputRouter::take_vehicle_menu_request() {
+	const bool requested = vehicle_menu_requested_;
+	vehicle_menu_requested_ = false;
 	return requested;
 }
 

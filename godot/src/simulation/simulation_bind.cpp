@@ -443,6 +443,13 @@ void Simulation::_bind_methods() {
 	                     &Simulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_vehicle_zone_team_matches"),
 	                     &Simulation::local_player_vehicle_zone_team_matches);
+	ClassDB::bind_method(D_METHOD("open_vehicle_menu"), &Simulation::open_vehicle_menu);
+	ClassDB::bind_method(D_METHOD("get_vehicle_menu_rows"), &Simulation::get_vehicle_menu_rows);
+	ClassDB::bind_method(D_METHOD("get_vehicle_menu_selected_row"),
+	                     &Simulation::get_vehicle_menu_selected_row);
+	ClassDB::bind_method(D_METHOD("select_vehicle_menu_row", "row"),
+	                     &Simulation::select_vehicle_menu_row);
+	ClassDB::bind_method(D_METHOD("click_vehicle_menu", "cancel"), &Simulation::click_vehicle_menu);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &Simulation::local_player_toggle_mount);
 	ClassDB::bind_method(D_METHOD("local_player_select_seat", "index"), &Simulation::local_player_select_seat);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "kit", "player_class"),

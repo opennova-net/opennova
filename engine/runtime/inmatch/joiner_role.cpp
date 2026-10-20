@@ -715,6 +715,11 @@ void JoinerRole::pump() {
 	//  call @0x5260C1].
 	if (!had_local && local_spawned_) lp.latch_attack_defend_role(rt.game_type());
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
+	// The vehicle screen's poll, after the client net frame and ahead of the
+	// entity update, its 0x42 left for the next send boundary (vehicle_menu.h).
+	// [orig: Game_ProcessMainFrame -- Client_ProcessNetworkFrame @0x526692,
+	//  VehicleMenu_PollAvailability @0x5266A1, Entity_UpdateAllEntities @0x52674B]
+	rt.poll_vehicle_menu(world, kernel.items_table());
 
 	// Received projectile/reload gameplay and the decoded remote collision
 	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying

@@ -154,6 +154,8 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 			use_latched_ = true;
 		} else if (arm == UseItemPressArm::kOpenArmory) {
 			frame.requests.push_back({Action::OpenArmory});
+		} else if (arm == UseItemPressArm::kOpenVehicleMenu) {
+			frame.requests.push_back({Action::OpenVehicleMenu});
 		}
 	}
 	if (use_consume_pending_) {

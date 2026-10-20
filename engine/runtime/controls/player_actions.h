@@ -62,14 +62,20 @@ enum class PlayerAction {
 	// The USE-ITEM armory arm's open (weapon.mnu WEAPON): the embedder's shell
 	// opens the screen.
 	OpenArmory,
+	// The USE-ITEM vehicle-loadout arm's open (vehicle.mnu VEHICLE): the
+	// embedder's shell opens the screen over inmatch::VehicleMenu.
+	OpenVehicleMenu,
 };
 
 // The arm a frame's held USE takes, as the embedder's press latch decides it
 // (world::LocalPlayer::take_use_item_press): the mount chain's hold, the
-// armory's open, or a press the arm takes with nothing to open (a latched or
-// refused armory press, the vehicle bay, whose vehicle.mnu is unported,
-// D-HUD-14).
-enum class UseItemPressArm : uint8_t { kMountChain, kOpenArmory, kTaken };
+// armory's open, the vehicle screen's open (a vehicle-loadout volume whose
+// ground's team byte is 0 or the player's), or a press the arm takes with
+// nothing to open (a latched or refused armory press, a vehicle bay of another
+// team).
+// [orig: Input_HandleActionBinding_0 case 0xB1 -- the team test
+//  @0x4E0AD8..0x4E0AEB, UI_OpenMenuScreen("vehicle.mnu", "VEHICLE") @0x4E0AFD]
+enum class UseItemPressArm : uint8_t { kMountChain, kOpenArmory, kOpenVehicleMenu, kTaken };
 
 struct PlayerActionRequest {
 	PlayerAction action = PlayerAction::ToggleMount;

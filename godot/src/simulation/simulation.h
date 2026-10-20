@@ -2131,6 +2131,16 @@ public:
 	// reads team 0 = open). False without a kernel.
 	bool local_player_in_vehicle_loadout_zone() const;
 	bool local_player_vehicle_zone_team_matches() const;
+	// THE VEHICLE SCREEN (engine: runtime/inmatch/vehicle_menu.h, D-NET-NEW-L5-5):
+	// the open (its first asks the host, C2S 0x42), the ITEM_LIST rows and the
+	// selected row as the engine's poll left them, a row pick, and the ACCEPT /
+	// CANCEL click (true when ACCEPT queued its C2S 0x40). False / empty without
+	// a client runtime.
+	bool open_vehicle_menu();
+	PackedStringArray get_vehicle_menu_rows() const;
+	int get_vehicle_menu_selected_row() const;
+	void select_vehicle_menu_row(int p_row);
+	bool click_vehicle_menu(bool p_cancel);
 
 	// The USE-ITEM mount toggle: weapon-busy gate + the witnessed toggle
 	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a

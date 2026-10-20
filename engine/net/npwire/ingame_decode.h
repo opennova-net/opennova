@@ -2184,7 +2184,7 @@ bool decode_vehicle_spawn_availability(const uint8_t *body, size_t len,
 
 // C2S 0x42 — the availability request. The host reads NO fields (it only needs
 // the sender's player entity), so the decoder consumes nothing and accepts any
-// length; the client's sender is the unported vehicle.mnu screen.
+// length; the client's sender is the vehicle.mnu screen (inmatch::VehicleMenu).
 // [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
 bool decode_vehicle_spawn_availability_request(const uint8_t *body, size_t len,
                                                size_t &consumed);
