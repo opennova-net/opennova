@@ -1151,7 +1151,18 @@ function Reset-DesktopCursor {
         ($before.clip -join ","), ($after.clip -join ","), $after.foreground_pid)
 }
 
-# The desktop guard: for the whole cell no game window keeps the foreground.
+# The desktop guard: for the whole cell no game window takes desk input or
+# keeps the foreground. Each game window is disabled (EnableWindow FALSE) as it
+# appears. A click on a window not in front is otherwise delivered while
+# Windows activates it (WM_MOUSEACTIVATE MA_ACTIVATE, then WM_LBUTTONDOWN):
+# retail's WM_SETFOCUS sets its focus flag again (@0x762697), opening its input
+# gate, and ours fires off Godot's polled button state, which has no focus gate
+# (ControlsModel::is_token_pressed / is_token_fire_signed,
+# godot/src/mnu/controls_model.cpp). x1's capture OO took one desk click as a
+# round. A disabled window gets no mouse or keyboard input and cannot be
+# activated by a click, and it still renders and ticks. The scripted inputs
+# never pass through window messages: onHook's at Input_ProcessFrame and the
+# menu pump, ours at the ControlsModel seam.
 # Without real focus a retail window neither centres nor reads a cursor delta
 # (the gate above); scripted input brings its own virtual focus and zeroes
 # the real delta when the window is not really focused. So a clip any window
@@ -1179,6 +1190,23 @@ public static class ParityDesktopGuard {
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool EnableWindow(IntPtr h, bool enable);
+    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    public delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+    // The visible, still enabled top-level windows of the given processes.
+    public static System.Collections.Generic.List<IntPtr> EnabledWindows(uint[] pids) {
+        var found = new System.Collections.Generic.List<IntPtr>();
+        EnumWindows((h, l) => {
+            uint owner;
+            GetWindowThreadProcessId(h, out owner);
+            if (Array.IndexOf(pids, owner) >= 0 && IsWindowVisible(h) && IsWindowEnabled(h))
+                found.Add(h);
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
     // A background process may not take the foreground once a launched game
     // has claimed it: joined to the foreground thread's input, it may.
     public static bool HandOff(IntPtr foreground, IntPtr target) {
@@ -1200,12 +1228,25 @@ public static class ParityDesktopGuard {
         # alt-tab away would.
         $handled = [IntPtr]::Zero
         while ($true) {
+            $own = @(if (Test-Path -LiteralPath $PidFile) { Get-Content -LiteralPath $PidFile })
+            $games = @(@(Get-Process -Name Jointops -ErrorAction SilentlyContinue | ForEach-Object { [uint32] $_.Id }) +
+                @($own | Where-Object { $_ } | ForEach-Object { [uint32] $_ }))
+            if ($games.Count -gt 0) {
+                foreach ($window in [ParityDesktopGuard]::EnabledWindows([uint32[]] $games)) {
+                    $owner = [uint32]0
+                    $null = [ParityDesktopGuard]::GetWindowThreadProcessId($window, [ref] $owner)
+                    $name = try { (Get-Process -Id $owner -ErrorAction Stop).ProcessName } catch { "" }
+                    $null = [ParityDesktopGuard]::EnableWindow($window, $false)
+                    Add-Content -LiteralPath $Log -Value ("{0} input-lock {1} pid={2} hwnd={3} disabled={4}" -f
+                        [DateTime]::UtcNow.ToString('o'), $name, $owner, $window,
+                        (-not [ParityDesktopGuard]::IsWindowEnabled($window)))
+                }
+            }
             $foreground = [ParityDesktopGuard]::GetForegroundWindow()
             if ($foreground -ne $handled) {
                 $owner = [uint32]0
                 $null = [ParityDesktopGuard]::GetWindowThreadProcessId($foreground, [ref] $owner)
                 $name = try { (Get-Process -Id $owner -ErrorAction Stop).ProcessName } catch { "" }
-                $own = @(if (Test-Path -LiteralPath $PidFile) { Get-Content -LiteralPath $PidFile })
                 if ($name -eq "Jointops" -or ($name -like "Godot*" -and $own -contains [string] $owner)) {
                     $ok = [ParityDesktopGuard]::HandOff($foreground, $desktop)
                     Start-Sleep -Milliseconds 50
