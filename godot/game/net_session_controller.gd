@@ -89,6 +89,11 @@ func maybe_launch_lan_from_flags() -> bool:
 		# player's callsign, matching LanHostCallsign in onhook.cfg.
 		var demo_config := HostSessionConfig.new()
 		demo_config.mission = lan_mission
+		# `--lan-rotation`: the missions after it, appended in order as the host
+		# screen's START appends its selected rows, each at launch option 0.
+		var rotation := LaunchFlags.lan_rotation()
+		if not rotation.is_empty():
+			demo_config.missions.assign([lan_mission] + Array(rotation))
 		demo_config.max_players = LaunchFlags.lan_max_players(4)
 		demo_config.bind_port = LaunchFlags.lan_port(demo_config.bind_port)
 		demo_config.game_type_auto = lan_gametype < 0

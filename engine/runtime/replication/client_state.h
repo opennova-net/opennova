@@ -1259,7 +1259,7 @@ struct ClientState {
 	// ladder's game-time line and timed/untimed arm picks (D-HUD-25).
 	// [orig: g_RoundTimeRemaining @0x24C1958 — the store
 	//  NapiNPClientMsg_0x00A @0x430219..0x430235; mission-start seed -1
-	//  @0x524A89]
+	//  @0x524A5D]
 	std::int32_t round_time_remaining_ticks = -1;
 	// The authority's breath seconds and fall-damage tolerance, the two WAC
 	// named values the same sub-block-1 timer state carries, zero-extended

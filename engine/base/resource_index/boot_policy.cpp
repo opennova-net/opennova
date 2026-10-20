@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 
@@ -138,6 +139,12 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.loose_root = has_flag(args, kLaunchFlagLooseRoot);
     f.mission = value_after(args, kLaunchFlagMission);
     f.lan_host = value_after(args, kLaunchFlagLanHost);
+    const std::string rotation = value_after(args, kLaunchFlagLanRotation);
+    for (std::size_t at = 0; at <= rotation.size();) {
+        const std::size_t comma = std::min(rotation.find(',', at), rotation.size());
+        if (comma > at) f.lan_rotation.push_back(rotation.substr(at, comma - at));
+        at = comma + 1;
+    }
     f.lan_join = value_after(args, kLaunchFlagLanJoin);
     f.lan_port = int_after(args, kLaunchFlagLanPort, 1, 65535, 0);
     f.lan_gametype = int_after(args, kLaunchFlagLanGametype, 0, 0x7fffffffL, -1);

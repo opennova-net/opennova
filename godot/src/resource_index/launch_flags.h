@@ -39,6 +39,8 @@ public:
 	// sentinel when the flag is absent or malformed.
 	static String mission();
 	static String lan_host();
+	// `--lan-rotation`: the --lan-host rotation's missions after its first.
+	static PackedStringArray lan_rotation();
 	static String lan_join_ip();
 	static int lan_join_port(int fallback);
 	// `--lan-join browse[:port]`: search, then join the row on the port.

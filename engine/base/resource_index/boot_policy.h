@@ -39,6 +39,13 @@
 //   --mission <name.bms>        boot straight into that single-player mission
 //                               through the menu's Start path (no navigation).
 //   --lan-host <mission.bms>    boot as a co-op LAN listen host on that mission.
+//   --lan-rotation <a.bms[,b.bms...]>
+//                               the --lan-host rotation's missions after its
+//                               first, in play order, as the host screen's
+//                               START appends its selected rows (launch option
+//                               0, the hook's LanHostRotation form)
+//                               [orig: UI_HandleHostSessionStart @0x556D88..0x556E2E;
+//                               MissionRotation_Append @0x5019D0].
 //   --lan-join <ip[:port]>      boot as a LAN joiner dialing that host.
 //   --lan-join browse[:port]    boot as a LAN joiner that searches as the LAN
 //                               screen does and joins the row found on that
@@ -93,6 +100,7 @@ inline constexpr const char *kLaunchFlagLooseMission = "--loose-mission";
 inline constexpr const char *kLaunchFlagLooseRoot = "--loose-root";
 inline constexpr const char *kLaunchFlagMission = "--mission";
 inline constexpr const char *kLaunchFlagLanHost = "--lan-host";
+inline constexpr const char *kLaunchFlagLanRotation = "--lan-rotation";
 inline constexpr const char *kLaunchFlagLanJoin = "--lan-join";
 inline constexpr const char *kLaunchFlagLanPort = "--lan-port";
 inline constexpr const char *kLaunchFlagLanGametype = "--lan-gametype";
@@ -156,6 +164,7 @@ struct LaunchFlags {
     bool loose_root = false;       // --loose-root
     std::string mission;           // --mission <name.bms>
     std::string lan_host;          // --lan-host <mission.bms>
+    std::vector<std::string> lan_rotation; // --lan-rotation <a.bms[,b.bms...]>, empty entries dropped
     std::string lan_join;          // --lan-join <ip[:port]> or browse[:port], verbatim
     int lan_port = 0;              // --lan-port; 0 = unset (1..65535 accepted)
     int lan_gametype = -1;         // --lan-gametype; -1 = auto (>= 0 accepted)

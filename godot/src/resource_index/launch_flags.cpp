@@ -23,6 +23,7 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::loose_override_enabled);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("mission"), &LaunchFlags::mission);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_host"), &LaunchFlags::lan_host);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_rotation"), &LaunchFlags::lan_rotation);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_join_ip"), &LaunchFlags::lan_join_ip);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_join_port", "fallback"),
 			&LaunchFlags::lan_join_port);
@@ -118,6 +119,12 @@ String LaunchFlags::mission() {
 
 String LaunchFlags::lan_host() {
 	return to_gd(parse().lan_host);
+}
+
+PackedStringArray LaunchFlags::lan_rotation() {
+	PackedStringArray out;
+	for (const std::string &name : parse().lan_rotation) out.push_back(to_gd(name));
+	return out;
 }
 
 String LaunchFlags::lan_join_ip() {

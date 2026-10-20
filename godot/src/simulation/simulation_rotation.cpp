@@ -20,8 +20,9 @@ namespace sim_internal {
 
 // The host screen's START over the mounted catalog: each SELECTED_MISSIONS
 // row names a catalog row (the first one whose file matches), its Switch cell
-// that row's launch option. A START with no table (the NovaWorld panel, the
-// --lan-host flag, a tool) is its one mission. A file the catalog does not
+// that row's launch option (a --lan-rotation row's 0, as the hook's
+// LanHostRotation appends). A START with no table (the NovaWorld panel, a
+// --lan-host with no --lan-rotation, a tool) is its one mission. A file the catalog does not
 // list cannot be a table row: it is left out, and a session with no listed
 // mission has no rotation (its first round end ends it). The seed itself is
 // the engine's (inmatch::seed_rotation_from_host_screen carries the witness).
