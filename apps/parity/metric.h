@@ -78,7 +78,8 @@ uint16_t event_identity(const wire::ParityEvent &event);
 // The direction's gameplay identity: C2S 0x0C, S2C 0x0A.
 uint16_t gameplay_identity(char dir);
 // A stable body's comparison key: the registered prefix (S2C 0x0F's live tick)
-// stripped.
+// stripped; S2C 0x64's session-block random bytes and S2C 0x0D's bobbing-hull z zeroed
+// (body.S.0x64.session_block, body.S.0x0d.hull_bob).
 std::string stable_body_key(char dir, uint16_t identity, const std::string &raw);
 // One physical record's framing key; a registered grouping length renders `len=*`.
 std::string wire_key(char dir, const wire::ParityWireRecord &record);

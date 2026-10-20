@@ -586,6 +586,69 @@ void test_registry() {
 			"the initial-body exemptions are the registry's");
 }
 
+// The registered body masks: S2C 0x1A's tick is out of byte equality; S2C 0x64's
+// session block zeroes only its random seed, session id and token; S2C 0x0D zeroes the z
+// of a bobbing hull (entity+0x24 bit 0x8000) and of a record carried on it, nothing else.
+void test_body_masks() {
+	check(initial_body_exempt('S', 0x01A), "the 0x1A game-start tick is exempt");
+
+	auto chunk = [](uint32_t offset, uint8_t fill, uint8_t name) {
+		std::string body(12, '\0');
+		body[0] = 1;                    // transfer id
+		body[4] = char(180);            // total size
+		body[8] = char(offset & 0xFF);  // chunk offset
+		// Random bytes (0..35, 148..179) get `fill`, the rules word and its neighbours
+		// (36..51) a constant, the three names (52..147) `name`.
+		for (uint32_t at = offset; at < 180; ++at)
+			body.push_back(char(at < 36 || at >= 148 ? fill : at < 52 ? 0x04 : name));
+		return body;
+	};
+	check(stable_body_key('S', 0x064, chunk(0, 0x11, 'A')) ==
+					stable_body_key('S', 0x064, chunk(0, 0x77, 'A')),
+			"0x64: the seed, session id and token are masked");
+	check(stable_body_key('S', 0x064, chunk(0, 0x11, 'A')) !=
+					stable_body_key('S', 0x064, chunk(0, 0x11, 'B')),
+			"0x64: the names compare");
+	check(stable_body_key('S', 0x064, chunk(140, 0x11, 'A')) ==
+					stable_body_key('S', 0x064, chunk(140, 0x77, 'A')),
+			"0x64: a chunk past the names masks the token by its block offset");
+
+	auto record = [](uint16_t slot, uint32_t entity_flags, int32_t z, uint16_t parent) {
+		PoolSpawnRecord r;
+		r.spawn_flags = kPoolSpawnHasEntityFlags;
+		r.slot_id = slot;
+		r.item_type_id = 0x050d;
+		r.pos_x = 0x10000;
+		r.pos_y = 0x20000;
+		r.pos_z = z;
+		r.entity_flags = entity_flags;
+		if (parent != 0xFFFF) {
+			r.spawn_flags |= kPoolSpawnHasParentHandle;
+			r.parent_handle = parent;
+		}
+		return r;
+	};
+	auto pool = [&](int32_t hull_z, int32_t child_z, int32_t land_z, int32_t hull_x) {
+		PoolSpawnBatch batch;
+		batch.records.push_back(record(0x1003, 0x00028400, hull_z, 0xFFFF));
+		batch.records.back().pos_x = hull_x;
+		batch.records.push_back(record(0x1004, 0x00020400, child_z, 0x1003));
+		batch.records.push_back(record(0x1000, 0x00020400, land_z, 0xFFFF));
+		const std::vector<uint8_t> bytes = encode_pool_spawn_batch(batch);
+		return std::string(bytes.begin(), bytes.end());
+	};
+	const std::string base = pool(0x000d7033, 0x000e0000, 0x000f0000, 0x10000);
+	check(stable_body_key('S', 0x00D, base) ==
+					stable_body_key('S', 0x00D, pool(0x000d701b, 0x000e0800, 0x000f0000, 0x10000)),
+			"0x0D: a bobbing hull's z and its carried child's z are masked");
+	check(stable_body_key('S', 0x00D, base) !=
+					stable_body_key('S', 0x00D, pool(0x000d7033, 0x000e0000, 0x000f0001, 0x10000)),
+			"0x0D: a land vehicle's z compares");
+	check(stable_body_key('S', 0x00D, base) !=
+					stable_body_key('S', 0x00D, pool(0x000d7033, 0x000e0000, 0x000f0000, 0x10001)),
+			"0x0D: the hull's x compares");
+}
+
 void test_timestamps() {
 	uint64_t ns = 0;
 	check(parse_utc_ns("1970-01-01T00:00:10.0000000Z", ns) && ns == 10 * kSec, "parse 7 digits");
@@ -1662,6 +1725,7 @@ void test_steady_rules() {
 
 int main() {
 	test_registry();
+	test_body_masks();
 	test_timestamps();
 	test_identical();
 	test_tag_histogram();

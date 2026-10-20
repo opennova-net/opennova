@@ -2,10 +2,14 @@
 
 #include "normalization.h"
 
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -43,7 +47,56 @@ uint16_t gameplay_identity(char dir) {
 	return dir == 'C' ? 0x00C : 0x00A;
 }
 
+namespace {
+
+// S2C 0x64's chunk of the 180-byte session block, its per-session random bytes zeroed:
+// [u32 transfer id][u32 180][u32 offset] then the block from `offset`.
+std::vector<uint8_t> masked_session_block(const std::string &raw) {
+	static_assert(has_normalization("body.S.0x64.session_block"));
+	std::vector<uint8_t> bytes(raw.begin(), raw.end());
+	constexpr size_t kHeader = 12;
+	if (bytes.size() < kHeader)
+		return bytes;
+	const uint32_t offset = uint32_t(bytes[8]) | uint32_t(bytes[9]) << 8 |
+			uint32_t(bytes[10]) << 16 | uint32_t(bytes[11]) << 24;
+	for (size_t i = kHeader; i < bytes.size(); ++i) {
+		const size_t at = size_t(offset) + (i - kHeader); // the byte's place in the block
+		if (at < 36 || (at >= 148 && at < 180))
+			bytes[i] = 0;
+	}
+	return bytes;
+}
+
+// S2C 0x0D with a bobbing hull's z, and the z of a record carried on it, zeroed. The
+// masked batch re-encodes field for field; a body that does not round-trip is kept whole.
+std::vector<uint8_t> masked_pool_spawn(const std::string &raw) {
+	static_assert(has_normalization("body.S.0x0d.hull_bob"));
+	std::vector<uint8_t> bytes(raw.begin(), raw.end());
+	PoolSpawnBatch batch;
+	if (!decode_pool_spawn_batch(bytes.data(), bytes.size(), batch) ||
+			encode_pool_spawn_batch(batch) != bytes)
+		return bytes;
+	constexpr uint32_t kBobFlag = 0x8000; // entity+0x24, the bob arm's test (@0x4839CE)
+	std::set<uint16_t> hulls;
+	for (const PoolSpawnRecord &record : batch.records)
+		if ((record.spawn_flags & kPoolSpawnHasEntityFlags) && (record.entity_flags & kBobFlag))
+			hulls.insert(record.slot_id);
+	if (hulls.empty())
+		return bytes;
+	for (PoolSpawnRecord &record : batch.records)
+		if (hulls.count(record.slot_id) ||
+				((record.spawn_flags & kPoolSpawnHasParentHandle) && hulls.count(record.parent_handle)))
+			record.pos_z = 0;
+	return encode_pool_spawn_batch(batch);
+}
+
+} // namespace
+
 std::string stable_body_key(char dir, uint16_t identity, const std::string &raw) {
+	if (dir == 'S' && identity == 0x064)
+		return hex_of(masked_session_block(raw));
+	if (dir == 'S' && identity == 0x00D)
+		return hex_of(masked_pool_spawn(raw));
 	const std::string hex = hex_of(std::vector<uint8_t>(raw.begin(), raw.end()));
 	const uint32_t prefix = stable_body_prefix(dir, identity);
 	if (prefix == 0)

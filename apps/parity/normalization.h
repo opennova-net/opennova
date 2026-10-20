@@ -160,6 +160,27 @@ inline constexpr Normalization kNormalizations[] = {
 			"the host's server timestamp (§5.34)" },
 	{ "initial.S.0x68", MaskKind::InitialBody, 'S', 0x068, "LOADED_MODEL_PAGE_REQUEST", 0,
 			"the page cursor advances on a process-global wrap" },
+	{ "initial.S.0x1a", MaskKind::InitialBody, 'S', 0x01A, "WAIT_FOR_GAME_START_ACK", 0,
+			"the game-start gate's body is the host's GetTickCount (NetPacket_WriteTimestamp "
+			"@0x5046c0, the tick @0x5046d3), which the client keeps as the kill-list window's "
+			"max (NapiNPClientMsg_0x01A @0x425ec0): a wall clock" },
+	{ "body.S.0x64.session_block", MaskKind::Field, 'S', 0x064, "seed / session id / token", 0,
+			"S2C 0x64 chunks the 180-byte session block (NetPacket_WriteFixed180Block "
+			"@0x507300, the copy from 0x24D1E08 @0x507379) that Game_StartMission fills per "
+			"mission (CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0, the call @0x5248a7): "
+			"block bytes 0..31 are GetTickCount x rand() (@0x51e91f), 32..35 the session id "
+			"(u16)(GetTickCount x GetTickCount) (@0x51e93f), 148..179 a second GetTickCount x "
+			"rand() token (@0x51e9a2); those bytes are zeroed, the header, the rules word and "
+			"the three names compare" },
+	{ "body.S.0x0d.hull_bob", MaskKind::Field, 'S', 0x00D, "pos_z of a bobbing hull", 0,
+			"a hull at rest on water (entity+0x24 bit 0x8000) arms a heave phase at 3pi/2 and "
+			"steps it every tick (Entity_ProcessPlatformPhysics @0x4839C5..0x483A29, the arm "
+			"@0x4839FA..0x483A07; Entity_ApplyBreathingOscillation @0x463BE0, the phase step "
+			"@0x463BEB, called @0x483A1D), so its "
+			"z, and the z of a record carried on it, is the phase at the tick the join's 0x0D "
+			"snapshot is written, which follows the joiner's own message timing: that z is "
+			"zeroed in the 0x0D bodies, every other field compares, and the steady window "
+			"still measures the hull (state.position)" },
 	{ "initial.S.0x16", MaskKind::InitialSet, 'S', 0x016, "PLAYER_LIST", 0,
 			"the scoreboard rides the 311-tick integrity boundary (Server_TickUpdate "
 			"@0x51D90D), whose phase against the join varies per run: how many one-row lists "
@@ -454,6 +475,7 @@ static_assert(handshake_cu_low16(0x42, "CI0") && !handshake_cu_masked(0x42, "CI0
 static_assert(
 		handshake_length_class(0x82, "SCRK") == 62 && handshake_length_class(0x82, "SK") == 0);
 static_assert(initial_body_exempt('S', 0x019) && !initial_body_exempt('C', 0x019));
+static_assert(initial_body_exempt('S', 0x01A) && !initial_body_exempt('S', 0x064));
 static_assert(initial_body_set('S', 0x016) && !initial_body_exempt('S', 0x016));
 static_assert(initial_records('S', 0x010) && length_set_exempt('S', 0x010));
 static_assert(stable_body_prefix('S', 0x00F) == 4 && stable_body_prefix('C', 0x00F) == 0);
