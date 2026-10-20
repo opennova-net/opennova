@@ -1308,6 +1308,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			SessionConfig config;
 			if (decode_session_config(m.payload.data(), m.payload.size(), config))
 				game_type_ = static_cast<uint32_t>(config.fields[3]);
+		} else if (m.tag == s2c::MISSION_MAP_NAMES) {
+			// The player-sync track's first record rewrites g_MapFileName with its second
+			// string, after the final 0x64 did: the value the C2S 0x0B's 17+-character side
+			// password runs on into (mission_status_side_password)
+			// [orig: NapiNPClientMsg_MissionMapNames @0x427e10 (an authority returns
+			//  @0x427e17), the copy into g_MapFileName @0x427e6c..0x427e7f].
+			MissionMapNames names;
+			if (decode_mission_map_names(m.payload.data(), m.payload.size(), names))
+				map_file_ = std::move(names.map_file_name);
 		} else if (m.tag == s2c::CLASS_ALLOW_MASK) {
 			// Retail's handler reads exactly one little-endian word and clears the
 			// global to zero when the packet is too short.

@@ -1064,9 +1064,12 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 //  @0x525495..0x525762, the 0x2F @0x525836 / @0x525c2e, the 0x0B @0x52624b, the push
 //  @0x526255]
 // `side_password` is the join's team-password entry: the ClientAuth JSP carries it and the
-// mission start's C2S 0x0B leads with the same text, its first 16 characters (D-NET-NEW-R3-4)
+// mission start's C2S 0x0B leads with the same text; an entry of 17 or more characters
+// fills the 17-byte field with no NUL, so the string runs on into g_MapFileName, which the
+// S2C 0x2C rewrote last (D-NET-NEW-R3-4)
 // [orig: UI_JoinSelectedSession @0x569bf4..0x569bfa; Game_ApplySessionSettingsToGlobals
-//  @0x551d20..0x551d30, strncpy 0x11 @0x55202a].
+//  @0x551d20..0x551d30, strncpy 0x11 @0x55202a; NapiNPClientMsg_MissionMapNames
+//  @0x427e6c; the 0x0B's read @0x52621f].
 bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 	constexpr uint32_t kServerKey = 0x11223344u;
 	constexpr uint32_t kConnectionId = 3;
@@ -1412,10 +1415,17 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 		return false;
 	}
 
+	// The player-sync track's 0x2C names a map file other than the final chunk's block+84
+	// (31 'Z's): the last g_MapFileName writer before the 0x0B.
+	const std::string kSyncMapFile = "PRELUDE.BMS";
+	std::vector<uint8_t> map_names = {'P', 'r', 'e', 'l', 'u', 'd', 'e', 0x00};
+	map_names.insert(map_names.end(), kSyncMapFile.begin(), kSyncMapFile.end());
+	map_names.push_back(0x00);
 	const std::vector<uint8_t> player_list_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
-			{make_protocol_message(
-					0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
+			{make_protocol_message(0x2C, std::move(map_names)),
+					make_protocol_message(
+							0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
 	const inmatch::JoinerConnection::PollResult player_list_result =
 			joiner.handle_datagram(
 					player_list_datagram.data(), player_list_datagram.size());
@@ -1503,7 +1513,11 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 				client_messages[1].payload == fresh_no_table_loadout_body(0x02) &&
 				client_messages[2].tag == 0x0B &&
 				client_messages[2].payload ==
-						inmatch::build_mission_status(side_password.substr(0, 16), 0x01070507u),
+						inmatch::build_mission_status(
+								side_password.size() < 17
+										? side_password
+										: side_password.substr(0, 17) + kSyncMapFile,
+								0x01070507u),
 			"the mission start's submissions: the fresh-profile loadout pair (team from "
 			"the 0x04 tail) and the 0x0B, which leads with the JSP's text")) {
 		return false;
@@ -7879,7 +7893,8 @@ int main() {
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&
 	                run_retail_post_auth_prelude() &&
-	                run_retail_post_auth_prelude("TeamPassword1234567") &&
+	                run_retail_post_auth_prelude("TeamPassword1234") &&
+	                run_retail_post_auth_prelude("TeamPassword12345678") &&
 	                run_novaworld_join_tokens_ride_the_wire() &&
 	                run_early_sync_tail_latch() &&
 	                run_client_reducer_preserves_packet_message_order() &&

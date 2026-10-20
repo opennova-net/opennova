@@ -562,13 +562,21 @@ public:
 	// The side password the C2S 0x0B carries first: the same entry the JSP carries.
 	// Retail clears the session settings' side password at a client join's start, the
 	// pre-game menu's team-password entry writes it, the JOIN's JSP copies it, and the
-	// mission start applies it to g_SidePassword through a 17-byte strncpy; past 16
-	// characters that string has no NUL inside the field, so ours keeps the 16.
+	// mission start applies it to the 17-byte g_SidePassword through strncpy 0x11. An
+	// entry of 17 or more characters fills the field with no NUL, so the 0x0B's string
+	// runs on into g_MapFileName, the field right behind it: the first 17 characters,
+	// then the map file. The joiner's last g_MapFileName writer before the 0x0B is the
+	// S2C 0x2C (the host's player-sync track answers the 0x09, ahead of the 0x1A), after
+	// the final 0x64's block+84; both land in map_file_.
 	// [orig: MultiPlayer_JoinSessionStateMachine @0x56a434 (the clear);
 	//  UI_PreGameMenuStateMachine @0x568c45 (the entry); UI_JoinSelectedSession
 	//  @0x569bf4..0x569bfa (the JSP, Napi_CopyString 0x40); Game_StartMission @0x524662 ->
-	//  Game_ApplySessionSettingsToGlobals @0x551d20..0x551d30, strncpy 0x11 @0x55202a]
-	std::string mission_status_side_password() const { return join_password_.substr(0, 16); }
+	//  Game_ApplySessionSettingsToGlobals @0x551d20..0x551d30, strncpy 0x11 @0x55202a;
+	//  g_SidePassword @0x24D1F2D, g_MapFileName @0x24D1F3E; the 0x0B's read @0x52621f]
+	std::string mission_status_side_password() const {
+		return join_password_.size() < 17 ? join_password_
+		                                  : join_password_.substr(0, 17) + map_file_;
+	}
 
 	// The install root the JOIN VERSIONCRCSTRING checksum is computed from
 	// (D-NET-166): at JOIN-build time the joiner CRCs the loose
@@ -1162,7 +1170,7 @@ private:
 	uint16_t mission_metadata_fixed_byte_mask_ = 0;
 	std::string server_name_;   // authoritative S2C 0x7B field 3
 	std::string mission_name_;  // authoritative S2C 0x7B field 4 (title or waypoint filename)
-	std::string map_file_;      // authoritative S2C 0x7B field 5
+	std::string map_file_;      // S2C 0x7B field 5, then g_MapFileName's writers (the final 0x64, the 0x2C)
 	std::string expansion_;     // authoritative S2C 0x7B field 7
 	std::vector<uint8_t> mission_header_bytes_; // exact valid 616-byte S2C 0x0B body
 	TerrainTilState terrain_til_state_ = TerrainTilState::Absent;
