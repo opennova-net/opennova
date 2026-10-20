@@ -363,6 +363,17 @@ units apart (`Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A`, skipped on
 the authority), so a joiner pose sets only the heading. A scenario that needs
 a place uses the host as its actor.
 
+A scenario may also list `staging` (E5): `[{"slot": n, "pose": {position_bms,
+yaw, pitch}}]`, poses the host applies to other players' slots after the
+prelude and before the actor's setup, so the snap above carries them to the
+joiner. A retail host applies them through `onhook_load_debug_snapshot`'s
+`target_slot` (an onHook pair with `apply_pose_slot`, opennova-int #74); the
+OpenNova host has no slot pose yet, so a staged scenario runs RR and RO. The
+scenario witness records each staging result, and `compare_scenario.py`
+requires every run to have played the same staging. Whether the joiner's
+in-flight uplinks pull a staged pose back before its client snaps is still to
+be seen on the first staged run.
+
 ```powershell
 pwsh -File scripts\net\run_parity_topology.ps1 -Topology RR ... -Scenario scripts\net\scenarios\self_nade.json
 python scripts/net/compare_scenario.py .scratch/runs/<rr>/run-summary.json .scratch/runs/<ro>/run-summary.json ...

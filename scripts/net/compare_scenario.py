@@ -8,7 +8,7 @@ and the end of its settle, and names the actor and its pool-0 index: a joiner
 by its first C2S 0x0C uplink's handle, the host by roster slot 0's.
 
 Every run must have played the same script (its run-root copy's mission,
-game type, actor, prelude, setup, steps and settle). The expectations come
+game type, actor, prelude, setup, staging, steps and settle). The expectations come
 from the scenario's source file (or --scenario), so they can be tightened
 without replaying. A run passes when `expect.sequence` matches its events in order.
 Across runs, every matched event's fields and every `expect.count_kinds` count
@@ -43,7 +43,7 @@ CAPTURE_LOCAL = {"frame", "ts_ns", "session", "decode", "pos"}
 HANDLE_FIELDS = {"entity", "shooter", "target", "handle", "carrier", "sender",
                  "vehicle", "victim_slot", "zone"}
 INDEX_FIELDS = {"attacker", "victim", "aux"}
-PLAYED_FIELDS = ("mission", "game_type", "actor", "prelude", "setup", "steps",
+PLAYED_FIELDS = ("mission", "game_type", "actor", "prelude", "setup", "staging", "steps",
                  "settle_seconds")
 
 

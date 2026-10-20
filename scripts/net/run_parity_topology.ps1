@@ -169,7 +169,7 @@ function Read-ParityScenario {
     }
     $spec = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     $expected = @("schema", "name", "mission", "game_type", "actor", "prelude",
-        "setup", "steps", "settle_seconds", "expect")
+        "setup", "staging", "steps", "settle_seconds", "expect")
     $extra = @($spec.PSObject.Properties.Name | Where-Object { $_ -notin $expected })
     if ($extra.Count -gt 0) {
         throw "Scenario $Path has unknown fields: $($extra -join ', ')"
@@ -210,6 +210,26 @@ function Read-ParityScenario {
                 @($position | Where-Object { -not (Test-JsonNumber $_) }).Count -gt 0 -or
                 -not (Test-JsonNumber $pose.yaw) -or -not (Test-JsonNumber $pose.pitch)) {
             throw "Scenario $($spec.name): setup.pose needs position_bms [x, y, z], yaw and pitch numbers"
+        }
+    }
+    # E5's staging: poses the host applies to other players' slots before the
+    # actor plays (a joiner's own pose would not stick, above).
+    if ($spec.PSObject.Properties.Name -contains "staging") {
+        $staging = @($spec.staging)
+        if ($staging.Count -lt 1) {
+            throw "Scenario $($spec.name): staging lists at least one slot pose"
+        }
+        foreach ($entry in $staging) {
+            $position = @($entry.pose.position_bms)
+            if (-not (Test-JsonInteger $entry.slot) -or $entry.slot -lt 0 -or $entry.slot -gt 254 -or
+                    $position.Count -ne 3 -or
+                    @($position | Where-Object { -not (Test-JsonNumber $_) }).Count -gt 0 -or
+                    -not (Test-JsonNumber $entry.pose.yaw) -or -not (Test-JsonNumber $entry.pose.pitch)) {
+                throw "Scenario $($spec.name): each staging entry needs a slot 0..254 and a pose with position_bms [x, y, z], yaw and pitch"
+            }
+        }
+        if ($Topology -in @("OR", "OO")) {
+            throw "Scenario $($spec.name) stages players through the host; the OpenNova host has no slot pose yet (RR and RO only)"
         }
     }
     return $spec
@@ -944,6 +964,54 @@ function Wait-UntilSteadyDeadline {
 # (retail's own key and mouse handlers at the Input_ProcessFrame seams); an
 # OpenNova joiner takes both through the scenario_play probe (ScriptedInput
 # at the ControlsModel device seam). Both report each step's applied tick.
+# One opennova.debug_snapshot.v1 file for a scenario pose, create-new.
+function Write-ScenarioPoseSnapshot {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Path,
+        [Parameter(Mandatory = $true)] $Pose
+    )
+    if (Test-Path -LiteralPath $Path) {
+        throw "Scenario pose snapshot must be create-new: $Path"
+    }
+    $position = @($Pose.position_bms)
+    [pscustomobject]@{
+        schema = "opennova.debug_snapshot.v1"
+        player = [pscustomobject]@{
+            position_bms = [pscustomobject]@{
+                x = $position[0]; y = $position[1]; z = $position[2]
+            }
+            orientation_mission_deg = [pscustomobject]@{
+                yaw = $Pose.yaw; pitch = $Pose.pitch
+            }
+        }
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Path -Encoding ASCII
+}
+
+# E5: the scenario's staging poses, applied by the retail host to each
+# listed slot (onhook_load_debug_snapshot target_slot, opennova-int #74), in
+# order, before the actor's setup and steps.
+function Invoke-ScenarioStaging {
+    param([string] $RetailHostInstanceId = "")
+    $spec = $script:ScenarioSpec
+    if (-not ($spec.PSObject.Properties.Name -contains "staging")) { return $null }
+    if (-not $RetailHostInstanceId) {
+        throw "Scenario staging on $Topology needs the retail host's instance id"
+    }
+    $applied = [System.Collections.Generic.List[object]]::new()
+    $index = 0
+    foreach ($entry in @($spec.staging)) {
+        $path = Join-Path $RunRoot "scenario-staging-$index.debug_snapshot.json"
+        Write-ScenarioPoseSnapshot -Path $path -Pose $entry.pose
+        $applied.Add((Get-StructuredResult (Invoke-OnHookTool -Name "onhook_load_debug_snapshot" -Arguments @{
+            instance_id = $RetailHostInstanceId
+            path = $path
+            target_slot = [int] $entry.slot
+        })))
+        ++$index
+    }
+    return $applied.ToArray()
+}
+
 function Invoke-ScenarioStage {
     param(
         [Parameter(Mandatory = $true)] [object[]] $Steps,
@@ -962,23 +1030,8 @@ function Invoke-ScenarioStage {
         }
         $setupResult = $null
         if ($hasPose) {
-            $pose = $Setup.pose
-            $position = @($pose.position_bms)
             $snapshotPath = Join-Path $RunRoot "scenario-setup.debug_snapshot.json"
-            if (Test-Path -LiteralPath $snapshotPath) {
-                throw "Scenario setup snapshot must be create-new: $snapshotPath"
-            }
-            [pscustomobject]@{
-                schema = "opennova.debug_snapshot.v1"
-                player = [pscustomobject]@{
-                    position_bms = [pscustomobject]@{
-                        x = $position[0]; y = $position[1]; z = $position[2]
-                    }
-                    orientation_mission_deg = [pscustomobject]@{
-                        yaw = $pose.yaw; pitch = $pose.pitch
-                    }
-                }
-            } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $snapshotPath -Encoding ASCII
+            Write-ScenarioPoseSnapshot -Path $snapshotPath -Pose $Setup.pose
             $setupResult = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_load_debug_snapshot" -Arguments @{
                 instance_id = $RetailInstanceId
                 path = $snapshotPath
@@ -1050,6 +1103,7 @@ function Invoke-ScenarioIfRequested {
         $prelude = Invoke-ScenarioStage -Steps @($spec.prelude) `
             -RetailInstanceId $retailInstanceId
     }
+    $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
     $setup = if ($spec.PSObject.Properties.Name -contains "setup") { $spec.setup } else { $null }
     $main = Invoke-ScenarioStage -Steps @($spec.steps) -Setup $setup `
         -RetailInstanceId $retailInstanceId
@@ -1075,6 +1129,7 @@ function Invoke-ScenarioIfRequested {
         settled_utc = [DateTime]::UtcNow.ToString("o")
         settle_seconds = [int] $spec.settle_seconds
         prelude = $(if ($prelude) { $prelude.record } else { $null })
+        staging = $staging
         setup = $main.setup
         record = $main.record
     }
