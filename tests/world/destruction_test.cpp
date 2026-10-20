@@ -326,6 +326,60 @@ void test_explosion_damage_gates() {
     w.tables.ammo.entries[1].flags = 0;
 }
 
+// D-NET-507: the explosion sweep runs on words. A pool-1 victim's reach is its
+// bound word plus the radius word and its length the truncated x87 root of the
+// word deltas; a pool-0 victim's reach doubles the radius word and its surface
+// (the length less the bound word, floored at 0) is held to the radius word.
+// A thousand units out, with low bits set (where the float views are lossy), a
+// victim on the edge takes the callback and one word further does not; a pool-1
+// item with a zero bound word leaves the sweep.
+// [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - pool 0 `lea ebp,
+//  [ebx+eax*2]` @0x4EAF2B, the deltas and root @0x4EAF2E..0x4EAFA2, the surface
+//  @0x4EB03C..0x4EB06C; pool 1 `mov ebp, [edi]; add ebp, var_AC` @0x4EB3D2..0x4EB3D4,
+//  the deltas and root @0x4EB3CD..0x4EB44F, the bound test @0x4EB535..0x4EB539]
+void test_explosion_sweep_runs_on_words() {
+    const int32_t x0 = (1000 << 16) | 0x1235;
+    const int32_t y0 = 0x7123;
+    auto struck = [&](int pool, int32_t offset, int32_t bound) {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        seed_ammo(w);
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        const int32_t radius = to_fixed(w.tables.ammo.entries[1].kz_maxradius);
+        Entity attacker_seed;
+        attacker_seed.kind = EntityKind::Organic;
+        attacker_seed.health = 100;
+        attacker_seed.team = 2;
+        attacker_seed.position.set_q16({0, 0, 0});
+        const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
+        Entity seed;
+        seed.kind = pool == 0 ? EntityKind::Organic : EntityKind::Item;
+        seed.item_id = 500;
+        seed.health = 120;
+        seed.health_max = 120;
+        seed.team = 1;
+        seed.bound_radius.q16 = bound;
+        seed.position.set_q16({x0 + bound + radius + offset, y0, 0});
+        const EntityHandle victim = w.registry.spawn(pool, seed);
+        w.tables.item_death_traits.set(500, barrel_traits());
+        ExplosionEntry e;
+        e.pos.set_q16({x0, y0, 0});
+        e.type = ammo_kz::kStandard;
+        e.ammo_index = 1;
+        e.owner = attacker;
+        w.explosions.queue_explosion(w, e);
+        w.explosions.process(w, nullptr, nullptr, 0.0f, w.out.destruction);
+        return w.registry.get(victim)->last_attacker == attacker;
+    };
+    const int32_t bound = 0x10000 | 0x0101;
+    CHECK(struck(1, 0, bound));      // the length is the reach word
+    CHECK(!struck(1, 1, bound));     // one word past it
+    CHECK(!struck(1, -0x8000, 0));   // a zero bound word leaves the sweep
+    CHECK(struck(0, 0, bound));      // the surface is the radius word
+    CHECK(!struck(0, 1, bound));     // one word past it
+}
+
 // Every pool-0 victim the blast admits with its damage word clear takes the
 // ammo's kz_sound at full volume and its secondary_effect into its +0x1CC
 // slot: at the victim, oriented (0, 0, -0.5), tagged, never re-posed, and a
@@ -4759,6 +4813,7 @@ int main() {
 	test_wreck_fire_crackle_rolls_on_the_engine_prng();
 	test_death_piece_trail_effect_rows();
     test_explosion_damage_gates();
+    test_explosion_sweep_runs_on_words();
     test_blast_victim_hit_emitter_and_kz_sound();
     test_multiplayer_destroy_buildings_rule();
     test_explosion_los_excludes_victim_hull();

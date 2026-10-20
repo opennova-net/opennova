@@ -354,10 +354,11 @@ bool runs_tree_death_body(const World &world, const Entity &target) {
 // so a victim at the exact antipode (delta 0x80000000, whose abs stays
 // INT_MIN) passes even the narrowest cone, and a negative half-angle rejects
 // every other bearing.
-bool cone_compare(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_target) {
+// The bearing takes the victim's word deltas, each fild exactly (D-NET-507)
+// [orig: `fild var_A8; fild var_A4; fpatan; fmul dbl_7C19D8` @0x4EAFD9..0x4EAFE3].
+bool cone_compare(const ExplosionEntry &e, int32_t cone_half_bam, int32_t dx, int32_t dy) {
     const int64_t scaled = static_cast<int64_t>(
-            std::atan2(static_cast<double>(to_target.y), static_cast<double>(to_target.x)) *
-            io::kBamPerRadian);
+            std::atan2(static_cast<double>(dy), static_cast<double>(dx)) * io::kBamPerRadian);
     const uint32_t ang = static_cast<uint32_t>(scaled);
     const int32_t diff = static_cast<int32_t>(ang - static_cast<uint32_t>(e.dir_bam));
     const int32_t sign = diff < 0 ? -1 : 0;
@@ -369,9 +370,37 @@ bool cone_compare(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to
 
 // The gate every type but the knife runs: a zero half-angle passes every
 // bearing [orig: pool 0 `cmp [esp+0C0h+var_98], 0; jz` @0x4EAFD2..0x4EAFD7].
-bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_target) {
+bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, int32_t dx, int32_t dy) {
     if (cone_half_bam == 0) return true;
-    return cone_compare(e, cone_half_bam, to_target);
+    return cone_compare(e, cone_half_bam, dx, dy);
+}
+
+// A victim's sweep words: its word deltas from the entry (victim less entry,
+// wrapping), each made absolute (`cdq; xor; sub`) and tested against the reach
+// word, then the x87 length saturated at flt_7C19E0 and truncated against it
+// (D-NET-507). [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - pool 0
+//  @0x4EAF29..0x4EAFA2, pool 1 @0x4EB3CD..0x4EB44F, pool 2 @0x4EB604..0x4EB690]
+struct SweepWords {
+    int32_t dx = 0, dy = 0;
+    int32_t length = 0;
+};
+int32_t fixed_distance(const EntityPosition &a, const EntityPosition &b);
+bool sweep_within(const Entity &t, const ExplosionEntry &e, int32_t reach, SweepWords &out) {
+    out.dx = io::bam_sub(t.position.x.q16, e.pos.x.q16);
+    out.dy = io::bam_sub(t.position.y.q16, e.pos.y.q16);
+    const int32_t dz = io::bam_sub(t.position.z.q16, e.pos.z.q16);
+    if (io::bam_abs(out.dx) > reach || io::bam_abs(out.dy) > reach || io::bam_abs(dz) > reach)
+        return false;
+    out.length = fixed_distance(t.position, e.pos);
+    return out.length <= reach;
+}
+
+// The victim's distance to the blast past its bound word, a signed subtract
+// floored at 0 (`sub; jns`). [orig: pool 0 @0x4EB03C..0x4EB042, pool 1
+// @0x4EB56F..0x4EB577]
+int32_t sweep_surface(int32_t length, int32_t bound) {
+    const int32_t surface = io::bam_sub(length, bound);
+    return surface < 0 ? 0 : surface;
 }
 
 // The fixed-point length of a victim's offset: the fixed deltas' length,
@@ -491,11 +520,12 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
 }
 
 // The AoE damage applicator for one victim [orig: Entity_ApplyWeaponDamage
-// @ 0x4e6820]. `distance` is the surface distance (center distance minus the
-// victim's bound radius, clamped at 0 by the caller), `blast_radius` the
-// resolved radius.
+// @ 0x4e6820]. `d16` is the surface distance word (the center length less the
+// victim's bound word, floored at 0 by the sweep), `blast16` the resolved
+// radius word, the two dwords the sweep pushes (D-NET-507) [orig: `push var_AC;
+// push var_B0` @0x4EB306..0x4EB30F].
 void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity &target, const ExplosionEntry &e,
-                                float distance, float blast_radius) {
+                                int32_t d16, int32_t blast16) {
     if ((target.engine_flags & kEntityFlagDead) != 0) return; // [orig: Flags & 2 @ 0x4e682e]
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     // In a session only the authority applies blast damage, and a Building
@@ -530,10 +560,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
     // Linear falloff from kz_minradius to the blast radius in 16.16: the fraction
     // is a truncating Q16 quotient and the multiply rounds at 0x8000; type 4
     // (radius blast / direct hit) skips it [orig: @ 0x4e6943-0x4e699c].
-    const int32_t d16 = to_fixed(distance);
     if (e.type != ammo_kz::kRadiusBlast) {
         const int32_t min16 = to_fixed(ammo->kz_minradius);
-        const int32_t blast16 = to_fixed(blast_radius);
         if (d16 > min16 && blast16 - min16 > 0) {
             const int32_t t16 = static_cast<int32_t>(
                     (static_cast<int64_t>(d16 - min16) << 16) / (blast16 - min16));
@@ -648,7 +676,7 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
         CollisionMatrix matrix;
         if (model != nullptr && collision->entity_section_matrix(world, target.handle, 0, matrix)) {
             const int32_t center[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
-            const int32_t radius = to_fixed(blast_radius);
+            const int32_t radius = blast16;
             for (size_t i = 0; i < model->sections.size(); ++i) {
                 const CollisionSection &section = model->sections[i];
                 if (!collision_section_breaks(section.flags)) continue;
@@ -798,16 +826,23 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                             MissionTables::kCharAttrMedic) ||
                     (healer->flags & kEntityFlagDead) != 0u)
                 continue;
-            const float medic_radius = e.radius_override != 0.0f
-                    ? e.radius_override : ammo->kz_maxradius;
+            // The pool-0 sweep's words: the reach (the bound word plus twice the
+            // radius word), the surface floored at 0 against the radius word
+            // (D-NET-507) [orig: @0x4EAF29..0x4EAFA2, @0x4EB03C..0x4EB06C].
+            const int32_t medic_q16 = e.radius_override != 0.0f
+                    ? to_fixed(e.radius_override) : to_fixed(ammo->kz_maxradius);
+            if (medic_q16 == 0) continue; // [orig: the kill switch `jz` @0x4EAE84]
             const size_t pool0 = world.registry.pool_capacity(0);
             for (size_t s = 0; s < pool0; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(0, static_cast<int>(s)));
                 if (t == nullptr || t == healer || t->kind != EntityKind::Organic) continue;
                 if (t->team != healer->team) continue;
-                const Vec3 d = vec_sub(t->position, e.pos);
-                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 0.6f;
-                if (vec_len(d) - bound > medic_radius) continue;
+                const int32_t bound = t->bound_radius.q16;
+                SweepWords sw;
+                if (!sweep_within(*t, e, static_cast<int32_t>(static_cast<uint32_t>(bound) +
+                                         2u * static_cast<uint32_t>(medic_q16)), sw))
+                    continue;
+                if (sweep_surface(sw.length, bound) > medic_q16) continue;
                 // The authority's host session runs each transaction here, in
                 // the queue, ahead of the pool-0 walk (a heal closes a death
                 // edge its walk would raise); a world it does not drive keeps
@@ -835,36 +870,39 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         // (@ 0x4eae56). A nonzero override replaces the radius
         // (@ 0x4eae64..0x4eae80) and a zero radius drops the whole entry, the
         // kill switch for zero-radius bullet rows (@ 0x4eae84).
+        // The radius is a word (var_AC): the ammo's kz_maxradius word, the
+        // source's bound word, or the override float times 65536 truncated;
+        // only a zero radius drops the entry (D-NET-507).
         const Entity *source = world.registry.get(e.owner);
         KillZoneCallback callback = KillZoneCallback::None;
-        float blast_radius = 0.0f;
+        int32_t radius_q16 = 0;
         switch (e.type) {
             case ammo_kz::kKnife:
                 callback = KillZoneCallback::Melee;
-                blast_radius = ammo->kz_maxradius; // [orig: E+28 -> +56 @ 0x4eae0c]
+                radius_q16 = to_fixed(ammo->kz_maxradius); // [orig: E+28 -> +56 @ 0x4eae0c]
                 if (source != nullptr &&
                         world.tables.class_has_attribute(
                                 source->player_class, MissionTables::kCharAttrKnifeBonus))
-                    blast_radius += 1.0f; // [orig: add edi, 10000h @ 0x4eae34]
+                    radius_q16 = io::bam_add(radius_q16, 0x10000); // [orig: add edi, 10000h @ 0x4eae34]
                 break;
             case ammo_kz::kStandard:
             case ammo_kz::kC4:
             case ammo_kz::kBullets:
             case ammo_kz::kSlash:
                 callback = KillZoneCallback::WeaponDamage;
-                blast_radius = ammo->kz_maxradius; // [orig: E+28 -> +56 @ 0x4eadcd]
+                radius_q16 = to_fixed(ammo->kz_maxradius); // [orig: E+28 -> +56 @ 0x4eadcd]
                 break;
             case ammo_kz::kRadiusBlast:
                 callback = KillZoneCallback::WeaponDamage;
-                blast_radius = source != nullptr ? source->bound_radius
-                                                 : ammo->kz_maxradius; // [orig: @ 0x4eae52]
+                radius_q16 = source != nullptr ? source->bound_radius.q16
+                                               : to_fixed(ammo->kz_maxradius); // [orig: `mov edi, [eax]` @ 0x4eae52]
                 break;
             default:
                 break;
         }
         if (e.radius_override != 0.0f)
-            blast_radius = e.radius_override;    // [orig: the E+0x2C float @ 0x4eae64]
-        if (blast_radius <= 0.0f) continue;
+            radius_q16 = to_fixed(e.radius_override); // [orig: the E+0x2C float, fmul, _ftol2 @ 0x4eae64..0x4eae7e]
+        if (radius_q16 == 0) continue;             // [orig: `cmp edi, ebx; jz` @ 0x4eae84]
         const int32_t cone_half = ammo->kz_pieslice_bam; // [orig: E+28 -> +60 @ 0x4eadad]
         const EntityHandle resolved = resolve_attacker_chain(world, e.owner);
         // The friendly-fire gate each pool leg asks of (victim, resolved
@@ -878,9 +916,9 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         // callback left the victim without one [orig: `call [esp+var_9C]`
         // @ 0x4eb312 / @ 0x4eb58c / @ 0x4eb868, the +0x178 fallbacks
         // @ 0x4eb319..0x4eb329 / @ 0x4eb593..0x4eb5a4 / @ 0x4eb86f..0x4eb880].
-        const auto run_callback = [&](Entity &t, float surface) {
+        const auto run_callback = [&](Entity &t, int32_t surface) {
             if (callback == KillZoneCallback::WeaponDamage)
-                entity_apply_weapon_damage(world, collision, t, e, surface, blast_radius);
+                entity_apply_weapon_damage(world, collision, t, e, surface, radius_q16);
             else if (callback == KillZoneCallback::Melee)
                 entity_apply_melee_damage(world, t, e);
             if (!t.last_attacker.valid()) t.last_attacker = resolved;
@@ -893,15 +931,14 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
             for (size_t s = 0; s < pool0; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(0, static_cast<int>(s)));
                 if (t == nullptr || (t->engine_flags & 0x1u) != 0) continue;
-                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 0.6f;
-                // The organic reaction band reaches 2x the blast radius
-                // [orig: max_check_range = radius + 2*blast @ 0x4eaf2b].
-                const Vec3 d = vec_sub(t->position, e.pos);
-                const float reach = bound + 2.0f * blast_radius;
-                if (std::abs(d.x) > reach || std::abs(d.y) > reach || std::abs(d.z) > reach)
-                    continue;
-                const float dist = vec_len(d);
-                if (dist > reach) continue;
+                // The organic reaction band reaches the bound word plus twice
+                // the radius word [orig: `mov ebx, [edi]; lea ebp, [ebx+eax*2]`
+                // @0x4eaf29..0x4eaf2b].
+                const int32_t bound = t->bound_radius.q16;
+                const int32_t reach = static_cast<int32_t>(
+                        static_cast<uint32_t>(bound) + 2u * static_cast<uint32_t>(radius_q16));
+                SweepWords sw;
+                if (!sweep_within(*t, e, reach, sw)) continue;
                 if (t->health <= 0 && (t->engine_flags & kEntityFlagDead) != 0) continue;
                 // The knife's zone (kztype 1, rounds_kz_Knife) skips the cone in
                 // a session for a victim within its kz_minradius, and otherwise
@@ -913,13 +950,12 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // @0x8133E0]
                 if (e.type == ammo_kz::kKnife) {
                     const bool within = world.rules.mp_session &&
-                            fixed_distance(t->position, e.pos) <= to_fixed(ammo->kz_minradius);
-                    if (!within && !cone_compare(e, cone_half, d)) continue;
-                } else if (!cone_gate(e, cone_half, d)) {
+                            sw.length <= to_fixed(ammo->kz_minradius);
+                    if (!within && !cone_compare(e, cone_half, sw.dx, sw.dy)) continue;
+                } else if (!cone_gate(e, cone_half, sw.dx, sw.dy)) {
                     continue;
                 }
-                float surface = dist - bound;
-                if (surface < 0.0f) surface = 0.0f;
+                const int32_t surface = sweep_surface(sw.length, bound);
                 // The OUTER-BAND flinch, ahead of the blast-radius cut: an
                 // organic anywhere in the 2x reaction band takes the ammo
                 // reaction notify, so an explosive near-miss that deals no
@@ -930,7 +966,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // lastAttacker) still rides the RoundHit drain, so a pure
                 // near-miss stamps no AI reaction here yet.
                 if (t->item_type == 3) entity_on_damage_received(world, *t, ammo);
-                if (surface > blast_radius) continue; // [orig: @0x4eb064..0x4eb06c]
+                if (surface > radius_q16) continue; // [orig: @0x4eb064..0x4eb06c]
                 // A medic entry and the attacker's own body pass the gate
                 // unasked [orig: `cmp [esi+18h], 3` @0x4eb076, the self compare
                 // @0x4eb07c, the call @0x4eb086].
@@ -1031,13 +1067,11 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 if ((t->engine_flags & 0x1u) != 0 ||
                     (t->engine_flags & kEntityFlagIndestructible) != 0)
                     continue; // [orig: @ 0x4eb3cb]
-                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 1.0f;
-                const Vec3 d = vec_sub(t->position, e.pos);
-                const float reach = bound + blast_radius;
-                if (std::abs(d.x) > reach || std::abs(d.y) > reach || std::abs(d.z) > reach)
-                    continue;
-                const float dist = vec_len(d);
-                if (dist > reach) continue;
+                // The reach is the bound word plus the radius word [orig:
+                // `mov ebp, [edi]; add ebp, var_AC` @0x4eb3d2..0x4eb3d4].
+                const int32_t bound = t->bound_radius.q16;
+                SweepWords sw;
+                if (!sweep_within(*t, e, io::bam_add(bound, radius_q16), sw)) continue;
                 if (pair_protected(*t)) continue; // [orig: @0x4eb45b]
                 // LOS with the witnessed +0.25 lift [orig: @ 0x4eb4ca]; this
                 // leg leaves the item's parentEntity in place.
@@ -1045,15 +1079,16 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                     !blast_los_clear(world, collision, terrain, t->position, e.pos,
                                      t->handle, 0.25f, /*query_parent_cleared=*/false))
                     continue;
-                if (!cone_gate(e, cone_half, d)) continue;
+                if (!cone_gate(e, cone_half, sw.dx, sw.dy)) continue;
+                // An item with a zero bound word leaves the sweep [orig: `mov ecx,
+                // [edi]; test ecx, ecx; jz` @0x4eb535..0x4eb539].
+                if (bound == 0) continue;
                 // Tree-class targets record the blast center as the debris
                 // launch origin [orig: the deathCallback ==
                 // Entity_HandleDestructibleDeathEvent check @ 0x4eb553].
                 if (t->health > 0 && runs_tree_death_body(world, *t))
                     t->death_blast_center = e.pos;
-                float surface = dist - bound;
-                if (surface < 0.0f) surface = 0.0f;
-                run_callback(*t, surface);
+                run_callback(*t, sweep_surface(sw.length, bound));
             }
         }
 
@@ -1064,19 +1099,17 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
             for (size_t s = 0; s < pool2; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(2, static_cast<int>(s)));
                 if (t == nullptr || (t->engine_flags & 0x1u) != 0) continue;
-                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 1.0f;
-                const Vec3 d = vec_sub(t->position, e.pos);
-                const float reach = bound + blast_radius;
-                if (std::abs(d.x) > reach || std::abs(d.y) > reach || std::abs(d.z) > reach)
-                    continue;
-                if (vec_len(d) > reach) continue;
-                if (!cone_gate(e, cone_half, d)) continue;
+                // The reach is the bound word plus the radius word [orig:
+                // `mov ebp, [edi]; add ebp, var_AC` @0x4eb609..0x4eb60b].
+                const int32_t bound = t->bound_radius.q16;
+                SweepWords sw;
+                if (!sweep_within(*t, e, io::bam_add(bound, radius_q16), sw)) continue;
+                if (!cone_gate(e, cone_half, sw.dx, sw.dy)) continue;
                 // The witnessed AABB-face distance refinement rides the model
                 // bounds [orig: @ 0x4eb700-0x4eb7f6]; the bound-sphere reach
                 // stands in until per-model AABBs reach the world (tracked).
-                float surface = vec_len(d) - bound;
-                if (surface < 0.0f) surface = 0.0f;
-                if (surface > blast_radius) continue;
+                const int32_t surface = sweep_surface(sw.length, bound);
+                if (surface > radius_q16) continue;
                 if (pair_protected(*t)) continue; // [orig: @0x4eb7f6]
                 // Window shatter at the GLASS1..4 user points [orig:
                 // Terrain_SpawnEffectsAtUserPoint x4 @ 0x4eb814-0x4eb85d].
