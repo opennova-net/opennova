@@ -379,6 +379,53 @@ void test_a_previous_frames_heal_keeps_the_0x41s_death() {
 	CHECK(f.deaths(f.drain(0)) == std::vector<uint16_t>{f.players[1].packed});
 }
 
+// D-NET-556: a damage death the previous frame's entity update raised, then
+// this frame's 0x41: the death armed its holds in that update, so the 0x41's
+// stores land last (+360 and +364 at the raw timeout, +368 closed).
+// [orig: GameEvent_PlayerDeath -- +360 @0x516EC4..0x516EC6, +368 @0x516F4F;
+//  NapiNPServerMsg_DeathTimeoutReset -- +360 @0x51057B, +364 @0x510587, +368
+//  @0x51058D]
+void test_the_0x41_lands_over_a_previous_frames_death() {
+	Fixture f;
+	f.hit(1, 0);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.dead_bit(1));
+	CHECK(f.conn(1).link.respawn_delay_seconds == 3u);
+	CHECK(f.conn(1).link.downed_revive_seconds == 120u);
+	f.request_death_timeout_reset(1);
+	CHECK(f.conn(1).link.respawn_delay_seconds == 1u);
+	CHECK(f.conn(1).link.spawn_target_hold_seconds == 1u);
+	CHECK(f.conn(1).link.downed_revive_seconds == 0u);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.conn(1).link.respawn_delay_seconds == 1u);
+	CHECK(f.conn(1).link.downed_revive_seconds == 0u);
+}
+
+// D-NET-556: a medic revive the previous frame's entity update admitted (the
+// revive window still open there), then this frame's 0x41: the revive ran in
+// that update (its pose armed, +360 closed, its 0x3A staged), and the 0x41
+// closes +368 again over it.
+// [orig: GameEvent_RevivePlayer @0x517CD0 -- the window gate @0x517D14, +89932
+//  @0x517D5B, +360 @0x517D67, the 0x3A @0x517E29..0x517E3F;
+//  NapiNPServerMsg_DeathTimeoutReset -- +368 @0x51058D]
+void test_a_previous_frames_revive_stands_under_the_0x41() {
+	Fixture f;
+	f.conn(1).link.auto_medic_enabled = true;
+	f.hit(1, 0);
+	inmatch::Server_TickUpdate(f.ctx); // the death opens the 120-second window
+	CHECK(f.dead_bit(1) && f.conn(1).link.downed_revive_seconds == 120u);
+	f.medic_kit(1, 2);
+	inmatch::Server_TickUpdate(f.ctx); // the revive, in this frame's update
+	CHECK(f.conn(1).reply.revive_pose_valid);
+	CHECK(f.conn(1).link.respawn_delay_seconds == 0u);
+	(void)f.drain(1);
+	f.request_death_timeout_reset(1);
+	CHECK(f.conn(1).link.downed_revive_seconds == 0u);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.conn(1).reply.revive_pose_valid);
+	CHECK(Fixture::first(f.drain(1), s2c::MEDIC_REVIVING) >= 0); // the revive's 0x3A
+}
+
 } // namespace
 
 int main() {
@@ -392,6 +439,8 @@ int main() {
 	test_a_heal_in_the_queue_closes_the_edge();
 	test_the_queues_heal_leads_the_walks_death();
 	test_a_previous_frames_heal_keeps_the_0x41s_death();
+	test_the_0x41_lands_over_a_previous_frames_death();
+	test_a_previous_frames_revive_stands_under_the_0x41();
 	if (failures == 0) std::printf("player_death_edge: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

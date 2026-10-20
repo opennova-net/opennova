@@ -404,10 +404,11 @@ struct RoundDeath {
     // so nothing queues a death for it. The server tick's head still reads it
     // (server_tick.cpp) until that read goes.
     bool player_edge = false;
-    // Nonzero for a player body's edge record: its transaction ran inside the
-    // entity update (the host session's IEntityUpdateTransactions), and the
-    // record keeps the place in the queue where the host releases the sends it
-    // staged, which retail's update queued after that frame's send pump.
+    // Nonzero for the record of a transaction the entity update ran inline (a
+    // player body's death edge, the explosion queue's medic arm: the host
+    // session's IEntityUpdateTransactions): the record keeps the place in the
+    // queue where the host releases the sends the transaction staged, which
+    // retail's update queued after that frame's send pump.
     // [orig: Game_ProcessMainFrame -- the send pump @0x51E487 inside the
     //  Server_TickUpdate call @0x5266B6, then Entity_UpdateAllEntities @0x52674B]
     uint32_t staged_sends = 0;

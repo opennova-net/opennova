@@ -138,8 +138,8 @@ PlayerDeathFeed classify_player_death(
 	return out;
 }
 
-// The batch an edge record names, onto the transports of the connections
-// still there: a connection dropped since the entity update takes nothing, as
+// The batch a transaction's record names, onto the transports of the
+// connections still there: a connection dropped since the entity update takes nothing, as
 // retail's slot teardown discards its queue.
 void release_staged_sends(NapiNPServerCtx &ctx, uint32_t seq) {
 	auto batch = std::find_if(ctx.entity_update_sends.begin(), ctx.entity_update_sends.end(),
@@ -195,8 +195,9 @@ EntityUpdateStaging::~EntityUpdateStaging() {
 	world_.round_sim.deaths.push_back(marker);
 }
 
-// Drain the queued deaths in order. A player body's edge record releases the
-// sends its transaction staged in the entity update; a damage-time record for
+// Drain the queued deaths in order. A transaction's record (a player body's
+// edge, the explosion queue's medic arm) releases the sends the transaction
+// staged in the entity update; a damage-time record for
 // a body whose edge raises its transaction only tallies (an org2 body's here,
 // an org1 body's in Server_ProcessPlayerDeath); every other record runs the
 // transaction. The head's drain then drops any batch whose record is gone and
