@@ -1522,7 +1522,7 @@ public:
 // the first description; a slot in state 7 (round over) is walked never.
 // [orig: Server_CheckPlayerViolations @0x51abd0 — the slot gates
 //  @0x51abf6/@0x51abff/@0x51ac0d, slot +5 gate @0x51ac9d (the bot byte @0x51aca2),
-//  TK gate @0x51acc2, suicide compare @0x51aced/@0x51acf0, "#S>9" @0x51ad0d,
+//  TK gate @0x51acc2, suicide compare @0x51aced/@0x51acf0 (/NOPUNT @0x51ad00), "#S>9" @0x51ad0d,
 //  punts @0x51ad17/@0x51acd9; caller Server_TickUpdate @0x51df5f]
 bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_kills,
 		int32_t suicides, bool host_own, bool expect_punt, const char *label,
