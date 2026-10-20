@@ -197,18 +197,29 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 
 // The slot's five vars go into the session's PlayerList in any state (a player added while the
 // request is out rides the first update's PlayerList); ClientHostPlayerAdded fires only while
-// hosting is established (state 6), the session's gate. Retail then sends the PlayerList delta
-// at once as well, ours at the next refresh (D-NET-490).
-// [orig: Server_PlayerAdd @0x51d3f0 @0x51d421..0x51d4b5; the state-6 wrapper @0x4d0e20]
+// hosting is established (state 6), the session's gate. Then the add runs the lists' update with
+// 0, which in state 6 sends the changed lists as a ClientHostUpdate at once: the new slot's vars
+// and whatever else is marked (D-NET-490). The slot's +5 byte the update's test reads is cleared
+// by the add itself, so the update always runs; a removal runs none (the update's callers are the
+// server-info update, the add and the mission start).
+// [orig: Server_PlayerAdd @0x51cbc0 - @0x51d3f0, @0x51d421..0x51d4b5 (CNapiGameSession_OnPlayerChat
+//  @0x4d0e20, the state-6 wrapper around CNapiGameSession_SendPlayerAdded), the +5 byte cleared
+//  @0x51cf02 and tested @0x51d4ba, CPlayerManager_RebuildLists(edi = 0 @0x51d35f) @0x51d4c6;
+//  CPlayerManager_RebuildLists @0x4d4590 - the state-6 test @0x4d459a, its other callers
+//  @0x4ff63a / @0x524903]
 void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 	players_[slot.slot] = slot;
 	cfg_.player_count = static_cast<int>(players_.size());
-	if (ClientSession *session = lobby_.session()) session->send_host_player_added(slot);
+	if (ClientSession *session = lobby_.session()) {
+		session->send_host_player_added(slot);
+		session->send_host_update(/*include_all=*/false);
+	}
 }
 
 // The slot's vars leave the session's PlayerList in any state; ClientHostPlayerRemoved fires only
 // while hosting is established (state 6).
-// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — the state-6 wrapper @0x51b5f3 (@0x4d0e40), then
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — the state-6 wrapper @0x51b5f3
+//  (CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40), then
 //  NapiLinkedList_RemoveByUserData on the PlayerList @0x51b601]
 void NwuHostRole::clear_player_slot(int slot) {
 	if (players_.erase(slot) == 0) return;

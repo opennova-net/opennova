@@ -1431,7 +1431,7 @@ bool ClientSession::send_host_player_added(const HostPlayerSlot &player) {
 }
 
 // [orig: the slot's vars dropped (NapiLinkedList_RemoveByUserData @0x630810), then the
-//  state-6 wrapper @0x4d0e40]
+//  state-6 wrapper CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40]
 bool ClientSession::send_host_player_removed(int player_number) {
 	if (remove_slot_vars(player_list_, player_number)) player_list_changed_ = true;
 	if (host_state_ != HostState::Established) return false;

@@ -364,7 +364,8 @@ public:
 	//  @0x4d5c63 / @0x4d5c71; CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce32f / @0x4ce33c]
 	void mark_host_lists();
 	// ClientHostPlayerAdded / ClientHostPlayerRemoved — queued only while Established (state 6).
-	// [orig: the state-6 wrappers @0x4d0e20 / @0x4d0e40]
+	// [orig: the state-6 wrappers CNapiGameSession_OnPlayerChat @0x4d0e20 /
+	//  CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40]
 	bool send_host_player_added(const HostPlayerSlot &player);
 	bool send_host_player_removed(int player_number);
 	// ClientPlayerEnterRequest for a joiner entering the hosted game

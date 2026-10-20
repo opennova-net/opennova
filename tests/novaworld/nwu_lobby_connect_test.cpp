@@ -15,6 +15,7 @@
 #include <net/napi/session.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/gate_probe.h>
+#include <net/novaworld/nwu_host_role.h>
 #include <net/novaworld/nwu_lobby_session.h>
 #include <net/napi/tlv.h>
 #include <net/npwire/nw_session_framing.h>
@@ -819,7 +820,114 @@ void check_gate_response_lines() {
 	CHECK(cut.size() == 3 && cut[0] == std::string(32767, 'x') && cut[1].empty() && cut[2] == "Y");
 }
 
+// The client 0x43s in `datagrams` decoded to their statements' names and containers, in order.
+std::vector<NapiMessage> client_statements(
+		const std::vector<std::vector<uint8_t>> &datagrams, const std::string &client_scrk) {
+	std::vector<NapiMessage> out;
+	ProtocolReassemblyState reassembly;
+	for (const auto &raw : datagrams) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!decode(raw, opcode, body) || opcode != SESSION_OPCODE_PROTOCOL_MESSAGE)
+			continue;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> records;
+		if (!decode_protocol_packet_plaintext(body.data(), body.size(), client_scrk, header, records))
+			continue;
+		for (const ProtocolMessage &record : records) {
+			std::vector<uint8_t> payload;
+			if (record.flags.settings_update || record.full_tag != 0 ||
+					!reassemble_protocol_payload(reassembly, record, payload) || payload.empty())
+				continue;
+			std::size_t consumed = 0;
+			std::vector<NapiMessage> stream;
+			if (napi_stream_decode(payload.data(), payload.size(), stream, &consumed) == 0)
+				for (NapiMessage &m : stream) out.push_back(std::move(m));
+		}
+	}
+	return out;
+}
+
+// D-NET-490: a player's add on a hosting session sends ClientHostPlayerAdded and then, at once,
+// the lists' update with 0: a ClientHostUpdate carrying the changed PlayerList (the new slot's
+// vars); a removal sends ClientHostPlayerRemoved alone, its PlayerList change riding the next
+// update. [orig: Server_PlayerAdd @0x51CBC0 - @0x51D4B5, the +5 test @0x51D4BA,
+//  CPlayerManager_RebuildLists(0) @0x51D4C6; CPlayerManager_RebuildLists @0x4D4590 - the state-6
+//  test @0x4D459A, CNapiGameSession_SendHostUpdate @0x4D45B5; Server_HandlePlayerDisconnect
+//  @0x51B5C0 - the removal @0x51B5F3 / @0x51B601, no update]
+void check_host_player_add_sends_update() {
+	Rig rig;
+	const std::vector<uint8_t> auth = bring_to_verify(rig);
+	CHECK(!auth.empty());
+	if (auth.empty())
+		return;
+	rig.session.inbound.push_back(
+			{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+	rig.lobby.tick(300);
+	NwuHostRole role(rig.lobby, NwuHostRole::Hooks{});
+	HostRegistration reg;
+	reg.server_name = "Add Srv";
+	CHECK(role.request(reg));
+	rig.lobby.tick(310);
+	rig.session.inbound.push_back(
+			{ kServer, server_statement_to(auth, "ServerHostResult", { { "Success", "1" } }, 2) });
+	rig.lobby.tick(320);
+	ClientSession *session = rig.lobby.session();
+	CHECK(session != nullptr);
+	if (session == nullptr)
+		return;
+	for (const auto &notice : session->take_notices())
+		role.handle_notice(notice);
+	CHECK(session->host_state() == ClientSession::HostState::Established);
+	// The request's marks stand: a first update (the add's) writes both lists; send it out of the
+	// way so the add's own delta is what the next one carries.
+	session->send_host_update(/*include_all=*/false);
+	rig.lobby.tick(330);
+
+	std::size_t before = rig.session.sent.size();
+	HostPlayerSlot joiner;
+	joiner.slot = 1;
+	joiner.player_name = "Joiner";
+	joiner.ip_and_port = "10.0.0.9:32768";
+	joiner.team = "1";
+	joiner.type = "0";
+	role.set_player_slot(joiner);
+	rig.lobby.tick(340);
+	std::vector<std::vector<uint8_t>> sent;
+	for (std::size_t i = before; i < rig.session.sent.size(); ++i)
+		sent.push_back(rig.session.sent[i].second);
+	std::vector<NapiMessage> statements = client_statements(sent, session->client_scrk());
+	CHECK(statements.size() == 2);
+	if (statements.size() == 2) {
+		CHECK(statements[0].name == "ClientHostPlayerAdded");
+		CHECK(statements[1].name == "ClientHostUpdate");
+		std::size_t player_vars = 0;
+		for (const NapiMessage &list : statements[1].children) {
+			std::string name;
+			for (const NapiField &f : list.fields)
+				if (f.name == "VarList") name.assign(f.data.begin(), f.data.end());
+			while (!name.empty() && name.back() == '\0')
+				name.pop_back();
+			if (name == "PlayerList")
+				player_vars = list.children.size();
+		}
+		CHECK(player_vars == 5);
+	}
+
+	before = rig.session.sent.size();
+	role.clear_player_slot(1);
+	rig.lobby.tick(350);
+	sent.clear();
+	for (std::size_t i = before; i < rig.session.sent.size(); ++i)
+		sent.push_back(rig.session.sent[i].second);
+	statements = client_statements(sent, session->client_scrk());
+	CHECK(statements.size() == 1 && !statements.empty() &&
+			statements[0].name == "ClientHostPlayerRemoved");
+	rig.lobby.close();
+}
+
 int main() {
+	check_host_player_add_sends_update();
 	check_connect_error_tags();
 	check_connect_log_gate_and_connect();
 	check_connect_log_give_ups();

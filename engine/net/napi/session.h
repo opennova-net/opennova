@@ -321,7 +321,7 @@ NapiMessage make_client_host_player_added(int player_number, const std::string &
                                           const std::string &pcid, const std::string &team,
                                           const std::string &type);
 // ClientHostPlayerRemoved: PlayerNumber only. [orig: CNapiGameSession_SendPlayerRemoved
-//  @0x4d01a0; the state-6 wrapper @0x4d0e40]
+//  @0x4d01a0; the state-6 wrapper CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40]
 NapiMessage make_client_host_player_removed(int player_number);
 
 // ClientPlayerEnterRequest: the HOST's admission statement for a player entering its game —
