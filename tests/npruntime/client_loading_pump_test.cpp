@@ -149,6 +149,7 @@ struct Harness {
 	std::string server_scrk = "SERVER-LOADING-PUMP-SCRK";
 	ClientAuth auth;
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	bool uplink = false; // the frame builds a C2S 0x0C body (the game loop's uplink)
 
 	Harness() { client.set_title(&kJo); }
 
@@ -161,6 +162,7 @@ struct Harness {
 					frame_server_session(server_tx, server_scrk, auth.ck, *incoming);
 			client.receive(dg.data(), dg.size());
 		}
+		if (uplink) return client.Client_ProcessNetworkFrame(PlayerExtendedUplink{}, tick++);
 		return client.Client_ProcessNetworkFrame(tick++);
 	}
 	std::vector<std::vector<uint8_t>> frame(std::vector<ProtocolMessage> incoming) {
@@ -424,8 +426,8 @@ std::vector<std::vector<uint8_t>> frame_until_sent(Harness &h, int limit) {
 }
 
 // Drive the admission under a dictated `period` to the final wait for S2C 0x0F, then let the
-// host release the player early: its self record and a first 0x5A grant (the in-match release
-// that precedes the 0x0F on an OpenNova host).
+// host release the player early: its self record and a first 0x5A grant (a host's answer to
+// the load's first 0x2F, which lands inside the final wait, ahead of the 0x0F).
 bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
 	if (!h.handshake()) return false;
 	(void)h.frame({settings_record(0), settings_record(1)});
@@ -464,17 +466,62 @@ bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
 			"early release: the joiner is in the match inside the final wait for the 0x0F");
 }
 
-// A joiner the host released into the match early (its self record and a first 0x5A inside
-// the final wait for the 0x0F) already runs our in-match frame: its uplink and input pack ride
-// that frame's send gate. Its sends therefore keep the per-frame countdown gate, so the frames
-// whose pack precondition holds are exactly the frames that build, once per dictated period,
-// and under no holdoff every frame builds and a one-shot queued before a frame leaves in it.
-// [orig: Client_ProcessNetworkFrame @0x42c3dd -> Player_PackInputStateToEntity @0x42c3e9 ->
-//  PumpClientProtocolSend @0x42c4bc]
-bool run_an_in_match_joiner_keeps_the_frame_gate() {
+// The tags of every message the joiner sent, one list per datagram, from `sent`.
+std::vector<std::vector<uint8_t>> sent_tags(Harness &h,
+		const std::vector<std::vector<uint8_t>> &sent) {
+	std::vector<std::vector<uint8_t>> out;
+	for (const std::vector<uint8_t> &dg : sent) {
+		std::vector<uint8_t> tags;
+		if (!h.tags_of(dg, tags)) tags = {0xFF, 0xFF};
+		out.push_back(tags);
+	}
+	return out;
+}
+
+bool carries(const std::vector<std::vector<uint8_t>> &packets, uint8_t tag) {
+	for (const std::vector<uint8_t> &tags : packets)
+		for (uint8_t t : tags)
+			if (t == tag) return true;
+	return false;
+}
+
+// A joiner the host released early (its self record and a first 0x5A inside the final wait
+// for the 0x0F, as a host's answer to the load's first 0x2F lands there) is still in that
+// wait: the loop spins, building at every pass, and runs no client net frame, so neither the
+// frame's 0x2C ping, its 0x0C uplink nor its 0x4C report leaves before the 0x0F (checkpoint
+// c1: our joiner's 0x2C and 0x0C rode the 0x0B, ahead of the load requests). The 0x0F ends
+// the wait: its completion burst leads, the first 0x2C and 0x0C ride the first game-loop
+// boundary behind it, and from there the frame's countdown gate paces the block, one boundary
+// per dictated period, the frames that build exactly the input pack's; under no holdoff
+// every frame opens and a one-shot queued before a frame leaves in it.
+// [orig: Game_StartMission's final wait @0x526295..0x5262e5 (the send @0x5262da, the exit
+//  @0x5262df on g_ClientWorldStateLoaded, set only by NapiNPClientMsg_0x00F @0x42e2cd; its
+//  burst @0x42e5af..0x42e6ab); Client_ProcessNetworkFrame @0x42c3dd ->
+//  Player_PackInputStateToEntity @0x42c3e9, the 0x2C @0x42c3fa..0x42c44a, the 0x0C
+//  @0x42c46f..0x42c4a3, the 0x4C @0x42c23e..0x42c279 -> PumpClientProtocolSend @0x42c4bc]
+bool run_an_early_release_stays_in_the_final_wait() {
 	{
 		Harness h;
+		h.uplink = true;
 		if (!drive_to_an_early_in_match_release(h, 6)) return false;
+		// Past one 0x4C period (310 frames): the spin never reaches the frame's producers.
+		for (int i = 0; i < 320; ++i) {
+			const uint32_t flushes = h.client.send_flush_counter();
+			const std::vector<std::vector<uint8_t>> sent = sent_tags(h, h.frame());
+			if (!expect(h.client.send_flush_counter() == flushes + 1,
+					"final wait: the spin builds at every pass, released or not"))
+				return false;
+			if (!expect(!carries(sent, 0x2C) && !carries(sent, 0x0C) && !carries(sent, 0x4C),
+					"final wait: no 0x2C, 0x0C or 0x4C leaves before the 0x0F"))
+				return false;
+		}
+		std::vector<uint8_t> world_state(23, 0);
+		std::vector<std::vector<uint8_t>> sent =
+				h.frame({make_protocol_message(0x0F, world_state)});
+		for (int i = 0; sent.empty() && i < 8; ++i) sent = h.frame();
+		if (!expect(h.packets(sent, {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23, 0x2C, 0x0C}}),
+				"the 0x0F ends the wait: its burst leads, the first 0x2C and 0x0C behind it"))
+			return false;
 		int opened_frames = 0;
 		int last_opened = -1;
 		for (int i = 0; i < 18; ++i) {
@@ -483,36 +530,31 @@ bool run_an_in_match_joiner_keeps_the_frame_gate() {
 			(void)h.frame();
 			const bool opened = h.client.send_flush_counter() != flushes;
 			if (!expect(opened == pack_frame,
-					"in match: the send block opens exactly on the input pack's frames"))
+					"game loop: the send block opens exactly on the input pack's frames"))
 				return false;
-			// The boundaries fall one dictated period apart. Their phase is wherever the
-			// mission start's own pumps left the countdown (D-NET-NEW-L2-6).
 			if (opened && !expect(last_opened < 0 || i - last_opened == 6,
-					"in match: the boundaries are one dictated period apart"))
+					"game loop: the boundaries are one dictated period apart"))
 				return false;
 			if (opened) {
 				last_opened = i;
 				++opened_frames;
 			}
 		}
-		if (!expect(opened_frames == 3, "in match: one send boundary per dictated period of 6"))
+		if (!expect(opened_frames == 3, "game loop: one send boundary per dictated period of 6"))
 			return false;
 	}
 	Harness h;
 	if (!drive_to_an_early_in_match_release(h, 0)) return false;
+	std::vector<uint8_t> world_state(23, 0);
+	(void)h.frame({make_protocol_message(0x0F, world_state)});
 	for (int i = 0; i < 4; ++i) {
 		if (!expect(h.client.send_block_opens_this_frame(),
-				"in match, no holdoff: every frame opens"))
+				"game loop, no holdoff: every frame opens"))
 			return false;
-		if (!expect(h.client.queue_stance_change(0xA9), "in match: the stance key queues a 0x1D"))
+		if (!expect(h.client.queue_stance_change(0xA9), "game loop: the stance key queues a 0x1D"))
 			return false;
-		std::vector<std::vector<uint8_t>> sent = h.frame();
-		bool carried = false;
-		std::vector<uint8_t> tags;
-		for (const std::vector<uint8_t> &dg : sent)
-			if (h.tags_of(dg, tags))
-				for (uint8_t tag : tags) carried = carried || tag == 0x1D;
-		if (!expect(carried, "in match, no holdoff: a one-shot queued before a frame leaves in it"))
+		if (!expect(carries(sent_tags(h, h.frame()), 0x1D),
+				"game loop, no holdoff: a one-shot queued before a frame leaves in it"))
 			return false;
 	}
 	return true;
@@ -800,7 +842,7 @@ int main() {
 	bool ok = true;
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
 	ok = run_timed_loops_pace_an_undictated_connection() && ok;
-	ok = run_an_in_match_joiner_keeps_the_frame_gate() && ok;
+	ok = run_an_early_release_stays_in_the_final_wait() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;

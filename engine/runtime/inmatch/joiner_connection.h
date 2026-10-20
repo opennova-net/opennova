@@ -884,13 +884,15 @@ public:
 	// or InMatch — a dead player re-entering the deploy flow is still in it.
 	bool in_session() const { return phase_ == Phase::Driving || phase_ == Phase::InMatch; }
 	// The game loop runs, so its main frame runs the client net frame every frame: from the
-	// mission start's end (or an earlier release) on, alive, dead or redeploying. Death sends
-	// the connection back to Driving; the frame and its housekeeping run on.
-	// [orig: Game_ProcessMainFrame @0x5263F0 -> Client_ProcessNetworkFrame @0x526692]
-	bool in_game_loop() const {
-		return phase_ == Phase::InMatch ||
-		       (phase_ == Phase::Driving && initial_admission_complete_);
-	}
+	// mission start's end on, alive, dead or redeploying. The S2C 0x0F alone ends the mission
+	// start's final wait; a 0x5A that released the player inside it starts no frame (its
+	// 0x2C, 0x0C and 0x4C wait for the 0x0F). Death sends the connection back to Driving;
+	// the frame and its housekeeping run on.
+	// [orig: Game_ProcessMainFrame @0x5263F0 -> Client_ProcessNetworkFrame @0x526692;
+	//  Game_StartMission's final wait @0x526295..0x5262e5 runs no net frame and exits only
+	//  on g_ClientWorldStateLoaded, cleared @0x5243be and set only by NapiNPClientMsg_0x00F
+	//  @0x42e2cd]
+	bool in_game_loop() const { return in_session() && initial_admission_complete_; }
 	// The host's session-variable list parsed from the reassembled S2C 0x60
 	// server-info transfer (npwire/session_vars.h): the server name and
 	// mission title the Tab board's header reads, and the EXP_FANFARE u16 (lo
