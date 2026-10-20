@@ -4,9 +4,10 @@
 // verbs; the request and query verbs answering as the Shell's request_json and query_json do, their
 // refusals included, a malformed one refused before the project opens; --install writing the
 // project's local.json as the editor reads it, a dry run's for that run alone, one naming no folder
-// refused; validate exiting as the build's gate says; and, with the game install, a project
-// imported from it whose Problems the query verb reads as the session does (the round's end-to-end
-// check), and an expansion project built over its jox01 (ADR 0046 S16).
+// refused; validate exiting as the build's gate says; and, with a game install (minted from
+// OpenNova's own game, minted_install.h), a project imported from it whose Problems the query verb
+// reads as the session does (the round's end-to-end check), and an expansion project built over its
+// expansion (ADR 0046 S16).
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -40,10 +41,9 @@
 #include <formats/pff/pff.h>
 
 #include "cli_verbs.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
-#include "common/test_parts.h"
 #include "editor/editor_test_support.h"
+#include "editor/minted_install.h"
 #include "common/png_test_support.h"
 
 namespace fs = std::filesystem;
@@ -741,16 +741,16 @@ static int test_validate_follows_the_gate() {
 	return 0;
 }
 
-// Retail: a project imported from the game install (the plan's end-to-end check): the main menu
-// and the stylesheet with the files they need, then its Problems read through the query and
-// validate verbs, each the answer the session gives the same project.
-static int test_retail_install_import() {
-	const std::string install = retail::install();
-	if (install.empty())
-		return retail::skip_leg("OPENNOVA_JO_DIR (a project imported from the game install, its Problems through query)");
-	test_temp::TempDir dir("opennova_project_cli_retail");
-	const std::string scratch = dir.root(), root = dir.file("Retail");
-	TEST_EXPECT(run(scratch, { "new", root, "--title", "Retail" }).code == 0);
+// A project imported from a game install (minted from OpenNova's own game, minted_install.h; the
+// plan's end-to-end check): the main menu and the stylesheet with the files they need, then its
+// Problems read through the query and validate verbs, each the answer the session gives the same
+// project.
+static int test_install_import() {
+	test_temp::TempDir dir("opennova_project_cli_install_import");
+	const std::string scratch = dir.root(), root = dir.file("Imported"), install = dir.file("install");
+	std::string minted;
+	TEST_EXPECT(minted_install::mint(install, minted));
+	TEST_EXPECT(run(scratch, { "new", root, "--title", "Imported" }).code == 0);
 	Ran ran = run(scratch, { "import", root, "--install", install, "--entry", "main.mnu", "--entry", "menu_style.mns",
 	                         "--with-dependencies" });
 	TEST_EXPECT(ran.code == 0 && ran.out.find("imported menus/main.mnu") != std::string::npos);
@@ -764,25 +764,25 @@ static int test_retail_install_import() {
 	TEST_EXPECT(ran.code == 0 && same(parsed(ran.out), problems));
 	ran = run(scratch, { "validate", root, "--json" });
 	TEST_EXPECT(ran.code == (blocked ? 1 : 0) && same(parsed(ran.out), problems));
-	std::printf("retail: %d problems after importing main.mnu and menu_style.mns with the files they need\n",
+	std::printf("install: %d problems after importing main.mnu and menu_style.mns with the files they need\n",
 	            int(problems.get_number("total", 0)));
 	return 0;
 }
 
-// Retail (ADR 0046 S16, the design's §6 row): a project built as the expansion jxm over the game
-// install's jox01. Its table imported from the install as /exp jox01 serves it (jox01.bin loose in its
-// folder, under the project's name), the main menu and its stylesheet with the files they need; the
-// build leaves out what the base game serves the same (same_as_base > 0); its run directory, staged
-// over the install as Play stages it, mounts with /exp jxm and serves the table and the menu.
-static int test_retail_expansion_build() {
-	const std::string install = retail::install();
-	if (install.empty())
-		return retail::skip_leg("OPENNOVA_JO_DIR (an expansion project built over the game install's jox01)");
-	if (!fs::is_regular_file(install + "/expansion/jox01/jox01.pff"))
-		return retail::skip_leg("the game install's expansion jox01 (an expansion project built over it)");
-	test_temp::TempDir dir("opennova_project_cli_retail_expansion");
-	const std::string scratch = dir.root(), root = dir.file("Mod");
-	TEST_EXPECT(run(scratch, { "new", root, "--title", "Retail Mod", "--expansion", "jxm", "--builds-on", "jox01" }).code == 0);
+// ADR 0046 S16, the design's §6 row: a project built as the expansion jxm over a game install's
+// expansion (minted from OpenNova's own game, minted_install.h: its onjo1, in the place JO:CA's jox01
+// has). Its table imported from the install as /exp onjo1 serves it (onjo1.bin loose in its folder,
+// under the project's name), the main menu and its stylesheet with the files they need; the build
+// leaves out what the base game serves the same (same_as_base > 0); its run directory, staged over
+// the install as Play stages it, mounts with /exp jxm and serves the table and the menu.
+static int test_install_expansion_build() {
+	test_temp::TempDir dir("opennova_project_cli_install_expansion");
+	const std::string scratch = dir.root(), root = dir.file("Mod"), install = dir.file("install");
+	std::string minted;
+	TEST_EXPECT(minted_install::mint(install, minted) &&
+	            fs::is_regular_file(install + "/expansion/" + minted_install::kExpansion + "/onjo1.pff"));
+	TEST_EXPECT(run(scratch, { "new", root, "--title", "Install Mod", "--expansion", "jxm", "--builds-on", minted_install::kExpansion })
+	                    .code == 0);
 	Ran ran = run(scratch, { "import", root, "--install", install, "--entry", "jxm.bin", "--entry", "main.mnu", "--entry",
 	                         "menu_style.mns", "--with-dependencies" });
 	TEST_EXPECT(ran.code == 0 && ran.out.find("jxm.bin") != std::string::npos);
@@ -802,20 +802,19 @@ static int test_retail_expansion_build() {
 	flags.expansion = "jxm";
 	TEST_EXPECT(opennova::mount_install(vfs, run_dir, flags) && vfs.mounted_expansion() == "jxm" &&
 	            vfs.has_file("main.mnu") && vfs.has_file("menu_style.mns"));
-	std::printf("retail: expansion jxm over jox01, %lu file(s) left out as the base game's own\n", same);
+	std::printf("install: expansion jxm over onjo1, %lu file(s) left out as the base game's own\n", same);
 	return 0;
 }
 
-// The retail twin's parts (tests/common/test_parts.h): `main` every case but the install import, whose
-// verbs each validate the project against the whole install (about 80 s), `install_import` that leg,
-// side by side.
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	const int failures = test_parts::run(
-	        argc, argv,
-	        {{"main", {test_verb_table, test_verbs_answer_as_the_session, test_request_and_query_verbs, test_install,
-	                   test_validate_follows_the_gate, test_retail_expansion_build}},
-	         {"install_import", {test_retail_install_import}, true}});
+int main() {
+	int failures = 0;
+	failures += test_verb_table();
+	failures += test_verbs_answer_as_the_session();
+	failures += test_request_and_query_verbs();
+	failures += test_install();
+	failures += test_validate_follows_the_gate();
+	failures += test_install_expansion_build();
+	failures += test_install_import();
 	if (failures == 0) std::printf("project_cli_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

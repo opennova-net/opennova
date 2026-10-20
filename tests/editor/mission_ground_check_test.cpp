@@ -9,15 +9,12 @@
 // checked again while nothing moves; and the mission view's people stood as the game's spawn stands them, the
 // person on the roof on the house's floor (the warmup's ground tail meeting it in his candidates), the settled
 // one on the terrain; and, over that world, the people playing in a world of their own (S27), looking about them
-// as the game's attention does. Mixed: the retail leg (OPENNOVA_JO_DIR) runs the rules over every
-// shipped mission of the base game over the game's own item table, models, terrains, tables and clips and
-// counts what they flag (`--list` prints each).
+// as the game's attention does. And every construct the shipped missions ground an entity by (measured once over the
+// base game's missions), each a minted mission of its own, raising no finding (`--list` prints the rules' verdicts).
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -25,8 +22,6 @@
 #include <vector>
 
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_ground_check.h>
 #include <editor/preview/mission_ground_facts.h>
@@ -57,7 +52,6 @@
 #include <editor/preview/mission_world.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -96,17 +90,6 @@ private:
 	uint64_t serial_ = 0;
 };
 
-// The game's mounted files as a FileSource: a name the mount resolves stamps 1.
-class VfsFiles : public opennova::FileSource {
-public:
-	explicit VfsFiles(const opennova::Vfs &vfs) : vfs_(vfs) {}
-	bool read(const std::string &name, std::vector<uint8_t> &out) const override { return vfs_.read_file(name, out); }
-	uint64_t stamp(const std::string &name) const override { return vfs_.has_file(name) ? 1 : 0; }
-
-private:
-	const opennova::Vfs &vfs_;
-};
-
 std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
 // The synth crate (a 1-unit box standing on its origin) with its `ground` point raised to `height` (the
@@ -123,9 +106,25 @@ std::vector<uint8_t> crate_anchored_at(double height) {
 	return wrote ? written : std::vector<uint8_t>();
 }
 
+// The synth crate with its one volume a blink box (type 8) in place of its solid: a model whose volumes a body
+// touches but the ground probe never clips (no type-1 solid), through the engine's own 3DI writer.
+std::vector<uint8_t> crate_without_solid() {
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("threedi/synth/crate.3di"));
+	opennova::threedi::Threedi3di3 model{};
+	if (opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) != 0) return {};
+	for (size_t i = 0; model.collision && i < model.collision->volume_count; ++i) model.collision->volumes[i].collidable_type = 8;
+	std::vector<uint8_t> written;
+	const bool wrote = opennova::threedi::threedi_3di3_write_memory(&model, written) == 0;
+	opennova::threedi::threedi_3di3_free(&model);
+	return wrote ? written : std::vector<uint8_t>();
+}
+
 // The catalog: a crate, the crate anchored 0.25 up, the crate anchored 1.5 up (over its 1-unit top), the
 // synth house (a 4-unit body under a roof slab to 4.4), a player-controlled truck (cveh), a rifleman (org1),
-// a statue (a person of org0's class, which has no motor), a bird (org1), a marker, a person naming no table.
+// a statue (a person of org0's class, which has no motor), a bird (org1), a marker, a person naming no table; the
+// movers of three more classes (CHel, catv, cbot), statics of the classes that keep the height (genx, upfx, ewep,
+// door, envs), a perch (drawn by the synth bird, whose collision block has faces and no volume) and a crate whose
+// one volume is a blink box (no solid of its own).
 constexpr const char *kItems =
 		"begin \"Null\"\nid 100000\ntype marker\nend\n"
 		"begin \"Crate\"\nid 101001\ntype decoration\ngraphic crate\nend\n"
@@ -141,7 +140,17 @@ constexpr const char *kItems =
 		"attrib: aidata\nend\n"
 		"begin \"Flag\"\nid 101009\ntype marker\nend\n"
 		"begin \"Mute\"\nid 101010\ntype person\ngraphic shed\nai_function org1\nmove_function org1\n"
-		"attrib: aidata\nend\n";
+		"attrib: aidata\nend\n"
+		"begin \"Helicopter\"\nid 101011\ntype vehicle\ngraphic carrier\nmove_function CHel\nend\n"
+		"begin \"ATV\"\nid 101012\ntype vehicle\ngraphic carrier\nmove_function catv\nend\n"
+		"begin \"Boat\"\nid 101013\ntype vehicle\ngraphic carrier\nmove_function cbot\nend\n"
+		"begin \"Pole\"\nid 101014\ntype object\ngraphic crate\nmove_function genx\nend\n"
+		"begin \"Splash\"\nid 101015\ntype object\ngraphic crate\nmove_function upfx\nend\n"
+		"begin \"Gun post\"\nid 101016\ntype object\ngraphic crate\nmove_function ewep\nend\n"
+		"begin \"Gate\"\nid 101017\ntype object\ngraphic crate\nmove_function door\nend\n"
+		"begin \"Hum\"\nid 101018\ntype object\ngraphic crate\nmove_function envs\nend\n"
+		"begin \"Perch\"\nid 101019\ntype decoration\ngraphic bird\nend\n"
+		"begin \"Blink crate\"\nid 101020\ntype decoration\ngraphic bcrate\nend\n";
 // The people's table: its idle row three entries, so that a body's two serves at its init (the secondary's, then the
 // primary's) move the variant the next body of the table plays.
 constexpr const char *kPeopleAdm = "anim_reset\t\"idle\"\r\nanim_idle\t\"idle\" \"walk\" \"idle\"\r\n"
@@ -201,6 +210,7 @@ struct Placed {
 	int team = 0;
 	uint8_t alert = 0; // its alert_state
 	int sight = 0;     // its max_engagement_distance, units
+	int pitch = 0, roll = 0; // whole degrees
 };
 
 std::vector<uint8_t> mint_mission(const std::vector<Placed> &placed) {
@@ -218,6 +228,8 @@ std::vector<uint8_t> mint_mission(const std::vector<Placed> &placed) {
 		entity.z = bms::to_fixed_16_16(p.z);
 		entity.bmsi_attributes = p.attributes;
 		entity.yaw = int16_t(p.yaw);
+		entity.pitch = int16_t(p.pitch);
+		entity.roll = int16_t(p.roll);
 		entity.team = uint8_t(p.team);
 		entity.alert_state = p.alert;
 		entity.max_engagement_distance = p.sight;
@@ -247,6 +259,8 @@ void put_rig(MemoryFiles &files) {
 	files.put("tcrate.3di", crate_anchored_at(1.5));
 	files.put("house.3di", test_io::read_file(test_paths_fixture("threedi/synth/house.3di")));
 	files.put("carrier.3di", test_io::read_file(test_paths_fixture("threedi/synth/carrier.3di")));
+	files.put("bird.3di", test_io::read_file(test_paths_fixture("threedi/synth/bird.3di")));
+	files.put("bcrate.3di", crate_without_solid());
 	files.put("people.adm", bytes_of(kPeopleAdm));
 	files.put("idle.bad", test_io::read_file(test_paths_fixture("anim/idle.bad")));
 	files.put("walk.bad", test_io::read_file(test_paths_fixture("anim/walk.bad")));
@@ -372,6 +386,7 @@ static int test_rules() {
 	// Wholly under the terrain: buried, lifted by its anchor.
 	const MissionGroundVerdict &buried = *of[kBuried];
 	TEST_EXPECT(buried.state == S::Buried && buried.off() && buried.top < buried.support && near(buried.fix_z, buried.support));
+	TEST_EXPECT(mission_ground_verdict_json(buried).get_string("state", "") == "buried");
 	// The house stands on the terrain; a crate on its roof stands on it, one 3 units over it floats over it.
 	TEST_EXPECT(state(kHouse) == S::Grounded && rule(kHouse) == MissionGroundRule::Static);
 	const MissionGroundVerdict &roof = *of[kOnRoof];
@@ -450,7 +465,7 @@ struct Session {
 		const AssetEntry *items = session.view().project.scan->find("items.def");
 		const std::string items_path = items ? items->relative_path : std::string("defs/items.def");
 		for (const char *name : { "Tmap.trn", "Tmap.cpt", "crate.3di", "acrate.3di", "tcrate.3di", "house.3di",
-					 "carrier.3di", "people.adm", "idle.bad", "walk.bad" }) {
+					 "carrier.3di", "bird.3di", "bcrate.3di", "people.adm", "idle.bad", "walk.bad" }) {
 			std::vector<uint8_t> bytes;
 			if (!files->read(name, bytes) || !test_io::write_file(root + "/" + name, bytes)) return false;
 		}
@@ -554,66 +569,177 @@ static int test_check() {
 	return 0;
 }
 
-// The retail leg: every shipped mission's entities as the rules ground them.
-static int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission's entities grounded)");
-	opennova::Vfs game;
-	game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-	TEST_EXPECT(game.mount_game(root, std::string(), opennova::VfsMountMode::Packed));
-	const auto files = std::make_shared<VfsFiles>(game);
-	std::vector<std::string> missions;
-	for (const opennova::VfsFileLocation &file : game.list_files()) {
-		const std::string name = std::filesystem::path(file.logical_name).filename().string();
-		if (retail::lower_ascii(std::filesystem::path(name).extension().string()) == ".bms") missions.push_back(name);
-	}
-	std::sort(missions.begin(), missions.end());
-	if (missions.empty()) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
-	const auto started = std::chrono::steady_clock::now();
-	MissionGroundReads reads;
+// --- the shipped constructs -------------------------------------------------------------------------------------
+
+namespace {
+
+// One construct the shipped missions ground: the records of a mission of its own, the one it is about (the only
+// record of its item there), and the verdict the rules give it, which is no finding.
+struct Construct {
+	const char *name;
+	std::vector<Placed> records;
+	size_t subject = 0;
+	MissionGroundRule rule = MissionGroundRule::Static;
+	const char *why = "";
+	MissionGroundState state = MissionGroundState::Grounded;
+	MissionSupport on = MissionSupport::Terrain;
+};
+
+// Every way the base game's shipped missions put an entity where the rules leave it (measured once over JO:CA's 88
+// missions, their 139,416 entities through the rules over the game's own catalog, models, terrains, tables and clips:
+// 39 statics off the ground, the shipped content's own, and every other one grounded or the game's to place), one
+// construct each. The statics grounded on the terrain (80,265), on another's solid (6,208) and on the water plane
+// (769), each sunk into what stands it, flush on it and within the slack over it; those leaning on, standing in or
+// buried with another's volume (942: over the terrain and wholly under it); the buildings' pool and the items';
+// yawed and tilted; models with a ground anchor off their origin, with a collision block of no volumes and with
+// volumes that hold no solid (a blink box alone); the classes that keep the height (genx, upfx, ewep, door, envs). The people set down by the warmup (1,727: over the
+// terrain and under it), standing on a floor (446) or the water (15), over it and in it, flying (67) and falling to
+// the terrain, a floor or the water (138). The movers of the four classes the shipped items name (cveh, CHel, catv,
+// cbot: 3,609) and the markers (45,191).
+std::vector<Construct> shipped_constructs(const opennova::terrain::TerrainHeightField &field, const Places &at, double water,
+		double perch_bottom) {
+	const auto h = [&](double x, double y) { return terrain_height(field, x, y); };
+	const double cx = at.land[0][0], cy = at.land[0][1];
+	const double hx = at.land[1][0], hy = at.land[1][1];
+	const double px = at.land[2][0], py = at.land[2][1];
+	const double sx = at.sea[0], sy = at.sea[1];
+	const double roof = h(hx, hy) + 4.4;
+	using K = mission::EntityKind;
+	using R = MissionGroundRule;
+	using S = MissionGroundState;
+	using On = MissionSupport;
+	const Placed house = { K::Building, 101004, hx, hy, h(hx, hy), 0, 90 };
+	const auto crate = [](double x, double y, double z) { return Placed{ K::Item, 101001, x, y, z }; };
+	const auto rifleman = [](double x, double y, double z) { return Placed{ K::Organic, 101006, x, y, z }; };
+	const auto with_house = [&](const Placed &subject) { return std::vector<Placed>{ house, subject }; };
+	std::vector<Construct> out = {
+		{ "a static flush on the terrain", { crate(cx, cy, h(cx, cy)) } },
+		{ "a static sunk into the terrain", { crate(cx, cy, h(cx, cy) - 0.5) } },
+		{ "a static within the slack over the terrain", { crate(cx, cy, h(cx, cy) + 0.5) } },
+		{ "a building sunk into the terrain", { Placed{ K::Building, 101004, hx, hy, h(hx, hy) - 0.5, 0, 90 } } },
+		{ "a static flush on another's solid", with_house(crate(hx - 2.0, hy - 2.0, roof)), 1, R::Static, "", S::Grounded,
+				On::Record },
+		{ "a static sunk into another's solid", with_house(crate(hx - 2.0, hy - 2.0, roof - 0.3)), 1, R::Static, "",
+				S::Grounded, On::Record },
+		{ "a static within the slack over another's solid", with_house(crate(hx - 2.0, hy - 2.0, roof + 0.5)), 1,
+				R::Static, "", S::Grounded, On::Record },
+		{ "a static leaning on another's volume over the terrain", with_house(crate(hx + 4.5, hy + 3.0, h(hx + 4.5, hy + 3.0) + 2.0)),
+				1, R::Static, "touches", S::Grounded, On::Record },
+		{ "a static in another's volume, both under the terrain",
+				{ Placed{ K::Building, 101004, hx, hy, h(hx, hy) - 10.0, 0, 90 }, crate(hx, hy, h(hx, hy) - 9.0) }, 1,
+				R::Static, "touches", S::Grounded, On::Record },
+		{ "a static flush on the water", { crate(sx, sy, water) }, 0, R::Static, "", S::Grounded, On::Water },
+		{ "a static sunk into the water", { crate(sx, sy, water - 0.5) }, 0, R::Static, "", S::Grounded, On::Water },
+		{ "a static within the slack over the water", { crate(sx, sy, water + 0.5) }, 0, R::Static, "", S::Grounded,
+				On::Water },
+		{ "a yawed static", { Placed{ K::Item, 101001, cx, cy, h(cx, cy), 0, 45 } } },
+		{ "a tilted static", { Placed{ K::Item, 101001, cx, cy, h(cx, cy), 0, 30, 0, 0, 0, 10, 5 } } },
+		{ "a static of a model whose ground anchor is off its origin", { Placed{ K::Item, 101002, cx, cy, h(cx, cy) - 0.25 } } },
+		{ "a static of a model whose collision block has no volume", { Placed{ K::Item, 101019, cx, cy, h(cx, cy) - perch_bottom } } },
+		{ "a static of a model whose volumes hold no solid", { Placed{ K::Item, 101020, cx, cy, h(cx, cy) } } },
+		{ "a static of genx", { Placed{ K::Item, 101014, cx, cy, h(cx, cy) } } },
+		{ "a static of upfx", { Placed{ K::Item, 101015, cx, cy, h(cx, cy) } } },
+		{ "a static of ewep", { Placed{ K::Item, 101016, cx, cy, h(cx, cy) } } },
+		{ "a static of door", { Placed{ K::Item, 101017, cx, cy, h(cx, cy) } } },
+		{ "a static of envs", { Placed{ K::Item, 101018, cx, cy, h(cx, cy) } } },
+		{ "a person set down over the terrain", { rifleman(px, py, h(px, py)) }, 0, R::Person, "settled" },
+		{ "a person set down from under the terrain", { rifleman(px, py, h(px, py) - 2.0) }, 0, R::Person, "settled" },
+		{ "a person standing on a floor", with_house(rifleman(hx + 2.0, hy - 2.0, roof)), 1, R::Person, "standing",
+				S::Grounded, On::Record },
+		{ "a person standing in a floor", with_house(rifleman(hx + 2.0, hy - 2.0, roof - 0.3)), 1, R::Person, "standing",
+				S::Grounded, On::Record },
+		{ "a person standing on the water", { rifleman(sx, sy, water) }, 0, R::Person, "standing", S::Grounded, On::Water },
+		{ "a person standing in the water", { rifleman(sx, sy, water - 0.5) }, 0, R::Person, "standing", S::Grounded,
+				On::Water },
+		{ "a person flying", { Placed{ K::Organic, 101008, px, py, h(px, py) + 5.0,
+				uint32_t(bms::BmsiAttributeFlags::FlyingOrganic) } }, 0, R::Person, "flying", S::Grounded, On::Nothing },
+		{ "a person falling to the terrain", { rifleman(px, py, h(px, py) + 5.0) }, 0, R::Person, "move:org1", S::Falls },
+		{ "a person falling to a floor", with_house(rifleman(hx + 2.0, hy - 2.0, roof + 5.0)), 1, R::Person, "move:org1",
+				S::Falls, On::Record },
+		{ "a person falling to the water", { rifleman(sx, sy, water + 5.0) }, 0, R::Person, "move:org1", S::Falls,
+				On::Water },
+		{ "a mover of cveh", { Placed{ K::Item, 101005, px, py, h(px, py) + 5.0 } }, 0, R::Mover, "move:cveh",
+				S::Grounded, On::Nothing },
+		{ "a mover of CHel", { Placed{ K::Item, 101011, px, py, h(px, py) + 5.0 } }, 0, R::Mover, "move:CHel",
+				S::Grounded, On::Nothing },
+		{ "a mover of catv", { Placed{ K::Item, 101012, px, py, h(px, py) + 5.0 } }, 0, R::Mover, "move:catv",
+				S::Grounded, On::Nothing },
+		{ "a mover of cbot", { Placed{ K::Item, 101013, sx, sy, water } }, 0, R::Mover, "move:cbot", S::Grounded,
+				On::Nothing },
+		{ "a marker", { Placed{ K::Marker, 101009, px, py, h(px, py) + 7.0 } }, 0, R::None, "marker", S::Grounded,
+				On::Nothing },
+	};
+	return out;
+}
+
+} // namespace
+
+// The rules over the shipped constructs (shipped_constructs above), each a mission of its own in one project, through
+// the session's check: every construct's entity grounded by the rule it is of (or the game's to place, or not
+// checked), and no construct's mission raising a mission.off_ground finding.
+static int test_shipped_constructs() {
+	Session s("opennova_editor_mission_ground_shipped");
+	s.records = [](const opennova::terrain::TerrainHeightField &, const Places &, double) { return std::vector<Placed>(); };
+	TEST_EXPECT(s.open());
+	auto files = std::make_shared<MemoryFiles>();
+	put_rig(*files);
 	MissionGround ground;
-	std::map<std::string, size_t> by_state, by_why;
-	size_t entities = 0, statics = 0, off = 0, grounded_missions = 0;
-	uint64_t generation = 0;
-	for (const std::string &name : missions) {
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(game.read_file(name, bytes));
-		MissionDocument document;
-		Diagnostic error;
-		TEST_EXPECT(document.load_bytes(bytes, name, AssetKind::Mission, "jo", error));
-		const std::unique_ptr<MissionSceneSource> source = mission_scene_source(document);
-		if (!source) continue;
-		MissionScene scene;
-		scene.read(*source);
-		const auto stamped = std::make_shared<opennova::StampedFiles>(files);
-		ground.follow(stamped, ++generation, scene.header(), name.substr(0, name.find_last_of('.')));
-		grounded_missions += ground.terrain() ? 1 : 0;
-		if (g_list && !ground.terrain()) std::printf("  %s: no terrain (%s)\n", name.c_str(), ground.error().c_str());
-		for (const MissionGroundVerdict &verdict : mission_ground_verdicts(scene, ground, reads, stamped)) {
-			++entities;
-			++by_state[mission_ground_state_token(verdict.state)];
-			++by_why[std::string(mission_ground_rule_token(verdict.rule)) + "/" + verdict.why];
-			statics += verdict.rule == MissionGroundRule::Static && verdict.why != "no_terrain" ? 1 : 0;
-			if (!verdict.off()) continue;
-			++off;
-			if (g_list)
-				std::printf("  %s row %llu item %lld \"%s\": %s %s base %.2f bottom %.2f top %.2f %s %.2f fix %.2f\n",
-						name.c_str(), (unsigned long long)verdict.row, (long long)verdict.item, verdict.name.c_str(),
-						mission_ground_rule_token(verdict.rule), mission_ground_state_token(verdict.state), verdict.base,
-						verdict.bottom, verdict.top, mission_support_token(verdict.on), verdict.support, verdict.fix_z);
+	MissionSceneHeader header;
+	header.terrain = "Tmap";
+	ground.follow(files, 1, header, "ground");
+	TEST_EXPECT(ground.terrain() && ground.water());
+	if (!ground.terrain()) return 1;
+	const Places at = find_places(*ground.height_field(), ground.water_height());
+	TEST_EXPECT(at.found);
+	if (!at.found) return 1;
+	// The perch's model (the synth bird): a collision block of faces and no volume, its box's bottom under its origin.
+	MissionGroundReads reads;
+	const MissionGroundReads::Model *perch = reads.model(*files, "bird");
+	TEST_EXPECT(perch && perch->bounds && !perch->collision && reads.parsed() == 1);
+	if (!perch) return 1;
+	const std::vector<Construct> constructs =
+			shipped_constructs(*ground.height_field(), at, ground.water_height(), double(perch->box[2]) / 65536.0);
+	const auto path_of = [](size_t i) { return "missions/shipped_" + std::to_string(i) + ".bms"; };
+	for (size_t i = 0; i < constructs.size(); ++i)
+		TEST_EXPECT(test_io::write_file(s.root + "/" + path_of(i), mint_mission(constructs[i].records)));
+	editor_test::handle_to_end(s.session, request::rescan());
+	const MissionGroundCheck *check = s.check();
+	TEST_EXPECT(check != nullptr);
+	if (!check) return 1;
+	// The verdict's words on the wire, by MissionGroundRule and MissionGroundState.
+	const char *rule_words[] = { "none", "static", "person", "mover" };
+	const char *state_words[] = { "grounded", "floats", "buried", "falls", "hangs" };
+	size_t grounded = 0;
+	for (size_t i = 0; i < constructs.size(); ++i) {
+		const Construct &construct = constructs[i];
+		const std::string path = path_of(i);
+		const std::vector<MissionGroundVerdict> *verdicts = check->verdicts(path);
+		TEST_EXPECT(verdicts && verdicts->size() == construct.records.size());
+		if (!verdicts) continue;
+		const MissionGroundVerdict *subject = nullptr;
+		bool off = false;
+		for (const MissionGroundVerdict &verdict : *verdicts) {
+			if (verdict.item == construct.records[construct.subject].item) subject = &verdict;
+			off = off || verdict.off();
 		}
+		size_t findings = 0;
+		for (const Diagnostic &d : s.session.view().findings.diagnostics)
+			findings += d.code() == "mission.off_ground" && d.asset == path ? 1 : 0;
+		const opennova::io::JsonValue wire = subject ? mission_ground_verdict_json(*subject) : opennova::io::JsonValue();
+		const bool held = subject && subject->rule == construct.rule && subject->why == construct.why &&
+		                  subject->state == construct.state && subject->on == construct.on && !off && findings == 0 &&
+		                  wire.get_string("rule", "") == rule_words[size_t(construct.rule)] &&
+		                  wire.get_string("state", "") == state_words[size_t(construct.state)];
+		if (!held)
+			std::printf("  %s: %s %s why '%s' on %s, %zu findings\n", construct.name,
+			            subject ? mission_ground_rule_token(subject->rule) : "-",
+			            subject ? mission_ground_state_token(subject->state) : "-", subject ? subject->why.c_str() : "-",
+			            subject ? mission_support_token(subject->on) : "-", findings);
+		TEST_EXPECT(held);
+		grounded += held ? 1 : 0;
 	}
-	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-	std::printf("retail: %zu missions (%zu on a terrain read), %zu entities (%zu statics checked), %zu off the ground, "
-				"%zu files parsed, in %.1f s\n",
-			missions.size(), grounded_missions, entities, statics, off, reads.parsed(), seconds);
-	for (const auto &entry : by_state) std::printf("  state %s: %zu\n", entry.first.c_str(), entry.second);
-	for (const auto &entry : by_why) std::printf("  %s: %zu\n", entry.first.c_str(), entry.second);
-	// The shipped missions' entities stand where the rules ground them but for a handful of statics in a
-	// thousand (38 of the 75,746 statics on a terrain the mount reads; the people the warmup leaves in the
-	// air fall where the game puts them, no finding).
-	TEST_EXPECT(grounded_missions > 0 && statics > 0 && off * 1000 < statics);
-	std::printf("test_retail passed\n");
+	std::printf("shipped constructs: %zu of %zu grounded as the rules ground them, no finding\n", grounded, constructs.size());
+	std::printf("test_shipped_constructs passed\n");
 	return 0;
 }
 
@@ -849,14 +975,13 @@ static int test_people_attend() {
 }
 
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
 	for (int i = 1; i < argc; ++i)
 		if (std::strcmp(argv[i], "--list") == 0) g_list = true;
 	TEST_EXPECT(test_rules() == 0);
 	TEST_EXPECT(test_check() == 0);
 	TEST_EXPECT(test_people_floors() == 0);
 	TEST_EXPECT(test_people_attend() == 0);
-	TEST_EXPECT(test_retail() == 0);
+	TEST_EXPECT(test_shipped_constructs() == 0);
 	std::printf("editor_mission_ground: all tests passed\n");
 	return 0;
 }

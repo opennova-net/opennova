@@ -11,7 +11,7 @@
 // install as an import source, the effective file copied in and a requirement
 // satisfied by it; (import_plan_test.cpp) the plan of an import with the files it needs
 // (S11f); and (import_apply_test.cpp) the session's import of that plan, staged and
-// published (S11g), with a retail leg over a packed game install (--retail).
+// published (S11g), over a packed game install minted from OpenNova's own game among them.
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -52,9 +52,7 @@
 #include <formats/threedi/threedi_3di3.h>
 
 #include "common/gp_model_bytes.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
-#include "common/test_parts.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
@@ -783,8 +781,8 @@ static int test_import_lifetime() {
 	return 0;
 }
 
-static int test_retail_source() {
-	test_temp::TempDir dir("opennova_editor_import_retail");
+static int test_install_source() {
+	test_temp::TempDir dir("opennova_editor_import_install");
 	// A fake install: the boot table's resource.pff with a text file and a string table.
 	const std::string retail = dir.file("retail");
 	std::error_code ec;
@@ -1130,22 +1128,25 @@ static int test_gp_import() {
 }
 
 // The plan of an import with the files it needs (import_plan_test.cpp), and the session's
-// import of it (import_apply_test.cpp; its retail leg runs with --retail).
+// import of it (import_apply_test.cpp).
 int run_import_plan_tests();
 int run_import_apply_tests();
-int run_import_apply_retail_closure();
 
-// The retail twin's parts (tests/common/test_parts.h): `main` every case but the smaller shipped
-// mission's closure imported and built, `closure_04tr` that leg, side by side.
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	const int failures = test_parts::run(
-	        argc, argv,
-	        {{"main", {test_import_pass, test_import_inputs, test_import_outputs_stay_in_folder, test_image_tga_output,
-	                   test_renamed_import_outputs, test_deep_root_import, test_deep_project_files, test_import_lifetime,
-	                   test_retail_source, test_scene_imports, test_gp_import, run_import_plan_tests,
-	                   run_import_apply_tests}},
-	         {"closure_04tr", {run_import_apply_retail_closure}, true}});
+int main() {
+	int failures = 0;
+	failures += test_import_pass();
+	failures += test_import_inputs();
+	failures += test_import_outputs_stay_in_folder();
+	failures += test_image_tga_output();
+	failures += test_renamed_import_outputs();
+	failures += test_deep_root_import();
+	failures += test_deep_project_files();
+	failures += test_import_lifetime();
+	failures += test_install_source();
+	failures += test_scene_imports();
+	failures += test_gp_import();
+	failures += run_import_plan_tests();
+	failures += run_import_apply_tests();
 	if (failures == 0) std::printf("editor_import: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

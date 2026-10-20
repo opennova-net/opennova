@@ -3,7 +3,8 @@
 // written back unedited as its own bytes; the live atlas the input over the regions whose bake is due and the
 // baked atlas elsewhere, which a save writes; the findings (heights past TrnGen's 128-unit draw-back, a depth
 // stretch past what CDEP holds, a changed .cpt's multiplayer note); its content on the wire; a snapshot of its type;
-// and (retail) every JO:CA .cpt opened and written again byte for byte with no finding.
+// and every .cpt fixture, the shipped polydata's form among them, opened and written again byte for byte with no
+// finding.
 #include <editor/documents/document_types.h>
 #include <editor/documents/terrain_heights_document.h>
 #include <formats/cpt/cpt_io.h>
@@ -12,7 +13,6 @@
 #include <formats/png/png_encode.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -22,7 +22,6 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -107,30 +106,31 @@ int test_cpt() {
 	return 0;
 }
 
-int test_retail() {
-	if (!retail::selected()) return 0;
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the shipped .cpt files)");
-		return 0;
-	}
-	int swept = 0;
-	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(assets)) {
-		std::string ext = entry.path().extension().string();
-		for (char &c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-		if (!entry.is_regular_file() || ext != ".cpt") continue;
-		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().string());
+// Every .cpt fixture: master's Tmap.cpt and the shipped polydata's form (fixtures/terrain/variants/shipped.cpt, minted
+// by tests/fixtures/terrain_variants_gen.cpp: the CDEP depth section of every block width, the shipped header, tiles
+// of strip and list LODs), each opened with no source issue and no finding and written again byte for byte. A
+// fixture missing fails.
+int test_fixtures(const std::string &repo) {
+	int swept = 0, failures = 0;
+	for (const char *file : {"fixtures/terrain/tmap/Tmap.cpt", "fixtures/terrain/variants/shipped.cpt"}) {
+		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
 		TerrainHeightsDocument document;
 		Diagnostic error;
-		const std::string name = entry.path().filename().string();
-		TEST_EXPECT(document.load_bytes(bytes, name, AssetKind::TerrainPolyData, "jo", error));
-		TEST_EXPECT(!document.blocked() && document.issues().empty() && validate_terrain_heights_file(document).empty());
-		TEST_EXPECT(document.serialize().text == text_of(bytes));
+		const bool opened = !bytes.empty() &&
+		                    document.load_bytes(bytes, std::filesystem::path(file).filename().string(), AssetKind::TerrainPolyData,
+		                                        "jo", error) &&
+		                    !document.blocked() && document.issues().empty() && validate_terrain_heights_file(document).empty();
+		const bool same = opened && document.serialize().text == text_of(bytes);
 		++swept;
+		if (!same) {
+			std::printf("FAIL: %s (%s)\n", file, bytes.empty() ? "missing" : !opened ? "an issue or a finding" : "written otherwise");
+			for (const SourceIssue &issue : document.issues()) std::printf("  line %zu: %s\n", issue.line, issue.message.c_str());
+			for (const Diagnostic &d : validate_terrain_heights_file(document)) std::printf("  %s: %s\n", d.code().c_str(), d.message.c_str());
+			++failures;
+		}
 	}
-	TEST_EXPECT(swept >= 23);
-	std::printf("retail: %d .cpt opened and saved byte-identical, no finding\n", swept);
-	return 0;
+	std::printf("fixtures: %d .cpt opened and written again byte for byte, no finding, %d failures\n", swept, failures);
+	return failures == 0 ? 0 : 1;
 }
 
 } // namespace
@@ -208,9 +208,8 @@ int test_image() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	const int failures = test_cpt() + test_image() + test_retail();
+int main() {
+	const int failures = test_cpt() + test_image() + test_fixtures(test_paths_repo_root(__FILE__));
 	if (failures == 0) std::printf("editor_terrain_heights_document: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

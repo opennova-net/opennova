@@ -7,13 +7,11 @@
 // (an entity by its kind and SSN, a zone by its record, an SSN or a zone no record holds said so); the
 // words on the wire (the `record` query's title) and in Problems (a row's `record_title`); the
 // types "Add trigger" and "Add action" offer, each with its title, group and line, every row of
-// mission_params' triggers and actions among them. With the game install (a SKIP-LEG without
-// OPENNOVA_JO_DIR), every event of every shipped mission worded, none of a type no row names, timed. S24: the
-// words as runs (a parameter's words its slot's run, the type's own words the type's), joined the words, for the
-// hand-worded types too and for every shipped record.
-#include <chrono>
+// mission_params' triggers and actions among them. Every event of every mission of the sweep (mission_sweep.h)
+// worded, none of a type no row names, every type the picker offers among its records. S24: the words as runs (a
+// parameter's words its slot's run, the type's own words the type's), joined the words, for the hand-worded types
+// too and for every record of the sweep.
 #include <cstdio>
-#include <filesystem>
 #include <map>
 #include <memory>
 #include <set>
@@ -21,8 +19,6 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_sentence.h>
@@ -35,10 +31,10 @@
 #include <formats/mission/mission_params.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_sweep.h"
 #include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
@@ -799,92 +795,89 @@ int test_types() {
 	return 0;
 }
 
-// Every event of every shipped mission (OPENNOVA_JO_DIR, base and each expansion through the VFS),
-// worded by its document: none of a trigger or an action type no row names (the shipped missions use
-// only witnessed types), the time it took.
-int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped event in words)");
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string());
-	std::set<std::string> seen;
+// Every event of every mission of the sweep (mission_sweep.h), in place of every mission the install ships,
+// worded by its document: none of a trigger or an action type no row names (the shipped missions use only
+// witnessed types, and logic.bms holds every one the picker offers but four area actions no shipped mission
+// holds: every other type of logic_types among the sweep's records), each record's runs joined its words, a
+// parameter's run of a slot its type reads.
+int test_sweep() {
+	std::vector<std::string> missing;
+	const std::vector<mission_sweep::Mission> sweep = mission_sweep::load(missing);
 	size_t missions = 0, events = 0, triggers = 0, actions = 0, unknown = 0, longest = 0, runs_made = 0;
-	double took_ms = 0;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string()) != ".bms") continue;
-			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(game.read_file(file.logical_name, bytes));
-			std::unique_ptr<Document> document = open(bytes, file.logical_name.c_str());
-			TEST_EXPECT(document && !document->blocked());
-			if (!document) continue;
-			++missions;
-			const MissionDocument &m = dynamic_cast<const MissionDocument &>(*document);
-			const DocumentMissionNames names(m);
-			const bms::Header *header = m.mission_row() ? &m.mission_row()->native.header : nullptr;
-			const auto started = std::chrono::steady_clock::now();
-			for (const Node *row : m.rows_of(MissionKind::Event)) {
-				++events;
-				const std::string sentence = m.record_title({row->id, row->kind, 0});
-				longest = std::max(longest, sentence.size());
-				const auto &chain = static_cast<const MissionRecordRow<mission::EventChain> &>(*row).native;
-				for (const bms::Trigger &t : chain.triggers) {
-					++triggers;
-					if (!logic_type(false, int32_t(t.main_type), t.sub_type)) {
-						++unknown;
-						std::printf("  %s: trigger %d/%d\n", file.logical_name.c_str(), int(t.main_type), t.sub_type);
-					}
+	std::set<const LogicType *> held;
+	for (const mission_sweep::Mission &file : sweep) {
+		std::unique_ptr<Document> document = open(file.bytes, file.name.c_str());
+		TEST_EXPECT(document && !document->blocked());
+		if (!document) continue;
+		++missions;
+		const MissionDocument &m = dynamic_cast<const MissionDocument &>(*document);
+		const DocumentMissionNames names(m);
+		const bms::Header *header = m.mission_row() ? &m.mission_row()->native.header : nullptr;
+		for (const Node *row : m.rows_of(MissionKind::Event)) {
+			++events;
+			const std::string sentence = m.record_title({row->id, row->kind, 0});
+			longest = std::max(longest, sentence.size());
+			const auto &chain = static_cast<const MissionRecordRow<mission::EventChain> &>(*row).native;
+			for (const bms::Trigger &t : chain.triggers) {
+				++triggers;
+				const LogicType *type = logic_type(false, int32_t(t.main_type), t.sub_type);
+				if (!type) {
+					++unknown;
+					std::printf("  %s: trigger %d/%d\n", file.path.c_str(), int(t.main_type), t.sub_type);
 				}
-				for (const bms::Action &a : chain.actions) {
-					++actions;
-					if (!logic_type(true, int32_t(a.action_type), a.action_sub_type)) {
-						++unknown;
-						std::printf("  %s: action %d/%d\n", file.logical_name.c_str(), int(a.action_type), a.action_sub_type);
-					}
+				held.insert(type);
+			}
+			for (const bms::Action &a : chain.actions) {
+				++actions;
+				const LogicType *type = logic_type(true, int32_t(a.action_type), a.action_sub_type);
+				if (!type) {
+					++unknown;
+					std::printf("  %s: action %d/%d\n", file.path.c_str(), int(a.action_type), a.action_sub_type);
 				}
-				TEST_EXPECT(sentence.find("unknown type") == std::string::npos);
-				// The runs (S24): joined, the words; a parameter's run of a slot the type reads.
-				for (const bms::Trigger &t : chain.triggers) {
-					const std::vector<LogicRun> runs = trigger_runs(t, names);
-					TEST_EXPECT(logic_runs_text(runs) == trigger_words(t, names));
-					for (const LogicRun &run : runs) {
-						TEST_EXPECT(run.slot >= -1 && run.slot <= kLogicTypeSlot && !run.text.empty());
-						TEST_EXPECT(run.slot < 0 || run.slot == kLogicTypeSlot ||
-						            mission::trigger_param_kind(t, run.slot) != mission::ParamKind::Unused);
-						runs_made += 1;
-					}
-				}
-				for (const bms::Action &a : chain.actions) {
-					const std::vector<LogicRun> runs = action_runs(a, names, header);
-					TEST_EXPECT(logic_runs_text(runs) == action_words(a, names, header));
-					for (const LogicRun &run : runs) {
-						TEST_EXPECT(run.slot >= -1 && run.slot <= kLogicTypeSlot && !run.text.empty());
-						TEST_EXPECT(run.slot < 0 || run.slot == kLogicTypeSlot ||
-						            mission::action_param_kind(a, run.slot) != mission::ParamKind::Unused);
-						runs_made += 1;
-					}
+				held.insert(type);
+			}
+			TEST_EXPECT(sentence.find("unknown type") == std::string::npos);
+			// The runs (S24): joined, the words; a parameter's run of a slot the type reads.
+			for (const bms::Trigger &t : chain.triggers) {
+				const std::vector<LogicRun> runs = trigger_runs(t, names);
+				TEST_EXPECT(logic_runs_text(runs) == trigger_words(t, names));
+				for (const LogicRun &run : runs) {
+					TEST_EXPECT(run.slot >= -1 && run.slot <= kLogicTypeSlot && !run.text.empty());
+					TEST_EXPECT(run.slot < 0 || run.slot == kLogicTypeSlot ||
+					            mission::trigger_param_kind(t, run.slot) != mission::ParamKind::Unused);
+					runs_made += 1;
 				}
 			}
-			took_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+			for (const bms::Action &a : chain.actions) {
+				const std::vector<LogicRun> runs = action_runs(a, names, header);
+				TEST_EXPECT(logic_runs_text(runs) == action_words(a, names, header));
+				for (const LogicRun &run : runs) {
+					TEST_EXPECT(run.slot >= -1 && run.slot <= kLogicTypeSlot && !run.text.empty());
+					if (run.slot >= 0 && run.slot != kLogicTypeSlot && mission::action_param_kind(a, run.slot) == mission::ParamKind::Unused)
+						std::printf("  %s: action %d/%d's run '%s' of slot %d, which it does not read\n", file.path.c_str(),
+						            int(a.action_type), a.action_sub_type, run.text.c_str(), run.slot);
+					TEST_EXPECT(run.slot < 0 || run.slot == kLogicTypeSlot ||
+					            mission::action_param_kind(a, run.slot) != mission::ParamKind::Unused);
+					runs_made += 1;
+				}
+			}
 		}
 	}
-	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
-	std::printf("retail: %zu missions, %zu events (%zu triggers, %zu actions) worded in %.1f ms, the longest sentence %zu "
-	            "characters, %zu of a type no row names\n",
-	            missions, events, triggers, actions, took_ms, longest, unknown);
-	std::printf("retail: every trigger's and action's runs joined are its words (%zu runs)\n", runs_made);
-	TEST_EXPECT(missions == 115 && unknown == 0);
+	std::printf("sweep: %zu missions, %zu events (%zu triggers, %zu actions) worded, the longest sentence %zu characters, "
+	            "%zu of a type no row names, %zu runs\n",
+	            missions, events, triggers, actions, longest, unknown, runs_made);
+	// Every type the picker offers among the records (an area AI action's third and fourth values, which the
+	// load overwrites with the area's box, worded as notes, never as those slots).
+	size_t offered = 0;
+	for (const bool action : {false, true}) offered += logic_types(action).size();
+	TEST_EXPECT(unknown == 0 && held.size() == offered);
+	TEST_EXPECT(mission_sweep::none_missing(missing));
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (test_words() != 0) return 1;
 	if (test_runs() != 0) return 1;
 	if (test_golden_words() != 0) return 1;
@@ -893,5 +886,5 @@ int main(int argc, char **argv) {
 	if (test_document_titles() != 0) return 1;
 	if (test_wire_and_problems() != 0) return 1;
 	if (test_types() != 0) return 1;
-	return test_retail();
+	return test_sweep();
 }

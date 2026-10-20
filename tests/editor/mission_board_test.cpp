@@ -5,21 +5,17 @@
 // its type does not read); the filter, Needs attention and folds; the running game's report on its card. The
 // mission_logic query answers by its op's row (session/mission_queries.h): every op its catalog offers is one of
 // the table's tokens, each answered by its own row; `board` the cards as the Logic pane shows them, its filter
-// and folds the workspace's unless the args name them, with the Common types and the recipes. And (a SKIP-LEG
-// without OPENNOVA_JO_DIR) every shipped mission's board built, every event a card, each line's runs its words,
-// its notes counted by code, timed.
+// and folds the workspace's unless the args name them, with the Common types and the recipes. And every board of
+// the sweep's missions (mission_sweep.h) built, every event a card, each line's runs its words, its notes counted
+// by code.
 #include <algorithm>
 #include <cstdio>
-#include <filesystem>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
-#include <chrono>
 #include <map>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_board.h>
@@ -42,10 +38,10 @@
 #include <formats/pff/pff.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_sweep.h"
 #include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
@@ -460,23 +456,23 @@ int test_wire_acceptance() {
 // and no table made that would hide it.
 int test_new_text_install() {
 	test_temp::TempDir dir("opennova_mission_board_install");
-	const std::string retail = dir.file("game");
-	TEST_EXPECT(test_io::write_text(retail + "/readme.txt", "game"));
+	const std::string game = dir.file("game");
+	TEST_EXPECT(test_io::write_text(game + "/readme.txt", "game"));
 	std::vector<uint8_t> table;
 	Diagnostic error;
 	BlankRequest blank;
 	blank.logical_name = "logic.bin";
-	blank.project_title = "Retail";
+	blank.project_title = "Game";
 	TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
 	const opennova::pff::PffWriteEntry entries[] = {{"logic.bin", table.data(), uint32_t(table.size()), 0, 0, 0}};
-	TEST_EXPECT(opennova::pff::pff_write_archive((retail + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	TEST_EXPECT(opennova::pff::pff_write_archive((game + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
 	editor_test::create_missing_files(session);
-	editor_test::set_game_install(session, retail);
+	editor_test::set_game_install(session, game);
 	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
@@ -550,68 +546,52 @@ int test_op_table() {
 	return 0;
 }
 
-// Every shipped mission's board: every event a card, each line's runs its words, the notes counted by code.
-int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission's board)");
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string());
-	std::set<std::string> seen;
+// Every mission of the sweep's board (mission_sweep.h, in place of every mission the install ships): every
+// event a card, each line's runs its words, the notes counted by code: the four the shipped boards hold (an event
+// with no action, one with no trigger, a pick naming nothing and a pick left unset) each among them.
+int test_sweep() {
+	std::vector<std::string> missing;
+	const std::vector<mission_sweep::Mission> sweep = mission_sweep::load(missing);
 	size_t missions = 0, cards = 0, lines = 0, largest = 0;
 	std::map<std::string, size_t> notes;
-	double took_ms = 0, slowest_ms = 0;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string()) != ".bms") continue;
-			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(game.read_file(file.logical_name, bytes));
-			std::unique_ptr<Document> document = open(bytes, file.logical_name.c_str());
-			TEST_EXPECT(document && !document->blocked());
-			if (!document) continue;
-			++missions;
-			const auto &m = dynamic_cast<const MissionDocument &>(*document);
-			const DocumentMissionNames names(m);
-			const bms::Header *header = m.mission_row() ? &m.mission_row()->native.header : nullptr;
-			const auto started = std::chrono::steady_clock::now();
-			const MissionBoard board = mission_board(m, names, BoardQuery());
-			const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-			took_ms += ms;
-			if (ms > slowest_ms) slowest_ms = ms;
-			TEST_EXPECT(board.cards.size() == board.events && board.events == m.rows_of(MissionKind::Event).size());
-			largest = std::max(largest, board.cards.size());
-			for (const BoardCard &card : board.cards) {
-				++cards;
-				const auto &event = static_cast<const EventRow &>(*m.row(card.event.row));
-				TEST_EXPECT(card.triggers.size() == event.native.triggers.size() && card.actions.size() == event.native.actions.size());
-				for (const BoardLine &line : card.triggers) {
-					++lines;
-					TEST_EXPECT(logic_runs_text(line.runs) == trigger_words(event.native.triggers[line.index], names));
-				}
-				for (const BoardLine &line : card.actions) {
-					++lines;
-					TEST_EXPECT(logic_runs_text(line.runs) == action_words(event.native.actions[line.index], names, header));
-				}
-				for (const BoardNote &note : card.notes) ++notes[note.code];
+	for (const mission_sweep::Mission &file : sweep) {
+		std::unique_ptr<Document> document = open(file.bytes, file.name.c_str());
+		TEST_EXPECT(document && !document->blocked());
+		if (!document) continue;
+		++missions;
+		const auto &m = dynamic_cast<const MissionDocument &>(*document);
+		const DocumentMissionNames names(m);
+		const bms::Header *header = m.mission_row() ? &m.mission_row()->native.header : nullptr;
+		const MissionBoard board = mission_board(m, names, BoardQuery());
+		TEST_EXPECT(board.cards.size() == board.events && board.events == m.rows_of(MissionKind::Event).size());
+		largest = std::max(largest, board.cards.size());
+		for (const BoardCard &card : board.cards) {
+			++cards;
+			const auto &event = static_cast<const EventRow &>(*m.row(card.event.row));
+			TEST_EXPECT(card.triggers.size() == event.native.triggers.size() && card.actions.size() == event.native.actions.size());
+			for (const BoardLine &line : card.triggers) {
+				++lines;
+				TEST_EXPECT(logic_runs_text(line.runs) == trigger_words(event.native.triggers[line.index], names));
 			}
+			for (const BoardLine &line : card.actions) {
+				++lines;
+				TEST_EXPECT(logic_runs_text(line.runs) == action_words(event.native.actions[line.index], names, header));
+			}
+			for (const BoardNote &note : card.notes) ++notes[note.code];
 		}
 	}
-	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
-	std::printf("retail: %zu missions' boards, %zu cards (at most %zu), %zu lines, in %.1f ms (the slowest %.1f ms); notes:",
-	            missions, cards, largest, lines, took_ms, slowest_ms);
+	std::printf("sweep: %zu missions' boards, %zu cards (at most %zu), %zu lines; notes:", missions, cards, largest, lines);
 	for (const auto &[code, count] : notes) std::printf(" %s %zu", code.c_str(), count);
 	std::printf("\n");
-	TEST_EXPECT(missions == 115 && cards == 3073 && lines == 3858 + 4971);
+	TEST_EXPECT(cards > 0 && lines > 0);
+	for (const char *code : {"board.missing", "board.no_actions", "board.right_away", "board.unset"}) TEST_EXPECT(notes.count(code));
+	TEST_EXPECT(mission_sweep::none_missing(missing));
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (test_cards() != 0) return 1;
 	if (test_variables() != 0) return 1;
 	if (test_board_op() != 0) return 1;
@@ -619,5 +599,5 @@ int main(int argc, char **argv) {
 	if (test_wire_acceptance() != 0) return 1;
 	if (test_new_text_install() != 0) return 1;
 	if (test_op_table() != 0) return 1;
-	return test_retail();
+	return test_sweep();
 }

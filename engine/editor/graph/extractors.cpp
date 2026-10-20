@@ -249,7 +249,34 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 			out.symbols.back().line = size_t(effect.id_line);
 		}
 	}
+	// Each table a particle's curve finds by its id among every particle file's [tabledef]s, without case [orig:
+	// CParticleManager_FindTableDefByName @ 0x5E9540] (the reader keeps no place: a Go to finds its line by reading
+	// the text again, native_text_place).
+	for (const particle::TableDef &table : file.tables)
+		if (!table.id.empty()) out.symbols.push_back(symbol_of(ReferenceKind::ParticleTable, table.id, name, table.id));
 	for (const particle::ParticleDef &definition : file.particles) {
+		// Each curve the particle names, its own and each graphic's, as the game resolves them once every particle
+		// file is loaded [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630], each key the site a rename rewrites.
+		const auto curve = [&](const particle::CurveRef &ref, const std::string &key) {
+			if (ref.present && !ref.name.empty())
+				out.edges.push_back(edge_of(name, definition.id, key, ReferenceKind::ParticleTable, ref.name, std::string(), true));
+		};
+		curve(definition.scale_func, "scale_func");
+		curve(definition.alpha_func, "alpha_func");
+		curve(definition.red_func, "red_func");
+		curve(definition.green_func, "green_func");
+		curve(definition.blue_func, "blue_func");
+		curve(definition.emit_rate_func, "emit_rate_func");
+		for (size_t g = 0; g < definition.graphics.size(); ++g) {
+			const particle::GraphicLayer &layer = definition.graphics[g];
+			if (!layer.present) continue;
+			const std::string prefix = "g" + std::to_string(g + 1) + "_";
+			curve(layer.scale_func, prefix + "scale_func");
+			curve(layer.alpha_func, prefix + "alpha_func");
+			curve(layer.red_func, prefix + "red_func");
+			curve(layer.green_func, prefix + "green_func");
+			curve(layer.blue_func, prefix + "blue_func");
+		}
 		for (size_t g = 0; g < definition.graphics.size(); ++g) {
 			const particle::GraphicLayer &layer = definition.graphics[g];
 			if (!layer.present || layer.texture.empty()) continue;

@@ -8,14 +8,14 @@
 // finding (after the first missing class, a second of a label), as are a word no attribute is, a value read as text,
 // and a class read with no camouflage item. A class added is the next; one removed the last (the loader stops at the
 // first class it lacks). A file in the ConfigFile's binary (CBIN) form opens read only, its classes as the game reads
-// them, with a listed finding. The retail leg (OPENNOVA_JO_DIR): the install's charattr.def, base and each expansion,
-// through the document: saved as the format's writer writes what its loader reads, a fixed point.
+// them, with a listed finding. JO:CA's shape (authored) and the format's variants (its fixtures: the ConfigFile
+// pool's two charattr.def shapes and charattr's own, JO:CA's shape among them) through the document: saved as the
+// format's writer writes what its loader reads, a fixed point; JO:CA's shape its nine classes, under the pool.
 #include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
 
-#include <base/vfs/vfs.h>
 #include <editor/documents/charattr_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -27,10 +27,11 @@
 #include <formats/cbin/binary_config.h>
 #include <formats/charattr/charattr.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "editor/charattr_shape.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/variant_files.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -255,38 +256,50 @@ static int test_rename() {
 	return 0;
 }
 
-static int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's charattr.def through the document)");
-		return 0;
-	}
-	std::vector<std::string> mounts{std::string()};
-	for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-	for (const std::string &expansion : mounts) {
-		Vfs vfs;
-		TEST_EXPECT(vfs.mount_game(install, expansion, VfsMountMode::Packed));
+// The variants of the format: JO:CA's shape authored (editor_test::jo_charattr_text: classes 1 and 5..9 live, 2..4
+// from the earlier classes below the legacy block, the second CHARACTER1 and CHARACTER5 never read) and each
+// charattr.def the format's fixtures hold (the format's row's JO:CA shape among them), through the document,
+// unblocked, saved as the format's writer writes what its loader reads, and that save read again the same text and
+// classes; JO:CA's shapes hold no value past the ConfigFile reader's pool.
+const char *const kJoShape = "fixtures/charattr/charattr.def";
+
+static int test_variants() {
+	const editor_test::VariantFiles variants =
+			editor_test::variant_files({"fixtures/charattr", "fixtures/configfile"}, {".def"}, {kJoShape});
+	int failures = editor_test::report_missing(variants);
+	struct Input {
+		std::string name;
 		std::vector<uint8_t> bytes;
-		TEST_EXPECT(vfs.read_file("charattr.def", bytes) && !bytes.empty());
+		bool jo_shape;
+	};
+	std::vector<Input> inputs{{"JO:CA's shape", bytes_of(editor_test::jo_charattr_text()), true}};
+	for (const std::string &path : variants.files) inputs.push_back({path, editor_test::repo_bytes(path), path == kJoShape});
+	for (const Input &input : inputs) {
 		CharAttrDocument document;
 		Diagnostic error;
-		TEST_EXPECT(document.load_bytes(bytes, "charattr.def", AssetKind::CharAttrDefs, "jo", error) && !document.blocked());
+		TEST_EXPECT(!input.bytes.empty() &&
+		            document.load_bytes(input.bytes, "charattr.def", AssetKind::CharAttrDefs, "jo", error) &&
+		            !document.blocked());
 		const SerializeResult saved = document.serialize();
 		CharAttrDocument again;
-		if (!saved.ok() || saved.text != written(std::string(bytes.begin(), bytes.end())) ||
+		if (!saved.ok() || saved.text.empty() ||
+		    saved.text != written(std::string(input.bytes.begin(), input.bytes.end())) ||
 		    !again.load_bytes(bytes_of(saved.text), "charattr.def", AssetKind::CharAttrDefs, "jo", error) ||
-		    again.serialize().text != saved.text) {
-			std::fprintf(stderr, "FAIL the install's charattr.def %s is not saved as the format's writer writes it\n",
-			             expansion.c_str());
-			return 1;
+		    again.serialize().text != saved.text || again.rows().size() != document.rows().size()) {
+			std::fprintf(stderr, "FAIL %s is not saved as the format's writer writes it\n", input.name.c_str());
+			++failures;
+			continue;
 		}
-		size_t overruns = 0;
-		for (const Diagnostic &d : validate_charattr_file(document)) overruns += d.code() == "document.config_overrun";
-		TEST_EXPECT(overruns == 0);
-		std::printf("retail: charattr.def %s, %zu classes, saved as the format's writer writes it, a fixed point\n",
-		            expansion.empty() ? "(base)" : expansion.c_str(), document.rows().size());
+		if (input.jo_shape) {
+			size_t overruns = 0;
+			for (const Diagnostic &d : validate_charattr_file(document)) overruns += d.code() == "document.config_overrun";
+			TEST_EXPECT(overruns == 0 && document.rows().size() == 9);
+		}
+		std::printf("variant: %s, %zu classes, saved as the format's writer writes it, a fixed point\n",
+		            input.name.c_str(), document.rows().size());
 	}
-	return 0;
+	TEST_EXPECT(variants.files.size() >= 3);
+	return failures;
 }
 
 // A CBIN-form charattr.def, which the game reads through the ConfigFile's binary reader: the document holds the
@@ -317,14 +330,13 @@ static int test_binary_form() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_rows();
 	failures += test_binary_form();
 	failures += test_references();
 	failures += test_rename();
-	failures += test_retail();
+	failures += test_variants();
 	if (failures == 0) std::printf("editor_charattr: all passed\n");
 	return failures;
 }

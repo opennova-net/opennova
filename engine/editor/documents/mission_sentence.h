@@ -160,7 +160,8 @@ struct LogicType {
 const std::vector<LogicType> &logic_types(bool actions);
 // The types the shipped missions use most, the most first (S24: what the type picker offers as Common): the
 // eight trigger types and the eight action types the install's 115 missions hold the most records of (measured
-// over their 3,858 triggers and 4,971 actions; the editor_mission_logic ctest's retail leg pins the ranking).
+// once over their 3,858 triggers and 4,971 actions; the editor_mission_logic ctest's test_common_and_recipes
+// pins the ranking).
 const std::vector<const LogicType *> &logic_common_types(bool actions);
 // The row of a trigger's or an action's type and sub-type (null: none: an unknown type).
 const LogicType *logic_type(bool action, int32_t type, int32_t sub);

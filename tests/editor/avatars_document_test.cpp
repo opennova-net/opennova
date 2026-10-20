@@ -6,9 +6,9 @@
 // the earlier of two parts of a name inert); the reader's notes as findings at their lines; the order the game binds
 // a combination's parts in (the last of a name above it, the rows in the file's order, which a save keeps); a file the
 // reader stops in held read only with the gating finding; in a session, an edit of a head's model moves the graph's
-// reference with it, and Undo moves it back. The retail leg (OPENNOVA_JO_DIR): the install's Avatars.def (its base
-// archives and each expansion's) through the document, saved as the format's writer writes what its reader reads of
-// it, a fixed point.
+// reference with it, and Undo moves it back. The format's variants (its fixtures, the shipped table's authored
+// shape among them) through the document, saved as the format's writer writes what its reader reads of each, a
+// fixed point.
 #include <editor/documents/avatars_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -16,17 +16,15 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 
-#include <base/vfs/vfs.h>
-
 #include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/variant_files.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -326,43 +324,42 @@ int test_order() {
 	return 0;
 }
 
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's Avatars.def through the document)");
-		return 0;
-	}
-	std::vector<std::string> mounts{std::string()};
-	for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-	for (const std::string &expansion : mounts) {
-		Vfs vfs;
-		TEST_EXPECT(vfs.mount_game(install, expansion, VfsMountMode::Packed));
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(vfs.read_file("Avatars.def", bytes) && !bytes.empty());
+// The format's variants: each Avatars.def its fixtures hold (the minted table in the writer's form, the format's
+// row's authored shape of the shipped one: its comment blocks, tabs, a part's key of no value) through the document,
+// unblocked, saved as the format's writer writes what its reader reads of it, and that save read again the same text
+// and rows.
+const char *const kJoShape = "fixtures/avatars/jo_shaped.def";
+
+int test_variants() {
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/avatars"}, {".def"}, {kJoShape});
+	int failures = editor_test::report_missing(variants);
+	for (const std::string &path : variants.files) {
+		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
 		AvatarsDocument document;
 		Diagnostic error;
-		TEST_EXPECT(document.load_bytes(bytes, "Avatars.def", AssetKind::AvatarDefs, "jo", error));
+		TEST_EXPECT(!bytes.empty() && document.load_bytes(bytes, "Avatars.def", AssetKind::AvatarDefs, "jo", error));
 		TEST_EXPECT(!document.blocked());
 		const SerializeResult written = document.serialize();
+		const std::string expected = written_form(std::string(bytes.begin(), bytes.end()));
 		AvatarsDocument again;
-		if (!written.ok() || written.text != written_form(std::string(bytes.begin(), bytes.end())) ||
+		if (!written.ok() || expected.empty() || written.text != expected ||
 		    !again.load_bytes(std::vector<uint8_t>(written.text.begin(), written.text.end()), "Avatars.def",
 		                      AssetKind::AvatarDefs, "jo", error) ||
 		    again.serialize().text != written.text || again.rows().size() != document.rows().size()) {
-			std::fprintf(stderr, "FAIL the install's Avatars.def %s is not saved as the format's writer writes it\n",
-			             expansion.c_str());
-			return 1;
+			std::fprintf(stderr, "FAIL %s is not saved as the format's writer writes it\n", path.c_str());
+			++failures;
+			continue;
 		}
-		std::printf("retail: Avatars.def %s, %zu rows, saved as the format's writer writes it, a fixed point\n",
-		            expansion.empty() ? "(base)" : expansion.c_str(), document.rows().size());
+		std::printf("variant: %s, %zu rows, saved as the format's writer writes it, a fixed point\n", path.c_str(),
+		            document.rows().size());
 	}
-	return 0;
+	TEST_EXPECT(variants.files.size() >= 2);
+	return failures;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	if (test_rows() || test_graph() || test_findings_and_session() || test_order() || test_retail()) return 1;
+int main() {
+	if (test_rows() || test_graph() || test_findings_and_session() || test_order() || test_variants()) return 1;
 	return 0;
 }
