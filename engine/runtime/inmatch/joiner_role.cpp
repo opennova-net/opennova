@@ -676,6 +676,9 @@ void JoinerRole::pump() {
 	materialize_replica_world();
 	const bool had_local = local_spawned_;
 	spawn_and_arm_local_player();
+	// Retail's L exists before any record; ours spawns here, after the frame's
+	// receive folded the self record, so a fresh L takes that record's byte now.
+	fold_local_record_flags();
 	apply_world_state_load();
 	apply_replica_track(world, rt.state(), rt.game_type(), true, track_seen_);
 	if (decoded.health) apply_authoritative_health();
@@ -1224,12 +1227,16 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			self_row = rt.state().find(self);
 			if (self_row != nullptr && self_row->compact_revision != self_revision)
 				interest.self_echo = self_row;
+			// This receive's own record folded its Flags byte into L first.
+			fold_local_record_flags();
 			up = replication::build_player_uplink(world, *e, *ae, interest);
 			return true;
 		}, now);
 	} else {
 		outs = rt.Client_ProcessNetworkFrame(now);
 	}
+	// A frame whose send block stayed shut still folded its receive's records.
+	fold_local_record_flags();
 	for (const std::vector<uint8_t> &dg : outs) send(dg);
 	// The wire leg ends here (the stats board's net split).
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - wire_leg_start_us_;

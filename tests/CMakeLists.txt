@@ -5038,6 +5038,11 @@ target_link_libraries(npruntime_player_placement_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_player_placement COMMAND npruntime_player_placement_test)
 
 # --- parity lane L5 (client replica) ---
+# The joiner's own player record Flags folded into L under 0xE1 and echoed by the same
+# frame's C2S 0x0C (D-NET-528).
+add_executable(npruntime_joiner_record_flags_test npruntime/joiner_record_flags_test.cpp)
+target_link_libraries(npruntime_joiner_record_flags_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_record_flags COMMAND npruntime_joiner_record_flags_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

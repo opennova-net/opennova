@@ -273,6 +273,8 @@ private:
 	// The S2C 0x0F landing on L: the authoritative pose (+ look yaw, the
 	// un-hide) and, for a waypoint gametype, the host-filtered route.
 	void apply_world_state_load();
+	// The self player record's Flags onto L under 0xE1, once per folded record.
+	void fold_local_record_flags();
 	void apply_authoritative_health();
 	void sync_authoritative_mount();
 	void apply_mounted_ammo_update();
@@ -291,6 +293,8 @@ private:
 	int32_t uplink_cpu_percent_ = 0;
 	// The last folded 0x0A tail whose stance echo L has latched.
 	uint32_t stance_echo_seen_ = 0;
+	// The self row's compact revision whose Flags byte L has folded.
+	uint32_t local_flags_revision_seen_ = 0;
 	// The wire-leg clock: the frame's start, stamped where the uplink ships
 	// (before the decoded-state folds) so the stats board measures exactly the
 	// wire leg.

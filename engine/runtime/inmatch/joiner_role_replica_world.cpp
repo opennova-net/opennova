@@ -212,6 +212,34 @@ void JoinerRole::spawn_and_arm_local_player() {
 	}
 }
 
+// The player record's Flags apply: the record that names the local player folds
+// the wire byte into its Flags under 0xE1 (a remote's under 0xFD), so the host's
+// deploy-screen bit 0x01, the chute 0x20 and bits 0x40 / 0x80 land on L and ride
+// back in the next C2S 0x0C, which writes L's Flags byte raw. Retail runs it in
+// the receive, ahead of the frame's send block; L takes the latest record's byte
+// once per folded record, as the record fold leaves it.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the byte read @0x4C0EFD..0x4C0EFF,
+//  `cmp edi, g_LocalPlayerEntity` @0x4C12F7, `and ebx, 0E1h` @0x4C12FF, the store
+//  @0x4C1311; the uplink's raw byte @0x4C1B17; Client_ProcessNetworkFrame @0x42C180,
+//  the receive @0x42C228 ahead of the send block @0x42C482]
+void JoinerRole::fold_local_record_flags() {
+	mission::MissionKernel &kernel = *kernel_;
+	world::World &world = kernel.world;
+	ClientRuntime &rt = *runtime;
+	if (!local_spawned_ || !world.cached.local_player.valid() || !rt.has_self_handle()) return;
+	const replication::ClientEntityState *self = rt.state().find(rt.self_handle());
+	if (self == nullptr || !self->state_flags_known ||
+			self->compact_revision == local_flags_revision_seen_)
+		return;
+	world::Entity *local = world.registry.get(world.cached.local_player);
+	if (local == nullptr) return;
+	local_flags_revision_seen_ = self->compact_revision;
+	constexpr uint32_t kLocalRecordFlagsMask = 0xE1u;
+	const uint32_t wire = self->state_flags;
+	local->flags ^= (local->flags ^ wire) & kLocalRecordFlagsMask;
+	local->engine_flags ^= (local->engine_flags ^ wire) & kLocalRecordFlagsMask;
+}
+
 // The 0x0A tail is the authoritative health source for the recipient's OWN
 // player. H belongs to the host's handle space; apply that recipient-local
 // scalar to the joiner's distinct motor entity L (the pump gates this phase on
@@ -233,12 +261,6 @@ void JoinerRole::apply_authoritative_health() {
 		world::AiEntity *local_ai =
 				world.ai.for_handle(local_h);
 		if (local != nullptr && local_ai != nullptr) {
-            if (const auto *self = client_entity_for_handle(rt.state(), rt.self_handle());
-                    self != nullptr && self->state_flags_known) {
-                const uint32_t chute = self->state_flags & world::kEntityFlagParachute;
-                local->flags = (local->flags & ~world::kEntityFlagParachute) | chute;
-                local->engine_flags = (local->engine_flags & ~world::kEntityFlagParachute) | chute;
-            }
 			// The tail's last word lands on L's +0x120 every frame that carries
 			// it, alive or dead: retail's store has no gate past the local
 			// entity's null test. [orig: NapiNPClientMsg_0x00A @0x430550 null
