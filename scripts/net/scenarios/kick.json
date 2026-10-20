@@ -1,0 +1,27 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "kick",
+  "mission": "TDH_I3A.bms",
+  "game_type": 65536,
+  "actor": "host",
+  "steps": [
+    {"tick": 0, "press": 1},
+    {"tick": 20, "char": "P"},
+    {"tick": 22, "char": "U"},
+    {"tick": 24, "char": "N"},
+    {"tick": 26, "char": "T"},
+    {"tick": 28, "char": " "},
+    {"tick": 30, "char": "A"},
+    {"tick": 32, "char": "L"},
+    {"tick": 34, "char": "L"},
+    {"tick": 38, "char": "\r"},
+    {"tick": 300, "end": true}
+  ],
+  "settle_seconds": 10,
+  "ends_joiner_session": true,
+  "expect": {
+    "sequence": [
+      {"dir": "S", "kind": "disconnect", "reason": "33", "tag_hex": "532e433a535041", "text_hex": ""}
+    ]
+  }
+}

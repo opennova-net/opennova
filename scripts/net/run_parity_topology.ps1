@@ -179,7 +179,7 @@ function Read-ParityScenario {
     }
     $spec = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     $expected = @("schema", "name", "mission", "game_type", "actor", "prelude",
-        "setup", "staging", "steps", "settle_seconds", "expect")
+        "setup", "staging", "steps", "settle_seconds", "expect", "ends_joiner_session")
     $extra = @($spec.PSObject.Properties.Name | Where-Object { $_ -notin $expected })
     if ($extra.Count -gt 0) {
         throw "Scenario $Path has unknown fields: $($extra -join ', ')"
@@ -242,7 +242,28 @@ function Read-ParityScenario {
             throw "Scenario $($spec.name) stages players through the host; the OpenNova host has no slot pose yet (RR and RO only)"
         }
     }
+    # E4's kick: the host's play ends the joiner's session (PUNT ALL,
+    # Server_HandleBanPuntCommand @0x50B380), so the steady window's end does
+    # not wait for that joiner in match. A retail host actor only (the
+    # OpenNova host's scenario_play driver types no char steps yet), on an
+    # in-match RR or RO run; OR and OO keep their steady-end checks.
+    if ($spec.PSObject.Properties.Name -contains "ends_joiner_session") {
+        if ($spec.ends_joiner_session -isnot [bool] -or -not $spec.ends_joiner_session) {
+            throw "Scenario $($spec.name): ends_joiner_session is true or absent"
+        }
+        if ([string] $spec.actor -cne "host" -or $Topology -notin @("RR", "RO") -or
+                $ReadinessMode -ne "in_match" -or $LateJoiner) {
+            throw "Scenario $($spec.name) ends the joiner's session: a retail host actor on an in-match RR or RO run without a late joiner"
+        }
+    }
     return $spec
+}
+
+# True when the scenario this run plays ends the joiner's session.
+function Test-ScenarioEndsJoinerSession {
+    return [bool] ($script:ScenarioSpec -and
+        $script:ScenarioSpec.PSObject.Properties.Name -contains "ends_joiner_session" -and
+        $script:ScenarioSpec.ends_joiner_session)
 }
 
 $script:ScenarioSpec = $null
@@ -2359,7 +2380,13 @@ try {
             Start-RetailLateJoiner
             Wait-UntilSteadyDeadline
             $hostStatus = Wait-RetailRunForPeer -OwnedRunId ([string] $pair.host.run_id)
-            $joinerStatus = Wait-RetailRunForPeer -OwnedRunId ([string] $pair.joiner.run_id)
+            $joinerStatus = if (Test-ScenarioEndsJoinerSession) {
+                Get-StructuredResult (Invoke-OnHookTool -Name "onhook_run_status" -Arguments @{
+                    run_id = [string] $pair.joiner.run_id
+                })
+            } else {
+                Wait-RetailRunForPeer -OwnedRunId ([string] $pair.joiner.run_id)
+            }
             $script:Acceptance = [pscustomobject]@{
                 host = $hostStatus.instance.run_state
                 joiner = $joinerStatus.instance.run_state
@@ -2473,14 +2500,17 @@ try {
                 throw "OpenNova joiner exited during the RO steady window"
             }
             $retailAcceptance = Wait-RetailRunForPeer -OwnedRunId ([string] $retailHost.run_id)
-            $joinerAcceptance = Wait-OpenNovaJoinerReady `
-                -MinimumTicksMsec $initialJoinerTicks -RequireMotionComplete `
-                -AllowPostDeathRedeploy
-            if (-not (Test-OpenNovaJoinerReadinessTransition `
-                    -Initial $initialJoinerAcceptance -Final $joinerAcceptance `
-                    -ReadinessMode $ReadinessMode -AllowPostDeathRedeploy `
-                    -RequireMotionComplete)) {
-                throw "OpenNova joiner in-match/post-death heartbeat transition is invalid"
+            $joinerAcceptance = $null
+            if (-not (Test-ScenarioEndsJoinerSession)) {
+                $joinerAcceptance = Wait-OpenNovaJoinerReady `
+                    -MinimumTicksMsec $initialJoinerTicks -RequireMotionComplete `
+                    -AllowPostDeathRedeploy
+                if (-not (Test-OpenNovaJoinerReadinessTransition `
+                        -Initial $initialJoinerAcceptance -Final $joinerAcceptance `
+                        -ReadinessMode $ReadinessMode -AllowPostDeathRedeploy `
+                        -RequireMotionComplete)) {
+                    throw "OpenNova joiner in-match/post-death heartbeat transition is invalid"
+                }
             }
             $script:Acceptance = [pscustomobject]@{
                 retail_host = $retailAcceptance

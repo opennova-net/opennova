@@ -43,6 +43,19 @@
       "exercise_input": false,
       "auto_deploy": true,
       "scenario": "self_nade.json"
+    },
+    {
+      "id": "tdh-i3a-tdm-kick",
+      "mission": "TDH_I3A.bms",
+      "mission_sha256": "8978c7afac2d7ba0f1b09c5a358412c74bace3424f31dd647a4aadc8f5811a33",
+      "game_type": 65536,
+      "port": 32787,
+      "readiness": "in_match",
+      "steady_seconds": 45,
+      "exercise_input": false,
+      "auto_deploy": true,
+      "scenario": "kick.json",
+      "topologies": ["RR", "RR-aa", "RO"]
     }
   ]
 }
