@@ -58,7 +58,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // attacker slot (+0x178), so a death nothing stamped reports as
         // unattributed while one that follows a non-lethal hit keeps that hit's
         // clip and shooter. A body that dies afloat takes death_drown 175 over
-        // the selection; the edge stamps the death tick and drops Flags 0xC0.
+        // the selection; the edge latches the dead bit, stamps the death tick,
+        // drops Flags 0xC0 and raises the player-death transaction.
         // [orig: Entity_UpdateInfantryPlayerBody @0x4b4c72 test, @0x4b4c7f
         //  compute(0, 0, 4) into +0x2C0, @0x4b4c8d lastAttacker = 0; the
         //  Flags&0x8000 pick @0x4B4C93..0x4B4CAB; death tick
@@ -69,7 +70,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // mount, and that must not leave the seat claim or compact carrier alive.
         // [orig: infantry death detach @0x4b9c57..0x4b9c60]
         if (ent->mounted) world.vehicles.detach(e.handle);
-        if (infantry_anim_flags(inf.anim_state) != 0x82u) {
+        if (player_body_death_edge_open(*this, e, ent)) {
             // The edge's scream: the org2 pass runs for this peer's body on the
             // authority as well, so its player composite plays here too
             // [orig: @0x4b4c4a..0x4b4c6a] (D-SND-22).
@@ -81,13 +82,19 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             if (((ent->flags | ent->engine_flags) & kEntityFlagDrowning) != 0)
                 death = anim_state::kDeathDrown;
             ent->death_anim_state = 0;
-            ent->flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
-            ent->engine_flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
+            // The latch: the dead bit, the 0xC0 clear, the death tick and the
+            // attach parent (+0x184). [orig: `or eax,2` @0x4B4CB5 / the store
+            //  @0x4B4CB8, @0x4B4CDB]
+            ent->flags = (ent->flags | kEntityFlagDead) & ~(kEntityFlagMounted | kEntityFlagAiClimb);
+            ent->engine_flags =
+                    (ent->engine_flags | kEntityFlagDead) & ~(kEntityFlagMounted | kEntityFlagAiClimb);
             ent->death_tick = logic_tick;
+            ent->attach_parent = {};
             // An unauthored selection plays the slot's registration fill.
             // [orig: AnimMap_RegisterEntity @0x40BB60; the edge stores the
             //  selection unchecked @0x4B4CA3]
             inf.request_body_animation(death);
+            raise_player_body_death(*this, world, *ent);
         }
     } else {
         // The replicated JUMP key (MoveOrder bit 5): the retail host derives the

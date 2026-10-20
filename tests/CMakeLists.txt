@@ -4997,6 +4997,11 @@ opennova_add_gated_test(ragdoll_us01 COMMAND ragdoll_us01_test)
 # --- parity lane L3 (host tick) ---
 
 # --- parity lane L4 (spawn/death) ---
+# The player body's death edge raising the player-death transaction in the
+# entity update (D-AI-9's org2 half).
+add_executable(npruntime_player_death_edge_test npruntime/player_death_edge_test.cpp)
+target_link_libraries(npruntime_player_death_edge_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_death_edge COMMAND npruntime_player_death_edge_test)
 
 # --- parity lane L5 (client replica) ---
 

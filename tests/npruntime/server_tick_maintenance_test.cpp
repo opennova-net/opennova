@@ -705,7 +705,8 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 
 // The flag reset's death is the player body's edge on its Health -1, raised in
 // the same frame's entity update, after the tick's send pump and ahead of the
-// next receive pump (D-NET-550). A C2S 0x4D in that next pump therefore kills
+// next receive pump (D-NET-550; the edge's own since D-AI-9's org2 half, its
+// sends leading the next frame's queue). A C2S 0x4D in that next pump therefore kills
 // the already dead body a second time (the team change has no dead gate) and
 // its penalty holds stand last; a C2S 0x41 there stores its unfloored timeout
 // over the death's floored holds and raises nothing (the body is dead).
@@ -761,23 +762,20 @@ bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool up
 				++deaths;
 	};
 
-	tick_to_periodic_second(ctx); // the limit second: Health -1
-	count_deaths();
-	if (!expect(world.registry.get(carrier)->health == -1 && deaths == 0,
-			"flag-reset: the limit second stores Health -1 and raises nothing yet"))
-		return false;
-	inmatch::Server_RouteFrameTailEdges(ctx); // the frame's entity update
+	tick_to_periodic_second(ctx); // the limit second: Health -1, then its entity update
 	count_deaths();
 	const bool tail_death = expect(
-			deaths == 1 && (world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0,
-			"flag-reset: the frame tail's edge raises the death ahead of the next pump");
+			world.registry.get(carrier)->health == -1 && deaths == 0 &&
+					(world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0 &&
+					conn.link.respawn_delay_seconds == 3,
+			"flag-reset: the limit second's entity update raises the death ahead of the "
+			"next pump, its sends staged for the next frame");
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &ctx;
 	(void)inmatch::dispatch_session_replies(ctx.config, conn,
 			{make_protocol_message(next_pump_tag, {})}, 100,
 			ctx.np_protocol.connection_list, &world, inputs);
 	inmatch::Server_TickUpdate(ctx);
-	inmatch::Server_RouteFrameTailEdges(ctx);
 	count_deaths();
 	if (next_pump_tag == c2s::TEAM_CHANGE_REQUEST)
 		return expect(deaths == 2 && world.registry.get(carrier)->team == 2 &&
@@ -985,17 +983,18 @@ bool check_team_downed_resend() {
 		return count;
 	};
 
-	// The revivable kill: another player, no knife/headshot cause bits. The round
-	// sim zeroes Health before it raises the death; the routing marks the body dead.
+	// The revivable kill: another player, no knife/headshot cause bits, raised by
+	// the victim body's edge in the previous frame's entity update (the
+	// transaction latches the body dead here, as the edge would have).
 	world.registry.get(victim)->health = 0;
 	w::RoundDeath death;
 	death.victim = victim;
 	death.killer = killer;
 	death.victim_handle = victim.packed;
 	death.killer_handle = killer.packed;
-	world.round_sim.deaths.push_back(death);
-	// Tick 1: the death routes (window 120), the shared periodic second already
-	// decrements it to 119, then the zero-armed resend countdown fires.
+	inmatch::Server_ProcessPlayerDeath(ctx, world, death);
+	// Tick 1: the window stands at 120, the shared periodic second decrements it
+	// to 119, then the zero-armed resend countdown fires.
 	inmatch::Server_TickUpdate(ctx);
 	if (!expect(roster[0].link.death_cause_revivable &&
 			roster[0].link.downed_revive_seconds == 119,
@@ -1124,6 +1123,10 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 	roster[2].reply.player_slot = 3;
 	roster[3].reply.player_slot = 4;
 
+	// The lethal hit: Health 0, its cause bits, its shooter (+0x178) and its
+	// staged death selection (+0x2C0, which keeps the shooter through the edge).
+	// The body's edge raises the transaction in the next entity update, and
+	// its 0x1E leads the frame after.
 	auto raise_death = [&](w::EntityHandle victim, w::EntityHandle by, uint32_t cause) {
 		w::Entity *body = world.registry.get(victim);
 		body->health = 0;
@@ -1131,18 +1134,15 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 		// The lethal hit re-armed the plyr think (spawnPhase = 64), so the
 		// cadence clear cannot race this tick's consumer.
 		body->spawn_phase = 64;
-		w::RoundDeath death;
-		death.victim = victim;
-		death.killer = by;
-		death.victim_handle = victim.packed;
-		death.killer_handle = by.packed;
-		world.round_sim.deaths.push_back(death);
+		body->last_attacker = by;
+		body->death_anim_state = w::compute_death_anim_state(0, 0, w::death_cause::kGeneric);
+		inmatch::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 	};
 
 	// A critical (head-zone) kill: the 0x1E ships the STRCND08 family 10..12,
 	// the reported 0x800 is cleared on the body, and no revive window opens.
 	raise_death(head, killer, 0x800u);
-	inmatch::Server_TickUpdate(ctx);
 	std::vector<uint8_t> feed = death_feed_types(killer_wire);
 	if (!expect(feed.size() == 1 && feed[0] >= 10 && feed[0] <= 12,
 			"a latched 0x800 reports the headshot family"))
@@ -1156,7 +1156,6 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 	// Both 0x100 and 0x800 latched: 0x100 wins the ladder (event 32) and ONLY
 	// that bit is cleared; the head-zone bit stays on the body.
 	raise_death(multi, killer, 0x900u);
-	inmatch::Server_TickUpdate(ctx);
 	feed = death_feed_types(killer_wire);
 	if (!expect(feed.size() == 1 && feed[0] == 32 &&
 			world.registry.get(multi)->cause_flags == 0x800u,
@@ -1165,7 +1164,6 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 
 	// The suicide branch returns before the ladder, so nothing is cleared.
 	raise_death(self, self, 0x800u);
-	inmatch::Server_TickUpdate(ctx);
 	feed = death_feed_types(killer_wire);
 	return expect(feed.size() == 1 && feed[0] >= 1 && feed[0] <= 3 &&
 			world.registry.get(self)->cause_flags == 0x800u,

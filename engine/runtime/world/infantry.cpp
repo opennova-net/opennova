@@ -1428,17 +1428,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: savedLivePose captured @ 0x4b4190-0x4b419c; entry read @ 0x4b327d]
     const int32_t tick_start_z = e.pos[2];
 
-    // 1. Death edge, once per life. Org1 keys it on the dead bit its own edge
-    // latches; the player bodies still ride the dead bit the host's damage-time
-    // death routing sets, so they key on the posed death clip (the 0x82 family
-    // flag), as does a rowless test body with no flags word.
+    // 1. Death edge, once per life, keyed on the dead bit the edge itself
+    // latches (a player body's gate also takes the head's hidden bit, and off
+    // the authority or for a rowless test body the posed death clip:
+    // player_body_death_edge_open).
     // [orig: Entity_UpdateInfantryAI `cmp [esi+11Eh],bp; jg` @0x4B9C40,
-    //  `test byte ptr [esi+24h],2; jnz` @0x4B9C4D]
+    //  `test byte ptr [esi+24h],2; jnz` @0x4B9C4D; the player-body twin
+    //  Entity_UpdateInfantryPlayerBody @0x4B4BF1 / @0x4B4BFE]
     const bool org1_body = npc_body && tick_entity != nullptr;
     if (e.health <= 0) {
         const bool edge_open = org1_body
                 ? ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagDead) == 0
-                : infantry_anim_flags(inf.anim_state) != 0x82u;
+                : player_body_death_edge_open(*this, e, tick_entity);
         if (edge_open) infantry_death_edge(*this, e, world, tick_entity, org1_body, logic_tick);
     }
     // Org1's corpse leg, think and motion gates read that dead bit, not health:

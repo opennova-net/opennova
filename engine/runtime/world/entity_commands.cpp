@@ -163,7 +163,7 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
     return true;
 }
 
-// The player bodies' death transaction stand-in (an org1 body's own edge
+// The death transaction of an organic with no live motor (a body's own edge
 // raises its own), defined with the group kill below.
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h);
 
@@ -176,9 +176,9 @@ bool script_kill_crosses_edge(const Entity &e) {
     return e.health > 0 && ((e.flags | e.engine_flags) & kEntityFlagDead) == 0;
 }
 
-// Edge stand-in (organic death transaction) after a script health write, until
-// the org1/org2 death edge owns it: a living organic the write took to zero or
-// below crosses the edge once; the written health word is kept.
+// The organic death after a script health write: a living organic the write
+// took to zero or below crosses the edge once (its own edge's, or the stand-in
+// for an organic with no live motor); the written health word is kept.
 // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550]
 void script_health_edge_stand_in(World &world, Entity &e, bool crosses_edge) {
     if (e.kind != EntityKind::Organic || !crosses_edge || e.health > 0) return;
@@ -304,8 +304,8 @@ bool EntityCommands::kill_ssn(EntityTarget ssn) {
         world_.round_sim.hit_record.owner = {};
     }
     hit_record_class_event(world_, *e, pool == 3 ? 4 : 1);
-    // The organic death transaction: an org1 body's own edge raises it, the
-    // player bodies take this stand-in for theirs
+    // The organic death transaction: the body's own edge raises it (an organic
+    // with no live motor takes the stand-in)
     // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
     if (e->kind == EntityKind::Organic && crosses_edge)
         raise_scripted_death(world_, *e, e->handle);
@@ -327,8 +327,8 @@ bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
     e->last_attacker = {};
     if (e->item_type == 3) e->death_anim_state = 0;
     hit_record_class_event(world_, *e, 1);
-    // The organic death transaction: an org1 body's own edge raises it, the
-    // player bodies take this stand-in for theirs
+    // The organic death transaction: the body's own edge raises it (an organic
+    // with no live motor takes the stand-in)
     // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
     if (e->kind == EntityKind::Organic && crosses_edge)
         raise_scripted_death(world_, *e, e->handle);
@@ -1430,16 +1430,17 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
 // which both edges zero before the send, so every edge-driven death ships 0 there
 // (the retail capture's `killerSource=0` on its scripted kills).
 //
-// An org1 (NPC) victim takes that path in the port too: its own motor death edge
-// raises the transaction from the zeroed health against lastAttacker, and the
-// script records nothing (no damage-time kill tally either: the script kill
-// never reaches Score_ProcessKillEvent). The player bodies (org2) still take
-// their transaction from this record.
+// Both organic motors take that path in the port too: an org1 (NPC) body's own
+// motor death edge, or a player (org2) body's, raises the transaction from the
+// zeroed health against lastAttacker, and the script records nothing (no
+// damage-time kill tally either: the script kill never reaches
+// Score_ProcessKillEvent). Only an organic with no live motor takes its
+// transaction from this record.
 // [orig: Entity_UpdateInfantryAI edge @0x4B9D4D / Entity_UpdateInfantryPlayerBody
 //  edge @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550 -> NetPacket_BuildDeathNotifyPayload
 //  @0x5036E0 (the +0x2C0 word @0x503733), send_mask 0x90]
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
-    if (org1_owns_death_transaction(world, h)) {
+    if (org1_owns_death_transaction(world, h) || org2_owns_death_transaction(world, h)) {
         e.alive = false;
         e.health = 0;
         return;
@@ -1483,9 +1484,9 @@ int EntityCommands::kill_group(int group) {
             world_.round_sim.hit_record.damage = 0;
             world_.round_sim.hit_record.owner = {};
             hit_record_class_event(world_, *e, 1);
-            // The organic death transaction: an org1 body's own edge raises
-            // it, the player bodies take this stand-in; only the living cross
-            // it, so a group killed twice notifies once [orig: @0x4B9D4D /
+            // The organic death transaction: the body's own edge raises it
+            // (an organic with no live motor takes the stand-in); only the
+            // living cross it, so a group killed twice notifies once [orig: @0x4B9D4D /
             // @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
             if (e->kind == EntityKind::Organic && crosses_edge)
                 raise_scripted_death(world_, *e, h);

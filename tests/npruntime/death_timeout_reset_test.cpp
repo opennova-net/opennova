@@ -3,9 +3,9 @@
 // word and the last attacker (+0x178), stores the respawn timeout itself,
 // unfloored, into the respawn delay (+360) and the spawn-target hold (+364),
 // and closes the revive window (+368). Health 0 on a live, unhidden body is
-// then the player body's death edge, which raises the player-death
-// transaction over those holds (the death's floor of 3, +364 cleared with no
-// spawn zones).
+// then the player body's death edge in the frame's entity update, which
+// raises the player-death transaction over those holds (the death's floor of
+// 3, +364 cleared with no spawn zones).
 // [orig: NapiNPServerMsg_DeathTimeoutReset @0x510540; the edge
 //  Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA; GameEvent_PlayerDeath
 //  @0x516EB6..0x516EEB]
@@ -111,7 +111,8 @@ struct Fixture {
 };
 
 // A live body: the stores, unfloored, then the edge's transaction (no killer)
-// re-arms +360 at its floor over them and clears +364 (no spawn zones).
+// in the frame's entity update re-arms +360 at its floor over them and clears
+// +364 (no spawn zones); its 0x13 leads the next frame's queue.
 void test_live_body_stores_then_dies() {
 	Fixture f;
 	f.ctx.config.respawn_timeout = 1;
@@ -122,22 +123,20 @@ void test_live_body_stores_then_dies() {
 	CHECK(f.conn(0).link.respawn_delay_seconds == 1);
 	CHECK(f.conn(0).link.spawn_target_hold_seconds == 1);
 	CHECK(f.conn(0).link.downed_revive_seconds == 0);
-	// The handler raises nothing itself: the edge's record waits in the queue.
+	// The handler raises and queues nothing: the edge is the entity update's.
 	CHECK(!f.dead_bit(0));
-	CHECK(f.world.round_sim.deaths.size() == 1);
-	if (!f.world.round_sim.deaths.empty()) {
-		CHECK(f.world.round_sim.deaths[0].victim == f.players[0]);
-		CHECK(!f.world.round_sim.deaths[0].killer.valid());
-	}
+	CHECK(f.world.round_sim.deaths.empty());
 	(void)f.sent_death(1);
 	inmatch::Server_TickUpdate(f.ctx);
-	CHECK(f.world.round_sim.deaths.empty());
-	CHECK(f.sent_death(1));
 	CHECK(f.dead_bit(0));
-	// The death's floor of 3 over the request's 1 (at most one periodic second
-	// has run since); +364 cleared with no spawn zones.
-	CHECK(f.conn(0).link.respawn_delay_seconds >= 2);
+	// The death's floor of 3 over the request's 1, stored after the frame's
+	// periodic decrement; +364 cleared with no spawn zones.
+	CHECK(f.conn(0).link.respawn_delay_seconds == 3);
 	CHECK(f.conn(0).link.spawn_target_hold_seconds == 0);
+	CHECK(!f.sent_death(1));
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.sent_death(1));
+	CHECK(f.world.round_sim.deaths.empty());
 }
 
 // A dead body takes the stores and raises no second death: the request
@@ -157,13 +156,19 @@ void test_dead_body_only_stores() {
 	CHECK(f.conn(0).link.spawn_target_hold_seconds == 5);
 	CHECK(f.conn(0).link.downed_revive_seconds == 0);
 	CHECK(f.world.round_sim.deaths.empty());
-	// A body the damage already dropped (its own transaction raised, the bit
-	// not yet latched) raises no second one either.
+	inmatch::Server_TickUpdate(f.ctx);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.deaths_of(0) == 0);
+	// A body the damage already dropped, its edge not yet run: the request
+	// queues nothing, and the edge raises the one death.
 	Fixture g;
 	g.entity(0).health = -5;
 	g.request(0);
 	CHECK(g.entity(0).health == 0);
 	CHECK(g.world.round_sim.deaths.empty());
+	inmatch::Server_TickUpdate(g.ctx);
+	inmatch::Server_TickUpdate(g.ctx);
+	CHECK(g.deaths_of(0) == 1);
 }
 
 // A hidden body (Flags bit 0, a spectator's) takes the stores; the edge skips
@@ -177,11 +182,15 @@ void test_hidden_body_raises_no_death() {
 	CHECK(f.conn(0).link.respawn_delay_seconds == 4);
 	CHECK(f.conn(0).link.spawn_target_hold_seconds == 4);
 	CHECK(f.world.round_sim.deaths.empty());
+	inmatch::Server_TickUpdate(f.ctx);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.deaths_of(0) == 0);
+	CHECK(!f.dead_bit(0));
 }
 
 // A 0x41 and a team change (0x4D) in one receive pump: the team change kills
-// the body inline and lays its penalty over the holds, so the 0x41's queued
-// edge finds the dead bit set when the tick routes it and runs no second
+// the body inline, latches its dead bit and lays its penalty over the holds, so
+// the edge in the frame's entity update skips the dead body and runs no second
 // death; the penalty's +360 stands. [orig: Entity_UpdateInfantryPlayerBody --
 // Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE; NapiNPServerMsg_0x04D_ChangeTeam
 // -- GameEvent_PlayerDeath @0x519059 / @0x5190C7, +0x168 @0x51906B..0x519076]
@@ -203,6 +212,7 @@ void test_team_change_in_the_same_pump_dies_once() {
 	ns::Datagram d;
 	while (f.transports[1].pop_outbound(d)) deaths += d.tag == s2c::ENTITY_DEATH ? 1 : 0;
 	inmatch::Server_TickUpdate(f.ctx);
+	inmatch::Server_TickUpdate(f.ctx);
 	while (f.transports[1].pop_outbound(d)) deaths += d.tag == s2c::ENTITY_DEATH ? 1 : 0;
 	CHECK(deaths == 1);
 	CHECK(f.world.round_sim.deaths.empty());
@@ -214,7 +224,7 @@ void test_team_change_in_the_same_pump_dies_once() {
 // retail's convert runs inline in the pump and hides the body (Flags |= 1 and
 // Health 1; its deploy leg raises the Health and clears only the dead bit), so
 // the edge after the pump skips it and no death is raised. Ours stages the
-// convert for the tick, which routes the 0x41's record after it.
+// convert for the tick, ahead of its entity update.
 // [orig: Server_ConvertPlayerToSpectator -- Flags @0x519E92, Health @0x519EA4, the
 //  deploy @0x519ECE; Server_DeployPlayer's dead-bit clear @0x51787A; the
 //  edge's hidden bit Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127]
@@ -233,7 +243,8 @@ void test_spectator_convert_in_the_same_pump_raises_no_death() {
 		inputs.server_ctx = &f.ctx;
 		(void)inmatch::dispatch_session_replies(f.ctx.config, f.conn(0), pump, 100,
 				f.ctx.np_protocol.connection_list, &f.world, inputs);
-		CHECK(f.world.round_sim.deaths.size() == 1); // the 0x41's edge, queued
+		CHECK(f.world.round_sim.deaths.empty());
+		inmatch::Server_TickUpdate(f.ctx);
 		inmatch::Server_TickUpdate(f.ctx);
 		CHECK(f.conn(0).link.spectator); // the convert took
 		CHECK(!f.sent_death(1));
@@ -242,59 +253,11 @@ void test_spectator_convert_in_the_same_pump_raises_no_death() {
 	}
 }
 
-// A medic heal the previous frame's entity update admitted, then a 0x41 in this
-// frame's pump: retail stored the heal in that entity update (ahead of the
-// pump), so the 0x41's Health 0 lies over it and the edge raises the death on
-// a body at Health 0. Ours routes the heal at the tick's head, after the pump:
-// the edge is tested ahead of it there, the 0x41's Health 0 goes back over the
-// heal, and the death still runs. [orig: Entity_UpdateAllEntities --
-// Projectile_ProcessExplosionQueue @0x4C223F -> GameEvent_HandleMedicInteraction,
-// the GameEvent_HealPlayer call @0x4E6805, Health = max @0x50DE7F;
-// NapiNPServerMsg_DeathTimeoutReset @0x510568; the edge
-// Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA]
-void test_previous_frame_heal_keeps_the_death() {
-	Fixture f;
-	f.ctx.config.respawn_timeout = 5;
-	f.entity(0).has_item_def = true;
-	f.entity(0).health_max = 100;
-	f.entity(0).health = 40;
-	f.entity(1).player_class = 5; // the Medic class
-	f.world.round_sim.medic_interactions.push_back({f.players[0], f.players[1], false});
-	(void)f.deaths_of(0);
-	f.request(0);
-	CHECK(f.world.round_sim.deaths.size() == 1);
-	inmatch::Server_TickUpdate(f.ctx);
-	int heals = 0;
-	CHECK(f.deaths_of(0, &heals) == 1);
-	CHECK(heals == 1); // the heal ran (its 0x1E ev 45)
-	CHECK(f.dead_bit(0));
-	CHECK(f.entity(0).health == 0); // the 0x41's store, not the heal's
-	CHECK(f.world.round_sim.deaths.empty());
-}
-
-// Two edge records on one body route one death: the head routes neither and
-// holds both, and the drain after the converts skips the second once the first
-// latched the dead bit. [orig: Entity_UpdateInfantryPlayerBody -- the dead bit
-// @0x4B4BFE]
-void test_two_edge_records_on_one_body_die_once() {
-	Fixture f;
-	f.ctx.config.respawn_timeout = 5;
-	(void)f.deaths_of(0);
-	f.request(0);
-	CHECK(f.world.round_sim.deaths.size() == 1);
-	if (!f.world.round_sim.deaths.empty())
-		f.world.round_sim.deaths.push_back(f.world.round_sim.deaths.front());
-	inmatch::Server_TickUpdate(f.ctx);
-	CHECK(f.deaths_of(0) == 1);
-	CHECK(f.dead_bit(0));
-	CHECK(f.world.round_sim.deaths.empty());
-}
-
 // A 0x41, a Default Spawn 0x0E and a 0x41 in one pump at a respawn timeout of 0,
 // in session: the 0x0E in ours reads the Health the 0x41 zeroed and deploys the body
-// (retail's reads the dead bit, still clear, and refuses: D-NET-460), so the
-// second 0x41 queues a second edge record on the redeployed body. The body
-// dies once. [orig: Server_ProcessClientRequestRespawn @0x519CC1;
+// (retail's reads the dead bit, still clear, and refuses: D-NET-460), and the
+// second 0x41 zeroes the redeployed body again. The edge in the frame's entity
+// update kills it once. [orig: Server_ProcessClientRequestRespawn @0x519CC1;
 // Entity_UpdateInfantryPlayerBody @0x4B4BFE]
 void test_reset_deploy_reset_in_one_pump_dies_once() {
 	Fixture f;
@@ -307,7 +270,8 @@ void test_reset_deploy_reset_in_one_pump_dies_once() {
 			 make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF}),
 			 make_protocol_message(c2s::DEATH_TIMEOUT_RESET, {})},
 			100, f.ctx.np_protocol.connection_list, &f.world, inputs);
-	CHECK(f.world.round_sim.deaths.size() == 2); // one record per 0x41
+	CHECK(f.world.round_sim.deaths.empty());
+	inmatch::Server_TickUpdate(f.ctx);
 	inmatch::Server_TickUpdate(f.ctx);
 	CHECK(f.deaths_of(0) == 1);
 	CHECK(f.dead_bit(0));
@@ -341,8 +305,6 @@ int main() {
 	test_hidden_body_raises_no_death();
 	test_team_change_in_the_same_pump_dies_once();
 	test_spectator_convert_in_the_same_pump_raises_no_death();
-	test_previous_frame_heal_keeps_the_death();
-	test_two_edge_records_on_one_body_die_once();
 	test_reset_deploy_reset_in_one_pump_dies_once();
 	test_refusals();
 	if (failures == 0) std::printf("death_timeout_reset: all passed\n");

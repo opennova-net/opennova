@@ -1183,11 +1183,20 @@ class World;
 
 // Whether `victim` is an org1 (NPC) body whose own motor death edge raises its
 // death transaction (the 0x13 + scoring), so the host's damage-time death record
-// for it only feeds the SP kill tally. Player bodies and organics without a live
-// motor keep the damage-time transaction.
+// for it only feeds the SP kill tally. Organics without a live motor keep the
+// damage-time transaction.
 // [orig: Entity_UpdateInfantryAI @0x4B9D44..0x4B9D4D -> Entity_CheckAndProcessDeath
 //  @0x51B550; Score_ProcessKillEvent @0x4FD400 from the damage paths only]
 bool org1_owns_death_transaction(const World &world, EntityHandle victim);
+
+// Whether `victim` is an org2 (player) body with a live motor, whose death edge
+// raises the player-death transaction inside the entity update, so a
+// damage-time death record for it only feeds the kill tally and every other
+// writer of its Health (a C2S 0x41, the flag reset, a script) just writes it.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B4CE1..0x4B4CEA ->
+//  Entity_CheckAndProcessDeath @0x51B550; Score_ProcessKillEvent @0x4FD400 from
+//  the damage paths only]
+bool org2_owns_death_transaction(const World &world, EntityHandle victim);
 
 // A person's ride link, refreshed by both organic think blocks: the occupant
 // (+0x170) of the entity it stands on (+0x28), else of that entity's own

@@ -19,6 +19,7 @@
 #include <runtime/inmatch/server_files.h>      // ServerLogs (the /PROFILE and punt log devices)
 #include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
 #include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
+#include <runtime/world/entity_update_transactions.h> // the entity update's inline transactions
 #include <runtime/world/match.h>               // world::MatchStats (the host slot's stats)
 
 // Forward declarations — the runtime holds non-owning pointers to the authoritative world and
@@ -180,6 +181,32 @@ inline uint32_t round_end_linger_ticks_for(int title) {
 	return title == gameprofile::GAME_DFX2 ? 1550u : 2790u;
 }
 
+struct NapiNPServerCtx;
+
+// The host session's half of the transactions its world's entity update raises
+// inline (world/entity_update_transactions.h), armed on that world at each
+// server tick's head (route_round_deaths). Defined in server_player_death.cpp.
+struct ServerEntityUpdateTransactions final : world::IEntityUpdateTransactions {
+	NapiNPServerCtx *ctx = nullptr;
+	void player_death(world::World &world, world::Entity &body) override;
+};
+
+// A send an entity-update transaction made, held for the next server tick's head:
+// the recipient's connection (its join-order id and its transport, both
+// re-checked at the release) and the message.
+struct StagedEntityUpdateSend {
+	uint32_t connection_id = 0;
+	replication::ISessionTransport *transport = nullptr;
+	uint8_t tag = 0;
+	std::vector<uint8_t> body;
+};
+
+// One transaction's sends, named by its queue record (RoundDeath::staged_sends).
+struct StagedEntityUpdateBatch {
+	uint32_t seq = 0;
+	std::vector<StagedEntityUpdateSend> sends;
+};
+
 struct NapiNPServerCtx {
 	NetworkType transport_mode = NetworkType::Lan; // [orig +0x50]
 	SocketMode socket_state = SocketMode::Socketless; // [orig +0x54]
@@ -312,9 +339,21 @@ struct NapiNPServerCtx {
 	std::vector<world::EntityHandle> team_change_entities;
 
 	// Whether this frame's entity update ran (Server_TickUpdate's step 4, behind
-	// its admission gate), which the frame tail's player-body edges need.
-	// [orig: Game_ProcessMainFrame @0x526703..0x526742]
+	// its admission gate). Nothing reads it since no death waits for the frame
+	// tail; server_tick.cpp still writes it.
 	bool entity_update_ran = false;
+
+	// The transactions the world's entity update raises inline (the player
+	// body's death edge), and the sends they staged: retail's update queues them
+	// after the frame's send pump, so they lead the next frame's queue, released
+	// at the next tick's head at their records' places in the death queue.
+	// `entity_update_staging` is the batch a running transaction sends into.
+	// [orig: Game_ProcessMainFrame -- the Server_TickUpdate call @0x5266B6 (its
+	//  send pump @0x51E487), then Entity_UpdateAllEntities @0x52674B]
+	ServerEntityUpdateTransactions entity_update_transactions;
+	std::vector<StagedEntityUpdateBatch> entity_update_sends;
+	std::vector<StagedEntityUpdateSend> *entity_update_staging = nullptr;
+	uint32_t entity_update_batch_seq = 0;
 
 	// The designation table the radio calls fill and the per-player S2C 0x6B
 	// batch reads, cleared at the new-round init

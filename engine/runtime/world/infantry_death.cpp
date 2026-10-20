@@ -1,6 +1,7 @@
 // The infantry death edge: once per life a dead body takes its death clip, seeds
-// its corpse timer, screams, drops its mount and latches the dead bit; an org1
-// (NPC) body on the authority then raises its own death transaction.
+// its corpse timer, screams, drops its mount and latches the dead bit; on the
+// authority an org1 (NPC) body then raises its own death transaction, and a
+// player (org2) body the host session's player-death transaction.
 // [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55; the player-body twin in
 //  Entity_UpdateInfantryPlayerBody @0x4B4C4A..0x4B4CEA]
 #include <runtime/world/infantry_internal.h>
@@ -11,14 +12,50 @@ namespace opennova::world {
 // An org1 body's death transaction is its motor edge's: retail raises
 // Entity_CheckAndProcessDeath from the edge [orig: Entity_UpdateInfantryAI
 // @0x4B9D44..0x4B9D4D -> Entity_CheckAndProcessDeath @0x51B550], never from the
-// damage that dropped the health. Player bodies (org2) and organics without a
-// motor keep the damage-time transaction.
+// damage that dropped the health. Organics without a motor keep the
+// damage-time transaction.
 bool org1_owns_death_transaction(const World &world, EntityHandle victim) {
     const Entity *ent = world.registry.get(victim);
     const AiEntity *body = world.ai.for_handle(victim);
     return ent != nullptr && body != nullptr && body->inf.active &&
            !body->inf.is_local_player && !body->net_is_remote_peer &&
            ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) == 0;
+}
+
+// The org2 twin: a player body's transaction is its edge's, inside the entity
+// update [orig: Entity_UpdateInfantryPlayerBody @0x4B4CE1..0x4B4CEA ->
+// Entity_CheckAndProcessDeath @0x51B550].
+bool org2_owns_death_transaction(const World &world, EntityHandle victim) {
+    const Entity *ent = world.registry.get(victim);
+    const AiEntity *body = world.ai.for_handle(victim);
+    return ent != nullptr && body != nullptr && body->inf.active &&
+           (body->inf.is_local_player || body->net_is_remote_peer ||
+            ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
+}
+
+// On the authority the dead bit is the edge's own latch, so the gate is
+// retail's: an unhidden body whose dead bit is clear. A joiner's own body takes
+// its dead bit from the 0x0A fold together with the Health
+// (JoinerRole::apply_authoritative_health), and a rowless test body has no
+// flags word, so those key the edge on the posed death clip instead.
+// [orig: Entity_UpdateInfantryPlayerBody -- the head's hidden-bit return
+//  @0x4B411E..0x4B4127, Health <= 0 @0x4B4BF1 (the caller's), the dead bit
+//  @0x4B4BFE]
+bool player_body_death_edge_open(const AiSystem &ai, const AiEntity &e, const Entity *ent) {
+    if (ent == nullptr || !ai.is_authority) return infantry_anim_flags(e.inf.anim_state) != 0x82u;
+    return ((ent->flags | ent->engine_flags) & (kEntityFlagCarried | kEntityFlagDead)) == 0;
+}
+
+// The edge's tail on the authority: Entity_CheckAndProcessDeath, which for a
+// player body is GameEvent_PlayerDeath (the 0x13, the 0x61 disarm, the 0x52,
+// the 0x1E, the 0x54 and the re-armed holds), raised at the body's turn in the
+// pool-0 walk. The edge has latched the dead bit; `alive` is the port's mirror
+// of it. [orig: Entity_UpdateInfantryPlayerBody -- the latch @0x4B4CB5..0x4B4CB8,
+//  `cmp is_authority` @0x4B4CE1, the Entity_CheckAndProcessDeath call @0x4B4CEA]
+void raise_player_body_death(const AiSystem &ai, World &world, Entity &ent) {
+    ent.alive = false;
+    if (ai.is_authority && world.entity_update_transactions != nullptr)
+        world.entity_update_transactions->player_death(world, ent);
 }
 
 // The death scream, played by the edge of whichever pass runs the body.
@@ -142,7 +179,10 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     ent->flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
     ent->engine_flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
     ent->death_tick = logic_tick;
-    if (!org1) return;
+    if (!org1) {
+        raise_player_body_death(ai, world, *ent);
+        return;
+    }
     // The authority raises the body's death transaction from here: the host's
     // death routing sends the 0x13 and scores it against the victim's
     // lastAttacker (+0x178). A damage-time record for this body only fed the

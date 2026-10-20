@@ -64,6 +64,14 @@ bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent
 // [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55]
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick);
+// The player-body (org2) edge's gate at Health <= 0, for both legs (the motor
+// and the authority's remote peers): the head's hidden-bit return, then the
+// dead bit. [orig: Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127,
+// @0x4B4BFE]
+bool player_body_death_edge_open(const AiSystem &ai, const AiEntity &e, const Entity *ent);
+// The player-body edge's tail after its latch: on the authority, the death
+// transaction the host session armed. [orig: @0x4B4CE1..0x4B4CEA]
+void raise_player_body_death(const AiSystem &ai, World &world, Entity &ent);
 // The death edge's scream leg, shared by the motor's edge and the authority's
 // remote-peer edge: a player body (org2) composes "<prefix>_DEATH" /
 // "_DEATH_K" from its anim slot, any other body plays its profile slot 7 / 8;

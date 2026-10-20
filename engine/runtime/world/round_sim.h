@@ -400,21 +400,17 @@ struct RoundDeath {
     // Entity_CheckAndProcessDeath @0x51B550; the tally Score_ProcessKillEvent
     // @0x4FD400 is called only from the damage paths]
     bool motor_edge = false;
-    // Queued for a player body's death edge ahead of the entity pass that runs
-    // it (the C2S 0x41's Health 0): the tick tests the edge's predicate at its
-    // head, so a body another transaction killed meanwhile (the team change's
-    // inline death) dies once, and routes the record after the receive pump's
-    // spectator converts unless the body is hidden or dead by then. [orig:
-    // Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
-    // Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE]
+    // Never set: a player body's death is its edge's (org2_owns_death_transaction),
+    // so nothing queues a death for it. The server tick's head still reads it
+    // (server_tick.cpp) until that read goes.
     bool player_edge = false;
-    // Queued for a player body's death edge in the same frame's entity update
-    // (the flag reset's Health -1): every tick drain holds it, and the host
-    // routes it after that frame's S2C flush, where retail's entity update
-    // follows the tick's send pump, ahead of the next receive pump
-    // (Server_RouteFrameTailEdges). [orig: Game_ProcessMainFrame -- the
-    // Server_TickUpdate call @0x5266B6, Entity_UpdateAllEntities @0x52674B]
-    bool frame_tail_edge = false;
+    // Nonzero for a player body's edge record: its transaction ran inside the
+    // entity update (the host session's IEntityUpdateTransactions), and the
+    // record keeps the place in the queue where the host releases the sends it
+    // staged, which retail's update queued after that frame's send pump.
+    // [orig: Game_ProcessMainFrame -- the send pump @0x51E487 inside the
+    //  Server_TickUpdate call @0x5266B6, then Entity_UpdateAllEntities @0x52674B]
+    uint32_t staged_sends = 0;
 };
 
 // A medic-kit hit on a same-team person the kill-zone pass admitted this tick,

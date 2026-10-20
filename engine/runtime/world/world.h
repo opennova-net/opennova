@@ -41,6 +41,7 @@
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
+#include <runtime/world/entity_update_transactions.h>
 #include <runtime/world/system.h>
 #include <runtime/world/vehicle_system.h>
 #include <runtime/world/rotor_wash.h>
@@ -975,6 +976,9 @@ public:
     ServerIdleLegs server_idle_legs;
     IEntityIdleTimers *entity_idle_timers = nullptr;
     IRemoteWeaponTables *remote_weapon_tables = nullptr;
+    // The authority's inline transactions (entity_update_transactions.h): armed
+    // by the host session for its tick, disarmed by run_entity_pass's tail.
+    IEntityUpdateTransactions *entity_update_transactions = nullptr;
     // The lifetime groups (declared above): what the script owns, what the
     // embedder feeds once, what the host stamps, what the drains consume.
     ScriptState script;
