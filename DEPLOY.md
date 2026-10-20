@@ -1744,27 +1744,6 @@ tokens. Then:
 `infra/github/imports.tf` adopted what existed before the stack. A new repository, member
 or secret is a change to the stack: add it, plan, apply.
 
-Once, after the change that left the two retail reference repositories out of the stack
-(no test reads retail data): `prevent_destroy` refuses a plan that would drop them, so
-[admin] delete `opennova-reference-assets` and `opennova-reference-retail-packed` in
-GitHub, take their instances out of the state, then apply, which also deletes the
-`REFERENCE_ASSETS_TOKEN` secret:
-
-```bash
-./deploy/run.sh github state-rm \
-  'github_repository.repo["opennova-reference-assets"]' \
-  'github_branch_default.repo["opennova-reference-assets"]' \
-  'github_repository_vulnerability_alerts.repo["opennova-reference-assets"]' \
-  'github_repository.repo["opennova-reference-retail-packed"]' \
-  'github_branch_default.repo["opennova-reference-retail-packed"]' \
-  'github_repository_vulnerability_alerts.repo["opennova-reference-retail-packed"]'
-./deploy/run.sh github apply
-```
-
-Then delete the vault item `reference-assets` and revoke its token, and the Actions caches
-the retired retail legs kept (`gh cache delete` each `reference-assets-*` and
-`retail-packed-*` key `gh cache list` shows).
-
 ## CI runners
 
 `ci.yml`'s build and test legs (test-core, test-linux, both gdext builds, the Godot
