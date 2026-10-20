@@ -3438,9 +3438,9 @@ add_test(NAME wac_dispatch_sweep COMMAND wac_dispatch_sweep_test)
 # The WAC language's words (runtime/wac/wac_lexis.h): the keywords, the comment start and the
 # operand prefixes, checked against what the compiler reads.
 add_test(NAME wac_lexis COMMAND wac_lexis_test)
-# The corpus sweep walks OPENNOVA_JO_ASSETS (argv dirs override); it reports
-# Skipped without it.
-opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
+# The corpus sweep: every committed .wac script (assets/, expansions/, fixtures/wac/;
+# argv dirs override) against the original compiler's listing of it.
+add_test(NAME wac_corpus COMMAND wac_corpus_test)
 
 # The original compiler and VM on synthetic programs: the fixtures are the
 # pinned executable's own listings and states (scripts/oracles/wac_parity.py).

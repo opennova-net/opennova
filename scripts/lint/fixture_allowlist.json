@@ -24,6 +24,7 @@
     "fixtures/score/score_sample.ini",
     "fixtures/terrain/tmap/items.def",
     "fixtures/threedi/o3d/*.o3d",
+    "fixtures/wac/forms.wac",
     "fixtures/wac/text_document.wac"
   ],
   "keep": [

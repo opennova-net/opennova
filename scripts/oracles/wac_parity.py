@@ -13,8 +13,9 @@ listing writes pool words as values and catalog handles as their names.
 VM slice: jo-c's wac_runtime_oracle executes compiled synthetic programs on
 the original WacScript_ExecuteBytecode @0x4F58B0 for a few steps.
 
-Corpus slice: the shipped .wac scripts compile with empty catalogs; only the
-SHA-256 of each source and of its listing are written, never script bytes.
+Corpus slices: the shipped .wac scripts, and the ones the tree commits (assets/,
+expansions/, fixtures/wac/), compile with empty catalogs; only the SHA-256 of each
+source and of its listing are written, never script bytes.
 
 Requires pefile and unicorn; the native tests use the committed vectors.
 Run with PYTHONDONTWRITEBYTECODE=1 so nothing is written into jo-c.
@@ -653,6 +654,22 @@ def corpus_rows(compiler, exe):
     return sorted(rows.items())
 
 
+def committed_rows(compiler, repo):
+    # The scripts the tree commits (the base game, its expansions, the test scripts), each
+    # loadable by RUN, compiled with empty catalogs as the shipped corpus is: the original
+    # compiler's listing of each, by the source's SHA-256 (wac_corpus_test).
+    paths = sorted(p for sub in ('assets', 'expansions', 'fixtures/wac') for p in (repo / sub).rglob('*')
+                   if p.is_file() and p.suffix.lower() == '.wac')
+    files = {p.name.upper(): p.read_bytes() for p in paths}
+    rows = {}
+    for path in paths:
+        data = path.read_bytes()
+        document = compiler.document(compiler.compile(data, files, catalogs=False))
+        rows[hashlib.sha256(data).hexdigest()] = (hashlib.sha256(document.encode('latin-1')).hexdigest(),
+                                                  path.relative_to(repo).as_posix())
+    return sorted((source, listing, name) for source, (listing, name) in rows.items())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jo-c', type=Path, required=True)
@@ -701,6 +718,10 @@ def main():
     corpus = corpus_rows(compiler, args.retail_exe.resolve())
     fixture('wac_retail_corpus_vectors.inc', header + ''.join('{"%s", "%s"},\n' % row for row in corpus))
     print(len(corpus), 'shipped scripts hashed')
+
+    committed = committed_rows(compiler, Path(__file__).resolve().parents[2])
+    fixture('wac_corpus_vectors.inc', header + ''.join('{"%s", "%s"}, // %s\n' % row for row in committed))
+    print(len(committed), 'committed scripts hashed')
 
 
 if __name__ == '__main__':
