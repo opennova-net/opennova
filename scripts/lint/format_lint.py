@@ -51,8 +51,16 @@ Finding = tuple[str, int, str, str]  # (path, line, tool, message)
 
 
 def git(*args: str) -> str:
+    # errors="replace": a text fixture in the diff may hold code-page bytes (a shipped menu
+    # form's 0xA9), which no scoped line number depends on.
     return subprocess.run(
-        ["git", *args], cwd=REPO, check=True, capture_output=True, text=True, encoding="utf-8"
+        ["git", *args],
+        cwd=REPO,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     ).stdout
 
 
