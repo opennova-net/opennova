@@ -67,7 +67,16 @@ bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
     if (control == "BLUE_PW") { cfg.mp_host_side_password_a = value.substr(0, 17); return true; }
     if (control == "RED_PW") { cfg.mp_host_side_password_b = value.substr(0, 17); return true; }
     if (control == "SPECTATOR_PW") { cfg.mp_host_spectator_password = value.substr(0, 17); return true; }
-    if (control == "GAME_LOCATION") { cfg.country = value.substr(0, 3); return true; }
+    if (control == "GAME_LOCATION") {
+        // strncpy with the item's own length (3 at most) as the count: the item's bytes over the
+        // word's, no NUL, so a shorter item keeps the old word's tail
+        // [orig: HostDialog_ReadSettings @0x555A51 (3), @0x555A58..0x555A69 (strlen),
+        //  @0x555A72 strncpy(country_3C5, item, count)].
+        const size_t count = std::min<size_t>(value.size(), 3);
+        if (cfg.country.size() < count) cfg.country.resize(count);
+        cfg.country.replace(0, count, value, 0, count);
+        return true;
+    }
     const int32_t number = edit_integer(value);
     // The six attribute spins onto their mpattrib bits, four of them inverted
     // [orig: @0x555CBC..0x555DE8].

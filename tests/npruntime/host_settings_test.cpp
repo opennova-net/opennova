@@ -135,6 +135,10 @@ int main() {
     TEST_EXPECT(cfg.mp_max_players == 64 && shown("MAX_PLAYERS") == "64");
     TEST_EXPECT(read("SERVERTYPE", "0") && shown("SERVERTYPE") == "0");
     TEST_EXPECT(read("GAME_LOCATION", "USA") && shown("GAME_LOCATION") == "USA");
+    // A shorter item copies its own bytes alone, no NUL: "DE" over "USA" leaves "DEA"
+    // [orig: HostDialog_ReadSettings @0x555A51..0x555A72].
+    TEST_EXPECT(read("GAME_LOCATION", "DE") && cfg.country == "DEA");
+    TEST_EXPECT(read("GAME_LOCATION", "USA") && cfg.country == "USA");
     TEST_EXPECT(read("GAME_NAME", "Night Ops") && shown("GAME_NAME") == "Night Ops");
     TEST_EXPECT(read("CONNECTIONSPEED", "5") && read("MAX_FF_KILLS", "3"));
     TEST_EXPECT(shown("CONNECTIONSPEED") == "5" && shown("MAX_FF_KILLS") == "3");
