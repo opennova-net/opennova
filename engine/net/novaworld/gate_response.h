@@ -59,6 +59,17 @@ namespace opennova {
 inline constexpr std::size_t kGateUdpNovaWorldMax = 16;
 inline constexpr std::size_t kGateUdpNovaWorldChars = 63;
 
+// The gate response's string fields, each a Napi_CopyString into its mission-info buffer: the
+// lobby name, the MET address and label and the two UDP codes 32 bytes (31 characters kept), the
+// startup URL and GLSVSSREQUEST 0x200 bytes (511 kept), every value to its first NUL.
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - LOBBYNAME CAITask_SetName @0x402BD0,
+//  METIPADDRESS CMissionInfo_SetSceneName @0x4CD930, METLABEL CMissionInfo_SetTargetName
+//  @0x4CD950, UDPCODE1 CMissionInfo_SetGateTag @0x4CD990, UDPCODE2 CMissionInfo_SetMetTag
+//  @0x4CD9B0 (each 0x20); STARTUPURL CMissionInfo_SetDescription @0x4CD970, GLSVSSREQUEST
+//  CMissionInfo_SetBriefingOutput @0x4CDA40 (each 0x200); Napi_CopyString @0x617E10]
+inline constexpr std::size_t kGateNameBytes = 0x20;
+inline constexpr std::size_t kGateTextBytes = 0x200;
+
 struct GateResponse {
 	// IPv4 addresses in NETWORK byte order (0xXXYYZZWW where X.Y.Z.W).
 	std::array<uint8_t, 4> post_ip{0, 0, 0, 0};
