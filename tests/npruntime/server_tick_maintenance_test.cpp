@@ -1538,6 +1538,53 @@ bool check_integrity_family_draws_once_per_send() {
 	              "the next boundary's 0x30 to both peers draws twice");
 }
 
+// D-NET-NEW-L3-5: the per-slot 0x0A runs in or out of a session; only the 0x57
+// beside it is session-gated. A closed session's in-match peer still takes its
+// 0x0A and no 0x57; an open one takes both.
+// [orig: Server_TickUpdate - is_in_session @0x51E211..0x51E217 lands on the
+//  per-slot loop @0x51E385, the 0x0A call @0x51E3E4, the 0x57's session test
+//  @0x51E3EC]
+bool check_entity_state_fan_runs_out_of_session() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
+	ctx.world = &world;
+	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &transport,
+			ns::TransportMode::Client, player, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
+	world.match.upsert_player({player, 1, "Peer"});
+	const auto tags = [&]() {
+		std::vector<uint8_t> out;
+		for (const ns::Datagram &d : drain(transport)) out.push_back(d.tag);
+		return out;
+	};
+	const auto has = [](const std::vector<uint8_t> &t, uint8_t tag) {
+		return std::find(t.begin(), t.end(), tag) != t.end();
+	};
+	ctx.is_in_session = 0;
+	inmatch::Server_TickUpdate(ctx);
+	const std::vector<uint8_t> closed = tags();
+	if (!expect(has(closed, s2c::PER_FRAME_UPDATE) && !has(closed, s2c::RTT_ECHO),
+	            "a closed session's peer takes its 0x0A and no 0x57"))
+		return false;
+	ctx.is_in_session = 1;
+	ctx.np_protocol.connection_list.back().reply.rtt_request_countdown = 0;
+	inmatch::Server_TickUpdate(ctx);
+	const std::vector<uint8_t> open = tags();
+	return expect(has(open, s2c::PER_FRAME_UPDATE) && has(open, s2c::RTT_ECHO),
+	              "an open session's peer takes its 0x0A and the 0x57");
+}
+
 // The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
 // every pass, once, whether or not its record changed and whatever the
 // recipient's state; the 0x6E goes, once, to a slot whose body's dead bit or
@@ -3254,6 +3301,7 @@ int main() {
 	ok = check_model_page_cursor_wraps_at_the_list_count() && ok;
 	ok = check_quartet_skips_a_spectator_slot() && ok;
 	ok = check_integrity_family_draws_once_per_send() && ok;
+	ok = check_entity_state_fan_runs_out_of_session() && ok;
 	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;

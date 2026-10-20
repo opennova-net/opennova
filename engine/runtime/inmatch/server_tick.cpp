@@ -433,8 +433,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
 	// tick runs under is_authority [orig: Game_ProcessMainFrame @0x5263f0 gates the call
 	// `if (is_authority && !suspended) Server_TickUpdate(...)` @0x5266b4]. is_in_session (+0x58) is
-	// NOT the gate here — it gates the per-frame replicate/broadcast at step (3) [D-NET-120]; the
-	// C2S drain + sim tick run regardless (the orig recv/send pumps are not is_in_session-gated).
+	// NOT the gate here, nor of the per-slot 0x0A at step (3) (D-NET-NEW-L3-5); the C2S drain +
+	// sim tick run regardless (the orig recv/send pumps are not is_in_session-gated).
 	if (ctx.world == nullptr || ctx.is_authority == 0) return;
 	world::World &world = *ctx.world;
 	// The previous frame's entity update sent inline, so its records lead
@@ -938,14 +938,18 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// maintenance leg above left it, and queued behind their messages (the
 	// capture-witnessed [0x16][0x31][0x79][..][0x0A] datagram order). The
 	// entity update runs only after this at step (4), so every 0x0A precedes
-	// this frame's motor step. SESSION-ONLY [D-NET-120]: the original's
-	// per-frame replicate/broadcast blocks are each gated on is_in_session
-	// (+0x58) inside Server_TickUpdate (@0x51d9ab..0x51e3f3), while the C2S recv
-	// pump above is not — so a World kept alive past match-end (is_in_session
-	// 0, world non-null) keeps ticking but stops fanning ghost 0x0A frames.
+	// this frame's motor step. No session test: the tail's is_in_session test
+	// skips the slot broadcast and the downed resend and lands on the per-slot
+	// loop, whose 0x0A call is not gated (only the 0x57 after it is), so a
+	// state-6 slot takes its 0x0A in or out of a session (D-NET-NEW-L3-5,
+	// correcting D-NET-120's reading). The round end's state 7 stops it.
 	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate (gated by the
-	//  jnz @0x5266B4) sends its 0x0A (the @0x51E3D6..0x51E450 per-slot block),
-	//  Entity_UpdateAllEntities follows @0x52674B]
+	//  jnz @0x5266B4) sends its 0x0A, Entity_UpdateAllEntities follows @0x52674B;
+	//  Server_TickUpdate - is_in_session @0x51E211..0x51E217 (to the loop
+	//  @0x51E385), the call @0x51E3E4, the 0x57's session test @0x51E3EC;
+	//  Server_SendInitialGameStateToPlayer @0x51BBA0 (g_MissionRunning
+	//  @0x51BBA3, state 6 @0x51BBC6, the call @0x51BBDC); Server_SendEntityStateToPlayer
+	//  state 6 @0x517BD2]
 	// Build the world snapshot ONCE, then fan a per-connection-anchored 0x0A to every in-match
 	// connection [orig: NapiNPServer_SendFiltered @0x4C87E0 once, SendToConn per node].
 	// [D-NET-122 RESOLVED at P5] This fan uses the shared is_in_match(conn) predicate (was an inline
@@ -957,7 +961,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// emits nothing and cannot advance per-recipient frame state.
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
 	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
-	if (ctx.is_in_session && !world.match.outcome().ended) {
+	if (!world.match.outcome().ended) {
 		// The snapshot is built only for recipients that take entity records.
 		// Type-1 peers take one only at their open send boundary (see the fan below).
 		bool any_record_recipient = false;
