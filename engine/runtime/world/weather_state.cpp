@@ -75,10 +75,6 @@ int32_t fog_command_target_q16(int32_t fixed, int32_t reference_q16) noexcept {
     return fixed;
 }
 
-uint32_t pack_rgb(uint32_t rgb) noexcept {
-    return rgb & 0x00FFFFFFu;
-}
-
 } // namespace
 
 double WeatherState::tod_hhmm() const {
@@ -127,7 +123,9 @@ void WeatherState::seed(const WeatherSeed &seed) {
     // authority [orig: Environment_InitDefaults @ 0x57c0b0; Terrain_Init
     //  @ 0x60fc9a/0x60fca3].
     fog_reference_q16 = static_cast<int32_t>(env::kFogDistReferenceDefault);
-    lightning_color = pack_rgb(seed.lightning_color);
+    // g_EnvLightningColor: the parser's packed word, its top byte included (the flash's
+    // fourth lane, which no reader takes) [orig: TimeOfDay_ParseProperty @ 0x57c844].
+    lightning_color = seed.lightning_color;
     // WacScript_InitAndLoad zeroes the color-fade seconds at every load.
     color_fade_ticks = 0;
     overcast_for_tod_q16 = 0;

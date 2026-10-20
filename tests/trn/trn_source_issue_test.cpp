@@ -1,10 +1,12 @@
-// The .trn readers' report of the lines they read otherwise than the record holds (formats/trn trn_source_issues):
-// a grid row before the width, short of it or past it, more than 16 rows; a key skipped, written again; a water
-// colour short or past a byte, a murk past 0.99; a block's codes past four or past a byte, an attrib word no arm
-// reads, a colour mode past 0..2, a line no block arm reads; a fifth block swallowing the rest; a cut last line (a
-// block's "end" read "en"); an environment keyword the record does not hold, polytrn_scale and polytrn_depthmap
-// (blocking) [orig: Terrain_ParseConfigCallback @ 0x60F330; Environment_LoadTimeOfDayConfig @ 0x57DB30's .trn pass;
-// File_ParseASCIIFile @ 0x53D8C7..0x53D8F5].
+// The .trn readers' report of the lines they read otherwise than the record holds (formats/trn
+// trn_source_issues): a grid row before the width, short of it or past it, more than 16 rows; a key
+// skipped, written again; a water colour short (one below 0 or past a byte is kept as read: no
+// issue), a murk past 0.99; a block's codes past four or past a byte, an attrib word no arm reads,
+// a colour mode past 0..2, a line no block arm reads; a fifth block swallowing the rest; a cut last
+// line (a block's "end" read "en"); an environment keyword the record does not hold, polytrn_scale
+// and polytrn_depthmap (blocking) [orig: Terrain_ParseConfigCallback @ 0x60F330;
+// Environment_LoadTimeOfDayConfig @ 0x57DB30's .trn pass; File_ParseASCIIFile
+// @ 0x53D8C7..0x53D8F5].
 #include <formats/trn/trn_source_issue.h>
 
 #include <cstdio>
@@ -72,7 +74,7 @@ int test_read_otherwise() {
 int test_values() {
 	const std::vector<TrnSourceIssue> issues = trn_source_issues(kHead +
 	                                                             "water_rgb 10,20\r\n"      // 4: two of three
-	                                                             "water_rgb 300,0,0\r\n"    // 5: past a byte (and again)
+	                                                             "water_rgb 300,-5,0\r\n"   // 5: kept as read (and again)
 	                                                             "foliage\r\n"              // 6
 	                                                             "  graphic a.3di\r\n"      // 7
 	                                                             "  match 300\r\n"          // 8: past a byte
@@ -83,8 +85,10 @@ int test_values() {
 	                                                             "end\r\n");
 	const TrnSourceIssue *issue = find(issues, TrnSourceRule::ShortColour, 4);
 	TEST_EXPECT(issue && issue->read == 2 && issue->field == "water_rgb");
-	issue = find(issues, TrnSourceRule::ColourByte, 5);
-	TEST_EXPECT(issue && issue->read == 300 && issue->kept == 255);
+	// A water colour below 0 or past a byte is kept as read: the parser packs it, it holds no byte
+	// [orig: TimeOfDay_ParseProperty @ 0x57CAF6 into Color_ScaleRGBAndPack @ 0x57F890].
+	for (const TrnSourceIssue &each : issues)
+		TEST_EXPECT(each.line != 5);
 	issue = find(issues, TrnSourceRule::ReadAgain, 4);
 	TEST_EXPECT(issue && issue->again == 5);
 	issue = find(issues, TrnSourceRule::MatchByte, 8);
@@ -95,9 +99,9 @@ int test_values() {
 	TEST_EXPECT(issue && issue->field == "color_upper" && issue->read == 3 && issue->kept == 2);
 	issue = find(issues, TrnSourceRule::EnvironmentKey, 11);
 	TEST_EXPECT(issue && issue->blocks && issue->token == "fog_level");
-	TEST_EXPECT(issues.size() == 7);
-	std::printf("values: a colour short and past a byte, a code past a byte, an attrib word, a colour mode; an "
-	            "environment keyword inside a block\n");
+	TEST_EXPECT(issues.size() == 6);
+	std::printf("values: a colour short (none past a byte), a code past a byte, an attrib word, a "
+				"colour mode; an environment keyword inside a block\n");
 	return 0;
 }
 

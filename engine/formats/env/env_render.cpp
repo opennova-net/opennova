@@ -1767,15 +1767,21 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 		config.fog_level = overrides.fog_level;
 	}
 	if (overrides.has_fog_color) {
-		// The engine writes the packed color into the fog block's parsed
-		// target, overriding every keyframe's fog contribution from then on;
-		// we override the keyframe fog colors at the config level.
-		for (Keyframe &keyframe : config.keyframes) {
-			keyframe.fog = overrides.fog_color;
-		}
+		// The header's dword into the fog block's parsed target, as it is
+		// [orig: Game_StartMission @ 0x52538d..0x525393, dword_26C6534]: the
+		// target the scratch keyframe's fog holds (the load put the scratch
+		// there, Environment_LoadTimeOfDayConfig @ 0x57dd0e). The keyframes
+		// stay: with a table the per-tick compute writes the target from them
+		// [orig: Environment_ComputeTimeOfDayColors @ 0x57e1a0, gated
+		// @ 0x57de8a], so the header's color stands only in a world with none.
+		config.scratch.fog = overrides.fog_color;
 	}
 	if (overrides.has_water_color) {
-		config.water_rgb = overrides.water_color;
+		// The header's three bytes as the water word, no envscale [orig:
+		// Game_LoadTerrainDuringConnect @ 0x520794..0x5207a8 ->
+		// Environment_SetWaterColor @ 0x57d510]; the line stays the file's.
+		config.water_word = rgb01_to_packed(overrides.water_color);
+		config.water_word_set = true;
 	}
 	if (overrides.has_water_murk) {
 		config.water_murk = clamp_water_murk_upper(overrides.water_murk);
@@ -1802,8 +1808,14 @@ BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_o
 		overrides.fog_level = static_cast<float>(fog_override);
 	}
 	if ((attrib_flags & kFogColorOverrideEnable) != 0) {
+		// The dword over the three bytes (and the one after, the smoother's
+		// fourth lane, which no reader takes) as the header's raw read leaves
+		// it: red the third byte, blue the first [orig: Game_StartMission
+		// @ 0x52538d, mov edx, g_BmsFogColorOverride @ 0xa76270;
+		// BMS_LoadAndValidateHeader @ 0x40e250 freads the 616-byte header into
+		// g_BmsHeaderBlock @ 0xa761d0 as it is].
 		overrides.has_fog_color = true;
-		overrides.fog_color = {fog_color[0] / 255.0f, fog_color[1] / 255.0f, fog_color[2] / 255.0f};
+		overrides.fog_color = {fog_color[2] / 255.0f, fog_color[1] / 255.0f, fog_color[0] / 255.0f};
 	}
 	if (water_color[0] != 0 || water_color[1] != 0 || water_color[2] != 0) {
 		overrides.has_water_color = true;

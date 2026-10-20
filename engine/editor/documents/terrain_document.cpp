@@ -16,6 +16,7 @@
 #include <editor/documents/source_issue_findings.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/staged_rows.h>
+#include <formats/env/env.h>
 #include <formats/trn/trn_io.h>
 #include <formats/trn/trn_source_issue.h>
 #include <runtime/renderer/texture_roles.h>
@@ -365,25 +366,33 @@ void terrain_fields(TableKind &kind) {
 	static const char *const kChannelLabels[] = {"Red", "Green", "Blue"};
 	for (int c = 0; c < 3; ++c) {
 		LabelledField field;
-		field.schema = schema(std::string("water_rgb_") + kChannels[c], FieldType::Byte, kChannelLabels[c], "Water",
+		// The line's values as read, below 0 or past a byte alike, which the environment's parser packs
+		// (env::scale_rgb_and_pack, env #11), within what the mission's environment record holds exactly
+		// (env::kLineChannelExact).
+		field.schema = schema(std::string("water_rgb_") + kChannels[c], FieldType::Integer, kChannelLabels[c],
+		                      "Water",
 		                      "The water's colour, read by the environment's reader as it reads the terrain, before the "
 		                      "mission's .env, whose own water colour then wins.");
 		field.schema.token = "water_rgb";
 		field.schema.group = "Water colour";
 		field.schema.color = FieldColor::Channel;
 		field.schema.optional = true;
-		ranged(field.schema, 0, 255);
+		ranged(field.schema, -env::kLineChannelExact, env::kLineChannelExact);
 		field.value.get = [c](const RecordHandle &record, Value &out) {
 			out = static_cast<int64_t>(config_of(record).water_rgb[size_t(c)]);
 			return true;
 		};
 		field.value.set = [c](const RecordHandle &record, const Value &value, std::string &error) {
-			int64_t byte = 0;
-			if (!whole_of(value, byte, error) || !in_range(byte, 0, 255, "A colour's byte: 0 to 255.", error)) return false;
+			int64_t number = 0;
+			if (!whole_of(value, number, error) ||
+			    !in_range(number, -env::kLineChannelExact, env::kLineChannelExact,
+			              "A colour's value: -8355903 to 8355903, what the engine's environment record holds exactly.",
+			              error))
+				return false;
 			// A Set of another value writes the line; one of the value it reads changes nothing.
 			TrnConfig &config = config_of(record);
-			if (config.water_rgb[size_t(c)] == byte) return true;
-			config.water_rgb[size_t(c)] = static_cast<int>(byte);
+			if (config.water_rgb[size_t(c)] == number) return true;
+			config.water_rgb[size_t(c)] = static_cast<int>(number);
 			config.water_rgb_set = true;
 			return true;
 		};
@@ -704,9 +713,6 @@ std::string source_issue_words(const TrnSourceIssue &read) {
 		return "This colour line has " + std::to_string(read.read) +
 		       " of its three values: the game reads the missing ones from where earlier, longer lines left them, and a "
 		       "save writes the three it read.";
-	case TrnSourceRule::ColourByte:
-		return "The game holds a colour's byte: it reads " + std::to_string(read.read) + " as " + std::to_string(read.kept) +
-		       ", and a save writes that.";
 	case TrnSourceRule::MurkClamp: return "The game reads a murk past 0.99 as 0.99: a save writes 0.99.";
 	case TrnSourceRule::MatchPastFour:
 		return "The game keeps up to seven codes and compares the first four: the rest are never used, and a save leaves "

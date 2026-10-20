@@ -398,6 +398,122 @@ int main() {
 		if (!expect(near(scaled.sun.r, 187.0f / 255.0f), "envscale should truncate at the byte level (170*1.1 = 187)")) return 1;
 	}
 
+	// The parser's pack on 32 bits (env #11): each channel times the scale, truncated, held at
+	// 255 from above alone, then ((r << 8 | g) << 8) | b, so a negative channel keeps its low
+	// byte and its sign bits fill every byte above it [orig: Color_ScaleRGBAndPack @ 0x57f890,
+	// the clamps @ 0x57f8a5 / @ 0x57f8bf / @ 0x57f8d7, the pack @ 0x57f8e4..0x57f8ef].
+	{
+		using opennova::env::Config;
+		using opennova::env::interpolate_tod;
+		using opennova::env::load_env;
+		using opennova::env::rgb01_to_line_channel;
+		using opennova::env::save_env;
+		using opennova::env::scale_rgb_and_pack;
+		using opennova::env::TodState;
+		if (!expect(scale_rgb_and_pack(-5, 0x40, 0x20, 1.0f) == 0xFFFB4020u &&
+							scale_rgb_and_pack(0x10, -5, 0x20, 1.0f) == 0xFFFFFB20u &&
+							scale_rgb_and_pack(0x10, 0x20, -5, 1.0f) == 0xFFFFFFFBu &&
+							scale_rgb_and_pack(-300, 0x40, 0x20, 1.0f) == 0xFED44020u,
+					"a negative channel keeps its low byte, its sign bits in every byte above it"))
+			return 1;
+		if (!expect(scale_rgb_and_pack(300, 0x40, 0x20, 1.0f) == 0x00FF4020u &&
+							scale_rgb_and_pack(300, 300, 300, 0.5f) == 0x00969696u,
+					"a channel past a byte is scaled first, held at 255 after"))
+			return 1;
+		if (!expect(scale_rgb_and_pack(10, 20, 30, -1.0f) == 0xFFFFFFE2u &&
+							scale_rgb_and_pack(-5, 0x40, 0x20, 0.5f) == 0xFFFE2010u,
+					"a negative envscale reaches the pack; each product truncates toward zero"))
+			return 1;
+
+		// A keyframe's line keeps its values as written, and the per-tick compute lerps the
+		// packed words' bytes: the smear is in the colors, a save writes the line back as read
+		// [orig: TimeOfDay_ParseProperty @ 0x57c704 (sun) into the slot;
+		// Color_InterpolateRGB888 @ 0x57c2f0 over the packed words].
+		std::istringstream lines("tod_begin 1200\r\n    sun_rgb -5,64,32\r\n"
+								 "    ground_rgb 16,-5,32\r\n    sky_rgb 16,32,-5\r\n"
+								 "    fog_rgb 300,64,32\r\ntod_end\r\n"
+								 "tod_begin 1300\r\n    sun_rgb 5,64,32\r\ntod_end\r\n");
+		Config smeared;
+		std::string err;
+		if (!expect(load_env(lines, smeared, err) && smeared.keyframes.size() == 2 &&
+							rgb01_to_line_channel(smeared.keyframes[0].sun.r) == -5 &&
+							rgb01_to_line_channel(smeared.keyframes[0].fog.r) == 300,
+					"a keyframe's line keeps its values below 0 and past a byte"))
+			return 1;
+		const float unit = 1.0f / 255.0f;
+		const TodState noon = interpolate_tod(smeared.keyframes, 1200.0f, 1.0f);
+		if (!expect(near(noon.sun.r, 251 * unit) && near(noon.sun.g, 64 * unit) &&
+							near(noon.sun.b, 32 * unit) && near(noon.ground.r, 1.0f) &&
+							near(noon.ground.g, 251 * unit) && near(noon.ground.b, 32 * unit) &&
+							near(noon.sky.r, 1.0f) && near(noon.sky.g, 1.0f) &&
+							near(noon.sky.b, 251 * unit) && near(noon.fog.r, 1.0f) &&
+							near(noon.fog.g, 64 * unit),
+					"the colors are the bytes of 0xFFFB4020, 0xFFFFFB20, 0xFFFFFFFB, 0x00FF4020"))
+			return 1;
+		// 251 toward 5 at the half: (0x8000 * (5 - 251) + (251 << 16) + 0x8000) >> 16 = 128.
+		const TodState half = interpolate_tod(smeared.keyframes, 1230.0f, 1.0f);
+		if (!expect(near(half.sun.r, 128 * unit) && near(half.sun.g, 64 * unit),
+					"the lerp runs over the packed bytes"))
+			return 1;
+		std::ostringstream saved;
+		if (!expect(save_env(saved, smeared, err), "save the smeared keyframes"))
+			return 1;
+		const std::string text = saved.str();
+		Config back;
+		std::istringstream again(text);
+		std::ostringstream resaved;
+		if (!expect(text.find("    sun_rgb -5,64,32\r\n") != std::string::npos &&
+							text.find("    ground_rgb 16,-5,32\r\n") != std::string::npos &&
+							text.find("    fog_rgb 300,64,32\r\n") != std::string::npos &&
+							load_env(again, back, err) && save_env(resaved, back, err) &&
+							resaved.str() == text,
+					"a save writes the lines as read, and they read back the same"))
+			return 1;
+
+		// A line outside every block lands on the scratch keyframe packed with the envscale read
+		// before it, kept as the packed word's bytes [orig: TimeOfDay_ParseProperty through
+		// g_EnvTodCurrentSlotPtr; Color_ScaleRGBAndPack @ 0x57f890].
+		std::istringstream naked_lines("sun_rgb -5,64,32\r\nenvscale 0.5\r\n"
+									   "sky_rgb -5,64,32\r\nsky_height 175\r\n");
+		Config naked;
+		if (!expect(load_env(naked_lines, naked, err) && near(naked.scratch.sun.r, 251 * unit) &&
+							near(naked.scratch.sun.g, 64 * unit) &&
+							near(naked.scratch.sky.r, 254 * unit) &&
+							near(naked.scratch.sky.g, 32 * unit) &&
+							near(naked.scratch.sky.b, 16 * unit),
+					"the scratch keeps the bytes of 0xFFFB4020 and 0xFFFE2010"))
+			return 1;
+		std::ostringstream naked_saved;
+		if (!expect(save_env(naked_saved, naked, err), "save the scratch"))
+			return 1;
+		const std::string naked_text = naked_saved.str();
+		Config naked_back;
+		std::istringstream naked_again(naked_text);
+		if (!expect(naked_text.find("sun_rgb 251,64,32\r\n") != std::string::npos &&
+							naked_text.find("sky_rgb 254,32,16\r\n") != std::string::npos &&
+							load_env(naked_again, naked_back, err) &&
+							near(naked_back.scratch.sun.r, 251 * unit) &&
+							near(naked_back.scratch.sky.b, 16 * unit),
+					"the scratch's bytes save ahead of the envscale and read back"))
+			return 1;
+
+		// The terrain's water line: the mission's water word is the pack of the line as read,
+		// its top byte included (the word the world-sync check compares whole) [orig:
+		// TimeOfDay_ParseProperty @ 0x57cb3c into g_EnvWaterColor;
+		// Server_HandleClientCRCValidation @ 0x519448].
+		const std::string trn_text = "water_rgb -5,64,32\r\n";
+		const std::string env_text = "sky_height 175\r\n";
+		opennova::env::MissionEnv mission;
+		opennova::env::MissionEnvTexts texts;
+		texts.terrain = &trn_text;
+		texts.environment = &env_text;
+		if (!expect(opennova::env::load_mission_env(texts, mission) &&
+							scale_rgb_and_pack(mission.config.water_rgb, mission.config.envscale) ==
+									0xFFFB4020u,
+					"the .trn's negative water channel packs as retail's g_EnvWaterColor"))
+			return 1;
+	}
+
 	// The engine caps TOD keyframes at 16. A 17th tod_begin takes no slot, stores no time and
 	// leaves the slot pointer where it is: after the 16th block's tod_end that is the scratch
 	// keyframe, so the 17th block's colors land there, packed; with the 16th block still open
