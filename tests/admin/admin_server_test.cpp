@@ -553,7 +553,7 @@ void test_mission() {
 	expect(query.find(std::string("MAP QUEUE: \r\n") + line0 + line1) != std::string::npos,
 	       "QUERY's queue prints empty strings where LIST prints () and <>");
 	expect_eq(c.one("MISSION CYCLE"), "OK - Server is cycling...", "CYCLE in the Game Loop");
-	expect(host.world.match.outcome().ended && host.ctx.round_end_linger_override_ticks == 620,
+	expect(host.world.match.outcome().ended && host.ctx.round_end_linger_ticks == 620,
 	       "the round ends with the 620 linger");
 	expect_eq(c.one("MISSION CLEAR"), "OK - Mission list reset.", "CLEAR");
 	expect(!host.rotation.state.exists, "CLEAR in the Game Loop frees the list");

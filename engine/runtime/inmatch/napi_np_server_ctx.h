@@ -564,13 +564,6 @@ struct NapiNPServerCtx {
 	};
 	std::function<void(const PlayerEnterRequest &)> on_player_enter_request;
 
-	// A ServerCommand Cycle / EndMission / GameOver ends the round and then
-	// overrides the linger Server_ProcessRoundEnd stored (2790) with 620 ticks;
-	// nonzero here is consumed by the announcing pass, then cleared.
-	// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand — Server_ProcessRoundEnd
-	//  @0x4D31C0, g_EndRoundLingerTimer = 0x26C @0x4D31CA]
-	uint32_t round_end_linger_override_ticks = 0;
-
 	// The host EntityLimit table behind the vehicle-spawn availability reply
 	// (C2S 0x42 -> S2C 0x70) and the C2S 0x40 spawn gate: one row per spawnable
 	// items.def id. Retail's 73-dword rows carry the id (row[0]), the type cap

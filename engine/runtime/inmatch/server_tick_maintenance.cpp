@@ -208,9 +208,10 @@ void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 // [orig: Server_CheckPlayerViolations @0x51ABD0 — in-session @0x51abd9, slot
 //  gates @0x51abf6/@0x51abff/@0x51ac0d, game types @0x51ac2c, counter
 //  @0x51ac5a/@0x51ac63, limit @0x51ac75, drop/sync/health @0x51ac84/@0x51ac8a/
-//  @0x51ac94, slot +5/+96483 @0x51aca2, TK gate @0x51acc2, suicide gate
-//  @0x51ad00, punts @0x51ad17/@0x51acd9; the sole caller is the periodic-second
-//  block of Server_TickUpdate @0x51df5f]
+//  @0x51ac94, slot +5 @0x51ac9d / +96483 @0x51aca2, TK gate @0x51acc2, suicide
+//  compare @0x51aced/@0x51acf0, punts @0x51ad17/@0x51acd9; the sole caller is
+//  the periodic-second block of Server_TickUpdate @0x51df5f, behind the win check
+//  @0x51df5a, whose round end puts every slot in state 7 first]
 void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_in_session) return;
 	const uint32_t gt = world.match.rules().game_type;

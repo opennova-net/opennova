@@ -46,6 +46,20 @@ std::vector<uint8_t> Server_RerollPlayerTickSeed(
 std::vector<uint8_t> Server_DisarmPlayerTickSeed(
 		NapiNPConnection &connection, uint32_t frame_clock);
 
+// The round end, synchronous at its latch: Match's outcome and frozen board,
+// then (in an MP session) every in-match slot's 0x61 / 0x1D, game state 11 and
+// slot state 7, the round tallies and the linger, before the caller's next
+// statement, so a later sweep in the same second walks nobody. A no-op once
+// the round is over. The periodic win check and the admin round ends call it;
+// a WAC / BMS action latches inside the world's script pass and Server_TickUpdate
+// announces it behind that pass's routed records.
+// [orig: Server_ProcessRoundEnd @0x5164F0 - the round-over gate @0x5164F6, slot
+//  state 7 @0x51685E; called inline by Server_CheckWinConditions @0x51AD77,
+//  CAdminServer_HandleGotoCommand @0x404A95, CAdminServer_HandleMissionCommand
+//  @0x40660B, CNapiGameSession_HandleServerCommand @0x4D31C0]
+void Server_ProcessRoundEnd(NapiNPServerCtx &ctx, world::World &world,
+		int32_t winning_team);
+
 // The disarmed grace reads the server frame clock against the disarm's stamp.
 // [orig: PlayerSlot_IsActive @0x4FC760 (`cmp g_ServerFrameClock` @0x4FC78E)]
 bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,

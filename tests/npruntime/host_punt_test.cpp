@@ -11,6 +11,7 @@
 
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/server_initial_state.h>
+#include <base/gameprofile/game_type.h> // kDeathmatch (the round-ending second)
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/joiner_connection.h>
@@ -1520,9 +1521,9 @@ public:
 // second: the suicide arm writes "#S>9" to _PUNT.TXT each time while the wire keeps
 // the first description; a slot in state 7 (round over) is walked never.
 // [orig: Server_CheckPlayerViolations @0x51abd0 — the slot gates
-//  @0x51abf6/@0x51abff/@0x51ac0d, slot +5 gate @0x51aca2, TK gate @0x51acc2,
-//  suicide gate @0x51ad00, "#S>9" @0x51ad0d, punts @0x51ad17/@0x51acd9; caller
-//  Server_TickUpdate @0x51df5f]
+//  @0x51abf6/@0x51abff/@0x51ac0d, slot +5 gate @0x51ac9d (the bot byte @0x51aca2),
+//  TK gate @0x51acc2, suicide compare @0x51aced/@0x51acf0, "#S>9" @0x51ad0d,
+//  punts @0x51ad17/@0x51acd9; caller Server_TickUpdate @0x51df5f]
 bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_kills,
 		int32_t suicides, bool host_own, bool expect_punt, const char *label,
 		bool round_over = false) {
@@ -1651,6 +1652,105 @@ bool check_violation_sweep_type6_arms() {
 	ok = check_violation_sweep_emits_type6(3, 4, 10, false, false,
 			"a round-over slot (state 7) is not walked", /*round_over=*/true) && ok;
 	return ok;
+}
+
+// The round-ending second (D-NET-NEW-L1-16): the win check runs the round end
+// inside the call, so every state-6 slot is in state 7 with its 0x61 / 0x1D queued
+// before the violation sweep and the flag refresh that follow in the same second.
+// A slot whose tenth suicide stands when its win check ends the round is never
+// punted and writes no "#S>9", and the refresh's 0x2F leaves behind the 0x61 / 0x1D.
+// [orig: Server_TickUpdate - Server_CheckWinConditions @0x51DF5A,
+//  Server_CheckPlayerViolations @0x51DF5F, Server_RefreshNextFlagState @0x51DF64;
+//  Server_CheckWinConditions -> Server_ProcessRoundEnd @0x51AD77 .. @0x51B4E6;
+//  Server_ProcessRoundEnd's slot state 7 @0x51685E; the sweep's state-6 gate @0x51AC0D]
+bool check_round_ending_second_walks_nobody() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.network_quality_broadcast_countdown = 100;
+	ctx.config.max_friendly_kills = 3;
+	MemoryFiles files;
+	inmatch::PuntLog punt_log(files);
+	punt_log.set_time_text([] { return std::string("T"); });
+	punt_log.arm_punt_log();
+	ctx.logs.punt = &punt_log;
+
+	opennova::world::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	// A Deathmatch with a one-kill limit: the slot's one enemy kill ends the round
+	// at the first periodic second's win check (winner 0).
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kDeathmatch;
+	rules.score_limit = 1;
+	world.match.configure(rules);
+	const opennova::world::EntityHandle player =
+			opennova::world::spawn_remote_player(world, opennova::world::PlayerSpawn{});
+	if (!expect(player.valid(), "round-end fixture spawned its player")) return false;
+	world.match.upsert_player({player, 0, "Violator"});
+	opennova::world::MatchPlayer *stats = world.match.player(player);
+	if (!expect(stats != nullptr, "round-end fixture registered its roster row")) return false;
+	stats->stats[opennova::world::MatchStats::kEnemyKills] = 1;
+	stats->stats[opennova::world::MatchStats::kSuicides] = 10;
+	// One flag in pool 1, so the second's round-robin refresh sends its 0x2F.
+	opennova::world::Entity flag;
+	flag.kind = opennova::world::EntityKind::Item;
+	flag.item_id = 4091;
+	flag.has_item_def = true;
+	flag.alive = true;
+	if (!expect(world.registry.spawn(1, flag).valid(), "round-end fixture spawned its flag"))
+		return false;
+	ctx.world = &world;
+
+	replication::UdpSessionTransport transport(
+			replication::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection conn;
+	conn.peer = {0x0100007Fu, 34067};
+	conn.type = inmatch::NapiNPConnection::kTypeServerSide;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.slot_state = inmatch::PlayerSlotState::Joined;
+	conn.burst.spawned = true;
+	conn.s2c_send_boundary_open = false;
+	conn.link.mode = replication::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = player;
+	conn.reply.player_slot = 3;
+	conn.reply.player_name = "Violator";
+	conn.reply.minimap_initial_scan_pending = false;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
+
+	// The zero-armed periodic second fires on the first host tick.
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(world.match.periodic_second() && world.match.outcome().ended &&
+				ctx.round_end_announced &&
+				live.slot_state == inmatch::PlayerSlotState::RoundOver,
+			"the first periodic second's win check ends the round inline"))
+		return false;
+	std::vector<replication::Datagram> out;
+	replication::Datagram datagram;
+	while (transport.pop_outbound(datagram)) out.push_back(datagram);
+	bool described = false;
+	size_t seed_at = out.size();
+	size_t header_at = out.size();
+	size_t refresh_at = out.size();
+	for (size_t i = 0; i < out.size(); ++i) {
+		described = described || out[i].tag == hightag::DESCRIPTION_PACKET;
+		if (out[i].tag == s2c::END_ROUND_HEADER && header_at == out.size()) header_at = i;
+		if (out[i].tag == s2c::OBJECTIVE_ENTITY_STATE && refresh_at == out.size()) refresh_at = i;
+	}
+	if (header_at > 0 && header_at < out.size() && out[header_at - 1].tag == s2c::TICK_SEED &&
+			out[header_at - 1].body == std::vector<uint8_t>(4, 0))
+		seed_at = header_at - 1;
+	if (!expect(!live.host_disconnect_sent && !described,
+			"the round-ending second's sweep walks nobody: no t6"))
+		return false;
+	if (!expect(files.files["_PUNT.TXT"] == "T : START : \r\n",
+			"the round-ending second writes no #S>9"))
+		return false;
+	return expect(seed_at < header_at && header_at < refresh_at && refresh_at < out.size(),
+			"the round end's 0x61 / 0x1D leave ahead of the flag refresh's 0x2F");
 }
 
 bool reply_body(const inmatch::JoinerConnection::PollResult &result, uint8_t tag,
@@ -2055,6 +2155,7 @@ int main() {
 	ok = check_join_deploy_idle_punt_uses_state6_elapsed_time() && ok;
 	ok = check_dead_player_punt_uses_a_consecutive_state6_counter() && ok;
 	ok = check_violation_sweep_type6_arms() && ok;
+	ok = check_round_ending_second_walks_nobody() && ok;
 	ok = check_crc_challenges_are_not_answered() && ok;
 	ok = check_join_rejection_retains_the_raw_reject_record() && ok;
 	ok = check_pv2_mismatch_reports_an_incompatible_version() && ok;

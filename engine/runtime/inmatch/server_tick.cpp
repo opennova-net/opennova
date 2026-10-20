@@ -237,15 +237,18 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 // does not allow SP-respawn (attrib 0x40) -> Server_ProcessRoundEnd(2) — every other
 // SP outcome comes from the WAC win/lose handlers or the BMS Blue/Red/GreenWin
 // actions [orig: @0x51ad6f]. Multiplayer delegates the witnessed uniform-zone
-// check and the complete game-type switch to world::Match.
+// check and the complete game-type switch to world::Match. Each outcome runs the
+// round end inside the check (Server_ProcessRoundEnd below), so every state-6 slot
+// is in state 7 and has its 0x61 / 0x1D before the violation sweep and the flag
+// refresh that follow in the same second (D-NET-NEW-L1-16)
+// [orig: the Server_ProcessRoundEnd calls @0x51AD77 .. @0x51B4E6].
 void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
-	(void)ctx;
 	if (world.match.outcome().ended) return;
 	if (world.rules.mp_session) {
 		if (const std::optional<int32_t> winner =
 					world.match.winner_if_finished(world);
 				winner.has_value())
-			world.process_round_end(*winner);
+			Server_ProcessRoundEnd(ctx, world, *winner);
 		return;
 	}
 	// mp_session (not ctx.is_in_session — always 1 on our listen server) is the
@@ -256,7 +259,7 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	// [orig: Server_CheckWinConditions `test byte ptr [eax+24h], 2` @0x51AD5E].
 	const bool dead = (local->flags & 2u) != 0;
 	if (dead && (world.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) == 0)
-		world.process_round_end(2);
+		Server_ProcessRoundEnd(ctx, world, 2); // [orig: @0x51AD77]
 }
 
 bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
@@ -320,12 +323,6 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	}
 	ctx.round_end_announced = true;
 	ctx.round_end_linger_ticks = round_end_linger_ticks_for(ctx.config.title);
-	// A ServerCommand Cycle / EndMission / GameOver overrides the stored
-	// linger right after the round end [orig: CNapiGameSession_HandleServerCommand @0x4D31CA].
-	if (ctx.round_end_linger_override_ticks != 0) {
-		ctx.round_end_linger_ticks = ctx.round_end_linger_override_ticks;
-		ctx.round_end_linger_override_ticks = 0;
-	}
 	return true;
 }
 
@@ -375,6 +372,12 @@ void clear_priority_target_marks(world::World &world) {
 
 } // namespace
 
+
+void Server_ProcessRoundEnd(NapiNPServerCtx &ctx, world::World &world,
+		int32_t winning_team) {
+	world.process_round_end(winning_team);
+	announce_round_end(ctx, world);
+}
 std::vector<uint8_t> Server_RerollPlayerTickSeed(
 		NapiNPConnection &connection, uint32_t frame_clock) {
 	connection.seed_armed_clock = frame_clock; // [orig: @0x5101A9 / @0x5101B3]
@@ -624,6 +627,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	route_script_remote_commands(ctx, world);
 	route_round_deaths(ctx, world);
 	route_match_gameplay_events(ctx, world);
+	// A WAC Win / Lose or a BMS Blue / Red / GreenWin action runs the round end
+	// inside the script pass, so its 0x61 / 0x1D follow the records the pass
+	// raised and its slots are in state 7 before the periodic block's sweep and
+	// flag refresh (D-NET-NEW-L1-16). Announced here, behind the pass's routed
+	// records; a round already announced (the admin's, inline) is a no-op.
+	// [orig: WacAction_Win @0x4ED4A5, WacAction_Lose @0x4ED44A, EventAction_Dispatch
+	//  @0x45447B / @0x454495 / @0x4544AF -> Server_ProcessRoundEnd @0x5164F0, from
+	//  WacScript_AdvanceTick @0x51D8BF and EventTrigger_UpdateQuarterRoundRobin
+	//  @0x51D8F4]
+	announce_round_end(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
 	// win-condition pass. WAC/BMS can end the round during the world tick above,
 	// so those script-driven outcomes consume this tick; automatic MP outcomes found
@@ -694,7 +707,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		refresh_next_flag_state(ctx, world);
 	}
 	tick_respawn_holds(ctx, world);
-	announce_round_end(ctx, world);
 
 	// Spawn-wave release precedes capture-zone mutation on the shared 1 Hz
 	// cadence. Each release runs the same deployment transaction as an

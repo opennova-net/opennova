@@ -6,6 +6,7 @@
 #include <runtime/inmatch/server_ban_lists.h>
 #include <runtime/inmatch/server_console.h> // Server_SendConsoleChat, the CHAT ring
 #include <runtime/inmatch/server_initial_state.h> // build_server_config_flags
+#include <runtime/inmatch/server_tick.h> // Server_ProcessRoundEnd
 #include <runtime/world/world.h>
 
 #include <base/gameprofile/game_type.h>
@@ -459,13 +460,16 @@ std::string AdminConsole::rotation_lines(bool query_fillers) const {
 	return out;
 }
 
-// The round end with no winner and the 620-tick linger in the Game Loop, else the refusal.
-// [orig: CAdminServer_HandleMissionCommand @0x4065E7..0x40662A; CAdminServer_HandleGotoCommand
-//  @0x404A74..0x404AAF -> Server_ProcessRoundEnd(0) @0x5164F0]
+// The round end with no winner, run inline (its 0x61 / 0x1D go out here), then the
+// 620-tick linger stored over the round end's, unconditionally, in the Game Loop, else
+// the refusal (D-NET-NEW-L1-16).
+// [orig: CAdminServer_HandleMissionCommand @0x4065E7..0x40662A (Server_ProcessRoundEnd(0)
+//  @0x40660B, the store @0x40661F); CAdminServer_HandleGotoCommand @0x404A74..0x404AAF
+//  (@0x404A95, the store @0x404AA5)]
 void AdminConsole::cycle_tail(std::vector<std::string> &replies) {
 	if (in_game() && ctx_.world != nullptr) {
-		ctx_.world->process_round_end(0);
-		ctx_.round_end_linger_override_ticks = kCycleLingerTicks;
+		Server_ProcessRoundEnd(ctx_, *ctx_.world, 0);
+		ctx_.round_end_linger_ticks = kCycleLingerTicks;
 		replies.emplace_back(kCycling);
 	} else {
 		replies.emplace_back(kMustBeInGame);

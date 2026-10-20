@@ -1172,10 +1172,20 @@ bool check_server_commands() {
 					(p2->flags & w::kEntityFlagDead) == 0u && p2_death,
 			"KillPlayerByIndex kills slot 2"))
 		return false;
-	// EndMission ends the round with the named winner and shortens the linger.
+	// EndMission ends the round with the named winner, inline: the slot is in
+	// state 7 and its 0x61 / 0x1D are queued before the command returns, then
+	// the 620-tick linger replaces the round end's 2790 (D-NET-NEW-L1-16)
+	// [orig: Server_ProcessRoundEnd @0x4D31C0, g_EndRoundLingerTimer = 0x26C @0x4D31CA].
+	(void)drain(f.transports[0]);
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "EndMission", "", {"Red"});
-	if (!expect(out.handled && f.world.match.outcome().ended && f.ctx.round_end_linger_override_ticks == 620,
-			"EndMission Red ends the round with the 620-tick linger pending"))
+	std::vector<uint8_t> end_tags;
+	for (const ns::Datagram &d : drain(f.transports[0]))
+		if (d.tag == s2c::TICK_SEED || d.tag == s2c::END_ROUND_HEADER) end_tags.push_back(d.tag);
+	if (!expect(out.handled && f.world.match.outcome().ended && f.ctx.round_end_announced &&
+					f.conn(0).slot_state == inmatch::PlayerSlotState::RoundOver &&
+					end_tags == std::vector<uint8_t>{s2c::TICK_SEED, s2c::END_ROUND_HEADER} &&
+					f.ctx.round_end_linger_ticks == 620,
+			"EndMission Red ends the round inline with the 620-tick linger"))
 		return false;
 	// PuntPlayer on a remote punts it; on the host's own slot it stops hosting.
 	HostFixture g(2, 1);

@@ -295,12 +295,14 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		return outcome;
 	}
 	if (strutil::iequals(verb, "Cycle") || strutil::iequals(verb, "EndMission") || strutil::iequals(verb, "GameOver")) {
-		// The round end with the parsed winner, then the 620-tick linger in
-		// place of the 2790 Server_ProcessRoundEnd stored [orig: @0x4D31BF..0x4D31CA].
+		// The round end with the parsed winner, run inline (its 0x61 / 0x1D go
+		// out here), then the 620-tick linger stored over the 2790 it stored,
+		// unconditionally (D-NET-NEW-L1-16) [orig: Server_ProcessRoundEnd @0x4D31C0,
+		// g_EndRoundLingerTimer = 0x26C @0x4D31CA].
 		if (world == nullptr) return outcome;
 		outcome.handled = true;
-		world->process_round_end(parse_winner_team(args));
-		ctx.round_end_linger_override_ticks = 0x26C;
+		Server_ProcessRoundEnd(ctx, *world, parse_winner_team(args));
+		ctx.round_end_linger_ticks = 0x26C;
 		return outcome;
 	}
 	if (strutil::iequals(verb, "Earthquake")) {
