@@ -5036,6 +5036,11 @@ add_test(NAME npruntime_player_death_edge COMMAND npruntime_player_death_edge_te
 add_executable(npruntime_player_placement_test npruntime/player_placement_test.cpp)
 target_link_libraries(npruntime_player_placement_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_player_placement COMMAND npruntime_player_placement_test)
+# The mission start's Player_InitPlayer body leg: a held playing host's own body
+# counts as a human for the first frame's entity update (L7-s1 FOUND-1).
+add_executable(host_mission_start_test mission/host_mission_start_test.cpp)
+target_link_libraries(host_mission_start_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME host_mission_start COMMAND host_mission_start_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

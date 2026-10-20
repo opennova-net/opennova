@@ -332,6 +332,21 @@ void HostRole::init_round_after_premission() {
 	kernel.local.reset_local_player_input_to_player_facing();
 }
 
+// See host_role.h. The add hid a held host's own body, as retail's spawn hides
+// every body it creates; Player_InitPlayer, which every mission start calls
+// after the round init, clears the local player's hidden bit, so
+// Server_BuildEntitySlotLists counts it until the own join's 0x0A writer sets
+// the bit again for the undeployed slot.
+// [orig: Game_StartMission @0x525BAF / @0x525BBC; Player_InitPlayer
+//  @0x4E19C2; Entity_SpawnFromAnimSlotProperty @0x43C433; Server_BuildEntitySlotLists
+//  @0x4F9815 / @0x4F9820; NetPacket_WritePlayerState @0x4FF7B8]
+void HostRole::init_local_player_at_mission_start() {
+	if (!state.host_owner.serve_and_play) return;
+	mission::MissionKernel &kernel = *kernel_;
+	if (world::Entity *player = kernel.world.registry.get(kernel.world.cached.local_player))
+		player->flags &= ~world::kEntityFlagCarried;
+}
+
 void HostRole::pump_load() {
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();

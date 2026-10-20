@@ -109,6 +109,13 @@ public:
 	// (map_change.h) [orig: Game_StartMission @0x524360, the
 	// Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	void init_round_after_premission();
+	// Player_InitPlayer's body leg at every mission start, after the round
+	// init: the playing host's own body leaves hidden, so a held own player
+	// counts as a human (the empty-world hold lets the entity update and the
+	// script run) until its own join's 0x0A writer hides it again
+	// [orig: Game_StartMission -- the Player_InitPlayer call @0x525BBC;
+	//  Player_InitPlayer @0x4E15F0 -- `Flags &= ~1` @0x4E19C2].
+	void init_local_player_at_mission_start();
 	// The mission load's end on the authority: the S2C 0x7B to every slot,
 	// and after a map change's bring-up a pump. Phase B of the host boot runs
 	// it [orig: Game_StartMission @0x52625F..0x526267].
