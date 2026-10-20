@@ -18,18 +18,16 @@ class World;
 // [orig: UseGun Entity_AttachToBoneAndUpdateTransform @0x5463d0; ordinary
 // seats Entity_GetBoneTransformAndOrientation @0x4b0c50]
 struct MountedPose {
-    Vec3 position;
+    // The seat point's 16.16 words (D-NET-507): the bone point through the
+    // carrier's matrix onto its Position words.
+    // [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 - outPos = Position
+    //  @0x4b0cf1, the bone point through the bone matrix @0x4b0d29..0x4b0d42]
+    EntityPosition position;
     // Live orientation is BAM32, never the whole-degree mission mirrors.
     // [orig: Entity_GetBoneTransformAndOrientation @0x4b0d81/@0x4b0db1/@0x4b0dbb]
     int32_t heading = 0;
     int32_t pitch = 0;
     int32_t roll = 0;
-    // An addeweap frame the original's fixed / float pipeline composed: its
-    // 16.16 position words, which the occupant takes as they are.
-    // [orig: Math_FixedPointMatrixToEulerAngles @0x613310 (the translation copy
-    //  @0x613481..0x61348C), from Entity_UpdateTransformAndTurret @0x4410DD]
-    bool exact_words = false;
-    int32_t position_q16[3] = {0, 0, 0};
 };
 
 // Seat-type pose/channel predicates (moved beside the mount surface, S7a):
@@ -113,7 +111,7 @@ void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle, bool is_lo
 // shell agree on one frame. Retail has exactly one entity orientation matrix
 // serving both. [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 over the
 // entity matrix built by Math_BuildFixedPointMatrixFromEulerAngles @0x613f40]
-Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local);
+EntityPosition entity_local_point_world(const Entity &vehicle, const Vec3 &local);
 
 enum class SeatSelectionMode : uint8_t {
     Any = 0,

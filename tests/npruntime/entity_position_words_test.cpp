@@ -42,6 +42,8 @@
 #include <runtime/world/match.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/round_sim.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/vehicle_system.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
@@ -668,6 +670,42 @@ int organic_record_streams_the_mount() {
 	return 0;
 }
 
+// The seat pose is the seat point rotated through the carrier's frame onto the
+// carrier's Position words, a word add, and the occupant takes those words.
+// [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 - outPos = Position @0x4b0cf1,
+//  Math_FixedPointTransformPoint22 @0x4b0d42]
+int seat_pose_is_words() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(0, 4);
+	world->registry.configure_pool(1, 4);
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 700;
+	vehicle.yaw = 30;
+	vehicle.position.set_q16({kFarZ, kAshJoinerX, kTdhHostY});
+	const w::EntityHandle carrier = world->registry.spawn(1, vehicle);
+	w::Entity rider;
+	rider.kind = w::EntityKind::Organic;
+	const w::EntityHandle occupant = world->registry.spawn(0, rider);
+	w::Seat seat;
+	seat.type = w::SeatType::Passenger;
+	seat.seat_local = {1.25f, -0.5f, 0.75f};
+	world->vehicles.pose_mounted_occupant(*world->registry.get(occupant), *world->registry.get(carrier), seat);
+	// The oracle: the carrier frame's rotation of the raw seat point, added to the words.
+	const int32_t origin[3] = {0, 0, 0};
+	const w::CollisionMatrix m = w::collision_matrix_from_euler(w::spawn_angle_bam(90 - 30), 0, 0, origin);
+	const int32_t local[3] = {static_cast<int32_t>(-0.5f * 65536.0f), static_cast<int32_t>(-1.25f * 65536.0f),
+	                          static_cast<int32_t>(0.75f * 65536.0f)};
+	int32_t rotated[3];
+	m.rotate_point(local, rotated);
+	if (!expect(same_words(world->registry.get(occupant)->position.q16(), kFarZ + rotated[0],
+	                       kAshJoinerX + rotated[1], kTdhHostY + rotated[2]),
+	            "the occupant takes the carrier's words plus the rotated seat point"))
+		return 1;
+	std::printf("PASS seat_pose_is_words\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -684,7 +722,8 @@ int main() {
 	const int flag = flag_state_streams_the_words();
 	const int round = round_flies_on_the_words();
 	const int mount = organic_record_streams_the_mount();
-	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round, mount})
+	const int seat = seat_pose_is_words();
+	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round, mount, seat})
 		if (r != 0) return r;
 	return 0;
 }

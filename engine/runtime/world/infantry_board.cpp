@@ -32,13 +32,14 @@ int32_t board_dist(const int32_t pos[3], const int32_t tgt[3]) {
 // [orig: Entity_GetBoneWorldPosition_0 @0x434DF0]
 void seat_world_position(World &world, const Entity &carrier, const Seat &seat, int32_t out[3]) {
 	MountedPose pose;
-	const Vec3 p = world.pose_provider &&
+	// The seat point's words (D-NET-507).
+	const EntityPosition p = world.pose_provider &&
 					world.pose_provider->resolve_mounted_pose(world, carrier, seat, pose)
 			? pose.position
 			: entity_local_point_world(carrier, seat.seat_local);
-	out[0] = io::float_to_fp16_16(p.x);
-	out[1] = io::float_to_fp16_16(p.y);
-	out[2] = io::float_to_fp16_16(p.z);
+	out[0] = p.x.q16;
+	out[1] = p.y.q16;
+	out[2] = p.z.q16;
 }
 bool named_point(World &world, const Entity &carrier, const char *name, int32_t out[6]) {
 	if (world.pose_provider &&

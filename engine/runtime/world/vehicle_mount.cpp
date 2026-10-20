@@ -271,7 +271,7 @@ void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle, bool is_lo
     }
 }
 
-Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
+EntityPosition entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
     // Seat points use the carrier's live BAM frame, as collision/render do;
     // the mission-degree mirrors discard sub-degree flight motion. An unmoved
     // carrier's frame is its placement angles in the spawn form.
@@ -296,10 +296,12 @@ Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
                            static_cast<int32_t>(L.z * 65536.0f)};
     int32_t wf[3];
     m.rotate_point(lf, wf);
-    Vec3 p;
-    p.x = vehicle.position.x + static_cast<float>(wf[0]) / 65536.0f;
-    p.y = vehicle.position.y + static_cast<float>(wf[1]) / 65536.0f;
-    p.z = vehicle.position.z + static_cast<float>(wf[2]) / 65536.0f;
+    // The rotated point onto the carrier's words, a word add (D-NET-507)
+    // [orig: Math_FixedPointTransformPoint22 @0x4b0d42's translation].
+    EntityPosition p;
+    p.set_q16({io::bam_add(vehicle.position.x.q16, wf[0]),
+               io::bam_add(vehicle.position.y.q16, wf[1]),
+               io::bam_add(vehicle.position.z.q16, wf[2])});
     return p;
 }
 
@@ -353,19 +355,13 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
         // An addeweap child with no anchor copies its carrier's root pose:
         // the position words as they are.
         // [orig: Entity_UpdateTransformAndTurret @0x441153..0x4411BC]
-        if (seat.attachment_frame && seat.bone_index == 0) {
-            live.exact_words = true;
-            live.position_q16[0] = vehicle.position.x.q16;
-            live.position_q16[1] = vehicle.position.y.q16;
-            live.position_q16[2] = vehicle.position.z.q16;
-        }
+        if (seat.attachment_frame && seat.bone_index == 0)
+            live.position = vehicle.position;
     }
-    // A composed addeweap frame's position words are the child's own.
+    // The seat point's words are the occupant's (D-NET-507); a composed addeweap
+    // frame's are the child's own.
     // [orig: Math_FixedPointMatrixToEulerAngles @0x613481..0x61348C]
-    if (live.exact_words)
-        occ.position.set_q16({live.position_q16[0], live.position_q16[1], live.position_q16[2]});
-    else
-        occ.position = live.position;
+    occ.position = live.position;
     occ.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(live.heading)));
     occ.pitch = static_cast<int16_t>(std::lround(live.pitch * kDegreesPerBam));
     occ.roll = static_cast<int16_t>(std::lround(live.roll * kDegreesPerBam));

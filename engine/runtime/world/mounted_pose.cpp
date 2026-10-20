@@ -298,13 +298,7 @@ bool resolve_model_mounted_pose_from_parts(
 			return false;
 		int32_t euler[3];
 		collision_matrix_to_euler(child, euler);
-		out.exact_words = true;
-		out.position_q16[0] = child.m[3];
-		out.position_q16[1] = child.m[7];
-		out.position_q16[2] = child.m[11];
-		out.position = world::Vec3{static_cast<float>(child.m[3] / 65536.0),
-				static_cast<float>(child.m[7] / 65536.0),
-				static_cast<float>(child.m[11] / 65536.0)};
+		out.position.set_q16({child.m[3], child.m[7], child.m[11]});
 		out.heading = euler[0];
 		out.pitch = euler[1];
 		out.roll = euler[2];
@@ -344,9 +338,10 @@ bool resolve_model_mounted_pose_from_parts(
 					-static_cast<double>(carrier.position.y)}};
 	const V3 live_world_position = affine_xform(carrier_world, live_model_position);
 	if (!v3_finite(live_world_position)) return false;
-	out.position = world::Vec3{static_cast<float>(live_world_position.x),
-			static_cast<float>(-live_world_position.z),
-			static_cast<float>(live_world_position.y)};
+	// The point's words straight from the double (no float view, D-NET-507).
+	out.position.set_q16({static_cast<int32_t>(live_world_position.x * 65536.0),
+			static_cast<int32_t>(-live_world_position.z * 65536.0),
+			static_cast<int32_t>(live_world_position.y * 65536.0)});
 
 	M3 live_basis;
 	if (seat.attachment_frame &&

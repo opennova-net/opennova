@@ -141,8 +141,12 @@ void look_at(World &w, EntityHandle player_h, const Vec3 &target) {
 }
 
 MountedPose pose_degrees(Vec3 position, double yaw, double pitch, double roll) {
-    return {position, bam_heading_from_mission_yaw_deg(yaw),
-            bam_from_degrees_wrapped(pitch), bam_from_degrees_wrapped(roll)};
+    MountedPose pose;
+    pose.position = position;
+    pose.heading = bam_heading_from_mission_yaw_deg(yaw);
+    pose.pitch = bam_from_degrees_wrapped(pitch);
+    pose.roll = bam_from_degrees_wrapped(roll);
+    return pose;
 }
 
 struct FakeMountedPoseProvider final : IPoseProvider {
