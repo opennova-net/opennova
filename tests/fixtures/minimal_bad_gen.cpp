@@ -71,7 +71,7 @@
 //   fixtures/anim/rig19_short.bad  two frames, two keys a bone (one fewer than
 //                                  the frame count's fence post): DT1RST.BAD's
 //                                  and stgr_RST.bad's channels
-//   fixtures/anim/rig19_sparse.bad eleven frames, every bone keyed sparsely on a
+//   fixtures/anim/rig19_sprs.bad   eleven frames, every bone keyed sparsely on a
 //                                  duration table of its own (1..4 frames a key,
 //                                  summing to the 12 fence posts): DVFLEE1E.BAD,
 //                                  the one sparse shipped clip
@@ -410,7 +410,7 @@ BadBuildClip make_short() {
 
 BadBuildClip make_sparse() {
 	BadBuildClip clip;
-	clip.name = "rig19_sparse";
+	clip.name = "rig19_sprs";
 	clip.flags = BAD_FLAG_LOOP;
 	clip.frame_count = 11;
 	clip.bones = rig_bones();
@@ -636,7 +636,7 @@ void check_facts(const Minted &m) {
 				m.name + ": the stock idle's shape");
 	if (m.name == "rig19_short.bad")
 		expect(bf.frame_count == 2 && bf.channels[0].frame_count == 2, m.name + ": two keys on two frames");
-	if (m.name == "rig19_sparse.bad")
+	if (m.name == "rig19_sprs.bad")
 		expect(bf.frame_count == 11 && bf.channels[0].frame_count < 12 && bf.channels[1].frame_count != bf.channels[0].frame_count,
 				m.name + ": sparse keys, a table a bone");
 	if (m.name == "rig19_v0.bad") expect(bf.events[0].trigger == -1, m.name + ": no trigger word");

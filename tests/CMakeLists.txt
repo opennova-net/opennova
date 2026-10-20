@@ -313,21 +313,22 @@ endif()
 add_test(NAME threedi_o3d_unicode
          COMMAND threedi_o3d_unicode_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
-# Retail clip sets through anim scene -> anim build -> anim compare (OPENNOVA_JO_ASSETS).
-add_executable(anim_o3a_retail_roundtrip_test anim/o3a_retail_roundtrip_test.cpp)
-target_include_directories(anim_o3a_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(anim_o3a_retail_roundtrip_test PRIVATE cxx_std_17)
-opennova_add_gated_test(anim_o3a_retail_roundtrip
-    COMMAND anim_o3a_retail_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+# The minted clip sets (each at a shipped set's shape) through anim scene -> anim
+# build -> anim compare.
+add_executable(anim_o3a_roundtrip_test anim/o3a_roundtrip_test.cpp)
+target_include_directories(anim_o3a_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_o3a_roundtrip_test PRIVATE cxx_std_17)
+add_test(NAME anim_o3a_roundtrip
+    COMMAND anim_o3a_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
-# The runtime plays a rebuilt clip set the way it plays the shipped one
-# (OPENNOVA_JO_ASSETS).
-add_executable(anim_o3a_runtime_playback_test anim/o3a_runtime_playback_test.cpp)
-target_link_libraries(anim_o3a_runtime_playback_test PRIVATE opennova_runtime)
-target_include_directories(anim_o3a_runtime_playback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(anim_o3a_runtime_playback_test PRIVATE cxx_std_17)
-opennova_add_gated_test(anim_o3a_runtime_playback
-    COMMAND anim_o3a_runtime_playback_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+# The runtime plays a rebuilt clip set the way it plays the one it was made from
+# (the minted person and first-person sets on their models).
+add_executable(anim_o3a_playback_test anim/o3a_playback_test.cpp)
+target_link_libraries(anim_o3a_playback_test PRIVATE opennova_runtime)
+target_include_directories(anim_o3a_playback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_o3a_playback_test PRIVATE cxx_std_17)
+add_test(NAME anim_o3a_playback
+    COMMAND anim_o3a_playback_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
 # Retail models through scene -> build -> compare (OPENNOVA_JO_ASSETS).
 add_executable(threedi_o3d_retail_roundtrip_test threedi/o3d_retail_roundtrip_test.cpp)
