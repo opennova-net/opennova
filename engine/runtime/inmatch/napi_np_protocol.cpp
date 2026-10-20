@@ -1521,20 +1521,13 @@ std::vector<TickOut> tick_connections(
 			}
 		}
 
-		// Retail's C2S 0x02 handler, pending-player spawn pump, and first
-		// roster publish occupy distinct send boundaries. In particular 0x04
-		// must arrive after the client has processed one intervening frame;
-		// otherwise its join initialization resets the assigned team and it
-		// submits the opposite faction's 0x2F kit. The production host calls
-		// tick_connections in the same pump that handled C2S 0x02, so the
-		// captured admission tick is an explicit lower bound as well as the
-		// packet latches below. The pump itself runs on the periodic second
-		// at the head of this call, so the 0x03 / settings / 0x05 / 0x04 /
-		// 0x7B boundary ships in the same pump that added the player — the
-		// retail in-pump order [orig: CNapiServer_ProcessPendingPlayerSpawns
-		// @0x4C8FF6..0x4C9123]; the one residual is that retail writes its
-		// 0x03 before Server_BuildPlayerInfoAndAdd and these bodies are built
-		// after it, which the wire cannot distinguish.
+		// A connection with a transport has its 0x03 / settings / 0x05 / 0x04 /
+		// 0x7B queued by the spawn pump at the add (retail's in-pump order,
+		// D-NET-504) [orig: CNapiServer_ProcessPendingPlayerSpawns
+		// @0x4C8FF6..0x4C9123]. This leg frames them for a transport-less
+		// connection (a test seam) at its next boundary, not in the frame that
+		// handled its C2S 0x02 (the admission tick, a lower bound kept from the
+		// framed path's first capture).
 		const bool staged_join_ready =
 				conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.admission_stage == GameAdmissionStage::Complete &&

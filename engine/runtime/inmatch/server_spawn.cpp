@@ -851,6 +851,25 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				broadcast_player_joined_text(ctx.np_protocol.connection_list, conn);
 				broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list,
 						conn, &world);
+				// The added player's own records queue here, at the add: the one-byte 0x03,
+				// the send-state reset's settings, the squad add, then the 0x05, the 0x04 and
+				// the 0x7B, so a later send to the slot (a scoreboard boundary's 0x16 before
+				// its next open send boundary) follows them (D-NET-504's early 0x22: ours
+				// queued them at that boundary, behind such a 0x16). A connection with no
+				// transport keeps tick_connections' framed leg.
+				// [orig: CNapiServer_ProcessPendingPlayerSpawns - the 0x03 @0x4C9034, the add
+				//  @0x4C903A, 0x05 @0x4C909D, 0x04 @0x4C90D7, 0x7B @0x4C9111;
+				//  NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640]
+				if (conn.type == NapiNPConnection::kTypeServerSide &&
+						conn.link.transport != nullptr && conn.reply.admission_metadata_pushed &&
+						!conn.reply.spawn_metadata_pushed) {
+					for (ProtocolMessage &m : build_spawn_pump_metadata(ctx.config,
+							ctx.mission_text_title, conn, ctx.np_protocol.connection_list, &world,
+							ctx.rotation, &ctx.host_slot))
+						conn.link.transport->host_send(m.tag, std::move(m.payload), m.reliable,
+								m.flags.raw, m.capacity_exempt, m.retention_flushes);
+					conn.reply.spawn_metadata_pushed = true;
+				}
 				++spawned;
 				restart = true;
 				break;

@@ -33,6 +33,7 @@
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
+#include <runtime/inmatch/server_tick_maintenance.h> // emit_scoreboard_boundary
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/replication/entity_wire_bridge.h> // class_for_type_id
 
@@ -960,6 +961,41 @@ bool run_a_bodyless_add_keeps_its_row() {
 
 } // namespace
 
+// D-NET-504 (c1: the retail joiner's early 0x22 on our host): the spawn pump queues the added
+// player's own records at the add, so a scoreboard boundary that falls before the joiner's next
+// open send boundary queues its 0x16 behind the 0x05 / 0x04 / 0x7B, as on a retail host. Ours
+// queued them at that next boundary, behind such a 0x16, so the joiner's 0x16 handler ran (and
+// sent its 0x22) before it had its 0x05.
+// [orig: CNapiServer_ProcessPendingPlayerSpawns - the 0x03 @0x4C9034, the add @0x4C903A, 0x05
+//  @0x4C909D, 0x04 @0x4C90D7, 0x7B @0x4C9111; Server_BuildAndBroadcastScoreboard's send loop
+//  @0x50DDC0 (the active byte, mask 0x20) from Server_TickUpdate @0x51D90D]
+bool run_the_add_queues_its_records_ahead_of_a_later_list() {
+	JoinFixture f(/*with_existing=*/false);
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true; // its C2S 0x02 was answered
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    j.reply.spawn_metadata_pushed,
+	            "the pump adds the joiner and queues its records at the add")) return false;
+	// The next scoreboard boundary, before the joiner's send boundary opens.
+	f.ctx->scoreboard_broadcast_timer = 0x136;
+	inmatch::emit_scoreboard_boundary(*f.ctx, *f.world);
+	const std::vector<uint8_t> tags = JoinFixture::drain(f.joiner_transport);
+	auto at = [&](uint8_t tag) {
+		for (std::size_t i = 0; i < tags.size(); ++i)
+			if (tags[i] == tag) return i;
+		return tags.size();
+	};
+	const std::size_t signal = at(opennova::s2c::GAME_START_SIGNAL);
+	const std::size_t slot = at(0x04);
+	const std::size_t info = at(opennova::s2c::FULL_PLAYER_INFO);
+	const std::size_t list = at(opennova::s2c::PLAYER_LIST);
+	if (!expect(!tags.empty() && tags.front() == opennova::s2c::SYNC_TICK && signal < slot &&
+	                    slot < info && info < list && list < tags.size(),
+	            "the 0x03, 0x05, 0x04 and 0x7B lead the boundary's 0x16")) return false;
+	return expect(!contains(f.pump(), opennova::s2c::GAME_START_SIGNAL),
+	              "the producer does not send them again at the boundary");
+}
+
 int main() {
 	int failures = 0;
 	if (!run_track_waits_for_player_sync_request()) ++failures;
@@ -979,6 +1015,7 @@ int main() {
 	if (!run_a_failed_add_leaves_the_joiner_rowless()) ++failures;
 	if (!run_a_held_joiner_has_no_team()) ++failures;
 	if (!run_a_bodyless_add_keeps_its_row()) ++failures;
+	if (!run_the_add_queues_its_records_ahead_of_a_later_list()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

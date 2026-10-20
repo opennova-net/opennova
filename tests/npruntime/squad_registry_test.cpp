@@ -188,10 +188,9 @@ void run_two_joiners_of_one_squad_and_their_leave() {
 	               text.subtype == opennova::kGameTextPlayerJoined,
 	       "the join line follows it");
 
-	// Able's own copy: none at the add, then between the settings updates and the 0x05.
-	expect(drain(f.transports[0]).empty(), "Able's own 0x6A waits for the pump's metadata");
-	(void)inmatch::tick_connections(*f.ctx, 16, f.tick++, /*respect_s2c_send_boundary=*/false,
-			/*run_spawn_pump=*/false);
+	// Able's own copy rides the pump's records, queued at the add (D-NET-504): between the
+	// settings updates and the 0x05 [orig: CNapiServer_ProcessPendingPlayerSpawns - the add
+	//  @0x4C903A, 0x05 @0x4C909D].
 	std::vector<ns::Datagram> own = drain(f.transports[0]);
 	const std::size_t reset = index_of(own, opennova::s2c::SYNC_TICK);
 	const std::size_t own_roster = index_of(own, opennova::s2c::CLAN_ROSTER);
