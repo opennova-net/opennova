@@ -93,7 +93,7 @@ void test_the_mission_start_list() {
 			"pine.3di", "sol_j.3di", "solxa.3di", "solxb.3di", "solfin.3di", "item2143.3di",
 			"wreck.3di", "wreckfin.3di", "chute.3di", "crate.3di", "crate_e.3di", "bay.3di",
 			"ai.3di", "jeep.3di", "jeep_vd.3di", "mg.3di", "sun1.3di", "fmoon4.3di", "upl.3di",
-			"hud.3di", "bush.3di"};
+			"hud.3di", "bush.3di", "crate_s.3di"};
 	std::vector<std::string> asked;
 	const inmatch::LoadedModelList::LoadsFn loads = [&](const std::string &file) {
 		asked.push_back(file);
@@ -101,8 +101,9 @@ void test_the_mission_start_list() {
 	};
 
 	// items.def: row 0 the Null marker; the camouflage item with a husk ending "xa"; 2143
-	// with a husk and a final husk; the parachute; pool items; a vehicle bay whose group's
-	// item carries one named attachment slot of two.
+	// with a husk and a final husk; the parachute; pool items (the pool-1 crate with an
+	// enemy graphic and a husk shadow); a vehicle bay whose group's item carries one named
+	// attachment slot of two.
 	std::vector<def::DefItemDef> rows;
 	rows.push_back(item(0, ""));
 	def::DefItemDef camo = item(5101, "sol_j.3di");
@@ -117,6 +118,7 @@ void test_the_mission_start_list() {
 	rows.push_back(item(7001, "trc.3di"));
 	def::DefItemDef crate = item(6001, "crate.3di");
 	std::strcpy(crate.graphic_enemy, "crate_e.3di");
+	std::strcpy(crate.huskshadow, "crate_s.3di"); // after the enemy graphic
 	rows.push_back(crate);
 	def::DefItemDef bay = item(6002, "bay.3di");
 	bay.attrib2 = def::DEF_ITEM_ATTRIB2_VEHICLEBAY;
@@ -197,7 +199,8 @@ void test_the_mission_start_list() {
 			"m4.3DI", "m4_3p.3DI", "glock.3DI", "pine.3DI",             // weapon.def
 			"sol_j.3DI", "SOLXA.3DI", "solxb.3DI",                      // the camouflage item
 			"item2143.3DI", "wreck.3DI", "wreckfin.3DI", "chute.3DI",   // 2143, 185
-			"crate.3DI", "crate_e.3DI", "bay.3DI", "ai.3DI",            // pools 1, 2, 0
+			"crate.3DI", "crate_e.3DI", "crate_s.3DI",                  // pool 1
+			"bay.3DI", "ai.3DI",                                        // pools 2, 0
 			"jeep.3DI", "jeep_vd.3DI", "mg.3DI",                        // the bay's group
 			"sun1.3DI", "fmoon4.3DI", "upl.3DI",                        // celestial
 			"hud.3DI",                                                  // hudfx.def

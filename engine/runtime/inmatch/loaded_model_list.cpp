@@ -217,7 +217,7 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 	// @0x53bd90 - @0x53bd9f].
 	if (const int palm = find_index_by_type_id(src.items, 900); palm != 0) items.load(palm);
 	// The parachute, the night-vision goggles, the binoculars [orig: Entity_PreloadSpecialItems
-	// @0x43c220 - @0x43c230, @0x43c245, @0x43c262].
+	// @0x43c220 - @0x43c230, @0x43c245, @0x43c25a].
 	items.load_type(185);
 	items.load_type(1904);
 	items.load_type(1424);
