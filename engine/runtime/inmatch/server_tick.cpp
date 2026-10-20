@@ -10,6 +10,7 @@
 #include <runtime/inmatch/server_player_death.h>     // the death queue drains and the frame tail's edges
 #include <runtime/inmatch/server_powerup.h>          // the remote grant tables and the S2C 0x35 fan
 #include <runtime/inmatch/server_entity_routes.h>    // the item events, crossings and guidance
+#include <runtime/inmatch/server_entity_state.h>     // the per-slot 0x0A writer (Server_SendEntityStateToPlayer)
 #include <runtime/inmatch/server_spawn.h>            // the admitted 0x51 spectator converts
 #include <runtime/inmatch/server_tick_maintenance.h> // the per-tick and periodic-second maintenance legs
 
@@ -988,64 +989,25 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
 	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
 	if (ctx.is_in_session && !world.match.outcome().ended) {
-		// Every 0x0A written for a spectator slot first restamps its body: the
-		// hide bit, damage disabled and Health 1, whatever a deploy left (the
-		// hide bytes are the latch here, replication_model.h owner_hidden). Done
-		// ahead of the snapshot: the slot's own records read the body after it.
-		// [orig: NetPacket_WritePlayerState @0x4FF6FA..0x4FF728, called from
-		//  Server_SendEntityStateToPlayer @0x517C76 before its records @0x517C81]
+		// Every 0x0A written for a spectator slot first restamps its body, ahead
+		// of the snapshot (server_entity_state.h).
 		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn) || !conn.link.spectator) continue;
 			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-			world::Entity *body = world.registry.get(conn.link.owned_entity);
-			if (body == nullptr) continue;
-			body->flags |= 1u;          // @0x4FF71B
-			body->damage_state = -1;    // @0x4FF71E
-			body->health = 1;           // @0x4FF728
+			restamp_spectator_body(world, conn);
 		}
-		// The priority build runs only for recipients that take entity records:
-		// the listen host's own player gets the header-only frame and never
-		// walks the pools [orig: Server_SendEntityStateToPlayer @0x517c1b skips
-		// Server_BuildEntityPriorityList for g_LocalPlayerEntity]. Type-1 peers
-		// take one only at their open send boundary (see the fan below).
+		// The snapshot is built only for recipients that take entity records.
+		// Type-1 peers take one only at their open send boundary (see the fan below).
 		bool any_record_recipient = false;
 		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
 			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-			if (world.cached.local_player.valid() &&
-					conn.link.owned_entity == world.cached.local_player)
-				continue;
+			if (!entity_state_takes_records(world, conn)) continue;
 			any_record_recipient = true;
 			break;
 		}
 		std::vector<GameEntitySnapshot> ents;
-		if (any_record_recipient) {
-			// The previous tick's movement/destruction is settled. Replication LOS
-			// can retain each target's final section matrices across every entity
-			// and recipient; never inherit a view built while the motor is moving.
-			{
-				const devtools::ProfileScope prep_scope(
-						world.profile, devtools::Slot::SIM_REPLICATION_QUERY_PREP);
-				if (world.collision != nullptr)
-					world.collision->prepare_cached_raycast_queries(world);
-			}
-			const devtools::ProfileScope snapshot_scope(
-					world.profile, devtools::Slot::SIM_REPLICATION_SNAPSHOT);
-			ents = replication::snapshot_world(world);
-			// Stamp owner-hidden rows: a spectator connection's own player entity
-			// is admitted only to its owner's list (the JO reduction of the
-			// slot+97536 hide byte — see replication_model.h owner_hidden)
-			// [orig: Server_BuildEntityPriorityList @0x50e6fd].
-			for (const NapiNPConnection &oc : ctx.np_protocol.connection_list) {
-				if (!oc.link.spectator || !oc.link.owned_entity.valid()) continue;
-				for (GameEntitySnapshot &es : ents) {
-					if (es.wire_handle == oc.link.owned_entity.packed) {
-						es.owner_hidden = true;
-						break;
-					}
-				}
-			}
-		}
+		if (any_record_recipient) ents = snapshot_entity_states(ctx, world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
 			// The host's type-2 loopback is an in-process seam and remains
@@ -1054,18 +1016,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			// configured S2C send boundary opens; queuing all intervening
 			// snapshots would burst stale frames at that boundary.
 			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-			const devtools::ProfileScope fan_scope(
-					world.profile, devtools::Slot::SIM_REPLICATION_FAN);
-			conn.link.receive_silence_ms = conn.receive_inactive_ms;
 			// Built here and queued just below: the frame's CONTENT is the world
 			// after the script pass and the maintenance, before the motor step.
-			// The server-fps and CPU bytes are this tick's copies of the main
-			// loop's FR counter and CPU share [orig: Server_TickUpdate
-			// @0x51D7E0..0x51D7E5, @0x51D7EA..0x51D7FB].
-			conn.frame_update_staged = replication::build_connection_s2c(
-					world, conn.link, ents, conn.staged_frame_update, ctx.config.game_type,
-					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0,
-					ctx.stats_avg_fps, ctx.stats_cpu_percent, ctx.np_protocol.identity);
+			conn.frame_update_staged =
+					write_entity_state(ctx, world, conn, ents, conn.staged_frame_update);
 		}
 	}
 	// Queue the frames just built, retail's per-slot send.

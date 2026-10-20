@@ -525,6 +525,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
     # --- parity lane L1 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_state.cpp        # the per-slot 0x0A writer (split off server_tick.cpp)
     # --- parity lane L2 sources ---
     # --- parity lane L3 sources ---
     # --- parity lane L4 sources ---
