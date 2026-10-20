@@ -173,12 +173,12 @@ target_link_libraries(utf8_format_paths_test PRIVATE opennova_formats)
 target_include_directories(utf8_format_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME utf8_format_paths COMMAND utf8_format_paths_test)
 
-# Every retail model through the reader and the writer the editor saves by:
-# byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
-add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
-target_link_libraries(threedi_retail_rewrite_test PRIVATE opennova_formats)
-target_include_directories(threedi_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(threedi_retail_rewrite COMMAND threedi_retail_rewrite_test)
+# Every committed model under fixtures/threedi through the reader and the writer the
+# editor saves by: byte-identical, a fixed point, and each write pinned by its FNV-1a64.
+add_executable(threedi_rewrite_test threedi/rewrite_test.cpp)
+target_link_libraries(threedi_rewrite_test PRIVATE opennova_formats)
+target_include_directories(threedi_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_rewrite COMMAND threedi_rewrite_test)
 
 # The BHD-era GP reader and its migration to 3DI3: synthetic GP models built in the test,
 # and every GP model BHD ships (OPENNOVA_JO_ASSETS/fixtures/bhd/3di) migrated and read back.
