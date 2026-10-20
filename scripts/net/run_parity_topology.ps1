@@ -615,6 +615,13 @@ function Register-OpenNovaLaunchProof {
         [Parameter(Mandatory = $true)]
         [System.Diagnostics.Process] $Process
     )
+    # The desktop guard takes the foreground only from this cell's own Godot.
+    if ($script:DesktopGuardPids) {
+        $guarded = @([string] $Process.Id)
+        $launcher = $Process.PSObject.Properties['OpenNovaLauncherProcess']
+        if ($launcher -and $launcher.Value) { $guarded += [string] $launcher.Value.Id }
+        Add-Content -LiteralPath $script:DesktopGuardPids -Value $guarded
+    }
     if ($script:OpenNovaLaunchProofs.Contains($Role)) {
         throw "Duplicate OpenNova launch proof for role '$Role'."
     }
@@ -976,15 +983,18 @@ function Reset-DesktopCursor {
 # (the gate above); scripted input brings its own virtual focus and zeroes
 # the real delta when the window is not really focused. So a clip any window
 # leaves cannot reach a body's look. The guard hands the foreground to the
-# shell's desktop window (GetShellWindow) whenever a Jointops.exe or Godot
-# window holds it, and
-# logs each hand-off.
+# shell's desktop window (GetShellWindow) whenever a Jointops.exe window or one
+# of this cell's own Godot processes (desktop-guard.pids, written as each
+# OpenNova role launches) holds it, and logs each hand-off. Another session's
+# Godot window (a lane's windowed GUT run) is left alone.
 $script:DesktopGuard = $null
 $script:DesktopGuardLog = ""
+$script:DesktopGuardPids = ""
 function Start-DesktopGuard {
     $script:DesktopGuardLog = Join-Path $RunRoot "desktop-guard.log"
-    $script:DesktopGuard = Start-Job -ArgumentList $script:DesktopGuardLog -ScriptBlock {
-        param([string] $Log)
+    $script:DesktopGuardPids = Join-Path $RunRoot "desktop-guard.pids"
+    $script:DesktopGuard = Start-Job -ArgumentList $script:DesktopGuardLog, $script:DesktopGuardPids -ScriptBlock {
+        param([string] $Log, [string] $PidFile)
         Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -1022,7 +1032,8 @@ public static class ParityDesktopGuard {
                 $owner = [uint32]0
                 $null = [ParityDesktopGuard]::GetWindowThreadProcessId($foreground, [ref] $owner)
                 $name = try { (Get-Process -Id $owner -ErrorAction Stop).ProcessName } catch { "" }
-                if ($name -eq "Jointops" -or $name -like "Godot*") {
+                $own = @(if (Test-Path -LiteralPath $PidFile) { Get-Content -LiteralPath $PidFile })
+                if ($name -eq "Jointops" -or ($name -like "Godot*" -and $own -contains [string] $owner)) {
                     $ok = [ParityDesktopGuard]::HandOff($foreground, $desktop)
                     Start-Sleep -Milliseconds 50
                     $still = [ParityDesktopGuard]::GetForegroundWindow() -eq $foreground
