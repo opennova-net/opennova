@@ -4,7 +4,8 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 
-#include <runtime/inmatch/punt_log.h> // napi_time_string (the /INOUT line's stamp)
+#include <runtime/inmatch/punt_log.h> // napi_time_string (the /INOUT line's stamp), kNapiLineEnding
+#include <runtime/inmatch/server_console.h> // kInoutLogFileName
 
 #include <base/io/crt_ftol.h>
 #include <net/npwire/ingame_encode.h>     // encode_chat_broadcast (S2C 0x14)
@@ -153,15 +154,17 @@ uint32_t Server_ValidateJoinBans(
 						continue;
 					if (&other != &conn && !slot_is_local(other))
 						other.duplicate_pcid_kick_pending = true;
-					// The /INOUT line for every holder, the joiner and the local one too: the
-					// port writes the protocol's /INOUT lines on the diagnostic channel
-					// (D-NET-356) [orig: "%s : REJECTING connection \"%s\" because pcid
+					// The /INOUT line for every holder, the joiner and the local one too,
+					// appended straight to _inout.txt (not through the protocol's log) under
+					// the switch [orig: "%s : REJECTING connection \"%s\" because pcid
 					//  \"%s\" matches \"%s\"!" @0x7CFAE0 -> NapiFile_AppendLine("_inout.txt")
-					//  @0x512865, gated on dword_B4C688].
-					io::logf(io::LogLevel::kInfo,
-							"%s : REJECTING connection \"%s\" because pcid \"%s\" matches \"%s\"!",
-							stamp.c_str(), peer_addr_to_string(other.peer).c_str(), pcid.c_str(),
-							other.account.pcid.c_str());
+					//  @0x512865, gated on g_InoutLogEnabled @0x5127F7].
+					const std::string line = stamp + " : REJECTING connection \"" +
+							peer_addr_to_string(other.peer) + "\" because pcid \"" + pcid +
+							"\" matches \"" + other.account.pcid + "\"!";
+					io::logf(io::LogLevel::kInfo, "%s", line.c_str());
+					if (ctx.logs.inout_switch && ctx.logs.files != nullptr)
+						ctx.logs.files->write(kInoutLogFileName, line + kNapiLineEnding, /*append=*/true);
 				}
 				return 30;
 			}

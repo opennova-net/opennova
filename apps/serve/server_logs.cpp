@@ -50,6 +50,10 @@ int parse_log_switch(const std::vector<std::string> &args, size_t i, LogSwitches
 		out.net_log = true;
 		return 1;
 	}
+	if (strutil::iequals(a, "/INOUT")) {
+		out.inout = true;
+		return 1;
+	}
 	return 0;
 }
 
@@ -67,6 +71,8 @@ void ServerLogDevices::arm(const LogSwitches &switches) {
 	// [orig: @0x4A7A23..0x4A7A29; Napi_FileExists("_DONETLOG.TXT") @0x4A7CBC..0x4A7CD3].
 	if (switches.net_log) net_.set_enabled(true);
 	if (files_.exists(inmatch::kNetLogArmFileName)) net_.set_enabled(true);
+	// g_InoutLogEnabled, which the socket open hands the protocol's log [orig: @0x4A744F].
+	inout_switch_ = switches.inout;
 }
 
 inmatch::ServerLogs ServerLogDevices::logs() {
@@ -74,6 +80,8 @@ inmatch::ServerLogs ServerLogDevices::logs() {
 	logs.profile = profile_.get();
 	logs.punt = punt_.get();
 	logs.net = &net_;
+	logs.inout = &inout_;
+	logs.inout_switch = inout_switch_;
 	logs.files = &files_;
 	return logs;
 }

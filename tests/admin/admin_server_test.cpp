@@ -130,7 +130,7 @@ public:
 struct Host {
 	inmatch::NapiNPServerCtx ctx;
 	MemoryFiles files;
-	inmatch::NetLog net_log{files};
+	inmatch::NapiLog net_log{files, inmatch::kNetLogFileName};
 	std::vector<std::string> system_lines;
 	std::unique_ptr<w::World> heap = std::make_unique<w::World>();
 	w::World &world = *heap;

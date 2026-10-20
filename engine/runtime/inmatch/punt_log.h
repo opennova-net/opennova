@@ -26,11 +26,15 @@
 //                (its only data references are that clear and the dump), so
 //                the file retail writes is always empty. The dump runs from the
 //                Server-class `PuntLog` action (catalog row 86, code 48, no
-//                default key) and from the shutdown, behind the error-log flag
-//                whose setter has no direct reference; the port's servers have
-//                neither trigger (D-NET-357) [orig: Input_HandleActionBinding
-//                case 48 @0x49b833; Game_ShutdownSubsystems @0x4a53f9 ->
-//                Server_DumpPuntLogIfErrorLogEnabled @0x53c770 gated on dword_24E5DD8].
+//                default key) and from the shutdown, behind the error-log flag,
+//                whose one writer (0x53c750, outside any function) nothing
+//                references, so a stock run never sets it and never writes the
+//                shutdown's punt.log nor _errlog.txt; the port's servers have
+//                neither trigger [orig: Input_HandleActionBinding case 48
+//                @0x49b833; Game_ShutdownSubsystems @0x4a53f9 ->
+//                Server_DumpPuntLogIfErrorLogEnabled @0x53c770 gated on
+//                g_ErrorLogEnabled; its store @0x53c761; ErrorLog_WriteTimestamped
+//                @0x53c6d3].
 //
 // Every write goes through the embedder's file seam (server_files.h).
 

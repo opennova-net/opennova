@@ -5086,6 +5086,14 @@ add_test(NAME mounted_fire_path COMMAND mounted_fire_path_test)
 add_executable(npruntime_dispatch_remainder_test npruntime/dispatch_remainder_test.cpp)
 target_link_libraries(npruntime_dispatch_remainder_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_dispatch_remainder COMMAND npruntime_dispatch_remainder_test)
+# The /INOUT file (D-NET-356): the protocol's _inout.txt NapiLog and opennova-serve's switch.
+add_executable(npruntime_inout_log_test npruntime/inout_log_test.cpp)
+target_link_libraries(npruntime_inout_log_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_inout_log COMMAND npruntime_inout_log_test)
+add_executable(opennova_serve_inout_switch_test serve/inout_switch_test.cpp)
+target_link_libraries(opennova_serve_inout_switch_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_inout_switch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_inout_switch COMMAND opennova_serve_inout_switch_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

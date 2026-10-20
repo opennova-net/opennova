@@ -6,7 +6,7 @@
 // switch spellings and the directory.
 
 #include <runtime/inmatch/punt_log.h>
-#include <runtime/inmatch/server_console.h> // NetLog
+#include <runtime/inmatch/server_console.h> // NapiLog
 #include <runtime/inmatch/server_files.h>
 #include <runtime/inmatch/server_log_recorder.h>
 
@@ -27,14 +27,17 @@ public:
 
 // The log switches in retail's spellings, matched without regard to case:
 // `/PROFILE <path>` the .sph server log, `/PUNT.TXT` or `/PUNTLOG` the punt
-// log, `/CHEATLOG` the cheat log, `/NETLOG` the net log on from the start
+// log, `/CHEATLOG` the cheat log, `/NETLOG` the net log on from the start,
+// `/INOUT` the protocol's _inout.txt log
 // [orig: Game_ParseCommandLineAndInit @0x4a778f (/PROFILE), @0x4a782d
-// (/PUNT.TXT), @0x4a7863 (/PUNTLOG), @0x4a77fc (/CHEATLOG), @0x4a7a11 (/NETLOG)].
+// (/PUNT.TXT), @0x4a7863 (/PUNTLOG), @0x4a77fc (/CHEATLOG), @0x4a7a11 (/NETLOG),
+// @0x4a743d..0x4a744f (/INOUT)].
 struct LogSwitches {
 	std::string profile_path;
 	bool punt_log = false;
 	bool cheat_log = false;
 	bool net_log = false;
+	bool inout = false;
 };
 
 // Parse one log switch at args[i]: the arguments it took (1, or 2 with its
@@ -51,10 +54,15 @@ public:
 	// lines now, as retail's switch parse does; `/NETLOG`, then a
 	// `_DONETLOG.TXT` in the working directory, turn the net log on.
 	void arm(const LogSwitches &switches);
-	// The process's network shut down: the net log stops and flushes
-	// [orig: Game_ShutdownSubsystems @0x4A5398 -> NapiLib_Shutdown -> the
-	//  manager's NapiLog_Shutdown @0x62B739]. `now_ms` is the host's clock.
-	void close(uint32_t now_ms) { net_.shutdown(now_ms); }
+	// The process's network shut down: the protocol's _inout.txt log, then the
+	// manager's net log, each stops and flushes [orig: the protocol's
+	//  NapiLog_Shutdown(protocol + 0xF80); Game_ShutdownSubsystems @0x4A5398 ->
+	//  NapiLib_Shutdown -> the manager's NapiLog_Shutdown @0x62B739]. `now_ms` is
+	// the host's clock.
+	void close(uint32_t now_ms) {
+		inout_.shutdown(now_ms);
+		net_.shutdown(now_ms);
+	}
 	// The devices for the host context (null = off).
 	inmatch::ServerLogs logs();
 	inmatch::ServerLogRecorder *profile() { return profile_.get(); }
@@ -64,7 +72,10 @@ private:
 	WorkingDirectoryFiles files_;
 	std::unique_ptr<inmatch::ServerLogRecorder> profile_;
 	std::unique_ptr<inmatch::PuntLog> punt_;
-	inmatch::NetLog net_{files_};
+	inmatch::NapiLog net_{files_, inmatch::kNetLogFileName};
+	// The protocol's _inout.txt log, which `/INOUT` turns on at the socket open.
+	inmatch::NapiLog inout_{files_, inmatch::kInoutLogFileName};
+	bool inout_switch_ = false;
 };
 
 } // namespace opennova::serve

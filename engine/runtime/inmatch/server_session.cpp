@@ -41,9 +41,12 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	p.host_stop_tick = 0;                   // cleared until StopServer
 	p.host_run_duration_ms = 0;
 	p.host_running = 1;                      // StartServer succeeded
-	// The /INOUT host line, ahead of the host-start callback
-	// [orig: CNapiNPConnection_LogHostStarted @0x62b629; D-NET-356].
-	io::logf(io::LogLevel::kInfo, "%s", inout_host_line(ctx, /*started=*/true).c_str());
+	// The socket the host opened before this start hands the /INOUT switch to the
+	// protocol's log [orig: CNapiNetwork_OpenTransportSocket @0x4C6D15], then the
+	// host line, ahead of the host-start callback [orig: CNapiNPConnection_LogHostStarted
+	// @0x62b629].
+	open_inout_log(ctx);
+	write_inout_line(ctx, inout_host_line(ctx, /*started=*/true));
 	// The host start callback zeroes the total logins [orig: NapiNPProtocol_StartServer
 	// @0x62b640 -> CNapiServer_OnHostStarted @0x4c94f0].
 	ctx.total_logins = 0;

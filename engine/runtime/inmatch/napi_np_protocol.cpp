@@ -218,10 +218,10 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 	// The /INOUT line heads the teardown, ahead of the burst
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253d2 ->
-	//  CNapiNPConnection_LogPlayerRemoved; D-NET-356]. The listen host's own
+	//  CNapiNPConnection_LogPlayerRemoved]. The listen host's own
 	// type-2 node is never torn down here.
 	if (it->type == NapiNPConnection::kTypeServerSide)
-		io::logf(io::LogLevel::kInfo, "%s", inout_player_removed_line(*it).c_str());
+		write_inout_line(ctx, inout_player_removed_line(*it));
 
 	if (goodbye_out != nullptr) {
 		std::vector<std::vector<uint8_t>> burst = host_goodbye_burst(ctx, *it);
@@ -954,8 +954,8 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	const bool negotiated = negotiate_max_packet_bytes(conn, mps);
 	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
 	// The /INOUT line once the 0x82 is out [orig: CNapiNPConnection_OnStateChange
-	//  @0x626204 -> CNapiNPConnection_LogPlayerAdded; D-NET-356].
-	io::logf(io::LogLevel::kInfo, "%s", inout_player_added_line(conn).c_str());
+	//  @0x626204 -> CNapiNPConnection_LogPlayerAdded].
+	write_inout_line(ctx, inout_player_added_line(conn));
 	if (negotiated) {
 		std::vector<uint8_t> initial_settings = frame_session_replies(
 				conn, make_game_session_initial_settings(conn.timeouts.max_packet_bytes));

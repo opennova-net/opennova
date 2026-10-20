@@ -748,8 +748,8 @@ void HostRole::close() {
 	}
 	ctx.np_protocol.host_running = 0;
 	// [orig: NapiNPProtocol_StopServer -> CNapiNPConnection_LogHostStopped
-	//  @0x62a97b, after host_running clears @0x62a95c; D-NET-356]
-	io::logf(io::LogLevel::kInfo, "%s", inmatch::inout_host_line(ctx, /*started=*/false).c_str());
+	//  @0x62a97b, after host_running clears @0x62a95c]
+	inmatch::write_inout_line(ctx, inmatch::inout_host_line(ctx, /*started=*/false));
 }
 
 // The editor Stop/Start rewind: the kernel's own restore, then a fresh

@@ -77,6 +77,8 @@ const char kUsage[] =
 		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
 		"  /NETLOG          start the net log, _NETLOG.TXT (the remote admin's CMD NETLOG\n"
 		"                   toggles it)\n"
+		"  /INOUT           log the host's start and stop and each player's add and removal\n"
+		"                   to _inout.txt\n"
 		"The server reads and writes game.cfg in the directory it runs from (the process's\n"
 		"working directory, as retail), with the host file's settings over it, and marks\n"
 		"itself running there with activesrvr.txt, which a clean exit deletes. A nonzero\n"

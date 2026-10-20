@@ -58,7 +58,7 @@ constexpr const char *kStamp = "2026-10-13 21:07:05: ";
 void test_net_log() {
 	MemoryFiles files;
 	files.files["_NETLOG.TXT"] = "a previous run\r\n";
-	inmatch::NetLog log(files);
+	inmatch::NapiLog log(files, inmatch::kNetLogFileName);
 	log.set_stamp_text([] { return std::string(kStamp); });
 	CHECK(!log.enabled());
 	log.set_enabled(false); // the same state writes nothing
@@ -88,7 +88,7 @@ void test_net_log() {
 struct Host {
 	inmatch::NapiNPServerCtx ctx;
 	MemoryFiles files;
-	inmatch::NetLog log{files};
+	inmatch::NapiLog log{files, inmatch::kNetLogFileName};
 	Host() {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.is_in_session = 1;

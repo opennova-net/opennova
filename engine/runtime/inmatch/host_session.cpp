@@ -392,8 +392,11 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 
 	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.
 	flush_s2c_boundaries(owner, sock, now, /*force_open=*/false);
-	// The manager's pump flushes the net log once its interval has passed
-	// [orig: NapiNPManager_Pump @0x62AC98 -> NapiLog_FlushIfExpired @0x62F2F0].
+	// The protocol's pump flushes its _inout.txt log, and the manager's pump the net
+	// log, each once its interval has passed [orig: NapiNPProtocol_Pump @0x62A7EA,
+	// NapiNPManager_Pump @0x62AC98 -> NapiLog_FlushIfExpired @0x62F2F0].
+	if (owner.ctx.logs.inout != nullptr)
+		owner.ctx.logs.inout->flush_if_expired(owner.ctx.np_protocol.host_run_duration_ms);
 	if (owner.ctx.logs.net != nullptr)
 		owner.ctx.logs.net->flush_if_expired(owner.ctx.np_protocol.host_run_duration_ms);
 	// The chat display's timers step down once a logic tick
