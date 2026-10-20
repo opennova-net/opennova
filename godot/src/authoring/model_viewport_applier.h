@@ -52,6 +52,15 @@ class MissionEnvironment;
 // instance of the gun's rig and posed by the same clip, its camo the character's; the camera stands where
 // the viewport's eye does and sees with its field of view.
 //
+// A person's held weapon (DI-13's follow-up, editor/preview/preview_held_weapon) draws as the
+// game's presenter draws a body's: a third ObjectModel of the weapon's third-person model the
+// viewport read (its gfx3 as the game's store loads it), rigid, beside the body rather than under
+// it, placed each frame by the game's own attach (EntityPresenter::held_weapon_attach_transform
+// over the body's posed skeleton, the present row's triple and frame, as the wire walk's
+// update_wire_held_weapon places it), at the body's level clamped to its own
+// (renderer::attachment_lod_index); built anew as the viewport's model moves, its textures read
+// through the project's files.
+//
 // A clip's fire events (DI-24, editor/preview/preview_clip_fire) draw the range the shots fly in: the effects the run
 // spawned (the ammo's ai_launcheffect, each impact's row) by the game's particle renderer (authoring/preview_effects,
 // the project's files mounted for their graphics), the tracers, the target's face and the scars on it
@@ -77,10 +86,12 @@ public:
 	// The editor's preview background behind the model.
 	void background(opennova::editor::PreviewBackground background) override;
 
-	// Its nodes, for the parity tests: the camera, the model and the first-person arms.
+	// Its nodes, for the parity tests: the camera, the model, the first-person arms and the held
+	// weapon.
 	Camera3D *camera() const { return camera_; }
 	ObjectModel *object_model() const { return object_; }
 	ObjectModel *arms_model() const { return arms_; }
+	ObjectModel *held_model() const { return held_; }
 	// A clip's fire (DI-24): the effects drawn and the range's target, tracers and scars (null until a clip fires
 	// here).
 	PreviewEffects *effects() const { return effects_.get(); }
@@ -127,6 +138,12 @@ private:
 	// A clip's fire (DI-24): the effects' scene the viewport's run stepped, the range drawn against the camera, the
 	// view single-sampled while anything fires.
 	void apply_fire_(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock);
+	// A person's held weapon (DI-13's follow-up): its model made again as the viewport's moves,
+	// then placed.
+	void apply_held_(const opennova::editor::ViewportModel &model);
+	// The held weapon where the game hangs it from the body as posed now, at the body's level
+	// clamped to its own; hidden while none draws or the body's skeleton cannot place it.
+	void place_held_(const opennova::editor::ViewportModel &model);
 	// The clip fire's effects and range made (the first time a clip fires), and let go of (nothing drawn, nothing
 	// mounted).
 	void make_fire_();
@@ -139,6 +156,7 @@ private:
 	Camera3D *camera_ = nullptr;
 	ObjectModel *object_ = nullptr;
 	ObjectModel *arms_ = nullptr; // the first-person arms on the gun's rig (no data: none)
+	ObjectModel *held_ = nullptr; // a person's held weapon (no data: none)
 	Ref<ObjectData> data_;
 	Ref<ObjectData> arms_data_;
 	Ref<PanmClock> clock_;
@@ -154,7 +172,13 @@ private:
 	std::unique_ptr<PreviewEffects> effects_;
 	std::unique_ptr<PreviewFrameEffects> frame_effects_; // the view's FrameFX: its decode, the heat haze's row
 	std::unique_ptr<PreviewRangeDraw> range_;
-	std::shared_ptr<const opennova::editor::ProjectAssetSource> fire_files_; // an animation's project files
+	// An animation's project files: what a clip's fire and the held weapon read through.
+	std::shared_ptr<const opennova::editor::ProjectAssetSource> animation_files_;
+	// The held weapon's: the viewport's model serial it was made from, the files its textures read
+	// (noted as read), the level it draws at.
+	uint64_t applied_held_ = UINT64_MAX;
+	std::shared_ptr<const opennova::StampedFiles> held_files_;
+	int applied_held_lod_ = -1;
 	bool mounted_ = false; // the project's files are mounted for the clip fire's effects
 };
 

@@ -42,6 +42,7 @@
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/ammo_table.h>
+#include <runtime/world/entity_pose.h>
 
 namespace opennova::editor {
 
@@ -114,6 +115,7 @@ struct ModelViewportView::Tools {
 	void sound(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void fire(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void first_person(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
+	void held_weapon(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 	void place_in_mission(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 };
@@ -490,6 +492,110 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 	if (options != model.options()) set_options(workspace, model, options);
 }
 
+// A person's held weapon (DI-13's follow-up, preview/preview_held_weapon): what the body holds
+// while the row plays and why, the weapon (Auto the first of weapon.def that plays the row, None,
+// or one picked), and the weapon's record, its fields and its model, each a Go to. The choice a
+// SetViewport of the options' `held`.
+void ModelViewportView::Tools::held_weapon(
+		Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model) {
+	const SessionView &view = workspace.view();
+	ModelViewportOptions options = model.options();
+	HeldWeaponOptions &chosen = options.held;
+	const HeldWeapon &held = model.held();
+	const HeldWeaponChoice *weapon = held.drawn();
+	const std::string label =
+			(weapon && held.model() ? "Held: " + weapon->name : std::string("Held (none)")) +
+			"###held";
+	row.next(ui_kit::button_width(label.c_str()));
+	if (ImGui::Button(label.c_str()))
+		ImGui::OpenPopup("held");
+	ui_kit::tooltip(held.words() + (held.note().empty() ? std::string() : "\n" + held.note()));
+	if (ImGui::BeginPopup("held")) {
+		const float unit = ImGui::GetFontSize();
+		ImGui::PushTextWrapPos(unit * 26.0f);
+		ImGui::TextUnformatted(held.words().c_str());
+		if (!held.note().empty())
+			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", held.note().c_str());
+		ImGui::PopTextWrapPos();
+		// The weapon: Auto (the one it draws), None, or a weapon of weapon.def, each saying how it
+		// plays the row.
+		const bool automatic = chosen.weapon.empty();
+		const bool none = chosen.weapon == kHeldWeaponNone;
+		const std::string shown = automatic
+				? "Auto" + (weapon ? " (" + weapon->name + ")" : std::string(" (none)"))
+				: none	 ? std::string("None")
+				: weapon ? weapon->name
+						 : chosen.weapon;
+		ImGui::SetNextItemWidth(unit * 16.0f);
+		if (ImGui::BeginCombo("Weapon", shown.c_str(), ImGuiComboFlags_HeightLarge)) {
+			if (ImGui::Selectable("Auto", automatic))
+				chosen.weapon.clear();
+			ui_kit::tooltip("The first weapon of weapon.def that plays this row: its hold, its "
+							"attack, its reload, the binoculars; on a body row, the first whose "
+							"hold mirrors it. Only the player's class holds one.");
+			if (ImGui::Selectable("None", none))
+				chosen.weapon = kHeldWeaponNone;
+			ui_kit::tooltip("Nothing in the hands.");
+			for (const HeldWeaponChoice &choice : held.choices()) {
+				const std::string line = choice.name + "  (" +
+						kHeldRouteTokens[size_t(choice.route)] + ")##" + std::to_string(choice.adm);
+				if (ImGui::Selectable(line.c_str(), !automatic && !none && weapon == &choice))
+					chosen.weapon = choice.name;
+				ui_kit::tooltip("ADM " + std::to_string(choice.adm) + ", special_hold " +
+						std::to_string(choice.hold) + ", attack_anim " +
+						std::to_string(choice.attack) + ", gfx3 " +
+						(choice.gfx3.empty() ? std::string("none") : choice.gfx3) +
+						". How it plays this row: " + kHeldRouteTokens[size_t(choice.route)] + ".");
+			}
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip("The weapon in the body's hand: Auto takes the first of weapon.def that "
+						"plays the row.");
+		// The weapon's record and fields, and its model, each a Go to.
+		if (weapon) {
+			const ReferenceTarget &record = held.record();
+			const auto field_link = [&](const std::string &text, const char *field,
+											const char *id) {
+				ImGui::AlignTextToFramePadding();
+				if (record.file.empty()) {
+					ImGui::TextUnformatted(text.c_str());
+					return;
+				}
+				ReferenceTarget target = record;
+				if (*field)
+					target.field = field;
+				if (ImGui::TextLink((text + "###" + id).c_str()))
+					window_requests::go_to(workspace, target);
+				ui_kit::tooltip("Go to " + weapon->name + "'s " +
+						(*field ? std::string(field) : std::string("record")) + " in " +
+						record.file + ".");
+			};
+			ImGui::SeparatorText("Held");
+			field_link(
+					weapon->name + " (ADM " + std::to_string(weapon->adm) + ")", "", "held_weapon");
+			field_link("special_hold " + std::to_string(weapon->hold), "special_hold", "held_hold");
+			ImGui::SameLine();
+			field_link(
+					"attack_anim " + std::to_string(weapon->attack), "attack_anim", "held_attack");
+			field_link("gfx3 " + (weapon->gfx3.empty() ? std::string("(none)") : weapon->gfx3),
+					"gfx3", "held_gfx3");
+			if (!held.model_path().empty() && view.project.scan) {
+				ImGui::SameLine();
+				if (ImGui::TextLink((held.model_file() + "###held_model").c_str()))
+					window_requests::go_to(
+							workspace, file_target(*view.project.scan, held.model_path()));
+				ui_kit::tooltip(
+						"Go to " + held.model_path() + ", the model the game draws in the hand.");
+			}
+			ImGui::TextDisabled("Hangs from bone %d, %s.", world::kHeldWeaponBoneIndex,
+					held.hand_frame() ? "turned with the hand" : "turned with the body");
+		}
+		ImGui::EndPopup();
+	}
+	if (options != model.options())
+		set_options(workspace, model, options);
+}
+
 // The clip the selection plays (ADR 0046 S17): its transport (Run or Pause, Space; the first
 // frame, Home; a frame back and on, the arrows; the speed), the frame and the
 // time shown, then a track the mouse scrubs with its frames ruled and its events marked by what
@@ -768,6 +874,8 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	if (model.animating()) sound(workspace, row, model);
 	if (model.animating() && !model.first_person().active()) fire(workspace, row, model);
 	if (model.animating() && model.first_person().active()) first_person(workspace, row, model);
+	if (model.animating() && model.held().active())
+		held_weapon(workspace, row, model);
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
 	ui_kit::tooltip("What the viewport marks over the model, and the collision it draws.");

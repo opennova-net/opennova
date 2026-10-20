@@ -372,6 +372,88 @@ void test_first_person() {
 	ui.drain();
 }
 
+// A person's held weapon (DI-13's follow-up): the Held button names the weapon the row plays with,
+// its popup says what draws and why, and the weapon's name is a Go to its record in weapon.def.
+void test_held_weapon() {
+	test_temp::TempDir dir("opennova_editor_ui_held_weapon");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Held")), "the project");
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	// Where the project keeps a file of the name (a blank Create Missing made), else under defs/.
+	const auto at = [&](const std::string &name) {
+		const AssetEntry *entry = v.project.scan ? v.project.scan->find(name) : nullptr;
+		return entry ? entry->relative_path : "defs/" + name;
+	};
+	// The synthetic person (bone 16 its weapon hand), its map of the rig19 clips, the player's item
+	// and a knife.
+	const std::string weapons = at("weapon.def");
+	bool ok = test_io::write_file(v.project.root + "/models/person.3di",
+					  test_io::read_file(repo + "/fixtures/threedi/synth/person.3di")) &&
+			test_io::write_file(v.project.root + "/models/knife_3.3di",
+					test_io::read_file(repo + "/fixtures/threedi/synth/gun.3di")) &&
+			test_io::write_text(v.project.root + "/anims/soldier.adm",
+					test_io::crlf("anim_reset \"rig19_rst\"\nanim_knife \"rig19_idle\"\n")) &&
+			test_io::write_text(v.project.root + "/" + at("items.def"),
+					test_io::crlf(
+							"begin \"Soldier\"\nid 105305\ntype person\ngraphic person\n"
+							"anim_def soldier\nai_function plyr\nmove_function org2\nend\n")) &&
+			test_io::write_text(v.project.root + "/" + weapons,
+					test_io::crlf("weapon \"WPN_KNIFE\"\n\tclipsize -1\n\tgfx3 knife_3\n"
+								  "\tspecial_hold 1\n\tattack_anim 1\nend\n"));
+	for (const char *clip : { "rig19_rst", "rig19_idle" })
+		ok = ok &&
+				test_io::write_file(v.project.root + "/anims/" + clip + ".bad",
+						test_io::read_file(repo + "/fixtures/anim/" + clip + ".bad"));
+	CHECK(ok, "the person, its map, its item and its weapon written");
+	session.handle(request::rescan());
+	session.run_operations();
+	while (v.activity.validation.running)
+		session.poll();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	ClipRun run{ session, devices, ui };
+	const std::string path = "anims/soldier.adm";
+	session.handle(request::open_document(path));
+	Document *table = session.document_for(path);
+	NodeAddress knife;
+	CHECK(table && find_definition(AssetGraph(), *table, "anim_knife", knife), "the knife row");
+	if (!table)
+		return;
+	session.handle(request::select_record(path, knife));
+	session.handle(request::set_viewport(path, R"({"clock": {"playing": false, "ticks": 0}})"));
+	run.settle();
+	const ModelViewport *model = run.model(path);
+	CHECK(model && model->held().active() && model->held().model() && model->held().hand_frame(),
+			"the knife held, turned with the hand");
+	if (!model)
+		return;
+	ui.away();
+	std::string text = lowered(logged_frame(ui));
+	CHECK(text.find("held: wpn_knife") != std::string::npos, "the Held button names the weapon");
+	const ImGuiID scope = item_id(Ui::window_id("Preview"), { "model", path.c_str() });
+	ui.activate(item_id(scope, { "###held" }));
+	run.settle(1);
+	text = lowered(logged_frame(ui));
+	CHECK(text.find(
+				  "wpn_knife (the first that plays the row) holds knife_3.3di in the right hand") !=
+					std::string::npos,
+			"what draws, in words");
+	ui.activate(popup_item(ImHashStr("held", 0, scope), "###held_weapon"));
+	bool opened = false;
+	for (const EditorRequest &request : ui.drain())
+		opened = opened ||
+				(request.kind == EditorRequestKind::OpenDocument && request.path == weapons &&
+						!request.locator.empty());
+	CHECK(opened, "the weapon's name a Go to its record in weapon.def");
+}
+
 } // namespace
 
 void run_animation_tests() {
@@ -379,6 +461,7 @@ void run_animation_tests() {
 	test_event_press();
 	test_animations_keep_options();
 	test_first_person();
+	test_held_weapon();
 }
 
 } // namespace editor_ui_test
