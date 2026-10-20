@@ -1472,6 +1472,86 @@ bool check_quartet_skips_a_spectator_slot() {
 	return expect(quartet_tags() == 4, "the latch cleared, the next walk sends the quartet");
 }
 
+// A silence punt does not end the slot's visit: the countdown runs in the same
+// visit (one punted visit leaves it one lower), and at its zero the quartet's
+// state moves (the counts, the time-sync sequence, the model cursor) while the
+// connection, its description gone, queues nothing more: the wire carries the
+// description alone.
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 - the punts
+//  @0x5189EF..0x518A3A falling to the countdown @0x518A42..0x518A5D;
+//  CNapiNPConnection_QueueMessage @0x628640, the `desc_sent` drop @0x62864D]
+bool check_silence_punt_falls_through_to_the_countdown() {
+	const auto ctx_owner = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_owner;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	ctx.loaded_model_list_count = 305;
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle pa = w::spawn_remote_player(world, w::PlayerSpawn{});
+	const w::EntityHandle pb = w::spawn_remote_player(world, w::PlayerSpawn{});
+	ctx.world = &world;
+	const auto ta_owner = std::make_unique<ns::UdpSessionTransport>(ns::UdpSessionTransport::Role::Host);
+	const auto tb_owner = std::make_unique<ns::UdpSessionTransport>(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport &ta = *ta_owner;
+	ns::UdpSessionTransport &tb = *tb_owner;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &ta, ns::TransportMode::Client, pa, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			8, inmatch::NapiNPConnection::kTypeServerSide, &tb, ns::TransportMode::Client, pb, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 2;
+	inmatch::NapiNPConnection &a = ctx.np_protocol.connection_list[0];
+	inmatch::NapiNPConnection &b = ctx.np_protocol.connection_list[1];
+	world.match.upsert_player({pa, 1, "A"});
+	world.match.upsert_player({pb, 2, "B"});
+	for (const w::EntityHandle h : {pa, pb})
+		world.match.player(h)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	// Peer A: the character-attribute silence (the 16 arm), countdown 2.
+	a.reply.charattr_unanswered_count = 8;
+	a.reply.control_request_countdown = 2;
+	// Peer B: answered challenges, the time-sync silence (the 24 arm), and a
+	// countdown that reaches zero in the punted visit.
+	b.reply.time_sync_unanswered_count = 8;
+	b.reply.control_request_countdown = 1;
+	b.reply.control_challenge_seed = 0x1234;
+	const uint32_t sequence = b.reply.time_sync_sequence;
+	const auto tags = [](ns::UdpSessionTransport &t) {
+		std::vector<uint8_t> out;
+		for (const ns::Datagram &d : drain(t)) out.push_back(d.tag);
+		return out;
+	};
+	inmatch::Server_TickUpdate(ctx);
+	const std::vector<uint8_t> a_tags = tags(ta);
+	const std::vector<uint8_t> b_tags = tags(tb);
+	const auto punted = [](const std::vector<uint8_t> &t) {
+		return std::count(t.begin(), t.end(), hightag::DESCRIPTION_PACKET) == 1 &&
+				std::count(t.begin(), t.end(), s2c::CHARATTR_CRC_CHALLENGE) == 0 &&
+				std::count(t.begin(), t.end(), s2c::CHARATTR_DISABLED_PROPERTIES) == 0 &&
+				std::count(t.begin(), t.end(), s2c::TIME_SYNC_PING) == 0 &&
+				std::count(t.begin(), t.end(), s2c::LOADED_MODEL_PAGE_REQUEST) == 0;
+	};
+	if (!expect(a.host_disconnect_sent && a.host_disconnect_mismatch_type == 16 &&
+	                    punted(a_tags) && a.reply.control_request_countdown == 1,
+	            "the 16 punt's visit runs the countdown on (2 -> 1)"))
+		return false;
+	return expect(b.host_disconnect_sent && b.host_disconnect_mismatch_type == 24 &&
+	                      punted(b_tags) &&
+	                      b.reply.control_request_countdown ==
+	                              inmatch::CONTROL_REQUEST_PERIOD_TICKS &&
+	                      b.reply.charattr_unanswered_count == 1 &&
+	                      b.reply.time_sync_unanswered_count == 9 &&
+	                      b.reply.time_sync_sequence == sequence + 1u &&
+	                      b.reply.loaded_model_page_cursor == 50u,
+	              "the 24 punt's visit reaches the zero: the quartet's state moves, "
+	              "nothing queues after the description");
+}
+
 // The integrity family spends one PRNG_Next16 draw per request it sends, the
 // slot's word filled and zeroed again, so every request carries 0: a 0x31
 // boundary draws once per resolvable ADM row (the unresolved peer sends and
@@ -3604,6 +3684,7 @@ int main() {
 	ok = check_armory_reuse_cooldown() && ok;
 	ok = check_model_page_cursor_wraps_at_the_list_count() && ok;
 	ok = check_quartet_skips_a_spectator_slot() && ok;
+	ok = check_silence_punt_falls_through_to_the_countdown() && ok;
 	ok = check_integrity_family_draws_once_per_send() && ok;
 	ok = check_entity_state_fan_runs_out_of_session() && ok;
 	ok = check_a_loading_joiner_takes_no_proximity_or_census_place() && ok;

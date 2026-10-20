@@ -610,10 +610,17 @@ bool check_host_control_punt(uint32_t charattr_silence,
 
 	inmatch::NapiNPConnection &live =
 			owner.ctx.np_protocol.connection_list.front();
+	// The counter is tested before the countdown, and the punt does not end the
+	// visit: the countdown reaches its zero and reloads, the quartet queuing
+	// nothing after the description [orig: Server_UpdateAllActivePlayerSlots
+	//  @0x5189EF..0x518A3A, the countdown @0x518A42..0x518A5D;
+	//  CNapiNPConnection_QueueMessage's `desc_sent` drop @0x62864D].
 	if (!expect(live.host_disconnect_sent &&
 				live.host_disconnect_mismatch_type == expected_type &&
-				live.reply.control_request_countdown == 1,
-			"the counter is checked before countdown decrement and the cause latches"))
+				live.reply.control_request_countdown ==
+						inmatch::CONTROL_REQUEST_PERIOD_TICKS,
+			"the counter is checked before the countdown, the cause latches and the "
+			"countdown runs on"))
 		return false;
 
 	const std::size_t sent_once = socket.sent.size();

@@ -348,8 +348,9 @@ namespace {
 // session, for a remote slot (not the host's own, +5) whose spectator latch is
 // clear and whose live age has reached 1860 (slot+0x184, the play ticks the
 // play-tick walk adds to later in the tick, so the previous ticks' value), the
-// two silence punts (the character-attribute silence first), then the 744-tick
-// countdown and, at its zero, the 0x39 / 0x42, the 0x43 and the 0x68. Once
+// two silence punts (the character-attribute silence first), then, punt or no
+// punt, the 744-tick countdown and, at its zero, the 0x39 / 0x42, the 0x43 and
+// the 0x68 (none queued once the punt's description went). Once
 // mature, the countdown runs on through death and deploy states. The +96481
 // byte between the two tests has no writer on this host.
 // [orig: Server_UpdateAllActivePlayerSlots @0x518820 - is_in_session @0x5189AD,
@@ -366,14 +367,15 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 					static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS))
 		return;
 	SessionReplyState &reply = conn.reply;
-	if (reply.charattr_unanswered_count >= kPuntSilenceLimit) {
+	// A punt does not leave the slot's turn: the countdown below runs in the
+	// same visit, and at its zero the quartet follows the description.
+	// [orig: @0x5189EF..0x5189F5 (charattr < 8 takes the time-sync arm), the 16
+	//  arm's push and jmp @0x518A11..0x518A13, the 24 arm's @0x518A37, the one
+	//  call @0x518A3A, then the countdown @0x518A42]
+	if (reply.charattr_unanswered_count >= kPuntSilenceLimit)
 		stage_host_punt(conn, kPuntCharattrSilence);
-		return;
-	}
-	if (reply.time_sync_unanswered_count >= kPuntSilenceLimit) {
+	else if (reply.time_sync_unanswered_count >= kPuntSilenceLimit)
 		stage_host_punt(conn, kPuntTimeSyncSilence);
-		return;
-	}
 	bool control_due = reply.control_request_countdown == 0;
 	if (!control_due) {
 		--reply.control_request_countdown;
@@ -381,6 +383,13 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 	}
 	if (control_due) {
 		reply.control_request_countdown = CONTROL_REQUEST_PERIOD_TICKS;
+		// Once a description went the connection queues no message (the
+		// punt above, this visit or an earlier one), but the quartet's own
+		// state still moves: the counts, the seed draw, the stamps and the
+		// cursor [orig: CNapiNPConnection_QueueMessage @0x628640, the
+		// `desc_sent` test @0x62864D (set by CNapiNPConnection_TrySendSessionInit
+		// @0x629750)].
+		const bool queues = !conn.host_disconnect_sent;
 
 		++reply.charattr_unanswered_count;
 		++reply.time_sync_unanswered_count;
@@ -388,8 +397,9 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 			reply.control_challenge_seed = next_maintenance_prng16(world);
 		std::vector<uint8_t> challenge;
 		io::append_u32_le(challenge, reply.control_challenge_seed);
-		conn.link.transport->host_send(
-				s2c::CHARATTR_CRC_CHALLENGE, std::move(challenge));
+		if (queues)
+			conn.link.transport->host_send(
+					s2c::CHARATTR_CRC_CHALLENGE, std::move(challenge));
 
 		// The authority's charattr disable latches, eight packed into bits
 		// 0..5/12/13 (0 until a session's mp_No* word raised one, so every
@@ -398,9 +408,10 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 		//  CharAttr_PackDisabledProperties @0x412550 (IDB
 		//  Input_PackStateFlags until 2026-10-12)]
 		const uint16_t latches = world.tables.charattr_disabled_word;
-		conn.link.transport->host_send(s2c::CHARATTR_DISABLED_PROPERTIES,
-				{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
-				/*reliable=*/false);
+		if (queues)
+			conn.link.transport->host_send(s2c::CHARATTR_DISABLED_PROPERTIES,
+					{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
+					/*reliable=*/false);
 
 		const uint32_t host_ms =
 				io::host_milliseconds_for_logic_tick(world.logic_tick);
@@ -412,8 +423,9 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 		}
 		std::vector<uint8_t> time_sync;
 		io::append_u32_le(time_sync, reply.time_sync_sequence);
-		conn.link.transport->host_send(
-				s2c::TIME_SYNC_PING, std::move(time_sync));
+		if (queues)
+			conn.link.transport->host_send(
+					s2c::TIME_SYNC_PING, std::move(time_sync));
 
 		// The 0x68 rides unless the host's game.cfg allowcustomskins word is
 		// set, dedicated host or not: it advances the slot's cursor by 50 and
@@ -433,9 +445,10 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 				reply.loaded_model_page_cursor = 0;
 			std::vector<uint8_t> model_page;
 			io::append_u32_le(model_page, reply.loaded_model_page_cursor);
-			conn.link.transport->host_send(
-					s2c::LOADED_MODEL_PAGE_REQUEST, std::move(model_page),
-					/*reliable=*/false);
+			if (queues)
+				conn.link.transport->host_send(
+						s2c::LOADED_MODEL_PAGE_REQUEST, std::move(model_page),
+						/*reliable=*/false);
 		}
 	}
 }
