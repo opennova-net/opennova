@@ -697,6 +697,8 @@ public:
 	// Joiner state passthrough (HostClient: never InMatch, no self handle).
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
 	bool in_session() const { return joiner_ && joiner_->in_session(); }
+	// The game loop runs (JoinerConnection::in_game_loop): alive, dead or redeploying.
+	bool in_game_loop() const { return joiner_ && joiner_->in_game_loop(); }
 	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }

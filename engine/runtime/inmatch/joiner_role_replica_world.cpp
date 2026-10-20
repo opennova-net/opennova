@@ -877,7 +877,14 @@ void JoinerRole::refresh_wire_collision_proxies() {
 	uint16_t self_wire_handle = world::EntityHandle::kInvalid;
 	if (rt.has_self_handle())
 		self_wire_handle = rt.self_handle();
-	if (rt.in_match()) {
+	// The game loop's entity update rebuilds the person and dynamic proximity lists every
+	// frame, the local player alive or dead: death sends the connection back to Driving,
+	// not out of the game loop.
+	// [orig: Entity_UpdateAllEntities @0x4c240a -> Entity_BuildProximityLists_Pool01
+	//  @0x4B9340 (g_PersonProxCount @0x4b935a, no local-death test); its readers
+	//  Physics_RaycastAgainstProximityList @0x4e4a30, Projectile_RaycastProximitySlots
+	//  @0x4e57c4, Entity_MovementCollisionResolver @0x4b3ac6]
+	if (rt.in_game_loop()) {
 		for (const replication::ClientEntityState &entity :
 				rt.state().entities) {
 			if (entity.handle == world::EntityHandle::kInvalid ||

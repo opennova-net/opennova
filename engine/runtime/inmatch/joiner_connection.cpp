@@ -242,6 +242,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	session_rtt_ms_ = 0;
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
+	round_over_gate_ = false;
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
@@ -1085,6 +1086,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	bool world_state_load_seen = false; // this packet's S2C 0x0F (completes admission below)
 	for (const ProtocolMessage &m : messages) {
 		const uint32_t packet_ack = containing_packet_ack[message_index++];
+		// The round-over gate at its wire position: the 0x1D raises it ahead of its own
+		// parse, the 0x25 on a client; the mission start lowers it after the pass that
+		// ended the mission-data spin (below).
+		// [orig: NapiNPClientMsg_0x01D @0x430858; NapiNPClientMsg_GameReset @0x422849;
+		//  Game_StartMission @0x524a1f]
+		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE &&
+		    (m.tag == s2c::END_ROUND_HEADER || m.tag == s2c::GAME_RESET))
+			round_over_gate_ = true;
 		// The ONE settings-flagged record that is not connection control to skip: the
 		// connection-description block the host sends to close the session. Gated on its exact
 		// full tag and on the body actually decoding as a description, so every other
@@ -1593,9 +1602,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			post_auth_stage_ = PostAuthStage::AwaitMissionStart;
 			out.game_start_acked = true;
 		} else if (m.tag == s2c::RTT_ECHO) {
+			// While the round-over gate is up the handler returns at once: no pong for
+			// the host's ping, no round trip measured for ours.
+			// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - `cmp g_SpawnSuccessGate, 0`
+			//  / `jnz locret` @0x432210..0x432217]
 			RttSample sample;
 			std::size_t consumed = 0;
-			if (decode_rtt_sample(
+			if (!round_over_gate_ && decode_rtt_sample(
 					m.payload.data(), m.payload.size(), sample, consumed) &&
 			    consumed == m.payload.size()) {
 				if (sample.echo_flag != 0) {
@@ -2030,6 +2043,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		out.queued_send_after.push_back(reducer_entries);
 		out.queued_send_messages.push_back(std::move(periodic_replies[reply]));
 	}
+	// The mission start's globals reset follows the pass that ended the mission-data spin.
+	// [orig: Game_StartMission `mov g_SpawnSuccessGate, ebx` @0x524a1f]
+	if (out.mission_started) round_over_gate_ = false;
 	if (admission.admitted && world_state_load_seen &&
 	    post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 		initial_admission_complete_ = true;
@@ -2147,6 +2163,7 @@ std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
 	// it) and the session's identity stay.
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
+	round_over_gate_ = true; // the round end's gate holds until the mission start
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;

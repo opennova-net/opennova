@@ -1135,6 +1135,10 @@ private:
 	std::vector<uint32_t> loaded_model_challenge_snapshot_;
 	bool preload_ready_ = false; // terminal pre-world S2C 0x11 received and ACK boundary reached
 	bool sync_tail_seen_ = false; // the host emits 0x11 exactly once; latch an early arrival
+	// The round-over gate in wire order for this connection's own handlers that read it
+	// (the 0x57's); the replica's ClientState::spawn_success_gate serves the frame.
+	// [orig: g_SpawnSuccessGate @0x24C1928]
+	bool round_over_gate_ = false;
 	bool initial_admission_complete_ = false; // a S2C 0x0F seen in the deploy wait
 	bool deployment_pick_sent_ = false;
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E

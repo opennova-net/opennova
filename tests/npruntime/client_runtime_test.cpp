@@ -3279,6 +3279,51 @@ bool run_console_command_sends_the_line() {
 	return expect(saw_line, "the listen host's own client sends its line over the loopback");
 }
 
+// The S2C 0x57's handler returns at once while the round-over gate is up: no pong for the
+// host's ping, no round trip measured for ours. The gate is read at the message's wire
+// position: a 0x57 ahead of the 0x1D in one packet is still answered, one behind it is not.
+// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - `cmp g_SpawnSuccessGate, 0` / `jnz locret`
+//  @0x432210..0x432217; NapiNPClientMsg_0x01D @0x430858 (the gate before the parse)]
+bool run_rtt_echo_waits_out_the_round_over_gate() {
+	const std::string client_scrk = "CLIENT-RTT-GATE-SCRK";
+	const std::string server_scrk = "SERVER-RTT-GATE-SCRK";
+	uint64_t now = 100000;
+	inmatch::ClientRuntime client("RttGate", [&now] { return now; });
+	client.set_title(&kJo);
+	client.seed_session(0x52545447u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/true);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const auto rtt = [](uint32_t ts, uint8_t echo) {
+		return make_protocol_message(s2c::RTT_ECHO,
+				{static_cast<uint8_t>(ts), static_cast<uint8_t>(ts >> 8),
+				 static_cast<uint8_t>(ts >> 16), static_cast<uint8_t>(ts >> 24), echo});
+	};
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.player_index = 0;
+	const ProtocolMessage round_over = make_protocol_message(s2c::END_ROUND_HEADER,
+			encode_end_round_header(header, /*non_team_form=*/false));
+	// One packet: a host ping, the 0x1D, a second host ping, then our own pong.
+	const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+			{rtt(0x11111111u, 1), round_over, rtt(0x22222222u, 1),
+			 rtt(static_cast<uint32_t>(now - 40), 0)});
+	client.receive(dg.data(), dg.size());
+	std::vector<std::vector<uint8_t>> pongs;
+	for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader packet;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, packet, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::RTT_CONSUMED) pongs.push_back(m.payload);
+	}
+	if (!expect(pongs == std::vector<std::vector<uint8_t>>{{0x11, 0x11, 0x11, 0x11, 0x00}},
+			"the ping ahead of the 0x1D is answered; the one behind it is not"))
+		return false;
+	return expect(client.client_ping_ms() == 0,
+			"our own pong behind the 0x1D measures nothing");
+}
+
 bool run_host_zone_timer_value_matches_retail_entry() {
 	ns::LoopbackChannel host_loop;
 	inmatch::ClientRuntime host_view(host_loop);
@@ -8346,6 +8391,7 @@ int main() {
 	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
 	                run_client_quality_takes_the_host_metric() &&
 	                run_console_command_sends_the_line() &&
+	                run_rtt_echo_waits_out_the_round_over_gate() &&
 	                run_novaworld_exit_on_a_joiner() &&
 	                run_mission_exit_routes() &&
 	                run_joiner_goodbye_tears_down_host();

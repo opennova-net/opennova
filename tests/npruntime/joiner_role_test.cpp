@@ -638,6 +638,56 @@ bool run_wire_proxy_twin_takes_the_owned_lifetime(bool wire_header_world) {
 	return ok;
 }
 
+// The proximity lists the joiner's collision reads are rebuilt every game-loop frame, the
+// local player alive or dead: a dead joiner (back in the deploy pick) keeps publishing the
+// decoded rows' wire proxies.
+// [orig: Entity_UpdateAllEntities @0x4c240a -> Entity_BuildProximityLists_Pool01 @0x4B9340,
+//  no local-death test]
+bool run_dead_joiner_keeps_its_wire_proxies() {
+	constexpr uint16_t kType = 1291;
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	def::DefItemDef defs[2]{};
+	defs[0].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[0].type = 3;
+	defs[0].hp = 100;
+	defs[1].id = kType + mission::kItemIdOffset;
+	defs[1].type = 1;
+	std::strcpy(defs[1].ai_function, "cveh");
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	const w::EntityHandle remote{0x1004};
+	auto &row = h.role.runtime->state().upsert(remote.packed);
+	row.type_id = kType;
+	row.cls = EntityClass::Vehicle;
+	h.role.run_tick(h.input);
+	if (!expect(h.kernel->collision.wire_dynamic_proxy(remote.packed) != nullptr,
+			"dead proxies: a living joiner publishes the decoded row's proxy"))
+		return false;
+	FrameUpdate death;
+	death.carried_handle = 0xFFFF;
+	death.health = 0;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(death))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+	h.role.run_tick(h.input);
+	if (!expect(!h.role.runtime->in_match() && h.role.runtime->in_game_loop(),
+			"dead proxies: the death leaves the match phase, not the game loop"))
+		return false;
+	return expect(h.kernel->collision.wire_dynamic_proxy(remote.packed) != nullptr,
+			"dead proxies: a dead joiner still publishes the decoded row's proxy");
+}
+
 // Retail drives the carrier from the mounted person's C2S 0x0C. Exercise
 // the joiner frame's confirmed mount, input and client prediction together.
 // [orig: Client_ProcessNetworkFrame @0x42c180;
@@ -2591,6 +2641,7 @@ int main() {
 	ok &= run_full_bms_child_gun_mount();
 	ok &= run_wire_proxy_twin_takes_the_owned_lifetime(true);
 	ok &= run_wire_proxy_twin_takes_the_owned_lifetime(false);
+	ok &= run_dead_joiner_keeps_its_wire_proxies();
 	ok &= run_flare_descriptor_carries_the_pilot_handheld();
 	ok &= run_guided_fire_preserves_selected_target();
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
