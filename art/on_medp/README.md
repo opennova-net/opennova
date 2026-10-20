@@ -1,7 +1,7 @@
 # `art/on_medp`: the base game's first-person medical pouch
 
 `on_medp.blend` is the first-person medical pouch, the view model of `WPN_MEDPACK` (the engine's
-fixed name, the medic's kit): `on_medp Rig` (56 parts: `BN01 Weapon origin`, `on_ar15 Rig`'s 54 arm
+fixed name, the medic's kit): `on_medp Rig` (56 parts: `BN01 Pelvis`, `on_ar15 Rig`'s 54 arm
 bones in the same order, then `BN56 Kit` on `BN17 hand_r`), the pouch's mesh, `on_arms Skin` for the
 previews, the `Hip view` camera (weapon.def `pos`) and the six `on_medp_anim_*` Actions the clip table
 names. Export Model and Export Animations on `on_medp` write every `assets/on_medp*` file (never

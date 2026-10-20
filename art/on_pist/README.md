@@ -1,7 +1,7 @@
 # `art/on_pist`: the base game's first-person pistol
 
 `on_pist.blend` is the first-person pistol, the view model of `WPN_colt45` (our WK-11, named by the sidearm id the engine's default kits name): `on_pist Rig` (63 parts:
-`BN01 Weapon origin`, `on_ar15 Rig`'s 54 arm bones in the same order, then the gun's eight, `BN56 Body`,
+`BN01 Pelvis`, `on_ar15 Rig`'s 54 arm bones in the same order, then the gun's eight, `BN56 Body`,
 `BN57 Slide`, `BN58 Trigger`, `BN59 Hammer`, `BN60 Magazine`, `BN61 Cartridge` (under the magazine),
 `BN62 Safety` and `BN63 Slide_Stop`), the gun's part meshes `56 Mesh` .. `63 Mesh` on their bones, the
 `Hip view` and `Aim view` cameras (weapon.def `pos` and `tpos`) and the seven `on_pist_anim_*` Actions
@@ -25,7 +25,7 @@ clips of the Manny skeleton (`A_FP_WK-11_Viper_*`) with the gun's own clips (`A_
 
 - **The skeleton.** The pack's Manny is the UE5 Manny the AR-15's arms come from, and its bind pose is
   `on_pist Rig`'s rest: fitted on the arm bones, the map from the skeleton's root frame into the rig's is
-  the AR-15's (the 1.07 m drop, no turn), within 0.01 mm. The pack's character clips are animation-only
+  the AR-15's (the 0.8424 m drop, no turn), within 0.01 mm. The pack's character clips are animation-only
   ASCII FBX, which Blender does not read and which carry no bind pose; Godot 4.6 reads them (its
   `FBXDocument`, then written as glTF), and the bind pose came from the one binary character FBX in the
   pack (`A_FP_MKR9_Idle`), the same skeleton.
@@ -62,11 +62,11 @@ clips of the Manny skeleton (`A_FP_WK-11_Viper_*`) with the gun's own clips (`A_
 ## The camera
 
 The game's first-person camera moves by nothing a weapon clip carries (`art/on_ar15/README.md`, The
-pack's camera), so `BN01 Weapon origin` stays at rest in every clip and the pack's head turn is left out.
+pack's camera), so `BN01 Pelvis` stays at rest in every clip and the pack's head turn is left out.
 The `Hip view` eye stands where the pack's camera is in the idle pose, moved by the opposite of the
 pack's `weaponOffset` for the Viper (the gun 1.5 cm across and 3 cm up from the head, in the character's
 root frame): the pack moves the gun and the hands with it, the game moves the eye, and the picture is
-the same. The add-on writes it as `pos` (-4.332 -3.84 -115.511).
+the same. The add-on writes it as `pos` (-4.332 -3.84 -173.766).
 
 ## Aiming
 
@@ -77,7 +77,7 @@ The sights are the Viper's fixed pair: the front post and the rear blade, its no
 the post's tip. The sight line runs from the post's tip to the top of the rear blade at the notch's
 middle; in the idle pose it points 0.26° left of the view and 1.65° below it, with the gun canted 0.07°.
 The `Aim view` camera stands on that line 17 cm behind the rear sight, looking down it with the gun's
-top up. The add-on writes its place (`tpos` -32.708 16.642 -102.353); its turn is `tpos`'s rotation, set
+top up. The add-on writes its place (`tpos` -32.708 16.642 -160.608); its turn is `tpos`'s rotation, set
 by hand: yaw 359.74, pitch 1.654, roll 359.935 (a negative angle reads as 0 in the game, so a yaw of
 -0.26 is written 359.74). The game turns the whole view model about the eye by it, so the post
 stands in the notch at the middle of the screen.

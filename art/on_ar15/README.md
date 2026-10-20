@@ -1,17 +1,35 @@
 # `art/on_ar15`: the base game's first-person carbine
 
-`on_ar15.blend` is the first-person carbine and its arms: `on_ar15 Rig` (64 parts: `BN01 Weapon
-origin`, the arms' 54 bones named after the UE5 Manny bones they come from, the gun's nine), the gun's
+`on_ar15.blend` is the first-person carbine and its arms: `on_ar15 Rig` (64 parts: `BN01 Pelvis`,
+the arms' 54 bones named after the UE5 Manny bones they come from, the gun's nine), the gun's
 part meshes on its bones, `on_arms Skin` deformed by the same rig, the `Hip view` and `Aim view`
 cameras (weapon.def `pos` and `tpos`) and the eight `on_ar15_anim_*` Actions the clip table names.
 Export Model on `on_ar15` and `on_arms` and Export Animations on `on_ar15` write every `assets/on_ar15*`
 and `assets/on_arms*` file. Materials and textures: `SOURCES.md`.
 
+## The rig stands as the soldier
+
+The original's first-person rig is the soldier's own skeleton cut down to the arms: `M9k_1st`,
+`ak47_1st` and the rest are T-posed character skeletons with `BN01 Pelvis` at the model origin and the
+upper arms 0.587 m above it, and every first-person clip stands that skeleton on the ground, its
+`bottom` the pelvis's height (1.069 m for the stock arms' clips; docs/net/novaworld-net-re.md §5.40,
+the add-on README's Animations). So weapon.def `pos` and `tpos` are the eye measured from the soldier's
+pelvis (the original's knife `pos 4 -5 -186`: the eye 0.727 m over it).
+
+Every first-person rig here is built the same way on our soldier (`art/onjo1/person/onsold1.blend`):
+`BN01 Pelvis` at the model origin, the upper arms 0.5934 m over it, where `onsoldb.3di` has them, and
+each scene's model root standing at the soldier's rest hip height, 1.0185 m (`onp1_rst`'s `bottom`),
+so every clip carries the soldier's hip height as the original's carry theirs. The eye cameras ride
+with the arms, so each `pos` and `tpos` is the eye over the pelvis (the AR-15's 0.794 m, the pistol's
+0.679 m). Nothing in the game reads a first-person clip's events, and the picture is the same either
+way; this keeps the files what the original's are.
+
 ## Where the clips come from
 
 The gun, the arms' rig and the clips are Infima Games' Tactical FPS Animations (TFA) assault rifle.
 Each clip is the pack's first-person clip of the Manny skeleton, its arm and gun bones taken in the
-skeleton's root frame (the rig's origin is 1.07 m above that root):
+skeleton's root frame, which stands 0.8424 m under `BN01 Pelvis` (the Manny arms sit lower on the
+pelvis than our soldier's; the rig carried them 1.07 m over that root before it stood as the soldier):
 
 | Action | TFA clip | Frames at 30 fps |
 |---|---|---|
@@ -47,7 +65,7 @@ idle, 1.3° in the fire, 2.1° in the holster and the reload, 2.7° in the draw)
 camera moves by nothing a weapon clip carries: the engine samples a clip's per-frame events (velocity,
 `bottom`, `top`) for a soldier's body only (`AnimChannel_InterpolateKeyframe @0x40B230`, reached only
 through `AnimMap_UpdateDualChannels @0x40B8C0` from the infantry body and AI updates), never for the
-first-person channel. So the camera stays still, and `BN01 Weapon origin` stays at rest in every clip.
+first-person channel. So the camera stays still, and `BN01 Pelvis` stays at rest in every clip.
 Baking the head's turn into `BN01` as its inverse was tried and dropped: it moves the arms and gun
 against a still world, which does not read as the pack's moving camera.
 
@@ -63,7 +81,7 @@ The sights are the pack's flip-up pair, both raised: the rear (its peep 10.7 mm 
 the rear sight's material). In the idle pose the gun is canted about 9° and the sight line (the peep's
 centre to the post's tip, parallel to the bore) points along the view to within 0.05°. The `Aim view`
 camera stands on that line 13.95 cm behind the peep, looking down it with the gun's top up. The add-on
-writes only its place (`tpos` 0.791 11.839 -135.622); its turn is `tpos`'s rotation, set by hand: yaw
+writes only its place (`tpos` 0.791 11.839 -193.877); its turn is `tpos`'s rotation, set by hand: yaw
 0.018, pitch 0, roll 8.973. The game turns the whole view model about the eye by it, so the cant comes
 out and the post's tip stands in the peep's centre at the middle of the screen.
 
@@ -71,6 +89,6 @@ out and the post's tip stands in the peep's centre at the middle of the screen.
 
 The pack's clips are not in the repository. To change one: export the TFA clip from the pack's Unreal
 project as FBX and import it into a scratch scene, sample its arm and gun bones onto `on_ar15 Rig` (the
-map from the skeleton's root frame into the rig's: fitted on the arm bones, a turn and the 1.07 m drop
-from the skeleton's root), leave `BN01` at rest, set the Action's frame range and Clip rate (30), then
-Export Animations.
+map from the skeleton's root frame into the rig's: fitted on the arm bones, a turn and the 0.8424 m drop
+from the skeleton's root to `BN01 Pelvis`), leave `BN01` at rest, set the Action's frame range and
+Clip rate (30), then Export Animations.

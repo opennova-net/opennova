@@ -1,7 +1,7 @@
 # `art/on_frag`: the base game's first-person fragmentation grenade
 
 `on_frag.blend` is the first-person frag grenade, the view model of `WPN_GRENADEHE` (the engine's
-fixed name): `on_frag Rig` (58 parts: `BN01 Weapon origin`, `on_ar15 Rig`'s 54 arm bones in the same
+fixed name): `on_frag Rig` (58 parts: `BN01 Pelvis`, `on_ar15 Rig`'s 54 arm bones in the same
 order, then `BN56 Body` on `BN17 hand_r`, and `BN57 Spoon` and `BN58 Pin` under the body), the three
 part meshes, `on_arms Skin` for the previews, the `Hip view` camera (weapon.def `pos`) and the six
 `on_frag_anim_*` Actions the clip table names. Export Model and Export Animations on `on_frag` write

@@ -1,10 +1,10 @@
 # `art/on_knif`: the base game's first-person combat knife
 
 `on_knif.blend` is the first-person knife, the view model of `WPN_KNIFE` and `WPN_KNIFE2` (the
-engine's fixed names for the blue and red sides' knife): `on_knif Rig` (56 parts: `BN01 Weapon
-origin`, `on_ar15 Rig`'s 54 arm bones in the same order, then `BN56 Knife`, a child of `BN17
-hand_r`), the knife's mesh `56 Mesh` on its bone, `on_arms Skin` for the previews, the `Hip view`
-camera (weapon.def `pos`) and the five `on_knif_anim_*` Actions the clip table names. Export Model
+engine's fixed names for the blue and red sides' knife): `on_knif Rig` (56 parts: `BN01 Pelvis`,
+`on_ar15 Rig`'s 54 arm bones in the same order, then `BN56 Knife`, a child of `BN17 hand_r`), the
+knife's mesh `56 Mesh` on its bone, `on_arms Skin` for the previews, the `Hip view` camera
+(weapon.def `pos`) and the five `on_knif_anim_*` Actions the clip table names. Export Model
 and Export Animations on `on_knif` write every `assets/on_knif*` file (never Export Model on
 `on_arms`: `art/on_ar15/on_ar15.blend` stays the arms' source). The scene `on_knif bake` holds the
 mesh with the bake materials the textures come from. Materials and textures: `SOURCES.md`.
@@ -50,8 +50,8 @@ them, the last key's time; every clip is at 30 fps.
 
 ## The camera
 
-As the AR-15's and the pistol's (`art/on_ar15/README.md`, The pack's camera): `BN01 Weapon origin`
-stays at rest in every clip. The `Hip view` camera is the pistol's eye (`pos -4.332 -3.84 -115.511`);
+As the AR-15's and the pistol's (`art/on_ar15/README.md`, The pack's camera): `BN01 Pelvis`
+stays at rest in every clip. The `Hip view` camera is the pistol's eye (`pos -4.332 -3.84 -173.766`);
 a knife has no sights, so there is no `Aim view` and no `tpos`.
 
 ## Changing a clip

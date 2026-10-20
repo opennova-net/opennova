@@ -497,7 +497,11 @@ Animations** reads a `.adm` (or a single `.bad`) onto the active model's rig.
   stands: `BN01` moves by its own translation, and every event stands still
   at the hips' rest height above Blender's ground (Z = 0), which is what
   retail's first-person clips carry. The game never reads a first-person
-  clip's events.
+  clip's events. Retail's first-person rig is the soldier's skeleton cut down
+  to the arms (`BN01 Pelvis` at the model origin, the upper arms 0.587 m over
+  it), standing at his hip height, 1.069 m for the stock arms, and `POS` is
+  the eye over that pelvis; stand the model root at the soldier's hip height
+  for the same events.
 - **Event triggers are markers.** A marker on the Action named after an
   event bit sets that bit on its frame: `FOOT_LEFT` and `FOOT_RIGHT` place
   the footsteps, `FIRE_PRIMARY`, `FIRE_SECONDARY` and `FIRE_MARKER3` fire the

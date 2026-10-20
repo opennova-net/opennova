@@ -23,9 +23,10 @@ pack (2026-10-13; the pistol's pack, `art/on_pist/SOURCES.md`). The pack's files
 are not kept here: the `.blend` holds only what was made from them.
 
 The pack's character stands on the UE5 Manny skeleton in Manny's rest pose, and
-`on_ar15 Rig`'s 54 arm bones are Manny's at that rest, 1.07 m lower (every bone
-head within 0.001 mm), so the sleeves and gloves sit on the rig as the pack built
-them, moved down 1.07 m; nothing is refitted, and the hands grip every weapon
+`on_ar15 Rig`'s 54 arm bones are Manny's at that rest, 0.8424 m lower (every bone
+head within 0.001 mm; the rig's `BN01 Pelvis` stands under them as our soldier's
+pelvis does, `art/on_ar15/README.md`), so the sleeves and gloves sit on the rig as
+the pack built them, moved down 0.8424 m; nothing is refitted, and the hands grip every weapon
 whose first 55 parts are this rig's as the pack's own hands do. Their weights are
 the pack's, each Manny bone's weight on the rig's bone of its name (the
 `BNxx <name>` label); a bone the rig lacks (a corrective, a wrist helper) gives its
