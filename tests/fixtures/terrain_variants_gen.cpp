@@ -213,13 +213,15 @@ constexpr int kBase = 64 * 256; // 64 world units
 
 // The atlas: flat at 64 units but the first block of rows 0 to 15, whose ranges take each width the 4-bit field
 // holds (a range of r a width of r + 1's bits: row k's first block a range of 2^k - 1, width k + 1, row 0 flat at
-// width 1), and row 15's first block steeper than a block holds (clamped by the writer, read back clamped).
+// width 1), and row 15's first block steeper than a block holds (clamped by the writer, read back clamped). That
+// block rises from 0, so clamped it tops out at kCdepMaxRange: every height read back stands at or under 128 units,
+// the rasterizer's top (no shipped .cpt stands past it; the editor's heights document finds any that does).
 std::vector<uint16_t> make_cpt_depth() {
 	std::vector<uint16_t> depth(size_t(kDim) * kDim, uint16_t(kBase));
 	for (int k = 0; k < 16; ++k) {
 		const int range = k < 15 ? (1 << k) - 1 : 40000;
 		for (int i = 0; i < 256; ++i) {
-			const int low = k < 15 ? kBase - range / 2 : 8000;
+			const int low = k < 15 ? kBase - range / 2 : 0;
 			depth[size_t(k) * kDim + i] = uint16_t(low + (i == 255 ? range : (range * i) / 255));
 		}
 	}

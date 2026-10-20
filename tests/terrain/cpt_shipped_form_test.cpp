@@ -32,7 +32,7 @@ struct Vector {
 };
 
 const Vector kExpected[] = {
-	{"variants/shipped.cpt", 255983u, 0x928a0548b13c5a7dull},
+	{"variants/shipped.cpt", 255983u, 0x459c750bf5427d4eull},
 	{"tmap/Tmap.cpt", 738781u, 0x47f26730fb433697ull},
 };
 
