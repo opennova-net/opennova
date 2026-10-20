@@ -1,5 +1,6 @@
 #include <runtime/inmatch/server_chat.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -69,20 +70,29 @@ const std::string *location_label(const NapiNPServerCtx &ctx, const world::World
 
 } // namespace
 
+// The walk over pool 3's 2044 rows: the sender's X/Y words less the row's (wrapping
+// int32 subtractions), the x87 length saturated at flt_7C19E0 and truncated, taken
+// when below the row's entity+0 bound word and strictly below the best so far (the
+// earliest row wins a tie); the label is the row's own +0x280 (D-NET-656).
+// [orig: NapiNPServer_HandleChatMessage @0x513760 - the walk @0x51394C..0x5139D1: the
+//  type test @0x513979, the deltas @0x51398A / @0x51398D, the clamp @0x5139AA..0x5139B5,
+//  _ftol2_sse @0x5139B7, `cmp eax, [edi]` @0x5139BC, `cmp eax, ebx` @0x5139C0, +0x280
+//  @0x5139C6; its radio twin NapiNPServerMsg_HandleRadioCall @0x514330 - @0x51444C /
+//  @0x51444F, @0x514479, @0x51447E]
 int nearest_location_index(const world::World &world, const world::Entity &sender) {
 	int best = -1;
-	float best_distance = 0.0f;
-	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3 || e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
-		// The marker's own location index, entity+0x280 (D-NET-656), not a pool-3 count.
-		const int my_index = e.location_index;
-		const float dx = sender.position.x - e.position.x;
-		const float dy = sender.position.y - e.position.y;
-		const float distance = std::sqrt(dx * dx + dy * dy);
-		if (distance < e.bound_radius && (best < 0 || distance < best_distance)) {
-			best = my_index;
-			best_distance = distance;
-		}
+	int32_t best_distance = INT32_MAX;
+	world.registry.for_each_in_pool(3, [&](const world::Entity &e) {
+		if (e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
+		const double dx = static_cast<int32_t>(
+				static_cast<uint32_t>(sender.position.x.q16) - static_cast<uint32_t>(e.position.x.q16));
+		const double dy = static_cast<int32_t>(
+				static_cast<uint32_t>(sender.position.y.q16) - static_cast<uint32_t>(e.position.y.q16));
+		const int32_t distance = static_cast<int32_t>(
+				std::min(std::sqrt(dx * dx + dy * dy), 2147418112.0)); // flt_7C19E0
+		if (distance >= world::to_fixed(e.bound_radius) || distance >= best_distance) return;
+		best_distance = distance;
+		best = e.location_index;
 	});
 	return best;
 }

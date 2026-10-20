@@ -186,16 +186,27 @@ SpawnPointResult target_pose(World &world, const Entity &target) {
     if (target.zone_number == 0)
         return out;
 
+    // The 6007 walk on the words: the zone's +0x15E radius shifted to 16.16, each
+    // pool-3 6007 row's wrapping X/Y deltas from the target, the x87 length
+    // saturated at flt_7C19E0 and truncated, kept when not past the radius, the
+    // first 32 (D-NET-507).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - the radius `movzx` / `shl 10h`
+    //  @0x50D034 / @0x50D03B, the ItemTypeIndex test @0x50D081..0x50D08C, the deltas
+    //  @0x50D098 / @0x50D09B, the clamp @0x50D0B7..0x50D0C2, _ftol2_sse @0x50D0C4,
+    //  `jg` @0x50D0CD, the 32-row cap @0x50D0D6]
+    const int32_t radius = static_cast<int32_t>(static_cast<uint32_t>(target.zone_radius) << 16);
     std::array<const Entity *, 32> nearby{};
     size_t count = 0;
-    world.registry.for_each([&](const Entity &candidate) {
-        if (count == nearby.size() || candidate.handle.pool() != 3 ||
-            !candidate.has_item_def || candidate.item_id != 6007)
+    world.registry.for_each_in_pool(3, [&](const Entity &candidate) {
+        if (count == nearby.size() || !candidate.has_item_def || candidate.item_id != 6007)
             return;
-        const double dx = static_cast<double>(candidate.position.x) - target.position.x;
-        const double dy = static_cast<double>(candidate.position.y) - target.position.y;
-        const double radius = static_cast<double>(target.zone_radius);
-        if (dx * dx + dy * dy <= radius * radius)
+        const double dx = static_cast<int32_t>(static_cast<uint32_t>(candidate.position.x.q16) -
+                                               static_cast<uint32_t>(target.position.x.q16));
+        const double dy = static_cast<int32_t>(static_cast<uint32_t>(candidate.position.y.q16) -
+                                               static_cast<uint32_t>(target.position.y.q16));
+        const int32_t distance = static_cast<int32_t>(
+                std::min(std::sqrt(dx * dx + dy * dy), 2147418112.0)); // flt_7C19E0
+        if (distance <= radius)
             nearby[count++] = &candidate;
     });
     if (count == 0)

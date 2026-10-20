@@ -1561,9 +1561,11 @@ void Match::tick_flag_event(World &world, Entity &flag) {
     state->previous_y_q16 = flag.position.y.q16;
     const Entity *occupant = world.registry.get(flag.primary_occupant);
     const Entity *local = world.registry.get(world.cached.local_player);
+    // The carrier's X/Y words, raw (D-NET-507).
+    // [orig: Entity_UpdateIdleCheck @0x408430 - @0x4085C2 / @0x4085C8]
     if (occupant != nullptr && local != nullptr && local->team == flag.team) {
-        flag.position.x = occupant->position.x;
-        flag.position.y = occupant->position.y;
+        flag.position.x.q16 = occupant->position.x.q16;
+        flag.position.y.q16 = occupant->position.y.q16;
     }
     flag.class_think_ticks = 62;
 }

@@ -18,6 +18,8 @@
 #include "host_test_setup.h"
 
 #include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/server_chat.h>
+#include <formats/def/reserved_items.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -30,6 +32,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
@@ -250,11 +253,114 @@ int placement_and_world_state_load_keep_the_words() {
 	return 0;
 }
 
+// An AI slot reads and writes its entity's words (no second store), and a
+// restore that replaces the registry's rows rebinds every slot to its row.
+// [orig: Entity_InitFromModel @0x40DC30 - the slot's spawn copy @0x40E115..0x40E127;
+//  the AI reads entity+4/+8/+0xC through the entity it belongs to]
+int ai_slot_reads_its_entity_words() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(0, 4);
+	w::Entity seed;
+	seed.position.set_q16({kAshJoinerX, kTdhHostY, kFarZ});
+	const w::EntityHandle h = world->registry.spawn(0, seed);
+	w::AiEntity *ae = world->ai.at(world->ai.attach(h));
+	if (!expect(ae->self == world->registry.get(h) &&
+	                    same_words(ae->self->position.q16(), kAshJoinerX, kTdhHostY, kFarZ),
+	            "the slot binds its row and reads its words"))
+		return 1;
+	world->ai.capture_spawn_baseline();
+	const w::World::Snapshot baseline = world->snapshot();
+	ae->self->position.x.q16 = kAshTrailerX;
+	if (!expect(world->registry.get(h)->position.x.q16 == kAshTrailerX,
+	            "a slot write is the entity's word"))
+		return 1;
+	world->restore(baseline);
+	ae = world->ai.for_handle(h);
+	if (!expect(ae != nullptr && ae->self == world->registry.get(h) &&
+	                    same_words(ae->self->position.q16(), kAshJoinerX, kTdhHostY, kFarZ),
+	            "the restore rebinds the slot to the restored row's words"))
+		return 1;
+	std::printf("PASS ai_slot_reads_its_entity_words\n");
+	return 0;
+}
+
+// The chat / radio nearest-location walk on the words: wrapping X/Y deltas,
+// the length truncated, strictly below the row's bound word and the best so
+// far (the earliest row wins a tie).
+// [orig: NapiNPServer_HandleChatMessage @0x513760 - @0x51398A / @0x51398D,
+//  _ftol2_sse @0x5139B7, `cmp eax, [edi]` @0x5139BC, `cmp eax, ebx` @0x5139C0]
+int nearest_location_takes_the_word_distances() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(3, 8);
+	const int32_t x0 = kFarZ; // 21000 units with low bits: the float view's ulp is 128 words
+	const auto location = [&](int32_t x, int32_t index, float bound) {
+		w::Entity seed;
+		seed.item_id = opennova::def::DEF_TYPE_NAMED_LOCATION;
+		seed.position.set_q16({x, 0, 0});
+		seed.location_index = index;
+		seed.bound_radius = bound;
+		return world->registry.spawn(3, seed);
+	};
+	// Row 0 one word farther than row 1 (a float view rounds both alike); row 2
+	// ties row 1; row 3 sits exactly on its bound word.
+	location(x0 - 0x10001, 10, 4.0f);
+	location(x0 + 0x10000, 11, 4.0f);
+	location(x0 - 0x10000, 12, 4.0f);
+	location(x0 + 0x8000, 13, 0.5f);
+	w::Entity sender;
+	sender.position.set_q16({x0, 0, 0});
+	if (!expect(inmatch::nearest_location_index(*world, sender) == 11,
+	            "the word distances pick the nearer row; a tie keeps the earlier; the bound is strict"))
+		return 1;
+	std::printf("PASS nearest_location_takes_the_word_distances\n");
+	return 0;
+}
+
+// The picked-zone placement on the words: the target's pose words, the z word
+// lifted by 0x10000, and the 6007 scatter walk's radius test on the words.
+// [orig: Server_PositionPlayerForSpawn @0x50CF60 - @0x50D01C; the 6007 walk
+//  @0x50D098..0x50D0CD]
+int zone_placement_keeps_the_words() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(0, 4);
+	world->registry.configure_pool(2, 4);
+	world->registry.configure_pool(3, 8);
+	w::Entity zone;
+	zone.has_item_def = true;
+	zone.position.set_q16({kAshJoinerX, kTdhHostY, kAshJoinerX});
+	const w::EntityHandle zone_h = world->registry.spawn(2, zone);
+	w::SpawnPointResult placed = w::resolve_player_spawn_pose(*world, {}, zone_h, 0, 1, 0);
+	if (!expect(placed.found && same_words(placed.position.q16(), kAshJoinerX, kTdhHostY,
+	                                               kAshJoinerX + 0x10000),
+	            "the target's words, the z word lifted by 0x10000"))
+		return 1;
+	// A 6007 row exactly on the zone's radius word stays in the walk.
+	world->registry.get(zone_h)->zone_number = 1;
+	world->registry.get(zone_h)->zone_radius = 3;
+	w::Entity scatter;
+	scatter.item_id = 6007;
+	scatter.has_item_def = true;
+	scatter.position.set_q16({kAshJoinerX + (3 << 16), kTdhHostY, 0});
+	world->registry.spawn(3, scatter);
+	world->zones.spawn_cycle_counter = 1; // the round-robin's second pick: the first 6007 row
+	placed = w::resolve_player_spawn_pose(*world, {}, zone_h, 0, 1, 0);
+	if (!expect(placed.found && placed.position.x.q16 == kAshJoinerX + (3 << 16),
+	            "a 6007 row on the radius word is in the walk"))
+		return 1;
+	std::printf("PASS zone_placement_keeps_the_words\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	const int lossy = words_are_lossy_through_a_float();
 	const int streams = promotion_and_streams_keep_the_words();
 	const int placement = placement_and_world_state_load_keep_the_words();
-	return lossy != 0 ? lossy : streams != 0 ? streams : placement;
+	const int slot = ai_slot_reads_its_entity_words();
+	const int chat = nearest_location_takes_the_word_distances();
+	const int zone = zone_placement_keeps_the_words();
+	for (const int r : {lossy, streams, placement, slot, chat, zone})
+		if (r != 0) return r;
+	return 0;
 }
