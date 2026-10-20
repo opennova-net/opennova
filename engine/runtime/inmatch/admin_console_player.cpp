@@ -9,7 +9,8 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_ban_lists.h>
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
-#include <runtime/inmatch/server_tick.h>  // Server_ProcessPlayerDeath / Server_StageHostDisconnect
+#include <runtime/inmatch/server_player_death.h> // Server_ProcessPlayerDeath
+#include <runtime/inmatch/server_tick.h>  // Server_StageHostDisconnect
 #include <runtime/world/ai.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>

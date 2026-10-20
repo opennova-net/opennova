@@ -33,6 +33,7 @@
 #include <runtime/inmatch/server_loadout_grant.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
+#include <runtime/inmatch/server_player_death.h> // Server_RouteFrameTailEdges
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
 

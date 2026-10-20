@@ -6,7 +6,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/inmatch/mission_rotation.h> // HostRotation::previous_game_type
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
-#include <runtime/inmatch/server_tick.h>  // Server_ProcessPlayerDeath
+#include <runtime/inmatch/server_player_death.h> // Server_ProcessPlayerDeath
 #include <runtime/world/entity.h>
 #include <runtime/world/round_sim.h>      // RoundDeath
 #include <runtime/world/world.h>

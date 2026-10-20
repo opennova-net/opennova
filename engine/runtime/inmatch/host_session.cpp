@@ -4,7 +4,8 @@
 
 #include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / ...
 #include <runtime/inmatch/server_spawn.h>   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
-#include <runtime/inmatch/server_tick.h>    // Server_TickUpdate, Server_RouteFrameTailEdges
+#include <runtime/inmatch/server_player_death.h> // Server_RouteFrameTailEdges
+#include <runtime/inmatch/server_tick.h>    // Server_TickUpdate
 #include <runtime/inmatch/session_timeout_config.h> // load_session_timeout_config (_NSTMOUT.TXT)
 
 #include <runtime/replication/connection_fan.h> // set_entity_send_budget (the BANDWIDTH cap)
