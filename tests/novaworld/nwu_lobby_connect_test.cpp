@@ -346,10 +346,10 @@ void check_rejected_connect() {
 	rig.lobby.close();
 }
 
-// The service's 0x83 to a connection up since `auth_dg`'s accept (server_auth_to's SCRK): the
-// next packet (seq 1) with one lobby container `name` carrying `fields`.
+// The service's 0x83 to a connection up since `auth_dg`'s accept (server_auth_to's SCRK): packet
+// `seq` (the first, 1, by default) with one lobby container `name` carrying `fields`.
 std::vector<uint8_t> server_statement_to(const std::vector<uint8_t> &auth_dg, const char *name,
-		const std::vector<std::pair<std::string, std::string>> &fields) {
+		const std::vector<std::pair<std::string, std::string>> &fields, uint32_t seq = 1) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientAuth auth;
@@ -380,7 +380,7 @@ std::vector<uint8_t> server_statement_to(const std::vector<uint8_t> &auth_dg, co
 	record.payload = std::move(stream_bytes);
 	ProtocolPacketHeader hdr;
 	hdr.session_id = auth.ck;
-	hdr.seq_num = 1;
+	hdr.seq_num = seq;
 	hdr.ack_count = 0;
 	hdr.connection_flags = 0;
 	std::vector<uint8_t> packet;
@@ -551,8 +551,62 @@ void check_disconnect_request_by_state() {
 	rig.lobby.close();
 }
 
+// D-NET-719: a 0x83 too short for its header does not end the connection. Retail reads each
+// missing header field as 0: a packet without the receiver key is tossed, one without a sequence
+// consumed, an in-order one cut before its ACK parsed with no record (its sequence taken). So the
+// verify still completes: the service's ServerVerifyResult as packet 1 is now stale and passed
+// over, as packet 2 it is read.
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the key @0x626B52..0x626B72, the sequence
+//  @0x626B8A..0x626BCC, the in-order parse @0x626BFC; CNapiNPConnection_ParseMessages @0x625BC0 -
+//  the ACK @0x625CD3..0x625CE5, return 1 @0x625F21]
+void check_short_protocol_packets_keep_the_connection() {
+	Rig rig;
+	const std::vector<uint8_t> auth = bring_to_verify(rig);
+	CHECK(!auth.empty() && rig.lobby.session() != nullptr);
+	if (auth.empty() || rig.lobby.session() == nullptr)
+		return;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> auth_body;
+	ClientAuth parsed;
+	CHECK(decode(auth, opcode, auth_body) && parse_client_auth(auth_body.data(), auth_body.size(), parsed));
+	const auto le = [](std::vector<uint8_t> &out, uint32_t v) {
+		for (int i = 0; i < 4; ++i)
+			out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+	};
+	std::vector<uint8_t> no_key{ 0x01, 0x02 };
+	std::vector<uint8_t> no_seq;
+	le(no_seq, parsed.ck);
+	no_seq.push_back(0x09);
+	std::vector<uint8_t> no_ack;
+	le(no_ack, parsed.ck);
+	le(no_ack, 1);
+	no_ack.push_back(0x00);
+	uint32_t at = 300;
+	for (const auto &short_body : { no_key, no_seq, no_ack }) {
+		rig.session.inbound.push_back(
+				{ kServer, nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, short_body) });
+		rig.lobby.tick(at);
+		at += 10;
+		CHECK(rig.lobby.session() != nullptr &&
+				rig.lobby.session()->state() == ClientSession::State::Verifying);
+	}
+	CHECK(rig.fatals.empty());
+	// Packet 1 was the short one: a statement under 1 is passed over.
+	rig.session.inbound.push_back(
+			{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "0" } }, 1) });
+	rig.lobby.tick(at);
+	at += 10;
+	CHECK(rig.fatals.empty());
+	rig.session.inbound.push_back(
+			{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "0" } }, 2) });
+	rig.lobby.tick(at);
+	CHECK(rig.fatals == std::vector<std::string>{ "NWEC48" });
+	rig.lobby.close();
+}
+
 int main() {
 	check_connect_error_tags();
+	check_short_protocol_packets_keep_the_connection();
 	check_disconnect_request_by_state();
 	check_state_one_give_up();
 	check_verify_give_up();

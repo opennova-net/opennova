@@ -529,20 +529,32 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                             SessionDeframeAdmission *admission_out,
                             bool drain_queued_successors) {
 	if (admission_out != nullptr) *admission_out = SessionDeframeAdmission{};
+	if (body == nullptr) body_len = 0;
+	// The header is read field by field through a bounded reader: a field the packet is too short
+	// for reads 0 (only the reader's overrun flag is set), so a short packet meets the same tests
+	// as a whole one and the connection lives on: a missing receiver key reads 0, which no
+	// connection's key is (tossed below); a missing sequence reads 0 (consumed below); an in-order
+	// packet too short for its ACK or flag byte reads them as 0 and holds no record.
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the key read @0x626B52..0x626B60 (0
+	//  @0x626B5C), the sequence @0x626B8A..0x626B96; CNapiNPConnection_ParseMessages @0x625BC0 -
+	//  the ACK @0x625CD3..0x625CE5 (0 @0x625CD9), the flag byte @0x625CF4]
+	hdr_out = ProtocolPacketHeader{};
+	if (body_len >= 4) hdr_out.session_id = read_u32_le(body + 0);
+	if (body_len >= 8) hdr_out.seq_num = read_u32_le(body + 4);
+	if (body_len >= 12) hdr_out.ack_count = read_u32_le(body + 8);
+	if (body_len >= PROTOCOL_PACKET_HEADER_SIZE) hdr_out.connection_flags = body[12];
 	// Retail validates the receiver-local session key before it reads the sequence number or enters
-	// ParseMessages. Parse only the plaintext header here so a stale packet from a prior connection
-	// cannot mutate ordering/ACK state or make us decrypt and parse its inner stream.
+	// ParseMessages, so a stale packet from a prior connection cannot mutate ordering/ACK state or
+	// make us decrypt and parse its inner stream.
 	// [orig: NapiNPProtocol_HandleSessionPacket @0x626b32..0x626b72]
-	if (!parse_protocol_packet_header(body, body_len, hdr_out)) {
-		return false;
-	}
 	if (crypto.expected_inbound_session_id.has_value() &&
 	    hdr_out.session_id != *crypto.expected_inbound_session_id) {
 		messages_out.clear();
 		return true; // retail quietly consumes/drops a packet addressed to a different connection
 	}
 	std::vector<ProtocolMessage> decoded;
-	if (!decode_protocol_packet_plaintext(body, body_len, crypto.in_scrk, hdr_out, decoded)) {
+	if (body_len > PROTOCOL_PACKET_HEADER_SIZE &&
+	    !decode_protocol_packet_plaintext(body, body_len, crypto.in_scrk, hdr_out, decoded)) {
 		return false; // leave seq untouched; the caller applies its own failure policy
 	}
 	messages_out.clear();

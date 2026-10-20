@@ -1024,12 +1024,15 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 	SessionDeframeAdmission admission;
 	// Lobby recv: decrypt inbound 0x83 with the server's SCRK. The ordered gate admits only the
 	// next sequence: a later packet is held (and latches the missing-sequence request for the
-	// receive tail), and the packets a closing gap releases drain in order.
-	// [orig: NapiNPProtocol_HandleSessionPacket @0x626a00 — the receiver key @0x626b72, the gate
-	//  and queue @0x626be0..0x626c3a]
+	// receive tail), and the packets a closing gap releases drain in order. No packet ends the
+	// connection: one too short for its header is read with its missing fields 0 (deframe), and
+	// one the deframe cannot read is passed over (D-NET-719).
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626a00 - the receiver key @0x626b72, the gate
+	//  and queue @0x626be0..0x626c3a, no leg touching the connection's state;
+	//  CNapiNPConnection_ParseMessages @0x625BC0 - no failure leg past its entry guards
+	//  @0x625C34..0x625C5B, return 1 @0x625F21]
 	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0, client_key_},
 	                            body.data(), body.size(), hdr, messages, &admission)) {
-		fail("bad 0x83 protocol packet");
 		return;
 	}
 	if (!admission.admitted) return;

@@ -824,8 +824,70 @@ bool check_cs_config_update_decoder() {
 			"an empty body reads direction 0 and mask 0");
 }
 
+// D-NET-719: a header too short for a field reads it as 0 and the packet meets the same tests as a
+// whole one. Under 4 bytes the receiver key reads 0, which is no connection's: tossed. With the key
+// but under 8 bytes the sequence reads 0: consumed. With the next sequence but under 12 bytes the
+// ACK reads 0 and the packet is admitted with no record, the sequence advanced; 12 bytes carry the
+// ACK. No call fails.
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the key @0x626B52..0x626B60 and its test
+//  @0x626B72, the sequence @0x626B8A..0x626B96, zero consumed @0x626BCC, the in-order parse
+//  @0x626BFC; CNapiNPConnection_ParseMessages @0x625BC0 - the ACK @0x625CD3..0x625CE5, the flag
+//  byte @0x625CF4, return 1 @0x625F21]
+bool check_short_session_header_reads_zero() {
+	const uint32_t key = 0x11223344u;
+	const std::string scrk = "TESTSCRK0123456789";
+	opennova::SessionSequencing rx{1, 6};
+	rx.ordered_recovery_enabled = true;
+	const opennova::SessionCrypto crypto{{}, scrk, 0, key};
+	const auto le = [](std::vector<uint8_t> &out, uint32_t v) {
+		for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+	};
+	struct Case {
+		std::vector<uint8_t> body;
+		bool admitted;
+		uint32_t last_inbound;
+		uint32_t ack;
+	};
+	std::vector<uint8_t> bare{0x44, 0x33};
+	std::vector<uint8_t> key_only;
+	le(key_only, key);
+	key_only.push_back(0x07);
+	std::vector<uint8_t> key_seq;
+	le(key_seq, key);
+	le(key_seq, 7);
+	key_seq.push_back(0x05);
+	std::vector<uint8_t> key_seq_ack;
+	le(key_seq_ack, key);
+	le(key_seq_ack, 8);
+	le(key_seq_ack, 4);
+	const std::vector<Case> cases = {
+		{ {}, false, 6, 0 },
+		{ bare, false, 6, 0 },
+		{ key_only, false, 6, 0 },
+		{ key_seq, true, 7, 0 },
+		{ key_seq_ack, true, 8, 4 },
+	};
+	for (const Case &c : cases) {
+		opennova::ProtocolPacketHeader hdr;
+		std::vector<opennova::ProtocolMessage> got{opennova::make_protocol_message(0x7F, {0xAA})};
+		opennova::SessionDeframeAdmission admission;
+		if (!expect(opennova::deframe_session_packet(rx, crypto, c.body.empty() ? nullptr : c.body.data(),
+		                                             c.body.size(), hdr, got, &admission),
+		            "a short session packet does not fail the deframe")) return false;
+		if (!expect(got.empty() && admission.admitted == c.admitted && rx.last_inbound_seq == c.last_inbound,
+		            "a short session packet is tossed, consumed or admitted by its zero-read fields"))
+			return false;
+		if (c.admitted && !expect(admission.max_ack_count == c.ack && admission.packets.size() == 1 &&
+		                                  admission.packets[0].messages.empty(),
+		                          "an admitted short packet carries the ACK it holds (0 when cut) and no record"))
+			return false;
+	}
+	return expect(rx.queued_inbound.empty(), "no short packet is queued");
+}
+
 int main() {
 	bool ok = true;
+	ok = check_short_session_header_reads_zero() && ok;
 	ok = check_cs_config_update_decoder() && ok;
 	ok = check_split_fills_partial_packet_and_clears_expiry() && ok;
 	ok = check_session_retransmit_retention_and_current_ack() && ok;

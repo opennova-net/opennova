@@ -456,8 +456,10 @@ void complete_session_send_flush(SessionSequencing &seq);
 // sequences succeed with no messages; future sequences queue until the gap closes, when all newly
 // contiguous messages drain in order. Generic consumers use a no-queue high-water policy: a newer
 // sequence is admitted even across a gap, while zero/stale/duplicate sequences are suppressed.
-// Returns false (leaving seq untouched) only if decode fails; a wrong session_id is quietly
-// consumed without changing sequencing state. `admission_out`, when supplied, distinguishes admitted
+// A header too short for a field reads that field as 0, as retail's bounded reader does (a
+// missing session_id never matches, a missing sequence is consumed, a short in-order packet is
+// admitted with no record; D-NET-719). Returns false (leaving seq untouched) only if the record
+// region's decode fails; a wrong session_id is quietly consumed without changing sequencing state. `admission_out`, when supplied, distinguishes admitted
 // header-only packets from stale/future packets and reports the greatest ACK carried by every packet
 // admitted during this call. The outer NWU envelope must already be stripped.
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 gates/queues @0x626be0..0x626c3a;
