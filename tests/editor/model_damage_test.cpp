@@ -395,14 +395,14 @@ std::vector<uint8_t> armory_with_point(const char *from, const char *to) {
 
 // The damageable items of every death the shipped ones die (JO:CA's ITEMS.DEF, measured once: 117 items whose graphic
 // and husk the tree holds, 114 of them husked, 60 by gnrc, 36 by a brain, 18 by a class's tail), each drawn by a
-// graphic of its own (the crate's copies), its husk the armory: gnrc decorations (38) with a Fire bank on their husk
-// (12) and with no death sound (1), gnrc objects with the death flash (4), a gnrc tag in capitals (3) and a bridge's
+// graphic of its own (the crate's copies), its husk the armory: gnrc decorations (38; one authoring its water death,
+// as 32 shipped items do) with a Fire bank on their husk (12) and with no death sound (1), gnrc objects with the death flash (4), a gnrc tag in capitals (3) and a bridge's
 // (its water shock, 1); gnrl tails (13) and one with no death sound (1); ewep's (4); the brains of chel and cveh (25)
 // and of a cbot boat (its explosion, 10); and two that land no husk: an item of no class (2) and a landmine's with a
 // final husk (1). With the leg kinds each plan runs, as the shipped items of its kind run them.
 constexpr const char *kSweepItems =
 		"begin \"Gnrc decoration\"\nid 100600\ntype decoration\ngraphic g00\nai_function gnrc\nhusk armory\n"
-		"sounddeath EXPLO_PUMP\nparticledeath fx_dead\nend\n"
+		"sounddeath EXPLO_PUMP\nparticledeath fx_dead\nparticleh2odeath fx_wet\nend\n"
 		"begin \"Gnrc fire bank\"\nid 100601\ntype decoration\ngraphic g01\nai_function gnrc\nhusk pyre\n"
 		"sounddeath EXPLO_PUMP\nparticledeath fx_dead\nparticlefire fx_fire\nend\n"
 		"begin \"Gnrc quiet\"\nid 100602\ntype decoration\ngraphic g02\nai_function gnrc\nhusk armory\nparticledeath fx_dead\nend\n"
@@ -485,6 +485,22 @@ static int test_damageable_sweep() {
 		TEST_EXPECT(kind == one.kind);
 		++by_kind[kind];
 		TEST_EXPECT(!plan.legs.empty() && plan.legs.front().kind == "swap");
+		// An item authoring its water death: the Dead bank's leg names it in that bank's place under water.
+		if (!model->damage_item().particleh2odeath.empty()) {
+			bool named = false;
+			for (const DamageLeg &leg : plan.legs)
+				named = named || (leg.kind == "effect" && leg.bank == 1 &&
+				                  leg.words.find("(fx_wet in its place for an item under water)") != std::string::npos);
+			TEST_EXPECT(named);
+		}
+	}
+	// The landmine's final husk (the house) is named so among the house's uses.
+	TEST_EXPECT(project.open("models/house.3di"));
+	if (const ModelViewport *house = project.viewport()) {
+		bool final_husk = false;
+		for (const DamageUse &use : house->damage_uses())
+			final_husk = final_husk || (use.item == "Landmine" && use.role == DamageRole::FinalHusk && use.field == "huskfinal");
+		TEST_EXPECT(final_husk);
 	}
 	std::printf("sweep: %zu damageable graphics destroyed (%zu gnrc, %zu brains, %zu class tails), their husks swapped in, "
 	            "%zu death pieces named\n",

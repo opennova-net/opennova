@@ -1005,10 +1005,11 @@ std::vector<uint8_t> box_field_model(const char *name, const std::vector<int> &b
 // models' plans drawn by LOD 0 within the cap, by the first coarser LOD within it, by an only LOD past it and by the
 // fewest of several past it), over minted models, one of each: a post (LOD 0 within the cap), a palm (LOD 0 and 1
 // past it, drawn by LOD 2, the first within it, though LOD 3 has fewer), a ruin (one LOD, past it, drawn by that) and
-// a hut (every LOD past it, drawn by the fewest, LOD 2), placed in turn by 1,331 records over the mission, then an
-// item of no graphic and one of a model the project lacks: 1,333 records. Its outlines read over the follows, a few each within the
-// map's budgets, to the end: every model outlined by the plan the cap gives it, the lines its records' plans' edges,
-// kMissionMapLinesChunk edges a chunk. Then a drag of the first outlined item over 20 samples of one gesture: each
+// a hut (every LOD past it, drawn by the fewest, LOD 2), placed in turn by 1,331 records over the mission (every
+// seventh pitched, every seventh from the fourth rolled: a tilted entity's footprint the hull of its every point), then
+// an item of no graphic and one of a model the project lacks: 1,333 records. Its outlines read over the follows, a few
+// each within the map's budgets, to the end: every model outlined by the plan the cap gives it, the lines its records'
+// plans' edges, kMissionMapLinesChunk edges a chunk; a tilted record's footprint not its level one's. Then a drag of the first outlined item over 20 samples of one gesture: each
 // sample's edit served and followed places that one record again and moves the chunks its edges lie in alone.
 static int test_edge_cap_and_chunks() {
 	Rig rig("opennova_editor_mission_map_cap");
@@ -1032,7 +1033,7 @@ static int test_edge_cap_and_chunks() {
 	}
 	items += "begin \"Bare\"\nid 106304\ntype decoration\nend\nbegin \"Lost\"\nid 106305\ntype decoration\ngraphic lost\nend\n";
 	TEST_EXPECT(test_io::write_text(project + "/defs/items.def", items));
-	// The four models in turn over a grid 20 units apart, then the two items that draw none.
+	// The four models in turn over a grid 20 units apart, some tilted, then the two items that draw none.
 	opennova::bms::File file;
 	opennova::mission::make_default(file);
 	const int64_t order[] = { 106300, 106301, 106302, 106303 };
@@ -1041,6 +1042,8 @@ static int test_edge_cap_and_chunks() {
 		opennova::bms::Entity entity = opennova::mission::new_entity(opennova::mission::EntityKind::Item, int(item), 100 + i);
 		entity.x = opennova::bms::to_fixed_16_16(-400.0 + 20.0 * (i % 40));
 		entity.y = opennova::bms::to_fixed_16_16(-400.0 + 20.0 * (i / 40));
+		entity.pitch = int16_t(i % 7 == 0 ? 10 : 0);
+		entity.roll = int16_t(i % 7 == 3 ? 5 : 0);
 		file.items.push_back(entity);
 	}
 	opennova::mission::sync_counts(file);
@@ -1068,7 +1071,7 @@ static int test_edge_cap_and_chunks() {
 	const std::vector<MissionEntityMark> &entities = map->scene().entities();
 	TEST_EXPECT(entities.size() == 1333 && map->footprints().size() == entities.size());
 	std::set<const MissionModelOutline *> outlined;
-	size_t past_cap = 0, edges = 0;
+	size_t past_cap = 0, edges = 0, tilted = 0;
 	for (size_t i = 0; i < entities.size() && i < map->footprints().size(); ++i) {
 		const MissionMapFootprint &footprint = map->footprints()[i];
 		const Shape *shape = nullptr;
@@ -1078,13 +1081,20 @@ static int test_edge_cap_and_chunks() {
 		TEST_EXPECT(footprint.outline->lod == shape->lod &&
 		            footprint.outline->edges.size() / 6 == size_t(4 * shape->boxes[size_t(shape->lod)]));
 		edges += footprint.outline->edges.size() / 6;
+		// A tilted record's footprint: the hull of its every point placed, not its level hull's.
+		if (entities[i].pitch != 0.0f || entities[i].roll != 0.0f) {
+			const MissionMapFootprint level = mission_map_footprint(footprint.outline, entities[i].x, entities[i].y, 0.0,
+					double(entities[i].yaw), 0.0, 0);
+			TEST_EXPECT(footprint.hull.size() >= 6 && footprint.hull != level.hull);
+			++tilted;
+		}
 		if (outlined.insert(footprint.outline.get()).second && footprint.outline->edges.size() / 6 > kMissionOutlineEdgesMax)
 			++past_cap;
 	}
 	const size_t lines = map->outline_lines().size() / 4;
 	std::printf("cap: %zu entities, %zu outlined, %zu past the %zu-edge cap, %zu lines in %zu chunks, %d follows\n",
 	            entities.size(), outlined.size(), past_cap, kMissionOutlineEdgesMax, lines, map->outline_chunks().size(), follows);
-	TEST_EXPECT(outlined.size() == 4 && past_cap == 2);
+	TEST_EXPECT(outlined.size() == 4 && past_cap == 2 && tilted == 381);
 	// 333 posts, palms and ruins and 332 huts: 4, 40, 200 and 196 edges each.
 	TEST_EXPECT(lines == edges && lines == 333 * (4 + 40 + 200) + 332 * 196);
 	TEST_EXPECT(map->outline_chunks().size() ==

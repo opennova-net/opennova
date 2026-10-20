@@ -205,21 +205,27 @@ static int test_model_item_facts() {
 	TEST_EXPECT(facts.kind == ModelItemKind::Vehicle && !facts.makes);
 	facts = facts_of("mount");
 	TEST_EXPECT(facts.kind == ModelItemKind::MountedWeapon && !facts.makes && facts.because.find("Usegun") != std::string::npos);
-	// A part a register DOOR_00 turns: a door, which the item made leaves shut.
-	facts = facts_of("house_lod0_sine_rotx", [](threedi::Threedi3di3 &model) {
-		auto *registers = static_cast<threedi::ThreediControlRegister *>(std::calloc(1, sizeof(threedi::ThreediControlRegister)));
-		std::snprintf(registers[0].name, sizeof(registers[0].name), "DOOR_00");
-		std::free(model.ctrl.registers);
-		model.ctrl.registers = registers;
-		model.ctrl.count = 1;
-		threedi::ThreediLod &lod = model.lods[0];
-		for (size_t i = 0; i < lod.part_animation_count; ++i)
-			if (lod.part_animations[i].rotation_x.control != 0) {
-				lod.part_animations[i].rotation_x.control = 113; // SET_CONTROL_REGISTER
-				lod.part_animations[i].rotation_x.control_param = 0;
-			}
-	});
+	// A part a register turns: DOOR_00 a door, which the item made leaves shut; another register (a light's, as some
+	// shipped models' parts read) no door.
+	const auto turned_by = [](const char *name) {
+		return facts_of("house_lod0_sine_rotx", [name](threedi::Threedi3di3 &model) {
+			auto *registers = static_cast<threedi::ThreediControlRegister *>(std::calloc(1, sizeof(threedi::ThreediControlRegister)));
+			std::snprintf(registers[0].name, sizeof(registers[0].name), "%s", name);
+			std::free(model.ctrl.registers);
+			model.ctrl.registers = registers;
+			model.ctrl.count = 1;
+			threedi::ThreediLod &lod = model.lods[0];
+			for (size_t i = 0; i < lod.part_animation_count; ++i)
+				if (lod.part_animations[i].rotation_x.control != 0) {
+					lod.part_animations[i].rotation_x.control = 113; // SET_CONTROL_REGISTER
+					lod.part_animations[i].rotation_x.control_param = 0;
+				}
+		});
+	};
+	facts = turned_by("DOOR_00");
 	TEST_EXPECT(facts.kind == ModelItemKind::Decoration && facts.doors == 1);
+	facts = turned_by("FLICKER");
+	TEST_EXPECT(facts.kind == ModelItemKind::Decoration && facts.doors == 0);
 	std::printf("test_model_item_facts passed\n");
 	return 0;
 }
@@ -458,11 +464,15 @@ static int test_calibration() {
 		  { { DEF_ITEM_TYPE_DECORATION, 240, 396 }, { DEF_ITEM_TYPE_OBJECT, 29, 36 }, { DEF_ITEM_TYPE_BUILDING, 20, 26 },
 		    { DEF_ITEM_TYPE_VEHICLE, 1, 1 } } },
 	};
+	// Each kind's word on the wire, each the word of a kind the shapes are told.
+	const std::map<ModelItemKind, std::string> words = { { ModelItemKind::Decoration, "decoration" },
+		{ ModelItemKind::Building, "building" }, { ModelItemKind::Person, "person" }, { ModelItemKind::Vehicle, "vehicle" },
+		{ ModelItemKind::MountedWeapon, "mounted_weapon" } };
 	for (const bool jox01 : { false, true }) {
 		std::map<ModelItemKind, std::map<int, size_t>> tally;
 		size_t models = 0;
 		for (const Shape &shape : shapes) {
-			TEST_EXPECT(shape.facts.kind == shape.kind);
+			TEST_EXPECT(shape.facts.kind == shape.kind && model_item_kind_token(shape.facts.kind) == words.at(shape.kind));
 			// The kind told is the TYPE most of the shape's shipped rows give it.
 			size_t most = 0, told = 0;
 			for (const ShippedTally &row : shape.shipped) {

@@ -106,11 +106,25 @@ std::vector<uint8_t> crate_anchored_at(double height) {
 	return wrote ? written : std::vector<uint8_t>();
 }
 
+// The synth crate with its one volume a blink box (type 8) in place of its solid: a model whose volumes a body
+// touches but the ground probe never clips (no type-1 solid), through the engine's own 3DI writer.
+std::vector<uint8_t> crate_without_solid() {
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("threedi/synth/crate.3di"));
+	opennova::threedi::Threedi3di3 model{};
+	if (opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) != 0) return {};
+	for (size_t i = 0; model.collision && i < model.collision->volume_count; ++i) model.collision->volumes[i].collidable_type = 8;
+	std::vector<uint8_t> written;
+	const bool wrote = opennova::threedi::threedi_3di3_write_memory(&model, written) == 0;
+	opennova::threedi::threedi_3di3_free(&model);
+	return wrote ? written : std::vector<uint8_t>();
+}
+
 // The catalog: a crate, the crate anchored 0.25 up, the crate anchored 1.5 up (over its 1-unit top), the
 // synth house (a 4-unit body under a roof slab to 4.4), a player-controlled truck (cveh), a rifleman (org1),
 // a statue (a person of org0's class, which has no motor), a bird (org1), a marker, a person naming no table; the
 // movers of three more classes (CHel, catv, cbot), statics of the classes that keep the height (genx, upfx, ewep,
-// door, envs), and a perch (drawn by the synth bird, whose collision block has faces and no volume).
+// door, envs), a perch (drawn by the synth bird, whose collision block has faces and no volume) and a crate whose
+// one volume is a blink box (no solid of its own).
 constexpr const char *kItems =
 		"begin \"Null\"\nid 100000\ntype marker\nend\n"
 		"begin \"Crate\"\nid 101001\ntype decoration\ngraphic crate\nend\n"
@@ -135,7 +149,8 @@ constexpr const char *kItems =
 		"begin \"Gun post\"\nid 101016\ntype object\ngraphic crate\nmove_function ewep\nend\n"
 		"begin \"Gate\"\nid 101017\ntype object\ngraphic crate\nmove_function door\nend\n"
 		"begin \"Hum\"\nid 101018\ntype object\ngraphic crate\nmove_function envs\nend\n"
-		"begin \"Perch\"\nid 101019\ntype decoration\ngraphic bird\nend\n";
+		"begin \"Perch\"\nid 101019\ntype decoration\ngraphic bird\nend\n"
+		"begin \"Blink crate\"\nid 101020\ntype decoration\ngraphic bcrate\nend\n";
 // The people's table: its idle row three entries, so that a body's two serves at its init (the secondary's, then the
 // primary's) move the variant the next body of the table plays.
 constexpr const char *kPeopleAdm = "anim_reset\t\"idle\"\r\nanim_idle\t\"idle\" \"walk\" \"idle\"\r\n"
@@ -245,6 +260,7 @@ void put_rig(MemoryFiles &files) {
 	files.put("house.3di", test_io::read_file(test_paths_fixture("threedi/synth/house.3di")));
 	files.put("carrier.3di", test_io::read_file(test_paths_fixture("threedi/synth/carrier.3di")));
 	files.put("bird.3di", test_io::read_file(test_paths_fixture("threedi/synth/bird.3di")));
+	files.put("bcrate.3di", crate_without_solid());
 	files.put("people.adm", bytes_of(kPeopleAdm));
 	files.put("idle.bad", test_io::read_file(test_paths_fixture("anim/idle.bad")));
 	files.put("walk.bad", test_io::read_file(test_paths_fixture("anim/walk.bad")));
@@ -370,6 +386,7 @@ static int test_rules() {
 	// Wholly under the terrain: buried, lifted by its anchor.
 	const MissionGroundVerdict &buried = *of[kBuried];
 	TEST_EXPECT(buried.state == S::Buried && buried.off() && buried.top < buried.support && near(buried.fix_z, buried.support));
+	TEST_EXPECT(mission_ground_verdict_json(buried).get_string("state", "") == "buried");
 	// The house stands on the terrain; a crate on its roof stands on it, one 3 units over it floats over it.
 	TEST_EXPECT(state(kHouse) == S::Grounded && rule(kHouse) == MissionGroundRule::Static);
 	const MissionGroundVerdict &roof = *of[kOnRoof];
@@ -448,7 +465,7 @@ struct Session {
 		const AssetEntry *items = session.view().project.scan->find("items.def");
 		const std::string items_path = items ? items->relative_path : std::string("defs/items.def");
 		for (const char *name : { "Tmap.trn", "Tmap.cpt", "crate.3di", "acrate.3di", "tcrate.3di", "house.3di",
-					 "carrier.3di", "bird.3di", "people.adm", "idle.bad", "walk.bad" }) {
+					 "carrier.3di", "bird.3di", "bcrate.3di", "people.adm", "idle.bad", "walk.bad" }) {
 			std::vector<uint8_t> bytes;
 			if (!files->read(name, bytes) || !test_io::write_file(root + "/" + name, bytes)) return false;
 		}
@@ -574,8 +591,8 @@ struct Construct {
 // construct each. The statics grounded on the terrain (80,265), on another's solid (6,208) and on the water plane
 // (769), each sunk into what stands it, flush on it and within the slack over it; those leaning on, standing in or
 // buried with another's volume (942: over the terrain and wholly under it); the buildings' pool and the items';
-// yawed and tilted; models with a ground anchor off their origin and with a collision block of no volumes; the
-// classes that keep the height (genx, upfx, ewep, door, envs). The people set down by the warmup (1,727: over the
+// yawed and tilted; models with a ground anchor off their origin, with a collision block of no volumes and with
+// volumes that hold no solid (a blink box alone); the classes that keep the height (genx, upfx, ewep, door, envs). The people set down by the warmup (1,727: over the
 // terrain and under it), standing on a floor (446) or the water (15), over it and in it, flying (67) and falling to
 // the terrain, a floor or the water (138). The movers of the four classes the shipped items name (cveh, CHel, catv,
 // cbot: 3,609) and the markers (45,191).
@@ -619,6 +636,7 @@ std::vector<Construct> shipped_constructs(const opennova::terrain::TerrainHeight
 		{ "a tilted static", { Placed{ K::Item, 101001, cx, cy, h(cx, cy), 0, 30, 0, 0, 0, 10, 5 } } },
 		{ "a static of a model whose ground anchor is off its origin", { Placed{ K::Item, 101002, cx, cy, h(cx, cy) - 0.25 } } },
 		{ "a static of a model whose collision block has no volume", { Placed{ K::Item, 101019, cx, cy, h(cx, cy) - perch_bottom } } },
+		{ "a static of a model whose volumes hold no solid", { Placed{ K::Item, 101020, cx, cy, h(cx, cy) } } },
 		{ "a static of genx", { Placed{ K::Item, 101014, cx, cy, h(cx, cy) } } },
 		{ "a static of upfx", { Placed{ K::Item, 101015, cx, cy, h(cx, cy) } } },
 		{ "a static of ewep", { Placed{ K::Item, 101016, cx, cy, h(cx, cy) } } },
@@ -677,7 +695,7 @@ static int test_shipped_constructs() {
 	// The perch's model (the synth bird): a collision block of faces and no volume, its box's bottom under its origin.
 	MissionGroundReads reads;
 	const MissionGroundReads::Model *perch = reads.model(*files, "bird");
-	TEST_EXPECT(perch && perch->bounds && !perch->collision);
+	TEST_EXPECT(perch && perch->bounds && !perch->collision && reads.parsed() == 1);
 	if (!perch) return 1;
 	const std::vector<Construct> constructs =
 			shipped_constructs(*ground.height_field(), at, ground.water_height(), double(perch->box[2]) / 65536.0);
@@ -688,6 +706,9 @@ static int test_shipped_constructs() {
 	const MissionGroundCheck *check = s.check();
 	TEST_EXPECT(check != nullptr);
 	if (!check) return 1;
+	// The verdict's words on the wire, by MissionGroundRule and MissionGroundState.
+	const char *rule_words[] = { "none", "static", "person", "mover" };
+	const char *state_words[] = { "grounded", "floats", "buried", "falls", "hangs" };
 	size_t grounded = 0;
 	for (size_t i = 0; i < constructs.size(); ++i) {
 		const Construct &construct = constructs[i];
@@ -704,8 +725,11 @@ static int test_shipped_constructs() {
 		size_t findings = 0;
 		for (const Diagnostic &d : s.session.view().findings.diagnostics)
 			findings += d.code() == "mission.off_ground" && d.asset == path ? 1 : 0;
+		const opennova::io::JsonValue wire = subject ? mission_ground_verdict_json(*subject) : opennova::io::JsonValue();
 		const bool held = subject && subject->rule == construct.rule && subject->why == construct.why &&
-		                  subject->state == construct.state && subject->on == construct.on && !off && findings == 0;
+		                  subject->state == construct.state && subject->on == construct.on && !off && findings == 0 &&
+		                  wire.get_string("rule", "") == rule_words[size_t(construct.rule)] &&
+		                  wire.get_string("state", "") == state_words[size_t(construct.state)];
 		if (!held)
 			std::printf("  %s: %s %s why '%s' on %s, %zu findings\n", construct.name,
 			            subject ? mission_ground_rule_token(subject->rule) : "-",
