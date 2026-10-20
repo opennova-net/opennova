@@ -673,7 +673,7 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 		// carries 0xFF and still spends the draw (D-NET-700).
 		// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the row
 		//  @0x508605..0x508611, its byte `mov ecx, [edi+4]` @0x50863E);
-		//  AdmDef_InitEntryDefaults @0x53FF00 (`or ecx, -1` @0x53FF16, the
+		//  AdmDef_InitEntryDefaults @0x53FEF0 (`or ecx, -1` @0x53FF16, the
 		//  store @0x53FF58)]
 		const world::WeaponTableEntry *adm =
 				world.tables.weapons.by_index(player->equipped_adm_index);
