@@ -22,6 +22,7 @@
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/mission/mission_text.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
@@ -67,6 +68,8 @@ bms::File deathmatch_route_mission() {
 		marker.y = 20 << 16;
 		mission.markers.push_back(marker);
 	}
+	// Two rows ahead of the route: the writer's scan stops on row 2.
+	mission.waypoint_records.resize(2);
 	bms::WaypointRecord route{};
 	route.flags = bms::WaypointFlags::PlayerRoute;
 	route.marker_count = 4;
@@ -151,6 +154,10 @@ void run(std::map<std::string, std::string> &files) {
 	if (own == nullptr) return;
 	const world::Entity *body = kernel.world.registry.get(own->link.owned_entity);
 	CHECK(body != nullptr && body->team == 1);
+	// The writer stamped the route row's index into the body's AI slot +0x94 (word 37)
+	// [orig: @0x502EE7..0x502EEA].
+	const world::AiEntity *ai = kernel.world.ai.for_handle(own->link.owned_entity);
+	CHECK(ai != nullptr && ai->slot.f[37] == 2);
 	CHECK(host.client_runtime->state().location_names == own_copy_names());
 	CHECK(ctx.mission_location_names == own_copy_names());
 

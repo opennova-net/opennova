@@ -271,6 +271,17 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	//  @0x502E3A..0x502E41, the route scan @0x502E45..0x502E66, the count cap
 	//  @0x502EF6..0x502F03, the records @0x502F28..0x502F7A;
 	//  NapiNPClientMsg_0x00F's game-type gate @0x42E459]
+	// The route row's index also lands in the body's AI slot +0x94 (slot word
+	// 37, the order word) [orig: @0x502EE7..0x502EEA].
+	if (recipient_team == 1 && ctx.mission != nullptr && ctx.world != nullptr) {
+		const std::vector<bms::WaypointRecord> &rows = ctx.mission->waypoint_records;
+		for (std::size_t row = 0; row < rows.size(); ++row) {
+			if (!bms::is_player_route(rows[row])) continue;
+			if (world::AiEntity *ai = ctx.world->ai.for_handle(conn.link.owned_entity))
+				ai->slot.f[37] = static_cast<int32_t>(row);
+			break;
+		}
+	}
 	std::vector<const world::WaypointEntry *> waypoints;
 	if (recipient_team == 1 && ctx.world != nullptr) {
 		const std::vector<world::WaypointEntry> &route =
