@@ -1,0 +1,347 @@
+// Authored for the def writers' corpus legs (fixtures/README.md): one block per kind of record
+// JO:CA's items.def and its jox01 expansion's hold, together using every key the two files use,
+// in each of the forms they write a key's values in (tab and blank runs, a key's case, a
+// trailing blank, negative and leading-zero whole numbers, reals spelled 1.5 / 2.50 / .75),
+// and the lines the game reads nothing of: an attrib: line with no word and with a word the
+// table lacks (exp1, exp11, forceasset, neutral, pilotonly, lfp, noctool, pfoil, fo), a subtype
+// on a building, an effect's volume and offset, an addeweapG placeholder tail, a name past the
+// game's cut. No value here is shipped data.
+
+
+begin "Corpus Drivable Tank"
+  id 106500
+  sid ctank1
+  attrib: AIData PlayerControl VehicleSpawn HasTurret Good DynamicShadow Reflect UseVK
+  type vehicle
+  graphic Ctank1
+  hp 4000
+  armor 60 45
+  radarsig 3
+  heatsig 4
+  unit_type 3
+  score 25
+  sound_profile SP_CorpusTank
+  ai_function cveh
+  move_function ctank
+  render_function tank
+  disk_function player
+  Virtualdisplay ctnkdrvr  camera
+  input_function tank
+  default_aip G_Corpus
+  minai 3
+  mass 55
+  max_slope 40
+  slip_slope 50
+  slip_speed 5
+  acceleration 12
+  deceleration 20
+  torque 80
+  turn_rate 30
+  turn_rate2 45
+  flip 10
+  spring 20
+  spring_comp 55
+  shock 30
+  top_heavy 2
+  lean 5
+  lean_velocity 3
+  pitch 4
+  pitch_velocity 2
+  bob 1
+  water_speed 0
+  climb_speed 4
+  player_speed 30
+  speedpitch 2
+  turnroll 3
+  weathervane 1
+  physics 1
+  criticalhp 400
+  criticaldrain 10
+  damage_reduc_pp 0.25 0.50
+  husk Ctank1H
+  husk_sub_part_types 01_HULL 02_CHUNK_L 03_CHUNK_M 04_CHUNK_m 05_CHUNK_S 06_CHUNK_s 07_WHEEL 08_wheel 09_ROCK_M 10_ROCK_S 11_CHUNKNP_M 12_CHUNKNP_m 13_CHUNKnp_m 14_CHUNKNP_S 15_CHUNKNP_s 16_CHUNK_M
+	particlefx Effect_CorpusHeat FX00
+	particlefxw1 Effect_CorpusWake FX01
+	particlefxw2 fx_corpus_dch FX02
+  	particlefxw3 fx_corpus_wk FX01
+	particlefxw4 fx_corpus_wk2 FX03
+	particlefxs Effect_CorpusWakeS FX01
+	particledeath Effect_CorpusDeath
+	particleh2odeath Effect_CorpusH2O
+	particlefire Effect_CorpusFire
+	particleother Effect_CorpusOther
+	particlefinale Effect_CorpusFinale
+  shadow shadowc.tga 3.5 12.5 0.0 -1.25
+  addeweap ewep01 106501 15 30 160 160
+  addeweap ewep02 106502
+  primary_weapon WPN_CORPUSGUN
+  weaplbup bullet01
+  weaplcup bullet02
+  weaplmup bullet03
+  weaprbup bullet04
+  weaprcup bullet05
+  weaprmup bullet06
+  weaplbup2 bullet11
+  weaplcup2 bullet12
+  weaplmup2 bullet13
+  weaprbup2 bullet14
+  weaprcup2 bullet15
+  weaprmup2 bullet16
+  textid CORPUS_TANK
+end
+
+begin "Corpus Flyable Helo"
+  id 106510
+  sid chelo1
+  attrib: AIData PlayerControl Landable Good
+  type vehicle
+  graphic Chelo1
+  hp 1500
+  armor 20 20
+  radarsig 4
+  heatsig 6
+  unit_type 5
+  score 30
+  sound_profile SP_CorpusHelo
+  ai_function chel
+  move_function chel
+  render_function chel
+  disk_function helo
+  default_aip H_Corpus
+  minai 2
+  mass 12
+  max_slope 30
+  slip_slope 45
+  acceleration 6
+  deceleration 9
+  turn_rate 50
+  turn_rate2 60
+  player_speed 80
+  damage_reduc_pp 0.33 0.67
+  husk Chelo1H
+  husk_sub_part_types 01_HULL 02_ROCK_M _ROCK_M
+  rotor_parts 2 3 4 5
+  aux_parts 6 7 8 9
+  shadow shadowh.tga 2.5 8.0 1.5 2.0
+  addeweapC ewep03 106503
+  addeweapG ewep04 106504 70 10 100 100   <down angle> <up angle> <right angle> <left angle>
+  kz 1.5
+end
+
+begin "Corpus Mounted Gun"
+  id 106520
+  attrib: AIData EWeap IsTurret OnTurret Good
+  type object
+  graphic Cgun1
+  hp 300
+  armor -1
+  ai_function ewep
+  move_function ewep
+  render_function ewep
+  disk_function emplace
+  husk Cgun1H
+  husk_sub_part_types 01_HULL 02_CHUNK_S 03_CHUNK_M 04_CHUNK_M 05_CHUNK_M
+  phrase_set 2
+  addeweap ewep01 106521 20 20 180 180
+  primary_weapon WPN_CORPUSMG
+  weaplbup bullet01
+  weaplcup bullet01
+  weaplmup bullet01
+  weaprbup bullet01
+  weaprcup bullet01
+  weaprmup bullet01
+  particledeath Effect_CorpusSmall
+  particlefinale Effect_CorpusSmallFin
+  particleh2odeath Effect_CorpusH2O
+  particlefire Effect_CorpusFire
+  particleother Effect_CorpusOther
+  dawnshot ENV_CORPUS1 2 30
+  dayshot ENV_CORPUS1 2 30
+  duskshot ENV_CORPUS2 4 60
+  nightshot ENV_CORPUS2 4 60
+  soundloop_1 ENV_CORPUSLP1
+  soundloop_2 ENV_CORPUSLP2
+  soundloop_3 ENV_CORPUSLP3
+  soundloop_4 ENV_CORPUSLP4
+  sounddeath EXPLO_CORPUS
+  subtype weapon
+end
+
+begin "Corpus Rifleman"
+  id 106530
+  sid csold1
+  attrib: AIData LeaveCorpse NoDismember Evil
+  type person
+  graphic Csold1
+  hp 100
+  armor 0 0
+  radarsig 1
+  heatsig 2
+  unit_type 1
+  score 10
+  sound_profile SP_CorpusMale
+  sound_profilefemale SP_CorpusFemale
+  ai_function plyr
+  move_function org1
+  disk_function organic
+  input_function troop
+  anim_def Csold1A
+  graphicenemy Csold1E
+  phrase_set 3
+  deathtime 6
+  clipsize 30
+  mana 4
+  ammo_easyrocket AMMO_CORPUS_A
+  ammo_advancedrocket AMMO_CORPUS_B
+  ammo_closeattack AMMO_CORPUS_C
+  ammo_marker3 AMMO_CORPUS_D
+  launchups_rocket rocket01
+  launchups_closeattack bullet01
+  launchups_marker3 marker01
+  max_attack_dist 30
+  max_engagement_dist 400
+  min_engagement_dist 20
+  fire_timer 5
+  shadow shadowp.tga 1.0 1.0 0.0 0.0
+end
+
+begin "Corpus Cargo Container with Doors"
+  id 106540
+  sid ccont1
+  attrib: landable exp1 forceasset
+  type building
+  subtype Corpus_Container
+  graphic Ccont1
+  hp 900
+  armor 120 120
+  radarsig 2
+  heatsig 1
+  score 5
+  ai_function door
+  move_function door
+  render_function door
+  num_doors 2
+  first_door 1
+  open_rate 4
+  door_open_sound_id DOOR_CORPUS_OPEN
+  door_close_sound_id DOOR_CORPUS_CLOSE
+  light_transfer 35
+  textid CORPUS_CONTAINER
+  husk Ccont1H
+  husk_sub_parts 2
+  particledeath Effect_CorpusBldg
+  particlefxw1 Effect_CorpusRocket FX00
+  particletesttime     90 0
+end
+
+begin "Corpus Ruin"
+  id 106550
+  attrib: neutral pilotonly lfp
+  type decoration
+  subtype Corpus_Ruin
+  graphic Cruin1
+  hp 200
+  armor 10 10
+  kz 0.75
+  huskfinal Cruin1F
+  husk Cruin1H
+  husk_sub_part_types 01_HULL 02_CHUNK_S 03_CHUNK_M 04_CHUNK_M 05_CHUNK_M 06_CHUNK_S 07_CHUNK_M 08_CHUNK_M 09_CHUNK_S 10_CHUNK_M
+  sounddeath IMP_CORPUS_RUIN
+  soundloop_1 ENV_CORPUSLPA
+  soundloop_2 ENV_CORPUSLPB
+  soundloop_3 ENV_CORPUSLPC
+  soundloop_4 ENV_CORPUSLPD
+  particlefx Effect_CorpusDust FX00
+end
+
+begin "Corpus Spawn Marker"
+  id 106560
+  attrib: SpawnPoint 4team ChangeTeam AutoInheritTeam noctool pfoil fo
+  type marker
+  ai_function flag
+  move_function envs
+  disk_function marker
+  pcvehicle_spawnlist 106500 106510
+  pcvehicle_spawnlist 0106500 0106510
+  sqb_distance .25
+  sqb_error 2
+  sqb_rate 3
+  dawnshot ENV_CORPUS_FLAP 1 3
+  dayshot ENV_CORPUS_FLAP 1 3
+  duskshot ENV_CORPUS_FLAP 2 3
+  nightshot ENV_CORPUS_FLAP 2 3
+  soundloop_1 ENV_CORPUSAIR1
+  soundloop_3 ENV_CORPUSAIR3
+  soundloop_4 ENV_CORPUSAIR4
+  primary_weapon WPN_CORPUSFLARE
+  subtype Corpus_Marker
+end
+
+begin "Corpus Squib Marker"
+  id 106561
+  attrib: NoTarget NoTool NoShadow StaticShadow NoScar
+  type marker
+  ai_function squib
+  move_function squib
+  sqb_distance 2.25
+  sqb_error 1
+  sqb_rate 1
+end
+
+begin "Corpus Mosquitos 02M - 01 count"
+  id 106570
+  attrib: good
+  type effect
+  ai_function emit
+  particlefx fx_Corpus_2m_L
+  volume 2 2 1
+  offset 0 0 1.5
+end
+
+begin "Corpus Mosquitos 04M - 02 count"
+  id 106571
+  attrib: good
+  type effect
+  ai_function emit
+  particlefx fx_Corpus_4m_L
+  volume .5 4 2
+  offset 0 0 3
+end
+
+begin "Corpus Fern"
+  id 106580
+  sid cfern1
+  attrib:
+  type foliage
+  graphic Cfern1
+end
+
+begin "Corpus Health Pickup"
+  id 106590
+  attrib: Armory Farp
+  type powerup
+  graphic Cmedk1
+  powerupdef CORPUS_HP
+  disk_function powerup
+end
+
+begin "Corpus Mine"
+  id 106595
+  attrib: Landmine Missile StaticDeath Easy Concave MoveCB TunnelPiece S&D NoWeapon exp11 1
+  type object
+  graphic Cmine1
+  hp 1
+  ai_function lndm
+  move_function rock
+  render_function lndm
+  disk_function explosv
+  score 3 200
+  kz 2
+end
+
+begin "Corpus Hangar, a name longer than the game's cut: two doors on one side, one on the other end"
+  id 106599
+  attrib:
+  type building
+  graphic Chang1
+end

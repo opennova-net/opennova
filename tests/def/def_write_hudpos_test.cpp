@@ -2,20 +2,21 @@
 // the same model, and the text it writes is canonical (written again from its own read it is the same
 // bytes, every line ending CR LF as the game's reader ends a line). The synthetic legs author every key the
 // writer writes (a quoted name, a fractional ALPHAFADE, the HUDLS block, the stances, the declutter rows,
-// two static frames, the icons, vehicle blocks) beside lines the model holds nothing of; the retail legs
-// round-trip JO:CA's own hudpos.def, out of the packed install (base and each expansion) and the extracted
-// tree.
+// two static frames, the icons, vehicle blocks) beside lines the model holds nothing of; the authored
+// fixtures/def/hudpos.def (the spellings JO:CA's two layouts use, with and without their trailing NUL) and
+// the base game's assets/hudpos.def round-trip, the authored layout's written form pinned by its FNV-1a64.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#include <base/vfs/vfs.h>
+#include <base/io/hash.h>
 #include <formats/def/def.h>
 #include <formats/def/def_hudpos_write.h>
 
-#include "common/retail_paths.h"
+#include "common/file_io.h"
+#include "common/test_paths.h"
 
 using namespace opennova::def;
 
@@ -217,61 +218,86 @@ int name_tokens_and_colour_channels() {
 	return 0;
 }
 
-int retail_legs() {
-	int ran = 0;
-	auto leg = [&](const std::vector<uint8_t> &bytes, const std::string &what) {
-		const std::string text(bytes.begin(), bytes.end());
-		Parsed source(text);
+// The layouts the game's reader is handed: the authored fixtures/def/hudpos.def (JO's spellings: a bare
+// `fonthud1`, blanks around a comma, leading zeros, trailing tabs, `emplace 1 35,206`, a block of seven seats),
+// once as written and once ending in the NUL JO:CA's two hudpos.def files end in (the walk drops it), and the
+// base game's own assets/hudpos.def.
+struct Layout {
+	std::string what;
+	std::string text;
+};
+
+std::vector<Layout> layouts() {
+	const std::string root = test_paths_repo_root(__FILE__);
+	const std::vector<uint8_t> authored = test_io::read_file(root + "/fixtures/def/hudpos.def");
+	const std::vector<uint8_t> base_game = test_io::read_file(root + "/assets/hudpos.def");
+	std::vector<Layout> out;
+	out.push_back({ "fixtures/def/hudpos.def", std::string(authored.begin(), authored.end()) });
+	out.push_back({ "fixtures/def/hudpos.def + NUL", std::string(authored.begin(), authored.end()) + '\0' });
+	out.push_back({ "assets/hudpos.def", std::string(base_game.begin(), base_game.end()) });
+	return out;
+}
+
+// The writer's form of the authored layout, pinned (the nw_codec_identity rule: a vector changes only with an
+// [orig] witness on the writer or a D-entry; `def_write_hudpos_test --dump` prints the table). Both reads of
+// the authored text write the same bytes.
+struct Vector {
+	const char *what;
+	size_t length;
+	uint64_t fnv;
+};
+const Vector kWritten[] = {
+	{ "fixtures/def/hudpos.def", 2041u, 0x0d1610a48c73ce66ull },
+	{ "fixtures/def/hudpos.def + NUL", 2041u, 0x0d1610a48c73ce66ull },
+};
+
+uint64_t fnv1a64(const std::string &text) {
+	return opennova::io::fnv1a64_bytes(opennova::io::kFnv1a64Offset, text.data(), text.size());
+}
+
+int dump() {
+	const std::vector<Layout> all = layouts();
+	std::printf("const Vector kWritten[] = {\n");
+	for (size_t i = 0; i < 2; ++i) {
+		Parsed read(all[i].text);
+		const std::string text = def_write_hudpos(read.file).text;
+		std::printf("\t{ \"%s\", %zuu, 0x%016llxull },\n", all[i].what.c_str(), text.size(),
+		            static_cast<unsigned long long>(fnv1a64(text)));
+	}
+	std::printf("};\n");
+	return 0;
+}
+
+int authored_layouts() {
+	const std::vector<Layout> all = layouts();
+	for (size_t i = 0; i < all.size(); ++i) {
+		const Layout &layout = all[i];
+		CHECK(!layout.text.empty());
+		Parsed source(layout.text);
 		CHECK(source.ok && source.file.hud.stances_count > 0);
-		round_trip(text, what.c_str());
-		std::printf("%s: read, written, read the same; the writer's bytes canonical\n", what.c_str());
-		++ran;
-	};
-	const std::string install = retail::install();
-	if (!install.empty()) {
-		std::vector<std::string> mounts{ std::string() };
-		for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-		for (const std::string &expansion : mounts) {
-			opennova::Vfs vfs;
-			std::vector<uint8_t> bytes;
-			if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) {
-				std::printf("FAIL mount_game(%s, %s): %s\n", install.c_str(), expansion.c_str(), vfs.last_error().c_str());
-				++failures;
-			} else if (!vfs.read_file("hudpos.def", bytes) || bytes.empty()) {
-				std::printf("FAIL hudpos.def is not on the install mount %s %s\n", install.c_str(), expansion.c_str());
-				++failures;
-			} else {
-				leg(bytes, "the install's hudpos.def" + (expansion.empty() ? std::string() : " (" + expansion + ")"));
-			}
+		const std::string text = round_trip(layout.text, layout.what.c_str());
+		if (i < 2) {
+			const Vector &want = kWritten[i];
+			const uint64_t got = fnv1a64(text);
+			if (text.size() != want.length || got != want.fnv)
+				std::printf("FAIL %s: the writer's form is %zu bytes, fnv 0x%016llx; pinned %zu, 0x%016llx\n",
+				            layout.what.c_str(), text.size(), static_cast<unsigned long long>(got), want.length,
+				            static_cast<unsigned long long>(want.fnv));
+			CHECK(text.size() == want.length && got == want.fnv);
 		}
-	} else {
-		retail::skip_leg("OPENNOVA_JO_DIR (the packed install's hudpos.def)");
+		std::printf("%s: read, written, read the same; the writer's bytes canonical\n", layout.what.c_str());
 	}
-	for (const std::string &path : { retail::asset_file("hudpos.def"), retail::reference_fixture("def/hudpos.def") }) {
-		if (path.empty()) continue;
-		std::FILE *file = std::fopen(path.c_str(), "rb");
-		std::vector<uint8_t> bytes;
-		if (file) {
-			uint8_t buffer[4096];
-			size_t got = 0;
-			while ((got = std::fread(buffer, 1, sizeof(buffer), file)) > 0) bytes.insert(bytes.end(), buffer, buffer + got);
-			std::fclose(file);
-		}
-		CHECK(!bytes.empty());
-		leg(bytes, path);
-	}
-	if (ran == 0 && retail::assets().empty()) retail::skip_leg("OPENNOVA_JO_ASSETS (the extracted hudpos.def)");
 	return 0;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+	if (argc > 1 && std::strcmp(argv[1], "--dump") == 0) return dump();
 	synthetic_every_key();
 	synthetic_key_values();
 	name_tokens_and_colour_channels();
-	retail_legs();
+	authored_layouts();
 	if (failures == 0) std::printf("def_write_hudpos: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

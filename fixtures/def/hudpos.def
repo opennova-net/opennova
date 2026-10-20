@@ -1,0 +1,135 @@
+
+
+
+// Authored HUD layout (fixtures/README.md) for def_parse_hudpos, hud_layout and def_write_hudpos:
+// the pins those tests read (the HUDHEALTH rect, hud_textcolor, stancecolor_good, the spinmap
+// extent, the stances, ALPHAFADE, HUDCHLINE, GAMEINFO, LFP_FLAGS, HUDVEHSTANCEPOS, the declutter
+// rows, the dbuggy1 vehicle block; every other number ours) in the spellings JO's hudpos.def files
+// use: a bare `fonthud1` line (no key), blanks around a comma, numbers with leading zeros,
+// trailing tabs, a run of tabs, an emplace list with a blank for its first comma, a vehicle
+// block of seven seats.
+fonthud1	onhud18b.fnt
+
+
+
+HUDSCOPERANGEXY		180 , 300
+HUDSCOPEZEROXY		180 , 320
+HUDSCOPEMAGXY		180 , 340
+
+HUDSPINMAPX1	 810
+HUDSPINMAPX2	 1020
+HUDSPINMAPY1	 552
+HUDSPINMAPY2	 762
+
+MAPCOORDS		1010,470
+HUDTIMECLOCK    1010,510
+
+HUDTITLEX		1000
+HUDTITLEY		330
+
+HUDPINGX		12
+HUDPINGY		12
+HUDPINGRIGHT	1
+
+HUDFLAGCARRIER	6 10
+
+HUDORDERS		1000 , 8
+
+SPECMODE_LABEL	500 , 690
+
+LFP_FLAGS		1020 , 27
+LFP_TAKEOVERDLG	190 , 610
+
+GAMEINFO		1013 , 430
+
+HUDHEALTH		2,739,141,757
+HUDHEALTHBORDER  96,210,190,180
+
+HUDCHLINE		8
+
+alphafade	30 50 3
+
+
+HUDCLIP		8	, 570
+
+weapon_textcolor 240,200,10
+hud_textcolor 251,213,5
+
+tagcolor_blueteam	047,079,255
+tagcolor_redteam	230,000,000
+
+tagcolor_good	008,240,016
+tagcolor_middle	240,160,008
+tagcolor_bad	170,010,010
+
+stancecolor_good	200,005,249,012
+stancecolor_middle  190,240,160,008
+stancecolor_bad		190,170,010,010
+
+HUDCHATTEXT			150 , 700
+HUDSYSTEXT			6 , 20
+
+cargopos		12,610
+roomtkpos		20,390
+roomtktxtpos	14,460
+
+ShowImpactDistPos 500 410
+
+StaticFrame	onhframe.tga  4,566
+
+HUDSTANCEPOS 24 626
+HUDVEHSTANCEPOS 0 272
+HUDSTANCE 0	0 0 stance_1.tga STAND
+HUDSTANCE 1	0 0 onstnc2.tga CROUCH
+HUDSTANCE 2	0 0 onstnc3.tga PRONE
+HUDSTANCE 3	1 0 onstnc4.tga Sitting
+HUDSTANCE 4	0 1 onstnc5.tga Emplaced
+
+HUDTEAMXY 2,550
+
+HUDWPNICON		10 , 580
+HUDGeartext		2 , 575
+
+DESTAGLCOLOR	96,40,210,30
+AGLCOLOR		70,0,250,0
+HUDAGLRADIUS	14
+HUDAGLTLRX		118,126
+HUDAGLYLEN		440,84
+HUDROCLEN        44
+
+AMMOCOUNTPOS	130,597,0,right
+
+HUDDECLUT_MSNTITLE		0 1	1	0
+HUDDECLUT_WAYPOINT		1 1	1	0
+HUDDECLUT_SPEED			0 0	1	0
+HUDDECLUT_WPNGRP		0 1	1	0
+HUDDECLUT_DMGBAR		0 1	1	0
+HUDDECLUT_SPINMAP		0 1	1	0
+HUDDECLUT_XHAIRS		1 1	1	1
+HUDDECLUT_TEAMID		0 0 1   1
+HUDDECLUT_CLOCK		    1 0 1   1
+
+VEHICLE_HUD
+  sid dbuggy1
+
+  interface h_buggya.tga
+  driver 16,196
+  emplace 1,27,220
+  seats 1,38,196
+VEHICLE_END
+
+VEHICLE_HUD
+  sid dtruck1
+  interface h_truck.tga
+  driver 14,190
+  emplace 1 20,210
+  seats 7,10,150,30,150,50,150,10,170,30,170,50,170,30,190
+VEHICLE_END
+
+VEHICLE_HUD
+	sid	dheli1
+	interface	h_heli.tga
+	driver	48,100
+	emplace	4,12,176,12,200,40,176,40,200
+	seats	4,12,144,12,160,40,160,40,144
+VEHICLE_END

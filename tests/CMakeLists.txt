@@ -502,23 +502,14 @@ add_executable(def_flag_parity_test def/def_flag_parity_test.cpp)
 target_link_libraries(def_flag_parity_test PRIVATE opennova_formats)
 add_test(NAME def_flag_parity COMMAND def_flag_parity_test)
 
-# The def parsers. items / item_attrib / item_type read the authored tables;
-# weapons, ammo, powerup and hudpos run their inline blocks unconditionally and
-# pin the shipped tables from the reference fixture set as SKIP-LEG legs.
+# The def parsers over their inline blocks and the authored tables (fixtures/def/items.def,
+# weapon.def, ammo.def and hudpos.def: the witnessed rows' values in the shipped grammar).
 foreach(test items weapons ammo powerup hudpos item_attrib item_part_bytes item_type)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
     target_link_libraries(def_parse_${test}_test PRIVATE opennova_formats)
     target_include_directories(def_parse_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
 endforeach()
-foreach(test items weapons ammo powerup hudpos item_attrib item_part_bytes item_type)
-    if(test MATCHES "^(items|weapons|ammo|powerup|hudpos)$")
-        opennova_add_mixed_test(def_parse_${test} COMMAND def_parse_${test}_test)
-    else()
-        add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
-    endif()
-endforeach()
-# The powerup retail leg reads powerup.def off the packed install through the Vfs.
-target_link_libraries(def_parse_powerup_test PRIVATE opennova_base)
 
 # hudfx.def (docs/interface/hud-re.md "hudfx.def"): the tagged lines, the one the game reads, the slots'
 # names, the writer's form and an authored file written again over its layout. JO ships none.
@@ -554,13 +545,13 @@ target_include_directories(minimal_avatars_gen_test PRIVATE ${CMAKE_CURRENT_SOUR
 add_test(NAME minimal_avatars_gen COMMAND minimal_avatars_gen_test)
 
 foreach(test parse roundtrip)
-    # The minted fixtures/avatars/synth_avatars.def carries the shape; the shipped
-    # table is each test's OPENNOVA_JO_ASSETS reference leg.
+    # The minted fixtures/avatars/synth_avatars.def carries the shape; the authored
+    # fixtures/avatars/jo_shaped.def the shipped table's constructs.
     add_executable(avatars_${test}_test avatars/avatars_${test}_test.cpp)
     target_link_libraries(avatars_${test}_test PRIVATE opennova_base opennova_formats)
     target_include_directories(avatars_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(avatars_${test}_test PRIVATE cxx_std_17)
-    opennova_add_mixed_test(avatars_${test} COMMAND avatars_${test}_test)
+    add_test(NAME avatars_${test} COMMAND avatars_${test}_test)
 endforeach()
 
 # Mission (BMS) tests
@@ -740,18 +731,21 @@ target_link_libraries(grm_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(grm_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(grm_roundtrip COMMAND grm_roundtrip_test)
 
+# score.ini (formats/score): the authored sample read, written and read again, the reader's edge cases, and the
+# game's own table: its twelve default rows (the runtime's) written are the shipped score.ini, pinned by its
+# length and FNV-1a64.
 add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
-target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
+target_link_libraries(score_roundtrip_test PRIVATE opennova_runtime)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
+add_test(NAME score_roundtrip COMMAND score_roundtrip_test)
 
 # The AI profiles' writer (formats/aip): a minted profile in the writer's form byte for byte, written and
-# read again the same profile, each unit's shortest word; --retail: every shipped profile written from its
-# model reads back as that model.
+# read again the same profile, each unit's shortest word; the authored fixtures/aip profiles (JO's layout and
+# the shipped profiles' constructs) written from their models read back as those models, their forms pinned.
 add_executable(aip_write_test aip/aip_write_test.cpp)
 target_link_libraries(aip_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(aip_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(aip_write COMMAND aip_write_test)
+add_test(NAME aip_write COMMAND aip_write_test)
 
 # game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
 # layout through gamecfg::write), its byte-exact load/write round trip, and the
@@ -916,7 +910,7 @@ add_executable(sound_profile_test audio/sound_profile_test.cpp)
 target_link_libraries(sound_profile_test PRIVATE opennova_runtime)
 target_include_directories(sound_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(sound_profile_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(sound_profile COMMAND sound_profile_test)
+add_test(NAME sound_profile COMMAND sound_profile_test)
 
 add_executable(infantry_stance_sound_test world/infantry_stance_sound_test.cpp)
 target_link_libraries(infantry_stance_sound_test PRIVATE opennova_runtime)
@@ -2023,12 +2017,11 @@ add_test(NAME hud_item_flash COMMAND hud_item_flash_test)
 
 # The hudpos.def parse applied to the HUD layout globals (hud/hud_layout_from_hudpos.h):
 # the corner rects, the positioned records, the packed colours, the stance slots and
-# the last-authored static frame; the retail leg reads the reference fixture's hudpos.def
-# (an earlier build's layout, not JO:CA's).
+# the last-authored static frame, on a synthetic file and the authored fixtures/def/hudpos.def.
 add_executable(hud_layout_test hud/hud_layout_test.cpp)
 target_link_libraries(hud_layout_test PRIVATE opennova_runtime)
 target_include_directories(hud_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(hud_layout COMMAND hud_layout_test)
+add_test(NAME hud_layout COMMAND hud_layout_test)
 
 add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
@@ -4891,21 +4884,25 @@ target_compile_features(json_test PRIVATE cxx_std_17)
 target_include_directories(json_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME json COMMAND json_test)
 
+# The item / weapon / ammo / powerup writers over inline catalogs and the corpus catalogs
+# (fixtures/def/corpus: the shipped catalogs' keys, forms and ignored lines, authored).
 add_executable(def_write_test def/def_write_test.cpp)
 target_link_libraries(def_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(def_write COMMAND def_write_test)
+add_test(NAME def_write COMMAND def_write_test)
 
 # hudpos.def's writer (formats/def/def_hudpos_write.h, ADR 0003; the editor deep-integration plan's DI-37):
-# read, written and read again the same model, its bytes canonical; the retail legs JO:CA's own hudpos.def
-# off the packed install (base and each expansion) and the extracted tree.
+# read, written and read again the same model, its bytes canonical, over every key it writes, the authored
+# fixtures/def/hudpos.def (JO:CA's spellings, with and without its trailing NUL; its written form pinned by
+# FNV-1a64) and the base game's assets/hudpos.def.
 # charattr.def's loader and writer (formats/charattr, ADR 0003): the classes in order to the first
 # missing, the first section of a label, each value's source and the unread sections; written and read
-# again the same rows; the retail legs JO:CA's own file (classes 1..9, CHARACTER8's CRC 0x22A25E01).
+# again the same rows; the authored fixtures/charattr/charattr.def in JO:CA's layout (classes 1..9,
+# CHARACTER8's CRC 0x22A25E01, the writer's form pinned by FNV-1a64).
 add_executable(charattr_test charattr/charattr_test.cpp)
 target_link_libraries(charattr_test PRIVATE opennova_base opennova_formats)
 target_include_directories(charattr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(charattr COMMAND charattr_test)
+add_test(NAME charattr COMMAND charattr_test)
 
 # hudpos.def's lines as the game's parser is handed them (formats/def/def_hudpos_text.h): the line the
 # game takes a key from is the key's last.
@@ -4917,15 +4914,16 @@ add_test(NAME def_hudpos_text COMMAND def_hudpos_text_test)
 add_executable(def_write_hudpos_test def/def_write_hudpos_test.cpp)
 target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_hudpos_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(def_write_hudpos COMMAND def_write_hudpos_test)
+add_test(NAME def_write_hudpos COMMAND def_write_hudpos_test)
 
 # The def writers' own form (formats/def): a minted record byte for byte and read back as itself, the
-# writer's reals the shortest that read back; --retail: every catalog written from its model reads back as
-# that model, one field changed changes one line, and its reals are the shortest.
+# writer's reals the shortest that read back; every corpus catalog (fixtures/def/corpus) written from its model
+# reads back as that model, one field changed changes one line, its reals are the shortest, and its written
+# form is pinned by FNV-1a64.
 add_executable(def_write_form_test def/def_write_form_test.cpp)
 target_link_libraries(def_write_form_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_form_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(def_write_form COMMAND def_write_form_test)
+add_test(NAME def_write_form COMMAND def_write_form_test)
 
 # The capture-point labels: the map-overlay slot walk and the marker types 8/9.
 add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)

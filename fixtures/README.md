@@ -58,8 +58,24 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 
 ## Authored files
 
-`def/items.def` (test rows 106100..), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
-`mnu/all_widgets.mnu`, `mns/test_style.mns`, `score/score_sample.ini`,
+`def/items.def` (test rows 106100..), `def/weapon.def`, `def/ammo.def` and `def/hudpos.def`
+(the rows and keys the `def_parse_*`, `hud_layout` and `def_write_hudpos` pins read, their
+witnessed values in the shipped files' grammar), `def/corpus/*.def` (every key JO:CA's items,
+weapon and ammo catalogs and its jox01 expansion's use, in their forms, with the lines the game
+reads nothing of, and a powerup table in the shipped one's shape: the `def_write` and
+`def_write_form` corpus legs'), `charattr/charattr.def` (JO:CA's charattr layout, its
+CHARACTER8 the shipped class-8 row: `charattr`), `avatars/jo_shaped.def` (an avatar table in
+the shipped one's shape: `avatars_parse`, `avatars_roundtrip`), `aip/*.aip` (AI profiles in
+JO's layout with the shipped profiles' constructs: `aip_write`), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
+`mnu/all_widgets.mnu`, `mnu/shipped_forms.mnu` (every element, attribute and lexical
+form the shipped JO menus use, in their CR LF code-page form, the two slips their quotes
+make among them: the menu format sweeps' variant fixture), `mnu/render_cases.mnu` and
+`mnu/hotkeys.mnu` (the drawing and keyboard cases the shipped screens hold, the
+`menu_render_corpus` and `menu_runtime_corpus` ctests'), `mns/test_style.mns`,
+`mns/shipped_form.mns` (the shipped stylesheets' line forms), `env/line_forms.env` and
+`terrain/forms/line_forms16.trn` / `line_forms8.trn` (the line forms the shipped `.env`
+and `.trn` files take, the `env_shipped_forms` and `trn_mission_load` ctests'),
+`score/score_sample.ini`,
 `anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`, and
 `weapon_timing.txt`, the `opennova-3di weapon timing` input the Blender packaging
 workflow runs),
