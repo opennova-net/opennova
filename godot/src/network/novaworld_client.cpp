@@ -354,19 +354,15 @@ void NovaWorldClient::stop() {
 		host_role_.stop();
 		// The stop statements leave on one send pump before the goodbye.
 		lobby_.flush();
-		opennova::ClientSession *session = lobby_.session();
-		if (session->is_verified()) {
-			// The reset's teardown of a connected connection sends its disconnect burst.
-			const std::vector<uint8_t> goodbye = session->build_goodbye();
-			for (size_t i = 0; i < session->disconnect_burst_count(); ++i) {
-				lobby_.send(goodbye);
-			}
-		} else if (!session->reconnecting() &&
-		           (state_ == STATE_SESSION_HELLO || state_ == STATE_SESSION_JOIN)) {
-			// A first connect still in its handshake says goodbye once (to its server once a
-			// 0x81 named one; before that the driver has nowhere to send it); a connection a
-			// reconnect is still re-establishing has nothing to tear down.
-			lobby_.send(session->build_goodbye());
+		// The reset's disconnect request (ClientSession::request_disconnect, the engine's port of
+		// retail's, D-NET-705): a connection that is up, from its accepted 0x82 on (verifying,
+		// verified, hosting or playing), tears down with its disconnect burst; one still probing
+		// or joining (its first connect's Hello or Auth), or one a reconnect is re-establishing,
+		// sends nothing.
+		std::vector<std::vector<uint8_t>> out;
+		lobby_.session()->request_disconnect(out);
+		for (const auto &dg : out) {
+			lobby_.send(dg);
 		}
 	}
 	if (browser_http_ != nullptr) {
@@ -1152,11 +1148,14 @@ void NovaWorldClient::on_host_request_completed(int result, int response_code,
 
 void NovaWorldClient::disconnect_at_exit() {
 	opennova::ClientSession *session = lobby_.session();
-	if (session == nullptr || !lobby_.is_open() || !session->is_verified())
+	if (session == nullptr || !lobby_.is_open())
 		return;
-	const std::vector<uint8_t> goodbye = session->build_goodbye();
-	for (size_t i = 0; i < session->disconnect_burst_count(); ++i) {
-		lobby_.send(goodbye);
+	// The same disconnect request as stop(): the burst from a connection that is up, nothing
+	// from one that is not.
+	std::vector<std::vector<uint8_t>> out;
+	session->request_disconnect(out);
+	for (const auto &dg : out) {
+		lobby_.send(dg);
 	}
 }
 

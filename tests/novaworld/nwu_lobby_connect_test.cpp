@@ -513,8 +513,47 @@ void check_late_accept_after_give_up() {
 
 } // namespace
 
+// D-NET-705: the disconnect request the shell's stop and exit make (NovaWorldClient::stop,
+// disconnect_at_exit) sends nothing from a connection that is not up, its first connect still in
+// Hello or Auth, and the burst from one that is, from its accepted 0x82 on (Verifying here).
+// [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - state 5 -> 6 @0x61E0F3..0x61E0FA, any
+//  other state but 1 -1 @0x61E110; the accepted 0x82's state 5 NapiNP_HandleServerJoinResponse
+//  @0x629EAC]
+void check_disconnect_request_by_state() {
+	Rig rig;
+	rig.start(10);
+	CHECK(rig.lobby.session() != nullptr);
+	if (rig.lobby.session() == nullptr)
+		return;
+	ClientSession &session = *rig.lobby.session();
+	std::vector<std::vector<uint8_t>> out;
+	CHECK(session.state() == ClientSession::State::Hello);
+	session.request_disconnect(out);
+	CHECK(out.empty());
+
+	rig.session.inbound.push_back(
+			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+	rig.lobby.tick(100);
+	CHECK(session.state() == ClientSession::State::Auth);
+	session.request_disconnect(out);
+	CHECK(out.empty());
+
+	rig.session.inbound.push_back({ kServer, server_auth_to(rig.last(SESSION_OPCODE_CLIENT_AUTH)) });
+	rig.lobby.tick(200);
+	CHECK(session.state() == ClientSession::State::Verifying);
+	session.request_disconnect(out);
+	CHECK(!out.empty() && out.size() == session.disconnect_burst_count());
+	for (const auto &dg : out) {
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		CHECK(decode(dg, op, body) && op == SESSION_OPCODE_CLIENT_GOODBYE);
+	}
+	rig.lobby.close();
+}
+
 int main() {
 	check_connect_error_tags();
+	check_disconnect_request_by_state();
 	check_state_one_give_up();
 	check_verify_give_up();
 	check_rejected_connect();
