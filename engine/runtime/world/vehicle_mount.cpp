@@ -327,6 +327,25 @@ void VehicleSystem::presnap_attach_heading(Entity &occupant, const Entity &vehic
 MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat) {
     World &world = world_;
     MountedPose live;
+    // An addeweap child with no anchor takes its carrier's root pose only while
+    // the carrier's matrix bit is clear: the update then builds the carrier's
+    // matrix from its words and copies the root pose. With the bit set (every
+    // mover's tail sets it each tick; a decoration, building or powerup carries it
+    // from its model init) the child keeps its own pose. The child's bit is set
+    // either way. [orig: Entity_UpdateTransformAndTurret @0x440CA0 (the gate
+    // `test [edi+24h], 20000h` @0x4410EA..0x4410F1, the build @0x4410F7..0x441151,
+    // the copy @0x441153..0x4411BC, the child's bit @0x4411C2); the setters
+    // Entity_InitFromModel @0x40E0D4..0x40E105, Entity_UpdateVehiclePhysics
+    // @0x48AF00 (the tail @0x48D43E..0x48D451)]
+    if (seat.attachment_frame && seat.bone_index == 0 &&
+            (vehicle.engine_flags & kEntityFlagMatrixBuilt) != 0) {
+        occ.engine_flags |= kEntityFlagMatrixBuilt;
+        live.position = occ.position;
+        live.heading = occ.veh.yaw_seeded ? occ.veh.yaw_bam : occ.heading;
+        live.pitch = occ.veh.yaw_seeded ? occ.veh.air_pitch_bam : spawn_angle_bam(occ.pitch);
+        live.roll = occ.veh.yaw_seeded ? occ.veh.air_roll_bam : spawn_angle_bam(occ.roll);
+        return live;
+    }
     if (world.pose_provider == nullptr ||
         !world.pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
         // The root/local fallback uses the same complete carrier frame as
@@ -342,8 +361,8 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
                 : spawn_angle_bam(vehicle.pitch);
         live.roll = vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
                 : spawn_angle_bam(vehicle.roll);
-        // An addeweap child with no anchor copies its carrier's root pose:
-        // the position words as they are.
+        // An addeweap child with no anchor copies its carrier's root pose (the
+        // carrier's matrix bit clear): the position words as they are.
         // [orig: Entity_UpdateTransformAndTurret @0x441153..0x4411BC]
         if (seat.attachment_frame && seat.bone_index == 0)
             live.position = vehicle.position;
@@ -364,6 +383,8 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
         occ.veh.yaw_bam = live.heading;
         occ.veh.air_pitch_bam = live.pitch;
         occ.veh.air_roll_bam = live.roll;
+        // The composed child's matrix is current [orig: @0x4411C2].
+        occ.engine_flags |= kEntityFlagMatrixBuilt;
     }
     return live;
 }

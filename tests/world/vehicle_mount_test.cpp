@@ -5005,7 +5005,61 @@ static void test_entity_pose_seat_bone_lookup() {
     CHECK(poses.resolve_seat_bone(w, *w.registry.get(bare_h), 1));
 }
 
+// An addeweap child with no anchor row takes its carrier's root pose only while the
+// carrier's matrix bit (Flags 0x20000) is clear; with it set (a mover's tail sets it
+// every tick, a decoration's model init once) the child keeps its own pose. The
+// child's own bit is set either way, and a teleport's clear lets the next compose
+// copy again. [orig: Entity_UpdateTransformAndTurret @0x440CA0 (the gate
+// @0x4410EA..0x4410F1, the copy @0x441153..0x4411BC, the child's bit @0x4411C2);
+// Entity_UpdateVehiclePhysics @0x48AF00 (the tail @0x48D43E..0x48D451);
+// Entity_TeleportTeamToSpawn @0x43D390 (the clears)]
+void test_an_anchorless_child_copies_only_a_stale_carrier() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.has_item_def = true;
+    carrier.position = {10.0f, 20.0f, 3.0f};
+    carrier.heading = placed_heading_bam(90);
+    carrier.health = 100;
+    carrier.alive = true;
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier);
+    Entity child;
+    child.kind = EntityKind::Item;
+    child.position = {50.0f, 60.0f, 7.0f};
+    child.emplacement_parent = carrier_h;
+    const EntityHandle child_h = w.registry.spawn(1, child);
+    Seat anchor;
+    anchor.type = SeatType::Gunner;
+    anchor.bone_index = 0; // no anchor row
+    anchor.attachment_frame = true;
+    const auto compose = [&]() {
+        w.vehicles.pose_mounted_occupant(*w.registry.get(child_h), *w.registry.get(carrier_h),
+                                         anchor);
+    };
+    // The carrier's bit clear (a mover not yet ticked): the root copy.
+    compose();
+    CHECK(w.registry.get(child_h)->position.x.q16 == w.registry.get(carrier_h)->position.x.q16);
+    CHECK(w.registry.get(child_h)->position.y.q16 == w.registry.get(carrier_h)->position.y.q16);
+    CHECK((w.registry.get(child_h)->engine_flags & kEntityFlagMatrixBuilt) != 0);
+    // A mover tick moves the carrier and sets its bit: the child holds.
+    w.registry.get(carrier_h)->position = {30.0f, 40.0f, 5.0f};
+    w.registry.get(carrier_h)->engine_flags |= kEntityFlagMatrixBuilt;
+    compose();
+    CHECK(w.registry.get(child_h)->position.x == 10.0f &&
+          w.registry.get(child_h)->position.y == 20.0f &&
+          w.registry.get(child_h)->position.z == 3.0f);
+    // A teleport clears the carrier's bit: the next compose copies again.
+    w.registry.get(carrier_h)->engine_flags &= ~kEntityFlagMatrixBuilt;
+    compose();
+    CHECK(w.registry.get(child_h)->position.x == 30.0f &&
+          w.registry.get(child_h)->position.y == 40.0f &&
+          w.registry.get(child_h)->position.z == 5.0f);
+}
+
 int main() {
+    test_an_anchorless_child_copies_only_a_stale_carrier();
     test_use_scan_poses_every_seat_kind_live();
     test_claimant_detach_cuts_vehicle_slot_action();
     test_npc_detach_zeroes_the_equipped_byte();

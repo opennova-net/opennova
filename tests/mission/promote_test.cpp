@@ -236,8 +236,12 @@ static void test_emplacement_attachments() {
     CHECK(plain_child->ref_group_member && gun_child->ref_group_member &&
           crosshair_child->ref_group_member);
     CHECK(plain_child->group_id == parent->group_id);
-    CHECK(gun_child->engine_flags == parent->engine_flags &&
+    // The child's own compose then sets its matrix bit [orig:
+    // Entity_UpdateTransformAndTurret @0x440CA0 (@0x4411C2)].
+    CHECK((gun_child->engine_flags & ~kEntityFlagMatrixBuilt) ==
+                  (parent->engine_flags & ~kEntityFlagMatrixBuilt) &&
           gun_child->flags == parent->flags);
+    CHECK((gun_child->engine_flags & kEntityFlagMatrixBuilt) != 0);
 
     parent->position = {30.f, 40.f, 5.f};
     parent->heading = placed_heading_bam(90);
