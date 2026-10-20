@@ -61,7 +61,7 @@ func _project() -> String:
 	assert_true(_seam.new_project(dir, "Preview Decode"))
 	TestFs.write_bytes(self, dir.path_join(MODEL), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
 	TestFs.write_bytes(self, dir.path_join("models/crate.tga"), TestFs.tga_bytes(Vector2i(8, 8), CRATE_RGB, 0x08))
-	TestFs.write_bytes(self, dir.path_join(PTL), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join(PTL), TestFs.crlf(_ptl()).to_utf8_buffer())
 	TestFs.write_bytes(self, dir.path_join("particles/solid.tga"), TestFs.tga_bytes(Vector2i(8, 8), PARTICLE_RGB, 0x08))
 	TestFs.write_bytes(self, dir.path_join(ITEMS), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
 			+ "particlefx Speck ground\nend\n").to_utf8_buffer())

@@ -89,19 +89,16 @@ void bounds_include(Emitter &e, const Vec3 &p) noexcept {
 	e.bounds_valid = true;
 }
 
+// The chosen layer's colour of the slot: the layer's own, which its graphicN
+// line copied from the particle [orig: SpawnParticle @ 0x5e77be..0x5e77d1 —
+// graphic+0x2BC + (rand & 3) * 4].
 Color3 color_for_slot(const ParticleDef &def, std::uint32_t graphic, std::uint32_t slot) noexcept {
 	const std::uint32_t which = slot & 3u;
 	const std::array<const Color3 *, 4> colors = {
 		&def.graphics[graphic].color1, &def.graphics[graphic].color2,
 		&def.graphics[graphic].color3, &def.graphics[graphic].color4,
 	};
-	if (def.graphics[graphic].color_overrides_set) {
-		return *colors[which];
-	}
-	const std::array<const Color3 *, 4> particle_colors = {
-		&def.color1, &def.color2, &def.color3, &def.color4,
-	};
-	return *particle_colors[which];
+	return *colors[which];
 }
 
 std::uint32_t pick_color_slot(Emitter &e) noexcept {
@@ -423,17 +420,19 @@ void apply_kill_plane(Emitter &e) noexcept {
 }
 
 // CParticleEmitter_SpawnParticle @ 0x5e7640: bits 0x01..0x100 are set when
-// the chosen graphic layer has a non-null LUT pointer at the matching offset.
-// We follow per-graphic curves with particle-level fallback.
+// the chosen graphic layer has a non-null LUT pointer at the matching offset
+// [orig: @ 0x5e76d4..0x5e7711 — graphic+0x1E0/+0x228/+0x270/+0x2B8/+0x194]:
+// the layer's own curves, the ones its graphicN line copied from the particle
+// among them; the particle's own are no fallback.
 std::uint32_t compute_spawn_flags(const ParticleDef &def, std::uint32_t graphic_idx) noexcept {
 	using namespace particle_runtime_flag;
 	const GraphicLayer &layer = def.graphics[graphic_idx];
 	std::uint32_t flags = 0;
-	if (layer.alpha_func.baked || def.alpha_func.baked) flags |= AlphaCurve;
-	if (layer.red_func.baked   || def.red_func.baked)   flags |= RedCurve;
-	if (layer.green_func.baked || def.green_func.baked) flags |= GreenCurve;
-	if (layer.blue_func.baked  || def.blue_func.baked)  flags |= BlueCurve;
-	if (layer.scale_func.baked || def.scale_func.baked) flags |= ScaleCurve;
+	if (layer.alpha_func.baked) flags |= AlphaCurve;
+	if (layer.red_func.baked)   flags |= RedCurve;
+	if (layer.green_func.baked) flags |= GreenCurve;
+	if (layer.blue_func.baked)  flags |= BlueCurve;
+	if (layer.scale_func.baked) flags |= ScaleCurve;
 	if (layer.flip_frames > 1) flags |= Flipbook;
 	if (layer.blend_mode == BlendMode::Bump || layer.blend_mode == BlendMode::Bumpadd) flags |= LitColor;
 	if (layer.blend_mode == BlendMode::Distort) flags |= Distort;
@@ -451,9 +450,9 @@ struct ModulatedColor {
 	std::uint8_t alpha = 255;
 };
 
-std::uint8_t modulate_channel(std::uint8_t channel, const CurveRef &graphic_curve,
-		const CurveRef &definition_curve, std::size_t lut_index) noexcept {
-	const CurveRef &curve = graphic_curve.baked ? graphic_curve : definition_curve;
+// The parent layer's curve over the channel [orig: SpawnParticle @ 0x5e7d99 —
+// the parent's graphic, its LUT pointers @ 0x5e7e03..0x5e7eab].
+std::uint8_t modulate_channel(std::uint8_t channel, const CurveRef &curve, std::size_t lut_index) noexcept {
 	if (!curve.baked) {
 		return channel;
 	}
@@ -470,18 +469,41 @@ ModulatedColor parent_modulated_color(const Particle &parent, const ParticleDef 
 			static_cast<std::int32_t>(parent.curve_phase) & 0xFF);
 	const GraphicLayer &layer = parent_def.graphics[parent.graphic_layer];
 	if ((parent.flags & AlphaCurve) != 0) {
-		out.alpha = modulate_channel(parent.alpha, layer.alpha_func, parent_def.alpha_func, lut_index);
+		out.alpha = modulate_channel(parent.alpha, layer.alpha_func, lut_index);
 	}
 	if ((parent.flags & RedCurve) != 0) {
-		out.rgb.r = modulate_channel(parent.color.r, layer.red_func, parent_def.red_func, lut_index);
+		out.rgb.r = modulate_channel(parent.color.r, layer.red_func, lut_index);
 	}
 	if ((parent.flags & GreenCurve) != 0) {
-		out.rgb.g = modulate_channel(parent.color.g, layer.green_func, parent_def.green_func, lut_index);
+		out.rgb.g = modulate_channel(parent.color.g, layer.green_func, lut_index);
 	}
 	if ((parent.flags & BlueCurve) != 0) {
-		out.rgb.b = modulate_channel(parent.color.b, layer.blue_func, parent_def.blue_func, lut_index);
+		out.rgb.b = modulate_channel(parent.color.b, layer.blue_func, lut_index);
 	}
 	return out;
+}
+
+// The parent particle's CURRENT size, as the child-spawn inherit block
+// recomputes it for USEPARENTSCALE: the parent's base size (+0x38) times its
+// scale curve's blend / 128 when the parent carries the ScaleCurve bit, the
+// lerp the billboard builders draw it with, its lut[i + 1] read included
+// [orig: SpawnParticle @ 0x5e7d8c (the parent's +0x38 on the FPU stack),
+// @ 0x5e7da2..0x5e7db3 (the index), @ 0x5e7eb5..0x5e7f00 (the blend, lut[i + 1]
+// @ 0x5e7ee2), @ 0x5e7f93..0x5e7f9c (stored as the child's +0x38 under 0x20)].
+// No 0.5: the halving is the quad's half extent alone.
+float parent_curved_size(const Particle &parent, const ParticleDef &parent_def) noexcept {
+	if ((parent.flags & particle_runtime_flag::ScaleCurve) == 0) {
+		return parent.size;
+	}
+	const CurveRef &curve = parent_def.graphics[parent.graphic_layer].scale_func;
+	if (!curve.baked) {
+		return parent.size;
+	}
+	// The fraction against the truncated phase, retail's second ftol
+	// (@ 0x5e7ebe) under `fsubr` (@ 0x5e7edf).
+	const std::int32_t whole = static_cast<std::int32_t>(parent.curve_phase);
+	const float fraction = parent.curve_phase - static_cast<float>(whole);
+	return parent.size * (particle_scale_curve_blend(curve, whole, fraction) / 128.0f);
 }
 
 float random_sign(Emitter &e, const ParticleDef &def) noexcept {
@@ -562,12 +584,12 @@ bool emit_one_internal(Emitter &e, const ParticleDef &def, const Vec3 &position,
 
 	if (parent != nullptr && parent_def != nullptr) {
 		// The parent-inherit block [orig: SpawnParticle @ 0x5e7d66..0x5e7fdf]:
-		// USEPARENTSCALE (0x20) copies the parent's base size, USEPARENTALPHA
-		// (0x80) and USEPARENTCOLOR (0x40) take the parent's current
+		// USEPARENTSCALE (0x20) takes the parent's current curved size,
+		// USEPARENTALPHA (0x80) and USEPARENTCOLOR (0x40) the parent's current
 		// LUT-modulated alpha / RGB, USEPARENTROTATIONS (0x100000) copies the roll.
 		const ModulatedColor inherited = parent_modulated_color(*parent, *parent_def);
 		if ((def.flags & particle_flag::UseParentScale) != 0) {
-			p.size = parent->size;
+			p.size = parent_curved_size(*parent, *parent_def);
 		}
 		if ((def.flags & particle_flag::UseParentAlpha) != 0) {
 			p.alpha = inherited.alpha;
@@ -817,6 +839,34 @@ void advance_emission(Emitter &e, const ParticleDef &def, float dt,
 }
 
 } // namespace
+
+float particle_scale_curve_blend(const CurveRef &curve, int lut_index, float fraction) noexcept {
+	const std::size_t index = static_cast<std::size_t>(lut_index & 0xFF);
+	// Retail reads lut[i + 1] unguarded [orig: BuildBillboardQuads @ 0x5e70e7,
+	// RenderStaticBillboards @ 0x5f51ba, RenderTopAlignedBillboards @ 0x5f5b6c,
+	// SpawnParticle @ 0x5e7ee2]. The graphic's LUT pointer is TableDef+0x148
+	// [orig: CEffectDef_ResolveTblDefReference @ 0x5e966d — found_node + 82],
+	// so at i = 255 the read lands on TableDef+0x248, the low byte of the
+	// transform-flags dword (index 146 of the 0x250-byte TableDef). A base
+	// table's is 0, every [tabledef] block constructing it zeroed [orig:
+	// CEffectTableDef_ParseCallback @ 0x5e4070; CParticleTableDef_Construct
+	// @ 0x5e26d4]; a transformed clone's is the reference's mask, inverse 0x01 |
+	// reverse 0x02 [orig: CParticleManager_FindTableDefByName @ 0x5e95da..0x5e95fc
+	// -> sub_5E80F0 @ 0x5e80fc; the bits CEffectTableDef_ApplyTransform
+	// @ 0x5e2730 / @ 0x5e273c tests]. The resolve hands an unmodified reference
+	// only a base table (flags 0) and a modified one only the clone stamped with
+	// its own mask (@ 0x5e95b8..0x5e95c6), so the byte is the reference's mask
+	// (D-PTL-11).
+	const std::uint8_t table_flags =
+			static_cast<std::uint8_t>((curve.inverse ? 0x01u : 0u) | (curve.reverse ? 0x02u : 0u));
+	const std::uint8_t index_sample = curve.baked_lut[index];
+	const std::uint8_t next_sample = index < 255 ? curve.baked_lut[index + 1] : table_flags;
+	// The NEXT byte takes 1 - fraction, the index byte the fraction: `fld1;
+	// fsub` multiplied into the lut[i + 1] load, the fraction into lut[i]
+	// [orig: BuildBillboardQuads @ 0x5e7100..0x5e710c] (D-PTL-35).
+	return static_cast<float>(next_sample) * (1.0f - fraction) +
+			static_cast<float>(index_sample) * fraction;
+}
 
 std::uint32_t emitter_rand10(Emitter &e) noexcept {
 	return lcg_step(e.rng_state) & 0x3FFu;

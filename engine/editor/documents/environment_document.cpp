@@ -71,7 +71,8 @@ bool real_of(const Value &value, double &out, std::string &error) {
 	return true;
 }
 
-// A colour channel's byte as the record holds it (0..1 floats of whole bytes, env.h).
+// A colour channel's byte where the record holds bytes (terrain_rgb, held to them at the parse, and
+// the colours with no keyframe, the packed bytes).
 int64_t byte_of(float channel) {
 	const int byte = static_cast<int>(channel * 255.0f + 0.5f);
 	return byte < 0 ? 0 : byte > 255 ? 255 : byte;
@@ -120,32 +121,47 @@ std::vector<FieldChoice> choices(std::initializer_list<FieldChoice> rows) { retu
 
 using RgbAt = std::function<Rgb &(const RecordHandle &)>;
 
-// A colour line's three bytes, one field each on one row (its `group`), the file's keyword their
+// What a colour's three fields hold: a line's whole values, below 0 or past a byte alike, as the
+// record keeps them (env.h line_channel_to_rgb01, within kLineChannelExact), which the game packs
+// (env::scale_rgb_and_pack, env #11); or bytes, where the record holds bytes (terrain_rgb, the
+// colours with no keyframe).
+enum class ColourValues { Line, Bytes };
+
+// A colour line's three values, one field each on one row (its `group`), the file's keyword their
 // token: what the parser reads as atol of the line's three values [orig: TimeOfDay_ParseProperty
 // @ 0x57c590, j__atol of tokens[2..4] in every *_rgb arm].
 void colour(TableKind &kind, const std::string &key, const std::string &prefix, const char *group,
-            const char *section, const char *description, const RgbAt &at,
+            const char *section, const char *description, const RgbAt &at, ColourValues values,
             const LabelledField::Decides &applies = nullptr) {
 	static const char *const kChannels[] = {"r", "g", "b"};
 	static const char *const kLabels[] = {"Red", "Green", "Blue"};
+	const bool line = values == ColourValues::Line;
 	for (int c = 0; c < 3; ++c) {
 		LabelledField field;
-		field.schema = schema(prefix + key + "_" + kChannels[c], FieldType::Byte, kLabels[c], section, description,
-		                      "");
+		field.schema = schema(prefix + key + "_" + kChannels[c], line ? FieldType::Integer : FieldType::Byte,
+		                      kLabels[c], section, description, "");
 		field.schema.token = key;
 		field.schema.group = group;
 		field.schema.color = FieldColor::Channel;
-		ranged(field.schema, 0, 255);
-		field.value.get = [at, c](const RecordHandle &record, Value &out) {
+		if (line) ranged(field.schema, -env::kLineChannelExact, env::kLineChannelExact);
+		else ranged(field.schema, 0, 255);
+		field.value.get = [at, c, line](const RecordHandle &record, Value &out) {
 			const Rgb &rgb = at(record);
-			out = byte_of(c == 0 ? rgb.r : c == 1 ? rgb.g : rgb.b);
+			const float channel = c == 0 ? rgb.r : c == 1 ? rgb.g : rgb.b;
+			out = line ? int64_t(env::rgb01_to_line_channel(channel)) : byte_of(channel);
 			return true;
 		};
-		field.value.set = [at, c](const RecordHandle &record, const Value &value, std::string &error) {
-			int64_t byte = 0;
-			if (!whole_of(value, byte, error) || !in_range(byte, 0, 255, "A colour's byte: 0 to 255.", error)) return false;
+		field.value.set = [at, c, line](const RecordHandle &record, const Value &value, std::string &error) {
+			int64_t number = 0;
+			if (!whole_of(value, number, error)) return false;
+			const bool held = line ? in_range(number, -env::kLineChannelExact, env::kLineChannelExact,
+			                                  "A colour's value: -8355903 to 8355903, what the engine's record "
+			                                  "holds exactly.",
+			                                  error)
+			                       : in_range(number, 0, 255, "A colour's byte: 0 to 255.", error);
+			if (!held) return false;
 			Rgb &rgb = at(record);
-			(c == 0 ? rgb.r : c == 1 ? rgb.g : rgb.b) = static_cast<float>(byte) / 255.0f;
+			(c == 0 ? rgb.r : c == 1 ? rgb.g : rgb.b) = env::line_channel_to_rgb01(static_cast<int32_t>(number));
 			return true;
 		};
 		field.applies = applies;
@@ -415,7 +431,7 @@ void environment_fields(TableKind &kind) {
 		kind.field(std::move(field));
 	}
 	colour(kind, "cloud_rgb", "", "Cloud colour", "Sky", "The dome's one colour when the cloud pass is flat.",
-	       [](const RecordHandle &record) -> Rgb & { return config_of(record).cloud_rgb; });
+	       [](const RecordHandle &record) -> Rgb & { return config_of(record).cloud_rgb; }, ColourValues::Line);
 
 	// --- the sun and the moon [orig: TimeOfDay_ParseProperty @ 0x57ccfc (sun_3di), @ 0x57cd2c, @ 0x57cd5c,
 	// @ 0x57cd8c; EffectWorld_LoadCelestialModels @ 0x5adc50; Star_RenderField_Unused @ 0x5ad9c0 has no
@@ -451,7 +467,7 @@ void environment_fields(TableKind &kind) {
 	// --- the water [orig: TimeOfDay_ParseProperty @ 0x57caf6 (water_rgb), @ 0x57cb4e (water_height << 15),
 	// @ 0x57cb7c (water_murk, held at 0.99 from above)]
 	colour(kind, "water_rgb", "", "Water colour", "Water", "The water's colour, lit by the sun and the sky.",
-	       [](const RecordHandle &record) -> Rgb & { return config_of(record).water_rgb; });
+	       [](const RecordHandle &record) -> Rgb & { return config_of(record).water_rgb; }, ColourValues::Line);
 	{
 		LabelledField field = whole_field(
 				"water_height", "Water height", "Water", "half m",
@@ -502,15 +518,16 @@ void environment_fields(TableKind &kind) {
 	                      "The exposure the eye's adjustment works around: 1 leaves the colours as they are.",
 	                      &Config::iris_center));
 	colour(kind, "lightning_rgb", "", "Lightning", "Light", "The flash a lightning strike adds to the sky, fog and ground.",
-	       [](const RecordHandle &record) -> Rgb & { return config_of(record).lightning_rgb; });
+	       [](const RecordHandle &record) -> Rgb & { return config_of(record).lightning_rgb; },
+	       ColourValues::Line);
 	colour(kind, "ceiling_rgb", "", "Ceiling", "Light", "Indoors, the light from above in place of the sky's.",
-	       [](const RecordHandle &record) -> Rgb & { return config_of(record).ceiling_rgb; });
+	       [](const RecordHandle &record) -> Rgb & { return config_of(record).ceiling_rgb; }, ColourValues::Line);
 	colour(kind, "floor_rgb", "", "Floor", "Light", "Indoors, the light from below in place of the ground's.",
-	       [](const RecordHandle &record) -> Rgb & { return config_of(record).floor_rgb; });
+	       [](const RecordHandle &record) -> Rgb & { return config_of(record).floor_rgb; }, ColourValues::Line);
 	colour(kind, "terrain_rgb", "", "Terrain tint", "Light",
 	       "Tints the terrain's placed tiles (half of it, doubled); effects are lit against it. The colour scale does "
 	       "not touch it.",
-	       [](const RecordHandle &record) -> Rgb & { return config_of(record).terrain_rgb; });
+	       [](const RecordHandle &record) -> Rgb & { return config_of(record).terrain_rgb; }, ColourValues::Bytes);
 
 	// --- the colours the game runs on with no keyframe: the colour lines outside every block land on
 	// the scratch keyframe, packed with the envscale read before them, and become the colour blocks'
@@ -528,7 +545,7 @@ void environment_fields(TableKind &kind) {
 		       [member](const RecordHandle &record) -> Rgb & {
 			       return config_of(record).scratch.*member;
 		       },
-		       without_keyframes);
+		       ColourValues::Bytes, without_keyframes);
 	}
 
 	// --- read and kept, not the game's [orig: TimeOfDay_ParseProperty @ 0x57c590 has no enviro_name or
@@ -542,7 +559,7 @@ void environment_fields(TableKind &kind) {
 	}
 	colour(kind, "vertex_rgb", "", "Vertex tint", "Kept for the editor",
 	       "Kept from earlier games' files: Joint Operations skips the line.",
-	       [](const RecordHandle &record) -> Rgb & { return config_of(record).vertex_rgb; },
+	       [](const RecordHandle &record) -> Rgb & { return config_of(record).vertex_rgb; }, ColourValues::Line,
 	       [](const RecordHandle &, const RecordOwners &) { return Applicability::Ignored; });
 }
 
@@ -569,7 +586,8 @@ void keyframe_fields(TableKind &kind) {
 	for (const TodColour &tod : kTodColours) {
 		Rgb Keyframe::*member = tod.member;
 		colour(kind, tod.key, "", tod.group, tod.section, tod.description,
-		       [member](const RecordHandle &record) -> Rgb & { return keyframe_of(record).*member; });
+		       [member](const RecordHandle &record) -> Rgb & { return keyframe_of(record).*member; },
+		       ColourValues::Line);
 	}
 }
 

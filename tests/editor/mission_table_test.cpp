@@ -415,9 +415,13 @@ int test_fields() {
 	            std::strcmp(file.header.terrain + 16, "CNV") == 0 && get(root, "cnv_file", value) &&
 	            std::get<std::string>(value) == "CNV");
 	TEST_EXPECT(!set(root, "terrain", std::string(17, 'x'), error));
-	// A colour packed 0xRRGGBB, red first; a score byte; the mana.
-	TEST_EXPECT(set(root, "fog_color", int64_t(0x102030), error) && file.header.fog_color[0] == 0x10 &&
-	            file.header.fog_color[2] == 0x30 && number(root, "fog_color") == 0x102030);
+	// A colour packed 0xRRGGBB: the water red first, the fog blue first (the header holds the
+	// mission editor's dword whole, red its byte 2); a score byte; the mana.
+	TEST_EXPECT(set(root, "water_color", int64_t(0x102030), error) && file.header.water_color[0] == 0x10 &&
+	            file.header.water_color[2] == 0x30 && number(root, "water_color") == 0x102030);
+	TEST_EXPECT(set(root, "fog_color", int64_t(0x102030), error) && file.header.fog_color[0] == 0x30 &&
+	            file.header.fog_color[1] == 0x20 && file.header.fog_color[2] == 0x10 &&
+	            number(root, "fog_color") == 0x102030);
 	TEST_EXPECT(!set(root, "fog_color", int64_t(0x1000000), error));
 	TEST_EXPECT(set(root, "win_scores[2]", int64_t(7), error) && file.header.win_scores[2] == 7 &&
 	            set(root, "mana", int64_t(55), error) && file.header.mana == 55);

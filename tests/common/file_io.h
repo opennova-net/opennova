@@ -115,13 +115,17 @@ inline std::string crlf(std::string_view text) {
 	return out;
 }
 
-// A text as a file named `name` holds it: a .def, .trn or .env with CR LF line ends (crlf above),
-// any other as it is.
+// A text as a file named `name` holds it: a .def, .trn, .env or particle file (.ptl, .ptu, .ptg, the
+// same walk [orig: CEffectSystem_Init @ 0x5F6070 -> File_ParseASCIIFile]) with CR LF line ends (crlf
+// above), any other as it is.
 inline std::string staged(const std::string &name, const std::string &text) {
 	std::string extension = name.size() >= 4 ? name.substr(name.size() - 4) : std::string();
 	for (char &c : extension)
 		c = char(std::tolower(static_cast<unsigned char>(c)));
-	return extension == ".def" || extension == ".trn" || extension == ".env" ? crlf(text) : text;
+	return extension == ".def" || extension == ".trn" || extension == ".env" || extension == ".ptl" ||
+	                       extension == ".ptu" || extension == ".ptg"
+	               ? crlf(text)
+	               : text;
 }
 
 // A text file written at `path` as staged above, its folders made (write_file).

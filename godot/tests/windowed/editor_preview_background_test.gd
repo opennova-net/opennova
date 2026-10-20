@@ -49,7 +49,7 @@ func _project() -> String:
 	assert_true(_seam.new_project(dir, "Preview Background"))
 	TestFs.write_bytes(self, dir.path_join("models/armory.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(ARMORY)))
 	TestFs.write_bytes(self, dir.path_join("models/crate.3di"), FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(CRATE)))
-	TestFs.write_bytes(self, dir.path_join(PTL), _ptl().to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join(PTL), TestFs.crlf(_ptl()).to_utf8_buffer())
 	TestFs.write_bytes(self, dir.path_join("particles/particle_dot.tga"),
 			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
 	TestFs.write_bytes(self, dir.path_join(ITEMS), TestFs.crlf("begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\nend\n")

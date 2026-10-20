@@ -142,6 +142,28 @@ bool set_rgb(void *record, const MissionValue &value, std::string &error) {
 	return true;
 }
 
+// The fog colour's three bytes, blue first, as one 0xRRGGBB word: the editor's dword moves into
+// the header whole and the game reads red from its byte 2 [orig: JOTACmed.exe
+// MissionGeneralInfo_DialogProc @ 0x403409..0x40347e (the boxes left to right, << 16 / << 8 /
+// << 0); MIS_ExportBmsFile @ 0x44f920 (the dword at +500 to header +160)];
+// [orig: BMS_LoadAndValidateHeader @ 0x40e250].
+template <class R, uint8_t (R::*Rgb)[3]>
+bool get_bgr(const void *record, MissionValue &out) {
+	const uint8_t(&bgr)[3] = as<R>(record).*Rgb;
+	out = int64_t((uint32_t(bgr[2]) << 16) | (uint32_t(bgr[1]) << 8) | bgr[0]);
+	return true;
+}
+template <class R, uint8_t (R::*Rgb)[3]>
+bool set_bgr(void *record, const MissionValue &value, std::string &error) {
+	int64_t number = 0;
+	if (!integer_of(value, number, error)) return false;
+	uint8_t(&bgr)[3] = as<R>(record).*Rgb;
+	bgr[2] = static_cast<uint8_t>((number >> 16) & 0xFF);
+	bgr[1] = static_cast<uint8_t>((number >> 8) & 0xFF);
+	bgr[0] = static_cast<uint8_t>(number & 0xFF);
+	return true;
+}
+
 // A fixed-width on-disk text slot (`Size` bytes, the whole slot or its first part): read to its first
 // NUL or its end, written with copy_fixed_field, which keeps every byte of the slot (a name a shipped
 // mission fills completely loses no byte to a forced NUL) and zero-pads a shorter text.
@@ -393,7 +415,7 @@ const MissionField kHeaderFields[] = {
 	{MissionRecord::Header, "fog_override", MissionFieldType::Integer, 0, 0, kU16Max, nullptr, 0, false,
 	 get_number<H, uint16_t, &H::fog_override>, set_cast<H, uint16_t, &H::fog_override>},
 	{MissionRecord::Header, "fog_color", MissionFieldType::Integer, 0, 0, 0xFFFFFF, nullptr, 0, false,
-	 get_rgb<H, &H::fog_color>, set_rgb<H, &H::fog_color>},
+	 get_bgr<H, &H::fog_color>, set_bgr<H, &H::fog_color>},
 	{MissionRecord::Header, "map_zoom", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_map_zoom,
 	 set_map_zoom},
 	// The eight win and eight lose sub-goal conditions, and their scores (each the score / 100: the .mis

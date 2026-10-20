@@ -382,10 +382,14 @@ static int test_vm_if_else(void) {
 
 /* ---- E6: call + return + setstate -------------------------------------- */
 
-static int test_vm_call_section_returns(void) {
-    /* `call Sub` (0x34 callv) jumps to section Sub, runs to a `return`
-       (0x39), then resumes after the call site.
-       Expect Var00 = 42 + 1 = 43 after the call+return. */
+static int test_vm_call_return_at_call_stack_base(void) {
+    /* `call Sub` (0x34 callv) jumps to section Sub, but writes its return at the
+       call stack's top without advancing it [orig: AudioVM_Op_CallV @ 0x672B95
+       mov [edi],esi; add ebp,4]: in a plain step Sub's `return` (0x39) finds the
+       call stack at its base, where the game pops the word below it (the script
+       file's size) and faults running on at it [orig: AudioVM_Op_Return @ 0x672C50];
+       the VM, with nothing to return to, stops (MUS_VM_HALTED) (D-MUS-25, D-MUS-27).
+       Var00 is 42, never the 43 a return to the call site would make. */
     const char *src =
         "script t\n"
         "section Begin\n"
@@ -405,9 +409,9 @@ static int test_vm_call_section_returns(void) {
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &s);
     mus_vm_start(vm);
-    /* Tick a few times to give it room (32-instr budget per tick). */
     mus_vm_tick(vm, 16);
-    CHECK(mus_vm_get_var(vm, 0) == 43, "call+return: Var00 += 1 after Sub set 42");
+    CHECK(mus_vm_get_var(vm, 0) == 42, "the return pops no call site: Var00 stays Sub's 42");
+    CHECK(mus_vm_call_depth(vm) == 0 && mus_vm_state(vm) == MUS_VM_HALTED, "callv pushed no return: the VM stops");
     mus_vm_destroy(vm);
     mus_script_free(&s);
     return 1;
@@ -1000,6 +1004,457 @@ static int test_vm_enter_frame_base_as_held(void) {
     return 1;
 }
 
+/* A frame setup of no argument still moves one word (D-MUS-16) [orig: AudioVM_Op_Enter @ 0x672C3C..0x672C47: the copy
+   loop tests after its copy, so `enter 0` runs `mov eax,[ebp-4]; mov [ebx-4],eax` once]: the stack's top, left on it,
+   into the word below the frame base (local 0x1C at MDEdit's 0x20); on an empty stack the word below the stack's base
+   (off_84F218 = 0x3244950), the running context's pointer dword_324494C, which `push_me` pushes [orig:
+   AudioVM_Op_PushSelf @ 0x6728F0]; at a frame base of 0 the globals' last word, the locals following the globals in
+   the block [orig: ScriptInstance_Init @ 0x672F9B..0x672FA3]. Past the instance's block, where a locals size under
+   the frame base puts it, the game writes the heap after its allocation and the VM nothing (D-MUS-22). */
+static int test_vm_enter_no_argument(void) {
+    MusSection sec;
+    memset(&sec, 0, sizeof(sec));
+    strncpy(sec.name, "Begin", sizeof(sec.name) - 1);
+    int32_t var0 = 0, var1 = 0, var16 = 0;
+    const auto run = [&](uint8_t *code, uint32_t size, uint32_t globals, uint32_t locals, uint32_t base) {
+        MusScript s;
+        memset(&s, 0, sizeof(s));
+        strncpy(s.name, "t", sizeof(s.name) - 1);
+        s.code = code; s.code_size = size;
+        s.sections = &sec; s.section_count = 1;
+        s.globals_size = globals; s.locals_size = locals; s.locals_frame_offset = base;
+        MusVM *vm = mus_vm_create();
+        mus_vm_load_script(vm, &s);
+        mus_vm_start(vm);
+        mus_vm_tick(vm, 16);
+        const bool ok = mus_vm_state(vm) != MUS_VM_ERROR;
+        var0 = mus_vm_get_var(vm, 0);
+        var1 = mus_vm_get_var(vm, 1);
+        var16 = mus_vm_get_var(vm, 16);
+        mus_vm_destroy(vm);
+        return ok;
+    };
+    static uint8_t top[] = {
+        0x01, 7,           /* push 7 */
+        0x38, 0x00,        /* enter 0: the 7 to local 0x1C, left on the stack */
+        0x08, 0x04,        /* pop_g Var01: the 7 enter 0 left */
+        0x04, 0x1C,        /* push_l 0x1C */
+        0x08, 0x00,        /* pop_g Var00 */
+        0x3F,
+    };
+    CHECK(run(top, sizeof(top), 68, 0x28, 0x20) && var0 == 7 && var1 == 7,
+          "enter 0 moves the stack's top below the frame base and pops nothing");
+    static uint8_t drained[] = {
+        0x01, 9,           /* push 9 */
+        0x09, 0x1C,        /* pop_l 0x1C: the stack empty again */
+        0x38, 0x00,        /* enter 0: the word below the stack's base to local 0x1C */
+        0x04, 0x1C,        /* push_l 0x1C */
+        0x08, 0x00,        /* pop_g Var00 */
+        0x0C,              /* push_me */
+        0x08, 0x04,        /* pop_g Var01 */
+        0x3F,
+    };
+    CHECK(run(drained, sizeof(drained), 68, 0x28, 0x20) && var0 != 9 && var0 == var1,
+          "on an empty stack enter 0 moves the word push_me pushes");
+    static uint8_t at_start[] = {
+        0x01, 7,           /* push 7 */
+        0x38, 0x00,        /* enter 0 at a frame base of 0: the 7 to the globals' last word */
+        0x3F,
+    };
+    CHECK(run(at_start, sizeof(at_start), 68, 0x28, 0) && var16 == 7 && var0 == 0,
+          "at a frame base of 0 the word below it is the globals' last");
+    static uint8_t past[] = {
+        0x01, 7,           /* push 7 */
+        0x38, 0x00,        /* enter 0: local 0x1C, past a block of 64 + 0 */
+        0x04, 0x1C,        /* push_l 0x1C */
+        0x08, 0x00,        /* pop_g Var00 */
+        0x3F,
+    };
+    CHECK(run(past, sizeof(past), 64, 0, 0x20) && var0 == 0,
+          "past the instance's block enter 0 writes nothing (D-MUS-22)");
+    return 1;
+}
+
+/* A hand-built one-section script over `code`: MUSIC.LAN's methods, 68 bytes of globals and 0x2C of
+   locals, MDEdit's frame base. */
+static MusScript one_section_script(uint8_t *code, uint32_t size, MusSection *sec) {
+    memset(sec, 0, sizeof(*sec));
+    strncpy(sec->name, "Begin", sizeof(sec->name) - 1);
+    MusScript s;
+    memset(&s, 0, sizeof(s));
+    lan_methods(&s);
+    strncpy(s.name, "t", sizeof(s.name) - 1);
+    s.code = code; s.code_size = size;
+    s.sections = sec; s.section_count = 1;
+    s.globals_size = 68; s.locals_size = 0x2C; s.locals_frame_offset = MUS_DEFAULT_LOCALS_BASE;
+    return s;
+}
+
+/* Every run starts with both stacks at their bases, whatever the last left on them [orig: AudioVM_RunContext
+   @ 0x672E89 mov edi,off_84F21C; @ 0x672E8F mov ebp,off_84F218] (D-MUS-23): a step that halts at a `play`
+   with two words on the stack starts the next with none, so its `enter 0` moves the word below the stack's
+   base, the one `push_me` pushes, not the 8 left on it. */
+static int test_vm_run_starts_at_stack_bases(void) {
+    static uint8_t code[] = {
+        0x01, 7,           /* push 7 */
+        0x01, 8,           /* push 8 */
+        0x3E, 0x00,        /* play 0: the run halts with 7 and 8 on the stack */
+        0x38, 0x00,        /* enter 0, the next run's first instruction */
+        0x04, 0x1C,        /* push_l 0x1C */
+        0x08, 0x00,        /* pop_g Var00 */
+        0x0C,              /* push_me */
+        0x08, 0x04,        /* pop_g Var01 */
+        0x3F,
+    };
+    MusSection sec;
+    MusScript s = one_section_script(code, sizeof(code), &sec);
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    CHECK(mus_vm_pc(vm) == 6, "the first run halts at the play");
+    mus_vm_tick(vm, 16);
+    const int32_t moved = mus_vm_get_var(vm, 0), self = mus_vm_get_var(vm, 1);
+    const bool ok = mus_vm_state(vm) != MUS_VM_ERROR;
+    mus_vm_destroy(vm);
+    CHECK(ok && moved == self && moved != 8, "the next run starts with the data stack at its base");
+    return 1;
+}
+
+/* A method pops nothing: its handler reads its arguments through the address of the stack's top word and its
+   result is pushed above them [orig: AudioVM_Op_Method @ 0x672D04..0x672D10; AudioVM_Intrinsic_GGRnd @ 0x672325
+   mov ebx,[ebp-4]; @ 0x672328 mov ecx,[ebp+0]] (D-MUS-24). GGRnd(5, 10) leaves 5 and 10 under its result, so the
+   pops after it take them, and an add after it adds the result to the 10. */
+static int test_vm_method_leaves_arguments(void) {
+    static uint8_t left[] = {
+        0x01, 100,         /* push 100 */
+        0x01, 5,           /* push 5 (lo) */
+        0x01, 10,          /* push 10 (hi) */
+        0x40, 0x01,        /* method GGRnd */
+        0x08, 0x00,        /* pop_g Var00: the result */
+        0x08, 0x04,        /* pop_g Var01: the 10 */
+        0x08, 0x08,        /* pop_g Var02: the 5 */
+        0x08, 0x0C,        /* pop_g Var03: the 100 */
+        0x3F,
+    };
+    MusSection sec;
+    MusScript s = one_section_script(left, sizeof(left), &sec);
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    const int32_t r = mus_vm_get_var(vm, 0);
+    bool ok = mus_vm_state(vm) != MUS_VM_ERROR && r >= 5 && r <= 10 && mus_vm_get_var(vm, 1) == 10 &&
+              mus_vm_get_var(vm, 2) == 5 && mus_vm_get_var(vm, 3) == 100;
+    mus_vm_destroy(vm);
+    CHECK(ok, "GGRnd's arguments stay under its result");
+    static uint8_t added[] = {
+        0x01, 100,         /* push 100 */
+        0x01, 5,           /* push 5 (lo) */
+        0x01, 10,          /* push 10 (hi) */
+        0x40, 0x01,        /* method GGRnd */
+        0x10,              /* add: the result and the 10 under it */
+        0x08, 0x00,        /* pop_g Var00 */
+        0x0F,              /* empty */
+        0x3F,
+    };
+    s = one_section_script(added, sizeof(added), &sec);
+    vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    const int32_t sum = mus_vm_get_var(vm, 0);
+    ok = mus_vm_state(vm) != MUS_VM_ERROR && sum >= 15 && sum <= 20;
+    mus_vm_destroy(vm);
+    CHECK(ok, "an add after the method adds its result to its last argument, not to the 100");
+    return 1;
+}
+
+/* A frame setup over fewer words than its count copies the words below the stack's base as the game keeps
+   them [orig: AudioVM_Op_Enter @ 0x672C2B sub ebp,ecx, the copy loop @ 0x672C3C..0x672C47]: under one word,
+   `enter 3` banks the locals' base (g_AudioVMLocalsBase, the address of local 0, as push_la 0 pushes it) at
+   0x20, the running context's pointer (dword_324494C, push_me's word) at 0x24 and the 7 at 0x28, the stack
+   pointer two words below its base after it. */
+static int test_vm_enter_past_stack_base(void) {
+    static uint8_t code[] = {
+        0x0C,              /* push_me */
+        0x08, 0x00,        /* pop_g Var00: the context's word */
+        0x06, 0x00, 0x00,  /* push_la 0 (+ its reserved byte) */
+        0x08, 0x04,        /* pop_g Var01: the address of local 0 */
+        0x01, 7,           /* push 7 */
+        0x38, 0x03,        /* enter 3 over one word */
+        0x3F,
+    };
+    MusSection sec;
+    MusScript s = one_section_script(code, sizeof(code), &sec);
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    /* The locals follow the 68 bytes of globals: local 0x20 is word 25, 0x24 word 26, 0x28 word 27. */
+    const bool ok = mus_vm_state(vm) != MUS_VM_ERROR && mus_vm_get_var(vm, 25) == mus_vm_get_var(vm, 1) &&
+                    mus_vm_get_var(vm, 1) != 0 && mus_vm_get_var(vm, 26) == mus_vm_get_var(vm, 0) &&
+                    mus_vm_get_var(vm, 27) == 7;
+    mus_vm_destroy(vm);
+    CHECK(ok, "enter 3 over one word banks the locals' base, the context's word and the 7");
+    return 1;
+}
+
+/* A pop past the data stack's base reads on below it and leaves the pointer there, and a push there writes what
+   the game keeps below the base [orig: AudioVM_Op_PopGlobal @ 0x672850 / AudioVM_Op_PushGlobalAddr @ 0x6727F0 over
+   off_84F218's words below: dword_324494C, g_AudioVMLocalsBase]: two pops reach the locals' base, a push there makes
+   it a global's address, so after `empty` a local is that global; a push over the running context's pointer
+   writes back the word it holds or stops the VM, where the game faults dereferencing the word written at its
+   run's end [orig: AudioVM_RunContext @ 0x672EC9] (D-MUS-27). */
+static int test_vm_push_below_stack_base(void) {
+    static uint8_t redirect[] = {
+        0x08, 0x14,        /* pop_g Var05: past the base, the context's pointer */
+        0x08, 0x18,        /* pop_g Var06: the locals' base */
+        0x05, 0x08, 0x00,  /* push_ga Var02: over the locals' base */
+        0x0F,              /* empty: the stack at its base */
+        0x01, 77,          /* push 77 */
+        0x09, 0x00,        /* pop_l 0: Var02, through the locals' base */
+        0x04, 0x00,        /* push_l 0 */
+        0x08, 0x0C,        /* pop_g Var03 */
+        0x3F,
+    };
+    MusSection sec;
+    MusScript s = one_section_script(redirect, sizeof(redirect), &sec);
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    bool ok = mus_vm_state(vm) != MUS_VM_ERROR && mus_vm_get_var(vm, 2) == 77 && mus_vm_get_var(vm, 3) == 77;
+    mus_vm_destroy(vm);
+    CHECK(ok, "a push over the locals' base makes every local that address's");
+    static uint8_t back[] = {
+        0x08, 0x14,        /* pop_g Var05: the context's pointer */
+        0x03, 0x14,        /* push_g Var05: written back over it */
+        0x08, 0x18,        /* pop_g Var06 */
+        0x3F,
+    };
+    s = one_section_script(back, sizeof(back), &sec);
+    vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    ok = mus_vm_state(vm) != MUS_VM_ERROR && mus_vm_get_var(vm, 6) == mus_vm_get_var(vm, 5);
+    mus_vm_destroy(vm);
+    CHECK(ok, "the context's pointer written back over itself runs on");
+    static uint8_t over[] = {
+        0x08, 0x14,        /* pop_g Var05 */
+        0x01, 5,           /* push 5: over the context's pointer */
+        0x3F,
+    };
+    s = one_section_script(over, sizeof(over), &sec);
+    vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    ok = mus_vm_state(vm) == MUS_VM_ERROR;
+    mus_vm_destroy(vm);
+    CHECK(ok, "another word over the context's pointer stops the VM");
+    return 1;
+}
+
+/* `push_me` pushes the running context's pointer, the one instance's address &g_AudioVmInstance = 0x3245AE8, and
+   GFB's `method` pushes GFB's own address, 0x672150 [orig: AudioVM_Op_PushSelf @ 0x6728F0; AudioVM_RunContext
+   @ 0x672E56 from sub_672EE0 @ 0x672EE0; AudioVM_Intrinsic_GFB @ 0x672150] (D-MUS-26): `Var00 = Me` is that
+   word, `if (Me)` takes its branch and `SV(Me)` clamps it to the loudest volume. */
+static int test_vm_self_word_is_the_instance(void) {
+    const char *src =
+        "script t\n"
+        "section Begin\n"
+        "{\n"
+        "  Var00 = Me\n"
+        "  if (Me)\n"
+        "  {\n"
+        "    Var01 = 1\n"
+        "  }\n"
+        "  SV(Me)\n"
+        "  Var02 = FB()\n"
+        "  done\n"
+        "}\n";
+    MusScript s = {};
+    if (!compile_or_die(src, &s)) return 0;
+    MusVM *vm = mus_vm_create();
+    int32_t left = 0;
+    MusVMHooks hooks = {};
+    hooks.user = &left;
+    hooks.on_volume_changed = [](void *u, int32_t l, int32_t) { *(int32_t *)u = l; };
+    mus_vm_set_hooks(vm, &hooks);
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    const bool ok = mus_vm_state(vm) != MUS_VM_ERROR && mus_vm_get_var(vm, 0) == 0x03245AE8 &&
+                    mus_vm_get_var(vm, 1) == 1 && left == (255 << 16) && mus_vm_get_var(vm, 2) == 0x00672150;
+    mus_vm_destroy(vm);
+    mus_script_free(&s);
+    CHECK(ok, "Me is &g_AudioVmInstance, true, and GSV's 255; FB() is GFB's address");
+    return 1;
+}
+
+/* A read through `push_me`'s word reads the VM's instance at the game's offsets [orig: AudioVmScriptInstance as
+   ScriptInstance_Init @ 0x672EF0 fills it]: +0x00 AudioVM_RunContext's address (@ 0x672FC6), +0x04 the chunk's
+   pointer (a heap address the VM has none of: 0, D-MUS-22), +0x0C the globals' address (push_ga 0's word), +0x10
+   the locals' (push_la 0's), +0x18 the IP the run started at, through which the script's code is read, +0x1C the
+   section a setstate entered (@ 0x672C82). Each read is FSet(0, Me + k), which writes the word back unchanged. */
+static int test_vm_reads_through_self_word(void) {
+    static uint8_t code[] = {
+        /* Begin @0 */
+        0x3B, 0x01,                                          /* setstate 1: the run ends, the IP at 2 */
+        /* Reads @2 */
+        0x01, 0x00, 0x0C, 0x01, 0x00, 0x10, 0x40, 0x05, 0x08, 0x00,   /* Var00 = FSet(0, Me + 0x00) */
+        0x01, 0x00, 0x0C, 0x01, 0x04, 0x10, 0x40, 0x05, 0x08, 0x04,   /* Var01 = FSet(0, Me + 0x04) */
+        0x01, 0x00, 0x0C, 0x01, 0x0C, 0x10, 0x40, 0x05, 0x08, 0x08,   /* Var02 = FSet(0, Me + 0x0C) */
+        0x01, 0x00, 0x0C, 0x01, 0x10, 0x10, 0x40, 0x05, 0x08, 0x0C,   /* Var03 = FSet(0, Me + 0x10) */
+        0x01, 0x00, 0x0C, 0x01, 0x18, 0x10, 0x40, 0x05, 0x08, 0x10,   /* Var04 = FSet(0, Me + 0x18) */
+        0x01, 0x00, 0x0C, 0x01, 0x1C, 0x10, 0x40, 0x05, 0x08, 0x18,   /* Var06 = FSet(0, Me + 0x1C) */
+        0x01, 0x00, 0x03, 0x10, 0x40, 0x05, 0x08, 0x14,               /* Var05 = FSet(0, Var04) */
+        0x05, 0x00, 0x00, 0x08, 0x1C,                                  /* Var07 = push_ga 0 */
+        0x06, 0x00, 0x00, 0x08, 0x20,                                  /* Var08 = push_la 0 */
+        0x3F,
+    };
+    MusSection secs[2];
+    memset(secs, 0, sizeof(secs));
+    strncpy(secs[0].name, "Begin", sizeof(secs[0].name) - 1);
+    strncpy(secs[1].name, "Reads", sizeof(secs[1].name) - 1);
+    secs[1].code_offset = 2;
+    MusScript s = one_section_script(code, sizeof(code), &secs[0]);
+    s.sections = secs;
+    s.section_count = 2;
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    mus_vm_tick(vm, 16);
+    const int32_t code_at_2 = (int32_t)((uint32_t)code[2] | ((uint32_t)code[3] << 8) | ((uint32_t)code[4] << 16) |
+                                        ((uint32_t)code[5] << 24));
+    const bool ok = mus_vm_state(vm) != MUS_VM_ERROR && mus_vm_get_var(vm, 0) == 0x00672E50 &&
+                    mus_vm_get_var(vm, 1) == 0 && mus_vm_get_var(vm, 2) == mus_vm_get_var(vm, 7) &&
+                    mus_vm_get_var(vm, 3) == mus_vm_get_var(vm, 8) && mus_vm_get_var(vm, 5) == code_at_2 &&
+                    mus_vm_get_var(vm, 6) == 1;
+    mus_vm_destroy(vm);
+    CHECK(ok, "the instance's dispatch word, chunk, globals, locals, IP and section through Me");
+    return 1;
+}
+
+/* A write through `push_me`'s word lands on the instance as the game's does, and takes effect where the game reads
+   the field: the restart byte (+0x20) at the next run's frame [orig: AudioVM_RunContext @ 0x672E95..0x672EB1],
+   the locals' word (+0x10) at the next run's locals base [orig: @ 0x672E64..0x672E67] (D-MUS-26). */
+static int test_vm_writes_through_self_word(void) {
+    static uint8_t restart[] = {
+        /* Begin @0 */
+        0x01, 3, 0x0C, 0x01, 0x20, 0x10, 0x40, 0x05, 0x0F,   /* FSet(3, Me + 0x20): the restart byte 3 */
+        0x3E, 0x00,                                          /* play 0: the run ends */
+        0x3B, 0x00,                                          /* setstate 0 */
+        /* MessageHandler @13 */
+        0x38, 0x02,                                          /* enter 2: the frame's byte and 0 */
+        0x04, 0x20, 0x08, 0x0C,                              /* Var03 = the byte */
+        0x3B, 0x00,
+    };
+    MusSection sec;
+    MusScript s = one_section_script(restart, sizeof(restart), &sec);
+    s.message_handler_offset = 13;
+    s.has_message_handler = 1;
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    bool ok = mus_vm_get_var(vm, 3) == 0;
+    mus_vm_tick(vm, 16);
+    ok = ok && mus_vm_state(vm) != MUS_VM_ERROR && mus_vm_get_var(vm, 3) == 3 && mus_vm_call_depth(vm) == 1;
+    mus_vm_destroy(vm);
+    CHECK(ok, "the restart byte written through Me takes the frame at the next run");
+    static uint8_t locals[] = {
+        0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0x0C, 0x01, 0x10, 0x10, 0x40, 0x06, 0x0F,   /* FClear(~0, Me + 0x10) */
+        0x05, 0x08, 0x00, 0x0C, 0x01, 0x10, 0x10, 0x40, 0x05, 0x0F,               /* FSet(&Var02, Me + 0x10) */
+        0x01, 5, 0x09, 0x00,                                                      /* local 0 = 5: this run's base */
+        0x3E, 0x00,                                                               /* play 0: the run ends */
+        0x01, 9, 0x09, 0x00,                                                      /* local 0 = 9: Var02 now */
+        0x3F,
+    };
+    s = one_section_script(locals, sizeof(locals), &sec);
+    vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    /* The locals follow the 68 bytes of globals: local 0 is word 17. */
+    ok = mus_vm_get_var(vm, 2) == 0 && mus_vm_get_var(vm, 17) == 5;
+    mus_vm_tick(vm, 16);
+    ok = ok && mus_vm_state(vm) != MUS_VM_ERROR && mus_vm_get_var(vm, 2) == 9 && mus_vm_get_var(vm, 17) == 5;
+    mus_vm_destroy(vm);
+    CHECK(ok, "the locals' word written through Me is the next run's locals base");
+    return 1;
+}
+
+/* A restart byte on a script with no MessageHandler: the game's frame reads through a null pointer [orig:
+   AudioVM_RunContext @ 0x672EC1]; ours, having no handler to run, drops it and takes the plain step (D-MUS-27),
+   from the next run (a byte written through Me) or at once (mus_vm_signal, -2). */
+static int test_vm_restart_byte_without_handler(void) {
+    static uint8_t code[] = {
+        0x01, 3, 0x0C, 0x01, 0x20, 0x10, 0x40, 0x05, 0x0F,         /* FSet(3, Me + 0x20): the restart byte 3 */
+        0x3E, 0x00,                                                 /* play 0: the run ends at 11 */
+        0x01, 1, 0x08, 0x04,                                        /* Var01 = 1 */
+        0x01, 0x00, 0x0C, 0x01, 0x20, 0x10, 0x40, 0x05, 0x08, 0x08, /* Var02 = the restart byte's word */
+        0x3F,
+    };
+    MusSection sec;
+    MusScript s = one_section_script(code, sizeof(code), &sec);
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    bool ok = mus_vm_pc(vm) == 11;
+    mus_vm_tick(vm, 16);
+    ok = ok && mus_vm_state(vm) == MUS_VM_RUNNING && mus_vm_call_depth(vm) == 0 && mus_vm_get_var(vm, 1) == 1 &&
+         mus_vm_get_var(vm, 2) == 0;
+    CHECK(ok, "a written restart byte with no handler is dropped: the plain step runs");
+    ok = mus_vm_signal(vm, 1) == -2 && mus_vm_pc(vm) == 11 && mus_vm_call_depth(vm) == 0 &&
+         mus_vm_state(vm) == MUS_VM_RUNNING;
+    mus_vm_destroy(vm);
+    CHECK(ok, "a signal with no handler is dropped: the plain step runs to the play");
+    return 1;
+}
+
+/* `callv` steps the data stack over the word its slot holds and leaves the call stack where it is [orig:
+   AudioVM_Op_CallV @ 0x672B95 mov [edi],esi; @ 0x672B97 add ebp,4] (D-MUS-25): after `push 9; pop_g` the
+   slot holds the 9, so the called section's `enter 0` finds it on top; its `return` finds the call stack at
+   its base and the call site is never resumed. */
+static int test_vm_callv_steps_data_stack(void) {
+    static uint8_t code[] = {
+        /* Begin @0 */
+        0x01, 9,                       /* push 9 */
+        0x08, 0x0C,                    /* pop_g Var03: the stack at its base, its slot still 9 */
+        0x34, 14, 0x00, 0x00, 0x00,    /* callv Sub */
+        0x01, 1,                       /* push 1 (never reached) */
+        0x08, 0x10,                    /* pop_g Var04 */
+        0x3F,
+        /* Sub @14 */
+        0x38, 0x00,                    /* enter 0: the word callv stepped over */
+        0x04, 0x1C,                    /* push_l 0x1C */
+        0x08, 0x08,                    /* pop_g Var02 */
+        0x39,                          /* return */
+    };
+    MusSection secs[2];
+    memset(secs, 0, sizeof(secs));
+    strncpy(secs[0].name, "Begin", sizeof(secs[0].name) - 1);
+    strncpy(secs[1].name, "Sub", sizeof(secs[1].name) - 1);
+    secs[1].code_offset = 14;
+    MusScript s = one_section_script(code, sizeof(code), &secs[0]);
+    s.sections = secs;
+    s.section_count = 2;
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    const bool ok = mus_vm_state(vm) == MUS_VM_HALTED && mus_vm_get_var(vm, 2) == 9 && mus_vm_get_var(vm, 4) == 0 &&
+                    mus_vm_call_depth(vm) == 0;
+    mus_vm_destroy(vm);
+    CHECK(ok, "callv pushes the slot's 9 and no return");
+    return 1;
+}
+
 /* TStart and TStop are silent no-ops in dfvas (NULL handler -> push 0).
    Hand-craft method calls and verify the VM doesn't crash and pushes 0. */
 static int test_vm_intrinsic_tstart_tstop_noop(void) {
@@ -1519,7 +1974,7 @@ int main(void) {
     RUN_TEST(test_vm_if_not_taken);
     RUN_TEST(test_vm_if_else);
     /* E6 */
-    RUN_TEST(test_vm_call_section_returns);
+    RUN_TEST(test_vm_call_return_at_call_stack_base);
     RUN_TEST(test_vm_setstate_halts);
     RUN_TEST(test_vm_done_resets_to_entry);
     RUN_TEST(test_vm_tablexec_in_range);
@@ -1540,6 +1995,16 @@ int main(void) {
     RUN_TEST(test_vm_method_resolves_by_name);
     RUN_TEST(test_vm_method_past_table_errors);
     RUN_TEST(test_vm_enter_frame_base_as_held);
+    RUN_TEST(test_vm_enter_no_argument);
+    RUN_TEST(test_vm_run_starts_at_stack_bases);
+    RUN_TEST(test_vm_method_leaves_arguments);
+    RUN_TEST(test_vm_enter_past_stack_base);
+    RUN_TEST(test_vm_push_below_stack_base);
+    RUN_TEST(test_vm_callv_steps_data_stack);
+    RUN_TEST(test_vm_self_word_is_the_instance);
+    RUN_TEST(test_vm_reads_through_self_word);
+    RUN_TEST(test_vm_writes_through_self_word);
+    RUN_TEST(test_vm_restart_byte_without_handler);
     /* E10 */
     RUN_TEST(test_vm_play_fires_hook);
     RUN_TEST(test_vm_playw_fires_hook_wait);

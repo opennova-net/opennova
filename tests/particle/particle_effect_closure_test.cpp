@@ -49,10 +49,12 @@ std::string table_text(const std::string &id, int value) {
 	return out + "}\n\n";
 }
 
+// The text as the game's reader takes it, its lines ended CR LF.
 particle::ParticleFile parsed(const std::string &text) {
+	const std::string crlf = opennova::strutil::normalized_crlf_line_ends(text);
 	particle::ParticleFile file;
 	particle::ParseError error;
-	particle::load_particles_from_buffer(text.data(), text.size(), file, error);
+	particle::load_particles_from_buffer(crlf.data(), crlf.size(), file, error);
 	return file;
 }
 

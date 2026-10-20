@@ -9,7 +9,7 @@
 [effectdef]
 {
 	id = Effect_GoreHit;
-	pdefs = GoreHit_Mist, Buildup dots;
+	pdefs = GoreHit_Mist, Buildup_dots;
 
 }
 

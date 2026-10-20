@@ -262,16 +262,35 @@ int main() {
 		overrides.fog_level = 333.0f;
 		overrides.has_fog_color = true;
 		overrides.fog_color = {50.0f / 255.0f, 60.0f / 255.0f, 70.0f / 255.0f};
+		overrides.has_water_color = true;
+		overrides.water_color = { 30.0f / 255.0f, 60.0f / 255.0f, 90.0f / 255.0f };
 		overrides.has_water_murk = true;
 		overrides.water_murk = 1.5f;
 		overrides.has_start_time = true;
 		overrides.start_time = 330;
 
+		config.envscale = 0.5f;
+		config.water_rgb = { 100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f };
 		apply_bms_overrides(config, overrides);
 		if (!expect(config.water_height_set && near(config.water_height, 5.0f), "water height override applies")) return 1;
 		if (!expect(near(config.fog_level, 333.0f), "fog level override applies")) return 1;
-		if (!expect(near(config.keyframes[0].fog.r, 50.0f / 255.0f) && near(config.keyframes[1].fog.r, 50.0f / 255.0f),
-		            "fog color override replaces every keyframe's fog")) return 1;
+		// The fog color is the fog block's parsed target, the scratch keyframe's: the keyframes
+		// keep theirs, which the per-tick compute writes over the target with a table [orig:
+		// Game_StartMission @ 0x525393; Environment_ComputeTimeOfDayColors @ 0x57e1a0].
+		if (!expect(near(config.scratch.fog.r, 50.0f / 255.0f) &&
+							near(config.scratch.fog.b, 70.0f / 255.0f) &&
+							near(config.keyframes[0].fog.r, 10.0f / 255.0f) &&
+							near(config.keyframes[1].fog.r, 20.0f / 255.0f),
+					"the fog color override is the scratch keyframe's fog; the keyframes keep "
+					"theirs"))
+			return 1;
+		// The water color is the water word as the header packs it, no envscale; the line stays
+		// [orig: Environment_SetWaterColor @ 0x57d510].
+		if (!expect(config.water_word_set && config.water_word == 0x1E3C5Au &&
+							water_color_word(config) == 0x1E3C5Au &&
+							near(config.water_rgb.r, 100.0f / 255.0f),
+					"the water color override is the water word, unscaled"))
+			return 1;
 		if (!expect(near(config.water_murk, 0.99f), "murk override uses the shared upper-only clamp")) return 1;
 		if (!expect(config.curtime == 330, "start time override applies")) return 1;
 		overrides.water_murk = -0.5f;
@@ -291,8 +310,12 @@ int main() {
 		const BmsEnvOverrides gated = bms_env_overrides_from_header(0x1 | 0x4, -7, 900, fog_rgb, water_rgb, 0);
 		if (!expect(gated.has_water_height && near(gated.water_height, -7.0f), "attrib 0x1 arms the water height")) return 1;
 		if (!expect(!gated.has_fog_level, "no attrib 0x2: the fog distance stays unarmed")) return 1;
-		if (!expect(gated.has_fog_color && near(gated.fog_color.r, 1.0f) && near(gated.fog_color.b, 128.0f / 255.0f),
-		            "attrib 0x4 arms the fog color as bytes / 255")) return 1;
+		// The game reads the fog color as the dword over the three bytes: red the third, blue
+		// the first [orig: Game_StartMission @ 0x52538d; BMS_LoadAndValidateHeader @ 0x40e250].
+		if (!expect(gated.has_fog_color && near(gated.fog_color.r, 128.0f / 255.0f) &&
+							near(gated.fog_color.g, 0.0f) && near(gated.fog_color.b, 1.0f),
+					"attrib 0x4 arms the fog color, red the third byte"))
+			return 1;
 		if (!expect(!gated.has_water_color && !gated.has_water_murk && !gated.has_start_time,
 		            "zero water bytes arm nothing")) return 1;
 		const int water_rgb2[3] = {0, 30, 0};

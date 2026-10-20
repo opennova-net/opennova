@@ -102,6 +102,8 @@ lod	= 0.000;
 	g2_alpha	= 1.000;
 	g2_scale	= 3.000;
 	g2_scale_adj	= 1.000;
+	g2_scale_func	= synth_grow reverse;
+	g2_alpha_func	= synth_fade;
 	graphic3 =	PufC.tga, blend;
 	g3_flip_frames	= 1;
 	g3_flip_rate	= 8;
@@ -112,6 +114,8 @@ lod	= 0.000;
 	g3_alpha	= 0.500;
 	g3_scale	= 3.000;
 	g3_scale_adj	= 1.000;
+	g3_scale_func	= synth_grow reverse;
+	g3_alpha_func	= synth_fade;
 
 }
 

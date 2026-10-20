@@ -1818,7 +1818,7 @@ func test_the_shoot_tool_plays_its_impacts() -> void:
 	var ptl := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 30;\n"
 	ptl += "\temit_rate = 40;\n\temit_burst = 1;\n\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n"
 	ptl += "\tgraphic1 = particle_dot.tga, blend;\n\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n"
-	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), ptl.to_utf8_buffer())
+	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), TestFs.crlf(ptl).to_utf8_buffer())
 	_copy_fixture("cbin/particle_dot.tga", root.path_join("particles/particle_dot.tga"))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps")

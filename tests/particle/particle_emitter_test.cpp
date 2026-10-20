@@ -240,7 +240,6 @@ bool test_spawn_records_visual_choices() {
 	g2.color2 = {40, 50, 60};
 	g2.color3 = {70, 80, 90};
 	g2.color4 = {100, 110, 120};
-	g2.color_overrides_set = true;
 
 	Emitter e;
 	emitter_init(e, &def, {0, 0, 0}, 7);
@@ -1204,7 +1203,7 @@ bool test_against_real_fixture() {
 		std::fprintf(stderr, "FAIL: parse buildup.ptl: %s\n", error.message.c_str());
 		return false;
 	}
-	const opennova::particle::ParticleDef *def = file.find_particle("Buildup dots");
+	const opennova::particle::ParticleDef *def = file.find_particle("Buildup_dots");
 	if (!expect(def != nullptr, "buildup particle resolves")) return false;
 
 	opennova::particle::Emitter e;
@@ -1487,6 +1486,66 @@ bool test_child_emitter_spawns_from_each_parent_particle() {
 	return expect(!emitter_alive(child), "and dies once drained after the parent's death");
 }
 
+bool test_use_parent_scale_takes_the_parents_curved_size() {
+	// USEPARENTSCALE (0x20) stores the parent's CURRENT size as the child's
+	// base size: the parent's +0x38 times its scale curve's blend / 128 when
+	// the parent carries the ScaleCurve bit, the billboard builders' lerp with
+	// its lut[i + 1] read [orig: SpawnParticle @ 0x5e7d8c, @ 0x5e7eb5..0x5e7f00
+	// (lut[i + 1] @ 0x5e7ee2), @ 0x5e7f93..0x5e7f9c]. At i = 255 that read is
+	// the TableDef's transform-flags byte: 0 for a base curve, the mask for a
+	// transformed one (D-PTL-11).
+	using namespace opennova::particle;
+	ParticleDef parent_def = make_minimal_def();
+	parent_def.emit_rate = 0.0f;
+	parent_def.age = 10.0f;
+	parent_def.gravity = 0.0f;
+	parent_def.speed = 0.0f;
+	CurveRef &scale = parent_def.graphics[0].scale_func;
+	scale.present = true;
+	scale.baked = true;
+	scale.baked_lut.fill(0);
+	scale.baked_lut[20] = 64;
+	scale.baked_lut[21] = 192;
+	scale.baked_lut[255] = 200;
+	ParticleDef child_def = make_minimal_def();
+	child_def.emit_rate = 10.0f;
+	child_def.emit_dur = 0.5f;
+	child_def.emit_burst = 1;
+	child_def.age = 10.0f;
+	child_def.gravity = 0.0f;
+	child_def.speed = 0.0f;
+	child_def.flags |= particle_flag::UseParentScale;
+	auto child_size_at = [&](float phase) {
+		Emitter parent;
+		emitter_init(parent, &parent_def, { 0, 0, 0 }, 1);
+		parent.child_def = &child_def;
+		Emitter child;
+		child.self_emitting = false;
+		emitter_init(child, &child_def, { 0, 0, 0 }, 2);
+		emitter_spawn_one(parent);
+		parent.particles[0].size = 4.0f;
+		parent.particles[0].curve_phase = phase;
+		emitter_advance(parent, 0.016f, {}, &child);
+		return child.particles.empty() ? -1.0f : child.particles[0].size;
+	};
+	// 192 x 0.75 + 64 x 0.25 = 160 -> 4 x 160 / 128 = 5 (no 0.5: that is the
+	// quad's half extent alone).
+	if (!expect(near(child_size_at(20.25f), 5.0f), "the parent's curved size, not its base size"))
+		return false;
+	// The last sample blends toward the base table's flags 0: 200 x 0.5 = 100
+	// -> 3.125 (a clamp to lut[255] gave 6.25).
+	if (!expect(near(child_size_at(255.5f), 3.125f), "a base curve's last sample blends toward 0"))
+		return false;
+	// A reverse reference's clone: (2 + 200) / 2 = 101 -> 3.15625.
+	scale.reverse = true;
+	if (!expect(near(child_size_at(255.5f), 3.15625f), "a reverse clone blends toward its mask 2"))
+		return false;
+	// Without the parent's ScaleCurve bit the base size passes whole.
+	scale.reverse = false;
+	scale.baked = false;
+	return expect(near(child_size_at(20.25f), 4.0f), "an uncurved parent hands over its base size");
+}
+
 bool test_on_my_death_children_spawn_when_the_parent_expires() {
 	// ONMYDEATH (0x10) arms the schedule with the parent's life and one child
 	// burst [orig: SpawnParticle @ 0x5e8095..0x5e80a6].
@@ -1570,6 +1629,7 @@ int main() {
 	if (!test_global_wind_drifts_position_only()) ++failures;
 	if (!test_no_vis_no_update_freezes_an_unseen_emitter_while_it_emits()) ++failures;
 	if (!test_child_emitter_spawns_from_each_parent_particle()) ++failures;
+	if (!test_use_parent_scale_takes_the_parents_curved_size()) ++failures;
 	if (!test_on_my_death_children_spawn_when_the_parent_expires()) ++failures;
 	if (failures != 0) {
 		std::fprintf(stderr, "%d test(s) failed\n", failures);

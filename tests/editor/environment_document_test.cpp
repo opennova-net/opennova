@@ -104,10 +104,13 @@ bool add_keyframe(Document &document, const NodeAddress &row, size_t position = 
 	return document.apply(edit, error);
 }
 
-uint8_t byte(float channel) { return uint8_t(std::max(0, std::min(255, int(channel * 255.0f + 0.5f)))); }
-
+// A colour's channels compared as the record keeps them: a line's whole values, below 0 or past a
+// byte alike (env.h rgb01_to_line_channel).
 bool same_rgb(const Rgb &a, const Rgb &b) {
-	return byte(a.r) == byte(b.r) && byte(a.g) == byte(b.g) && byte(a.b) == byte(b.b);
+	using opennova::env::rgb01_to_line_channel;
+	return rgb01_to_line_channel(a.r) == rgb01_to_line_channel(b.r) &&
+			rgb01_to_line_channel(a.g) == rgb01_to_line_channel(b.g) &&
+			rgb01_to_line_channel(a.b) == rgb01_to_line_channel(b.b);
 }
 
 bool same_keyframe(const Keyframe &a, const Keyframe &b) {
@@ -229,7 +232,19 @@ int test_document(const std::string &repo) {
 	TEST_EXPECT(!set(env, row, "curtime", int64_t(1275), &why) && why.find("HHMM") != std::string::npos);
 	TEST_EXPECT(set(env, row, "curtime", int64_t(30)));
 	TEST_EXPECT(!set(env, row, "water_murk", 1.0, &why) && why.find("0.99") != std::string::npos);
-	TEST_EXPECT(!set(env, row, "water_rgb_g", int64_t(256)));
+	// A line's colour holds what the record holds, below 0 and past a byte (the game packs it, env
+	// #11); past the record's reach it is refused. The colours with no keyframe and the terrain
+	// tint hold bytes.
+	TEST_EXPECT(set(env, row, "water_rgb_g", int64_t(-5)) &&
+			read(env, row, "water_rgb_g") == Value(int64_t(-5)));
+	TEST_EXPECT(set(env, row, "water_rgb_g", int64_t(300)) &&
+			read(env, row, "water_rgb_g") == Value(int64_t(300)));
+	TEST_EXPECT(
+			!set(env, row, "water_rgb_g", int64_t(opennova::env::kLineChannelExact + 1), &why) &&
+			why.find("8355903") != std::string::npos);
+	TEST_EXPECT(set(env, row, "water_rgb_g", int64_t(64)));
+	TEST_EXPECT(!set(env, row, "terrain_rgb_r", int64_t(256)) &&
+			!set(env, row, "static_sun_rgb_r", int64_t(-1)));
 	TEST_EXPECT(!set(env, row, "sun_3di", std::string("a\"b.3di")));
 	TEST_EXPECT(set(env, row, "sky_map2", std::string("my clouds.pcx")));
 	// The optional lines: a water height Set is written, Cleared left out; the sky height left out keeps the
@@ -284,6 +299,34 @@ int test_document(const std::string &repo) {
 		TEST_EXPECT(!env.apply(add, error));
 	}
 	std::printf("document: the fields in the file's units, the rules, the keyframes, the optional lines\n");
+	return 0;
+}
+
+// A colour line's values below 0 and past a byte (env #11): the fields show them as the file wrote
+// them, an edit of one channel leaves the others as they are, and a save writes them back.
+int test_line_colours() {
+	auto document = load("water_rgb -5,300,32\r\nsky_height 175\r\n"
+						 "tod_begin 1200\r\n    sun_rgb -5,64,32\r\ntod_end\r\n");
+	TEST_EXPECT(document != nullptr);
+	if (!document)
+		return 1;
+	EnvironmentDocument &env = *document;
+	const NodeAddress row = row_address(env);
+	const NodeAddress keyframe = keyframe_address(env, 0);
+	TEST_EXPECT(env.issues().empty());
+	TEST_EXPECT(read(env, row, "water_rgb_r") == Value(int64_t(-5)) &&
+			read(env, row, "water_rgb_g") == Value(int64_t(300)) &&
+			read(env, keyframe, "sun_rgb_r") == Value(int64_t(-5)));
+	TEST_EXPECT(set(env, row, "water_rgb_b", int64_t(40)) &&
+			read(env, row, "water_rgb_r") == Value(int64_t(-5)) &&
+			read(env, row, "water_rgb_g") == Value(int64_t(300)));
+	TEST_EXPECT(set(env, keyframe, "sun_rgb_g", int64_t(70)) &&
+			read(env, keyframe, "sun_rgb_r") == Value(int64_t(-5)));
+	const std::string text = env.serialize().text;
+	TEST_EXPECT(text.find("water_rgb -5,300,40\r\n") != std::string::npos &&
+			text.find("    sun_rgb -5,70,32\r\n") != std::string::npos);
+	std::printf("line colours: below 0 and past a byte shown, kept by an edit of another channel, "
+				"saved\n");
 	return 0;
 }
 
@@ -901,6 +944,7 @@ int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_type();
 	failures += test_document(repo);
+	failures += test_line_colours();
 	failures += test_source_issues();
 	failures += test_terrain_keys(repo);
 	failures += test_session();

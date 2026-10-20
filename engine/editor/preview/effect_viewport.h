@@ -20,14 +20,13 @@ namespace opennova::editor {
 enum class EffectViewStatus : uint8_t {
 	NoProject, // no project is open
 	NoFile, // no particle file is open at its path
-	Unreadable, // the game's particle reader does not read the file (detail: where it stops)
-	NoEffect, // the file defines no effect
+	NoEffect, // the file defines no effect (the game's reader refuses no text: it reads every file)
 	SpawnsNothing, // the effect the game resolves spawns nothing (a member no particle the game loads names)
 	Ready,
 };
-// "no_project", "no_file", "unreadable", "no_effect", "spawns_nothing", "ready": its token on the wire.
+// "no_project", "no_file", "no_effect", "spawns_nothing", "ready": its token on the wire.
 inline constexpr const char *kEffectViewStatusTokens[] = {
-	"no_project", "no_file", "unreadable", "no_effect", "spawns_nothing", "ready",
+	"no_project", "no_file", "no_effect", "spawns_nothing", "ready",
 };
 
 // How an effect viewport plays and draws its effect: the effect shown (its id; "" the file's first,
@@ -150,8 +149,6 @@ private:
 	// The file as the last follow read it (its document's identity, load and revision then: read again only
 	// when one moved), and the catalog serial its effects' registrations were taken at.
 	particle::ParticleFile file_;
-	particle::ParseError file_error_;
-	bool file_read_ = false;
 	bool file_known_ = false;
 	uint64_t file_identity_ = 0;
 	uint64_t file_load_ = 0;

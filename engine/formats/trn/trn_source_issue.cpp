@@ -76,18 +76,8 @@ std::vector<TrnSourceIssue> trn_source_issues(const std::string &text) {
 				issue(TrnSourceRule::EnvironmentKey, true, line, key).token = tokens.tokens[0];
 				return;
 			}
-			if (key == "water_rgb") {
-				if (tokens.count < 4) issue(TrnSourceRule::ShortColour, false, line, key).read = tokens.count - 1;
-				for (int c = 1; c <= 3; ++c) {
-					const int read = io::retail_atol(tokens.token(c));
-					if (read < 0 || read > 255) {
-						TrnSourceIssue &out = issue(TrnSourceRule::ColourByte, false, line, key);
-						out.read = read;
-						out.kept = std::clamp(read, 0, 255);
-						break;
-					}
-				}
-			}
+			if (key == "water_rgb" && tokens.count < 4)
+				issue(TrnSourceRule::ShortColour, false, line, key).read = tokens.count - 1;
 			if (key == "water_murk" && static_cast<float>(io::retail_atof(value)) > 0.99f)
 				issue(TrnSourceRule::MurkClamp, false, line, key);
 			if (in_foliage) return;

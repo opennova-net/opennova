@@ -1,4 +1,4 @@
-/* Focused VM regression for the grill fixes (D-MUS-2/3/9/10).
+/* Focused VM regression for the grill fixes (D-MUS-2/3/9/10; the run's stack bases and callv, D-MUS-23/25).
    Drives the public mus_vm_* API over hand-built bytecode. Plain main() style. */
 #include <stdio.h>
 #include <stdint.h>
@@ -83,15 +83,25 @@ int main(void) {
     mus_vm_destroy(vm);
 
     /* ---- Script 2: empty (0x0F) full drain (D-MUS-3) ----
-       push 1,2,3; empty; add. If empty drains the whole stack, add underflows
-       -> ERROR. If it only dropped TOS, add would succeed (no error). */
-    uint8_t code2[] = { 0x01,1, 0x01,2, 0x01,3, 0x0F, 0x10, 0x3F };
+       push_la 0; pop_g Var01; push_me; pop_g Var02; push 1,2,3; empty; add; pop_g Var00.
+       empty drains the whole stack, so add reads on below its base, as the game's does: the
+       running context's pointer and the locals' base under it [orig: AudioVM_Op_Add @ 0x672910
+       over off_84F218's words below: dword_324494C, g_AudioVMLocalsBase] (D-MUS-27), their sum
+       written over the locals' base and popped into Var00. Had it dropped the top alone, Var00
+       would be 1 + 2. */
+    uint8_t code2[] = { 0x06,0x00,0x00, 0x08,0x04, 0x0C, 0x08,0x08,
+                        0x01,1, 0x01,2, 0x01,3, 0x0F, 0x10, 0x08,0x00, 0x3F };
     MusScript s2 = make_script(code2, sizeof(code2), &sec);
+    s2.locals_size = 0x28;
     MusVM *vm2 = mus_vm_create();
     mus_vm_load_script(vm2, &s2);
     mus_vm_start(vm2);
     mus_vm_tick(vm2, 16);
-    CHECK(mus_vm_state(vm2) == MUS_VM_ERROR, "empty fully drains stack (add underflows)");
+    CHECK(mus_vm_state(vm2) != MUS_VM_ERROR &&
+              mus_vm_get_var(vm2, 0) ==
+                  (int32_t)((uint32_t)mus_vm_get_var(vm2, 1) + (uint32_t)mus_vm_get_var(vm2, 2)) &&
+              mus_vm_get_var(vm2, 0) != 3,
+          "empty fully drains stack (add takes the two words below its base)");
     mus_vm_destroy(vm2);
 
     /* ---- Script 3: pushstr (0x07) pushes the word at its index of the string table ----
@@ -230,13 +240,14 @@ int main(void) {
     mus_vm_tick(vm6, 16);   /* exactly ONE tick */
     CHECK(mus_vm_get_var(vm6, 0) == 42, "tablexec forward setstate continues the SAME tick (Var0=42 after 1 tick)");
     CHECK(mus_vm_state(vm6) != MUS_VM_ERROR, "tablexec-setstate script ran without error");
-    /* A script with no MessageHandler: the restart frame is refused (retail
-       would read through a null chunk pointer) and nothing moves. */
+    /* A script with no MessageHandler: retail reads through a null pointer [orig: AudioVM_RunContext
+       @0x672EC1]; ours, having no handler to run, drops the signal and takes the plain step (D-MUS-27):
+       no frame, and the step runs S0 again (Var0 back to 42 over the embedder's 7). */
     {
-        uint32_t pc_before = mus_vm_pc(vm6);
+        mus_vm_set_var(vm6, 0, 7);
         CHECK(mus_vm_signal(vm6, 1) == -2, "signal on a handler-less script returns -2");
-        CHECK(mus_vm_pc(vm6) == pc_before && mus_vm_call_depth(vm6) == 0,
-              "a refused restart frame pushes nothing");
+        CHECK(mus_vm_call_depth(vm6) == 0 && mus_vm_get_var(vm6, 0) == 42 && mus_vm_state(vm6) != MUS_VM_ERROR,
+              "the dropped signal pushes no frame and the plain step runs");
     }
     mus_vm_destroy(vm6);
 
@@ -316,12 +327,20 @@ int main(void) {
         CHECK(ok, "the lose sting is entries 8..12 in order");
     }
     CHECK(strcmp(mus_vm_current_section(vm7), "Idle") == 0, "the lose sting returns to the idle section");
-    CHECK(mus_vm_call_depth(vm7) == 2, "each frame leaves one interrupted pc behind");
+    /* Every run starts at the call stack's base [orig: AudioVM_RunContext @0x672E89 mov edi,off_84F21C]:
+       the frame's interrupted pc does not outlive its run (D-MUS-23). */
+    CHECK(mus_vm_call_depth(vm7) == 0, "no frame outlives its run");
 
-    /* signal(0): the handler's first table entry is the idle section. */
-    CHECK(mus_vm_signal(vm7, 0) == 0, "signal(0) runs the restart frame");
-    CHECK(strcmp(mus_vm_current_section(vm7), "Idle") == 0 && mus_vm_pc(vm7) == 4,
-          "value 0 -> setstate 1 (Idle)");
+    /* The frame's byte is the value's low byte [orig: MusicCtx_SelectEndTrack @0x672FD9..0x672FDD], and
+       a 0 byte is no frame: the step runs as the per-update one [orig: AudioVM_RunContext @0x672E9B jz]. */
+    plays.count = 0;
+    CHECK(mus_vm_signal(vm7, 0) == 0, "signal(0) runs the plain step");
+    CHECK(strcmp(mus_vm_current_section(vm7), "Idle") == 0 && mus_vm_pc(vm7) == 6 && plays.count == 1 &&
+              plays.idx[0] == 1 && mus_vm_call_depth(vm7) == 0,
+          "value 0: no frame, the idle section plays its entry 1");
+    CHECK(mus_vm_signal(vm7, 0x102) == 0 && strcmp(mus_vm_current_section(vm7), "Missionlose") == 0 &&
+              mus_vm_pc(vm7) == 24,
+          "value 0x102: the byte 2, the frame enters Missionlose");
 
     /* The frame ignores the embedder's streaming state: a stopped VM with a
        loaded script still takes it [orig: AudioVM_RunContext tests only ctx+32 and the
@@ -376,6 +395,69 @@ int main(void) {
             mus_close(&mf);
             mus_free(buf);
         }
+    }
+
+    /* ---- Script 8: the restart frame's run starts from both stacks' bases (D-MUS-23) ----
+       [orig: AudioVM_RunContext @0x672E89 mov edi,off_84F21C; @0x672E8F mov ebp,off_84F218; the frame
+       @0x672EA1..0x672EB1]: whatever the last run left, the handler finds the frame's two words alone on
+       the data stack (the byte, then 0) and the interrupted pc alone on the call stack. The step before
+       halts at a play with 7 and 8 on the stack; the handler pops the 0 and the byte, and its `enter 0`
+       then moves the word below the stack's base, push_me's, not the 8. */
+    {
+        uint8_t code8[] = {
+            /* Start   @0 */ 0x01,7, 0x01,8, 0x3E,0x00, 0x3B,0x00,
+            /* handler @8 */ 0x08,0x00, 0x08,0x04, 0x38,0x00, 0x04,0x1C, 0x08,0x08, 0x0C, 0x08,0x0C, 0x3B,0x00
+        };
+        MusSection sec8; memset(&sec8, 0, sizeof(sec8)); strcpy(sec8.name, "Start");
+        MusScript s8 = make_script(code8, sizeof(code8), &sec8);
+        s8.locals_size = 0x28;
+        s8.message_handler_offset = 8; s8.has_message_handler = 1;
+        MusVM *vm9 = mus_vm_create();
+        mus_vm_load_script(vm9, &s8);
+        mus_vm_start(vm9);
+        mus_vm_tick(vm9, 16);
+        CHECK(mus_vm_pc(vm9) == 6, "the step halts at the play with two words on the stack");
+        CHECK(mus_vm_signal(vm9, 0x105) == 0, "signal(0x105) runs the restart frame");
+        CHECK(mus_vm_get_var(vm9, 0) == 0 && mus_vm_get_var(vm9, 1) == 5,
+              "the frame's words: 0 on top, the value's low byte under it");
+        CHECK(mus_vm_get_var(vm9, 2) == mus_vm_get_var(vm9, 3) && mus_vm_get_var(vm9, 2) != 8,
+              "nothing under the frame's words: enter 0 moves the word below the stack's base");
+        CHECK(mus_vm_call_depth(vm9) == 1 && mus_vm_state(vm9) != MUS_VM_ERROR,
+              "the interrupted pc alone on the call stack");
+        mus_vm_tick(vm9, 16);
+        CHECK(mus_vm_call_depth(vm9) == 0, "the next step starts at the call stack's base");
+        mus_vm_destroy(vm9);
+    }
+
+    /* ---- Script 9: a call in the restart frame returns to the interrupted pc (D-MUS-25) ----
+       [orig: AudioVM_Op_CallV @0x672B95 mov [edi],esi writes at the call stack's top without advancing it;
+       AudioVM_Op_Return @0x672C50 mov esi,[edi-4] pops the word below]: the handler's `callv Sub` leaves the
+       frame's interrupted pc the call stack's one word, so Sub's `return` runs on there (Idle's setstate),
+       never back at the call site (Var05 stays 0). */
+    {
+        uint8_t code9[] = {
+            /* Idle    @0 */ 0x3E,0x00, 0x3B,0x00,
+            /* Sub     @4 */ 0x01,42, 0x08,0x00, 0x39,
+            /* handler @9 */ 0x34,0x04,0x00,0x00,0x00, 0x01,1, 0x08,0x14, 0x3B,0x00
+        };
+        MusSection sec9[2]; memset(sec9, 0, sizeof(sec9));
+        strcpy(sec9[0].name, "Idle"); sec9[0].code_offset = 0;
+        strcpy(sec9[1].name, "Sub"); sec9[1].code_offset = 4;
+        MusScript s9 = make_script(code9, sizeof(code9), sec9);
+        s9.section_count = 2;
+        s9.message_handler_offset = 9; s9.has_message_handler = 1;
+        MusVM *vm10 = mus_vm_create();
+        mus_vm_load_script(vm10, &s9);
+        mus_vm_start(vm10);
+        mus_vm_tick(vm10, 16);
+        CHECK(mus_vm_pc(vm10) == 2, "Idle halts at its play");
+        CHECK(mus_vm_signal(vm10, 1) == 0, "signal(1) runs the restart frame");
+        CHECK(mus_vm_get_var(vm10, 0) == 42 && mus_vm_get_var(vm10, 5) == 0,
+              "Sub ran and its return did not come back to the call site");
+        CHECK(mus_vm_pc(vm10) == 0 && strcmp(mus_vm_current_section(vm10), "Idle") == 0 &&
+                  mus_vm_call_depth(vm10) == 0,
+              "the return resumed the interrupted pc: Idle's setstate");
+        mus_vm_destroy(vm10);
     }
 
     printf("\n%d passed, %d failed\n", passed, failed);

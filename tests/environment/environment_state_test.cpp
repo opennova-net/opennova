@@ -182,6 +182,69 @@ int main() {
 		ok &= expect(!env.set_nvg_view(true, 2), "identical NVG is idempotent");
 	}
 
+	// --- a global colour's negative channel (env #11) ------------------------
+	// Each global line packs as the parser packs it, under the envscale: a
+	// negative channel's sign bits fill the bytes above it, and the targets
+	// are the packed word's bytes; g_EnvLightningColor keeps the whole word
+	// [orig: Color_ScaleRGBAndPack @ 0x57f890; TimeOfDay_ParseProperty
+	//  @ 0x57c844 (lightning), @ 0x57c8f4 (ceiling), @ 0x57cb3c (water)].
+	{
+		EnvironmentState env;
+		opennova::env::Config cfg = make_config(); // envscale 0.5
+		cfg.ceiling_rgb = { -5.0f / 255.0f, 64.0f / 255.0f, 32.0f / 255.0f };
+		cfg.water_rgb = { 16.0f / 255.0f, -5.0f / 255.0f, 32.0f / 255.0f };
+		cfg.lightning_rgb = { 20.0f / 255.0f, 40.0f / 255.0f, -10.0f / 255.0f };
+		env.set_config(&cfg, true);
+		// -5 x .5 truncates to -2: 0xFFFE2010.
+		ok &= expect(rgb_near(env.ceiling_color_target(),
+							 { 254.0f / 255.0f, 32.0f / 255.0f, 16.0f / 255.0f }),
+				"a negative red packs into the red byte and the top byte");
+		// g -2 fills the red byte: 0xFFFFFE10.
+		ok &= expect(rgb_near(env.water_color(), { 1.0f, 254.0f / 255.0f, 16.0f / 255.0f }),
+				"a negative green's sign bits fill the red byte");
+		opennova::bms::Header header{};
+		header.minutes_per_day = 1440;
+		ok &= expect(
+				opennova::env::weather_seed_from_config(cfg, header).lightning_color == 0xFFFFFFFBu,
+				"the lightning word is the pack whole: b -5 fills every byte above it");
+	}
+
+	// --- a mission header's water and fog colours --------------------------
+	// The water bytes become the water word as they are, no envscale; the fog
+	// dword goes to the fog block's parsed target (the scratch keyframe's
+	// fog), which the per-tick compute writes from the keyframes whenever a
+	// table exists [orig: Game_LoadTerrainDuringConnect @ 0x5207a8 ->
+	// Environment_SetWaterColor @ 0x57d510; Game_StartMission @ 0x525393;
+	// Environment_ComputeTimeOfDayColors @ 0x57e1a0, gated @ 0x57de8a].
+	{
+		opennova::env::BmsEnvOverrides overrides;
+		overrides.has_water_color = true;
+		overrides.water_color = { 30.0f / 255.0f, 60.0f / 255.0f, 90.0f / 255.0f };
+		overrides.has_fog_color = true;
+		overrides.fog_color = { 200.0f / 255.0f, 180.0f / 255.0f, 160.0f / 255.0f };
+		opennova::env::Config keyed = make_config(); // envscale 0.5, a noon keyframe
+		opennova::env::apply_bms_overrides(keyed, overrides);
+		EnvironmentState env;
+		env.set_config(&keyed, true);
+		env.set_time_of_day(1200.0f);
+		ok &= expect(
+				rgb_near(env.water_color(), { 30.0f / 255.0f, 60.0f / 255.0f, 90.0f / 255.0f }),
+				"the header's water word stands, unscaled by the envscale");
+		// The noon keyframe's fog (0.25, 0.35, 0.45: lines 64, 89, 115) at envscale .5.
+		ok &= expect(rgb_near(env.fog_color_base_target(),
+							 { 32.0f / 255.0f, 44.0f / 255.0f, 57.0f / 255.0f }),
+				"with a keyframe table the keyframes' fog stands over the header's");
+		opennova::env::Config untimed = make_config();
+		untimed.keyframes.clear();
+		opennova::env::apply_bms_overrides(untimed, overrides);
+		EnvironmentState bare;
+		bare.set_config(&untimed, true);
+		bare.set_time_of_day(1200.0f);
+		ok &= expect(rgb_near(bare.fog_color_base_target(),
+							 { 200.0f / 255.0f, 180.0f / 255.0f, 160.0f / 255.0f }),
+				"with no table the header's fog is the fog target, unscaled");
+	}
+
 	// --- the NVG interior pair: the modulator R term on all channels ---------
 	{
 		EnvironmentState env;

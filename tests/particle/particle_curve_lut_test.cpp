@@ -9,6 +9,8 @@
 #include <formats/particle/parser.h>
 #include <formats/particle/particle.h>
 
+#include <base/io/strutil.h>
+
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -136,30 +138,203 @@ bool test_short_table_zero_pad() {
 	return true;
 }
 
-bool test_table_rows_follow_tl_indices_and_last_write_wins() {
-	const char *source = R"PTL(
-[tabledef]
-{
-	id = shuffled;
-	tl2 = 2, 2, 2, 2, 2, 2, 2, 2;
-	tl1 = 1, 1, 1, 1, 1, 1, 1, 1;
-	tl2 = 9, 9, 9, 9, 9, 9, 9, 9;
-	tl32 = 32, 32, 32, 32, 32, 32, 32, 32;
-	tl0 = 77, 77, 77, 77, 77, 77, 77, 77;
-	tlfoo = 88, 88, 88, 88, 88, 88, 88, 88;
-}
-)PTL";
-	std::istringstream stream(source);
+// A text as the game's reader takes it: lines ended CR LF [orig: File_ParseASCIIFile @ 0x53D8DE].
+opennova::particle::ParticleFile read_text(const char *source, opennova::particle::ParticleReadState *state = nullptr) {
+	const std::string text = opennova::strutil::normalized_crlf_line_ends(source);
 	opennova::particle::ParticleFile file;
 	opennova::particle::ParseError error;
-	if (!opennova::particle::load_particles(stream, file, error)) return false;
-	if (!expect(file.tables.size() == 1, "shuffled table parses")) return false;
+	opennova::particle::ParticleReadState fresh;
+	opennova::particle::load_particles_from_buffer(text.data(), text.size(), file, state ? *state : fresh, error);
+	return file;
+}
+
+// `rows` rows of eight bytes, each byte `value`, as the writer writes them (tl1 on).
+std::string rows_of(int rows, int value) {
+	std::string out;
+	for (int r = 1; r <= rows; ++r) {
+		out += "\ttl" + std::to_string(r) + " = ";
+		for (int c = 0; c < 8; ++c) out += (c ? ", " : "") + std::to_string(value);
+		out += ";\n";
+	}
+	return out;
+}
+
+bool test_table_rows_stream_as_the_game_reads_them() {
+	// The game's table reader takes any key holding a lowercase 't' as the next row, in the order written, its
+	// number aside, up to 8 bytes through atol, each its low byte, on one cursor: a short row's next row goes on
+	// from its last byte [orig: CEffectTableDef_ParseCallback @ 0x5E4010 — strstr(key, "t") @ 0x5E4120, the cursor
+	// @ 0x5E415D].
+	const opennova::particle::ParticleFile file = read_text(R"PTL(
+[tabledef]
+{
+	id = streamed;
+	tl2 = 1, 2, 3, 4, 5, 6, 7, 8;
+	tl1 = 9, 10, 11;
+	TL3 = 77, 77, 77, 77, 77, 77, 77, 77;
+	t = 300, -1;
+	rowfoo = 5;
+	tightness = 6;
+}
+)PTL");
+	if (!expect(file.tables.size() == 1 && file.tables[0].id == "streamed" && file.tables[0].rows.size() == 32,
+				"the table reads, 32 rows of eight")) return false;
 	const auto &rows = file.tables[0].rows;
-	if (!expect(rows.size() == 32, "tl32 establishes indexed row 32")) return false;
-	if (!expect(rows[0][0] == 1, "tl1 maps to row zero")) return false;
-	if (!expect(rows[1][0] == 9, "duplicate tl2 is last-wins")) return false;
-	if (!expect(rows[2][0] == 0, "missing tl3 stays zero")) return false;
-	return expect(rows[31][0] == 32, "tl32 maps to final row");
+	for (int c = 0; c < 8; ++c)
+		if (!expect(rows[0][c] == c + 1, "the first row written is the first row, tl2 or not")) return false;
+	if (!expect(rows[1][0] == 9 && rows[1][1] == 10 && rows[1][2] == 11, "a short row goes on the stream")) return false;
+	if (!expect(rows[1][3] == 44 && rows[1][4] == 255, "`t` is a row; 300 and -1 keep their low bytes")) return false;
+	if (!expect(rows[1][5] == 6, "tightness holds a 't': a row too")) return false;
+	if (!expect(rows[1][6] == 0 && rows[2][0] == 0, "TL3 (no lowercase t) and rowfoo are no rows")) return false;
+	if (!expect(file.tables[0].flags == 0, "a table's flags start 0")) return false;
+
+	// At most 32 rows since the last id; the id resets the count but not the cursor, so rows after it run past the
+	// LUT into the table's flags dword (+0x248) [orig: @ 0x5E4137 the cap, @ 0x5E40DE the reset]. A base reference
+	// then finds no table of flags 0; an inverse one finds the table whose flags are its mask and takes it as it is
+	// [orig: CParticleManager_FindTableDefByName @ 0x5E95C0].
+	const std::string capped = "[tabledef]\n{\n\tid = capped;\n" + rows_of(33, 7) + "}\n";
+	const opennova::particle::ParticleFile cap = read_text(capped.c_str());
+	if (!expect(cap.tables.size() == 1 && cap.tables[0].rows[31][7] == 7 && cap.tables[0].flags == 0,
+				"a 33rd row writes nothing")) return false;
+	const std::string flagged = "[tabledef]\n{\n" + rows_of(32, 3) + "\tid = flagged;\n\ttl33 = 1, 0, 0, 0, 9, 9, 9, 9;\n"
+	                            "\ttl34 = 8, 8;\n}\n";
+	const opennova::particle::ParticleFile over = read_text(flagged.c_str());
+	if (!expect(over.tables.size() == 1 && over.tables[0].id == "flagged" && over.tables[0].flags == 1u,
+				"bytes 256..259 are the flags, little-endian; 260 on are dropped")) return false;
+	using namespace opennova::particle;
+	ParticleDef def;
+	def.scale_func.present = true;
+	def.scale_func.name = "flagged";
+	def.alpha_func.present = true;
+	def.alpha_func.name = "flagged";
+	def.alpha_func.inverse = true;
+	bake_particle_def_curves(def, over.tables);
+	if (!expect(!def.scale_func.baked, "a base reference finds no table of flags 0")) return false;
+	if (!expect(def.alpha_func.baked && def.alpha_func.baked_lut[0] == 3 && def.alpha_func.baked_lut[255] == 3,
+				"an inverse reference takes the table of flags 1 as it is, uninverted")) return false;
+
+	// After `}` the cursor still points into the table it registered: a row read before the next `{` writes there.
+	const opennova::particle::ParticleFile stale = read_text("[tabledef]\n{\n\tid = a;\n\ttl1 = 1;\n}\n\ttl2 = 5, 6;\n");
+	return expect(stale.tables.size() == 1 && stale.tables[0].rows[0][0] == 1 && stale.tables[0].rows[0][1] == 5 &&
+						  stale.tables[0].rows[0][2] == 6,
+			"a row after the table's brace goes on its stream");
+}
+
+bool test_the_row_count_outlives_the_file() {
+	// The row count is the reader's, reset only at an id: a table whose rows come before its id, read after another
+	// file's table of 30 rows, takes two rows of its five [orig: dword_2C0656C @ 0x5E40DE / 0x5E4171].
+	opennova::particle::ParticleReadState state;
+	const std::string first = "[tabledef]\n{\n\tid = first;\n" + rows_of(30, 1) + "}\n";
+	const opennova::particle::ParticleFile a = read_text(first.c_str(), &state);
+	const std::string second = "[tabledef]\n{\n" + rows_of(5, 4) + "\tid = late;\n}\n";
+	const opennova::particle::ParticleFile b = read_text(second.c_str(), &state);
+	if (!expect(a.tables.size() == 1 && b.tables.size() == 1 && b.tables[0].id == "late", "both tables read"))
+		return false;
+	const auto &rows = b.tables[0].rows;
+	return expect(rows[0][0] == 4 && rows[1][7] == 4 && rows[2][0] == 0,
+			"the second file's table takes two rows past the first's 30");
+}
+
+bool test_curve_modifiers_are_the_readers_words() {
+	// The word after a curve's table id is a modifier only as `reverse` or `inverse`, without case [orig:
+	// CParticleDef_ParseProperties @ 0x5eb051 / @ 0x5eb06a, _stricmp]: `invert`, the word NovaLogic's writers spell
+	// bit 0x01 (ParticleCurve_BuildModifierString @ 0x5e28d0), is none, so rocket2.ptl's `scale_func = smokeContrail invert;`
+	// loads uninverted. The port reads on past a modifier (D-PTL-20) and stops at the first word that is neither.
+	// A quoted id holding a blank is the playback-flag path, which finds `reverse` and `invert` in what follows the
+	// blank, with case [orig: ParticleDef_ParsePlaybackFlags @ 0x5e2990, strstr @ 0x5e29b9 / @ 0x5e29d0].
+	const char *source = R"PTL(
+[particledef]
+{
+	id = words;
+	scale_func = smokeContrail invert;
+	alpha_func = fade Inverse;
+	red_func = tint invert reverse;
+	green_func = tint2 reverse invert;
+	blue_func = "tint3 invert reverse";
+	emit_rate_func = "tint4 inverse";
+}
+)PTL";
+	using namespace opennova::particle;
+	const ParticleFile file = read_text(source);
+	if (!expect(file.particles.size() == 1, "the block parses")) return false;
+	const ParticleDef &def = file.particles[0];
+	if (!expect(def.scale_func.name == "smokeContrail" && !def.scale_func.inverse && !def.scale_func.reverse,
+				"invert is no modifier")) return false;
+	if (!expect(def.alpha_func.inverse && !def.alpha_func.reverse, "Inverse is, without case")) return false;
+	if (!expect(def.red_func.name == "tint" && !def.red_func.inverse && !def.red_func.reverse,
+				"invert first: the line holds no modifier")) return false;
+	if (!expect(def.green_func.reverse && !def.green_func.inverse, "reverse, then invert: reverse alone")) return false;
+	if (!expect(def.blue_func.name == "tint3" && def.blue_func.inverse && def.blue_func.reverse,
+				"a quoted id's words set both bits by substring")) return false;
+	return expect(def.emit_rate_func.name == "tint4" && !def.emit_rate_func.inverse,
+			"the quoted path finds no invert in inverse");
+}
+
+bool test_curve_lines_or_their_modifiers_into_the_entry() {
+	// A `*_func` line replaces its entry's table id and ORs its modifier into
+	// the entry's mask, never clearing a bit: a repeated line keeps an earlier
+	// line's bits, and a graphic's line keeps the bits of the definition entry
+	// its `graphicN` line copied [orig: CParticleDef_ParseProperties
+	// @ 0x5eb010..0x5eb07a (`or dword_2C07468, 2 / 1`); CParticleDefEntry_ParseGraphicProperty
+	// @ 0x5e36a4..0x5e36ec (the copy), @ 0x5e3b4e..0x5e3bd3].
+	const char *source = R"PTL(
+[particledef]
+{
+	id = carry;
+	scale_func = grow reverse;
+	alpha_func = fade;
+	alpha_func = fade2 inverse;
+	red_func = tint inverse;
+	red_func = tint2;
+	graphic1 = puff.tga, blend;
+	g1_scale_func = shrink;
+	g1_alpha_func = fade3 reverse;
+	graphic2 = puff.tga, blend;
+	g2_red_func = tint3 reverse;
+	g2_red_func = tint4;
+}
+)PTL";
+	using namespace opennova::particle;
+	const ParticleFile file = read_text(source);
+	if (!expect(file.particles.size() == 1, "the block parses")) {
+		return false;
+	}
+	const ParticleDef &def = file.particles[0];
+	if (!expect(def.alpha_func.name == "fade2" && def.alpha_func.inverse && !def.alpha_func.reverse,
+				"a repeated line takes the new id and ORs its bit")) {
+		return false;
+	}
+	if (!expect(def.red_func.name == "tint2" && def.red_func.inverse,
+				"a repeated line with no modifier keeps the earlier inverse")) {
+		return false;
+	}
+	const GraphicLayer &g1 = def.graphics[0];
+	if (!expect(g1.scale_func.name == "shrink" && g1.scale_func.reverse && !g1.scale_func.inverse,
+				"a graphic's line keeps the definition's reverse")) {
+		return false;
+	}
+	if (!expect(g1.alpha_func.name == "fade3" && g1.alpha_func.reverse && g1.alpha_func.inverse,
+				"the graphic's reverse ORs onto the definition's inverse")) {
+		return false;
+	}
+	if (!expect(g1.red_func.present && g1.red_func.name == "tint2" && g1.red_func.inverse,
+				"a graphic with no line of its own holds the copy its graphicN line took")) {
+		return false;
+	}
+	const GraphicLayer &g2 = def.graphics[1];
+	if (!expect(g2.red_func.name == "tint4" && g2.red_func.inverse && g2.red_func.reverse,
+				"a graphic's repeated line keeps both carried bits")) {
+		return false;
+	}
+
+	// The carried bit reaches the bake: `shrink` resolves to its reversed clone.
+	std::vector<TableDef> tables;
+	tables.push_back(ramp_table("shrink"));
+	ParticleDef baked = def;
+	bake_particle_def_curves(baked, tables);
+	return expect(baked.graphics[0].scale_func.baked &&
+					baked.graphics[0].scale_func.baked_lut[0] == 255 &&
+					baked.graphics[0].scale_func.baked_lut[255] == 0,
+			"the graphic's carried reverse bakes the reversed table");
 }
 
 bool test_def_bake_resolves_named_curves() {
@@ -378,7 +553,10 @@ int main() {
 	if (!test_inverse())                        ++failures;
 	if (!test_reverse_and_inverse_compose())    ++failures;
 	if (!test_short_table_zero_pad())           ++failures;
-	if (!test_table_rows_follow_tl_indices_and_last_write_wins()) ++failures;
+	if (!test_table_rows_stream_as_the_game_reads_them()) ++failures;
+	if (!test_the_row_count_outlives_the_file()) ++failures;
+	if (!test_curve_lines_or_their_modifiers_into_the_entry()) ++failures;
+	if (!test_curve_modifiers_are_the_readers_words()) ++failures;
 	if (!test_def_bake_resolves_named_curves()) ++failures;
 	if (!test_def_bake_resolves_names_case_insensitively()) ++failures;
 	if (!test_duplicate_selection_matches_retail_transform_cache()) ++failures;
