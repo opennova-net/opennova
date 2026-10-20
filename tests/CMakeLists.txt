@@ -3968,13 +3968,13 @@ target_compile_definitions(nwmsg_replay_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE
 add_test(NAME nwmsg_replay COMMAND nwmsg_replay_test)
 # R1 of the net parity proof ladder: every body in the retail captures decoded
 # to the byte and, where a struct encoder exists, re-encoded byte-identical
-# (net/npwire/ingame_body_codec.h). The _retail leg proves the authored
-# record-class table against the real items.def.
+# (net/npwire/ingame_body_codec.h), its record classes resolved through the
+# authored table and again through the same rows as items.def text.
 add_executable(nwmsg_codec_parity_test novaworld/nwmsg_codec_parity_test.cpp)
 target_link_libraries(nwmsg_codec_parity_test PRIVATE opennova_runtime opennova_formats opennova_net)
 target_include_directories(nwmsg_codec_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nwmsg_codec_parity_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
-opennova_add_mixed_test(nwmsg_codec_parity COMMAND nwmsg_codec_parity_test)
+add_test(NAME nwmsg_codec_parity COMMAND nwmsg_codec_parity_test)
 
 # opennova-wire --scenario-events: the decoded event lines the network-parity scenario
 # comparator (scripts/net/compare_scenario.py) consumes.
