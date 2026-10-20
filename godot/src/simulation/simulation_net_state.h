@@ -83,14 +83,25 @@ struct SimulationNetState {
 	// screen's rows and Switch cells (configure_host_session), the mounted
 	// catalog the first host boot seeds the list over, the session-level
 	// words the map change reads, and the latch that makes the next boot the
-	// map change's (begin_host_map_change -> boot_mission). The words live
-	// with this session's simulation: a new session's start fresh, where
-	// retail's process globals carry the half toggle and the SETNEXT latch
-	// into the next session (D-NET-353).
+	// map change's (begin_host_map_change -> boot_mission). The words are
+	// process globals in retail that no session start resets (the half
+	// toggle, the SETNEXT latch, the side-to-team map), so a session that
+	// ended mid-map hands them to the next: the game world owns the one
+	// HostRotation for its whole run (use_host_rotation) and the session
+	// words reset at their own points (the seed, the round init, the host
+	// start). A simulation with no owner (a tool, a test) keeps its own.
+	// [orig: g_RotationIsFlipped, g_RotationSetNextLatch, g_RotationSideTeam0 /
+	//  g_RotationSideTeam1, whose only writers are Game_TeardownMission
+	//  @0x522501..0x522520, PostMenu_RouteMissionExit @0x5685F9 / @0x568607 / @0x568624
+	//  and CAdminServer_HandleMissionCommand's SETNEXT @0x4066DF]
 	std::vector<std::string> rotation_missions;
 	std::vector<int32_t> rotation_launch_options;
 	std::vector<opennova::mission_catalog::Row> rotation_catalog;
-	opennova::inmatch::HostRotation rotation;
+	opennova::inmatch::HostRotation own_rotation;
+	opennova::inmatch::HostRotation *process_rotation = nullptr;
+	opennova::inmatch::HostRotation &rotation() {
+		return process_rotation != nullptr ? *process_rotation : own_rotation;
+	}
 	bool map_change_pending = false;
 	// The mounted <mission>.bin (or the medmssn.bin fallback) RTXT the shell
 	// handed over before load, harvested engine-side

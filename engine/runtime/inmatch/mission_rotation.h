@@ -120,7 +120,7 @@ struct HostRotation {
 	// [orig: g_LastGameToggle (dword_C8FC5C)] input action 108's toggle;
 	// cleared only by Server_InitNewRoundState (session create and destroy).
 	bool last_game = false;
-	// [orig: byte_82F240 / byte_82F241] the side-to-team map (initially 1, 2)
+	// [orig: g_RotationSideTeam0 / g_RotationSideTeam1] the side-to-team map (initially 1, 2)
 	// Server_AssignPlayerTeam's side arms read; the teardown swaps it.
 	std::array<uint8_t, 2> side_team = {1, 2};
 	// [orig: dword_24D212C] the previous mission's mode: START's first row,

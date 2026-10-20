@@ -1401,6 +1401,9 @@ public:
 	// The process's cfg block (player/game_config_block.h): every session create reads its
 	// mpreset word, and a ServerCommand's config change writes it (execute_server_command).
 	void use_game_config(const Ref<GameConfigBlock> &p_block) { net_.game_config = p_block; }
+	// The process's map-rotation words (simulation_net_state.h): the game world's one
+	// HostRotation, which every session's host reads and writes. Null = this sim's own.
+	void use_host_rotation(opennova::inmatch::HostRotation *p_rotation) { net_.process_rotation = p_rotation; }
 	// The last load's session create ended the process on a nonzero mpreset (inmatch
 	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.
 	bool session_create_ended_process() const;

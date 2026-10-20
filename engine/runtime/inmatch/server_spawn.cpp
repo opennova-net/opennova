@@ -76,7 +76,7 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// If both side passwords match, side A wins the ordered comparison.
 	// [orig: Server_AssignPlayerTeam @0x4FE424..0x4FE4AD]
 	// Each side arm answers with the side's team through the side-to-team map
-	// [orig: byte_82F240 @0x4FE456, byte_82F241 @0x4FE492].
+	// [orig: g_RotationSideTeam0 @0x4FE456, g_RotationSideTeam1 @0x4FE492].
 	if (side_a_locked && opennova::strutil::iequals(
 			config.side_a_password.c_str(), submitted_password.c_str())) return side_team[0];
 	if (side_b_locked && opennova::strutil::iequals(

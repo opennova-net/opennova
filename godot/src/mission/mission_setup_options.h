@@ -87,6 +87,10 @@ public:
 	// Null = none: the session config's own mpreset word stands.
 	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
 	void set_game_config(const Ref<GameConfigBlock> &p_value) { game_config_ = p_value; }
+	// The process's map-rotation words (Simulation.use_host_rotation), C++ only.
+	// Null = the sim keeps its own.
+	opennova::inmatch::HostRotation *get_host_rotation() const { return host_rotation_; }
+	void set_host_rotation(opennova::inmatch::HostRotation *p_value) { host_rotation_ = p_value; }
 	// The joiner's profile-to-wire projection (Simulation.set_join_character_profile).
 	// Null = none staged.
 	Ref<CharacterJoinProfile> get_join_character_profile() const {
@@ -163,6 +167,7 @@ private:
 	Ref<CharacterJoinProfile> local_character_profile_;
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
+	opennova::inmatch::HostRotation *host_rotation_ = nullptr;
 	Ref<CharacterJoinProfile> join_character_profile_;
 	PackedStringArray spawn_names_;
 	Ref<ResourceRoot> resource_root_;

@@ -5094,6 +5094,10 @@ add_executable(opennova_serve_inout_switch_test serve/inout_switch_test.cpp)
 target_link_libraries(opennova_serve_inout_switch_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_inout_switch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_inout_switch COMMAND opennova_serve_inout_switch_test)
+# The map rotation's process words across two host sessions (D-NET-353).
+add_executable(npruntime_rotation_process_words_test npruntime/rotation_process_words_test.cpp)
+target_link_libraries(npruntime_rotation_process_words_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_rotation_process_words COMMAND npruntime_rotation_process_words_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

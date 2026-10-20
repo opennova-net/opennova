@@ -172,6 +172,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// The process's cfg block, whose mpreset word every session create reads.
 	if (options->get_game_config().is_valid())
 		sim_->use_game_config(options->get_game_config());
+	// The process's map-rotation words, which a session hands the next (D-NET-353).
+	sim_->use_host_rotation(options->get_host_rotation());
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	// load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	// sole live runtime owner (ADR 0025). Isolated tests may instantiate this same

@@ -27,7 +27,7 @@ namespace sim_internal {
 // the engine's (inmatch::seed_rotation_from_host_screen carries the witness).
 void seed_host_rotation(SimulationNetState &p_net, const Ref<ResourceRoot> &p_root) {
 	namespace inmatch = opennova::inmatch;
-	p_net.rotation.list = inmatch::MissionRotation{};
+	p_net.rotation().list = inmatch::MissionRotation{};
 	p_net.rotation_catalog.clear();
 	if (p_root.is_null()) return;
 	p_net.rotation_catalog = opennova::mission_catalog::build(p_root->native_index());
@@ -49,7 +49,7 @@ void seed_host_rotation(SimulationNetState &p_net, const Ref<ResourceRoot> &p_ro
 		}
 	}
 	if (rows.empty()) return;
-	inmatch::seed_rotation_from_host_screen(p_net.rotation, catalog, rows, launch_options);
+	inmatch::seed_rotation_from_host_screen(p_net.rotation(), catalog, rows, launch_options);
 }
 
 } // namespace sim_internal
@@ -74,7 +74,7 @@ String Simulation::begin_host_map_change() {
 		return String();
 	// The next boot continues this session (boot_mission reads the latch).
 	net_.map_change_pending = true;
-	return opennova::to_gd(net_.rotation.list.map_file);
+	return opennova::to_gd(net_.rotation().list.map_file);
 }
 
 bool Simulation::begin_joiner_reload() {

@@ -653,14 +653,14 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 			// The map change's next map: the session keeps its config, the
 			// rotation names the map and its mode (Game_StartMission's
 			// authority arm, inmatch/map_change.h).
-			net_.host_session_config.mission_file = net_.rotation.list.map_file;
-			net_.host_session_config.game_type = net_.rotation.list.map_game_type;
+			net_.host_session_config.mission_file = net_.rotation().list.map_file;
+			net_.host_session_config.game_type = net_.rotation().list.map_game_type;
 			net_.host_session_config.mission_name = document.get_mission_name();
 			net_.host_session_config.spawn_names.clear();
 		} else {
 			seed_host_rotation(net_, p_resource_root);
 		}
-		host_role_->set_rotation(&net_.rotation);
+		host_role_->set_rotation(&net_.rotation());
 	}
 	if (host_role_ != nullptr) {
 		request.host_cfg = host_session_cfg(mission_game_type);

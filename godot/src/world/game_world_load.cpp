@@ -948,6 +948,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	opts->set_local_character_profile(local_character_profile_);
 	opts->set_player_profiles(player_profiles_);
 	opts->set_game_config(game_config_);
+	opts->set_host_rotation(&host_rotation_);
 	// Serve-and-play hosts run the listen server AND spawn their own player
 	// (ADR 0011/0012, net-re §5.2b/§5.38). A DEDICATED host (config
 	// "dedicated") serves WITHOUT a local player — same listen server, just no

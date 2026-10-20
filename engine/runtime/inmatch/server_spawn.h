@@ -42,7 +42,7 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEn
 // rotation's side-to-team map gives that side (null: sides 1, 2), which the
 // Attack-and-Defend swap exchanges between the halves.
 // [orig: Server_AssignPlayerTeam @0x4fe310 writes playerSlot+416 before
-// NetPacket_WriteSlotAssignment @0x502b30 reads it; byte_82F240 / byte_82F241
+// NetPacket_WriteSlotAssignment @0x502b30 reads it; g_RotationSideTeam0 / g_RotationSideTeam1
 // @0x4FE408, @0x4FE456, @0x4FE492, @0x4FE507, @0x4FE543, @0x4FE56D]
 // The balance tally counts every active slot's team but the joiner's, so a
 // Serve Only host's own slot 0 (`host_slot`, its team 1 from the session

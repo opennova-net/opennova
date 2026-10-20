@@ -19,6 +19,7 @@
 
 #include <cstdint>
 
+#include <runtime/inmatch/mission_rotation.h> // HostRotation (the process's rotation words)
 #include <runtime/renderer/object_lod.h> // the object detail rungs
 #include <runtime/renderer/particle_density.h> // the particle_density rungs
 #include <runtime/renderer/device_texture.h> // the terrain_texdetail word
@@ -902,6 +903,11 @@ private:
 	Ref<CharacterJoinProfile> local_character_profile_;
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
+	// The process's map-rotation words, one for the world's whole run: retail's are
+	// process globals no session start resets, so a session that ended mid-map
+	// hands its half toggle, SETNEXT latch and side-to-team map to the next
+	// (Simulation.use_host_rotation; inmatch/mission_rotation.h).
+	opennova::inmatch::HostRotation host_rotation_;
 	// The last frame's world-tick leg counters (RuntimePerfCounters).
 	int64_t perf_tick_us_ = 0;
 	int64_t perf_foliage_us_ = 0;
