@@ -566,11 +566,17 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	if not mounted_echoed:
 		return
 
+	# The mount's switch-out completes before the gun's slot is the EquippedSlot
+	# and its def the AdmDef byte the FP model resolves from: neither borrowing
+	# attach stamps the byte, the completion does (D-NET-NEW-L7-7) [orig:
+	# Entity_AttachToUseGunSlot @0x546B80 (no +0x2B0 store); WeaponAction_SwitchFrom
+	# @0x5433B0 (@0x543475, @0x543496)].
 	for _settle in range(100):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if joiner.get_local_player_weapon_state().current_action < 2:
+		var settled := joiner.get_local_player_weapon_state()
+		if settled.borrowed_usegun_slot and settled.current_action < 2:
 			break
 		OS.delay_msec(1)
 
