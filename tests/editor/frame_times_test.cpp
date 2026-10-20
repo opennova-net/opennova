@@ -79,6 +79,32 @@ int test_summary_json() {
 	return 0;
 }
 
+int test_windows() {
+	FrameTimes times;
+	// Outside a frame a window's time is not kept.
+	times.add_window("Files", 5);
+	times.begin_frame();
+	times.add_window("Files", 3000);
+	times.add_window("Problems", 1000);
+	times.add(FramePhase::Wall, 9000);
+	times.end_frame();
+	times.begin_frame();
+	times.add_window("Files", 1000);
+	times.add(FramePhase::Wall, 2000);
+	times.end_frame();
+	const JsonValue json = times.json();
+	const JsonValue *windows = json.get("windows");
+	TEST_EXPECT(windows && windows->is_array() && windows->array.size() == 2);
+	// The costliest first, its draws and mean over every frame that drew it.
+	TEST_EXPECT(windows->array[0].get_string("title", "") == "Files" && windows->array[0].get_int("max", -1) == 3000);
+	TEST_EXPECT(windows->array[0].get_int("draws", -1) == 2 && windows->array[0].get_int("mean", -1) == 2000);
+	// The slowest frame's windows.
+	const JsonValue *slowest = json.get("slowest");
+	TEST_EXPECT(slowest && slowest->get_int("wall", -1) == 9000);
+	TEST_EXPECT(slowest->get("windows") && slowest->get("windows")->get_int("Problems", -1) == 1000);
+	return 0;
+}
+
 int test_perf_query() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
@@ -105,6 +131,7 @@ int main() {
 	int failures = 0;
 	failures += test_phases_and_ring();
 	failures += test_summary_json();
+	failures += test_windows();
 	failures += test_perf_query();
 	if (failures == 0) std::printf("editor_frame_times: all tests passed\n");
 	return failures == 0 ? 0 : 1;

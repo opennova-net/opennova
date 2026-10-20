@@ -450,7 +450,12 @@ void EditorApp::before_layout(double) {
 }
 
 void EditorApp::after_layout(uint64_t, bool, int64_t p_layout_us) {
-	if (session_) session_->frame_times().add(opennova::editor::FramePhase::Layout, p_layout_us);
+	if (session_) {
+		opennova::editor::FrameTimes &times = session_->frame_times();
+		times.add(opennova::editor::FramePhase::Layout, p_layout_us);
+		if (opennova::devtools::ImGuiPass *pass = engine_pass())
+			for (const auto &[title, us] : pass->window_times()) times.add_window(title, us);
+	}
 #if OPENNOVA_EDITOR_UI
 	windows_->end_frame();
 	// One pointer over a picture that draws the game's (a menu's, DI-08): the system one hidden while a

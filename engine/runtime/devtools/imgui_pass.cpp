@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
 #include <cstring>
 
 // The engine's ImGui copy must be the commit the imgui-godot addon bundles
@@ -367,7 +368,16 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	}
 	ImGui::DockSpaceOverViewport(dockspace_id, viewport, ImGuiDockNodeFlags_None);
 
+	// Each window's draw timed (window_times), the menu bar's first.
+	window_times_.clear();
+	const auto now_us = [] {
+		return std::chrono::duration_cast<std::chrono::microseconds>(
+		               std::chrono::steady_clock::now().time_since_epoch())
+		        .count();
+	};
+	int64_t started = now_us();
 	draw_menu_bar();
+	window_times_.emplace_back("menu bar", now_us() - started);
 	sync_visibility();
 
 	for (int i = 0; i < static_cast<int>(windows_.size()); ++i) {
@@ -388,7 +398,9 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		if (window.owns_frame()) {
 			// No pass-owned Begin to focus; the request would only latch.
 			window.take_focus_request();
+			started = now_us();
 			window.draw(*this, frame_index);
+			window_times_.emplace_back(window.title(), now_us() - started);
 			continue;
 		}
 		if (reset_layout) {
@@ -455,10 +467,12 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 				}
 			}
 		}
+		started = now_us();
 		if (ImGui::Begin(window.title(), open, flags)) {
 			window.draw(*this, frame_index);
 		}
 		ImGui::End();
+		window_times_.emplace_back(window.title(), now_us() - started);
 	}
 
 	sync_visibility();

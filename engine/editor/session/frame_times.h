@@ -3,6 +3,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <base/io/json.h>
 
@@ -47,6 +51,8 @@ public:
 
 	void begin_frame();
 	void add(FramePhase phase, int64_t us);
+	// What drawing one window took inside the frame's layout (the ImGui pass's window_times), by its title.
+	void add_window(const char *title, int64_t us);
 	void end_frame();
 	bool in_frame() const { return open_; }
 
@@ -61,7 +67,9 @@ public:
 
 	// The summary on the wire: frames, total_frames, slow_total and stall_total (frames over 50 and
 	// 100 ms since the first), slow and stall (of the frames held), phases (each phase's mean, p50, p95
-	// and max over the frames held, by token) and worst (the slowest frame's phases, by token).
+	// and max over the frames held, by token), worst (the slowest frame's phases, by token), windows
+	// (each window's title, draws, mean and max since the first frame, the costliest first) and
+	// slowest (the slowest frame since the first: its wall and its windows' times, by title).
 	io::JsonValue json() const;
 
 private:
@@ -73,6 +81,15 @@ private:
 	uint64_t total_ = 0;
 	uint64_t slow_total_ = 0;
 	uint64_t stall_total_ = 0;
+	struct WindowCost {
+		uint64_t draws = 0;
+		int64_t total_us = 0;
+		int64_t max_us = 0;
+	};
+	std::map<std::string, WindowCost> windows_;
+	std::vector<std::pair<std::string, int64_t>> current_windows_; // the frame under way's
+	int64_t slowest_wall_ = -1;
+	std::vector<std::pair<std::string, int64_t>> slowest_windows_;
 };
 
 // Microseconds on the steady clock, the one the phases are timed by.

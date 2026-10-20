@@ -27,7 +27,18 @@ const char *frame_phase_token(FramePhase phase) {
 
 void FrameTimes::begin_frame() {
 	current_.fill(0);
+	current_windows_.clear();
 	open_ = true;
+}
+
+void FrameTimes::add_window(const char *title, int64_t us) {
+	if (!open_ || !title) return;
+	const int64_t spent = std::max<int64_t>(0, us);
+	current_windows_.emplace_back(title, spent);
+	WindowCost &cost = windows_[title];
+	++cost.draws;
+	cost.total_us += spent;
+	cost.max_us = std::max(cost.max_us, spent);
 }
 
 void FrameTimes::add(FramePhase phase, int64_t us) {
@@ -45,6 +56,10 @@ void FrameTimes::end_frame() {
 	const int64_t wall = current_[size_t(FramePhase::Wall)];
 	if (wall > kSlowUs) ++slow_total_;
 	if (wall > kStallUs) ++stall_total_;
+	if (wall > slowest_wall_) {
+		slowest_wall_ = wall;
+		slowest_windows_ = current_windows_;
+	}
 }
 
 int64_t FrameTimes::percentile(FramePhase phase, double fraction) const {
@@ -102,6 +117,24 @@ JsonValue FrameTimes::json() const {
 	}
 	out.set("phases", std::move(phases));
 	out.set("worst", std::move(worst_frame));
+	std::vector<std::pair<std::string, WindowCost>> costs(windows_.begin(), windows_.end());
+	std::stable_sort(costs.begin(), costs.end(), [](const auto &a, const auto &b) { return a.second.max_us > b.second.max_us; });
+	JsonValue windows = JsonValue::make_array();
+	for (const auto &[title, cost] : costs) {
+		JsonValue row = JsonValue::make_object();
+		row.set("title", JsonValue::make_string(title));
+		row.set("draws", JsonValue::make_number(double(cost.draws)));
+		row.set("mean", JsonValue::make_number(double(cost.draws ? cost.total_us / int64_t(cost.draws) : 0)));
+		row.set("max", JsonValue::make_number(double(cost.max_us)));
+		windows.push(std::move(row));
+	}
+	out.set("windows", std::move(windows));
+	JsonValue slowest = JsonValue::make_object();
+	slowest.set("wall", JsonValue::make_number(double(std::max<int64_t>(0, slowest_wall_))));
+	JsonValue drawn = JsonValue::make_object();
+	for (const auto &[title, us] : slowest_windows_) drawn.set(title, JsonValue::make_number(double(us)));
+	slowest.set("windows", std::move(drawn));
+	out.set("slowest", std::move(slowest));
 	return out;
 }
 
