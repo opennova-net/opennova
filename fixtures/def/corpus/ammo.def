@@ -1,0 +1,246 @@
+// Authored for the def writers' corpus legs (fixtures/README.md): ammo blocks that together use
+// every key JO:CA's ammo.def and its jox01 expansion's use, each in the forms the two files write
+// its values in (reals spelled 0.5 / 4.0 / .75, leading-zero item ids, a one- and a two-word
+// tracer_type, an effects_table of every surface the two files name, the underwater rows among
+// them), and the `penetration` line the game reads nothing of. No value here is shipped data.
+
+ammo AT_CORPUS_NULL
+	velocity			0
+	min_stable_velocity 0
+	max_age				0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+
+    ai_launch		NULL_SET
+
+	effects_table
+		move       none                		none          		0
+		obj        none   					imp_corpus_dirt   	15
+		dirt       Effect_CorpusDirt    	imp_corpus_dirt   	15
+		grass      Effect_CorpusGrass   	imp_corpus_grass  	15
+		snow       Effect_CorpusSnow    	imp_corpus_dirt   	1
+		cement     Effect_CorpusDirt    	IMP_CORPUS_CEMENT   	15
+		packeddirt Effect_CorpusDirt    	imp_corpus_dirt   	15
+		water      Effect_CorpusWater  	imp_corpus_water  	5
+		railroad   Effect_CorpusMetal   	imp_corpus_metal  	15
+		mud        Effect_CorpusDirt     imp_corpus_mud    	15
+		ice        Effect_CorpusSnow     imp_corpus_mud    	15
+		sand       Effect_CorpusSand    	imp_corpus_sand   	15
+		quicksand  Effect_CorpusSand    	imp_corpus_sand   	15
+		stone      Effect_CorpusStone   	IMP_CORPUS_CEMENT  	15
+		wood       Effect_CorpusDirt    	imp_corpus_wood   	5
+		metal      Effect_CorpusMetal   	imp_corpus_metal  	15
+		bodyarmor  Effect_CorpusArmor   	IMP_CORPUS_BARMOR  	15
+		glass      Effect_CorpusGlass    IMP_CORPUS_GLASS          	5
+		cloth      Effect_CorpusCloth   	IMP_CORPUS_CLOTH 	3
+		foliage    Effect_CorpusGrass 	IMP_CORPUS_FOLIAGE   	3
+		hmetal     Effect_CorpusMetal   	imp_corpus_armor  	15
+		flesh      Effect_CorpusBody   	imp_corpus_flesh  	3
+		player		none				imp_corpus_flesh	10
+		zip			none				WSH_CORPUS_BY		10
+	end
+end
+
+ammo AMMO_CORPUS_556
+	max_age				3
+	arm_age				0
+	penetration			2
+	velocity			820
+	min_stable_velocity 	0
+	error				0
+	tumble_error		0.01
+	drag				0.25
+	weight_in_grains	60
+	min_damage			0
+	max_damage			0
+	recoil				7 8 10
+	penetration_impact	18
+	penetration_kz		18
+	armor_density		6	1.5	12
+	kztype				rounds_kz_C4
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00275
+	spread_count		1
+
+	tracerRate	 4
+
+	scar_type 1
+    ai_launch		GS_CORPUSAI
+	ai_Launcheffect Effect_CorpusMF
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		dirt		Effect_CorpusDirt		IMP_CORPUS_DIRT		15
+		zip			none					WSH_CORPUS_BY2		10
+	end
+end
+
+ammo AMMO_CORPUS_SHELL
+	frndlyTrcrID		01874
+	foeTrcrID			01875
+	max_age				4.5
+	arm_age				.05
+	velocity			300
+	dopplerdiv			2
+	min_stable_velocity 0
+	recoil				15 15 15
+	error				1
+	tumble_error		0.01
+	drag				.75
+	weight_in_grains	15000
+	min_damage			0
+	max_damage			0
+	penetration_impact	90
+	penetration_kz		90
+	armor_density		1.5	2	3
+	kztype				rounds_kz_C4
+	kz_minradius		3.0
+	kz_maxradius		7.0
+	kz_damage			500
+	bullet_radius		.0381
+	notarmmedammo	GRENADE_CORPUS
+	kz_sound		IMP_CORPUS_KZ
+
+    ai_launch		GS_CORPUSCANNON
+	Mf_Light 100
+	scorch_id 2
+	scar_type 2
+
+	tracer_type		grenade
+
+    kz_physics 1
+
+	light_move     5.0  120 110 70
+	light_impact   9.0  250 180 90  0.25
+
+	flag LAWR
+	flag	IgnorFoilage
+	flag forcetracer
+	flag priority
+	flag ClipWater
+	flag ClipWaterFX
+
+	effects_table
+		move	   none				    none			0
+		obj        Effect_CorpusObj		explo_corpus_med		200
+		water      effect_corpuswater	explo_corpus_water	200
+		zip			none				WSH_CORPUS_SHELL	50
+		uwaterdeep		Effect_CorpusH2O1	EXPLO_CORPUS_UW		20
+		uwatershallow	effect_corpusH2O	EXPLO_CORPUS_WM		20
+		uwatersurface	Effect_CorpusRings	EXPLO_CORPUS_UWS	20
+	end
+end
+
+ammo CORPUSMISSILE
+	frndlyTrcrID		4510
+	max_age				30
+	arm_age				.5
+	velocity			100
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				.75
+	weight_in_grains	60000
+	min_damage			20000
+	max_damage			20000
+	penetration_impact	100
+	penetration_kz		100
+	kztype				rounds_kz_C4
+	kz_minradius		2
+	kz_maxradius		10
+	kz_damage			1500
+	bullet_radius		0.050
+	armor_density		20	1	40
+
+    ai_launch		GS_CORPUSMSL
+	ai_launcheffect Effect_corpusmf
+
+	tracer_type		0
+
+	scorch_id 2
+	scar_type 2
+
+	turnrate_maxpit  120
+	turnrate_maxyaw  120
+	heat_det_range 3000.0
+	boresight_maxang 20
+
+	kz_physics	1
+
+	light_move     5.0  120 110 70
+	light_impact   7.0  240 170 80  0.3
+
+	flag LAWR
+	flag NoGravity
+	flag forcetracer
+	flag priority
+end
+
+ammo corpusmine
+	frndlyTrcrID		1895
+	foeTrcrID			1895
+	max_age		1
+	arm_age		0
+	velocity	2
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	40
+	penetration_kz		40
+	kztype				rounds_kz_C4
+	kz_damage			105
+	kz_minradius		.5
+	kz_maxradius		30
+	kz_pieslice			24
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag	useownmove
+	flag	noage
+
+	effects_table
+		move		none				none				0
+	end
+end
+
+ammo corpusflash
+	frndlyTrcrID		1876
+	max_age		4
+	arm_age		0
+	velocity	30
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+	kztype rounds_kz_C4
+	kz_minradius 20.0
+	kz_maxradius 20.0
+	kz_damage 0
+    kz_physics 3
+    secondary_anim  2
+	flag	useownmove
+end

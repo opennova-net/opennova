@@ -775,6 +775,21 @@ void test_helicopter_sound_curves_and_decay() {
 			"the medium fade-in endpoint retains the reciprocal/ftol one-unit loss");
 	CHECK(edge.size() == 3 && edge[0].volume_q8_8 == 0,
 			"cruise starts at zero at the medium fade-in endpoint");
+	// Between the fade-in end (50%) and the fade-out start (75%) the medium loop
+	// holds full volume; between the fade-out start and end (100%) it fades.
+	// [orig: VehicleEffect_UpdateEmissions -- the medium curve's hold and fade-out
+	//  arms over Math_InterpolateValueInRange @ 0x527EA0]
+	helo.veh.part_spin.speed =
+			static_cast<int32_t>((int64_t(39322) * kRotorSpeedMax + 65535) / 65536); // 60%
+	world.vehicles.update_rotor_sound(helo, traits);
+	const auto hold = world.out.sound_emitters.drain();
+	CHECK(hold.size() == 3 && hold[1].volume_q8_8 == 65279, "the medium loop holds full volume at 60%");
+	helo.veh.part_spin.speed =
+			static_cast<int32_t>((int64_t(58982) * kRotorSpeedMax + 65535) / 65536); // 90%
+	world.vehicles.update_rotor_sound(helo, traits);
+	const auto fade = world.out.sound_emitters.drain();
+	CHECK(fade.size() == 3 && fade[1].volume_q8_8 > 0 && fade[1].volume_q8_8 < 65279,
+			"the medium loop fades out past 75%");
 	helo.veh.part_spin.speed = kRotorSpeedMax;
 	world.vehicles.part_anim_tick(helo, traits);
 	CHECK(!world.out.sound_emitters.empty() && helo.veh.part_spin.speed < kRotorSpeedMax,

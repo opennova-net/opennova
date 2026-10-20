@@ -6,8 +6,8 @@
 // as no text; a null text the reader would read through, and a file laid out otherwise, not loaded and the
 // credits left as they were. CENTER_X and VERTICAL_SPACE read through the reader's binary entry read, so a CBIN
 // entry of no value reads the next value laid out. The minted synth_nlist trio loads with its
-// [ENV] values and its lines and fonts as the credits view reads them. The retail leg (OPENNOVA_JO_ASSETS):
-// the shipped JO, JOX01 and BHD lists each load as their text form does, their counts pinned.
+// [ENV] values and its lines and fonts as the credits view reads them, and the minted lists of the shipped
+// JO, JOX01 and BHD lists' shapes each load as their text form does, their counts pinned.
 #include <cstdio>
 #include <cstring>
 #include <iterator>
@@ -20,7 +20,6 @@
 #include <runtime/menu/menu_credits.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -369,27 +368,28 @@ Counts counts_of(const MarqueeCredits &credits) {
 	return c;
 }
 
-// The shipped lists, each as its text form reads, their [ENV] values and node counts pinned (every texture
-// taken as loading).
-struct ShippedList {
+// The shipped lists' shapes (the minted synth_nlist_controls.kda and synth_nlist_bhd_plain.kda: JO's and
+// JOX01's control runs and both image forms, BHD's plain lines and ~BINK_LOGO markup), each as its text form
+// reads, their [ENV] values and node counts pinned (every texture taken as loading): a fading ~F image and a
+// spacing ~I image are a node each, a markup line none. The retired menu_credits_retail row pinned the
+// shipped lists so: JO's and JOX01's 250 nodes (231 lines, 2 spacing, 17 fading), BHD's 259 (259 lines).
+struct MintedList {
 	const char *path;
 	int vertical_space;
 	Counts counts;
 };
 
-int test_retail() {
-	const ShippedList lists[] = {
-			{"cbin/nlist.reference.kda", 14, {250, 231, 2, 17}},
-			{"cbin/nlist.jox01.reference.kda", 14, {250, 231, 2, 17}},
-			{"cbin/nlist.bhd.reference.kda", 20, {259, 259, 0, 0}},
+int test_shipped_shapes() {
+	const MintedList lists[] = {
+			{"/fixtures/cbin/synth_nlist_controls.kda", 14, {18, 12, 2, 4}},
+			{"/fixtures/cbin/synth_nlist_bhd_plain.kda", 20, {14, 14, 0, 0}},
 	};
-	for (const ShippedList &list : lists)
-		if (retail::reference_fixture(list.path).empty())
-			return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/cbin/nlist*.reference.kda (the shipped credits lists)");
+	const std::string root = test_paths_repo_root(__FILE__);
 	int failures = 0;
-	for (const ShippedList &list : lists) {
+	for (const MintedList &list : lists) {
 		MarqueeCredits credits;
-		const std::vector<uint8_t> bytes = test_io::read_file(retail::reference_fixture(list.path));
+		const std::vector<uint8_t> bytes = test_io::read_file(root + list.path);
+		TEST_EXPECT(!bytes.empty());
 		if (check_forms_agree(list.path, bytes, credits) != 0 || check_against_view(bytes, credits) != 0) {
 			++failures;
 			continue;
@@ -410,8 +410,7 @@ int test_retail() {
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_forms_agree();
 	failures += test_label_lowercased_in_place();
@@ -420,7 +419,7 @@ int main(int argc, char **argv) {
 	failures += test_empty_label();
 	failures += test_markup_and_empty_line();
 	failures += test_minted();
-	failures += test_retail();
+	failures += test_shipped_shapes();
 	if (failures == 0) std::printf("menu_credits: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -3,11 +3,10 @@
 // [orig: SoundProfile_LoadAll @ 0x527490, SoundProfile_ParseLineCallback @ 0x526fc0,
 // SoundProfile_FindSlotByName @ 0x526e30]. The inline fixture mirrors the retail
 // file's shapes (quoted begin names + trailing comment text, tab/space runs,
-// float param columns, the med/crs percent rows). The retail-corpus spot check
-// (<OPENNOVA_JO_ASSETS>/sndprof.def, 49 profiles) runs only when the extracted
-// asset tree carries it — SKIP-LEG otherwise (docs/asset-gated-tests.md).
+// float param columns, the med/crs percent rows), and kShippedRows authors the
+// shipped file's stale-slot rows in its own layout (JO:CA's SndProf.def, 49
+// profiles: the Chinook's and the Mil-26's loop lines, the SP player's footsteps).
 #include <runtime/audio/sound_profile.h>
-#include <base/resource_index/resource_index.h>
 #include "common/test_expect.h"
 
 #include <cstdio>
@@ -15,7 +14,6 @@
 #include <cstring>
 #include <string>
 #include <vector>
-#include "common/retail_paths.h"
 
 using opennova::audio::SoundProfile;
 using opennova::audio::SoundProfileTable;
@@ -171,8 +169,38 @@ static int test_writer() {
     return 0;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+// Three blocks in the layout JO:CA's SndProf.def writes them in (a quoted name, a trailing comment, quoted or
+// not, tab runs, a trailing blank, blank-only lines), their loop lines spaced as the shipped SP_Chinook's and
+// SP_Mil26's are: the Chinook's bare `soundloop_3` reads the 1.2 its `soundloop_2` left in token 3, and the Mil-26's
+// `soundloop_2` reads its slot 4 through the pointer its longer `soundloop_1` left, which lands on the 2 of its
+// own "1.2" (the shipped rows: SP_Chinook param3 78643 on soundloop_3, SP_Mil26 param4 2 on soundloop_2, witnessed
+// over the install's base SndProf.def by the retired sound_profile_retail leg, 2026-10-19).
+static const char kShippedRows[] =
+    "begin \"SP_Rotor1\"\t\t Flyable rotor one\r\n"
+    "\tenginestart\t\t\tV_ROTOR_START\r\n"
+    "\tsoundloop_1\t\t\telp_rotor_blds \t\t.9 1.2 \r\n"
+    "\tsoundloop_2\t\t\tV_ROTOR1_ILP\t\t.9 1.2 \r\n"
+    "\tsoundloop_3\t\t\tV_ROTOR1_DLP\t\t\t\t\r\n"
+    "\tsounddeath\t\t\tEXPLO_HELI\r\n"
+    "  \r\n"
+    "\tmedloopfadeinstart   \t20 \t\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"SP_Rotor2\"\t\t\"Flyable rotor two\" \r\n"
+    "\tsoundloop_1\tA .9 1.2 7\r\n"
+    "\tsoundloop_2\tV_B\t.8 1.2 \r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"SP_PlayerM1\"\tSoldier #1, player-MALE Single PLayer\r\n"
+    "     sounddeath     BM1_DEATH\r\n"
+    "     SSNightDead    BM1_DEATH_K\r\n"
+    "     SSLFootGND     FSP_DIRT_L\r\n"
+    "     SSFootWater    FS_WATER\r\n"
+    "     SSAudio4\t\tFS_SWIM\r\n"
+    "     FreeFall       FREEFALL\r\n"
+    "end\r\n";
+
+int main() {
     if (test_writer() != 0) return 1;
     // Inline fixture: shapes and stores.
     {
@@ -345,62 +373,28 @@ int main(int argc, char **argv) {
                     std::string(slot::kSoundProfileSetNameBytes - 1, 'S'));
     }
 
-    // Retail corpus (asset-gated): JO's sndprof.def parses to 49 profiles and the
-    // SP player profile carries the witnessed footstep sets.
-    const std::string path = retail::asset_file("sndprof.def");
-    if (!path.empty()) {
-        if (FILE *f = std::fopen(path.c_str(), "rb")) {
-            std::fseek(f, 0, SEEK_END);
-            long n = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
-            std::vector<char> buf(static_cast<size_t>(n));
-            const bool read_ok = std::fread(buf.data(), 1, buf.size(), f) == buf.size();
-            std::fclose(f);
-            TEST_EXPECT(read_ok);
-            SoundProfileTable t;
-            TEST_EXPECT(t.parse(buf.data(), buf.size()) == 49);
-            const SoundProfile *player = t.find("SP_JO_SP_PlayerM1");
-            TEST_EXPECT(player != nullptr && player->name == "SP_JO_SP_PlayerM1");
+    // The shipped file's shapes (kShippedRows): the stale-slot rows read as the game reads the shipped ones, and
+    // the writer carries them: written from scratch with every slot line's five columns, the stale-slot values
+    // read back as the values they are.
+    {
+        SoundProfileTable t;
+        TEST_EXPECT(t.parse(kShippedRows, sizeof(kShippedRows) - 1) == 3);
+        const SoundProfile *chinook = t.find("SP_Rotor1");
+        const SoundProfile *mil26 = t.find("SP_Rotor2");
+        const SoundProfile *player = t.find("SP_PlayerM1");
+        TEST_EXPECT(chinook != nullptr && mil26 != nullptr && player != nullptr);
+        if (chinook != nullptr && mil26 != nullptr && player != nullptr) {
+            TEST_EXPECT(chinook->set_names[slot::kSlotSoundLoop1 + 2] == "V_ROTOR1_DLP");
+            TEST_EXPECT(chinook->param3_q16[slot::kSlotSoundLoop1 + 2] == 78643);
+            TEST_EXPECT(chinook->param2_q16[slot::kSlotSoundLoop1 + 2] == 0);
+            TEST_EXPECT(mil26->param4[slot::kSlotSoundLoop1 + 1] == 2);
+            TEST_EXPECT(mil26->param3_q16[slot::kSlotSoundLoop1 + 1] == 78643);
             TEST_EXPECT(player->set_names[slot::kSlotFootLGround] == "FSP_DIRT_L");
             TEST_EXPECT(player->set_names[slot::kSlotFootWater] == "FS_WATER");
             TEST_EXPECT(player->set_names[slot::kSlotNightDeath] == "BM1_DEATH_K");
             TEST_EXPECT(player->set_names[slot::kSlotFreeFall] == "FREEFALL");
-            // The writer carries every shipped profile: written from scratch,
-            // the 49 read back the same.
-            TEST_EXPECT(round_trips(t.entries()));
-        } else {
-            std::fprintf(stderr, "FAIL: cannot open %s\n", path.c_str());
-            return 1;
         }
-    } else {
-        retail::skip_leg("OPENNOVA_JO_ASSETS/sndprof.def (retail sound profile spot check)");
-    }
-
-    // The install's base SndProf.def through its mount: a short slot line
-    // reads the slots an earlier, longer line left, so the Chinook's bare
-    // soundloop_3 takes a param3 of 1.2 (78643) and the Mil26's soundloop_2
-    // the gear count 2 from slot 4 [orig: SoundProfile_ParseLineCallback
-    // @0x526fc0, the column reads @0x5270f0..0x52718b; Config_TokenizeLine
-    // @0x53CB71..0x53CB81].
-    const std::string install = retail::install();
-    if (!install.empty()) {
-        opennova::ResourceIndex index;
-        std::vector<uint8_t> bytes;
-        TEST_EXPECT(index.scan(install) && index.read_file("sndprof.def", bytes));
-        SoundProfileTable t;
-        TEST_EXPECT(t.parse(reinterpret_cast<const char *>(bytes.data()), bytes.size()) > 0);
-        const SoundProfile *chinook = t.find("SP_Chinook");
-        const SoundProfile *mil26 = t.find("SP_Mil26");
-        TEST_EXPECT(chinook != nullptr && chinook->name == "SP_Chinook");
-        TEST_EXPECT(mil26 != nullptr && mil26->name == "SP_Mil26");
-        TEST_EXPECT(chinook->param3_q16[slot::kSlotSoundLoop1 + 2] == 78643);
-        TEST_EXPECT(chinook->param2_q16[slot::kSlotSoundLoop1 + 2] == 0);
-        TEST_EXPECT(mil26->param4[slot::kSlotSoundLoop1 + 1] == 2);
-        // Written from scratch with every slot line's five columns, the
-        // stale-slot values read back as the values they are.
         TEST_EXPECT(round_trips(t.entries()));
-    } else {
-        retail::skip_leg("OPENNOVA_JO_DIR (the mounted SndProf.def's stale-slot rows)");
     }
 
     return 0;

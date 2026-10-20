@@ -3,8 +3,8 @@
 // true-colour PNG read into one plane beside their form, written again from it as the same bytes; a DDS, a
 // run-length TGA and a palette PNG held whole, no brush. Texels painted are one step (a stroke's batches one), their
 // tiles a region of the document's changes, undone to the file as read; a texture operation (S18) is a whole change.
-// The retail twin paints every shipped char, foliage, colour and blend map at one texel, undoes it and saves it
-// identical, and writes each again from its plane as the same bytes.
+// Every terrain map fixture, in each form the shipped char, foliage, colour and blend maps take, is painted at one
+// texel, undone and saved identical, and written again from its plane as the same bytes.
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -22,8 +22,8 @@
 #include <formats/tga/tga.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -233,22 +233,19 @@ bool ends_with(const std::string &s, const char *tail) {
 	return s.size() >= t.size() && s.compare(s.size() - t.size(), t.size(), t) == 0;
 }
 
-// Every shipped terrain map: written again from its plane as the same bytes; painted at one texel, undone, saved
-// identical.
-int test_retail_maps() {
-	if (!retail::selected()) return 0;
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the shipped _m/_f.pcx and _c/_d1.tga terrain maps)");
-		return 0;
-	}
+// Every terrain map fixture, in each form the shipped char (_m.pcx), foliage (_f.pcx), colour (_c.tga) and detail
+// blend (_d1.tga) maps take: master's Tmap maps and the shipped forms fixtures/terrain/variants holds (minted by
+// tests/fixtures/terrain_variants_gen.cpp). Each written again from its plane as the same bytes; painted at one
+// texel, undone, saved identical. A fixture missing fails.
+int test_terrain_maps(const std::string &repo) {
 	int swept = 0, failures = 0;
-	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(assets)) {
-		if (!entry.is_regular_file()) continue;
-		const std::string name = entry.path().filename().string(), l = lower(name);
-		if (!ends_with(l, "_m.pcx") && !ends_with(l, "_f.pcx") && !ends_with(l, "_c.tga") && !ends_with(l, "_d1.tga")) continue;
-		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().string());
-		auto document = open(name, bytes);
+	for (const char *file : {"fixtures/terrain/tmap/Tmap_m.pcx", "fixtures/terrain/tmap/Tmap_f.pcx", "fixtures/terrain/variants/charmap_m.pcx",
+	                         "fixtures/terrain/variants/foliage_f.pcx", "fixtures/terrain/variants/map_c.tga",
+	                         "fixtures/terrain/variants/map_d1.tga"}) {
+		const std::string name = std::filesystem::path(file).filename().string(), l = lower(name);
+		TEST_EXPECT(ends_with(l, "_m.pcx") || ends_with(l, "_f.pcx") || ends_with(l, "_c.tga") || ends_with(l, "_d1.tga"));
+		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
+		auto document = bytes.empty() ? nullptr : open(name, bytes);
 		const bool painted = document && document->paintable() && written_again(name, bytes);
 		bool same = false;
 		if (painted) {
@@ -262,15 +259,12 @@ int test_retail_maps() {
 		}
 		++swept;
 		if (!painted || !same) {
-			std::printf("FAIL: %s (%s)\n", name.c_str(), !painted ? "its plane does not write it again" : "undone it differs");
+			std::printf("FAIL: %s (%s)\n", file,
+			            bytes.empty() ? "missing" : !painted ? "its plane does not write it again" : "undone it differs");
 			++failures;
 		}
 	}
-	if (swept == 0) {
-		std::printf("FAIL: no terrain map under %s\n", assets.c_str());
-		return 1;
-	}
-	std::printf("retail: %d terrain maps painted, undone and written again, %d failures\n", swept, failures);
+	std::printf("terrain maps: %d painted, undone and written again, %d failures\n", swept, failures);
 	return failures == 0 ? 0 : 1;
 }
 
@@ -361,9 +355,8 @@ int test_painted_image() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	const int failures = test_forms() + test_paint_undo_save() + test_painted_image() + test_retail_maps();
+int main() {
+	const int failures = test_forms() + test_paint_undo_save() + test_painted_image() + test_terrain_maps(test_paths_repo_root(__FILE__));
 	if (failures == 0) std::printf("editor_texture_paint: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -2,13 +2,15 @@
 // with no source text is the writer's own form, byte for byte, and reads back as itself; an authored file (its
 // comments, its spacing, a number's own spelling, the keys the reader reads nothing of, a key before `type`)
 // through the reader, written and read again, is the same profile, and an edit reads back; a mask the reader
-// ORs over two lines is written on one; every unit's shortest word reads back to its value. With a JO install
-// configured (--retail): every shipped profile through the game's reader, written from its profile and read
-// again, has the same fields, and an edit reads back.
+// ORs over two lines is written on one; every unit's shortest word reads back to its value. The authored
+// profiles in fixtures/aip (JO's layout and the constructs its 98 shipped profiles use) through the game's reader,
+// each as written, ending in the NUL the shipped files end in and with that NUL in place of its last line's
+// ending: written from its profile and read again, the same fields; an edit reads back; the writer's form pinned.
 #include <formats/aip/aip.h>
-#include <base/vfs/vfs.h>
+#include <base/io/hash.h>
 
-#include "common/retail_paths.h"
+#include "common/file_io.h"
+#include "common/test_paths.h"
 #include "common/test_expect.h"
 
 #include <algorithm>
@@ -217,49 +219,102 @@ int review_cases() {
 	return 0;
 }
 
-int retail_profiles() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (every shipped AI profile written and read back)");
-		return 0;
+// The authored profiles (fixtures/aip): JO's layout (a quoted description first, tab runs, trailing tabs, blank
+// and tab-only lines) and the constructs the 98 shipped profiles use: GROUND and HELO, the BOAT, TRAIN and PLANE
+// subtypes, the PRETTY / FOLLOWWP / WINGMAN states, flag words in either order, a flag twice, a mask of 0, a
+// facing of WEAPON_TURRET, 0 or 180, weapon names led by a digit (20MM, 50CAL) and 0 for none, rates spelled
+// 0.20 / .05 / 0.25, a pitch of 0.0, MAINTAIN_SPEED. Every shipped profile ends in a NUL, most after the last
+// line's CR LF, three in place of it (witnessed over JO:CA's base archives by the retired aip_write_retail leg,
+// 2026-10-19).
+const char *const kProfiles[] = { "boat.aip", "ground_vehicle.aip", "helo.aip", "turret.aip" };
+
+std::string profile_text(const char *name) {
+	const std::vector<uint8_t> bytes =
+			test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/aip/" + name);
+	return std::string(bytes.begin(), bytes.end());
+}
+
+std::string written_form(const aip::Profile &profile) {
+	std::string text, error;
+	return aip::write_profile(profile, text, error) ? text : std::string("<refused>");
+}
+
+uint64_t fnv1a64(const std::string &text) {
+	return io::fnv1a64_bytes(io::kFnv1a64Offset, text.data(), text.size());
+}
+
+// Each profile's writer's form, pinned (the nw_codec_identity rule: a vector changes only with an [orig] witness on
+// the writer or a D-entry; `aip_write_test --dump` prints the table).
+struct Vector {
+	const char *name;
+	size_t length;
+	uint64_t fnv;
+};
+const Vector kWritten[] = {
+	{ "boat.aip", 593u, 0x6958e4fed56b2409ull },
+	{ "ground_vehicle.aip", 615u, 0x53d0a6cc39a9cd6cull },
+	{ "helo.aip", 882u, 0x6bc1c8caf92e536bull },
+	{ "turret.aip", 565u, 0x2a3e7802b976bcd8ull },
+};
+
+int dump() {
+	std::printf("const Vector kWritten[] = {\n");
+	for (const char *name : kProfiles) {
+		const std::string text = written_form(parsed(profile_text(name)));
+		std::printf("\t{ \"%s\", %zuu, 0x%016llxull },\n", name, text.size(), static_cast<unsigned long long>(fnv1a64(text)));
 	}
-	Vfs vfs;
-	TEST_EXPECT(vfs.mount_game(install, "", VfsMountMode::Packed));
-	size_t files = 0, edited = 0;
-	for (const auto &location : vfs.list_files()) {
-		std::string name = location.logical_name;
-		std::string lower = name;
-		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-		if (lower.size() < 4 || lower.substr(lower.size() - 4) != ".aip") continue;
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(vfs.read_file(name, bytes));
-		// Through the game's reader, written from its profile and read again: the same fields.
-		const aip::Profile profile = aip::parse_profile(bytes.data(), bytes.size());
-		if (!reads_back(profile)) {
-			std::fprintf(stderr, "FAIL %s: its writer's form reads back otherwise\n", name.c_str());
-			return 1;
-		}
-		++files;
-		// One whole number changed reads back.
-		if (profile.type == aip::kTypeGround || profile.type == aip::kTypeHelo) {
-			aip::Profile changed = profile;
-			changed.priority_air = profile.priority_air + 1;
-			if (!reads_back(changed)) {
-				std::fprintf(stderr, "FAIL %s: one value changed reads back otherwise\n", name.c_str());
+	std::printf("};\n");
+	return 0;
+}
+
+int authored_profiles() {
+	size_t files = 0;
+	for (size_t i = 0; i < sizeof(kProfiles) / sizeof(kProfiles[0]); ++i) {
+		const std::string text = profile_text(kProfiles[i]);
+		TEST_EXPECT(text.size() > 2 && text.compare(text.size() - 2, 2, "\r\n") == 0);
+		// As authored, the NUL after its last line, the NUL in place of its last line's ending: one profile.
+		const aip::Profile profile = parsed(text);
+		const std::string forms[] = { text, text + '\0', text.substr(0, text.size() - 2) + '\0' };
+		for (const std::string &form : forms) {
+			const aip::Profile read = parsed(form);
+			TEST_EXPECT(aip::same_profile(read, profile));
+			// Through the game's reader, written from its profile and read again: the same fields.
+			if (!reads_back(read)) {
+				std::fprintf(stderr, "FAIL %s: its writer's form reads back otherwise\n", kProfiles[i]);
 				return 1;
 			}
-			++edited;
+			// One whole number changed reads back.
+			aip::Profile changed = read;
+			changed.priority_air = read.priority_air + 1;
+			if (!reads_back(changed)) {
+				std::fprintf(stderr, "FAIL %s: one value changed reads back otherwise\n", kProfiles[i]);
+				return 1;
+			}
 		}
+		TEST_EXPECT(profile.type == aip::kTypeGround || profile.type == aip::kTypeHelo);
+		const std::string out = written_form(profile);
+		if (out.size() != kWritten[i].length || fnv1a64(out) != kWritten[i].fnv)
+			std::fprintf(stderr, "FAIL %s: the writer's form is %zu bytes, fnv 0x%016llx\n", kProfiles[i], out.size(),
+			             static_cast<unsigned long long>(fnv1a64(out)));
+		TEST_EXPECT(std::strcmp(kWritten[i].name, kProfiles[i]) == 0 && out.size() == kWritten[i].length &&
+		            fnv1a64(out) == kWritten[i].fnv);
+		++files;
 	}
-	std::printf("retail: %zu shipped profiles written from their profiles and read back, %zu edited\n", files, edited);
-	TEST_EXPECT(files >= 98); // JO:CA ships 98, all in its base archives
+	// A weapon name led by a digit is a name; 0 is none.
+	const aip::Profile boat = parsed(profile_text("boat.aip"));
+	TEST_EXPECT(boat.secondary.weapon == "50CAL" && boat.type == aip::kTypeGround);
+	const aip::Profile helo = parsed(profile_text("helo.aip"));
+	TEST_EXPECT(helo.type == aip::kTypeHelo && helo.secondary.weapon == "20MM");
+	std::printf("authored: %zu profiles in JO's layout, each as written and ending in a NUL, written from their profiles "
+	            "and read back, an edit each; the writer's forms pinned\n",
+	            files);
 	return 0;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	if (minted() || authored() || units() || review_cases() || retail_profiles()) return 1;
+	if (argc > 1 && std::strcmp(argv[1], "--dump") == 0) return dump();
+	if (minted() || authored() || units() || review_cases() || authored_profiles()) return 1;
 	return 0;
 }

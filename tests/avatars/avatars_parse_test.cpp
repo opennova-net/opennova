@@ -1,16 +1,13 @@
 // Parse test for opennova engine/formats/avatars: the minted fixtures/avatars/synth_avatars.def
-// (tests/fixtures/minimal_avatars_gen.cpp) unconditionally, the shipped Avatars.def from the
-// reference fixture set behind OPENNOVA_JO_ASSETS.
-// The retail leg pins the shipped table (a retail JO + JOX extract,
-// Desktop/REVX02/AVATARS.DEF) against the witnessed grammar; the synthetic leg pins the parser
-// over the same shapes (docs/playerinfo/avatars-re.md): part pool,
-// nationality -> division -> combo tree, ids by number (a trailing token, the shipped "skipdemo", is read for
-// nothing and not kept), quoted values.
+// (tests/fixtures/minimal_avatars_gen.cpp) and the authored fixtures/avatars/jo_shaped.def, a table in
+// the shipped one's shape (its banners and tab alignment, a comment after a header and after a value, quoted
+// names, N00 / D00 / 001 ids, the trailing "skipdemo", a second set of parts below the good nationalities),
+// against the witnessed grammar (docs/playerinfo/avatars-re.md): part pool, nationality -> division -> combo
+// tree, ids by number (a trailing token is read for nothing and not kept), quoted values.
 #include <cstdio>
 #include <cstring>
 #include <string>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/avatars/avatars.h>
@@ -115,14 +112,14 @@ int check_synth(const std::string &path) {
     return 0;
 }
 
-// The shipped table: 51 heads + 36 bodies + 22 arms = 109 parts; 8 nationalities; 69 combos.
-int check_retail(const std::string &path) {
+// The authored JO-shaped table: 6 heads + 4 bodies + 4 arms = 14 parts; 4 nationalities; 18 combos (the
+// shipped one: 51 + 36 + 22 = 109 parts, 8 nationalities, 69 combos).
+int check_jo_shaped(const std::string &path) {
     AvatarsFile f;
     TEST_EXPECT(avatars_parse(path.c_str(), &f) == 0);
 
-    // Counts: 51 heads + 36 bodies + 22 arms = 109 parts; 8 nationalities; 69 combos.
-    TEST_EXPECT(f.parts_count == 109);
-    TEST_EXPECT(f.nationalities_count == 8);
+    TEST_EXPECT(f.parts_count == 14);
+    TEST_EXPECT(f.nationalities_count == 4);
     size_t heads = 0, bodies = 0, arms = 0, combos = 0;
     for (size_t i = 0; i < f.parts_count; ++i) {
         switch (f.parts[i].kind) {
@@ -132,13 +129,13 @@ int check_retail(const std::string &path) {
         default: break;
         }
     }
-    TEST_EXPECT(heads == 51);
-    TEST_EXPECT(bodies == 36);
-    TEST_EXPECT(arms == 22);
+    TEST_EXPECT(heads == 6);
+    TEST_EXPECT(bodies == 4);
+    TEST_EXPECT(arms == 4);
     for (size_t i = 0; i < f.nationalities_count; ++i)
         for (size_t j = 0; j < f.nationalities[i].divisions_count; ++j)
             combos += f.nationalities[i].divisions[j].combos_count;
-    TEST_EXPECT(combos == 69);
+    TEST_EXPECT(combos == 18);
 
     // First head: define head JO_HEAD_SEAL { name AV_BOONIEHAT; graphic Boonie.3di;
     //   camo 0 0 0; voice 1; sex m }.
@@ -184,14 +181,28 @@ int check_retail(const std::string &path) {
     // Great Britain (its trailing "skipdemo" read for nothing); a division of the United States.
     const AvatarNationality *gb = find_nat(f, 1);
     TEST_EXPECT(gb != nullptr);
+    TEST_EXPECT(gb != nullptr && std::strcmp(gb->name_key, "AV_NAT_GREATBRITAIN") == 0);
     TEST_EXPECT(std::strcmp(us->divisions[2].name_key, "AV_DIV_FORCERECON") == 0);
+
+    // A comment after a value or a header is no part of it; a quoted name keeps its blanks and its '-'.
+    const AvatarPart *mask = find_part(f, "JO_HEAD_MASK");
+    TEST_EXPECT(mask != nullptr && std::strcmp(mask->display_name, "AV_FACESHIELD") == 0);
+    TEST_EXPECT(find_part(f, "JO_HEAD_COMBAT") != nullptr && find_part(f, "JO_HEAD_FEMALE_BERET") != nullptr);
+    const AvatarPart *gloves = find_part(f, "JO_ARMS_US_1");
+    TEST_EXPECT(gloves != nullptr && std::strcmp(gloves->display_name, "US Camo -Black Gloves") == 0);
+    const AvatarPart *beret = find_part(f, "JO_HEAD_FEMALE_BERET");
+    TEST_EXPECT(beret != nullptr && beret->sex == AVATAR_SEX_FEMALE && beret->voice == 5);
+
+    // The rebels: defined below the good nationalities, the evil one under them.
+    const AvatarNationality *rebels = find_nat(f, 7);
+    TEST_EXPECT(rebels != nullptr && rebels->alignment == AVATAR_ALIGN_EVIL && rebels->divisions_count == 2);
+    TEST_EXPECT(!has_diag(f, "AVATAR_DUPLICATE_PART"));
 
     avatars_free(&f);
     return 0;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     const std::string root = test_paths_repo_root(__FILE__);
     if (check_synth(root + "/fixtures/avatars/synth_avatars.def") != 0) return 1;
 
@@ -384,11 +395,8 @@ int main(int argc, char **argv) {
         avatars_free(&model);
     }
 
-    // The retail leg: the shipped Avatars.def from the reference fixture set.
-    const std::string retail = retail::reference_fixture("avatars/Avatars.def");
-    if (retail.empty())
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/avatars/Avatars.def (the shipped avatar table)");
-    if (check_retail(retail) != 0) return 1;
-    std::printf("retail leg: Avatars.def parsed with the shipped pins\n");
+    // The JO-shaped table.
+    if (check_jo_shaped(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/avatars/jo_shaped.def") != 0) return 1;
+    std::printf("JO-shaped table: parsed with its pins\n");
     return 0;
 }

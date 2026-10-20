@@ -5,7 +5,7 @@
 // server, the one the CMake cache variable OPENNOVA_TEST_PG names, which ctest
 // passes the test as `--pg <uri>` (opennova_add_pg_test). main() calls
 // test_db::init(argc, argv) first: with no server it prints the SKIP line and
-// exits 77, which ctest reports Skipped and the core suite fails.
+// exits 77, which ctest reports Skipped and the suite fails.
 //
 // Each TestDatabase creates nwt_<pid>_<n> on that server the way the service's
 // own is made (TEMPLATE template0, SQL_ASCII, C collation: db::run_migrations

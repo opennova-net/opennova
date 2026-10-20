@@ -3,7 +3,12 @@
 //    synthetic credits lists written by cbin::encode from authored rows, in
 //    the shapes the shipped JO, JOX01 and BHD nlist.kda take (the BHD one
 //    carries the top_y/bottom_y bounds); a fixed XOR key per file keeps the
-//    bytes reproducible. The shipped trio is cbin_roundtrip's reference-tree leg.
+//    bytes reproducible.
+//  * synth_nlist_controls.kda, synth_nlist_bhd_plain.kda — the shipped lists'
+//    own shapes beyond those three (JO's and JOX01's control runs and images,
+//    BHD's plain lines, its ~BINK_LOGO markup and bounds), in the shipped
+//    encoder's key: the variants the retired cbin_roundtrip_retail and
+//    menu_credits_retail rows read from the shipped trio.
 //  * credits_image.png — the 8x8 RGB image the credits tests stage beside a
 //    .kda under the name its ~F image row references (the tests' PNG writer,
 //    common/png_test_support.h, with one stored zlib block, so no compressor is
@@ -153,6 +158,89 @@ Credits make_credits(const char *title, int sections, uint32_t xor_key) {
 	return c;
 }
 
+// The XOR key the retail encoder wrote all three shipped lists with (JO's, JOX01's and BHD's nlist.kda).
+constexpr uint32_t kShippedKey = 0x01E177CEu;
+
+// The JO and JOX01 lists' own shape, beyond make_credits' (the shipped pair, read once on 2026-10-19 by
+// the retired cbin_roundtrip_retail row): every word joined by '_' (the text form carries no space), a
+// run of two controls at the head (~JR, then ~CFF0000), controls ahead of a line end or an image and not
+// only of a line, fading ~F images at 0|0 among the lines (17 in each) and two ~I spacing images at the
+// end, every line a text with its font, the shipped encoder's key.
+Credits make_controls_credits() {
+	Credits c;
+	c.scroll_rate = 0.5f;
+	c.vertical_space = 14;
+	c.center_x = 400;
+	c.xor_key = kShippedKey;
+	c.entries.push_back(Entry::make_justify(Justify::Right));
+	c.entries.push_back(Entry::make_color(0xFF0000));
+	c.entries.push_back(text_with_font("Open_Nova:", "Synth24"));
+	c.entries.push_back(text_with_font("Combined_Shapes", "Synth24"));
+	c.entries.push_back(Entry::make_newline());
+	c.entries.push_back(Entry::make_newline());
+	c.entries.push_back(text_with_font("Contributors", "Synth16"));
+	c.entries.push_back(Entry::make_color(0xFFFFFF));
+	c.entries.push_back(Entry::make_image("synth1.png", 0, 0));
+	for (int i = 0; i < 3; ++i) c.entries.push_back(Entry::make_newline());
+	static const char *const kHeadings[] = {"Engine_Team", "Format_Team", "Network_Team"};
+	for (int s = 0; s < 3; ++s) {
+		c.entries.push_back(Entry::make_color(0xFF0000));
+		c.entries.push_back(text_with_font(kHeadings[s], "Synth24"));
+		c.entries.push_back(Entry::make_color(0xFFFFFF));
+		c.entries.push_back(Entry::make_newline());
+		c.entries.push_back(text_with_font("Contributor_" + std::to_string(2 * s + 1), "Synth16"));
+		c.entries.push_back(text_with_font("Contributor_" + std::to_string(2 * s + 2), "Synth16"));
+		c.entries.push_back(Entry::make_newline());
+		c.entries.push_back(Entry::make_image("synth" + std::to_string(s + 2) + ".png", 0, 0));
+		c.entries.push_back(Entry::make_newline());
+	}
+	c.entries.push_back(Entry::make_justify(Justify::Center));
+	Entry first = Entry::make_image("synth_a.tga");
+	first.use_simple_image_format = true;
+	c.entries.push_back(first);
+	c.entries.push_back(Entry::make_newline());
+	Entry second = Entry::make_image("synth_b.tga");
+	second.use_simple_image_format = true;
+	c.entries.push_back(second);
+	return c;
+}
+
+// BHD's list (nlist.bhd.reference.kda, read once on 2026-10-19): no control code at all (no ~C, ~J, ~F
+// or ~I), every line a text with its font, line ends, one ~BINK_LOGO markup line with a font, which
+// draws nothing; a wider line spacing (vertical_space 20) and its viewport bounds, top_y 66 and
+// bottom_y 588, the shipped encoder's key.
+Credits make_bhd_plain_credits() {
+	Credits c;
+	c.scroll_rate = 0.5f;
+	c.vertical_space = 20;
+	c.center_x = 400;
+	c.has_top_y = true;
+	c.top_y = 66;
+	c.has_bottom_y = true;
+	c.bottom_y = 588;
+	c.xor_key = kShippedKey;
+	c.entries.push_back(text_with_font("OpenNova_Black_Hawk_Shapes", "Synth36"));
+	c.entries.push_back(Entry::make_newline());
+	c.entries.push_back(Entry::make_newline());
+	static const char *const kHeadings[] = {"Lead_Engine", "Formats", "Network"};
+	for (int s = 0; s < 3; ++s) {
+		c.entries.push_back(text_with_font(kHeadings[s], "Synth24"));
+		c.entries.push_back(Entry::make_newline());
+		for (int n = 0; n < 3; ++n)
+			c.entries.push_back(text_with_font("Contributor_" + std::to_string(3 * s + n + 1), "Synth16"));
+		c.entries.push_back(Entry::make_newline());
+	}
+	Entry logo;
+	logo.type = EntryType::Markup;
+	logo.text = "~BINK_LOGO";
+	logo.font = "Synth16";
+	logo.binary_type = 2;
+	c.entries.push_back(logo);
+	c.entries.push_back(Entry::make_newline());
+	c.entries.push_back(text_with_font("*", "Synth16"));
+	return c;
+}
+
 // Encode a list, prove the bytes decode back to the same entry sequence and
 // re-encode identically (with the string table the decoder recovered), and
 // return them.
@@ -212,5 +300,8 @@ int main(int argc, char **argv) {
 	bhd.has_bottom_y = true;
 	bhd.bottom_y = 580;
 	failures += guard_credits(dir + "/synth_nlist_bhd.kda", bhd, write_mode);
+	// The shipped lists' own shapes: JO's and JOX01's controls and images, BHD's plain lines.
+	failures += guard_credits(dir + "/synth_nlist_controls.kda", make_controls_credits(), write_mode);
+	failures += guard_credits(dir + "/synth_nlist_bhd_plain.kda", make_bhd_plain_credits(), write_mode);
 	return failures == 0 ? 0 : 1;
 }

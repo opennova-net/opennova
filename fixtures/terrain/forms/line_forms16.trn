@@ -1,0 +1,68 @@
+// OpenNova authored terrain: the shipped .trn line forms (tabs, a 16-sector grid)
+;a fixture for the trn_mission_load ctest
+
+terrain_name "Forms16"
+terrain_creator " Open Nova"
+
+polytrn_colormap	forms_c.tga
+polytrn_detailmap	forms_dm.tga	; the near detail
+polytrn_detailmap2	forms_dm2.tga	; a second near detail
+polytrn_detailmap_c1	forms_dc1.tga	; colour one
+polytrn_detailmap_c2	forms_dc2.tga	; colour two of three
+polytrn_detailmap_c3	forms_dc3.tga	; colour three
+polytrn_detailmapdist	forms_dmd.tga	; the far detail texture
+polytrn_detailblendmap	forms_d1.tga
+polytrn_detaildensity	128
+polytrn_detaildensity2	8
+polytrn_polydata	Forms16.cpt
+polytrn_charmap	Forms16_m.pcx
+polytrn_foliagemap	Forms16_f.pcx
+polytrn_tilestrip	trntile10.tga
+
+water_height	21 ;sea level, in units above the floor
+water_murk	.9
+water_rgb	20,40,60
+
+polytrn_sectorcount		16                   ; sectors a side
+polytrn_wrapx			1                   ; wrap along x?
+polytrn_wrapy			0                   ; wrap along y?
+polytrn_origin		-8 -8	; the sector at world (x,y)
+
+lock_topleft 0 0
+lock_topright 0 1
+lock_bottomleft 1 0
+lock_bottomright 1 1
+
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0; this row
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	3	4	1	2	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	1	2	3	4	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	3	4	1	2	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0; this row
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0	0	0	0
+
+; the foliage
+foliage
+  graphic         ftree1.3di                ; the model to place - a small one
+  color_lower     0                         ; 0=match ground  1=half blend  2=keep its colour
+  color_upper     2                         ; 0=match ground  1=half blend  2=keep its colour
+  match           254                       ; up to four foliage map codes
+  attrib	  shadow		
+end
+
+foliage
+  graphic         fbush1.3di                ; the model to place - a small one
+  color_lower     1                         ; 0=match ground  1=half blend  2=keep its colour
+  color_upper     1                         ; 0=match ground  1=half blend  2=keep its colour
+  match           253                       ; up to four foliage map codes
+  attrib shadow
+end

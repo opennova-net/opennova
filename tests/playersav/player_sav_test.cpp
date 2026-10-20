@@ -1,9 +1,9 @@
 // engine/formats/playersav — player.sav parse/serialize tests.
 //
-// Every fixture is built in code: no retail file is committed. The retail leg
-// checks the format against the installed program's own save (Jointops.exe
-// under OPENNOVA_JO_DIR, read only) and notes SKIP-LEG without it
-// (docs/asset-gated-tests.md).
+// Every fixture is built in code: no retail file is committed. The program's
+// own save constants (the header immediates, the record size and the trailer)
+// are pinned as cited values read once from the pinned JO:CA Jointops.exe
+// (SHA-256 9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57).
 
 #include <cstdint>
 #include <cstdio>
@@ -12,8 +12,6 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/pe_image.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include <formats/playersav/player_sav.h>
 
@@ -213,41 +211,30 @@ int test_header_gate() {
     return 0;
 }
 
-// --- 4. retail: the format the installed program's save writes -----------------
+// --- 4. the program's own save constants ----------------------------------------
 
-int test_retail_program() {
-    const std::string exe = retail::jointops_exe();
-    if (exe.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying Jointops.exe");
-    pe::Image image;
-    if (!image.open(exe)) {
-        std::fprintf(stderr, "Jointops.exe found but not a readable PE32 image: %s\n", exe.c_str());
-        return 1;
-    }
-    PlayerSav f;
-    const std::vector<uint8_t> written = write(f);
-    std::vector<uint8_t> b;
-    // The header's two immediates [orig: PlayerProfile_SaveToFiles @0x54be2e
-    // mov [esp], 'FPBC'; @0x54be35 mov [esp+4], '0211'].
-    TEST_EXPECT(image.read(0x54be31, 4, b) && std::memcmp(b.data(), written.data(), 4) == 0);
-    TEST_EXPECT(image.read(0x54be39, 4, b) && std::memcmp(b.data(), written.data() + 4, 4) == 0);
-    // Each record's size [orig: push 3C80h @0x54be70].
-    uint32_t record = 0;
-    TEST_EXPECT(image.u32(0x54be71, record) && record == kPlayerRecordBytes);
-    // The trailer: 8 bytes [orig: push 8 @0x54be92] from off_829F3C's string.
-    TEST_EXPECT(image.read(0x54be93, 1, b) && b[0] == kTrailerBytes);
-    uint32_t trailer_va = 0;
-    TEST_EXPECT(image.u32(0x829F3C, trailer_va));
-    TEST_EXPECT(image.read(trailer_va, kTrailerBytes, b) &&
-                std::memcmp(b.data(), written.data() + written.size() - kTrailerBytes, kTrailerBytes) == 0);
-    std::printf("Jointops.exe: header, record size and trailer \"%s\" match the writer\n",
-                image.c_string(trailer_va).c_str());
+// The bytes PlayerProfile_SaveToFiles writes, as the pinned Jointops.exe holds
+// them: the header's two immediates, each record's size and the trailer.
+constexpr char kProgramMagic[] = "FPBC";    // [orig: PlayerProfile_SaveToFiles @0x54be2e mov [esp], 'FPBC' (imm @0x54be31)]
+constexpr char kProgramVersion[] = "0211";  // [orig: @0x54be35 mov [esp+4], '0211' (imm @0x54be39)]
+constexpr uint32_t kProgramRecordBytes = 0x3C80;  // [orig: push 3C80h @0x54be70]
+constexpr uint32_t kProgramTrailerBytes = 8;      // [orig: push 8 @0x54be92]
+constexpr char kProgramTrailer[] = "fsasyaof";    // [orig: off_829F3C -> the string @0x7C8C1C]
+
+int test_program_constants() {
+    const std::vector<uint8_t> written = write(PlayerSav{});
+    TEST_EXPECT(std::memcmp(written.data(), kProgramMagic, 4) == 0);
+    TEST_EXPECT(std::memcmp(written.data() + 4, kProgramVersion, 4) == 0);
+    TEST_EXPECT(kPlayerRecordBytes == kProgramRecordBytes);
+    TEST_EXPECT(kTrailerBytes == kProgramTrailerBytes);
+    TEST_EXPECT(written.size() >= kTrailerBytes &&
+                std::memcmp(written.data() + written.size() - kTrailerBytes, kProgramTrailer, kProgramTrailerBytes) == 0);
     return 0;
 }
 
 }  // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     struct Case {
         const char *name;
         int (*fn)();
@@ -256,7 +243,7 @@ int main(int argc, char **argv) {
         {"layout", test_layout},
         {"round_trip", test_round_trip},
         {"header_gate", test_header_gate},
-        {"retail_program", test_retail_program},
+        {"program_constants", test_program_constants},
     };
     int failures = 0;
     for (const Case &c : cases) {

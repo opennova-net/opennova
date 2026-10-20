@@ -1,18 +1,21 @@
-// The menu runtime over the 2026-09-23 grill's census corpus: the sixteen .mnu loose
-// at the OPENNOVA_JO_ASSETS root, each screen's labels read through its own string
-// tables (menutxt.bin), checked against the grill's shipped hotkey cases (set B3):
-//  (a) VK_ENTER is no key: cmap.mnu WPNAME_OK and loadout.mnu ACCEPT register no row
-//      and Enter does not reach them;
-//  (b) the {hot} label mnemonics of every class whose parse reads a STRING: the 18
-//      shipped RADIO tab labels (game.mnu, mp.mnu, options.mnu) register one each,
-//      and the letter selects the tab;
-//  (c) ESC with an edit focused does nothing (cmap.mnu WPNAME in its MODAL
-//      WAYPOINTNAME_DLG, whose WPNAME_CANCEL answers ESC once the focus is gone);
-//  (d) Enter in an edit commits and then presses the VK_RETURN button (player.mnu
-//      PLAYERNAME -> ACCEPT, whose cross-file jump follows its callbacks; PRE.MNU's
-//      passwords -> ACCEPT);
-//  (e) the popup gate: cmap.mnu's '=' ZOOMIN answers only while the MODAL dialog is
-//      closed.
+// The menu runtime over the shipped screens' hotkey cases the 2026-09-23 grill found in
+// its census corpus (set B3), each authored in fixtures/mnu/hotkeys.mnu in the shape of
+// the shipped screen that holds it, its labels read through its own string table
+// (menutxt.bin, minted here):
+//  (a) VK_ENTER is no key: the shipped cmap.mnu WPNAME_OK and loadout.mnu ACCEPT (here
+//      MARKER_OK and KIT's ACCEPT) register no row and Enter does not reach them;
+//  (b) the {hot} label mnemonics of every class whose parse reads a STRING: the shipped
+//      RADIO tab labels (game.mnu, mp.mnu, options.mnu; here SETTINGS's tabs, and PAUSE's
+//      tabs and device radios behind its OPTIONS button) register one each, and the
+//      letter selects the tab;
+//  (c) ESC with an edit focused does nothing (the shipped cmap.mnu WPNAME in its MODAL
+//      WAYPOINTNAME_DLG, whose WPNAME_CANCEL answers ESC once the focus is gone; here
+//      MARKER_NAME in MARKER_DLG);
+//  (d) Enter in an edit commits and then presses the VK_RETURN button (the shipped
+//      player.mnu PLAYERNAME -> ACCEPT, whose cross-file jump follows its callbacks, and
+//      PRE.MNU's passwords -> ACCEPT; here PROFILE and PREGAME);
+//  (e) the popup gate: the shipped cmap.mnu's '=' ZOOMIN (here MAPVIEW's) answers only
+//      while the MODAL dialog is closed.
 // [orig: UI_DispatchKeyboardEventToChildren @ 0x63ad10; CWnd_ParseVirtualKeyNameW
 //  @ 0x6467f0; CUIButtonWidget_ParseXMLAttributes @ 0x657c30;
 //  CEditWnd_HandleKeyEvent @ 0x6623a0; CWnd_IsVisibleInHierarchy @ 0x646290]
@@ -38,7 +41,7 @@
 #include <runtime/menu/menu_text_tables.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
+#include "mnu/repo_menus.h"
 
 using opennova::menu::EditKeyResult;
 using opennova::menu::MenuEvent;
@@ -203,142 +206,169 @@ MenuKeyInput typed(int ch) {
 	return k;
 }
 
+// The labels of hotkeys.mnu's screens: the table its TEXT_RSRC names, minted here (section
+// "menu"). A {hot} marker names its next letter the label's mnemonic; the side labels and the
+// buttons' carry none.
+std::vector<uint8_t> minted_menutxt() {
+	const char *const rows[][2] = {
+		{ "HK_SIDE_ONE", "Side one" },
+		{ "HK_SIDE_TWO", "Side two" },
+		{ "HK_BACK", "Back" },
+		{ "HK_ACCEPT", "Accept" },
+		{ "HK_CANCEL", "Cancel" },
+		{ "HK_CLOSE", "Close" },
+		{ "HK_RESUME", "Resume" },
+		{ "HK_OPTIONS", "Options" },
+		{ "HK_TAB_SOUND", "{hot}Sound" },
+		{ "HK_TAB_SCREEN", "S{hot}creen" },
+		{ "HK_TAB_DISPLAY", "{hot}Display" },
+		{ "HK_TAB_CONTROLS", "{hot}Controls" },
+		{ "HK_KEYBOARD", "{hot}Keyboard" },
+		{ "HK_MOUSE", "{hot}Mouse" },
+	};
+	opennova::rtxt::File table;
+	table.sections.push_back({ opennova::menu::kMenuTextSection, 0 });
+	for (const auto &row : rows) {
+		opennova::rtxt::Entry e;
+		e.key = row[0];
+		e.text = row[1];
+		e.section_index = 0;
+		table.entries.push_back(e);
+		++table.sections[0].string_count;
+	}
+	std::vector<uint8_t> bytes;
+	std::string error;
+	opennova::rtxt::write(table, bytes, error);
+	return bytes;
+}
+
 } // namespace
 
 int main() {
-	const std::string root = retail::assets();
-	std::map<std::string, std::string> files; // lowercased name -> path
-	std::vector<std::string> menus;
-	std::error_code ec;
-	if (!root.empty()) {
-		for (const auto &entry : std::filesystem::directory_iterator(root, ec)) {
-			if (!entry.is_regular_file(ec)) continue;
-			const std::string name = entry.path().filename().string();
-			files[retail::lower_ascii(name)] = entry.path().generic_string();
-			if (name.size() > 4 && retail::lower_ascii(name.substr(name.size() - 4)) == ".mnu")
-				menus.push_back(entry.path().generic_string());
+	const std::string path = repo_menus::path("fixtures/mnu/hotkeys.mnu");
+	const std::vector<uint8_t> menutxt = minted_menutxt();
+	const Reader read = [&path, &menutxt](const std::string &name, std::vector<uint8_t> &out) {
+		const std::string file = repo_menus::lower(std::filesystem::path(name).filename().string());
+		if (file == "menutxt.bin") {
+			out = menutxt;
+			return true;
 		}
+		return file == "hotkeys.mnu" && test_io::read_file(path, out);
+	};
+	opennova::mnu::Document menu;
+	std::string error;
+	if (menutxt.empty() || !opennova::mnu::parse_file(path, menu, error)) {
+		std::fprintf(stderr, "fixtures/mnu/hotkeys.mnu or its minted table does not read: %s\n", error.c_str());
+		return 1;
 	}
-	if (menus.empty() || files.count("menutxt.bin") == 0)
-		return retail::skip("OPENNOVA_JO_ASSETS/*.mnu and menutxt.bin (the grill's census corpus)");
-	std::sort(menus.begin(), menus.end());
-	const Reader read = [&files](const std::string &name, std::vector<uint8_t> &out) {
-		const auto found = files.find(retail::lower_ascii(std::filesystem::path(name).filename().string()));
-		return found != files.end() && test_io::read_file(found->second, out);
-	};
-	const auto path_of = [&files](const char *name) {
-		const auto found = files.find(retail::lower_ascii(name));
-		return found != files.end() ? found->second : std::string();
-	};
 
 	// The hotkey tables of every screen: the radio mnemonics, and the VK_ENTER rows.
-	std::printf("the census corpus's hotkey tables (%s):\n", root.c_str());
-	int radio_rows = 0;
+	std::printf("hotkeys.mnu's hotkey tables:\n");
+	std::vector<std::string> radio_rows;
+	int enter_sources = 0;
 	int enter_widgets = 0;
 	int enter_rows = 0;
-	for (const std::string &path : menus) {
-		opennova::mnu::Document doc;
-		std::string error;
-		if (!opennova::mnu::parse_file(path, doc, error)) {
-			expect(false, path + " parses");
+	for (const opennova::mnu::Screen &screen : menu.screens) {
+		Session s;
+		if (!s.open(path, screen.name, read)) {
+			expect(false, "hotkeys.mnu " + screen.name + " opens");
 			continue;
 		}
-		for (const opennova::mnu::Screen &screen : doc.screens) {
-			Session s;
-			if (!s.open(path, screen.name, read)) {
-				expect(false, path + " " + screen.name + " opens");
-				continue;
-			}
-			std::string line;
-			for (const opennova::menu::MenuHotkeyRow &row : s.rt.hotkey_rows()) {
-				const opennova::mnu::Window *w = s.rt.index().window(row.id);
-				if (w == nullptr) continue;
-				line += " " + w->name + (row.virtual_key ? "=vk" + std::to_string(row.key) : "='" +
-								std::string(1, static_cast<char>(row.key)) + "'");
-				if (!row.virtual_key && w->type == opennova::mnu::WindowType::Radio) ++radio_rows;
-			}
-			for (int id : s.rt.current_screen_ids()) {
-				const opennova::mnu::Window *w = s.rt.index().window(id);
-				bool authors_enter = false;
-				for (const opennova::mnu::Hotkey &hk : w->hotkeys)
-					if (hk.virtual_key && iequals(hk.value, "VK_ENTER")) authors_enter = true;
-				if (!authors_enter) continue;
-				++enter_widgets;
-				for (const opennova::menu::MenuHotkeyRow &row : s.rt.hotkey_rows())
-					if (row.id == id && row.virtual_key) ++enter_rows;
-			}
-			std::printf("  %-12s %-18s%s\n", std::filesystem::path(path).filename().string().c_str(),
-					screen.name.c_str(), line.c_str());
+		std::string line;
+		for (const opennova::menu::MenuHotkeyRow &row : s.rt.hotkey_rows()) {
+			const opennova::mnu::Window *w = s.rt.index().window(row.id);
+			if (w == nullptr) continue;
+			line += " " + w->name + (row.virtual_key ? "=vk" + std::to_string(row.key) : "='" +
+							std::string(1, static_cast<char>(row.key)) + "'");
+			if (!row.virtual_key && w->type == opennova::mnu::WindowType::Radio)
+				radio_rows.push_back(screen.name + "/" + w->name + "='" + std::string(1, static_cast<char>(row.key)) + "'");
 		}
+		for (int id : s.rt.current_screen_ids()) {
+			const opennova::mnu::Window *w = s.rt.index().window(id);
+			bool authors_enter = false;
+			for (const opennova::mnu::Hotkey &hk : w->hotkeys)
+				if (hk.virtual_key && iequals(hk.value, "VK_ENTER")) authors_enter = true;
+			if ((screen.name == "KIT" && w->name == "ACCEPT") || w->name == "MARKER_OK") ++enter_sources;
+			if (!authors_enter) continue;
+			++enter_widgets;
+			for (const opennova::menu::MenuHotkeyRow &row : s.rt.hotkey_rows())
+				if (row.id == id && row.virtual_key) ++enter_rows;
+		}
+		std::printf("  %-10s%s\n", screen.name.c_str(), line.c_str());
 	}
-	std::printf("  radio mnemonic rows %d (grill: 18); widgets authoring VK_ENTER %d, their rows %d\n",
-			radio_rows, enter_widgets, enter_rows);
-	expect(radio_rows == 18, "the 18 shipped RADIO tab labels register their {hot} letter");
-	// VK_ENTER is key 0 (cmap WPNAME_OK, loadout ACCEPT), which registers nothing: the reader leaves it out.
-	expect(enter_widgets == 0 && enter_rows == 0, "VK_ENTER registers nothing (cmap WPNAME_OK, loadout ACCEPT)");
+	// The six {hot} tab labels (SETTINGS's two, PAUSE's two tabs and two device radios), each
+	// its letter; the side radios' labels carry no marker and register nothing.
+	const std::vector<std::string> expected_radios = { "SETTINGS/RADIO_TAB_SOUND='S'", "SETTINGS/RADIO_TAB_SCREEN='c'",
+		"PAUSE/RADIO_TAB_DISPLAY='D'", "PAUSE/RADIO_TAB_CONTROLS='C'", "PAUSE/KEYBOARD='K'", "PAUSE/MOUSE='M'" };
+	expect(radio_rows == expected_radios, "the {hot} RADIO labels register their letter, a label with none nothing");
+	// VK_ENTER is key 0 (the shipped cmap WPNAME_OK and loadout ACCEPT; here KIT's ACCEPT and
+	// MARKER_OK), which registers nothing: the reader leaves it out.
+	expect(enter_sources == 2, "the two VK_ENTER buttons are on their screens");
+	expect(enter_widgets == 0 && enter_rows == 0, "VK_ENTER registers nothing (KIT ACCEPT, MARKER_OK)");
 
-	// (a) Enter on the loadout screen reaches no ACCEPT.
+	// (a) Enter on the kit screen reaches no ACCEPT.
 	{
 		Session s;
-		expect(s.open(path_of("loadout.mnu"), "LOADOUT", read), "loadout.mnu opens");
-		expect(!s.rt.handle_key(vk(13)) && s.activated().empty(), "loadout: Enter fires nothing");
-		expect(s.rt.handle_key(vk(27)) && s.activated() == std::vector<std::string>{ "BACK" },
-				"loadout: ESC is BACK's");
+		expect(s.open(path, "KIT", read), "KIT opens");
+		expect(!s.rt.handle_key(vk(13)) && s.activated().empty(), "kit: Enter fires nothing");
+		expect(s.rt.handle_key(vk(27)) && s.activated() == std::vector<std::string>{ "BACK" }, "kit: ESC is BACK's");
 	}
-	// (b) A tab's letter selects it: options.mnu's and game.mnu's tabs.
-	for (const char *file : { "options.mnu", "game.mnu", "mp.mnu" }) {
-		opennova::mnu::Document doc;
-		std::string error;
-		opennova::mnu::parse_file(path_of(file), doc, error);
-		for (const opennova::mnu::Screen &screen : doc.screens) {
-			Session probe;
-			if (!probe.open(path_of(file), screen.name, read)) continue;
-			for (const opennova::menu::MenuHotkeyRow &row : probe.rt.hotkey_rows()) {
-				const opennova::mnu::Window *w = probe.rt.index().window(row.id);
-				if (row.virtual_key || w == nullptr || w->type != opennova::mnu::WindowType::Radio) continue;
-				Session s;
-				s.open(path_of(file), screen.name, read);
-				// Reach the tab the way a player does, through the authored actions: the
-				// pause menu's OPTIONS button, then the CONTROLS tab for the device radios.
-				const bool device = w->name == "KEYBOARD" || w->name == "MOUSE" || w->name == "JOYSTICK";
-				if (std::string(file) == "game.mnu") s.rt.activate(s.rt.widget_id("OPTIONS"));
-				if (device) s.rt.activate(s.rt.widget_id("RADIO_TAB_CONTROLS"));
-				s.events.clear();
-				const bool fired = s.rt.handle_key(typed(row.key));
-				const std::vector<std::string> got = s.activated();
-				const bool selected = fired && !got.empty() && got.front() == w->name && s.rt.is_widget_checked(row.id);
-				std::printf("  %-12s %-10s '%c' -> %s\n", file, w->name.c_str(), static_cast<char>(row.key),
-						got.empty() ? "(nothing)" : got.front().c_str());
-				expect(selected, std::string(file) + " " + w->name + ": its letter selects it");
-			}
+	// (b) A tab's letter selects it, reached the way a player reaches it: PAUSE's OPTIONS button
+	// first, then its CONTROLS tab for the device radios.
+	for (const char *screen_name : { "SETTINGS", "PAUSE" }) {
+		Session probe;
+		if (!probe.open(path, screen_name, read)) continue;
+		for (const opennova::menu::MenuHotkeyRow &row : probe.rt.hotkey_rows()) {
+			const opennova::mnu::Window *w = probe.rt.index().window(row.id);
+			if (row.virtual_key || w == nullptr || w->type != opennova::mnu::WindowType::Radio) continue;
+			Session s;
+			s.open(path, screen_name, read);
+			const bool device = w->name == "KEYBOARD" || w->name == "MOUSE";
+			if (std::string(screen_name) == "PAUSE") s.rt.activate(s.rt.widget_id("OPTIONS"));
+			if (device) s.rt.activate(s.rt.widget_id("RADIO_TAB_CONTROLS"));
+			s.events.clear();
+			const bool fired = s.rt.handle_key(typed(row.key));
+			const std::vector<std::string> got = s.activated();
+			const bool selected = fired && !got.empty() && got.front() == w->name && s.rt.is_widget_checked(row.id);
+			std::printf("  %-10s %-18s '%c' -> %s\n", screen_name, w->name.c_str(), static_cast<char>(row.key),
+					got.empty() ? "(nothing)" : got.front().c_str());
+			expect(selected, std::string(screen_name) + " " + w->name + ": its letter selects it");
 		}
 	}
-	// (c) + (e) cmap.mnu: the popup gate, and ESC with the edit focused.
+	// A device radio's letter does nothing while its tab is hidden.
 	{
 		Session s;
-		expect(s.open(path_of("cmap.mnu"), "CMAP", read), "cmap.mnu opens");
-		expect(s.rt.handle_key(typed('=')) && s.activated() == std::vector<std::string>{ "ZOOMIN" },
-				"cmap: '=' is ZOOMIN's with the dialog closed");
+		expect(s.open(path, "PAUSE", read), "PAUSE opens");
+		s.rt.activate(s.rt.widget_id("OPTIONS"));
 		s.events.clear();
-		expect(s.show("WAYPOINTNAME_DLG") && s.rt.open_popup() == s.rt.widget_id("WAYPOINTNAME_DLG"),
-				"cmap: the MODAL dialog opens the popup");
-		expect(!s.rt.handle_key(typed('=')) && s.activated().empty(), "cmap: '=' is shut out by the popup");
-		expect(!s.rt.handle_key(vk(13)) && s.activated().empty(), "cmap: Enter reaches no VK_ENTER WPNAME_OK");
-		s.rt.focus_edit(s.rt.widget_id("WPNAME"));
+		expect(!s.rt.handle_key(typed('K')) && s.activated().empty(), "pause: a hidden tab's radio answers no letter");
+	}
+	// (c) + (e) MAPVIEW: the popup gate, and ESC with the edit focused.
+	{
+		Session s;
+		expect(s.open(path, "MAPVIEW", read), "MAPVIEW opens");
+		expect(s.rt.handle_key(typed('=')) && s.activated() == std::vector<std::string>{ "ZOOMIN" },
+				"mapview: '=' is ZOOMIN's with the dialog closed");
+		s.events.clear();
+		expect(s.show("MARKER_DLG") && s.rt.open_popup() == s.rt.widget_id("MARKER_DLG"),
+				"mapview: the MODAL dialog opens the popup");
+		expect(!s.rt.handle_key(typed('=')) && s.activated().empty(), "mapview: '=' is shut out by the popup");
+		expect(!s.rt.handle_key(vk(13)) && s.activated().empty(), "mapview: Enter reaches no VK_ENTER MARKER_OK");
+		s.rt.focus_edit(s.rt.widget_id("MARKER_NAME"));
 		expect(s.rt.handle_key(vk(27)) && s.activated().empty() &&
-						s.rt.focused_widget() == s.rt.widget_id("WPNAME"),
-				"cmap: ESC with WPNAME focused does nothing");
-		s.show("WAYPOINTNAME_DLG"); // a WINDOW row drops the focus
-		expect(s.rt.focused_widget() == -1, "cmap: the focus dropped");
-		expect(s.rt.handle_key(vk(27)) && s.activated() == std::vector<std::string>{ "WPNAME_CANCEL" },
-				"cmap: ESC is WPNAME_CANCEL's, the OK outside the popup is shut out");
+						s.rt.focused_widget() == s.rt.widget_id("MARKER_NAME"),
+				"mapview: ESC with MARKER_NAME focused does nothing");
+		s.show("MARKER_DLG"); // a WINDOW row drops the focus
+		expect(s.rt.focused_widget() == -1, "mapview: the focus dropped");
+		expect(s.rt.handle_key(vk(27)) && s.activated() == std::vector<std::string>{ "MARKER_CANCEL" },
+				"mapview: ESC is MARKER_CANCEL's, the CLOSE outside the popup is shut out");
 	}
 	// (d) Enter in an edit commits, then presses the VK_RETURN button.
 	{
 		Session s;
-		expect(s.open(path_of("player.mnu"), "PLAYER_INFO", read), "player.mnu opens");
-		s.rt.focus_edit(s.rt.widget_id("PLAYERNAME"));
-		expect(s.rt.handle_key(vk(13)) && s.rt.focused_widget() == -1, "player: Enter commits PLAYERNAME");
+		expect(s.open(path, "PROFILE", read), "PROFILE opens");
+		s.rt.focus_edit(s.rt.widget_id("CALLSIGN"));
+		expect(s.rt.handle_key(vk(13)) && s.rt.focused_widget() == -1, "profile: Enter commits CALLSIGN");
 		int activated = -1;
 		int requested = -1;
 		for (size_t i = 0; i < s.events.size(); ++i) {
@@ -349,17 +379,17 @@ int main() {
 				requested = static_cast<int>(i);
 		}
 		expect(activated >= 0 && requested > activated,
-				"player: ACCEPT fires, and its jump to main.mnu STARTUP follows its callbacks");
+				"profile: ACCEPT fires, and its jump to main.mnu STARTUP follows its callbacks");
 	}
 	for (const char *password : { "GAME_PASSWORD", "TEAM_PASSWORD" }) {
 		Session s;
-		expect(s.open(path_of("PRE.MNU"), "PRE_GAME_MENU", read), "PRE.MNU opens");
+		expect(s.open(path, "PREGAME", read), "PREGAME opens");
 		s.show(std::string(password) == "GAME_PASSWORD" ? "GAME_PASSWORD_WRAPPER" : "TEAM_PASSWORD_WRAPPER");
 		s.show("ABORTRETRY_WRAPPER");
 		s.rt.focus_edit(s.rt.widget_id(password));
-		expect(s.rt.focused_widget() == s.rt.widget_id(password), std::string("PRE: ") + password + " focuses");
+		expect(s.rt.focused_widget() == s.rt.widget_id(password), std::string("pregame: ") + password + " focuses");
 		expect(s.rt.handle_key(vk(13)) && s.activated() == std::vector<std::string>{ "ACCEPT" },
-				std::string("PRE: Enter in ") + password + " commits and presses ACCEPT");
+				std::string("pregame: Enter in ") + password + " commits and presses ACCEPT");
 	}
 	if (failures != 0) {
 		std::fprintf(stderr, "\n%d check(s) FAILED\n", failures);

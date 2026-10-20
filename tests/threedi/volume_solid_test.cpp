@@ -72,6 +72,51 @@ int box_planes_make_the_box() {
 	return 0;
 }
 
+// Two forms the shipped volumes take (the retired editor_model_collision_retail sweep reached
+// them; 2026-10-19): a corner chamfered by under a millimetre, whose two corners on the top facet
+// straddle the facet's winding seam (they sort first and last and collapse to one), and a ladder
+// of no thickness, whose facing (plane 0) is all it keeps.
+int chamfer_and_flat_ladder() {
+	// The box -1..1 x -1..1 x 0..1 with its (-1, -1) edge cut by a plane 0.5 mm in, square to
+	// the diagonal.
+	ThreediBoundingPlane planes[7] = {};
+	const float n[7][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+		{-0.70710677f, -0.70710677f, 0}};
+	const float d[7] = {-1, -1, -1, -1, -1, 0, -0.70710677f * (2.0f - 0.0005f)};
+	for (int i = 0; i < 7; ++i) {
+		std::copy(n[i], n[i] + 3, planes[i].normal);
+		planes[i].radius = d[i];
+	}
+	const auto polygons = threedi_volume_polygons(planes, 7, false);
+	// The top facet keeps the cut corner once: the 0.5 mm pair is one cluster across the seam.
+	size_t top_corners = 0;
+	for (const auto &polygon : polygons) {
+		bool top = true;
+		for (const ThreediBuildVec3 &p : polygon) top = top && std::fabs(p.z - 1.0) < 1e-6;
+		if (top) top_corners = polygon.size();
+	}
+	TEST_EXPECT(top_corners == 4);
+	// A ladder of no thickness: facing +x and -x at x = 0, bounded in y and z. Its side planes
+	// hold no area, so it bounds no solid and keeps its facing alone.
+	ThreediBoundingPlane ladder[6] = {};
+	const float ln[6][3] = {{1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {-1, 0, 0}};
+	const float ld[6] = {0, -0.5f, -0.5f, -3, 0, 0};
+	for (int i = 0; i < 6; ++i) {
+		std::copy(ln[i], ln[i] + 3, ladder[i].normal);
+		ladder[i].radius = ld[i];
+	}
+	const auto facing = threedi_volume_polygons(ladder, 6, true);
+	TEST_EXPECT(facing.size() == 1 && facing[0].size() == 4);
+	for (const ThreediBuildVec3 &p : facing.empty() ? std::vector<ThreediBuildVec3>{} : facing[0])
+		TEST_EXPECT(std::fabs(p.x) < 1e-6);
+	TEST_EXPECT(threedi_volume_polygons(ladder, 6, false).empty());
+	std::printf("volumes: a sub-millimetre chamfer collapses across the seam; a flat ladder keeps its facing\n");
+	return 0;
+}
+
 } // namespace
 
-int main() { return box_planes_make_the_box(); }
+int main() {
+	if (box_planes_make_the_box() != 0) return 1;
+	return chamfer_and_flat_ladder();
+}

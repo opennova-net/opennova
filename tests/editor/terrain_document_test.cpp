@@ -4,9 +4,9 @@
 // than written as the file's source findings, the gate's refusal and the inert definitions as findings with
 // fixes; its references the graph's edges through the document; the missions that run on it and the import
 // that makes it (session/terrain_uses, the terrain_uses query); an authored terrain edited, followed, undone
-// and saved; an import's terrain opened and every edit of it refused (document.imported), its Reimport. The
-// retail leg (OPENNOVA_JO_DIR): every .trn of the install read through the document and written again reads
-// back as the same terrain, field for field, and a second save writes the same bytes.
+// and saved; an import's terrain opened and every edit of it refused (document.imported), its Reimport. A
+// terrain in each layout the shipped ones take, and every .trn fixture, read through the document and written
+// again reads back as the same terrain, field for field, and a second save writes the same bytes.
 #include <algorithm>
 #include <cstdio>
 #include <sstream>
@@ -14,7 +14,6 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
@@ -33,8 +32,8 @@
 #include <formats/trn/trn_io.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -684,69 +683,192 @@ int test_session() {
 	return 0;
 }
 
-// Every .trn of the install through the document and written again: the same terrain, field for field, and a
-// second save writes the same bytes.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (every retail .trn through the terrain document)");
-		return 0;
+// A terrain in the layouts the shipped ones take (the census of JO:CA's 30 .trn), each a construct the reader and the
+// writer meet there: keys and values apart by tabs and spaces both, a tab or a space before the name, comments at the
+// margin, behind a value and behind a tab, "//" lines, a creator's quoted name with a slash and a leading space, a
+// 16-sector grid of 16-cell rows, a row with stray spaces among its tabs, a row behind its own comment, locks apart
+// by tabs, an origin of 4, both wraps, densities of 256 and 16, a murk of 1.0 (past 0.99: the one source issue), an
+// attrib behind tabs, an "end" behind a tab, and a last line of tabs and spaces with no line end (18 of the 30 end so).
+const char *const kTabbed =
+		"terrain_name     \"Atoll\"\r\n"
+		"terrain_creator  \" Jo Ann/ Someone\"\r\n"
+		"\r\n"
+		";terrain values\r\n"
+		"water_height     0          ;default, if zero will take from mission\r\n"
+		"// the maps\r\n"
+		"polytrn_colormap    \tAtoll_c.tga\r\n"
+		"polytrn_detailmap    \t Det_d2.tga\r\n"
+		"polytrn_detailmap_c1     Det_dgc2.tga\t; colour grass\r\n"
+		"polytrn_detailmap_c2     Det_ddc3.tga\t; colour dirt\r\n"
+		"polytrn_detailmap_c3     Det_mr3.tga\t; colour rocks\t\r\n"
+		"polytrn_detailmap2       Det_d2d.tga\t; grey distance detail map\r\n"
+		"polytrn_detailmapdist    Detdrt3b.tga\t; base detail map\r\n"
+		"polytrn_polydata     \tAtoll.cpt\r\n"
+		"polytrn_tilestrip   \ttrntile11.tga\r\n"
+		"polytrn_charmap     \tAtoll_m.pcx\r\n"
+		"polytrn_foliagemap  \tAtoll_f.pcx\r\n"
+		"polytrn_detailblendmap   Atoll_d1.tga\r\n"
+		"water_rgb \t\t 90,70,40\r\n"
+		"water_murk  \t\t 1.0\r\n"
+		"polytrn_detaildensity           256\r\n"
+		"polytrn_detaildensity2          16\r\n"
+		"// the grid\r\n"
+		"polytrn_sectorcount\t\t16                   ; width of sectors\r\n"
+		"polytrn_wrapx\t\t\t1                   ; do we wrap on X?\r\n"
+		"polytrn_wrapy\t\t\t1                   ; do we wrap on Y?\r\n"
+		"polytrn_origin\t\t\t4\t4           ; move terrain origin by this amount (X,Y)  \r\n"
+		"polytrn_sectors\t\t\t4\t4\t4\t4\t1\t0\t0\t0\t0\t0\t0\t3\t4\t4\t4\t4; width here must match above\r\n"
+		"polytrn_sectors\t\t\t4\t4\t4\t1\t0\t0\t0\t0\t0\t0\t0\t0\t3\t4\t4\t4\r\n"
+		"polytrn_sectors\t\t\t4\t4\t1\t0\t0\t2 \t1\t2       4\t0\t0\t0\t0\t3\t4\t4\r\n"
+		"polytrn_sectors\t\t\t4\t1\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t3\t4\r\n"
+		"polytrn_sectors\t\t\t1\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t3\r\n"
+		"polytrn_sectors\t\t\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\r\n"
+		"polytrn_sectors\t\t\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\r\n"
+		"polytrn_sectors\t\t\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\r\n"
+		"polytrn_sectors\t\t\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\r\n"
+		"polytrn_sectors\t\t\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\r\n"
+		"polytrn_sectors\t\t\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\r\n"
+		"polytrn_sectors\t\t\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\r\n"
+		"polytrn_sectors\t\t\t2\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t1\r\n"
+		"polytrn_sectors\t\t\t4\t2\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t1\t4\r\n"
+		"polytrn_sectors\t\t\t4\t4\t2\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t1\t4\t4\r\n"
+		"polytrn_sectors\t\t\t4\t4\t4\t2\t0\t0\t0\t0\t0\t0\t0\t0\t1\t4\t4\t4; width here must match above\r\n"
+		"lock_topleft\t\t0\t0\r\n"
+		"lock_topright\t\t1\t0\r\n"
+		"lock_bottomleft\t        0\t0\r\n"
+		"lock_bottomright\t       \t0\t0\r\n"
+		"\r\n"
+		"foliage\r\n"
+		"  graphic         fern1.3di                 ; the 3DI to place - few verts\r\n"
+		"  color_lower     0                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  color_upper     1                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  match           254                       ; a code of the foliage map\r\n"
+		"  attrib\t  shadow\t\t\r\n"
+		"end\t\r\n"
+		"\r\n"
+		"foliage\r\n"
+		"  graphic         fern2.3di                 ; the 3DI to place - few verts\r\n"
+		"  color_lower     0                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  color_upper     2                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  match           253                       ; a code of the foliage map\r\n"
+		"  attrib     shadow \r\n"
+		"end\r\n"
+		"\r\n"
+		"foliage\r\n"
+		"  graphic         reed1.3di                 ; the 3DI to place - few verts\r\n"
+		"  color_lower     0                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  color_upper     2                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  match           252                       ; a code of the foliage map\r\n"
+		"  attrib\t  shadow\r\n"
+		"end\r\n"
+		"\r\n"
+		"\t\t\t    ";
+
+// The one terrain that names no second detail map, no splat detail, no blend map and no second density (Dvxg5b.trn's
+// key set): an 8-sector grid apart by tabs, locks apart by spaces, an origin of -8, a murk with no leading zero (.85),
+// a colour with no tab, two foliage blocks, and a last line that is a comment with no line end. No source issue.
+const char *const kBare =
+		"terrain_name     \"Spit\"\r\n"
+		"terrain_creator  \"Someone/Else\"\r\n"
+		"\r\n"
+		"water_height     27         ;default, if zero will take from mission\r\n"
+		"polytrn_colormap         spit_c.tga\r\n"
+		"polytrn_detailmap        Det_d6.tga\r\n"
+		"polytrn_detailmapdist    Det_m2b.tga\r\n"
+		"polytrn_polydata         spit.cpt\r\n"
+		"polytrn_tilestrip       trntile10.tga\r\n"
+		"polytrn_charmap          spit_m.pcx\r\n"
+		"polytrn_foliagemap       spit_f.pcx\r\n"
+		"water_rgb 86,89,61\r\n"
+		"water_murk  .85\r\n"
+		"polytrn_detaildensity           128\r\n"
+		"polytrn_sectorcount\t\t8                   ; width of sectors\r\n"
+		"polytrn_wrapx\t\t\t0                   ; do we wrap on X?\r\n"
+		"polytrn_wrapy\t\t\t0                   ; do we wrap on Y?\r\n"
+		"polytrn_origin\t\t\t-8\t-8           ; move terrain origin by this amount (X,Y)  \r\n"
+		"polytrn_sectors\t\t\t0\t0\t1\t3\t3\t3\t3\t3 ; width here must match above\r\n"
+		"polytrn_sectors\t\t\t0\t1\t3\t3\t3\t3\t3\t3\r\n"
+		"polytrn_sectors\t\t\t1\t3\t3\t3\t3\t3\t3\t3\r\n"
+		"polytrn_sectors\t\t\t1\t3\t3\t3\t3\t3\t3\t3\r\n"
+		"polytrn_sectors\t\t\t1\t3\t3\t3\t3\t3\t3\t3\r\n"
+		"polytrn_sectors\t\t\t1\t3\t3\t3\t3\t3\t3\t3\r\n"
+		"polytrn_sectors\t\t\t0\t1\t3\t3\t3\t3\t3\t3\r\n"
+		"polytrn_sectors\t\t\t0\t0\t1\t3\t3\t3\t3\t3 ; width here must match above\r\n"
+		"lock_topleft      0 1\r\n"
+		"lock_topright     0 1\r\n"
+		"lock_bottomleft   1 1\r\n"
+		"lock_bottomright  1 1\r\n"
+		"\r\n"
+		"foliage\r\n"
+		"  graphic         bush2.3di                 ; the 3DI to place - few verts\r\n"
+		"  color_lower     0                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  color_upper     2                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  match           254                       ; a code of the foliage map\r\n"
+		"  attrib     shadow\r\n"
+		"end\r\n"
+		"foliage\r\n"
+		"  graphic         bush3.3di                 ; the 3DI to place - few verts\r\n"
+		"  color_lower     0                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  color_upper     2                         ; 0=match ground  1=50% blend  2=retain full color\r\n"
+		"  match           253                       ; a code of the foliage map\r\n"
+		"  attrib     shadow\r\n"
+		"end\r\n"
+		"\r\n"
+		";bush4    \"a bush for the dunes\"    ";
+
+// What every shipped terrain holds: read through the document, not blocked and not refused, written
+// again it reads back as the same terrain, field for field (the grid extended as the gate's last leg extends it), and
+// a second save writes the same bytes with no source issue. `issue` the one source issue it is to have ("" none).
+bool written_again_field_for_field(const std::string &name, const std::string &original, const char *issue) {
+	auto document = load(original, name);
+	if (!document || document->blocked() || !document->refused().empty() || !document->config()) {
+		std::fprintf(stderr, "FAIL: %s: %s\n", name.c_str(), !document ? "does not load" : document->blocked() ? "blocked" : "refused");
+		return false;
 	}
-	opennova::Vfs vfs;
-	TEST_EXPECT(vfs.mount_game(install.c_str(), std::string(), opennova::VfsMountMode::Packed));
-	size_t files = 0, issues = 0, blocked = 0, refused = 0, inert = 0;
-	for (const auto &location : vfs.list_files()) {
-		const std::string &name = location.logical_name;
-		if (name.size() < 4) continue;
-		std::string extension = name.substr(name.size() - 4);
-		std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-		if (extension != ".trn") continue;
-		std::vector<uint8_t> bytes;
-		if (!vfs.read_file_raw(name, bytes) || bytes.empty()) continue;
-		++files;
-		auto document = std::make_unique<TerrainDocument>();
-		Diagnostic error;
-		TEST_EXPECT(document->load_bytes(bytes, name, AssetKind::Terrain, "jo", error));
-		issues += document->issues().size();
-		for (const SourceIssue &issue : document->issues())
-			std::printf("  %s line %zu: %s\n", name.c_str(), issue.line, issue.message.c_str());
-		if (document->blocked()) {
-			++blocked;
-			continue;
-		}
-		refused += !document->refused().empty();
-		for (const Diagnostic &d : validate_terrain_file(*document)) inert += d.code() == "terrain.foliage_inert";
-		const TrnConfig *held = document->config();
-		TEST_EXPECT(held != nullptr);
-		if (!held) continue;
-		const SerializeResult written = document->serialize();
-		TEST_EXPECT(written.ok());
-		// What the game reads of the original, the grid extended as its gate's last leg extends it.
-		const std::string original(bytes.begin(), bytes.end());
-		const std::string difference = config_difference(parsed(original), parsed(written.text));
-		if (!difference.empty()) std::fprintf(stderr, "FAIL: %s: %s reads back otherwise\n", name.c_str(), difference.c_str());
-		TEST_EXPECT(difference.empty());
-		auto again = std::make_unique<TerrainDocument>();
-		TEST_EXPECT(again->load_bytes(bytes_of(written.text), name, AssetKind::Terrain, "jo", error) &&
-		            again->serialize().text == written.text && again->issues().empty());
+	const bool issues_as_said = issue ? document->issues().size() == 1 && document->issues()[0].message.find(issue) != std::string::npos
+	                                  : true;
+	for (const SourceIssue &each : document->issues()) std::printf("  %s line %zu: %s\n", name.c_str(), each.line, each.message.c_str());
+	const SerializeResult written = document->serialize();
+	const std::string difference = written.ok() ? config_difference(parsed(original), parsed(written.text)) : "unwritable";
+	if (!difference.empty()) std::fprintf(stderr, "FAIL: %s: %s reads back otherwise\n", name.c_str(), difference.c_str());
+	auto again = load(written.text, name);
+	const bool fixed = again && again->serialize().text == written.text && again->issues().empty();
+	if (!fixed) std::fprintf(stderr, "FAIL: %s: a second save writes otherwise\n", name.c_str());
+	if (!issues_as_said) std::fprintf(stderr, "FAIL: %s: not the one source issue '%s'\n", name.c_str(), issue);
+	return difference.empty() && fixed && issues_as_said;
+}
+
+// The shipped layouts above, the .trn line forms the format's tests read (fixtures/terrain/forms, authored after the
+// same census) and master's Tmap.trn: each written again field for field. A fixture missing fails.
+int test_shipped_layouts(const std::string &repo) {
+	TEST_EXPECT(written_again_field_for_field("atoll.trn", kTabbed, "0.99"));
+	TEST_EXPECT(written_again_field_for_field("spit.trn", kBare, nullptr));
+	// The last line "end" with no line end (two of the 30): read "en", the block left open and kept, its end written.
+	std::string cut = kBare;
+	cut = cut.substr(0, cut.rfind("end\r\n") + 3);
+	TEST_EXPECT(written_again_field_for_field("cay.trn", cut, "no line end"));
+	size_t files = 0;
+	for (const char *file : {"fixtures/terrain/forms/line_forms8.trn", "fixtures/terrain/forms/line_forms16.trn",
+	                         "fixtures/terrain/tmap/Tmap.trn"}) {
+		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
+		if (bytes.empty()) std::fprintf(stderr, "FAIL: %s: missing\n", file);
+		files += !bytes.empty() && written_again_field_for_field(file, std::string(bytes.begin(), bytes.end()), nullptr) ? 1 : 0;
 	}
-	std::printf("retail: %zu terrains read and written again field for field (%zu source issues, %zu blocked, %zu "
-	            "refused, %zu inert definitions)\n",
-	            files, issues, blocked, refused, inert);
-	TEST_EXPECT(files >= 30 && blocked == 0 && refused == 0);
+	TEST_EXPECT(files == 3);
+	std::printf("shipped layouts: each layout the shipped terrains take and each .trn fixture written again field for field\n");
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
+	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_type();
 	failures += test_document();
 	failures += test_source_issues();
 	failures += test_findings();
 	failures += test_session();
-	failures += test_retail();
+	failures += test_shipped_layouts(repo);
 	if (failures == 0) std::printf("editor_terrain_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

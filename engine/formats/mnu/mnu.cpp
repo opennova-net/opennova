@@ -1206,6 +1206,8 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (seen == frame.seen.end()) {
         frame.seen["ORIENTATION"] = &child;
         w.orientation = decided(child);
+        if (w.orientation.empty()) // only HORIZONTAL sets anything [orig: @ 0x64c745]
+          text_notes_[&child] = "Only HORIZONTAL sets ORIENTATION in retail; left out.";
       } else if (mnu_xml::iequals(child.text, kHorizontalOrientation) &&
                  !mnu_xml::iequals(seen->second->text, kHorizontalOrientation)) {
         seen->second->read = false;

@@ -1086,5 +1086,71 @@ func test_stamped_body_channels_pose_their_served_ring_entries() -> void:
 
 # The native pose_skeleton batch (one call per model per frame) must write the
 # exact bone poses the script-side eval_pose loop wrote before it existed —
-# the equivalence seam for the present-pass hot path. Asset-gated: needs the
-# retail PFF mount for a real .adm/.bad rig (M82_1st, the adm_dump_probe rig).
+# the equivalence seam for the present-pass hot path. The rig is the minted
+# 19-bone person clip (fixtures/anim/rig19_idle.bad, the retail person rig
+# order: 16 = BN17 R Hand), which also reaches the BN17 collapse branch; the
+# retail witness this replaced posed M82_1st.adm's anim_reset.
+const RIG19_CLIP := "rig19_idle.bad"
+
+
+func test_pose_skeleton_matches_script_bone_loop() -> void:
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim")), OK)
+	var sk := SkeletalAnim.new()
+	assert_true(sk.load_from_bad_files(root, RIG19_CLIP, {"anim_reset": RIG19_CLIP}),
+			"the 19-bone clip binds: %s" % sk.get_last_error())
+	assert_true(sk.has_clip("anim_reset"), "the rig carries anim_reset")
+
+	var native_skel := Skeleton3D.new()
+	var script_skel := Skeleton3D.new()
+	add_child_autofree(native_skel)
+	add_child_autofree(script_skel)
+	var bones: Array = sk.get_skeleton_bones()
+	assert_eq(bones.size(), 19, "the person rig has nineteen bones")
+	for skel in [native_skel, script_skel]:
+		# Pose equivalence is indexed. Retail labels may contain ':' or '/',
+		# which Godot rejects; ObjectModel sanitizes them for the live rig.
+		for i in range(bones.size()):
+			(skel as Skeleton3D).add_bone("bone_%d" % i)
+		for i in range(bones.size()):
+			var b: Dictionary = bones[i]
+			var parent := int(b.get("parent_index", -1))
+			if parent >= 0:
+				(skel as Skeleton3D).set_bone_parent(i, parent)
+			(skel as Skeleton3D).set_bone_rest(i, b.get("rest", Transform3D()))
+
+	var playhead := 0.37
+	sk.pose_skeleton(native_skel, "anim_reset", playhead, 0,
+			PackedInt32Array(), [], "", 0.0, false)
+	var pose: Array = sk.eval_pose("anim_reset", playhead, 0)
+	var count: int = mini(pose.size(), script_skel.get_bone_count())
+	assert_gt(count, 16, "pose covers the rig through bone 16")
+	for i in range(count):
+		var t: Transform3D = pose[i]
+		script_skel.set_bone_pose_position(i, t.origin)
+		script_skel.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+		script_skel.set_bone_pose_scale(i, t.basis.get_scale())
+	for i in range(count):
+		var dp: float = native_skel.get_bone_pose_position(i).distance_to(
+				script_skel.get_bone_pose_position(i))
+		assert_lt(dp, 0.00001, "bone %d position matches" % i)
+		var qn: Quaternion = native_skel.get_bone_pose_rotation(i)
+		var qs: Quaternion = script_skel.get_bone_pose_rotation(i)
+		# godot-cpp's Basis->Quaternion conversion differs from core Godot's in
+		# branch selection at component boundaries (the same family as the
+		# Basis(axis, angle) divergence in godot/src/CLAUDE.md): the script
+		# loop ran core's math, pose_skeleton runs godot-cpp's. Observed max
+		# ~0.0007 rad on boundary bones — render-invisible; exactness across the
+		# boundary is unattainable by construction.
+		assert_lt(absf(qn.angle_to(qs)), 0.002, "bone %d rotation matches" % i)
+		var ds: float = native_skel.get_bone_pose_scale(i).distance_to(
+				script_skel.get_bone_pose_scale(i))
+		assert_lt(ds, 0.00001, "bone %d scale matches" % i)
+
+	# The BN17 collapse branch: zero scale, identity rotation, sampled origin.
+	sk.pose_skeleton(native_skel, "anim_reset", playhead, 0,
+			PackedInt32Array(), [], "", 0.0, true)
+	assert_eq(native_skel.get_bone_pose_scale(16), Vector3.ZERO,
+			"collapse_right_hand zero-scales bone 16")
+	assert_eq(native_skel.get_bone_pose_rotation(16), Quaternion.IDENTITY,
+			"collapse_right_hand clears bone 16 rotation")

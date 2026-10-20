@@ -2,9 +2,10 @@
 // writer (sbf_read_bank, sbf_write_bank): the minted synth_gamemus.sbf (tests/fixtures/minimal_sbf_gen.cpp) read and
 // written back byte for byte; a stream renamed, added, moved and removed, written and read back; the findings; a
 // stream decoded as the preview player sounds it; play_sound of a stream through a session (refused for a bank with
-// unsaved changes, a stream it has not); the blank. The retail leg (OPENNOVA_JO_DIR): every bank the install streams
-// (its own pair and each expansion's) through the document: saved at its size, the writer's form of the same streams
-// (the bytes the game never reads the writer's, S26), a fixed point.
+// unsaved changes, a stream it has not); the blank. Every bank of the variant set (the format's minted banks under
+// fixtures/sbf/, the chunks' never-read bytes NovaLogic's encoder left among them; our base game's pair and our
+// expansion's) through the document: saved at its size, the writer's form of the same streams (the bytes the game
+// never reads the writer's, S26, which the findings list), a fixed point.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/music_bank_document.h>
@@ -17,18 +18,16 @@
 #include <formats/sbf/sbf.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
-#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/menus_audio_fixtures.h"
 #include "editor/test_platform.h"
 
 using namespace opennova;
@@ -257,53 +256,71 @@ int test_script_plays_streams() {
 	return 0;
 }
 
-// Every bank the install streams through the document: saved at its size as the same streams, the bytes the game
-// never reads (a header word, a chunk's reserved pair and tail) the writer's, which the findings list (S26: the
-// writer writes its model alone); saved again, the same bytes.
-int test_retail() {
-	if (!retail::selected()) return 0;
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the music banks the install streams)");
-		return 0;
-	}
+// The bank the format's lane mints in the form NovaLogic's encoder left every shipped bank in
+// (tests/fixtures/minimal_sbf_gen.cpp): each chunk's never-read reserved pair one value a bank other than the
+// writer's, and each stream's last, partial chunk's never-read tail past its audio the encoder's reused buffer (the
+// previous chunk's bytes there, a one-chunk stream's zero) rather than the writer's.
+const char *const kStaleChunks = "fixtures/sbf/tool_bank.sbf";
+
+// Every bank of the variant set through the document: fixtures/sbf/'s (the format's minted banks), our base game's
+// pair (assets/) and our expansion's (expansions/onjo1/music/). Each saved at its size as the same streams, the bytes
+// the game never reads (a header word, a chunk's reserved pair and tail) the writer's, which the findings list (S26:
+// the writer writes its model alone), the stale-chunk bank's among them; saved again, the same bytes.
+int test_every_bank() {
+	std::vector<variant_fixtures::Input> inputs, more;
+	const bool all = variant_fixtures::inputs({"fixtures/sbf", "assets"}, ".sbf", {kStaleChunks}, inputs);
+	// The expansion's folder holds banks (each swept, or an unpulled LFS pointer skipped).
+	size_t unpulled = 0;
+	TEST_EXPECT(variant_fixtures::inputs({"expansions/onjo1/music"}, ".sbf", {}, more, &unpulled) &&
+	            more.size() + unpulled > 0);
+	inputs.insert(inputs.end(), more.begin(), more.end());
 	size_t banks = 0, streams = 0;
-	std::error_code ec;
-	for (const auto &entry : std::filesystem::recursive_directory_iterator(std::filesystem::u8path(install), ec)) {
-		std::string ext = entry.path().extension().u8string();
-		for (char &c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-		if (ext != ".sbf") continue;
-		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().u8string());
+	for (const variant_fixtures::Input &input : inputs) {
+		const std::vector<uint8_t> bytes = test_io::read_file(input.path);
 		MusicBankDocument bank;
 		Diagnostic error;
-		TEST_EXPECT(bank.load_bytes(bytes, entry.path().filename().u8string(), AssetKind::MusicBank, "jo", error));
+		const bool loaded = bank.load_bytes(bytes, input.label, AssetKind::MusicBank, "jo", error) && bank.bank_row();
+		if (!loaded) std::printf("  %s does not load: %s\n", input.label.c_str(), error.message.c_str());
+		TEST_EXPECT(loaded);
+		if (!loaded) continue;
 		TEST_EXPECT(std::none_of(bank.issues().begin(), bank.issues().end(), [](const SourceIssue &issue) { return issue.blocks; }));
 		const std::vector<uint8_t> written = saved(bank);
 		MusicBankDocument again;
-		TEST_EXPECT(written.size() == bytes.size() && load(again, written, error) && again.issues().empty() &&
-		            saved(again) == written && again.bank_row() &&
-		            again.bank_row()->streams.size() == bank.bank_row()->streams.size());
-		for (const Diagnostic &d : validate_music_bank_file(bank)) TEST_EXPECT(d.severity != DiagnosticSeverity::Error);
+		const bool fixed = written.size() == bytes.size() && load(again, written, error) && again.issues().empty() &&
+		                   saved(again) == written && again.bank_row() &&
+		                   again.bank_row()->streams.size() == bank.bank_row()->streams.size();
+		if (!fixed) std::printf("  %s: not saved at its size as a fixed point\n", input.label.c_str());
+		TEST_EXPECT(fixed);
+		const std::vector<Diagnostic> findings = validate_music_bank_file(bank);
+		for (const Diagnostic &d : findings) TEST_EXPECT(d.severity != DiagnosticSeverity::Error);
+		if (input.label == kStaleChunks) {
+			// Both the encoder's leavings are listed: the chunks' reserved pair and their tails past the audio.
+			const auto listed = [&](const char *words) {
+				return std::any_of(bank.issues().begin(), bank.issues().end(),
+				                   [&](const SourceIssue &issue) { return issue.message.find(words) != std::string::npos; });
+			};
+			TEST_EXPECT(written != bytes && has_code(findings, "music_bank.ignored_input") &&
+			            listed("another pair of never-read header bytes") && listed("never-read bytes past their audio"));
+		}
 		streams += bank.bank_row()->streams.size();
 		++banks;
 	}
-	TEST_EXPECT(banks >= 2);
-	std::printf("retail: %zu music banks, %zu streams through the document, saved at their size, a fixed point\n", banks,
+	std::printf("music banks: %zu banks, %zu streams through the document, saved at their size, a fixed point\n", banks,
 	            streams);
+	TEST_EXPECT(all);
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_reads_and_writes_back();
 	failed += test_edits();
 	failed += test_findings();
 	failed += test_session_play();
 	failed += test_script_plays_streams();
-	failed += test_retail();
+	failed += test_every_bank();
 	if (failed == 0) std::printf("editor music bank: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

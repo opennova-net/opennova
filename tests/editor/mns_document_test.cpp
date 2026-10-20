@@ -1,7 +1,8 @@
 // The stylesheet document (ADR 0046 S9i, as the S26 ruling made it) over the neutral core: a stylesheet loads as one
 // row per variable of the list the game's reader makes of the file (its directives decided, its comments and
 // switched-off lines read as nothing, the first spelling and the last value of a name), the same list the game reads
-// (the synthetic forms, an empty file, the shipped menu_style.mns); a save writes the list alone, `name<TAB>value`
+// (the synthetic forms, an empty file, every sheet of the variant set: the format's minted sheets under fixtures/mns/,
+// the shipped menu_style.mns's form among them, and our base game's); a save writes the list alone, `name<TAB>value`
 // and CR LF a line, which reads back as the list, a file of that form byte for byte; an edit changes its own line and
 // undoes; the changes the game would read otherwise are refused before they commit; the validator reports what the
 // stored file holds that a save leaves out (its line ends, its comments and directives, where the game hangs on it)
@@ -21,9 +22,9 @@
 #include <editor/session/view/session_view.h>
 #include <formats/mns/mns.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/menus_audio_fixtures.h"
 #include "editor/test_platform.h"
 
 #include <algorithm>
@@ -153,33 +154,62 @@ static int test_the_list() {
 	return 0;
 }
 
-static int test_the_shipped_sheet(const std::string &fixture) {
+// The sheet the format's lane authors in the form the shipped menu_style.mns takes (tests/mns/mns_write_test's
+// variant): CR LF lines, whole-line comments and blank lines, a name and its value apart by a run of tabs, upper- and
+// lower-case hex colours, a font's and a texture's file name.
+const char *const kShippedForm = "fixtures/mns/shipped_form.mns";
+
+// One sheet of the variant set: the document and the game read it alike, and as mns::parse does; its save reads back
+// as the list; its first variable (where it has one) found by its %name% in lower case, holding its value; a value
+// edit changes its own bytes alone, its undo giving the text back.
+static int test_sheet(const variant_fixtures::Input &input) {
 	std::string src, message;
-	TEST_EXPECT(opennova::io::read_file_text(fixture, src, message));
-	test_temp::TempDir dir("opennova_styles_retail");
+	TEST_EXPECT(opennova::io::read_file_text(input.path, src, message));
+	test_temp::TempDir dir("opennova_styles_sheet");
 	MnsDocument document;
 	TEST_EXPECT(load(document, dir, src));
-	// The document and the game read it alike.
-	TEST_EXPECT(same_list(document.list(), game_read(src)) && document.list().sheet().variables.size() == 12);
+	TEST_EXPECT(same_list(document.list(), game_read(src)));
 	opennova::mns::StyleSheet sheet;
 	TEST_EXPECT(opennova::mns::parse(src.data(), src.size(), sheet, message) &&
 	            sheet.variables == document.list().sheet().variables);
 	const std::string written = saved(document);
 	TEST_EXPECT(same_list(game_read(written), document.list()));
-	NodeAddress fg;
-	TEST_EXPECT(find_definition(AssetGraph(), document, "%def_text_fg%", fg) &&
-			text(document, fg, "value") == "FFFFFFFF");
+	// A sheet of comments alone (our brand.mns) is a list of none: a save writes nothing.
+	if (document.list().nodes.empty()) {
+		TEST_EXPECT(written.empty());
+		return 0;
+	}
+	const opennova::mns::KeyValue first = document.list().nodes.front();
+	NodeAddress at;
+	TEST_EXPECT(find_definition(AssetGraph(), document, "%" + opennova::strutil::to_lower(first.name) + "%", at) &&
+	            text(document, at, "value") == first.value);
 	// A value edit changes its own line; its undo gives the text back.
+	std::string other = first.value;
+	for (char &c : other) c = c == 'Z' ? 'Y' : 'Z';
 	Diagnostic error;
-	TEST_EXPECT(document.apply(set_edit(fg, "value", std::string("11223344")), error));
+	TEST_EXPECT(document.apply(set_edit(at, "value", other), error));
 	const std::string edited = saved(document);
 	TEST_EXPECT(edited.size() == written.size());
 	size_t differing = 0;
 	for (size_t i = 0; i < written.size() && i < edited.size(); ++i) differing += written[i] != edited[i];
-	TEST_EXPECT(differing == 8);
+	TEST_EXPECT(differing == first.value.size());
 	document.undo();
 	TEST_EXPECT(saved(document) == written);
-	std::printf("test_the_shipped_sheet passed\n");
+	return 0;
+}
+
+// Every sheet of the variant set: fixtures/mns/'s (the format's minted sheets) and our base game's (assets/).
+static int test_every_sheet() {
+	std::vector<variant_fixtures::Input> inputs;
+	const bool all = variant_fixtures::inputs({"fixtures/mns", "assets"}, ".mns", {kShippedForm}, inputs);
+	int failures = all ? 0 : 1;
+	for (const variant_fixtures::Input &input : inputs) {
+		const int failed = test_sheet(input);
+		if (failed) std::fprintf(stderr, "  the sheet %s\n", input.label.c_str());
+		failures += failed;
+	}
+	if (failures) return 1;
+	std::printf("test_every_sheet passed (%zu sheets)\n", inputs.size());
 	return 0;
 }
 
@@ -493,8 +523,7 @@ static int test_load_in_place() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_style_value_use();
 	failures += test_load_in_place();
@@ -503,10 +532,7 @@ int main(int argc, char **argv) {
 	failures += test_changes_since_save();
 	failures += test_validation();
 	failures += test_stored_hang();
-	const std::string fixture = retail::reference_fixture("mns/menu_style.mns");
-	if (!fixture.empty()) failures += test_the_shipped_sheet(fixture);
+	failures += test_every_sheet();
 	if (failures == 0) std::printf("editor_styles: all tests passed\n");
-	if (failures == 0 && fixture.empty())
-		return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mns/menu_style.mns (the shipped style sheet)");
 	return failures == 0 ? 0 : 1;
 }

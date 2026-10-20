@@ -6,8 +6,8 @@
 // 128": 64x64 indexed PCX files minted by encode_pcx_indexed from integer
 // data). The env / sky dome / weather tests load the .env, resolve the maps
 // beside it through the shared texture resolver and edit the bindings; no
-// retail file is carried (the shipped .env set is the gated env_jo_install
-// sweep).
+// retail file is carried (the shipped .env line forms are the authored
+// line_forms.env, env_shipped_forms).
 //
 // Default: rebuild in memory and byte-compare the committed files. `--write`
 // (re)writes them.

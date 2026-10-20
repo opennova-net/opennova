@@ -2,8 +2,11 @@
 // the engine's own readers and from-scratch writers, the sound names they define as the graph's symbols
 // (a set looked up in the game's bank order, a profile by name), the preview's picks as the game picks,
 // and the session's play_sound over them. Minted fixtures alone (fixtures/lwf/menu.lwf, a short PCM wave,
-// banks minted here through lwf::encode_lwf); the retail leg (OPENNOVA_JO_ASSETS) reads every shipped
-// bank and the shipped SndProf.def through the documents and writes them back from scratch, the same.
+// banks minted here through lwf::encode_lwf) and our own base game's: every bank of the variant set (the
+// format's minted banks under fixtures/lwf/, the stale bytes NovaLogic's tools left among them; ours) and a
+// SndProf.def in the shipped one's shapes, and ours, through the documents and written back from scratch,
+// the same; an import of a game install's ammo.def (an install minted from assets/ with the engine's PFF
+// writer) following its sounds to their bank.
 #include <editor/assets/asset_import.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
@@ -40,10 +43,11 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/import_test_support.h"
+#include "editor/menus_audio_fixtures.h"
 #include "editor/test_platform.h"
 
 using namespace opennova;
@@ -609,26 +613,28 @@ int test_wave_import() {
 	return 0;
 }
 
-// --- retail ---------------------------------------------------------------------------------------------
+// --- the variant set ---------------------------------------------------------------------------------------
 
-// Every shipped bank through the document: its waves, sets, layers and members as the engine reads them,
-// written from scratch and read back the same (each member on the wave of the same name); SndProf.def's 49
-// profiles the same.
-int test_retail_banks() {
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the shipped banks through the bank document)");
-		return 0;
-	}
+// The bank the format's lane mints with the stale bytes NovaLogic's authoring tools left in the shipped banks
+// (tests/fixtures/minimal_lwf_gen.cpp): a wave's name past its terminator, a set's slots and a layer's member slots
+// past their counts, a layer's +12 scratch word where no flag 0x100 makes it the anchor.
+const char *const kStaleBank = "fixtures/lwf/stale.lwf";
+
+// Every bank of the variant set through the document (fixtures/lwf/'s, the format's minted banks; our base
+// game's): its waves, sets, layers and members as the engine reads them, written from scratch and read back the
+// same (each member on the wave of the same name).
+int test_every_bank() {
+	std::vector<variant_fixtures::Input> inputs;
+	const bool all = variant_fixtures::inputs({"fixtures/lwf", "assets"}, ".lwf", {kStaleBank}, inputs);
 	size_t banks = 0;
-	std::error_code ec;
-	for (const auto &entry : std::filesystem::directory_iterator(opennova::io::os_path(assets), ec)) {
-		const std::string name = opennova::io::utf8_path(entry.path().filename());
-		if (strutil::to_lower(entry.path().extension().string()) != ".lwf") continue;
-		const std::vector<uint8_t> bytes = test_io::read_file(opennova::io::utf8_path(entry.path()));
+	for (const variant_fixtures::Input &input : inputs) {
+		const std::string &name = input.label;
+		const std::vector<uint8_t> bytes = test_io::read_file(input.path);
 		lwf::File original;
 		std::string message;
-		if (!lwf::parse_lwf_buffer(bytes.data(), bytes.size(), original, message)) continue; // D-SND-3's refusals
+		const bool parsed = lwf::parse_lwf_buffer(bytes.data(), bytes.size(), original, message);
+		TEST_EXPECT(parsed || name != kStaleBank);
+		if (!parsed) continue; // D-SND-3's refusals
 		SoundBankDocument bank;
 		Diagnostic error;
 		TEST_EXPECT(bank.load_bytes(bytes, name, AssetKind::SoundBank, "jo", error));
@@ -661,29 +667,91 @@ int test_retail_banks() {
 		TEST_EXPECT(same);
 		++banks;
 	}
-	std::printf("retail: %zu banks through the document\n", banks);
-	TEST_EXPECT(banks >= 3);
-	const std::string sndprof = retail::asset_file("sndprof.def");
-	if (!sndprof.empty()) {
-		SoundProfileDocument profiles;
-		Diagnostic error;
-		TEST_EXPECT(profiles.load_bytes(test_io::read_file(sndprof), "SndProf.def", AssetKind::SoundProfileDefs, "jo", error));
-		TEST_EXPECT(profiles.rows().size() == 49 && profiles.serialize().ok());
-	}
+	std::printf("sound banks: %zu through the document\n", banks);
+	TEST_EXPECT(all && banks > 0);
 	return 0;
 }
 
-// An import of the install's ammo.def with the files it needs brings the banks its sounds are sets of
-// (DI-02: a set is a bank's symbol, followed like any other): game.lwf among the plan's rows, no sound left
-// unfollowed.
-int test_retail_import_follows_sounds() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (an install import following ammo.def's sounds to their banks)");
-		return 0;
+// Two profile tables hold the same profiles: the names, each slot's set and columns, the loop percents.
+bool same_profiles(const audio::SoundProfileTable &a, const audio::SoundProfileTable &b) {
+	if (a.entries().size() != b.entries().size()) return false;
+	for (size_t i = 0; i < a.entries().size(); ++i) {
+		const audio::SoundProfile &x = a.entries()[i], &y = b.entries()[i];
+		if (x.name != y.name || x.set_names != y.set_names || x.param2_q16 != y.param2_q16 || x.param3_q16 != y.param3_q16 ||
+		    x.param4 != y.param4 || x.loop_params != y.loop_params)
+			return false;
 	}
-	// A project of no bank of its own (one of the name would keep its copy: ImportPlan::shadowed).
+	return true;
+}
+
+// A SndProf.def written in the shapes the shipped one takes (the shapes tests/audio/sound_profile_test's fixture
+// mirrors too): blank lines before and in a profile, one of spaces alone; a quoted begin name with words after it;
+// tab and space runs between a key and its set; a key in another case (SSAudio3); float columns written ".9 1.2 "
+// with a trailing space; a slot line of a set alone after a longer one, which reads the columns that line left
+// [orig: SoundProfile_ParseLineCallback @ 0x526fc0, the column reads @ 0x5270f0..0x52718b; Config_TokenizeLine
+// @ 0x53CB71..0x53CB81]; the medium and coarse loop percents with trailing tabs and spaces; "end " with a space.
+const char *const kShippedShapes =
+        "\r\n\r\n"
+        "begin \"default\"\t\t default\r\n"
+        "\r\n"
+        "\tmedloopfadeinstart   \t20 \t\r\n"
+        "\tmedloopfadeinend    \t30 \t\r\n"
+        "\tmedlooppitchendp    \t150\t\r\n"
+        "\r\n"
+        "\tcrsloopfadeinstart   \t60 \r\n"
+        "\tcrslooppitchendp     \t100\r\n"
+        "end \r\n"
+        "\r\n"
+        "begin \"SP_Heli\"\t\t Flyable helicopter\r\n"
+        "\tenginestart\t\t\tV_HELI_START\r\n"
+        "\t\r\n"
+        "\tsoundloop_2\t\t\tV_HELI_ILP\t\t.9 1.2 \r\n"
+        "\tsoundloop_3\t\t\tV_HELI_DLP\t\t\t\t\r\n"
+        "\tsounddeath\t\t\tEXPLO_HELI\r\n"
+        "\tSSAudio3\t\t\tIMP_V_HELO\t\t\r\n"
+        "  \r\n"
+        "\tmedloopfadeinstart   \t20 \t\r\n"
+        "\tcrslooppitchendp     \t100  \r\n"
+        "end \r\n";
+
+// SndProf.def through the document: the shipped one's shapes and our base game's, each a row per profile the game's
+// walk reads, written from scratch and read back as the same profiles; the set-alone slot line keeps the 1.2 its
+// longer neighbour left in the third column (78643 in 16.16) and a second column of 0, as the game reads them.
+int test_profiles_round_trip() {
+	const std::string ours = test_io::read_file_text(repo() + "/assets/SndProf.def");
+	TEST_EXPECT(!ours.empty());
+	for (const std::string &text : {std::string(kShippedShapes), ours}) {
+		audio::SoundProfileTable read;
+		const size_t count = read.parse(text.data(), text.size());
+		SoundProfileDocument profiles;
+		Diagnostic error;
+		TEST_EXPECT(count > 0 && profiles.load_bytes(text_bytes(text), "SndProf.def", AssetKind::SoundProfileDefs, "jo", error));
+		TEST_EXPECT(profiles.rows().size() == count);
+		const SerializeResult written = profiles.serialize();
+		TEST_EXPECT(written.ok());
+		audio::SoundProfileTable again;
+		TEST_EXPECT(again.parse(written.text.data(), written.text.size()) == count && same_profiles(read, again));
+	}
+	audio::SoundProfileTable shipped;
+	shipped.parse(kShippedShapes, std::strlen(kShippedShapes));
+	const audio::SoundProfile *heli = shipped.find("SP_Heli");
+	TEST_EXPECT(heli && heli->param3_q16[audio::kSlotSoundLoop1 + 2] == 78643 &&
+	            heli->param2_q16[audio::kSlotSoundLoop1 + 2] == 0);
+	return 0;
+}
+
+// An import of a game install's ammo.def with the files it needs brings the banks its sounds are sets of
+// (DI-02: a set is a bank's symbol, followed like any other): game.lwf among the plan's rows, no sound left
+// unfollowed. The install is minted from our base game with the engine's PFF writer: ammo.def and the banks in
+// localres.pff, where JO's install keeps them.
+int test_install_import_follows_sounds() {
 	test_temp::TempDir dir("opennova_editor_sound_import_plan");
+	const std::string install = dir.file("install");
+	const auto asset = [](const char *name) { return test_io::read_file_text(repo() + "/assets/" + name); };
+	TEST_EXPECT(import_test::write_pff(install + "/localres.pff", {{"ammo.def", asset("ammo.def")},
+	                                                               {"game.lwf", asset("game.lwf")},
+	                                                               {"menu.lwf", asset("menu.lwf")}}));
+	// A project of no bank of its own (one of the name would keep its copy: ImportPlan::shadowed).
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -698,10 +766,10 @@ int test_retail_import_follows_sounds() {
 	const ImportPlan plan = plan_import({ammo}, true, ProjectPaths::for_root(view.project.root), *view.project.document,
 	                                    *view.project.scan, *view.findings.graph, install);
 	bool bank = false;
-	for (const ImportPlanRow &row : plan.rows) bank = bank || (strutil::iequals(row.name, "game.lwf") || strutil::iequals(row.name, "gamelocl.lwf"));
+	for (const ImportPlanRow &row : plan.rows) bank = bank || strutil::iequals(row.name, "game.lwf");
 	bool unfollowed = false;
 	for (const ImportNotFollowed &entry : plan.not_followed) unfollowed = unfollowed || entry.reference == ReferenceKind::Sound;
-	std::printf("retail: ammo.def's plan, %zu rows, a bank among them: %s\n", plan.rows.size(), bank ? "yes" : "no");
+	std::printf("install: ammo.def's plan, %zu rows, a bank among them: %s\n", plan.rows.size(), bank ? "yes" : "no");
 	for (const ImportNotFollowed &entry : plan.undefined)
 		std::printf("  undefined: %s x%zu, first in %s\n", reference_row(entry.reference).token, entry.count, entry.first.c_str());
 	TEST_EXPECT(bank && !unfollowed);
@@ -710,8 +778,7 @@ int test_retail_import_follows_sounds() {
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_bank_reads_and_writes_back();
 	failed += test_bank_edits();
@@ -723,8 +790,9 @@ int main(int argc, char **argv) {
 	failed += test_session_play();
 	failed += test_waves();
 	failed += test_wave_import();
-	failed += test_retail_banks();
-	failed += test_retail_import_follows_sounds();
+	failed += test_every_bank();
+	failed += test_profiles_round_trip();
+	failed += test_install_import_follows_sounds();
 	if (failed == 0) std::printf("editor sound documents: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

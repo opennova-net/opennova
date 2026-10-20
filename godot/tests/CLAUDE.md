@@ -9,25 +9,21 @@
   Headless runs never attach an ImGui context: `DevTools.is_available()` is false
   there while its open state (the Insert toggle, capture, input policy) still works and is tested.
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
-- `--suite core` unsets the retail roots; `--suite retail` requires both roots
-  and rejects skipped compatibility tests. The default `--suite all` allows
-  explicit missing-data skips. Retail scripts live under `tests/retail/`.
-  Scripts whose every test needs a RenderingDevice live under `tests/windowed/`
-  (core) and `tests/retail/windowed/` (retail): both are excluded from every
-  headless selection and run only with `--windowed` on their suite, where a
-  pending test is a failure (a missing RenderingDevice fails; under `all` a
-  missing-data skip stays allowed). Headless scripts that mix in RD-gated
-  methods keep them `pending` there until they are split into windowed siblings.
-  The runner snapshots selected scripts/methods and checks the JUnit report
-  for missing coverage. See `docs/asset-gated-tests.md` for migration records.
+- One suite, no retail data: a script's inputs are minted or authored fixtures
+  and the tree's own `assets/`, and `scripts/ci/test_suites.py --check-layout`
+  fails a script that names a retail root. Scripts whose every test needs a
+  RenderingDevice live under `tests/windowed/`: excluded from the headless
+  selection, they run only with `--windowed`, where a pending test is a failure.
+  Headless scripts that mix in RD-gated methods keep them `pending` there until
+  they are split into windowed siblings. The runner snapshots selected
+  scripts/methods and checks the JUnit report for missing coverage.
 - No probes live here. Runtime probes are `game_probe` tools under `godot/probes/`
   (`docs/mcp.md`, ADR 0041): registered in `ProbeDef.definitions()`
   (`godot/game/probe/`), driven through the game's MCP endpoint with typed
   arguments, judged by their verdict. Their GUT companions
   (the catalog contract, the render-fixture and foliage-capture contracts, the
   parity-joiner contract) live in `godot/tests/probes/`. An assertion over the
-  portable engine is a ctest under `tests/<domain>/`, gated on the retail roots
-  when it needs retail data (`docs/asset-gated-tests.md`).
+  portable engine is a ctest under `tests/<domain>/`.
 - GUT exits 0 when a script fails to parse — it is silently dropped from collection.
   `scripts/test_godot.sh` greps for parse errors and dropped scripts; prefer it over
   invoking `gut_cmdln.gd` directly, and replicate those greps after any direct run.
@@ -83,4 +79,4 @@
   generator, run it with `--write`, commit the files. A test that needs an authored
   variant loads one of these and asserts its content with the read-back getters; the
   model and variant tables are in `fixtures/README.md`. No retail model lives in the
-  tree; retail-only assertions run as `OPENNOVA_JO_ASSETS` legs.
+  tree, and no test reads one.

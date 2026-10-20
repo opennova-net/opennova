@@ -14,9 +14,12 @@
 // too ("bank it"). `--dump` prints the waiver rows the current state needs.
 //
 // The S2C 0x0A / C2S 0x0C compact records need each wire type id's record
-// class. The core leg resolves the 14 ids the corpus uses through an authored
-// definition table; the `_retail` leg proves that table against the real
-// items.def and reruns the sweep with the real catalog.
+// class. The sweep resolves the 14 ids the corpus uses through an authored
+// definition table, then again through the items.def path: the same 14 rows
+// written as items.def text with the class fields the shipped items.def gives
+// them (type, physics and the four function names), parsed and built into the
+// catalog the game builds, must resolve each id to the same class and pass the
+// same sweep.
 
 #include <net/npwire/ingame_body_codec.h>
 #include <net/npwire/ingame_decode.h>
@@ -38,7 +41,6 @@
 #include <vector>
 
 #include "common/nwmsg_fixture.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 
 using namespace opennova;
@@ -86,6 +88,39 @@ rep::ItemReplicationCatalog authored_catalog() {
 	}
 	return rep::ItemReplicationCatalog::from_definitions(defs);
 }
+
+// The same 14 rows as items.def text, each with the class fields the shipped
+// items.def authors for it (its `type`, `physics` and function names; no row
+// carries an attrib word), in the game's CRLF form.
+const char kCorpusItemsDef[] =
+	"begin \"Drivable Motorcycle\"\r\n id 100074\r\n type vehicle\r\n ai_function cveh\r\n"
+	" render_function cveh\r\n move_function cbike\r\n physics 1\r\nend\r\n"
+	"begin \"Drivable M1A1 Tank\"\r\n id 100164\r\n type vehicle\r\n ai_function cveh\r\n"
+	" move_function ctank\r\n physics 1\r\n render_function tank\r\nend\r\n"
+	"begin \"Drivable T80 Tank\"\r\n id 100165\r\n type vehicle\r\n ai_function cveh\r\n"
+	" move_function ctank\r\n physics 1\r\n render_function tank\r\nend\r\n"
+	"begin \"Drivable BTR-80, Indonesian\"\r\n id 101213\r\n type vehicle\r\n ai_function cveh\r\n"
+	" move_function catv\r\n physics 1\r\n render_function cveh\r\nend\r\n"
+	"begin \"Flyable Mil-26, Indonesian helo\"\r\n id 101214\r\n type vehicle\r\n disk_function HELO\r\n"
+	" ai_function chel\r\n move_function chel\r\n render_function chel\r\nend\r\n"
+	"begin \"Flyable Nb0-105, Indonesian helo\"\r\n id 101215\r\n type vehicle\r\n disk_function HELO\r\n"
+	" ai_function chel\r\n move_function chel\r\n render_function chel\r\nend\r\n"
+	"begin \"Drivable ATV\"\r\n id 101301\r\n type vehicle\r\n render_function cveh\r\n ai_function cveh\r\n"
+	" move_function catv\r\n physics 1\r\nend\r\n"
+	"begin \"Drivable SUV with 50cal\"\r\n id 101302\r\n type vehicle\r\n ai_function cveh\r\n"
+	" move_function cveh\r\n physics 1\r\n render_function cveh\r\nend\r\n"
+	"begin \"Drivable Attack Vehicle with MK19\"\r\n id 101304\r\n type vehicle\r\n ai_function cveh\r\n"
+	" move_function cveh\r\n physics 1\r\n render_function cveh\r\nend\r\n"
+	"begin \"Drivable SUV with Mk19\"\r\n id 101305\r\n type vehicle\r\n ai_function cveh\r\n"
+	" move_function cveh\r\n physics 1\r\n render_function cveh\r\nend\r\n"
+	"begin \"Flyable Super Puma, Indonesian helo\"\r\n id 101308\r\n type vehicle\r\n disk_function HELO\r\n"
+	" ai_function chel\r\n move_function chel\r\n render_function chel\r\nend\r\n"
+	"begin \"Flyable Nb0-105 with miniguns, Indonesian helo\"\r\n id 102099\r\n type vehicle\r\n"
+	" disk_function HELO\r\n ai_function chel\r\n move_function chel\r\n render_function chel\r\nend\r\n"
+	"begin \"Flyable Nb0-105 with rocketpods, Indonesian helo\"\r\n id 102100\r\n type vehicle\r\n"
+	" disk_function HELO\r\n ai_function chel\r\n move_function chel\r\n render_function chel\r\nend\r\n"
+	"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n type person\r\n ai_function plyr\r\n"
+	" disk_function PLAYER\r\n move_function org2\r\nend\r\n";
 
 // --- the corpus -------------------------------------------------------------
 
@@ -415,18 +450,54 @@ int registry_matches_catalog() {
 	return bad;
 }
 
-int retail_leg(const Corpus &corpus, const rep::ItemReplicationCatalog &authored, bool dump) {
-	const std::string items_path = retail::asset_file("items.def");
-	if (items_path.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS carrying items.def");
+// The catalog's classes the corpus rows carry none of, over the shipped rows' keys: a boat (move
+// function cbot, the watercraft family) and a spawn point (the SpawnPoint attribute).
+int catalog_other_classes() {
+	static const char kRows[] =
+			"begin \"Drivable Zodiac\"\r\n  id 101293\r\n  type vehicle\r\n"
+			"  attrib: AIData neutral Reflect PlayerControl  forceasset\r\n  ai_function cbot\r\n"
+			"  move_function cbot\r\nend\r\n"
+			"begin \"LFP Tower with Change Team & Spawn Volume\"\r\n  id 101336\r\n  type object\r\n"
+			"  attrib:  landable SpawnPoint ChangeTeam LFP\r\nend\r\n";
 	def::DefItemsFile items{};
-	if (def::def_parse_items(items_path.c_str(), &items) != 0) {
-		std::printf("FAIL cannot parse %s\n", items_path.c_str());
+	if (def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kRows), sizeof(kRows) - 1, &items) != 0) {
+		std::printf("FAIL the other classes' items.def text does not parse\n");
+		return 1;
+	}
+	const rep::ItemReplicationCatalog catalog = rep::ItemReplicationCatalog::from_items_def(items);
+	def::def_free_items(&items);
+	int bad = 0;
+	const rep::ItemReplicationProfile *boat = catalog.by_definition_id(101293);
+	if (boat == nullptr || boat->motion_family != rep::MotionFamily::Watercraft) {
+		std::printf("FAIL a cbot row is not the watercraft family\n");
+		++bad;
+	}
+	const rep::ItemReplicationProfile *tower = catalog.by_definition_id(101336);
+	if (tower == nullptr || !tower->allocation.spawn_point ||
+			!rep::has_capability(tower->capabilities, rep::ItemReplicationCapability::SpawnPoint)) {
+		std::printf("FAIL a SpawnPoint row lacks the spawn-point capability\n");
+		++bad;
+	}
+	return bad;
+}
+
+int items_def_leg(const Corpus &corpus, const rep::ItemReplicationCatalog &authored, bool dump) {
+	def::DefItemsFile items{};
+	if (def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kCorpusItemsDef),
+	                                sizeof(kCorpusItemsDef) - 1, &items) != 0) {
+		std::printf("FAIL the corpus rows' items.def text does not parse\n");
 		return 1;
 	}
 	const rep::ItemReplicationCatalog real = rep::ItemReplicationCatalog::from_items_def(items);
+	const size_t rows = items.count;
 	def::def_free_items(&items);
 	int bad = 0;
-	// Each authored row resolves to the class the real items.def gives it.
+	if (rows != std::size(kCorpusItems)) {
+		std::printf("FAIL the corpus rows' items.def text holds %zu rows, not %zu\n", rows,
+		            std::size(kCorpusItems));
+		++bad;
+	}
+	// Each authored row resolves to the class the items.def rows give it.
 	for (const AuthoredItem &item : kCorpusItems) {
 		const uint16_t wire = static_cast<uint16_t>(item.definition_id - 100000);
 		const auto want = real.resolve_wire_entity_class(wire);
@@ -443,14 +514,13 @@ int retail_leg(const Corpus &corpus, const rep::ItemReplicationCatalog &authored
 		const auto c = real.resolve_wire_entity_class(id);
 		return c ? *c : EntityClass::Unknown;
 	};
-	bad += judge(sweep(corpus, ctx), dump, "retail");
+	bad += judge(sweep(corpus, ctx), dump, "items_def");
 	return bad;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
 	bool dump = false;
 	for (int i = 1; i < argc; ++i)
 		if (std::strcmp(argv[i], "--dump") == 0) dump = true;
@@ -482,7 +552,8 @@ int main(int argc, char **argv) {
 		++violations;
 	}
 
-	violations += retail_leg(corpus, authored, dump);
+	violations += items_def_leg(corpus, authored, dump);
+	violations += catalog_other_classes();
 	if (violations != 0) {
 		std::printf("nwmsg_codec_parity: %d violation(s)\n", violations);
 		return 1;

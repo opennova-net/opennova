@@ -17,6 +17,9 @@ extends GutTest
 const RIGGED_3DI := "res://../fixtures/threedi/synth/shed.3di"
 const MUZZLE_3DI := "res://../fixtures/threedi/synth/gun.3di"
 const SECTIONED_3DI := "res://../fixtures/threedi/synth/pump.3di"
+# The IBlock01 shape (tests/fixtures/gut_world_gen.cpp): a block and its door
+# part on CTRL DOOR_00.
+const DOOR_3DI := "res://../fixtures/gut/door_block.3di"
 
 
 # Builds the flat PF-layout snapshot Simulation.get_present_snapshot()
@@ -310,6 +313,41 @@ func test_cold_door_row_releases_only_what_the_door_writer_owned() -> void:
 	_present(p, snap)
 	assert_eq(_ctrl(model, "DOOR_00"), 0, "a door row overwrites the foreign value (one CTRL value)")
 	assert_eq(_ctrl(model, "DOOR_01"), 65536, "the side table carries the exact signed dword")
+
+
+# The IBlock01 door end to end: door_block's part 1 turns rotation x on CTRL
+# DOOR_00 (control 113 register 0, 0 to -5688, IBlock01's LOD 0 row 1), so
+# the presented phase poses the visible door part while the block stays put.
+func test_door_visible_part_uses_the_presented_phase() -> void:
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(DOOR_3DI)), OK)
+	var model := _model()
+	model.set_object_data(data)
+	var clock := PanmClock.new()
+	clock.set_time_ms_for_test(0)
+	model.set_panm_clock(clock)
+	var parts := model.get_render_part_nodes()
+	assert_true(parts.has(0) and parts.has(1))
+	if not parts.has(0) or not parts.has(1):
+		return
+	var building := parts[0] as Node3D
+	var door := parts[1] as Node3D
+	var p := _make_pass(_index_of({ 1: model }))
+	var snap := Snapshot.new()
+	snap.entities = [{ "bms_id": 1, "doors": [0] }]
+	_present(p, snap)
+	model.advance_runtime_frame(0.0)
+	var closed := door.transform
+	var fixed := building.transform
+	snap.entities[0]["doors"] = [65536]
+	_present(p, snap)
+	model.advance_runtime_frame(0.0)
+	assert_ne(door.transform, closed, "the door visibly opens at the endpoint")
+	assert_eq(building.transform, fixed, "the building stays fixed")
+	snap.entities[0]["doors"] = [0]
+	_present(p, snap)
+	model.advance_runtime_frame(0.0)
+	assert_eq(door.transform, closed, "closing returns to the exact initial transform")
 
 
 func test_active_channel_poses_to_phase() -> void:

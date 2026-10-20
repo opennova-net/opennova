@@ -6,7 +6,7 @@
 // from the fields alone and read back; each stream's decode the raw entry's, a stream stopping at a
 // chunk whose shift is past 7; what the reader refuses (entries sharing bytes among them) and what
 // it notes of a layout the writer lays out otherwise (a write then the writer's bytes); what the
-// writer refuses. The retail banks' sweep is sbf_jo_install_sweep.
+// writer refuses. The banks in both shipped forms are swept by sbf_bank_sweep.
 #include <formats/sbf/sbf.h>
 
 #include "common/file_io.h"

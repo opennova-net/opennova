@@ -46,8 +46,8 @@ enum class ParamKind : uint8_t {
 inline constexpr int32_t kAnySubType = -1;
 
 // What a trigger's or an action's parameter holds where its type does not read it: every shipped
-// record holds -1 there (19,596 of the install's 19,596 such slots over its 115 missions, the
-// mission_logic ctest's retail leg; the original editor's initializer is unread), so a new record is
+// record holds -1 there (19,596 of the install's 19,596 such slots over its 115 missions, measured once;
+// the editor_mission_logic ctest's test_measured_defaults pins it; the original editor's initializer is unread), so a new record is
 // born with it in each of its four, and a retype writes it into a slot the new type does not read.
 // (A sub-type its type does not read holds 0: 501 of 501.)
 inline constexpr int32_t kUnreadParam = -1;

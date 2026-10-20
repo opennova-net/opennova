@@ -981,6 +981,14 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::NoCase, AssetKind::ItemDefs)
 	        .tolerated(item_name_missing)
 	        .row,
+	// A particle's curve, by its table's id among every particle file's [tabledef]s, without case [orig:
+	// CEffectDef_ResolveTblDefReference @ 0x5E9630; CParticleManager_FindTableDefByName @ 0x5E9540, _stricmp @
+	// 0x76FDF6]. A miss is the particle file's own finding (particle.curve_unresolved, the project check's), with
+	// what the game draws without the curve: the graph's Missing is its badge alone.
+	Row(ReferenceKind::ParticleTable, "particle_table", "the particle table", "particle table")
+	        .symbol(NameCase::NoCase, AssetKind::Particles)
+	        .never_missing()
+	        .row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {

@@ -1409,7 +1409,7 @@ databases, one per case, on the PostgreSQL server `-DOPENNOVA_TEST_PG=<uri>` nam
 (`tests/common/test_database.h`); the HTTP layer's (label `redis`) also need the Redis
 server `-DOPENNOVA_TEST_REDIS=<url>` names, each in a key namespace of its own
 (`tests/common/test_redis.h`). Without the server a test prints `SKIP: needs a PostgreSQL
-server` (or `a Redis server`) and exits 77, which `--suite core` counts as a failure.
+server` (or `a Redis server`) and exits 77, which the suite counts as a failure.
 `scripts/dev_postgres.sh up` and `scripts/dev_redis.sh up` print the values for local
 servers, and the Linux CI jobs run both beside the build. The route harness,
 `opennova_novaworld_web_http_routes_*` (`tests/novaworld/http_routes_test.cpp`, a row per part),

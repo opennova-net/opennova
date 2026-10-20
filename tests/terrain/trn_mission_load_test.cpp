@@ -4,14 +4,13 @@
 // @ 0x57db44 sets it once, the passes @ 0x57dbeb / @ 0x57dc3b / @ 0x57dcbf]. A terrain key in either later file
 // is the terrain's, the .env's over overcast.def's over the .trn's; the .trn alone (load_trn, the terrain
 // document's read) is unchanged. The runtime's own load (terrain_field_store_load) takes the .env by the
-// mission's name. Retail leg: every JO:CA terrain under overcast.def and each shipped .env makes the configuration
-// its .trn alone makes (no shipped file writes a terrain key after the .trn).
+// mission's name. The shipped forms: each .trn line form under overcast.def's form and each .env form makes the
+// configuration its .trn alone makes (no shipped file writes a terrain key after the .trn).
 
 #include <formats/trn/trn.h>
 #include <formats/trn/trn_io.h>
 
 #include <base/vfs/file_source.h>
-#include <base/vfs/vfs.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 
@@ -24,7 +23,6 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -265,40 +263,53 @@ std::string saved(const TrnConfig &config) {
 	return opennova::save_trn(out, config, error) ? out.str() : std::string("(unwritable) ") + error;
 }
 
-// Every terrain of the install under its overcast.def and each of its .env files (and none): the configuration the
-// .trn alone makes, no later line taken.
-int run_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (every terrain under overcast.def and each shipped .env)");
-		return 0;
+// overcast.def's form as JO:CA ships it: a comment line, then time-of-day blocks of the twelve colours, each indented
+// by a space, blank lines between (values of our own).
+std::string overcast_form() {
+	static const char *const kColours[] = {"sun_rgb", "moon_rgb", "sky_rgb", "ground_rgb", "skyfog_rgb", "fog_rgb",
+	                                       "skybase_rgb", "skybright_rgb", "skyhighlight_rgb", "cloudbase_rgb",
+	                                       "cloudhighlight_rgb", "cloudedge_rgb"};
+	std::string text = "; the overcast sky's keyframes\n\n";
+	for (int block = 0; block < 9; ++block) {
+		text += "tod_begin " + std::to_string(200 + block * 250) + "\n";
+		for (int k = 0; k < 12; ++k)
+			text += std::string(" ") + kColours[k] + " " + std::to_string(block * 20 + k) + "," + std::to_string(40 + k) + ",60\n";
+		text += "tod_end\n\n";
 	}
-	opennova::Vfs vfs;
-	TEST_EXPECT(vfs.mount_game(install.c_str(), std::string(), opennova::VfsMountMode::Packed));
-	std::vector<std::string> terrains, environments;
-	for (const auto &location : vfs.list_files()) {
-		const std::string name = lower(location.logical_name);
-		if (name.size() < 4) continue;
-		const std::string extension = name.substr(name.size() - 4);
-		if (extension == ".trn") terrains.push_back(location.logical_name);
-		if (extension == ".env") environments.push_back(location.logical_name);
-	}
-	std::vector<uint8_t> bytes;
-	TEST_EXPECT(vfs.read_file_raw("overcast.def", bytes) && !bytes.empty());
-	const std::string overcast = text_of(bytes);
+	return crlf(text);
+}
+
+// The shipped forms (the authored fixtures/terrain/forms/line_forms16.trn and line_forms8.trn, after the census of
+// JO:CA's 38 .trn: tabs and spaces between the values, a comment glued to a row's last value, a 16-sector grid's
+// short last row, foliage blocks with their attributes, no line end after the last line; and the minted Tmap.trn)
+// under overcast.def's form and each .env form (the authored fixtures/env/line_forms.env, the minted synth_full.env,
+// and none): the configuration the .trn alone makes, no later line taken. The negative claim proved once over
+// JO:CA's 30 terrains under overcast.def and its 10 environments (330 loads): no shipped file after the .trn
+// writes a terrain key. Every keyword those files use (their census) is none the terrain's parser compares.
+int run_shipped_forms() {
+	static const char *const kLaterKeys[] = {
+		"enviro_name", "timeofday", "envscale", "iris_percent", "iris_center", "water_rgb", "sky_map1", "sky_map2",
+		"sky_height", "sky_speed", "fog_level", "fog_type", "cloud_rgb", "terrain_rgb", "vertex_rgb", "lightning_rgb",
+		"sun_3di", "moon_3di", "glare_3di", "star_3di", "ceiling_rgb", "floor_rgb", "curtime", "advanced_clouds",
+		"tod_begin", "tod_end", "sun_rgb", "moon_rgb", "sky_rgb", "ground_rgb", "skyfog_rgb", "fog_rgb", "skybase_rgb",
+		"skybright_rgb", "skyhighlight_rgb", "cloudbase_rgb", "cloudhighlight_rgb", "cloudedge_rgb"};
+	for (const char *key : kLaterKeys) TEST_EXPECT(!opennova::trn_parser_key(key, true));
+	const std::string overcast = overcast_form();
+	TEST_EXPECT(opennova::trn_parser_lines(overcast).empty());
 	std::vector<std::string> environment_texts(1); // the first: none
-	for (const std::string &name : environments) {
-		TEST_EXPECT(vfs.read_file_raw(name, bytes));
-		environment_texts.push_back(text_of(bytes));
+	for (const char *rel : {"env/line_forms.env", "env/synth_full.env"}) {
+		environment_texts.push_back(text_of(test_io::read_file(test_paths_fixture(rel))));
+		TEST_EXPECT(!environment_texts.back().empty() && opennova::trn_parser_lines(environment_texts.back()).empty());
 	}
 	size_t loads = 0;
-	for (const std::string &name : terrains) {
-		TEST_EXPECT(vfs.read_file_raw(name, bytes));
-		const std::string trn = text_of(bytes);
+	for (const char *rel : {"terrain/forms/line_forms16.trn", "terrain/forms/line_forms8.trn", "terrain/tmap/Tmap.trn"}) {
+		const std::string trn = text_of(test_io::read_file(test_paths_fixture(rel)));
+		TEST_EXPECT(!trn.empty());
 		TrnConfig alone;
 		std::string alone_error;
 		std::istringstream in(trn);
 		const bool alone_ok = opennova::load_trn(in, alone, alone_error);
+		TEST_EXPECT(alone_ok);
 		for (size_t e = 0; e < environment_texts.size(); ++e) {
 			TrnLaterTexts later;
 			later.overcast = &overcast;
@@ -308,23 +319,36 @@ int run_retail() {
 			std::vector<TrnLaterLine> taken;
 			const bool ok = opennova::load_mission_trn(trn, later, mission, error, &taken);
 			if (ok != alone_ok || error != alone_error || saved(mission) != saved(alone) || !taken.empty())
-				std::fprintf(stderr, "FAIL: %s under %s reads otherwise than alone\n", name.c_str(),
-				             e > 0 ? environments[e - 1].c_str() : "no .env");
+				std::fprintf(stderr, "FAIL: %s under the .env form %zu reads otherwise than alone\n", rel, e);
 			TEST_EXPECT(ok == alone_ok && error == alone_error && saved(mission) == saved(alone) && taken.empty());
 			++loads;
 		}
 	}
-	std::printf("retail: %zu terrains under overcast.def and %zu environments (%zu loads) read as the .trn alone\n",
-	            terrains.size(), environments.size(), loads);
-	TEST_EXPECT(terrains.size() >= 30 && environments.size() >= 10);
+	// The forms read as written: the glued comment and the short row, the foliage blocks, the last line unended.
+	TrnConfig forms;
+	std::string error;
+	{
+		std::istringstream in(text_of(test_io::read_file(test_paths_fixture("terrain/forms/line_forms16.trn"))));
+		TEST_EXPECT(opennova::load_trn(in, forms, error) && forms.sector_count == 16 && forms.wrap_x == 1 &&
+		            forms.foliage_defs.size() == 2 && forms.foliage_defs[0].graphic == "ftree1.3di" &&
+		            forms.foliage_defs[1].match[0] == 253 && forms.polydata == "Forms16.cpt");
+	}
+	{
+		std::istringstream in(text_of(test_io::read_file(test_paths_fixture("terrain/forms/line_forms8.trn"))));
+		TrnConfig forms8;
+		TEST_EXPECT(opennova::load_trn(in, forms8, error) && forms8.sector_count == 8 && forms8.wrap_y == 1 &&
+		            forms8.foliage_defs.size() == 1 && forms8.foliage_defs[0].match[0] == 252 &&
+		            forms8.lock_bottomright.x == 1);
+	}
+	std::printf("shipped forms: 3 terrains under overcast.def's form and 3 environments (%zu loads) read as the .trn alone\n",
+	            loads);
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (const int failed = run()) return failed;
 	if (const int failed = run_key_lines()) return failed;
-	return run_retail();
+	return run_shipped_forms();
 }

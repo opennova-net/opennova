@@ -1,12 +1,16 @@
 // CBIN roundtrip: decode -> encode reproduces a credits list byte for byte,
 // and encode -> decode -> encode is a fixed point.
 //
-// Two legs. The minted fixtures/cbin/synth_nlist*.kda trio (JO, JOX01 and BHD
-// shapes; tests/fixtures/minimal_cbin_gen.cpp) runs unconditionally. The
-// shipped trio — the retail encoder's own output, redundant control runs and
-// all — is read from the reference fixture set behind OPENNOVA_JO_ASSETS and
-// must re-encode byte for byte too.
+// Over the minted fixtures/cbin/synth_nlist*.kda lists (tests/fixtures/
+// minimal_cbin_gen.cpp): the JO, JOX01 and BHD trio, and the shipped lists'
+// own shapes, which the retired cbin_roundtrip_retail row read from the
+// shipped trio (the retail encoder's output, its key, controls ahead of line
+// ends and images, both image forms, BHD's plain lines and ~BINK_LOGO markup).
+// Each re-encode is pinned by an FNV-1a64 vector (the nw_codec_identity
+// pattern): a vector changes only with an [orig] witness or a D-CBIN entry;
+// `cbin_roundtrip_test --dump` prints the replacement table.
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -14,7 +18,6 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include <formats/cbin/cbin.h>
 
 #ifndef OPENNOVA_SOURCE_DIR
@@ -34,8 +37,9 @@ struct Expect {
 };
 
 // One list: the ENV pins, at least one text entry with a font, the BHD bounds
-// when expected, a byte-for-byte re-encode, and the internal fixed point.
-int check_list(const char *label, const std::string &path, const Expect &expect) {
+// when expected, a byte-for-byte re-encode (left in `re_encoded`), and the
+// internal fixed point.
+int check_list(const char *label, const std::string &path, const Expect &expect, std::vector<uint8_t> &re_encoded) {
     int failures = 0;
     std::vector<uint8_t> original;
     if (!test_io::read_file(path, original)) {
@@ -71,7 +75,6 @@ int check_list(const char *label, const std::string &path, const Expect &expect)
     std::cout << "decoded " << credits.entries.size() << " entries, " << text_with_font << " with fonts"
               << std::endl;
 
-    std::vector<uint8_t> re_encoded;
     if (!opennova::cbin::encode(credits, re_encoded, error)) {
         std::cerr << "FAIL: encode failed for " << label << ": " << error << std::endl;
         return failures + 1;
@@ -102,33 +105,79 @@ int check_list(const char *label, const std::string &path, const Expect &expect)
     return failures;
 }
 
+uint64_t fnv1a64(const std::vector<uint8_t> &bytes) {
+    uint64_t h = 1469598103934665603ull;
+    for (uint8_t b : bytes) {
+        h ^= b;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+struct List {
+    const char *name;
+    Expect expect;
+};
+
+// The minted lists and their pins: the trio (make_credits' shape), JO's and JOX01's controls and images,
+// BHD's plain lines with its spacing and bounds.
+const List kLists[] = {
+    {"synth_nlist.kda", {true, 0.5f, 14, 400, false, 0, 0}},
+    {"synth_nlist_jox01.kda", {true, 0.5f, 14, 400, false, 0, 0}},
+    {"synth_nlist_bhd.kda", {true, 0.5f, 14, 400, true, 60, 580}},
+    {"synth_nlist_controls.kda", {true, 0.5f, 14, 400, false, 0, 0}},
+    {"synth_nlist_bhd_plain.kda", {true, 0.5f, 20, 400, true, 66, 588}},
+};
+
+struct Vector {
+    const char *name;
+    size_t len;
+    uint64_t hash;
+};
+
+const Vector kExpected[] = {
+    {"synth_nlist.kda", 1749u, 0x3ed30972e58b0afcull},
+    {"synth_nlist_jox01.kda", 2097u, 0x611f10ee876bd71cull},
+    {"synth_nlist_bhd.kda", 1454u, 0x5e2e4ab167160252ull},
+    {"synth_nlist_controls.kda", 1237u, 0xb66922ab566c34b1ull},
+    {"synth_nlist_bhd_plain.kda", 923u, 0xae0fca9182ec3854ull},
+};
+
 } // namespace
 
 int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+    bool dump = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::strcmp(argv[i], "--dump") == 0) dump = true;
     int failures = 0;
     const std::string synth = std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/cbin/";
-    failures += check_list("synthetic JO nlist", synth + "synth_nlist.kda", {true, 0.5f, 14, 400, false, 0, 0});
-    failures += check_list("synthetic JOX01 nlist", synth + "synth_nlist_jox01.kda", {true, 0.5f, 14, 400, false, 0, 0});
-    failures += check_list("synthetic BHD nlist", synth + "synth_nlist_bhd.kda", {true, 0.5f, 14, 400, true, 60, 580});
+    const size_t count = sizeof(kLists) / sizeof(kLists[0]);
+    std::string table = "const Vector kExpected[] = {\n";
+    for (size_t i = 0; i < count; ++i) {
+        std::vector<uint8_t> re_encoded;
+        failures += check_list(kLists[i].name, synth + kLists[i].name, kLists[i].expect, re_encoded);
+        const uint64_t hash = fnv1a64(re_encoded);
+        char row[160];
+        std::snprintf(row, sizeof(row), "    {\"%s\", %zuu, 0x%016llxull},\n", kLists[i].name, re_encoded.size(),
+                      (unsigned long long)hash);
+        table += row;
+        if (dump) continue;
+        const Vector &want = kExpected[i];
+        if (std::strcmp(want.name, kLists[i].name) != 0 || want.len != re_encoded.size() || want.hash != hash) {
+            std::cerr << "FAIL: " << kLists[i].name << " re-encodes to " << re_encoded.size() << " bytes, hash 0x"
+                      << std::hex << hash << std::dec << "; the pinned vector says " << want.len
+                      << " bytes (a change needs a witness; --dump prints the table)" << std::endl;
+            failures++;
+        }
+    }
+    if (dump) {
+        std::printf("\n%s};\n", table.c_str());
+        return 0;
+    }
     if (failures != 0) {
-        std::cerr << "FAIL: " << failures << " synthetic check(s) failed" << std::endl;
+        std::cerr << "FAIL: " << failures << " check(s) failed" << std::endl;
         return 1;
     }
-
-    // The retail leg: the shipped JO / JOX01 / BHD lists.
-    const std::string jo = retail::reference_fixture("cbin/nlist.reference.kda");
-    const std::string jox = retail::reference_fixture("cbin/nlist.jox01.reference.kda");
-    const std::string bhd = retail::reference_fixture("cbin/nlist.bhd.reference.kda");
-    if (jo.empty() || jox.empty() || bhd.empty())
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/cbin/nlist*.reference.kda (the shipped credits lists)");
-    failures += check_list("retail JO nlist", jo, {true, 0.5f, 14, 400, false, 0, 0});
-    failures += check_list("retail JOX01 nlist", jox, {true, 0.5f, 14, 400, false, 0, 0});
-    failures += check_list("retail BHD nlist", bhd, {false, 0.0f, 0, 0, true, 66, 588});
-    if (failures != 0) {
-        std::cerr << "FAIL: " << failures << " retail check(s) failed" << std::endl;
-        return 1;
-    }
-    std::cout << "\nPASS: all roundtrip checks passed (synthetic + retail)" << std::endl;
+    std::cout << "\nPASS: all roundtrip checks passed, " << count << " lists pinned" << std::endl;
     return 0;
 }

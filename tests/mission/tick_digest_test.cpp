@@ -18,16 +18,16 @@
 //                    change is genuinely behavior-neutral leaves the constant
 //                    alone; `--print` reports the current value for the rare
 //                    ledgered follow-up that is allowed to move it.
-//   --mission NAME   a retail mission through the ctest rig (local tool, never
-//                    a ctest leg: needs the OPENNOVA_JO_DIR root), printing
+//   --install DIR --mission NAME
+//                    a mission of the packed retail install DIR through the
+//                    ctest rig (a local tool, never a ctest row), printing
 //                    `digest <mission> <ticks> <hex>` for scripts/parity/
 //                    tick_digest.py --record / --check. Float codegen differs
 //                    across compilers, so a retail digest is compared on one
 //                    machine and never committed.
 #include "common/boot_file_source.h"
 #include "common/file_io.h"
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
 #include "common/synthetic_mission.h"
 #include "common/test_paths.h"
 
@@ -42,6 +42,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -244,15 +245,14 @@ bool synthetic_chain(int ticks, uint64_t &out, std::string &error) {
 	return true;
 }
 
-// --- the retail leg (local tool) ---------------------------------------------
+// --- a retail install's mission (local tool) ---------------------------------
 
-int retail_chain(const std::string &mission_name, int ticks, bool listen) {
-	const std::string root = retail::install();
+int install_chain(const std::string &root, const std::string &mission_name, int ticks, bool listen) {
 	if (root.empty()) {
-		std::printf("SKIP: needs OPENNOVA_JO_DIR for --mission\n");
-		return retail::kSkipExitCode;
+		std::fprintf(stderr, "FAIL: --mission needs --install <packed retail install>\n");
+		return 1;
 	}
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(root, mission_name, error)) {
 		std::printf("FAIL: open %s: %s\n", mission_name.c_str(), error.c_str());
@@ -284,17 +284,19 @@ int retail_chain(const std::string &mission_name, int ticks, bool listen) {
 } // namespace
 
 int main(int argc, char **argv) {
+	std::string install;
 	std::string mission;
 	int ticks = kSyntheticTicks;
 	bool listen = true;
 	bool print = false;
 	for (int i = 1; i < argc; ++i) {
-		if (std::strcmp(argv[i], "--mission") == 0 && i + 1 < argc) mission = argv[++i];
+		if (std::strcmp(argv[i], "--install") == 0 && i + 1 < argc) install = argv[++i];
+		else if (std::strcmp(argv[i], "--mission") == 0 && i + 1 < argc) mission = argv[++i];
 		else if (std::strcmp(argv[i], "--ticks") == 0 && i + 1 < argc) ticks = std::atoi(argv[++i]);
 		else if (std::strcmp(argv[i], "--no-listen") == 0) listen = false;
 		else if (std::strcmp(argv[i], "--print") == 0) print = true;
 	}
-	if (!mission.empty()) return retail_chain(mission, ticks, listen);
+	if (!mission.empty()) return install_chain(install, mission, ticks, listen);
 
 	std::string error;
 	uint64_t first = 0, second = 0;

@@ -1,20 +1,26 @@
-// The shipped menus through the frame compiler, in three legs, each screen compiled
+// The tree's menus through the frame compiler, in three legs, each screen compiled
 // with its own assets read the way the game reads them: the TEXT_RSRC tables (section
 // "menu"), the FONT files by retail's name rule, the textures by retail's extension
 // dispatch, and the stylesheet's %VAR%s. A table of what each screen drew and what did
 // not load is printed.
-//  1. Every screen of the fifteen revx02 JO menus of the reference fixture set
-//     configures and compiles (the whole test is gated on them; no assets).
-//  2. The 2026-09-23 grill's census corpus, the .mnu files loose at the extracted
-//     tree's root (a SKIP-LEG leg): every screen compiles, and the grill's shipped-case
-//     counts are the oracle. The 134 statics with no MOUSEOVER, SELECTED or DISABLED
-//     row keep their default label colour under the mouse; the SHADOWQUALITY and
-//     RED_PW bands are the HEIGHT their texture's first load baked (20 and 24, not
-//     their own 24 and 2); the 68 spin arrows draw each of their four state rows; and
-//     the 216 typeless APPEARANCE rows (and the one unknown TYPE) mark their state and
-//     draw nothing.
-//  3. Every .mnu the packed install serves (a SKIP-LEG leg, base mount and each
-//     expansion) compiles.
+//  1. Every screen of the authored menus under fixtures/mnu (shipped_forms.mnu with
+//     every form the shipped JO menus take among them) configures and compiles (no
+//     assets).
+//  2. fixtures/mnu/render_cases.mnu, the drawing cases the 2026-09-23 grill counted in
+//     the shipped screens (set B3), each authored, over the base game's fonts and
+//     stylesheet with its strips minted here: the statics with no MOUSEOVER, SELECTED or
+//     DISABLED row keep their default label colour under the mouse (the grill's 134,
+//     retail: none recoloured); a row whose own HEIGHT differs from the one its
+//     texture's first load baked draws the baked band (the grill's options.mnu
+//     SHADOWQUALITY, 24 on a texture first loaded at 20, and mp.mnu RED_PW's DISABLED
+//     row, 2 on one first loaded at 24); the spin arrows draw each of their four state
+//     rows (the grill's 68); and the typeless APPEARANCE rows, and a TYPE the parse
+//     does not know (death.mnu's one "window"), mark their state and draw nothing (the
+//     grill's 217). Its FORMS screen draws the forms the shipped screens also hold: a
+//     label at the right of its rect, a PASSWORD edit, and a spin list's IMAGE item whose
+//     texture does not load (the load note naming the item row).
+//  3. Every screen of the base game's menus (assets/) compiles with the base game's
+//     files beside it, as an install serves its menus.
 // [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60; CUIStringTable_LookupString
 //  @ 0x6527c0; CFontCache_LoadOrGetFont @ 0x652f70; CTextureManager_LoadOrFindTexture
 //  @ 0x654980; CWnd_ProcessMouseEvent @ 0x647a00 (the state fallback
@@ -35,10 +41,11 @@
 #include <vector>
 
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
+#include <base/vfs/file_source.h>
 #include <formats/mnu/mnu.h>
 #include <formats/mns/mns.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/tga/tga.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_frame_assets.h>
@@ -47,7 +54,7 @@
 #include <runtime/menu/menu_texture_header.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
+#include "mnu/repo_menus.h"
 
 using opennova::menu::MenuDrawList;
 using opennova::menu::MenuFrameCompiler;
@@ -179,31 +186,56 @@ std::map<std::string, std::string> style_vars(const AssetSource &assets) {
 	return vars;
 }
 
-// Every .mnu one mount layer of the packed install serves.
-void sweep_mount(const std::string &install, const std::string &expansion, Totals &totals, int &menus) {
-	opennova::Vfs vfs;
-	if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) {
-		std::printf("  FAIL mount_game(%s, %s): %s\n", install.c_str(), expansion.c_str(), vfs.last_error().c_str());
-		++totals.failures;
-		return;
+// A loose tree's files, read once and by file name without case (as the game's mount
+// resolves them), under an overlay of files made in memory. An LFS pointer is no file.
+class LooseFiles {
+public:
+	explicit LooseFiles(const std::string &dir) {
+		std::error_code ec;
+		for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
+			if (entry.is_regular_file(ec))
+				paths_[repo_menus::lower(entry.path().filename().string())] = entry.path().generic_string();
 	}
-	AssetSource assets;
-	assets.read = [&vfs](const std::string &name, std::vector<uint8_t> &out) { return vfs.read_file(name, out); };
-	assets.has = [&vfs](const std::string &name) { return vfs.has_file(name); };
-	const std::map<std::string, std::string> vars = style_vars(assets);
-	for (const auto &loc : vfs.list_files()) {
-		const std::string &name = loc.logical_name;
-		if (name.size() < 4 || retail::lower_ascii(name.substr(name.size() - 4)) != ".mnu") continue;
-		std::vector<uint8_t> bytes;
+	void add(const std::string &name, std::vector<uint8_t> bytes) { cache_[repo_menus::lower(name)] = std::move(bytes); }
+	AssetSource source() {
+		AssetSource assets;
+		assets.read = [this](const std::string &name, std::vector<uint8_t> &out) { return read(name, out); };
+		assets.has = [this](const std::string &name) {
+			std::vector<uint8_t> bytes;
+			return read(name, bytes);
+		};
+		return assets;
+	}
+
+private:
+	bool read(const std::string &name, std::vector<uint8_t> &out) {
+		const std::string key = repo_menus::lower(std::filesystem::path(name).filename().string());
+		const auto cached = cache_.find(key);
+		if (cached != cache_.end()) {
+			out = cached->second;
+			return true;
+		}
+		const auto found = paths_.find(key);
+		if (found == paths_.end() || !test_io::read_file(found->second, out) || test_io::is_lfs_pointer(out)) return false;
+		cache_[key] = out;
+		return true;
+	}
+	std::map<std::string, std::string> paths_;
+	std::map<std::string, std::vector<uint8_t>> cache_;
+};
+
+// Every screen of each menu compiled over `assets` (or none).
+void sweep_menus(const std::vector<std::string> &paths, const AssetSource *assets,
+		const std::map<std::string, std::string> &vars, Totals &totals) {
+	for (const std::string &path : paths) {
 		opennova::mnu::Document doc;
 		std::string error;
-		if (!vfs.read_file_raw(name, bytes) || !opennova::mnu::parse(bytes.data(), bytes.size(), doc, error)) {
-			std::printf("  FAIL %s (%s)\n", name.c_str(), error.c_str());
+		if (!opennova::mnu::parse_file(path, doc, error)) {
+			std::printf("  FAIL %s (%s)\n", repo_menus::name(path).c_str(), error.c_str());
 			++totals.failures;
 			continue;
 		}
-		++menus;
-		compile_document((expansion.empty() ? std::string() : expansion + "/") + name, doc, &assets, vars, totals);
+		compile_document(repo_menus::name(path), doc, assets, vars, totals);
 	}
 }
 
@@ -328,8 +360,8 @@ struct Census {
 	int unknown_type = 0;      // APPEARANCE rows with a TYPE the parse does not know
 	int marker_widgets = 0;    // document widgets put in a state only markers author
 	int marker_draw_diffs = 0; // compiles where a marker drew something
-	bool shadowquality = false;
-	bool red_pw = false;
+	bool tall_rows = false;
+	bool low_row = false;
 	int failures = 0;
 };
 
@@ -369,9 +401,11 @@ void census_statics(const opennova::mnu::Document &doc, size_t screen_at, const 
 	}
 }
 
-// The two shipped rows whose own HEIGHT differs from the one their texture's first
-// load baked: options.mnu SHADOWQUALITY (24 on btn1e.tga, loaded first at 20) and
-// mp.mnu RED_PW's DISABLED row (2 on btn3.tga, loaded first at 24).
+// The rows whose own HEIGHT differs from the one their texture's first load baked, as
+// the shipped screens hold two (the grill's options.mnu SHADOWQUALITY, a combo box's 24
+// on a texture first loaded at 20, and mp.mnu RED_PW's DISABLED row, an edit's 2 on one
+// first loaded at 24): render_cases.mnu's TALL_ROWS (24 on band20.tga, first loaded at
+// 20) and LOW_ROW's DISABLED row (2 on band24.tga, first loaded at 24).
 void census_bands(const opennova::mnu::Document &doc, size_t screen_at, const AssetSource &assets,
 		const std::map<std::string, std::string> &vars, Census &census) {
 	struct Case {
@@ -381,8 +415,8 @@ void census_bands(const opennova::mnu::Document &doc, size_t screen_at, const As
 		bool *seen;
 	};
 	const Case cases[] = {
-		{ "SHADOWQUALITY", "btn1e.tga", 20, &census.shadowquality },
-		{ "RED_PW", "btn3.tga", 24, &census.red_pw },
+		{ "TALL_ROWS", "band20.tga", 20, &census.tall_rows },
+		{ "LOW_ROW", "band24.tga", 24, &census.low_row },
 	};
 	const opennova::mnu::Screen &screen = doc.screens[screen_at];
 	const std::vector<Indexed> tree = index_screen(screen);
@@ -517,84 +551,71 @@ void census_markers(const opennova::mnu::Document &doc, size_t screen_at, const 
 	}
 }
 
-// The grill's census corpus: the .mnu files at the extracted tree's root, read with
-// the files beside them (the loose tree, case-insensitive).
-int census_leg(Totals &totals) {
-	const std::string root = retail::assets();
-	std::map<std::string, std::string> files; // lowercased name -> path
-	std::vector<std::string> menus;
-	std::error_code ec;
-	if (!root.empty()) {
-		for (const auto &entry : std::filesystem::directory_iterator(root, ec)) {
-			if (!entry.is_regular_file(ec)) continue;
-			const std::string name = entry.path().filename().string();
-			files[retail::lower_ascii(name)] = entry.path().generic_string();
-			if (name.size() > 4 && retail::lower_ascii(name.substr(name.size() - 4)) == ".mnu")
-				menus.push_back(entry.path().generic_string());
+// A strip `width` x `height` texels, every texel the band it sits in (from small integer data),
+// written through our TGA writer.
+std::vector<uint8_t> minted_strip(uint32_t width, uint32_t height, uint32_t band) {
+	std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4u);
+	for (uint32_t y = 0; y < height; ++y)
+		for (uint32_t x = 0; x < width; ++x) {
+			uint8_t *px = &rgba[(static_cast<size_t>(y) * width + x) * 4u];
+			px[0] = static_cast<uint8_t>(64u * (y / band));
+			px[1] = static_cast<uint8_t>(4u * x);
+			px[2] = 128;
+			px[3] = 255;
 		}
-	}
-	if (menus.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/*.mnu (the grill's census corpus)");
-	std::sort(menus.begin(), menus.end());
-	// Read once: the census builds each screen's compiler several times.
-	std::map<std::string, std::vector<uint8_t>> cache;
-	AssetSource assets;
-	assets.read = [&files, &cache](const std::string &name, std::vector<uint8_t> &out) {
-		const std::string key = retail::lower_ascii(std::filesystem::path(name).filename().string());
-		const auto cached = cache.find(key);
-		if (cached != cache.end()) {
-			out = cached->second;
-			return true;
-		}
-		const auto found = files.find(key);
-		if (found == files.end() || !test_io::read_file(found->second, out)) return false;
-		cache[key] = out;
-		return true;
-	};
-	assets.has = [&files](const std::string &name) {
-		return files.count(retail::lower_ascii(std::filesystem::path(name).filename().string())) != 0;
-	};
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::tga::tga_write_rgba32(rgba.data(), width, height, out, error);
+	return out;
+}
+
+// render_cases.mnu's drawing cases, read with the base game's files beside it (its fonts
+// and menu_style.mns) and its strips minted here: four bands each, band20.tga 20 texels a
+// band, band24.tga 24, arrows.tga 16; arrowup.tga one 16-texel image.
+int cases_leg(Totals &totals) {
+	LooseFiles files(repo_menus::path("assets"));
+	files.add("band20.tga", minted_strip(32, 80, 20));
+	files.add("band24.tga", minted_strip(32, 96, 24));
+	files.add("arrows.tga", minted_strip(16, 64, 16));
+	files.add("arrowup.tga", minted_strip(16, 16, 16));
+	const AssetSource assets = files.source();
 	const std::map<std::string, std::string> vars = style_vars(assets);
-	std::printf("the grill's census corpus (%s), with its assets:\n", root.c_str());
+	const std::string path = repo_menus::path("fixtures/mnu/render_cases.mnu");
+	opennova::mnu::Document doc;
+	std::string error;
+	if (!opennova::mnu::parse_file(path, doc, error)) {
+		std::printf("  FAIL render_cases.mnu (%s)\n", error.c_str());
+		++totals.failures;
+		return 0;
+	}
+	std::printf("render_cases.mnu, with the base game's fonts and stylesheet:\n");
+	compile_document("render_cases.mnu", doc, &assets, vars, totals);
 	Census census;
-	for (const std::string &path : menus) {
-		opennova::mnu::Document doc;
-		std::string error;
-		const std::string label = std::filesystem::path(path).filename().string();
-		if (!opennova::mnu::parse_file(path, doc, error)) {
-			std::printf("  FAIL %s (%s)\n", label.c_str(), error.c_str());
-			++totals.failures;
-			continue;
-		}
-		++census.menus;
-		compile_document(label, doc, &assets, vars, totals);
-		for (const opennova::mnu::Screen &screen : doc.screens) {
-			for (const Window &root_window : screen.roots) {
-				walk_windows(root_window, [&census](const Window &w) {
-					for (const std::vector<Appearance> *rows : { &w.appearances, &w.items.appearances, &w.shuttle,
-								 &w.scrollup, &w.scrolldown })
-						for (const Appearance &row : *rows) {
-							if (row.type.empty()) ++census.typeless;
-							else if (!drawing_type(row.type)) ++census.unknown_type;
-						}
-				});
-			}
-		}
-		for (size_t s = 0; s < doc.screens.size(); ++s) {
-			++census.screens;
-			census_statics(doc, s, assets, vars, census);
-			census_bands(doc, s, assets, vars, census);
-			census_arrows(doc, s, assets, vars, census);
-			census_markers(doc, s, assets, vars, census);
+	for (const opennova::mnu::Screen &screen : doc.screens) {
+		for (const Window &root_window : screen.roots) {
+			walk_windows(root_window, [&census](const Window &w) {
+				for (const std::vector<Appearance> *rows : { &w.appearances, &w.items.appearances, &w.shuttle,
+							 &w.scrollup, &w.scrolldown })
+					for (const Appearance &row : *rows) {
+						if (row.type.empty()) ++census.typeless;
+						else if (!drawing_type(row.type)) ++census.unknown_type;
+					}
+			});
 		}
 	}
-	std::printf("census: %d menus, %d screens\n", census.menus, census.screens);
-	std::printf("  statics with no MOUSEOVER/SELECTED/DISABLED row %d (grill: 134); recoloured under the mouse %d "
-				"(retail: 0); would follow an authored MOUSEOVER row %d\n",
+	for (size_t s = 0; s < doc.screens.size(); ++s) {
+		++census.screens;
+		census_statics(doc, s, assets, vars, census);
+		census_bands(doc, s, assets, vars, census);
+		census_arrows(doc, s, assets, vars, census);
+		census_markers(doc, s, assets, vars, census);
+	}
+	std::printf("  statics with no MOUSEOVER/SELECTED/DISABLED row %d; recoloured under the mouse %d; would follow "
+				"an authored MOUSEOVER row %d\n",
 			census.quiet_statics, census.quiet_recoloured, census.quiet_would_turn);
-	std::printf("  spin arrows %d (grill: 68); drawing all four state rows %d\n", census.arrows,
-			census.arrows_all_states);
-	std::printf("  typeless APPEARANCE rows %d (grill: 216), unknown TYPE %d (grill: 1); widgets put in a "
-				"marker-only state %d; compiles where a marker drew %d\n",
+	std::printf("  spin arrows %d; drawing all four state rows %d\n", census.arrows, census.arrows_all_states);
+	std::printf("  typeless APPEARANCE rows %d, unknown TYPE %d; widgets put in a marker-only state %d; compiles "
+				"where a marker drew %d\n",
 			census.typeless, census.unknown_type, census.marker_widgets, census.marker_draw_diffs);
 	const auto expect = [&](bool ok, const char *what) {
 		if (!ok) {
@@ -602,15 +623,16 @@ int census_leg(Totals &totals) {
 			++census.failures;
 		}
 	};
-	expect(census.menus == 16, "the census corpus is the grill's sixteen menus");
-	expect(census.quiet_statics == 134, "134 statics author no MOUSEOVER, SELECTED or DISABLED row");
-	expect(census.quiet_recoloured == 0, "none of them changes its label colour under the mouse");
-	expect(census.quiet_would_turn > 0, "the label follows the state once a MOUSEOVER row is authored");
-	expect(census.shadowquality, "SHADOWQUALITY draws the 20-texel band btn1e.tga's first load baked");
-	expect(census.red_pw, "RED_PW draws the 24-texel band btn3.tga's first load baked");
-	expect(census.arrows == 68 && census.arrows_all_states == 68, "the 68 spin arrows draw all four state rows");
-	// The grill's one unknown TYPE reads as none (the reader holds a TYPE its parse does not know as none).
-	expect(census.typeless == 217 && census.unknown_type == 0, "217 typeless rows: the one unknown TYPE reads as none");
+	// QUIET_LABEL (a DEFAULT row) and BARE_LABEL (no row); FRAMED_LABEL authors a MOUSEOVER row.
+	expect(census.quiet_statics == 2, "the two statics author no MOUSEOVER, SELECTED or DISABLED row");
+	expect(census.quiet_recoloured == 0, "neither changes its label colour under the mouse");
+	expect(census.quiet_would_turn == 2, "each label follows the state once a MOUSEOVER row is authored");
+	expect(census.tall_rows, "TALL_ROWS draws the 20-texel band band20.tga's first load baked");
+	expect(census.low_row, "LOW_ROW draws the 24-texel band band24.tga's first load baked");
+	expect(census.arrows == 4 && census.arrows_all_states == 4, "the 4 spin arrows draw all four state rows");
+	// QUIET_LABEL's one, MARKED's four, FRAMED_LABEL's two, and FRAMED's "window" TYPE, which the
+	// reader holds as none (no TYPE the parse knows).
+	expect(census.typeless == 8 && census.unknown_type == 0, "8 typeless rows: the one unknown TYPE reads as none");
 	expect(census.marker_widgets > 0 && census.marker_draw_diffs == 0, "a typeless row marks its state, draws nothing");
 	totals.failures += census.failures;
 	return 0;
@@ -619,48 +641,37 @@ int census_leg(Totals &totals) {
 } // namespace
 
 int main() {
-	static const char *const kMenus[] = {
-		"jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player", "jo_weapon", "jo_loadout",
-		"jo_color", "jo_cmap", "jo_stat", "jo_death", "jo_vehicle", "jo_item_db", "jo_splash",
-	};
 	Totals totals;
-	std::printf("the fixture menus (no assets):\n");
-	for (const char *name : kMenus) {
-		const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
-		if (path.empty())
-			return retail::skip("OPENNOVA_JO_ASSETS/fixtures/mnu/jo_*.mnu (the fifteen shipped revx02 menus)");
-		opennova::mnu::Document doc;
-		std::string error;
-		if (!opennova::mnu::parse_file(path, doc, error)) {
-			std::printf("  FAIL %s (%s)\n", name, error.c_str());
-			++totals.failures;
-			continue;
-		}
-		compile_document(name, doc, nullptr, {}, totals);
+	const std::vector<std::string> authored = repo_menus::files("fixtures/mnu", ".mnu");
+	if (!repo_menus::holds(authored, "shipped_forms.mnu") || !repo_menus::holds(authored, "render_cases.mnu")) {
+		std::fprintf(stderr, "fixtures/mnu/shipped_forms.mnu or render_cases.mnu is missing\n");
+		return 1;
 	}
+	std::printf("the authored menus (no assets):\n");
+	sweep_menus(authored, nullptr, {}, totals);
 	if (totals.failures != 0) {
 		std::fprintf(stderr, "\n%d fixture screen(s) FAILED\n", totals.failures);
 		return 1;
 	}
-	census_leg(totals);
+	cases_leg(totals);
 	if (totals.failures != 0) {
-		std::fprintf(stderr, "\n%d census check(s) or screen(s) FAILED\n", totals.failures);
+		std::fprintf(stderr, "\n%d case check(s) or screen(s) FAILED\n", totals.failures);
 		return 1;
 	}
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (the packed install's .mnu set)");
-	std::printf("the installed menus, with their assets:\n");
-	int menus = 0;
-	sweep_mount(install, std::string(), totals, menus);
-	for (const std::string &expansion : retail::expansions()) sweep_mount(install, expansion, totals, menus);
+	std::printf("the base game's menus, with its files:\n");
+	const std::vector<std::string> base = repo_menus::files("assets", ".mnu");
+	LooseFiles files(repo_menus::path("assets"));
+	const AssetSource assets = files.source();
+	sweep_menus(base, &assets, style_vars(assets), totals);
 	if (totals.failures != 0) {
-		std::fprintf(stderr, "\n%d installed screen(s) FAILED\n", totals.failures);
+		std::fprintf(stderr, "\n%d base game screen(s) FAILED\n", totals.failures);
 		return 1;
 	}
-	if (menus == 0) {
-		std::fprintf(stderr, "\nthe packed install served no .mnu\n");
+	if (base.empty()) {
+		std::fprintf(stderr, "\nassets/ holds no .mnu\n");
 		return 1;
 	}
-	std::printf("retail leg: %d installed menu(s), %d screen(s) compiled\n", menus, totals.screens);
+	std::printf("%zu authored and %zu base game menu(s), %d screen(s) compiled\n", authored.size(), base.size(),
+			totals.screens);
 	return 0;
 }

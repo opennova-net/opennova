@@ -4,16 +4,16 @@
 // writer of a stylesheet is witnessed: the form is OpenNova's). A minted list is the writer's form byte for byte
 // and reads back as itself; an authored sheet (comments, directives, a continuation, a repeat, odd spacing)
 // read, written and read again is the same list; a name or value the reader would read otherwise is refused.
-// The retail leg (--retail) reads the reference set's shipped menu_style.mns and every .mns the packed install
-// serves: each read to its end, written, and read back as the same list.
-#include <base/vfs/vfs.h>
+// The tree's sheets (fixtures/mns, shipped_form.mns in the shipped sheets' form, and the base game's in
+// assets/) are each read to its end, written, and read back as the same list; the writer's bytes for each
+// authored one are a pinned FNV-1a64 vector.
 #include <formats/mns/mns.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "mnu/repo_menus.h"
 
-#include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -108,60 +108,100 @@ int authored() {
 	return 0;
 }
 
-int retail_sheets() {
-	int checked = 0;
-	const auto check = [&](const std::string &label, const std::string &bytes) {
+// The writer's bytes for each authored sheet under fixtures/mns, pinned as FNV-1a64 vectors (the
+// tests/novaworld nw_codec_identity form). The form is OpenNova's own (no original writer of a
+// stylesheet is witnessed), so a vector changes only with a change of that form and
+// `mns_write_test --dump`'s table in the same commit.
+struct WriterVector {
+	const char *file;
+	size_t len;
+	uint64_t hash;
+};
+
+const WriterVector kWriterVectors[] = {
+    {"shipped_form.mns", 334u, 0x0e0375f00a2efcd2ull},
+    {"test_style.mns", 87u, 0xaacfef68eeb8e1f1ull},
+};
+
+uint64_t fnv1a64(const std::string &bytes) {
+	uint64_t h = 1469598103934665603ull;
+	for (const char c : bytes) {
+		h ^= static_cast<uint8_t>(c);
+		h *= 1099511628211ull;
+	}
+	return h;
+}
+
+// The tree's stylesheets (tests/mnu/repo_menus.h) in place of an installed game's: the authored
+// ones, shipped_form.mns among them (the shipped sheets' form: CR LF lines, no byte-order mark,
+// whole-line comments and blank lines between the groups, each name set off by two to five tabs,
+// font, colour and image values), and the base game's: each read to its end, written, and read back
+// as the same list; the writer's bytes for each authored one are the pinned vector.
+int tree_sheets(bool dump) {
+	const std::vector<std::string> paths = repo_menus::stylesheets();
+	if (!repo_menus::holds(paths, "shipped_form.mns")) {
+		std::printf("fixtures/mns/shipped_form.mns (the shipped stylesheets' form) is missing\n");
+		return 1;
+	}
+	int failures = 0;
+	std::vector<std::string> names;
+	std::vector<WriterVector> got;
+	for (const std::string &path : paths) {
+		std::string bytes;
+		if (!test_io::read_file_text(path.c_str(), bytes)) {
+			std::printf("  FAIL %s (unreadable)\n", path.c_str());
+			++failures;
+			continue;
+		}
+		const std::string name = repo_menus::name(path);
+		// An authored sheet sets variables; the base game's brand.mns is comments alone (no brand yet).
+		const bool authored = path.find("/fixtures/mns/") != std::string::npos;
 		mns::ReadStatus status = mns::ReadStatus::Hangs;
 		const mns::KeyValueList list = read(bytes, &status);
 		std::string written;
-		const bool ok = status == mns::ReadStatus::Read && !list.nodes.empty() && reads_back(list, &written);
-		std::printf("  %s %s (%zu bytes, %zu variables, written %zu bytes)\n", ok ? "OK  " : "FAIL", label.c_str(),
-		            bytes.size(), list.nodes.size(), written.size());
-		++checked;
-		return ok ? 0 : 1;
-	};
-	int failures = 0;
-	const std::string reference = retail::reference_fixture("mns/menu_style.mns");
-	std::string bytes;
-	if (!reference.empty() && test_io::read_file_text(reference.c_str(), bytes))
-		failures += check("reference/menu_style.mns", bytes);
-	const std::string install = retail::install();
-	if (!install.empty()) {
-		std::vector<std::string> mounts = {std::string()};
-		for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-		for (const std::string &expansion : mounts) {
-			Vfs vfs;
-			if (!vfs.mount_game(install, expansion, VfsMountMode::Packed)) {
-				std::printf("  FAIL mount_game(%s, %s)\n", install.c_str(), expansion.c_str());
-				++failures;
-				continue;
-			}
-			for (const auto &loc : vfs.list_files()) {
-				std::string name = loc.logical_name;
-				std::string lower = name;
-				for (char &c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-				if (lower.size() < 4 || lower.compare(lower.size() - 4, 4, ".mns") != 0) continue;
-				std::vector<uint8_t> raw;
-				if (!vfs.read_file_raw(name, raw)) {
-					std::printf("  FAIL %s (unreadable)\n", name.c_str());
-					++failures;
-					continue;
-				}
-				failures += check((expansion.empty() ? std::string("<install>/") : expansion + "/") + name,
-				                  std::string(raw.begin(), raw.end()));
-			}
+		const bool ok = status == mns::ReadStatus::Read && (!authored || !list.nodes.empty()) && reads_back(list, &written);
+		if (!dump)
+			std::printf("  %s %s (%zu bytes, %zu variables, written %zu bytes)\n", ok ? "OK  " : "FAIL", name.c_str(),
+			            bytes.size(), list.nodes.size(), written.size());
+		if (!ok) ++failures;
+		// The authored sheets are pinned; the base game's change as the game does.
+		if (!authored) continue;
+		names.push_back(name);
+		got.push_back({nullptr, written.size(), fnv1a64(written)});
+	}
+	if (dump) {
+		std::printf("const WriterVector kWriterVectors[] = {\n");
+		for (size_t i = 0; i < got.size(); ++i)
+			std::printf("    {\"%s\", %zuu, 0x%016llxull},\n", names[i].c_str(), got[i].len,
+			            static_cast<unsigned long long>(got[i].hash));
+		std::printf("};\n");
+		return 0;
+	}
+	const size_t expected = sizeof(kWriterVectors) / sizeof(kWriterVectors[0]);
+	if (expected != got.size()) {
+		std::printf("  FAIL %zu sheets written but %zu vectors pinned (mns_write_test --dump)\n", got.size(), expected);
+		++failures;
+	}
+	for (size_t i = 0; i < got.size() && i < expected; ++i) {
+		const WriterVector &e = kWriterVectors[i];
+		if (names[i] != e.file || got[i].len != e.len || got[i].hash != e.hash) {
+			std::printf("  FAIL %s written %zu bytes hash 0x%016llx, pinned %s %zu bytes hash 0x%016llx\n",
+			            names[i].c_str(), got[i].len, static_cast<unsigned long long>(got[i].hash), e.file, e.len,
+			            static_cast<unsigned long long>(e.hash));
+			++failures;
 		}
 	}
-	if (checked == 0) return retail::skip_leg("OPENNOVA_JO_DIR or OPENNOVA_JO_ASSETS (the shipped stylesheets)");
-	std::printf("retail: %d stylesheet(s) read to the end, written and read back as the same list\n", checked);
+	std::printf("tree: %zu stylesheet(s) read to the end, written and read back as the same list; %zu writer vectors\n",
+	            paths.size(), got.size());
 	return failures;
 }
 
 } // namespace
 
+// `mns_write_test --dump` prints the writer vector table; the ctest registration passes nothing.
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+	for (int i = 1; i < argc; ++i)
+		if (std::string(argv[i]) == "--dump") return tree_sheets(true);
 	if (minted() || refused() || authored()) return 1;
-	if (!retail::selected()) return 0;
-	return retail_sheets() ? 1 : 0;
+	return tree_sheets(false) ? 1 : 0;
 }

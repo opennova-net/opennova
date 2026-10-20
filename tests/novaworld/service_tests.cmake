@@ -27,7 +27,7 @@ set(OPENNOVA_TEST_PG "" CACHE STRING
 # names it (redis://host:port), ctest hands it to the test as `--redis <url>`,
 # and each test keeps its keys under a prefix of its own there
 # (tests/common/test_redis.h). With none set the test prints "SKIP: needs a
-# Redis server" and exits 77, which the core suite fails, as for PostgreSQL.
+# Redis server" and exits 77, which the suite fails, as for PostgreSQL.
 # scripts/dev_redis.sh runs a local one and prints the value; CI runs
 # valkey/valkey:8 as a job service. A pg test that needs Redis too names REDIS.
 set(OPENNOVA_TEST_REDIS "" CACHE STRING
@@ -692,7 +692,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # one expiring the first, the subscription Checkout would make, Stripe's webhook signed
     # as Stripe signs it, and the entitlement GET /api/me/billing shows. Needs
     # ONNET_STRIPE_TEST_SECRET_KEY (a test-mode key; locally from the vault through
-    # deploy/env/billing.e2e.env.tpl): without it, a skip the core suite accepts. A pg test
+    # deploy/env/billing.e2e.env.tpl): without it, a skip the suite accepts. A pg test
     # besides; labelled `stripe`.
     add_executable(billing_stripe_e2e_test novaworld/billing_stripe_e2e_test.cpp)
     target_link_libraries(billing_stripe_e2e_test PRIVATE

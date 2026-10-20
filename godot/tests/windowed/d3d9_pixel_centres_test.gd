@@ -8,7 +8,7 @@ extends GutTest
 # (Render_SetViewport @0x58A720); the HUD draws pre-transformed vertices at its
 # coordinates as given (GDynamicVB_DrawPrimitive @0x6788E0). Both pins render
 # through the real device: a tests/windowed/ script, run by
-# `scripts/test_godot.sh --suite core --windowed` (a headless run pends it).
+# `scripts/test_godot.sh --windowed` (a headless run pends it).
 
 const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"
 const TICK_COUNT := 2

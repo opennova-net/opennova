@@ -1,0 +1,22 @@
+powerup "FULLHP"
+	hp   -1
+	respawn_time 30
+	max_respawns 1
+	action "respawn"
+		function powerup_respawn
+	end
+	action "pickup"
+		function powerup_pickup
+	end
+end
+powerup "AmmoFull"
+	respawn_time 100
+	max_respawns 1
+	allammo
+	action "respawn"
+		function powerup_respawn
+	end
+	action "pickup"
+		function powerup_pickup
+	end
+end

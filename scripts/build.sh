@@ -3,14 +3,13 @@
 # then builds the Godot GDExtension so the editor never loads a stale DLL
 # missing classes that engine/ has since added.
 #
-# Usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all]
-#                         [--shard editor|rest] [--no-test | -R REGEX]
-#                         [--cmake-arg ARG]...
+# Usage: scripts/build.sh [--no-godot] [--jobs N] [--shard editor|rest]
+#                         [--no-test | -R REGEX] [--cmake-arg ARG]...
 #   --no-godot       skip the Godot addon bootstrap and the GDExtension build
 #                    (library-only iteration; what CI's engine test job runs)
 #   --jobs N         build/test parallelism (default: the machine's CPU count)
-#   --shard NAME     run one of the core suite's two CI shards (editor: the
-#                    rows labelled `editor`, rest: the others; test_suites.py
+#   --shard NAME     run one of the suite's two CI shards (editor: the rows
+#                    labelled `editor`, rest: the others; test_suites.py
 #                    SHARDS), attested on its own; the build is the full tree
 #   --no-test        build only; run no ctest
 #   -R REGEX         run only the suite's ctests matching REGEX; a partial run
@@ -28,19 +27,14 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 build_godot=1
-suite=all
 run_tests=1
 test_regex=""
 shard=""
 cmake_args=()
-usage="usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all] [--shard editor|rest] [--no-test | -R REGEX] [--cmake-arg ARG]..."
+usage="usage: scripts/build.sh [--no-godot] [--jobs N] [--shard editor|rest] [--no-test | -R REGEX] [--cmake-arg ARG]..."
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --suite)
-            [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
-            suite="$2"; shift 2 ;;
-        --suite=*) suite="${1#--suite=}"; shift ;;
         --shard)
             [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
             shard="$2"; shift 2 ;;
@@ -62,15 +56,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-case "$suite" in
-    core) unset OPENNOVA_JO_DIR OPENNOVA_JO_ASSETS ;;
-    retail) python "$root/scripts/ci/test_suites.py" --suite retail --require-roots ;;
-    all) ;;
-    *) echo "$usage" >&2; exit 2 ;;
-esac
 case "$shard" in
-    "") ;;
-    editor|rest) [[ "$suite" == core ]] || { echo "--shard splits the core suite only" >&2; exit 2; } ;;
+    ""|editor|rest) ;;
     *) echo "$usage" >&2; exit 2 ;;
 esac
 
@@ -91,11 +78,12 @@ if [[ ! -f "$root/build/CMakeCache.txt" || ${#cmake_args[@]} -gt 0 ]]; then
 fi
 cmake --build "$root/build" --config Release -j "$jobs"
 
-# The suite's (or shard's) ctest labels, from the one place that defines them.
+# The shard's ctest labels (none for the whole suite), from the one place that
+# defines them.
 shard_args=(${shard:+--shard "$shard"})
-mapfile -t selection < <(python "$root/scripts/ci/test_suites.py" --suite "$suite" \
+mapfile -t selection < <(python "$root/scripts/ci/test_suites.py" \
     "${shard_args[@]}" --selection | tr -d '\r')
-name="$suite${shard:+-$shard}"
+name="${shard:-all}"
 # The rows that run whole terrain bakes take the `bakes` resource, a few at a time
 # (tests/CMakeLists.txt opennova_bakes).
 resources=(--resource-spec-file "$root/tests/ctest_resources.json")
@@ -110,14 +98,14 @@ else
     mkdir -p "$root/build/Testing"
     inventory="$root/build/Testing/$name-inventory.json"
     report="$root/build/Testing/ctest-$name.xml"
-    python "$root/scripts/ci/test_suites.py" --suite "$suite" "${shard_args[@]}" --build "$root/build" \
+    python "$root/scripts/ci/test_suites.py" "${shard_args[@]}" --build "$root/build" \
       --inventory "$inventory"
-    # Preserve full passing output so missing compatibility legs cannot hide
-    # beyond CTest's default truncation limit.
+    # Preserve full passing output so a data skip's "SKIP: needs" line cannot
+    # hide beyond CTest's default truncation limit.
     ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" "${resources[@]}" \
       --test-output-size-passed 1048576 --test-output-size-failed 1048576 \
       --output-junit "$report" "${selection[@]}"
-    python "$root/scripts/ci/test_suites.py" --suite "$suite" --inventory "$inventory" --report "$report"
+    python "$root/scripts/ci/test_suites.py" --inventory "$inventory" --report "$report"
 fi
 
 if [[ "$build_godot" == "1" ]]; then

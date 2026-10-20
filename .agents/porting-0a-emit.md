@@ -41,7 +41,7 @@ Per recipient, per frame, all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
   golden profile caches to `<golden>.0a.json` (instant re-runs; `--refresh` after a decoder change). This
   is the machine-readable "are we sending what retail sends" check.
 - **Golden:** `retail-ashi5a-*.pcapng` = retail host + retail joiner on ASH_I5A (the spec; C 0x0f
-  = 0). Captures are machine-local and never committed (`docs/asset-gated-tests.md`); the live
+  = 0). Captures are machine-local and never committed (`docs/test-suite.md`); the live
   re-capture runbook is `.agents/retail-lan-parity.md`.
 
 ## Rules

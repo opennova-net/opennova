@@ -464,10 +464,11 @@ constexpr int kType = kLogicTypeSlot;
 constexpr int kNote = -1;
 
 // A template's words: [a|b] the first where `negated` is false, else the second; {1}..{4} the
-// parameter (`word(slot)`, the slot's run), {s} `subject`; the rest the type's own words. A negated template
-// with no choice says "not" before it.
+// parameter (`word(slot)`, the slot's run, or a note from slot `notes_from` on: a value the game writes
+// there itself, which no edit of the slot reaches), {s} `subject`; the rest the type's own words. A negated
+// template with no choice says "not" before it.
 template <class Word>
-Runs fill(const char *words, bool negated, const Runs &subject, const Word &word) {
+Runs fill(const char *words, bool negated, const Runs &subject, const Word &word, int notes_from = kType) {
 	std::string out;
 	bool chose = false;
 	for (const char *c = words; *c; ++c) {
@@ -494,7 +495,7 @@ Runs fill(const char *words, bool negated, const Runs &subject, const Word &word
 				filled.add(literal, kType);
 				literal.clear();
 				if (key == 's') filled.add(subject);
-				else filled.add(word(key - '1'), key - '1');
+				else filled.add(word(key - '1'), key - '1' < notes_from ? key - '1' : kNote);
 				i += 2;
 				continue;
 			}
@@ -815,9 +816,10 @@ std::vector<LogicRun> action_runs(const bms::Action &action, const MissionNames 
 		if (area && !names.zone_resolves(action.param1))
 			return out.add("do nothing (the game drops this action: no area resolves zone " + number(action.param1) + ")", kType)
 			        .take();
+		// Those two are notes, not the slots' runs: the stored values are never read.
 		const auto area_word = [&](int slot) { return area && slot >= 2 ? std::string("(a value of the area's box)") : word(slot); };
 		if (sub == 0) return out.add("do nothing to ", kType).add(subject).add(" (no AI change)", kType).take();
-		if (const AiRow *row = ai_row(sub)) return fill(row->words, false, subject, area_word).take();
+		if (const AiRow *row = ai_row(sub)) return fill(row->words, false, subject, area_word, area ? 2 : kType).take();
 		return out.add("apply AI command " + number(sub) + " to ", kType).add(subject).add(" (what it does is unknown)", kType).take();
 	}
 	if (const ActionRow *row = action_row(type); row && *row->words) return fill(row->words, false, Runs(), word).take();
@@ -999,11 +1001,11 @@ const std::vector<LogicType> &logic_types(bool actions) {
 }
 
 const std::vector<const LogicType *> &logic_common_types(bool actions) {
-	// The ranking by records held (the retail leg's measure): Entity is destroyed 1,076, Group is in an area 606,
-	// Event has fired 501, Group has passed a waypoint 484, Group has lost units 289, Entity is in an area 267,
-	// Group is wiped out 166, Variable equals 126; Send group along a path 659, Send entity along a path 491,
-	// Kill entity 343, Re-arm event 340, Group AI: Patrol speed 334, Remove entity 307, Show or hide a win
-	// objective 275, Play dialog 238.
+	// The ranking by records held (measured once over the install's 115 missions): Entity is destroyed 1,076,
+	// Group is in an area 606, Event has fired 501, Group has passed a waypoint 484, Group has lost units 289,
+	// Entity is in an area 267, Group is wiped out 166, Variable equals 126; Send group along a path 659, Send
+	// entity along a path 491, Kill entity 343, Re-arm event 340, Group AI: Patrol speed 334, Remove entity 307,
+	// Show or hide a win objective 275, Play dialog 238.
 	struct Pair {
 		int32_t type, sub;
 	};

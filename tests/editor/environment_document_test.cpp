@@ -3,8 +3,8 @@
 // writes them, its keyframes a list of at most 16, what the reader reads otherwise than written as the
 // file's source findings; its references the graph's edges; the missions that run on it, each with its
 // terrain, its header's overrides and its water plane (session/environment_uses, the environment_uses
-// query); an edit followed by the graph, undone, saved. The retail leg (OPENNOVA_JO_DIR): every .env of
-// the install read through the document and written again reads back as the same environment, field for
+// query); an edit followed by the graph, undone, saved. Every .env fixture, the shipped environments' line
+// forms among them, read through the document and written again reads back as the same environment, field for
 // field.
 #include <algorithm>
 #include <cstdio>
@@ -31,7 +31,6 @@
 #include <formats/tga/tga.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -785,53 +784,44 @@ int test_session() {
 	return 0;
 }
 
-// Every .env of the install through the document and written again: the same environment, field for field.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (every retail .env through the environment document)");
-		return 0;
+// One .env through the document and written again: not blocked, the same environment field for field, and written
+// again from what it wrote, the same bytes with no source issue.
+bool env_written_again(const std::string &file, const std::vector<uint8_t> &bytes, size_t &issues) {
+	auto document = std::make_unique<EnvironmentDocument>();
+	Diagnostic error;
+	if (!document->load_bytes(bytes, file, AssetKind::Environment, "jo", error) || document->blocked() || !document->config()) {
+		std::fprintf(stderr, "FAIL: %s: does not load, or blocked\n", file.c_str());
+		return false;
 	}
-	opennova::Vfs vfs;
-	TEST_EXPECT(vfs.mount_game(install.c_str(), std::string(), opennova::VfsMountMode::Packed));
-	size_t files = 0, issues = 0, blocked = 0, rates = 0;
-	for (const auto &location : vfs.list_files()) {
-		const std::string &name = location.logical_name;
-		if (name.size() < 4) continue;
-		std::string extension = name.substr(name.size() - 4);
-		std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-		if (extension != ".env") continue;
-		std::vector<uint8_t> bytes;
-		if (!vfs.read_file_raw(name, bytes) || bytes.empty()) continue;
-		++files;
-		auto document = std::make_unique<EnvironmentDocument>();
-		Diagnostic error;
-		TEST_EXPECT(document->load_bytes(bytes, name, AssetKind::Environment, "jo", error));
-		issues += document->issues().size();
-		for (const SourceIssue &issue : document->issues())
-			std::printf("  %s line %zu: %s\n", name.c_str(), issue.line, issue.message.c_str());
-		if (document->blocked()) {
-			++blocked;
+	issues += document->issues().size();
+	for (const SourceIssue &issue : document->issues()) std::printf("  %s line %zu: %s\n", file.c_str(), issue.line, issue.message.c_str());
+	const SerializeResult written = document->serialize();
+	const std::string difference = written.ok() ? config_difference(*document->config(), parsed(written.text)) : "unwritable";
+	if (!difference.empty()) std::fprintf(stderr, "FAIL: %s: %s reads back otherwise\n", file.c_str(), difference.c_str());
+	auto again = std::make_unique<EnvironmentDocument>();
+	const bool fixed = again->load_bytes(bytes_of(written.text), file, AssetKind::Environment, "jo", error) &&
+	                   again->serialize().text == written.text && again->issues().empty();
+	if (!fixed) std::fprintf(stderr, "FAIL: %s: a second save writes otherwise\n", file.c_str());
+	return difference.empty() && fixed;
+}
+
+// Every .env fixture through the document and written again, field for field: the minted synth_full.env (every
+// keyword), the line forms the shipped environments take (fixtures/env/line_forms.env, authored after the census of
+// JO:CA's ten FULL_*.ENV), and the base game's and its expansion's own. A fixture missing fails.
+int test_fixtures(const std::string &repo) {
+	size_t files = 0, issues = 0, failed = 0;
+	for (const char *file : {"fixtures/env/synth_full.env", "fixtures/env/line_forms.env", "assets/onisle1.env", "assets/onrain1.env",
+	                         "expansions/onjo1/terrain/onstorm1.env"}) {
+		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
+		if (bytes.empty()) std::fprintf(stderr, "FAIL: %s: missing\n", file);
+		if (bytes.empty() || !env_written_again(file, bytes, issues)) {
+			++failed;
 			continue;
 		}
-		const Config *held = document->config();
-		TEST_EXPECT(held != nullptr);
-		if (!held) continue;
-		rates += held->tod_rate_set;
-		const SerializeResult written = document->serialize();
-		TEST_EXPECT(written.ok());
-		const std::string difference = config_difference(*held, parsed(written.text));
-		if (!difference.empty()) std::fprintf(stderr, "FAIL: %s: %s reads back otherwise\n", name.c_str(), difference.c_str());
-		TEST_EXPECT(difference.empty());
-		// Written again from what it wrote, it writes the same bytes.
-		auto again = std::make_unique<EnvironmentDocument>();
-		TEST_EXPECT(again->load_bytes(bytes_of(written.text), name, AssetKind::Environment, "jo", error) &&
-		            again->serialize().text == written.text && again->issues().empty());
+		++files;
 	}
-	std::printf("retail: %zu environments read and written again field for field (%zu source issues, %zu blocked, %zu "
-	            "with a tod_rate)\n",
-	            files, issues, blocked, rates);
-	TEST_EXPECT(files >= 10 && blocked == 0);
+	TEST_EXPECT(failed == 0);
+	std::printf("fixtures: %zu environments read and written again field for field (%zu source issues)\n", files, issues);
 	return 0;
 }
 
@@ -950,8 +940,7 @@ int test_mission_terrain() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_type();
 	failures += test_document(repo);
@@ -960,7 +949,7 @@ int main(int argc, char **argv) {
 	failures += test_terrain_keys(repo);
 	failures += test_session();
 	failures += test_mission_terrain();
-	failures += test_retail();
+	failures += test_fixtures(repo);
 	if (failures == 0) std::printf("editor_environment_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

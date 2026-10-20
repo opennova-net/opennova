@@ -1,0 +1,7 @@
+// Original JO x86; regenerate with scripts/oracles/wac_parity.py.
+{"1c86d60b8ea2639cb59e60d21fc21b326d6cd3c1a73de599beaccb6c63fdec8a", "f44bda2750ccd8e2fc6da6867f65f802c4f42e6b0ff1363c490f3c32c8f8fc37"}, // assets/server.wac
+{"288df354f85994ce6e25a2e5000a728bd505f947592e5040c561c5c668893d28", "58de479f43b95c2058934d70cae34f94df295e710ae31f9b7d1a01052924e494"}, // fixtures/wac/forms.wac
+{"673de892d6580ad5df66d6e0cd54a746e3a01b29cc9117a98762d63265329d4d", "f44bda2750ccd8e2fc6da6867f65f802c4f42e6b0ff1363c490f3c32c8f8fc37"}, // assets/game.wac
+{"683fe1a5e484a729413d7614c2538ccf7629b3bc37cfa419ef9d233baf1aa142", "2a7b95be4e621503c60be338e6edd20eca49fcf20d895b0e6af8e7eda5a9e5fa"}, // assets/onjo_m1.wac
+{"8b808c97d336830b0c8630446037817e505136aaa3669d3668d09b8baeb322d8", "dcf13e0aa7feab816d2439eaea5148ca32d6521fcd1f217ef5d4e96866fd8d33"}, // expansions/onjo1/missions/onjo1_m1.wac
+{"afc238ea6981d0d1129053c0e75ec6a755b3c42bbd294e5784612e69be76855d", "b0cf84ebc88bf6649470fee57167a69154dad6b7a3669d0a17d059cfe0786a3e"}, // fixtures/wac/text_document.wac

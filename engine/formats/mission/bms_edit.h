@@ -25,7 +25,7 @@ namespace opennova::mission {
 void make_default(bms::File &file);
 // A new mission as an author starts one: make_default's file, named, on a terrain and under an
 // environment, with the header values the shipped missions hold in common [corpus, bms_edit.cpp:
-// mission_corpus's retail leg holds each to the shipped missions' most common value]. It holds no
+// each the shipped missions' most common value, measured once over them]. It holds no
 // entity, area trigger or event. False, with `error` and `file` untouched, for a name past its slot
 // (the mission name's 32 bytes, the designer's 32, the terrain's and the environment's 16).
 struct BlankMission {
@@ -97,7 +97,7 @@ bool remove_entity(bms::File &file, EntityKind kind, size_t index, std::string &
 // record's +0x4f @ 0x44c9f5 and the order to its +0x30 @ 0x44c9ff; MissionDocument_RebuildWaypointPaths @ 0x44cfd0, the 6005 item's
 // markers alone, a number outside 1..128 cleared, a bubble sort on the order @ 0x44d0e9..0x44d0f3;
 // MIS_ExportBmsFile @ 0x44f920, the count @ 0x4508a6 and the 32 slots @ 0x4508c1]. Every shipped path agrees with
-// its markers (mission_corpus's retail leg). The edits below set the markers' two fields and lay out each
+// its markers (swept once; mission_corpus holds the rule). The edits below set the markers' two fields and lay out each
 // path they touch as the original's writer does; a path of more than 32 stops keeps its count over its 32
 // slots, as CP19.bms's path 6 of 39 does, the game reading the next record's words for the stops past them [orig:
 // AIWaypoint_UpdateTarget @0x457476]. Which marker a stop names the runtime reads unbounded [orig:
@@ -119,6 +119,9 @@ void lay_out_waypoint_path(bms::File &file, size_t index);
 // out a path from those alone).
 bool set_waypoint_path(bms::File &file, size_t index, const std::vector<int> &marker_indices,
 		int flags, std::string &error);
+// Path `index`'s flags (bms::WaypointFlags) made `flags`, through the path's field row: its stops, its markers'
+// fields and the count it stores stay as they stand. Refused for a path out of range.
+bool set_waypoint_path_flags(bms::File &file, size_t index, int flags, std::string &error);
 bool clear_waypoint_path(bms::File &file, size_t index, std::string &error);
 // A new marker record put on `path_index` at `insert_index` (-1 = at its end); returns the marker's
 // index through `out_marker_index`.

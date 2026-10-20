@@ -5,8 +5,8 @@
 //   1. the native conversion conventions (bad_channel_quat = normalize(w, x, y, z) reorder
 //      only; bone bind position used as-is),
 //   2. quaternion helper correctness, and
-//   3. world<->local self-consistency on the shipped BINOC.bad (the reference fixture
-//      set, OPENNOVA_JO_ASSETS; a SKIP-LEG retail leg -- catches sign / multiply-order
+//   3. world<->local self-consistency on the stock 19-bone idle's shape (the minted
+//      fixtures/anim/rig19_idle.bad, BINOC.bad's shape; catches sign / multiply-order
 //      bugs; space-independent), and
 //   4. the bind a rig loads with (which clip of the .adm binds, and the translation
 //      gate that bind decides), over synthetic clips minted into a temp root.
@@ -28,7 +28,6 @@
 #include <system_error>
 #include <vector>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -83,8 +82,7 @@ static bool quat_approx(const Quat &a, const Quat &b, float eps = 1e-4f) {
     return approx(a.w, b.w, eps) && approx(a.x, b.x, eps) && approx(a.y, b.y, eps) && approx(a.z, b.z, eps);
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     using namespace opennova::anim;
 
     // --- native conversion conventions (engine Y-up; reorder only, no axis swap) ---
@@ -111,12 +109,27 @@ int main(int argc, char **argv) {
         TEST_EXPECT(approx(v.x, 0.0f) && approx(v.y, 1.0f) && approx(v.z, 0.0f));
     }
 
-    // --- sample the shipped rig (the retail leg) ---
-    const std::string binoc = retail::reference_fixture("bad/BINOC.bad");
-    const bool retail_leg = !binoc.empty();
+    // --- a bind's rows as a quaternion, each of Shepperd's four branches: a small turn (the
+    // trace's), and 150 degrees about x, y and z (each axis's own: a body rig's bind turns its
+    // limbs past a quarter turn, as the shipped binds do) ---
+    {
+        const float c = -0.8660254f, s = 0.5f; // cos and sin of 150 degrees
+        const float rx[9] = {1, 0, 0, 0, c, -s, 0, s, c};
+        const float ry[9] = {c, 0, s, 0, 1, 0, -s, 0, c};
+        const float rz[9] = {c, -s, 0, s, c, 0, 0, 0, 1};
+        const float half_c = 0.25881905f, half_s = 0.96592583f; // cos and sin of 75 degrees
+        TEST_EXPECT(quat_approx(mat3_to_quat(rx), {half_c, half_s, 0, 0}));
+        TEST_EXPECT(quat_approx(mat3_to_quat(ry), {half_c, 0, half_s, 0}));
+        TEST_EXPECT(quat_approx(mat3_to_quat(rz), {half_c, 0, 0, half_s}));
+        const float id[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        TEST_EXPECT(quat_approx(mat3_to_quat(id), {1, 0, 0, 0}));
+    }
+
+    // --- sample the 19-bone rig ---
+    const std::string rig19 = test_paths_fixture("anim/rig19_idle.bad");
     BadFile bad = {};
-    if (retail_leg) {
-    TEST_EXPECT(bad_parse(binoc.c_str(), &bad) == 0);
+    {
+    TEST_EXPECT(bad_parse(rig19.c_str(), &bad) == 0);
 
     Clip clip = sample_clip(bad);
     TEST_EXPECT(clip.bones.size() == 19);
@@ -229,7 +242,7 @@ int main(int argc, char **argv) {
         TEST_EXPECT(rest_follows_shared);
         TEST_EXPECT(default_rest_is_bad);
     }
-    }  // retail_leg
+    }  // the 19-bone rig
 
     // --- compressed clip: per-bone sparse keyframes with non-uniform durations (regression) ---
     // A flat rotations[frame] index snaps a bone to IDENTITY once frame >= its keyframe count; the
@@ -760,7 +773,6 @@ int main(int argc, char **argv) {
         TEST_EXPECT(approx(far[0].x, -1.0f) && approx(far[0].y, 2.0f) && approx(far[0].z, 3.0f));
     }
 
-    if (retail_leg) bad_free(&bad);
-    else return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bad/BINOC.bad (the shipped 19-bone rig)");
+    bad_free(&bad);
     return 0;
 }

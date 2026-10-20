@@ -89,7 +89,7 @@ inline constexpr size_t kFileKindCount = static_cast<size_t>(FileKind::kCount);
 // 0x829f90; fatal check @ 0x4a6f44]: an arbitrary-named .pff never mounts
 // (docs/vfs/vfs-pff-mount-re.md D-VFS-2), so every packed file goes into language.pff,
 // localres.pff or resource.pff (archive_slot_file_name, base/vfs kBootArchiveTable). The placement
-// by kind mirrors retail's (witnessed against the shipped JO install, file_kind_test's retail leg:
+// by kind mirrors retail's (witnessed once against the shipped JO install, pinned by file_kind_test:
 // the boot text bins, the credits and the missions' sound banks in language; menus / defs / missions
 // and their tiles / fonts / music scripts / animations / AI profiles / particles / effects in
 // localres; models / terrain / env / most textures in resource; the few files retail splits from

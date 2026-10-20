@@ -4,7 +4,7 @@
 // refused at a side the game does not sample whole and for a texel of no class (named by its place); written as an
 // 8-bit PCX the game's reader reads back class for class. The foliage map: an indexed picture by its indices (its
 // palette kept), a grey one by its levels; refused holding colour (the texel named) or at a side the game does not
-// sample whole. With --retail, JO:CA's shipped Dvxi5_m.pcx and Dvxi5_f.pcx read the same way: their indices kept.
+// sample whole. The shipped maps' forms (Dvxi5_m.pcx and Dvxi5_f.pcx's, minted) read the same way: their indices kept.
 #include <runtime/terrain/terrain_map_source.h>
 
 #include <algorithm>
@@ -13,16 +13,16 @@
 #include <utility>
 #include <vector>
 
-#include <base/resource_index/resource_index.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/png/png_decode.h>
 #include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
 #include <formats/trn/charmap_legend.h>
 
+#include "common/file_io.h"
 #include "common/png_test_support.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 
 namespace {
 
@@ -245,15 +245,13 @@ int test_foliage_reads() {
 	return 0;
 }
 
-// With --retail: JO:CA's shipped maps read as the import reads a picture. The char map is 512 x 512, 8-bit, its
+// The shipped maps' forms (fixtures/terrain/variants, minted by tests/fixtures/terrain_variants_gen.cpp after
+// JO:CA's Dvxi5_m.pcx and Dvxi5_f.pcx) read as the import reads a picture. The char map is 512 x 512, 8-bit, its
 // palette the legend's first fifteen colours and white past them; the foliage map 256 x 256, 8-bit, its codes 252 to
 // 255; their indices (and the foliage map's palette) kept as they are.
-int test_retail_maps() {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (shipped maps, Dvxi5_m.pcx and Dvxi5_f.pcx)");
-	opennova::ResourceIndex index;
-	std::vector<uint8_t> charmap, foliage;
-	TEST_EXPECT(index.scan(install) && index.read_file("Dvxi5_m.pcx", charmap) && index.read_file("Dvxi5_f.pcx", foliage));
+int test_shipped_maps() {
+	const std::vector<uint8_t> charmap = test_io::read_file(test_paths_fixture("terrain/variants/charmap_m.pcx"));
+	const std::vector<uint8_t> foliage = test_io::read_file(test_paths_fixture("terrain/variants/foliage_f.pcx"));
 	std::string why;
 	IndexedImage8 shipped, out;
 	TEST_EXPECT(opennova::decode_pcx_indexed(charmap.data(), charmap.size(), shipped, why) && shipped.width == 512 &&
@@ -262,23 +260,23 @@ int test_retail_maps() {
 		const opennova::CharmapLegendColour &c = i < 15 ? kCharmapLegend[i] : opennova::kCharmapLegendRest;
 		TEST_EXPECT(shipped.palette[i][0] == c.r && shipped.palette[i][1] == c.g && shipped.palette[i][2] == c.b);
 	}
-	TEST_EXPECT(decode_charmap_source("Dvxi5_m.pcx", charmap, out, why) && out.indices == shipped.indices);
+	TEST_EXPECT(decode_charmap_source("charmap_m.pcx", charmap, out, why) && out.indices == shipped.indices);
 	TEST_EXPECT(opennova::decode_pcx_indexed(foliage.data(), foliage.size(), shipped, why) && shipped.width == 256 &&
 	            shipped.height == 256);
-	TEST_EXPECT(decode_foliage_map_source("Dvxi5_f.pcx", foliage, out, why) && out.indices == shipped.indices &&
+	TEST_EXPECT(std::all_of(shipped.indices.begin(), shipped.indices.end(), [](uint8_t code) { return code >= 252; }));
+	TEST_EXPECT(decode_foliage_map_source("foliage_f.pcx", foliage, out, why) && out.indices == shipped.indices &&
 	            std::equal(&out.palette[0][0], &out.palette[0][0] + 768, &shipped.palette[0][0]));
-	std::printf("retail: Dvxi5's char map and foliage map read, their indices kept\n");
+	std::printf("shipped forms: the char map and foliage map read, their indices kept\n");
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_charmap_reads();
 	failures += test_foliage_reads();
-	failures += test_retail_maps();
+	failures += test_shipped_maps();
 	if (failures == 0) std::printf("terrain_map_source: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

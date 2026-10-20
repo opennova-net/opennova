@@ -12,8 +12,8 @@
 // agrees with master's other copies of its facts: the shader loader's stored form
 // (vfs_loader_takes_stored), the boot table's names (kBootArchiveTable), the mission list's walk
 // (runtime/mission/mission_catalog) and the names the game reads from an expansion's folder
-// (vfs_read_from_expansion_folder). With --retail, retail's boot archives hold each entry where its
-// kind's slot says, but the splits recorded with why.
+// (vfs_read_from_expansion_folder). And retail's boot archives hold each entry where its kind's slot
+// says, but the splits recorded with why, over an install minted from the table.
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -28,8 +28,10 @@
 #include <base/vfs/vfs_decode.h>
 #include <formats/pff/pff.h>
 
-#include "common/retail_paths.h"
+#include "common/file_io.h"
+#include "common/temp_dir.h"
 #include "common/test_expect.h"
+#include "pff/pff_packer_archive.h"
 
 using namespace opennova;
 
@@ -294,10 +296,14 @@ static int test_master_copies() {
 	return 0;
 }
 
-// Retail's boot archives against the table (the install under OPENNOVA_JO_DIR): each entry sits in the
-// archive its kind's slot names, but where retail splits a kind over two archives by what a file is for,
-// which no name says (kRetailSplits, each with why). A split no entry needs any more fails too, so the
-// list stays retail's.
+// Retail's boot archives against the table: each entry sits in the archive its kind's slot names, but
+// where retail splits a kind over two archives by what a file is for, which no name says
+// (kRetailSplits, each with why). The retired file_kind_retail row held every entry of JO:CA's three
+// boot archives to this rule and found these eight splits and no other; a split no entry needs fails
+// too, so the list stays retail's. The rule runs here over an install minted from the table itself
+// (one packed file of every packed kind on its slot, one file per split in the archive retail puts it
+// in, the archives laid out as the retail packer lays them out, tests/pff/pff_packer_archive.h), and
+// the check's two refusals over the same install with one file astray and one split's file left out.
 struct RetailSplit {
 	ArchiveSlot archive;
 	FileKind kind;
@@ -314,22 +320,24 @@ constexpr RetailSplit kRetailSplits[] = {
 	{ ArchiveSlot::Resource, FileKind::OtherDefs, "overcast.def", "a weather .def packed with the terrains" },
 	{ ArchiveSlot::Localres, FileKind::Notes, "mislist.txt", "a list the game never reads (no kind packs it)" },
 };
+constexpr size_t kRetailSplitCount = sizeof(kRetailSplits) / sizeof(kRetailSplits[0]);
 
-static int test_retail_archives() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the boot archives' entries against their kinds' slots)");
-		return 0;
-	}
+// The failures of the boot archives under `install` against the table and kRetailSplits: an entry off
+// its kind's slot that no split lists, and a split no entry needs.
+int boot_archive_failures(const std::string &install) {
 	int failures = 0;
-	bool used[sizeof(kRetailSplits) / sizeof(kRetailSplits[0])] = {};
+	bool used[kRetailSplitCount] = {};
 	const std::vector<std::string> slots = vfs_boot_archive_slots(install);
 	size_t archives = 0, entries = 0, split = 0;
 	for (size_t slot = 0; slot < slots.size(); ++slot) {
 		if (slots[slot].empty()) continue;
 		pff::PffArchive archive{};
-		const std::string path = retail::join(install, slots[slot]);
-		TEST_EXPECT(pff::pff_open(&archive, path.c_str()) == 0);
+		const std::string path = install + "/" + slots[slot];
+		if (pff::pff_open(&archive, path.c_str()) != 0) {
+			std::fprintf(stderr, "%s does not open\n", path.c_str());
+			++failures;
+			continue;
+		}
 		++archives;
 		for (uint32_t i = 0; i < archive.entry_count; ++i) {
 			const pff::PffEntry &entry = archive.entries[i];
@@ -338,14 +346,14 @@ static int test_retail_archives() {
 			std::vector<uint8_t> bytes;
 			if (resource_extension_for_name(name) == ".bin") {
 				bytes.resize(entry.size);
-				TEST_EXPECT(pff::pff_extract(&archive, &entry, bytes.data(), bytes.size()) == 0);
+				if (pff::pff_extract(&archive, &entry, bytes.data(), bytes.size()) != 0) ++failures;
 			}
 			const FileKind kind = file_kind_for_file(name, bytes.empty() ? nullptr : &bytes);
 			++entries;
 			if (static_cast<size_t>(file_kind_facts(kind).archive_slot) == slot) continue;
 			const std::string lower = strutil::to_lower(name);
 			bool listed = false;
-			for (size_t at = 0; at < sizeof(kRetailSplits) / sizeof(kRetailSplits[0]) && !listed; ++at) {
+			for (size_t at = 0; at < kRetailSplitCount && !listed; ++at) {
 				const RetailSplit &row = kRetailSplits[at];
 				if (static_cast<size_t>(row.archive) != slot || row.kind != kind || (row.name && lower != row.name))
 					continue;
@@ -361,8 +369,8 @@ static int test_retail_archives() {
 		}
 		pff::pff_close(&archive);
 	}
-	TEST_EXPECT(archives == slots.size());
-	for (size_t at = 0; at < sizeof(kRetailSplits) / sizeof(kRetailSplits[0]); ++at)
+	if (archives != slots.size()) ++failures;
+	for (size_t at = 0; at < kRetailSplitCount; ++at)
 		if (!used[at]) {
 			std::fprintf(stderr, "no entry of %s needs the split %s (%s)\n", archive_slot_file_name(kRetailSplits[at].archive),
 			             kRetailSplits[at].name ? kRetailSplits[at].name : "of its kind", kRetailSplits[at].why);
@@ -373,10 +381,97 @@ static int test_retail_archives() {
 	return failures;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+// A `.bin`'s content for `kind`: the magic of the classifier's rule that gives it (a string table's
+// RTXT, a music script's SCR0), else raw bytes.
+std::vector<uint8_t> bin_content(FileKind kind) {
+	std::vector<uint8_t> bytes = {0x12, 0x34};
+	for (const ResourceKindRule &rule : resource_kind_rules())
+		if (*rule.magic && std::string(rule.extension) == ".bin" &&
+		    file_kind_for_resource_kind(rule.kind) == kind)
+			bytes.assign(rule.magic, rule.magic + std::strlen(rule.magic));
+	bytes.resize(16, 0);
+	return bytes;
+}
+
+// The minted install's archives, slot by slot: one file of every kind a packed slot holds, named by the
+// kind's whole name, its first listed name or its first extension, then one file of every split in the
+// archive the split names. `skip_split` leaves that split's file out; `astray` adds a model to the
+// language archive.
+std::vector<pff_packer::Entry> minted_slot(ArchiveSlot slot, size_t skip_split, bool astray) {
+	std::vector<pff_packer::Entry> out;
+	uint32_t seed = 1;
+	const auto add = [&](const std::string &name, FileKind kind) {
+		pff_packer::Entry e;
+		e.name = name;
+		e.data = resource_extension_for_name(name) == ".bin" ? bin_content(kind) : pff_packer::payload(seed++, 24);
+		e.time = 1069184788u;
+		e.checksum = pff_packer::plain_checksum(e.data);
+		out.push_back(std::move(e));
+	};
+	for (size_t i = 0; i < kFileKindCount; ++i) {
+		const FileKindFacts &row = file_kind_facts(FileKind(i));
+		if (row.archive_slot != slot) continue;
+		std::string name;
+		if (row.file_name) name = row.file_name;
+		else if (row.file_names && *row.file_names) name = *row.file_names;
+		else if (row.extensions && *row.extensions) name = std::string("kind") + std::to_string(i) + *row.extensions;
+		if (name.empty() || name.size() > size_t(pff::PFF_NAME_SIZE)) continue;
+		std::vector<uint8_t> bytes = resource_extension_for_name(name) == ".bin" ? bin_content(row.kind) : std::vector<uint8_t>();
+		if (file_kind_for_file(name, bytes.empty() ? nullptr : &bytes) != row.kind) continue;
+		add(name, row.kind);
+	}
+	for (size_t at = 0; at < kRetailSplitCount; ++at) {
+		const RetailSplit &row = kRetailSplits[at];
+		if (row.archive != slot || at == skip_split) continue;
+		const char *extension = file_kind_facts(row.kind).extensions ? *file_kind_facts(row.kind).extensions : "";
+		add(row.name ? std::string(row.name) : std::string("split") + std::to_string(at) + extension, row.kind);
+	}
+	if (astray && slot == ArchiveSlot::Language) add("astray.3di", FileKind::Model);
+	return out;
+}
+
+int write_minted_install(const std::string &dir, size_t skip_split, bool astray) {
+	for (const ArchiveSlot slot : {ArchiveSlot::Language, ArchiveSlot::Localres, ArchiveSlot::Resource})
+		TEST_EXPECT(test_io::write_file(dir + "/" + archive_slot_file_name(slot),
+		                                pff_packer::archive(minted_slot(slot, skip_split, astray))));
+	return 0;
+}
+
+static int test_boot_archives() {
+	// Every split names a kind whose own slot is another place (mislist.txt's none at all).
+	for (const RetailSplit &row : kRetailSplits) TEST_EXPECT(file_kind_facts(row.kind).archive_slot != row.archive);
 	int failures = 0;
-	failures += test_retail_archives();
+	{
+		test_temp::TempDir dir("file_kind_install");
+		TEST_EXPECT(write_minted_install(dir.root(), kRetailSplitCount, false) == 0);
+		const int found = boot_archive_failures(dir.root());
+		if (found != 0) std::fprintf(stderr, "the minted install fails the rule %d time(s)\n", found);
+		failures += found != 0;
+	}
+	{
+		// A model in the language archive, which no split lists: one failure.
+		test_temp::TempDir dir("file_kind_astray");
+		TEST_EXPECT(write_minted_install(dir.root(), kRetailSplitCount, true) == 0);
+		std::printf("file_kind: (expected) ");
+		const int found = boot_archive_failures(dir.root());
+		if (found != 1) std::fprintf(stderr, "a file astray failed %d time(s), not once\n", found);
+		failures += found != 1;
+	}
+	{
+		// overcast.def's split with no overcast.def in resource.pff: one failure, the split unused.
+		test_temp::TempDir dir("file_kind_unused_split");
+		TEST_EXPECT(write_minted_install(dir.root(), 6, false) == 0);
+		std::printf("file_kind: (expected) ");
+		const int found = boot_archive_failures(dir.root());
+		if (found != 1) std::fprintf(stderr, "an unused split failed %d time(s), not once\n", found);
+		failures += found != 1;
+	}
+	return failures;
+}
+
+int main() {
+	int failures = 0;
+	failures += test_boot_archives();
 	failures += test_runtime_formats();
 	failures += test_required_files();
 	failures += test_boot_files();

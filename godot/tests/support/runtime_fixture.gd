@@ -7,6 +7,12 @@ extends RefCounted
 
 static var _directory := ""
 
+# items.def carries the player template row the local body spawns from (105305,
+# "Player #1, Multiplayer", as assets/items.def has it: kPlayerInfantryTypeId
+# 0x14B9 + the item id offset), after the rows before it so its ordinal is not 0:
+# a pool-0 body at ordinal 0 builds no proximity slice [orig:
+# Entity_BuildProximityListsFromPools @0x4B8EB0, the +0x1C test @0x4B8EF9], so
+# it would meet no building, ground probe or USE target.
 const TEXT_FILES := {
 	"items.def": """begin "Player #1, Single player"
   id 105310
@@ -51,6 +57,19 @@ end
 begin "waypoint"
   id 106005
   type marker
+end
+
+begin "Player #1, Multiplayer"
+  id 105305
+  type person
+  graphic US01
+  graphicenemy Indo01
+  sid player1_mp
+  anim_def US01
+  hp 150
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
 end
 """,
 	"weapon.def": """ammoclass_max_carry CLASS_556MM		1000

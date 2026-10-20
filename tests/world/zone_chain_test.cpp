@@ -635,6 +635,21 @@ void test_capture_contact_has_no_move_gate_and_contests() {
         CHECK(events_of<ZoneCaptureEvents::TimerWindow>(ev).empty());
         CHECK(f.w.registry.get(zone)->team == 0);
     }
+    {
+        // A teamless body's touch is dropped before the capture request: only
+        // team 1 and team 2 players start a capture. [orig: the gated callback
+        //  @0x4B31DD..0x4B3238 -- the team test]
+        AshFixture f;
+        MatchRules rules = f.w.match.rules();
+        rules.capture_duration_seconds = 3;
+        f.w.match.configure(rules);
+        const EntityHandle zone = spawn_unnumbered_zone(f.w, 0, pos);
+        spawn_soldier(f.w, 0, pos);
+        ZoneCaptureEvents ev;
+        capture_second(f.w, ev);
+        CHECK(events_of<ZoneCaptureEvents::TimedStart>(ev).empty());
+        CHECK(f.w.registry.get(zone)->team == 0);
+    }
 }
 
 // A point can be well inside the gameplay/proximity radius while remaining

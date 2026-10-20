@@ -6,13 +6,11 @@
 // room-transition chain the hand-built unit fixtures cannot: authored OFAC
 // topology in a file, blink-box/section/render-part correspondence.
 //
-// Two legs share the camera walk: the synthetic fixtures/threedi/synth/armory.3di
-// (tests/fixtures/minimal_3di_gen.cpp authors the retail floor plan below)
-// always runs; the retail Armry01.3di (the 00TRa armory) runs when
-// OPENNOVA_JO_ASSETS names the extracted JO corpus (docs/asset-gated-tests.md).
+// The camera walk runs over the synthetic fixtures/threedi/synth/armory.3di
+// (tests/fixtures/minimal_3di_gen.cpp authors the retail 00TRa armory's floor
+// plan below).
 //
-// The floor plan both models share (mission axes, entity-local; model =
-// (-y, z, x)):
+// The floor plan (mission axes, entity-local; model = (-y, z, x)):
 //   blink sec 1 = east room   x  1.1.. 5.7, y -3.2..2.8   (carries the window)
 //   blink sec 2 = west room   x -6.8..-0.6, y -3.2..3.7
 //   blink sec 3 = middle      x -0.5.. 1.1, y -3.2..2.8
@@ -35,7 +33,6 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
-#include "common/retail_paths.h"
 
 using namespace opennova::world;
 using namespace opennova::threedi;
@@ -373,8 +370,7 @@ int run_leg(const char *label, const std::string &path, const VolumeShape &expec
     return failures - failures_before;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     // The synthetic armory: five CB walls/roof, one CA trigger, one VC hull,
     // one CL ladder, three BB rooms (tests/fixtures/minimal_3di_gen.cpp).
     const std::string synthetic = OPENNOVA_ARMRY_FIXTURE;
@@ -383,15 +379,6 @@ int main(int argc, char **argv) {
         return 1;
     }
     run_leg("synthetic", synthetic, VolumeShape{5, 1, 1, 1, 3});
-
-    // The retail 00TRa armory: fourteen CBs, one CA, one VC, no ladder,
-    // three BB rooms.
-    const std::string assets = retail::assets();
-    if (assets.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS for the retail Armry01.3di");
-    } else {
-        run_leg("retail", retail::asset_file("Armry01.3di"), VolumeShape{14, 0, 1, 1, 3});
-    }
 
     if (failures == 0) std::printf("occlusion_armry: all checks passed\n");
     return failures == 0 ? 0 : 1;

@@ -11,11 +11,14 @@
 // viewport query's state and hit over it, a SetViewport of its camera and options, a refused one; the
 // texture opened (the Preview stepping aside for the tab that shows it), the document query's
 // `texture`, the graph's use of it by an item; another file selected and the project closed letting go.
-// The retail leg (OPENNOVA_JO_DIR): a sample of the install's textures of each extension, each read by
-// its reader and loaded as a document.
+// Then one file of each form of texture JO:CA ships (editor/texture_forms.h) and every texture fixture (the
+// base game's in assets/, the shipped terrain files' forms in fixtures/terrain/variants, master's own): each
+// opened, loaded by the game, decoded, no blank form, the right way up, and saved as read (a BFC1-stored one
+// read unpacked), every extension the game's texture readers take among them.
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <map>
 #include <variant>
 #include <memory>
@@ -23,8 +26,6 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
-#include <editor/assets/install_view.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
@@ -34,22 +35,24 @@
 #include <editor/preview/texture_viewport.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewports.h>
-#include <editor/project/project_document.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/bfc1/bfc1.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_dxt.h>
 
-#include "common/retail_paths.h"
+#include "common/file_io.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "common/png_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/texture_forms.h"
 #include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
@@ -75,6 +78,8 @@ std::vector<uint8_t> pattern(uint32_t w, uint32_t h, uint8_t (*alpha)(size_t)) {
 uint8_t graded(size_t i) { return uint8_t(i * 16); }
 uint8_t cutout(size_t i) { return i % 3 ? 255 : 0; }
 uint8_t opaque(size_t) { return 255; }
+uint8_t half_or_whole(size_t i) { return i % 2 ? 255 : 128; }
+uint8_t half(size_t) { return 128; }
 
 std::vector<uint8_t> tga_of(const std::vector<uint8_t> &rgba, uint32_t w, uint32_t h) {
 	std::vector<uint8_t> out;
@@ -137,6 +142,11 @@ int test_decode() {
 	            fact(*image, "alpha") == "on or off: each texel 0 or 255 (a cut-out)");
 	image = decode_texture("plain.tga", tga_of(pattern(3, 2, opaque), 3, 2));
 	TEST_EXPECT(image->alpha == TextureAlpha::None && fact(*image, "size") == "3 x 2 (a side is no power of two)");
+	// Two alpha values that are not 0 and 255, or one that is neither, grade it: no cut-out.
+	image = decode_texture("veil.tga", tga_of(pattern(4, 2, half_or_whole), 4, 2));
+	TEST_EXPECT(image->alpha == TextureAlpha::Graded && fact(*image, "alpha") == "graded: 2 values from 128 to 255");
+	image = decode_texture("haze.tga", tga_of(pattern(4, 2, half), 4, 2));
+	TEST_EXPECT(image->alpha == TextureAlpha::Graded);
 	// A top-left TGA: the game reads it bottom up all the same, so it shows upside down.
 	std::vector<uint8_t> top = tga_of(rgba, 4, 4);
 	top[17] |= 0x20;
@@ -371,61 +381,122 @@ int test_session() {
 	return 0;
 }
 
-// --- the retail leg ----------------------------------------------------------------------------------
+// --- the shipped forms and the fixtures ----------------------------------------------------------------
 
-// A sample of the install's textures of each extension: each read by its reader and loaded as a
-// document, the game loading it; their counts said.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's textures)");
-		return 0;
+// What every texture JO:CA ships holds (the census: all 2,579): the document opens it, the game loads it, its
+// texels decode, it is no blank form and it stands the right way up.
+bool opens_whole(const std::string &name, const std::vector<uint8_t> &bytes, std::shared_ptr<const TextureImage> *image_out = nullptr) {
+	std::unique_ptr<DocumentBase> document = make_texture_document();
+	Diagnostic error;
+	if (!document->load_bytes(bytes, name, AssetKind::Texture, "jo", error)) {
+		std::fprintf(stderr, "%s: does not open: %s\n", name.c_str(), error.message.c_str());
+		return false;
 	}
-	ProjectDocument project;
-	project.target_game = "jo";
-	InstallView install_view;
-	std::string why;
-	TEST_EXPECT(install_view.open(install_spec(install, project), why));
-	const opennova::Vfs &mount = install_view.vfs();
-	constexpr size_t kSample = 40;
-	std::map<std::string, size_t> listed, opened;
-	size_t texels = 0;
-	for (const opennova::VfsFileLocation &location : mount.list_files()) {
-		const std::string &name = location.logical_name;
-		if (classify_asset(name, nullptr) != AssetKind::Texture) continue;
-		std::string extension = name.substr(name.find_last_of('.') + 1);
-		for (char &c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
-		if (++listed[extension] > kSample) continue;
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(mount.read_file_raw(name, bytes));
+	const auto &texture = dynamic_cast<const TextureDocument &>(*document);
+	const std::shared_ptr<const TextureImage> image = texture.image();
+	if (!image || !image->loads || !image->decoded || image->blank || image->width() == 0 || image->upside_down) {
+		std::fprintf(stderr, "%s: %s%s\n", name.c_str(), image ? image->refusal.c_str() : "no image", image ? image->undecoded.c_str() : "");
+		return false;
+	}
+	if (image_out) *image_out = image;
+	return true;
+}
+
+std::string extension_of(const std::string &name) {
+	std::string extension = name.substr(name.find_last_of('.') + 1);
+	for (char &c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
+	return extension;
+}
+
+// One file of each form of texture JO:CA ships (editor/texture_forms.h): each opens whole; a save writes the bytes
+// read; a BFC1-stored one is read unpacked, the picture its plain bytes make.
+int test_shipped_forms(std::map<std::string, size_t> &read) {
+	size_t forms = 0;
+	for (const texture_forms::TextureForm &form : texture_forms::shipped_texture_forms()) {
+		std::shared_ptr<const TextureImage> image;
+		TEST_EXPECT(opens_whole(form.name, form.bytes, &image));
+		std::vector<uint8_t> plain = form.bytes;
+		TEST_EXPECT(opennova::bfc1::bfc1_unpack(plain) && (plain != form.bytes) == form.packed);
 		std::unique_ptr<DocumentBase> document = make_texture_document();
 		Diagnostic error;
-		TEST_EXPECT(document->load_bytes(bytes, name, AssetKind::Texture, "jo", error));
-		const TextureImage &image = *dynamic_cast<const TextureDocument &>(*document).image();
-		if (!image.loads || !image.decoded || image.blank)
-			std::fprintf(stderr, "retail: %s: %s%s\n", name.c_str(), image.refusal.c_str(), image.undecoded.c_str());
-		TEST_EXPECT(image.loads && image.decoded && !image.blank && image.width() > 0 && !image.upside_down);
-		texels += size_t(image.width()) * image.height();
-		++opened[extension];
+		TEST_EXPECT(document->load_bytes(form.bytes, form.name, AssetKind::Texture, "jo", error) &&
+		            document->serialize().text == std::string(plain.begin(), plain.end()));
+		if (form.packed && image) {
+			const std::shared_ptr<const TextureImage> unpacked = decode_texture(form.name, plain);
+			TEST_EXPECT(unpacked && unpacked->levels.size() == image->levels.size() && !unpacked->levels.empty() &&
+			            unpacked->levels[0].rgba == image->levels[0].rgba);
+		}
+		++read[extension_of(form.name)];
+		++forms;
 	}
-	for (const auto &[extension, count] : listed)
-		std::printf("retail: %zu .%s files, %zu read\n", count, extension.c_str(), opened[extension]);
-	// Every extension the game's texture readers take is in the install, each sample read whole.
-	for (const char *extension : {"dds", "mdt", "tga", "pcx", "png"})
-		TEST_EXPECT(listed[extension] > 0 && opened[extension] == std::min(listed[extension], kSample));
-	std::printf("retail: %zu texels read\n", texels);
+	std::printf("shipped forms: %zu forms of texture the install ships, each opened whole\n", forms);
+	return 0;
+}
+
+// The texture fixtures: master's (the env and terrain fixtures' maps, the credits' image and graphic), the base
+// game's in assets/ and its expansion's models' (our own art), and the shipped terrain files' forms
+// fixtures/terrain/variants holds (minted by tests/fixtures/terrain_variants_gen.cpp): each opens whole and a save
+// writes its bytes. A fixture missing fails.
+int test_fixtures(const std::string &repo, std::map<std::string, size_t> &read) {
+	std::vector<std::string> files = {"fixtures/cbin/particle_dot.tga", "fixtures/cbin/credits_image.png",
+	                                  "fixtures/env/cloud01.pcx",       "fixtures/env/cloud01b.pcx",
+	                                  "fixtures/terrain/tmap/Tmap_m.pcx", "fixtures/terrain/tmap/Tmap_f.pcx",
+	                                  "expansions/onjo1/models/onshed1_0.dds", "expansions/onjo1/models/onshed1_0d.dds",
+	                                  "expansions/onjo1/models/onshed1_1d.dds", "expansions/onjo1/models/onshed1_0n.mdt"};
+	for (const char *variant : {"charmap_m.pcx", "foliage_f.pcx", "picture.pcx", "grey_info2.pcx", "rgb24.pcx", "trntile_a.tga",
+	                            "map_d1.tga", "map_c.tga", "bare24.tga"})
+		files.push_back(std::string("fixtures/terrain/variants/") + variant);
+	size_t base_game = 0;
+	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(repo + "/assets")) {
+		const std::string name = entry.path().filename().string();
+		if (!entry.is_regular_file() || classify_asset(name, nullptr) != AssetKind::Texture) continue;
+		files.push_back("assets/" + name);
+		++base_game;
+	}
+	TEST_EXPECT(base_game > 100);
+	size_t failed = 0, unpulled = 0;
+	for (const std::string &file : files) {
+		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
+		// Our own game's files ride Git LFS, and CI's test jobs pull fixtures/ alone: a pointer is skipped, said (the
+		// forms are the minted fixtures' and test_shipped_forms').
+		if ((file.rfind("assets/", 0) == 0 || file.rfind("expansions/", 0) == 0) && test_io::is_lfs_pointer(bytes)) {
+			std::printf("[skip] %s is an unpulled LFS pointer\n", file.c_str());
+			++unpulled;
+			continue;
+		}
+		const bool whole = !bytes.empty() && opens_whole(file, bytes);
+		std::unique_ptr<DocumentBase> document = make_texture_document();
+		Diagnostic error;
+		const bool saved = whole && document->load_bytes(bytes, file, AssetKind::Texture, "jo", error) &&
+		                   document->serialize().text == std::string(bytes.begin(), bytes.end());
+		if (!saved) {
+			std::fprintf(stderr, "FAIL: %s: %s\n", file.c_str(),
+			             bytes.empty() ? "missing" : !whole ? "does not open whole" : "a save does not write its bytes");
+			++failed;
+			continue;
+		}
+		++read[extension_of(file)];
+	}
+	TEST_EXPECT(failed == 0);
+	std::printf("fixtures: %zu texture files (%zu of the base game, %zu unpulled LFS pointers skipped) each opened whole "
+	            "and saved as read\n",
+	            files.size() - unpulled, base_game, unpulled);
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
+	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = 0;
 	failures += test_decode();
 	failures += test_document();
 	failures += test_session();
-	failures += test_retail();
+	std::map<std::string, size_t> read;
+	failures += test_shipped_forms(read);
+	failures += test_fixtures(repo, read);
+	// Every extension the game's texture readers take is among them.
+	for (const char *extension : {"dds", "mdt", "tga", "pcx", "png"}) TEST_EXPECT(read[extension] > 0);
 	if (failures == 0) std::printf("editor_texture_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -4,22 +4,21 @@
 // and kept ascending (a tile put in, copied or moved takes the layer of the row before it); a save writes MED's
 // header from the rows, an emptied placement the header alone; a header MED would not write and bytes past the
 // records are source notes a save leaves out; a file the game reads no tile of (no til0 mark, under 16 bytes) or
-// whose count runs past its bytes opens read only. The retail leg opens every JO:CA .til and saves it
-// byte-identical with no finding.
+// whose count runs past its bytes opens read only. Every .til fixture, the shipped overlays' form among them,
+// opens with no finding and saves byte-identical.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/til_document.h>
 #include <formats/til/til_io.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <string>
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -242,37 +241,35 @@ int test_blank() {
 	return 0;
 }
 
-int test_retail() {
-	if (!retail::selected()) return 0;
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the shipped .til files)");
-		return 0;
-	}
-	int swept = 0;
-	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(assets)) {
-		std::string ext = entry.path().extension().string();
-		for (char &c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-		if (!entry.is_regular_file() || ext != ".til") continue;
-		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().string());
+// Every .til fixture: the base game's and its expansion's mission overlays and the shipped overlays' form (MED's
+// header, every flag combination, layers ascending, fixtures/terrain/variants/med.til, minted by
+// tests/fixtures/terrain_variants_gen.cpp), each opened with no source note and no finding and saved
+// byte-identical. A fixture missing fails.
+int test_fixtures(const std::string &repo) {
+	int swept = 0, failures = 0;
+	for (const char *file : {"assets/onjo_m1.til", "expansions/onjo1/missions/onjo1_m1.til", "fixtures/terrain/variants/med.til"}) {
+		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
 		TilDocument document;
 		Diagnostic error;
-		const std::string name = entry.path().filename().string();
-		TEST_EXPECT(document.load_bytes(bytes, name, AssetKind::TileInfo, "jo", error));
-		TEST_EXPECT(!document.blocked() && document.issues().empty() && validate_til_file(document).empty());
-		TEST_EXPECT(document.serialize().text == std::string(bytes.begin(), bytes.end()));
+		const bool opened = !bytes.empty() &&
+		                    document.load_bytes(bytes, std::filesystem::path(file).filename().string(), AssetKind::TileInfo, "jo", error) &&
+		                    !document.blocked() && document.issues().empty() && validate_til_file(document).empty();
+		const bool same = opened && document.serialize().text == std::string(bytes.begin(), bytes.end());
 		++swept;
+		if (!same) {
+			std::printf("FAIL: %s (%s)\n", file, bytes.empty() ? "missing" : !opened ? "a note or a finding" : "saved otherwise");
+			++failures;
+		}
 	}
-	TEST_EXPECT(swept > 0);
-	std::printf("retail: %d .til opened and saved byte-identical, no finding\n", swept);
-	return 0;
+	std::printf("fixtures: %d .til opened and saved byte-identical, no finding, %d failures\n", swept, failures);
+	return failures == 0 ? 0 : 1;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	const int failures = test_fields() + test_layers() + test_source_notes() + test_med_notes() + test_blank() + test_retail();
+int main() {
+	const int failures = test_fields() + test_layers() + test_source_notes() + test_med_notes() + test_blank() +
+	                     test_fixtures(test_paths_repo_root(__FILE__));
 	if (failures == 0) std::printf("editor_til_document: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -811,7 +811,47 @@ void bike_indestructible_hull_skips_impact_damage() {
     }
 }
 
+// A physics boat's severity-3 hit costs a flat 100 only when both its impact
+// speed and its tick's travel pass 29300; a slower strike costs nothing.
+// [orig: Entity_ProcessPlatformPhysics @0x481870 -- the boat's impact arm]
+void physics_boat_hard_strike_costs_a_hundred() {
+    for (const int32_t vel : {30000, 20000}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Watercraft);
+        t.physics = 1;
+        auto &v = r.entity();
+        v.veh.vel_x = vel;
+        v.saved_live_valid = false; // the travel reads the impact itself
+        const int32_t before = v.health;
+        r.world.ai.is_authority = true;
+        detail::vehicle_contact_impact(r.world, v, t, 3, EntityHandle{}, 0, 0, 0);
+        CHECK(v.health == (vel > 29300 ? before - 100 : before));
+    }
+}
+
+// A hard landing costs hull health in proportion to the fall and mass, unless
+// the whole Flags word carries Indestructible.
+// [orig: ground @0x47D9A5..0x47DABD -- the Flags 0x4000000 gate]
+void indestructible_hull_skips_landing_damage() {
+    for (int indestructible : {0, 1}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Ground);
+        t.mass = 10;
+        auto &v = r.entity();
+        r.world.ai.is_authority = true;
+        if (indestructible) v.engine_flags |= kEntityFlagIndestructible;
+        v.veh.slide_z = -40000;
+        for (int i = 0; i < 4; ++i) v.veh.plat_acc[i] = 6000;
+        const int32_t depth[4] = {1, 1, 1, 1};
+        const int32_t before = v.health;
+        detail::vehicle_landing_damage(r.world, v, t, depth, 4, 1 << 16);
+        CHECK(indestructible ? v.health == before : v.health < before);
+    }
+}
+
 int main() {
+    physics_boat_hard_strike_costs_a_hundred();
+    indestructible_hull_skips_landing_damage();
     tank_belly_support_keeps_corners_grounded();
     tank_airborne_fit_applies_corner_drop();
     tank_latched_hull_loses_stability();

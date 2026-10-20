@@ -90,23 +90,15 @@ function Get-Median([double[]]$Values) {
 }
 
 if (-not $SkipCapture) {
-    if ([string]::IsNullOrWhiteSpace($MissionResourceDir)) {
-        $MissionResourceDir = Get-OpenNovaRetailAssets
-    }
-    if ([string]::IsNullOrWhiteSpace($RuntimeResourceDir)) {
-        $RuntimeResourceDir = Get-OpenNovaRetailInstall
-    }
     if (-not [string]::IsNullOrWhiteSpace($GodotPath)) { $env:GODOT_BIN = $GodotPath }
     if (-not (Find-GodotBinary)) {
         throw "Set GODOT_BIN or pass -GodotPath to run the capture."
     }
     if ([string]::IsNullOrWhiteSpace($MissionResourceDir)) {
-        throw "Set OPENNOVA_JO_ASSETS or pass -MissionResourceDir " +
-            "to locate the loose authoring mission."
+        throw "Pass -MissionResourceDir to locate the loose authoring mission."
     }
     if ([string]::IsNullOrWhiteSpace($RuntimeResourceDir)) {
-        throw "Set OPENNOVA_JO_DIR or pass -RuntimeResourceDir " +
-            "to locate the packed retail install."
+        throw "Pass -RuntimeResourceDir to locate the packed retail install."
     }
     if ([string]::IsNullOrWhiteSpace($Expansion)) {
         throw "Pass an explicit -Expansion for the comparison capture."

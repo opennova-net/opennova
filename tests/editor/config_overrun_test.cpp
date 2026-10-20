@@ -8,19 +8,17 @@
 // and the lines the game reads nothing of), none for a CBIN credits file nor a kind of another reader; the blanks of
 // both kinds under the line and a credits blank over it refused; and through a session, the row over a closed
 // charattr.def, the build it refuses (the game's own failure, cited), and the file saved, after which the project
-// builds. The retail leg reads every file JO:CA's game reads through the text
-// reader (charattr.def, base and each expansion and the extracted tree; every DATASOURCE a shipped menu names) and
-// asserts none overruns, and that the editor makes no finding of JO:CA's charattr.def.
+// builds. The rule's guard against a finding on what JO:CA ships (every file its game reads through the text
+// reader: charattr.def, and the credits its menus name, CBIN files): a charattr.def in JO:CA's shape at its
+// counts, none past the pool and no finding; each construct of it alone at the line, no finding, and one value
+// more a warning; a CBIN credits file, no pool.
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <memory>
-#include <regex>
-#include <set>
 #include <string>
 #include <vector>
 
-#include <base/vfs/vfs.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/charattr_document.h>
 #include <editor/documents/config_overrun.h>
@@ -39,9 +37,9 @@
 #include <formats/configfile/config_file.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/charattr_shape.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -337,81 +335,113 @@ int test_session() {
 	return 0;
 }
 
-// Every file JO:CA's game reads through the text reader: charattr.def [orig: CharAttr_LoadFromDef @ 0x412177] and
-// each DATASOURCE a menu names [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c5fe -> ConfigFile_LoadGlobal]; the
-// reader's other entry, IniFile_LoadGlobal @ 0x760b00, has no caller.
-int test_retail() {
-	int ran = 0;
-	const auto check = [&](const std::vector<uint8_t> &bytes, const std::string &what, bool charattr) -> int {
-		const configfile::DataStringsPool pool = pool_of(bytes);
-		std::printf("  %s: %s%u values, %u bytes of text values, a %u-byte pool\n", what.c_str(),
-		            pool.binary ? "CBIN (the binary reader), " : "", pool.values, pool.string_bytes, pool.pool_bytes);
-		TEST_EXPECT(pool.overrun() == 0);
-		if (charattr) {
-			TEST_EXPECT(!pool.binary && pool.values == 278 && pool.string_bytes == 288 && pool.pool_bytes == 320);
-			const std::string text(bytes.begin(), bytes.end());
-			std::unique_ptr<DocumentBase> document = loaded(text, "charattr.def", AssetKind::CharAttrDefs);
-			TEST_EXPECT(document && charattr_overrun(*document).empty());
-		}
-		++ran;
-		return 0;
+// The files JO:CA's game reads through the text reader: charattr.def [orig: CharAttr_LoadFromDef @ 0x412177] and
+// each DATASOURCE a menu names [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c5fe -> ConfigFile_LoadGlobal], its
+// nlist.kda (base and jox01), a CBIN file; the reader's other entry, IniFile_LoadGlobal @ 0x760b00, has no caller.
+// A charattr.def in JO:CA's shape (editor_test::jo_charattr_text) holds JO:CA's counts, 278 values over 288 bytes
+// of text values, a 320-byte pool (the shipped file's, base and jox01 alike, read by the reader when the suite
+// still held it): none past the pool, nor past it in the text a save writes, and no finding. A credits file in the
+// CBIN form, laid out as nlist.kda is, goes to the binary reader: no text pool, no value cleared.
+static int test_shipped_shapes() {
+	const std::string jo = editor_test::jo_charattr_text();
+	const configfile::DataStringsPool pool = pool_of(jo);
+	std::printf("  JO:CA's charattr.def shape: %u values, %u bytes of text values, a %u-byte pool\n", pool.values,
+	            pool.string_bytes, pool.pool_bytes);
+	TEST_EXPECT(!pool.binary && pool.values == 278 && pool.string_bytes == 288 && pool.pool_bytes == 320 &&
+	            pool.overrun() == 0);
+	std::unique_ptr<DocumentBase> document = loaded(jo, "charattr.def", AssetKind::CharAttrDefs);
+	TEST_EXPECT(document && charattr_overrun(*document).empty() && pool_of(saved_text(*document)).overrun() == 0);
+	cbin::BinaryConfig config;
+	config.strings = { "env", "text", "scroll_rate", "~JC", "Name_One", "Gunpl22b", "<CR>" };
+	config.xor_key = 0x600DF00Du;
+	cbin::BinaryConfig::Label env;
+	env.name = 1;
+	env.entries.push_back({ 3, { { 14, cbin::BinaryConfig::kInteger } } });
+	cbin::BinaryConfig::Label text;
+	text.name = 2;
+	for (int i = 0; i < 60; ++i) {
+		text.entries.push_back({ 2, { { 4, cbin::BinaryConfig::kString } } });
+		text.entries.push_back({ 2, { { 5, cbin::BinaryConfig::kString }, { 6, cbin::BinaryConfig::kString } } });
+		text.entries.push_back({ 2, { { 7, cbin::BinaryConfig::kString } } });
+	}
+	config.labels = { env, text };
+	std::vector<uint8_t> stored;
+	std::string why;
+	TEST_EXPECT(cbin::encode_binary_config(config, stored, why));
+	const configfile::DataStringsPool binary = pool_of(stored);
+	TEST_EXPECT(binary.binary && binary.values == 0 && binary.pool_bytes == 0 && binary.overrun() == 0);
+	std::unique_ptr<DocumentBase> credits = document_type_for(AssetKind::Credits)->make();
+	Diagnostic error;
+	TEST_EXPECT(credits->load_bytes(stored, "nlist.kda", AssetKind::Credits, "jo", error) &&
+	            config_overrun_findings(*credits).empty());
+	std::printf("shipped shapes: charattr.def at JO:CA's counts and a CBIN credits file, none past a pool\n");
+	return 0;
+}
+
+// Each construct of JO:CA's charattr.def alone, in a file at the line (its values the pool's bytes exactly, the
+// rest whole numbers): no finding, so the rule counts none of the construct that the reader does not; and one value
+// more, 1 byte past, the warning, so it counts none fewer. The constructs' counts are the reader's (a line opening
+// with '[' and a label a section; an entry a line of a key, an '=' and a value, which runs to a ';' or the line's
+// end; its values the words between commas and blanks, a tab a blank; a word no number a text value, its length and
+// one) [orig: ConfigFile_ParseText @ 0x7608a0, ConfigFile_CountValuesAndStringLengths @ 0x7605d0].
+static int test_shipped_constructs() {
+	struct Construct {
+		const char *what;
+		const char *before; // lines before the file's first section
+		const char *inside; // lines in its [CHARACTER1]
+		uint32_t values, string_bytes;
 	};
-	int failures = 0;
-	const std::string install = retail::install();
-	if (!install.empty()) {
-		std::vector<std::string> mounts{ std::string() };
-		for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-		for (const std::string &expansion : mounts) {
-			Vfs vfs;
-			TEST_EXPECT(vfs.mount_game(install, expansion, VfsMountMode::Packed));
-			const std::string where = expansion.empty() ? std::string("the install") : expansion;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(vfs.read_file("charattr.def", bytes) && !bytes.empty());
-			failures += check(bytes, where + "'s charattr.def", true);
-			// The DATASOURCEs the shipped menus name.
-			std::set<std::string> sources;
-			const std::regex tag("<DATASOURCE>\\s*([^<\\s]+)\\s*</DATASOURCE>", std::regex::icase);
-			for (const VfsFileLocation &file : vfs.list_files()) {
-				const std::string &name = file.logical_name;
-				if (name.size() < 4 || retail::lower_ascii(name.substr(name.size() - 4)) != ".mnu") continue;
-				std::vector<uint8_t> menu;
-				if (!vfs.read_file(name, menu)) continue;
-				const std::string menu_text(menu.begin(), menu.end());
-				for (std::sregex_iterator it(menu_text.begin(), menu_text.end(), tag), end; it != end; ++it)
-					sources.insert(retail::lower_ascii((*it)[1].str()));
-			}
-			TEST_EXPECT(!sources.empty());
-			for (const std::string &source : sources) {
-				std::vector<uint8_t> credits;
-				TEST_EXPECT(vfs.read_file(source, credits) && !credits.empty());
-				failures += check(credits, where + "'s " + source, false);
-			}
+	const Construct constructs[] = {
+		{ "a comment holding an '=' before any section", "// setchar n (n = 1-9)\r\n", "", 0, 0 },
+		{ "a commented-out section's label", "", "//[CHARACTER?]\r\n", 0, 0 },
+		{ "a commented-out entry", "", "//STEALTH\t\t\t= 20\t\r\n", 1, 0 },
+		{ "a commented-out entry of no blank before its '='", "", "//JUNGLE_CAMMO_ALT= 5307\r\n", 1, 0 },
+		{ "an entry of blanks alone", "", "//ATTRIBUTES  \t= \t\r\n", 0, 0 },
+		{ "a real's trailing tab and a negative number", "", "SCOPE_MUTE  \t= 0.0\t\r\nRUN_MODIFIER\t= -1\r\n", 2, 0 },
+		{ "a list whose note runs on", "", "PREF_WEAP\t\t= 1,2,3\t// scoped rifles\r\n", 6, 3 + 7 + 7 },
+		{ "a note of commas, blanks and a hyphened word", "", "PREF_WEAP\t\t= 8,9\t// belt fed, CQB-2\r\n", 6,
+		  3 + 5 + 4 + 6 },
+		{ "two attribute words", "", "ATTRIBUTES  \t= Medic WaterGirl\r\n", 2, 6 + 10 },
+		{ "the NULL attribute", "", "ATTRIBUTES\t\t= NULL\r\n", 1, 5 },
+		{ "an attribute word's trailing blank", "", "ATTRIBUTES  \t= AutoScope \r\n", 1, 10 },
+		{ "a second section of a label", "", "STEALTH\t\t\t= 20\r\n[CHARACTER1]\r\nSTEALTH\t\t\t= 20\r\n", 2, 0 },
+	};
+	for (const Construct &construct : constructs) {
+		const uint32_t step = configfile::kFastMemStep;
+		const uint32_t line = construct.string_bytes == 0 ? step : (construct.string_bytes + step - 1) / step * step;
+		std::string text = std::string(construct.before) + "[CHARACTER1]\r\n" + construct.inside;
+		int pad = 0;
+		for (uint32_t left = line - construct.values; left > 0; ++pad) {
+			const uint32_t n = std::min<uint32_t>(left, 10);
+			text += "PAD" + std::to_string(pad) + "\t\t=";
+			for (uint32_t i = 0; i < n; ++i) text += " 1";
+			text += "\r\n";
+			left -= n;
 		}
-	} else {
-		retail::skip_leg("OPENNOVA_JO_DIR (the packed install's charattr.def and menus)");
+		const configfile::DataStringsPool pool = pool_of(text);
+		if (pool.values != line || pool.string_bytes != construct.string_bytes || pool.pool_bytes != line)
+			std::fprintf(stderr, "%s: %u values over %u bytes, a %u-byte pool\n", construct.what, pool.values,
+			             pool.string_bytes, pool.pool_bytes);
+		TEST_EXPECT(pool.values == line && pool.string_bytes == construct.string_bytes && pool.pool_bytes == line);
+		std::unique_ptr<DocumentBase> at_line = loaded(text, "charattr.def", AssetKind::CharAttrDefs);
+		TEST_EXPECT(at_line && charattr_overrun(*at_line).empty());
+		std::unique_ptr<DocumentBase> one_past = loaded(text + "PAST\t\t= 1\r\n", "charattr.def", AssetKind::CharAttrDefs);
+		TEST_EXPECT(one_past && overrun_of(charattr_overrun(*one_past), DiagnosticSeverity::Warning) != nullptr);
 	}
-	const std::string path = retail::asset_file("charattr.def");
-	if (!path.empty()) {
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(test_io::read_file(path, bytes));
-		failures += check(bytes, path, true);
-	} else if (retail::selected()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the extracted charattr.def)");
-	}
-	if (ran) std::printf("retail: %d of JO:CA's ConfigFile reads, none past its pool\n", ran);
-	return failures;
+	std::printf("constructs: each of JO:CA's charattr.def's at the line, no finding; one value more, the warning\n");
+	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_rule_charattr();
 	failures += test_rule_other_kinds();
 	failures += test_blanks();
 	failures += test_session();
-	failures += test_retail();
+	failures += test_shipped_shapes();
+	failures += test_shipped_constructs();
 	if (failures == 0) std::printf("editor_config_overrun: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

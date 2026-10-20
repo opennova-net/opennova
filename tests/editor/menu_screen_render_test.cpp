@@ -8,12 +8,12 @@
 // texture the project lacks is the graph's finding, the preview's note only; the build
 // still packs. A menu renders again only when it or a file it read moves, or a variable it
 // names changes (S13 D4: a stylesheet edit that changes no variable renders nothing). The check
-// renders a menu a step (S13 A3), its rows those of one run to its end.
-// The retail legs (each a SKIP-LEG without its root): every screen of the shipped menus
-// loose at OPENNOVA_JO_ASSETS' root (read with the files beside them) and of every .mnu
-// OPENNOVA_JO_DIR's packed install serves (read with that mount's files) renders, in the
-// document's order, and every texture and font name the compiler interns is an edge of
-// the asset graph (the split the render check relies on); a table of the notes is printed.
+// renders a menu a step (S13 A3), its rows those of one run to its end. A note no window names
+// (a font a LIST_BOX alone names) sits on the screen.
+// Every screen of every menu of the variant set (the format's minted menus, our base game's),
+// read with our base game's files beside it, renders, in the document's order, and every
+// texture and font name the compiler interns is an edge of the asset graph (the split the
+// render check relies on); a table of the notes is printed.
 
 #include <algorithm>
 #include <cstdint>
@@ -43,9 +43,10 @@
 #include <runtime/menu/menu_screen_inputs.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/menus_audio_fixtures.h"
+#include "editor/minted_install.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -292,25 +293,30 @@ public:
 		std::error_code ec;
 		for (const auto &entry : std::filesystem::directory_iterator(root, ec))
 			if (entry.is_regular_file(ec))
-				files_[retail::lower_ascii(entry.path().filename().string())] = entry.path().generic_string();
+				files_[opennova::strutil::to_lower(entry.path().filename().string())] = entry.path().generic_string();
 	}
 	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
 		const auto found = files_.find(key(name));
 		return found != files_.end() && test_io::read_file(found->second, out);
 	}
 	uint64_t stamp(const std::string &name) const override { return files_.count(key(name)) ? 1 : 0; }
-	std::vector<std::string> menus() const {
-		std::vector<std::string> out;
-		for (const auto &entry : files_)
-			if (entry.first.size() > 4 && entry.first.substr(entry.first.size() - 4) == ".mnu") out.push_back(entry.second);
-		return out;
-	}
 
 private:
 	static std::string key(const std::string &name) {
-		return retail::lower_ascii(std::filesystem::path(name).filename().string());
+		return opennova::strutil::to_lower(std::filesystem::path(name).filename().string());
 	}
 	std::map<std::string, std::string> files_;
+};
+
+// The files one mount of a packed install serves, as the game's loaders read them.
+class MountedFiles : public opennova::FileSource {
+public:
+	explicit MountedFiles(const opennova::Vfs &vfs) : vfs_(vfs) {}
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override { return vfs_.read_file(name, out); }
+	uint64_t stamp(const std::string &name) const override { return vfs_.has_file(name) ? 1 : 0; }
+
+private:
+	const opennova::Vfs &vfs_;
 };
 
 std::string resolved(const std::string &value, const std::map<std::string, std::string> &vars) {
@@ -333,17 +339,6 @@ bool has_edge(const Extracted &extracted, ReferenceKind kind, const std::string 
 } // namespace
 
 namespace {
-
-// The mounted files of one layer of the packed install (base, or an expansion), decoded.
-class MountedFiles : public opennova::FileSource {
-public:
-	explicit MountedFiles(const opennova::Vfs &vfs) : vfs_(vfs) {}
-	bool read(const std::string &name, std::vector<uint8_t> &out) const override { return vfs_.read_file(name, out); }
-	uint64_t stamp(const std::string &name) const override { return vfs_.has_file(name) ? 1 : 0; }
-
-private:
-	const opennova::Vfs &vfs_;
-};
 
 struct SweepTotals {
 	int menus = 0, screens = 0, failures = 0;
@@ -406,49 +401,44 @@ void print_totals(const char *leg, const SweepTotals &totals) {
 	std::printf("%s: %d menu(s), %d screen(s), %d failure(s)\n", leg, totals.menus, totals.screens, totals.failures);
 }
 
-bool is_menu_name(const std::string &name) {
-	return name.size() > 4 && retail::lower_ascii(name.substr(name.size() - 4)) == ".mnu";
-}
-
 } // namespace
 
-// The shipped menus loose at OPENNOVA_JO_ASSETS' root, read with the files beside them.
-static int test_retail_assets_leg() {
-	const std::string root = retail::assets();
-	if (root.empty() || !retail::dir_exists(root)) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/*.mnu (every shipped screen through the render check's headless render)");
-		return 0;
-	}
+// Every menu of the variant set (menus_audio_fixtures.h: fixtures/mnu/'s, the format's minted variants of the
+// shipped menus' forms among them, and our base game's), each read with our base game's files beside it (assets/:
+// its fonts, textures and stylesheets, as a menu dropped into the game's folder reads them).
+static int test_variant_menus() {
+	std::vector<variant_fixtures::Input> menus;
+	const bool all = variant_fixtures::menus(menus);
+	const std::string root = variant_fixtures::repo() + "/assets";
 	LooseFiles files(root);
-	std::vector<std::string> menus = files.menus();
-	std::sort(menus.begin(), menus.end());
-	if (menus.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/*.mnu (no menu at the tree's root)");
-		return 0;
-	}
 	opennova::menu::MenuStyleSource style;
 	const std::map<std::string, std::string> &vars = style.vars(files);
 	SweepTotals totals;
-	std::printf("the shipped menus at %s through MenuScreenRender:\n", root.c_str());
-	for (const std::string &path : menus) sweep_menu(std::filesystem::path(path).filename().string(), path, files, vars, totals);
-	print_totals("assets leg", totals);
-	return totals.failures == 0 ? 0 : 1;
+	std::printf("the variant set's menus through MenuScreenRender, read with %s:\n", root.c_str());
+	for (const variant_fixtures::Input &menu : menus) sweep_menu(menu.label, menu.path, files, vars, totals);
+	print_totals("variant menus", totals);
+	return all && totals.menus > 0 && totals.failures == 0 ? 0 : 1;
 }
 
-// Every .mnu the packed install serves (the base mount, then each expansion's), read with
-// the files that mount serves; a menu a later layer serves byte for byte again is not
-// swept twice.
-static int test_retail_install_leg() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (every .mnu the packed install serves, through the headless render)");
-		return 0;
-	}
+// Every .mnu a packed install serves (the base mount, then each expansion's), read with the files that mount
+// serves; a menu a later layer serves byte for byte again is not swept twice. The install is minted from our own
+// game (minted_install.h: the base game's project and the onjo1 expansion through our PFF writer, the expansion
+// carrying its own main.mnu, variant_fixtures::expansion_main_menu).
+static int test_install_leg() {
 	test_temp::TempDir scratch("opennova_menu_render_install");
+	const std::string install = scratch.file("install");
+	std::string minted;
+	std::vector<uint8_t> patched;
+	if (!variant_fixtures::expansion_main_menu(patched) ||
+	    !minted_install::mint_with(install, {{"main.mnu", minted_install::share(patched)}}, minted)) {
+		std::printf("  FAIL the install did not mint: %s\n", minted.c_str());
+		return 1;
+	}
 	SweepTotals totals;
 	std::map<std::string, std::vector<uint8_t>> seen;
+	int repeats = 0, base_menus = 0;
 	std::vector<std::string> layers{std::string()};
-	for (const std::string &expansion : retail::expansions()) layers.push_back(expansion);
+	for (const std::string &expansion : opennova::vfs_list_expansions(install)) layers.push_back(expansion);
 	for (const std::string &layer : layers) {
 		opennova::Vfs vfs;
 		if (!vfs.mount_game(install, layer, opennova::VfsMountMode::Packed)) {
@@ -460,11 +450,14 @@ static int test_retail_install_leg() {
 		opennova::menu::MenuStyleSource style;
 		const std::map<std::string, std::string> &vars = style.vars(files);
 		for (const auto &location : vfs.list_files()) {
-			if (!is_menu_name(location.logical_name)) continue;
+			if (!opennova::strutil::ends_with_icase(location.logical_name, ".mnu")) continue;
 			std::vector<uint8_t> stored;
 			if (!vfs.read_file_raw(location.logical_name, stored)) continue;
-			std::vector<uint8_t> &earlier = seen[retail::lower_ascii(location.logical_name)];
-			if (earlier == stored) continue;
+			std::vector<uint8_t> &earlier = seen[opennova::strutil::to_lower(location.logical_name)];
+			if (earlier == stored) {
+				++repeats;
+				continue;
+			}
 			earlier = stored;
 			const std::string path = scratch.file(location.logical_name.c_str());
 			if (!test_io::write_file(path, stored)) {
@@ -473,12 +466,23 @@ static int test_retail_install_leg() {
 			}
 			sweep_menu((layer.empty() ? std::string() : layer + "/") + location.logical_name, path, files, vars, totals);
 		}
+		if (layer.empty()) base_menus = totals.menus;
+	}
+	if (totals.menus != base_menus + 1) {
+		std::printf("  FAIL the expansion's own main.mnu was not swept\n");
+		++totals.failures;
 	}
 	if (totals.menus == 0) {
 		std::printf("  FAIL the packed install served no .mnu\n");
 		++totals.failures;
 	}
+	// The expansion's mount serves the base game's menus again, unchanged: each counted once.
+	if (layers.size() < 2 || repeats == 0) {
+		std::printf("  FAIL no later layer served a menu again (%zu layers)\n", layers.size());
+		++totals.failures;
+	}
 	print_totals("install leg", totals);
+	std::printf("install leg: %d more served unchanged by a later layer\n", repeats);
 	return totals.failures == 0 ? 0 : 1;
 }
 
@@ -587,15 +591,62 @@ static int test_render_check_steps() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+// A note no window of the screen names sits on the screen itself (menu_note_address): a font a combo box's
+// LIST_BOX alone names, which the project holds and the game cannot read, is a Problems row on the screen (no
+// window, no field) and, in the menu_render query, a note of no window.
+static int test_screen_level_note() {
+	test_temp::TempDir dir("opennova_menu_render_screen_note");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Screen note"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	std::string font;
+	for (const AssetEntry &asset : view.project.scan->entries)
+		if (asset.kind == AssetKind::Font) {
+			font = asset.relative_path;
+			break;
+		}
+	TEST_EXPECT(!font.empty());
+	if (font.empty()) return 1;
+	const std::string fonts = std::filesystem::path(root + "/" + font).parent_path().generic_string();
+	TEST_EXPECT(test_io::write_text(fonts + "/listfont.fnt", "not a font"));
+	TEST_EXPECT(test_io::write_text(root + "/menus/combo.mnu",
+			"<SCREEN>\r\n<NAME>PICK</NAME>\r\n<WINDOW TYPE=\"COMBOBOX\" NAME=\"CHOICE\">\r\n"
+			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>190</RIGHT><BOTTOM>24</BOTTOM></POSITION>\r\n"
+			"<LIST_BOX>\r\n<POSITION><LEFT>0</LEFT><TOP>24</TOP><RIGHT>190</RIGHT><BOTTOM>136</BOTTOM></POSITION>\r\n"
+			"<FONT><NAME>listfont.fnt</NAME></FONT>\r\n</LIST_BOX>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	const Diagnostic *row = nullptr;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == "menu.render.font_unreadable" && d.asset == "menus/combo.mnu") row = &d;
+	TEST_EXPECT(row && row->record == "PICK" && row->child_id == 0 && row->field.empty() &&
+			row->record_kind == node_kind(MenuKind::Screen));
+	const MenuRenderCheck *check = menu_render_check(view.findings.project_checks.get());
+	const MnuDocument *document = check ? check->document("menus/combo.mnu") : nullptr;
+	TEST_EXPECT(document && !document->rows().empty());
+	if (!document || document->rows().empty()) return 1;
+	const opennova::io::JsonValue json = menu_render_to_json(view, "menus/combo.mnu", document->rows()[0]->id, JsonPage());
+	TEST_EXPECT(json.get("notes"));
+	bool on_screen = false;
+	for (const opennova::io::JsonValue &note : json.get("notes")->array)
+		on_screen = on_screen || (note.get_string("code", "") == "font_unreadable" && note.get_number("index", 0) == -1 &&
+		                          note.get_number("id", 1) == 0 && note.get_string("field", "x").empty());
+	TEST_EXPECT(on_screen);
+	return 0;
+}
+
+int main() {
 	const std::pair<const char *, int (*)()> cases[] = {
 		{ "blank_startup", test_blank_startup },
 		{ "render_again_only_when_moved", test_render_again_only_when_moved },
 		{ "notes_alone_recompose", test_notes_alone_recompose },
 		{ "render_check_steps", test_render_check_steps },
-		{ "retail_assets_leg", test_retail_assets_leg },
-		{ "retail_install_leg", test_retail_install_leg },
+		{ "variant_menus", test_variant_menus },
+		{ "install_leg", test_install_leg },
+		{ "screen_level_note", test_screen_level_note },
 	};
 	for (const auto &entry : cases) {
 		std::fflush(stdout);

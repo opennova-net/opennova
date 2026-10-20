@@ -1,0 +1,206 @@
+<!-- hotkeys.mnu: an OpenNova test menu, hand-written: the keyboard cases the shipped screens hold -->
+<!-- (menu_runtime_corpus). The labels are menutxt.bin's, a table the test mints. -->
+<SCREEN>
+	<NAME>KIT</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+		<WINDOW type="radio" name="SIDE_ONE" CHECKED>
+			<STRING type="id">HK_SIDE_ONE</STRING>
+		</WINDOW>
+		<WINDOW type="radio" name="SIDE_TWO">
+			<STRING type="id">HK_SIDE_TWO</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="BACK">
+			<ACTION type="pop_screen"></ACTION>
+			<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+			<STRING type="id" justify="LEFT">HK_BACK</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="ACCEPT">
+			<ACTION type="pop_screen"></ACTION>
+			<HOTKEY VIRTUAL>VK_ENTER</HOTKEY>
+			<STRING type="id" justify="RIGHT">HK_ACCEPT</STRING>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>SETTINGS</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+		<WINDOW type="radio" name="RADIO_TAB_SOUND" CHECKED>
+			<ACTION type="window" state="SHOW">TAB_SOUND</ACTION>
+			<ACTION type="window" state="HIDE">TAB_SCREEN</ACTION>
+			<STRING type="id" justify="CENTER" vjustify="CENTER">HK_TAB_SOUND</STRING>
+		</WINDOW>
+		<WINDOW type="radio" name="RADIO_TAB_SCREEN">
+			<ACTION type="window" state="HIDE">TAB_SOUND</ACTION>
+			<ACTION type="window" state="SHOW">TAB_SCREEN</ACTION>
+			<STRING type="id" justify="CENTER" vjustify="CENTER">HK_TAB_SCREEN</STRING>
+		</WINDOW>
+		<WINDOW type="window" name="TAB_SOUND"></WINDOW>
+		<WINDOW type="window" name="TAB_SCREEN" HIDDEN></WINDOW>
+		<WINDOW type="button" name="BACK">
+			<ACTION type="pop_screen"></ACTION>
+			<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+			<STRING type="id">HK_BACK</STRING>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>PAUSE</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+		<WINDOW type="window" name="PAUSE_WRAPPER" DRAW_FRAME>
+			<WINDOW type="button" name="OPTIONS">
+				<ACTION type="window" state="HIDE">PAUSE_WRAPPER</ACTION>
+				<ACTION type="window" state="SHOW">OPTIONS_WRAPPER</ACTION>
+				<STRING type="id">HK_OPTIONS</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="RESUME">
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<STRING type="id">HK_RESUME</STRING>
+			</WINDOW>
+		</WINDOW>
+		<WINDOW type="window" name="OPTIONS_WRAPPER" HIDDEN DRAW_FRAME>
+			<WINDOW type="radio" name="RADIO_TAB_DISPLAY" CHECKED>
+				<ACTION type="window" state="SHOW">TAB_DISPLAY</ACTION>
+				<ACTION type="window" state="HIDE">TAB_CONTROLS</ACTION>
+				<STRING type="id" justify="CENTER" vjustify="CENTER">HK_TAB_DISPLAY</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="RADIO_TAB_CONTROLS">
+				<ACTION type="window" state="HIDE">TAB_DISPLAY</ACTION>
+				<ACTION type="window" state="SHOW">TAB_CONTROLS</ACTION>
+				<STRING type="id" justify="CENTER" vjustify="CENTER">HK_TAB_CONTROLS</STRING>
+			</WINDOW>
+			<WINDOW type="window" name="TAB_DISPLAY"></WINDOW>
+			<WINDOW type="window" name="TAB_CONTROLS" HIDDEN>
+				<WINDOW type="radio" name="KEYBOARD">
+					<STRING type="ID" justify="CENTER" vjustify="CENTER">HK_KEYBOARD</STRING>
+				</WINDOW>
+				<WINDOW type="radio" name="MOUSE">
+					<STRING type="ID" justify="CENTER" vjustify="CENTER">HK_MOUSE</STRING>
+				</WINDOW>
+			</WINDOW>
+			<WINDOW type="button" name="OPTIONS_BACK">
+				<ACTION type="window" state="SHOW">PAUSE_WRAPPER</ACTION>
+				<ACTION type="window" state="HIDE">OPTIONS_WRAPPER</ACTION>
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<STRING type="id">HK_BACK</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>MAPVIEW</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+		<WINDOW type="window" name="TAB_MAP">
+			<WINDOW type="button" name="ZOOMIN">
+				<HOTKEY>=</HOTKEY>
+				<STRING justify="CENTER" vjustify="CENTER">+</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="ZOOMOUT">
+				<HOTKEY>-</HOTKEY>
+				<STRING justify="CENTER" vjustify="CENTER">-</STRING>
+			</WINDOW>
+		</WINDOW>
+		<WINDOW type="window" name="MARKER_DLG" HIDDEN MODAL DRAW_FRAME>
+			<WINDOW type="edit" name="MARKER_NAME">
+				<STRING justify="left" vjustify="top"></STRING>
+			</WINDOW>
+			<WINDOW type="button" name="MARKER_CANCEL">
+				<ACTION type="window" state="HIDE">MARKER_DLG</ACTION>
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<STRING type="id" justify="left" vjustify="top">HK_CANCEL</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="MARKER_OK">
+				<ACTION type="window" state="HIDE">MARKER_DLG</ACTION>
+				<HOTKEY VIRTUAL>VK_ENTER</HOTKEY>
+				<STRING type="id" justify="RIGHT" vjustify="top">HK_ACCEPT</STRING>
+			</WINDOW>
+		</WINDOW>
+		<WINDOW type="button" name="CLOSE">
+			<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+			<HOTKEY>M</HOTKEY>
+			<STRING type="id" justify="left" vjustify="top">HK_CLOSE</STRING>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>PROFILE</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+		<WINDOW type="window" name="WRAPPER">
+			<WINDOW type="edit" name="CALLSIGN">
+				<STRING edge="5" type="id" justify="LEFT"></STRING>
+			</WINDOW>
+			<WINDOW type="button" name="ACCEPT">
+				<ACTION type="screen" file="main.mnu">STARTUP</ACTION>
+				<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+				<STRING type="id" justify="RIGHT">HK_ACCEPT</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>PREGAME</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+		<WINDOW type="window" name="GAME_PASSWORD_WRAPPER" HIDDEN>
+			<WINDOW type="edit" name="GAME_PASSWORD" PASSWORD>
+				<STRING edge="5" justify="CENTER" vjustify="CENTER"></STRING>
+			</WINDOW>
+		</WINDOW>
+		<WINDOW type="window" name="TEAM_PASSWORD_WRAPPER" HIDDEN>
+			<WINDOW type="edit" name="TEAM_PASSWORD" PASSWORD>
+				<STRING edge="5" justify="CENTER" vjustify="CENTER"></STRING>
+			</WINDOW>
+		</WINDOW>
+		<WINDOW type="window" name="ABORTRETRY_WRAPPER" HIDDEN>
+			<WINDOW type="button" name="BACK">
+				<ACTION type="pop_screen"></ACTION>
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<STRING type="id" justify="LEFT">HK_BACK</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="ACCEPT">
+				<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+				<STRING type="id" justify="RIGHT">HK_ACCEPT</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>

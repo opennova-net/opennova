@@ -1,10 +1,16 @@
-/* MNU compat sweep: parse + round-trip real shipped .mnu menus.
+/* MNU compat sweep: parse + round-trip the menus the tree holds.
 
-   The fifteen revx02 JO-family menus come from the reference fixture set
-   (<OPENNOVA_JO_ASSETS>/fixtures/mnu/jo_*.mnu; the whole test is gated on
-   them) and are required-pass; every .mnu the packed retail install carries
-   (OPENNOVA_JO_DIR, the base mount plus each expansion) is swept as a
-   SKIP-LEG retail leg. Extra loose menus still sweep from argv.
+   The authored set under fixtures/mnu and the base game's screens in assets/
+   (tests/mnu/repo_menus.h), required-pass. fixtures/mnu/shipped_forms.mnu is
+   written in the shipped JO menus' byte form and holds every element,
+   attribute and lexical form they use (surveyed once over the closed corpus:
+   the fifteen revx02 menus and every .mnu the packed install serves): CR LF
+   lines and tab indents, comments (multi-line, and one holding commented-out
+   markup), bare flags, unquoted numbers, whitespace before a '>', a code-page
+   byte, and the two slips the shipped quotes make (`map_state="3 height=..`,
+   which reads `height` into the quoted value, and `vjustify="CENTER>`, whose
+   value runs to the next quote and takes the next element's attributes).
+   Extra loose menus still sweep from argv.
 
    Three properties per menu:
    1. The differential: mnu_xml's reader (the structural translation of
@@ -13,7 +19,8 @@
       2026-09-23 grill's sk_retail_xml.py, below as `oracle`), over the same
       decoded text: tags, joined text, attributes in retail's list order, and
       children.
-   2. The shipped menu writes: no WriteIssue (retail loads every shipped menu).
+   2. The menu writes: no WriteIssue (retail loads every shipped menu, and so
+      every form shipped_forms.mnu holds).
    3. The fixed point: serialize(parse(x)) re-parses and re-serializes to the
       same bytes, so the model the loader builds survives a save and reload. */
 
@@ -23,12 +30,11 @@
 #include <string>
 #include <vector>
 
-#include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
 #include <formats/mnu/mnu_xml.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
+#include "repo_menus.h"
 
 namespace {
 
@@ -366,54 +372,17 @@ int try_menu(const char *path, bool required) {
   return check_source(path, src);
 }
 
-/* Every .mnu one mount layer of the packed install serves. Returns the number
-   of failures; `checked` accumulates the menus seen. */
-int sweep_mount(const std::string &install, const std::string &expansion, int &checked) {
-  opennova::Vfs vfs;
-  if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) {
-    printf("  FAIL mount_game(%s, %s): %s\n", install.c_str(), expansion.c_str(),
-           vfs.last_error().c_str());
-    return 1;
-  }
-  int fail = 0;
-  for (const auto &loc : vfs.list_files()) {
-    const std::string &name = loc.logical_name;
-    if (name.size() < 4) continue;
-    std::string ext = name.substr(name.size() - 4);
-    for (auto &c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (ext != ".mnu") continue;
-    std::vector<uint8_t> bytes;
-    if (!vfs.read_file_raw(name, bytes)) {
-      printf("  FAIL %s (unreadable on the %s mount)\n", name.c_str(),
-             expansion.empty() ? "base" : expansion.c_str());
-      ++fail;
-      continue;
-    }
-    ++checked;
-    const std::string label = (expansion.empty() ? std::string("<install>/") : expansion + "/") + name;
-    if (!check_source(label.c_str(), std::string(bytes.begin(), bytes.end()))) ++fail;
-  }
-  return fail;
-}
-
 } // namespace
 
 int main(int argc, char **argv) {
   int fail = 0;
 
-  /* The fifteen shipped revx02 menus from the reference fixture set are
-     required-pass; the fixed-point idempotence proof matches mnu_coverage's
-     set. */
-  static const char *const kMenus[] = {
-      "jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player", "jo_weapon", "jo_loadout",
-      "jo_color", "jo_cmap", "jo_stat", "jo_death", "jo_vehicle", "jo_item_db", "jo_splash",
-  };
-  std::vector<std::string> paths;
-  for (const char *name : kMenus) {
-    const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
-    if (path.empty())
-      return retail::skip("OPENNOVA_JO_ASSETS/fixtures/mnu/jo_*.mnu (the fifteen shipped revx02 menus)");
-    paths.push_back(path);
+  /* The tree's menus are required-pass; the fixed-point idempotence proof
+     matches mnu_coverage's set. */
+  const std::vector<std::string> paths = repo_menus::menus();
+  if (!repo_menus::holds(paths, "shipped_forms.mnu")) {
+    fprintf(stderr, "fixtures/mnu/shipped_forms.mnu (the shipped menus' forms) is missing\n");
+    return 1;
   }
   for (const std::string &p : paths)
     if (!try_menu(p.c_str(), true)) ++fail;
@@ -427,24 +396,6 @@ int main(int argc, char **argv) {
     fprintf(stderr, "\n%d required MNU fixture(s) FAILED\n", fail);
     return 1;
   }
-
-  /* The retail leg: every .mnu the packed install serves, base mount and each
-     expansion. */
-  const std::string install = retail::install();
-  if (install.empty())
-    return retail::skip_leg("OPENNOVA_JO_DIR (the packed install's .mnu set)");
-  int checked = 0;
-  fail += sweep_mount(install, std::string(), checked);
-  for (const std::string &expansion : retail::expansions())
-    fail += sweep_mount(install, expansion, checked);
-  if (fail > 0) {
-    fprintf(stderr, "\n%d installed menu(s) FAILED\n", fail);
-    return 1;
-  }
-  if (checked == 0) {
-    fprintf(stderr, "\nthe packed install served no .mnu\n");
-    return 1;
-  }
-  printf("retail leg: %d installed menu(s) parsed, matched the oracle and round-tripped\n", checked);
+  printf("%zu menu(s) parsed, matched the oracle and round-tripped\n", paths.size());
   return 0;
 }

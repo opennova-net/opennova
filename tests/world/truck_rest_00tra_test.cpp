@@ -1,5 +1,5 @@
-// D-VEH-1 regression on the retail data: the parked transport trucks on 00TRa
-// rest their wheel-contact ORIGIN on the terrain under the authority vehicle
+// D-VEH-1 regression: the parked transport trucks of the shipped 00TRa rest
+// their wheel-contact ORIGIN on the terrain under the authority vehicle
 // pass (the same pass a player's SP listen server runs). Before the witnessed
 // probe-box provenance landed (the CMDL header bbox Z pair,
 // docs/world/vehicle-client-movers-re.md §3) the per-COBJ AABB-union stand-in
@@ -10,9 +10,11 @@
 // test that lifts one LIVE truck 2 u (with a planar nudge — the solve's sleep
 // fast-path compares the pose planar-only, vehicle-client-movers-re.md §7) and
 // requires the ground solve to settle it BACK to the wheel-contact rest.
-// Gated on OPENNOVA_JO_DIR (a retail install carrying 00TRa.bms).
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+// The mission is the mission set's truck_rest.bms (tests/fixtures/mission_set_gen.cpp): 00TRa's
+// three trucks by their SSNs around the single-player start, the minted mtruck in the shipped
+// DTruck1's shape (its CMDL floor 0.01 over the origin), on the minted Tmap terrain.
+#include "common/mission_set.h"
+#include "common/mission_rig.h"
 
 #include <cmath>
 #include <cstdio>
@@ -39,21 +41,24 @@ constexpr float kMaxRestError = 0.15f;
 // The union stand-in floated the hull ~0.334 u — anything near that is the
 // regression this test exists to catch.
 constexpr float kOldFloat = 0.334f;
-// 00TRa's three placed DTrucks (bms ids): 11 + 6 = "Drivable Transport Truck"
-// (DTruck1; 11 is the truck right of the player spawn), 1714 = the armory
-// truck (DTruck2). Spawn-area trucks first — the drop test picks the first.
+// 00TRa's three placed trucks (bms ids): 11 + 6 = "Drivable Transport Truck"
+// (11 is the truck right of the player spawn), 1714 = the armory truck.
+// Spawn-area trucks first — the drop test picks the first.
 constexpr uint16_t kTruckSsns[] = {11, 1714, 6};
 
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("truck_rest");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "00TRa.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "truck_rest.bms", error), "truck_rest.bms opens")) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "00TRa boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
@@ -112,6 +117,23 @@ int main() {
 							 "the dropped truck rests its origin on the terrain") &&
 					std::fabs(rest_error - kOldFloat) < 0.1f)
 				std::printf("truck-rest: drop-test floats by the pre-D-VEH-1 wheel depth\n");
+		}
+
+		// The hard fall: dropped from 40 u, the truck's fall passes the authority's
+		// crash bound (|vz| > 0x7000) in the air; the request latches the crash at
+		// the next suspension fit, and the hull comes down a wreck.
+		// [orig: Entity_ProcessTrackedVehiclePhysics -- the hard-fall request
+		//  @0x47d771..0x47d7a8, the latch Entity_ProcessWheeledVehicleSuspension
+		//  @0x46b1a6..0x46b314]
+		const w::Vec3 rest = rig.world.registry.get(handle)->position;
+		rig.world.commands.set_entity_position(handle, w::Vec3{rest.x, rest.y, rest.z + 40.0f});
+		rig.tick(310);
+		const w::Entity *fallen = rig.world.registry.get(handle);
+		if (expect(fallen != nullptr, "the dropped truck is still in the world")) {
+			std::printf("truck-rest: hard fall ssn=%u z %.3f -> %.3f crashed=%d\n", unsigned(ssn), rest.z + 40.0f,
+					fallen->position.z, int(fallen->veh.crashed));
+			expect(fallen->position.z < rest.z + 5.0f, "the dropped truck came down");
+			expect(fallen->veh.crashed != 0, "a 40 u fall latches the truck's crash");
 		}
 	}
 

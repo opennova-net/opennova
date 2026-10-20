@@ -1193,9 +1193,12 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     //  Vehicle_ReleaseEWeapGroupOnDestruction @0x547040]
     if (target.ref_num != 0) world.vehicles.cleanup_destroyed_ref_group(target);
     // [orig: Entity_SpawnDeathPieces @ 0x493400] Gate: not already husked, a
-    // husk model exists, not fully underwater.
+    // husk model loaded, not fully underwater. The model test is the live
+    // huskFinal ?: husk render object, not the items.def name: an authored
+    // husk whose model did not load takes no pieces and keeps the def's
+    // +0x1C4 mover, as a husk-less row does [orig: @0x4934AF..0x4934E5].
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
-    if (traits == nullptr || !traits->has_husk) return 0;
+    if (traits == nullptr || !traits->husk_model_loaded) return 0;
     if ((target.engine_flags & kEntityFlagHusk) != 0) return 0;
     if (target.position.z + target.bound_radius < world_water_z(world)) return 0;
     // The explosion glow flash [orig: the LightPool_SpawnGlowEffect

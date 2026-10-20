@@ -30,7 +30,7 @@ namespace opennova::editor {
 // renumber_references when a register or a frame moves. serialize() composes the base and the rows
 // into the struct the writer takes (strips renumbered to the materials' new order) and
 // writes it from scratch (ADR 0003); an untouched model writes its own bytes (ctest
-// threedi_retail_rewrite).
+// threedi_rewrite).
 
 enum class ModelKind : NodeKind {
 	Model = 0, Collision, Lod, PartAnimation, Material, Texture, Light, UserPoint, Register, Frame, Section, Volume,

@@ -1,7 +1,7 @@
 // .mis idempotency: load a .bms, export .mis (gen1), parse gen1, export again (gen2) -> gen1 ==
 // gen2 BYTE-EQUAL, over the minted fixtures/bms/synth_dense.bms (tests/fixtures/minimal_bms_gen.cpp:
-// four populated pools, zero-valued optional fields) and, behind OPENNOVA_JO_ASSETS, the shipped
-// ash_i5b from the reference fixture set. This is the fixture-blind-spot closer
+// four populated pools, zero-valued optional fields) and fixtures/bms/synth_areas.bms
+// (tests/fixtures/mission_set_gen.cpp: a shipped training mission's areas). This is the fixture-blind-spot closer
 // for D-MIS-5: the authored-fixture tests exercise the same authoring defaults the parser seeds
 // (spawns/no_more_than = 1, ...), which is exactly how the writer/parser default asymmetry hid —
 // on retail data every zero-valued field mutated per round-trip (all 1365 entities on 00TRg
@@ -21,7 +21,6 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/def/def.h>
@@ -227,15 +226,29 @@ int check(const std::string &path) {
 	return 0;
 }
 
-// 00TRg's default kit (D-MIS-19): over the install's weapon table, the kit the shipped .bms's loadout leads with is
-// the shipped .mis's, and the .mis's kit read back builds the shipped chunk's records, name for name.
-int check_00trg_kit(const std::string &bms_path, const std::string &weapons_path, const std::string &mis_path) {
+// The default kit of a shipped mission's loadout (D-MIS-19), over the authored armory
+// (fixtures/def/weapon.def, the shipped table's rows): 00TRg's chunk, as the original
+// editor's export builds it from its kit {WPN_M16M203BURST, WPN_colt45, WPN_AT4} -- the
+// burst rifle and its two subclass rows, the pistol, the launcher, then kMisLoadoutTail --
+// each record its name and two "-1" strings. The kit the chunk leads with is the kit, the
+// .mis written over the table carries its three lines, and the .mis read back builds the
+// chunk's records, name for name.
+int check_default_kit(const std::string &weapons_path) {
 	using namespace opennova::mission;
 	namespace bms = opennova::bms;
 	namespace def = opennova::def;
 	std::string error;
 	bms::File file;
-	TEST_EXPECT(bms::parse_file(bms_path, file, error));
+	make_default(file);
+	for (const char *name : {"WPN_M16M203BURST", "WPN_M16M203", "WPN_M16M203HE", "WPN_colt45", "WPN_AT4",
+	                         "WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"}) {
+		bms::WeaponLoadoutRecord record;
+		record.name = name;
+		record.ammo_primary = "-1";
+		record.ammo_secondary = "-1";
+		record.has_flags = false;
+		file.loadout.entries.push_back(record);
+	}
 	const std::vector<uint8_t> weapon_bytes = test_io::read_file(weapons_path);
 	def::DefWeaponsFile weapons{};
 	TEST_EXPECT(def::def_parse_weapons_memory(weapon_bytes.data(), weapon_bytes.size(), &weapons) == 0);
@@ -247,37 +260,28 @@ int check_00trg_kit(const std::string &bms_path, const std::string &weapons_path
 	sync_counts(file);
 	std::string written;
 	TEST_EXPECT(write_mis_text(file, written, error, nullptr, nullptr, &table));
-	const std::string shipped = test_io::read_file_text(mis_path);
 	const std::string lines = "  default_primary   WPN_M16M203BURST\r\n  default_secondary WPN_colt45\r\n"
 	                          "  default_accessory WPN_AT4\r\n";
-	TEST_EXPECT(shipped.find(lines) != std::string::npos && written.find(lines) != std::string::npos);
+	TEST_EXPECT(written.find(lines) != std::string::npos);
 	bms::File read;
-	TEST_EXPECT(parse_mis_text(shipped, {}, read, error, nullptr, &table));
+	TEST_EXPECT(parse_mis_text(written, {}, read, error, nullptr, &table));
 	TEST_EXPECT(read.loadout.entries.size() == file.loadout.entries.size());
 	for (size_t i = 0; i < read.loadout.entries.size() && i < file.loadout.entries.size(); ++i)
 		TEST_EXPECT(read.loadout.entries[i].name == file.loadout.entries[i].name);
 	return 0;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
+	const std::string root = test_paths_repo_root(__FILE__);
 	if (check(fixture_path()) != 0) return 1;
-	// The retail leg: the shipped ash_i5b (87 items, 1088 buildings, 432 markers).
-	const std::string retail = retail::reference_fixture("bms/ash_i5b.reference.bms");
-	if (retail.empty())
-		return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bms/ash_i5b.reference.bms (the shipped mission)");
-	if (check(retail) != 0) return 1;
-	std::printf("retail leg: ash_i5b .mis export is idempotent\n");
-	// A shipped mission with areas (ash_i5b has none): 03TR, ten of them, constrain-Z among their flags.
-	const std::string areas = retail::asset_file("03TR.bms");
-	if (areas.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/03TR.bms (a shipped mission with areas)");
-	if (check(areas) != 0) return 1;
-	std::printf("retail leg: 03TR .mis export is idempotent, its areas by zone id\n");
-	const std::string trg = retail::asset_file("00TRg.bms"), weapons = retail::asset_file("weapon.def"),
-	                  trg_mis = retail::asset_file("00TRg.mis");
-	if (trg.empty() || weapons.empty() || trg_mis.empty())
-		return retail::skip_leg("OPENNOVA_JO_ASSETS/00TRg.bms, 00TRg.mis and weapon.def (the shipped kit)");
-	if (check_00trg_kit(trg, weapons, trg_mis) != 0) return 1;
-	std::printf("retail leg: 00TRg's .mis kit is the one its loadout leads with, and builds its records\n");
+	// A mission with areas (synth_dense has none): fixtures/bms/synth_areas.bms, thirteen zones in a
+	// shipped training mission's shape (constrain-Z among their flags) and the mission boundary.
+	if (check(root + "/fixtures/bms/synth_areas.bms") != 0) return 1;
+	std::printf("synth_areas .mis export is idempotent, its areas by zone id\n");
+	// Every optional member set (fixtures/bms/synth_fields.bms): each written and read back.
+	if (check(root + "/fixtures/bms/synth_fields.bms") != 0) return 1;
+	std::printf("synth_fields .mis export is idempotent, its optional members set\n");
+	if (check_default_kit(root + "/fixtures/def/weapon.def") != 0) return 1;
+	std::printf("the default kit is the one the loadout leads with, and builds its records\n");
 	return 0;
 }

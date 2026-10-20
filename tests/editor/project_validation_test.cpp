@@ -16,12 +16,12 @@
 // cross-table catalog.item_identity rows: Golf and India of the item tables, Golf and Hotel with
 // them open). Their count and digest were pinned from the trunk's run and pinned again, the rows
 // compared member for member, when the review wrote a row's reference kind by its token (its
-// number moved with MenuText) and dropped those rows. The retail leg (OPENNOVA_JO_DIR)
-// exports the install's files a document type opens into a project and times a first
-// validation, one with nothing changed and one after an edit of the open item table. S13 A6:
-// every finding the four projects make, composed as the editor and the command line compose
-// them, is made from a row of the finding codes' tables, and so is every finding of the install's
-// files in the retail leg.
+// number moved with MenuText) and dropped those rows. A game install minted from OpenNova's own
+// game (minted_install.h) has its files a document type opens exported into a project, timed
+// through a first validation, one with nothing changed and one after an edit of the open item
+// table. S13 A6: every finding the four projects make, composed as the editor and the command
+// line compose them, is made from a row of the finding codes' tables, and so is every finding of
+// the install's files.
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_view.h>
@@ -57,11 +57,11 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/fixture_projects.h"
+#include "editor/minted_install.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -213,8 +213,16 @@ static int test_rows_as_before() {
 		// reference the game loads on without is a warning, the fixture items' graphic and husk models among them
 		// (the same rows gave ee46e4c2). S26 (the writers write their models alone, #1098): the menus' parse notes
 		// what a save leaves out (an ITEM's VALUE 0, a default FLAGS word, a MARQUEE_WND's ORIENTATION and STRING),
-		// nine menu.ignored_input (the 377 rows before them gave dcf0da91).
-		{ "fixtures", fixture_files, false, 386, 0x745d680f80fbcc07ull },
+		// nine menu.ignored_input (the 377 rows before them gave dcf0da91). The retail-free program's variant fixtures
+		// (fixtures/def, rtxt, mnu, threedi/synth and anim, minted once for each form the shipped files take) add the
+		// findings those forms make in a project of the fixtures alone: the models, fonts, string tables, menus and
+		// shaders they name that the project lacks (reference.missing), the input the menus' and tables' readers
+		// leave out (menu.ignored_input, animation_map.ignored_input), a table's repeated key (strings.key_duplicate)
+		// and a material no strip draws (model.material_unused); weapon.def defines the items' weapons (four
+		// reference.missing go) and shipped_forms.mnu names %TRIM_COLOR% (style.unused goes); the mnu reader notes a
+		// first ORIENTATION other than HORIZONTAL (all_widgets.mnu's VolumeBar, one menu.ignored_input; the 386
+		// rows before them gave 745d680f).
+		{ "fixtures", fixture_files, false, 702, 0x5b4e0791d1c03f93ull },
 		// S26: the stylesheet is the list the game reads (its earlier DUP inert no more: the list holds DUP once, its last
 		// value), and what a save does not write of it one style.ignored_input (the 15 rows before gave e39ad421).
 		{ "styles", style_files, false, 15, 0xec187e567b03a96aull },
@@ -607,22 +615,21 @@ static int test_item_ids_within_a_table() {
 	return 0;
 }
 
-// The retail leg (OPENNOVA_JO_DIR): the install's files of every kind a document type opens and
-// validates (its catalogs, string tables, menus, stylesheet, models, clips and animation tables; its
-// textures are the texture checks' retail leg's) exported into a
-// project and validated: every file's own findings made once, and no closed file's document
-// alive after (the models' geometry included); nothing made again while nothing changed; an edit
-// of the open item table validates that table alone and the graph extracts it alone.
-static int test_retail_validation() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the JO install's files validated a file at a time)");
-		return 0;
-	}
+// The install's files of every kind a document type opens and validates (a game install minted from
+// OpenNova's own game, minted_install.h: its catalogs, string tables, menus, stylesheets, models,
+// clips, animation tables, missions, sound banks and fonts; its textures are the texture checks'
+// own tests', editor_texture_roles) exported into a project and validated: every file's own findings
+// made once, and no closed file's document alive after (the models' geometry included); nothing
+// made again while nothing changed; an edit of the open item table validates that table alone and
+// the graph extracts it alone.
+static int test_install_validation() {
+	test_temp::TempDir minted("opennova_editor_project_validation_install");
+	const std::string install = minted.file("install");
+	std::string error;
+	TEST_EXPECT(minted_install::mint(install, error));
 	Project project;
 	TEST_EXPECT(project.make({}));
 	ImportOrigin origin;
-	std::string error;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, project.document, error));
 	InstallView view;
 	TEST_EXPECT(view.open(install_spec(install, project.document), error));
@@ -632,7 +639,7 @@ static int test_retail_validation() {
 		const std::string &name = location.logical_name;
 		if (opennova::strutil::ends_with_icase(name, ".pff"))
 			continue;
-		// The install's textures are the texture checks' retail leg's (editor_texture_roles): left out here.
+		// The install's textures are the texture checks' tests' (editor_texture_roles): left out here.
 		const AssetKind kind = origin.file_kind(name);
 		const DocumentType *type = document_type_for(kind);
 		if (!type || type->id == DocumentTypeId::Texture)
@@ -662,7 +669,7 @@ static int test_retail_validation() {
 	};
 	size_t rows = 0;
 	const double first = timed(rows);
-	std::printf("retail: %zu files a document type opens exported (%zu models), %zu rows; the "
+	std::printf("install: %zu files a document type opens exported (%zu models), %zu rows; the "
 				"first validation "
 				"made %zu files' findings, read %zu (%zu did not load) in %.0f ms, %zu documents "
 				"alive after\n",
@@ -671,7 +678,7 @@ static int test_retail_validation() {
 	TEST_EXPECT(stats.files_validated == files && stats.files_loaded == files &&
 			cache.documents_alive() == 0);
 	const double again = timed(rows);
-	std::printf("retail: nothing changed: %zu files' findings kept, %zu read, in %.1f ms\n",
+	std::printf("install: nothing changed: %zu files' findings kept, %zu read, in %.1f ms\n",
 			stats.files_reused, stats.files_loaded, again);
 	TEST_EXPECT(stats.files_validated == 0 && stats.files_loaded == 0 &&
 			stats.files_reused == files && graph.stats().files_extracted == 0);
@@ -686,7 +693,7 @@ static int test_retail_validation() {
 		std::vector<Diagnostic> uses;
 		const auto checks_start = std::chrono::steady_clock::now();
 		run_use_checks(graph, cache, { project.paths, project.document, project.scan, open }, uses);
-		std::printf("retail: the rows composed again over %zu missions, nothing moved: %zu in %.2f ms, the use checks' "
+		std::printf("install: the rows composed again over %zu missions, nothing moved: %zu in %.2f ms, the use checks' "
 				"%zu in %.2f ms\n",
 				missions, composed, ms, uses.size(),
 				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - checks_start).count());
@@ -707,8 +714,8 @@ static int test_retail_validation() {
 						none, none, none },
 				graph, cache, checks, source);
 		std::set<std::string> codes;
-		TEST_EXPECT(check_rows("retail", composed.rows, project.scan, codes) == 0);
-		std::printf("retail: every finding has a row: %zu findings of %zu codes\n",
+		TEST_EXPECT(check_rows("install", composed.rows, project.scan, codes) == 0);
+		std::printf("install: every finding has a row: %zu findings of %zu codes\n",
 				composed.rows.size(), codes.size());
 	}
 	const AssetEntry *items_entry = project.scan.find("items.def");
@@ -728,7 +735,7 @@ static int test_retail_validation() {
 	Diagnostic edit_error;
 	TEST_EXPECT(items->apply(edit, edit_error));
 	const double edited = timed(rows);
-	std::printf("retail: an edit of the open item table: %zu file's findings made, %zu kept, %zu "
+	std::printf("install: an edit of the open item table: %zu file's findings made, %zu kept, %zu "
 				"read, the graph "
 				"extracting %zu, in %.1f ms\n",
 			stats.files_validated, stats.files_reused, stats.files_loaded,
@@ -738,8 +745,7 @@ static int test_retail_validation() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_rows_as_before();
 	failures += test_every_finding_has_a_row();
@@ -750,6 +756,6 @@ int main(int argc, char **argv) {
 	failures += test_style_name_as_reference();
 	failures += test_style_uses_by_what_names_them();
 	failures += test_item_ids_within_a_table();
-	failures += test_retail_validation();
+	failures += test_install_validation();
 	return failures == 0 ? 0 : 1;
 }
