@@ -29,6 +29,9 @@ namespace opennova::world {
 struct AmmoTable;
 class World;
 } // namespace opennova::world
+namespace opennova::mission {
+class MissionKernel;
+} // namespace opennova::mission
 
 namespace opennova::inmatch {
 
@@ -106,5 +109,16 @@ bool mission_has_special_event(const bms::File &mission);
 // items the mission reloads (Game_ReloadEntityModelsAndCallbacks), the celestial models and
 // upl.3di, hudfx.def's models, and the terrain's foliage models, marked.
 LoadedModelList build_mission_start_model_list(const MissionStartModelSources &sources);
+
+// The page a mission start freezes for `kernel` over the mount `files`: the kernel's loaded
+// tables and world, a load the kernel's asset store parsing the model (no renderer), the
+// process's character-attribute table, and the mission's special event, an authority's alone
+// (a joiner loads no mission body). Its size is the host's S2C 0x68 cursor wrap, its dwords a
+// joiner's C2S 0x3D page; the game's host and joiner and opennova-serve's dedicated host build
+// it alike [orig: Game_StartMission @0x524360 (the call @0x525A6E) ->
+// Render_InitMissionTextures @0x587120 (the call @0x58728C) -> CEffectWorld_RebuildAllModelBuffers
+// @0x5B3A80].
+std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &kernel,
+		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority);
 
 } // namespace opennova::inmatch

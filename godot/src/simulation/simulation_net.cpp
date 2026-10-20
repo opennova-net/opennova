@@ -9,7 +9,6 @@
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
 #include <runtime/inmatch/loaded_model_list.h> // the C2S 0x3D page (D-NET-527)
 #include <runtime/mission/runtime_boot.h>      // boot_files_from_index
-#include <formats/mission/bms_edit.h>          // mission_info (the header's terrain / environment)
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
@@ -706,22 +705,7 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 	if (kernel_ && assets_.root.is_valid()) {
 		const opennova::mission::BootFileSource files =
 				opennova::mission::boot_files_from_index(assets_.root->native_index());
-		const opennova::mission::MissionInfo info = opennova::mission::mission_info(kernel_->mission);
-		inmatch::MissionStartModelSources sources;
-		sources.files = &files;
-		const opennova::assets::AssetStore &models = kernel_->assets();
-		sources.model_loads = [&models](const std::string &file) { return models.model(file) != nullptr; };
-		sources.climate = kernel_->mission.header.climate;
-		sources.terrain = info.terrain;
-		sources.environment = info.environment;
-		sources.weapons = kernel_->weapon_defs_ok ? &kernel_->weapon_defs : nullptr;
-		sources.items = kernel_->items_table();
-		sources.ammo = &kernel_->world.tables.ammo;
-		sources.charattr = &net_.charattr_table;
-		sources.world = &kernel_->world;
-		sources.in_session = kernel_->world.rules.mp_session;
-		sources.special_event = !is_joiner() && inmatch::mission_has_special_event(kernel_->mission);
-		page = inmatch::build_mission_start_model_list(sources).freeze();
+		page = inmatch::mission_start_model_page(*kernel_, files, &net_.charattr_table, !is_joiner());
 	}
 	// The same frozen count is a host's S2C 0x68 cursor wrap (the role reads
 	// it every tick) [orig: Server_SendRandomSeedSync @0x511375 / @0x511391].

@@ -1,5 +1,6 @@
 #include <runtime/inmatch/loaded_model_list.h>
 
+#include <runtime/mission/mission_kernel.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
@@ -10,6 +11,7 @@
 #include <formats/charattr/charattr.h>
 #include <formats/def/def_hudfx.h>
 #include <formats/env/env.h>
+#include <formats/mission/bms_edit.h> // mission_info (the header's terrain / environment)
 
 #include <algorithm>
 #include <cctype>
@@ -311,6 +313,26 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 		if (!graphic.empty()) list.load_foliage(graphic);
 	// The freeze follows [orig: Render_InitMissionTextures @0x525a6e].
 	return list;
+}
+
+std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &kernel,
+		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority) {
+	const mission::MissionInfo info = mission::mission_info(kernel.mission);
+	MissionStartModelSources sources;
+	sources.files = &files;
+	const assets::AssetStore &models = kernel.assets();
+	sources.model_loads = [&models](const std::string &file) { return models.model(file) != nullptr; };
+	sources.climate = kernel.mission.header.climate;
+	sources.terrain = info.terrain;
+	sources.environment = info.environment;
+	sources.weapons = kernel.weapon_defs_ok ? &kernel.weapon_defs : nullptr;
+	sources.items = kernel.items_table();
+	sources.ammo = &kernel.world.tables.ammo;
+	sources.charattr = charattr;
+	sources.world = &kernel.world;
+	sources.in_session = kernel.world.rules.mp_session;
+	sources.special_event = authority && mission_has_special_event(kernel.mission);
+	return build_mission_start_model_list(sources).freeze();
 }
 
 } // namespace opennova::inmatch

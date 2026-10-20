@@ -18,6 +18,7 @@
 #include <net/title/title_identity.h>
 #include <runtime/hud/hud_math.h> // hud_label_font_choice (HUD_InitAllFonts)
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/loaded_model_list.h> // the S2C 0x68 cursor's wrap
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/server_ban_lists.h>
@@ -579,6 +580,14 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	}
 	// No device stages run between the phases on a headless host.
 	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
+	// The mission start freezes its model-def list, whose count every S2C 0x68
+	// cursor wraps at: a dedicated host builds it as the game's host does,
+	// from the mission's loads, with no renderer [orig: Game_StartMission
+	// @0x524360 (the call @0x525A6E) -> Render_InitMissionTextures @0x587120
+	// (the call @0x58728C) -> CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
+	loaded_model_list_count_ = static_cast<uint32_t>(inmatch::mission_start_model_page(
+			*kernel_, mission::boot_files_from_index(index_), &boot_.charattr,
+			/*authority=*/true).size());
 	select_chat_font();
 	++missions_played_;
 	io::logf(io::LogLevel::kInfo,
@@ -799,6 +808,7 @@ bool Server::frame(double delta_seconds) {
 	}
 	inmatch::FrameInput input;
 	input.delta_seconds = delta_seconds;
+	input.loaded_model_list_count = loaded_model_list_count_;
 	const inmatch::FrameOutcome outcome = session_->advance(input);
 	// No presenter drains the presentation half of the outbox.
 	kernel_->world.out.discard_presentation();

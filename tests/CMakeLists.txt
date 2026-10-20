@@ -5141,6 +5141,11 @@ add_test(NAME npruntime_squad_registry COMMAND npruntime_squad_registry_test)
 add_executable(npruntime_net_quality_gates_test npruntime/net_quality_gates_test.cpp)
 target_link_libraries(npruntime_net_quality_gates_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_net_quality_gates COMMAND npruntime_net_quality_gates_test)
+# opennova-serve's S2C 0x68 cursor wrap: the mission start's frozen model-def list's count.
+add_executable(opennova_serve_model_page_test serve/opennova_serve_model_page_test.cpp)
+target_link_libraries(opennova_serve_model_page_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_model_page_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_model_page COMMAND opennova_serve_model_page_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

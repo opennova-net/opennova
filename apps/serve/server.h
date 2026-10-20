@@ -277,6 +277,9 @@ private:
 	std::unique_ptr<inmatch::HostRole> role_;
 	std::unique_ptr<inmatch::Session> session_;
 	inmatch::HostBoot boot_;
+	// The mission start's frozen model-def list's count: the S2C 0x68 cursor's
+	// wrap (inmatch/loaded_model_list.h; FrameInput::loaded_model_list_count).
+	uint32_t loaded_model_list_count_ = 0;
 	rtxt::File gametext_;
 	bool have_gametext_ = false;
 	bool novaworld_ = false;
