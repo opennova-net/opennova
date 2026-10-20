@@ -1,11 +1,18 @@
-// Every shipped .wac script against the original compiler. For each source,
-// fixtures/wac_retail_corpus_vectors.inc holds the SHA-256 of the listing
+// Every committed .wac script against the original compiler. For each source,
+// fixtures/wac_corpus_vectors.inc holds the SHA-256 of the listing
 // Script_Compile @0x4F31F0 writes of it with every catalog empty (effects,
 // sound sets, ammo, mission text; the seven default groups), written by
 // scripts/oracles/wac_parity.py; the port compiles the same file the same way
-// and must write the same listing. Only hashes are committed. Directories
-// come from argv, else OPENNOVA_JO_ASSETS; without either the test reports
-// Skipped (docs/asset-gated-tests.md).
+// and must write the same listing. Only hashes are committed. The scripts are
+// the tree's own: the base game (assets/), its expansions (expansions/) and the
+// test scripts (fixtures/wac/), among them fixtures/wac/forms.wac, authored to
+// hold every lexical and statement form the 48 shipped scripts use (surveyed
+// 2026-10-19, when this row last read them: both comment starts, CR LF lines,
+// tabs and trailing blanks, mixed case, no final line end, AND / OR / NOT,
+// ELSE, ELSEIF on its own line, an `Else if`, DOSEQ and DORND with NEXT,
+// assignment and comparison operators, a stray '/', a command with no
+// parentheses and a quoted string, the operand prefixes). Directories come from
+// argv, else the tree's own.
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -17,7 +24,7 @@
 #include <base/io/sha256.h>
 #include <runtime/wac/compiler.h>
 #include "common/file_io.h"
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 #include "wac_listing.h"
 
 namespace fs = std::filesystem;
@@ -30,7 +37,7 @@ struct CorpusVector {
 	const char *listing_sha256;
 };
 const CorpusVector kCorpus[] = {
-#include "fixtures/wac_retail_corpus_vectors.inc"
+#include "fixtures/wac_corpus_vectors.inc"
 };
 
 std::string upper(std::string text) {
@@ -48,9 +55,9 @@ int main(int argc, char **argv) {
 	std::vector<std::string> dirs;
 	for (int i = 1; i < argc; ++i) dirs.push_back(argv[i]);
 	if (dirs.empty()) {
-		if (const std::string assets = retail::assets(); !assets.empty()) dirs.push_back(assets);
+		const std::string root = test_paths_repo_root(__FILE__);
+		for (const char *sub : {"/assets", "/expansions", "/fixtures/wac"}) dirs.push_back(root + sub);
 	}
-	if (dirs.empty()) return retail::skip("OPENNOVA_JO_ASSETS (the extracted tree's retail .wac scripts)");
 
 	std::map<std::string, std::string> scripts; // upper-case file name -> path, for RUN
 	for (const std::string &dir : dirs) {
@@ -63,7 +70,10 @@ int main(int argc, char **argv) {
 			scripts.emplace(upper(it->path().filename().string()), it->path().string());
 		}
 	}
-	if (scripts.empty()) return retail::skip("no .wac scripts under the corpus directories");
+	if (scripts.empty()) {
+		std::printf("FAIL: no .wac scripts under the corpus directories\n");
+		return 1;
+	}
 
 	int compared = 0;
 	int unwitnessed = 0;
@@ -94,7 +104,10 @@ int main(int argc, char **argv) {
 		}
 	}
 	std::printf("corpus: %d scripts compared, %d without an original listing\n", compared, unwitnessed);
-	if (compared == 0) return retail::skip("no corpus script has an original listing");
+	if (compared == 0) {
+		std::printf("FAIL: no corpus script has an original listing\n");
+		return 1;
+	}
 	if (failed != 0) {
 		std::printf("CORPUS TEST FAILED (%d)\n", failed);
 		return 1;

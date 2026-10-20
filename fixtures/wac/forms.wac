@@ -1,0 +1,40 @@
+; forms.wac: every lexical and statement form the shipped scripts use, authored
+// both comment starts, CR LF lines, tabs, trailing blanks, mixed case, no final line end
+
+if (humans == 2) then
+	accuracyspread = 12
+elseif
+	(humans > 6) then
+		accuracyspread = 6
+else	
+	accuracyspread = 9
+endif
+
+If eq (v1,1) and never and waveready then wave "onradio1.wav",80
+if eq(v2,1) Then
+	set(v2,0)  
+Else if true(greenkills) then
+	set(v3,1)
+endif
+
+if past(30) and not past(90) or event(4) then
+	ssntowp(1200,3)	; a note after a statement
+endif
+
+if previous()and never() then
+	doseq
+		ssntowp(1201,4)
+	next
+		ssntowp(1201,5)
+	enddo
+	dornd
+		gtowp(12,6)
+	next
+		gtowp(12,7)
+	enddo
+endif
+/
+if ssnArea3D(1203,2) or ssndead(1204) or elapse(45) then
+	killssn(1205)   // the same note, the other way
+	ssnhp(1206,500) 
+endif

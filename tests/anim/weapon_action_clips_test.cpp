@@ -1,21 +1,21 @@
-// The weapon.def ACTION anim keys against the shipped weapon .adm files, as the
-// bind resolves them: a key resolves when its table loads (it holds a reset
-// clip) and the key names one of the 252 anim slots, whether or not the table
+// The weapon.def ACTION anim keys against the weapon .adm files, as the bind
+// resolves them: a key resolves when its table loads (it holds a reset clip)
+// and the key names one of the 252 anim slots, whether or not the table
 // authors that slot. An authored slot bakes an 'auto' delay from its ring (a
 // one-clip ring from that clip, whatever read came first); a slot the table
 // does not author serves the table's first reset clip, so its 'auto' delay
 // bakes that clip's length; a key naming no slot, or a table that does not
-// load (SPAS12's spas_1st set), bakes as no-anim with 'auto' collapsed to 0
-// (D-WPN-26). The unauthored and unresolved sets are reported, not judged:
-// they are the data's, not the engine's.
+// load, bakes as no-anim with 'auto' collapsed to 0 (D-WPN-26).
 // [orig: Anim_InitActions @0x541FA0 -- existence is the AnimMap_FindSlotByName
 //  lookup @0x5421AE, the reads @0x5421C5 / @0x5421D8, the collapses @0x542152,
 //  @0x542180, @0x542202; AnimMap_RegisterBoneNode's reset backfill
 //  @0x40C39A..0x40C3E2]
-// Gated on OPENNOVA_JO_ASSETS (an extracted JO tree carrying weapon.def and the
-// weapon .adm files).
-#include "common/retail_paths.h"
-
+// Each construct the stock data uses, authored once: weapons keying an
+// authored slot (with an 'auto' and a fixed delay), a slot their table does
+// not author (anim_wpn_empty_idle, which eleven stock weapons key on tables
+// that lack it), a key naming no slot (WPN_KNIFE2's fire keys its handler's
+// name, wpn_std_idle), and a table with no reset row, over the minted
+// first-person set fixtures/anim/vm40* (tests/fixtures/minimal_bad_gen.cpp).
 #include <base/resource_index/resource_index.h>
 #include <runtime/assets/asset_store.h>
 #include <base/vfs/vfs.h>
@@ -24,6 +24,10 @@
 #include <runtime/anim/adm_clip_index.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_table.h>
+
+#include "common/file_io.h"
+#include "common/temp_dir.h"
+#include "common/test_paths.h"
 
 #include <cctype>
 #include <cstdio>
@@ -52,20 +56,61 @@ std::string lower(const char *s) {
 	return out;
 }
 
+constexpr const char *kWeaponDef =
+		"weapon \"WPN_VM40\"\r\n"
+		"\tanimadm vm40\r\n"
+		"\taction \"idle\"\r\n"
+		"\t\tanim anim_wpn_idle\r\n"
+		"\t\tdelaystart auto\r\n"
+		"\tend\r\n"
+		"\taction \"fire\"\r\n"
+		"\t\tanim anim_wpn_fire\r\n"
+		"\t\tdelaystart 4\r\n"
+		"\tend\r\n"
+		"\taction \"emptyidle\"\r\n"
+		"\t\tanim anim_wpn_empty_idle\r\n"
+		"\t\tdelaystart auto\r\n"
+		"\tend\r\n"
+		"\taction \"recoil\"\r\n"
+		"\t\tanim wpn_std_idle\r\n"
+		"\t\tdelaystart auto\r\n"
+		"\tend\r\n"
+		"end\r\n"
+		"weapon \"WPN_NORESET\"\r\n"
+		"\tanimadm noreset\r\n"
+		"\taction \"idle\"\r\n"
+		"\t\tanim anim_wpn_idle\r\n"
+		"\t\tdelaystart auto\r\n"
+		"\tend\r\n"
+		"end\r\n";
+
+// A table naming a clip but holding no reset row: it does not load.
+constexpr const char *kNoResetAdm = "anim_wpn_idle\t\t\t\t\"vm40_i\"\r\n";
+
+bool stage(const std::string &dir) {
+	std::vector<uint8_t> bytes;
+	for (const char *name : {"vm40.adm", "vm40_rst.bad", "vm40_i.bad", "vm40_f.bad", "vm40_r.bad", "vm40_e.bad",
+				 "vm40_swt.bad", "vm40_swf.bad", "vm40_swr.bad"})
+		if (!test_io::read_file(test_paths_fixture(std::string("anim/") + name), bytes) ||
+				!test_io::write_file(dir + "/" + name, bytes))
+			return false;
+	const std::string def(kWeaponDef), adm(kNoResetAdm);
+	return test_io::write_file(dir + "/weapon.def", std::vector<uint8_t>(def.begin(), def.end())) &&
+			test_io::write_file(dir + "/noreset.adm", std::vector<uint8_t>(adm.begin(), adm.end()));
+}
+
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
-			"OPENNOVA_JO_ASSETS (an extracted JO tree carrying weapon.def)");
+	test_temp::TempDir root("opennova_weapon_action_clips");
+	if (!expect(stage(root.root()), "the weapon set stages")) return 1;
 	ResourceIndex index;
 	opennova::assets::AssetStore index_assets{&index};
-	if (!index.scan(assets) && !index.scan(assets, std::string(), VfsMountMode::LooseOnly))
-		return retail::skip("a mountable OPENNOVA_JO_ASSETS tree");
+	if (!expect(index.scan(root.root(), std::string(), VfsMountMode::LooseOnly), "the staged set mounts")) return 1;
 	std::vector<uint8_t> bytes;
-	if (!index.read_file("weapon.def", bytes)) return retail::skip("weapon.def under OPENNOVA_JO_ASSETS");
+	expect(index.read_file("weapon.def", bytes), "weapon.def reads");
 	DefWeaponsFile file{};
-	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file) != 0)
-		return retail::skip("a parseable weapon.def");
+	if (!expect(def_parse_weapons_memory(bytes.data(), bytes.size(), &file) == 0, "weapon.def parses")) return 1;
 	const world::WeaponTable table = world::build_weapon_table(file, &index_assets);
 	expect(!table.empty(), "the weapon table bakes");
 
@@ -78,6 +123,7 @@ int main() {
 		const int table_index = table.index_of(d.weapon_name);
 		const world::WeaponTableEntry *entry =
 				table_index >= 0 ? table.by_index(static_cast<uint8_t>(table_index)) : nullptr;
+		expect(entry != nullptr, "every weapon bakes an entry");
 		// The file the load resolved: default.adm for one the roots lack.
 		const std::string animadm = entry != nullptr ? entry->animadm : std::string(d.animadm);
 		anim::AdmClipIndex clips;
@@ -96,6 +142,7 @@ int main() {
 				}
 			const world::WeaponFsmAction *baked =
 					(entry != nullptr && id >= 0) ? &entry->action_fsm.actions[id] : nullptr;
+			expect(baked != nullptr, "every keyed action bakes");
 			if (!loads || anim::adm_slot_index(act.anim) < 0) {
 				++unresolved;
 				std::printf("weapon_action_clips: %s action %s anim %s resolves no slot of %s\n",
@@ -142,7 +189,7 @@ int main() {
 			const int32_t want =
 					world::weapon_anim_ticks_from_ms(static_cast<int32_t>(seconds * 1000.0f));
 			++auto_checked;
-			if (baked->delay_start != want) {
+			if (want <= 0 || baked->delay_start != want) {
 				std::fprintf(stderr, "FAIL: %s action %s (%s) baked delaystart %d, the clip says %d\n",
 						d.weapon_name, act.name, act.anim, baked->delay_start, want);
 				++failures;
@@ -153,10 +200,13 @@ int main() {
 				"authored slot, %d on the reset backfill, %d unresolved (%d 'auto' delays collapsed "
 				"to 0); %d 'auto' delays pinned against their clip\n",
 			file.count, weapons, keyed, authored, backfilled, unresolved, collapsed, auto_checked);
-	expect(weapons > 0, "weapon.def names weapon .adm files");
-	expect(keyed > 0, "weapon.def actions name anim keys");
-	expect(authored > keyed / 2, "most weapon.def ACTION anim keys name a slot their animadm authors");
-	expect(auto_checked > 0, "at least one 'auto' delay was pinned against its clip length");
+	expect(weapons == 2, "weapon.def names two weapon .adm files");
+	expect(keyed == 5, "five actions name anim keys");
+	expect(authored == 2, "two keys name a slot their animadm authors");
+	expect(backfilled == 1, "one key names a slot its animadm lacks: the reset backfill");
+	expect(unresolved == 2 && collapsed == 2,
+			"a key naming no slot and a key on a table that does not load bake as no-anim, 'auto' at 0");
+	expect(auto_checked == 2, "the authored and the backfilled 'auto' delays are pinned against their clips");
 	def_free_weapons(&file);
 	if (failures == 0) std::printf("weapon_action_clips: OK\n");
 	return failures == 0 ? 0 : 1;

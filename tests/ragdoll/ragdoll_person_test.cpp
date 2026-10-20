@@ -1,11 +1,12 @@
-// The opt-in ragdoll corpses (ADR 0060) on retail's own soldier rig, US01:
-// the body plan takes it, the model frame the plan assumes holds (a crouch
-// puts the knees toward +Z, the model's front), each death_bullet_torso clip
-// falls the way its quadrant's kick pushes, and a ragdoll started on a death
+// The opt-in ragdoll corpses (ADR 0060) on a JO person rig read from files as
+// the game reads a soldier's: the minted person model and its clip set
+// (common/rig19_set.h: person.3di and rig19.adm on the stock 19-bone body rig,
+// the US01 layout). The body plan takes it, the model frame the plan assumes
+// holds (a crouch puts the knees toward +Z, the model's front), each
+// death_bullet_torso clip's fall is reported, and a ragdoll started on a death
 // clip settles on flat ground with no body sunk into it.
-// Gated on OPENNOVA_JO_ASSETS (an extracted JO tree carrying items.def, US01.3di
-// and US01.adm).
-#include "common/retail_paths.h"
+#include "common/rig19_set.h"
+#include "common/temp_dir.h"
 
 #include <base/resource_index/resource_index.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -58,21 +59,22 @@ void pivots(const anim::SkeletalClips &clips, const std::string &key, double sec
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(
-			assets, retail::assets(), "OPENNOVA_JO_ASSETS (an extracted JO tree carrying US01)");
+	test_temp::TempDir root("opennova_ragdoll_person");
+	if (!expect(rig19::stage(root.root()), "the person rig stages"))
+		return 1;
 	ResourceIndex index;
-	if (!index.scan(assets) && !index.scan(assets, std::string(), VfsMountMode::LooseOnly))
-		return retail::skip("a mountable OPENNOVA_JO_ASSETS tree");
+	if (!expect(index.scan(root.root(), std::string(), VfsMountMode::LooseOnly), "the staged rig mounts"))
+		return 1;
 	assets::AssetStore models{ &index };
-	const threedi::Threedi3di3 *model = models.model("US01").get();
-	if (model == nullptr)
-		return retail::skip("US01.3di under OPENNOVA_JO_ASSETS");
+	const threedi::Threedi3di3 *model = models.model("person").get();
+	if (!expect(model != nullptr, "person.3di loads"))
+		return 1;
 	std::vector<anim::Vec3> origins;
 	std::vector<int> parents;
-	if (!expect(world::model_bone_table(*model, origins, parents), "US01 carries a bone table"))
+	if (!expect(world::model_bone_table(*model, origins, parents), "person carries a bone table"))
 		return 1;
 	anim::SkeletalClips clips;
-	if (!expect(clips.load_from_adm(&models, "US01.adm", origins, parents), "US01.adm loads"))
+	if (!expect(clips.load_from_adm(&models, "rig19.adm", origins, parents), "rig19.adm loads"))
 		return 1;
 
 	RigSource source;
@@ -89,7 +91,7 @@ int main() {
 				rest_pivot[i].y, rest_pivot[i].z);
 	}
 	const auto rig = std::make_shared<const Rig>(build_rig(source));
-	if (!expect(rig->valid(), "US01 gets a ragdoll plan"))
+	if (!expect(rig->valid(), "the person rig gets a ragdoll plan"))
 		return 1;
 	std::printf("stature %.3f, %zu bodies\n", rig->height, rig->bodies.size());
 
@@ -111,7 +113,7 @@ int main() {
 		"anim_death_bullet_torso_right", "anim_death_bullet_torso_back",
 		"anim_death_bullet_torso_left" };
 	for (int q = 0; q < 4; ++q) {
-		if (!clips.has_clip(kTorso[q]))
+		if (!expect(clips.has_clip(kTorso[q]), "the set carries every torso death"))
 			continue;
 		std::vector<Vec3> first, last;
 		pivots(clips, kTorso[q], 0.0, first);
@@ -161,6 +163,6 @@ int main() {
 		expect(deepest > -0.05f * rig->height, "no body sinks into the ground");
 	}
 	if (failures == 0)
-		std::printf("ragdoll_us01: all passed\n");
+		std::printf("ragdoll_person: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

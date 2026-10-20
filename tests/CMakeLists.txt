@@ -173,26 +173,35 @@ target_link_libraries(utf8_format_paths_test PRIVATE opennova_formats)
 target_include_directories(utf8_format_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME utf8_format_paths COMMAND utf8_format_paths_test)
 
-# Every retail model through the reader and the writer the editor saves by:
-# byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
-add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
-target_link_libraries(threedi_retail_rewrite_test PRIVATE opennova_formats)
-target_include_directories(threedi_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(threedi_retail_rewrite COMMAND threedi_retail_rewrite_test)
+# Every committed model under fixtures/threedi through the reader and the writer the
+# editor saves by: byte-identical, a fixed point, and each write pinned by its FNV-1a64.
+add_executable(threedi_rewrite_test threedi/rewrite_test.cpp)
+target_link_libraries(threedi_rewrite_test PRIVATE opennova_formats)
+target_include_directories(threedi_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_rewrite COMMAND threedi_rewrite_test)
+
+# The BHD GP models fixtures/threedi_gp (one per GP kind, between them every construct
+# BHD's 677 ship), minted through the GP writer from common/gp_model_bytes.h and
+# byte-compared every run (--write regenerates).
+add_executable(minimal_gp_gen_test fixtures/minimal_gp_gen.cpp)
+target_link_libraries(minimal_gp_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_gp_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_gp_gen COMMAND minimal_gp_gen_test)
 
 # The BHD-era GP reader and its migration to 3DI3: synthetic GP models built in the test,
-# and every GP model BHD ships (OPENNOVA_JO_ASSETS/fixtures/bhd/3di) migrated and read back.
+# and the minted fixtures/threedi_gp models migrated, read back and lowered.
 add_executable(threedi_gp_test threedi/threedi_gp_test.cpp)
 target_link_libraries(threedi_gp_test PRIVATE opennova_formats)
 target_include_directories(threedi_gp_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(threedi_gp COMMAND threedi_gp_test)
+add_test(NAME threedi_gp COMMAND threedi_gp_test)
 
-# Every retail .bad and .adm through the reader and the writer the editor
-# saves by: field-equal and a fixed point (OPENNOVA_JO_ASSETS).
-add_executable(anim_retail_rewrite_test anim/retail_rewrite_test.cpp)
-target_link_libraries(anim_retail_rewrite_test PRIVATE opennova_formats)
-target_include_directories(anim_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(anim_retail_rewrite COMMAND anim_retail_rewrite_test)
+# Every committed .bad and .adm under fixtures/anim (one clip per form the shipped
+# clips take among them) through the reader and the writer the editor saves by:
+# field-equal, a fixed point, and each write pinned by its FNV-1a64.
+add_executable(anim_rewrite_test anim/rewrite_test.cpp)
+target_link_libraries(anim_rewrite_test PRIVATE opennova_formats)
+target_include_directories(anim_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_rewrite COMMAND anim_rewrite_test)
 
 add_executable(threedi_compare_test threedi/compare_test.cpp threedi/threedi_compare.cpp)
 target_link_libraries(threedi_compare_test PRIVATE opennova_formats)
@@ -258,14 +267,12 @@ add_test(NAME weapon_timing COMMAND weapon_timing_test ${CMAKE_CURRENT_BINARY_DI
 # BLENDER_EXECUTABLE when it is not on PATH): every tests/blender/*_test.py
 # loads the source tree's add-on through tests/blender/addon_harness.py and
 # runs the opennova-3di built here, authoring what it exports from scratch.
-# Mixed rows: the `_retail` entry passes --retail, which selects the legs that
-# read OPENNOVA_JO_ASSETS (addon_harness.retail_asset).
 find_program(BLENDER_EXECUTABLE NAMES blender)
 if(BLENDER_EXECUTABLE)
     file(GLOB OPENNOVA_BLENDER_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/blender/*_test.py)
     foreach(test ${OPENNOVA_BLENDER_TESTS})
         get_filename_component(name ${test} NAME_WE)
-        opennova_add_mixed_test(blender_${name} COMMAND ${BLENDER_EXECUTABLE}
+        add_test(NAME blender_${name} COMMAND ${BLENDER_EXECUTABLE}
             --background --factory-startup --python-exit-code 1 --python ${test} -- $<TARGET_FILE:opennova_3di>)
     endforeach()
 endif()
@@ -314,29 +321,30 @@ endif()
 add_test(NAME threedi_o3d_unicode
          COMMAND threedi_o3d_unicode_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
-# Retail clip sets through anim scene -> anim build -> anim compare (OPENNOVA_JO_ASSETS).
-add_executable(anim_o3a_retail_roundtrip_test anim/o3a_retail_roundtrip_test.cpp)
-target_include_directories(anim_o3a_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(anim_o3a_retail_roundtrip_test PRIVATE cxx_std_17)
-opennova_add_gated_test(anim_o3a_retail_roundtrip
-    COMMAND anim_o3a_retail_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+# The minted clip sets (each at a shipped set's shape) through anim scene -> anim
+# build -> anim compare.
+add_executable(anim_o3a_roundtrip_test anim/o3a_roundtrip_test.cpp)
+target_include_directories(anim_o3a_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_o3a_roundtrip_test PRIVATE cxx_std_17)
+add_test(NAME anim_o3a_roundtrip
+    COMMAND anim_o3a_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
-# The runtime plays a rebuilt clip set the way it plays the shipped one
-# (OPENNOVA_JO_ASSETS).
-add_executable(anim_o3a_runtime_playback_test anim/o3a_runtime_playback_test.cpp)
-target_link_libraries(anim_o3a_runtime_playback_test PRIVATE opennova_runtime)
-target_include_directories(anim_o3a_runtime_playback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(anim_o3a_runtime_playback_test PRIVATE cxx_std_17)
-opennova_add_gated_test(anim_o3a_runtime_playback
-    COMMAND anim_o3a_runtime_playback_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+# The runtime plays a rebuilt clip set the way it plays the one it was made from
+# (the minted person and first-person sets on their models).
+add_executable(anim_o3a_playback_test anim/o3a_playback_test.cpp)
+target_link_libraries(anim_o3a_playback_test PRIVATE opennova_runtime)
+target_include_directories(anim_o3a_playback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_o3a_playback_test PRIVATE cxx_std_17)
+add_test(NAME anim_o3a_playback
+    COMMAND anim_o3a_playback_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
-# Retail models through scene -> build -> compare (OPENNOVA_JO_ASSETS).
-add_executable(threedi_o3d_retail_roundtrip_test threedi/o3d_retail_roundtrip_test.cpp)
-target_include_directories(threedi_o3d_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(threedi_o3d_retail_roundtrip_test PRIVATE opennova_formats)
-target_compile_features(threedi_o3d_retail_roundtrip_test PRIVATE cxx_std_17)
-opennova_add_gated_test(threedi_o3d_retail_roundtrip
-    COMMAND threedi_o3d_retail_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+# Every committed model under fixtures/threedi through scene -> build -> compare.
+add_executable(threedi_o3d_roundtrip_test threedi/o3d_roundtrip_test.cpp)
+target_include_directories(threedi_o3d_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(threedi_o3d_roundtrip_test PRIVATE opennova_formats)
+target_compile_features(threedi_o3d_roundtrip_test PRIVATE cxx_std_17)
+add_test(NAME threedi_o3d_roundtrip
+    COMMAND threedi_o3d_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
 # PANM unit tests
 foreach(test ctrl decode pose runtime wave)
@@ -357,14 +365,14 @@ target_link_libraries(threedi_userpoint_test PRIVATE opennova_formats)
 target_include_directories(threedi_userpoint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_userpoint COMMAND threedi_userpoint_test)
 
-# Asset-gated (OPENNOVA_JO_DIR): the retail MTRL facts (Scrate1's constant
-# AlphaGen on an opaque, non-alpha-tested FF_ST_OP row) the projected-shadow
-# GUT witness keys on, read through the engine's 3DI3 parser.
-add_executable(threedi_retail_material_facts_test threedi/retail_material_facts_test.cpp)
-target_link_libraries(threedi_retail_material_facts_test PRIVATE opennova_base opennova_formats)
-target_include_directories(threedi_retail_material_facts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(threedi_retail_material_facts_test PRIVATE cxx_std_17)
-opennova_add_gated_test(threedi_retail_material_facts COMMAND threedi_retail_material_facts_test)
+# The MTRL facts (SCrate1's constant AlphaGen on an opaque, non-alpha-tested
+# FF_ST_OP row, minted as fixtures/threedi/crate_alphagen24.3di) the
+# projected-shadow GUT witness keys on, read through the engine's 3DI3 parser.
+add_executable(threedi_material_facts_test threedi/material_facts_test.cpp)
+target_link_libraries(threedi_material_facts_test PRIVATE opennova_base opennova_formats)
+target_include_directories(threedi_material_facts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(threedi_material_facts_test PRIVATE cxx_std_17)
+add_test(NAME threedi_material_facts COMMAND threedi_material_facts_test)
 
 add_executable(threedi_collision_3di_test threedi/collision_3di_test.cpp)
 target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
@@ -393,40 +401,50 @@ target_compile_features(minimal_3di_gen_test PRIVATE cxx_std_17)
 target_include_directories(minimal_3di_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
 
-# ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
-# set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
+# The synthetic person clip set fixtures/anim/rig19* (the table, the reset, the
+# stock 19-bone idle's shape and its two-bone twist, a crouch, two reloads, the
+# four torso deaths and a walk), minted through the clip construction seam on
+# the rig fixtures/threedi/synth/person.3di carries (tests/fixtures/person_rig.h)
+# and byte-compared every run (--write regenerates).
+add_executable(minimal_bad_gen_test fixtures/minimal_bad_gen.cpp)
+target_link_libraries(minimal_bad_gen_test PRIVATE opennova_runtime opennova_formats)
+target_compile_features(minimal_bad_gen_test PRIVATE cxx_std_17)
+target_include_directories(minimal_bad_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_bad_gen COMMAND minimal_bad_gen_test)
+
+# ADM tests. adm_parse pins the minted first-person table fixtures/anim/vm40.adm;
+# the rest author their maps in memory.
 foreach(test comment trim_value parse variants write)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_formats)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test comment trim_value variants write)
+foreach(test comment trim_value parse variants write)
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()
-opennova_add_gated_test(adm_parse COMMAND adm_parse_test)
 
-# BAD tests: the null guard unconditionally, the shipped BINOC.bad pins as the
-# reference-set SKIP-LEG leg, and 357_RST.bad's translation rows 0..frame_count
-# (OPENNOVA_JO_ASSETS, SKIP-LEG).
+# BAD tests: the null guard, the stock 19-bone idle's pins on the minted
+# fixtures/anim/rig19_idle.bad, and a translated reset's rows 0..frame_count
+# (fixtures/anim/vm40_rst.bad).
 add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_formats)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(bad_parse COMMAND bad_parse_test)
+add_test(NAME bad_parse COMMAND bad_parse_test)
 # bad_roundtrip: the writer and the construction seam against the reader -- our
 # fixtures byte-exact, a from-scratch clip field-equal and re-write-stable, the
-# builder's derived bone table pinned, BINOC.bad as the SKIP-LEG leg.
+# builder's derived bone table pinned.
 add_executable(bad_roundtrip_test bad/bad_roundtrip_test.cpp)
 target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(bad_roundtrip COMMAND bad_roundtrip_test)
+add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 # bad_build: the construction seam -- the frame maps, the derived bind and
 # position, the events' bottom and top written as stated, the refusals, and the
-# canonical table, with SKIP-LEG retail legs over both derivations (BINOC.bad's
-# bind; DT1PRONE.BAD's positions through DT1RST.BAD's bind).
+# canonical table, with both derivations pinned on witnessed shipped values
+# (BINOC.bad's bind; DT1PRONE.BAD's positions through DT1RST.BAD's bind).
 add_executable(bad_build_test bad/bad_build_test.cpp)
 target_link_libraries(bad_build_test PRIVATE opennova_formats)
 target_include_directories(bad_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(bad_build COMMAND bad_build_test)
+add_test(NAME bad_build COMMAND bad_build_test)
 
 # Native BIKi menu-video decoder: a deterministic generated bitstream plus an
 # OPENNOVA_JO_DIR-gated retail smoke test.
@@ -440,24 +458,22 @@ target_link_libraries(bink_retail_test PRIVATE opennova_formats)
 opennova_add_gated_test(bink_retail COMMAND bink_retail_test)
 
 # ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
-# world<->local self-consistency on the shipped BINOC.bad (a reference-set SKIP-LEG leg).
+# world<->local self-consistency on the minted 19-bone fixtures/anim/rig19_idle.bad.
 add_executable(anim_sample_test anim/anim_sample_test.cpp)
 target_link_libraries(anim_sample_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(anim_sample_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(anim_sample COMMAND anim_sample_test)
+add_test(NAME anim_sample COMMAND anim_sample_test)
 
-# ANIM positions_from_model over the retail viewmodel corpus (the retail half of
-# the former tests/test_bad_pos_derivation.py; synthetic exactness stays in
-# anim_sample): healthy M16/M24/M21/Frag rigs reconstruct BadBone.position within
-# 5e-4 on >=30 norm-consistent bones each; ak47_1st's X-triplicated rows (>=20)
-# come back model-consistent. Asset-gated on OPENNOVA_JO_ASSETS; reports Skipped
-# when unset.
-add_executable(anim_positions_from_model_corpus_test anim/anim_positions_from_model_corpus_test.cpp)
-target_link_libraries(anim_positions_from_model_corpus_test PRIVATE opennova_runtime opennova_formats)
-target_include_directories(anim_positions_from_model_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(anim_positions_from_model_corpus_test PRIVATE cxx_std_17)
-opennova_add_gated_test(anim_positions_from_model_corpus COMMAND anim_positions_from_model_corpus_test)
+# ANIM positions_from_model over a viewmodel rig read from its files (synthetic
+# exactness stays in anim_sample): the minted 40-bone vm40 rig reconstructs
+# BadBone.position within 5e-4 on >=30 norm-consistent bones; its X-triplicated
+# twin (ak47_1st's breakage, >=20 rows) comes back model-consistent.
+add_executable(anim_positions_from_model_test anim/anim_positions_from_model_test.cpp)
+target_link_libraries(anim_positions_from_model_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(anim_positions_from_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_positions_from_model_test PRIVATE cxx_std_17)
+add_test(NAME anim_positions_from_model COMMAND anim_positions_from_model_test)
 
 # ANIM aim overlay (the torso bend): bone-class map, BAM blend branches, compose
 # invariants. [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md s14]
@@ -735,10 +751,16 @@ target_link_libraries(infantry_escort_test PRIVATE opennova_runtime)
 target_include_directories(infantry_escort_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME infantry_escort COMMAND infantry_escort_test)
 
+# fixtures/grm/face108.grm: a face at the scale of the ones BHD ships, through the GRM writer.
+add_executable(minimal_grm_gen_test fixtures/minimal_grm_gen.cpp)
+target_link_libraries(minimal_grm_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_grm_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_grm_gen COMMAND minimal_grm_gen_test)
+
 add_executable(grm_roundtrip_test grm/grm_roundtrip_test.cpp)
 target_link_libraries(grm_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(grm_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(grm_roundtrip COMMAND grm_roundtrip_test)
+add_test(NAME grm_roundtrip COMMAND grm_roundtrip_test)
 
 add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
 target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
@@ -1347,14 +1369,13 @@ target_link_libraries(anim_adm_ring_table_test PRIVATE opennova_runtime)
 target_include_directories(anim_adm_ring_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME anim_adm_ring_table COMMAND anim_adm_ring_table_test)
 
-# The SECONDARY (weapon) channel composition over the shipped BINOC.bad rig
-# plus its BINOC_twist.bad (the two-bone twist minted once from the retired
-# writer; the test asserts that provenance before probing). Both come from the
-# reference fixture set; gated on OPENNOVA_JO_ASSETS.
+# The SECONDARY (weapon) channel composition over the minted 19-bone
+# fixtures/anim/rig19_idle.bad plus its rig19_twist.bad (the two-bone twist; the
+# test asserts that provenance before probing).
 add_executable(anim_skeletal_clips_weapon_channel_test anim/skeletal_clips_weapon_channel_test.cpp)
 target_link_libraries(anim_skeletal_clips_weapon_channel_test PRIVATE opennova_runtime)
 target_include_directories(anim_skeletal_clips_weapon_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(anim_skeletal_clips_weapon_channel COMMAND anim_skeletal_clips_weapon_channel_test)
+add_test(NAME anim_skeletal_clips_weapon_channel COMMAND anim_skeletal_clips_weapon_channel_test)
 
 add_executable(anim_person_rows_past_clip_test anim/person_rows_past_clip_test.cpp)
 target_link_libraries(anim_person_rows_past_clip_test PRIVATE opennova_runtime)
@@ -3376,15 +3397,15 @@ target_include_directories(route_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(route_parity_test PRIVATE cxx_std_17)
 add_test(NAME route_parity COMMAND route_parity_test)
 
-# Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
-# events array is the per-frame root record; rec[3] = bottom, the hips' height above the
-# ground, whose 16.16 change is the vertical root motion. Asset-gated: absent files skip
-# (CI-safe).
+# Root-motion track grill (AnimMap_UpdateEntity @0x40b5f0): the .bad events array is
+# the per-frame root record; rec[3] = bottom, the hips' height above the ground, whose
+# 16.16 change is the vertical root motion. Over the two stock gaits minted at their
+# witnessed shape, played through the engine's root source at their witnessed steps.
 add_executable(root_motion_test anim/root_motion_test.cpp)
-target_link_libraries(root_motion_test PRIVATE opennova_formats)
+target_link_libraries(root_motion_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(root_motion_test PRIVATE cxx_std_17)
-opennova_add_gated_test(root_motion COMMAND root_motion_test)
+add_test(NAME root_motion COMMAND root_motion_test)
 
 # WAC scripting. The registry oracle (165-command ISA + 28 param types from the
 # binary) exercises only the format half (engine/formats/wac); VM behavior (var
@@ -3417,9 +3438,9 @@ add_test(NAME wac_dispatch_sweep COMMAND wac_dispatch_sweep_test)
 # The WAC language's words (runtime/wac/wac_lexis.h): the keywords, the comment start and the
 # operand prefixes, checked against what the compiler reads.
 add_test(NAME wac_lexis COMMAND wac_lexis_test)
-# The corpus sweep walks OPENNOVA_JO_ASSETS (argv dirs override); it reports
-# Skipped without it.
-opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
+# The corpus sweep: every committed .wac script (assets/, expansions/, fixtures/wac/;
+# argv dirs override) against the original compiler's listing of it.
+add_test(NAME wac_corpus COMMAND wac_corpus_test)
 
 # The original compiler and VM on synthetic programs: the fixtures are the
 # pinned executable's own listings and states (scripts/oracles/wac_parity.py).
@@ -4431,11 +4452,21 @@ opennova_add_gated_test(win_flow_01tr COMMAND lose_flow_test --bms 01TR.bms --wi
 # the fired-event set including event 11's authored activation delay).
 opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bms --restart-boot)
 
-# The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
+# The remote player's reload clip chain and the weapon.def ACTION keys against
+# their tables, each over minted rigs staged into a temp root (the 19-bone
+# person, the 40-bone first-person set) with authored defs.
+foreach(rig_test reload_clips weapon_action_clips)
+    add_executable(anim_${rig_test}_test anim/${rig_test}_test.cpp)
+    target_link_libraries(anim_${rig_test}_test PRIVATE opennova_net opennova_runtime)
+    target_include_directories(anim_${rig_test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(anim_${rig_test}_test PRIVATE cxx_std_17)
+    add_test(NAME anim_${rig_test} COMMAND anim_${rig_test}_test)
+endforeach()
+
+# The def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped
 # without OPENNOVA_JO_ASSETS / OPENNOVA_JO_DIR.
 foreach(gated
-        anim/reload_clips_us01 anim/weapon_action_clips
         npruntime/remote_body_state npruntime/held_weapon_attach npruntime/authored_payload_00trg
         particle/gore_set_catalog)
     get_filename_component(gated_name ${gated} NAME)
@@ -4976,14 +5007,15 @@ endif()
 add_subdirectory(editor)
 
 # The opt-in ragdoll corpses (ADR 0060): the solver, the set and the death
-# clip reading on a synthetic person rig; ragdoll_us01 on retail's own rig.
+# clip reading on a synthetic person rig; ragdoll_person on that rig read from
+# files (the minted person.3di and its rig19 clip set).
 add_executable(ragdoll_test ragdoll/ragdoll_test.cpp)
 target_link_libraries(ragdoll_test PRIVATE opennova_runtime)
 target_include_directories(ragdoll_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ragdoll_test PRIVATE cxx_std_17)
 add_test(NAME ragdoll COMMAND ragdoll_test)
-add_executable(ragdoll_us01_test ragdoll/ragdoll_us01_test.cpp)
-target_link_libraries(ragdoll_us01_test PRIVATE opennova_runtime)
-target_include_directories(ragdoll_us01_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(ragdoll_us01_test PRIVATE cxx_std_17)
-opennova_add_gated_test(ragdoll_us01 COMMAND ragdoll_us01_test)
+add_executable(ragdoll_person_test ragdoll/ragdoll_person_test.cpp)
+target_link_libraries(ragdoll_person_test PRIVATE opennova_runtime)
+target_include_directories(ragdoll_person_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ragdoll_person_test PRIVATE cxx_std_17)
+add_test(NAME ragdoll_person COMMAND ragdoll_person_test)
