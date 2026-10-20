@@ -2938,18 +2938,39 @@ void test_ai_drive_leg() {
     CHECK(std::abs(heading_err) < 60000000); // within ~5 deg of the bearing
     CHECK(std::abs(r.veh().position.y - 200.0f) < 30.0f); // the turn arc, not a runaway
 
-    // A DEAD controller counts as no controller (the death->detach chain stand-in,
-    // D-AI-11 k): the motor's own resolve must not consume the corpse's input.
+    // The input block tests the hull, never the occupant: a controller that dies
+    // seated leaves its seat at its own death edge, which the pool-0 walk runs
+    // ahead of the hull's pool-1 update, and the hull then parks on its empty
+    // seat. [orig: Entity_UpdateInfantryAI @0x4B9910 (the +0x16C test @0x4B9C57,
+    // the detach @0x4B9C60); Entity_UpdateVehiclePhysics @0x48AF00
+    // (@0x48B972..0x48B987, the parked arm @0x48C002)]
     r.w.registry.get(nh)->health = 0;
     r.w.registry.get(nh)->alive = false;
+    CHECK(r.w.vehicles.detach(nh)); // the death edge's detach
     {
-        VehicleDriveCmd cmd; // ai_drive stays false: the staging parks dead drivers
-        r.sys.vehicle_ai_drive(r.w, r.veh(), nullptr, t, cmd);
+        VehicleDriveCmd cmd;
+        r.sys.vehicle_ai_drive(r.w, r.veh(), r.w.vehicles.resolve_controller(r.veh()), t, cmd);
         CHECK(!cmd.ai_drive);
         CHECK(b.f[AiBrain::kCurState] == 22);
         r.w.vehicles.tick_motor(r.veh(), t, &cmd);
-        CHECK(r.veh().veh.cmd_speed == 0); // the no-controller hold, not the stale drive
+        CHECK(r.veh().veh.cmd_speed == 0); // the parked hold, not the stale drive
     }
+    // A live controller under a hull a script disabled (Flags 0x10000000) parks
+    // as well: the hull's bit, not the occupant, decides.
+    // [orig: WacCmd_DisableSsn @0x4F7690 (@0x4F76DD); @0x48B980..0x48B987]
+    r.w.registry.get(nh)->health = 150;
+    r.w.registry.get(nh)->alive = true;
+    CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
+    r.veh().flags |= kEntityFlagScriptDisabled;
+    r.veh().veh.cmd_speed = 40 * 293;
+    {
+        VehicleDriveCmd cmd;
+        r.sys.vehicle_ai_drive(r.w, r.veh(), r.w.vehicles.resolve_controller(r.veh()), t, cmd);
+        CHECK(!cmd.ai_drive);
+        r.w.vehicles.tick_motor(r.veh(), t, &cmd);
+        CHECK(r.veh().veh.cmd_speed == 0);
+    }
+    r.veh().flags &= ~kEntityFlagScriptDisabled;
 }
 
 // The pool-1 avoid BRAKE: a neighbor whose footprint ellipse overlaps ours and

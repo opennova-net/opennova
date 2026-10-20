@@ -432,28 +432,46 @@ void stage_player_vehicle_input(
 // player. That distinction is invisible on a listen host flying its own
 // aircraft, and decisive when a JOINER is the pilot: the host owns the mover, so
 // insisting on the host's local player left a remote pilot commanding nothing.
-// [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the ground twin is
-//  Entity_UpdateVehiclePhysics @0x48b0ff]
+// The block tests the hull, never the occupant's life: an empty seat or the hull's
+// Flags 0x10000002 (the dead bit, a script's disable) parks it, and a body that
+// dies seated has left its seat at its own death edge before the hull's update
+// (the pool-0 walk precedes pool 1). [orig: Entity_UpdateAircraftPhysics
+// @0x490310 (the input gate @0x490F00..0x490F0E, the park @0x490F16..0x490F25);
+// the ground twin Entity_UpdateVehiclePhysics @0x48AF00 (@0x48B958..0x48B987); the
+// death edge's detach Entity_UpdateInfantryAI @0x4B9910 (@0x4B9C57..0x4B9C60)]
 Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits) {
     if (!traits.player_control) return nullptr;
+    if (vehicle_hull_parked(veh)) return nullptr;
     Entity *occ = world.vehicles.resolve_controller(veh);
-    if (occ == nullptr || occ->handle.pool() != 0 || occ->player_class == 0 ||
-        !occ->alive || occ->health <= 0)
+    if (occ == nullptr || occ->handle.pool() != 0 || occ->player_class == 0)
         return nullptr;
     const bool is_authority = world.ai.is_authority;
     if (!is_authority && occ->handle != world.cached.local_player) return nullptr;
     return occ;
 }
 
+// The predicting client's own driver: the input block runs only for the local
+// player's seat, whatever its life (above). [orig: cveh @0x48B958..0x48B96C; cbot
+// @0x48DF7F..0x48DFA2]
 static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
                                                 const VehicleTraits &traits) {
     if (!traits.player_control || !world.cached.local_player.valid()) return nullptr;
     Entity *occ = world.vehicles.resolve_controller(veh);
     if (occ == nullptr || occ->handle != world.cached.local_player ||
-        occ->handle.pool() != 0 || occ->player_class == 0 ||
-        !occ->alive || occ->health <= 0)
+        occ->handle.pool() != 0 || occ->player_class == 0)
         return nullptr;
     return occ;
+}
+
+// The parked arm the input block takes for an empty seat or a parked hull: steer
+// holds the heading, the command and the ramp zero, the lights bit clears.
+// [orig: cveh @0x48C002..0x48C02D; cbot @0x48E7EE..0x48E81E]
+static void vehicle_park_inputs(Entity &veh) {
+    Entity::VehicleMotorState &m = veh.veh;
+    m.steer_target_bam = m.yaw_bam;
+    m.cmd_speed = 0;
+    m.steer_ramp_bam = 0;
+    veh.flags &= ~0x80u;
 }
 
 // The ground/tracked contact + suspension solve — the client-executed subset
@@ -544,10 +562,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 	// Everything after it, including the PlayerControl tail, runs on both roles.
 	Entity *occ = traits.player_control && !prediction ? world.vehicles.resolve_controller(veh)
 													   : nullptr;
-    // A DEAD controller counts as none. The infantry death edge now detaches first;
-    // this remains the same-frame safety gate when motor/system ordering varies.
-    // [orig: infantry death detach @0x4b9c57..0x4b9c60]
-    if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
+    // The block reads the hull, never the occupant's life: a body that dies seated
+    // has left the seat at its own death edge, which the pool-0 walk runs ahead of
+    // this pool-1 update. [orig: Entity_UpdateInfantryAI @0x4B9910 (@0x4B9C57..0x4B9C60)]
     // "Occupant is a player" [orig: `occupant->Flags & 0x100`] — our runtime players
     // are pool-0 organics with a resolved soldier class.
     const bool player_occupant =
@@ -558,15 +575,12 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
         // state's death transforms raise the dead bit.
         // [orig: cveh @0x48B972..0x48B987; ctan @0x48954B..0x489560;
         //  cbik @0x484A98..0x484AAD]
-        if (occ == nullptr || (veh.flags & 0x10000002u) != 0) {
-			// Without a live controller, steer holds the current heading and command speed decays
+        if (occ == nullptr || vehicle_hull_parked(veh)) {
+			// Without a controller, steer holds the current heading and command speed decays
 			// through the family deceleration clamps. Parked/stuck state is handled by vehicle
 			// lifecycle.
 			// Witness sites: [orig: @0x48c002]
-			m.steer_target_bam = m.yaw_bam;
-			m.cmd_speed = 0;
-			m.steer_ramp_bam = 0;
-            veh.flags &= ~0x80u;
+			vehicle_park_inputs(veh);
         } else if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
 			// A player driver whose eye (CameraOffset.z + Z) sits at or below the
 			// water plane drops to the AI leg like the boat twin [orig: `mov
@@ -588,7 +602,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
         // hull (Flags 0x10000002) keeps counting under its occupant [orig:
         // `moveTimer = 0` after the parked test — cveh @0x48B98D, ctan @0x489566,
         // cbik @0x484AB3; the boat twin @0x48DFA8..0x48DFCD].
-        if (occ != nullptr && (veh.flags & 0x10000002u) == 0) m.stuck_ticks = 0;
+        if (occ != nullptr && !vehicle_hull_parked(veh)) m.stuck_ticks = 0;
     }
     // The handbrake stop latch and the crashed stop sit OUTSIDE the attrib-0x40
     // authority/occupant block, so a DRIVING CLIENT runs them on its predicted
@@ -1854,11 +1868,16 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 	// retains the authored steering input.
 	// Witness sites: [orig: @0x48DDD4, @0x48DDF4, @0x490C9E]
 	if (Entity *local_driver = resolve_local_vehicle_controller(world, veh, traits)) {
-		stage_player_vehicle_input(world_, veh, *local_driver, traits);
-		// Retail reconciles only longitudinal command on the controlling
-		// client; its steer target stays owned by current local LOOK/input.
-		m.cmd_speed = io::bam_sar(
-                io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+		// The boat parks on the dead bit alone [orig: @0x48DFB6..0x48DFBA].
+		if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
+			vehicle_park_inputs(veh);
+		} else {
+			stage_player_vehicle_input(world_, veh, *local_driver, traits);
+			// Retail reconciles only longitudinal command on the controlling
+			// client; its steer target stays owned by current local LOOK/input.
+			m.cmd_speed = io::bam_sar(
+                    io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+		}
 	} else {
 		m.cmd_speed = m.net_recv_speed;
 		m.steer_target_bam = m.net_recv_steer_bam;
@@ -2159,36 +2178,40 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
     // @0x48DFA8..0x48DFCD — no attrib 0x40 means the whole block is skipped and
     // the core runs on the persisted registers]
     if (traits.player_control) {
+        // The entry split reads the seat and the hull's dead bit alone: no
+        // occupant life (a body that dies seated has left at its own death edge,
+        // ahead of this pool-1 update) and no disable bit.
+        // [orig: @0x48DFA8..0x48DFBA; Entity_UpdateInfantryAI @0x4B9910
+        //  (@0x4B9C57..0x4B9C60)]
         Entity *occ = world.vehicles.resolve_controller(veh);
-        if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
         const bool player_occupant =
                 occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
-        if (occ == nullptr) {
+        if (occ == nullptr || ((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
             // Parked/no controller: hold heading, zero command and ramp, lights
             // off. The state-22 stamp and the stuck escalation live with the
             // brain in watercraft_ai_drive. [orig: @0x48E7EE..0x48E81E]
-            m.steer_target_bam = m.yaw_bam;
-            m.cmd_speed = 0;
-            m.steer_ramp_bam = 0;
-            veh.flags &= ~0x80u;
-        } else if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
-            // The human-driver leg: 8-way keys + analog through waterSpeed, the
-            // boat bit6/bit7 overrides, the 45-deg ramp cap, walk/creep halving,
-            // lights [orig: @0x48DFE5..0x48E20F]. A player whose head is under
-            // the water plane routes to the AI leg instead [orig: the
-            // submerged-driver cut @0x48DFD3..0x48DFDF].
-            m.stuck_ticks = 0; // [orig: `moveTimer = 0` at the entry split @0x48DFA8..0x48DFCD]
-			stage_player_vehicle_input(world_, veh, *occ, traits);
-		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
-			// The AI-driver leg's outputs (AiSystem::watercraft_ai_drive)
-            // [orig: @0x48E247..0x48E756 writes aiComp[132]/[136]].
+            vehicle_park_inputs(veh);
+        } else {
+            // Occupied and not dead: the stuck count rests whatever the leg
+            // [orig: `moveTimer = 0` @0x48DFC0].
             m.stuck_ticks = 0;
-            m.steer_target_bam = ai_cmd->steer_target_bam;
-            m.cmd_speed = ai_cmd->cmd_speed;
-            m.steer_ramp_bam = 0;
-		}
-		// A live non-player controller with no drive command holds the previous
-        // targets.
+            if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
+                // The human-driver leg: 8-way keys + analog through waterSpeed, the
+                // boat bit6/bit7 overrides, the 45-deg ramp cap, walk/creep halving,
+                // lights [orig: @0x48DFE5..0x48E20F]. A player whose head is under
+                // the water plane routes to the AI leg instead [orig: the
+                // submerged-driver cut @0x48DFD3..0x48DFDF].
+                stage_player_vehicle_input(world_, veh, *occ, traits);
+            } else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
+                // The AI-driver leg's outputs (AiSystem::watercraft_ai_drive)
+                // [orig: @0x48E247..0x48E756 writes aiComp[132]/[136]].
+                m.steer_target_bam = ai_cmd->steer_target_bam;
+                m.cmd_speed = ai_cmd->cmd_speed;
+                m.steer_ramp_bam = 0;
+            }
+            // A non-player controller with no drive command holds the previous
+            // targets.
+        }
     }
 
     watercraft_motor_core(world, veh, traits);
@@ -2250,14 +2273,20 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
 	// Register mirror / local-driver gate (see the watercraft mirror note).
 	if (Entity *local_driver =
                 resolve_local_vehicle_controller(world, veh, traits)) {
-		stage_player_vehicle_input(world_, veh, *local_driver, traits);
-		// The controlling client halves its staged command against the
-		// received register every tick — the same longitudinal-only
-		// reconciliation as the boat; steer stays owned by current local
-		// LOOK/input [orig: ground @0x48bbef; bike @0x484dad —
-		// [136] = ([136] + [177]) >> 1].
-		m.cmd_speed = io::bam_sar(
-                io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+		// The driving client parks a parked hull as the authority does
+		// [orig: cveh @0x48B980..0x48B987 -> @0x48C002].
+		if (vehicle_hull_parked(veh)) {
+			vehicle_park_inputs(veh);
+		} else {
+			stage_player_vehicle_input(world_, veh, *local_driver, traits);
+			// The controlling client halves its staged command against the
+			// received register every tick — the same longitudinal-only
+			// reconciliation as the boat; steer stays owned by current local
+			// LOOK/input [orig: ground @0x48bbef; bike @0x484dad —
+			// [136] = ([136] + [177]) >> 1].
+			m.cmd_speed = io::bam_sar(
+                    io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+		}
     } else {
         m.cmd_speed = m.net_recv_speed;
         m.steer_target_bam = m.net_recv_steer_bam;

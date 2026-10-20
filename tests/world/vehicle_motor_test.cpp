@@ -2842,7 +2842,39 @@ void test_bike_lean_at_speed_both_ways() {
 	}
 }
 
+// The boat's entry split reads the seat and the hull's dead bit alone, never the
+// occupant: an AI command drives a hull whose seated controller has died (its death
+// edge, which detaches it, is the pool-0 walk's, ahead of this update), and an
+// occupied live hull rests its stuck count whatever the leg.
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 (the seat and dead-bit tests
+//  @0x48DFA8..0x48DFBA, `mov [esi+148h], ebx` @0x48DFC0, the parked arm
+//  @0x48E7EE..0x48E81E)]
+void test_watercraft_entry_reads_the_hull() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.family = VehicleFamily::Watercraft;
+    t.water_speed = 40 * 293;
+    r.w.registry.get(r.drv_h)->player_class = 0; // an NPC controller: the AI leg
+    CHECK(r.w.vehicles.process_attach(r.drv_h, r.veh_h, 1));
+    CHECK(r.w.vehicles.resolve_controller(r.veh()) != nullptr);
+    VehicleDriveCmd drive;
+    drive.ai_drive = true;
+    drive.cmd_speed = 20 * 293;
+    drive.steer_target_bam = 0x10000000;
+    // A seated controller at zero health still takes the AI command.
+    r.w.registry.get(r.drv_h)->health = 0;
+    r.w.registry.get(r.drv_h)->alive = false;
+    r.veh().veh.stuck_ticks = 9;
+    r.w.vehicles.tick_watercraft_motor(r.veh(), t, &drive);
+    CHECK(r.veh().veh.cmd_speed == drive.cmd_speed);
+    CHECK(r.veh().veh.stuck_ticks == 0);
+    // (A dead hull never reaches the split: the mover bails to its tail first,
+    // @0x48DDFA..0x48DDFE, so the split's own dead-bit test only matters within
+    // one pass.)
+}
+
 int main() {
+    test_watercraft_entry_reads_the_hull();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();

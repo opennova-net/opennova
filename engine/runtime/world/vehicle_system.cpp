@@ -79,13 +79,15 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
             if (vehicle_family_uses_direct_air_mover(traits->family)) {
                 if (!veh->veh.net_predicted) {
                     Entity *actrl = world.vehicles.resolve_controller(*veh);
-                    const bool actrl_alive = actrl != nullptr && actrl->alive &&
-                                             actrl->health > 0;
+                    // The parked test (an empty seat or the hull's Flags
+                    // 0x10000002) precedes the player test; the occupant's life is
+                    // never read (a seated body's death edge detaches it first).
                     // A player pilot whose eye sits at or below the water plane
                     // loses the stick to the AI leg, as in the staged families.
-                    // [orig: Entity_UpdateAircraftPhysics `test [ebp+24h],100h`
-                    //  @0x490F36, the eye test @0x490F3F..0x490F4B]
-                    const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
+                    // [orig: Entity_UpdateAircraftPhysics @0x490F16..0x490F25, `test
+                    //  [ebp+24h],100h` @0x490F36, the eye test @0x490F3F..0x490F4B]
+                    const bool aplayer = actrl != nullptr && !vehicle_hull_parked(*veh) &&
+                                         actrl->handle.pool() == 0 &&
                                          actrl->player_class != 0 &&
                                          !watercraft_driver_submerged(world, *actrl);
                     if (aplayer) {
@@ -108,8 +110,7 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                         //  separate mover]
                         world.vehicles.aircraft_client_tick(*veh, *traits);
                     } else {
-                        world.ai.chel_ai_drive(world, *veh, actrl_alive ? actrl : nullptr,
-                                      *traits);
+                        world.ai.chel_ai_drive(world, *veh, actrl, *traits);
                         world.vehicles.aircraft_client_tick(*veh, *traits);
 						if (AiEntity *brain = world.ai.for_handle(h)) {
 							brain->brain.f[AiBrain::kWorkPosZ] = veh->veh.net_alt_target;
@@ -151,14 +152,18 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
             VehicleDriveCmd cmd;
             if (traits->player_control) {
                 Entity *ctrl = world.vehicles.resolve_controller(*veh);
-                // A DEAD controller parks the vehicle. The infantry death edge detaches
-                // first; this guard preserves the same result if the vehicle pass happens
-                // to observe the controller earlier in the frame.
-                // [orig: infantry death detach @0x4b9c57..0x4b9c60]
-                const bool ctrl_alive =
-                        ctrl != nullptr && ctrl->alive && ctrl->health > 0;
-                bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
-                                   ctrl->player_class != 0;
+                // The parked test (an empty seat, or the hull's Flags 0x10000002 /
+                // the boat's dead bit) precedes the player test, and the occupant's
+                // life is never read: a body that dies seated has left at its own
+                // death edge, which the pool-0 walk runs ahead of this pool-1 update.
+                // [orig: cveh @0x48B972..0x48B987; ctan @0x48954B..0x489560; cbik
+                //  @0x484A98..0x484AAD; cbot @0x48DFA8..0x48DFBA;
+                //  Entity_UpdateInfantryAI @0x4B9910 (@0x4B9C57..0x4B9C60)]
+                const bool hull_parked = traits->family == VehicleFamily::Watercraft
+                        ? ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0
+                        : vehicle_hull_parked(*veh);
+                bool player_ctrl = ctrl != nullptr && !hull_parked &&
+                                   ctrl->handle.pool() == 0 && ctrl->player_class != 0;
                 // A PLAYER driver whose head is under the water plane is driven
                 // by the AI leg in every family this staging serves, not only the
                 // boat. [orig: the submerged-driver cuts — cveh @0x48B9A0..0x48B9AC
@@ -175,11 +180,9 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                         ve->brain.f[AiBrain::kCurState] = 22;
                     }
                 } else if (traits->family == VehicleFamily::Watercraft) {
-                    world.ai.watercraft_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr,
-                                        *traits, cmd);
+                    world.ai.watercraft_ai_drive(world, *veh, ctrl, *traits, cmd);
                 } else {
-                    world.ai.vehicle_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr, *traits,
-                                     cmd);
+                    world.ai.vehicle_ai_drive(world, *veh, ctrl, *traits, cmd);
                 }
             }
             // Per-family motor dispatch, the class-table split [orig:

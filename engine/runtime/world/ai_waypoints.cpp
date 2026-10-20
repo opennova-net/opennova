@@ -762,8 +762,9 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 
 	// Parked is `occupant == 0 || Flags & 0x10000002` and nothing else: no hull
 	// or pilot health term. A dead pilot has already left the seat through the
-	// infantry death edge's detach (the caller hands a dead controller in as
-	// null). [orig: Entity_UpdateAircraftPhysics @0x490F16..0x490F25]
+	// infantry death edge's detach, which the pool-0 walk runs first (the caller
+	// hands in the seat's occupant as it stands). [orig: Entity_UpdateAircraftPhysics
+	// @0x490F16..0x490F25; Entity_UpdateInfantryAI @0x4B9910 (@0x4B9C57..0x4B9C60)]
 	if (controller == nullptr || ((veh.flags | veh.engine_flags) & 0x10000002u) != 0) {
 		// Parked: both thrust registers and the climb zeroed, the altitude target
 		// pinned 0x4000 under the ground (collective off), the stuck escalation,

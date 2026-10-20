@@ -16,6 +16,15 @@
 
 namespace opennova::world {
 
+// A PlayerControl hull's input block parks it on its Flags 0x10000002: the dead
+// bit or a script's disable (WacCmd_DisableSsn), whatever the occupant.
+// [orig: Entity_UpdateVehiclePhysics @0x48B980..0x48B987; the tank twin
+//  @0x489559..0x489560; the bike twin @0x484AA6..0x484AAD;
+//  Entity_UpdateAircraftPhysics @0x490F1E..0x490F25]
+inline bool vehicle_hull_parked(const Entity &veh) {
+    return ((veh.flags | veh.engine_flags) & 0x10000002u) != 0;
+}
+
 class World;
 struct AiEntity;
 
