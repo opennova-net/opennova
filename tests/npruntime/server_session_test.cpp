@@ -3332,9 +3332,12 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	// The retail 00TRg oracle's first S2C 0x6E occurs in the exact datagram that
 	// kills the joiner's own entity (0x0035), then repeats once per second while
 	// the deploy/death screen is held. AI deaths before it do not trigger 0x6E.
-	// Pin the same recipient predicate and the no-wave `[u8 0]` body.
+	// Pin the same recipient predicate and the no-wave `[u8 0]` body. The gate
+	// reads the dead bit (as the body's death edge latches it), not the Health.
+	// [orig: Server_TickUpdate `test [eax+24h], 2` @0x51E083]
 	opennova::world::Entity *dead_player = world.registry.get(player);
 	dead_player->health = 0;
+	dead_player->engine_flags |= opennova::world::kEntityFlagDead;
 	// Advance to the next one-second service boundary (the shared countdown,
 	// not a frame-count phase); the intervening frames carry no 0x6E.
 	do {

@@ -687,9 +687,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// The world side runs in zone_capture_second_tick; this block encodes its one
 	// ordered event stream without regrouping messages by tag:
 	//   0x6F 15 B [u16 handle][u8 team][i32 control][i32 0x10000][i16 delta][u8 f][u8 e]
-	//     [orig: NetPacket_WriteZoneTimerValue @0x506E70] — CHANGE-GATED to all in-match
-	//     conns + the full set at 1 Hz to deploy-pending/dead ones (the golden carries
-	//     0x6F in deploy-window bursts, not a steady per-second stream; D-NET-162);
+	//     [orig: NetPacket_WriteZoneTimerValue @0x506E70] — every zone's record to every
+	//     in-match slot each pass, sent once;
 	//   0x50 6 B [u16 handle][u8 team][u16 netId][u8 animSlot] for every actual
 	//     ownership mutation, including the ordered team-0/new-team instant pair;
 	//     non-player identity is zero [orig: Server_ChangeEntityTeam @0x518D70;
@@ -782,23 +781,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				io::append_u16_le(body, static_cast<uint16_t>(control->delta));
 				body.push_back(control->friendlies);
 				body.push_back(control->enemies);
-				auto cached = ctx.zone_6f_cache.find(control->zone.packed);
-				const bool changed = cached == ctx.zone_6f_cache.end() ||
-						cached->second != body;
-				if (changed) ctx.zone_6f_cache[control->zone.packed] = body;
-				for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-					if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-					bool dead = false;
-					if (conn.link.owned_entity.valid()) {
-						const world::Entity *entity =
-								world.registry.get(conn.link.owned_entity);
-						dead = entity != nullptr && entity->health <= 0;
-					}
-					if (changed || conn.link.respawn_pending || dead)
-						conn.link.transport->host_send(
-								s2c::ZONE_TIMER_VALUE, body,
-								/*reliable=*/false);
-				}
+				// Every pass sends each zone's record to every state-6/7 slot,
+				// once (userParam 1): no change gate and no dead or pending test
+				// (the mask's 0x80 arm reads only the slot state).
+				// [orig: Server_UpdateCaptureZoneEntities @0x519690 - send_mask 0x80
+				//  @0x5197B1, the send @0x5197D9; NapiNPServer_SendFiltered
+				//  @0x4C893E..0x4C8953]
+				send_all(s2c::ZONE_TIMER_VALUE, body, /*reliable=*/false);
 				continue;
 			}
 			if (const auto *secure =
@@ -913,11 +902,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 	}
 
-	// (2c) Spawn-wave status: requester-specific S2C 0x6E at 1 Hz to every
-	// PENDING or DEAD in-match player. [orig: Server_TickUpdate
-	// @0x51e089 emits NetPacket_WriteSpawnWaveStatus @0x507490 at 1 Hz; the recipient mask
-	// includes the respawn-pending bit4 (slot+89912 & 0x10 @0x5074c2) and dead players;
-	// golden ASH_I5A deploy window carries 0x6E ×11 at ~1 Hz]
+	// (2c) Spawn-wave status: requester-specific S2C 0x6E at 1 Hz, sent once, to
+	// every in-match player whose body's dead bit or slot's hold (+89912 & 0x10)
+	// is set; the Health word is not read.
+	// [orig: Server_TickUpdate - the slot's state 6 and entity @0x51E062..0x51E06C,
+	//  `test [eax+24h], 2` @0x51E083, the hold @0x51E089, mask 32 @0x51E09D,
+	//  NetPacket_WriteSpawnWaveStatus @0x507490 (the call @0x51E0AD), userParam 1
+	//  @0x51E0C4]
 	if (ctx.is_in_session && !world.match.outcome().ended &&
 			periodic_second) {
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -925,7 +916,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			bool dead = false;
 			if (conn.link.owned_entity.valid()) {
 				const world::Entity *e = world.registry.get(conn.link.owned_entity);
-				dead = e != nullptr && e->health <= 0;
+				dead = e != nullptr &&
+						((e->flags | e->engine_flags) & world::kEntityFlagDead) != 0;
 			}
 			if (conn.link.respawn_pending || dead)
 				conn.link.transport->host_send(

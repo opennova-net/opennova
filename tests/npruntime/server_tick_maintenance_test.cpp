@@ -1406,6 +1406,100 @@ bool check_model_page_cursor_wraps_at_the_list_count() {
 	return ok;
 }
 
+// The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
+// every pass, once, whether or not its record changed and whatever the
+// recipient's state; the 0x6E goes, once, to a slot whose body's dead bit or
+// hold is set, and a Health-0 body with its dead bit clear (a death its edge
+// has not latched yet) gets none.
+// [orig: Server_UpdateCaptureZoneEntities @0x519690 - send_mask 0x80 @0x5197B1,
+//  userParam 1 @0x5197D9; Server_TickUpdate - `test [eax+24h], 2` @0x51E083, the
+//  hold @0x51E089, userParam 1 @0x51E0C4]
+bool check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() {
+	inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kTeamDeathmatch;
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	ctx.world = &world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = ctx.config.game_type;
+	world.match.configure(rules);
+	w::Entity zone;
+	zone.kind = w::EntityKind::Item;
+	zone.is_capture_trigger = true;
+	zone.zone_number = 1;
+	zone.zone_radius = 20;
+	zone.team = 1;
+	zone.health = 1;
+	zone.alive = true;
+	const w::EntityHandle zone_handle = world.registry.spawn(1, zone);
+	world.zones.build_chain_from_mission();
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.player_class = 8;
+	body.team = 1;
+	body.health = 150;
+	body.alive = true;
+	body.position = {500.0f, 0.0f, 0.0f};
+	const w::EntityHandle player = world.registry.spawn(0, body);
+	world.match.upsert_player({player, 0, "Blue", {}});
+	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection conn;
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.mode = ns::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = player;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	struct Pass {
+		int zone_records = 0;
+		bool zone_reliable = false;
+		int wave_status = 0;
+		bool wave_reliable = false;
+	};
+	const auto next_second = [&]() {
+		do {
+			inmatch::Server_TickUpdate(ctx);
+		} while (!world.match.periodic_second());
+		Pass out;
+		ns::Datagram d;
+		while (transport.pop_outbound(d)) {
+			if (d.tag == s2c::ZONE_TIMER_VALUE && d.body.size() >= 2 &&
+					(d.body[0] | (d.body[1] << 8)) == zone_handle.packed) {
+				++out.zone_records;
+				out.zone_reliable = out.zone_reliable || d.reliable;
+			}
+			if (d.tag == s2c::SPAWN_WAVE_STATUS) {
+				++out.wave_status;
+				out.wave_reliable = out.wave_reliable || d.reliable;
+			}
+		}
+		return out;
+	};
+	(void)next_second();
+	const Pass unchanged = next_second();
+	bool ok = expect(unchanged.zone_records == 1 && !unchanged.zone_reliable &&
+					unchanged.wave_status == 0,
+			"an unchanged zone's 0x6F reaches a live slot again, sent once");
+	w::Entity *e = world.registry.get(player);
+	e->health = 0;
+	const Pass unlatched = next_second();
+	ok = expect(unlatched.zone_records == 1 && unlatched.wave_status == 0,
+			"a Health-0 body with its dead bit clear draws no 0x6E") && ok;
+	e->health = 150;
+	e->engine_flags |= w::kEntityFlagDead;
+	const Pass dead = next_second();
+	ok = expect(dead.wave_status == 1 && !dead.wave_reliable,
+			"the dead bit draws the one-send 0x6E") && ok;
+	return ok;
+}
+
 bool check_priority_target_sweep() {
 	w::World world;
 	world.registry.configure_pool(0, 4);
@@ -3026,6 +3120,7 @@ int main() {
 	ok = check_spectator_latch_mirrors_onto_the_roster_row() && ok;
 	ok = check_armory_reuse_cooldown() && ok;
 	ok = check_model_page_cursor_wraps_at_the_list_count() && ok;
+	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;
 	ok = check_kit_weight_reads_the_seat() && ok;

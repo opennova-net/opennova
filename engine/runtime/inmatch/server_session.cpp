@@ -111,9 +111,6 @@ void continue_session(NapiNPServerCtx &ctx, const GameConfig &config) {
 	// The exit the round end stored is spent: the main frame read it before
 	// the map change [orig: Game_ProcessMainFrame @0x526806..0x526867].
 	ctx.mission_exit_reason = 0;
-	// The change-gated S2C 0x6F cache is keyed by the old mission's zone
-	// handles (a port cache with no retail counterpart).
-	ctx.zone_6f_cache.clear();
 }
 
 // [orig: CNapiGameSession_CreateSession @0x4c97c0] — see header.

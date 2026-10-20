@@ -396,11 +396,6 @@ struct NapiNPServerCtx {
 	// Non-owning; the role re-points it whenever it rebuilds that runtime.
 	const ClientRuntime *host_client = nullptr;
 
-	// Last-sent S2C 0x6F body per zone handle — the golden shows 0x6F is NOT a steady
-	// per-second stream (268 across a whole session): unchanged bodies are withheld and
-	// pending/dead (deploy-screen) recipients get the full set at 1 Hz instead
-	// (change-gated broadcast; D-NET-162 note). Keyed by the zone's packed handle.
-	std::unordered_map<uint16_t, std::vector<uint8_t>> zone_6f_cache;
 	// The loaded mission, read by the initial-state burst for the S2C 0x0B BMS-header body
 	// (bms::encode_loaded_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
 	const bms::File *mission = nullptr;
