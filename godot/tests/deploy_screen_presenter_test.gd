@@ -118,13 +118,30 @@ func _join_pair_in_match(host_traits_first := false) -> Dictionary:
 	return {"host": host, "joiner": joiner}
 
 
-# The in-match pair driven onward to the DEATH deploy pick: the authority kills
-# the joiner and the death edge re-arms the pick (begin_redeployment). Returns
-# {host, joiner}; both are autofreed Nodes.
+# The in-match pair driven onward to the DEATH deploy pick: the joiner deploys,
+# then the authority kills it and the death edge re-arms the pick
+# (begin_redeployment). The kill needs a deployed body: a held joiner's body is
+# hidden on the authority, and the player body's death edge skips a hidden body,
+# so a kill there raises no death transaction (no 0x13, no revive window).
+# [orig: Entity_UpdateInfantryPlayerBody - the hidden-bit return
+#  @0x4B411E..0x4B4127; NetPacket_WritePlayerState - the held slot's hide bit
+#  @0x4FF7AA..0x4FF7B8]
+# Returns {host, joiner}; both are autofreed Nodes.
 func _join_pair_with_pending_pick() -> Dictionary:
 	var pair := _join_pair_in_match()
 	var host: Simulation = pair.host
 	var joiner: Simulation = pair.joiner
+	var overlay := false
+	for _i in range(240):
+		host.step()
+		joiner.step()
+		if joiner.is_deploy_overlay_active():
+			overlay = true
+			break
+		OS.delay_msec(2)
+	assert_true(overlay, "the held joiner's overlay arms")
+	assert_true(joiner.send_deployment_pick(0), "the joiner picks the Default Spawn")
+	_assert_deployment_released(pair)
 	# The kill targets the joiner's wire handle: wait for the 0x0C name-match to
 	# bind it, then the authority's real death transaction re-arms the pick (the
 	# DEATH screen).
