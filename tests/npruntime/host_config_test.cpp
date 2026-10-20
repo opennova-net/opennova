@@ -329,6 +329,32 @@ int main() {
 		TEST_EXPECT(request.config.respawn_time == 25);
 		TEST_EXPECT(request.player_limit == 0 && block.mp_max_players == 0);
 		TEST_EXPECT(host_session_settings(block).player_limit == 1 && block.mp_max_players == 1);
+		// A fresh block (Config_SetDefaults' words) makes the host screen's rule baseline.
+		const GameConfig fresh = host_screen_from_block(gamecfg::defaults()).config;
+		const GameConfig baseline = host_screen_default_config();
+		TEST_EXPECT(fresh.respawn_time == baseline.respawn_time);
+		TEST_EXPECT(fresh.time_limit_minutes == baseline.time_limit_minutes);
+		TEST_EXPECT(fresh.replay_enabled == baseline.replay_enabled);
+		TEST_EXPECT(fresh.max_team_lives == baseline.max_team_lives);
+		TEST_EXPECT(fresh.score_limit == baseline.score_limit);
+		TEST_EXPECT(fresh.max_score == baseline.max_score);
+		TEST_EXPECT(fresh.koth_delta == baseline.koth_delta);
+		TEST_EXPECT(fresh.flag_return_ticks == baseline.flag_return_ticks);
+		TEST_EXPECT(fresh.flag_reset_seconds == baseline.flag_reset_seconds);
+		TEST_EXPECT(fresh.armory_reuse_time == baseline.armory_reuse_time);
+		TEST_EXPECT(fresh.capture_duration_seconds == baseline.capture_duration_seconds);
+		TEST_EXPECT(fresh.capture_speed_setting == baseline.capture_speed_setting);
+		TEST_EXPECT(fresh.spawn_wave_time_base == baseline.spawn_wave_time_base);
+		TEST_EXPECT(fresh.spawn_wave_time_zone == baseline.spawn_wave_time_zone);
+		TEST_EXPECT(fresh.num_teams == baseline.num_teams);
+		TEST_EXPECT(fresh.respawn_timeout == baseline.respawn_timeout);
+		TEST_EXPECT(fresh.start_delay == baseline.start_delay);
+		TEST_EXPECT(fresh.destroy_buildings == baseline.destroy_buildings);
+		TEST_EXPECT(fresh.death_messages == baseline.death_messages);
+		TEST_EXPECT(fresh.mp_attributes == baseline.mp_attributes);
+		TEST_EXPECT(fresh.class_allow_mask == baseline.class_allow_mask);
+		TEST_EXPECT(fresh.lan_mode == baseline.lan_mode);
+		TEST_EXPECT(fresh.spectator_slots == baseline.spectator_slots);
 	}
 
 	// The session socket's bind scan over the block's quads: a LAN authority the server quad
