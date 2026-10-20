@@ -26,8 +26,8 @@ const FIRST_PAGE_OFFSET := 6
 
 const BLUE_CLASS := 8
 const RED_CLASS := 6
-# Every name below is a row of ArmoryFixture's loadout catalog (the shipped
-# weapon.def's rows and loadout fields, in the shipped order).
+# Every name below is a row of ArmoryFixture's loadout catalog (authored rows under
+# the shipped weapon names).
 const BLUE_PAGE := ["WPN_KNIFE", "WPN_M4AUTO", "WPN_colt45"]
 const RED_PAGE := ["WPN_KNIFE2", "WPN_DRAGUNOV", "WPN_357"]
 # Deliberately absent from both pages: if it shows up in the local pool, the pool was

@@ -13,8 +13,9 @@ extends GutTest
 # resolver (ctest collision_test) — here the screen itself is the unit.
 
 # ArmoryFixture authors the catalog and strings. The shipped-value pins at the end
-# read ArmoryFixture's loadout catalog (the shipped weapon.def's loadout fields) and
-# our base game's assets/weapon.mnu (the authored WEAPON screen).
+# read ArmoryFixture's loadout catalog (authored rows carrying the shipped weapon.def
+# values those pins name) and our base game's assets/weapon.mnu (the authored WEAPON
+# screen).
 
 const ASSETS_WEAPON_MNU := "res://../assets/weapon.mnu"
 # The shipped gametext.bin WepDes round labels the ammo rows resolve
@@ -553,9 +554,9 @@ func test_real_weapon_mnu_populates() -> void:
 	assert_eq(driver.item_count(spin), 5, "the companion fills the authored-empty class spinlist")
 
 
-# First-show regression against the authored WEAPON screen and the shipped loadout
-# fields: M4 (weaponweight 5.5 + maxclips 10 * clipweight 1.5) plus two satchels
-# (maxclips 2 * clipweight 17.6) is 55.7 lbs / Normal. Selecting row zero means one
+# First-show regression against the authored WEAPON screen and the shipped weapon.def
+# values the loadout catalog pins: M4 (weaponweight 5.5 + maxclips 10 * clipweight
+# 1.5) plus two satchels (maxclips 2 * clipweight 17.6) is 55.7 lbs / Normal. Selecting row zero means one
 # satchel and must re-render 38.1 lbs / Normal.
 func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> void:
 	var driver := _assets_weapon_driver()

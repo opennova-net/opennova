@@ -3602,9 +3602,9 @@ func test_emit_callback_uses_live_particle_groups_on_fixed_ticks() -> void:
 
 # The first armory open over the production world: our base game's WEAPON screen
 # (assets/weapon.mnu) and string tables (assets/menutxt.bin, assets/gametext.bin)
-# beside ArmoryFixture's loadout catalog (the shipped weapon.def's loadout rows, the
-# satchel's loadout_subclasses 1 and its detonator row among them), staged over the
-# minimal root.
+# beside ArmoryFixture's loadout catalog (authored rows, the satchel's
+# loadout_subclasses 1 and its detonator row among them), staged over the minimal
+# root.
 func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	Strings.clear()
 	var root_dir := _staged(WorldFixture.stage_minimal_root("first_armory_open"))

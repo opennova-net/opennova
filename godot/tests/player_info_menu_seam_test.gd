@@ -1677,7 +1677,7 @@ func test_accept_leaves_the_side_not_shown() -> void:
 			"the class goes to both sides, red's 9 included")
 
 
-# --- The authored PLAYER_INFO screen and the shipped loadout fields -------------
+# --- The authored PLAYER_INFO screen and the loadout catalog ---------------------
 
 # Our base game's player.mnu: the authored PLAYER_INFO widget tree the runtime opens.
 const ASSETS_PLAYER_MNU := "res://../assets/player.mnu"
@@ -1690,8 +1690,8 @@ func _assets_player_doc() -> MnuDocument:
 	return doc
 
 
-# ArmoryFixture's loadout catalog: the shipped weapon.def's rows and loadout fields
-# the cases below read (WPN_M4AUTO, the M4M203 family, the grenades, ...).
+# ArmoryFixture's loadout catalog: authored rows under the names the cases below read
+# (WPN_M4AUTO, the M4M203 family, the grenades, ...), with the shipped values they pin.
 func _load_weapons() -> WeaponDatabase:
 	var wdb := WeaponDatabase.new()
 	var path := ArmoryFixture.stage_loadout_catalog("player_info_seam").path_join("weapon.def")
@@ -1858,7 +1858,8 @@ func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 8, "WPN_M4M203AUTO")
 	# The witnessed walk skips same-round WPN_M4M203 and lands on WPN_M4M203HE
 	# (AMMO_M203_40MM_NADE) within loadout_subclasses = 2: the shipped weapon.def's
-	# three M4M203 rows, in its order (ArmoryFixture.LOADOUT_ROWS).
+	# three M4M203 rows' order, round link and subclass count, which
+	# ArmoryFixture.LOADOUT_ROWS pins.
 	var sub := _expected_sub(wdb, w)
 	assert_eq(sub.name, "WPN_M4M203HE",
 		"the sub walk lands on the first DIFFERING round_type entry")
