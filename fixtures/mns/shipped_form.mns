@@ -1,0 +1,38 @@
+// shipped_form.mns: an OpenNova test stylesheet, hand-written in the form the shipped
+// stylesheets take: CR LF lines, no byte-order mark, whole-line comments and blank lines
+// between the groups, and each name set off from its value by a run of two to five tabs.
+//
+// The style variables the screens name as %NAME%.
+//
+
+// --- Fonts ---------------------------------------------------------------------------
+// The default control font.
+DEF_FONTNAME		Arial14n.fnt
+// The large buttons' font.
+DEF_FONTNAME_LG			Arial16b.fnt
+// The titles' font.
+IMPACT_FONTNAME			Impac22b.fnt
+
+// --- Text colours (ARGB) -------------------------------------------------------------
+// At rest.
+DEF_TEXT_FG				FFD0D8E0
+// Under the mouse.
+DEF_TEXT_MOUSEOVER_FG		FFFFB040
+// Pressed.
+DEF_TEXT_SELECTED_FG		FFFFFFFF
+// Disabled.
+DEF_TEXT_DISABLED_FG		FF606870
+
+// --- Frames and fills (ARGB) ---------------------------------------------------------
+// A frame's trim.
+TRIM_COLOR					FF506070
+// A selected row's fill.
+ITEM_SELECTED_BG			A0806020
+// The opaque black fill.
+COLOR_BLACK					FF000000
+// The half-black fill.
+SEMIOPAQUE_BLACK		B0000000
+
+// --- Images --------------------------------------------------------------------------
+// The screens' default background.
+DEF_IMAGE_DEFAULT_BG		formsbg.tga

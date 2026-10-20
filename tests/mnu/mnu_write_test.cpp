@@ -3,9 +3,10 @@
 // file's comments and spacing are not kept). A document made in code writes the canonical bytes
 // pinned below, pretty and on one line; a hand-written menu, its comments and spacing dropped, reads
 // back as the model it was read as; a set of edits, and seeded rounds of list edits, each written and
-// read again, read back as the edited model. The retail leg (--retail) sweeps every .mnu the packed
-// install serves and the reference set's shipped menus: each read, written and read again is the
-// model it was, and the same edits over each read back as edited.
+// read again, read back as the edited model. The tree leg sweeps the tree's menus (tests/mnu/
+// repo_menus.h: the authored set, shipped_forms.mnu with every form the shipped JO menus take, and
+// the base game's screens): each read, written and read again is the model it was, the same edits
+// over each read back as edited, and the writer's bytes for each are a pinned FNV-1a64 vector.
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -16,13 +17,12 @@
 #include <utility>
 #include <vector>
 
-#include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
 #include <formats/mnu/mnu_layout.h>
 #include <formats/mnu/mnu_schema.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
+#include "repo_menus.h"
 
 namespace {
 
@@ -991,7 +991,7 @@ bool test_list_rounds() {
 	return true;
 }
 
-// --- the retail corpus -------------------------------------------------------------------------
+// --- the tree's menus --------------------------------------------------------------------------
 
 struct Corpus {
 	int checked = 0;
@@ -1041,64 +1041,101 @@ void check_menu(Corpus &corpus, const std::string &label, const std::string &byt
 	std::printf("  OK   %s (%zu bytes; it and the edits read back)\n", label.c_str(), bytes.size());
 }
 
-void sweep_mount(Corpus &corpus, const std::string &install, const std::string &expansion) {
-	opennova::Vfs vfs;
-	if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) {
-		std::printf("  FAIL mount_game(%s, %s): %s\n", install.c_str(), expansion.c_str(), vfs.last_error().c_str());
-		++corpus.failed;
-		return;
+// The writer's bytes (mnu::serialize, pretty) for each authored menu under fixtures/mnu, pinned as
+// FNV-1a64 vectors (the tests/novaworld nw_codec_identity form): shipped_forms.mnu holds every form the
+// shipped JO menus take, so a change to what the writer puts down for one of them shows here. The
+// form is OpenNova's own (D-MNU-22: no original tool writes a menu), so a vector changes only with a
+// change of that form, its D-MNU entry and `mnu_write_test --dump`'s table in the same commit.
+struct WriterVector {
+	const char *file;
+	size_t len;
+	uint64_t hash;
+};
+
+const WriterVector kWriterVectors[] = {
+    {"all_widgets.mnu", 6510u, 0x226e6c3d4cd87841ull},
+    {"hotkeys.mnu", 7027u, 0x051b5ec893bf1ddcull},
+    {"render_cases.mnu", 7515u, 0x2abc77c9581a74b8ull},
+    {"shipped_forms.mnu", 10552u, 0x2aa7d1861d63e481ull},
+    {"widgets.mnu", 2675u, 0xc23947a90b1f90d2ull},
+};
+
+uint64_t fnv1a64(const std::string &bytes) {
+	uint64_t h = 1469598103934665603ull;
+	for (const char c : bytes) {
+		h ^= static_cast<uint8_t>(c);
+		h *= 1099511628211ull;
 	}
-	for (const auto &loc : vfs.list_files()) {
-		const std::string &name = loc.logical_name;
-		if (name.size() < 4) continue;
-		std::string ext = name.substr(name.size() - 4);
-		for (char &c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		if (ext != ".mnu") continue;
-		std::vector<uint8_t> bytes;
-		if (!vfs.read_file_raw(name, bytes)) {
-			std::printf("  FAIL %s (unreadable)\n", name.c_str());
+	return h;
+}
+
+// The tree's menus (tests/mnu/repo_menus.h) in place of an installed game's: each read, written
+// and read again is the model it was, the same edits over each read back as edited, seeded rounds
+// of list edits over each, and the writer's bytes for each authored one are the pinned vector.
+int tree_leg(bool dump) {
+	const std::vector<std::string> paths = repo_menus::menus();
+	if (!repo_menus::holds(paths, "shipped_forms.mnu")) {
+		std::fprintf(stderr, "fixtures/mnu/shipped_forms.mnu (the shipped menus' forms) is missing\n");
+		return 1;
+	}
+	Corpus corpus;
+	std::vector<WriterVector> got;
+	std::vector<std::string> names;
+	for (const std::string &path : paths) {
+		std::string bytes;
+		if (!test_io::read_file_text(path.c_str(), bytes)) {
+			std::printf("  FAIL %s (unreadable)\n", path.c_str());
 			++corpus.failed;
 			continue;
 		}
-		check_menu(corpus, (expansion.empty() ? std::string("<install>/") : expansion + "/") + name,
-		           std::string(bytes.begin(), bytes.end()));
+		const std::string name = repo_menus::name(path);
+		check_menu(corpus, name, bytes);
+		// The authored fixtures are pinned; the base game's screens change as the game does.
+		mnu::Document doc;
+		std::string error;
+		if (path.find("/fixtures/mnu/") == std::string::npos || !mnu::parse(bytes, doc, error)) continue;
+		const std::string written = canonical(doc);
+		names.push_back(name);
+		got.push_back({nullptr, written.size(), fnv1a64(written)});
 	}
-}
-
-int retail_leg() {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (the packed install's .mnu set)");
-	Corpus corpus;
-	sweep_mount(corpus, install, std::string());
-	for (const std::string &expansion : retail::expansions()) sweep_mount(corpus, install, expansion);
-	// The reference set's shipped menus, when the asset tree is there too.
-	static const char *const kMenus[] = {"jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player",
-	                                     "jo_weapon", "jo_loadout", "jo_color", "jo_cmap", "jo_stat", "jo_death",
-	                                     "jo_vehicle", "jo_item_db", "jo_splash"};
-	int reference = 0;
-	for (const char *name : kMenus) {
-		const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
-		std::string bytes;
-		if (path.empty() || !test_io::read_file_text(path.c_str(), bytes)) continue;
-		++reference;
-		check_menu(corpus, std::string("reference/") + name + ".mnu", bytes);
+	if (dump) {
+		std::printf("const WriterVector kWriterVectors[] = {\n");
+		for (size_t i = 0; i < got.size(); ++i)
+			std::printf("    {\"%s\", %zuu, 0x%016llxull},\n", names[i].c_str(), got[i].len,
+			            static_cast<unsigned long long>(got[i].hash));
+		std::printf("};\n");
+		return 0;
 	}
-	if (corpus.checked == 0) {
-		std::fprintf(stderr, "\nthe packed install served no .mnu\n");
-		return 1;
+	const size_t expected = sizeof(kWriterVectors) / sizeof(kWriterVectors[0]);
+	if (expected != got.size()) {
+		std::printf("  FAIL %zu menus written but %zu vectors pinned (mnu_write_test --dump)\n", got.size(), expected);
+		++corpus.failed;
 	}
-	std::printf("retail leg: %d menu(s) (%d from the reference set; %zu distinct files), each read back as the model "
-	            "it was; %d edited menus read back as edited (%d edits refused for a write issue); %d rounds of list "
-	            "edits over the distinct files (%d refused, %d read in another order); %d failure(s)\n",
-	            corpus.checked, reference, corpus.distinct.size(), corpus.edits, corpus.refused, corpus.rounds.rounds,
-	            corpus.rounds.refused, corpus.rounds.canonical, corpus.failed);
+	for (size_t i = 0; i < got.size() && i < expected; ++i) {
+		const WriterVector &e = kWriterVectors[i];
+		if (names[i] != e.file || got[i].len != e.len || got[i].hash != e.hash) {
+			std::printf("  FAIL %s written %zu bytes hash 0x%016llx, pinned %s %zu bytes hash 0x%016llx\n",
+			            names[i].c_str(), got[i].len, static_cast<unsigned long long>(got[i].hash), e.file, e.len,
+			            static_cast<unsigned long long>(e.hash));
+			++corpus.failed;
+		}
+	}
+	std::printf("tree leg: %d menu(s) (%zu distinct files), each read back as the model it was; %d edited menus read "
+	            "back as edited (%d edits refused for a write issue); %d rounds of list edits over the distinct files "
+	            "(%d refused, %d read in another order); %zu writer vectors; %d failure(s)\n",
+	            corpus.checked, corpus.distinct.size(), corpus.edits, corpus.refused, corpus.rounds.rounds,
+	            corpus.rounds.refused, corpus.rounds.canonical, got.size(), corpus.failed);
 	return corpus.failed == 0 ? 0 : 1;
 }
 
 } // namespace
 
+// `mnu_write_test --dump` prints the writer vector table; the ctest registration passes nothing.
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+	bool dump = false;
+	for (int i = 1; i < argc; ++i)
+		if (std::string(argv[i]) == "--dump") dump = true;
+	if (dump) return tree_leg(true);
 #define RUN(name)                                                    \
 	do {                                                             \
 		std::printf("Running " #name "... ");                        \
@@ -1113,5 +1150,5 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "\n%d check(s) FAILED\n", g_failed);
 		return 1;
 	}
-	return retail_leg();
+	return tree_leg(false);
 }

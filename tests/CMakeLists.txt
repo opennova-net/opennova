@@ -1094,8 +1094,8 @@ add_test(NAME mus_names_roundtrip COMMAND mus_names_roundtrip_test
 
 # Entry-section round-trip: the compiler hardcodes entry_section_index = 0, so a
 # faithful round-trip needs the original entry to be its lowest-offset section
-# (true for both stock bins). Pins that the recompiled entry names the same
-# section -- a drift the text round-trip and encode-idempotence cannot see.
+# (true for every stock bin and the minted programs). Pins that the recompiled entry
+# names the same section -- a drift the text round-trip and encode-idempotence cannot see.
 add_executable(mus_entry_roundtrip_test mus/mus_entry_roundtrip_test.cpp)
 target_link_libraries(mus_entry_roundtrip_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mus_entry_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1130,8 +1130,7 @@ target_include_directories(mus_vm_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME mus_vm_fixes COMMAND mus_vm_fixes_test)
 
 # Write-path parity: a program decompiled to its MUS text, compiled and encoded again is its own bytes (the
-# compiler writes MDEdit's layout): the minted pair in core; the reference pair and every music script the
-# install's archives hold (base and each expansion) as the retail leg. See the test file header.
+# compiler writes MDEdit's layout): the minted programs, the forms program among them. See the test file header.
 add_executable(mus_encode_idempotence_test mus/mus_encode_idempotence_test.cpp)
 target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mus_encode_idempotence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1225,7 +1224,7 @@ target_include_directories(minimal_env_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 add_test(NAME minimal_env_gen COMMAND minimal_env_gen_test)
 
 # RTXT parity over the minted synthetic string tables (format invariants + byte
-# roundtrip); the same checks over the retail bins are the gated install sweep.
+# roundtrip), synth_variants.bin among them: the shapes the shipped bins take.
 add_executable(rtxt_synth_parity_test rtxt/synth_parity_test.cpp)
 target_link_libraries(rtxt_synth_parity_test PRIVATE opennova_formats)
 target_include_directories(rtxt_synth_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
@@ -2225,19 +2224,20 @@ target_link_libraries(menu_credits_test PRIVATE opennova_runtime)
 target_include_directories(menu_credits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_credits COMMAND menu_credits_test)
 
-# Every shipped screen through the frame compiler: the reference fixture menus
-# (gated) and every .mnu the packed install serves, with its assets (SKIP-LEG).
+# The tree's screens through the frame compiler: every authored menu (no assets), the
+# drawing cases of the shipped screens (fixtures/mnu/render_cases.mnu over the base game's
+# fonts with minted strips), and every base game menu with the base game's files.
 add_executable(menu_render_corpus_test menu/menu_render_corpus_test.cpp)
 target_link_libraries(menu_render_corpus_test PRIVATE opennova_runtime)
 target_include_directories(menu_render_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(menu_render_corpus COMMAND menu_render_corpus_test)
+add_test(NAME menu_render_corpus COMMAND menu_render_corpus_test)
 
-# The runtime's keyboard over the grill's census corpus (the .mnu at the
-# OPENNOVA_JO_ASSETS root with menutxt.bin): the shipped hotkey cases (gated).
+# The runtime's keyboard over the shipped screens' hotkey cases, each authored
+# (fixtures/mnu/hotkeys.mnu, its labels a minted menutxt.bin).
 add_executable(menu_runtime_corpus_test menu/menu_runtime_corpus_test.cpp)
 target_link_libraries(menu_runtime_corpus_test PRIVATE opennova_runtime)
 target_include_directories(menu_runtime_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(menu_runtime_corpus COMMAND menu_runtime_corpus_test)
+add_test(NAME menu_runtime_corpus COMMAND menu_runtime_corpus_test)
 
 add_executable(vehicle_collision_damage_test world/vehicle_collision_damage_test.cpp)
 target_link_libraries(vehicle_collision_damage_test PRIVATE opennova_runtime)
@@ -2483,13 +2483,15 @@ target_link_libraries(mnu_unit_test PRIVATE opennova_formats)
 target_include_directories(mnu_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mnu_unit COMMAND mnu_unit_test)
 
-# Compat sweep over real shipped .mnu menus: the fifteen revx02 menus from the
-# reference fixture set (gated on OPENNOVA_JO_ASSETS) required-pass, then every
-# .mnu the packed install serves (OPENNOVA_JO_DIR, a SKIP-LEG retail leg).
+# Compat sweep over the tree's menus (tests/mnu/repo_menus.h): the authored set
+# under fixtures/mnu, shipped_forms.mnu among them (every element, attribute and
+# lexical form the shipped JO menus use, in their byte form), and the base game's
+# screens in assets/: the reader against the retail-reader oracle, no write
+# issue, and the writer's fixed point.
 add_executable(mnu_compat_test mnu/mnu_compat_test.cpp)
 target_link_libraries(mnu_compat_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mnu_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(mnu_compat COMMAND mnu_compat_test)
+add_test(NAME mnu_compat COMMAND mnu_compat_test)
 
 # Round-trip key-coverage: catches attributes/tags dropped at parse time, which
 # the idempotence sweep above cannot see (see ADR 0002). The same fifteen
@@ -2497,17 +2499,18 @@ opennova_add_gated_test(mnu_compat COMMAND mnu_compat_test)
 add_executable(mnu_coverage_test mnu/mnu_coverage_test.cpp)
 target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(mnu_coverage COMMAND mnu_coverage_test)
+add_test(NAME mnu_coverage COMMAND mnu_coverage_test)
 
 # The menu writer's own form (formats/mnu/mnu_write, D-MNU-22): a document made in code
 # writes the canonical bytes; a menu written and read again is the model it was; edits and
-# seeded rounds of list edits read back as edited. The retail twin sweeps every .mnu the
-# packed install serves (OPENNOVA_JO_DIR) and the reference set's shipped menus
-# (OPENNOVA_JO_ASSETS): each reads back as the model it was, and the edits as edited.
+# seeded rounds of list edits read back as edited; the tree's menus (tests/mnu/repo_menus.h,
+# shipped_forms.mnu with every form the shipped JO menus take) each read back as the model
+# they were, the edits as edited, and the writer's bytes for each are a pinned FNV-1a64
+# vector (`mnu_write_test --dump` prints the table).
 add_executable(mnu_write_test mnu/mnu_write_test.cpp)
 target_link_libraries(mnu_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mnu_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(mnu_write COMMAND mnu_write_test)
+add_test(NAME mnu_write COMMAND mnu_write_test)
 
 # The format's rules a property table reads (formats/mnu/mnu_schema, ADR 0046 S9h): which
 # window type reads what, what an ACTION's verb reads, the material flag tokens. The table
@@ -2524,13 +2527,13 @@ add_test(NAME mns_parse COMMAND mns_parse_test)
 
 # The stylesheet writer (formats/mns, mns::write): the reader's list written in the
 # writer's form, a minted list byte for byte, an authored sheet read back as its list,
-# what the reader reads otherwise refused; the retail twin reads the reference set's
-# menu_style.mns (OPENNOVA_JO_ASSETS) and every .mns the packed install serves
-# (OPENNOVA_JO_DIR), each written and read back as the same list.
+# what the reader reads otherwise refused; the tree's sheets (fixtures/mns, shipped_form.mns
+# in the shipped sheets' form, and the base game's) each written and read back as the same
+# list, the writer's bytes for each authored one a pinned FNV-1a64 vector (--dump).
 add_executable(mns_write_test mns/mns_write_test.cpp)
 target_link_libraries(mns_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mns_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(mns_write COMMAND mns_write_test)
+add_test(NAME mns_write COMMAND mns_write_test)
 
 # World runtime substrate: addressable entities (faithful find_by_net_id), shared
 # var store, entity-command primitives, the logic-tick clock, snapshot/restore.

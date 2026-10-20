@@ -1,0 +1,252 @@
+<!-- shipped_forms.mnu: an OpenNova test menu, hand-written in the form the shipped menus take -->
+<!-- (CR LF lines, tab indents, comments, bare flags, unquoted numbers, the slips their quotes make) -->
+<SCREEN>
+	<NAME>FORMS</NAME>
+	<MUSICVAR>7</MUSICVAR>
+	<WINDOW type="window" name="MAIN">
+		<FRAME>
+			<STENCIL size="32">frmedge.tga</STENCIL>
+			<BRUSH>frmfill.tga</BRUSH>
+			<MONOGRAM>frmmark.tga</MONOGRAM>
+		</FRAME>
+		<APPEARANCE type="image" state="default">formsbg.tga</APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+		</CURSOR>
+		<FONT>
+			<NAME>Arial14n.fnt</NAME>
+			<DEFAULT_FG>b8c0c8</DEFAULT_FG>
+			<DEFAULT_BG>000000</DEFAULT_BG>
+			<DISABLED_FG>605040</DISABLED_FG>
+			<DISABLED_BG>000000</DISABLED_BG>
+			<SELECTED_FG>f0a020</SELECTED_FG>
+			<SELECTED_BG>000000</SELECTED_BG>
+			<MOUSEOVER_FG>FFC040</MOUSEOVER_FG>
+			<MOUSEOVER_BG>000000</MOUSEOVER_BG>
+		</FONT>
+		<!--
+			The buttons down the left side.
+			A second line of the same comment.
+		-->
+		<WINDOW type="button" name="PLAY_ONLINE">
+			<ACTION type="URL" EXTERNAL_BROWSER>opennova.net/play</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="30">frmbtn.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="30">frmbtn.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="30">frmbtn.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3 height="30">frmbtn.tga</APPEARANCE>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_JOIN">menu.lwf</SOUND>
+			<POSITION>
+				<LEFT>40</LEFT>
+				<RIGHT>240</RIGHT>
+				<TOP>120</TOP>
+				<BOTTOM>150</BOTTOM>
+			</POSITION>
+			<STRING type="string" justify="LEFT">{hot}ONLINE</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="ARCHIVE" DISABLE HIDDEN>
+			<APPEARANCE state="default"></APPEARANCE>
+			<APPEARANCE state="mouseover"></APPEARANCE>
+			<POSITION>
+				<LEFT>40</LEFT>
+				<RIGHT>240</RIGHT>
+				<TOP>160</TOP>
+				<BOTTOM>190</BOTTOM>
+			</POSITION>
+			<STRING type="id" justify="RIGHT">FORMS_ARCHIVE</STRING>
+		</WINDOW>
+		<!-- someday, a second page:
+		<WINDOW type="button" name="PAGE_TWO">
+			<STRING type="id">FORMS_PAGE_TWO</STRING>
+		</WINDOW>
+		-->
+		<WINDOW type="static" name="COPYRIGHT">
+			<POSITION>
+				<LEFT>40</LEFT>
+				<RIGHT>400</RIGHT>
+				<TOP>560</TOP>
+				<BOTTOM>580</BOTTOM>
+			</POSITION>
+			<STRING justify="LEFT">© 2026, the OpenNova contributors</STRING>
+		</WINDOW>
+		<WINDOW type="window" name="DIALOG" DRAW_FRAME HIDDEN MODAL>
+			<APPEARANCE type="window" state="default"></APPEARANCE>
+			<POSITION>
+				<LEFT>250</LEFT>
+				<RIGHT>550</RIGHT>
+				<TOP>200</TOP>
+				<BOTTOM>400</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>Arial12b.fnt</NAME>
+				<DEFAULT_FG>FFFFFF</DEFAULT_FG>
+				<SELECTED_FG>FFE0A0</SELECTED_FG>
+				<MOUSEOVER_FG>ffd080</MOUSEOVER_FG>
+			</FONT>
+			<WINDOW type="static" name="DIALOG_LABEL">
+				<POSITION>
+					<LEFT>10</LEFT>
+					<RIGHT>290</RIGHT>
+					<TOP>10</TOP>
+					<BOTTOM>40</BOTTOM>
+				</POSITION>
+				<STRING edge="5" justify="CENTER" vjustify="CENTER></STRING>
+				<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+			</WINDOW>
+			<WINDOW type="static" name="DIALOG_TEXT">
+				<POSITION>
+					<LEFT>10</LEFT>
+					<RIGHT>290</RIGHT>
+					<TOP>50</TOP>
+					<BOTTOM>80</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER" type="id">FORMS_DIALOG</STRING>
+			</WINDOW>
+		</WINDOW>
+		<WINDOW type="scroll" name="BRIGHTNESS">
+			<POSITION>
+				<LEFT>300</LEFT>
+				<RIGHT>500</RIGHT>
+				<TOP>440</TOP>
+				<BOTTOM>456</BOTTOM>
+			</POSITION>
+			<HEIGHT>12</HEIGHT>
+			<ORIENTATION>HORIZONTAL</ORIENTATION>
+			<SHUTTLE type="color" state="default">7FC08000</SHUTTLE>
+			<SHUTTLE type="color" state="mouseover">7f40C000</SHUTTLE>
+			<SCROLLUP type="image" state="default" map_state=0 height=16>frmleft.tga</SCROLLUP>
+			<SCROLLUP type="image" state="mouseover" map_state=1 height=16>frmleft.tga</SCROLLUP>
+			<SCROLLUP type="image" state="selected" map_state=2 height=16>frmleft.tga</SCROLLUP>
+			<SCROLLUP type="image" state="disabled" map_state=3 height=16>frmleft.tga</SCROLLUP>
+			<SCROLLDOWN type="image" state="default" map_state="0" height="16">frmrght.tga</SCROLLDOWN>
+			<SCROLLDOWN type="image" state="mouseover" map_state="1" height="16">frmrght.tga</SCROLLDOWN>
+			<SCROLLDOWN type="image" state="selected" map_state="2" height="16">frmrght.tga</SCROLLDOWN>
+			<SCROLLDOWN type="image" state="disabled" map_state="3" height="16">frmrght.tga</SCROLLDOWN>
+		</WINDOW>
+		<WINDOW type="combobox" name="REGION">
+			<APPEARANCE type="image" state="default" map_state="0" height="20">frmcombo.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="20">frmcombo.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="20">frmcombo.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="20">frmcombo.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>300</LEFT>
+				<RIGHT>500</RIGHT>
+				<TOP>120</TOP>
+				<BOTTOM>140</BOTTOM>
+			</POSITION>
+			<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+			<LIST_BOX sb_edge_pad="21">
+				<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+				<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+				<APPEARANCE type="color" state="selected">7f7F2000</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>200</RIGHT>
+					<TOP>20</TOP>
+					<BOTTOM>120</BOTTOM>
+				</POSITION>
+				<ITEMS justify="LEFT" vjustify="CENTER">
+					<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+				</ITEMS>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+				<STRING edge="5"></STRING>
+				<SCROLLBAR>
+					<SHUTTLE type="image" state="default">frmshut.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="14">frmup.tga</SCROLLUP>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="14">frmup.tga</SCROLLUP>
+					<SCROLLUP type="image" state="selected" map_state="2" height="14">frmup.tga</SCROLLUP>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="14">frmup.tga</SCROLLUP>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="14">frmdown.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="14">frmdown.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="14">frmdown.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="14">frmdown.tga</SCROLLDOWN>
+				</SCROLLBAR>
+			</LIST_BOX>
+			<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="spinlist" name="SQUAD">
+			<APPEARANCE type="image" state="default" map_state="0" height="24">frmspin.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">frmspin.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">frmspin.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">frmspin.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>300</LEFT>
+				<RIGHT>500</RIGHT>
+				<TOP>160</TOP>
+				<BOTTOM>184</BOTTOM>
+			</POSITION>
+			<ITEMS justify="CENTER" vjustify="CENTER">
+				<ITEM type="id" value="0">FORMS_SQUAD_A</ITEM>
+				<ITEM type="id" value="1">FORMS_SQUAD_B</ITEM>
+			</ITEMS>
+			<SPINUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">frmnext.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">frmnext.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">frmnext.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">frmnext.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>176</LEFT>
+					<RIGHT>200</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>24</BOTTOM>
+				</POSITION>
+			</SPINUP>
+			<SPINDOWN>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">frmprev.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">frmprev.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">frmprev.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">frmprev.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>24</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>24</BOTTOM>
+				</POSITION>
+			</SPINDOWN>
+			<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="list" name="NOTES">
+			<APPEARANCE type="custom" state="default">7f203000</APPEARANCE>
+			<POSITION>
+				<LEFT>300</LEFT>
+				<RIGHT>500</RIGHT>
+				<TOP>200</TOP>
+				<BOTTOM>260</BOTTOM>
+			</POSITION>
+			<ITEMS justify="LEFT" vjustify="LEFT">
+				<ITEM value="0">first note</ITEM>
+			</ITEMS>
+		</WINDOW>
+		<WINDOW type="table" name="ROSTER">
+			<POSITION>
+				<LEFT>300</LEFT>
+				<RIGHT>780</RIGHT>
+				<TOP>280</TOP>
+				<BOTTOM>420</BOTTOM>
+			</POSITION>
+			<COLUMN count="4" spacing="0">
+				<HEADER justify="CENTER" vjustify="CENTER" column="0" sort="0" width="40" type="id">FORMS_COL_MARK</HEADER>
+				<HEADER justify="CENTER" vjustify="CENTER" column="1" sort="A" width="160" type="id">FORMS_COL_NAME</HEADER>
+				<HEADER justify="CENTER" vjustify="CENTER" column="2" sort="NONE" width="120" type="id">FORMS_COL_ROLE</HEADER>
+				<HEADER justify="CENTER" vjustify="CENTER" column="3" sort="NONE" width="60" type="id">FORMS_COL_PING</HEADER>
+				<BODY justify="CENTER" vjustify="CENTER" column="0" CUSTOM_DRAW BITMAP_DRAW BITMAP_FLAGS="STANDARD_TRANSPARENT" SCALE_BITMAP></BODY>
+				<BODY justify="LEFT" vjustify="CENTER" column="1" ></BODY>
+				<BODY justify="LEFT" vjustify="CENTER" column="2" CUSTOM_DRAW></BODY>
+				<BODY justify="CENTER" vjustify="CENTER" column="3" ></BODY>
+			</COLUMN>
+			<ITEMS MULTISELECT>
+				<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+			</ITEMS>
+			<MIN_ITEM_HEIGHT>18</MIN_ITEM_HEIGHT>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
