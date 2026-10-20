@@ -76,12 +76,18 @@ void project_client_replica_present_row(
 	row[world::PF_POS_X] = static_cast<float>(entity.x / kFixed16);
 	row[world::PF_POS_Y] = static_cast<float>(entity.z / kFixed16);
 	row[world::PF_POS_Z] = static_cast<float>(-entity.y / kFixed16);
-	// Vehicle euler X/Y live in the same BAM32 entity fields as the
-	// authoritative pose. Spawn/dead-pose records seed them; the joiner
-	// prediction mirror advances air/water attitude between records. Role
-	// bindings override afterwards where a better source exists (the host's
-	// authoritative registry attitude, attachment poses).
-	if (entity.cls == EntityClass::Vehicle) {
+	// Euler X/Y live in the same BAM32 entity fields as the authoritative
+	// pose. Spawn/dead-pose records seed them; the joiner prediction mirror
+	// advances air/water attitude between records. Role bindings override
+	// afterwards where a better source exists (the host's authoritative
+	// registry attitude, attachment poses). Every non-person row draws from its
+	// full euler, a pitched or rolled building or object included; a person's
+	// pitch is its look, which the body's channels take, not the root.
+	// [orig: BoneCallback_bldg_World @0x4E21A0 - the matrix rebuilt from
+	//  Position and the eulers @0x4E21BA..0x4E220C: Math_BuildFixedPointMatrixFromEulerAngles
+	//  @0x613F40 (the call @0x4E220C), the scaled builder
+	//  Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210]
+	if (entity.cls != EntityClass::Player && entity.cls != EntityClass::Infantry) {
 		row[world::PF_PITCH_DEG] = static_cast<float>(
 				double(entity.pitch_bam) * world::kDegreesPerBam);
 		row[world::PF_ROLL_DEG] = static_cast<float>(

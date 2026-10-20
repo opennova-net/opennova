@@ -273,6 +273,38 @@ bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 	return ok;
 }
 
+// D-NET-621: every non-person replica row draws from its full euler, a pitched
+// or rolled building or object included; a person's pitch is its look and stays
+// off the root. [orig: BoneCallback_bldg_World @0x4E21A0 - @0x4E21BA..0x4E220C]
+bool test_replica_statics_present_their_pitch_and_roll() {
+	opennova::replication::ClientState state;
+	opennova::replication::ClientEntityState building;
+	building.handle = 0x2005;
+	building.cls = nw::EntityClass::Unknown;
+	building.pitch_bam = 0x10000000; // 22.5 degrees
+	building.roll_bam = -0x08000000; // -11.25 degrees
+	opennova::replication::ClientEntityState gun = building;
+	gun.handle = 0x1006;
+	gun.cls = nw::EntityClass::NoNetworkCallback;
+	opennova::replication::ClientEntityState person = building;
+	person.handle = 0x0007;
+	person.cls = nw::EntityClass::Player;
+	const im::ClientReplicaPresentContext context{nullptr, nullptr, false, nullptr};
+	float rows[3][w::PF_STRIDE];
+	const opennova::replication::ClientEntityState *sources[3] = {&building, &gun, &person};
+	for (int i = 0; i < 3; ++i) {
+		im::initialize_client_replica_present_row(rows[i]);
+		im::project_client_replica_present_row(rows[i], *sources[i], state, context);
+	}
+	bool ok = expect(rows[0][w::PF_PITCH_DEG] == 22.5f && rows[0][w::PF_ROLL_DEG] == -11.25f,
+			"a static row presents its pitch and roll");
+	ok = expect(rows[1][w::PF_PITCH_DEG] == 22.5f && rows[1][w::PF_ROLL_DEG] == -11.25f,
+			"a callback-less row presents its pitch and roll") && ok;
+	ok = expect(rows[2][w::PF_PITCH_DEG] == 0.0f && rows[2][w::PF_ROLL_DEG] == 0.0f,
+			"a person's look pitch stays off its root") && ok;
+	return ok;
+}
+
 } // namespace
 
 bool test_vehicle_suspension_reaches_present_rows() {
@@ -1522,6 +1554,7 @@ int main() {
 	ok = test_host_rows_apply_the_remote_held_weapon_ammo_leg() && ok;
 	ok = test_host_rows_draw_the_mounted_rider_weapon() && ok;
 	ok = test_rows_carry_the_slot_march_start() && ok;
+	ok = test_replica_statics_present_their_pitch_and_roll() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;
