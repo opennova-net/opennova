@@ -4989,6 +4989,48 @@ bool run_client_quality_frame_pressure_follows_the_frame_rate() {
 	return expect(fold(0, false) == 3, "an unmeasured rate samples the ceiling 255 -> level 3");
 }
 
+// NEW-L5-1: the joiner's level folds the host scalar the S2C 0x79 stored with its own
+// window's: combined = max(host, client). A held window (here the round-over gate)
+// clears only the receive counters, so the host scalar still sets the level.
+// [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the fold @0x4c585a..0x4c5867, the held
+//  clear CNetStats_ClearRecvCounters @0x4C2F90 (+0x10 and the window, not +0x0C);
+//  NapiNPClientMsg_NetworkQuality @0x429B00, the store @0x429b32]
+bool run_client_quality_takes_the_host_metric() {
+	const std::string client_scrk = "CLIENT-HOST-METRIC-SCRK";
+	const std::string server_scrk = "SERVER-HOST-METRIC-SCRK";
+	inmatch::ClientRuntime client("HostMetric", [] { return uint64_t{100000}; });
+	client.set_title(&kJo);
+	client.seed_session(0x10213243u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	client.set_observed_frame_rate(62); // the client window samples its floor 1
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	uint32_t tick = 1;
+	const auto host_metric = [&](uint8_t metric) {
+		const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+				{make_protocol_message(s2c::NETWORK_QUALITY, {metric})});
+		client.receive(dg.data(), dg.size());
+	};
+	host_metric(0xAB); // 171: the band above 169
+	for (int i = 0; i < 62 * 2; ++i) (void)client.Client_ProcessNetworkFrame(tick++);
+	if (!expect(client.net_quality_level() == 3, "max(171, 1) buckets to level 3"))
+		return false;
+	host_metric(0x60); // 96: the 85..169 band
+	for (int i = 0; i < 62; ++i) (void)client.Client_ProcessNetworkFrame(tick++);
+	if (!expect(client.net_quality_level() == 2, "a fresh 0x79 moves the level with it"))
+		return false;
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.player_index = 0;
+	const std::vector<uint8_t> end_datagram = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	client.receive(end_datagram.data(), end_datagram.size());
+	for (int i = 0; i < 62; ++i) (void)client.Client_ProcessNetworkFrame(tick++);
+	return expect(client.state().spawn_success_gate && client.net_quality_level() == 2,
+			"the held window keeps the host scalar: level 2, not 0");
+}
+
 // The NovaWorld exit leads the joiner's 62-frame block (D-NET-220): a NovaWorld
 // network type with its NWU session in use exits the mission with reason 12 once
 // the session's hosting/playing word holds neither 2 nor 3; a playing or hosting
@@ -8119,6 +8161,7 @@ int main() {
 	                run_chat_uplink_api() && run_host_chat_uplink() &&
 	                run_client_quality_level_folds_the_ping_ring() &&
 	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
+	                run_client_quality_takes_the_host_metric() &&
 	                run_novaworld_exit_on_a_joiner() &&
 	                run_mission_exit_routes() &&
 	                run_joiner_goodbye_tears_down_host();

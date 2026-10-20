@@ -752,9 +752,10 @@ bool ClientRuntime::queue_team_change_request() {
 // g_NetSpawnSuspended / g_ClientDeployHold / g_SpawnSuccessGate /
 // g_PreRoundDelayTimer holds the peer, else one sample of frame pressure,
 // the ping ring's mean and the loss counter; the combined scalar is
-// max(host, client) and the host window never runs on a non-authority, so it
-// folds as 0. The loss counter (stru_A86920.aimPoint.Y) is read-and-zeroed
-// here and NOTHING in the binary increments it: the term is the floor 1.
+// max(host, client); the host window never runs on a non-authority, so its
+// host scalar is what the S2C 0x79 stored. The loss counter
+// (stru_A86920.aimPoint.Y) is read-and-zeroed here and NOTHING in the binary
+// increments it: the term is the floor 1.
 int32_t ClientRuntime::mission_exit_reason() const {
 	if (mission_exit_reason_ != kMissionExitNone) return mission_exit_reason_;
 	if (joiner_ != nullptr && joiner_->has_disconnect_event()) {
@@ -794,7 +795,14 @@ void ClientRuntime::update_net_quality() {
 				replication::net_quality_client_ping_metric(joiner_->client_average_ping_ms()),
 				replication::net_quality_loss_metric(0.0));
 	}
-	const int32_t combined = std::max(0, client_quality_window_.quality);
+	// The tail folds the host scalar (+0x0C) with the client's (+0x10): on a joiner
+	// the host scalar is the last S2C 0x79's byte (the host window never runs here),
+	// and a held window clears only the receive counters, so it stands.
+	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 - @0x4c585a..0x4c5867;
+	//  CNetStats_ClearRecvCounters @0x4C2F90; NapiNPClientMsg_NetworkQuality
+	//  @0x429B00 (the store @0x429b32)] (D-NET-NEW-L5-1)
+	const int32_t combined = std::max<int32_t>(view_.state().net.host_metric,
+			client_quality_window_.quality);
 	// CNetQuality_SetLevel(&g_NetQuality, level) [orig: @0x52659b]: the level
 	// the 0x4C report carries and the quality icon's channels ramp toward.
 	hud::net_quality_set_level(net_indicators_, replication::net_quality_level(combined));
