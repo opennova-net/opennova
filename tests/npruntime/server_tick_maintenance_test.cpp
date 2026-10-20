@@ -32,6 +32,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_loadout_grant.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_initial_state.h> // Server_SendInitialGameStateToPlayer (the host's own join)
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_player_death.h> // Server_ProcessPlayerDeath
 #include <runtime/inmatch/server_spawn.h>
@@ -175,7 +176,10 @@ void install_rifle_armory(w::World &world) {
 // --------------------------------------------------------------------------
 
 bool check_spawn_protection_seeded_at_creation() {
-	// A remote joiner: 620 at creation regardless of the spawn-zone hold.
+	// A remote joiner: the add's body is hidden with no protection; its C2S 0x0B's join
+	// stores the 620 after the 0x0F, whatever the spawn-zone hold (D-NET-503).
+	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C433 / @0x43C508; Server_OnPlayerJoin
+	//  @0x51A882]
 	{
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
@@ -198,14 +202,20 @@ bool check_spawn_protection_seeded_at_creation() {
 		const w::EntityHandle player =
 				inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world, /*round_init=*/false);
 		const w::Entity *entity = world.registry.get(player);
+		if (!expect(entity != nullptr && (entity->flags & 1u) != 0 && entity->damage_state == 0,
+				"a remote add's body is hidden, with no spawn protection"))
+			return false;
+		std::vector<ProtocolMessage> join_replies;
+		inmatch::Server_HandlePlayerJoinRequest(&ctx, live, &world, /*now_tick=*/1, join_replies);
+		entity = world.registry.get(player);
 		if (!expect(entity != nullptr && entity->damage_state == 620,
-				"a zone-less joiner's entity is created under the 620-tick protection"))
+				"a zone-less joiner's join stores the 620-tick protection"))
 			return false;
 		if (!expect(live.link.armory_reuse_seconds == 0 && !live.link.preround_loadout_latch,
 				"the join zeroes the armory cooldown and clears the latch outside pre-round"))
 			return false;
 	}
-	// The listen host's own player takes the same creation seed.
+	// The listen host's own player takes the same 620 at its in-process join.
 	{
 		w::World world;
 		world.registry.configure_pool(0, 8);
@@ -222,11 +232,14 @@ bool check_spawn_protection_seeded_at_creation() {
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
 				"host-own creation fixture spawns the local player"))
 			return false;
+		inmatch::NapiNPConnection &own = ctx.np_protocol.connection_list.front();
+		for (int i = 0; i < 64 && !own.burst.spawned; ++i)
+			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx, own, /*now_tick=*/1);
 		const w::Entity *host = world.registry.get(world.cached.local_player);
-		if (!expect(host != nullptr && host->damage_state == 620,
-				"the host's own player is created under the 620-tick protection"))
+		if (!expect(own.burst.spawned && host != nullptr && host->damage_state == 620,
+				"the host's own player joins under the 620-tick protection"))
 			return false;
-		return expect(ctx.np_protocol.connection_list.front().link.preround_loadout_latch,
+		return expect(own.link.preround_loadout_latch,
 				"a pre-round join sets the loadout latch");
 	}
 }
