@@ -224,7 +224,7 @@ weapon "WPN_KNIFE"
 	teamfilter blue
 	flags Underwater
 	flags WhileSwimming
-	pos -4.332 -3.84 -173.766 0 0 0
+	pos 4 -5 -186 0 0 0
 	action "idle"
 		anim anim_wpn_idle
 		delayend 125
@@ -292,7 +292,7 @@ weapon "WPN_KNIFE2"
 	teamfilter red
 	flags Underwater
 	flags WhileSwimming
-	pos -4.332 -3.84 -173.766 0 0 0
+	pos 4 -5 -186 0 0 0
 	action "idle"
 		anim anim_wpn_idle
 		delayend 125
