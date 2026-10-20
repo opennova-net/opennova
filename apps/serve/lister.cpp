@@ -418,9 +418,13 @@ void Lister::end(int code) {
 }
 
 // Close the session: with `stop_hosting` (stop) the ClientStopHosting statement leaves on one
-// send pump first and the verified connection's disconnect burst follows (NovaWorldClient::stop's
+// send pump first and the connection's disconnect burst follows (NovaWorldClient::stop's
 // teardown); without it (disconnect) the burst alone, as a process exit's atexit teardown sends
-// it.
+// it. The burst is RequestDisconnect's: a connection the server accepted (state 5, verifying or
+// verified) sends it, one still in its Hello / Auth legs nothing (D-NET-NEW-L9-1)
+// [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - state 5 -> SetState(6)
+//  @0x61E0F3..0x61E0FA; CNapiNPConnection_TeardownActiveConnection's state-5 burst
+//  @0x62549E..0x6254D3].
 // The NovaWorld leg goes first: a console close leaves the process a few seconds.
 void Lister::teardown(bool stop_hosting) {
 	if (phase_ == Phase::Done) return;
@@ -430,11 +434,13 @@ void Lister::teardown(bool stop_hosting) {
 			role_.stop();
 			lobby_.flush();
 		}
-		if (ClientSession *session = lobby_.session(); session != nullptr && session->is_verified()) {
-			const std::vector<uint8_t> goodbye = session->build_goodbye();
-			for (std::size_t i = 0; i < session->disconnect_burst_count(); ++i) lobby_.send(goodbye);
-			io::logf(LogLevel::kInfo, "[session] %s",
-			         stop_hosting ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
+		if (ClientSession *session = lobby_.session(); session != nullptr) {
+			std::vector<std::vector<uint8_t>> out;
+			session->request_disconnect(out);
+			for (const std::vector<uint8_t> &dg : out) lobby_.send(dg);
+			if (!out.empty())
+				io::logf(LogLevel::kInfo, "[session] %s",
+				         stop_hosting ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
 		}
 		lobby_.close();
 	}
