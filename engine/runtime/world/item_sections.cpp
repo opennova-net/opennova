@@ -10,11 +10,10 @@
 
 namespace opennova::world {
 namespace {
-int32_t section_ground(const World &world, const Vec3 &position) {
+int32_t section_ground(const World &world, int32_t x, int32_t y) {
     const auto *terrain = world.tables.terrain;
-    return io::bam_add(terrain && terrain->valid() ? int32_t(
-            terrain::height_field_height_mission_bilinear(*terrain,
-                position.x, position.y) * 65536) : 0, 16384);
+    return io::bam_add(terrain && terrain->valid()
+            ? terrain::height_field_height_bilinear_fixed(*terrain, x, y) : 0, 16384);
 }
 void section_effect(World &world, const std::string &name, const Vec3 &position) {
     if (!name.empty()) world.out.destruction.effects.push_back({name, position, {}});
@@ -130,7 +129,7 @@ bool tick_tower_section(World &world, Entity &entity) {
     }
     int32_t pos[3] = {entity.position.x.q16,
             entity.position.y.q16, entity.position.z.q16};
-    const int32_t ground = section_ground(world, entity.position);
+    const int32_t ground = section_ground(world, entity.position.x.q16, entity.position.y.q16);
     const int32_t z = io::bam_add(pos[2], entity.veh.slide_z);
     bool bottom_contact = false;
     if (z > ground && entity.veh.slide_z != 0) {
@@ -156,8 +155,7 @@ bool tick_tower_section(World &world, Entity &entity) {
     const int32_t local[3] = {0, 0, height};
     int32_t end[3];
     entity_placement_matrix(entity).transform_point(local, end);
-    const Vec3 end_position{end[0] / 65536.0f, end[1] / 65536.0f, end[2] / 65536.0f};
-    const int32_t end_ground = section_ground(world, end_position);
+    const int32_t end_ground = section_ground(world, end[0], end[1]);
     bool top_contact = false;
     if (end[2] < end_ground) {
         end[2] = end_ground;
@@ -473,9 +471,10 @@ bool tick_item_section_motion(World &world, Entity &entity) {
     entity.saved_live_roll = bam_from_degrees_wrapped(entity.roll);
     entity.saved_live_valid = true;
     const auto *terrain = world.tables.terrain;
-    const int32_t ground = io::bam_add(terrain && terrain->valid() ? int32_t(
-            terrain::height_field_height_mission_bilinear(*terrain,
-                entity.position.x, entity.position.y) * 65536) : 0, 16384);
+    const int32_t ground = io::bam_add(terrain && terrain->valid()
+            ? terrain::height_field_height_bilinear_fixed(*terrain, entity.position.x.q16,
+                    entity.position.y.q16)
+            : 0, 16384);
     const int32_t z = io::bam_add(pos[2], entity.veh.slide_z);
     if (z <= ground) {
         entity.veh.vel_x >>= 2;

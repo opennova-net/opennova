@@ -48,9 +48,10 @@ HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope
 			position.z = world.env.water_z;
 			out.hit = true;
 		} else {
-			const float x = float(from_fixed(position.x)), y = float(from_fixed(position.y));
-			if (position.z < to_fixed(terrain::height_field_height_mission(*terrain, x, y))) {
-				position.z = to_fixed(terrain::height_field_height_mission_bilinear(*terrain, x, y));
+			// The samplers take the words (D-NET-507).
+			if (position.z < terrain::height_field_height_fixed(*terrain, position.x, position.y)) {
+				position.z = terrain::height_field_height_bilinear_fixed(*terrain, position.x,
+						position.y);
 				out.hit = true;
 			}
 		}

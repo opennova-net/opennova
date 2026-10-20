@@ -132,6 +132,16 @@ struct TerrainHeightGradient {
 // significant bits rounds across a texel edge.
 int32_t height_field_height_fixed(const TerrainHeightField &f, int32_t mission_x, int32_t mission_y);
 
+// The bilinear height at a fixed-point (16.16) mission position, the game's own sampler: the
+// texel the shared routing takes, its +1 taps through the quadrant's seam locks, the four
+// weights from the words' low halves (x, and -y) as rounded 16.16 products, each tap's raw16
+// shifted up by 8 times its weight, rounded, summed. 0 with no grid and on an empty cell.
+// [orig: Terrain_SampleHeightBilinear @0x6067B0 - the routing @0x6067BD..0x606807, the weights
+//  @0x606851 / @0x60686D / @0x606889 / @0x60689D, the taps @0x6068AC..0x60694E, the sum
+//  @0x606806]
+int32_t height_field_height_bilinear_fixed(const TerrainHeightField &f, int32_t mission_x,
+		int32_t mission_y);
+
 // Fixed-point mission X/Y, with retail's NEG/SAR, global wrap/clamp and
 // quadrant-local tap locks. Empty terrain/cells return zero differences, as
 // the two motor callers initialize the retail out-parameters to zero.

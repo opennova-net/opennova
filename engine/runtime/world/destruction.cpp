@@ -153,10 +153,8 @@ int32_t piece_physics_ground_probe_q16(
     if (terrain == nullptr || !terrain->valid()) return end_z;
     const int32_t query_x = io::bam_add(entity_x_q16, offset_x_q16);
     const int32_t query_y = io::bam_add(entity_y_q16, offset_y_q16);
-    const int32_t terrain_z = to_fixed(
-            terrain::height_field_height_mission_bilinear(
-                    *terrain, static_cast<float>(from_fixed(query_x)),
-                    static_cast<float>(from_fixed(query_y))));
+    const int32_t terrain_z =
+            terrain::height_field_height_bilinear_fixed(*terrain, query_x, query_y);
     return terrain_z <= start_z && terrain_z >= end_z ? terrain_z : end_z;
 }
 
@@ -302,8 +300,7 @@ bool blast_los_clear(World &world, CollisionWorld *collision,
         // The same null-entity terrain leg when no collision device is bound.
         // [orig: Physics_CheckTerrainLineOfSight @ 0x53B080]
         const auto buried = [&](const int32_t p[3]) {
-            return to_fixed(terrain::height_field_height_mission_bilinear(*terrain,
-                    p[0] * io::kInvFp16One, p[1] * io::kInvFp16One)) > p[2];
+            return terrain::height_field_height_bilinear_fixed(*terrain, p[0], p[1]) > p[2];
         };
         if (buried(a) || buried(b)) return true;
         const int32_t raised_a[3] = {a[0], a[1], a[2] + 0x4000};
@@ -1116,10 +1113,13 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
         blast.hit_word = 1;
         if (traits->kz_points.empty()) {
             blast.pos = target.position;
-            blast.radius_override =
-                    traits->kz > 0.0f ? traits->kz
-                                      : (target.bound_radius > 0.0f ? target.bound_radius
-                                                                    : 1.0f);
+            // The def's kz, else the bound word in whole units (an unsigned
+            // divide; 0 leaves the ammo's radius at the drain).
+            // [orig: Entity_QueueKzBlastAtUserPoints @0x4EABF0 - the def +408
+            //  test @0x4ead26, `boundRadius / 0x10000` @0x4ead42]
+            blast.radius_override = traits->kz != 0.0f
+                    ? traits->kz
+                    : float(static_cast<uint32_t>(target.bound_radius.q16) / 0x10000u);
             world.explosions.queue_explosion(world, blast);
         } else {
             const CollisionMatrix orientation = destruction_orientation(target);
@@ -1728,24 +1728,29 @@ void tick_item_death_motion(World &world, Entity &entity,
     if (routed_falling) e->engine_flags &= ~kEntityFlagMatrixBuilt;
     const EntityPosition old_position = e->position;
     if (static_motion) {
-        // Entity_UpdateStaticDeathPhysics @ 0x494230 samples the
-        // current ground before movement and clears the building bit.
-        float ground = -1.0e9f;
-        if (terrain != nullptr && terrain->valid())
-            ground = terrain::height_field_height_mission_bilinear(
-                    *terrain, e->position.x, e->position.y);
+        // Entity_UpdateStaticDeathPhysics @ 0x494230 samples the current
+        // ground at the Position words before movement and clears the
+        // building bit; the water term, the landing line and the snap are
+        // words (D-NET-507). No terrain samples as an empty cell, 0.
+        // [orig: Terrain_SampleHeightBilinear @0x494250; water - ground
+        //  against 655360 @0x4942B2 / 0 @0x4942C0, Z = ground @0x4942C3;
+        //  the landing compare @0x4943CC / @0x4943D1, Z = ground @0x4943D7]
+        const int32_t ground = terrain != nullptr && terrain->valid()
+                ? terrain::height_field_height_bilinear_fixed(
+                        *terrain, e->position.x.q16, e->position.y.q16)
+                : 0;
         e->engine_flags &= ~kEntityFlagMatrixBuilt;
-        const float static_water =
-                water_height <= -1.0e8f ? 0.0f : water_height;
-        const float water_above_ground = static_water - ground;
-        if (water_above_ground < 0.0f) {
-            e->position.z = ground;
+        const int32_t static_water =
+                water_height <= -1.0e8f ? 0 : to_fixed(water_height);
+        const int32_t water_above_ground = io::bam_sub(static_water, ground);
+        if (water_above_ground <= 655360 && water_above_ground < 0) {
+            e->position.z.q16 = ground;
             e->death_motion = DeathMotionMode::Generic;
             // [orig: Entity_UpdateStaticDeathPhysics call @ 0x4942c6]
             transition_to_ground_death(*e, traits, events);
         }
-        const float landing_line = water_above_ground > 10.0f
-                ? ground - 25.0f
+        const int32_t landing_line = water_above_ground > 655360
+                ? io::bam_sub(ground, 1638400)
                 : ground;
 
         // The callback then advances (the velocity words added to the
@@ -1765,8 +1770,8 @@ void tick_item_death_motion(World &world, Entity &entity,
         if (e->veh.vel_y > -8 && e->veh.vel_y < 8) e->veh.vel_y = 0;
         if (e->veh.vel_x == 0 && e->veh.vel_y == 0) {
             e->veh.slide_z -= 167;
-            if (e->position.z < landing_line) {
-                e->position.z = ground;
+            if (e->position.z.q16 < landing_line) {
+                e->position.z.q16 = ground;
                 e->death_motion = DeathMotionMode::Generic;
                 // [orig: Entity_UpdateStaticDeathPhysics call @ 0x4943da]
                 transition_to_ground_death(*e, traits, events);
@@ -1784,7 +1789,8 @@ void tick_item_death_motion(World &world, Entity &entity,
         e->veh.vel_y >>= 1;
         e->veh.slide_z = -4096;
     }
-    float ground = -1.0e9f;
+    // The ground is a word (D-NET-507); INT32_MIN stands for no ground.
+    int32_t ground = INT32_MIN;
 			e->ground_target = {};
 			// The routed wreck queries posed models as well as terrain.
 			// [orig: Entity_UpdateFallingDeathPhysics @0x493FF1..0x494001]
@@ -1793,17 +1799,17 @@ void tick_item_death_motion(World &world, Entity &entity,
 					e->position.z.q16 };
 				const int32_t height = world.ai.collision->raycast_ground(
 						world, e->handle, pos, 0, 0, 0x10000, 0x200000, &e->ground_target);
-				if (height != INT32_MIN)
-					ground = float(from_fixed(height));
+				ground = height;
 			} else if (terrain != nullptr && terrain->valid())
-				ground = terrain::height_field_height_mission_bilinear(
-						*terrain, e->position.x, e->position.y);
+				ground = terrain::height_field_height_bilinear_fixed(
+						*terrain, e->position.x.q16, e->position.y.q16);
 			// The wreck rests with section 0's lowest extent on the ground
     // [orig: ground -= |sec0 z min| @ 0x461e23-0x461e4b]. The ground above
     // is the object-aware probe (terrain plus posed models, retail's mask
     // 0x200000 @ 0x461e1a); the inverted += |z max| leg
     // (@ 0x494034-0x49405e) is not taken here (world-wac-ai-re.md D-ITEM-9).
-    if (traits != nullptr) ground -= std::abs(traits->husk_rest_min_z);
+    if (traits != nullptr && ground != INT32_MIN)
+        ground = io::bam_sub(ground, to_fixed(std::abs(traits->husk_rest_min_z)));
     const float old_top = e->position.z + e->bound_radius;
     // The pose advances by the velocity words, word arithmetic (D-NET-507).
     // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - @0x494077..0x49407D,
@@ -1833,14 +1839,14 @@ void tick_item_death_motion(World &world, Entity &entity,
 				wreck_impact_sound(world, *e, traits, 39, "IMP_DEBLRG_WATER",
 						Vec3{ new_x, new_y, water_height }, events);
 			}
-			if (new_z <= ground) {
+			if (ground != INT32_MIN && new_z_q16 <= ground) {
         // Ground contact [orig: Entity_TransitionToGroundDeath
         // @ 0x493080 + the landing legs @ 0x494113-0x494209]. The
         // generic leg restores the pre-move pose and clears vertical
         // motion. The routed leg transitions state here but its common
         // tail still commits the integrated pose and retains velocity.
         if (routed_falling) {
-            e->position.z = ground;
+            e->position.z.q16 = ground;
             e->death_motion = DeathMotionMode::Generic;
             // [orig: Entity_UpdateFallingDeathPhysics call @ 0x494113]
             transition_to_ground_death(*e, traits, events);
@@ -1867,11 +1873,14 @@ void tick_item_death_motion(World &world, Entity &entity,
 				if (routed_falling) {
 					wreck_impact_sound(world, *e, traits, 35, "IMP_VCL_DROP", e->position, events);
 					if (world.rules.logic_authority) {
+						// The def's kz, else the bound word in whole units,
+						// truncated toward zero. [orig: Entity_UpdateFallingDeathPhysics
+						//  - the def +0x198 test @0x4941C7..0x4941D4, the word's
+						//  `cdq` / `sar eax, 10h` @0x4941DE..0x4941E9]
 						const float radius =
-                        (traits != nullptr && traits->kz > 0.0f)
+                        (traits != nullptr && traits->kz != 0.0f)
                         ? traits->kz
-                        : (e->bound_radius > 0.0f ? e->bound_radius
-                                                  : 1.0f);
+                        : float(e->bound_radius.q16 / 65536);
                 queue_named_landing_blast(
                         world, *e, kAmmoKzOrganicBlast, radius);
 					}

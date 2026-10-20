@@ -44,9 +44,11 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/vehicle_system.h>
+#include <runtime/terrain_query/height_field.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -706,6 +708,42 @@ int seat_pose_is_words() {
 	return 0;
 }
 
+// The ground sampler takes the words: the weights from the words' low halves (x, and
+// -y) as rounded 16.16 products, four raw16 << 8 taps, each weighted and rounded, summed.
+// [orig: Terrain_SampleHeightBilinear @0x6067B0 - the weights @0x606851 / @0x60686D /
+//  @0x606889 / @0x60689D, the sum @0x606806]
+int ground_sampler_takes_the_words() {
+	std::vector<uint16_t> heights(1024 * 1024, 0);
+	std::array<int, 256> sectors{};
+	sectors.fill(1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heights.data();
+	field.dim = 1024;
+	field.layout.sector_grid = sectors.data();
+	const auto at = [&](int x, int z) -> uint16_t & { return heights[static_cast<size_t>(z) * 1024 + x]; };
+	at(8, 20) = 1000;
+	at(9, 20) = 3001;
+	at(8, 21) = 5003;
+	at(9, 21) = 7007;
+	// 21,000 units on x (texel 8 of its quadrant), y = -(20 units + 0xC003 words).
+	const int32_t x = (21000 << 16) + 0x4001;
+	const int32_t y = -((20 << 16) + 0xC003);
+	const uint64_t fx = 0x4001, fy = 0xC003;
+	const auto w = [](uint64_t a, uint64_t b) { return int64_t((a * b + 0x8000) >> 16); };
+	const auto t = [](int64_t weight, int64_t raw) { return int32_t(uint64_t(weight * (raw << 8) + 0x8000) >> 16); };
+	const int32_t expected = t(w(0x10000 - fx, 0x10000 - fy), 1000) + t(w(fx, 0x10000 - fy), 3001) +
+	                         t(w(0x10000 - fx, fy), 5003) + t(w(fx, fy), 7007);
+	if (!expect(opennova::terrain::height_field_height_bilinear_fixed(field, x, y) == expected,
+	            "the word sampler's rounded weights and taps"))
+		return 1;
+	sectors.fill(0);
+	if (!expect(opennova::terrain::height_field_height_bilinear_fixed(field, x, y) == 0,
+	            "an empty cell samples 0"))
+		return 1;
+	std::printf("PASS ground_sampler_takes_the_words\n");
+	return 0;
+}
+
 // entity+0 is a word: a model-derived bound radius past 256 units keeps its low bits on
 // the 0x0A's priority term (a float would round them away).
 // [orig: entity+0; NetPacket_SerializeEntityStatesToPacket's priority list (D-NET-530)]
@@ -736,8 +774,10 @@ int main() {
 	const int round = round_flies_on_the_words();
 	const int mount = organic_record_streams_the_mount();
 	const int seat = seat_pose_is_words();
+	const int sampler = ground_sampler_takes_the_words();
 	const int bound = bound_radius_is_a_word();
-	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round, mount, seat, bound})
+	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round, mount,
+	                    seat, sampler, bound})
 		if (r != 0) return r;
 	return 0;
 }

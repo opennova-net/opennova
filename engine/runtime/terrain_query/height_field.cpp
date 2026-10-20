@@ -148,6 +148,36 @@ int32_t height_field_height_fixed(const TerrainHeightField &f, int32_t mission_x
 	return static_cast<int32_t>(f.heightmap[static_cast<std::size_t>(texel.z) * f.dim + texel.x]) << 8;
 }
 
+int32_t height_field_height_bilinear_fixed(const TerrainHeightField &f, int32_t mission_x,
+		int32_t mission_y) {
+	if (!f.valid()) return 0;
+	const TerrainAtlasTexel texel = terrain_atlas_texel_at(
+			TerrainAtlasRouting{f.layout.sector_grid, f.layout.origin_x, f.layout.origin_y, f.wrap_x, f.wrap_z},
+			mission_x, mission_y);
+	if (!texel.mapped) return 0;
+	const CoordsTaps taps = coords_taps_for_quadrant(f.locks, (texel.slot & 2) != 0 ? 512 : 0,
+			(texel.slot & 1) != 0 ? 512 : 0, f.dim);
+	const auto raw = [&](int tx, int tz) -> int64_t {
+		const int x = taps.x(tx), z = taps.z(tz);
+		// A test atlas narrower than retail's 1024 has no texel past its side.
+		if (x >= f.dim || z >= f.dim) return 0;
+		return static_cast<int64_t>(f.heightmap[static_cast<std::size_t>(z) * f.dim + x]) << 8;
+	};
+	const uint64_t fx = static_cast<uint16_t>(mission_x);
+	const uint64_t fy = static_cast<uint16_t>(io::bam_sub(0, mission_y));
+	const auto weight = [](uint64_t a, uint64_t b) {
+		return static_cast<int64_t>((a * b + 0x8000u) >> 16);
+	};
+	const auto term = [](int64_t w, int64_t h) {
+		return static_cast<int32_t>(static_cast<uint64_t>(w * h + 0x8000) >> 16);
+	};
+	const int x = texel.x, z = texel.z;
+	return term(weight(0x10000 - fx, 0x10000 - fy), raw(x, z)) +
+	       term(weight(fx, 0x10000 - fy), raw(x + 1, z)) +
+	       term(weight(0x10000 - fx, fy), raw(x, z + 1)) +
+	       term(weight(fx, fy), raw(x + 1, z + 1));
+}
+
 TerrainHeightGradient height_field_gradient_fixed(
 		const TerrainHeightField &f, int32_t mission_x, int32_t mission_y) {
 	if (!f.valid() || !f.layout.sector_grid) return {};

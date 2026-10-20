@@ -30,10 +30,11 @@ EntityHandle waypoint_create_for_player(World &world, int32_t x, int32_t y, cons
 	// [orig: Waypoint_CreateForPlayer @0x4dfd19 / @0x4dfd1d]
 	seed.position.x.q16 = x;
 	seed.position.y.q16 = y;
-	seed.position.z = world.tables.terrain != nullptr
-			? terrain::height_field_height_mission_bilinear(*world.tables.terrain, seed.position.x,
-					  seed.position.y)
-			: 0.0f;
+	// The z word the sampler gives at the x / y words (D-NET-507).
+	// [orig: Waypoint_CreateForPlayer - Terrain_SampleHeightBilinear @0x4dfd21]
+	seed.position.z.q16 = world.tables.terrain != nullptr
+			? terrain::height_field_height_bilinear_fixed(*world.tables.terrain, x, y)
+			: 0;
 	seed.display_name = text.substr(0, kUserWaypointNameMax);
 	seed.primary_occupant = owner;
 	seed.ammo_count = 3;

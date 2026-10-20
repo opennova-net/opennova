@@ -234,10 +234,7 @@ void push_motor_effect(World &world, RoundSim &sim, const LiveRound &r, int tag,
 // (mission_x, -mission_y) — the collision.cpp convention.]
 int32_t ground_q16(const terrain::TerrainHeightField *terrain, int32_t x, int32_t y) {
     if (terrain == nullptr || !terrain->valid()) return INT32_MIN;
-    const float h = terrain::height_field_height_mission_bilinear(
-            *terrain, static_cast<float>(from_fixed(x)),
-            static_cast<float>(from_fixed(y)));
-    return to_fixed(h);
+    return terrain::height_field_height_bilinear_fixed(*terrain, x, y); // the words (D-NET-507)
 }
 
 // The contact presentation's descriptor carries the sound bit while the

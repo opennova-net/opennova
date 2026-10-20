@@ -36,8 +36,8 @@ void entity_process_falling_death(
 			ground = world.ai.collision->raycast_ground(
 					world, e.handle, pos, 0, 0, 0x10000, 0x200000, &e.ground_target);
 		} else if (terrain != nullptr && terrain->valid()) {
-			ground = to_fixed(terrain::height_field_height_mission_bilinear(
-					*terrain, e.position.x, e.position.y));
+			ground = terrain::height_field_height_bilinear_fixed(
+					*terrain, e.position.x.q16, e.position.y.q16);
 			e.ground_target = {};
 		}
 		if (ground != INT32_MIN && traits != nullptr) {
