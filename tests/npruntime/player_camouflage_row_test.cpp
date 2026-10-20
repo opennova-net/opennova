@@ -133,13 +133,13 @@ void test_arctic_and_an_other_selector() {
 	check_body(other, other.spawn(5), 0x14B9, 1, 150);
 }
 
-// The add resolves by its class word ahead of its class stores: the own add's word 0 reads
-// 1 out of a session, so a class-8 body binds class 1's row.
+// The add resolves by its class word ahead of its class stores and clamp: a joiner's word 3
+// binds class 3's row (5310 here) while the class clamps to 8.
 // [orig: Server_PlayerAdd @0x51D02B..0x51D040, the spawn @0x51D056, the stores @0x51D09A /
-//  @0x51D0A8]
+//  @0x51D0A8, the clamp @0x51D0FA..0x51D10E]
 void test_the_add_resolves_by_its_own_class_word() {
 	Rig r(0);
-	w::Entity *body = r.spawn(8, 1);
+	w::Entity *body = r.spawn(8, 3);
 	CHECK(body != nullptr && body->player_class == 8);
 	check_body(r, body, 0x14BE, 2, 120);
 }

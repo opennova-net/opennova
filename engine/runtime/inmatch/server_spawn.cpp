@@ -475,12 +475,13 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
 		const uint8_t cls = conn.char_vars.char_class[side];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
-		// The own add's class word is 0, which reads `is_in_session ? 8 : 1`: the
-		// body binds that class's camouflage item (D-NET-348) ahead of the class
-		// stores and the re-stamp above. [orig: Server_BuildPlayerInfoAndAdd's
-		//  local arm leaves player_info_buf[52] 0 (@0x51D63A); Server_PlayerAdd
-		//  @0x51D02B..0x51D040, the spawn @0x51D056]
-		spawn.item_class = ctx.is_in_session != 0 ? 8 : 1;
+		// The body's camouflage row binds by the class it spawns with (D-NET-348).
+		// Retail's own add attaches the local entity once the slot table is up and
+		// the round init spawns the slot with its class byte, which the own
+		// client's mission-start accepts leave at this side's class; that byte's
+		// path is D-NET-695's [orig: Server_PlayerAdd's own arm @0x51CC24..0x51CC60;
+		//  Server_InitAllPlayerEntitiesForRound @0x516B56].
+		spawn.item_class = spawn.player_class;
 	} else if (round_init) {
 		spawn.anim_slot = conn.char_vars.avatar[side];
 		spawn.minimap_net_id = conn.char_vars.char_id[side];

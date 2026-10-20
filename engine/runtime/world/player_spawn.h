@@ -68,9 +68,9 @@ struct PlayerSpawn {
     // The items.def type the body binds: -1 (the authority's spawn) resolves the
     // camouflage item of `item_class` (0: of player_class) by the mission's
     // climate (player_cammo_type_id); a joiner's own body from its 0x0C record
-    // passes the record's type word. The add resolves by its class word before
-    // its own class stores and clamp (Server_PlayerAdd's `is_in_session ? 8 : 1`
-    // for a zero word), so the two classes can differ.
+    // passes the record's type word. A joiner's add resolves by its class word
+    // before its class stores and clamp (a zero word reads 8 in a session), so
+    // the two classes can differ.
     // [orig: Entity_SpawnFromAnimSlotProperty @0x43C399..0x43C3CA; Server_PlayerAdd
     //  @0x51D02B..0x51D056, the stores @0x51D09A / @0x51D0A8, the clamp
     //  @0x51D0FA..0x51D10E; NapiNPClientMsg_0x00C @0x42E730]
