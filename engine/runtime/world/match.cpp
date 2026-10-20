@@ -290,7 +290,7 @@ void Match::configure(const MatchRules &rules) {
         rules_.score_values = default_match_score_values(rules_.game_type, rules_.title);
     players_.clear();
     player_punts_.clear();
-    teams_ = {};
+    teams_.assign(kTeamRecordCount, MatchStats{});
     team_hold_ticks_ = {};
     periodic_second_timer_ = 0;
     periodic_second_fired_ = false;
@@ -1939,7 +1939,8 @@ int32_t Match::team_primary_score(uint8_t team) const {
     // @0x508E0A (the +0x148 fold)]
     if (team >= teams_.size())
         return 0;
-    return primary_score(teams_[team], team_hold_ticks_[team]);
+    // The hold timer lives beside the first five records (the boards' teams).
+    return primary_score(teams_[team], team < team_hold_ticks_.size() ? team_hold_ticks_[team] : 0);
 }
 
 MatchLiveScoreboard Match::live_scoreboard(World &world) {
@@ -2018,7 +2019,9 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         // expiry. [orig: Server_CheckWinConditions @0x51AE34..0x51AE3B]
         if (rules_.score_limit == 0)
             return std::nullopt;
-        for (uint8_t team = 0; team < teams_.size(); ++team) {
+        // The limit walk reads the first five records alone. [orig: Server_CheckWinConditions
+        // @0x51AE41..0x51AE70, +0x154 per record to +0x6A8]
+        for (uint8_t team = 0; team < 5; ++team) {
             if (teams_[team][MatchStats::kEnemyKills] >=
                 static_cast<int32_t>(rules_.score_limit))
                 return static_cast<int32_t>(team);
@@ -2219,7 +2222,8 @@ bool Match::finish(int32_t winner_team, const World &world) {
     result_.game_type = rules_.game_type;
     result_.winner_team = winner_team;
     result_.score_fields = rules_.score_fields;
-    result_.team_stats = teams_;
+    // The end-of-round board reads the first five records (its team rows).
+    std::copy_n(teams_.begin(), result_.team_stats.size(), result_.team_stats.begin());
     result_.team_hold_ticks = team_hold_ticks_;
     result_.team_row_count = scoreboard_team_row_count(rules_);
     if (rules_.game_type == gt::kAdvanceAndSecure ||

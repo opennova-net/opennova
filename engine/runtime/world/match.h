@@ -610,7 +610,16 @@ class Match {
     MatchResult result_;
     std::vector<MatchPlayer> players_;
     std::vector<MatchPlayerPunt> player_punts_;
-    std::array<MatchStats, 5> teams_{};
+    // The team records: 70 of them, indexed by the entity's team byte with no bound test, so a
+    // kill bonus of a team 5..69 lands in a record the boards never walk (the serializer of a
+    // player of that team reads it). A team past the table (70..127, and 128..255 sign-extended
+    // before it) is retail's out-of-bounds write, which ours drops.
+    // [orig: Game_CountAlivePlayersPerTeam @0x5001D5 (the clear's 0x46 records);
+    //  GameEvent_ProcessScoring @0x52F65F..0x52F66C / @0x52F6AB..0x52F6B8 (movsx, imul 154h);
+    //  NetPacket_SerializePlayerSlotToBuffer @0x5068D5..0x5068E2]
+    // On the heap: the World a test holds on its stack does not grow by the 65 extra records.
+    static constexpr size_t kTeamRecordCount = 70;
+    std::vector<MatchStats> teams_ = std::vector<MatchStats>(kTeamRecordCount);
     std::array<int32_t, 5> team_hold_ticks_{};
     int32_t periodic_second_timer_ = 0;
     bool periodic_second_fired_ = false;

@@ -826,6 +826,15 @@ void test_kill_bonus_team_bits_shift_as_dwords() {
         CHECK(scorer->stats[MatchStats::kVictimNearOwnObjectiveKills] == 0);
         CHECK(scorer->stats[MatchStats::kAttackerNearVictimObjectiveKills] == 0);
         CHECK(scorer->stats[MatchStats::kPoints] == 10 + wraps * (4 + 3));
+        // D-NET-680: the team record is indexed by the team byte over 70 records, unchecked, so a
+        // team of 9 or 33 has its kill (and team 33 its bonus 24) credited to record 9 / 33
+        // [orig: GameEvent_ProcessScoring @0x52F65F..0x52F66C; Game_CountAlivePlayersPerTeam
+        //  @0x5001D5].
+        const MatchStats &team_record = world->match.team_stats(killer_team);
+        CHECK(team_record[MatchStats::kEnemyKills] == 1);
+        CHECK(team_record[MatchStats::kAttackerNearOwnObjectiveKills] == wraps);
+        // The board's five records are untouched by it.
+        CHECK(world->match.team_stats(1)[MatchStats::kEnemyKills] == 0);
     }
 }
 
