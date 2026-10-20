@@ -38,8 +38,8 @@ MissionRecipe recipe(const char *token, const char *title, const char *tip, Para
 }
 
 // The shipped missions' compositions, the most used first: the events of the install's 115 missions holding
-// exactly the recipe's trigger (or none) with its flags, and the missions holding them (the editor_mission_logic
-// ctest's retail leg measures each and pins these counts).
+// exactly the recipe's trigger (or none) with its flags, and the missions holding them (measured once over them;
+// the editor_mission_logic ctest's test_common_and_recipes pins these counts).
 std::vector<MissionRecipe> make_recipes() {
 	const ParamKind none = ParamKind::Unused;
 	return {

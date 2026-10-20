@@ -40,7 +40,7 @@ TextureHeader texture_file_header(const std::string &root, const AssetEntry &ent
 // What a role asks of a file's sides, by its header as the role's loader reads it (`file` its name,
 // `where` the use in words: "the terrain colour map of isle.trn", `context` what the use says of itself:
 // a particle graphic's mode): each finding handed to `add`, the code, its severity and its words. The
-// check above makes one finding of each; a test or a retail leg asks it of a file directly.
+// check above makes one finding of each; a test asks it of a file directly.
 using TextureFindingSink = std::function<void(CoreFinding, DiagnosticSeverity, const std::string &message)>;
 void check_texture_role(renderer::TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
                         const TextureFindingSink &add, const TextureUseContext &context = TextureUseContext());

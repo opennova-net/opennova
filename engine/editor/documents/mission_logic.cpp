@@ -97,8 +97,8 @@ Edit set_of(const NodeAddress &address, const char *field, int64_t value) {
 } // namespace
 
 int64_t logic_param_default(ParamKind kind) {
-	// The value the install's 115 missions hold most often in a parameter of the kind (measured by the
-	// mission_logic ctest's retail leg, which pins each): units 1 (179 of 290), metres 200 (27 of 202),
+	// The value the install's 115 missions hold most often in a parameter of the kind (measured once over
+	// them; the editor_mission_logic ctest's test_measured_defaults pins each): units 1 (179 of 290), metres 200 (27 of 202),
 	// seconds 10 (8 of 17), km/h 20 (87 of 626), off 0 (781 of 1,047), team 2 (16 of 23), sub-goal 1
 	// (131 of 548). No shipped record holds hit points: 0. Any other kind starts at 0, none named.
 	switch (kind) {
