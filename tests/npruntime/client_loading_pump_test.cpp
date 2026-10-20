@@ -545,6 +545,14 @@ bool run_an_early_release_stays_in_the_final_wait() {
 	}
 	Harness h;
 	if (!drive_to_an_early_in_match_release(h, 0)) return false;
+	// The final wait resets the key queue and reads ESC alone: an input producer
+	// queues nothing there, the early release notwithstanding
+	// [orig: Game_StartMission @0x524360 - Input_ResetKeyQueue @0x526288, ESC
+	//  @0x5262a2..0x5262ad].
+	if (!expect(h.client.in_match() && !h.client.in_game_loop() &&
+				!h.client.queue_stance_change(0xA9),
+			"final wait: the stance key queues nothing before the 0x0F"))
+		return false;
 	std::vector<uint8_t> world_state(23, 0);
 	(void)h.frame({make_protocol_message(0x0F, world_state)});
 	for (int i = 0; i < 4; ++i) {

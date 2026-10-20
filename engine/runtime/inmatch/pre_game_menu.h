@@ -9,7 +9,7 @@
 // and the loading screen starts only once the host signals the game start.
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 (the join machine,
 //  dword_25E58A0); UI_ShowPreGameMenuByState @0x568d10 (the panel machine's
-//  windows, dword_25E5880); the PreMenu init sub_5693E0]
+//  windows, g_PreGamePanelState); the PreMenu init PreMenu_Init @0x5693E0]
 
 #include <cstdint>
 #include <string>
@@ -34,7 +34,7 @@ inline constexpr int kPreGameWindowCount = 8;
 // The window name each bit shows, in bit order.
 const char *pre_game_window_name(int bit_index);
 
-// The panel machine's states [orig: dword_25E5880].
+// The panel machine's states [orig: g_PreGamePanelState].
 enum class PreGamePanel : int {
 	Error = -1,            // a failure: the reason in MESSAGES, Cancel only
 	Progress = 0,          // the join's status line, Cancel

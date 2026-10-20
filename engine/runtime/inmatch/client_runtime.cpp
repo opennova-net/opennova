@@ -537,7 +537,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::disconnect() {
 }
 
 bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame() ||
 	    !is_deployed() || !joiner_->has_self_handle() ||
 	    round.shooter_handle != joiner_->self_handle())
 		return false;
@@ -571,7 +571,7 @@ bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
 }
 
 bool ClientRuntime::queue_reload_request(const WeaponReload &reload) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame() ||
 	    !is_deployed() || !joiner_->has_self_handle() ||
 	    wire_handle::is_batch_end_sentinel(reload.entity_handle))
 		return false;
@@ -675,7 +675,7 @@ bool ClientRuntime::queue_stance_change(uint16_t action_id) {
 	// The authority's own client queues it too: the senders carry no
 	// is_authority test, and its connection is the local one.
 	const bool host_path = role_ == Role::HostClient && loopback_ != nullptr;
-	if (!host_path && (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match()))
+	if (!host_path && (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame()))
 		return false;
 	std::vector<uint8_t> body;
 	io::append_u16_le(body, action_id);
@@ -684,7 +684,7 @@ bool ClientRuntime::queue_stance_change(uint16_t action_id) {
 }
 
 bool ClientRuntime::queue_door_request(uint16_t handle, int16_t state, uint8_t section) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match()) return false;
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame()) return false;
 	DoorSlotAction request;
 	request.entity_handle = handle;
 	request.state = state;
@@ -895,7 +895,7 @@ void ClientRuntime::apply_net_quality_link_errors(uint32_t mask) {
 }
 
 bool ClientRuntime::queue_mounted_weapon_slot_selection(bool use_parent_slot) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame() ||
 	    !is_deployed() || !joiner_->has_self_handle())
 		return false;
 	MountedWeaponSlotSelection selection;
@@ -908,7 +908,7 @@ bool ClientRuntime::queue_mounted_weapon_slot_selection(bool use_parent_slot) {
 
 bool ClientRuntime::queue_vehicle_attach(
 		uint16_t vehicle_handle, uint8_t model_bone_index) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame() ||
 	    !is_deployed() || !joiner_->has_self_handle() ||
 	    vehicle_handle == 0xFFFFu || model_bone_index == 0)
 		return false;
@@ -927,7 +927,7 @@ bool ClientRuntime::queue_vehicle_attach(
 }
 
 bool ClientRuntime::queue_vehicle_detach(uint16_t vehicle_handle) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame() ||
 	    !is_deployed() || !joiner_->has_self_handle() || vehicle_handle == 0xFFFFu)
 		return false;
 	return queue_detach_packet(vehicle_handle);

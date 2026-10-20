@@ -555,7 +555,8 @@ public:
 	//  NetPacket_WriteAutoMedicPreference @0x42A400 reading +1660 @0x42A411]
 	void set_auto_medic_preference(uint32_t disabled) { auto_medic_disabled_ = disabled; }
 	// Configure the retail game-session request before start(). Spectator emits
-	// JSR=1 and optional JSPP; join_password emits JSP for a side/squad credential.
+	// JSR=1; a non-empty spectator password emits JSPP whatever the role (the join
+	// choice's kept password); join_password emits JSP for a side/squad credential.
 	// The transport PW, JSP and spectator JSPP remain separate.
 	void set_join_request(JoinRole role, std::string spectator_password,
 			std::string server_password, std::string join_password = {}) {

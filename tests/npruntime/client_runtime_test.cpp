@@ -382,6 +382,36 @@ bool run_spectator_clientauth_and_state_latch() {
 		return false;
 	}
 
+	// JSPP rides on its own non-empty test, JSR's `jz` landing on it: the join
+	// choice's commit as a player keeps the spectator password it held, and that
+	// password goes up with no JSR [orig: CNapiServerInfo_SerializeToSession
+	// @0x4c3c54..0x4c3cb2]. The process's words: a spectate commit writes both, a
+	// player commit the spectate word alone [orig: UI_PreGameMenuStateMachine
+	// @0x568bf0 / @0x568c33].
+	inmatch::ClientProcessState process;
+	process.commit_join_choice(true, "spec");
+	process.commit_join_choice(false, "team");
+	if (!expect(!process.join_spectate && process.join_spectator_password == "spec",
+			"a player commit keeps the process's spectator password"))
+		return false;
+	ClientAuth kept;
+	if (!expect(build_joiner_client_auth(inmatch::JoinRole::Player,
+				process.join_spectator_password, kept),
+			"kept-password player ClientAuth builds"))
+		return false;
+	int jspp_count = 0;
+	bool jsr = false;
+	for (const std::vector<uint8_t> &blob : kept.cu) {
+		uint8_t type = 0;
+		std::string name, value;
+		if (!parse_client_cu_chunk(blob.data(), blob.size(), type, name, value)) continue;
+		if (name == "JSPP" && value == "spec") ++jspp_count;
+		if (name == "JSR") jsr = true;
+	}
+	if (!expect(jspp_count == 1 && !jsr,
+			"a player's kept spectator password rides JSPP=spec with no JSR"))
+		return false;
+
 	const std::string client_scrk = "CLIENT-SPECTATOR-STATE-SCRK";
 	const std::string server_scrk = "SERVER-SPECTATOR-STATE-SCRK";
 	constexpr uint32_t kSession = 0x10203040u;

@@ -79,6 +79,21 @@ struct ClientProcessState {
 		net_quality_report_timer = 0;
 		return true;
 	}
+	// The join screen's spectate choice and spectator password: the pre.mnu commit is
+	// their only writer (the password only when SPECTATE is checked), and every join
+	// copies both into its ClientAuth's JSR and JSPP, so they hold for the process and a
+	// later join that shows no choice still sends them (D-NET-NEW-L2-12).
+	// [orig: g_GameConfigState unknownHostOption_428 / unknownHostText_42C -
+	//  UI_PreGameMenuStateMachine @0x568A40 (the stores @0x568bf0 / @0x568c33);
+	//  UI_JoinSelectedSession's copies @0x569c5d / @0x569c6a]
+	bool join_spectate = false;
+	std::string join_spectator_password;
+	// The commit's process half: the spectate state always, the shared password only
+	// when SPECTATE was checked (else it went to the side password, which is the join's).
+	void commit_join_choice(bool spectate, const std::string &spectator_password) {
+		join_spectate = spectate;
+		if (spectate) join_spectator_password = spectator_password;
+	}
 };
 
 class ClientRuntime {
@@ -1009,6 +1024,12 @@ private:
 	ClientProcessState &process_state() {
 		return external_process_ != nullptr ? *external_process_ : own_process_;
 	}
+	// The joiner's input-driven producers queue only in the game loop: a 0x5A that
+	// lands inside the mission start leaves the joiner InMatch in the final wait, which
+	// resets the key queue and reads ESC alone, so no action queues there.
+	// [orig: Game_StartMission @0x524360 - Input_ResetKeyQueue @0x526288, the loop's
+	//  Input_DequeueKeyEvent for ESC @0x5262a2..0x5262ad]
+	bool joiner_input_frame() const { return joiner_->in_match() && joiner_->in_game_loop(); }
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_Tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
 	                                     // and decremented, but never compared in @0x42C180;
 	                                     // vestigial/telemetry state, not a send throttle.

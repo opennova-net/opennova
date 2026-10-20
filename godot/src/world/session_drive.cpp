@@ -155,10 +155,19 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 		return ERR_UNCONFIGURED;
 	}
 	join_preload_sim_->set_title(title);
+	// The join's JSR and JSPP are the process's join-screen words: this target's commit
+	// (an answered choice) writes them, and every join sends what they hold
+	// (engine: inmatch/client_runtime.h ClientProcessState; D-NET-NEW-L2-12).
+	opennova::inmatch::ClientProcessState &process = world_->client_process_;
+	if (p_target->get_role_explicit()) {
+		process.commit_join_choice(p_target->get_join_role() == JoinTarget::ROLE_SPECTATOR,
+				opennova::to_std(p_target->get_spectator_password()));
+	}
 	if (!join_preload_sim_->enable_join(p_target->get_host_ip(), p_target->get_port(),
-				p_target->get_player_name(), p_target->get_join_role(),
-				p_target->get_spectator_password(), p_target->get_server_password(),
-				p_target->get_join_password())) {
+				p_target->get_player_name(),
+				process.join_spectate ? JoinTarget::ROLE_SPECTATOR : JoinTarget::ROLE_PLAYER,
+				opennova::to_gd(process.join_spectator_password),
+				p_target->get_server_password(), p_target->get_join_password())) {
 		join_preload_sim_.unref();
 		clear_pending_session();
 		world_->emit_signal(kSignalLoadFailed, "join: could not open the LAN session socket");

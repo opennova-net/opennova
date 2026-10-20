@@ -432,16 +432,15 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.avatar[0] != 0);
 	append_profile_value("VCB", static_cast<int8_t>(character_join_vars_.avatar[1]),
 			character_join_vars_.avatar[1] != 0);
-	// Spectator is opt-in. Keeping both fields absent for Player preserves the
-	// captured retail player-join bytes exactly.
-	// [orig: CNapiServerInfo_SerializeToSession @0x4c3650 writes JSR/JSPP]
-	if (join_role_ == JoinRole::Spectator) {
+	// JSR on a nonzero spectate word, then JSPP on a non-empty spectator password,
+	// each on its own test: the join's choice keeps a spectator password a later
+	// player commit left in place, and it rides JSPP with no JSR (D-NET-NEW-L2-12).
+	// [orig: CNapiServerInfo_SerializeToSession @0x4C3650 - JSR @0x4c3c54..0x4c3c94
+	//  (`jz` to the JSPP test), JSPP @0x4c3c9c..0x4c3cb2]
+	if (join_role_ == JoinRole::Spectator)
 		auth.cu.push_back(make_client_cu_chunk(2, "JSR", "1"));
-		if (!spectator_password_.empty()) {
-			auth.cu.push_back(make_client_cu_chunk(
-					2, "JSPP", spectator_password_));
-		}
-	}
+	if (!spectator_password_.empty())
+		auth.cu.push_back(make_client_cu_chunk(2, "JSPP", spectator_password_));
 	// TZB is the OS time-zone bias, omitted when 0; MPS the stock mpmaxpacketsize (no cfg loader).
 	// [orig: tzb @0x569dbd, its gate @0x4c3da4; max_packet_bytes = maxPacketSize_338 @0x569ca0,
 	//  cfg row @0x833380 default "1300"] (D-NET-296)
