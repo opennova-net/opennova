@@ -9,7 +9,7 @@
 // independent read of the same files.
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms);
 // the attach count pins the recorded retail value on that tree (859).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <runtime/world/player_spawn.h>
@@ -80,7 +80,7 @@ int main() {
 	// --- The bare sim: promote, the native attach sweep, the by-name weapon
 	// install and the session bank.
 	{
-		testrig::RetailMissionRig rig;
+		testrig::MissionRig rig;
 		if (!rig.open(assets, "00TRg.bms", error)) return retail::skip(error.c_str());
 		if (!expect(rig.items_ok, "items.def parses from the tree")) return 1;
 		// The bare promote: no seat/mount table (the recorded attach count is
@@ -126,7 +126,7 @@ int main() {
 	// booted world poses natively end to end, and the native file resolution
 	// matches the independent reads.
 	{
-		testrig::RetailMissionRig rig;
+		testrig::MissionRig rig;
 		if (!rig.open(assets, "00TRg.bms", error)) return retail::skip(error.c_str());
 		testrig::BootOptions options;
 		if (!expect(rig.boot(options, error), "00TRg boots (S9)")) {

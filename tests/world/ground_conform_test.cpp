@@ -6,7 +6,7 @@
 
 #include <runtime/world/ground_conform.h>
 
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <algorithm>
@@ -211,7 +211,7 @@ void test_cp01_standing_player_is_vertically_stable() {
 		retail::skip_leg("OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms)");
 		return;
 	}
-	opennova::testrig::RetailMissionRig rig;
+	opennova::testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "CP01.bms", error)) {
 		retail::skip_leg(error.c_str());

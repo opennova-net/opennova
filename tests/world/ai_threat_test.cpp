@@ -8,7 +8,7 @@
 // Movement rides the same PlayerInput packet the shell's input router fills;
 // the look is set straight at the target in the engine's BAM frame.
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <runtime/terrain_query/height_field.h>
@@ -42,7 +42,7 @@ struct Nearest {
 // occupant rides its seat and fires via the D-AI-2 emplacement solver, and an
 // NPC authored with the no-scan slot bit never perceives anyone
 // [orig: aiSlot byte+4 & 1 -> no scan] — both are out of the slice-1 loop.
-Nearest nearest_npc(testrig::RetailMissionRig &rig) {
+Nearest nearest_npc(testrig::MissionRig &rig) {
 	Nearest best;
 	const w::Vec3 player = rig.local.player_position();
 	const w::AiEntity *self = rig.local.player_ai();
@@ -69,7 +69,7 @@ Nearest nearest_npc(testrig::RetailMissionRig &rig) {
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "CP01.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

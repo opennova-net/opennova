@@ -19,7 +19,7 @@
 // player cannot lose the race and no assertion rides on it.
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying CP01.bms);
 // no synthetic leg exists: the death matrix needs a retail infantry .adm.
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <runtime/world/local_player_view.h>
@@ -53,7 +53,7 @@ struct Nearest {
 };
 
 // Whether the local player's eye sees the NPC 0.5 u above its origin.
-bool player_sees(testrig::RetailMissionRig &rig, const w::AiEntity &npc) {
+bool player_sees(testrig::MissionRig &rig, const w::AiEntity &npc) {
 	const w::Entity *player = rig.world.registry.get(rig.world.cached.local_player);
 	if (player == nullptr || rig.world.collision == nullptr) return false;
 	const w::Vec3 eye = w::player_eye_position(*player);
@@ -64,7 +64,7 @@ bool player_sees(testrig::RetailMissionRig &rig, const w::AiEntity &npc) {
 }
 
 // The nearest live foot NPC, or with `visible` the nearest one the player sees.
-Nearest nearest_npc(testrig::RetailMissionRig &rig, bool visible = false) {
+Nearest nearest_npc(testrig::MissionRig &rig, bool visible = false) {
 	Nearest best;
 	const w::Vec3 player = rig.local.player_position();
 	for (int i = 0; i < rig.world.ai.count(); ++i) {
@@ -89,7 +89,7 @@ Nearest nearest_npc(testrig::RetailMissionRig &rig, bool visible = false) {
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
 			"OPENNOVA_JO_ASSETS (an extracted retail tree carrying CP01.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(assets, "CP01.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

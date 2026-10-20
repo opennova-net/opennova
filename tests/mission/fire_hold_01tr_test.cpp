@@ -9,7 +9,7 @@
 // they emptied their rifles into the dividers from the first second.
 // `--verbose` dumps the shooters and every round; `--seconds N` sets the watch.
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <cstdio>
@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
 	}
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "01TR.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

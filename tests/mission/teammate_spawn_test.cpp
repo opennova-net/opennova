@@ -1,4 +1,4 @@
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 #include <runtime/world/teammate_operations.h>
 #include <runtime/world/vehicle_motor.h>
@@ -103,7 +103,7 @@ int main() {
         return 1;
     }
     RETAIL_REQUIRE_OR_SKIP(install, retail::install(), "OPENNOVA_JO_DIR (CP01 and the teammate DEF/AIP assets)");
-    auto owned = std::make_unique<testrig::RetailMissionRig>();
+    auto owned = std::make_unique<testrig::MissionRig>();
     auto &rig = *owned;
     std::string error;
     if (!rig.open(install, "CP01.bms", error)) return retail::skip(error.c_str());

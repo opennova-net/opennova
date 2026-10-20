@@ -23,7 +23,7 @@
 // --route x,y;x,y;... (walk these mission waypoints after the door legs),
 // --span <u> / --inside <u> (how far outside / inside the door plane the legs
 // run), --verbose (one line per tick).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <runtime/inmatch/occlusion_collect.h> // the shell's entity collect
@@ -98,7 +98,7 @@ void mission_from_render(const float r[3], float out[3]) {
 	out[2] = r[1];
 }
 
-std::string item_label(testrig::RetailMissionRig &rig, const w::Entity &e) {
+std::string item_label(testrig::MissionRig &rig, const w::Entity &e) {
 	const def::DefItemsFile *items = rig.items_table();
 	if (items == nullptr) return "?";
 	const def::DefItemDef *d = mission::find_item_def(
@@ -124,7 +124,7 @@ struct DoorRecord {
 	float min_z = 0.0f, max_z = 0.0f;
 };
 
-std::vector<DoorRecord> portal_records(testrig::RetailMissionRig &rig, const w::Entity &e) {
+std::vector<DoorRecord> portal_records(testrig::MissionRig &rig, const w::Entity &e) {
 	std::vector<DoorRecord> out;
 	const w::OcclusionModel *m = rig.occlusion.model(rig.occlusion.instance_model_id(e.handle));
 	if (m == nullptr) return out;
@@ -162,14 +162,14 @@ std::vector<DoorRecord> portal_records(testrig::RetailMissionRig &rig, const w::
 	return out;
 }
 
-w::BlinkAccum point_query(testrig::RetailMissionRig &rig, const float p[3]) {
+w::BlinkAccum point_query(testrig::MissionRig &rig, const float p[3]) {
 	const int32_t pf[3] = {w::to_fixed(p[0]), w::to_fixed(p[1]), w::to_fixed(p[2])};
 	w::BlinkAccum acc;
 	rig.collision.query_blink_boxes_at_point(rig.world, pf, acc);
 	return acc;
 }
 
-void list_buildings(testrig::RetailMissionRig &rig) {
+void list_buildings(testrig::MissionRig &rig) {
 	const w::Vec3 spawn = rig.local.player_position();
 	rig.world.registry.for_each([&](const w::Entity &e) {
 		if (e.kind != w::EntityKind::Building) return;
@@ -238,7 +238,7 @@ struct Frame {
 // watched entity, the slots whose silhouette fully holds its sphere (the
 // render_TOC slot leg before the 8-corner refinement and the viewthru rescue;
 // a type-1 slot counts only while its building carries the bit-31 marker).
-std::string slot_probe(testrig::RetailMissionRig &rig, const w::OcclusionFrameCamera &cam) {
+std::string slot_probe(testrig::MissionRig &rig, const w::OcclusionFrameCamera &cam) {
 	struct Slot {
 		w::EntityHandle h;
 		int bms = 0;
@@ -373,7 +373,7 @@ std::string slot_probe(testrig::RetailMissionRig &rig, const w::OcclusionFrameCa
 // the silhouette build's classification (front = n.(v0 - eye) > 0 per face;
 // back faces feed the cancelled edge list) — a camera inside a closed hull
 // sees every face front, so the record yields face planes and no edge planes.
-std::string occluder_probe(testrig::RetailMissionRig &rig, const w::Entity &bldg,
+std::string occluder_probe(testrig::MissionRig &rig, const w::Entity &bldg,
 		const w::OcclusionFrameCamera &cam) {
 	const w::OcclusionModel *m = rig.occlusion.model(rig.occlusion.instance_model_id(bldg.handle));
 	if (m == nullptr) return "";
@@ -492,7 +492,7 @@ std::string occluder_probe(testrig::RetailMissionRig &rig, const w::Entity &bldg
 }
 
 // One render-occlusion frame over the camera the game draws with.
-bool run_frame(testrig::RetailMissionRig &rig, const w::Entity &bldg, const DoorRecord &door,
+bool run_frame(testrig::MissionRig &rig, const w::Entity &bldg, const DoorRecord &door,
 		const float inward[3], Frame &out) {
 	const w::LocalPlayerViewFrame f = rig.local.view_frame();
 	if (!f.camera_pose_valid) return false;
@@ -668,7 +668,7 @@ LegFlips report_leg(const std::vector<Frame> &frames, bool verbose) {
 
 // Walk one leg holding forward until `done` says stop (or max ticks).
 template <typename Done>
-std::vector<Frame> walk(testrig::RetailMissionRig &rig, const w::Entity &bldg,
+std::vector<Frame> walk(testrig::MissionRig &rig, const w::Entity &bldg,
 		const DoorRecord &door, const float inward[3], int max_ticks, Done done) {
 	std::vector<Frame> frames;
 	rig.local.input.forward = true;
@@ -726,7 +726,7 @@ int main(int argc, char **argv) {
 	}
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying the mission)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, opt.bms.c_str(), error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

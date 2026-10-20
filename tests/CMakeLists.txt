@@ -76,12 +76,12 @@ function(opennova_add_parts name)
     endforeach()
 endfunction()
 
-# The retail-mission rig the asset-gated world/mission ctests share
-# (common/retail_mission_files.h): one real mission booted through the
+# The mission rig the world/mission ctests share (common/mission_rig.h): one
+# mission (the minted mission set's, common/mission_set.h) booted through the
 # engine's own mission::MissionKernel (ADR 0042 d3) and ticked on the SP
 # listen frame (inmatch::HostRole) or the local role's bare no-net tick; this
-# pair supplies only the retail terrain documents and the tick roles.
-add_library(opennova_test_rig STATIC common/retail_mission_files.cpp)
+# pair supplies only the tick roles.
+add_library(opennova_test_rig STATIC common/mission_rig.cpp)
 target_include_directories(opennova_test_rig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opennova_test_rig
     PUBLIC opennova_net opennova_runtime opennova_formats opennova_base)
@@ -4374,10 +4374,9 @@ opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_
 
 # The retail-mission ports of the former in-game probes (ADR 0041: an
 # assertion over the portable engine is a ctest, not a probe), all on the
-# shared rig (common/retail_mission_files.h). Gated: OPENNOVA_JO_DIR (a packed
+# shared rig (common/mission_rig.h). Gated: OPENNOVA_JO_DIR (a packed
 # install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
 foreach(port
-        world/truck_rest_00tra world/motorcycle_gravity_06tr
         world/rock_collision_00trg world/ai_corpse world/ai_threat
         world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
@@ -4388,6 +4387,17 @@ foreach(port
     add_executable(${port_name}_test ${port}_test.cpp)
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
     opennova_add_gated_test(${port_name} COMMAND ${port_name}_test)
+endforeach()
+
+# The former retail-mission ports over the minted mission set (common/mission_set.h,
+# tests/fixtures/mission_set_gen.cpp): each boots its own mission set mission on the
+# shared rig, the scenario of the shipped training mission it is named after.
+foreach(port
+        world/truck_rest_00tra world/motorcycle_gravity_06tr)
+    get_filename_component(port_name ${port} NAME)
+    add_executable(${port_name}_test ${port}_test.cpp)
+    target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
+    add_test(NAME ${port_name} COMMAND ${port_name}_test)
 endforeach()
 
 # The indoor-visibility walk (the "occlusion issues in a building" report):

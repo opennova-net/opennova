@@ -41,7 +41,7 @@
 
 #include "channel_clip_source.h"
 #include <runtime/world/world.h>
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 #include <string>
 
@@ -4230,7 +4230,7 @@ void test_out_of_range_enemy_is_approached() {
 // returning to the primary-state mirror once the slot is idle again.
 namespace {
 
-int retail_hold_state(opennova::testrig::RetailMissionRig &rig, const char *weapon, int settle_ticks) {
+int retail_hold_state(opennova::testrig::MissionRig &rig, const char *weapon, int settle_ticks) {
     if (!rig.install_weapon(weapon)) return -1;
     // The hold kind is re-read every selection pass from the entity's OWN
     // equipped index (the single wire byte at entity+0x2B0) [orig: @0x4b5dba].
@@ -4243,7 +4243,7 @@ int retail_hold_state(opennova::testrig::RetailMissionRig &rig, const char *weap
 
 // Burst-fire then press R; returns the first weapon-channel state that differs
 // from `hold` within `wait_ticks`, or -1. Flags `never_state` if it ever shows.
-int retail_fire_then_reload(opennova::testrig::RetailMissionRig &rig, int hold, int wait_ticks,
+int retail_fire_then_reload(opennova::testrig::MissionRig &rig, int hold, int wait_ticks,
         int *r_never_seen, int never_state) {
     for (int t = 0; t < 20; ++t) {
         rig.local.set_weapon_input(true, t == 0, false);
@@ -4265,7 +4265,7 @@ int retail_fire_then_reload(opennova::testrig::RetailMissionRig &rig, int hold, 
     return seen;
 }
 
-void wait_slot_idle(opennova::testrig::RetailMissionRig &rig, int max_ticks) {
+void wait_slot_idle(opennova::testrig::MissionRig &rig, int max_ticks) {
     for (int t = 0; t < max_ticks; ++t) {
         if (rig.local.weapon.slot.current == weapon_action::kIdle && t > 5) return;
         rig.tick();
@@ -4280,7 +4280,7 @@ static void test_retail_weapon_channel_holds() {
         retail::skip_leg("OPENNOVA_JO_ASSETS (an extracted JO tree carrying 00TRg.bms, weapon.def and US01)");
         return;
     }
-    opennova::testrig::RetailMissionRig rig;
+    opennova::testrig::MissionRig rig;
     std::string error;
     if (!rig.open(assets, "00TRg.bms", error)) {
         retail::skip_leg(error.c_str());

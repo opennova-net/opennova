@@ -18,7 +18,7 @@
 //     span without a drop (the "pushed off halfway up" report).
 //   The dismount family is pinned by the `collision`/`infantry` ctests.
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <algorithm>
@@ -57,7 +57,7 @@ struct Ladder {
 	uint16_t owner = 0xFFFF;
 };
 
-std::vector<Ladder> cl_volumes(testrig::RetailMissionRig &rig) {
+std::vector<Ladder> cl_volumes(testrig::MissionRig &rig) {
 	std::vector<Ladder> found;
 	for (const w::CollisionWorld::DebugInstance &inst :
 			rig.collision_instances(rig.local.player_position(), 150.0f, 128)) {
@@ -99,11 +99,11 @@ std::vector<Ladder> cl_volumes(testrig::RetailMissionRig &rig) {
 	return found;
 }
 
-bool climbing(testrig::RetailMissionRig &rig) {
+bool climbing(testrig::MissionRig &rig) {
 	return rig.local.player_anim_key().find("climb") != std::string::npos;
 }
 
-void look_up(testrig::RetailMissionRig &rig) {
+void look_up(testrig::MissionRig &rig) {
 	for (int i = 0; i < 8; ++i) {
 		rig.local.look(0.0f, -600.0f);
 		rig.tick();
@@ -115,7 +115,7 @@ void look_up(testrig::RetailMissionRig &rig) {
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "00TRa.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

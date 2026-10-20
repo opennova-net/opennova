@@ -219,4 +219,20 @@ stands in for.
 
 | File | Shape |
 |---|---|
+| `mtruck.3di` | the shipped transport truck's (DTruck1): a "veh0" LOD, the hull on part 0 and six wheels on parts 1..6 at the shipped hubs, each a PANM row on the shipped VEHICLE_* registers; the shipped controller and seven passenger user points; a collision object per part with type-1 volumes on the hull, the wheels' bottoms 0.01 over the origin (the shipped CMDL floor); `truck_rest_00tra`'s |
+| `mbike.3di` | the shipped motorcycle's (Dcycle2): the body on part 0, the front and rear wheels on parts 1 and 2 (hubs 0.82 fore and aft, 0.385 up) on VEHICLE_WHEELS and their VEHICLE_TIRE registers; the rider's ctrlx24 and the pillion's sitex00; one collision object with the body's one type-1 volume; `motorcycle_gravity_06tr`'s |
 | `door.3di` | the shipped door building's (IBlock01): a "door" LOD, part 0 a 6 x 6 block house with a doorway in its +x wall, part 1 the door hinged at (2.9, -0.5), its PANM row a rotation on control register 0 (`DOOR_00`) from 0 to -5688; a collision object per part, the door's offset to its hinge; `doors`' |
+
+Its missions, each the scenario of the shipped training mission the test it serves is named
+after, minted by the same generator on the Tmap terrain (the ground 36 units at the origin,
+falling a sixteenth of a unit per unit of mission y):
+
+| File | Scenario |
+|---|---|
+| `motorcycle.bms` | 06TR's instructor ride: motorcycle SSN 80 (group 4) with its instructor SSN 1715 command-mounted at spawn, the start beside it, ride path 6, and the boarding event (a Player sub-39 trigger on SSN 80) redirecting group 4 onto the path |
+| `truck_rest.bms` | 00TRa's three parked trucks by their SSNs (11 and 1714 crewed by a command-mounted friendly soldier, 6 empty) around the single-player start |
+
+Its authored text: `items.def` (the rows its missions place, by the shipped rows' ids and
+field values over the minted models) and the AI profiles its vehicles name (`d_5ton.aip`,
+`d_buggy.aip`: the shipped profiles' values). Tests read it through `tests/common/mission_set.h`, which stages it beside
+the Tmap terrain, the synthetic models and the authored clips as one loose game root.

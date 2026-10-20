@@ -1,5 +1,5 @@
 // Retail data stays outside the repository; boot the two shipped lndm missions.
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 #include <base/io/fixed.h>
 #include <runtime/world/entity_spawn.h>
@@ -13,7 +13,7 @@ int main() {
     if (root.empty()) return retail::skip("packed JO install is not configured");
     for (const auto &mission : {std::pair<const char *, int>{"00TRd.bms", 98},
                                {"CP09.bms", 74}}) {
-        auto rig = std::make_unique<testrig::RetailMissionRig>();
+        auto rig = std::make_unique<testrig::MissionRig>();
         std::string error;
         if (!rig->open(root, mission.first, error)) {
             std::fprintf(stderr, "FAIL open %s: %s\n", mission.first, error.c_str());

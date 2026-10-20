@@ -17,7 +17,7 @@
 // view frame: the chase in a control seat, first person otherwise [orig: the
 // arbiter Render_ProcessMainSceneFrame @0x5ca1d2..0x5ca1f2].
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <runtime/world/vehicle_mount.h>
@@ -42,7 +42,7 @@ bool expect(bool cond, const char *msg) {
 constexpr uint16_t kTruckSsn = 11;
 constexpr uint16_t kAtvSsn = 1766;
 
-bool camera_check(testrig::RetailMissionRig &rig, const char *label, bool expect_third_person) {
+bool camera_check(testrig::MissionRig &rig, const char *label, bool expect_third_person) {
 	const w::LocalPlayerViewFrame f = rig.local.view_frame();
 	std::printf("ride: camera %s third_person=%d camera_mounted=%d selected=%d\n", label,
 			int(f.third_person), int(f.camera_mounted), int(f.third_person_selected));
@@ -56,7 +56,7 @@ bool control_seat(w::SeatType t) { return t == w::SeatType::Controller || t == w
 // Aim the local player's view at a world point through the input-owned look
 // mirrors; the next tick lands them on the body Yaw/Pitch the seat scan measures
 // its cone from [orig: Entity_FindNearestSeatOrArmory @0x4360b6 / @0x4360c6].
-void aim_local_at(testrig::RetailMissionRig &rig, const w::Vec3 &target) {
+void aim_local_at(testrig::MissionRig &rig, const w::Vec3 &target) {
 	const w::Entity *pl = rig.local.player();
 	if (pl == nullptr) return;
 	const w::Vec3 eye{ pl->position.x + pl->eye_offset_x / 65536.0f,
@@ -80,7 +80,7 @@ int first_free_seat(const w::Entity &vehicle) {
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "00TRa.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

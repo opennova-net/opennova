@@ -1,0 +1,183 @@
+begin "start, player"
+  id 106001
+  type marker
+  subtype LFP
+end
+
+begin "waypoint"
+  id 106005
+  type marker
+end
+
+begin "Player #1, Single player"
+  id 105310
+  type person
+  unit_type 9
+  graphic person
+  anim_def soldier
+  attrib: aidata fo notool pfoil
+  ai_function plyr
+  disk_function PLAYER
+  phrase_set 0
+  move_function org2
+  input_function troop
+  hp 150
+  armor 0 0
+  radarsig 300
+  mana 0
+end
+
+begin "Friendly Soldier #3 with M16"
+  id 102072
+  type person
+  graphic person
+  anim_def soldier
+  attrib: good aidata nodismember
+  deathtime	30
+  hp 100
+  radarsig 300
+  score 10
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 33
+  move_function org1
+  unit_type 9
+  clipsize 30
+  ammo_closeattack    AMMO_M16_556MM
+  ammo_easyrocket     AMMO_M16_556MM
+  ammo_advancedrocket AMMO_M16_556MM
+  ammo_marker3        AMMO_M16_556MM
+  launchups_closeattack	mflash01
+  launchups_rocket		mflash01
+  launchups_marker3		mflash01
+end
+
+begin "Friendly Soldier #4 with MP5"
+  id 102073
+  type person
+  graphic person
+  anim_def soldier
+  attrib: good aidata nodismember
+  deathtime	30
+  hp 100
+  radarsig 300
+  score 10
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 33
+  move_function org1
+  unit_type 9
+  clipsize 30
+  ammo_closeattack    AMMO_MP5SP_9MM
+  ammo_easyrocket     AMMO_MP5SP_9MM
+  ammo_advancedrocket AMMO_MP5SP_9MM
+  ammo_marker3        AMMO_MP5SP_9MM
+  launchups_closeattack	mflash01
+  launchups_rocket		mflash01
+  launchups_marker3		mflash01
+end
+
+begin "Drivable Motorcycle"
+  id 100074
+  sid mbike
+  type vehicle
+  graphic mbike
+  attrib: AIData noscar neutral PlayerControl exp1 forceasset DynamicShadow
+  hp 1500
+  armor 10 10
+  criticalhp 300
+  criticaldrain 15
+  score 50
+  radarsig 500
+  ai_function cveh
+  render_function cveh
+  move_function cbike
+    turn_rate 110
+    turn_rate2 16
+    acceleration 25
+    deceleration 70
+    slip_speed 0
+    player_speed 80
+    slip_slope	50
+    max_slope	60
+    spring		1
+    spring_comp 15
+    shock		1
+    mass		1
+    minai		1
+    physics     1
+    lean		30
+    lean_velocity 40
+    torque 	9
+  default_aip d_buggy
+  unit_type 12
+end
+
+begin "Drivable Transport Truck"
+  id 101294
+  type vehicle
+  sid mtruck
+  graphic mtruck
+  attrib: AIData neutral NoScar PlayerControl  forceasset DynamicShadow UseVK
+  ai_function cveh
+  move_function cveh
+    turn_rate 45
+    turn_rate2 30
+    acceleration 10
+    deceleration 20
+    slip_speed 0
+    player_speed 64
+    slip_slope	35
+    max_slope	50
+    top_heavy   10
+    torque 7
+    physics     1
+    spring		6
+    shock		6
+    flip        10
+    mass 11
+    minai		1
+  render_function cveh
+  default_aip d_5ton
+  unit_type 1
+  hp 10000
+  armor 20 20
+  criticalhp 1000
+  criticaldrain 50
+  score 20
+  radarsig 500
+end
+
+begin "Drivable Transport Truck with armory"
+  id 101420
+  type vehicle
+  sid mtruck2
+  graphic mtruck
+  attrib: AIData neutral NoScar PlayerControl  forceasset armory DynamicShadow UseVK
+  ai_function cveh
+  move_function cveh
+    turn_rate 45
+    turn_rate2 30
+    acceleration 10
+    deceleration 20
+    slip_speed 0
+    player_speed 64
+    slip_slope	35
+    max_slope	50
+    torque 7
+    physics     1
+    spring		6
+    shock		6
+    flip        10
+    mass 11
+    minai		1
+  render_function cveh
+  default_aip d_5ton
+  unit_type 1
+  hp 10000
+  armor 20 20
+  criticalhp 1000
+  criticaldrain 50
+  score 20
+  radarsig 500
+end

@@ -1,6 +1,6 @@
 // The reported training regressions through the actual mounted assets and host
 // tick: US01 locomotion/footsteps, neutral tags, and the Little Bird pilot gun.
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 #include <runtime/world/friendly_tags.h>
 #include <runtime/audio/sound_profile.h>
@@ -17,7 +17,7 @@ static int failures = 0;
 // The shell consumes switch requests through MissionKernel::install_weapon.
 // Exercise that public boundary here as well; advancing the host alone leaves
 // presentation-requested weapon definitions uninstalled in a headless rig.
-static void advance(testrig::RetailMissionRig &rig, int count = 1) {
+static void advance(testrig::MissionRig &rig, int count = 1) {
     for (int tick = 0; tick < count; ++tick) {
         // FireEvent is an embedder-drained presentation queue, not a per-tick
         // snapshot. Consume the previous frame before observing new shots.
@@ -34,9 +34,9 @@ static void advance(testrig::RetailMissionRig &rig, int count = 1) {
     }
 }
 
-static std::unique_ptr<testrig::RetailMissionRig> boot(const std::string &root,
+static std::unique_ptr<testrig::MissionRig> boot(const std::string &root,
         const std::string &expansion, const char *mission) {
-    auto rig = std::make_unique<testrig::RetailMissionRig>();
+    auto rig = std::make_unique<testrig::MissionRig>();
     std::string error;
     if (!rig->open(root, mission, error, expansion) ||
             !rig->boot(testrig::BootOptions{}, error)) {
@@ -48,7 +48,7 @@ static std::unique_ptr<testrig::RetailMissionRig> boot(const std::string &root,
     return rig;
 }
 
-static void truck_glass(testrig::RetailMissionRig &rig) {
+static void truck_glass(testrig::MissionRig &rig) {
     Entity *truck = rig.world.registry.by_net_id(11);
     CHECK(truck != nullptr);
     if (!truck) return;

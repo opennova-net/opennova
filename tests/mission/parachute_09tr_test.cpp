@@ -1,6 +1,6 @@
 // Walk onto the 09TR Chinook floor without Use. The mission itself orders six
 // soldiers into seats, leaves the instructor standing, and starts the flight.
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 #include <runtime/world/vehicle_mount.h>
 #include <cmath>
@@ -21,7 +21,7 @@ world::Vec3 local_offset(const world::Entity &carrier, world::Vec3 position) {
 }
 int main() {
     RETAIL_REQUIRE_OR_SKIP(root, retail::assets(), "OPENNOVA_JO_ASSETS with 09TR.bms");
-    auto owned = std::make_unique<testrig::RetailMissionRig>();
+    auto owned = std::make_unique<testrig::MissionRig>();
     auto &r = *owned;
     std::string error;
     if (!r.open(root, "09TR.bms", error)) return retail::skip(error.c_str());

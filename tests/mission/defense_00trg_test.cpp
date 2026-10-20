@@ -24,7 +24,7 @@
 // ledger carries the tail) — a FAIL line there is the known state, not a
 // regression of this test. `--ticks N` sets the run budget (default 15000).
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRg.bms).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <cmath>
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
 		if (std::strcmp(argv[i], "--ticks") == 0) run_ticks = std::max(1, std::atoi(argv[i + 1]));
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRg.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "00TRg.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

@@ -1,0 +1,36 @@
+description     "Drivable - Buggy"
+type			GROUND
+default_state	GROUND_FOLLOWWP
+
+rank				0
+view_fov			180
+view_dist			300
+radar_fov			240
+radar_dist			300
+priority_air		0
+priority_ground		0
+priority_organics	0
+
+evade_flags			FOLLOW_WP FLEE
+combat_flags		FOLLOW_WP FLEE
+
+react_time			0
+aim_skill			0
+check_six_rate		0
+target_eval_rate	0
+tether_dist			0
+
+patrol_speed		85
+combat_speed		85
+
+min_speed			0
+min_chase_dist		100
+max_chase_dist		200
+
+drive_skill			3
+turn_rate			50
+
+accel_time			35
+
+radio_distance		0
+radio_delay			0

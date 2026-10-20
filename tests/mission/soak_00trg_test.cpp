@@ -12,7 +12,7 @@
 // declines a single production query across the whole run.
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms).
 // `--rounds N` (default 300; one round = 62 ticks + one sweep).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <cstdio>
@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
 		if (std::strcmp(argv[i], "--rounds") == 0) rounds = std::max(1, std::atoi(argv[i + 1]));
 	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
 			"OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(assets, "00TRg.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

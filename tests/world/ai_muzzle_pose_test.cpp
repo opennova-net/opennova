@@ -8,7 +8,7 @@
 // held-weapon model (M4_3RD) carries the user points the fire pass reads
 // (MFLASH01 ahead of the origin, muzzle authored +Z).
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <formats/threedi/threedi_3di3.h>
@@ -44,7 +44,7 @@ float fx(int32_t q16) { return static_cast<float>(q16) / 65536.0f; }
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "CP01.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;

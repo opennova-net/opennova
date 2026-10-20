@@ -8,7 +8,7 @@
 // strike the entity's CFAC mesh (a miss there is a concrete render-vs-bullet
 // hole, not an AABB approximation artifact).
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <formats/threedi/threedi_strip_decode.h>
@@ -137,7 +137,7 @@ struct Fire {
 	std::string terminal = "no_event";
 };
 
-Fire fire_one(testrig::RetailMissionRig &rig, const V &origin, const V &dir, uint16_t target, int ammo_index) {
+Fire fire_one(testrig::MissionRig &rig, const V &origin, const V &dir, uint16_t target, int ammo_index) {
 	static const char *const kKindNames[] = {"organic", "item face", "item sphere", "terrain", "expired", "face miss"};
 	const uint32_t spawn_tick = rig.world.logic_tick;
 	w::RoundSpawnParams params;
@@ -178,7 +178,7 @@ Fire fire_one(testrig::RetailMissionRig &rig, const V &origin, const V &dir, uin
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
 			"OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(assets, "00TRg.bms", error)) return retail::skip(error.c_str());
 	if (!expect(rig.items_ok, "items.def parses from the tree")) return 1;

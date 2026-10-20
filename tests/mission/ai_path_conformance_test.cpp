@@ -48,7 +48,7 @@
 #include <map>
 #include <string>
 #include <vector>
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_mission_open.h"
 #include "common/retail_paths.h"
 
@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
 	// field, registers E_STAND.adm + each soldier's own .adm, resolves the
 	// items.def traits and the collision instances, loads weapon.def/ammo.def
 	// and the WAC layers - in the S9 order the shipping game runs.
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error, served_by;
 	if (!retail::open_mission(rig, install, bms_name, error, served_by))
 		return retail::skip((bms_name + " on the OPENNOVA_JO_DIR mount (base or an expansion) "

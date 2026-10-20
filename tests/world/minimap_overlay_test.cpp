@@ -6,7 +6,7 @@
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/world.h>
 #include <runtime/world/powerup.h>
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <algorithm>
@@ -43,7 +43,7 @@ void test_00trg_persistent_overlay_set() {
 		retail::skip_leg("OPENNOVA_JO_DIR (revx02) or OPENNOVA_JO_ASSETS carrying 00TRg.bms");
 		return;
 	}
-	opennova::testrig::RetailMissionRig rig;
+	opennova::testrig::MissionRig rig;
 	std::string error;
 	bool opened = !install.empty() && rig.open(install, "00TRg.bms", error, "revx02") &&
 			rig.index.mounted_expansion() == "revx02";

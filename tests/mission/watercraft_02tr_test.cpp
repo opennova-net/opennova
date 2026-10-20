@@ -1,7 +1,7 @@
 // The authored water-training hulls must retain support while idling. In
 // particular the selector-zero amphibious LCAC uses the seven-point solve.
 // Isolate the hulls over a zero-height water plane, with no terrain support.
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 
 #include <cmath>
@@ -11,7 +11,7 @@
 int main() {
 	using namespace opennova;
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(), "OPENNOVA_JO_DIR (02TR.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "02TR.bms", error))
 		return retail::skip(error.c_str());

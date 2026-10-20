@@ -13,7 +13,7 @@
 //     the authored userpoint), so it never falls behind a moving carrier.
 //
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms).
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/player_weapon.h>
 #include "common/retail_paths.h"
@@ -37,7 +37,7 @@ bool expect(bool cond, const char *msg) {
 
 constexpr int kBuggyTypeId = 1291; // items.def 101291 "Drivable Dune Buggy"
 
-const w::Entity *nearest_buggy(testrig::RetailMissionRig &rig, const w::Vec3 &from) {
+const w::Entity *nearest_buggy(testrig::MissionRig &rig, const w::Vec3 &from) {
 	const w::Entity *best = nullptr;
 	float best_d = 1e30f;
 	rig.world.registry.for_each([&](const w::Entity &e) {
@@ -51,7 +51,7 @@ const w::Entity *nearest_buggy(testrig::RetailMissionRig &rig, const w::Vec3 &fr
 	return best;
 }
 
-const w::Entity *gun_child_of(testrig::RetailMissionRig &rig, w::EntityHandle carrier) {
+const w::Entity *gun_child_of(testrig::MissionRig &rig, w::EntityHandle carrier) {
 	const w::Entity *found = nullptr;
 	rig.world.registry.for_each([&](const w::Entity &e) {
 		if (found == nullptr && e.emplacement_parent == carrier) found = &e;
@@ -64,7 +64,7 @@ const w::Entity *gun_child_of(testrig::RetailMissionRig &rig, w::EntityHandle ca
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms)");
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(install, "01TR.bms", error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;
