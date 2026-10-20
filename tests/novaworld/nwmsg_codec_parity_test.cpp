@@ -450,6 +450,37 @@ int registry_matches_catalog() {
 	return bad;
 }
 
+// The catalog's classes the corpus rows carry none of, over the shipped rows' keys: a boat (move
+// function cbot, the watercraft family) and a spawn point (the SpawnPoint attribute).
+int catalog_other_classes() {
+	static const char kRows[] =
+			"begin \"Drivable Zodiac\"\r\n  id 101293\r\n  type vehicle\r\n"
+			"  attrib: AIData neutral Reflect PlayerControl  forceasset\r\n  ai_function cbot\r\n"
+			"  move_function cbot\r\nend\r\n"
+			"begin \"LFP Tower with Change Team & Spawn Volume\"\r\n  id 101336\r\n  type object\r\n"
+			"  attrib:  landable SpawnPoint ChangeTeam LFP\r\nend\r\n";
+	def::DefItemsFile items{};
+	if (def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kRows), sizeof(kRows) - 1, &items) != 0) {
+		std::printf("FAIL the other classes' items.def text does not parse\n");
+		return 1;
+	}
+	const rep::ItemReplicationCatalog catalog = rep::ItemReplicationCatalog::from_items_def(items);
+	def::def_free_items(&items);
+	int bad = 0;
+	const rep::ItemReplicationProfile *boat = catalog.by_definition_id(101293);
+	if (boat == nullptr || boat->motion_family != rep::MotionFamily::Watercraft) {
+		std::printf("FAIL a cbot row is not the watercraft family\n");
+		++bad;
+	}
+	const rep::ItemReplicationProfile *tower = catalog.by_definition_id(101336);
+	if (tower == nullptr || !tower->allocation.spawn_point ||
+			!rep::has_capability(tower->capabilities, rep::ItemReplicationCapability::SpawnPoint)) {
+		std::printf("FAIL a SpawnPoint row lacks the spawn-point capability\n");
+		++bad;
+	}
+	return bad;
+}
+
 int items_def_leg(const Corpus &corpus, const rep::ItemReplicationCatalog &authored, bool dump) {
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kCorpusItemsDef),
@@ -522,6 +553,7 @@ int main(int argc, char **argv) {
 	}
 
 	violations += items_def_leg(corpus, authored, dump);
+	violations += catalog_other_classes();
 	if (violations != 0) {
 		std::printf("nwmsg_codec_parity: %d violation(s)\n", violations);
 		return 1;

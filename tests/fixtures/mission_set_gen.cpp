@@ -587,7 +587,8 @@ synth3di::Model make_heli() {
 }
 
 // mzodiac.3di: an inflatable boat in the shape of the shipped Dzdiac1: the hull on part 0; the
-// coxswain's controller ctrlx03 aft and the passengers sitex08 and sitex09; one collision object,
+// coxswain's controller ctrlx03 aft, the passengers sitex08 and sitex09, the sound point and the
+// wake points (FX01 astern and either beam, FX00 amidships, off every part); one collision object,
 // its faces the hull's and its type-1 volumes the shipped floor (-1.84..1.68, 0.32 under the origin
 // to 0.11 over it), the two side tubes and the bow.
 synth3di::Model make_zodiac() {
@@ -605,6 +606,11 @@ synth3di::Model make_zodiac() {
 	m.add_user_point("ctrlx03", Vec3{-1.327, -0.447, 0.581}, kForward, 0, synth3di::kUserPointGameplay);
 	m.add_user_point("sitex08", Vec3{0.282, -0.453, 0.483}, kForward, 0, synth3di::kUserPointGameplay);
 	m.add_user_point("sitex09", Vec3{0.147, 1.043, 0.617}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sound", Vec3{-2.292, 0.014, 0.314}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FX01", Vec3{-2.334, -0.002, -0.166}, Vec3{-0.996, 0.0, 0.087}, -1, synth3di::kUserPointEffect);
+	m.add_user_point("FX01", Vec3{1.190, 1.368, -0.166}, Vec3{0.0, 0.996, 0.087}, -1, synth3di::kUserPointEffect);
+	m.add_user_point("FX01", Vec3{1.190, -1.365, -0.166}, Vec3{0.0, -0.996, 0.087}, -1, synth3di::kUserPointEffect);
+	m.add_user_point("FX00", Vec3{-1.318, 0.0, 0.078}, Vec3{-0.996, 0.0, 0.087}, -1, synth3di::kUserPointEffect);
 	const int c = m.add_cobj(0);
 	for (const Box &b : {floor, tube_r, tube_l, bow}) {
 		m.add_face_box(c, b);
@@ -641,7 +647,8 @@ synth3di::Model make_lcac() {
 
 // mmarkv.3di: a patrol craft in the shape of the shipped Dmrk51 (the Mark V, and the stand-in the
 // garrison mission's assault boat wears): the hull on part 0; the helm's controller ctrlx22 before
-// the wheelhouse and the four passengers sitex17a..d amidships; one collision object, its type-1
+// the wheelhouse, the four passengers sitex17a..d amidships, the sound point and the wake points
+// (FX01 either bow, FX00 astern, off every part); one collision object, its type-1
 // volumes the shipped keel (1.72 under the origin), the hull, the stern, the bow and the
 // wheelhouse, over their faces.
 synth3di::Model make_markv() {
@@ -658,6 +665,10 @@ synth3di::Model make_markv() {
 	for (const Box &b : {keel, body, stern, bow, wheelhouse}) m.add_box(lod, hull, paint, b);
 	m.add_panm(lod, hull, 0);
 	m.add_user_point("ctrlx22", Vec3{10.295, -0.866, 2.035}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sound", Vec3{-1.567, 0.194, 1.617}, kUp, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FX01", Vec3{9.312, 3.451, -0.341}, Vec3{0.341, 0.936, 0.087}, -1, synth3di::kUserPointEffect);
+	m.add_user_point("FX01", Vec3{9.312, -3.096, -0.341}, Vec3{0.341, -0.936, 0.087}, -1, synth3di::kUserPointEffect);
+	m.add_user_point("FX00", Vec3{0.018, 0.104, 0.046}, Vec3{-1.0, 0.0, 0.0}, -1, synth3di::kUserPointEffect);
 	const Vec3 seats[4] = {{7.707, 0.438, 1.703}, {6.761, 0.438, 1.703}, {6.748, -0.151, 1.703}, {7.694, -0.151, 1.703}};
 	const char *const names[4] = {"sitex17a", "sitex17b", "sitex17c", "sitex17d"};
 	for (int s = 0; s < 4; ++s)
@@ -720,8 +731,9 @@ synth3di::Model make_tripod() {
 // mlbird.3di: a light helicopter in the shape of the shipped DAH62 (the minigun Little Bird): the
 // fuselage on part 0 (its open cockpit between the floor and the roof, its skids 3.23 under the
 // origin), the main rotor on part 1 (HELO_ROTOR) and the tail rotor on part 2 (HELO_TAILROTOR);
-// the pilot's controller ctrlx05 and the co-pilot's sitex04 in the cockpit and the two miniguns'
-// bullet, flash and casing points either side, as the shipped ones; one collision object, the
+// the pilot's controller ctrlx05 and the co-pilot's sitex04 in the cockpit, the two miniguns'
+// bullet, flash and casing points either side, the two flare launchers and the heat-haze point
+// FX00, as the shipped ones; one collision object, the
 // fuselage's and the skids' faces and type-1 volumes.
 synth3di::Model make_little_bird() {
 	synth3di::Model m;
@@ -758,6 +770,9 @@ synth3di::Model make_little_bird() {
 	m.add_user_point("BULLET02", Vec3{1.732, -1.29, -2.648}, kForward, 0, synth3di::kUserPointGameplay);
 	m.add_user_point("MFLASH01", Vec3{1.637, 1.265, -2.648}, kForward, 0, synth3di::kUserPointGameplay);
 	m.add_user_point("MFLASH02", Vec3{1.637, -1.29, -2.648}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FLARE01", Vec3{-0.942, 0.6, -2.162}, Vec3{0.0, 1.0, 0.0}, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FLARE02", Vec3{-0.942, -0.602, -2.162}, Vec3{0.0, -1.0, 0.0}, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FX00", Vec3{-2.084, 0.0, -1.857}, Vec3{-0.94, 0.0, -0.342}, -1, synth3di::kUserPointEffect);
 	const int c = m.add_cobj(0);
 	for (const Box &b : {floor, roof, tail, boom, skid_l, skid_r, struts}) m.add_face_box(c, b);
 	for (const Box &b : {floor, skid_l, skid_r}) m.add_volume(c, 1, 0, b);
@@ -797,8 +812,9 @@ void add_ramp_volume(synth3di::Model &m, int cobj, double x0, double x1, double 
 // floor's extent (-5.22..8.06 along, -2.19..2.37 across), the gear 7.19 under it, the walls and the
 // roof clear of a standing body, the cockpit forward and the ramp sloping from the ground behind
 // the cabin up to its floor; the forward and aft rotors on parts 1 and 2 turning on HELO_ROTOR; the
-// pilot's controller ctrlx05 and the co-pilot's sitex04 in the cockpit and the six troop seats
-// sitex17A..F along the cabin walls at the shipped places; one collision object, the floor, walls,
+// pilot's controller ctrlx05 and the co-pilot's sitex04 in the cockpit, the two flare launchers,
+// the heat-haze point FX00 and the six troop seats sitex17A..F along the cabin walls at the shipped
+// places; one collision object, the floor, walls,
 // roof and cockpit as faces and type-1 volumes, the ramp a sloped one, and the shipped troop
 // benches along the walls (flags 0x1) and the seats' bases.
 synth3di::Model make_chinook() {
@@ -825,6 +841,11 @@ synth3di::Model make_chinook() {
 	}
 	m.add_user_point("ctrlx05", Vec3{9.009, 1.017, -4.79}, kForward, 0, synth3di::kUserPointGameplay);
 	m.add_user_point("sitex04", Vec3{9.009, -1.017, -4.79}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FLARE 01", Vec3{-4.013, 3.324, -5.953}, Vec3{-0.169, 0.971, -0.171}, 0,
+			synth3di::kUserPointGameplay);
+	m.add_user_point("FLARE 02", Vec3{-4.013, -3.295, -5.953}, Vec3{-0.169, -0.971, -0.171}, 0,
+			synth3di::kUserPointGameplay);
+	m.add_user_point("FX00", Vec3{-7.172, -1.384, -2.191}, Vec3{-0.936, 0.0, -0.352}, -1, synth3di::kUserPointEffect);
 	const char *const names[6] = {"sitex17A", "sitex17B", "sitex17C", "sitex17D", "sitex17E", "sitex17F"};
 	const double along[3] = {5.953, 5.403, 4.763};
 	for (int s = 0; s < 6; ++s) {
@@ -898,6 +919,48 @@ synth3di::Model make_hut() {
 	m.add_occ_box(0, 0, 0, east_n);
 	const Vec3 window[4] = {{3.6, 3.0, 1.0}, {2.4, 3.0, 1.0}, {2.4, 3.0, 2.2}, {3.6, 3.0, 2.2}};
 	m.add_occ_quad(2, 1, 0, window, Vec3{0.0, 1.0, 0.0});
+	return m;
+}
+
+// mm1a1.3di: a main battle tank in the shape of the shipped Dm1a1: the hull and the turret on
+// part 0, the origin 1.3 over the tracks' bottom; the driver's controller ctrlx25, the shipped
+// exhaust and dust points (fx00 twice, fx01, fx02 twice) and its `ground` point; one collision
+// object, its type-1 volume the hull.
+synth3di::Model make_tank() {
+	synth3di::Model m;
+	m.name = "mm1a1";
+	const int lod = m.add_lod(96);
+	const int paint = m.add_material("FF_ST_OP", "mm1a1.tga");
+	const Box hull = box(-4.9, -1.8, -1.3, 3.9, 1.8, 0.4);
+	const Box turret = box(-1.8, -1.4, 0.4, 1.4, 1.4, 1.2);
+	const int part = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {hull, turret}) m.add_box(lod, part, paint, b);
+	m.add_panm(lod, part, 0);
+	m.add_user_point("ctrlx25", Vec3{1.532, -0.029, -0.590}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("fx00", Vec3{-3.703, 0.920, 0.631}, Vec3{-1.0, 0.0, 0.0}, 0, synth3di::kUserPointEffect);
+	m.add_user_point("fx00", Vec3{-3.703, -0.988, 0.631}, Vec3{-1.0, 0.0, 0.0}, 0, synth3di::kUserPointEffect);
+	m.add_user_point("fx01", Vec3{-4.924, -0.031, 0.116}, Vec3{-1.0, 0.0, 0.0}, 0, synth3di::kUserPointEffect);
+	m.add_user_point("fx02", Vec3{-3.713, -1.628, -1.118}, Vec3{-0.832, 0.0, 0.555}, 0, synth3di::kUserPointEffect);
+	m.add_user_point("fx02", Vec3{-3.713, 1.654, -1.118}, Vec3{-0.832, 0.0, 0.555}, 0, synth3di::kUserPointEffect);
+	m.add_user_point("ground", Vec3{0.028, -0.036, -1.304}, kUp, 0, synth3di::kUserPointGameplay);
+	const int c = m.add_cobj(0);
+	for (const Box &b : {hull, turret}) m.add_face_box(c, b);
+	m.add_volume(c, 1, 0, hull);
+	return m;
+}
+
+// mtankdrv.3di: the M1A1 driver's virtual display in the shape of the shipped TankDrvr (the cockpit
+// the M1A1 row's `Virtualdisplay tankdrvr camera` names): one part, the hatch's view box, and its
+// one `Camera` point at the shipped place.
+synth3di::Model make_tank_display() {
+	synth3di::Model m;
+	m.name = "mtankdrv";
+	const int lod = m.add_lod(0);
+	const int paint = m.add_material("FF_ST_OP", "mtankdrv.tga");
+	const int part = m.add_part(lod, 0, Vec3{});
+	m.add_box(lod, part, paint, box(1.4, -0.5, 0.0, 2.2, 0.5, 0.6));
+	m.add_panm(lod, part, 0);
+	m.add_user_point("Camera", Vec3{1.827, -0.097, 0.270}, Vec3{0.0, -1.0, 0.0}, 0, synth3di::kUserPointGameplay);
 	return m;
 }
 
@@ -1295,7 +1358,8 @@ constexpr int kLaneDividers[3] = {102289, 102290, 102291}; // the shipped concre
 // (its items.def `addeweap` gun child rides its ewep01 point) beside it; the player's team's three
 // riflemen by their SSNs (2, 70, 71: team 1, the shipped records' engagement distances 0 and 300
 // and attack distance 300) beside the start; and five of the course's team-2 concrete lane
-// dividers (hp 0) sixty to eighty units in front of them, well inside that range.
+// dividers (hp 0) sixty to eighty units in front of them, well inside that range; west of the start
+// a boulder (SSN 310) and a parked motorcycle (SSN 311).
 bool build_land_vehicles(std::vector<uint8_t> &bytes, std::string &err) {
 	bms::File doc;
 	if (!begin_mission(doc, "Land Vehicles", err)) return false;
@@ -1322,6 +1386,11 @@ bool build_land_vehicles(std::vector<uint8_t> &bytes, std::string &err) {
 				-90, 1780 + i);
 		doc.buildings[index].team = 2;
 	}
+	// West of the start, clear of the buggy's and the riflemen's ground: a boulder (the rock
+	// formation, SSN 310) and a motorcycle (SSN 311) parked beside it, for the wall-contact leg.
+	place_on_ground(doc, EntityKind::Item, kRockFormation, -260.0, -60.0, 0, 310);
+	const size_t bike = place_on_ground(doc, EntityKind::Item, kMotorcycle, -250.0, -90.0, 0, 311);
+	name_record(doc.items[bike], "mbike", "d_buggy");
 	return finish_mission(doc, bytes, err);
 }
 
@@ -1422,8 +1491,11 @@ constexpr int kAssaultBoat = 101303;   // the shipped "Drivable Indonesian Assau
 constexpr int kTripod50 = 101902;      // the shipped "50cal on 180 tripod" row's id
 constexpr int kChinook = 101300;       // the shipped "Flyable Chinook" row's id
 constexpr int kLittleBird = 101306;    // the shipped "Flyable LITTLE BIRD with miniguns" row's id
+constexpr int kM1A1 = 100164;          // the shipped "Drivable M1A1 Tank" row's id
 constexpr int kJungleBird = 102272;    // the shipped "Jungle Bird 1" row's id
 constexpr int kJungleHut = 101202;     // the shipped "Jungle Hut 1" row's id
+constexpr int kTeleportTarget = 106088; // the shipped "teleport target" marker row's id
+constexpr int kTruckSpawnMarker = 101182; // the shipped "Ground Spawn Marker - 5-Ton Truck" row's id
 
 // A record placed at an absolute height `z` (a hull on the water, a body aboard one).
 size_t place_at(bms::File &doc, EntityKind kind, int item_id, double x, double y, double z, int yaw, int32_t id) {
@@ -1481,7 +1553,8 @@ constexpr int kIndoSoldierTwo = 101799; // the AK47 soldier the garrison wears t
 // them at spawn; the truck column (58, 59, 62, 63, transport trucks, and 1664 the armory truck: team
 // 2, group 3) each crewed at spawn, two of them carrying a defender squad (groups 12 and 13); the
 // boats on the shore (60 the assault boat, group 5; the Zodiacs 56 and 57, groups 6 and 7) each
-// crewed at spawn, the Zodiacs' crews the defender groups 14 and 15; a patrol squad (group 20) on
+// crewed at spawn, the Zodiacs' crews the defender groups 14 and 15; a patrol squad (SSNs 90..92,
+// under the event matrices' 128 single rows; group 20) on
 // its looping path 8; two jungle huts; the column's path 3, the boats' paths 5, 6 and 7,
 // the defenders' paths 15 and 16; and 00TRg's events at their shipped indices: 8 (thirty quanta)
 // sends group 3 down path 3 at 40, 9..15 mark its progress, 18 sends the assault boat down path 5
@@ -1549,7 +1622,7 @@ bool build_garrison(std::vector<uint8_t> &bytes, std::string &err) {
 	// The patrol squad on its loop.
 	for (int i = 0; i < 3; ++i) {
 		const size_t index = place_on_ground(doc, EntityKind::Organic, kIndoSoldierTwo, -260.0 + 3.0 * i, -150.0, 90,
-				2900 + i);
+				90 + i);
 		bms::Entity &e = doc.organics[index];
 		e.team = 2;
 		e.group_id = 20;
@@ -1590,6 +1663,25 @@ bool build_garrison(std::vector<uint8_t> &bytes, std::string &err) {
 	if (!add_event_rows(doc, 15, {}, {{1, 0, 7, 7, 0, -1}, {3, 30, 6, 60, -1, -1}}, err)) return false; // 21
 	if (!add_event_rows(doc, 1, {{1, 7, 7, 7, 10, -1}}, {{1, 0, 15, 16, -1, -1}, {3, 5, 15, -1, -1, -1}}, err))
 		return false;                                                                                     // 22
+	// The camp's own events past 00TRg's (the trigger and action kinds its other events author): the
+	// first patrol member at its loop's node 1 clears its visited row (SingleAtWaypoint ->
+	// SingleResetHasVisited); two quanta in, the particle marker numbered 7 fires its effect
+	// (ParticleEffectAction); a quantum in, lose subgoal 1 is shown cleared (ShowLoseSubgoal with
+	// its show word 0) and the stray far north-west goes to red alert (ChangeSingleAI, sub 5).
+	if (!add_event_rows(doc, 0, {{2, 7, 90, 8, 1, -1}}, {{33, 0, 90, -1, -1, -1}}, err)) return false; // 23
+	if (!add_event_rows(doc, 2, {}, {{27, 0, 7, -1, -1, -1}}, err)) return false;                      // 24
+	if (!add_event_rows(doc, 1, {}, {{36, 0, 1, 0, -1, -1}, {21, 5, 2970, -1, -1, -1}}, err)) return false; // 25
+	const size_t effect = place_on_ground(doc, EntityKind::Marker, kTeleportTarget, -180.0, -80.0, 0, 2960);
+	doc.markers[effect].wp_number = 7;
+	// A trigger reading the player by its SSN 10000 (is the player at red alert; an event with no
+	// action); a stray soldier far north-west ordered aboard SSN 9998, which no record carries; and
+	// the truck column's ground spawn marker.
+	if (!add_event_rows(doc, 0, {{2, 3, 10000, -1, -1, -1}}, {}, err)) return false; // 26
+	const size_t stray = place_on_ground(doc, EntityKind::Organic, kIndoSoldierTwo, -350.0, 150.0, 0, 2970);
+	doc.organics[stray].team = 2;
+	doc.organics[stray].waypoint_id = 125;
+	doc.organics[stray].wp_number = 9998;
+	place_on_ground(doc, EntityKind::Marker, kTruckSpawnMarker, -70.0, -120.0, 0, 2971);
 	return finish_mission(doc, bytes, err);
 }
 
@@ -1692,7 +1784,8 @@ bool build_parachute(std::vector<uint8_t> &bytes, std::string &err) {
 
 // tags.bms: 03TR's ground in miniature: the single-player start; a section of the player's own
 // team (three friendly soldiers); two jungle birds (team 0, the labelable neutral organics 03TR
-// authors); and the minigun Little Bird SSN 41 (team 1) parked on its skids, its cockpit free.
+// authors); the minigun Little Bird SSN 41 (team 1) parked on its skids, its cockpit free; and an
+// M1A1 (SSN 42, neutral), its driver's view the mtankdrv virtual display, parked beyond it.
 bool build_tags(std::vector<uint8_t> &bytes, std::string &err) {
 	bms::File doc;
 	if (!begin_mission(doc, "Tags", err)) return false;
@@ -1710,6 +1803,8 @@ bool build_tags(std::vector<uint8_t> &bytes, std::string &err) {
 	}
 	const size_t heli = place_on_ground(doc, EntityKind::Item, kLittleBird, -190.0, -110.0, 0, 41, 3.23);
 	doc.items[heli].team = 1;
+	// An M1A1 parked beyond the Little Bird, its driver's view a virtual display.
+	place_on_ground(doc, EntityKind::Item, kM1A1, -160.0, -130.0, 90, 42, 1.3);
 	return finish_mission(doc, bytes, err);
 }
 
@@ -1797,7 +1892,7 @@ constexpr int kArmoryThree = 101186;  // the shipped "Armory Version #3" row's i
 
 // indoor.bms: 00TRa's armory ground in miniature: the single-player start south-east of the hut
 // (bms 20, its doorway in its east wall) a crate inside it and a soldier of the player's team by
-// its door.
+// its door; the mission's kit rules (a loadout and two availability rows).
 bool build_indoor(std::vector<uint8_t> &bytes, std::string &err) {
 	bms::File doc;
 	if (!begin_mission(doc, "Indoor", err)) return false;
@@ -1806,6 +1901,23 @@ bool build_indoor(std::vector<uint8_t> &bytes, std::string &err) {
 	place_on_ground(doc, EntityKind::Building, kLightPost, -202.0, -99.0, 0, 21);
 	const size_t soldier = place_on_ground(doc, EntityKind::Organic, kFriendlySoldier, -193.0, -103.0, 90, 22);
 	doc.organics[soldier].team = 1;
+	// The mission's kit rules: the loadout the start grants (an M4 and a Colt, every count the
+	// "-1" default) and two availability rows, the M4 allowed for the mission (status -1) and the
+	// knife's status 1.
+	std::vector<mission::WeaponLoadoutEntry> kit;
+	for (const char *name : {"WPN_M4AUTO", "WPN_colt45"}) {
+		mission::WeaponLoadoutEntry entry;
+		entry.name = name;
+		entry.ammo_primary = "-1";
+		entry.ammo_secondary = "-1";
+		kit.push_back(entry);
+	}
+	std::string edit_error;
+	if (!mission::set_weapon_loadout(doc, kit, edit_error)) {
+		err = "set_weapon_loadout failed: " + edit_error;
+		return false;
+	}
+	doc.item_availability = {{"WPN_M4AUTO", 0xFF}, {"WPN_KNIFE", 1}};
 	return finish_mission(doc, bytes, err);
 }
 
@@ -2256,6 +2368,30 @@ bool build_loadout_unterminated(std::vector<uint8_t> &bytes, std::string &err) {
 	return build_damaged_loadout(LoadoutDamage::Unterminated, bytes, err);
 }
 
+// fixtures/bms/synth_fields.bms: synth_areas.bms's records with every optional member the .mis
+// export writes only when set, set: a name index, a team budget, a terrain-tool index, a colour
+// override, a deploy group (lfp_group) and a generator string on the first record of each pool.
+bool build_fields_mission(std::vector<uint8_t> &bytes, std::string &err) {
+	std::vector<uint8_t> clean;
+	if (!build_areas_mission(clean, err)) return false;
+	bms::File doc;
+	if (!bms::parse(clean.data(), clean.size(), doc, err)) return false;
+	std::vector<bms::Entity> *pools[4] = {&doc.items, &doc.buildings, &doc.markers, &doc.organics};
+	uint8_t k = 1;
+	for (std::vector<bms::Entity> *pool : pools) {
+		if (pool->empty()) continue;
+		bms::Entity &e = pool->front();
+		e.name_index = k;
+		e.team_budget = static_cast<uint8_t>(10 + k);
+		e.ttool_index = 2 + k;
+		e.color_override = static_cast<uint8_t>(3 + k);
+		e.lfp_group = static_cast<uint8_t>(k);
+		std::snprintf(e.gen_string, sizeof(e.gen_string), "gen%d", int(k));
+		++k;
+	}
+	return finish_mission(doc, bytes, err);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -2272,6 +2408,11 @@ int main(int argc, char **argv) {
 	if (emit(root + "fixtures/bms/synth_logic.bms", mission_bytes, write_mode) != 0) return 1;
 	if (emit(root + "fixtures/bms/synth_logic.bin", table_bytes, write_mode) != 0) return 1;
 	if (emit(root + "fixtures/bms/synth_areas.bms", areas_bytes, write_mode) != 0) return 1;
+	{
+		std::vector<uint8_t> fields_bytes;
+		if (!expect(build_fields_mission(fields_bytes, err), ("synth_fields.bms: " + err).c_str())) return 1;
+		if (emit(root + "fixtures/bms/synth_fields.bms", fields_bytes, write_mode) != 0) return 1;
+	}
 	// The D-EVT-7 damaged loadouts.
 	{
 		const struct {
@@ -2311,6 +2452,8 @@ int main(int argc, char **argv) {
 		{"mlbird.3di", make_little_bird},
 		{"mchinook.3di", make_chinook},
 		{"mhut.3di", make_hut},
+		{"mm1a1.3di", make_tank},
+		{"mtankdrv.3di", make_tank_display},
 	};
 	for (const ModelRecipe &recipe : models) {
 		std::vector<uint8_t> bytes;

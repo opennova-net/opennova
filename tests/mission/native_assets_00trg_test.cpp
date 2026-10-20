@@ -38,7 +38,7 @@ bool expect(bool cond, const char *msg) {
 }
 
 // The native attach count on garrison.bms (the independent count below, pinned once).
-constexpr int kExpectAttach = 37;
+constexpr int kExpectAttach = 38;
 
 std::string lower_ascii(std::string s) {
 	for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));

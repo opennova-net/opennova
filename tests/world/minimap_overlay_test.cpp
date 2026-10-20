@@ -92,6 +92,20 @@ int main() {
 	CHECK(row.visible && row.icon == 13,
 			"armory classification outranks the vehicle branch");
 
+	// The vehicle branch's other unit types: a helicopter (3, 4) draws cell 11, unit type 12 cell
+	// 25; and a live unit type 11 draws cell 9 ahead of every later branch.
+	entity = base_entity();
+	entity.item_type = 1;
+	entity.item_unit_type = 3;
+	row = world::classify_minimap_overlay(entity, nullptr);
+	CHECK(row.visible && row.icon == 11, "a unit type 3 vehicle draws cell 11");
+	entity.item_unit_type = 12;
+	row = world::classify_minimap_overlay(entity, nullptr);
+	CHECK(row.visible && row.icon == 25, "a unit type 12 vehicle draws cell 25");
+	entity.item_unit_type = 11;
+	row = world::classify_minimap_overlay(entity, nullptr);
+	CHECK(row.visible && row.icon == 9, "a live unit type 11 draws cell 9");
+
 	entity = base_entity();
 	entity.item_type = 5;
 	entity.team = 0;

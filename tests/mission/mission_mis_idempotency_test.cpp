@@ -278,6 +278,9 @@ int main() {
 	// shipped training mission's shape (constrain-Z among their flags) and the mission boundary.
 	if (check(root + "/fixtures/bms/synth_areas.bms") != 0) return 1;
 	std::printf("synth_areas .mis export is idempotent, its areas by zone id\n");
+	// Every optional member set (fixtures/bms/synth_fields.bms): each written and read back.
+	if (check(root + "/fixtures/bms/synth_fields.bms") != 0) return 1;
+	std::printf("synth_fields .mis export is idempotent, its optional members set\n");
 	if (check_default_kit(root + "/fixtures/def/weapon.def") != 0) return 1;
 	std::printf("the default kit is the one the loadout leads with, and builds its records\n");
 	return 0;

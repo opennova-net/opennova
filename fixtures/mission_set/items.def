@@ -273,6 +273,9 @@ begin "Drivable Dune Buggy"
     physics     1
     flip		30
     torque 	9
+	particlefx   Effect_whiteExhaust FX00
+	particlefxw2 Effect_DirtWake FX01
+	particlefxs Effect_DirtWakeS FX01
   default_aip d_buggy
   unit_type 1
   addeweap ewep01 101419  15 37 92 92
@@ -360,6 +363,7 @@ begin "Combat Medic01 Soldier w"
   armor 0 0
   ai_function org1
   disk_function ORGANIC
+  phrase_set 53
   move_function org1
   radarsig 300
   clipsize 30
@@ -380,6 +384,7 @@ begin "Combat Medic02 Soldier no gun"
   armor -1
   ai_function org1
   disk_function ORGANIC
+  phrase_set 53
   move_function org1
   radarsig 300
   clipsize 30
@@ -504,6 +509,8 @@ begin "Drivable Zodiac"
     pitch 10
     pitch_velocity 3
     bob 5
+  	particlefxw3 fx_sml_wk FX00
+	particlefxw4 fx_sml_wk_f FX01
   render_function cveh
   hp 3000
   armor 10 10
@@ -567,6 +574,8 @@ begin "Drivable Mark V"
     pitch_velocity 1
     bob 3
     minai 2
+	particlefxw3 Effect_Mark5Wake FX00
+	particlefxw4 Effect_mark5Wakef FX01
   render_function cveh
   hp 18000
   armor 40 50
@@ -649,6 +658,7 @@ begin "Flyable Chinook"
     torque 3
     mass 110
     minai 1
+  particlefx Effect_heloHeat1 fx00
   render_function chel
   hp 15000
   armor 20 20
@@ -681,6 +691,7 @@ begin "Flyable LITTLE BIRD with miniguns"
     torque 3
     mass 5
     minai 1
+  particlefx Effect_heloHeat1 fx00
   render_function chel
   hp 5000
   armor 20 20
@@ -746,6 +757,61 @@ begin "Weathered light post no light"
   type decoration
   graphic crate
   attrib:
+end
+
+begin "Drivable M1A1 Tank"
+  id 100164
+  type vehicle
+  sid mm1a1
+  graphic mm1a1
+  Virtualdisplay mtankdrv  camera
+  input_function tank
+  attrib: AIData neutral NoScar PlayerControl  forceasset DynamicShadow
+  ai_function cveh
+  move_function ctank
+    turn_rate 30
+	turn_rate2 15
+    acceleration 8
+    deceleration 20
+    slip_speed 0
+    player_speed 68
+    slip_slope	70
+    max_slope	70
+    torque   7
+    mass 135
+    physics     1
+	spring 6
+    spring_comp 35
+	shock 2
+    minai		1
+    lean 0
+    lean_velocity 0
+    pitch 0
+    pitch_velocity 0
+    bob 0
+    flip 15
+	particlefx Effect_heloHeat1 FX00
+	particlefxw1 Effect_DirtWake_T FX01
+	particlefxw2 fx_tank_dch FX02
+  	particlefxw3 fx_sml_wk FX01
+	particlefxw4 fx_sml_wk_f FX01
+	particlefxs Effect_DirtWakeS FX01
+  render_function tank
+  default_aip d_5ton
+  unit_type 2
+  hp 26000
+  armor 80 80
+  criticalhp 5001
+  criticaldrain 100
+  score 20
+  radarsig 500
+end
+
+begin "Ground Spawn Marker - 5-Ton Truck"
+  id 101182
+  type marker
+  attrib: VehicleSpawn AutoInheritTeam
+  pcvehicle_spawnlist	1294 1294
 end
 
 begin "Drivable Transport Truck"

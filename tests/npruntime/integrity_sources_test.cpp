@@ -614,17 +614,19 @@ std::vector<uint8_t> file_bytes(const fs::path &path) {
 // The sources a launch with `/exp xp1` computes over a minted install, as the
 // pinned JO:CA install with `/exp jox01` computes them (the retail match: its
 // 75 row CRCs and its table CRC are the live witness, integrity_oracles.h):
-// the base archive carries items.def, a base ammo.def and weapon.def and the
-// weapon's clips, the expansion's archive its own ammo.def and weapon.def,
+// the base archive carries items.def, a base ammo.def and weapon.def, the
+// weapon's clips and a global sound bank (game.lwf), the expansion's archive its
+// own ammo.def and weapon.def (its rows naming every weapon class, sound keys
+// and an action with no animation),
 // which the mount serves over the base's. Computed twice, the sources carry
 // no state from one mission load to the next; the expansion's tables are the
 // ones read (the image builders over the same two texts give the same CRCs,
 // the base tables others); and the CRCs are pinned, so a change to either
 // image builder needs its witness.
 constexpr size_t kMintedAmmoRows = 4;
-constexpr int32_t kMintedWeaponNamedRows = 4;
+constexpr int32_t kMintedWeaponNamedRows = 5;
 constexpr uint64_t kMintedAmmoRowDigest = UINT64_C(0x9031CC1874D7C574);
-constexpr uint32_t kMintedWeaponTableCrc = 0x448ACEE1u;
+constexpr uint32_t kMintedWeaponTableCrc = 0x0A670279u;
 
 void test_minted_install(const WeaponCorpus &c) {
 	const fs::path install = c.dir / "install";
@@ -649,17 +651,22 @@ void test_minted_install(const WeaponCorpus &c) {
 			"ammoclass_max_carry CLASS_556 1000\r\nammoclass_max_carry CLASS_40MM 1000\r\n"
 			"weapon WPN_A\r\ncategory 3\r\nrank 0\r\nteamfilter blue\r\ncharfilter rifleman\r\n"
 			"maxclips 10\r\nclipsize 30\r\nstartrounds 300\r\nerror 0.0165 0.2 0.25 0.0165 0.032 0.047\r\n"
-			"round_type AMMO_556\r\nammoclass CLASS_556 1\r\nflags auto\r\nanimadm wpn\r\n"
+			"round_type AMMO_556\r\nammoclass CLASS_556 1\r\nflags auto\r\nweapon_class primary\r\n"
+			"soundhead GS_A_HEAD\r\nsoundtrailoff GS_A_TAIL\r\nsoundlockedtone GS_A_LOCK\r\nanimadm wpn\r\n"
 			"action fire\r\nanim anim_wpn_fire\r\ndelayend 3\r\nend\r\n"
 			"action recoil\r\nanim anim_wpn_recoil\r\ndelaystart auto\r\nend\r\nend\r\n"
 			"weapon WPN_A203\r\ncategory 3\r\nrank 1\r\nround_type AMMO_40MM\r\nclipsize 1\r\n"
-			"startrounds 6\r\nammoclass CLASS_40MM 1\r\nsameas WPN_A\r\nend\r\n"
-			"weapon WPN_GREN\r\ncategory 6\r\nrank 0\r\nround_type grenadehe\r\nweapon_class grenade\r\nend\r\n";
+			"startrounds 6\r\nammoclass CLASS_40MM 1\r\nsameas WPN_A\r\nweapon_class secondary\r\nend\r\n"
+			"weapon WPN_GREN\r\ncategory 6\r\nrank 0\r\nround_type grenadehe\r\nweapon_class grenade\r\nend\r\n"
+			"weapon WPN_BINOC\r\ncategory 7\r\nrank 0\r\nweapon_class accessory\r\n"
+			"action idle\r\ndelayend auto\r\nend\r\nend\r\n";
 	std::vector<std::pair<std::string, std::vector<uint8_t>>> base = {
 		{ "items.def", bytes_of(kItems) },
 		{ "ammo.def", bytes_of(kBaseAmmo) },
 		{ "weapon.def", bytes_of(kBaseWeapons) },
 		{ "wpn.adm", file_bytes(c.dir / "wpn.adm") },
+		// A global sound bank (the minted fixtures/lwf/menu.lwf in game.lwf's slot).
+		{ "game.lwf", file_bytes(fs::path(test_paths_repo_root(__FILE__)) / "fixtures" / "lwf" / "menu.lwf") },
 	};
 	for (const char *clip : { "rst.bad", "f.bad", "r1.bad", "r2.bad", "r3.bad", "i.bad" })
 		base.push_back({ clip, file_bytes(c.dir / clip) });
