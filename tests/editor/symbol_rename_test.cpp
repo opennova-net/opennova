@@ -13,7 +13,8 @@
 // nothing; an item id compared as the number it is. The second review: the files written together
 // (a later one the system will not replace puts the earlier ones back); a name its definition
 // would hold in another form refused; an open document that would not write refused, and a dirty
-// menu whose saved use reaches another definition not asked to save.
+// menu whose saved use reaches another definition not asked to save. The name jumps: a particle's id, its pdefs
+// members and its child_id set at their spans (and back), and an effect's id with ammo.def's and a script's uses.
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -795,6 +796,75 @@ static int test_rename_back() {
 	return 0;
 }
 
+// A particle (the name jumps: a particle file's names are spans, native_text_places): its [particledef]'s id in a.ptl,
+// b.ptl's effect naming it in pdefs and its other particle naming it as its child_id, each set at its span, every
+// other byte of the two files as it was. Refused: a name the pdefs slot cannot hold (64 bytes or more, the slot @
+// 0x5E4920), a name with a blank (the reader would take two members: the read-back), and a use the text spells
+// otherwise (a member holding a separator the reader strips: =spark) no span names. And back.
+static int test_particle_definition() {
+	Project project("opennova_rename_particle");
+	const std::string a = "[particledef]\r\n{\r\n\tid = spark;\r\n}\r\n";
+	const std::string b = "[effectdef]\r\n{\r\n\tid = Hit;\r\n\tpdefs = smoke, Spark;\r\n}\r\n\r\n[particledef]\r\n{\r\n"
+	                      "\tid = smoke;\r\n\tchild_id\t= spark;\r\n}\r\n";
+	TEST_EXPECT(project.write("effects/a.ptl", a) && project.write("effects/b.ptl", b));
+	project.rescan();
+	const GraphSymbol *spark = project.defined(ReferenceKind::ParticleDefinition, "spark", "effects/a.ptl");
+	TEST_EXPECT(spark && spark->locator == "3:7" && spark->field == "id");
+	if (!spark) return 1;
+	const DialogsView::RenamePreview &plan = project.preview(*spark, "flash");
+	TEST_EXPECT(plan.refusals.empty() && plan.sites && plan.sites->size() == 3 && sites_in(plan, "effects/b.ptl") == 2);
+	// Too long for the member's slot; a blank the reader cuts at.
+	TEST_EXPECT(refused(project.preview(*spark, std::string(64, 'x')), "rename.too_long", "effects/b.ptl"));
+	TEST_EXPECT(project.preview(*spark, std::string(63, 'x')).refusals.empty());
+	TEST_EXPECT(refused(project.preview(*spark, "two words"), "rename.name", "effects/b.ptl"));
+	TEST_EXPECT(project.rename(*spark, "flash"));
+	TEST_EXPECT(project.read("effects/a.ptl") == "[particledef]\r\n{\r\n\tid = flash;\r\n}\r\n");
+	TEST_EXPECT(project.read("effects/b.ptl") ==
+	            "[effectdef]\r\n{\r\n\tid = Hit;\r\n\tpdefs = smoke, flash;\r\n}\r\n\r\n[particledef]\r\n{\r\n"
+	            "\tid = smoke;\r\n\tchild_id\t= flash;\r\n}\r\n");
+	const GraphEdge *member = edge_to(project.graph(), "effects/b.ptl", ReferenceKind::ParticleDefinition, "flash");
+	TEST_EXPECT(member && project.graph().resolve(*member) == ReferenceStatus::Present);
+	// Back: the three spans the rename wrote, the member in the name as defined.
+	editor_test::handle_to_end(project.session, request::preview_rename_back());
+	const DialogsView::RenamePreview &back = project.view().dialogs.rename_preview;
+	TEST_EXPECT(back.back && back.refusals.empty() && back.sites && back.sites->size() == 3);
+	TEST_EXPECT(editor_test::handle_to_end(project.session, request::rename_back()).done());
+	TEST_EXPECT(project.read("effects/a.ptl") == a &&
+	            project.read("effects/b.ptl").find("\tpdefs = smoke, spark;\r\n") != std::string::npos);
+	// A member the text spells otherwise than the name (=spark, whose = the reader strips): no place a rename sets.
+	TEST_EXPECT(project.write("effects/c.ptl", "[effectdef]\r\n{\r\n\tid = Odd;\r\n\tpdefs =spark;\r\n}\r\n"));
+	project.rescan();
+	spark = project.defined(ReferenceKind::ParticleDefinition, "spark", "effects/a.ptl");
+	TEST_EXPECT(spark && refused(project.preview(*spark, "glow"), "rename.site", "effects/c.ptl"));
+	std::printf("particle rename: its id, a member and a child_id at their spans, and back; 64 bytes, a blank, a "
+	            "spelling refused\n");
+	return 0;
+}
+
+// An effect (a particle file's [effectdef] id, now a span): renamed in its file, in ammo.def's secondary_effect and in
+// a script's FX operand together.
+static int test_effect_name() {
+	Project project("opennova_rename_effect");
+	TEST_EXPECT(project.write("effects/fx.ptl", "[effectdef]\r\n{\r\n\tid = Boom;\r\n\tpdefs = puff;\r\n}\r\n\r\n"
+	                                            "[particledef]\r\n{\r\n\tid = puff;\r\n}\r\n"));
+	TEST_EXPECT(project.write("defs/ammo.def", "ammo AMMO_A\n\tsecondary_effect Boom\nend\n"));
+	TEST_EXPECT(project.write("missions/fire.wac", "If true(bluekills) then\r\n\tfxrain FX_Boom\r\nendif\r\n"));
+	project.rescan();
+	const std::string ammo = project.path("ammo.def");
+	const GraphSymbol *boom = project.defined(ReferenceKind::Particle, "Boom", "effects/fx.ptl");
+	TEST_EXPECT(boom && boom->field == "id" && boom->span.line == 3);
+	if (!boom) return 1;
+	const DialogsView::RenamePreview &plan = project.preview(*boom, "Blast");
+	TEST_EXPECT(plan.refusals.empty() && plan.sites && plan.sites->size() == 3 && sites_in(plan, ammo) == 1 &&
+	            sites_in(plan, "missions/fire.wac") == 1);
+	TEST_EXPECT(project.rename(*boom, "Blast"));
+	TEST_EXPECT(project.read("effects/fx.ptl").find("\tid = Blast;\r\n\tpdefs = puff;") != std::string::npos);
+	TEST_EXPECT(project.read(ammo).find("secondary_effect Blast") != std::string::npos);
+	TEST_EXPECT(project.read("missions/fire.wac") == "If true(bluekills) then\r\n\tfxrain FX_Blast\r\nendif\r\n");
+	std::printf("effect rename: its id, ammo.def's use and a script's FX operand\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_rename_back();
@@ -817,6 +887,8 @@ int main() {
 	failures += test_powerup_name();
 	failures += test_item_id_in_mission();
 	failures += test_user_point();
+	failures += test_particle_definition();
+	failures += test_effect_name();
 	if (failures == 0) std::printf("editor_symbol_rename: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

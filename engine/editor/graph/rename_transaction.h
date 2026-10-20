@@ -201,9 +201,11 @@ struct SymbolRenamePlan {
 // another definition of the kind already has where a lookup would find it (the same scope: a
 // string id's table and section, a window's screen, the whole project for a weapon, an ammo, an
 // item or a style variable), unless only its case changes; a definition in a file the editor
-// cannot rewrite, or a use in one (a mission, the avatar table, a particle file, an
-// environment); a site whose field cannot hold the new name (too long for its width, or not a
-// number where the field is one: an item id). A use in a document with unsaved edits is planned
+// cannot rewrite, or a use in one (a mission, the avatar table, an environment); a site whose field
+// cannot hold the new name (too long for its width, or not a number where the field is one: an item
+// id), or whose reader's slot cannot (GraphEdge::width: a pdefs member's 64 bytes). A particle file's
+// names are its spans (native_text_sites.h native_text_places), its ids definitions a rename sets there
+// as a use's, a use its text spells otherwise than the name (no span) refused. A use in a document with unsaved edits is planned
 // like any other: the session asks to save them before the commit (which reads the files on
 // disk) runs. A use of a style variable is written %NAME% (the kind's spell), any other the name. A use that
 // defines a name of its own as it names this one (a gametext.bin WepDes key, a use of the weapon of its name:
