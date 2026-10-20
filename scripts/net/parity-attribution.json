@@ -1,6 +1,6 @@
 {
   "schema": "opennova.parity-attribution.v1",
-  "source": "docs/net/lan-parity-verdict.md, Findings, with the consequences it lists (verdict parity-20261011)",
+  "source": "docs/net/lan-parity-verdict.md, Findings, with the consequences it lists (verdict parity-20261011); the parity-20261020-base triage (basis noted per entry)",
   "match": "a verdict row matches an entry when its topology is listed, its direction equals the entry's (B: the verdict's both-direction rows; *: any), its metric and key fully match the entry's patterns (Python regex, case-insensitive; an empty key pattern matches the keyless rows), and its case is listed (*: every case); basis says where an entry comes from: a Findings row (finding), a consequence the record lists (consequence), the record's 03TR / CP04 attribution by metric (by-metric), or a mechanical consequence the record does not list (inferred)",
   "rows": [
     {"id": "D-NET-500", "topologies": ["OR", "OO"], "direction": "B", "metric": "milestones", "key": "", "cases": ["01tr-coop", "tdh-i3a-tdm", "ash-i5a-aas-deploy"], "basis": "finding", "note": "C:0x09 before S:0x2C"},
@@ -64,6 +64,16 @@
     {"id": "D-NET-530", "topologies": ["OR", "OO"], "direction": "S", "metric": "tag_presence", "key": "0x12:0", "cases": ["03tr-dm"], "basis": "finding"},
     {"id": "D-NET-531", "topologies": ["OO"], "direction": "B", "metric": "integrity_rows", "key": ".*", "cases": ["ash-i5a-aas-deploy"], "basis": "finding", "note": "ammo row 19"},
     {"id": "D-NET-531", "topologies": ["OO"], "direction": "B", "metric": "integrity_row_unwitnessed", "key": ".*", "cases": ["ash-i5a-aas-deploy"], "basis": "inferred", "note": "the same ammo row 19, which no retail run witnessed"},
-    {"id": "D-NET-532", "topologies": ["OO"], "direction": "*", "metric": "tag_count", "key": ".*", "cases": ["tdh-i3a-tdm"], "basis": "finding", "note": "the control quartet twice; may be phase"}
+    {"id": "D-NET-532", "topologies": ["OO"], "direction": "*", "metric": "tag_count", "key": ".*", "cases": ["tdh-i3a-tdm"], "basis": "finding", "note": "the control quartet twice; may be phase"},
+    {"id": "D-NET-501", "topologies": ["OR", "OO"], "direction": "S", "metric": "initial_count", "key": "0x40:0", "cases": "*", "basis": "consequence", "note": "parity-20261020-base: the game-start bundle lacks the first 0x0A, so the capture-zone 0x40s fall ahead of it"},
+    {"id": "D-NET-504", "topologies": ["OR", "OO"], "direction": "S", "metric": "initial_body_set", "key": "0x16:0", "cases": "*", "basis": "inferred", "note": "parity-20261020-base: after D-NET-505's fix the window holds an extra transitional 0x16 body"},
+    {"id": "D-NET-515", "topologies": ["RO", "OR", "OO"], "direction": "S", "metric": "initial_body|length_set", "key": "0x0d:0", "cases": "*", "basis": "finding", "note": "parity-20261020-base: a floating hull's z at the join snapshot follows the joiner's timing (comparator normalization initial.S.0x0d.hull_bob owed)"},
+    {"id": "D-NET-526", "topologies": ["RO", "OO"], "direction": "C", "metric": "initial_grouping", "key": "", "cases": "*", "basis": "consequence", "note": "parity-20261020-base: the first difference is our 0x22 where RR has the empty C2S 0x0A spawn request"},
+    {"id": "D-NET-529", "topologies": ["RO"], "direction": "C", "metric": "tag_count", "key": "0x2c:0|0x4c:0", "cases": ["03tr-dm"], "basis": "finding", "note": "re-scoped 2026-10-20: the dead joiner's send pump"},
+    {"id": "D-NET-529", "topologies": ["RO"], "direction": "S", "metric": "tag_count|steady_order_distribution", "key": "0x57:0|", "cases": ["03tr-dm"], "basis": "finding", "note": "re-scoped 2026-10-20: the retail host's side of the dead joiner's pump"},
+    {"id": "D-NET-529", "topologies": ["RO"], "direction": "C", "metric": "packet_cadence|packet_shape_distribution|bandwidth|steady_group_distribution|steady_order_distribution", "key": ".*", "cases": ["03tr-dm"], "basis": "finding", "note": "re-scoped 2026-10-20: header-only ACKs instead of rtt-consumed record packets"},
+    {"id": "D-NET-NEW-LP-1", "topologies": ["OR", "OO"], "direction": "S", "metric": "tag_presence", "key": "0x1e:0|0x52:0|0x6e:0", "cases": ["03tr-dm"], "basis": "finding", "note": "our host spawns the 03TR DM players at yaw 0x40 where retail spawns them at 0x00: the exercise does not fall"},
+    {"id": "D-NET-NEW-LP-1", "topologies": ["OR", "OO"], "direction": "*", "metric": "gameplay_cadence|bandwidth|tag_count|steady_group_distribution|steady_order_distribution|entity_P_orientation_.*|frame_health", "key": ".*", "cases": ["03tr-dm"], "basis": "consequence", "note": "the joiner lives on our host where it dies on retail's"},
+    {"id": "D-NET-NEW-LP-3", "topologies": ["OR", "OO"], "direction": "S", "metric": "length_set|stable_body_set", "key": "0x0f:0", "cases": ["03tr-dm"], "basis": "finding", "note": "retail's DM 0x0F writes a waypoint section ours omits (48 bytes)"}
   ]
 }
