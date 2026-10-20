@@ -564,16 +564,16 @@ int flag_state_streams_the_words() {
 	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
 	ctx.np_protocol.connection_list.push_back(conn_fixture::make_seeded_conn(
 			3, 1, &remote, ns::TransportMode::Client, carrier, true));
-	// Run to the limit second (the carry breaks there), then one tick for the queued pair.
+	// Run to the limit second (the carry breaks there): the sweep sends its drop and
+	// re-sync 0x2F inline, ahead of that second's refresh (D-NET-NEW-V3-1).
+	std::vector<opennova::ObjectiveEntityState> pair;
 	for (int i = 0; i < 4 && world->registry.get(carrier)->mounted_child.valid(); ++i) {
 		do {
 			inmatch::Server_TickUpdate(ctx);
 		} while (!ctx.world->match.periodic_second());
+		pair = objective_states(remote);
 	}
-	objective_states(remote);
-	inmatch::Server_TickUpdate(ctx);
-	const std::vector<opennova::ObjectiveEntityState> pair = objective_states(remote);
-	if (!expect(pair.size() == 2 && pair[0].entity_handle == flag.packed &&
+	if (!expect(pair.size() == 3 && pair[0].entity_handle == flag.packed &&
 	                    pair[0].pos_x == kAshJoinerX && pair[0].pos_y == kTdhHostY &&
 	                    pair[1].entity_handle == flag.packed && pair[1].pos_x == kAshTrailerX &&
 	                    pair[1].pos_y == kFarZ,

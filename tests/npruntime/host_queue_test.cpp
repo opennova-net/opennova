@@ -17,7 +17,10 @@
 //     @0x5188B8..0x5188C5, its frontier hint @0x51890C..0x5189A6]; the C2S 0x51 convert runs
 //     inline in the pump, its sends ahead of a later message's reply [orig:
 //     Server_ProcessClientRequestSpectatorRespawn @0x51C8D5 -> Server_ConvertPlayerToSpectator
-//     @0x519E00].
+//     @0x519E00];
+//   - D-NET-NEW-V3-1: what a handler raises in the world goes out behind it, ahead of a later
+//     message's sends [orig: CNapiNPConnection_ParseMessages @0x625BC0, record by record;
+//     RoundData_SpawnRound @0x4EC270 -> EntityTracker_RegisterOrUpdate's 0x1E @0x511645].
 
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -392,6 +395,53 @@ bool run_the_convert_sends_lead_a_later_reply() {
 	              "the convert's 0x5A, 0x61 and 0x32 lead the later 0x2C's 0x57");
 }
 
+// D-NET-NEW-V3-1: a handler's raised record goes out behind it. The remote's C2S 0x06 fires
+// a designator round (alt fire, its ammo marks): the authority's RoundData_SpawnRound sends the
+// mode-1 S2C 0x1E notice to the firer's team inside the fire handler, so the 0x2C that follows
+// in the same datagram is answered after it. Ours used to route the handlers' raised records
+// once after the whole receive pump, so the 0x57 led the notice.
+// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310 -> RoundData_SpawnRound @0x4EC270 ->
+//  EntityTracker_RegisterOrUpdate @0x511580, SendFiltered(0x1E) @0x511645]
+bool run_a_handler_raised_record_leads_a_later_message() {
+	QueueFixture f(/*joined=*/true, /*with_world=*/true);
+	opennova::world::World &world = *f.world;
+	world.rules.mp_session = true;
+	world.rules.projectile_authority = true;
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries[0].flags = opennova::world::kAmmoFlagDesignateTarget;
+	world.tables.weapons.entries.resize(1);
+	world.tables.weapons.entries[0].valid = true;
+	world.tables.weapons.entries[0].designation_ticks = 30 * 62;
+	world.tables.weapons.entries[0].hud_splash_radius = 10;
+	const opennova::world::EntityHandle body = f.give_body(f.conn(), 1);
+	f.conn().fire_tick_mode = true;
+	f.conn().fire_tick_floor = 1;
+	opennova::ClientFiredRound fire;
+	fire.current_tick = 5;
+	fire.shooter_handle = body.packed;
+	fire.fire_flags = 0x01; // alt fire: the request's byte is the ammo
+	fire.adm_index = 0;
+	fire.pos_x = 100 * 65536;
+	fire.pos_y = 200 * 65536;
+	fire.pos_z = 5 * 65536;
+	f.receive_messages({opennova::make_protocol_message(opennova::c2s::FIRED_ROUND,
+	                            opennova::encode_client_fired_round(fire)),
+			opennova::make_protocol_message(0x2C, {1, 2, 3, 4, 1})});
+	f.pump();
+	const std::vector<std::vector<ProtocolMessage>> sent = f.packets();
+	if (!expect(!sent.empty(), "the frame's boundary sends its queue")) return false;
+	const std::vector<ProtocolMessage> &packet = sent[0];
+	const std::vector<uint8_t> notice = {0x30, static_cast<uint8_t>(body.slot()), 0xFF, 0xFF,
+			0x00, 0x00, 0x00, 0x00};
+	std::size_t notice_at = packet.size();
+	for (std::size_t i = 0; i < packet.size() && notice_at == packet.size(); ++i)
+		if (packet[i].tag == 0x1E && packet[i].payload == notice) notice_at = i;
+	const std::size_t reply = QueueFixture::index_of(packet, 0x57);
+	return expect(notice_at < reply && reply < packet.size(),
+	              "the fire's 0x1E notice leads the later 0x2C's 0x57");
+}
+
 } // namespace
 
 int main() {
@@ -402,6 +452,7 @@ int main() {
 	if (!run_a_handled_message_is_walked_next_frame()) ++failures;
 	if (!run_own_client_requests_follow_the_entity_update_sends()) ++failures;
 	if (!run_the_convert_sends_lead_a_later_reply()) ++failures;
+	if (!run_a_handler_raised_record_leads_a_later_message()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

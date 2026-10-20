@@ -531,6 +531,9 @@ void HostRole::drain_host_client_gameplay_requests() {
 				state.host_owner.ctx.config, *local, messages, state.host_owner.now_tick,
 				state.host_owner.ctx.np_protocol.connection_list, &kernel.world, inputs);
 		for (ProtocolMessage &reply : replies) state.host_loop.host_send(reply.tag, std::move(reply.payload));
+		// The records its handler raised go out behind it, as a remote's do (D-NET-NEW-V3-1)
+		// [orig: CNapiNPConnection_ParseMessages @0x625BC0, record by record].
+		inmatch::route_entity_pass_records(state.host_owner.ctx, kernel.world);
 	}
 	for (replication::Datagram &preserved : deferred) state.host_loop.deliver_c2s(preserved.tag, std::move(preserved.body));
 }

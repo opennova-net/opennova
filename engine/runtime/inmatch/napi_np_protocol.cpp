@@ -7,6 +7,7 @@
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the reactive §5.1 replies)
 #include <runtime/inmatch/server_spawn.h>            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 #include <runtime/inmatch/server_squad_registry.h>   // Server_ReleaseSquadRegistryNode (the disconnect's squad leg)
+#include <runtime/inmatch/server_tick.h>             // route_entity_pass_records (each handler's raised records)
 
 #include <net/npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
 #include <net/npwire/ingame_message_id.h>
@@ -1134,8 +1135,13 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 	// between two boundaries share a packet, whether the connection has joined yet or not
 	// (D-NET-525). Each message is dispatched on its own so its handler's replies queue at its
 	// place among the sends the handlers make directly, as retail's handlers queue as they run.
+	// The records a handler raised in the world (a designator round's 0x1E notice, a death, a
+	// flag's 0x2F, ...) go out right behind it too: retail sends each at its call, inside the
+	// handler, so a later message's sends follow it (D-NET-NEW-V3-1).
 	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 dispatches record by record;
-	//  NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640]
+	//  NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
+	//  NapiNPServerMsg_0x006_ClientFiredRound @0x513310 -> RoundData_SpawnRound @0x4EC270 ->
+	//  EntityTracker_RegisterOrUpdate's SendFiltered(0x1E) @0x511645]
 	const bool queued = conn.link.transport != nullptr;
 	std::vector<ProtocolMessage> replies;
 	if (queued && conn.admission_stage == GameAdmissionStage::Complete) {
@@ -1144,6 +1150,8 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 					std::vector<ProtocolMessage>{message}, now_tick,
 					ctx.np_protocol.connection_list, ctx.world, dispatch_inputs);
 			queue_session_messages(conn, own);
+			if (ctx.world != nullptr && ctx.is_authority != 0)
+				route_entity_pass_records(ctx, *ctx.world);
 		}
 	} else {
 		replies = dispatch_session_replies(ctx.config, conn, messages, now_tick,

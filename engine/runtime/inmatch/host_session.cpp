@@ -357,8 +357,8 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	// first: its sends to the local address go to the manager's loopback FIFO, which the
 	// manager's receive, earlier in the frame, drains ahead of the socket, queueing each on the
 	// protocol FIFO ahead of every remote datagram. Then the recv-drain, the 0x84 tail and the
-	// send-boundary clocks; the connection producers; and the records the handlers raised,
-	// behind their sends.
+	// send-boundary clocks (each message's handler's raised records go out behind it,
+	// D-NET-NEW-V3-1); the connection producers; and what those raised.
 	// [orig: Server_TickUpdate - Server_UpdateAllActivePlayerSlots @0x51D88B,
 	//  CNapiNetwork_PumpServerProtocolRecv @0x51D895; NapiNPProtocol_PumpRecvQueues @0x6266A0 -
 	//  the FIFO pass @0x6266CA..0x6267B2, its handler call @0x6267AD -> Nwu_HandleClientSession

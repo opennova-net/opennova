@@ -695,22 +695,29 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 			flag_entity->position.x == 5.0f && flag_entity->position.y == 6.0f,
 			"at the limit the counter resets, the carry breaks, the flag snaps home and Health is -1"))
 		return false;
-	// The same second's refresh already publishes the home pose; the drop and
-	// sync records queued by the sweep are drained on the following tick.
-	if (!expect(objective_states(limit_second).size() == 1 && !saw_flag_return_feed(limit_second),
-			"the limit second carries the refresh 0x2F and no 0x1E return event"))
+	// The sweep's drop and re-sync send their 0x2F inline, ahead of the same
+	// second's refresh, which publishes the home pose again (D-NET-NEW-V3-1)
+	// [orig: Server_CheckPlayerViolations - Entity_DropCarriedObject @0x51AC84 (its
+	//  0x2F @0x439F34), Entity_SyncPositionFromDefinition @0x51AC8A; then
+	//  Server_RefreshNextFlagState @0x51DF64].
+	const std::vector<ObjectiveEntityState> limit_states = objective_states(limit_second);
+	if (!expect(limit_states.size() == 3 && limit_states[0].entity_handle == flag.packed &&
+			limit_states[0].attach_handle == 0xFFFF &&
+			limit_states[0].pos_x == w::to_fixed(carrier_position.x) &&
+			limit_states[0].pos_y == w::to_fixed(carrier_position.y) &&
+			limit_states[1].entity_handle == flag.packed && limit_states[1].attach_handle == 0xFFFF &&
+			limit_states[1].pos_x == 5 * 65536 && limit_states[1].pos_y == 6 * 65536 &&
+			limit_states[2].entity_handle == flag.packed &&
+			limit_states[2].pos_x == 5 * 65536 && limit_states[2].pos_y == 6 * 65536,
+			"the limit second fans the drop-pose 0x2F, the home-pose 0x2F, then the refresh's"))
+		return false;
+	if (!expect(!saw_flag_return_feed(limit_second),
+			"the carry break never emits a 0x23..0x25 return feed"))
 		return false;
 	inmatch::Server_TickUpdate(ctx); // the limit second's entity-update sends lead it
 	const std::vector<ns::Datagram> next_tick = drain(remote);
-	const std::vector<ObjectiveEntityState> pair = objective_states(next_tick);
-	if (!expect(pair.size() == 2 && pair[0].entity_handle == flag.packed &&
-			pair[0].attach_handle == 0xFFFF && pair[0].pos_x == w::to_fixed(carrier_position.x) &&
-			pair[0].pos_y == w::to_fixed(carrier_position.y) &&
-			pair[1].entity_handle == flag.packed && pair[1].attach_handle == 0xFFFF &&
-			pair[1].pos_x == 5 * 65536 && pair[1].pos_y == 6 * 65536,
-			"the carry break fans the drop-pose 0x2F then the home-pose 0x2F"))
-		return false;
-	if (!expect(!saw_flag_return_feed(next_tick), "the carry break never emits a 0x23..0x25 return feed"))
+	if (!expect(objective_states(next_tick).empty() && !saw_flag_return_feed(next_tick),
+			"nothing of the carry break waits for the next tick but the death"))
 		return false;
 	bool saw_death = false;
 	for (const ns::Datagram &d : next_tick)

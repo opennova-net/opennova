@@ -587,6 +587,24 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			break;
 		}
 	}
+	// The rest of what the pass raised: retail sends each inline as the script
+	// runs, so all of it precedes the scoreboard boundary and the frame's 0x0A fan:
+	// the replicated WAC commands (0x23), the deaths (their broadcasts staged
+	// before the 0x0A fan, §5.60), the flag events, then a WAC Win / Lose or a BMS
+	// Blue / Red / GreenWin round end, whose 0x61 / 0x1D follow the records the
+	// pass raised and whose slots are in state 7 before the periodic block's sweep
+	// and flag refresh (D-NET-NEW-L1-16, D-NET-NEW-V3-1). The entity pass's records
+	// were routed at the head of this call; a round already announced (the
+	// admin's, inline) is a no-op.
+	// [orig: WacScript_ExecuteBytecode's SendFiltered(0x23) @0x4F5E74 / @0x4F5ED1;
+	//  WacAction_Win @0x4ED4A5, WacAction_Lose @0x4ED44A, EventAction_Dispatch
+	//  @0x45447B / @0x454495 / @0x4544AF -> Server_ProcessRoundEnd @0x5164F0;
+	//  from WacScript_AdvanceTick @0x51D8BF and EventTrigger_UpdateQuarterRoundRobin
+	//  @0x51D8F4, ahead of the scoreboard @0x51D90D]
+	route_script_remote_commands(ctx, world);
+	route_round_deaths(ctx, world);
+	route_match_gameplay_events(ctx, world);
+	announce_round_end(ctx, world);
 	// The scoreboard boundary follows the script pass's BMS quarter pass and
 	// precedes the play-tick walk [orig: Server_TickUpdate @0x51D8F9..0x51D917].
 	emit_scoreboard_boundary(ctx, world);
@@ -621,22 +639,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		arm_refused_capture_nags(ctx, world);
 	}
 
-	// (2b) Death routing + respawn release — the deaths the script pass raised get
-	// their broadcasts staged before this frame's 0x0A fan (§5.60); the entity
-	// pass's were routed at the head of this call.
-	route_script_remote_commands(ctx, world);
-	route_round_deaths(ctx, world);
-	route_match_gameplay_events(ctx, world);
-	// A WAC Win / Lose or a BMS Blue / Red / GreenWin action runs the round end
-	// inside the script pass, so its 0x61 / 0x1D follow the records the pass
-	// raised and its slots are in state 7 before the periodic block's sweep and
-	// flag refresh (D-NET-NEW-L1-16). Announced here, behind the pass's routed
-	// records; a round already announced (the admin's, inline) is a no-op.
-	// [orig: WacAction_Win @0x4ED4A5, WacAction_Lose @0x4ED44A, EventAction_Dispatch
-	//  @0x45447B / @0x454495 / @0x4544AF -> Server_ProcessRoundEnd @0x5164F0, from
-	//  WacScript_AdvanceTick @0x51D8BF and EventTrigger_UpdateQuarterRoundRobin
-	//  @0x51D8F4]
-	announce_round_end(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
 	// win-condition pass. WAC/BMS can end the round during the world tick above,
 	// so those script-driven outcomes consume this tick; automatic MP outcomes found
@@ -702,8 +704,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// 0x2F flag refresh, both ahead of the spawn-wave release.
 	// [orig: Server_TickUpdate @0x51df5f Server_CheckPlayerViolations,
 	//  @0x51df64 Server_RefreshNextFlagState, then @0x51df6e SpawnWaveList_Tick]
+	// The sweep's carry-limit drop and re-sync send their 0x2F inline, ahead of
+	// the refresh's (D-NET-NEW-V3-1) [orig: Server_CheckPlayerViolations -
+	// Entity_DropCarriedObject @0x51AC84 (its 0x2F @0x439F34),
+	// Entity_SyncPositionFromDefinition @0x51AC8A (@0x43AA6B / @0x43AB40)].
 	if (periodic_second) {
 		check_player_violations(ctx, world);
+		route_match_gameplay_events(ctx, world);
 		refresh_next_flag_state(ctx, world);
 	}
 	tick_respawn_holds(ctx, world);
