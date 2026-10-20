@@ -358,21 +358,23 @@ bool run_admission_follows_the_retail_loading_loops() {
 
 	// S2C 0x1A ends the world stream. Its receive spent the countdown, so the wait's
 	// last send ACKs it at once (header-only); the mission start's own pumps then find
-	// the reloaded countdown, and the loadout pair and the 0x0B leave together from the
-	// final 0x0F wait's spin (D-NET-NEW-L2-6).
-	if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), {{}, {0x2F, 0x2F, 0x0B}}),
-			"the 0x1A's immediate ACK, then the loadout pair and status together"))
+	// the reloaded countdown and hold the loadout pair and the 0x0B for the final 0x0F
+	// wait (D-NET-NEW-L2-6).
+	if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), {{}}) &&
+	                    h.client.send_holdoff_countdown() == 10,
+			"the 0x1A's immediate ACK; the load's pumps hold the submissions at c = 10"))
 		return false;
 
-	// S2C 0x0F ends Game_StartMission. From here Client_ProcessNetworkFrame's
-	// gate paces the send block again: the completion burst waits for the
-	// countdown, re-armed to 12 by the last spin build.
+	// The S2C 0x0F already waits at the final wait's first pass: its receive ends
+	// Game_StartMission before its send, which the countdown holds. From here
+	// Client_ProcessNetworkFrame's gate paces the send block again: the held submissions
+	// and the completion burst leave together once the countdown is spent.
 	std::vector<uint8_t> world_state(23, 0);
 	sent = h.frame({make_protocol_message(0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF}),
 			make_protocol_message(0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF}),
 			make_protocol_message(0x19, {0x40, 0x30, 0x20, 0x10}),
 			make_protocol_message(0x0F, world_state)});
-	if (!expect(sent.empty(), "the in-match gate holds the world-state completion burst"))
+	if (!expect(sent.empty(), "the 0x0F wait's pass receives the 0x0F; its send is held"))
 		return false;
 	int held_frames = 1;
 	for (; held_frames < 12; ++held_frames) {
@@ -380,9 +382,10 @@ bool run_admission_follows_the_retail_loading_loops() {
 		if (!sent.empty()) break;
 	}
 	std::vector<uint8_t> tags;
-	if (!expect(held_frames == 11 && !sent.empty() && h.tags_of(sent[0], tags) &&
-	                    !tags.empty() && tags[0] == 0x28,
-			"the completion burst leaves at the main loop's twelfth frame"))
+	if (!expect(held_frames == 9 && !sent.empty() && h.tags_of(sent[0], tags) &&
+	                    tags.size() > 3 && tags[0] == 0x2F && tags[1] == 0x2F &&
+	                    tags[2] == 0x0B && tags[3] == 0x28,
+			"the submissions lead the completion burst at the main loop's ninth frame"))
 		return false;
 	return true;
 }
@@ -578,28 +581,37 @@ bool drive_into_the_world_stream(Harness &h, uint8_t period) {
 // step) and sends (a build only at a spent countdown, the one immediate header-only ACK,
 // reloading c to the dictated period N); the load receives twice (@0x525784, @0x525bd9) and
 // builds only at c = 0 at its send pumps (@0x5258a2 after the first 0x2F, @0x526255 after
-// the second and the 0x0B); the final 0x0F wait spins until c is spent. So c = 1 after the
-// wait sends the first 0x2F alone and the rest from the 0x0F wait; c = 2 sends all three at
-// @0x526255; c >= 3 (N after an immediate ACK) all three from the 0x0F wait; N = 0 builds at
-// every pump. Nothing else leaves between the 0x1A and the submissions, and a mission start
-// whose load runs after the release neither receives nor sends until its load ends.
+// the second and the 0x0B). What c still holds there leaves from the final 0x0F wait, whose
+// every pass reads the socket and runs the receive handlers before its send: our next frame,
+// its receive then its build. So c = 1 after the wait sends the first 0x2F alone and the rest
+// from the 0x0F wait; c = 2 sends all three at @0x526255; c >= 3 (N after an immediate ACK)
+// all three from the 0x0F wait; N = 0 builds at every pump. Nothing else leaves between the
+// 0x1A and the submissions, and a mission start whose load runs after the release neither
+// receives nor sends until its load ends: what arrived meanwhile is folded ahead of the held
+// submissions' build, its ACK in their header and its replies behind them.
 // [orig: NapiClient_WaitForGameStart @0x42cc10 - @0x42cc88, @0x42cc92, @0x42ccbf;
 //  Game_StartMission @0x524360 - @0x5253ef, @0x525784, @0x525836, @0x5258a2..@0x525aca,
-//  @0x525bd9, @0x525c2e, @0x52624b, @0x526255, the 0x0F wait @0x5262be / @0x5262da;
-//  CNapiNPConnection_PumpFlags @0x629780 (@0x6297ac, @0x629802);
-//  CNapiNPConnection_PumpEnumeratorAndSend @0x62927b; LP's 2026-10-11 captures: one
-//  immediate header-only ACK on 03TR, none on 01TR, then nothing until the submissions]
+//  @0x525bd9, @0x525c2e, @0x52624b, @0x526255, the 0x0F wait @0x5262b4 / @0x5262be /
+//  @0x5262da; CNapiNPConnection_PumpFlags @0x629780 (@0x6297ac, @0x629802);
+//  CNapiNPConnection_PumpEnumeratorAndSend @0x62927b; NapiNPClientMsg_PlayerList @0x42fc35
+//  (the 0x22); LP's 2026-10-11 captures: one immediate header-only ACK on 03TR, none on
+//  01TR, then nothing until the submissions]
 bool run_the_mission_start_submissions_follow_the_countdown() {
 	struct Case {
 		uint32_t countdown_before; // c ahead of the 0x1A's frame
-		std::vector<std::vector<uint8_t>> sent;
+		std::vector<std::vector<uint8_t>> at_release; // the 0x1A's frame
+		uint32_t countdown_after;                     // c at the load's last send
+		std::vector<std::vector<uint8_t>> next;       // the 0x0F wait's frame
 		const char *what;
 	};
 	const Case cases[] = {
-			{1, {{}, {0x2F, 0x2F, 0x0B}}, "spent by the 0x1A: its ACK, then all three from the 0x0F wait"},
-			{2, {{0x2F}, {0x2F, 0x0B}}, "c = 1 at the exit: the first 0x2F alone, then the rest"},
-			{3, {{0x2F, 0x2F, 0x0B}}, "c = 2 at the exit: all three at the load's last send"},
-			{4, {{0x2F, 0x2F, 0x0B}}, "c = 3 at the exit: all three from the 0x0F wait"},
+			{1, {{}}, 10, {{0x2F, 0x2F, 0x0B}},
+					"spent by the 0x1A: its ACK, then all three from the 0x0F wait"},
+			{2, {{0x2F}}, 11, {{0x2F, 0x0B}},
+					"c = 1 at the exit: the first 0x2F alone, then the rest from the 0x0F wait"},
+			{3, {{0x2F, 0x2F, 0x0B}}, 12, {},
+					"c = 2 at the exit: all three at the load's last send"},
+			{4, {}, 1, {{0x2F, 0x2F, 0x0B}}, "c = 3 at the exit: all three from the 0x0F wait"},
 	};
 	for (const Case &c : cases) {
 		Harness h;
@@ -610,11 +622,11 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 		if (!expect(h.client.send_holdoff_countdown() == c.countdown_before,
 				"submissions: the countdown stands where the case needs it"))
 			return false;
-		if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), c.sent), c.what))
+		if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), c.at_release) &&
+							h.client.send_holdoff_countdown() == c.countdown_after,
+					c.what))
 			return false;
-		if (!expect(h.client.send_holdoff_countdown() == 12,
-				"submissions: the last build reloaded the countdown"))
-			return false;
+		if (!expect(h.packets(h.frame(), c.next), c.what)) return false;
 	}
 	{
 		Harness h;
@@ -625,16 +637,19 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 				"N = 0: every pump builds: the ACK, the first 0x2F, the second with the 0x0B"))
 			return false;
 	}
-	// A shell whose load runs after the release: no frame receives or sends while it
-	// loads, a list that arrives waits in the queue, and the push builds by the countdown.
+	// A shell whose load runs after the release, in the common case: the 0x1A's pass spent
+	// the countdown, so the load's pumps hold all three. No frame receives or sends while it
+	// loads, the lists that arrive wait, and the 0x0F wait folds them before it sends: the
+	// held submissions leave first in one packet that ACKs the last list and carries the
+	// lists' 0x22s behind them.
 	Harness h;
 	if (!expect(drive_into_the_world_stream(h, 12), "loading: the world stream runs"))
 		return false;
 	h.client.set_mission_start_loading(true);
-	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 3; ++i) (void)h.frame();
-	if (!expect(h.frame({make_protocol_message(0x1A, {})}).empty() &&
+	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 1; ++i) (void)h.frame();
+	if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), {{}}) &&
 						h.client.mission_start_released(),
-			"loading: no immediate ACK at c = 3; the 0x1A releases the mission start"))
+			"loading: the 0x1A's immediate ACK at c = 1; the 0x1A releases the mission start"))
 		return false;
 	const uint32_t flushes = h.client.send_flush_counter();
 	for (int i = 0; i < 6; ++i) {
@@ -643,15 +658,21 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 				"loading: the frames neither receive nor send while the load runs"))
 			return false;
 	}
-	if (!expect(h.packets(h.client.push_mission_start_end(), {{0x2F, 0x2F, 0x0B}}) &&
-						!h.client.mission_start_released(),
-			"loading: the load's end sends all three at its last send (c = 2 at the exit)"))
+	if (!expect(h.client.push_mission_start_end().empty() && !h.client.mission_start_released(),
+			"loading: the load's pumps hold all three (c = 12 at the exit)"))
 		return false;
-	std::vector<uint8_t> tags;
 	const std::vector<std::vector<uint8_t>> after = h.frame();
-	return expect(!after.empty() && h.tags_of(after[0], tags) && !tags.empty() &&
-						tags[0] == 0x22,
-			"loading: the held lists fold at the next frame and draw their 0x22");
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	bool replies_behind = after.size() == 1 &&
+			decode_client_session(after[0], h.auth.scrk, header, messages) &&
+			messages.size() > 3 && messages[0].tag == 0x2F && messages[1].tag == 0x2F &&
+			messages[2].tag == 0x0B && header.ack_count == h.server_tx.next_outbound_seq - 1;
+	for (std::size_t i = 3; replies_behind && i < messages.size(); ++i)
+		replies_behind = messages[i].tag == 0x22;
+	return expect(replies_behind,
+			"loading: the 0x0F wait folds the held lists first: the submissions leave ACKing "
+			"the last list, its 0x22s behind them");
 }
 
 // The client's net-frame counter, the C2S 0x02 echo's third dword: one per process, stepped

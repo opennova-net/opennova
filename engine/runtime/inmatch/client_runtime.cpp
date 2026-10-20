@@ -1646,15 +1646,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
 	send_queue_.push_back(std::move(submissions.second_loadout));
 	send_queue_.push_back(std::move(submissions.mission_status));
 	send_pump();
-	// The final wait for the S2C 0x0F spins its receive and send pumps: what the
-	// countdown held leaves once the spin has spent it, ahead of anything a later frame
-	// receives. [orig: Game_StartMission @0x52628d..0x5262df - the receive @0x5262be,
-	//  the send @0x5262da]
-	for (uint32_t spin = 0; !send_queue_.empty() && spin <= 2u * send_holdoff_ticks_ + 2u;
-			++spin) {
-		receive_pump();
-		send_pump();
-	}
+	// The push ends here. What the countdown still holds waits in the queue for the final
+	// wait for the S2C 0x0F, whose every pass reads the socket and runs the receive
+	// handlers before its send: everything that arrived during the load is folded first,
+	// its ACK rides the held submissions' packet and its handlers' replies queue behind
+	// them. That is the next frame's WorldStateWait loop, its receive then its send.
+	// [orig: Game_StartMission @0x526295..0x5262e5 - PumpManagerReceive @0x5262b4,
+	//  PumpClientProtocolRecv @0x5262be, PumpClientProtocolSend @0x5262da]
 	return outbound;
 }
 

@@ -124,9 +124,10 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 }
 
 // The mission start's end once the S2C 0x1A released it: its pumps' datagrams, the two
-// 0x2F and the 0x0B in one packet or two by the send-holdoff countdown
-// (ClientRuntime::push_mission_start_end) [orig: Game_StartMission @0x524360 -
-// @0x5258a2, @0x526255, the final wait @0x5262da].
+// 0x2F and the 0x0B in one packet or two by the send-holdoff countdown; what it holds
+// leaves from the next frame's final wait (ClientRuntime::push_mission_start_end)
+// [orig: Game_StartMission @0x524360 - @0x5258a2, @0x526255, the final wait @0x5262b4 /
+// @0x5262da].
 void JoinerRole::push_mission_start_end() {
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end()) send(dg);

@@ -551,7 +551,9 @@ public:
 	// Game_StartMission's network pumps from the 0x1A to the final wait for the S2C 0x0F,
 	// in its order: its receive pumps step the send-holdoff countdown, its send pumps build
 	// only at a spent countdown and reload it, so the first 0x2F, the second and the 0x0B
-	// leave in one packet or two by where the countdown stood (D-NET-NEW-L2-6).
+	// leave in one packet or two by where the countdown stood; what it still holds at the
+	// last send leaves from the next frame's final wait, after that frame's receive
+	// (D-NET-NEW-L2-6).
 	std::vector<std::vector<uint8_t>> push_mission_start_end();
 	void set_weapon_table(const world::WeaponTable *weapons) {
 		if (joiner_) joiner_->set_weapon_table(weapons);
