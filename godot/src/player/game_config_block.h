@@ -10,7 +10,6 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
@@ -66,9 +65,11 @@ public:
 	void set_word(const String &p_key, int p_value);
 
 	// The host screen over the block (the engine's host_settings.h): the
-	// populate (the block's cap clamped to the screen's, then each control's
-	// value by its name) and START's read of one control into the block.
-	Dictionary host_dialog_values();
+	// populate's write (the block's cap clamped to the screen's), each
+	// control's shown value by its name, and START's read of one control into
+	// the block.
+	void populate_host_dialog();
+	String host_dialog_value(const String &p_control) const;
 	bool apply_host_dialog_control(const String &p_control, const String &p_value);
 	// Single player's mission start's block write after its save (the engine's
 	// GameConfigBlock::single_player_mission_start).

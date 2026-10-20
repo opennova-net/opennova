@@ -104,8 +104,7 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 	// The mounted Avatars.def's combos the player add validates against (D-NET-137).
 	cfg.characters = assets_.character_registry;
 	// banned.txt and banlist.txt by bare name in the same working directory, as retail opens
-	// them; every host's round init loads them (engine server_ban_lists.h) [orig:
-	// Server_InitNewRoundState @0x51C92F, @0x51CB25..0x51CB3B].
+	// them; every host's round init loads them (the witness: engine server_ban_lists.h).
 	if (net_.log_devices != nullptr) cfg.ban_directory = net_.log_devices->files().dir();
 	// The process's 0x4C report count runs on across sessions (ClientProcessState).
 	cfg.client_process = net_.client_process;
@@ -248,9 +247,8 @@ bool Simulation::enable_host_listen(int p_port) {
 	net_.pump->set_capture_path(net_.capture_pcap_path);
 	// The LAN host scans from the requested port (the request's first port is
 	// the cfg block's mplanserverportmin) through the block's
-	// mplanserverportmax by its mplanserverportdelta, random 0 (D-NET-210;
-	// engine inmatch::transport_bind_ports) [orig: CNapiNetwork_OpenTransportSocket
-	// @0x4C6A40 - the authority arm @0x4C6AA2..0x4C6AB4]. Port 0 keeps the
+	// mplanserverportmax by its mplanserverportdelta, random 0 (D-NET-210; the
+	// witness is engine inmatch::transport_bind_ports). Port 0 keeps the
 	// OS-assigned bind — the dev/test seam retail has no analog for.
 	bool bound = false;
 	if (p_port <= 0) {

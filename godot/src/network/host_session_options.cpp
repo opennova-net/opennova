@@ -162,8 +162,7 @@ void HostSessionOptions::seed_from_block(const Ref<GameConfigBlock> &p_block) {
 	config_ = host.config;
 	max_players_ = host.player_limit;
 	serve_and_play_ = host.serve_and_play;
-	// The LAN authority arm's first port [orig: CNapiNetwork_OpenTransportSocket
-	//  @0x4C6AA2 (lanServerPortMin_244)].
+	// The LAN authority arm's first port (engine host_config.h transport_bind_ports).
 	bind_port_ = cfg.mp_lan_server_port_min;
 }
 

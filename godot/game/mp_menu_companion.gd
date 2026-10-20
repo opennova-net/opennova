@@ -211,19 +211,20 @@ func _on_host_table_cell_clicked(_id: int, widget_name: String, row: int, column
 
 # The host screen opens showing the process's cfg block, the populate step the
 # retail dialog init runs before the mission pool (the engine's
-# host_dialog_value over the block, which first clamps the block's cap to the
-# screen's; GameConfigBlock.host_dialog_values) [orig:
-# UI_PopulateHostSettingsFromConfig @0x555FE0]. Edits take the text, spins
+# populate_host_dialog, which clamps the block's cap to the screen's, then
+# host_dialog_value over the block; GameConfigBlock; the witness is
+# engine runtime/inmatch/host_settings.h). Edits take the text, spins
 # select the item whose authored value= matches, GAME_LOCATION the item whose
 # name shares the country's first three characters, checkboxes the nonzero
 # value. A user-cleared edit is still read verbatim at START.
 func _seed_host_controls() -> void:
-	var shown: Dictionary = GameCfgStore.block().host_dialog_values()
+	var block := GameCfgStore.block()
+	block.populate_host_dialog()
 	for control in HostSessionOptions.dialog_controls():
 		var id := _id(control)
 		if id < 0:
 			continue
-		var value: String = shown.get(control, "")
+		var value: String = block.host_dialog_value(control)
 		if control == "SERVER_PUNKBUSTER":
 			# No pb\pbcl.dll ships with OpenNova; the populate selects 0 and
 			# disables the spin whenever that file is absent.
@@ -262,9 +263,8 @@ func _sync_start_gate() -> void:
 
 # START: the screen read into the process's cfg block, the block saved, and the
 # session request made of the block, as retail's LAN start reads the dialog,
-# saves game.cfg and creates the session from the block [orig:
-# UI_HandleHostSessionStart @0x556D00 - HostDialog_ReadSettings @0x556E36,
-# Game_SaveConfig @0x556E72].
+# saves game.cfg and creates the session from the block (the witness is
+# engine runtime/inmatch/host_settings.h).
 func _on_host_start() -> void:
 	if not _driver.can_start_host():
 		return

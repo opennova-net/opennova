@@ -65,7 +65,8 @@ void GameConfigBlock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_video_test_ran"), &GameConfigBlock::is_video_test_ran);
 	ClassDB::bind_method(D_METHOD("get_word", "key"), &GameConfigBlock::get_word);
 	ClassDB::bind_method(D_METHOD("set_word", "key", "value"), &GameConfigBlock::set_word);
-	ClassDB::bind_method(D_METHOD("host_dialog_values"), &GameConfigBlock::host_dialog_values);
+	ClassDB::bind_method(D_METHOD("populate_host_dialog"), &GameConfigBlock::populate_host_dialog);
+	ClassDB::bind_method(D_METHOD("host_dialog_value", "control"), &GameConfigBlock::host_dialog_value);
 	ClassDB::bind_method(D_METHOD("single_player_mission_start"),
 			&GameConfigBlock::single_player_mission_start);
 	ClassDB::bind_method(D_METHOD("apply_host_dialog_control", "control", "value"),
@@ -131,13 +132,12 @@ void GameConfigBlock::set_word(const String &p_key, int p_value) {
 	UtilityFunctions::push_warning(vformat("GameConfigBlock: no word '%s'", p_key));
 }
 
-Dictionary GameConfigBlock::host_dialog_values() {
+void GameConfigBlock::populate_host_dialog() {
 	inmatch::populate_host_dialog(block_.cfg());
-	Dictionary values;
-	for (const std::string_view control : inmatch::host_dialog_controls())
-		values[String::utf8(control.data(), static_cast<int64_t>(control.size()))] =
-				opennova::to_gd(inmatch::host_dialog_value(block_.cfg(), control));
-	return values;
+}
+
+String GameConfigBlock::host_dialog_value(const String &p_control) const {
+	return opennova::to_gd(inmatch::host_dialog_value(block_.cfg(), opennova::to_std(p_control)));
 }
 
 bool GameConfigBlock::apply_host_dialog_control(const String &p_control, const String &p_value) {
