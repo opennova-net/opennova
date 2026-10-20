@@ -282,7 +282,6 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.net_analog_z = 0;
 	piece.analog_throttle = 0;
 	piece.equipped_adm_index = kAdmSlotNone;
-	piece.pre_use_gun_equipped_adm_index = kAdmSlotNone;
     piece.use_gun_slot_swapped = false;
     piece.hidden = false;
     piece.last_attacker = EntityHandle{};

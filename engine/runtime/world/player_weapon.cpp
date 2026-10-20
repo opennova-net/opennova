@@ -300,8 +300,10 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		//  Player_ResetCameraAndMovementState call @0x546ba4); the route leg's
 		//  EquippedSlot stores NetPacket_SerializePlayerState @0x4c139d / @0x4c13f8,
 		//  NapiNPServerMsg_HandleWeaponToggle @0x511b08 / @0x511b38]
+		// The personal def the switch-out leaves: the AdmDef byte, which the
+		// attach left as the last switch completion stamped it.
 		if (!w.usegun_slot_active)
-			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
+			w.usegun_saved_adm = player->equipped_adm_index;
 		// The attach's mount stores g_PendingWeaponSlot over whatever a mount
 		// before it staged there: a personal mount still in flight (the previous
 		// control seat's detach mount, run by the same process ahead of this
@@ -317,18 +319,17 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		w.usegun_pending_weapon_adm = target_adm;
 		w.usegun_switch = w.usegun_slot_active ? LocalUseGunSwitch::kSwap
 		                                       : LocalUseGunSwitch::kAttach;
+		// The AdmDef byte stays the outgoing slot's until the switch completion
+		// stamps the new one (NEW-L7-3) [orig: WeaponAction_SwitchFrom @0x543496;
+		// WeaponAction_SwitchRank @0x54355A].
 		const uint8_t from_adm =
 				w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm;
-		// The shared helper applied the nonlocal immediate stamp. L retains its
-		// outgoing EquippedSlot until the action handler's commit seam.
-		player->equipped_adm_index = from_adm;
 		queue_local_usegun_weapon_switch(world, w,
 				same_category(from_adm, target_adm));
 	};
 	const auto stage_personal = [&]() {
 		const uint8_t from_adm =
 				w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm;
-		player->equipped_adm_index = from_adm;
 		w.usegun_pending_mount = EntityHandle{};
 		w.usegun_pending_weapon_adm = 0xFF;
 		w.usegun_switch = LocalUseGunSwitch::kDetach;

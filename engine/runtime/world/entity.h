@@ -801,12 +801,15 @@ struct Entity {
 	// to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
 	// (D-NET-143)
 	uint8_t equipped_adm_index = 0xFF;
-    // UseGun temporarily replaces EquippedSlot with the parent's embedded slot.
-    // Preserve the personal AdmDef byte. Detach restores it for a player-classified
-    // occupant and clears the equipped byte for an NPC.
-    // [orig: Entity_AttachToUseGunSlot @0x546c42; Entity_DetachFromVehicle
-    //  restore @0x435671-0x435687, NPC clear @0x435694-0x4356aa]
-    uint8_t pre_use_gun_equipped_adm_index = 0xFF;
+    // The occupant's seat borrows its carrier's embedded slot (a UseGun seat, an EWeap
+    // carrier's ctrlx). Neither attach writes the AdmDef byte (+0x2B0): the local
+    // player's switch completion stamps it, a remote player's uplink and fire carry
+    // it, an NPC's mounted fire request copies the carrier's; the detach zeroes it
+    // for a non-player alone (NEW-L7-3).
+    // [orig: Entity_AttachToUseGunSlot @0x546B80 and Entity_AttachToVehicleSlot
+    //  @0x4946D0 (no +0x2B0 store); Entity_DetachFromVehicle @0x4355F0 (the
+    //  non-player's zero @0x43569C); WeaponAction_SwitchFrom @0x543496;
+    //  WeaponAction_SwitchRank @0x54355A]
     bool use_gun_slot_swapped = false;
     // EquippedSlot (+0x118) and the saved slot (+0x308) of any entity but the local
     // player (WeaponSlotRef above). The attaches that borrow a carrier's slot point

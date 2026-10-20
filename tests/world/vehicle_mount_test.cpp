@@ -2397,8 +2397,7 @@ void test_bms_mount_predicates() {
     CHECK(cmds.local_player_on_gun_of_ssn(500));
     CHECK(cmds.local_player_attached_to_ssn(11)); // via the carrier link
     CHECK(!cmds.local_player_driving_ssn(500));
-    CHECK(r.player().equipped_adm_index == 1);
-    CHECK(r.player().pre_use_gun_equipped_adm_index == 7);
+    CHECK(r.player().equipped_adm_index == 7); // no AdmDef store at the attach (NEW-L7-3)
     CHECK(r.player().use_gun_slot_swapped);
     CHECK(r.w.registry.get(gh)->primary_weapon_owner == r.player_h);
     // PLYRONSSN reads groundEntity, not parentEntity. Both org1 and org2

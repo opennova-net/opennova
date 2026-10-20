@@ -145,8 +145,9 @@ static void test_mount_config_lifecycle() {
     // [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
     CHECK((w.registry.get(sh)->flags & 0x40u) == 0);
     CHECK((w.registry.get(sh)->engine_flags & 0x40u) == 0);
-    CHECK(w.registry.get(sh)->equipped_adm_index == 1);
-    CHECK(w.registry.get(sh)->pre_use_gun_equipped_adm_index == 7);
+    // The attach writes no AdmDef byte (NEW-L7-3) [orig: Entity_AttachToUseGunSlot
+    // @0x546B80].
+    CHECK(w.registry.get(sh)->equipped_adm_index == 7);
     CHECK(w.registry.get(sh)->use_gun_slot_swapped);
     CHECK(w.registry.get(gh)->primary_weapon_owner == sh);
     CHECK(w.registry.get(gh)->primary_weapon_slot_adm == 1);
@@ -168,8 +169,7 @@ static void test_mount_config_lifecycle() {
     CHECK(w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 7);
-    CHECK(w.registry.get(sh)->equipped_adm_index == 1);
-    CHECK(w.registry.get(sh)->pre_use_gun_equipped_adm_index == 7);
+    CHECK(w.registry.get(sh)->equipped_adm_index == 7);
     CHECK(w.registry.get(sh)->use_gun_slot_swapped);
     CHECK(w.registry.get(gh)->primary_weapon_owner == sh);
     CHECK(w.registry.get(gh)->emplaced_config_valid);

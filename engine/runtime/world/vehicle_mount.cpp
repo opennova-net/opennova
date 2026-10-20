@@ -163,17 +163,11 @@ bool VehicleSystem::prepare_weapon_slot(Entity &vehicle) {
 
 bool VehicleSystem::bind_use_gun_slot(Entity &occupant, Entity &vehicle) {
     World &world = world_;
-    if (!occupant.use_gun_slot_swapped) {
-        occupant.pre_use_gun_equipped_adm_index = occupant.equipped_adm_index;
-        occupant.use_gun_slot_swapped = true;
-    }
+    // The borrow writes no AdmDef byte (Entity::use_gun_slot_swapped).
+    // [orig: Entity_AttachToUseGunSlot @0x546B80; Entity_AttachToVehicleSlot @0x4946D0]
+    occupant.use_gun_slot_swapped = true;
     vehicle.primary_weapon_owner = occupant.handle;
-    if (!world.vehicles.prepare_weapon_slot(vehicle)) {
-        occupant.equipped_adm_index = 0xFF;
-        return false;
-    }
-    occupant.equipped_adm_index = vehicle.primary_weapon_slot_adm;
-    return true;
+    return world.vehicles.prepare_weapon_slot(vehicle);
 }
 
 const WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(const Entity &mount) const {
@@ -246,12 +240,9 @@ void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle, bool is_lo
         vehicle->primary_weapon_owner = EntityHandle{};
     const bool is_player =
             ((occupant.flags | occupant.engine_flags) & 0x100u) != 0;
-    if (occupant.use_gun_slot_swapped) {
-        if (is_player)
-            occupant.equipped_adm_index = occupant.pre_use_gun_equipped_adm_index;
-        occupant.pre_use_gun_equipped_adm_index = 0xFF;
-        occupant.use_gun_slot_swapped = false;
-    }
+    // No AdmDef byte is restored: the detach writes it only below, for a
+    // non-player (NEW-L7-3). [orig: Entity_DetachFromVehicle @0x4355F0]
+    occupant.use_gun_slot_swapped = false;
     // Any other entity leaving a seat 2 or 3 points its EquippedSlot at +0x308,
     // whether that seat borrowed a slot or not: after an unarmed ctrlx ride it is
     // whatever +0x308 last held, null when nothing saved one (FOUND-4). The local
