@@ -15,7 +15,13 @@
 // [orig: Pool_AllocEntry @0x442230 - @0x44225C, @0x442262..0x44226C, @0x44228B;
 //  Entity_Destroy @0x43EA7F].
 
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_chat.h>
+#include <runtime/inmatch/server_initial_state.h>
+
 #include <formats/mission/bms.h>
+#include <formats/rtxt/rtxt.h>
+#include <runtime/mission/mission_text.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <runtime/mission/promote.h>
@@ -26,6 +32,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -33,6 +40,7 @@ namespace {
 namespace w = opennova::world;
 namespace ns = opennova::replication;
 namespace bms = opennova::bms;
+namespace inmatch = opennova::inmatch;
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -189,9 +197,65 @@ int pool3_record_streams_its_source_fields() {
 	return 0;
 }
 
+// D-NET-656: the type-0x7FC leg runs for every pool's records in the load's order 1, 2, 3, 0,
+// so a 2044 in the items section takes the first location slot ahead of the markers'.
+// [orig: Mission_LoadBMSFile @0x40F4E0 - @0x40F9C6 / @0x40FA34 / @0x40FAA4 / @0x40FB19;
+//  Entity_SpawnFromBMSRecord @0x40F17C, @0x40F18F, @0x40F20C]
+int location_names_take_every_pool_in_load_order() {
+	bms::File m{};
+	bms::Entity item = record(bms::ItemType::Item, 2044, 0, 0, 0);
+	item.id = 71;
+	item.name_index = 5;
+	m.items.push_back(item);
+	for (int k = 0; k < 2; ++k) {
+		bms::Entity mk = record(bms::ItemType::Marker, 2044, (100 + 100 * k) << 16, 0, 0);
+		mk.id = 72 + k;
+		mk.name_index = k;
+		m.markers.push_back(mk);
+	}
+	auto world = std::make_unique<w::World>();
+	opennova::mission::promote_mission(m, *world, {});
+	const w::Entity *first = world->registry.get(world->registry.find_by_net_id(71));
+	const w::Entity *m0 = world->registry.get(world->registry.find_by_net_id(72));
+	const w::Entity *m1 = world->registry.get(world->registry.find_by_net_id(73));
+	if (!expect(first != nullptr && m0 != nullptr && m1 != nullptr && first->location_index == 0 &&
+	                    m0->location_index == 1 && m1->location_index == 2,
+	            "the items section's 2044 takes index 0, the markers 1 and 2"))
+		return 1;
+	opennova::mission::MissionText text;
+	text.loaded = true;
+	text.table.sections.push_back({"Locations", 0});
+	for (int32_t i = 0; i <= 5; ++i) {
+		opennova::rtxt::Entry entry;
+		entry.key = "LOCATION00" + std::to_string(i);
+		entry.text = "Place " + std::to_string(i);
+		text.table.entries.push_back(entry);
+		++text.table.sections.back().string_count;
+	}
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::install_mission_location_names(ctx, *world, m, text);
+	if (!expect(ctx.mission_location_names.size() == 3 &&
+	                    ctx.mission_location_names[0] == "Place 5" &&
+	                    ctx.mission_location_names[1] == "Place 0" &&
+	                    ctx.mission_location_names[2] == "Place 1",
+	            "the names follow the load's pool order"))
+		return 1;
+	w::Entity sender;
+	sender.position = w::Vec3{200.0f, 0.0f, 0.0f};
+	w::Entity &near_marker = *world->registry.get(m1->handle);
+	near_marker.bound_radius = 10.0f;
+	if (!expect(inmatch::nearest_location_index(*world, sender) == 2,
+	            "the chat reads the marker's own index, not a pool-3 count"))
+		return 1;
+	std::printf("PASS location_names_take_every_pool_in_load_order\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
+	const int names = location_names_take_every_pool_in_load_order();
+	if (names != 0) return names;
 	const int net_id = organic_net_id_is_its_15c_word();
 	const int streams = streams_pass_over_rows_without_a_type_index_def_or_slot();
 	const int alloc = fresh_allocation_passes_over_a_destroyed_row();

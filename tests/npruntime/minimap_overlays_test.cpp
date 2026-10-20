@@ -85,11 +85,13 @@ void test_entity_facts_are_stamped() {
 
 void test_overlays_gather() {
     MapWorld mw;
+    int16_t locations = 0; // the load's g_LocationNameCount (entity+0x280, D-NET-656)
     const auto spawn_marker = [&](int pool, int32_t id, float x) {
         world::Entity e;
         e.has_item_def = true;
         e.item_id = id;
         e.item_type_index = 9;
+        if (id == 2044) e.location_index = locations++;
         e.position = {x, 0.0f, 0.0f};
         e.bound_radius = 2.0f;
         return mw.w.registry.spawn(pool, e);

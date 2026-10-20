@@ -919,12 +919,19 @@ void install_mission_location_names(NapiNPServerCtx &ctx, const world::World &wo
 	//  epilogue @0x40EB07..0x40EB1B: the attribute gates @0x40EA94..0x40EAC2,
 	//  the def attrib 0x10000 gate @0x40EAD2..0x40EB05, the team-3/4 gate
 	//  @0x40EB1C..0x40EB2E]
+	// Every pool's records take the leg, in the load's pool order: items (pool 1),
+	// buildings (2), markers (3), organics (0) (D-NET-656). [orig: Mission_LoadBMSFile
+	//  @0x40F4E0 - the spawn calls @0x40F9C6 / @0x40FA34 / @0x40FAA4 / @0x40FB19]
 	std::vector<std::string> names;
-	for (std::size_t slot = 0; slot < mission.markers.size(); ++slot) {
-		if (mission.markers[slot].type_id != def::DEF_TYPE_NAMED_LOCATION) continue;
-		if (world.registry.get(world::EntityHandle::make(3, static_cast<int>(slot))) == nullptr)
-			continue;
-		names.push_back(text.location_name(mission.markers[slot].name_index));
+	const std::pair<int, const std::vector<bms::Entity> *> sections[] = {
+			{1, &mission.items}, {2, &mission.buildings}, {3, &mission.markers}, {0, &mission.organics}};
+	for (const auto &[pool, records] : sections) {
+		for (std::size_t slot = 0; slot < records->size(); ++slot) {
+			if ((*records)[slot].type_id != def::DEF_TYPE_NAMED_LOCATION) continue;
+			if (world.registry.get(world::EntityHandle::make(pool, static_cast<int>(slot))) == nullptr)
+				continue;
+			names.push_back(text.location_name((*records)[slot].name_index));
+		}
 	}
 	ctx.mission_location_names = location_slot_strings(names);
 }

@@ -728,6 +728,7 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		es.spawn_entity_flags = 0;
 		es.spawn_section_mask = 0;
 		es.spawn_ammo_count = rec.ammo_count;
+		es.spawn_location_index = static_cast<int16_t>(rec.weapon_type); // [orig: @0x425D7E]
 		es.spawn_bound_radius_q16 =
 				static_cast<int32_t>(rec.orientation_val);
 		es.spawn_ref_num = 0;

@@ -74,6 +74,7 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.engine_flags = row.spawn_entity_flags & ~kMoverRuntimeBits;
 	seed.section_mask = row.spawn_section_mask;
 	seed.ammo_count = static_cast<uint8_t>(row.spawn_ammo_count & 0xFFu);
+	seed.location_index = row.spawn_location_index;
 	seed.ref_num = row.spawn_ref_num;
 	seed.sub_type = row.spawn_sub_type;
 	seed.owner_connection_id = row.spawn_owner_connection_id;

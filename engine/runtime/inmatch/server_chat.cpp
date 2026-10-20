@@ -57,12 +57,12 @@ const std::string *location_label(const NapiNPServerCtx &ctx, const world::World
 		return &ctx.mission_location_names[static_cast<size_t>(index)];
 	// Without the MissionText table the marker's own name stands in (the same
 	// fallback the 0x0F writer takes).
+	// The row whose +0x280 is the index, whatever its pool (D-NET-656).
 	static std::string fallback;
 	fallback.clear();
-	int walk = 0;
 	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3 || e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
-		if (walk++ == index) fallback = e.name;
+		if (e.item_id != def::DEF_TYPE_NAMED_LOCATION || e.location_index != index) return;
+		if (fallback.empty()) fallback = e.name;
 	});
 	return fallback.empty() ? nullptr : &fallback;
 }
@@ -71,11 +71,11 @@ const std::string *location_label(const NapiNPServerCtx &ctx, const world::World
 
 int nearest_location_index(const world::World &world, const world::Entity &sender) {
 	int best = -1;
-	int index = 0;
 	float best_distance = 0.0f;
 	world.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 3 || e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
-		const int my_index = index++;
+		// The marker's own location index, entity+0x280 (D-NET-656), not a pool-3 count.
+		const int my_index = e.location_index;
 		const float dx = sender.position.x - e.position.x;
 		const float dy = sender.position.y - e.position.y;
 		const float distance = std::sqrt(dx * dx + dy * dy);

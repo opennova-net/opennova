@@ -296,9 +296,15 @@ int main() {
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		// The synthetic source carries no items.def: the Player row it would give the
+		// local body, which the 0x0C needs (D-NET-487).
+		kernel.world.tables.player.has_item_def = true;
+		kernel.world.tables.player.item_type_index = 1;
+		kernel.world.tables.player.item_type = 3;
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		CHECK(error.empty());
+
 
 		// The bring-up residue: the np host owner over the kernel's world and
 		// mission, serve-and-play over the loopback, the SINGLEPLAYERGAME

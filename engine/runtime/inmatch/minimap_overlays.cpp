@@ -243,14 +243,14 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
     };
     std::sort(pool3.begin(), pool3.end(), by_slot);
     std::sort(pool4.begin(), pool4.end(), by_slot);
-    int16_t location = 0;
     for (const world::Entity *e : pool3) {
         hud::HudMinimapPoolEntity row;
         row.def_id = e->item_id;
         row.x = e->position.x.q16;
         row.y = e->position.y.q16;
         row.radius_q16 = world::to_fixed(e->bound_radius);
-        if (e->item_id == def::DEF_TYPE_NAMED_LOCATION) row.location_index = location++;
+        // The marker's own entity+0x280, the load's count at its spawn (D-NET-656).
+        if (e->item_id == def::DEF_TYPE_NAMED_LOCATION) row.location_index = e->location_index;
         out.pool3.push_back(row);
     }
     for (const world::Entity *e : pool4) {

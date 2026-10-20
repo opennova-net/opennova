@@ -436,6 +436,9 @@ struct ClientEntityState {
 	uint32_t spawn_entity_flags = 0;
 	uint32_t spawn_section_mask = 0;
 	uint16_t spawn_ammo_count = 0;
+	// entity+0x280, a 2044's location index from the 0x20 record's 0x10 field
+	// [orig: NapiNPClientMsg_0x020 @0x425C00 - the store @0x425D7E].
+	int16_t spawn_location_index = 0;
 	uint8_t spawn_ref_num = 0;
 	uint8_t spawn_sub_type = 0;
 	// The full 0x18 repair carries these fields in addition to pool-load data.
