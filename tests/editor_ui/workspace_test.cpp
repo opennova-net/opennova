@@ -14,7 +14,8 @@
 // the buttons; never over the menus); a canvas whose picture fills it read through ImGui (the
 // right button apart from a press, the keys a camera flies by, a line of text drawn); Files (its folders, the file count, the kind hidden
 // until the header's menu shows it, a filter's flat list, a click and a double click, New
-// and its name prompt, Rename...); the import dialog; the OS window's title; and the view
+// and its name prompt, Rename..., only the rows that show drawn, a folded folder's files out of a
+// Shift+click's run); the import dialog; the OS window's title; and the view
 // events' mailboxes (each event held until its window draws, taken once). The mission's view
 // in the Document window (ADR 0046 S14): its toolbar raises SetViewports alone, a marquee over
 // its picture one SelectRecord across the four pools, which the Inspector shows as one shared
@@ -3000,8 +3001,8 @@ void test_window_title() {
 
 // S13 D1: Files makes its tree and each file's counts again only when what they read moves (the
 // files, the findings): a line of Output, the status line and every step of a build leave them
-// as they were; a finding about a file, the files as they were, makes them again, and so does a
-// file the scan finds anew.
+// as they were; a finding about a file, the files as they were, makes the counts again and keeps the
+// tree; a file the scan finds anew makes the tree again.
 void test_files_tree_kept() {
 	test_temp::TempDir dir("opennova_editor_ui_files_kept");
 	NoProcess platform;
@@ -3027,10 +3028,12 @@ void test_files_tree_kept() {
 	// an Undo in a file that is not open, leaves none: the demo round's review): Findings moves alone of
 	// what the tree reads.
 	const uint64_t files = session.view().revisions.of(ViewConcern::Files);
+	const size_t trees = window->tree_rebuilds();
 	session.handle(request::cancel_operation());
 	ui.frames(2);
 	CHECK(session.view().revisions.of(ViewConcern::Files) == files, "the files as they were");
-	CHECK(window->rebuilds() == made + 1, "a finding alone: the tree and its counts made again");
+	CHECK(window->rebuilds() == made + 1 && window->tree_rebuilds() == trees,
+	      "a finding alone: the counts made again, the tree kept");
 	session.set_poll_budget({0, 64 * 1024}); // one step per poll
 	session.handle(request::build()); // its refresh reads the files again
 	ui.frames(2);
@@ -3049,8 +3052,109 @@ void test_files_tree_kept() {
 	session.handle(request::rescan());
 	session.run_operations();
 	ui.frames(2);
-	CHECK(window->rebuilds() > building && logged_frame(ui).find("readme.txt") != std::string::npos,
+	CHECK(window->rebuilds() > building && window->tree_rebuilds() > trees &&
+	              logged_frame(ui).find("readme.txt") != std::string::npos,
 	      "a file found anew: the tree made again");
+}
+
+// Files draws only the rows that show (the speed pass): a minted project of 3,000 files in 30 folders draws a
+// screenful of rows a frame, its tree made once; a file revealed at the far end is drawn in sight; a folded
+// folder's files leave the tree (a logged frame draws every row), the tree not made again, and a reveal of one
+// of them opens it.
+void test_files_draws_what_shows() {
+	SessionView v;
+	v.project.open = true;
+	v.project.root = "C:/mods/Many";
+	editor_test::own(v.project.document).title = "Many";
+	AssetScan &scan = editor_test::own(v.project.scan);
+	for (int folder = 0; folder < 30; ++folder)
+		for (int file = 0; file < 100; ++file) {
+			char name[32], path[48];
+			std::snprintf(name, sizeof(name), "file%04d.txt", folder * 100 + file);
+			std::snprintf(path, sizeof(path), "f%02d/%s", folder, name);
+			scan.entries.push_back(file_entry(name, path, AssetKind::Text));
+		}
+	scan.index();
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	ui.drain();
+	const auto *window = dynamic_cast<const FilesWindow *>(find_window(ui.windows.pass(), "Files"));
+	CHECK(window != nullptr, "the Files window");
+	if (!window) return;
+	const size_t trees = window->tree_rebuilds();
+	ui.frames(3);
+	CHECK(window->rows_drawn() > 10 && window->rows_drawn() < 60, "a screenful of the 3,030 rows drawn");
+	CHECK(window->tree_rebuilds() == trees, "the tree kept from frame to frame");
+	const ImGuiID table = item_id(Ui::window_id("Files"), {"project_files"});
+	const ImGuiID last = item_id(table, {"f29", "f29/file2999.txt", "##row"});
+	ImRect rect;
+	CHECK(!ui.locate(last, rect), "the last file out of sight");
+	post_event(v, ViewEventKind::RevealFile, "f29/file2999.txt");
+	ui.frames(3);
+	CHECK(window->selected() == "f29/file2999.txt" && ui.locate(last, rect) && window->rows_drawn() < 60,
+	      "the last file revealed: scrolled into sight, a screenful drawn");
+	// The first folder folded: its files leave the tree; one of them revealed opens it again.
+	post_event(v, ViewEventKind::RevealFile, "f00/file0000.txt");
+	ui.frames(3);
+	CHECK(ui.click_item(item_id(table, {"f00"})), "f00's row clicked");
+	ui.frames(2);
+	std::string text = logged_frame(ui);
+	CHECK(text.find("file0000.txt") == std::string::npos && text.find("file0099.txt") == std::string::npos &&
+	              in_order(text, {"f00", "f01", "file0100.txt", "f29", "file2999.txt"}),
+	      "a folded folder's files out of the tree, the others' in it");
+	post_event(v, ViewEventKind::RevealFile, "f00/file0050.txt");
+	ui.frames(3);
+	text = logged_frame(ui);
+	CHECK(window->selected() == "f00/file0050.txt" && in_order(text, {"f00", "file0000.txt", "file0050.txt", "f01"}),
+	      "a reveal opens its folder again");
+	CHECK(window->tree_rebuilds() == trees, "folds and reveals keep the tree");
+	ui.drain();
+}
+
+// DI-25's Shift+click over the tree as it shows: the run from the row selected to the row clicked takes the files
+// between them (what Delete... then names), never those of a folded folder.
+void test_files_shift_click_skips_folded() {
+	SessionView v;
+	v.project.open = true;
+	v.project.root = "C:/mods/Runs";
+	editor_test::own(v.project.document).title = "Runs";
+	editor_test::own(v.project.scan).entries = {
+		file_entry("one.txt", "a/one.txt", AssetKind::Text), file_entry("two.txt", "a/two.txt", AssetKind::Text),
+		file_entry("three.txt", "b/three.txt", AssetKind::Text), file_entry("four.txt", "b/four.txt", AssetKind::Text),
+		file_entry("zed.txt", "zed.txt", AssetKind::Text)};
+	editor_test::own(v.project.scan).index();
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.drain();
+	const ImGuiID table = item_id(Ui::window_id("Files"), {"project_files"});
+	// one.txt clicked, zed.txt Shift+clicked, Delete pressed: the files Delete... names beside zed.txt; the dialog
+	// closed after.
+	const auto run = [&]() {
+		CHECK(ui.click_item(item_id(table, {"a", "a/one.txt", "##row"})), "one.txt clicked");
+		ui.key(ImGuiMod_Shift, true);
+		CHECK(ui.click_item(item_id(table, {"zed.txt", "##row"})), "zed.txt Shift+clicked");
+		ui.key(ImGuiMod_Shift, false);
+		ui.key(ImGuiKey_Delete, true);
+		ui.key(ImGuiKey_Delete, false);
+		const WorkspaceView::FileDelete asked = v.workspace.file_delete;
+		std::vector<WorkspaceRefusal> refusals;
+		apply_workspace_change(v, "{\"file_delete\": {\"path\": \"\"}}", refusals);
+		v.revisions.touch(ViewConcern::Workspace);
+		ui.frames(2);
+		ui.drain();
+		return asked;
+	};
+	using Paths = std::vector<std::string>;
+	WorkspaceView::FileDelete asked = run();
+	CHECK(asked.path == "zed.txt" && asked.paths == Paths({"a/one.txt", "a/two.txt", "b/four.txt", "b/three.txt"}),
+	      "the run over every file between them, as they show (a folder's files by name)");
+	CHECK(ui.click_item(item_id(table, {"b"})), "b folded");
+	ui.frames(2);
+	asked = run();
+	CHECK(asked.path == "zed.txt" && asked.paths == Paths({"a/one.txt", "a/two.txt"}), "the folded folder's files left out");
 }
 
 // "Import N files": how many rows the import dialog's last frame has checked (-1: none said).
@@ -3277,6 +3381,8 @@ void run_workspace_tests() {
 	test_menus();
 	test_menu_bar_status();
 	test_files_window();
+	test_files_draws_what_shows();
+	test_files_shift_click_skips_folded();
 	test_import_dialog();
 	test_import_dialog_groups();
 	test_import_dialog_problem_root();
