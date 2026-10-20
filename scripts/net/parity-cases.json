@@ -34,8 +34,9 @@
       "port": 32785,
       "readiness": "in_match",
       "steady_seconds": 45,
-      "exercise_input": true,
-      "auto_deploy": true
+      "exercise_input": false,
+      "auto_deploy": true,
+      "scenario": "dm_host_walk.json"
     },
     {
       "id": "cp04-objcoop-deploy",

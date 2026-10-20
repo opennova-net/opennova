@@ -274,7 +274,10 @@ checkout unless `-AllowDirtyRepo`, and the OpenNova joiner browses unless
 
 A case (`parity-cases.json`, `opennova.parity-cases.v1`) gives `id`,
 `mission`, `mission_sha256`, `game_type`, `port` (inside the SERVER copy's `mplanserverportmin`..`max`, stock 32768-32787), `readiness` (`in_match` or
-`deploy_hold`), `steady_seconds`, `exercise_input` and `auto_deploy`. The table
+`deploy_hold`), `steady_seconds`, `exercise_input` and `auto_deploy`, and
+optionally `scenario`: a `scenarios\` file its actor plays at the steady
+window's start in place of the input exercise (a reference is reused only
+when it played the same scenario). The table
 fixes `expansion` (`jox01`), `items_sha256` and `host_session_name`, which must equal the
 SERVER copy's `game.cfg` `game_name` byte for byte (`"Untitled "`, with the
 trailing space).
@@ -353,3 +356,4 @@ excluded.
 | `drive` | 01TR co-op | facing the spawn buggy: USE takes its 50cal, USE drops onto the deck, USE takes the driver seat, drive, USE | The joiner's setup pose sets only its heading (above). Seat swaps are held-USE digit keys, not action codes, so the seats come from retail's nearest-seat scan. |
 | `frag_kill` | 01TR deathmatch | the `self_nade` play with the host on the shared spawn | The frag kills the host (a kill, 0x1E type 4..6 from the PRNG, `GameEvent_PlayerDeath @0x517237`), then the thrower (a suicide). `game_event.type` is masked. |
 | `capture_base` | ASH_I5A Advance & Secure, `deploy_hold` | the host deploys with SPACE (auto team spawn), is posed inside zone 2's bunker (`0x1032`) and holds it | The zone drains (mode 0, -2730/s), turns (0x1E 60, 0x50 to team 1, 0x1E 52 and 56) and secures (mode 1, +1820/s, 0x1E 59) in about a minute. The first timer sample's `value` is masked: it depends on where the 1 Hz block falls after the pose. |
+| `dm_host_walk` | 03TR deathmatch (the `03tr-dm` suite case) | the host, posed on the shared spawn (0, 0, 62.4) facing +y, walks the runner's input exercise legs (forward, strafe, back, each with its mouse turn) | The case's play. The joiner exercise walked a retail host's joiner (spawned facing yaw 0x00) off the spawn ledge to its death on some runs and not others, so the 03TR A/A floor was a coin flip; the posed host stays on the raised side. `expect` is empty: the suite judges the run by its parity metrics. |

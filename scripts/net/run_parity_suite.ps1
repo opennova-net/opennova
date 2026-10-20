@@ -177,6 +177,16 @@ function Read-ParityCases {
                 ([bool] $case.exercise_input -or [bool] $case.auto_deploy)) {
             throw "Parity case '$($case.id)': deploy_hold can neither exercise input nor auto-deploy"
         }
+        # A case may play a scenario (scenarios\<file>) in place of the input
+        # exercise: its actor plays it at the steady window's start.
+        if ($case.PSObject.Properties.Name -contains "scenario") {
+            if ([bool] $case.exercise_input) {
+                throw "Parity case '$($case.id)': a scenario replaces the input exercise"
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $case.scenario)) -PathType Leaf)) {
+                throw "Parity case '$($case.id)': no scenario scenarios\$($case.scenario)"
+            }
+        }
         # The runner checks the port against the SERVER copy's game.cfg LAN
         # host range (stock JO:CA 32768-32787).
         if ([int] $case.port -lt 1 -or [int] $case.port -gt 65535) {
@@ -211,6 +221,9 @@ function Get-CellArguments {
     if ($Resolution) { $arguments += @("-Resolution", $Resolution) }
     if ([bool] $Case.auto_deploy) { $arguments += "-AutoDeploy" }
     if ([bool] $Case.exercise_input) { $arguments += "-ExerciseInput" }
+    if ($Case.PSObject.Properties.Name -contains "scenario") {
+        $arguments += @("-Scenario", (Join-Path $PSScriptRoot ("scenarios\" + [string] $Case.scenario)))
+    }
     if ($Cell.Topology -in @("RO", "OO")) { $arguments += @("-JoinerDial", $JoinerDial) }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
     return $arguments
@@ -274,6 +287,16 @@ function Get-ReferenceMismatches {
     }
     if ($fields -contains "retail_stock_observer" -and -not [bool] $Summary.retail_stock_observer) {
         $reasons.Add("the retail roles ran without StockObserver")
+    }
+    $wantScenario = if ($Case.PSObject.Properties.Name -contains "scenario") {
+        [string] (Get-Content -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $Case.scenario)) -Raw |
+            ConvertFrom-Json).name
+    } else { "" }
+    $hadScenario = if ($fields -contains "scenario_witness" -and $Summary.scenario_witness) {
+        [string] $Summary.scenario_witness.name
+    } else { "" }
+    if ($hadScenario -cne $wantScenario) {
+        $reasons.Add("scenario '$hadScenario' is not '$wantScenario'")
     }
     return @($reasons.ToArray())
 }
