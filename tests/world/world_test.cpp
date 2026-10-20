@@ -136,22 +136,32 @@ int main() {
     CHECK(w.logic_tick == 1);
 
     // The entity-update counter counts completed entity updates: a gameplay
-    // tick's update adds one, a pre-round tick (no entity update) adds none,
-    // and a restore keeps it (it is not in the Snapshot).
+    // tick's update adds one, and a restore keeps it (it is not in the
+    // Snapshot). The pre-round half of the update's gate is the local client's
+    // copy of the pre-round byte: the authority's own pre-round tick updates
+    // (a dedicated host's copy stays 0), its copy held up holds the update, and
+    // a non-authority's PreRound phase is its copy (D-NET-558).
     // [orig: g_EntityUpdateCounter, `add g_EntityUpdateCounter,esi` in
-    //  Entity_UpdateAllEntities @0x4C2639]
+    //  Entity_UpdateAllEntities @0x4C2639; Game_ProcessMainFrame -- `cmp
+    //  g_ClientPreRoundTimer` @0x52672C]
     {
         World cw;
         CHECK(cw.entity_update_counter == 0);
         cw.run_logic_tick(true);
         CHECK(cw.logic_tick == 1 && cw.entity_update_counter == 1);
         cw.run_logic_tick(true, TickPhase::PreRound);
-        CHECK(cw.logic_tick == 2 && cw.entity_update_counter == 1);
+        CHECK(cw.logic_tick == 2 && cw.entity_update_counter == 2);
+        cw.cached.client_preround_timer = 3;
+        cw.run_logic_tick(true, TickPhase::PreRound);
+        CHECK(cw.logic_tick == 3 && cw.entity_update_counter == 2);
+        cw.cached.client_preround_timer = 0;
+        cw.run_logic_tick(false, TickPhase::PreRound);
+        CHECK(cw.logic_tick == 4 && cw.entity_update_counter == 2);
         const World::Snapshot snap = cw.snapshot();
         cw.run_logic_tick(true);
-        CHECK(cw.logic_tick == 3 && cw.entity_update_counter == 2);
+        CHECK(cw.logic_tick == 5 && cw.entity_update_counter == 3);
         cw.restore(snap);
-        CHECK(cw.logic_tick == 2 && cw.entity_update_counter == 2);
+        CHECK(cw.logic_tick == 4 && cw.entity_update_counter == 3);
     }
 
     // The entity update's admission: an authority with no human and a started

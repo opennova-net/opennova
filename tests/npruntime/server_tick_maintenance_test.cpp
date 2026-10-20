@@ -33,7 +33,7 @@
 #include <runtime/inmatch/server_loadout_grant.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
-#include <runtime/inmatch/server_player_death.h> // Server_RouteFrameTailEdges
+#include <runtime/inmatch/server_player_death.h> // Server_ProcessPlayerDeath
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
 
@@ -681,8 +681,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 	if (!expect(objective_states(limit_second).size() == 1 && !saw_flag_return_feed(limit_second),
 			"the limit second carries the refresh 0x2F and no 0x1E return event"))
 		return false;
-	inmatch::Server_RouteFrameTailEdges(ctx); // host_session_pump's post-flush leg
-	inmatch::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx); // the limit second's entity-update sends lead it
 	const std::vector<ns::Datagram> next_tick = drain(remote);
 	const std::vector<ObjectiveEntityState> pair = objective_states(next_tick);
 	if (!expect(pair.size() == 2 && pair[0].entity_handle == flag.packed &&
@@ -836,7 +835,6 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 	ctx.np_protocol.connection_list.push_back(
 			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
 	tick_to_periodic_second(ctx);
-	inmatch::Server_RouteFrameTailEdges(ctx);
 	const w::MatchPlayer *stats = world.match.player(shooter);
 	const int32_t kills = stats != nullptr ? stats->stats[w::MatchStats::kEnemyKills] : -1;
 	return expect((world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0 &&
@@ -845,12 +843,13 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 			       : "flag-reset: an unstaged edge clears the attacker, so no kill is credited");
 }
 
-// A flag reset in a frame whose entity update does not run (the pre-round
-// phase) leaves its edge waiting; a C2S 0x4D before the next entity update
-// kills the body and latches its dead bit, so the waiting edge, which skips a
-// dead body, raises no second death. [orig: Entity_UpdateInfantryPlayerBody
-// -- the dead bit @0x4B4BFE; NapiNPServerMsg_0x04D_ChangeTeam -- Flags |= 2
-// @0x519061 / @0x5190CF]
+// A flag reset in a frame whose entity update does not run (a host that also
+// plays, its own client's copy of the pre-round byte still up) leaves its edge
+// waiting; a C2S 0x4D before the next entity update kills the body and latches
+// its dead bit, so the waiting edge, which skips a dead body, raises no second
+// death. [orig: Game_ProcessMainFrame -- `cmp g_ClientPreRoundTimer` @0x52672C;
+// Entity_UpdateInfantryPlayerBody -- the dead bit @0x4B4BFE;
+// NapiNPServerMsg_0x04D_ChangeTeam -- Flags |= 2 @0x519061 / @0x5190CF]
 bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	w::World world;
 	world.rules.mp_session = true;
@@ -873,7 +872,8 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	flag_seed.flags = w::kEntityFlagCarried;
 	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
 	world.registry.get(carrier)->mounted_child = flag;
-	world.preround_delay_seconds = 2; // the limit second's entity update holds
+	world.preround_delay_seconds = 2;
+	world.cached.client_preround_timer = 2; // the own client's copy holds the update
 
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
@@ -897,10 +897,9 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	};
 
 	tick_to_periodic_second(ctx); // the limit second, in the pre-round
-	inmatch::Server_RouteFrameTailEdges(ctx);
 	count_deaths();
 	if (!expect(world.registry.get(carrier)->health == -1 && deaths == 0 &&
-					!ctx.entity_update_ran,
+					(world.registry.get(carrier)->flags & w::kEntityFlagDead) == 0,
 			"waiting-edge: the pre-round limit second stores Health -1 and its edge waits"))
 		return false;
 	inmatch::ServerDispatchInputs inputs;
@@ -911,15 +910,14 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	count_deaths();
 	if (!expect(deaths == 1, "waiting-edge: the team change kills the waiting body"))
 		return false;
-	// Run until an entity update has run and its tail has drained.
-	for (int frame = 0; frame < 400 && !ctx.entity_update_ran; ++frame) {
-		inmatch::Server_TickUpdate(ctx);
-		inmatch::Server_RouteFrameTailEdges(ctx);
-	}
+	// The own client's copy clears: the next entity update runs and its edge
+	// skips the dead body.
+	world.cached.client_preround_timer = 0;
+	const uint32_t updates = world.entity_update_counter;
 	inmatch::Server_TickUpdate(ctx);
-	inmatch::Server_RouteFrameTailEdges(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	count_deaths();
-	return expect(ctx.entity_update_ran && deaths == 1 &&
+	return expect(world.entity_update_counter > updates && deaths == 1 &&
 					conn.link.respawn_delay_seconds >= 55,
 			"waiting-edge: the first entity update after it skips the dead body");
 }

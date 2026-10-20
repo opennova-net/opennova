@@ -237,6 +237,50 @@ void test_hidden_body_is_skipped() {
 	CHECK(f.deaths(f.drain(2)).empty());
 }
 
+// D-NET-558: the authority's entity update through the pre-round. Retail's gate
+// tests the local client's copy of the pre-round byte (g_ClientPreRoundTimer,
+// whose one writer is the client's 0x0A handler), not the authority's timer, so
+// a dedicated host runs its entity update, the player body's edge included,
+// every pre-round frame while a human is in it, where the script pass holds.
+// [orig: Game_ProcessMainFrame -- `cmp g_ClientPreRoundTimer` @0x52672C, the
+//  Entity_UpdateAllEntities call @0x52674B; the store NapiNPClientMsg_0x00A
+//  @0x430064; Server_TickUpdate -- the script admission @0x51D8BD]
+void test_dedicated_host_updates_through_the_preround() {
+	Fixture f;
+	HealthWrite script;
+	script.body = f.players[2];
+	script.health = 50;
+	script.armed = true;
+	f.world.add_system(&script);
+	f.world.preround_delay_seconds = 5;
+	f.hit(0, 1);
+	const uint32_t updates = f.world.entity_update_counter;
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.world.preround_delay_seconds != 0); // still the pre-round
+	CHECK(f.world.entity_update_counter == updates + 1);
+	CHECK(f.dead_bit(0));
+	CHECK(script.armed); // the script pass held
+	CHECK(f.entity(2).health == 100);
+}
+
+// A host that also plays holds its entity update while its own client's copy of
+// the byte is up (the host role stamps it from its loopback 0x0A), and runs it
+// once the copy clears.
+void test_own_clients_copy_holds_the_update() {
+	Fixture f;
+	f.world.preround_delay_seconds = 5;
+	f.world.cached.client_preround_timer = 5;
+	f.hit(0, 1);
+	const uint32_t updates = f.world.entity_update_counter;
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.world.entity_update_counter == updates);
+	CHECK(!f.dead_bit(0));
+	f.world.cached.client_preround_timer = 0;
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.world.entity_update_counter == updates + 1);
+	CHECK(f.dead_bit(0));
+}
+
 } // namespace
 
 int main() {
@@ -245,6 +289,8 @@ int main() {
 	test_two_bodies_die_in_slot_order();
 	test_damage_record_only_tallies();
 	test_hidden_body_is_skipped();
+	test_dedicated_host_updates_through_the_preround();
+	test_own_clients_copy_holds_the_update();
 	if (failures == 0) std::printf("player_death_edge: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

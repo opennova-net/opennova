@@ -612,10 +612,15 @@ void World::run_entity_pass(const TickContext &ctx) {
     devtools::ProfileLap lap(profile);
     const bool pre_mission = ctx.phase == TickPhase::PreMission;
     const bool gameplay = ctx.phase == TickPhase::Gameplay;
-    // The entity update, on every peer, behind the frame's admission gate.
-    // [orig: Game_ProcessMainFrame @0x5263F0 (the Entity_UpdateAllEntities
-    //  call @0x52674B)]
-    if (gameplay && entity_update_admitted(ctx.is_authority)) update_all_entities(ctx);
+    // The entity update, on every peer, behind the frame's admission gate. The
+    // authority's PreRound phase is its own pre-round timer, which the gate does
+    // not read (its pre-round half is the local client's copy, cached), so the
+    // authority's update runs through the pre-round; a joiner's PreRound phase
+    // is that copy. [orig: Game_ProcessMainFrame @0x5263F0 (the gate
+    //  @0x526703..0x526742, `cmp g_ClientPreRoundTimer` @0x52672C, the
+    //  Entity_UpdateAllEntities call @0x52674B)]
+    const bool update_phase = ctx.is_authority ? !pre_mission : gameplay;
+    if (update_phase && entity_update_admitted(ctx.is_authority)) update_all_entities(ctx);
     lap.restart();
     item_emitters.sync_owners(*this);
     // The waypoint current-selection pass, from the local player's position (the

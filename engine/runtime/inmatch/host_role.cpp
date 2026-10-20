@@ -554,6 +554,16 @@ void HostRole::run_tick(const TickInput &input) {
 	//  `cmp g_DeathScreenActive,0` @0x526713]
 	kernel.world.cached.peer_death_screen = state.host_owner.ctx.is_mp_session_peer != 0 &&
 			state.client_runtime != nullptr && state.client_runtime->state().death_screen_active;
+	// The gate's pre-round half is the same client's copy of the pre-round byte,
+	// folded from its loopback 0x0A at the end of the previous frame; a host
+	// that does not play receives no 0x0A, so its copy stays 0 and its entity
+	// update runs through the pre-round.
+	// [orig: Game_ProcessMainFrame -- `cmp g_ClientPreRoundTimer` @0x52672C;
+	//  its one store NapiNPClientMsg_0x00A @0x430064]
+	kernel.world.cached.client_preround_timer =
+			state.host_owner.ctx.is_mp_session_peer != 0 && state.client_runtime != nullptr
+			? state.client_runtime->state().preround_delay_seconds
+			: 0u;
 	// The own client's spectate walk starts from and skips the host's player
 	// [orig: Spectator_CycleTarget_0 @0x52ac56 / @0x52ad09].
 	if (state.client_runtime != nullptr)

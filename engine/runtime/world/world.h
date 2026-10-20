@@ -204,6 +204,13 @@ struct CachedFrameState {
     // [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
     //  `cmp g_DeathScreenActive,0` @0x526713]
     bool peer_death_screen = false;
+    // The local client's copy of the pre-round byte (g_ClientPreRoundTimer),
+    // which the entity-update gate reads: its one writer is the client's 0x0A
+    // handler, so a host that also plays stamps its own client's copy each frame
+    // and a dedicated host, which receives no 0x0A, keeps 0.
+    // [orig: g_ClientPreRoundTimer @0xA85B64 -- the store NapiNPClientMsg_0x00A
+    //  @0x430064, the gate's read Game_ProcessMainFrame @0x52672C]
+    uint32_t client_preround_timer = 0;
 };
 
 // Mutable engine values exposed to mission scripts through retail's named-value
@@ -1138,17 +1145,21 @@ public:
     }
     // Game_ProcessMainFrame's gate over the whole entity update. On the
     // authority an empty world (no human, a started WAC clock) holds still,
-    // unless a playing host's own player is on the death screen; in a session
-    // the ended round holds every peer still (the round-over latch the round
-    // end raises). The pre-round byte half is the PreRound tick phase.
+    // unless a playing host's own player is on the death screen; the local
+    // client's copy of the pre-round byte holds every peer (the authority's own
+    // pre-round timer is no part of it); in a session the ended round holds
+    // every peer still (the round-over latch the round end raises). A joiner's
+    // PreRound tick phase is its copy of the byte (run_entity_pass).
     // [orig: Game_ProcessMainFrame @0x526703..0x526742 -- `cmp is_authority`
     //  @0x526703, the humans/ticks tests @0x52671C..0x52672A, `cmp
-    //  is_in_session` @0x526734, `cmp g_SpawnSuccessGate` @0x52673C;
-    //  the latch writer Server_ProcessRoundEnd @0x5168E4]
+    //  g_ClientPreRoundTimer` @0x52672C, `cmp is_in_session` @0x526734, `cmp
+    //  g_SpawnSuccessGate` @0x52673C; the latch writer Server_ProcessRoundEnd
+    //  @0x5168E4]
     bool entity_update_admitted(bool is_authority) const {
         if (is_authority && !cached.peer_death_screen && cached.humans == 0 &&
                 cached.wac_ticks != 0)
             return false;
+        if (cached.client_preround_timer != 0) return false;
         return !(rules.mp_session && match.outcome().ended);
     }
     // The SP end screen is up: the round end's SP tail started the cine, and
