@@ -104,12 +104,9 @@ int main(void) {
   // them (every element and attribute the shipped JO menus use, in their byte form), and
   // the base game's screens. Every one must round-trip without losing an authored key
   // retail reads.
-  // all_widgets.mnu is left out: its VOLUMEBAR's <ORIENTATION>VERTICAL</ORIENTATION> reads as
-  // nothing (only a HORIZONTAL text sets anything [orig: @ 0x64c745]), so the written menu drops
-  // it, and mnu::parse reports no note for it yet; the shipped menus author HORIZONTAL only.
-  std::vector<std::string> paths;
-  for (const std::string &p : repo_menus::menus())
-    if (repo_menus::lower(repo_menus::name(p)) != "all_widgets.mnu") paths.push_back(p);
+  // all_widgets.mnu's <ORIENTATION>VERTICAL</ORIENTATION> reads as nothing (only a HORIZONTAL
+  // text sets anything [orig: @ 0x64c745]): the written menu drops it, under mnu::parse's note.
+  const std::vector<std::string> paths = repo_menus::menus();
   if (!repo_menus::holds(paths, "shipped_forms.mnu")) {
     fprintf(stderr, "fixtures/mnu/shipped_forms.mnu (the shipped menus' forms) is missing\n");
     return 1;

@@ -1206,6 +1206,11 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (seen == frame.seen.end()) {
         frame.seen["ORIENTATION"] = &child;
         w.orientation = decided(child);
+        // Read, but a text other than HORIZONTAL sets nothing [orig: @ 0x64c745]: the window stays vertical
+        // and the written menu holds no ORIENTATION (a later HORIZONTAL one replaces this note below).
+        if (w.orientation.empty())
+          text_notes_[&child] = "An ORIENTATION other than HORIZONTAL sets nothing in retail (the window stays "
+                                "vertical); it is left out.";
       } else if (mnu_xml::iequals(child.text, kHorizontalOrientation) &&
                  !mnu_xml::iequals(seen->second->text, kHorizontalOrientation)) {
         seen->second->read = false;
