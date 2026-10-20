@@ -9,24 +9,17 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <filesystem>
 #include <string>
-#include <system_error>
+#include <utility>
 #include <vector>
 
-#include <base/io/os_path.h>
-#include <base/io/strutil.h>
-
-#include "common/file_io.h"
-#include "common/test_paths.h"
+#include "editor/variant_files.h"
 
 namespace model_variants {
 
-inline std::string repo_path(const std::string &relative) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/" + relative;
-}
+using editor_test::repo_path;
 
-inline std::vector<uint8_t> bytes_of(const std::string &relative) { return test_io::read_file(repo_path(relative)); }
+inline std::vector<uint8_t> bytes_of(const std::string &relative) { return editor_test::repo_bytes(relative); }
 
 struct Files {
 	std::vector<std::string> paths;    // repository-relative, sorted, each once
@@ -37,44 +30,23 @@ struct Files {
 	}
 };
 
-// Every file of `dirs` (not walked down; a directory that is not there holds none) whose extension is one of
-// `extensions` (with their dot, compared without case), and each of `required`, which must be there.
+// The sweep of editor/variant_files.h, with the required paths kept.
 inline Files files(const std::vector<std::string> &dirs, const std::vector<std::string> &extensions,
                    const std::vector<std::string> &required) {
+	editor_test::VariantFiles found = editor_test::variant_files(dirs, extensions, required);
 	Files out;
+	out.paths = std::move(found.files);
 	out.required = required;
-	const auto wanted = [&](const std::string &name) {
-		return std::any_of(extensions.begin(), extensions.end(),
-		                   [&](const std::string &ext) { return opennova::strutil::ends_with_icase(name, ext); });
-	};
-	for (const std::string &dir : dirs) {
-		std::error_code ec;
-		for (const auto &entry : std::filesystem::directory_iterator(opennova::io::os_path(repo_path(dir)), ec)) {
-			if (!entry.is_regular_file(ec)) continue;
-			const std::string name = opennova::io::utf8_path(entry.path().filename());
-			if (wanted(name)) out.paths.push_back(dir + "/" + name);
-		}
-	}
-	for (const std::string &path : required) {
-		std::error_code ec;
-		if (std::filesystem::is_regular_file(opennova::io::os_path(repo_path(path)), ec)) out.paths.push_back(path);
-		else out.missing.push_back(path);
-	}
-	std::sort(out.paths.begin(), out.paths.end());
-	out.paths.erase(std::unique(out.paths.begin(), out.paths.end()), out.paths.end());
+	out.missing = std::move(found.missing);
 	return out;
 }
 
-// Each missing required path said; their count.
 inline int report_missing(const Files &found) {
 	for (const std::string &path : found.missing)
 		std::fprintf(stderr, "FAIL %s: a variant its format's row mints is not there\n", path.c_str());
 	return int(found.missing.size());
 }
 
-// The 3DI3 models: every model of fixtures/threedi (the synthetic set in synth/ and the variants minted beside
-// it, tests/fixtures/minimal_3di_gen.cpp, all of which threedi_rewrite sweeps) and the forms of the shipped
-// models the threedi rows mint: each a model the game loads, read and written back byte for byte.
 inline Files models() {
 	return files({"fixtures/threedi", "fixtures/threedi/synth"}, {".3di"},
 	             {

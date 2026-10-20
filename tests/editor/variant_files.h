@@ -11,6 +11,7 @@
 #include <system_error>
 #include <vector>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 #include "common/file_io.h"
@@ -39,15 +40,15 @@ inline VariantFiles variant_files(const std::vector<std::string> &dirs, const st
 	};
 	for (const std::string &dir : dirs) {
 		std::error_code ec;
-		for (const auto &entry : std::filesystem::directory_iterator(std::filesystem::u8path(repo_path(dir)), ec)) {
+		for (const auto &entry : std::filesystem::directory_iterator(opennova::io::os_path(repo_path(dir)), ec)) {
 			if (!entry.is_regular_file(ec)) continue;
-			const std::string name = entry.path().filename().u8string();
+			const std::string name = opennova::io::utf8_path(entry.path().filename());
 			if (wanted(name)) out.files.push_back(dir + "/" + name);
 		}
 	}
 	for (const std::string &path : expected) {
 		std::error_code ec;
-		if (!std::filesystem::is_regular_file(std::filesystem::u8path(repo_path(path)), ec)) {
+		if (!std::filesystem::is_regular_file(opennova::io::os_path(repo_path(path)), ec)) {
 			out.missing.push_back(path);
 			continue;
 		}
