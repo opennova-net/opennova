@@ -695,6 +695,10 @@ void World::pump_weapon_actions() {
     const size_t pool0 = registry.pool_capacity(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
         const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
+        // A row whose ItemTypeIndex is 0 is skipped, the local player's too.
+        // [orig: `cmp dword ptr [eax+1Ch], 0` @0x5426B9]
+        const Entity *row = registry.get(handle);
+        if (row == nullptr || row->item_type_index == 0) continue;
         if (local_player_state != nullptr && handle == local) {
             local_player_state->pump_local_weapon();
             // Its reload request queues at its own visit, in the walk's order with
@@ -711,7 +715,7 @@ void World::pump_weapon_actions() {
             }
             continue;
         }
-        if (Entity *row = registry.get(handle)) ai.pump_gunner_slot(*this, *row, frame_tick);
+        ai.pump_gunner_slot(*this, *registry.get(handle), frame_tick);
     }
     // Then pool 1 in slot order: a row with no occupant (+0x170), an EWEAP
     // definition and a slot whose heat window (+0x14) is still open.
@@ -724,7 +728,8 @@ void World::pump_weapon_actions() {
         Entity *row = registry.get(EntityHandle::make(1, static_cast<int>(slot)));
         if (row == nullptr) continue;
         ai.release_stale_gunner_link(*this, *row);
-        if (row->primary_occupant.valid() || !row->has_item_def ||
+        // [orig: the ItemTypeIndex test @0x5426F2]
+        if (row->primary_occupant.valid() || row->item_type_index == 0 || !row->has_item_def ||
                 (row->item_attrib & kItemAttribEweap) == 0 ||
                 row->primary_weapon_slot.heat_window_end_tick == 0)
             continue;

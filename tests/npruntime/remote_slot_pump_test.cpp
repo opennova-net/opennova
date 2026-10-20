@@ -112,6 +112,9 @@ struct Rig {
 		acts[w::weapon_action::kRecoil].delay_end = 2;
 		acts[w::weapon_action::kReload].delay_start = 4;
 		acts[w::weapon_action::kReload].delay_end = 4;
+		// The player's def row: the walk visits only rows whose ItemTypeIndex is set
+		// [orig: WeaponAction_ProcessAllEntities @0x5426B9].
+		world.tables.player.item_type_index = 1;
 		w::PlayerSpawn spawn;
 		spawn.net_id = 0xFFF1;
 		shooter = w::spawn_remote_player(world, spawn);

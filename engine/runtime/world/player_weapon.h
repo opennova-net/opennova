@@ -377,7 +377,8 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 
 // UseGun borrow staging/commit + the emplaced instant-switch predicate.
 bool local_usegun_switch_is_instant(const World &world,
-                                    const LocalPlayerWeapon &w);
+                                    const LocalPlayerWeapon &w,
+                                    const WeaponInventory *inventory);
 void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
                                       bool same_category);
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w);

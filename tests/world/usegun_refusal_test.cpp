@@ -409,6 +409,88 @@ void test_the_walk_relays_an_authority_reload() {
 	}
 }
 
+// A joiner whose personal SWITCHFROM is running when the host's forced UseGun attach lands
+// with a gun of the outgoing weapon's category: the mount stores the gun's slot as
+// g_PendingWeaponSlot and its SWITCHRANK queue writes nothing over the running SWITCHFROM,
+// whose completion (instant: the pending def is Emplaced) stores the gun's slot and queues
+// its SWITCHTO; the key's personal target never commits. Ours committed only when the
+// completing action was the transition's own, so the SWITCHFROM committed nothing and a
+// SWITCHRANK ran first. [orig: Player_MountWeaponSlot @0x4DFA40 (@0x4DFB16, @0x4DFB96);
+// WeaponSlot_TryQueueSwitchRank @0x53F1C0; WeaponAction_SwitchFrom @0x5433B0 (the
+// Emplaced sentinel @0x543435..0x54344A, the store @0x543475, the SWITCHTO @0x5434A3)]
+void test_a_running_switchfrom_commits_the_forced_gun() {
+	Rig r;
+	w::World &world = r.world;
+	constexpr uint8_t kPistolAdm = 2;
+	w::WeaponTable &table = world.tables.weapons;
+	table.entries[kGunAdm].category = 3; // the outgoing rifle's category
+	table.entries[kGunAdm].rank = 5;
+	table.entries.resize(3);
+	w::WeaponTableEntry &pistol = table.entries[kPistolAdm];
+	pistol.name = "WPN_PISTOL";
+	pistol.valid = true;
+	pistol.category = 2;
+	pistol.clipsize = 15;
+	pistol.startrounds = 60;
+	pistol.maxclips = 4;
+	pistol.ammo_class_count = 1;
+	pistol.weapon_class_slot = 2;
+	pistol.ammo_class_id = 1;
+	bake(pistol);
+	world.cached.local_player = r.requester_h;
+	w::LocalPlayer local(world);
+	world.local_player_state = &local;
+	local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1},
+			w::WeaponKitEntry{"WPN_PISTOL", -1, -1, -1}};
+	local.loadout.spawn_kit_set = true;
+	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
+			local.inventory_valid, /*select_spawn_default=*/true);
+	const int32_t rifle = local.inventory.equipped_combo;
+	CHECK(rifle == kRifleCombo);
+	const auto install = [&](const std::string &name, bool preserve) {
+		w::WeaponInstallData data;
+		data.name = name;
+		data.clipsize = table.entries[size_t(table.index_of(name.c_str()))].clipsize;
+		data.table_baked = true;
+		w::local_weapon_install(world, local.weapon, data, preserve, false,
+				&local.inventory, local.view);
+	};
+	const auto pump = [&]() {
+		++world.logic_tick;
+		local.pump_local_weapon();
+		const std::vector<w::WeaponPresentationEvent> events = local.weapon.events;
+		local.weapon.events.clear();
+		for (const w::WeaponPresentationEvent &e : events)
+			if (!e.switch_to_weapon.empty()) install(e.switch_to_weapon, e.preserve_slot_state);
+	};
+	install("WPN_M4AUTO", false);
+	for (int i = 0; i < 8; ++i) pump();
+
+	// The pistol's key: SWITCHFROM on the rifle, running.
+	const w::WeaponSwitchOutcome key = w::weapon_switch_to_handle(table, local.inventory,
+			2 * 65, w::local_weapon_switch_gates(world, local.weapon, &local.inventory));
+	CHECK(key.kind == w::WeaponSwitchOutcome::kMount && !key.same_category);
+	w::handle_weapon_switch_outcome(world, local.weapon, &local.inventory, key, local.view);
+	for (int i = 0; i < 4; ++i) pump();
+	CHECK(local.weapon.slot.current == w::weapon_action::kSwitchFrom);
+
+	// The host's forced attach lands on the joiner (the UseGun row, bone 2).
+	world.ai.is_authority = false;
+	CHECK(world.vehicles.apply_confirmed_mount(r.requester_h, r.gun_h, 2));
+	w::sync_local_usegun_weapon_transition(world, local.weapon);
+	CHECK(local.weapon.usegun_switch == w::LocalUseGunSwitch::kAttach);
+	CHECK(!local.weapon.switch_in_flight);
+	pump();
+	// The running SWITCHFROM's completion committed the gun and drew it.
+	CHECK(local.weapon.usegun_slot_active);
+	CHECK(local.weapon.usegun_switch == w::LocalUseGunSwitch::kNone);
+	CHECK(r.gun().primary_weapon_slot.next == w::weapon_action::kSwitchTo ||
+			r.gun().primary_weapon_slot.current == w::weapon_action::kSwitchTo);
+	CHECK(r.requester().equipped_adm_index == kGunAdm);
+	CHECK(local.inventory.equipped_combo == rifle);
+	world.local_player_state = nullptr;
+}
+
 // The same-tick order: each reload queues at its row's visit in the pool-0 walk, the
 // local player's at its own slot, so a gunner at a lower slot (a mission NPC loaded ahead
 // of the host's player) relays first and the S2C 0x49 pair leaves in that order. Ours sent
@@ -468,6 +550,7 @@ int main() {
 	test_a_weapon_key_ends_a_slot_held_on_foot();
 	test_the_walk_relays_an_authority_reload();
 	test_the_walk_queues_reloads_in_slot_order();
+	test_a_running_switchfrom_commits_the_forced_gun();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

@@ -112,18 +112,36 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 	return gates;
 }
 
+// With a pending slot, SWITCHFROM is instant when the EquippedSlot's def or the
+// pending slot's def is Emplaced, whichever mount staged it: the UseGun transition's,
+// or a personal one, a key away from a gun's slot held on foot included (D-NET-420).
+// [orig: WeaponAction_SwitchFrom @0x5433B0 - the local player and g_PendingWeaponSlot
+//  @0x543417, the EquippedSlot def's Flags 0x80 @0x54342E, the pending def's
+//  @0x543435..0x543448, the sentinel @0x54344A]
 bool local_usegun_switch_is_instant(const World &world,
-		const LocalPlayerWeapon &w) {
-	if (w.usegun_switch_action != weapon_action::kSwitchFrom) return false;
-	const uint8_t from_adm =
-			w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm;
-	const uint8_t to_adm =
-			(w.usegun_switch == LocalUseGunSwitch::kAttach ||
-			 w.usegun_switch == LocalUseGunSwitch::kSwap)
-			? w.usegun_pending_weapon_adm
-			: w.usegun_saved_adm;
-	const WeaponTableEntry *from = world.tables.weapons.by_index(from_adm);
-	const WeaponTableEntry *to = world.tables.weapons.by_index(to_adm);
+		const LocalPlayerWeapon &w, const WeaponInventory *inventory) {
+	const WeaponTable &table = world.tables.weapons;
+	const auto personal_def = [&](int32_t combo) -> const WeaponTableEntry * {
+		const WeaponInventorySlot *slot = inventory != nullptr ? inventory->slot(combo) : nullptr;
+		return slot != nullptr && slot->adm_index >= 0
+				? table.by_index(static_cast<uint8_t>(slot->adm_index))
+				: nullptr;
+	};
+	const WeaponTableEntry *from = nullptr;
+	const WeaponTableEntry *to = nullptr;
+	if (w.usegun_switch != LocalUseGunSwitch::kNone) {
+		from = table.by_index(w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm);
+		to = table.by_index(w.usegun_switch == LocalUseGunSwitch::kAttach ||
+						w.usegun_switch == LocalUseGunSwitch::kSwap
+				? w.usegun_pending_weapon_adm
+				: w.usegun_saved_adm);
+	} else if (w.switch_in_flight && inventory != nullptr) {
+		from = w.usegun_slot_active ? table.by_index(w.usegun_weapon_adm)
+		                            : personal_def(inventory->equipped_combo);
+		to = personal_def(inventory->pending_combo);
+	} else {
+		return false; // no pending slot
+	}
 	const int32_t flags = (from != nullptr ? from->flags : 0) |
 			(to != nullptr ? to->flags : 0);
 	return (flags & weapon_flag::kEmplaced) != 0;
@@ -1355,7 +1373,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// @0x542ad3 / @0x5413a0].
 	LocalWeaponScope scope(world, w, view);
 	in.scope = &scope;
-	in.instant_emplaced_switch = local_usegun_switch_is_instant(world, w);
+	in.instant_emplaced_switch = local_usegun_switch_is_instant(world, w, io.inventory);
 	// The heat window is a deadline against the logic tick, not a stored level.
 	// [orig: current_tick @ 0x24C1968]
 	in.current_tick = static_cast<int32_t>(world.logic_tick);
@@ -1677,8 +1695,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// [orig: the FSM's clip lives on the MountSlot (+0x10) and the reserve is the
 	//  per-ammo-class pool — one storage, two views; this port mirrors between the
 	//  single-slot FSM state and the inventory]
-	if (w.usegun_switch != LocalUseGunSwitch::kNone && ev.switch_completed &&
-			active_slot.current == w.usegun_switch_action) {
+	// Whichever switch action completes on the EquippedSlot commits the one
+	// g_PendingWeaponSlot word the UseGun mount stored, a personal SWITCHFROM the
+	// mount found running included (its queue wrote no SWITCHRANK over it); the
+	// completing action decides the SWITCHTO. [orig: WeaponAction_SwitchFrom @0x5433B0
+	//  (the store @0x543475, WeaponSlot_TryQueueSwitchTo @0x5434A3);
+	//  WeaponAction_SwitchRank @0x543500 (the store @0x543539, no SWITCHTO);
+	//  WeaponSlot_TryQueueSwitchRank @0x53F1C0]
+	if (w.usegun_switch != LocalUseGunSwitch::kNone && ev.switch_completed) {
+		w.usegun_switch_action = active_slot.current;
 		commit_local_usegun_weapon_switch(world, w);
 		// The switch back hands the personal slot to its readers again, which read
 		// a bucket weapon's rounds through the seat as it now stands: the mirror the

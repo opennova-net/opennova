@@ -838,6 +838,10 @@ int main() {
 		CHECK(gun_handle.valid());
 		if (!gun_handle.valid()) return 1;
 		CHECK(world.vehicles.process_attach(npc, gun_handle, 1));
+		// The walk visits only rows with a resolved def row (ItemTypeIndex != 0); the
+		// synthetic mission's NPC has none of its own.
+		// [orig: WeaponAction_ProcessAllEntities @0x5426B9]
+		world.registry.get(npc)->item_type_index = 1;
 		w::Entity &live_gun = *world.registry.get(gun_handle);
 		CHECK(live_gun.primary_weapon_owner == npc);
 		live_gun.primary_weapon_slot.next = w::weapon_action::kFire;
