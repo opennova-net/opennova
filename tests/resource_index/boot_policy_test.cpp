@@ -166,8 +166,8 @@ void test_runtime_launch_flags_parse() {
     CHECK(f.lan_rotation.empty());
     // The rotation after --lan-host's mission, in order, the hook's comma form.
     const LaunchFlags rotation =
-        parse_launch_flags({"--lan-host", "TDH_I3A.BMS", "--lan-rotation", "BTDH_G11A.bms,,ash_i5a.bms"});
-    CHECK((rotation.lan_rotation == std::vector<std::string>{"BTDH_G11A.bms", "ash_i5a.bms"}));
+        parse_launch_flags({"--lan-host", "TDH_I3A.BMS", "--lan-rotation", "TDH_G11A.bms,,ash_i5a.bms"});
+    CHECK((rotation.lan_rotation == std::vector<std::string>{"TDH_G11A.bms", "ash_i5a.bms"}));
     CHECK(f.lan_join == "192.168.10.120:32770");
     CHECK(f.lan_port == 32768);
     CHECK(f.lan_gametype == 0x10020);
