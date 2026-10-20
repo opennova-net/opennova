@@ -105,7 +105,7 @@ struct TickInput {
 	// this to consume edge-triggered actions exactly once across catch-up.
 	bool consume_one_shots = false;
 	// The count of the loaded-model list the host froze at its mission start,
-	// which a listen host wraps its S2C 0x68 cursor at (0 until a list froze)
+	// which the host wraps its S2C 0x68 cursor at (0 until a list froze)
 	// [orig: Server_SendRandomSeedSync @0x511375 / @0x511391 reads
 	//  g_LoadedModelChallengeCount through CEffectWorld_GetViewportDimensions @0x5B1578].
 	uint32_t loaded_model_list_count = 0;

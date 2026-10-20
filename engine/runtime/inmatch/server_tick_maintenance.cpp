@@ -397,15 +397,19 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 		conn.link.transport->host_send(
 				s2c::TIME_SYNC_PING, std::move(time_sync));
 
-		// A dedicated host sends no 0x68; any other advances the slot's
-		// cursor by 50 and wraps it to 0 at its own frozen loaded-model
-		// list count (the IDB's "viewport height" getter returns that
-		// count, g_LoadedModelChallengeCount), unsigned.
-		// [orig: Server_SendRandomSeedSync @0x511360 - the dedicated test
-		//  @0x511363..0x51136A, CEffectWorld_GetViewportDimensions @0x511375
-		//  (g_LoadedModelChallengeCount @0x5B1578), +50 @0x51137E, `jb`
-		//  @0x511391, the wrap @0x511393, mask 32 @0x5113C5, the send @0x5113D4]
-		if (ctx.connection_mode != ConnectionMode::HostOnly) {
+		// The 0x68 rides unless the host's game.cfg allowcustomskins word is
+		// set, dedicated host or not: it advances the slot's cursor by 50 and
+		// wraps it to 0 at the host's own frozen loaded-model list count (the
+		// IDB's "viewport height" getter returns that count,
+		// g_LoadedModelChallengeCount), unsigned. The set branch's one store
+		// (slot+0x17D18 = dword_A87060 @0x5113E7) has no reader.
+		// [orig: Server_SendRandomSeedSync @0x511360 - the allowcustomskins test
+		//  @0x511363..0x51136A (g_GameConfigState+0x524, the cfg's allowcustomskins:
+		//  Config_ParseSettingsLine @0x54F818 / @0x54F837),
+		//  CEffectWorld_GetViewportDimensions @0x511375 (g_LoadedModelChallengeCount
+		//  @0x5B1578), +50 @0x51137E, `jb` @0x511391, the wrap @0x511393, mask 32
+		//  @0x5113C5, the send @0x5113D4]
+		if (ctx.config.allow_custom_skins == 0) {
 			reply.loaded_model_page_cursor += 50u;
 			if (reply.loaded_model_page_cursor >= ctx.loaded_model_list_count)
 				reply.loaded_model_page_cursor = 0;

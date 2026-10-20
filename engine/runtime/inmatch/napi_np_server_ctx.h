@@ -392,7 +392,7 @@ struct NapiNPServerCtx {
 
 	// The count of the loaded-model list this host froze at its mission start
 	// (g_LoadedModelChallengeCount, which the IDB's CEffectWorld_GetViewportDimensions
-	// returns as a "height"), the wrap of the non-dedicated S2C 0x68's 50-row cursor.
+	// returns as a "height"), the wrap of the S2C 0x68's 50-row cursor.
 	// The role stamps it every tick from the embedder's frozen count; focused
 	// tests set it directly. [orig: CEffectWorld_GetViewportDimensions @0x5B1578;
 	//  Server_SendRandomSeedSync @0x511375 / @0x511391]

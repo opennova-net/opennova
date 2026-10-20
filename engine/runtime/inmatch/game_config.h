@@ -231,8 +231,11 @@ struct GameConfig {
 	bool hit_feedback = true; // [orig: hitFeedback_198 @0x54D18B]
 	int32_t fat_bullets = 0;                    // [orig: g_FatBullets @0x24D21A0]
 	// The cfg's allowcustomskins as the session settings apply copies it, which the NovaWorld
-	// listing's Skins column reads [orig: dword_24D218C <- cfg +0x524,
-	// Game_ApplySessionSettingsToGlobals @0x551C22; Lobby_UpdateServerInfo @0x4FECD7].
+	// listing's Skins column reads, and the cfg word itself, which suppresses the control
+	// quartet's S2C 0x68 when set (each has its one writer, so they agree)
+	// [orig: dword_24D218C <- cfg +0x524, Game_ApplySessionSettingsToGlobals @0x551C22;
+	//  Lobby_UpdateServerInfo @0x4FECD7; Config_ParseSettingsLine @0x54F837;
+	//  Server_SendRandomSeedSync @0x511363].
 	int32_t allow_custom_skins = 0;
 	int32_t one_shot_kill = 0;                  // [orig: g_OneShotKill @0x24D219C]
 	// game.cfg `unlimited_vehicles`, stock 1: a destroyed PlayerControl hull

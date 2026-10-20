@@ -3291,19 +3291,21 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	            "time-sync requests preserve retail's 1,1,2,2 sequence"))
 		return false;
 
-	ctx.connection_mode = opennova::inmatch::ConnectionMode::HostOnly;
+	// The cfg's allowcustomskins word suppresses only the 0x68
+	// [orig: Server_SendRandomSeedSync @0x511363..0x51136A].
+	ctx.config.allow_custom_skins = 1;
 	for (uint32_t i = 0; i < opennova::inmatch::CONTROL_REQUEST_PERIOD_TICKS; ++i) {
 		opennova::inmatch::Server_TickUpdate(ctx);
 		if (i + 1u < opennova::inmatch::CONTROL_REQUEST_PERIOD_TICKS) (void)drain();
 	}
-	const std::vector<Emitted> dedicated_control = drain();
-	if (!expect(find(dedicated_control,
+	const std::vector<Emitted> skins_control = drain();
+	if (!expect(find(skins_control,
 	                    opennova::s2c::CHARATTR_CRC_CHALLENGE) != nullptr &&
-	                    find(dedicated_control,
+	                    find(skins_control,
 	                            opennova::s2c::LOADED_MODEL_PAGE_REQUEST) == nullptr,
-	            "dedicated hosts omit only the renderer-backed loaded-model request"))
+	            "allowcustomskins omits only the loaded-model request"))
 		return false;
-	ctx.connection_mode = opennova::inmatch::ConnectionMode::HostClient;
+	ctx.config.allow_custom_skins = 0;
 
 	// After maturity, deploy/death presentation does not reset or pause the
 	// quartet countdown: UpdateAll checks its slot blockers and the saved age,

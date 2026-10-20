@@ -1354,22 +1354,26 @@ bool check_armory_reuse_cooldown() {
 // The 744-tick priority-target sweep.
 // --------------------------------------------------------------------------
 
-// A listen host's S2C 0x68 cursor advances by 50 per quartet and wraps to 0 at
-// its own frozen loaded-model list count (the count retail's misnamed viewport
-// getter returns): with 305 frozen rows it asks 50, 100, ..., 300, then 0, 50;
-// with none frozen every request wraps to 0.
-// [orig: Server_SendRandomSeedSync @0x511360 - +50 @0x51137E, the `jb` against
-//  g_LoadedModelChallengeCount (CEffectWorld_GetViewportDimensions @0x5B1578) @0x511391, the
-//  wrap @0x511393, the send @0x5113D4]
+// The S2C 0x68 rides each quartet unless the host's game.cfg allowcustomskins
+// word is set, on a dedicated host as on a listen host; its cursor advances by
+// 50 and wraps to 0 at the host's own frozen loaded-model list count (the
+// count retail's misnamed viewport getter returns): with 305 frozen rows it
+// asks 50, 100, ..., 300, then 0, 50; with none frozen every request wraps to
+// 0; with allowcustomskins set no 0x68 goes at all.
+// [orig: Server_SendRandomSeedSync @0x511360 - the allowcustomskins test
+//  @0x511363..0x51136A (Config_ParseSettingsLine @0x54F818 / @0x54F837), +50
+//  @0x51137E, the `jb` against g_LoadedModelChallengeCount
+//  (CEffectWorld_GetViewportDimensions @0x5B1578) @0x511391, the wrap
+//  @0x511393, the send @0x5113D4]
 bool check_model_page_cursor_wraps_at_the_list_count() {
-	const auto cursors = [](uint32_t list_count, int quartets) {
-		ns::LoopbackChannel loopback;
+	const auto cursors = [](uint32_t list_count, int quartets, int32_t allow_custom_skins) {
 		inmatch::NapiNPServerCtx ctx;
-		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostClient);
+		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 		inmatch::GameConfig config;
 		config.max_players = 4;
-		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, &loopback);
+		config.allow_custom_skins = allow_custom_skins;
+		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
 		auto heap = std::make_unique<w::World>();
 		w::World &world = *heap;
 		world.rules.mp_session = true;
@@ -1377,20 +1381,21 @@ bool check_model_page_cursor_wraps_at_the_list_count() {
 		const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
 		ctx.world = &world;
 		ctx.loaded_model_list_count = list_count;
-		auto &self = ctx.np_protocol.connection_list.front();
-		self.phase = inmatch::ConnectionPhase::InMatch;
-		self.burst.spawned = true;
-		self.link.owned_entity = player;
-		world.match.upsert_player({player, 0, "Host"});
+		ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+		ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+				7, inmatch::NapiNPConnection::kTypeServerSide, &transport,
+				ns::TransportMode::Client, player, true));
+		auto &peer = ctx.np_protocol.connection_list.back();
+		peer.reply.player_slot = 1;
+		world.match.upsert_player({player, 1, "Peer"});
 		world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 		std::vector<uint32_t> out;
 		for (int q = 0; q < quartets; ++q) {
-			self.reply.control_request_countdown = 0;
-			self.reply.charattr_unanswered_count = 0;
-			self.reply.time_sync_unanswered_count = 0;
+			peer.reply.control_request_countdown = 0;
+			peer.reply.charattr_unanswered_count = 0;
+			peer.reply.time_sync_unanswered_count = 0;
 			inmatch::Server_TickUpdate(ctx);
-			ns::Datagram d;
-			while (loopback.client_recv(d))
+			for (const ns::Datagram &d : drain(transport))
 				if (d.tag == s2c::LOADED_MODEL_PAGE_REQUEST && d.body.size() == 4)
 					out.push_back(static_cast<uint32_t>(d.body[0]) |
 							(static_cast<uint32_t>(d.body[1]) << 8) |
@@ -1399,11 +1404,13 @@ bool check_model_page_cursor_wraps_at_the_list_count() {
 		}
 		return out;
 	};
-	bool ok = expect(cursors(305, 8) ==
+	bool ok = expect(cursors(305, 8, 0) ==
 					std::vector<uint32_t>({50, 100, 150, 200, 250, 300, 0, 50}),
-			"the 0x68 cursor wraps to 0 at the 305-row list");
-	ok = expect(cursors(0, 2) == std::vector<uint32_t>({0, 0}),
+			"a dedicated host's 0x68 cursor wraps to 0 at the 305-row list");
+	ok = expect(cursors(0, 2, 0) == std::vector<uint32_t>({0, 0}),
 			"with no list frozen every 0x68 asks row 0") && ok;
+	ok = expect(cursors(305, 2, 1).empty(),
+			"allowcustomskins set sends no 0x68") && ok;
 	return ok;
 }
 

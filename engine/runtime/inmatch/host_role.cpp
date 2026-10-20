@@ -527,9 +527,9 @@ void HostRole::run_tick(const TickInput &input) {
 	kernel.local.view_session_inputs = view_session_inputs_for(
 			state.client_runtime.get(), /*joiner=*/false, kernel.local.local_player_dead(),
 			kernel.world.rules.mp_session);
-	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor wraps at the
-	// host's frozen loaded-model list count [orig: Server_SendRandomSeedSync
-	// @0x511375 / @0x511391].
+	// Server_SendRandomSeedSync's S2C 0x68 cursor wraps at the host's frozen
+	// loaded-model list count [orig: Server_SendRandomSeedSync @0x511375 /
+	// @0x511391].
 	state.host_owner.ctx.loaded_model_list_count = input.loaded_model_list_count;
 	const uint32_t now = state.host_owner.now_tick;
 	// The stats board's host-prep row: the view/viewport setup before the
