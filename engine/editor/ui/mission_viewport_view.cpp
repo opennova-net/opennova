@@ -26,12 +26,14 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/script_assist.h>
+#include <editor/documents/sound_bank_document.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_mark_menu.h>
 #include <editor/ui/mission_palette_view.h>
 #include <editor/ui/overlay_legend.h>
 #include <editor/ui/project_find.h>
+#include <editor/ui/reference_fields.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_widgets.h>
@@ -134,7 +136,7 @@ struct MissionViewportView::Tools {
 	void toolbar(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void show_popup(MissionViewportOptions &options);
 	void time_popup(MissionViewportOptions &options, const MissionViewport &mission);
-	void heard_popup(const MissionViewport &mission);
+	void heard_popup(Workspace &workspace, const MissionViewport &mission);
 	void numbers(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void path_list(Workspace &workspace, const MissionViewport &mission);
 	void shoot_list(Workspace &workspace, const MissionViewport &mission);
@@ -470,7 +472,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		if (ui_kit::tool(row, "Heard", true, "What plays on each of the game's channels now, the weather and the script."))
 			ImGui::OpenPopup("heard");
 		if (ImGui::BeginPopup("heard")) {
-			heard_popup(mission);
+			heard_popup(workspace, mission);
 			ImGui::EndPopup();
 		}
 	}
@@ -884,9 +886,10 @@ void MissionViewportView::Tools::time_popup(MissionViewportOptions &options, con
 	ImGui::EndDisabled();
 }
 
-// What the Listen plays now (DI-36): each channel the loudest-first mix binds, the weather the script made and the
-// script's own state, the sources by what they do.
-void MissionViewportView::Tools::heard_popup(const MissionViewport &mission) {
+// What the Listen plays now (DI-36): each channel the loudest-first mix binds, its set, its bank and its wave each a link
+// to where it is defined (the set and the wave in that bank), the weather the script made and the script's own state,
+// the sources by what they do, and the last sound heard.
+void MissionViewportView::Tools::heard_popup(Workspace &workspace, const MissionViewport &mission) {
 	const MissionListen &listen = mission.listen();
 	if (!listen.open()) {
 		ImGui::TextDisabled("Not listening yet.");
@@ -898,8 +901,20 @@ void MissionViewportView::Tools::heard_popup(const MissionViewport &mission) {
 		if (channel.candidate < 0) continue;
 		++shown;
 		const std::string from = std::string(channel.source) == "rain" ? "rain" : "source";
-		ImGui::Text("%d. %s (%s), %s, volume %d, %.0f m (%s)", channel.channel + 1, channel.set.c_str(),
-				channel.bank.c_str(), channel.wave.c_str(), channel.volume, double(channel.distance), from.c_str());
+		const std::string bank = sound_bank_scope(channel.bank);
+		ImGui::PushID(channel.channel);
+		ImGui::Text("%d.", channel.channel + 1);
+		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::Sound, channel.set, bank}, "set");
+		ImGui::SameLine();
+		ImGui::TextDisabled("in");
+		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::SoundBank, channel.bank}, "bank");
+		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::BankWave, channel.wave, bank}, "wave");
+		ImGui::SameLine();
+		ImGui::Text("volume %d, %.0f m (%s)", channel.volume, double(channel.distance), from.c_str());
+		ImGui::PopID();
 	}
 	if (shown == 0) ImGui::TextDisabled("Nothing is heard here.");
 	ImGui::Separator();
@@ -926,7 +941,14 @@ void MissionViewportView::Tools::heard_popup(const MissionViewport &mission) {
 		ImGui::TextDisabled("Script: %s, run %u times", script.scripted() ? "compiled" : "none", script.script_runs());
 	}
 	const std::vector<ClipSoundFired> &fired = listen.sounds_fired();
-	if (!fired.empty()) ImGui::TextDisabled("Last heard: %s", ui_kit::fit(fired.back().words, ImGui::GetFontSize() * 30.0f).c_str());
+	if (!fired.empty()) {
+		// The set a link (in its bank where one is named), the sentence in its tooltip.
+		const ClipSoundFired &last = fired.back();
+		ImGui::TextDisabled("Last heard:");
+		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::Sound, last.set, last.bank.empty() ? std::string() : sound_bank_scope(last.bank)},
+		          "last heard", last.words);
+	}
 }
 
 void MissionViewportView::Tools::ground_line() {

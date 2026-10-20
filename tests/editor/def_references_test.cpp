@@ -12,7 +12,8 @@
 // vehicle panels name items by their alias (items.def's sid, else S%06i of the id), Avatars.def's combinations
 // their parts by name and kind. The
 // complete query: the names a typed text begins first, as the lookup compares them, each with whether the
-// field holds it whole and its preview; the typed name's status, Go to and Add it there.
+// field holds it whole and its preview; the typed name's status, Go to and Add it there. An impact board's
+// effect (a readout's name) leads where the ammo's field naming it does.
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -20,11 +21,13 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/documents/def_table.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/ammo_impacts.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -34,6 +37,7 @@
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/graph_test_support.h"
 #include "editor/test_platform.h"
 #include "fixtures/minimal_3di_builder.h"
 
@@ -493,8 +497,46 @@ static int test_surface_choices() {
 	return 0;
 }
 
+// The name jumps: an impact board's effect (a readout's name: the board's name_link goes through reference_targets
+// over its kind and name) leads where the ammo's own field naming it does (the field's Go to), the effect's
+// definition in its particle file.
+static int test_impact_board_targets() {
+	Project project;
+	TEST_EXPECT(project.write("particles/hits.ptl", "[effectdef]\n{\n\tid = Effect_hit;\n\tpdefs = puff;\n}\n\n"
+	                                                "[particledef]\n{\n\tid = puff;\n}\n"));
+	project.rescan();
+	const std::string ammo = project.path("ammo.def");
+	TEST_EXPECT(project.write(ammo, "ammo AMMO_I\n\teffects_table\n\t\tdirt Effect_hit none 0\n\tend\nend\n"));
+	project.rescan();
+	const SessionView &view = project.session.view();
+	AmmoTableSource source;
+	source.refresh(view.findings.assets);
+	const AmmoImpactBoard board = ammo_impact_board(source.table(), "AMMO_I");
+	std::string effect;
+	for (const AmmoImpactRow &row : board.surfaces)
+		if (!row.pick.effect.empty() && row.pick.from == world::ImpactRowFrom::Own) effect = row.pick.effect;
+	TEST_EXPECT(board.found && effect == "Effect_hit");
+	const GraphEdge *named = nullptr;
+	for (const GraphEdge *edge : project.graph().references_of(ammo))
+		if (edge->kind == ReferenceKind::Particle && edge->value == effect) named = edge;
+	TEST_EXPECT(named != nullptr);
+	if (!named) return 1;
+	editor_test::handle_to_end(project.session, request::open_document(ammo));
+	const Document *document = project.session.document_for(ammo);
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const std::vector<ReferenceTarget> by_field = graph_test::targets_of(*document, named->address, named->field, view);
+	const std::vector<ReferenceTarget> by_board =
+			reference_targets(project.graph(), *view.project.scan, ReferenceKind::Particle, effect, "");
+	TEST_EXPECT(by_field.size() == 1 && by_board.size() == 1 && by_field[0].file == by_board[0].file &&
+	            by_field[0].locator == by_board[0].locator && by_field[0].field == by_board[0].field &&
+	            by_board[0].file == "particles/hits.ptl" && by_board[0].locator == "3:7");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_impact_board_targets();
 	failures += test_fields_are_references();
 	failures += test_type_ids();
 	failures += test_complete_query();

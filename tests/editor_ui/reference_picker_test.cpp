@@ -9,7 +9,7 @@
 // model row's use what the texture costs the game; the texture's toolbar shows its object texture detail and
 // its alpha as the use shown reads it; a texture no use reads says so under its uses, with its Set it aside. The
 // name jumps: a particle file's names in its panel, each a text field over its span (its fixes, its completion, a
-// drop, each replacing that span alone).
+// drop, each replacing that span alone); the HUD layout's font a name field of kind Font.
 #include <cstring>
 #include <string>
 #include <utility>
@@ -27,6 +27,8 @@
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
 #include "editor_ui_test_support.h"
+#include "../editor/viewport_test_support.h"
+#include <runtime/hud/hud_elements.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -1124,6 +1126,66 @@ void test_particle_name_fields() {
 	CHECK(ptl && drop_at(ui, texture, ptl->relative_path).empty(), "a particle file dropped on a texture's name sets nothing");
 }
 
+// The HUD layout's font (the name jumps): the picked element's font a text_reference_field of kind Font, a font file
+// dropped from Files on it the viewport's set of that line's value; a font the project lacks its dot's fixes.
+void test_hud_font_field() {
+	test_temp::TempDir dir{"opennova_editor_ui_hud_font"};
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::FakeDevices devices;
+	session.handle(request::new_project(dir.file("project"), "HUD"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::string root = session.view().project.root;
+	const std::string layout = "defs/hudpos.def";
+	CHECK(test_io::write_text(root + "/" + layout, "fonthud1_hi\tgone.fnt\r\nfonthud1_lo\tgone.fnt\r\n"
+	                                               "AMMOCOUNTPOS\t168,616,0,right\r\n") &&
+	              test_io::write_text(root + "/fonts/other.fnt", "a font file"),
+	      "the HUD layout and a font");
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document(layout));
+	session.run_operations();
+	devices.sync(session);
+	// The device says where the HUD's walk drew the ammo count, which is then picked.
+	if (editor_test::FakeDevice *device = devices.held(layout, ViewportKind::Hud)) {
+		device->placed.assign(opennova::hud::kHudElementCount, ViewportDeviceReport::Rect());
+		device->placed[size_t(opennova::hud::HudElement::AmmoCount)] = ViewportDeviceReport::Rect{true, 130, 616, 168, 632};
+	}
+	session.run_operations();
+	devices.sync(session);
+	session.handle(request::set_viewport(layout, "{\"kind\":\"hud\",\"options\":{\"picked\":\"ammo_count\"}}"));
+	session.run_operations();
+	devices.sync(session);
+	Ui ui;
+	ui.pump = [&] {
+		session.run_operations();
+		devices.sync(session);
+	};
+	ui.windows.set_view(&session.view());
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	const ImGuiID font = item_id(Ui::window_id("Inspector"), {"fonthud1_hi"});
+	ImRect at;
+	CHECK(ui.locate(item_id(font, {"##name"}), at), "the picked element's font is a name field");
+	const AssetEntry *other = session.view().project.scan->find("other.fnt");
+	CHECK(other != nullptr, "other.fnt in the project");
+	if (!other) return;
+	const std::vector<EditorRequest> dropped = drop_at(ui, at.GetCenter(), other->relative_path);
+	const EditorRequest *set = only(dropped, EditorRequestKind::EditInViewport);
+	CHECK(set && set->command.name == "set" && set->command.field == "fonthud1_hi" && set->command.value == "other.fnt",
+	      "a font dropped on it sets the line's font through the viewport");
+	ui.activate(item_id(font, {"go to dot"}));
+	ui.frames(2);
+	CHECK(GImGui->OpenPopupStack.Size == 1 && logged_frame(ui).find("The value is missing") != std::string::npos,
+	      "the missing font's dot opens its fixes");
+	ImGui::ClosePopupsExceptModals();
+	ui.frames(2);
+}
+
 void run_reference_picker_tests() {
 	test_filters_apart();
 	test_drop_on_value();
@@ -1142,6 +1204,7 @@ void run_reference_picker_tests() {
 	test_texture_set_aside_line();
 	test_texture_drop_replaces();
 	test_particle_name_fields();
+	test_hud_font_field();
 }
 
 } // namespace editor_ui_test

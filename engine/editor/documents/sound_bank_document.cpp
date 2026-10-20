@@ -343,10 +343,9 @@ const RecordTable &sound_bank_table() {
 	return table;
 }
 
-namespace {
-
-// The scope a bank's own names live in (its waves'): its file name, upper case ("GAME.LWF").
 std::string sound_bank_scope(const std::string &path) { return strutil::to_upper(basename_of(path)); }
+
+namespace {
 
 // How a layer's flags pick its member, in words [orig: SoundBank_PlayTriggerEntries @ 0x75cd5c..0x75cdfc]:
 // "in order" (0x10), "a random start, then in order" (0x80), else "at random" (0x08 never read).
