@@ -2,10 +2,10 @@
 // kind beside the mission's 3D view, which stays the kind a mission is read through), the CMAP's projection (its
 // click-to-world law, hud::command_map_waypoint_world, the inverse the map's pixels take), the marks of the minted
 // mission and the first framing, a hit and a box, a drag of a pin planned into the 3D view's move batch
-// (mission_move_edits) and served as one undo step, the selection the 3D view shares, the commands and the wire.
+// (mission_move_edits) and served as one undo step, the selection the 3D view shares, the commands and the wire; the
+// edge cap (kMissionOutlineEdgesMax) and the wireframes' chunks over a mission of minted models at 00TRa's scale.
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <functional>
 #include <cstdio>
@@ -14,7 +14,6 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/io/strutil.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_handle_edit.h>
@@ -32,18 +31,20 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <formats/def/def.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/hud/hud_map_view.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
+#include "fixtures/minimal_3di_builder.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
@@ -978,96 +979,125 @@ static int test_palette_pictures() {
 	return 0;
 }
 
-// The retail leg (OPENNOVA_JO_ASSETS): JO:CA's 00TRa, the mission S23 C measured the map on, written into a project
-// with the game's items.def and the models its entities' items draw (each item's graphic), its outlines read to the end:
-// the entities, the models outlined, the lines drawn, and the edge cap (a plan of LOD 0 past kMissionOutlineEdgesMax
-// edges drawn by its first coarser LOD's that has no more, else by the fewest) pinned. Prints the time the outlines
-// took over the follows.
-static int test_retail() {
-	const std::string mission_file = retail::asset_file("00TRa.bms"), items_file = retail::asset_file("items.def");
-	if (mission_file.empty() || items_file.empty())
-		return retail::skip_leg("OPENNOVA_JO_ASSETS (00TRa's map: its outlines read and drawn)");
-	const std::vector<uint8_t> mission_bytes = test_io::read_file(mission_file), items_bytes = test_io::read_file(items_file);
-	Rig rig("opennova_editor_mission_map_retail");
+// A model of a field of unit boxes on each LOD (`boxes[l]` on LOD l, two units apart in rows of eight, its thresholds
+// falling to 0), through the engine's own construction API and 3DI writer: seen from above a box is its plan's four
+// sides (the crate's), so LOD l's plan has 4 x boxes[l] edges.
+std::vector<uint8_t> box_field_model(const char *name, const std::vector<int> &boxes) {
+	synth3di::Model m;
+	m.name = name;
+	const int material = m.add_material("FF_ST_OP", "field.tga");
+	for (size_t l = 0; l < boxes.size(); ++l) {
+		const int lod = m.add_lod(int32_t(32 * (boxes.size() - 1 - l)));
+		const int part = m.add_part(lod, 0, synth3di::Vec3{});
+		for (int b = 0; b < boxes[l]; ++b) {
+			const double x = 2.0 * (b % 8), y = 2.0 * (b / 8);
+			m.add_box(lod, part, material, synth3di::Box{ { x, y, 0.0 }, { x + 1.0, y + 1.0, 1.0 } });
+		}
+		m.add_panm(lod, 0, 0);
+	}
+	std::vector<uint8_t> bytes;
+	if (!synth3di::mint(m, bytes)) bytes.clear();
+	return bytes;
+}
+
+// The edge cap and the chunks over a mission of the scale S23 C measured the map on (JO:CA's 00TRa, measured once:
+// 1,333 entity records, 141 models outlined, six of them drawn by their fewest plan, 79,903 lines in 20 chunks; its
+// models' plans drawn by LOD 0 within the cap, by the first coarser LOD within it, by an only LOD past it and by the
+// fewest of several past it), over minted models, one of each: a post (LOD 0 within the cap), a palm (LOD 0 and 1
+// past it, drawn by LOD 2, the first within it, though LOD 3 has fewer), a ruin (one LOD, past it, drawn by that) and
+// a hut (every LOD past it, drawn by the fewest, LOD 2), placed in turn by 1,331 records over the mission, then an
+// item of no graphic and one of a model the project lacks: 1,333 records. Its outlines read over the follows, a few each within the
+// map's budgets, to the end: every model outlined by the plan the cap gives it, the lines its records' plans' edges,
+// kMissionMapLinesChunk edges a chunk. Then a drag of the first outlined item over 20 samples of one gesture: each
+// sample's edit served and followed places that one record again and moves the chunks its edges lie in alone.
+static int test_edge_cap_and_chunks() {
+	Rig rig("opennova_editor_mission_map_cap");
 	rig.session.handle(request::new_project(rig.dir.file("project"), "Maps"));
 	rig.session.run_operations();
 	editor_test::create_missing_files(rig.session);
 	const std::string project = rig.session.view().project.root;
-	TEST_EXPECT(test_io::write_file(project + "/missions/00TRa.bms", mission_bytes));
-	TEST_EXPECT(test_io::write_file(project + "/defs/items.def", items_bytes));
+	struct Shape {
+		const char *name;
+		int64_t item;
+		std::vector<int> boxes; // by LOD
+		int lod;                // the LOD its plan is drawn by
+	};
+	const Shape shapes[] = { { "post", 106300, { 1 }, 0 }, { "palm", 106301, { 60, 50, 10, 2 }, 2 },
+		{ "ruin", 106302, { 50 }, 0 }, { "hut", 106303, { 70, 52, 49, 55 }, 2 } };
+	std::string items;
+	for (const Shape &shape : shapes) {
+		TEST_EXPECT(test_io::write_file(project + "/models/" + shape.name + ".3di", box_field_model(shape.name, shape.boxes)));
+		items += "begin \"" + std::string(shape.name) + "\"\nid " + std::to_string(shape.item) + "\ntype decoration\ngraphic " +
+		         shape.name + "\nend\n";
+	}
+	items += "begin \"Bare\"\nid 106304\ntype decoration\nend\nbegin \"Lost\"\nid 106305\ntype decoration\ngraphic lost\nend\n";
+	TEST_EXPECT(test_io::write_text(project + "/defs/items.def", items));
+	// The four models in turn over a grid 20 units apart, then the two items that draw none.
+	opennova::bms::File file;
+	opennova::mission::make_default(file);
+	const int64_t order[] = { 106300, 106301, 106302, 106303 };
+	for (int i = 0; i < 1333; ++i) {
+		const int64_t item = i < 1331 ? order[i % 4] : 106304 + (i - 1331);
+		opennova::bms::Entity entity = opennova::mission::new_entity(opennova::mission::EntityKind::Item, int(item), 100 + i);
+		entity.x = opennova::bms::to_fixed_16_16(-400.0 + 20.0 * (i % 40));
+		entity.y = opennova::bms::to_fixed_16_16(-400.0 + 20.0 * (i / 40));
+		file.items.push_back(entity);
+	}
+	opennova::mission::sync_counts(file);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(opennova::bms::write(file, bytes, error) && test_io::write_file(project + "/missions/field.bms", bytes));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
-	rig.session.handle(request::open_document("missions/00TRa.bms"));
+	rig.session.handle(request::open_document("missions/field.bms"));
 	TEST_EXPECT(rig.session.outcome().done());
 	if (!rig.session.outcome().done()) return 1;
-	rig.path = rig.session.document_for("missions/00TRa.bms")->path();
+	rig.path = rig.session.document_for("missions/field.bms")->path();
 	rig.pump();
 	const MissionMapViewport *map = rig.map();
 	TEST_EXPECT(map && map->status() == ViewportStatus::Ready);
 	if (!map) return 1;
-	// The models its entities' items draw, from the game's archives, as the item cache names them (the graphic, its
-	// .3di where it names none).
-	opennova::def::DefItemsFile items{};
-	TEST_EXPECT(opennova::def::def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0);
-	std::set<int64_t> named;
-	for (const MissionEntityMark &entity : map->scene().entities()) named.insert(entity.item);
-	std::set<std::string> models;
-	for (size_t i = 0; i < items.count; ++i) {
-		const opennova::def::DefItemDef &item = items.entries[i];
-		if (!named.count(int64_t(item.id)) || item.graphic[0] == 0) continue;
-		std::string graphic = item.graphic;
-		if (graphic.find('.') == std::string::npos) graphic += ".3di";
-		models.insert(opennova::strutil::to_lower(graphic));
-	}
-	opennova::def::def_free_items(&items);
-	size_t copied = 0;
-	for (const std::string &model : models) {
-		const std::string file = retail::asset_file(model.c_str());
-		if (file.empty()) continue;
-		TEST_EXPECT(test_io::write_file(project + "/models/" + model, test_io::read_file(file)));
-		++copied;
-	}
-	rig.session.handle(request::rescan());
-	rig.session.run_operations();
-	// The outlines read over the follows, a few each within the map's budgets, to the end.
-	const auto started = std::chrono::steady_clock::now();
 	int follows = 0;
 	do {
 		rig.pump();
 		++follows;
 	} while ((map->outlines_pending() > 0 || map->outline_lines().empty()) && follows < 4000);
-	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 	TEST_EXPECT(map->outlines_pending() == 0);
-	// What it drew: the entities, the distinct models outlined, the lines; every plan within the cap but those whose
-	// every LOD's plan is past it (drawn by the fewest).
+	// Each model outlined by the plan the cap gives it; every plan within the cap but those whose every LOD's plan is
+	// past it (the ruin and the hut, drawn by the fewest); the two items of no model outlined by none.
+	const std::vector<MissionEntityMark> &entities = map->scene().entities();
+	TEST_EXPECT(entities.size() == 1333 && map->footprints().size() == entities.size());
 	std::set<const MissionModelOutline *> outlined;
-	size_t past_cap = 0;
-	for (const MissionMapFootprint &footprint : map->footprints())
-		if (footprint.outline && outlined.insert(footprint.outline.get()).second &&
-		    footprint.outline->edges.size() / 6 > kMissionOutlineEdgesMax)
+	size_t past_cap = 0, edges = 0;
+	for (size_t i = 0; i < entities.size() && i < map->footprints().size(); ++i) {
+		const MissionMapFootprint &footprint = map->footprints()[i];
+		const Shape *shape = nullptr;
+		for (const Shape &each : shapes) shape = each.item == entities[i].item ? &each : shape;
+		TEST_EXPECT((shape != nullptr) == (footprint.outline != nullptr));
+		if (!shape || !footprint.outline) continue;
+		TEST_EXPECT(footprint.outline->lod == shape->lod &&
+		            footprint.outline->edges.size() / 6 == size_t(4 * shape->boxes[size_t(shape->lod)]));
+		edges += footprint.outline->edges.size() / 6;
+		if (outlined.insert(footprint.outline.get()).second && footprint.outline->edges.size() / 6 > kMissionOutlineEdgesMax)
 			++past_cap;
+	}
 	const size_t lines = map->outline_lines().size() / 4;
-	std::printf("retail 00TRa: %zu entities, %zu items named, %zu models copied, %zu outlined, %zu past the %zu-edge cap, "
-	            "%zu lines, %zu files read, %d follows in %.2f s\n",
-	            map->scene().entities().size(), named.size(), copied, outlined.size(), past_cap, kMissionOutlineEdgesMax,
-	            lines, map->outline_files_read(), follows, seconds);
-	// 00TRa's 1,333 entity records (the game places 943 of them in a single-player run: the rest its mode admits not),
-	// 141 models outlined, six of them drawn by their fewest plan, every LOD's past the cap.
-	TEST_EXPECT(map->scene().entities().size() == 1333);
-	TEST_EXPECT(outlined.size() == 141);
-	TEST_EXPECT(lines == 79903);
-	TEST_EXPECT(past_cap == 6);
-	// A drag of the first outlined item over 20 samples of one gesture, then its end: each sample's edit served and
-	// followed places that one record again and moves the chunks its edges lie in alone. Prints a sample's time.
+	std::printf("cap: %zu entities, %zu outlined, %zu past the %zu-edge cap, %zu lines in %zu chunks, %d follows\n",
+	            entities.size(), outlined.size(), past_cap, kMissionOutlineEdgesMax, lines, map->outline_chunks().size(), follows);
+	TEST_EXPECT(outlined.size() == 4 && past_cap == 2);
+	// 333 posts, palms and ruins and 332 huts: 4, 40, 200 and 196 edges each.
+	TEST_EXPECT(lines == edges && lines == 333 * (4 + 40 + 200) + 332 * 196);
+	TEST_EXPECT(map->outline_chunks().size() ==
+	            (lines + MissionMapViewport::kMissionMapLinesChunk - 1) / MissionMapViewport::kMissionMapLinesChunk);
+	// A drag of the first outlined item over 20 samples of one gesture, then its end.
 	NodeAddress dragged;
-	for (size_t i = 0; i < map->scene().entities().size() && !dragged.row; ++i)
-		if (map->footprints()[i].outline && map->scene().entities()[i].pool == MissionPool::Item)
-			dragged = NodeAddress{ map->scene().entities()[i].row, map->scene().entities()[i].kind, 0 };
+	for (size_t i = 0; i < entities.size() && !dragged.row; ++i)
+		if (map->footprints()[i].outline && entities[i].pool == MissionPool::Item)
+			dragged = NodeAddress{ entities[i].row, entities[i].kind, 0 };
 	TEST_EXPECT(dragged.row != 0);
 	if (!dragged.row) return 1;
 	const std::vector<uint64_t> chunks_before = map->outline_chunks();
-	double sample_seconds = 0.0;
-	size_t samples = 0, chunks_moved = 0;
+	size_t chunks_moved = 0;
 	for (int sample = 1; sample <= 20; ++sample) {
 		ViewportDrag drag;
 		drag.id = dragged.row;
@@ -1078,26 +1108,21 @@ static int test_retail() {
 		drag.snap = 0.0f;
 		drag.end = sample == 20;
 		editor_test::Gathered gathered;
-		std::string error;
-		const auto at = std::chrono::steady_clock::now();
 		TEST_EXPECT(map->drag(rig.context(), drag, gathered, error));
 		TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
 		rig.pump();
-		sample_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - at).count();
-		++samples;
 		TEST_EXPECT(map->outlines_placed() == 1);
 	}
 	const std::vector<uint64_t> &chunks_after = map->outline_chunks();
 	TEST_EXPECT(chunks_after.size() == chunks_before.size());
 	for (size_t i = 0; i < chunks_after.size() && i < chunks_before.size(); ++i) chunks_moved += chunks_after[i] != chunks_before[i];
 	TEST_EXPECT(chunks_moved >= 1 && chunks_moved <= 2);
-	std::printf("retail 00TRa drag: %zu samples, %.2f ms a sample (the edit served and followed), %zu of %zu chunks moved\n",
-	            samples, 1000.0 * sample_seconds / double(samples), chunks_moved, chunks_after.size());
+	std::printf("cap drag: 20 samples, %zu of %zu chunks moved\n", chunks_moved, chunks_after.size());
+	std::printf("test_edge_cap_and_chunks passed\n");
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_kind_row();
 	failed += test_workspace_pins();
@@ -1116,6 +1141,6 @@ int main(int argc, char **argv) {
 	failed += test_footprints();
 	failed += test_header_rebuilds();
 	failed += test_palette_pictures();
-	failed += test_retail();
+	failed += test_edge_cap_and_chunks();
 	return failed == 0 ? 0 : 1;
 }

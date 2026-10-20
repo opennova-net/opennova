@@ -11,13 +11,11 @@
 // destroy registers at the fade's values over the held ones; the husk's own viewport driven over itself; the
 // death sound heard as the clock runs from the death (Play destroy), never over a seek; the envelope's
 // `damage`, the `registers` rows' words; the option's wire and its refusals; a class whose death lands no
-// husk (null), a gnrl item's tail, and one with no husk model (its death plays, the graphic kept); the retail
-// leg (--retail, OPENNOVA_JO_ASSETS): JO's damageable items
-// whose models the tree holds, each planned and its husk swapped in.
+// husk (null), a gnrl item's tail, and one with no husk model (its death plays, the graphic kept); and an item of
+// every death the shipped damageable items die, each planned as its kind runs it and its husk swapped in.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <filesystem>
 #include <set>
 #include <string>
 #include <vector>
@@ -34,11 +32,11 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
+#include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/world/destruction.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -378,82 +376,131 @@ static int test_death_sound() {
 	return 0;
 }
 
-// The retail leg (--retail, OPENNOVA_JO_ASSETS): JO's ITEMS.DEF and every model its damageable items name
-// that the tree holds, written into one project; each damageable item's graphic opened destroyed past its
-// swap: the husk the game draws swapped in, its pieces those of the debris rows its def names.
-static int test_retail() {
-	const std::string items = retail::asset_file("ITEMS.DEF");
-	if (items.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS (ITEMS.DEF and the models it names)");
+namespace {
+
+// The synth armory with its user point `from` named `to`, through the engine's own 3DI writer (a husk of a death bank
+// the armory names none of).
+std::vector<uint8_t> armory_with_point(const char *from, const char *to) {
+	const std::vector<uint8_t> bytes = test_io::read_file(synth("armory.3di"));
+	threedi::Threedi3di3 model{};
+	if (threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) != 0) return {};
+	for (size_t i = 0; i < model.user_point_count; ++i)
+		if (std::string(model.user_points[i].name) == from)
+			std::snprintf(model.user_points[i].name, sizeof(model.user_points[i].name), "%s", to);
+	std::vector<uint8_t> written;
+	const bool wrote = threedi::threedi_3di3_write_memory(&model, written) == 0;
+	threedi::threedi_3di3_free(&model);
+	return wrote ? written : std::vector<uint8_t>();
+}
+
+// The damageable items of every death the shipped ones die (JO:CA's ITEMS.DEF, measured once: 117 items whose graphic
+// and husk the tree holds, 114 of them husked, 60 by gnrc, 36 by a brain, 18 by a class's tail), each drawn by a
+// graphic of its own (the crate's copies), its husk the armory: gnrc decorations (38) with a Fire bank on their husk
+// (12) and with no death sound (1), gnrc objects with the death flash (4), a gnrc tag in capitals (3) and a bridge's
+// (its water shock, 1); gnrl tails (13) and one with no death sound (1); ewep's (4); the brains of chel and cveh (25)
+// and of a cbot boat (its explosion, 10); and two that land no husk: an item of no class (2) and a landmine's with a
+// final husk (1). With the leg kinds each plan runs, as the shipped items of its kind run them.
+constexpr const char *kSweepItems =
+		"begin \"Gnrc decoration\"\nid 100600\ntype decoration\ngraphic g00\nai_function gnrc\nhusk armory\n"
+		"sounddeath EXPLO_PUMP\nparticledeath fx_dead\nend\n"
+		"begin \"Gnrc fire bank\"\nid 100601\ntype decoration\ngraphic g01\nai_function gnrc\nhusk pyre\n"
+		"sounddeath EXPLO_PUMP\nparticledeath fx_dead\nparticlefire fx_fire\nend\n"
+		"begin \"Gnrc quiet\"\nid 100602\ntype decoration\ngraphic g02\nai_function gnrc\nhusk armory\nparticledeath fx_dead\nend\n"
+		"begin \"Gnrc object\"\nid 100603\ntype object\ngraphic g03\nai_function gnrc\nhusk armory\nsounddeath EXPLO_PUMP\n"
+		"particledeath fx_dead\nend\n"
+		"begin \"Gnrc capitals\"\nid 100604\ntype decoration\ngraphic g04\nai_function GNRC\nhusk armory\n"
+		"sounddeath EXPLO_PUMP\nparticledeath fx_dead\nend\n"
+		"begin \"Gnrc bridge\"\nid 100605\ntype decoration\ngraphic g05\nai_function GNRC\nunit_type 11\nhusk armory\n"
+		"sounddeath EXPLO_PUMP\nparticledeath fx_dead\nend\n"
+		"begin \"Gnrl\"\nid 100606\ntype decoration\ngraphic g06\nai_function gnrl\nhusk armory\nsounddeath EXPLO_PUMP\n"
+		"particledeath fx_dead\nend\n"
+		"begin \"Gnrl quiet\"\nid 100607\ntype decoration\ngraphic g07\nai_function gnrl\nhusk armory\nparticledeath fx_dead\nend\n"
+		"begin \"Ewep\"\nid 100608\ntype object\ngraphic g08\nai_function ewep\nhusk armory\nend\n"
+		"begin \"Chel brain\"\nid 100609\ntype vehicle\ngraphic g09\nai_function chel\nattrib: aidata\nhusk armory\n"
+		"particledeath fx_dead\nend\n"
+		"begin \"Cveh brain\"\nid 100610\ntype vehicle\ngraphic g10\nai_function cveh\nattrib: aidata\nhusk armory\n"
+		"particledeath fx_dead\nend\n"
+		"begin \"Cbot brain\"\nid 100611\ntype vehicle\ngraphic g11\nai_function cbot\nattrib: aidata\nunit_type 5\n"
+		"husk armory\nparticledeath fx_dead\nend\n"
+		"begin \"No class\"\nid 100612\ntype decoration\ngraphic g12\nhusk armory\nend\n"
+		"begin \"Landmine\"\nid 100613\ntype object\ngraphic g13\nai_function lndm\nhusk armory\nhuskfinal house\nend\n";
+
+} // namespace
+
+// The sweep the shipped damageable items are held to, over those: every damageable item's graphic opened destroyed past
+// its swap, the husk the game draws swapped in where its death lands one, its plan's legs those its kind runs.
+static int test_damageable_sweep() {
 	DamageProject project;
 	TEST_EXPECT(project.made);
-	const std::vector<uint8_t> bytes = test_io::read_file(items);
-	def::DefItemsFile parsed{};
-	TEST_EXPECT(def::def_parse_items_memory(bytes.data(), bytes.size(), &parsed) == 0);
+	if (!project.made) return 1;
 	struct Damageable {
-		std::string item, graphic, husk;
+		const char *item, *graphic;
+		bool swaps;
+		int kind; // 0 gnrc, 1 a brain, 2 a class's tail
+		const char *legs;
 	};
-	std::vector<Damageable> damageable;
-	std::set<std::string> models;
-	for (size_t i = 0; i < parsed.count; ++i) {
-		const def::DefItemDef &def = parsed.entries[i];
-		if (def.husk[0] == '\0' || def.graphic[0] == '\0') continue;
-		const std::string graphic = retail::asset_file((std::string(def.graphic) + ".3di").c_str());
-		const std::string husk = retail::asset_file((std::string(def.husk) + ".3di").c_str());
-		if (graphic.empty() || husk.empty()) continue;
-		damageable.push_back({def.display_name, std::filesystem::path(graphic).filename().string(),
-		                      std::filesystem::path(husk).filename().string()});
-		models.insert(graphic);
-		models.insert(husk);
-		if (def.huskfinal[0] != '\0') {
-			const std::string final_husk = retail::asset_file((std::string(def.huskfinal) + ".3di").c_str());
-			if (!final_husk.empty()) models.insert(final_husk);
-		}
-	}
-	def::def_free_items(&parsed);
-	if (damageable.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS with the models JO's damageable items name");
-	for (const std::string &model : models)
-		TEST_EXPECT(test_io::write_file(project.root + "/models/" + std::filesystem::path(model).filename().string(),
-		                                     test_io::read_file(model)));
-	TEST_EXPECT(test_io::write_file(project.root + "/defs/items.def", bytes));
+	const Damageable damageable[] = {
+		{ "Gnrc decoration", "g00", true, 0, "4 swap,4 pieces,4 sound,4 effect,4 blast,4 fade" },
+		{ "Gnrc fire bank", "g01", true, 0, "4 swap,4 pieces,4 sound,4 effect,4 effect,4 blast,4 fade" },
+		{ "Gnrc quiet", "g02", true, 0, "4 swap,4 pieces,4 effect,4 blast,4 fade" },
+		{ "Gnrc object", "g03", true, 0, "4 swap,4 flash,4 pieces,4 sound,4 effect,4 blast,4 fade" },
+		{ "Gnrc capitals", "g04", true, 0, "4 swap,4 pieces,4 sound,4 effect,4 blast,4 fade" },
+		{ "Gnrc bridge", "g05", true, 0, "4 swap,4 pieces,4 effect,4 sound,4 effect,4 blast,4 fade" },
+		{ "Gnrl", "g06", true, 2, "0 swap,0 sound,0 effect,0 fade" },
+		{ "Gnrl quiet", "g07", true, 2, "0 swap,0 effect,0 fade" },
+		{ "Ewep", "g08", true, 2, "0 swap,0 fade" },
+		{ "Chel brain", "g09", true, 1, "0 swap,0 flash,0 pieces,0 effect,0 blast,0 fade" },
+		{ "Cveh brain", "g10", true, 1, "0 swap,0 flash,0 pieces,0 effect,0 blast,0 fade" },
+		{ "Cbot brain", "g11", true, 1, "0 swap,0 flash,0 pieces,0 sound,0 effect,0 blast,0 fade" },
+		{ "No class", "g12", false, -1, "" },
+		{ "Landmine", "g13", false, -1, "" },
+	};
+	const std::vector<uint8_t> crate = test_io::read_file(synth("crate.3di"));
+	for (const Damageable &one : damageable)
+		TEST_EXPECT(test_io::write_file(project.root + "/models/" + one.graphic + ".3di", crate));
+	TEST_EXPECT(test_io::write_file(project.root + "/models/pyre.3di", armory_with_point("Armory", "Fire")));
+	TEST_EXPECT(test_io::write_text(project.root + "/defs/items.def", test_io::crlf(kSweepItems)));
 	editor_test::handle_to_end(project.session, request::rescan());
 	while (project.session.view().activity.validation.running) project.session.poll();
-	size_t swapped = 0, pieces = 0, gnrc = 0, brains = 0, tails = 0;
-	std::set<std::string> opened;
+	size_t swapped = 0, pieces = 0, by_kind[3] = { 0, 0, 0 };
 	for (const Damageable &one : damageable) {
-		if (strutil::iequals(one.graphic, one.husk) || !opened.insert(strutil::to_lower(one.graphic)).second) continue;
-		TEST_EXPECT(project.open("models/" + one.graphic));
+		TEST_EXPECT(project.open(std::string("models/") + one.graphic + ".3di"));
 		TEST_EXPECT(project.set(R"({"options": {"damage": {"state": "destroyed", "item": )" +
 		                        io::json_write(io::json_string(one.item)) + "}}}"));
 		TEST_EXPECT(project.hold(64));
 		const ModelViewport *model = project.viewport();
-		TEST_EXPECT(model && model->view_status() == ModelViewStatus::Ready);
+		TEST_EXPECT(model && model->view_status() == ModelViewStatus::Ready && model->damage_item().found);
 		if (!model || !model->damage_item().found) continue;
 		const DamagePlan &plan = model->damage_plan();
+		std::string legs;
+		for (const std::string &kind : leg_kinds(plan)) legs += (legs.empty() ? "" : ",") + kind;
+		if (legs != one.legs) std::printf("  %s: %s\n", one.item, legs.c_str());
+		TEST_EXPECT(plan.swaps == one.swaps && legs == one.legs);
 		if (!plan.swaps) continue;
-		TEST_EXPECT(strutil::iequals(model->damage_drawn(), one.husk));
-		if (strutil::iequals(model->damage_drawn(), one.husk)) ++swapped;
+		const std::string husk = model->damage_item().husk + ".3di";
+		TEST_EXPECT(strutil::iequals(model->damage_drawn(), husk) && plan.husk == plan.pieces_from);
+		if (strutil::iequals(model->damage_drawn(), husk)) ++swapped;
 		pieces += plan.pieces.size();
-		if (model->damage_item().ai_class) ++brains;
-		else if (model->damage_item().death_class == world::ItemDeathClass::kGnrc) ++gnrc;
-		else ++tails;
+		const int kind = model->damage_item().ai_class ? 1 : model->damage_item().death_class == world::ItemDeathClass::kGnrc ? 0 : 2;
+		TEST_EXPECT(kind == one.kind);
+		++by_kind[kind];
 		TEST_EXPECT(!plan.legs.empty() && plan.legs.front().kind == "swap");
 	}
-	TEST_EXPECT(swapped > 0);
-	std::printf("retail: %zu damageable graphics destroyed (%zu gnrc, %zu brains, %zu class tails), their husks "
-	            "swapped in, %zu death pieces named\n",
-	            swapped, gnrc, brains, tails, pieces);
-	std::printf("test_retail passed\n");
+	std::printf("sweep: %zu damageable graphics destroyed (%zu gnrc, %zu brains, %zu class tails), their husks swapped in, "
+	            "%zu death pieces named\n",
+	            swapped, by_kind[0], by_kind[1], by_kind[2], pieces);
+	TEST_EXPECT(swapped == 12 && by_kind[0] == 6 && by_kind[1] == 3 && by_kind[2] == 3);
+	std::printf("test_damageable_sweep passed\n");
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	TEST_EXPECT(test_ctrl_words() == 0);
 	TEST_EXPECT(test_plan_and_frame() == 0);
 	TEST_EXPECT(test_destroyed_picture() == 0);
 	TEST_EXPECT(test_husk_viewport() == 0);
 	TEST_EXPECT(test_death_sound() == 0);
-	TEST_EXPECT(test_retail() == 0);
+	TEST_EXPECT(test_damageable_sweep() == 0);
 	std::printf("editor_model_damage OK\n");
 	return 0;
 }

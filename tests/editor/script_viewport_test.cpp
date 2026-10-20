@@ -19,9 +19,9 @@
 // (a reference's, a keyword's, a caret alone); a credits file held read only and the busy gate
 // refusing the planner; the envelope; a SetViewport of its device's size; and what the editor MCP's
 // ops say of a viewport with no canvas (a hit refused as such, a render, a drag, a command and a
-// camera refused, its items the marks, its notes none, the clock alone set). The retail leg
-// (OPENNOVA_JO_DIR): every shipped script's highlights tokens of their lines, its shown text's lines
-// the document's.
+// camera refused, its items the marks, its notes none, the clock alone set). And a script of our own
+// for every construct the shipped scripts are written in: its highlights tokens of their lines, its
+// shown text's lines the document's, its words pinned.
 #include <algorithm>
 #include <cstdio>
 #include <memory>
@@ -30,10 +30,7 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
-#include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
-#include <editor/assets/install_view.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/script_type.h>
 #include <editor/model/text_document.h>
@@ -52,7 +49,6 @@
 #include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -884,80 +880,132 @@ int test_session() {
 	return 0;
 }
 
-// --- the retail leg ----------------------------------------------------------------------------------
+// --- the shipped scripts' constructs ---------------------------------------------------------------------------
 
-// The retail leg (OPENNOVA_JO_DIR): every script the install ships, as the editor reads it. Its
-// highlights each one token of its line (inside the line, no blank and no line end in it), in order
-// and apart; its text as the control shows it a line for each of the document's, each line's start
-// the document's byte for byte; the install's counts pinned.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's scripts)");
-		return 0;
+// A script's words as the editor reads them, counted.
+struct ScriptWords {
+	size_t keywords = 0, commands = 0, operands = 0, lines = 0;
+};
+
+// A script read as the editor reads it (`name` its file): its highlights each one token of its line (inside the line,
+// no blank and no line end in it), in order and apart; its text as the control shows it a line for each of the
+// document's, each line's start the document's byte for byte. Its words counted into `words`.
+bool check_script(const std::string &name, const std::string &text_bytes, ScriptWords &words) {
+	const DocumentType *type = document_type_for(AssetKind::Script);
+	std::unique_ptr<DocumentBase> base = type->make();
+	Diagnostic error;
+	bool held = base->load_bytes(bytes_of(text_bytes), name, AssetKind::Script, "jo", error);
+	const TextDocument *text = text_of(*base);
+	if (!held || !text) {
+		std::fprintf(stderr, "%s: no script document\n", name.c_str());
+		return false;
 	}
-	ProjectDocument project;
-	project.target_game = "jo";
-	InstallView view;
-	std::string view_error;
-	TEST_EXPECT(view.open(install_spec(install, project), view_error));
-	const opennova::Vfs &mount = view.vfs();
-	size_t scripts = 0, keywords = 0, commands = 0, operands = 0, lines = 0;
-	for (const opennova::VfsFileLocation &location : mount.list_files()) {
-		const std::string &name = location.logical_name;
-		std::vector<uint8_t> bytes;
-		if (classify_asset(name, nullptr) != AssetKind::Script || !mount.read_file_raw(name, bytes)) continue;
-		const DocumentType *type = document_type_for(AssetKind::Script);
-		std::unique_ptr<DocumentBase> base = type->make();
-		Diagnostic error;
-		TEST_EXPECT(base->load_bytes(bytes, name, AssetKind::Script, "jo", error));
-		const TextDocument *text = text_of(*base);
-		if (!text) continue;
-		++scripts;
-		std::vector<TextHighlight> words;
-		script_highlighter(type->id)(*text, words);
-		const TextHighlight *last = nullptr;
-		for (const TextHighlight &word : words) {
-			keywords += word.kind == TextHighlightKind::Keyword;
-			commands += word.kind == TextHighlightKind::Command;
-			operands += word.kind == TextHighlightKind::Operand;
-			const std::string_view line = text->line(word.span.line);
-			const bool token = word.span.line >= 1 && word.span.line <= text->line_count() && word.span.column >= 1 &&
-			                   word.span.length > 0 && word.span.column - 1 + word.span.length <= line.size() &&
-			                   line.substr(word.span.column - 1, word.span.length).find_first_of(" \t\r\n") == std::string_view::npos;
-			if (!token)
-				std::fprintf(stderr, "retail: %s: the run at %zu:%zu (%zu) is no token of its line\n", name.c_str(), word.span.line,
-				             word.span.column, word.span.length);
-			TEST_EXPECT(token);
-			TEST_EXPECT(!last || last->span.line < word.span.line ||
-			            (last->span.line == word.span.line && last->span.column + last->span.length <= word.span.column));
-			last = &word;
-		}
-		// The control's lines the document's, each start where the document's line starts.
-		const ShownText shown(*text);
-		std::vector<size_t> starts{0};
-		for (size_t i = 0; i < shown.text().size(); ++i)
-			if (shown.text()[i] == U'\n') starts.push_back(i + 1);
-		TEST_EXPECT(starts.size() == text->line_count());
-		for (size_t line = 1; line <= starts.size() && line <= text->line_count(); ++line) {
-			size_t offset = 0;
-			TEST_EXPECT(text->offset_of(line, 1, offset) && shown.shown_at(offset) == starts[line - 1] &&
-			            shown.document_offset(starts[line - 1]) == offset);
-		}
-		lines += text->line_count();
+	std::vector<TextHighlight> found;
+	script_highlighter(type->id)(*text, found);
+	const TextHighlight *last = nullptr;
+	for (const TextHighlight &word : found) {
+		words.keywords += word.kind == TextHighlightKind::Keyword;
+		words.commands += word.kind == TextHighlightKind::Command;
+		words.operands += word.kind == TextHighlightKind::Operand;
+		const std::string_view line = text->line(word.span.line);
+		const bool token = word.span.line >= 1 && word.span.line <= text->line_count() && word.span.column >= 1 &&
+		                   word.span.length > 0 && word.span.column - 1 + word.span.length <= line.size() &&
+		                   line.substr(word.span.column - 1, word.span.length).find_first_of(" \t\r\n") == std::string_view::npos;
+		if (!token)
+			std::fprintf(stderr, "%s: the run at %zu:%zu (%zu) is no token of its line\n", name.c_str(), word.span.line,
+			             word.span.column, word.span.length);
+		const bool apart = !last || last->span.line < word.span.line ||
+		                   (last->span.line == word.span.line && last->span.column + last->span.length <= word.span.column);
+		if (!apart) std::fprintf(stderr, "%s: the run at %zu:%zu overlaps the one before\n", name.c_str(), word.span.line,
+		                         word.span.column);
+		held = held && token && apart;
+		last = &word;
 	}
-	std::printf("retail: %zu scripts, %zu lines; %zu keywords, %zu commands, %zu operands highlighted\n", scripts, lines,
-	            keywords, commands, operands);
-	// The install's counts, pinned (Joint Operations: Combined Arms): its operands the references
-	// editor_text_document's retail leg counts.
-	TEST_EXPECT(scripts == 23 && lines == 793 && keywords == 287 && commands == 209 && operands == 36);
+	// The control's lines the document's, each start where the document's line starts.
+	const ShownText shown(*text);
+	std::vector<size_t> starts{0};
+	for (size_t i = 0; i < shown.text().size(); ++i)
+		if (shown.text()[i] == U'\n') starts.push_back(i + 1);
+	if (starts.size() != text->line_count())
+		std::fprintf(stderr, "%s: %zu shown lines of %zu\n", name.c_str(), starts.size(), text->line_count());
+	held = held && starts.size() == text->line_count();
+	for (size_t line = 1; line <= starts.size() && line <= text->line_count(); ++line) {
+		size_t offset = 0;
+		const bool same = text->offset_of(line, 1, offset) && shown.shown_at(offset) == starts[line - 1] &&
+		                  shown.document_offset(starts[line - 1]) == offset;
+		if (!same) std::fprintf(stderr, "%s: line %zu starts elsewhere shown\n", name.c_str(), line);
+		held = held && same;
+	}
+	words.lines += text->line_count();
+	return held;
+}
+
+// Every construct the shipped scripts are written in (enumerated once over JO:CA's scripts, the base game's and its
+// expansions': 23 in the install, 793 lines, 287 keywords, 209 commands and 36 operands highlighted), a script of our
+// own each, in the shipped form (CR LF lines): its highlights tokens of their lines, its shown text's lines the
+// document's (check_script), and its words and lines pinned (the document counts the empty line after a last
+// CR LF). The constructs: tab and blank indents, blank lines, a last line
+// with no end, blanks after a line's last word; comments after ';' and after '//' (a rule of slashes and stars, an IF
+// and its ENDIF commented out, a note after a command); the keywords in every case the scripts spell them (IF, If,
+// if; THEN, Then; ELSE, Else; ELSEIF; ENDIF, EndIf; NOT, Not; AND, And; OR) and the conditions joined by them; an
+// ELSEIF whose condition stands on the next line; a variable set and compared (=, ==, !=, >=, <=, -); a command's
+// parameters in parentheses, after a blank and none, empty, or bare after a blank, split by a comma with and without a
+// blank; a wave's quoted name; a DOSEQ's sections (NEXT, ENDDO); a line of a colon and a command; and the misspelt
+// END (ENIF), a word the compiler knows none of.
+int test_shipped_constructs() {
+	struct Script {
+		const char *name;
+		const char *text;
+		ScriptWords want;
+	};
+	const Script scripts[] = {
+		{ "tabs.wac", "If true(bluekills) then\r\n\tLose (1)\r\nendif\r\n", { 3, 2, 0, 4 } },
+		{ "blank_lines.wac", "If true(bluekills) then\r\n\r\n            Lose (1)\r\n\r\nendif\r\n", { 3, 2, 0, 6 } },
+		{ "no_last_end.wac", "if eq v11 1 and never then\r\n\tsound2tgt ss_EXPLO_BASE, 4\r\nendif", { 4, 3, 1, 3 } },
+		{ "trailing_blanks.wac", "if eq v11 1 and never then \r\n\tLose (1)  \r\nendif\t\r\n", { 4, 3, 0, 4 } },
+		{ "semicolons.wac", "; the opening\r\n;-------- a rule --------\r\nIf true(bluekills) then ; a note\r\n\tLose (1)\r\n"
+		                    "endif\r\n;endif\r\n",
+		  { 3, 2, 0, 7 } },
+		{ "slashes.wac", "///***** a rule ******///\r\n//if true(bluekills) then\r\n//endif\r\nIf true(bluekills) then\r\n"
+		                 "\tLose (1) // the end\r\nendif\r\n",
+		  { 3, 2, 0, 7 } },
+		{ "cases.wac", "IF true(bluekills) THEN\r\n\tLose (1)\r\nELSE\r\n\tLose (2)\r\nENDIF\r\nIf NOT true(bluekills) And never "
+		               "OR never Then\r\n\tLose (1)\r\nElse\r\n\tLose (2)\r\nEndIf\r\nif Not never AND never then\r\n\tLose (1)\r\n"
+		               "endif\r\n",
+		  { 16, 11, 0, 14 } },
+		{ "elseif.wac", "if (humans == 1) then\r\n\taccuracyspread = 14\r\nelseif\r\n\t(humans == 2) then\r\n\t\taccuracyspread = 13\r\n"
+		                "ELSEIF\r\n\t(humans != 3) then\r\n\t\taccuracyspread = 11\r\nelse\r\n\taccuracyspread = 8\r\nendif\r\n",
+		  { 8, 0, 0, 12 } },
+		{ "operators.wac", "if (v1 >= 2) and (v2 <= 4) then\r\n\tv3 = v3 - 1\r\nendif\r\n", { 4, 0, 0, 4 } },
+		{ "parameters.wac", "if never() then\r\n            fogtype(4) \r\n\tfogtype 2\r\n\tskyheight(200)\r\n\tsound2tgt ss_EXPLO_BASE,4\r\n"
+		                    "\tsound2tgt ss_EXPLO_BASE, 4\r\nendif\r\n",
+		  { 3, 6, 2, 8 } },
+		{ "wave.wac", "If eq (v1,1) and never and waveready then wave \"intro01.wav\",100\r\nendif\r\n", { 5, 4, 1, 3 } },
+		{ "doseq.wac", "If true(bluekills) then\r\n\tdoseq\r\n\t\tLose (1)\r\n\tnext\r\n\t\tLose (2)\r\n\tenddo\r\nendif\r\n",
+		  { 6, 3, 0, 8 } },
+		{ "colon.wac", "if never() then\r\n\r\n:           skyheight(200)\r\n\r\nendif\r\n", { 3, 2, 0, 6 } },
+		{ "enif.wac", "if ontick(850) then\r\n\tskyspeed(25)\r\nenif\r\n", { 2, 2, 0, 4 } },
+	};
+	size_t held = 0;
+	for (const Script &script : scripts) {
+		ScriptWords words;
+		const bool checked = check_script(script.name, script.text, words);
+		const bool pinned = words.keywords == script.want.keywords && words.commands == script.want.commands &&
+		                    words.operands == script.want.operands && words.lines == script.want.lines;
+		if (!pinned)
+			std::fprintf(stderr, "%s: %zu keywords, %zu commands, %zu operands, %zu lines\n", script.name, words.keywords,
+			             words.commands, words.operands, words.lines);
+		held += checked && pinned ? 1 : 0;
+	}
+	std::printf("shipped constructs: %zu of %zu scripts' highlights tokens of their lines, their lines the control's\n", held,
+	            std::size(scripts));
+	TEST_EXPECT(held == std::size(scripts));
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_kind_table();
 	failures += test_span_diff();
@@ -968,7 +1016,7 @@ int main(int argc, char **argv) {
 	failures += test_highlights();
 	failures += test_reveal_after_hidden_byte();
 	failures += test_session();
-	failures += test_retail();
+	failures += test_shipped_constructs();
 	if (failures == 0) std::printf("editor_script_viewport: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
