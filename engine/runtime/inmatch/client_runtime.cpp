@@ -498,13 +498,19 @@ bool ClientRuntime::begin_mission_reload() {
 }
 
 // The mission start's head: the main frame's 62-frame quality countdown goes to 0, so
-// the mission's first game-loop frame folds at once, and the quality object resets.
-// The metrics object's reset (CNetStats_Reset @0x5243aa) has no separate client state
-// here: the replica state and the held window start empty.
+// the mission's first game-loop frame folds at once; the metrics object resets (its
+// level, the host scalar +0x0C, and through ClearRecvCounters the client scalar +0x10
+// and the receive window, whose stale samples a reload would otherwise fold into the new
+// mission's first reports); and the quality object, whose level the 0x4C carries, resets.
 // [orig: Game_StartMission @0x524360 - `mov dword_24D1DDC, ebx` @0x52439e (ebx = 0),
+//  CNetStats_Reset(&g_NetQualityLevel) @0x5243aa (@0x4C2FF0: [0], [3] and the send
+//  window; CNetStats_ClearRecvCounters @0x4C2F90: [4] and the receive window),
 //  CNetQuality_Reset(&g_NetQuality) @0x5243b4]
 void ClientRuntime::reset_mission_start_quality() {
 	quality_update_countdown_ = 0;
+	replication::net_quality_window_clear(client_quality_window_);
+	view_.state().net.level = 0;
+	view_.state().net.host_metric = 0;
 	hud::net_quality_reset(net_indicators_, view_.state().local_clock_ms);
 }
 

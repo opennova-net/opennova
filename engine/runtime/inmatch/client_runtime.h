@@ -331,6 +331,10 @@ public:
 	// retail's mode-init value (the ceiling metric 255) until the first 2 s
 	// window closes; any rate at or above 16 scores the floor. Joiner only.
 	void set_observed_frame_rate(int32_t fps) { observed_frame_rate_ = fps; }
+	// The client (RECEIVE) window the 62-frame fold samples into.
+	const replication::NetQualityWindow &client_quality_window() const {
+		return client_quality_window_;
+	}
 	// The local player's Position (fixed 16.16), the client handlers' read of
 	// g_LocalPlayerEntity->Position: each role stamps its world's local player
 	// ahead of the client frame (the joiner's L, the listen host's own body);

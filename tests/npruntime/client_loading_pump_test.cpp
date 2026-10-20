@@ -648,10 +648,11 @@ bool run_a_bodyless_joiner_pings() {
 // The main frame's 62-frame quality fold steps in the game loop's frames alone and starts
 // from the mission start's zero: no fold runs in the join's waits (a host scalar landing
 // there moves no level), the first game-loop frame folds at once, the next fold is 62
-// frames on, and a reload's mission start zeroes the countdown and resets the level.
+// frames on, and a reload's mission start zeroes the countdown and resets the level, the
+// host scalar and the receive window.
 // [orig: Game_ProcessMainFrame @0x526537..0x526555 (dword_24D1DDC - 1, > 0 skips, else
 //  62) -> CNetQuality_UpdateMetrics @0x4C52C0; Game_StartMission's head @0x52439e (the
-//  zero) and CNetQuality_Reset @0x5243b4]
+//  zero), CNetStats_Reset @0x5243aa and CNetQuality_Reset @0x5243b4]
 bool run_the_quality_fold_starts_with_the_game_loop() {
 	Harness h;
 	h.client.set_observed_frame_rate(62); // the client window samples its floor 1
@@ -682,8 +683,16 @@ bool run_the_quality_fold_starts_with_the_game_loop() {
 	(void)h.frame();
 	if (!expect(h.client.net_quality_level() == 2, "fold: the 63rd game-loop frame folds again"))
 		return false;
-	return expect(h.client.begin_mission_reload() && h.client.net_quality_level() == 0,
-			"fold: a reload's mission start resets the level");
+	if (!expect(h.client.client_quality_window().ping[1] != 0,
+			"fold: the receive window holds the game loop's samples"))
+		return false;
+	const replication::NetQualityWindow empty;
+	const replication::NetQualityWindow &window = h.client.client_quality_window();
+	return expect(h.client.begin_mission_reload() && h.client.net_quality_level() == 0 &&
+	                      window.cursor == empty.cursor && window.ping[1] == 0 &&
+	                      window.quality == 0 && h.client.state().net.host_metric == 0,
+			"fold: a reload's mission start resets the level, the host scalar and the "
+			"receive window");
 }
 
 // Game_StartMission's pumps from the S2C 0x1A to the final wait for the 0x0F, by where the
