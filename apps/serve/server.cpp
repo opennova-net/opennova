@@ -240,7 +240,7 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// fopen("admin_log.txt", "w") @0x402C84].
 	(void)files_.write(kAdminLogFileName, std::string_view(), /*append=*/false);
 	// The log switches arm at the process start, as retail's command-line
-	// parse arms them (server_logs.h).
+	// parse arms them (inmatch/server_log_devices.h).
 	log_devices_.arm(options_.log_switches);
 	// Retail's boot order: game.cfg at Game_Run's start, the subsystems (the
 	// mount, weapon.def and game.cfg again), then the dead /HOST path (the host
@@ -540,7 +540,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.host_cfg.serve_and_play = host_.serve_and_play;
 	request.host_cfg.game_root = options_.resource_dir;
 	// The log devices and the socket's address (bound on every interface) for
-	// the session's logs (server_logs.h; inmatch/server_console.h).
+	// the session's logs (inmatch/server_log_devices.h; inmatch/server_console.h).
 	request.host_cfg.logs = log_devices_.logs();
 	request.host_cfg.local_address = PeerAddr{0, bound_port_};
 	request.host_cfg.local_address_known = true;

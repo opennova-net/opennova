@@ -1404,6 +1404,9 @@ public:
 	// The process's map-rotation words (simulation_net_state.h): the game world's one
 	// HostRotation, which every session's host reads and writes. Null = this sim's own.
 	void use_host_rotation(opennova::inmatch::HostRotation *p_rotation) { net_.process_rotation = p_rotation; }
+	// The process's server log devices (simulation_net_state.h), which every hosted
+	// session's context writes. Null = none.
+	void use_log_devices(opennova::inmatch::ServerLogDevices *p_devices) { net_.log_devices = p_devices; }
 	// The last load's session create ended the process on a nonzero mpreset (inmatch
 	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.
 	bool session_create_ended_process() const;

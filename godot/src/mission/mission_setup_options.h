@@ -91,6 +91,9 @@ public:
 	// Null = the sim keeps its own.
 	opennova::inmatch::HostRotation *get_host_rotation() const { return host_rotation_; }
 	void set_host_rotation(opennova::inmatch::HostRotation *p_value) { host_rotation_ = p_value; }
+	// The process's server log devices (Simulation.use_log_devices), C++ only. Null = none.
+	opennova::inmatch::ServerLogDevices *get_log_devices() const { return log_devices_; }
+	void set_log_devices(opennova::inmatch::ServerLogDevices *p_value) { log_devices_ = p_value; }
 	// The joiner's profile-to-wire projection (Simulation.set_join_character_profile).
 	// Null = none staged.
 	Ref<CharacterJoinProfile> get_join_character_profile() const {
@@ -168,6 +171,7 @@ private:
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
 	opennova::inmatch::HostRotation *host_rotation_ = nullptr;
+	opennova::inmatch::ServerLogDevices *log_devices_ = nullptr;
 	Ref<CharacterJoinProfile> join_character_profile_;
 	PackedStringArray spawn_names_;
 	Ref<ResourceRoot> resource_root_;

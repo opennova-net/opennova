@@ -11,6 +11,8 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "network/net_session_policy.h"
+#include "resource_index/launch_flags.h" // the server log switches
+#include "util/string_convert.h"
 #include "network/novaworld_client.h"
 #include <runtime/inmatch/mission_exit.h>
 #include "audio/music_director.h"
@@ -59,6 +61,15 @@ GameWorld::GameWorld() :
 }
 
 void GameWorld::_ready() {
+	// The server log devices the process's switches arm, in the working directory where
+	// retail opens every log by its bare name; the punt and cheat logs write their START
+	// lines now, as retail's switch parse does [orig: Game_ParseCommandLineAndInit
+	//  @0x4a778f..0x4a7a11, @0x4a743d..0x4a744f].
+	if (log_devices_ == nullptr) {
+		log_devices_ = std::make_unique<opennova::inmatch::ServerLogDevices>(
+				opennova::to_std(LaunchFlags::working_dir()));
+		log_devices_->arm(LaunchFlags::parsed().log_switches);
+	}
 	// The world's own process step exists for exactly one thing: the joiner
 	// preload wait the session drive steps (switched on by load_as_joiner,
 	// off when the preload ends).
@@ -122,6 +133,9 @@ void GameWorld::_process(double p_delta) {
 void GameWorld::_notification(int p_what) {
 	if (p_what == NOTIFICATION_EXIT_TREE) {
 		stop_water_render_stats();
+		// The process's network shut down: the _inout.txt log, then the net log, each
+		// stops and flushes [orig: Game_ShutdownSubsystems @0x4A5398].
+		if (log_devices_ != nullptr) log_devices_->close(0u);
 		return;
 	}
 	if (p_what != NOTIFICATION_VISIBILITY_CHANGED || !is_node_ready()) {

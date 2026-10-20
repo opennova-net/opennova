@@ -5146,6 +5146,10 @@ add_executable(opennova_serve_model_page_test serve/opennova_serve_model_page_te
 target_link_libraries(opennova_serve_model_page_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_model_page_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_model_page COMMAND opennova_serve_model_page_test)
+# The server log switches the game's launch walk reads and the devices they arm (FOUND 5).
+add_executable(npruntime_server_log_devices_test npruntime/server_log_devices_test.cpp)
+target_link_libraries(npruntime_server_log_devices_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_server_log_devices COMMAND npruntime_server_log_devices_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

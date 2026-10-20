@@ -20,7 +20,10 @@ std::string manifest_words(const std::string &role) {
 	return "this machine's configuration of the game";
 }
 
-// The files the game writes beside itself as it runs, each by its writer.
+// The files the game writes beside itself as it runs, each by its writer. _errlog.txt's
+// writer is gated on a flag nothing in a stock run sets, so stock JO never writes it; the row
+// names one another build left beside the game (D-NET-357) [orig: g_ErrorLogEnabled, read
+// @0x53c6d3, its one store @0x53c761 outside any function].
 struct Written {
 	const char *name;
 	const char *what;

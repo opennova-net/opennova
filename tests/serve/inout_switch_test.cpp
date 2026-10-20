@@ -2,7 +2,7 @@
 // with the protocol's _inout.txt log, which the socket open then turns on.
 // [orig: Game_ParseCommandLineAndInit @0x4A743D..0x4A744F (g_InoutLogEnabled);
 //  CNapiNetwork_OpenTransportSocket @0x4C6D02..0x4C6D15]
-#include "server_logs.h"
+#include <runtime/inmatch/server_log_devices.h>
 
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_console.h>
@@ -21,12 +21,12 @@ int main() {
 			++failures;
 		}
 	};
-	serve::LogSwitches sw;
+	LogSwitches sw;
 	std::string error;
-	check(serve::parse_log_switch({"/inout"}, 0, sw, error) == 1 && sw.inout, "/INOUT in any case");
-	serve::LogSwitches off;
+	check(parse_log_switch({"/inout"}, 0, sw, error) == 1 && sw.inout, "/INOUT in any case");
+	LogSwitches off;
 	{
-		serve::ServerLogDevices devices;
+		inmatch::ServerLogDevices devices;
 		devices.arm(off);
 		const inmatch::ServerLogs logs = devices.logs();
 		check(logs.inout != nullptr && !logs.inout_switch, "the log exists, the switch unset");
@@ -36,7 +36,7 @@ int main() {
 		check(!logs.inout->enabled(), "unset: the socket open leaves it off");
 	}
 	{
-		serve::ServerLogDevices devices;
+		inmatch::ServerLogDevices devices;
 		devices.arm(sw);
 		const inmatch::ServerLogs logs = devices.logs();
 		check(logs.inout != nullptr && logs.inout_switch, "the switch reaches the host context");

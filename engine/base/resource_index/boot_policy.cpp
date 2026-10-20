@@ -65,6 +65,28 @@ void parse_novaworld_switches(const std::vector<std::string> &args, LaunchFlags 
     }
 }
 
+// The server log switches in the game's walk order: /INOUT, then /PROFILE, which steps onto its
+// value token, then /CHEATLOG, /PUNT.TXT, /PUNTLOG and /NETLOG, tested against that token when
+// /PROFILE took one, as every later test of the walk's iteration is.
+// [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/INOUT" @0x4a743d; "/PROFILE" @0x4a778f,
+//  the step `add edi, ebx` @0x4a77a1 and the copy into g_ProfileLogPath @0x4a77a7..0x4a77b9,
+//  g_RunningWithProfile @0x4a77bb; "/CHEATLOG" @0x4a77fc; "/PUNT.TXT" @0x4a782d; "/PUNTLOG"
+//  @0x4a7863; "/NETLOG" @0x4a7a11]
+void parse_log_switches(const std::vector<std::string> &args, LaunchFlags &f) {
+    LogSwitches &s = f.log_switches;
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        if (strutil::iequals(args[i], kLaunchFlagInout)) s.inout = true;
+        if (strutil::iequals(args[i], kLaunchFlagProfile) && i + 1 < args.size()) {
+            ++i;
+            s.profile_path = args[i];
+        }
+        if (strutil::iequals(args[i], kLaunchFlagCheatLog)) s.cheat_log = true;
+        if (strutil::iequals(args[i], kLaunchFlagPuntTxt)) s.punt_log = true;
+        if (strutil::iequals(args[i], kLaunchFlagPuntLog)) s.punt_log = true;
+        if (strutil::iequals(args[i], kLaunchFlagNetLog)) s.net_log = true;
+    }
+}
+
 // `/mod` and `/exp` share one arm of the game's walk [orig:
 // Game_ParseCommandLineAndInit @ 0x4a7310, the two `stricmp`s @ 0x4a76ac]: with
 // a next token the walk steps onto it (@ 0x4a76c1), so that token is never read
@@ -132,7 +154,38 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.no_reload = has_flag(args, kLaunchFlagNoReload); // [orig: @0x4A76D7..0x4A76E9]
     f.lan = has_flag(args, kLaunchFlagLan); // [orig: @0x4A74D9..0x4A74EB]
     parse_novaworld_switches(args, f);
+    parse_log_switches(args, f);
     return f;
+}
+
+int parse_log_switch(const std::vector<std::string> &args, std::size_t i, LogSwitches &out,
+        std::string &error) {
+    const std::string &a = args[i];
+    if (strutil::iequals(a, kLaunchFlagProfile)) {
+        if (i + 1 >= args.size()) {
+            error = a + " needs a value";
+            return -1;
+        }
+        out.profile_path = args[i + 1];
+        return 2;
+    }
+    if (strutil::iequals(a, kLaunchFlagPuntTxt) || strutil::iequals(a, kLaunchFlagPuntLog)) {
+        out.punt_log = true;
+        return 1;
+    }
+    if (strutil::iequals(a, kLaunchFlagCheatLog)) {
+        out.cheat_log = true;
+        return 1;
+    }
+    if (strutil::iequals(a, kLaunchFlagNetLog)) {
+        out.net_log = true;
+        return 1;
+    }
+    if (strutil::iequals(a, kLaunchFlagInout)) {
+        out.inout = true;
+        return 1;
+    }
+    return 0;
 }
 
 int launch_lan_port(const LaunchFlags &flags, int fallback) {

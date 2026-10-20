@@ -24,7 +24,7 @@
 #include "server.h"
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
-#include "server_logs.h"
+#include <runtime/inmatch/server_log_devices.h>
 #include "serve_test_support.h"
 #include "status_console.h"
 
@@ -306,16 +306,16 @@ void test_inout_lines() {
 }
 
 void test_switches_and_devices() {
-	serve::LogSwitches sw;
+	LogSwitches sw;
 	std::string error;
 	const std::vector<std::string> args = {"/profile", "host", "/PuntLog", "/CHEATLOG", "/PUNT.TXT", "/x"};
-	CHECK(serve::parse_log_switch(args, 0, sw, error) == 2 && sw.profile_path == "host");
-	CHECK(serve::parse_log_switch(args, 2, sw, error) == 1 && sw.punt_log);
-	CHECK(serve::parse_log_switch(args, 3, sw, error) == 1 && sw.cheat_log);
-	CHECK(serve::parse_log_switch(args, 4, sw, error) == 1);
-	CHECK(serve::parse_log_switch(args, 5, sw, error) == 0);
-	CHECK(serve::parse_log_switch({"/PROFILE"}, 0, sw, error) == -1);
-	CHECK(serve::parse_log_switch({"/netlog"}, 0, sw, error) == 1 && sw.net_log);
+	CHECK(parse_log_switch(args, 0, sw, error) == 2 && sw.profile_path == "host");
+	CHECK(parse_log_switch(args, 2, sw, error) == 1 && sw.punt_log);
+	CHECK(parse_log_switch(args, 3, sw, error) == 1 && sw.cheat_log);
+	CHECK(parse_log_switch(args, 4, sw, error) == 1);
+	CHECK(parse_log_switch(args, 5, sw, error) == 0);
+	CHECK(parse_log_switch({"/PROFILE"}, 0, sw, error) == -1);
+	CHECK(parse_log_switch({"/netlog"}, 0, sw, error) == 1 && sw.net_log);
 
 	// The devices in a working directory of their own.
 	const fs::path dir = fs::temp_directory_path() /
@@ -325,8 +325,8 @@ void test_switches_and_devices() {
 	const fs::path previous = fs::current_path();
 	fs::current_path(dir);
 	{
-		serve::ServerLogDevices devices;
-		serve::LogSwitches on;
+		inmatch::ServerLogDevices devices;
+		LogSwitches on;
 		on.profile_path = "host";
 		on.punt_log = true;
 		devices.arm(on);
@@ -345,8 +345,8 @@ void test_switches_and_devices() {
 	{
 		// A _DONETLOG.TXT in the working directory turns it on at the start.
 		std::ofstream("_DONETLOG.TXT") << "";
-		serve::ServerLogDevices devices;
-		devices.arm(serve::LogSwitches{});
+		inmatch::ServerLogDevices devices;
+		devices.arm(LogSwitches{});
 		CHECK(devices.logs().net->enabled());
 	}
 	std::ifstream netlog("_NETLOG.TXT", std::ios::binary);

@@ -49,12 +49,12 @@
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_vars.h>
 #include <net/npwire/datagram_demux.h>
+#include <runtime/inmatch/server_log_devices.h> // the log devices the switches arm
 
 #include "admin_tcp_server.h"
 #include "credentials.h"
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
-#include "server_logs.h"
 
 #include <atomic>
 #include <cstdint>
@@ -97,7 +97,7 @@ struct ServeOptions {
 	bool allow_public = false;                     // --allow-public
 	std::string credentials_path;                  // --credentials FILE
 	Credentials credentials; // main() loads it and masks every value
-	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG (server_logs.h)
+	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG, /NETLOG, /INOUT
 	// What a supervisor reads of the run (run_reports.h), none of it retail's: whether the
 	// status page prints and stdin is its chat input (--status-page on|off; on, as a retail
 	// dedicated host draws its page), the tick health rewritten once a minute (--stats-file)
@@ -301,9 +301,9 @@ private:
 	bool exit_save_owed_ = false;
 	bool reset_exit_ = false;
 	std::string end_message_;
-	ServerLogDevices log_devices_; // the logs the switches armed (server_logs.h)
-	// The working directory as the admin log's device (server_logs.h).
-	WorkingDirectoryFiles files_;
+	inmatch::ServerLogDevices log_devices_; // the logs the switches armed (server_log_devices.h)
+	// The working directory as the admin log's device (server_log_devices.h).
+	inmatch::WorkingDirectoryFiles files_;
 	uint32_t main_frame_ = 0;
 	// The avatar registry PETERRABBIT SEXCHANGE picks from (the mounted Avatars.def).
 	inmatch::CharacterRegistry characters_;

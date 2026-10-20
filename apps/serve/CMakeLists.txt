@@ -15,7 +15,6 @@ add_library(opennova_serve_core STATIC
     run_reports.cpp      # a supervisor's files: the tick health (--stats-file), the exit's line (--exit-file)
     serve_listing.cpp
     server.cpp
-    server_logs.cpp      # the working-directory file seam and the log switches (ADR 0051 PR7)
     status_console.cpp   # the status page as text on stdout, stdin as its chat input
 )
 

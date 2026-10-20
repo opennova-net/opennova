@@ -110,6 +110,33 @@ inline constexpr const char *kLaunchFlagPostPortNumber = "/POSTPORTNUMBER";
 inline constexpr const char *kLaunchFlagUdpNovaWorld = "/UDPNOVAWORLD";
 inline constexpr const char *kLaunchFlagUseJunction = "/USEJUNCTION";
 inline constexpr const char *kLaunchFlagClearJunction = "/CLEARJUNCTION";
+// The server log switches in retail's spellings, each the whole token in any case:
+// `/PROFILE <path>` the .sph server log, `/PUNT.TXT` or `/PUNTLOG` the punt log, `/CHEATLOG`
+// the cheat log, `/NETLOG` the net log on from the start, `/INOUT` the protocol's _inout.txt
+// log. The game and opennova-serve arm the same devices from them
+// (runtime/inmatch/server_log_devices.h).
+// [orig: Game_ParseCommandLineAndInit @0x4a778f (/PROFILE), @0x4a782d (/PUNT.TXT), @0x4a7863
+// (/PUNTLOG), @0x4a77fc (/CHEATLOG), @0x4a7a11 (/NETLOG), @0x4a743d..0x4a744f (/INOUT)]
+inline constexpr const char *kLaunchFlagProfile = "/PROFILE";
+inline constexpr const char *kLaunchFlagPuntTxt = "/PUNT.TXT";
+inline constexpr const char *kLaunchFlagPuntLog = "/PUNTLOG";
+inline constexpr const char *kLaunchFlagCheatLog = "/CHEATLOG";
+inline constexpr const char *kLaunchFlagNetLog = "/NETLOG";
+inline constexpr const char *kLaunchFlagInout = "/INOUT";
+struct LogSwitches {
+    std::string profile_path;
+    bool punt_log = false;
+    bool cheat_log = false;
+    bool net_log = false;
+    bool inout = false;
+};
+
+// Parse one log switch at args[i]: the arguments it took (1, or 2 with its value), 0 when
+// args[i] is not a log switch, -1 when /PROFILE has no value (`error` says why). The
+// /PROFILE path is the next token [orig: @0x4a77a1..0x4a77b9].
+int parse_log_switch(const std::vector<std::string> &args, std::size_t i, LogSwitches &out,
+        std::string &error);
+
 // The /UDPNOVAWORLD table's bounds: six entries of 32 bytes (31 characters and the NUL).
 inline constexpr std::size_t kLaunchUdpNovaWorldMax = 6;
 inline constexpr std::size_t kLaunchUdpNovaWorldChars = 31;
@@ -182,6 +209,9 @@ struct LaunchFlags {
     //  both -1 in .data @0x829F88]
     int use_junction = -1;
     int clear_junction = -1;
+    // The server log switches (parse_log_switch), read in the same walk: a /PROFILE's value
+    // token is stepped over.
+    LogSwitches log_switches;
 };
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args);
