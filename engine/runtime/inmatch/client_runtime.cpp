@@ -779,7 +779,12 @@ void ClientRuntime::update_net_quality() {
 				novaworld_link_.nwu_session_role)) {
 		mission_exit_reason_ = kMissionExitNovaWorld;
 	}
-	const bool held = !deployed_ || !authoritative_spawn_released_ ||
+	// Held by the deploy hold, the round-over gate or the pre-round timer; death is
+	// not in it, so a dead player's window samples on (D-NET-529). g_NetSpawnSuspended
+	// holds only inside the mission start, which runs no main frame here.
+	// [orig: @0x4c5606..0x4c5630; g_NetSpawnSuspended @0x24d1de0 written by
+	//  Game_StartMission and Game_ShowErrorLogAndAbortMission alone]
+	const bool held = !deployed_ || view_.state().spawn_success_gate ||
 			view_.state().preround_delay_seconds != 0;
 	if (held) {
 		replication::net_quality_window_clear(client_quality_window_);
@@ -1366,7 +1371,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	//  aborted 1" @0x524db0..0x524dd1; NapiClient_WaitForGameStart @0x42cca1
 	//  -> "aborted 3" @0x524e2e..0x524e4f; both push g_GameModeGameLoop]
 	const bool gate_read = joiner_ != nullptr &&
-			(joiner_->in_match() ||
+			(joiner_->in_game_loop() ||
 			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::SyncTailWait ||
 			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::WorldStreamWait);
 	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session() && gate_read &&
@@ -1414,8 +1419,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	}
 
 	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
-	// is_mp_session_peer (a Joiner in-match satisfies both). [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279]
-	if (!replay_mode_ && joiner_->in_match()) {
+	// is_mp_session_peer alone, so the game loop's frame steps the timer and reports dead
+	// or alive (D-NET-529). [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279]
+	if (!replay_mode_ && joiner_->in_game_loop()) {
 		if (++net_quality_timer_ > kNetQualityInterval) {
 			net_quality_timer_ = 0;
 			ProtocolMessage quality = make_protocol_message(
@@ -1453,15 +1459,25 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	if (send_block_open) build_send_boundary(outbound, now_tick,
 			[&](std::vector<ProtocolMessage> &send_messages) {
 		// The witnessed deploy gate the 0x2C RTT ping and the 0x0C uplink share: is_in_session &&
-		// !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate. A Joiner is always !is_authority;
-		// deployed_ and authoritative_spawn_released_ model those two independent gates.
-		const bool deployed_joiner =
-				joiner_->in_match() && is_deployed() && joiner_->has_self_handle();
+		// !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate. A Joiner is always
+		// !is_authority; deployed_ is the deploy hold (open). Death is not in it: a dead
+		// player's game loop pings every open boundary until the deploy pick re-arms the
+		// hold (D-NET-529). [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c410 and
+		//  @0x42c44f..0x42c46d; g_ClientDeployHold is set only by Input_HandleActionBinding
+		//  @0x49b067 and cleared by Game_InitNewRound @0x4227ce, the 0x5A @0x429713 and
+		//  the 0x0F @0x42e391]
+		const bool send_gate = joiner_->in_game_loop() && deployed_ &&
+				!view_.state().spawn_success_gate && joiner_->has_self_handle();
+		// The uplink's build refuses a body with no health or the dead flag: the
+		// authoritative spawn latch the death edge closes stands for it here.
+		// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0`
+		//  @0x42a58f, `test byte [eax+24h], 2` @0x42a599, return 0]
+		const bool deployed_joiner = send_gate && authoritative_spawn_released_;
 
 		// (0x2C) RTT timestamp ping — Joiner only. [orig: Client_ProcessNetworkFrame @0x42c3fa..0x42c44a]. Body = [u32 ts][u8 1]
 		// (NetPacket_WriteInt32AndByte; echoFlag=1 requests the S2C 0x57 pong, §5.34). Retail uses
 		// wall-clock milliseconds (GetTickCount), not the network-role simulation tick.
-		if (!replay_mode_ && deployed_joiner) {
+		if (!replay_mode_ && send_gate) {
 			tag2c_send_cooldown_ = kTag2CCooldown;
 			std::vector<uint8_t> ping = le32(joiner_->monotonic_milliseconds32());
 			ping.push_back(0x01);

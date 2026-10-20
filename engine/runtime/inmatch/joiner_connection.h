@@ -883,6 +883,14 @@ public:
 	// The authenticated session (retail g_NapiNPCtx.is_in_session): Driving
 	// or InMatch — a dead player re-entering the deploy flow is still in it.
 	bool in_session() const { return phase_ == Phase::Driving || phase_ == Phase::InMatch; }
+	// The game loop runs, so its main frame runs the client net frame every frame: from the
+	// mission start's end (or an earlier release) on, alive, dead or redeploying. Death sends
+	// the connection back to Driving; the frame and its housekeeping run on.
+	// [orig: Game_ProcessMainFrame @0x5263F0 -> Client_ProcessNetworkFrame @0x526692]
+	bool in_game_loop() const {
+		return phase_ == Phase::InMatch ||
+		       (phase_ == Phase::Driving && initial_admission_complete_);
+	}
 	// The host's session-variable list parsed from the reassembled S2C 0x60
 	// server-info transfer (npwire/session_vars.h): the server name and
 	// mission title the Tab board's header reads, and the EXP_FANFARE u16 (lo

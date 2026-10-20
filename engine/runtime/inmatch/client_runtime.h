@@ -110,9 +110,10 @@ public:
 	// CNapiNetwork_QueueReliableMessage @0x42d169]
 	bool queue_door_request(uint16_t handle, int16_t state, uint8_t section);
 
-	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
-	// 0x06 fire, 0x2C ping) requires both retail's g_ClientDeployHold hold to be open
-	// and the independent authoritative spawn/health latch to be released.
+	// Effective gameplay readiness. The C2S gameplay sends (0x0C uplink, 0x06 fire)
+	// require both retail's g_ClientDeployHold hold to be open and the independent
+	// authoritative spawn/health latch to be released; the frame's 0x2C ping needs the
+	// hold alone, so a dead player still pings (D-NET-529).
 	// Every valid 0x5A opens the literal gameplay gate even while a spawn-zone
 	// deploy screen remains pending; queuing C2S 0x0E closes only that gate. A
 	// complete recipient-local 0x0A tail with health <= 0 closes only the

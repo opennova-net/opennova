@@ -5385,7 +5385,8 @@ bool run_self_respawn_edge_releases_a_revive_deploy() {
 // D-NET-235: a queued producer's message leaves at the next open send boundary even when the
 // player died in between. Retail's QueueReliableMessage puts it on the connection's list, and
 // PumpClientProtocolSend builds whatever is queued; only the 0x2C ping and the 0x0C uplink are
-// built behind the deploy gate, and nothing drains the list on death.
+// built behind the deploy gate, and nothing drains the list on death. The gate holds no death
+// (D-NET-529): the frame's 0x2C leaves beside the queued 0x27; the dead body builds no 0x0C.
 // [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c4a3 (the 0x2C / 0x0C builds behind
 //  is_in_session && !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate), the tail
 //  @0x42c4b1 -> PumpClientProtocolSend @0x42c4bc in every branch;
@@ -5416,18 +5417,146 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 	if (!expect(!client.is_deployed(), "the death closes the deploy gate this frame"))
 		return false;
 	bool saw_detach = false;
-	bool saw_ping_or_uplink = false;
+	bool saw_ping = false;
+	bool saw_uplink = false;
 	for (const std::vector<uint8_t> &datagram : boundary) {
 		ProtocolPacketHeader header;
 		std::vector<ProtocolMessage> messages;
 		if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
 		for (const ProtocolMessage &message : messages) {
 			saw_detach = saw_detach || message.tag == 0x27;
-			saw_ping_or_uplink = saw_ping_or_uplink || message.tag == 0x2C || message.tag == 0x0C;
+			saw_ping = saw_ping || message.tag == 0x2C;
+			saw_uplink = saw_uplink || message.tag == 0x0C;
 		}
 	}
-	return expect(saw_detach && !saw_ping_or_uplink,
-			"the queued 0x27 leaves at the boundary; only the 0x2C/0x0C builds sit behind the gate");
+	return expect(saw_detach && saw_ping && !saw_uplink,
+			"the queued 0x27 leaves at the boundary with the frame's 0x2C; no 0x0C for the dead body");
+}
+
+// D-NET-529: a dead player's game loop runs the client net frame on. Every open boundary
+// carries the frame's 0x2C [ts][1] (the deploy gate holds no death), none carries a 0x0C (the
+// uplink build refuses the dead body), and the 310-frame 0x4C leg reports from a quality window
+// that samples on (death holds nothing there either). The deploy pick re-arms the hold and the
+// ping stops; the round-over gate stops it too. The retail joiner on the 03TR death screen sends
+// a 0x2C in every packet (the retail host echoes each in an S2C 0x57) and a 0x4C every 5 s.
+// [orig: Game_ProcessMainFrame @0x5263F0 -> Client_ProcessNetworkFrame @0x526692; the 0x4C leg
+//  @0x42c23e..0x42c279; the 0x2C gate @0x42c3ee..0x42c410, the 0x0C's @0x42c44f..0x42c46d;
+//  Player_BuildTag0CInputBody @0x42A550 (@0x42a58f, @0x42a599); CNetQuality_UpdateMetrics
+//  @0x4C52C0, the held test @0x4c5606..0x4c5630; Input_HandleActionBinding @0x49b067]
+bool run_dead_joiner_keeps_pinging_every_boundary() {
+	struct Tally {
+		int boundaries = 0;
+		int pings = 0;
+		int uplinks = 0;
+		int quality_reports = 0;
+		int picks = 0;
+		uint8_t quality_level = 0xFF;
+	};
+	const auto tally = [](const std::string &scrk,
+			const std::vector<std::vector<uint8_t>> &out, Tally &t) {
+		bool boundary = false;
+		for (const std::vector<uint8_t> &datagram : out) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_client_session(datagram, scrk, header, messages)) continue;
+			boundary = true;
+			for (const ProtocolMessage &message : messages) {
+				if (message.tag == 0x2C && message.payload.size() == 5 && message.payload[4] == 1)
+					++t.pings;
+				if (message.tag == 0x0C) ++t.uplinks;
+				if (message.tag == 0x0E) ++t.picks;
+				if (message.tag == 0x4C && message.payload.size() == 1) {
+					++t.quality_reports;
+					t.quality_level = message.payload[0];
+				}
+			}
+		}
+		if (boundary) ++t.boundaries;
+	};
+	const std::string client_scrk = "CLIENT-DEAD-PUMP-SCRK";
+	const std::string server_scrk = "SERVER-DEAD-PUMP-SCRK";
+	inmatch::ClientRuntime client("DeadPump", [] { return uint64_t{5000}; });
+	client.set_title(&kJo);
+	client.seed_session(
+			0x52535455u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	client.set_observed_frame_rate(62);
+	const PlayerExtendedUplink uplink;
+	uint32_t tick = 1;
+	Tally alive;
+	tally(client_scrk, client.Client_ProcessNetworkFrame(uplink, tick++), alive);
+	if (!expect(alive.boundaries == 1 && alive.pings == 1 && alive.uplinks == 1,
+			"a living joiner's boundary carries its 0x2C and its 0x0C"))
+		return false;
+
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	FrameUpdate death;
+	death.carried_handle = 0xFFFF;
+	death.health = 0;
+	const std::vector<uint8_t> death_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x0A, encode_frame_update(death))});
+	client.receive(death_datagram.data(), death_datagram.size());
+	Tally dead;
+	for (int frame = 0; frame < 400; ++frame)
+		tally(client_scrk, client.Client_ProcessNetworkFrame(uplink, tick++), dead);
+	if (!expect(client.deployment_pick_pending() && !client.is_deployed() &&
+				client.gameplay_gate_open(),
+			"the death re-enters the picker with the deploy hold still open"))
+		return false;
+	if (!expect(dead.boundaries == 400 && dead.pings == 400 && dead.uplinks == 0,
+			"every dead boundary carries one 0x2C [ts][1] and no 0x0C"))
+		return false;
+	if (!expect(dead.quality_reports == 1 && dead.quality_level == 1,
+			"the 0x4C leg reports on the death screen from a window that samples on"))
+		return false;
+
+	if (!expect(client.queue_deployment_pick(0xFFFF), "the dead player picks Default Spawn"))
+		return false;
+	Tally picked;
+	for (int frame = 0; frame < 20; ++frame)
+		tally(client_scrk, client.Client_ProcessNetworkFrame(uplink, tick++), picked);
+	if (!expect(picked.picks == 1 && picked.pings == 0 && picked.uplinks == 0,
+			"the pick re-arms the deploy hold: its 0x0E leaves and the ping stops"))
+		return false;
+
+	inmatch::ClientRuntime round_over("RoundOverPump", [] { return uint64_t{5000}; });
+	round_over.set_title(&kJo);
+	round_over.seed_session(
+			0x56575859u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing round_tx = inmatch::make_jo_game_session_sequencing();
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.player_index = 0;
+	const std::vector<uint8_t> end_datagram = frame_server_session(round_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	round_over.receive(end_datagram.data(), end_datagram.size());
+	Tally over;
+	tally(client_scrk, round_over.Client_ProcessNetworkFrame(uplink, 1), over);
+	if (!expect(round_over.state().spawn_success_gate && over.boundaries == 1 &&
+				over.pings == 0 && over.uplinks == 0,
+			"the round-over gate shuts the frame's 0x2C and 0x0C"))
+		return false;
+
+	// The dead player's frame also runs the end-round linger: the round ends while it waits
+	// on the death screen, and the frame after the host's 0x25 stores exit 4.
+	// [orig: Client_ProcessNetworkFrame @0x42c3ab..0x42c3d3]
+	const std::vector<uint8_t> dead_end = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	client.receive(dead_end.data(), dead_end.size());
+	(void)client.Client_ProcessNetworkFrame(tick++);
+	const std::vector<uint8_t> reset = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::GAME_RESET, {})});
+	client.receive(reset.data(), reset.size());
+	(void)client.Client_ProcessNetworkFrame(tick++);
+	return expect(!client.in_match() && client.in_session() &&
+				client.mission_exit_reason() == inmatch::kMissionExitRoundOver,
+			"the dead player's frame runs the linger out after the 0x25");
 }
 
 bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
@@ -7955,6 +8084,7 @@ int main() {
 	                run_self_respawn_edge_releases_a_revive_deploy() &&
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
 	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
+	                run_dead_joiner_keeps_pinging_every_boundary() &&
 	                run_mounted_slot_select_and_reload_producers() &&
 	                run_same_packet_holdoff_keeps_first_admission_boundary_open() &&
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&
