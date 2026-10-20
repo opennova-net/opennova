@@ -359,6 +359,124 @@ void test_a_weapon_key_ends_a_slot_held_on_foot() {
 	world.local_player_state = nullptr;
 }
 
+// D-WPN-48's borrowed-gun edge: the player holds gun A's slot on foot (a refused
+// UseGun attach), then takes EWeap carrier B's ctrlx seat. The attach saves the
+// EquippedSlot, A's slot, at +0x308 (it is not B's own slot) before the mount of B's
+// [orig: Entity_AttachToVehicleSlot @0x4946D0 (the EWeap gate @0x49480B, the local
+// test @0x494815, the EquippedSlot @0x49481D..0x494825, not the carrier's slot
+// @0x494827..0x49482F, the save @0x494831, the mount @0x494838)]. Leaving B mounts
+// +0x308 when its def's category is below 11, else the current personal slot
+// [orig: Entity_DetachFromVehicle @0x4355F0 (the local gate @0x435616..0x43561C,
+// parentSlot 3 / 2 @0x43562A..0x435638, +0x308 @0x43563A, the category test
+// @0x43564B..0x43564E, the fallback @0x435650..0x435658, the mount @0x43565F)]: the
+// player ends on foot holding A's slot, and the completion stamps A's def into the
+// AdmDef byte the C2S 0x06 and 0x0C carry [orig: WeaponAction_SwitchFrom @0x5433B0
+// (@0x543475, @0x543496)]. Every select's store replaces the saved gun [orig:
+// Player_SelectWeaponSlot @0x4DD680 (@0x4DD6DA)].
+void test_a_ctrlx_seat_saves_a_gun_held_on_foot() {
+	constexpr uint8_t kCannonAdm = 2;
+	for (const bool low_category : {true, false}) {
+		Rig r;
+		w::World &world = r.world;
+		world.tables.weapons.entries.resize(3);
+		w::WeaponTableEntry &cannon = world.tables.weapons.entries[kCannonAdm];
+		cannon.name = "WPN_CANNON";
+		cannon.valid = true;
+		cannon.category = 10;
+		cannon.clipsize = 10;
+		cannon.startrounds = 10;
+		cannon.ammo_class_count = 1;
+		cannon.ammo_class_id = 0;
+		cannon.ammo_index = 0;
+		bake(cannon);
+		if (!low_category) world.tables.weapons.entries[kGunAdm].category = 11;
+		w::Entity b;
+		b.kind = w::EntityKind::Item;
+		b.has_item_def = true;
+		b.has_graphic_model = true;
+		b.item_type = 6;
+		b.item_attrib = w::kItemAttribEweap | w::kItemAttribPlayerControl;
+		b.health = b.health_max = 1000;
+		b.alive = true;
+		b.position = {106.0f, 200.0f, 10.0f};
+		b.primary_weapon = "WPN_CANNON";
+		w::Seat c;
+		c.type = w::SeatType::Controller;
+		c.bone_index = 1;
+		c.source_name = "ctrlx00";
+		c.seat_local = {0.5f, 1.5f, 1.0f};
+		b.seats.push_back(c);
+		const w::EntityHandle b_h = world.registry.spawn(1, b);
+		CHECK(world.vehicles.prepare_weapon_slot(*world.registry.get(b_h)));
+
+		CHECK(r.attach(r.claimant_h, 0)); // the claimant holds A's +368
+		world.cached.local_player = r.requester_h;
+		w::LocalPlayer local(world);
+		world.local_player_state = &local;
+		local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
+		local.loadout.spawn_kit_set = true;
+		w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
+				local.inventory_valid, /*select_spawn_default=*/true);
+		const auto install = [&](const std::string &name, bool preserve) {
+			w::WeaponInstallData data;
+			data.name = name;
+			data.clipsize = world.tables.weapons.entries[size_t(
+					world.tables.weapons.index_of(name.c_str()))].clipsize;
+			data.table_baked = true;
+			w::local_weapon_install(world, local.weapon, data, preserve, false,
+					&local.inventory, local.view);
+		};
+		const auto pump = [&]() {
+			++world.logic_tick;
+			local.pump_local_weapon();
+			const std::vector<w::WeaponPresentationEvent> events = local.weapon.events;
+			local.weapon.events.clear();
+			for (const w::WeaponPresentationEvent &e : events)
+				if (!e.switch_to_weapon.empty()) install(e.switch_to_weapon, e.preserve_slot_state);
+		};
+		install("WPN_M4AUTO", false);
+		for (int i = 0; i < 8; ++i) pump();
+
+		// Refused at A's UseGun seat: A's slot is held on foot.
+		CHECK(!r.attach(r.requester_h, r.use_gun_index()));
+		for (int i = 0; i < 4; ++i) pump();
+		CHECK(local.weapon.usegun_on_foot && local.weapon.usegun_mount == r.gun_h);
+		CHECK(local.inventory.selected_mount == w::EntityHandle::kInvalid);
+
+		// B's ctrlx seat: +0x308 takes A's slot; the mount borrows B's.
+		CHECK(world.vehicles.attach_to_seat(r.requester_h, {b_h, 0, w::SeatType::Controller}));
+		CHECK(local.inventory.selected_mount == r.gun_h.packed);
+		for (int i = 0; i < 32 && local.weapon.usegun_mount != b_h; ++i) pump();
+		CHECK(local.weapon.usegun_slot_active && !local.weapon.usegun_on_foot);
+		CHECK(local.weapon.usegun_mount == b_h);
+		CHECK(r.requester().equipped_adm_index == kCannonAdm);
+
+		// Leaving B mounts +0x308: A's slot (category 9), held on foot; or, a def of
+		// category 11 there, the current personal slot.
+		CHECK(world.vehicles.detach(r.requester_h));
+		for (int i = 0; i < 32 && (local.weapon.usegun_switch != w::LocalUseGunSwitch::kNone ||
+				local.weapon.usegun_mount == b_h); ++i)
+			pump();
+		CHECK(local.weapon.usegun_switch == w::LocalUseGunSwitch::kNone);
+		if (low_category) {
+			CHECK(local.weapon.usegun_slot_active && local.weapon.usegun_on_foot);
+			CHECK(local.weapon.usegun_mount == r.gun_h);
+			CHECK(r.requester().equipped_adm_index == kGunAdm);
+			// Held on foot: the next pumps leave it there.
+			for (int i = 0; i < 8; ++i) pump();
+			CHECK(local.weapon.usegun_on_foot && local.weapon.usegun_mount == r.gun_h);
+		} else {
+			CHECK(!local.weapon.usegun_slot_active && !local.weapon.usegun_on_foot);
+			CHECK(r.requester().equipped_adm_index == kRifleAdm);
+		}
+		// A select's store replaces the saved gun.
+		local.inventory.selected_mount = r.gun_h.packed;
+		CHECK(w::weapon_select_slot(world.tables.weapons, local.inventory, kRifleCombo, false));
+		CHECK(local.inventory.selected_mount == w::EntityHandle::kInvalid);
+		world.local_player_state = nullptr;
+	}
+}
+
 // D-NET-336 (the walk's leg): a reload the authority's walk begins on another row's
 // slot queues its C2S 0x25 for the host's own dispatcher, which broadcasts S2C 0x49:
 // a UseGun gunner's addresses the gun (an EWeap: 0xFFFF), a slot held on foot the
@@ -581,6 +699,7 @@ int main() {
 	test_a_seat_detach_points_the_slot_at_the_saved_one();
 	test_the_local_player_holds_a_refused_gun_on_foot();
 	test_a_weapon_key_ends_a_slot_held_on_foot();
+	test_a_ctrlx_seat_saves_a_gun_held_on_foot();
 	test_the_walk_relays_an_authority_reload();
 	test_a_dedicated_host_refills_no_gun();
 	test_the_walk_queues_reloads_in_slot_order();

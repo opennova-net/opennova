@@ -1091,6 +1091,7 @@ bool MissionKernel::restore_baseline() {
 	local.weapon.usegun_pending_weapon_adm = 0xFF;
 	local.weapon.usegun_saved_adm = 0xFF;
 	local.weapon.usegun_switch_action = -1;
+	local.weapon.usegun_pending_on_foot = false;
 	local.weapon.switch_deferred_action = -1;
 	world.restore(baseline); // rewinds registry/vars/env/clock + re-inits systems (incl.
 	                         // AI; WacSystem::on_load also resets its 62-tick accumulator)

@@ -721,6 +721,7 @@ bool weapon_select_slot(const WeaponTable &table, WeaponInventory &inv, int32_t 
     // [orig: Player_SelectWeaponSlot @ 0x4DD680]
     auto stage = [&](int32_t c) {
         inv.selected_combo = c; // [orig: entity+0x308 @ 0x4dd6da / 0x4dd7a8 / 0x4dd81c]
+        inv.selected_mount = 0xFFFF; // the store replaces a saved gun's slot
         if (commit_equip) inv.equipped_combo = c; // [orig: EquippedSlot @ 0x4dd704 /
                                                   //  0x4dd7d2, gated on the seat state]
     };

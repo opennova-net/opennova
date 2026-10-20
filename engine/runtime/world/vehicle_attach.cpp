@@ -140,19 +140,25 @@ bool slot_pair_is_local(const World &world, EntityHandle entity) {
 // the carrier's slot replaces it: a ctrlx seat whatever the slot, a UseGun seat
 // unless the slot's def carries flags 0x80 (Emplaced), which keeps the old +0x308;
 // a null EquippedSlot leaves none. The EquippedSlot is the personal one, or a gun's
-// the player still holds: a seat switch's detach only queued the personal mount,
-// and a refused attach left a borrow on foot. [orig: Entity_AttachToVehicleSlot
-// @0x49481D..0x494831 (a null slot's leg @0x494867..0x494898);
-// Entity_AttachToUseGunSlot @0x546BCF..0x546C31 (the 0x80 test @0x546BE0..0x546BEE),
-// @0x546C48]
-void save_borrowed_selected_slot(World &world, LocalPlayer &local, bool use_gun) {
+// the player still holds (a refused attach's borrow on foot, or the seat a seat
+// switch's detach only queued the switch-out of), which +0x308 then names
+// (WeaponInventory::selected_mount). A mounting attach (`mounts`: the success leg)
+// saves nothing when the EquippedSlot already is the carrier's slot; a refused
+// UseGun attach's direct store saves regardless. [orig: Entity_AttachToVehicleSlot
+// @0x49481D..0x494831 (the carrier's slot @0x494827..0x49482F; a null slot's leg
+// @0x494867..0x494898); Entity_AttachToUseGunSlot @0x546BCF..0x546C31 (the 0x80
+// test @0x546BE0..0x546BEE, the gun's slot @0x546C2F), @0x546C48]
+void save_borrowed_selected_slot(World &world, LocalPlayer &local, bool use_gun,
+                                 const Entity &carrier, bool mounts) {
     WeaponInventory &inv = local.inventory;
     const LocalPlayerWeapon &w = local.weapon;
     const WeaponInventorySlot *slot = inv.slot(inv.equipped_combo);
     if (!w.usegun_slot_active && slot == nullptr) {
         inv.selected_combo = -1;
+        inv.selected_mount = EntityHandle::kInvalid;
         return;
     }
+    if (mounts && w.usegun_slot_active && w.usegun_mount == carrier.handle) return;
     if (use_gun) {
         const WeaponTableEntry *def = w.usegun_slot_active
                 ? world.tables.weapons.by_index(w.usegun_weapon_adm)
@@ -161,8 +167,12 @@ void save_borrowed_selected_slot(World &world, LocalPlayer &local, bool use_gun)
                 : nullptr;
         if (def != nullptr && (def->flags & weapon_flag::kEmplaced) != 0) return;
     }
-    // A borrowed gun slot is no combo: the personal slot stands for it.
+    if (w.usegun_slot_active) {
+        inv.selected_mount = w.usegun_mount.packed;
+        return;
+    }
     inv.selected_combo = inv.equipped_combo;
+    inv.selected_mount = EntityHandle::kInvalid;
 }
 
 // Any other entity's borrow, success or a refused UseGun attach alike: +0x308
@@ -264,7 +274,8 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
             veh.primary_occupant != occ.handle) {
         if (slot_pair_is_local(world, occ.handle)) {
             LocalPlayer &local = *world.local_player_state;
-            if (local.inventory_valid) save_borrowed_selected_slot(world, local, true);
+            if (local.inventory_valid)
+                save_borrowed_selected_slot(world, local, true, veh, /*mounts=*/false);
             local_weapon_direct_borrow(world, local.weapon, veh);
         } else {
             borrow_carrier_slot(world, occ, veh, true);
@@ -311,7 +322,8 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
         if (slot_pair_is_local(world, occ.handle)) {
             if (world.local_player_state->inventory_valid)
                 save_borrowed_selected_slot(world, *world.local_player_state,
-                                            occ.mount_type == SeatType::Gunner);
+                                            occ.mount_type == SeatType::Gunner, veh,
+                                            /*mounts=*/true);
         } else {
             borrow_carrier_slot(world, occ, veh, occ.mount_type == SeatType::Gunner);
         }

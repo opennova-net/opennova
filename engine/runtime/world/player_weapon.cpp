@@ -178,6 +178,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 		w.usegun_pending_weapon_adm = 0xFF;
 		w.usegun_saved_adm = 0xFF;
 		w.usegun_switch_action = -1;
+		w.usegun_pending_on_foot = false;
 		w.switch_deferred_action = -1;
 		w.active = false;
 		w.first_person_model_adm = 0xFF;
@@ -239,7 +240,13 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	if (next_def == nullptr) w.active = false;
 
 	w.usegun_switch = LocalUseGunSwitch::kNone;
-	w.usegun_on_foot = false;
+	// A detach's mount of a saved gun's slot leaves it held on foot, as a refused
+	// attach's direct store does (D-WPN-48) [orig: Entity_DetachFromVehicle
+	// @0x43563A..0x43565F -> Player_MountWeaponSlot @0x4DFA40; the completion
+	// WeaponAction_SwitchFrom @0x5433B0 (@0x543475) / WeaponAction_SwitchRank
+	// @0x543500 (@0x543539)].
+	w.usegun_on_foot = select_parent && w.usegun_pending_on_foot;
+	w.usegun_pending_on_foot = false;
 	w.usegun_pending_mount = EntityHandle{};
 	w.usegun_pending_weapon_adm = 0xFF;
 	w.usegun_switch_action = -1;
@@ -317,6 +324,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		w.switch_in_flight = false;
 		w.usegun_pending_mount = p_mount.handle;
 		w.usegun_pending_weapon_adm = target_adm;
+		w.usegun_pending_on_foot = false;
 		w.usegun_switch = w.usegun_slot_active ? LocalUseGunSwitch::kSwap
 		                                       : LocalUseGunSwitch::kAttach;
 		// The AdmDef byte stays the outgoing slot's until the switch completion
@@ -332,6 +340,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 				w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm;
 		w.usegun_pending_mount = EntityHandle{};
 		w.usegun_pending_weapon_adm = 0xFF;
+		w.usegun_pending_on_foot = false;
 		w.usegun_switch = LocalUseGunSwitch::kDetach;
 		// Seats 2 and 3 share the detach restore through Player_MountWeaponSlot
 		// (its NVG latch clear ran at the detach, local_weapon_detach_mount).
@@ -342,6 +351,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 
 	if (on_usegun) {
 		w.usegun_on_foot = false; // the seat's borrow names the slot now
+		w.usegun_pending_on_foot = false;
 		const bool active_matches = w.usegun_slot_active &&
 				w.usegun_mount == mounted_parent->handle &&
 				w.usegun_weapon_adm == mounted_adm;
@@ -361,8 +371,14 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 	}
 
 	// A borrow held on foot names no seat to leave: only a mount replaces it
-	// (D-NET-420) [orig: Entity_AttachToUseGunSlot @0x546C4E].
+	// (D-NET-420) [orig: Entity_AttachToUseGunSlot @0x546C4E]. Nor does the
+	// detach's own mount of a saved gun's slot, pending until its completion
+	// (D-WPN-48).
 	if (w.usegun_on_foot && w.usegun_switch == LocalUseGunSwitch::kNone) return;
+	if (w.usegun_pending_on_foot &&
+			(w.usegun_switch == LocalUseGunSwitch::kAttach ||
+			 w.usegun_switch == LocalUseGunSwitch::kSwap))
+		return;
 	if ((w.usegun_slot_active ||
 			 w.usegun_switch == LocalUseGunSwitch::kAttach ||
 			 w.usegun_switch == LocalUseGunSwitch::kSwap) &&
@@ -370,17 +386,22 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		stage_personal();
 }
 
+// The def of the slot a borrow of `gun` holds: its own, or its carrier's when the
+// route sends it there; 0xFF with no slot.
+static uint8_t borrowed_slot_adm(World &world, Entity &gun) {
+	WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(gun);
+	if (slot == nullptr) return 0xFF;
+	if (slot == &gun.primary_weapon_slot) return gun.primary_weapon_slot_adm;
+	const Entity *carrier = world.registry.get(gun.ground_target);
+	return carrier != nullptr ? carrier->primary_weapon_slot_adm : uint8_t{0xFF};
+}
+
 void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun) {
 	Entity *player = world.registry.get(world.cached.local_player);
 	if (player == nullptr) return;
-	WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(gun);
-	uint8_t adm = gun.primary_weapon_slot_adm;
-	if (slot != nullptr && slot != &gun.primary_weapon_slot) {
-		const Entity *carrier = world.registry.get(gun.ground_target);
-		adm = carrier != nullptr ? carrier->primary_weapon_slot_adm : 0xFF;
-	}
+	const uint8_t adm = borrowed_slot_adm(world, gun);
 	const WeaponTableEntry *def = world.tables.weapons.by_index(adm);
-	if (slot == nullptr || def == nullptr) return;
+	if (def == nullptr) return;
 	// The personal def the detach restore and the stage's outgoing slot read.
 	if (!w.usegun_slot_active) w.usegun_saved_adm = player->equipped_adm_index;
 	w.usegun_slot_active = true;
@@ -390,6 +411,7 @@ void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun)
 	w.usegun_switch = LocalUseGunSwitch::kNone;
 	w.usegun_pending_mount = EntityHandle{};
 	w.usegun_pending_weapon_adm = 0xFF;
+	w.usegun_pending_on_foot = false;
 	w.usegun_switch_action = -1;
 	// The first-person model follows the EquippedSlot's def each frame
 	// [orig: Player_RenderFirstPersonViewModel @0x4DED60].
@@ -401,26 +423,62 @@ void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun)
 	w.events.push_back(std::move(event));
 }
 
+// The detach's mount of a gun's slot entity+0x308 saved: the borrow the
+// transition stages for an attach, g_PendingWeaponSlot replaced, whose completion
+// leaves the slot held on foot. [orig: Entity_DetachFromVehicle @0x43563A..0x43565F
+// -> Player_MountWeaponSlot @0x4DFA40 (the store @0x4DFB16, the category compare
+// @0x4DFB8B, SWITCHRANK @0x4DFB96 / SWITCHFROM @0x4DFB9E)]
+static void stage_local_saved_gun_mount(World &world, LocalPlayerWeapon &w, Entity &gun,
+		uint8_t adm) {
+	const Entity *player = world.registry.get(world.cached.local_player);
+	if (player == nullptr) return;
+	if (!w.usegun_slot_active) w.usegun_saved_adm = player->equipped_adm_index;
+	const uint8_t from_adm = w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm;
+	w.switch_in_flight = false;
+	w.usegun_pending_mount = gun.handle;
+	w.usegun_pending_weapon_adm = adm;
+	w.usegun_pending_on_foot = true;
+	w.usegun_switch = w.usegun_slot_active ? LocalUseGunSwitch::kSwap : LocalUseGunSwitch::kAttach;
+	const WeaponTableEntry *from = world.tables.weapons.by_index(from_adm);
+	const WeaponTableEntry *to = world.tables.weapons.by_index(adm);
+	queue_local_usegun_weapon_switch(world, w,
+			from != nullptr && to != nullptr && from->category == to->category);
+}
+
 void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 		WeaponInventory *inventory, PlayerViewState &view) {
 	// The equipped slot and its def [orig: @0x4dfa5e..0x4dfa74].
 	if (!w.active) return;
 	// The detach mounts entity+0x308, else (no def of category < 11 there) the
 	// current slot [orig: +0x308 read @0x43563a, the fallback
-	// @0x43564e..0x435658]. A borrowed seat's +0x308 is the personal slot its
-	// attach saved [orig: @0x494831; @0x546c31 / @0x546c48]. An unborrowed
-	// seat's is the last SELECTED slot, stale after a key switch or a cycle,
-	// which mount without selecting [orig: Player_SelectWeaponSlot's writes
-	// @0x4dd6da / @0x4dd7a8 / @0x4dd81c are its only others], and the player
-	// leaves holding it: the whole mount runs, a same-category one queueing
-	// SWITCHRANK (D-WPN-48).
+	// @0x43564e..0x435658]. A borrowed seat's +0x308 is the slot its attach saved:
+	// the personal one, or a gun's the EquippedSlot was [orig: @0x494831;
+	// @0x546c31 / @0x546c48]. An unborrowed seat's is the last SELECTED slot,
+	// stale after a key switch or a cycle, which mount without selecting [orig:
+	// Player_SelectWeaponSlot's writes @0x4dd6da / @0x4dd7a8 / @0x4dd81c are its
+	// only others], and the player leaves holding it: the whole mount runs, a
+	// same-category one queueing SWITCHRANK (D-WPN-48).
+	// A saved gun's slot, borrowed seat or not: its mount stages a borrow the
+	// player then holds on foot.
+	Entity *saved_gun = inventory != nullptr && inventory->selected_mount != EntityHandle::kInvalid
+			? world.registry.get(EntityHandle{inventory->selected_mount})
+			: nullptr;
+	const uint8_t saved_gun_adm = saved_gun != nullptr ? borrowed_slot_adm(world, *saved_gun) : 0xFF;
+	const WeaponTableEntry *saved_gun_def = world.tables.weapons.by_index(saved_gun_adm);
+	if (saved_gun_def != nullptr && saved_gun_def->category < 11) {
+		stage_local_saved_gun_mount(world, w, *saved_gun, saved_gun_adm);
+		w.nvg_scope_restore = false; // [orig: dword_B76554 = 0 @0x4dfb75]
+		return;
+	}
 	// A borrow held on foot is no seat's: an unborrowed seat's detach mounts +0x308
 	// over it as over a personal slot (D-NET-420).
 	if ((!w.usegun_slot_active || w.usegun_on_foot) &&
 			w.usegun_switch == LocalUseGunSwitch::kNone) {
 		if (inventory == nullptr) return;
 		const WeaponTable &table = world.tables.weapons;
-		int32_t target = inventory->selected_combo;
+		// A saved gun's slot whose def is of category 11 or more takes the fallback.
+		int32_t target = inventory->selected_mount != EntityHandle::kInvalid
+				? -1 : inventory->selected_combo;
 		const WeaponInventorySlot *saved = inventory->slot(target);
 		const WeaponTableEntry *saved_def = saved != nullptr && saved->adm_index >= 0
 				? table.by_index(static_cast<uint8_t>(saved->adm_index))

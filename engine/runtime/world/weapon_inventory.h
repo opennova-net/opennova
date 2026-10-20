@@ -174,6 +174,14 @@ struct WeaponInventory {
     // @0x4DD81C; Entity_AttachToVehicleSlot @0x494831; Entity_AttachToUseGunSlot
     // @0x546C31 / @0x546C48; read by Entity_DetachFromVehicle @0x43563A]
     int32_t selected_combo = -1;
+    // entity+0x308 when it names a borrowed gun's slot instead: the packed handle
+    // of the mount whose slot a borrowing attach saved because the EquippedSlot
+    // was that gun's (a gun held on foot, or one a seat switch's detach had not
+    // yet switched out), 0xFFFF when +0x308 is selected_combo's personal slot or
+    // none. Every select's store replaces it. [orig: Entity_AttachToVehicleSlot
+    // @0x49481D..0x494831; Entity_AttachToUseGunSlot @0x546BCF..0x546C31;
+    // Player_SelectWeaponSlot @0x4DD6DA / @0x4DD7A8 / @0x4DD81C]
+    uint16_t selected_mount = 0xFFFF;
     // entity+44 carry-presentation bits gathered by the fill (8 = def.flags&0x1000,
     // 0x10 = def.flags2&2) [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5415aa/0x5415bc].
     uint32_t carry_flags = 0;
@@ -194,6 +202,7 @@ struct WeaponInventory {
         equipped_combo = -1;
         pending_combo = -1;
         selected_combo = -1;
+        selected_mount = 0xFFFF;
         carry_flags = 0;
         quick_switch_combo = -1;
         quick_switch_stash = -1;
