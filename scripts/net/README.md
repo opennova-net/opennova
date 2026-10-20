@@ -318,6 +318,11 @@ so the default suite is unchanged. An extension case may add:
 - `topologies`: the cells the case has (default all five; RR and RR-aa always).
   The other cells report `not_applicable` and are not counted as missing.
 
+`01tr-coop-selfnade` is the dying joiner's case: 01TR co-op playing
+`self_nade` (the joiner frags its own feet), with an 80 s steady window over
+the death screen. It is what judges a dead joiner's send pump (D-NET-529),
+which the main table's 03TR walk no longer reaches since its joiner stands.
+
 The summary records `rotation`, `time_limit_minutes` and `late_joiner`, and a
 reference is reused only for a case with the same values.
 

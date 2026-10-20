@@ -31,6 +31,18 @@
       "auto_deploy": true,
       "late_joiner": true,
       "topologies": ["RR", "RR-aa", "OR"]
+    },
+    {
+      "id": "01tr-coop-selfnade",
+      "mission": "01TR.bms",
+      "mission_sha256": "7ceb5dac231f6dd0a78a41302889cb325629369cf7599ee31b506a98ea2cd590",
+      "game_type": 65568,
+      "port": 32786,
+      "readiness": "in_match",
+      "steady_seconds": 80,
+      "exercise_input": false,
+      "auto_deploy": true,
+      "scenario": "self_nade.json"
     }
   ]
 }
