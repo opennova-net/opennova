@@ -53,6 +53,9 @@ public:
 	void add(FramePhase phase, int64_t us);
 	// What drawing one window took inside the frame's layout (the ImGui pass's window_times), by its title.
 	void add_window(const char *title, int64_t us);
+	// The Shell's frame pacing after the frame: its state ("off", "active", "idle"), the cap it set, and each
+	// reason it found the frame active by (a frame active for several counts under each).
+	void note_pacing(const char *state, int max_fps, const std::vector<const char *> &reasons);
 	void end_frame();
 	bool in_frame() const { return open_; }
 
@@ -68,8 +71,9 @@ public:
 	// The summary on the wire: frames, total_frames, slow_total and stall_total (frames over 50 and
 	// 100 ms since the first), slow and stall (of the frames held), phases (each phase's mean, p50, p95
 	// and max over the frames held, by token), worst (the slowest frame's phases, by token), windows
-	// (each window's title, draws, mean and max since the first frame, the costliest first) and
-	// slowest (the slowest frame since the first: its wall and its windows' times, by title).
+	// (each window's title, draws, mean and max since the first frame, the costliest first),
+	// slowest (the slowest frame since the first: its wall and its windows' times, by title) and pacing
+	// (the last state and cap, and the frames each reason kept active since the first: active_by).
 	io::JsonValue json() const;
 
 private:
@@ -90,6 +94,9 @@ private:
 	std::vector<std::pair<std::string, int64_t>> current_windows_; // the frame under way's
 	int64_t slowest_wall_ = -1;
 	std::vector<std::pair<std::string, int64_t>> slowest_windows_;
+	std::string pacing_state_ = "off";
+	int pacing_fps_ = 0;
+	std::map<std::string, uint64_t> active_by_;
 };
 
 // Microseconds on the steady clock, the one the phases are timed by.

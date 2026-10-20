@@ -46,6 +46,13 @@ void FrameTimes::add(FramePhase phase, int64_t us) {
 	current_[size_t(phase)] += std::max<int64_t>(0, us);
 }
 
+void FrameTimes::note_pacing(const char *state, int max_fps, const std::vector<const char *> &reasons) {
+	pacing_state_ = state ? state : "";
+	pacing_fps_ = max_fps;
+	for (const char *reason : reasons)
+		if (reason) ++active_by_[reason];
+}
+
 void FrameTimes::end_frame() {
 	if (!open_) return;
 	open_ = false;
@@ -135,6 +142,13 @@ JsonValue FrameTimes::json() const {
 	for (const auto &[title, us] : slowest_windows_) drawn.set(title, JsonValue::make_number(double(us)));
 	slowest.set("windows", std::move(drawn));
 	out.set("slowest", std::move(slowest));
+	JsonValue pacing = JsonValue::make_object();
+	pacing.set("state", JsonValue::make_string(pacing_state_));
+	pacing.set("max_fps", JsonValue::make_number(double(pacing_fps_)));
+	JsonValue by = JsonValue::make_object();
+	for (const auto &[reason, frames] : active_by_) by.set(reason, JsonValue::make_number(double(frames)));
+	pacing.set("active_by", std::move(by));
+	out.set("pacing", std::move(pacing));
 	return out;
 }
 

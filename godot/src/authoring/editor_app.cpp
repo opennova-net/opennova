@@ -459,16 +459,27 @@ void EditorApp::release_frame_cap_() {
 }
 
 bool EditorApp::frame_active_() {
-	bool active = root_input_ || resized_ || wire_asked_;
+	// Each reason the frame is active by, kept for the perf query (FrameTimes::note_pacing).
+	active_reasons_.clear();
+	const auto by = [this](bool reason, const char *name) {
+		if (reason) active_reasons_.push_back(name);
+	};
+	by(root_input_, "input");
+	by(resized_, "resize");
+	by(wire_asked_, "wire");
 	root_input_ = resized_ = wire_asked_ = false;
 #if OPENNOVA_EDITOR_UI
-	active = active || windows_->input_seen();
+	by(windows_->input_seen(), "windows");
 #endif
-	if (!session_) return active;
-	active = active || session_->busy() || (session_->live_logic_reachable() && session_->live_logic_polling());
-	if (devices_)
-		active = active || devices_->building() || (session_->viewports().clock().playing() && devices_->drawn());
-	return active;
+	if (session_) {
+		by(session_->busy(), "busy");
+		by(session_->live_logic_reachable() && session_->live_logic_polling(), "live_logic");
+		if (devices_) {
+			by(devices_->building(), "building");
+			by(session_->viewports().clock().playing() && devices_->drawn(), "clock");
+		}
+	}
+	return !active_reasons_.empty();
 }
 
 // After the frame's work: the cap for the frames that follow, the display's rate while active (read as pacing
@@ -492,6 +503,7 @@ void EditorApp::pace_frame_() {
 	}
 	const int fps = idle ? kIdleFps : display_fps_;
 	if (engine->get_max_fps() != fps) engine->set_max_fps(fps);
+	if (session_) session_->frame_times().note_pacing(idle ? "idle" : "active", fps, active_reasons_);
 }
 
 void EditorApp::_on_window_resized() {

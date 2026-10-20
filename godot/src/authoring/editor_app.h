@@ -310,6 +310,7 @@ private:
 	bool root_input_ = false;
 	bool resized_ = false;
 	bool wire_asked_ = false;
+	std::vector<const char *> active_reasons_; // the last frame's reasons it was active by (frame_active_)
 	String settings_path_ = "user://editor_settings.json";
 	PackedStringArray play_engine_args_;
 	FileDialog *picker_ = nullptr;

@@ -411,10 +411,12 @@ void EditorWindows::end_frame() {
 	// A drop no item took within two frames is none's (the frame it came in may have drawn before it).
 	if (!dropped_.paths.empty() && --dropped_.frames <= 0) dropped_ = Dropped();
 	// What the frame saw of a person: the input events its NewFrame took (each a change: Dear ImGui drops one
-	// that repeats the state), a button or a key still held, an item active.
+	// that repeats the state), a button or a key still held, an item active (a drag, a held button; never a
+	// text field that only holds the caret: Dear ImGui keeps it active while it has the keyboard, and a person
+	// typing into it brings input events).
 	input_seen_ = false;
 	if (const ImGuiContext *context = ImGui::GetCurrentContext()) {
-		bool held = ImGui::IsAnyMouseDown() || ImGui::IsAnyItemActive();
+		bool held = ImGui::IsAnyMouseDown() || (ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput);
 		for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END && !held; ++key)
 			held = ImGui::IsKeyDown(static_cast<ImGuiKey>(key));
 		input_seen_ = held || !context->InputEventsTrail.empty();

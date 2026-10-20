@@ -105,6 +105,21 @@ int test_windows() {
 	return 0;
 }
 
+int test_pacing() {
+	FrameTimes times;
+	TEST_EXPECT(times.json().get("pacing") && times.json().get("pacing")->get_string("state", "") == "off");
+	times.note_pacing("active", 144, {"busy", "windows"});
+	times.note_pacing("active", 144, {"busy"});
+	times.note_pacing("idle", 10, {});
+	const JsonValue json = times.json();
+	const JsonValue *pacing = json.get("pacing");
+	TEST_EXPECT(pacing && pacing->get_string("state", "") == "idle" && pacing->get_int("max_fps", -1) == 10);
+	// Each reason counts the frames it kept active, all told.
+	TEST_EXPECT(pacing->get("active_by") && pacing->get("active_by")->get_int("busy", -1) == 2 &&
+	            pacing->get("active_by")->get_int("windows", -1) == 1);
+	return 0;
+}
+
 int test_perf_query() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
@@ -132,6 +147,7 @@ int main() {
 	failures += test_phases_and_ring();
 	failures += test_summary_json();
 	failures += test_windows();
+	failures += test_pacing();
 	failures += test_perf_query();
 	if (failures == 0) std::printf("editor_frame_times: all tests passed\n");
 	return failures == 0 ? 0 : 1;
