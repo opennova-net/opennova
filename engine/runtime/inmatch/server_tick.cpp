@@ -411,20 +411,8 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
 	route_throwable_events(ctx, world);
-	// The receive pump's player-body edges (the C2S 0x41's) are tested here,
-	// ahead of the medic heals below, and wait for the drain after the
-	// spectator converts.
-	route_round_deaths(ctx, world, EdgeDrain::HoldAtHead);
+	route_round_deaths(ctx, world, EdgeDrain::HoldAtHead); // releases the last update's staged sends
 	Server_RouteMedicInteractions(ctx, world);
-	// Retail stored the previous frame's heal (Health = max, in that frame's
-	// entity update) ahead of this pump's 0x41 (Health 0); ours routes the heal
-	// only now, after the pump, so the 0x41's store goes back over it on each
-	// body whose edge is held, and its death keeps the 0x41's Health 0.
-	// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_DeathTimeoutReset
-	//  @0x510568]
-	for (const world::RoundDeath &d : world.round_sim.deaths)
-		if (d.player_edge)
-			if (world::Entity *body = world.registry.get(d.victim)) body->health = 0;
 	Server_ApplyPowerupGrants(ctx.np_protocol.connection_list, world);
 	Server_BroadcastWeaponOverlayUpdates(ctx, world);
 	route_match_gameplay_events(ctx, world);
@@ -449,9 +437,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	devtools::ProfileLap lap(world.profile);
 	const bool round_was_announced = ctx.round_end_announced;
 	// Snapshot the phase at frame entry. Retail decrements the timer later on
-	// the shared second boundary, after the entity-update gate has already been
-	// tested, so the 1 -> 0 transition frame remains frozen.
-	// [orig: entity gate @0x51D8BD; decrement @0x51DC20..0x51DC33]
+	// the shared second boundary, after the script pass's admission has already
+	// been tested, so the 1 -> 0 transition frame remains frozen.
+	// [orig: the script admission `cmp g_PreRoundDelayTimer` @0x51D89F..0x51D8BD;
+	//  decrement @0x51DC20..0x51DC33]
 	const bool preround_active = world.preround_delay_seconds != 0;
 
 	// (0) The head-of-function timers, ahead of the per-player walk and the
@@ -509,14 +498,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// and the state fan: a converted body is hidden before it is counted.
 	// [orig: Server_TickUpdate, the receive pump call @0x51D895]
 	Server_ProcessSpectatorRespawnRequests(ctx, world);
-	// The receive pump's player-body edges (the C2S 0x41's Health 0) route
-	// after its converts: retail's edge runs in the entity update after the
-	// whole pump, and skips a body the convert hid (Flags |= 1, which the
-	// convert's deploy leg keeps; it clears only the dead bit).
-	// [orig: Server_ConvertPlayerToSpectator @0x519E92, Health 1 @0x519EA4, the deploy
-	//  @0x519ECE; Server_DeployPlayer @0x51787A; the edge's hidden bit
-	//  Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127]
-	route_round_deaths(ctx, world, EdgeDrain::AfterConverts);
 
 	// (1b) The WAC 'humans' count, rebuilt each server tick right after the
 	// receive pump, just before the script pass. The original also uses it as
@@ -1079,10 +1060,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// through this seam (world/powerup.cpp).
 	ServerRemoteWeaponTables remote_weapon_tables(ctx.np_protocol.connection_list);
 	world.remote_weapon_tables = &remote_weapon_tables;
-	ctx.entity_update_ran = tick.phase == world::TickPhase::Gameplay &&
-			world.entity_update_admitted(/*is_authority=*/true);
-	if (ctx.entity_update_ran) arm_frame_tail_edges(world);
+	// The transactions the update raises inline (a player body's death edge, the
+	// explosion queue's medic arm) run the session's, their sends staged for the
+	// next tick's head (server_player_death.h).
+	ctx.entity_update_transactions.ctx = &ctx;
+	world.entity_update_transactions = &ctx.entity_update_transactions;
 	world.run_entity_pass(tick);
+	world.entity_update_transactions = nullptr;
 	world.remote_weapon_tables = nullptr;
 
 	// (5) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client

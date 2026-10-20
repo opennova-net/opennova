@@ -177,8 +177,8 @@ inline uint32_t round_end_linger_ticks_for(int title) {
 struct NapiNPServerCtx;
 
 // The host session's half of the transactions its world's entity update raises
-// inline (world/entity_update_transactions.h), armed on that world at each
-// server tick's head (route_round_deaths). Defined in server_player_death.cpp.
+// inline (world/entity_update_transactions.h), armed on that world around each
+// server tick's entity pass (Server_TickUpdate). Defined in server_player_death.cpp.
 struct ServerEntityUpdateTransactions final : world::IEntityUpdateTransactions {
 	NapiNPServerCtx *ctx = nullptr;
 	void player_death(world::World &world, world::Entity &body) override;

@@ -200,9 +200,7 @@ EntityUpdateStaging::~EntityUpdateStaging() {
 // staged in the entity update; a damage-time record for
 // a body whose edge raises its transaction only tallies (an org2 body's here,
 // an org1 body's in Server_ProcessPlayerDeath); every other record runs the
-// transaction. The head's drain then drops any batch whose record is gone and
-// arms this tick's entity update with the session's transactions, which the
-// pass disarms as it ends.
+// transaction. The head's drain then drops any batch whose record is gone.
 // [orig: Game_ProcessMainFrame -- the Server_TickUpdate call @0x5266B6 (its
 //  send pump @0x51E487), then Entity_UpdateAllEntities @0x52674B, whose
 //  player-body edge calls Entity_CheckAndProcessDeath
@@ -225,8 +223,6 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world,
 	}
 	if (edges != EdgeDrain::HoldAtHead) return;
 	ctx.entity_update_sends.clear();
-	ctx.entity_update_transactions.ctx = &ctx;
-	world.entity_update_transactions = &ctx.entity_update_transactions;
 }
 
 // See header. [orig: Server_CheckPlayerViolations @0x51ABD0 - the Health

@@ -506,10 +506,14 @@ bool run_death_feed_classifier_matrix() {
 	}
 
 	// The same +460 counter is produced by the authority every 32 host ticks.
-	// At the first sample beyond 4*20, the eye-under-water predicate kills the
-	// player with the drown animation and routes the same no-killer transaction.
-	// [orig: Server_UpdatePlayerBreathTimers @0x50D770, call gate @0x51D8C4;
-	// GameEvent_PlayerDeath @0x5172EC..0x51734D]
+	// At the first sample beyond 4*20, the eye-under-water predicate drowns the
+	// player: the drown selection and Health -1, which the body's death edge
+	// raises in the entity update as the same no-killer transaction. This
+	// fixture's bodies are rowless (no edge), so the edge's record is routed
+	// in its place, as in the cases above.
+	// [orig: Server_UpdatePlayerBreathTimers @0x50D770, call gate @0x51D8C4,
+	//  Health -1 @0x50D819; Entity_UpdateInfantryPlayerBody @0x4B4CEA;
+	//  GameEvent_PlayerDeath @0x5172EC..0x51734D]
 	reset();
 	world.logic_tick = 32;
 	world.env.water_z = 1 << 16;
@@ -525,13 +529,16 @@ bool run_death_feed_classifier_matrix() {
 	{
 		const Drained host_out = drain_all(host);
 		drain_all(victim_wire);
-		const auto feed = host_out.tag(0x1E);
-		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26 &&
-		                    submerged->health <= 0 && submerged->death_anim_state == 175,
-		            "the 32-tick authority breath sample produces a drowned player death"))
+		if (!expect(host_out.tag(0x1E).empty() && submerged->health <= 0 &&
+		                    submerged->death_anim_state == 175,
+		            "the 32-tick authority breath sample drowns the player"))
 			return false;
 		if (!expect(!submerged->last_attacker.valid(),
 		            "the drowning clears the attacker slot"))
+			return false;
+		const auto feed = route(death(w::EntityHandle{}));
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26,
+		            "the drowned body's death reports event 26"))
 			return false;
 	}
 
@@ -570,12 +577,13 @@ bool run_death_feed_classifier_matrix() {
 	roster[1].link.underwater_breath_samples = 16;
 	inmatch::Server_TickUpdate(ctx);
 	{
-		const Drained host_out = drain_all(host);
+		drain_all(host);
 		drain_all(victim_wire);
-		const auto feed = host_out.tag(0x1E);
-		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26 &&
-		                    submerged->health <= 0,
-		            "breathtime 4 drowns at sample 17"))
+		if (!expect(submerged->health <= 0, "breathtime 4 drowns at sample 17"))
+			return false;
+		const auto feed = route(death(w::EntityHandle{}));
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26,
+		            "the breathtime-4 drowning reports event 26"))
 			return false;
 	}
 	world.script.wac_values.breathtime = 20;

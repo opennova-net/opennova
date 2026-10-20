@@ -43,10 +43,9 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		const world::RoundDeath &death);
 
 // Which drain: the tick's head (HoldAtHead) also releases the previous entity
-// update's staged sends at their records' places and arms this tick's entity
-// update with the session's transactions; the two later drains (Route, and
-// AfterConverts after the receive pump's spectator converts) drain alone, as
-// nothing is held for a player body's edge any more.
+// update's staged sends at their records' places; the later drain (Route)
+// drains alone, as nothing is held for a player body's edge any more.
+// Server_TickUpdate arms the session's transactions around its entity pass.
 enum class EdgeDrain {
 	Route,
 	HoldAtHead,
