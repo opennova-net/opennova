@@ -66,6 +66,9 @@ const MountLook := preload("res://tests/support/mount_look.gd")
 # the sitex rows retired: the corpus authors no zero-offset control seat, and
 # the same-frame carrier-follow pin below compares L against the carrier root.
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_coop_two_sim"
+# The minted Avatars.def: a fresh profile over it packs side A's first good
+# combo as 0x0200 (tests/fixtures/minimal_avatars_gen.cpp).
+const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
 func before_all() -> void:
@@ -1657,6 +1660,12 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	host.resolve_item_traits(watercraft_db)
 
 	var joiner := Simulation.new()
+	# The joiner's shell installs its mounted Avatars.def's fresh profile, as the
+	# game's join does; a joiner that installs none carries the empty table's
+	# id 0, which this pin is not about (D-NET-NEW-L2-7).
+	var avatars := AvatarDatabase.new()
+	assert_eq(avatars.load(ProjectSettings.globalize_path(AVATARS_FIXTURE)), OK)
+	joiner.set_join_character_profile(avatars.character_join_profile({}, true))
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "VehicleObserver"))
 	joiner.set_asset_root(root)
