@@ -91,6 +91,14 @@ struct ProblemAnswer {
 // one of `blockers` (the plan's refusals, build_blockers; null: when the build gates on its code).
 FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalData *originals,
                            const std::vector<Diagnostic> *blockers);
+// Whether a row may be the game's own at all (mark_findings' rule before the install is asked): it is about a
+// file, and the build does not gate on its code, or its code's row says the file does not serialize (the
+// build packs the game's own bytes as stored). The rows the game's own data's check is asked about
+// (ProblemsService: the names of their files, session/original_files.h).
+bool original_candidate(const Diagnostic &d);
+// The logical name a row's file is served by (its project-relative path's file name), normalized: what the
+// install's findings are kept by (OriginalData::findings, covered).
+std::string served_name(const Diagnostic &d);
 // The view's marks: the session's while they are the rows' (FindingsView::marks), else made into
 // `scratch` from what the view holds (a view no session made).
 const FindingMarks &finding_marks(const SessionView &view, FindingMarks &scratch);

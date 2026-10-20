@@ -26,9 +26,14 @@ namespace {
 class TilProjectCheck final : public ProjectCheck {
 public:
 	bool update(const ProjectCheckInput &input) override {
+		// Its findings are about tile placements: a validation of a scope that holds none (the game's own data's
+		// check, ValidationScope) reads no mission; one that holds one reads every mission (which mission reports
+		// a placement first is the files' order's).
 		std::vector<std::string> missions;
-		for (const AssetEntry &entry : input.validation.scan.entries)
-			if (entry.kind == AssetKind::Mission) missions.push_back(entry.logical_name);
+		const ValidationScope *scope = input.validation.scope;
+		if (!scope || scope->tiles)
+			for (const AssetEntry &entry : input.validation.scan.entries)
+				if (entry.kind == AssetKind::Mission) missions.push_back(entry.logical_name);
 		if (made_ && missions == missions_ && !stamps_.moved(input.files)) return false;
 		const std::vector<Diagnostic> before = std::move(findings_);
 		findings_.clear();

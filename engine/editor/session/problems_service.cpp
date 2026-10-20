@@ -197,23 +197,25 @@ void ProblemsService::step_validation(const PollBudget &budget, const OperationC
 
 void ProblemsService::want_originals() {
 	if (!view_.project.open || !view_.project.scan) return;
+	// The install is validated for the files a row may be the game's own in (problem_query.h's
+	// original_candidate): a finding on a file of a name the install serves, each name validated once (the
+	// install's files of those names and what their findings read, session/original_files.h).
+	// The install's names normalized once while its listing stands (a composition asks every row's).
+	if (served_listing_ != view_.project.retail_files) {
+		served_listing_ = view_.project.retail_files;
+		served_.clear();
+		for (const std::string &name : served_listing_) served_.insert(pff::normalized_logical_name(name));
+	}
+	std::vector<std::string> names;
+	for (const Diagnostic &d : view_.findings.diagnostics)
+		if (original_candidate(d))
+			if (std::string name = served_name(d); served_.count(name)) names.push_back(std::move(name));
+	std::sort(names.begin(), names.end());
+	names.erase(std::unique(names.begin(), names.end()), names.end());
+	originals_needed_ = !names.empty();
 	// Another install or game forgets what was found (the view says so at once); a new scan looks at the
 	// install's folder again.
-	originals_->want(core_.base_game(), view_.project.document, view_.project.scan.get());
-	// The install is validated once a row may be about its data: a finding on a file of a name it serves.
-	originals_needed_ = false;
-	const std::vector<std::string> &served = view_.project.retail_files;
-	const auto by_name = [](const std::string &a, const std::string &b) {
-		return pff::normalized_logical_name(a) < pff::normalized_logical_name(b);
-	};
-	for (const Diagnostic &d : view_.findings.diagnostics) {
-		if (d.asset.empty() || blocks_build(d)) continue;
-		const std::string name = basename_of(d.asset);
-		if (std::binary_search(served.begin(), served.end(), name, by_name)) {
-			originals_needed_ = true;
-			break;
-		}
-	}
+	originals_->want(core_.base_game(), view_.project.document, view_.project.scan.get(), names);
 	show_originals();
 }
 

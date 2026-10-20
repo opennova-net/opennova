@@ -78,27 +78,29 @@ bool ProblemQuery::operator==(const ProblemQuery &other) const {
 	       scope == other.scope && fixable == other.fixable && grouping == other.grouping && blocking == other.blocking;
 }
 
-namespace {
-
-// The logical name a row's file is served by (its project-relative path's file name), normalized: what
-// the install's findings are kept by.
 std::string served_name(const Diagnostic &d) {
 	const size_t slash = d.asset.find_last_of('/');
 	return pff::normalized_logical_name(slash == std::string::npos ? d.asset : d.asset.substr(slash + 1));
 }
 
+bool original_candidate(const Diagnostic &d) {
+	return !d.asset.empty() && !(blocks_build(d) && !(d.row() && d.row()->blocks_save));
+}
+
+namespace {
+
 // Whether a row is the game's own (mark_findings' rule): the install, as a whole, makes the same finding in
-// the file of the same name; `left` the install's findings not taken by an earlier row (null: none taken,
-// a single row's answer).
+// the file of the same name, once the install was validated for that name (OriginalData::covers); `left` the
+// install's findings not taken by an earlier row (null: none taken, a single row's answer).
 bool original_row(const Diagnostic &d, const OriginalData &originals,
                   std::map<std::string, std::map<std::string, size_t>> *left) {
 	// A finding the build gates on stays the modder's to see, whatever file it is in. One that the file does
 	// not serialize gates nothing over the game's own bytes, which the build packs as stored (ADR 0046 S16,
 	// ShippedFiles): the original's where the install makes it too, unless the build is refused for it
 	// (mark_findings: a row among the plan's blockers is never the original's).
-	if (!originals.ready || d.asset.empty()) return false;
-	if (blocks_build(d) && !(d.row() && d.row()->blocks_save)) return false;
+	if (!originals.ready || !original_candidate(d)) return false;
 	const std::string name = served_name(d);
+	if (!originals.covers(name)) return false;
 	const auto served = originals.findings.find(name);
 	if (served == originals.findings.end()) return false;
 	const std::string key = original_finding_key(d);

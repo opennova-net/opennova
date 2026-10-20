@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -247,6 +248,9 @@ private:
 	// a name it serves).
 	std::unique_ptr<OriginalFiles> originals_;
 	bool originals_needed_ = false;
+	// The install's names (ProjectView::retail_files) as want_originals last read them, and normalized.
+	std::vector<std::string> served_listing_;
+	std::unordered_set<std::string> served_;
 	// The plan's refusals the rows were last marked against (mark_rows), which a reported finding's mark reads.
 	std::vector<Diagnostic> blockers_;
 	// What they were planned over (problems_service.cpp), kept while it stands: a composition that leaves the

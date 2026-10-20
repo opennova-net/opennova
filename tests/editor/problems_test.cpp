@@ -22,18 +22,23 @@
 #include <utility>
 #include <vector>
 
+#include <editor/assets/asset_import.h>
+#include <editor/assets/asset_type_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/project_checks.h>
-#include <editor/documents/validation_cache.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/graph/texture_checks.h>
 #include <editor/model/core_finding.h>
+#include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project/project_findings.h>
 #include <editor/project_build/build_plan.h>
@@ -55,6 +60,7 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/minted_install.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -1447,6 +1453,237 @@ static int test_original_textures() {
 	return 0;
 }
 
+// The game's own data's check validates the install only for the names the project's rows are about (the editor
+// speed pass: OriginalData::covered), and each finding about one of them is the game's own as a validation of the
+// whole install would say: a missing reference both make; one only the project's menu makes; a cross-file one, the
+// texture a model's row names and its loader passes over for its .dds (texture.not_read), made by the model's use;
+// a texture's own finding the install's copy makes too, once the project holds the texture (its name validated then,
+// in a round of its own, over the run as it stood). Its own files are far fewer than the install lists.
+static int test_original_scope() {
+	test_temp::TempDir dir("opennova_editor_problems_original_scope");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Original scope"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const auto menu = [](const char *name, const char *image) {
+		return std::string("<SCREEN>\r\n\t<NAME>") + name + "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+		       "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+		       "\t\t<APPEARANCE type=\"image\" state=\"default\">" + image + "</APPEARANCE>\r\n\t</WINDOW>\r\n</SCREEN>\r\n";
+	};
+	// A model naming wall.tga in a stage row, whose loader opens wall.dds where the files have it.
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
+	                                "o3d 2\nmodel THING\nmaterial FF_ST_OP\ntexture wall.tga 2 0\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
+	                                "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	ImportChoice model;
+	model.path = scene + "/thing.o3d";
+	const ImportResult imported = import_assets({model}, ProjectPaths::for_root(root), *v.project.document, false);
+	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/thing.3di"}));
+	std::vector<uint8_t> top = editor_test::tga_bytes();
+	top[17] |= 0x20; // rows stored top first: the texture's own finding
+	const std::string shipped = menu("SHIPPED", "logo.tga"), filler = "filler";
+	const std::vector<uint8_t> thing = test_io::read_file(root + "/models/thing.3di"), wall = editor_test::tga_bytes();
+	TEST_EXPECT(!thing.empty());
+	// The install: those files, and twenty more no row is about.
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
+	        {"shipped.mnu", std::vector<uint8_t>(shipped.begin(), shipped.end())}, {"thing.3di", thing},
+	        {"wall.tga", wall}, {"wall.dds", wall}, {"top.tga", top}};
+	for (int i = 0; i < 20; ++i) files.push_back({"note" + std::to_string(i) + ".txt", std::vector<uint8_t>(filler.begin(), filler.end())});
+	std::vector<opennova::pff::PffWriteEntry> entries;
+	for (const auto &[name, bytes] : files) entries.push_back({name.c_str(), bytes.data(), uint32_t(bytes.size()), 0, 0, 0});
+	const std::string install = dir.file("install");
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install") &&
+	            opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                             entries.data(), uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK);
+	// The project: the same files but the upside-down texture, and a menu of its own naming a texture neither has.
+	TEST_EXPECT(test_io::write_text(root + "/menus/shipped.mnu", shipped) && test_io::write_text(root + "/menus/mine.mnu", menu("MINE", "other.tga")) &&
+	            test_io::write_file(root + "/textures/wall.tga", wall) && test_io::write_file(root + "/textures/wall.dds", wall));
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	const auto row_of = [&v](const char *code, const char *asset, const char *about = "") {
+		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i) {
+			const Diagnostic &d = v.findings.diagnostics[i];
+			if (d.code() == code && d.asset == asset && d.message.find(about) != std::string::npos) return i;
+		}
+		std::fprintf(stderr, "no %s on %s\n", code, asset);
+		return SIZE_MAX;
+	};
+	const auto theirs = [&v](size_t row) { return row != SIZE_MAX && in_original_data(row, v); };
+	TEST_EXPECT(theirs(row_of("reference.missing", "menus/shipped.mnu", "logo.tga")) &&
+	            !theirs(row_of("reference.missing", "menus/mine.mnu", "other.tga")) &&
+	            theirs(row_of("texture.not_read", "textures/wall.tga")));
+	const OriginalFiles &fold = session.originals();
+	TEST_EXPECT(v.findings.originals && v.findings.originals->scoped);
+	if (!v.findings.originals) return 1;
+	const std::set<std::string> &covered = v.findings.originals->covered;
+	TEST_EXPECT(covered.count(normalized_logical_name("wall.tga")) && covered.count(normalized_logical_name("shipped.mnu")) &&
+	            !covered.count(normalized_logical_name("top.tga")) && !covered.count(normalized_logical_name("note0.txt")));
+	TEST_EXPECT(fold.validations() == 1 && fold.files() * 4 < fold.listed());
+	std::printf("original scope: %zu of %zu files validated\n", fold.files(), fold.listed());
+	// The texture the project now holds too, its own finding a row: its name validated in a round of its own, over
+	// the run as it stood, the rows before as they were.
+	TEST_EXPECT(test_io::write_file(root + "/textures/top.tga", top));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(theirs(row_of("texture.tga_upside_down", "textures/top.tga")) &&
+	            theirs(row_of("reference.missing", "menus/shipped.mnu", "logo.tga")) &&
+	            theirs(row_of("texture.not_read", "textures/wall.tga")));
+	TEST_EXPECT(fold.validations() == 2 && v.findings.originals->covered.count(normalized_logical_name("top.tga")));
+	std::printf("original scope: a name validated in a round of its own\n");
+	return 0;
+}
+
+// The install validated whole, as the game's own data's check did before it was scoped: listed and typed as the
+// check lists it, every file validated (the graph, each file's own findings, the project checks), every finding
+// about a file keyed by its name.
+static OriginalData whole_install(const std::string &install, const ProjectDocument &document) {
+	OriginalData data;
+	auto view = std::make_unique<InstallView>();
+	std::string why;
+	if (!view->open(install_spec(install, document), why)) return data;
+	const auto files = std::make_shared<InstallFileSource>(std::move(view));
+	ProjectPaths paths = ProjectPaths::for_root(install);
+	paths.files = files;
+	AssetScan scan;
+	for (const InstallFile &file : files->view().files()) {
+		AssetEntry entry;
+		entry.logical_name = entry.relative_path = file.name;
+		entry.size_bytes = files->size_of(file.name);
+		entry.kind = classify_asset(file.name, nullptr);
+		std::vector<uint8_t> content;
+		if ((opennova::editor::asset_classification_needs_bytes(file.name) || entry.kind == AssetKind::Unknown) &&
+		    files->read(file.name, content))
+			entry.kind = classify_asset(file.name, &content);
+		scan.entries.push_back(std::move(entry));
+	}
+	scan.index();
+	AssetGraph graph;
+	ValidationCache cache;
+	GraphReadings readings;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const ValidationInput input{paths, document, scan, open};
+	ProjectValidation validation(graph, cache, readings);
+	while (!validation.step(input, UINT64_MAX)) {
+	}
+	ProjectChecks checks;
+	checks.update({input, cache, *files});
+	std::vector<Diagnostic> rows = project_rows(input, graph, cache);
+	checks.append_findings(rows);
+	data.ready = true;
+	for (const Diagnostic &d : rows)
+		if (!d.asset.empty()) ++data.findings[normalized_logical_name(basename_of(d.asset))][original_finding_key(d)];
+	return data;
+}
+
+// The game's own data's check over a game install minted from OpenNova's own game (minted_install.h: menus,
+// missions, terrains, models, textures, definitions) finds of each name it is asked about what a validation of the
+// whole install finds: asked every name the install serves, every finding; asked a few (every name the whole finds
+// something in, a menu, the stylesheet, the item table, overcast.def and one file of each other kind), each one's
+// findings, and none of a name not asked, from far fewer files than it lists.
+static int test_original_scope_whole() {
+	test_temp::TempDir dir("opennova_editor_problems_original_whole");
+	const std::string install = dir.file("install");
+	std::string error;
+	TEST_EXPECT(minted_install::mint(install, error));
+	ProjectDocument document;
+	Diagnostic created;
+	TEST_EXPECT(create_project(dir.file("project"), "Whole", "jo", document, created));
+	const auto shared = std::make_shared<const ProjectDocument>(document);
+	const OriginalData whole = whole_install(install, document);
+	TEST_EXPECT(whole.ready && !whole.findings.empty());
+	const int scan = 0; // the session's scan stands in: the same one throughout
+	const auto settle = [&](OriginalFiles &fold, const std::vector<std::string> &names) {
+		fold.want(install, shared, &scan, names);
+		while (!fold.step(1 << 20)) {
+		}
+		return *fold.data();
+	};
+	// Every name the install serves.
+	std::vector<std::string> every;
+	{
+		InstallView view;
+		TEST_EXPECT(view.open(install_spec(install, document), error));
+		for (const InstallFile &file : view.files()) every.push_back(normalized_logical_name(file.name));
+	}
+	{
+		OriginalFiles fold;
+		const OriginalData all = settle(fold, every);
+		TEST_EXPECT(all.ready && all.scoped && all.findings == whole.findings);
+		std::printf("original scope: every name, %zu files with findings as the whole install's\n", all.findings.size());
+	}
+	// A few names: every one the whole install finds something in, the menus' stylesheet, the item table and
+	// overcast.def, and one of each other kind.
+	std::vector<std::string> some;
+	std::set<std::string> kinds;
+	for (const auto &[name, findings] : whole.findings) {
+		some.push_back(name);
+		kinds.insert(minted_install::extension_of(name));
+	}
+	for (const char *name : {"main.mnu", "menu_style.mns", "items.def", "overcast.def"}) some.push_back(normalized_logical_name(name));
+	for (const std::string &name : every)
+		if (kinds.insert(minted_install::extension_of(name)).second) some.push_back(name);
+	std::sort(some.begin(), some.end());
+	some.erase(std::unique(some.begin(), some.end()), some.end());
+	OriginalFiles fold;
+	const OriginalData narrowed = settle(fold, some);
+	TEST_EXPECT(narrowed.covered == std::set<std::string>(some.begin(), some.end()));
+	size_t compared = 0;
+	for (const std::string &name : some) {
+		const auto mine = narrowed.findings.find(name), theirs = whole.findings.find(name);
+		const bool same = (mine == narrowed.findings.end()) == (theirs == whole.findings.end()) &&
+		                  (mine == narrowed.findings.end() || mine->second == theirs->second);
+		if (!same) std::fprintf(stderr, "original scope: %s's findings differ from the whole install's\n", name.c_str());
+		TEST_EXPECT(same);
+		compared += theirs != whole.findings.end() ? 1 : 0;
+	}
+	for (const auto &[name, findings] : narrowed.findings) TEST_EXPECT(narrowed.covered.count(name) != 0);
+	TEST_EXPECT(compared == whole.findings.size() && fold.files() * 4 < fold.listed());
+	std::printf("original scope: %zu names (%zu with findings), %zu of %zu files validated\n", some.size(), compared,
+	            fold.files(), fold.listed());
+	// A finding about a file made of every file's uses: the shell's stylesheet with a variable a menu no row is about
+	// names (zzuse.mnu) and one no menu names (style.unused). Asked the stylesheet alone, its findings are the whole
+	// install's: the graph reads the menu, whose own findings are not made.
+	std::vector<minted_install::File> game, expansion;
+	TEST_EXPECT(minted_install::base_game(game, error) && minted_install::expansion_game(expansion, error));
+	const std::string uses = "<SCREEN>\r\n\t<NAME>ZZUSE</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	                         "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	                         "\t\t<APPEARANCE type=\"color\" state=\"default\">%ZZ_USED%</APPEARANCE>\r\n\t</WINDOW>\r\n"
+	                         "</SCREEN>\r\n";
+	bool styled_sheet = false;
+	for (minted_install::File &file : game)
+		if (normalized_logical_name(file.name) == normalized_logical_name("menu_style.mns")) {
+			std::string style(file.bytes->begin(), file.bytes->end());
+			style += "\r\nZZ_USED FF00FF00\r\nZZ_UNUSED FF00FF00\r\n";
+			file.bytes = minted_install::share(std::vector<uint8_t>(style.begin(), style.end()));
+			styled_sheet = true;
+		}
+	game.push_back({"zzuse.mnu", minted_install::share(std::vector<uint8_t>(uses.begin(), uses.end()))});
+	const std::string styled = dir.file("styled");
+	TEST_EXPECT(styled_sheet && minted_install::write_install(styled, game, minted_install::kExpansion, expansion, error));
+	const OriginalData styled_whole = whole_install(styled, document);
+	const std::string sheet = normalized_logical_name("menu_style.mns");
+	const auto unused_of = [](const OriginalData &data, const std::string &name) {
+		size_t unused = 0;
+		const auto found = data.findings.find(name);
+		if (found != data.findings.end())
+			for (const auto &[key, count] : found->second) unused += key.rfind("style.unused", 0) == 0 ? count : 0;
+		return unused;
+	};
+	TEST_EXPECT(unused_of(styled_whole, sheet) > 0);
+	OriginalFiles styled_fold;
+	styled_fold.want(styled, shared, &scan, {sheet});
+	while (!styled_fold.step(1 << 20)) {
+	}
+	const OriginalData &styled_scope = *styled_fold.data();
+	const auto mine = styled_scope.findings.find(sheet), theirs = styled_whole.findings.find(sheet);
+	TEST_EXPECT(mine != styled_scope.findings.end() && theirs != styled_whole.findings.end() &&
+	            mine->second == theirs->second && unused_of(styled_scope, sheet) == unused_of(styled_whole, sheet));
+	std::printf("original scope: the stylesheet's findings over every menu's uses, %zu unused\n",
+	            unused_of(styled_scope, sheet));
+	return 0;
+}
+
 // The rows' marks over the install's findings by hand (the UX round's problems lane): each of the install's
 // findings of a file taken by one row (an item and its duplicate name the same missing shadow, the install
 // has it once: the first row's is the game's own, the duplicate's the modder's); a finding the install
@@ -1930,6 +2167,8 @@ int main() {
 	failures += test_placeholders();
 	failures += test_original_data();
 	failures += test_original_textures();
+	failures += test_original_scope();
+	failures += test_original_scope_whole();
 	if (failures == 0) std::printf("editor_problems: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

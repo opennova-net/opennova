@@ -92,10 +92,17 @@ struct WalkKey {
 	uint64_t generation = 0, serial = 0;
 	std::string root;
 	const FileSource *files = nullptr;
+	uint64_t scope = 0; // the validation's scope (ValidationScope::version), 0 for every file
 	bool operator==(const WalkKey &o) const {
-		return generation == o.generation && serial == o.serial && root == o.root && files == o.files;
+		return generation == o.generation && serial == o.serial && root == o.root && files == o.files &&
+		       scope == o.scope;
 	}
 };
+
+WalkKey walk_key(const AssetGraph &graph, const ValidationInput &input) {
+	return {graph.generation(), input.scan.serial(), input.paths.root, input.paths.files.get(),
+	        input.scope ? input.scope->version : 0};
+}
 struct Walk {
 	std::weak_ptr<const FileSource> files;
 	std::vector<Diagnostic> findings;
@@ -512,9 +519,27 @@ bool is_texture_use(const GraphEdge &edge) {
 	       edge.kind == ReferenceKind::LoadingImage;
 }
 
+// Under a validation's scope (ValidationScope), the files the loaders of its own files' uses open (a terrain
+// detail's coefficient aside, which is read by its own name and shares nothing with another use): a use of one
+// of them by a file outside the scope is checked too, its findings left out, so the one finding a texture's cost
+// makes is said where a check of every file says it (the first use, in the files' order).
+std::set<std::string> scope_served(const AssetGraph &graph, const ValidationInput &input) {
+	std::set<std::string> out;
+	graph.for_each_edge([&](const GraphEdge &edge) {
+		UseTarget target;
+		if (is_texture_use(edge) && input.in_scope(edge.source) && use_target(graph, input, edge, target) &&
+		    target.role != R::TerrainDetailCoefficient)
+			out.insert(target.served);
+	});
+	return out;
+}
+
+// One use's findings into `out`: under a scope (`served_in_scope`, scope_served; null without one), those about
+// the scope's files alone (a file outside it whose use opens one of those is checked for what the uses after it
+// share, its findings left out; any other is checked only for the file of its name its loader passes over).
 void check_use(const AssetGraph &graph, const ValidationInput &input, const GraphEdge &edge,
                std::set<std::pair<std::string, std::string>> &passed_over, std::set<std::string> &costed,
-               std::vector<Diagnostic> &out) {
+               std::vector<Diagnostic> &out, const std::set<std::string> *served_in_scope = nullptr) {
 	UseTarget target;
 	if (!use_target(graph, input, edge, target)) return;
 	const R role = target.role;
@@ -528,13 +553,16 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	// terrain detail's, which the game reads by its own name too (texture_role_read_by_name).
 	const AssetEntry *written = target.written;
 	if (written && written->kind == AssetKind::Texture && written->relative_path != served && !renderer::texture_role_read_by_name(role) &&
-	    passed_over.insert({written->relative_path, served}).second)
+	    passed_over.insert({written->relative_path, served}).second && input.in_scope(written->relative_path))
 		out.push_back(make_finding(finding_code(TextureFinding::NotRead), DiagnosticSeverity::Warning,
 		                           "The game never reads " + written->logical_name + " for " + where + ": its loader opens " +
 		                                   basename_of(served) + " instead.",
 		                           written->relative_path));
+	// A use outside the scope goes on only where a use of the scope's opens the same file (what they share).
+	const bool own = input.in_scope(edge.source);
+	if (!own && (role == R::TerrainDetailCoefficient || !served_in_scope || !served_in_scope->count(served))) return;
 	const auto add = [&](F code, DiagnosticSeverity severity, const std::string &message) {
-		out.push_back(on_use(edge, code, severity, message));
+		if (own) out.push_back(on_use(edge, code, severity, message));
 	};
 	// A terrain's detail map, made into its coefficient by its own name (use_target): its sizes are that file's.
 	if (role == R::TerrainDetailCoefficient) {
@@ -604,7 +632,7 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	// A char map's classes past the twenty the tile set tables name: the game reads the byte as it stands
 	// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x6065C6], and what reads the class bounds it alone (docs/tiles/til-re.md
 	// "A char-map class at or past 20"): listed, never gated.
-	if (role == R::TerrainCharMap && reader == TextureReader::Pcx)
+	if (own && role == R::TerrainCharMap && reader == TextureReader::Pcx)
 		if (const KeptClasses *classes = char_map_classes(input, served); classes && classes->past > 0)
 			add(F::TextureCharMapClass, DiagnosticSeverity::Warning,
 			    basename_of(served) + ", " + where + ", holds " + std::to_string(classes->past) + " texel" +
@@ -646,7 +674,7 @@ std::vector<TextureRead> texture_use_reads(const AssetGraph &graph, const Valida
 	{
 		// None while the check keeps its walk of the graph and the scan as they stand: a composition reads nothing.
 		const std::lock_guard<std::mutex> lock(g_mutex);
-		const WalkKey key{graph.generation(), input.scan.serial(), input.paths.root, input.paths.files.get()};
+		const WalkKey key = walk_key(graph, input);
 		if (key.serial != 0)
 			if (const Walk *kept = g_walks.find(key); kept && kept->files.lock() == input.paths.files) return out;
 	}
@@ -655,23 +683,29 @@ std::vector<TextureRead> texture_use_reads(const AssetGraph &graph, const Valida
 		if (entry && reader != TextureReader::None && listed.insert({entry, reader, classes}).second)
 			out.push_back({entry, reader, classes});
 	};
+	// Under a scope, the scope's own uses' reads, and the header a use outside it reads of a file one of them
+	// opens (check_use goes on there).
+	const std::set<std::string> served_in_scope = input.scope ? scope_served(graph, input) : std::set<std::string>();
 	graph.for_each_edge([&](const GraphEdge &edge) {
 		UseTarget target;
 		if (!is_texture_use(edge) || !use_target(graph, input, edge, target)) return;
+		const bool own = input.in_scope(edge.source);
 		if (target.role == R::TerrainDetailCoefficient) {
-			add(target.written, target.detail, false);
+			if (own) add(target.written, target.detail, false);
 			return;
 		}
+		if (!own && !served_in_scope.count(target.served)) return;
 		const AssetEntry *served = input.scan.at_path(target.served);
 		add(served, target.reader, false);
 		// A char map's classes (check_use reads its texels past a header its loader reads).
-		if (target.role == R::TerrainCharMap && target.reader == TextureReader::Pcx)
+		if (own && target.role == R::TerrainCharMap && target.reader == TextureReader::Pcx)
 			add(served, TextureReader::Pcx, true);
 	});
 	for (const FixedTextureName &fixed : fixed_texture_names()) {
 		if (fixed.role != R::HudMfd && fixed.role != R::LoadingScreen) continue;
 		const AssetEntry *entry = input.scan.find(fixed.name);
-		if (entry && entry->kind == AssetKind::Texture) add(entry, TextureReader::Pcx, false);
+		if (entry && entry->kind == AssetKind::Texture && input.in_scope(entry->relative_path))
+			add(entry, TextureReader::Pcx, false);
 	}
 	return out;
 }
@@ -699,7 +733,7 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
 	(void)files;
 	const std::lock_guard<std::mutex> lock(g_mutex);
 	// The walk kept while the graph, the scan and the files it read stand (a scan never indexed keeps none).
-	const WalkKey key{graph.generation(), input.scan.serial(), input.paths.root, input.paths.files.get()};
+	const WalkKey key = walk_key(graph, input);
 	if (key.serial != 0)
 		if (const Walk *kept = g_walks.find(key); kept && kept->files.lock() == input.paths.files) {
 			out.insert(out.end(), kept->findings.begin(), kept->findings.end());
@@ -709,14 +743,17 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
 	std::vector<Diagnostic> found;
 	std::set<std::pair<std::string, std::string>> passed_over;
 	std::set<std::string> costed;
+	// Under a scope, its files' findings alone, as a walk of every file makes them (check_use).
+	const std::set<std::string> served_in_scope = input.scope ? scope_served(graph, input) : std::set<std::string>();
 	graph.for_each_edge([&](const GraphEdge &edge) {
-		if (is_texture_use(edge)) check_use(graph, input, edge, passed_over, costed, found);
+		if (is_texture_use(edge))
+			check_use(graph, input, edge, passed_over, costed, found, input.scope ? &served_in_scope : nullptr);
 	});
 	// The names the game opens itself whose sizes it asks for: the MFD's, the default loading screen's.
 	for (const FixedTextureName &fixed : fixed_texture_names()) {
 		if (fixed.role != R::HudMfd && fixed.role != R::LoadingScreen) continue;
 		const AssetEntry *entry = input.scan.find(fixed.name);
-		if (!entry || entry->kind != AssetKind::Texture) continue;
+		if (!entry || entry->kind != AssetKind::Texture || !input.in_scope(entry->relative_path)) continue;
 		const TextureHeader *header = header_of(input, entry->relative_path, TextureReader::Pcx);
 		if (!header || !header->read) continue;
 		check_sizes(fixed.role, entry->logical_name, *header, std::string("which the game opens by name ") + fixed.what,

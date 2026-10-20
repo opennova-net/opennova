@@ -837,6 +837,7 @@ JsonValue answer_perf(const QueryContext &context, const QueryArgs &, std::strin
 	JsonValue install = JsonValue::make_object();
 	install.set("validations", number(originals.validations()));
 	install.set("files", number(originals.files()));
+	install.set("listed", number(originals.listed()));
 	install.set("last_ms", number(originals.last_ms()));
 	install.set("us", number(problems.spent().originals_us));
 	out.set("originals", std::move(install));
@@ -1402,8 +1403,8 @@ constexpr EditorQueryRow kRows[] = {
 			"poll, validation, compose, operation, originals and devices, each its mean, p50, p95 and max in "
 			"microseconds; worst: the slowest frame's phases); problems (compositions, compose_us, blocker_plans); "
 			"validation (the last pass's files); graph (the last update's files, files_walked those it visited, and "
-			"edges); originals (validations, "
-			"files, last_ms, us); textures (headers_read, header_bytes, use_walks); and status (the validation's "
+			"edges); originals (validations: its rounds, "
+			"files: those whose own findings it made, listed, last_ms, us); textures (headers_read, header_bytes, use_walks); and status (the validation's "
 			"running, done, total). Every count is all told since the editor started.")
 			.row,
 };

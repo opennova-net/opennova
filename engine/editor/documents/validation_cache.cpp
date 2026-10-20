@@ -1,5 +1,6 @@
 #include "validation_cache.h"
 
+#include <atomic>
 #include <iterator>
 #include <utility>
 
@@ -197,6 +198,11 @@ void ValidationCache::end() {
 	ended_serial_ = serial_;
 	ended_game_ = game_;
 	ended_floor_ = floor_;
+}
+
+void ValidationScope::taken() {
+	static std::atomic<uint64_t> versions{0};
+	version = ++versions;
 }
 
 std::shared_ptr<const DocumentBase> ValidationInput::open_document(const AssetEntry &asset) const {

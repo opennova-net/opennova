@@ -174,6 +174,19 @@ bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
 void ProjectValidation::begin_files(const ValidationInput &input) {
 	const uint64_t serial = input.scan.serial();
 	const std::string &game = input.project.target_game;
+	if (input.scope) {
+		// The scope's files alone (the game's own data's check), each asked: one the cache holds as the scan lists
+		// it kept, every other file's findings left unmade.
+		std::vector<std::string> asked;
+		for (const AssetEntry *asset : validation_files(input.scan))
+			if (input.scope->has(asset->relative_path)) {
+				files_.push_back(asset);
+				asked.push_back(asset->relative_path);
+			}
+		if (cache_.keeps(serial, game)) cache_.begin_kept(serial, game, asked);
+		else cache_.begin(serial, game);
+		return;
+	}
 	if (!cache_.keeps(serial, game)) {
 		cache_.begin(serial, game);
 		files_ = validation_files(input.scan);

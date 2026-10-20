@@ -29,16 +29,37 @@ struct ValidationStats {
 	size_t files_dropped = 0; // files it did not ask (gone from the scan), whose findings went
 };
 
+// The files of its scan a validation validates where it does not validate every one (ADR 0046 S15: the
+// game's own data's check, session/original_files.h, over the files the project's rows are about and those
+// their findings read): each one's own findings made (so records_checked is false for every other file),
+// the texture headers its uses' checks read, the per-file project checks over it (a menu rendered, the tile
+// check's missions). Every file is still listed, and the asset graph reads every file it reads: a cross-file
+// finding about a file in the scope reads the references of every file (which use of a texture comes first,
+// whether any menu names a variable), so the findings about the scope's files are those a validation of
+// every file makes.
+struct ValidationScope {
+	std::set<std::string> paths; // project-relative paths of the scan's files in it
+	bool tiles = false;          // one of them is a tile placement (the tile check then runs over every mission)
+	// A value of a process-wide counter, taken anew by every change (taken()): what a cache keeps of a scope's
+	// validation is kept by it.
+	uint64_t version = 0;
+	bool has(const std::string &path) const { return paths.count(path) != 0; }
+	void taken();
+};
+
 // The project's files as one validation reads them (graph/project_validation.h): the scan's
-// files, an open document standing in for its file.
+// files, an open document standing in for its file; `scope` the files it validates (null: every file).
 struct ValidationInput {
 	const ProjectPaths &paths;
 	const ProjectDocument &project;
 	const AssetScan &scan;
 	const std::vector<std::shared_ptr<const DocumentBase>> &open;
+	const ValidationScope *scope = nullptr;
 
 	// The open document standing in for a file; null for a closed one.
 	std::shared_ptr<const DocumentBase> open_document(const AssetEntry &asset) const;
+	// Whether the validation validates the file at `path` (every file, without a scope).
+	bool in_scope(const std::string &path) const { return !scope || scope->has(path); }
 };
 
 // A file of a validation's scan loaded into document: from the project's folder, or through the paths'
