@@ -83,6 +83,20 @@ int main() {
 		check(p.avatars[0] == 1 && p.avatars[1] == 10, "fresh avatars = head voices");
 		check(character_join_vars(p).team_request == 0xFF, "the fresh profile's TR is -1");
 	}
+	// The computed fresh profile the runtime carries when nothing is installed
+	// (D-NET-NEW-L2-7): over this stock-shaped table the witnessed oracle, over
+	// no table ids 0 and the resolve's miss 1.
+	{
+		const CharacterJoinVars v = fresh_profile_character_vars(registry);
+		check(v.char_id[0] == 0x0200 && v.char_id[1] == 0x8207 && v.char_class[0] == 8 &&
+				v.char_class[1] == 8 && v.avatar[0] == 1 && v.avatar[1] == 10 &&
+				v.team_request == 0xFF,
+				"the computed fresh profile is the stock oracle");
+		const CharacterJoinVars none = fresh_profile_character_vars(CharacterRegistry());
+		check(none.char_id[0] == 0 && none.char_id[1] == 0 && none.avatar[0] == 1 &&
+				none.avatar[1] == 1 && none.char_class[0] == 8 && none.team_request == 0xFF,
+				"no Avatars.def: ids 0, avatars 1");
+	}
 	// A persisted side-A selection with class 6 on both blocks.
 	{
 		JoinSideSelection saved[2];

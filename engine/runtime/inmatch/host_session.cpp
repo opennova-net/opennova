@@ -2,6 +2,7 @@
 #include <runtime/devtools/tick_profile.h>
 #include <base/io/tick_rate.h>
 
+#include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / ...
 #include <runtime/inmatch/server_spawn.h>   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
 #include <runtime/inmatch/server_tick.h>    // Server_TickUpdate
@@ -712,7 +713,9 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	// Server_ProcessPendingPlayerSpawns stamps the local player from it.
 	for (NapiNPConnection &connection : owner.ctx.np_protocol.connection_list) {
 		if (connection.type == NapiNPConnection::kTypeClientSide) {
-			connection.char_vars = cfg.local_character_vars;
+			connection.char_vars = cfg.local_character_vars
+					? *cfg.local_character_vars
+					: fresh_profile_character_vars(CharacterRegistry());
 			// The round init's copy of the host's own profile word into its
 			// slot +372 [orig: Server_InitNewRoundState @0x51ca55..0x51ca61].
 			connection.link.auto_medic_enabled = cfg.local_auto_medic_disabled == 0;

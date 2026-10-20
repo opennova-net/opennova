@@ -171,4 +171,20 @@ inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile
 	return vars;
 }
 
+// A fresh profile's tag block over an Avatars.def registry: no side saved, so each side
+// takes its alignment's first combo and that combo's head voice, class 8 and the automatic
+// side request; over the empty registry (no Avatars.def) the ids are 0 and both avatar
+// bytes 1. What an embedder that installs no selection carries: the host boot computes
+// it over the mounted file for the host's own slot, and a joiner starts from the
+// no-table form until its shell installs the mounted selection. The stock Avatars.def
+// gives {0x0200, 0x8207}, class 8 / 8, avatars 1 / 10 (the oracle in the tests).
+// [orig: PlayerProfile_InitDefaults @0x54BB40 - class 8 @0x54bbe0 / @0x54bbe3, the
+//  packs EntitySlot_LookupAndPackEntry @0x57AD40 (calls @0x54bbea / @0x54bc0f), the
+//  voice overrides zeroed @0x54bc1e / @0x54bc24; Avatars_ResolveSelectionIndex
+//  @0x57AE60] (D-NET-NEW-L2-7)
+inline CharacterJoinVars fresh_profile_character_vars(const CharacterRegistry &registry) {
+	const JoinSideSelection none[2] = {};
+	return character_join_vars(join_character_profile(registry, none, /*in_session=*/true));
+}
+
 } // namespace opennova::inmatch

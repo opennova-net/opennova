@@ -163,9 +163,11 @@ struct HostConfig {
 	// record from the profile the same way [orig: PlayerSession_InitFromProfile
 	// @0x50ca80 validates + stores both side ids; Player_InitPlayer @0x4e15f0 <-
 	// g_AvatarTeam1/2, g_CharClassTeam1/2 <- Game_ApplySessionSettingsToGlobals
-	// @0x551500]. Defaults to the stock fresh-profile seed; the shell replaces it
-	// from the mounted Avatars.def + weapon.sav.
-	CharacterJoinVars local_character_vars = retail_fresh_profile_character_vars();
+	// @0x551500]. The shell installs it from the mounted Avatars.def + weapon.sav;
+	// unset, the host boot computes a fresh profile's over the mounted Avatars.def
+	// (fresh_profile_character_vars), and a session started with neither takes the
+	// no-table form.
+	std::optional<CharacterJoinVars> local_character_vars;
 	// The listen host's OWN inverse OPTIONS_AUTOMEDIC word, its profile's +1660:
 	// the round init copies it into the host's own player slot +372, where a
 	// joiner's arrives by C2S 0x03; 0 (a fresh record's) is automatic requests.

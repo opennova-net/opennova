@@ -9,6 +9,8 @@
 
 #include <runtime/inmatch/session_transport.h>
 
+#include "fresh_profile_oracle.h"
+
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 
@@ -30,7 +32,7 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 	// type-2 loopback right after create_session; the tests carry the stock fresh-profile
 	// seed (side A 0x0200 / avatar 1 = the golden host record) unless a test overrides it.
 	for (NapiNPConnection &connection : ctx.np_protocol.connection_list) {
-		if (connection.type == 2) connection.char_vars = retail_fresh_profile_character_vars();
+		if (connection.type == 2) connection.char_vars = stock_fresh_profile_character_vars();
 	}
 }
 

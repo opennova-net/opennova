@@ -872,12 +872,14 @@ bool check_listen_host_installs_local_character_profile() {
 	config.title = &kJo;
 	config.socket_mode = SocketMode::Socketless;
 	config.serve_and_play = true;
-	config.local_character_vars.char_id[0] = 0x0400;
-	config.local_character_vars.char_id[1] = 0x8407;
-	config.local_character_vars.char_class[0] = 6;
-	config.local_character_vars.char_class[1] = 7;
-	config.local_character_vars.avatar[0] = 3;
-	config.local_character_vars.avatar[1] = 9;
+	opennova::inmatch::CharacterJoinVars local_vars;
+	local_vars.char_id[0] = 0x0400;
+	local_vars.char_id[1] = 0x8407;
+	local_vars.char_class[0] = 6;
+	local_vars.char_class[1] = 7;
+	local_vars.avatar[0] = 3;
+	local_vars.avatar[1] = 9;
+	config.local_character_vars = local_vars;
 
 	opennova::inmatch::start_host_session(owner, config);
 	if (!expect(owner.ctx.np_protocol.connection_list.size() == 1,

@@ -16,6 +16,7 @@
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/vfs/vfs.h>
+#include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 
 #include <algorithm>
 #include <chrono>
@@ -186,10 +187,10 @@ JoinerConnection::JoinerConnection(std::string player_name,
 		: player_name_(std::move(player_name)),
 		  monotonic_milliseconds_(std::move(monotonic_milliseconds)) {
 	if (!monotonic_milliseconds_) monotonic_milliseconds_ = &steady_milliseconds;
-	// Stock-Avatars.def fresh-profile seed for socket-free/headless callers; the
-	// Godot binding replaces it from the mounted Avatars.def + weapon.sav before
-	// start(), so a user's real selection wins (retail_fresh_profile_character_vars).
-	character_join_vars_ = retail_fresh_profile_character_vars();
+	// A fresh profile with no Avatars.def until the embedder installs the mounted
+	// selection: the Godot binding computes it from the mounted Avatars.def and the
+	// profile before start() (fresh_profile_character_vars).
+	character_join_vars_ = fresh_profile_character_vars(CharacterRegistry());
 	conn_.type = 2;                  // client-side connection (the joiner's view of the host)
 	conn_.player_name = player_name_;
 }

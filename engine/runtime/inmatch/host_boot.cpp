@@ -3,6 +3,7 @@
 #include <base/gameprofile/game_type.h> // host_loading_band's auto game type
 #include <base/io/fixed.h>
 #include <base/io/log.h>
+#include <formats/avatars/avatars.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/entity_class.h>
@@ -10,6 +11,7 @@
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/integrity_sources.h>
+#include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h> // session_mission_name
@@ -166,6 +168,25 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
 								score_bytes.size())))
 			io::logf(io::LogLevel::kWarn, "host boot: score.ini rejected; the default table stands");
+	}
+
+	// The host's own slot's character selection when the embedder installed none
+	// (a headless host): a fresh profile's over the mounted Avatars.def, as the
+	// boot's fresh record packs each side's first combo; an install with no
+	// Avatars.def takes the empty table's (D-NET-NEW-L2-7).
+	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> EntitySlot_LookupAndPackEntry
+	//  @0x57AD40 over g_AvatarDefs; CAvatarDefs_Init @0x57B180 opens "Avatars.def"]
+	if (request.host != nullptr && !host_cfg.local_character_vars) {
+		CharacterRegistry characters;
+		std::vector<uint8_t> avatars_bytes;
+		if (files.valid() && files.read_file("Avatars.def", avatars_bytes)) {
+			avatars::AvatarsFile avatars = {};
+			if (avatars::avatars_parse_memory(avatars_bytes.data(), avatars_bytes.size(),
+						&avatars) == 0)
+				characters = CharacterRegistry::from_file(avatars);
+			avatars::avatars_free(&avatars);
+		}
+		host_cfg.local_character_vars = fresh_profile_character_vars(characters);
 	}
 
 	// The mission's placed tiles: one shared array serving the S2C 0x45

@@ -39,6 +39,7 @@
 
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/loopback_channel.h>
+#include "npruntime/fresh_profile_oracle.h"
 
 #include <net/npwire/ingame_decode.h>          // PlayerExtendedUplink (the §5.10 0x0C body)
 #include <net/npwire/ingame_message_catalog.h> // ingame_message_name
@@ -188,6 +189,9 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	uint64_t client_ms = 1;
 	inmatch::ClientRuntime client("SelfCapture", [&client_ms] { return client_ms; });
 	client.set_title(&kJo);
+	// The shell installs the mounted fresh profile; this script has no Avatars.def, so it
+	// installs the stock file's (the witnessed oracle, D-NET-NEW-L2-7).
+	client.set_character_join_vars(inmatch::stock_fresh_profile_character_vars());
 
 	int cap_seq = 0;
 	auto record = [&](int src, int dst, const std::vector<uint8_t> &d) {
