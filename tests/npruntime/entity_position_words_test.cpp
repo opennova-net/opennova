@@ -46,12 +46,15 @@
 #include <runtime/world/vehicle_system.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/spawn_select.h>
+#include <runtime/world/throwables.h>
+#include <runtime/world/user_waypoints.h>
 #include <runtime/world/world.h>
 
 #include <array>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -754,11 +757,69 @@ int ground_sampler_takes_the_words() {
 	if (!expect(opennova::terrain::height_field_height_bilinear_fixed(field, x, y) == expected,
 	            "the word sampler's rounded weights and taps"))
 		return 1;
+	// A user waypoint takes the sampler's z word at its x / y words.
+	// [orig: Waypoint_CreateForPlayer @0x4DFCB0 - Terrain_SampleHeightBilinear @0x4dfd21]
+	{
+		auto world = std::make_unique<w::World>();
+		world->registry.configure_pool(w::kUserWaypointPool, 4);
+		world->tables.terrain = &field;
+		std::string line;
+		const w::EntityHandle wp = w::waypoint_create_for_player(*world, x, y, "Rally", {}, line);
+		const w::Entity *row = world->registry.get(wp);
+		if (!expect(row != nullptr && row->position.x.q16 == x && row->position.y.q16 == y &&
+		                    row->position.z.q16 == expected,
+		            "the user waypoint's z word is the sampler's"))
+			return 1;
+	}
 	sectors.fill(0);
 	if (!expect(opennova::terrain::height_field_height_bilinear_fixed(field, x, y) == 0,
 	            "an empty cell samples 0"))
 		return 1;
 	std::printf("PASS ground_sampler_takes_the_words\n");
+	return 0;
+}
+
+// The S2C 0x59 a placed device sends streams the resting round's Position words
+// raw, 21,000 units out with low bits set (D-NET-507). [orig:
+// Entity_ConvertRoundToPlacedEntity @0x5455B0 -> S2C 0x59; the record's words from
+// the round's +4 / +8 / +0xC, Entity_UpdateSatchelPhysics @0x448AEB..0x448B09]
+int placed_device_spawn_streams_the_words() {
+	auto world = std::make_unique<w::World>();
+	world->rules.mp_session = true;
+	world->registry.configure_pool(0, 4);
+	w::PlayerSpawn spawn;
+	spawn.position.set_q16({kAshJoinerX, kTdhHostY, 2 << 16});
+	spawn.team = 1;
+	const w::EntityHandle owner = w::spawn_remote_player(*world, spawn);
+	w::ThrowableEvents::DeviceSpawn event;
+	event.entity = 0x1003;
+	event.item_id = 0x0361;
+	event.owner_handle = owner.packed;
+	event.pos.set_q16({kAshTrailerX, kTdhHostY, kFarZ});
+	world->throwables.events.spawns.push_back(event);
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = world.get();
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(conn_fixture::make_seeded_conn(
+			3, 1, &remote, ns::TransportMode::Client, owner, true));
+	inmatch::route_entity_pass_records(ctx, *world);
+	opennova::DeployedItemSpawn sent;
+	bool found = false;
+	opennova::replication::Datagram d;
+	while (remote.pop_outbound(d)) {
+		if (d.tag != opennova::s2c::DEPLOYED_ITEM) continue;
+		size_t consumed = 0;
+		found = opennova::decode_deployed_item_spawn(d.body.data(), d.body.size(), sent, consumed) &&
+		        consumed == d.body.size();
+	}
+	if (!expect(found && sent.pos_x == kAshTrailerX && sent.pos_y == kTdhHostY &&
+	                    sent.pos_z == kFarZ && sent.slot_handle == 0x1003,
+	            "the 0x59 streams the placed device's words"))
+		return 1;
+	std::printf("PASS placed_device_spawn_streams_the_words\n");
 	return 0;
 }
 
@@ -794,8 +855,9 @@ int main() {
 	const int seat = seat_pose_is_words();
 	const int sampler = ground_sampler_takes_the_words();
 	const int bound = bound_radius_is_a_word();
+	const int device = placed_device_spawn_streams_the_words();
 	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round, mount,
-	                    seat, sampler, bound})
+	                    seat, sampler, bound, device})
 		if (r != 0) return r;
 	return 0;
 }
