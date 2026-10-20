@@ -57,7 +57,8 @@ inline std::string row_of(const Diagnostic &d) {
 using Files = std::vector<std::pair<std::string, std::string>>;
 
 // Every fixture a document type reads: the item table, the string tables, the menus, the
-// stylesheet (as menu_style.mns, the one the game reads), the models, the clips and the tables.
+// stylesheet (fixtures/mns/test_style.mns as menu_style.mns, the one the game reads; the format's
+// other stylesheets are its own sweep's), the models, the clips and the tables.
 inline Files fixture_files() {
 	Files files;
 	const std::string root = repo() + "/fixtures/";
@@ -66,7 +67,8 @@ inline Files fixture_files() {
 		std::vector<fs::path> found;
 		std::error_code ec;
 		for (const auto &entry : fs::directory_iterator(root + dir, ec))
-			if (entry.is_regular_file(ec) && entry.path().extension() == extension)
+			if (entry.is_regular_file(ec) && entry.path().extension() == extension &&
+					(!as_style || entry.path().filename() == "test_style.mns"))
 				found.push_back(entry.path());
 		std::sort(found.begin(), found.end());
 		for (const fs::path &path : found)

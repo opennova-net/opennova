@@ -307,10 +307,12 @@ BadBuildClip make_walk() {
 		return BadBuildQuat{};
 	});
 	standing_events(clip);
+	// The end pose (frame 30, the loop's seam) carries no footstep of its own: the game plays frames 0 to 29 and
+	// never reads its event, frame 0's footstep firing each cycle (the editor's animation.end_pose_trigger).
 	for (size_t k = 0; k < clip.events.size(); ++k) {
 		BadBuildEvent &e = clip.events[k];
 		e.velocity = BadBuildVec3{1.0 / 16.0, 0.0, 0.0};
-		e.trigger = (k == 0 || k == 30) ? 0x1 : (k == 15 ? 0x2 : (k == 8 ? 0x20 : 0));
+		e.trigger = k == 0 ? 0x1 : (k == 15 ? 0x2 : (k == 8 ? 0x20 : 0));
 	}
 	return clip;
 }
