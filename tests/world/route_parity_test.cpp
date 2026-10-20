@@ -624,6 +624,43 @@ void test_flight_floor_is_the_fresh_sample() {
     CHECK(helo.veh.net_alt_target == (5 << 16) - 0x2000);     // parked on the CACHE
 }
 
+// Beyond 6 u of its node, a hull whose SM mover left no out-speed takes the
+// 132-scaled cyclic seed from the heading error: dead ahead, the forward
+// register is the full 132 and the lateral one 0.
+// [orig: Entity_UpdateAircraftPhysics — the seeds `[540] = brain[127]; [544]
+//  = brain[128]` @0x4915a3..0x4915a9, the zero-register seed @0x4917f3..0x491834]
+void test_far_node_seeds_a_zero_speed_command() {
+    FlatField terrain(0);
+    AirRig r;
+    r.w.tables.terrain = &terrain.field;
+    r.seat_pilot();
+    Entity &helo = r.helo();
+    helo.position = {100.0f, 20.0f, 50.0f};
+    helo.bound_radius = 5.0f;
+    helo.veh.yaw_bam = 0;
+    helo.veh.yaw_seeded = true;
+    AiEntity &ai = *r.w.ai.for_handle(r.helo_h);
+    ai.pos[0] = 100 << 16;
+    ai.pos[1] = 20 << 16;
+    ai.pos[2] = 50 << 16;
+    NavNodeTable &nav = r.w.ai.nav;
+    nav.nodes.resize(1);
+    nav.nodes[0].f[1] = 200 << 16; // 100 u dead ahead, level
+    nav.nodes[0].f[2] = 20 << 16;
+    nav.nodes[0].f[3] = 50 << 16;
+    nav.channels.resize(2);
+    nav.channels[1].count = 1;
+    AiBrain &b = r.brain();
+    b.f[AiBrain::kCurState] = 7;
+    b.f[AiBrain::kWpType] = 1;
+    b.f[AiBrain::kWpChannel] = 1;
+    b.f[AiBrain::kWpNode] = 0;
+    b.f[AiBrain::kOutSpeed] = 0;
+    r.w.ai.chel_ai_drive(r.w, helo, &r.pilot(), r.traits);
+    CHECK(helo.veh.cmd_speed == 132);
+    CHECK(helo.veh.cmd_lateral_speed == 0);
+}
+
 // Every Entity_CalcAverageGroundHeight sample refreshes the hull's ground link:
 // the east and centre taps are the AndObject ray kind, which stores its hit
 // entity (null on a miss), so the centre hit is the link that survives.
@@ -767,6 +804,7 @@ int main() {
     test_route_seed_is_the_slot_words();
     test_parked_airborne_hull_spins();
     test_flight_floor_is_the_fresh_sample();
+    test_far_node_seeds_a_zero_speed_command();
     test_ground_samples_refresh_the_link();
     test_boat_slip_bearing_truncates();
     test_script_gates_read_the_item_type_index();

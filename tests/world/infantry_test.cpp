@@ -2994,6 +2994,34 @@ void test_slope_pass_org1_selector_and_chase() {
     CHECK(e->inf.vel[0] == -2048);
 }
 
+// On the same 45-degree dune the slide always runs downhill, whichever way the
+// body faces: facing down the slope (-x) the pitch arm pushes it forward, and
+// facing across it (+y, the high side on the right) the roll arm pushes it left.
+// [orig: Entity_UpdateInfantryAI slide @0x4BA249..0x4BA2FB -- the forward and
+//  leftward arms]
+void test_slope_pass_org1_slides_downhill_across_and_facing_down() {
+    Field ramp([](int x) {
+        int v = x * 256;
+        return static_cast<uint16_t>(v > 65535 ? 65535 : v);
+    });
+    struct Case { int32_t heading; int32_t vx, vy; };
+    const Case cases[] = {{static_cast<int32_t>(0x80000000u), -2048, 0}, {0x40000000, -2048, 0}};
+    for (const Case &c : cases) {
+        World w;
+        AiSystem ai;
+        ai.terrain = &ramp.field;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(100) + kFloorStand;
+        e->heading = c.heading;
+        e->inf.anim_state = anim_state::kWalkProneForward;
+        ai.infantry_slope_pass(*e, w, 0, 0);
+        CHECK(e->inf.vel[0] == c.vx && e->inf.vel[1] == c.vy);
+    }
+}
+
 // The org1 slopes shift the 32-bit height difference in 32 bits before the
 // clamp: a lateral step of 0.6875 u (a 4 u/u ramp across the 0.171875 u probe
 // pair) wraps the <<16 and flips the roll's sign; a probe that finds no ground
@@ -5309,6 +5337,7 @@ int main() {
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();
     test_slope_pass_org1_selector_and_chase();
+    test_slope_pass_org1_slides_downhill_across_and_facing_down();
     test_slope_pass_org1_wraps_its_32_bit_slopes();
     test_slope_pass_org2_airborne_corpse_tumbles();
     // ---- body heading: quarter-step toward the target, clamped ±69273360/tick ----

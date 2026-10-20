@@ -290,8 +290,30 @@ static void test_validator_gates_destroyed_and_cheat_targets() {
     CHECK(!valid());
 }
 
+// The air class (slot class 0) walks pool 1 for vehicles that are unbrained
+// or helo-brained only: a ground-profiled SM vehicle nearer the scanner is
+// passed over for the helicopter behind it.
+// [orig: AI_FindBestTargetB case 0 @0x466ff3; the class-0 pool-1 sub-filter
+//  `!parent || profile+16 == 1` @0x46715d]
+static void test_air_class_takes_only_helo_brained_vehicles() {
+    Scanner s;
+    World &w = *s.w;
+    s.e().profile.class_priority[0] = 1; // the air class alone
+    const EntityHandle ground = s.spawn_enemy(1, 0, 0);
+    const int ground_ai = w.ai.attach(ground);
+    w.ai.at(ground_ai)->profile.type = 2; // GROUND
+    const EntityHandle helo = s.spawn_enemy(1, 0, 0);
+    w.registry.get(helo)->position = Vec3{40.0f, 0.0f, 0.0f};
+    const int helo_ai = w.ai.attach(helo);
+    w.ai.at(helo_ai)->profile.type = 1; // HELO
+    AiTarget found{};
+    CHECK(w.ai.acquire_target(w, s.e(), found));
+    CHECK(found.handle == helo);
+}
+
 int main() {
     test_engage_jitter_keys_on_the_target_brain();
+    test_air_class_takes_only_helo_brained_vehicles();
     test_rounds_mark_their_shooter();
     test_scripted_berserk_reaches_the_readers();
     test_helo_search_reads_the_arc_signed();

@@ -278,7 +278,7 @@ stands in for.
 | `mlcac.3di` | the shipped LCAC's (Dlcac1): the hull on part 0; the pilot's ctrlx11 and the passenger sitex00; one collision object, the shipped skirt, deck and side structures as type-1 volumes; `watercraft_02tr`'s |
 | `mmarkv.3di` | the shipped Mark V's (Dmrk51, and the garrison's assault boat): the hull on part 0; the helm's ctrlx22, four passengers, the sound point and the wake points (two FX01, FX00) at the shipped places; one collision object, the shipped keel, hull, stern, bow and wheelhouse as type-1 volumes; `watercraft_02tr`'s and the garrison's |
 | `mtripod.3di` | the shipped .50 on a tripod's (E50triB): the tripod on part 0, the traverse on part 1 (EWEAP_GUNYAW) and the gun on part 2 (EWEAP_GUNPITCH) about the shipped pivot; the gunner's Usegun point and the gun's camera, heat, casing, bullet and flash points; a collision object per part; the garrison's |
-| `mlbird.3di` | the shipped minigun Little Bird's (DAH62): the fuselage with its open cockpit and skids on part 0, the main and tail rotors on parts 1 and 2; the pilot's ctrlx05, the co-pilot's sitex04, the miniguns' bullet, flash and casing points, the two flare launchers and the heat-haze point FX00; one collision object; `training_gameplay`'s |
+| `mlbird.3di` | the shipped minigun Little Bird's (DAH62): the fuselage with its open cockpit and skids on part 0, the main and tail rotors on parts 1 and 2; the pilot's ctrlx05, the co-pilot's sitex04, the miniguns' bullet, flash and casing points, the two flare launchers, the heat-haze point FX00 and the aim point TARGET; one collision object; `training_gameplay`'s |
 | `mchinook.3di` | the shipped Chinook's (Dchnk1): the fuselage on part 0, its cabin floor 6.23 and its gear 7.19 under the origin, the ramp a sloped volume; the rotors on parts 1 and 2; the cockpit's ctrlx05 and sitex04, the two flare launchers, the heat-haze point FX00 and the six troop seats sitex17A..F at the shipped places; one collision object, with the shipped troop benches and seat bases; `parachute_09tr`'s |
 | `mhut.3di` | an enterable one-room building in the shape of the shipped ones the indoor-visibility reports came from (00TRa's armory, CP03's HN_Bld1): the shell and the room on parts 0 and 1, a doorway and a window; its collision walls with the doorway open, the room's blink box (type 8), and its occlusion records (the open slot, the wall occluders, the doorway as record 5 and the window, both type 2); the indoor-visibility rows' |
 | `mm1a1.3di` | the shipped M1A1's (Dm1a1): the hull and turret on part 0, the origin 1.3 over the tracks' bottom; the driver's ctrlx25, the exhaust and dust points (fx00 twice, fx01, fx02 twice) and its `ground` point at the shipped places; one collision object, the hull its type-1 volume; `training_gameplay`'s (tags.bms) |
@@ -322,7 +322,8 @@ shipped medics' drag poses: the draggee; the dragger's idle and walk), and the f
 `mfp_m4.adm` (the shipped M4_1st table's slots).
 
 Its authored text: `items.def` (the rows its missions place, by the shipped rows' ids and
-field values over the minted models, the movement-effect rows among them), `powerup.def` (two of
+field values over the minted models, the movement-effect rows among them, and the Stinger and
+Javelin rows the throw-class table resolves at load), `powerup.def` (two of
 the shipped powerup rows' shape, the full-health and full-ammo powerups), `weapon.def` (the knife, the Colt, the M4 with its
 actions, the buggy's emplaced gun, the tripod's .50 and the Little Bird's miniguns, over the
 minted first-person table), `SndProf.def` (the player's footstep sounds), the lose flows' WACs

@@ -219,8 +219,30 @@ void test_draggee_clip_and_dead_medic_gates() {
     CHECK(b.pos[0] == 0 && f.anchors.hand_queries == 0);
 }
 } // namespace
+// A gunner-seated body takes the emplaced state 67, or its mount's variant: the
+// item's mount config 1 picks 68 and 2 picks 69 when the clip table carries it,
+// else the plain 67 stands. [orig: Entity_UpdateInfantryAI @0x4b9910 -- the
+//  isInVehicle branch, `gap_86c == 1 && animMap[68] != *animMap`]
+void test_emplaced_gunner_takes_its_mount_variant() {
+    struct Case { int config; bool valid; int missing; int want; };
+    const Case cases[] = {{1, true, -1, 68}, {2, true, -1, 69}, {1, true, 68, 67}, {1, false, -1, 67}, {0, true, -1, 67}};
+    for (const Case &c : cases) {
+        Fixture f;
+        if (c.missing >= 0) f.motion.missing.insert(c.missing);
+        const auto gunner = f.person(30, 0);
+        Entity &e = f.entity(gunner);
+        e.mounted = true;
+        e.mount_type = SeatType::Gunner;
+        e.mounted_config_valid = c.valid;
+        e.mounted_config = c.config;
+        f.world.ai.infantry_select(f.body(gunner), f.world);
+        CHECK(f.body(gunner).inf.anim_state == c.want);
+    }
+}
+
 int main() {
     test_escort_approach_boundaries();
+    test_emplaced_gunner_takes_its_mount_variant();
     test_patient_head_approach_and_fallback();
     test_backward_drag_gait_and_root_motion();
     test_corpse_hand_follow_and_lifetime();

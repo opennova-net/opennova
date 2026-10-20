@@ -916,6 +916,61 @@ static void test_idle_facing_probes_turn_away_from_a_wall() {
     r.w.ai.collision = nullptr;
 }
 
+// Every fan probe found blocked folds its reverse bearing into the mean: with a
+// wall 1.5 u east (the first probe) and another 1.5 u west (the fan's 180-degree
+// probe), the mean ends between the half turn and the quarter.
+// [orig: Entity_UpdateInfantryAI — the fan @0x4BDBED..0x4BE071]
+static void test_idle_facing_folds_each_blocked_fan_probe() {
+    Rig r(fx(200), 0, 0, {1, 43, 44, 49});
+    CollisionModel box;
+    const auto plane = [&](int nx, int ny, int nz, double d) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = fx(d);
+        box.planes.push_back(p);
+    };
+    plane(16384, 0, 0, -0.5);
+    plane(-16384, 0, 0, -0.5);
+    plane(0, 16384, 0, -0.5);
+    plane(0, -16384, 0, -0.5);
+    plane(0, 0, 16384, -3.0);
+    plane(0, 0, -16384, 0.0);
+    CollisionVolume volume;
+    volume.type = 1;
+    volume.min_x = volume.min_y = fx(-0.5);
+    volume.max_x = volume.max_y = fx(0.5);
+    volume.max_z = fx(3.0);
+    volume.plane_count = 6;
+    box.volumes.push_back(volume);
+    CollisionSection section;
+    section.volume_count = 1;
+    box.sections.push_back(section);
+    Entity wall{};
+    wall.kind = EntityKind::Building;
+    wall.alive = true;
+    wall.yaw = 90;
+    wall.position = {1.5f, 0.0f, 0.0f};
+    const EntityHandle east_h = r.w.registry.spawn(2, wall);
+    wall.position = {-1.5f, 0.0f, 0.0f};
+    const EntityHandle west_h = r.w.registry.spawn(2, wall);
+    auto collision = std::make_unique<CollisionWorld>();
+    const int32_t model = collision->add_model(std::move(box));
+    collision->assign_entity(east_h, model);
+    collision->assign_entity(west_h, model);
+    for (int i = 0; i < 17; ++i) collision->build_tick_tables(r.w);
+    r.w.ai.collision = collision.get();
+    r.alerted_idle();
+    r.tick(16);
+    CHECK(r.blue().inf.anim_state == anim_state::kIdle2);
+    // East blocked: the mean turns to 0x7FFFFF80; the fan's 180-degree probe (2 u
+    // west, off the ORIGINAL mean) is blocked too and folds its reverse bearing
+    // in: 0x7FFFFF80 + (0 + 0x7FFFFF80) / 2.
+    CHECK(r.blue().inf.target_heading == static_cast<int32_t>(0xBFFFFF40u));
+    r.w.ai.collision = nullptr;
+}
+
 // Airborne without the 0x80 climb order, the think seeds aimPitch from the SSN
 // and skips the rest: no cooldown step, no route leg. The climb order exempts
 // the body. [orig: Entity_UpdateInfantryAI @0x4BAA4B..0x4BAA66]
@@ -1035,6 +1090,74 @@ static void test_teamless_coward_scans_as_team_two() {
     CHECK(r.blue().inf.combat_target == enemy);
 }
 
+// A threat behind a wall is not acquired: each candidate's line of sight runs
+// from the scanner's fire origin to its aim point, and the retail flag arm's
+// alternate ray 3/8 u forward is blocked as well, so the scan comes back empty.
+// [orig: Entity_FindTargets @0x53AE4C..0x53AF2B]
+static void test_scan_skips_a_threat_behind_a_wall() {
+    Rig r(fx(5), 0, 0);
+    const EntityHandle enemy = r.make(2, 1, 0, fx(6), 0);
+    r.blue().team = 0;
+    r.blue_entity().team = 0;
+    r.blue().slot.f[1] |= 8;
+    r.blue().inf.combat_target = {};
+    r.blue().slot.f[3] = 0;
+    r.blue_entity().flags |= 0x800000u; // the alternate-ray arm
+    CollisionModel box;
+    const auto plane = [&](int nx, int ny, int nz, double d) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = fx(d);
+        box.planes.push_back(p);
+    };
+    plane(16384, 0, 0, -0.5);
+    plane(-16384, 0, 0, -0.5);
+    plane(0, 16384, 0, -0.5);
+    plane(0, -16384, 0, -0.5);
+    plane(0, 0, 16384, -3.0);
+    plane(0, 0, -16384, 0.0);
+    CollisionVolume volume;
+    volume.type = 1;
+    volume.min_x = volume.min_y = fx(-0.5);
+    volume.max_x = volume.max_y = fx(0.5);
+    volume.max_z = fx(3.0);
+    volume.plane_count = 6;
+    box.volumes.push_back(volume);
+    CollisionSection section;
+    section.volume_count = 1;
+    box.sections.push_back(section);
+    Entity wall{};
+    wall.kind = EntityKind::Building;
+    wall.alive = true;
+    wall.yaw = 90;
+    wall.position = {0.0f, 3.0f, 0.0f};
+    wall.item_type_index = 1; // the def row's ordinal: the +0x1C slice gate
+    wall.has_item_def = true;
+    wall.bound_radius = 1.5f;
+    const EntityHandle wall_h = r.w.registry.spawn(2, wall);
+    auto collision = std::make_unique<CollisionWorld>();
+    collision->assign_entity(wall_h, collision->add_model(std::move(box)));
+    for (int i = 0; i < 17; ++i) collision->build_tick_tables(r.w);
+    r.w.ai.collision = collision.get();
+    // The LOS test needs a terrain to clip against (flat at 0).
+    std::vector<uint16_t> heights(512 * 512, 0);
+    std::vector<int> grid(256, 1);
+    opennova::terrain::TerrainHeightField terrain;
+    terrain.heightmap = heights.data();
+    terrain.dim = 512;
+    terrain.layout.sector_grid = grid.data();
+    r.w.ai.terrain = &terrain;
+    // Both bodies' eyes 1.5 u up: the rays run well inside the wall's height.
+    r.blue().inf.eye_offset_z = fx(1.5);
+    r.w.ai.for_handle(enemy)->inf.eye_offset_z = fx(1.5);
+    r.think(128); // phase 0 of the 32-tick perception
+    CHECK(r.blue().inf.combat_target != enemy);
+    r.w.ai.collision = nullptr;
+    r.w.ai.terrain = nullptr;
+}
+
 // A stop (147) is arbitrated raw: from an exit-gated state (115, flags 0x20)
 // the movement-flagged 147 commits at once, where the idle it would resolve to
 // (43, no 0x1) only queues. [orig: the arbitration @0x4BD845..0x4BD874 on the
@@ -1117,12 +1240,14 @@ int main() {
     test_player_slow_pass_refreshes_the_ride_link();
     test_idle_facing_turns_away_from_a_teammate();
     test_idle_facing_probes_turn_away_from_a_wall();
+    test_idle_facing_folds_each_blocked_fan_probe();
     test_airborne_think_skips_after_the_pitch_seed();
     test_swimming_selects_the_swim_clips();
     test_combat_approach_runs_as_run_attack();
     test_scripted_idle_watches_the_local_player();
     test_scripted_idle_far_player_takes_the_sse2_indefinite();
     test_teamless_coward_scans_as_team_two();
+    test_scan_skips_a_threat_behind_a_wall();
     test_stop_is_arbitrated_raw();
     test_attachment_publishes_the_move_mode_and_consumes_the_hit();
     test_run_fallback_precedes_the_wounded_gait();

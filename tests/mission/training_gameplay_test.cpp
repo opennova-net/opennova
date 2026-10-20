@@ -9,9 +9,11 @@
 #include "common/mission_set.h"
 #include <runtime/world/friendly_tags.h>
 #include <runtime/audio/sound_profile.h>
+#include <runtime/world/collision.h>
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <string>
 
 using namespace opennova;
 using namespace opennova::world;
@@ -183,6 +185,24 @@ static void tags_and_pilot(const std::string &root) {
     CHECK(heli != nullptr);
     if (!heli) return;
     CHECK((heli->item_attrib & kItemAttribEweap) != 0);
+    // A modeled non-person is aimed at its def TARGET userpoint: the raw point
+    // through the placement matrix alone. The minigun Little Bird carries the
+    // shipped one. [orig: Entity_ComputeWeaponFireOrigin -- def+1350
+    //  @0x43b5d4..0x43b5f6; Entity_InitFromModel @0x40dd04]
+    {
+        const auto *model = rig->assets().model("mlbird").get();
+        CHECK(model != nullptr && heli->target_userpoint_byte != 0);
+        if (model != nullptr && heli->target_userpoint_byte != 0 &&
+                heli->target_userpoint_byte <= model->user_point_count) {
+            const auto &point = model->user_points[heli->target_userpoint_byte - 1];
+            CHECK(std::string(point.name) == "TARGET");
+            const int32_t local[3] = {point.x, point.y, point.z};
+            int32_t want[3], aim[3];
+            entity_placement_matrix(*heli).transform_point(local, want);
+            world.ai.weapon_aim_origin(world, *heli, aim);
+            CHECK(aim[0] == want[0] && aim[1] == want[1] && aim[2] == want[2]);
+        }
+    }
     const Seat *control_seat = nullptr;
     for (const Seat &seat : heli->seats)
         if (seat.type == SeatType::Controller) control_seat = &seat;

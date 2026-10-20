@@ -393,6 +393,24 @@ begin "Combat Medic02 Soldier no gun"
   ammo_marker3        AMMO_CAR15_556MM
 end
 
+begin "Stinger"
+	id 104504
+	type object
+	attrib: NoTool
+	graphic stinger
+	ai_function stng
+	move_function stng
+end
+
+begin "Javelin round"
+	id 100369
+	type object
+	attrib: NoTool
+	graphic Javelin
+	ai_function jvln
+	move_function jvln
+end
+
 begin "teleport target"
   id 106088
   type marker
