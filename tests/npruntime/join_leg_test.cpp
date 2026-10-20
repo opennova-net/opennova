@@ -28,6 +28,7 @@
 //     Server_BuildRoundEventListForPlayer @0x4FFEE8, @0x5001A8..0x5001AE].
 
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/punt_log.h> // PuntLog (the checksum legs' _PUNT.TXT lines)
 #include <runtime/inmatch/server_dispatch_join.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -48,8 +49,10 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -57,6 +60,20 @@ namespace {
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 namespace ns = opennova::replication;
+
+// A _PUNT.TXT sink in memory (the punt-log lines the join's checksum legs write).
+class MemoryFiles final : public inmatch::ServerFileSink {
+public:
+	std::map<std::string, std::string> files;
+	bool exists(const std::string &name) override { return files.count(name) != 0; }
+	void remove(const std::string &name) override { files.erase(name); }
+	bool write(const std::string &name, std::string_view bytes, bool append) override {
+		std::string &f = files[name];
+		if (!append) f.clear();
+		f.append(bytes.data(), bytes.size());
+		return true;
+	}
+};
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -577,13 +594,17 @@ bool run_the_spawn_pump_follows_the_scoreboard() {
 // D-NET-NEW-L1-5: the join compares the 0x0B's two map checksums against the mission's, which
 // Mission_GetMapChecksums stores as 0 (the stub a stock joiner's mission start also reads, so a
 // stock 0x0B carries two zeros). A remote slot's mismatch punts it after the 0x0F: the HMCRC
-// leg's description ("t9", DPC 33, "LogPuntEvent") among the join's sends, the CMCRC leg then
-// finding the slot punted. Zeros, or a body that ends before them, pass.
+// leg's description ("t9", DPC 33, "LogPuntEvent") among the join's sends. On a double
+// mismatch the CMCRC leg runs too (the latch both legs test has no writer), but
+// SendChatMessage keeps the first pending event, so the wire carries "t9" alone while
+// _PUNT.TXT takes both lines, HMCRC then CMCRC (D-NET-NEW-L1-12). Zeros, or a body that ends
+// before them, pass.
 // [orig: Server_OnPlayerJoin - Mission_GetMapChecksums @0x51A89C (@0x6108A8 / @0x6108AE), the
-//  compares @0x51A8B7..0x51A8CE / @0x51A8F8..0x51A90F, Server_LogCRCMismatchPunt (slot, 9)
-//  @0x51A8F2 and (slot, 10) @0x51A933, ahead of the 0x4D @0x51A97A;
-//  NapiNPServerMsg_PlayerJoinRequest's reads @0x51AB5A..0x51AB91;
-//  Server_LogCRCMismatchPunt @0x517ED0 (the 33 / "LogPuntEvent" send @0x517F5A)]
+//  compares @0x51A8B9..0x51A8CE / @0x51A8FA..0x51A90F, Server_WritePuntLog "HMCRC" @0x51A8E1
+//  and "CMCRC" @0x51A922, Server_LogCRCMismatchPunt (slot, 9) @0x51A8F2 and (slot, 10)
+//  @0x51A933, ahead of the 0x4D @0x51A97A; NapiNPServerMsg_PlayerJoinRequest's reads
+//  @0x51AB5A..0x51AB91; Server_LogCRCMismatchPunt @0x517ED0 (the 33 / "LogPuntEvent" send
+//  @0x517F5A); CNapiNPConnection_SendChatMessage's kept pending event @0x4C7FF2]
 bool run_join_punts_a_map_checksum_mismatch() {
 	const auto body = [](uint32_t a, uint32_t b) {
 		std::vector<uint8_t> out{0x00}; // the side password's empty C string
@@ -606,6 +627,11 @@ bool run_join_punts_a_map_checksum_mismatch() {
 	};
 	{
 		JoinFixture f(/*with_existing=*/false);
+		MemoryFiles files;
+		inmatch::PuntLog punt_log(files);
+		punt_log.set_time_text([] { return std::string("T"); });
+		punt_log.arm_punt_log();
+		f.ctx->logs.punt = &punt_log;
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
 		                    f.drive_to_await_join(),
 		            "the joiner reaches slot state 5")) return false;
@@ -620,9 +646,19 @@ bool run_join_punts_a_map_checksum_mismatch() {
 			if (sent[i].tag == opennova::s2c::SPAWN_SLOT_NOTICE) notice = i;
 		}
 		if (!expect(dstr == std::vector<std::string>{"t9"} && f.joiner().host_disconnect_sent,
-		            "a mismatched HMCRC punts once, t9 / 33 / LogPuntEvent")) return false;
+		            "both checksums mismatched: one description, the first, t9 / 33 / LogPuntEvent"))
+			return false;
 		if (!expect(world_load < at && at < notice,
 		            "the punt sits after the 0x0F, ahead of the 0x4D")) return false;
+		const std::string slot_name = " : " +
+				std::string(f.joiner().reply.player_slot < 10 ? "0" : "") +
+				std::to_string(f.joiner().reply.player_slot) + " : \"" +
+				f.joiner().reply.player_name + "\" : ";
+		const std::string expected = "T : START : \r\n"
+				"T" + slot_name + "HMCRC : \r\n"
+				"T" + slot_name + "CMCRC : \r\n";
+		if (!expect(files.files["_PUNT.TXT"] == expected,
+		            "both checksums mismatched: _PUNT.TXT takes HMCRC then CMCRC")) return false;
 	}
 	{
 		JoinFixture f(/*with_existing=*/false);

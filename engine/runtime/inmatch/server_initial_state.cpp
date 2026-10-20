@@ -819,14 +819,16 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// that is not the host's own (nor a bot's, which JO has none of), each mismatch logs its
 	// HMCRC / CMCRC line and punts type 9 / 10 (the "t9" / "t10" description, DPC 33), here
 	// among the sends, after the 0x0F (D-NET-NEW-L1-5). Both legs run through the shared
-	// punt seam (server_logs_punt, Server_StageHostPunt), which stages one description per
-	// connection. `/NOPUNT` is not modelled (no port host sets it).
+	// punt seam (server_logs_punt, Server_StageHostPunt): a double mismatch logs both lines
+	// (the latch both legs test, slot+89896, has no writer) and sends one description, the
+	// first, as SendChatMessage keeps the first pending event (D-NET-NEW-L1-12).
+	// `/NOPUNT` is not modelled (no port host sets it).
 	// [orig: Server_OnPlayerJoin - Mission_GetMapChecksums @0x51A89C (@0x6108A8 / @0x6108AE),
-	//  the local and bot bytes @0x51A8A0..0x51A8AD, the first compare @0x51A8B7..0x51A8CE,
+	//  the local and bot bytes @0x51A8A4..0x51A8B3, the first compare @0x51A8B9..0x51A8CE,
 	//  Server_WritePuntLog "HMCRC" @0x51A8E1, Server_LogCRCMismatchPunt(slot, 9, ..) @0x51A8F2,
-	//  the second @0x51A8F8..0x51A90F, "CMCRC" @0x51A922, (slot, 10, ..) @0x51A933;
+	//  the second @0x51A8FA..0x51A90F, "CMCRC" @0x51A922, (slot, 10, ..) @0x51A933;
 	//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_SendChatMessage(.., 33,
-	//  "LogPuntEvent") @0x517F5A]
+	//  "LogPuntEvent") @0x517F5A, the pending slot kept @0x4C7FF2]
 	const uint32_t mission_checksums[2] = {0, 0};
 	if (conn.type != NapiNPConnection::kTypeClientSide) {
 		if (client_checksums[0] != mission_checksums[0]) {

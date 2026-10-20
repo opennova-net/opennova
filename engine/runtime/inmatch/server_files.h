@@ -54,12 +54,15 @@ struct ServerLogs {
 };
 
 // Server_WritePuntLog(slot, reason, "") at a punt the host logs: the line goes
-// only for a slot that is not the host's own, not a bot and not already
-// punted, with `/NOPUNT` unset (no port host sets it) [orig: the gates ahead
-// of each call — Server_ValidateWeaponCRC @0x501fd6..0x50200e,
+// only for a slot that is not the host's own and not a bot, with `/NOPUNT`
+// unset (no port host sets it). The gates also test a latch, slot+89896, that
+// nothing in the image writes, so a slot already punted still logs; its
+// description stays the first (Server_StageHostDisconnect) [orig: the gates
+// ahead of each call: Server_ValidateWeaponCRC @0x501fd6..0x50200e,
 // NapiNPServerMsg_HandleAntiCheatCRCCheck @0x5021a2..0x5021da,
-// Server_CheckPlayerViolations @0x51acf2..0x51ad0d: slot+5, slot+96483, the
-// latch slot+89896, dword_B4C698]. Defined in punt_log.cpp.
+// Server_CheckPlayerViolations @0x51acf2..0x51ad0d, Server_OnPlayerJoin
+// @0x51A8A4..0x51A8D4 / @0x51A8FA..0x51A915: slot+5, slot+96483, the latch
+// slot+89896, dword_B4C698]. Defined in punt_log.cpp.
 void server_logs_punt(const ServerLogs &logs, const NapiNPConnection &conn, const char *reason);
 // The /PROFILE deploy marker of a player's deploy transaction, after its
 // frontier hint and ahead of its mobile-spawn seat re-pick (null = off)

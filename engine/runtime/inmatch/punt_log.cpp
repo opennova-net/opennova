@@ -172,7 +172,11 @@ void PuntLog::write_punt(int32_t slot_index, const std::string &name, const char
 
 void server_logs_punt(const ServerLogs &logs, const NapiNPConnection &conn, const char *reason) {
 	if (logs.punt == nullptr) return;
-	if (conn.link.mode == replication::TransportMode::Loopback || conn.host_disconnect_sent) return;
+	// The callers' latch (slot +89896) has no writer in the image, so a punt already
+	// staged does not hold the line back: the join's double map-checksum mismatch logs
+	// both HMCRC and CMCRC (D-NET-NEW-L1-12) [orig: Server_OnPlayerJoin @0x51A8CE /
+	//  @0x51A90F; Server_WritePuntLog @0x4F9C70 gates on g_PuntLogEnabled alone].
+	if (conn.link.mode == replication::TransportMode::Loopback) return;
 	logs.punt->write_punt(conn.reply.player_slot, conn.reply.player_name, reason, "");
 }
 

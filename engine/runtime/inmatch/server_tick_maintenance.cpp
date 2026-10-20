@@ -40,9 +40,13 @@ constexpr uint8_t kDescriptionFlags =
 		PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8;
 static_assert(kDescriptionFlags == 0xA0);
 
-// The first description event owns the connection's disconnect slot. Closing
-// the gameplay predicate here prevents later producers from following it with
-// an ordinary frame while HostOwner still has one chance to flush the record.
+// The first description event owns the connection's disconnect slot: retail's
+// SendChatMessage keeps the first pending event and sends none once the
+// description went [orig: CNapiNPConnection_SendChatMessage @0x4C7EF0, the
+// sent byte conn+0x70D @0x4C7F58..0x4C7F5F, the pending slot conn+0x654
+// @0x4C7FF2..0x4C8004]. Closing the gameplay predicate here prevents later
+// producers from following it with an ordinary frame while HostOwner still has
+// one chance to flush the record.
 bool stage_host_disconnect(
 		NapiNPConnection &conn, const DisconnectEvent &event) {
 	if (conn.host_disconnect_sent || conn.type != NapiNPConnection::kTypeServerSide ||
@@ -195,8 +199,8 @@ void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 // (`suicides > 9` -> punt t6, the suicide arm logging "#S>9" to _PUNT.TXT
 // first), else the team-kill arm punts t6 with no log line. The global
 // punts-off switch dword_B4C698 (`/NOPUNT`) is not modeled (no port host sets
-// it); stage_host_punt already carries the first-event latch (slot dword
-// +89896), which also gates the log line.
+// it). The slot +89896 latch the gates also test has no writer in the image;
+// stage_host_punt's first-event-wins is SendChatMessage's (stage_host_disconnect).
 // [orig: Server_CheckPlayerViolations @0x51ABD0 — in-session @0x51abd9, slot
 //  gates @0x51abf6/@0x51abff/@0x51ac0d, game types @0x51ac2c, counter
 //  @0x51ac5a/@0x51ac63, limit @0x51ac75, drop/sync/health @0x51ac84/@0x51ac8a/
