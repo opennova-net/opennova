@@ -196,11 +196,27 @@ void run(std::map<std::string, std::string> &files) {
 			coop.waypoints[3].slot_id == 127 && coop.team_names == host_list && coop.unread_bytes == 0);
 }
 
+// The name count is a signed word: 0x8000 or more reads no names, and the
+// names that follow stay unread [orig: NapiNPClientMsg_0x00F - `movsx eax, cx`
+// @0x42E516, `jle` @0x42E520].
+void signed_name_count() {
+	std::vector<uint8_t> body(535, 0);
+	body.push_back(0x00); // the waypoint count
+	body.push_back(0x00);
+	body.push_back(0x00); // the name count, 0x8000
+	body.push_back(0x80);
+	for (const char c : {'A', 'b', '\0'}) body.push_back(static_cast<uint8_t>(c));
+	WorldStateLoad read;
+	CHECK(decode_world_state_load(body.data(), body.size(), read, /*is_waypoint_gametype=*/false));
+	CHECK(read.team_name_count == 0x8000 && read.team_names.empty() && read.unread_bytes == 3);
+}
+
 } // namespace
 
 int main() {
 	std::map<std::string, std::string> files;
 	run(files);
+	signed_name_count();
 	if (failures != 0) {
 		std::printf("world_state_waypoints: %d failure(s)\n", failures);
 		return 1;

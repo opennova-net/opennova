@@ -2750,8 +2750,11 @@ bool check_scoreboard_active_slot_filter_is_distinct() {
 
 // The host compares each active player's accumulated Points field with the
 // per-slot cache every authority pass and sends a reliable requester-only 0x81
-// on change. The primary-score projection is deliberately not involved.
-// [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
+// on change. The primary-score projection is deliberately not involved. The
+// pass has no session test, and nothing goes while the round is over
+// (g_SpawnSuccessGate).
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - g_SpawnSuccessGate
+//        @0x5086A3..0x5086AA, active / state 6 / entity @0x508720..0x50873B;
 //        CPlayerStats_GetFieldPlusOne(player+0x48, 0x1C) @0x508749]
 bool check_requester_score_delta_refresh() {
 	opennova::inmatch::NapiNPServerCtx ctx;
@@ -2783,6 +2786,7 @@ bool check_requester_score_delta_refresh() {
 	opennova::inmatch::NapiNPConnection conn;
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.slot_state = opennova::inmatch::PlayerSlotState::Joined;
 	conn.burst.spawned = true;
 	conn.link.mode = opennova::replication::TransportMode::Client;
 	conn.link.transport = &transport;
@@ -2820,10 +2824,28 @@ bool check_requester_score_delta_refresh() {
 		return false;
 	opennova::inmatch::Server_TickUpdate(ctx);
 	scores = drain_scores();
-	return expect(scores.size() == 1 && scores[0].reliable &&
-	                      scores[0].body ==
-	                              std::vector<uint8_t>({0x11, 0x00, 0x00, 0x00}),
-	              "the next one-second pass refreshes the requester");
+	if (!expect(scores.size() == 1 && scores[0].reliable &&
+	                    scores[0].body ==
+	                            std::vector<uint8_t>({0x11, 0x00, 0x00, 0x00}),
+	            "the next one-second pass refreshes the requester"))
+		return false;
+
+	// Out of a session the pass still runs.
+	ctx.is_in_session = 0;
+	world.match.player(player)->stats[opennova::world::MatchStats::kPoints] = 23;
+	for (int i = 0; i < 62; ++i) opennova::inmatch::Server_TickUpdate(ctx);
+	scores = drain_scores();
+	if (!expect(scores.size() == 1 &&
+	                    scores[0].body == std::vector<uint8_t>({0x17, 0x00, 0x00, 0x00}),
+	            "the 0x81 has no session test"))
+		return false;
+
+	// A round over sends nothing, though Points changed.
+	ctx.is_in_session = 1;
+	world.match.latch_round_over();
+	world.match.player(player)->stats[opennova::world::MatchStats::kPoints] = 30;
+	for (int i = 0; i < 62; ++i) opennova::inmatch::Server_TickUpdate(ctx);
+	return expect(drain_scores().empty(), "no 0x81 while the round is over");
 }
 
 // A listen host's own slot (+5) takes neither the control quartet nor the
@@ -5497,6 +5519,7 @@ bool build_flag_overlay_scene(FlagOverlayScene &s, uint32_t game_type, int build
 		inmatch::NapiNPConnection conn;
 		conn.type = 1;
 		conn.phase = inmatch::ConnectionPhase::InMatch;
+		conn.slot_state = inmatch::PlayerSlotState::Joined;
 		conn.burst.spawned = true;
 		conn.link.mode = replication::TransportMode::Client;
 		conn.link.transport = transport;

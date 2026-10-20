@@ -18,6 +18,7 @@
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/punt_log.h> // PuntLog (the violation sweep's #S>9 lines)
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
@@ -40,7 +41,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
@@ -1488,21 +1491,45 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 			"the first non-permanent second over 360 emits exact t7");
 }
 
+// A _PUNT.TXT sink in memory (the violation sweep's "#S>9" lines).
+class MemoryFiles final : public inmatch::ServerFileSink {
+public:
+	std::map<std::string, std::string> files;
+	bool exists(const std::string &name) override { return files.count(name) != 0; }
+	void remove(const std::string &name) override { files.erase(name); }
+	bool write(const std::string &name, std::string_view bytes, bool append) override {
+		std::string &f = files[name];
+		if (!append) f.clear();
+		f.append(bytes.data(), bytes.size());
+		return true;
+	}
+};
+
 // The type-6 producer: the 1 Hz violation sweep. With the MaxFriendlyKills limit L,
 // `L < 0 || teamKills <= L` routes to the suicide arm (punt when suicides > 9), else
 // the team-kill arm punts outright; the listen host's own slot is exempt and the
-// description latch keeps a second sweep silent.
-// [orig: Server_CheckPlayerViolations @0x51abd0 — slot +5 gate @0x51aca2, TK gate
-//  @0x51acc2, suicide gate @0x51ad00, punts @0x51ad17/@0x51acd9; caller
+// description latch keeps a second sweep silent. The slot gates are the slot's alone
+// (active, entity, state 6), so a punted slot that lingers is walked again each
+// second: the suicide arm writes "#S>9" to _PUNT.TXT each time while the wire keeps
+// the first description; a slot in state 7 (round over) is walked never.
+// [orig: Server_CheckPlayerViolations @0x51abd0 — the slot gates
+//  @0x51abf6/@0x51abff/@0x51ac0d, slot +5 gate @0x51aca2, TK gate @0x51acc2,
+//  suicide gate @0x51ad00, "#S>9" @0x51ad0d, punts @0x51ad17/@0x51acd9; caller
 //  Server_TickUpdate @0x51df5f]
 bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_kills,
-		int32_t suicides, bool host_own, bool expect_punt, const char *label) {
+		int32_t suicides, bool host_own, bool expect_punt, const char *label,
+		bool round_over = false) {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::set_connection_mode(ctx,
 			host_own ? inmatch::ConnectionMode::HostClient : inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.network_quality_broadcast_countdown = 100;
 	ctx.config.max_friendly_kills = max_friendly_kills;
+	MemoryFiles files;
+	inmatch::PuntLog punt_log(files);
+	punt_log.set_time_text([] { return std::string("T"); });
+	punt_log.arm_punt_log();
+	ctx.logs.punt = &punt_log;
 
 	opennova::world::World world;
 	world.rules.mp_session = true;
@@ -1527,6 +1554,8 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	conn.type = host_own ? inmatch::NapiNPConnection::kTypeClientSide
 	                     : inmatch::NapiNPConnection::kTypeServerSide;
 	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.slot_state = round_over ? inmatch::PlayerSlotState::RoundOver
+	                             : inmatch::PlayerSlotState::Joined;
 	conn.burst.spawned = true;
 	conn.s2c_send_boundary_open = false;
 	conn.link.mode = host_own ? replication::TransportMode::Loopback
@@ -1536,6 +1565,8 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	else
 		conn.link.transport = &transport;
 	conn.link.owned_entity = player;
+	conn.reply.player_slot = 3;
+	conn.reply.player_name = "Violator";
 	conn.reply.minimap_initial_scan_pending = false;
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
@@ -1544,6 +1575,7 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	inmatch::Server_TickUpdate(ctx);
 	if (!expect(world.match.periodic_second(), "the first host tick is a periodic second"))
 		return false;
+	int periodic_seconds = 1;
 	auto descriptions = [&]() {
 		std::vector<replication::Datagram> out;
 		replication::Datagram datagram;
@@ -1574,8 +1606,23 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 			return false;
 	}
 	// A second sweep never repeats the record.
-	for (int i = 0; i < 62; ++i) inmatch::Server_TickUpdate(ctx);
-	return expect(descriptions().empty(), "a later sweep stays silent behind the first-event latch");
+	for (int i = 0; i < 62; ++i) {
+		inmatch::Server_TickUpdate(ctx);
+		if (world.match.periodic_second()) ++periodic_seconds;
+	}
+	if (!expect(periodic_seconds == 2 && descriptions().empty(),
+			"a later sweep stays silent behind the first-event latch"))
+		return false;
+	// The suicide arm logs "#S>9" each second the slot is walked, the lingering
+	// punted slot's included; the team-kill arm and an unpunted slot log nothing.
+	const bool suicide_arm = expect_punt &&
+			(max_friendly_kills < 0 || team_kills <= max_friendly_kills);
+	std::string expected = "T : START : \r\n";
+	if (suicide_arm)
+		for (int i = 0; i < periodic_seconds; ++i)
+			expected += "T : 03 : \"Violator\" : #S>9 : \r\n";
+	return expect(files.files["_PUNT.TXT"] == expected,
+			"_PUNT.TXT takes one #S>9 per periodic second the suicide arm walks");
 }
 
 bool check_violation_sweep_type6_arms() {
@@ -1594,6 +1641,8 @@ bool check_violation_sweep_type6_arms() {
 			"a negative MaxFriendlyKills keeps the suicide arm") && ok;
 	ok = check_violation_sweep_emits_type6(3, 4, 10, true, false,
 			"the listen host's own slot is never punted") && ok;
+	ok = check_violation_sweep_emits_type6(3, 4, 10, false, false,
+			"a round-over slot (state 7) is not walked", /*round_over=*/true) && ok;
 	return ok;
 }
 

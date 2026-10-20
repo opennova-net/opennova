@@ -1260,8 +1260,11 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 	// [orig: NapiNPClientMsg_0x00F - the count @0x42E50B..0x42E51B, the copy's
 	//  NUL / end tests @0x42E548 / @0x42E557 / @0x42E567, the step
 	//  `strlen + 1` @0x42E59B, the hold at the end @0x42E5A1..0x42E5A3]
-	out.team_names.reserve(out.team_name_count);
-	for (unsigned i = 0; i < out.team_name_count; ++i) {
+	// The count is signed: a word of 0x8000 or more reads no names
+	// [orig: `movsx eax, cx` @0x42E516, `jle` @0x42E520].
+	const int name_count = static_cast<int16_t>(out.team_name_count);
+	if (name_count > 0) out.team_names.reserve(static_cast<size_t>(name_count));
+	for (int i = 0; i < name_count; ++i) {
 		const uint8_t *name_end = c.p;
 		while (name_end < c.end && *name_end != 0) ++name_end;
 		out.team_names.emplace_back(reinterpret_cast<const char *>(c.p),

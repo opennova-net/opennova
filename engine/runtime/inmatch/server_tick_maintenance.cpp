@@ -199,8 +199,12 @@ void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 // (`suicides > 9` -> punt t6, the suicide arm logging "#S>9" to _PUNT.TXT
 // first), else the team-kill arm punts t6 with no log line. The global
 // punts-off switch dword_B4C698 (`/NOPUNT`) is not modeled (no port host sets
-// it). The slot +89896 latch the gates also test has no writer in the image;
-// stage_host_punt's first-event-wins is SendChatMessage's (stage_host_disconnect).
+// it). The slot +89896 latch the gates also test has no writer in the image,
+// and the slot gates are the slot's alone (active, entity, state 6), so a
+// punted slot still in state 6 is walked again each second: its suicide arm
+// writes "#S>9" again while the description stays the first
+// (stage_host_disconnect, SendChatMessage's first-event-wins), and a round
+// over (state 7) walks nobody.
 // [orig: Server_CheckPlayerViolations @0x51ABD0 — in-session @0x51abd9, slot
 //  gates @0x51abf6/@0x51abff/@0x51ac0d, game types @0x51ac2c, counter
 //  @0x51ac5a/@0x51ac63, limit @0x51ac75, drop/sync/health @0x51ac84/@0x51ac8a/
@@ -213,7 +217,9 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 	const bool carry_limited = gt == game_type::kCaptureTheFlag ||
 			gt == game_type::kFlagBall || gt == game_type::kFlagMe;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
+		if (!player_slot_active(conn) || !conn.link.owned_entity.valid() ||
+				conn.slot_state != PlayerSlotState::Joined)
+			continue;
 		world::Entity *player = world.registry.get(conn.link.owned_entity);
 		if (player == nullptr) continue;
 		if (carry_limited) {
@@ -436,12 +442,22 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 
 } // namespace
 
+// The 0x81 is the proximity pass's per-slot head: nothing while the round is
+// over (g_SpawnSuccessGate, which Match's outcome stands for), then each
+// active slot in state 6 with an entity, with no session test, stores its
+// Points when they changed and sends them through the filter's mask 32 to the
+// slot's own connection (none once its description closed it, is_in_match).
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - g_SpawnSuccessGate
+//  @0x5086A3..0x5086AA, active @0x508720, state 6 @0x50872A, the entity
+//  @0x50873B, Points @0x508749, the compare @0x50874E, the store @0x50875F,
+//  the send @0x508790; NapiNPServer_SendFiltered's mask-32 arm
+//  @0x4C8A06..0x4C8A38]
 void emit_requester_score_refreshes(NapiNPServerCtx &ctx,
 		world::World &world) {
-	if (!ctx.is_in_session) return;
+	if (world.match.outcome().ended) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!is_in_match(conn) || conn.link.transport == nullptr ||
-				!conn.link.owned_entity.valid())
+		if (!player_slot_active(conn) || conn.slot_state != PlayerSlotState::Joined ||
+				world.registry.get(conn.link.owned_entity) == nullptr)
 			continue;
 		const world::MatchPlayer *player =
 				world.match.player(conn.link.owned_entity);
@@ -450,6 +466,7 @@ void emit_requester_score_refreshes(NapiNPServerCtx &ctx,
 				player->stats[world::MatchStats::kPoints];
 		if (score == conn.reply.score_delta_sound_value) continue;
 		conn.reply.score_delta_sound_value = score;
+		if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
 		std::vector<uint8_t> body;
 		io::append_u32_le(body, static_cast<uint32_t>(score));
 		conn.link.transport->host_send(
@@ -657,15 +674,21 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 // consecutive periodic seconds its body carries the dead bit, zeroed by a live
 // second) and the S2C 0x6E (sent once) when the body's dead bit or the slot's
 // hold is set, with no session test; then in session the t35 deploy-idle punt
-// and the t7 dead-too-long punt, the second reached after the first (whose
-// latch then refuses it). The round end moves every slot to state 7, which the
+// and the t7 dead-too-long punt, the second reached after the first. Both arms
+// test a latch (+0x15F28) that nothing in the image writes, so a slot already
+// punted meets them again (t7 after t35 in the same second, both in each later
+// one); neither writes a punt-log line, and the repeat sends nothing, since
+// SendChatMessage keeps the connection's first description
+// (stage_host_disconnect, which a second call meets). Ours's walk skips a
+// punted slot (is_in_match), whose 0x6E would go to the connection that
+// description closed. The round end moves every slot to state 7, which the
 // match outcome stands for. The t35 arm: a remote slot held (+89912 & 0x10)
 // strictly over six minutes from its state-6 entry stamp, not a spectator. The
 // t7 arm's exclusions, all at the punt and none at the counter: permanent
 // death, the local slot (+0x5, ours the type-1 test), the bot byte (+0x178E3,
-// never set), the spectator latch (+0x188D7), the punt latch (+0x15F28, ours
-// host_disconnect_sent) and /NOPUNT (dword_B4C698, not modelled); the counter
-// is compared after its increment, so the punt lands after 361 dead seconds.
+// never set), the spectator latch (+0x188D7) and /NOPUNT (dword_B4C698, not
+// modelled); the counter is compared after its increment, so the punt lands
+// after 361 dead seconds.
 // [orig: Server_TickUpdate - the walk @0x51DFB0..0x51E1A5; state 6 and the
 //  entity @0x51E062..0x51E06C, the counter @0x51E06E..0x51E07D, the 0x6E
 //  @0x51E083..0x51E0CF (userParam 1 @0x51E0C4; NetPacket_WriteSpawnWaveStatus
@@ -704,7 +727,7 @@ void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 					build_spawn_wave_status_body(world, conn), // the slot's rows (D-NET-581)
 					/*reliable=*/false);
 		if (!ctx.is_in_session) continue;
-		const bool join_deploy_idle_gate = !conn.host_disconnect_sent &&
+		const bool join_deploy_idle_gate =
 				conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.link.transport != nullptr &&
 				conn.link.respawn_pending &&
@@ -717,7 +740,7 @@ void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 		if (dead && reply.dead_live_seconds > kDeadLiveSecondLimit &&
 				!ctx.config.permanent_death &&
 				conn.type == NapiNPConnection::kTypeServerSide &&
-				!conn.link.spectator && !conn.host_disconnect_sent)
+				!conn.link.spectator)
 			stage_host_punt(conn, kPuntDeadTooLong);
 	}
 }
