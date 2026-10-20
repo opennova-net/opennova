@@ -617,6 +617,17 @@ bool EntityCommands::kill_player(EntityHandle victim, EntityHandle killer) {
     Entity *e = world_.registry.get(victim);
     if (e == nullptr || (e->flags & kEntityFlagPlayer) == 0) return false;
     e->health = 0;
+    // A killer's lethal hit stamps its shooter into +0x178, and the plyr class
+    // callback's health tail stages the default death selection when none is
+    // staged; the body's death edge keeps a staged death's +0x178, which its
+    // transaction credits. [orig: Projectile_ProcessDamageOnTarget @0x4E81F3;
+    // Entity_HandleDamageAndTriggerZones @0x407AC5..0x407AE7; the edge's
+    // +0x178 clear for an unstaged death @0x4B4C72..0x4B4C8D]
+    if (killer.valid()) {
+        e->last_attacker = killer;
+        if (e->death_anim_state == 0)
+            e->death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
+    }
     RoundDeath d;
     d.victim = victim;
     d.victim_handle = victim.packed;

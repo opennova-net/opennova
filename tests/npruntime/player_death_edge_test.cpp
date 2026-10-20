@@ -256,6 +256,25 @@ void test_damage_record_only_tallies() {
 	CHECK(killer != nullptr && killer->stats[w::MatchStats::kEnemyKills] == 1);
 }
 
+// The kill command as player 1's lethal hit: it stamps the shooter and the
+// default death selection, so the edge keeps +0x178 and the transaction opens
+// the other-player kill's 120-second window, crediting the killer once.
+// [orig: Projectile_ProcessDamageOnTarget @0x4E81F3;
+//  Entity_HandleDamageAndTriggerZones @0x407AC5..0x407AE7; the edge's +0x178
+//  clear @0x4B4C72..0x4B4C8D; GameEvent_PlayerDeath +368 @0x516F4F]
+void test_the_kill_command_credits_its_killer() {
+	Fixture f;
+	CHECK(f.world.commands.kill_player(f.players[0], f.players[1]));
+	CHECK(f.entity(0).last_attacker == f.players[1]);
+	CHECK(f.entity(0).death_anim_state ==
+			w::compute_death_anim_state(0, 0, w::death_cause::kBullet));
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.dead_bit(0));
+	CHECK(f.conn(0).link.downed_revive_seconds == 120u);
+	const w::MatchPlayer *killer = f.world.match.player(f.players[1]);
+	CHECK(killer != nullptr && killer->stats[w::MatchStats::kEnemyKills] == 1);
+}
+
 // A hidden body (Flags bit 0) at Health 0: the edge skips it.
 void test_hidden_body_is_skipped() {
 	Fixture f;
@@ -433,6 +452,7 @@ int main() {
 	test_raise_ahead_of_the_walk_cancels_it();
 	test_two_bodies_die_in_slot_order();
 	test_damage_record_only_tallies();
+	test_the_kill_command_credits_its_killer();
 	test_hidden_body_is_skipped();
 	test_dedicated_host_updates_through_the_preround();
 	test_own_clients_copy_holds_the_update();

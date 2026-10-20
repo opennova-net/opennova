@@ -151,9 +151,11 @@ public:
     bool set_entity_position(EntityHandle h, const Vec3 &mission_pos);
     // Kill a PLAYER entity outright as `killer`'s victim: the health write the
     // real damage path would have made (so the recipient's 0x0A tail health --
-    // the joiner's death channel -- reads the death too) plus the RoundDeath
-    // record the round-end and kill-feed consumers key on. False when the
-    // handle resolves no player row.
+    // the joiner's death channel -- reads the death too), the shooter and death
+    // selection its hit stamps (which the body's death edge hands to the
+    // transaction), plus the damage-time RoundDeath record (the tally). No
+    // killer is a bare Health store. False when the handle resolves no player
+    // row.
     bool kill_player(EntityHandle victim, EntityHandle killer);
     // Write the primary weapon slot's clip/reserve counts (retail's signed
     // i16 words). False when the handle resolves no registry row.
