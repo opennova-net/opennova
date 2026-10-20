@@ -213,8 +213,9 @@ this directory's.
   the listing and the admin link. Three checks in a row with no answer on the link fail
   the server. A listing no check has found for 8 min places the server again, no restart
   counted: every lobby of a deployment shares one address, so a lobby's replacement lists
-  it again within about 4.5 min (the service README's "Lobby instances"), and the 8 min
-  are the safety net. While its machine is lost, or no lobby is live, the clock waits.
+  it again within its next update and reconnect, under a minute (the old lobby's goodbye,
+  the service README's "Lobby instances"), or about 4.5 min after a lobby that died
+  without its stop, and the 8 min are the safety net. While its machine is lost, or no lobby is live, the clock waits.
   Nothing reaps an idle server or ends one for its age.
 - **Reconciliation** at the supervisor's start: a machine row still `launching` whose job
   is gone fails; a `fleet.sweep` job runs (every cloud machine the driver lists that no

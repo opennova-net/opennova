@@ -124,6 +124,11 @@ inline constexpr uint64_t kSessionSeenWriteMs = 10000;
 // the count of those since. Service policy.
 inline constexpr std::size_t kReceiveBatchMaxDatagrams = 256;
 inline constexpr uint64_t kBadEnvelopeLogMs = 10000;
+// How often the receive thread reads the goodbyes the lobbies' stops left (lobbydb::list_goodbyes),
+// and how often at most it sends one session its goodbye again while that session's packets keep
+// coming (the burst was lost). Service policy.
+inline constexpr uint64_t kGoodbyeReadMs = 1000;
+inline constexpr uint64_t kGoodbyeResendMs = 1000;
 
 // Port-64206 UDP listener for the NAPI NovaWorld session protocol
 // (NWU-encrypted, NAPI-CRC-enveloped, opcode-dispatched).
@@ -151,7 +156,10 @@ inline constexpr uint64_t kBadEnvelopeLogMs = 10000;
 // thread, every kCommandDrainMs at most: the ServerCommand / ServerStopHosting
 // pushes to a listed server, the admin's end of a session, and an account's
 // loss of its listings (forget_owner). So the routes and the supervisor that
-// insert them could as well run in another process.
+// insert them could as well run in another process. Its clean stop leaves the
+// goodbye it owes each session it holds in lobby_goodbyes, and every
+// kGoodbyeReadMs it reads the ones the lobbies' stops left, to send each in the
+// stopped lobby's place (send_owed_goodbye).
 class NwUdpListener {
 public:
 	explicit NwUdpListener(ConnectionManager &manager);
@@ -199,8 +207,10 @@ public:
 	// set and the config names no endpoint, or when the bind, the DB lease or
 	// the registration fails; the lobby program treats that as fatal.
 	bool start(const ServerConfig &config);
-	// The receive thread joined, every connection dropped (their rows with
-	// them), then this instance's row deleted (and whatever still names it).
+	// The receive thread joined, the goodbye owed each session it holds left
+	// for the lobby that session's next packet reaches (leave_goodbyes), every
+	// connection dropped (their rows with them), then this instance's row
+	// deleted (and whatever still names it).
 	void stop();
 
 	// This lobby instance's id (lobby_instances; 0 without a database or
@@ -346,6 +356,34 @@ private:
 	// the stored owner (service policy). The listing stays listed; its next write stores no
 	// owner. Under lobby_states_mu_.
 	void forget_owner_locked(db::Database &db, int64_t user_id);
+	// stop()'s goodbyes: the one this lobby owes each session it holds, a row each in
+	// lobby_goodbyes (lobbydb::leave_goodbyes) on the calling thread's connection. On ECS the
+	// balancer ended this task's flows before ECS signalled its stop, so a burst sent from here
+	// would not reach them through the lobby address; their next packets reach another lobby,
+	// which sends it in this one's place (send_owed_goodbye). A write that fails is logged, and
+	// the sessions drop their silent lobby by themselves past their 240 s receive window.
+	void leave_goodbyes();
+	// The goodbyes left within the sessions' receive window (lobbydb::list_goodbyes), every
+	// kGoodbyeReadMs on the receive thread's connection, into goodbyes_.
+	void read_goodbyes(db::Database &db);
+	// A SESSION from an address this lobby admitted nothing from, carrying the SK of a session
+	// another lobby held whose stop left its goodbye (goodbyes_): the ServerGoodBye a stopping
+	// NAPI server sends its connections, {1, 9, 0, 0, "", 0, "NP.C:SH:STOP"}, keyed by the
+	// client's CK, burst CS field 1 times as its teardown sends it (again at most every
+	// kGoodbyeResendMs while that session's packets keep coming). A stock client tears its
+	// session down at the first and, its word still set, reconnects to the lobby address at
+	// once, re-verifying and re-hosting or re-playing, where the silence would have held it for
+	// its 240 s receive window; this lobby then takes its new session. Service policy (which
+	// lobby sends the goodbye; the retail service's stop is unwitnessed). True when the packet
+	// was such a session's (sent, or held back by the resend window).
+	// [orig: NapiNPProtocol_StopServer @0x62A820 - the record @0x62a8c3..0x62a924, then
+	//  CNapiNPConnection_Destroy -> TeardownActiveConnection @0x6253C0, the burst
+	//  @0x6253ef..0x625424; CNapiNPConnection_SendDisconnectPacket @0x61F2A0 - opcode 0x86
+	//  @0x61f367, the client's key @0x61f3af; the client's Nwu_HandleDisconnect @0x623CE0 - the
+	//  key check @0x623e74, RequestDisconnect @0x6240c4; its reconnect armed by
+	//  TeardownActiveConnection @0x625504..0x625525, run by PumpStateMachine @0x629487..0x6296cb]
+	bool send_owed_goodbye(opennova::net::Socket &socket, const opennova::net::Endpoint &to,
+			const PeerAddr &peer, const std::vector<uint8_t> &body);
 	void pump_send_intervals(opennova::net::Socket &socket);
 	void initialize_jo_host();
 	void reset_per_run_state(const char *reason);
@@ -404,6 +442,18 @@ private:
 	// not logged since.
 	uint64_t last_bad_envelope_log_ms_ = 0;
 	uint64_t bad_envelopes_unlogged_ = 0;
+	// The receive thread's own: the goodbyes the lobbies' stops left (read_goodbyes), keyed by
+	// the session's address (peer_addr_to_string), each with when this lobby last sent it (the
+	// steady clock in ms, 0 for never); when it last read them, and last logged a read that
+	// failed.
+	struct OwedGoodbye {
+		uint32_t server_sk = 0;
+		uint32_t client_ck = 0;
+		uint64_t sent_ms = 0;
+	};
+	std::unordered_map<std::string, OwedGoodbye> goodbyes_;
+	uint64_t last_goodbye_read_ms_ = 0;
+	uint64_t last_goodbye_warning_ms_ = 0;
 	// The lobby instance (start(): lobbydb::register_instance; a new one when
 	// the heartbeat registers again), its endpoint, and when the receive
 	// thread last moved its last_seen_at.

@@ -82,6 +82,13 @@ const char *connection_state_name(ConnectionState s) {
 // [orig: CNapiGameSession_InitNPConnection @0x4d3e1f (240000)]
 constexpr uint64_t kParkedLobbyTtlMs = 240000;
 
+// How long a stopped lobby's goodbye stays good: the receive window the service advertised its
+// sessions (CS field 0), past which a session has dropped its silent lobby by itself. Service
+// policy.
+int64_t goodbye_keep_seconds() {
+	return static_cast<int64_t>(novaworldudp_session_timeout_ms() / 1000);
+}
+
 // "0x41"-style signature for the unknown tracker. Width follows the value so
 // a 1-byte opcode reads "0x41" and a wider tag reads "0x0123".
 std::string hex_sig(uint32_t value, int min_width = 2) {
@@ -370,6 +377,8 @@ void NwUdpListener::reset_per_run_state(const char *reason) {
 	}
 	last_command_drain_ms_ = 0;
 	last_seen_write_ms_ = 0;
+	goodbyes_.clear();
+	last_goodbye_read_ms_ = 0;
 
 	jo_peers_.clear();
 	jo_owner_.reset();
@@ -481,6 +490,7 @@ void NwUdpListener::stop() {
 	stop_requested_.store(true);
 	if (worker_.joinable()) worker_.join();
 	running_.store(false);
+	leave_goodbyes();
 	reset_per_run_state("listener-stop");
 	// Its instance last: nothing names it now but rows a drop left behind, which go with it.
 	const int64_t id = lobby_id_.exchange(0);
@@ -953,6 +963,102 @@ void NwUdpListener::forget_owner_locked(db::Database &db, int64_t user_id) {
 	for (const PeerAddr &peer : changed) sync_session_locked(peer, &db);
 }
 
+void NwUdpListener::leave_goodbyes() {
+	const int64_t id = lobby_id_.load();
+	if (id == 0 || !db_pool_)
+		return;
+	std::vector<lobbydb::Goodbye> goodbyes;
+	{
+		std::lock_guard<std::mutex> lk(lobby_states_mu_);
+		goodbyes.reserve(lobby_states_.size());
+		for (const auto &[peer, state] : lobby_states_) {
+			goodbyes.push_back(
+					{ peer_addr_ip_to_string(peer), peer.port, state.server_sk, state.client_ck });
+		}
+	}
+	if (goodbyes.empty())
+		return;
+	try {
+		std::optional<db::ConnectionPool::Lease> lease;
+		db::Database *db = db_pool_->leased_by_this_thread();
+		if (db == nullptr) {
+			lease.emplace(db_pool_->acquire());
+			db = lease->get();
+		}
+		lobbydb::leave_goodbyes(*db, goodbyes, goodbye_keep_seconds());
+		std::printf("[lobby] instance %lld left %zu goodbye(s) for the lobby its sessions reach "
+					"next\n",
+				static_cast<long long>(id), goodbyes.size());
+	} catch (const std::exception &e) {
+		std::fprintf(stderr, "[lobby] WARN leaving instance %lld's goodbyes: %s\n",
+				static_cast<long long>(id), e.what());
+	}
+}
+
+void NwUdpListener::read_goodbyes(db::Database &db) {
+	std::vector<lobbydb::Goodbye> rows;
+	try {
+		rows = lobbydb::list_goodbyes(db, goodbye_keep_seconds());
+	} catch (const std::exception &e) {
+		// A line a minute while the database fails, not one a read.
+		const uint64_t now = now_ms();
+		if (last_goodbye_warning_ms_ == 0 || now - last_goodbye_warning_ms_ >= 60000) {
+			last_goodbye_warning_ms_ = now;
+			std::fprintf(stderr, "[nwudp] WARN reading the lobbies' goodbyes: %s\n", e.what());
+		}
+		return;
+	}
+	// A goodbye read again keeps when this lobby last sent it.
+	std::unordered_map<std::string, OwedGoodbye> read;
+	for (const lobbydb::Goodbye &row : rows) {
+		const std::string addr = row.peer_ip + ":" + std::to_string(row.peer_port);
+		OwedGoodbye owed{ row.server_sk, row.client_ck, 0 };
+		if (const auto it = goodbyes_.find(addr); it != goodbyes_.end() &&
+				it->second.server_sk == owed.server_sk && it->second.client_ck == owed.client_ck)
+			owed.sent_ms = it->second.sent_ms;
+		read.emplace(addr, owed);
+	}
+	goodbyes_ = std::move(read);
+}
+
+bool NwUdpListener::send_owed_goodbye(opennova::net::Socket &socket,
+		const opennova::net::Endpoint &to, const PeerAddr &peer, const std::vector<uint8_t> &body) {
+	if (goodbyes_.empty())
+		return false;
+	const std::string addr = peer_addr_to_string(peer);
+	const auto it = goodbyes_.find(addr);
+	if (it == goodbyes_.end())
+		return false;
+	// The packet's session id is the receiver's key, the SK the stopped lobby minted, in the clear
+	// ahead of the encrypted records. [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the
+	//  local-key match @0x626B72]
+	ProtocolPacketHeader hdr;
+	if (!parse_protocol_packet_header(body.data(), body.size(), hdr) ||
+			hdr.session_id != it->second.server_sk)
+		return false;
+	OwedGoodbye &owed = it->second;
+	const uint64_t now = now_ms();
+	if (owed.sent_ms != 0 && now - owed.sent_ms < kGoodbyeResendMs)
+		return true;
+	owed.sent_ms = now;
+	const std::vector<uint8_t> datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(
+					owed.client_ck, make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP")));
+	// The burst the stopped lobby's connection would have sent: the CS field 1 its 0x82
+	// advertised, the service template's.
+	const std::size_t count =
+			disconnect_burst_count(novaworld_service_cs_config().recv_max_per_tick);
+	std::size_t sent = 0;
+	for (; sent < count; ++sent) {
+		if (opennova::net::udp_send_to(socket, to, datagram.data(), datagram.size()) < 0)
+			break;
+	}
+	std::printf("[nwudp] SESSION from %s addresses a session a stopped lobby held: ServerGoodBye "
+				"x%zu in its place\n",
+			addr.c_str(), sent);
+	return true;
+}
+
 // PumpSendIntervals' ACTIVE leg on the service's end of each lobby connection, as the NAPI server
 // role runs it: reliable records still retained (not yet ACKed) and more than CS field 5 since the
 // connection's last framed packet -> a build with nothing queued, one header-only packet, and
@@ -1057,13 +1163,18 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			}
 			// The lobby connections' own sends between receive batches: the commands addressed
 			// to the lobby (the pushes to a hosting connection, the sessions an admin ended) every
-			// kCommandDrainMs, then the send-interval leg; every kSessionSeenWriteMs the
-			// sessions' last-heard times; every kInstanceTouchSeconds the instance's heartbeat.
+			// kCommandDrainMs, then the send-interval leg; every kGoodbyeReadMs the goodbyes the
+			// lobbies' stops left; every kSessionSeenWriteMs the sessions' last-heard times; every
+			// kInstanceTouchSeconds the instance's heartbeat.
 			if (loop_db != nullptr) {
 				const uint64_t ms = now_ms();
 				if (ms - last_command_drain_ms_ >= kCommandDrainMs) {
 					last_command_drain_ms_ = ms;
 					drain_commands(socket.get(), *loop_db);
+				}
+				if (ms - last_goodbye_read_ms_ >= kGoodbyeReadMs) {
+					last_goodbye_read_ms_ = ms;
+					read_goodbyes(*loop_db);
 				}
 				if (ms - last_seen_write_ms_ >= kSessionSeenWriteMs) {
 					last_seen_write_ms_ = ms;
@@ -1387,6 +1498,10 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			//  @0x626AD7..0x626AE4, no key test before the local-key match @0x626B72]
 			auto conn_opt = manager_.registry().find_by_addr(peer);
 			if (!conn_opt || conn_opt->state != ConnectionState::Active) {
+				// From an address this lobby admitted nothing from: the session may be one a
+				// stopped lobby held, whose goodbye goes in its place.
+				if (!conn_opt && send_owed_goodbye(socket.get(), from, peer, body))
+					break;
 				// SESSION before AUTH completed — drop quietly.
 				std::printf("[nwudp] SESSION before AUTH from %s; dropped\n",
 				            client_label.c_str());
