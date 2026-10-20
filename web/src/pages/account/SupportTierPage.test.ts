@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import SupportTierPage from './SupportTierPage.vue';
-import { fetchMyBilling, fetchTiers, openPortal, startCheckout, syncMyBilling } from '../../api/billing';
+import { cancelCheckout, fetchMyBilling, fetchTiers, openPortal, startCheckout, syncMyBilling } from '../../api/billing';
 import {
   addressSubscription,
   myBilling,
@@ -15,6 +15,7 @@ import { navigateToStripe } from '../../utils/navigate';
 
 vi.mock('../../api/billing', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/billing')>()),
+  cancelCheckout: vi.fn(),
   fetchTiers: vi.fn(),
   fetchMyBilling: vi.fn(),
   syncMyBilling: vi.fn(),
@@ -28,6 +29,7 @@ const mine = vi.mocked(fetchMyBilling);
 const sync = vi.mocked(syncMyBilling);
 const checkout = vi.mocked(startCheckout);
 const portal = vi.mocked(openPortal);
+const cancel = vi.mocked(cancelCheckout);
 const navigate = vi.mocked(navigateToStripe);
 
 const CHECKOUT_URL = 'https://checkout.stripe.com/c/pay/cs_test_1';
@@ -57,6 +59,7 @@ describe('SupportTierPage', () => {
     window.sessionStorage.clear(); // the checkout item a test's checkout remembered
     tiers.mockResolvedValue({ ok: true, value: tiersResponse() });
     mine.mockResolvedValue({ ok: true, value: myBilling() });
+    cancel.mockResolvedValue({ ok: true, value: true });
   });
 
   afterEach(() => {
@@ -446,6 +449,8 @@ describe('SupportTierPage', () => {
     expect(page.text()).toContain('No payment was taken.');
     expect(router.currentRoute.value.fullPath).toBe('/me/support');
     expect(sync).not.toHaveBeenCalled();
+    // Its hold on the fleet's room goes at once.
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it('confirms a checkout: syncs, polls until the tier is active, then drops the query', async () => {

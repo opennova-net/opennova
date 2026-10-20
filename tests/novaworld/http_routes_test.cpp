@@ -7473,6 +7473,37 @@ int test_billing_routes(Harness &h) {
 	}
 	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), gus));
 
+	// Back from Stripe unpaid: the open session expires and its reservation goes
+	// at once, so the room sells again; again, nothing is left to release; a paid
+	// session is left to the sync.
+	const int64_t hal = make_account(h, "bill_hal", "pw-bill-hal");
+	const std::string hal_s = login_token(h, "10.61.0.10", "bill_hal", "pw-bill-hal");
+	TEST_EXPECT(hal > 0 && !hal_s.empty());
+	TEST_EXPECT(post("/api/billing/checkout/cancel", hal_s).code == 200);
+	TEST_EXPECT(post("/api/billing/checkout", hal_s, "{\"item\":\"own_machine\"}").code == 200);
+	std::string hal_session = billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session;
+	TEST_EXPECT(!hal_session.empty() && billing::live_reservations_of(*h.pool.acquire(), hal).size() == 1);
+	reply = post("/api/billing/checkout/cancel", hal_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["released"].b());
+	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), hal).empty() &&
+			billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session.empty());
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		TEST_EXPECT(h.stripe->checkout_sessions[hal_session].status == "expired");
+	}
+	reply = post("/api/billing/checkout/cancel", hal_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["released"].b());
+	TEST_EXPECT(post("/api/billing/checkout", hal_s, "{\"item\":\"own_machine\"}").code == 200);
+	hal_session = billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session;
+	TEST_EXPECT(!h.stripe->complete_checkout(hal_session).empty());
+	reply = post("/api/billing/checkout/cancel", hal_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["released"].b() &&
+			billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session == hal_session);
+	TEST_EXPECT(post("/api/billing/checkout/cancel", hal_s, {}, /*csrf=*/false).code == 403);
+
 	// Billing off (the Secure listener): every account route 503 billing_disabled.
 	std::string token;
 	{

@@ -156,6 +156,24 @@ describe('NewServerPage', () => {
     expect(start).toHaveBeenCalledWith(expect.anything(), true, null);
   });
 
+  it('says a server goes to a shared machine while every dedicated machine is in use', async () => {
+    const stopped = hostedServer(7, { state: 'stopped' });
+    servers.mockResolvedValue({
+      ok: true,
+      value: serversResponse([hostedServer(1, { own_machine: true }), stopped], {
+        entitlement: { max_servers: 3, tier: 2, own_machines: 1 },
+      }),
+    });
+    addresses.mockResolvedValue({ ok: true, value: addressesResponse([]) });
+    wrapper = mount(NewServerPage, { global: { plugins: [await testRouter('/me/servers/new?from=7')] } });
+    await flushPromises();
+    expect(wrapper.find('#new-server-own_machine').exists()).toBe(false);
+    expect(wrapper.get('#new-server-pool').text()).toBe('On a shared machine: your dedicated machines are all in use.');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenCalledWith(expect.anything(), false, null);
+  });
+
   it('starts a shared server again on a shared machine, and offers no dedicated machine with none free', async () => {
     const shared = await mountPage(hostedServer(7, { state: 'stopped' }), [address(3, 'fleettest')]);
     expect((shared.get('#new-server-shared_machine').element as HTMLInputElement).checked).toBe(true);

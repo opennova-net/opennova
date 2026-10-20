@@ -54,7 +54,13 @@
         <h2 id="servers-allowance-heading" class="sr-only">Your hosting allowance</h2>
         <div class="grid gap-6 sm:grid-cols-2">
           <div v-if="data.entitlement.shared_servers > 0" class="space-y-1">
-            <AllowanceMeter id="servers-allowance" :used="data.entitlement.shared_used" :max="data.entitlement.shared_servers" />
+            <AllowanceMeter
+              id="servers-allowance"
+              :used="data.entitlement.shared_used"
+              :max="data.entitlement.shared_servers"
+              singular="shared server"
+              plural="shared servers"
+            />
             <p class="text-xs text-ink-muted">{{ sourceLine }}</p>
           </div>
           <div v-if="data.entitlement.own_machines > 0" class="space-y-1">
@@ -168,7 +174,7 @@
 <script setup lang="ts">
 // /me/servers: everything the logged-in account runs. From GET /api/me/servers
 // its hosting allowance (an AllowanceMeter for its servers on shared
-// machines, "2 of 3 servers used", and one for its dedicated machines) with
+// machines, "2 of 3 shared servers used", and one for its dedicated machines) with
 // the start (to /me/servers/new) while either has room (at its limit, a
 // bigger tier or a dedicated machine while one can be bought:
 // moreServersEnding), the support tier callout while it has none, and its

@@ -51,7 +51,7 @@ describe('ServersPage', () => {
   it('shows the allowance and a start while there is room', async () => {
     const wrapper = await mountPage(serversResponse([hostedServer(1), hostedServer(2)]));
     unmount = () => wrapper.unmount();
-    expect(wrapper.get('#servers-allowance').text()).toBe('2 of 3 servers used');
+    expect(wrapper.get('#servers-allowance').text()).toBe('2 of 3 shared servers used');
     const start = wrapper.findAll('a').find((a) => a.text() === 'Start a server');
     expect(start?.attributes('href')).toBe('/me/servers/new');
     expect(start?.attributes('aria-describedby')).toBe('servers-allowance');
@@ -65,7 +65,7 @@ describe('ServersPage', () => {
       serversResponse([hostedServer(1), hostedServer(2)], { entitlement: { max_servers: 3, tier: 2, own_machines: 1 } }),
     );
     unmount = () => wrapper.unmount();
-    expect(wrapper.get('#servers-allowance').text()).toBe('2 of 2 servers used');
+    expect(wrapper.get('#servers-allowance').text()).toBe('2 of 2 shared servers used');
     expect(wrapper.get('#servers-own-machines').text()).toBe('0 of 1 dedicated machine used');
     expect(wrapper.text()).toContain('One more server each, on a machine of its own.');
     // The machine is free: a start goes there.
@@ -119,7 +119,7 @@ describe('ServersPage', () => {
       serversResponse([hostedServer(1), hostedServer(2), hostedServer(3, { state: 'stopping' })]),
     );
     unmount = () => wrapper.unmount();
-    expect(wrapper.get('#servers-allowance').text()).toBe('3 of 3 servers used');
+    expect(wrapper.get('#servers-allowance').text()).toBe('3 of 3 shared servers used');
     expect(wrapper.findAll('a').some((a) => a.text() === 'Start a server')).toBe(false);
     expect(wrapper.text()).toContain('All 3 servers you may run are live.');
     expect(wrapper.text()).toContain('counts toward your limit until it has stopped, in about a minute');
