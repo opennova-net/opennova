@@ -39,6 +39,12 @@
 //            the cabin COBJ carries its own CVRT run and CXLT (2, 0, 1/2)
 //   tank     hull + turret; ctrlx25 (row 1), ewep01 on the turret, ground;
 //            the turret yaws on VEHICLE_GUNYAW
+//   vm40     the first-person viewmodel: forty skinned parts on the stock
+//            first-person rig's 40 bones (vm40_rig.h: two arms of five
+//            fingers, the receiver, magazine and bolt), each part a cube on
+//            its bone and a collision section of its own carrying one face
+//            quad on its pivot; `bullet` and `MFlash01` on the receiver; the
+//            fixtures/anim/vm40* clip set plays on it
 // Outside the set, fixtures/threedi/crate_alphagen24.3di: the crate wearing
 // retail's constant AlphaGen on an opaque material, the MTRL row JOTAC's
 // SCrate1.3di carries (FF_ST_OP, two-sided, alphagen style 24 reg -1 start 128,
@@ -49,6 +55,7 @@
 // and checks the authored facts the consumers pin.
 #include "fixtures/minimal_3di_builder.h"
 #include "fixtures/person_rig.h"
+#include "fixtures/vm40_rig.h"
 
 #include <formats/threedi/threedi_panm_pose.h>
 
@@ -577,6 +584,35 @@ Model make_tank() {
 	return m;
 }
 
+Model make_vm40() {
+	Model m;
+	m.name = "vm40";
+	m.skinned = true;
+	const int lod = m.add_lod();
+	const int mat = m.add_material("VS_SKBASIC", "vm40.tga");
+	const std::vector<vm40_rig::Bone> rig = vm40_rig::bones();
+	for (size_t i = 0; i < rig.size(); ++i) {
+		const vm40_rig::Bone &b = rig[i];
+		const int parent = b.parent < 0 ? 0 : b.parent;
+		const Vec3 pivot{b.pivot[0], b.pivot[1], b.pivot[2]};
+		const int part = m.add_part(lod, parent, pivot);
+		const double h = 1.0 / 64.0;
+		m.add_box(lod, part, mat, box(pivot.x - h, pivot.y - h, pivot.z - h, pivot.x + h, pivot.y + h, pivot.z + h), false,
+				part);
+		m.add_panm(lod, part, parent);
+		const int cobj = m.add_cobj(parent, pivot);
+		const Vec3 quad[4] = {{pivot.x - h, pivot.y - h, pivot.z}, {pivot.x + h, pivot.y - h, pivot.z},
+			{pivot.x + h, pivot.y + h, pivot.z}, {pivot.x - h, pivot.y + h, pivot.z}};
+		m.add_face_quad(cobj, quad);
+	}
+	const vm40_rig::Bone &receiver = rig[vm40_rig::kReceiver];
+	m.add_user_point("bullet", Vec3{receiver.pivot[0] + 0.375, receiver.pivot[1], receiver.pivot[2]}, kForward,
+			vm40_rig::kReceiver, kUserPointEffect);
+	m.add_user_point("MFlash01", Vec3{receiver.pivot[0] + 0.40625, receiver.pivot[1], receiver.pivot[2]}, kForward,
+			vm40_rig::kReceiver, kUserPointEffect);
+	return m;
+}
+
 // ---------------------------------------------------------------------------
 // The variant recipes (fixtures/README.md "threedi/synth"): one authored edit
 // each, spelled with the same runtime vocabulary the retired ObjectData
@@ -648,6 +684,7 @@ const std::vector<Recipe> &recipes() {
 		{"mount", make_mount, nullptr},
 		{"carrier", make_carrier, nullptr},
 		{"tank", make_tank, nullptr},
+		{"vm40", make_vm40, nullptr},
 		// --- CTRL bus (object_data_ctrl_bus_test.gd) ---
 		{"mount_ctrl1_heat_glow", make_mount, [](Model &m) { rename_register(m, 1, "HEAT_GLOW"); }},
 		{"mount_ctrl1_not_retail", make_mount, [](Model &m) { rename_register(m, 1, "NOT_RETAIL"); }},
@@ -904,6 +941,11 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 						p.model.collision->translations[0].translation[0] == 131072 && p.model.collision->translations[0].translation[2] == 32768 &&
 						!std::strcmp(p.point(0), "ctrlx13") && !std::strcmp(p.point(2), "sitex00d") && p.model.user_point_count == 8 && p.model.ctrl.count == 6,
 				name + ": carrier facts");
+	} else if (base == "vm40") {
+		expect(p.model.header.mesh_type == THREEDI_MESH_SKINNED && p.parts() == 40 && p.cobjs() == 40 &&
+						p.model.collision->face_count == 80 && p.model.lods[0].render_objects[38].parent_index == 37 &&
+						!std::strcmp(p.point(0), "bullet") && p.model.user_points[0].subobject_index == 37,
+				name + ": vm40 facts");
 	} else if (base == "tank") {
 		expect(p.parts() == 2 && p.cobjs() == 2 && !std::strcmp(p.point(0), "ctrlx25") && !std::strcmp(p.point(1), "ewep01") &&
 						p.model.user_points[1].subobject_index == 1 && p.bvol_type_count(19) == 2,

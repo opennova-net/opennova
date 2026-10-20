@@ -57,12 +57,20 @@
 //                                  clips carry it)
 //   fixtures/anim/vm40_swf.bad     switch from
 //   fixtures/anim/vm40_swr.bad     switch rank
+//   fixtures/anim/vm40_brk.bad     the reset with every child bone's dead position
+//                                  field X-triplicated (x copied into y and z),
+//                                  the breakage the stock exporter left in 6720
+//                                  of 13517 shipped bones (ak47_1st's rig: its
+//                                  reset positions the runtime never reads,
+//                                  bad_build.h); minted by hand from vm40_rst,
+//                                  not a clip the seam would write
 // Every turn is a rational rotation (a quaternion (t * axis, 1) normalized: t
 // the tangent of half the angle), so the bytes come out the same on every
 // platform. Default: rebuild every file in memory and byte-compare the
 // committed copies; `--write` (re)writes them. Every run re-reads the committed
 // bytes and checks the shape the consumers pin.
 #include "fixtures/person_rig.h"
+#include "fixtures/vm40_rig.h"
 
 #include <formats/adm/adm.h>
 #include <formats/bad/bad.h>
@@ -270,54 +278,18 @@ BadBuildSet make_set() {
 	return set;
 }
 
-// The 40-bone first-person rig (mission axes, the eye at the origin): 0 the
-// root; per arm (right from 1, left from 19) the upper arm, the forearm, the
-// hand and five fingers of three joints; 37 the receiver, 38 the magazine and
-// 39 the bolt under it.
-constexpr int kVmBones = 40;
-constexpr int kVmReceiver = 37, kVmMagazine = 38, kVmBolt = 39;
+// The 40-bone first-person rig (vm40_rig.h), no keys yet.
+constexpr int kVmReceiver = vm40_rig::kReceiver, kVmMagazine = vm40_rig::kMagazine, kVmBolt = vm40_rig::kBolt;
 
 std::vector<BadBuildBone> vm_bones() {
-	std::vector<BadBuildBone> bones(kVmBones);
-	char name[32];
-	bones[0].name = "BN01 Root";
-	for (int side = 0; side < 2; ++side) {
-		const int base = 1 + side * 18;
-		const double y = side == 0 ? -1.0 : 1.0;
-		const char *letter = side == 0 ? "R" : "L";
-		const double reach = side == 0 ? 0.0 : 0.125;
-		const BadBuildVec3 joints[3] = {{0.0, 0.25 * y, -0.25}, {0.25 + reach, 0.1875 * y, -0.3125},
-			{0.5 + reach, 0.125 * y, -0.25}};
-		const char *roles[3] = {"UpperArm", "Forearm", "Hand"};
-		for (int j = 0; j < 3; ++j) {
-			BadBuildBone &b = bones[static_cast<size_t>(base + j)];
-			std::snprintf(name, sizeof(name), "BN%02d %s %s", base + j + 1, letter, roles[j]);
-			b.name = name;
-			b.parent = j == 0 ? 0 : base + j - 1;
-			b.pivot = joints[j];
-			b.length = 0.25;
-		}
-		const BadBuildVec3 &hand = joints[2];
-		for (int f = 0; f < 5; ++f) {
-			for (int k = 0; k < 3; ++k) {
-				const int index = base + 3 + f * 3 + k;
-				BadBuildBone &b = bones[static_cast<size_t>(index)];
-				std::snprintf(name, sizeof(name), "BN%02d %s Finger%d%d", index + 1, letter, f + 1, k + 1);
-				b.name = name;
-				b.parent = k == 0 ? base + 2 : index - 1;
-				b.pivot = BadBuildVec3{hand.x + 0.0625 + 0.03125 * k, hand.y + 0.015625 * (f - 2) * y, hand.z};
-				b.length = 0.03125;
-			}
-		}
-	}
-	const BadBuildVec3 gun[3] = {{0.375, -0.125, -0.1875}, {0.4375, -0.125, -0.25}, {0.3125, -0.125, -0.15625}};
-	const char *gun_names[3] = {"BN38 Receiver", "BN39 Magazine", "BN40 Bolt"};
-	for (int g = 0; g < 3; ++g) {
-		BadBuildBone &b = bones[static_cast<size_t>(kVmReceiver + g)];
-		b.name = gun_names[g];
-		b.parent = g == 0 ? 0 : kVmReceiver;
-		b.pivot = gun[g];
-		b.length = 0.125;
+	std::vector<BadBuildBone> bones;
+	for (const vm40_rig::Bone &r : vm40_rig::bones()) {
+		BadBuildBone b;
+		b.name = r.name;
+		b.parent = r.parent;
+		b.pivot = BadBuildVec3{r.pivot[0], r.pivot[1], r.pivot[2]};
+		b.length = r.length;
+		bones.push_back(b);
 	}
 	return bones;
 }
@@ -423,6 +395,19 @@ bool mint_set(const BadBuildSet &set, std::vector<Minted> &out) {
 
 bool mint_all(std::vector<Minted> &out) {
 	if (!mint_set(make_set(), out) || !mint_set(make_vm_set(), out)) return false;
+	// The broken rig from the minted first-person reset.
+	for (const Minted &m : out) {
+		if (m.name != "vm40_rst.bad") continue;
+		BadFile bf{};
+		if (bad_parse_buffer(m.bytes.data(), m.bytes.size(), &bf) != 0) return false;
+		for (size_t b = 1; b < bf.num_bones; ++b) bf.bones[b].position[1] = bf.bones[b].position[2] = bf.bones[b].position[0];
+		Minted broken{"vm40_brk.bad", {}};
+		const bool ok = bad_write_buffer(&bf, broken.bytes) == 0;
+		bad_free(&bf);
+		if (!ok) return false;
+		out.push_back(std::move(broken));
+		break;
+	}
 	// The twist from the minted idle: its bone table, header and events as they are.
 	for (const Minted &m : out) {
 		if (m.name != "rig19_idle.bad") continue;
@@ -466,6 +451,13 @@ void check_facts(const Minted &m) {
 				m.name + ": the 40-bone first-person rig, translated, standing still");
 		if (m.name == "vm40_rst.bad") expect(bf.frame_count == 1 && bf.num_translations == 80, m.name + ": one frame, rows 0..1");
 		if (m.name == "vm40_swt.bad") expect((bf.flags & BAD_FLAG_BIT3) != 0, m.name + ": flag bit 3");
+		if (m.name == "vm40_brk.bad") {
+			int triplicated = 0;
+			for (size_t b = 1; b < bf.num_bones; ++b)
+				triplicated += bf.bones[b].position[0] == bf.bones[b].position[1] &&
+						bf.bones[b].position[1] == bf.bones[b].position[2];
+			expect(triplicated == 39, m.name + ": every child bone X-triplicated");
+		}
 		bad_free(&bf);
 		return;
 	}

@@ -455,17 +455,15 @@ target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(anim_sample_test PRIVATE cxx_std_17)
 add_test(NAME anim_sample COMMAND anim_sample_test)
 
-# ANIM positions_from_model over the retail viewmodel corpus (the retail half of
-# the former tests/test_bad_pos_derivation.py; synthetic exactness stays in
-# anim_sample): healthy M16/M24/M21/Frag rigs reconstruct BadBone.position within
-# 5e-4 on >=30 norm-consistent bones each; ak47_1st's X-triplicated rows (>=20)
-# come back model-consistent. Asset-gated on OPENNOVA_JO_ASSETS; reports Skipped
-# when unset.
-add_executable(anim_positions_from_model_corpus_test anim/anim_positions_from_model_corpus_test.cpp)
-target_link_libraries(anim_positions_from_model_corpus_test PRIVATE opennova_runtime opennova_formats)
-target_include_directories(anim_positions_from_model_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(anim_positions_from_model_corpus_test PRIVATE cxx_std_17)
-opennova_add_gated_test(anim_positions_from_model_corpus COMMAND anim_positions_from_model_corpus_test)
+# ANIM positions_from_model over a viewmodel rig read from its files (synthetic
+# exactness stays in anim_sample): the minted 40-bone vm40 rig reconstructs
+# BadBone.position within 5e-4 on >=30 norm-consistent bones; its X-triplicated
+# twin (ak47_1st's breakage, >=20 rows) comes back model-consistent.
+add_executable(anim_positions_from_model_test anim/anim_positions_from_model_test.cpp)
+target_link_libraries(anim_positions_from_model_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(anim_positions_from_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_positions_from_model_test PRIVATE cxx_std_17)
+add_test(NAME anim_positions_from_model COMMAND anim_positions_from_model_test)
 
 # ANIM aim overlay (the torso bend): bone-class map, BAM blend branches, compose
 # invariants. [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md s14]
