@@ -92,6 +92,7 @@ static void pose_emplacement_attachments(World &world) {
 // Precipitation_Reset precedes mission entities and consumes the shared B stream.
 // [orig: Game_StartMission @ 0x524360, seed @ 0x52460B / reset @ 0x5249D4]
 World::World() : commands(*this), vehicles(*this), rotor_wash(*this), zones(*this) {
+    ai.bind_registry(&registry);
 	weather.precipitation.reset(&io::rotating_prng_callback, &prng16_b_state);
 }
 

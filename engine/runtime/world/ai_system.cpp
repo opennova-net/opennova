@@ -198,9 +198,14 @@ int AiSystem::attach(EntityHandle h) {
     AiEntity &e = entities_[index];
     e = AiEntity{};
     e.handle = h;
+    bind_self(e);
     e.brain.f[AiBrain::kOwner] = 1; // nonzero = live slot
     if (h.valid()) handle_to_ai_index_[h.packed] = index;
     return index;
+}
+
+void AiSystem::bind_self(AiEntity &e) {
+    e.self = registry_ != nullptr ? registry_->row_storage(e.handle) : nullptr;
 }
 
 void AiSystem::release(EntityHandle h) {
@@ -242,6 +247,7 @@ int AiSystem::attach_dismemberment_piece(
 
 int AiSystem::place_dismemberment_piece(EntityHandle h, AiEntity &&piece) {
     release(h);
+    bind_self(piece);
     int index = -1;
     for (int i = 0; i < static_cast<int>(entities_.size()); ++i) {
         if (entities_[i].brain.f[AiBrain::kOwner] == 0) {
@@ -1001,6 +1007,9 @@ void AiSystem::on_load(World &) {
         entities_ = spawn_baseline_;
         anim_rings = spawn_baseline_rings_;
     }
+    // The restore replaced the registry's rows; each slot rebinds to its row,
+    // whose words the registry baseline restored.
+    for (AiEntity &e : entities_) bind_self(e);
     rebuild_handle_index();
     events.clear();
     relmat_calls.clear();

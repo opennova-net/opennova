@@ -84,6 +84,10 @@ public:
     const Entity *get(EntityHandle h) const;
     Entity *get(EntityLifetime lifetime);
     const Entity *get(EntityLifetime lifetime) const;
+    // Row h's storage, live or not (null past the pool's capacity): the entity
+    // an AI slot belongs to. Stable until configure_pool or restore_from
+    // replaces the pool.
+    Entity *row_storage(EntityHandle h);
 
     // Restore authored/runtime-visible registry state without rewinding the
     // host-only lifetime serial. Collision and skeletal caches use that serial

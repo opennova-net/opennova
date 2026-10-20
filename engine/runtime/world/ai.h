@@ -41,6 +41,7 @@ struct TerrainHeightField;
 
 namespace opennova::world {
 
+class EntityRegistry;
 class World;
 struct VehicleDriveCmd;
 struct VehicleTraits;
@@ -442,6 +443,14 @@ public:
 // (faithful units: 32-bit fixed-point position, 32-bit binary-angle heading).
 struct AiEntity {
     EntityHandle handle;
+    // The entity this slot belongs to (the row behind `handle`). Retail's AI
+    // code reaches the slot through its entity (entity+0x68) and reads the
+    // entity's own Position words (+4/+8/+0xC); the slot keeps no position of
+    // its own beyond the spawn copy +0x10..+0x18. Bound by AiSystem::attach,
+    // rebound when a restore replaces the registry's rows.
+    // [orig: Entity_InitFromModel @0x40DC30 - the slot's +0x10..+0x18 copies of
+    //  Position @0x40E115..0x40E127]
+    Entity *self = nullptr;
     AiBrain brain;
     AiSlot slot;
     AiProfile profile;
@@ -768,6 +777,9 @@ public:
     // play start (after promote + the pre-mission pass), when it snapshots the World.
     void capture_spawn_baseline();
 
+    // The registry whose rows the slots belong to (World binds its own at
+    // construction; a standalone system binds its rig's).
+    void bind_registry(EntityRegistry *registry) { registry_ = registry; }
     // Attach a brain to a world entity; returns its AI index (faithful to the
     // unk_AED380 array index used by AIEvent entity_index).
     int attach(EntityHandle h);
@@ -1368,6 +1380,10 @@ private:
     // lowest free slot or a new one.
     int place_dismemberment_piece(EntityHandle h, AiEntity &&piece);
 
+    // Each slot's entity (AiEntity::self) is this registry's row for its handle.
+    void bind_self(AiEntity &e);
+
+    EntityRegistry *registry_ = nullptr;
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     // A body's own update holds references into entities_, and its org1
     // death edge's hit callback can clone a dismemberment piece mid-update

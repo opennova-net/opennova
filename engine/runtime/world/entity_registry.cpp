@@ -128,6 +128,16 @@ const Entity *EntityRegistry::get(EntityHandle h) const {
     return const_cast<EntityRegistry *>(this)->get(h);
 }
 
+Entity *EntityRegistry::row_storage(EntityHandle h) {
+    if (!h.valid()) return nullptr;
+    const int pool = h.pool();
+    const int slot = h.slot();
+    if (pool < 0 || pool >= kPoolCount) return nullptr;
+    Pool &p = pools_[pool];
+    if (slot < 0 || static_cast<size_t>(slot) >= p.slots.size()) return nullptr;
+    return &p.slots[static_cast<size_t>(slot)];
+}
+
 Entity *EntityRegistry::get(EntityLifetime lifetime) {
     if (!lifetime.valid()) return nullptr;
     Entity *entity = get(lifetime.handle);
