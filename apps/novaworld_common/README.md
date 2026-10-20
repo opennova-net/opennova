@@ -462,9 +462,25 @@ UDP 64206, which spreads the clients across the lobby tasks by flow (a client's 
 port) and keeps each flow on one task.
 
 - **Why one address** (ADR 0063 decision 8, with its witness): a stock host reconnects
-  only to the lobby address the gate first gave it, after 240 s of silence, so with one
-  address a host whose lobby went away is listed again on a live one within about 271 s,
-  with no restart; retail self-hosts recover the same way.
+  only to the lobby address the gate first gave it, after its session's teardown (a
+  ServerGoodBye from the lobby address, or 240 s of silence), so with one address a host
+  whose lobby went away is listed again on a live one with no restart; retail self-hosts
+  recover the same way.
+- **The goodbyes** (`0021_lobby_goodbyes.sql`, `lobbydb::leave_goodbyes` / `list_goodbyes`;
+  service policy): a NAPI server that stops sends each connection its ServerGoodBye burst
+  (`{1, 9, 0, 0, "", 0, "NP.C:SH:STOP"}`), but behind the balancer a stopping lobby's flows
+  ended before its stop's signal, so its burst would reach no one. Its clean stop leaves a
+  row per session it held instead (the session's address, the SK its packets carry, the
+  client's CK). Every lobby reads the rows left within the last 240 s every second, and a
+  SESSION packet from an address it admitted nothing from, carrying such a row's SK, draws
+  that burst keyed by the CK (again at most once a second while such packets keep coming;
+  another key, or another address, draws nothing). The client tears its session down and
+  reconnects to the lobby address at once, onto the lobby that answered: a host lists again
+  on its next update (30 s at most) plus its reconnect's few seconds. A lobby that dies
+  without its stop leaves none, and its hosts list again within about 271 s (the 240 s of
+  silence, the reconnect's 1 s delay, its 10 s probe window and 20 s re-join at most). A
+  stop's write deletes the rows past the 240 s, and a row at an address replaces the one
+  before it.
 - **Its row** (`lobby_instances`: id, endpoint, `active` or `draining`, the task its lobby
   runs as, `started_at`, `last_seen_at`; the task, its ECS task id else its hostname, is the
   key its `program_samples` rows carry). The NW UDP listener's start registers a new row, reaps every instance
@@ -472,8 +488,8 @@ port) and keeps each flow on one task.
   and clears the rows no instance holds, all before it serves. Its receive thread moves
   `last_seen_at` every 5 s; a row found reaped all the same is registered again under a new
   id (draining still when it was) and the lobby writes its session rows and listings anew
-  from memory. A clean stop drains the row, then deletes it with its rows. Every row the
-  lobby writes names its instance (`lobby_id`).
+  from memory. A clean stop drains the row, leaves its sessions' goodbyes (above), then
+  deletes the row with its rows. Every row the lobby writes names its instance (`lobby_id`).
 - **The gate hands every client the one lobby address** while at least one instance is
   active and seen within 15 s (`lobbydb::live_lobbies`, read every 5 s on the gate's own
   connection); after a failed read, its fallback for six refreshes; with none live, its
