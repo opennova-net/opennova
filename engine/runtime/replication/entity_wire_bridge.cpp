@@ -856,7 +856,8 @@ static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 	// byte 81 sign-extended (0x04), +640 a 2044's location index (0x10), +672's low byte
 	// gated on the dword (0x20). [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 -
 	//  +290 @0x5035AD..0x5035CC, +640 @0x50360B..0x50362A, +672 @0x503633..0x503650;
-	//  Entity_SpawnFromBMSRecord @0x40EBD1..0x40EBD5 (movsx), @0x40F18F, @0x40EC54 / @0x40F176]
+	//  Entity_SpawnFromBMSRecord @0x40EBD1..0x40EBD5 (movsx), @0x40F18F, @0x40EC54 / @0x40F0AD
+	//  (6005) / @0x40F176 (6006)]
 	rec.ammo_count = static_cast<uint16_t>(static_cast<int16_t>(static_cast<int8_t>(e.ammo_count)));
 	rec.weapon_type = static_cast<uint16_t>(e.location_index);
 	rec.score_present = e.script_next_ssn != 0;
