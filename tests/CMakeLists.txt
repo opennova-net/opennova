@@ -5166,6 +5166,10 @@ add_test(NAME usegun_refusal COMMAND usegun_refusal_test)
 add_executable(npruntime_remote_slot_pump_test npruntime/remote_slot_pump_test.cpp)
 target_link_libraries(npruntime_remote_slot_pump_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_remote_slot_pump COMMAND npruntime_remote_slot_pump_test)
+# D-NET-693: the C2S 0x2F accept's availability gate (the host's weapon table, the armory zone).
+add_executable(npruntime_loadout_availability_test npruntime/loadout_availability_test.cpp)
+target_link_libraries(npruntime_loadout_availability_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_loadout_availability COMMAND npruntime_loadout_availability_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

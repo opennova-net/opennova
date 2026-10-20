@@ -31,15 +31,30 @@ struct KitEntry {
 	uint8_t variant = 0;
 };
 
-// The entries the masks admit, in request order: the slot's loadout buffer (the map
-// availability, D-NET-693, is not ported). [orig: @0x515A17..0x515A58]
+// The entries the masks admit, and at the accept the availability, in request order:
+// the slot's loadout buffer. A deploy re-reads its buffer, which holds the kept entries
+// alone, with no availability (`availability` null). [orig: @0x515A17..0x515A58]
 std::vector<KitEntry> admitted_entries(const LoadoutSubmit &req, uint8_t avatar_class,
-                                       const world::WeaponTable &table) {
+                                       const world::WeaponTable &table,
+                                       const LoadoutAvailability *availability = nullptr) {
 	std::vector<KitEntry> out;
 	for (const LoadoutSubmitEntry &e : req.entries) {
 		const world::WeaponTableEntry *def = table.by_index(e.adm_index);
 		if (def == nullptr) continue; // the AdmDef_GetEntryByIndex fail leg
 		if (!world::loadout_entry_permitted(*def, req.team, avatar_class)) continue;
+		// The entry's availability: 0 refuses it; the armory-only value keeps it only
+		// inside an armory zone. [orig: `mov eax, g_ArmoryWeaponAvailability[edx*4]`
+		//  @0x515A3F, the zero test @0x515A46..0x515A48, `cmp eax, 2` @0x515A4A, the
+		//  requester's Flags 0x400000 @0x515A4F..0x515A58]
+		if (availability != nullptr) {
+			int32_t value = 1;
+			if (availability->restrictions != nullptr)
+				for (const auto &r : *availability->restrictions)
+					if (r.first == e.adm_index) value = r.second;
+			if (value == 0) continue;
+			if (value == availability->armory_only && !availability->requester_in_armory_zone)
+				continue;
+		}
 		KitEntry k;
 		k.adm_index = e.adm_index;
 		k.def = def;
@@ -284,7 +299,8 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  const world::WeaponTable *table,
 										  const NapiNPConnection &conn,
 										  const world::WeaponAmmoSeat &seat,
-										  bool allow_sniper_scope_zoom) {
+										  bool allow_sniper_scope_zoom,
+										  const LoadoutAvailability *availability) {
 	const bool allow_zoom = allow_sniper_scope_zoom;
 	GrantedWeaponLoadout grant;
 	WeaponLoadout &reply = grant.reply;
@@ -309,7 +325,16 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 	}
 
 	if (table != nullptr && !table->empty()) {
-		const std::vector<KitEntry> entries = admitted_entries(req, reply.avatar_class, *table);
+		const std::vector<KitEntry> entries =
+				admitted_entries(req, reply.avatar_class, *table, availability);
+		for (const KitEntry &e : entries) {
+			LoadoutSubmitEntry kept;
+			kept.adm_index = e.adm_index;
+			kept.ammo_primary = static_cast<uint8_t>(e.count);
+			kept.ammo_secondary = static_cast<uint8_t>(e.count2);
+			kept.variant = e.variant;
+			grant.kept_entries.push_back(kept);
+		}
 		const uint8_t cls = reply.avatar_class;
 		// The slot's table from the accepted entries: the display list, a fill keeping
 		// the first weapon on a combo, the pools seeded and one clip drawn; the list
@@ -351,6 +376,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 	}
 
 	if (req.player_class == 0) return grant; // no entry matches the empty mask
+	grant.kept_entries = req.entries;
 	// Resource-less test/diagnostic fallback: no AmmoDef relationship exists, but duplicate
 	// ADM slots still behave like a table load (last entry wins) and serialize only once.
 	for (const LoadoutSubmitEntry &e : req.entries) {

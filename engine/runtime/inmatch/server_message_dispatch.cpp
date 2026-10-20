@@ -31,6 +31,7 @@
 #include <net/npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <net/npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
 #include <net/npwire/ingame_message_id.h>
+#include <net/title/title_identity.h>     // title_in_match (the 0x2F armory-only value)
 #include <net/npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle: the bound entity read through owned_entity
@@ -746,13 +747,27 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
+				// The availability gate reads the host's weapon table and the requester's
+				// armory-zone bit (D-NET-693) [orig: @0x515A3F..0x515A58]; a World-less
+				// unit path has no host table, every entry reading 1.
+				LoadoutAvailability availability;
+				if (inputs.server_ctx != nullptr) {
+					availability.restrictions = &inputs.server_ctx->weapon_restrictions;
+					availability.armory_only = title_in_match(
+							inputs.server_ctx->np_protocol.identity).armory_only_availability;
+				}
+				availability.requester_in_armory_zone =
+						((loadout_player->flags | loadout_player->engine_flags) &
+						 world::kEntityFlagArmoryZone) != 0;
 				const GrantedWeaponLoadout grant =
 						grant_weapon_loadout(req, config.class_allow_mask, armory, conn,
 								world::entity_ammo_seat(*world, *loadout_player),
-								world->rules.sniper_zoom_fill);
-				// The accepted entries become the slot's loadout buffer, which every
-				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515CBD..0x515D83].
+								world->rules.sniper_zoom_fill, &availability);
+				// The kept entries become the slot's loadout buffer, which every
+				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515A5A..0x515A7E,
+				// @0x515CBD..0x515D83].
 				st.loadout_buffer = req;
+				st.loadout_buffer.entries = grant.kept_entries;
 				st.loadout_buffer.player_class = grant.reply.avatar_class;
 				st.loadout_buffer_set = true;
 				// The accepted class is the slot's class and its PlayerType, at its store and its

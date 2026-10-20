@@ -72,6 +72,25 @@ struct GrantedWeaponLoadout {
 		int16_t clip = 0;
 	};
 	std::vector<Row> rows;
+	// The entries the accept kept, in request order (the masks and the availability
+	// passed): the slot's loadout buffer, which every deploy rebuilds the kit from.
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout - the kept entry @0x515A5A..0x515A7E,
+	//  the buffer @0x515CBD..0x515D83]
+	std::vector<LoadoutSubmitEntry> kept_entries;
+};
+
+// The accept's availability gate over the host's weapon table (g_ArmoryWeaponAvailability,
+// 255 dwords, every entry 1 unless the admin's WEAPON SET restricted it): an entry at 0
+// is refused, one at the title's armory-only value (2 in Jointops.exe, 3 in dfx2.exe)
+// only while the requester's entity carries the armory-zone bit (Flags 0x400000).
+// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515A3F..0x515A58; dfx2.exe @0x5129d0
+//  (@0x512c8a)]
+struct LoadoutAvailability {
+	// The restricted (index, value) entries (NapiNPServerCtx::weapon_restrictions); an
+	// index absent here reads 1.
+	const std::vector<std::pair<uint8_t, uint8_t>> *restrictions = nullptr;
+	int32_t armory_only = 2;
+	bool requester_in_armory_zone = false;
 };
 
 
@@ -90,7 +109,8 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  const world::WeaponTable *table,
 										  const NapiNPConnection &conn,
 										  const world::WeaponAmmoSeat &seat,
-										  bool allow_sniper_scope_zoom);
+										  bool allow_sniper_scope_zoom,
+										  const LoadoutAvailability *availability = nullptr);
 
 
 // The accept's damage-class stores onto the slot's table (NapiNPConnection::
