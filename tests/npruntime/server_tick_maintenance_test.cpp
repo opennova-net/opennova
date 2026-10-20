@@ -1729,6 +1729,52 @@ bool check_slot_team_readers_ignore_a_body_team_write() {
 	              "the status page colours by the slot team");
 }
 
+// The host's CNetQuality sample runs in the main frame ahead of the server
+// tick, so ahead of the receive pump: a ping the pump stores this frame
+// reaches the next sample, not this one.
+// [orig: Game_ProcessMainFrame - CNetQuality_UpdateMetrics @0x52658B ahead of
+//  the Server_TickUpdate call @0x5266B6; Server_TickUpdate's receive pump
+//  @0x51D895]
+bool check_host_quality_samples_ahead_of_the_receive_pump() {
+	const auto sample = [](uint32_t ring_before, bool pump_writes) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+		inmatch::GameConfig config;
+		config.max_players = 4;
+		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+		auto heap = std::make_unique<w::World>();
+		w::World &world = *heap;
+		world.rules.mp_session = true;
+		world.registry.configure_pool(0, 8);
+		ctx.world = &world;
+		ctx.stats_avg_fps = 62;
+		const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
+		ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+		ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+				7, inmatch::NapiNPConnection::kTypeServerSide, &transport,
+				ns::TransportMode::Client, player, true));
+		inmatch::NapiNPConnection &peer = ctx.np_protocol.connection_list.back();
+		peer.reply.player_slot = 1;
+		world.match.upsert_player({player, 1, "Peer"});
+		world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+		for (uint32_t &r : peer.reply.rtt_ring) r = ring_before;
+		ctx.net_quality_sample_countdown = 1; // this frame samples
+		if (pump_writes)
+			ctx.receive_pump = [&peer]() {
+				for (uint32_t &r : peer.reply.rtt_ring) r = 250;
+			};
+		inmatch::Server_TickUpdate(ctx);
+		return ctx.host_network_quality;
+	};
+	const uint8_t before = sample(0, false);
+	const uint8_t pumped = sample(0, true);
+	const uint8_t slow = sample(250, false);
+	if (!expect(before != slow, "a 250 ms ring samples apart from a zero one"))
+		return false;
+	return expect(pumped == before, "the pump's ping waits for the next sample");
+}
+
 // The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
 // every pass, once, whether or not its record changed and whatever the
 // recipient's state; the 0x6E goes, once, to a slot whose body's dead bit or
@@ -3448,6 +3494,7 @@ int main() {
 	ok = check_entity_state_fan_runs_out_of_session() && ok;
 	ok = check_a_loading_joiner_takes_no_proximity_or_census_place() && ok;
 	ok = check_slot_team_readers_ignore_a_body_team_write() && ok;
+	ok = check_host_quality_samples_ahead_of_the_receive_pump() && ok;
 	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;

@@ -440,6 +440,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// The previous frame's entity update sent inline, so its records lead
 	// this frame's queue, ahead of every message this tick produces.
 	route_entity_pass_records(ctx, world);
+	// The host CNetQuality send window, on its own 62-frame countdown: the main
+	// frame samples it ahead of the server tick, so ahead of the walk and of the
+	// receive pump whose replies move the ping rings.
+	// [orig: Game_ProcessMainFrame - the countdown and session test
+	//  @0x52654F..0x52655B, CNetQuality_UpdateMetrics @0x52658B, ahead of the
+	//  Server_TickUpdate call @0x5266B6]
+	Server_SampleHostNetQuality(ctx);
 	// The phases lap onto the SIM_SERVER_* / SIM_MATCH / SIM_REPLICATION_*
 	// rows of the world's profile (ADR 0043 d5); the script and entity passes
 	// attribute their own SIM_WORLD_* / SIM_UPDATE_* rows.
@@ -478,9 +485,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		ctx.receive_pump();
 		lap.restart();
 	}
-	// The host CNetQuality send window, on its own 62-frame countdown (retail
-	// samples it from the main frame beside this tick).
-	Server_SampleHostNetQuality(ctx);
 
 	// (1) net-before-logic: drain each in-match connection's queued C2S 0x0C and read-apply (SNAP).
 	// burst.spawned marks an in-match connection — a mid-burst peer is still receiving its §5.2a
