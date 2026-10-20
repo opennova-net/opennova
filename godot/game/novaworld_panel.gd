@@ -836,6 +836,8 @@ func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedB
 	# CD identity cookie (packed PUB* blob) it validates in the 0x00 JOIN (code 23).
 	target.app_id = app_id
 	target.cd_cookie = cd_cookie
+	# The gate's GLSVSSREQUEST, which the NovaWorld 0x00 JOIN carries last (D-NET-723).
+	target.glsvss_request = _client.get_glsvss_request()
 	# The proxy-assisted join fields (the .joi NI/NP/BK) and the LN lobby number
 	# ride the target so the in-match joiner can install its rendezvous config
 	# and pick the LAN-discovered endpoint over the relay.

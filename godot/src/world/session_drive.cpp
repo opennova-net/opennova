@@ -128,6 +128,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->set_app_id(p_target->get_app_id());
 	join_preload_sim_->set_join_network_type(p_target->get_network_type());
 	join_preload_sim_->set_join_cd_cookie(p_target->get_cd_cookie());
+	join_preload_sim_->set_join_glsvss_request(p_target->get_glsvss_request());
 	// A join from a browse row connects with the row's session record: the 0x42
 	// first, with the row's HK (JoinerConnection::DiscoveredSession).
 	join_preload_sim_->set_join_discovered_session(p_target);

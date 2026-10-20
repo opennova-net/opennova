@@ -57,6 +57,7 @@ void JoinTarget::_bind_methods() {
 	JOIN_TARGET_PROPERTY(Variant::STRING, dir)
 	JOIN_TARGET_PROPERTY(Variant::STRING, app_id)
 	JOIN_TARGET_PROPERTY(Variant::PACKED_BYTE_ARRAY, cd_cookie)
+	JOIN_TARGET_PROPERTY(Variant::PACKED_BYTE_ARRAY, glsvss_request)
 	JOIN_TARGET_PROPERTY(Variant::STRING, server_name)
 	JOIN_TARGET_PROPERTY(Variant::INT, game_type)
 	JOIN_TARGET_PROPERTY(Variant::INT, server_flags)

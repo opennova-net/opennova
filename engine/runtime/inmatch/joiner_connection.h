@@ -629,6 +629,11 @@ public:
 	// configured or test value (net/novacrypto/cdkey.h make_wire_key).
 	// [orig: NapiNP_WriteClientAuthPayload @0x42a180 - @0x42a1d4 / @0x42a20d]
 	void set_cd_key_ids(cdkey::WireKeys ids) { cd_key_ids_ = std::move(ids); }
+	// The gate's GLSVSSREQUEST (GateResponse::glsvss_request, the embedder's lobby hands it
+	// over), which the C2S 0x00 JOIN of a NovaWorld session carries last when it is set; a LAN
+	// JOIN never does. Empty sends none.
+	// [orig: NapiNP_WriteClientAuthPayload @0x42a180 - @0x42a2dd..0x42a315]
+	void set_glsvss_request(std::string request) { glsvss_request_ = std::move(request); }
 	const cdkey::WireKeys &cd_key_ids() const { return cd_key_ids_; }
 	// The LAN session fact the JOIN's CD-key leg tests [orig: is_in_session && transport_mode
 	// == 2 @0x42a1cb]: a joiner is in session; a NovaWorld join is the one carrying the .joi
@@ -1059,6 +1064,7 @@ private:
 	std::string player_name_;
 	const TitleIdentity *title_ = nullptr; // set_title
 	cdkey::WireKeys cd_key_ids_; // set_cd_key_ids
+	std::string glsvss_request_; // set_glsvss_request
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;
 	std::string server_password_;

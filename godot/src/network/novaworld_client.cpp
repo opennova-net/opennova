@@ -104,6 +104,7 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
 			&NovaWorldClient::forget_gate_response);
+	ClassDB::bind_method(D_METHOD("get_glsvss_request"), &NovaWorldClient::get_glsvss_request);
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaWorldClient::get_state);
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("is_authenticated"), &NovaWorldClient::is_authenticated);
@@ -365,6 +366,14 @@ void NovaWorldClient::start() {
 
 void NovaWorldClient::forget_gate_response() {
 	opennova::process_gate_memory().forget();
+}
+
+PackedByteArray NovaWorldClient::get_glsvss_request() const {
+	const std::string &request = lobby_.gate_response().glsvss_request;
+	PackedByteArray out;
+	out.resize(static_cast<int64_t>(request.size()));
+	if (!request.empty()) std::memcpy(out.ptrw(), request.data(), request.size());
+	return out;
 }
 
 void NovaWorldClient::stop() {

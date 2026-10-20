@@ -7,6 +7,8 @@
 //            writes the TLVs in a LAN session when the registry key holds one); a NovaWorld join
 //            (one carrying the .joi APPID) sends none
 //   the 0x42 build CU values are the title's (BN 1, VN 2, MBN 20042002, SOPD 180 in both)
+//   D-NET-723 a NovaWorld C2S 0x00 JOIN carries the gate's GLSVSSREQUEST last when the gate gave
+//            one (DFX2's [dfx2]kills, any title's); a LAN JOIN never does
 //
 // [orig: NetPacket_SendLoadoutSubmit @0x42ceae; NapiNP_WriteClientAuthPayload @0x42a1cb..0x42a235;
 //  CNapiServerInfo_SerializeToSession @0x4c3650] [orig: @0x42ec1f..0x42ec3e, @0x42c25b..0x42c2c5,
@@ -105,21 +107,25 @@ void loadout_class_byte() {
 	expect(resubmit_class(dfx2(), 2) == 7, "DFX2-12: 7 in a mission of type 2");
 }
 
-// Drive a joiner speaking `title` from its hello to its JOIN and return the JOIN's TLV names and
-// its CDKIID (empty when it sent none), and the ClientAuth's CU (name, value) pairs.
+// Drive a joiner speaking `title` from its hello to its JOIN and return the JOIN's TLV names, its
+// CDKIID and GLSVSSREQUEST (each empty when it sent none), and the ClientAuth's CU (name, value)
+// pairs.
 struct JoinSent {
 	std::vector<std::string> join_fields;
 	std::string cdkiid;
+	std::string glsvss_request;
 	std::vector<std::pair<std::string, std::string>> cu;
 	bool ok = false;
 };
 
-JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const std::string &app_id) {
+JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const std::string &app_id,
+		const std::string &glsvss_request = {}) {
 	JoinSent out;
 	inmatch::JoinerConnection joiner("Dfx2Joiner");
 	joiner.set_title(title);
 	joiner.set_cd_key_ids(ids);
 	if (!app_id.empty()) joiner.set_app_id(app_id);
+	joiner.set_glsvss_request(glsvss_request);
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientHello hello;
@@ -165,6 +171,10 @@ JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const s
 				out.join_fields.emplace_back(field.name);
 				if (field.name == "CDKIID")
 					out.cdkiid = load_value_string(field.value, m.payload.data() + m.payload.size(), SIZE_MAX);
+				if (field.name == "GLSVSSREQUEST") {
+					const uint8_t *end = m.payload.data() + m.payload.size();
+					out.glsvss_request = load_value_string(field.value, end, SIZE_MAX);
+				}
 			}
 			out.ok = true;
 		}
@@ -201,11 +211,33 @@ void join_carries_the_cd_key() {
 	}
 }
 
+// D-NET-723: retail's JOIN writer appends the gate's GLSVSSREQUEST, a NUL-terminated string,
+// after the CD cookie when the transport is NovaWorld and the gate gave one; a LAN join and a
+// gate without one send none. Both titles run the same code.
+// [orig: NapiNP_WriteClientAuthPayload @0x42a180 - the NovaWorld transport test @0x42a2dd, the
+//  buffer's test @0x42a2e6, the TLV @0x42a315]
+// [orig: @0x42c36d, @0x42c376, the TLV @0x42c3a5 (dfx2.exe)]
+void join_carries_the_glsvss_request() {
+	const JoinSent nw = join_of(dfx2(), cdkey::WireKeys{}, "3225", "[dfx2]kills");
+	const std::vector<std::string> fields{"VERSIONCRCSTRING", "GLSVSSREQUEST"};
+	expect(nw.ok && nw.join_fields == fields && nw.glsvss_request == "[dfx2]kills",
+	       "D-NET-723: a NovaWorld JOIN carries the gate's GLSVSSREQUEST last");
+	const JoinSent jo_nw = join_of(jo(), cdkey::WireKeys{}, "3225", "[dfx]kills");
+	expect(jo_nw.ok && jo_nw.glsvss_request == "[dfx]kills", "JO's joiner writes it alike");
+	const JoinSent none = join_of(dfx2(), cdkey::WireKeys{}, "3225");
+	expect(none.ok && none.join_fields == std::vector<std::string>{"VERSIONCRCSTRING"},
+	       "a NovaWorld JOIN without a gate GLSVSSREQUEST sends none");
+	const JoinSent lan = join_of(dfx2(), cdkey::WireKeys{}, "", "[dfx2]kills");
+	expect(lan.ok && lan.join_fields == std::vector<std::string>{"VERSIONCRCSTRING"},
+	       "a LAN JOIN never carries it");
+}
+
 } // namespace
 
 int main() {
 	loadout_class_byte();
 	join_carries_the_cd_key();
+	join_carries_the_glsvss_request();
 	if (g_failures == 0) {
 		std::printf("npruntime_dfx2_joiner: all checks passed\n");
 		return 0;

@@ -609,6 +609,11 @@ public:
 	void set_cd_key_ids(cdkey::WireKeys ids) {
 		if (joiner_) joiner_->set_cd_key_ids(std::move(ids));
 	}
+	// The gate's GLSVSSREQUEST a NovaWorld 0x00 JOIN carries
+	// (JoinerConnection::set_glsvss_request). Joiner only.
+	void set_glsvss_request(std::string request) {
+		if (joiner_) joiner_->set_glsvss_request(std::move(request));
+	}
 	void set_charattr_table(CharAttrTable table) {
 		if (joiner_) joiner_->set_charattr_table(std::move(table));
 	}

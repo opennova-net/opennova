@@ -132,6 +132,9 @@ public:
 	// forgotten, so the next start() probes the gate again
 	// (opennova::NwuLobbySession::GateMemory::forget, D-NET-706).
 	static void forget_gate_response();
+	// The gate response's GLSVSSREQUEST (its wire bytes; empty without one), which a NovaWorld
+	// join's 0x00 JOIN carries (JoinTarget.glsvss_request, D-NET-723).
+	PackedByteArray get_glsvss_request() const;
 
 	State get_state() const { return state_; }
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }

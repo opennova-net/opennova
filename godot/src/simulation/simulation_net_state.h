@@ -153,6 +153,9 @@ struct SimulationNetState {
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN (codes 23/24/25).
 	// Empty for LAN. Retained across direct-load runtime rebuilds.
 	std::vector<uint8_t> join_cd_cookie;
+	// The gate's GLSVSSREQUEST for a NovaWorld 0x00 JOIN (D-NET-723). Empty for LAN. Retained
+	// across direct-load runtime rebuilds.
+	std::string join_glsvss_request;
 	// The browse row's 0x81 record a join from it connects with (no 0x41).
 	// Retained across direct-load runtime rebuilds.
 	opennova::inmatch::JoinerConnection::DiscoveredSession join_discovered_session;

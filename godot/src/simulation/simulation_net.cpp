@@ -591,6 +591,11 @@ void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
 	install_join_cd_cookie();
 }
 
+void Simulation::set_join_glsvss_request(const PackedByteArray &p_request) {
+	net_.join_glsvss_request.assign(p_request.ptr(), p_request.ptr() + p_request.size());
+	install_join_glsvss_request();
+}
+
 void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
 	opennova::inmatch::JoinerConnection::DiscoveredSession session;
 	if (p_target.is_valid()) {
@@ -685,6 +690,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_expansion_version_root();
 	install_app_id();
 	install_join_cd_cookie();
+	install_join_glsvss_request();
 	install_join_mission_start();
 	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
 	install_item_catalog();

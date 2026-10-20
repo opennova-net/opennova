@@ -114,6 +114,10 @@ public:
 	// 23/24/25/28). Empty = LAN.
 	PackedByteArray get_cd_cookie() const { return cd_cookie_; }
 	void set_cd_cookie(const PackedByteArray &p_cookie) { cd_cookie_ = p_cookie; }
+	// The NovaWorld gate's GLSVSSREQUEST (its wire bytes), which the 0x00 JOIN of a
+	// NovaWorld join carries last (D-NET-723). Empty = none (every LAN join).
+	PackedByteArray get_glsvss_request() const { return glsvss_request_; }
+	void set_glsvss_request(const PackedByteArray &p_value) { glsvss_request_ = p_value; }
 	// Numeric g_GameType hint; -1 = unknown before authentication.
 	int get_game_type() const { return game_type_; }
 	void set_game_type(int p_value) { game_type_ = p_value; }
@@ -193,6 +197,7 @@ private:
 	String dir_;
 	String app_id_ = "0";
 	PackedByteArray cd_cookie_;
+	PackedByteArray glsvss_request_;
 	String server_name_;
 	int game_type_ = -1;
 	int server_flags_ = -1;

@@ -79,13 +79,14 @@ std::vector<uint8_t> build_join_padding_echo(
 // only the latter; expansion hosts require both. In a LAN session the CD-key
 // ids lead them, each only when set: the joiner's registry key decoded (a DFX2
 // LAN host checks them, DFX2-13; JO's sends them alike and its host ignores
-// them). The same code in both titles.
+// them). In a NovaWorld session the gate's GLSVSSREQUEST rides last when the gate gave one.
+// The same code in both titles.
 // [orig: NapiNP_WriteClientAuthPayload @0x42a1cb..0x42a235] [orig: @0x42c25b..0x42c2c5
 //  (dfx2.exe)]
 std::vector<uint8_t> build_join_request(
 		std::string_view expansion, int32_t expansion_version_checksum,
 		const std::vector<uint8_t> &cd_cookie, bool lan_session,
-		const cdkey::WireKeys &cd_key_ids) {
+		const cdkey::WireKeys &cd_key_ids, std::string_view glsvss_request) {
 	std::vector<uint8_t> body;
 	// One flat TLV: [name\0][LE16 size][size bytes]. A string value carries
 	// its NUL inside the size; a binary value is emitted as-is.
@@ -134,6 +135,13 @@ std::vector<uint8_t> build_join_request(
 			append_binary_tlv("CD", cd_cookie.data(), cd_cookie.size());
 		}
 	}
+	// The gate's GLSVSSREQUEST, a NUL-terminated string, in a NovaWorld session when the gate
+	// gave one (D-NET-723).
+	// [orig: NapiNP_WriteClientAuthPayload @0x42a180 - the NovaWorld transport test @0x42a2dd,
+	//  the buffer's test @0x42a2e6, the TLV @0x42a315]
+	// [orig: @0x42c36d, @0x42c376, the TLV @0x42c3a5 (dfx2.exe)]
+	if (!lan_session && !glsvss_request.empty())
+		append_string_tlv("GLSVSSREQUEST", glsvss_request);
 	return body;
 }
 
@@ -1076,7 +1084,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 						vfs_expansion_version_checksum(
 								expansion_version_root_,
 								advertised_expansion_),
-						cd_cookie_, lan_session(), cd_key_ids_)));
+						cd_cookie_, lan_session(), cd_key_ids_, glsvss_request_)));
 		io::logf(io::LogLevel::kInfo,
 				"np joiner: 0x00 JOIN CD identity cookie = %zu bytes",
 				cd_cookie_.size());

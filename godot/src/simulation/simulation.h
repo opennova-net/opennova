@@ -519,6 +519,8 @@ private:
 	void install_app_id();
 	// Install the retained CD identity cookie (packed PUB* blob) on the runtime.
 	void install_join_cd_cookie();
+	// Install the retained gate GLSVSSREQUEST (the NovaWorld JOIN's last TLV) on the runtime.
+	void install_join_glsvss_request();
 	// Install the retained mission-start seam (the load flag, the side password).
 	void install_join_mission_start();
 	// The host's session record for a mission of `p_game_type` (the UI host config or the SP
@@ -827,6 +829,9 @@ public:
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
 	void set_join_cd_cookie(const PackedByteArray &p_cookie);
+	// The NovaWorld gate's GLSVSSREQUEST (wire bytes) the C2S 0x00 JOIN of a NovaWorld join
+	// carries last (D-NET-723). Empty for LAN. Retained across runtime rebuilds.
+	void set_join_glsvss_request(const PackedByteArray &p_request);
 	// The browse row's 0x81 record the join connects with (HK, SF, expansion and the
 	// browse's CI), built from the join target; a null target clears it.
 	void set_join_discovered_session(const Ref<JoinTarget> &p_target);

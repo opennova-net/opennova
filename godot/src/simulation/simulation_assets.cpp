@@ -140,6 +140,11 @@ void Simulation::install_join_cd_cookie() {
 	runtime_->set_join_cd_cookie(net_.join_cd_cookie);
 }
 
+void Simulation::install_join_glsvss_request() {
+	if (!runtime_) return;
+	runtime_->set_glsvss_request(net_.join_glsvss_request);
+}
+
 void Simulation::install_join_mission_start() {
 	if (!runtime_) return;
 	runtime_->set_mission_start_loading(net_.join_mission_start_loading);
