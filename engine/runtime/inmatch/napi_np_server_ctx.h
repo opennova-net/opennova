@@ -345,6 +345,13 @@ struct NapiNPServerCtx {
 	std::vector<StagedEntityUpdateSend> *entity_update_staging = nullptr;
 	uint32_t entity_update_batch_seq = 0;
 
+	// The session owner's receive pump (host_session.cpp), set for the length of its
+	// Server_TickUpdate call, which runs it after the per-player walk: the walk reads what
+	// the last frame left, and every handler's sends queue behind the walk's (D-NET-686).
+	// [orig: Server_TickUpdate - Server_UpdateAllActivePlayerSlots @0x51D88B, then
+	//  CNapiNetwork_PumpServerProtocolRecv @0x51D895]
+	std::function<void()> receive_pump;
+
 	// The designation table the radio calls fill and the per-player S2C 0x6B
 	// batch reads, cleared at the new-round init
 	// (inmatch/server_designations.h). [orig: g_ServerDesignations @0xC84810;

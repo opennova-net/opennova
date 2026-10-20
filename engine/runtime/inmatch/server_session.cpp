@@ -187,7 +187,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		// 0x42 creates (type 1). (D-NET-713)
 		// [orig: CNapiGameSession_CreateSession @0x4C97C0 - the type-2 create @0x4C9B9C;
 		//  NapiNPProtocol_HandleClientJoin @0x62BF06 (the self-join's 0x42, through
-		//  CNapiGameSession_WaitForHostResponse @0x4C9C76); CNapiNPConnection_Create - the step
+		//  CNapiGameSession_WaitForHostResponse @0x4C9C6F); CNapiNPConnection_Create - the step
 		//  @0x62B282..0x62B296]
 		(void)next_connection_index();
 		(void)next_connection_index();

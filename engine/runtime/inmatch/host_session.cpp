@@ -307,7 +307,8 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 
 void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick, void *before_server_tick_context,
-		HostEventObserverFn event_observer, void *event_observer_context) {
+		HostEventObserverFn event_observer, void *event_observer_context,
+		HostOwnClientDrainFn own_client_drain, void *own_client_drain_context) {
 	devtools::TickProfile *profile =
 			owner.ctx.world != nullptr ? owner.ctx.world->profile : nullptr;
 	const devtools::ProfileScope pump_scope(profile, devtools::Slot::SIM_HOST_PUMP);
@@ -326,52 +327,67 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	auto &pending_session_messages = owner.pending_session_messages;
 
 	// (0) The previous frame's entity update sent inline, after that frame's send pump: its
-	// records sit on every connection's queue ahead of anything this frame's receive pump
-	// queues, the replies and the handlers' own sends alike, and leave in this frame's send
-	// pump. Route them now; the tick's head routes again what the receive pump raises, and
-	// arms the entity update's transactions there, not across the receive pump.
-	// (D-NET-NEW-L1-6)
+	// records sit on every connection's queue ahead of anything this frame queues, the walk's
+	// sends, the receive pump's replies and its handlers' own sends alike, and leave in this
+	// frame's send pump. Route them now. (D-NET-NEW-L1-6)
 	// [orig: NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
 	//  the one in-match send pump, Server_TickUpdate @0x51E487 (CNapiNetwork_PumpServerProtocolSend
-	//  @0x4C4F00); the receive pump @0x51D895; Game_ProcessMainFrame's Entity_UpdateAllEntities
-	//  call @0x52674B after Server_TickUpdate @0x5266B6]
-	if (owner.ctx.world != nullptr && owner.ctx.is_authority != 0) {
+	//  @0x4C4F00); the per-player walk @0x51D88B and the receive pump @0x51D895;
+	//  Game_ProcessMainFrame's Entity_UpdateAllEntities call @0x52674B after Server_TickUpdate
+	//  @0x5266B6]
+	if (owner.ctx.world != nullptr && owner.ctx.is_authority != 0)
 		route_entity_pass_records(owner.ctx, *owner.ctx.world);
-		owner.ctx.world->entity_update_transactions = nullptr;
-	}
 
-	// (1) recv-drain, the 0x84 tail and the send-boundary clocks.
-	receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
-	lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
-
-	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
-	for (TickOut &t : tick_connections(
-			owner.ctx, /*elapsed_ms=*/16, now,
-			/*respect_s2c_send_boundary=*/true)) {
-		for (const std::vector<uint8_t> &dg : t.outbound) {
-			send_or_stage_established_datagram(owner, sock, t.peer, dg);
-		}
-		for (const HostAcceptEvent &ev : t.events) {
-			if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) {
-				pending_session_messages.erase(t.peer);
-				owner.pending_session_datagrams.erase(t.peer);
+	// (1) and (2), the receive pump, which (3) Server_TickUpdate runs after its per-player
+	// walk, so the walk reads what the last frame left and a message handled now is walked
+	// next frame (D-NET-686). The host's own client's requests first: its node leads every
+	// remote's on the protocol's connection list, which the pump walks from the head, each
+	// node's messages in turn. Then the recv-drain, the 0x84 tail and the send-boundary
+	// clocks; the connection producers; and the records the handlers raised, behind their
+	// sends.
+	// [orig: Server_TickUpdate - Server_UpdateAllActivePlayerSlots @0x51D88B,
+	//  CNapiNetwork_PumpServerProtocolRecv @0x51D895; NapiNPProtocol_PumpRecvQueues @0x6266A0 -
+	//  the list walk @0x626910..0x6269E8, CNapiNPConnection_ParseMessages @0x62696B;
+	//  CNapiNPConnection_Create appends each node @0x62B17D..0x62B1AE;
+	//  CNapiGameSession_CreateSession creates the local client's node @0x4C9B9C and joins it
+	//  @0x4C9C6F, ahead of any remote]
+	bool received = false;
+	auto receive_pump = [&]() {
+		received = true;
+		lap.mark(devtools::Slot::SIM_SERVER_TICK);
+		if (own_client_drain != nullptr) own_client_drain(own_client_drain_context);
+		receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
+		lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
+		// (2) tick_connections: drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
+		for (TickOut &t : tick_connections(
+				owner.ctx, /*elapsed_ms=*/16, now,
+				/*respect_s2c_send_boundary=*/true)) {
+			for (const std::vector<uint8_t> &dg : t.outbound) {
+				send_or_stage_established_datagram(owner, sock, t.peer, dg);
 			}
-			dispatch_event(owner, t.peer, ev);
-			if (event_observer != nullptr)
-				event_observer(event_observer_context, ev);
+			for (const HostAcceptEvent &ev : t.events) {
+				if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) {
+					pending_session_messages.erase(t.peer);
+					owner.pending_session_datagrams.erase(t.peer);
+				}
+				dispatch_event(owner, t.peer, ev);
+				if (event_observer != nullptr)
+					event_observer(event_observer_context, ev);
+			}
 		}
-	}
-
-	// Owner-side entity registration belongs between creation and the first body update.
-	// Retail's AnimMap_RegisterEntity runs at entity creation; embedders with external
-	// animation registries use this boundary to preserve the same lifetime.
-	lap.mark(devtools::Slot::SIM_HOST_CONNECTIONS);
-	if (before_server_tick != nullptr) before_server_tick(before_server_tick_context);
-	lap.mark(devtools::Slot::SIM_HOST_ADAPTER);
-
-	// (3) Logic and C2S remain full-rate. Server_TickUpdate consults the
-	// already-advanced per-connection boundary only for fresh remote 0x0A.
+		// Owner-side entity registration belongs between creation and the first body update.
+		// Retail's AnimMap_RegisterEntity runs at entity creation; embedders with external
+		// animation registries use this boundary to preserve the same lifetime.
+		lap.mark(devtools::Slot::SIM_HOST_CONNECTIONS);
+		if (before_server_tick != nullptr) before_server_tick(before_server_tick_context);
+		if (owner.ctx.world != nullptr && owner.ctx.is_authority != 0)
+			route_entity_pass_records(owner.ctx, *owner.ctx.world);
+		lap.mark(devtools::Slot::SIM_HOST_ADAPTER);
+	};
+	owner.ctx.receive_pump = receive_pump;
 	Server_TickUpdate(owner.ctx);
+	owner.ctx.receive_pump = nullptr;
+	if (!received) receive_pump();
 	lap.mark(devtools::Slot::SIM_SERVER_TICK);
 
 	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.

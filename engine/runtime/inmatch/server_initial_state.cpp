@@ -742,8 +742,9 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		}
 	}
 	// A spectator's body stays hidden and damage-disabled; any other's hidden bit clears
-	// (+96481, the gate's other byte, the add zeroes @0x51D534 and nothing sets). The 0x0A
-	// writer's header ORs it back while the slot is undeployed, the join's own 0x0A first.
+	// (+96481, the gate's other byte, the add zeroes @0x51D534 and nothing sets). In session
+	// the 0x0A writer's stores OR it back while the slot is undeployed, the join's own 0x0A
+	// first; out of session the clear stands.
 	// [orig: Server_OnPlayerJoin @0x51A78E..0x51A7DA (the spectator arm @0x51A7AE / @0x51A7B3,
 	//  the clear @0x51A7DA); NetPacket_WritePlayerState @0x4FF7AA..0x4FF7B8]
 	if (body != nullptr) {
@@ -753,7 +754,6 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		} else {
 			body->flags &= ~1u;
 		}
-		if (conn.link.respawn_pending) body->flags |= 1u;
 	}
 
 	// The tail: the deploy unsticker. Without it a retail joiner world-loads but stays
@@ -792,7 +792,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 			out.push_back(InitialStateMessage{s2c::PER_FRAME_UPDATE, std::move(frame),
 					/*reliable=*/false});
 	}
-	// [orig: Server_OnPlayerJoin @0x51A864 -> NetPacket_WriteWorldStateLoad0x0F @0x502D10,
+	// [orig: Server_OnPlayerJoin @0x51A84C -> NetPacket_WriteWorldStateLoad0x0F @0x502D10,
 	//  sent @0x51A869]
 	out.push_back(InitialStateMessage{0x0F, serialize_world_state_load(ctx, conn, now_tick)});
 	// Every joined body starts under the 620-tick spawn protection, stored after the 0x0F

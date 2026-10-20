@@ -48,9 +48,9 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 // The previous entity update's records, routed onto the connections (server_tick.cpp): the
 // placed devices, the deaths and their staged sends, the medic interactions, the powerup
 // grants, the overlay updates, the gameplay events and the water crossings. Server_TickUpdate
-// runs it at its head; a session owner runs it first at the head of its pump, ahead of the
-// receive pump, so the update's sends lead what that pump queues (D-NET-NEW-L1-6), and the
-// tick's own call then routes what the receive pump raised.
+// runs it at its head; a session owner runs it first at the head of its pump, so the update's
+// sends lead what the tick's walk and receive pump queue (D-NET-NEW-L1-6), and again at the
+// end of the receive pump it hands the tick, for what that pump's handlers raised (D-NET-686).
 // [orig: Game_ProcessMainFrame - the Entity_UpdateAllEntities call @0x52674B after
 //  Server_TickUpdate's send pump @0x51E487]
 void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world);

@@ -276,7 +276,7 @@ bool run_one_step_per_boundary() {
 // D-NET-503: the add's body is hidden and carries no spawn protection; the join places it
 // again (whatever moved it), clears its hidden bit, and the 0x0F carries the join's placement,
 // then the 620 [orig: Entity_SpawnFromAnimSlotProperty @0x43C433 / @0x43C508; Server_OnPlayerJoin
-// @0x51A786, @0x51A7DA, the 0x0F @0x51A864 / @0x51A869, 620 @0x51A882].
+// @0x51A786, @0x51A7DA, the 0x0F @0x51A84C / @0x51A869, 620 @0x51A882].
 bool run_join_places_the_hidden_body() {
 	JoinFixture f(/*with_existing=*/false);
 	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,

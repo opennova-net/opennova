@@ -7,17 +7,28 @@
 //   - D-NET-525: replies to datagrams that arrive between two send boundaries share a packet,
 //     before the connection joined as after;
 //   - D-NET-NEW-L1-6: the previous entity update's sends lead what this frame's receive pump
-//     queues [orig: Game_ProcessMainFrame - Entity_UpdateAllEntities @0x52674B after
-//     Server_TickUpdate @0x5266B6; the receive pump @0x51D895].
+//     queues, the host's own client's requests included [orig: Game_ProcessMainFrame -
+//     Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6; the receive pump
+//     @0x51D895];
+//   - D-NET-686: the server tick's per-player walk runs before its receive pump, so the walk's
+//     sends lead the pump's and a message the pump handles is walked in the next frame [orig:
+//     Server_TickUpdate - Server_UpdateAllActivePlayerSlots @0x51D88B, then
+//     CNapiNetwork_PumpServerProtocolRecv @0x51D895; the walk's spawn-protection decrement
+//     @0x5188B8..0x5188C5, its frontier hint @0x51890C..0x5189A6].
 
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/udp_session_transport.h>
 
+#include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <net/npwire/idatagram_socket.h>
+#include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
@@ -116,21 +127,47 @@ struct QueueFixture {
 
 	inmatch::NapiNPConnection &conn() { return owner->ctx.np_protocol.connection_list.front(); }
 
-	// One C2S 0x2C RTT request (answered with an S2C 0x57) in its own 0x43 datagram.
-	void receive_rtt_request() {
+	// One C2S message in its own 0x43 datagram.
+	void receive(uint8_t tag, std::vector<uint8_t> payload) {
 		opennova::ProtocolPacketHeader header;
 		header.session_id = 0x55667788u;
 		header.seq_num = next_c2s_seq++;
 		header.ack_count = 0;
 		std::vector<uint8_t> body;
 		(void)opennova::encode_protocol_packet_plaintext(header,
-				{opennova::make_protocol_message(0x2C, {1, 2, 3, 4, 1})}, kClientScrk, body);
+				{opennova::make_protocol_message(tag, std::move(payload))}, kClientScrk, body);
 		socket.incoming.push_back(
 				{kPeer, opennova::nw_encode_outbound(opennova::SESSION_OPCODE_PROTOCOL_MESSAGE,
 						std::move(body))});
 	}
 
+	// One C2S 0x2C RTT request (answered with an S2C 0x57).
+	void receive_rtt_request() { receive(0x2C, {1, 2, 3, 4, 1}); }
+
+	// A live player body in pool 0 with its roster row, owned by `c`.
+	opennova::world::EntityHandle give_body(inmatch::NapiNPConnection &c, uint8_t team) {
+		opennova::world::Entity body;
+		body.kind = opennova::world::EntityKind::Organic;
+		body.player_class = 8;
+		body.team = team;
+		body.health = 150;
+		body.alive = true;
+		const opennova::world::EntityHandle handle = world->registry.spawn(0, body);
+		world->match.upsert_player({handle, 0, c.player_name, {}});
+		c.link.owned_entity = handle;
+		c.assigned_team = team;
+		c.assigned_team_valid = true;
+		return handle;
+	}
+
 	void pump() { inmatch::host_session_pump(*owner, socket); }
+
+	// Index of the first record tagged `tag` in `packet`, or its size when none is.
+	static std::size_t index_of(const std::vector<ProtocolMessage> &packet, uint8_t tag) {
+		for (std::size_t i = 0; i < packet.size(); ++i)
+			if (packet[i].tag == tag) return i;
+		return packet.size();
+	}
 
 	// The records of every S2C session packet sent so far, one vector per packet.
 	std::vector<std::vector<ProtocolMessage>> packets() const {
@@ -173,10 +210,9 @@ bool run_pre_join_replies_share_a_packet() {
 	              "both datagrams' replies share it, in arrival order");
 }
 
-// D-NET-NEW-L1-6: the previous entity update staged one send for this connection (a death's
-// 0x13); this frame's receive pump answers a 0x2C. The update's send leads the reply.
-bool run_entity_update_sends_lead_the_receive_pump() {
-	QueueFixture f(/*joined=*/true, /*with_world=*/true);
+// Stages one entity-update send (a death's 0x13) for the fixture's remote, as the previous
+// frame's update would have.
+void stage_entity_update_send(QueueFixture &f) {
 	inmatch::NapiNPServerCtx &ctx = f.owner->ctx;
 	inmatch::StagedEntityUpdateBatch batch;
 	batch.seq = 7;
@@ -190,6 +226,13 @@ bool run_entity_update_sends_lead_the_receive_pump() {
 	opennova::world::RoundDeath marker;
 	marker.staged_sends = 7;
 	f.world->round_sim.deaths.push_back(marker);
+}
+
+// D-NET-NEW-L1-6: the previous entity update staged one send for this connection (a death's
+// 0x13); this frame's receive pump answers a 0x2C. The update's send leads the reply.
+bool run_entity_update_sends_lead_the_receive_pump() {
+	QueueFixture f(/*joined=*/true, /*with_world=*/true);
+	stage_entity_update_send(f);
 	f.receive_rtt_request();
 	f.pump();
 	const std::vector<std::vector<ProtocolMessage>> sent = f.packets();
@@ -199,12 +242,132 @@ bool run_entity_update_sends_lead_the_receive_pump() {
 	              "the entity update's 0x13 leads the receive pump's 0x57");
 }
 
+// The listen host's own client, in match with a live body: its requests reach the server's
+// handlers through the pump's own-client hook.
+struct OwnClient {
+	QueueFixture *fixture = nullptr;
+	std::vector<ProtocolMessage> queued;
+};
+
+void drain_own_client(void *context) {
+	OwnClient &own = *static_cast<OwnClient *>(context);
+	inmatch::NapiNPServerCtx &ctx = own.fixture->owner->ctx;
+	inmatch::NapiNPConnection &local = ctx.np_protocol.connection_list.back();
+	(void)inmatch::dispatch_session_replies(ctx.config, local, own.queued,
+			own.fixture->owner->now_tick, ctx.np_protocol.connection_list, ctx.world);
+	own.queued.clear();
+}
+
+// D-NET-686: the walk's sends lead the receive pump's. A joined remote with its frontier hint
+// armed and 1240 play ticks gets the walk's S2C 0x1E event 58; its C2S 0x2C arrives in the
+// same frame. Ours used to run the receive pump first, so its 0x57 led the hint.
+bool run_the_walk_leads_the_receive_pump() {
+	QueueFixture f(/*joined=*/true, /*with_world=*/true);
+	opennova::world::World &world = *f.world;
+	world.registry.configure_pool(1, 8);
+	world.rules.mp_session = true;
+	f.owner->ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kAdvanceAndSecure;
+	world.match.configure(rules);
+	const uint8_t teams[3] = {1, 1, 2}; // an A&S chain: zones 1 and 2 blue, 3 red
+	for (uint8_t number = 1; number <= 3; ++number) {
+		opennova::world::Entity zone;
+		zone.kind = opennova::world::EntityKind::Item;
+		zone.is_capture_trigger = true;
+		zone.is_spawn_point = true;
+		zone.zone_number = number;
+		zone.zone_radius = 20;
+		zone.team = teams[number - 1];
+		zone.health = 1;
+		zone.alive = true;
+		zone.position = {1000.0f * number, 0.0f, 0.0f};
+		world.registry.spawn(1, zone);
+	}
+	world.zones.build_chain_from_mission();
+	if (!expect(world.zones.frontier_zone(1) != 0, "the chain gives blue a frontier")) return false;
+	const opennova::world::EntityHandle body = f.give_body(f.conn(), 1);
+	world.match.player(body)->play_ticks = 1240;
+	f.conn().reply.frontier_hint_pending = true;
+	f.receive_rtt_request();
+	f.pump();
+	const std::vector<std::vector<ProtocolMessage>> sent = f.packets();
+	if (!expect(!sent.empty(), "the frame's boundary sends its queue")) return false;
+	const std::size_t hint = QueueFixture::index_of(sent[0], 0x1E);
+	const std::size_t reply = QueueFixture::index_of(sent[0], 0x57);
+	return expect(hint < sent[0].size() && reply < sent[0].size() && hint < reply,
+	              "the walk's frontier hint leads the receive pump's 0x57");
+}
+
+// D-NET-686: a message the receive pump handles is walked in the next frame. The joiner's
+// C2S 0x0B runs the join, which stores the 620 spawn protection: the walk ran before the pump,
+// so the join's frame keeps the full 620, and the next frame's walk counts it to 619. Ours
+// used to walk after the pump and count it down in the join's own frame.
+bool run_a_handled_message_is_walked_next_frame() {
+	QueueFixture f(/*joined=*/false, /*with_world=*/true);
+	opennova::world::World &world = *f.world;
+	world.rules.mp_session = true;
+	opennova::bms::File mission;
+	opennova::mission::make_default(mission);
+	f.owner->ctx.mission = &mission;
+	inmatch::NapiNPConnection &c = f.conn();
+	c.player_name = "Joiner";
+	c.reply.player_slot = 1;
+	c.slot_state = inmatch::PlayerSlotState::AwaitJoin;
+	c.burst.game_state = 9;
+	const opennova::world::EntityHandle body = f.give_body(c, 1);
+	f.receive(opennova::c2s::MISSION_FILE_STATUS, {0x00});
+	f.pump();
+	const opennova::world::Entity *player = world.registry.get(body);
+	if (!expect(c.slot_state == inmatch::PlayerSlotState::Joined && inmatch::is_in_match(c),
+	            "the 0x0B joins the slot in the pump")) return false;
+	if (!expect(player != nullptr && player->damage_state == 620,
+	            "the join's frame keeps its 620: the walk ran before the pump")) return false;
+	f.pump();
+	return expect(player->damage_state == 619, "the next frame's walk counts it down");
+}
+
+// D-NET-NEW-L1-6 on a listen host: the host player's own requests are handled in the receive
+// pump, behind the previous entity update's sends. The update staged a 0x13 for the remote;
+// the host player's reload (C2S 0x25) fans an S2C 0x49 to it in this frame. The remote reads
+// the 0x13 first; ours used to dispatch the host's requests ahead of the release.
+bool run_own_client_requests_follow_the_entity_update_sends() {
+	QueueFixture f(/*joined=*/true, /*with_world=*/true);
+	f.owner->ctx.np_protocol.connection_list.emplace_back();
+	inmatch::NapiNPConnection &local = f.owner->ctx.np_protocol.connection_list.back();
+	local.type = inmatch::NapiNPConnection::kTypeClientSide;
+	local.player_name = "Host";
+	local.phase = inmatch::ConnectionPhase::InMatch;
+	local.burst.spawned = true;
+	local.link.mode = ns::TransportMode::Loopback;
+	const opennova::world::EntityHandle own_body = f.give_body(local, 1);
+	(void)f.give_body(f.conn(), 2);
+	stage_entity_update_send(f);
+	OwnClient own{&f, {}};
+	opennova::WeaponReload reload;
+	reload.entity_handle = own_body.packed;
+	reload.reload_param = 0;
+	own.queued.push_back(opennova::make_protocol_message(
+			opennova::c2s::WEAPON_RELOAD_REQUEST, opennova::encode_weapon_reload(reload)));
+	inmatch::host_session_pump(*f.owner, f.socket, nullptr, nullptr, nullptr, nullptr,
+			&drain_own_client, &own);
+	const std::vector<std::vector<ProtocolMessage>> sent = f.packets();
+	if (!expect(!sent.empty(), "the frame's boundary sends its queue")) return false;
+	const std::size_t death = QueueFixture::index_of(sent[0], 0x13);
+	const std::size_t relay = QueueFixture::index_of(sent[0], opennova::s2c::WEAPON_RELOAD);
+	return expect(death < sent[0].size() && relay < sent[0].size() && death < relay,
+	              "the entity update's 0x13 leads the host player's reload relay");
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
 	if (!run_pre_join_replies_share_a_packet()) ++failures;
 	if (!run_entity_update_sends_lead_the_receive_pump()) ++failures;
+	if (!run_the_walk_leads_the_receive_pump()) ++failures;
+	if (!run_a_handled_message_is_walked_next_frame()) ++failures;
+	if (!run_own_client_requests_follow_the_entity_update_sends()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

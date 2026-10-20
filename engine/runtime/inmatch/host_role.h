@@ -142,7 +142,8 @@ public:
 	// Created [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0].
 	CreateSessionResult session_create() const { return session_create_; }
 
-	// The C2S drain the host's own client feeds before the server tick.
+	// The C2S drain the host's own client feeds: the first leg of the receive pump the
+	// server tick runs after its per-player walk (host_session_pump's own-client hook).
 	void drain_host_client_gameplay_requests();
 	// The authority-local fire gate for this frame's weapon walk: in an MP
 	// session, the host's own player slot must be active against its own

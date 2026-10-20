@@ -85,19 +85,29 @@ void admit_peer(HostOwner &owner, const PeerAddr &peer);
 // React to one HostAcceptEvent surfaced by handle_server_datagram / tick_connections.
 void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEvent &ev);
 
-// One full owner iteration over `sock` (the §5.44 recv-before-send order):
-//   (1) recv-drain: recv_from -> handle_server_datagram -> ship replies + react to events; the
-//       receive pump's own sends (0x44 rebuilds, the 0x84 request, the 0x85 pong) leave at once
-//   (2) tick_connections: pre-spawn §5.2a bursts (framed 0x83 for remote peers) + surface F3/spawned
-//   (3) Server_TickUpdate: the single C2S drain + one logic tick + per-connection 0x0A fan
+// One full owner iteration over `sock`, in retail's frame order:
+//   (0) the previous frame's entity-update records, routed ahead of everything this frame queues
+//   (3) Server_TickUpdate, whose head (the timers, the per-player walk) runs before the receive
+//       pump this owner hands it (NapiNPServerCtx::receive_pump, D-NET-686):
+//       (1) the host's own client's requests (`own_client_drain`), then the recv-drain:
+//           recv_from -> handle_server_datagram -> queue replies + react to events; the
+//           receive pump's own sends (0x44 rebuilds, the 0x84 request, the 0x85 pong) leave
+//           at once; then the send-boundary clocks
+//       (2) tick_connections: pre-spawn §5.2a bursts + surface F3/spawned, then
+//           `before_server_tick`, then the records the handlers raised, behind their sends
+//       then the tick's single C2S drain, one logic tick and the per-connection 0x0A fan
 //   (4) S2C flush: on each peer's send boundary, ship pre-framed 0x83 packets,
 //       then pop its transport's identity [tag][body] -> frame/batch as 0x83 -> send
 //   (5) drain an unused embedder loopback for HostOnly; preserve the HostClient local view
-// `before_server_tick`, when supplied, runs after tick_connections has completed any
-// player spawns and before their first authoritative logic update / 0x0A fan. The opaque
-// context keeps this shared owner loop independent of embedder-specific registration state.
-// Advances owner.now_tick by 1.
+// A tick that does not run (no world, or not the authority) leaves (1) and (2) to the
+// owner, after it. `before_server_tick`, when supplied, runs after tick_connections has
+// completed any player spawns and before their first authoritative logic update / 0x0A fan.
+// `own_client_drain`, when supplied, dispatches the listen host's own client's queued
+// requests: its node leads every remote's on the protocol's connection list, so the receive
+// pump handles its messages first. The opaque contexts keep this shared owner loop
+// independent of embedder-specific state. Advances owner.now_tick by 1.
 using HostBeforeServerTickFn = void (*)(void *context);
+using HostOwnClientDrainFn = void (*)(void *context);
 using HostEventObserverFn = void (*)(void *context, const HostAcceptEvent &event);
 
 // The phases lap onto the SIM_HOST_* / SIM_SERVER_TICK rows of the world's
@@ -106,7 +116,9 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick = nullptr,
 		void *before_server_tick_context = nullptr,
 		HostEventObserverFn event_observer = nullptr,
-		void *event_observer_context = nullptr);
+		void *event_observer_context = nullptr,
+		HostOwnClientDrainFn own_client_drain = nullptr,
+		void *own_client_drain_context = nullptr);
 
 // The pump's step (4) alone, with every boundary treated as open: the
 // teardown's final flush, so the round-reset 0x25 and the "NP.C:SH:STOP"

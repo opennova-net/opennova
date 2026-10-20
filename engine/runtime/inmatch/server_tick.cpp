@@ -462,6 +462,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Then the per-player maintenance walk
 	// [orig: Server_UpdateAllActivePlayerSlots @0x518820, called @0x51d88b].
 	update_all_active_player_slots(ctx, world);
+	// Then the session owner's receive pump (host_session_pump's), behind the walk (D-NET-686)
+	// [orig: CNapiNetwork_PumpServerProtocolRecv, the call @0x51D895]. It laps onto the
+	// owner's own rows.
+	if (ctx.receive_pump) {
+		ctx.receive_pump();
+		lap.restart();
+	}
 	// The host CNetQuality send window, on its own 62-frame countdown (retail
 	// samples it from the main frame beside this tick).
 	Server_SampleHostNetQuality(ctx);

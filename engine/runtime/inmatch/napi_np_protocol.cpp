@@ -330,7 +330,7 @@ uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
 //  @0x62B17A..0x62B1AE, ++proto+0xED4 for type 1 @0x62B1BD..0x62B1CB; CNapiNPConnection_Destroy
 //  @0x62A4B0 - the unlink @0x62A5A8..0x62A5E5, the type-1 decrement @0x62A5FF; the listen host's
 //  self-join: CNapiGameSession_CreateSession @0x4C97C0 (the gate @0x4C9B6A..0x4C9B76, its type-2
-//  create @0x4C9B9C, CNapiGameSession_WaitForHostResponse @0x4C9C76), its 0x42's type-1 create
+//  create @0x4C9B9C, CNapiGameSession_WaitForHostResponse @0x4C9C6F), its 0x42's type-1 create
 //  in NapiNPProtocol_HandleClientJoin @0x62BF06]
 uint32_t server_connection_count(const NapiNPServerCtx &ctx) {
 	uint32_t count = 0;

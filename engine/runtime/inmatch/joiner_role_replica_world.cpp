@@ -372,7 +372,7 @@ void JoinerRole::apply_authoritative_health() {
 // [orig: NapiNPClientMsg_0x00F @0x42E200 — `if (!g_LocalPlayerEntity)` skip,
 //  the pose stores (Pitch @0x42E3E9, Roll @0x42E3F2), `Flags &= ~1` when
 //  !g_DeathScreenActive; Server_OnPlayerJoin positions @0x51A786 then
-//  serializes 0x0F @0x51A864]
+//  serializes 0x0F @0x51A84C]
 void JoinerRole::apply_world_state_load() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;

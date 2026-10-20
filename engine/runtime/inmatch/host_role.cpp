@@ -37,6 +37,13 @@ void before_server_tick(void *context) {
 		static_cast<mission::MissionKernel *>(context)->resolve_new_infantry_adm_ids();
 }
 
+// host_session_pump's own-client hook: the host player's requests, which retail's
+// receive pump handles first, inside the server tick after its per-player walk and
+// after the previous entity update's sends (D-NET-686).
+void drain_own_client(void *context) {
+	static_cast<HostRole *>(context)->drain_host_client_gameplay_requests();
+}
+
 } // namespace
 
 HostRole::HostRole() = default;
@@ -395,8 +402,7 @@ void HostRole::drain_host_client_gameplay_requests() {
 		//  Server_ProcessClientRequestSpectatorRespawn @0x51C840].
 		// So does its stance key's 0x1D: the handler latches the host's own
 		// player on the frame after the press, ahead of that frame's body
-		// update. Retail's pack runs before it and is overwritten by it; here
-		// the pack follows and rewrites MoveOrder's stance from the same latches.
+		// update. The frame's pack runs before it and is overwritten by it.
 		// [orig: NapiNPServerMsg_HandleStanceChange @0x501c60 from
 		//  Server_TickUpdate's receive pump @0x51d895]
 		// So does its Respawn key's bodiless 0x41, which the handler applies
@@ -531,7 +537,6 @@ void HostRole::run_tick(const TickInput &input) {
 	if (kernel.world.profile != nullptr)
 		kernel.world.profile->add(devtools::Slot::SIM_HOST_PREP,
 				static_cast<int64_t>(io::perf_now_us()) - prep_start);
-	drain_host_client_gameplay_requests();
 	// The host dictates its own client's local connection (no peer address) a
 	// one-tick holdoff, so that client frame's send block -- and the input
 	// pack inside it -- opens every frame [orig: Client_ProcessNetworkFrame
@@ -567,7 +572,7 @@ void HostRole::run_tick(const TickInput &input) {
 	if (state.client_runtime != nullptr)
 		state.client_runtime->view().set_spectate_local_handle(kernel.world.cached.local_player.packed);
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
-			nullptr, nullptr);
+			nullptr, nullptr, &drain_own_client, this);
 	// The frame tail after the server tick laps onto the stats board's
 	// player-tail row; the weapon walk keeps its own row.
 	devtools::ProfileLap tail(kernel.world.profile);
