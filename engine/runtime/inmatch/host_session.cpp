@@ -326,6 +326,21 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 			static_cast<uint64_t>(now) * uint64_t(io::kTickMs));
 	auto &pending_session_messages = owner.pending_session_messages;
 
+	// (0) The previous frame's entity update sent inline, after that frame's send pump: its
+	// records sit on every connection's queue ahead of anything this frame's receive pump
+	// queues, the replies and the handlers' own sends alike, and leave in this frame's send
+	// pump. Route them now; the tick's head routes again what the receive pump raises, and
+	// arms the entity update's transactions there, not across the receive pump.
+	// (D-NET-NEW-L1-6)
+	// [orig: NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
+	//  the one in-match send pump, Server_TickUpdate @0x51E487 (CNapiNetwork_PumpServerProtocolSend
+	//  @0x4C4F00); the receive pump @0x51D895; Game_ProcessMainFrame's Entity_UpdateAllEntities
+	//  call @0x52674B after Server_TickUpdate @0x5266B6]
+	if (owner.ctx.world != nullptr && owner.ctx.is_authority != 0) {
+		route_entity_pass_records(owner.ctx, *owner.ctx.world);
+		owner.ctx.world->entity_update_transactions = nullptr;
+	}
+
 	// (1) recv-drain, the 0x84 tail and the send-boundary clocks.
 	receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
 	lap.mark(devtools::Slot::SIM_HOST_RECEIVE);

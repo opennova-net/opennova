@@ -408,7 +408,7 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 //  follows Server_TickUpdate's send pump @0x51E487; Projectile_ProcessExplosionQueue
 //  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790 ->
 //  GameEvent_RevivePlayer @0x517CD0 / GameEvent_HealPlayer @0x50DE30]
-static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
+void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
 	route_throwable_events(ctx, world);
 	// The receive pump's player-body edges (the C2S 0x41's) are tested here,

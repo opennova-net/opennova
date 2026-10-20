@@ -1008,13 +1008,18 @@ bool check_host_pump_batches_one_send_boundary() {
 	std::vector<uint8_t> inbound = opennova::nw_encode_outbound(
 			opennova::SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(inbound_body));
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
-	peer_link.transport->host_send(
-			opennova::s2c::CHARATTR_CRC_CHALLENGE, {0x5D, 0x3D, 0x00, 0x00});
-	peer_link.transport->host_send(
-			opennova::s2c::PER_FRAME_UPDATE, {0, 0, 0, 0}, /*reliable=*/false);
+	// The tick's own sends queue after the receive pump's reply, as the server tick runs
+	// after its receive pump (D-NET-525: one queue per connection, in production order).
+	auto queue_tick_sends = [](void *context) {
+		auto *transport = static_cast<opennova::replication::ISessionTransport *>(context);
+		transport->host_send(
+				opennova::s2c::CHARATTR_CRC_CHALLENGE, {0x5D, 0x3D, 0x00, 0x00});
+		transport->host_send(
+				opennova::s2c::PER_FRAME_UPDATE, {0, 0, 0, 0}, /*reliable=*/false);
+	};
 	CaptureDatagramSocket socket;
 	socket.incoming.push_back({peer, std::move(inbound)});
-	opennova::inmatch::host_session_pump(owner, socket);
+	opennova::inmatch::host_session_pump(owner, socket, queue_tick_sends, peer_link.transport.get());
 	if (!expect(owner.ctx.np_protocol.connection_list.size() == 1 &&
 	                    owner.ctx.np_protocol.connection_list.front().peer == peer,
 	            "one host tick preserves the admitted remote peer"))

@@ -45,6 +45,16 @@ std::vector<uint8_t> Server_DisarmPlayerTickSeed(
 bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 		uint32_t client_tick, uint32_t host_tick, uint32_t send_holdoff_ticks);
 
+// The previous entity update's records, routed onto the connections (server_tick.cpp): the
+// placed devices, the deaths and their staged sends, the medic interactions, the powerup
+// grants, the overlay updates, the gameplay events and the water crossings. Server_TickUpdate
+// runs it at its head; a session owner runs it first at the head of its pump, ahead of the
+// receive pump, so the update's sends lead what that pump queues (D-NET-NEW-L1-6), and the
+// tick's own call then routes what the receive pump raised.
+// [orig: Game_ProcessMainFrame - the Entity_UpdateAllEntities call @0x52674B after
+//  Server_TickUpdate's send pump @0x51E487]
+void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world);
+
 // The authoritative per-frame host loop [orig: Server_TickUpdate @0x51d7e0]. One call = one engine
 // tick (the original 62 Hz cadence). Walks the SINGLE-OWNER connection table
 // NapiNPProtocol.connection_list (each node's embedded replication::Connection `link`) and, for every

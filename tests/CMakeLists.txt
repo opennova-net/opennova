@@ -4995,6 +4995,10 @@ add_executable(npruntime_join_leg_test npruntime/join_leg_test.cpp)
 target_link_libraries(npruntime_join_leg_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_join_leg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_join_leg COMMAND npruntime_join_leg_test)
+add_executable(npruntime_host_queue_test npruntime/host_queue_test.cpp)
+target_link_libraries(npruntime_host_queue_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_queue COMMAND npruntime_host_queue_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

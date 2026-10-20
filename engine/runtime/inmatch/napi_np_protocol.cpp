@@ -441,6 +441,18 @@ std::vector<uint8_t> frame_retained_session_reply(
 			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
 }
 
+// Queue `messages` on the connection's transport, in order, behind whatever it already holds:
+// the owner's send boundary packs the connection's one queue (D-NET-525).
+// [orig: NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
+//  CNapiNPConnection_BuildOutgoingPackets @0x628430 packs the queue @0x62844E,
+//  @0x62860B..0x628619]
+void queue_session_messages(NapiNPConnection &conn, std::vector<ProtocolMessage> &messages) {
+	for (ProtocolMessage &m : messages)
+		conn.link.transport->host_send(m.tag, std::move(m.payload), m.reliable, m.flags.raw,
+				m.capacity_exempt, m.retention_flushes);
+	messages.clear();
+}
+
 // The new-connection callback's MTU negotiation: a joiner that uploaded a nonzero MPS CU tag gets
 // the ceiling clamped to [100, the connection's own field 13] stored into both of the node's
 // direction blocks, then one CS update per direction (mask 0x2000) queued — the first sequenced
@@ -1056,10 +1068,26 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	dispatch_inputs.round_end_board_stream = &ctx.round_end_board_stream;
 	dispatch_inputs.medic_request_format = &ctx.server_text.medic_request_format;
 	dispatch_inputs.server_ctx = &ctx;
-	std::vector<ProtocolMessage> replies =
-			dispatch_session_replies(ctx.config, conn, messages, now_tick,
-			                         ctx.np_protocol.connection_list, ctx.world,
-			                         dispatch_inputs);
+	// With an owner's transport attached (from the 0x42 accept on), every reply joins the
+	// connection's one queue, which its send boundary packs: replies to datagrams that arrive
+	// between two boundaries share a packet, whether the connection has joined yet or not
+	// (D-NET-525). Each message is dispatched on its own so its handler's replies queue at its
+	// place among the sends the handlers make directly, as retail's handlers queue as they run.
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 dispatches record by record;
+	//  NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640]
+	const bool queued = conn.link.transport != nullptr;
+	std::vector<ProtocolMessage> replies;
+	if (queued && conn.admission_stage == GameAdmissionStage::Complete) {
+		for (const ProtocolMessage &message : messages) {
+			std::vector<ProtocolMessage> own = dispatch_session_replies(ctx.config, conn,
+					std::vector<ProtocolMessage>{message}, now_tick,
+					ctx.np_protocol.connection_list, ctx.world, dispatch_inputs);
+			queue_session_messages(conn, own);
+		}
+	} else {
+		replies = dispatch_session_replies(ctx.config, conn, messages, now_tick,
+				ctx.np_protocol.connection_list, ctx.world, dispatch_inputs);
+	}
 	if (conn.admission_stage == GameAdmissionStage::Rejected) {
 		// A game-layer join-gate failure that STAGED retail's description punt
 		// (the spectator DPC 14/15/16 legs) must retain the node: the owner
@@ -1081,7 +1109,9 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return;
 	}
 	if (!replies.empty()) {
-		if (defer_in_match_replies && conn.burst.spawned) {
+		if (queued) {
+			queue_session_messages(conn, replies);
+		} else if (defer_in_match_replies && conn.burst.spawned) {
 			out.deferred_session_replies.insert(
 					out.deferred_session_replies.end(),
 					std::make_move_iterator(replies.begin()),
@@ -1388,9 +1418,13 @@ std::vector<TickOut> tick_connections(
 				conn.phase < ConnectionPhase::PlayerAdded &&
 				conn.reply.admission_hold_nag_pending) {
 			conn.reply.admission_hold_nag_pending = false;
-			std::vector<uint8_t> nag = frame_session_replies(
-					conn, {make_protocol_message(s2c::SYNC_TICK, {0x00})});
-			if (!nag.empty()) to.outbound.push_back(std::move(nag));
+			std::vector<ProtocolMessage> nag_messages{make_protocol_message(s2c::SYNC_TICK, {0x00})};
+			if (conn.link.transport != nullptr) {
+				queue_session_messages(conn, nag_messages); // the connection's queue (D-NET-525)
+			} else {
+				std::vector<uint8_t> nag = frame_session_replies(conn, nag_messages);
+				if (!nag.empty()) to.outbound.push_back(std::move(nag));
+			}
 		}
 
 		// Retail's C2S 0x02 handler, pending-player spawn pump, and first
@@ -1420,11 +1454,17 @@ std::vector<TickOut> tick_connections(
 							ctx.config, ctx.mission_text_title, conn,
 							ctx.np_protocol.connection_list, ctx.world, ctx.rotation,
 							&ctx.host_slot);
-			std::vector<uint8_t> datagram =
-					frame_session_replies(conn, spawn_metadata);
-			if (!datagram.empty()) {
-				to.outbound.push_back(std::move(datagram));
+			if (conn.link.transport != nullptr) {
+				// The connection's queue, packed at its boundary (D-NET-525).
+				queue_session_messages(conn, spawn_metadata);
 				conn.reply.spawn_metadata_pushed = true;
+			} else {
+				std::vector<uint8_t> datagram =
+						frame_session_replies(conn, spawn_metadata);
+				if (!datagram.empty()) {
+					to.outbound.push_back(std::move(datagram));
+					conn.reply.spawn_metadata_pushed = true;
+				}
 			}
 			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
