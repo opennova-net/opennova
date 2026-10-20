@@ -47,6 +47,7 @@
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent (the emitter drain)
 #include <runtime/world/fire_sound.h> // ReadyFireSound (the fire-sound drain)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
+#include <runtime/inmatch/admin_console.h> // AdminConsole::Seams (remote_admin_seams)
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
@@ -1407,6 +1408,18 @@ public:
 	// The process's server log devices (simulation_net_state.h), which every hosted
 	// session's context writes. Null = none.
 	void use_log_devices(opennova::inmatch::ServerLogDevices *p_devices) { net_.log_devices = p_devices; }
+	// The remote-admin console's seams over this session (C++ only; the game world's admin
+	// pump binds them, engine inmatch/remote_admin.h): the process block and its save, the
+	// host's rotation and catalog, the avatars, the mission's items.def rows, the listen host's
+	// own client and the title's version and name texts.
+	opennova::inmatch::AdminConsole::Seams remote_admin_seams(opennova::gamecfg::GameCfg *p_block,
+			std::function<void()> p_save_config);
+	// The process's CRT stream the challenge draws from while a mission runs (World::crt_rand);
+	// null with no kernel.
+	opennova::io::CrtRand *process_crt_rand();
+	// The listen host's own client runtime (null: none), which a map change remakes; the admin
+	// pump rebinds its console when it changes.
+	opennova::inmatch::ClientRuntime *host_client_runtime();
 	void use_client_process(opennova::inmatch::ClientProcessState *p_state) { net_.client_process = p_state; }
 	// The last load's session create ended the process on a nonzero mpreset (inmatch
 	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.

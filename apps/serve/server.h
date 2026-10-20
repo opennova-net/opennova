@@ -36,6 +36,7 @@
 #include <net/admin/admin_server.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/inmatch/admin_console.h>
+#include <runtime/inmatch/remote_admin.h>
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/game_config_block.h>
 #include <runtime/inmatch/host_boot.h>
@@ -212,15 +213,6 @@ public:
 	uint32_t main_frame() const { return main_frame_; }
 
 private:
-	// The admin server's command half until the session's console stands: retail's console
-	// reads the live globals from the first frame, the port's needs the host context, which
-	// the first boot creates. The pump runs only in game frames, so nothing reaches it before.
-	struct AdminForward final : AdminCommandHandler {
-		inmatch::AdminConsole *console = nullptr;
-		bool dispatch(const AdminSession &session, std::string_view line,
-				std::vector<std::string> &replies) override;
-		std::string status_report() override;
-	};
 	// admin.cfg and the listener, once the subsystems are up [orig: Game_InitSubsystems
 	// @0x4A72B8..0x4A72D9].
 	void open_admin();
@@ -311,8 +303,10 @@ private:
 	// The remote-admin server: the rotation seam, the console, the wire server, its sockets
 	// and the CRT stream its challenge draws from (the world's, synced around each pump).
 	std::unique_ptr<inmatch::HostRotationAdmin> rotation_admin_;
-	std::unique_ptr<inmatch::AdminConsole> admin_console_;
-	AdminForward admin_forward_;
+	// The admin server's command half (inmatch/remote_admin.h): the console over the session's
+	// context once the first boot binds it; the pump runs only in game frames, so nothing
+	// reaches the session-less one first.
+	inmatch::RemoteAdminConsoles admin_consoles_;
 	io::CrtRand admin_rand_;
 	std::unique_ptr<AdminServer> admin_server_;
 	std::unique_ptr<net::AdminTcpServer> admin_tcp_;

@@ -98,6 +98,10 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// STOPS the frame, so later device phases cannot run against a lost or
 	// failed session.
 	{ "session", FrameStats::WORLD_RUNTIME, &GameWorld::leg_session, kStopsFrame },
+	// The remote admin's pump ends the main frame, after the session's tick; a frame the session
+	// stopped never reaches it (engine inmatch/remote_admin.h). The menus' frames pump it from
+	// the internal process step instead.
+	{ "remote_admin", kNoSlot, &GameWorld::leg_remote_admin, kLegNone },
 	// Place the local-player camera/viewmodel from the state the session tick
 	// just produced, BEFORE every camera-driven render leg reads it (D-RORD-8).
 	// It also hands the entity presenter the frame's virtual-display verdict
@@ -386,6 +390,15 @@ GameWorld::LegResult GameWorld::leg_session(FrameContext &r_ctx) {
 		session_frame_failed(r_ctx.outcome->get_error());
 		return kLegStop;
 	}
+	return kLegRan;
+}
+
+GameWorld::LegResult GameWorld::leg_remote_admin(FrameContext &r_ctx) {
+	MissionRoot *presentation = get_runtime();
+	if (presentation == nullptr || !presentation->is_playing()) {
+		return kLegSkipped;
+	}
+	pump_remote_admin(opennova::inmatch::AdminScene::GameLoop);
 	return kLegRan;
 }
 

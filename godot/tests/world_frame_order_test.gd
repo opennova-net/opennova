@@ -9,7 +9,7 @@ extends GutTest
 
 func test_frame_leg_table_is_the_witnessed_order() -> void:
 	assert_eq(Array(GameWorld.frame_leg_names()), [
-		"begin", "session", "local_view", "scene_environment",
+		"begin", "session", "remote_admin", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "network", "blink",
 		"occlusion", "foliage", "iris", "sun_veil", "lights", "ragdolls", "materials", "framefx",
 		"slot_shadows", "particles", "precipitation", "scene_overlay",
@@ -36,6 +36,8 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 	for producer in ["lights", "particles", "precipitation"]:
 		assert_gt(names.find("scene_overlay"), names.find(producer),
 				"the overlay tail gathers what %s published this frame" % producer)
+	assert_eq(names.find("remote_admin"), names.find("session") + 1,
+			"the remote admin's pump ends the main frame, right after the session's tick")
 	assert_gt(names.find("ragdolls"), local_view,
 			"the ragdolls read the avatar the local view posed this frame")
 	assert_lt(names.find("ragdolls"), names.find("materials"),

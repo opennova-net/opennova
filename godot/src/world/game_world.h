@@ -21,6 +21,7 @@
 
 #include <runtime/inmatch/mission_rotation.h> // HostRotation (the process's rotation words)
 #include <runtime/inmatch/client_runtime.h> // ClientProcessState (the process's client words)
+#include <runtime/inmatch/remote_admin.h> // RemoteAdminConsoles (the remote admin)
 #include <runtime/inmatch/server_log_devices.h> // ServerLogDevices (the server log switches)
 
 #include <memory>
@@ -30,6 +31,7 @@
 #include <runtime/renderer/texture_compression.h> // the texcompression_level word
 #include <runtime/renderer/texture_filter.h> // the texfilter rungs
 
+#include "network/admin_tcp_pump.h"
 #include "audio/mission_audio.h"
 #include "devtools/frame_stats.h"
 #include "env/celestial.h"
@@ -666,6 +668,7 @@ private:
 	void run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext &r_ctx, bool p_timed);
 	LegResult leg_begin(FrameContext &r_ctx);
 	LegResult leg_session(FrameContext &r_ctx);
+	LegResult leg_remote_admin(FrameContext &r_ctx);
 	LegResult leg_local_view(FrameContext &r_ctx);
 	LegResult leg_scene_environment(FrameContext &r_ctx);
 	LegResult leg_environment_nodes(FrameContext &r_ctx);
@@ -922,6 +925,25 @@ private:
 	// (Simulation.use_log_devices; inmatch/server_log_devices.h). Armed at _ready, closed at
 	// the exit from the tree.
 	std::unique_ptr<opennova::inmatch::ServerLogDevices> log_devices_;
+	// The process's remote admin (engine inmatch/remote_admin.h): admin.cfg and the listener
+	// once the process block is known, the console bound over the running session's host (else
+	// session-less), the CRT stream its challenge draws from outside a mission, and the TCP
+	// device. Pumped by the remote_admin leg in a mission frame and by the internal process
+	// step on every other frame (the menus).
+	opennova::inmatch::RemoteAdminConsoles admin_consoles_;
+	opennova::io::CrtRand admin_rand_;
+	std::unique_ptr<opennova::AdminServer> admin_server_;
+	std::unique_ptr<AdminTcpPump> admin_pump_;
+	bool admin_opened_ = false;
+	// What the bound console's seams point into: the session's simulation (its instance id), its
+	// host context and the listen host's own client; any change rebinds.
+	uint64_t admin_bound_sim_ = 0;
+	opennova::inmatch::NapiNPServerCtx *admin_bound_ctx_ = nullptr;
+	opennova::inmatch::ClientRuntime *admin_bound_client_ = nullptr;
+	// Open on the first pump with a process block; false until then.
+	bool open_remote_admin();
+	// One frame's pump in `p_scene` over the running session's host (none: session-less).
+	void pump_remote_admin(opennova::inmatch::AdminScene p_scene);
 	// The last frame's world-tick leg counters (RuntimePerfCounters).
 	int64_t perf_tick_us_ = 0;
 	int64_t perf_foliage_us_ = 0;

@@ -89,10 +89,6 @@ const char kUsage[] =
 		"its users in admin.cfg there and its log in admin_log.txt; banned.txt and\n"
 		"banlist.txt there are the ban lists.\n";
 
-// The admin server's log, by bare name in the working directory [orig: "admin_log.txt"
-// @0x7C0860, CAdminServer_Construct @0x402C39].
-constexpr const char *kAdminLogFileName = "admin_log.txt";
-
 // The one-token switches, retail-spelled ones matched case-insensitively.
 bool parse_port(const std::string &text, uint16_t &out, bool allow_zero = false) {
 	char *end = nullptr;
@@ -246,7 +242,7 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// construction, ahead of everything, so every launch truncates it whether
 	// or not the listener ever opens [orig: CAdminServer_Construct @0x402C10,
 	// fopen("admin_log.txt", "w") @0x402C84].
-	(void)files_.write(kAdminLogFileName, std::string_view(), /*append=*/false);
+	(void)files_.write(inmatch::kAdminLogFileName, std::string_view(), /*append=*/false);
 	// The log switches arm at the process start, as retail's command-line
 	// parse arms them (inmatch/server_log_devices.h).
 	{
@@ -937,15 +933,6 @@ bool Server::save_config() {
 	return false;
 }
 
-bool Server::AdminForward::dispatch(const AdminSession &session, std::string_view line,
-		std::vector<std::string> &replies) {
-	return console != nullptr ? console->dispatch(session, line, replies) : true;
-}
-
-std::string Server::AdminForward::status_report() {
-	return console != nullptr ? console->status_report() : std::string();
-}
-
 // admin.cfg from the working directory (a missing file is no users and no whitelist), then the
 // listener on game.cfg's 16-bit remote_admin_port when it is nonzero, on every interface; a
 // listen that fails is ignored, as retail ignores Listen's result.
@@ -955,18 +942,13 @@ std::string Server::AdminForward::status_report() {
 void Server::open_admin() {
 	admincfg::AdminConfig config;
 	(void)admincfg::load_file(admincfg::kFileName, config);
-	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_forward_, admin_rand_,
+	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_consoles_, admin_rand_,
 			[this](std::string_view line) {
-				// The log is a text-mode stream: each "\n" reaches the disk as CR LF.
-				std::string text;
-				for (const char c : line) {
-					if (c == '\n') text += '\r';
-					text += c;
-				}
-				(void)files_.write(kAdminLogFileName, text, /*append=*/true);
+				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(line),
+						/*append=*/true);
 			});
 	admin_tcp_ = std::make_unique<net::AdminTcpServer>(*admin_server_);
-	const uint16_t port = static_cast<uint16_t>(config_.cfg().remote_admin_port);
+	const uint16_t port = inmatch::remote_admin_listen_port(config_.cfg());
 	if (port == 0) return;
 	if (admin_tcp_->listen(port))
 		io::logf(io::LogLevel::kInfo, "opennova-serve: remote admin on TCP %u", admin_tcp_->port());
@@ -1003,8 +985,7 @@ void Server::bind_admin_console() {
 	seams.quit_to_menu = [this] {
 		role_->state.host_owner.ctx.mission_exit_reason = inmatch::kMissionExitQuit;
 	};
-	admin_console_ = std::make_unique<inmatch::AdminConsole>(role_->state.host_owner.ctx, std::move(seams));
-	admin_forward_.console = admin_console_.get();
+	admin_consoles_.bind(&role_->state.host_owner.ctx, std::move(seams));
 }
 
 // The scene is the Game Loop whenever this runs: a map change runs inside one frame, so the
@@ -1015,9 +996,10 @@ void Server::bind_admin_console() {
 // retail's does. [orig: CAdminServer_AcceptConnection @0x405783..0x4057AC (32 draws of
 //  rand() % 255 + 1); srand @0x51C1AA, the session's one seed]
 void Server::pump_admin() {
-	if (!admin_tcp_ || !admin_tcp_->listening() || !admin_console_) return;
-	admin_console_->set_scene(inmatch::AdminScene::GameLoop);
-	admin_console_->set_main_frame(main_frame_);
+	inmatch::AdminConsole *console = admin_consoles_.console();
+	if (!admin_tcp_ || !admin_tcp_->listening() || console == nullptr) return;
+	console->set_scene(inmatch::AdminScene::GameLoop);
+	console->set_main_frame(main_frame_);
 	admin_rand_ = kernel_->world.crt_rand;
 	admin_tcp_->pump();
 	kernel_->world.crt_rand = admin_rand_;

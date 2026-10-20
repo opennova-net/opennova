@@ -410,6 +410,40 @@ Simulation::ServerCommandResult Simulation::execute_server_command(const String 
 	return out;
 }
 
+opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
+		opennova::gamecfg::GameCfg *p_block, std::function<void()> p_save_config) {
+	namespace inmatch = opennova::inmatch;
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = p_block;
+	seams.save_config = std::move(p_save_config);
+	if (net_.process_rotation != nullptr) {
+		if (net_.rotation_admin == nullptr)
+			net_.rotation_admin = std::make_unique<inmatch::HostRotationAdmin>(
+					*net_.process_rotation, net_.rotation_catalog);
+		seams.rotation = net_.rotation_admin.get();
+	}
+	seams.characters = &assets_.character_registry;
+	seams.items_table = [this]() -> const opennova::def::DefItemsFile * {
+		return kernel_ ? kernel_->items_table() : nullptr;
+	};
+	seams.host_client = host_client_runtime();
+	const opennova::TitleIdentity *title = session_title(net_.title);
+	if (title != nullptr) {
+		const opennova::inmatch::ConnectLogHeader header = opennova::inmatch::connect_log_header(title);
+		seams.version_text = header.version;
+		seams.title_text = header.title;
+	}
+	return seams;
+}
+
+opennova::io::CrtRand *Simulation::process_crt_rand() {
+	return kernel_ ? &kernel_->world.crt_rand : nullptr;
+}
+
+opennova::inmatch::ClientRuntime *Simulation::host_client_runtime() {
+	return host_role_ != nullptr ? host_role_->state.client_runtime.get() : nullptr;
+}
+
 void Simulation::set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook) {
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr) return;

@@ -61,6 +61,7 @@ add_library(opennova_bindings OBJECT
     network/novaworld_identity.cpp
     network/udp_datagram.cpp
     network/udp_pump.cpp
+    network/admin_tcp_pump.cpp
     network/lan_session.cpp
     network/lan_server_row.cpp
     network/net_protocol.cpp

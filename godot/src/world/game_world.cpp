@@ -1,5 +1,6 @@
 #include "world/game_world.h"
 
+#include <formats/admincfg/admin_cfg.h>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
@@ -79,6 +80,9 @@ void GameWorld::_ready() {
 	// preload wait the session drive steps (switched on by load_as_joiner,
 	// off when the preload ends).
 	set_process(drive_.is_preload_pending());
+	// The internal process step pumps the remote admin on every frame no mission frame runs
+	// (pump_remote_admin).
+	set_process_internal(true);
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const Callable post_draw = callable_mp(this, &GameWorld::on_frame_post_draw);
 	if (rs != nullptr && !rs->is_connected("frame_post_draw", post_draw)) {
@@ -136,8 +140,20 @@ void GameWorld::_process(double p_delta) {
 }
 
 void GameWorld::_notification(int p_what) {
+	if (p_what == NOTIFICATION_INTERNAL_PROCESS) {
+		// A frame with no mission frame: the menus (the main menu with nothing loaded, the
+		// pre and post menus around a loaded mission) pump the admin server too
+		// (Menu_UpdateFrame's call; engine inmatch/remote_admin.h).
+		MissionRoot *runtime = get_runtime();
+		if (runtime == nullptr || !runtime->is_playing())
+			pump_remote_admin(world_ready_ ? opennova::inmatch::AdminScene::Other
+			                               : opennova::inmatch::AdminScene::MainMenu);
+		return;
+	}
 	if (p_what == NOTIFICATION_EXIT_TREE) {
 		stop_water_render_stats();
+		// The admin server's sockets close with the process.
+		if (admin_pump_ != nullptr) admin_pump_->close();
 		// The process's network shut down: the _inout.txt log, then the net log, each
 		// stops and flushes (ServerLogDevices::close carries the witness).
 		if (log_devices_ != nullptr) log_devices_->close(0u);
@@ -421,6 +437,68 @@ int GameWorld::get_authored_occluder_model_count() const {
 
 MissionRoot *GameWorld::get_runtime() const {
 	return Object::cast_to<MissionRoot>(ObjectDB::get_instance(runtime_id_));
+}
+
+bool GameWorld::open_remote_admin() {
+	if (admin_opened_) return true;
+	if (game_config_.is_null() || log_devices_ == nullptr) return false;
+	admin_opened_ = true;
+	// The log truncates at the process start, admin.cfg loads from the working directory (a
+	// missing file is no users and no whitelist), and the listener opens on the block's 16-bit
+	// port when it is nonzero; a failed listen is ignored (engine inmatch/remote_admin.h).
+	opennova::inmatch::WorkingDirectoryFiles &files = log_devices_->files();
+	(void)files.write(opennova::inmatch::kAdminLogFileName, std::string_view(), /*append=*/false);
+	const std::string &dir = files.dir();
+	const std::string cfg_path = dir.empty() ? std::string(opennova::admincfg::kFileName)
+	                                         : dir + "/" + opennova::admincfg::kFileName;
+	opennova::admincfg::AdminConfig config;
+	(void)opennova::admincfg::load_file(cfg_path, config);
+	admin_server_ = std::make_unique<opennova::AdminServer>(std::move(config), admin_consoles_,
+			admin_rand_, [&files](std::string_view p_line) {
+				(void)files.write(opennova::inmatch::kAdminLogFileName,
+						opennova::inmatch::admin_log_file_text(p_line), /*append=*/true);
+			});
+	admin_pump_ = std::make_unique<AdminTcpPump>(*admin_server_);
+	const uint16_t port = opennova::inmatch::remote_admin_listen_port(game_config_->native().cfg());
+	if (port != 0 && !admin_pump_->listen(port))
+		print_verbose(String("GameWorld: the remote admin did not listen on TCP ") + itos(port));
+	return true;
+}
+
+void GameWorld::pump_remote_admin(opennova::inmatch::AdminScene p_scene) {
+	if (!open_remote_admin() || !admin_pump_->listening()) return;
+	const Ref<Simulation> sim = get_sim();
+	opennova::inmatch::NapiNPServerCtx *ctx = sim.is_valid() ? sim->host_ctx() : nullptr;
+	opennova::inmatch::ClientRuntime *client = sim.is_valid() ? sim->host_client_runtime() : nullptr;
+	const uint64_t sim_id = sim.is_valid() ? static_cast<uint64_t>(sim->get_instance_id()) : 0u;
+	if (!admin_consoles_.bound_to(ctx) || sim_id != admin_bound_sim_ || ctx != admin_bound_ctx_ ||
+			client != admin_bound_client_) {
+		admin_bound_sim_ = sim_id;
+		admin_bound_ctx_ = ctx;
+		admin_bound_client_ = client;
+		Ref<GameConfigBlock> block = game_config_;
+		std::function<void()> save = [block]() { (void)block->save(); };
+		opennova::gamecfg::GameCfg *cfg = &game_config_->native().cfg();
+		if (sim.is_valid()) {
+			admin_consoles_.bind(ctx, sim->remote_admin_seams(cfg, std::move(save)));
+		} else {
+			opennova::inmatch::AdminConsole::Seams seams;
+			seams.config_block = cfg;
+			seams.save_config = std::move(save);
+			admin_consoles_.bind(nullptr, std::move(seams));
+		}
+	}
+	opennova::inmatch::AdminConsole *console = admin_consoles_.console();
+	console->set_scene(p_scene);
+	// The challenge's rand() is the process's one CRT stream: the running mission's world
+	// keeps it, so the pump draws from it and hands it back (opennova-serve's pump does the same).
+	opennova::io::CrtRand *crt = sim.is_valid() ? sim->process_crt_rand() : nullptr;
+	if (crt != nullptr) {
+		console->set_main_frame(static_cast<uint32_t>(sim->get_main_frame_counter()));
+		admin_rand_ = *crt;
+	}
+	admin_pump_->pump();
+	if (crt != nullptr) *crt = admin_rand_;
 }
 
 Ref<Simulation> GameWorld::get_sim() const {

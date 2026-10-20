@@ -5192,6 +5192,12 @@ add_executable(opennova_serve_host_switches_test serve/opennova_serve_host_switc
 target_link_libraries(opennova_serve_host_switches_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_host_switches_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_host_switches COMMAND opennova_serve_host_switches_test)
+# The process's remote-admin half (NEW-L8-11): the 16-bit port, the log line, the console
+# session-less in the menus and over a host's context (the game's and opennova-serve's).
+add_executable(remote_admin_test admin/remote_admin_test.cpp)
+target_link_libraries(remote_admin_test PRIVATE opennova_runtime)
+target_include_directories(remote_admin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME remote_admin COMMAND remote_admin_test)
 
 # --- parity lane L9 (NovaWorld) ---
 
