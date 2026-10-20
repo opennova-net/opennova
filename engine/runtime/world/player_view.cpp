@@ -53,8 +53,9 @@ void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
         }
         return;
     }
-    // Every production caller supplies 1, 7, or 15 steps. Retail's integer
-    // division also requires a positive count on this nonzero-delta branch.
+    // Every production caller supplies 1, 7, 15, or 0x1F (the weapon-switch
+    // ease) steps. Retail's integer division also requires a positive count on
+    // this nonzero-delta branch.
     assert(steps != 0);
     const double reciprocal = 1.0 / static_cast<double>(steps);
     for (int i = 0; i < 3; ++i) {
@@ -72,6 +73,12 @@ void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
 }
 
 void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip) {
+    player_view_bias_interp_step(interp, hip, interp.position_bias_q16, interp.rotation_bias_bam);
+}
+
+void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip,
+                                  int32_t (&position_bias_q16)[3],
+                                  int32_t (&rotation_bias_bam)[3]) {
     if (!interp.active) return;
     if (interp.remaining != 0) --interp.remaining;
     bool moving = false;
@@ -112,9 +119,9 @@ void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerView
     // [orig: @0x4DDF42..0x4DDFC3] float difference -> truncating ftol for
     // position, modular subtraction for rotation; both are relative to hip.
     for (int i = 0; i < 3; ++i) {
-        interp.position_bias_q16[i] = static_cast<int32_t>(
+        position_bias_q16[i] = static_cast<int32_t>(
                 static_cast<double>(interp.current.position_q16[i]) - hip.position_q16[i]);
-        interp.rotation_bias_bam[i] = io::bam_sub(
+        rotation_bias_bam[i] = io::bam_sub(
                 static_cast<int32_t>(interp.current.rotation_bam[i]),
                 static_cast<int32_t>(hip.rotation_bam[i]));
     }
@@ -266,6 +273,10 @@ void player_view_scope_reset(PlayerViewState &v) {
     v.scope_hipfire = true;
     v.weapon_pose_interp = {};
     v.weapon_pose_bound = false;
+    // No held weapon leaves the switch ease's slot without a Def: its stepper
+    // drops the latch [orig: @0x4DDD2B..0x4DDDBC].
+    v.weapon_switch_interp = {};
+    v.weapon_switch_bound = false;
 }
 
 void player_view_weapon_switch_reset(PlayerViewState &v) {
@@ -282,15 +293,56 @@ void player_view_weapon_switch_reset(PlayerViewState &v) {
     v.weapon_pose_bound = false; // caller rebinds an optical equipped slot
 }
 
-void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed) {
-    if ((flags & 0x20000000) != 0) v.scope_settled = true;
-    else if (category_changed) v.scope_settled = false;
+void player_view_clear_bias(PlayerViewState &v) {
     // Mount clears only the six published biases, retaining the running pose.
     // [orig: Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8]
     for (int i = 0; i < 3; ++i) {
         v.weapon_pose_interp.position_bias_q16[i] = 0;
         v.weapon_pose_interp.rotation_bias_bam[i] = 0;
     }
+}
+
+namespace {
+
+// The bound def's hip position with its Z lane lowered by 65536.0 (fld +0xFC;
+// fsub flt_7C32BC; fstp: one float rounding of the exact difference) and the
+// three rotation lanes zero, NOT the hip's own rotation.
+// [orig: Player_SetupWeaponSwitchViewEase @0x4DF96F..0x4DF9B4]
+PlayerViewPose weapon_switch_lowered_pose(const PlayerViewPose &hip) {
+    PlayerViewPose lowered;
+    lowered.position_q16[0] = hip.position_q16[0];
+    lowered.position_q16[1] = hip.position_q16[1];
+    lowered.position_q16[2] = static_cast<float>(
+            static_cast<double>(hip.position_q16[2]) - kWeaponSwitchLowerQ16);
+    return lowered;
+}
+
+} // namespace
+
+void player_view_weapon_switch_lower(PlayerViewState &v) {
+    // [orig: @0x4DF960(0) -- entitySlotPtr = EquippedSlot @0x4DF9A1, the
+    //  write-only lowering latch @0x4DF9B8, Setup(0x1F, Def+0xF4, lowered)
+    //  @0x4DFA19..0x4DFA35]
+    v.weapon_switch_bound = true;
+    player_view_bias_interp_setup(v.weapon_switch_interp,
+                                  static_cast<uint32_t>(kWeaponSwitchEaseSteps),
+                                  v.weapon_hip_pose, weapon_switch_lowered_pose(v.weapon_hip_pose));
+}
+
+void player_view_weapon_switch_raise(PlayerViewState &v, int32_t flags) {
+    // [orig: @0x4DF960(1) -- entitySlotPtr = the new EquippedSlot @0x4DF9A1;
+    //  Def+8 & 0x80 (Emplaced) -> Setup(1, lowered, Def+0x10C) @0x4DF9D1..0x4DF9F0,
+    //  else Setup(0x1F, lowered, Def+0x10C) @0x4DF9FA..0x4DFA0F]
+    v.weapon_switch_bound = true;
+    const int32_t steps = (flags & 0x80) != 0 ? kWeaponSwitchEaseStepsInstant
+                                              : kWeaponSwitchEaseSteps;
+    player_view_bias_interp_setup(v.weapon_switch_interp, static_cast<uint32_t>(steps),
+                                  weapon_switch_lowered_pose(v.weapon_hip_pose), v.weapon_hip_pose);
+}
+
+void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed) {
+    if ((flags & 0x20000000) != 0) v.scope_settled = true;
+    else if (category_changed) v.scope_settled = false;
     v.weapon_pose_bound = (flags & (3 | 0x04000000)) != 0;
     if ((flags & 3) != 0 && v.scope_settled) {
         // [orig: g_ScopeEngaged = 1 @0x4dfc5b; Setup(1, +0x10C hip, +0x124 tpos)
@@ -318,6 +370,21 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
         else
             v.weapon_pose_interp.active = false;
         if (!v.weapon_pose_interp.active) v.scope_settled = v.scope_engaged;
+    }
+    // The weapon-switch view ease steps after the scope ease and publishes into
+    // the same bias lanes, so while it moves the frame takes its pose; an
+    // unbound slot deactivates it at once. Its completion callback has no
+    // writer, so nothing promotes on its landing.
+    // [orig: Player_UpdatePerFrame -- activeFlag test @0x4de4fd,
+    //  Player_StepFpViewBiasInterp(&g_WeaponSwitchViewInterp) @0x4de505..0x4de50a,
+    //  the callback @0x4de50f..0x4de522; the null slot/Def leg @0x4DDD2B..0x4DDDBC]
+    if (v.weapon_switch_interp.active) {
+        if (v.weapon_switch_bound)
+            player_view_bias_interp_step(v.weapon_switch_interp, v.weapon_hip_pose,
+                                         v.weapon_pose_interp.position_bias_q16,
+                                         v.weapon_pose_interp.rotation_bias_bam);
+        else
+            v.weapon_switch_interp.active = false;
     }
 
     if (v.third_person) {

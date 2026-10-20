@@ -1028,7 +1028,7 @@ void test_binoculars_survive_all_but_the_camera_reset() {
         req.use_parent_slot = true;
         req.mount = r.veh_h;
         req.parent = carrier_h;
-        local_player_apply_mount_slot_select(r.w, local.weapon, req);
+        local_player_apply_mount_slot_select(r.w, local.weapon, local.view, req);
         CHECK(r.veh().primary_weapon_slot.redirect_to_parent_slot);
         CHECK(r.player().equipped_adm_index == r.w.registry.get(carrier_h)->primary_weapon_slot_adm);
         CHECK(local.view.binoculars_requested && local.weapon.nvg_scope_restore);

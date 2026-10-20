@@ -394,7 +394,7 @@ private:
 	}
 	void queue_local_usegun_weapon_switch(bool p_same_category) {
 		opennova::world::queue_local_usegun_weapon_switch(
-				kernel_->world, kernel_->local.weapon, p_same_category);
+				kernel_->world, kernel_->local.weapon, kernel_->local.view, p_same_category);
 	}
 	void install_local_player_weapon(const Ref<WeaponDef> &p_def,
 	                                 const Dictionary &p_clip_seconds,

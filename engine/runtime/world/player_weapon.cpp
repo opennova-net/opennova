@@ -124,8 +124,30 @@ bool local_usegun_switch_is_instant(const World &world,
 	return (flags & weapon_flag::kEmplaced) != 0;
 }
 
+namespace {
+
+// The mount's holster ease [orig: Player_MountWeaponSlot @0x4DFBA6..0x4DFBC5]:
+// when the cross-category request queued SWITCHFROM on the equipped slot
+// (ForceQueueSwitchFrom accepted, EquippedSlot->next == 7, and no saved-game
+// load pending, dword_A892C8, which this runtime never sets: spawn_select.cpp),
+// the holster lowers it off the view. A SWITCHFROM the port retains instead (a
+// press during the draw) lowers when it attaches (the pump's latch). The
+// mount's bias clear (@0x4DFBCF..0x4DFBE8) stays with the install
+// (local_weapon_install): retail renders after the same quantum's step
+// republishes, while a request here lands on a display frame that may render
+// before the next tick's step, which would show a running ease's weapon at
+// its hip for that frame.
+void mount_switch_view_lower(LocalPlayerWeapon &w, const WeaponSlotState &slot,
+		bool switch_from_queued, PlayerViewState &view) {
+	if (switch_from_queued && slot.next == weapon_action::kSwitchFrom)
+		player_view_weapon_switch_lower(view);
+	w.switch_view_lower_deferred = false;
+}
+
+} // namespace
+
 void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
-		bool same_category) {
+		PlayerViewState &view, bool same_category) {
 	w.usegun_switch_action = same_category ? weapon_action::kSwitchRank
 	                                       : weapon_action::kSwitchFrom;
 	w.switch_deferred_action = w.usegun_switch_action;
@@ -135,11 +157,18 @@ void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
 		commit_local_usegun_weapon_switch(world, w);
 		return;
 	}
+	// UseGun and the EWeap control seat mount through the same
+	// Player_MountWeaponSlot [orig: Entity_AttachToUseGunSlot @0x546C38].
 	WeaponSlotState *slot = active_local_weapon_slot(world, w);
+	bool switch_from_queued = false;
 	if (w.usegun_switch_action == weapon_action::kSwitchRank)
 		weapon_fsm_queue_switch_rank(*slot);
 	else
-		weapon_fsm_queue_switch_from(*slot);
+		switch_from_queued = weapon_fsm_queue_switch_from(*slot);
+	mount_switch_view_lower(w, *slot, switch_from_queued, view);
+	// A refused holster rides the retained deferred action instead.
+	if (w.usegun_switch_action == weapon_action::kSwitchFrom && !switch_from_queued)
+		w.switch_view_lower_deferred = true;
 }
 
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
@@ -226,7 +255,8 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	}
 }
 
-void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
+void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
+		PlayerViewState &view) {
 	if (!world.cached.local_player.valid()) return;
 	Entity *player = world.registry.get(world.cached.local_player);
 	if (player == nullptr) return;
@@ -285,7 +315,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		// The shared helper applied the nonlocal immediate stamp. L retains its
 		// outgoing EquippedSlot until the action handler's commit seam.
 		player->equipped_adm_index = from_adm;
-		queue_local_usegun_weapon_switch(world, w,
+		queue_local_usegun_weapon_switch(world, w, view,
 				same_category(from_adm, target_adm));
 	};
 	const auto stage_personal = [&]() {
@@ -298,7 +328,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		// Seats 2 and 3 share the detach restore through Player_MountWeaponSlot
 		// (its NVG latch clear ran at the detach, local_weapon_detach_mount).
 		// [orig: Entity_DetachFromVehicle @0x43562A..0x43565F]
-		queue_local_usegun_weapon_switch(world, w,
+		queue_local_usegun_weapon_switch(world, w, view,
 				same_category(from_adm, w.usegun_saved_adm));
 	};
 
@@ -440,6 +470,7 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 			const int32_t action = out.same_category
 					? weapon_action::kSwitchRank
 					: weapon_action::kSwitchFrom;
+			bool switch_from_queued = false;
 			if (active_slot->current == weapon_action::kSwitchTo) {
 				// The witnessed writer refuses during SWITCHTO. Unlike the original
 				// dispatcher, this shell supplies one press edge, so retain it beside
@@ -456,8 +487,11 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 				weapon_fsm_queue_switch_rank(*active_slot);
 			} else {
 				w.switch_deferred_action = -1;
-				weapon_fsm_queue_switch_from(*active_slot);
+				switch_from_queued = weapon_fsm_queue_switch_from(*active_slot);
 			}
+			mount_switch_view_lower(w, *active_slot, switch_from_queued, view);
+			if (w.switch_deferred_action == weapon_action::kSwitchFrom)
+				w.switch_view_lower_deferred = true;
 			break;
 		}
 		default:
@@ -750,6 +784,15 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
     }
     view.weapon_hip_pose = data.view_hip_pose;
     view.weapon_ads_pose = data.view_ads_pose;
+    // The install a completed holster's commit drives binds the drawn def: its
+    // raise runs now, and the bias the holster published stays until the next
+    // tick's step, so the drawn weapon is never presented at its hip before it
+    // rises (retail's swap clears no bias; its mount cleared them at the
+    // request, before the holster published).
+    // [orig: WeaponAction_SwitchFrom @0x5434AA -> Player_SetupWeaponSwitchViewEase(1)]
+    const bool switch_view_raise = w.switch_view_raise_pending;
+    w.switch_view_raise_pending = false;
+    if (switch_view_raise) player_view_weapon_switch_raise(view, flags);
     w.def.scope_zero = data.scope_zero;
     if (installed >= 0)
         w.def.scope_zero = world.tables.weapons.entries[installed].action_fsm.scope_zero;
@@ -884,6 +927,9 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
     if (category_changed && (data.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0)
         world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
     player_view_weapon_mount(view, data.flags, category_changed);
+    // The mount's bias clear, which the port runs with the install it drives
+    // [orig: Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8].
+    if (!switch_view_raise) player_view_clear_bias(view);
 	w.def_name = data.name;
 	w.active = true;
 }
@@ -901,6 +947,8 @@ void local_weapon_store_scope_zoom(const World &world, const LocalPlayerWeapon &
 
 void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view) {
 	w.nvg_scope_restore = false;
+	w.switch_view_raise_pending = false;
+	w.switch_view_lower_deferred = false;
 	w.active = false;
 	w.def_name.clear();
 	w.power_throw_start_tick = 0;
@@ -1164,7 +1212,14 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	io.reload = LocalWeaponReloadWire{};
 	if (io.view == nullptr || !world.cached.local_player.valid()) return;
 	PlayerViewState &view = *io.view;
-	sync_local_usegun_weapon_transition(world, w);
+	sync_local_usegun_weapon_transition(world, w, view);
+	// A holster commit's raise that no install consumed before this tick: the
+	// shell keeps a def it is asked to mount again, so the drawn def is the one
+	// installed, and it rises from here [orig: WeaponAction_SwitchFrom @0x5434AA].
+	if (w.switch_view_raise_pending) {
+		w.switch_view_raise_pending = false;
+		if (w.active) player_view_weapon_switch_raise(view, w.def.flags);
+	}
 	if (!w.active) return;
 	WeaponSlotState &active_slot = *active_local_weapon_slot(world, w);
 	const Entity *player = world.registry.get(world.cached.local_player);
@@ -1296,6 +1351,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// the pending inventory handoff without requiring another key press.
 	if (w.switch_deferred_action >= 0) {
 		if (active_slot.current == w.switch_deferred_action) {
+			// The retained holster entered: it lowers as the mount that would
+			// have queued it does [orig: Player_MountWeaponSlot @0x4DFBA6..0x4DFBC5].
+			if (w.switch_view_lower_deferred &&
+					active_slot.current == weapon_action::kSwitchFrom)
+				player_view_weapon_switch_lower(view);
+			w.switch_view_lower_deferred = false;
 			w.switch_deferred_action = -1;
 		} else {
 			active_slot.next = w.switch_deferred_action;
@@ -1590,8 +1651,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// [orig: the FSM's clip lives on the MountSlot (+0x10) and the reserve is the
 	//  per-ammo-class pool — one storage, two views; this port mirrors between the
 	//  single-slot FSM state and the inventory]
+	// A completed holster raises the drawn weapon into view once the commit's
+	// install binds its def [orig: WeaponAction_SwitchFrom @0x543475..0x5434AA:
+	// EquippedSlot = g_PendingWeaponSlot, then Player_SetupWeaponSwitchViewEase(1)
+	// for the local owner; SwitchRank @0x543500 raises nothing].
+	const bool holster_completed =
+			ev.switch_completed && active_slot.current == weapon_action::kSwitchFrom;
 	if (w.usegun_switch != LocalUseGunSwitch::kNone && ev.switch_completed &&
 			active_slot.current == w.usegun_switch_action) {
+		w.switch_view_raise_pending = holster_completed;
 		commit_local_usegun_weapon_switch(world, w);
 		// The switch back hands the personal slot to its readers again, which read
 		// a bucket weapon's rounds through the seat as it now stands: the mirror the
@@ -1637,6 +1705,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// A queued manual switch commits at the outgoing SWITCHFROM/SWITCHRANK
 		// swap seam [orig: the completion consumes g_PendingWeaponSlot].
 		if (w.switch_in_flight && ev.switch_completed) {
+			w.switch_view_raise_pending = holster_completed;
 			commit_pending_weapon_switch(world, w, io.inventory);
 		}
 	}

@@ -199,6 +199,16 @@ struct LocalPlayerWeapon {
     bool switch_in_flight = false;
     int32_t switch_deferred_action = -1;
     bool start_in_switchto = false;
+    // The weapon-switch view ease's two hand-offs (world/player_view.h
+    // player_view_weapon_switch_lower / _raise). A completed holster's raise
+    // waits for the commit's install, which binds the drawn def's hip pose, or
+    // for the next pump when no install comes [orig: WeaponAction_SwitchFrom
+    // @0x5434AA]; a holster the port retains
+    // past a refused queue (a press during the draw) lowers when it attaches,
+    // as the mount that queues it would [orig: Player_MountWeaponSlot
+    // @0x4DFBA6..0x4DFBC5].
+    bool switch_view_raise_pending = false;
+    bool switch_view_lower_deferred = false;
     bool presentation_pending = false;
     bool nvg_scope_restore = false;
 
@@ -376,9 +386,10 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 bool local_usegun_switch_is_instant(const World &world,
                                     const LocalPlayerWeapon &w);
 void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
-                                      bool same_category);
+                                      PlayerViewState &view, bool same_category);
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w);
-void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w);
+void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
+                                         PlayerViewState &view);
 // The local player's seat-2 / seat-3 detach mounts entity+0x308 (a borrowed
 // seat's saved personal slot, else the last selected one) or, without a def of
 // category < 11 there, the current slot, and the mount, past its early-outs (a
