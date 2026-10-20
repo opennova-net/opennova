@@ -326,6 +326,7 @@ void test_attach_yaw_snaps_at_the_request_alone() {
 		const Npc npc = stage(r);
 		Entity enemy;
 		enemy.kind = EntityKind::Organic;
+		enemy.has_item_def = true;
 		enemy.health = 100;
 		enemy.alive = true;
 		enemy.team = 2;
@@ -1332,6 +1333,7 @@ void test_label_pass_carrier_block_has_no_type_test() {
 		const EntityHandle gun_h = r.w.registry.spawn(1, gun);
 		Entity enemy;
 		enemy.kind = EntityKind::Organic;
+		enemy.has_item_def = true;
 		enemy.health = 100;
 		enemy.alive = true;
 		enemy.team = 2;
@@ -1360,6 +1362,7 @@ void test_label_pass_carrier_block_has_no_type_test() {
 		r.veh().seats[0].type = SeatType::Passenger;
 		Entity enemy;
 		enemy.kind = EntityKind::Organic;
+		enemy.has_item_def = true;
 		enemy.health = 100;
 		enemy.alive = true;
 		enemy.team = 2;
@@ -1778,6 +1781,7 @@ void test_enemy_on_carried_gun_blocks_root_and_sibling() {
 	const EntityHandle gh = r.w.registry.spawn(1, gun);
 	Entity enemy;
 	enemy.kind = EntityKind::Organic;
+	enemy.has_item_def = true;
 	enemy.health = 100;
 	enemy.alive = true;
 	enemy.team = 2;
@@ -2310,6 +2314,7 @@ void test_enemy_occupant_blocks_scan() {
     Entity enemy;
     enemy.kind = EntityKind::Organic;
     enemy.item_id = 5305;
+    enemy.has_item_def = true; // the scan skips a row with no ItemDef [orig: @0x435A4F]
     enemy.team = 2; // player team defaults 0... stamp both sides below
     enemy.health = 150;
     enemy.alive = true;
@@ -2337,20 +2342,31 @@ void test_enemy_occupant_blocks_scan() {
     CHECK(label_count() == 0);
     CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
 
-    // Same-team, dead, or detached riders do not block the vehicle. The occupied
-    // seat itself remains hidden independently, leaving the passenger seat.
+    // Same-team, dead-bit, ItemDef-less or detached riders do not block the
+    // vehicle; a rider's Health or life alone does not unblock it, only its dead
+    // bit (D-NET-586) [orig: Vehicle_HasEnemyOccupant @0x4359F0 (@0x435A4D,
+    // @0x435A4F, @0x435A65)]. The occupied seat itself remains hidden
+    // independently, leaving the passenger seat.
     ee->team = 1;
     CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 1);
     ee->team = 2;
     ee->alive = false;
-    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
-    CHECK(label_count() == 1);
+    CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+    CHECK(label_count() == 0);
     ee->alive = true;
     ee->health = 0;
+    CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+    CHECK(label_count() == 0);
+    ee->health = 150;
+    ee->engine_flags |= kEntityFlagDead;
     CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 1);
-    ee->health = 150;
+    ee->engine_flags &= ~kEntityFlagDead;
+    ee->has_item_def = false;
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+    CHECK(label_count() == 1);
+    ee->has_item_def = true;
     CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 0);
     ee->mounted = false;
@@ -4113,6 +4129,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
         Entity organic;
         organic.kind = EntityKind::Organic;
         organic.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
+        organic.has_item_def = true;
         organic.position = {120.0f + static_cast<float>(i), 200.0f, 10.0f};
         organic.health = 100;
         organic.alive = true;
@@ -5079,7 +5096,28 @@ void test_an_anchorless_child_copies_only_a_stale_carrier() {
           w.registry.get(child_h)->position.z == 5.0f);
 }
 
+// D-NET-586: the process refuses the requester on its dead bit alone: a body at zero
+// Health or with its life cleared but no dead bit is still admitted (its death edge
+// raises the bit, D-AI-9), and the bit in either Flags view refuses.
+// [orig: Entity_ProcessVehicleAttach @0x435AA0 (`test [edi+24h], al` @0x435AFE, the
+//  refusal @0x435B01)]
+void test_the_rider_gate_reads_the_dead_bit_alone() {
+    {
+        Rig r;
+        r.player().health = 0;
+        r.player().alive = false;
+        CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+    }
+    {
+        Rig r;
+        r.player().engine_flags |= kEntityFlagDead;
+        CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+        CHECK(!r.player().mounted);
+    }
+}
+
 int main() {
+    test_the_rider_gate_reads_the_dead_bit_alone();
     test_an_anchorless_child_copies_only_a_stale_carrier();
     test_use_scan_poses_every_seat_kind_live();
     test_claimant_detach_cuts_vehicle_slot_action();

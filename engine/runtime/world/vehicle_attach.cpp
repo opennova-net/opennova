@@ -24,9 +24,14 @@ namespace {
 constexpr std::size_t kEntityHandleDomain =
         static_cast<std::size_t>(EntityRegistry::kPoolCount) << 12;
 
+// A pool-0 row blocks the requester while it lives by its dead bit alone (no Health
+// or life fold), has an ItemDef, is not the requester and sits on the other team.
+// [orig: Vehicle_HasEnemyOccupant @0x4359F0 (the dead bit @0x435A4D, the ItemDef
+//  @0x435A4F, the requester and team tests @0x435A65)]
 bool is_blocking_enemy_rider(const Entity &entity, const Entity &requester) {
     if (entity.handle == requester.handle) return false;
-    if (entity.health <= 0 || !entity.alive) return false;
+    if (((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0) return false;
+    if (!entity.has_item_def) return false;
     if (entity.team == requester.team) return false;
     return entity.mounted;
 }
@@ -618,16 +623,14 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     Entity *veh = world.registry.get(selection.vehicle);
     // The process refuses every seat kind of a carrier with no ItemDef, and a
     // dead carrier or requester, before anything: the enemy and seat tests,
-    // the old seat's detach and the attach. The carrier's test is its dead bit
-    // alone, in either Flags view (D-NET-557); the requester's still folds in
-    // Health and `alive` (D-NET-586).
+    // the old seat's detach and the attach. Each test is the dead bit alone, in
+    // either Flags view: the carrier's (D-NET-557) and the requester's (D-NET-586),
+    // which the body's own death edge raises (D-AI-9).
     // [orig: Entity_ProcessVehicleAttach @0x435ae5..0x435b01 (the ItemDef
     //  @0x435aed..0x435af1, the carrier @0x435af9, the requester @0x435afe),
     //  ahead of the detach @0x435bce]
     if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
-    if (occ->health <= 0 || !occ->alive ||
-        (occ->flags & kEntityFlagDead) != 0)
-        return false;
+    if (((occ->flags | occ->engine_flags) & kEntityFlagDead) != 0) return false;
     if (((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false;
     if (selection.seat_index < 0 ||
         selection.seat_index >= static_cast<int>(veh->seats.size()))
@@ -701,10 +704,9 @@ bool VehicleSystem::process_attach(EntityHandle player, EntityHandle vehicle, ui
     Entity *occ = world.registry.get(player);
     Entity *veh = world.registry.get(vehicle);
     // 1. Resolve + dead gates [orig: @0x435b01 — null vehicle/itemDef/player or either
-    //    Flags & 2 reject]. The carrier's is the dead bit alone (D-NET-557); the
-    //    requester's still folds in health/alive (D-NET-586).
+    //    Flags & 2 reject]. Each is the dead bit alone (D-NET-557, D-NET-586).
     if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
-    if (occ->health <= 0 || !occ->alive || (occ->flags & 2u) != 0) return false;
+    if (((occ->flags | occ->engine_flags) & kEntityFlagDead) != 0) return false; // @0x435afe
     if (((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false; // @0x435af9
 
     // 2. Seat classification by the exact wire bone. The byte is a 1-based index into
@@ -742,11 +744,12 @@ bool VehicleSystem::apply_confirmed_mount(
     if (!vehicle.valid() || bone == 0) return detach(player);
     Entity *veh = world.registry.get(vehicle);
     // The process's gates, ahead of the previous holder's and the body's own
-    // detach; the carrier's is its dead bit alone (D-NET-557) [orig:
+    // detach; each is the dead bit alone (D-NET-557, D-NET-586) [orig:
     // Entity_TryAttachOrDetach @0x436610, the call @0x4366E8 -> Entity_ProcessVehicleAttach
-    // @0x435ae5..0x435b01, the ItemDef @0x435aed..0x435af1, the carrier @0x435AF9].
-    if (veh == nullptr || !veh->has_item_def || !occ->alive || occ->health <= 0 ||
-        (occ->flags & kEntityFlagDead) != 0 ||
+    // @0x435ae5..0x435b01, the ItemDef @0x435aed..0x435af1, the carrier @0x435AF9, the
+    // requester @0x435AFE].
+    if (veh == nullptr || !veh->has_item_def ||
+        ((occ->flags | occ->engine_flags) & kEntityFlagDead) != 0 ||
         ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false;
 
     int seat_idx = -1;

@@ -60,8 +60,8 @@ public:
 	// requester's relation changed: it attached, or it left a seat before a refusal.
 	// Ported validation order [orig: Entity_ProcessVehicleAttach @0x435AA0]:
 	//   1. resolve both handles; reject a missing entity, a carrier with no item def, or
-	//      either side dead (Flags & 2 / health <= 0) [orig: @0x435b01, the item def
-	//      @0x435aed..0x435af1];
+	//      either side's dead bit (Flags & 2 alone, D-NET-557 / D-NET-586) [orig: @0x435b01,
+	//      the item def @0x435aed..0x435af1];
 	//   2. seat classification: the vehicle seat whose bone_index matches the wire bone
 	//      [orig: Entity_GetBoneSlotType @0x434ED0 classifies the MODEL USRP row name —
 	//      48-byte rows, name +32, 1-based index; sitex 1 / ctrlx 2 / drvrx 5 / UseGun 3].
