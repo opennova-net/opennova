@@ -36,8 +36,8 @@ bool player_watches(World &world, AiSystem &ai, const Entity &entity, const Vec3
     const Entity *player = world.registry.get(world.cached.local_player);
     if (player == nullptr) return false;
     const int32_t from[3] = {to_fixed(position.x), to_fixed(position.y), to_fixed(position.z)};
-    const int32_t to[3] = {to_fixed(player->position.x), to_fixed(player->position.y),
-                           to_fixed(player->position.z)};
+    const int32_t to[3] = {player->position.x.q16, player->position.y.q16,
+                           player->position.z.q16};
     // Retail uses the entity origins, including for the spawn-position watch.
     return ai.line_of_sight_clear(world, from, to, entity.handle, player->handle);
 }
@@ -223,8 +223,7 @@ void initialize_organic_ai(World &world, Entity &entity) {
             body->collide_state.skip_counter = 0;
         }
     }
-    entity.position = {body->pos[0] / 65536.0f, body->pos[1] / 65536.0f,
-                         body->pos[2] / 65536.0f};
+    entity.position.set_q16({body->pos[0], body->pos[1], body->pos[2]});
     // The source is savedLivePose, deliberately not the grounded position; the
     // offset is 3 u along the heading in the Q22 trig of retail's
     // radians-per-BAM double. [orig: Entity_InitOrganicAI @0x4C01CD..0x4C022C,
@@ -327,8 +326,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
                         infantry_anim_flags(inf.anim_state), body->health);
                 if (clearance <= 0) body->pos[2] -= clearance;
             }
-            entity.position = {body->pos[0] / 65536.0f, body->pos[1] / 65536.0f,
-                                 body->pos[2] / 65536.0f};
+            entity.position.set_q16({body->pos[0], body->pos[1], body->pos[2]});
             if (const auto *traits = world.tables.item_death_traits.get(entity.item_id)) {
                 if (!traits->particlespawn.empty()) {
                     DestructionEffectEvent effect;

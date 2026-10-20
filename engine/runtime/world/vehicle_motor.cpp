@@ -888,8 +888,8 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 				std::fill_n(m.chassis_impulse_direction, 3, 0);
 		}
 
-		const int32_t prev[3] = { to_fixed(veh.position.x), to_fixed(veh.position.y),
-			to_fixed(veh.position.z) };
+		const int32_t prev[3] = { veh.position.x.q16, veh.position.y.q16,
+			veh.position.z.q16 };
 		// The bike integrates through `2 * ftol(v * 0.5)` per axis — the odd LSB
 		// of every velocity is dropped each tick (a wire-visible 1-LSB drift on
 		// odd values) [orig: Entity_UpdateLightVehiclePhysics `fmul 0.5; ftol;
@@ -934,7 +934,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		} else {
 			m.grounded = true; // no terrain wired (unit worlds): drive on a flat plane
 			if (m.slide_z < 0) m.slide_z = 0;
-            pz = to_fixed(veh.position.z);
+            pz = veh.position.z.q16;
 		}
 
 		// Grounded steering applies the wheel yaw rate [orig: @0x48ef60
@@ -968,9 +968,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 			m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
 		}
 
-		veh.position.x = static_cast<float>(from_fixed(px));
-		veh.position.y = static_cast<float>(from_fixed(py));
-		veh.position.z = static_cast<float>(from_fixed(pz));
+		veh.position.x.q16 = px;
+		veh.position.y.q16 = py;
+		veh.position.z.q16 = pz;
         veh.yaw = static_cast<int16_t>(std::lround(
                 normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(m.yaw_bam))));
 	}
@@ -1103,9 +1103,9 @@ void vehicle_client_chase(Entity &veh, VehicleChaseFamily family, int32_t entry_
 		heading_free = !latched && m.wheelie_active == 0 && entry_up_z16 >= 0;
 	const bool z_step = family == VehicleChaseFamily::Plain ||
 			((veh.flags & kEntityFlagInAir) != 0 && !latched);
-	int32_t px = to_fixed(veh.position.x);
-	int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
+	int32_t px = veh.position.x.q16;
+	int32_t py = veh.position.y.q16;
+    int32_t pz = veh.position.z.q16;
     if (m.net_interp_progress == 0) {
         const int64_t dx = int64_t(m.net_smooth_target[0]) - px;
         const int64_t dy = int64_t(m.net_smooth_target[1]) - py;
@@ -1175,9 +1175,9 @@ void vehicle_client_chase(Entity &veh, VehicleChaseFamily family, int32_t entry_
         }
     }
 
-    veh.position.x = static_cast<float>(from_fixed(px));
-    veh.position.y = static_cast<float>(from_fixed(py));
-    veh.position.z = static_cast<float>(from_fixed(pz));
+    veh.position.x.q16 = px;
+    veh.position.y.q16 = py;
+    veh.position.z.q16 = pz;
 }
 
 // Boat platform contact, buoyancy, planing and wreck state. The four pads and three spine probes
@@ -1340,9 +1340,9 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
         return;
 
     const int32_t W = world.env.water_z;
-    int32_t px = to_fixed(veh.position.x);
-    int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
+    int32_t px = veh.position.x.q16;
+    int32_t py = veh.position.y.q16;
+    int32_t pz = veh.position.z.q16;
 
 	// [orig: Entity_ProcessPlatformPhysics @0x4818B9..0x481A5C]
 	if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 && m.wheel_rate_bam == 0 &&
@@ -1357,7 +1357,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
 		pz = io::bam_sub(pz, m.slide_z);
 		m.slide_z >>= 1;
 		vehicle_rest_state(world, veh, VehicleFamily::Watercraft);
-		veh.position.z = float(from_fixed(pz));
+		veh.position.z.q16 = pz;
 		return;
 	}
 	vehicle_expire_contact_wake(world, veh);
@@ -1703,9 +1703,9 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     m.plat_airborne_ticks =
             (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
 
-    veh.position.x = float(from_fixed(px));
-    veh.position.y = float(from_fixed(py));
-    veh.position.z = float(from_fixed(pz));
+    veh.position.x.q16 = px;
+    veh.position.y.q16 = py;
+    veh.position.z.q16 = pz;
 }
 
 namespace {
@@ -1732,9 +1732,9 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
         {traits.foot_x_lo + q, traits.foot_y_lo + q, zb},
         {traits.foot_x_lo + q, traits.foot_y_hi - q, zb},
     };
-    const int32_t pos[3] = {to_fixed(veh.position.x),
-                            to_fixed(veh.position.y),
-                            to_fixed(veh.position.z)};
+    const int32_t pos[3] = {veh.position.x.q16,
+                            veh.position.y.q16,
+                            veh.position.z.q16};
     const int32_t origin[3] = {};
     const CollisionMatrix basis = collision_matrix_from_euler(
             m.yaw_bam, m.air_pitch_bam, m.air_roll_bam, origin);
@@ -1774,9 +1774,9 @@ void watercraft_refresh_fallback_afloat(World &world, Entity &veh, const Vehicle
         if (world.tables.terrain == nullptr) {
             afloat = true;
         } else {
-            const int32_t pos[3] = {to_fixed(veh.position.x),
-                                    to_fixed(veh.position.y),
-                                    to_fixed(veh.position.z)};
+            const int32_t pos[3] = {veh.position.x.q16,
+                                    veh.position.y.q16,
+                                    veh.position.z.q16};
             const GroundClearance clearance{};
             const int32_t ground = calc_average_ground_height(
                     *world.tables.terrain, pos, 0, clearance);
@@ -1799,9 +1799,9 @@ static void watercraft_motor_core(World &world, Entity &veh,
 // Entity_UpdateAircraftPhysics @0x490310, carrier @0x4905BC..0x49095B]
 void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
                         int32_t &pitch, int32_t &roll) {
-    pos[0] = to_fixed(e.position.x);
-    pos[1] = to_fixed(e.position.y);
-    pos[2] = to_fixed(e.position.z);
+    pos[0] = e.position.x.q16;
+    pos[1] = e.position.y.q16;
+    pos[2] = e.position.z.q16;
 	if (e.veh.yaw_seeded) {
 		yaw = e.veh.yaw_bam;
 		pitch = e.veh.air_pitch_bam;
@@ -1879,9 +1879,9 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 static void watercraft_motor_core(World &world, Entity &veh,
                                   const VehicleTraits &traits) {
     Entity::VehicleMotorState &m = veh.veh;
-    int32_t px = to_fixed(veh.position.x);
-    int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
+    int32_t px = veh.position.x.q16;
+    int32_t py = veh.position.y.q16;
+    int32_t pz = veh.position.z.q16;
 
     // ---- 3. Steer/rudder integrator [orig: @0x48E82C..0x48E926].
     {
@@ -2075,9 +2075,9 @@ static void watercraft_motor_core(World &world, Entity &veh,
                 io::bam_sar(r, 31)); // decay toward zero
     }
 
-    veh.position.x = static_cast<float>(from_fixed(px));
-    veh.position.y = static_cast<float>(from_fixed(py));
-    veh.position.z = static_cast<float>(from_fixed(pz));
+    veh.position.x.q16 = px;
+    veh.position.y.q16 = py;
+    veh.position.z.q16 = pz;
 
     // The platform solve runs every tick after integration, exactly where the
     // retail caller sits [orig: call @0x48ECE7 — after Position += velocity,

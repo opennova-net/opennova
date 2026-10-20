@@ -282,13 +282,13 @@ FocalSwayPose RotorWashSystem::sway_pose(const Entity &e) const {
 	FocalSwayPose result;
 	if (!e.render_sway)
 		return result;
-	const int32_t p[3] = { to_fixed(e.position.x), to_fixed(e.position.y),
-		io::bam_add(to_fixed(e.position.z), 0x20000) };
+	const int32_t p[3] = { e.position.x.q16, e.position.y.q16,
+		io::bam_add(e.position.z.q16, 0x20000) };
 	int32_t magnitude, direction[3];
 	if (!sample_sway(p, magnitude, direction))
 		return result;
 	const uint32_t seed = world_.logic_tick + uint32_t(p[0] >> 14) + uint32_t(p[1] >> 14) +
-			uint32_t(to_fixed(e.position.z) >> 14);
+			uint32_t(e.position.z.q16 >> 14);
 	auto wave = [&](uint32_t rate, int32_t weight, int shift) {
 		const int32_t sine = sin22_of_bam_x87(int32_t(seed * rate));
 		return retail_q16_mul_rhu(weight, sine >> shift);

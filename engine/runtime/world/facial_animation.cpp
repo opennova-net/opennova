@@ -36,8 +36,8 @@ void position_of(const World &world, const Entity &entity, int32_t out[2]) {
 	if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
 		out[0] = body->pos[0]; out[1] = body->pos[1];
 	} else {
-		out[0] = static_cast<int32_t>(entity.position.x * 65536.0f);
-		out[1] = static_cast<int32_t>(entity.position.y * 65536.0f);
+		out[0] = entity.position.x.q16;
+		out[1] = entity.position.y.q16;
 	}
 }
 

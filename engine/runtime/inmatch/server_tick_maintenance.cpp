@@ -266,9 +266,9 @@ void refresh_next_flag_state(NapiNPServerCtx &ctx, world::World &world) {
 		ObjectiveEntityState state;
 		state.entity_handle = e.handle.packed;
 		state.flags_byte = static_cast<uint8_t>(e.flags);
-		state.pos_x = world::to_fixed(e.position.x);
-		state.pos_y = world::to_fixed(e.position.y);
-		state.pos_z = world::to_fixed(e.position.z);
+		state.pos_x = e.position.x.q16;
+		state.pos_y = e.position.y.q16;
+		state.pos_z = e.position.z.q16;
 		state.attach_handle = e.primary_occupant.packed;
 		state.ground_handle = e.ground_target.packed;
 		const std::vector<uint8_t> body = encode_objective_entity_state(state);

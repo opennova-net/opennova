@@ -11,9 +11,9 @@ void play_at_entity(World &world, const Entity &entity, const std::string &name)
     if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
         for (int axis = 0; axis < 3; ++axis) sound.pos[axis] = body->pos[axis];
     } else {
-        sound.pos[0] = to_fixed(entity.position.x);
-        sound.pos[1] = to_fixed(entity.position.y);
-        sound.pos[2] = to_fixed(entity.position.z);
+        sound.pos[0] = entity.position.x.q16;
+        sound.pos[1] = entity.position.y.q16;
+        sound.pos[2] = entity.position.z.q16;
     }
     std::snprintf(sound.set_name, sizeof(sound.set_name), "%s", name.c_str());
     world.out.slot_sounds.push_back(sound);

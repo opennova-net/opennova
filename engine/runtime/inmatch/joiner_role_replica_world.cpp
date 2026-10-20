@@ -13,7 +13,6 @@
 
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 
-#include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
 
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -41,15 +40,11 @@ namespace opennova::inmatch {
 
 namespace {
 
-constexpr double kFixed16 = io::kFp16OneD;
-
 // SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
 world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	world::PlayerSpawn spawn;
 	// SelfSpawn position is mission i32 16.16; PlayerSpawn.position is float mission units.
-	spawn.position = {static_cast<float>(s.pos_x / kFixed16),
-	                  static_cast<float>(s.pos_y / kFixed16),
-	                  static_cast<float>(s.pos_z / kFixed16)};
+	spawn.position.set_q16({s.pos_x, s.pos_y, s.pos_z});
 	// orientation is ALREADY a full 32-bit BAM (unlike HostJoinerPose.heading, an i16
 	// the host shifts << 16) -> pass it straight to the (90 - heading) mission-degree map.
 	spawn.yaw = static_cast<int16_t>(
@@ -288,14 +283,7 @@ void JoinerRole::apply_authoritative_health() {
 					const int32_t pitch =
 							static_cast<int32_t>(
 									static_cast<uint32_t>(self->pitch_byte) << 24);
-					local->position = {
-							static_cast<float>(
-									static_cast<double>(self->x) / kFixed16),
-							static_cast<float>(
-									static_cast<double>(self->y) / kFixed16),
-							static_cast<float>(
-									static_cast<double>(self->z) / kFixed16),
-					};
+					local->position.set_q16({self->x, self->y, self->z}); // the record's words (D-NET-507)
 					local->yaw = static_cast<int16_t>(std::lround(
 							world::mission_yaw_deg_from_bam_heading(heading)));
 					local->pitch = static_cast<int16_t>(std::lround(
@@ -397,11 +385,7 @@ void JoinerRole::apply_world_state_load() {
 		world::Entity *local = world.registry.get(world.cached.local_player);
 		world::AiEntity *local_ai = world.ai.for_handle(world.cached.local_player);
 		if (local != nullptr && local_ai != nullptr) {
-			local->position = {
-					static_cast<float>(static_cast<double>(ws.pos_x) / kFixed16),
-					static_cast<float>(static_cast<double>(ws.pos_y) / kFixed16),
-					static_cast<float>(static_cast<double>(ws.pos_z) / kFixed16),
-			};
+			local->position.set_q16({ws.pos_x, ws.pos_y, ws.pos_z}); // the 0x0F words (D-NET-507)
 			local->yaw = static_cast<int16_t>(std::lround(
 					world::mission_yaw_deg_from_bam_heading(ws.yaw_bam)));
 			local->pitch = static_cast<int16_t>(std::lround(
@@ -615,9 +599,9 @@ void JoinerRole::mirror_mission_entities() {
 		// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
 		//  flag's pose]
 		if (kernel_->wire_header_world && replication::is_carry_objective(es.type_id)) {
-			es.x = world::to_fixed(local->position.x);
-			es.y = world::to_fixed(local->position.y);
-			es.z = world::to_fixed(local->position.z);
+			es.x = local->position.x.q16;
+			es.y = local->position.y.q16;
+			es.z = local->position.z.q16;
 			if (local->veh.yaw_seeded) {
 				es.heading_bam = local->veh.yaw_bam;
 				es.pitch_bam = local->veh.air_pitch_bam;
@@ -681,9 +665,9 @@ void JoinerRole::mirror_mission_entities() {
 					if ((es.state_flags & world::kEntityFlagDead) != 0u &&
 							((local->flags | local->engine_flags) &
 									world::kEntityFlagDead) == 0u) {
-						local->position.x = opennova::io::fp16_16_to_float(es.x);
-						local->position.y = opennova::io::fp16_16_to_float(es.y);
-						local->position.z = opennova::io::fp16_16_to_float(es.z);
+						local->position.x.q16 = es.x;
+						local->position.y.q16 = es.y;
+						local->position.z.q16 = es.z;
 						if (m.yaw_seeded) m.yaw_bam = es.heading_bam;
 						local->yaw = static_cast<int16_t>(std::lround(
 								world::mission_yaw_deg_from_bam_heading(es.heading_bam)));
@@ -748,9 +732,9 @@ void JoinerRole::mirror_mission_entities() {
 					m.plat_porpoise = false;
 					m.plat_planing = false;
 					m.plat_bob_phase = 0.0f;
-					local->position.x = opennova::io::fp16_16_to_float(es.x);
-					local->position.y = opennova::io::fp16_16_to_float(es.y);
-					local->position.z = opennova::io::fp16_16_to_float(es.z);
+					local->position.x.q16 = es.x;
+					local->position.y.q16 = es.y;
+					local->position.z.q16 = es.z;
 					continue;
 				}
 				if (es.compact_revision != m.net_seen_revision) {
@@ -814,9 +798,9 @@ void JoinerRole::mirror_mission_entities() {
 				continue; // the world mover owns the registry position now
 			}
 		}
-		local->position.x = opennova::io::fp16_16_to_float(es.x);
-		local->position.y = opennova::io::fp16_16_to_float(es.y);
-		local->position.z = opennova::io::fp16_16_to_float(es.z);
+		local->position.x.q16 = es.x;
+		local->position.y.q16 = es.y;
+		local->position.z.q16 = es.z;
 	}
 }
 
@@ -833,9 +817,9 @@ void JoinerRole::mirror_predicted_vehicles() {
 		const world::EntityHandle h{es.handle};
 		world::Entity *local = replica_world_entity(world, h);
 		if (local == nullptr || !local->veh.net_predicted) continue;
-		es.x = world::to_fixed(local->position.x);
-		es.y = world::to_fixed(local->position.y);
-		es.z = world::to_fixed(local->position.z);
+		es.x = local->position.x.q16;
+		es.y = local->position.y.q16;
+		es.z = local->position.z.q16;
 		es.heading_bam = local->veh.yaw_bam;
 		local->yaw = static_cast<int16_t>(std::lround(
 				world::mission_yaw_deg_from_bam_heading(local->veh.yaw_bam)));

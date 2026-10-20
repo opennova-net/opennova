@@ -9,7 +9,7 @@ namespace opennova::world {
 void weapon_fire_environment_inputs(const World &world, const Entity &owner,
                                     WeaponFsmInputs &inputs) {
     // [orig: WeaponSlot_CanFire @0x541bfa..0x541c39]
-    inputs.head_submerged = io::bam_add(to_fixed(owner.position.z), owner.eye_offset_z) <
+    inputs.head_submerged = io::bam_add(owner.position.z.q16, owner.eye_offset_z) <
             world.env.water_z;
     inputs.drowning = ((owner.flags | owner.engine_flags) & 0x8000u) != 0;
     inputs.ignore_ammo_cost = world.rules.ignore_weapon_ammo_cost;
@@ -78,15 +78,15 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
             ((owner.flags | owner.engine_flags) & 0x100u) == 0) return 0;
     const Entity *carrier = world.registry.get(owner.ground_target);
     if (carrier != nullptr && carrier->saved_live_valid &&
-            (to_fixed(carrier->position.x) != carrier->saved_live_pos[0] ||
-             to_fixed(carrier->position.y) != carrier->saved_live_pos[1] ||
-             to_fixed(carrier->position.z) != carrier->saved_live_pos[2] ||
+            (carrier->position.x.q16 != carrier->saved_live_pos[0] ||
+             carrier->position.y.q16 != carrier->saved_live_pos[1] ||
+             carrier->position.z.q16 != carrier->saved_live_pos[2] ||
              static_cast<int32_t>(uint32_t(carrier->yaw) << 16) != carrier->saved_live_yaw ||
              static_cast<int32_t>(uint32_t(carrier->pitch) << 16) != carrier->saved_live_pitch ||
              static_cast<int32_t>(uint32_t(carrier->roll) << 16) != carrier->saved_live_roll)) return 0;
-    const int32_t dx = io::bam_sub(to_fixed(owner.position.x), origin.x);
-    const int32_t dy = io::bam_sub(to_fixed(owner.position.y), origin.y);
-    const int32_t dz = io::bam_sub(to_fixed(owner.position.z), origin.z);
+    const int32_t dx = io::bam_sub(owner.position.x.q16, origin.x);
+    const int32_t dy = io::bam_sub(owner.position.y.q16, origin.y);
+    const int32_t dz = io::bam_sub(owner.position.z.q16, origin.z);
     int32_t limit = 0x20000;
     double squared = double(dx) * dx + double(dy) * dy;
     if (owner.mount_type == SeatType::Gunner) {

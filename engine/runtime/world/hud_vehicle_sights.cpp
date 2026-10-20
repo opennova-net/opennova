@@ -15,8 +15,8 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 	Entity *mount = player ? world.registry.get(player->mount_target) : nullptr;
 	if (!player || !mount || !mount->has_item_def || !weapon.active)
 		return;
-	const int32_t root[3] = { to_fixed(mount->position.x), to_fixed(mount->position.y),
-		to_fixed(mount->position.z) };
+	const int32_t root[3] = { mount->position.x.q16, mount->position.y.q16,
+		mount->position.z.q16 };
 	// The live BAM frame when seeded (the same one emplaced_gun_frame_pitch
 	// produces the compared word from), else the placer's degree mirrors.
 	const int32_t yaw = mount->veh.yaw_seeded ? mount->veh.yaw_bam

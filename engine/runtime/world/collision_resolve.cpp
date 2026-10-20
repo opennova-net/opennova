@@ -603,10 +603,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                          (p->flags & kEntityFlagDead) != 0, health,
                                          (vflags & kEntityFlagDead) != 0)) {
 			const int32_t pdx = p->saved_live_valid
-					? io::bam_sub(to_fixed(p->position.x), p->saved_live_pos[0])
+					? io::bam_sub(p->position.x.q16, p->saved_live_pos[0])
 					: 0;
 			const int32_t pdy = p->saved_live_valid
-					? io::bam_sub(to_fixed(p->position.y), p->saved_live_pos[1])
+					? io::bam_sub(p->position.y.q16, p->saved_live_pos[1])
 					: 0;
 			const int32_t vdx = io::bam_sub(pos[0], state.prev_pos[0]);
 			const int32_t vdy = io::bam_sub(pos[1], state.prev_pos[1]);

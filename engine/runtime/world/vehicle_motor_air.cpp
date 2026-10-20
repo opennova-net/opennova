@@ -159,9 +159,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         }
         m.yaw_seeded = true;
     }
-    int32_t px = to_fixed(veh.position.x);
-    int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
+    int32_t px = veh.position.x.q16;
+    int32_t py = veh.position.y.q16;
+    int32_t pz = veh.position.z.q16;
     // The mover-entry pose — savedLivePose for the solve's sleep compare
     // [orig: the prologue 6-dword capture @0x490326..0x49036B].
     const int32_t start_x = px, start_y = py;
@@ -196,9 +196,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 		part_anim_tick(veh, traits);
 
 	vehicle_follow_carrier(world, veh);
-	px = to_fixed(veh.position.x);
-	py = to_fixed(veh.position.y);
-	pz = to_fixed(veh.position.z);
+	px = veh.position.x.q16;
+	py = veh.position.y.q16;
+	pz = veh.position.z.q16;
 
 	// ---- 1. The air interp block [orig: @0x49095E..0x490C98]. 3D distance,
 	// snap 0xA0000 (0x20000 when BOTH received cmds < 293), buckets
@@ -297,7 +297,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	// controls, velocity and gear servos [orig: @0x490CD0 -> @0x49274C]; the
 	// tail still sets Flags 0x20000 [orig: @0x492766].
 	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
-		veh.position = { float(from_fixed(px)), float(from_fixed(py)), float(from_fixed(pz)) };
+		veh.position.set_q16({px, py, pz});
 		veh.engine_flags |= kEntityFlagMatrixBuilt;
 		return;
 	}
@@ -715,9 +715,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	// [orig: @0x4926EB/@0x4926F9 reads var_B4, stored at @0x491CE4..0x491CF8]
 	slew_turret(veh, turret_step);
 
-	veh.position.x = static_cast<float>(from_fixed(px));
-	veh.position.y = static_cast<float>(from_fixed(py));
-	veh.position.z = static_cast<float>(from_fixed(pz));
+	veh.position.x.q16 = px;
+	veh.position.y.q16 = py;
+	veh.position.z.q16 = pz;
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
     // ...and the attitude with it. In the original these ARE the entity's own

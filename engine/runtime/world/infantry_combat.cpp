@@ -148,9 +148,9 @@ int32_t clamped_distance(int32_t dx, int32_t dy, int32_t dz) {
 // The registry Position in the Q16 lanes the target's savedLivePose stamp uses
 // (vehicle_motor.h carrier_pose_fixed).
 void registry_position(const Entity &entity, int32_t out[3]) {
-    out[0] = static_cast<int32_t>(entity.position.x * io::kFp16One);
-    out[1] = static_cast<int32_t>(entity.position.y * io::kFp16One);
-    out[2] = static_cast<int32_t>(entity.position.z * io::kFp16One);
+    out[0] = entity.position.x.q16;
+    out[1] = entity.position.y.q16;
+    out[2] = entity.position.z.q16;
 }
 
 // [orig: Entity_CheckGroundHeightAtPosition @0x4AFF70] The PROBE entity's own
@@ -912,9 +912,9 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     if (target == nullptr) return;
 
     const int32_t target_pos[3] = {
-        static_cast<int32_t>(target->position.x * io::kFp16One),
-        static_cast<int32_t>(target->position.y * io::kFp16One),
-        static_cast<int32_t>(target->position.z * io::kFp16One)};
+        target->position.x.q16,
+        target->position.y.q16,
+        target->position.z.q16};
     const uint32_t stagger = static_cast<uint32_t>(target_pos[0]) -
             static_cast<uint32_t>(target_pos[1]) + key;
     if ((stagger & 0x40u) != 0) return;

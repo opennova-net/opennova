@@ -249,9 +249,9 @@ enum class AvoidBrakeWalk { SkipIndexZero, OnlyIndexOne };
 static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
                                    int32_t cmd_speed, AvoidBrakeWalk walk) {
     const int32_t self_bound = to_fixed(veh.bound_radius);
-    const int32_t sx = to_fixed(veh.position.x);
-    const int32_t sy = to_fixed(veh.position.y);
-    const int32_t sz = to_fixed(veh.position.z);
+    const int32_t sx = veh.position.x.q16;
+    const int32_t sy = veh.position.y.q16;
+    const int32_t sz = veh.position.z.q16;
     const size_t cap = world.registry.pool_capacity(1);
     for (size_t si = 0; si < cap; ++si) {
         const Entity *o =
@@ -268,14 +268,14 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
             continue;
         const int32_t ob = to_fixed(o->bound_radius);
         const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
-        const int32_t dx = sx - to_fixed(o->position.x);
+        const int32_t dx = sx - o->position.x.q16;
         if (iabs32(dx) > reach) continue;
-        const int32_t dy = sy - to_fixed(o->position.y);
+        const int32_t dy = sy - o->position.y.q16;
         if (iabs32(dy) > reach) continue;
         // Carrier chains never brake for each other [orig: @0x48be1d-0x48be25].
         if (o->ground_target == veh.handle || veh.ground_target == o->handle)
             continue;
-        const int32_t dz2 = 2 * (sz - to_fixed(o->position.z)); // [orig: @0x48be2d]
+        const int32_t dz2 = 2 * (sz - o->position.z.q16); // [orig: @0x48be2d]
         if (iabs32(dz2) > reach) continue;
         const double fdx = static_cast<double>(dx);
         const double fdy = static_cast<double>(dy);
@@ -336,13 +336,13 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
 // [orig: @0x434F98, @0x434FA6, @0x434FC3, @0x43501E, @0x435051]
 // See ai.h. [orig: Entity_IsBoneInProximity @0x434F90]
 bool vehicle_at_spawn_anchor(const World &world, const Entity &veh) {
-	int32_t pose[6] = { to_fixed(veh.spawn_position.x), to_fixed(veh.spawn_position.y),
-		to_fixed(veh.spawn_position.z), 0, 0, 0 };
+	int32_t pose[6] = { veh.spawn_position.x.q16, veh.spawn_position.y.q16,
+		veh.spawn_position.z.q16, 0, 0, 0 };
 	if (veh.veh.spawn_pose_valid && !world.vehicles.resolve_spawn_pose(veh, pose))
 		return false;
-	const int32_t dx = io::bam_sub(pose[0], to_fixed(veh.position.x));
-	const int32_t dy = io::bam_sub(pose[1], to_fixed(veh.position.y));
-	const int32_t dz = io::bam_sub(pose[2], to_fixed(veh.position.z)) >> 1;
+	const int32_t dx = io::bam_sub(pose[0], veh.position.x.q16);
+	const int32_t dy = io::bam_sub(pose[1], veh.position.y.q16);
+	const int32_t dz = io::bam_sub(pose[2], veh.position.z.q16) >> 1;
 	const double d = std::sqrt(static_cast<double>(dx) * dx + static_cast<double>(dy) * dy +
 			static_cast<double>(dz) * dz);
 	const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
@@ -377,7 +377,7 @@ int count_mounted_entities(const World &world, const Entity &veh) {
 // and keeps the wheel — a seated eye sits above the deck, never at it.
 bool watercraft_driver_submerged(const World &world, const Entity &occ) {
     if (world.env.water_z == 0 || occ.eye_offset_z == 0) return false;
-    return to_fixed(occ.position.z) + occ.eye_offset_z <= world.env.water_z;
+    return occ.position.z.q16 + occ.eye_offset_z <= world.env.water_z;
 }
 
 // Stuck escalation uses the live spawn-parent anchor and rejects dead parents.
@@ -391,9 +391,9 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
     Entity::VehicleMotorState &m = veh.veh;
     const int32_t n = ++m.stuck_ticks;                 // [orig: @0x4652b6]
     if (!is_authority || (n & 0xF) != 0) return;       // [orig: @0x4652bc/@0x4652c4]
-    const int32_t px = to_fixed(veh.position.x);
-    const int32_t py = to_fixed(veh.position.y);
-    const int32_t pz = to_fixed(veh.position.z);
+    const int32_t px = veh.position.x.q16;
+    const int32_t py = veh.position.y.q16;
+    const int32_t pz = veh.position.z.q16;
     const int32_t self_r = to_fixed(veh.bound_radius); // [orig: entity+0]
     // dfx2.exe keeps a hull alive for a body within 4 u, not 12, and starts
     // the write-off past 1860 counts, not 3410; the 3720 kill is the same.
@@ -409,11 +409,11 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
             if (!e.has_item_def) return;               // [orig: entity[7] @0x465308]
             if ((e.flags & 3u) != 0) return;           // [orig: (Flags & 3) == 0 @0x465312]
             const int32_t r = to_fixed(e.bound_radius) + self_r + near_reach;
-            const int32_t dx = px - to_fixed(e.position.x);
+            const int32_t dx = px - e.position.x.q16;
             if (iabs32(dx) > r) return;
-            const int32_t dy = py - to_fixed(e.position.y);
+            const int32_t dy = py - e.position.y.q16;
             if (iabs32(dy) > r) return;
-            const int32_t dz = pz - to_fixed(e.position.z);
+            const int32_t dz = pz - e.position.z.q16;
             if (iabs32(dz) > r) return;
             const double d = std::sqrt(static_cast<double>(dx) * dx +
                                        static_cast<double>(dy) * dy +
@@ -424,8 +424,8 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
     }
     if (m.stuck_ticks <= (dfx2 ? 1860 : 3410)) return; // [orig: @0x4653a6]
 	// [orig: AI_CheckVehicleStuckState @0x4653AC..0x46542D]
-	int32_t pose[6] = { to_fixed(veh.spawn_position.x), to_fixed(veh.spawn_position.y),
-		to_fixed(veh.spawn_position.z), 0, 0, 0 };
+	int32_t pose[6] = { veh.spawn_position.x.q16, veh.spawn_position.y.q16,
+		veh.spawn_position.z.q16, 0, 0, 0 };
 	if (m.spawn_pose_valid && !world.vehicles.resolve_spawn_pose(veh, pose))
 		return;
 	const int32_t sx = io::bam_sub(px, pose[0]);
@@ -932,8 +932,8 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
             const int32_t ny = py + ((node->f[2] - py) >> 6);
             ve->pos[0] = nx;
             ve->pos[1] = ny;
-            veh.position.x = static_cast<float>(from_fixed(nx));
-            veh.position.y = static_cast<float>(from_fixed(ny));
+            veh.position.x.q16 = nx;
+            veh.position.y.q16 = ny;
             m.net_alt_target = ground - 0x2000;
         }
         // Steer: the heading error clamped to the per-leg budget

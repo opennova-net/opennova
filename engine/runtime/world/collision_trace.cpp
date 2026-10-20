@@ -1423,8 +1423,8 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         if (!live_pose_available && aim) continue;
         if (!live_pose_available &&
             !trace_torso_fallback(
-                FixedVec3{to_fixed(e->position.x), to_fixed(e->position.y),
-                          to_fixed(e->position.z)},
+                FixedVec3{e->position.x.q16, e->position.y.q16,
+                          e->position.z.q16},
                 e->uniform_scale_q16,
                 eh, hit_distance))
             continue;
@@ -1447,9 +1447,9 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
     if (is_local) local_player_blink_flags = 0;
 
     CollisionPoint pt;
-    pt.x = to_fixed(ent.position.x);
-    pt.y = to_fixed(ent.position.y);
-    pt.z = to_fixed(ent.position.z);
+    pt.x = ent.position.x.q16;
+    pt.y = ent.position.y.q16;
+    pt.z = ent.position.z.q16;
     const int32_t radius = 0x8000; // [orig: searchRadius_fp = 0x8000]
 
     // The def's type picks the walk: a vehicle or a person (1 / 3) its own

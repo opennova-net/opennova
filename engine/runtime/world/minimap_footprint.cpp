@@ -111,9 +111,9 @@ void minimap_footprint_place(const MinimapFootprintMesh &mesh,
 	//  Render_MinimapSlotBlip @0x5be55b subtracts entity[0x10];
 	//  Render_CollisionWireframe @0x596844..0x596bbb]
 	const int32_t pos_q16[3] = {
-		static_cast<int32_t>(entity.position.x * 65536.0f),
-		static_cast<int32_t>(entity.position.y * 65536.0f),
-		static_cast<int32_t>(entity.position.z * 65536.0f),
+		entity.position.x.q16,
+		entity.position.y.q16,
+		entity.position.z.q16,
 	};
 	const int32_t footprint_heading = static_cast<int32_t>(
 			static_cast<uint32_t>(bam_heading_from_mission_yaw_deg(

@@ -16,8 +16,8 @@ EntityLifetime lifetime(const Entity *entity) {
 std::array<int32_t, 3> position(const World &world, const Entity &entity) {
     if (const AiEntity *ai = world.ai.for_handle(entity.handle))
         return {ai->pos[0], ai->pos[1], ai->pos[2]};
-    return {int32_t(entity.position.x * 65536.0f), int32_t(entity.position.y * 65536.0f),
-            int32_t(entity.position.z * 65536.0f)};
+    return {entity.position.x.q16, entity.position.y.q16,
+            entity.position.z.q16};
 }
 int32_t heading(const World &world, const Entity &entity) {
     const AiEntity *ai = world.ai.for_handle(entity.handle);

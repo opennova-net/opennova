@@ -35,8 +35,8 @@ bool CollisionWorld::pool_row_hits_ray(const World &world, EntityHandle handle, 
     if (!e.has_item_def || !e.bound_radius || handle==excluded ||
             ((e.engine_flags|e.flags)&1u) ||
             (e.ground_target.valid() && e.ground_target==excluded)) return false;
-    const int32_t p[]={int32_t(e.position.x*65536),int32_t(e.position.y*65536),
-            int32_t(e.position.z*65536)};
+    const int32_t p[]={e.position.x.q16,e.position.y.q16,
+            e.position.z.q16};
     const int32_t radius=int32_t(e.bound_radius*65536);
     bool outside=false;
     for (int a=0;a<3;++a)
@@ -110,8 +110,8 @@ ProjectileHit CollisionWorld::trace_squib(World &world, EntityHandle source,
             const auto handle=EntityHandle::make(pool,uint16_t(i));
             const Entity *e=world.registry.get(handle);
             if (!e || !pool_row_hits_ray(world,handle,*e,ray,source,owner)) continue;
-            const int32_t p[]={int32_t(e->position.x*65536),int32_t(e->position.y*65536),
-                    int32_t(e->position.z*65536)};
+            const int32_t p[]={e->position.x.q16,e->position.y.q16,
+                    e->position.z.q16};
             const int32_t projected=int32_t((int64_t(ray.dir[0])*(p[0]-start.x)+
                     int64_t(ray.dir[1])*(p[1]-start.y)+int64_t(ray.dir[2])*(p[2]-start.z))>>16);
             for (int a=0;a<3;++a)

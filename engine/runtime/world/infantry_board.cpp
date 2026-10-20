@@ -200,15 +200,15 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 			const double angle = yaw * io::kRadiansPerBamX87;
 			const int64_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);
 			const int64_t sn = static_cast<int32_t>(std::sin(angle) * 4194304.0);
-			goal[0] = io::float_to_fp16_16(target.position.x) + int32_t((bound * c) >> 22) +
+			goal[0] = target.position.x.q16 + int32_t((bound * c) >> 22) +
 					int32_t(((bound >> 1) * sn) >> 22);
-			goal[1] = io::float_to_fp16_16(target.position.y) + int32_t((bound * sn) >> 22) -
+			goal[1] = target.position.y.q16 + int32_t((bound * sn) >> 22) -
 					int32_t(((bound >> 1) * c) >> 22);
-			goal[2] = io::float_to_fp16_16(target.position.z);
+			goal[2] = target.position.z.q16;
 			radius = 0;
 		}
 	}
-	self.position = { e.pos[0] / 65536.0f, e.pos[1] / 65536.0f, e.pos[2] / 65536.0f };
+	self.position.set_q16({e.pos[0], e.pos[1], e.pos[2]});
 }
 } // namespace
 
@@ -248,9 +248,9 @@ InfantryAttachmentPose infantry_attachment_pose(AiEntity &e, World &world) {
     const Entity *parent = world.registry.get(self->attach_parent);
     if (parent == nullptr || parent->item_id == 0) return result;
     result.parent = parent->handle;
-    int32_t point[6] = {io::float_to_fp16_16(parent->position.x),
-                       io::float_to_fp16_16(parent->position.y),
-                       io::float_to_fp16_16(parent->position.z)};
+    int32_t point[6] = {parent->position.x.q16,
+                       parent->position.y.q16,
+                       parent->position.z.q16};
     // The stored LAST-match index is a gate; the reader resolves the FIRST
     // named point, exactly as Entity_GetBoneTransformAndOrientation does.
     named_point(world, *parent, "attach", point);
@@ -360,9 +360,9 @@ void AiSystem::infantry_command_think(AiEntity &e, World &world, int32_t &entry_
         // max(aiComp[16], 0x40000) @0x4bab77..0x4bab83]
         const Entity *player = world.registry.get(world.cached.local_player);
         if (player == nullptr) return;
-        int32_t tgt[3] = {io::float_to_fp16_16(player->position.x),
-                          io::float_to_fp16_16(player->position.y),
-                          io::float_to_fp16_16(player->position.z)};
+        int32_t tgt[3] = {player->position.x.q16,
+                          player->position.y.q16,
+                          player->position.z.q16};
         const int32_t dist = board_dist(e.pos, tgt);
         int32_t radius = 0x40000;
         if (inf.combat_target.valid() &&
@@ -406,8 +406,8 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 		return;
 	const bool pc = (target->item_attrib & kItemAttribPlayerControl) != 0;
 	const bool entry_type = target->item_type == 1 || target->item_type == 6;
-	int32_t goal[3] = { io::float_to_fp16_16(target->position.x),
-		io::float_to_fp16_16(target->position.y), io::float_to_fp16_16(target->position.z) };
+	int32_t goal[3] = { target->position.x.q16,
+		target->position.y.q16, target->position.z.q16 };
 	// Arrival radius [orig: @0x4BB325..0x4BB34A, 2-unit arm @0x4BB32E].
 	int32_t radius = io::float_to_fp16_16(target->bound_radius) + 0x10000;
 	if (entry_type && pc && vehicle_can_enter(world, self, *target)) {
@@ -434,10 +434,10 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 		bool killed = false;
 		// The dead bit alone decides [orig: `test byte [edx+24h],2` @0x4BB211].
 		if (((target->flags | target->engine_flags) & kEntityFlagDead) != 0) {
-			const double dx = io::float_to_fp16_16(self->spawn_position.x) - int64_t(e.pos[0]);
-			const double dy = io::float_to_fp16_16(self->spawn_position.y) - int64_t(e.pos[1]);
+			const double dx = self->spawn_position.x.q16 - int64_t(e.pos[0]);
+			const double dy = self->spawn_position.y.q16 - int64_t(e.pos[1]);
 			const double dz =
-					(io::float_to_fp16_16(self->spawn_position.z) - int64_t(e.pos[2])) >> 1;
+					(self->spawn_position.z.q16 - int64_t(e.pos[2])) >> 1;
 			if (std::trunc(std::sqrt(dx * dx + dy * dy + dz * dz)) > 0x80000) {
 				self->health = e.health = 0;
 				self->last_attacker = target->last_attacker;

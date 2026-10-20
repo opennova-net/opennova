@@ -1902,7 +1902,7 @@ void test_carrier_without_a_model_takes_no_rider() {
 
 void test_vehicle_admission_stationary_threshold_and_deck() {
 	Rig r;
-	r.veh().spawn_position = {};
+	r.veh().spawn_position = Vec3{};
 	r.veh().saved_live_pos[0] = 100 * 65536;
 	r.veh().saved_live_pos[1] = 200 * 65536;
 	CHECK(vehicle_can_enter(r.w, nullptr, r.veh()));
@@ -1916,7 +1916,7 @@ void test_vehicle_admission_stationary_threshold_and_deck() {
 	r.veh().spawn_position = r.veh().position;
 	r.veh().flags |= kEntityFlagInAir;
 	CHECK(vehicle_can_enter(r.w, nullptr, r.veh())); // spawn arm precedes airborne
-	r.veh().spawn_position = {};
+	r.veh().spawn_position = Vec3{};
 	CHECK(!vehicle_can_enter(r.w, nullptr, r.veh()));
 }
 

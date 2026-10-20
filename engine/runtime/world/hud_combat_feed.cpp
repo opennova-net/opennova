@@ -23,8 +23,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	out.local_valid = player != nullptr;
 	if (!player)
 		return;
-	out.local_position = { to_fixed(player->position.x), to_fixed(player->position.y),
-		to_fixed(player->position.z) };
+	out.local_position = { player->position.x.q16, player->position.y.q16,
+		player->position.z.q16 };
 	out.local_team = player->team;
 	const AiEntity *body = world.ai.for_handle(player->handle);
 	const Entity *mount = world.registry.get(player->mount_target);
@@ -132,8 +132,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 			tracker.hud_impact_distance_q16 = impact.distance_q16;
 		s.impact_distance_m = uint16_t(uint32_t(tracker.hud_impact_distance_q16) >> 16);
 		if (world.ai.terrain) {
-			const int32_t start[] = { to_fixed(player->position.x),
-				to_fixed(player->position.y) + 0x20000, to_fixed(player->position.z) };
+			const int32_t start[] = { player->position.x.q16,
+				player->position.y.q16 + 0x20000, player->position.z.q16 };
 			const int32_t end[] = { impact.position[0], impact.position[1] + 0x20000,
 				impact.position[2] };
 			s.designator_color =
@@ -185,8 +185,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 				// clip and action pair select; the raw gun position otherwise.
 				// [orig: Entity_ComputeUserpointWorldTransform @0x59E680, the
 				//  occupant's slot +0x118 @0x59E66A]
-				int32_t origin[6] = { to_fixed(gun.position.x), to_fixed(gun.position.y),
-					to_fixed(gun.position.z), 0, 0, 0 };
+				int32_t origin[6] = { gun.position.x.q16, gun.position.y.q16,
+					gun.position.z.q16, 0, 0, 0 };
 				const WeaponSlotState &slot = gun.primary_weapon_slot;
 				carrier_weapon_userpoint(world, gun,
 						world.tables.weapons.by_index(gun.primary_weapon_slot_adm), slot.clip,
@@ -220,7 +220,7 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		out.vehicle_texture = mount->hud_image;
 		s.gear = (player->net_stance_bits & 2) ? 0 : 2 - ((player->net_stance_bits & 1) != 0);
 		if (mount->item_unit_type == 3) {
-			s.altitude_q16 = to_fixed(mount->position.z);
+			s.altitude_q16 = mount->position.z.q16;
 			s.altitude_agl_q16 = int32_t(std::clamp(int64_t(s.altitude_q16) -
 							(mount->veh.ground_cache == INT32_MIN ? 0 : mount->veh.ground_cache),
 					int64_t(0), int64_t(INT32_MAX)));
@@ -260,8 +260,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	{
 		int32_t best = 0x40000000;
 		const Entity *nearest = nullptr;
-		const int32_t px = to_fixed(player->position.x);
-		const int32_t py = to_fixed(player->position.y);
+		const int32_t px = player->position.x.q16;
+		const int32_t py = player->position.y.q16;
 		world.registry.for_each([&](const Entity &e) {
 			const int pool = e.handle.pool();
 			if (pool != 1 && pool != 2) return;
@@ -270,9 +270,9 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 					((1u << (e.zone_number & 31u)) & service.owned_zone_mask) == 0)
 				return;
 			const double dx = static_cast<double>(static_cast<int32_t>(
-					static_cast<uint32_t>(to_fixed(e.position.x)) - static_cast<uint32_t>(px)));
+					static_cast<uint32_t>(e.position.x.q16) - static_cast<uint32_t>(px)));
 			const double dy = static_cast<double>(static_cast<int32_t>(
-					static_cast<uint32_t>(to_fixed(e.position.y)) - static_cast<uint32_t>(py)));
+					static_cast<uint32_t>(e.position.y.q16) - static_cast<uint32_t>(py)));
 			const int32_t dist = static_cast<int32_t>(
 					std::min(std::sqrt(dx * dx + dy * dy), 2147418112.0));
 			if (dist < best) {
@@ -282,8 +282,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		});
 		if (nearest != nullptr) {
 			s.farp_present = true;
-			s.farp_x_q16 = to_fixed(nearest->position.x);
-			s.farp_y_q16 = to_fixed(nearest->position.y);
+			s.farp_x_q16 = nearest->position.x.q16;
+			s.farp_y_q16 = nearest->position.y.q16;
 		}
 	}
 	fill_hud_vehicle_sights(world, weapon, view);

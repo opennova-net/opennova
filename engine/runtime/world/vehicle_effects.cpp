@@ -203,7 +203,7 @@ void vehicle_crash_state(
 	if (!boat && !bike && !tank &&
 			((m.wreck_2fc && up < 0) ||
 					((e.flags & kEntityFlagInAir) != 0 &&
-							to_fixed(e.position.z) < world.env.water_z)))
+							e.position.z.q16 < world.env.water_z)))
 		clear_sinks();
 }
 } // namespace opennova::world::detail

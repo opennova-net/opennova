@@ -143,7 +143,7 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         const auto *native_owner = world.registry.get(mount->primary_weapon_owner);
         if (row) {
             owner.handle = world::EntityHandle{row->handle};
-            owner.position = {float(row->x)/65536.0f, float(row->y)/65536.0f, float(row->z)/65536.0f};
+            owner.position.set_q16({row->x, row->y, row->z});
             owner.mount_target = world::EntityHandle{row->carrier_handle};
             if (const auto *carrier = world.registry.get(owner.mount_target))
                 owner.mount_type = seat_type(*row, *carrier);
@@ -156,7 +156,7 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         // @0x24D2118; WeaponAction_Idle @0x5429a6 tests no owner].
         input.auto_reload = world.rules.auto_reload;
         input.current_tick = static_cast<int32_t>(world.logic_tick);
-        input.submerged = world.env.water_z != 0 && world::to_fixed(owner.position.z) <= world.env.water_z;
+        input.submerged = world.env.water_z != 0 && owner.position.z.q16 <= world.env.water_z;
         input.last_tick_of_batch = world.rules.last_tick_of_batch;
         world::WeaponFsmEvents events;
         world::weapon_fsm_tick(def->action_fsm, slot, input, events);

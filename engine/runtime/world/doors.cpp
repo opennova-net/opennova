@@ -173,9 +173,9 @@ void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch
             if (sound != nullptr && sound[0] != '\0') {
                 SoundSlotEvent output;
                 output.source_handle = entity.handle.packed;
-                output.pos[0] = static_cast<int32_t>(entity.position.x * 65536.0f);
-                output.pos[1] = static_cast<int32_t>(entity.position.y * 65536.0f);
-                output.pos[2] = static_cast<int32_t>(entity.position.z * 65536.0f);
+                output.pos[0] = entity.position.x.q16;
+                output.pos[1] = entity.position.y.q16;
+                output.pos[2] = entity.position.z.q16;
                 if (world.pose_provider != nullptr)
                     world.pose_provider->resolve_section_pivot(world, entity.handle,
                             std::max(0, entity.door_first_bone + i), output.pos);

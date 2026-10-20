@@ -261,9 +261,9 @@ void entity_live_euler_bam(const Entity &e, int32_t out[3]) {
 
 CollisionMatrix entity_placement_matrix(const Entity &e) {
     const int32_t position[3] = {
-        static_cast<int32_t>(e.position.x * 65536.0f),
-        static_cast<int32_t>(e.position.y * 65536.0f),
-        static_cast<int32_t>(e.position.z * 65536.0f),
+        e.position.x.q16,
+        e.position.y.q16,
+        e.position.z.q16,
     };
     int32_t euler[3];
     entity_live_euler_bam(e, euler);

@@ -235,9 +235,9 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // Only motor-owned movement writes position back; otherwise retain the
     // wire-owned registry pose, including in data-less authority fixtures.
     if (carried || resolve_contacts) {
-        ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
-        ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
-        ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
+        ent->position.x.q16 = e.pos[0];
+        ent->position.y.q16 = e.pos[1];
+        ent->position.z.q16 = e.pos[2];
     }
 
     // Present-pass clip for the host's own third-person view of this peer.

@@ -547,9 +547,9 @@ AiDebugReport ai_debug_report(World &world) {
 			if (const AiEntity *te = ai.for_handle(target)) {
 				for (int c = 0; c < 3; ++c) row.target_pos[c] = te->pos[c];
 			} else if (const Entity *tw = world.registry.get(target)) {
-				row.target_pos[0] = io::float_to_fp16_16(tw->position.x);
-				row.target_pos[1] = io::float_to_fp16_16(tw->position.y);
-				row.target_pos[2] = io::float_to_fp16_16(tw->position.z);
+				row.target_pos[0] = tw->position.x.q16;
+				row.target_pos[1] = tw->position.y.q16;
+				row.target_pos[2] = tw->position.z.q16;
 			}
 			if (const Entity *tw = world.registry.get(target))
 				row.target_name = tw->name;

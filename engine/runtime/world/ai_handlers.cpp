@@ -716,9 +716,9 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     }
 
     // Bearing to the tracked target, truncated [orig: @0x473A49..0x473A90].
-    const int32_t tpos[3] = {static_cast<int32_t>(tent->position.x * 65536.0f),
-                             static_cast<int32_t>(tent->position.y * 65536.0f),
-                             static_cast<int32_t>(tent->position.z * 65536.0f)};
+    const int32_t tpos[3] = {tent->position.x.q16,
+                             tent->position.y.q16,
+                             tent->position.z.q16};
     const int32_t dy = io::bam_sub(tpos[1], e.pos[1]);
     const int32_t dx = io::bam_sub(tpos[0], e.pos[0]);
     const int32_t bearing = bearing_bam(dy, dx);
@@ -962,8 +962,8 @@ void h_vehicle_dead_event(AiThinkCtx &) {}
 // [orig: AI_TransitionToDeath_Vehicle @0x4668D9..0x46693C; AI_CheckLethalDamage
 //  @0x45791F..0x457970]
 int32_t aircraft_death_ground(World &world, Entity &entity) {
-	const int32_t pos[3] = { to_fixed(entity.position.x), to_fixed(entity.position.y),
-		to_fixed(entity.position.z) };
+	const int32_t pos[3] = { entity.position.x.q16, entity.position.y.q16,
+		entity.position.z.q16 };
 	int32_t ground = INT32_MIN;
 	if (world.ai.collision != nullptr)
 		ground = world.ai.collision->raycast_ground(
@@ -987,13 +987,13 @@ void h_enter_aircraft_land(AiThinkCtx &ctx) {
 		return;
 	const int32_t ground = aircraft_death_ground(*ctx.world, *entity);
 	b.f[138] = ai.profile.patrol_climb >> 1;
-	b.f[AiBrain::kWorkPosX] = to_fixed(entity->position.x);
-	b.f[AiBrain::kWorkPosY] = to_fixed(entity->position.y);
+	b.f[AiBrain::kWorkPosX] = entity->position.x.q16;
+	b.f[AiBrain::kWorkPosY] = entity->position.y.q16;
 	b.f[AiBrain::kWorkPosZ] = ground;
 	b.f[AiBrain::kWorkHeading] = entity->veh.yaw_seeded ? entity->veh.yaw_bam : ai.heading;
 	b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;
 	b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kTargetRef] = 0;
-	if (io::bam_sub(ground, 16384) > to_fixed(entity->position.z))
+	if (io::bam_sub(ground, 16384) > entity->position.z.q16)
 		queue_destroy_event(ctx, ai);
 }
 void h_aircraft_land_tick(AiThinkCtx &ctx) {
@@ -1005,13 +1005,13 @@ void h_aircraft_land_tick(AiThinkCtx &ctx) {
 	if (entity == nullptr)
 		return;
 	const int32_t ground = aircraft_death_ground(*ctx.world, *entity);
-	const int32_t z = to_fixed(entity->position.z);
+	const int32_t z = entity->position.z.q16;
 	b.f[AiBrain::kWorkPosZ] = ground;
 	b.f[AiBrain::kOutSpeed] = 0;
 	if (ground < z)
 		b.f[138] = io::bam_sub(z, ground) >= 327680 ? ai.profile.patrol_climb >> 1 : 2114;
 	else {
-		entity->position.z = float(from_fixed(ground));
+		entity->position.z.q16 = ground;
 		ai.pos[2] = ground;
 		b.f[138] = 0;
 		b.set_pend(14);
@@ -1042,7 +1042,7 @@ void queue_aircraft_death(AiThinkCtx &ctx) {
 	if (entity == nullptr)
 		return;
 	AiEventEntry event{};
-	event.f[0] = aircraft_death_ground(*ctx.world, *entity) <= to_fixed(entity->position.z) ? 3 : 4;
+	event.f[0] = aircraft_death_ground(*ctx.world, *entity) <= entity->position.z.q16 ? 3 : 4;
 	event.f[1] = ctx.sys->index_of(*ctx.self) << 16;
 	ctx.sys->events.queue(event);
 }
@@ -1110,7 +1110,7 @@ void h_enter_aircraft_dying(AiThinkCtx &ctx) {
 			const int cannon_index = world.tables.ammo.index_of("20mm");
 			const bool cannon = cannon_index >= 0 && ai.slot.f[24] == cannon_index;
 			if (!cannon && ((entity->flags | entity->engine_flags) & kEntityFlagHusk) == 0 &&
-					aircraft_death_ground(world, *entity) < to_fixed(entity->position.z)) {
+					aircraft_death_ground(world, *entity) < entity->position.z.q16) {
 				entity_init_aircraft_death(world, *entity, true);
 				// [orig: AI_TransitionToDeath_Vehicle @0x46694E..0x466963 ->
 				//  Server_SendEntityStatePacket(entity, 0)]
@@ -1125,7 +1125,7 @@ void h_enter_aircraft_dying(AiThinkCtx &ctx) {
 	if (entity != nullptr)
 		ground = aircraft_death_ground(*ctx.world, *entity);
 	ai.brain.f[138] = 1336;
-	if (entity != nullptr && ground > to_fixed(entity->position.z))
+	if (entity != nullptr && ground > entity->position.z.q16)
 		queue_destroy_event(ctx, ai);
 }
 
@@ -1137,8 +1137,8 @@ void h_aircraft_dying_tick(AiThinkCtx &ctx) {
 	Entity *entity = ctx.world->registry.get(ai.handle);
 	if (entity == nullptr)
 		return;
-	const int32_t pos[3] = { to_fixed(entity->position.x), to_fixed(entity->position.y),
-		to_fixed(entity->position.z) };
+	const int32_t pos[3] = { entity->position.x.q16, entity->position.y.q16,
+		entity->position.z.q16 };
 	const bool still = entity->saved_live_valid && entity->saved_live_pos[0] == pos[0] &&
 			entity->saved_live_pos[1] == pos[1] && entity->saved_live_pos[2] == pos[2];
 	if (aircraft_death_ground(*ctx.world, *entity) >= pos[2] || still) {
@@ -1172,7 +1172,7 @@ void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 				const int32_t ground = aircraft_death_ground(world, *entity);
 				entity_init_aircraft_death(world, *entity,
 						ground == INT32_MIN ||
-								io::bam_sub(ground, 0x4000) <= to_fixed(entity->position.z));
+								io::bam_sub(ground, 0x4000) <= entity->position.z.q16);
 				// [orig: Entity_ProcessVehicleDestruction @0x466B2C..0x466B41 ->
 				//  Server_SendEntityStatePacket(entity, 0)]
 				emit_item_state(world, *entity, 0);

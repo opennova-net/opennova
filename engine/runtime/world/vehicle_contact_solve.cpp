@@ -1149,8 +1149,8 @@ static void light_apply_frame(World &world, Entity &entity, CollisionMatrix matr
 // [orig: Entity_ProcessLightVehiclePhysics @ 0x47BF00..0x47C03B]
 static void light_capture_launch(Entity &entity, const VehicleEulerBasis &basis,
         int32_t x, int32_t y, int32_t z) {
-    const int32_t fallback[3] = {to_fixed(entity.position.x), to_fixed(entity.position.y),
-            to_fixed(entity.position.z)};
+    const int32_t fallback[3] = {entity.position.x.q16, entity.position.y.q16,
+            entity.position.z.q16};
     const int32_t *previous = entity.saved_live_valid ? entity.saved_live_pos : fallback;
     const int64_t displacement[3] = {
         io::bam_sub(x, previous[0]), io::bam_sub(y, previous[1]), io::bam_sub(z, previous[2])};

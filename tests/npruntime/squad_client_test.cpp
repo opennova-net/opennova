@@ -242,8 +242,8 @@ void test_waypoint_wipe_is_exact() {
 	const int32_t y = -((700 << 16) + 3);
 	const w::EntityHandle first = w::place_user_waypoint(c.world, x, y, "RALLY");
 	CHECK(first.valid() && c.pool4_rows() == 1);
-	CHECK(c.world.registry.get(first)->waypoint_x_q16 == x &&
-			c.world.registry.get(first)->waypoint_y_q16 == y);
+	CHECK(c.world.registry.get(first)->position.x.q16 == x &&
+			c.world.registry.get(first)->position.y.q16 == y);
 	CHECK(w::user_waypoint_row(c.world, first).x == x &&
 			w::user_waypoint_row(c.world, first).y == y);
 	const w::EntityHandle second = w::place_user_waypoint(c.world, x, y, "rally");

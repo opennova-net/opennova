@@ -1372,8 +1372,8 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
         // The distance is the fixed-point deltas' length, capped at
         // 2147418112.0 and truncated, against the fixed range [orig:
         // @0x43CA97..0x43CAE9 / @0x43CC38..0x43CC8B, _ftol2_sse].
-        const int32_t pos[3] = {to_fixed(e->position.x), to_fixed(e->position.y),
-                                to_fixed(e->position.z)};
+        const int32_t pos[3] = {e->position.x.q16, e->position.y.q16,
+                                e->position.z.q16};
         const double dx = double(int32_t(uint32_t(pos[0]) - uint32_t(dev[0])));
         const double dy = double(int32_t(uint32_t(pos[1]) - uint32_t(dev[1])));
         const double dz = double(int32_t(uint32_t(pos[2]) - uint32_t(dev[2])));

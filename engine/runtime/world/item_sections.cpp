@@ -44,7 +44,7 @@ void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &tr
     int32_t pos[3];
     entity_placement_matrix(entity).transform_point(
             traits.model_section_origins_q16[section].data(), pos);
-    seed.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+    seed.position.set_q16({pos[0], pos[1], pos[2]});
     seed.spawn_position = seed.position;
     section_effect(world, "Effect_FlashPop", seed.position);
     const auto handle = world.item_piece_spawner
@@ -70,16 +70,16 @@ void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &tr
     // The tower's footprint retires the terrain pages composed under it
     // [orig: Entity_SpawnSectionEntity @ 0x44062E..0x440670].
     world.out.terrain_scorches.emit_page_invalidation(
-            int32_t(entity.position.x * 65536), int32_t(entity.position.y * 65536),
+            entity.position.x.q16, entity.position.y.q16,
             int32_t(entity.bound_radius * 65536));
 }
 void fit_section_to_ground(Entity &entity, const int32_t end[3], int32_t ground) {
     // Per-product Q16 rounding, signed sum, x87 nearest sqrt, then <<8.
     // The angle conversions truncate after multiplying the witnessed double.
     // [orig: Entity_InitFloatingPhysics @ 0x4A8581, 0x4A8735]
-    const int32_t dx = io::bam_sub(end[0], int32_t(entity.position.x * 65536));
-    const int32_t dy = io::bam_sub(end[1], int32_t(entity.position.y * 65536));
-    const int32_t dz = io::bam_sub(ground, int32_t(entity.position.z * 65536));
+    const int32_t dx = io::bam_sub(end[0], entity.position.x.q16);
+    const int32_t dy = io::bam_sub(end[1], entity.position.y.q16);
+    const int32_t dz = io::bam_sub(ground, entity.position.z.q16);
     const int32_t squared = io::bam_add(int32_t((int64_t(dx) * dx + (io::kFp16OneInt / 2)) >> 16),
             int32_t((int64_t(dy) * dy + (io::kFp16OneInt / 2)) >> 16));
     const int32_t root = squared >= 0 ? int32_t(std::nearbyint(std::sqrt(double(squared)))) : INT32_MIN;
@@ -128,8 +128,8 @@ bool tick_tower_section(World &world, Entity &entity) {
         entity.veh.vel_x >>= 1; entity.veh.vel_y >>= 1;
         if (entity.veh.slide_z < 0) entity.veh.slide_z = 0;
     }
-    int32_t pos[3] = {int32_t(entity.position.x * 65536),
-            int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+    int32_t pos[3] = {entity.position.x.q16,
+            entity.position.y.q16, entity.position.z.q16};
     const int32_t ground = section_ground(world, entity.position);
     const int32_t z = io::bam_add(pos[2], entity.veh.slide_z);
     bool bottom_contact = false;
@@ -146,7 +146,7 @@ bool tick_tower_section(World &world, Entity &entity) {
         }
         bottom_contact = true; pos[2] = ground;
     }
-    entity.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+    entity.position.set_q16({pos[0], pos[1], pos[2]});
     // Every InitFloatingPhysics contact/settle effect is the interned def+0x412
     // handle: particledeath, the word the SectionSettled leg above reads too.
     // [orig: Effect_SubmitDescriptor(.., word def+0x412) @0x4A84B8 (bottom),
@@ -196,8 +196,8 @@ bool tick_tower_section(World &world, Entity &entity) {
     return true;
 }
 CollisionMatrix palm_matrix(const Entity &entity) {
-    const int32_t pos[3] = {int32_t(entity.position.x * 65536),
-            int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+    const int32_t pos[3] = {entity.position.x.q16,
+            entity.position.y.q16, entity.position.z.q16};
     // This callback explicitly uses the unscaled Euler builder.
     // [orig: TerrainTile_TransformPointFromSector @ 0x53BDB0]
     return collision_matrix_from_euler(bam_heading_from_mission_yaw_deg(entity.yaw),
@@ -227,7 +227,7 @@ void palm_transition(World &world, Entity &entity, int section) {
         seed.position = entity.position;
         int32_t pos[3];
         palm_matrix(entity).transform_point(traits->model_pivots_q16[pivot].data(), pos);
-        seed.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+        seed.position.set_q16({pos[0], pos[1], pos[2]});
         seed.spawn_position = seed.position;
         seed.yaw = entity.yaw; // pitch/roll in the zeroed fragment template stay zero.
         seed.uniform_scale_q16 = 65536;
@@ -243,8 +243,8 @@ void palm_transition(World &world, Entity &entity, int section) {
         seed.palm_fragment = true;
         seed.palm_state = type;
         seed.death_motion = DeathMotionMode::PalmPiece;
-        const int32_t x = int32_t(entity.position.x * 65536);
-        const int32_t y = int32_t(entity.position.y * 65536);
+        const int32_t x = entity.position.x.q16;
+        const int32_t y = entity.position.y.q16;
         world.prng16_b_state = uint32_t(entity.handle.slot() + 8 * type) +
                 uint32_t((y >> 10) & ~63) + uint32_t((x >> 10) & ~63);
         seed.veh.vel_x = (world.next_prng16_b() & 8191) - 4096;
@@ -465,8 +465,8 @@ bool tick_item_section_motion(World &world, Entity &entity) {
             entity.death_motion == DeathMotionMode::SectionSettled)
         return tick_tower_section(world, entity);
     if (entity.death_motion != DeathMotionMode::PalmPiece) return false;
-    int32_t pos[3] = {int32_t(entity.position.x * 65536),
-            int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+    int32_t pos[3] = {entity.position.x.q16,
+            entity.position.y.q16, entity.position.z.q16};
     for (int i = 0; i < 3; ++i) entity.saved_live_pos[i] = pos[i];
     entity.saved_live_yaw = bam_heading_from_mission_yaw_deg(entity.yaw);
     entity.saved_live_pitch = bam_from_degrees_wrapped(entity.pitch);
@@ -493,7 +493,7 @@ bool tick_item_section_motion(World &world, Entity &entity) {
             entity.pitch = float(io::bam_add(entity.saved_live_pitch, 0x1000000) * kDegreesPerBam);
         entity.veh.slide_z = io::bam_sub(entity.veh.slide_z, 167);
     }
-    entity.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+    entity.position.set_q16({pos[0], pos[1], pos[2]});
     entity.engine_flags &= ~0x20000u;
     return true;
 }

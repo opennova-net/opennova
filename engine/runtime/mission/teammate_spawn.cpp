@@ -59,7 +59,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     seed.item_id = request.item_type;
     seed.net_id = request.ssn;
     seed.team = 1;
-    seed.position = {request.pos[0] / 65536.0f, request.pos[1] / 65536.0f, request.pos[2] / 65536.0f};
+    seed.position.set_q16({request.pos[0], request.pos[1], request.pos[2]});
     seed.spawn_position = seed.position;
     seed.yaw = float(mission_yaw_deg_from_bam_heading(request.heading));
     seed.spawn_heading = request.heading;

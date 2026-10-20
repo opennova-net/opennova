@@ -12,8 +12,8 @@ int32_t AiSystem::aircraft_ground_height(World &world, AiEntity &ai, int32_t rad
 	if (entity == nullptr)
 		return INT32_MIN;
 	const int32_t offset = brain_ground_offset(world, *entity);
-	int32_t pos[3] = { to_fixed(entity->position.x), to_fixed(entity->position.y),
-		to_fixed(entity->position.z) };
+	int32_t pos[3] = { entity->position.x.q16, entity->position.y.q16,
+		entity->position.z.q16 };
 	int32_t ground = INT32_MIN;
 	if (collision != nullptr && collision->instance_count() != 0) {
 		// Two ray kinds share the probe: the AndObject kind also stores its hit
@@ -131,8 +131,8 @@ Entity *target_entity(World &world, int32_t packed) {
 	return packed != 0 ? world.registry.get(EntityHandle{ uint16_t(packed - 1) }) : nullptr;
 }
 int32_t target_heading(const AiEntity &ai, const Entity &target) {
-	return detail::bearing_bam(bam_sub(to_fixed(target.position.y), ai.pos[1]),
-			bam_sub(to_fixed(target.position.x), ai.pos[0]));
+	return detail::bearing_bam(bam_sub(target.position.y.q16, ai.pos[1]),
+			bam_sub(target.position.x.q16, ai.pos[0]));
 }
 uint32_t folded_angle(int32_t angle) {
 	const uint32_t a = uint32_t(angle) >> 24;
@@ -371,7 +371,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 		}
 		return 0;
 	}
-	const int32_t tx = to_fixed(target->position.x), ty = to_fixed(target->position.y);
+	const int32_t tx = target->position.x.q16, ty = target->position.y.q16;
 	const int32_t bearing = target_heading(ai, *target);
 	const uint32_t angle = folded_angle(bam_sub(bearing, ai.heading));
 	b.f[AiBrain::kWorkHeading] =
@@ -403,7 +403,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 				b.f[AiBrain::kCombatTimer] = 0;
 			b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
 		} else {
-			b.f[AiBrain::kWorkPosZ] = bam_add(b.f[51], to_fixed(target->position.z));
+			b.f[AiBrain::kWorkPosZ] = bam_add(b.f[51], target->position.z.q16);
 			if (plane) {
 				if (angle < 64 && aircraft_target_in_sight(ai, world))
 					b.f[AiBrain::kCombatTimer] = 0;

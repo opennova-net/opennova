@@ -2435,9 +2435,9 @@ void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {
     // input; our AiEntity.pos vs registry Entity.position split is the tracked deviation, so
     // we keep them in sync here. (The direct AI-pool present still reads AiEntity.pos.)
     if (Entity *ent = world.registry.get(e.handle)) {
-        ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
-        ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
-        ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
+        ent->position.x.q16 = e.pos[0];
+        ent->position.y.q16 = e.pos[1];
+        ent->position.z.q16 = e.pos[2];
         // Collision and landing damage mutate the motor-side health field. The original
         // has one Entity store; mirror that result into the registry store consumed by
         // scripts, the HUD, and wire snapshots.

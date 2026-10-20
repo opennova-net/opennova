@@ -37,6 +37,9 @@ void entity_orientation_words(const Entity &entity, int32_t out[3]) {
 SpawnPointResult entity_pose(const Entity &entity) {
     SpawnPointResult out;
     out.found = true;
+    // The chosen entity's position words, copied raw (D-NET-507).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - the copies
+    //  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
     out.position = entity.position;
     out.yaw = entity.yaw;
     out.pitch = entity.pitch;
@@ -59,19 +62,17 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
     int32_t parent_words[3];
     entity_orientation_words(*parent, parent_words);
     const int32_t parent_position[3] = {
-        to_fixed(parent->position.x), to_fixed(parent->position.y),
-        to_fixed(parent->position.z)};
+        parent->position.x.q16, parent->position.y.q16,
+        parent->position.z.q16};
     const CollisionMatrix parent_pose = collision_matrix_from_euler(
         parent_words[0], parent_words[1], parent_words[2], parent_position);
     const int32_t local[3] = {
-        to_fixed(marker.position.x), to_fixed(marker.position.y),
-        to_fixed(marker.position.z)};
+        marker.position.x.q16, marker.position.y.q16,
+        marker.position.z.q16};
     int32_t transformed[3] = {};
     parent_pose.transform_point(local, transformed);
-    constexpr float kFromFixed = io::kInvFp16One;
-    out.position = {transformed[0] * kFromFixed,
-                    transformed[1] * kFromFixed,
-                    transformed[2] * kFromFixed};
+    // The transformed words are the pose's position words (D-NET-507).
+    out.position.set_q16({transformed[0], transformed[1], transformed[2]});
     // Entity_TransformLocalToWorld adds heading while retaining the marker's
     // local pitch and roll. Entity stores the inverse mission-yaw convention.
     out.yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
@@ -146,10 +147,10 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
         int64_t nearest = kDistanceClampFixed;
         for (const Vec3 &other : avoid) {
             const long double dx =
-                static_cast<long double>(to_fixed(row.pose.position.x)) -
+                static_cast<long double>(row.pose.position.x.q16) -
                 to_fixed(other.x);
             const long double dy =
-                static_cast<long double>(to_fixed(row.pose.position.y)) -
+                static_cast<long double>(row.pose.position.y.q16) -
                 to_fixed(other.y);
             const long double distance = std::sqrt(dx * dx + dy * dy);
             if (distance < static_cast<long double>(nearest)) {
@@ -406,8 +407,8 @@ SpawnZoneRegistry ZoneSystem::build_spawn_zone_list() const {
                     ? 232420u + static_cast<uint32_t>(e.handle.slot()) * 1360u
                     : 1865416u + static_cast<uint32_t>(e.handle.slot()) * 812u;
             rows.push_back(row);
-            const int32_t x = to_fixed(e.position.x);
-            const int32_t y = to_fixed(e.position.y);
+            const int32_t x = e.position.x.q16;
+            const int32_t y = e.position.y.q16;
             if (x < reg.min_x) reg.min_x = x;
             if (y < reg.min_y) reg.min_y = y;
             if (x > reg.max_x) reg.max_x = x;

@@ -279,9 +279,7 @@ void LocalPlayer::place_on_composed_view() {
 	p->inf.look_pitch = pitch;
 	input.look_heading = heading;
 	input.look_pitch = pitch;
-	e->position = {static_cast<float>(w::from_fixed(p->pos[0])),
-			static_cast<float>(w::from_fixed(p->pos[1])),
-			static_cast<float>(w::from_fixed(p->pos[2]))};
+	e->position.set_q16({p->pos[0], p->pos[1], p->pos[2]});
 	e->yaw = static_cast<int16_t>(std::lround(
 			w::normalize_mission_yaw_deg(w::mission_yaw_deg_from_bam_heading(heading))));
 }
@@ -332,9 +330,7 @@ bool LocalPlayer::apply_pose(const int32_t (&position_q16)[3], int32_t heading_b
 	p->heading = heading_bam;
 	p->pitch = pitch_bam;
 	p->inf.vel[0] = p->inf.vel[1] = p->inf.vel[2] = 0;
-	e->position = {static_cast<float>(w::from_fixed(p->pos[0])),
-			static_cast<float>(w::from_fixed(p->pos[1])),
-			static_cast<float>(w::from_fixed(p->pos[2]))};
+	e->position.set_q16({p->pos[0], p->pos[1], p->pos[2]});
 	p->inf.target_heading = heading_bam;
 	p->inf.look_pitch = pitch_bam;
 	input.look_heading = heading_bam;

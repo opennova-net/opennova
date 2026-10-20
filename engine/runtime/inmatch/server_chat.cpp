@@ -172,18 +172,18 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	cmd.flag = 1;
 	cmd.sound_name = set_name;
 	cmd.has_pos = true;
-	cmd.pos_x = static_cast<int16_t>(world::to_fixed(requester->position.x) >> 16);
-	cmd.pos_y = static_cast<int16_t>(world::to_fixed(requester->position.y) >> 16);
-	cmd.pos_z = static_cast<int16_t>(world::to_fixed(requester->position.z) >> 16);
+	cmd.pos_x = static_cast<int16_t>(requester->position.x.q16 >> 16);
+	cmd.pos_y = static_cast<int16_t>(requester->position.y.q16 >> 16);
+	cmd.pos_z = static_cast<int16_t>(requester->position.z.q16 >> 16);
 	const std::vector<uint8_t> sound_body = encode_play_sound(cmd);
 	for (NapiNPConnection &candidate : roster) {
 		if (!active_player_recipient(candidate)) continue;
 		if (candidate.link.mode == replication::TransportMode::Loopback) {
 			world::SoundSlotEvent local;
 			local.source_handle = conn.link.owned_entity.packed;
-			local.pos[0] = world::to_fixed(requester->position.x);
-			local.pos[1] = world::to_fixed(requester->position.y);
-			local.pos[2] = world::to_fixed(requester->position.z);
+			local.pos[0] = requester->position.x.q16;
+			local.pos[1] = requester->position.y.q16;
+			local.pos[2] = requester->position.z.q16;
 			local.slot = 0;
 			std::memcpy(local.set_name, set_name, sizeof(set_name));
 			world->out.slot_sounds.push_back(local);
@@ -259,9 +259,9 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	int8_t wire_channel = channel;
 	if (channel == 4 || channel == 5) wire_channel = 2;
 	const int32_t sender_pos[3] = {
-			world::to_fixed(sender_entity->position.x),
-			world::to_fixed(sender_entity->position.y),
-			world::to_fixed(sender_entity->position.z)};
+			sender_entity->position.x.q16,
+			sender_entity->position.y.q16,
+			sender_entity->position.z.q16};
 
 	std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 	for (NapiNPConnection &recipient : roster) {
@@ -288,9 +288,9 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			break;
 		case 13: { // within 100 units on every axis [orig: @0x513FC2..0x51401E]
 			if (recipient_entity == nullptr) break;
-			const int32_t dx = world::to_fixed(recipient_entity->position.x) - sender_pos[0];
-			const int32_t dy = world::to_fixed(recipient_entity->position.y) - sender_pos[1];
-			const int32_t dz = world::to_fixed(recipient_entity->position.z) - sender_pos[2];
+			const int32_t dx = recipient_entity->position.x.q16 - sender_pos[0];
+			const int32_t dy = recipient_entity->position.y.q16 - sender_pos[1];
+			const int32_t dz = recipient_entity->position.z.q16 - sender_pos[2];
 			admit = std::abs(dx) <= kProximityPerAxisFixed &&
 					std::abs(dy) <= kProximityPerAxisFixed &&
 					std::abs(dz) <= kProximityPerAxisFixed;

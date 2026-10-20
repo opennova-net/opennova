@@ -35,8 +35,8 @@ void regional_sound_event(World &world, Entity &entity, int phase) {
         SoundSlotEvent sound;
         sound.source_handle = entity.handle.packed;
         sound.slot = static_cast<uint8_t>(audio::kSlotShotDawn + region);
-        int32_t pos[3] = {int32_t(entity.position.x * 65536),
-                int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+        int32_t pos[3] = {entity.position.x.q16,
+                entity.position.y.q16, entity.position.z.q16};
         if (traits->has_sound_point) {
             // The SOUND userpoint rides the cached entity orientation matrix
             // (entity+0xB4), which carries the def scale on its rotation
@@ -434,7 +434,7 @@ void barrel_event(World &world, Entity &target) {
     if (!world.rules.logic_authority) return;
     if ((target.engine_flags & kEntityFlagDead) != 0) {
         spawn_item_explosion(world, nullptr,
-                {to_fixed(target.position.x),to_fixed(target.position.y),to_fixed(target.position.z)},
+                {target.position.x.q16,target.position.y.q16,target.position.z.q16},
                 bam_heading_from_mission_yaw_deg(target.yaw), 10);
         if (world.rules.mp_session) world.out.entity_events.push_back(EntityRemoveEvent{target.handle.packed});
         world.commands.remove_ssn(target.handle);
@@ -475,8 +475,8 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
                 if (entity.attach_parent.valid()) return;
                 const auto *other = world.tables.item_death_traits.get(candidate.item_id);
                 if (other == nullptr || !other->model_loaded || !strutil::iequals(other->graphic_name, partner)) return;
-                if (int32_t(candidate.position.x * 65536) != int32_t(entity.position.x * 65536) ||
-                        int32_t(candidate.position.y * 65536) != int32_t(entity.position.y * 65536)) return;
+                if (candidate.position.x.q16 != entity.position.x.q16 ||
+                        candidate.position.y.q16 != entity.position.y.q16) return;
                 entity.attach_parent = candidate.handle;
                 world.registry.get(candidate.handle)->attach_parent = entity.handle;
             });
@@ -504,8 +504,8 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
     }
     if ((entity.engine_flags & kEntityFlagDead) != 0 && entity.collapse_step < 64) {
         if (entity.collapse_step == 0 && !traits->particledeath.empty()) {
-            const int32_t origin[] = {int32_t(entity.position.x * 65536),
-                    int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+            const int32_t origin[] = {entity.position.x.q16,
+                    entity.position.y.q16, entity.position.z.q16};
             const auto matrix = collision_matrix_from_euler(
                     bam_heading_from_mission_yaw_deg(entity.yaw), bam_from_degrees_wrapped(entity.pitch),
                     bam_from_degrees_wrapped(entity.roll), origin);
@@ -539,13 +539,13 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
             // @0x440036..0x44007E; both call
             // Terrain_InvalidateTileCacheRegion @0x605C10].
             world.out.terrain_scorches.emit_page_invalidation(
-                    int32_t(entity.position.x * 65536), int32_t(entity.position.y * 65536),
+                    entity.position.x.q16, entity.position.y.q16,
                     int32_t(entity.bound_radius * 65536));
             // Four stack arguments: x, y, kind, GPM radius. Crane's kind 0
             // is a no-op (and consumes no CRT draw).
             // [orig: bld2 @0x43F1E3..0x43F1F1; cran @0x440087..0x440095]
-            world.out.terrain_scorches.emit_sized(int32_t(entity.position.x * 65536),
-                    int32_t(entity.position.y * 65536), crane ? 0 : 7,
+            world.out.terrain_scorches.emit_sized(entity.position.x.q16,
+                    entity.position.y.q16, crane ? 0 : 7,
                     traits->model_radius_q16, world.logic_tick);
         }
         ++entity.collapse_step;
@@ -583,8 +583,8 @@ void building_event(World &world, Entity &target) {
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     if (traits == nullptr || !traits->model_loaded) return;
     world.out.scars.clear_entity(target.handle);
-    const int32_t pos[3] = {int32_t(target.position.x * 65536),
-            int32_t(target.position.y * 65536), int32_t(target.position.z * 65536)};
+    const int32_t pos[3] = {target.position.x.q16,
+            target.position.y.q16, target.position.z.q16};
     const int32_t radius[3] = {traits->model_radius_xy_q16,
             traits->model_radius_xy_q16, traits->model_radius_z_q16};
     int32_t lo[3], hi[3];
@@ -600,8 +600,8 @@ void building_event(World &world, Entity &target) {
             if (row.item_type_index == 0) return;
             if (pool == 0 && row.damage_state != 0) return;
             if (pool == 2 && row.has_item_def && row.item_type == 5) return;
-            const int32_t p[3] = {int32_t(row.position.x * 65536),
-                    int32_t(row.position.y * 65536), int32_t(row.position.z * 65536)};
+            const int32_t p[3] = {row.position.x.q16,
+                    row.position.y.q16, row.position.z.q16};
             for (int axis = 0; axis < 3; ++axis)
                 if (p[axis] < lo[axis] || p[axis] > hi[axis]) return;
             world.registry.get(row.handle)->health = 0;
@@ -819,14 +819,14 @@ bool tick_item_class_motion(World &world, Entity &entity,
                         io::bam_abs(traits->model_section0_max_z_q16)));
         }
         entity.veh.slide_z = io::bam_sub(entity.veh.slide_z, 65536);
-        int32_t z = io::bam_add(int32_t(entity.position.z * 65536), entity.veh.slide_z);
+        int32_t z = io::bam_add(entity.position.z.q16, entity.veh.slide_z);
         if (z <= ground) {
             entity.health = -1;
             entity.class_think_ticks = 0;
             entity.death_motion = DeathMotionMode::BuildingEffects;
             z = ground;
         }
-        entity.position.z = z / 65536.0f;
+        entity.position.z.q16 = z;
         return true;
     }
     if (entity.death_motion != DeathMotionMode::BuildingEffects) return false;

@@ -60,8 +60,8 @@ void stamp_minimap_entity_facts(hud::HudMinimapMarker &m, const world::Entity &e
                        ? static_cast<int16_t>(world::spawn_zone_index_of(*zones, entity.handle))
                        : int16_t{-1};
     m.zone_radius = entity.zone_radius;
-    const int32_t pos[3] = {world::to_fixed(entity.position.x), world::to_fixed(entity.position.y),
-                            world::to_fixed(entity.position.z)};
+    const int32_t pos[3] = {entity.position.x.q16, entity.position.y.q16,
+                            entity.position.z.q16};
     m.entity_x = pos[0];
     m.entity_y = pos[1];
     m.entity_z = pos[2];
@@ -211,9 +211,9 @@ void build_minimap_markers(const MinimapMarkerInputs &in,
     hud::HudMinimapMarker m;
     m.bank = static_cast<uint8_t>(hud::HudMinimapBank::kPersistent);
     m.handle = local_marker_handle;
-    m.x = world::to_fixed(local_player->position.x);
-    m.y = world::to_fixed(local_player->position.y);
-    m.z = world::to_fixed(local_player->position.z);
+    m.x = local_player->position.x.q16;
+    m.y = local_player->position.y.q16;
+    m.z = local_player->position.z.q16;
     m.heading_bam = in.local_heading_bam;
     m.icon = 3; // live Person classification -> TSDicon cell 3
     m.color = replication::minimap_team_argb(local_player->team);

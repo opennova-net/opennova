@@ -24,9 +24,9 @@ void position_of(const AiSystem &ai, const Entity &entity, int32_t out[3]) {
     if (const AiEntity *body = ai.for_handle(entity.handle)) {
         std::copy_n(body->pos, 3, out);
     } else {
-        out[0] = static_cast<int32_t>(entity.position.x * 65536.0f);
-        out[1] = static_cast<int32_t>(entity.position.y * 65536.0f);
-        out[2] = static_cast<int32_t>(entity.position.z * 65536.0f);
+        out[0] = entity.position.x.q16;
+        out[1] = entity.position.y.q16;
+        out[2] = entity.position.z.q16;
     }
 }
 

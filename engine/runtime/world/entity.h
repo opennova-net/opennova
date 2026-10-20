@@ -469,7 +469,9 @@ struct Entity {
 
     uint16_t facial_slot = 0; // entity+440, GRM slot index | 0x8000
     bool facial_checked = false; // model initialization attempted for this allocation
-    Vec3 position;            // mission space (Z-up)
+    // Mission space (Z-up): entity+4/+8/+0xC, the 16.16 words retail keeps
+    // (geom.h EntityPosition; D-NET-507).
+    EntityPosition position;
     int16_t yaw = 0;
     int16_t pitch = 0;
     int16_t roll = 0;
@@ -501,7 +503,7 @@ struct Entity {
     uint32_t flags = 0;
     // Spawn-point backup of position, written by world::entity_reset_to_spawn_state
     // [orig: Entity_ResetToSpawnState backs Position into pad9[124/128/132]].
-    Vec3 spawn_position;
+    EntityPosition spawn_position;
 
     uint8_t team = 0;
     // GamePlayerEntity.playerClass (entity+0x294) — the soldier class 5..9. The joiner's client
@@ -520,16 +522,6 @@ struct Entity {
     // [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; read
     //  HUD_DrawEntityLabel @0x5a4021]
     std::string display_name;
-    // A user waypoint's exact 16.16 x / y (entity+4 / +8): the dwords
-    // Waypoint_CreateForPlayer stores from its arguments, compares in its
-    // duplicate wipe and the share writes back out. `position` mirrors them
-    // as floats, which drop the low bits past 256 units. Zero on every other
-    // entity (world/user_waypoints.h).
-    // [orig: Waypoint_CreateForPlayer @0x4dfd19 / @0x4dfd1d (the stores),
-    //  @0x4dfdba / @0x4dfdc6 (the wipe's compares);
-    //  NetPacket_WriteTypeNameAndPosition @0x42b1bc / @0x42b1cd (the share)]
-    int32_t waypoint_x_q16 = 0;
-    int32_t waypoint_y_q16 = 0;
     // The AI slot's +156 name: the BMS record's raw 8-byte ai_textfile (name2),
     // copied as two dwords for an AIData def and never rewritten; the 0x0D
     // record's AI trailer streams it. The port's .aip resolver reads its own

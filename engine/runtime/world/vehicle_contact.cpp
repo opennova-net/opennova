@@ -136,8 +136,8 @@ void vehicle_refresh_ground_link(World &world, Entity &vehicle, const VehicleTra
 	                                 : world.entity_update_counter;
 	if ((phase & 7u) != 0 && !(air && m.ground_cache == INT32_MIN))
 		return;
-	const int32_t pos[3] = { to_fixed(vehicle.position.x), to_fixed(vehicle.position.y),
-		to_fixed(vehicle.position.z) };
+	const int32_t pos[3] = { vehicle.position.x.q16, vehicle.position.y.q16,
+		vehicle.position.z.q16 };
 	const int32_t ground = vehicle_ground_height_at(world, vehicle, traits, pos);
 	if (air && ground != INT32_MIN)
 		m.ground_cache = ground;
@@ -154,8 +154,7 @@ void vehicle_follow_carrier(World &world, Entity &vehicle) {
 	CarrierMotionPose pose;
 	carrier_pose_fixed(vehicle, pose.pos, pose.yaw_bam, pose.pitch_bam, pose.roll_bam);
 	follow_carrier_motion(*carrier, pose);
-	vehicle.position = { float(from_fixed(pose.pos[0])), float(from_fixed(pose.pos[1])),
-		float(from_fixed(pose.pos[2])) };
+	vehicle.position.set_q16({pose.pos[0], pose.pos[1], pose.pos[2]});
 	auto &m = vehicle.veh;
 	m.yaw_bam = pose.yaw_bam;
 	m.air_pitch_bam = pose.pitch_bam;
@@ -285,12 +284,9 @@ void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &
 	other->veh.vel_x = io::bam_add(other->veh.vel_x, bam_mul_wrap(3, transfer[0]) >> 2);
 	other->veh.vel_y = io::bam_add(other->veh.vel_y, bam_mul_wrap(3, transfer[1]) >> 2);
 	other->veh.slide_z = io::bam_add(other->veh.slide_z, bam_mul_wrap(3, transfer[2]) >> 2);
-	other->position.x =
-			float(from_fixed(io::bam_add(to_fixed(other->position.x), transfer[0] >> 2)));
-	other->position.y =
-			float(from_fixed(io::bam_add(to_fixed(other->position.y), transfer[1] >> 2)));
-	other->position.z =
-			float(from_fixed(io::bam_add(to_fixed(other->position.z), transfer[2] >> 2)));
+	other->position.x.q16 = io::bam_add(other->position.x.q16, transfer[0] >> 2);
+	other->position.y.q16 = io::bam_add(other->position.y.q16, transfer[1] >> 2);
+	other->position.z.q16 = io::bam_add(other->position.z.q16, transfer[2] >> 2);
 }
 
 // A landing reaction runs once at the first positive probe depth, before

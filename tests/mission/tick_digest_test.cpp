@@ -122,9 +122,10 @@ void hash_entity(Digest &d, const w::Entity &e) {
 	d.value(e.bms_id);
 	d.value(static_cast<int32_t>(e.kind));
 	d.value(e.item_id);
-	d.value(e.position.x);
-	d.value(e.position.y);
-	d.value(e.position.z);
+	// The float view of the 16.16 words (D-NET-507): the float the chain always hashed.
+	d.value(static_cast<float>(e.position.x));
+	d.value(static_cast<float>(e.position.y));
+	d.value(static_cast<float>(e.position.z));
 	d.value(e.yaw);
 	d.value(e.pitch);
 	d.value(e.roll);

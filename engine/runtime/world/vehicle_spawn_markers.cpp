@@ -10,8 +10,8 @@ namespace {
 // The x87 planar norm clamps before truncation. Subtractions wrap in 32 bits.
 // [orig: Spawn_BuildMarkerBudgetList @0x529D30; selector @0x529EDD]
 int32_t planar_distance(const Entity &a, const Entity &b) {
-	const double dx = io::bam_sub(to_fixed(a.position.x), to_fixed(b.position.x));
-	const double dy = io::bam_sub(to_fixed(a.position.y), to_fixed(b.position.y));
+	const double dx = io::bam_sub(a.position.x.q16, b.position.x.q16);
+	const double dy = io::bam_sub(a.position.y.q16, b.position.y.q16);
 	return static_cast<int32_t>(std::min(2147418112.0, std::sqrt(dx * dx + dy * dy)));
 }
 bool zone_definition(const Entity &e) {

@@ -627,8 +627,8 @@ void World::run_entity_pass(const TickContext &ctx) {
         if (const Entity *lp = registry.get(cached.local_player)) {
             WaypointFrameInputs in;
             static_cast<WaypointCycleContext &>(in) = waypoint_context();
-            in.player_x = static_cast<int32_t>(lp->position.x * 65536.0f);
-            in.player_y = static_cast<int32_t>(lp->position.y * 65536.0f);
+            in.player_x = lp->position.x.q16;
+            in.player_y = lp->position.y.q16;
             in.subgoals_won = script.subgoals.won; // [orig: dword_AC86F4 @0x452e14]
             in.local = lp;
             script.waypoints.tick_advance(in);

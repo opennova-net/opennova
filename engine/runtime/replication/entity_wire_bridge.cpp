@@ -141,10 +141,10 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.type_id = static_cast<uint16_t>(e.item_id);
 	s.flags = 0;
 	s.team = e.team;
-	// World stores mission-space floats; the wire is i32 16.16 (world::to_fixed).
-	s.x = world::to_fixed(e.position.x);
-	s.y = world::to_fixed(e.position.y);
-	s.z = world::to_fixed(e.position.z);
+	// The entity's 16.16 position words, raw (D-NET-507).
+	s.x = e.position.x.q16;
+	s.y = e.position.y.q16;
+	s.z = e.position.z.q16;
 	// Entity+16 on the wire is a 32-bit engine-frame BAM heading = the spawn angle of
 	// (90 - mission_yaw) (D-NET-86 / §5.23/§5.24 — the same convention promote.cpp and ai.cpp
 	// build from). Entity::yaw is mission yaw in DEGREES, so reconcile our two-store split
@@ -295,9 +295,9 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 			if (const world::Entity *c =
 			            w.registry.get(world::EntityHandle{carrier})) {
 				s.carrier_pose_valid = true;
-				s.carrier_x = world::to_fixed(c->position.x);
-				s.carrier_y = world::to_fixed(c->position.y);
-				s.carrier_z = world::to_fixed(c->position.z);
+				s.carrier_x = c->position.x.q16;
+				s.carrier_y = c->position.y.q16;
+				s.carrier_z = c->position.z.q16;
 				// Same engine-frame conventions as snapshot_of: yaw is (90 - mission)
 				// framed, pitch a pure widen (D-NET-86) — read from the frame the
 				// rider was posed in (carrier_heading_bam).
@@ -416,9 +416,11 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		// Player-record wire rules (flags/minimap net_id/playerClass) are shared with the
 		// S2C 0x18 repair record — see the witness comments on the helpers above.
 		rec.minimap_flags = record_flags_word(e);
-		rec.pos_x = world::to_fixed(e.position.x);
-		rec.pos_y = world::to_fixed(e.position.y);
-		rec.pos_z = world::to_fixed(e.position.z);
+		// The position words, raw (D-NET-507). [orig: NetPacket_SerializeEntityStatesToBuffer
+		//  @0x5030A0 - entity+4 / +8 / +0xC @0x503250 / @0x503260 / @0x503270]
+		rec.pos_x = e.position.x.q16;
+		rec.pos_y = e.position.y.q16;
+		rec.pos_z = e.position.z.q16;
 		rec.orientation = engine_heading_bam(e.yaw);
 		rec.team = e.team;
 		// Field 13 = entity+0x374 animSlot, the character-model/anim-set selector — serialized RAW
@@ -484,9 +486,9 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 			}
 		}
 	}
-	rec.pos_x = world::to_fixed(e.position.x);
-	rec.pos_y = world::to_fixed(e.position.y);
-	rec.pos_z = world::to_fixed(e.position.z);
+	rec.pos_x = e.position.x.q16;
+	rec.pos_y = e.position.y.q16;
+	rec.pos_z = e.position.z.q16;
 	// Yaw high word — the client restores Yaw = (i16)heading_hi << 16 (@0x433aa1), so this is
 	// the engine-frame heading BAM's top half (same convention as the 0x0C orientation). The
 	// writer truncates the live dwords, so a seeded mover sends its own BAM
@@ -543,9 +545,11 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		// the one-byte empty string.
 		// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503A64..0x503ADF]
 		if (e.is_ai_capable) rec.entity_name = e.display_name;
-		rec.pos_x = world::to_fixed(e.position.x);
-		rec.pos_y = world::to_fixed(e.position.y);
-		rec.pos_z = world::to_fixed(e.position.z);
+		// The position words, raw (D-NET-507). [orig: NetPacket_SerializeEntityPoolToPacket_0
+		//  @0x503940 - entity+4 / +8 / +0xC @0x503B00 / @0x503B11 / @0x503B24]
+		rec.pos_x = e.position.x.q16;
+		rec.pos_y = e.position.y.q16;
+		rec.pos_z = e.position.z.q16;
 		// The entity+16/+20/+24 dwords, full width: a seeded mover's own BAM, not its
 		// whole-degree mirror [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503B37,
 		// @0x503B53, @0x503B6F].
@@ -607,8 +611,10 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		if (e.is_ai_capable) {
 			rec.has_ai_trailer = true;
 			rec.ai_name = e.ai_text_file;  // strcpy source @0x433370 (empty = one 0x00, still safe)
-			rec.ai_profile_1 = world::to_fixed(e.spawn_position.x);
-			rec.ai_profile_2 = world::to_fixed(e.spawn_position.y);
+			// The words raw (D-NET-507) [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940 -
+			//  the slot reads @0x503D59 / @0x503D74].
+			rec.ai_profile_1 = e.spawn_position.x.q16;
+			rec.ai_profile_2 = e.spawn_position.y.q16;
 		}
 		// Every row carries its entity+290 byte (the BMS byte-81 ammo count).
 		// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503D27..0x503D38]
@@ -724,9 +730,11 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 			continue;
 		}
 		rec.item_type_id = static_cast<uint16_t>(e->item_id);
-		rec.pos_x = world::to_fixed(e->position.x);
-		rec.pos_y = world::to_fixed(e->position.y);
-		rec.pos_z = world::to_fixed(e->position.z);
+		// The position words, raw (D-NET-507). [orig: NetPacket_SerializePool2StaticToBuffer
+		//  @0x5042F0 - entity+4 / +8 / +0xC @0x5043A8 / @0x5043B9 / @0x5043CA]
+		rec.pos_x = e->position.x.q16;
+		rec.pos_y = e->position.y.q16;
+		rec.pos_z = e->position.z.q16;
 		rec.euler_z = engine_heading_bam(e->yaw); // entity+16 heading (gates 0x0001 if non-zero)
 		rec.euler_x = engine_axis_bam(e->pitch);   // entity+20 pitch (0x0002 when non-zero)
 		rec.euler_y = engine_axis_bam(e->roll);    // entity+24 roll (0x0004 when non-zero)
@@ -810,9 +818,11 @@ static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 	Pool3SyncRecord rec;
 	rec.item_type_id = static_cast<uint16_t>(e.item_id);
 	rec.net_handle = e.handle.packed;            // entitySlot+124 — the wire handle (always)
-	rec.pos_x = world::to_fixed(e.position.x);   // entitySlot+4/8/12 (always)
-	rec.pos_y = world::to_fixed(e.position.y);
-	rec.pos_z = world::to_fixed(e.position.z);
+	// entitySlot+4/8/12 (always): the position words, raw (D-NET-507).
+	// [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 - @0x503543 / @0x503555 / @0x503567]
+	rec.pos_x = e.position.x.q16;
+	rec.pos_y = e.position.y.q16;
+	rec.pos_z = e.position.z.q16;
 	rec.movement_val = static_cast<uint32_t>(engine_heading_bam(e.yaw)); // entry+16 BAM (D-NET-59)
 	// Pool-3 flag 0x02 is the raw entity+0 dword. For marker types whose
 	// BMS waypoint distance overrides that field (notably KOTH's 6006), this
@@ -896,9 +906,9 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 			const int32_t carrier_yaw_bam = carrier_heading_bam(*carrier);
 			const WorldPose w = network_transform_local_to_world(
 					intent.pos_x, intent.pos_y, intent.pos_z,
-					world::to_fixed(carrier->position.x),
-					world::to_fixed(carrier->position.y),
-					world::to_fixed(carrier->position.z),
+					carrier->position.x.q16,
+					carrier->position.y.q16,
+					carrier->position.z.q16,
 					static_cast<uint32_t>(carrier_yaw_bam),
 					static_cast<uint32_t>(carrier_pitch_bam(*carrier)),
 					static_cast<uint32_t>(carrier_roll_bam(*carrier)));
@@ -928,9 +938,9 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	//    @0x4c206a/@0x4c206d.] Free-standing wire position is ABSOLUTE world (no
 	//    map-origin add on receive); the grounded branch above already lifted local ->
 	//    world.
-	ent->position.x = static_cast<float>(world::from_fixed(wire_x));
-	ent->position.y = static_cast<float>(world::from_fixed(wire_y));
-	ent->position.z = static_cast<float>(world::from_fixed(wire_z));
+	ent->position.x.q16 = wire_x;
+	ent->position.y.q16 = wire_y;
+	ent->position.z.q16 = wire_z;
 	// BAM32 -> mission yaw degrees, rounded (the inverse of snapshot_of's spawn-angle
 	// heading), normalized into [0, 360): a value that rounds up to 360 is 0.
 	const long yaw_deg = std::lround(world::mission_yaw_deg_from_bam_heading(heading_bam));
@@ -1259,9 +1269,9 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
 		const int32_t carrier_yaw_bam = carrier_heading_bam(*carrier);
 		const WorldPose local = network_transform_world_to_local(
 				ae.pos[0], ae.pos[1], ae.pos[2],
-				world::to_fixed(carrier->position.x),
-				world::to_fixed(carrier->position.y),
-				world::to_fixed(carrier->position.z),
+				carrier->position.x.q16,
+				carrier->position.y.q16,
+				carrier->position.z.q16,
 				static_cast<uint32_t>(carrier_yaw_bam),
 				static_cast<uint32_t>(carrier_pitch_bam(*carrier)),
 				static_cast<uint32_t>(carrier_roll_bam(*carrier)));

@@ -54,9 +54,9 @@ int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
         e.roll = pose.roll;
     }
     // Organics present from AiEntity.pos, not Entity.position.
-    e.pos[0] = to_fixed(occupant.position.x);
-    e.pos[1] = to_fixed(occupant.position.y);
-    e.pos[2] = to_fixed(occupant.position.z);
+    e.pos[0] = occupant.position.x.q16;
+    e.pos[1] = occupant.position.y.q16;
+    e.pos[2] = occupant.position.z.q16;
     return resolved_heading;
 }
 

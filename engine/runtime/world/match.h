@@ -608,7 +608,7 @@ class Match {
 // and pitch, its Flags (the indoors bit), its blink quad, and its identity as
 // the drop sound's source (none for a replica-only carrier).
 struct DropCarrierPose {
-    Vec3 position;
+    EntityPosition position;
     int32_t heading_bam = 0;
     int32_t pitch_bam = 0;
     uint32_t flags = 0;

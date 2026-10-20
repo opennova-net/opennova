@@ -39,8 +39,8 @@ uint8_t pool0_index(world::EntityHandle h) {
 // @0x517E63..0x517EB6 and the heal @0x50DEAC..0x50DF02].
 void send_medic_event(NapiNPServerCtx &ctx, uint8_t event, world::EntityHandle victim_handle,
 		world::EntityHandle healer_handle, const world::Entity &victim) {
-	const int32_t x = world::to_fixed(victim.position.x);
-	const int32_t y = world::to_fixed(victim.position.y);
+	const int32_t x = victim.position.x.q16;
+	const int32_t y = victim.position.y.q16;
 	const uint16_t x_hi = static_cast<uint16_t>(static_cast<uint32_t>(x) >> 16);
 	const uint16_t y_hi = static_cast<uint16_t>(static_cast<uint32_t>(y) >> 16);
 	const std::vector<uint8_t> body = {
@@ -111,9 +111,9 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 	// [orig: @0x517DCD..0x517E09; the reader Server_PositionPlayerForSpawn @0x50D60A]
 	{
 		SessionReplyState &st = victim_connection->reply;
-		st.revive_pos[0] = world::to_fixed(victim->position.x);
-		st.revive_pos[1] = world::to_fixed(victim->position.y);
-		st.revive_pos[2] = world::to_fixed(victim->position.z) + kRevivePoseRaise;
+		st.revive_pos[0] = victim->position.x.q16;
+		st.revive_pos[1] = victim->position.y.q16;
+		st.revive_pos[2] = victim->position.z.q16 + kRevivePoseRaise;
 	}
 	// The window again and the medic request cleared
 	// [orig: +368 = 0 @0x517E14, byte +89856 = 0 @0x517E1A].

@@ -136,9 +136,9 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
 				// Entity_UpdateAttachedChildren @0x45D550, @0x45D573 then @0x45D578..].
 				world.vehicles.update_attached_children(*veh);
 				if (AiEntity *ve = world.ai.for_handle(h)) {
-                    ve->pos[0] = to_fixed(veh->position.x);
-                    ve->pos[1] = to_fixed(veh->position.y);
-                    ve->pos[2] = to_fixed(veh->position.z);
+                    ve->pos[0] = veh->position.x.q16;
+                    ve->pos[1] = veh->position.y.q16;
+                    ve->pos[2] = veh->position.z.q16;
 					ve->pitch = veh->veh.air_pitch_bam;
 					ve->roll = veh->veh.air_roll_bam;
 					ve->heading = veh->veh.yaw_seeded
@@ -200,9 +200,9 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
             // Mirror the integrated transform back into the brain entity — one struct in
             // the original; the SM mover and the present snapshot read pos[]/heading.
             if (AiEntity *ve = world.ai.for_handle(h)) {
-                ve->pos[0] = to_fixed(veh->position.x);
-                ve->pos[1] = to_fixed(veh->position.y);
-                ve->pos[2] = to_fixed(veh->position.z);
+                ve->pos[0] = veh->position.x.q16;
+                ve->pos[1] = veh->position.y.q16;
+                ve->pos[2] = veh->position.z.q16;
                 ve->heading = veh->veh.yaw_seeded
                         ? veh->veh.yaw_bam
                         : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));

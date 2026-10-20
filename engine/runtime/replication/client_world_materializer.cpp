@@ -50,10 +50,7 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.item_id = row.type_id;
 	seed.net_id = row.net_id;
 	seed.display_name = row.display_name; // entity+0xF4
-	seed.position = {
-			static_cast<float>(row.x) / 65536.0f,
-			static_cast<float>(row.y) / 65536.0f,
-			static_cast<float>(row.z) / 65536.0f};
+	seed.position.set_q16({row.x, row.y, row.z});
 	seed.spawn_position = seed.position;
 	seed.yaw = static_cast<int16_t>(std::lround(
 			world::mission_yaw_deg_from_bam_heading(row.heading_bam)));
@@ -139,8 +136,7 @@ bool drop_carrier_pose_for(const ClientState &state, const world::World &world,
 	} else {
 		return false;
 	}
-	out.position = {static_cast<float>(x) / 65536.0f, static_cast<float>(y) / 65536.0f,
-			static_cast<float>(z) / 65536.0f};
+	out.position.set_q16({x, y, z});
 	return true;
 }
 

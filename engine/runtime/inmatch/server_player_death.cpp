@@ -379,9 +379,9 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 			if (camera_entity == nullptr) camera_entity = victim_entity;
 			DeathCameraTarget target;
 			if (camera_entity != nullptr) {
-				target.x = world::to_fixed(camera_entity->position.x);
-				target.y = world::to_fixed(camera_entity->position.y);
-				target.z = world::to_fixed(camera_entity->position.z);
+				target.x = camera_entity->position.x.q16;
+				target.y = camera_entity->position.y.q16;
+				target.z = camera_entity->position.z.q16;
 			}
 			victim_connection->link.transport->host_send(
 					s2c::DEATH_CAMERA_TARGET,

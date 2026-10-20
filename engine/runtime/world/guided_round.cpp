@@ -13,9 +13,9 @@ namespace {
 // [orig: jvln launch @0x445E40..0x445E97; PersonClass_GetTarget @0x4B0DF5..0x4B0E12;
 //  flare decoy @0x446232..0x44626B]
 void target_position(const Entity &target, int32_t out[3]) {
-    out[0] = to_fixed(target.position.x);
-    out[1] = to_fixed(target.position.y);
-    out[2] = to_fixed(target.position.z);
+    out[0] = target.position.x.q16;
+    out[1] = target.position.y.q16;
+    out[2] = target.position.z.q16;
 }
 // Every IN-FLIGHT refresh samples the target's aim origin instead: a person's
 // phased CameraOffset point, a model's TARGET userpoint, else its bbox centre.

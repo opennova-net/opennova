@@ -879,10 +879,10 @@ bool EntityCommands::raise_local_player() {
     Entity *e = world_.registry.get(world_.cached.local_player);
     if (e == nullptr) return false;
     AiEntity *body = world_.ai.for_handle(e->handle);
-    const int32_t z = body != nullptr ? body->pos[2] : to_fixed(e->position.z);
+    const int32_t z = body != nullptr ? body->pos[2] : e->position.z.q16;
     const int32_t raised = static_cast<int32_t>(uint32_t(z) + 0x1F40000u);
     if (body != nullptr) body->pos[2] = raised;
-    e->position.z = static_cast<float>(from_fixed(raised));
+    e->position.z.q16 = raised;
     return true;
 }
 
@@ -913,12 +913,11 @@ bool EntityCommands::teleport_local_to_ssn(EntityTarget ssn) {
     if (target == nullptr || player == nullptr) return false;
     const AiEntity *target_body = world_.ai.for_handle(target->handle);
     const int32_t pos[3] = {
-        target_body != nullptr ? target_body->pos[0] : to_fixed(target->position.x),
-        target_body != nullptr ? target_body->pos[1] : to_fixed(target->position.y),
-        target_body != nullptr ? target_body->pos[2] : to_fixed(target->position.z)};
+        target_body != nullptr ? target_body->pos[0] : target->position.x.q16,
+        target_body != nullptr ? target_body->pos[1] : target->position.y.q16,
+        target_body != nullptr ? target_body->pos[2] : target->position.z.q16};
     player->health = 20000;
-    player->position = {float(from_fixed(pos[0])), float(from_fixed(pos[1])),
-                        float(from_fixed(pos[2]))};
+    player->position.set_q16({pos[0], pos[1], pos[2]});
     std::copy_n(pos, 3, player->saved_live_pos);
     player->mount_toggle_fallback = target->handle;
     player->ground_target = target->handle;
@@ -1281,8 +1280,8 @@ int32_t script_position_distance(const int32_t a[3], const int32_t b[3]) {
 }
 
 int32_t script_entity_distance(const Entity &a, const Entity &b) {
-    const int32_t pa[3] = {to_fixed(a.position.x), to_fixed(a.position.y), to_fixed(a.position.z)};
-    const int32_t pb[3] = {to_fixed(b.position.x), to_fixed(b.position.y), to_fixed(b.position.z)};
+    const int32_t pa[3] = {a.position.x.q16, a.position.y.q16, a.position.z.q16};
+    const int32_t pb[3] = {b.position.x.q16, b.position.y.q16, b.position.z.q16};
     return script_position_distance(pa, pb);
 }
 
@@ -1320,9 +1319,9 @@ namespace {
 // entity[127..129] @0x4f1880..0x4f18c5 (sub 45) / @0x4f1728..0x4f176f
 // (sub 44); the center writer Entity_InitFromModel @0x40df1e..0x40e018]
 void los_offset_point(const Entity &e, int32_t out[3]) {
-    out[0] = static_cast<int32_t>(uint32_t(to_fixed(e.position.x)) + uint32_t(to_fixed(e.bbox_center.x)));
-    out[1] = static_cast<int32_t>(uint32_t(to_fixed(e.position.y)) + uint32_t(to_fixed(e.bbox_center.y)));
-    out[2] = static_cast<int32_t>(uint32_t(to_fixed(e.position.z)) + uint32_t(to_fixed(e.bbox_center.z)));
+    out[0] = static_cast<int32_t>(uint32_t(e.position.x.q16) + uint32_t(to_fixed(e.bbox_center.x)));
+    out[1] = static_cast<int32_t>(uint32_t(e.position.y.q16) + uint32_t(to_fixed(e.bbox_center.y)));
+    out[2] = static_cast<int32_t>(uint32_t(e.position.z.q16) + uint32_t(to_fixed(e.bbox_center.z)));
 }
 
 // The script LOS pair's ray. An authored range of at most 20 u takes the
@@ -1650,9 +1649,9 @@ const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
 void sync_teleported_ai(World &world, const Entity &entity) {
     AiEntity *ae = world.ai.for_handle(entity.handle);
     if (ae == nullptr) return;
-    ae->pos[0] = to_fixed(entity.position.x);
-    ae->pos[1] = to_fixed(entity.position.y);
-    ae->pos[2] = to_fixed(entity.position.z);
+    ae->pos[0] = entity.position.x.q16;
+    ae->pos[1] = entity.position.y.q16;
+    ae->pos[2] = entity.position.z.q16;
     ae->heading = bam_heading_from_mission_yaw_deg(
             static_cast<double>(entity.yaw));
     ae->pitch = bam_from_degrees_wrapped(static_cast<double>(entity.pitch));
@@ -2406,8 +2405,8 @@ int EntityCommands::apply_area_ai_command(int team, int sub_type, int32_t p1, in
         const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
         const Entity *entity = world_.registry.get(handle);
         if (entity == nullptr || static_cast<int8_t>(entity->team) != team) continue;
-        const int32_t x = to_fixed(entity->position.x);
-        const int32_t y = to_fixed(entity->position.y);
+        const int32_t x = entity->position.x.q16;
+        const int32_t y = entity->position.y.q16;
         if (x < p1 || x > p3 || y < p4 || y > reserved1) continue;
         if (apply_row_ai_command(world_, handle, sub_type, p2, p3, p4)) ++n;
     }

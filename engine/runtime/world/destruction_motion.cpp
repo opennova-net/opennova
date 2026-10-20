@@ -30,8 +30,8 @@ void entity_process_falling_death(
 			m.slide_z = -4096;
 		}
 		int32_t ground = INT32_MIN;
-		const int32_t pos[3] = { to_fixed(e.position.x), to_fixed(e.position.y),
-			to_fixed(e.position.z) };
+		const int32_t pos[3] = { e.position.x.q16, e.position.y.q16,
+			e.position.z.q16 };
 		if (world.ai.collision != nullptr) {
 			ground = world.ai.collision->raycast_ground(
 					world, e.handle, pos, 0, 0, 0x10000, 0x200000, &e.ground_target);
@@ -48,8 +48,7 @@ void entity_process_falling_death(
 		}
 		const int32_t z = io::bam_add(pos[2], m.slide_z);
 		if (ground == INT32_MIN || z > ground) {
-			e.position = { float(from_fixed(io::bam_add(pos[0], m.vel_x))),
-				float(from_fixed(io::bam_add(pos[1], m.vel_y))), float(from_fixed(z)) };
+			e.position.set_q16({io::bam_add(pos[0], m.vel_x), io::bam_add(pos[1], m.vel_y), z});
 		} else {
 			// Full old pose is retained; only the vertical component stops.
 			m.slide_z = 0;
@@ -58,9 +57,9 @@ void entity_process_falling_death(
 	if (AiEntity *body = world.ai.for_handle(e.handle)) {
 		for (int axis = 0; axis < 3; ++axis)
 			body->net_saved_live_pose[axis] = e.saved_live_pos[axis];
-		body->pos[0] = to_fixed(e.position.x);
-		body->pos[1] = to_fixed(e.position.y);
-		body->pos[2] = to_fixed(e.position.z);
+		body->pos[0] = e.position.x.q16;
+		body->pos[1] = e.position.y.q16;
+		body->pos[2] = e.position.z.q16;
 		body->vel_x = m.vel_x;
 		body->vel_y = m.vel_y;
 	}

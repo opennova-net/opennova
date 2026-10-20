@@ -1277,7 +1277,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// flag) clears it. No authored water (env.water_z == 0) never submerges.
 	// [orig: WeaponAction_ProcessFrame @ 0x540e60, the gate @ 0x54101c]
 	in.submerged = player != nullptr && world.env.water_z != 0 &&
-			to_fixed(player->position.z) <= world.env.water_z;
+			player->position.z.q16 <= world.env.water_z;
 	if (player != nullptr) weapon_fire_environment_inputs(world, *player, in);
 	if (!accept_weapon_input) active_slot.refire_queued = false;
 	WeaponFsmEvents ev;

@@ -439,8 +439,8 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     // [orig: @0x4E666A..0x4E66B1 — the fpatan @0x4E668D; the shift @0x4E6725]
     const int quadrant = approach_quadrant(
             bam_heading_from_mission_yaw_deg(static_cast<double>(target.yaw)),
-            io::bam_sub(to_fixed(e.pos.x), to_fixed(target.position.x)),
-            io::bam_sub(to_fixed(e.pos.y), to_fixed(target.position.y)),
+            io::bam_sub(to_fixed(e.pos.x), target.position.x.q16),
+            io::bam_sub(to_fixed(e.pos.y), target.position.y.q16),
             kCollisionQuadrantBias);
     const int32_t before = target.health;
     if (before <= 0) return; // [orig: `test bp, bp; jle` @0x4E66B7..0x4E66BE]
@@ -572,8 +572,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
         //  `add ecx, 1FFFFFFFh; shr ecx, 1Eh` @ 0x4e6a58..0x4e6a5e].
         const int32_t heading_bam = bam_heading_from_mission_yaw_deg(target.yaw);
         const int quadrant = approach_quadrant(heading_bam,
-                io::bam_sub(to_fixed(e.pos.x), to_fixed(target.position.x)),
-                io::bam_sub(to_fixed(e.pos.y), to_fixed(target.position.y)), 0x1FFFFFFFu);
+                io::bam_sub(to_fixed(e.pos.x), target.position.x.q16),
+                io::bam_sub(to_fixed(e.pos.y), target.position.y.q16), 0x1FFFFFFFu);
         int cause = death_cause::kExplosive;
         if (d16 >= 0x40000 && d16 < 0x80000)
             cause = (death_rand16(world) < 0x4000) ? death_cause::kFire : death_cause::kExplosive;
@@ -1178,7 +1178,7 @@ void process_destructible_death(World &world, Entity &target) {
     // The item's footprint retires the terrain pages composed under it
     // [orig: Entity_ProcessDestructibleDeath @ 0x43fc12..0x43fc5e].
     world.out.terrain_scorches.emit_page_invalidation(
-            int32_t(target.position.x * 65536), int32_t(target.position.y * 65536),
+            target.position.x.q16, target.position.y.q16,
             int32_t(target.bound_radius * 65536));
     // The S2C 0x26 entity-state broadcast (Server_SendEntityStatePacket
     // @ 0x509d70) is the net track's emit — staged with the other MP legs
@@ -1372,7 +1372,7 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 		target.death_motion = DeathMotionMode::PiecePhysics;
     }
 	else {
-		const bool water = to_fixed(target.position.z) <= world.env.water_z;
+		const bool water = target.position.z.q16 <= world.env.water_z;
 		Vec3 pos = target.position;
 		if (water)
 			pos.z = float(from_fixed(world.env.water_z));
@@ -1624,9 +1624,9 @@ void tick_item_death_motion(World &world, Entity &entity,
     if (e->death_motion == DeathMotionMode::PiecePhysics) {
         seed_piece_physics_angles(*e);
         Entity::VehicleMotorState &motion = e->veh;
-        int32_t x_q16 = to_fixed(e->position.x);
-        int32_t y_q16 = to_fixed(e->position.y);
-        int32_t z_q16 = to_fixed(e->position.z);
+        int32_t x_q16 = e->position.x.q16;
+        int32_t y_q16 = e->position.y.q16;
+        int32_t z_q16 = e->position.z.q16;
         const int32_t water_q16 = death_water_q16(water_height);
         if (z_q16 >= water_q16) {
             motion.slide_z = io::bam_sub(
@@ -1663,10 +1663,7 @@ void tick_item_death_motion(World &world, Entity &entity,
         x_q16 = io::bam_add(x_q16, motion.vel_x);
         y_q16 = io::bam_add(y_q16, motion.vel_y);
         z_q16 = io::bam_add(z_q16, motion.slide_z);
-        e->position = Vec3{
-                static_cast<float>(from_fixed(x_q16)),
-                static_cast<float>(from_fixed(y_q16)),
-                static_cast<float>(from_fixed(z_q16))};
+        e->position.set_q16({x_q16, y_q16, z_q16});
         update_dead_wreck_effects(
                 world, *e, traits, water_height, events);
         const PiecePhysicsSlope slope = piece_physics_slope(
@@ -1675,7 +1672,7 @@ void tick_item_death_motion(World &world, Entity &entity,
             e->death_motion = DeathMotionMode::PiecePitchSettle;
             z_q16 = io::bam_sub(
                     slope.ground_q16, kPiecePhysicsLandingOffsetQ16);
-            e->position.z = static_cast<float>(from_fixed(z_q16));
+            e->position.z.q16 = z_q16;
             motion.air_pitch_rate = slope.forward_bam;
             events.effects.push_back(DestructionEffectEvent{
                     "Effect_HeloGroundHit", e->position,
@@ -1777,8 +1774,8 @@ void tick_item_death_motion(World &world, Entity &entity,
 			// The routed wreck queries posed models as well as terrain.
 			// [orig: Entity_UpdateFallingDeathPhysics @0x493FF1..0x494001]
 			if (world.ai.collision != nullptr) {
-				const int32_t pos[3] = { to_fixed(e->position.x), to_fixed(e->position.y),
-					to_fixed(e->position.z) };
+				const int32_t pos[3] = { e->position.x.q16, e->position.y.q16,
+					e->position.z.q16 };
 				const int32_t height = world.ai.collision->raycast_ground(
 						world, e->handle, pos, 0, 0, 0x10000, 0x200000, &e->ground_target);
 				if (height != INT32_MIN)
@@ -1833,8 +1830,8 @@ void tick_item_death_motion(World &world, Entity &entity,
 					// [orig: ground-entity test @0x49414E; scorch 7 call
 					// @0x49416B..0x494179]
 					if (!e->ground_target.valid())
-						world.out.terrain_scorches.emit_standard(to_fixed(e->position.x),
-								to_fixed(e->position.y), 7, world.logic_tick);
+						world.out.terrain_scorches.emit_standard(e->position.x.q16,
+								e->position.y.q16, 7, world.logic_tick);
 				} else {
 					e->position = old_position;
             e->veh.slide_z = 0;

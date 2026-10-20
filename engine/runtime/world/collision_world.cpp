@@ -219,9 +219,9 @@ namespace detail { // was anonymous; the entity position/radius set is declared 
 
 // Entity position in 16.16 engine units (registry entities store float mission units).
 void entity_pos_fixed(const Entity &e, int32_t out[3]) {
-    out[0] = to_fixed(e.position.x);
-    out[1] = to_fixed(e.position.y);
-    out[2] = to_fixed(e.position.z);
+    out[0] = e.position.x.q16;
+    out[1] = e.position.y.q16;
+    out[2] = e.position.z.q16;
 }
 
 // Collision-model fallback for hosts/tests that have not stamped entity+0.

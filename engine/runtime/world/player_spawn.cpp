@@ -129,9 +129,9 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // skips it once net-snapped (inf.is_local_player stays false). [orig: net-re §5.38; ADR 0012]
     const int idx = world.ai.attach(h);
     AiEntity &ae = *world.ai.at(idx);
-    ae.pos[0] = to_fixed(spawn.position.x);
-    ae.pos[1] = to_fixed(spawn.position.y);
-    ae.pos[2] = to_fixed(spawn.position.z);
+    ae.pos[0] = spawn.position.x.q16;
+    ae.pos[1] = spawn.position.y.q16;
+    ae.pos[2] = spawn.position.z.q16;
     // The heading word the placement copied (D-NET-376), else the (90 - yaw)
     // heading of a spawn with no source pose.
     // [orig: Entity_FindBestSpawnPoint @0x50CF38]

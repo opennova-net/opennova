@@ -493,9 +493,9 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 			HostJoinerPose p;
 			p.entity_handle = e->handle.packed;
 			p.item_type_id = static_cast<uint16_t>(e->item_id);
-			p.pos_x = world::to_fixed(e->position.x);
-			p.pos_y = world::to_fixed(e->position.y);
-			p.pos_z = world::to_fixed(e->position.z);
+			p.pos_x = e->position.x.q16;
+			p.pos_y = e->position.y.q16;
+			p.pos_z = e->position.z.q16;
 			// Match the wire heading convention the P2 pose / the 0x0C body use: the high 16 bits of
 			// the engine-frame BAM = (90 - mission_yaw) deg (D-NET-86), NOT raw mission degrees. The
 			// spawned player's heading is its start marker's placement angle, so the high half is the

@@ -54,7 +54,7 @@ void ground_step(World &world, Entity &e, const VehicleTraits &t, int32_t &z) {
 	const bool grounded = (e.flags & kEntityFlagInAir) == 0;
 	if (grounded && m.speed != 0) {
 		const int32_t seed =
-				bam_shl_wrap(io::bam_add(to_fixed(e.position.x), to_fixed(e.position.y)), 14);
+				bam_shl_wrap(io::bam_add(e.position.x.q16, e.position.y.q16), 14);
 		m.air_roll_rate = io::bam_add(m.air_roll_rate, (seed ^ 0x16968000) >> 15);
 		m.air_pitch_rate = io::bam_add(m.air_pitch_rate, (seed ^ 0x29690000) >> 15);
 	}
@@ -299,7 +299,7 @@ void VehicleSystem::tick_simple_motor(
 		}
 	}
 	steer(e, t, boat);
-	int32_t x = to_fixed(e.position.x), y = to_fixed(e.position.y), z = to_fixed(e.position.z);
+	int32_t x = e.position.x.q16, y = e.position.y.q16, z = e.position.z.q16;
 	int32_t lateral = 0;
 	if (boat)
 		lateral = boat_step(world_, e, t, x, y, z);
@@ -328,7 +328,7 @@ void VehicleSystem::tick_simple_motor(
 					m.air_roll_bam, bam_shl_wrap(bam_mul_wrap(lateral, t.turn_roll), 8));
 		}
 	}
-	e.position = { float(from_fixed(x)), float(from_fixed(y)), float(from_fixed(z)) };
+	e.position.set_q16({x, y, z});
 	e.yaw = int16_t(std::lround(mission_yaw_deg_from_bam_heading(m.yaw_bam)));
 	e.pitch = degrees_i16_from_bam(m.air_pitch_bam);
 	e.roll = degrees_i16_from_bam(m.air_roll_bam);

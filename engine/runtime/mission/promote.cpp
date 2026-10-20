@@ -259,9 +259,9 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     s.bms_id = e.id; // carry the file entity id so the embedder can map this entity back to its placed node
     s.kind = kind;
     s.item_id = e.type_id;
-    s.position.x = e.get_x();
-    s.position.y = e.get_y();
-    s.position.z = e.get_z();
+    // The record's three 16.16 dwords, copied raw (D-NET-507).
+    // [orig: Entity_SpawnFromBMSRecord @0x40EB30..0x40EB3F]
+    s.position.set_q16({e.x, e.y, e.z});
 	s.spawn_position = s.position;
 	s.yaw = e.yaw;
 	s.pitch = e.pitch;
@@ -352,6 +352,8 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // ((90 - yaw)<<16/360)<<16, spawn_angle_bam]. The waypoint mover writes the same engine frame (atan2(dY,dX) bearing
     // into kWorkHeading), so storing the seed in the engine frame keeps a unit's facing consistent
     // whether parked or moving; the present pass converts engine-heading -> mission yaw for the basis.
+    // The slot takes the entity's position words raw (D-NET-507).
+    // [orig: Entity_InitFromModel @0x40E113..0x40E127]
     ae.pos[0] = e.x;
     ae.pos[1] = e.y;
     ae.pos[2] = e.z;
@@ -601,6 +603,8 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         Entity child_seed;
         child_seed.kind = EntityKind::Item;
         child_seed.item_id = attachment.child_type_id;
+        // The carrier's position words, copied raw (D-NET-507).
+        // [orig: Entity_SpawnWeaponOverlays @0x40F3C5..0x40F3EB]
         child_seed.position = carrier->position;
         child_seed.yaw = carrier->yaw;
         child_seed.pitch = carrier->pitch;

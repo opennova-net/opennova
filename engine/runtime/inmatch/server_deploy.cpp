@@ -3,7 +3,6 @@
 #include <runtime/inmatch/server_spawn.h>
 
 #include <runtime/inmatch/server_message_dispatch.h> // Server_ReleasePlayerDeployment (the convert's deploy)
-#include <base/io/fixed.h>                          // fp16_16_to_float (a revive's saved position)
 
 #include <runtime/world/ai.h>           // AiEntity / AiSystem
 #include <runtime/world/angle.h>        // bam_heading_from_mission_yaw_deg
@@ -83,6 +82,9 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 			world, player->handle, world::EntityHandle{},
 			conn.reply.player_slot, team, ctx.config.game_type);
 	if (selected.found) {
+		// The marker's position words, copied raw (D-NET-507).
+		// [orig: Server_PositionPlayerForSpawn @0x50CF60 - the copies
+		//  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
 		player->position = selected.position;
 		player->yaw = selected.yaw;
 		player->pitch = selected.pitch;
@@ -106,9 +108,9 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	player->damage_state = 620;
 	if (ai != nullptr) {
 		const int32_t pos[3] = {
-				world::to_fixed(player->position.x),
-				world::to_fixed(player->position.y),
-				world::to_fixed(player->position.z)};
+				player->position.x.q16,
+				player->position.y.q16,
+				player->position.z.q16};
 		// The placement's copied heading word (D-NET-376) [orig:
 		// Server_PositionPlayerForSpawn @0x50D3F7; Entity_FindBestSpawnPoint
 		// @0x50CF38]; with no marker, the mirror's heading.
@@ -263,9 +265,8 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 	// was picked (D-NET-377). [orig: Server_PositionPlayerForSpawn
 	//  @0x50D60A..0x50D62A; GameEvent_RevivePlayer @0x517DCD..0x517E09 saves]
 	if (conn.reply.revive_pose_valid) {
-		player.position.x = opennova::io::fp16_16_to_float(conn.reply.revive_pos[0]);
-		player.position.y = opennova::io::fp16_16_to_float(conn.reply.revive_pos[1]);
-		player.position.z = opennova::io::fp16_16_to_float(conn.reply.revive_pos[2]);
+		player.position.set_q16({conn.reply.revive_pos[0], conn.reply.revive_pos[1],
+				conn.reply.revive_pos[2]});
 		conn.reply.revive_pose_valid = false;
 	} else if (!pose.found) {
 		// No authored marker: the deploy transaction restores the position

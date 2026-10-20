@@ -247,16 +247,16 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
     for (const world::Entity *e : pool3) {
         hud::HudMinimapPoolEntity row;
         row.def_id = e->item_id;
-        row.x = world::to_fixed(e->position.x);
-        row.y = world::to_fixed(e->position.y);
+        row.x = e->position.x.q16;
+        row.y = e->position.y.q16;
         row.radius_q16 = world::to_fixed(e->bound_radius);
         if (e->item_id == def::DEF_TYPE_NAMED_LOCATION) row.location_index = location++;
         out.pool3.push_back(row);
     }
     for (const world::Entity *e : pool4) {
         hud::HudMinimapPlayerWaypoint row;
-        row.x = world::to_fixed(e->position.x);
-        row.y = world::to_fixed(e->position.y);
+        row.x = e->position.x.q16;
+        row.y = e->position.y.q16;
         row.name = e->display_name;
         out.player_waypoints.push_back(row);
     }
@@ -283,8 +283,8 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
         const world::Entity *te = w->registry.get(world::EntityHandle{rt.handle});
         if (te != nullptr) {
             t.live_known = true;
-            t.live_x = world::to_fixed(te->position.x);
-            t.live_y = world::to_fixed(te->position.y);
+            t.live_x = te->position.x.q16;
+            t.live_y = te->position.y.q16;
             t.radio_request = te->radio_request == 1;
             t.hidden_bit = ((te->flags | te->engine_flags) & world::kEntityFlagCarried) != 0;
             t.aboard_vehicle = world::friendly_tag_aboard_vehicle(*w, te->ground_target);

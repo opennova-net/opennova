@@ -47,9 +47,9 @@ void entity_position_q16(const World &world, const Entity &entity, int32_t out[3
 		out[2] = body->pos[2];
 		return;
 	}
-	out[0] = to_fixed(entity.position.x);
-	out[1] = to_fixed(entity.position.y);
-	out[2] = to_fixed(entity.position.z);
+	out[0] = entity.position.x.q16;
+	out[1] = entity.position.y.q16;
+	out[2] = entity.position.z.q16;
 }
 
 } // namespace

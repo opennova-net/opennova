@@ -34,18 +34,18 @@ void fan_entity_sound_in_match(NapiNPServerCtx &ctx, world::World &world,
 	cmd.flag = 1;
 	cmd.sound_name = set_name;
 	cmd.has_pos = true;
-	cmd.pos_x = static_cast<int16_t>(world::to_fixed(source.position.x) >> 16);
-	cmd.pos_y = static_cast<int16_t>(world::to_fixed(source.position.y) >> 16);
-	cmd.pos_z = static_cast<int16_t>(world::to_fixed(source.position.z) >> 16);
+	cmd.pos_x = static_cast<int16_t>(source.position.x.q16 >> 16);
+	cmd.pos_y = static_cast<int16_t>(source.position.y.q16 >> 16);
+	cmd.pos_z = static_cast<int16_t>(source.position.z.q16 >> 16);
 	const std::vector<uint8_t> body = encode_play_sound(cmd);
 	for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
 		if (!active_player_recipient(candidate)) continue;
 		if (candidate.link.mode == replication::TransportMode::Loopback) {
 			world::SoundSlotEvent local;
 			local.source_handle = source.handle.packed;
-			local.pos[0] = world::to_fixed(source.position.x);
-			local.pos[1] = world::to_fixed(source.position.y);
-			local.pos[2] = world::to_fixed(source.position.z);
+			local.pos[0] = source.position.x.q16;
+			local.pos[1] = source.position.y.q16;
+			local.pos[2] = source.position.z.q16;
 			local.slot = 0;
 			std::memcpy(local.set_name, set_name, sizeof(set_name));
 			world.out.slot_sounds.push_back(local);
@@ -93,7 +93,7 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 		// signed; retail carries no authored-water test at this site.
 		// [orig: @0x50D7CD..0x50D7D9 `add eax,[ecx+0Ch]; cmp eax,
 		//  g_EnvWaterHeightFixed; jge`]
-		if (world::to_fixed(player->position.z) + player->eye_offset_z >= world.env.water_z) {
+		if (player->position.z.q16 + player->eye_offset_z >= world.env.water_z) {
 			// Surfacing after more than four samples plays the breath (a dive
 			// no longer than 160% of the breath value) or the gasp composite,
 			// for a body with an ItemDef (+0x20).

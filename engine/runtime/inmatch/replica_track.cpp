@@ -40,9 +40,9 @@ void rebuild_route(world::World &world, const replication::ClientState &state) {
 		// wire-header joiner streamed it), else whatever the old entry held.
 		const world::EntityHandle marker_h = world::EntityHandle::make(3, wp.slot_id);
 		if (const world::Entity *marker = world.registry.get(marker_h)) {
-			entry.x = world::to_fixed(marker->position.x);
-			entry.y = world::to_fixed(marker->position.y);
-			entry.z = world::to_fixed(marker->position.z);
+			entry.x = marker->position.x.q16;
+			entry.y = marker->position.y.q16;
+			entry.z = marker->position.z.q16;
 		} else if (const replication::ClientEntityState *row = state.find(marker_h.packed)) {
 			entry.x = row->x;
 			entry.y = row->y;

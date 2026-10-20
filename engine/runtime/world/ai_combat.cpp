@@ -104,9 +104,9 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
             }
             AiCandidate cand;
             cand.handle = h;
-            cand.pos[0] = static_cast<int32_t>(c->position.x * io::kFp16One);
-            cand.pos[1] = static_cast<int32_t>(c->position.y * io::kFp16One);
-            cand.pos[2] = static_cast<int32_t>(c->position.z * io::kFp16One);
+            cand.pos[0] = c->position.x.q16;
+            cand.pos[1] = c->position.y.q16;
+            cand.pos[2] = c->position.z.q16;
             cand.team = c->team;
             cand.flags = static_cast<int32_t>(c->engine_flags); // &2/&0x8000000 skip, &0x4000 prio x6
             cand.health = static_cast<int16_t>(std::min<int32_t>(c->health, INT16_MAX));
@@ -352,9 +352,9 @@ void AiSystem::weapon_fire_origin(const AiEntity &e, int32_t out[3]) {
 }
 
 void AiSystem::weapon_fire_origin(const Entity &e, int32_t out[3]) {
-    out[0] = static_cast<int32_t>(e.position.x * io::kFp16One);
-    out[1] = static_cast<int32_t>(e.position.y * io::kFp16One);
-    out[2] = static_cast<int32_t>(e.position.z * io::kFp16One);
+    out[0] = e.position.x.q16;
+    out[1] = e.position.y.q16;
+    out[2] = e.position.z.q16;
 }
 
 // The live-pose seam shared by both World& forms: the world's native muzzle
@@ -572,9 +572,9 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
         if (ally == nullptr || ally->item_id == 0 || h == e.handle ||
                 ally->team != e.team || ally->health <= 0 ||
                 ((ally->flags | ally->engine_flags) & (2u | kEntityFlagPlayer)) != 0) continue;
-        const double dx = io::bam_sub(int32_t(ally->position.x * io::kFp16One), e.pos[0]);
-        const double dy = io::bam_sub(int32_t(ally->position.y * io::kFp16One), e.pos[1]);
-        const double dz = io::bam_sub(int32_t(ally->position.z * io::kFp16One), e.pos[2]);
+        const double dx = io::bam_sub(ally->position.x.q16, e.pos[0]);
+        const double dy = io::bam_sub(ally->position.y.q16, e.pos[1]);
+        const double dz = io::bam_sub(ally->position.z.q16, e.pos[2]);
         if (std::sqrt(dx * dx + dy * dy + dz * dz) >= 6553601.0) continue;
         e.slot.bytes()[AiSlot::kAlertByte] = 2;
         if (AiEntity *brain = for_handle(h)) brain->brain.f[AiBrain::kAlert] = 2;

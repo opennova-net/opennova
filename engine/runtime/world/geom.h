@@ -2,13 +2,16 @@
 //
 // The original engine stores mission-space coordinates and many WAC/BMS scalar
 // parameters as 16.16 signed fixed-point (e.g. bms::Entity::get_x() = x / 65536).
-// The portable world keeps a clean float model; conversion helpers live here so
-// front-ends (WAC operand resolution, BMS param decode) share one definition.
+// An entity's position keeps those words (EntityPosition); the conversion helpers
+// live here so front-ends (WAC operand resolution, BMS param decode) share one
+// definition.
 #pragma once
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
@@ -43,6 +46,51 @@ struct Vec3 {
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;
+};
+
+// One axis of an entity's mission-space position: retail's int32 16.16 word
+// (entity+4 / +8 / +0xC), the only state the axis keeps (D-NET-507). Retail
+// stores and copies these words raw: the BMS spawn
+// [orig: Entity_SpawnFromBMSRecord @0x40EB30..0x40EB3F], the AI slot
+// [orig: Entity_InitFromModel @0x40E113..0x40E127], a placement
+// [orig: Server_PositionPlayerForSpawn @0x50D3DB..0x50D403] and every load
+// serializer; `q16` is that word. The float conversion is the accessor for the
+// consumers that compute in float, and a float store truncates through
+// to_fixed, the conversion the wire builders applied to the float position and
+// retail's own float-to-int rule [orig: _ftol2_sse @0x76BC00 - cvttsd2si @0x76BC15].
+struct PositionWord {
+    int32_t q16 = 0;
+
+    operator float() const { return io::fp16_16_to_float(q16); }
+    PositionWord &operator=(float units) {
+        q16 = to_fixed(units);
+        return *this;
+    }
+    PositionWord &operator+=(float units) { return *this = float(*this) + units; }
+    PositionWord &operator-=(float units) { return *this = float(*this) - units; }
+};
+
+// An entity's position (and its spawn backup), three PositionWords. The float
+// view converts per read; a Vec3 store truncates each axis; q16()/set_q16()
+// move the words exactly. Not an aggregate, so a braced store resolves to the
+// Vec3 overload alone.
+struct EntityPosition {
+    PositionWord x, y, z;
+
+    EntityPosition() {}
+    operator Vec3() const { return {float(x), float(y), float(z)}; }
+    EntityPosition &operator=(const Vec3 &v) {
+        x = v.x;
+        y = v.y;
+        z = v.z;
+        return *this;
+    }
+    FixedVec3 q16() const { return {x.q16, y.q16, z.q16}; }
+    void set_q16(const FixedVec3 &w) {
+        x.q16 = w.x;
+        y.q16 = w.y;
+        z.q16 = w.z;
+    }
 };
 
 // Axis-aligned bounding box in mission space (Z-up, the original's frame).

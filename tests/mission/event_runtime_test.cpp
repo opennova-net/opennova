@@ -2812,7 +2812,7 @@ static void test_structural_bms_actions() {
     dispatch(bms::ActionType::SingleChangeGroup, 100, 7);
     CHECK(w.registry.get(pool0_h)->group_id == 7);
 
-    w.registry.get(pool0_h)->position = {};
+    w.registry.get(pool0_h)->position = world::Vec3{};
     w.registry.get(pool0_h)->engine_flags |= world::kEntityFlagMatrixBuilt;
     dispatch(bms::ActionType::SingleTeleportAction, 100, 9);
     CHECK(w.registry.get(pool0_h)->position.x == 10.0f);

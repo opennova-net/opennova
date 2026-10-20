@@ -780,8 +780,7 @@ void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPos
     object.yaw = static_cast<int16_t>(
         std::lround(mission_yaw_deg_from_bam_heading(object.veh.yaw_bam)));
     object.position = carrier.position;
-    object.position.z = static_cast<float>(
-        from_fixed(io::bam_add(to_fixed(carrier.position.z), 0x4000)));
+    object.position.z.q16 = io::bam_add(carrier.position.z.q16, 0x4000);
     // The dropped object takes its carrier's blink quad, then re-runs its own
     // proximity/blink query at the drop point (the quad and the indoors bit
     // the collector's blink-hits gate and the render waves read).
@@ -842,9 +841,9 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     CarryObjectiveState *state = carry_state(world, flag_handle);
     if (flag == nullptr || state == nullptr)
         return false;
-    const int32_t x = to_fixed(flag->position.x);
-    const int32_t y = to_fixed(flag->position.y);
-    const int32_t z = to_fixed(flag->position.z);
+    const int32_t x = flag->position.x.q16;
+    const int32_t y = flag->position.y.q16;
+    const int32_t z = flag->position.z.q16;
     const int32_t home_x = to_fixed(state->home.x);
     const int32_t home_y = to_fixed(state->home.y);
     const int32_t home_z = to_fixed(state->home.z);
@@ -1531,11 +1530,11 @@ void Match::tick_flag_event(World &world, Entity &flag) {
     }
     CarryObjectiveState *state = carry_state(world, flag.handle);
     if (state == nullptr) return;
-    const int32_t x = int32_t(flag.position.x * 65536);
-    const int32_t y = int32_t(flag.position.y * 65536);
+    const int32_t x = flag.position.x.q16;
+    const int32_t y = flag.position.y.q16;
     const int32_t dx = io::bam_sub(x, int32_t(state->home.x * 65536));
     const int32_t dy = io::bam_sub(y, int32_t(state->home.y * 65536));
-    const int32_t dz = io::bam_sub(int32_t(flag.position.z * 65536), int32_t(state->home.z * 65536));
+    const int32_t dz = io::bam_sub(flag.position.z.q16, int32_t(state->home.z * 65536));
     const bool near_home = std::sqrt(double(dx) * dx + double(dy) * dy) < 131072.0 &&
             io::bam_abs(dz) < 131072;
     const bool idle = x == state->previous_x_q16 && y == state->previous_y_q16 &&
@@ -1555,8 +1554,8 @@ void Match::tick_flag_event(World &world, Entity &flag) {
         return_flag_home(world, handle, MatchGameplayEventKind::FlagReturn);
         state = carry_state(world, handle);
     }
-    state->previous_x_q16 = int32_t(flag.position.x * 65536);
-    state->previous_y_q16 = int32_t(flag.position.y * 65536);
+    state->previous_x_q16 = flag.position.x.q16;
+    state->previous_y_q16 = flag.position.y.q16;
     const Entity *occupant = world.registry.get(flag.primary_occupant);
     const Entity *local = world.registry.get(world.cached.local_player);
     if (occupant != nullptr && local != nullptr && local->team == flag.team) {
@@ -1583,9 +1582,9 @@ void fall_step(World &world, Entity &object) {
     // @0x4adf0d..0x4adf6d; the step @0x4adf33..0x4adf55]
     stamp_saved_live_pose(object);
     Entity::VehicleMotorState &m = object.veh;
-    const int32_t x = to_fixed(object.position.x);
-    const int32_t y = to_fixed(object.position.y);
-    const int32_t z = to_fixed(object.position.z);
+    const int32_t x = object.position.x.q16;
+    const int32_t y = object.position.y.q16;
+    const int32_t z = object.position.z.q16;
     const int32_t next_x = io::bam_add(x, m.vel_x);
     const int32_t next_y = io::bam_add(m.vel_y, y);
     const int32_t next_z = io::bam_add(m.slide_z, z);
@@ -1599,9 +1598,7 @@ void fall_step(World &world, Entity &object) {
         world, object.handle, FixedVec3{x, y, io::bam_add(z, 0x1000)},
         (object.flags & kEntityFlagIndoors) != 0, &ground);
     if (next_z > height) {
-        object.position = {static_cast<float>(from_fixed(next_x)),
-                           static_cast<float>(from_fixed(next_y)),
-                           static_cast<float>(from_fixed(next_z))}; // [orig: @0x4ae016..0x4ae01f]
+        object.position.set_q16({next_x, next_y, next_z}); // [orig: @0x4ae016..0x4ae01f]
         return;
     }
     // The landing: the ground height, the ground link and no velocity
@@ -1610,7 +1607,7 @@ void fall_step(World &world, Entity &object) {
     // other def follows a dead ground entity plainly and rides otherwise
     // (a ride with no ground only keeps saving its pose)
     // [orig: @0x4adfc9..0x4ae00e].
-    object.position.z = static_cast<float>(from_fixed(height));
+    object.position.z.q16 = height;
     object.ground_target = ground;
     m.vel_x = 0;
     m.vel_y = 0;
@@ -1646,9 +1643,7 @@ void follow_ground(World &world, Entity &object, bool ride) {
         CarrierMotionPose pose;
         carrier_pose_fixed(object, pose.pos, pose.yaw_bam, pose.pitch_bam, pose.roll_bam);
         follow_carrier_motion(*ground, pose);
-        object.position = {static_cast<float>(from_fixed(pose.pos[0])),
-                           static_cast<float>(from_fixed(pose.pos[1])),
-                           static_cast<float>(from_fixed(pose.pos[2]))};
+        object.position.set_q16({pose.pos[0], pose.pos[1], pose.pos[2]});
         object.veh.yaw_seeded = true;
         object.veh.yaw_bam = pose.yaw_bam;
         object.veh.air_pitch_bam = pose.pitch_bam;
@@ -1768,11 +1763,11 @@ void Match::update_flag_objectives(World &world) {
             // @0x43A9BE) -> Server_BroadcastEntityDeathEvent @0x4AD8D3]
             if (state == nullptr)
                 continue;
-            const int64_t dx = int64_t{to_fixed(target->position.x)} -
+            const int64_t dx = int64_t{target->position.x.q16} -
                                to_fixed(state->home.x);
-            const int64_t dy = int64_t{to_fixed(target->position.y)} -
+            const int64_t dy = int64_t{target->position.y.q16} -
                                to_fixed(state->home.y);
-            const int64_t dz = int64_t{to_fixed(target->position.z)} -
+            const int64_t dz = int64_t{target->position.z.q16} -
                                to_fixed(state->home.z);
             const bool displaced =
                 static_cast<int64_t>(std::sqrt(static_cast<long double>(

@@ -1418,7 +1418,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
         int32_t center_local[3];
         int32_t radius = 0;
         bound_sphere_fixed(*cm, center_local, radius, e->uniform_scale_q16);
-        const int32_t z = to_fixed(e->position.z) + center_local[2];
+        const int32_t z = e->position.z.q16 + center_local[2];
         return z + radius > cam.water_z && z - radius < cam.water_z;
     };
 

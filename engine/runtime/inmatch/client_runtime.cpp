@@ -214,9 +214,9 @@ void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
 void ClientRuntime::set_local_player_position(const world::World &world) {
 	const world::Entity *player = world.registry.get(world.cached.local_player);
 	if (player == nullptr) return;
-	local_player_position_[0] = world::to_fixed(player->position.x);
-	local_player_position_[1] = world::to_fixed(player->position.y);
-	local_player_position_[2] = world::to_fixed(player->position.z);
+	local_player_position_[0] = player->position.x.q16;
+	local_player_position_[1] = player->position.y.q16;
+	local_player_position_[2] = player->position.z.q16;
 }
 
 void ClientRuntime::adopt_tracked_window(const ZoneTimerWindow &window) {

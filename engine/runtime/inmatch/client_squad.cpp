@@ -88,7 +88,7 @@ bool ClientRuntime::place_user_waypoint(world::World &world, int32_t x, int32_t 
 	share.name = wp->display_name;
 	share.x = x;
 	share.y = y;
-	share.z = world::to_fixed(wp->position.z);
+	share.z = wp->position.z.q16;
 	queue_squad_message(c2s::WAYPOINT_SHARE, encode_waypoint_share(share));
 	return true;
 }

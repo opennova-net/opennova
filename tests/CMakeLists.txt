@@ -5001,6 +5001,11 @@ opennova_add_gated_test(ragdoll_us01 COMMAND ragdoll_us01_test)
 # --- parity lane L5 (client replica) ---
 
 # --- parity lane L6 (stream/16.16) ---
+# D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a
+# placement and every load-stream serializer (0x0C / 0x0D + trailer / 0x0F / 0x10 / 0x20).
+add_executable(npruntime_entity_position_words_test npruntime/entity_position_words_test.cpp)
+target_link_libraries(npruntime_entity_position_words_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_entity_position_words COMMAND npruntime_entity_position_words_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 

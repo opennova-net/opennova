@@ -42,7 +42,7 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
         out.handle = world::EntityHandle{row->handle};
         out.item_id = row->type_id;
         out.has_item_def = row->type_id != 0;
-        out.position = {float(row->x) / 65536.0f, float(row->y) / 65536.0f, float(row->z) / 65536.0f};
+        out.position.set_q16({row->x, row->y, row->z});
         out.team = row->team_known ? row->team : 0;
         out.flags = row->state_flags;
         out.engine_flags = row->rm_entity_flags;
@@ -83,13 +83,13 @@ bool in_active_radio_zone(const world::World &world, const world::Entity &speake
                 (entry.value_active && entry.value_target == entry.value_limit)) continue;
         const auto *zone = world.registry.get(world::EntityHandle{pair.first});
         if (!zone) continue;
-        const double dx = double(world::to_fixed(zone->position.x)) - world::to_fixed(speaker.position.x);
-        const double dy = double(world::to_fixed(zone->position.y)) - world::to_fixed(speaker.position.y);
+        const double dx = double(zone->position.x.q16) - speaker.position.x.q16;
+        const double dy = double(zone->position.y.q16) - speaker.position.y.q16;
         // The x87 length is clamped at flt_7C19E0 (0x7FFF0000) before ftol.
         const int32_t dist = int32_t(std::min(std::sqrt(dx*dx+dy*dy), 2147418112.0));
         const int32_t radius = int32_t(zone->zone_radius) << 16;
         if (dist > radius ||
-                std::abs(double(world::to_fixed(zone->position.z)) - world::to_fixed(speaker.position.z)) > radius/2) continue;
+                std::abs(double(zone->position.z.q16) - speaker.position.z.q16) > radius/2) continue;
         const auto matches = [&](const auto &slot) {
             return slot.active && slot.handle == pair.first &&
                 (!(zone->item_attrib & 0x40000u) || !zone->zone_number || (slot.flags & 0xC0u));
@@ -126,9 +126,9 @@ void set_tracked_entity_target(replication::ClientState &state, const world::Wor
     target.handle = entity.handle.packed;
     target.ticks_remaining = entity.radio_request == 1
             ? 62u * static_cast<uint32_t>(entity.radio_request_seconds) : 496u;
-    target.position[0] = world::to_fixed(entity.position.x);
-    target.position[1] = world::to_fixed(entity.position.y);
-    target.position[2] = world::to_fixed(entity.position.z);
+    target.position[0] = entity.position.x.q16;
+    target.position[1] = entity.position.y.q16;
+    target.position[2] = entity.position.z.q16;
     target.friendly = entity.team == local->team || entity.team == 0;
     target.color = entity.radio_request == 1 ? hud::kHudPaletteLightBlue : 0xFFFFFFFFu;
     ++target.serial;
@@ -307,9 +307,9 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             if (!local) continue;
             world::SoundSlotEvent event;
             std::memcpy(event.set_name, "MEDIC_KIT_USE", sizeof("MEDIC_KIT_USE"));
-            event.pos[0] = world::to_fixed(local->position.x);
-            event.pos[1] = world::to_fixed(local->position.y);
-            event.pos[2] = world::to_fixed(local->position.z);
+            event.pos[0] = local->position.x.q16;
+            event.pos[1] = local->position.y.q16;
+            event.pos[2] = local->position.z.q16;
             world.out.slot_sounds.push_back(event);
             world.script.voice.radio_set(world, "MEDIC_VOICE", local->handle);
         } else if (const auto *event = std::get_if<GameEventRecord>(&request)) {

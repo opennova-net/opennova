@@ -12,8 +12,8 @@
 namespace opennova::world {
 namespace {
 FixedVec3 position(const Entity &e) {
-    return {io::float_to_fp16_16(e.position.x), io::float_to_fp16_16(e.position.y),
-            io::float_to_fp16_16(e.position.z)};
+    return {e.position.x.q16, e.position.y.q16,
+            e.position.z.q16};
 }
 int32_t add(int32_t a, int32_t b) {
     return static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b));

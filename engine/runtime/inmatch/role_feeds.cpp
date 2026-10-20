@@ -660,9 +660,9 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 	const world::World &w = view.kernel->world;
 	if (const world::Entity *player = w.registry.get(w.cached.local_player)) {
 		out.player_present = true;
-		out.player_x = io::float_to_fp16_16_sat(player->position.x);
-		out.player_y = io::float_to_fp16_16_sat(player->position.y);
-		out.player_z = io::float_to_fp16_16_sat(player->position.z);
+		out.player_x = player->position.x.q16;
+		out.player_y = player->position.y.q16;
+		out.player_z = player->position.z.q16;
 		out.player_team = player->team;
 	}
 	out.bounds_min_x = zones.min_x;
@@ -755,9 +755,9 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 		// to the bbox centre [orig: Entity_GetWorldBoundsCenter @0x59c311..0x59c327].
 		int32_t euler[3];
 		world::entity_live_euler_bam(*e, euler);
-		const int32_t position[3] = {io::float_to_fp16_16_sat(e->position.x),
-				io::float_to_fp16_16_sat(e->position.y),
-				io::float_to_fp16_16_sat(e->position.z)};
+		const int32_t position[3] = {e->position.x.q16,
+				e->position.y.q16,
+				e->position.z.q16};
 		const world::CollisionMatrix m =
 				world::collision_matrix_from_euler(euler[0], euler[1], euler[2], position);
 		const int32_t centre[3] = {io::float_to_fp16_16_sat(e->bbox_center.x),

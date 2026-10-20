@@ -61,10 +61,10 @@ void WaypointTrack::select_nearest_enemy_base(const EntityRegistry &registry,
         if (marker == nullptr || !marker->has_item_def || (marker->flags & 1u) != 0) continue;
         if ((local.team == 2 && marker->item_id != 4091) ||
                 (local.team == 1 && marker->item_id != 4093)) continue;
-        const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(to_fixed(local.position.x)) -
-                static_cast<uint32_t>(to_fixed(marker->position.x)));
-        const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(to_fixed(local.position.y)) -
-                static_cast<uint32_t>(to_fixed(marker->position.y)));
+        const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(local.position.x.q16) -
+                static_cast<uint32_t>(marker->position.x.q16));
+        const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(local.position.y.q16) -
+                static_cast<uint32_t>(marker->position.y.q16));
         // The x87 distance caps at flt_7C19E0 (0x7fff0000), then truncates.
         const double length = std::sqrt(double(dx) * dx + double(dy) * dy);
         const int32_t distance = static_cast<int32_t>(std::min(length, 2147418112.0));
@@ -109,8 +109,8 @@ void WaypointTrack::tick_advance(const WaypointFrameInputs &in) {
         int32_t marker_x = cur->x;
         int32_t marker_y = cur->y;
         if (const Entity *marker = in.registry != nullptr ? in.registry->get(cur->handle()) : nullptr) {
-            marker_x = to_fixed(marker->position.x);
-            marker_y = to_fixed(marker->position.y);
+            marker_x = marker->position.x.q16;
+            marker_y = marker->position.y.q16;
         }
         const int32_t dx = std::abs(in.player_x - marker_x);
         const int32_t dy = std::abs(in.player_y - marker_y);
@@ -149,9 +149,9 @@ void WaypointTrack::build_map_poi_list(const EntityRegistry &registry) {
         WaypointEntry entry;
         entry.node = e.handle.slot();
         entry.pool = static_cast<uint8_t>(e.handle.pool());
-        entry.x = to_fixed(e.position.x);
-        entry.y = to_fixed(e.position.y);
-        entry.z = to_fixed(e.position.z);
+        entry.x = e.position.x.q16;
+        entry.y = e.position.y.q16;
+        entry.z = e.position.z.q16;
         entry.radius = to_fixed(e.bound_radius);
         list.push_back(entry);
     };
@@ -355,9 +355,9 @@ WaypointHudView waypoint_hud_view(const WaypointTrack &track, const EntityRegist
             v.def_type = marker->has_item_def ? marker->item_id : 0;
             v.def_attrib = marker->has_item_def ? marker->item_attrib : 0u;
             v.zone_number = marker->zone_number;
-            v.entry.x = to_fixed(marker->position.x);
-            v.entry.y = to_fixed(marker->position.y);
-            v.entry.z = to_fixed(marker->position.z);
+            v.entry.x = marker->position.x.q16;
+            v.entry.y = marker->position.y.q16;
+            v.entry.z = marker->position.z.q16;
         }
     }
     return v;

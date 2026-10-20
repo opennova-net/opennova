@@ -409,8 +409,8 @@ bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &ca
 		return false;
 	// The comparison is 16 raw 16.16 counts, not sixteen world units.
 	// [orig: Entity_CanEnterVehicle @0x4354C7..0x435509]
-	const int64_t x = static_cast<int32_t>(carrier.position.x * 65536.0f);
-	const int64_t y = static_cast<int32_t>(carrier.position.y * 65536.0f);
+	const int64_t x = carrier.position.x.q16;
+	const int64_t y = carrier.position.y.q16;
 	return std::abs(x - carrier.saved_live_pos[0]) <= 16 &&
 			std::abs(y - carrier.saved_live_pos[1]) <= 16;
 }
@@ -702,9 +702,9 @@ namespace {
 // tag drawer, not this site)]
 bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &point,
 		bool label = false) {
-	const int32_t a[3] = { static_cast<int32_t>(player.position.x * 65536.0f),
-		static_cast<int32_t>(player.position.y * 65536.0f),
-		static_cast<int32_t>(player.position.z * 65536.0f) };
+	const int32_t a[3] = { player.position.x.q16,
+		player.position.y.q16,
+		player.position.z.q16 };
 	const int32_t b[3] = { static_cast<int32_t>(point.x * 65536.0f),
 		static_cast<int32_t>(point.y * 65536.0f),
 		static_cast<int32_t>(point.z * 65536.0f) + (label ? 0 : 12288) };
@@ -797,9 +797,9 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // The eye is Position + CameraOffset in 16.16; the candidate point carries
     // the +0x3000 (0.1875 u) scan bias [orig: @0x435fff..0x436041, the
     // Position.Y subtract @0x436010].
-    const int32_t eye_x = to_fixed(player.position.x) + player.eye_offset_x;
-    const int32_t eye_y = to_fixed(player.position.y) + player.eye_offset_y;
-    const int32_t eye_z = to_fixed(player.position.z) + player.eye_offset_z;
+    const int32_t eye_x = player.position.x.q16 + player.eye_offset_x;
+    const int32_t eye_y = player.position.y.q16 + player.eye_offset_y;
+    const int32_t eye_z = player.position.z.q16 + player.eye_offset_z;
     // _ftol2_sse over the 0x4EFFFE00 (2^31 - 16384) float clamp the block keeps
     // on the x87 stack [orig: flt_7C19E0 @0x43604d / @0x43607d / @0x4360f4];
     // an out-of-range conversion is the x87 indefinite integer.

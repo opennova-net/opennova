@@ -620,7 +620,7 @@ RoundSourceState resolve_round_source(World &world,
 
     AiEntity *body = world.ai.for_handle(params.owner);
     const int32_t source_z =
-            body != nullptr ? body->pos[2] : to_fixed(entity->position.z);
+            body != nullptr ? body->pos[2] : entity->position.z.q16;
     // The below-water classifier projects the per-tick EYE height (the shared
     // entity_eye_below_water witness) wherever the drowning bit is clear.
     // eye_offset_z is the ported +0x74 channel (0 when never stamped, the

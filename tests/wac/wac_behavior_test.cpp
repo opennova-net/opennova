@@ -1401,7 +1401,7 @@ static void test_wac_area_and_location_queries() {
     w.registry.register_area("duplicate", duplicate, true, 37);
     w.registry.register_location(duplicate, 8);
     w.registry.register_location(area, 9);
-    e.position = {}; e.item_id = 2001; e.item_type_index = 7; e.net_id = 100;
+    e.position = Vec3{}; e.item_id = 2001; e.item_type_index = 7; e.net_id = 100;
     w.registry.spawn(2, e); // slot 0: packed blink hit must be nonzero
     const EntityHandle building = w.registry.spawn(2, e);
     Program program = compile_source(

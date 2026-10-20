@@ -335,7 +335,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 					world, world::EntityHandle{}, world::EntityHandle{},
 					*player_slot, spawn.team, ctx.config.game_type, slot_state);
 	if (sel.found) {
-		spawn.position = sel.position; // mission space, straight from the chosen marker
+		// The chosen marker's position words, copied raw (D-NET-507).
+		// [orig: Server_PositionPlayerForSpawn @0x50CF60 - the copies
+		//  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
+		spawn.position = sel.position;
 		spawn.yaw = sel.yaw;
 		spawn.heading_bam = sel.heading_bam; // the copied word (D-NET-376)
 		spawn.pitch = sel.pitch;

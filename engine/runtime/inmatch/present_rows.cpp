@@ -314,10 +314,7 @@ bool resolve_client_eweap_attachment_pose(
 
 	Entity carrier;
 	carrier.item_id = static_cast<int32_t>(parent->type_id);
-	carrier.position = {
-			static_cast<float>(parent->x / kFixed16),
-			static_cast<float>(parent->y / kFixed16),
-			static_cast<float>(parent->z / kFixed16)};
+	carrier.position.set_q16({parent->x, parent->y, parent->z});
 	carrier.veh.yaw_seeded = true;
 	carrier.veh.yaw_bam = parent->heading_bam;
 	carrier.veh.air_pitch_bam = parent->pitch_bam;

@@ -75,8 +75,8 @@ void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out, const
 				posed_handles.find(static_cast<uint16_t>(s)) != posed_handles.end())
 			continue;
 		if (debug_range >= 0) {
-			const int32_t ep[3] = { world::to_fixed(e->position.x), world::to_fixed(e->position.y),
-				world::to_fixed(e->position.z) };
+			const int32_t ep[3] = { e->position.x.q16, e->position.y.q16,
+				e->position.z.q16 };
 			if (std::llabs(static_cast<int64_t>(ep[0]) - anchor[0]) > debug_range ||
 					std::llabs(static_cast<int64_t>(ep[1]) - anchor[1]) > debug_range ||
 					std::llabs(static_cast<int64_t>(ep[2]) - anchor[2]) > debug_range)
@@ -85,8 +85,8 @@ void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out, const
 		DebugHitboxOrganic o;
 		o.handle = e->handle;
 		o.section = 1;
-		o.center[0] = world::to_fixed(e->position.x);
-		o.center[1] = world::to_fixed(e->position.y);
+		o.center[0] = e->position.x.q16;
+		o.center[1] = e->position.y.q16;
 		o.center[2] = world::to_fixed(e->position.z + world::kOrganicStandInCenterZ);
 		o.radius_q16 = world::to_fixed(world::kOrganicStandInRadius);
 		o.authored_radius_q16 = o.radius_q16;

@@ -26,10 +26,10 @@ EntityHandle waypoint_create_for_player(World &world, int32_t x, int32_t y, cons
 	seed.item_type_index = world.tables.user_waypoint_type_index;
 	seed.has_item_def = true;
 	seed.item_type = world.tables.user_waypoint_item_type;
-	seed.waypoint_x_q16 = x;
-	seed.waypoint_y_q16 = y;
-	seed.position.x = static_cast<float>(x) / 65536.0f;
-	seed.position.y = static_cast<float>(y) / 65536.0f;
+	// The x / y dwords are the row's position words (entity+4 / +8).
+	// [orig: Waypoint_CreateForPlayer @0x4dfd19 / @0x4dfd1d]
+	seed.position.x.q16 = x;
+	seed.position.y.q16 = y;
 	seed.position.z = world.tables.terrain != nullptr
 			? terrain::height_field_height_mission_bilinear(*world.tables.terrain, seed.position.x,
 					  seed.position.y)
@@ -52,7 +52,7 @@ EntityHandle waypoint_create_for_player(World &world, int32_t x, int32_t y, cons
 	world.registry.for_each_in_pool(kUserWaypointPool, [&](const Entity &e) {
 		if (e.item_type_index == 0) return;
 		if (e.primary_occupant != owner) return;
-		if (e.waypoint_x_q16 != x || e.waypoint_y_q16 != y) return;
+		if (e.position.x.q16 != x || e.position.y.q16 != y) return;
 		if (!strutil::iequals(e.display_name, text)) return;
 		wiped.push_back(e.handle);
 	});
@@ -79,9 +79,11 @@ UserWaypointRow user_waypoint_row(const World &world, EntityHandle handle) {
 	UserWaypointRow row;
 	const Entity *e = world.registry.get(handle);
 	if (e == nullptr) return row;
-	row.x = e->waypoint_x_q16;
-	row.y = e->waypoint_y_q16;
-	row.z = to_fixed(e->position.z);
+	// The share writes the row's x / y dwords back out.
+	// [orig: NetPacket_WriteTypeNameAndPosition @0x42b1bc / @0x42b1cd]
+	row.x = e->position.x.q16;
+	row.y = e->position.y.q16;
+	row.z = e->position.z.q16;
 	row.name = e->display_name;
 	return row;
 }

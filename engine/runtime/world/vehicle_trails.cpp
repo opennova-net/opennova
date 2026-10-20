@@ -35,8 +35,8 @@ void vehicle_update_trail_lane(
 	if (intensity == 0 || !world.out.fire_sounds.listener_valid())
 		return;
 	const auto &camera = world.out.fire_sounds.listener();
-	const int64_t dx = int64_t(to_fixed(e.position.x)) - to_fixed(camera.x);
-	const int64_t dy = int64_t(to_fixed(e.position.y)) - to_fixed(camera.y);
+	const int64_t dx = int64_t(e.position.x.q16) - to_fixed(camera.x);
+	const int64_t dy = int64_t(e.position.y.q16) - to_fixed(camera.y);
 	const int32_t limit = ((world.logic_tick & 3u) == 0 ? 600 : 300) << 16;
 	if (std::sqrt(double(dx) * dx + double(dy) * dy) > limit)
 		return;

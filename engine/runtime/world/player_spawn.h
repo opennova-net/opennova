@@ -30,7 +30,7 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = 0;
 // convention as a BMS heading). `net_id` is the SSN the caller assigns (default a reserved
 // high value unlikely to collide with mission entities).
 struct PlayerSpawn {
-    Vec3 position;
+    EntityPosition position; // the source pose's words (D-NET-507)
     int16_t yaw = 0;
     // The heading word (+0x10) the motor starts from, when the spawn copies a
     // source pose: the placement's (SpawnPointResult::heading_bam) or a

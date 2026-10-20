@@ -18,7 +18,7 @@ ScriptEffectEvent descriptor(const World &world, const Entity &entity, const std
     if (const AiEntity *body = world.ai.for_handle(entity.handle))
         event.position = {body->pos[0], body->pos[1], body->pos[2]};
     else
-        event.position = {to_fixed(entity.position.x), to_fixed(entity.position.y), to_fixed(entity.position.z)};
+        event.position = {entity.position.x.q16, entity.position.y.q16, entity.position.z.q16};
     return event;
 }
 

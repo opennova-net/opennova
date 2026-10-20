@@ -315,7 +315,7 @@ bool MissionShots::build_(Run &run) {
 			world::Entity *row = placed.registry.get(entity.handle);
 			if (!body || !row) return;
 			body->pos[2] = io::bam_add(body->pos[2], int32_t(std::lround(person.lift * io::kFp16OneD)));
-			row->position.z = float(double(body->pos[2]) / io::kFp16OneD);
+			row->position.z.q16 = body->pos[2];
 			run.people.push_back({ entity.handle.packed, mark->row });
 		});
 	});

@@ -21,9 +21,9 @@ void anchor_of(World &world, const Entity &entity, SkeletalAnchor anchor, int32_
     if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
         std::copy_n(body->pos, 3, out);
     } else {
-        out[0] = static_cast<int32_t>(entity.position.x * 65536.0f);
-        out[1] = static_cast<int32_t>(entity.position.y * 65536.0f);
-        out[2] = static_cast<int32_t>(entity.position.z * 65536.0f);
+        out[0] = entity.position.x.q16;
+        out[1] = entity.position.y.q16;
+        out[2] = entity.position.z.q16;
     }
 }
 // [orig: the Q22 trig of retail's radians-per-BAM double, `fmul dbl_7C3608`
@@ -118,7 +118,7 @@ bool infantry_drag_corpse(AiEntity &e, World &world) {
     anchor_of(world, *self, SkeletalAnchor::Head, head);
     e.pos[0] = io::bam_add(e.pos[0], io::bam_sub(hand[0], head[0]));
     e.pos[1] = io::bam_add(e.pos[1], io::bam_sub(hand[1], head[1]));
-    self->position = {e.pos[0] / 65536.0f, e.pos[1] / 65536.0f, e.pos[2] / 65536.0f};
+    self->position.set_q16({e.pos[0], e.pos[1], e.pos[2]});
     const AiEntity *body = world.ai.for_handle(dragger->handle);
     e.inf.target_heading = e.inf.aim_heading = body ? body->inf.body_heading
             : heading_of(world, *dragger);

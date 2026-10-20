@@ -111,9 +111,9 @@ bool Server_HandleVehicleSpawnRequest(NapiNPServerCtx &ctx, NapiNPConnection &co
 	// by its attitude, else its position raised 2.0 [orig: @0x51C60C..0x51C682].
 	// Model userpoints are not reachable from this layer: the raised position.
 	const int32_t position[3] = {
-			world::to_fixed(source->position.x),
-			world::to_fixed(source->position.y),
-			world::to_fixed(source->position.z) + kSpawnRaiseNoUserpoint};
+			source->position.x.q16,
+			source->position.y.q16,
+			source->position.z.q16 + kSpawnRaiseNoUserpoint};
 	if (!ctx.deployable_spawner) return false;
 	const world::EntityHandle spawned = ctx.deployable_spawner(world, item_id, team, position);
 	world::Entity *vehicle = world.registry.get(spawned);

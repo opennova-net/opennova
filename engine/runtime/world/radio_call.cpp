@@ -35,8 +35,8 @@ int32_t capture_zone_max_coverage(const World &world, const Entity &entity) {
             const int32_t delta = static_cast<int32_t>(uint32_t(a) - uint32_t(b));
             return delta < 0 ? static_cast<int32_t>(0u - uint32_t(delta)) : delta;
         };
-        const int64_t x = abs_delta(to_fixed(e->position.x), to_fixed(entity.position.x));
-        const int64_t y = abs_delta(to_fixed(e->position.y), to_fixed(entity.position.y));
+        const int64_t x = abs_delta(e->position.x.q16, entity.position.x.q16);
+        const int64_t y = abs_delta(e->position.y.q16, entity.position.y.q16);
         if (x > radius || y > radius) continue;
         const int32_t squared = static_cast<int32_t>(((x*x + 0x8000) >> 16) + ((y*y + 0x8000) >> 16));
         // x87's invalid sqrt -> integer-indefinite -> SHL 8 is zero. Preserve

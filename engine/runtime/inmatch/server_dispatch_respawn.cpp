@@ -149,9 +149,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 			world.ai.for_handle(player->handle);
 			motor != nullptr && motor->inf.active) {
 		const int32_t motor_position[3] = {
-				world::to_fixed(player->position.x),
-				world::to_fixed(player->position.y),
-				world::to_fixed(player->position.z),
+				player->position.x.q16,
+				player->position.y.q16,
+				player->position.z.q16,
 		};
 		// The placement's heading word (D-NET-376), a revive's included; with no
 		// pick the body keeps its own word (D-NET-377) [orig: @0x50D3F7; @0x50D60A].

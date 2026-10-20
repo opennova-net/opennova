@@ -121,9 +121,9 @@ int test_flag_callback() {
     }
     destruction_notify_item_damage(w, flag, 0);
     CHECK(flag.position.x == 0 && flag.engine_flags == 0);
-    flag.position = {1.99f, 0, 1.99f};
+    flag.position = {1.984375f, 0, 1.984375f}; // just under 2, a 16.16 word
     for (int visit = 0; visit < 7; ++visit) destruction_notify_item_damage(w, flag, 0);
-    CHECK(flag.position.x == 1.99f); // Near home keeps rearming.
+    CHECK(flag.position.x == 1.984375f); // Near home keeps rearming.
     Entity body;
     body.team = 1;
     body.position = {7, 8, 9};
@@ -132,7 +132,7 @@ int test_flag_callback() {
     flag.team = 1;
     flag.primary_occupant = carrier;
     destruction_notify_item_damage(w, flag, 0);
-    CHECK(flag.position.x == 7 && flag.position.y == 8 && flag.position.z == 1.99f);
+    CHECK(flag.position.x == 7 && flag.position.y == 8 && flag.position.z == 1.984375f);
     flag.team = 2;
     flag.position.x = 3;
     destruction_notify_item_damage(w, flag, 0);

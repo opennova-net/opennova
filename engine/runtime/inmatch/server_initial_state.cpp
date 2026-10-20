@@ -192,9 +192,11 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	// the burst); fall back to the host-advertised spawn from the session config.
 	if (ctx.world != nullptr && conn.link.owned_entity.valid()) {
 		if (const world::Entity *e = ctx.world->registry.get(conn.link.owned_entity)) {
-			px = world::to_fixed(e->position.x);
-			py = world::to_fixed(e->position.y);
-			pz = world::to_fixed(e->position.z);
+			// The position words, raw (D-NET-507) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10 -
+			//  entity+4 / +8 / +0xC @0x502D3A / @0x502D4B / @0x502D5C].
+			px = e->position.x.q16;
+			py = e->position.y.q16;
+			pz = e->position.z.q16;
 			// §5.29 wire yaw is an i16 the client <<16 to a 16.16 BAM = the high half of the engine-frame
 			// heading (90 - mission_yaw); matches snapshot_of / pose_for_conn (D-NET-86). The fresh
 			// player's angles are its start marker's placement angles, so the high halves are the

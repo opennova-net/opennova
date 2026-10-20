@@ -30,8 +30,8 @@ void impulse_quad(const Entity &e, const VehicleTraits &t, const CollisionMatrix
 	const int32_t x = io::bam_abs(io::bam_sub(t.box_x_hi, t.box_x_lo)) / 2;
 	const int32_t y = io::bam_abs(io::bam_sub(t.box_y_hi, t.box_y_lo)) / 2;
 	const int32_t xs[4] = { x, x, -x, -x }, ys[4] = { y, -y, -y, y };
-	const int32_t position[3] = { to_fixed(e.position.x), to_fixed(e.position.y),
-		to_fixed(e.position.z) };
+	const int32_t position[3] = { e.position.x.q16, e.position.y.q16,
+		e.position.z.q16 };
 	for (int i = 0; i < 4; ++i) {
 		int32_t delta[3];
 		for (int k = 0; k < 3; ++k) {
@@ -104,8 +104,8 @@ static void impact_impulse(World &world, Entity &e, const VehicleTraits &t,
 	const auto frame = entity_placement_matrix(e);
 	int32_t corners[4][3], radial[4][3];
 	impulse_quad(e, t, frame, corners, radial);
-	const int32_t offset[3] = { io::bam_sub(hit[0], to_fixed(e.position.x)),
-		io::bam_sub(hit[1], to_fixed(e.position.y)), 0 };
+	const int32_t offset[3] = { io::bam_sub(hit[0], e.position.x.q16),
+		io::bam_sub(hit[1], e.position.y.q16), 0 };
 	int32_t toward[3];
 	normalize16(offset, toward);
 	int quadrant = -1;

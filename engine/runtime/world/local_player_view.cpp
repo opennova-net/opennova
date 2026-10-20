@@ -52,7 +52,7 @@ const Entity *local_entity(World *world) {
 void enter_death_camera(World &world, const Entity &e, PlayerViewState &v,
                         const LocalViewSessionInputs &s) {
     const int32_t player[3] = {
-        to_fixed(e.position.x), to_fixed(e.position.y), to_fixed(e.position.z)};
+        e.position.x.q16, e.position.y.q16, e.position.z.q16};
     int32_t anchor[3] = {player[0], player[1], player[2]};
     if (s.joiner) {
         if (s.death_camera_target_known) {
@@ -61,9 +61,9 @@ void enter_death_camera(World &world, const Entity &e, PlayerViewState &v,
             anchor[2] = s.death_camera_target[2];
         }
     } else if (const Entity *killer = world.registry.get(e.last_attacker)) {
-        anchor[0] = to_fixed(killer->position.x);
-        anchor[1] = to_fixed(killer->position.y);
-        anchor[2] = to_fixed(killer->position.z);
+        anchor[0] = killer->position.x.q16;
+        anchor[1] = killer->position.y.q16;
+        anchor[2] = killer->position.z.q16;
     }
     // The probe's bone leg (Entity_ComputeCollisionForceFromBones @0x4afff0
     // over the tracked entity's collision-bone list) is unported, and with no
@@ -369,7 +369,7 @@ bool scope_view_visible(World &world, const LocalPlayerWeapon &w, const PlayerVi
     if (force && v.camera_mode == 0) {
         visible = true;
     } else if (!sighted) {
-        const int32_t position_z = body != nullptr ? body->pos[2] : to_fixed(player.position.z);
+        const int32_t position_z = body != nullptr ? body->pos[2] : player.position.z.q16;
         const int32_t eye_z = static_cast<int32_t>(
             uint32_t(position_z) + uint32_t(player.eye_offset_z));
         if ((flags & 0x8000u) != 0 || eye_z < world.env.water_z)
@@ -825,11 +825,11 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
         // seat carry's BAM32 Roll, never the whole-degree registry mirror).
         // [orig: not an EWEAP @0x545EB7..0x545EEA; the no-skeleton copy
         //  @0x545F17..0x545F4E]
-        out[0] = io::bam_add(body ? body->pos[0] : to_fixed(rider.position.x),
+        out[0] = io::bam_add(body ? body->pos[0] : rider.position.x.q16,
                 body ? body->inf.eye_offset_x : rider.eye_offset_x);
-        out[1] = io::bam_add(body ? body->pos[1] : to_fixed(rider.position.y),
+        out[1] = io::bam_add(body ? body->pos[1] : rider.position.y.q16,
                 body ? body->inf.eye_offset_y : rider.eye_offset_y);
-        out[2] = io::bam_add(body ? body->pos[2] : to_fixed(rider.position.z),
+        out[2] = io::bam_add(body ? body->pos[2] : rider.position.z.q16,
                 body ? body->inf.eye_offset_z : rider.eye_offset_z);
         out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
         out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
@@ -848,9 +848,9 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
             world.pose_provider->resolve_userpoint_transform(
                     world, parent->handle, parent->camera_userpoint_byte, out))
         return true;
-    out[0] = to_fixed(parent->position.x);
-    out[1] = to_fixed(parent->position.y);
-    out[2] = to_fixed(parent->position.z);
+    out[0] = parent->position.x.q16;
+    out[1] = parent->position.y.q16;
+    out[2] = parent->position.z.q16;
     out[3] = emplaced_gun_frame_heading(*parent);
     out[4] = emplaced_gun_frame_pitch(*parent);
     out[5] = parent->veh.yaw_seeded ? parent->veh.air_roll_bam
@@ -869,9 +869,9 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
     // writes it through Entity_AttachToBoneAndUpdateTransform @0x5463D0 ->
     // Math_FixedPointMatrixToEulerAngles @0x54656F].
     const AiEntity *body = world.ai.for_handle(rider.handle);
-    out[0] = body ? body->pos[0] : to_fixed(rider.position.x);
-    out[1] = body ? body->pos[1] : to_fixed(rider.position.y);
-    out[2] = body ? body->pos[2] : to_fixed(rider.position.z);
+    out[0] = body ? body->pos[0] : rider.position.x.q16;
+    out[1] = body ? body->pos[1] : rider.position.y.q16;
+    out[2] = body ? body->pos[2] : rider.position.z.q16;
     out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
     out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
     out[5] = body ? body->roll : bam_from_degrees_wrapped(rider.roll);
@@ -904,9 +904,9 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
         //  CameraOffset (+0x6C) and the carrier's own rotation triple, all
         //  three full-width words @0x4DC732..0x4DC741]
         const AiEntity *carrier_body = world.ai.for_handle(carrier->handle);
-        out[0] = io::bam_add(to_fixed(carrier->position.x), carrier->eye_offset_x);
-        out[1] = io::bam_add(to_fixed(carrier->position.y), carrier->eye_offset_y);
-        out[2] = io::bam_add(to_fixed(carrier->position.z), carrier->eye_offset_z);
+        out[0] = io::bam_add(carrier->position.x.q16, carrier->eye_offset_x);
+        out[1] = io::bam_add(carrier->position.y.q16, carrier->eye_offset_y);
+        out[2] = io::bam_add(carrier->position.z.q16, carrier->eye_offset_z);
         out[3] = carrier_body ? carrier_body->heading
                 : carrier->veh.yaw_seeded ? carrier->veh.yaw_bam
                                           : bam_heading_from_mission_yaw_deg(carrier->yaw);

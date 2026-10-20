@@ -502,11 +502,11 @@ const world::Entity *owned_entity_for_emit(const world::World &w,
 //  = Position + [+0x6C/+0x70/+0x74]); the list @0x517C1E]
 PlayerReplicationState anchor_for_owned_entity(const world::Entity &entity) {
 	PlayerReplicationState anchor;
-	anchor.spawn_x = static_cast<uint32_t>(world::to_fixed(entity.position.x)) +
+	anchor.spawn_x = static_cast<uint32_t>(entity.position.x.q16) +
 			static_cast<uint32_t>(entity.eye_offset_x);
-	anchor.spawn_y = static_cast<uint32_t>(world::to_fixed(entity.position.y)) +
+	anchor.spawn_y = static_cast<uint32_t>(entity.position.y.q16) +
 			static_cast<uint32_t>(entity.eye_offset_y);
-	anchor.spawn_z = static_cast<uint32_t>(world::to_fixed(entity.position.z)) +
+	anchor.spawn_z = static_cast<uint32_t>(entity.position.z.q16) +
 			static_cast<uint32_t>(entity.eye_offset_z);
 	return anchor;
 }
@@ -1179,8 +1179,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// priority list's LOS start read where the rest reads the eye anchor
 	// [orig: Server_BuildRoundEventListForPlayer @0x50000A..0x500012;
 	//  Server_BuildEntityPriorityList @0x50EACD / @0x50EFA1..0x50EFA4].
-	const int32_t body[3] = {world::to_fixed(owned->position.x),
-			world::to_fixed(owned->position.y), world::to_fixed(owned->position.z)};
+	const int32_t body[3] = {owned->position.x.q16,
+			owned->position.y.q16, owned->position.z.q16};
     // The retail temporary global is restored after this recipient's write.
     // Keep that budget local so one peer's NAK cannot affect another peer.
     // [orig: Server_SendEntityStateToPlayer @0x517c58..0x517c9a; halving @0x517c62]

@@ -22,7 +22,7 @@ class World;
 
 struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
-    Vec3 position{};    // mission space (Z-up), copied from the chosen marker
+    EntityPosition position; // mission space (Z-up): the chosen marker's words, copied raw
     int16_t yaw = 0;    // the whole-degree mission yaw mirror (Entity::yaw)
     int16_t pitch = 0;
     int16_t roll = 0;

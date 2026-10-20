@@ -30,8 +30,7 @@ void read_pose(const Entity &e, int32_t pose[6]) {
 	carrier_pose_fixed(e, pose, pose[3], pose[4], pose[5]);
 }
 void write_pose(Entity &e, const int32_t pose[6]) {
-	e.position = { float(from_fixed(pose[0])), float(from_fixed(pose[1])),
-		float(from_fixed(pose[2])) };
+	e.position.set_q16({pose[0], pose[1], pose[2]});
 	e.veh.yaw_seeded = true;
 	e.veh.yaw_bam = pose[3];
 	e.veh.air_pitch_bam = pose[4];
@@ -41,8 +40,8 @@ void write_pose(Entity &e, const int32_t pose[6]) {
 	e.roll = degrees_i16_from_bam(pose[5]);
 }
 int32_t respawn_ground(World &world, Entity &e) {
-	const int32_t pos[3] = { to_fixed(e.position.x), to_fixed(e.position.y),
-		to_fixed(e.position.z) };
+	const int32_t pos[3] = { e.position.x.q16, e.position.y.q16,
+		e.position.z.q16 };
 	if (world.ai.collision != nullptr)
 		return world.ai.collision->raycast_ground(
 				world, e.handle, pos, 0, 0, 0x10000, 0x100000, &e.ground_target);
@@ -145,9 +144,9 @@ void VehicleSystem::initialize_mission_vehicles() {
 			continue;
 		const int32_t ground = respawn_ground(world_, e);
 		if (ground != INT32_MIN) {
-			e.position.z = float(from_fixed(
-					std::max(world_.env.water_z, bam_add(ground, e.veh.air_probe_z_off))));
-			e.veh.ground_cache = to_fixed(e.position.z);
+			e.position.z.q16 =
+					std::max(world_.env.water_z, bam_add(ground, e.veh.air_probe_z_off));
+			e.veh.ground_cache = e.position.z.q16;
 		}
 		e.flags |= 0x40u;
 		e.engine_flags |= 0x40u;
@@ -331,9 +330,8 @@ void VehicleSystem::respawn(Entity &e) {
 	if (world_.ai.collision != nullptr) world_.ai.collision->rebuild_candidate_slices(world_);
 	const int32_t ground = respawn_ground(world_, e);
 	if (ground != INT32_MIN)
-		e.position.z =
-				float(from_fixed(std::max(world_.env.water_z, bam_add(ground, m.air_probe_z_off))));
-	m.ground_cache = to_fixed(e.position.z);
+		e.position.z.q16 = std::max(world_.env.water_z, bam_add(ground, m.air_probe_z_off));
+	m.ground_cache = e.position.z.q16;
 	stamp_saved_live_pose(e);
 	mirror_pose(world_, e);
 }
@@ -548,8 +546,8 @@ void VehicleSystem::setup_gunner_attachments(Entity &vehicle) {
 		const Entity *child = world.registry.get(attached_child_handle(b, slot));
 		if (child == nullptr)
 			continue;
-		const int32_t child_pos[3] = { to_fixed(child->position.x),
-			to_fixed(child->position.y), to_fixed(child->position.z) };
+		const int32_t child_pos[3] = { child->position.x.q16,
+			child->position.y.q16, child->position.z.q16 };
 		uint32_t best = 0xFFFFFFFFu;
 		int best_index = -1;
 		for (int j = 0; j < point_count; ++j) {
@@ -607,9 +605,7 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 		// included) [orig: @0x45D5FF..0x45D61D; @0x45D641..0x45D663].
 		int32_t world_point[3];
 		matrix.transform_point(t->agun_points[static_cast<size_t>(bone - 1)].position, world_point);
-		child->position = { static_cast<float>(from_fixed(world_point[0])),
-			static_cast<float>(from_fixed(world_point[1])),
-			static_cast<float>(from_fixed(world_point[2])) };
+		child->position.set_q16({world_point[0], world_point[1], world_point[2]});
 		child->yaw = vehicle.yaw;
 		child->pitch = vehicle.pitch;
 		child->roll = vehicle.roll;
