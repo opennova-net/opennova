@@ -12,6 +12,7 @@
 #include <runtime/inmatch/slot_staging.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/world.h>
 
 #include "conn_fixture.h"
@@ -61,7 +62,7 @@ struct Rig {
 
 void test_a_slot_body_takes_the_three_position_words() {
     Rig r;
-    r.ent().yaw = 33;
+    r.ent().heading = w::placed_heading_bam(33);
     const inmatch::SlotStagingResult staged =
             inmatch::stage_slot_position(r.ctx, 1, 35.0, -16.0, 16.9);
     CHECK(staged.status == inmatch::SlotStagingStatus::Staged);
@@ -71,7 +72,7 @@ void test_a_slot_body_takes_the_three_position_words() {
     CHECK(r.ent().position.y.q16 == -16 * 65536);
     CHECK(r.ent().position.z.q16 == 1107558);
     CHECK(staged.position_q16[2] == 1107558);
-    CHECK(r.ent().yaw == 33); // position only
+    CHECK(r.ent().heading == w::placed_heading_bam(33)); // position only
 }
 
 void test_an_empty_slot_a_bodiless_player_and_a_joiner_refuse() {

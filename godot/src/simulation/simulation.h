@@ -384,7 +384,8 @@ private:
 	}
 	bool local_usegun_switch_is_instant() const {
 		return opennova::world::local_usegun_switch_is_instant(
-				kernel_->world, kernel_->local.weapon);
+				kernel_->world, kernel_->local.weapon,
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr);
 	}
 	void commit_local_usegun_weapon_switch() {
 		opennova::world::commit_local_usegun_weapon_switch(
