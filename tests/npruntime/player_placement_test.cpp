@@ -19,6 +19,7 @@
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/inmatch/loopback_channel.h>
+#include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
@@ -136,10 +137,14 @@ void test_a_markerless_deploy_leaves_the_body_where_it_stands() {
 }
 
 // D-NET-NEW-L4-1: a deathmatch add with no start marker keeps the zeroed
-// entity's words: position 0 and heading word 0, whose mission yaw is 90.
+// entity's words: position 0 and heading word 0, whose mission yaw is 90. The
+// host's own body and a joiner's alike, so every S2C 0x0A player record ships
+// yaw byte 0x00, the heading word's high byte (D-NET-NEW-LP-1: 03TR's retail
+// host sends 0x00 for both bodies; the add's old heading 16384 sent 0x40).
 // [orig: Entity_SpawnFromAnimSlotProperty - the memset @0x43C3FE, the
 //  placement @0x43C459; Server_PositionPlayerForSpawn - the 6095 / 6002 arms
-//  @0x50D234 / @0x50D310, Entity_FindBestSpawnPoint @0x50D56C]
+//  @0x50D234 / @0x50D310, Entity_FindBestSpawnPoint @0x50D56C;
+//  NetPacket_SerializePlayerState - the yaw byte @0x4C0C5D]
 void test_a_markerless_add_takes_heading_word_zero() {
 	auto world = std::make_unique<w::World>();
 	world->registry.configure_pool(0, 16);
@@ -148,7 +153,7 @@ void test_a_markerless_add_takes_heading_word_zero() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::GameConfig settings;
 	settings.server_name = "DM";
-	settings.max_players = 1;
+	settings.max_players = 2;
 	settings.game_type = 0; // deathmatch: the 6095 / 6002 chain
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, /*host_key=*/0, &loop, settings);
@@ -162,6 +167,23 @@ void test_a_markerless_add_takes_heading_word_zero() {
 	CHECK(player->position.x.q16 == 0 && player->position.y.q16 == 0);
 	CHECK(motor->heading == 0);
 	CHECK(player->yaw == 90);
+	// A joiner's add on the same markerless mission: the same words.
+	ns::UdpSessionTransport joiner_transport(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
+			inmatch::kFirstJoinerDcb, inmatch::NapiNPConnection::kTypeServerSide,
+			&joiner_transport, ns::TransportMode::Client, w::EntityHandle{}, false));
+	const w::EntityHandle joiner_h = inmatch::Server_BuildPlayerInfoAndAdd(
+			ctx, ctx.np_protocol.connection_list.back(), *world, /*round_init=*/false);
+	const w::Entity *joiner = world->registry.get(joiner_h);
+	const w::AiEntity *joiner_motor = world->ai.for_handle(joiner_h);
+	CHECK(joiner != nullptr && joiner_motor != nullptr);
+	if (joiner == nullptr || joiner_motor == nullptr) return;
+	CHECK(joiner->position.x.q16 == 0 && joiner->position.y.q16 == 0);
+	CHECK(joiner_motor->heading == 0);
+	// The 0x0A player record's yaw byte, both bodies.
+	player = world->registry.get(world->cached.local_player);
+	CHECK((static_cast<uint32_t>(ns::snapshot_of(*player).euler_z) >> 24) == 0x00u);
+	CHECK((static_cast<uint32_t>(ns::snapshot_of(*joiner).euler_z) >> 24) == 0x00u);
 	// The pick found no marker and still asks for the warm-up.
 	const w::SpawnPointResult pick = w::resolve_player_spawn_pose(*world,
 			w::EntityHandle{}, w::EntityHandle{}, 0, 0, 0);
@@ -195,6 +217,7 @@ void test_the_warm_up_lifts_an_unparented_player_body() {
 	Source source;
 	w::PlayerSpawn spawn;
 	spawn.position = {5.0f, 6.0f, 7.0f};
+	spawn.net_id = 0; // a player carries no SSN, as the add stamps it (D-NET-112)
 	const w::EntityHandle h = w::spawn_remote_player(*world, spawn);
 	w::Entity *body = world->registry.get(h);
 	w::AiEntity *motor = world->ai.for_handle(h);
@@ -205,8 +228,16 @@ void test_the_warm_up_lifts_an_unparented_player_body() {
 	CHECK(body->position.z.q16 == z0);
 	world->ai.root_motion = &source;
 	motor->inf.adm_id = 0;
+	CHECK(motor->net_id == 0); // 10 dual updates
 	w::warm_up_player_body(*world, *body);
-	CHECK(body->position.z.q16 > z0 + 65536);
+	// The first update's rise is the clip's 100 (no previous capsule bottom);
+	// each later update's is the bottom's change, 0 here; then the last
+	// frame's bottom (65536) and the extra update's change (0).
+	// [orig: Entity_WarmUpOrganicAnimation - the count @0x4B8B3F..0x4B8B56,
+	//  the per-update add @0x4B8B7E, the bottom @0x4B8BB4, the last update's
+	//  delta @0x4B8BD2; AnimMap_UpdateEntity - the delta against slot+76
+	//  @0x40B88E..0x40B899, its store @0x40B8A0]
+	CHECK(body->position.z.q16 == z0 + 100 + 65536);
 	CHECK(body->position.x.q16 == 5 * 65536 && body->position.y.q16 == 6 * 65536);
 	CHECK(motor->self == body); // the motor works on the body's own words (D-NET-507)
 	const int32_t z1 = body->position.z.q16;

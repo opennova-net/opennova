@@ -325,6 +325,51 @@ void test_kill_player_dies_twice() {
 			second[second_feed].body[0] <= 3);
 }
 
+// D-NET-553 with nothing staged: the inline transaction ships the live +0x2C0
+// (0) and takes the killer-less arm, which names the victim its own last
+// attacker; the edge in the next entity update finds +0x2C0 clear, computes
+// the default selection and clears +0x178, so the second transaction is
+// killer-less again: a second 0x13 with word 0 and the same feed, no revive
+// window, the holds re-armed.
+// [orig: CNapiGameSession_HandleServerCommand -- Health 0 @0x4D29DA, +0x178 = 0
+//  @0x4D29E3, Entity_CheckAndProcessDeath @0x4D29EC; GameEvent_PlayerDeath --
+//  the killer-less store @0x5172E6, +368 = 120 only for another's kill
+//  @0x516F4D; Entity_UpdateInfantryPlayerBody -- the unstaged arm's compute
+//  and +0x178 clear @0x4B4C72..0x4B4C8D, the consume @0x4B4CD5, the call
+//  @0x4B4CEA]
+void test_kill_player_unstaged_dies_killerless_twice() {
+	Fixture f;
+	f.conn(0).slot_state = inmatch::PlayerSlotState::Joined;
+	f.entity(0).death_anim_state = 0; // nothing staged
+	f.entity(0).last_attacker = f.players[1];
+	const inmatch::ServerCommandOutcome out =
+			inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "KillPlayer", "ByIndex", {"1"});
+	CHECK(out.handled);
+	CHECK(f.entity(0).health == 0 && !f.dead_bit(0));
+	CHECK(f.entity(0).last_attacker == f.players[0]);
+	const std::vector<ns::Datagram> first = f.drain(2);
+	CHECK(f.deaths(first) == std::vector<uint16_t>{f.players[0].packed});
+	const int first_at = Fixture::first(first, s2c::ENTITY_DEATH);
+	CHECK(first_at >= 0 && first[first_at].body.size() >= 4 &&
+			first[first_at].body[2] == 0 && first[first_at].body[3] == 0);
+	const int first_feed = Fixture::first(first, s2c::GAME_EVENT);
+	CHECK(first_feed >= 0 && first[first_feed].body[0] == 22);
+	f.conn(0).link.respawn_delay_seconds = 0; // the first transaction's holds, spent
+	inmatch::Server_TickUpdate(f.ctx); // the edge latches and raises the second
+	CHECK(f.dead_bit(0));
+	CHECK(f.conn(0).link.respawn_delay_seconds == 3u);
+	CHECK(f.conn(0).link.downed_revive_seconds == 0u);
+	CHECK(f.entity(0).last_attacker == f.players[0]);
+	inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<ns::Datagram> second = f.drain(2);
+	CHECK(f.deaths(second) == std::vector<uint16_t>{f.players[0].packed});
+	const int second_at = Fixture::first(second, s2c::ENTITY_DEATH);
+	CHECK(second_at >= 0 && second[second_at].body.size() >= 4 &&
+			second[second_at].body[2] == 0 && second[second_at].body[3] == 0);
+	const int second_feed = Fixture::first(second, s2c::GAME_EVENT);
+	CHECK(second_feed >= 0 && second[second_feed].body[0] == 22);
+}
+
 // FOUND (GameEvent_PlayerDeath's spectator latch): a direct caller's death on a
 // spectator-latched slot unlinks the AI bodies' links to it and stops there: no
 // 0x13, no feed, no holds.
@@ -531,6 +576,7 @@ int main() {
 	test_damage_record_only_tallies();
 	test_the_kill_command_credits_its_killer();
 	test_kill_player_dies_twice();
+	test_kill_player_unstaged_dies_killerless_twice();
 	test_a_spectator_slots_death_stops_at_the_latch();
 	test_hidden_body_is_skipped();
 	test_dedicated_host_updates_through_the_preround();
