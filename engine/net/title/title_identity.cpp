@@ -228,6 +228,13 @@ TitleIdentity dfx2_row() {
 	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0ce0 (dfx2.exe) - the HostSetup list's
 	//  DFXCATEGORY1 @0x4d0e8a..0x4d0eb1, the Host list's @0x4d0faf..0x4d0fd5]
 	t.host_category_var = true;
+	// NovaLogic's live gate answered the DFX2 tag with no POST pair, an http://[domainname]
+	// startupurl and a TimeOnGateServer line (docs/titles/dfx2-vs-jo-re.md §6.5): the reply the
+	// service's gate gives this title. [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the
+	//  in-use word's skip of the POST tests @0x4CF541 / @0x4CF5A0, no key for TimeOnGateServer
+	//  (dfx2.exe's twin @0x4CEEB0 identical); Mission_DeobfuscateDescription @0x4CDAA0 -
+	//  [DOMAINNAME] @0x4CDB88, called @0x4D1665]
+	t.gate_reply_witnessed = true;
 	// The live DFX2 gate's startupurl carries &pfid=38 (docs/titles/dfx2-vs-jo-re.md §6.5).
 	t.pfid = 38;
 	// The dfx2_0 pages the live gate's startupurl leads to (url=dfx2_0_start.htm, dfx2-vs-jo-re

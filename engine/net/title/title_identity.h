@@ -137,6 +137,13 @@ struct TitleIdentity {
 	// witnessed difference rather than an unwitnessed value: absent from JO's lists, present in
 	// DFX2's (docs/titles/dfx2-vs-jo-re.md DFX2-7).
 	bool host_category_var = false;
+	// Whether NovaLogic's own gate's reply to the title's tag is witnessed, which the service's gate
+	// then answers in that shape: no POSTIPADDRESS / POSTIPPORT (the udpnovaworld line skips the
+	// client's POST tests), a startupurl on http://[domainname]/ (the client fills it from the
+	// lobby's 0x82), and a TimeOnGateServer line after the reflected pair (DFX2's, 2026-10-14:
+	// docs/titles/dfx2-vs-jo-re.md §6.5, D-NET-721). JO's live reply is unrecorded, so JO's row
+	// keeps the reply the service always sent.
+	bool gate_reply_witnessed = false;
 	std::optional<int> pfid;
 	std::optional<TitlePages> pages;
 };

@@ -408,8 +408,13 @@ expansion.
 - **The gate** answers a probe from the row its tag selects: `LobbyName`, the
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
   takes the configured `ONNET_GLSVSS_*`, none by default). DFX2's row carries the values
-  NovaLogic's live gate answered for its tag, in this gate's shape (the witness:
-  `docs/titles/dfx2-vs-jo-re.md`). A tag no row (nor the alias) answers to gets no reply,
+  NovaLogic's live gate answered for its tag, in that reply's shape too (the witness:
+  `docs/titles/dfx2-vs-jo-re.md` §6.5; `TitleIdentity::gate_reply_witnessed`, D-NET-721):
+  no `POSTIPADDRESS` / `POSTIPPORT` (its `udpnovaworld` line leaves the pair unread), a
+  `startupurl` on `http://[domainname]/` (the client fills it from the lobby's SessionInit
+  web domain) and a `TimeOnGateServer` line, the gate's UTC clock in asctime's shape, after
+  the reflected pair. JO's and ON's rows keep the POST pair, the web endpoint in the
+  `startupurl` and no `TimeOnGateServer`. A tag no row (nor the alias) answers to gets no reply,
   and the unknown tracker records it. The gate reads the table once in `start()`, so its
   receive thread never touches the database for a probe; a change to the table takes a
   restart.

@@ -13,9 +13,12 @@
 #include <net/novaworld/lobby_repository.h>
 #include <net/novaworld/lobby_update.h>
 #include <net/novaworld/unknown_tracker.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 
 #include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <exception>
 #include <future>
 #include <optional>
@@ -59,11 +62,16 @@ namespace {
 // answered the DFX2 tag (dfx2-vs-jo-re.md section 6.5, DFX2-6): LobbyName
 // "dfx2_0_consumer", pfid=38 in the startupurl, GLSVSS "[DFX2]KILLS" 3600000
 // 45000, the GLSVSS lines before the reflected pair as that reply has them.
-// Service policy against that witness: the POST pair goes out for every row
-// (the live DFX2 reply has none, its UDPNOVAWORLD line skipping the client's
-// POST tests); the startupurl names this service's address where the live
-// one has [domainname]; and TimeOnGateServer, which no parse reads, is not
-// sent (JO's live reply is unrecorded).
+// A title whose live reply is witnessed (TitleIdentity::gate_reply_witnessed,
+// DFX2's) gets that reply's shape too (D-NET-721): no POST pair (its
+// udpnovaworld line skips the client's POST tests, and a host on NWU posts no
+// status blob), the startupurl on http://[domainname]/ (the client fills the
+// domain from the lobby's 0x82 NovaworldWebDomainNameAndPortNumber, which
+// names the same web endpoint), and a TimeOnGateServer line, which no parse
+// reads, after the reflected pair: the gate's clock in asctime's shape (the
+// zone is this service's choice, UTC; the witness's is unrecorded). JO's live
+// reply is unrecorded, so its rows keep the POST pair, this service's address
+// in the startupurl and no TimeOnGateServer.
 //
 // Every address it names comes from the config or the lobby instances' rows,
 // never from a port another listener bound (the lobbies and web run in other
@@ -89,7 +97,25 @@ struct GateResponseFields {
 	std::string glsvss_request;
 	int64_t glsvss_rims = 0;
 	int64_t glsvss_agrms = 0;
+	// The witnessed live shape (TitleIdentity::gate_reply_witnessed) and its
+	// TimeOnGateServer value.
+	bool witnessed_shape = false;
+	std::string time_on_gate_server;
 };
+
+// The gate's clock as C's asctime spells it ("Wed Oct 14 07:50:11 2026", the
+// day space-padded), with no newline, in UTC.
+std::string gate_clock_text(std::time_t now) {
+	std::tm utc{};
+#ifdef _WIN32
+	gmtime_s(&utc, &now);
+#else
+	gmtime_r(&now, &utc);
+#endif
+	char text[64] = {};
+	std::strftime(text, sizeof text, "%a %b %e %H:%M:%S %Y", &utc);
+	return text;
+}
 
 std::string build_gate_response(const GateResponseFields &f) {
 	auto append_var = [](std::ostringstream &os, const char *key, const std::string &value) {
@@ -99,8 +125,10 @@ std::string build_gate_response(const GateResponseFields &f) {
 	std::ostringstream os;
 	os << "GATEPROTOCOL \"1.0\"\r\n";
 	append_var(os, "LobbyName", f.lobby_name);
-	append_var(os, "POSTIPADDRESS", f.public_host);
-	append_var(os, "POSTIPPORT", std::to_string(f.post_port));
+	if (!f.witnessed_shape) {
+		append_var(os, "POSTIPADDRESS", f.public_host);
+		append_var(os, "POSTIPPORT", std::to_string(f.post_port));
+	}
 	if (!f.met_ip.empty()) {
 		append_var(os, "METIPADDRESS", f.met_ip);
 		append_var(os, "METIPPORT", std::to_string(f.met_port));
@@ -111,9 +139,10 @@ std::string build_gate_response(const GateResponseFields &f) {
 	append_var(os, "udpnovaworld", f.lobby_endpoint);
 	append_var(os, "udpcode1", "abc");
 	append_var(os, "udpcode2", "xyz");
-	append_var(os, "startupurl",
-			"http://" + f.web_host + ":" + std::to_string(f.http_port) + "/nwprepare.dll?" +
-					f.startup_query);
+	const std::string web = f.witnessed_shape
+			? std::string("[domainname]")
+			: f.web_host + ":" + std::to_string(f.http_port);
+	append_var(os, "startupurl", "http://" + web + "/nwprepare.dll?" + f.startup_query);
 	append_var(os, "usejunction", "0");
 	append_var(os, "clearjunction", "0");
 	if (!f.glsvss_request.empty()) {
@@ -123,6 +152,8 @@ std::string build_gate_response(const GateResponseFields &f) {
 	}
 	append_var(os, "ReflectedIpAddress", f.reflected_ip);
 	append_var(os, "ReflectedPortNumber", std::to_string(f.reflected_port));
+	if (f.witnessed_shape)
+		append_var(os, "TimeOnGateServer", f.time_on_gate_server);
 	return os.str();
 }
 
@@ -402,6 +433,12 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		fields.glsvss_request = row_glsvss ? game->glsvss_request : glsvss_request_;
 		fields.glsvss_rims    = row_glsvss ? game->glsvss_rims : glsvss_rims_;
 		fields.glsvss_agrms   = row_glsvss ? game->glsvss_agrms : glsvss_agrms_;
+		// The row's title answers in its witnessed live shape, if it has one.
+		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(game->title.c_str());
+		const TitleIdentity *title = profile != nullptr ? title_identity(profile->id) : nullptr;
+		fields.witnessed_shape = title != nullptr && title->gate_reply_witnessed;
+		if (fields.witnessed_shape)
+			fields.time_on_gate_server = gate_clock_text(std::time(nullptr));
 		const std::string body = build_gate_response(fields);
 
 		std::vector<uint8_t> reply_inner(body.begin(), body.end());

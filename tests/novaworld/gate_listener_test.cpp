@@ -13,10 +13,12 @@
 // and each probe's tag selects the row whose LobbyName, startupurl query and
 // GLSVSS leg the reply carries. JO's tag, and the JO demo's alias of it, get
 // the reply this gate always sent, byte for byte; DFX2's gets what NovaLogic's
-// live gate answered it (dfx2-vs-jo-re.md section 6.5, DFX2-6) in this gate's
-// shape (the POST pair, this service's address); OpenNova's gets its row's; a
-// tag no row answers to gets nothing. A configured GLSVSS leg (ONNET_GLSVSS_*)
-// stands in for a row with none, never for DFX2's own.
+// live gate answered it (dfx2-vs-jo-re.md section 6.5, DFX2-6), in that reply's
+// shape too (D-NET-721: no POST pair, the startupurl on http://[domainname]/,
+// a TimeOnGateServer line in asctime's shape after the reflected pair);
+// OpenNova's gets its row's; a tag no row answers to gets nothing. A
+// configured GLSVSS leg (ONNET_GLSVSS_*) stands in for a row with none, never
+// for DFX2's own.
 //
 // A gate with no lobby to hand out (no instance takes clients, no fallback)
 // answers no probe, and its heartbeat says so: probes_unanswered counts them
@@ -116,30 +118,51 @@ constexpr const char *kDfx2Query =
 		"ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38&gt=[GT]&url=dfx2_0_start.htm";
 
 // One lobby's answer: its LobbyName, startupurl query and GLSVSS leg (an
-// empty request: none).
+// empty request: none), and whether its title's live reply is witnessed
+// (TitleIdentity::gate_reply_witnessed: DFX2's).
 struct Lobby {
 	std::string name;
 	std::string query;
 	std::string glsvss_request;
 	std::string glsvss_rims;
 	std::string glsvss_agrms;
+	bool witnessed = false;
 };
+
+// asctime's shape with no newline: "Www Mmm dd hh:mm:ss yyyy", the day
+// space-padded (the live DFX2 gate's "Wed Oct 14 07:50:11 2026").
+bool asctime_shaped(const std::string &text) {
+	static const std::string days = "SunMonTueWedThuFriSat";
+	static const std::string months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+	if (text.size() != 24 || text[3] != ' ' || text[7] != ' ' || text[10] != ' ' ||
+			text[13] != ':' || text[16] != ':' || text[19] != ' ')
+		return false;
+	const size_t day = days.find(text.substr(0, 3));
+	const size_t month = months.find(text.substr(4, 3));
+	if (day == std::string::npos || day % 3 != 0 || month == std::string::npos || month % 3 != 0)
+		return false;
+	const auto digit = [&](size_t i) { return text[i] >= '0' && text[i] <= '9'; };
+	return (text[8] == ' ' || digit(8)) && digit(9) && digit(11) && digit(12) && digit(14) &&
+			digit(15) && digit(17) && digit(18) && digit(20) && digit(21) && digit(22) &&
+			digit(23);
+}
 
 // The reply this gate sent every tag before the games table chose its lobby,
 // with the lobby's values in their places: for JO's lobby, "jop_2_consumer"
 // and kJoQuery with no GLSVSS, it is that reply byte for byte.
 std::string expected_reply(uint16_t gate_port, uint16_t client_port, const Lobby &lobby) {
-	std::vector<std::pair<std::string, std::string>> vars = {
-		{ "LobbyName", lobby.name },
-		{ "POSTIPADDRESS", "127.0.0.1" },
-		{ "POSTIPPORT", std::to_string(gate_port) },
-		{ "udpnovaworld", "198.51.100.7:40123" },
-		{ "udpcode1", "abc" },
-		{ "udpcode2", "xyz" },
-		{ "startupurl", "http://nw.example.test:40456/nwprepare.dll?" + lobby.query },
-		{ "usejunction", "0" },
-		{ "clearjunction", "0" },
-	};
+	std::vector<std::pair<std::string, std::string>> vars = { { "LobbyName", lobby.name } };
+	if (!lobby.witnessed) {
+		vars.push_back({ "POSTIPADDRESS", "127.0.0.1" });
+		vars.push_back({ "POSTIPPORT", std::to_string(gate_port) });
+	}
+	const std::string web = lobby.witnessed ? "[domainname]" : "nw.example.test:40456";
+	vars.push_back({ "udpnovaworld", "198.51.100.7:40123" });
+	vars.push_back({ "udpcode1", "abc" });
+	vars.push_back({ "udpcode2", "xyz" });
+	vars.push_back({ "startupurl", "http://" + web + "/nwprepare.dll?" + lobby.query });
+	vars.push_back({ "usejunction", "0" });
+	vars.push_back({ "clearjunction", "0" });
 	if (!lobby.glsvss_request.empty()) {
 		vars.push_back({ "GLSVSSREQUEST", lobby.glsvss_request });
 		vars.push_back({ "GLSVSSRIMS", lobby.glsvss_rims });
@@ -153,18 +176,32 @@ std::string expected_reply(uint16_t gate_port, uint16_t client_port, const Lobby
 	return text;
 }
 
-// `tag`'s reply is the expected one for `lobby`.
+// `tag`'s reply is the expected one for `lobby`: byte for byte, but for a
+// witnessed shape's TimeOnGateServer value (the gate's clock), which is
+// asctime-shaped and ends the reply.
 int expect_lobby(uint16_t port, const std::string &tag, const Lobby &lobby) {
 	const auto got = probe_text(port, tag);
 	if (!got)
 		std::fprintf(stderr, "  no gate reply to %s from :%u\n", tag.c_str(), port);
 	TEST_EXPECT(got.has_value());
 	const std::string want = expected_reply(port, got->client_port, lobby);
-	if (got->text != want) {
+	std::string text = got->text;
+	if (lobby.witnessed) {
+		const std::string head = "VAR " + std::string(1, '"') + "TimeOnGateServer" +
+				std::string(1, '"') + " " + std::string(1, '"');
+		const size_t at = text.rfind(head);
+		TEST_EXPECT(at != std::string::npos);
+		const std::string line = text.substr(at + head.size());
+		TEST_EXPECT(line.size() == 24 + 3 && line[24] == '"' && line[25] == '\r' &&
+				line[26] == '\n');
+		TEST_EXPECT(asctime_shaped(line.substr(0, 24)));
+		text.erase(at);
+	}
+	if (text != want) {
 		std::fprintf(stderr, "  %s's reply:\n%s\n  expected:\n%s\n", tag.c_str(), got->text.c_str(),
 				want.c_str());
 	}
-	TEST_EXPECT(got->text == want);
+	TEST_EXPECT(text == want);
 	opennova::GateResponse parsed;
 	TEST_EXPECT(opennova::gate_response_parse(got->text, parsed));
 	TEST_EXPECT(parsed.lobby_name == lobby.name);
@@ -215,7 +252,7 @@ int main(int argc, char **argv) {
 	// Each tag's lobby: JO's reply unchanged, the JO demo's alias answering as
 	// JO, DFX2's as the live DFX2 gate answers, and OpenNova's row.
 	const Lobby jo{ "jop_2_consumer", kJoQuery, "", "", "" };
-	const Lobby dfx2{ "dfx2_0_consumer", kDfx2Query, "[DFX2]KILLS", "3600000", "45000" };
+	const Lobby dfx2{ "dfx2_0_consumer", kDfx2Query, "[DFX2]KILLS", "3600000", "45000", true };
 	const Lobby on{ "opennova_0_consumer", kJoQuery, "", "", "" };
 	if (expect_lobby(port, "jop:cus2", jo) != 0)
 		return 1;
@@ -232,6 +269,10 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(opennova::gate_response_parse(got->text, parsed));
 		TEST_EXPECT(parsed.glsvss_request == "[DFX2]KILLS");
 		TEST_EXPECT(parsed.glsvss_rims == 3600000 && parsed.glsvss_agrms == 45000);
+		// The witnessed shape parses as the client parses it: no POST pair (the
+		// udpnovaworld line leaves it unread) and the [domainname] startupurl.
+		TEST_EXPECT(parsed.post_port == 0 && parsed.udp_novaworld.size() == 1);
+		TEST_EXPECT(parsed.startup_url.rfind("http://[domainname]/nwprepare.dll?", 0) == 0);
 	}
 
 	// A configured GLSVSS leg stands in for the rows with none (JO's and

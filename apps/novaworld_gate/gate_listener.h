@@ -97,7 +97,8 @@ public:
 	void stop();
 
 	// The port start() bound and the receive loop serves (the OS's pick when
-	// the configured port is 0); the gate response advertises it as POSTIPPORT.
+	// the configured port is 0); the gate response advertises it as POSTIPPORT
+	// (but to a title whose live reply is witnessed without the pair: DFX2's).
 	uint16_t bound_port() const { return bound_port_; }
 
 	// The games catalogue start() loaded (the lobbies the gate answers for).

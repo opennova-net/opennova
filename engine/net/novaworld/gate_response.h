@@ -39,10 +39,11 @@ namespace opennova {
 //
 // The required-field gate (the NW-G1 finding): retail fails the gate
 // (state -> -9) unless POSTIPADDRESS and POSTIPPORT are both present, OR
-// the junction/direct-connect bypass `dword_B5FD2C` is set from command
-// line flags. Our server therefore MUST emit both, which it does
-// (apps/novaworld_gate/gate_listener.cpp). onnet's omission of them was
-// a bug; the reverted PR #37 stack adding them was the correct fix.
+// the NWU-in-use word `dword_B5FD2C` is set, which a UDPNOVAWORLD line or a
+// command-line /UDPNOVAWORLD entry sets (NwuLobbySession::poll_gate). Our
+// gate (apps/novaworld_gate/gate_listener.cpp) sends both for every title
+// but one whose live reply is witnessed without them (DFX2's, D-NET-721);
+// its udpnovaworld line leaves the pair unread.
 //
 // CUS / PVT are NOT part of retail JO:CA's ProcessResponse key set (they
 // came from a different/older witness), but live gate responses carry them;
