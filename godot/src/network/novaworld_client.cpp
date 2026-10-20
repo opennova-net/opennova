@@ -8,7 +8,7 @@
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
-#include <runtime/inmatch/host_config.h> // transport_bind_ports
+#include <runtime/inmatch/host_config.h> // transport_bind_ports / gate_bind_ports
 #include <runtime/inmatch/punt_log.h>   // ConnectLog (the gate and connect lines)
 
 #include <array>
@@ -305,15 +305,26 @@ void NovaWorldClient::start() {
 	// Every NovaWorld menu entry of the process reads the one kept gate response (D-NET-706).
 	lobby_.set_gate_memory(&opennova::process_gate_memory());
 
-	// The gate worker's socket (an OS-assigned port), and the NovaWorld network
-	// type's one socket: bound from the cfg block's mpnovaworld quad, its random
-	// word included (engine: inmatch::transport_bind_ports), it carries the NWU
-	// session now and, when this session hosts, the hosted match's game traffic
-	// too (the pump's demux, D-NET-346). Then the driver mints the ci/ck pair on
-	// them; a bind failure is the error state.
+	// The gate worker's socket: on every interface over the cfg block's
+	// mpgateserverlocalport quad (engine: inmatch::gate_bind_ports, its first free
+	// port the probe's source), and the NovaWorld network type's one socket:
+	// bound from the cfg block's mpnovaworld quad, its random word included
+	// (engine: inmatch::transport_bind_ports), it carries the NWU session now and,
+	// when this session hosts, the hosted match's game traffic too (the pump's
+	// demux, D-NET-346). Then the driver mints the ci/ck pair on them; a bind
+	// failure is the error state.
 	gate_pump_.instantiate();
 	nw_pump_.instantiate();
-	if (gate_pump_->bind_listen(0) != OK) {
+	bool gate_bound = false;
+	const std::vector<uint16_t> gate_ports = opennova::inmatch::gate_bind_ports(
+			game_config_.is_valid() ? game_config_->native().cfg() : opennova::gamecfg::defaults());
+	for (const uint16_t port : gate_ports) {
+		if (gate_pump_->bind_listen_at(port, 0u) == OK) {
+			gate_bound = true;
+			break;
+		}
+	}
+	if (!gate_bound) {
 		enter_state(STATE_ERROR, String("gate UDP bind failed"));
 		return;
 	}

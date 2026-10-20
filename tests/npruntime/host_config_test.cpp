@@ -434,6 +434,34 @@ int main() {
 		TEST_EXPECT(transport_socket_setup_text(0u, 40002) == "NET SOCKET SETUP [0.0.0.0:40002]");
 	}
 
+	// The gate socket's scan: the block's mpgateserverlocalport quad whatever the network type,
+	// the shipped 49152 / 65536 / 1 / 0 clamped to 49152..65535 from 49152, a random word
+	// starting the same walk at a drawn port. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 -
+	// @0x4CE7D2, @0x4CE7DE..0x4CE810; CNapiGateManager_CreateAndBindSocket @0x633770 -
+	// @0x6337D4..0x633824; NapiUdpSocket_CreateAndBind @0x62D2A0]
+	{
+		gamecfg::GameCfg block = gamecfg::defaults();
+		const TransportPortQuad shipped = gate_port_quad(block);
+		TEST_EXPECT(shipped.min == 49152 && shipped.max == 65536 && shipped.delta == 1 &&
+				shipped.random == 0);
+		const std::vector<uint16_t> ports = gate_bind_ports(block);
+		TEST_EXPECT(ports.size() == 16384 && ports.front() == 49152 && ports.back() == 65535);
+		block.mp_gate_port_min = 50000;
+		block.mp_gate_port_max = 50004;
+		block.mp_gate_port_delta = 2;
+		block.mp_novaworld_port_min = 42000; // the session socket's quad is not the gate's
+		TEST_EXPECT((gate_bind_ports(block) == std::vector<uint16_t>{50000, 50002}));
+		block.mp_gate_port_delta = 1;
+		block.mp_gate_port_max = 50002;
+		block.mp_gate_port_random = 1;
+		const std::vector<uint16_t> drawn = gate_bind_ports(block);
+		TEST_EXPECT(drawn.size() == 3);
+		if (drawn.size() == 3) {
+			for (std::size_t i = 0; i < 3; ++i)
+				TEST_EXPECT(drawn[i] == 50000 + (drawn[0] - 50000 + i) % 3);
+		}
+	}
+
 	std::printf("host_config: ok\n");
 	return 0;
 }

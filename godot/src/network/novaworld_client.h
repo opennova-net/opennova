@@ -114,7 +114,9 @@ public:
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
 
 	// The process's cfg block, whose mpnovaworld quad the session socket scans
-	// (inmatch::transport_bind_ports); none scans the quad's shipped defaults.
+	// (inmatch::transport_bind_ports) and whose mpgateserverlocalport quad the
+	// gate socket scans (inmatch::gate_bind_ports); none scans the quads' shipped
+	// defaults.
 	void set_game_config(const Ref<GameConfigBlock> &p_block) { game_config_ = p_block; }
 	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
 

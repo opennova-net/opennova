@@ -273,9 +273,11 @@ TransportPortQuad transport_port_quad(const gamecfg::GameCfg &cfg, NetworkType t
 	return quad;
 }
 
-std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkType type,
-		bool authority, std::optional<uint32_t> first) {
-	const TransportPortQuad quad = transport_port_quad(cfg, type, authority, first);
+namespace {
+
+// NapiUdpSocket_CreateAndBind's scan over a stored quad (transport_bind_ports' declaration
+// carries the witness).
+std::vector<uint16_t> bind_ports_of_quad(const TransportPortQuad &quad) {
 	const uint32_t start = static_cast<uint32_t>(quad.min);
 	uint32_t start_index = 0;
 	if (quad.random != 0) {
@@ -289,6 +291,23 @@ std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkT
 	}
 	return lan_host_bind_ports(start, static_cast<uint32_t>(quad.max),
 			static_cast<uint32_t>(quad.delta), start_index);
+}
+
+} // namespace
+
+std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first) {
+	return bind_ports_of_quad(transport_port_quad(cfg, type, authority, first));
+}
+
+TransportPortQuad gate_port_quad(const gamecfg::GameCfg &cfg) {
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE7DE..0x4CE810]
+	return {cfg.mp_gate_port_min, cfg.mp_gate_port_max, cfg.mp_gate_port_delta,
+			cfg.mp_gate_port_random};
+}
+
+std::vector<uint16_t> gate_bind_ports(const gamecfg::GameCfg &cfg) {
+	return bind_ports_of_quad(gate_port_quad(cfg));
 }
 
 uint32_t transport_bind_address(const gamecfg::GameCfg &cfg) {

@@ -120,6 +120,18 @@ struct TransportPortQuad {
 };
 TransportPortQuad transport_port_quad(const gamecfg::GameCfg &cfg, NetworkType type,
 		bool authority, std::optional<uint32_t> first = std::nullopt);
+// The gate worker's socket, bound by every fresh gate probe: on every interface (the context's
+// bind address 0) over the block's mpgateserverlocalport quad (min, max, delta, random), whatever
+// the network type, scanned as the session socket's (transport_bind_ports: the shipped 49152 /
+// 65536 / 1 / 0 clamp to 49152..65535 from 49152). The bound port is the probe's source port,
+// which the gate reflects as REFLECTEDPORTNUMBER and the connect log's "GATE GATE SERVICE
+// STARTED" line prints. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - the bind address 0
+// @0x4CE7D2, the quad g_GameConfigState +0x218..+0x224 into the context's +0x110..+0x11C
+// @0x4CE7DE..0x4CE810; CNapiGateManager_CreateAndBindSocket @0x633770 - the address and the quad
+// into the bind's parameters @0x6337D4..0x633824, NapiUdpSocket_CreateAndBind (the call
+// @0x633830); NapiUdpSocket_CreateAndBind @0x62D2A0]
+TransportPortQuad gate_port_quad(const gamecfg::GameCfg &cfg);
+std::vector<uint16_t> gate_bind_ports(const gamecfg::GameCfg &cfg);
 // The socket open's bind address: the block's mpipaddressstring through Napi_ResolveAddress with
 // DNS off ("255.255.255.255" the broadcast word, a text inet_addr does not read 0, i.e. every
 // interface), whatever the network type. [orig: CNapiNetwork_OpenTransportSocket @0x4C6B12
