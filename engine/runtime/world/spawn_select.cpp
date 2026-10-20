@@ -182,7 +182,9 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
 // no-userpoint +1 z arm rather than inventing a name.
 SpawnPointResult target_pose(World &world, const Entity &target) {
     SpawnPointResult out = entity_pose(target);
-    out.position.z += 1.0f;
+    // The z word's +0x10000 (D-NET-507).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - `add dword ptr [eax+0Ch], 10000h` @0x50D01C]
+    out.position.z.q16 = io::bam_add(out.position.z.q16, 0x10000);
     if (target.zone_number == 0)
         return out;
 
@@ -222,7 +224,9 @@ SpawnPointResult objective_coop_entity_pose(const World &world, uint8_t team) {
     if (selected == nullptr)
         return {};
     SpawnPointResult out = entity_pose(*selected);
-    out.position.z += 1.0f; // unrecovered userpoint name: exact absent arm
+    // Unrecovered userpoint name: the exact absent arm, the z word's +0x10000.
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - `add dword ptr [ebx+0Ch], 10000h` @0x50D55D]
+    out.position.z.q16 = io::bam_add(out.position.z.q16, 0x10000);
     return out;
 }
 

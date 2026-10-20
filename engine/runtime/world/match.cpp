@@ -844,9 +844,9 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     const int32_t x = flag->position.x.q16;
     const int32_t y = flag->position.y.q16;
     const int32_t z = flag->position.z.q16;
-    const int32_t home_x = to_fixed(state->home.x);
-    const int32_t home_y = to_fixed(state->home.y);
-    const int32_t home_z = to_fixed(state->home.z);
+    const int32_t home_x = state->home.x.q16;
+    const int32_t home_y = state->home.y.q16;
+    const int32_t home_z = state->home.z.q16;
     int32_t pose[3];
     int32_t heading = 0;
     int32_t pitch = 0;
@@ -1532,9 +1532,9 @@ void Match::tick_flag_event(World &world, Entity &flag) {
     if (state == nullptr) return;
     const int32_t x = flag.position.x.q16;
     const int32_t y = flag.position.y.q16;
-    const int32_t dx = io::bam_sub(x, int32_t(state->home.x * 65536));
-    const int32_t dy = io::bam_sub(y, int32_t(state->home.y * 65536));
-    const int32_t dz = io::bam_sub(flag.position.z.q16, int32_t(state->home.z * 65536));
+    const int32_t dx = io::bam_sub(x, state->home.x.q16);
+    const int32_t dy = io::bam_sub(y, state->home.y.q16);
+    const int32_t dz = io::bam_sub(flag.position.z.q16, state->home.z.q16);
     const bool near_home = std::sqrt(double(dx) * dx + double(dy) * dy) < 131072.0 &&
             io::bam_abs(dz) < 131072;
     const bool idle = x == state->previous_x_q16 && y == state->previous_y_q16 &&
@@ -1764,11 +1764,11 @@ void Match::update_flag_objectives(World &world) {
             if (state == nullptr)
                 continue;
             const int64_t dx = int64_t{target->position.x.q16} -
-                               to_fixed(state->home.x);
+                               state->home.x.q16;
             const int64_t dy = int64_t{target->position.y.q16} -
-                               to_fixed(state->home.y);
+                               state->home.y.q16;
             const int64_t dz = int64_t{target->position.z.q16} -
-                               to_fixed(state->home.z);
+                               state->home.z.q16;
             const bool displaced =
                 static_cast<int64_t>(std::sqrt(static_cast<long double>(
                     dx * dx + dy * dy))) >= 0x20000 ||

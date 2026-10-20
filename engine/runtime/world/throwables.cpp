@@ -1493,9 +1493,9 @@ void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
             // [orig: @ 0x4a8d7d..0x4a8db4].
             stamp_saved_live_pose(*e);
             CarrierMotionPose p;
-            p.pos[0] = to_fixed(d.pos.x);
-            p.pos[1] = to_fixed(d.pos.y);
-            p.pos[2] = to_fixed(d.pos.z);
+            p.pos[0] = e->position.x.q16;
+            p.pos[1] = e->position.y.q16;
+            p.pos[2] = e->position.z.q16;
             p.yaw_bam = d.yaw_bam;
             p.pitch_bam = d.pitch_bam;
             p.roll_bam = d.roll_bam;
@@ -1506,7 +1506,8 @@ void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
             d.yaw_bam = p.yaw_bam;
             d.pitch_bam = p.pitch_bam;
             d.roll_bam = p.roll_bam;
-            e->position = d.pos;
+            // The followed pose's words, stored raw (D-NET-507).
+            e->position.set_q16({p.pos[0], p.pos[1], p.pos[2]});
             e->yaw = static_cast<int16_t>(
                     std::lround(mission_yaw_deg_from_bam_heading(d.yaw_bam)));
             e->pitch = item_angle_degrees_from_bam(d.pitch_bam);

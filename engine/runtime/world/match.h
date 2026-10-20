@@ -538,7 +538,7 @@ class Match {
     struct CarryObjectiveState {
         EntityHandle objective;
         uint64_t spawn_id = 0;
-        Vec3 home;
+        EntityPosition home; // the definition pose's words (D-NET-507)
         int32_t return_ticks = 0;
         int32_t previous_x_q16 = 0;
         int32_t previous_y_q16 = 0;

@@ -1721,7 +1721,7 @@ void tick_item_death_motion(World &world, Entity &entity,
     const bool routed_falling = e->death_motion == DeathMotionMode::Falling;
     const bool static_motion = e->death_motion == DeathMotionMode::Static;
     if (routed_falling) e->engine_flags &= ~kEntityFlagMatrixBuilt;
-    const Vec3 old_position = e->position;
+    const EntityPosition old_position = e->position;
     if (static_motion) {
         // Entity_UpdateStaticDeathPhysics @ 0x494230 samples the
         // current ground before movement and clears the building bit.
@@ -1743,12 +1743,15 @@ void tick_item_death_motion(World &world, Entity &entity,
                 ? ground - 25.0f
                 : ground;
 
-        // The callback then advances, truncates the float 0.97 damp
+        // The callback then advances (the velocity words added to the
+        // position words, D-NET-507), truncates the float 0.97 damp
         // toward zero, zeroes raw components under 8, and applies
         // half-gravity only once horizontal motion stops.
-        e->position.x += e->veh.vel_x / io::kFp16One;
-        e->position.y += e->veh.vel_y / io::kFp16One;
-        e->position.z += e->veh.slide_z / io::kFp16One;
+        // [orig: Entity_UpdateStaticDeathPhysics @0x494230 - the adds
+        //  @0x4942D4 / @0x4942EA / @0x4942F9]
+        e->position.x.q16 = io::bam_add(e->position.x.q16, e->veh.vel_x);
+        e->position.y.q16 = io::bam_add(e->position.y.q16, e->veh.vel_y);
+        e->position.z.q16 = io::bam_add(e->position.z.q16, e->veh.slide_z);
         e->veh.vel_x = static_cast<int32_t>(
                 static_cast<float>(e->veh.vel_x) * 0.9700000286102295f);
         e->veh.vel_y = static_cast<int32_t>(
@@ -1797,12 +1800,19 @@ void tick_item_death_motion(World &world, Entity &entity,
     // (@ 0x494034-0x49405e) is not taken here (world-wac-ai-re.md D-ITEM-9).
     if (traits != nullptr) ground -= std::abs(traits->husk_rest_min_z);
     const float old_top = e->position.z + e->bound_radius;
-    const float new_z = e->position.z + e->veh.slide_z / io::kFp16One;
-    const float new_x = e->position.x + e->veh.vel_x / io::kFp16One;
-    const float new_y = e->position.y + e->veh.vel_y / io::kFp16One;
+    // The pose advances by the velocity words, word arithmetic (D-NET-507).
+    // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - @0x494077..0x49407D,
+    //  the commit @0x49421C..0x494221; Entity_ProcessFallingDeathPhysics @0x461D30 -
+    //  @0x461E5C / @0x461E64, the commit @0x461EAA..0x461EAF]
+    const int32_t new_x_q16 = io::bam_add(e->position.x.q16, e->veh.vel_x);
+    const int32_t new_y_q16 = io::bam_add(e->position.y.q16, e->veh.vel_y);
+    const int32_t new_z_q16 = io::bam_add(e->position.z.q16, e->veh.slide_z);
+    const float new_z = io::fp16_16_to_float(new_z_q16);
+    const float new_x = io::fp16_16_to_float(new_x_q16);
+    const float new_y = io::fp16_16_to_float(new_y_q16);
     if (!routed_falling) {
-        e->position.x = new_x;
-        e->position.y = new_y;
+        e->position.x.q16 = new_x_q16;
+        e->position.y.q16 = new_y_q16;
     }
 			// No per-tick horizontal damp: the falling legs keep velocity until
 			// water or ground [orig: 0x461d30/0x493f70 — the 0.97 damp belongs
@@ -1862,10 +1872,10 @@ void tick_item_death_motion(World &world, Entity &entity,
 					}
 				}
     } else if (!routed_falling) {
-        e->position.z = new_z;
+        e->position.z.q16 = new_z_q16;
     }
     if (routed_falling)
-        e->position = Vec3{new_x, new_y, new_z};
+        e->position.set_q16({new_x_q16, new_y_q16, new_z_q16});
 }
 
 // ----------------------------------------------------------------------------
