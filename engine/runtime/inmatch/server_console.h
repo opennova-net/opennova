@@ -42,7 +42,7 @@
 // CNapiNPConnection_LogPlayerRemoved @0x61e940 (TeardownActiveConnection
 // @0x6253d2), each testing the log's on byte (protocol + 0xF8B); the log
 // CNapiLog_Init(protocol + 0xF80, "_inout.txt", 3, 6, 5000) @0x625ae5..0x625b07 (the
-// call @0x625afb),
+// "_inout.txt" push @0x625afb),
 // enabled by NapiLog_SetEnabled(g_InoutLogEnabled) @0x4c6d02..0x4c6d15 in
 // CNapiNetwork_OpenTransportSocket; `/INOUT` @0x4a743d..0x4a744f].
 

@@ -1,6 +1,6 @@
 // opennova-serve's `/INOUT` switch (D-NET-356): parsed in any case, handed to the host context
 // with the protocol's _inout.txt log, which the socket open then turns on.
-// [orig: Game_ParseCommandLineAndInit @0x4A743D..0x4A744F (dword_B4C688);
+// [orig: Game_ParseCommandLineAndInit @0x4A743D..0x4A744F (g_InoutLogEnabled);
 //  CNapiNetwork_OpenTransportSocket @0x4C6D02..0x4C6D15]
 #include "server_logs.h"
 
