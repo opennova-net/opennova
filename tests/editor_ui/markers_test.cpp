@@ -844,6 +844,17 @@ void test_shortcuts() {
 // The editor's quiet lines (the prose rule, ui/ui_kit.h): a warning and a refusal on one line cut to it,
 // whole in their tooltips, each in its severity's colour; a button naming what it acts on cut in its middle,
 // its id its verb's whatever the name, never acting while disabled.
+// A finding's words cut to a line drop their witness citations; the rest stands as written.
+void test_without_citations() {
+	CHECK(ui_kit::without_citations("Reads past it [orig: ItemDef_ParseProperty @ 0x49eb00]; fix it.") ==
+	              "Reads past it; fix it.",
+	      "a citation and the blank before it go");
+	CHECK(ui_kit::without_citations("A [orig: A @ 0x1] and B [orig: B @ 0x2]") == "A and B", "every citation goes");
+	CHECK(ui_kit::without_citations("No citation [here] at all.") == "No citation [here] at all.",
+	      "other brackets stand");
+	CHECK(ui_kit::without_citations("Cut [orig: never closed") == "Cut [orig: never closed", "an unclosed one stands");
+}
+
 void test_quiet_lines() {
 	NullBackend backend;
 	ImGuiIO &io = ImGui::GetIO();
@@ -929,6 +940,7 @@ void run_marker_tests() {
 	test_output_follows();
 	test_shortcuts();
 	test_quiet_lines();
+	test_without_citations();
 }
 
 } // namespace editor_ui_test

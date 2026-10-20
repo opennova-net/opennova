@@ -454,7 +454,8 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 		ui_kit::clipped_text(d.code());
 		ImGui::PopStyleColor();
 	} else {
-		ui_kit::clipped_text(d.message, d.code().empty() ? std::string() : d.message + "\n\n" + d.code());
+		// Cut to the line: the words without their witness citations, the whole message and its code in the tooltip.
+		ui_kit::clipped_text(ui_kit::without_citations(d.message), d.code().empty() ? d.message : d.message + "\n\n" + d.code());
 	}
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();

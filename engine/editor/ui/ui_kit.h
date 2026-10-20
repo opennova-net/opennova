@@ -75,6 +75,9 @@ void warning_line(const std::string &text, const std::string &tip = std::string(
 void refusal_text(const std::string &text);
 // The words a view shows while the project's references are still being read.
 const char *reading_references();
+// `text` without its witness citations ("[orig: ...]" and the blank before each): what a line that is cut to
+// one line shows of a finding's words, the whole in its tooltip.
+std::string without_citations(const std::string &text);
 // A button that names what it acts on, `verb` then `name` ("Import gametext.bin..."; `tail` after the name),
 // cut to what is left of the line in its middle (a name's end tells two apart), its id the verb's whatever the
 // name: pressed only while `enabled`, `tip` its tooltip.
