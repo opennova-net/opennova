@@ -49,12 +49,17 @@ int EntityCommands::fire_ammo_in_area(int32_t ammo, int32_t area_id) {
         const uint16_t random = uint16_t(world_.ai.prng_step_a());
         return int32_t(uint32_t((int64_t(range) * random + 0x8000) >> 16));
     };
-    const int32_t x = to_fixed(area.script_bounds.min.x);
-    const int32_t y = to_fixed(area.script_bounds.min.y);
+    // The record's own words: x_min and the x span, y_min and the y span, the raw
+    // z_min plus 400 units (D-NET-507). [orig: WacCmd_AmmoArea @0x4EE240 -
+    //  `mov eax, [ecx+8]` / `mov esi, [ecx+4]` / `sub eax, esi` @0x4EE272..0x4EE27D,
+    //  `mov edi, [ecx+0Ch]` / `sub edx, edi` @0x4EE280..0x4EE28C, `mov eax, [ecx+14h]`
+    //  @0x4EE32B, `add eax, 1900000h` @0x4EE336]
+    const int32_t x = area.record_xy_q16[0];
+    const int32_t y = area.record_xy_q16[2];
     FixedVec3 p;
-    p.x = io::bam_add(x, random_offset(io::bam_sub(to_fixed(area.script_bounds.max.x), x)));
-    p.y = io::bam_add(y, random_offset(io::bam_sub(to_fixed(area.script_bounds.max.y), y)));
-    p.z = io::bam_add(to_fixed(area.script_bounds.min.z), 0x1900000); // area bottom + 400u
+    p.x = io::bam_add(x, random_offset(io::bam_sub(area.record_xy_q16[1], x)));
+    p.y = io::bam_add(y, random_offset(io::bam_sub(area.record_xy_q16[3], y)));
+    p.z = io::bam_add(area.record_z_q16[0], 0x1900000); // area bottom + 400u
     const int32_t rise = random_offset(0x320000); // 0..50u, third draw
     // This is the existing CFAC/terrain support query, despite the old
     // decompiler's unrelated name Entity_ComputeClampedDisplacement.
