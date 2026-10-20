@@ -106,6 +106,16 @@ void EntityRegistry::despawn(EntityHandle h) {
     }
 }
 
+void EntityRegistry::clear_destroyed(EntityHandle h) {
+    if (!h.valid()) return;
+    const int pool = h.pool();
+    const int slot = h.slot();
+    if (pool < 0 || pool >= kPoolCount) return;
+    Pool &p = pools_[pool];
+    if (slot < 0 || static_cast<size_t>(slot) >= p.slots.size() || p.used[slot]) return;
+    p.destroyed[slot] = 0;
+}
+
 bool EntityRegistry::despawn(EntityLifetime lifetime) {
     if (get(lifetime) == nullptr) return false;
     despawn(lifetime.handle);

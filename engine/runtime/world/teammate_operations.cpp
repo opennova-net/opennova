@@ -96,11 +96,17 @@ void diagnostic(World &world, const char *reason, int32_t subtype, int32_t patie
     world.diagnostics.record({RuntimeGapKind::BmsAction, 39, subtype, -1, -1, reason},
             world.logic_tick, {patient, 0, 0, 0});
 }
-void retire(World &world, EntityLifetime &owner) {
+// free_row: the departure's clone retirements clear the row's +0x219 after the
+// destroy, so the next includeInUse-0 clone takes it (the patient keeps it).
+// [orig: HeliLift_UpdateSlotState @0x451730 - @0x451B49 / @0x451B65 (no brain),
+//  @0x451BB8 / @0x451BD4 / @0x451BF0 (landed)]
+void retire(World &world, EntityLifetime &owner, bool free_row = false) {
     if (const Entity *entity = world.registry.get(owner)) {
         // Use the bound handle: several concurrent operations intentionally
         // share 11000/12000/12001 identities.
-        world.commands.remove_ssn(entity->handle);
+        const EntityHandle h = entity->handle;
+        world.commands.remove_ssn(h);
+        if (free_row) world.registry.clear_destroyed(h);
     }
     owner = {};
 }
@@ -361,8 +367,10 @@ void TeammateOperations::update(World &world, Slot &slot) {
     case State::Depart:
         if (!air || (air->brain.f[AiBrain::kWpDistance] != 0 &&
                 air->brain.f[AiBrain::kWpDistance] < 1966080)) {
-            retire(world, slot.patient); retire(world, slot.first); retire(world, slot.second);
-            if (air) retire(world, slot.helicopter); // retail preserves a brainless helicopter
+            retire(world, slot.patient);
+            retire(world, slot.first, true);
+            retire(world, slot.second, true);
+            if (air) retire(world, slot.helicopter, true); // retail preserves a brainless helicopter
             slot.state = State::Finished;
         }
         break;

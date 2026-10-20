@@ -80,6 +80,11 @@ public:
     EntityHandle spawn_at(EntityHandle h, const Entity &seed);
     void despawn(EntityHandle h);
     bool despawn(EntityLifetime lifetime);
+    // Clear a free row's +0x219 (destroyed) byte, so an includeInUse-0 caller
+    // may take it again (D-NET-485). A live row is left alone.
+    // [orig: HeliLift_UpdateSlotState @0x451730 - `mov [reg+219h], bl` after
+    //  each clone's Entity_Destroy]
+    void clear_destroyed(EntityHandle h);
     Entity *get(EntityHandle h);
     const Entity *get(EntityHandle h) const;
     Entity *get(EntityLifetime lifetime);
