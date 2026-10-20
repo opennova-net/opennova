@@ -1414,6 +1414,54 @@ bool check_model_page_cursor_wraps_at_the_list_count() {
 	return ok;
 }
 
+// A remote slot whose spectator latch is set takes no control quartet (and
+// draws no silence punt), mature or not; its latch cleared, the next walk sends
+// the 0x39 / 0x42 / 0x43 / 0x68.
+// [orig: Server_UpdateAllActivePlayerSlots - the spectator latch +0x188D7
+//  @0x5189CE ahead of the live age @0x5189DA and the punts @0x5189EF..0x518A3A]
+bool check_quartet_skips_a_spectator_slot() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
+	ctx.world = &world;
+	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &transport,
+			ns::TransportMode::Client, player, true));
+	auto &peer = ctx.np_protocol.connection_list.back();
+	peer.reply.player_slot = 1;
+	peer.link.spectator = true;
+	world.match.upsert_player({player, 1, "Peer"});
+	world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	peer.reply.control_request_countdown = 0;
+	peer.reply.charattr_unanswered_count = 8; // a silence the punt would read
+	const auto quartet_tags = [&]() {
+		int n = 0;
+		for (const ns::Datagram &d : drain(transport))
+			if (d.tag == s2c::CHARATTR_CRC_CHALLENGE || d.tag == s2c::CHARATTR_DISABLED_PROPERTIES ||
+					d.tag == s2c::TIME_SYNC_PING || d.tag == s2c::LOADED_MODEL_PAGE_REQUEST)
+				++n;
+		return n;
+	};
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(quartet_tags() == 0 && !peer.host_disconnect_sent &&
+	                    peer.reply.control_request_countdown == 0,
+	            "a spectator slot takes no quartet and no silence punt"))
+		return false;
+	peer.link.spectator = false;
+	peer.reply.charattr_unanswered_count = 0;
+	inmatch::Server_TickUpdate(ctx);
+	return expect(quartet_tags() == 4, "the latch cleared, the next walk sends the quartet");
+}
+
 // The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
 // every pass, once, whether or not its record changed and whatever the
 // recipient's state; the 0x6E goes, once, to a slot whose body's dead bit or
@@ -3128,6 +3176,7 @@ int main() {
 	ok = check_spectator_latch_mirrors_onto_the_roster_row() && ok;
 	ok = check_armory_reuse_cooldown() && ok;
 	ok = check_model_page_cursor_wraps_at_the_list_count() && ok;
+	ok = check_quartet_skips_a_spectator_slot() && ok;
 	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;

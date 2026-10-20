@@ -298,9 +298,14 @@ uint16_t next_maintenance_prng16(world::World &world) {
 	return world.next_prng16();
 }
 
+// The integrity family's slot gate: an active remote slot (not the host's own,
+// +5; the bot byte +0x178E3 has no writer in JO) in state 6 with a live entity.
+// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 - active @0x508562,
+//  +5 @0x50856B..0x50856E, +0x178E3 @0x508574, state 6 @0x508580, the entity
+//  @0x50858A]
 const world::Entity *integrity_player(
 		const NapiNPConnection &conn, const world::World &world) {
-	if (!is_in_match(conn) || conn.link.transport == nullptr)
+	if (!is_in_match(conn) || slot_is_local(conn) || conn.link.transport == nullptr)
 		return nullptr;
 	const world::Entity *player = world.registry.get(conn.link.owned_entity);
 	// The integrity slot walk tests only entity+36 bit 0x02. Health and the
@@ -330,20 +335,23 @@ bool scoreboard_recipient(const NapiNPConnection &conn) {
 namespace {
 
 // The control quartet, in the walk's state-6 block after the frontier hint: in
-// session, for a slot whose live age has reached 1860 (slot+0x184, the play
-// ticks the play-tick walk adds to later in the tick, so the previous ticks'
-// value), the two silence punts (the character-attribute silence first), then
-// the 744-tick countdown and, at its zero, the 0x39 / 0x42, the 0x43 and the
-// 0x68. Once mature, the countdown runs on through death and deploy states.
+// session, for a remote slot (not the host's own, +5) whose spectator latch is
+// clear and whose live age has reached 1860 (slot+0x184, the play ticks the
+// play-tick walk adds to later in the tick, so the previous ticks' value), the
+// two silence punts (the character-attribute silence first), then the 744-tick
+// countdown and, at its zero, the 0x39 / 0x42, the 0x43 and the 0x68. Once
+// mature, the countdown runs on through death and deploy states. The +96481
+// byte between the two tests has no writer on this host.
 // [orig: Server_UpdateAllActivePlayerSlots @0x518820 - is_in_session @0x5189AD,
-//  the live age `(int)slot[97] >= 1860` @0x5189DA..0x5189E4, the punts
+//  +5 @0x5189B9..0x5189BC, +0x178E1 @0x5189C2, the spectator latch +0x188D7
+//  @0x5189CE, the live age `(int)slot[97] >= 1860` @0x5189DA..0x5189E4, the punts
 //  @0x5189F5..0x518A3A, the countdown @0x518A42..0x518A5D, the sends @0x518A67 /
 //  @0x518A73 / @0x518A79; the play-tick walk's slot test and add
 //  @0x51D95E..0x51D97E, the add @0x51D977]
 void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnection &conn) {
 	const world::MatchPlayer *row = world.match.player(conn.link.owned_entity);
-	if (!ctx.is_in_session || !is_in_match(conn) || conn.link.transport == nullptr ||
-			row == nullptr ||
+	if (!ctx.is_in_session || !is_in_match(conn) || slot_is_local(conn) ||
+			conn.link.spectator || conn.link.transport == nullptr || row == nullptr ||
 			static_cast<int32_t>(row->play_ticks) <
 					static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS))
 		return;

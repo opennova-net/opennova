@@ -2824,7 +2824,17 @@ bool check_requester_score_delta_refresh() {
 	              "the next one-second pass refreshes the requester");
 }
 
-bool check_listen_host_receives_targeted_maintenance() {
+// A listen host's own slot (+5) takes neither the control quartet nor the
+// integrity family, while a remote peer on the same tick takes both; the 0x16,
+// the 0x79 and the 0x0A reach both. The peer's order: the quartet in the
+// tick-head walk, the 0x16 and the family at the scoreboard boundary after the
+// script pass, the 0x79 at the tail of the periodic block, the 0x0A in the
+// per-slot fan.
+// [orig: Server_UpdateAllActivePlayerSlots - +5 @0x5189B9..0x5189BC;
+//  Server_BroadcastWeaponSlotStateToPlayers - +5 @0x50856B..0x50856E;
+//  Server_TickUpdate - the walk @0x51D88B, @0x51D90D / @0x51D912, @0x51E1B2,
+//  @0x51E3E4]
+bool check_listen_host_own_slot_takes_no_quartet_or_family() {
 	opennova::replication::LoopbackChannel loopback;
 	opennova::inmatch::NapiNPServerCtx ctx;
 	opennova::inmatch::set_connection_mode(
@@ -2840,70 +2850,104 @@ bool check_listen_host_receives_targeted_maintenance() {
 	            "listen maintenance fixture owns one type-2 loopback slot"))
 		return false;
 
-	opennova::world::World world;
+	auto heap = std::make_unique<opennova::world::World>();
+	opennova::world::World &world = *heap;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
-	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn spawn;
-	const opennova::world::EntityHandle player =
+	const opennova::world::EntityHandle host_player =
 			opennova::world::spawn_remote_player(world, spawn);
-	if (!expect(player.valid(), "listen maintenance player spawned")) return false;
-	opennova::world::Entity *entity = world.registry.get(player);
-	entity->equipped_adm_index = 0x20;
+	const opennova::world::EntityHandle peer_player =
+			opennova::world::spawn_remote_player(world, spawn);
+	if (!expect(host_player.valid() && peer_player.valid(),
+	            "listen maintenance players spawned"))
+		return false;
 	world.tables.weapons.entries.resize(0x21);
 	world.tables.weapons.entries[0x20].valid = true;
 	world.tables.weapons.entries[0x20].ammo_index = 0x1A;
+	for (const opennova::world::EntityHandle h : {host_player, peer_player})
+		world.registry.get(h)->equipped_adm_index = 0x20;
 	ctx.world = &world;
 	ctx.loaded_model_list_count = 100;
 	ctx.scoreboard_broadcast_timer = 0x136u;
 	// The authority's latches ride the quartet's 0x42 (D-NET-374).
 	world.tables.charattr_disabled_word = 0x0012u;
+
+	opennova::replication::UdpSessionTransport transport(
+			opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::inmatch::NapiNPConnection peer;
+	peer.type = 1;
+	peer.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	peer.burst.spawned = true;
+	peer.link.mode = opennova::replication::TransportMode::Client;
+	peer.link.transport = &transport;
+	peer.link.owned_entity = peer_player;
+	peer.reply.player_name = "Peer";
+	peer.reply.player_slot = 1;
+	ctx.np_protocol.connection_list.push_back(std::move(peer));
 	auto &self = ctx.np_protocol.connection_list.front();
 	self.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	self.burst.spawned = true;
-	self.link.owned_entity = player;
+	self.link.owned_entity = host_player;
 	self.reply.player_name = "ListenHost";
 	// The quartet's live age is the slot's play ticks (slot+0x184)
 	// [orig: Server_UpdateAllActivePlayerSlots @0x5189DA..0x5189E4].
-	world.match.upsert_player({player, 0, "ListenHost"});
-	world.match.player(player)->play_ticks =
-			opennova::inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
-	self.reply.control_request_countdown = 0;
+	world.match.upsert_player({host_player, 0, "ListenHost"});
+	world.match.upsert_player({peer_player, 1, "Peer"});
+	for (const opennova::world::EntityHandle h : {host_player, peer_player})
+		world.match.player(h)->play_ticks =
+				opennova::inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	for (opennova::inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		conn.reply.control_request_countdown = 0;
 
 	opennova::inmatch::Server_TickUpdate(ctx);
-	std::vector<uint8_t> tags;
-	std::vector<uint8_t> latches;
+	std::vector<uint8_t> own_tags;
 	opennova::replication::Datagram datagram;
-	while (loopback.client_recv(datagram)) {
-		tags.push_back(datagram.tag);
+	while (loopback.client_recv(datagram)) own_tags.push_back(datagram.tag);
+	std::vector<uint8_t> peer_tags;
+	std::vector<uint8_t> latches;
+	while (transport.pop_outbound(datagram)) {
+		peer_tags.push_back(datagram.tag);
 		if (datagram.tag == opennova::s2c::CHARATTR_DISABLED_PROPERTIES) latches = datagram.body;
 	}
-	if (!expect(latches == std::vector<uint8_t>({0x12, 0x00}), "the quartet's 0x42 carries the authority's latches"))
-		return false;
-	auto index_of = [&](uint8_t tag) {
+	auto index_of = [](const std::vector<uint8_t> &tags, uint8_t tag) {
 		const auto it = std::find(tags.begin(), tags.end(), tag);
-		return it == tags.end()
-				? tags.size()
-				: static_cast<std::size_t>(std::distance(tags.begin(), it));
+		return static_cast<std::size_t>(std::distance(tags.begin(), it));
 	};
-	const std::size_t scoreboard_i = index_of(opennova::s2c::PLAYER_LIST);
-	const std::size_t integrity_i = index_of(opennova::s2c::LOADOUT_CRC_REQ);
-	const std::size_t quality_i = index_of(opennova::s2c::NETWORK_QUALITY);
-	const std::size_t charattr_i =
-			index_of(opennova::s2c::CHARATTR_CRC_CHALLENGE);
-	const std::size_t input_i = index_of(opennova::s2c::CHARATTR_DISABLED_PROPERTIES);
-	const std::size_t time_i = index_of(opennova::s2c::TIME_SYNC_PING);
-	const std::size_t model_i =
-			index_of(opennova::s2c::LOADED_MODEL_PAGE_REQUEST);
-	const std::size_t frame_i = index_of(opennova::s2c::PER_FRAME_UPDATE);
-	// The quartet rides the tick-head walk, the 0x16 and the family the
-	// scoreboard boundary after the script pass, the 0x79 the tail of the
-	// periodic block, the 0x0A the per-slot fan [orig: Server_TickUpdate - the walk
-	// @0x51D88B, @0x51D90D / @0x51D912, @0x51E1B2, @0x51E3E4].
+	auto has = [&](const std::vector<uint8_t> &tags, uint8_t tag) {
+		return index_of(tags, tag) < tags.size();
+	};
+	if (!expect(!has(own_tags, opennova::s2c::CHARATTR_CRC_CHALLENGE) &&
+	                    !has(own_tags, opennova::s2c::CHARATTR_DISABLED_PROPERTIES) &&
+	                    !has(own_tags, opennova::s2c::TIME_SYNC_PING) &&
+	                    !has(own_tags, opennova::s2c::LOADED_MODEL_PAGE_REQUEST) &&
+	                    !has(own_tags, opennova::s2c::LOADOUT_CRC_REQ) &&
+	                    !has(own_tags, opennova::s2c::ENTITY_CHECKSUM_REQ),
+	            "the listen host's own slot takes no quartet and no integrity family"))
+		return false;
+	if (!expect(index_of(own_tags, opennova::s2c::PLAYER_LIST) <
+	                            index_of(own_tags, opennova::s2c::NETWORK_QUALITY) &&
+	                    index_of(own_tags, opennova::s2c::NETWORK_QUALITY) <
+	                            index_of(own_tags, opennova::s2c::PER_FRAME_UPDATE) &&
+	                    has(own_tags, opennova::s2c::PER_FRAME_UPDATE),
+	            "the listen host's own slot takes the 0x16, the 0x79 and its 0x0A"))
+		return false;
+	if (!expect(latches == std::vector<uint8_t>({0x12, 0x00}),
+	            "the peer's quartet 0x42 carries the authority's latches"))
+		return false;
+	const std::size_t charattr_i = index_of(peer_tags, opennova::s2c::CHARATTR_CRC_CHALLENGE);
+	const std::size_t input_i = index_of(peer_tags, opennova::s2c::CHARATTR_DISABLED_PROPERTIES);
+	const std::size_t time_i = index_of(peer_tags, opennova::s2c::TIME_SYNC_PING);
+	const std::size_t model_i = index_of(peer_tags, opennova::s2c::LOADED_MODEL_PAGE_REQUEST);
+	const std::size_t scoreboard_i = index_of(peer_tags, opennova::s2c::PLAYER_LIST);
+	const std::size_t integrity_i = index_of(peer_tags, opennova::s2c::LOADOUT_CRC_REQ);
+	const std::size_t quality_i = index_of(peer_tags, opennova::s2c::NETWORK_QUALITY);
+	const std::size_t frame_i = index_of(peer_tags, opennova::s2c::PER_FRAME_UPDATE);
 	return expect(charattr_i < input_i && input_i < time_i && time_i < model_i &&
 	                      model_i < scoreboard_i && scoreboard_i < integrity_i &&
-	                      integrity_i < quality_i && quality_i < frame_i,
-	              "listen-host slot receives ordered quartet/0x16/0x31/0x79/0x0A maintenance");
+	                      integrity_i < quality_i && quality_i < frame_i &&
+	                      frame_i < peer_tags.size(),
+	              "the remote peer receives ordered quartet/0x16/0x31/0x79/0x0A maintenance");
 }
 
 // Retail maintenance follows authoritative player-slot state, not free-running
@@ -5771,7 +5815,7 @@ int main() {
 	ok = check_global_scoreboard_integrity_phase() && ok;
 	ok = check_scoreboard_active_slot_filter_is_distinct() && ok;
 	ok = check_requester_score_delta_refresh() && ok;
-	ok = check_listen_host_receives_targeted_maintenance() && ok;
+	ok = check_listen_host_own_slot_takes_no_quartet_or_family() && ok;
 	ok = check_spawned_peer_gets_periodic_retail_maintenance() && ok;
 	ok = check_spawn_wave_queue_and_release_wire() && ok;
 	ok = check_default_spawn_requires_no_team_zone() && ok;
