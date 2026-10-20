@@ -289,16 +289,15 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
     entity.destroy_progress = 0;
     entity.objective_death_scored = false;
     // The reset reads the Position words as they stand (no float view): the
-    // savedLivePose and spawn backups are dword copies of them (D-NET-507).
+    // spawn backup (+0x318..+0x320) is a dword copy of them (D-NET-507); it
+    // leaves savedLivePose (+0x80) alone. [orig: Entity_ResetToSpawnState
+    //  @0x4B9610 - the stores @0x4B9632 / @0x4B963B / @0x4B9644]
     const EntityPosition origin = entity.position;
     const int32_t heading = bam_heading_from_mission_yaw_deg(entity.yaw);
     const uint32_t flags = entity.flags | entity.engine_flags;
     AiEntity *body = ai.for_handle(entity.handle);
     if (body != nullptr) {
-        for (int axis = 0; axis < 3; ++axis) {
-            body->net_saved_live_pose[axis] = origin.word(axis);
-            body->inf.vel[axis] = 0;
-        }
+        for (int axis = 0; axis < 3; ++axis) body->inf.vel[axis] = 0;
         body->inf.z_quarter_step = 0; // [orig: @0x4B967A]
         body->heading = heading;
         body->vel_x = body->vel_y = 0;
