@@ -12,7 +12,7 @@ Every file is OpenNova's own: hand-written, made by the editor's blank
 factories (`engine/editor/blank/`, written through our own writers), minted by
 our tools, or exported by the Blender add-on (`tools/blender/opennova_3di/`)
 from a scene under [`art/`](../art). No retail byte is ever committed here
-([docs/asset-gated-tests.md](../docs/asset-gated-tests.md) has the policy).
+([docs/test-suite.md](../docs/test-suite.md) has the policy).
 The models, clips, textures, sounds, music banks and images made from `art/`
 ride Git LFS; everything else, the menu's pointer `newarow1.tga` included, is a
 plain git blob, so no test needs an LFS pull (`.gitattributes`).

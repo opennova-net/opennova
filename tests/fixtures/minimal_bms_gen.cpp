@@ -7,9 +7,9 @@
 // tables, and zero-valued optional fields on every record (the D-MIS-5 shape:
 // an authoring default the parser seeds must not mutate a zero it read). The
 // header names the minted terrain (Tmap) and environment (synth_full)
-// fixtures. No retail mission is carried: the shipped ash_i5b is
-// mission_mis_idempotency's reference-tree leg, and the whole shipped corpus
-// is mission_corpus's retail leg.
+// fixtures. No retail mission is carried: the minted mission sets
+// (fixtures/bms, fixtures/mission_set) stand for the shipped missions the
+// mission tests once read.
 //
 // Default: rebuild in memory and byte-compare the committed file. `--write`
 // (re)writes it.

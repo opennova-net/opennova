@@ -172,7 +172,7 @@ bool build_mission(std::vector<uint8_t> &bytes, std::string &err) {
 	}
 
 	// Each parameter a record's type does not read holds -1, as every shipped record holds it
-	// (mission::kUnreadParam, the mission_logic ctest's retail leg).
+	// (mission::kUnreadParam, editor_mission_logic's test_measured_defaults).
 	for (bms::Trigger &trigger : doc.triggers) {
 		int32_t *params[4] = {&trigger.param1, &trigger.param2, &trigger.param3, &trigger.param4};
 		for (int slot = 0; slot < 4; ++slot)

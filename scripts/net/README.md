@@ -4,7 +4,7 @@ These PowerShell scripts support local LAN, capture, and retail-interoperability
 work. They are operator tools, not release inputs or CI gates. Captures and
 retail data stay machine-local and gitignored and must never be
 committed without the sanitization review described in
-[`docs/asset-gated-tests.md`](../../docs/asset-gated-tests.md).
+[`docs/test-suite.md`](../../docs/test-suite.md).
 
 The parity verdict is `opennova-parity` (C++, `apps/parity`), run per case by
 `run_parity_suite.ps1` ("Parity verdict" below). It judges the runs it is given; it

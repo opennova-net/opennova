@@ -513,7 +513,7 @@ void print_hex(const std::vector<uint8_t> &bytes) {
 
 // `nw_codec_identity_test --dump` prints the replacement vector table; the
 // ctest registration passes nothing. Updating a vector is a wire-format change
-// (docs/asset-gated-tests.md, tier 1).
+// (docs/test-suite.md, tier 1).
 int main(int argc, char **argv) {
 	const std::vector<Case> corpus = build_corpus();
 

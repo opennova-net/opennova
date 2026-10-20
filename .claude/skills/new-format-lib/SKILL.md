@@ -90,7 +90,7 @@ FFI wrapper. One thing still matters:
   through the generator (a NovaLogic tool's quirk built deliberately, cited to
   its witness or D-entry), pin the writer's output on them with FNV-1a64
   vectors, and assert a witnessed retail value as a cited constant (prove once,
-  pin; `docs/asset-gated-tests.md`). Never read the environment
+  pin; `docs/test-suite.md`). Never read the environment
   (`scripts/lint/env_lint.py` hard-fails it).
 - Record where each committed sample came from in the test header comment.
 

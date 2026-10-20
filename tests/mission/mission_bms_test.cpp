@@ -346,7 +346,7 @@ int main() {
 	TEST_EXPECT(entity_item_id(document.items[added]) == 101291);
 	TEST_EXPECT(document.items[added].type_id == 1291);
 	// A new record holds what the original editor's initializer gives a placed item (new_entity, D-MIS-10;
-	// mission_corpus's retail leg holds each to the corpus), its SSN one past the file's largest.
+	// each measured once over the corpus), its SSN one past the file's largest.
 	{
 		const opennova::bms::Entity &made = document.items[added];
 		int largest = 0;
