@@ -12,6 +12,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <base/io/log.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
+#include <net/novaworld/join_identity.h> // decrypt_join_cookie_field
 
 #include <base/io/strutil.h>
 
@@ -24,6 +25,13 @@
 namespace opennova::inmatch {
 
 namespace {
+
+// The validator's cookie reads: each field decrypts into a 512-byte buffer, and the NAMEINFO
+// name keeps 16 characters.
+// [orig: Server_ValidatePlayerJoinRequest - `push 200h` @0x51262C / @0x5126E2, the cut
+//  `cmp eax, 10h` @0x51268B and the NUL store @0x512690]
+constexpr std::size_t kJoinCookieFieldBytes = 512;
+constexpr std::size_t kJoinCookieNameChars = 16;
 
 std::string file_path(const ServerBanLists &bans, const char *name) {
 	if (!bans.directory.has_value() || bans.directory->empty()) return name;
@@ -135,13 +143,24 @@ bool Server_NameBanned(const NapiNPServerCtx &ctx, std::string_view name) {
 	return false;
 }
 
-uint32_t Server_ValidateJoinBans(
-		NapiNPServerCtx &ctx, NapiNPConnection &conn, bool pcid_decrypted) {
+uint32_t Server_ValidateJoinAccount(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	std::string local_address;
 	if (get_local_address(ctx, local_address)) {
+		// The cookie legs, each refusal a description punt (D-NET-702).
+		if (!conn.join_cookie_present) return 23;
+		std::vector<uint8_t> field;
+		if (!decrypt_join_cookie_field(conn.join_identity_pairs, local_address + "NAMEINFO",
+					ctx.cookie_key_table, kJoinCookieFieldBytes, field))
+			return 24;
+		std::string name(reinterpret_cast<const char *>(field.data()));
+		if (name.size() > kJoinCookieNameChars) name.resize(kJoinCookieNameChars);
+		if (conn.player_name != name) conn.player_name = name;
+		if (!decrypt_join_cookie_field(conn.join_identity_pairs, local_address + "PCID",
+					ctx.cookie_key_table, kJoinCookieFieldBytes, field))
+			return 25;
 		if (Server_PcidBanned(ctx, conn.account.pcid))
 			return 29;
-		if (pcid_decrypted && ctx.config.punt_duplicate_pcids != 0) {
+		if (ctx.config.punt_duplicate_pcids != 0) {
 			const std::string &pcid = conn.account.pcid;
 			uint32_t holders = 0;
 			for (const NapiNPConnection &other : ctx.np_protocol.connection_list)
@@ -168,6 +187,13 @@ uint32_t Server_ValidateJoinBans(
 				}
 				return 30;
 			}
+		}
+		if (join_tickets_required(ctx)) {
+			const std::string ticket = local_address + "JOINTICKET";
+			bool named = false;
+			for (const auto &pair : conn.join_identity_pairs)
+				named = named || strutil::iequals(pair.first, ticket);
+			if (!named) return 28;
 		}
 	}
 	if (ctx.is_in_session != 0 && Server_NameBanned(ctx, conn.player_name)) return 31;

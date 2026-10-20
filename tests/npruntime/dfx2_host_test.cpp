@@ -200,7 +200,10 @@ void lan_cd_key_check() {
 	expect(join_code(ctx, key, {cdkey::WireKeys{other_key, ""}, cdkey::WireKeys{key, ""}}) == 13,
 	       "DFX2-13: another player's CDKIID is refused 13");
 	ctx.transport_mode = inmatch::NetworkType::NovaWorld;
-	expect(join_code(ctx, "") == 0, "a DFX2 NovaWorld session runs no CD-key leg");
+	// No CD-key leg there; the NovaWorld cookie legs instead, and this JOIN carries no CD
+	// cookie (D-NET-702) [orig: Server_ValidatePlayerJoinRequest @0x50F8A8..0x50F8BB -> 23
+	// @0x50FC06 (dfx2.exe)].
+	expect(join_code(ctx, "") == 23, "a DFX2 NovaWorld session runs no CD-key leg");
 	ctx.transport_mode = inmatch::NetworkType::Lan;
 	ctx.np_protocol.identity = jo();
 	expect(join_code(ctx, "") == 0, "a JO LAN host has no CD-key leg");

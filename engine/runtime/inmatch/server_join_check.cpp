@@ -3,7 +3,7 @@
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
-#include <runtime/inmatch/server_ban_lists.h> // Server_ValidateJoinBans (29 / 30 / 31)
+#include <runtime/inmatch/server_ban_lists.h> // Server_ValidateJoinAccount (23..25, 28..31)
 
 #include <base/io/crt_ftol.h>  // retail_atol (the VERSIONCRCSTRING compare)
 #include <base/io/strutil.h>   // iequals (Napi_StrCaseEqual)
@@ -169,7 +169,7 @@ void read_join_cd_key_ids(NapiNPConnection &conn, const std::vector<uint8_t> &jo
 
 uint32_t Server_ValidatePlayerJoinRequest(const GameConfig &config, NapiNPServerCtx *ctx,
 		NapiNPConnection &conn, const std::vector<NapiNPConnection> &roster,
-		const std::vector<uint8_t> &join_payload, bool pcid_decrypted) {
+		const std::vector<uint8_t> &join_payload) {
 	const TitleIdentity *title = ctx != nullptr ? ctx->np_protocol.identity : nullptr;
 	uint32_t reject_dpc = validate_join_environment(conn.join_environment, title_join_build(title));
 	if (reject_dpc == 0 && ctx != nullptr)
@@ -183,7 +183,7 @@ uint32_t Server_ValidatePlayerJoinRequest(const GameConfig &config, NapiNPServer
 	if (reject_dpc == 0)
 		reject_dpc = validate_side_password(config, conn);
 	if (reject_dpc == 0 && ctx != nullptr)
-		reject_dpc = Server_ValidateJoinBans(*ctx, conn, pcid_decrypted); // 29 / 30 / 31
+		reject_dpc = Server_ValidateJoinAccount(*ctx, conn); // 23 / 24 / 25 / 29 / 30 / 28 / 31
 	return reject_dpc;
 }
 

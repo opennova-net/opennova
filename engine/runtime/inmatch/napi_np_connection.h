@@ -622,6 +622,11 @@ struct NapiNPConnection {
 	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 "CD" -> the cookie
 	//  buffer; KeyValueBuffer_FindValue @0x4C2A30 walks it by key]
 	JoinCookiePairs join_identity_pairs;
+	// The JOIN carried a CD of some length (retail's cookie buffer is non-null): the
+	// validator's code-23 test, apart from whether any pair parses.
+	// [orig: CNetPlayer_SetCookieBuffer @0x4C6060 keeps none below length 1
+	//  @0x4C608E..0x4C6095; Server_ValidatePlayerJoinRequest @0x5125F2..0x512605]
+	bool join_cookie_present = false;
 	// The NovaWorld account fields of this player's net config: a remote joiner's
 	// decrypted PCID / SQUADINFO cookies (load_join_account_from_cookie), the
 	// host's own loopback its login PCID. Read by the 0x7A / 0x7B PCID, the 0x46

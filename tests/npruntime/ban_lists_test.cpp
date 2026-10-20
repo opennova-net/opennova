@@ -147,17 +147,50 @@ void test_files_and_console() {
 	       "dirty: rewritten whole");
 }
 
-// The game-layer join (C2S 0x00) through the dispatcher, as the handshake tests drive it.
+// One CD cookie pair: `name` and `plain` (NUL-terminated) encrypted under the key an empty
+// cookie-key table tries, "0".
+void append_cookie_pair(std::vector<uint8_t> &cd, const std::string &name, const std::string &plain) {
+	std::vector<uint8_t> bytes(plain.begin(), plain.end());
+	bytes.push_back(0);
+	std::string value;
+	expect(encode_pub_value(bytes, "0", value), "the cookie value encodes");
+	cd.insert(cd.end(), name.begin(), name.end());
+	cd.push_back(0);
+	cd.insert(cd.end(), value.begin(), value.end());
+	cd.push_back(0);
+}
+
+// One raw CD cookie pair, its value as given (not encrypted).
+void append_raw_pair(std::vector<uint8_t> &cd, const std::string &name, const std::string &value) {
+	cd.insert(cd.end(), name.begin(), name.end());
+	cd.push_back(0);
+	cd.insert(cd.end(), value.begin(), value.end());
+	cd.push_back(0);
+}
+
+// A JOIN body: VERSIONCRCSTRING "0" and, when `cd` is given, its CD field.
+std::vector<uint8_t> join_body(const std::vector<uint8_t> *cd) {
+	std::vector<uint8_t> payload;
+	const uint8_t crc[] = { '0', 0 };
+	append_flat_tlv(payload, "VERSIONCRCSTRING", crc, sizeof(crc));
+	if (cd != nullptr)
+		append_flat_tlv(payload, "CD", cd->data(), static_cast<uint16_t>(cd->size()));
+	return payload;
+}
+
+// The game-layer join (C2S 0x00) through the dispatcher, as the handshake tests drive it; the
+// JOIN carries the cookie a stock NovaWorld joiner's does, its PUBNAMEINFO the connection's
+// name and its PUBPCID the account's PCID.
 uint32_t join_punt_code(inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection conn) {
 	replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 	conn.link.transport = &transport;
 	conn.phase = inmatch::ConnectionPhase::Joined;
 	conn.admission_stage = inmatch::GameAdmissionStage::AwaitJoinRequest;
 	conn.join_environment = {0, 2, 1, 0, 20042002, 180};
-	std::vector<uint8_t> payload;
-	const char name[] = "VERSIONCRCSTRING";
-	payload.insert(payload.end(), name, name + sizeof(name));
-	payload.insert(payload.end(), {2, 0, '0', 0});
+	std::vector<uint8_t> cd;
+	append_cookie_pair(cd, "PUBNAMEINFO", conn.player_name);
+	append_cookie_pair(cd, "PUBPCID", conn.account.pcid);
+	const std::vector<uint8_t> payload = join_body(&cd);
 	std::vector<inmatch::NapiNPConnection> roster{conn};
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &ctx;
@@ -193,24 +226,13 @@ void test_join_refusals() {
 	expect(join_punt_code(ctx, named) == 31, "the name leg holds in any session");
 }
 
-// The JOIN body a NovaWorld joiner sends: VERSIONCRCSTRING "0" and a CD blob whose PUBPCID
-// is `pcid` encrypted under the key an empty cookie-key table tries, "0".
+// The JOIN body a NovaWorld joiner sends: VERSIONCRCSTRING "0" and a CD blob whose
+// PUBNAMEINFO is "Joiner" and whose PUBPCID is `pcid`.
 std::vector<uint8_t> join_with_pcid_cookie(const std::string &pcid) {
-	std::vector<uint8_t> payload;
-	const uint8_t crc[] = { '0', 0 };
-	append_flat_tlv(payload, "VERSIONCRCSTRING", crc, sizeof(crc));
-	std::vector<uint8_t> plain(pcid.begin(), pcid.end());
-	plain.push_back(0);
-	std::string value;
-	expect(encode_pub_value(plain, "0", value), "the PUBPCID cookie encodes");
 	std::vector<uint8_t> cd;
-	for (const char c : std::string("PUBPCID"))
-		cd.push_back(static_cast<uint8_t>(c));
-	cd.push_back(0);
-	cd.insert(cd.end(), value.begin(), value.end());
-	cd.push_back(0);
-	append_flat_tlv(payload, "CD", cd.data(), static_cast<uint16_t>(cd.size()));
-	return payload;
+	append_cookie_pair(cd, "PUBNAMEINFO", "Joiner");
+	append_cookie_pair(cd, "PUBPCID", pcid);
+	return join_body(&cd);
 }
 
 // The joiner at `index` of the session's own list sends its JOIN; the refusal's DPC, 0 when
@@ -310,13 +332,10 @@ void test_duplicate_pcid_refusal_and_kick() {
 		inmatch::NapiNPServerCtx ctx;
 		session(ctx, 1);
 		ctx.np_protocol.connection_list[3].account.pcid = "P-DUP-0001";
-		std::vector<uint8_t> no_cookie;
-		const uint8_t crc[] = { '0', 0 };
-		append_flat_tlv(no_cookie, "VERSIONCRCSTRING", crc, sizeof(crc));
 		replication::UdpSessionTransport joiner(replication::UdpSessionTransport::Role::Host);
-		expect(session_join_punt_code(ctx, 3, joiner, no_cookie) == 0 &&
+		expect(session_join_punt_code(ctx, 3, joiner, join_body(nullptr)) == 23 &&
 						!ctx.np_protocol.connection_list[1].duplicate_pcid_kick_pending,
-				"no decrypted PCID: the leg does not run");
+				"no cookie: refused 23 ahead of the duplicate leg, which flags no one");
 	}
 	{
 		inmatch::NapiNPServerCtx ctx;
@@ -327,12 +346,70 @@ void test_duplicate_pcid_refusal_and_kick() {
 	}
 }
 
+// D-NET-702: the cookie legs of a NovaWorld session's join, in retail's order: no CD cookie
+// (none, or one of no length) 23; a PUBNAMEINFO that does not decrypt 24; the decrypted name,
+// cut to 16 characters, renames the connection (and the name ban then reads it); a PUBPCID that
+// does not decrypt 25; with join tickets required, no PUBJOINTICKET key (any case) 28. Off
+// NovaWorld no leg runs.
+// [orig: Server_ValidatePlayerJoinRequest - @0x5125F2..0x512605 -> 23 @0x512969; the NAMEINFO
+//  decrypt @0x512648 -> 24 @0x512662; the cut @0x51268B..0x512690, SetName @0x5126BC; the PCID
+//  decrypt @0x5126FE -> 25 @0x512718; KeyValueBuffer_FindValue @0x512934 -> 28 @0x51294E;
+//  KeyValueBuffer_FindValue @0x4C2A30 (Napi_StrCaseEqual @0x4C2A99)]
+void test_cookie_refusals() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.transport_mode = inmatch::NetworkType::NovaWorld;
+	ctx.bans.addresses.entries.push_back({0u, "Cheater"});
+	ctx.np_protocol.connection_list.push_back(slot(1, "", ""));
+	auto conn = [&]() -> inmatch::NapiNPConnection & { return ctx.np_protocol.connection_list[0]; };
+	// Each JOIN on a fresh connection (a refusal stages its one description), named as its
+	// 0x42 named it.
+	auto code = [&](const std::vector<uint8_t> &payload, const char *auth_name = "JO:1234:gate") {
+		conn() = slot(1, "", "");
+		conn().player_name = auth_name;
+		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
+		return session_join_punt_code(ctx, 0, transport, payload);
+	};
+	expect(code(join_body(nullptr)) == 23, "no CD cookie: 23");
+	const std::vector<uint8_t> empty_cd;
+	expect(code(join_body(&empty_cd)) == 23, "a CD of no length: 23");
+	std::vector<uint8_t> pcid_only;
+	append_cookie_pair(pcid_only, "PUBPCID", "P-COOKIE-01");
+	expect(code(join_body(&pcid_only)) == 24, "no PUBNAMEINFO: 24");
+	std::vector<uint8_t> garbled;
+	append_raw_pair(garbled, "PUBNAMEINFO", "NOTENCRYPTED");
+	expect(code(join_body(&garbled)) == 24, "a PUBNAMEINFO that does not decrypt: 24");
+	std::vector<uint8_t> name_only;
+	append_cookie_pair(name_only, "PUBNAMEINFO", "AVeryLongCallsign99");
+	expect(code(join_body(&name_only)) == 25 && conn().player_name == "AVeryLongCallsig",
+	       "the name, cut to 16, renames the connection; no PUBPCID: 25");
+	std::vector<uint8_t> banned_name;
+	append_cookie_pair(banned_name, "PUBNAMEINFO", "Cheater");
+	append_cookie_pair(banned_name, "PUBPCID", "P-COOKIE-01");
+	expect(code(join_body(&banned_name), "Honest") == 31 && conn().player_name == "Cheater",
+	       "the name ban reads the cookie's name: 31");
+	std::vector<uint8_t> honest;
+	append_cookie_pair(honest, "PUBNAMEINFO", "Honest");
+	append_cookie_pair(honest, "PUBPCID", "P-COOKIE-01");
+	expect(code(join_body(&honest)) == 0, "a full cookie passes");
+	ctx.novaworld_join_tickets_armed = true;
+	expect(code(join_body(&honest)) == 28, "tickets required, no PUBJOINTICKET: 28");
+	std::vector<uint8_t> ticketed = honest;
+	append_raw_pair(ticketed, "pubjointicket", "T-1");
+	expect(code(join_body(&ticketed)) == 0, "a PUBJOINTICKET key, any case, passes");
+	ctx.novaworld_join_tickets_armed = false;
+	ctx.transport_mode = inmatch::NetworkType::Lan;
+	expect(code(join_body(nullptr)) == 0, "off NovaWorld no cookie leg runs");
+}
+
 } // namespace
 
 int main() {
 	test_files_and_console();
 	test_join_refusals();
 	test_duplicate_pcid_refusal_and_kick();
+	test_cookie_refusals();
 	if (g_failures == 0) {
 		std::printf("npruntime_ban_lists: OK\n");
 		return 0;

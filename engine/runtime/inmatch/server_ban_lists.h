@@ -63,23 +63,29 @@ bool Server_PcidBanned(const NapiNPServerCtx &ctx, std::string_view pcid);
 // A joiner's name on banned.txt, compared exactly (strcmp), the code-31 refusal.
 // [orig: Server_ValidatePlayerJoinRequest @0x512989..0x5129CB, the refusal @0x512A6C]
 bool Server_NameBanned(const NapiNPServerCtx &ctx, std::string_view name);
-// The game-layer join's ban and duplicate legs, past the cookie's NAMEINFO / PCID decrypt
-// legs (codes 23 / 24 / 25, not ported): on a NovaWorld session (the host has a local
-// address), a joiner whose decrypted PCID is listed is refused 29; then, with game.cfg's
-// mphostpuntplayerswithsamepcids set and the joiner's PCID decrypted (`pcid_decrypted`, the
-// cookie load's answer: retail's walk reaches the leg only past its own decrypt), a PCID
-// that more than one of the session's connections holds (case-insensitively, the joiner
-// counted) flags every OTHER remote connection holding it for the next 0x79 boundary's kick
-// (Server_KickDuplicatePcids), writes the _inout.txt REJECTING line for every holder, and
-// refuses the joiner 30; in a session, a listed name is refused 31. 0 admits.
-// [orig: Server_ValidatePlayerJoinRequest — the local-address block @0x5125F2..0x512956,
-//  LinkedList_FindByName @0x512737 -> code 29 @0x512751; the duplicate leg: the cfg word
+// The game-layer join's account legs. On a NovaWorld session (the host has a local address,
+// "PUB"): a JOIN with no CD cookie (none, or one of no length) is refused 23; a cookie whose
+// <local>NAMEINFO does not decrypt 24; the decrypted name, cut to 16 characters, renames the
+// connection where it differs; a <local>PCID that does not decrypt 25; a listed PCID 29; then,
+// with game.cfg's mphostpuntplayerswithsamepcids set, a PCID that more than one of the
+// session's connections holds (case-insensitively, the joiner counted) flags every OTHER
+// remote connection holding it for the next 0x79 boundary's kick (Server_KickDuplicatePcids),
+// writes the _inout.txt REJECTING line for every holder, and refuses the joiner 30; with join
+// tickets required, a cookie naming no <local>JOINTICKET (by key, case-insensitively) 28. In a
+// session, a listed name (the renamed one) is refused 31. 0 admits.
+// [orig: Server_ValidatePlayerJoinRequest — the local-address block @0x5125EA..0x512956:
+//  the cookie test @0x5125F2..0x512605 -> code 23 @0x51295B..0x512969; NAMEINFO
+//  NapiPacket_DecryptAndVerify @0x512648 -> code 24 @0x512654..0x512662; the 16-character cut
+//  @0x51268B..0x512690, String_ExactMatch @0x5126A6, CNapiNPConnection_SetName @0x5126BC; PCID
+//  @0x5126FE -> code 25 @0x51270A..0x512718; LinkedList_FindByName @0x512737 -> code 29
+//  @0x512751; the duplicate leg: the cfg word
 //  @0x512771..0x512778, NapiSession_CountPlayersByName(ctx, 1, pcid) @0x51278D (> 1
 //  @0x512795), the walk over ctx+0x24 @0x51279E..0x51287C (Napi_StrCaseEqual @0x5127CF, not
 //  the joiner @0x5127DF, a connection that is not the local one @0x5127E3..0x5127F1, the flag
-//  @0x5127F3, the /INOUT line @0x5127F7..0x512865), code 30 @0x512890; the session test
-//  @0x51297D, the name walk @0x512989..0x5129CB -> code 31 @0x512A6C]
-uint32_t Server_ValidateJoinBans(NapiNPServerCtx &ctx, NapiNPConnection &conn, bool pcid_decrypted);
+//  @0x5127F3, the /INOUT line @0x5127F7..0x512865), code 30 @0x512890; the ticket leg
+//  @0x5128E9..0x51294E (KeyValueBuffer_FindValue @0x512934, code 28 @0x51294E); the session
+//  test @0x51297D, the name walk @0x512989..0x5129CB -> code 31 @0x512A6C]
+uint32_t Server_ValidateJoinAccount(NapiNPServerCtx &ctx, NapiNPConnection &conn);
 // The S2C 0x79 boundary's kick of the connections the join validator flagged (nothing off the
 // boundary, `quality_boundary` false): each flagged remote connection latches {DS its role, DC 2,
 // 0, 0, "N.C:SPTWNTBP[<its PCID>]", DPC 0, ""} when no record is latched yet and is marked for the

@@ -302,7 +302,7 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	// it (re-sending the 0x03) until the cap admits it (D-NET-714, D-NET-715).
 	// [orig: the C2S 0x02 handler @0x512FD0 - NapiNPServer_UpdateHoldoffTicks @0x513068, the
 	//  sends @0x5130AC..0x5131D5, game state 7 @0x51319C; Server_PlayerAdd's row pick
-	//  @0x51CC9A, Server_AssignPlayerTeam @0x4FE310; CNapiServer_ProcessPendingPlayerSpawns's
+	//  (the PlayerSlot_PickFreeSlot call @0x51CC95), Server_AssignPlayerTeam @0x4FE310; CNapiServer_ProcessPendingPlayerSpawns's
 	//  cap @0x4C8E13]
 	// The both-direction send-holdoff dictation (H:0x00 mask 8 / CS field 3)
 	// [orig: NapiNPServer_UpdateHoldoffTicks @0x4c5f40 sends @0x4c5fc0/@0x4c5fcb;
@@ -334,7 +334,7 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 //  @0x4C608E..0x4C6095, else a copy of the declared length); KeyValueBuffer_FindValue
 //  @0x4C2A30]
 std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
-		const std::vector<uint8_t> &payload) {
+		const std::vector<uint8_t> &payload, bool &cookie_present) {
 	std::vector<std::pair<std::string, std::string>> pairs;
 	const uint8_t *cookie = nullptr;
 	size_t cookie_bytes = 0;
@@ -350,6 +350,7 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 		cookie = field.size < 1 ? nullptr : field.value;
 		cookie_bytes = field.size < 1 ? 0 : field.present;
 	}
+	cookie_present = cookie != nullptr;
 	if (cookie != nullptr) {
 		const uint8_t *cursor = cookie;
 		const uint8_t *end = cookie + cookie_bytes;
@@ -471,15 +472,15 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 			// Server_ValidatePlayerJoinRequest @0x5121ab..0x5121af -> @0x512a76 (conn+0x2E set = accept unvalidated)]
 			// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
 			// connection on a NovaWorld session decrypts before the validator.
-			conn.join_identity_pairs = parse_join_identity_pairs(admission_message->payload);
+			conn.join_identity_pairs = parse_join_identity_pairs(
+					admission_message->payload, conn.join_cookie_present);
 			read_join_cd_key_ids(conn, admission_message->payload);
-			const bool pcid_decrypted = inputs.server_ctx != nullptr &&
-					load_join_account_from_cookie(*inputs.server_ctx, conn);
+			if (inputs.server_ctx != nullptr)
+				(void)load_join_account_from_cookie(*inputs.server_ctx, conn);
 			if (conn.type != NapiNPConnection::kTypeClientSide) {
 				conn.link.spectator = conn.join_spectator_request != 0;
 				const uint32_t reject_dpc = Server_ValidatePlayerJoinRequest(config,
-						inputs.server_ctx, conn, roster, admission_message->payload,
-						pcid_decrypted);
+						inputs.server_ctx, conn, roster, admission_message->payload);
 				if (reject_dpc != 0) {
 					(void)stage_join_gate_reject(conn, reject_dpc);
 					conn.admission_stage = GameAdmissionStage::Rejected;
@@ -535,7 +536,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 // See header. [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0]
 void dispatch_join(NapiNPConnection &conn, const ProtocolMessage &msg,
 		std::vector<ProtocolMessage> &replies) {
-	conn.join_identity_pairs = parse_join_identity_pairs(msg.payload);
+	conn.join_identity_pairs = parse_join_identity_pairs(msg.payload, conn.join_cookie_present);
 	replies.push_back(make_protocol_message(s2c::INIT, {}));
 }
 
