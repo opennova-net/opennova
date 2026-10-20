@@ -695,6 +695,11 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		// [u16 handle], ahead of its 0x0A: the first admitted rows' walks clear
 		// them all, in slot order. A handle past pool 4 or a pool's capacity
 		// resolves to nothing and stays.
+		// Pool 1's copy of the walk despawns a slot only when its row is freed
+		// (`!def` @0x50EC9C) and never calls Entity_ValidatePtr; ours applies the
+		// pool-0 tests in every turn, which cannot show: the recipient's own body
+		// is always an admitted pool-0 row, and its turn, which clears its own
+		// handle, walks all four slots with the pool-0 tests before any pool-1 row.
 		// [orig: the walk @0x50E736..0x50E867 (pool 1 @0x50EC45..0x50ECE0): the
 		//  resolve @0x50E757..0x50E794, Entity_ValidatePtr @0x50E7C2 and its
 		//  visible-owner clear @0x50E7DC..0x50E7E5, the despawn test @0x50E7F3, the
@@ -857,10 +862,15 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 
 		if ((e.state_flags & 0x01) != 0) v >>= 4; // [orig: @0x50eb83]
 		// The tracked-handle floor lands AFTER the bit0 damp, before the age
-		// key composition [orig: `if (priorPriority > v48) v48 = priorPriority`
-		// @0x50eb8c].
+		// key composition. It is retail's only floor: the prior starts at 0 for
+		// every row and a tracked score is the uplink's u16 zero-extended, so a
+		// score the heading singularity drove negative keys as 0.
+		// [orig: `if (priorPriority > v48) v48 = priorPriority` @0x50EB8B..0x50EB8F
+		//  (pool 1 @0x50F02A..0x50F02E); priorPriority = 0 per row @0x50E6C9 /
+		//  @0x50E739; the uplink's store `movzx ecx, cx` @0x4C1F37..0x4C1F3A;
+		//  the key `eax + ((eax * age) >> 8) + age` @0x50EB91..0x50EBA6
+		//  (pool 1 @0x50F030..0x50F044), CPairList_AddEntry @0x50EBB0]
 		if (prior_priority > v) v = prior_priority;
-		if (v < 0) v = 0; // CPairList keys are unsigned; a behind-the-viewer negative floors
 		const bool own = conn.owned_entity.valid() &&
 		                 e.wire_handle == conn.owned_entity.packed &&
 		                 e.entity_class == EntityClass::Player;

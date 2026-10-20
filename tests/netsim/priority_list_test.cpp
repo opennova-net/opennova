@@ -1,4 +1,4 @@
-// D-NET-530, D-NET-349 -- the S2C 0x0A priority list's distance and its
+// D-NET-530, D-NET-349, D-NET-739 -- the S2C 0x0A priority list's distance, its key and its
 // tracked-slot despawn. Retail's tile distance is the anchor distance, capped
 // and truncated, LESS the row's boundRadius (entity+0), shifted down 16 bits;
 // the 1124-tile gate reads it raw, then it floors at 0. In each admitted row's
@@ -147,11 +147,58 @@ void test_tracked_slots_despawn_ahead_of_the_frame() {
 	CHECK(conn.tracked_handle[0] == 0x5001 && conn.tracked_handle[1] == 0x0008);
 }
 
+// D-NET-739: a score the heading singularity drives negative (the cached heading
+// byte 0x80 against a heading of 0: abs32(0x80000000) stays negative, -128 after
+// the shift, so 2 * headingDelta = -256) is lifted to the row's prior priority,
+// 0 for an untracked row (a tracked score is the uplink's u16, zero-extended),
+// and keys as a zero-score row: its age leads. A dead recipient's flat score is
+// 0 for an unmounted other-team row, so the keys are A = 201 and B = 11.
+// [orig: Server_BuildEntityPriorityList - priorPriority = 0 @0x50E6C9 /
+//  @0x50E739, the dead-recipient score @0x50EB28..0x50EB3F, 2 * headingDelta
+//  @0x50EB80, `if (priorPriority > v48)` @0x50EB8B..0x50EB8F, the key
+//  @0x50EB91..0x50EBA6; NetPacket_SerializePlayerState's score store
+//  @0x4C1F37..0x4C1F3A; CPairList_ShellSortByValue `jge` @0x526D6B]
+void test_negative_score_keys_at_the_prior() {
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle me = w::spawn_remote_player(world, at(0.0f, 1));
+	const w::EntityHandle a = w::spawn_remote_player(world, at(5.0f, 2));
+	const w::EntityHandle b = w::spawn_remote_player(world, at(10.0f, 3));
+	std::vector<GameEntitySnapshot> ents = ns::snapshot_world(world);
+	for (GameEntitySnapshot &row : ents) {
+		row.team = row.wire_handle == me.packed ? 2 : 1;
+		row.euler_z = 0;
+		row.tick_speed_q6 = 0;
+		row.mounted = false;
+		row.state_flags &= ~uint8_t{0x03};
+		if (row.wire_handle == me.packed) row.state_flags |= 0x02; // a dead recipient's flat score
+	}
+	ns::LoopbackChannel ch;
+	ns::Connection conn{&ch, ns::TransportMode::Loopback, me, 0};
+	conn.s2c_entity_heading[a.slot()] = 0x80;
+	conn.s2c_entity_heading[b.slot()] = 0x00;
+	conn.s2c_entity_age[a.slot()] = 200; // the sweep makes it 201
+	conn.s2c_entity_age[b.slot()] = 10;  // 11
+	const std::vector<ns::Datagram> run = emit(world, conn, ents);
+	std::vector<uint16_t> order;
+	for (const ns::Datagram &d : run) {
+		if (d.tag != s2c::PER_FRAME_UPDATE) continue;
+		FrameUpdate fu;
+		CHECK(decode_frame_update(d.body.data(), d.body.size(),
+				[](uint16_t) { return EntityClass::Player; }, fu));
+		for (const FrameUpdateRecord &r : fu.records)
+			if (r.handle == a.packed || r.handle == b.packed) order.push_back(r.handle);
+	}
+	CHECK((order == std::vector<uint16_t>{a.packed, b.packed}));
+}
+
 } // namespace
 
 int main() {
 	test_bound_radius_moves_a_row_inside_the_gate();
 	test_tracked_slots_despawn_ahead_of_the_frame();
+	test_negative_score_keys_at_the_prior();
 	if (failures == 0) std::printf("priority_list: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
