@@ -5137,6 +5137,10 @@ add_test(NAME npruntime_rotation_process_words COMMAND npruntime_rotation_proces
 add_executable(npruntime_squad_registry_test npruntime/squad_registry_test.cpp)
 target_link_libraries(npruntime_squad_registry_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_squad_registry COMMAND npruntime_squad_registry_test)
+# The host CNetQuality send window's level arithmetic and its round-over hold (F6).
+add_executable(npruntime_net_quality_gates_test npruntime/net_quality_gates_test.cpp)
+target_link_libraries(npruntime_net_quality_gates_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_net_quality_gates COMMAND npruntime_net_quality_gates_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

@@ -86,9 +86,12 @@ void Server_StoreClientQuality(NapiNPConnection &conn, uint8_t reported) {
 }
 
 void Server_EmitQualityResends(NapiNPServerCtx &ctx, const world::World &world) {
-	// [orig: @0x51DE79] is_in_session && !g_PreRoundDelayTimer &&
-	// !g_SpawnSuccessGate (the latter is not copied into this context).
-	if (!ctx.is_in_session || world.preround_delay_seconds != 0) return;
+	// is_in_session && !g_PreRoundDelayTimer && !g_SpawnSuccessGate, the last
+	// the authority's round-over latch (Match's outcome)
+	// [orig: Server_TickUpdate @0x51DE4B..0x51DE5F; Server_ProcessRoundEnd's
+	//  store @0x5168E4, Game_StartMission's clear @0x524A1F].
+	if (!ctx.is_in_session || world.preround_delay_seconds != 0 || world.match.outcome().ended)
+		return;
 	std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 	const int32_t capacity = static_cast<int32_t>(roster.size());
 	if (capacity == 0) return;
@@ -131,11 +134,16 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 				ctx.nwu_session_role)) {
 		ctx.mission_exit_reason = kMissionExitNovaWorld;
 	}
-	// The pre-round hold clears the send window instead of sampling it
-	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — `g_NetSpawnSuspended ||
-	//  g_SpawnSuccessGate || g_PreRoundDelayTimer` -> CNetStats_ClearSendCounters
-	//  @0x4C2F50]; the two spawn gates have no host-side model here.
-	if (ctx.world != nullptr && ctx.world->preround_delay_seconds != 0) {
+	// The holds clear the send window instead of sampling it: the pre-round
+	// timer and, on the authority, the round-over latch (g_SpawnSuccessGate, set
+	// by the round end, cleared by the next mission start: Match's outcome).
+	// g_NetSpawnSuspended is set only inside the synchronous mission load, so no
+	// sample ever sees it [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the gates
+	//  @0x4C52EA..0x4C5308 -> CNetStats_ClearSendCounters @0x4C55E3;
+	//  Server_ProcessRoundEnd @0x5168E4; Game_StartMission - the spawn gate's set
+	//  @0x524398 and clear @0x52631B, the round-over clear @0x524A1F].
+	if (ctx.world != nullptr && (ctx.world->preround_delay_seconds != 0 ||
+			ctx.world->match.outcome().ended)) {
 		replication::net_quality_window_clear(ctx.host_quality_window);
 		ctx.host_network_quality = 0;
 		// The tail still buckets the cleared scalar [orig: @0x4c585a..0x4c58b0].
