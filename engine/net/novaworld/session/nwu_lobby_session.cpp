@@ -115,8 +115,9 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	// with USEJUNCTION and CLEARJUNCTION both set.
 	// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - dword_B5FF48 @0x558E2D, dword_B5FD38
 	//  @0x558E3B, dword_B5FD3C @0x558E43, the form write @0x558E64]
-	if (gate_ok_ && use_junction_ != 0 && clear_junction_ != 0)
-		junction_code_.clear();
+	GateMemory &kept = memory();
+	if (kept.response_kept && kept.use_junction != 0 && kept.clear_junction != 0)
+		kept.junction_code.clear();
 	gate_socket_ = &gate;
 	session_socket_ = &session;
 	client_index_ = 0;
@@ -127,8 +128,6 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	gate_probe_datagram_.clear();
 	targets_.clear();
 	nw_peer_ = PeerAddr{};
-	gate_response_ = GateResponse{};
-	in_use_ = false;
 	clock_ms_ = 0;
 	gate_started_ms_ = 0;
 	gate_last_send_ms_ = 0;
@@ -145,6 +144,25 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 		if (hooks_.on_fatal) hooks_.on_fatal("no title identity to probe the gate with");
 		return;
 	}
+	// While the last response that went through is kept, the wait starts no probe and the menu
+	// goes on to the connect over it, its processing not run again; a probe starts over with the
+	// response emptied.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - dword_B5FF48 @0x4CE6CF, the gate state 2
+	//  @0x4CE6F3, 0 returned @0x4CE6FA; else CMissionInfo_Init(byte_B5F450) @0x4CE719;
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - state 2 @0x559072..0x559094, the connect
+	//  @0x559156]
+	GateMemory &kept = memory();
+	if (kept.response_kept && kept.gate_host == gate_host && kept.gate_port == gate_port) {
+		gate_answered_ = true;
+		if (hooks_.on_gate_response)
+			hooks_.on_gate_response(kept.response);
+		connect_from_response();
+		return;
+	}
+	kept.response_kept = false;
+	kept.response = GateResponse{};
+	kept.gate_host = gate_host;
+	kept.gate_port = gate_port;
 	// The gate manager's tag: the title's, or the boot's gt.ssc (set_title).
 	// [orig: CNapiGateManager_ProbeThreadProc @0x6339e0 - the tag's bytes @0x633aa1]
 	const std::vector<uint8_t> probe_dg = gate_probe_build(gate_tag_);
@@ -175,19 +193,20 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 //  GLSVSS pair under its flags @0x4CF567..0x4CF589; Game_ParseCommandLineAndInit @0x4A7310 -
 //  Napi_ResolveAddress(token, 1) @0x4A75C7]
 void NwuLobbySession::apply_command_line_overrides() {
+	GateResponse &response = memory().response;
 	if (!command_line_.post_ip_address.empty()) {
 		const uint32_t ip = resolve_address(command_line_.post_ip_address);
 		if (ip != 0) {
 			for (std::size_t i = 0; i < 4; ++i)
-				gate_response_.post_ip[i] = static_cast<uint8_t>(ip >> (8 * i));
+				response.post_ip[i] = static_cast<uint8_t>(ip >> (8 * i));
 		}
 	}
 	if (command_line_.post_port_number != 0)
-		gate_response_.post_port = static_cast<uint32_t>(command_line_.post_port_number);
+		response.post_port = static_cast<uint32_t>(command_line_.post_port_number);
 	if (command_line_.glsvss_rims)
-		gate_response_.glsvss_rims = *command_line_.glsvss_rims;
+		response.glsvss_rims = *command_line_.glsvss_rims;
 	if (command_line_.glsvss_agrms)
-		gate_response_.glsvss_agrms = *command_line_.glsvss_agrms;
+		response.glsvss_agrms = *command_line_.glsvss_agrms;
 }
 
 void NwuLobbySession::send_gate_probe() {
@@ -218,7 +237,7 @@ bool NwuLobbySession::claims(const PeerAddr &from, const uint8_t *data, std::siz
 
 NwuLobbySession::MatchFacts NwuLobbySession::match_facts() const {
 	MatchFacts out;
-	out.in_use = in_use_;
+	out.in_use = memory().in_use;
 	if (session_) {
 		out.flags = session_->session_flags();
 		out.role = session_->session_role();
@@ -442,7 +461,8 @@ void NwuLobbySession::poll_gate() {
 
 		gate_answered_ = true;
 		gate_probe_datagram_.clear();
-		gate_response_ = parsed;
+		GateMemory &kept = memory();
+		kept.response = parsed;
 		// The reply the worker took is the gate's answer: one whose parse counted no field (no
 		// VAR line of a key the parse knows, or no line at all) fails the gate as state -9, the
 		// menu's NWEC25, as a reply with no POST pair does below.
@@ -456,7 +476,7 @@ void NwuLobbySession::poll_gate() {
 		}
 		apply_command_line_overrides();
 		if (hooks_.on_gate_response)
-			hooks_.on_gate_response(gate_response_);
+			hooks_.on_gate_response(kept.response);
 
 		// The NWU session is in use when the gate or the command line named an address (the
 		// command line's count @0x4CF52E). Without one the response
@@ -469,10 +489,10 @@ void NwuLobbySession::poll_gate() {
 		//  port @0x4CF627, the -9 store @0x4CF6AC; UI_ProcessLANSessionStateMachine @0x558DE0 -
 		//  state 3's -9 -> NWEC25 @0x5590FD..0x559102, state 9 @0x559262;
 		//  CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D46EA..0x4D46F0]
-		in_use_ = !parsed.udp_novaworld.empty() || !command_line_.udp_novaworld.empty();
-		if (!in_use_) {
+		kept.in_use = !parsed.udp_novaworld.empty() || !command_line_.udp_novaworld.empty();
+		if (!kept.in_use) {
 			const std::array<uint8_t, 4> none{ 0, 0, 0, 0 };
-			if (gate_response_.post_ip == none || gate_response_.post_port == 0) {
+			if (kept.response.post_ip == none || kept.response.post_port == 0) {
 				if (hooks_.on_fatal)
 					hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
 				return;
@@ -483,43 +503,49 @@ void NwuLobbySession::poll_gate() {
 		// form's USEJUNCTION, which nothing here reads), and the gate's info stands.
 		// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the overrides @0x4CF6ED..0x4CF709,
 		//  the form writes @0x4CF71B..0x4CF76E, dword_B5FF48 = 1 @0x4CF81D]
-		use_junction_ = command_line_.use_junction != -1
+		kept.use_junction = command_line_.use_junction != -1
 				? command_line_.use_junction
 				: static_cast<int32_t>(parsed.use_junction);
-		clear_junction_ = command_line_.clear_junction != -1
+		kept.clear_junction = command_line_.clear_junction != -1
 				? command_line_.clear_junction
 				: static_cast<int32_t>(parsed.clear_junction);
-		if (use_junction_ != 0)
-			junction_code_.clear();
-		gate_ok_ = true;
-		if (!in_use_) {
-			if (hooks_.on_sessionless)
-				hooks_.on_sessionless();
-			return;
-		}
-		// The old targets go, then the connect's one source is made probe targets: the menu's
-		// JUNCTIONCODE when it is nonempty, else every /UDPNOVAWORLD command-line entry, else
-		// every gate entry. An address that names none makes no target and is passed over, so
-		// with none the connect probes nothing until it gives up.
-		// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the old targets
-		//  freed @0x4D4A22 (NapiNPEnumerator_DestroyAllTimers @0x6220C0 over the list
-		//  CreateTarget fills); JUNCTIONCODE @0x4D4A4A, its one target @0x4D4A71; the command
-		//  line's entries @0x4D4A78..0x4D4A9E; the gate variables @0x4D4AA2..0x4D4ACE
-		//  (CMissionInfo_GetVariable @0x4D4AB8, CNapiGameSession_SendToAddress @0x4D4AC0, its
-		//  result unread), then CNapiGameSession_InitPlayerConnection @0x4D4B16]
-		targets_.clear();
-		if (!junction_code_.empty()) {
-			add_target(junction_code_);
-		} else if (!command_line_.udp_novaworld.empty()) {
-			for (const std::string &address : command_line_.udp_novaworld)
-				add_target(address);
-		} else {
-			for (const std::string &address : parsed.udp_novaworld)
-				add_target(address);
-		}
-		begin_session();
+		if (kept.use_junction != 0)
+			kept.junction_code.clear();
+		kept.response_kept = true;
+		connect_from_response();
 		return;
 	}
+}
+
+// ConnectToNovaWorld over the gate memory's response: with the session not in use it returns at
+// once (each connect poll too, and the menu opens its web lobby); else the old targets go, then
+// the connect's one source is made probe targets: the menu's JUNCTIONCODE when it is nonempty,
+// else every /UDPNOVAWORLD command-line entry, else every gate entry. An address that names none
+// makes no target and is passed over, so with none the connect probes nothing until it gives up.
+// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D46EA..0x4D46F0; the old targets
+//  freed @0x4D4A22 (NapiNPEnumerator_DestroyAllTimers @0x6220C0 over the list CreateTarget
+//  fills); JUNCTIONCODE @0x4D4A4A, its one target @0x4D4A71; the command line's entries
+//  @0x4D4A78..0x4D4A9E; the gate variables @0x4D4AA2..0x4D4ACE (CMissionInfo_GetVariable
+//  @0x4D4AB8, CNapiGameSession_SendToAddress @0x4D4AC0, its result unread), then
+//  CNapiGameSession_InitPlayerConnection @0x4D4B16]
+void NwuLobbySession::connect_from_response() {
+	const GateMemory &kept = memory();
+	if (!kept.in_use) {
+		if (hooks_.on_sessionless)
+			hooks_.on_sessionless();
+		return;
+	}
+	targets_.clear();
+	if (!kept.junction_code.empty()) {
+		add_target(kept.junction_code);
+	} else if (!command_line_.udp_novaworld.empty()) {
+		for (const std::string &address : command_line_.udp_novaworld)
+			add_target(address);
+	} else {
+		for (const std::string &address : kept.response.udp_novaworld)
+			add_target(address);
+	}
+	begin_session();
 }
 
 // The session state machine and its ClientHello, once the gate response named the NW UDP
@@ -544,15 +570,16 @@ void NwuLobbySession::begin_session() {
 	cu.application = read_exe_basename().substr(0, kLobbyApplicationChars);
 	cu.build_date_and_time = title_->lobby_bdat;
 	cu.gate_tag = cfg.na;
-	cu.met_tag = gate_response_.met_label;
-	cu.udp_code1 = gate_response_.udp_code1;
-	cu.udp_code2 = gate_response_.udp_code2;
+	const GateResponse &gate = memory().response;
+	cu.met_tag = gate.met_label;
+	cu.udp_code1 = gate.udp_code1;
+	cu.udp_code2 = gate.udp_code2;
 	if (env_.max_packet_size != 0) cu.max_packet_size = env_.max_packet_size;
 	cfg.cu_vars = make_novaworld_join_cu(cu);
 	// The gate's GLSVSS trio arms the session's periodic GLSVSS leg.
-	cfg.glsvss_request = gate_response_.glsvss_request;
-	cfg.glsvss_rims_ms = gate_response_.glsvss_rims;
-	cfg.glsvss_agrms_ms = gate_response_.glsvss_agrms;
+	cfg.glsvss_request = gate.glsvss_request;
+	cfg.glsvss_rims_ms = gate.glsvss_rims;
+	cfg.glsvss_agrms_ms = gate.glsvss_agrms;
 	// The "Cookie" var-list every Cookie-bearing statement re-serializes.
 	cfg.cookie_vars = hooks_.cookie_vars;
 
@@ -667,6 +694,11 @@ void NwuLobbySession::poll_session() {
 	if (session_->state() == ClientSession::State::Closed && session_->disconnected_by_peer()) {
 		if (hooks_.on_session_state) hooks_.on_session_state();
 	}
+}
+
+NwuLobbySession::GateMemory &process_gate_memory() {
+	static NwuLobbySession::GateMemory memory;
+	return memory;
 }
 
 } // namespace opennova

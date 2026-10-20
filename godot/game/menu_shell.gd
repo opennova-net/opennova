@@ -648,6 +648,11 @@ func _mount_expansion(name: String) -> void:
 		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
+	# The menu's teardown forgets the kept NovaWorld gate response: the next
+	# NovaWorld entry probes the gate again (D-NET-706).
+	# [orig: Menu_TeardownShellAndCloseBinkVideos @ 0x54e430 - dword_B5FF48 = 0
+	#  @ 0x54e4c8 under dword_2551104, set @ 0x552756 ahead of the call @ 0x55275c]
+	NovaWorldClient.forget_gate_response()
 	# The reload closes every archive before it mounts the pick, so the pick's
 	# text-override table loads as at boot (docs/vfs/vfs-pff-mount-re.md,
 	# "Expansions" item 1): the root mounts from cleared, not as the join's

@@ -128,6 +128,10 @@ public:
 	// sends it (docs/net/novaworld-net-re.md D-NET-385; opennova-serve's
 	// serve::Lister::disconnect). Nothing for a session not verified.
 	void disconnect_at_exit();
+	// The menu's teardown (an expansion reload): the process's kept gate response is
+	// forgotten, so the next start() probes the gate again
+	// (opennova::NwuLobbySession::GateMemory::forget, D-NET-706).
+	static void forget_gate_response();
 
 	State get_state() const { return state_; }
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }

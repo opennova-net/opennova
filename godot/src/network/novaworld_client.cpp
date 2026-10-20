@@ -102,6 +102,8 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("start"), &NovaWorldClient::start);
 	ClassDB::bind_method(D_METHOD("stop"), &NovaWorldClient::stop);
 	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
+			&NovaWorldClient::forget_gate_response);
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaWorldClient::get_state);
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("is_authenticated"), &NovaWorldClient::is_authenticated);
@@ -298,6 +300,8 @@ void NovaWorldClient::start() {
 		return;
 	}
 	lobby_.set_title(title, ResourceRoot::session_gate_tag(resource_root_, *title));
+	// Every NovaWorld menu entry of the process reads the one kept gate response (D-NET-706).
+	lobby_.set_gate_memory(&opennova::process_gate_memory());
 
 	// The gate worker's socket (an OS-assigned port), and the NovaWorld network
 	// type's one socket: bound from the cfg block's mpnovaworld quad, its random
@@ -357,6 +361,10 @@ void NovaWorldClient::start() {
 
 	enter_state(STATE_GATE_PROBING);
 	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
+}
+
+void NovaWorldClient::forget_gate_response() {
+	opennova::process_gate_memory().forget();
 }
 
 void NovaWorldClient::stop() {

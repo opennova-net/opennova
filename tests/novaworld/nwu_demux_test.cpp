@@ -613,6 +613,105 @@ int main() {
 		}
 	}
 
+	// D-NET-706: a gate response that went through is kept for the NovaWorld menu's next entry
+	// (the gate memory several drivers share, as the game shell's start()s do): that entry sends
+	// no probe and connects at once from the kept response, which is not processed again; a
+	// sessionless response's entry goes sessionless again; a response that failed is not kept;
+	// another gate probes; the menu's teardown (forget()) ends the keeping and empties
+	// JUNCTIONCODE while the in-use word stands.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - dword_B5FF48 @0x4CE6CF, the gate state 2
+	//  @0x4CE6F3, 0 returned @0x4CE6FA, else CMissionInfo_Init @0x4CE719 and the probe;
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - state 2 @0x559072..0x559094;
+	//  CNapiGateManager_ProcessResponse @0x4CED20 - dword_B5FF48 = 1 @0x4CF81D;
+	//  Menu_TeardownShellAndCloseBinkVideos @0x54E430 - dword_B5FF48 = 0 @0x54E4C8]
+	{
+		const std::string gate_entry = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
+									   "VAR \"UDPCODE1\" \"code-one\"\r\n";
+		const std::string post_pair = "VAR \"POSTIPADDRESS\" \"192.168.0.5\"\r\n"
+									  "VAR \"POSTIPPORT\" \"7598\"\r\n";
+		const std::string no_var = "GATEPROTOCOL \"1.0\"\r\n";
+		struct Entry {
+			std::size_t probes = 0;
+			std::size_t hellos = 0;
+			std::vector<GateResponse> responses;
+			int sessionless = 0;
+			std::vector<std::string> fatals;
+			bool session = false;
+			bool in_use = false;
+		};
+		// One menu entry: a new driver over `memory` opens, probes `host`, takes `reply` from
+		// the gate when one is given, and ticks once.
+		auto enter = [](NwuLobbySession::GateMemory &memory, const std::string &host,
+				const std::optional<std::string> &reply) {
+			MemorySocket gate;
+			MemorySocket session;
+			Entry out;
+			NwuLobbySession::Hooks hooks;
+			hooks.on_gate_response = [&out](const GateResponse &r) { out.responses.push_back(r); };
+			hooks.on_sessionless = [&out]() { ++out.sessionless; };
+			hooks.on_fatal = [&out](const std::string &m) { out.fatals.push_back(m); };
+			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
+			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_gate_memory(&memory);
+			lobby.open(gate, session);
+			lobby.probe(host, GATE_DEFAULT_PORT);
+			if (reply)
+				gate.inbound.push_back(
+						{ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(*reply) });
+			lobby.tick(10);
+			out.probes = gate.sent.size();
+			for (const auto &dg : session.sent) {
+				if (opcode_of(dg.second) == SESSION_OPCODE_CLIENT_HELLO) ++out.hellos;
+			}
+			out.session = lobby.session() != nullptr;
+			out.in_use = lobby.match_facts().in_use;
+			lobby.close();
+			return out;
+		};
+
+		// The first entry probes; the response goes through and is kept.
+		NwuLobbySession::GateMemory memory;
+		const Entry first = enter(memory, "127.0.0.1", gate_entry);
+		CHECK(first.probes == 1 && first.session && first.in_use && first.hellos == 1);
+		CHECK(first.responses.size() == 1 && first.responses[0].udp_code1 == "code-one");
+		CHECK(memory.response_kept && memory.response.udp_code1 == "code-one");
+		// The next entry sends no probe and connects at once from the kept response (no gate
+		// reply needed), the hook handed the kept one.
+		const Entry again = enter(memory, "127.0.0.1", std::nullopt);
+		CHECK(again.probes == 0 && again.session && again.in_use && again.hellos == 1);
+		CHECK(again.fatals.empty());
+		CHECK(again.responses.size() == 1 && again.responses[0].udp_code1 == "code-one");
+		// Another gate is not the one the response came from: it probes, the response no longer
+		// kept.
+		const Entry other = enter(memory, "127.0.0.2", std::nullopt);
+		CHECK(other.probes == 1 && !other.session && other.responses.empty());
+		CHECK(!memory.response_kept);
+
+		// The menu's teardown: the next entry probes again; JUNCTIONCODE goes with the menu's
+		// form, the in-use word stays.
+		NwuLobbySession::GateMemory torn;
+		CHECK(enter(torn, "127.0.0.1", gate_entry).session);
+		torn.junction_code = "127.0.0.9:7009";
+		torn.forget();
+		CHECK(!torn.response_kept && torn.junction_code.empty() && torn.in_use);
+		const Entry after = enter(torn, "127.0.0.1", std::nullopt);
+		CHECK(after.probes == 1 && !after.session && after.responses.empty());
+
+		// A sessionless response (the POST pair, no NWU address) is kept too: its next entry
+		// goes sessionless again with no probe.
+		NwuLobbySession::GateMemory post;
+		const Entry post_first = enter(post, "127.0.0.1", post_pair);
+		CHECK(post_first.sessionless == 1 && !post_first.session && post.response_kept);
+		const Entry post_again = enter(post, "127.0.0.1", std::nullopt);
+		CHECK(post_again.probes == 0 && post_again.sessionless == 1 && !post_again.session);
+
+		// A response that fails the gate (NWEC25) is not kept: the next entry probes.
+		NwuLobbySession::GateMemory failed;
+		const Entry fail_first = enter(failed, "127.0.0.1", no_var);
+		CHECK(fail_first.fatals == std::vector<std::string>{ "NWEC25" } && !failed.response_kept);
+		CHECK(enter(failed, "127.0.0.1", std::nullopt).probes == 1);
+	}
+
 	if (failures != 0) {
 		std::printf("nwu_demux: %d failure(s)\n", failures);
 		return 1;

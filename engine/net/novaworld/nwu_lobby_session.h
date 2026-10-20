@@ -36,7 +36,8 @@ public:
 		std::size_t replies = 0;
 	};
 	struct Hooks {
-		// The parsed gate response, before the session handshake starts.
+		// The parsed gate response, before the session handshake starts; on an entry over a kept
+		// response (no probe, GateMemory), the kept one.
 		std::function<void(const GateResponse &)> on_gate_response;
 		// The current "Cookie" var-list, read for each statement that serializes it.
 		std::function<std::vector<std::pair<std::string, std::string>>()> cookie_vars;
@@ -112,7 +113,42 @@ public:
 		int32_t exit_reason = 0;
 	};
 
+	// What a gate response that went through leaves for the NovaWorld menu's next entry: retail's
+	// gate manager globals, which outlive the session and every exit from the menu until the menu
+	// itself is destroyed (forget()). While `response_kept` is set an entry starts no probe and
+	// connects from the kept response, which is not processed again (probe()). The embedder whose
+	// menu entries share them hands each driver the same one (set_gate_memory: the game shell's
+	// process_gate_memory()); a driver without one keeps its own.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the in-use word dword_B5FD2C
+	//  @0x4CF525..0x4CF541, dword_B5FD38 / dword_B5FD3C @0x4CF6ED..0x4CF709, dword_B5FF48 = 1
+	//  @0x4CF81D; CNapiGateManager_WaitForConnect @0x4CE6B0 - the kept test @0x4CE6CF..0x4CE6F3,
+	//  the fresh probe's CMissionInfo_Init(byte_B5F450) @0x4CE719]
+	struct GateMemory {
+		bool response_kept = false; // dword_B5FF48
+		// The response the connect reads (byte_B5F450 and the words its processing wrote, the
+		// command line's overrides applied) and the gate it came from.
+		GateResponse response;
+		std::string gate_host;
+		uint16_t gate_port = 0;
+		bool in_use = false;        // dword_B5FD2C
+		int32_t use_junction = 0;   // dword_B5FD38
+		int32_t clear_junction = 0; // dword_B5FD3C
+		// The menu form's JUNCTIONCODE (set_junction_code).
+		std::string junction_code;
+		// The menu's teardown: the response no longer kept and the form gone with the menu; the
+		// in-use word stays (its one writer is the next response).
+		// [orig: Menu_TeardownShellAndCloseBinkVideos @0x54E430 - under dword_2551104 @0x54E4A3,
+		//  g_GameMenu destroyed @0x54E4BA..0x54E4C2, dword_B5FF48 = 0 @0x54E4C8]
+		void forget() {
+			response_kept = false;
+			junction_code.clear();
+		}
+	};
+
 	NwuLobbySession(Hooks hooks, Environment env);
+
+	// The gate memory this driver reads and writes (null: its own).
+	void set_gate_memory(GateMemory *memory) { shared_memory_ = memory; }
 
 	// The title the session speaks (complete: resolve_title_identity; it outlives the session)
 	// and the tag its gate manager holds (title_gate_tag: the title's, or the mount's gt.ssc's):
@@ -139,14 +175,24 @@ public:
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the read @0x4D4A31..0x4D4A4A, its
 	//  one target @0x4D4A4F..0x4D4A71; CNapiGateManager_ProcessResponse @0x4CED20 - the clear
 	//  @0x4CF71B..0x4CF76E; UI_ProcessLANSessionStateMachine @0x558DE0 - @0x558E2D..0x558E64]
-	void set_junction_code(std::string code) { junction_code_ = std::move(code); }
-	const std::string &junction_code() const { return junction_code_; }
+	void set_junction_code(std::string code) { memory().junction_code = std::move(code); }
+	const std::string &junction_code() const { return memory().junction_code; }
 
 	// Start over on the embedder's two bound sockets (non-owning; they outlive close()) and mint
 	// the ci/ck pair. The clock restarts at 0 with the first tick().
 	void open(IDatagramSocket &gate, IDatagramSocket &session);
 	// Send the enveloped gate probe toward `gate_host:gate_port` and start the gate worker's
 	// retry/deadline clocks. An unresolvable host sends nothing, so the deadline reports it.
+	// While the gate memory keeps a response from this gate, no probe: the kept response goes to
+	// on_gate_response and the connect runs from it at once. The process's gate is its init's in
+	// retail, so a response is kept for the gate it came from alone (the shell's NovaWorld target
+	// can name another gate within one process).
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - dword_B5FF48 @0x4CE6CF, the gate state 2
+	//  @0x4CE6F3, 0 returned @0x4CE6FA; UI_ProcessLANSessionStateMachine @0x558DE0 - state 2
+	//  passing over the response's processing for a gate state other than 1 @0x559072..0x559094,
+	//  then ConnectToNovaWorld @0x559156; CNapiGameSession_ConnectToNovaWorld @0x4D4640 - its
+	//  kept-response test @0x4D46D8; CNapiGateManager_InitDefaults @0x4d1460 - the host
+	//  @0x4d149f, the port @0x4d14af]
 	void probe(const std::string &gate_host, uint16_t gate_port);
 	// Drop the session and the sockets (the embedder closes them). Owners send their goodbye
 	// datagrams BEFORE closing (send()/session() are still live).
@@ -186,7 +232,7 @@ public:
 	ClientSession *session() { return session_.get(); }
 	const ClientSession *session() const { return session_.get(); }
 	bool session_verified() const { return session_ && session_->is_verified(); }
-	const GateResponse &gate_response() const { return gate_response_; }
+	const GateResponse &gate_response() const { return memory().response; }
 	MatchFacts match_facts() const;
 	// The connection's CI (1 once a session is made, 0 before) and the CK its last 0x81 drew.
 	uint32_t client_index() const { return client_index_; }
@@ -207,6 +253,13 @@ public:
 
 private:
 	void begin_session();
+	// The connect over the gate memory's response: ConnectToNovaWorld's sessionless return, or
+	// its probe targets and the session.
+	void connect_from_response();
+	GateMemory &memory() { return shared_memory_ != nullptr ? *shared_memory_ : own_memory_; }
+	const GateMemory &memory() const {
+		return shared_memory_ != nullptr ? *shared_memory_ : own_memory_;
+	}
 	// One address string into a probe target, as retail's send-to-address does; false (no
 	// target) when it names no address.
 	bool add_target(const std::string &address);
@@ -244,15 +297,9 @@ private:
 	uint32_t client_index_ = 0;
 	std::vector<Target> targets_; // the enumerator's target list
 	PeerAddr nw_peer_;
-	GateResponse gate_response_;
-	bool in_use_ = false; // dword_B5FD2C
-	// The menu form's JUNCTIONCODE, and the last gate response's word set (dword_B5FF48) with its
-	// USEJUNCTION / CLEARJUNCTION after the command line's (dword_B5FD38 / dword_B5FD3C), which
-	// the menu's entry reads; none reset by open().
-	std::string junction_code_;
-	bool gate_ok_ = false;
-	int32_t use_junction_ = 0;
-	int32_t clear_junction_ = 0;
+	// The kept gate state, none of it reset by open() (GateMemory).
+	GateMemory own_memory_;
+	GateMemory *shared_memory_ = nullptr;
 	uint32_t clock_ms_ = 0;
 	// The gate worker: the probe re-sent every retry interval until the deadline.
 	uint32_t gate_started_ms_ = 0;
@@ -270,5 +317,9 @@ private:
 	int give_up_ = 0;
 	uint32_t connect_last_send_ms_ = 0;
 };
+
+// The process's one gate memory, for an embedder whose NovaWorld menu entries all share it as
+// retail's globals are shared (the game shell's NovaWorldClient; its menu's teardown forgets it).
+NwuLobbySession::GateMemory &process_gate_memory();
 
 } // namespace opennova
