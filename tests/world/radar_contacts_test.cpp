@@ -299,9 +299,11 @@ void test_whiz_blip_reads_a_brained_shooter_body() {
 	AiEntity *body = world.ai.at(world.ai.attach(rig.enemy));
 	CHECK(body != nullptr, "the shooter takes a brain");
 	if (body == nullptr) return;
-	body->pos[0] = 40 << 16; // the brain's carrier, ten units past the float mirror
-	body->pos[1] = 2 << 16;
-	body->pos[2] = 0;
+	// The brain's carrier sits ten units past the listener; the position is the
+	// entity's own words (D-NET-507: the AI mirror is gone).
+	body->self->position.x.q16 = 40 << 16;
+	body->self->position.y.q16 = 2 << 16;
+	body->self->position.z.q16 = 0;
 	LiveRound round;
 	round.owner = rig.enemy;
 	round_tracer_whiz(world, round, &ammo, {3 << 16, 1 << 16, 0}, {-(1 << 16), 1 << 16, 0},

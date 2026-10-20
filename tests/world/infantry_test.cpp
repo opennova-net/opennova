@@ -3063,12 +3063,16 @@ void test_slope_pass_org1_slides_downhill_across_and_facing_down() {
     for (const Case &c : cases) {
         World w;
         AiSystem ai;
+        // The soldier binds its own pool-0 row: its position is the entity's words
+        // (D-NET-507: the AI mirror is gone), as the sibling slope case does.
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8);
         ai.terrain = &ramp.field;
         AiEntity *e = soldier(ai);
         e->health = 100;
-        e->pos[0] = fx(100);
-        e->pos[1] = fx(100);
-        e->pos[2] = fx(100) + kFloorStand;
+        e->self->position.x.q16 = fx(100);
+        e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(100) + kFloorStand;
         e->heading = c.heading;
         e->inf.anim_state = anim_state::kWalkProneForward;
         ai.infantry_slope_pass(*e, w, 0, 0);
