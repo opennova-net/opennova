@@ -8,6 +8,7 @@
 #include <runtime/replication/client_scoreboard_view.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/minimap_overlays.h> // entity_display_name
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h> // host_session_vars
 #include <runtime/inmatch/session_status.h> // the authority's own 0x58 report
@@ -250,6 +251,26 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// The drawer's session gate, the same session bit as the MP lines below
 	// [orig: `cmp is_in_session, 0` @0x4c3210].
 	out.net_quality.in_session = view.kernel->world.rules.mp_session;
+	// The weapon inset's friendly name: the HUD target cursor is the aim lock,
+	// else the head-look target, and its display name the lookup's over the
+	// session rules word, the HUD's team and the role's 0x4C slot table.
+	// [orig: HUD_BuildEntityInfo -- the lock (aiRuntime+0xC) @0x4B87F0, else
+	//  headLookTarget (+0x344) @0x4B881F; Render_WeaponInsetScene -- the call
+	//  @0x5CA0AB]
+	{
+		const world::World &tw = view.kernel->world;
+		const world::Entity *local = tw.registry.get(tw.cached.local_player);
+		const world::AiEntity *body =
+				local != nullptr ? tw.ai.for_handle(local->handle) : nullptr;
+		const world::Entity *cursor =
+				body != nullptr ? tw.registry.get(body->inf.combat_target) : nullptr;
+		if (cursor == nullptr && body != nullptr)
+			cursor = tw.registry.get(body->inf.head_look_target);
+		if (cursor != nullptr)
+			(void)entity_display_name(*cursor, local->team, session_rules_word(view),
+					view.runtime != nullptr ? &view.runtime->state() : nullptr,
+					out.inset_target_name);
+	}
 	if (voice_menus != 0u) {
 		const world::World &vw = view.kernel->world;
 		if (const world::Entity *local = vw.registry.get(vw.cached.local_player)) {

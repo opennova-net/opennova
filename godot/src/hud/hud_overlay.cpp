@@ -1536,6 +1536,7 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.session = facts.session;
 	state_.squad_orders = facts.squad_orders;
 	state_.net_quality = facts.net_quality;
+	inset_target_name_ = facts.inset_target_name;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
 		opennova::hud::HudSlotBarSlot &slot = state_.slot_bar[c];

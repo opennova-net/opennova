@@ -257,6 +257,11 @@ static void combat_text_font_slots() {
 	CHECK(pages(inset, kHudFontSlotLabelBold) == 4 && pages(inset, kHudFontSlotHud) == 0);
 	CHECK(std::all_of(inset.glyphs.begin(), inset.glyphs.end(),
 			[](const auto &g) { return g.color == 0xFF7F0000u; }));
+	// No name from the display-name lookup: the brackets draw, no text does
+	// (D-NET-655) [orig: Render_WeaponInsetScene -- the null test @0x5CA0B3..0x5CA0B5].
+	s.combat.target_name.clear();
+	const auto &unnamed = compiler.compile(s, 1024, 768);
+	CHECK(pages(unnamed, kHudFontSlotLabelBold) == 0 && unnamed.glyphs.empty());
 
 	// "89 m" measures 4 * (8 + 1) - 1 = 35 in the font, 70 at the bold slot's
 	// 2x: the hudpos-font line starts at design 512 - 35 and runs left to right.

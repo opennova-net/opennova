@@ -526,6 +526,9 @@ private:
 	opennova::hud::HudLayout layout_;
 	opennova::hud::HudFrameState state_;
 	uint32_t voice_menus_ = 0; // inmatch::kHudVoiceMenu* bits (set_overlay_panel_windows)
+	// The role's inset friendly name (set_role_facts), set into the combat state
+	// set_combat_state copies from the view.
+	std::string inset_target_name_;
 	std::array<std::string, 12> slot_bar_key_labels_; // by def category (set_slot_bar_key_labels)
 	bool server_status_shown_ = false;                // set_server_status_page
 	bool scene_3d_was_disabled_ = false;              // the viewport's own setting under the page

@@ -11,12 +11,14 @@
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/role_feeds.h>
+#include <runtime/hud/hud_math.h> // friendly_tag_fallback_name
 #include <runtime/replication/client_world_materializer.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
 
 #include <cstdio>
 #include <map>
+#include <memory>
 #include <string>
 
 using namespace opennova;
@@ -27,6 +29,77 @@ static int failures = 0;
 	do {                                                                               \
 		if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
 	} while (0)
+
+// The weapon inset's friendly name (D-NET-655): Entity_GetDisplayName of the
+// HUD target cursor, the aim lock else the head-look target, over the live
+// rules word, the HUD's team and the role's S2C 0x4C slot table; none when
+// the lookup names none.
+// [orig: Render_WeaponInsetScene -- @0x5CA0A4..0x5CA0B5; HUD_BuildEntityInfo
+//  -- the lock @0x4B87F0, the head-look target @0x4B881F; Entity_GetDisplayName
+//  @0x59BF70]
+static void inset_target_name_cases() {
+	auto runtime_heap = std::make_unique<ClientRuntime>("host");
+	ClientRuntime &host_runtime = *runtime_heap;
+	// The kernel on the heap: main's frame already holds several (1 MB stack).
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 8);
+	world::Entity local;
+	local.kind = world::EntityKind::Organic;
+	local.team = 1;
+	const world::EntityHandle me = kernel.world.registry.spawn(0, local);
+	kernel.world.cached.local_player = me;
+	kernel.world.ai.attach(me);
+	world::Entity mate;
+	mate.kind = world::EntityKind::Organic;
+	mate.team = 1;
+	mate.display_name = "Mate";
+	const world::EntityHandle mate_h = kernel.world.registry.spawn(0, mate);
+	world::Entity foe = mate;
+	foe.team = 2;
+	foe.display_name = "Foe";
+	const world::EntityHandle foe_h = kernel.world.registry.spawn(0, foe);
+	world::Entity unnamed = mate;
+	unnamed.display_name.clear();
+	const world::EntityHandle unnamed_h = kernel.world.registry.spawn(0, unnamed);
+	world::Entity player = mate;
+	player.display_name = "Body";
+	player.flags |= world::kEntityFlagPlayer;
+	const world::EntityHandle player_h = kernel.world.registry.spawn(0, player);
+	RoleView host;
+	host.runtime = &host_runtime;
+	host.kernel = &kernel;
+	world::AiEntity *body = kernel.world.ai.for_handle(me);
+	CHECK(body != nullptr);
+	if (body != nullptr) {
+		CHECK(hud_role_facts(host).inset_target_name.empty()); // no cursor
+		body->inf.head_look_target = mate_h;
+		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		// The lock outranks the head-look target; another team names none.
+		body->inf.combat_target = foe_h;
+		CHECK(hud_role_facts(host).inset_target_name.empty());
+		// An unnamed teammate: '^' + the fallback at its pool-encoded id.
+		body->inf.combat_target = unnamed_h;
+		CHECK(hud_role_facts(host).inset_target_name ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		// FriendlyTag 0 in the live rules word nulls every name.
+		kernel.world.rules.mpattrib = 0x400;
+		body->inf.combat_target = mate_h;
+		CHECK(hud_role_facts(host).inset_target_name.empty());
+		kernel.world.rules.mpattrib = 0;
+		// A player names the first 0x4C slot driving it, never its body's
+		// name; with none it is unnamed.
+		body->inf.combat_target = player_h;
+		CHECK(hud_role_facts(host).inset_target_name.empty());
+		replication::ClientRosterSlot &slot = host_runtime.state().roster[3];
+		slot.bound = true;
+		slot.name = "Pat";
+		slot.registry_clan = "TAG";
+		slot.entity_slot = static_cast<int16_t>(player_h.slot());
+		host_runtime.state().visible_players.push_back({3, player_h.packed});
+		CHECK(hud_role_facts(host).inset_target_name == "Pat <ch>TAG<co>");
+	}
+}
 
 int main() {
 	// The bare local role: nothing folded, nothing gathered.
@@ -719,6 +792,8 @@ int main() {
 		cold.kernel = &kernel;
 		CHECK(index.for_handle(cold, 5) == nullptr);
 	}
+
+	inset_target_name_cases();
 
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

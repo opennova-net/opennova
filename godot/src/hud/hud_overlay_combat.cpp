@@ -67,6 +67,8 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 	const auto &v = view.is_valid() ? view->native_frame().hud_combat : empty;
 	state_.combat = v.state;
 	auto &s = state_.combat;
+	// The inset's friendly name is the role's lookup (set_role_facts).
+	s.target_name = inset_target_name_;
 	auto &l = layout_.combat;
 	// The weapon def's crosshair, commandersX and hudicon art and the item
 	// defs' HUD images load in alpha mode; the cargo's stock flag and document

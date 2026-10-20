@@ -76,7 +76,6 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 				!(mount &&
 						(player->mount_type == SeatType::Controller ||
 								player->mount_type == SeatType::Driver));
-		s.target_name = target->display_name;
 		s.target_brackets = target->handle.pool() == 0 && target->has_item_def &&
 				target->item_type == 3 && admitted && team && team_mode &&
 				!(mount &&

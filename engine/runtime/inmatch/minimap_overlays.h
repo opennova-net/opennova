@@ -43,6 +43,17 @@ struct MinimapOverlayInputs {
     int32_t own_auto_medic_off = 0;
 };
 
+// Entity_GetDisplayName: the name the map labels and the weapon inset draw for
+// an entity, false (null) when it has none: under the rules word's
+// FriendlyTag-0 bit (0x400) or off pool 0; a non-player of another team than
+// the HUD's; a non-player of the HUD's team names its authored name or '^' +
+// the fallback name at its pool-encoded id; a player the first S2C 0x4C table
+// slot driving it, " <ch>" tag "<co>" appended for a non-empty tag, all within
+// 64 bytes (no such slot is null). `cs` is the role's replica (null: no
+// session). [orig: Entity_GetDisplayName @0x59BF70]
+bool entity_display_name(const world::Entity &e, uint8_t hud_team, uint32_t rules_word,
+                         const replication::ClientState *cs, std::string &out);
+
 // Fills `out` (replaced).
 void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverlays &out);
 

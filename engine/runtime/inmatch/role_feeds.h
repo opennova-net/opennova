@@ -217,6 +217,13 @@ struct HudRoleFacts {
 	// The connection indicators' feed (hud/net_quality_indicators.h): the
 	// session gate, the NovaWorld icon gate and the runtime's g_NetQuality.
 	hud::HudNetQualityState net_quality;
+	// The weapon inset's friendly name: Entity_GetDisplayName of the HUD target
+	// cursor (the aim lock, else the head-look target), empty when the lookup
+	// names none (entity_display_name; D-NET-655). The inset draws it under
+	// its friendly brackets only when it is non-empty.
+	// [orig: Render_WeaponInsetScene -- g_HUDTargetCursorEntity @0x5CA0A4, the call
+	//  @0x5CA0AB, the null test @0x5CA0B3..0x5CA0B5; HUD_BuildEntityInfo @0x4B87ED..0x4B8825]
+	std::string inset_target_name;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;

@@ -35,42 +35,6 @@ const replication::ClientRosterSlot *table_slot(const replication::ClientState &
     return slot.bound ? &slot : nullptr;
 }
 
-// Entity_GetDisplayName over the port's entity: null (false) under the rules
-// bit or off pool 0; a non-Player entity of the HUD team yields its authored
-// name or '^' + the compiled-in fallback at its pool-encoded id, another
-// team null; a Player entity names the first S2C 0x4C table slot that drives
-// it: the slot name, then " <ch>" tag "<co>" for a non-empty registry tag,
-// all within 64 bytes; no such slot is null.
-// [orig: Entity_GetDisplayName @0x59BF70 — rules @0x59BF70, pool 0
-//  @0x59BF84, team byte_27234FE (hudInfo+374) @0x59BFA6, fallback
-//  @0x59BFE4..0x59C04D, player slots @0x59C07A..0x59C0A9, the name
-//  Napi_CopyString(.., 64) @0x59c0bb and the wrap @0x59c0c0..0x59c0f9]
-bool display_name(const world::Entity &e, uint8_t hud_team, uint32_t rules_word,
-                  const replication::ClientState *cs, std::string &out) {
-    if ((rules_word & kRulesNoNames) != 0) return false;
-    if (e.handle.pool() != 0) return false;
-    if (((e.flags | e.engine_flags) & world::kEntityFlagPlayer) == 0) {
-        if (e.team != hud_team) return false;
-        out = e.display_name.empty() ? hud::friendly_tag_fallback_name(e.handle.packed)
-                                     : e.display_name;
-        return true;
-    }
-    if (cs == nullptr) return false;
-    for (const replication::ClientVisiblePlayer &entry : cs->visible_players) {
-        const replication::ClientRosterSlot *slot = table_slot(*cs, entry);
-        if (slot == nullptr || slot->entity_slot != e.handle.slot()) continue;
-        out.clear();
-        replication::string_append_n(out, slot->name, 64);
-        if (!slot->registry_clan.empty()) {
-            replication::string_append_n(out, " <ch>", 64);
-            replication::string_append_n(out, slot->registry_clan, 64);
-            replication::string_append_n(out, "<co>", 64);
-        }
-        return true;
-    }
-    return false;
-}
-
 // One bit-5 loop-1 entry's slot entity as the map reads it: a world entity
 // (the listen host's players, the local player) through the shared policy
 // and facts, a joiner's decoded Player row through its own fields.
@@ -171,6 +135,43 @@ void tracked_blip(const world::Entity &e, const world::Entity *local,
 }
 
 } // namespace
+
+// Entity_GetDisplayName over the port's entity: null (false) under the rules
+// bit or off pool 0; a non-Player entity of the HUD team yields its authored
+// name or '^' + the compiled-in fallback at its pool-encoded id, another
+// team null; a Player entity names the first S2C 0x4C table slot that drives
+// it: the slot name, then " <ch>" tag "<co>" for a non-empty registry tag,
+// all within 64 bytes; no such slot is null.
+// [orig: Entity_GetDisplayName @0x59BF70 — rules @0x59BF70, pool 0
+//  @0x59BF84, team byte_27234FE (hudInfo+374) @0x59BFA6, fallback
+//  @0x59BFE4..0x59C04D, player slots @0x59C07A..0x59C0A9, the name
+//  Napi_CopyString(.., 64) @0x59c0bb and the wrap @0x59c0c0..0x59c0f9]
+bool entity_display_name(const world::Entity &e, uint8_t hud_team, uint32_t rules_word,
+                         const replication::ClientState *cs, std::string &out) {
+    if ((rules_word & kRulesNoNames) != 0) return false;
+    if (e.handle.pool() != 0) return false;
+    if (((e.flags | e.engine_flags) & world::kEntityFlagPlayer) == 0) {
+        if (e.team != hud_team) return false;
+        out = e.display_name.empty() ? hud::friendly_tag_fallback_name(e.handle.packed)
+                                     : e.display_name;
+        return true;
+    }
+    if (cs == nullptr) return false;
+    for (const replication::ClientVisiblePlayer &entry : cs->visible_players) {
+        const replication::ClientRosterSlot *slot = table_slot(*cs, entry);
+        if (slot == nullptr || slot->entity_slot != e.handle.slot()) continue;
+        out.clear();
+        replication::string_append_n(out, slot->name, 64);
+        if (!slot->registry_clan.empty()) {
+            replication::string_append_n(out, " <ch>", 64);
+            replication::string_append_n(out, slot->registry_clan, 64);
+            replication::string_append_n(out, "<co>", 64);
+        }
+        return true;
+    }
+    return false;
+}
+
 
 void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverlays &out) {
     out = hud::HudMinimapOverlays{};
@@ -360,7 +361,7 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
             if (e == local || e->team != local->team) continue;
             hud::HudMinimapName name;
             name.handle = slot.handle;
-            if (display_name(*e, local->team, in.rules_word, cs, name.text))
+            if (entity_display_name(*e, local->team, in.rules_word, cs, name.text))
                 out.names.push_back(std::move(name));
         }
     }

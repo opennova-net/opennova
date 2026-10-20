@@ -116,7 +116,10 @@ struct HudCombatState {
 	HudProjectedPoint vehicle_fixed_point, vehicle_lag_point;
 	// The mortar distance template, Overlays/STROVER_DIST. Unresolved it is
 	// GameText_GetString's miss, "" [orig: @0x5A8961 -> the miss @0x51EC08].
-	std::string target_name, impact_format;
+	std::string impact_format;
+	// The inset's friendly name, the role's display-name lookup of the HUD
+	// target cursor (inmatch::HudRoleFacts::inset_target_name); empty draws none.
+	std::string target_name;
 	int32_t impact_x_q16 = 0, impact_y_q16 = 0, impact_radius_q16 = 0;
 	uint16_t impact_distance_m = 0;
 	float inset_fov_over_zoom = 0, designator_scale = 1;
