@@ -94,6 +94,44 @@ void test_the_settle_keeps_the_trailer_words() {
 	CHECK(batch.records[0].pos_x == fx(-281.1) && batch.records[0].pos_y == fx(-35.0));
 }
 
+// D-NET-515: the settle runs the hull's installed +0x1C4 mover, the per-tick one:
+// a helicopter's brain leaves the allocator's state 0 for 14 at the mover's head,
+// and its unpiloted AI leg runs, whose drive registers the mover mirrors into the
+// brain [orig: Game_StartMission @0x525FF9..0x526010; Entity_UpdateAircraftPhysics
+// @0x490310, 0 -> 14 @0x490377..0x49037D]. The bare physics tick left the brain at 0.
+void test_the_settle_runs_the_aircraft_mover() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(1, 4);
+	w::Entity seed;
+	seed.kind = w::EntityKind::Item;
+	seed.item_type_index = 7;
+	seed.item_id = 1310;
+	seed.has_item_def = true;
+	seed.has_graphic_model = true;
+	seed.item_type = 1;
+	seed.item_attrib = 0x40u; // PlayerControl
+	seed.position = {10.0f, 10.0f, 0.0f};
+	seed.alive = true;
+	seed.health = seed.health_max = 1000;
+	const w::EntityHandle h = world->registry.spawn(1, seed);
+	w::VehicleTraits traits;
+	traits.family = w::VehicleFamily::Helicopter;
+	traits.player_control = true;
+	world->vehicles.traits.set(seed.item_id, traits);
+	w::AiEntity *brain = world->ai.at(world->ai.attach(h));
+	CHECK(brain != nullptr);
+	if (brain == nullptr) return;
+	brain->brain.f[w::AiBrain::kCurState] = 0;
+	brain->brain.f[w::AiBrain::kWorkPosZ] = 0x7777;
+	world->vehicles.initialize_mission_vehicles();
+	brain = world->ai.for_handle(h);
+	CHECK(brain != nullptr && brain->brain.f[w::AiBrain::kCurState] == 14);
+	CHECK(brain != nullptr &&
+	      brain->brain.f[w::AiBrain::kWorkPosZ] == world->registry.get(h)->veh.net_alt_target);
+	CHECK((world->registry.get(h)->flags & 0x40u) != 0);
+	CHECK(world->registry.get(h)->veh.spawn_pose_valid);
+}
+
 struct ContactRig {
 	w::World world;
 	w::CollisionWorld collision;
@@ -253,6 +291,7 @@ void test_a_root_anchor_composes_like_retail() {
 
 int main() {
 	test_the_settle_keeps_the_trailer_words();
+	test_the_settle_runs_the_aircraft_mover();
 	test_a_light_hull_leaves_a_neighbours_gun_asleep();
 	test_a_heavy_hull_wakes_a_neighbours_gun();
 	test_a_root_anchor_composes_like_retail();

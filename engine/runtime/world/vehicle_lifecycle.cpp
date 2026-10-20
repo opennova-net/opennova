@@ -154,12 +154,14 @@ void VehicleSystem::initialize_mission_vehicles() {
 		}
 		e.flags |= 0x40u;
 		e.engine_flags |= 0x40u;
-		if (vehicle_family_uses_direct_air_mover(t->family))
-			aircraft_client_tick(e, *t);
-		else if (t->family == VehicleFamily::Watercraft)
-			tick_watercraft_motor(e, *t);
-		else
-			tick_motor(e, *t);
+		// The installed +0x1C4 callback, the same one the per-tick update runs:
+		// the family mover with its head's brain promotion (0 -> 22 ground and
+		// boat, 0 -> 14 aircraft) and its occupant / AI drive leg, then the
+		// same-refNum children. (D-NET-515: the aircraft settle ran the bare
+		// physics tick, without the promotion or the AI leg.)
+		// [orig: Game_StartMission `call ecx` (+0x1C4) @0x525FF9..0x526010;
+		//  Entity_UpdateAircraftPhysics @0x490310 (0 -> 14 @0x490377..0x49037D)]
+		update_motor(e, /*is_authority=*/true);
 		capture_spawn_pose(e);
 		mirror_pose(world_, e);
 		// The respawn budget seed: a hull with an AI slot stores thinkCooldown
