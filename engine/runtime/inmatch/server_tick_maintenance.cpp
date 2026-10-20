@@ -826,7 +826,8 @@ void advance_play_ticks(NapiNPServerCtx &ctx, world::World &world) {
 	// [orig: Server_ProcessRoundEnd -- the slot state 6 -> 7 store @0x51685E]
 	if (world.match.outcome().ended) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!is_in_match(conn)) continue;
+		// The slot's own state: a punted slot plays on until the teardown (D-NET-652).
+		if (!slot_in_match(conn)) continue;
 		const world::Entity *player = world.registry.get(conn.link.owned_entity);
 		if (player == nullptr || ((player->flags | player->engine_flags) & 1u) != 0)
 			continue;

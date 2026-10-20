@@ -75,10 +75,14 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 	const int32_t gasp_after = static_cast<int32_t>(
 			static_cast<uint32_t>(world.script.wac_values.breathtime) * 160u) / 100;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		// A live slot in state 6 [orig: slot+4 @0x50D7A2; `cmp [esi+20h],6;
-		// jnz` @0x50D7B7..0x50D7BB]; a spectator slot never samples
-		// [orig: !slot+100567 @0x50D7AB].
-		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
+		// A live slot in state 6 exactly [orig: slot+4 @0x50D7A2; `cmp [esi+20h],6;
+		// jnz` @0x50D7B7..0x50D7BB]: a punted slot still is (slot_in_match,
+		// D-NET-652), the round end's state 7 is not (Match's outcome stands for the
+		// 6 -> 7 store [orig: Server_ProcessRoundEnd @0x51685E]); a spectator slot
+		// never samples [orig: !slot+100567 @0x50D7AB].
+		if (!slot_in_match(conn) || world.match.outcome().ended ||
+				!conn.link.owned_entity.valid())
+			continue;
 		if (conn.link.spectator) continue;
 		world::Entity *player = world.registry.get(conn.link.owned_entity);
 		if (player == nullptr) continue;

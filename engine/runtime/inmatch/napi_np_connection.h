@@ -848,6 +848,17 @@ inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
 }
 
+// The player slot's state word read as in match (6, or 7 once the round ends): from the
+// initial-state burst's end until the teardown erases the row. A punt writes no slot byte (the
+// punt fills the connection's disconnect event alone), so a reader of the slot itself keeps
+// reading a punted slot as in match until Server_HandlePlayerDisconnect's row memset; the
+// connection's erase stands for that memset here. is_in_match's punt leg is the send fans' gate.
+// [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 (no slot write);
+//  Server_HandlePlayerDisconnect @0x51B87D (the row memset)]
+inline bool slot_in_match(const NapiNPConnection &conn) {
+	return conn.burst.spawned;
+}
+
 // The player slot's active byte (+4): its player was added. Server_PlayerAdd
 // is its one setter, and only the row memsets clear it (the slot table's
 // allocation and the disconnect's), which the port's connection erase stands

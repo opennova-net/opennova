@@ -5198,6 +5198,12 @@ add_executable(remote_admin_test admin/remote_admin_test.cpp)
 target_link_libraries(remote_admin_test PRIVATE opennova_runtime)
 target_include_directories(remote_admin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME remote_admin COMMAND remote_admin_test)
+# D-NET-652: the slot's own readers (the squad break-up's member test, the play-tick walk, the
+# breath sampler) keep a punted slot in state 6 until the teardown.
+add_executable(npruntime_punt_slot_readers_test npruntime/punt_slot_readers_test.cpp)
+target_link_libraries(npruntime_punt_slot_readers_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_punt_slot_readers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_punt_slot_readers COMMAND npruntime_punt_slot_readers_test)
 
 # --- parity lane L9 (NovaWorld) ---
 
