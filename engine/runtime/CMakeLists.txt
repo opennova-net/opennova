@@ -430,6 +430,10 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/connection_fan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/entity_wire_bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/item_replication_catalog.cpp
+    # --- parity lane L2 sources ---
+    # --- parity lane L3 sources ---
+    # --- parity lane L5 sources ---
+    # --- parity lane L6 sources ---
     # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
     # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
     # server/client state machines and frame loops, the transports
@@ -520,6 +524,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
+    # --- parity lane L1 sources ---
+    # --- parity lane L2 sources ---
+    # --- parity lane L3 sources ---
+    # --- parity lane L4 sources ---
+    # --- parity lane L5 sources ---
+    # --- parity lane L7 sources ---
+    # --- parity lane L8 sources ---
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.

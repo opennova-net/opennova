@@ -4987,3 +4987,26 @@ target_link_libraries(ragdoll_us01_test PRIVATE opennova_runtime)
 target_include_directories(ragdoll_us01_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ragdoll_us01_test PRIVATE cxx_std_17)
 opennova_add_gated_test(ragdoll_us01 COMMAND ragdoll_us01_test)
+
+# The net parity program's per-lane blocks: each lane adds its rows inside its own block.
+
+# --- parity lane L1 (join/host) ---
+
+# --- parity lane L2 (joiner) ---
+
+# --- parity lane L3 (host tick) ---
+
+# --- parity lane L4 (spawn/death) ---
+
+# --- parity lane L5 (client replica) ---
+
+# --- parity lane L6 (stream/16.16) ---
+
+# --- parity lane L7 (vehicles/weapons) ---
+
+# --- parity lane L8 (round/info/serve) ---
+
+# --- parity lane L9 (NovaWorld) ---
+
+# --- parity lane LP (proof) ---
+
