@@ -99,7 +99,7 @@ void VehicleSystem::tick_spawn_markers() {
 			marker->engine_flags &= ~1u;
 			world_.registry.for_each_in_pool(1, [&](const Entity &other) {
 				if (vehicle_or_untyped(other) && ((other.flags | other.engine_flags) & 6) == 0 &&
-						planar_distance(other, *marker) < to_fixed(other.bound_radius)) {
+						planar_distance(other, *marker) < other.bound_radius.q16) {
 					marker->flags |= 1;
 					marker->engine_flags |= 1;
 				}
@@ -136,7 +136,7 @@ void VehicleSystem::tick_spawn_markers() {
 					return;
 				// Wrecks participate here. A blocked best marker does not retry another.
 				const int32_t radius =
-						io::bam_add(to_fixed(other.bound_radius), to_fixed(vehicle->bound_radius));
+						io::bam_add(other.bound_radius.q16, vehicle->bound_radius.q16);
 				if (planar_distance(other, *best) < radius)
 					clear = false;
 			});

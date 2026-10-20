@@ -152,7 +152,7 @@ void WaypointTrack::build_map_poi_list(const EntityRegistry &registry) {
         entry.x = e.position.x.q16;
         entry.y = e.position.y.q16;
         entry.z = e.position.z.q16;
-        entry.radius = to_fixed(e.bound_radius);
+        entry.radius = e.bound_radius.q16;
         list.push_back(entry);
     };
     // Pool 2: the targets (def attrib 0x8000) [orig: @0x42de58..0x42de71].

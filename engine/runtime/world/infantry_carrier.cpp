@@ -34,7 +34,7 @@ static void follow_ground_carrier(AiEntity &e, World &world, int32_t bottom, boo
                 std::sqrt(dx * dx + dy * dy + dz * dz), 2147418112.0));
         // Only org2 drops an unmounted ground link outside the carrier radius.
         // [orig: @0x4B52A7..0x4B52FF]
-        if (distance > to_fixed(carrier->bound_radius)) {
+        if (distance > carrier->bound_radius.q16) {
             self->ground_target = {};
             return;
         }

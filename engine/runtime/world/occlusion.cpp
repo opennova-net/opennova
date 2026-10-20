@@ -1179,7 +1179,7 @@ OcclusionWorld::TocCandidate toc_candidate(const Entity &e, const CollisionModel
     OcclusionWorld::TocCandidate c;
     c.self = e.handle;
     detail::entity_pos_fixed(e, c.pos_fixed);
-    c.radius_q16 = to_fixed(e.bound_radius);
+    c.radius_q16 = e.bound_radius.q16;
     c.model = cm;
     c.heading_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
     c.pitch_bam = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
@@ -1575,7 +1575,7 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
             ((ent.flags | ent.engine_flags) & kEntityFlagParachute) != 0;
         collected = person_render_visible(
             collision, cam, epos,
-            person_collector_radius(to_fixed(ent.bound_radius), parachute),
+            person_collector_radius(ent.bound_radius.q16, parachute),
             ent.occlusion_latch, world.logic_tick);
     } else {
         // Bound sphere + view cull (also paces the latch like the original —

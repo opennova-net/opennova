@@ -806,8 +806,11 @@ struct Entity {
     // Bound-sphere radius (entity+0 boundRadius), host-stamped from the placed
     // model's collision bounds (0 = unstamped; the damage sweeps substitute the
     // organic stand-in radius). Feeds the blast range tests and the kz fallback
-    // radius. [orig: entity+0, read throughout the explosion sweep @ 0x4ead80]
-    float bound_radius = 0.0f;
+    // radius. The 16.16 word retail keeps (D-NET-507): the float view reads it,
+    // a float store truncates; the wire and the integer compares read .q16.
+    // [orig: entity+0, read throughout the explosion sweep @ 0x4ead80;
+    //  Entity_SpawnFromBMSRecord stores `wp << 16` / 0x8000 @0x40F213..0x40F221]
+    PositionWord bound_radius;
     // Kill-credit attacker (entity+0x178 lastAttacker): stamped by the damage
     // paths. WAC ammo2ssn also overwrites this word with its target (0x4F25D4).
     // The explosion sweep only fills an EMPTY slot with its resolved

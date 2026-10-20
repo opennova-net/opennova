@@ -327,9 +327,9 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     if (kind == EntityKind::Marker &&
         (e.type_id == def::DEF_TYPE_WAYPOINT || e.type_id == def::DEF_TYPE_KOTH_CENTRE ||
          e.type_id == def::DEF_TYPE_NAMED_LOCATION)) {
-        s.bound_radius = e.wp_distance != 0
-            ? static_cast<float>(e.wp_distance)
-            : 0.5f;
+        s.bound_radius.q16 = e.wp_distance != 0
+            ? static_cast<int32_t>(static_cast<uint32_t>(e.wp_distance) << 16)
+            : 0x8000;
     }
     return s;
 }

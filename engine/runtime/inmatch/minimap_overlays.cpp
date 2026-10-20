@@ -248,7 +248,7 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
         row.def_id = e->item_id;
         row.x = e->position.x.q16;
         row.y = e->position.y.q16;
-        row.radius_q16 = world::to_fixed(e->bound_radius);
+        row.radius_q16 = e->bound_radius.q16;
         // The marker's own entity+0x280, the load's count at its spawn (D-NET-656).
         if (e->item_id == def::DEF_TYPE_NAMED_LOCATION) row.location_index = e->location_index;
         out.pool3.push_back(row);

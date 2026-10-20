@@ -190,7 +190,7 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
         // ENTITY bound radius, as retail reads entity->boundRadius on each row.
         // [orig: the pool-0 scan @ 0x4bf9ac-0x4bfa39 -> state 32]
         const int32_t bound = tick_entity->bound_radius > 0.0f
-                                  ? to_fixed(tick_entity->bound_radius)
+                                  ? tick_entity->bound_radius.q16
                                   : 0;
         held = collision->ladder_person_ahead(world, e.handle, probe_x, probe_y,
                                               e.self->position.z.q16, bound);

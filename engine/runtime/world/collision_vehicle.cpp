@@ -68,7 +68,7 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 	q.num_points = count;
 	for (int axis = 0; axis < 3; ++axis)
 		q.prev_pos[axis] = source.saved_live_valid ? source.saved_live_pos[axis] : hull_pos[axis];
-	q.source_bound_radius = to_fixed(source.bound_radius);
+	q.source_bound_radius = source.bound_radius.q16;
 	// Low-byte bit 7 adds type-12 to the ordinary vehicle type-7/CB query.
 	// [orig: @0x462A91..0x462A9F; Entity_ComputeBoneCollisionForce @0x4AE150]
 	q.mask = (source.item_attrib2 & 0x80u) != 0 ? 24 : 8;

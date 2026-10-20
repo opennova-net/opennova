@@ -248,7 +248,7 @@ enum class AvoidBrakeWalk { SkipIndexZero, OnlyIndexOne };
 // contact was never the retail path-follow behavior.
 static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
                                    int32_t cmd_speed, AvoidBrakeWalk walk) {
-    const int32_t self_bound = to_fixed(veh.bound_radius);
+    const int32_t self_bound = veh.bound_radius.q16;
     const int32_t sx = veh.position.x.q16;
     const int32_t sy = veh.position.y.q16;
     const int32_t sz = veh.position.z.q16;
@@ -266,7 +266,7 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         if (walk == AvoidBrakeWalk::SkipIndexZero ? o->item_type_index == 0
                                                   : o->item_type_index != 1)
             continue;
-        const int32_t ob = to_fixed(o->bound_radius);
+        const int32_t ob = o->bound_radius.q16;
         const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
         const int32_t dx = sx - o->position.x.q16;
         if (iabs32(dx) > reach) continue;
@@ -394,7 +394,7 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
     const int32_t px = veh.position.x.q16;
     const int32_t py = veh.position.y.q16;
     const int32_t pz = veh.position.z.q16;
-    const int32_t self_r = to_fixed(veh.bound_radius); // [orig: entity+0]
+    const int32_t self_r = veh.bound_radius.q16; // [orig: entity+0]
     // dfx2.exe keeps a hull alive for a body within 4 u, not 12, and starts
     // the write-off past 1860 counts, not 3410; the 3720 kill is the same.
     // [orig: @0x46532c (0x40000), @0x4653ac (0x744) in the twin @0x4652a0 (dfx2.exe)]
@@ -408,7 +408,7 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
             if (m.stuck_ticks == 0) return;
             if (!e.has_item_def) return;               // [orig: entity[7] @0x465308]
             if ((e.flags & 3u) != 0) return;           // [orig: (Flags & 3) == 0 @0x465312]
-            const int32_t r = to_fixed(e.bound_radius) + self_r + near_reach;
+            const int32_t r = e.bound_radius.q16 + self_r + near_reach;
             const int32_t dx = px - e.position.x.q16;
             if (iabs32(dx) > r) return;
             const int32_t dy = py - e.position.y.q16;
@@ -911,7 +911,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
             node_ground = calc_average_ground_height(*world.tables.terrain, npos, 0, clearance);
         }
         const int32_t node_agl = node_ground != INT32_MIN ? node->f[3] - node_ground : 0;
-        const int32_t floor = self_ground + (to_fixed(veh.bound_radius) >> 2);
+        const int32_t floor = self_ground + (veh.bound_radius.q16 >> 2);
         if (node_agl > 0x60000 || dist > 0x60000) {
             // En route (or the node hangs in the air): never below the hull's
             // ground + bound/4 — a low target lifts 16 u above that floor and

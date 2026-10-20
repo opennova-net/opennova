@@ -1430,7 +1430,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             continue;
 
         eh.geometry_entity = e->handle;
-        eh.victim_bound_radius_q16 = person_park_radius(to_fixed(e->bound_radius));
+        eh.victim_bound_radius_q16 = person_park_radius(e->bound_radius.q16);
         finish_person_hit(eh, hit_distance);
         break;
     }

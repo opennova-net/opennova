@@ -185,7 +185,7 @@ int32_t boat_step(
 		const double phase = double(phase_word) * 0.00390625;
 		int32_t pitch = int32_t(std::cos(phase * 1.4) * 327680.0 + std::cos(phase) * 655360.0);
 		int32_t roll = int32_t(std::sin(phase * 0.8) * 524288.0 + std::sin(phase * 1.2) * 655360.0);
-		const int32_t radius = to_fixed(e.bound_radius);
+		const int32_t radius = e.bound_radius.q16;
 		const int shift = radius > 786432 ? 4 : radius > 393216 ? 2 : 0;
 		m.air_pitch_bam = io::bam_add(m.air_pitch_bam, pitch >> shift);
 		m.air_roll_bam = io::bam_add(m.air_roll_bam, roll >> shift);

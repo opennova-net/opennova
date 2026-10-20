@@ -76,7 +76,7 @@ void stamp_minimap_entity_facts(hud::HudMinimapMarker &m, const world::Entity &e
     placement.transform_point(center, anchor);
     m.anchor_x = anchor[0];
     m.anchor_y = anchor[1];
-    m.bound_radius_q16 = world::to_fixed(entity.bound_radius);
+    m.bound_radius_q16 = entity.bound_radius.q16;
 }
 
 namespace {

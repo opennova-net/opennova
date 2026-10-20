@@ -85,8 +85,7 @@ world::Entity seed_from(const ClientEntityState &row) {
 	}
 	seed.zone_number = static_cast<uint8_t>(row.zone_number_rank & 0x1Fu);
 	seed.zone_radius = row.zone_radius;
-	seed.bound_radius = static_cast<float>(row.spawn_bound_radius_q16) /
-			65536.0f;
+	seed.bound_radius.q16 = row.spawn_bound_radius_q16; // the wire's word (D-NET-507)
 	seed.spawn_origin = world::kSpawnOriginNone;
 	return seed;
 }

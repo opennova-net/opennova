@@ -890,7 +890,7 @@ int main(int argc, char **argv) {
 				bool in_view = true;
 				for (int32_t p = 0; p < cam.frustum_count; ++p)
 					if (pos[0] * cam.frustum[p][0] + pos[1] * cam.frustum[p][1] + pos[2] * cam.frustum[p][2] +
-									cam.frustum[p][3] < -std::max(e.bound_radius, 1.0f))
+									cam.frustum[p][3] < -std::max(float(e.bound_radius), 1.0f))
 						in_view = false;
 				const bool gate = rig.occlusion.blink_hits_render_active(e.blink_hits);
 				std::printf("why: bms=%d h=%u %s d=%.1f hits %s gate=%d view~%d culled=%d\n", e.bms_id,

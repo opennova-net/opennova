@@ -246,7 +246,7 @@ int32_t entity_bound_radius(const CollisionWorld &cw, const CollisionModel *mode
 
 int32_t entity_proximity_radius(const CollisionWorld &cw, const Entity &e,
                                 const CollisionModel *fallback_model) {
-    if (e.bound_radius > 0.0f) return to_fixed(e.bound_radius);
+    if (e.bound_radius > 0.0f) return e.bound_radius.q16;
     return entity_bound_radius(cw, fallback_model, e.uniform_scale_q16);
 }
 
@@ -813,7 +813,7 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         const CollisionModel *attached =
             inst != instances_.end() ? model(inst->second.model_id) : nullptr;
         p.radius = entity_proximity_radius(*this, e, attached);
-        p.bound = e.bound_radius > 0.0f ? to_fixed(e.bound_radius) : 0;
+        p.bound = e.bound_radius > 0.0f ? e.bound_radius.q16 : 0;
         // A published live pose can place bones far from the feet (seated
         // poses, corpse spreads, the off-body pose regression test). Widen
         // the SLOT to the pose's own bone-sphere reach so the projectile
@@ -955,7 +955,7 @@ void CollisionWorld::build_candidate_slices(World &world) {
         // The source's own boundRadius word plus the pool's pad, a zero
         // radius included. [orig: @0x4B8F02..0x4B8F0B (pool 0, +4.0u),
         //  @0x4B9149..0x4B9152 (pool 1, +6.0u)]
-        const int32_t range = to_fixed(e.bound_radius) + pad;
+        const int32_t range = e.bound_radius.q16 + pad;
         // The slice pointer and a zero count, then each entry the fill has
         // room for. [orig: the stores @0x4B8F10 / @0x4B8F16 and
         //  @0x4B9157 / @0x4B915D]

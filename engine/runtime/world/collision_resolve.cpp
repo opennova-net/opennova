@@ -212,7 +212,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // without either has no invented compatibility radius.
     const int32_t source_bound_radius_q16 =
         ent != nullptr && ent->bound_radius > 0.0f
-            ? to_fixed(ent->bound_radius)
+            ? ent->bound_radius.q16
             : replica_source_bound_radius_q16_;
 
     ContactQuery q;
@@ -1172,7 +1172,7 @@ std::vector<CollisionWorld::DebugHitboxEntity> CollisionWorld::debug_hitboxes(
         if (const Entity *e = world.registry.get(h)) {
             ent.husk = (e->engine_flags & kEntityFlagHusk) != 0 &&
                        instances_.at(h.packed).husk_model_id >= 0;
-            if (e->bound_radius > 0.0f) ent.bound_radius = to_fixed(e->bound_radius);
+            if (e->bound_radius > 0.0f) ent.bound_radius = e->bound_radius.q16;
         }
 
         const CollisionModel &m = *tv->model;
@@ -1284,7 +1284,7 @@ bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,
         // radius is pose-widened for the projectile gate and would deepen the
         // band. [orig: other->boundRadius @ 0x4bfa29]
         const int32_t peer_bound =
-            peer->bound_radius > 0.0f ? to_fixed(peer->bound_radius) : 0;
+            peer->bound_radius > 0.0f ? peer->bound_radius.q16 : 0;
         if (self_z + (self_bound >> 1) >= live[2] - (peer_bound >> 1) &&
             self_z <= live[2])
             return true;

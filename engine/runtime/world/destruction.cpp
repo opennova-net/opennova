@@ -1372,7 +1372,7 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 	if (world.rules.logic_authority) {
 		const float radius = traits != nullptr && traits->kz != 0.0f
 				? traits->kz
-				: float(to_fixed(target.bound_radius) / 65536);
+				: float(target.bound_radius.q16 / 65536);
 		queue_named_landing_blast(world, target, kAmmoKzMItemBlast, radius);
 	}
 	world.out.scars.clear_entity(target.handle);

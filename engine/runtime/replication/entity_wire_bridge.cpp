@@ -193,7 +193,7 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.entity_class = entity_class_of(e);
 	s.health = e.health; // §5.10 field-17 tier numerator — non-zero keeps the player alive
 	// entity+0 boundRadius, the priority list's distance term (D-NET-530).
-	s.bound_radius_q16 = world::to_fixed(e.bound_radius);
+	s.bound_radius_q16 = e.bound_radius.q16;
 	// The tier denominator is the def's signed hp word, 0 included (the classifier's guard
 	// turns it into 1): an hp-0 Player row's Health-1 body packs tier 2 (D-PWR-10)
 	// [orig: Entity_GetHealthClassification @0x4AD4E0 - entity+0x20 @0x4AD4EF, the
@@ -867,7 +867,7 @@ static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 	// is the authored Q16 radius rather than an Euler component.
 	// [orig: NetPacket_SerializeEntityPoolToPacket @0x503593/@0x5035A9]
 	rec.orientation_val = static_cast<uint32_t>(
-			world::to_fixed(e.bound_radius));
+			e.bound_radius.q16);
 	rec.team_byte = e.team;
 	// The three source fields, each under its value gate (D-NET-517): +290 the record's
 	// byte 81 sign-extended (0x04), +640 a 2044's location index (0x10), +672's low byte
@@ -1166,7 +1166,7 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 		// entity+0 boundRadius: a pool-1 row's materialized twin carries it; a
 		// pool-0 person is its decoded collision proxy's (the same model bound
 		// the retail client's own pool-0 entity holds).
-		const int32_t bound_q16 = native != nullptr ? world::to_fixed(native->bound_radius)
+		const int32_t bound_q16 = native != nullptr ? native->bound_radius.q16
 				: (pool == 0 && world.collision != nullptr
 						? world.collision->wire_person_bound_radius_q16(row->handle) : 0);
 		int32_t distance = static_cast<int32_t>(static_cast<uint32_t>(retail_ftol(dist3)) -

@@ -92,7 +92,7 @@ int nearest_location_index(const world::World &world, const world::Entity &sende
 				static_cast<uint32_t>(sender.position.y.q16) - static_cast<uint32_t>(e.position.y.q16));
 		const int32_t distance = static_cast<int32_t>(
 				std::min(std::sqrt(dx * dx + dy * dy), 2147418112.0)); // flt_7C19E0
-		if (distance >= world::to_fixed(e.bound_radius) || distance >= best_distance) return;
+		if (distance >= e.bound_radius.q16 || distance >= best_distance) return;
 		best_distance = distance;
 		best = e.location_index;
 	});

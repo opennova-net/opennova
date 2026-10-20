@@ -79,7 +79,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 	// The inclusive reconciliation boundary follows the strict input boundary.
 	// [orig: Entity_UpdateAircraftPhysics @0x490310, collective/flare/steer block]
 	if (ground != INT32_MIN) {
-		const bool near = io::bam_sub(pz, ground) < bam_mul_wrap(to_fixed(veh.bound_radius), 2);
+		const bool near = io::bam_sub(pz, ground) < bam_mul_wrap(veh.bound_radius.q16, 2);
 		const auto collective = [&](int32_t delta) {
 			if (near)
 				m.net_climb = io::bam_add(m.net_climb, delta);
@@ -104,7 +104,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 			m.net_alt_target = ground;
 		}
 		world.vehicles.tick_flare_input(veh);
-		if (io::bam_sub(pz, ground) <= bam_mul_wrap(to_fixed(veh.bound_radius), 2))
+		if (io::bam_sub(pz, ground) <= bam_mul_wrap(veh.bound_radius.q16, 2))
 			m.net_alt_target = io::bam_add(ground, m.net_climb);
 	}
 	if (m.net_climb != 0) {
@@ -457,7 +457,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         if (lat < neg_cap) lat = neg_cap;
         m.air_pitch_rate = io::bam_sub(m.air_pitch_rate, fwd);
         m.air_roll_rate = io::bam_sub(m.air_roll_rate, lat);
-        if (to_fixed(veh.bound_radius) >= 0xF0000)
+        if (veh.bound_radius.q16 >= 0xF0000)
             m.slide_z += (m.net_alt_target - pz + 0x100) >> 9; // heavy 1/512
         else
             m.slide_z += (m.net_alt_target - pz + 0x80) >> 8;  // light 1/256

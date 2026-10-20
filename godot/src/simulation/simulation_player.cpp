@@ -139,7 +139,7 @@ bool Simulation::local_player_light_query(Vector3 &r_position, int32_t &r_radius
 			? kernel_->world.registry.get(kernel_->world.cached.local_player) : nullptr;
 	if (entity == nullptr) return false;
 	r_position = Vector3(entity->position.x, entity->position.z, -entity->position.y);
-	r_radius_q16 = opennova::io::float_to_fp16_16_round_sat(entity->bound_radius);
+	r_radius_q16 = entity->bound_radius.q16; // entity+0's word (D-NET-507)
 	return true;
 }
 

@@ -869,8 +869,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			}
 		}
 		if (has_collision_block && e->bound_radius <= 0.0f)
-			e->bound_radius = static_cast<float>(world::entity_bound_radius_q16(bound)) /
-					65536.0f;
+			e->bound_radius.q16 = world::entity_bound_radius_q16(bound); // the word (D-NET-507)
 		const int32_t occ_id = state.occlusion_by_graphic[key];
 		// Entity_ClassifyForMinimap's ordinary-Building branch checks the
 		// live graphic model's +0xE0 portal/occlusion pointer. The parsed .3di

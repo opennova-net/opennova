@@ -706,6 +706,19 @@ int seat_pose_is_words() {
 	return 0;
 }
 
+// entity+0 is a word: a model-derived bound radius past 256 units keeps its low bits on
+// the 0x0A's priority term (a float would round them away).
+// [orig: entity+0; NetPacket_SerializeEntityStatesToPacket's priority list (D-NET-530)]
+int bound_radius_is_a_word() {
+	w::Entity e;
+	e.bound_radius.q16 = 0x01000001; // 256 units and one word
+	if (!expect(through_float(0x01000001) != 0x01000001, "a float view loses the word")) return 1;
+	const opennova::GameEntitySnapshot s = ns::snapshot_of(e);
+	if (!expect(s.bound_radius_q16 == 0x01000001, "the 0x0A streams the bound word")) return 1;
+	std::printf("PASS bound_radius_is_a_word\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -723,7 +736,8 @@ int main() {
 	const int round = round_flies_on_the_words();
 	const int mount = organic_record_streams_the_mount();
 	const int seat = seat_pose_is_words();
-	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round, mount, seat})
+	const int bound = bound_radius_is_a_word();
+	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round, mount, seat, bound})
 		if (r != 0) return r;
 	return 0;
 }

@@ -29,7 +29,7 @@ int32_t capture_zone_max_coverage(const World &world, const Entity &entity) {
     for (size_t i = 0; i < world.registry.pool_capacity(3); ++i) {
         const Entity *e = world.registry.get(EntityHandle::make(3, static_cast<int>(i)));
         if (!e || !e->has_item_def || e->item_id != def::DEF_TYPE_KOTH_CENTRE || e->team != 0) continue;
-        const int32_t radius = to_fixed(e->bound_radius);
+        const int32_t radius = e->bound_radius.q16;
         if (radius <= 0) continue;
         const auto abs_delta = [](int32_t a, int32_t b) {
             const int32_t delta = static_cast<int32_t>(uint32_t(a) - uint32_t(b));

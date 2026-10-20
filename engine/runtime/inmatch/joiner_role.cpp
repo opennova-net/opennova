@@ -1150,7 +1150,7 @@ void JoinerRole::wire_frame_providers() {
 						out.saved_pitch = out.pitch;
 						out.saved_roll = out.roll;
 					}
-					out.bound_radius = world::to_fixed(e->bound_radius);
+					out.bound_radius = e->bound_radius.q16;
 					return true;
 				});
 	} else {
