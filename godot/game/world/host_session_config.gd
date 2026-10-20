@@ -64,6 +64,14 @@ func _init() -> void:
 	expansion = ""     ## g_ExpansionName: what the process actually mounted; "" for base JO
 	channel = CHANNEL_LAN
 	bind_port = DEFAULT_LAN_PORT
+	## The attribute word is the process block's: retail's host screen shows its
+	## six switches from the block's mpattrib, its START writes them back into the
+	## block, and the session create copies the block's word, so the bits no
+	## switch shows, and a host with no screen in front of it (the --lan-host
+	## launch), keep the file's (D-NET-NEW-LP-4) [orig: UI_PopulateHostSettingsFromConfig
+	## @0x5563E1..0x5564EE, multiplayerAttributeFlags_34C; CNapiGameSession_BuildAndCreateSession
+	## @0x569662 -> game_settings.mp_attributes @0x56967F].
+	mp_attributes = GameCfgStore.block().get_word("mpattrib")
 
 
 ## The session slice for Simulation.configure_host_session as the typed record

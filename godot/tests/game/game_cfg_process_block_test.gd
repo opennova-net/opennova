@@ -110,6 +110,20 @@ func test_the_shell_words_are_the_cfg_words() -> void:
 	assert_eq(block.get_word("hud_color_index"), HudOverlay.hud_color_index_default())
 
 
+func test_a_host_request_takes_the_block_attribute_word() -> void:
+	# A host request starts from the block's mpattrib: the host screen's
+	# TEAM_CHOOSE switch shows the file's bit, and a launch-flag host, with no
+	# screen, sends the file's word in its S2C 0x64 (D-NET-NEW-LP-4).
+	_write_cfg("version = 29\r\nmpattrib = 14854\r\n")
+	GameCfgStore.reset()
+	var config := HostSessionConfig.new()
+	assert_eq(config.mp_attributes, 14854, "the request carries the file's word, 0x3A06")
+	assert_eq(config.dialog_value("TEAM_CHOOSE"), "1", "the screen shows TEAM_CHOOSE on")
+	_write_cfg("version = 29\r\nmpattrib = 14850\r\n")
+	GameCfgStore.reset()
+	assert_eq(HostSessionConfig.new().mp_attributes, 14850, "and the stock word when the file says so")
+
+
 func test_set_mp_reset_in_the_hosting_wait_is_stored_and_saved() -> void:
 	# The world has no match yet (the hosting wait before the session create):
 	# the command runs on a session-less context, where SetMPReset alone passes.
