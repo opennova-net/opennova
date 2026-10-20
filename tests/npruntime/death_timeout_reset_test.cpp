@@ -271,15 +271,17 @@ void test_spectator_convert_in_the_same_pump_raises_no_death() {
 	}
 }
 
-// A 0x41, a Default Spawn 0x0E and a 0x41 in one pump at a respawn timeout of 0,
-// in session: the 0x0E in ours reads the Health the 0x41 zeroed and deploys the body
-// (retail's reads the dead bit, still clear, and refuses: D-NET-460), and the
-// second 0x41 zeroes the redeployed body again. The edge in the frame's entity
-// update kills it once. [orig: Server_ProcessClientRequestRespawn @0x519CC1;
-// Entity_UpdateInfantryPlayerBody @0x4B4BFE]
+// D-NET-460: a 0x41, a Default Spawn 0x0E and a 0x41 in one pump at a respawn
+// timeout of 0, in session: the 0x0E reads the dead bit, still clear after the
+// 0x41's Health 0 (the edge runs after the pump), with no hold, and refuses, and
+// the edge in the frame's entity update kills the body once.
+// [orig: Server_ProcessClientRequestRespawn -- the dead bit @0x519CC1, the hold
+//  @0x519CC7, is_in_session @0x519CD0 / @0x519CD7; Entity_UpdateInfantryPlayerBody
+//  @0x4B4BFE]
 void test_reset_deploy_reset_in_one_pump_dies_once() {
 	Fixture f;
 	f.ctx.config.respawn_timeout = 0;
+	f.conn(0).link.last_deploy_tick_valid = false;
 	(void)f.deaths_of(0);
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &f.ctx;
@@ -289,6 +291,7 @@ void test_reset_deploy_reset_in_one_pump_dies_once() {
 			 make_protocol_message(c2s::DEATH_TIMEOUT_RESET, {})},
 			100, f.ctx.np_protocol.connection_list, &f.world, inputs);
 	CHECK(f.world.round_sim.deaths.empty());
+	CHECK(!f.conn(0).link.last_deploy_tick_valid); // the 0x0E deployed nothing
 	inmatch::Server_TickUpdate(f.ctx);
 	inmatch::Server_TickUpdate(f.ctx);
 	CHECK(f.deaths_of(0) == 1);

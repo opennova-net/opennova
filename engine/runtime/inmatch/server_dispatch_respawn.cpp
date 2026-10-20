@@ -328,12 +328,18 @@ void dispatch_respawn_request(const GameConfig &config, NapiNPConnection &conn,
 			!revive_latch && target == nullptr &&
 			world->zones.team_has_available_spawn_zone(request_team))
 		return;
-	// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
-	// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive, unheld
-	// player's request is refused in a session; out of one (world.rules.mp_session)
-	// it deploys at once, ahead of +360, the seat, the zone and the wave
-	// [orig: is_in_session @0x519cd0 / @0x519cd7, the deploy @0x519cdd..0x519ce3].
-	const bool deploy_now = !conn.link.respawn_pending && player->health > 0;
+	// The dead-or-pending gate: the requester's dead bit (entity+0x24 & 2) or
+	// the slot's hold (+89912 & 0x10), never its Health, so a 0x41's Health 0
+	// earlier in the pump, ahead of the body's edge, is no death here. An
+	// unflagged requester is refused in a session; out of one
+	// (world.rules.mp_session) it deploys at once, ahead of +360, the seat, the
+	// zone and the wave. [orig: Server_ProcessClientRequestRespawn -- `test
+	//  byte ptr [ecx+24h], 2` @0x519CC1, the hold @0x519CC7, is_in_session
+	//  @0x519CD0 / @0x519CD7, the deploy @0x519CDD..0x519CE3; the dead bit's
+	//  latch Entity_UpdateInfantryPlayerBody @0x4B4CB5]
+	const bool dead =
+			((player->flags | player->engine_flags) & world::kEntityFlagDead) != 0u;
+	const bool deploy_now = !conn.link.respawn_pending && !dead;
 	if (deploy_now && world->rules.mp_session) return;
 	if (!deploy_now) {
 		// +360 follows the dead-or-pending test and silently rejects every
