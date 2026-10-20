@@ -843,6 +843,55 @@ void test_outside_in_viewthru() {
     CHECK(rig.ow.viewthru_group_count() >= 1);
 }
 
+// A building beyond the two-window building, on the line through both windows:
+// the open slab's shadow wedge covers it, but the banked viewthru wedge rescues
+// it, so it draws. [orig: Terrain_TestSectorEntityOcclusion -- the viewthru
+//  rescue @ 0x5c48cc / 0x5c4a76]
+void test_viewthru_rescues_a_building_seen_through_two_windows() {
+    Rig rig;
+    const double mn[3] = {1.6, -1.6, 0.0};
+    const double mx[3] = {2.0, 1.6, 2.6};
+    OcclusionModel om = box_occluder(kOccRecOpen, mn, mx);
+    auto append = [&om](const OcclusionModel &win) {
+        const int32_t vbase = static_cast<int32_t>(om.vertices.size());
+        const int32_t pbase = static_cast<int32_t>(om.planes.size());
+        const int32_t fbase = static_cast<int32_t>(om.faces.size());
+        for (const auto &v : win.vertices) om.vertices.push_back(v);
+        for (const auto &p : win.planes) om.planes.push_back(p);
+        for (const auto &f : win.faces) om.faces.push_back(f);
+        OcclusionPortalFace rec = win.records[0];
+        rec.vert_start += vbase;
+        rec.plane_start += pbase;
+        rec.face_start += fbase;
+        om.records.push_back(rec);
+    };
+    append(one_room_window());
+    {
+        QuadSpec west;
+        west.type = kOccRecWindow;
+        west.section_a = 1;
+        west.section_b = 0;
+        const double c[4][3] = {
+            {-2.0, 1.0, 1.0}, {-2.0, -1.0, 1.0}, {-2.0, -1.0, 2.5}, {-2.0, 1.0, 2.5}};
+        std::memcpy(west.corners, c, sizeof(c));
+        west.normal[0] = -1.0;
+        west.normal[1] = 0.0;
+        west.normal[2] = 0.0;
+        append(occ_model({west}));
+    }
+    rig.add_building(20.0, 10.0, building_collision(2, 2, 3), std::move(om));
+    const EntityHandle beyond =
+        rig.add_building(8.0, 10.0, building_collision(0.3, 0.3, 0.3), OcclusionModel{});
+    rig.world.registry.get(beyond)->position.z = 1.4f;
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    const OcclusionFrameCamera cam = rig.camera(32.0, 10.0, 1.6, 0, -1);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.viewthru_group_count() >= 1);
+    CHECK(rig.ow.building_batched(beyond));
+    CHECK(rig.ow.building_visible(beyond));
+}
+
 // ---------------------------------------------------------------------------
 void test_toc_occlusion() {
     Rig rig;
@@ -945,6 +994,21 @@ void test_three_ray_latch() {
     rig3.ow.build_frame(rig3.world, rig3.cw, cam3);
     CHECK(rig3.ow.entity_render_visible(rig3.world, rig3.cw, *n3, cam3));
     CHECK(n3->occlusion_latch >= 16 && n3->occlusion_latch <= 23);
+
+    // Buildings run the latch too: one behind the ridge, its three rays
+    // blocked, is culled from the batch this frame. [orig: @ 0x5c6cd9-0x5c6d0d]
+    Rig rig4;
+    for (int y = 0; y < Field::kDim; ++y)
+        for (int x = 29; x <= 33; ++x)
+            rig4.field.heightmap[y * Field::kDim + x] = 20 * 256;
+    const EntityHandle hidden =
+        rig4.add_building(60.0, 10.0, building_collision(1.0, 1.0, 2.0), OcclusionModel{});
+    rig4.rebuild();
+    rig4.ow.init_mission(rig4.world, rig4.cw);
+    const OcclusionFrameCamera cam4 = rig4.camera(5.0, 10.0, 1.5);
+    rig4.ow.build_frame(rig4.world, rig4.cw, cam4);
+    CHECK(!rig4.ow.building_visible(hidden));
+    CHECK(rig4.world.registry.get(hidden)->occlusion_latch == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1622,6 +1686,34 @@ void test_eye_in_front_of_a_window_keeps_the_exterior() {
     CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *out, near_cam));
 }
 
+// From inside a room the other buildings are tested against the window wedges:
+// one off to the side, in view but where no window looks, is culled (no group
+// holds its sphere); one out in front of the east window draws with every
+// section.
+// [orig: Terrain_TestSectorEntityOcclusion -- the camera-inside rule
+//  @ 0x5c4662..0x5c4721, Terrain_TestSphereInPlaneGroups @ 0x5c4580;
+//  Terrain_BuildSectionMasks -- the closed-building arm @ 0x5c8ab4]
+void test_room_camera_culls_buildings_outside_its_windows() {
+    Rig rig;
+    const EntityHandle room =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    const EntityHandle aside =
+        rig.add_building(40.0, 24.0, building_collision(1.0, 1.0, 2.0), OcclusionModel{});
+    const EntityHandle ahead =
+        rig.add_building(40.0, 10.0, building_collision(1.0, 1.0, 2.0), OcclusionModel{});
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    // The eye at the window's mid height, looking out along +X.
+    const OcclusionFrameCamera cam = rig.camera(20.0, 10.0, 1.75, 0x2);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.camera_indoors());
+    CHECK(rig.ow.building_visible(room));
+    CHECK(rig.ow.building_batched(aside));
+    CHECK(!rig.ow.building_visible(aside));
+    CHECK(rig.ow.building_visible(ahead));
+    CHECK(rig.ow.section_mask(ahead) == 0xFFFFFFFu);
+}
+
 // The statics table splits pool 2 on the items.def TYPE: a decoration (def type
 // 2) inside a building stays out of the building prefix and batch, takes its
 // own blink quad at the mission-start refresh, and is entity-collected by that
@@ -1746,6 +1838,8 @@ int main() {
     test_static_pose_memo_matches_the_unmemoized_walk();
     test_indoor_masks_and_gate();
     test_outside_in_viewthru();
+    test_viewthru_rescues_a_building_seen_through_two_windows();
+    test_room_camera_culls_buildings_outside_its_windows();
     test_toc_occlusion();
     test_three_ray_latch();
     test_camera_blink_query();

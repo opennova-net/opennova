@@ -157,6 +157,18 @@ void test_dxt1_blocks() {
 	CHECK(bytes_equal(block, std::array<uint8_t, 8>{
 			0x26, 0xC3, 0x26, 0xC3, 0x00, 0x00, 0x00, 0x00}), "solid DXT1 block");
 
+	// A near-flat block, one 5-bit red step apart after the 5:6:5 quantization:
+	// red's luminance weight (0x1.302a6p-2) keeps the box diagonal under 2^-12,
+	// so its corners are the endpoints, unrefined. [orig: D3DXTex_OptimizeRGB
+	// @ 0x720537 -- the flt_7FB5F0 minimum-length exit after the diagonal pick]
+	std::vector<uint8_t> near_flat = solid(200, 100, 50, 255);
+	near_flat[15 * 4 + 0] = 208;
+	encode_dxt1_block(block_from_rgba(near_flat), false, block);
+	const uint16_t word_a = static_cast<uint16_t>(block[0] | (block[1] << 8));
+	const uint16_t word_b = static_cast<uint16_t>(block[2] | (block[3] << 8));
+	CHECK((word_a == 0xC326 && word_b == 0xCB26) || (word_a == 0xCB26 && word_b == 0xC326),
+			"near-flat DXT1 block takes its box corners");
+
 	// A two-axis ramp runs the endpoint search and the four-colour palette.
 	std::vector<uint8_t> ramp;
 	for (int y = 0; y < 4; ++y) {

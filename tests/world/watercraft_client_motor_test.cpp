@@ -13,6 +13,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_attach.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/world.h>
 
 #include <base/io/bam.h>
@@ -966,6 +967,110 @@ bool run_platform_basis_preserves_roll_sign() {
 	r.world.vehicles.watercraft_platform_solve(*boat, r.traits);
 	return expect(boat->veh.air_roll_bam > 0,
 	              "platform Q22 basis preserves positive roll sign");
+}
+
+// A type-1 box `hx` x `hy` around its origin, `h` tall from its bottom face.
+w::CollisionModel box_model(double hx, double hy, double h) {
+	w::CollisionModel box;
+	const auto plane = [&](int nx, int ny, int nz, double d) {
+		w::CollisionPlane p;
+		p.nx = static_cast<int16_t>(nx);
+		p.ny = static_cast<int16_t>(ny);
+		p.nz = static_cast<int16_t>(nz);
+		p.dist = w::to_fixed(float(d));
+		box.planes.push_back(p);
+	};
+	plane(16384, 0, 0, -hx);
+	plane(-16384, 0, 0, -hx);
+	plane(0, 16384, 0, -hy);
+	plane(0, -16384, 0, -hy);
+	plane(0, 0, 16384, -h);
+	plane(0, 0, -16384, 0.0);
+	w::CollisionVolume volume;
+	volume.type = 1;
+	volume.min_x = w::to_fixed(float(-hx));
+	volume.max_x = w::to_fixed(float(hx));
+	volume.min_y = w::to_fixed(float(-hy));
+	volume.max_y = w::to_fixed(float(hy));
+	volume.min_z = 0;
+	volume.max_z = w::to_fixed(float(h));
+	volume.plane_start = 0;
+	volume.plane_count = 6;
+	box.volumes.push_back(volume);
+	// The section AABB and bound sphere the host fills from COBJ.
+	w::CollisionSection section;
+	section.volume_start = 0;
+	section.volume_count = 1;
+	section.min_x = volume.min_x;
+	section.max_x = volume.max_x;
+	section.min_y = volume.min_y;
+	section.max_y = volume.max_y;
+	section.min_z = volume.min_z;
+	section.max_z = volume.max_z;
+	section.center[2] = w::to_fixed(float(h * 0.5));
+	section.radius = w::to_fixed(float(std::sqrt(hx * hx + hy * hy + h * h * 0.25)));
+	box.sections.push_back(section);
+	return box;
+}
+
+// A boat whose bow probe meets a pier wall takes the platform solve's wall
+// push and its second probe pass: the hull is moved back out along -X.
+// [orig: Entity_ProcessPlatformPhysics @0x481870 -- the severity >= 1 push and
+//  second pass @0x482546..0x482A8C]
+bool run_platform_solve_pushes_off_a_wall() {
+	Rig r;
+	make_rig(r);
+	set_zodiac_boxes(r.traits);
+	r.traits.max_slope = 25 * 11930464;
+	r.traits.slip_slope = 20 * 11930464;
+	r.world.registry.configure_pool(2, 4);
+	w::Entity pier;
+	pier.kind = w::EntityKind::Building;
+	pier.alive = true;
+	pier.yaw = 90;
+	pier.position = {103.0f, 200.0f, 0.0f};
+	pier.bound_radius = 12.0f; // the bound sphere about its foot reaches the waterline
+	pier.item_type_index = 1; // the def row's ordinal: the +0x1C slice gate
+	pier.has_item_def = true;
+	const w::EntityHandle pier_h = r.world.registry.spawn(2, pier);
+	w::Entity *boat = r.world.registry.get(r.boat);
+	if (!expect(boat != nullptr, "the pier boat spawned")) return false;
+	boat->alive = true;
+	boat->health = boat->health_max = 1000;
+	boat->bound_radius = 3.0f;
+	boat->item_type_index = 1; // a pool-1 slice source: the +0x1C word and an ItemDef
+	boat->has_item_def = true;
+	w::CollisionWorld cw;
+	cw.assign_entity(pier_h, cw.add_model(box_model(1.0, 6.0, 20.0)));
+	for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.world);
+	r.world.ai.collision = &cw;
+	boat->veh.yaw_seeded = true;
+	boat->veh.yaw_bam = 0; // bow along +X, 0.5 u into the pier's west face
+	r.world.vehicles.watercraft_platform_solve(*boat, r.traits);
+	r.world.ai.collision = nullptr;
+	std::fprintf(stderr, "[platform wall] x=%.3f\n", double(boat->position.x));
+	return expect(boat->position.x < 100.0f, "the pier wall pushes the hull back");
+}
+
+// A heavy hull heeled hard over (its side vector's Z past 0x2000) takes the
+// rolled lift and pitch thresholds, and the platform fit rights it over the
+// following ticks. [orig: Entity_ProcessPlatformPhysics -- the HEAVY arm
+//  @0x48221B, the heavily-rolled pick @0x482259]
+bool run_heavy_heeled_hull_rights_itself() {
+	Rig r;
+	make_rig(r);
+	set_zodiac_boxes(r.traits);
+	r.traits.mass = 114; // the Mark V's
+	w::Entity *boat = r.world.registry.get(r.boat);
+	if (!expect(boat != nullptr, "the heeled boat spawned")) return false;
+	boat->veh.yaw_seeded = true;
+	boat->veh.yaw_bam = 0;
+	boat->veh.air_roll_bam = w::bam_from_degrees_wrapped(30.0);
+	const int32_t heeled = std::abs(boat->veh.air_roll_bam);
+	for (int t = 0; t < 120; ++t)
+		r.world.vehicles.watercraft_platform_solve(*boat, r.traits);
+	std::fprintf(stderr, "[platform heel] roll %d -> %d\n", heeled, boat->veh.air_roll_bam);
+	return expect(std::abs(boat->veh.air_roll_bam) < heeled, "the heavy hull eases off its heel");
 }
 
 bool run_bike_grounded_lean_recovers_roll() {
@@ -2450,6 +2555,8 @@ int main() {
 	ok &= run_afloat_latch_controls_drag();
 	ok &= run_first_prediction_seeds_platform_state();
 	ok &= run_platform_basis_preserves_roll_sign();
+	ok &= run_platform_solve_pushes_off_a_wall();
+	ok &= run_heavy_heeled_hull_rights_itself();
 	ok &= run_bike_grounded_lean_recovers_roll();
 	ok &= run_planing_boat_leans_into_steer();
 	ok &= run_water_rudder_wraps_min_speed();

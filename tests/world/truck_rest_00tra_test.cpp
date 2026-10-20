@@ -118,6 +118,23 @@ int main() {
 					std::fabs(rest_error - kOldFloat) < 0.1f)
 				std::printf("truck-rest: drop-test floats by the pre-D-VEH-1 wheel depth\n");
 		}
+
+		// The hard fall: dropped from 40 u, the truck's fall passes the authority's
+		// crash bound (|vz| > 0x7000) in the air; the request latches the crash at
+		// the next suspension fit, and the hull comes down a wreck.
+		// [orig: Entity_ProcessTrackedVehiclePhysics -- the hard-fall request
+		//  @0x47d771..0x47d7a8, the latch Entity_ProcessWheeledVehicleSuspension
+		//  @0x46b1a6..0x46b314]
+		const w::Vec3 rest = rig.world.registry.get(handle)->position;
+		rig.world.commands.set_entity_position(handle, w::Vec3{rest.x, rest.y, rest.z + 40.0f});
+		rig.tick(310);
+		const w::Entity *fallen = rig.world.registry.get(handle);
+		if (expect(fallen != nullptr, "the dropped truck is still in the world")) {
+			std::printf("truck-rest: hard fall ssn=%u z %.3f -> %.3f crashed=%d\n", unsigned(ssn), rest.z + 40.0f,
+					fallen->position.z, int(fallen->veh.crashed));
+			expect(fallen->position.z < rest.z + 5.0f, "the dropped truck came down");
+			expect(fallen->veh.crashed != 0, "a 40 u fall latches the truck's crash");
+		}
 	}
 
 	if (failures == 0) std::printf("truck_rest_00tra: every placed DTruck rests its origin on the terrain\n");

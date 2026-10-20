@@ -107,6 +107,39 @@ int main() {
         CHECK(t.current == 2);
     }
 
+    // --- the proximity test reads the marker entity's LIVE position: a marker
+    // moved since the list was built is met where it now stands, not where the
+    // entry recorded it [orig: `sub eax, [esi+4]` / `sub eax, [esi+8]`
+    // @0x4de676..0x4de682] ---
+    {
+        EntityRegistry registry;
+        registry.configure_pool(3, 4);
+        Entity marker;
+        marker.kind = EntityKind::Marker;
+        marker.has_item_def = true;
+        marker.position = {50.0f, 0.0f, 0.0f}; // moved from the recorded (0, 0)
+        CHECK(registry.spawn_at(EntityHandle::make(3, 1), marker).valid());
+        marker.position = {100.0f, 0.0f, 0.0f};
+        CHECK(registry.spawn_at(EntityHandle::make(3, 2), marker).valid());
+        WaypointTrack t;
+        t.entries = {wp(0, 0, 4), wp(100, 0, 4)};
+        t.entries[0].pool = 3;
+        t.entries[0].node = 1;
+        t.entries[1].pool = 3;
+        t.entries[1].node = 2;
+        t.current = 0;
+        WaypointFrameInputs in;
+        in.game_type = 0x30020;
+        in.registry = &registry;
+        in.player_x = 0; // on the recorded spot: not met
+        in.player_y = 0;
+        t.tick_advance(in);
+        CHECK(t.current == 0);
+        in.player_x = 50 << 16; // on the marker where it stands: met
+        t.tick_advance(in);
+        CHECK(t.current == 1);
+    }
+
     // --- an event-linked waypoint blocks proximity advance ---
     {
         WaypointTrack t;

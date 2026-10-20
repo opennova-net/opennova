@@ -732,8 +732,8 @@ synth3di::Model make_tripod() {
 // fuselage on part 0 (its open cockpit between the floor and the roof, its skids 3.23 under the
 // origin), the main rotor on part 1 (HELO_ROTOR) and the tail rotor on part 2 (HELO_TAILROTOR);
 // the pilot's controller ctrlx05 and the co-pilot's sitex04 in the cockpit, the two miniguns'
-// bullet, flash and casing points either side, the two flare launchers and the heat-haze point
-// FX00, as the shipped ones; one collision object, the
+// bullet, flash and casing points either side, the two flare launchers, the heat-haze point
+// FX00 and the aim point TARGET, as the shipped ones; one collision object, the
 // fuselage's and the skids' faces and type-1 volumes.
 synth3di::Model make_little_bird() {
 	synth3di::Model m;
@@ -773,6 +773,7 @@ synth3di::Model make_little_bird() {
 	m.add_user_point("FLARE01", Vec3{-0.942, 0.6, -2.162}, Vec3{0.0, 1.0, 0.0}, 0, synth3di::kUserPointGameplay);
 	m.add_user_point("FLARE02", Vec3{-0.942, -0.602, -2.162}, Vec3{0.0, -1.0, 0.0}, 0, synth3di::kUserPointGameplay);
 	m.add_user_point("FX00", Vec3{-2.084, 0.0, -1.857}, Vec3{-0.94, 0.0, -0.342}, -1, synth3di::kUserPointEffect);
+	m.add_user_point("TARGET", Vec3{-0.807, 0.0, -1.348}, kUp, 0, synth3di::kUserPointGameplay);
 	const int c = m.add_cobj(0);
 	for (const Box &b : {floor, roof, tail, boom, skid_l, skid_r, struts}) m.add_face_box(c, b);
 	for (const Box &b : {floor, skid_l, skid_r}) m.add_volume(c, 1, 0, b);

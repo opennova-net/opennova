@@ -634,6 +634,33 @@ void test_plat_terrain_probe_grazing_uses_wrapped_product() {
 	CHECK(out.fx == -89066);
 	CHECK(out.fy == 0);
 	CHECK(out.fz == 0);
+
+	// The same contact (cosr 3290533) between a lower soft bound (0x300000) and
+	// the midpoint of soft and hard (3670016) is severity 2: a quarter of the
+	// planar push. [orig: @0x4624BB..0x462528 -- the `(hard + soft) >> 1` arm]
+	detail::PlatProbeForce mid{};
+	const int32_t mid_severity = detail::plat_terrain_probe(world, 10 << 16, -(5 << 16), 768042,
+			2 << 16, 0x300000, 0x400000, mid, /*wheel_probe=*/true);
+	CHECK(mid_severity == 2);
+	CHECK(mid.fx == -(89066 >> 2));
+	CHECK(mid.fy == 0);
+
+	// The first-pass speed response over the wheeled solve's thirteen probes:
+	// severity 2 decays the speed by >> (torque + 1), severity 1 by >> (torque + 2).
+	// [orig: the shared response, the wheeled call site @0x48a9ef]
+	{
+		Entity::VehicleMotorState m{};
+		VehicleTraits t;
+		t.torque = 3;
+		const detail::PlatProbeForce forces[13]{};
+		const int32_t probes[13][3]{};
+		m.speed = 64000;
+		detail::contact_speed_response(m, t, 2, EntityHandle{}, forces, probes, 7, 0, 0);
+		CHECK(m.speed == 64000 - (64000 >> 4));
+		m.speed = 64000;
+		detail::contact_speed_response(m, t, 1, EntityHandle{}, forces, probes, 7, 0, 0);
+		CHECK(m.speed == 64000 - (64000 >> 5));
+	}
 }
 
 void test_simple_motors_and_contact() {

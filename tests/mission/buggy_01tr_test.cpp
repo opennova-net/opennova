@@ -23,6 +23,7 @@
 #include <runtime/world/player_weapon.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -199,6 +200,31 @@ int main() {
 	rig.tick(31);
 	pl = rig.local.player();
 	if (!expect(pl->mounted && pl->mount_target == buggy_h, "the player drives the buggy")) return 1;
+	// Seat key 2 moves the driver off the controller to the family's next seat, and seat
+	// key 1 takes the controller back. [orig: Entity_FindAvailableSeat @0x4368B0 ->
+	//  Entity_RequestVehicleAttach @0x4365DD]
+	{
+		rig.tick(62);
+		const w::Entity *driver = rig.local.player();
+		const w::EntityHandle seat_target = driver->mount_target;
+		const int seat = int(driver->mount_seat);
+		expect(rig.local.select_numbered_seat(1), "seat key 2 moves the driver to the next seat");
+		rig.tick(62);
+		driver = rig.local.player();
+		expect(driver->mounted && (driver->mount_target != seat_target || int(driver->mount_seat) != seat),
+				"the driver sits in another seat of the buggy family");
+		for (int i = 0; i < 250; ++i) {
+			const auto *slot = w::active_local_weapon_slot(rig.world, rig.local.weapon);
+			if (!slot || w::weapon_state_allows_mount_toggle(slot->current, slot->next)) break;
+			rig.tick();
+		}
+		expect(rig.local.select_numbered_seat(0), "seat key 1 takes the controller back");
+		rig.tick(62);
+		driver = rig.local.player();
+		if (!expect(driver->mounted && driver->mount_target == buggy_h && driver->mount_type == w::SeatType::Controller,
+					"the player drives the buggy again")) return 1;
+	}
+	pl = rig.local.player();
 	const w::Vec3 b0 = rig.world.registry.get(buggy_h)->position;
 	const w::Vec3 g0 = rig.world.registry.get(gun_h)->position;
 	rig.local.input.forward = true;
@@ -251,6 +277,28 @@ int main() {
 	expect(bike_run.last_second < 0.5f, "the motorcycle is held at the boulder, its throttle still open");
 	expect(bike_run.closest >= kBoulderRadius, "the motorcycle never enters the boulder");
 	expect(bike_run.end < 0.0f, "the motorcycle stops short of the boulder, not past it");
+
+	// --- Leaning: steered hard at speed, the motorcycle banks into the turn.
+	// [orig: Entity_SmoothHeadingToTarget @0x45B2C0 -- the bike lean, its caller
+	//  Entity_ProcessLightVehiclePhysics @0x479600 site @0x47A7B1..0x47A7D3]
+	{
+		const w::Vec3 rock = rig.world.registry.by_net_id(kBoulderSsn)->position;
+		rig.world.commands.set_entity_position(bike_h,
+				w::Vec3{rock.x - bike_heading.x * 60.0f, rock.y - bike_heading.y * 60.0f, rock.z + 1.5f});
+		rig.tick(62);
+		rig.local.input.forward = true;
+		rig.tick(124);
+		rig.local.input.left = true;
+		int32_t banked = 0;
+		for (int t = 0; t < 62; ++t) {
+			rig.tick();
+			banked = std::max(banked, std::abs(rig.world.registry.get(bike_h)->veh.air_roll_bam));
+		}
+		rig.local.input.left = false;
+		rig.local.input.forward = false;
+		std::printf("motorcycle: banked to %d BAM steering at speed\n", banked);
+		expect(banked > 0, "the motorcycle banks into a turn taken at speed");
+	}
 	std::printf("buggy_01tr: %s\n", failures == 0 ? "OK" : "FAILED");
 	return failures == 0 ? 0 : 1;
 }
