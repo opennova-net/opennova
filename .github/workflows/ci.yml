@@ -21,8 +21,8 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The build and test legs (test-core, test-retail, test-linux, both gdext
-# builds, the Godot package) run on RunsOn's 16-vCPU runners in the
+# The build and test legs (test-core, test-linux, both gdext builds, the
+# Godot package) run on RunsOn's 16-vCPU runners in the
 # Organization's ci account (infra/ci; DEPLOY.md, "CI runners"): an EC2 spot
 # instance of its own per job, launched for it and ended after it, on RunsOn's
 # images: Windows Server 2025 with Visual Studio 2022 (windows-latest and the
@@ -33,8 +33,8 @@ concurrency:
 # runners, windows-latest and ubuntu-latest, free for a public repository. So
 # does every job of a pull request from a
 # fork: only the organization's own branches start an instance. The legs run
-# side by side on runners of their own (the two core shards beside the retail
-# leg, a gdext build per flavour) and lean on the compiler caches, and each
+# side by side on runners of their own (the two test shards, a gdext build
+# per flavour) and lean on the compiler caches, and each
 # build takes as many jobs as its runner has cores (scripts/build.sh's --jobs
 # default, nproc, Ninja's own). Their caches live in RunsOn's Magic Cache (the
 # label's extras=s3-cache and the runs-on/action step): actions/cache reads and
@@ -168,8 +168,9 @@ jobs:
           python scripts/lint/env_lint.py --enforce
           # Vocabulary conventions (CLAUDE.md): no Nova/nova_ prefix (ADR 0040).
           python scripts/lint/conventions_lint.py --enforce
-          # Suite isolation, migration coverage and report-completeness checks.
-          python scripts/ci/test_suites.py --suite core --check-layout
+          # No test reads retail data; then the suite runner's own checks
+          # (shards, inventory against report).
+          python scripts/ci/test_suites.py --check-layout
           python -B -m unittest discover -s scripts/ci -p test_test_suites.py
           # The cite image rule cite_census.py and scripts/ida/cite_sweep.py share.
           python -B -m unittest discover -s scripts/lint -p "test_*.py"
@@ -193,16 +194,14 @@ jobs:
         shell: bash
         run: dotnet test switcher/OpenNovaSwitcher.sln -c Release --nologo
 
-  # The C++ engine + ctest suites on Windows: the core suite (test-core, two
-  # shards) and the retail suite (test-retail), three runners at once, each its
-  # own build from the same compiler cache, and `test` reporting them under the
-  # required check's name. One runner ran them back to back (~28 min: ~7
-  # build, ~12 core, ~7 retail) before the editor's rows joined core.
+  # The C++ engine + ctest suite on Windows as two shards (test-core), two
+  # runners at once, each its own build from the same compiler cache, and
+  # `test` reporting them under the required check's name.
   #
-  # The core suite is split by the `editor` ctest label (scripts/ci/
+  # The suite is split by the `editor` ctest label (scripts/ci/
   # test_suites.py SHARDS): `editor` runs tests/editor's rows, `rest` the
   # others, and each attests its own selection (inventory == report). The two
-  # selections partition core by construction. Each shard builds the full
+  # selections partition the suite by construction. Each shard builds the full
   # tree, so both compile the same objects and either may save the cache; the
   # editor shard does.
   #
@@ -276,7 +275,7 @@ jobs:
 
       - name: Build
         shell: bash
-        run: scripts/build.sh --no-godot --suite core --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
+        run: scripts/build.sh --no-godot --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
 
       # Right after the build, so the step's numbers are this build's hit rate.
       - name: sccache stats
@@ -292,9 +291,9 @@ jobs:
           mode: restore
 
       # The build is up to date, so the second call goes straight to the tests.
-      - name: Test (core, ${{ matrix.shard }})
+      - name: Test (${{ matrix.shard }})
         shell: bash
-        run: scripts/build.sh --no-godot --suite core --shard ${{ matrix.shard }}
+        run: scripts/build.sh --no-godot --shard ${{ matrix.shard }}
 
       - name: Save the ctest cost data
         if: always()
@@ -315,8 +314,8 @@ jobs:
             build/Testing/
             build/.ninja_log
 
-      # The one Windows leg that saves the win-root flavour: the rest shard and
-      # test-retail build the same objects and only read it.
+      # The one Windows leg that saves the win-root flavour: the rest shard
+      # builds the same objects and only reads it.
       - name: Save the compiler cache
         if: matrix.shard == 'editor'
         uses: ./.github/actions/compiler-cache
@@ -324,123 +323,28 @@ jobs:
           flavour: win-root
           mode: save
 
-  # The retail suite (docs/asset-gated-tests.md) on a runner of its own: the
-  # core leg's build (the two roots are read at test time only), then the
-  # retail ctests. It runs whenever the reference data is reachable (not on
-  # fork PRs) and blocks the merge like the core leg, through `test`.
-  test-retail:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
-    needs: [changes, retail-availability]
-    if: needs.changes.outputs.code == 'true' && needs.retail-availability.outputs.available == 'true'
-    permissions:
-      contents: read
-    env:
-      CMAKE_GENERATOR: Ninja
-      CMAKE_CXX_COMPILER_LAUNCHER: sccache
-      CMAKE_C_COMPILER_LAUNCHER: sccache
-    steps:
-      # Magic Cache: this job's actions/cache calls go to the ci account's S3
-      # bucket (a no-op on GitHub's runners, a fork's).
-      - uses: runs-on/action@v2
-
-      - uses: actions/checkout@v4
-        with:
-          lfs: false   # scoped below: the tests read fixtures/ only
-          submodules: recursive
-
-      - name: Pull Git LFS assets (fixtures/ only)
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull --include="fixtures/**"
-
-      # RunsOn's Windows image carries Python 3.14 alone; 3.11 would install.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.14'
-
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Restore the compiler cache
-        uses: ./.github/actions/compiler-cache
-        with:
-          flavour: win-root
-          mode: restore
-
-      - name: Build
-        shell: bash
-        run: scripts/build.sh --no-godot --suite core --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
-
-      - name: sccache stats
-        if: always()
-        shell: bash
-        run: sccache --show-stats
-
-      # The retail data the asset gates need: the composite action restores
-      # or checks out the two private reference repositories and exports the
-      # two roots.
-      - name: Mount the reference data
-        uses: ./.github/actions/mount-reference-data
-        with:
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          enabled: 'true'
-
-      # ctest starts the suite's longest rows first (.github/actions/ctest-costs).
-      - name: Restore the ctest cost data
-        uses: ./.github/actions/ctest-costs
-        with:
-          leg: retail
-          mode: restore
-
-      - name: Test (retail)
-        shell: bash
-        run: scripts/build.sh --no-godot --suite retail
-
-      - name: Save the ctest cost data
-        if: always()
-        uses: ./.github/actions/ctest-costs
-        with:
-          leg: retail
-          mode: save
-
-      - name: Upload native retail test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-retail-reports
-          if-no-files-found: warn
-          path: build/Testing/
-
   # The required check "test (windows-latest)" (branch protection names it):
-  # green when the gates passed, both core shards passed (a matrix job's
+  # green when the gates passed and both test shards passed (a matrix job's
   # result is success only when every leg is) or were skipped for a docs-only
-  # change (no instance starts for one), and the retail leg passed, or was
-  # skipped because there was nothing for it to run (a docs-only change, or a
-  # fork PR without the reference data). It runs when a leg fails too, so a
+  # change (no instance starts for one). It runs when a leg fails too, so a
   # failure reports red, never skipped.
   test:
     name: test (windows-latest)
     if: ${{ !cancelled() }}
-    needs: [changes, retail-availability, gates, test-core, test-retail]
+    needs: [changes, gates, test-core]
     runs-on: ubuntu-latest
     steps:
       - name: The Windows legs
         shell: bash
         env:
           CHANGES: ${{ needs.changes.result }}
-          AVAILABILITY: ${{ needs.retail-availability.result }}
           GATES: ${{ needs.gates.result }}
           CORE: ${{ needs.test-core.result }}
-          RETAIL: ${{ needs.test-retail.result }}
           CODE: ${{ needs.changes.outputs.code }}
-          AVAILABLE: ${{ needs.retail-availability.outputs.available }}
         run: |
-          echo "gates: ${GATES}; test-core: ${CORE}; test-retail: ${RETAIL}"
-          if [[ "$CHANGES" != success || "$AVAILABILITY" != success ]]; then
-            echo "::error::a gate job did not pass (changes: ${CHANGES}, retail-availability: ${AVAILABILITY})"
+          echo "gates: ${GATES}; test-core: ${CORE}"
+          if [[ "$CHANGES" != success ]]; then
+            echo "::error::a gate job did not pass (changes: ${CHANGES})"
             exit 1
           fi
           if [[ "$GATES" != success ]]; then
@@ -453,12 +357,6 @@ jobs:
             echo "::error::test-core: ${CORE} (expected ${want})"
             exit 1
           fi
-          want=skipped
-          if [[ "$CODE" == true && "$AVAILABLE" == true ]]; then want=success; fi
-          if [[ "$RETAIL" != "$want" ]]; then
-            echo "::error::test-retail: ${RETAIL} (expected ${want})"
-            exit 1
-          fi
 
   # The same build on Linux, configured with the NovaWorld service and its
   # HTTP layer ON (the deploy target's flag set: the service target, the
@@ -469,7 +367,7 @@ jobs:
   # The service's database tests make a database per case on the PostgreSQL
   # service container below (OPENNOVA_TEST_PG), and the HTTP layer's tests keep
   # their keys on the Valkey one (OPENNOVA_TEST_REDIS); without them they skip,
-  # which the core suite fails.
+  # which the suite fails.
   test-linux:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
@@ -551,7 +449,7 @@ jobs:
         env:
           ONNET_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
         run: >-
-          scripts/build.sh --no-godot --suite core
+          scripts/build.sh --no-godot
           --cmake-arg -DOPENNOVA_NOVAWORLD_SERVICE=ON --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
           --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           --cmake-arg -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
@@ -663,8 +561,6 @@ jobs:
     needs: [build-gdextension-linux]   # skipped with it on docs-only PRs
     env:
       GODOT_VERSION: 4.6.1-stable
-      OPENNOVA_JO_DIR: ''
-      OPENNOVA_JO_ASSETS: ''
     steps:
       - uses: actions/checkout@v4
         with:
@@ -715,12 +611,12 @@ jobs:
             exit 1
           fi
 
-      - name: Run Linux Godot core tests
+      - name: Run Linux Godot tests
         run: |
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
-          bash scripts/test_godot.sh --suite core
+          bash scripts/test_godot.sh
 
-      - name: Upload Linux Godot core test reports
+      - name: Upload Linux Godot test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -880,7 +776,7 @@ jobs:
             godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
             godot/bin/libopennova_editor.windows.${{ matrix.target }}.x86_64.dll
 
-  # The Godot core suite on Windows as two shards, each on a runner of its own
+  # The Godot suite on Windows as two shards, each on a runner of its own
   # (scripts/ci/test_suites.py GODOT_SHARDS: `shells` the scripts under
   # tests/authoring, game, mcp and probes, `world` the others), each attesting
   # its own selection; one GUT process ran them back to back (~7 min of
@@ -897,8 +793,6 @@ jobs:
     needs: [build-gdextension-windows]
     env:
       GODOT_VERSION: 4.6.1-stable
-      OPENNOVA_JO_DIR: ''
-      OPENNOVA_JO_ASSETS: ''
     steps:
       - uses: actions/checkout@v4
         with:
@@ -960,13 +854,13 @@ jobs:
             exit 1
           fi
 
-      - name: Run Godot tests (core, ${{ matrix.shard }})
+      - name: Run Godot tests (${{ matrix.shard }})
         shell: bash
         run: |
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          bash scripts/test_godot.sh --suite core --shard ${{ matrix.shard }}
+          bash scripts/test_godot.sh --shard ${{ matrix.shard }}
 
-      - name: Upload godot core test reports
+      - name: Upload godot test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -975,7 +869,7 @@ jobs:
           path: build/Testing/
 
   # The required check "godot-tests (windows-latest)" (branch protection names
-  # it): green when both core shards passed, or were skipped because there was
+  # it): green when both shards passed, or were skipped because there was
   # nothing for them to run (a docs-only change). It runs when a shard or the
   # extension build fails too, so a failure reports red, never skipped.
   godot-tests:
@@ -1218,123 +1112,3 @@ jobs:
               // failing CI. Same-repo branch PRs (the normal path here) always work.
               core.warning(`Could not post build-links comment (forked PR or token lacks pull-requests:write?): ${err.message}`);
             }
-
-  # Secrets are unavailable on fork PRs. Record that explicitly and skip only
-  # retail legs (test-retail, godot-tests-retail); ordinary engine and
-  # Godot checks always run.
-  retail-availability:
-    runs-on: ubuntu-latest
-    outputs:
-      available: ${{ steps.reference.outputs.available }}
-    steps:
-      - name: Check reference-data access
-        id: reference
-        shell: bash
-        env:
-          HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
-        run: |
-          echo "available=$HAVE_REFERENCE_ASSETS" >> "$GITHUB_OUTPUT"
-          if [[ "$HAVE_REFERENCE_ASSETS" != "true" ]]; then
-            echo "::notice::Retail compatibility tests skipped: REFERENCE_ASSETS_TOKEN is unavailable."
-            echo "Retail compatibility tests skipped: reference-data credentials are unavailable." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-  # The retail suite as two shards beside each other, as the core suite runs
-  # (scripts/ci/test_suites.py GODOT_SHARDS; tests/retail/authoring holds the
-  # editor's mission viewport over the install, the suite's longest script),
-  # each attesting its own selection. One process ran them back to back (326 s
-  # of scripts). GitHub's free standard runners; each shard mounts the
-  # reference data from its cache.
-  godot-tests-retail:
-    if: needs.retail-availability.outputs.available == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [shells, world]
-    runs-on: windows-latest
-    needs: [build-gdextension-windows, retail-availability]
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: false   # scoped below: the tests read fixtures/ only
-          submodules: recursive
-
-      - name: Pull Git LFS assets (fixtures/ only)
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull --include="fixtures/**"
-
-      # The retail data the asset gates need (docs/asset-gated-tests.md); the
-      # same composite action as the engine test job.
-      - name: Mount the reference data
-        uses: ./.github/actions/mount-reference-data
-        with:
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
-
-      # runner.os, like the package and release jobs: one cache entry serves
-      # every job that installs this binary.
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      # This job uses the Windows console binary and matching GDExtension.
-      - name: Install Godot (Windows)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $version = "${env:GODOT_VERSION}"
-          $bin = ".godot-bin/Godot_v${version}_win64_console.exe"
-          if (-not (Test-Path $bin)) {
-            New-Item -ItemType Directory -Force -Path .godot-bin | Out-Null
-            $url = "https://github.com/godotengine/godot/releases/download/${version}/Godot_v${version}_win64.exe.zip"
-            Invoke-WebRequest -Uri $url -OutFile .godot-bin/godot.zip
-            Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
-          }
-
-      # The editor binary that runs GUT loads the template_debug flavour only
-      # (the editor-enabled variant, through the plain .gdextension row).
-      - name: Download GDExtensions (Windows)
-        uses: actions/download-artifact@v4
-        with:
-          name: gdext_windows_template_debug
-          path: godot/bin
-
-      - name: Prime Godot import cache
-        shell: bash
-        run: |
-          GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          bash scripts/bootstrap_godot.sh
-          # The editor importer can still crash on a cold import; a half-baked
-          # cache makes the test run fail with confusing "missing resource"
-          # errors instead of a clear signal. Retry, and fail loudly if the
-          # import never completes (was previously masked by continue-on-error).
-          ok=0
-          for attempt in 1 2 3; do
-            if "$GODOT_BIN" --headless --path godot --import; then ok=1; break; fi
-            echo "::warning::Godot import attempt ${attempt} failed; retrying"
-          done
-          if [[ "$ok" != "1" ]]; then
-            echo "::error::Godot import did not complete after 3 attempts"
-            exit 1
-          fi
-
-      - name: Run Godot tests (retail, ${{ matrix.shard }})
-        shell: bash
-        run: |
-          export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          bash scripts/test_godot.sh --suite retail --shard ${{ matrix.shard }}
-
-      - name: Upload godot retail test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: godot-retail-reports-${{ matrix.shard }}
-          if-no-files-found: warn
-          path: build/Testing/

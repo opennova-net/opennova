@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""Select and attest the core and retail test suites without private data in core.
+"""Select and attest the test suite, its ctest rows and its Godot scripts.
 
 CTest labels and the Godot test directory layout are the source of truth:
-tests/retail/ holds the retail scripts, and a windowed/ directory at either
-level (tests/windowed/, tests/retail/windowed/) holds the graphics scripts
-that need a live RenderingDevice and run only with --windowed. Reports must
-contain every selected test; an empty or incomplete run never passes.
+tests/windowed/ holds the graphics scripts that need a live RenderingDevice
+and run only with --windowed. Reports must contain every selected test; an
+empty or incomplete run never passes. No test reads retail data
+(--check-layout).
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -19,43 +18,32 @@ import sys
 import xml.etree.ElementTree as ET
 
 REPO = Path(__file__).resolve().parents[2]
-ROOTS = ("OPENNOVA_JO_DIR", "OPENNOVA_JO_ASSETS")
 
 
-# The GUT suites' CI shards, each on its own runner: `shells`, the scripts under
+# The GUT suite's CI shards, each on its own runner: `shells`, the scripts under
 # the directories of the shells and what drives them (tests/authoring the
 # editor's, tests/game the game shell's, tests/mcp their MCP endpoints',
-# tests/probes the runtime probes' contracts; the same names under
-# tests/retail/ for the retail suite), and `world`, every other script of the
-# suite. A script is in one or the other by its first directory under tests/
-# (tests/retail/), so the two partition each suite by construction. On the
-# Windows runs of 2026-10-18 they split core's 406 s of scripts 207 s / 199 s
-# and retail's 326 s 119 s / 207 s.
+# tests/probes the runtime probes' contracts), and `world`, every other script.
+# A script is in one or the other by its first directory under tests/, so the
+# two partition the suite by construction. On the Windows runs of 2026-10-18
+# they split 406 s of scripts 207 s / 199 s.
 GODOT_SHELL_DIRS = ("authoring", "game", "mcp", "probes")
 GODOT_SHARDS = ("shells", "world")
 
 
 def godot_shard(script: str) -> str:
-    """The GUT shard a script (res://tests/... or res://tests/retail/...) runs in."""
+    """The GUT shard a script (res://tests/...) runs in."""
     dirs = script.removeprefix("res://").split("/")[1:-1]
-    if dirs[:1] == ["retail"]:
-        dirs = dirs[1:]
     return "shells" if dirs[:1] and dirs[0] in GODOT_SHELL_DIRS else "world"
 
 
-def godot_scripts(repo: Path, suite: str, *, windowed: bool = False,
-                  shard: str | None = None) -> list[str]:
-    if shard is not None and (suite == "all" or shard not in GODOT_SHARDS):
-        raise ValueError("a Godot shard (shells, world) splits the core or the retail suite")
+def godot_scripts(repo: Path, *, windowed: bool = False, shard: str | None = None) -> list[str]:
+    if shard is not None and shard not in GODOT_SHARDS:
+        raise ValueError("a Godot shard is shells or world")
     scripts = []
     for path in sorted((repo / "godot/tests").rglob("*_test.gd")):
         rel = path.relative_to(repo / "godot")
-        dirs = list(rel.parts[1:-1])
-        retail = dirs[:1] == ["retail"]
-        is_windowed = dirs[1 if retail else 0:][:1] == ["windowed"]
-        if is_windowed != windowed:
-            continue
-        if suite == "all" or retail == (suite == "retail"):
+        if (list(rel.parts[1:-1])[:1] == ["windowed"]) == windowed:
             scripts.append("res://" + rel.as_posix())
     if shard is not None:
         scripts = [script for script in scripts if godot_shard(script) == shard]
@@ -68,81 +56,49 @@ def godot_methods(repo: Path, scripts: list[str]) -> dict[str, list[str]]:
         re.MULTILINE) for script in scripts}
 
 
+# No test reads retail data (the suite runs on minted and authored fixtures and
+# the tree's own assets/): nothing under tests/ or godot/tests/ names a retail
+# root variable or the retired retail-root helpers.
+RETAIL_READS = ("OPENNOVA_JO_", "retail_paths", "retail_mission_files", "RetailData")
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".inc", ".gd", ".py", ".cmake", ".txt", ".json"}
+
+
 def layout_errors(repo: Path) -> list[str]:
     errors = []
-    for script in godot_scripts(repo, "core") + godot_scripts(repo, "core", windowed=True):
-        source = (repo / "godot" / script.removeprefix("res://")).read_text(encoding="utf-8")
-        code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
-        if "RetailData." in code or "PresenterFixture.stage(" in code or "InstalledCombatHud." in code:
-            errors.append(f"core script reads retail data: {script}")
-    # The native migration record (docs/asset-gated-tests.md): every mixed
-    # entry stays registered through opennova_add_mixed_test and every source
-    # file it names still exists.
-    record = repo / "scripts/ci/native_migration.json"
-    if record.is_file():
-        data = json.loads(record.read_text(encoding="utf-8"))
-        cmake = repo / "tests/CMakeLists.txt"
-        forms = re.findall(r"opennova_add_mixed_test\(\s*([\w${}]+)",
-                           cmake.read_text(encoding="utf-8") if cmake.is_file() else "")
-        registered = [re.compile("^" + re.sub(r"\\\$\\\{\w+\\\}", r"\\w+", re.escape(form)) + "$")
-                      for form in forms]
-        errors += [f"native migration entry is not a mixed ctest: {name}"
-                   for name in data["mixed_entries"] if not any(p.match(name) for p in registered)]
-        errors += [f"native migration source missing: {source}"
-                   for source in data["sources"] if not (repo / source).is_file()]
-    # Historical assertion homes are reviewable without becoming the selector.
-    manifest = repo / "scripts/ci/retail_migration.json"
-    if manifest.is_file():
-        for row in json.loads(manifest.read_text(encoding="utf-8")):
-            for suite in ("core", "retail"):
-                script = row[f"{suite}_script"]
-                if script is None:
-                    continue
-                path = repo / script
-                actual = re.findall(r"^func (test_\w+)\(", path.read_text(encoding="utf-8"),
-                                    re.MULTILINE) if path.is_file() else []
-                errors += [f"migrated method missing: {script}:{name}"
-                           for name in row[f"{suite}_methods"] if name not in actual]
+    for top in ("tests", "godot/tests"):
+        for path in sorted((repo / top).rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for token in RETAIL_READS:
+                if token in text:
+                    errors.append(f"test reads retail data ({token}): {path.relative_to(repo).as_posix()}")
     return errors
 
 
-# The core suite's CI shards, each on its own runner: the `editor` label
+# The ctest suite's CI shards, each on its own runner: the `editor` label
 # (tests/editor/CMakeLists.txt gives it to every row there) and the rest. Every
-# core row has the label or not, so the two partition core by construction.
+# row has the label or not, so the two partition the suite by construction.
 SHARDS = {
-    "editor": ["-L", "^editor$", "-LE", "^retail$"],
-    "rest": ["-LE", "^(retail|editor)$"],
+    "editor": ["-L", "^editor$"],
+    "rest": ["-LE", "^editor$"],
 }
 
 
-def ctest_selection(suite: str, shard: str | None = None) -> list[str]:
-    """The ctest label arguments that select a suite, or one core shard of it."""
-    if shard is not None:
-        if suite != "core":
-            raise ValueError("a shard splits the core suite only")
-        return list(SHARDS[shard])
-    if suite == "all":
-        return []
-    return ["-L" if suite == "retail" else "-LE", "^retail$"]
+def ctest_selection(shard: str | None = None) -> list[str]:
+    """The ctest label arguments that select the suite, or one shard of it."""
+    return list(SHARDS[shard]) if shard is not None else []
 
 
-def ctest_inventory(build: Path, suite: str, shard: str | None = None) -> list[str]:
+def ctest_inventory(build: Path, shard: str | None = None) -> list[str]:
     command = ["ctest", "--test-dir", str(build), "-C", "Release", "--show-only=json-v1"]
-    command += ctest_selection(suite, shard)
+    command += ctest_selection(shard)
     data = json.loads(subprocess.check_output(command, text=True, encoding="utf-8"))
     return [test["name"] for test in data["tests"]]
 
 
-def check_roots() -> list[str]:
-    roots = {"OPENNOVA_JO_DIR": os.environ.get("OPENNOVA_JO_DIR", ""),
-             "OPENNOVA_JO_ASSETS": os.environ.get("OPENNOVA_JO_ASSETS", "")}
-    return [f"{name} must name an existing directory" for name, value in roots.items()
-            if not value or not Path(value).is_dir()]
-
-
-def check_report(report: Path, expected: list[str], *, godot: bool, suite: str,
+def check_report(report: Path, expected: list[str], *, godot: bool,
                  methods: dict[str, list[str]] | None = None,
-                 allowed_skipped_scripts: set[str] | None = None,
                  windowed: bool = False) -> list[str]:
     cases = list(ET.parse(report).getroot().iter("testcase"))
     errors = []
@@ -154,16 +110,12 @@ def check_report(report: Path, expected: list[str], *, godot: bool, suite: str,
         # GUT's classname is the script path (possibly followed by an inner class).
         seen = {case.get("classname", "").replace("\\", "/").removeprefix("res://") for case in cases}
         expected = [name.removeprefix("res://") for name in expected]
-        skipped_scripts = allowed_skipped_scripts or set()
         missing = [name for name in expected if not any(
-            actual == name or actual.startswith(name + ".") for actual in seen)
-                   and name not in skipped_scripts]
+            actual == name or actual.startswith(name + ".") for actual in seen)]
         errors += [f"unexpected script: {name}" for name in sorted(seen)
                    if not any(name == script or name.startswith(script + ".") for script in expected)]
         for script, names in (methods or {}).items():
             script = script.removeprefix("res://")
-            if script in skipped_scripts:
-                continue
             actual = {case.get("name", "") for case in cases
                       if case.get("classname", "").removeprefix("res://") == script}
             errors += [f"method not in report: {script}:{name}" for name in names if name not in actual]
@@ -177,59 +129,34 @@ def check_report(report: Path, expected: list[str], *, godot: bool, suite: str,
         name = case.get("classname", "") + ":" + case.get("name", "")
         if case.find("failure") is not None or case.find("error") is not None:
             errors.append(f"failed: {name}")
-        output = case.findtext("system-out") or ""
-        skipped = case.find("skipped")
-        skip_text = "" if skipped is None else ET.tostring(skipped, encoding="unicode")
-        if suite == "retail" and skipped is not None:
-            errors.append(f"retail test skipped: {name}")
-        elif windowed and skipped is not None and not (
-                suite == "all" and any(root in skip_text for root in ROOTS)):
+        if windowed and case.find("skipped") is not None:
             # A windowed script exists to draw: a pending there (no
-            # RenderingDevice, the wrong renderer) is missing coverage. Local
-            # `all` keeps its explicit missing-data skips, as headless does.
+            # RenderingDevice, the wrong renderer) is missing coverage.
             errors.append(f"windowed test skipped: {name}")
-        if suite != "all" and ("SKIP-LEG:" in output or any(root in skip_text for root in ROOTS)):
-            errors.append(f"retail coverage not exercised: {name}")
-        if suite == "core" and "SKIP: needs" in output:
-            errors.append(f"gated test in core: {name}")
+        # A row whose data is absent (the service's database and Redis tests
+        # without their servers) prints "SKIP: needs" and exits 77: a skip
+        # proves nothing, so the suite fails it.
+        if "SKIP: needs" in (case.findtext("system-out") or ""):
+            errors.append(f"test skipped: {name}")
     return errors
 
 
-def skipped_retail_scripts(log: Path) -> set[str]:
-    """Local --suite all may report an explicit missing-data script skip."""
-    current = ""
-    skipped = set()
-    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
-        if line.startswith("res://tests/"):
-            current = line.removeprefix("res://")
-        if current.startswith("tests/retail/") and "[Script skipped]" in line and any(root in line for root in ROOTS):
-            skipped.add(current)
-    return skipped
-
-
-def check_log(path: Path, suite: str, *, windowed: bool = False) -> list[str]:
+def check_log(path: Path, *, windowed: bool = False) -> list[str]:
     errors = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = re.sub(r"\x1b\[[0-9;]*m", "", line)
         if "SCRIPT ERROR:" in line or ("Ignoring script" in line and "does not extend GutTest" in line):
             errors.append(line.strip())
-        pending = "[Pending]" in line or "[Script skipped]" in line
-        if suite != "all" and ("SKIP-LEG:" in line or (
-                pending and any(root in line for root in ROOTS))):
-            errors.append(line.strip())
-        elif windowed and pending and not (suite == "all" and any(root in line for root in ROOTS)):
+        elif windowed and ("[Pending]" in line or "[Script skipped]" in line):
             errors.append(line.strip())
     return errors
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--suite", choices=("core", "retail", "all"), required=True)
     ap.add_argument("--shard", choices=tuple(SHARDS) + GODOT_SHARDS,
-                    help="one CI shard: of the core suite's ctest selection and inventory "
-                         "(editor, rest), or, with --godot-config, of the core or retail suite's "
-                         "Godot scripts (shells, world)")
+                    help="one CI shard: of the ctest selection and inventory (editor, rest), "
+                         "or, with --godot-config, of the Godot scripts (shells, world)")
     ap.add_argument("--selection", action="store_true",
                     help="print the suite's (or shard's) ctest label arguments, one per line")
     ap.add_argument("--godot-config", type=Path)
@@ -237,27 +164,20 @@ def main() -> int:
     ap.add_argument("--build", type=Path)
     ap.add_argument("--report", type=Path)
     ap.add_argument("--gut-log", type=Path)
-    ap.add_argument("--require-roots", action="store_true")
-    ap.add_argument("--check-layout", action="store_true")
+    ap.add_argument("--check-layout", action="store_true",
+                    help="fail any test under tests/ or godot/tests/ that reads retail data")
     ap.add_argument("--windowed", action="store_true",
-                    help="select only the suite's graphics scripts (tests/windowed/ for core, "
-                         "tests/retail/windowed/ for retail); a pending test then fails")
+                    help="select only the graphics scripts (tests/windowed/); a pending test then fails")
     args = ap.parse_args()
     if args.shard and (args.shard in GODOT_SHARDS) != bool(args.godot_config):
         ap.error("--shard shells|world splits the Godot scripts (--godot-config), editor|rest the ctest rows")
-    if args.shard in SHARDS and args.suite != "core":
-        ap.error("--shard editor|rest splits the core suite only")
-    if args.shard in GODOT_SHARDS and args.suite == "all":
-        ap.error("--shard shells|world splits the core or the retail suite")
     if args.selection:
-        for arg in ctest_selection(args.suite, args.shard):
+        for arg in ctest_selection(args.shard):
             print(arg)
         return 0
-    errors = check_roots() if args.require_roots else []
-    if args.check_layout:
-        errors += layout_errors(REPO)
+    errors = layout_errors(REPO) if args.check_layout else []
     if args.godot_config:
-        expected = godot_scripts(REPO, args.suite, windowed=args.windowed, shard=args.shard)
+        expected = godot_scripts(REPO, windowed=args.windowed, shard=args.shard)
         if not expected:
             errors.append("suite selection is empty")
         config = {"dirs": [], "tests": expected, "prefix": "", "suffix": "_test.gd",
@@ -270,7 +190,7 @@ def main() -> int:
             args.inventory.write_text(json.dumps({"scripts": expected,
                 "methods": godot_methods(REPO, expected)}, indent=2) + "\n", encoding="utf-8")
     elif args.build and not args.report:
-        expected = ctest_inventory(args.build, args.suite, args.shard)
+        expected = ctest_inventory(args.build, args.shard)
         if not expected:
             errors.append("suite selection is empty")
         if args.inventory:
@@ -282,15 +202,13 @@ def main() -> int:
         inventory = json.loads(args.inventory.read_text(encoding="utf-8"))
         expected = inventory["scripts"] if isinstance(inventory, dict) else inventory
         methods = inventory.get("methods") if isinstance(inventory, dict) else None
-        allowed = skipped_retail_scripts(args.gut_log) if args.gut_log and args.suite == "all" else set()
         if not args.report.is_file():
             errors.append(f"missing report: {args.report}")
         else:
             errors += check_report(args.report, expected, godot=args.gut_log is not None,
-                                   suite=args.suite, methods=methods, allowed_skipped_scripts=allowed,
-                                   windowed=args.windowed)
+                                   methods=methods, windowed=args.windowed)
     if args.gut_log:
-        errors += check_log(args.gut_log, args.suite, windowed=args.windowed)
+        errors += check_log(args.gut_log, windowed=args.windowed)
     for error in errors:
         print(f"[test-suites] {error}")
     return 1 if errors else 0

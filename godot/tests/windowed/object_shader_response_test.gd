@@ -2,7 +2,7 @@ extends GutTest
 
 # Raster pins for the object wrappers' retail combiner math, drawn through the
 # production .gdshader wrappers on a real RenderingDevice: a tests/windowed/
-# script, run by `scripts/test_godot.sh --suite core --windowed` (a headless
+# script, run by `scripts/test_godot.sh --windowed` (a headless
 # run pends it). Every case isolates one retail rule:
 # - the SELFLUM emissive saturates SelfLumColor x gain before MODULATE2X;
 # - fixed-function lighting sums and saturates per vertex (Gouraud);
