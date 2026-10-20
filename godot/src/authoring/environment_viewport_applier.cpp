@@ -74,16 +74,7 @@ ApplierStep EnvironmentViewportApplier::step(const opennova::editor::ViewportMod
 	return ApplierStep::Built;
 }
 
-opennova::editor::OperationProgress EnvironmentViewportApplier::progress() const {
-	opennova::editor::OperationProgress progress;
-	progress.unit = opennova::editor::OperationUnit::Steps;
-	if (!building_)
-		return progress;
-	progress.done = layers_->units_done();
-	progress.total = layers_->units_planned() + 1;
-	progress.label = layers_->building() ? layers_->step_label() : "pose";
-	return progress;
-}
+opennova::editor::OperationProgress EnvironmentViewportApplier::progress() const { return layers_->progress(building_); }
 
 // --- the state -----------------------------------------------------------------------------------
 
@@ -188,17 +179,7 @@ void EnvironmentViewportApplier::present(double dt) {
 	if (!layers_->environment_built())
 		return;
 	++presented_;
-	// In the game's leg order (game_world_frame.cpp).
-	layers_->begin_frame();
-	layers_->present_environment(dt);
-	layers_->present_ground(dt, clock_ms_);
-	layers_->present_sun_veil();
-	layers_->present_particles(clock_ms_);
-	layers_->present_drops();
-	layers_->present_overlay(nullptr);
-	layers_->present_frame_effects();
-	layers_->present_clear_and_cube();
-	layers_->end_frame();
+	layers_->present_frame(dt, clock_ms_);
 }
 
 } // namespace godot

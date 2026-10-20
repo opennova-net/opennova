@@ -75,16 +75,7 @@ ApplierStep TerrainViewportApplier::step(const opennova::editor::ViewportModel &
 	return ApplierStep::Built;
 }
 
-opennova::editor::OperationProgress TerrainViewportApplier::progress() const {
-	opennova::editor::OperationProgress progress;
-	progress.unit = opennova::editor::OperationUnit::Steps;
-	if (!building_)
-		return progress;
-	progress.done = layers_->units_done();
-	progress.total = layers_->units_planned() + 1;
-	progress.label = layers_->building() ? layers_->step_label() : "pose";
-	return progress;
-}
+opennova::editor::OperationProgress TerrainViewportApplier::progress() const { return layers_->progress(building_); }
 
 // --- the state -----------------------------------------------------------------------------------
 
@@ -195,18 +186,8 @@ void TerrainViewportApplier::present(double dt) {
 	// Nothing to draw while the first build runs.
 	if (building_ && !layers_->environment_built())
 		return;
-	// In the game's leg order (game_world_frame.cpp).
-	layers_->begin_frame();
-	layers_->present_environment(dt);
-	layers_->present_ground(dt, clock_ms_);
-	layers_->present_sun_veil();
-	layers_->present_particles(clock_ms_);
-	layers_->present_drops();
-	layers_->present_overlay(nullptr);
-	layers_->present_frame_effects();
-	layers_->present_clear_and_cube();
+	layers_->present_frame(dt, clock_ms_);
 	++presented_;
-	layers_->end_frame();
 }
 
 } // namespace godot

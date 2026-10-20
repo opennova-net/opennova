@@ -1506,13 +1506,7 @@ void InspectorWindow::send_filter(const std::string &path, const std::string &be
 	window_requests::set_workspace(workspace_, "document", std::move(members));
 }
 
-void InspectorWindow::nothing_matches(char *filter, const char *what) {
-	const std::string said = std::string("No ") + what + " matches \"" + filter + "\".";
-	ImGui::TextDisabled("%s", said.c_str());
-	ImGui::SameLine();
-	if (ImGui::SmallButton("Clear##nothing")) filter[0] = '\0';
-	ui_kit::tooltip("Clear the filter: every field and list again. Each file keeps a filter of its own.");
-}
+void InspectorWindow::nothing_matches(char *filter, const char *what) { ui_kit::nothing_matches(filter, what); }
 
 void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();

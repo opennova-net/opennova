@@ -237,7 +237,7 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), hud_options_change(options)));
 	if (options.sights && !model.scope_frame() && !model.scope_why().empty())
-		ImGui::TextDisabled("%s", model.scope_why().c_str());
+		ui_kit::quiet_text(model.scope_why());
 
 	// The element picked: its lines and its textures, each a Go to.
 	if (const HudPreviewElement *picked = model.picked()) {
@@ -262,8 +262,8 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 				go_to_texture(workspace, view, art.path);
 		}
 	} else {
-		ImGui::TextDisabled("Point at an element to name it; click to pick it; drag it to move it; double click to go "
-		                    "to its line.");
+		ui_kit::quiet_text("Point at an element to name it.",
+		                   "Click to pick it, drag it to move it, double click to go to its line.");
 	}
 
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y), [&](const CanvasInput &in) {

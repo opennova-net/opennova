@@ -23,7 +23,6 @@ namespace {
 constexpr NodeKind k(ModelKind kind) { return node_kind(kind); }
 
 const ImVec4 kMuted(0.70f, 0.70f, 0.70f, 1.0f);
-const ImVec4 kMixed(0.95f, 0.75f, 0.35f, 1.0f);
 
 // A label column as the generic form draws one, then the control on the rest of the line.
 void label(const char *text, float column) {
@@ -66,7 +65,7 @@ void material_faces(Workspace &workspace, const ModelDocument &model, const Node
 	label("Surface", column);
 	const std::string shown = model_material_surface_words(surface);
 	ImGui::SetNextItemWidth(-1.0f);
-	if (surface.mixed()) ImGui::PushStyleColor(ImGuiCol_Text, kMixed);
+	if (surface.mixed()) ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::warning_color());
 	const bool open = ImGui::BeginCombo("##surface", shown.c_str());
 	if (surface.mixed()) ImGui::PopStyleColor();
 	if (!open) ui_kit::tooltip(surface.mixed() ? shown + "\nThe faces made from this material disagree: pick one "
@@ -128,7 +127,7 @@ void material_faces(Workspace &workspace, const ModelDocument &model, const Node
 		                                                   : std::string()));
 		if (mixed) {
 			ImGui::SameLine();
-			ImGui::TextColored(kMixed, "%zu of %zu", count_of.on, surface.faces);
+			ImGui::TextColored(ui_kit::warning_color(), "%zu of %zu", count_of.on, surface.faces);
 		}
 		ImGui::PopID();
 	}
@@ -145,8 +144,7 @@ void face_material(Workspace &workspace, const ModelDocument &model, const NodeA
 		return;
 	}
 	const std::string words = model_record_label(model, material, nullptr);
-	if (ImGui::Selectable((ui_kit::fit(words, ImGui::GetContentRegionAvail().x) + "###material").c_str()))
-		window_requests::select(workspace, model, material);
+	if (ui_kit::fitted_selectable(words, "material")) window_requests::select(workspace, model, material);
 	ui_kit::tooltip(words + "\nIts surface and flags are set on every face made from it: select it to set them "
 	                        "all at once.");
 }
@@ -169,18 +167,11 @@ std::string plain(const std::string &words) {
 	return out;
 }
 
-// What a collision record is to the game (documents/model_collision_words.h): the words wrapped, muted,
-// their citations in the tooltip, and a second paragraph where the record's own kind says more.
+// What a collision record is to the game (documents/model_collision_words.h): a muted line, the whole words
+// with their citations in its tooltip, and a second where the record's own kind says more.
 void game_words(const std::string &words, const std::string &more = std::string()) {
-	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-	ImGui::TextWrapped("%s", plain(words).c_str());
-	ImGui::PopStyleColor();
-	ui_kit::tooltip(words);
-	if (more.empty()) return;
-	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-	ImGui::TextWrapped("%s", plain(more).c_str());
-	ImGui::PopStyleColor();
-	ui_kit::tooltip(more);
+	ui_kit::quiet_text(plain(words), words);
+	if (!more.empty()) ui_kit::quiet_text(plain(more), more);
 }
 
 // A collision record's words: the section (a person's hit sphere), the volume by its type, the bullet face,
@@ -284,7 +275,7 @@ bool draw_model_inspector(Workspace &workspace, const Document &document, const 
 		if (!row || !model->placement(record, at)) return false;
 		const std::string range = model_lod_range(*row, at.index);
 		if (renderer::object_lod_reachable(model_lod_thresholds(*row), at.index)) ImGui::TextColored(kMuted, "Drawn %s.", range.c_str());
-		else ImGui::TextColored(kMixed, "Drawn %s.", range.c_str());
+		else ImGui::TextColored(ui_kit::warning_color(), "Drawn %s.", range.c_str());
 		ui_kit::tooltip("The game draws the first LOD whose threshold the model's projected radius is above, LOD 0 "
 		                "first, and stops at the first 0 [Model_SelectRlodLevel].");
 		return true;

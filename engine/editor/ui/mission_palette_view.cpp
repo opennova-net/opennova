@@ -77,7 +77,7 @@ int64_t MissionPaletteView::draw(const SessionView &view, const AssetGraph *grap
 		return 0;
 	}
 	if (palette_.items.empty()) {
-		ui_kit::empty_state("No item matches the search.");
+		if (ui_kit::nothing_matches(filter_.text, "item") && typed) *typed = filter_.sent();
 		return 0;
 	}
 	int64_t chosen = 0;

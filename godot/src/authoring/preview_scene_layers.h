@@ -104,7 +104,6 @@ public:
 	PreviewEffects &effects() { return *effects_; }
 	const PreviewEffects &effects() const { return *effects_; }
 	const Ref<ResourceRoot> &files() const { return root_files_; }
-	const std::shared_ptr<opennova::StampedFiles> &stamped() const { return stamped_; }
 
 	// --- the files
 	// ---------------------------------------------------------------------------------------------
@@ -140,6 +139,9 @@ public:
 	size_t units_done() const { return next_; }
 	size_t units_planned() const { return units_.size(); }
 	const char *step_label() const;
+	// A device's build progress over the layers (the terrain's and the environment's appliers', `building` theirs):
+	// the units done of those planned and the pose after them, the step's label; nothing while not building.
+	opennova::editor::OperationProgress progress(bool building) const;
 	// Nothing drawn: no terrain, no environment, the plan and every note dropped.
 	void clear();
 	bool environment_built() const { return environment_built_; }
@@ -150,8 +152,6 @@ public:
 	// The placed tiles the terrain's load took (empty: none) and whether they are the terrain's
 	// own.
 	const MissionTilesRead &tiles_read() const { return tiles_read_; }
-	int environment_builds() const { return environment_builds_; }
-	int terrain_builds() const { return terrain_builds_; }
 
 	// --- the state
 	// ---------------------------------------------------------------------------------------------
@@ -195,6 +195,9 @@ public:
 	void present_frame_effects();
 	void present_clear_and_cube();
 	void end_frame();
+	// A frame of a device with no legs of its own (the terrain's and the environment's viewports): every leg above in
+	// the game's order, between begin_frame and end_frame, no light director, at `clock_ms`.
+	void present_frame(double dt, int64_t clock_ms);
 	// Whether the water draws this frame (its plane active and shown), and its height.
 	bool water_drawn() const;
 	float water_height() const;
@@ -273,7 +276,6 @@ private:
 	bool binding_ = false; // the sky and the water planned and not yet bound to what was built
 	TerrainKey terrain_key_;
 	EnvironmentKey environment_key_;
-	int environment_builds_ = 0, terrain_builds_ = 0;
 
 	Shown shown_;
 	double shown_time_ = -1.0;

@@ -54,6 +54,9 @@ private:
 	// The filter's box over the model's filter (`width` 0: the rest of the line), which it shows
 	// as it stands (a reveal clears it) and sets as it is typed.
 	void filter_box(const char *hint, float width, const char *tip);
+	// What a list shows when it lists nothing: the filter's nothing with its Clear (ui_kit::nothing_matches,
+	// "No <what> matches ..."), or with no text filtered `otherwise` (the kinds shown hide every record).
+	void nothing_matches(const char *what, const char *otherwise);
 	void draw_kinds(const Document &document);
 	void draw_list(Workspace &workspace, const Document &document);
 	void draw_tree(Workspace &workspace, const Document &document);

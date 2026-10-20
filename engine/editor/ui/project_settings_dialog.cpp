@@ -141,7 +141,8 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	}
 	if (choice.value().name != v.project.document->expansion.name && !v.project.document->expansion.name.empty() &&
 	    !choice.value().name.empty())
-		ImGui::TextDisabled("Apply renames the project's own expansion files to the new name.");
+		ui_kit::warning_line("Apply renames the expansion's files.",
+		                     "Apply renames the project's own expansion files to the new name.");
 
 	ImGui::SeparatorText("This computer");
 	const ui_kit::PathField install =
@@ -151,22 +152,21 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		workspace.request(request::pick_directory(PickPurpose::GameInstall));
 	}
 	if (install.edited) set("game_install", io::JsonValue::make_string(game_install_.sent()));
-	ui_kit::tooltip(game_install_.text);
+	ui_kit::tooltip(std::string(game_install_.text) + (game_install_.text[0] ? "\n" : "") +
+	                "Where the game is installed, kept with the project: its game data is imported from it.");
 	// What the folder holds, checked once it is not being typed (the UX round's project lane).
 	bool found = false;
 	const std::string words = check_.words(workspace, game_install_.text, install.typing, std::string(), found);
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
-	ImGui::PushStyleColor(ImGuiCol_Text, words.empty() || found ? ImVec4(0.55f, 0.85f, 0.55f, 1.0f) : ImVec4(0.95f, 0.55f, 0.45f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_Text, words.empty() || found ? ui_kit::reference_color(ReferenceStatus::Present)
+	                                                            : ui_kit::refusal_color());
 	ImGui::TextWrapped("%s", words.empty() ? "Checking the folder..." : words.c_str());
 	ImGui::PopStyleColor();
 	ImGui::PopTextWrapPos();
-	ImGui::TextDisabled("Where the game is installed, kept with the project: its game data is imported from it.");
 	if (v.activity.source_run) {
 		const std::string runtime = "OpenNova runtime: " + v.activity.runtime_executable;
-		const std::string shown = ui_kit::fit(runtime, field_width() * 1.5f);
-		ImGui::TextUnformatted(shown.c_str());
-		if (shown != runtime) ui_kit::tooltip(runtime);
-		ImGui::TextDisabled("A source run: Play runs the Godot binary at the checkout.");
+		ImGui::TextUnformatted(ui_kit::fit(runtime, field_width() * 1.5f).c_str());
+		ui_kit::tooltip(runtime + "\nA source run: Play runs the Godot binary at the checkout.");
 	} else {
 		const ui_kit::PathField runtime =
 				ui_kit::path_field("OpenNova runtime", runtime_.text, sizeof(runtime_.text), "Browse...##runtime", field_width());
@@ -175,12 +175,14 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 			workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
 		}
 		if (runtime.edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
-		ImGui::TextDisabled("opennova.exe; left empty, the one packaged beside the editor.");
-		ui_kit::tooltip(v.activity.runtime_executable.empty() ? "No runtime is found now." : "Play runs " + v.activity.runtime_executable + ".");
+		ui_kit::tooltip("opennova.exe; left empty, the one packaged beside the editor. " +
+		                (v.activity.runtime_executable.empty() ? std::string("No runtime is found now.")
+		                                                       : "Play runs " + v.activity.runtime_executable + "."));
 	}
 	// How the project plays: its own, kept in its local settings on this computer (never the editor's, so it
 	// never reaches another project, nor another editor on the machine).
 	ImGui::SeparatorText("Play");
+	ui_kit::tooltip("This project's, on this computer (.opennova/local.json): other projects play as each is set.");
 	const auto set_mode = [&set](PlayMode mode) { set("play_mode", io::JsonValue::make_string(play_mode_token(mode))); };
 	bool strict = plays_in_install(held.play_mode);
 	if (ImGui::Checkbox("Play in the game install (strict)", &strict)) set_mode(strict ? PlayMode::Strict : PlayMode::Runtime);
@@ -192,11 +194,10 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	if (ImGui::Checkbox("Save all before Play", &save_first)) set("save_before_play", io::JsonValue::make_bool(save_first));
 	ui_kit::tooltip("Play writes every file with unsaved edits first, as Save all does, and starts at once. Off, Play "
 	                "asks first, as Build does.");
-	ImGui::TextDisabled("This project's, on this computer (.opennova/local.json): other projects play as each is set.");
 
 	if (!error_.empty()) {
 		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
-		ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s", error_.c_str());
+		ImGui::TextColored(ui_kit::refusal_color(), "%s", error_.c_str());
 		ImGui::PopTextWrapPos();
 	}
 	const bool can_apply = !waiting_ && !held.title.empty() && expansion_ok;

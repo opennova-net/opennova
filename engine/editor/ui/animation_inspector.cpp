@@ -15,6 +15,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/animation_uses.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/document_views.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <formats/bad/bad_build.h>
@@ -22,20 +23,6 @@
 
 namespace opennova::editor {
 
-namespace {
-
-// A line that goes to a use (a Selectable cut to the room, whole in its tooltip).
-void use_line(Workspace &workspace, const GraphEdge *edge, const std::string &line, int id) {
-	const SessionView &view = workspace.view();
-	ImGui::PushID(id);
-	const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
-	if (ImGui::Selectable((shown + "###use").c_str()) && edge && view.project.scan)
-		window_requests::go_to(workspace, usage_target(*view.project.scan, *edge));
-	ui_kit::tooltip(line + "\nClick to go there.");
-	ImGui::PopID();
-}
-
-} // namespace
 
 bool draw_animation_map_inspector(Workspace &workspace, const Document &document, const NodeAddress &record,
                                   InspectorTaken &) {
@@ -45,7 +32,7 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 	const ClipLoads loads = view.project.scan ? project_clip_loads(*view.project.scan) : ClipLoads();
 	// What the game does with the row (or the row of the clip selected).
 	const std::vector<std::string> notes = map_row_notes(*map, record, loads);
-	for (const std::string &line : notes) ui_kit::note(line);
+	for (const std::string &line : notes) ui_kit::quiet_text(line);
 	// The reset row: the slots the map leaves out, by what the game does with each.
 	const Node *row = document.row(record.row);
 	if (row && !record.child &&
@@ -83,7 +70,7 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 	if (view.findings.graph && view.project.scan) {
 		const std::vector<MapPlayer> players = map_players(*view.findings.graph, *view.project.scan, map->path());
 		if (players.empty()) {
-			ui_kit::note(map_unused_words(*view.findings.graph, map->path()));
+			ui_kit::quiet_text(map_unused_words(*view.findings.graph, map->path()));
 		} else {
 			ImGui::Text("Played by (%zu):", players.size());
 			int id = 0;
@@ -91,8 +78,8 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 				std::string line = player.record + (player.first_person ? " (its first-person view)" : "");
 				if (!player.model.empty()) line += " on " + player.model;
 				if (!player.enemy_model.empty()) line += " (" + player.enemy_model + " as an enemy)";
-				use_line(workspace, player.edge, line + " (" + io::utf8_file_name(player.file) + ")",
-				         id++);
+				inspector_jump_line(workspace, player.edge ? usage_target(*view.project.scan, *player.edge) : ReferenceTarget(),
+				                    line + " (" + io::utf8_file_name(player.file) + ")", "p" + std::to_string(id++));
 			}
 		}
 	}
@@ -115,22 +102,24 @@ bool draw_clip_inspector(Workspace &workspace, const Document &document, const N
 	std::snprintf(length, sizeof(length), "%u frames at %u a second: %.2f s in the game; %s.", frames, clip->fps,
 	              ticks > 0 ? ticks / io::kTickHz : 0.0,
 	              loops ? "it loops" : "it plays once and holds its last frame");
-	ui_kit::note(length);
+	ui_kit::quiet_text(length);
 	// Its frame events: one a frame and the end pose, whose event never fires (animation_end_pose).
 	if (clip->events.size() == size_t(frames) + 1 && frames > 0) {
 		std::snprintf(length, sizeof(length),
 		              "Its %zu frame events are its %u frames (0 to %u) and the end pose (%u), whose event never fires.",
 		              clip->events.size(), frames, frames - 1, frames);
-		ui_kit::note(length);
+		ui_kit::quiet_text(length);
 	}
 	if (view.findings.graph && view.project.scan) {
 		const std::vector<ClipUse> uses = clip_uses(*view.findings.graph, *view.project.scan, clip_document->path());
 		if (uses.empty()) {
-			ui_kit::note(clip_unused_words(*view.findings.graph, clip_document->path()));
+			ui_kit::quiet_text(clip_unused_words(*view.findings.graph, clip_document->path()));
 		} else {
 			ImGui::Text("Played by these map rows (%zu):", uses.size());
 			int id = 0;
-			for (const ClipUse &use : uses) use_line(workspace, use.edge, use.map + ": " + use.words, id++);
+			for (const ClipUse &use : uses)
+				inspector_jump_line(workspace, use.edge ? usage_target(*view.project.scan, *use.edge) : ReferenceTarget(),
+				                    use.map + ": " + use.words, "u" + std::to_string(id++));
 		}
 	}
 	ImGui::Separator();

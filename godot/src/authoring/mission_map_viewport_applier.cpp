@@ -362,7 +362,6 @@ void MissionMapViewportApplier::draw_tiles_(const opennova::editor::MissionMapVi
 	rs->canvas_item_clear(tiles_item_);
 	tiles_drawn_ = 0;
 	if (tile_set_.is_null()) return;
-	++tiles_redrawn_;
 	// Each record in file order (MED draws its layers in ascending order, the order it writes them in, which is the
 	// file's), its cell over its 16-unit square, the cell's corners where the game's drawing puts them: the square from
 	// the record's corner (x, the stored z: its north-west) 16 units east and south, the cell's first row along its
@@ -427,7 +426,6 @@ void MissionMapViewportApplier::draw_outlines_(const opennova::editor::MissionMa
 		}
 		// Thin lines (a negative width: a pixel whatever the transform), a colour an edge.
 		rs->canvas_item_add_multiline(chunk_items_[chunk], points, colours, -1.0f);
-		++chunks_uploaded_;
 	}
 }
 

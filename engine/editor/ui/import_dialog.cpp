@@ -222,12 +222,9 @@ void ImportDialog::draw(Workspace &workspace) {
 			chosen_.size() != preview.choices.size())
 		take(v, preview);
 	if (grouped_ != preview.plan) group(preview);
-	if (preview.changed) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Warning));
-		ImGui::TextWrapped("The files changed since the preview, so nothing was imported: this is the import as they "
-		                   "are now.");
-		ImGui::PopStyleColor();
-	}
+	if (preview.changed)
+		ui_kit::warning_line("The files changed since the preview, so nothing was imported.",
+		                     "This is the import as they are now.");
 	const bool from_game = (!preview.roots.empty() && preview.roots.front().install) ||
 	                       (!preview.choices.empty() && preview.choices.front().install);
 	ImGui::TextWrapped("%s", preview.all ? "Copy every file of the game data into the project."
@@ -437,7 +434,8 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", shown.c_str());
 	if (visible.empty()) {
-		ui_kit::empty_state("No file matches the filter.", "Clear the filter, or show every kind.");
+		if (filter_.text[0]) ui_kit::nothing_matches(filter_.text, "file");
+		else ui_kit::empty_state("No file of this kind.", "Show every kind.");
 		return;
 	}
 	// The place each file comes from, only where they are not all from one.
@@ -745,7 +743,8 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 		for (const size_t i : shown_rows) checked_[i] = false;
 	}
 	if (rows.empty()) {
-		ui_kit::empty_state("No row matches.", "Clear the filter, or show every kind.");
+		if (rows_filter_.text[0]) ui_kit::nothing_matches(rows_filter_.text, "row");
+		else ui_kit::empty_state("No row of this kind.", "Show every kind.");
 		return;
 	}
 	// The table takes the height the notes under it leave.

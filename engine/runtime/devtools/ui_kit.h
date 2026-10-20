@@ -2,7 +2,8 @@
 // past the window's edge; a button whose tooltip says what it does, or while it cannot act, why not; the
 // tools of a list's selected record; a path's field with its Browse...; a filter box; a control over a
 // value its owner holds; text cut to its cell with the whole of it in a tooltip; the one tooltip every
-// window's hover text goes through; and what a view shows when it has nothing to list.
+// window's hover text goes through; a "(?)" holding a how-to; and what a view shows when it has nothing
+// to list, or its filter leaves nothing.
 //
 // ImGui-free like every window's header: ui_kit.cpp draws, built with the pass.
 #pragma once
@@ -143,11 +144,28 @@ template <class Make> void tooltip_lazy(Make &&make) {
 	if (tooltip_hovered()) tooltip(make());
 }
 
-// What a view shows when it has nothing to list: a line of disabled text and, optionally,
-// a second saying what to do.
+// What a view shows when it has nothing to list: a line of disabled text, what to do (`hint`, when
+// given) in its tooltip.
 void empty_state(const char *text, const char *hint = nullptr);
 // A sentence muted and wrapped (a type's notes in the Inspector, what a view has nothing of).
 void note(const std::string &text);
+// A line muted and cut to what is left of the line: hovered, `tip` when one is given, else the whole
+// text when it was cut (a value's note, a canvas's one context line).
+void quiet_text(const std::string &text, const std::string &tip = std::string());
+// A muted "(?)" on the line of the item just drawn, `tip` its tooltip: how to use what sits before it,
+// or the rule behind it.
+void help_mark(const std::string &tip);
+// What a filtered list shows when its filter leaves nothing: "No <what> matches "<filter>"." cut to
+// the line, and a Clear (id "Clear##nothing") that empties `filter`. True when it was cleared.
+bool nothing_matches(char *filter, const char *what);
+// A selectable line cut to what is left of the line ("..." where it is cut), its id `id` whatever
+// the cut leaves, the whole line in its tooltip where it was cut (a tooltip after it shows instead):
+// true when clicked.
+bool fitted_selectable(const std::string &line, const char *id, bool selected = false);
+// A tool on `row` (tool(): pressed only while `enabled`, its tooltip `tip`) that opens the popup
+// `popup`, and that popup begun: true while it draws, the caller's ImGui::EndPopup after.
+bool tool_popup(WrapRow &row, const char *label, const char *popup, bool enabled, const std::string &tip,
+                bool small = false);
 
 // While one lives, a tooltip (`tooltip`) shows above its item, its bottom edge on the item's top
 // edge, rather than below the pointer; the pointer's own place where there is no room above. For the

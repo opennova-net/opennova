@@ -18,7 +18,6 @@ namespace {
 
 const ImVec4 kTrue(0.45f, 0.85f, 0.45f, 1.0f);
 const ImVec4 kFalse(0.95f, 0.45f, 0.40f, 1.0f);
-const ImVec4 kWarn(0.95f, 0.75f, 0.35f, 1.0f);
 
 // A countdown in the game's units (64 a step, one step a quarter pass of 64 ticks) as the seconds it lasts.
 std::string seconds_of(int64_t countdown) {
@@ -56,12 +55,12 @@ void heading(Workspace &workspace, const LiveLogic &live, const LiveEvent &event
 	const std::string words = state_words(event);
 	// The game silent a while: its last report, said so.
 	if (live.quiet_ms >= 2000) {
-		ImGui::TextColored(kWarn, "no report for %d s", int(live.quiet_ms / 1000));
+		ImGui::TextColored(ui_kit::warning_color(), "no report for %d s", int(live.quiet_ms / 1000));
 		ui_kit::tooltip("The game has not answered the editor for a while (a stall, or another client's long call): "
 		                "what follows is its last report.");
 		ImGui::SameLine();
 	}
-	const ImVec4 colour = event.fired ? kTrue : event.activate_countdown > 0 || event.active ? kWarn
+	const ImVec4 colour = event.fired ? kTrue : event.activate_countdown > 0 || event.active ? ui_kit::warning_color()
 	                                                                                     : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
 	ImGui::TextColored(colour, "%s", words.c_str());
 	std::string tip = "In the running game, at tick " + std::to_string(live.tick) + ": " + words + ".";
@@ -73,7 +72,7 @@ void heading(Workspace &workspace, const LiveLogic &live, const LiveEvent &event
 	ui_kit::tooltip(tip);
 	if (live.stale) {
 		ImGui::SameLine();
-		ImGui::TextColored(kWarn, "stale");
+		ImGui::TextColored(ui_kit::warning_color(), "stale");
 		ui_kit::tooltip("Played at revision " + std::to_string(live.played_revision) +
 		                ": the mission was edited since, and the game runs it as it was then. Play again to see the edits run.");
 	}

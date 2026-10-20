@@ -4,11 +4,14 @@
 #include <cstdio>
 #include <iterator>
 
+#include <imgui.h>
+
 #include <base/io/json.h>
 #include <editor/preview/terrain_brush_overlay.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
 #include <editor/ui/workspace.h>
 
@@ -76,6 +79,21 @@ void draw_overlay_legend(Workspace &workspace, ViewportCanvas &ui, const std::st
 	io::JsonValue options = io::JsonValue::make_object();
 	options.set("legend", io::JsonValue::make_bool(!open));
 	workspace.request(request::set_viewport(path, viewport_change(kind, "options", std::move(options))));
+}
+
+MissionGroundOverlay ground_overlay_choice(MissionGroundOverlay current) {
+	MissionGroundOverlay picked = current;
+	const auto choice = [&](const char *label, MissionGroundOverlay kind, const char *tip) {
+		if (ImGui::RadioButton(label, current == kind)) picked = kind;
+		ui_kit::tooltip(tip);
+	};
+	choice("Nothing", MissionGroundOverlay::None, "The terrain as the game draws it.");
+	choice("Surface classes", MissionGroundOverlay::Surfaces,
+	       "Each point's surface class as the game reads it (its char map, the placed tiles): what footsteps and a "
+	       "round's impact play there.");
+	choice("Foliage", MissionGroundOverlay::Foliage,
+	       "Where the foliage map's codes grow each definition, and what the placed tiles keep off.");
+	return picked;
 }
 
 } // namespace opennova::editor

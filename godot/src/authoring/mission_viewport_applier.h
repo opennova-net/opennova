@@ -151,22 +151,8 @@ public:
 	void publish_scene_state() override;
 	void present(double dt) override;
 
-	// Its nodes and its placer, for the parity tests.
-	Camera3D *camera() const { return camera_; }
-	// S23 C: the entities' moving ground shadows, the game's render-slot device over the picture's casters.
-	SlotShadow *slot_shadow() const { return slot_shadow_; }
-	// The Shoot tool's (DI-23): the scars its shots left, drawn by the game's ScarPresenter (their effects play in
-	// the items' effect scene, effects()).
-	ScarPresenter *shot_scars() const { return shot_scars_; }
-	Terrain *terrain() const { return terrain_; }
-	MissionEnvironment *environment() const { return environment_; }
+	// Its placer, for the GUT device tests (EditorApp::get_mission_placer).
 	Ref<MissionObjectPlacer> placer() const { return placer_; }
-	// DI-31's: the foliage dispatcher, the effects drawn, the light director.
-	FoliageDispatcher *foliage() const { return foliage_; }
-	// DI-36's: the Listen's channels' player.
-	const PreviewSoundLoops &listen() const { return *listen_; }
-	PreviewEffects &effects() { return layers_->effects(); }
-	Ref<EffectLightDirector> lights() const { return lights_; }
 	// How the entities stand: placed by the last whole placement and shown, lifted since and shown,
 	// hidden; how many whole placements ran and what the last one cost (microseconds).
 	int placed_count() const;

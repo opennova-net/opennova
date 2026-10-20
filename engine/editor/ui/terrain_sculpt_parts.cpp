@@ -40,8 +40,6 @@ void draw_sculpt_part(TerrainPaneContext &context) {
 		ui_kit::tooltip("The height Set lays (strength 1: an exact plateau), metres over the terrain's zero.");
 		if (ImGui::IsItemDeactivatedAfterEdit())
 			window_requests::set_workspace(context.workspace, "terrain_brush", "height", io::JsonValue::make_number(double(held)));
-	} else if (brush.tool == TerrainTool::Flatten) {
-		ImGui::TextDisabled("Flatten levels towards the height under the stroke's first dab.");
 	}
 	const TerrainHeightsDocument *heights = open_heights(context);
 	if (!heights) {
@@ -51,21 +49,19 @@ void draw_sculpt_part(TerrainPaneContext &context) {
 		return;
 	}
 	if (heights->blocked()) {
-		ImGui::TextWrapped("%s is open read only: %s", basename_of(heights->path()).c_str(),
-		                   heights->issues().empty() ? "its heights do not read." : heights->issues().front().message.c_str());
+		ui_kit::refusal_text(basename_of(heights->path()) + " is open read only: " +
+		                     (heights->issues().empty() ? "its heights do not read." : heights->issues().front().message));
 		return;
 	}
 	const HeightsFacts facts = heights->facts();
 	ImGui::Text("Heights %.2f m to %.2f m, %zu tiles", metres(facts.lowest), metres(facts.highest), facts.tiles);
-	if (facts.over_rasterizer) {
-		ImGui::TextWrapped("%zu texels stand past 128 m: TrnGen's bake leaves them out of the terrain it draws.",
-		                   facts.over_rasterizer);
-		ui_kit::tooltip("The bake's draw-back covers 0 to 128 m; a height past it keeps its old atlas value.");
-	}
-	if (facts.steep_blocks) {
-		ImGui::TextWrapped("%d blocks of the depth section span more than it holds: the writer clamps them.",
-		                   facts.steep_blocks);
-	}
+	if (facts.over_rasterizer)
+		ui_kit::warning_line(std::to_string(facts.over_rasterizer) + " texels stand past 128 m",
+		                     "TrnGen's bake leaves them out of the terrain it draws: its draw-back covers 0 to 128 m, and a "
+		                     "height past it keeps its old atlas value.");
+	if (facts.steep_blocks)
+		ui_kit::warning_line(std::to_string(facts.steep_blocks) + " depth blocks written clamped",
+		                     "These blocks of the depth section span more than it holds: the writer clamps them.");
 }
 
 // The heights file's bake (S25 lane A): running, the regions it waits on, or done.
@@ -81,20 +77,21 @@ void draw_bake_part(TerrainPaneContext &context) {
 	}
 	if (heights->blocked()) return;
 	const std::string name = basename_of(heights->path());
+	const std::string bakes = "A stroke's bake remakes only the tiles it reached; Save, Play and Build wait for it.";
 	if (view.documents.preparing == heights->path()) {
 		ImGui::Text("Preparing %s for sculpting...", name.c_str());
 		ui_kit::tooltip("Its bake state is made once, in the background: strokes go on meanwhile, their bake after it.");
 	} else if (view.documents.baking == heights->path()) {
 		ImGui::Text("Baking %s...", name.c_str());
+		ui_kit::tooltip(bakes);
 	} else if (const size_t due = heights->heights().unbaked.size()) {
-		ImGui::TextWrapped("%zu %s for the bake (it starts as the stroke ends).", due,
-		                   due == 1 ? "region waits" : "regions wait");
+		ui_kit::clipped_text(std::to_string(due) + (due == 1 ? " region waits" : " regions wait") + " for the bake.",
+		                     "It starts as the stroke ends. " + bakes);
 	} else if (heights->heights().baked) {
-		ImGui::TextDisabled("%s baked: every tile as TrnGen's bake makes it of these heights.", name.c_str());
+		ui_kit::quiet_text(name + " baked.", "Every tile as TrnGen's bake makes it of these heights. " + bakes);
 	} else {
-		ImGui::TextDisabled("Not baked yet: the import's terrain stands until the first stroke's bake.");
+		ui_kit::quiet_text("Not baked yet.", "The import's terrain stands until the first stroke's bake. " + bakes);
 	}
-	ui_kit::tooltip("A stroke's bake remakes only the tiles it reached; Save, Play and Build wait for it.");
 }
 
 } // namespace opennova::editor
