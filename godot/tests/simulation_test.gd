@@ -102,6 +102,14 @@ func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
 	return db
 
 
+# The weapon walk pumps only a pool-0 row whose ItemTypeIndex is set, the local
+# player's included, so a default mission's body needs its items.def row before
+# its weapon runs (D-NET-NEW-L7-6) [orig: WeaponAction_ProcessAllEntities
+# @0x542690 (the ItemTypeIndex test @0x5426B9)].
+func _resolve_player_row(sim: Simulation) -> void:
+	sim.resolve_item_traits(_item_db_from_text(_native_fixture_dir(), ""))
+
+
 # Rename one 16-byte USRP name field in raw .3di bytes (whole-name match) —
 # the same byte-patch technique the KZ husk test uses — so a committed model
 # can stand in for any retail seat prefix without another binary fixture.
@@ -858,6 +866,7 @@ func _aim_verdict_sim(flags: int) -> Simulation:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def_1 := WeaponDef.new()
 	def_1.name = "WPN_AIM_VERDICT"
 	def_1.set_actions([
@@ -1297,6 +1306,7 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_RING"
 	def.animadm = "ring.adm"
@@ -1364,6 +1374,7 @@ func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_EVENT_BATCH"
 	# The clip lengths below stand in for this ANIMADM's rings; a def with no
@@ -1441,6 +1452,7 @@ func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_SCOPE_BATCH"
 	def.set_actions([
@@ -1568,6 +1580,7 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def_5 := WeaponDef.new()
 	def_5.name = "WPN_SCOPE_RELOAD"
 	def_5.set_actions([
@@ -1602,6 +1615,7 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_EVENT_LIFECYCLE"
 	def.set_actions([WeaponActionRow.make("idle", 0, 0, "anim_wpn_idle")])
@@ -1653,6 +1667,7 @@ func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_RESTART_POWERTHROW"
 	def.set_actions([
@@ -4191,6 +4206,7 @@ func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -4737,6 +4753,7 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -4781,6 +4798,7 @@ func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	_resolve_player_row(sim)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -4815,6 +4833,7 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	_resolve_player_row(sim)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)

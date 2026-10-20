@@ -44,6 +44,12 @@ func before_each() -> void:
 	assert_eq(_sim.load_ammo_table(_root, "ammo.def"), OK)
 	_db = WeaponDatabase.new()
 	assert_eq(_db.load_from_resource_root(_root, "weapon.def"), OK)
+	# The weapon walk pumps only a pool-0 row whose ItemTypeIndex is set, the local
+	# player's included: the body takes its items.def row (D-NET-NEW-L7-6)
+	# [orig: WeaponAction_ProcessAllEntities @0x542690 (@0x5426B9)].
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
+	_sim.resolve_item_traits(item_db)
 
 
 func after_each() -> void:
