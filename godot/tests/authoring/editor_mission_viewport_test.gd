@@ -345,13 +345,18 @@ func test_the_mission_builds_over_frames() -> void:
 
 
 ## The scale witness: the shipped mission with the most entities (ASH_I1gA.bms, 2,193 entities,
-## the retail leg's measurement) stands as the minted mission grown to that count on the Tmap
-## project, built over the Shell's frames at a budget of 0 (one unit a frame) to `ready`: the units
-## in the build's order, the terrain built, every entity drawn placed (one placement, none lifted or
-## hidden). Prints what the build cost on the frames (frames, frame_us, unit_us, total_us), each
-## label's units and time, and the three longest units: the measurement the first-picture budget
-## and the stepped placement (D5) are read against.
+## the retail leg's measurement) stands as the minted mission grown to that count. It is packed with
+## its closure (the Tmap terrain and its textures, the environment, the item table, the models)
+## into a game install minted as PFF archives, imported with its dependencies into a new project
+## on that install (the flow's end-to-end import: apply_project_settings' game_install,
+## preview_install_import, import_files), opened, and its picture built over the Shell's frames
+## at a budget of 0 (one unit a frame) to `ready`: the units in the build's order, the terrain
+## built, every entity drawn placed (one placement, none lifted or hidden). Prints what the import
+## and the build cost (frames, frame_us, unit_us, total_us), each label's units and time, and the
+## three longest units: the measurement the first-picture budget and the stepped placement (D5)
+## are read against.
 const LARGEST_MISSION_ENTITIES := 2193
+const LARGEST_MISSION := "synth_large.bms"
 ## How long the picture's build may stand still (no unit run) before it counts as a hang: the build
 ## takes as long as it takes while it moves.
 const BUILD_STALL_MS := 120000
@@ -384,19 +389,72 @@ func _grow_mission(path: String, count: int) -> void:
 	assert_eq(m.save_as(path), OK)
 
 
+## A game install holding the grown mission's closure: the Tmap mission's files as
+## EditorFixture.mint_tmap_mission writes them for a project (into a scratch folder), the mission
+## grown and renamed LARGEST_MISSION, packed flat into the boot table's archives as retail places
+## them (the mission and the defs in localres.pff, the rest in resource.pff; language.pff empty).
+func _mint_install(name: String) -> String:
+	var source := OS.get_cache_dir().path_join("opennova editor %s source %d" % [name, Time.get_ticks_usec()])
+	var install := OS.get_cache_dir().path_join("opennova editor %s install %d" % [name, Time.get_ticks_usec()])
+	_dirs.append(source)
+	_dirs.append(install)
+	assert_eq(DirAccess.make_dir_recursive_absolute(install), OK)
+	var options := _picture_files()
+	options["small"] = true
+	EditorFixture.mint_tmap_mission(self, _seam, source, options)
+	_grow_mission(source.path_join(EditorFixture.MISSION), LARGEST_MISSION_ENTITIES)
+	var localres: Array = []
+	var resource: Array = []
+	for folder in DirAccess.get_directories_at(source):
+		for file_name in DirAccess.get_files_at(source.path_join(folder)):
+			var bytes := FileAccess.get_file_as_bytes(source.path_join(folder).path_join(file_name))
+			# A PFF entry holds bytes: the project's empty overcast.def has no archived twin.
+			if bytes.is_empty():
+				continue
+			var entry_name := LARGEST_MISSION if file_name == EditorFixture.MISSION.get_file() else file_name
+			var entry := {"name": entry_name, "bytes": bytes}
+			if entry_name.get_extension().to_lower() in ["bms", "def"]:
+				localres.append(entry)
+			else:
+				resource.append(entry)
+	WorldFixture.write_pff(self, install.path_join("localres.pff"), localres)
+	WorldFixture.write_pff(self, install.path_join("resource.pff"), resource)
+	WorldFixture.write_pff(self, install.path_join("language.pff"), [])
+	return install
+
+
+## A request served and its operation settled (the seam's request settles it for as long as it
+## moves): whether it was done.
+func _served(fields: Dictionary) -> bool:
+	var answer: Dictionary = _seam.request(fields)
+	var done := bool(answer.get("outcome", {}).get("done", false))
+	assert_true(done, "%s: %s" % [String(fields.get("kind", "")), str(answer).left(400)])
+	return done and bool(_seam.settled)
+
+
 func test_the_largest_mission_builds() -> void:
 	if _app == null:
 		return
-	var root := EditorFixture.new_project(self, _seam, _dirs, "Largest Mission")
-	EditorFixture.mint_tmap_mission(self, _seam, root, _picture_files())
-	_grow_mission(root.path_join(EditorFixture.MISSION), LARGEST_MISSION_ENTITIES)
-	_seam.request({"kind": "rescan"})
-	assert_true(_seam.settled, "a Rescan steps across pumps (S13 A3)")
+	# A bare new project, as the import flow makes one: what it lacks (the item table, the models
+	# its items draw) the install serves as its base game.
+	var project := OS.get_cache_dir().path_join("opennova editor largest mission %d" % Time.get_ticks_usec())
+	_dirs.append(project)
+	assert_true(_seam.new_project(project, "Largest Mission"))
+	var install := _mint_install("largest mission")
+	assert_true(_served({"kind": "apply_project_settings", "settings": {"game_install": install, "mission": true}}))
+	var started := Time.get_ticks_msec()
+	assert_true(_served({"kind": "preview_install_import", "names": [LARGEST_MISSION], "with_dependencies": true}))
+	var plan: Dictionary = _seam.query("import_preview", {"limit": 1})
+	assert_gt(int(plan.get("count", 0)), 0, "the closure planned: %s" % str(plan).left(400))
+	assert_true(_served({"kind": "import_files", "planned": true, "plan": int(plan.get("plan", 0))}))
+	gut.p("%s's closure: %d files, %.1f MB, imported in %.1f s" % [LARGEST_MISSION, int(plan.get("count", 0)),
+			float(plan.get("total_bytes", 0)) / 1e6, float(Time.get_ticks_msec() - started) / 1000.0])
 
 	_app.build_budget_ms = 0
-	assert_true(_seam.open_document(EditorFixture.MISSION), "the grown mission opens")
+	# The import files a mission under the project's missions/ folder.
+	assert_true(_seam.open_document("missions/" + LARGEST_MISSION), "%s opens" % LARGEST_MISSION)
 	var path := String(_seam.state(["documents"]).get("documents", {}).get("active", ""))
-	assert_true(path.to_lower().ends_with("synth_logic.bms"), path)
+	assert_true(path.to_lower().ends_with(LARGEST_MISSION), path)
 	_app.pump()
 	var state := _state(path)
 	assert_eq(String(state.get("status", "")), "loading", str(state).left(400))
