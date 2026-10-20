@@ -126,7 +126,7 @@ struct HostFixture {
 			conn.assigned_team = static_cast<uint8_t>(first_team + (i % 2));
 			conn.assigned_team_valid = true;
 			conn.slot_state = inmatch::PlayerSlotState::Joined; // in game (state 6)
-			(void)inmatch::Server_RerollPlayerTickSeed(conn);
+			(void)inmatch::Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock);
 			ctx.np_protocol.connection_list.push_back(std::move(conn));
 		}
 	}

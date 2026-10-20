@@ -575,7 +575,7 @@ bool HostRole::local_fire_admitted() const {
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.link.owned_entity != kernel.world.cached.local_player) continue;
 		return Server_AcceptsPlayerFireTick(conn, state.client_runtime->current_tick(),
-				kernel.world.logic_tick, ctx.config.effective_send_holdoff_ticks());
+				kernel.world.out.rounds.frame_clock, ctx.config.effective_send_holdoff_ticks());
 	}
 	return true;
 }

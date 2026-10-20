@@ -33,13 +33,14 @@ inline opennova::inmatch::NapiNPConnection make_conn(uint32_t id, int type,
 }
 
 // make_conn, with a spawned connection's tick seed re-rolled the way join and
-// deployment arm it (Server_RerollPlayerTickSeed).
+// deployment arm it (Server_RerollPlayerTickSeed), at a session's first server
+// frame clock, 1 (world::RoundRing::frame_clock's start).
 inline opennova::inmatch::NapiNPConnection make_seeded_conn(uint32_t id, int type,
                                                 opennova::replication::ISessionTransport *t,
                                                 opennova::replication::TransportMode mode,
                                                 opennova::world::EntityHandle owned, bool spawned) {
 	opennova::inmatch::NapiNPConnection c = make_conn(id, type, t, mode, owned, spawned);
-	if (spawned) (void)opennova::inmatch::Server_RerollPlayerTickSeed(c);
+	if (spawned) (void)opennova::inmatch::Server_RerollPlayerTickSeed(c, 1u);
 	return c;
 }
 

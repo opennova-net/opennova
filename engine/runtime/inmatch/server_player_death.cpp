@@ -404,7 +404,7 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 				is_in_match(*victim_connection) &&
 				victim_connection->link.transport != nullptr) {
 			send_entity_update_message(ctx, *victim_connection, s2c::TICK_SEED,
-					Server_DisarmPlayerTickSeed(*victim_connection, world.logic_tick));
+					Server_DisarmPlayerTickSeed(*victim_connection, world.out.rounds.frame_clock));
 		}
 
 		// Then target the victim with the fixed-point position used by the
@@ -490,14 +490,18 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 
 	if (victim_connection != nullptr) {
 		// Every player slot gets the same two whole-second counters. A
-		// configured timeout below three is floored; a spawn less than 620
-		// authority ticks ago forces exactly three. +364 retains the greater
-		// value only when a spawn-target registry exists.
-		// [orig: GameEvent_PlayerDeath @0x516ec4..0x516eeb]
+		// configured timeout below three is floored; a death less than 620
+		// server frames after the slot's last seed arm (its join, deploy or
+		// revive) forces exactly three: the frame clock less the arm's stamp,
+		// a signed compare, with no validity flag (a fresh row's stamp is 0).
+		// +364 retains the greater value only when a spawn-target registry exists.
+		// [orig: GameEvent_PlayerDeath @0x516E9F..0x516EB4 (`mov eax,
+		//  g_ServerFrameClock` @0x516E9F, `sub eax, [edi+178C8h]` @0x516EA4, `cmp eax,
+		//  26Ch; jl` @0x516EAF..0x516EB4), the stores @0x516EBE..0x516EEB]
 		replication::Connection &link = victim_connection->link;
 		uint32_t hold = std::max(ctx.config.respawn_timeout, 3u);
-		if (link.last_deploy_tick_valid &&
-				static_cast<uint32_t>(world.logic_tick - link.last_deploy_tick) < 620u)
+		if (static_cast<int32_t>(world.out.rounds.frame_clock -
+				victim_connection->seed_armed_clock) < 620)
 			hold = 3;
 		link.respawn_delay_seconds = hold;
 		link.spawn_target_hold_seconds = world.zones.has_spawn_zone()

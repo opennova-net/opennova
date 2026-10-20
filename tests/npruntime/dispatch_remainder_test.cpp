@@ -88,7 +88,7 @@ void test_keepalive_high_water() {
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.np_protocol.connection_list.push_back(slot(1, "Alpha", "", nullptr));
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
-	(void)inmatch::Server_RerollPlayerTickSeed(conn);
+	(void)inmatch::Server_RerollPlayerTickSeed(conn, 1u);
 	const uint32_t seed = conn.tick_seed;
 	expect(conn.keepalive_ack_high_water == seed, "the roll sets the high-water to the seed (@0x5101DD)");
 	expect(dispatch(ctx, 0, c2s::KEEPALIVE, u32_body(seed - 1)).empty(), "the 0x34 draws no reply");

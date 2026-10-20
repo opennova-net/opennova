@@ -848,16 +848,17 @@ int main() {
 			CHECK(!role.local_fire_admitted());
 			own->fire_tick_floor = floor;
 			// A disarm: the grace admits, then refuses past three periods.
-			(void)inmatch::Server_DisarmPlayerTickSeed(*own, kernel.world.logic_tick);
+			// The grace runs on the server frame clock.
+			(void)inmatch::Server_DisarmPlayerTickSeed(*own, kernel.world.out.rounds.frame_clock);
 			CHECK(role.local_fire_admitted());
 			const uint32_t holdoff = host.host_owner.ctx.config.effective_send_holdoff_ticks();
-			kernel.world.logic_tick += 3 * holdoff;
+			kernel.world.out.rounds.frame_clock += 3 * holdoff;
 			CHECK(!role.local_fire_admitted());
 			role.run_tick(tick_input(0));
 			CHECK(!kernel.local.authority_fire_admitted);
 			// A re-arm admits again; the disarm's zero seed then parks the
 			// host client's clock and refuses.
-			(void)inmatch::Server_RerollPlayerTickSeed(*own);
+			(void)inmatch::Server_RerollPlayerTickSeed(*own, kernel.world.out.rounds.frame_clock);
 			own->fire_tick_floor = 1;
 			CHECK(role.local_fire_admitted());
 			host.host_loop.host_send(s2c::TICK_SEED, {0, 0, 0, 0});

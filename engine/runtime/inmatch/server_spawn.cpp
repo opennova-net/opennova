@@ -537,8 +537,6 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	world.registry.get(h)->ammo_damage_class.assign(conn.ammo_damage_classes.begin(),
 			conn.ammo_damage_classes.end());
 	conn.link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
-	conn.link.last_deploy_tick = world.logic_tick;
-	conn.link.last_deploy_tick_valid = true;
 	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 binds the newly allocated
 	// player row into the recipient slot used by Server_SendEntityStateToPlayer]
 

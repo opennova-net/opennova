@@ -291,7 +291,8 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 		// state. The client pulls 0x56 independently, so no board chunk is pushed.
 		// [orig: Server_ProcessRoundEnd @0x516790..0x51685E]
 		conn.link.transport->host_send(
-				s2c::TICK_SEED, Server_DisarmPlayerTickSeed(conn, world.logic_tick));
+				s2c::TICK_SEED,
+				Server_DisarmPlayerTickSeed(conn, world.out.rounds.frame_clock)); // [orig: @0x516746]
 		conn.link.transport->host_send(
 				s2c::END_ROUND_HEADER,
 				encode_end_round_header(
@@ -375,12 +376,13 @@ void clear_priority_target_marks(world::World &world) {
 } // namespace
 
 std::vector<uint8_t> Server_RerollPlayerTickSeed(
-		NapiNPConnection &connection) {
+		NapiNPConnection &connection, uint32_t frame_clock) {
+	connection.seed_armed_clock = frame_clock; // [orig: @0x5101A9 / @0x5101B3]
 	connection.tick_seed =
 			((make_random_session_u32() & 0xFEu) + 1u) << 16;
 	connection.fire_tick_floor = connection.tick_seed;
 	connection.keepalive_ack_high_water = connection.tick_seed; // [orig: @0x5101DD]
-	connection.fire_disarmed_at = 0;
+	connection.fire_disarmed_at = 0; // [orig: @0x5101B9]
 	connection.fire_tick_mode = true;
 	std::vector<uint8_t> body;
 	body.reserve(4);
@@ -388,12 +390,12 @@ std::vector<uint8_t> Server_RerollPlayerTickSeed(
 	return body;
 }
 
-// The enable==0 arm: clear the slot's seed/freshness stamp and ship the
-// four-zero 0x61. [orig: Server_SendRandomSeedToPlayer @0x5101A0,
-// enable==0 arm @0x510237..0x510278]
+// The enable==0 arm: stamp the frame clock as the fire grace's start, clear
+// the slot's seed and ship the four-zero 0x61. [orig: Server_SendRandomSeedToPlayer
+// @0x5101A0, enable==0 arm @0x51022A..0x510278 (the clock @0x51022A, +0x178CC @0x510237)]
 std::vector<uint8_t> Server_DisarmPlayerTickSeed(
-		NapiNPConnection &connection, uint32_t host_tick) {
-	connection.fire_disarmed_at = host_tick;
+		NapiNPConnection &connection, uint32_t frame_clock) {
+	connection.fire_disarmed_at = frame_clock;
 	connection.fire_tick_mode = false;
 	connection.tick_seed = 0;
 	connection.keepalive_ack_high_water = 0; // [orig: @0x510244]
@@ -401,17 +403,20 @@ std::vector<uint8_t> Server_DisarmPlayerTickSeed(
 }
 
 // The comparisons are signed x86 compares, including wrap at bit 31. A
-// zero client tick never passes, even during the death/round-end grace.
-// [orig: PlayerSlot_IsActive @0x4FC760]
+// zero client tick never passes, even during the death/round-end grace,
+// which runs on the server frame clock: accepted while the clock is below
+// the disarm's stamp plus three send holdoffs.
+// [orig: PlayerSlot_IsActive @0x4FC760 (+0x178CC @0x4FC779..0x4FC781, the
+//  deadline @0x4FC783..0x4FC78C, `cmp g_ServerFrameClock, eax; jl` @0x4FC78E..0x4FC794)]
 bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
-		uint32_t client_tick, uint32_t host_tick, uint32_t send_holdoff_ticks) {
+		uint32_t client_tick, uint32_t frame_clock, uint32_t send_holdoff_ticks) {
 	if (client_tick == 0) return false;
 	if (connection.fire_tick_mode)
 		return connection.fire_tick_floor != 0 &&
 				static_cast<int32_t>(client_tick) > static_cast<int32_t>(connection.fire_tick_floor);
 	const uint32_t deadline = connection.fire_disarmed_at + 3u * send_holdoff_ticks;
 	return connection.fire_disarmed_at != 0 &&
-			static_cast<int32_t>(host_tick) < static_cast<int32_t>(deadline);
+			static_cast<int32_t>(frame_clock) < static_cast<int32_t>(deadline);
 }
 
 // The records the entity update produces, routed at the head of the next

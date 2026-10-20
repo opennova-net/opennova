@@ -29,21 +29,27 @@ bool Server_StageHostPunt(
 
 // Re-roll one player's retained fire-freshness/tick anchor and return its
 // exact 4-byte S2C 0x61 body. Join, revive, and deployment call this one
-// transaction so the connection field and wire value cannot diverge.
-// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==1 arm]
+// transaction so the connection field and wire value cannot diverge. The arm
+// stamps the server frame clock (world.out.rounds.frame_clock), which the
+// death's 620-frame recent-spawn test reads.
+// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==1 arm: the clock
+//  @0x5101A9, +0x178C8 @0x5101B3, +0x178CC = 0 @0x5101B9]
 std::vector<uint8_t> Server_RerollPlayerTickSeed(
-		NapiNPConnection &connection);
+		NapiNPConnection &connection, uint32_t frame_clock);
 
-// The disarm twin: zero the retained anchor and return the four-zero 0x61
-// body. Death and round-end call this arm; the zero seed freezes the
-// client's network-role tick until the next re-arm.
-// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237]
+// The disarm twin: zero the retained anchor, stamp the server frame clock as
+// the fire grace's start and return the four-zero 0x61 body. Death and
+// round-end call this arm; the zero seed freezes the client's network-role
+// tick until the next re-arm.
+// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm: the clock
+//  @0x51022A, +0x178CC @0x510237]
 std::vector<uint8_t> Server_DisarmPlayerTickSeed(
-		NapiNPConnection &connection, uint32_t host_tick);
+		NapiNPConnection &connection, uint32_t frame_clock);
 
-// [orig: PlayerSlot_IsActive @0x4FC760]
+// The disarmed grace reads the server frame clock against the disarm's stamp.
+// [orig: PlayerSlot_IsActive @0x4FC760 (`cmp g_ServerFrameClock` @0x4FC78E)]
 bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
-		uint32_t client_tick, uint32_t host_tick, uint32_t send_holdoff_ticks);
+		uint32_t client_tick, uint32_t frame_clock, uint32_t send_holdoff_ticks);
 
 // The previous entity update's records, routed onto the connections (server_tick.cpp): the
 // placed devices, the deaths and their staged sends, the medic interactions, the powerup

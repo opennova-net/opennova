@@ -164,8 +164,7 @@ int main() {
 		roster[i].assigned_team_valid = true;
 		roster[i].reply.player_slot = static_cast<uint8_t>(i);
 		roster[i].admission_stage = inmatch::GameAdmissionStage::Complete;
-		roster[i].link.last_deploy_tick = world.logic_tick;
-		roster[i].link.last_deploy_tick_valid = true;
+		roster[i].seed_armed_clock = world.out.rounds.frame_clock;
 	}
 
 	// --- The predicate itself: in-match + team byte + Medic class, nothing else.

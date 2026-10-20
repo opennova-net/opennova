@@ -1814,12 +1814,10 @@ int main() {
 	// C2S 0x22 slot pull below address players by this index.
 	for (size_t i = 0; i < roster.size(); ++i)
 		roster[i].reply.player_slot = static_cast<uint8_t>(i);
-	// These fixture players predate the measured 620-tick recent-spawn window.
-	// Individual sub-cases below stamp a fresh deploy when they exercise that arm.
-	for (inmatch::NapiNPConnection &conn : roster) {
-		conn.link.last_deploy_tick = world.logic_tick - 620u;
-		conn.link.last_deploy_tick_valid = true;
-	}
+	// These fixture players' seed arms predate the 620-frame recent-spawn window.
+	// Individual sub-cases below stamp a fresh arm when they exercise that arm.
+	for (inmatch::NapiNPConnection &conn : roster)
+		conn.seed_armed_clock = world.out.rounds.frame_clock - 620u;
 	// Only the shooter is a Medic. Retail's send mask 0x580 is the conjunction of
 	// slot state 6/7 (in-match) + same team byte + the charattr Medic bit — no
 	// entity health/dead test [orig:
@@ -2393,7 +2391,7 @@ int main() {
 	const std::vector<ProtocolMessage> client_release = request_client_respawn();
 	if (!expect(client_release.size() >= 2 &&
 	                    world.registry.get(hc)->health == 150 &&
-	                    roster[2].link.last_deploy_tick == world.logic_tick &&
+	                    roster[2].seed_armed_clock == world.out.rounds.frame_clock &&
 	                    roster[2].link.downed_revive_seconds == 0,
 	            "the first post-expiry pick runs the shared deployment release"))
 		return 1;
@@ -2408,8 +2406,7 @@ int main() {
 	// lane before the separate host-player kill scenario below; the focused
 	// projectile_combat test pins corpse interception itself.
 	world.registry.get(hc)->position.y = 20.0f;
-	roster[0].link.last_deploy_tick = world.logic_tick;
-	roster[0].link.last_deploy_tick_valid = true;
+	roster[0].seed_armed_clock = world.out.rounds.frame_clock;
 	drain_all(udp_b);
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,

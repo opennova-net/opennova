@@ -226,15 +226,6 @@ struct Connection {
 	// [orig: playerSlot+460 in Server_UpdatePlayerBreathTimers @0x50D770;
 	// GameEvent_PlayerDeath @0x5172EC..0x51732A]
 	uint32_t underwater_breath_samples = 0;
-
-	// The authority tick of the last completed deployment. Validity is explicit
-	// because tick zero is a real stamp and unsigned subtraction preserves the
-	// original counter's wrap behavior. A death within 620 ticks forces the
-	// +360/+364 hold to three seconds even when the configured timeout is larger.
-	// [orig: playerSlot+96456 read @0x516edc; deployment stamp in the
-	// Server_DeployPlayer path @0x517740]
-	uint32_t last_deploy_tick = 0;
-	bool last_deploy_tick_valid = false;
 };
 
 } // namespace opennova::replication

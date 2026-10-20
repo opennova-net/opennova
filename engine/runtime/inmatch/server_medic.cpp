@@ -125,7 +125,7 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 	if (is_in_match(*victim_connection) && victim_connection->link.transport != nullptr) {
 		send_entity_update_message(ctx, *victim_connection, s2c::MEDIC_REVIVING, {});
 		send_entity_update_message(ctx, *victim_connection, s2c::TICK_SEED,
-				Server_RerollPlayerTickSeed(*victim_connection));
+				Server_RerollPlayerTickSeed(*victim_connection, world.out.rounds.frame_clock));
 	}
 	// 0x1E event 38 only when the healer slot's hide bytes +97536/+97537 are
 	// clear (+97536 tracks the spectator latch +100567, +97537 is never set)

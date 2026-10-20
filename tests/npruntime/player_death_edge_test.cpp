@@ -21,6 +21,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_player_death.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/udp_session_transport.h>
@@ -567,9 +568,40 @@ void test_a_previous_frames_revive_stands_under_the_0x41() {
 	CHECK(Fixture::first(f.drain(1), s2c::MEDIC_REVIVING) >= 0); // the revive's 0x3A
 }
 
+// The seed arm and its readers run on the server frame clock: the arm stamps it
+// (+0x178C8), the death's recent-spawn test reads the clock less that stamp,
+// signed, against 620, and the death's disarm stamps the clock as the fire
+// grace's start (+0x178CC). A death 619 frames after the arm forces the
+// 3-second hold, 620 frames after takes the configured timeout. The frame clock
+// trails the logic tick by one here, so a logic-tick reader would read 620 at
+// the first death. [orig: Server_SendRandomSeedToPlayer @0x5101A9 / @0x5101B3,
+// the disarm @0x51022A / @0x510237; GameEvent_PlayerDeath @0x516E9F..0x516EB4,
+// the timeout's floor @0x516EB6..0x516EC6, the disarm call @0x516EF4]
+void test_the_recent_spawn_hold_reads_the_arm_on_the_frame_clock() {
+	Fixture f;
+	f.ctx.config.respawn_timeout = 9;
+	(void)inmatch::Server_RerollPlayerTickSeed(f.conn(0), 1000u);
+	(void)inmatch::Server_RerollPlayerTickSeed(f.conn(1), 999u);
+	CHECK(f.conn(0).seed_armed_clock == 1000u && f.conn(0).fire_disarmed_at == 0u);
+	f.world.out.rounds.frame_clock = 1619u;
+	f.world.logic_tick = 1620u;
+	for (size_t i = 0; i < 2; ++i) {
+		f.entity(i).health = 0;
+		w::RoundDeath d;
+		d.victim = f.players[i];
+		d.victim_handle = f.players[i].packed;
+		inmatch::Server_ProcessPlayerDeath(f.ctx, f.world, d);
+	}
+	CHECK(f.conn(0).link.respawn_delay_seconds == 3u); // 619 frames: the recent-spawn hold
+	CHECK(f.conn(1).link.respawn_delay_seconds == 9u); // 620 frames: the timeout
+	CHECK(f.conn(0).fire_disarmed_at == 1619u && f.conn(1).fire_disarmed_at == 1619u);
+	CHECK(f.conn(0).seed_armed_clock == 1000u); // the disarm leaves the arm's stamp
+}
+
 } // namespace
 
 int main() {
+	test_the_recent_spawn_hold_reads_the_arm_on_the_frame_clock();
 	test_health_write_dies_in_its_frames_entity_update();
 	test_raise_ahead_of_the_walk_cancels_it();
 	test_two_bodies_die_in_slot_order();

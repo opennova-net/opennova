@@ -201,8 +201,6 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
 	conn.reply.capture_nag_held = false;
 	conn.link.armory_reuse_seconds = 0;
-	conn.link.last_deploy_tick = world.logic_tick;
-	conn.link.last_deploy_tick_valid = true;
 	// The leg stores nothing to the hide bit: the slot's next 0x0A clears it and
 	// re-sets a spectator's or a held slot's, so a held body stays hidden, and
 	// out of that tick's humans count, until then (Server_SendEntityStateToPlayer)
@@ -223,7 +221,8 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: @0x5178F2, under the @0x5178C5 test and is_in_session @0x5178E9 / @0x5178EF].
 	if (!revive_deploy && world.rules.mp_session)
 		replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, &world)));
-	replies.push_back(make_protocol_message(0x61, Server_RerollPlayerTickSeed(conn)));
+	replies.push_back(make_protocol_message(0x61,
+			Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock)));
 	// The slot team's frontier (D-NET-583) [orig: @0x5179BA, the call @0x5179D9]
 	const uint8_t frontier = world.zones.frontier_zone(conn.assigned_team);
 	if (frontier != 0)

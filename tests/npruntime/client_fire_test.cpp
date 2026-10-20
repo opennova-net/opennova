@@ -406,7 +406,7 @@ bool check_retail_fire_admission() {
     };
     send(100);
     if (!expect(world.out.rounds.count == 0, "unseeded host player cannot fire")) return false;
-    (void)inmatch::Server_RerollPlayerTickSeed(conn);
+    (void)inmatch::Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock);
     const uint32_t seed = conn.tick_seed;
     send(0);
     send(seed);
@@ -432,16 +432,24 @@ bool check_retail_fire_admission() {
     if (!expect(world.out.rounds.count == 4, "rejects preserve the clock and alt shots stamp only their tick")) return false;
     if (!expect(conn.weapon_slots[uint16_t(3 * 65 + 2)].clip == 18,
             "only the two accepted primary shots consume cartridges")) return false;
+    // The grace reads the server frame clock (g_ServerFrameClock), not the logic
+    // tick: the frame clock trails the logic tick by one here, so a logic-tick
+    // reader would refuse the second shot. [orig: PlayerSlot_IsActive
+    // `cmp g_ServerFrameClock, eax; jl` @0x4FC78E..0x4FC794; the disarm's stamp
+    // Server_SendRandomSeedToPlayer @0x51022A / @0x510237]
     (void)inmatch::Server_DisarmPlayerTickSeed(conn, 100);
-    world.logic_tick = 100;
+    world.out.rounds.frame_clock = 100;
+    world.logic_tick = 101;
     send(seed + 23, 1);
-    world.logic_tick = 102;
+    world.out.rounds.frame_clock = 102;
+    world.logic_tick = 103;
     send(seed + 23, 1); // the grace arm checks host time, not monotonic packet time
-    world.logic_tick = 103; // default SP send period 1, strict 3-period boundary
+    world.out.rounds.frame_clock = 103; // default SP send period 1, strict 3-period boundary
+    world.logic_tick = 104;
     send(seed + 23, 1);
     if (!expect(world.out.rounds.count == 6,
             "disarmed player accepts in-flight shots only before the three-period deadline")) return false;
-    (void)inmatch::Server_RerollPlayerTickSeed(conn);
+    (void)inmatch::Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock);
     send(conn.tick_seed);
     return expect(world.out.rounds.count == 6,
             "re-deployment resets freshness to the newly advertised seed");

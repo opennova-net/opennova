@@ -48,7 +48,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		return;
 	world::Entity *shooter = world->registry.get(conn.link.owned_entity);
 	if (shooter == nullptr) return;
-	if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->logic_tick,
+	if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->out.rounds.frame_clock,
 			config.effective_send_holdoff_ticks())) return;
 
 	if (((shooter->flags | shooter->engine_flags) & 0x102u) == 0x102u) return;

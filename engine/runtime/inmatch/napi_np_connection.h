@@ -480,7 +480,15 @@ struct NapiNPConnection {
 	// accepted shot; disarming retains it and opens the short receive grace.
 	// [orig: PlayerSlot_IsActive @0x4FC760; Server_SendRandomSeedToPlayer @0x5101A0]
 	uint32_t fire_tick_floor = 0;     // playerSlot+96472
-	uint32_t fire_disarmed_at = 0;   // playerSlot+96460 (host logic tick)
+	// The server frame clock (world.out.rounds.frame_clock, g_ServerFrameClock) at the
+	// last disarm; the arm zeroes it. [orig: Server_SendRandomSeedToPlayer @0x51022A /
+	//  @0x510237, the arm's zero @0x5101B9; Server_ProcessRoundEnd @0x516746 / @0x516753]
+	uint32_t fire_disarmed_at = 0;   // playerSlot+96460
+	// The server frame clock at the last arm (join, deploy, revive): the death's 620-frame
+	// recent-spawn test reads it. Its only writer is the arm; a fresh row's 0 stands until
+	// the first one. [orig: Server_SendRandomSeedToPlayer @0x5101A9 / @0x5101B3;
+	//  GameEvent_PlayerDeath @0x516E9F..0x516EB4]
+	uint32_t seed_armed_clock = 0;   // playerSlot+96456
 	bool fire_tick_mode = false;    // playerSlot+96480
 	// The C2S 0x34 keepalive's high-water: the seed's roll sets it to the seed, the
 	// disarm and the round end clear it, and the 0x34 handler raises it; no other

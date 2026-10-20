@@ -344,7 +344,7 @@ void test_a_convert_then_a_team_change_changes_nothing() {
 void test_reset_deploy_reset_in_one_pump_dies_once() {
 	Fixture f;
 	f.ctx.config.respawn_timeout = 0;
-	f.conn(0).link.last_deploy_tick_valid = false;
+	f.conn(0).seed_armed_clock = 0xDEADu; // a deploy's re-arm would restamp it
 	(void)f.deaths_of(0);
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &f.ctx;
@@ -354,7 +354,7 @@ void test_reset_deploy_reset_in_one_pump_dies_once() {
 			 make_protocol_message(c2s::DEATH_TIMEOUT_RESET, {})},
 			100, f.ctx.np_protocol.connection_list, &f.world, inputs);
 	CHECK(f.world.round_sim.deaths.empty());
-	CHECK(!f.conn(0).link.last_deploy_tick_valid); // the 0x0E deployed nothing
+	CHECK(f.conn(0).seed_armed_clock == 0xDEADu); // the 0x0E deployed nothing
 	inmatch::Server_TickUpdate(f.ctx);
 	inmatch::Server_TickUpdate(f.ctx);
 	CHECK(f.deaths_of(0) == 1);
@@ -375,6 +375,8 @@ void test_reset_deploy_reset_in_one_pump_dies_once() {
 void test_the_0x41s_frame_fans_the_body_undead() {
 	Fixture f;
 	f.ctx.config.respawn_timeout = 5;
+	// The slot's seed arm predates the death's 620-frame recent-spawn window.
+	f.conn(0).seed_armed_clock = f.world.out.rounds.frame_clock - 620u;
 	inmatch::Server_TickUpdate(f.ctx); // the first frame's periodic second
 	(void)f.sent_death(1);
 	(void)f.sent_death(0);

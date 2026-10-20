@@ -880,7 +880,8 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// player's freshness floor. Never the session constant.
 	// [orig: Server_SendRandomSeedToPlayer @0x5101a0 - value @0x5101d4
 	//  ((rand() & 0xFE) + 1) << 16; join sender @0x51a982]
-	out.push_back(InitialStateMessage{0x61, Server_RerollPlayerTickSeed(conn)});
+	out.push_back(InitialStateMessage{0x61,
+			Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock)});
 	// A cease fire in effect tells the joiner so: one reliable chat line, channel 0, sender
 	// slot 0xFF.
 	// [orig: Server_OnPlayerJoin @0x51A998..0x51A9F3 - `cmp g_InCeaseFire` @0x51A998, the text
@@ -904,7 +905,8 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	//  EndRoundScoreboard_SerializeHeader @0x5052a6]
 	if (world.match.outcome().ended) {
 		out.push_back(InitialStateMessage{
-				s2c::TICK_SEED, Server_DisarmPlayerTickSeed(conn, world.logic_tick)});
+				s2c::TICK_SEED,
+				Server_DisarmPlayerTickSeed(conn, world.out.rounds.frame_clock)});
 		const world::MatchResult &result = world.match.result();
 		const bool non_team_header =
 				world.rules.mp_session && (result.game_type & 0x10000u) == 0;
