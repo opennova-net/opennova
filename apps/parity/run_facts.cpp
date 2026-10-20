@@ -137,8 +137,27 @@ void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<Eviden
 		return;
 	std::sort(samples.begin(), samples.end());
 	const std::string label = dir == 'C' ? "C2S 0x0C" : "S2C 0x0A";
-	if (samples.front() > facts.info.steady_start_ns + kBoundaryToleranceNs ||
-			samples.back() + kBoundaryToleranceNs < facts.info.steady_end_ns)
+	// A dead joiner sends no uplink: retail's 0x0C build returns nothing for a body
+	// with no health or the dead flag. A C2S gap or window edge that a frame
+	// reporting the joiner's own health 0 falls in is that death, not a stall
+	// (window.dead_joiner_uplink).
+	static_assert(has_normalization("window.dead_joiner_uplink"));
+	auto dead_in = [&](uint64_t after, uint64_t until) {
+		if (dir != 'C')
+			return false;
+		for (const wire::ParityFrameState &frame : facts.trace.frames)
+			if (frame.decoded && frame.local_tail && frame.health == 0 && frame.ts_ns > after &&
+					frame.ts_ns <= until)
+				return true;
+		return false;
+	};
+	const bool start_missing =
+			samples.front() > facts.info.steady_start_ns + kBoundaryToleranceNs &&
+			!dead_in(facts.info.steady_start_ns - kBoundaryToleranceNs, samples.front());
+	const bool end_missing =
+			samples.back() + kBoundaryToleranceNs < facts.info.steady_end_ns &&
+			!dead_in(samples.back(), facts.info.steady_end_ns);
+	if (start_missing || end_missing)
 		out.push_back({ "STEADY_BOUNDARY_GAMEPLAY_MISSING",
 				label +
 						" decoded gameplay has no sample within 500 ms of a steady "
@@ -160,11 +179,12 @@ void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<Eviden
 	uint64_t widest = 0;
 	uint64_t previous = facts.info.steady_start_ns;
 	for (const uint64_t ts : samples) {
-		if (!(next_mission_ns > previous && next_mission_ns < ts))
+		if (!(next_mission_ns > previous && next_mission_ns < ts) && !dead_in(previous, ts))
 			widest = std::max(widest, ts - previous);
 		previous = ts;
 	}
-	widest = std::max(widest, facts.info.steady_end_ns - previous);
+	if (!dead_in(previous, facts.info.steady_end_ns))
+		widest = std::max(widest, facts.info.steady_end_ns - previous);
 	if (widest > kMaximumGameplayGapNs) {
 		char buf[160];
 		std::snprintf(buf, sizeof(buf), " decoded gameplay has a %.1f ms gap in the steady window",

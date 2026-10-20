@@ -81,9 +81,15 @@ std::string stable_body_key(char dir, uint16_t identity, const std::string &raw)
 std::string wire_key(char dir, const wire::ParityWireRecord &record) {
 	static_assert(has_normalization("group.S.0x0a.length"));
 	static_assert(has_normalization("group.fragment_length"));
+	static_assert(has_normalization("group.length_exempt"));
 	constexpr uint8_t kFragment = 0x04 | 0x02; // FRAG_CONT | FRAG_END (protocol_message.h)
+	constexpr uint8_t kLengthField = 0x40 | 0x20; // LEN16 | LEN8 (protocol_message.h)
+	const bool exempt = length_set_exempt(dir, record.full_tag);
 	char buf[64];
-	if (group_length_masked(dir, record.full_tag))
+	if (exempt)
+		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=*|skip=",
+				unsigned(record.raw_flags & ~kLengthField & 0xFFu));
+	else if (group_length_masked(dir, record.full_tag))
 		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=*|skip=", unsigned(record.raw_flags));
 	else if (record.raw_flags & kFragment)
 		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=frag|skip=", unsigned(record.raw_flags));

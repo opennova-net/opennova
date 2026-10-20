@@ -306,6 +306,12 @@ inline constexpr Normalization kNormalizations[] = {
 			"DispatchMessage @0x622570) is split at the packet's remaining room, so its length "
 			"is the records before it (a phase-bound 0x16 in front shortens it); the "
 			"reassembled message's length and body are judged on its event" },
+	{ "group.length_exempt", MaskKind::Field, '*', 0, "length and length-field size", 0,
+			"a length-exempt identity's record length (length.*) follows what its length "
+			"set leaves out, and the encoder sizes the length field from the payload length "
+			"(LEN8 0x20 below 256 bytes, else LEN16 0x40: NapiNPMessage_Create "
+			"@0x628304..0x62831B), so a grouping keys neither: c2's ASH last S2C 0x10 page is "
+			"290 B (0x40) on retail against 238 B (0x20) on ours, the residue's radius words" },
 	{ "group.S.0x57.reply", MaskKind::GroupReply, 'S', 0x057, "RTT_ECHO", 0,
 			"the host answers each client ping (queued every client frame, "
 			"Client_ProcessNetworkFrame @0x42c41c) from its receive pump, and the reply rides "
@@ -342,6 +348,13 @@ inline constexpr Normalization kNormalizations[] = {
 			"round end and the next mission's start join the milestones (the first 0x5D, "
 			"the first 0x61 after it, the second 0x7B and 0x0B, the first 0x0A after that "
 			"header)" },
+	{ "window.dead_joiner_uplink", MaskKind::Field, 'C', 0x00C, "uplink gap while dead", 0,
+			"a joiner whose own body has no health sends no C2S 0x0C: the uplink build "
+			"returns nothing on a zero health word or the dead flag "
+			"(Player_BuildTag0CInputBody @0x42A550: the health word @0x42a58f, the flag "
+			"@0x42a599). A gap or a window edge holding a S2C 0x0A whose own-player tail "
+			"reports health 0 is that death, not a stall: x1's selfnade RR joiner stops "
+			"uplinking at its death for the window's last 72 s" },
 	{ "window.tag_presence_grace", MaskKind::Field, '*', 0, "tag window end", 0,
 			"an event on the mission clock lands at a different offset from each run's "
 			"join, so one near the window end falls inside one run's window and just past "

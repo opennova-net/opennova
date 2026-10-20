@@ -903,6 +903,40 @@ void test_rotation_load_gap() {
 	check(gap(undeclared), "the same gap without a declared rotation is STEADY_GAMEPLAY_GAP");
 }
 
+// A dead joiner sends no C2S 0x0C (window.dead_joiner_uplink): a gap or a window
+// edge that a frame reporting the joiner's own health 0 falls in is its death; the
+// same hole while the frames report it alive is STEADY_GAMEPLAY_GAP.
+void test_dead_joiner_uplink() {
+	auto die = [](wire::ParityTrace trace, uint64_t from, uint64_t until, bool report_dead) {
+		std::vector<wire::ParityUplinkState> kept;
+		for (const wire::ParityUplinkState &u : trace.uplinks)
+			if (u.ts_ns < from || u.ts_ns >= until)
+				kept.push_back(u);
+		trace.uplinks = std::move(kept);
+		if (report_dead)
+			for (wire::ParityFrameState &frame : trace.frames)
+				if (frame.ts_ns >= from + 50 * kMs && frame.ts_ns < until)
+					frame.health = 0;
+		return trace;
+	};
+	auto coverage = [](const Case &c) {
+		for (const EvidenceRow &row : c.verdict.evidence)
+			if (row.code == "STEADY_GAMEPLAY_GAP" || row.code == "STEADY_BOUNDARY_GAMEPLAY_MISSING")
+				return true;
+		return false;
+	};
+	const uint64_t end = kSteadyStart + uint64_t(kSteadySeconds * 1e9) + kSec;
+	// Dead for the window's rest (a self nade), and dead then respawned.
+	for (const auto &[from, until] : { std::pair{ 12 * kSec, end }, std::pair{ 9 * kSec, 13 * kSec } }) {
+		const Case dead = judge_case(die(scripted(1), from, until, true),
+				die(scripted(2), from, until, true), die(scripted(3), from, until, true));
+		check(!coverage(dead), "a dead joiner's missing uplink is no coverage failure");
+		const Case alive = judge_case(die(scripted(1), from, until, true),
+				die(scripted(2), from, until, true), die(scripted(3), from, until, false));
+		check(coverage(alive), "the same hole while the joiner lives is a coverage failure");
+	}
+}
+
 void test_aa_widening() {
 	// RR-aa itself carries half of RR's S2C 0x2C: retail's noise. A subject as far
 	// off passes, against the widened floor; the aa row reports the widening.
@@ -1610,6 +1644,17 @@ void test_world_records() {
 		expect_row(residue, 'S', "initial_records", "0x10:0", "pass");
 		check(find_row(residue.verdict.rows, 'S', "length_set", "0x10:0") == nullptr,
 				"S2C 0x10's length set follows the residue: left out");
+		// Its length and the length field's size leave the grouping key too
+		// (group.length_exempt): a longer last page sized LEN16 groups the same.
+		wire::ParityTrace sized = with(3, organic, statics(0x40, 7, 0x08020000));
+		for (wire::ParityPacket &p : sized.packets)
+			for (wire::ParityWireRecord &r : p.records)
+				if (p.dir == 'S' && r.full_tag == 0x010) {
+					r.raw_flags = 0x40;
+					r.encoded_length += 300;
+				}
+		expect_row(judge_case(with(1, organic, base_statics), with(2, organic, base_statics), sized),
+				'S', "initial_grouping", "", "pass");
 		const Case flags = judge_case(with(1, organic, base_statics),
 				with(2, organic, base_statics), with(3, organic, statics(0, 0, 0x00020000)));
 		expect_row(flags, 'S', "initial_records", "0x10:0", "fail", "INITIAL_RECORD_MISMATCH");
@@ -1939,6 +1984,7 @@ int main() {
 	test_pool_live_pose();
 	test_tag_window();
 	test_rotation_load_gap();
+	test_dead_joiner_uplink();
 	test_timestamps();
 	test_identical();
 	test_tag_histogram();

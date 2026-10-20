@@ -318,6 +318,7 @@ function Test-ScenarioEndsJoinerSession {
 $script:ScenarioSpec = $null
 $script:ScenarioWitness = $null
 $script:ScenarioEarlySetup = $null
+$script:DesktopResetBeforeWindow = $false
 if ($Scenario) {
     if ($ExerciseInput -or $WireOnly) {
         throw "A scenario plays with neither ExerciseInput nor WireOnly: its steps drive the joiner."
@@ -1240,8 +1241,10 @@ function Complete-DesktopWitness {
 
 function Begin-SteadyWindow {
     if ($script:SteadyStartedUtc) { throw "Steady window was already started" }
-    try { Reset-DesktopCursor }
-    catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady start: $($_.Exception.Message)" }
+    if (-not $script:DesktopResetBeforeWindow) {
+        try { Reset-DesktopCursor }
+        catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady start: $($_.Exception.Message)" }
+    }
     $script:SteadyStartedUtc = [DateTime]::UtcNow.ToString("o")
 }
 
@@ -1683,6 +1686,13 @@ function Invoke-ScenarioSetupBeforeWindow {
     } else {
         $RetailJoinerInstanceId
     }
+    # The steady start's desktop reset (two window enumerations, about 1 s) runs
+    # before the setup, so the window opens and the steps follow the pose as
+    # closely as they did inside one stage: a posed actor in a fight (x1's
+    # coop_ai_kill, the AI firing from the pose on) gets no extra second.
+    try { Reset-DesktopCursor }
+    catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady start: $($_.Exception.Message)" }
+    $script:DesktopResetBeforeWindow = $true
     $startedUtc = [DateTime]::UtcNow.ToString("o")
     $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
     $setup = $null

@@ -465,6 +465,8 @@ run's window starts on the posed state. Applied inside the window, the pose
 landed a fraction of a second in, and the S2C frame period (about 190 ms)
 decided whether one pre-pose frame was measured with the jump. c2 03TR read the
 host body's orientation range as 64 on RR, RR-aa and OR and as 5 on RO and OO.
+The steady start's desktop reset runs just before that setup, so the window
+opens and the steps follow the pose with no more delay than inside one stage.
 The witness's `setup_before_window` records that stage's start and end. A
 prelude must come before the pose, so a scenario with one plays wholly inside
 the window. A retail actor plays
