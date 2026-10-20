@@ -60,6 +60,12 @@ inline std::string play_not_playing_line(int session_state) {                   
 	       "]!!!";
 }
 inline constexpr char kMovingOnLine[] = "NWU MOVING ON TO HOSTING OR PLAYING...";    // @0x4D536D
+// The play leg's 60 s poll (the game shell's NovaWorldClient runs it): the key queue emptied
+// before it (Input_ResetKeyQueue @0x4D54A1); each frame the periodic update, the timeout test, then
+// the key read (Input_DequeueKeyEvent @0x4D54DA): ESC writes kPlayEscapedLine with NWEC03
+// (@0x4D558A), a timeout kPlayTimeoutLine with NWEC02 (@0x4D553E), and either runs
+// CGameSession_StopPlaying (the call @0x4D5592); then any state but 8 writes
+// play_not_playing_line (@0x4D55E7) and maps a result's MsgCode over the tag (@0x4D55FE).
 inline constexpr char kHostAttemptLine[] = "NWU ATTEMPTING TO START HOSTING";        // @0x4D5038
 inline constexpr char kHostGateNotOkLine[] = "NWU HOSTING FAILED...GATEINFO NOT OK!!!"; // @0x4D50C9
 inline constexpr char kHostStartFailedLine[] =
