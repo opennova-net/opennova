@@ -550,6 +550,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			novaworld_ ? inmatch::NetworkType::NovaWorld : inmatch::NetworkType::Lan;
 	request.host_cfg.serve_and_play = host_.serve_and_play;
 	request.host_cfg.game_root = options_.resource_dir;
+	// The mounted Avatars.def's combos the player add validates against (D-NET-137).
+	request.host_cfg.characters = characters_;
 	// The log devices and the socket's address (bound on every interface) for
 	// the session's logs (inmatch/server_log_devices.h; inmatch/server_console.h).
 	request.host_cfg.logs = log_devices_.logs();

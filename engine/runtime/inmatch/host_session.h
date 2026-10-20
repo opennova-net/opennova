@@ -27,6 +27,7 @@
 #include <runtime/inmatch/server_files.h> // ServerLogs
 #include <net/npwire/protocol_message.h>
 
+#include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>  // HostAcceptEvent + the server protocol entry points
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -168,6 +169,9 @@ struct HostConfig {
 	// (fresh_profile_character_vars), and a session started with neither takes the
 	// no-table form.
 	std::optional<CharacterJoinVars> local_character_vars;
+	// The host's character table (the mounted Avatars.def; empty without the
+	// file), installed on the server ctx before any player add (D-NET-137).
+	CharacterRegistry characters;
 	// The listen host's OWN inverse OPTIONS_AUTOMEDIC word, its profile's +1660:
 	// the round init copies it into the host's own player slot +372, where a
 	// joiner's arrives by C2S 0x03; 0 (a fresh record's) is automatic requests.

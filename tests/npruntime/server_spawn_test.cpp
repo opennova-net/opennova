@@ -583,6 +583,12 @@ int main() {
 		inmatch::test::bring_up_host(cctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &cloop, settings);
 		cctx.world = &cw;
+		// The host's Avatars.def combos (the golden ids, in file order: side A 0x0200 / 0x0400,
+		// side B 0x8207 / 0x8407); the add validates every side's id against them (D-NET-137).
+		cctx.characters.add_entry(0, 0, 0, 0, 0, 1, 0, 1, false); // 0x0200
+		cctx.characters.add_entry(0, 0, 1, 0, 0, 2, 0, 3, false); // 0x0400
+		cctx.characters.add_entry(1, 0, 0, 7, 0, 1, 1, 4, false); // 0x8207
+		cctx.characters.add_entry(1, 0, 1, 7, 0, 2, 1, 9, false); // 0x8407
 		// A non-default local profile is installed on the type-2 loopback before the
 		// spawn (start_host_session does it from HostConfig.local_character_vars); the
 		// host's own player is stamped from it by ASSIGNED side like a joiner's upload —
@@ -643,7 +649,8 @@ int main() {
 		if (!expect(join_rec_ok, "0x0C joiner record: animSlot 4 + netId 0x8207 + class 5 (golden shape)")) return 1;
 
 		// A var-less joiner (no CU tags): animSlot stays the retail raw 0, class defaults to 8,
-		// and the netId falls back to the D-NET-137 encoding shim (nonzero).
+		// and its id 0 names no combo, so the add re-resolves each side to the side's first
+		// combo (D-NET-137) [orig: Server_PlayerAdd @0x51CF87..0x51CFD8].
 		{
 			inmatch::NapiNPConnection bare;
 			bare.type = 1;
@@ -654,13 +661,16 @@ int main() {
 		}
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: bare joiner spawned")) return 1;
 		const w::Entity *cbare = pool0_player(cw, inmatch::kFirstJoinerDcb + 1);
-		if (!expect(cbare != nullptr && cbare->anim_slot == 0 && cbare->minimap_net_id == 0,
-		            "var-less joiner: animSlot 0 (tag absent), no char id")) return 1;
+		if (!expect(cbare != nullptr && cbare->anim_slot == 0,
+		            "var-less joiner: animSlot 0 (tag absent)")) return 1;
+		const uint16_t side_default = cbare->team == 2 ? 0x8207 : 0x0200;
+		if (!expect(cbare->minimap_net_id == side_default,
+		            "var-less joiner: the id re-resolves to its side's first combo")) return 1;
 		if (!expect(cbare->player_class == 8, "var-less joiner: playerClass defaults 8 in-session")) return 1;
 		const opennova::OrganicSpawnBatch bbatch = ns::build_pool0_organic_batch(cw);
 		for (const opennova::OrganicSpawnRecord &r : bbatch.records) {
 			if (r.owner_connection_id == inmatch::kFirstJoinerDcb + 1) {
-				if (!expect(r.net_id != 0, "var-less joiner netId falls back to the encoder shim")) return 1;
+				if (!expect(r.net_id == side_default, "var-less joiner streams its re-resolved id")) return 1;
 			}
 		}
 

@@ -803,11 +803,12 @@ bool run_full_entity_spawn_player() {
 	player.team = 1;
 	player.player_class = 0;             // unset -> must clamp to 8 on the wire
 	player.owner_connection_id = 0x0C;
+	player.minimap_net_id = 0x0200; // the add's validated side-A character id (+0x15C)
 	const w::EntityHandle h = world.registry.spawn(0, player);
 	const w::Entity *e = world.registry.get(h);
 	if (!expect(e != nullptr, "player spawned")) return false;
 
-	// Remote view (requester != owner): flags 0x0100, minimap net_id, class 8.
+	// Remote view (requester != owner): flags 0x0100, the character id, class 8.
 	nw::FullEntitySpawnRecord rec = ns::build_full_entity_spawn(*e);
 	if (!expect(rec.slot_id == h.packed, "slot_id = wire handle")) return false;
 	if (!expect(rec.item_type_id == 0x14B9, "type id carried")) return false;
@@ -815,7 +816,7 @@ bool run_full_entity_spawn_player() {
 	if (!expect(rec.minimap_flags == 0x0100, "remote player flags 0x0100")) return false;
 	if (!expect(rec.entity_flags == 0x0C, "owner connection id carried")) return false;
 	if (!expect(rec.entity_name == "Player", "name carried")) return false;
-	if (!expect(rec.net_id == (0x0200u | (h.slot() & 0x1Fu)), "minimap net_id (team 1)")) return false;
+	if (!expect(rec.net_id == 0x0200u, "the +0x15C character id, raw (D-NET-137)")) return false;
 	if (!expect(rec.player_class == 8, "playerClass clamped to 8")) return false;
 	if (!expect(rec.parent_entity_handle == 0xFFFF && rec.seat_mask == 0, "on foot, no seats")) return false;
 	if (!expect(rec.mount_handle_8 == 0xFFFF && rec.mount_handle_9 == 0xFFFF,

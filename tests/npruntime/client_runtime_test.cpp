@@ -2112,6 +2112,10 @@ bool run_roundtrip() {
 	world.script.subgoals.show_win = 0x48u;
 	world.script.subgoals.show_lose = 0x90u;
 	ctx.world = &world;
+	// The host's Avatars.def combos holding the joiner's two ids, which the add validates
+	// (D-NET-137) [orig: Server_PlayerAdd @0x51CF87..0x51CFD8].
+	ctx.characters.add_entry(0, 0, 0, 0, 0, 2, 0, 1, false); // 0x0400
+	ctx.characters.add_entry(1, 0, 0, 7, 0, 2, 1, 4, false); // 0x8407
 	// The host's own local player (sets cached.local_player, which apply_player_intent refuses to snap).
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host's own player spawned (cached.local_player)")) return false;

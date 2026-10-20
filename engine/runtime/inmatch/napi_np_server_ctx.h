@@ -10,6 +10,7 @@
 
 #include <functional>
 
+#include <runtime/inmatch/character_registry.h> // the host's Avatars.def combos (g_AvatarDefs)
 #include <runtime/inmatch/chat_flood.h>        // the console chat's flood table
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/napi_np_connection.h>
@@ -221,6 +222,11 @@ struct NapiNPServerCtx {
 	ConnectionMode connection_mode = ConnectionMode::None; // [orig +0x5C]
 	uint32_t is_authority = 0;          // [orig +0x60] is_host bit of connection_mode
 	uint32_t is_mp_session_peer = 0;    // [orig +0x64] is_client bit of connection_mode
+
+	// The host's character table (Avatars.def's combos; empty without the
+	// file): the player add validates each side's character id against it.
+	// [orig: g_AvatarDefs, read by Server_PlayerAdd @0x51CF82 / @0x51CFB4]
+	CharacterRegistry characters;
 
 	// The ONE consolidated server-state config (ADR 0013 / §6.9): §6.4 identity + the §6.9 rule globals
 	// (S2C 0x08) + the §5.1 reactive-reply mission/player/spawn. Merged from the former game_settings +

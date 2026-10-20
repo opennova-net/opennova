@@ -101,6 +101,8 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 	// process runs, a listen host's as a dedicated one's (base/resource_index boot_policy.h
 	// LogSwitches carries the witness).
 	if (net_.log_devices != nullptr) cfg.logs = net_.log_devices->logs();
+	// The mounted Avatars.def's combos the player add validates against (D-NET-137).
+	cfg.characters = assets_.character_registry;
 	// The loose _NSTMOUT.TXT reap/pool override under the install root
 	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty
 	// keeps the 120000 ms / 1200-record template.

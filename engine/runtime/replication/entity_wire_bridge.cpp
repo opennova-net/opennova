@@ -379,39 +379,22 @@ uint16_t record_flags_word(const world::Entity &e) {
 			: static_cast<uint16_t>(load_stream_flags_dword(e) & 0xFFFFu);
 }
 
-// entity+348 (0x15C) — the wire "net_id" is the player's MINIMAP slot id, NOT the WAC SSN
+// entity+348 (0x15C) — the wire "net_id" is the player's character id, NOT the WAC SSN
 // (e.net_id, which players keep at 0 to stay out of find_by_net_id; D-NET-112 conflated the
-// two). The retail host allocates a per-team minimap id here [orig: Server_PlayerAdd @0x51cbc0
-// fills player_slot+442 (team 1) / +444 (team 2) — seeded from the JOINING client's own JSP
-// fields (jsp[56]/jsp[58], Server_BuildPlayerInfoAndAdd @0x51d560), validated by
-// MinimapSlot_HasEntity @0x57b140 and reallocated via EntitySlot_LookupAndPackEntry
-// @0x57ad40 when stale; serialized at NetPacket_SerializeEntityStatesToBuffer @0x5030a0 name+21 =
-// *(u16)(entity+348)]. The REAL packing (witnessed in the packer @0x57ae47 and its decoder
-// CAvatarDefs_FindComboByPackedId @0x57a270) is type(bits 0-4) | subtype(5-8) | index(9-14) |
-// side(15) over the 288-byte minimap slot array — bit 15 is the nationality ALIGNMENT, not a
-// liveness bit (net-re §5.59; the join packer writes it from the selected
-// nationality's alignment): golden 0x0200 = index 1 on side A, 0x8207 = type 7 + index 1 on
-// side B. It MUST be nonzero: a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0)
-// match the first zero-initialized slot, so its handler SKIPS minimap allocation and the remote
-// player is left unregistered — the remote-only divergence behind the C2S 0x0F flood grill,
-// while the joiner's OWN player is immune (its minimap slot is set by local deploy, not this
-// wire record). Our formula below is an ENCODING SHIM, not the retail packing: its team==2
-// 0x8000 does land in the right bit (side), but `slot` lands in the `type` field with
-// subtype/index left unpopulated. It stays interop-safe because the client
-// self-heals any UNMATCHED net_id — NapiNPClientMsg_0x00C @0x42eadb reallocates and overwrites
-// entity->NetId when MinimapSlot_HasEntity fails. Faithful port = minimap slot-array alloc;
-// docs/net/novaworld-net-re.md (D-NET-137). [golden diff + minimap grill 2026-07-01]
+// two). The host's player add takes each side's id from the joiner's JSP (CI0 / CI1, or the
+// listen host's own profile), validates it against the host's Avatars.def combos and re-resolves
+// a stale one to the side's default (0 with no table); the spawn stamps the assigned side's into
+// entity+0x15C, and every stream writes that word (D-NET-137).
+// [orig: Server_PlayerAdd @0x51CBC0 - slot+0x1BA / +0x1BC validated @0x51CF87..0x51CFD8;
+//  NetPacket_SerializeEntityStatesToBuffer @0x5030a0 - `movzx edi, word ptr [ecx+15Ch]`
+//  @0x5032CB. The packing (type bits 0-4, subtype 5-8, index 9-14, alignment 15) is the
+//  packer's @0x57ae47 and CAvatarDefs_FindComboByPackedId @0x57a270's; net-re §5.59]
 } // namespace
-
-static uint16_t player_minimap_net_id(const world::Entity &e) {
-	return static_cast<uint16_t>((e.team == 2 ? 0x8000u : 0u) | 0x0200u |
-	                             (e.handle.slot() & 0x1Fu));
-}
 
 // player_class_for_wire (the [5,9]-else-8 clamp) lives above snapshot_of, which shares it.
 
 uint16_t player_wire_net_id(const world::Entity &e) {
-	return e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e);
+	return e.minimap_net_id;
 }
 
 OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {

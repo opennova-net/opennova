@@ -356,6 +356,20 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	//  ServerLog_BufferAndFlush's g_CreateSvrLogTxt gate @0x4FC0C3..0x4FC0CA]
 	if (!player_slot.has_value()) return {};
 
+	// Each side's character id names a combo of the host's Avatars.def, else it
+	// is re-resolved to the side's default: the first combo of the side's
+	// alignment, else entry 0, or 0 for an empty table (D-NET-137). The round
+	// init's kept slots were validated at their add.
+	// [orig: Server_PlayerAdd @0x51CBC0 - MinimapSlot_HasEntity (the combo find)
+	//  @0x51CF87, EntitySlot_LookupAndPackEntry(side 0) @0x51CF9D, slot+0x1BA
+	//  @0x51CFA5; @0x51CFB9, side 1 @0x51CFD0, slot+0x1BC @0x51CFD8]
+	if (!round_init) {
+		for (int side = 0; side < 2; ++side) {
+			if (ctx.characters.find_by_packed_id(conn.char_vars.char_id[side]) == nullptr)
+				conn.char_vars.char_id[side] = ctx.characters.first_character_id(side);
+		}
+	}
+
 	world::PlayerSpawn spawn;
 	// Team FIRST — a team gametype's start markers are per-team (6096-6099 primary,
 	// 6003/6004/6090/6091 fallback), so the AS join spawn needs the assigned team before the
@@ -421,11 +435,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// @0x51cff7]. The picked avatar byte is the entity+0x374 animSlot [@0x51d0b1] and the picked
 	// char id the entity+0x15C wire NetId [slot+440] — the joiner's own 0x0C record must echo the
 	// values it uploaded (golden ASH_I5A: VCB=4/CI1=0x8207 -> record 4/0x8207) or its client binds
-	// a wrong-type character slot: the D-NET-146 DBuggy1-shadow bug. Retail additionally validates
-	// the char id against the character-slot registry (MinimapSlot_HasEntity @0x57b140 -> realloc
-	// @0x57ad40); the reimpl has no registry yet, so the id is echoed unvalidated and 0 falls back
-	// to the encoder's D-NET-137 shim (two default-profile joiners colliding on 0x8207 is a
-	// tracked deferral, harmless at 2-player scope).
+	// a wrong-type character slot: the D-NET-146 DBuggy1-shadow bug. The ids were validated
+	// against the host's Avatars.def above (D-NET-137) [orig: MinimapSlot_HasEntity @0x57b140 ->
+	// EntitySlot_LookupAndPackEntry @0x57ad40].
 	// The pick reads the slot's team byte the assignment just wrote: a session
 	// spectator's team 0 takes side B in a team game (D-NET-NEW-L3-7).
 	// [orig: Server_PlayerAdd @0x51CFDF..0x51CFF7 - slot+0x1A0 against 1 and 3,
@@ -467,7 +479,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.player_class = static_cast<uint8_t>(conn.slot_class);
 	} else {
 		spawn.anim_slot = conn.char_vars.avatar[side];       // raw echo; 0 = tag absent (retail)
-		spawn.minimap_net_id = conn.char_vars.char_id[side]; // 0 -> encoder shim
+		spawn.minimap_net_id = conn.char_vars.char_id[side];
 		// playerClass = TR ? CTB : CTA [orig: Server_BuildPlayerInfoAndAdd @0x51d711 buf[52]];
 		// absent (0) -> 8 in-session [@0x51d02b]; outside [5,9] -> 8 [@0x51d102]. The joiner's
 		// later C2S 0x2F loadout re-stamps it (server_message_dispatch case 0x2F), same as retail.

@@ -89,6 +89,15 @@ func before_all() -> void:
 			"composed the zero-offset control-seat carrier fixture")
 
 
+# The host's Avatars.def: the player add validates each side's packed character
+# id against its combos and re-resolves one it lacks (D-NET-137).
+func _host_avatars() -> AvatarDatabase:
+	var db := AvatarDatabase.new()
+	assert_eq(db.load(ProjectSettings.globalize_path(AVATARS_FIXTURE)), OK,
+			"the Avatars.def fixture loads")
+	return db
+
+
 func _native_asset_root() -> ResourceRoot:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
@@ -1651,6 +1660,9 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
+	# The joiner's side-A id 0x0200 names a combo of the host's table, so the add
+	# keeps it (D-NET-137).
+	host.set_character_avatar_database(_host_avatars())
 	assert_true(host.install_seat_specs_for_type_ids(
 			watercraft_db, PackedInt32Array([1291, 5008])))
 	assert_gt(host.get_mounted_graphic_source_count(), 0,

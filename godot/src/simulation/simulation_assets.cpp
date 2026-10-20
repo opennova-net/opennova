@@ -148,11 +148,13 @@ void Simulation::install_join_mission_start() {
 int Simulation::set_character_avatar_database(
 		const Ref<AvatarDatabase> &p_avatar_db) {
 	assets_.character_sex_rows.clear();
+	assets_.character_registry = opennova::inmatch::CharacterRegistry{};
 	if (p_avatar_db.is_valid()) {
 		for (const AvatarDatabase::CharacterSexRow &row :
 				p_avatar_db->character_sex_rows())
 			assets_.character_sex_rows.push_back(
 					CharacterSexRow{row.character_id, row.female});
+		assets_.character_registry = p_avatar_db->character_registry();
 	}
 	apply_character_traits_to_world();
 	return static_cast<int>(assets_.character_sex_rows.size());

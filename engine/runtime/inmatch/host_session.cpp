@@ -696,6 +696,8 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			cfg.serve_and_play ? ConnectionMode::HostClient : ConnectionMode::HostOnly);
 	set_transport_mode(owner.ctx, cfg.socket_mode);
 	const SessionStartup startup = make_session_startup(cfg);
+	// The character table every player add validates against (D-NET-137).
+	owner.ctx.characters = cfg.characters;
 	// The create also runs Server_InitNewRoundState. A set mpreset word ends
 	// the process there, so nothing of the session follows it
 	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0].
