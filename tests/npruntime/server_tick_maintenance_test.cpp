@@ -1585,6 +1585,86 @@ bool check_entity_state_fan_runs_out_of_session() {
 	              "an open session's peer takes its 0x0A and the 0x57");
 }
 
+// D-NET-441: a joiner loading between its add and its join (its slot out of
+// state 6) takes no proximity-pass service (its event-25 tick here) and no
+// place in the capture census, while a joined slot in the same zone takes
+// both; once it joins, its next pass counts it.
+// [orig: Server_UpdateCaptureZoneProximity - state 6 @0x50872A, the clear
+//  @0x50872E, `jnz` @0x508735; CaptureZone_CalculateControlDelta - state 6
+//  @0x501188, the presence compare @0x50120D..0x501248; Server_OnPlayerJoin's
+//  state 6 @0x51A712]
+bool check_a_loading_joiner_takes_no_proximity_or_census_place() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.game_type = game_type::kTeamDeathmatch;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kTeamDeathmatch;
+	world.match.configure(rules);
+	ctx.world = &world;
+	w::Entity zone;
+	zone.kind = w::EntityKind::Item;
+	zone.is_capture_trigger = true;
+	zone.zone_number = 1;
+	zone.zone_radius = 20;
+	zone.team = 1;
+	zone.health = 1;
+	zone.alive = true;
+	world.registry.spawn(1, zone);
+	const w::EntityHandle joined = w::spawn_remote_player(world, player_spawn(0, 0, 0, 1));
+	const w::EntityHandle loading = w::spawn_remote_player(world, player_spawn(0, 0, 0, 1));
+	ns::UdpSessionTransport tj(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport tl(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &tj, ns::TransportMode::Client, joined, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			8, inmatch::NapiNPConnection::kTypeServerSide, &tl, ns::TransportMode::Client, loading, false));
+	inmatch::NapiNPConnection &joiner = ctx.np_protocol.connection_list.back();
+	joiner.reply.player_slot = 2;
+	joiner.phase = inmatch::ConnectionPhase::PlayerAdded;
+	joiner.slot_state = inmatch::PlayerSlotState::AwaitJoin; // its world stream ended, no 0x0B yet
+	world.match.upsert_player({joined, 1, "Joined"});
+	world.match.upsert_player({loading, 2, "Loading"});
+	for (const w::EntityHandle h : {joined, loading}) world.match.set_player_slot_team(h, 1);
+	const auto friendlies = [&]() {
+		int out = -1;
+		for (const ns::Datagram &d : drain(tj))
+			if (d.tag == s2c::ZONE_TIMER_VALUE && d.body.size() == 15) out = d.body[13];
+		(void)drain(tl);
+		return out;
+	};
+	// Two passes: the session's first tick (the zero-armed countdown fires at
+	// once), then a periodic second later.
+	inmatch::Server_TickUpdate(ctx);
+	(void)friendlies();
+	tick_to_periodic_second(ctx);
+	const w::MatchPlayer *jr = world.match.player(joined);
+	const w::MatchPlayer *lr = world.match.player(loading);
+	if (!expect(jr->periodic_score_ticks == 2, "the joined slot takes both passes' event-25 ticks"))
+		return false;
+	if (!expect(lr->periodic_score_ticks == 0, "the loading joiner takes no event-25 tick"))
+		return false;
+	if (!expect(friendlies() == 1, "the capture census counts the joined slot alone"))
+		return false;
+	// The join: state 6, and its initial-state stream completes.
+	joiner.slot_state = inmatch::PlayerSlotState::Joined;
+	joiner.phase = inmatch::ConnectionPhase::InMatch;
+	joiner.burst.spawned = true;
+	tick_to_periodic_second(ctx);
+	if (!expect(lr->periodic_score_ticks == 1, "joined, its next pass counts it"))
+		return false;
+	return expect(friendlies() == 2, "joined, the census counts both");
+}
+
 // The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
 // every pass, once, whether or not its record changed and whatever the
 // recipient's state; the 0x6E goes, once, to a slot whose body's dead bit or
@@ -3302,6 +3382,7 @@ int main() {
 	ok = check_quartet_skips_a_spectator_slot() && ok;
 	ok = check_integrity_family_draws_once_per_send() && ok;
 	ok = check_entity_state_fan_runs_out_of_session() && ok;
+	ok = check_a_loading_joiner_takes_no_proximity_or_census_place() && ok;
 	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;

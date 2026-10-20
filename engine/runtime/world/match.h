@@ -251,6 +251,17 @@ struct MatchPlayer {
     //  Server_UpdateCaptureZoneProximity @0x508C95; Entity_SetTeamByNetId
     //  @0x43C680]
     uint8_t slot_team = 0;
+    // Player-slot +0x20 == 6, the state the join enters: the proximity pass
+    // (after its mask clear), the alive-holder count and the capture delta's
+    // census skip a slot in any other state, so a joiner loading between its
+    // add (state 1) and its join takes no mask, no event-25 tick, no capture
+    // timer and no census place. The authority stamps it from its slot word
+    // ahead of each match tick; a row no session stamps (a World ticked
+    // without the authority) counts as joined.
+    // [orig: Server_UpdateCaptureZoneProximity @0x50872A..0x508735;
+    //  Game_CountAlivePlayersPerTeam @0x500208; CaptureZone_CalculateControlDelta
+    //  @0x501188 / `jnz` @0x50118C; Server_OnPlayerJoin's state 6 @0x51A712]
+    bool slot_in_game = true;
 };
 
 // The match requests a disconnect without owning the transport. The authority
@@ -407,6 +418,7 @@ class Match {
     // [orig: Server_ChangeEntityTeam @0x518DEF; Server_ConvertPlayerToSpectator
     //  @0x519E6E]
     void set_player_slot_team(EntityHandle entity, uint8_t team);
+    void set_player_slot_in_game(EntityHandle entity, bool in_game);
     const MatchStats &team_stats(uint8_t team) const;
 
     // Script player operations validate the registered slot, not the Player

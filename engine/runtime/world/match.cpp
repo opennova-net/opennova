@@ -340,6 +340,11 @@ void Match::set_player_slot_team(EntityHandle entity, uint8_t team) {
         row->slot_team = team;
 }
 
+void Match::set_player_slot_in_game(EntityHandle entity, bool in_game) {
+    if (MatchPlayer *row = player(entity))
+        row->slot_in_game = in_game;
+}
+
 const MatchPlayer *Match::player(EntityHandle entity) const {
     const auto it = std::find_if(players_.begin(), players_.end(),
                                  [&](const MatchPlayer &p) { return p.identity.entity == entity; });
@@ -1323,8 +1328,13 @@ void Match::update_objective_proximity(const World &world) {
     const bool team_mode = (rules_.game_type & 0x10000u) != 0;
     for (MatchPlayer &match_player : players_) {
         const Entity *player_entity = world.registry.get(match_player.identity.entity);
+        // Every active slot's mask clears; one out of state 6 or without its
+        // entity is skipped after the clear.
+        // [orig: Server_UpdateCaptureZoneProximity - `cmp [esi+20h], 6`
+        //  @0x50872A, the clear @0x50872E, its `jnz` @0x508735, the entity
+        //  @0x50873B]
         match_player.objective_proximity_mask = 0;
-        if (player_entity == nullptr)
+        if (!match_player.slot_in_game || player_entity == nullptr)
             continue;
         // A spectator-latched slot is skipped after its mask clear.
         // [orig: Server_UpdateCaptureZoneProximity `cmp byte ptr [esi+188D7h], 0`
@@ -1499,7 +1509,8 @@ std::array<int32_t, 5> Match::count_alive_players_per_team(const World &world) c
         // [orig: Game_CountAlivePlayersPerTeam @0x5001C0 - the spectator
         //  test @0x500214, `movzx eax, byte ptr [ecx+1A0h]` @0x50021D, the
         //  dead bit @0x50022F, the mask's bit 0 @0x500235, the count @0x50023E]
-        if (match_player.spectator || !is_live_player(entity) ||
+        if (!match_player.slot_in_game || match_player.spectator ||
+            !is_live_player(entity) ||
             (match_player.objective_proximity_mask & 0x01u) == 0 ||
             match_player.slot_team >= holders.size())
             continue;

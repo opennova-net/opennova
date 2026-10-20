@@ -219,11 +219,10 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
     const MatchRules &rules = world.match.rules();
 
     // The in-game census the delta walks: every slot in state 6 whose body is
-    // neither carried nor dead. Past the round end, which moves every active
-    // slot to state 7, it takes none, so every presence and every delta is 0.
-    // Ours's roster carries no slot state: the census takes every registered
-    // Player's row, none once the outcome is decided, and so still counts a
-    // joiner loading between its add and its join (D-NET-441).
+    // neither carried nor dead (a joiner loading between its add and its join
+    // is not in state 6, D-NET-441). Past the round end, which moves every
+    // active slot to state 7, it takes none, so every presence and every delta
+    // is 0.
     // [orig: CaptureZone_CalculateControlDelta @0x501120 — slot active
     //  @0x501169, its entity @0x501173..0x501178, `test byte [ent+24h], 3`
     //  @0x50117E, state 6 @0x501188 / `jnz` @0x50118C; Server_ProcessRoundEnd's
@@ -238,7 +237,7 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
     if (!world.match.outcome().ended) {
         for (const MatchPlayer &row : world.match.players()) {
             const Entity *e = world.registry.get(row.identity.entity);
-            if (e == nullptr ||
+            if (e == nullptr || !row.slot_in_game ||
                     (entity_flags(*e) & (kEntityFlagCarried | kEntityFlagDead)) != 0)
                 continue;
             census.push_back(e);

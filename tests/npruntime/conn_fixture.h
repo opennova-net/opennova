@@ -27,6 +27,8 @@ inline opennova::inmatch::NapiNPConnection make_conn(uint32_t id, int type,
 	c.burst.spawned = spawned;
 	c.spawned_announced = spawned;
 	c.phase = spawned ? opennova::inmatch::ConnectionPhase::InMatch : opennova::inmatch::ConnectionPhase::New;
+	// An in-match connection's slot is joined (state 6).
+	if (spawned) c.slot_state = opennova::inmatch::PlayerSlotState::Joined;
 	return c;
 }
 

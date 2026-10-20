@@ -570,6 +570,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	emit_scoreboard_boundary(ctx, world);
 	advance_play_ticks(ctx, world);
 	lap.restart();
+	// The roster rows carry each slot's state-6 fact for the world's readers
+	// (the proximity pass, the alive-holder count, the capture census), which
+	// read the slot word live: the receive pump above made this tick's joins
+	// and re-syncs, and nothing after this point changes a slot's state before
+	// they read it (D-NET-441).
+	// [orig: Server_UpdateCaptureZoneProximity @0x50872A; Game_CountAlivePlayersPerTeam
+	//  @0x500208; CaptureZone_CalculateControlDelta @0x501188]
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		world.match.set_player_slot_in_game(
+				conn.link.owned_entity, conn.slot_state == PlayerSlotState::Joined);
 	world.match.advance_tick(
 			world,
 			preround_active ? world::TickPhase::PreRound
