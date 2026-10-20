@@ -11,7 +11,6 @@
 GITHUB_TOKEN=op://@VAULT@/github-terraform/token
 TF_VAR_billing_email=op://@VAULT@/github-terraform/billing_email
 TF_VAR_members=op://@VAULT@/github-terraform/members
-TF_VAR_reference_assets_token=op://@VAULT@/reference-assets/token
 TF_VAR_stripe_test_secret_key=op://@VAULT@/stripe-test/restricted_key
 TF_VAR_aws_account_id_prod=op://@VAULT@/aws-prod/account_id
 TF_VAR_aws_account_id_staging=op://@VAULT@/aws-staging/account_id

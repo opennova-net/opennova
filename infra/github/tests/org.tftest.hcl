@@ -50,7 +50,6 @@ override_resource {
 variables {
   billing_email          = "billing@example.com"
   members                = { mock-admin = "admin", mock-member = "member" }
-  reference_assets_token = "github_pat_mock"
   stripe_test_secret_key = "rk_test_mock"
   aws_account_id_prod    = "111111111111"
   aws_account_id_staging = "222222222222"
@@ -79,16 +78,16 @@ run "repositories" {
   command = plan
 
   assert {
-    condition     = length(github_repository.repo) == 10 && length(github_branch_default.repo) == 10 && length(github_repository_vulnerability_alerts.repo) == 10
-    error_message = "every one of the organization's 10 repositories, with its default branch and alerts"
+    condition     = length(github_repository.repo) == 8 && length(github_branch_default.repo) == 8 && length(github_repository_vulnerability_alerts.repo) == 8
+    error_message = "every one of the organization's 8 repositories, with its default branch and alerts"
   }
   assert {
     condition     = github_repository.repo["opennova"].visibility == "public" && github_branch_default.repo["opennova"].branch == "master"
     error_message = "opennova is public, on master"
   }
   assert {
-    condition     = github_repository.repo["opennova-reference-assets"].visibility == "private" && github_repository.repo["docs"].visibility == "private"
-    error_message = "the reference data and the docs stay private"
+    condition     = github_repository.repo["docs"].visibility == "private"
+    error_message = "the docs stay private"
   }
   assert {
     condition     = github_repository.repo["WolfRAT2"].fork && github_repository.repo["WolfRAT2"].source_owner == "BadgerLove"
