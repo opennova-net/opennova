@@ -50,10 +50,10 @@ begin "Light Post"
   graphic Lpost01
 end
 """
-# The player's body (105310, the placer's PLAYER_VISUAL_ITEM_ID) and its
-# template (105305, retail's "Player #1, Multiplayer", the type the spawn
-# seeds the local body from) over the synthetic 19-bone person, leading the
-# file (a type id resolves to its FIRST row; blink_reopen_edge_test.gd).
+# The player's body (105310, the placer's PLAYER_VISUAL_ITEM_ID) over the
+# synthetic 19-bone person, leading the file (a type id resolves to its FIRST
+# row; blink_reopen_edge_test.gd). The template it spawns from (105305) is the
+# minimal pack's.
 const PLAYER_DEFS := """begin "Player Character"
   id 105310
   type person
@@ -61,17 +61,6 @@ const PLAYER_DEFS := """begin "Player Character"
   sid player
   anim_def soldier
   hp 100
-end
-
-begin "Player #1, Multiplayer"
-  id 105305
-  type person
-  graphic person
-  anim_def soldier
-  ai_function plyr
-  disk_function PLAYER
-  move_function org2
-  hp 150
 end
 """
 const LANE_TEXEL := 9

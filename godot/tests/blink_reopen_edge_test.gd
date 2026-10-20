@@ -43,24 +43,6 @@ const PLAYER_ITEM_DEF := """begin "Player Character"
   hp 100
 end
 """
-# The player template, retail's "Player #1, Multiplayer" row (105305, the
-# 0x14B9 type the spawn seeds the local body from, world::
-# kPlayerInfantryTypeId). Its items.def ordinal is the body's +0x1C word,
-# and a pool-0 body whose word is 0 builds no proximity slice [orig:
-# Entity_BuildProximityListsFromPools @0x4B8EF9..0x4B8F00], so without the
-# row the armory never reaches the body's contact walk. It follows the body
-# row: ordinal 1, as in the shipped table, never 0 (the Null row's).
-const PLAYER_TEMPLATE_DEF := """begin "Player #1, Multiplayer"
-  id 105305
-  type person
-  graphic person
-  anim_def soldier
-  ai_function plyr
-  disk_function PLAYER
-  move_function org2
-  hp 150
-end
-"""
 # Mission-space (Z up) site of the building on the Tmap surface, west of the
 # world origin where the ground carries only its gentle z slope; the floor
 # stands FLOOR_LIFT above the ground there, clear of it over the whole plan,
@@ -121,7 +103,7 @@ func _stage_root() -> String:
 		TestFs.copy(self, "res://../fixtures/anim/" + clip, root_dir.path_join(clip))
 	var items := FileAccess.get_file_as_string(root_dir.path_join("items.def"))
 	TestFs.write_text(self, root_dir.path_join("items.def"), PLAYER_ITEM_DEF + "\n"
-			+ PLAYER_TEMPLATE_DEF + "\n" + items + "\n" + BUILDING_ITEM_DEF)
+			+ items + "\n" + BUILDING_ITEM_DEF)
 	return root_dir
 
 
