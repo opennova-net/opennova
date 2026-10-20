@@ -58,16 +58,6 @@ public:
 	// The editor's preview background behind the record's picture, the grid's lines read against it.
 	void background(opennova::editor::PreviewBackground background) override;
 
-	// Its nodes, for the device tests: the camera, the grid, the model, the effects drawn, a weapon's arms, its
-	// tracers, its scars and its target.
-	Camera3D *camera() const { return camera_; }
-	MeshInstance3D *grid() const { return grid_; }
-	MeshInstance3D *backdrop() const { return backdrop_; }
-	ObjectModel *object_model() const { return model_->object(); }
-	PreviewEffects &effects() { return *effects_; }
-	ObjectModel *arms_model() const { return arms_->object(); }
-	PreviewRangeDraw *range() const { return range_.get(); }
-
 private:
 	// The viewport's state over the scene that stands: the registers, the hidden sections, the level, a person's
 	// pose and lift, the camera and the grid; a weapon's channel, team, tracers, scars and target.

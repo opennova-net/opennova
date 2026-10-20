@@ -15,8 +15,6 @@ namespace godot {
 
 bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevicePatch> &patches, TerrainData &data,
 		Terrain &terrain) {
-	regions_ = 0;
-	tiles_ = 0;
 	std::vector<opennova::terrain::CoordsRect> rects;
 	std::vector<int> replaced;
 	uint64_t last = taken_;
@@ -33,7 +31,6 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 			}
 			// Each region its own rect (a change across the atlas's wrap arrives as two): one refresh shows them all.
 			rects.push_back(rect);
-			++regions_;
 		}
 		if (!patch.tile_indices.empty()) {
 			if (!data.replace_tiles(patch.tile_indices, patch.tiles)) {
@@ -42,7 +39,6 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 				return false;
 			}
 			replaced.insert(replaced.end(), patch.tile_indices.begin(), patch.tile_indices.end());
-			tiles_ += int(patch.tile_indices.size());
 		}
 	}
 	taken_ = last;
@@ -66,7 +62,6 @@ void TerrainPatchApplier::settle_colour(Terrain &terrain, uint64_t now_ms) {
 bool TerrainPatchApplier::apply_maps(const std::vector<opennova::editor::MapsDevicePatch> &patches, Terrain &terrain,
 		FoliageDispatcher *foliage, const std::function<void(const std::string &name, uint64_t stamp)> &took) {
 	using Kind = opennova::editor::MapsDevicePatch::Kind;
-	maps_applied_ = 0;
 	for (const opennova::editor::MapsDevicePatch &patch : patches) {
 		if (patch.serial <= maps_taken_) continue;
 		maps_taken_ = patch.serial;
@@ -125,7 +120,6 @@ bool TerrainPatchApplier::apply_maps(const std::vector<opennova::editor::MapsDev
 			continue;
 		}
 		for (const opennova::FileStamp &file : patch.files) took(file.name, file.stamp);
-		++maps_applied_;
 	}
 	return !maps_refused_;
 }

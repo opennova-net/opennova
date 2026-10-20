@@ -39,9 +39,6 @@ public:
 		return failed;
 	}
 	uint64_t taken() const { return taken_; }
-	// What the last apply did (a test's count): the regions written and the tiles replaced.
-	int regions_applied() const { return regions_; }
-	int tiles_applied() const { return tiles_; }
 
 	// The maps' and the placed tiles' patches (S25, the maps lane: MapsDevicePatch) past the last serial taken, applied
 	// in place to `terrain`: a colour map's region (Terrain::update_colormap_region: its tile pages that sample it
@@ -65,26 +62,20 @@ public:
 		colour_due_ = false;
 	}
 	uint64_t maps_taken() const { return maps_taken_; }
-	bool colour_due() const { return colour_due_; }
 	// Whether a patch could not be taken since this was last asked (the report's maps_refused).
 	bool take_maps_refused() {
 		const bool refused = maps_refused_;
 		maps_refused_ = false;
 		return refused;
 	}
-	// What the last apply_maps did (a test's count): the patches applied.
-	int maps_applied() const { return maps_applied_; }
 
 private:
 	uint64_t taken_ = 0;
 	bool failed_ = false;
-	int regions_ = 0;
-	int tiles_ = 0;
 	uint64_t maps_taken_ = 0;
 	bool maps_refused_ = false;
 	bool colour_due_ = false;   // a colour patch taken since the live texture was last written
 	uint64_t colour_at_ms_ = 0; // when the last one was taken
-	int maps_applied_ = 0;
 };
 
 } // namespace godot

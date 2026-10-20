@@ -1,4 +1,5 @@
 #include "authoring/definition_viewport_applier.h"
+#include "authoring/orbit_stage.h"
 #include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/node3d.hpp>
@@ -33,29 +34,14 @@ const opennova::editor::DefinitionViewport &definition_of(const opennova::editor
 } // namespace
 
 DefinitionViewportApplier::DefinitionViewportApplier(SubViewport &viewport) {
-	// Single-sampled, as the game's own view draws: the particle renderer's compositor passes bind the view's depth
-	// (DI-14's rule).
-	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
-	// The editor's preview background, behind everything the picture draws.
-	backdrop_ = make_preview_backdrop_3d();
-	viewport.add_child(backdrop_);
-	Node3D *root = memnew(Node3D);
-	viewport.add_child(root);
-	// The game's FrameFx for the view (its one terminal display decode, and the distortion row a class-7 particle draws
-	// on), and the environment with no .env, which lights like the retail noon (the model preview's recipe, and the
-	// particle tints it gives).
-	frame_effects_ = std::make_unique<PreviewFrameEffects>(*root, viewport, false);
-	environment_ = memnew(MissionEnvironment);
-	root->add_child(environment_);
-	camera_ = memnew(Camera3D);
-	camera_->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
-	camera_->set_fov(opennova::editor::OrbitCamera::fov_horizontal_degrees());
-	camera_->set_current(true);
-	root->add_child(camera_);
-	grid_ = memnew(MeshInstance3D);
-	grid_->set_name("Grid");
-	grid_->set_mesh(preview_grid_mesh(opennova::editor::PreviewBackground::Dark));
-	root->add_child(grid_);
+	// The orbit devices' stage (authoring/orbit_stage), its grid with it.
+	OrbitStage stage = make_orbit_stage(viewport, true);
+	backdrop_ = stage.backdrop;
+	frame_effects_ = std::move(stage.frame_effects);
+	environment_ = stage.environment;
+	camera_ = stage.camera;
+	grid_ = stage.grid;
+	Node3D *root = stage.root;
 	model_ = std::make_unique<PreviewModel>(*root);
 	// A weapon's first-person arms (DI-22).
 	arms_ = std::make_unique<PreviewModel>(*root);
@@ -150,14 +136,8 @@ void DefinitionViewportApplier::clear() {
 
 void DefinitionViewportApplier::place_(const opennova::editor::ViewportModel &viewport) {
 	const opennova::editor::DefinitionViewport &model = definition_of(viewport);
-	const opennova::editor::OrbitCamera &camera = model.camera();
-	opennova::editor::PreviewVec3 right, up, back;
-	camera.axes(right, up, back);
-	camera_->set_transform(Transform3D(Basis(to_godot(right), to_godot(up), to_godot(back)), to_godot(camera.eye())));
-	camera_->set_near(camera.near_plane);
-	camera_->set_far(camera.far_plane);
 	// The first-person eye sees with the weapon's renderfov (DI-22, DI-13's), else the game's view.
-	camera_->set_fov(camera.fov_degrees());
+	place_orbit_camera(*camera_, model.camera(), true);
 	grid_->set_visible(model.options().grid);
 }
 

@@ -1,4 +1,5 @@
 #include "authoring/effect_viewport_applier.h"
+#include "authoring/orbit_stage.h"
 #include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -35,31 +36,14 @@ const opennova::editor::EffectViewport &effect_of(const opennova::editor::Viewpo
 } // namespace
 
 EffectViewportApplier::EffectViewportApplier(SubViewport &viewport) {
-	// No multisampling, as the game's own view draws: the particle renderer's compositor passes draw over
-	// the view's single-sampled colour and depth (a multisampled view's resolved depth is no attachment
-	// they can bind; under MSAA every particle would go undrawn).
-	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
-	// The editor's preview background, behind everything the picture draws.
-	backdrop_ = make_preview_backdrop_3d();
-	viewport.add_child(backdrop_);
-	Node3D *root = memnew(Node3D);
-	viewport.add_child(root);
-	// The game's FrameFx for the view (its one terminal display decode, and the distortion row a class-7 particle draws
-	// on), and the environment with no .env, which lights like the retail noon: the particle tints a mission's light
-	// gives (the model preview's recipe).
-	frame_effects_ = std::make_unique<PreviewFrameEffects>(*root, viewport, false);
-	environment_ = memnew(MissionEnvironment);
-	root->add_child(environment_);
-	camera_ = memnew(Camera3D);
-	camera_->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
-	camera_->set_fov(opennova::editor::OrbitCamera::fov_horizontal_degrees());
-	camera_->set_current(true);
-	root->add_child(camera_);
-	grid_ = memnew(MeshInstance3D);
-	grid_->set_name("Grid");
-	grid_->set_mesh(preview_grid_mesh(opennova::editor::PreviewBackground::Dark));
-	root->add_child(grid_);
-	effects_ = std::make_unique<PreviewEffects>(*root);
+	// The orbit devices' stage (authoring/orbit_stage), its grid with it.
+	OrbitStage stage = make_orbit_stage(viewport, true);
+	backdrop_ = stage.backdrop;
+	frame_effects_ = std::move(stage.frame_effects);
+	environment_ = stage.environment;
+	camera_ = stage.camera;
+	grid_ = stage.grid;
+	effects_ = std::make_unique<PreviewEffects>(*stage.root);
 	effects_->set_environment_source(environment_);
 }
 
@@ -98,12 +82,7 @@ void EffectViewportApplier::clear() {
 
 void EffectViewportApplier::place_(const opennova::editor::ViewportModel &viewport) {
 	const opennova::editor::EffectViewport &model = effect_of(viewport);
-	const opennova::editor::OrbitCamera &camera = model.camera();
-	opennova::editor::PreviewVec3 right, up, back;
-	camera.axes(right, up, back);
-	camera_->set_transform(Transform3D(Basis(to_godot(right), to_godot(up), to_godot(back)), to_godot(camera.eye())));
-	camera_->set_near(camera.near_plane);
-	camera_->set_far(camera.far_plane);
+	place_orbit_camera(*camera_, model.camera(), false);
 	grid_->set_visible(model.options().grid);
 }
 

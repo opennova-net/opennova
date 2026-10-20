@@ -73,19 +73,6 @@ public:
 	void publish_scene_state() override { layers_->publish_scene_state(); }
 	void present(double dt) override;
 
-	// Its nodes, for the device tests.
-	Camera3D *camera() const { return layers_->camera(); }
-	MissionEnvironment *environment() const { return layers_->nodes().environment; }
-	Weather *weather() const { return layers_->nodes().weather; }
-	Celestial *celestial() const { return layers_->nodes().celestial; }
-	Terrain *terrain() const { return layers_->nodes().terrain; }
-	Water *water() const { return layers_->nodes().water; }
-	Precipitation *precipitation() const { return layers_->nodes().precipitation; }
-	// How many game ticks it ran, and how many builds of each layer.
-	int64_t ticks_run() const { return layers_->ticks_run(); }
-	int environment_builds() const { return layers_->environment_builds(); }
-	int terrain_builds() const { return layers_->terrain_builds(); }
-
 private:
 	// What the viewport says its weather and clock are (taken at each apply, run at the next tick).
 	struct Wanted {

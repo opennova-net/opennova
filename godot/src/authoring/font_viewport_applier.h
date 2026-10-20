@@ -43,12 +43,6 @@ public:
 	bool reads_scene_state() const override { return false; }
 	void background(opennova::editor::PreviewBackground background) override;
 
-	// What it holds (a GUT device test reads it): the pages uploaded, the glyph quads drawn last, the item they are
-	// drawn on.
-	int pages() const { return int(pages_.size()); }
-	int quads_drawn() const { return quads_drawn_; }
-	RID glyph_item() const { return glyph_item_; }
-
 private:
 	void draw(const opennova::editor::ViewportModel &model);
 

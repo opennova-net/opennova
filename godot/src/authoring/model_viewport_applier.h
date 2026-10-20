@@ -77,15 +77,6 @@ public:
 	// The editor's preview background behind the model.
 	void background(opennova::editor::PreviewBackground background) override;
 
-	// Its nodes, for the parity tests: the camera, the model and the first-person arms.
-	Camera3D *camera() const { return camera_; }
-	ObjectModel *object_model() const { return object_; }
-	ObjectModel *arms_model() const { return arms_; }
-	// A clip's fire (DI-24): the effects drawn and the range's target, tracers and scars (null until a clip fires
-	// here).
-	PreviewEffects *effects() const { return effects_.get(); }
-	PreviewRangeDraw *range() const { return range_.get(); }
-
 private:
 	// A build in flight: the data the scene will hold (and the first-person arms', null: none), the files
 	// its textures are read through, the rig it binds (null: none) and its serial, and its units: each
