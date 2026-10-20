@@ -44,7 +44,9 @@
 //            fingers, the receiver, magazine and bolt), each part a cube on
 //            its bone and a collision section of its own carrying one face
 //            quad on its pivot, the fingers' quads under the 8.8 grid's step
-//            so the grid collapses them (ArmsG's and Mp5b_1st's); `bullet` and
+//            so the grid collapses them (ArmsG's and Mp5b_1st's); the arms on
+//            a material of two camouflage frames CTRL TEX_CAMO1 picks (ArmsG's
+//            animated texture rows); `bullet` and
 //            `MFlash01` on the receiver; the fixtures/anim/vm40* clip set plays
 //            on it
 //   heli     Dblkhwk1's layout: tangent frames on every vertex (vflags 0x15),
@@ -605,6 +607,24 @@ Model make_vm40() {
 	m.skinned = true;
 	const int lod = m.add_lod();
 	const int mat = m.add_material("VS_SKBASIC", "vm40.tga");
+	// The arms' material: two camouflage diffuse frames a CTRL register picks
+	// (ArmsG's TEX_CAMO1 rows: animated texture rows, a register-driven
+	// texture animation).
+	const int arms = m.add_material("VS_SKBASIC", "arms_wd.tga");
+	{
+		ThreediMaterial &a = m.materials[arms];
+		a.textures[0].flags = THREEDI_TEX_FLAG_ANIMATED;
+		ThreediMaterialTexture &t = a.textures[a.texture_count++];
+		std::snprintf(t.name, sizeof(t.name), "%s", "arms_ds.tga");
+		t.slot = THREEDI_TEX_SLOT_DIFFUSE;
+		t.type = THREEDI_TEX_TYPE_DIFFUSE;
+		t.flags = THREEDI_TEX_FLAG_ANIMATED;
+		t.frame = 1;
+		a.animation.num_frames = 2;
+		a.animation.animation_type = 1;  // control register driven
+		a.animation.cycle_frame_time = 0; // register 0
+	}
+	m.add_control_register("TEX_CAMO1");
 	const std::vector<vm40_rig::Bone> rig = vm40_rig::bones();
 	for (size_t i = 0; i < rig.size(); ++i) {
 		const vm40_rig::Bone &b = rig[i];
@@ -612,7 +632,8 @@ Model make_vm40() {
 		const Vec3 pivot{b.pivot[0], b.pivot[1], b.pivot[2]};
 		const int part = m.add_part(lod, parent, pivot);
 		const double h = 1.0 / 64.0;
-		m.add_box(lod, part, mat, box(pivot.x - h, pivot.y - h, pivot.z - h, pivot.x + h, pivot.y + h, pivot.z + h), false,
+		const bool arm = i >= 1 && i < static_cast<size_t>(vm40_rig::kReceiver);
+		m.add_box(lod, part, arm ? arms : mat, box(pivot.x - h, pivot.y - h, pivot.z - h, pivot.x + h, pivot.y + h, pivot.z + h), false,
 				part);
 		m.add_panm(lod, part, parent);
 		const int cobj = m.add_cobj(parent, pivot);

@@ -95,7 +95,7 @@ const Vector kExpected[] = {
 		{"synth/shed_lght0_sub2_origin_atten100.3di", 5168u, 0x9ca3437021f1b44bull},
 		{"synth/tank.3di", 9560u, 0x5f2bccfb81ba55f4ull},
 		{"synth/tank_special1_slide_ewep01.3di", 9492u, 0x22433bf0787b8099ull},
-		{"synth/vm40.3di", 74548u, 0x0f79a7034fef281bull},
+		{"synth/vm40.3di", 75156u, 0xcdeb8058fe71a2e0ull},
 };
 
 // The path of the first chunk whose id, size or payload differs ("" when the
