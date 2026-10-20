@@ -173,7 +173,7 @@ func _game_frame(root: ResourceRoot, seen: Dictionary, effect: String, crate: bo
 	camera.current = true
 	if crate:
 		var data := ObjectData.new()
-		assert_eq(data.open_from_resource_root(root, "crate.3di", false), OK, data.get_last_error())
+		assert_eq(data.open_from_resource_root(root, "crate.3di"), OK, data.get_last_error())
 		var model := ObjectModel.new()
 		scene.add_child(model)
 		model.set_object_data(data)

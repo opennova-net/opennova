@@ -16,7 +16,7 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 		return
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_from_resource_root(
-			resource_root, "Scrate1.3di", false), OK,
+			resource_root, "Scrate1.3di"), OK,
 		"Scrate1 must resolve from the mounted retail archives")
 	# Scrate1 authors retail's constant AlphaGen style (24, start 128) on an
 	# opaque FF_ST_OP material with no alpha test — the asset-gated
