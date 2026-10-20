@@ -464,12 +464,10 @@ inline constexpr float kGlassShatterAltProbability[4] = {
 static_assert(static_cast<int>(kGlassShatterAltProbability[0] * 100.0f) == 33,
               "glass gate boundary: ftol(0.33f * 100) is 33, admitting 34 rolls");
 
-// The wreck-fire random crackle, rolled per tick per burning wreck on the
-// world's rol-xor PRNG stand-in stream (the same generator as retail's
-// PRNG_Next16_C @ 0x6131b0 — our one DestructionRng stream stands in for the
-// A/B/C instances, the documented fold). One roll per wreck at the entity
-// position collapses retail's per-fire-bone rolls at the bone positions —
-// the 4-slot bone banks remain the open D-ITEM-15 residual. The crackle
+// The wreck-fire random crackle, rolled per tick per masked fire-bone slot at
+// the bone's position on World's stream C (World::next_prng16_c, retail's
+// PRNG_Next16_C @ 0x6131b0; update_dead_wreck_effects over the 4-slot bone
+// banks, D-ITEM-15 fixed). The crackle
 // SOUND is distance-delay gated at the ENTITY position; the effect spawns
 // transient.
 // [orig: Entity_UpdateDeadWreckEffects @ 0x493140 (renamed ex

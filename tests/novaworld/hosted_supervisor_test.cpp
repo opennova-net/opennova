@@ -700,7 +700,7 @@ int test_requests() {
 	// A stopping server still counts.
 	const auto g_live = hosted::live_servers_of(db, g);
 	TEST_EXPECT(g_live.size() == 2 && g_live[0].id < g_live[1].id);
-	TEST_EXPECT(hosted::request_stop(db, g_live[0].id, "test"));
+	TEST_EXPECT(hosted::request_stop(db, g_live[0].id, "test", hosted::StartCause::OwnerStop));
 	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::AtLimit);
 	// Tier 2 and one dedicated machine: two shared servers and one on it (a
 	// dedicated machine adds to the tier's), the second on one refused, and a
@@ -729,7 +729,8 @@ int test_requests() {
 	TEST_EXPECT(on_dedicated(k).outcome == hosted::RequestOutcome::NoOwnMachine);
 	TEST_EXPECT(hosted::count_live_of(db, k) == 1 && hosted::count_own_live_of(db, k) == 1);
 	for (const int64_t owner : { g, m, k }) {
-		for (const auto &s : hosted::live_servers_of(db, owner)) hosted::request_stop(db, s.id, "test");
+		for (const auto &s : hosted::live_servers_of(db, owner))
+			hosted::request_stop(db, s.id, "test", hosted::StartCause::OwnerStop);
 		db.exec("UPDATE hosted_servers SET state = 'stopped' WHERE owner_user_id = $1 AND state = 'stopping';",
 				{ BindValue(owner) });
 	}
@@ -737,8 +738,8 @@ int test_requests() {
 	// The kill switch asks every live server's stop, once.
 	TEST_EXPECT(hosted::request_stop_all(db, "kill switch") == 4);
 	TEST_EXPECT(hosted::request_stop_all(db, "kill switch") == 0);
-	TEST_EXPECT(!hosted::request_stop(db, first.id, "again"));
-	TEST_EXPECT(!hosted::request_stop(db, third.id, "ended"));
+	TEST_EXPECT(!hosted::request_stop(db, first.id, "again", hosted::StartCause::OwnerStop));
+	TEST_EXPECT(!hosted::request_stop(db, third.id, "ended", hosted::StartCause::OwnerStop));
 	return 0;
 }
 
@@ -779,7 +780,7 @@ int test_fleet_room() {
 	TEST_EXPECT(rig.machine_of(a.id) == rig.machine_of(b.id) && rig.machine_of(own.id) != rig.machine_of(a.id));
 	TEST_EXPECT(!hosted::fleet_has_room(*db, fleet, false) && !hosted::fleet_has_room(*db, fleet, true));
 	// One ends: its slot is free again.
-	TEST_EXPECT(hosted::request_stop(*db, b.id, "test"));
+	TEST_EXPECT(hosted::request_stop(*db, b.id, "test", hosted::StartCause::OwnerStop));
 	rig.step();
 	rig.step();
 	TEST_EXPECT(rig.state(b.id) == State::Stopped);
@@ -905,7 +906,8 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(rig.state(id) == State::Running);
 
 	// The owner's stop: the push to the listing, then the end once it has left.
-	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Stopping);
 	TEST_EXPECT(rig.pushes.size() == 1 && rig.pushes[0].first == 5001 && rig.pushes[0].second == service);
@@ -924,11 +926,11 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(transitions(rig.db, id) ==
 			(std::vector<std::string>{ ">requested", "requested>provisioning", "provisioning>booting",
 					"booting>listing", "listing>running", "running>stopping", "stopping>stopped" }));
-	// The stop ended its start.
+	// The stop ended its start, its owner's.
 	{
 		const auto starts = hosted::list_starts(rig.db, id, 10);
 		TEST_EXPECT(starts.size() == 1 && !starts[0].ended_at.empty() &&
-				starts[0].cause == hosted::StartCause::Stop && !starts[0].exit_code);
+				starts[0].cause == hosted::StartCause::OwnerStop && !starts[0].exit_code);
 	}
 	rig.step(); // nothing live: nothing happens, and the machine stays (idle) for now
 	TEST_EXPECT(rig.fake.launches == 1 && !rig.fake.was_terminated(launched.cloud_id));
@@ -985,7 +987,8 @@ int test_own_machine() {
 	TEST_EXPECT(rig.fake.machines.at(own_machine->cloud_id).kind == hosted::MachineKind::Own);
 	TEST_EXPECT(rig.server(own)->slot == 0 && rig.server(own)->game_port == 32768);
 	// Its stop ends the machine with it (the shared one stays).
-	TEST_EXPECT(hosted::request_stop(*db, own, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(*db, own, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.step(); // the push
 	hostdb::remove_host_by_rid(*db, 5201);
 	rig.step(); // stopped
@@ -1020,7 +1023,8 @@ int test_own_restart_at_cap() {
 	TEST_EXPECT(first > 0 && !rig.to_running(first, 5211).empty());
 	const int64_t old_machine = rig.machine_of(first);
 	TEST_EXPECT(!hosted::fleet_has_room(*db, fleet, true));
-	TEST_EXPECT(hosted::request_stop(*db, first, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(*db, first, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.step(); // the push
 	hostdb::remove_host_by_rid(*db, 5211);
 	rig.step(); // stopped
@@ -1287,7 +1291,8 @@ int test_stop_paths() {
 	Rig rig("hosted_stops");
 	// A stop before any slot: stopped with no launch.
 	const int64_t early = rig.request("stop_early");
-	TEST_EXPECT(hosted::request_stop(rig.db, early, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, early, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.tick();
 	TEST_EXPECT(rig.state(early) == State::Stopped && rig.fake.launches == 0);
 	TEST_EXPECT(transitions(rig.db, early) ==
@@ -1297,7 +1302,8 @@ int test_stop_paths() {
 	const int64_t stuck = rig.request("stop_stuck");
 	const std::string container = rig.to_running(stuck, 6001);
 	TEST_EXPECT(!container.empty());
-	TEST_EXPECT(hosted::request_stop(rig.db, stuck, "stopped by an admin"));
+	TEST_EXPECT(hosted::request_stop(rig.db, stuck, "stopped by an admin",
+			hosted::StartCause::AdminStop));
 	rig.step();
 	TEST_EXPECT(rig.pushes.size() == 1);
 	rig.advance(rig.config.stop_timeout_ms - 1);
@@ -1307,6 +1313,7 @@ int test_stop_paths() {
 	rig.step();
 	TEST_EXPECT(rig.state(stuck) == State::Stopped);
 	TEST_EXPECT(contains(last_detail(rig.db, stuck), "after the stop"));
+	TEST_EXPECT(hosted::list_starts(rig.db, stuck, 1)[0].cause == hosted::StartCause::AdminStop);
 	TEST_EXPECT(rig.agents.begin()->second.find(container) == nullptr);
 	hostdb::remove_host_by_rid(rig.db, 6001);
 
@@ -1315,7 +1322,8 @@ int test_stop_paths() {
 	// restart.
 	const int64_t quick = rig.request("stop_quick");
 	const std::string c2 = rig.to_running(quick, 6002);
-	TEST_EXPECT(hosted::request_stop(rig.db, quick, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, quick, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.step();
 	const int launches_before = rig.fake.launches;
 	rig.agent_of(quick)->exit_with(c2, 3);
@@ -1334,7 +1342,8 @@ int test_stop_paths() {
 	const int64_t racing = rig.request("stop_racing");
 	rig.tick(); // -> provisioning
 	rig.fake.on_slot_plan = [&rig, racing] {
-		hosted::request_stop(rig.db, racing, "stopped mid-placement");
+		hosted::request_stop(rig.db, racing, "stopped mid-placement",
+				hosted::StartCause::OwnerStop);
 	};
 	rig.tick(); // the placement loses to the stop
 	rig.fake.on_slot_plan = nullptr;
@@ -1363,7 +1372,8 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(zero_row->state == State::Provisioning && zero_row->restarts == 1 && !zero_row->machine_ref);
 	TEST_EXPECT(contains(last_detail(rig.db, zero), "exited with code 0; restart 1 of 2"));
 	hostdb::remove_host_by_rid(rig.db, 7001);
-	TEST_EXPECT(hosted::request_stop(rig.db, zero, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, zero, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.tick(); // no container to stop
 	TEST_EXPECT(rig.state(zero) == State::Stopped);
 
@@ -1398,7 +1408,8 @@ int test_exits_and_crash_restarts() {
 		TEST_EXPECT(rig.state(unfetched) == State::Booting &&
 				rig.server(unfetched)->generation == 2 && rig.server(unfetched)->restarts == 0);
 	}
-	TEST_EXPECT(hosted::request_stop(rig.db, unfetched, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, unfetched, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.tick();
 	TEST_EXPECT(rig.state(unfetched) == State::Stopped);
 
@@ -1673,7 +1684,7 @@ int test_timeouts_and_health() {
 	rig.step();
 	TEST_EXPECT(rig.state(slow) == State::Provisioning);
 	TEST_EXPECT(contains(last_detail(rig.db, slow), "its container did not start in 10 s"));
-	TEST_EXPECT(hosted::request_stop(rig.db, slow, "done"));
+	TEST_EXPECT(hosted::request_stop(rig.db, slow, "done", hosted::StartCause::OwnerStop));
 	rig.step();
 	rig.start_running = true;
 	for (auto &entry : rig.agents) entry.second.start_running = true;
@@ -1685,7 +1696,7 @@ int test_timeouts_and_health() {
 	rig.step();
 	TEST_EXPECT(rig.state(quiet) == State::Provisioning);
 	TEST_EXPECT(contains(last_detail(rig.db, quiet), "no listing in 20 s"));
-	TEST_EXPECT(hosted::request_stop(rig.db, quiet, "done"));
+	TEST_EXPECT(hosted::request_stop(rig.db, quiet, "done", hosted::StartCause::OwnerStop));
 	rig.step();
 	return 0;
 }
@@ -1980,6 +1991,9 @@ int test_owner_changes() {
 	for (const uint32_t rid : { 9001u, 9002u }) hostdb::remove_host_by_rid(rig.db, rid);
 	rig.step(); // the banned and deleted owners' stops end (their listings gone)
 	TEST_EXPECT(rig.state(banned) == State::Stopped && rig.state(deleted) == State::Stopped);
+	// The service's own stops, neither its owner's nor an admin's.
+	for (const int64_t id : { banned, deleted })
+		TEST_EXPECT(hosted::list_starts(rig.db, id, 1)[0].cause == hosted::StartCause::Stop);
 	const int64_t revoked = rig.request_as(subscriber);
 	const std::string c3 = rig.to_running(revoked, 9003);
 	TEST_EXPECT(!c3.empty());
@@ -2201,7 +2215,8 @@ int test_own_machines_cut() {
 		TEST_EXPECT(starts.size() == 2 && starts[0].generation == generation + 1 &&
 				starts[0].machine_id == shared_machine && starts[0].ended_at.empty() &&
 				!starts[0].running_at.empty() && starts[1].machine_id == newer_machine &&
-				!starts[1].ended_at.empty() && starts[1].cause == hosted::StartCause::Limits);
+				!starts[1].ended_at.empty() && starts[1].cause == hosted::StartCause::Limits &&
+				!starts[1].limit);
 	}
 	// Nothing more moves or stops.
 	rig.step();
@@ -2239,7 +2254,12 @@ int test_own_machines_cut_no_room() {
 	TEST_EXPECT(has_event(*db, newer, "moved to a shared machine: its owner has 0 dedicated machines now"));
 	TEST_EXPECT(stopped_with(*db, older, "its owner has 0 dedicated machines now and the fleet has no shared room"));
 	TEST_EXPECT(rig.server(older)->own_machine && rig.machine_of(older) == older_machine);
-	TEST_EXPECT(hosted::list_starts(*db, older, 1)[0].cause == hosted::StartCause::Limits);
+	{
+		// The limit it was past: no shared room, its owner at 0 dedicated machines.
+		const auto start = hosted::list_starts(*db, older, 1)[0];
+		TEST_EXPECT(start.cause == hosted::StartCause::Limits && start.limit &&
+				start.limit->kind == hosted::LimitKind::NoSharedRoom && start.limit->count == 0);
+	}
 	TEST_EXPECT(rig.state(shared) == State::Running);
 	TEST_EXPECT(!hosted::fleet_has_room(*db, rig.config.placement, false));
 	// The stop ends as any (its listing gone), and its dedicated machine with it.
@@ -2320,13 +2340,23 @@ int test_pools_cut() {
 	rig.step(); // the push
 	rig.step(); // stopped
 	TEST_EXPECT(rig.state(shared_new) == State::Stopped);
+	{
+		// Its start ended for the limit it was past: 1 shared server.
+		const auto start = hosted::list_starts(*db, shared_new, 1)[0];
+		TEST_EXPECT(start.cause == hosted::StartCause::Limits && start.limit &&
+				start.limit->kind == hosted::LimitKind::SharedServers && start.limit->count == 1);
+	}
 
 	TEST_EXPECT(hosted::fleet_has_room(*db, rig.config.placement, false));
 	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 1, 1 }));
 	rig.step();
 	TEST_EXPECT(stopped_with(*db, own_new, "its owner has 1 dedicated machine now and no shared server free"));
 	TEST_EXPECT(rig.server(own_new)->own_machine && !has_event(*db, own_new, "moved to a shared machine"));
-	TEST_EXPECT(hosted::list_starts(*db, own_new, 1)[0].cause == hosted::StartCause::Limits);
+	{
+		const auto start = hosted::list_starts(*db, own_new, 1)[0];
+		TEST_EXPECT(start.cause == hosted::StartCause::Limits && start.limit &&
+				start.limit->kind == hosted::LimitKind::NoSharedServer && start.limit->count == 1);
+	}
 	TEST_EXPECT(rig.state(shared_old) == State::Running && rig.state(own_old) == State::Running &&
 			rig.server(own_old)->own_machine);
 	return 0;
@@ -2480,7 +2510,8 @@ int test_reconciliation() {
 	TEST_EXPECT(!rig.to_running(lost, 9102).empty());
 	const int64_t stopping = rig.request("rec_stopping");
 	TEST_EXPECT(!rig.to_running(stopping, 9103).empty());
-	TEST_EXPECT(hosted::request_stop(rig.db, stopping, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, stopping, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	const std::string kept_container = rig.container(kept);
 	const int64_t kept_machine = rig.machine_of(kept);
 	// The service goes down: its previous run's listings are gone (main()
@@ -2511,7 +2542,7 @@ int test_reconciliation() {
 	rig.step();
 	TEST_EXPECT(rig.fake.launches == 4);
 	TEST_EXPECT(rig.walk(lost, State::Booting));
-	TEST_EXPECT(hosted::request_stop(rig.db, lost, "done"));
+	TEST_EXPECT(hosted::request_stop(rig.db, lost, "done", hosted::StartCause::OwnerStop));
 
 	// The resumed server's checks wait out its grace, unlisted and uncounted,
 	// and its listing comes back within it; past the grace a check finds it.
@@ -2663,7 +2694,8 @@ int test_admin_links_follow_running() {
 	if (relinked && link) TEST_EXPECT(relinked->target().password != link->target().password);
 
 	// The stop: no link from stopping on.
-	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Stopping && links.find(id) == nullptr);
 

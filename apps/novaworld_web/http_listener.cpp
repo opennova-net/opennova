@@ -69,6 +69,36 @@ namespace opennova::novaworld_server {
 
 namespace {
 
+// Crow logs two Info lines a request: its "Request:" line, which ends with the
+// path, and its "Response:" line, which names it before the code. The health
+// probes (the balancer's and Route 53's GET /healthz through the portal, every
+// few seconds; the container health check's GET /livez) would fill the log, so
+// their lines are dropped, and every other line goes out as Crow's own handler
+// writes it. Crow's logger is the process's one.
+class QuietProbesLog : public crow::ILogHandler {
+public:
+	void log(std::string message, crow::LogLevel level) override {
+		if (level <= crow::LogLevel::Info && names_probe(message))
+			return;
+		fallback_.log(std::move(message), level);
+	}
+
+private:
+	static bool names_probe(const std::string &message) {
+		for (const std::string_view path : { " /livez", " /healthz" }) {
+			const size_t at = message.find(path);
+			if (at == std::string::npos)
+				continue;
+			const size_t end = at + path.size();
+			if (end == message.size() || message[end] == ' ')
+				return true;
+		}
+		return false;
+	}
+
+	crow::CerrLogHandler fallback_;
+};
+
 // The page link's first-call query on NWJoin.dll / NWHost.dll: any of the
 // fields the join / host page link carries (net/novaworld/relay_request.h).
 bool has_relay_first_call_query(const crow::request &req) {
@@ -396,6 +426,10 @@ bool HttpListener::start(const ServerConfig &config) {
 
 	auto &app = impl_->app;
 	app.loglevel(crow::LogLevel::Info);
+	// The process's Crow log, with the health probes' request lines left out;
+	// lives as long as the process.
+	static QuietProbesLog quiet_log;
+	crow::logger::setHandler(&quiet_log);
 
 	// Per-request access log lives inside each handler below. The
 	// /<path> wildcard logs 404 misses so we see retail asking for

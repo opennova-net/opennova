@@ -82,7 +82,8 @@ int test_desired_state() {
 	rig.muted.insert(machine);
 	const int64_t b = rig.request("desired_b");
 	TEST_EXPECT(rig.walk(b, State::Booting) && rig.machine_of(b) == machine);
-	TEST_EXPECT(hosted::request_stop(*db, b, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(*db, b, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	rig.muted.erase(machine);
 	rig.sync_all();
 	TEST_EXPECT(agent.last.desired.size() == 1 && agent.last.desired[0].name == rig.container(a));
@@ -309,7 +310,8 @@ int test_idle_scale_in() {
 	rig.advance(rig.config.idle_ms);
 	rig.step();
 	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Ready); // it holds a server
-	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner",
+			hosted::StartCause::OwnerStop));
 	hostdb::remove_host_by_rid(rig.db, 3301);
 	rig.step();
 	rig.step();

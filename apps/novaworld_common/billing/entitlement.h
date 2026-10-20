@@ -78,6 +78,9 @@ struct AccountFacts {
 
 // Whether Stripe's `status` is one that grants (active, trialing, past_due).
 bool status_grants(std::string_view status);
+// Whether Stripe's `status` is one a subscription never leaves (canceled,
+// incomplete_expired): it grants nothing again.
+bool status_terminal(std::string_view status);
 // Whether the subscription grants at `now` (Unix seconds): a granting status,
 // a tier (1..3), a dedicated machine or a static address, and now <
 // current_period_end + kPeriodNetSeconds (no period end: no grant).

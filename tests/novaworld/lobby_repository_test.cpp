@@ -1,6 +1,8 @@
 // The lobby's tables below the listener (engine/net/novaworld/lobby_repository.h, migrations
-// 0006_lobby_commands.sql, 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql and
-// 0020_lobby_live_view.sql), on a migrated database per case: the lobby instances (each
+// 0006_lobby_commands.sql, 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql,
+// 0020_lobby_live_view.sql and 0022_lobby_goodbyes.sql), on a migrated database per case: the
+// goodbyes a lobby's clean stop leaves (listed within their window, replaced by address, the
+// older deleted by the next stop's write), the lobby instances (each
 // registration a row of its own naming its task, two
 // at one endpoint, listed with how long ago each was seen, touched, drained, the live ones those
 // active and seen within the live window and named by the newest one's endpoint, one unseen for
@@ -508,6 +510,41 @@ int test_login_account() {
 	return 0;
 }
 
+// The goodbyes a lobby's clean stop leaves (lobbydb::leave_goodbyes / list_goodbyes): every one
+// listed by address with its keys, a key at the top of the u32 range kept whole; a later stop's
+// goodbye at an address replaces the earlier one; one left past the window is not listed, and
+// the next stop's write deletes it.
+int test_goodbyes() {
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
+	TEST_EXPECT(lobbydb::list_goodbyes(db, 240).empty());
+	lobbydb::leave_goodbyes(db,
+			{ { "10.7.1.2", 32768, 0xFFFFFFFFu, 0x5A5A0001u }, { "10.7.1.3", 2302, 0x11u, 0u } },
+			240);
+	auto left = lobbydb::list_goodbyes(db, 240);
+	TEST_EXPECT(left.size() == 2);
+	TEST_EXPECT(left[0].peer_ip == "10.7.1.2" && left[0].peer_port == 32768 &&
+			left[0].server_sk == 0xFFFFFFFFu && left[0].client_ck == 0x5A5A0001u);
+	TEST_EXPECT(left[1].peer_ip == "10.7.1.3" && left[1].peer_port == 2302 &&
+			left[1].server_sk == 0x11u && left[1].client_ck == 0u);
+
+	// Another stop, at one of the addresses: its goodbye replaces the earlier one.
+	lobbydb::leave_goodbyes(db, { { "10.7.1.2", 32768, 0x22u, 0x5A5A0002u } }, 240);
+	left = lobbydb::list_goodbyes(db, 240);
+	TEST_EXPECT(left.size() == 2 && left[0].server_sk == 0x22u && left[0].client_ck == 0x5A5A0002u);
+
+	// One left past the window: no longer listed, and the next stop's write deletes it (an empty
+	// one too).
+	db.exec("UPDATE lobby_goodbyes SET left_at = now() - interval '10 minutes' WHERE peer_ip = "
+			"'10.7.1.3';");
+	left = lobbydb::list_goodbyes(db, 240);
+	TEST_EXPECT(left.size() == 1 && left[0].peer_ip == "10.7.1.2");
+	TEST_EXPECT(db.query("SELECT 1 FROM lobby_goodbyes;").size() == 2);
+	lobbydb::leave_goodbyes(db, {}, 240);
+	TEST_EXPECT(db.query("SELECT 1 FROM lobby_goodbyes;").size() == 1);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -519,7 +556,9 @@ int main(int argc, char **argv) {
 	if (test_take_and_cascade() != 0) return 1;
 	if (test_instances_and_rids() != 0)
 		return 1;
+	if (test_goodbyes() != 0)
+		return 1;
 	std::printf("OK: lobby repository (instances, RIDs, session rows, pushes, ends, forget_owner, "
-				"take, cascade, clear_unheld)\n");
+				"take, cascade, clear_unheld, goodbyes)\n");
 	return 0;
 }

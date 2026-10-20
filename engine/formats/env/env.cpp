@@ -94,8 +94,9 @@ std::string name_token(const std::string &name) {
 }
 
 // The parser's color pack: each byte times the envscale read so far, truncated, clamped
-// to 255 [orig: Color_ScaleRGBAndPack @ 0x57f890] (and at 0: the original packs garbage
-// for a negative byte, divergence #11).
+// to 255 [orig: Color_ScaleRGBAndPack @ 0x57f890]. We also clamp at 0, where the original
+// has no lower clamp and packs a negative channel by sign extension (its low byte kept,
+// every byte above it 0xFF, @ 0x57f8e4..0x57f8ef): an open divergence, env-tod-re #11.
 void parse_rgb_baked(const io::ConfigTokens &tokens, Rgb &out, float envscale) {
 	int rgb[3];
 	token_rgb(tokens, rgb);
@@ -152,8 +153,9 @@ void assign_tod_color(Keyframe &keyframe, const std::string &key, const io::Conf
 
 // Quantize one channel the way the parser stores it: file byte scaled by
 // envscale, truncated, clamped to 255 [orig: Color_ScaleRGBAndPack @ 0x57f890].
-// (The original has no lower clamp and packs garbage for negative inputs; we
-// clamp at 0 — tracked divergence #11 in docs/env/env-tod-re.md.)
+// (The original has no lower clamp and packs a negative channel by sign
+// extension, @ 0x57f8e4..0x57f8ef; we clamp at 0, an open divergence: #11 in
+// docs/env/env-tod-re.md.)
 int quantize_channel(float normalized, float envscale) {
 	const int byte_value = std::clamp<int>(static_cast<int>(normalized * 255.0f + 0.5f), 0, 255);
 	const int scaled = static_cast<int>(static_cast<float>(byte_value) * envscale);

@@ -5515,18 +5515,24 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(body_text(one(ana, ana_first)).find("planted-admin-secret") == std::string::npos);
 
 	// The owner's stop by id: stopping, again stopping, then (the row ended) 409
-	// not_live; the list shows the live one first, then the ended one.
+	// not_live; the list shows the live one first, then the ended one. Placed
+	// (an open start, as its slot makes one), its start ends its owner's stop.
+	h.pool.acquire()->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot) "
+						   "VALUES ($1, 1, 99, 0);",
+			{ opennova::db::BindValue(ana_first) });
 	reply = stop(ana, ana_first);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
 	reply = stop(ana, ana_first);
 	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
+	TEST_EXPECT(hosted::end_start(*h.pool.acquire(), ana_first, 1, hosted::StartCause::Stop));
 	TEST_EXPECT(hosted::transition(*h.pool.acquire(), ana_first, hosted::State::Stopping, hosted::State::Stopped,
 			"ended by the test"));
 	reply = stop(ana, ana_first);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
 	json = crow::json::load(body_text(one(ana, ana_first)));
 	TEST_EXPECT(str(json["server"]["state"]) == "stopped" && !json["server"]["live"].b());
+	TEST_EXPECT(str(json["server"]["stopped_because"]["cause"]) == "owner_stop");
 	TEST_EXPECT(json["server"]["events"].size() == 3);
 	TEST_EXPECT(json["server"]["ended_at"].t() == crow::json::type::String);
 	json = crow::json::load(body_text(list(ana)));
@@ -5641,6 +5647,12 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(admin_stop("999999", { kBearer }).code == 404);
 	reply = admin_stop(std::to_string(ana_first), { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	// Each placed (an open start): its start ends an admin's stop.
+	for (const int64_t id : { cy_server, ana_second }) {
+		h.pool.acquire()->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot) "
+							   "VALUES ($1, 1, 99, 0);",
+				{ opennova::db::BindValue(id) });
+	}
 	reply = admin_stop(std::to_string(cy_server), { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
@@ -5652,6 +5664,8 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 0);
 	const auto second_row = hosted::find_server(*h.pool.acquire(), ana_second);
 	TEST_EXPECT(second_row && second_row->state == hosted::State::Stopping);
+	for (const int64_t id : { cy_server, ana_second })
+		TEST_EXPECT(hosted::list_starts(*h.pool.acquire(), id, 1)[0].cause == hosted::StartCause::AdminStop);
 	end_stopping_servers(h);
 	{
 		auto db = h.pool.acquire();
@@ -5662,7 +5676,7 @@ int test_hosted_server_routes(Harness &h) {
 	{
 		auto db = h.pool.acquire();
 		db->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, ended_at, exit_code, "
-				 "reason, cause) VALUES ($1, 1, 99, 0, now(), 3, 'the session ended: the NovaWorld service "
+				 "reason, cause) VALUES ($1, 2, 99, 0, now(), 3, 'the session ended: the NovaWorld service "
 				 "stopped the hosting', 'crash');",
 				{ opennova::db::BindValue(ana_first) });
 	}
@@ -5672,7 +5686,8 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(str(json["server"]["stopped_because"]["cause"]) == "crash" &&
 			json["server"]["stopped_because"]["exit_code"].i() == 3 && !json["server"]["stopped_because"]["oom"].b() &&
 			str(json["server"]["stopped_because"]["line"]) ==
-					"the session ended: the NovaWorld service stopped the hosting");
+					"the session ended: the NovaWorld service stopped the hosting" &&
+			json["server"]["stopped_because"]["limit"].t() == crow::json::type::Null);
 	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(ana_first), { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && str(json["server"]["phase"]["name"]) == "stopped" &&
@@ -5682,7 +5697,7 @@ int test_hosted_server_routes(Harness &h) {
 	{
 		auto db = h.pool.acquire();
 		db->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, ended_at, exit_code, "
-				 "reason, cause) VALUES ($1, 2, 99, 0, now(), 125, 'its data could not be fetched: aws s3 sync "
+				 "reason, cause) VALUES ($1, 3, 99, 0, now(), 125, 'its data could not be fetched: aws s3 sync "
 				 "exited 1: AccessDenied', 'data_unavailable');",
 				{ opennova::db::BindValue(ana_first) });
 	}
@@ -5697,6 +5712,16 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200 && json &&
 			str(json["server"]["stopped_because"]["line"]) ==
 					"its data could not be fetched: aws s3 sync exited 1: AccessDenied");
+	// A stop for its owner's limits: the limit it was past, and how many its
+	// owner had (no shared server free, 0 dedicated machines).
+	h.pool.acquire()->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, ended_at, "
+						   "cause, limit_kind, limit_count) VALUES ($1, 4, 99, 0, now(), 'limits', "
+						   "'no_shared_server', 0);",
+			{ opennova::db::BindValue(ana_first) });
+	json = crow::json::load(body_text(one(ana, ana_first)));
+	TEST_EXPECT(json && str(json["server"]["stopped_because"]["cause"]) == "limits" &&
+			str(json["server"]["stopped_because"]["limit"]["kind"]) == "no_shared_server" &&
+			json["server"]["stopped_because"]["limit"]["count"].i() == 0);
 
 	// Hosting off (the Secure listener runs with ONNET_HOSTED_PROVIDER none): 503.
 	std::string token;
@@ -6390,7 +6415,8 @@ int test_admin_fleet_routes(Harness &h) {
 	TEST_EXPECT(hosted::transition_machine(*db, booting.id, hosted::FleetMachineState::Draining,
 			hosted::FleetMachineState::Ended, "by the test"));
 	opennova::hostdb::remove_host_by_rid(*db, rid);
-	for (const int64_t id : { running, waiting }) hosted::request_stop(*db, id, "by the test");
+	for (const int64_t id : { running, waiting })
+		hosted::request_stop(*db, id, "by the test", hosted::StartCause::OwnerStop);
 	end_stopping_servers(*db);
 	TEST_EXPECT(nws::delete_service_account(*db, service.id).ok);
 	db->exec("DELETE FROM billing_subscriptions WHERE stripe_subscription_id = 'sub_fleet_ben';");
@@ -6560,7 +6586,8 @@ int test_hosted_stats_routes(Harness &h) {
 
 	// Leave no live server for the cases after.
 	opennova::hostdb::remove_host_by_rid(*db, rid);
-	for (const int64_t id : { running, others }) hosted::request_stop(*db, id, "by the test");
+	for (const int64_t id : { running, others })
+		hosted::request_stop(*db, id, "by the test", hosted::StartCause::OwnerStop);
 	end_stopping_servers(*db);
 	TEST_EXPECT(nws::delete_service_account(*db, service.id).ok);
 	return 0;
@@ -6773,7 +6800,7 @@ int test_hosted_usage_route(Harness &h) {
 
 	// Leave no live server or machine for the cases after.
 	for (const int64_t id : { a, b, c, d })
-		hosted::request_stop(*db, id, "by the test");
+		hosted::request_stop(*db, id, "by the test", hosted::StartCause::OwnerStop);
 	end_stopping_servers(*db);
 	for (const int64_t m : { shared, own })
 		TEST_EXPECT(hosted::transition_machine(*db, m, hosted::FleetMachineState::Ready,
@@ -7195,7 +7222,8 @@ int test_hosted_console_routes(Harness &h) {
 	}
 
 	// Stopping: refused before the link, the console still read.
-	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test"));
+	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test",
+			hosted::StartCause::OwnerStop));
 	reply = get(me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
 	reply = post(base + "/players/1/punt", { kBearer });
@@ -7472,6 +7500,37 @@ int test_billing_routes(Harness &h) {
 		TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_eligible");
 	}
 	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), gus));
+
+	// Back from Stripe unpaid: the open session expires and its reservation goes
+	// at once, so the room sells again; again, nothing is left to release; a paid
+	// session is left to the sync.
+	const int64_t hal = make_account(h, "bill_hal", "pw-bill-hal");
+	const std::string hal_s = login_token(h, "10.61.0.10", "bill_hal", "pw-bill-hal");
+	TEST_EXPECT(hal > 0 && !hal_s.empty());
+	TEST_EXPECT(post("/api/billing/checkout/cancel", hal_s).code == 200);
+	TEST_EXPECT(post("/api/billing/checkout", hal_s, "{\"item\":\"own_machine\"}").code == 200);
+	std::string hal_session = billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session;
+	TEST_EXPECT(!hal_session.empty() && billing::live_reservations_of(*h.pool.acquire(), hal).size() == 1);
+	reply = post("/api/billing/checkout/cancel", hal_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["released"].b());
+	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), hal).empty() &&
+			billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session.empty());
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		TEST_EXPECT(h.stripe->checkout_sessions[hal_session].status == "expired");
+	}
+	reply = post("/api/billing/checkout/cancel", hal_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["released"].b());
+	TEST_EXPECT(post("/api/billing/checkout", hal_s, "{\"item\":\"own_machine\"}").code == 200);
+	hal_session = billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session;
+	TEST_EXPECT(!h.stripe->complete_checkout(hal_session).empty());
+	reply = post("/api/billing/checkout/cancel", hal_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["released"].b() &&
+			billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session == hal_session);
+	TEST_EXPECT(post("/api/billing/checkout/cancel", hal_s, {}, /*csrf=*/false).code == 403);
 
 	// Billing off (the Secure listener): every account route 503 billing_disabled.
 	std::string token;

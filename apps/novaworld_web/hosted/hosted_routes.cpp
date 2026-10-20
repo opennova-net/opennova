@@ -367,6 +367,12 @@ void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, i
 	if (const auto why = stopped_because(s.state, in.last_start, admin)) {
 		crow::json::wvalue b;
 		b["cause"] = start_cause_text(why->cause);
+		if (why->limit) {
+			b["limit"]["kind"] = limit_kind_text(why->limit->kind);
+			b["limit"]["count"] = why->limit->count;
+		} else {
+			b["limit"] = nullptr;
+		}
 		if (why->exit_code)
 			b["exit_code"] = *why->exit_code;
 		else
@@ -447,9 +453,13 @@ void HostedRoutes::register_routes(WebApp &app) {
 // and bytes_total with downloading_data, restart, restart_limit and cause
 // (crash or timeout) with restarting}: where its start stands,
 // server_phase.h), stopped_because
-// ({cause: crash, timeout, fleet, stop, update, limits, no_data, link_lost or
-// data_unavailable, exit_code, oom, line: the server's own last line} for a
-// stopped or failed server, else null)}, without
+// ({cause: crash, timeout, fleet, stop (the service's, or one before
+// owner_stop and admin_stop told who), owner_stop, admin_stop, update, limits,
+// no_data, link_lost or data_unavailable, limit ({kind: shared_servers,
+// no_shared_server or no_shared_room, count: the owner's shared servers or
+// dedicated machines then} for a limits stop that recorded it, else null),
+// exit_code, oom, line: the server's own last line} for a stopped or failed
+// server, else null)}, without
 // its events. 401 with no live session.
 crow::response HostedRoutes::me_servers(const crow::request &req) {
 	auto access = access_.require_user(req);
@@ -718,7 +728,8 @@ crow::response HostedRoutes::me_stop(const crow::request &req, uint64_t id) {
 			log_owner(user, "stop", "server " + std::to_string(server->id) + " not_live");
 			return json_error(409, "not_live", "this hosted server has ended");
 		}
-		const bool asked = request_stop(*db_conn, server->id, "stopped by its owner");
+		const bool asked =
+				request_stop(*db_conn, server->id, "stopped by its owner", StartCause::OwnerStop);
 		log_owner(user, "stop", "server " + std::to_string(server->id) + (asked ? " stopping" : " already stopping"));
 		return server_reply(202, *db_conn, server->id, false);
 	} catch (const db::Error &e) {
@@ -797,7 +808,7 @@ crow::response HostedRoutes::admin_stop(const crow::request &req, uint64_t id) {
 		const auto server = find_server(*db_conn, server_id);
 		if (!server) return json_error(404, "not_found", "no hosted server has this id");
 		if (!is_live(server->state)) return json_error(409, "not_live", "this hosted server has ended");
-		request_stop(*db_conn, server_id, "stopped by an admin");
+		request_stop(*db_conn, server_id, "stopped by an admin", StartCause::AdminStop);
 		return server_reply(202, *db_conn, server_id, true);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/hosted/%llu/stop failed: %s\n",

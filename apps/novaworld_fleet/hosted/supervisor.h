@@ -303,8 +303,9 @@ struct SupervisorConfig {
 	uint64_t listing_timeout_ms = 3 * 60 * 1000;
 	// A server running at the service's start: its health checks wait this
 	// long for it to list again, on either driver. The restart left its
-	// lister's NOVAWORLDUDP session dead, which opennova-serve drops only past
-	// the service template's 240 s of receive silence, retail's
+	// lister's NOVAWORLDUDP session dead, which opennova-serve drops at its next
+	// update when the lobby's clean stop left the session's goodbye, else only
+	// past the service template's 240 s of receive silence, retail's
 	// (novaworldudp_session_timeout_ms; [orig: CNapiGameSession_InitNPConnection
 	// @0x4d3e1f], the reap [orig: CNapiNPConnection_PumpStateMachine @0x6292e0]),
 	// before it reconnects and re-hosts: twice that 240 s.
@@ -312,7 +313,9 @@ struct SupervisorConfig {
 	// A running server whose listing no health check has found for this long
 	// is placed again, no restart counted: its lobby went away (a lobby's
 	// replacement takes its listings, ADR 0063 d8). Its lister, opennova-serve's
-	// NWU session (retail's), notices only past those 240 s of receive silence,
+	// NWU session (retail's), notices at its next update when the lobby's clean
+	// stop left the session's goodbye (lobby_goodbyes: the lobby that update
+	// reaches sends it), else only past those 240 s of receive silence,
 	// then reconnects to the lobby address the gate gave it, never through the
 	// gate again: its 0x41 to the gate's UDPNOVAWORLD targets 1 s on, every 3 s
 	// in 10 s windows, the re-join's 0x42 for up to 20 s, then the re-verify
@@ -321,10 +324,12 @@ struct SupervisorConfig {
 	// @0x629487..0x6296cb; CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0,
 	// the target walk @0x629183..0x6291b4;
 	// CNapiGameSession_HandleConnectVerifyResponse @0x4d5961..0x4d599e]). A
-	// lobby back at that address lists it again within about 271 s (240 + 1 +
-	// 10 + 20, one health interval later here); one at a new address, an ECS
-	// task's own, never does, and only a new start, through the gate, lists it
-	// again. Twice the 240 s, as above.
+	// lobby back at that address lists it again within its next update (30 s)
+	// and a few seconds on the goodbye, else within about 271 s (240 + 1 + 10 +
+	// 20, one health interval later here); one at a new address, an ECS task's
+	// own, never does, and only a new start, through the gate, lists it again.
+	// Twice the 240 s, as above: the silence is the path a lobby that died
+	// without its stop leaves.
 	uint64_t listing_lost_ms = 2 * 240 * 1000;
 	uint64_t health_interval_ms = 20 * 1000;
 	int health_misses = 3;

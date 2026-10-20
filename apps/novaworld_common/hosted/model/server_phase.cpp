@@ -128,6 +128,7 @@ std::optional<StoppedBecause> stopped_because(
 		return std::nullopt;
 	StoppedBecause out;
 	out.cause = *last_start->cause;
+	if (out.cause == StartCause::Limits) out.limit = last_start->limit;
 	out.exit_code = last_start->exit_code;
 	out.oom = last_start->oom;
 	// The agent's reason a start never ran is no line of the server's.

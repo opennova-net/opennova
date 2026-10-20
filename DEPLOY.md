@@ -964,10 +964,16 @@ new task waits as the standby, then leads once the old one lets the lock go; the
 balancer sends new lobby flows to the new lobby task once it passes, then drains the old
 one for 10 s before ECS stops it). A lobby's restart is the one that shows: its players
 sign in again through the gate, and the servers listed on it, hosted or retail players'
-own, leave the browser for up to about 4.5 min (a host's session drops the silent lobby
-after 240 s and reconnects to the one lobby address), then list again with no restart and
-their matches going on. The jobs (the worker's, the data program's) and the fleet's
-rows wait out a restart in the database. hostd is the exception: one task per machine
+own, leave the browser until each host's next update (30 s at most) and its reconnect (a
+few seconds), then list again with no restart and their matches going on. The old lobby's
+stop leaves the goodbye it owes each session it held (`lobby_goodbyes`): the balancer
+ended its flows before ECS signalled it, so the new lobby, which a host's next packet
+reaches, sends it in its place, and the host reconnects to the one lobby address at once.
+A lobby that dies without its stop leaves none, and its hosts drop the silent lobby after
+240 s, then reconnect the same way (up to about 4.5 min). A release that first brings the
+goodbyes still replaces a lobby that leaves none: its roll takes the 4.5 min. The jobs
+(the worker's, the data program's) and the fleet's rows wait out a restart in the
+database. hostd is the exception: one task per machine
 (a DAEMON service, never two agents on one machine), so ECS stops at most half the
 machines' agents, then starts their new ones (`minimumHealthyPercent` 50); a machine's
 servers run on meanwhile, and its agent's sync gap stays well under the 60 s after which
@@ -1998,9 +2004,10 @@ every command).
   old and takes the balancer's new flows once it passes; the old one is drained (10 s)
   and stopped. Its players sign in again through the gate onto the one lobby address.
   The hosted server and the retail self-host both list again on the new task within about
-  5 minutes (a host's session times out after 240 s and reconnects to the same address)
-  with no restart: the server's timeline shows no `placed again`, its match goes on, and
-  it is never `failed`. A lobby
+  a minute (the new lobby answers each host's next packet with the goodbye the old one
+  left, and the host reconnects to the same address at once; the new lobby's log says
+  `ServerGoodBye x4 in its place` for each) with no restart: the server's timeline shows
+  no `placed again`, its match goes on, and it is never `failed`. A lobby
   image that never turns healthy (`app deploy --image lobby=<a broken tag>`) leaves the
   old lobby serving while the circuit breaker rolls it back, and the deploy records
   nothing.

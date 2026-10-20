@@ -141,13 +141,15 @@ ComposedServerCommand refused(const char *error, const std::string &message) {
 }
 
 // A hosted server's listing (ADR 0053, proposed): its stop is the hosted
-// server's, the supervisor's own act (the row to stopping, then the
-// supervisor's ServerStopHosting push and the machine's end), never a bare push
+// server's, the supervisor's own act (the row to stopping, its start's cause
+// who asked, then the supervisor's ServerStopHosting push and the machine's
+// end), never a bare push
 // here: that would end the server's session, and the supervisor would read the
 // exit as a crash and restart it. 202 {"rid", "hosted_server_id", "state"}, the
 // hosted server's state after the request (also when it was stopping already).
-crow::response stop_hosted(db::Database &db, uint32_t rid, int64_t server_id, const char *detail) {
-	hosted::request_stop(db, server_id, detail);
+crow::response stop_hosted(db::Database &db, uint32_t rid, int64_t server_id, const char *detail,
+		hosted::StartCause cause) {
+	hosted::request_stop(db, server_id, detail, cause);
 	const auto server = hosted::find_server(db, server_id);
 	crow::json::wvalue out;
 	out["rid"] = rid;
@@ -374,7 +376,8 @@ crow::response HostRoutes::admin_stop(const crow::request &req, uint64_t rid) {
 			// (an ended one's lingering listing included) takes the plain push.
 			const auto hosted_server = hosted::hosted_server_of_account(*db_conn, *row->host_user_id);
 			if (hosted_server && hosted::is_live(hosted_server->state))
-				return stop_hosted(*db_conn, rid32, hosted_server->server_id, "stopped by an admin from its listing");
+				return stop_hosted(*db_conn, rid32, hosted_server->server_id,
+						"stopped by an admin from its listing", hosted::StartCause::AdminStop);
 		}
 		result = lobbydb::queue_stop_hosting(*db_conn, rid32, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT);
 	} catch (const db::Error &e) {
@@ -496,7 +499,7 @@ crow::response HostRoutes::push_as_owner(const WebSessionUser &user, uint64_t ri
 			if (kind == OwnerPush::Stop) {
 				log_owner_push(user, rid, what, line, "hosted_stop");
 				return stop_hosted(*db_conn, rid32, hosted_server->server_id,
-						"stopped by its owner from its listing");
+						"stopped by its owner from its listing", hosted::StartCause::OwnerStop);
 			}
 			if (hosted_server->state == hosted::State::Stopping) {
 				log_owner_push(user, rid, what, line, "server_stopping");

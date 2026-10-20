@@ -56,7 +56,7 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 // bytes_total, with restarting restart, restart_limit and cause (crash or
 // timeout), with
 // data_unavailable for an admin (`admin`) line, the agent's reason},
-// "stopped_because" ({cause, exit_code, oom, line} for a stopped or failed
+// "stopped_because" ({cause, limit, exit_code, oom, line} for a stopped or failed
 // server whose last run ended, else null; the agent's reason a start never ran
 // is an admin's line alone).
 void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, int64_t now_ms,
