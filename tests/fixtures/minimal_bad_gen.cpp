@@ -15,9 +15,11 @@
 //                                  each a frame long), a loop (flags 1), 4 events
 //                                  (bottom 31/32, top 55/32), no translations;
 //                                  bone 0 `BN01 Hips` the root, 13/14 the neck
-//                                  and head; every key a small turn of its own
-//                                  (the last repeating the first, a seamless
-//                                  loop), so no bone's bind is the identity
+//                                  and head; every key a turn of its own, every
+//                                  fourth bone's past 150 degrees (the last key
+//                                  repeating the first from the opposite
+//                                  hemisphere, a seamless loop), so no bone's
+//                                  bind is the identity
 //   fixtures/anim/rig19_twist.bad  rig19_idle with bone 5 (BN06 R UpperArm, a
 //                                  weapon-channel mask bone) and bone 7 (BN08 R
 //                                  Thigh, not one) turned 90 degrees about their
@@ -213,10 +215,18 @@ BadBuildClip make_idle() {
 	clip.frame_count = 3;
 	clip.bones = rig_bones();
 	// Bone b turns about mission axis b % 3 by tan(half angle) = (8 + 2 (b % 5)
-	// + k) / 128 on key k (7 to 14 degrees), the last key repeating the first.
+	// + k) / 128 on key k (7 to 14 degrees); every fourth bone (0, 4, 8, 12, 16:
+	// about x, y and z) by 4 + k / 16 instead (152 degrees and on), as a body
+	// rig's bind turns its limbs past a quarter turn. The last key repeats the
+	// first from the opposite hemisphere, (-x, -y, -z, -w): the same turn, which
+	// the slerp takes the short way, as the shipped clips store such neighbours
+	// (4573 key pairs in 218 of the 477, bad_build.h).
 	key_every_bone(clip, [](int b, int k) {
 		const int step = k == 3 ? 0 : k;
-		return turn(b % 3, (8.0 + 2.0 * (b % 5) + step) / 128.0);
+		const double t = b % 4 == 0 ? 4.0 + step / 16.0 : (8.0 + 2.0 * (b % 5) + step) / 128.0;
+		BadBuildQuat q = turn(b % 3, t);
+		if (k == 3) q = BadBuildQuat{-q.x, -q.y, -q.z, -q.w};
+		return q;
 	});
 	standing_events(clip);
 	return clip;

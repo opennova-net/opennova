@@ -1082,6 +1082,14 @@ const std::vector<Recipe> &recipes() {
 		// A user point on part -1 (Bed01).
 		{"crate_usrp_no_part", make_crate, nullptr, "threedi/synth",
 				[](Threedi3di3 &t) { t.user_points[0].subobject_index = -1; }},
+		// The bulb self-lit on its UV twin: an emissive material named _LUM#UV, its U
+		// scrolling (the shipped _LUM#UV rows the reader accepts as emissive).
+		{"shed_mtrl1_ab_lum_uv", make_shed, [](Model &m) {
+			std::snprintf(m.materials[1].shader_name, sizeof(m.materials[1].shader_name), "FF_ST_AB_LUM#UV");
+			m.materials[1].emissive_type = THREEDI_EMISSIVE_FULL;
+			m.materials[1].u_params.style = 16;
+			m.materials[1].u_params.gen_rate = 1.0f;
+		}},
 		// --- the constant AlphaGen crate (fixtures/threedi/crate_alphagen24.3di) ---
 		{"crate_alphagen24", make_crate, [](Model &m) {
 			ThreediMaterial &mat = m.materials[0];
@@ -1313,6 +1321,10 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "house") expect(!p.live(0), name + ": inert");
 	if (name == "house_lod0_sine_rotx") expect(p.live(0) && p.model.materials[0].u_params.style == 0, name + ": live, uv 0");
 	if (name == "house_lod0_sine_rotx_uv1") expect(p.live(0) && p.model.materials[0].u_params.style == 1, name + ": live, uv 1");
+	if (name == "shed_mtrl1_ab_lum_uv")
+		expect(!std::strcmp(p.model.materials[1].shader_name, "FF_ST_AB_LUM#UV") &&
+						p.model.materials[1].emissive_type == THREEDI_EMISSIVE_FULL && p.model.materials[1].u_params.style == 16,
+				name + ": an emissive _LUM#UV row");
 	if (name == "crate_alphagen24")
 		expect(!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP") && p.model.materials[0].alpha_gen.style == 24 &&
 						p.model.materials[0].alpha_gen.start == 128 &&

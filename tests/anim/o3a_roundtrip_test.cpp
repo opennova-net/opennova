@@ -9,8 +9,12 @@
 // rig19_short.bad (DT1RST's, a channel that keys fewer times than its frame
 // count), rig19_sprs.bad (DVFLEE1E's, the one shipped clip that keys its
 // bones sparsely, with a duration table per bone), rig19_v0.bad (m60_rst's
-// version 0 events) and vm40_long.bad (M60_1i's channels keyed past the frame
-// count). Every event's bottom and top ride the text as stored.
+// version 0 events), vm40_long.bad (M60_1i's channels keyed past the frame
+// count), vm40_brk.bad (ak47_1st's X-triplicated positions, which the text
+// states as stored: `bonepos`), rig19_junk.bad (the exporter's leftovers),
+// vm40_nopad.bad (stgr_RST's missing pad row) and the flag bit 3 clips
+// rig19_b3.bad and vm40_b3lp.bad. Every event's bottom and top ride the text as
+// stored.
 //
 //   o3a_roundtrip_test <opennova-3di> <scratch dir>
 #include <cstdio>
@@ -47,7 +51,7 @@ int main(int argc, char **argv) {
 	int failures = 0;
 	int ran = 0;
 	for (const char *name : {"rig19.adm", "vm40.adm", "rig19_short.bad", "rig19_sprs.bad", "rig19_v0.bad",
-				 "vm40_long.bad"}) {
+				 "vm40_long.bad", "vm40_brk.bad", "rig19_junk.bad", "vm40_nopad.bad", "rig19_b3.bad", "vm40_b3lp.bad"}) {
 		const std::string source = test_paths_fixture(std::string("anim/") + name);
 		++ran;
 		const std::string stem = std::string(name).substr(0, std::string(name).find('.'));
