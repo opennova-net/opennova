@@ -40,6 +40,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/project_validation.h>
+#include <editor/graph/texture_checks.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_pass.h>
 #include <editor/import/import_plan.h>
@@ -417,7 +418,8 @@ static int test_scan_update() {
 // The validation a file at a time (ProjectValidation): over the four fixture projects, stepped at a
 // budget of one byte (a file a step), it makes the rows refresh_project and project_rows make in one
 // call, member for member, and the same stats; at one byte a step for each file the graph reads
-// (read ahead, the update taking them), one for the update, one for each file the document
+// (read ahead, the update taking them), one for the update, one for each texture header the uses'
+// check reads (texture_use_reads, listed over the updated graph), one for each file the document
 // types open, and the last one ends it.
 static int test_validation_steps() {
 	test_temp::TempDir dir("opennova_long_ops_validation");
@@ -436,9 +438,11 @@ static int test_validation_steps() {
 		ProjectValidation validation(stepped_graph, stepped_cache, readings);
 		size_t steps = 1;
 		while (!validation.step(input, 1)) ++steps;
-		// Each file the graph reads read ahead, the update, each file's own findings, the end.
+		// Each file the graph reads read ahead, the update, each texture header the uses read, each file's own
+		// findings, the end.
+		const size_t uses = texture_use_reads(stepped_graph, input).size();
 		TEST_EXPECT(validation.moved() && validation.files_done() == validation.files_total() &&
-		            validation.files_total() == whole_graph.stats().files_extracted + validation_files(scan).size());
+		            validation.files_total() == whole_graph.stats().files_extracted + uses + validation_files(scan).size());
 		TEST_EXPECT(steps == validation.files_total() + 2);
 		// The readings taken count as the update read them.
 		TEST_EXPECT(stepped_graph.stats().files_extracted == whole_graph.stats().files_extracted);

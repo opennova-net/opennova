@@ -826,6 +826,7 @@ JsonValue answer_perf(const QueryContext &context, const QueryArgs &, std::strin
 	out.set("validation", std::move(files));
 	const GraphStats &graph = problems.graph().stats();
 	JsonValue edges = JsonValue::make_object();
+	edges.set("files_walked", number(graph.files_walked));
 	edges.set("files_extracted", number(graph.files_extracted));
 	edges.set("files_reused", number(graph.files_reused));
 	edges.set("files_patched", number(graph.files_patched));
@@ -836,6 +837,7 @@ JsonValue answer_perf(const QueryContext &context, const QueryArgs &, std::strin
 	JsonValue install = JsonValue::make_object();
 	install.set("validations", number(originals.validations()));
 	install.set("files", number(originals.files()));
+	install.set("listed", number(originals.listed()));
 	install.set("last_ms", number(originals.last_ms()));
 	install.set("us", number(problems.spent().originals_us));
 	out.set("originals", std::move(install));
@@ -854,8 +856,8 @@ JsonValue answer_perf(const QueryContext &context, const QueryArgs &, std::strin
 	return out;
 }
 
-// What a build would be refused for, nothing built (S13 A7): the build's own plan
-// (project_build/build_plan.h) over the files as last scanned, the requirements and the Problems
+// What a build would be refused for, nothing built (S13 A7): the build's own plan's refusals
+// (project_build/build_plan.h, plan_blockers) over the files as last scanned, the requirements and the Problems
 // rows the build gates on (an error whose code gates: blocks_build); `blocked` exactly when that
 // plan would not pack. start_build reads the
 // changed documents again and refreshes first, and a build request joins a running build and waits
@@ -876,14 +878,13 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 	const std::vector<Diagnostic> gate = core.problems().gate_findings();
 	// The game's own bytes, packed as stored, gate on no finding that they do not serialize (S16).
 	const ShippedFiles shipped = core.shipped_files();
-	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements, gate, target,
-			&base, &shipped);
-	const std::vector<Diagnostic> blocking = build_blockers(plan);
+	const std::vector<Diagnostic> blocking = plan_blockers(core.paths(), *view.project.scan, *view.project.requirements,
+			gate, target, &base, &shipped);
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
-	out.set("blocked", JsonValue::make_bool(!plan.ok));
+	out.set("blocked", JsonValue::make_bool(!blocking.empty()));
 	// The line a build would be refused with (the UX round's problems lane), each refusal with its why.
-	if (!plan.ok) out.set("refusal", JsonValue::make_string(refusal_words(blocking)));
+	if (!blocking.empty()) out.set("refusal", JsonValue::make_string(refusal_words(blocking)));
 	set_page(out, page, blocking.size());
 	JsonValue list = JsonValue::make_array();
 	for (size_t i = page.first(blocking.size()); i < page.last(blocking.size()); ++i) {
@@ -1401,9 +1402,10 @@ constexpr EditorQueryRow kRows[] = {
 			"total_frames, slow and stall: those over 50 and 100 ms, held and all told; phases: wall, layout, requests, "
 			"poll, validation, compose, operation, originals and devices, each its mean, p50, p95 and max in "
 			"microseconds; worst: the slowest frame's phases); problems (compositions, compose_us, blocker_plans); "
-			"validation (the last pass's files); graph (the last update's files and edges); originals (validations, "
-			"files, last_ms, us); textures (headers_read, header_bytes, use_walks); and status (the validation's "
-			"running, done, total). Every count is all told since the editor started.")
+			"validation (the last pass's files); graph (the last update's files, files_walked those it visited, and "
+			"edges); originals (validations: its rounds, files: those whose own findings it made, listed, last_ms, "
+			"us); textures (headers_read, header_bytes, use_walks); and status (the validation's running, done, "
+			"total). Every count is all told since the editor started.")
 			.row,
 };
 

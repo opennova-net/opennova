@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -172,6 +174,30 @@ inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
 			a.planned == b.planned;
 }
 inline bool operator!=(const Diagnostic &a, const Diagnostic &b) { return !(a == b); }
+
+// A hash of a finding that operator== agrees with (two equal findings hash alike), over the members that tell
+// findings apart most often: what a set of findings is looked up by where a list of them is asked per row (the
+// rows a build is refused for, among thousands).
+struct DiagnosticHash {
+	size_t operator()(const Diagnostic &d) const {
+		size_t h = std::hash<std::string>()(d.message);
+		const auto mix = [&h](size_t value) { h ^= value + size_t(0x9e3779b9u) + (h << 6) + (h >> 2); };
+		mix(std::hash<std::string>()(d.asset));
+		mix(std::hash<std::string>()(d.field));
+		mix(std::hash<std::string>()(d.record));
+		mix(std::hash<const void *>()(d.row()));
+		mix(std::hash<size_t>()(d.line));
+		mix(std::hash<size_t>()(d.column));
+		mix(std::hash<uint64_t>()(uint64_t(d.row_id)));
+		mix(std::hash<size_t>()(static_cast<size_t>(d.severity)));
+		return h;
+	}
+	size_t operator()(const Diagnostic *d) const { return (*this)(*d); }
+};
+// Two findings by pointer, compared as findings (a set of pointers into a list it does not copy).
+struct DiagnosticPointerEqual {
+	bool operator()(const Diagnostic *a, const Diagnostic *b) const { return *a == *b; }
+};
 
 inline const char *diagnostic_severity_label(DiagnosticSeverity severity) {
 	switch (severity) {

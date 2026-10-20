@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -27,11 +28,17 @@ std::string original_finding_key(const Diagnostic &d);
 // (normalized_logical_name), with the findings a validation of the whole install makes about it, by key
 // and how many of each. A finding of the project is the game's own while its file's logical name holds
 // its key, as many times as the install's holds it; nothing is before the install was validated
-// (`ready`).
+// (`ready`), nor in a file of a name the install was not validated for (`covered`, where `scoped`: the
+// check validates the install for the names the project's rows are about; unscoped, every name).
 struct OriginalData {
 	bool ready = false;
+	bool scoped = false;
+	std::set<std::string> covered; // the names it was validated for, normalized (where `scoped`)
 	std::map<std::string, std::map<std::string, size_t>> findings;
-	bool operator==(const OriginalData &o) const { return ready == o.ready && findings == o.findings; }
+	bool covers(const std::string &name) const { return !scoped || covered.count(name) != 0; }
+	bool operator==(const OriginalData &o) const {
+		return ready == o.ready && scoped == o.scoped && covered == o.covered && findings == o.findings;
+	}
 	bool operator!=(const OriginalData &o) const { return !(*this == o); }
 };
 
@@ -47,13 +54,20 @@ struct OriginalData {
 // The install is listed as the project imports it (assets/install_view.h: its archives' files and the
 // loose files the game reads beside them, with `/exp` for a project that builds on an installed
 // expansion and under the project's names for one that builds as an expansion, ADR 0046 S16), each file
-// by its logical name and read through the view (ProjectPaths::files), then validated as the session validates the project (ProjectValidation, then the document
-// types' project checks over the install's files: a menu's screens compiled as the game draws them),
-// every step within a budget of bytes, its own graph, cache and checks let go once the findings are
-// keyed (nothing of the session's is copied or read). It never depends on the project: an edit, a
-// save, an import or a build validates nothing again. A Refresh (a new scan) looks at the install's
-// folder again, and an install that moved there (a patch) is validated again; another install or game
-// forgets it, as does another expansion of the project's (the view moves with it).
+// by its logical name and read through the view (ProjectPaths::files), then validated as the session
+// validates the project (ProjectValidation, then the document types' project checks over the install's
+// files: a menu's screens compiled as the game draws them), every step within a budget of bytes, its own
+// graph, cache and checks (nothing of the session's is copied or read). It validates only the files of
+// the names the project's rows are about (want's `names`: a ValidationScope, with the missions whose
+// terrain findings land on a terrain, an environment or overcast.def among them), which a validation of
+// every file finds the same of: the asset graph still reads every file it reads, for the cross-file
+// findings. The run is kept (its listing, graph, files' findings and checks; the mount let go between
+// rounds, the install's archives free for a patch): a name a later row is about is validated then, in a round
+// over the same graph and cache, and a finding of a name not yet covered is the modder's until it is
+// (OriginalData::covered). It never depends on the project's files: an edit, a save, an import or a build
+// validates nothing again but the name a row is about for the first time. A Refresh (a new scan) looks at the
+// install's folder again, and an install that moved there (a patch) is validated again; another install or
+// game forgets it, as does another expansion of the project's (the view moves with it).
 class OriginalFiles {
 public:
 	OriginalFiles();
@@ -63,19 +77,28 @@ public:
 
 	// The install to judge against (`install`, "" for none) for the project's game (`document`);
 	// `scan` the session's scan, a new one of which (a Refresh, a save) looks at the install's folder
-	// again. Another install, game or folder state forgets what was found and starts over.
-	void want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document, const void *scan);
+	// again; `names` the files the project's rows are about (normalized logical names the install serves),
+	// each validated once (those already wanted kept). Another install, game or folder state forgets what
+	// was found and starts over.
+	void want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document, const void *scan,
+	          const std::vector<std::string> &names);
 	// Goes on within `bytes` (what it reads, each file at least kValidationFileCost: at least one
 	// step); true when nothing is left to do.
 	bool step(uint64_t bytes);
-	bool settled() const { return phase_ == Phase::Idle || phase_ == Phase::Done; }
+	// Nothing left to do: no install, or every name wanted covered (an install that does not mount covers
+	// none, and never will).
+	bool settled() const {
+		return phase_ == Phase::Idle || (phase_ == Phase::Done && (!mounted_ || pending_.empty()));
+	}
 	// What it found: a new instance whenever it moves (then generation() moves too), never null.
 	const std::shared_ptr<const OriginalData> &data() const { return data_; }
 	uint64_t generation() const { return generation_; }
-	// For the tests and the measure: how many times it validated an install, of how many files, and the last
-	// one's time in its steps (milliseconds of the steady clock).
+	// For the tests and the measure: how many times it validated the install (a round over the names wanted
+	// then), of how many files whose own findings it made (the scope) among how many it listed, and the last
+	// round's time in its steps (milliseconds of the steady clock; the first's with the listing).
 	size_t validations() const { return validations_; }
 	size_t files() const { return files_; }
+	size_t listed() const { return listed_; }
 	double last_ms() const { return last_ms_; }
 	// The project closed: everything forgotten, the install let go.
 	void clear();
@@ -87,6 +110,11 @@ private:
 	void start();
 	void publish(OriginalData data);
 	std::string folder_state() const;
+	// A round over the names wanted: the scope of their files, validated over the run's graph and cache.
+	void begin_round();
+	// The scope's missions, once the graph holds the install: those whose terrain findings land on a file of the
+	// scope (a terrain's, an environment's, every one's for overcast.def).
+	void add_scope_missions();
 
 	std::string install_;
 	std::shared_ptr<const ProjectDocument> document_;
@@ -96,10 +124,15 @@ private:
 	const void *scan_ = nullptr;
 	Phase phase_ = Phase::Idle;
 	std::unique_ptr<Run> run_;
+	bool mounted_ = false;           // the install mounted (else nothing is ever covered)
+	std::set<std::string> wanted_;   // every name wanted since the run started, normalized
+	std::set<std::string> covered_;  // those the last round published
+	std::set<std::string> pending_;  // wanted, not covered
 	std::shared_ptr<const OriginalData> data_;
 	uint64_t generation_ = 0;
 	size_t validations_ = 0;
 	size_t files_ = 0;
+	size_t listed_ = 0;
 	double last_ms_ = 0.0;
 };
 

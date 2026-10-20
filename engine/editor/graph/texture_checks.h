@@ -42,11 +42,34 @@ struct TextureCheckStats {
 	uint64_t use_walks = 0;
 };
 TextureCheckStats texture_check_stats();
+// What the check keeps let go: its walks of the uses (each kept while the graph's state, the scan, the project's
+// folder and the files' source stand) and the headers and char map classes it read (use_checks.h's
+// forget_use_checks).
+void forget_texture_checks();
 
 // A project file's header as `reader` reads it (`root` the project's directory), read once and kept while
 // the file's stamp (the scan's size and last write) stands: the use check's read of it, which the uses'
-// budgets (TextureUseIndex) share.
+// budgets (TextureUseIndex) share. A PCX's or a PNG's is read from the file's first bytes alone (the 128 of a
+// PCX's header), a TGA's and a DDS's from the whole file.
 TextureHeader texture_file_header(const std::string &root, const AssetEntry &entry, TextureReader reader);
+
+// A read the check makes of a file of the validation's scan: its header as `reader` reads it, or (`classes`) a
+// char map's texels, read whole.
+struct TextureRead {
+	const AssetEntry *entry = nullptr;
+	TextureReader reader = TextureReader::None;
+	bool classes = false;
+};
+// Every read the check makes over `input` (each use's target as the check resolves it: the file its loader opens
+// and its reader, a terrain detail's own name's, a char map's classes; the names the game opens itself), each
+// once, in the graph's edges' order: what a validation's step reads ahead of the composition (ProjectValidation's
+// texture step), so the check reads nothing as it composes. None while the check keeps its walk for the graph
+// and the scan as they stand. A file is read through the input's paths: their source by its logical name where
+// they have one (ProjectPaths::files), else the project's folder.
+std::vector<TextureRead> texture_use_reads(const AssetGraph &graph, const ValidationInput &input);
+// One of those reads made where the check has not kept it for the file as the scan lists it; the bytes read (0:
+// kept).
+uint64_t read_texture_use(const ValidationInput &input, const TextureRead &read);
 
 // What a role asks of a file's sides, by its header as the role's loader reads it (`file` its name,
 // `where` the use in words: "the terrain colour map of isle.trn", `context` what the use says of itself:

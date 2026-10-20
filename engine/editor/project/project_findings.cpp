@@ -1,12 +1,15 @@
 #include <editor/project/project_findings.h>
 
 #include <iterator>
+#include <mutex>
 #include <set>
+#include <utility>
 
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/project_checks.h>
 #include <editor/graph/project_validation.h>
+#include <editor/graph/use_checks.h>
 #include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
@@ -37,7 +40,7 @@ Diagnostic boot_finding(const std::string &name) {
 // no file names (a script another runs, a tile file a terrain names) and the game opens by no
 // fixed name (game.wac, server.wac). What a mission's rename leaves behind, or an import of the
 // file without its mission: a note on the file, never a gate.
-void sidecar_notes(const AssetScan &scan, const AssetGraph &graph, std::vector<Diagnostic> &rows) {
+void sidecar_notes_of(const AssetScan &scan, const AssetGraph &graph, std::vector<Diagnostic> &rows) {
 	// The base names of the project's missions, as every reader takes them (to the first dot: a
 	// mission "op.v2.bms" opens "op.wac").
 	std::set<std::string> missions;
@@ -62,7 +65,54 @@ void sidecar_notes(const AssetScan &scan, const AssetGraph &graph, std::vector<D
 	}
 }
 
+// What a composition keeps between calls, each answer by what it was made of (forget_kept_answers lets them go):
+// the sidecars' notes by the scan's serial and the graph's state, the plan's word on the files by the scan's
+// serial and the project's expansion. A scan never indexed (serial 0) keeps none.
+std::mutex g_kept_mutex;
+UseCheckMemo<std::pair<uint64_t, uint64_t>, std::vector<Diagnostic>> g_sidecars;      // g_kept_mutex held
+UseCheckMemo<std::pair<uint64_t, std::string>, std::vector<Diagnostic>> g_plan_words; // g_kept_mutex held
+
+void sidecar_notes(const AssetScan &scan, const AssetGraph &graph, std::vector<Diagnostic> &rows) {
+	const std::pair<uint64_t, uint64_t> key{scan.serial(), graph.generation()};
+	const std::lock_guard<std::mutex> lock(g_kept_mutex);
+	const std::vector<Diagnostic> *kept = key.first != 0 ? g_sidecars.find(key) : nullptr;
+	if (!kept) {
+		std::vector<Diagnostic> made;
+		sidecar_notes_of(scan, graph, made);
+		if (key.first == 0) {
+			rows.insert(rows.end(), made.begin(), made.end());
+			return;
+		}
+		kept = &g_sidecars.keep(key, std::move(made));
+	}
+	rows.insert(rows.end(), kept->begin(), kept->end());
+}
+
+void plan_words(const AssetScan &scan, const std::string &expansion, std::vector<Diagnostic> &rows) {
+	const std::pair<uint64_t, std::string> key{scan.serial(), expansion};
+	const std::lock_guard<std::mutex> lock(g_kept_mutex);
+	const std::vector<Diagnostic> *kept = key.first != 0 ? g_plan_words.find(key) : nullptr;
+	if (!kept) {
+		std::vector<Diagnostic> made = plan_scan_findings(scan, expansion);
+		if (key.first == 0) {
+			rows.insert(rows.end(), made.begin(), made.end());
+			return;
+		}
+		kept = &g_plan_words.keep(key, std::move(made));
+	}
+	rows.insert(rows.end(), kept->begin(), kept->end());
+}
+
 } // namespace
+
+void forget_kept_answers() {
+	{
+		const std::lock_guard<std::mutex> lock(g_kept_mutex);
+		g_sidecars.clear();
+		g_plan_words.clear();
+	}
+	forget_use_checks();
+}
 
 ProjectFindings compose_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
                                          ProjectChecks &checks, const FileSource &files) {
@@ -101,8 +151,7 @@ ProjectFindings collect_project_findings(const ProjectFindingsInput &input, cons
 	rows.insert(rows.end(), input.open_findings.begin(), input.open_findings.end());
 	// The build's own word on the files (an archive in the project, a name no archive stores, a player's
 	// file left out): rows of the gate, so a build is refused only for what Problems shows and marks.
-	const std::vector<Diagnostic> plan = plan_scan_findings(input.scan, input.project.expansion.name);
-	rows.insert(rows.end(), plan.begin(), plan.end());
+	plan_words(input.scan, input.project.expansion.name, rows);
 	out.gate_end = rows.size();
 	checks.append_findings(rows);
 	rows.insert(rows.end(), input.build.begin(), input.build.end());

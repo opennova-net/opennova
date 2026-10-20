@@ -17,7 +17,11 @@
 
 #include <base/io/json.h>
 #include <editor/assets/asset_import.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/documents/validation_cache.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
 #include <editor/documents/texture_document.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/texture_checks.h>
@@ -493,6 +497,83 @@ int test_shipped_terrain_maps() {
 	return 0;
 }
 
+// Two headers alike in every field the checks read.
+bool same_header(const TextureHeader &a, const TextureHeader &b) {
+	return a.reader == b.reader && a.read == b.read && a.refusal == b.refusal && a.width == b.width && a.height == b.height &&
+	       a.bfc1 == b.bfc1 && a.pcx_bits == b.pcx_bits && a.pcx_planes == b.pcx_planes &&
+	       a.pcx_bytes_per_line == b.pcx_bytes_per_line && a.alpha == b.alpha;
+}
+
+// A PCX's and a PNG's header read from the file's first bytes (texture_file_header: the 128 of a PCX's header) is
+// the header read from the whole file, a short file's too, and the read takes those bytes alone. A validation
+// stepped at the smallest budget reads the uses' headers a step at a time (ProjectValidation's texture step), at
+// least two steps apart, and the composition after it reads none (texture_check_stats: headers_read).
+int test_header_reads() {
+	test_temp::TempDir dir{"opennova_editor_texture_header_reads"};
+	const std::string root = dir.file("project");
+	ProjectDocument document;
+	Diagnostic created;
+	TEST_EXPECT(create_project(root, "Header reads", "jo", document, created));
+	const std::vector<uint8_t> png = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 'I', 'H', 'D', 'R',
+	                                  0, 0, 0, 8, 0, 0, 0, 4, 8, 6, 0, 0, 0, 0, 0, 0, 0};
+	std::vector<uint8_t> png_long = png;
+	png_long.resize(4096, 7);
+	const std::vector<uint8_t> big = pcx(64, 32, 64);
+	const std::vector<uint8_t> cut(big.begin(), big.begin() + 100);
+	struct File {
+		const char *name;
+		const std::vector<uint8_t> *bytes;
+		TextureReader reader;
+	};
+	const File files[] = {{"big.pcx", &big, TextureReader::Pcx}, {"cut.pcx", &cut, TextureReader::Pcx},
+	                      {"tall.png", &png_long, TextureReader::Png}, {"short.png", &png, TextureReader::Png}};
+	for (const File &file : files) {
+		TEST_EXPECT(test_io::write_file(root + "/textures/" + file.name, *file.bytes));
+		AssetEntry entry = editor_test::file_entry(file.name, std::string("textures/") + file.name, AssetKind::Texture);
+		entry.size_bytes = file.bytes->size();
+		const TextureCheckStats before = texture_check_stats();
+		const TextureHeader prefix = texture_file_header(root, entry, file.reader);
+		const TextureCheckStats after = texture_check_stats();
+		TEST_EXPECT(same_header(prefix, texture_header_as(file.reader, *file.bytes)));
+		TEST_EXPECT(after.headers_read == before.headers_read + 1 &&
+		            after.header_bytes - before.header_bytes == std::min<size_t>(file.bytes->size(), 128));
+	}
+	// Two terrains' maps, each a use whose header the check reads.
+	TEST_EXPECT(test_io::write_file(root + "/textures/colour.tga", tga(1024, 1024)) &&
+	            test_io::write_file(root + "/textures/side.tga", tga(512, 512)) &&
+	            test_io::write_file(root + "/textures/detail.tga", tga(8, 8)) &&
+	            test_io::write_text(root + "/terrains/a.trn", trn("polytrn_colormap colour.tga\n")) &&
+	            test_io::write_text(root + "/terrains/b.trn", trn("polytrn_colormap side.tga\n")));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const AssetScan scan = scan_project_assets(paths, document);
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const ValidationInput input{paths, document, scan, open};
+	AssetGraph graph;
+	ValidationCache cache;
+	GraphReadings readings;
+	ProjectValidation validation(graph, cache, readings);
+	size_t steps_reading = 0;
+	for (bool done = false; !done;) {
+		const uint64_t before = texture_check_stats().headers_read;
+		done = validation.step(input, 1);
+		const uint64_t read = texture_check_stats().headers_read - before;
+		TEST_EXPECT(read <= 1);
+		steps_reading += read ? 1 : 0;
+	}
+	TEST_EXPECT(steps_reading >= 2);
+	const TextureCheckStats validated = texture_check_stats();
+	const std::vector<Diagnostic> rows = project_rows(input, graph, cache);
+	const TextureCheckStats composed = texture_check_stats();
+	TEST_EXPECT(composed.headers_read == validated.headers_read && composed.use_walks == validated.use_walks + 1);
+	TEST_EXPECT(std::any_of(rows.begin(), rows.end(), [](const Diagnostic &d) {
+		return d.code() == "texture.colormap_size" && d.asset == "terrains/b.trn";
+	}));
+	std::printf("header reads: a PCX's and a PNG's from their first bytes, the uses' a step at a time (%zu steps), none "
+	            "composing\n",
+	            steps_reading);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -500,6 +581,7 @@ int main() {
 	failures += test_checks();
 	failures += test_shipped_forms();
 	failures += test_shipped_terrain_maps();
+	failures += test_header_reads();
 	if (failures == 0) std::printf("editor_texture_checks: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
