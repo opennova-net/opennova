@@ -376,6 +376,14 @@ struct WeaponFsmInputs {
     bool owner_present = true; // MountSlot+36; ownerless embedded slots still cool down
     bool is_local = true;        // owner == g_LocalPlayerEntity paths
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately
+    // The authority's immediate refill stands for the refill its own S2C 0x49 echo
+    // runs, which only the local player and an entity with a non-person def take: a
+    // person row's reload (a remote player's own slot, a borrower addressed as
+    // itself) is refilled only by its own client's C2S 0x25 at the host
+    // (D-NET-336). [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 (the local
+    // test @0x42C0F8, the def test @0x42C103, the person arm @0x42C109..0x42C113);
+    // NapiNPServerMsg_HandleReloadRequest @0x514DF0 (the sender gate @0x514EFA)]
+    bool reload_refills = true;
     bool auto_reload = true;     // [orig: g_AutoReloadEnabled @ 0x24D2118]
     bool scope_active = false;   // g_WeaponScopeActive, the promoted byte, at the pump
     WeaponFsmScope *scope = nullptr; // the local owner's scope (null: no scope legs run)
@@ -519,5 +527,17 @@ bool weapon_fsm_scope_toggle_allowed(const WeaponFsmDef &def, const WeaponSlotSt
 // One 62.5 Hz tick of the pump + the current action's handler.
 void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
                      const WeaponFsmInputs &in, WeaponFsmEvents &out);
+
+// The authority's arm of an accepted C2S 0x06 on the slot it fires through (a
+// player's own row or a borrowed carrier slot): the counter cleared, the held
+// phase, FIRE current, then the fire action's state legs, whose shot and spend the
+// 0x06 handler has already run: the burst cycle, next = RECOIL, the kick sized by
+// the recoil row, the finish. The weapon walk pumps the slot on from there.
+// [orig: Server_ClientFiredRound @0x50BAA0 - +0 = 0 @0x50C2B0, +90 = 64 @0x50C2C4,
+//  +44 = 2 @0x50C2F0, the fire action @0x50C30D -> WeaponAction_Fire @0x542B10
+//  (the burst @0x542C8A..0x542C9B, next @0x542C9E, the kick @0x542CF1..0x542D0F,
+//  the finish @0x542D1A)]
+void weapon_fsm_arm_network_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
+                                 const WeaponFsmInputs &in, WeaponFsmEvents &out);
 
 } // namespace opennova::world

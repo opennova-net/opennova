@@ -976,7 +976,10 @@ bool check_a_controller_seat_fires_from_the_userpoint() {
 	hull.item_attrib = w::kItemAttribEweap;
 	hull.primary_weapon = gun.name;
 	hull.position = {1.0f, 0.5f, 0.0f};
-	hull.weapon_userpoint_bytes[0][0] = 5; // the slot's barrel after one shot (clip 8)
+	// The slot's barrel after one shot (clip 8), read at the RECOIL column: the first
+	// shot's arm left RECOIL next and no walk runs between the requests (D-NET-336)
+	// [orig: Server_ClientFiredRound @0x50C2B0..0x50C30D; the column @0x545B09..0x545B31].
+	hull.weapon_userpoint_bytes[0][1] = 5;
 	hull.weapon_userpoint_bytes[2][0] = 4; // the request's barrel
 	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
 	w::Entity *live_hull = world.registry.get(hull_h);
@@ -998,7 +1001,8 @@ bool check_a_controller_seat_fires_from_the_userpoint() {
 	// the carrier's raw pose.
 	dispatch_fire(roster[0], roster, world,
 			fire_body(shooter.packed, 0x22, 6, 0, 0, 0, 0x4000, 0, 0xFFFF, 1, 0, 0));
-	// Clip 8: the slot's barrel 0 names one, so barrel 2's record (point 4) is posed.
+	// Clip 8: the slot's barrel 0 names one at the RECOIL column, so barrel 2's record
+	// (point 4) is posed.
 	dispatch_fire(roster[0], roster, world,
 			fire_body(shooter.packed, 0x22, 6, 0, 0, 0, 0x4000, 0, 0xFFFF, 2, 0, 0));
 	// Barrel 3 names no point: the claim stands.

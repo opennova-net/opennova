@@ -254,6 +254,21 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 				world::weapon_fire_owner_status(*world, *shooter, slot_def, false) == 0 &&
 				world::weapon_fire_origin_status(*world, *shooter, *slot_def, claimed,
 						/*replay_client_action=*/false) == 0;
+		// The authority arms the slot the fire went through, after the controller
+		// pose read its pre-fire next action: FIRE runs on it (its shot and spend
+		// are this handler's legs), and the weapon walk pumps it on from there, a
+		// remote player's own row included (D-NET-336).
+		// [orig: Server_ClientFiredRound @0x50BAA0 - the arm @0x50C2B0..0x50C2F0,
+		//  the fire action @0x50C30D -> WeaponAction_Fire @0x542B10]
+		{
+			world::WeaponSlotState &armed =
+					mounted_slot != nullptr ? *mounted_slot
+					                        : static_cast<world::WeaponSlotState &>(*personal);
+			world::WeaponFsmInputs arm_inputs;
+			arm_inputs.is_local = false;
+			world::WeaponFsmEvents arm_events;
+			world::weapon_fsm_arm_network_fire(fire_def, armed, arm_inputs, arm_events);
+		}
 	}
 	// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
 	// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].

@@ -409,6 +409,54 @@ void test_the_walk_relays_an_authority_reload() {
 	}
 }
 
+// The same-tick order: each reload queues at its row's visit in the pool-0 walk, the
+// local player's at its own slot, so a gunner at a lower slot (a mission NPC loaded ahead
+// of the host's player) relays first and the S2C 0x49 pair leaves in that order. Ours sent
+// the local player's ahead of the walk's. [orig: WeaponAction_ProcessAllEntities
+// @0x5426A6..0x5426C9; WeaponAction_Reload @0x5430B0 (@0x5430FF / @0x543103) ->
+// NetPacket_SendReloadRequest @0x432930 (the queue @0x4329B7)]
+void test_the_walk_queues_reloads_in_slot_order() {
+	Rig r(false);
+	w::World &world = r.world;
+	CHECK(r.attach(r.claimant_h, 0)); // the NPC gunner, pool-0 slot 0
+	CHECK(r.claimant_h.slot() < r.requester_h.slot());
+	world.cached.local_player = r.requester_h;
+	w::LocalPlayer local(world);
+	world.local_player_state = &local;
+	local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
+	local.loadout.spawn_kit_set = true;
+	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
+			local.inventory_valid, /*select_spawn_default=*/true);
+	w::WeaponInstallData data;
+	data.name = "WPN_M4AUTO";
+	data.clipsize = world.tables.weapons.entries[kRifleAdm].clipsize;
+	data.table_baked = true;
+	w::local_weapon_install(world, local.weapon, data, false, false, &local.inventory,
+			local.view);
+	// Both slots enter RELOAD on the walk's next pass.
+	const auto stage = [](w::WeaponSlotState &slot) {
+		slot.current = w::weapon_action::kIdle;
+		slot.next = w::weapon_action::kReload;
+		slot.counter = 0;
+		slot.phase = w::weapon_phase::kDone;
+		slot.clip = 0;
+		slot.reserve = 100;
+	};
+	stage(r.gun().primary_weapon_slot);
+	stage(local.weapon.slot);
+	++world.logic_tick;
+	world.pump_weapon_actions();
+	CHECK(world.out.weapon_reloads.size() == 2);
+	if (world.out.weapon_reloads.size() == 2) {
+		CHECK(world.out.weapon_reloads[0].entity_handle == r.gun_h.packed);
+		CHECK(world.out.weapon_reloads[0].reload_param == 0xFFFF);
+		CHECK(world.out.weapon_reloads[1].entity_handle == r.requester_h.packed);
+		CHECK(world.out.weapon_reloads[1].reload_param == kRifleCombo);
+	}
+	CHECK(!local.last_reload.valid);
+	world.local_player_state = nullptr;
+}
+
 } // namespace
 
 int main() {
@@ -419,6 +467,7 @@ int main() {
 	test_the_local_player_holds_a_refused_gun_on_foot();
 	test_a_weapon_key_ends_a_slot_held_on_foot();
 	test_the_walk_relays_an_authority_reload();
+	test_the_walk_queues_reloads_in_slot_order();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

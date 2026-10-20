@@ -969,6 +969,13 @@ public:
     // A copy of `player`'s tables; false when no session slot holds it.
     virtual bool remote_weapon_tables(const World &world, EntityHandle player,
                                       WeaponInventory &out) const = 0;
+    // The two ammo words a slot of `player`'s own table reads: the pool of
+    // `ammo_class` (+0x15A58) and the loaded rounds of `bucket` (+0x15C58), each 0
+    // outside its table; false when no session slot holds it.
+    // [orig: Entity_GetScoreValueBySlotType @0x5406E0 (the validated player's pools
+    //  @0x5407B3); WeaponSlot_GetSharedLoadedRounds @0x5405F0 (its buckets @0x540657)]
+    virtual bool remote_ammo(const World &world, EntityHandle player, int32_t ammo_class,
+                             int32_t bucket, int32_t &pool, int32_t &loaded) const = 0;
 };
 
 // Server_TickUpdate's every-32 legs, inside the one script admission, between

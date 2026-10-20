@@ -387,9 +387,10 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                 }
             }
         }
-        if (in.is_authority) {
+        if (in.is_authority && in.reload_refills) {
             // Listen-host/SP zero-latency loopback of the §5.58 round-trip: the
-            // authority applies WeaponSlot_ReloadAmmo when it relays the request.
+            // authority applies WeaponSlot_ReloadAmmo when it relays the request,
+            // as its own S2C 0x49 echo would.
             apply_reload_ammo(def, slot);
             out.reload_applied = true;
         }
@@ -880,6 +881,23 @@ void weapon_fsm_replay_action(const WeaponFsmDef &def, WeaponSlotState &slot,
     } else if (slot.current == weapon_action::kRecoil) {
         add_shot_heat(def, slot, current_tick);
     }
+}
+
+void weapon_fsm_arm_network_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
+                                 const WeaponFsmInputs &in, WeaponFsmEvents &out) {
+    out = WeaponFsmEvents{};
+    slot.counter = 0;                     // [orig: @0x50C2B0]
+    slot.phase = weapon_phase::kHeld;     // [orig: +90 = 64 @0x50C2C4]
+    slot.current = weapon_action::kFire;  // [orig: +44 = 2 @0x50C2F0]
+    if (!in.owner_present) return;        // [orig: WeaponAction_Fire @0x542B24..0x542B2E]
+    const WeaponFsmAction &desc = def.actions[weapon_action::kFire];
+    if (def.burst3) // [orig: @0x542C8A]
+        slot.burst = slot.burst != 0 ? static_cast<uint8_t>(slot.burst - 1) : 2;
+    slot.next = weapon_action::kRecoil; // [orig: @0x542C9E]
+    begin_active(desc, slot, in, out);  // [orig: ExecuteActionTick @0x542CB4]
+    const WeaponFsmAction &recoil = def.actions[weapon_action::kRecoil];
+    kick_add(slot, recoil.delay_start + recoil.delay_end + slot.counter + 10); // [orig: @0x542CF1..0x542D0F]
+    finish_active(def, desc, slot, slot.next, out); // [orig: @0x542D1A]
 }
 
 void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,

@@ -20,6 +20,7 @@
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_powerup.h> // ServerRemoteWeaponTables
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/entity_wire_bridge.h>
@@ -666,28 +667,28 @@ void HostRole::run_tick(const TickInput &input) {
 	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
 	//  the WeaponAction_ProcessAllEntities call @0x526786]
 	kernel.local.authority_fire_admitted = local_fire_admitted();
-	kernel.world.pump_weapon_actions();
+	{
+		// A remote player's own slot reads its pools through the session's tables
+		// (D-NET-336) [orig: Entity_GetScoreValueBySlotType @0x5406E0].
+		ServerRemoteWeaponTables remote_tables(state.host_owner.ctx.np_protocol.connection_list);
+		kernel.world.remote_weapon_tables = &remote_tables;
+		kernel.world.pump_weapon_actions();
+		kernel.world.remote_weapon_tables = nullptr;
+	}
 	tail.restart();
 	kernel.resolve_new_infantry_adm_ids();
 	tail.mark(devtools::Slot::SIM_ADM_RESOLVE);
 	kernel.local.tick_medic_cooldown(kernel.local.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
-	// The pump's wire-facing reload outcome relays onto the loopback so the
-	// shared dispatcher broadcasts the S2C 0x49 to every client next frame
-	// (the authority already performed WeaponSlot_ReloadAmmo inside the pump;
-	// the server handler's local-connection gate prevents a second refill).
-	if (kernel.local.last_reload.valid && state.host_owner.serve_and_play) {
-		opennova::WeaponReload reload;
-		reload.entity_handle = kernel.local.last_reload.entity_handle;
-		reload.reload_param = kernel.local.last_reload.reload_param;
-		state.host_loop.client_send(0x25, opennova::encode_weapon_reload(reload));
-		kernel.local.last_reload = world::LocalWeaponReloadWire{};
-	}
-	// The walk's reloads for every other row ride the same client, in walk order
-	// (D-NET-336). Retail queues each at its row, the local player's among them;
-	// ours sends the local player's first when both reload on one tick. A host
-	// with no client of its own has no dispatcher queue to reach.
-	// [orig: WeaponAction_Reload @0x5430FF / @0x543103 ->
-	//  NetPacket_SendReloadRequest -> CNapiNetwork_QueueReliableMessage @0x4329B7]
+	// The walk's reload requests, the local player's at its own pool-0 visit among
+	// every other row's, ride the host's own client onto the loopback in walk order,
+	// so the shared dispatcher broadcasts each S2C 0x49 next frame in that order
+	// (the authority already refilled where the echo would; the server handler's
+	// local-connection gate prevents a second refill) (D-NET-336). A dedicated
+	// host has no client connection, so its queue sends nothing, as retail's.
+	// [orig: WeaponAction_Reload @0x5430FF / @0x543103 -> NetPacket_SendReloadRequest
+	//  @0x432930 -> CNapiNetwork_QueueReliableMessage @0x4C4FA0 (the client
+	//  connection test @0x4C4FA8), the connection made only for a host that is also a
+	//  client, CNapiGameSession_CreateSession @0x4C97C0 (@0x4C9B73..0x4C9BA6)]
 	if (state.host_owner.serve_and_play) {
 		for (const world::WeaponReloadRequest &request : kernel.world.out.weapon_reloads) {
 			opennova::WeaponReload reload;

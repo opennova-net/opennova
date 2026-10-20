@@ -1239,6 +1239,7 @@ public:
     //  (the gunner's +0x118 is the parent's MountSlot) ->
     //  WeaponAction_ProcessFrame @0x540E60]
     void pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick);
+    void pump_personal_slot(World &world, Entity &owner, uint32_t logic_tick);
     // The port's mount->gunner link (Entity::primary_weapon_owner) has no
     // retail twin: retail's borrow lives on the gunner's own +0x118 and ends
     // with it. A link whose gunner is gone, dead, reseated or on another mount

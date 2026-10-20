@@ -27,8 +27,10 @@ void store_conn_weapon_inventory(NapiNPConnection &conn, world::Entity *player,
 
 // The roster's tables behind the World's remote-player seam: the session
 // installs one around its entity pass, where the pickup's refusal walks read
-// a remote picker's tables. The listen host's own player is the local one and
-// has none here (world/powerup.cpp reads its live inventory).
+// a remote picker's tables, and the host role around its weapon walk, where a
+// remote player's own slot reads its pools (D-NET-336). The listen host's own
+// player is the local one and has none here (world/powerup.cpp reads its live
+// inventory).
 // [orig: WeaponSlot_RecalculateScore @0x542450 -> Entity_ValidatePtr @0x542464]
 class ServerRemoteWeaponTables final : public world::IRemoteWeaponTables {
 public:
@@ -36,6 +38,8 @@ public:
 			: roster_(roster) {}
 	bool remote_weapon_tables(const world::World &world, world::EntityHandle player,
 			world::WeaponInventory &out) const override;
+	bool remote_ammo(const world::World &world, world::EntityHandle player,
+			int32_t ammo_class, int32_t bucket, int32_t &pool, int32_t &loaded) const override;
 
 private:
 	std::vector<NapiNPConnection> &roster_;

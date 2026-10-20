@@ -697,6 +697,18 @@ void World::pump_weapon_actions() {
         const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
         if (local_player_state != nullptr && handle == local) {
             local_player_state->pump_local_weapon();
+            // Its reload request queues at its own visit, in the walk's order with
+            // every other row's (D-NET-336) [orig: WeaponAction_Reload @0x5430B0
+            //  (the send @0x543103) -> NetPacket_SendReloadRequest @0x432930 (the
+            //  queue @0x4329B7)].
+            LocalWeaponReloadWire &reload = local_player_state->last_reload;
+            if (reload.valid) {
+                WeaponReloadRequest request;
+                request.entity_handle = reload.entity_handle;
+                request.reload_param = reload.reload_param;
+                out.weapon_reloads.push_back(request);
+                reload = LocalWeaponReloadWire{};
+            }
             continue;
         }
         if (Entity *row = registry.get(handle)) ai.pump_gunner_slot(*this, *row, frame_tick);

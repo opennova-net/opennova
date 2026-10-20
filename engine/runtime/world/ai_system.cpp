@@ -614,10 +614,81 @@ void AiSystem::release_stale_gunner_link(World &world, Entity &mount) {
         mount.primary_weapon_owner = EntityHandle{};
 }
 
+// The S2C 0x49 echo of an authority reload refills the addressed entity only when
+// it is the local player or carries a def other than a person's (WeaponFsmInputs::
+// reload_refills). [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 (@0x42C0F8,
+// @0x42C103, @0x42C109)]
+static bool reload_echo_refills(const World &world, const Entity &addressed) {
+    return addressed.handle == world.cached.local_player ||
+           (addressed.has_item_def && addressed.item_type != 3);
+}
+
+// A reload the walk began on the authority queues its C2S 0x25 into the host's own
+// dispatcher: a UseGun gunner's addresses the gun (an EWeap, so 0xFFFF), any other
+// row's itself with the slot's combo (D-NET-336).
+// [orig: WeaponAction_Reload @0x5430B6..0x543108 (the authority gate @0x5430D9,
+//  parentSlot 3 @0x5430EA..0x5430FF); NetPacket_SendReloadRequest
+//  @0x43296C..0x432974]
+static void queue_walk_reload(World &world, const Entity &addressed,
+                              const WeaponTableEntry &weapon) {
+    WeaponReloadRequest request;
+    request.entity_handle = addressed.handle.packed;
+    request.reload_param = addressed.has_item_def &&
+            (addressed.item_attrib & kItemAttribEweap) != 0
+            ? uint16_t(0xFFFF)
+            : static_cast<uint16_t>(static_cast<uint16_t>(weapon.category) * 65u +
+                                    static_cast<uint16_t>(weapon.rank));
+    world.out.weapon_reloads.push_back(request);
+}
+
+// A remote player's own slot, the row of its table its EquippedSlot names, pumped
+// with no input: the authority's arm of each accepted C2S 0x06 runs its FIRE, then
+// the walk runs RECOIL and, an empty clip with rounds left, RELOAD, whose request
+// relays as S2C 0x49 while nothing refills the host's copy but the player's own
+// C2S 0x25 (D-NET-336). The pools and the loaded-round bucket it reads are the
+// player's slot tables. [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1
+// -> WeaponAction_ProcessFrame @0x540E60 (the def test @0x540E74);
+// Server_ClientFiredRound @0x50C27F..0x50C28B (the row it names);
+// Entity_GetScoreValueBySlotType @0x5406E0; WeaponSlot_GetSharedLoadedRounds
+// @0x5405F0]
+void AiSystem::pump_personal_slot(World &world, Entity &owner, uint32_t logic_tick) {
+    const auto row = owner.weapon_slots.find(owner.equipped_slot.combo);
+    if (row == owner.weapon_slots.end()) return;
+    const WeaponTableEntry *weapon = world.tables.weapons.by_index(row->second.adm_index);
+    if (weapon == nullptr) return;
+    PersonalWeaponSlot &slot = row->second;
+    const WeaponAmmoSeat seat = entity_ammo_seat(world, owner);
+    int32_t pool = 0;
+    int32_t loaded = 0;
+    if (world.remote_weapon_tables != nullptr)
+        (void)world.remote_weapon_tables->remote_ammo(world, owner.handle,
+                weapon->ammo_class_id, weapon->ammo_bucket, pool, loaded);
+    slot.reserve = weapon_seat_pool(seat, weapon->ammo_class_id, pool);
+    // A bucket weapon's loaded rounds are the bucket's; the row's own word stays.
+    const int32_t own_clip = slot.clip;
+    if (weapon->ammo_bucket != 0) slot.clip = weapon_seat_bucket(seat, loaded);
+    WeaponFsmInputs inputs;
+    inputs.is_local = false;
+    inputs.is_authority = is_authority;
+    inputs.reload_refills = reload_echo_refills(world, owner);
+    inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
+    inputs.current_tick = static_cast<int32_t>(logic_tick);
+    weapon_fire_environment_inputs(world, owner, inputs);
+    WeaponFsmEvents events;
+    weapon_fsm_tick(weapon->action_fsm, slot, inputs, events);
+    if (weapon->ammo_bucket != 0) slot.clip = own_clip;
+    if (events.reload_requested && is_authority) queue_walk_reload(world, owner, *weapon);
+}
+
 // Every pool-0 row's EquippedSlot is pumped, whatever its seat: a borrower's is
 // the carrier slot it names, seated or, after a refused UseGun attach, on foot
-// (D-NET-420). [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1]
+// (D-NET-420); a remote player's own is a row of its table (D-NET-336).
+// [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1]
 void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick) {
+    if (owner.equipped_slot.kind == WeaponSlotRef::kPersonal) {
+        pump_personal_slot(world, owner, logic_tick);
+        return;
+    }
     if (owner.equipped_slot.kind != WeaponSlotRef::kMount) return;
     Entity *mount = world.registry.get(owner.equipped_slot.mount);
     if (mount == nullptr) return;
@@ -639,9 +710,15 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
                 world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
         if (weapon == nullptr || weapon->ammo_index < 0) return;
 
+        // The reload addresses the gun from a UseGun seat, else the row itself.
+        // [orig: WeaponAction_Reload @0x5430EA..0x543103]
+        const Entity *addressed = owner.mount_type == SeatType::Gunner && owner.mounted
+                ? world.registry.get(owner.mount_target) : nullptr;
+        if (addressed == nullptr) addressed = &owner;
         WeaponFsmInputs inputs;
         inputs.is_local = owner.handle == world.cached.local_player;
         inputs.is_authority = is_authority;
+        inputs.reload_refills = reload_echo_refills(world, *addressed);
         inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
         // The heat window is derived from the tick, so the pump needs it. AI gunners
         // sit on the emplaced guns that actually author heat, so this is the path
@@ -652,25 +729,8 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);
         weapon_sound_publish(world, owner, weapon->action_fsm, weapon_events);
-        // A reload the walk began on the authority queues its C2S 0x25 into the
-        // host's own dispatcher: a UseGun gunner's addresses the gun (an EWeap,
-        // so 0xFFFF), any other row's itself with the slot's combo (D-NET-336).
-        // [orig: WeaponAction_Reload @0x5430B6..0x543108 (the authority gate
-        //  @0x5430D9, parentSlot 3 @0x5430EA..0x5430FF); NetPacket_SendReloadRequest
-        //  @0x43296C..0x432974]
-        if (weapon_events.reload_requested && is_authority) {
-            const Entity *addressed = owner.mount_type == SeatType::Gunner && owner.mounted
-                    ? world.registry.get(owner.mount_target) : nullptr;
-            if (addressed == nullptr) addressed = &owner;
-            WeaponReloadRequest request;
-            request.entity_handle = addressed->handle.packed;
-            request.reload_param = addressed->has_item_def &&
-                    (addressed->item_attrib & kItemAttribEweap) != 0
-                    ? uint16_t(0xFFFF)
-                    : static_cast<uint16_t>(static_cast<uint16_t>(weapon->category) * 65u +
-                                            static_cast<uint16_t>(weapon->rank));
-            world.out.weapon_reloads.push_back(request);
-        }
+        if (weapon_events.reload_requested && is_authority)
+            queue_walk_reload(world, *addressed, *weapon);
         if (!weapon_events.fired || !is_authority || !seated) return;
 
         // The slot owner is the gunner, while its def/ammo live on the parent.
