@@ -538,6 +538,10 @@ int bhd_migrated() {
 	for (const std::string &path : gp.paths) files.push_back({path, model_variants::bytes_of(path)});
 	size_t models = 0;
 	for (const auto &file : files) {
+		// A GP model is no model the game's loader takes, its chunk tag not 3DI3 [orig:
+		// ThreediGp_LoadFromFile @ 0x5B5806, CChunkFile_LoadFromFile with the tag 0x33494433]: the editor migrates it
+		// before it opens.
+		TEST_EXPECT(file.second.size() >= 4 && std::memcmp(file.second.data(), "3DI3", 4) != 0);
 		std::string message;
 		opennova::threedi_gp::File parsed;
 		std::vector<uint8_t> model;
