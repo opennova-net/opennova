@@ -397,19 +397,28 @@ void dispatch_respawn_request(const GameConfig &config, NapiNPConnection &conn,
 
 // See header.
 void dispatch_spectator_respawn(const GameConfig &config, NapiNPConnection &conn,
-		const ProtocolMessage &msg, const ServerDispatchInputs &inputs) {
-	SessionReplyState &st = conn.reply;
-	// Gates in order: the round-over latch (where the convert runs), authority,
-	// permanent death, a spectator capacity, a player, not a spectator; then
-	// Server_ConvertPlayerToSpectator(player, packet i16, 1). The conversion
-	// needs the owning context, so it is staged for the host tick.
-	if (inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) return;
+		const ProtocolMessage &msg, world::World *world, const ServerDispatchInputs &inputs,
+		std::vector<ProtocolMessage> &replies) {
+	// Gates in order: the round-over latch, authority, permanent death, a
+	// spectator capacity, a player, not a spectator; then the convert runs
+	// inline in the receive pump, so a later message in the same pump (a 0x41,
+	// a 0x4D) finds the slot converted, and the deploy's replies join this
+	// pump's. A short body reads 0.
+	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840 -- the
+	//  g_SpawnSuccessGate test @0x51C840..0x51C847, the latch @0x51C87C, the word
+	//  @0x51C896..0x51C89C, Server_ConvertPlayerToSpectator(slot, word, 1) @0x51C8D5]
+	if (world == nullptr || inputs.server_ctx == nullptr) return;
+	if (world->match.outcome().ended) return;
+	if (!inputs.server_ctx->is_authority) return;
 	if (!config.permanent_death || config.spectator_slots == 0) return;
 	if (!conn.link.owned_entity.valid() || conn.link.spectator) return;
-	st.spectator_convert_killer = msg.payload.size() >= 2
-			? static_cast<int16_t>(msg.payload[0] | (msg.payload[1] << 8))
-			: int16_t{0};
-	st.spectator_convert_pending = true;
+	const uint16_t request = msg.payload.size() >= 2
+			? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
+			: uint16_t{0};
+	std::vector<ProtocolMessage> deployment =
+			Server_ConvertPlayerToSpectator(*inputs.server_ctx, conn, *world, request);
+	replies.insert(replies.end(), std::make_move_iterator(deployment.begin()),
+			std::make_move_iterator(deployment.end()));
 }
 
 } // namespace opennova::inmatch

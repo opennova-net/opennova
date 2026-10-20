@@ -523,25 +523,26 @@ bool check_spectator_respawn_request() {
 	HostFixture f(2);
 	// Gates: permanent death and a spectator capacity.
 	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
-	if (!expect(!f.conn(0).reply.spectator_convert_pending, "no permanent death: refused"))
+	if (!expect(!f.conn(0).link.spectator, "no permanent death: refused"))
 		return false;
 	f.ctx.config.permanent_death = true;
 	f.ctx.config.spectator_slots = 1;
-	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
-	if (!expect(f.conn(0).reply.spectator_convert_pending, "the request is admitted")) return false;
 	for (auto &t : f.transports) (void)drain(t);
-	inmatch::Server_TickUpdate(f.ctx);
-	if (!expect(f.conn(0).link.spectator, "the host tick converts the slot")) return false;
-	const w::Entity *player = f.world.registry.get(f.players[0]);
-	if (!expect(player != nullptr && player->team == 0 && player->health == 1,
-			"the convert clears the team and leaves health 1"))
-		return false;
+	// D-NET-551/554: the convert runs inline in the receive pump.
+	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C8D5]
+	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
+	if (!expect(f.conn(0).link.spectator, "the receive pump converts the slot")) return false;
 	std::vector<ns::Datagram> to_p2 = drain(f.transports[1]);
 	const std::vector<uint8_t> want = {5, 'P', '1', 0};
 	bool saw = false;
 	for (const ns::Datagram &d : to_p2)
 		if (d.tag == s2c::FORMATTED_GAME_TEXT && d.body == want) saw = true;
 	if (!expect(saw, "S2C 0x32 [5][name] reaches the other player")) return false;
+	inmatch::Server_TickUpdate(f.ctx);
+	const w::Entity *player = f.world.registry.get(f.players[0]);
+	if (!expect(player != nullptr && player->team == 0 && player->health == 1,
+			"the convert clears the team and leaves health 1"))
+		return false;
 	// Past the round end the handler's first gate drops the request.
 	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840..0x51C847]
 	HostFixture over(2);
@@ -549,8 +550,7 @@ bool check_spectator_respawn_request() {
 	over.ctx.config.spectator_slots = 1;
 	over.world.match.latch_round_over();
 	(void)over.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
-	inmatch::Server_ProcessSpectatorRespawnRequests(over.ctx, over.world);
-	return expect(!over.conn(0).link.spectator && !over.conn(0).reply.spectator_convert_pending,
+	return expect(!over.conn(0).link.spectator,
 			"past the round end the request converts nothing");
 }
 
@@ -583,9 +583,9 @@ bool check_spectator_convert_deploys() {
 	f.conn(0).link.respawn_pending = true;
 	f.conn(0).link.respawn_delay_seconds = 5;
 	f.conn(0).link.spawn_target_hold_seconds = 4;
-	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
 	for (auto &t : f.transports) (void)drain(t);
-	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
+	const std::vector<ProtocolMessage> own_replies =
+			f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
 	if (!expect(f.conn(0).link.spectator && body->team == 0 && body->group_id == 0,
 			"the request converts the slot and clears the command group word"))
 		return false;
@@ -604,9 +604,12 @@ bool check_spectator_convert_deploys() {
 					f.conn(0).link.spawn_target_hold_seconds == 4,
 			"the 0xFFFF deploy leaves the +360 delay and the +364 hold"))
 		return false;
+	// The deploy's private replies join the pump's replies, which the flush
+	// puts ahead of the 0x32 on the converted player's wire.
 	std::vector<ns::Datagram> own = drain(f.transports[0]);
-	if (!expect(own.size() >= 3 && own[0].tag == s2c::WEAPON_LOADOUT &&
-					own[1].tag == s2c::TICK_SEED && own.back().tag == s2c::FORMATTED_GAME_TEXT,
+	if (!expect(own_replies.size() >= 2 && own_replies[0].tag == s2c::WEAPON_LOADOUT &&
+					own_replies[1].tag == s2c::TICK_SEED && !own.empty() &&
+					own.back().tag == s2c::FORMATTED_GAME_TEXT,
 			"the deploy's 0x5A and 0x61 reach the converted player ahead of the 0x32"))
 		return false;
 	inmatch::Server_TickUpdate(f.ctx);
@@ -628,7 +631,6 @@ bool check_spectator_convert_deploys() {
 	f.conn(1).link.spawn_target_hold_seconds = 4;
 	(void)f.dispatch(1, c2s::SPECTATOR_RESPAWN,
 			{static_cast<uint8_t>(point_handle.packed), static_cast<uint8_t>(point_handle.packed >> 8)});
-	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
 	if (!expect(f.conn(1).link.spectator && other->position.x == 300.0f &&
 					other->position.y == 400.0f && other->position.z == 21.0f,
 			"a named spawn point of any team places the converted body"))
@@ -649,7 +651,6 @@ bool check_spectator_convert_deploys() {
 	const uint16_t own_handle = crafted.players[0].packed;
 	(void)crafted.dispatch(0, c2s::SPECTATOR_RESPAWN,
 			{static_cast<uint8_t>(own_handle), static_cast<uint8_t>(own_handle >> 8)});
-	inmatch::Server_ProcessSpectatorRespawnRequests(crafted.ctx, crafted.world);
 	return expect(crafted.conn(0).link.spectator &&
 					crafted.conn(0).link.respawn_delay_seconds == 5 &&
 					crafted.conn(0).link.spawn_target_hold_seconds == 0,
@@ -706,7 +707,6 @@ bool check_spectator_convert_stores_the_slot_team() {
 		const uint16_t own = f.players[i].packed;
 		(void)f.dispatch(i, c2s::SPECTATOR_RESPAWN,
 				{static_cast<uint8_t>(own), static_cast<uint8_t>(own >> 8)});
-		inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
 		return body;
 	};
 	f.world.logic_tick = 2; // an even tick: the parity names team 2

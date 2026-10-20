@@ -1039,7 +1039,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			case c2s::SPECTATOR_RESPAWN: // [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
-				dispatch_spectator_respawn(config, conn, msg, inputs);
+				dispatch_spectator_respawn(config, conn, msg, world, inputs, replies);
 				break;
 			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
 				Server_HandlePlayerJoinRequest(inputs.server_ctx, conn, world, now_tick, replies);

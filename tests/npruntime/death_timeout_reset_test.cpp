@@ -239,10 +239,9 @@ void test_team_change_in_the_same_pump_dies_once() {
 }
 
 // A 0x41 and a spectator convert (0x51) in one receive pump, in either order:
-// retail's convert runs inline in the pump and hides the body (Flags |= 1 and
+// the convert runs inline in the pump and hides the body (Flags |= 1 and
 // Health 1; its deploy leg raises the Health and clears only the dead bit), so
-// the edge after the pump skips it and no death is raised. Ours stages the
-// convert for the tick, ahead of its entity update.
+// the edge after the pump skips it and no death is raised.
 // [orig: Server_ConvertPlayerToSpectator -- Flags @0x519E92, Health @0x519EA4, the
 //  deploy @0x519ECE; Server_DeployPlayer's dead-bit clear @0x51787A; the
 //  edge's hidden bit Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127]
@@ -269,6 +268,70 @@ void test_spectator_convert_in_the_same_pump_raises_no_death() {
 		CHECK(!f.dead_bit(0));
 		CHECK(f.world.round_sim.deaths.empty());
 	}
+}
+
+// D-NET-551: a 0x51 naming a target, then a 0x41, in one pump. The convert
+// runs inline, and its deploy clears the +364 hold for a handle other than
+// 0xFFFF; the 0x41 after it stores the timeout into +364 again and zeroes the
+// Health the deploy raised. The hidden body raises no death, and its next 0x0A
+// restamps Health 1.
+// [orig: Server_ProcessClientRequestSpectatorRespawn -- the
+//  Server_ConvertPlayerToSpectator call @0x51C8D5; Server_DeployPlayer -- `cmp
+//  bp, 0FFFFh` @0x51786B, the +364 store @0x517872;
+//  NapiNPServerMsg_DeathTimeoutReset -- Health @0x510568, +364 @0x510587;
+//  NetPacket_WritePlayerState -- Health 1 @0x4FF728]
+void test_a_named_convert_then_a_0x41_keeps_the_0x41s_hold() {
+	Fixture f;
+	f.ctx.config.respawn_timeout = 5;
+	f.ctx.config.permanent_death = true;
+	f.ctx.config.spectator_slots = 1;
+	f.conn(0).link.spawn_target_hold_seconds = 4;
+	(void)f.deaths_of(0);
+	const uint16_t own = f.players[0].packed; // a named handle (resolves to nothing)
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &f.ctx;
+	(void)inmatch::dispatch_session_replies(f.ctx.config, f.conn(0),
+			{make_protocol_message(c2s::SPECTATOR_RESPAWN,
+					 {static_cast<uint8_t>(own), static_cast<uint8_t>(own >> 8)}),
+			 make_protocol_message(c2s::DEATH_TIMEOUT_RESET, {})},
+			100, f.ctx.np_protocol.connection_list, &f.world, inputs);
+	CHECK(f.conn(0).link.spectator);
+	CHECK(f.conn(0).link.spawn_target_hold_seconds == 5u);
+	CHECK(f.entity(0).health == 0);
+	inmatch::Server_TickUpdate(f.ctx);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.deaths_of(0) == 0);
+	CHECK(!f.dead_bit(0));
+}
+
+// D-NET-554: a 0x51, then a 0x4D, in one pump. The convert runs inline and sets
+// the slot's spectator latch, which the team change's gate refuses: no team
+// change, no death, no stamp.
+// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C8D5;
+//  Server_ConvertPlayerToSpectator -- the latch @0x519E61;
+//  NapiNPServerMsg_0x04D_ChangeTeam -- `cmp [edi+188D7h], bl` @0x518FAE]
+void test_a_convert_then_a_team_change_changes_nothing() {
+	Fixture f;
+	f.ctx.config.respawn_timeout = 5;
+	f.ctx.config.permanent_death = true;
+	f.ctx.config.spectator_slots = 1;
+	f.ctx.config.change_team_penalty_seconds = 60;
+	f.ctx.config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
+	(void)f.deaths_of(0);
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &f.ctx;
+	(void)inmatch::dispatch_session_replies(f.ctx.config, f.conn(0),
+			{make_protocol_message(c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF}),
+			 make_protocol_message(c2s::TEAM_CHANGE_REQUEST, {})},
+			100, f.ctx.np_protocol.connection_list, &f.world, inputs);
+	CHECK(f.conn(0).link.spectator);
+	CHECK(f.entity(0).team == 0);
+	CHECK(f.conn(0).reply.team_change_ms == 0u);
+	CHECK(f.conn(0).link.respawn_delay_seconds != 60u);
+	CHECK(f.deaths_of(0) == 0);
+	inmatch::Server_TickUpdate(f.ctx);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.deaths_of(0) == 0);
 }
 
 // D-NET-460: a 0x41, a Default Spawn 0x0E and a 0x41 in one pump at a respawn
@@ -374,6 +437,8 @@ int main() {
 	test_hidden_body_raises_no_death();
 	test_team_change_in_the_same_pump_dies_once();
 	test_spectator_convert_in_the_same_pump_raises_no_death();
+	test_a_named_convert_then_a_0x41_keeps_the_0x41s_hold();
+	test_a_convert_then_a_team_change_changes_nothing();
 	test_reset_deploy_reset_in_one_pump_dies_once();
 	test_the_0x41s_frame_fans_the_body_undead();
 	test_a_periodic_frames_death_escapes_its_decrement();

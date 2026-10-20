@@ -27,6 +27,7 @@ void dispatch_respawn_request(const GameConfig &config, NapiNPConnection &conn,
 		const ProtocolMessage &msg, world::World *world, const ServerDispatchInputs &inputs,
 		std::vector<ProtocolMessage> &replies);                               // C2S 0x0E
 void dispatch_spectator_respawn(const GameConfig &config, NapiNPConnection &conn,
-		const ProtocolMessage &msg, const ServerDispatchInputs &inputs);      // C2S 0x51
+		const ProtocolMessage &msg, world::World *world, const ServerDispatchInputs &inputs,
+		std::vector<ProtocolMessage> &replies);                               // C2S 0x51
 
 } // namespace opennova::inmatch

@@ -137,19 +137,23 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 		world::EntityHandle entity, uint8_t team);
 
-// Apply the C2S 0x51 requests the dispatcher admitted: the retail kill-and-
-// convert — the slot's spectator latch and hide byte, its team cleared, the
-// entity's command group cleared, the entity hidden with health 1 and damage
-// disabled, its spawn-wave removal, the hold latch (the request named no
-// target), the deploy leg (Server_ReleasePlayerDeployment) over the request's
-// handle, its private replies, then S2C 0x32 [5][name] to every active player.
-// A request staged past the round end converts nothing (the handler's
-// g_SpawnSuccessGate test @0x51C840..0x51C847). Runs once per host tick at the
-// receive pump's place, before the humans count and the state fan.
+// The retail kill-and-convert of a C2S 0x51, run inline in the receive pump
+// by its handler: the slot's spectator latch and hide byte, its team cleared,
+// the entity's command group cleared, the entity hidden with health 1 and
+// damage disabled, its spawn-wave removal, the hold latch (the request named
+// no target), the deploy leg (Server_ReleasePlayerDeployment) over the
+// request's handle, whose private replies it returns (the handler's replies,
+// ahead of the 0x32), then S2C 0x32 [5][name] to every active player.
 // [orig: Server_ConvertPlayerToSpectator
 //  @0x519E00: gates @0x519E16..0x519E3F, the convert @0x519E5B..0x519EA4,
 //  SpawnWaveList_RemovePlayer @0x519EB3, the latch @0x519EBC..0x519EC8,
-//  Server_DeployPlayer @0x519ECE, 0x32 @0x519EDC..0x519F43]
+//  Server_DeployPlayer @0x519ECE, 0x32 @0x519EDC..0x519F43; called from
+//  Server_ProcessClientRequestSpectatorRespawn @0x51C8D5]
+std::vector<ProtocolMessage> Server_ConvertPlayerToSpectator(NapiNPServerCtx &ctx,
+		NapiNPConnection &conn, world::World &world, uint16_t request);
+
+// Empty: no convert waits for the tick (the 0x51 converts inline in the
+// receive pump). Server_TickUpdate still calls it after the pump.
 void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &world);
 
 // The deploy leg's placement, between its raise and its spawn-state reset:

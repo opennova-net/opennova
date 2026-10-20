@@ -293,11 +293,6 @@ struct SessionReplyState {
 	//  Server_PositionPlayerForSpawn @0x50D60A..0x50D655]
 	bool revive_pose_valid = false;
 	int32_t revive_pos[3] = {0, 0, 0};
-	// A C2S 0x51 spectator-respawn request the dispatcher admitted; the host
-	// tick performs the conversion (it needs the owning context).
-	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
-	bool spectator_convert_pending = false;
-	int16_t spectator_convert_killer = -1;
 	// The convert's hold latch: set when its request named no target (0xFFFF),
 	// read and cleared by the deploy leg the convert runs, which then places
 	// nothing (Server_PositionDeployingPlayer). [orig: slot+0x188D9 -

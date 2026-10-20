@@ -279,60 +279,47 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 	return pose;
 }
 
-void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &world) {
-	if (!ctx.is_authority) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!conn.reply.spectator_convert_pending) continue;
-		conn.reply.spectator_convert_pending = false;
-		// The handler's first gate is the round-over latch, which the match
-		// outcome stands for on the host; the request was staged in the same
-		// receive pump, so the latch reads as the handler saw it
-		// [orig: Server_ProcessClientRequestSpectatorRespawn - `cmp
-		//  g_SpawnSuccessGate, 0` / `jnz` @0x51C840..0x51C847].
-		if (world.match.outcome().ended) continue;
-		// The handler's own gates repeat inside the kill: authority, a live
-		// entity, not already a spectator [orig: @0x519E22..0x519E4B].
-		if (!conn.link.owned_entity.valid() || conn.link.spectator) continue;
-		world::Entity *player = world.registry.get(conn.link.owned_entity);
-		if (player == nullptr) continue;
-		// The convert: latch + hide byte + team 0 + Flags bit 0 + damage -1 +
-		// health 1 [orig: @0x519E5B..0x519EA4]; Server_SetPlayerSpectator is that
-		// same slot/entity mutation, bar the command group word.
-		if (!Server_SetPlayerSpectator(ctx, conn, world, /*spectator=*/true)) continue;
-		player->group_id = 0;                                     // entity+0x11C = 0 @0x519E89
-		player->health = 1;                                       // entity+286 = 1 @0x519EA4
-		world.zones.spawn_waves.remove_player(conn.link.owned_entity); // @0x519EB3
-		// A request naming no target (the stock client's 0xFFFF) holds the body
-		// in place; any other handle is the deploy's target, which the convert
-		// hands on unresolved: the placement resolves it with the cleared team
-		// 0, which admits every team's spawn point. [orig: @0x519EBC..0x519EC8,
-		//  the raw handle pushed @0x519EC3; Input_HandleActionBinding @0x49B085
-		//  sends 0xFFFF; Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
-		const uint16_t request = static_cast<uint16_t>(conn.reply.spectator_convert_killer);
-		conn.reply.convert_holds_pose = request == 0xFFFFu;
-		// Server_DeployPlayer(player, handle) @0x519ECE: the deploy leg, its
-		// raises, placement, reset and private replies, before the 0x32.
-		std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
-				ctx.config, conn, world, world::EntityHandle{request}, request,
-				ctx.logs.profile, ctx.np_protocol.identity);
-		if (conn.link.transport != nullptr) {
-			for (ProtocolMessage &message : deployment)
-				conn.link.transport->host_send(
-						message.tag, std::move(message.payload),
-						message.reliable, message.flags.raw,
-						message.capacity_exempt, message.retention_flushes);
-		}
-		// S2C 0x32 [u8 5][cstr name], mask 128 [orig: @0x519EDC..0x519F43].
-		FormattedGameText text;
-		text.subtype = kGameTextPlayerSpectating;
-		text.text = conn.reply.player_name;
-		const std::vector<uint8_t> body = encode_formatted_game_text(text);
-		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-			if (!is_in_match(c) || c.link.transport == nullptr) continue;
-			c.link.transport->host_send(s2c::FORMATTED_GAME_TEXT, body);
-		}
+std::vector<ProtocolMessage> Server_ConvertPlayerToSpectator(NapiNPServerCtx &ctx,
+		NapiNPConnection &conn, world::World &world, uint16_t request) {
+	// The convert's own gates: authority, a live entity, not already a
+	// spectator [orig: @0x519E22..0x519E4B].
+	if (!ctx.is_authority) return {};
+	if (!conn.link.owned_entity.valid() || conn.link.spectator) return {};
+	world::Entity *player = world.registry.get(conn.link.owned_entity);
+	if (player == nullptr) return {};
+	// The convert: latch + hide byte + team 0 + Flags bit 0 + damage -1 +
+	// health 1 [orig: @0x519E5B..0x519EA4]; Server_SetPlayerSpectator is that
+	// same slot/entity mutation, bar the command group word.
+	if (!Server_SetPlayerSpectator(ctx, conn, world, /*spectator=*/true)) return {};
+	player->group_id = 0;                                     // entity+0x11C = 0 @0x519E89
+	player->health = 1;                                       // entity+286 = 1 @0x519EA4
+	world.zones.spawn_waves.remove_player(conn.link.owned_entity); // @0x519EB3
+	// A request naming no target (the stock client's 0xFFFF) holds the body
+	// in place; any other handle is the deploy's target, which the convert
+	// hands on unresolved: the placement resolves it with the cleared team
+	// 0, which admits every team's spawn point. [orig: @0x519EBC..0x519EC8,
+	//  the raw handle pushed @0x519EC3; Input_HandleActionBinding @0x49B085
+	//  sends 0xFFFF; Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
+	conn.reply.convert_holds_pose = request == 0xFFFFu;
+	// Server_DeployPlayer(player, handle) @0x519ECE: the deploy leg, its
+	// raises, placement, reset and private replies, before the 0x32.
+	std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
+			ctx.config, conn, world, world::EntityHandle{request}, request,
+			ctx.logs.profile, ctx.np_protocol.identity);
+	// S2C 0x32 [u8 5][cstr name], mask 128 [orig: @0x519EDC..0x519F43].
+	FormattedGameText text;
+	text.subtype = kGameTextPlayerSpectating;
+	text.text = conn.reply.player_name;
+	const std::vector<uint8_t> body = encode_formatted_game_text(text);
+	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (!is_in_match(c) || c.link.transport == nullptr) continue;
+		c.link.transport->host_send(s2c::FORMATTED_GAME_TEXT, body);
 	}
+	return deployment;
 }
+
+// Empty: the C2S 0x51 converts inline in the receive pump.
+void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &, world::World &) {}
 
 // The host side of the Respawn key's request -- see server_spawn.h.
 void Server_HandleDeathTimeoutReset(NapiNPServerCtx &ctx, NapiNPConnection &conn,
