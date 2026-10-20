@@ -53,11 +53,14 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include "common/file_io.h"
+#include "common/test_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/minted_install.h"
@@ -1453,87 +1456,6 @@ static int test_original_textures() {
 	return 0;
 }
 
-// The game's own data's check validates the install only for the names the project's rows are about (the editor
-// speed pass: OriginalData::covered), and each finding about one of them is the game's own as a validation of the
-// whole install would say: a missing reference both make; one only the project's menu makes; a cross-file one, the
-// texture a model's row names and its loader passes over for its .dds (texture.not_read), made by the model's use;
-// a texture's own finding the install's copy makes too, once the project holds the texture (its name validated then,
-// in a round of its own, over the run as it stood). Its own files are far fewer than the install lists.
-static int test_original_scope() {
-	test_temp::TempDir dir("opennova_editor_problems_original_scope");
-	NoProcess platform;
-	MemoryPreferencesStore preferences;
-	ProjectSession session(platform, preferences);
-	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Original scope"));
-	const SessionView &v = session.view();
-	const std::string root = v.project.root;
-	const auto menu = [](const char *name, const char *image) {
-		return std::string("<SCREEN>\r\n\t<NAME>") + name + "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
-		       "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
-		       "\t\t<APPEARANCE type=\"image\" state=\"default\">" + image + "</APPEARANCE>\r\n\t</WINDOW>\r\n</SCREEN>\r\n";
-	};
-	// A model naming wall.tga in a stage row, whose loader opens wall.dds where the files have it.
-	const std::string scene = dir.file("scene");
-	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
-	                                "o3d 2\nmodel THING\nmaterial FF_ST_OP\ntexture wall.tga 2 0\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
-	                                "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
-	ImportChoice model;
-	model.path = scene + "/thing.o3d";
-	const ImportResult imported = import_assets({model}, ProjectPaths::for_root(root), *v.project.document, false);
-	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/thing.3di"}));
-	std::vector<uint8_t> top = editor_test::tga_bytes();
-	top[17] |= 0x20; // rows stored top first: the texture's own finding
-	const std::string shipped = menu("SHIPPED", "logo.tga"), filler = "filler";
-	const std::vector<uint8_t> thing = test_io::read_file(root + "/models/thing.3di"), wall = editor_test::tga_bytes();
-	TEST_EXPECT(!thing.empty());
-	// The install: those files, and twenty more no row is about.
-	std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
-	        {"shipped.mnu", std::vector<uint8_t>(shipped.begin(), shipped.end())}, {"thing.3di", thing},
-	        {"wall.tga", wall}, {"wall.dds", wall}, {"top.tga", top}};
-	for (int i = 0; i < 20; ++i) files.push_back({"note" + std::to_string(i) + ".txt", std::vector<uint8_t>(filler.begin(), filler.end())});
-	std::vector<opennova::pff::PffWriteEntry> entries;
-	for (const auto &[name, bytes] : files) entries.push_back({name.c_str(), bytes.data(), uint32_t(bytes.size()), 0, 0, 0});
-	const std::string install = dir.file("install");
-	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install") &&
-	            opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
-	                                             entries.data(), uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK);
-	// The project: the same files but the upside-down texture, and a menu of its own naming a texture neither has.
-	TEST_EXPECT(test_io::write_text(root + "/menus/shipped.mnu", shipped) && test_io::write_text(root + "/menus/mine.mnu", menu("MINE", "other.tga")) &&
-	            test_io::write_file(root + "/textures/wall.tga", wall) && test_io::write_file(root + "/textures/wall.dds", wall));
-	editor_test::set_game_install(session, install);
-	editor_test::handle_to_end(session, request::rescan());
-	const auto row_of = [&v](const char *code, const char *asset, const char *about = "") {
-		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i) {
-			const Diagnostic &d = v.findings.diagnostics[i];
-			if (d.code() == code && d.asset == asset && d.message.find(about) != std::string::npos) return i;
-		}
-		std::fprintf(stderr, "no %s on %s\n", code, asset);
-		return SIZE_MAX;
-	};
-	const auto theirs = [&v](size_t row) { return row != SIZE_MAX && in_original_data(row, v); };
-	TEST_EXPECT(theirs(row_of("reference.missing", "menus/shipped.mnu", "logo.tga")) &&
-	            !theirs(row_of("reference.missing", "menus/mine.mnu", "other.tga")) &&
-	            theirs(row_of("texture.not_read", "textures/wall.tga")));
-	const OriginalFiles &fold = session.originals();
-	TEST_EXPECT(v.findings.originals && v.findings.originals->scoped);
-	if (!v.findings.originals) return 1;
-	const std::set<std::string> &covered = v.findings.originals->covered;
-	TEST_EXPECT(covered.count(normalized_logical_name("wall.tga")) && covered.count(normalized_logical_name("shipped.mnu")) &&
-	            !covered.count(normalized_logical_name("top.tga")) && !covered.count(normalized_logical_name("note0.txt")));
-	TEST_EXPECT(fold.validations() == 1 && fold.files() * 4 < fold.listed());
-	std::printf("original scope: %zu of %zu files validated\n", fold.files(), fold.listed());
-	// The texture the project now holds too, its own finding a row: its name validated in a round of its own, over
-	// the run as it stood, the rows before as they were.
-	TEST_EXPECT(test_io::write_file(root + "/textures/top.tga", top));
-	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(theirs(row_of("texture.tga_upside_down", "textures/top.tga")) &&
-	            theirs(row_of("reference.missing", "menus/shipped.mnu", "logo.tga")) &&
-	            theirs(row_of("texture.not_read", "textures/wall.tga")));
-	TEST_EXPECT(fold.validations() == 2 && v.findings.originals->covered.count(normalized_logical_name("top.tga")));
-	std::printf("original scope: a name validated in a round of its own\n");
-	return 0;
-}
-
 // The install validated whole, as the game's own data's check did before it was scoped: listed and typed as the
 // check lists it, every file validated (the graph, each file's own findings, the project checks), every finding
 // about a file keyed by its name.
@@ -1574,6 +1496,137 @@ static OriginalData whole_install(const std::string &install, const ProjectDocum
 	for (const Diagnostic &d : rows)
 		if (!d.asset.empty()) ++data.findings[normalized_logical_name(basename_of(d.asset))][original_finding_key(d)];
 	return data;
+}
+
+// The game's own data's check validates the install only for the names the project's rows are about (the editor
+// speed pass: OriginalData::covered), and each finding about one of them is the game's own as a validation of the
+// whole install would say: a missing reference both make; one only the project's menu makes; a cross-file one, the
+// texture a model's row names and its loader passes over for its .dds (texture.not_read), made by the model's use;
+// a texture's own finding the install's copy makes too, once the project holds the texture (its name validated then,
+// in a round of its own, over the run as it stood), and in that round the project checks' rows on a menu and a
+// mission the first round left unread (a render note, an entity off the ground), as the whole install's run marks
+// them. Its own files are far fewer than the install lists.
+static int test_original_scope() {
+	test_temp::TempDir dir("opennova_editor_problems_original_scope");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Original scope"));
+	editor_test::set_missions(session, true);
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const auto menu = [](const char *name, const char *image) {
+		return std::string("<SCREEN>\r\n\t<NAME>") + name + "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+		       "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+		       "\t\t<APPEARANCE type=\"image\" state=\"default\">" + image + "</APPEARANCE>\r\n\t</WINDOW>\r\n</SCREEN>\r\n";
+	};
+	// A model naming wall.tga in a stage row, whose loader opens wall.dds where the files have it.
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
+	                                "o3d 2\nmodel THING\nmaterial FF_ST_OP\ntexture wall.tga 2 0\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
+	                                "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	ImportChoice model;
+	model.path = scene + "/thing.o3d";
+	const ImportResult imported = import_assets({model}, ProjectPaths::for_root(root), *v.project.document, false);
+	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/thing.3di"}));
+	std::vector<uint8_t> top = editor_test::tga_bytes();
+	top[17] |= 0x20; // rows stored top first: the texture's own finding
+	const std::string shipped = menu("SHIPPED", "logo.tga"), filler = "filler";
+	const std::vector<uint8_t> thing = test_io::read_file(root + "/models/thing.3di"), wall = editor_test::tga_bytes();
+	TEST_EXPECT(!thing.empty());
+	// A menu whose colour reads with no alpha (a render check's row, menu.render.color_transparent), and a mission
+	// on the minted terrain with a crate high above it (the mission ground check's, mission.off_ground).
+	const std::string paint = "<SCREEN>\r\n\t<NAME>PAINT</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	                          "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	                          "\t\t<APPEARANCE type=\"color\" state=\"default\">00FF00</APPEARANCE>\r\n\t</WINDOW>\r\n"
+	                          "</SCREEN>\r\n";
+	const std::string catalog = "begin \"Null\"\r\nid 100000\r\ntype marker\r\nend\r\n"
+	                            "begin \"Crate\"\r\nid 101001\r\ntype decoration\r\ngraphic crate\r\nend\r\n";
+	std::vector<uint8_t> floating;
+	{
+		opennova::bms::File mission;
+		std::string error;
+		opennova::mission::BlankMission blank;
+		blank.name = "Float";
+		blank.terrain = "Tmap";
+		TEST_EXPECT(opennova::mission::make_blank(mission, blank, error));
+		opennova::bms::Entity crate = opennova::mission::new_entity(opennova::mission::EntityKind::Item, 101001, 1);
+		crate.x = opennova::bms::to_fixed_16_16(0.0);
+		crate.y = opennova::bms::to_fixed_16_16(0.0);
+		crate.z = opennova::bms::to_fixed_16_16(500.0);
+		mission.items.push_back(crate);
+		opennova::mission::sync_counts(mission);
+		TEST_EXPECT(opennova::bms::write(mission, floating, error));
+	}
+	const std::vector<std::pair<std::string, std::vector<uint8_t>>> later = {
+	        {"paint.mnu", std::vector<uint8_t>(paint.begin(), paint.end())},
+	        {"float.bms", floating},
+	        {"items.def", std::vector<uint8_t>(catalog.begin(), catalog.end())},
+	        {"crate.3di", test_io::read_file(test_paths_fixture("threedi/synth/crate.3di"))},
+	        {"Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"))},
+	        {"Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"))}};
+	// The install: those files, and twenty more no row is about.
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
+	        {"shipped.mnu", std::vector<uint8_t>(shipped.begin(), shipped.end())}, {"thing.3di", thing},
+	        {"wall.tga", wall}, {"wall.dds", wall}, {"top.tga", top}};
+	files.insert(files.end(), later.begin(), later.end());
+	for (int i = 0; i < 20; ++i) files.push_back({"note" + std::to_string(i) + ".txt", std::vector<uint8_t>(filler.begin(), filler.end())});
+	std::vector<opennova::pff::PffWriteEntry> entries;
+	for (const auto &[name, bytes] : files) entries.push_back({name.c_str(), bytes.data(), uint32_t(bytes.size()), 0, 0, 0});
+	const std::string install = dir.file("install");
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install") &&
+	            opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                             entries.data(), uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK);
+	// The project: the same files but the upside-down texture, and a menu of its own naming a texture neither has.
+	TEST_EXPECT(test_io::write_text(root + "/menus/shipped.mnu", shipped) && test_io::write_text(root + "/menus/mine.mnu", menu("MINE", "other.tga")) &&
+	            test_io::write_file(root + "/textures/wall.tga", wall) && test_io::write_file(root + "/textures/wall.dds", wall));
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	const auto row_of = [&v](const char *code, const char *asset, const char *about = "") {
+		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i) {
+			const Diagnostic &d = v.findings.diagnostics[i];
+			if (d.code() == code && d.asset == asset && d.message.find(about) != std::string::npos) return i;
+		}
+		std::fprintf(stderr, "no %s on %s\n", code, asset);
+		return SIZE_MAX;
+	};
+	const auto theirs = [&v](size_t row) { return row != SIZE_MAX && in_original_data(row, v); };
+	TEST_EXPECT(theirs(row_of("reference.missing", "menus/shipped.mnu", "logo.tga")) &&
+	            !theirs(row_of("reference.missing", "menus/mine.mnu", "other.tga")) &&
+	            theirs(row_of("texture.not_read", "textures/wall.tga")));
+	const OriginalFiles &fold = session.originals();
+	TEST_EXPECT(v.findings.originals && v.findings.originals->scoped);
+	if (!v.findings.originals) return 1;
+	const std::set<std::string> &covered = v.findings.originals->covered;
+	TEST_EXPECT(covered.count(normalized_logical_name("wall.tga")) && covered.count(normalized_logical_name("shipped.mnu")) &&
+	            !covered.count(normalized_logical_name("top.tga")) && !covered.count(normalized_logical_name("note0.txt")));
+	TEST_EXPECT(fold.validations() == 1 && fold.files() * 4 < fold.listed());
+	std::printf("original scope: %zu of %zu files validated\n", fold.files(), fold.listed());
+	// The texture the project now holds too, its own finding a row, and the menu and the mission with the files the
+	// mission reads, the project checks' rows on them: their names validated in a round of its own, over the run as it
+	// stood (whose project checks start over: the first round kept the menu and the mission unread), the rows before
+	// as they were, each row marked as a validation of the whole install marks it.
+	TEST_EXPECT(test_io::write_file(root + "/textures/top.tga", top));
+	for (const auto &[name, bytes] : later) TEST_EXPECT(test_io::write_file(root + "/" + name, bytes));
+	editor_test::handle_to_end(session, request::rescan());
+	const OriginalData whole = whole_install(install, *v.project.document);
+	const auto as_whole = [&](size_t row) {
+		if (row == SIZE_MAX) return false;
+		const Diagnostic &d = v.findings.diagnostics[row];
+		const auto found = whole.findings.find(served_name(d));
+		const bool made = found != whole.findings.end() && found->second.count(original_finding_key(d)) != 0;
+		return made && in_original_data(row, v);
+	};
+	TEST_EXPECT(theirs(row_of("texture.tga_upside_down", "textures/top.tga")) &&
+	            theirs(row_of("reference.missing", "menus/shipped.mnu", "logo.tga")) &&
+	            theirs(row_of("texture.not_read", "textures/wall.tga")));
+	TEST_EXPECT(as_whole(row_of("menu.render.color_transparent", "paint.mnu")));
+	TEST_EXPECT(as_whole(row_of("mission.off_ground", "float.bms")));
+	TEST_EXPECT(fold.validations() == 2 && v.findings.originals->covered.count(normalized_logical_name("top.tga")) &&
+	            v.findings.originals->covered.count(normalized_logical_name("paint.mnu")) &&
+	            v.findings.originals->covered.count(normalized_logical_name("float.bms")));
+	std::printf("original scope: names validated in a round of their own, the project checks' rows the whole's\n");
+	return 0;
 }
 
 // The game's own data's check over a game install minted from OpenNova's own game (minted_install.h: menus,
