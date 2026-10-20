@@ -245,15 +245,21 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		++tick;
 	}
 
-	// Phase C: in-match frames until the host's scoreboard clock lands its S2C 0x16 (every 311
-	// host ticks [orig: Server_TickUpdate @0x51D8F9..0x51D917]). The join no longer waits for
-	// that list (D-NET-526), so the script carries the clock's list here.
-	for (int f = 0; f < 400 && !client.state().scoreboard.known; ++f) {
+	// Phase C: one full cadence of every periodic producer, whatever tick the join ended on:
+	// the host's scoreboard clock (S2C 0x16 every 311 ticks), its network-quality byte (S2C
+	// 0x79 every 310, its own countdown) and the joiner's net-quality report (C2S 0x4C every
+	// 310 in-match frames). The join waits for none of them (D-NET-526), so a window ending
+	// at the first list would cover the 0x79 only when its boundary fell inside it.
+	// [orig: Server_TickUpdate @0x51D8F9..0x51D917 (0x16), @0x51E1B2..0x51E1E4 (0x79);
+	//  Client_ProcessNetworkFrame @0x42C22D..0x42C279 (0x4C)]
+	const uint64_t lists_before = client.state().scoreboard.revision;
+	for (int f = 0; f < 340; ++f) {
 		pump_and_deliver();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
 		++tick;
 	}
-	return expect(client.state().scoreboard.known, "the host's scoreboard clock reached the joiner");
+	return expect(client.state().scoreboard.revision != lists_before,
+			"the host's scoreboard clock reached the joined joiner");
 }
 
 std::map<Key, long> histogram(const std::vector<CaptureDatagram> &caps) {
