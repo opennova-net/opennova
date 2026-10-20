@@ -5,20 +5,16 @@
 // (STAGE's .dds sibling first, ARCHIVE's sibling at the last dot then a PCX's luminance alpha, HUD's
 // .FULL and .ALPHA suffixes and its PCX white with alpha from blue, FILE's PCX for any name but a .TGA,
 // MENU's by the last extension), and what each transform makes of the texels, against vectors worked
-// by hand.
+// by hand; the graph resolving each reference by its loader over a project, and every spelling of a texture
+// reference the shipped referrers take resolved, none refusing a build.
 #include <cstdio>
-#include <map>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
-#include <editor/assets/install_view.h>
-#include <editor/assets/asset_import.h>
 #include <editor/assets/asset_kinds.h>
-#include <editor/assets/asset_type_registry.h>
 #include <editor/documents/texture_image.h>
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
@@ -29,12 +25,11 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 
-#include <editor/project/project_document.h>
-
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "common/png_test_support.h"
@@ -377,91 +372,125 @@ int test_graph() {
 	return 0;
 }
 
-// The retail leg (OPENNOVA_JO_DIR): the install's referrers of textures (its terrains, environments,
-// particle files, HUD layout, catalogs, menus and missions) and every texture it ships, by name (an
-// empty file each: what a reference resolves to is a name), in a project: every texture reference
-// resolved by its loader, counted by role; none the game would abort the mission over (every shipped
-// terrain's colour map, and every blend map a terrain's key names, is there).
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's texture references by role)");
-		return 0;
-	}
-	test_temp::TempDir dir{"opennova_editor_texture_roles_retail"};
+// The texture references of the shipped referrers in the spellings they take (the census of JO:CA's 234 referrers
+// and 2,579 textures), each resolved by its loader in a project holding every texture by its file's own name (an
+// empty file each: what a reference resolves to is a name): a terrain's colour map and detail blend map, the two the
+// game aborts the mission without, named as their file is (27 of the 30 terrains), in lower case over a file of mixed
+// case (dvxg9_c.tga for Dvxg9_c.tga) and in mixed case over one of lower (Dvxg4_c.tga for dvxg4_c.tga, Dvxg5_m2.tga
+// for dvxg5_m2.tga); a terrain that names no blend map (Dvxg5b.trn); its char, foliage and detail maps and its tile
+// strip in another case than their files' (trntile10.tga for TRNTILE10.TGA); the sky maps' .pcx (Cloud01.pcx for
+// cloud01.pcx); a mission's tile set named without its extension (trntile10); a particle graphic in another case;
+// and a particle graphic and a HUD image whose files the install lacks (91 shipped references are so, every one of
+// a loader that does not gate). Every reference but those two resolves, each colour map among them, and none
+// refuses a build.
+int test_shipped_references() {
+	test_temp::TempDir dir{"opennova_editor_texture_roles_shipped"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
 	const std::string root = dir.file("project");
 	editor_test::handle_to_end(session, request::new_project(root, "Roles"));
-	ProjectDocument project;
-	project.target_game = "jo";
-	InstallView install_view;
-	std::string why;
-	TEST_EXPECT(install_view.open(install_spec(install, project), why));
-	const opennova::Vfs &mount = install_view.vfs();
-	const std::set<AssetKind> referrers = {AssetKind::Terrain,    AssetKind::Environment, AssetKind::Particles,
-	                                       AssetKind::HudPosDefs, AssetKind::ItemDefs,    AssetKind::WeaponDefs,
-	                                       AssetKind::AmmoDefs,   AssetKind::Menu,        AssetKind::MenuStyle,
-	                                       AssetKind::Mission};
-	size_t textures = 0, files = 0;
-	for (const opennova::VfsFileLocation &location : mount.list_files()) {
-		const std::string &name = location.logical_name;
-		const AssetKind kind = classify_asset(name, nullptr);
-		if (kind == AssetKind::Texture) {
-			textures += test_io::write_file(root + "/textures/" + name, {}) ? 1 : 0;
-		} else if (referrers.count(kind)) {
-			std::vector<uint8_t> bytes;
-			if (mount.read_file_raw(name, bytes) && test_io::write_file(root + "/" + asset_kind_token(kind) + "/" + name, bytes))
-				++files;
-		}
+	editor_test::create_missing_files(session);
+	const auto terrain = [](const std::string &maps) {
+		return "terrain_name     \"Isle\"\r\npolytrn_detailmap        Det_d4.tga\r\npolytrn_polydata         isle.cpt\r\n"
+		       "polytrn_tilestrip       trntile10.tga\r\n" + maps + "polytrn_sectorcount\t\t1\r\npolytrn_sectors\t\t\t0\r\n";
+	};
+	TEST_EXPECT(test_io::write_text(root + "/terrains/exact.trn",
+	                                terrain("polytrn_colormap         Isle_c.tga\r\npolytrn_detailblendmap   Isle_d1.tga\r\n"
+	                                        "polytrn_charmap          Isle_m.pcx\r\npolytrn_foliagemap       Isle_f.pcx\r\n")) &&
+	            test_io::write_text(root + "/terrains/lower.trn",
+	                                terrain("polytrn_colormap         reef_c.tga\r\npolytrn_detailblendmap   Reef_d1.tga\r\n"
+	                                        "polytrn_charmap          reef_m.pcx\r\npolytrn_foliagemap       reef_f.pcx\r\n")) &&
+	            test_io::write_text(root + "/terrains/mixed.trn",
+	                                terrain("polytrn_colormap         Cove_c.tga\r\npolytrn_detailblendmap   Cove_m2.tga\r\n")) &&
+	            test_io::write_text(root + "/terrains/noblend.trn", terrain("polytrn_colormap         Isle_c.tga\r\n")));
+	for (const char *file : {"Isle_c.tga", "Isle_d1.tga", "Isle_m.pcx", "Isle_f.pcx", "Reef_c.tga", "Reef_d1.tga", "Reef_m.pcx",
+	                         "Reef_f.pcx", "cove_c.tga", "cove_m2.tga", "det_d4.tga", "TRNTILE10.TGA", "cloud01.pcx", "cloud01b.pcx",
+	                         "CNFireBA.tga"})
+		TEST_EXPECT(test_io::write_file(root + "/textures/" + file, {}));
+	{
+		std::ostringstream text;
+		opennova::env::Config config;
+		config.sky_map1 = "Cloud01.pcx";
+		config.sky_map2 = "Cloud01b.pcx";
+		std::string error;
+		TEST_EXPECT(opennova::env::save_env(text, config, error) && test_io::write_text(root + "/envs/day.env", text.str()));
 	}
+	{
+		opennova::bms::File file;
+		opennova::mission::make_default(file);
+		std::string why;
+		TEST_EXPECT(opennova::mission::set_header_string(file, "terrain", "exact", why) &&
+		            opennova::mission::set_header_string(file, "environment", "day", why) &&
+		            opennova::mission::set_header_string(file, "terrain_tile", "trntile10", why));
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(file, bytes, why) && test_io::write_file(root + "/missions/landing.bms", bytes));
+	}
+	TEST_EXPECT(test_io::write_text(root + "/fx.ptl",
+	                                "[effectdef]\n{\n\tid = FIRE;\n\tpdefs = flame, spark;\n}\n\n[particledef]\n{\n\tid = flame;\n"
+	                                "\tgraphic1 = CNFIREBA.tga, additive;\n}\n\n[particledef]\n{\n\tid = spark;\n"
+	                                "\tgraphic1 = gone.tga, additive;\n}\n") &&
+	            test_io::write_text(root + "/defs/items.def", "begin \"Brick\"\nid 100300\ntype building\nhud_image soflam1.tga\nend\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 	const AssetGraph *graph = session.view().findings.graph.get();
-	TEST_EXPECT(graph != nullptr && textures > 1000 && files > 100);
+	TEST_EXPECT(graph != nullptr);
 	if (!graph) return 1;
-	// Each role's references and those its loader finds nothing for.
-	std::map<std::string, std::pair<size_t, size_t>> by_role;
-	std::map<std::string, std::vector<std::string>> examples;
-	size_t unwitnessed = 0;
+	const auto resolved = [&](const std::string &source, const std::string &value) {
+		for (const GraphEdge *edge : graph->references_of(source))
+			if (edge->kind == ReferenceKind::Texture && edge->value == value) {
+				std::string file;
+				return graph->resolve(*edge, &file) == ReferenceStatus::Present ? file : std::string("<missing>");
+			}
+		return std::string("<none>");
+	};
+	TEST_EXPECT(resolved("terrains/exact.trn", "Isle_c.tga") == "textures/Isle_c.tga" &&
+	            resolved("terrains/exact.trn", "Isle_d1.tga") == "textures/Isle_d1.tga" &&
+	            resolved("terrains/exact.trn", "Isle_m.pcx") == "textures/Isle_m.pcx" &&
+	            resolved("terrains/exact.trn", "Isle_f.pcx") == "textures/Isle_f.pcx");
+	TEST_EXPECT(resolved("terrains/lower.trn", "reef_c.tga") == "textures/Reef_c.tga" &&
+	            resolved("terrains/lower.trn", "Reef_d1.tga") == "textures/Reef_d1.tga" &&
+	            resolved("terrains/lower.trn", "reef_m.pcx") == "textures/Reef_m.pcx" &&
+	            resolved("terrains/lower.trn", "reef_f.pcx") == "textures/Reef_f.pcx");
+	TEST_EXPECT(resolved("terrains/mixed.trn", "Cove_c.tga") == "textures/cove_c.tga" &&
+	            resolved("terrains/mixed.trn", "Cove_m2.tga") == "textures/cove_m2.tga");
+	TEST_EXPECT(resolved("terrains/noblend.trn", "Isle_c.tga") == "textures/Isle_c.tga");
+	for (const char *source : {"terrains/exact.trn", "terrains/lower.trn", "terrains/mixed.trn", "terrains/noblend.trn"})
+		TEST_EXPECT(resolved(source, "Det_d4.tga") == "textures/det_d4.tga" &&
+		            resolved(source, "trntile10.tga") == "textures/TRNTILE10.TGA");
+	TEST_EXPECT(resolved("envs/day.env", "Cloud01.pcx") == "textures/cloud01.pcx" &&
+	            resolved("envs/day.env", "Cloud01b.pcx") == "textures/cloud01b.pcx");
+	TEST_EXPECT(resolved("missions/landing.bms", "trntile10") == "textures/TRNTILE10.TGA");
+	TEST_EXPECT(resolved("fx.ptl", "CNFIREBA.tga") == "textures/CNFireBA.tga" && resolved("fx.ptl", "gone.tga") == "<missing>" &&
+	            resolved("defs/items.def", "soflam1.tga") == "<missing>");
+	// Each colour map resolves, the four of them; no texture reference refuses a build, the two missing listed.
+	size_t colour_maps = 0;
 	graph->for_each_edge([&](const GraphEdge &edge) {
-		if (edge.kind != ReferenceKind::Texture) return;
 		renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
-		const std::string token = texture_arg_role(edge.loader_arg, role) ? texture_role_row(role).token
-		                          : texture_arg_is_row_type(edge.loader_arg) ? "model_row"
-		                                                                     : "not_witnessed";
-		unwitnessed += token == std::string("not_witnessed") ? 1 : 0;
-		auto &[count, missing] = by_role[token];
-		++count;
-		if (graph->resolve(edge) != ReferenceStatus::Missing) return;
-		++missing;
-		if (examples[token].size() < 4) examples[token].push_back(basename_of(edge.source) + ": " + edge.value);
+		if (edge.kind != ReferenceKind::Texture || !texture_arg_role(edge.loader_arg, role) ||
+		    role != renderer::TextureRoleId::TerrainColourMap)
+			return;
+		colour_maps += graph->resolve(edge) == ReferenceStatus::Present ? 1 : 0;
 	});
-	for (const auto &[role, counts] : by_role) {
-		std::string some;
-		for (const std::string &example : examples[role]) some += (some.empty() ? " (" : ", ") + example;
-		std::printf("retail: %-28s %6zu references, %5zu missing%s\n", role.c_str(), counts.first, counts.second,
-		            some.empty() ? "" : (some + ")").c_str());
+	TEST_EXPECT(colour_maps == 4);
+	size_t gating = 0, missing = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics) {
+		if (d.code() != "reference.missing" || editor_test::reference_of(d).kind != ReferenceKind::Texture) continue;
+		++missing;
+		if (!blocks_build(d)) continue;
+		std::fprintf(stderr, "refuses a build: %s %s: %s\n", d.asset.c_str(), d.field.c_str(), d.message.c_str());
+		++gating;
 	}
-	// The game aborts no shipped mission over its terrain's maps.
-	size_t gating = 0;
-	for (const Diagnostic &d : session.view().findings.diagnostics)
-		if (d.code() == "reference.missing" && blocks_build(d) && editor_test::reference_of(d).kind == ReferenceKind::Texture) {
-			std::fprintf(stderr, "retail: %s %s: %s\n", d.asset.c_str(), d.field.c_str(), d.message.c_str());
-			++gating;
-		}
-	TEST_EXPECT(gating == 0);
-	TEST_EXPECT(by_role.count("terrain_colour_map") && by_role["terrain_colour_map"].second == 0);
-	std::printf("retail: %zu textures and %zu referrers; %zu references of a loader not witnessed yet; none refusing a build\n",
-	            textures, files, unwitnessed);
+	TEST_EXPECT(gating == 0 && missing == 2);
+	std::printf("shipped references: every spelling the shipped referrers take resolved by its loader, %zu colour maps; "
+	            "the missing two listed, none refusing a build\n",
+	            colour_maps);
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_catalog();
 	failures += test_names();
@@ -469,7 +498,7 @@ int main(int argc, char **argv) {
 	failures += test_query();
 	failures += test_reference_load();
 	failures += test_graph();
-	failures += test_retail();
+	failures += test_shipped_references();
 	if (failures == 0) std::printf("editor_texture_roles: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
