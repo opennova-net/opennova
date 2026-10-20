@@ -120,6 +120,9 @@ struct LocalPlayerWeapon {
 
     LocalUseGunSwitch usegun_switch = LocalUseGunSwitch::kNone;
     bool usegun_slot_active = false;
+    // The borrowed slot is held on foot: a refused UseGun attach pointed the
+    // EquippedSlot at the gun's slot with no seat (local_weapon_direct_borrow).
+    bool usegun_on_foot = false;
     EntityHandle usegun_mount{};
     EntityHandle usegun_pending_mount{};
     uint8_t usegun_weapon_adm = 0xFF;
@@ -379,6 +382,14 @@ void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
                                       bool same_category);
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w);
 void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w);
+// A refused UseGun attach points the local player's EquippedSlot at the gun's
+// slot directly, with no switch and no +0x2B0 stamp: the body stays on foot
+// holding it, and the weapon walk pumps it, until a mount replaces it (a weapon
+// key's commit, the next borrowing attach, a seat-2/3 detach's mount). A gun
+// with no resolvable slot or def leaves the EquippedSlot alone. (D-NET-420)
+// [orig: Entity_AttachToUseGunSlot @0x546C42..0x546C4E, reached for the local
+//  player whenever the attach did not succeed (@0x546C17..0x546C25)]
+void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun);
 // The local player's seat-2 / seat-3 detach mounts entity+0x308 (a borrowed
 // seat's saved personal slot, else the last selected one) or, without a def of
 // category < 11 there, the current slot, and the mount, past its early-outs (a

@@ -141,10 +141,10 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	const uint8_t game_state = conn.burst.game_state;
 	conn.burst = InitialStateBurst{};
 	conn.burst.game_state = game_state;
-	// The slot table (+0x1D0) is left as well; the round init rebuilds it
-	// [orig: the reset stores +0x1CC alone @0x5163B2..0x516417;
+	// The slot table (+0x1D0) is left as well; the round init rebuilds it, and the
+	// player entity's EquippedSlot (world::Entity::equipped_slot) goes with the
+	// mission's world [orig: the reset stores +0x1CC alone @0x5163B2..0x516417;
 	//  Server_InitAllPlayerEntitiesForRound @0x516BF3..0x516C20].
-	conn.equipped_slot = NapiNPConnection::EquippedSlotRef{};
 }
 
 namespace {

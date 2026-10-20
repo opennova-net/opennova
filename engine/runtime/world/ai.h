@@ -1216,11 +1216,12 @@ public:
     void infantry_mounted_fire_pass(AiEntity &e, World &world, uint32_t logic_tick,
                                     uint32_t key);
     // One pool-0 row's visit in the frame's weapon-action walk
-    // (World::pump_weapon_actions): a UseGun gunner (an NPC or a remote player)
-    // pumps the parent MountSlot it borrowed. The infantry request above only
-    // writes next=FIRE; this visit advances the authored weapon FSM and emits
-    // the round with the gunner as owner. A gunner that has died drops its
-    // link instead.
+    // (World::pump_weapon_actions): a row (an NPC or a remote player) whose
+    // EquippedSlot names a carrier's slot pumps it, seated or held on foot after
+    // a refused UseGun attach. The infantry request above only writes next=FIRE;
+    // this visit advances the authored weapon FSM and, for a seated gunner,
+    // emits the round with the gunner as owner. A gunner that has died drops its
+    // link; its slot still pumps until its detach.
     // [orig: WeaponAction_ProcessAllEntities pool-0 walk @0x5426A6..0x5426C9
     //  (the gunner's +0x118 is the parent's MountSlot) ->
     //  WeaponAction_ProcessFrame @0x540E60]

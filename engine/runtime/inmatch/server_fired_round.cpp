@@ -191,13 +191,17 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		}
 		// The accepted fire re-points the shooter's EquippedSlot: the borrowed
 		// mount slot it fired through, else the personal slot of the fired
-		// combo. [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d]
-		if (shooter->use_gun_slot_swapped && shooter->mount_target.valid()) {
-			conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kMount;
-			conn.equipped_slot.mount = shooter->mount_target;
+		// combo, which also ends a borrow a refused UseGun attach left on a body
+		// on foot (D-NET-420). [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d]
+		if (mounted_route) {
+			shooter->equipped_slot = {};
+			shooter->equipped_slot.kind = world::WeaponSlotRef::kMount;
+			shooter->equipped_slot.mount = shooter->mount_target;
 		} else {
-			conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
-			conn.equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
+			shooter->equipped_slot = {};
+			shooter->equipped_slot.kind = world::WeaponSlotRef::kPersonal;
+			shooter->equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
+			shooter->equipped_slot.adm = personal->adm_index;
 		}
 		// The slot's fire action re-enters the handler with the weapon that
 		// fires, whose local pass judges the round again: the owner checks

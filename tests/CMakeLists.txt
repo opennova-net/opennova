@@ -5106,6 +5106,11 @@ add_test(NAME round_type_index COMMAND round_type_index_test)
 add_executable(mounted_fire_path_test world/mounted_fire_path_test.cpp)
 target_link_libraries(mounted_fire_path_test PRIVATE opennova_runtime)
 add_test(NAME mounted_fire_path COMMAND mounted_fire_path_test)
+# D-NET-420 / FOUND-4: the UseGun attach's +368 refusal leaves the gun's slot held on foot
+# (the walk, the busy gate), a client's forced claim, and the seat-2/3 detach's +0x308 store.
+add_executable(usegun_refusal_test world/usegun_refusal_test.cpp)
+target_link_libraries(usegun_refusal_test PRIVATE opennova_runtime)
+add_test(NAME usegun_refusal COMMAND usegun_refusal_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

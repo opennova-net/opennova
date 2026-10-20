@@ -1414,8 +1414,8 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	const uint16_t grenade_combo = 5 * 65 + 1;
 	conn.weapon_slots[grenade_combo].adm_index = 4;
 	conn.weapon_slots[grenade_combo].clip = 0;
-	conn.equipped_slot.kind = im::NapiNPConnection::EquippedSlotRef::kPersonal;
-	conn.equipped_slot.combo = grenade_combo;
+	body->equipped_slot.kind = w::WeaponSlotRef::kPersonal;
+	body->equipped_slot.combo = grenade_combo;
 
 	std::vector<float> rows;
 	im::PoolPresentLifecycleMap lifecycle;
@@ -1433,10 +1433,10 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	conn.weapon_slots[grenade_combo].clip = 1;
 	ok = expect(held(&server) == 5, "the one-round clip counts toward the ammo") && ok;
 	conn.weapon_slots[grenade_combo].clip = 0;
-	conn.equipped_slot = {};
+	kernel.world.registry.get(body_handle)->equipped_slot = {};
 	ok = expect(held(&server) == 5, "no EquippedSlot: nothing to test") && ok;
-	conn.equipped_slot.kind = im::NapiNPConnection::EquippedSlotRef::kPersonal;
-	conn.equipped_slot.combo = grenade_combo;
+	kernel.world.registry.get(body_handle)->equipped_slot.kind = w::WeaponSlotRef::kPersonal;
+	kernel.world.registry.get(body_handle)->equipped_slot.combo = grenade_combo;
 	kernel.world.cached.local_player = body_handle;
 	ok = expect(held(&server) == 5, "the local player takes its own branch") && ok;
 	return ok;

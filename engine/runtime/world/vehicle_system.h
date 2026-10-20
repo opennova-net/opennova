@@ -69,8 +69,10 @@ public:
 	//   3. enemy-occupant gate: reject when a LIVE ENEMY already occupies the vehicle
 	//      [orig: Vehicle_HasEnemyOccupant @0x4359F0 — scans pool 0, skips dead/self/
 	//      same-team; same-team occupants never block multi-seat co-boarding];
-	//      (the weapon-busy gate on EquippedSlot->currentAction [orig: @0x435b29] is
-	//      unmodeled — no weapon action state server-side; tracked in D-NET-157)
+	//      after the authority's weapon-busy gate: the requester's EquippedSlot action
+	//      past EmptyIdle and not Overheated refuses [orig: @0x435B18..0x435B38]
+	//      (equipped_slot_busy; a remote player's own slots carry no action yet,
+	//      D-NET-336)
 	//   4. seat occupancy: an occupied matching seat / an already-taken wire bone rejects
 	//      [orig: @0x435ba9 mountHandles[idx] != 0xFFFF];
 	//   5. an already-mounted requester detaches first [orig: @0x435bce];

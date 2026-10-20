@@ -3476,7 +3476,8 @@ bool check_host_tracks_the_remote_equipped_slot() {
 	inmatch::NapiNPConnection &conn = roster.front();
 	const uint16_t rifle_combo = 3 * 65 + 2;
 	const uint16_t chute_combo = 3 * 65 + 1;
-	using Ref = inmatch::NapiNPConnection::EquippedSlotRef;
+	using Ref = w::WeaponSlotRef;
+	const auto equipped = [&]() { return world.registry.get(shooter)->equipped_slot; };
 	auto submit = [&](uint32_t slot) {
 		LoadoutSubmit request;
 		request.team = 1;
@@ -3491,22 +3492,26 @@ bool check_host_tracks_the_remote_equipped_slot() {
 				100, roster, &world);
 	};
 	submit(rifle_combo);
-	if (!expect(conn.weapon_slots.count(rifle_combo) == 1 && conn.equipped_slot.kind == Ref::kPersonal &&
-					conn.equipped_slot.combo == rifle_combo,
+	if (!expect(conn.weapon_slots.count(rifle_combo) == 1 && equipped().kind == Ref::kPersonal &&
+					equipped().combo == rifle_combo,
 			"a selectable submitted slot is the EquippedSlot"))
 		return false;
 	submit(3 * 65 + 9);
-	if (!expect(conn.equipped_slot.kind == Ref::kNone, "an empty submitted slot clears it"))
+	if (!expect(equipped().kind == Ref::kNone, "an empty submitted slot clears it"))
 		return false;
 	submit(chute_combo);
-	if (!expect(conn.equipped_slot.kind == Ref::kNone, "a NoSelect submitted slot clears it"))
+	if (!expect(equipped().kind == Ref::kNone, "a NoSelect submitted slot clears it"))
 		return false;
 	uint32_t client_tick = conn.tick_seed;
+	// A gun's slot held on foot (a refused UseGun attach, D-NET-420) is no seat:
+	// the fire takes the personal slot and re-points to it.
+	world.registry.get(shooter)->equipped_slot.kind = Ref::kMount;
+	world.registry.get(shooter)->equipped_slot.mount = shooter;
 	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
 			{make_protocol_message(c2s::FIRED_ROUND, fire_body(conn, shooter.packed, 5, client_tick))},
 			100, roster, &world);
-	return expect(world.out.rounds.count == 1 && conn.equipped_slot.kind == Ref::kPersonal &&
-					conn.equipped_slot.combo == rifle_combo,
+	return expect(world.out.rounds.count == 1 && equipped().kind == Ref::kPersonal &&
+					equipped().combo == rifle_combo,
 			"an accepted fire re-points the EquippedSlot at the fired combo");
 }
 

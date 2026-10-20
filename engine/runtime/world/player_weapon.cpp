@@ -148,6 +148,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	if (player == nullptr) {
 		w.usegun_switch = LocalUseGunSwitch::kNone;
 		w.usegun_slot_active = false;
+		w.usegun_on_foot = false;
 		w.usegun_mount = EntityHandle{};
 		w.usegun_weapon_adm = 0xFF;
 		w.usegun_pending_mount = EntityHandle{};
@@ -215,6 +216,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	if (next_def == nullptr) w.active = false;
 
 	w.usegun_switch = LocalUseGunSwitch::kNone;
+	w.usegun_on_foot = false;
 	w.usegun_pending_mount = EntityHandle{};
 	w.usegun_pending_weapon_adm = 0xFF;
 	w.usegun_switch_action = -1;
@@ -311,6 +313,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 	};
 
 	if (on_usegun) {
+		w.usegun_on_foot = false; // the seat's borrow names the slot now
 		const bool active_matches = w.usegun_slot_active &&
 				w.usegun_mount == mounted_parent->handle &&
 				w.usegun_weapon_adm == mounted_adm;
@@ -329,11 +332,45 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		return;
 	}
 
+	// A borrow held on foot names no seat to leave: only a mount replaces it
+	// (D-NET-420) [orig: Entity_AttachToUseGunSlot @0x546C4E].
+	if (w.usegun_on_foot && w.usegun_switch == LocalUseGunSwitch::kNone) return;
 	if ((w.usegun_slot_active ||
 			 w.usegun_switch == LocalUseGunSwitch::kAttach ||
 			 w.usegun_switch == LocalUseGunSwitch::kSwap) &&
 			w.usegun_switch != LocalUseGunSwitch::kDetach)
 		stage_personal();
+}
+
+void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun) {
+	Entity *player = world.registry.get(world.cached.local_player);
+	if (player == nullptr) return;
+	WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(gun);
+	uint8_t adm = gun.primary_weapon_slot_adm;
+	if (slot != nullptr && slot != &gun.primary_weapon_slot) {
+		const Entity *carrier = world.registry.get(gun.ground_target);
+		adm = carrier != nullptr ? carrier->primary_weapon_slot_adm : 0xFF;
+	}
+	const WeaponTableEntry *def = world.tables.weapons.by_index(adm);
+	if (slot == nullptr || def == nullptr) return;
+	// The personal def the detach restore and the stage's outgoing slot read.
+	if (!w.usegun_slot_active) w.usegun_saved_adm = player->equipped_adm_index;
+	w.usegun_slot_active = true;
+	w.usegun_on_foot = true;
+	w.usegun_mount = gun.handle;
+	w.usegun_weapon_adm = adm;
+	w.usegun_switch = LocalUseGunSwitch::kNone;
+	w.usegun_pending_mount = EntityHandle{};
+	w.usegun_pending_weapon_adm = 0xFF;
+	w.usegun_switch_action = -1;
+	// The first-person model follows the EquippedSlot's def each frame
+	// [orig: Player_RenderFirstPersonViewModel @0x4DED60].
+	WeaponPresentationEvent event;
+	event.tick = world.logic_tick;
+	event.world_position = local_player_mission_position(world);
+	event.switch_to_weapon = def->name;
+	event.preserve_slot_state = true;
+	w.events.push_back(std::move(event));
 }
 
 void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
@@ -349,7 +386,10 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 	// @0x4dd6da / @0x4dd7a8 / @0x4dd81c are its only others], and the player
 	// leaves holding it: the whole mount runs, a same-category one queueing
 	// SWITCHRANK (D-WPN-48).
-	if (!w.usegun_slot_active && w.usegun_switch == LocalUseGunSwitch::kNone) {
+	// A borrow held on foot is no seat's: an unborrowed seat's detach mounts +0x308
+	// over it as over a personal slot (D-NET-420).
+	if ((!w.usegun_slot_active || w.usegun_on_foot) &&
+			w.usegun_switch == LocalUseGunSwitch::kNone) {
 		if (inventory == nullptr) return;
 		const WeaponTable &table = world.tables.weapons;
 		int32_t target = inventory->selected_combo;
@@ -394,6 +434,16 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	const WeaponInventorySlot *slot = inventory->slot(combo);
 	if (slot == nullptr || slot->adm_index < 0) return;
 	inventory->equipped_combo = combo;
+	// The personal slot is the EquippedSlot now: a borrow held on foot ends
+	// (D-NET-420) [orig: WeaponAction_SwitchFrom @0x543475 / WeaponAction_SwitchRank
+	// @0x543539 store g_PendingWeaponSlot as the EquippedSlot].
+	if (w.usegun_on_foot) {
+		w.usegun_on_foot = false;
+		w.usegun_slot_active = false;
+		w.usegun_mount = EntityHandle{};
+		w.usegun_weapon_adm = 0xFF;
+		w.usegun_saved_adm = 0xFF;
+	}
 	// The entity stamp is the only entity-DEPENDENT half. Retail's selection has no
 	// entity-existence precondition on the PRESENTATION half — the tail of every 0x5A
 	// grant runs Player_SelectWeaponSlot against the pool it just rebuilt and the FP

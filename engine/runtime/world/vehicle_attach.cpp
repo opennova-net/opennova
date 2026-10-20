@@ -109,32 +109,109 @@ bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
     return armory_mode ? !candidate.armory_points.empty() : !candidate.seats.empty();
 }
 
+// The def a carrier slot holds: the gun's own, or, for an EWeap child routed to
+// its vehicle's slot, the vehicle's [orig: Entity_GetWeaponSlots @0x5460E0].
+const WeaponTableEntry *carrier_slot_def(const World &world, const Entity &mount) {
+    const WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(mount);
+    if (slot == nullptr) return nullptr;
+    uint8_t adm = mount.primary_weapon_slot_adm;
+    if (slot != &mount.primary_weapon_slot) {
+        const Entity *carrier = world.registry.get(mount.ground_target);
+        if (carrier == nullptr) return nullptr;
+        adm = carrier->primary_weapon_slot_adm;
+    }
+    return world.tables.weapons.by_index(adm);
+}
+
+const WeaponTableEntry *slot_ref_def(const World &world, const WeaponSlotRef &ref) {
+    if (ref.kind == WeaponSlotRef::kPersonal) return world.tables.weapons.by_index(ref.adm);
+    if (ref.kind != WeaponSlotRef::kMount) return nullptr;
+    const Entity *mount = world.registry.get(ref.mount);
+    return mount != nullptr ? carrier_slot_def(world, *mount) : nullptr;
+}
+
+// Whether LocalPlayer holds this entity's EquippedSlot pair; without one the
+// entity's own WeaponSlotRefs are its pair.
+bool slot_pair_is_local(const World &world, EntityHandle entity) {
+    return entity == world.cached.local_player && world.local_player_state != nullptr;
+}
+
 // The local player's borrowed attach saves its EquippedSlot at entity+0x308 before
 // the carrier's slot replaces it: a ctrlx seat whatever the slot, a UseGun seat
-// unless the slot's def carries flags 0x80, which keeps the old +0x308; a null
-// EquippedSlot leaves none. The process's detach ran first, so the EquippedSlot is
-// the personal one. [orig: Entity_AttachToVehicleSlot @0x49481D..0x494831 (a null
-// slot's leg @0x494867..0x494898); Entity_AttachToUseGunSlot @0x546BCF..0x546C31
-// (the 0x80 test @0x546BE0..0x546BEE), @0x546C48]
-void save_borrowed_selected_slot(World &world, WeaponInventory &inv, bool use_gun) {
+// unless the slot's def carries flags 0x80 (Emplaced), which keeps the old +0x308;
+// a null EquippedSlot leaves none. The EquippedSlot is the personal one, or a gun's
+// the player still holds: a seat switch's detach only queued the personal mount,
+// and a refused attach left a borrow on foot. [orig: Entity_AttachToVehicleSlot
+// @0x49481D..0x494831 (a null slot's leg @0x494867..0x494898);
+// Entity_AttachToUseGunSlot @0x546BCF..0x546C31 (the 0x80 test @0x546BE0..0x546BEE),
+// @0x546C48]
+void save_borrowed_selected_slot(World &world, LocalPlayer &local, bool use_gun) {
+    WeaponInventory &inv = local.inventory;
+    const LocalPlayerWeapon &w = local.weapon;
     const WeaponInventorySlot *slot = inv.slot(inv.equipped_combo);
-    if (slot == nullptr) {
+    if (!w.usegun_slot_active && slot == nullptr) {
         inv.selected_combo = -1;
         return;
     }
-    if (use_gun && slot->adm_index >= 0) {
-        const WeaponTableEntry *def =
-                world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
-        if (def != nullptr && (def->flags & 0x80) != 0) return;
+    if (use_gun) {
+        const WeaponTableEntry *def = w.usegun_slot_active
+                ? world.tables.weapons.by_index(w.usegun_weapon_adm)
+                : slot->adm_index >= 0
+                ? world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index))
+                : nullptr;
+        if (def != nullptr && (def->flags & weapon_flag::kEmplaced) != 0) return;
     }
+    // A borrowed gun slot is no combo: the personal slot stands for it.
     inv.selected_combo = inv.equipped_combo;
 }
 
-// Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
+// Any other entity's borrow, success or a refused UseGun attach alike: +0x308
+// takes the EquippedSlot (a UseGun attach keeps the old one over an Emplaced
+// (0x80) def; a ctrlx attach saves none when the slot already was the carrier's)
+// and the EquippedSlot takes the carrier's slot.
+// [orig: Entity_AttachToUseGunSlot @0x546BCF..0x546C15, @0x546C42..0x546C4E;
+//  Entity_AttachToVehicleSlot @0x494867..0x494898]
+void borrow_carrier_slot(const World &world, Entity &occ, const Entity &carrier, bool use_gun) {
+    const WeaponSlotRef old = occ.equipped_slot;
+    if (use_gun) {
+        const WeaponTableEntry *def = slot_ref_def(world, old);
+        if (def == nullptr || (def->flags & weapon_flag::kEmplaced) == 0)
+            occ.selected_slot = old;
+    } else {
+        occ.selected_slot = old.names_mount(carrier.handle) ? WeaponSlotRef{} : old;
+    }
+    occ.equipped_slot = {};
+    occ.equipped_slot.kind = WeaponSlotRef::kMount;
+    occ.equipped_slot.mount = carrier.handle;
+}
+
+// The authority's process refuses an attach while the requester's EquippedSlot is
+// busy: an action past EmptyIdle other than Overheated (fire, recoil, reload, the
+// dry click, a switch or a scope step). The local player's slot is its active
+// one (a borrowed gun's included); another entity's is the carrier slot it names.
+// The host keeps no action for a remote player's own slots (D-NET-336), so those
+// read idle. [orig: Entity_ProcessVehicleAttach @0x435B18..0x435B38]
+bool equipped_slot_busy(World &world, const Entity &occ) {
+    const WeaponSlotState *slot = nullptr;
+    if (slot_pair_is_local(world, occ.handle)) {
+        if (world.local_player_state->weapon.active)
+            slot = active_local_weapon_slot(world, world.local_player_state->weapon);
+    } else if (occ.equipped_slot.kind == WeaponSlotRef::kMount) {
+        if (const Entity *mount = world.registry.get(occ.equipped_slot.mount))
+            slot = world.vehicles.resolve_mounted_ammo_slot(*mount);
+    }
+    return slot != nullptr && slot->current >= weapon_action::kFire &&
+            slot->current != weapon_action::kOverheated;
+}
+
+// Shared attach write block. Retail splits UseGun from ordinary vehicle slots at
 // the flags write; the remaining relationship fields are common. Returns false for a
-// control seat retail refuses, before any relationship write.
-bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
+// seat retail refuses, before any relationship write. `force_attach` is a client's
+// (Entity_ProcessVehicleAttach passes 1 there, 0 on the authority).
+bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone,
+        bool force_attach) {
     const bool control_seat = is_vehicle_control_seat(veh.seats[seat_idx].type);
+    const bool use_gun = veh.seats[seat_idx].type == SeatType::Gunner;
     // The local player's control-seat attach resets its camera first, EWeap
     // carrier or not, ahead of the +368 claim test: the scope target and
     // ease, the fov, the binoculars and the NVG restore latch. (The function's
@@ -166,6 +243,27 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     if (control_seat &&
             !world.vehicles.claim_primary_occupant(veh, occ.handle, veh.seats[seat_idx].type))
         return false;
+    // The authority's UseGun attach succeeds only while +368 is empty or the
+    // requester's; a refusal still saves +0x308 and points the EquippedSlot at the
+    // gun's slot, the local player's too (only a success mounts through
+    // Player_MountWeaponSlot), then writes nothing else: the requester stays on
+    // foot holding the gun's slot, which the weapon walk pumps through it. A
+    // client's attach is forced and always seats. (D-NET-420)
+    // [orig: Entity_AttachToUseGunSlot -- forceAttach @0x546B91..0x546B98, the +368
+    //  test @0x546BB6..0x546BC6, the save @0x546BCF..0x546C15, the success-only
+    //  mount @0x546C17..0x546C38, the store @0x546C42..0x546C4E, the success gate
+    //  @0x546C56]
+    if (use_gun && !force_attach && veh.primary_occupant.valid() &&
+            veh.primary_occupant != occ.handle) {
+        if (slot_pair_is_local(world, occ.handle)) {
+            LocalPlayer &local = *world.local_player_state;
+            if (local.inventory_valid) save_borrowed_selected_slot(world, local, true);
+            local_weapon_direct_borrow(world, local.weapon, veh);
+        } else {
+            borrow_carrier_slot(world, occ, veh, true);
+        }
+        return false;
+    }
     veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
     occ.mount_type = veh.seats[seat_idx].type; // [orig: parentSlot(0x168) = slotType]
     static_assert((kEntityFlagDrowning | kEntityFlagInAir) == 0xA000u,
@@ -203,10 +301,13 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     if (occ.mount_type == SeatType::Gunner ||
             (occ.mount_type == SeatType::Controller &&
              (veh.item_attrib & kItemAttribEweap) != 0)) {
-        if (occ.handle == world.cached.local_player && world.local_player_state != nullptr &&
-                world.local_player_state->inventory_valid)
-            save_borrowed_selected_slot(world, world.local_player_state->inventory,
-                                        occ.mount_type == SeatType::Gunner);
+        if (slot_pair_is_local(world, occ.handle)) {
+            if (world.local_player_state->inventory_valid)
+                save_borrowed_selected_slot(world, *world.local_player_state,
+                                            occ.mount_type == SeatType::Gunner);
+        } else {
+            borrow_carrier_slot(world, occ, veh, occ.mount_type == SeatType::Gunner);
+        }
         world.vehicles.bind_use_gun_slot(occ, veh);
     }
     // The entity's degree mirror as the entity carried it in, before the seat
@@ -238,9 +339,13 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
         }
         if (body != nullptr && body->inf.is_local_player) body->inf.target_heading = yaw;
     }
-    // The UseGun claim (the control seats claimed above).
-    // [orig: Entity_AttachToUseGunSlot +368 @0x546c6d]
-    if (!control_seat)
+    // The UseGun claim (the control seats claimed above): a client's forced
+    // attach stores +368 over any claimant.
+    // [orig: Entity_AttachToUseGunSlot +368 @0x546c6d; forceAttach @0x546B93]
+    if (use_gun && force_attach && veh.primary_occupant.valid() &&
+            veh.primary_occupant != occ.handle)
+        veh.primary_occupant = occ.handle;
+    else if (!control_seat)
         world.vehicles.claim_primary_occupant(veh, occ.handle, occ.mount_type);
     return true;
 }
@@ -509,6 +614,9 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     if (selection.seat_index < 0 ||
         selection.seat_index >= static_cast<int>(veh->seats.size()))
         return false;
+    // The authority's busy gate on the requester's EquippedSlot, then its enemy
+    // test [orig: @0x435B18..0x435B38; Vehicle_HasEnemyOccupant @0x435B40].
+    if (world.ai.is_authority && equipped_slot_busy(world, *occ)) return false;
     if (vehicle_has_enemy_occupant(world, *veh, *occ)) return false;
     const Seat &seat = veh->seats[static_cast<size_t>(selection.seat_index)];
     if (seat.type == SeatType::None || seat.type != selection.type) return false;
@@ -534,7 +642,7 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     // A refused control seat attaches nothing [orig: @0x435c09 / @0x435c40];
     // as apply_confirmed_mount reports, the relation changed only if the body
     // left a seat first.
-    if (!attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index))
+    if (!attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index, false))
         return was_mounted;
     world.out.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
     raise_boarding_tip(world, player, *veh, selection.type);
@@ -654,7 +762,7 @@ bool VehicleSystem::apply_confirmed_mount(
     // The client runs the same refusal on its own +368: the relation changed
     // only when the body left a seat [orig: Entity_ProcessVehicleAttach
     // @0x435bce, then Entity_AttachToVehicleSlot @0x494714].
-    if (!attach_apply(world, *occ, *veh, seat_idx, bone)) return was_mounted;
+    if (!attach_apply(world, *occ, *veh, seat_idx, bone, true)) return was_mounted;
     world.out.scars.clear_entity(player);
     // The client's attach runs the same function [orig: Entity_TryAttachOrDetach
     // @0x4366e8 -> Entity_ProcessVehicleAttach, the tip @0x435bfd].
@@ -696,7 +804,7 @@ bool VehicleSystem::detach(EntityHandle player) {
             if (s.occupant == player) s.occupant = EntityHandle{}; // [orig: -> 0xFFFF]
         }
     }
-    vehicle_release_equipped_slot(*occ, veh);
+    vehicle_release_equipped_slot(*occ, veh, slot_pair_is_local(world, player));
     // The local player's detach fades a showing tip [orig: @0x4356b0..0x4356bf
     // — CTipSystem_HandleEvent(6) for g_LocalPlayerEntity].
     if (player == world.cached.local_player)

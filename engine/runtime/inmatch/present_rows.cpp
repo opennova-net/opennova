@@ -98,18 +98,18 @@ bool remote_held_weapon_out_of_ammo(const World &w, const NapiNPServerCtx &serve
 		if (conn.link.owned_entity.packed != e.handle.packed) continue;
 		const WeaponTableEntry *def = nullptr;
 		int16_t slot_clip = 0;
-		switch (conn.equipped_slot.kind) {
-			case NapiNPConnection::EquippedSlotRef::kNone:
+		switch (e.equipped_slot.kind) {
+			case WeaponSlotRef::kNone:
 				return false;
-			case NapiNPConnection::EquippedSlotRef::kPersonal: {
-				const auto slot = conn.weapon_slots.find(conn.equipped_slot.combo);
+			case WeaponSlotRef::kPersonal: {
+				const auto slot = conn.weapon_slots.find(e.equipped_slot.combo);
 				if (slot == conn.weapon_slots.end()) return false;
 				def = w.tables.weapons.by_index(slot->second.adm_index);
 				slot_clip = slot->second.clip;
 				break;
 			}
-			case NapiNPConnection::EquippedSlotRef::kMount: {
-				const Entity *mount = w.registry.get(conn.equipped_slot.mount);
+			case WeaponSlotRef::kMount: {
+				const Entity *mount = w.registry.get(e.equipped_slot.mount);
 				if (mount == nullptr) return false;
 				def = w.tables.weapons.by_index(mount->primary_weapon_slot_adm);
 				slot_clip = static_cast<int16_t>(mount->primary_weapon_slot.clip);

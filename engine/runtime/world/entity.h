@@ -334,6 +334,28 @@ struct VehicleTrailState {
 	uint16_t effect_state[2] = {};
 };
 
+// The weapon slot an entity's EquippedSlot (+0x118) or its saved slot (+0x308)
+// names: none, a slot of the player's own table (its combo, and the def the slot
+// held when named), or a carrier's MountSlot (a gun's +0x2B4, a vehicle's +0x474).
+// The local player's pair lives in LocalPlayer (WeaponInventory's equipped and
+// selected combos, LocalPlayerWeapon's borrowed slot); these carry every other
+// entity's, the host's record of a remote player's among them.
+// [orig: entity+0x118 / +0x308; Entity_AttachToUseGunSlot @0x546C42..0x546C4E;
+//  Entity_AttachToVehicleSlot @0x494867..0x494898; Entity_DetachFromVehicle
+//  @0x435671..0x435696; Server_ClientFiredRound @0x50C1D4..0x50C28D;
+//  NapiNPServerMsg_HandlePlayerLoadout @0x515F52..0x515F8A]
+struct WeaponSlotRef {
+	enum Kind : uint8_t { kNone, kPersonal, kMount };
+	Kind kind = kNone;
+	uint16_t combo = 0;   // kPersonal: the slot's combo
+	uint8_t adm = 0xFF;   // kPersonal: the def that slot held
+	EntityHandle mount{}; // kMount: the carrier whose slot is named
+	bool names_mount(EntityHandle carrier) const { return kind == kMount && mount == carrier; }
+	bool operator==(const WeaponSlotRef &o) const {
+		return kind == o.kind && combo == o.combo && adm == o.adm && mount == o.mount;
+	}
+};
+
 // The lndm entity overlay. Zero-filled, unauthored slots still participate.
 // [orig: Entity_InitHardpoints @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
 struct MinefieldState {
@@ -772,6 +794,12 @@ struct Entity {
     //  restore @0x435671-0x435687, NPC clear @0x435694-0x4356aa]
     uint8_t pre_use_gun_equipped_adm_index = 0xFF;
     bool use_gun_slot_swapped = false;
+    // EquippedSlot (+0x118) and the saved slot (+0x308) of any entity but the local
+    // player (WeaponSlotRef above). The attaches that borrow a carrier's slot point
+    // the first at it and save the second; a seat-2/3 detach points the first back
+    // at the second; the weapon walk pumps the first, a borrowed one on foot too.
+    WeaponSlotRef equipped_slot;
+    WeaponSlotRef selected_slot;
     bool hidden = false;
 
     // --- destruction state (world/destruction.h; world-wac-ai-re §24) ---

@@ -767,7 +767,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// [orig: NapiNPServerMsg_HandlePlayerLoadout - the store @0x515F52..0x515F62,
 					//  the slot / def tests @0x515F73..0x515F7C, `and ecx, 1` @0x515F81 whose
 					//  zero skips the clear @0x515F88, the clear @0x515F8A]
-					conn.equipped_slot = {};
+					world::WeaponSlotRef &equipped = loadout_player->equipped_slot;
+					equipped = {};
 					const auto submitted = req.weapon_slot_index <= 0xFFFFu
 							? conn.weapon_slots.find(static_cast<uint16_t>(req.weapon_slot_index))
 							: conn.weapon_slots.end();
@@ -776,8 +777,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							: nullptr;
 					if (submitted_def != nullptr &&
 							(submitted_def->flags2 & world::weapon_flag2::kNoSelect) == 0) {
-						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
-						conn.equipped_slot.combo = submitted->first;
+						equipped.kind = world::WeaponSlotRef::kPersonal;
+						equipped.combo = submitted->first;
+						equipped.adm = submitted->second.adm_index;
 					}
 				}
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));

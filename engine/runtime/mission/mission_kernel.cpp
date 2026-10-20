@@ -1065,6 +1065,7 @@ bool MissionKernel::restore_baseline() {
 	local.weapon.reload_pressed = false;
 	local.weapon.usegun_switch = w::LocalUseGunSwitch::kNone;
 	local.weapon.usegun_slot_active = false;
+	local.weapon.usegun_on_foot = false;
 	local.weapon.usegun_mount = w::EntityHandle{};
 	local.weapon.usegun_weapon_adm = 0xFF;
 	local.weapon.usegun_pending_mount = w::EntityHandle{};

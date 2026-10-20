@@ -59,7 +59,9 @@ bool VehicleSystem::claim_primary_occupant(Entity &vehicle, EntityHandle occupan
     // empty or already theirs and the carrier's def has PlayerControl (0x40)
     // (@0x4947b3..0x4947d2 / @0x4948b9..0x4948d8). UseGun(3) claims through
     // Entity_AttachToUseGunSlot @0x546B80 (the test @0x546bb6..0x546bc6, the store
-    // @0x546c6d): ours only when empty (D-NET-420). This function's own type-3 leg
+    // @0x546c6d): the authority's attach refused a held +368 before this
+    // (attach_apply) and a client's forced attach stores over a claimant there, so
+    // here it claims an empty one or keeps its own. This function's own type-3 leg
     // (@0x494944..0x49495e, empty only) is unreachable: the one caller sends UseGun seats to
     // Entity_AttachToUseGunSlot (@0x435c9f / @0x435caa). Sitex passengers never touch +368.
     const bool was_empty = !vehicle.primary_occupant.valid();
@@ -239,7 +241,7 @@ bool VehicleSystem::reload_weapon_slot(Entity &mount) {
     return true;
 }
 
-void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle) {
+void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle, bool is_local) {
     if (vehicle != nullptr && vehicle->primary_weapon_owner == occupant.handle)
         vehicle->primary_weapon_owner = EntityHandle{};
     const bool is_player =
@@ -250,11 +252,23 @@ void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle) {
         occupant.pre_use_gun_equipped_adm_index = 0xFF;
         occupant.use_gun_slot_swapped = false;
     }
+    // Any other entity leaving a seat 2 or 3 points its EquippedSlot at +0x308,
+    // whether that seat borrowed a slot or not: after an unarmed ctrlx ride it is
+    // whatever +0x308 last held, null when nothing saved one (FOUND-4). The local
+    // player mounts it instead (local_weapon_detach_mount).
+    // [orig: Entity_DetachFromVehicle @0x435671..0x43567F, the store
+    //  @0x435681..0x435687]
+    if (!is_local && (occupant.mount_type == SeatType::Gunner ||
+                      occupant.mount_type == SeatType::Controller))
+        occupant.equipped_slot = occupant.selected_slot;
     // Then any non-player leaving its parent, whatever the seat, drops its
     // EquippedSlot and zeroes its AdmDef byte.
     // [orig: Entity_DetachFromVehicle Flags 0x100 test @0x43568D, EquippedSlot
     //  @0x435696, the byte @0x43569C]
-    if (!is_player) occupant.equipped_adm_index = 0;
+    if (!is_player) {
+        occupant.equipped_slot = {};
+        occupant.equipped_adm_index = 0;
+    }
 }
 
 Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {

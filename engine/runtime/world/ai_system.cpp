@@ -614,15 +614,23 @@ void AiSystem::release_stale_gunner_link(World &world, Entity &mount) {
         mount.primary_weapon_owner = EntityHandle{};
 }
 
-// Every pool-0 row's weapon slot is pumped, whatever its seat: a borrower's
-// is the mount's. [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1]
+// Every pool-0 row's EquippedSlot is pumped, whatever its seat: a borrower's is
+// the carrier slot it names, seated or, after a refused UseGun attach, on foot
+// (D-NET-420). [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1]
 void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick) {
-    if (!owner.mounted) return;
-    Entity *mount = world.registry.get(owner.mount_target);
-    if (mount == nullptr || mount->primary_weapon_owner != owner.handle) return;
-    if (!gunner_holds_mount(owner, *mount)) {
+    if (owner.equipped_slot.kind != WeaponSlotRef::kMount) return;
+    Entity *mount = world.registry.get(owner.equipped_slot.mount);
+    if (mount == nullptr) return;
+    // The seated borrower's mount->gunner link is the port's (a stale one drops),
+    // and only it fires: no fire request reaches a slot held on foot (the
+    // infantry request writes FIRE from a seat alone, and a remote player's
+    // accepted fire re-points to its personal slot first, Server_ClientFiredRound
+    // @0x50C1D4..0x50C28D).
+    bool seated = owner.mounted && owner.mount_target == mount->handle &&
+            mount->primary_weapon_owner == owner.handle;
+    if (seated && !gunner_holds_mount(owner, *mount)) {
         mount->primary_weapon_owner = EntityHandle{};
-        return;
+        seated = false;
     }
     {
         AiEntity *gunner = for_handle(owner.handle);
@@ -644,7 +652,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);
         weapon_sound_publish(world, owner, weapon->action_fsm, weapon_events);
-        if (!weapon_events.fired || !is_authority) return;
+        if (!weapon_events.fired || !is_authority || !seated) return;
 
         // The slot owner is the gunner, while its def/ammo live on the parent.
         // A UseGun shot leaves through the gunner branch every mounted shooter
