@@ -607,9 +607,20 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# Let the authority consume action 6 and prepare the parent slot before
 	# stamping the non-default phase-8 witness; first-time preparation seeds the
 	# weapon.def defaults and would intentionally replace an earlier debug value.
-	joiner.step()
-	host.step()
-	NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
+	# The C2S rides the joiner's next uplink pump, so wait for the authority's
+	# preparation itself (the parent's slot leaves its unprepared zero words)
+	# rather than for a fixed number of steps.
+	var parent_prepared := false
+	for _tick in range(120):
+		joiner.step()
+		host.step()
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
+		if host.entity_card_by_net_id(parent_bms_id).get_primary_weapon_clip() != 0:
+			parent_prepared = true
+			break
+		OS.delay_msec(1)
+	assert_true(parent_prepared,
+			"the authority consumed action 6 and prepared the parent MountSlot")
 	assert_eq(host.debug_set_world_entity_weapon_ammo(
 			parent_bms_id, 7, 19), OK)
 	var parent_ammo_applied := false
