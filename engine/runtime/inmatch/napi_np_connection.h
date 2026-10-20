@@ -153,11 +153,7 @@ struct InitialStateBurst {
 		kSyncSessionConfig = 9,
 		kSyncChatHistoryFirst = 10,
 		kSyncChatHistoryLast = 15,
-		kSyncNoop = 16,
-		kSyncBmsHeader = 17,
-		kSyncWeaponRestrictions = 18,
-		kSyncClassAllowMask = 19,
-		kSyncDisconnectUnlock = 20,
+		kSyncTail = 16, // one call sends the whole tail (0x1C, 0x0B, 0x66, 0x76, 0x11)
 	};
 	enum WorldStreamPhase : uint8_t {
 		kStreamInit = 0,
@@ -170,7 +166,7 @@ struct InitialStateBurst {
 		kStreamWaitForGameStartAck = 7,
 		kStreamGameStartBundle = 8,
 	};
-	uint16_t player_sync_subphase = kSyncMissionMapNames;  // [playerSlot+89878] 8..20 (one tag each; see server_initial_state)
+	uint16_t player_sync_subphase = kSyncMissionMapNames;  // [playerSlot+89878] 8..16 (see server_initial_state)
 	uint8_t  world_stream_phase = kStreamInit;    // [playerSlot+89882] 0 phase-0 init [orig: @0x51bc1a case 0], 1=0x10 .. 7=0x1A
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
@@ -697,14 +693,9 @@ struct NapiNPConnection {
 	// [orig: CNapiNPConnection_RequestDisconnect @0x61e107 -> NapiNPProtocol_Pump @0x62a6fd]
 	bool pending_disconnect = false;
 	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
-	                               // seqs it confirmed. Drives the initial-state backlog throttle: the
-	                               // original stalls both burst tracks while the connection's
-	                               // outstanding-message count (conn+0x768) >= 20 [orig: the
-	                               // NapiNPMessageQueueState field read at 0x51bf1b / 0x51bc04] — the
-	                               // client-paced backpressure that stretches the world stream across a
-	                               // cold client's mission build (D-NET-150). Our structural stand-in
-	                               // counts unconfirmed outbound datagrams (next_outbound_seq-1 minus
-	                               // this); exact retail inc/dec sites pending an IDA pass.
+	                               // seqs it confirmed (the retransmitted 0x42's settings re-send reads
+	                               // it). The initial-state backlog gate counts messages instead
+	                               // (seq.retained_outbound_message_count, server_initial_state.cpp).
 	std::string session_id;        // key into the GameServerRuntime sessions_ (the peer label)
 	GameAdmissionStage admission_stage = GameAdmissionStage::Complete;
 	uint32_t admission_padding_x = 0; // S2C 0x02 challenge prefix the C2S echo must preserve

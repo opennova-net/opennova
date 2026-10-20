@@ -209,12 +209,49 @@ bool run_no_player_list_off_the_scoreboard_clock() {
 	return true;
 }
 
+// The producer's pacing: one step per send boundary, a step that sends nothing included, and
+// the 20-message backlog gate [orig: Server_TickUpdate @0x51E3D6..0x51E3E4;
+// Server_SendInitialGameStateToPlayer @0x51BBA0 - world case 0 @0x51BC22..0x51BC29, the gate
+// `cmp [ecx+768h], 14h` @0x51BF14..0x51BF1B; the tail @0x51C03A..0x51C13C].
+bool run_one_step_per_boundary() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	inmatch::NapiNPConnection &j = f.joiner();
+	(void)f.send(opennova::c2s::CHECKSUM_RESPONSE);
+	// 20 messages on the wire unacknowledged hold the track; 19 do not.
+	j.seq.retained_outbound_message_count = 20;
+	if (!expect(f.pump().empty(), "20 unacknowledged messages hold the track")) return false;
+	j.seq.retained_outbound_message_count = 19;
+	const std::vector<uint8_t> first = f.pump();
+	if (!expect(first == std::vector<uint8_t>{opennova::s2c::MISSION_MAP_NAMES},
+	            "below 20 the track sends its one 0x2C step")) return false;
+	j.seq.retained_outbound_message_count = 0;
+	// Subphases 9..15: one record per boundary (the 0x08, then the six 0x2A rows).
+	for (int i = 0; i < 7; ++i) {
+		if (!expect(f.pump().size() == 1, "one player-sync record per boundary")) return false;
+	}
+	const std::vector<uint8_t> tail = f.pump();
+	if (!expect(tail.size() >= 4 && tail.front() == opennova::s2c::NOOP &&
+	                    tail.back() == opennova::s2c::DISCONNECT_UNLOCK &&
+	                    j.slot_state == inmatch::PlayerSlotState::AwaitWorldRequest,
+	            "the tail is one boundary and parks the slot in state 3")) return false;
+	(void)f.send(opennova::c2s::SPAWN_MENU_REQUEST);
+	if (!expect(f.pump().empty() && j.burst.world_stream_phase == 1,
+	            "the world stream's case 0 spends a boundary with no send")) return false;
+	const std::vector<uint8_t> statics = f.pump();
+	if (!expect(statics == std::vector<uint8_t>{0x10},
+	            "the next boundary sends the first 0x10 page alone")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
 	if (!run_track_waits_for_player_sync_request()) ++failures;
 	if (!run_no_player_list_off_the_scoreboard_clock()) ++failures;
+	if (!run_one_step_per_boundary()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;
