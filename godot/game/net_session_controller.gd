@@ -29,11 +29,11 @@ var _novaworld_client: NovaWorldClient
 # The match was entered from the NovaWorld menu: a normal exit returns there
 # (retail's g_ReturnToNovaWorldMenu, docs/net/novaworld-net-re.md).
 var _return_to_novaworld := false
-var _join_role_prompt: Control
-var _join_role_password: LineEdit
-var _join_server_password: LineEdit
-var _join_password: LineEdit
-var _join_role_target: JoinTarget
+# The target the join screen's choice panels are up for (_begin_join_choice).
+var _join_choice_target: JoinTarget
+## The join screen the choice shows on when the controller runs without its shell
+## (the GUT harness opens one over an authored pre.mnu); the shell's own otherwise.
+var standalone_join_screen: PreGameMenuPresenter = null
 var _spectator_probe: LanSession
 var _spectator_probe_target: JoinTarget
 var _spectator_probe_serial := 0
@@ -47,7 +47,7 @@ const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 func _exit_tree() -> void:
 	_cancel_launch_browse()
 	_cancel_spectator_probe()
-	_dismiss_join_role_prompt()
+	_join_choice_target = null
 	_release_novaworld_client()
 
 
@@ -201,7 +201,7 @@ func join_lan_server(target: JoinTarget) -> void:
 	if target == null:
 		return
 	_cancel_spectator_probe()
-	_dismiss_join_role_prompt()
+	_join_choice_target = null
 	# The entry's step is the engine's (inmatch/server_flags.h join_entry_step):
 	# enumerate the endpoint for its flag word first (every target without one),
 	# dial, or ask the retail player/spectator question.
@@ -209,7 +209,7 @@ func join_lan_server(target: JoinTarget) -> void:
 		JoinTarget.ENTRY_PREFLIGHT:
 			_begin_spectator_preflight(target)
 		JoinTarget.ENTRY_PROMPT:
-			_show_join_role_prompt(target)
+			_begin_join_choice(target)
 		_:
 			_start_lan_join(target)
 
@@ -340,7 +340,7 @@ func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
 	target.transport = probe.take_transport()
 	_cancel_spectator_probe()
 	if target.entry_step() == JoinTarget.ENTRY_PROMPT:
-		_show_join_role_prompt(target)
+		_begin_join_choice(target)
 	else:
 		_start_lan_join(target)
 
@@ -366,142 +366,51 @@ func _abort_spectator_preflight() -> void:
 		_menu_shell.show_menu()
 
 
-# Retail exposes this decision after enumeration whenever P2 bit 0x2000 is
-# set. The password control appears only with P2 bit 0x4000; Player never sends
-# JSPP. The witnessed BuildFlags bits live engine-side
-# (engine/runtime/inmatch/server_initial_state.cpp; docs/net/novaworld-net-re.md
-# section 5.0e). As retail's PRE.MNU, the prompt has no team control: the side
-# comes from the team password, and every join sends the automatic TR=-1
-# (D-NET-590).
-func _show_join_role_prompt(target: JoinTarget) -> void:
-	_dismiss_join_role_prompt()
-	_join_role_target = target
-	var overlay := Control.new()
-	overlay.name = "JoinRolePrompt"
-	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	_join_role_prompt = overlay
-
-	var shade := ColorRect.new()
-	shade.color = Color(0.0, 0.0, 0.0, 0.72)
-	shade.mouse_filter = Control.MOUSE_FILTER_STOP
-	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	overlay.add_child(shade)
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	overlay.add_child(center)
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(420.0, 0.0)
-	center.add_child(panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 24)
-	margin.add_theme_constant_override("margin_top", 20)
-	margin.add_theme_constant_override("margin_right", 24)
-	margin.add_theme_constant_override("margin_bottom", 20)
-	panel.add_child(margin)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 12)
-	margin.add_child(box)
-
-	var title := Label.new()
-	title.text = "Join %s" % (
-			target.server_name if not target.server_name.is_empty() else "game")
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(title)
-	var question := Label.new()
-	question.text = ("Would you like to join as a player or spectator?"
-			if target.allows_spectators() else "Choose how to join.")
-	question.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(question)
-
-	if target.server_password_required():
-		_join_server_password = LineEdit.new()
-		_join_server_password.name = "ServerPassword"
-		_join_server_password.placeholder_text = "Server password"
-		_join_server_password.secret = true
-		_join_server_password.text = target.server_password
-		box.add_child(_join_server_password)
-
-	if target.has_team_password():
-		_join_password = LineEdit.new()
-		_join_password.name = "JoinPassword"
-		_join_password.placeholder_text = "Team password (leave empty for an open team)"
-		_join_password.secret = true
-		_join_password.max_length = 63
-		_join_password.text = target.join_password
-		box.add_child(_join_password)
-
-	if target.allows_spectators() and target.spectator_password_required():
-		_join_role_password = LineEdit.new()
-		_join_role_password.name = "SpectatorPassword"
-		_join_role_password.placeholder_text = "Spectator password"
-		_join_role_password.secret = true
-		_join_role_password.max_length = HostSessionConfig.SPECTATOR_PASSWORD_MAX_LENGTH
-		box.add_child(_join_role_password)
-
-	var choices := HBoxContainer.new()
-	choices.alignment = BoxContainer.ALIGNMENT_CENTER
-	choices.add_theme_constant_override("separation", 10)
-	box.add_child(choices)
-	var player_button := Button.new()
-	player_button.name = "JoinAsPlayer"
-	player_button.text = "Player" if target.allows_spectators() else "Join"
-	player_button.pressed.connect(_choose_join_role.bind(JoinTarget.ROLE_PLAYER))
-	choices.add_child(player_button)
-	var spectator_button := Button.new()
-	spectator_button.name = "JoinAsSpectator"
-	spectator_button.text = "Spectator"
-	spectator_button.pressed.connect(_choose_join_role.bind(JoinTarget.ROLE_SPECTATOR))
-	choices.add_child(spectator_button)
-	spectator_button.visible = target.allows_spectators()
-	var cancel_button := Button.new()
-	cancel_button.name = "CancelJoin"
-	cancel_button.text = "Cancel"
-	cancel_button.pressed.connect(_cancel_join_role_choice)
-	choices.add_child(cancel_button)
-
-	var mount := _panel_layer if _panel_layer != null else self
-	mount.add_child(overlay)
-	if _join_server_password != null:
-		_join_server_password.grab_focus()
-	else:
-		player_button.grab_focus()
+# The join machine's choice (its state 8, which a discovered word carrying any of
+# 0x6038 reaches): pre.mnu's choice panels on the join screen, GAME_PASSWORD for a
+# server password, SPECTATE when the host takes spectators, then the spectator
+# password or the side password in the one shared TEAM_PASSWORD control; ACCEPT
+# walks them and its commit routes the three controls onto the target
+# (JoinTarget.apply_pre_game_choice: the shared text to the spectator password
+# when spectating, else to the side password), after which the join goes on; BACK
+# or Cancel leaves to the menu. The screen has no team control: every join sends
+# the automatic TR=-1 (D-NET-590). The walk and the routing are the engine's
+# (inmatch/pre_game_menu.h carries the witness; ctest npruntime_pre_game_menu).
+func _begin_join_choice(target: JoinTarget) -> void:
+	_join_choice_target = target
+	var shown := false
+	if _shell != null:
+		shown = _shell.begin_join_choice(target.server_flags, _commit_join_choice,
+				_cancel_join_role_choice)
+	elif standalone_join_screen != null:
+		shown = standalone_join_screen.show_choice(target.server_flags)
+		if shown and not standalone_join_screen.choice_committed.is_connected(_commit_join_choice):
+			standalone_join_screen.choice_committed.connect(_commit_join_choice)
+			standalone_join_screen.cancelled.connect(_cancel_join_role_choice)
+	if not shown:
+		push_warning("NetSessionController: the join screen could not show the join choice")
+		_cancel_join_role_choice()
 
 
-func _choose_join_role(role: int) -> void:
-	var target := _join_role_target
+## The join choice's panels are up for a target (the test and probe read).
+func is_join_choice_pending() -> bool:
+	return _join_choice_target != null
+
+
+func _commit_join_choice(game_password: String, spectate: bool, team_password: String) -> void:
+	var target := _join_choice_target
+	_join_choice_target = null
 	if target == null:
 		return
-	if _join_server_password != null:
-		target.server_password = _join_server_password.text
-	if _join_password != null:
-		target.join_password = _join_password.text
-	target.join_role = role
-	target.role_explicit = true
-	target.spectator_password = (
-			_join_role_password.text
-			if role == JoinTarget.ROLE_SPECTATOR and _join_role_password != null
-			else "")
-	_dismiss_join_role_prompt()
+	target.apply_pre_game_choice(game_password, spectate, team_password)
 	_start_lan_join(target)
 
 
 func _cancel_join_role_choice() -> void:
-	_dismiss_join_role_prompt()
+	_join_choice_target = null
 	_release_novaworld_client()
 	if _menu_shell != null:
 		_menu_shell.show_menu()
-
-
-func _dismiss_join_role_prompt() -> void:
-	if _join_role_prompt != null:
-		_join_role_prompt.queue_free()
-	_join_role_prompt = null
-	_join_role_password = null
-	_join_server_password = null
-	_join_password = null
-	_join_role_target = null
 
 
 ## The local player's display callsign, carried by game ClientAuth.NA.

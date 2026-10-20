@@ -78,6 +78,74 @@ uint32_t pre_game_windows(PreGamePanel panel) {
 	return 0;
 }
 
+namespace {
+
+constexpr uint32_t kFlagServerPassword = 0x8u;
+constexpr uint32_t kFlagSidePasswords = 0x30u;
+constexpr uint32_t kFlagSpectators = 0x2000u;
+constexpr uint32_t kFlagSpectatorPassword = 0x4000u;
+
+} // namespace
+
+PreGamePanel pre_game_entry_panel(uint32_t server_flags, bool authority) {
+	if ((server_flags & kFlagServerPassword) != 0u) return PreGamePanel::GamePassword;
+	if ((server_flags & kFlagSpectators) != 0u) return PreGamePanel::Spectate;
+	if ((server_flags & kFlagSidePasswords) != 0u && !authority) return PreGamePanel::TeamPassword;
+	return PreGamePanel::Progress;
+}
+
+PreGameAccept pre_game_accept(PreGamePanel panel, uint32_t server_flags, bool spectate_checked,
+		bool authority) {
+	PreGameAccept out;
+	const bool side_passwords = (server_flags & kFlagSidePasswords) != 0u && !authority;
+	switch (panel) {
+	case PreGamePanel::Progress:
+		out.next = PreGamePanel::Progress;
+		return out;
+	case PreGamePanel::GamePassword:
+		if ((server_flags & kFlagSpectators) != 0u) {
+			out.next = PreGamePanel::Spectate;
+			return out;
+		}
+		if (side_passwords) {
+			out.next = PreGamePanel::TeamPassword;
+			return out;
+		}
+		break;
+	case PreGamePanel::Spectate:
+		if (spectate_checked) {
+			if ((server_flags & kFlagSpectatorPassword) != 0u && !authority) {
+				out.next = PreGamePanel::SpectatorPassword;
+				return out;
+			}
+		} else if (side_passwords) {
+			out.next = PreGamePanel::TeamPassword;
+			return out;
+		}
+		break;
+	case PreGamePanel::SpectatorPassword:
+	case PreGamePanel::TeamPassword:
+		break;
+	case PreGamePanel::Error:
+		out.next = PreGamePanel::Error;
+		out.abort = true;
+		return out;
+	}
+	out.next = PreGamePanel::Progress;
+	out.commit = true;
+	return out;
+}
+
+void pre_game_commit(const std::string &game_password, bool spectate_checked,
+		const std::string &team_password, PreGameChoice &choice) {
+	choice.server_password = game_password;
+	choice.spectate = spectate_checked;
+	if (spectate_checked)
+		choice.spectator_password = team_password;
+	else
+		choice.side_password = team_password;
+}
+
 void fold_join_queue_record(JoinQueueRecord &record, const uint8_t *data, size_t size,
 		uint64_t now_ms) {
 	const uint8_t queued = size >= 1 ? data[0] : 0;

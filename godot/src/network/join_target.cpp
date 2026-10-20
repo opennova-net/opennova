@@ -1,6 +1,9 @@
 #include "network/join_target.h"
 
 #include "network/lan_server_row.h"
+#include "util/string_convert.h"
+
+#include <runtime/inmatch/pre_game_menu.h> // pre_game_commit (the join screen's choice)
 
 namespace godot {
 
@@ -26,6 +29,20 @@ Ref<JoinTarget> JoinTarget::from_lan_row(const Ref<LanServerRow> &p_row) {
 	// The join goes on with the browse's connection and its CI (D-NET-521).
 	target->session_client_index_ = p_row->get_client_index();
 	return target;
+}
+
+void JoinTarget::apply_pre_game_choice(const String &p_game_password, bool p_spectate,
+		const String &p_team_password) {
+	opennova::inmatch::PreGameChoice choice;
+	choice.side_password = opennova::to_std(join_password_);
+	choice.spectator_password = opennova::to_std(spectator_password_);
+	opennova::inmatch::pre_game_commit(opennova::to_std(p_game_password), p_spectate,
+			opennova::to_std(p_team_password), choice);
+	server_password_ = opennova::to_gd(choice.server_password);
+	join_password_ = opennova::to_gd(choice.side_password);
+	spectator_password_ = opennova::to_gd(choice.spectator_password);
+	join_role_ = choice.spectate ? ROLE_SPECTATOR : ROLE_PLAYER;
+	role_explicit_ = true;
 }
 
 void JoinTarget::_bind_methods() {
@@ -69,6 +86,9 @@ void JoinTarget::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spectator_password_required"),
 			&JoinTarget::spectator_password_required);
 	ClassDB::bind_method(D_METHOD("entry_step"), &JoinTarget::entry_step);
+	ClassDB::bind_method(D_METHOD("apply_pre_game_choice", "game_password", "spectate",
+								 "team_password"),
+			&JoinTarget::apply_pre_game_choice);
 	ClassDB::bind_static_method("JoinTarget", D_METHOD("from_lan_row", "row"),
 			&JoinTarget::from_lan_row);
 	BIND_ENUM_CONSTANT(ROLE_PLAYER);

@@ -62,9 +62,22 @@ public:
 	static int window_count();
 	static String window_name(int p_index);
 	static bool panel_shows_window(int p_panel, int p_index);
+
+	// The choice panels (inmatch::pre_game_entry_panel / pre_game_accept): the panel a
+	// discovered flag word opens on (PANEL_PROGRESS = no choice), and ACCEPT's step on a
+	// panel: the next panel, or ACCEPT_COMMIT, ACCEPT_ABORT, ACCEPT_NONE.
+	enum AcceptStep {
+		ACCEPT_COMMIT = -100,
+		ACCEPT_ABORT = -101,
+		ACCEPT_NONE = -102,
+	};
+	static int entry_panel(int p_server_flags, bool p_authority);
+	static int accept_step(int p_panel, int p_server_flags, bool p_spectate_checked,
+			bool p_authority);
 };
 
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::JoinScreenStatus::Stage);
 VARIANT_ENUM_CAST(godot::JoinScreenStatus::Panel);
+VARIANT_ENUM_CAST(godot::JoinScreenStatus::AcceptStep);

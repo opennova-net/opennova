@@ -48,6 +48,25 @@ bool JoinScreenStatus::panel_shows_window(int p_panel, int p_index) {
 	return (windows & (1u << p_index)) != 0;
 }
 
+int JoinScreenStatus::entry_panel(int p_server_flags, bool p_authority) {
+	if (p_server_flags < 0) return PANEL_PROGRESS;
+	return static_cast<int>(opennova::inmatch::pre_game_entry_panel(
+			static_cast<uint32_t>(p_server_flags), p_authority));
+}
+
+int JoinScreenStatus::accept_step(int p_panel, int p_server_flags, bool p_spectate_checked,
+		bool p_authority) {
+	if (p_panel < PANEL_ERROR || p_panel > PANEL_TEAM_PASSWORD || p_server_flags < 0)
+		return ACCEPT_NONE;
+	const opennova::inmatch::PreGameAccept step = opennova::inmatch::pre_game_accept(
+			static_cast<opennova::inmatch::PreGamePanel>(p_panel),
+			static_cast<uint32_t>(p_server_flags), p_spectate_checked, p_authority);
+	if (step.abort) return ACCEPT_ABORT;
+	if (step.commit) return ACCEPT_COMMIT;
+	if (step.next == opennova::inmatch::PreGamePanel::Progress) return ACCEPT_NONE;
+	return static_cast<int>(step.next);
+}
+
 void JoinScreenStatus::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stage"), &JoinScreenStatus::get_stage);
 	ClassDB::bind_method(D_METHOD("message_text", "override_table", "gameerr"),
@@ -62,6 +81,15 @@ void JoinScreenStatus::_bind_methods() {
 	ClassDB::bind_static_method("JoinScreenStatus",
 			D_METHOD("panel_shows_window", "panel", "index"),
 			&JoinScreenStatus::panel_shows_window);
+	ClassDB::bind_static_method("JoinScreenStatus",
+			D_METHOD("entry_panel", "server_flags", "authority"),
+			&JoinScreenStatus::entry_panel);
+	ClassDB::bind_static_method("JoinScreenStatus",
+			D_METHOD("accept_step", "panel", "server_flags", "spectate_checked", "authority"),
+			&JoinScreenStatus::accept_step);
+	BIND_ENUM_CONSTANT(ACCEPT_COMMIT);
+	BIND_ENUM_CONSTANT(ACCEPT_ABORT);
+	BIND_ENUM_CONSTANT(ACCEPT_NONE);
 	BIND_ENUM_CONSTANT(STAGE_JOINING);
 	BIND_ENUM_CONSTANT(STAGE_CONNECTING);
 	BIND_ENUM_CONSTANT(STAGE_VERIFYING);

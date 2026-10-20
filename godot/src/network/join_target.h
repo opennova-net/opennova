@@ -154,6 +154,11 @@ public:
 	bool spectator_password_required() const {
 		return opennova::inmatch::server_spectator_password_required(server_flags_);
 	}
+	// The join screen's choice committed (inmatch::pre_game_commit): GAME_PASSWORD's text is
+	// the server password, SPECTATE the role (answered), and TEAM_PASSWORD's one shared text
+	// the spectator password when spectating, else the side password, the other kept.
+	void apply_pre_game_choice(const String &p_game_password, bool p_spectate,
+			const String &p_team_password);
 	// What the shell does with this target before dialing: enumerate the
 	// endpoint for its flag word first (every target without one), dial, or ask
 	// the player/spectator question.

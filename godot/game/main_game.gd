@@ -98,8 +98,11 @@ var _sp_restart_info: LoadingScreenInfo = null  # the last SP load: the restart'
 var _sp_restart_loader := Callable()
 # The join screen (pre.mnu PRE_GAME_MENU) a join runs on until the host starts the game.
 var _join_screen := PreGameMenuPresenter.new()
-# The enumerate-and-join's abort while its join screen is up (begin_join_enumerate).
+# The enumerate-and-join's abort while its join screen is up (begin_join_enumerate),
+# and the choice's (begin_join_choice).
 var _join_enumerate_abort := Callable()
+# The choice's commit while its panels are up (begin_join_choice).
+var _join_choice_committed := Callable()
 var _shutdown_prepared := false
 var _shutdown_resources_released := false
 var _quit_requested := false
@@ -135,6 +138,7 @@ func _init() -> void:
 	add_child(_join_screen)
 	_join_screen.cancelled.connect(_on_join_screen_cancelled)
 	_join_screen.game_starting.connect(_on_join_game_starting)
+	_join_screen.choice_committed.connect(_on_join_choice_committed)
 
 
 func _on_player_options_changed(state: PlayerOptions.State) -> void:
@@ -1191,6 +1195,33 @@ func end_join_enumerate() -> void:
 	_join_screen.close()
 
 
+## The join machine's choice (its state 8): a discovered session whose flag word
+## offers one opens pre.mnu's choice panels on the join screen; ACCEPT walks them
+## and its commit hands the three controls to `committed`; BACK or Cancel runs
+## `abort`, which leaves to the menu. False when the screen cannot show a choice.
+## (engine: inmatch/pre_game_menu.h pre_game_entry_panel / pre_game_accept)
+func begin_join_choice(server_flags: int, committed: Callable, abort: Callable) -> bool:
+	if not _join_screen.open(_root, self):
+		return false
+	if not _join_screen.show_choice(server_flags):
+		_join_screen.close()
+		return false
+	_join_enumerate_abort = abort
+	_join_choice_committed = committed
+	return true
+
+
+# The choice's commit: the screen closes and the join goes on with the choice.
+func _on_join_choice_committed(game_password: String, spectate: bool,
+		team_password: String) -> void:
+	var committed := _join_choice_committed
+	_join_choice_committed = Callable()
+	_join_enumerate_abort = Callable()
+	_join_screen.close()
+	if committed.is_valid():
+		committed.call(game_password, spectate, team_password)
+
+
 ## The join screen is up (the probe and test read).
 func is_join_screen_open() -> bool:
 	return _join_screen.is_open()
@@ -1212,6 +1243,7 @@ func _on_join_screen_cancelled() -> void:
 	if _join_enumerate_abort.is_valid():
 		var abort := _join_enumerate_abort
 		_join_enumerate_abort = Callable()
+		_join_choice_committed = Callable()
 		_join_screen.close()
 		abort.call()
 		return

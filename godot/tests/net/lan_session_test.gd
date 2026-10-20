@@ -283,38 +283,42 @@ func test_browse_row_ci_reaches_the_joiner_connection() -> void:
 # from the LAN screen: a search on LanSession's defaults, then the join from the
 # row on that port as its discovered session (JoinTarget.from_lan_row). A row on
 # another port is passed over; the row taken ends the search. This row's
-# spectator flag stops the join at the role question, so no world load starts.
+# spectator flag stops the join at the choice (the join screen's SPECTATE panel,
+# here over an authored pre.mnu), so no world load starts.
 func test_launch_browse_joins_the_row_on_its_port() -> void:
 	LaunchFlags.set_args_override(PackedStringArray(["--lan-join", "browse:32786"]))
+	var screen_dir := "res://.godot/lan_session_test_join_screen"
+	JoinScreenFixture.stage(self, screen_dir)
 	var layer := Control.new()
 	add_child_autofree(layer)
 	var controller := NetSessionController.new()
 	add_child_autofree(controller)
 	controller.setup(null, null, null, layer)
+	var screen := JoinScreenFixture.open(self, screen_dir)
+	controller.standalone_join_screen = screen
 	assert_true(controller.maybe_launch_lan_from_flags(), "the browse form is a join launch")
 	var browse := controller.get_node_or_null("LaunchBrowse") as LanSession
 	assert_not_null(browse, "the launch starts a LAN search")
 	if browse == null:
 		LaunchFlags.clear_args_override()
+		JoinScreenFixture.unstage(screen_dir)
 		return
 	assert_null(controller.get_node_or_null("SpectatorPreflight"),
 			"the search is the join's only enumeration")
 	var other := LanServerRow.make("Other Host", "192.0.2.7", 32770)
 	browse.servers_changed.emit([other])
-	assert_null(layer.get_node_or_null("JoinRolePrompt"), "a row on another port is passed over")
+	assert_false(controller.is_join_choice_pending(), "a row on another port is passed over")
 	var row := LanServerRow.make("Untitled ", "192.0.2.8", 32786)
 	row.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS
 	row.client_index = 5
 	browse.servers_changed.emit([other, row])
 	assert_false(browse.is_browsing(), "the row taken ends the search")
-	var prompt := layer.get_node_or_null("JoinRolePrompt")
-	assert_not_null(prompt, "the row's session goes on to the join")
-	if prompt != null:
-		var labels := prompt.find_children("*", "Label", true, false)
-		assert_gt(labels.size(), 0)
-		if labels.size() > 0:
-			assert_eq((labels[0] as Label).text, "Join Untitled ", "the join is the row's")
+	assert_true(controller.is_join_choice_pending(), "the row's session goes on to the join")
+	assert_eq(screen.panel(), JoinScreenStatus.PANEL_SPECTATE,
+			"the row's flag word opens the choice")
+	JoinScreenFixture.press(screen, "BACK")
 	LaunchFlags.clear_args_override()
+	JoinScreenFixture.unstage(screen_dir)
 
 
 # D-NET-712: the proxy-assisted join's rendezvous rides the browse; the shell

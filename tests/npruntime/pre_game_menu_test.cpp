@@ -14,6 +14,11 @@ using namespace opennova;
 using inmatch::JoinQueueRecord;
 using inmatch::JoinScreenStage;
 using inmatch::PreGamePanel;
+using inmatch::PreGameAccept;
+using inmatch::PreGameChoice;
+using inmatch::pre_game_accept;
+using inmatch::pre_game_commit;
+using inmatch::pre_game_entry_panel;
 
 namespace {
 
@@ -146,11 +151,81 @@ bool run_each_stage_writes_its_line() {
 
 } // namespace
 
+// The choice panels (L2-s2 FOUND 1): the entry panel by the flag word, ACCEPT's walk and
+// the commit's copy-out, each against the cited arms.
+// [orig: UI_ShowPreGameMenuByState @0x568dfc..0x568e44; UI_PreGameMenuStateMachine
+//  @0x568A40 (cases 1..4, the default's abort, the commit @0x568b7e..0x568c69)]
+bool run_the_choice_panels_follow_the_flag_word() {
+	// Entry: 0x8 first, then 0x2000, then 0x30 off an authority; else none.
+	if (!expect(pre_game_entry_panel(0x8 | 0x2000 | 0x30, false) == PreGamePanel::GamePassword &&
+	                    pre_game_entry_panel(0x2000 | 0x30, false) == PreGamePanel::Spectate &&
+	                    pre_game_entry_panel(0x10, false) == PreGamePanel::TeamPassword &&
+	                    pre_game_entry_panel(0x20, true) == PreGamePanel::Progress &&
+	                    pre_game_entry_panel(0x4000, false) == PreGamePanel::Progress,
+			"entry: the server password, then spectate, then a side password off an authority"))
+		return false;
+	const auto next = [](PreGamePanel panel, uint32_t flags, bool checked, bool authority) {
+		return pre_game_accept(panel, flags, checked, authority);
+	};
+	PreGameAccept a = next(PreGamePanel::GamePassword, 0x8 | 0x2000 | 0x30, false, false);
+	if (!expect(a.next == PreGamePanel::Spectate && !a.commit,
+			"GAME_PASSWORD's ACCEPT goes on to SPECTATE when the word takes spectators"))
+		return false;
+	a = next(PreGamePanel::GamePassword, 0x8 | 0x30, false, false);
+	if (!expect(a.next == PreGamePanel::TeamPassword && !a.commit,
+			"else to TEAM_PASSWORD for a side password"))
+		return false;
+	a = next(PreGamePanel::GamePassword, 0x8 | 0x30, false, true);
+	if (!expect(a.commit && a.next == PreGamePanel::Progress,
+			"an authority owes no side password: GAME_PASSWORD commits"))
+		return false;
+	a = next(PreGamePanel::Spectate, 0x2000 | 0x4000 | 0x30, true, false);
+	if (!expect(a.next == PreGamePanel::SpectatorPassword && !a.commit,
+			"SPECTATE checked goes on to the spectator password"))
+		return false;
+	a = next(PreGamePanel::Spectate, 0x2000 | 0x30, true, false);
+	if (!expect(a.commit, "checked with no spectator password: commits"))
+		return false;
+	a = next(PreGamePanel::Spectate, 0x2000 | 0x4000 | 0x30, false, false);
+	if (!expect(a.next == PreGamePanel::TeamPassword && !a.commit,
+			"unchecked goes on to TEAM_PASSWORD for a side password"))
+		return false;
+	a = next(PreGamePanel::Spectate, 0x2000 | 0x4000, false, false);
+	if (!expect(a.commit, "unchecked with no side password: commits"))
+		return false;
+	if (!expect(next(PreGamePanel::SpectatorPassword, 0x6038, true, false).commit &&
+	                    next(PreGamePanel::TeamPassword, 0x6038, false, false).commit,
+			"either password panel commits"))
+		return false;
+	a = next(PreGamePanel::Progress, 0x6038, false, false);
+	if (!expect(!a.commit && !a.abort && a.next == PreGamePanel::Progress,
+			"ACCEPT on Progress does nothing"))
+		return false;
+	if (!expect(next(PreGamePanel::Error, 0x6038, false, false).abort,
+			"ACCEPT on Error aborts the join"))
+		return false;
+	// The commit: the shared TEAM_PASSWORD text to JSPP when spectating, else to JSP;
+	// the other keeps what it held.
+	PreGameChoice choice;
+	choice.side_password = "old-side";
+	choice.spectator_password = "old-spec";
+	pre_game_commit("srv", true, "shared", choice);
+	if (!expect(choice.server_password == "srv" && choice.spectate &&
+	                    choice.spectator_password == "shared" && choice.side_password == "old-side",
+			"spectating: the text is the spectator password, the side password kept"))
+		return false;
+	pre_game_commit("", false, "team", choice);
+	return expect(choice.server_password.empty() && !choice.spectate &&
+	                      choice.side_password == "team" && choice.spectator_password == "shared",
+			"playing: the text is the side password, the spectator password kept");
+}
+
 int main() {
 	bool ok = true;
 	ok = run_each_panel_shows_its_windows() && ok;
 	ok = run_the_queue_record_folds_like_retail() && ok;
 	ok = run_each_stage_writes_its_line() && ok;
+	ok = run_the_choice_panels_follow_the_flag_word() && ok;
 	if (ok) std::printf("pre_game_menu_test: OK\n");
 	return ok ? 0 : 1;
 }

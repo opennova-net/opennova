@@ -1,17 +1,35 @@
 extends GutTest
 
-# A discovered retail/OpenNova host carrying ServerHello.P2 spectator flags
-# must stop before world loading or ClientAuth and ask for the join role.
+# A discovered retail/OpenNova host whose ServerHello.P2 offers a choice (0x6038:
+# passwords, spectators) stops before world loading or ClientAuth on the join
+# screen's choice panels (pre.mnu PRE_GAME_MENU; engine inmatch/pre_game_menu.h).
+
+const TMP_DIR := "res://.godot/spectator_join_prompt_test"
+
+var _screen: PreGameMenuPresenter = null
+
+
+func before_each() -> void:
+	JoinScreenFixture.stage(self, TMP_DIR)
 
 
 func after_each() -> void:
 	LaunchFlags.clear_args_override()
+	_screen = null
 
 
+func after_all() -> void:
+	JoinScreenFixture.unstage(TMP_DIR)
+
+
+# The controller with no shell shows its choice on a join screen opened over the
+# authored pre.mnu (NetSessionController.standalone_join_screen).
 func _controller(panel_layer: Control) -> NetSessionController:
 	var controller := NetSessionController.new()
 	add_child_autofree(controller)
 	controller.setup(null, null, null, panel_layer)
+	_screen = JoinScreenFixture.open(self, TMP_DIR)
+	controller.standalone_join_screen = _screen
 	return controller
 
 
@@ -62,8 +80,9 @@ func test_preflight_row_becomes_the_discovered_session() -> void:
 	assert_true(target.session_password_required, "the row's SF rides the join")
 	assert_eq(target.session_client_index, 7, "the join carries the browse's CI")
 	assert_eq(target.server_flags, JoinTarget.FLAG_ALLOW_SPECTATORS)
-	assert_not_null(layer.get_node_or_null("JoinRolePrompt"),
-			"the row's spectator flag asks the role question")
+	assert_true(controller.is_join_choice_pending(),
+			"the row's spectator flag opens the join choice")
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_SPECTATE)
 
 
 # D-NET-703: the enumerate-and-join never gives up on its own and never dials
@@ -89,7 +108,7 @@ func test_silent_endpoint_keeps_enumerating_without_a_fallback_dial() -> void:
 	await get_tree().create_timer(1.5).timeout
 	assert_true(is_instance_valid(probe) and probe.is_browsing(), "still enumerating after 1.5 s")
 	assert_false(target.discovered_session, "no row-less join")
-	assert_null(layer.get_node_or_null("JoinRolePrompt"))
+	assert_false(controller.is_join_choice_pending())
 
 
 func test_discovered_spectator_host_prompts_before_joining() -> void:
@@ -102,24 +121,18 @@ func test_discovered_spectator_host_prompts_before_joining() -> void:
 
 	controller.join_lan_server(target)
 
-	var prompt := layer.get_node_or_null("JoinRolePrompt")
-	assert_not_null(prompt,
+	assert_true(controller.is_join_choice_pending(),
 			"an enabled ServerHello.P2 opens the retail role decision")
 	assert_false(target.role_explicit,
 			"no join role is committed before the user chooses")
-	if prompt == null:
-		return
-	var player := prompt.find_child("JoinAsPlayer", true, false) as Button
-	var spectator := prompt.find_child("JoinAsSpectator", true, false) as Button
-	var password := prompt.find_child("SpectatorPassword", true, false) as LineEdit
-	assert_not_null(player)
-	assert_not_null(spectator)
-	assert_not_null(password,
-			"P2 bit 0x4000 reveals the spectator-password field")
-	if password != null:
-		assert_true(password.secret)
-		assert_eq(password.max_length, 17,
-				"the prompt preserves retail's 17-character password limit")
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_SPECTATE,
+			"spectator slots open the SPECTATE panel")
+	JoinScreenFixture.set_checked(_screen, "SPECTATE", true)
+	JoinScreenFixture.press(_screen, "ACCEPT")
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_SPECTATOR_PASSWORD,
+			"P2 bit 0x4000 asks a spectator for its password in the shared control")
+	assert_true(_screen.is_window_shown("SPECTATOR_STATIC_WRAPPER"))
+	assert_false(target.role_explicit, "nothing is committed before the last ACCEPT")
 
 
 func test_unprotected_spectator_host_omits_password_field_and_cancel_closes() -> void:
@@ -130,15 +143,12 @@ func test_unprotected_spectator_host_omits_password_field_and_cancel_closes() ->
 
 	controller.join_lan_server(target)
 
-	var prompt := layer.get_node_or_null("JoinRolePrompt")
-	assert_not_null(prompt)
-	if prompt == null:
-		return
-	assert_null(prompt.find_child("SpectatorPassword", true, false))
-	var cancel := prompt.find_child("CancelJoin", true, false) as Button
-	assert_not_null(cancel)
-	if cancel != null:
-		cancel.pressed.emit()
+	assert_true(controller.is_join_choice_pending())
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_SPECTATE)
+	assert_false(_screen.is_window_shown("TEAM_PASSWORD_WRAPPER"),
+			"no password control while the host asks none")
+	JoinScreenFixture.press(_screen, "BACK")
+	assert_false(controller.is_join_choice_pending(), "BACK abandons the join")
 	assert_false(target.role_explicit)
 
 
@@ -148,39 +158,36 @@ func test_server_password_prompt_is_independent_of_spectator_access() -> void:
 	var controller := _controller(layer)
 	var target := _target(JoinTarget.FLAG_SERVER_PASSWORD)
 	controller.join_lan_server(target)
-	var prompt := layer.get_node_or_null("JoinRolePrompt")
-	assert_not_null(prompt)
-	if prompt == null:
-		return
-	var password := prompt.find_child("ServerPassword", true, false) as LineEdit
-	assert_not_null(password)
-	if password != null:
-		assert_true(password.secret)
-	assert_null(prompt.find_child("SpectatorPassword", true, false))
-	var spectator := prompt.find_child("JoinAsSpectator", true, false) as Button
-	assert_false(spectator.visible)
+	assert_true(controller.is_join_choice_pending())
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_GAME_PASSWORD,
+			"a server password opens GAME_PASSWORD")
+	assert_false(_screen.is_window_shown("SPECTATE_WRAPPER"),
+			"no spectate choice off a host that takes no spectators")
 	assert_false(target.role_explicit)
 
 
-func test_both_passwords_have_distinct_controls() -> void:
+# The server password and the spectator password take their turns: GAME_PASSWORD,
+# then SPECTATE, then the shared TEAM_PASSWORD control with the spectator static.
+func test_the_passwords_take_their_panels_in_turn() -> void:
 	var layer := Control.new()
 	add_child_autofree(layer)
 	var controller := _controller(layer)
 	var target := _target(JoinTarget.FLAG_SERVER_PASSWORD
 			| JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD)
 	controller.join_lan_server(target)
-	var prompt := layer.get_node_or_null("JoinRolePrompt")
-	assert_not_null(prompt)
-	if prompt != null:
-		assert_not_null(prompt.find_child("ServerPassword", true, false))
-		assert_not_null(prompt.find_child("SpectatorPassword", true, false))
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_GAME_PASSWORD)
+	JoinScreenFixture.press(_screen, "ACCEPT")
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_SPECTATE)
+	JoinScreenFixture.set_checked(_screen, "SPECTATE", true)
+	JoinScreenFixture.press(_screen, "ACCEPT")
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_SPECTATOR_PASSWORD)
 
 
-# A TeamChoose host with protected sides prompts for the side password and
-# offers no team control: retail's PRE.MNU holds GAME_PASSWORD, the SPECTATE /
-# PLAY radios and TEAM_PASSWORD, and every join sends the automatic TR=-1, the
-# side coming from the side password (D-NET-590, D-NET-167; the wire is pinned
-# by ctest npruntime_client_runtime).
+# A TeamChoose host with protected sides asks for the side password and offers
+# no team control: retail's PRE.MNU holds GAME_PASSWORD, the SPECTATE radio and
+# TEAM_PASSWORD, and every join sends the automatic TR=-1, the side coming from
+# the side password (D-NET-590, D-NET-167; the wire is pinned by ctest
+# npruntime_client_runtime). BACK commits nothing.
 func test_team_choose_host_prompts_for_the_side_password_with_no_team_control() -> void:
 	var layer := Control.new()
 	add_child_autofree(layer)
@@ -189,25 +196,36 @@ func test_team_choose_host_prompts_for_the_side_password_with_no_team_control() 
 			| JoinTarget.FLAG_RED_PASSWORD | JoinTarget.FLAG_SERVER_PASSWORD)
 	target.join_password = "prefilled"
 	controller.join_lan_server(target)
-	var prompt := layer.get_node_or_null("JoinRolePrompt")
-	assert_not_null(prompt, "protected sides prompt even without spectator access")
-	if prompt == null:
-		return
-	assert_null(prompt.find_child("TeamChoice", true, false),
-			"the prompt offers no team control")
+	assert_true(controller.is_join_choice_pending(),
+			"protected sides open the choice even without spectator access")
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_GAME_PASSWORD)
 	assert_false("team_request" in target, "a join target carries no side request")
-	var password := prompt.find_child("JoinPassword", true, false) as LineEdit
-	assert_not_null(password)
-	assert_not_null(prompt.find_child("ServerPassword", true, false))
-	if password != null:
-		assert_true(password.secret)
-		assert_eq(password.text, "prefilled")
-		assert_eq(password.max_length, 63)
-		password.text = "unsubmitted"
-	var cancel := prompt.find_child("CancelJoin", true, false) as Button
-	cancel.pressed.emit()
-	assert_eq(target.join_password, "prefilled", "cancel does not commit credentials")
+	JoinScreenFixture.press(_screen, "ACCEPT")
+	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_TEAM_PASSWORD,
+			"the side password follows the server password")
+	assert_true(_screen.is_window_shown("TEAM_STATIC_WRAPPER"))
+	JoinScreenFixture.set_text(_screen, "TEAM_PASSWORD", "unsubmitted")
+	JoinScreenFixture.press(_screen, "BACK")
+	assert_eq(target.join_password, "prefilled", "BACK does not commit credentials")
 	assert_false(target.role_explicit)
+
+
+# The commit routes the screen's controls onto the target (engine pre_game_commit):
+# the shared TEAM_PASSWORD text is the spectator password when SPECTATE is
+# checked, else the side password, the other keeping what it held.
+func test_the_commit_routes_the_shared_password_by_the_role() -> void:
+	var target := _target(JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD)
+	target.join_password = "side"
+	target.apply_pre_game_choice("srv", true, "spec")
+	assert_eq(target.server_password, "srv")
+	assert_eq(target.join_role, JoinTarget.ROLE_SPECTATOR)
+	assert_true(target.role_explicit)
+	assert_eq(target.spectator_password, "spec")
+	assert_eq(target.join_password, "side", "the side password is kept")
+	target.apply_pre_game_choice("", false, "team")
+	assert_eq(target.join_role, JoinTarget.ROLE_PLAYER)
+	assert_eq(target.join_password, "team")
+	assert_eq(target.spectator_password, "spec", "the spectator password is kept")
 
 
 # TeamChoose alone (a plain team game; a stock host advertises 0x904) offers no
@@ -240,11 +258,9 @@ func test_abandoned_novaworld_join_frees_the_held_session() -> void:
 	panel.join_in_match_requested.emit(_target(JoinTarget.FLAG_ALLOW_SPECTATORS))
 	assert_eq(client.get_parent(), controller,
 			"the panel's session moves to the controller instead of dying with the panel")
-	var prompt := layer.get_node_or_null("JoinRolePrompt")
-	assert_not_null(prompt, "the spectator host still asks for the join role")
-	if prompt == null:
-		return
-	(prompt.find_child("CancelJoin", true, false) as Button).pressed.emit()
+	assert_true(controller.is_join_choice_pending(),
+			"the spectator host still asks for the join role")
+	JoinScreenFixture.press(_screen, "BACK")
 	await wait_frames(2)
 	assert_false(is_instance_valid(client), "an abandoned join frees the held session")
 
@@ -267,9 +283,8 @@ func test_novaworld_join_saves_the_profile_first() -> void:
 				"the join launch saved player.sav in the working directory")
 		assert_true(FileAccess.file_exists(run_dir.path_join(GameCfgStore.FILE_NAME)),
 				"and game.cfg beside it")
-		var prompt := layer.get_node_or_null("JoinRolePrompt")
-		if prompt != null:
-			(prompt.find_child("CancelJoin", true, false) as Button).pressed.emit()
+		if controller.is_join_choice_pending():
+			JoinScreenFixture.press(_screen, "BACK")
 		await wait_frames(2)
 	TestFs.remove_dir_recursive(run_dir)
 
