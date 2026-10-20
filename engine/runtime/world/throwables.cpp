@@ -150,10 +150,11 @@ struct MotorFrame {
 };
 
 int32_t throwable_water_q16(const World &world) {
-    // Environment zero means no authored water. Fixed-point cannot represent
-    // the host's -1e9 dry sentinel, so INT32_MIN is the lowest equivalent
-    // plane for the motor comparisons.
-    return world.env.water_z != 0 ? world.env.water_z : INT32_MIN;
+    // Every motor compare reads the water word raw, 0 when no water is authored
+    // (no dry sentinel; D-NET-507). [orig: Entity_UpdateGrenadePhysics @0x443F50 -
+    //  `cmp eax, g_EnvWaterHeightFixed` @0x443FF4, @0x44497F..0x444984;
+    //  Entity_UpdateClaymorePhysics @0x4473C1; Entity_UpdateSatchelPhysics @0x448371]
+    return world.env.water_z;
 }
 
 Entity *entity_for_lifetime(World &world, EntityHandle handle, uint64_t spawn_id) {

@@ -322,6 +322,10 @@ struct Rig {
             : w_heap(std::make_unique<World>()), w(*w_heap), flat(ground_raw16) {
         seed_ammo(w);
         seed_classes(w);
+        // A water plane far below every case's motion: retail keeps no dry
+        // sentinel, so a dry map's plane is the word 0 (the cases that test
+        // water set their own plane).
+        w.env.water_z = -(1000 << 16);
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 16);
         w.registry.configure_pool(2, 8);
@@ -446,16 +450,23 @@ void test_tracer_item_binding_fallbacks() {
     }
 }
 
-// Zero is the environment's no-water sentinel, not a plane at mission Z=0.
-// A grenade below zero in a dry mission therefore takes the above-water
-// gravity branch [orig: g_EnvWaterHeightFixed authoring gate + motor @ 0x443ffa].
-void test_zero_water_is_dry_below_altitude_zero() {
+// D-NET-507: retail keeps no dry sentinel. With no water authored the water
+// word is the memset's 0 and the motor compares Z against it raw, so a grenade
+// below zero in a dry mission takes the submerged branch (-55), not gravity.
+// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E;
+//  Entity_UpdateGrenadePhysics @0x443F50 - `cmp eax, g_EnvWaterHeightFixed; jg`
+//  @0x443FF4..0x443FFA, `add [esi+0A0h], -55` @0x443FFC, the submerged drag
+//  @0x4441AD..0x4441B5]
+void test_zero_water_is_a_plane_below_altitude_zero() {
     Rig rig;
+    rig.w.env.water_z = 0; // a dry mission
     const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, -10}, 0, 0);
     CHECK(slot >= 0);
     rig.w.round_sim.tick(rig.w, nullptr, nullptr);
     const LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
-    CHECK(to_fixed(round.vel.z) == -167);
+    // -55, then the submerged 0.95 drag: (-55 * 62259 + 0x8000) >> 16
+    // [orig: @0x4441B5].
+    CHECK(to_fixed(round.vel.z) == -52);
     for (const RoundImpact &impact : rig.w.round_sim.impacts)
         CHECK(impact.effect_tag != 11);
 }
@@ -2636,7 +2647,7 @@ int main() {
     test_power_throw_charge();
     test_charge_scales_spawn_speed();
     test_tracer_item_binding_fallbacks();
-    test_zero_water_is_dry_below_altitude_zero();
+    test_zero_water_is_a_plane_below_altitude_zero();
     test_charge_stick_surface_gate();
     test_stick_pose_exact();
     test_motor_sweep_ignores_non_pool_domains();

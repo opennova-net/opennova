@@ -27,7 +27,7 @@ using namespace opennova::crt;
 namespace opennova::world {
 
 int32_t death_water_q16(float water_height) {
-    return water_height <= -1.0e8f ? INT32_MIN : to_fixed(water_height);
+    return to_fixed(water_height);
 }
 
 int32_t entity_top_q16(const Entity &e) {
@@ -51,17 +51,18 @@ void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *tr
 }
 
 // The environment water plane (env.water_z, 16.16 — the #265 sound-profile
-// home; 0 = no water authored) as float units [orig: g_EnvWaterHeightFixed
-// @0x26c6454].
+// home) as float units: 0 when no water is authored, the word retail keeps.
+// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
+// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
+// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
 float world_water_z(const World &world) {
-    return world.env.water_z != 0 ? static_cast<float>(world.env.water_z) / io::kFp16One
-                                  : -1.0e9f;
+    return static_cast<float>(world.env.water_z) / io::kFp16One;
 }
 
-// The water plane as the word retail compares against, INT32_MIN when none is
-// authored (below every word). [orig: g_EnvWaterHeightFixed @0x26c6454]
+// The water plane as the word retail compares against, 0 when none is authored
+// (no dry sentinel). [orig: g_EnvWaterHeightFixed @0x26C6454]
 int32_t world_water_q16(const World &world) {
-    return world.env.water_z != 0 ? world.env.water_z : INT32_MIN;
+    return world.env.water_z;
 }
 
 // The witnessed rol-xor PRNG stream the death paths roll [orig: the inline
@@ -1758,8 +1759,7 @@ void tick_item_death_motion(World &world, Entity &entity,
                         *terrain, e->position.x.q16, e->position.y.q16)
                 : 0;
         e->engine_flags &= ~kEntityFlagMatrixBuilt;
-        const int32_t static_water =
-                water_height <= -1.0e8f ? 0 : to_fixed(water_height);
+        const int32_t static_water = to_fixed(water_height);
         const int32_t water_above_ground = io::bam_sub(static_water, ground);
         if (water_above_ground <= 655360 && water_above_ground < 0) {
             e->position.z.q16 = ground;

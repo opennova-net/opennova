@@ -1035,7 +1035,7 @@ void test_routed_wreck_lands_on_a_posed_model() {
     e->death_motion = DeathMotionMode::Falling;
     e->veh.slide_z = -16384; // a quarter unit a tick
     for (int tick = 0; tick < 62 && e->death_motion == DeathMotionMode::Falling; ++tick)
-        tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
     w.ai.collision = nullptr;
     // On the box's top, not through it (the routed tail commits its last
     // integrated step, a fraction under the contact).
@@ -1276,6 +1276,37 @@ void test_death_piece_ring_generation() {
     const uint64_t generation3 = settled_reuse.generation;
     sim.reset();
     CHECK(sim.alloc().generation == generation3 + 1);
+}
+
+// D-NET-507: the piece gate tests the top word (Z + entity+0, a wrapping add)
+// against the water word, signed; retail keeps no dry sentinel, so with no water
+// authored the plane is the word 0. A top one word under the plane takes no
+// pieces; a top on the plane takes them.
+// [orig: Entity_SpawnDeathPieces @0x493400 - `mov ecx, [ebp+0Ch]; mov edx, [ebp+0];
+//  add edx, ecx; cmp edx, g_EnvWaterHeightFixed; jl` @0x4934D7..0x4934E5;
+//  Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E]
+void test_death_pieces_water_word_edge() {
+    auto pieces_at = [](int32_t water, int32_t top) {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        seed_ammo(w);
+        w.registry.configure_pool(1, 4);
+        w.env.water_z = water;
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = 700;
+        seed.health = 0;
+        seed.bound_radius.q16 = 0x20000;
+        seed.position.set_q16({0, 0, top - 0x20000});
+        const EntityHandle h = w.registry.spawn(1, seed);
+        w.tables.item_death_traits.set(700, barrel_traits());
+        return spawn_death_pieces(w, *w.registry.get(h));
+    };
+    const int32_t water = (12 << 16) | 0x8000;
+    CHECK(pieces_at(water, water - 1) == 0);
+    CHECK(pieces_at(water, water) != 0);
+    CHECK(pieces_at(0, -1) == 0); // a dry map's plane is the word 0
+    CHECK(pieces_at(0, 0) != 0);
 }
 
 // The witnessed launch build [orig: @0x493718-0x49380e]: the horizontal launch
@@ -1651,7 +1682,7 @@ void test_dead_item_settle() {
     // No terrain -> ground at -1e9: it keeps falling, gravity accumulating
     // [orig: slideDecay -= 334 @0x493fe5].
     const int32_t sz0 = e->veh.slide_z;
-    tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
     CHECK(e->veh.slide_z == sz0 - 334);
     CHECK(e->position.z < 5.0f);
 }
@@ -1678,7 +1709,7 @@ void test_generic_staticdeath_freezes() {
     e->veh.vel_y = -32768;
     e->veh.slide_z = -65536;
     const Vec3 before = e->position;
-    tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
     CHECK(std::abs(e->position.x - before.x) < 1.0e-6f);
     CHECK(std::abs(e->position.y - before.y) < 1.0e-6f);
     CHECK(std::abs(e->position.z - before.z) < 1.0e-6f);
@@ -1771,7 +1802,7 @@ void test_specialized_piece_physics_callback() {
             ? 0
             : 0x02D82D82;
     crt_srand(1);
-    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, -1000.0f, w.out.destruction); // water far below the ground
 
     CHECK(w.destruction_rng.state == expected_rng.state);
     CHECK(piece->veh.air_pitch_bam == expected_pitch);
@@ -1822,7 +1853,7 @@ void test_specialized_piece_physics_callback() {
     while (piece->death_motion == DeathMotionMode::PiecePitchSettle &&
            settle_ticks < 12) {
         const int32_t before = piece->veh.air_pitch_bam;
-        tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, &flat.field, -1000.0f, w.out.destruction); // water far below the ground
         ++settle_ticks;
         if (piece->death_motion == DeathMotionMode::PiecePitchSettle) {
             const int32_t moved = std::abs(before - piece->veh.air_pitch_bam);
@@ -1863,7 +1894,7 @@ void test_specialized_piece_physics_callback() {
     DestructionRng ordered_expected = ordered.destruction_rng;
     const uint16_t ordered_angle_roll = ordered_expected.next16();
 	const uint32_t fire_state_before = ordered.prng16_c_state; // independent retail PRNG_C
-	tick_dead_items(ordered, nullptr, -1.0e9f, ordered.out.destruction);
+	tick_dead_items(ordered, nullptr, 0.0f, ordered.out.destruction);
 	CHECK(ordered.destruction_rng.state == ordered_expected.state);
 	CHECK(ordered.prng16_c_state != fire_state_before);
 	CHECK(ordered_piece->veh.yaw_bam == ((ordered_angle_roll & 1u) != 0 ? 0 : 0x02D82D82));
@@ -1874,7 +1905,7 @@ void test_specialized_piece_physics_callback() {
     ordered_piece->veh.air_pitch_rate = 0;
     const uint32_t equal_pitch_rng = ordered.destruction_rng.state;
     tick_dead_items(
-            ordered, nullptr, -1.0e9f, ordered.out.destruction);
+            ordered, nullptr, 0.0f, ordered.out.destruction);
     CHECK(ordered_piece->death_motion == DeathMotionMode::Generic);
     CHECK(ordered.destruction_rng.state == equal_pitch_rng);
 
@@ -1955,7 +1986,7 @@ void test_specialized_piece_physics_callback() {
     CollisionWorld client_collision;
     attach_wreck_shells(client, client_collision, client_h, -2.0, -1.0);
     tick_dead_items(
-            client, &ramp.field, -1.0e9f, client.out.destruction);
+            client, &ramp.field, 0.0f, client.out.destruction);
     CHECK(client_piece->death_motion == DeathMotionMode::PiecePitchSettle);
     CHECK(client_piece->veh.air_pitch_rate > 0);
     CHECK(client.out.terrain_scorches.pending().size() == 1);
@@ -1993,7 +2024,7 @@ void test_specialized_piece_physics_callback() {
     // lands; the husk-floor cases above start below their raised target.
     for (int tick = 0; tick < 16 &&
             bare_piece->death_motion == DeathMotionMode::PiecePhysics; ++tick) {
-        tick_dead_items(bare, &flat.field, -1.0e9f, bare.out.destruction);
+        tick_dead_items(bare, &flat.field, -1000.0f, bare.out.destruction); // water far below the ground
     }
     CHECK(bare_piece->death_motion == DeathMotionMode::PiecePitchSettle);
     // ground = avg 0 - 0, then the -0x8000 landing offset.
@@ -2024,7 +2055,7 @@ void test_specialized_piece_physics_callback() {
     land_piece->veh.slide_z = -65536;
     CollisionWorld land_collision;
     attach_wreck_shells(land, land_collision, land_h, -2.0, -1.0);
-    tick_dead_items(land, &flat.field, -1.0e9f, land.out.destruction);
+    tick_dead_items(land, &flat.field, -1000.0f, land.out.destruction); // water far below the ground
     CHECK(land_piece->death_motion == DeathMotionMode::PiecePitchSettle);
     int authored_landings = 0;
     for (const DestructionSoundEvent &sound : land.out.destruction.sounds) {
@@ -2103,7 +2134,7 @@ void test_dead_item_landing_split() {
     t.particlefinale = "Effect_VehDrtPuftrk";
     Entity *item = drop(700, t);
     const Vec3 item_before = item->position;
-    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
     CHECK(std::abs(item->position.x - item_before.x) < 1.0e-6f);
     CHECK(std::abs(item->position.y - item_before.y) < 1.0e-6f);
     CHECK(std::abs(item->position.z - item_before.z) < 1.0e-6f);
@@ -2124,7 +2155,7 @@ void test_dead_item_landing_split() {
     tv.unit_type = 1;
     tv.particlefinale = "Effect_VehDrtPuftrk";
     Entity *wreck = drop(701, tv);
-    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
     const float routed_new_z = ground + 0.5f +
             static_cast<float>(-65536 - 334) / 65536.0f;
     CHECK(std::abs(wreck->position.z - routed_new_z) < 1.0e-3f);
@@ -2169,7 +2200,7 @@ void test_dead_item_landing_split() {
     const size_t authority_blasts = w.explosions.queue.size();
     w.rules.logic_authority = false;
     Entity *client_wreck = drop(702, tv);
-    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
     CHECK(client_wreck->death_motion == DeathMotionMode::Generic);
     CHECK(w.explosions.queue.size() == authority_blasts);
 }
@@ -2213,7 +2244,7 @@ void test_static_dead_item_settle() {
         sliding->veh.vel_x = 65536;
         sliding->veh.vel_y = 0;
         sliding->veh.slide_z = 0;
-        tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
         CHECK(std::abs(sliding->position.x - (x0 + 1.0f)) < 1.0e-6f);
         CHECK(sliding->veh.vel_x == 63569);
         CHECK(sliding->veh.slide_z == 0);
@@ -2224,7 +2255,7 @@ void test_static_dead_item_settle() {
         stopping->veh.vel_x = 8;
         stopping->veh.vel_y = -8;
         stopping->veh.slide_z = 0;
-        tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
         CHECK(stopping->veh.vel_x == 0);
         CHECK(stopping->veh.vel_y == 0);
         CHECK(stopping->veh.slide_z == -167);
@@ -2235,13 +2266,13 @@ void test_static_dead_item_settle() {
         landing->veh.vel_x = 0;
         landing->veh.vel_y = 0;
         landing->veh.slide_z = -65536;
-        tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
         CHECK(std::abs(landing->position.z - ground) < 1.0e-3f);
         CHECK(landing->veh.vel_x == 0);
         CHECK(landing->veh.vel_y == 0);
         CHECK(landing->veh.slide_z == -65536 - 167);
         CHECK(landing->death_motion == DeathMotionMode::Generic);
-        tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
         CHECK(std::abs(landing->position.z - ground) < 1.0e-3f);
         CHECK(landing->veh.slide_z == 0);
     }
@@ -2253,13 +2284,13 @@ void test_static_dead_item_settle() {
     ai_static->veh.vel_x = 0;
     ai_static->veh.vel_y = 0;
     ai_static->veh.slide_z = 0;
-    tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
     CHECK(ai_static->veh.slide_z == -167);
 
     Entity *below_sliding = spawn_static(5, Vec3{50.0f, 8.0f, ground - 1.0f});
     below_sliding->veh.vel_x = 65536;
     below_sliding->veh.slide_z = 0;
-    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
     CHECK(below_sliding->death_motion == DeathMotionMode::Static);
     CHECK(std::abs(below_sliding->position.z - (ground - 1.0f)) < 1.0e-6f);
 
@@ -2406,7 +2437,7 @@ void test_death_dispatch_flag_routing() {
     Entity *falling = dispatch(712, 1, true);
     CHECK((falling->engine_flags & 0x20000u) != 0);
     falling->veh.slide_z = -65536;
-    tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, nullptr, 0.0f, w.out.destruction); // dry: the water word 0
     CHECK((falling->engine_flags & 0x20000u) == 0);
 }
 
@@ -2770,7 +2801,7 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
 
     int ticks_to_first = 0;
     for (int i = 0; i < 20000 && w.out.destruction.crackles == 0; ++i) {
-        tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
         ++ticks_to_first;
     }
     CHECK(w.out.destruction.crackles > 0);
@@ -2800,7 +2831,7 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
     e2->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
     e2->alive = false;
     for (int i = 0; i < ticks_to_first + 100; ++i)
-        tick_dead_items(w2, &flat.field, -1.0e9f, w2.out.destruction);
+        tick_dead_items(w2, &flat.field, 0.0f, w2.out.destruction);
     CHECK(w2.out.destruction.crackles == 0);
 
     // Underwater: the draw is consumed BEFORE the water gate — the stream
@@ -2849,7 +2880,7 @@ void test_generic_wreck_zero_velocity_and_inverted_rest() {
 	seed.death_motion = DeathMotionMode::Generic;
 	auto h = w.registry.spawn(1, seed);
 	Entity &e = *w.registry.get(h);
-	tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
 	CHECK(e.veh.slide_z == -334);
 	CHECK(e.position.z < seed.position.z); // zero velocity does not suppress gravity
 	ItemDeathTraits t;
@@ -2861,12 +2892,12 @@ void test_generic_wreck_zero_velocity_and_inverted_rest() {
 	e.veh.yaw_seeded = false;
 	e.veh.slide_z = -65536;
 	e.veh.vel_x = 65536;
-	tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
 	CHECK(e.position.x == 8 && e.position.z == ground + 1);
 	CHECK(e.roll == 180 && e.veh.slide_z == 0 && e.veh.vel_x == 65536);
 	e.roll = 0;
 	e.veh.slide_z = -65536;
-	tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
 	CHECK(e.position.x == 9 && e.position.z < ground + 1); // upright lower bound permits this step
 }
 
@@ -4747,6 +4778,7 @@ int main() {
     test_death_pieces();
     test_death_piece_ring_generation();
     test_death_piece_launch_and_spin();
+    test_death_pieces_water_word_edge();
     test_ai_wreck_pieces_follow_its_travel();
     test_death_piece_rng_is_world_local();
     test_death_piece_section_center();

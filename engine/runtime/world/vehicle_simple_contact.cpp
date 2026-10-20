@@ -79,8 +79,14 @@ void vehicle_simple_contact(
 		const Entity *other = world.registry.get(hit);
 		const VehicleTraits *ot =
 				other != nullptr ? world.vehicles.traits.get(other->item_id) : nullptr;
-		if (ot != nullptr && ot->player_control && ot->mass < int64_t(t.mass) * 2 &&
-				other->bound_radius < e.bound_radius * 2 && int64_t(ot->mass) + t.mass != 0)
+		// The other's def mass against twice ours and its bound word against twice
+		// ours, each doubled by a wrapping add, signed compares (D-NET-507).
+		// [orig: Entity_ProcessVehicleSuspension @0x463C60 - `lea edi, [ecx+ecx]; cmp edx,
+		//  edi` @0x4645F5..0x4645FA, `mov edi, [esi]; add edi, edi; cmp [ebx], edi`
+		//  @0x4645FC..0x464602]
+		if (ot != nullptr && ot->player_control && ot->mass < io::bam_add(t.mass, t.mass) &&
+				other->bound_radius.q16 < io::bam_add(e.bound_radius.q16, e.bound_radius.q16) &&
+				int64_t(ot->mass) + t.mass != 0)
 			impulse = int32_t(int64_t(impulse) * ot->mass / (int64_t(ot->mass) + t.mass));
 		m.wheel_rate_bam = io::bam_add(m.wheel_rate_bam, impulse >> 2);
 	}

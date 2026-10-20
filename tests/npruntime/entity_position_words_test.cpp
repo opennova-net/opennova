@@ -519,7 +519,7 @@ int static_wreck_slides_on_the_words() {
 	e.veh.vel_x = 0x10001;
 	e.veh.vel_y = -0x8003;
 	e.veh.slide_z = 0x35;
-	w::tick_item_death_motion(*world, e, nullptr, -1.0e9f, world->out.destruction);
+	w::tick_item_death_motion(*world, e, nullptr, 0.0f, world->out.destruction); // dry: the water word 0
 	if (!expect(same_words(e.position.q16(), kFarZ + 0x10001, kAshJoinerX - 0x8003, kTdhHostY + 0x35),
 	            "the wreck's slide is a word add"))
 		return 1;
@@ -628,13 +628,14 @@ int round_flies_on_the_words() {
 
 // The 0x0C carries a mounted body's attachBoneId (+0x157), parentSlot (+0x168) and its
 // parent's packed handle (+0x16C); an unmounted one 0 / 0 / 0xFFFF. Every body's record
-// also carries the low byte of aiState (+0x2B4), the AI slot's +0x20 byte (the low byte of
-// its tick accumulator), refNum (+0x215) and subType (+0x214), each of which a stock
+// also carries the low byte of aiState (+0x2B4), the AI slot's +0x20 byte (the dword the
+// command's case 1 writes), refNum (+0x215) and subType (+0x214), each of which a stock
 // joiner stores.
 // [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - @0x503353, @0x50336D,
 //  @0x50337B..0x5033DD, the null 0xFFFF @0x5033EC; aiState @0x5032A3, the slot byte
-//  @0x5032F3..0x5032F6, refNum @0x503329, subType @0x50333E; NapiNPClientMsg_0x00C
-//  @0x42E730 - @0x42E991, @0x42E9EB, @0x42EA20, @0x42EA35]
+//  @0x5032F3..0x5032F6 (Entity_AllocateAISlot @0x40D2C0 links the slot @0x40D2F4;
+//  Entity_ApplyCommand case 1 @0x43AB92 writes +0x20), refNum @0x503329, subType @0x50333E;
+//  NapiNPClientMsg_0x00C @0x42E730 - @0x42E991, @0x42E9EB, @0x42EA20, @0x42EA35]
 int organic_record_streams_the_mount() {
 	auto world = std::make_unique<w::World>();
 	world->registry.configure_pool(0, 4);
@@ -662,7 +663,7 @@ int organic_record_streams_the_mount() {
 	g.ai_state = 0x0115;
 	g.ref_num = 7;
 	g.sub_type = 9;
-	world->ai.for_handle(gunner)->brain.f[w::AiBrain::kTickAccum] = 0x1234;
+	world->ai.for_handle(gunner)->slot.f[8] = 0x1234; // AiSlot +0x20
 	const opennova::OrganicSpawnBatch c = ns::build_pool0_organic_batch(*world);
 	opennova::OrganicSpawnBatch out;
 	const std::vector<uint8_t> wire = opennova::encode_organic_spawn_batch(c);

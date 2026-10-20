@@ -1377,6 +1377,39 @@ static void test_player_awol_counter_and_trigger() {
     CHECK(sys2.awol_count() == 0);
 }
 
+// D-NET-507: the AWOL probe compares the position words with the area record's own
+// X/Y words (x_min, x_max, y_min, y_max, signed, unnormalized): a player one word
+// under the record's x_min is out although the float bounds' view rounds it in.
+// [orig: Entity_IsLocalPlayerOutOfBounds @0x439D40 - @0x439D69..0x439D85]
+static void test_player_awol_probe_reads_the_record_words() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+    world::Aabb zone;
+    zone.min = {10.0f, 0.0f, -16384.0f};
+    zone.max = {100.0f, 100.0f, 16384.0f};
+    const std::array<int32_t, 4> record = {(10 << 16) | 0x1234, 100 << 16, 0, 100 << 16};
+    w.registry.register_area("", zone, /*active=*/true, -1, {}, false, record);
+    world::Entity seed{};
+    seed.alive = true;
+    seed.position.set_q16({(10 << 16) | 0x1233, 50 << 16, 0});
+    const world::EntityHandle player = w.registry.spawn(0, seed);
+    w.cached.local_player = player;
+
+    mission::BmsEventSystem sys;
+    load_probe(sys, make_trigger(bms::TriggerMainType::Player,
+                                 static_cast<int>(bms::PlayerTriggerType::PlayerAwol),
+                                 /*threshold=*/2));
+    w.add_system(&sys);
+    w.load_systems();
+    tick_n(w, kCycle);
+    CHECK(sys.awol_count() == 1); // one word under x_min: out
+
+    w.registry.get(player)->position.x.q16 = (10 << 16) | 0x1234;
+    tick_n(w, kCycle);
+    CHECK(sys.awol_count() == 0); // on x_min: in
+}
+
 // The cat-7 mount-sub dispatch must discriminate the four predicates — the shipped
 // IDB carried PERMUTED names for exactly these, so a permuted case map is the
 // realistic defect and every row below catches one permutation.
@@ -2944,6 +2977,7 @@ int main() {
     test_second_time_through_parity();
     test_teammate_triggers();
     test_player_awol_counter_and_trigger();
+    test_player_awol_probe_reads_the_record_words();
     test_player_mount_trigger_dispatch();
     test_player_input_bit_triggers();
     test_player_berserk_trigger();

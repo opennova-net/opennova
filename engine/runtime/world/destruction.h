@@ -763,8 +763,12 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate);
 // trail effect [orig: @0x493811 — the spawnEffect submit behind (frameFlags & 1)].
 uint32_t spawn_death_pieces(World &world, Entity &target, bool silent = false);
 
-// The death legs' water word: the given water height as a word, INT32_MIN for
-// the dry sentinel (no water authored). [orig: g_EnvWaterHeightFixed @0x26c6454]
+// The death legs' water word: the given water height as a word. Retail keeps no
+// dry sentinel: with no water authored the word is 0, the memset's, and every leg
+// compares against it (a top word below 0 on a dry map is underwater).
+// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
+// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
+// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
 int32_t death_water_q16(float water_height);
 
 // An entity's top as the death legs test it against the water word: its Z word

@@ -283,8 +283,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
                 if (e->squib.motor) {
                     tick_squib(*this, *e);
                 } else {
-                    const float water_z = env.water_z != 0
-                            ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+                    const float water_z = static_cast<float>(env.water_z) / 65536.0f;
                     tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
                 }
             }
@@ -351,8 +350,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     if (e->squib.motor) {
         tick_squib(*this, *e);
     } else {
-        const float water_z =
-                env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+        const float water_z = static_cast<float>(env.water_z) / 65536.0f;
         tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
     }
     if ((e = live()) == nullptr) return;
@@ -488,11 +486,11 @@ void World::update_all_entities(const TickContext &ctx) {
     // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     const bool round_host =
             is_authority || (rules.mp_session && !rules.projectile_authority);
-    // The water plane: env.water_z (16.16, the #265 sound-profile home) —
-    // zero means "no water authored", the same read the wreck gates use
-    // [orig: g_EnvWaterHeightFixed @0x26c6454].
-    const float water_z =
-            env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+    // The water plane: env.water_z (16.16, the #265 sound-profile home), 0 when
+    // none is authored (retail keeps no dry sentinel; D-NET-507)
+    // [orig: g_EnvWaterHeightFixed @0x26C6454; Environment_InitDefaults @0x57C010 -
+    //  the memset @0x57C011..0x57C01E].
+    const float water_z = static_cast<float>(env.water_z) / 65536.0f;
     // [orig: DeathPiece_TickAll @0x57b900, the call @0x4c221c]
     if (round_host) death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
     // The timed AI events, before this tick's projectiles: a damage event the

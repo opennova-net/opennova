@@ -203,8 +203,13 @@ bool mass_exchange_target(const World &world, const Entity &vehicle, const Entit
 		return false;
 	our_mass = ours->mass;
 	their_mass = theirs->mass;
-	return int64_t(their_mass) < 2LL * our_mass &&
-			other->bound_radius < 2.0f * vehicle.bound_radius &&
+	// Their def mass against twice ours, their bound word against twice ours, each
+	// doubled by a wrapping add, signed compares (D-NET-507).
+	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - `lea edx, [eax+eax]; cmp ecx,
+	//  edx` @0x47CEA8..0x47CEAB, `mov edx, [esi]; add edx, edx; cmp [edi], edx`
+	//  @0x47CEB3..0x47CEB7; Entity_ProcessVehicleSuspension @0x463C60 - @0x4643E6..0x4643F5]
+	return their_mass < io::bam_add(our_mass, our_mass) &&
+			other->bound_radius.q16 < io::bam_add(vehicle.bound_radius.q16, vehicle.bound_radius.q16) &&
 			int64_t(our_mass) + their_mass != 0;
 }
 

@@ -364,7 +364,8 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // init's aim basis is the spawn position. [orig: Entity_InitFromModel @0x40DC30 -
     //  `mov ecx, [edi]; mov [esi+80h], ecx` @0x40E14B..0x40E14D, +0x84 @0x40E15D /
     //  @0x40E160, +0x88 @0x40E153 / @0x40E169; Entity_InitAllFromModels @0x40E460;
-    //  Entity_InitOrganicAI @0x4C01D0..0x4C01EE reads them into +0x30C..]
+    //  Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8, +0x310 @0x4C01EE, +0x314
+    //  @0x4C01FB]
     ae.net_saved_live_pose[0] = ae.self->position.x.q16;
     ae.net_saved_live_pose[1] = ae.self->position.y.q16;
     ae.net_saved_live_pose[2] = ae.self->position.z.q16;

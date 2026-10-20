@@ -731,6 +731,55 @@ void test_proximity_bits_shift_as_bytes() {
     CHECK(pass(gt::kAdvanceAndSecure, 1, 2) == 0x04);
 }
 
+// D-NET-507: the proximity tests run on the position words. The 20-unit test takes
+// the absolute word deltas against 0x140000, squares each to a rounded 16.16 word,
+// sums them and shifts the x87 root up 8: dx 0x140000 with dy 0x4000 (a length of
+// 20.0016 units) is inside, dy 0xB500 outside. A capturable entity's |dz| is tested
+// against half its radius word, a signed halving: a radius of 3 holds |dz| 0x18000
+// and drops 0x18001.
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - the deltas and 0x140000
+//  @0x5088A9..0x5088D8, the rounded squares, fsqrt, fistp and `shl 8`
+//  @0x5088DE..0x508925; the capturable leg @0x508B57..0x508BDB]
+void test_proximity_tests_run_on_the_words() {
+    auto objective_mask = [](int32_t dy) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 8);
+        world->match.configure(rules(kTdm, 10, 99));
+        const EntityHandle body = player(*world, 0, 1, "Body");
+        world->registry.get(body)->position.set_q16({0x140000, dy, 0});
+        objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+        world->match.advance_tick(*world);
+        return world->match.player(body)->objective_proximity_mask;
+    };
+    CHECK(objective_mask(0x4000) == 0x01);
+    CHECK(objective_mask(0xB500) == 0x00);
+    auto zone_mask = [](int32_t dz) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        MatchRules aas;
+        aas.game_type = gt::kAdvanceAndSecure;
+        world->match.configure(aas);
+        const EntityHandle body = player(*world, 0, 1, "Body");
+        world->registry.get(body)->position.set_q16({0, 0, dz});
+        Entity site;
+        site.kind = EntityKind::Item;
+        site.has_item_def = true;
+        site.team = 2;
+        site.alive = true;
+        site.item_attrib = kItemAttribSpawnPoint;
+        site.zone_number = 1;
+        site.zone_radius = 3;
+        world->registry.spawn(1, site);
+        advance_initial_periodic_passes(*world, 1);
+        return world->match.player(body)->objective_proximity_mask;
+    };
+    CHECK(zone_mask(0x18000) == 0x04);
+    CHECK(zone_mask(-0x18000) == 0x04);
+    CHECK(zone_mask(0x18001) == 0x00);
+}
+
 // D-NET-680: the kill bonuses' near-objective tests shift a dword by the
 // entity team byte, its count taken mod 32, and test the low byte against the
 // mask, so a team of 32 and up wraps onto the low bits and 8..31 tests none:
@@ -1778,6 +1827,7 @@ int main() {
     test_retail_objective_proximity_scoring_events();
     test_zone_time_split_reads_the_slot_team();
     test_proximity_bits_shift_as_bytes();
+    test_proximity_tests_run_on_the_words();
     test_kill_bonus_team_bits_shift_as_dwords();
     test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();

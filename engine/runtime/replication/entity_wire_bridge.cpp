@@ -444,13 +444,15 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 				? player_wire_net_id(e)
 				: e.minimap_net_id;
 		rec.player_class = player_class_for_wire(e);
-		// The AI slot's +0x20 byte (*(entity+0x68) + 0x20): the low byte of the slot's tick
-		// accumulator, which a stock joiner stores back into its slot's +0x20 dword.
+		// The AI slot's +0x20 byte (*(entity+0x68) + 0x20; the 172-byte slot the entity
+		// links, ours AiSlot), the dword the command's case 1 writes, which a stock joiner
+		// stores back into its slot's +0x20.
 		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - `mov edx, [ecx+68h];
-		//  mov dl, [edx+20h]` @0x5032F3..0x5032F6, stored @0x503306; NapiNPClientMsg_0x00C
-		//  @0x42E730 - @0x42E9EB; AIEntity_ProcessWeaponFire @0x472E00 - `add [esi+20h], eax`
-		//  @0x472E3A]
-		rec.ai_action = static_cast<uint8_t>(ae->brain.f[world::AiBrain::kTickAccum]);
+		//  mov dl, [edx+20h]` @0x5032F3..0x5032F6, stored @0x503306; Entity_AllocateAISlot
+		//  @0x40D2C0 - entity+0x68 = slot @0x40D2F4; Entity_ApplyCommand case 1 - `mov eax,
+		//  [eax+68h]` @0x43AB83, `mov [eax+20h], ecx` @0x43AB92; NapiNPClientMsg_0x00C
+		//  @0x42E730 - @0x42E9EB]
+		rec.ai_action = static_cast<uint8_t>(ae->slot.f[8]);
 		rec.player_slot_id = e.player_slot_id; // entity+0x154 [orig: @0x503316..0x503327]
 		// refNum (+0x215) and subType (+0x214). [orig: NetPacket_SerializeEntityStatesToBuffer
 		//  @0x5030A0 - +0x215 @0x503329 stored @0x50333C, +0x214 @0x50333E stored @0x503351;

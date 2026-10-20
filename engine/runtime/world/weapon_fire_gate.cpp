@@ -99,7 +99,10 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
     if (owner.mount_type == SeatType::Gunner) {
         squared += double(dz) * dz;
         const Entity *mount = world.registry.get(owner.mount_target);
-        limit = mount != nullptr ? to_fixed(2.0f * mount->bound_radius) : 0x30000;
+        // The mount's bound word doubled by a wrapping add (D-NET-507).
+        // [orig: Server_ClientFiredRound - `mov edi, [ecx]; add edi, edi` @0x50C43A..0x50C43C]
+        limit = mount != nullptr ? io::bam_add(mount->bound_radius.q16, mount->bound_radius.q16)
+                                 : 0x30000;
         // A gunner on an attached, parent-routed mountable gun
         // (Entity_IsMountableGun: itemdef && type != 1 && attrib & 0x20; the
         // attachment flag +0x326 & 2; the MountSlot+0x5E redirect bit at
@@ -113,7 +116,7 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
             const Entity *parent = world.registry.get(mount->ground_target);
             if (parent != nullptr && parent->has_item_def && parent->item_type == 1 &&
                     (parent->item_attrib & 0x20u) != 0)
-                limit = to_fixed(2.0f * parent->bound_radius);
+                limit = io::bam_add(parent->bound_radius.q16, parent->bound_radius.q16); // @0x50C473..0x50C475
         }
     }
     const int32_t distance = static_cast<int32_t>(std::min(std::sqrt(squared), 2147418112.0));
