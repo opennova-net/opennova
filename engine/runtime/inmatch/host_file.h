@@ -51,6 +51,14 @@ namespace opennova::inmatch {
 // stays inert.
 // [orig: Config_SetDefaults @0x54D030 -- engine/base/gameprofile/game_type.h
 //  game_rules carries each value's cite]
+// The game shell's host requests (HostSessionConfig) take the process cfg
+// block's mpattrib over this baseline's attribute word: retail's host screen
+// shows its six attribute switches from the block's word, its START writes
+// them back into the block, and the session create copies the block's word,
+// so the bits no switch shows, and a host with no screen (the launch-flag
+// host), keep the file's (D-NET-NEW-LP-4) [orig: UI_PopulateHostSettingsFromConfig
+// @0x5563E1..0x5564EE (multiplayerAttributeFlags_34C); CNapiGameSession_BuildAndCreateSession
+// @0x569662 -> game_settings.mp_attributes @0x56967F].
 GameConfig host_screen_default_config();
 
 // The session a host runs from: the session config and the words of the cfg

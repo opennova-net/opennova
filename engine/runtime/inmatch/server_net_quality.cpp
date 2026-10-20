@@ -139,7 +139,7 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// by the round end, cleared by the next mission start: Match's outcome).
 	// g_NetSpawnSuspended is set only inside the synchronous mission load, so no
 	// sample ever sees it [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the gates
-	//  @0x4C52EA..0x4C5308 -> CNetStats_ClearSendCounters @0x4C55E3;
+	//  @0x4C52EA..0x4C5308 -> CNetStats_ClearSendCounters @0x4C2F50 (the call @0x4C55E3);
 	//  Server_ProcessRoundEnd @0x5168E4; Game_StartMission - the spawn gate's set
 	//  @0x524398 and clear @0x52631B, the round-over clear @0x524A1F].
 	if (ctx.world != nullptr && (ctx.world->preround_delay_seconds != 0 ||

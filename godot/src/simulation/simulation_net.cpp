@@ -98,9 +98,8 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 	inmatch::HostConfig cfg = inmatch::shell_host_config(source);
 	cfg.title = session_title(net_.title);
 	// The process's log devices: the switches retail's command line arms reach every host the
-	// process runs, a listen host's as a dedicated one's [orig: Game_ParseCommandLineAndInit
-	//  @0x4a778f (/PROFILE), @0x4a782d / @0x4a7863 (/PUNT.TXT, /PUNTLOG), @0x4a77fc
-	//  (/CHEATLOG), @0x4a7a11 (/NETLOG), @0x4a743d..0x4a744f (/INOUT)].
+	// process runs, a listen host's as a dedicated one's (base/resource_index boot_policy.h
+	// LogSwitches carries the witness).
 	if (net_.log_devices != nullptr) cfg.logs = net_.log_devices->logs();
 	// The loose _NSTMOUT.TXT reap/pool override under the install root
 	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty

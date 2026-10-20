@@ -63,8 +63,8 @@ GameWorld::GameWorld() :
 void GameWorld::_ready() {
 	// The server log devices the process's switches arm, in the working directory where
 	// retail opens every log by its bare name; the punt and cheat logs write their START
-	// lines now, as retail's switch parse does [orig: Game_ParseCommandLineAndInit
-	//  @0x4a778f..0x4a7a11, @0x4a743d..0x4a744f].
+	// lines now, as retail's switch parse does (the witness: base/resource_index
+	// boot_policy.h LogSwitches, inmatch/server_log_devices.h).
 	if (log_devices_ == nullptr) {
 		log_devices_ = std::make_unique<opennova::inmatch::ServerLogDevices>(
 				opennova::to_std(LaunchFlags::working_dir()));
@@ -134,7 +134,7 @@ void GameWorld::_notification(int p_what) {
 	if (p_what == NOTIFICATION_EXIT_TREE) {
 		stop_water_render_stats();
 		// The process's network shut down: the _inout.txt log, then the net log, each
-		// stops and flushes [orig: Game_ShutdownSubsystems @0x4A5398].
+		// stops and flushes (ServerLogDevices::close carries the witness).
 		if (log_devices_ != nullptr) log_devices_->close(0u);
 		return;
 	}

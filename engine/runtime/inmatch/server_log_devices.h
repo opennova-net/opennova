@@ -45,7 +45,8 @@ public:
 	// retail's switch parse does; `/NETLOG`, then a `_DONETLOG.TXT` in the working directory,
 	// turn the net log on.
 	void arm(const LogSwitches &switches);
-	// The process's network shut down: the protocol's _inout.txt log, then the manager's net
+	// The process's network shut down (the game world's exit from the tree, opennova-serve's
+	// exit tail): the protocol's _inout.txt log, then the manager's net
 	// log, each stops and flushes [orig: the protocol's NapiLog_Shutdown(protocol + 0xF80) in
 	// NapiNPProtocol_Destroy @0x62B500 (the call @0x62B570); Game_ShutdownSubsystems @0x4A5398
 	// -> NapiLib_Shutdown -> the manager's NapiLog_Shutdown @0x62B739]. `now_ms` is the host's
