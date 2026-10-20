@@ -1407,6 +1407,7 @@ public:
 	// The process's server log devices (simulation_net_state.h), which every hosted
 	// session's context writes. Null = none.
 	void use_log_devices(opennova::inmatch::ServerLogDevices *p_devices) { net_.log_devices = p_devices; }
+	void use_client_process(opennova::inmatch::ClientProcessState *p_state) { net_.client_process = p_state; }
 	// The last load's session create ended the process on a nonzero mpreset (inmatch
 	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.
 	bool session_create_ended_process() const;

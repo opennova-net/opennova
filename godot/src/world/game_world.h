@@ -20,6 +20,7 @@
 #include <cstdint>
 
 #include <runtime/inmatch/mission_rotation.h> // HostRotation (the process's rotation words)
+#include <runtime/inmatch/client_runtime.h> // ClientProcessState (the process's client words)
 #include <runtime/inmatch/server_log_devices.h> // ServerLogDevices (the server log switches)
 
 #include <memory>
@@ -911,6 +912,10 @@ private:
 	// hands its half toggle, SETNEXT latch and side-to-team map to the next
 	// (Simulation.use_host_rotation; inmatch/mission_rotation.h).
 	opennova::inmatch::HostRotation host_rotation_;
+	// The process's client words (the 0x4C report's count), which every hosted session's own
+	// client runtime steps on (Simulation.use_client_process; inmatch/client_runtime.h
+	// ClientProcessState).
+	opennova::inmatch::ClientProcessState client_process_;
 	// The server log devices the process's command-line switches arm (/PROFILE, /PUNTLOG,
 	// /PUNT.TXT, /CHEATLOG, /NETLOG, /INOUT), alive for the world's run as retail's globals
 	// are for the process's, every hosted session writing them

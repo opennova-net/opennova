@@ -177,6 +177,9 @@ void HostRole::install_spawned_body_bind() {
 void HostRole::make_client_runtime(uint32_t game_type) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime = std::make_unique<inmatch::ClientRuntime>(state.host_loop);
+	// The 0x4C report's count runs on across the runtimes [orig: g_NetQualityReportTimer
+	//  @0xA85B84, process-lived; Client_ProcessNetworkFrame @0x42C239 / @0x42C246].
+	state.client_runtime->use_process_state(client_process_);
 	state.host_owner.ctx.host_client = state.client_runtime.get();
 	// Its mission start ends with its C2S 0x0B (D-NET-NEW-L4-5).
 	kernel.net_mission_start_end = [this] { send_own_mission_status(); };
@@ -251,6 +254,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 void HostRole::bring_up(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
+	if (host_cfg.client_process != nullptr) client_process_ = host_cfg.client_process;
 	reset_state(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
 			host_cfg.title);
 	state.host_owner.host_loopback = &state.host_loop;
@@ -289,6 +293,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
+	if (host_cfg.client_process != nullptr) client_process_ = host_cfg.client_process;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	state.client_runtime.reset();
 	local_round_reset_seen_ = kernel.local.round_reset_revision;

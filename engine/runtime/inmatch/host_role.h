@@ -210,6 +210,10 @@ private:
 	// (NapiNPServerCtx::bind_spawned_body), installed after a bring-up's own spawn.
 	void install_spawned_body_bind();
 	void make_client_runtime(uint32_t game_type);
+	// The client words the host's own runtime steps: the embedder's (HostConfig::client_process),
+	// else the role's own, which every runtime the role makes (a map change, a retry) shares.
+	ClientProcessState own_client_process_;
+	ClientProcessState *client_process_ = &own_client_process_;
 	// The map change's bring-up: the kept session onto the next mission's
 	// kernel (map_change.h).
 	void bring_up_next_mission(const HostBringup &bringup);

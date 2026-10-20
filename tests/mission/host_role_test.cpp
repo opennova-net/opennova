@@ -283,6 +283,66 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 	}
 }
 
+// Its own frame: main's locals already fill the 1 MB test stack.
+void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
+	// --- the 0x4C report's count is the process's: a remade client runs on --
+	// Retail keeps the count in one global that only the report zeroes, so a
+	// client remade mid-cycle (a retry's, a map change's) reports on the same
+	// 311-frame beat; the embedder's ClientProcessState carries it across
+	// sessions. Here the role remakes its client at frame 200 and the host's
+	// level still lands at frame 312.
+	// [orig: g_NetQualityReportTimer @0xA85B84 - Client_ProcessNetworkFrame
+	//  @0x42C239 / @0x42C246, its only writers]
+	{
+		// Heap-held: a second kernel in this frame overflows the 1 MB test-main stack.
+		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		ms::MissionKernel &kernel = *kernel_owner;
+		inmatch::HostRole &role = *role_owner;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "quality_report_runs_on", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		inmatch::ClientProcessState process;
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
+			cfg.config.server_name = "quality_report_runs_on";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			cfg.client_process = &process;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		role.observe_frame_rate(62);
+		kernel.capture_baseline();
+		int stored_at = -1;
+		for (int frame = 1; frame <= 600 && stored_at < 0; ++frame) {
+			if (frame == 201) {
+				CHECK(process.net_quality_report_timer == 200);
+				inmatch::SessionError reset_error;
+				CHECK(role.reset_to_baseline(reset_error));
+			}
+			role.run_tick(tick_input(0));
+			for (const inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+				if (conn.link.owned_entity == kernel.world.cached.local_player &&
+						conn.reply.client_quality != 0)
+					stored_at = frame;
+		}
+		std::printf("host_role: the remade client's 0x4C stored at frame %d\n", stored_at);
+		CHECK(stored_at == 312);
+	}
+}
+
 int main() {
 	std::map<std::string, std::string> files;
 
@@ -1317,6 +1377,8 @@ int main() {
 			CHECK(host.client_runtime->state().roster[slot].quality == 1);
 		}
 	}
+
+	check_quality_report_runs_on(files);
 
 	check_own_world_state_location_names(files);
 

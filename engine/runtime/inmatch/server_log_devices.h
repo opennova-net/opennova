@@ -31,6 +31,7 @@ public:
 	bool exists(const std::string &name) override;
 	void remove(const std::string &name) override;
 	bool write(const std::string &name, std::string_view bytes, bool append) override;
+	const std::string &dir() const { return dir_; }
 
 private:
 	std::string path(const std::string &name) const;

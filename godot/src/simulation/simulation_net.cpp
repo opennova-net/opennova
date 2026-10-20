@@ -103,6 +103,12 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 	if (net_.log_devices != nullptr) cfg.logs = net_.log_devices->logs();
 	// The mounted Avatars.def's combos the player add validates against (D-NET-137).
 	cfg.characters = assets_.character_registry;
+	// banned.txt and banlist.txt by bare name in the same working directory, as retail opens
+	// them; every host's round init loads them (engine server_ban_lists.h) [orig:
+	// Server_InitNewRoundState @0x51C92F, @0x51CB25..0x51CB3B].
+	if (net_.log_devices != nullptr) cfg.ban_directory = net_.log_devices->files().dir();
+	// The process's 0x4C report count runs on across sessions (ClientProcessState).
+	cfg.client_process = net_.client_process;
 	// The loose _NSTMOUT.TXT reap/pool override under the install root
 	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty
 	// keeps the 120000 ms / 1200-record template.

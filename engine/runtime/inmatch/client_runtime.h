@@ -56,8 +56,20 @@ namespace opennova::world { class World; }
 
 namespace opennova::inmatch {
 
+// The client half's process-lived word: retail keeps the 0x4C report's frame count in a
+// global for the whole process, so it runs on across sessions, map changes and roles; only the
+// report zeroes it. The embedder that outlives its sessions owns one and hands it to every
+// client runtime (ClientRuntime::use_process_state); a runtime with none keeps its own.
+// [orig: g_NetQualityReportTimer @0xA85B84 - its only writers Client_ProcessNetworkFrame
+//  @0x42C239 (the step) and @0x42C246 (the zero at the report)]
+struct ClientProcessState {
+	uint32_t net_quality_report_timer = 0;
+};
+
 class ClientRuntime {
 public:
+	// The process-lived client words this runtime steps (null: its own).
+	void use_process_state(ClientProcessState *state) { external_process_ = state; }
 	enum class Role : uint8_t { Joiner, HostClient };
 
 	// Remote-joiner runtime. Transport-less: framed bytes in via receive(), framed bytes out via
@@ -939,7 +951,13 @@ private:
 	uint32_t current_tick_ = 0;          // [orig: g_ClientCurrentTick @0xA8229C] bumped once per run_frame
 	uint32_t slot_refresh_frames_ = 0;   // [orig: g_SlotRefreshTimer @0xA85B80] the 1 Hz revive countdown
 	uint32_t last_keepalive_tick_ = 0;   // [orig: g_LastKeepaliveTick @0xA822A0] 0x34 send latch
-	uint32_t net_quality_timer_ = 0;     // [orig: g_NetQualityReportTimer @0xA85B84] 0x4C cadence
+	// [orig: g_NetQualityReportTimer @0xA85B84] the 0x4C cadence: the embedder's
+	// process-lived word (use_process_state), else this runtime's own.
+	ClientProcessState own_process_;
+	ClientProcessState *external_process_ = nullptr;
+	uint32_t &net_quality_timer() {
+		return (external_process_ != nullptr ? *external_process_ : own_process_).net_quality_report_timer;
+	}
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_Tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
 	                                     // and decremented, but never compared in @0x42C180;
 	                                     // vestigial/telemetry state, not a send throttle.

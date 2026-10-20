@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <net/npwire/net_ports.h>
+#include <runtime/inmatch/client_runtime.h> // ClientProcessState
 
 #include "mission/mission_object_placer.h"
 #include "network/host_session_options.h"
@@ -91,6 +92,9 @@ public:
 	// Null = the sim keeps its own.
 	opennova::inmatch::HostRotation *get_host_rotation() const { return host_rotation_; }
 	void set_host_rotation(opennova::inmatch::HostRotation *p_value) { host_rotation_ = p_value; }
+	// The process's client words (Simulation.use_client_process), C++ only. Null = none.
+	opennova::inmatch::ClientProcessState *get_client_process() const { return client_process_; }
+	void set_client_process(opennova::inmatch::ClientProcessState *p_value) { client_process_ = p_value; }
 	// The process's server log devices (Simulation.use_log_devices), C++ only. Null = none.
 	opennova::inmatch::ServerLogDevices *get_log_devices() const { return log_devices_; }
 	void set_log_devices(opennova::inmatch::ServerLogDevices *p_value) { log_devices_ = p_value; }
@@ -171,6 +175,7 @@ private:
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
 	opennova::inmatch::HostRotation *host_rotation_ = nullptr;
+	opennova::inmatch::ClientProcessState *client_process_ = nullptr;
 	opennova::inmatch::ServerLogDevices *log_devices_ = nullptr;
 	Ref<CharacterJoinProfile> join_character_profile_;
 	PackedStringArray spawn_names_;

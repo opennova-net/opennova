@@ -176,6 +176,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	sim_->use_host_rotation(options->get_host_rotation());
 	// The process's server log devices, which every hosted session writes.
 	sim_->use_log_devices(options->get_log_devices());
+	// The process's client words, which every hosted session's own client steps on.
+	sim_->use_client_process(options->get_client_process());
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	// load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	// sole live runtime owner (ADR 0025). Isolated tests may instantiate this same

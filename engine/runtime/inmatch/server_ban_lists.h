@@ -24,8 +24,8 @@ struct NapiNPConnection;
 
 struct ServerBanLists {
 	// The directory both files live in: retail's working directory, which the embedder names
-	// (opennova-serve its own). Unset, the lists still load (empty) and work, and no file is
-	// read or written: the game's hosts and the tests (D-NET-295's residual).
+	// (opennova-serve its own, the game's hosts the game's --working-dir). Unset, the lists
+	// still load (empty) and work, and no file is read or written: the tests.
 	std::optional<std::string> directory;
 	// g_BannedPcidList @0xC867A0: absent off a NovaWorld authority session, where BAN and
 	// UNBAN do nothing and a PLAYER BAN is a punt.

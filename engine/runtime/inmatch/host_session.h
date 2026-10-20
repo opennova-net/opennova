@@ -36,6 +36,8 @@
 
 namespace opennova::inmatch {
 
+struct ClientProcessState;
+
 // Per-remote-peer owner state: the socket-free transport the owner pumps (owns its lifetime; the
 // connection's link.transport is a non-owning pointer into it) + the once-latch for the joiner's
 // named dcb-bearing organic-spawn announce.
@@ -182,6 +184,9 @@ struct HostConfig {
 	// address for the /INOUT lines; the session start installs both on the
 	// fresh context.
 	ServerLogs logs;
+	// The process's client words the host's own client runtime steps (ClientProcessState,
+	// client_runtime.h): null keeps the role's own across its map changes.
+	ClientProcessState *client_process = nullptr;
 	PeerAddr local_address{};
 	bool local_address_known = false;
 	// The directory banned.txt and banlist.txt live in (ServerBanLists::directory): retail's

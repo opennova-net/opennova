@@ -15,6 +15,7 @@
 #include <runtime/inmatch/game_config.h>          // GameConfig
 #include <runtime/inmatch/joiner_connection.h>    // JoinerConnection::DiscoveredSession
 #include <runtime/inmatch/mission_rotation.h>     // HostRotation (D-NET-331)
+#include <runtime/inmatch/client_runtime.h>       // ClientProcessState (the process's client words)
 #include <runtime/inmatch/server_log_devices.h>   // ServerLogDevices (the server log switches)
 #include <runtime/inmatch/napi_np_connection.h>   // CharacterJoinVars
 #include <runtime/inmatch/napi_np_server_ctx.h>   // NetworkType
@@ -101,6 +102,9 @@ struct SimulationNetState {
 	// set, armed from the command line's switches, which every hosted session's context
 	// writes (host_session_cfg). Null = none (a tool, a test): no logs.
 	opennova::inmatch::ServerLogDevices *log_devices = nullptr;
+	// The process's client words (inmatch/client_runtime.h ClientProcessState): the game
+	// world's, which every hosted session's own client runtime steps on. Null = the role's own.
+	opennova::inmatch::ClientProcessState *client_process = nullptr;
 	opennova::inmatch::HostRotation &rotation() {
 		return process_rotation != nullptr ? *process_rotation : own_rotation;
 	}

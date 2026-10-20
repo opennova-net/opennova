@@ -440,7 +440,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	current_tick_ = 0;
 	slot_refresh_frames_ = 0;
 	last_keepalive_tick_ = 0;
-	net_quality_timer_ = 0;
+	// The 0x4C report's count is the process's and runs on (ClientProcessState).
 	tag2c_send_cooldown_ = 0;
 	send_holdoff_countdown_ = 0;
 	send_holdoff_ticks_ = 0;
@@ -1450,8 +1450,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// [orig: Client_ProcessNetworkFrame @0x42C180 - the timer
 		//  @0x42C22D..0x42C23E, is_in_session @0x42C240, is_mp_session_peer
 		//  @0x42C24E, the queue @0x42C279]
-		if (++net_quality_timer_ > kNetQualityInterval) {
-			net_quality_timer_ = 0;
+		if (++net_quality_timer() > kNetQualityInterval) {
+			net_quality_timer() = 0;
 			if (view_.mp_session())
 				queue_host_message(c2s::CLIENT_QUALITY, {net_quality_level()});
 		}
@@ -1480,8 +1480,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// is_mp_session_peer alone, so the game loop's frame steps the timer and reports dead
 	// or alive (D-NET-529). [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279]
 	if (!replay_mode_ && joiner_->in_game_loop()) {
-		if (++net_quality_timer_ > kNetQualityInterval) {
-			net_quality_timer_ = 0;
+		if (++net_quality_timer() > kNetQualityInterval) {
+			net_quality_timer() = 0;
 			ProtocolMessage quality = make_protocol_message(
 					0x4C, std::vector<uint8_t>{net_quality_level()});
 			// This is neither indefinitely reliable nor one-send: retail passes
