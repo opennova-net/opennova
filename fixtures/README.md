@@ -197,6 +197,9 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   area triggers (03TR's shape: thirteen zones over ids 1..15 with gaps, most constrain-Z) beside
   the mission boundary and a record in each pool, which `mission_mis_idempotency` round-trips
   through `.mis` by zone id.
+- `mission_set/` — `tests/fixtures/mission_set_gen.cpp` and authored text: a loose game root the
+  world and mission tests mount in place of the training missions they once booted (see its section
+  below).
 - `particle/synth_*.ptl` — `tests/fixtures/minimal_particle_gen.cpp`: five particle
   files through `save_particles` (a lone table, a table with its edit handles,
   seven effects over a blank particle, a three-layer particle with curves and
@@ -205,3 +208,15 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   reference-tree leg.
 - `dbf/synth_bank.dbf` — `tests/fixtures/minimal_dbf_gen.cpp`: eleven dialog groups
   through `encode_dbf`; the shipped 00TRg bank is `dbf_roundtrip`'s reference-tree leg.
+
+## mission_set — the minted mission set (minted, with authored text)
+
+A loose game root (no archive: the kernel mounts it as the game mounts loose
+files) holding what the world and mission tests that once booted shipped training
+missions read instead: models minted through `tests/fixtures/minimal_3di_builder.h`
+by `tests/fixtures/mission_set_gen.cpp`, each in the shape of the shipped model it
+stands in for.
+
+| File | Shape |
+|---|---|
+| `door.3di` | the shipped door building's (IBlock01): a "door" LOD, part 0 a 6 x 6 block house with a doorway in its +x wall, part 1 the door hinged at (2.9, -0.5), its PANM row a rotation on control register 0 (`DOOR_00`) from 0 to -5688; a collision object per part, the door's offset to its hinge; `doors`' |

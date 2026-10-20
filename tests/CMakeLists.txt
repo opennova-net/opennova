@@ -2975,7 +2975,7 @@ target_compile_features(doors_test PRIVATE cxx_std_17)
 if(MSVC)
     target_link_options(doors_test PRIVATE "/STACK:4194304")
 endif()
-opennova_add_mixed_test(doors COMMAND doors_test)
+add_test(NAME doors COMMAND doors_test)
 
 # World-object collision (Entity_TestCollisionSections @0x4aef90 / _RaycastCollisionModel
 # @0x413060 / _ComputeBoneCollisionForce @0x4ae150 / _ProcessCollisionAndPlatformPhysics

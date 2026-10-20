@@ -28,11 +28,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "common/file_io.h"
+#include "fixtures/minimal_3di_builder.h"
 
 namespace {
 
@@ -240,6 +242,53 @@ bool build_table(std::vector<uint8_t> &bytes, std::string &err) {
 	return true;
 }
 
+// --- the mission set's models (fixtures/mission_set) --------------------------------------------
+
+using synth3di::Box;
+using synth3di::Vec3;
+
+Box box(double x0, double y0, double z0, double x1, double y1, double z1) {
+	return Box{{x0, y0, z0}, {x1, y1, z1}};
+}
+
+// door.3di: a block house with a hinged door, in the shape of the shipped door building
+// (IBlock01: an LOD of type "door" whose part 0 is the house and part 1 the door, its one PANM
+// row a rotation on control register 0, DOOR_00, from 0 to -5688, rotation type 2; a collision
+// object per part, the door's offset to its hinge). Mission axes: the house a 6 x 6 room, 3 tall,
+// its doorway in the +x wall, the door hinged at (3, -0.5).
+synth3di::Model make_door_building() {
+	synth3di::Model m;
+	m.name = "door";
+	const int lod = m.add_lod(0, "door");
+	const int walls = m.add_material("FF_ST_OP", "door_walls.tga");
+	const int slab = m.add_material("FF_ST_OP", "door_slab.tga");
+	const Box floor = box(-3.0, -3.0, 0.0, 3.0, 3.0, 0.1);
+	const Box back = box(-3.0, -3.0, 0.1, -2.8, 3.0, 3.0);
+	const Box left = box(-2.8, 2.8, 0.1, 3.0, 3.0, 3.0);
+	const Box right = box(-2.8, -3.0, 0.1, 3.0, -2.8, 3.0);
+	const Box front_a = box(2.8, 0.5, 0.1, 3.0, 2.8, 3.0);
+	const Box front_b = box(2.8, -2.8, 0.1, 3.0, -0.5, 3.0);
+	const Box lintel = box(2.8, -0.5, 2.2, 3.0, 0.5, 3.0);
+	const Box roof = box(-3.0, -3.0, 3.0, 3.0, 3.0, 3.2);
+	const Box door = box(2.85, -0.5, 0.1, 2.95, 0.5, 2.2);
+	const int house = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {floor, back, left, right, front_a, front_b, lintel, roof}) m.add_box(lod, house, walls, b);
+	const Vec3 hinge{2.9, -0.5, 0.1};
+	const int leaf = m.add_part(lod, 0, hinge);
+	m.add_box(lod, leaf, slab, door);
+	m.add_control_register("DOOR_00");
+	m.add_panm(lod, house, 0);
+	opennova::threedi::ThreediPartAnimation &swing =
+			m.add_panm(lod, leaf, 0, opennova::threedi::threedi_panm_pack_flags(0, 2, 0, 0));
+	swing.rotation_x = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0, 0, -5688);
+	m.add_user_point("Ground", Vec3{}, Vec3{0.0, 0.0, 1.0}, 0, synth3di::kUserPointGameplay);
+	const int shell = m.add_cobj(0);
+	for (const Box &b : {floor, back, left, right, front_a, front_b, lintel, roof}) m.add_face_box(shell, b);
+	const int door_cobj = m.add_cobj(0, hinge);
+	m.add_face_box(door_cobj, door);
+	return m;
+}
+
 // fixtures/bms/synth_areas.bms: a mission whose area triggers take the shape of a shipped
 // training mission's (03TR: thirteen zones over ids 1..15 with gaps, most constrain-Z, flag 2),
 // with the mission boundary (flag 1) beside them and a record in each of the four pools, so its
@@ -319,5 +368,27 @@ int main(int argc, char **argv) {
 	if (!expect(build_areas_mission(areas_bytes, err), ("synth_areas.bms: " + err).c_str())) return 1;
 	if (emit(root + "fixtures/bms/synth_logic.bms", mission_bytes, write_mode) != 0) return 1;
 	if (emit(root + "fixtures/bms/synth_logic.bin", table_bytes, write_mode) != 0) return 1;
-	return emit(root + "fixtures/bms/synth_areas.bms", areas_bytes, write_mode);
+	if (emit(root + "fixtures/bms/synth_areas.bms", areas_bytes, write_mode) != 0) return 1;
+
+	// The mission set (fixtures/mission_set): its models.
+	const std::string set = root + "fixtures/mission_set/";
+	if (write_mode) std::filesystem::create_directories(set);
+	struct ModelRecipe {
+		const char *file;
+		synth3di::Model (*make)();
+	};
+	const ModelRecipe models[] = {
+		{"door.3di", make_door_building},
+	};
+	for (const ModelRecipe &recipe : models) {
+		std::vector<uint8_t> bytes;
+		if (!expect(synth3di::mint(recipe.make(), bytes), (std::string(recipe.file) + ": the writer refused it").c_str()))
+			return 1;
+		opennova::threedi::Threedi3di3 back{};
+		const bool reads = opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &back) == 0;
+		opennova::threedi::threedi_3di3_free(&back);
+		if (!expect(reads, (std::string(recipe.file) + ": does not read back").c_str())) return 1;
+		if (emit(set + recipe.file, bytes, write_mode) != 0) return 1;
+	}
+	return 0;
 }
