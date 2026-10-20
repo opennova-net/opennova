@@ -21,6 +21,7 @@ struct EntityHandle;
 
 namespace opennova {
 struct TitleIdentity; // net/title/title_identity.h
+struct PlayerReplicationState; // net/npwire/replication_model.h
 }
 
 // P8 — the reactive in-match gameplay-message reply path.
@@ -155,6 +156,12 @@ struct ServerDispatchInputs {
 //  bit 0x400 CharAttr_ClassHasAttribute(class, Medic) @0x4c8990..0x4c89a8]
 bool is_medic_recipient(const NapiNPConnection &candidate,
 		const world::World &world, int32_t team_filter);
+
+// Build the per-reply PlayerReplicationState from the session config and the
+// connection's binding: the 0x46 serializers' input (the dispatch TUs and the
+// join's roster push share it).
+PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnection &conn,
+		const world::World *world);
 
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
