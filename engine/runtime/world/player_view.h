@@ -38,6 +38,15 @@ class World;
 constexpr int32_t kScopeEaseSteps = 15;
 constexpr int32_t kScopeEaseStepsInset = 7;
 constexpr int32_t kScopeEaseStepsHipfire = 1;
+// The weapon-switch view ease: the holstered weapon lowers, and the drawn one
+// rises, over 0x1F steps between its hip pose and that pose lowered 65536.0 on
+// the def-scale Z lane (one view unit, flt_7C32BC) with its rotation lanes
+// zeroed; an Emplaced (flags 0x80) draw takes a single step
+// [orig: Player_SetupWeaponSwitchViewEase @0x4DF960 -- the lowered pose
+//  @0x4DF96F..0x4DF9B4, Setup(1) @0x4DF9F0, Setup(0x1F) @0x4DFA0F / @0x4DFA35].
+constexpr int32_t kWeaponSwitchEaseSteps = 0x1F;
+constexpr int32_t kWeaponSwitchEaseStepsInstant = 1;
+constexpr float kWeaponSwitchLowerQ16 = 65536.0f;
 // [orig: g_CameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
 constexpr float kPlayerCameraFovHDeg = 80.0f;
 // [orig: binocular camera fov constant in Player_UpdateFirstPersonCamera]
@@ -381,7 +390,15 @@ struct PlayerViewBiasInterp {
 void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
                                   const PlayerViewPose &idle_source,
                                   const PlayerViewPose &target);
+// One step, publishing into `interp`'s own bias lanes. Retail's stepper writes
+// the shared camera-bias globals whichever interp it steps
+// [orig: Player_StepFpViewBiasInterp @0x4DDD20, the publication
+// @0x4DDF42..0x4DDFC3 into 0xB76520..0xB76534]; the second form names those
+// lanes explicitly so a second interp publishes where the first one does.
 void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip);
+void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip,
+                                  int32_t (&position_bias_q16)[3],
+                                  int32_t (&rotation_bias_bam)[3]);
 
 struct PlayerViewState {
     // THE ADS SCOPE TRI-STATE beside the FP camera interp below.
@@ -409,6 +426,18 @@ struct PlayerViewState {
     PlayerViewPose weapon_ads_pose;
     PlayerViewBiasInterp weapon_pose_interp;
     bool weapon_pose_bound = false; // fpCameraInterp.entitySlotPtr + its non-null Def
+    // THE WEAPON-SWITCH VIEW EASE, retail's second interp of the same type
+    // [orig: g_WeaponSwitchViewInterp @0x82CEA0 -- counter +0, velocity
+    // +4..24, current +28..48, target +52..72, entitySlotPtr +76 (0x82CEEC),
+    // activeFlag +80 (0x82CEF0); the lowering latch +88 (0x82CEF8) is written
+    // and never read, and the completion callback +92 (0x82CEFC) has no
+    // writer]. It lowers the holstered weapon off the view and raises the
+    // drawn one (player_view_weapon_switch_lower / _raise), stepping after the
+    // scope ease and publishing into the same bias lanes, which
+    // weapon_pose_interp carries for both: retail's stepper writes one set of
+    // camera-bias globals whichever interp it runs.
+    PlayerViewBiasInterp weapon_switch_interp;
+    bool weapon_switch_bound = false; // its entitySlotPtr + that slot's non-null Def
     // The movement-held latch: written by the input pack only, from the packed
     // word's direction bits, so a joiner's latches once per send boundary.
     // [orig: g_MovementKeyHeld @ 0xB7653B; Player_PackInputStateToEntity
@@ -606,8 +635,9 @@ void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bi
                                    int action);
 
 // One 62.5 Hz tick: resolve the camera mode, step the six-lane scope-camera
-// interp toward its target and promote the settled byte on the tick its
-// active latch drops [orig: Player_UpdatePerFrame -- the step runs only
+// interp toward its target, then the weapon-switch view ease (which publishes
+// last) [orig: Player_UpdatePerFrame @0x4de4fd..0x4de522], and promote the
+// settled byte on the tick the scope interp's active latch drops [orig: Player_UpdatePerFrame -- the step runs only
 // behind an active interp @0x4de4c7 -> Player_StepFpViewBiasInterp @0x4de4c9,
 // then `if (!activeFlag)` @0x4de4d9 -> g_WeaponScopeActive = (g_ScopeEngaged
 // != 0) @0x4de4f7; the stepper reports done on the call AFTER the last
@@ -657,11 +687,30 @@ void player_view_scope_reset(PlayerViewState &v);
 // copy angle velocity into current, then deactivate the interpolator.
 // [orig: Player_ResetCameraAndMovementState @0x4DE1F0..0x4DE281]
 void player_view_weapon_switch_reset(PlayerViewState &v);
-// A direct mount clears only the published biases. Same-category mounts keep
-// the promoted byte; ForceScoped sets it; an optical promoted mount sets up a
-// one-step transition to the new def's ADS pose without stepping it here.
+// A direct mount's scope legs: same-category mounts keep the promoted byte;
+// ForceScoped sets it; an optical promoted mount sets up a one-step transition
+// to the new def's ADS pose without stepping it here. The bias clear the mount
+// also runs is player_view_clear_bias, which the caller orders.
 // [orig: Player_MountWeaponSlot @0x4DFB31..0x4DFC9A]
 void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed);
+// The mount's clear of the six published camera biases, retaining every
+// interp's running pose [orig: Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8].
+void player_view_clear_bias(PlayerViewState &v);
+// The weapon-switch view ease [orig: Player_SetupWeaponSwitchViewEase
+// @0x4DF960, two callers]. LOWER is the request's holster leg: when a
+// cross-category mount queued SWITCHFROM on the equipped slot, the ease binds
+// that slot and runs 0x1F steps from its def's hip pose (Def+0xF4) to that
+// pose lowered [orig: Player_MountWeaponSlot @0x4DFBA6..0x4DFBC5 ->
+// @0x4DF960(0), Setup @0x4DFA19..0x4DFA35]. RAISE is the holster's
+// completion: the drawn weapon's ease binds the new EquippedSlot and runs
+// from its lowered pose to its hip copy (Def+0x10C), 0x1F steps, one for an
+// Emplaced def [orig: WeaponAction_SwitchFrom @0x5434A8..0x5434AA ->
+// @0x4DF960(1), Setup @0x4DF9C0..0x4DFA14]. Both read v.weapon_hip_pose, the
+// def the slot binds; an ease already running sources from its own pose
+// (player_view_bias_interp_setup). Neither publishes: the next tick's step
+// does, so the bias the holster left holds the drawn weapon lowered until then.
+void player_view_weapon_switch_lower(PlayerViewState &v);
+void player_view_weapon_switch_raise(PlayerViewState &v, int32_t flags);
 
 // Whether a scope request for `engaged` has anything to do: false when that
 // target is already reached or in flight. The one exception is the engaged

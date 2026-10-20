@@ -497,8 +497,11 @@ void weapon_fsm_queue_scope_down(WeaponSlotState &slot);
 // WeaponSlot_TryQueueSwitchRank @ 0x53f1c0]: queue SWITCHFROM (cross-category holster)
 // or SWITCHRANK (same-category flip) on the OUTGOING weapon's slot when its phase is
 // complete ({0, 4, 0x40}); an in-flight action forces idle instead. The caller commits
-// pending -> equipped when the queued action's active phase finishes.
-void weapon_fsm_queue_switch_from(WeaponSlotState &slot);
+// pending -> equipped when the queued action's active phase finishes. The SWITCHFROM
+// writer answers whether it ran (false while SWITCHFROM or SWITCHTO is current), the
+// mount's test before its holster ease [orig: @0x53F1B7 / @0x53F19B vs @0x53F1BD;
+// Player_MountWeaponSlot @0x4DFBA6].
+bool weapon_fsm_queue_switch_from(WeaponSlotState &slot);
 void weapon_fsm_queue_switch_rank(WeaponSlotState &slot);
 // Queue SWITCHTO on a newly committed target only when it is not already drawing
 // and its phase is DONE/NONE; a busy target is allowed to settle to IDLE. READY

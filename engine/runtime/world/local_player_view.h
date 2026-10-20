@@ -156,6 +156,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
 // The standalone/tool-world apply of a validated selection: the same
 // transition the authoritative compact seat_type 1/2 echo performs.
 void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
+                                          PlayerViewState &v,
                                           const MountSlotSelectRequest &req);
 
 // The ordinary scope toggle, in the witnessed order: the dispatcher's gate

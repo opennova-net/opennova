@@ -416,6 +416,214 @@ void test_committed_switch_only_draws_after_holstering() {
     }
 }
 
+// The weapon-switch view ease, driven as the live player runs it: each tick the
+// view steps before the weapon pump, and a commit's switch event installs the
+// drawn def before the next tick. A cross-category switch lowers the holstered
+// weapon one view unit (65536.0 on the def-scale Z lane, rotation lanes to zero)
+// over 0x1F steps, swaps it while it is off the view, and raises the drawn one
+// from there to its hip; the install never presents the drawn weapon at its hip
+// before it rises (the published bias still holds it lowered), so the model swap
+// is never on screen. A same-category SWITCHRANK eases nothing.
+// [orig: Player_SetupWeaponSwitchViewEase @0x4DF960, from Player_MountWeaponSlot
+//  @0x4DFBC5 (lower) and WeaponAction_SwitchFrom @0x5434AA (raise); the step
+//  Player_UpdatePerFrame @0x4de505..0x4de50a]
+void test_switch_view_ease_hides_the_model_swap() {
+    for (const bool same_category : {false, true}) {
+        Fixture f;
+        World world;
+        world.tables.weapons = f.t;
+        WeaponInventory inv;
+        inv.reset(f.t);
+        weapon_inventory_load_from_display(f.t,
+                {"WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PISTOL"}, inv, 8, false);
+        weapon_inventory_seed_pools(f.t, inv, 8);
+        weapon_inventory_recalc_clips(f.t, inv);
+        inv.equipped_combo = 3 * 65;
+        world.registry.configure_pool(0, 1);
+        Entity seed;
+        seed.alive = true;
+        seed.health = 100;
+        world.cached.local_player = world.registry.spawn(0, seed);
+
+        WeaponInstallData data;
+        data.name = "WPN_M4AUTO";
+        data.clipsize = 30;
+        data.rows.resize(3);
+        std::snprintf(data.rows[0].name, sizeof(data.rows[0].name), "switchrank");
+        std::snprintf(data.rows[1].name, sizeof(data.rows[1].name), "switchfrom");
+        std::snprintf(data.rows[2].name, sizeof(data.rows[2].name), "switchto");
+        for (WeaponFsmActionRow &row : data.rows) {
+            row.delaystart = 1; // every shipped switch row [weapon.def corpus]
+            row.delayend = 1;
+        }
+        data.view_hip_pose.position_q16[0] = -6796.8f;
+        data.view_hip_pose.position_q16[1] = 5952.0f;
+        data.view_hip_pose.position_q16[2] = -42240.0f;
+        data.view_hip_pose.rotation_bam[0] = 0x01000000u;
+        LocalPlayerWeapon weapon;
+        PlayerViewState view;
+        local_weapon_install(world, weapon, data, false, false, &inv, view);
+        CHECK(!view.weapon_switch_interp.active);
+
+        const WeaponSwitchOutcome outcome = weapon_switch_to_handle(f.t, inv,
+                (same_category ? 3 : 2) * 65,
+                local_weapon_switch_gates(world, weapon, &inv));
+        CHECK(outcome.kind == WeaponSwitchOutcome::kMount);
+        handle_weapon_switch_outcome(world, weapon, &inv, outcome, view);
+        // The request arms the holster; the ease publishes nothing until the
+        // view's step.
+        CHECK(view.weapon_switch_interp.active == !same_category);
+        CHECK(view.weapon_pose_interp.position_bias_q16[2] == 0);
+
+        const float eye[3] = {0.0f, 0.0f, 0.0f};
+        LocalWeaponPumpIO io;
+        io.view = &view;
+        io.inventory = &inv;
+        int32_t previous_z = 0;
+        bool lowered_monotonically = true;
+        for (int tick = 0; tick < 80 && weapon.switch_in_flight; ++tick) {
+            ++world.logic_tick;
+            player_view_tick(view, eye);
+            const int32_t z = view.weapon_pose_interp.position_bias_q16[2];
+            if (z > previous_z) lowered_monotonically = false;
+            previous_z = z;
+            local_weapon_pump_tick(world, weapon, io);
+        }
+        CHECK(!weapon.switch_in_flight);
+        CHECK(lowered_monotonically);
+        if (same_category) {
+            // SWITCHRANK changes modes in place: no ease, the weapon stays at hip.
+            CHECK(!view.weapon_switch_interp.active);
+            CHECK(view.weapon_pose_interp.position_bias_q16[2] == 0);
+            CHECK(!weapon.switch_view_raise_pending);
+            continue;
+        }
+        // The holster landed one view unit down with the hip rotation cancelled.
+        CHECK(view.weapon_pose_interp.position_bias_q16[0] == 0);
+        CHECK(view.weapon_pose_interp.position_bias_q16[1] == 0);
+        CHECK(view.weapon_pose_interp.position_bias_q16[2] == -65536);
+        CHECK(view.weapon_pose_interp.rotation_bias_bam[0] == -0x01000000);
+        CHECK(weapon.switch_view_raise_pending);
+
+        // The commit's event installs the drawn def (the presenter, after the
+        // tick). It must not present the drawn weapon at its hip: the bias the
+        // holster published holds it lowered until the next step.
+        CHECK(!weapon.events.empty() && weapon.events.back().switch_to_weapon == "WPN_PISTOL");
+        data.name = "WPN_PISTOL";
+        data.view_hip_pose.position_q16[0] = -9472.0f;
+        data.view_hip_pose.position_q16[2] = -46080.0f;
+        data.view_hip_pose.rotation_bam[0] = 0;
+        local_weapon_install(world, weapon, data, false, false, &inv, view);
+        CHECK(!weapon.switch_view_raise_pending);
+        CHECK(view.weapon_switch_interp.active);
+        CHECK(view.weapon_pose_interp.position_bias_q16[2] == -65536);
+        for (int i = 0; i < 3; ++i)
+            CHECK(view.weapon_switch_interp.target.position_q16[i] ==
+                  data.view_hip_pose.position_q16[i]);
+
+        // The raise: the drawn weapon climbs back to its hip over the draw.
+        bool raised_monotonically = true;
+        previous_z = view.weapon_pose_interp.position_bias_q16[2];
+        int ticks = 0;
+        for (; ticks < 80 && view.weapon_switch_interp.active; ++ticks) {
+            ++world.logic_tick;
+            player_view_tick(view, eye);
+            const int32_t z = view.weapon_pose_interp.position_bias_q16[2];
+            if (z < previous_z) raised_monotonically = false;
+            previous_z = z;
+            local_weapon_pump_tick(world, weapon, io);
+        }
+        CHECK(raised_monotonically);
+        // Retail's ease raises from the drawn def's lowered pose; an ease still
+        // running at the swap sources from its own pose (the holster's), so the
+        // first step may land anywhere at or above the lowered offset.
+        CHECK(ticks >= kWeaponSwitchEaseSteps && ticks <= kWeaponSwitchEaseSteps + 2);
+        for (int i = 0; i < 3; ++i) {
+            CHECK(view.weapon_pose_interp.position_bias_q16[i] == 0);
+            CHECK(view.weapon_pose_interp.rotation_bias_bam[i] == 0);
+        }
+    }
+}
+
+// A category press during the draw is retained until the draw ends; the holster
+// it then enters lowers as the mount that would have queued it does.
+// [orig: Player_MountWeaponSlot @0x4DFBA6..0x4DFBC5]
+void test_switch_view_ease_lowers_a_retained_holster() {
+    Fixture f;
+    World world;
+    world.tables.weapons = f.t;
+    WeaponInventory inv;
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t,
+            {"WPN_M4AUTO", "WPN_PISTOL", "WPN_KNIFE"}, inv, 8, false);
+    weapon_inventory_seed_pools(f.t, inv, 8);
+    weapon_inventory_recalc_clips(f.t, inv);
+    inv.equipped_combo = 3 * 65;
+    world.registry.configure_pool(0, 1);
+    Entity seed;
+    seed.alive = true;
+    seed.health = 100;
+    world.cached.local_player = world.registry.spawn(0, seed);
+    WeaponInstallData data;
+    data.name = "WPN_M4AUTO";
+    data.clipsize = 30;
+    data.rows.resize(2);
+    std::snprintf(data.rows[0].name, sizeof(data.rows[0].name), "switchfrom");
+    std::snprintf(data.rows[1].name, sizeof(data.rows[1].name), "switchto");
+    for (WeaponFsmActionRow &row : data.rows) {
+        row.delaystart = 1;
+        row.delayend = 1;
+    }
+    data.view_hip_pose.position_q16[2] = -42240.0f;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    local_weapon_install(world, weapon, data, false, false, &inv, view);
+    const float eye[3] = {0.0f, 0.0f, 0.0f};
+    LocalWeaponPumpIO io;
+    io.view = &view;
+    io.inventory = &inv;
+    const auto request = [&](int category) {
+        handle_weapon_switch_outcome(world, weapon, &inv,
+                weapon_switch_to_handle(f.t, inv, category * 65,
+                        local_weapon_switch_gates(world, weapon, &inv)),
+                view);
+    };
+    const auto tick = [&]() {
+        ++world.logic_tick;
+        player_view_tick(view, eye);
+        local_weapon_pump_tick(world, weapon, io);
+    };
+    request(2);
+    for (int i = 0; i < 80 && weapon.switch_in_flight; ++i) tick();
+    data.name = "WPN_PISTOL";
+    local_weapon_install(world, weapon, data, false, false, &inv, view);
+    // Two ticks into the pistol's draw, press the knife.
+    tick();
+    tick();
+    CHECK(weapon.slot.current == weapon_action::kSwitchTo);
+    request(1);
+    CHECK(weapon.switch_deferred_action == weapon_action::kSwitchFrom);
+    CHECK(weapon.switch_view_lower_deferred);
+    // The draw's raise runs on; once the retained holster enters, the ease
+    // turns back down, and the knife swaps in off the view.
+    for (int i = 0; i < 80 && weapon.slot.current != weapon_action::kSwitchFrom; ++i) tick();
+    CHECK(weapon.slot.current == weapon_action::kSwitchFrom);
+    CHECK(!weapon.switch_view_lower_deferred);
+    CHECK(view.weapon_switch_interp.active);
+    for (int i = 0; i < 80 && weapon.switch_in_flight; ++i) tick();
+    CHECK(!weapon.switch_in_flight);
+    CHECK(view.weapon_pose_interp.position_bias_q16[2] == -65536);
+    CHECK(weapon.switch_view_raise_pending);
+    // No install consumes this raise (the shell keeps a def it is asked to
+    // mount again): the next pump raises the def installed, which climbs back.
+    tick();
+    CHECK(!weapon.switch_view_raise_pending);
+    CHECK(view.weapon_switch_interp.active);
+    CHECK(view.weapon_switch_interp.target.position_q16[2] == data.view_hip_pose.position_q16[2]);
+    for (int i = 0; i < 80 && view.weapon_switch_interp.active; ++i) tick();
+    CHECK(view.weapon_pose_interp.position_bias_q16[2] == 0);
+}
+
 // ToSpecial / QuickSwitch (input case 220): the local fill takes the first
 // QuickSwitch slot as the hold-swap target and clears the stash; the press
 // stashes the equipped slot and mounts the target, the release mounts the
@@ -1068,6 +1276,8 @@ int main() {
     test_select();
     test_switch_walks();
     test_committed_switch_only_draws_after_holstering();
+    test_switch_view_ease_hides_the_model_swap();
+    test_switch_view_ease_lowers_a_retained_holster();
     test_defaults();
     test_kit_damage_classes();
     test_cycle();

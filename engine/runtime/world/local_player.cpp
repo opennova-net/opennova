@@ -371,7 +371,7 @@ bool LocalPlayer::mount_toggle_allowed() {
 	World &world = world_;
 	const w::Entity *toggle_player = player();
 	if (toggle_player == nullptr || !toggle_player->alive || toggle_player->health <= 0) return false;
-	w::sync_local_usegun_weapon_transition(world, weapon);
+	w::sync_local_usegun_weapon_transition(world, weapon, view);
 	const w::WeaponSlotState *active_slot = w::active_local_weapon_slot(world, weapon);
 	return active_slot == nullptr ||
 			w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next);
@@ -394,7 +394,7 @@ bool LocalPlayer::toggle_mount() {
 		// @0x435AA0 write no toggle].
 		w::local_player_view_refresh(&world, view);
 		sync_local_mounted_input_heading();
-		w::sync_local_usegun_weapon_transition(world, weapon);
+		w::sync_local_usegun_weapon_transition(world, weapon, view);
 	}
 	return changed;
 }
@@ -405,7 +405,7 @@ bool LocalPlayer::find_numbered_seat(int index, VehicleSeatSelection &out,
 	out = {};
 	const w::Entity *local = player();
 	if (local == nullptr || !local->alive || local->health <= 0) return false;
-	w::sync_local_usegun_weapon_transition(world_, weapon);
+	w::sync_local_usegun_weapon_transition(world_, weapon, view);
 	const w::WeaponSlotState *slot = w::active_local_weapon_slot(world_, weapon);
 	// This is currentAction == 11, not the USE toggle's pending-action gate.
 	if (weapon.active && slot != nullptr && slot->current >= 2 && slot->current != w::weapon_action::kOverheated)
@@ -423,7 +423,7 @@ bool LocalPlayer::select_numbered_seat(int index) {
 	if (changed) {
 		w::local_player_view_refresh(&world_, view);
 		sync_local_mounted_input_heading();
-		w::sync_local_usegun_weapon_transition(world_, weapon);
+		w::sync_local_usegun_weapon_transition(world_, weapon, view);
 	}
 	return changed;
 }
