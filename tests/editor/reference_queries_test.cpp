@@ -499,7 +499,9 @@ static int test_readout_targets() {
 	const Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu != nullptr);
 	if (!menu) return 1;
-	size_t compared = 0, through_variable = 0;
+	// The lambda counts what differs (TEST_EXPECT returns from it, which would make it return a value on one
+	// path only); the count is checked after the walk.
+	size_t compared = 0, through_variable = 0, differing = 0;
 	const auto compare = [&](const NodeAddress &address) {
 		for (const FieldSchema &schema : menu->fields(address.kind)) {
 			Value value;
@@ -509,7 +511,7 @@ static int test_readout_targets() {
 			std::string name, scope;
 			if (!reference_target(field, value, kind, name, scope)) continue;
 			const std::vector<ReferenceTarget> by_field = reference_targets(graph, scan, field, value);
-			TEST_EXPECT(same(by_field, reference_targets(graph, scan, kind, name, scope, field.loader_arg)));
+			if (!same(by_field, reference_targets(graph, scan, kind, name, scope, field.loader_arg))) ++differing;
 			++compared;
 			through_variable += by_field.size() > 1 ? 1 : 0;
 		}
@@ -521,7 +523,7 @@ static int test_readout_targets() {
 			return true;
 		});
 	}
-	TEST_EXPECT(compared >= 5 && through_variable > 0);
+	TEST_EXPECT(differing == 0 && compared >= 5 && through_variable > 0);
 	std::printf("readout targets: %zu fields' Go to alike, %zu through a style variable\n", compared, through_variable);
 	return 0;
 }
