@@ -4,7 +4,8 @@
 // lacks put on its own line before the block's closing brace in its indent and line end; a value the reader would
 // take otherwise refused with why; the query over a session; the format's variants (its fixtures) and the base
 // game's particle files read so, each key's text at its span its value.
-// A name a value holds given another: its span alone, a name the tokenizer would cut refused.
+// A name a value holds given another: its span alone, a name the tokenizer would cut refused, and a member its
+// 64-byte slot cannot hold.
 #include <algorithm>
 #include <cstdio>
 #include <memory>
@@ -261,6 +262,10 @@ int test_name_edit() {
 	TEST_EXPECT(!particle_name_edit(*pdefs, smok, "a,b", edit, why));
 	TEST_EXPECT(!particle_name_edit(*pdefs, smok, "", edit, why));
 	TEST_EXPECT(!particle_name_edit(*pdefs, TextSpan{4, 2, 5}, "smoke", edit, why));
+	// A member's name slot holds 63 characters (kPdefsNameSlot, as Rename everywhere refuses a longer one).
+	TEST_EXPECT(particle_name_edit(*pdefs, smok, std::string(kPdefsNameSlot - 1, 'x'), edit, why));
+	TEST_EXPECT(!particle_name_edit(*pdefs, smok, std::string(kPdefsNameSlot, 'x'), edit, why) &&
+	            why.find("63 characters") != std::string::npos);
 	return failures;
 }
 
