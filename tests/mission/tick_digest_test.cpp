@@ -99,7 +99,11 @@ namespace {
 // play those clips, which moves the chain from 0xa22209beb52b4e4f; with every
 // person naming its table the exit itself moves nothing (reverting it gives
 // the same value).
-constexpr uint64_t kSyntheticDigest = 0x517e7adde3a32d91ULL;
+// The registry row now carries the Yaw word (D-NET-NEW-L6-2) and the chain
+// digests it in place of the whole-degree mirror, which moves it from
+// 0x517e7adde3a32d91; digesting the word's rounded whole degrees gives that
+// value back, so no tick behaviour moved.
+constexpr uint64_t kSyntheticDigest = 0xe722d011570202edULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
@@ -127,7 +131,7 @@ void hash_entity(Digest &d, const w::Entity &e) {
 	d.value(static_cast<float>(e.position.x));
 	d.value(static_cast<float>(e.position.y));
 	d.value(static_cast<float>(e.position.z));
-	d.value(e.yaw);
+	d.value(e.heading);
 	d.value(e.pitch);
 	d.value(e.roll);
 	d.value(e.health);

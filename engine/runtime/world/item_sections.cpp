@@ -39,7 +39,7 @@ void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &tr
     // [orig: @0x440365 / @0x440370].
     seed.section_clone = true;
     seed.death_motion = DeathMotionMode::SectionFalling;
-    seed.yaw = entity.yaw; seed.pitch = entity.pitch; seed.roll = entity.roll;
+    seed.heading = entity.heading; seed.pitch = entity.pitch; seed.roll = entity.roll;
     int32_t pos[3];
     entity_placement_matrix(entity).transform_point(
             traits.model_section_origins_q16[section].data(), pos);
@@ -85,7 +85,7 @@ void fit_section_to_ground(Entity &entity, const int32_t end[3], int32_t ground)
     const int32_t planar = int32_t(uint32_t(root) << 8);
     const int32_t heading = int32_t(int64_t(std::atan2(double(dy), double(dx)) * io::kBamPerRadian));
     const int32_t slope = int32_t(int64_t(std::atan2(double(dz), double(planar)) * io::kBamPerRadian));
-    entity.yaw = float(mission_yaw_deg_from_bam_heading(heading));
+    entity.heading = heading; // the Yaw word, stored (D-NET-NEW-L6-2)
     entity.pitch = float(io::bam_sub(0x40000000, slope) * kDegreesPerBam);
 }
 bool tick_tower_section(World &world, Entity &entity) {
@@ -113,9 +113,8 @@ bool tick_tower_section(World &world, Entity &entity) {
             height = io::bam_add(height, traits->model_section_heights_q16[i]);
     }
     const uint8_t old_flags = uint8_t(entity.death_anim_state);
-    const int32_t yaw = bam_heading_from_mission_yaw_deg(entity.yaw);
-    entity.yaw = float(mission_yaw_deg_from_bam_heading(
-            io::bam_add(yaw, (old_flags & 0xF0) ? -0x1000000 : 0x1000000)));
+    const int32_t yaw = entity.heading;
+    entity.heading = io::bam_add(yaw, (old_flags & 0xF0) ? -0x1000000 : 0x1000000);
     if ((old_flags & 2) == 0) {
         const int32_t pitch = bam_from_degrees_wrapped(entity.pitch);
         entity.section_pitch_accel = io::bam_add(entity.section_pitch_accel,
@@ -198,7 +197,7 @@ CollisionMatrix palm_matrix(const Entity &entity) {
             entity.position.y.q16, entity.position.z.q16};
     // This callback explicitly uses the unscaled Euler builder.
     // [orig: TerrainTile_TransformPointFromSector @ 0x53BDB0]
-    return collision_matrix_from_euler(bam_heading_from_mission_yaw_deg(entity.yaw),
+    return collision_matrix_from_euler(entity.heading,
             bam_from_degrees_wrapped(entity.pitch), bam_from_degrees_wrapped(entity.roll), pos);
 }
 void palm_transition(World &world, Entity &entity, int section) {
@@ -227,7 +226,7 @@ void palm_transition(World &world, Entity &entity, int section) {
         palm_matrix(entity).transform_point(traits->model_pivots_q16[pivot].data(), pos);
         seed.position.set_q16({pos[0], pos[1], pos[2]});
         seed.spawn_position = seed.position;
-        seed.yaw = entity.yaw; // pitch/roll in the zeroed fragment template stay zero.
+        seed.heading = entity.heading; // pitch/roll in the zeroed fragment template stay zero.
         seed.uniform_scale_q16 = 65536;
         seed.engine_flags = kEntityFlagDead;
         seed.alive = false;
@@ -466,7 +465,7 @@ bool tick_item_section_motion(World &world, Entity &entity) {
     int32_t pos[3] = {entity.position.x.q16,
             entity.position.y.q16, entity.position.z.q16};
     for (int i = 0; i < 3; ++i) entity.saved_live_pos[i] = pos[i];
-    entity.saved_live_yaw = bam_heading_from_mission_yaw_deg(entity.yaw);
+    entity.saved_live_yaw = entity.heading;
     entity.saved_live_pitch = bam_from_degrees_wrapped(entity.pitch);
     entity.saved_live_roll = bam_from_degrees_wrapped(entity.roll);
     entity.saved_live_valid = true;
@@ -486,8 +485,8 @@ bool tick_item_section_motion(World &world, Entity &entity) {
         pos[0] = io::bam_add(pos[0], entity.veh.vel_x);
         pos[1] = io::bam_add(pos[1], entity.veh.vel_y);
         pos[2] = z;
-        entity.yaw = float(mission_yaw_deg_from_bam_heading(io::bam_add(
-                entity.saved_live_yaw, entity.palm_state == 17 ? 0x2000000 : 0x800000)));
+        entity.heading = io::bam_add(
+                entity.saved_live_yaw, entity.palm_state == 17 ? 0x2000000 : 0x800000);
         if (entity.palm_state != 17 && uint32_t(entity.saved_live_pitch) < 0x40000000u)
             entity.pitch = float(io::bam_add(entity.saved_live_pitch, 0x1000000) * kDegreesPerBam);
         entity.veh.slide_z = io::bam_sub(entity.veh.slide_z, 167);

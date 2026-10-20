@@ -116,8 +116,7 @@ void minimap_footprint_place(const MinimapFootprintMesh &mesh,
 		entity.position.z.q16,
 	};
 	const int32_t footprint_heading = static_cast<int32_t>(
-			static_cast<uint32_t>(bam_heading_from_mission_yaw_deg(
-					static_cast<double>(entity.yaw))) - 0x40000000u);
+			static_cast<uint32_t>(entity.heading) - 0x40000000u);
 	const CollisionMatrix matrix = collision_matrix_from_heading(
 			footprint_heading, pos_q16);
 	const auto place_pairs = [&](const std::vector<int32_t> &local,

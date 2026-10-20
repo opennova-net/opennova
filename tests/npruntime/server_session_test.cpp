@@ -34,6 +34,7 @@
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include "../common/flat_floor.h"
 
@@ -4388,7 +4389,7 @@ bool check_timed_capture_host_wire_transaction() {
 	zone.health = 1;
 	zone.alive = true;
 	zone.position = {20.0f, 30.0f, 4.0f};
-	zone.yaw = 90; // mission yaw 90 is identity collision placement
+	zone.heading = opennova::world::placed_heading_bam(90); // mission yaw 90 is identity collision placement
 	const auto zone_handle = world.registry.spawn(1, zone);
 
 	// The transaction starts only when the authority player-body resolver
@@ -4631,7 +4632,7 @@ bool check_numbered_flip_pair_and_banner_wire() {
 		zone.health = 1;
 		zone.alive = true;
 		zone.position = position;
-		zone.yaw = 90; // mission yaw 90 is identity collision placement
+		zone.heading = opennova::world::placed_heading_bam(90); // mission yaw 90 is identity collision placement
 		return world.registry.spawn(1, zone);
 	};
 	make_zone(1, 1, {-2000.0f, 0.0f, 4.0f});

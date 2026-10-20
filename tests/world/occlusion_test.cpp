@@ -311,7 +311,7 @@ struct Rig {
         b.kind = EntityKind::Building;
         b.net_id = next_net_id++;
         b.position = {static_cast<float>(x), static_cast<float>(y), 0.0f};
-        b.yaw = 90; // mission yaw 90 -> engine heading 0 (identity rotation)
+        b.heading = placed_heading_bam(90); // mission yaw 90 -> engine heading 0 (identity rotation)
         b.alive = true;
         const EntityHandle h = world.registry.spawn(2, b);
         const int32_t cid = cw.add_model(std::move(cm));
@@ -441,7 +441,7 @@ void test_render_math() {
     // live fields consumed by every float-space portal and TOC transform.
     Entity e;
     e.position = {3.0f, 5.0f, 7.0f};
-    e.yaw = 90;
+    e.heading = placed_heading_bam(90);
     e.pitch = 45;
     e.roll = -30;
     const RenderMatrix from_entity = render_matrix_from_entity_pose(e);
@@ -1437,7 +1437,7 @@ void test_model_leg_render_model_sphere() {
         e.kind = EntityKind::Item;
         e.net_id = rig.next_net_id++;
         e.position = {static_cast<float>(x), 10.0f, 1.0f};
-        e.yaw = 90; // identity heading
+        e.heading = placed_heading_bam(90); // identity heading
         e.alive = true;
         return rig.world.registry.spawn(2, e);
     };
@@ -1573,7 +1573,7 @@ void test_round_restart_keeps_the_first_weld() {
     // The test_weld_and_flags pair: A's +X window 0.1 u from B's -X window.
     a->position = {10.0f, 10.0f, 0.0f};
     b->position = {14.1f, 10.0f, 0.0f};
-    a->yaw = b->yaw = 90.0f; // identity heading
+    a->heading = b->heading = placed_heading_bam(90); // identity heading
     a->pitch = b->pitch = a->roll = b->roll = 0.0f;
     QuadSpec qb;
     qb.type = kOccRecWindow;
@@ -1769,7 +1769,7 @@ void test_decoration_rows_are_entity_collected() {
     c.kind = EntityKind::Building;
     c.net_id = rig.next_net_id++;
     c.position = {19.0f, 10.0f, 0.5f};
-    c.yaw = 90;
+    c.heading = placed_heading_bam(90);
     c.alive = true;
     c.has_item_def = true;
     c.item_type = 2;

@@ -128,7 +128,7 @@ void player_motor_vectors() {
         drv.net_analog_x = static_cast<int8_t>(v[1]);
         drv.net_analog_y = static_cast<int8_t>(v[2]);
         drv.net_analog_z = static_cast<int8_t>(v[3]);
-        drv.yaw = 64; // rounded mirror; the body owns the full input angle
+        drv.heading = placed_heading_bam(64); // rounded mirror; the body owns the full input angle
         body.heading = body.inf.target_heading = v[4];
         w.vehicles.tick_motor(veh, traits);
         const int32_t actual[] = {veh.veh.cmd_speed, veh.veh.steer_target_bam,

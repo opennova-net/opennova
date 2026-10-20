@@ -6,6 +6,7 @@
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/entity_pose.h>
+#include <runtime/world/angle.h>
 #include <formats/threedi/threedi_3di3.h>
 
 using namespace opennova::world;
@@ -46,7 +47,7 @@ struct Fixture {
     EntityHandle marker(int number, Vec3 position, int pool = 3, bool itemdef = true) {
         Entity e;
         e.item_id = kParticleEffectMarkerTypeId; e.has_item_def = itemdef;
-        e.wp_number = number; e.position = position; e.yaw = 90;
+        e.wp_number = number; e.position = position; e.heading = placed_heading_bam(90);
         e.health = 0; e.alive = false; // no health gate in these scans
         return world.registry.spawn(pool, e);
     }
@@ -216,7 +217,7 @@ static void test_ssn_fire_uses_the_models_alternating_userpoints() {
     Entity seed;
     seed.net_id = 1; seed.item_id = 11; seed.has_item_def = true;
     seed.kind = EntityKind::Item; seed.health = 100;
-    seed.position = {10, 20, 30}; seed.yaw = 90;
+    seed.position = {10, 20, 30}; seed.heading = placed_heading_bam(90);
     const auto shooter = f.world.registry.spawn(1, seed);
     const int model_id = collision.add_model(CollisionModel{});
     collision.assign_entity(shooter, model_id);

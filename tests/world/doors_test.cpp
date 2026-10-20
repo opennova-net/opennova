@@ -16,6 +16,7 @@
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova;
 using namespace opennova::world;
@@ -235,7 +236,7 @@ static void test_door_building_pose() {
     Entity e;
     e.kind = EntityKind::Building;
     e.item_id = 1998;
-    e.yaw = 90;
+    e.heading = placed_heading_bam(90);
     const auto h = w.registry.spawn(2, e);
     mission::resolve_item_traits(w, items, {}, &models);
     const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};

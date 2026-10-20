@@ -2046,7 +2046,7 @@ struct FirstLogicTickProbe final : w::ISystem {
 w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
 	w::PlayerSpawn s;
 	s.position = pos;
-	s.yaw = yaw;
+	s.heading = w::placed_heading_bam(yaw);
 	s.net_id = net_id;
 	return s;
 }
@@ -4065,7 +4065,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	gun.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	gun.item_id = 1294; // B50Cal ewep
 	gun.position = {0.0f, 8.0f, 0.0f};
-	gun.yaw = 45;
+	gun.heading = w::placed_heading_bam(45);
 	gun.net_class_code = static_cast<uint8_t>(EntityClass::NoNetworkCallback);
 	w::Seat gunner;
 	gunner.type = w::SeatType::Gunner;

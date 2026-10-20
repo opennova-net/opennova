@@ -64,13 +64,13 @@ bool is_flag_bay(int32_t item_id) {
            item_id == kTeam4Bay || item_id == kTeam3Bay;
 }
 
-// The Yaw word back to the definition pose's, the spawn heading of the
-// whole-degree placement yaw [orig: Entity_SyncPositionFromDefinition
-// @0x43aa96]. A dropped object holds its heading as a live BAM word.
-void restore_authored_heading(Entity &flag, int16_t home_yaw) {
-    flag.yaw = home_yaw;
+// The Yaw word back to the definition pose's [orig:
+// Entity_SyncPositionFromDefinition @0x43aa96]. A dropped object holds its
+// heading as a live BAM word.
+void restore_authored_heading(Entity &flag, int32_t home_heading) {
+    flag.heading = home_heading;
     if (flag.veh.yaw_seeded)
-        flag.veh.yaw_bam = spawn_angle_bam(90 - home_yaw);
+        flag.veh.yaw_bam = home_heading;
 }
 
 // [orig: Server_UpdateCaptureZoneProximity @0x5086A0 — the per-id bit OR into
@@ -569,7 +569,7 @@ Match::CarryObjectiveState *Match::carry_state(World &world, EntityHandle object
     // The definition pose's yaw word is the spawn heading [orig:
     // Entity_InitFromModel @0x40e12a..0x40e130 copies Yaw into aiRuntime
     // f0_7[7]]; nothing has turned the row before its first carry service.
-    carry_objectives_.back().home_yaw = entity->yaw;
+    carry_objectives_.back().home_heading = entity->heading;
     return &carry_objectives_.back();
 }
 
@@ -631,7 +631,7 @@ void Match::return_flag_home(World &world, EntityHandle flag_handle,
     // @0x43aa96, called from
     //  Entity_UpdateIdleCheck @0x40857d, Entity_ProcessWaypointInteraction
     //  @0x4ad8c3 / @0x4ad908, Server_ProcessScoringAndBroadcast @0x516a5b]
-    restore_authored_heading(*flag, state->home_yaw);
+    restore_authored_heading(*flag, state->home_heading);
     flag->alive = true;
     state->return_ticks = 0;
     gameplay_events_.push_back({kind,
@@ -806,8 +806,7 @@ void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPos
         object.veh.yaw_seeded = true;
     }
     object.veh.yaw_bam = io::bam_add(carrier.heading_bam, 0x40000000);
-    object.yaw = static_cast<int16_t>(
-        std::lround(mission_yaw_deg_from_bam_heading(object.veh.yaw_bam)));
+    object.heading = object.veh.yaw_bam;
     object.position = carrier.position;
     object.position.z.q16 = io::bam_add(carrier.position.z.q16, 0x4000);
     // The dropped object takes its carrier's blink quad, then re-runs its own
@@ -882,7 +881,7 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     int32_t roll = 0;
     carrier_pose_fixed(*flag, pose, heading, pitch, roll);
     if (x == home_x && y == home_y && z == home_z &&
-        heading == spawn_angle_bam(90 - state->home_yaw))
+        heading == state->home_heading)
         return false; // [orig: @0x43a9f8 — already at the definition pose]
     const int64_t dx = int64_t{x} - home_x;
     const int64_t dy = int64_t{y} - home_y;
@@ -896,7 +895,7 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
         // (@0x43ab22) — this port clears it like the timeout return does, no
         // raycast seam here.
         flag->position = state->home;                 // [orig: @0x43aa7d..0x43aa96]
-        restore_authored_heading(*flag, state->home_yaw);
+        restore_authored_heading(*flag, state->home_heading);
         flag->ground_target = EntityHandle{};
     }
     // Both paths publish the 19-B 0x2F state and nothing else (no 0x1E, no
@@ -1700,8 +1699,7 @@ void follow_ground(World &world, Entity &object, bool ride) {
         object.veh.yaw_bam = pose.yaw_bam;
         object.veh.air_pitch_bam = pose.pitch_bam;
         object.veh.air_roll_bam = pose.roll_bam;
-        object.yaw = static_cast<int16_t>(
-            std::lround(mission_yaw_deg_from_bam_heading(pose.yaw_bam)));
+        object.heading = pose.yaw_bam;
         object.pitch = static_cast<int16_t>(std::lround(double(pose.pitch_bam) * kDegreesPerBam));
         object.roll = static_cast<int16_t>(std::lround(double(pose.roll_bam) * kDegreesPerBam));
         if (ride && entity_dead(*ground)) {

@@ -121,7 +121,7 @@ particle::Vec3 effect_axes(const int32_t xyz[3]) {
 particle::EffectPose emitter_owner_pose(const Entity &entity) {
     const int32_t origin[3] = {};
     const auto matrix = collision_matrix_from_euler(
-            bam_heading_from_mission_yaw_deg(entity.yaw),
+            entity.heading,
             bam_from_degrees_wrapped(entity.pitch), bam_from_degrees_wrapped(entity.roll), origin);
     particle::EffectPose pose;
     pose.position = {entity.position.x, entity.position.z, -entity.position.y};

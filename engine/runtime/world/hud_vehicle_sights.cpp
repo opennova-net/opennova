@@ -20,7 +20,7 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 	// The live BAM frame when seeded (the same one emplaced_gun_frame_pitch
 	// produces the compared word from), else the placer's degree mirrors.
 	const int32_t yaw = mount->veh.yaw_seeded ? mount->veh.yaw_bam
-											  : bam_heading_from_mission_yaw_deg(mount->yaw);
+											  : mount->heading;
 	const int32_t pitch = mount->veh.yaw_seeded ? mount->veh.air_pitch_bam
 												: bam_from_degrees_wrapped(mount->pitch),
 				  roll = mount->veh.yaw_seeded ? mount->veh.air_roll_bam
@@ -39,7 +39,7 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 	if (mount->item_attrib2 & 0x1000u) {
 		const auto *body = world.ai.for_handle(player->handle);
 		const int32_t player_yaw =
-				body ? body->heading : bam_heading_from_mission_yaw_deg(player->yaw);
+				body ? body->heading : player->heading;
 		const int32_t player_pitch = body ? body->pitch : bam_from_degrees_wrapped(player->pitch);
 		const uint16_t desired_yaw = uint16_t(uint32_t(io::bam_sub(yaw, player_yaw)) >> 16);
 		const uint16_t desired_pitch = uint16_t(uint32_t(io::bam_sub(pitch, player_pitch)) >> 16);

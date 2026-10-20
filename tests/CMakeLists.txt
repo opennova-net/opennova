@@ -5109,6 +5109,11 @@ add_test(NAME npruntime_entity_position_words COMMAND npruntime_entity_position_
 add_executable(npruntime_load_stream_rows_test npruntime/load_stream_rows_test.cpp)
 target_link_libraries(npruntime_load_stream_rows_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_load_stream_rows COMMAND npruntime_load_stream_rows_test)
+# D-NET-NEW-L6-2: the entity's Yaw word (+0x10) from the BMS spawn through the reset, every load
+# stream and the fire origin's carrier test.
+add_executable(npruntime_entity_yaw_word_test npruntime/entity_yaw_word_test.cpp)
+target_link_libraries(npruntime_entity_yaw_word_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_entity_yaw_word COMMAND npruntime_entity_yaw_word_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

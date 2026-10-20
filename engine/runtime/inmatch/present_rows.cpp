@@ -273,13 +273,12 @@ bool local_view_suppresses_mount(const mission::MissionKernel &kernel,
 
 double pool_present_yaw_deg(const Entity &e, const AiEntity *ae, EntityClass cls) {
 	if (e.emplacement_parent.valid() && e.emplacement_pose_metadata_resolved)
-		return e.veh.yaw_seeded ? mission_yaw_deg_from_bam_heading(e.veh.yaw_bam)
-				: static_cast<double>(e.yaw);
+		return mission_yaw_deg_from_bam_heading(e.veh.yaw_seeded ? e.veh.yaw_bam : e.heading);
 	if (cls == EntityClass::Vehicle && e.veh.yaw_seeded)
 		return mission_yaw_deg_from_bam_heading(e.veh.yaw_bam);
 	if (cls == EntityClass::Infantry && ae != nullptr)
 		return mission_yaw_deg_from_bam_heading(ae->heading);
-	return static_cast<double>(e.yaw);
+	return mission_yaw_deg_from_bam_heading(e.heading);
 }
 
 // [orig: the model matrix is built over the entity's 32-bit euler triple --
@@ -656,7 +655,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					 owned->death_motion == DeathMotionMode::BuildingEffects)) {
 				const Vec3 pos = item_section_render_position(kernel.world, *owned);
 				r[PF_POS_X] = pos.x; r[PF_POS_Y] = pos.z; r[PF_POS_Z] = -pos.y;
-				r[PF_YAW_DEG] = owned->yaw;
+				r[PF_YAW_DEG] = static_cast<float>(mission_yaw_deg_from_bam_heading(owned->heading));
 				r[PF_PITCH_DEG] = owned->pitch; r[PF_ROLL_DEG] = owned->roll;
 				r[PF_ALIVE] = owned->alive ? 1.0f : 0.0f;
 				write_present_section_mask(r, item_hidden_sections(*owned));

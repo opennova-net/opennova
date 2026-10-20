@@ -9,6 +9,7 @@
 #include <runtime/world/facial_animation.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 #include "common/test_paths.h"
 
 #include <cmath>
@@ -247,7 +248,7 @@ void test_look_back_uses_the_placement_heading() {
 	body.inf.anim_state = 140; body.inf.body_heading = 0;
 	body.inf.head_look_target = target;
 	f.entity(target).position.y = -5668.0f / 65536.0f;
-	f.entity(target).yaw = -112;
+	f.entity(target).heading = placed_heading_bam(-112);
 	f.world.ai.root_motion = &f.motion;
 	infantry_attention_think(f.world.ai, body, f.world, 0x80);
 	CHECK(f.slot(h).automatic == 6);

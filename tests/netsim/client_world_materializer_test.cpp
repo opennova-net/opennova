@@ -653,7 +653,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 			building->kind == w::EntityKind::Building &&
 			building->item_id == 0x0600 &&
 			building->net_id == 0 &&
-			building->yaw == 37 && building->pitch == -8 &&
+			building->heading == static_row.euler_z && building->pitch == -8 && // the wire word
 			building->roll == 5 &&
 			building->engine_flags == 0x04020400u &&
 			building->section_mask == 0x120u &&
@@ -676,7 +676,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 			boat->ref_num == 0x17 && boat->sub_type == 0x33 &&
 			boat->zone_number == 2 && boat->zone_radius == 70 &&
 			std::fabs(boat->position.x - 2.0f) < 0.0001f &&
-			boat->yaw == 338 && boat->pitch == 4 && boat->roll == -6 &&
+			boat->heading == vehicle.euler_z && boat->pitch == 4 && boat->roll == -6 &&
 			boat->spawn_origin == w::kSpawnOriginNone,
 			"pool-1 materialization retains exact handle, identity, pose, and traits"))
 		return false;
@@ -1470,7 +1470,7 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 			attribs_of(rows[2]) == 0x00800000u &&
 			kind_of(rows[3]) == 2 && rows[3]->bms_id == 0x2026 &&
 			rows[3]->item_id == 0x0600 && rows[3]->team == 2 &&
-			rows[3]->yaw == 37 &&
+			rows[3]->heading == w::bam_heading_from_mission_yaw_deg(37.0) && // the wire word
 			std::fabs(rows[3]->position.x - 11.0f) < 0.0001f &&
 			attribs_of(rows[3]) == 0x00A00000u,
 			"placed rows are (kind, index)-ordered and carry the record-space attributes"))

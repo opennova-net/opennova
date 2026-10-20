@@ -830,7 +830,7 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
                 body ? body->inf.eye_offset_y : rider.eye_offset_y);
         out[2] = io::bam_add(body ? body->self->position.z.q16 : rider.position.z.q16,
                 body ? body->inf.eye_offset_z : rider.eye_offset_z);
-        out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
+        out[3] = body ? body->heading : rider.heading;
         out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
         out[5] = body ? body->roll : bam_from_degrees_wrapped(rider.roll);
         // Only the EWEAP copy then adds the rider's +0x94 word (the body
@@ -871,7 +871,7 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
     out[0] = body ? body->self->position.x.q16 : rider.position.x.q16;
     out[1] = body ? body->self->position.y.q16 : rider.position.y.q16;
     out[2] = body ? body->self->position.z.q16 : rider.position.z.q16;
-    out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
+    out[3] = body ? body->heading : rider.heading;
     out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
     out[5] = body ? body->roll : bam_from_degrees_wrapped(rider.roll);
     if (parent->virtual_display_camera) {
@@ -908,7 +908,7 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
         out[2] = io::bam_add(carrier->position.z.q16, carrier->eye_offset_z);
         out[3] = carrier_body ? carrier_body->heading
                 : carrier->veh.yaw_seeded ? carrier->veh.yaw_bam
-                                          : bam_heading_from_mission_yaw_deg(carrier->yaw);
+                                          : carrier->heading;
         out[4] = carrier_body ? carrier_body->pitch
                 : carrier->veh.yaw_seeded ? carrier->veh.air_pitch_bam
                                           : bam_from_degrees_wrapped(carrier->pitch);

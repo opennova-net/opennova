@@ -46,7 +46,7 @@ struct Rig {
         veh.has_item_def = true;
         veh.net_id = 200;
         veh.position = {100.0f, 200.0f, 10.0f};
-        veh.yaw = 1;
+        veh.heading = placed_heading_bam(1);
         veh.pitch = 10;
         veh.roll = -3;
         veh.health = veh.health_max = 3000;
@@ -199,7 +199,7 @@ void test_seat_point_reads_the_spawn_form() {
     for (const bool tilted : {false, true}) {
         Rig r;
         Entity &placed = r.veh();
-        placed.yaw = 37;
+        placed.heading = placed_heading_bam(37);
         placed.pitch = tilted ? -12 : 0;
         placed.roll = tilted ? 17 : 0;
         Entity seeded = placed;

@@ -502,7 +502,7 @@ int main() {
 			CHECK(again->position.x == fresh_player->position.x);
 			CHECK(again->position.y == fresh_player->position.y);
 			CHECK(again->position.z == fresh_player->position.z);
-			CHECK(again->yaw == fresh_player->yaw);
+			CHECK(w::mission_yaw_whole_deg(again->heading) == w::mission_yaw_whole_deg(fresh_player->heading));
 		}
 		CHECK(fired_set(*restarted.kernel) == boot_set);
 		CHECK(!rw.match.outcome().ended);

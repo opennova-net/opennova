@@ -11,6 +11,7 @@
 #include <runtime/mission/event_runtime.h>
 #include <formats/mission/bms.h>
 #include <runtime/world/ai.h>
+#include <base/io/bam.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
@@ -56,7 +57,7 @@ static Entity make_gun(uint16_t ssn, float x, float y, float z, int16_t yaw) {
     e.has_item_def = true; // seats need the def (D-NET-422)
     e.has_graphic_model = true;
     e.position = {x, y, z};
-    e.yaw = yaw;
+    e.heading = world::placed_heading_bam(yaw);
     Seat s;
     s.type = SeatType::Gunner;
     e.seats.push_back(s);
@@ -543,7 +544,7 @@ int main() {
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         vehicle.item_attrib = world::kItemAttribPlayerControl;
         vehicle.position = {100.f, 200.f, 7.f};
-        vehicle.yaw = -90;
+        vehicle.heading = world::placed_heading_bam(-90);
         Seat control;
         control.type = SeatType::Controller;
         control.seat_local = {-0.7148895f, -0.1189880f, 2.1048889f};
@@ -683,7 +684,7 @@ int main() {
         // After Entity_RequestVehicleAttach establishes the seat base, later UseGun
         // look updates remain independent while the body stays in the carried frame.
         // [orig: request pre-snap @0x4364a0; UseGun save/restore @0x546416..0x546664]
-        CHECK(occ->yaw == 80);
+        CHECK(occ->heading == kLookHeading); // the Yaw word is the live look
         CHECK(occ->pitch == -12);
         CHECK(occ->roll == 17);
         CHECK(ae->heading == kLookHeading);
@@ -741,7 +742,7 @@ int main() {
         CHECK(ai.pose_if_mounted(*ae, w));
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);
-        CHECK(occ->yaw == 137); // degree-rounded registry/wire/motor look mirror
+        CHECK(occ->heading == look_heading); // the registry/wire/motor Yaw word is the look
         CHECK(occ->pitch == -12);
         CHECK(occ->roll == 17);
         CHECK(ae->heading == look_heading); // full precision, never the seat heading
@@ -770,7 +771,7 @@ int main() {
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.has_graphic_model = true;
         vehicle.position = {10.f, 20.f, 5.f};
-        vehicle.yaw = 15;
+        vehicle.heading = world::placed_heading_bam(15);
         Seat passenger;
         passenger.type = SeatType::Passenger;
         passenger.yaw_offset = 90;
@@ -789,7 +790,8 @@ int main() {
         Entity *occ = w.registry.get(sh);
         CHECK(occ->mounted);
         CHECK(occ->mount_target == vh);
-        CHECK(occ->yaw == 105);
+        // The carrier's word turned by the seat's 90-degree offset.
+        CHECK(occ->heading == opennova::io::bam_sub(world::placed_heading_bam(15), 0x40000000));
 
         TickContext ctx{};
         ctx.is_authority = true;

@@ -291,7 +291,7 @@ void infantry_attachment_select(AiEntity &e, World &world, const InfantryAttachm
     if (pose.distance <= 0x10000) {
         const AiEntity *parent_ai = world.ai.for_handle(parent->handle);
         const int32_t yaw = parent_ai ? parent_ai->heading
-                : bam_heading_from_mission_yaw_deg(parent->yaw);
+                : parent->heading;
         inf.target_heading = inf.aim_heading = yaw;
         inf.leg_target[0] = inf.leg_target[1] = yaw;
         inf.aim_pitch = 0;

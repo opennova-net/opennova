@@ -1035,7 +1035,7 @@ void test_aas_capture_events_carry_zone_numbers() {
 		zone.zone_number = number;
 		zone.zone_radius = 70;
 		zone.position = {x, 0.0f, 0.0f};
-		zone.yaw = 90;
+		zone.heading = w::placed_heading_bam(90);
 		zone.is_capture_trigger = true;
 		zone.is_spawn_point = true;
 		zone.alive = true;
@@ -1164,7 +1164,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	red_flag.item_attrib = w::kItemAttribMoveCallback;
 	red_flag.position = flag_position;
 	red_flag.spawn_position = red_flag.position;
-	red_flag.yaw = 90;
+	red_flag.heading = w::placed_heading_bam(90);
 	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
 	w::Entity blue_bay;
 	blue_bay.kind = w::EntityKind::Item;
@@ -1172,7 +1172,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	blue_bay.has_item_def = true;
 	blue_bay.item_attrib = w::kItemAttribMoveCallback;
 	blue_bay.position = bay_position;
-	blue_bay.yaw = 90;
+	blue_bay.heading = w::placed_heading_bam(90);
 	const w::EntityHandle bay = world.registry.spawn(1, blue_bay);
 	expect(flag.valid() && bay.valid(), "CTF objective fixtures spawn");
 	const int32_t waypoint_model = collision.add_model(contact_box(1));
@@ -1348,7 +1348,7 @@ void test_flag_timeout_wire_transaction() {
 	red_flag.item_attrib = w::kItemAttribMoveCallback;
 	red_flag.position = flag_position;
 	red_flag.spawn_position = {5.0f, 6.0f, 2.0f};
-	red_flag.yaw = 90;
+	red_flag.heading = w::placed_heading_bam(90);
 	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
 	expect(flag.valid(), "FlagBall timeout fixture spawns its red flag");
 	const int32_t waypoint_model = collision.add_model(contact_box(1));

@@ -8,7 +8,6 @@
 #include <runtime/inmatch/server_files.h> // server_logs_punt (the join's HMCRC / CMCRC lines)
 #include <runtime/inmatch/server_tick.h> // Server_StageHostPunt (the join's checksum punts)
 
-#include <runtime/world/angle.h>        // mission_yaw_deg_from_bam_heading (the no-marker heading word)
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
 #include <runtime/world/spawn_select.h> // resolve_player_spawn_pose / world_has_spawn_zone
@@ -412,8 +411,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// [orig: Server_PositionPlayerForSpawn @0x50CF60 - the copies
 		//  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
 		spawn.position = sel.position;
-		spawn.yaw = sel.yaw;
-		spawn.heading_bam = sel.heading_bam; // the copied word (D-NET-376)
+		spawn.heading = sel.heading_bam; // the copied word (D-NET-376)
 		spawn.pitch = sel.pitch;
 		spawn.roll = sel.roll;
 	} else {
@@ -423,8 +421,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		//  placement @0x43C459; Entity_FindBestSpawnPoint @0x50CCC0 - no marker, no store
 		//  (@0x50CD20)]
 		spawn.position = {0.0f, 0.0f, 0.0f};
-		spawn.heading_bam = 0;
-		spawn.yaw = static_cast<int16_t>(world::mission_yaw_deg_from_bam_heading(0));
+		spawn.heading = 0;
 	}
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	// [D-NET-112] A player carries no SSN (net_id 0) — faithful to the original, which identifies it by

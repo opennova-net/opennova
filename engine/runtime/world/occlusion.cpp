@@ -31,14 +31,14 @@ inline int32_t ftol(double v) { return static_cast<int32_t>(v); }
 
 
 // The collectors' fixed entity matrix: the full Euler pack at entity+4 (the
-// canonical heading plus the authored pitch/roll BAMs), which places the
+// Yaw word plus the authored pitch/roll BAMs), which places the
 // entity+0x1FC sphere center before the view transform.
 // [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, called from the
 //  building collector @ 0x5c6c6a, the statics collector @ 0x5c70b1 and the
 //  model leg @ 0x5c8f25]
 inline CollisionMatrix entity_euler_pose(const Entity &e, const int32_t pos[3]) {
     return collision_matrix_from_euler(
-        bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw)),
+        e.heading,
         bam_from_degrees_wrapped(static_cast<double>(e.pitch)),
         bam_from_degrees_wrapped(static_cast<double>(e.roll)), pos);
 }
@@ -159,7 +159,7 @@ RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int3
 RenderMatrix render_matrix_from_entity_pose(const Entity &e) {
     int32_t pos[3];
     detail::entity_pos_fixed(e, pos);
-    const int32_t heading = bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
+    const int32_t heading = e.heading;
     const int32_t pitch = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
     const int32_t roll = bam_from_degrees_wrapped(static_cast<double>(e.roll));
     return render_matrix_from_pose(pos, heading, pitch, roll);
@@ -567,7 +567,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         const bool pose_hit = static_pose_memo_enabled_ &&
                               memo.handle_packed == slot.h.packed &&
                               memo.cm == cm && memo.model_id == inst_model_id &&
-                              memo.yaw == e->yaw &&
+                              memo.heading == e->heading &&
                               memo.pitch == e->pitch && memo.roll == e->roll &&
                               memo.pos[0] == epos[0] && memo.pos[1] == epos[1] &&
                               memo.pos[2] == epos[2];
@@ -578,7 +578,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
             memo.handle_packed = slot.h.packed;
             memo.cm = cm;
             memo.model_id = inst_model_id;
-            memo.yaw = e->yaw;
+            memo.heading = e->heading;
             memo.pitch = e->pitch;
             memo.roll = e->roll;
             memo.pos[0] = epos[0];
@@ -1181,7 +1181,7 @@ OcclusionWorld::TocCandidate toc_candidate(const Entity &e, const CollisionModel
     detail::entity_pos_fixed(e, c.pos_fixed);
     c.radius_q16 = e.bound_radius.q16;
     c.model = cm;
-    c.heading_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
+    c.heading_bam = e.heading;
     c.pitch_bam = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
     c.roll_bam = bam_from_degrees_wrapped(static_cast<double>(e.roll));
     return c;

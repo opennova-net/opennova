@@ -7,6 +7,7 @@
 #include <runtime/world/collision.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <algorithm>
 #include <array>
@@ -102,7 +103,7 @@ EntityHandle objective(World &world, int32_t item_id, uint8_t team, Vec3 positio
     entity.position = position;
     entity.spawn_position = position;
     entity.bound_radius = 2.0f;
-    entity.yaw = 90;
+    entity.heading = placed_heading_bam(90);
     entity.alive = true;
     return world.registry.spawn(1, entity);
 }

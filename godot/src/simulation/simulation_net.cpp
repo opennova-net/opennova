@@ -37,6 +37,7 @@
 #include <net/novaworld/lobby_vars.h> // resolve_address_without_dns (the join's row address)
 #include <base/vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
 #include <net/npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
+#include <runtime/world/angle.h>         // placed_heading_bam / mission_yaw_deg_from_bam_heading
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
@@ -160,7 +161,8 @@ Array Simulation::get_streamed_placement_records() const {
 				row->item_id, false);
 		d["position"] = Vector3(row->position.x, row->position.y, row->position.z);
 		d["rotation_deg"] = Vector3(static_cast<float>(row->pitch),
-				static_cast<float>(row->yaw), static_cast<float>(row->roll));
+				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(row->heading)),
+				static_cast<float>(row->roll));
 		d["team"] = row->team;
 		d["group"] = row->group_id;
 		d["ai_flags"] = static_cast<int64_t>(
@@ -1065,7 +1067,7 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 	// Godot (x,y,z) -> mission (x,-z,y), the inverse of the present remap (same as spawn_local_player).
 	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),
 	                  static_cast<float>(p_position.y)};
-	spawn.yaw = static_cast<int16_t>(p_yaw_deg);
+	spawn.heading = opennova::world::placed_heading_bam(static_cast<int32_t>(p_yaw_deg));
 	spawn.team = static_cast<uint8_t>(p_team);
 	// A synthetic loopback peer; distinct port per call so repeated admits don't alias. Own a transport
 	// so the connection is well-formed. The synthetic admit (no handshake) mirrors the post-PeerSpawned

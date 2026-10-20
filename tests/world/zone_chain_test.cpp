@@ -11,6 +11,7 @@
 #include <runtime/world/world.h>
 #include <runtime/world/zone_capture.h>
 #include <runtime/world/zone_chain.h>
+#include <runtime/world/angle.h>
 
 #include <cstdio>
 #include <memory>
@@ -71,7 +72,7 @@ EntityHandle spawn_zone(World &w, uint8_t zone_no, uint8_t team, Vec3 pos) {
     e.kind = EntityKind::Item; // the ASH_I5A 1359 zone objects ride pool 1 (items)
     e.item_id = 1359;
     e.position = pos;
-    e.yaw = 90; // mission yaw 90 -> identity collision placement
+    e.heading = placed_heading_bam(90); // mission yaw 90 -> identity collision placement
     e.team = team;
     e.zone_number = zone_no;
     e.is_capture_trigger = true; // ItemDefAttrib 0x20000 "ChangeTeam"
@@ -521,7 +522,7 @@ EntityHandle spawn_unnumbered_zone(World &w, uint8_t team, Vec3 pos) {
     zone.kind = EntityKind::Item;
     zone.item_id = 1359;
     zone.position = pos;
-    zone.yaw = 90; // identity collision placement
+    zone.heading = placed_heading_bam(90); // identity collision placement
     zone.team = team;
     zone.zone_radius = 70;
     zone.zone_number = 0;

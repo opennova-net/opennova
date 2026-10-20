@@ -41,6 +41,7 @@
 
 #include "channel_clip_source.h"
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 #include "common/mission_rig.h"
 #include "common/mission_set.h"
 #include <string>
@@ -377,7 +378,7 @@ void test_hurt_volume_updates_registry_health() {
     Entity hazard;
     hazard.kind = EntityKind::Building;
     hazard.position = {10.0f, 10.0f, 0.0f};
-    hazard.yaw = 90;
+    hazard.heading = placed_heading_bam(90);
     const EntityHandle hazard_handle = world.registry.spawn(2, hazard);
 
     Entity infantry;
@@ -431,7 +432,7 @@ void test_remote_player_body_publishes_exact_change_team_contact() {
     Entity trigger;
     trigger.kind = EntityKind::Item;
     trigger.position = {10.0f, 10.0f, 0.0f};
-    trigger.yaw = 90;
+    trigger.heading = placed_heading_bam(90);
     trigger.is_capture_trigger = true;
     trigger.alive = true;
     const EntityHandle trigger_handle = world.registry.spawn(1, trigger);
@@ -584,7 +585,7 @@ struct ClimbRig {
         Entity ladder;
         ladder.kind = EntityKind::Building;
         ladder.position = {10.0f, 10.0f, 0.0f};
-        ladder.yaw = 90; // engine heading 0 (identity)
+        ladder.heading = placed_heading_bam(90); // engine heading 0 (identity)
         ladder.alive = true;
         ladder_h = world.registry.spawn(2, ladder);
         Entity body;
@@ -3384,7 +3385,7 @@ struct NpcRespawnRig {
         seed.health = seed.health_max = 125;
         seed.mana_max = 37;
         seed.position = {12.0f, 3.0f, 6.0f};
-        seed.yaw = 30;
+        seed.heading = placed_heading_bam(30);
         seed.flags = seed.engine_flags = 0x400u;
         seed.deathtime_ticks = 3;
         handle = w.registry.spawn(0, seed);
@@ -3459,7 +3460,7 @@ void test_npc_respawn_counts_and_spawn_reset() {
     CHECK(r.entity().npc_respawns == 0);
     CHECK(r.entity().registry_spawn_id == identity);
     CHECK(r.entity().position.x == 12.0f && r.entity().position.y == 3.0f);
-    CHECK(r.entity().yaw == 30 && r.entity().flags == 0x400u);
+    CHECK(r.entity().heading == placed_heading_bam(30) && r.entity().flags == 0x400u);
     CHECK(r.body().inf.magazine == 19 && r.body().inf.anim_state == 153);
     CHECK(r.storage->out.entity_events.empty());
     r.kill();
@@ -4566,7 +4567,7 @@ static void test_find_and_use_attachment_motor() {
     person.health = person.health_max = 100; person.kind = EntityKind::Organic;
     person.leave_corpse = true;
     const EntityHandle self = w.registry.spawn(0, person);
-    Entity prop; prop.net_id = 77; prop.item_id = 1002; prop.yaw = 90;
+    Entity prop; prop.net_id = 77; prop.item_id = 1002; prop.heading = placed_heading_bam(90);
     pose.carrier = w.registry.spawn(1, prop);
     w.pose_provider = &pose;
     TestSource motion;
@@ -4650,7 +4651,7 @@ static void test_downwash_query_and_body_selection() {
     seed.kind = EntityKind::Item;
     seed.item_type = 1;
     seed.position = {0, 0, 6};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.veh.part_spin.speed = 214748352; // kRotorSpeedMax
     const EntityHandle heli = world.registry.spawn(1, seed);
     VehicleTraits traits;
@@ -5297,7 +5298,7 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
     prop.alive = true;
     prop.health = prop.health_max = 100;
     prop.position = {40.0f, 30.0f, 0.0f};
-    prop.yaw = 90;
+    prop.heading = placed_heading_bam(90);
     pose.carrier = w.registry.spawn(1, prop);
     w.pose_provider = &pose;
     auto make = [&](int idx, uint8_t team, float x, float y, float z) {
@@ -5405,7 +5406,7 @@ void test_slope_probes_include_candidate_models() {
  solid.item_type = 1;
  solid.bound_radius = 4.0f;
  solid.position = {10,10,0};
- solid.yaw = 90;
+ solid.heading = placed_heading_bam(90);
  solid.pitch = 15;
  const auto support = world.registry.spawn(2,solid);
  Entity person;

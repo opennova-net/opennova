@@ -73,9 +73,9 @@ struct WorldDetail {
 	int32_t zone_control = 0;
 	int32_t zone_chain_index = -1;
 	Vec3 mission_position{};
-	// The registry row's authored/promoted orientation, Entity::yaw/pitch/roll:
-	// whole mission degrees in an int16 (every writer rounds
-	// normalize_mission_yaw_deg), NOT the AI card's BAM32 heading.
+	// The registry row's orientation: the Yaw word as whole mission degrees
+	// (mission_yaw_whole_deg) and the pitch / roll mirrors, NOT the AI card's
+	// BAM32 heading.
 	int32_t yaw = 0;
 	int32_t pitch = 0;
 	int32_t roll = 0;

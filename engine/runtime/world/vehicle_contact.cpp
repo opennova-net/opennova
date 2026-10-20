@@ -159,7 +159,7 @@ void vehicle_follow_carrier(World &world, Entity &vehicle) {
 	m.yaw_bam = pose.yaw_bam;
 	m.air_pitch_bam = pose.pitch_bam;
 	m.air_roll_bam = pose.roll_bam;
-	vehicle.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+	vehicle.heading = m.yaw_bam;
 	vehicle.pitch = degrees_i16_from_bam(m.air_pitch_bam);
 	vehicle.roll = degrees_i16_from_bam(m.air_roll_bam);
 }

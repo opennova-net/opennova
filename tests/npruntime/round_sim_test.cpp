@@ -1149,7 +1149,7 @@ struct DismembermentRig {
 				static_cast<uint8_t>(EntityClass::Infantry);
 		victim_seed.position = {5.0f, 0.0f, 0.0f};
 		victim_seed.spawn_position = victim_seed.position;
-		victim_seed.yaw = 90; // engine heading 0; a +X round is rear quadrant 2
+		victim_seed.heading = w::placed_heading_bam(90); // engine heading 0; a +X round is rear quadrant 2
 		victim_seed.health = 10;
 		victim_seed.health_max = 20;
 		// A pre-hidden bit OUTSIDE every bone mask, so the "already hidden
@@ -1449,7 +1449,7 @@ bool test_dismemberment_damage_path() {
 //  callback(entity, 1, 0) @0x4e820e after the authority-gated subtraction]
 bool test_person_hit_presentation_legs_run_on_every_hit() {
 	struct Case {
-		int16_t yaw;          // victim Entity yaw (mission deg); the round flies +X
+		int16_t yaw;          // the victim's placed mission yaw (deg); the round flies +X
 		int32_t expected_roll;
 		const char *label;
 	};
@@ -1465,7 +1465,7 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		w::AiEntity *body = rig.ai.for_handle(rig.victim);
 		victim->health = 100;
 		body->health = 100;
-		victim->yaw = c.yaw;
+		victim->heading = w::placed_heading_bam(c.yaw);
 		rig.fire();
 		if (!expect(victim->health == 90 && rig.world.round_sim.deaths.empty() &&
 		                    rig.piece() == nullptr,
@@ -1473,7 +1473,7 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 			return false;
 		if (!expect(body->roll == c.expected_roll, c.label)) return false;
 		const int quadrant = w::death_quadrant_from_round(
-				w::bam_heading_from_mission_yaw_deg(c.yaw), 1.0f, 0.0f);
+				w::placed_heading_bam(c.yaw), 1.0f, 0.0f);
 		if (!expect(victim->death_anim_state ==
 		                    w::compute_death_anim_state(3, quadrant, w::death_cause::kBullet),
 		            "a non-lethal hit stages the bone/quadrant bullet death in +0x2C0"))

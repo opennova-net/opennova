@@ -1108,8 +1108,7 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     seed.kind = EntityKind::Item;
     seed.has_item_def = true;
     seed.position = round.pos;
-    seed.yaw = static_cast<int16_t>(
-            std::lround(mission_yaw_deg_from_bam_heading(round.yaw_bam)));
+    seed.heading = round.yaw_bam;
     seed.pitch = item_angle_degrees_from_bam(round.pitch_bam);
     seed.roll = item_angle_degrees_from_bam(round.roll_bam);
     seed.ground_target = parent_handle;
@@ -1503,8 +1502,7 @@ void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
             d.roll_bam = p.roll_bam;
             // The followed pose's words, stored raw (D-NET-507).
             e->position.set_q16({p.pos[0], p.pos[1], p.pos[2]});
-            e->yaw = static_cast<int16_t>(
-                    std::lround(mission_yaw_deg_from_bam_heading(d.yaw_bam)));
+            e->heading = d.yaw_bam;
             e->pitch = item_angle_degrees_from_bam(d.pitch_bam);
             e->roll = item_angle_degrees_from_bam(d.roll_bam);
             e->ground_target = d.parent;

@@ -206,7 +206,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			// player's angles are its start marker's placement angles, so the high halves are the
 			// spawn angles' (world::spawn_angle_bam, low half zero) [orig:
 			// NetPacket_WriteWorldStateLoad0x0F `movzx edx, word ptr [ebp+12h]` @0x502D6D].
-			yaw = static_cast<int16_t>(world::spawn_angle_bam(90 - e->yaw) >> 16);
+			yaw = static_cast<int16_t>(e->heading >> 16);
 			// Pitch/roll are pure degree-to-BAM axes (no frame inversion); the
 			// wire carries their 16.16 high words and the retail joiner applies
 			// them straight onto its local entity (<<16) at every 0x0F.
@@ -752,7 +752,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 				slot_state);
 		if (pose.found) {
 			body->position = pose.position;
-			body->yaw = pose.yaw;
+			body->heading = pose.heading_bam; // the copied word (D-NET-NEW-L6-2)
 			body->pitch = pose.pitch;
 			body->roll = pose.roll;
 			world::apply_spawn_point_latches(*body, pose);

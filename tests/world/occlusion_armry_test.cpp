@@ -33,6 +33,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::world;
 using namespace opennova::threedi;
@@ -186,7 +187,7 @@ struct Rig {
         b.kind = EntityKind::Building;
         b.net_id = 100;
         b.position = {static_cast<float>(x), static_cast<float>(y), 0.0f};
-        b.yaw = 90; // mission yaw 90 -> engine heading 0 (identity rotation)
+        b.heading = placed_heading_bam(90); // mission yaw 90 -> engine heading 0 (identity rotation)
         b.alive = true;
         const EntityHandle h = world.registry.spawn(2, b);
         cw.assign_entity(h, cw.add_model(std::move(cm)));

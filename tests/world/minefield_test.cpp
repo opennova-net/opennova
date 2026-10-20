@@ -6,6 +6,7 @@
 #include "common/test_paths.h"
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
 
 #include <cstdio>
 #include <cstring>
@@ -38,7 +39,7 @@ struct Rig {
         Entity seed;
         seed.item_id = 1896;
         seed.bound_radius = 128;
-        seed.yaw = 90; // identity placement
+        seed.heading = placed_heading_bam(90); // identity placement
         const EntityHandle h = world.registry.spawn(pool, seed);
         std::vector<MinefieldPoint> points;
         for (int i = 0; i < 14; ++i)
@@ -152,7 +153,7 @@ void quantization_rng_and_reset() {
 
     Entity seed;
     seed.item_id = 1896;
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     const auto q = w.registry.spawn(2, seed);
     const std::vector<MinefieldPoint> points = {
         {1, {-1, 0x800000, -257}}, {3, {65536, 0, 0}}, {0, {}}
@@ -224,7 +225,7 @@ void empty_slots_and_markers() {
     Entity seed;
     seed.item_id = 1;
     seed.bound_radius = 10;
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     const auto h = w.registry.spawn(2, seed);
     auto *field = w.registry.get(h);
     w.minefields.initialize(w, *field, true, true, true, 1, 2, "s", "l",
@@ -278,7 +279,7 @@ void vehicle_ground_query() {
     Entity deck;
     deck.kind = EntityKind::Item;
     deck.item_id = 42;
-    deck.yaw = 90;
+    deck.heading = placed_heading_bam(90);
     deck.position = {0, 0, 2};
     deck.bound_radius = 4;
     const auto h = w.registry.spawn(1, deck);
@@ -351,7 +352,7 @@ void authored_binding() {
         Entity field;
         field.item_id = 1896;
         field.position = {12, 34, 56};
-        field.yaw = yaw;
+        field.heading = placed_heading_bam(yaw);
         field.uniform_scale_q16 = 0x20000;
         const auto handle = w.registry.spawn(2, field);
         mission::resolve_minefields(w, definitions, models);

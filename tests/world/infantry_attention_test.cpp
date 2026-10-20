@@ -6,6 +6,7 @@
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -69,7 +70,7 @@ struct Fixture {
         entity.group_id = group;
         entity.team = static_cast<uint8_t>(team);
         entity.position = position;
-        entity.yaw = 90; // +X in mission coordinates.
+        entity.heading = placed_heading_bam(90); // +X in mission coordinates.
         entity.health = entity.health_max = 100;
         return world.registry.spawn(0, entity);
     }
@@ -187,7 +188,7 @@ static void test_candidate_look_back_uses_the_placement_heading() {
     Fixture f;
     f.body().slot.f[17] = fixed(14);
     const auto target = f.person({1.5f, -5156.0f / 65536.0f, 2}, 10, 3, 0);
-    f.world.registry.get(target)->yaw = -112;
+    f.world.registry.get(target)->heading = placed_heading_bam(-112);
     f.tick(512);
     CHECK(f.body().inf.head_look_target == target);
 }
@@ -304,7 +305,7 @@ static void test_items_occlude_spotting() {
     Entity crate;
     crate.kind = EntityKind::Item;
     crate.alive = true;
-    crate.yaw = 90;
+    crate.heading = placed_heading_bam(90);
     crate.position = {1.5f, 0.5f, 0.0f};
     const EntityHandle crate_h = f.world.registry.spawn(1, crate);
     auto collision = std::make_unique<CollisionWorld>();
@@ -390,7 +391,7 @@ static void test_mounted_attention_respects_vehicle_motion() {
             vehicle.item_attrib = kItemAttribPlayerControl;
             vehicle.health = 100;
             vehicle.position = {0, 0, 2};
-            vehicle.yaw = 90;
+            vehicle.heading = placed_heading_bam(90);
             Seat seat;
             seat.type = type;
             seat.bone_index = 1;

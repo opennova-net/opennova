@@ -100,8 +100,7 @@ bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
         // that exact value without consulting input latches or advancing aim again.
         e.heading = saved_look_heading;
         e.pitch = saved_look_pitch;
-        occupant->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(saved_look_heading))));
+        occupant->heading = saved_look_heading;
     } else {
         e.heading = seat_heading;
     }
@@ -889,8 +888,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // player-owned — the drive motor reads it as the mouse-steer target
         // [orig: Entity_UpdateInfantryPlayerBody mounted leg (bodyHeading only) +
         //  Entity_UpdateVehiclePhysics steer source @0x48ba59/v61->Yaw].
-        occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(e.inf.target_heading))));
+        occ->heading = e.inf.target_heading;
         // Mirror the live inputs into the wire fields the motor consumes — tick_infantry's
         // per-tick mirror is skipped while mounted (one entity struct in the original; the
         // split is ours) [orig: the MoveOrder packer @0x4df68f-0x4df741].
@@ -913,8 +911,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // The seated LOOK stays mouse-instant at FULL precision: retail drives entity
         // Yaw/Pitch straight from input regardless of mount (the mounted body leg
         // writes bodyHeading/headLook from the bone, never the look) — the camera
-        // reads these mirrors, and the whole-degree occ->yaw roundtrip above (the
-        // wire/motor mirror) must not quantize or freeze it. tick_infantry's own
+        // reads these, and the occ->heading store above (the wire/motor Yaw
+        // word) must not freeze it. tick_infantry's own
         // mirrors (its lines `e.heading = inf.target_heading` / `e.pitch =
         // inf.look_pitch`) are skipped for the whole ride.
         // [orig: Input_HandleActionBinding_0 @0x4e1330 writes entity+0x10/+0x14;
@@ -927,8 +925,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // the owner's mouse-steer target, not the carrier yaw.
         e.heading = saved_look_heading;
         e.pitch = saved_look_pitch;
-        occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(saved_look_heading))));
+        occ->heading = saved_look_heading;
     } else if (e.inf.active && (seat.type == SeatType::Gunner || npc_mounted_body(e, *occ))) {
         // Attachment writes the seat/base pose but restores the child's independent
         // live look. The look then chases the desired solution instead of snapping:
@@ -964,8 +961,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
             e.heading = chased_look_heading;
             e.pitch = chased_look_pitch;
         }
-        occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(e.heading))));
+        occ->heading = e.heading;
     }
     if (e.inf.active) {
         const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);

@@ -26,7 +26,7 @@ struct Factory : ITeammateSpawner {
         Entity seed; seed.kind = r.helicopter ? EntityKind::Item : EntityKind::Organic;
         seed.item_id = r.item_type; seed.net_id = r.ssn; seed.team = 1; seed.has_item_def = true;
         seed.position.set_q16({r.pos[0], r.pos[1], r.pos[2]});
-        seed.yaw = float(mission_yaw_deg_from_bam_heading(r.heading));
+        seed.heading = placed_heading_bam(float(mission_yaw_deg_from_bam_heading(r.heading)));
         seed.spawn_origin = kSpawnOriginNone;
         // Both clones allocate includeInUse 0, as the production spawner does
         // [orig: Entity_CloneFromTemplate `push 0` @0x439750;
@@ -57,7 +57,7 @@ struct Fixture {
         AiEntity &ai = *world.ai.at(world.ai.attach(patient));
         ai.self->position.x.q16 = 10 * 65536; ai.self->position.y.q16 = 20 * 65536; ai.self->position.z.q16 = 3 * 65536;
         seed.kind = EntityKind::Marker; seed.item_id = 6088; seed.net_id = 500; seed.wp_number = 9;
-        seed.has_item_def = true; seed.yaw = 90;
+        seed.has_item_def = true; seed.heading = placed_heading_bam(90);
         marker = world.registry.spawn(3, seed);
     }
     void action(int sub = 2, int patient_id = 73, int point = 9) {
@@ -176,7 +176,7 @@ void test_pickup_and_invalid_helicopter_boundary() {
     // placement's spawn form: yaw 1 -> ((89 << 16) / 360) << 16. [orig:
     //  HeliLift_SpawnPickup @0x45262E (lea ebp,[eax+4]; the Entity_SpawnFromItemDef
     //  calls @0x452650/@0x4526A5); Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
-    Fixture f; f.world.registry.get(f.marker)->yaw = 1; f.action(1);
+    Fixture f; f.world.registry.get(f.marker)->heading = placed_heading_bam(1); f.action(1);
     CHECK(f.factory.requests.size() == 2);
     CHECK(f.factory.requests[0].heading == 1061748736);
     CHECK(f.factory.requests[1].heading == 1061748736);

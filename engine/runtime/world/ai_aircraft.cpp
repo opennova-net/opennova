@@ -433,7 +433,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 							: planar_magnitude(target->veh.vel_x, target->veh.vel_y);
 					const int32_t target_yaw = other != nullptr
 							? other->heading
-							: bam_heading_from_mission_yaw_deg(target->yaw);
+							: target->heading;
 					// The reverse bearing is its own truncated atan2 of the negated
 					// deltas, not the forward bearing plus a half turn.
 					// [orig: fild/fild/fpatan/fmul/fistp @0x461453..0x46148c, folded

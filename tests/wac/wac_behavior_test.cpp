@@ -14,6 +14,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::wac;
 using namespace opennova::world;
@@ -564,7 +565,7 @@ static void test_wac_spatial_wounded_and_mount_predicates() {
     source.health = 40;
     source.health_max = 100;
     source.position = {0.0f, 0.0f, 0.0f};
-    source.yaw = 90; // mission 90 = engine heading 0 = +X
+    source.heading = placed_heading_bam(90); // mission 90 = engine heading 0 = +X
     w.registry.spawn(0, source);
 
     Entity target = source;
@@ -1570,7 +1571,7 @@ static void test_distance_literals_and_lead_queries() {
     seed.item_id = 1; seed.item_type_index = 7;
     seed.net_id = 101;
     seed.position = {0.0f, 0.0f, 2.5f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.health = 0; seed.alive = false; seed.flags = kEntityFlagDead;
     const auto a = w.registry.spawn(0, seed);
     seed.net_id = 102; seed.position.z = 5.0f;
@@ -1722,7 +1723,7 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     marker.item_type = 4;
     marker.wp_number = 9;
     marker.position = {20.0f, 10.0f, 5.0f};
-    marker.yaw = 30; marker.roll = 4;
+    marker.heading = placed_heading_bam(30); marker.roll = 4;
     marker.flags = marker.engine_flags = kEntityFlagMatrixBuilt;
     const auto first_marker = w.registry.spawn(3, marker);
     marker.position.x = 40.0f;

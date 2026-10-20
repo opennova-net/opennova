@@ -318,7 +318,7 @@ bool run_unresolved_attachment_follows_its_target_carrier() {
 	h.role.run_tick(h.input);
 	h.role.run_tick(h.input);
 	const w::Entity *live = world.registry.get(gun);
-	ok &= expect(live != nullptr && live->yaw == 30,
+	ok &= expect(live != nullptr && live->heading == row.heading_bam,
 	             "the unresolved attachment adopts the pose recomposed on its target carrier");
 	return ok;
 }

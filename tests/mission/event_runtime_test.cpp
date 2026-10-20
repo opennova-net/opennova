@@ -2172,7 +2172,7 @@ static void test_single_distance_los_chain() {
     org.item_id = 1001; org.item_type_index = 7;
     org.net_id = 70;
     org.position = {0.0f, 0.0f, 0.0f};
-    org.yaw = 90; // mission 90 deg = engine BAM 0 = facing +X
+    org.heading = world::placed_heading_bam(90); // mission 90 deg = engine BAM 0 = facing +X
     world::EntityHandle a_h = w.registry.spawn(0, org);
     org.net_id = 71;
     org.position = {30.0f, 0.0f, 0.0f};
@@ -2214,20 +2214,20 @@ static void test_single_distance_los_chain() {
     // 71 faces +Y (mission yaw 0), 70 lies due -X of it: 90 deg off-cone.
     // (Exactly 180 deg astern would PASS via retail's abs INT_MIN overflow
     // quirk — carried in the port, so the test avoids the degenerate angle.)
-    w.registry.get(b_h)->yaw = 0;
+    w.registry.get(b_h)->heading = world::placed_heading_bam(0);
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 71, 70, 40)));
     // Rotate the shooter 45 deg away: outside the 30-deg cone.
-    w.registry.get(a_h)->yaw = 45;
+    w.registry.get(a_h)->heading = world::placed_heading_bam(45);
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
     // 20 deg off: inside the cone.
-    w.registry.get(a_h)->yaw = 70;
+    w.registry.get(a_h)->heading = world::placed_heading_bam(70);
     CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
 
     // Sub 45's range AND bearing ride the +0x1FC bbox-center offset points
     // (position + the host-stamped model bbox center, added unrotated)
     // [orig: the deltas over the offset sums @0x4f18cd..0x4f18dd; center
     //  writer Entity_InitFromModel @0x40df1e..0x40df4a].
-    w.registry.get(a_h)->yaw = 90;
+    w.registry.get(a_h)->heading = world::placed_heading_bam(90);
     w.registry.get(b_h)->bbox_center = {15.0f, 0.0f, 0.0f};
     CHECK(!sys.evaluate_trigger_for_test(w,
             single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
@@ -2708,7 +2708,7 @@ static void test_structural_bms_actions() {
     marker.has_item_def = true;
     marker.wp_number = 9;
     marker.position = {10.0f, 20.0f, 30.0f};
-    marker.yaw = 45;
+    marker.heading = world::placed_heading_bam(45);
     marker.pitch = 5;
     marker.roll = -3;
     // The BMS spawn stamps the chute bit on engine_flags; the teleport read
@@ -2790,7 +2790,7 @@ static void test_structural_bms_actions() {
         CHECK(entity->position.x == 10.0f);
         CHECK(entity->position.y == 20.0f);
         CHECK(entity->position.z == 30.0f);
-        CHECK(entity->yaw == 45);
+        CHECK(entity->heading == world::placed_heading_bam(45));
         CHECK(entity->pitch == 5);
         // Pool 0 enters Entity_ResetToSpawnState, which levels Roll.
         CHECK(entity->roll == (handle.pool() == 0 ? 0 : -3));

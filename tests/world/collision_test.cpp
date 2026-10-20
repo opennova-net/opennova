@@ -202,7 +202,7 @@ struct Rig {
         b.kind = EntityKind::Building;
         b.net_id = 100;
         b.position = {static_cast<float>(bx), static_cast<float>(by), 0.0f};
-        b.yaw = 90; // mission yaw 90 -> engine heading 0 (identity rotation)
+        b.heading = placed_heading_bam(90); // mission yaw 90 -> engine heading 0 (identity rotation)
         b.alive = true;
         building = world.registry.spawn(2, b);
 
@@ -285,7 +285,7 @@ void test_infantry_detour_rays_see_items() {
     Entity crate;
     crate.kind = EntityKind::Item;
     crate.position = {6.0f, -0.85f, 0.0f};
-    crate.yaw = 90;
+    crate.heading = placed_heading_bam(90);
     crate.alive = true;
     const EntityHandle crate_h = rig.world.registry.spawn(1, crate);
     rig.cw.assign_entity(crate_h, rig.cw.add_model(box_model(1, 0, 0.3, 0.3, 3.0)));
@@ -809,7 +809,7 @@ void test_candidate_sun_segment_includes_pool1_dynamics() {
     Entity blocker_seed;
     blocker_seed.kind = EntityKind::Item;
     blocker_seed.position = {5.0f, 0.0f, 0.0f};
-    blocker_seed.yaw = 90;
+    blocker_seed.heading = placed_heading_bam(90);
     blocker_seed.alive = true;
     const EntityHandle blocker = world.registry.spawn(1, blocker_seed);
     const int32_t model =
@@ -1344,7 +1344,7 @@ void test_mounted_resolver_keeps_touch_without_parent_pushout() {
     gun.alive = true;
     gun.net_id = 0x20;
     gun.position = Vec3{10.0f, 10.0f, 0.0f};
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     Seat seat{};
     seat.type = SeatType::Gunner;
     gun.seats.push_back(seat);
@@ -1876,7 +1876,7 @@ void test_slice_cadence_and_invuln() {
     b.kind = EntityKind::Building;
     b.net_id = 100;
     b.position = {10.0f, 10.0f, 0.0f};
-    b.yaw = 90;
+    b.heading = placed_heading_bam(90);
     b.alive = true;
     const EntityHandle building = world.registry.spawn(2, b);
     Entity s;
@@ -1925,7 +1925,7 @@ void test_slice_cadence_and_invuln() {
         Entity blocker_seed;
         blocker_seed.kind = EntityKind::Building;
         blocker_seed.position = {5.0f, 0.0f, 0.0f};
-        blocker_seed.yaw = 90;
+        blocker_seed.heading = placed_heading_bam(90);
         blocker_seed.alive = true;
         const EntityHandle blocker = refresh_world.registry.spawn(2, blocker_seed);
         const int32_t blocker_model =
@@ -2909,7 +2909,7 @@ void test_raycast_clear_table_readiness() {
         Entity seed;
         seed.kind = kind;
         seed.position = {5.0f, 0.0f, 0.0f};
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.alive = true;
         const EntityHandle h = world.registry.spawn(pool, seed);
         cw.assign_entity(h, cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
@@ -2955,7 +2955,7 @@ void test_cached_raycast_spatial_candidates() {
         Entity seed;
         seed.kind = EntityKind::Building;
         seed.position = {static_cast<float>(i), 200.0f + i, 0.0f};
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.alive = true;
         const EntityHandle h = world.registry.spawn(2, seed);
         CHECK(h.valid());
@@ -2964,7 +2964,7 @@ void test_cached_raycast_spatial_candidates() {
     Entity blocker_seed;
     blocker_seed.kind = EntityKind::Building;
     blocker_seed.position = {50.0f, 0.0f, 0.0f};
-    blocker_seed.yaw = 90;
+    blocker_seed.heading = placed_heading_bam(90);
     blocker_seed.alive = true;
     const EntityHandle blocker = world.registry.spawn(2, blocker_seed);
     CHECK(blocker.valid());
@@ -2996,7 +2996,7 @@ void test_cached_raycast_sparse_extent_uses_exact_hash_fallback() {
     Entity near_seed;
     near_seed.kind = EntityKind::Building;
     near_seed.position = {-50.0f, 0.0f, 0.0f};
-    near_seed.yaw = 90;
+    near_seed.heading = placed_heading_bam(90);
     near_seed.alive = true;
     const EntityHandle near_blocker = world.registry.spawn(2, near_seed);
     CHECK(near_blocker.valid());
@@ -3027,7 +3027,7 @@ void test_raycast_uses_stamped_bound_for_live_section_pose() {
     Entity seed;
     seed.kind = EntityKind::Building;
     seed.position = {5.0f, 0.0f, 0.0f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.alive = true;
     const EntityHandle target = world.registry.spawn(2, seed);
     const int32_t model_id = cw.add_model(box_model(1, 0, 0.5, 0.5, 2.0));
@@ -3053,7 +3053,7 @@ void test_raycast_uses_stamped_bound_for_live_section_pose() {
     scaled_world.registry.configure_pool(2, 4);
     Entity scaled_seed;
     scaled_seed.kind = EntityKind::Building;
-    scaled_seed.yaw = 90;
+    scaled_seed.heading = placed_heading_bam(90);
     scaled_seed.uniform_scale_q16 = fx(2.0);
     scaled_seed.alive = true;
     const EntityHandle scaled = scaled_world.registry.spawn(2, scaled_seed);
@@ -3241,7 +3241,7 @@ void test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices
     Entity stale_seed;
     stale_seed.kind = EntityKind::Building;
     stale_seed.position = {10.0f, 10.0f, 0.0f};
-    stale_seed.yaw = 90;
+    stale_seed.heading = placed_heading_bam(90);
     stale_seed.alive = true;
     const EntityHandle stale = rig.world.registry.spawn(2, stale_seed);
     CHECK(stale.valid());
@@ -3326,7 +3326,7 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
         Entity seed;
         seed.kind = EntityKind::Building;
         seed.position = {10.0f, y, 0.0f};
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.alive = true;
         return world.registry.spawn(2, seed);
     };
@@ -3381,7 +3381,7 @@ void test_vehicle_probes_support_model_decks_and_grade_slopes() {
 	Entity deck;
 	deck.kind = EntityKind::Building;
 	deck.position = { 10.0f, 10.0f, 0.0f };
-	deck.yaw = 90;
+	deck.heading = placed_heading_bam(90);
 	EntityHandle platform = world.registry.spawn(2, deck);
 	collision.assign_entity(platform, collision.add_model(box_model(1, 0, 4.0, 4.0, 1.0)));
 	for (int i = 0; i < 17; ++i)
@@ -3435,7 +3435,7 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
         seed.has_graphic_model = true;
         seed.item_type = 1;
         seed.position = {x, y, z};
-        seed.yaw = 90; // mission 90 = engine heading BAM 0, like the wall template
+        seed.heading = placed_heading_bam(90); // mission 90 = engine heading BAM 0, like the wall template
         seed.bound_radius = bound_radius;
         seed.alive = true;
         return world.registry.spawn(1, seed);
@@ -3593,7 +3593,7 @@ void test_person_effective_radius() {
 void test_person_section_raycast_uses_posed_bone_matrix() {
     Rig rig(person_section_model());
     rig.cw.assign_entity(rig.soldier, 0);
-    rig.world.registry.get(rig.soldier)->yaw = 90;
+    rig.world.registry.get(rig.soldier)->heading = placed_heading_bam(90);
     PosedHeadMatrixProvider provider;
     rig.cw.set_pose_provider(&provider);
 
@@ -3625,7 +3625,7 @@ void test_f3_debug_prefilters_before_building_section_matrices() {
         seed.kind = kind;
         seed.alive = true;
         seed.position = Vec3{static_cast<float>(x), 0.0f, 0.0f};
-        seed.yaw = 90; // engine heading 0: section center stays axis-aligned
+        seed.heading = placed_heading_bam(90); // engine heading 0: section center stays axis-aligned
         return world.registry.spawn(pool, seed);
     };
     const EntityHandle near_person = spawn(0, EntityKind::Organic, 1.0);
@@ -3697,7 +3697,7 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
         Entity seed;
         seed.kind = EntityKind::Building;
         seed.position = Vec3{100.0f + static_cast<float>(i), 0.0f, 0.0f};
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.alive = true;
         const EntityHandle h = world.registry.spawn(2, seed);
         CHECK(h.valid());
@@ -3707,7 +3707,7 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
     Entity near_seed;
     near_seed.kind = EntityKind::Building;
     near_seed.position = Vec3{5.0f, 0.0f, 0.0f};
-    near_seed.yaw = 90;
+    near_seed.heading = placed_heading_bam(90);
     near_seed.alive = true;
     const EntityHandle near_static = world.registry.spawn(2, near_seed);
     CHECK(near_static.valid());
@@ -3753,7 +3753,7 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
         Entity dynamic_seed;
         dynamic_seed.kind = EntityKind::Item;
         dynamic_seed.position = Vec3{1.0f, static_cast<float>(i) * 0.25f, 0.0f};
-        dynamic_seed.yaw = 90;
+        dynamic_seed.heading = placed_heading_bam(90);
         dynamic_seed.alive = true;
         const EntityHandle h = world.registry.spawn(1, dynamic_seed);
         collision.assign_entity(h, model_id);
@@ -3763,7 +3763,7 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
         Entity far_seed;
         far_seed.kind = EntityKind::Building;
         far_seed.position = Vec3{3.0f, static_cast<float>(i) * 0.1f, 0.0f};
-        far_seed.yaw = 90;
+        far_seed.heading = placed_heading_bam(90);
         far_seed.alive = true;
         const EntityHandle h = world.registry.spawn(2, far_seed);
         collision.assign_entity(h, model_id);
@@ -3772,7 +3772,7 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
     Entity blocker_seed;
     blocker_seed.kind = EntityKind::Building;
     blocker_seed.position = Vec3{0.0f, 5.0f, 0.0f};
-    blocker_seed.yaw = 90;
+    blocker_seed.heading = placed_heading_bam(90);
     blocker_seed.alive = true;
     const EntityHandle blocker = world.registry.spawn(2, blocker_seed);
     collision.assign_entity(blocker, model_id);
@@ -4636,7 +4636,7 @@ void test_projectile_trace_profile_is_opt_in_and_parity_neutral() {
     Entity dynamic_seed;
     dynamic_seed.kind = EntityKind::Item;
     dynamic_seed.position = Vec3{7.0f, 0.0f, 0.0f};
-    dynamic_seed.yaw = 90;
+    dynamic_seed.heading = placed_heading_bam(90);
     dynamic_seed.alive = true;
     const EntityHandle dynamic = world.registry.spawn(1, dynamic_seed);
     Entity static_seed = dynamic_seed;
@@ -4731,7 +4731,7 @@ void test_ray_debug_capture_is_opt_in_with_scoped_categories() {
     Entity static_seed;
     static_seed.kind = EntityKind::Building;
     static_seed.position = Vec3{5.0f, 0.0f, 0.0f};
-    static_seed.yaw = 90;
+    static_seed.heading = placed_heading_bam(90);
     static_seed.alive = true;
     const EntityHandle statik = world.registry.spawn(2, static_seed);
     // A type-1 solid on its own lane for the boolean LOS leg (the CFAC wall
@@ -4869,7 +4869,7 @@ void test_contact_debug_capture_is_opt_in() {
     Entity static_seed;
     static_seed.kind = EntityKind::Building;
     static_seed.position = Vec3{5.0f, 0.0f, 0.0f};
-    static_seed.yaw = 90;
+    static_seed.heading = placed_heading_bam(90);
     static_seed.alive = true;
     const EntityHandle statik = world.registry.spawn(2, static_seed);
     CHECK(owner.valid() && statik.valid());
@@ -4962,7 +4962,7 @@ void test_projectile_dynamic_fallback_encloses_scaled_diagonal() {
     Entity dynamic;
     dynamic.kind = EntityKind::Item;
     dynamic.position = {5.0f, 0.0f, 0.0f};
-    dynamic.yaw = 90; // identity collision placement
+    dynamic.heading = placed_heading_bam(90); // identity collision placement
     dynamic.uniform_scale_q16 = fx(2.0);
     dynamic.alive = true;
     const EntityHandle target = world.registry.spawn(1, dynamic);
@@ -4990,7 +4990,7 @@ void test_round_equal_distance_uses_retail_pool_order() {
     seed.kind = EntityKind::Item;
     seed.health = 100;
     seed.position = Vec3{5.0f, 0.0f, 0.9f};
-    seed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    seed.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     seed.bound_radius = kOrganicStandInRadius;
     const EntityHandle dynamic = world.registry.spawn(1, seed);
     const EntityHandle statik = world.registry.spawn(2, seed);
@@ -5046,7 +5046,7 @@ void test_round_item_skip_mask() {
 
     Entity hit_seed = skipped_seed;
     hit_seed.position = Vec3{8.0f, 0.0f, 0.0f};
-    hit_seed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    hit_seed.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     hit_seed.engine_flags = 0;
     const EntityHandle eligible = world.registry.spawn(1, hit_seed);
     CHECK(skipped.valid() && eligible.valid());
@@ -5119,7 +5119,7 @@ void test_refnum_group_immunity() {
     Entity plate_seed;
     plate_seed.kind = EntityKind::Item;
     plate_seed.position = Vec3{4.0f, 0.0f, 0.9f};
-    plate_seed.yaw = 90;
+    plate_seed.heading = placed_heading_bam(90);
     plate_seed.bound_radius = 1.0f;
     plate_seed.ref_num = 9;
     const EntityHandle plate = world.registry.spawn(1, plate_seed);
@@ -5204,7 +5204,7 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     victim_seed.health = 775;
     victim_seed.alive = true;
     victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
-    victim_seed.yaw = 90; // engine heading 0: +X round is the back quadrant
+    victim_seed.heading = placed_heading_bam(90); // engine heading 0: +X round is the back quadrant
     const EntityHandle victim = world.registry.spawn(0, victim_seed);
     CHECK(victim.valid());
 
@@ -5443,7 +5443,7 @@ void test_late_pool1_item_resolves_cfac_or_raises() {
     placed.has_graphic_model = true;
     placed.item_id = 7001;
     placed.position = {5.0f, 0.0f, 0.0f};
-    placed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    placed.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     placed.bound_radius = 0.5f; // ThrowableSim::place_from_round stand-in
     placed.uniform_scale_q16 = fx(0.1); // face is narrower than the fallback sphere
     const EntityHandle first = world.registry.spawn(1, placed);
@@ -5756,7 +5756,7 @@ void test_projectile_trace_world_ordering() {
     Entity dynamic;
     dynamic.kind = EntityKind::Item;
     dynamic.position = {5.0f, 0.0f, 0.0f};
-    dynamic.yaw = 90;
+    dynamic.heading = placed_heading_bam(90);
     dynamic.alive = true;
     const EntityHandle dynamic_h = rig.world.registry.spawn(1, dynamic);
     const int32_t dynamic_model = rig.cw.add_model(wall_triangle_model());
@@ -5863,7 +5863,7 @@ void test_projectile_trace_domain_switches_preserve_farther_pool_hit() {
     Entity item;
     item.kind = EntityKind::Item;
     item.position = {8.0f, 0.0f, -4.0f};
-    item.yaw = 90;
+    item.heading = placed_heading_bam(90);
     item.bound_radius = 0.4f;
     const EntityHandle item_h = world.registry.spawn(1, item);
 
@@ -6079,7 +6079,7 @@ void test_cached_los_excludes_the_endpoint_carrier() {
     hull.alive = true;
     hull.net_id = 0x20;
     hull.position = Vec3{10.0f, 10.0f, 0.0f};
-    hull.yaw = 90;
+    hull.heading = placed_heading_bam(90);
     Seat seat{};
     seat.type = SeatType::Gunner;
     hull.seats.push_back(seat);
@@ -6232,7 +6232,7 @@ struct RunOverRig {
 		v.item_type = 1;
 		v.health = 500;
 		v.position = {10.0f, 10.0f, 0.0f};
-		v.yaw = 90; // mission 90 = engine heading 0: the box stays axis-aligned
+		v.heading = placed_heading_bam(90); // mission 90 = engine heading 0: the box stays axis-aligned
 		v.team = 1;
 		v.alive = true;
 		v.primary_occupant = driver;
@@ -6246,7 +6246,7 @@ struct RunOverRig {
 		s.health = 100;
 		s.position = {12.8f, 10.0f, 0.0f};
 		s.bound_radius = 1.0f;
-		s.yaw = 90; // facing +x, away from the hull
+		s.heading = placed_heading_bam(90); // facing +x, away from the hull
 		s.team = 2;
 		s.alive = true;
 		victim = world.registry.spawn(0, s);
@@ -6358,7 +6358,7 @@ void test_palm_sector_collision_is_the_fragments() {
     fragment.kind = EntityKind::Building;
     fragment.item_id = 900;
     fragment.position = {8.0f, 16.0f, 7.0f};
-    fragment.yaw = 90;
+    fragment.heading = placed_heading_bam(90);
     fragment.item_section_piece = true;
     fragment.palm_fragment = true; // item 900's own render tag names no section row
     fragment.palm_state = 17;
@@ -6369,7 +6369,7 @@ void test_palm_sector_collision_is_the_fragments() {
     palm.kind = EntityKind::Building;
     palm.item_id = 21;
     palm.position = {20.0f, 16.0f, 0.0f};
-    palm.yaw = 90;
+    palm.heading = placed_heading_bam(90);
     palm.alive = true;
     palm.palm_sections = true; // the render tag's psec row
     palm.palm_state = 0;

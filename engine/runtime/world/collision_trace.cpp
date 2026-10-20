@@ -42,7 +42,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
 
     int32_t p[3];
     entity_pos_fixed(*e, p);
-    const int32_t heading = bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw));
+    const int32_t heading = e->heading;
     // Statics authored with pitch/roll (rocks seated on slopes) take the full
     // euler matrix so the shell leans with the visual [orig: the entity
     // orientation matrix @ 0x613f40 serves every collision query]; pure-yaw
@@ -51,7 +51,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // before either publication path so the matching scaled inverse can be
     // selected by the polygon walker.
     CollisionMatrix world_mat = collision_matrix_from_placement(
-            static_cast<double>(e->yaw), static_cast<double>(e->pitch),
+            heading, static_cast<double>(e->pitch),
             static_cast<double>(e->roll), p, e->uniform_scale_q16);
 
     // Explicitly published matrices and the host callback both own the FINAL

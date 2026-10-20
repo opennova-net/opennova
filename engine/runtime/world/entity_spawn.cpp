@@ -27,7 +27,7 @@ void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling) {
     // [orig: Entity_ResetToSpawnState @0x4B9610] Save the current pose and
     // flags before clearing death state.
     e.spawn_position = e.position;
-    e.spawn_heading = bam_heading_from_mission_yaw_deg(e.yaw);
+    e.spawn_heading = e.heading;
     e.spawn_flags = (e.flags | e.engine_flags) & ~kEntityFlagDead;
     // Both portable flag views represent the same retail dword.
     e.flags &= ~2u;

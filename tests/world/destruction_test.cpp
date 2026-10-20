@@ -774,7 +774,7 @@ void test_section_debris_samples_collision_faces() {
     seed.item_id = 500;
     seed.health = 0;
     seed.position = Vec3{10.0f, 20.0f, 30.0f};
-    seed.yaw = 90.0f; // identity mission placement rotation
+    seed.heading = placed_heading_bam(90); // identity mission placement rotation
     seed.death_blast_center = Vec3{9.0f, 20.0f, 30.0f};
     const EntityHandle target = w.registry.spawn(1, seed);
     w.tables.item_death_traits.set(500, barrel_traits());
@@ -855,7 +855,7 @@ void test_glass_userpoints_shatter_once_at_authored_radius() {
     seed.health_max = 1000;
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 2.0f;
-    seed.yaw = 0.0f;
+    seed.heading = placed_heading_bam(0);
     seed.pitch = 90.0f;
     seed.roll = 90.0f;
     const EntityHandle building = w.registry.spawn(2, seed);
@@ -1102,7 +1102,7 @@ void test_kz_point_full_euler() {
     seed.health = 0;
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 1.0f;
-    seed.yaw = 0;
+    seed.heading = placed_heading_bam(0);
     seed.pitch = 90;
     seed.roll = 90;
     const EntityHandle h = w.registry.spawn(1, seed);
@@ -1144,7 +1144,7 @@ void test_bridge_dead_points_emit_water_shocks() {
     seed.health = 0;
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 1.0f;
-    seed.yaw = 0;
+    seed.heading = placed_heading_bam(0);
     seed.pitch = 90;
     seed.roll = 90;
     const EntityHandle h = w.registry.spawn(1, seed);
@@ -1425,7 +1425,7 @@ void test_death_piece_section_center() {
     seed.health = 0;
     seed.position = Vec3{4.0f, 6.0f, 10.0f};
     seed.bound_radius = 2.0f;
-    seed.yaw = 0;
+    seed.heading = placed_heading_bam(0);
     seed.pitch = 90;
     seed.roll = 90;
     const EntityHandle h = w.registry.spawn(1, seed);
@@ -1466,7 +1466,7 @@ void test_death_piece_render_contract() {
     seed.health = 0;
     seed.position = Vec3{1.0f, 2.0f, 3.0f};
     seed.bound_radius = 2.0f;
-    seed.yaw = 30;   // mission yaw -> BAM heading 90 - 30 = 60 degrees
+    seed.heading = placed_heading_bam(30);   // the Yaw word ((60 << 16) / 360) << 16 = 0x2AAA0000
     seed.pitch = -20;
     seed.roll = 15;
     const EntityHandle h = w.registry.spawn(1, seed);
@@ -1485,7 +1485,7 @@ void test_death_piece_render_contract() {
         ++seen;
         CHECK(q.section >= 1 && q.section <= 3);
         CHECK(q.hidden_mask == (0xFu & ~(1u << q.section)));
-        CHECK(std::abs(q.heading - 60.0f) < 1.0e-3f);
+        CHECK(std::abs(q.heading - 59.996338f) < 1.0e-3f); // the placed word 0x2AAA0000 in degrees
         CHECK(std::abs(q.pitch + 20.0f) < 1.0e-3f);
         CHECK(std::abs(q.roll - 15.0f) < 1.0e-3f);
         CHECK(q.radius_q16 == fixed16(2.25));
@@ -1738,7 +1738,7 @@ void test_specialized_piece_physics_callback() {
     seed.alive = false;
     seed.position = Vec3{8.0f, 8.0f, 1.0f};
     seed.bound_radius = 2.75f;
-    seed.yaw = 90; // engine heading BAM 0: forward probe is +mission X
+    seed.heading = placed_heading_bam(90); // engine heading BAM 0: forward probe is +mission X
     seed.pitch = 10;
     seed.roll = -3;
     const EntityHandle h = w.registry.spawn(1, seed);
@@ -1851,7 +1851,7 @@ void test_specialized_piece_physics_callback() {
     ordered.tables.item_death_traits.set(733, burning);
     seed.item_id = 733;
     seed.position = Vec3{20.0f, 20.0f, 10.0f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.pitch = 0;
     seed.roll = 0;
     const EntityHandle ordered_h = ordered.registry.spawn(1, seed);
@@ -1944,7 +1944,7 @@ void test_specialized_piece_physics_callback() {
     seed.position = Vec3{64.0f, 8.0f,
             opennova::terrain::height_field_height_world_bilinear(
                     ramp.field, 64.0f, -8.0f) + 1.25f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.pitch = 0;
     seed.roll = 0;
     const EntityHandle client_h = client.registry.spawn(1, seed);
@@ -1973,7 +1973,7 @@ void test_specialized_piece_physics_callback() {
     bare.vehicles.traits.set(734, model);
     seed.item_id = 734;
     seed.position = Vec3{8.0f, 8.0f, 0.5f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.pitch = 0;
     seed.roll = 0;
     const EntityHandle bare_h = bare.registry.spawn(1, seed);
@@ -2496,7 +2496,7 @@ void test_round_destroys_item() {
     barrel_seed.has_item_def = true; // retail damage gate: geometry + ItemDef
     barrel_seed.health = 40;
     barrel_seed.position = Vec3{6.0f, 0.0f, 1.0f};
-    barrel_seed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    barrel_seed.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     barrel_seed.bound_radius = 1.0f;
     const EntityHandle barrel = w.registry.spawn(1, barrel_seed);
     w.tables.item_death_traits.set(500, barrel_traits());
@@ -2687,7 +2687,7 @@ void test_death_effect_banks_and_water_crossings() {
 	World &w = *heap;
 	Entity e;
 	e.position = { 10, 20, 1 };
-	e.yaw = 90;
+	e.heading = placed_heading_bam(90);
 	e.net_id = 8;
 	auto traits = barrel_traits();
 	traits.effect_banks[0].mask = 3;
@@ -2880,7 +2880,7 @@ static void test_vehicle_respawn_lifecycle() {
 	Entity seed;
 	seed.item_id = 42;
 	seed.position = { 10, 20, 30 };
-	seed.yaw = 90;
+	seed.heading = placed_heading_bam(90);
 	seed.team = 2;
 	seed.health_max = 500;
 	seed.item_attrib = kItemAttribPlayerControl;
@@ -2962,13 +2962,13 @@ static void test_vehicle_respawn_lifecycle() {
 
 	Entity support_seed;
 	support_seed.position = { 8, 20, 30 };
-	support_seed.yaw = 90;
+	support_seed.heading = placed_heading_bam(90);
 	const auto support_h = w.registry.spawn(2, support_seed);
 	Entity &support = *w.registry.get(support_h);
 	e.ground_target = support_h;
 	w.vehicles.capture_spawn_pose(e); // two units along the carrier's local X
 	support.position = { 18, 20, 30 };
-	support.yaw = 0;
+	support.heading = placed_heading_bam(0);
 	int32_t pose[6];
 	CHECK(w.vehicles.resolve_spawn_pose(e, pose));
 	CHECK(std::abs(pose[0] - 18 * 65536) < 16 && std::abs(pose[1] - 22 * 65536) < 16);
@@ -4202,7 +4202,7 @@ void test_person_blast_quadrant_faces_the_blast() {
     person.item_type = 3;
     person.health = person.health_max = 1000;
     person.bound_radius = 0.6f;
-    person.yaw = 90; // engine heading 0: facing +x
+    person.heading = placed_heading_bam(90); // engine heading 0: facing +x
     const EntityHandle body = w.registry.spawn(0, person);
     ExplosionEntry e;
     e.pos = Vec3{1.0f, 0.0f, 0.0f}; // in front, surface 0.4 (no fire roll)
@@ -4528,7 +4528,7 @@ void test_knife_kill_zone() {
     Entity victim_seed = attacker_seed;
     victim_seed.team = 2;
     victim_seed.position = Vec3{1.0f, 0.0f, 0.0f};
-    victim_seed.yaw = 270; // engine heading 0x80000000: facing the attacker
+    victim_seed.heading = placed_heading_bam(270); // engine heading 0x80000000: facing the attacker
     const EntityHandle victim = w.registry.spawn(0, victim_seed);
     Entity far_seed = victim_seed;
     far_seed.position = Vec3{-2.6f, 0.0f, 0.0f}; // surface 2.0: past 1.5, inside 2.5

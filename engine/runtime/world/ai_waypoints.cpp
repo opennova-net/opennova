@@ -294,7 +294,7 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         // [orig: the 1024-entry cos table off_849934 @0x48be8f-0x48bef1].
         const int32_t oyaw = o->veh.yaw_seeded
                 ? o->veh.yaw_bam
-                : bam_heading_from_mission_yaw_deg(static_cast<double>(o->yaw));
+                : o->heading;
         int32_t other_cos22, self_cos22, unused_sin22;
         // Add half a bin, then take the unsigned top ten bits before loading
         // off_849934; continuous cosine changes the overlap/brake threshold.
@@ -497,7 +497,7 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
 
     const int32_t heading = veh.veh.yaw_seeded
             ? veh.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+            : veh.heading;
 
     // cmd speed = the SM mover's out-speed, capped at the def player_speed
     // [orig: @0x48bc23-0x48bc48; ctan @0x4897EC..0x489811 — aiComp[136] =
@@ -589,7 +589,7 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
 
     const int32_t heading = veh.veh.yaw_seeded
             ? veh.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+            : veh.heading;
 
     // cmd = the SM mover's out-speed capped at def waterSpeed [orig:
     // @0x48E260..0x48E279 — aiComp[136] = min(brain[128], waterSpeed)]. The
@@ -737,7 +737,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         // [orig: Entity_UpdateAircraftPhysics @0x49034C/@0x490355/@0x49035E read
         //  the row's Yaw/Pitch/Roll, unmoved = the spawn form,
         //  Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
-        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+        m.yaw_bam = veh.heading;
         m.air_pitch_bam = spawn_angle_bam(veh.pitch);
         m.air_roll_bam = spawn_angle_bam(veh.roll);
         m.yaw_seeded = true;

@@ -23,7 +23,6 @@ class World;
 struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
     EntityPosition position; // mission space (Z-up): the chosen marker's words, copied raw
-    int16_t yaw = 0;    // the whole-degree mission yaw mirror (Entity::yaw)
     int16_t pitch = 0;
     int16_t roll = 0;
     // The heading word (+0x10) the placement copies onto the player verbatim:

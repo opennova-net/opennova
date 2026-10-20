@@ -64,7 +64,7 @@ std::string height_words(double value) {
 // CollisionWorld::target_view builds; BoneCallback_Simple @0x4e2600 copies it into every section).
 world::CollisionMatrix placement(const MissionEntityMark &entity, int32_t scale_q16) {
 	const int32_t at[3] = { fixed(entity.x), fixed(entity.y), fixed(entity.z) };
-	return world::collision_matrix_from_placement(double(entity.yaw), double(entity.pitch), double(entity.roll), at,
+	return world::collision_matrix_from_placement(world::placed_heading_bam(entity.yaw), double(entity.pitch), double(entity.roll), at,
 			scale_q16);
 }
 

@@ -435,7 +435,7 @@ int gnl2_blast_point_is_the_raised_z_word() {
 	seed.item_id = 500;
 	seed.has_item_def = true;
 	seed.position.set_q16({kAshJoinerX, kTdhHostY, kFarZ});
-	seed.yaw = 100;
+	seed.heading = w::placed_heading_bam(100);
 	seed.engine_flags = w::kEntityFlagDead; // the expiry leg (Flags & 2)
 	const w::EntityHandle h = world->registry.spawn(1, seed);
 	w::ItemDeathTraits traits;
@@ -483,7 +483,7 @@ int barrel_blast_takes_the_yaw_word() {
 	seed.item_id = 501;
 	seed.has_item_def = true;
 	seed.position.set_q16({kAshTrailerX, kTdhHostY, kFarZ});
-	seed.yaw = 100;
+	seed.heading = w::placed_heading_bam(100);
 	seed.engine_flags = w::kEntityFlagDead;
 	const w::EntityHandle h = world->registry.spawn(1, seed);
 	w::ItemDeathTraits traits;
@@ -700,7 +700,7 @@ int seat_pose_is_words() {
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 700;
-	vehicle.yaw = 30;
+	vehicle.heading = w::placed_heading_bam(30);
 	vehicle.position.set_q16({kFarZ, kAshJoinerX, kTdhHostY});
 	const w::EntityHandle carrier = world->registry.spawn(1, vehicle);
 	w::Entity rider;

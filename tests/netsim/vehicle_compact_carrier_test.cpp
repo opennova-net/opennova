@@ -72,7 +72,7 @@ uint32_t bam_distance(int32_t a, int32_t b) {
 w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
 	w::PlayerSpawn s;
 	s.position = pos;
-	s.yaw = yaw;
+	s.heading = w::placed_heading_bam(yaw);
 	s.net_id = net_id;
 	return s;
 }
@@ -85,7 +85,7 @@ w::Entity vehicle_seed(uint16_t item_id, w::Vec3 pos, int16_t yaw) {
 	v.health = 3000;
 	v.health_max = 3000;
 	v.position = pos;
-	v.yaw = yaw;
+	v.heading = w::placed_heading_bam(yaw);
 	v.team = 1;
 	v.has_item_def = true; // the trait sweep's row (D-NET-487)
 	v.item_type_index = 1;
@@ -210,8 +210,7 @@ bool run_fan_full_precision_heading_and_wreck_pose() {
 	hull.veh.yaw_bam = 0x12345678;        // 25.6 deg engine heading, sub-degree
 	hull.veh.air_pitch_bam = -0x0123ABCD; // the wreck's tilted attitude
 	hull.veh.air_roll_bam = 0x09876543;
-	hull.yaw = static_cast<int16_t>(std::lround(
-			w::mission_yaw_deg_from_bam_heading(hull.veh.yaw_bam)));
+	hull.heading = hull.veh.yaw_bam;
 	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
 	if (!expect(host_h.valid() && hull_h.valid(), "host and hull spawned")) return false;
 

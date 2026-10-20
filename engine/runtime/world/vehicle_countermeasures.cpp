@@ -24,7 +24,7 @@ void VehicleSystem::release_flares(Entity &vehicle) {
 				{ vehicle.position.x.q16, vehicle.position.y.q16,
 						vehicle.position.z.q16 },
 				vehicle.veh.yaw_seeded ? vehicle.veh.yaw_bam
-									   : bam_heading_from_mission_yaw_deg(vehicle.yaw),
+									   : vehicle.heading,
 				vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
 									   : bam_from_degrees_wrapped(vehicle.pitch),
 				uint8_t(ammo));

@@ -58,7 +58,7 @@ struct Rig {
         Entity seed;
         seed.kind = EntityKind::Organic; seed.item_id = 41; seed.has_item_def = true;
         seed.item_type = 3; seed.net_id = uint16_t(id); seed.team = 1; seed.group_id = 7;
-        seed.position = {8, 8, 0}; seed.yaw = 90;
+        seed.position = {8, 8, 0}; seed.heading = placed_heading_bam(90);
         handle = world.registry.spawn(0, seed);
         world.ai.attach(handle);
         body().inf.active = true;
@@ -501,7 +501,7 @@ struct StillPeople {
         Entity seed;
         seed.kind = EntityKind::Organic; seed.item_id = 41; seed.has_item_def = true;
         seed.item_type = 3; seed.net_id = uint16_t(id); seed.team = uint8_t(team);
-        seed.position = {x, y, 0}; seed.yaw = int16_t(yaw);
+        seed.position = {x, y, 0}; seed.heading = placed_heading_bam(int16_t(yaw));
         seed.flags = guard ? 0x40u : 0u;
         const EntityHandle handle = owned->registry.spawn(0, seed);
         owned->ai.attach(handle);
@@ -545,7 +545,7 @@ bool same_attention(StillPeople &a, StillPeople &b, size_t i) {
            p.eye_offset_x == q.eye_offset_x && p.eye_offset_y == q.eye_offset_y &&
            p.eye_offset_z == q.eye_offset_z && u.eye_offset_x == v.eye_offset_x &&
            u.eye_offset_y == v.eye_offset_y && u.eye_offset_z == v.eye_offset_z &&
-           ((u.flags ^ v.flags) & 0x40u) == 0 && u.yaw == v.yaw && x.self->position.x.q16 == y.self->position.x.q16 &&
+           ((u.flags ^ v.flags) & 0x40u) == 0 && mission_yaw_whole_deg(u.heading) == mission_yaw_whole_deg(v.heading) && x.self->position.x.q16 == y.self->position.x.q16 &&
            x.self->position.y.q16 == y.self->position.y.q16 && x.self->position.z.q16 == y.self->position.z.q16 && u.position.x == v.position.x &&
            u.position.y == v.position.y && u.position.z == v.position.z && x.health == y.health &&
            u.health == v.health && p.max_health == q.max_health;

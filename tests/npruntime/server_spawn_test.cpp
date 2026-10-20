@@ -56,7 +56,7 @@ void make_world(w::World &world) {
 	start.kind = w::EntityKind::Marker;
 	start.item_id = 6002; // non-team fallback player start
 	start.position = {123.0f, 456.0f, 7.0f};
-	start.yaw = 30;
+	start.heading = w::placed_heading_bam(30);
 	world.registry.spawn(3, start);
 }
 
@@ -767,7 +767,7 @@ int main() {
 			start.kind = w::EntityKind::Marker;
 			start.item_id = 6001; // the Co-op fallback start, 00TRa's only player start
 			start.position = {297.81f, -409.12f, 27.14f};
-			start.yaw = 45;
+			start.heading = w::placed_heading_bam(45);
 			sp_world->registry.spawn(3, start);
 
 			ns::LoopbackChannel sp_loop;
@@ -811,7 +811,7 @@ int main() {
 		start.kind = w::EntityKind::Marker;
 		start.item_id = 6001;
 		start.position = {-534.9119f, -139.3639f, 25.5f};
-		start.yaw = -197;
+		start.heading = w::placed_heading_bam(-197);
 		cp01_world->registry.spawn(3, start);
 
 		ns::LoopbackChannel cp01_loop;
@@ -831,7 +831,7 @@ int main() {
 		if (!expect(motor != nullptr && static_cast<uint32_t>(motor->heading) == 0xCC160000u,
 		            "the host player's motor heading is the marker's word 0xCC160000")) return 1;
 		const w::Entity *player = cp01_world->registry.get(cp01_world->cached.local_player);
-		if (!expect(player != nullptr && player->yaw == -197,
+		if (!expect(player != nullptr && player->heading == w::placed_heading_bam(-197),
 		            "the player's whole-degree mirror stays the record's")) return 1;
 
 		// D-NET-377: a medic revive's deploy restores ONLY the saved position. The
@@ -849,7 +849,7 @@ int main() {
 		            "the host's own connection owns the CP01 player")) return 1;
 		// The body died 30 units away facing elsewhere; the revive saved its spot.
 		body->position = {-504.9119f, -139.3639f, 26.0f};
-		body->yaw = 10;
+		body->heading = w::placed_heading_bam(10);
 		body->pitch = 7;
 		body_motor->heading = 0x12340000;
 		body->alive = false;
@@ -865,7 +865,7 @@ int main() {
 		                    body->position.x == -504.9119f && body->position.z == 26.25f,
 		            "the revive deploy lands on the saved spot raised 0x4000")) return 1;
 		if (!expect(static_cast<uint32_t>(body_motor->heading) == 0xCC160000u &&
-		                    body->yaw == -197 && body->pitch == 0,
+		                    body->heading == w::placed_heading_bam(-197) && body->pitch == 0,
 		            "the revived player keeps the start marker's facing, not the body's")) return 1;
 	}
 
@@ -895,7 +895,7 @@ int main() {
 		if (!expect(body != nullptr && body_motor != nullptr,
 		            "the marker-less player has a body and a motor")) return 1;
 		body_motor->heading = 0x12340000;
-		body->yaw = 10;
+		body->heading = w::placed_heading_bam(10);
 		body->alive = false;
 		body->health = 0;
 		body->flags |= w::kEntityFlagDead;
@@ -1021,7 +1021,7 @@ int main() {
 		start.has_item_def = true;
 		start.team = 2;
 		start.position = {1.0f, 0.0f, 2.0f};
-		start.yaw = 90;
+		start.heading = w::placed_heading_bam(90);
 		start.flags = w::kEntityFlagParachute;
 		start.ground_target = carrier_handle;
 		coop_world->registry.spawn(3, start);

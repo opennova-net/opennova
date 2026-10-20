@@ -644,7 +644,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 // The approach quadrant reads the victim's displacement minus
                 // the pusher's [orig: @0x4b395d..0x4b3963].
                 const int quadrant = run_over_quadrant(
-                        bam_heading_from_mission_yaw_deg(static_cast<double>(ent->yaw)),
+                        ent->heading,
                         io::bam_sub(vdx, pdx), io::bam_sub(vdy, pdy));
                 ent->death_anim_state = compute_death_anim_state(
                         kRunOverDeathBone, quadrant, kRunOverDeathCause);
@@ -1104,7 +1104,7 @@ std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
         inst.pos[1] = tv->pos[1];
         inst.pos[2] = tv->pos[2];
         if (const Entity *e = world.registry.get(h))
-            inst.heading_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw));
+            inst.heading_bam = e->heading;
 
         const CollisionModel &m = *tv->model;
         for (size_t si = 0; si < m.sections.size(); ++si) {

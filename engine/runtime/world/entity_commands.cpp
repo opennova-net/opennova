@@ -234,7 +234,7 @@ void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
                 e.health = 0;
                 if (record.has_round)
                     e.death_anim_state = hit_record_death_anim_state(
-                            record, bam_heading_from_mission_yaw_deg(e.yaw));
+                            record, e.heading);
                 return;
             }
             if (phase != 1) return;
@@ -1388,7 +1388,7 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
             std::atan2(fdy, fdx) * -683565275.5764316);
     const int32_t heading = a->veh.yaw_seeded
             ? a->veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(a->yaw));
+            : a->heading;
     // diff = wrap32(-yaw - trunc(atan2 * -(2^31/pi))) [orig: neg ecx; sub
     // ecx, eax @0x4f1977-0x4f1979] == wrap32(bearing - yaw); |.| equalizes.
     const int32_t diff = static_cast<int32_t>(
@@ -1630,8 +1630,7 @@ const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
 void sync_teleported_ai(World &world, const Entity &entity) {
     AiEntity *ae = world.ai.for_handle(entity.handle);
     if (ae == nullptr) return;
-    ae->heading = bam_heading_from_mission_yaw_deg(
-            static_cast<double>(entity.yaw));
+    ae->heading = entity.heading;
     ae->pitch = bam_from_degrees_wrapped(static_cast<double>(entity.pitch));
     ae->roll = bam_from_degrees_wrapped(static_cast<double>(entity.roll));
     ae->net_saved_live_pose[0] = ae->self->position.x.q16;
@@ -1651,7 +1650,7 @@ void sync_teleported_ai(World &world, const Entity &entity) {
 void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
                       bool single_action) {
     entity.position = marker.position;
-    entity.yaw = marker.yaw;
+    entity.heading = marker.heading;
     entity.pitch = marker.pitch;
     entity.roll = marker.roll;
     if (single_action || entity.handle.pool() != 0)

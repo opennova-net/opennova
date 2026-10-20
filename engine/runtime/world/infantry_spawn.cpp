@@ -293,7 +293,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
     // leaves savedLivePose (+0x80) alone. [orig: Entity_ResetToSpawnState
     //  @0x4B9610 - the stores @0x4B9632 / @0x4B963B / @0x4B9644]
     const EntityPosition origin = entity.position;
-    const int32_t heading = bam_heading_from_mission_yaw_deg(entity.yaw);
+    const int32_t heading = entity.heading;
     const uint32_t flags = entity.flags | entity.engine_flags;
     AiEntity *body = ai.for_handle(entity.handle);
     if (body != nullptr) {
@@ -460,8 +460,7 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         }
         if (entity.npc_respawns < 100) --entity.npc_respawns;
         entity.position = entity.spawn_position;
-        entity.yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(entity.spawn_heading))));
+        entity.heading = entity.spawn_heading;
         entity.flags = entity.engine_flags = entity.spawn_flags;
         entity_reset_to_spawn_state(world, ai, entity);
         world.recount_group_live();

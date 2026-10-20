@@ -136,7 +136,7 @@ int16_t death_angle_degrees_from_bam(int32_t bam) {
 void seed_piece_physics_angles(Entity &entity) {
     Entity::VehicleMotorState &motion = entity.veh;
     if (motion.yaw_seeded) return;
-    motion.yaw_bam = spawn_angle_bam(90 - entity.yaw);
+    motion.yaw_bam = entity.heading;
     motion.air_pitch_bam = spawn_angle_bam(entity.pitch);
     motion.air_roll_bam = spawn_angle_bam(entity.roll);
     motion.yaw_seeded = true;
@@ -144,8 +144,7 @@ void seed_piece_physics_angles(Entity &entity) {
 
 void publish_piece_physics_angles(Entity &entity) {
     const Entity::VehicleMotorState &motion = entity.veh;
-    entity.yaw = static_cast<int16_t>(std::lround(
-            mission_yaw_deg_from_bam_heading(motion.yaw_bam)));
+    entity.heading = motion.yaw_bam;
     entity.pitch = death_angle_degrees_from_bam(motion.air_pitch_bam);
     entity.roll = death_angle_degrees_from_bam(motion.air_roll_bam);
 }
@@ -269,7 +268,7 @@ Vec3 vec_sub(const Vec3 &a, const Vec3 &b) { return Vec3{a.x - b.x, a.y - b.y, a
 CollisionMatrix destruction_orientation(const Entity &target) {
     const int32_t origin[3] = {0, 0, 0};
     return collision_matrix_from_euler(
-            bam_heading_from_mission_yaw_deg(static_cast<double>(target.yaw)),
+            target.heading,
             bam_from_degrees_wrapped(static_cast<double>(target.pitch)),
             bam_from_degrees_wrapped(static_cast<double>(target.roll)), origin);
 }
@@ -445,7 +444,7 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     // The approach quadrant from the victim toward the entry point.
     // [orig: @0x4E666A..0x4E66B1 — the fpatan @0x4E668D; the shift @0x4E6725]
     const int quadrant = approach_quadrant(
-            bam_heading_from_mission_yaw_deg(static_cast<double>(target.yaw)),
+            target.heading,
             io::bam_sub(e.pos.x.q16, target.position.x.q16),
             io::bam_sub(e.pos.y.q16, target.position.y.q16),
             kCollisionQuadrantBias);
@@ -577,7 +576,7 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
         // point, biased by 0x1FFFFFFF, so a blast in front is quadrant 0
         // [orig: the entry-minus-target fpatan @ 0x4e6a07..0x4e6a2e,
         //  `add ecx, 1FFFFFFFh; shr ecx, 1Eh` @ 0x4e6a58..0x4e6a5e].
-        const int32_t heading_bam = bam_heading_from_mission_yaw_deg(target.yaw);
+        const int32_t heading_bam = target.heading;
         const int quadrant = approach_quadrant(heading_bam,
                 io::bam_sub(e.pos.x.q16, target.position.x.q16),
                 io::bam_sub(e.pos.y.q16, target.position.y.q16), 0x1FFFFFFFu);

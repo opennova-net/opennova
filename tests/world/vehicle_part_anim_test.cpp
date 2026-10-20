@@ -12,6 +12,7 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <cstdio>
 #include <cmath>
@@ -145,7 +146,7 @@ struct Rig {
 		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 		veh.item_attrib = kItemAttribPlayerControl;
 		veh.position = {100.0f, 200.0f, 10.0f};
-		veh.yaw = 0;
+		veh.heading = placed_heading_bam(0);
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.alive = true;
@@ -558,7 +559,7 @@ void test_rotor_wash_particles_and_lifetime() {
 	Entity seed;
 	seed.kind = EntityKind::Item;
 	seed.position = { 0, 0, 6 };
-	seed.yaw = 90;
+	seed.heading = placed_heading_bam(90);
 	seed.health = seed.health_max = 1000;
 	const auto h = world.registry.spawn(1, seed);
 	Entity &helo = *world.registry.get(h);

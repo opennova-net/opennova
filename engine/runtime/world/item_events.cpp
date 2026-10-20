@@ -295,7 +295,7 @@ void gnl2_death_expiry(World &world, Entity &target, int32_t section) {
     spawn_item_explosion(world, world.registry.get(target.last_attacker),
             {target.position.x.q16, target.position.y.q16,
              io::bam_add(target.position.z.q16, 0x10000)},
-            spawn_angle_bam(90 - target.yaw), 60);
+            target.heading, 60);
     emit_item_state(world, target, section);
 	land_class_husk(world, target);
 	if (target.death_tick == 0) target.death_tick = world.logic_tick;
@@ -448,7 +448,7 @@ void barrel_event(World &world, Entity &target) {
         //  @0x407D0E; the Yaw word Entity_SpawnFromBMSRecord @0x40EB66]
         spawn_item_explosion(world, nullptr,
                 {target.position.x.q16,target.position.y.q16,target.position.z.q16},
-                spawn_angle_bam(90 - target.yaw), 10);
+                target.heading, 10);
         if (world.rules.mp_session) world.out.entity_events.push_back(EntityRemoveEvent{target.handle.packed});
         world.commands.remove_ssn(target.handle);
     } else if (target.health > 0) {
@@ -520,7 +520,7 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
             const int32_t origin[] = {entity.position.x.q16,
                     entity.position.y.q16, entity.position.z.q16};
             const auto matrix = collision_matrix_from_euler(
-                    bam_heading_from_mission_yaw_deg(entity.yaw), bam_from_degrees_wrapped(entity.pitch),
+                    entity.heading, bam_from_degrees_wrapped(entity.pitch),
                     bam_from_degrees_wrapped(entity.roll), origin);
             const int32_t width = io::bam_sub(traits->model_max_q16[0], traits->model_min_q16[0]);
             const int32_t height = io::bam_sub(traits->model_max_q16[1], traits->model_min_q16[1]);

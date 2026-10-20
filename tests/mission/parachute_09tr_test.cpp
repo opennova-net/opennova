@@ -41,7 +41,7 @@ int main() {
     const auto carrier = heli->handle;
     const auto player = r.world.cached.local_player;
     const auto rest = heli->position;
-    const auto rest_yaw = heli->yaw;
+    const auto rest_yaw = world::mission_yaw_whole_deg(heli->heading);
     // Stage above the floor; production collision must acquire support. No
     // ground link, mount, route, event, or vehicle pose is injected by the test.
     r.world.commands.set_entity_position(player,
@@ -82,7 +82,7 @@ int main() {
         }
     }
     const float dx = heli->position.x - rest.x, dy = heli->position.y - rest.y;
-    if (!supported || !airborne || dx*dx + dy*dy < 100 || heli->yaw == rest_yaw ||
+    if (!supported || !airborne || dx*dx + dy*dy < 100 || world::mission_yaw_whole_deg(heli->heading) == rest_yaw ||
             !r.events.event_fired(25) || !r.events.event_fired(26) || !r.events.event_fired(27)) {
         std::printf("FAIL takeoff did not exercise translation, turn, and boarding orders\n");
         return 1;

@@ -46,12 +46,9 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	// SelfSpawn position is mission i32 16.16; PlayerSpawn.position is float mission units.
 	spawn.position.set_q16({s.pos_x, s.pos_y, s.pos_z});
 	// orientation is ALREADY a full 32-bit BAM (unlike HostJoinerPose.heading, an i16
-	// the host shifts << 16) -> pass it straight to the (90 - heading) mission-degree map.
-	spawn.yaw = static_cast<int16_t>(
-			std::lround(world::mission_yaw_deg_from_bam_heading(s.orientation)));
-	// The motor keeps the record's full word, never its whole-degree mirror
-	// (D-NET-376) [orig: NapiNPClientMsg_0x00C @0x42E967 `mov [edi+10h], ecx`].
-	spawn.heading_bam = s.orientation;
+	// the host shifts << 16): the body keeps the record's full word (D-NET-376,
+	// D-NET-NEW-L6-2) [orig: NapiNPClientMsg_0x00C @0x42E967 `mov [edi+10h], ecx`].
+	spawn.heading = s.orientation;
 	spawn.team = s.team;
 	// The named player record carries the host-stamped character selector and
 	// packed minimap/character id; L keeps both (a zero animSlot recreated D-NET-146's
@@ -215,7 +212,7 @@ void JoinerRole::spawn_and_arm_local_player() {
 		lp.weapon.fire_pressed = false;
 		lp.weapon.reload_pressed = false;
 		kernel.resolve_new_infantry_adm_ids();
-		lp.reset_local_player_input(world::player_spawn_heading(spawn));
+		lp.reset_local_player_input(spawn.heading);
 	}
 }
 
@@ -313,8 +310,7 @@ void JoinerRole::apply_authoritative_health() {
 							static_cast<int32_t>(
 									static_cast<uint32_t>(self->pitch_byte) << 24);
 					local->position.set_q16({self->x, self->y, self->z}); // the record's words (D-NET-507)
-					local->yaw = static_cast<int16_t>(std::lround(
-							world::mission_yaw_deg_from_bam_heading(heading)));
+					local->heading = heading;
 					local->pitch = static_cast<int16_t>(std::lround(
 							static_cast<double>(pitch) * world::kDegreesPerBam));
 					local->roll = 0;
@@ -412,8 +408,7 @@ void JoinerRole::apply_world_state_load() {
 		world::AiEntity *local_ai = world.ai.for_handle(world.cached.local_player);
 		if (local != nullptr && local_ai != nullptr) {
 			local->position.set_q16({ws.pos_x, ws.pos_y, ws.pos_z}); // the 0x0F words (D-NET-507)
-			local->yaw = static_cast<int16_t>(std::lround(
-					world::mission_yaw_deg_from_bam_heading(ws.yaw_bam)));
+			local->heading = ws.yaw_bam;
 			local->pitch = static_cast<int16_t>(std::lround(
 					static_cast<double>(ws.pitch_bam) * world::kDegreesPerBam));
 			local->roll = static_cast<int16_t>(std::lround(
@@ -675,8 +670,7 @@ void JoinerRole::mirror_mission_entities() {
 				local->veh.yaw_bam = es.heading_bam;
 				local->veh.air_pitch_bam = es.pitch_bam;
 				local->veh.air_roll_bam = es.roll_bam;
-				local->yaw = static_cast<int16_t>(std::lround(
-						world::mission_yaw_deg_from_bam_heading(es.heading_bam)));
+				local->heading = es.heading_bam; // the wire's Yaw word (D-NET-NEW-L6-2)
 				local->pitch = static_cast<int16_t>(std::lround(
 						double(es.pitch_bam) * world::kDegreesPerBam));
 				local->roll = static_cast<int16_t>(std::lround(
@@ -721,8 +715,7 @@ void JoinerRole::mirror_mission_entities() {
 		// an exact heading_bam; mirror it for unresolved children whose rigid wire
 		// pose is the world-consumer source of truth.
 		if (es.heading_known || unresolved_persistent_attachment)
-			local->yaw = static_cast<int16_t>(std::lround(
-					world::mission_yaw_deg_from_bam_heading(es.heading_bam)));
+			local->heading = es.heading_bam;
 		local->pitch = static_cast<int16_t>(std::lround(
 				double(es.pitch_bam) * world::kDegreesPerBam));
 		local->roll = static_cast<int16_t>(std::lround(
@@ -762,8 +755,7 @@ void JoinerRole::mirror_mission_entities() {
 						local->position.y.q16 = es.y;
 						local->position.z.q16 = es.z;
 						if (m.yaw_seeded) m.yaw_bam = es.heading_bam;
-						local->yaw = static_cast<int16_t>(std::lround(
-								world::mission_yaw_deg_from_bam_heading(es.heading_bam)));
+						local->heading = es.heading_bam;
 						if (local->health != 0) {
 							health_word = 0;
 							world::apply_item_state_event(world, *local, 0);
@@ -914,8 +906,7 @@ void JoinerRole::mirror_predicted_vehicles() {
 		es.y = local->position.y.q16;
 		es.z = local->position.z.q16;
 		es.heading_bam = local->veh.yaw_bam;
-		local->yaw = static_cast<int16_t>(std::lround(
-				world::mission_yaw_deg_from_bam_heading(local->veh.yaw_bam)));
+		local->heading = local->veh.yaw_bam;
 		// Every family mover owns live attitude now: air/water solves plus the
 		// ground/bike wheeled contact solve (Entity_ProcessTrackedVehiclePhysics
 		// @0x47C1C0 client subset). Publish zero too: level is a real solved

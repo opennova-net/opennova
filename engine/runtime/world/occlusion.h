@@ -134,8 +134,8 @@ void render_float_from_fixed(const int32_t p[3], float out[3]);
 RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int32_t pitch_bam,
                                      int32_t roll_bam);
 
-// Live entity -> the same full retail render pose. Mission yaw uses the
-// canonical heading conversion; authored pitch/roll are direct wrapped BAMs.
+// Live entity -> the same full retail render pose: the entity's Yaw word;
+// authored pitch/roll are direct wrapped BAMs.
 // [orig: the entity+4 call sites of Math_BuildFixedPointToFloatMatrix4x4]
 RenderMatrix render_matrix_from_entity_pose(const Entity &entity);
 
@@ -545,7 +545,8 @@ private:
     struct StaticPoseMemo {
         uint16_t handle_packed = 0; // guards the slot-index addressing
         const CollisionModel *cm = nullptr;
-        float yaw = 0.0f, pitch = 0.0f, roll = 0.0f;
+        int32_t heading = 0; // the Yaw word
+        float pitch = 0.0f, roll = 0.0f;
         int32_t pos[3] = {0, 0, 0};
         int32_t center_world[3] = {0, 0, 0};
         int32_t radius = 0;

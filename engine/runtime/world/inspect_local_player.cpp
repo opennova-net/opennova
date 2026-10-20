@@ -1,5 +1,6 @@
 #include <runtime/world/inspect_local_player.h>
 
+#include <runtime/world/angle.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
@@ -21,7 +22,7 @@ bool local_player_report(const World &world, const LocalPlayer &local, const Col
 	out.hidden = e->hidden;
 	out.dead = local.local_player_dead();
 	out.position = e->position;
-	out.yaw_deg = e->yaw;
+	out.yaw_deg = mission_yaw_whole_deg(e->heading);
 	out.pitch_deg = e->pitch;
 	out.roll_deg = e->roll;
 	out.stance = local.stance_latch();

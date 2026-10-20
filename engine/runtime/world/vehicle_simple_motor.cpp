@@ -230,7 +230,7 @@ void VehicleSystem::tick_simple_motor(
 		// The unmoved row's placement angles, as the entry copy reads them.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
 		//  Entity_ProcessInfantryPhysics @0x46E133/@0x46E13C/@0x46E14C]
-		m.yaw_bam = spawn_angle_bam(90 - e.yaw);
+		m.yaw_bam = e.heading;
 		m.air_pitch_bam = spawn_angle_bam(e.pitch);
 		m.air_roll_bam = spawn_angle_bam(e.roll);
 		m.yaw_seeded = true;
@@ -329,7 +329,7 @@ void VehicleSystem::tick_simple_motor(
 		}
 	}
 	e.position.set_q16({x, y, z});
-	e.yaw = int16_t(std::lround(mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+	e.heading = m.yaw_bam;
 	e.pitch = degrees_i16_from_bam(m.air_pitch_bam);
 	e.roll = degrees_i16_from_bam(m.air_roll_bam);
 	// The rebuilt entity matrix sets the matrix bit (Flags 0x20000), homed on

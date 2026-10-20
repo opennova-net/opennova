@@ -332,7 +332,7 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 		}
 	}
 	d.mission_position = ent.position;
-	d.yaw = ent.yaw;
+	d.yaw = mission_yaw_whole_deg(ent.heading);
 	d.pitch = ent.pitch;
 	d.roll = ent.roll;
 	d.primary_weapon_clip = ent.primary_weapon_slot.clip;

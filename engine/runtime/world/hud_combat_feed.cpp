@@ -197,7 +197,7 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 				int32_t end[3];
 				collision_matrix_from_euler(aim_body
 								? aim_body->heading
-								: bam_heading_from_mission_yaw_deg(occupant->yaw),
+								: occupant->heading,
 						aim_body ? aim_body->pitch : bam_from_degrees_wrapped(occupant->pitch), 0,
 						camera)
 						.transform_point(forward, end);

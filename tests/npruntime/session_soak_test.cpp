@@ -39,6 +39,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -244,7 +245,7 @@ bool run_soak(const SoakCase &soak) {
 		start.kind = w::EntityKind::Marker;
 		start.item_id = 6002;
 		start.position = {50.0f, 60.0f, 1.0f};
-		start.yaw = 0;
+		start.heading = w::placed_heading_bam(0);
 		world.registry.spawn(3, start);
 	}
 	for (int i = 0; i < soak.world_markers; ++i) {
@@ -252,7 +253,7 @@ bool run_soak(const SoakCase &soak) {
 		marker.kind = w::EntityKind::Marker;
 		marker.item_id = 6002;
 		marker.position = {10.0f + static_cast<float>(i), 20.0f, 1.0f};
-		marker.yaw = 0;
+		marker.heading = w::placed_heading_bam(0);
 		world.registry.spawn(3, marker);
 	}
 	bms::File mission;

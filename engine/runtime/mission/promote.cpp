@@ -263,7 +263,9 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // [orig: Entity_SpawnFromBMSRecord @0x40EB30..0x40EB3F]
     s.position.set_q16({e.x, e.y, e.z});
 	s.spawn_position = s.position;
-	s.yaw = e.yaw;
+	// The Yaw word: the spawn angle of 90 - the record's yaw (D-NET-NEW-L6-2).
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	s.heading = placed_heading_bam(e.yaw);
 	s.pitch = e.pitch;
     s.roll = e.roll;
     s.team = e.team;
@@ -613,7 +615,7 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         // The carrier's position words, copied raw (D-NET-507).
         // [orig: Entity_SpawnAddEWeapChildren @0x40F3C5..0x40F3EB]
         child_seed.position = carrier->position;
-        child_seed.yaw = carrier->yaw;
+        child_seed.heading = carrier->heading;
         child_seed.pitch = carrier->pitch;
         child_seed.roll = carrier->roll;
         child_seed.team = carrier->team;

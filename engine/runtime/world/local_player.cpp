@@ -279,8 +279,7 @@ void LocalPlayer::place_on_composed_view() {
 	p->inf.look_pitch = pitch;
 	input.look_heading = heading;
 	input.look_pitch = pitch;
-	e->yaw = static_cast<int16_t>(std::lround(
-			w::normalize_mission_yaw_deg(w::mission_yaw_deg_from_bam_heading(heading))));
+	e->heading = heading;
 }
 
 void LocalPlayer::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
@@ -909,7 +908,7 @@ void LocalPlayer::reset_for_new_round() {
     // [orig: Game_InitNewRound @0x4227DA..0x4227E3].
     const w::AiEntity *motor = player_ai();
     input.look_heading = motor != nullptr ? motor->heading
-                                          : bam_heading_from_mission_yaw_deg(local->yaw);
+                                          : local->heading;
     // The HUD buffers belong to the presenting device; one ordered effect
     // carries the reset without discarding unrelated mission events.
     Effect reset;

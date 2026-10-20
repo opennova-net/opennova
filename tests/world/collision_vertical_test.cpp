@@ -4,6 +4,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -60,7 +61,7 @@ Result resolve(int16_t nx, int16_t ny, int16_t nz, int32_t velocity,
     Entity building;
     building.kind = EntityKind::Building;
     building.position = {10, 10, 0};
-    building.yaw = 90;
+    building.heading = placed_heading_bam(90);
     building.alive = true;
     const auto obstacle = world->registry.spawn(2, building);
     collision.assign_entity(obstacle, collision.add_model(ceiling_model(nx, ny, nz)));
@@ -177,7 +178,7 @@ struct MotorRig {
         Entity building;
         building.kind = EntityKind::Building;
         building.position = {10, 10, 0};
-        building.yaw = 90;
+        building.heading = placed_heading_bam(90);
         building.alive = true;
         const auto obstacle = w->registry.spawn(2, building);
         collision.assign_entity(obstacle, collision.add_model(ceiling_model(nx, ny, nz, slab_z)));

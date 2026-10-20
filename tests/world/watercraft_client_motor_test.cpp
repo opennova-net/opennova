@@ -88,7 +88,7 @@ void make_rig(Rig &r) {
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	seed.item_attrib = w::kItemAttribPlayerControl;
 	seed.position = {100.0f, 200.0f, 10.0f};
-	seed.yaw = 90; // mission 90 deg = engine heading BAM 0 = +X forward
+	seed.heading = w::placed_heading_bam(90); // mission 90 deg = engine heading BAM 0 = +X forward
 	r.boat = r.world.registry.spawn(1, seed);
 	r.traits.physics = 1;
 	r.traits.family = w::VehicleFamily::Watercraft;
@@ -1027,7 +1027,7 @@ bool run_platform_solve_pushes_off_a_wall() {
 	w::Entity pier;
 	pier.kind = w::EntityKind::Building;
 	pier.alive = true;
-	pier.yaw = 90;
+	pier.heading = w::placed_heading_bam(90);
 	pier.position = {103.0f, 200.0f, 0.0f};
 	pier.bound_radius = 12.0f; // the bound sphere about its foot reaches the waterline
 	pier.item_type_index = 1; // the def row's ordinal: the +0x1C slice gate
@@ -1368,7 +1368,7 @@ bool run_ground_and_bike_local_driver_input_gate() {
 		if (!expect(local_vehicle && local_driver,
 		            "local ground/bike prediction rig ready")) return false;
 		local_driver->net_move_input = 0x08; // moving forward
-		local_driver->yaw = 37;
+		local_driver->heading = w::placed_heading_bam(37);
 		prime_prediction_tick(*local_vehicle, -7000);
 		local_vehicle->veh.net_recv_steer_bam =
 				w::bam_from_degrees_wrapped(-71.0);
@@ -1381,7 +1381,7 @@ bool run_ground_and_bike_local_driver_input_gate() {
 		                             local.traits.player_speed, -7000), 1),
 		             "local ground/bike driver blends current command with the wire mirror");
 		ok &= expect(local_vehicle->veh.steer_target_bam ==
-		                     w::bam_heading_from_mission_yaw_deg(37.0),
+		                     w::placed_heading_bam(37), // the driver's Yaw word
 		             "local ground/bike driver retains current player steer");
 
 		Rig remote;
@@ -1395,7 +1395,7 @@ bool run_ground_and_bike_local_driver_input_gate() {
 		if (!expect(remote_vehicle && remote_driver,
 		            "remote ground/bike prediction rig ready")) return false;
 		remote_driver->net_move_input = 0x08;
-		remote_driver->yaw = 37;
+		remote_driver->heading = w::placed_heading_bam(37);
 		const int32_t received_steer = w::bam_from_degrees_wrapped(-71.0);
 		prime_prediction_tick(*remote_vehicle, -7000);
 		remote_vehicle->veh.net_recv_steer_bam = received_steer;
@@ -1420,7 +1420,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	if (!expect(local_boat && local_driver,
 	            "local watercraft prediction rig ready")) return false;
 	local_driver->net_move_input = 0x08;
-	local_driver->yaw = 53;
+	local_driver->heading = w::placed_heading_bam(53);
 	prime_prediction_tick(*local_boat, -2000);
 	local_boat->veh.net_recv_steer_bam = w::bam_from_degrees_wrapped(-80.0);
 	local.world.vehicles.watercraft_client_tick(*local_boat, local.traits);
@@ -1428,7 +1428,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	ok &= expect(local_boat->veh.cmd_speed == 5000,
 	             "local watercraft averages current and received speed commands");
 	ok &= expect(local_boat->veh.steer_target_bam ==
-	                     w::bam_heading_from_mission_yaw_deg(53.0),
+	                     w::placed_heading_bam(53), // the driver's Yaw word
 	             "local watercraft retains current player steer");
 
 	Rig remote;
@@ -1440,7 +1440,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	if (!expect(remote_boat && remote_driver,
 	            "remote watercraft prediction rig ready")) return false;
 	remote_driver->net_move_input = 0x08;
-	remote_driver->yaw = 53;
+	remote_driver->heading = w::placed_heading_bam(53);
 	const int32_t received_steer = w::bam_from_degrees_wrapped(-80.0);
 	prime_prediction_tick(*remote_boat, -2000);
 	remote_boat->veh.net_recv_steer_bam = received_steer;
@@ -1482,7 +1482,7 @@ bool run_aircraft_local_pilot_input_gate() {
 	w::Entity *pilot = mount_prediction_driver(local, true);
 	if (!expect(heli && pilot, "local air prediction rig ready")) return false;
 	pilot->net_move_input = 0x08; // moving forward -> cmd = flight speed
-	pilot->yaw = 41;
+	pilot->heading = w::placed_heading_bam(41);
 	prime_prediction_tick(*heli, -7000);
 	heli->veh.net_recv_lat = 3000;
 	heli->veh.net_recv_steer_bam = w::bam_from_degrees_wrapped(-66.0);
@@ -1498,7 +1498,7 @@ bool run_aircraft_local_pilot_input_gate() {
 	                     opennova::io::bam_sar(3000, 1),
 	             "the local pilot blends lateral command with the wire mirror");
 	ok &= expect(heli->veh.steer_target_bam ==
-	                     w::bam_heading_from_mission_yaw_deg(41.0),
+	                     w::placed_heading_bam(41), // the driver's Yaw word
 	             "the local pilot's LOOK owns the steer target");
 
 	Rig remote;
@@ -1510,7 +1510,7 @@ bool run_aircraft_local_pilot_input_gate() {
 	w::Entity *rpilot = mount_prediction_driver(remote, false);
 	if (!expect(rheli && rpilot, "remote air prediction rig ready")) return false;
 	rpilot->net_move_input = 0x08;
-	rpilot->yaw = 41;
+	rpilot->heading = w::placed_heading_bam(41);
 	const int32_t received_steer = w::bam_from_degrees_wrapped(-66.0);
 	prime_prediction_tick(*rheli, -7000);
 	rheli->veh.net_recv_lat = 3000;
@@ -1980,7 +1980,7 @@ bool run_physicsless_air_dispatches_directly() {
 	air_seed.kind = w::EntityKind::Item;
 	air_seed.item_id = 6001;
 	air_seed.position = {100.0f, 200.0f, 60.0f};
-	air_seed.yaw = 90;
+	air_seed.heading = w::placed_heading_bam(90);
 	air_seed.health = 3000;
 	air_seed.flags |= w::kEntityFlagInAir;
 	const w::EntityHandle air_h = world.registry.spawn(1, air_seed);
@@ -2054,7 +2054,7 @@ bool run_client_family_sound_dispatch_scope() {
 		seed.kind = w::EntityKind::Item;
 		seed.item_id = item_id;
 		seed.position = {x, 200.0f, 60.0f};
-		seed.yaw = 90;
+		seed.heading = w::placed_heading_bam(90);
 		seed.health = 3000;
 		seed.flags |= w::kEntityFlagInAir;
 		return world.registry.spawn(1, seed);
@@ -2287,9 +2287,9 @@ bool run_authority_player_drive_uses_waterspeed() {
 	if (drv == nullptr) return false;
 	drv->player_class = 2;   // a human driver [orig: the Flags & 0x100 class]
 	drv->flags |= 0x100u;
-	drv->yaw = 90; // mission yaw 90 = BAM heading 0 = +x, matching the hull
+	drv->heading = w::placed_heading_bam(90); // mission yaw 90 = BAM heading 0 = +x, matching the hull
 	w::Entity *boat = r.world.registry.get(r.boat);
-	boat->yaw = 90;
+	boat->heading = w::placed_heading_bam(90);
 	w::Entity *ctrl = r.world.vehicles.resolve_controller(*boat);
 	bool ok = expect(ctrl != nullptr, "player controller resolves");
 
@@ -2334,9 +2334,9 @@ bool run_submerged_driver_hands_to_ai_leg() {
 	if (drv == nullptr) return false;
 	drv->player_class = 2;
 	drv->flags |= 0x100u;
-	drv->yaw = 90;
+	drv->heading = w::placed_heading_bam(90);
 	w::Entity *boat = r.world.registry.get(r.boat);
-	boat->yaw = 90;
+	boat->heading = w::placed_heading_bam(90);
 	drv->net_move_input = 0x08u | 0x01u;
 	bool ok = true;
 	// Eye above the plane: the player leg commands waterSpeed.

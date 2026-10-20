@@ -618,7 +618,7 @@ PackedVector3Array Simulation::get_entity_effect_state_for_ssn(int p_ssn) const 
 			entity->position.x, entity->position.z, -entity->position.y));
 	out.set(EFFECT_STATE_ROTATION_DEG, Vector3(
 			static_cast<float>(entity->pitch),
-			static_cast<float>(entity->yaw),
+			static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(entity->heading)),
 			static_cast<float>(entity->roll)));
 	return out;
 }

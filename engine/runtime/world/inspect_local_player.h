@@ -29,7 +29,7 @@ struct LocalPlayerReport {
 	bool hidden = false;
 	bool dead = false;
 	Vec3 position{};        // mission space
-	int32_t yaw_deg = 0;    // Entity::yaw (whole mission degrees)
+	int32_t yaw_deg = 0;    // Entity::heading as whole mission degrees
 	int32_t pitch_deg = 0;
 	int32_t roll_deg = 0;
 	int32_t stance = 0;     // 0 stand, 1 crouch, 2 prone (the sim's latch)

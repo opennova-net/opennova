@@ -20,6 +20,7 @@
 #include <runtime/world/throwables.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -532,7 +533,7 @@ void test_motor_sweep_ignores_non_pool_domains() {
         item.kind = EntityKind::Item;
         item.alive = true;
         item.position = Vec3{18.0f, 10.0f, -4.0f};
-        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+        item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
         // The grenade's gates project along its velocity over its horizontal
         // speed, which a 45-degree throw overshoots by 2x: the bound must reach
         // the projected point 11.3 u past the item for the walk to reach the
@@ -587,7 +588,7 @@ void test_grenade_item_contact_backs_off_along_the_ray() {
     item.kind = EntityKind::Item;
     item.alive = true;
     item.position = Vec3{18.0f, 10.0f, 6.0f};
-    item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     item.bound_radius = 12.0f; // the gates' 45-degree overshoot (above)
     const EntityHandle item_h = rig.w.registry.spawn(1, item);
     CHECK(item_h.valid());
@@ -700,7 +701,7 @@ void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
         near_seed.kind = EntityKind::Building;
         near_seed.health = 100;
         near_seed.position = Vec3{14.0f, 10.0f, 10.0f};
-        near_seed.yaw = 90; // identity model placement
+        near_seed.heading = placed_heading_bam(90); // identity model placement
         near_seed.bound_radius = 12.0f;
         const EntityHandle near_h = rig.w.registry.spawn(2, near_seed);
         CollisionWorld collision;
@@ -715,7 +716,7 @@ void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
             far_seed.kind = EntityKind::Item;
             far_seed.alive = true;
             far_seed.position = Vec3{18.0f, 10.0f, 6.0f};
-            far_seed.yaw = 90;
+            far_seed.heading = placed_heading_bam(90);
             far_seed.bound_radius = 12.0f;
             const EntityHandle far_h = rig.w.registry.spawn(1, far_seed);
             collision.assign_entity(
@@ -772,7 +773,7 @@ void test_motor_sweep_passes_a_model_less_entity() {
     seed.kind = EntityKind::Building;
     seed.health = 100;
     seed.position = Vec3{14.0f, 10.0f, 10.0f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.bound_radius = 12.0f;
     rig.w.registry.spawn(2, seed);
     CollisionWorld collision;
@@ -802,7 +803,7 @@ void test_grenade_gates_project_along_the_velocity() {
         item.kind = EntityKind::Item;
         item.alive = true;
         item.position = Vec3{18.0f, 10.0f, item_z};
-        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+        item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
         item.bound_radius = 0.4f;
         const EntityHandle item_h = rig.w.registry.spawn(1, item);
         CHECK(item_h.valid());
@@ -832,7 +833,7 @@ void test_satchel_item_contact_restores_the_tick_start_pose() {
     item.kind = EntityKind::Item;
     item.alive = true;
     item.position = Vec3{18.0f, 10.0f, -4.0f};
-    item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     item.bound_radius = 0.4f;
     const EntityHandle item_h = rig.w.registry.spawn(1, item);
     CHECK(item_h.valid());
@@ -1385,7 +1386,7 @@ void test_placed_device_pose_and_ballistic_damage() {
     CHECK(entity != nullptr);
     if (entity == nullptr) return;
     CHECK(entity->has_item_def);
-    CHECK(entity->yaw == 68);
+    CHECK(entity->heading == 0x10000000); // the round's Yaw word
     CHECK(entity->pitch == 45);
     CHECK(entity->roll == -90);
     CHECK(!entity->ground_target.valid());
@@ -1426,7 +1427,7 @@ void test_parented_device_follows_parent_yaw() {
     Entity parent_seed;
     parent_seed.kind = EntityKind::Item;
     parent_seed.position = Vec3{10, 10, 1};
-    parent_seed.yaw = 90; // mission heading zero
+    parent_seed.heading = placed_heading_bam(90); // mission heading zero
     const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
     CHECK(parent.valid());
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 2}, parent);
@@ -1441,7 +1442,7 @@ void test_parented_device_follows_parent_yaw() {
     // [orig: the +0x80..+0x94 prologue stamps every mover carries].
     stamp_saved_live_pose(*carrier);
     carrier->position = Vec3{20, 30, 3};
-    carrier->yaw = 0; // +90 degrees of mission-heading rotation
+    carrier->heading = placed_heading_bam(0); // +90 degrees of mission-heading rotation
     step_devices(rig.w, nullptr, nullptr);
     const PlacedDevice &device = rig.w.throwables.devices[0];
     CHECK(std::fabs(device.pos.x - 20.0f) < 1e-4f);
@@ -1449,7 +1450,7 @@ void test_parented_device_follows_parent_yaw() {
     CHECK(std::fabs(device.pos.z - 4.0f) < 1e-4f);
     CHECK(static_cast<uint32_t>(device.yaw_bam) == 0x40000000u);
     const Entity *entity = rig.w.registry.get(device.entity);
-    CHECK(entity != nullptr && entity->yaw == 0);
+    CHECK(entity != nullptr && entity->heading == placed_heading_bam(0));
     CHECK(entity != nullptr && entity->ground_target == parent);
     CHECK(rig.w.throwables.events.spawns.size() == 1);
     if (!rig.w.throwables.events.spawns.empty()) {
@@ -1470,7 +1471,7 @@ void test_parented_device_adopts_parent_pitch() {
     Entity parent_seed;
     parent_seed.kind = EntityKind::Item;
     parent_seed.position = Vec3{10, 10, 1};
-    parent_seed.yaw = 90; // mission heading zero
+    parent_seed.heading = placed_heading_bam(90); // mission heading zero
     const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 1}, parent);
     round.yaw_bam = 0;
@@ -1553,7 +1554,7 @@ void test_parent_handle_reuse_detaches_device() {
     Entity parent_seed;
     parent_seed.kind = EntityKind::Item;
     parent_seed.position = Vec3{10, 10, 1};
-    parent_seed.yaw = 90;
+    parent_seed.heading = placed_heading_bam(90);
     const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 2}, parent);
     CHECK(rig.w.throwables.place_from_round(rig.w, round,
@@ -1561,7 +1562,7 @@ void test_parent_handle_reuse_detaches_device() {
     const Vec3 last_pos = rig.w.throwables.devices[0].pos;
     rig.w.registry.despawn(parent);
     parent_seed.position = Vec3{100, 100, 100};
-    parent_seed.yaw = 0;
+    parent_seed.heading = placed_heading_bam(0);
     const EntityHandle replacement = rig.w.registry.spawn(1, parent_seed);
     CHECK(replacement == parent);
     step_devices(rig.w, nullptr, nullptr);
@@ -1889,7 +1890,7 @@ void test_claymore_sector_los_blocks_trigger() {
     wall_seed.health = 100;
     wall_seed.position = Vec3{(placed.pos.x + ahead.x) * 0.5f,
                               (placed.pos.y + ahead.y) * 0.5f, 0.0f};
-    wall_seed.yaw = 90; // mission yaw 90 -> identity collision basis
+    wall_seed.heading = placed_heading_bam(90); // mission yaw 90 -> identity collision basis
     const EntityHandle wall = rig.w.registry.spawn(2, wall_seed);
 
     CollisionWorld collision;
@@ -2005,7 +2006,7 @@ void test_avmine_sees_one_unit_above_the_vehicle() {
         wall_seed.kind = EntityKind::Building;
         wall_seed.health = 100;
         wall_seed.position = Vec3{mine.landed.x, mine.landed.y + 2.0f, 0.0f};
-        wall_seed.yaw = 90; // mission yaw 90 -> identity collision basis
+        wall_seed.heading = placed_heading_bam(90); // mission yaw 90 -> identity collision basis
         const EntityHandle wall = mine.rig.w.registry.spawn(2, wall_seed);
         CollisionWorld collision;
         collision.terrain = &mine.rig.flat.field;
@@ -2418,7 +2419,7 @@ void test_claymore_parents_to_every_contact() {
         item.kind = EntityKind::Item;
         item.alive = true;
         item.position = Vec3{18.0f, 10.0f, -4.0f};
-        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+        item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
         item.bound_radius = 0.4f;
         const EntityHandle item_h = rig.w.registry.spawn(1, item);
         CollisionWorld collision;
@@ -2479,7 +2480,7 @@ void test_charge_stick_reads_the_local_face_normal() {
     Entity item;
     item.kind = EntityKind::Item;
     item.position = Vec3{20, 20, 2};
-    item.yaw = 0; // a quarter turn off the identity placement (yaw 90)
+    item.heading = placed_heading_bam(0); // a quarter turn off the identity placement (yaw 90)
     item.bound_radius = 4;
     const EntityHandle item_h = rig.w.registry.spawn(1, item);
     CollisionWorld cw;

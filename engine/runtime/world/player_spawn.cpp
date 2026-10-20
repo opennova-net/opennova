@@ -71,7 +71,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     }
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
-    seed.yaw = spawn.yaw;
+    seed.heading = spawn.heading; // the Yaw word (D-NET-NEW-L6-2)
     seed.pitch = spawn.pitch;
     seed.roll = spawn.roll;
     seed.team = spawn.team;
@@ -129,10 +129,9 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // skips it once net-snapped (inf.is_local_player stays false). [orig: net-re §5.38; ADR 0012]
     const int idx = world.ai.attach(h);
     AiEntity &ae = *world.ai.at(idx);
-    // The heading word the placement copied (D-NET-376), else the (90 - yaw)
-    // heading of a spawn with no source pose.
+    // The heading word the placement copied (D-NET-376).
     // [orig: Entity_FindBestSpawnPoint @0x50CF38]
-    ae.heading = player_spawn_heading(spawn);
+    ae.heading = spawn.heading;
     ae.team = spawn.team;
     ae.net_id = spawn.net_id;
     ae.health = static_cast<int16_t>(ent->health); // a signed 16-bit value above

@@ -4,6 +4,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 #include <base/io/crt_rand.h>
 #include <base/gameprofile/game_type.h>
 
@@ -25,7 +26,7 @@ EntityHandle spawn_marker(World &w, int32_t item_id, Vec3 pos, int16_t yaw = 0) 
     e.item_id = item_id;
     e.has_item_def = true;
     e.position = pos;
-    e.yaw = yaw;
+    e.heading = placed_heading_bam(yaw);
     return w.registry.spawn(3, e);
 }
 
@@ -97,7 +98,7 @@ int main() {
         CHECK(approx(r.position.x, 200.0f));
         CHECK(approx(r.position.y, 10.0f));
         CHECK(approx(r.position.z, 3.0f));
-        CHECK(r.yaw == 90);
+        CHECK(r.heading_bam == placed_heading_bam(90));
         CHECK(w.zones.spawn_cycle_counter == 1);
     }
 
@@ -139,11 +140,11 @@ int main() {
         };
         // Seed 1: 41 >> 8 = 0 then 18467 >> 8 = 72 -> the second marker wins.
         const SpawnPointResult first = pick(1);
-        CHECK(first.yaw == 22);
+        CHECK(first.heading_bam == placed_heading_bam(22));
         const SpawnPointResult again = pick(1);
-        CHECK(again.yaw == first.yaw && approx(again.position.x, first.position.x));
+        CHECK(again.heading_bam == first.heading_bam && approx(again.position.x, first.position.x));
         // Seed 106: 1 then 0 -> the first marker wins.
-        CHECK(pick(106).yaw == 11);
+        CHECK(pick(106).heading_bam == placed_heading_bam(11));
 
         // The owned state rides the world snapshot beside prng16_state.
         auto w_storage = std::make_unique<World>();
@@ -172,7 +173,7 @@ int main() {
             w, self, EntityHandle{}, 0, 0, 0x00000u);
         CHECK(r.found);
         CHECK(approx(r.position.x, 0.25f));
-        CHECK(r.yaw == 11);
+        CHECK(r.heading_bam == placed_heading_bam(11));
         CHECK(w.zones.spawn_cycle_counter == 1);
     }
 
@@ -192,7 +193,7 @@ int main() {
             w, EntityHandle{}, EntityHandle{}, 1, 1, 0x10020u);
         CHECK(r.found);
         CHECK(approx(r.position.x, 297.81f));
-        CHECK(r.yaw == 22);
+        CHECK(r.heading_bam == placed_heading_bam(22));
         CHECK(w.zones.spawn_cycle_counter == 0);
     }
 
@@ -206,7 +207,7 @@ int main() {
         Entity parent;
         parent.kind = EntityKind::Item;
         parent.position = {100.0f, 50.0f, 10.0f};
-        parent.yaw = 0;
+        parent.heading = placed_heading_bam(0);
         const EntityHandle parent_h = w.registry.spawn(1, parent);
         const EntityHandle marker_h = spawn_marker(w, 6094, {1.0f, 0.0f, 2.0f}, 90);
         Entity *marker = w.registry.get(marker_h);
@@ -219,7 +220,7 @@ int main() {
         CHECK(approx(r.position.x, 100.0f));
         CHECK(approx(r.position.y, 51.0f));
         CHECK(approx(r.position.z, 12.0f));
-        CHECK(r.yaw == 0 && r.pitch == 4 && r.roll == 5);
+        CHECK(r.heading_bam == placed_heading_bam(0) && r.pitch == 4 && r.roll == 5);
         CHECK(r.flags_or == 0 && !r.carrier.valid()); // team 0 marker: no latch
     }
 
@@ -242,10 +243,10 @@ int main() {
         spawn_marker(w, 6001, {-529.2835f, -138.3019f, 25.5f}, -167);
         SpawnPointResult r = resolve_player_spawn_pose(
             w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
-        CHECK(r.found && r.yaw == -197);
+        CHECK(r.found);
         CHECK(static_cast<uint32_t>(r.heading_bam) == 0xCC160000u);
         r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 1, 1, 0x30020u);
-        CHECK(r.found && r.yaw == -167);
+        CHECK(r.found);
         CHECK(static_cast<uint32_t>(r.heading_bam) == 0xB6C10000u);
     }
     {
@@ -255,7 +256,7 @@ int main() {
         w.registry.configure_pool(3, 16);
         Entity parent;
         parent.kind = EntityKind::Item;
-        parent.yaw = 73; // word 0x0C160000 (17 degrees truncated)
+        parent.heading = placed_heading_bam(73); // word 0x0C160000 (17 degrees truncated)
         const EntityHandle parent_h = w.registry.spawn(1, parent);
         const EntityHandle marker_h = spawn_marker(w, 6094, {1.0f, 0.0f, 0.0f}, 180);
         w.registry.get(marker_h)->ground_target = parent_h; // word 0xC0000000
@@ -278,12 +279,12 @@ int main() {
         w.registry.configure_pool(3, 4);
         const EntityHandle zone = spawn_zone(w, 1, 1, 0);
         Entity *vehicle = w.registry.get(zone);
-        vehicle->yaw = 30;
+        vehicle->heading = placed_heading_bam(30);
         vehicle->veh.yaw_seeded = true;
         vehicle->veh.yaw_bam = 0x2AAA1234;
         const SpawnPointResult r = resolve_player_spawn_pose(
             w, EntityHandle{}, zone, 0, 1, 0x10010u);
-        CHECK(r.found && r.yaw == 30 && r.heading_bam == 0x2AAA1234);
+        CHECK(r.found && r.heading_bam == 0x2AAA1234);
     }
 
     // --- The Co-op direct-marker arm's two survivors: the chosen marker's
@@ -590,7 +591,7 @@ int main() {
         const EntityHandle zone = spawn_zone(w, 2, 1, 1);
         Entity *target = w.registry.get(zone);
         target->position = {10.0f, 20.0f, 3.0f};
-        target->yaw = 30;
+        target->heading = placed_heading_bam(30);
         target->zone_radius = 5;
         spawn_marker(w, 6007, {12.0f, 20.0f, 7.0f}, 60);
         spawn_marker(w, 6007, {100.0f, 20.0f, 9.0f}, 90); // outside
@@ -599,14 +600,14 @@ int main() {
             w, EntityHandle{}, zone, 0, 1, 0x10010u);
         CHECK(pose.found && approx(pose.position.x, 10.0f));
         CHECK(approx(pose.position.z, 4.0f));
-        CHECK(pose.yaw == 30);
+        CHECK(pose.heading_bam == placed_heading_bam(30));
         CHECK(w.zones.spawn_cycle_counter == 1);
 
         pose = resolve_player_spawn_pose(
             w, EntityHandle{}, zone, 0, 1, 0x10010u);
         CHECK(approx(pose.position.x, 12.0f));
         CHECK(approx(pose.position.z, 7.0f));
-        CHECK(pose.yaw == 60);
+        CHECK(pose.heading_bam == placed_heading_bam(60));
         CHECK(w.zones.spawn_cycle_counter == 2);
 
         pose = resolve_player_spawn_pose(
@@ -635,7 +636,7 @@ int main() {
         Entity parent;
         parent.kind = EntityKind::Item;
         parent.position = {100.0f, 50.0f, 10.0f};
-        parent.yaw = 0; // heading 90 degrees: local +X becomes world +Y
+        parent.heading = placed_heading_bam(0); // heading 90 degrees: local +X becomes world +Y
         const EntityHandle parent_handle = w.registry.spawn(1, parent);
         const EntityHandle marker = spawn_marker(w, 6007, {1.0f, 0.0f, 2.0f}, 90);
         w.registry.get(marker)->pitch = 4;
@@ -649,7 +650,7 @@ int main() {
         CHECK(approx(pose.position.x, 100.0f));
         CHECK(approx(pose.position.y, 51.0f));
         CHECK(approx(pose.position.z, 12.0f));
-        CHECK(pose.yaw == 0);
+        CHECK(pose.heading_bam == placed_heading_bam(0));
         CHECK(pose.pitch == 4);
         CHECK(pose.roll == 5);
     }
@@ -849,13 +850,13 @@ int main() {
         w.rules.title = opennova::gameprofile::GAME_DFX2;
         SpawnPointResult r = resolve_player_spawn_pose(
             w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
-        CHECK(r.found && approx(r.position.x, 1.0f) && r.yaw == 90); // 0xFFFF: none yet
+        CHECK(r.found && approx(r.position.x, 1.0f) && r.heading_bam == placed_heading_bam(90)); // 0xFFFF: none yet
 
         w.script.coop_checkpoint_slot = static_cast<uint16_t>(checkpoint.slot());
         for (const uint32_t coop : {0x10020u, 0x30020u}) {
             r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, coop);
             CHECK(r.found && approx(r.position.x, 50.0f) && approx(r.position.y, 60.0f) &&
-                  approx(r.position.z, 5.0f) && r.yaw == 45);
+                  approx(r.position.z, 5.0f) && r.heading_bam == placed_heading_bam(45));
             CHECK(r.flags_or == 0x200u && r.carrier == start);
         }
         r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, 0x0u);
@@ -863,7 +864,7 @@ int main() {
 
         w.rules.title = opennova::gameprofile::GAME_JO;
         r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
-        CHECK(r.found && approx(r.position.x, 1.0f) && r.yaw == 90);
+        CHECK(r.found && approx(r.position.x, 1.0f) && r.heading_bam == placed_heading_bam(90));
     }
 
     if (failures == 0) std::printf("OK spawn_select\n");

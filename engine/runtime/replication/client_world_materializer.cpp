@@ -52,8 +52,7 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.display_name = row.display_name; // entity+0xF4
 	seed.position.set_q16({row.x, row.y, row.z});
 	seed.spawn_position = seed.position;
-	seed.yaw = static_cast<int16_t>(std::lround(
-			world::mission_yaw_deg_from_bam_heading(row.heading_bam)));
+	seed.heading = row.heading_bam;
 	seed.pitch = static_cast<int16_t>(std::lround(
 			static_cast<double>(row.pitch_bam) * world::kDegreesPerBam));
 	seed.roll = static_cast<int16_t>(std::lround(
@@ -95,12 +94,12 @@ bool update_live_row_state(
 	const world::Entity seed = seed_from(row);
 	const bool changed = entity.position.x != seed.position.x ||
 			entity.position.y != seed.position.y ||
-			entity.position.z != seed.position.z || entity.yaw != seed.yaw ||
+			entity.position.z != seed.position.z || entity.heading != seed.heading ||
 			entity.pitch != seed.pitch || entity.roll != seed.roll ||
 			entity.team != seed.team;
 	if (!changed) return false;
 	entity.position = seed.position;
-	entity.yaw = seed.yaw;
+	entity.heading = seed.heading;
 	entity.pitch = seed.pitch;
 	entity.roll = seed.roll;
 	entity.team = seed.team;

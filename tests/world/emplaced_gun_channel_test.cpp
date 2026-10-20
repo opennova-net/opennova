@@ -52,7 +52,7 @@ struct Rig {
         gun_seed.item_type_index = 2; // a resolved def row: the walk skips row 0 (@0x5426F2)
         gun_seed.health = 100;
         gun_seed.alive = true;
-        gun_seed.yaw = 0;
+        gun_seed.heading = placed_heading_bam(0);
         gun_seed.pitch = 0;
         gun_seed.item_attrib2 = attrib2;
         // An 'ewep' render class: the writer that publishes the gun words.
@@ -797,7 +797,7 @@ void test_freed_carrier_row_keeps_the_child() {
     w.registry.despawn(pr.parent_h);
     tick_emplaced_weapon_class_update(w, gun);
     CHECK(gun.position.x == 0.0f && gun.position.y == 0.0f && gun.position.z == 0.0f);
-    CHECK(gun.yaw == 90 && gun.pitch == 0 && gun.roll == 0);
+    CHECK(gun.heading == placed_heading_bam(90) && gun.pitch == 0 && gun.roll == 0);
     CHECK((gun.engine_flags & kEntityFlagMatrixBuilt) != 0);
     CHECK((gun.flags & kEntityFlagCarried) != 0);
 

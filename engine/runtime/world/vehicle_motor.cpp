@@ -242,9 +242,8 @@ Entity *VehicleSystem::resolve_controller(Entity &veh) {
 int32_t turn_pilot_view(World &world, Entity &pilot, int32_t delta) {
 	AiEntity *body = world.ai.for_handle(pilot.handle);
 	const int32_t yaw = io::bam_add(
-			body != nullptr ? body->heading : bam_heading_from_mission_yaw_deg(pilot.yaw), delta);
-	pilot.yaw = static_cast<int16_t>(
-			std::lround(normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(yaw))));
+			body != nullptr ? body->heading : pilot.heading, delta);
+	pilot.heading = yaw;
 	if (body != nullptr) {
 		body->heading = yaw;
 		body->inf.target_heading = io::bam_add(body->inf.target_heading, delta);
@@ -303,7 +302,7 @@ void stage_player_vehicle_input(
 	// [orig: Entity_UpdateVehiclePhysics @0x48BB0B; D-VEH-3]
 	const AiEntity *driver_body = world.ai.for_handle(occ.handle);
 	int32_t driver_yaw_bam = driver_body != nullptr ? driver_body->heading
-			: bam_heading_from_mission_yaw_deg(occ.yaw);
+			: occ.heading;
 
 	// Family split at the command source: the boat player leg reads itemDef
     // waterSpeed (+0x8EC) at EVERY command site — retail cbot defs author no
@@ -487,7 +486,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		// form, which the mover's entry copy reads as they stand.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
 		//  Entity_UpdateVehiclePhysics @0x48AF7A..0x48AF8C]
-		m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+		m.yaw_bam = veh.heading;
         // Seed the live BAM attitude mirror from the row's authored pose: one
         // entity Pitch/Roll in the original — the same storage the contact
         // solve conforms every grounded tick [orig: entity->Pitch/Roll writes
@@ -971,8 +970,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		veh.position.x.q16 = px;
 		veh.position.y.q16 = py;
 		veh.position.z.q16 = pz;
-        veh.yaw = static_cast<int16_t>(std::lround(
-                normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(m.yaw_bam))));
+        veh.heading = m.yaw_bam;
 	}
 
 	slew_turret(veh, 0x2108421);
@@ -1809,7 +1807,7 @@ void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
 	} else {
 		// An unmoved row: its placement angles in the spawn form.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
-		yaw = spawn_angle_bam(90 - e.yaw);
+		yaw = e.heading;
 		pitch = spawn_angle_bam(e.pitch);
 		roll = spawn_angle_bam(e.roll);
 	}
@@ -1833,7 +1831,7 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 	if (!m.yaw_seeded) {
 		// [orig: Entity_UpdateWatercraftPhysics @0x48D4B2 reads the row's Yaw,
 		//  unmoved = the spawn form, Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
-		m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+		m.yaw_bam = veh.heading;
 		m.yaw_seeded = true;
 	}
 
@@ -2086,8 +2084,7 @@ static void watercraft_motor_core(World &world, Entity &veh,
     // template's airborne-only Z-step gate). Yaw applies only AFTER this call.
     world.vehicles.watercraft_platform_solve(veh, traits);
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
-    veh.yaw = static_cast<int16_t>(std::lround(
-            mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+    veh.heading = m.yaw_bam;
 	detail::vehicle_sample_trails(world, veh, traits, m.cmd_speed);
 	// No rotor machine here: Entity_UpdateWatercraftPhysics @0x48D480..0x48EF74
 	// calls neither @0x4928B0 nor @0x48FA70, and its wheel phase is the thrust
@@ -2109,7 +2106,7 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
 		// The unmoved hull's placement angles, as the entry copy reads them.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
 		//  Entity_UpdateWatercraftPhysics @0x48D4B2/@0x48D4BB/@0x48D4CB]
-		m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+		m.yaw_bam = veh.heading;
         m.air_pitch_bam = spawn_angle_bam(veh.pitch);
         m.air_roll_bam = spawn_angle_bam(veh.roll);
         m.yaw_seeded = true;
@@ -2232,7 +2229,7 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
         // [orig: the movers' entry copy reads the row's Yaw, unmoved = the spawn
         //  form, Entity_UpdateVehiclePhysics @0x48AF7A; Entity_SpawnFromBMSRecord
         //  @0x40EB42..0x40EB66]
-        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+        m.yaw_bam = veh.heading;
         m.yaw_seeded = true;
     }
 	// The prologue's savedLivePose stamp precedes the chase.

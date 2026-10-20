@@ -18,7 +18,7 @@ void carrier_pose(const World &world, const Entity &carrier, int32_t out[6]) {
     out[2] = carrier.position.z.q16;
     const AiEntity *body = world.ai.for_handle(carrier.handle);
     out[3] = body ? body->heading : carrier.veh.yaw_seeded ? carrier.veh.yaw_bam
-        : bam_heading_from_mission_yaw_deg(carrier.yaw);
+        : carrier.heading;
     out[4] = body ? body->pitch : carrier.veh.yaw_seeded ? carrier.veh.air_pitch_bam
         : bam_from_degrees_wrapped(carrier.pitch);
     out[5] = body ? body->roll : carrier.veh.yaw_seeded ? carrier.veh.air_roll_bam
@@ -150,7 +150,7 @@ void local_weapon_fire_pose(World &world, const LocalPlayerWeapon &weapon,
     out[0] = io::bam_add(body ? body->self->position.x.q16 : shooter->position.x.q16, body ? body->inf.eye_offset_x : shooter->eye_offset_x);
     out[1] = io::bam_add(body ? body->self->position.y.q16 : shooter->position.y.q16, body ? body->inf.eye_offset_y : shooter->eye_offset_y);
     out[2] = io::bam_add(body ? body->self->position.z.q16 : shooter->position.z.q16, body ? body->inf.eye_offset_z : shooter->eye_offset_z);
-    out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(shooter->yaw);
+    out[3] = body ? body->heading : shooter->heading;
     out[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch) : bam_from_degrees_wrapped(shooter->pitch);
     out[5] = body ? body->roll : bam_from_degrees_wrapped(shooter->roll);
     // Add the minimum + local elevation offset, then the banded limit clamp.

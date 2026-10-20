@@ -89,7 +89,7 @@ int main_impl() {
 		start.kind = w::EntityKind::Marker;
 		start.item_id = 6002;
 		start.position = {50.0f, 60.0f, 1.0f};
-		start.yaw = 0;
+		start.heading = w::placed_heading_bam(0);
 		start.item_type_index = 1; // the trait sweep's row: not an empty slot
 		start.has_item_def = true;
 		world.registry.spawn(3, start);
@@ -119,7 +119,7 @@ int main_impl() {
 		bld.kind = w::EntityKind::Building;
 		bld.item_id = 0x044c;
 		bld.position = {-396.6f, 360.1f, 11.2f};
-		bld.yaw = 0;
+		bld.heading = w::placed_heading_bam(0);
 		bld.engine_flags = 0x04020400u;
 		bld.ammo_count = 0xFF;
 		bld.sub_type = 0xFF;
@@ -898,11 +898,11 @@ int pool1_fixture_bytes_impl() {
 	item.engine_flags = w::kEntityFlagMatrixBuilt; // its init's matrix bit 0x20000
 	item.name = "never streamed";               // not an AIData def
 	item.position = {1058.0f, 592.0f, 60.0f};
-	item.yaw = 60;                              // heading 30 deg: 0x15550000
+	item.heading = w::placed_heading_bam(60);                              // heading 30 deg: 0x15550000
 	item.ammo_count = 0xFF;
 	if (!expect(place(0x46, item).valid(), "item 0x1046 spawns")) return 1;
 	item.position = {992.0f, -489.0f, static_cast<float>(0x00451200) / 65536.0f};
-	item.yaw = 0;                               // heading 90 deg: 0x40000000
+	item.heading = w::placed_heading_bam(0);                               // heading 90 deg: 0x40000000
 	item.ammo_count = 0x00;
 	if (!expect(place(0x48, item).valid(), "item 0x1048 spawns")) return 1;
 	const std::vector<uint8_t> wire =
@@ -932,7 +932,7 @@ int pool1_fixture_bytes_impl() {
 	vehicle.ammo_count = 0xFF;
 	vehicle.position = {989.0f, 578.0f, static_cast<float>(0x003C032C) / 65536.0f};
 	vehicle.spawn_position = vehicle.position;
-	vehicle.yaw = 180; // engine heading 270 deg: 0xC0000000
+	vehicle.heading = w::placed_heading_bam(180); // engine heading 270 deg: 0xC0000000
 	vehicle.team = 2;
 	w::Seat passenger;
 	passenger.type = w::SeatType::Passenger;

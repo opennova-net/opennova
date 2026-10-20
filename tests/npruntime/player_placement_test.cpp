@@ -166,7 +166,7 @@ void test_a_markerless_add_takes_heading_word_zero() {
 	if (player == nullptr || motor == nullptr) return;
 	CHECK(player->position.x.q16 == 0 && player->position.y.q16 == 0);
 	CHECK(motor->heading == 0);
-	CHECK(player->yaw == 90);
+	CHECK(player->heading == w::placed_heading_bam(90));
 	// A joiner's add on the same markerless mission: the same words.
 	ns::UdpSessionTransport joiner_transport(ns::UdpSessionTransport::Role::Host);
 	ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(

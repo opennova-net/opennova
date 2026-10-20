@@ -514,7 +514,16 @@ struct Entity {
     // Mission space (Z-up): entity+4/+8/+0xC, the 16.16 words retail keeps
     // (geom.h EntityPosition; D-NET-507).
     EntityPosition position;
-    int16_t yaw = 0;
+    // The Yaw word (entity+0x10): the engine-frame BAM32 heading retail keeps
+    // per entity, the one store every reader reads. A placed row holds its
+    // spawn angle, ((90 - yaw) << 16) / 360 << 16 with the low half zero
+    // (world::spawn_angle_bam); a mover stores its live word. A reader that
+    // wants mission degrees converts it (mission_yaw_deg_from_bam_heading)
+    // (D-NET-NEW-L6-2). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
+    //  Entity_ResetToSpawnState @0x4B9610 - the read @0x4B964A] Every placement
+    // stores it; a bare seed starts at mission yaw 0's word, the facing the
+    // whole-degree field this replaced defaulted to.
+    int32_t heading = 0x40000000;
     int16_t pitch = 0;
     int16_t roll = 0;
     // The eye/camera-offset triple (entity+0x6C/+0x70/+0x74, 16.16): the
@@ -1283,10 +1292,10 @@ struct Entity {
     // AI/physics component (`vehicleData` = *(entity+100)); the slot comments name the
     // original homes. [orig: Entity_UpdateVehiclePhysics @0x48af00]
     struct VehicleMotorState {
-        int32_t yaw_bam = 0;          // 32-bit engine-frame heading (entity+0x10). Entity::yaw
-                                      // (mission deg) mirrors (90 - bam/deg) each motor tick —
+        int32_t yaw_bam = 0;          // 32-bit engine-frame heading (entity+0x10); the motor
+                                      // stores it into Entity::heading each motor tick —
                                       // steering accumulates sub-degree BAM deltas.
-        bool yaw_seeded = false;      // yaw_bam initialized from Entity::yaw on first tick
+        bool yaw_seeded = false;      // yaw_bam initialized from Entity::heading on first tick
 		// Spawn-relative pose (+0x24C), support (+0x264), and team (+0x165).
 		// [orig: Game_StartMission @0x526003..0x52606B]
 		int32_t spawn_pose[6] = {};

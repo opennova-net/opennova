@@ -94,7 +94,7 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id,
                             uint16_t min_entity_slot = 0) {
 	w::PlayerSpawn s;
 	s.position = pos;
-	s.yaw = yaw;
+	s.heading = w::placed_heading_bam(yaw);
 	s.net_id = net_id;
 	s.min_entity_slot = min_entity_slot;
 	return s;
@@ -347,7 +347,7 @@ bool run_joiner_uplink_snaps_peer() {
 	if (!expect(je != nullptr, "joiner entity present")) return false;
 	if (!expect(je->position.x == 1.0f && je->position.y == 1.0f && je->position.z == 1.0f,
 	            "a visible joiner body is not snapped to the wire pose")) return false;
-	if (!expect(je->yaw == 45, "joiner yaw = 90 - BAM/deg (== 45)")) return false;
+	if (!expect(je->heading == w::placed_heading_bam(45), "joiner yaw = 90 - BAM/deg (== 45)")) return false;
 	const w::AiEntity *jae = ai.for_handle(joiner_h);
 	if (!expect(jae != nullptr && jae->net_is_remote_peer &&
 	                    jae->net_smooth_target[0] == wx && jae->net_smooth_target[1] == wy &&
@@ -918,7 +918,7 @@ bool run_0a_vehicle_budget_round_robin() {
 		veh.health = 3000;                                      // items.def hp (full spawn)
 		veh.health_max = 3000;
 		veh.position = {120.0f, 100.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 1;
 		veh.has_item_def = true; // the trait sweep's row (D-NET-487)
 		veh.item_type_index = 1;
@@ -1085,7 +1085,7 @@ bool run_0a_priority_view_terms() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {70.0f, 95.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 1; // same team: no enemy bonus
 		a_h = world.registry.spawn(1, veh);
 		if (!expect(a_h.valid(), "vehicle A spawned")) return false;
@@ -1108,7 +1108,7 @@ bool run_0a_priority_view_terms() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {500.0f, 100.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 2; // enemy of the recipient
 		veh.primary_occupant = crew_h;    // occupied [orig: entity+0x170 @0x50efc9]
 		// This tick's displacement off the mover-entry saved pose (+0x80):
@@ -1202,7 +1202,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {-500.0f, 95.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 1;
 		veh.primary_occupant = crew_h;
 		c_h = world.registry.spawn(1, veh);
@@ -1219,7 +1219,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {130.0f, 100.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 2;
 		d_h = world.registry.spawn(1, veh);
 		if (!expect(d_h.valid(), "vehicle D spawned")) return false;
@@ -1582,7 +1582,7 @@ bool run_0a_round_score_and_los_read_the_body() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {150.0f, 100.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		const w::EntityHandle target = world.registry.spawn(1, veh);
 		world.weather.core.scalar_channels.fog_dist_fp = 600 << 16; // the view distance
 		std::vector<ns::Connection> conns;
@@ -1753,7 +1753,7 @@ bool run_0x26_attach_mounted_echo() {
 		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 		veh.item_attrib |= w::kItemAttribPlayerControl;
 		veh.position = {12.0f, 20.0f, 3.0f};
-		veh.yaw = 0;
+		veh.heading = w::placed_heading_bam(0);
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
@@ -1943,7 +1943,7 @@ bool run_grounded_uplink_apply_and_echo() {
 		bld.kind = w::EntityKind::Building;
 		bld.item_id = 0x044c;
 		bld.position = {100.0f, 200.0f, 10.0f};
-		bld.yaw = 90;
+		bld.heading = w::placed_heading_bam(90);
 		bld_h = world.registry.spawn(2, bld);
 	}
 	if (!expect(bld_h.valid() && bld_h.pool() == 2, "pool-2 carrier spawned")) return false;
@@ -1980,7 +1980,7 @@ bool run_grounded_uplink_apply_and_echo() {
 	                    jae->net_smooth_target[2] == w::to_fixed(11.0),
 	            "grounded uplink lifted local -> world through the carrier pose"))
 		return false;
-	if (!expect(je->yaw == 45, "grounded heading composed with the carrier heading")) return false;
+	if (!expect(je->heading == w::placed_heading_bam(45), "grounded heading composed with the carrier heading")) return false;
 	if (!expect(!je->ground_target.valid(), "the read-apply stores no ground link"))
 		return false;
 	if (!expect((je->flags & 0x1Cu) == 0x10u,
@@ -2325,7 +2325,7 @@ bool run_vehicle_drive_authority() {
 		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 		veh.item_attrib = w::kItemAttribPlayerControl;
 		veh.position = {12.0f, 20.0f, 3.0f};
-		veh.yaw = 0;
+		veh.heading = w::placed_heading_bam(0);
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
@@ -2375,7 +2375,7 @@ bool run_vehicle_drive_authority() {
 		return false;
 	w::AiEntity *driver_ai = ai.for_handle(ph);
 	if (!expect(driver_ai != nullptr && driver_ai->net_is_remote_peer &&
-	                    driver_ai->heading == driver_wire_look && player->yaw == 45,
+	                    driver_ai->heading == driver_wire_look && player->heading == w::placed_heading_bam(45),
 	            "driver wire LOOK differs from the vehicle seat yaw"))
 		return false;
 
@@ -2408,7 +2408,7 @@ bool run_vehicle_drive_authority() {
 	if (!expect(veh != nullptr && veh->veh.steer_target_bam == driver_wire_look,
 	            "authority motor consumes the full-precision remote driver LOOK"))
 		return false;
-	if (!expect(player != nullptr && driver_ai != nullptr && player->yaw == 45 &&
+	if (!expect(player != nullptr && driver_ai != nullptr && player->heading == w::placed_heading_bam(45) &&
 	                    driver_ai->heading == driver_wire_look,
 	            "post-motor mounted refresh preserves remote driver LOOK"))
 		return false;
@@ -2537,7 +2537,7 @@ bool run_0a_priority_caches_hold_every_pool1_slot() {
 		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle);
 		veh.health = veh.health_max = 3000;
 		veh.position = {110.0f, 100.0f, 10.0f};
-		veh.yaw = yaw;
+		veh.heading = w::placed_heading_bam(yaw);
 		return world.registry.spawn_at(w::EntityHandle{uint16_t((1u << 12) | slot)}, veh);
 	};
 	const w::EntityHandle low = vehicle_at(10, 90);    // heading BAM 0

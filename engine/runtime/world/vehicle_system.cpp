@@ -140,7 +140,7 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
 					ve->roll = veh->veh.air_roll_bam;
 					ve->heading = veh->veh.yaw_seeded
 							? veh->veh.yaw_bam
-							: bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
+							: veh->heading;
 				}
 				return;
             }
@@ -199,7 +199,7 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
             if (AiEntity *ve = world.ai.for_handle(h)) {
                 ve->heading = veh->veh.yaw_seeded
                         ? veh->veh.yaw_bam
-                        : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
+                        : veh->heading;
                 // The mover's command registers ARE brain[132]/[136]/[137]
                 // (brain+0x210/+0x220/+0x224, the mover's moveMode base = entity
                 // +0x64): the next think reads the mover's steer target back, e.g.

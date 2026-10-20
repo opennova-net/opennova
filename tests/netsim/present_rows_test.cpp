@@ -54,7 +54,7 @@ w::Entity *spawn_pool_row(opennova::mission::MissionKernel &kernel, int pool, in
 	seed.item_id = item_id;
 	seed.alive = true;
 	seed.position = {10.0f, 20.0f, 3.0f};
-	seed.yaw = 45;
+	seed.heading = w::placed_heading_bam(45);
 	seed.pitch = 2;
 	seed.roll = -3;
 	seed.net_stance_bits = 0x02u; // the MoveOrder stance latch bit 9
@@ -403,7 +403,7 @@ bool test_attached_rows_retain_subdegree_frame() {
     gun->veh.yaw_bam = w::bam_heading_from_mission_yaw_deg(33.125);
     gun->veh.air_pitch_bam = w::bam_from_degrees_wrapped(2.49);
     gun->veh.air_roll_bam = w::bam_from_degrees_wrapped(-1.51);
-    gun->yaw = 33; gun->pitch = 2; gun->roll = -2;
+    gun->heading = w::placed_heading_bam(33); gun->pitch = 2; gun->roll = -2;
     im::PoolPresentLifecycleMap lifecycle;
     std::vector<float> rows;
     im::DoorPhaseTable doors;
@@ -566,7 +566,7 @@ bool test_joiner_bldg_section_offset_reaches_present_rows() {
 	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
 	e->kind = w::EntityKind::Building;
 	e->position = {10.0f, 20.0f, 11.0f};
-	e->yaw = 90; e->pitch = 0; e->roll = 0;
+	e->heading = w::placed_heading_bam(90); e->pitch = 0; e->roll = 0;
 	e->bldg_section_pivot = true;
 	e->death_anim_state = 0x0100;
 	w::ItemDeathTraits traits;
@@ -847,7 +847,7 @@ bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
 	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1116);
 	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
 	e->position = {10.0f, 20.0f, 11.0f};
-	e->yaw = 90; e->pitch = 0; e->roll = 0;
+	e->heading = w::placed_heading_bam(90); e->pitch = 0; e->roll = 0;
 	e->bldg_section_pivot = true;
 	e->death_anim_state = 0x0100;
 	w::ItemDeathTraits traits;
@@ -886,7 +886,7 @@ bool test_joiner_palm_source_and_local_fragment() {
     auto *source = spawn_pool_row(kernel, 2, 0, 812);
     source->kind = w::EntityKind::Building;
     source->palm_sections = true; source->palm_state = 2; source->section_mask = 0;
-    source->pitch = source->roll = 0; source->yaw = 90;
+    source->pitch = source->roll = 0; source->heading = w::placed_heading_bam(90);
     opennova::replication::ClientEntityState decoded;
     decoded.handle = source->handle.packed;
     decoded.type_id = 812;
@@ -894,7 +894,7 @@ bool test_joiner_palm_source_and_local_fragment() {
     runtime.state().upsert(decoded.handle) = decoded;
     w::Entity piece;
     piece.kind = w::EntityKind::Building; piece.item_id = 900;
-    piece.position = {10, 20, 7}; piece.yaw = 90;
+    piece.position = {10, 20, 7}; piece.heading = w::placed_heading_bam(90);
     // An item 900 whose render tag is the psec row: the fragment draws its palm
     // state through it (its collision callback, palm_fragment, plays no part here).
     piece.palm_sections = true; piece.item_section_piece = true; piece.palm_state = 17;
@@ -1329,7 +1329,7 @@ bool test_rows_carry_the_slot_march_start() {
 	kernel.world.registry.configure_pool(1, 64);
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "the bare registry spawns a pool-1 row")) return false;
-	e->yaw = 0;
+	e->heading = w::placed_heading_bam(0);
 	e->pitch = 0;
 	e->roll = 0;
 	e->item_type = 3;

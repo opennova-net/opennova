@@ -389,7 +389,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     veh_seed.item_type = 1; // not def type 3: the non-person leg
     veh_seed.alive = true;
     veh_seed.position = Vec3{10.0f, 20.0f, 0.0f};
-    veh_seed.yaw = 90;
+    veh_seed.heading = placed_heading_bam(90);
     veh_seed.bbox_center = Vec3{0.0f, 0.0f, 1.5f};
     const EntityHandle veh = w.registry.spawn(1, veh_seed);
 
@@ -1407,7 +1407,7 @@ static void test_mounted_gunner_acquires_and_fires() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90; // engine heading 0: faces the enemy on +X.
+    gun.heading = placed_heading_bam(90); // engine heading 0: faces the enemy on +X.
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -1520,7 +1520,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
                                  // built around a def-less gun, drops it below
         gun.team = 1;
         gun.net_id = 0x31;
-        gun.yaw = 90;
+        gun.heading = placed_heading_bam(90);
         gun.item_attrib = kItemAttribEweap;
         gun.primary_weapon.assign(1, 'x');
         for (int barrel = 0; barrel < 4; ++barrel)
@@ -1764,7 +1764,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         gun.has_graphic_model = true;
         gun.team = 1;
         gun.net_id = 0x31;
-        gun.yaw = 90; // engine heading 0: faces the enemy on +X.
+        gun.heading = placed_heading_bam(90); // engine heading 0: faces the enemy on +X.
         gun.position = Vec3{2.0f, 100.0f, 0.0f};
         gun.item_attrib = kItemAttribEweap;
         gun.item_attrib2 = cannon ? opennova::def::DEF_ITEM_ATTRIB2_ISTURRET
@@ -1974,7 +1974,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
                              // built around a def-less gun, drops it below
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2159,7 +2159,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
         gun.has_graphic_model = true;
         gun.team = 1;
         gun.net_id = net_id;
-        gun.yaw = 90;
+        gun.heading = placed_heading_bam(90);
         gun.primary_weapon.assign(1, 'x');
         Seat seat{};
         seat.type = SeatType::Gunner;
@@ -2218,7 +2218,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2286,7 +2286,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2357,7 +2357,7 @@ static void test_mounted_request_runs_for_a_passenger() {
         truck.has_graphic_model = true;
         truck.team = 1;
         truck.net_id = 0x31;
-        truck.yaw = 90;
+        truck.heading = placed_heading_bam(90);
         if (armed) truck.primary_weapon.assign(1, 'x');
         Seat seat{};
         seat.type = SeatType::Passenger;
@@ -2426,7 +2426,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2481,7 +2481,7 @@ static void test_mounted_look_traverses_before_fire_request() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2674,7 +2674,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     vehicle.health_max = 3000;
     vehicle.alive = true;
     vehicle.position = Vec3{100.0f, 200.0f, 10.0f};
-    vehicle.yaw = 37;
+    vehicle.heading = placed_heading_bam(37);
     vehicle.veh.speed = 0;
     vehicle.primary_occupant = npc_h; // NPC claimant: the PlayerControl loop gate
     const EntityHandle vehicle_h = w->registry.spawn(1, vehicle);
@@ -2693,7 +2693,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     AiSystem &ai = w->ai;
 
     const Vec3 before = w->registry.get(vehicle_h)->position;
-    const int16_t yaw_before = w->registry.get(vehicle_h)->yaw;
+    const int16_t yaw_before = mission_yaw_whole_deg(w->registry.get(vehicle_h)->heading);
     w->run_logic_tick(false);
 
     const Entity *after = w->registry.get(vehicle_h);
@@ -2701,7 +2701,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     CHECK(after->position.x == before.x);
     CHECK(after->position.y == before.y);
     CHECK(after->position.z == before.z);
-    CHECK(after->yaw == yaw_before);
+    CHECK(mission_yaw_whole_deg(after->heading) == yaw_before);
 
     CHECK(w->out.sound_emitters.size() == 1);
     if (w->out.sound_emitters.size() == 1) {

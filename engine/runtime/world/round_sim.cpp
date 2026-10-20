@@ -803,7 +803,7 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
     // @0x407478, Entity_ComputeAnimSlotIndex call @0x407483].
     const Vec3 vel = vec_from_fixed(record.round_vel_q16);
     const int quadrant = death_quadrant_from_round(
-            bam_heading_from_mission_yaw_deg(victim.yaw), vel.x, vel.y);
+            victim.heading, vel.x, vel.y);
     victim.death_anim_state =
             compute_death_anim_state(record.section, quadrant, death_cause::kBullet);
     // The ammo's burn/force pair from the round's position, crediting its
@@ -1571,7 +1571,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     //  Entity_HandleDamageAndTriggerZones @0x4077e0 / @0x4077eb
                     //  / @0x4078c6]
                     const int32_t heading_bam =
-                        bam_heading_from_mission_yaw_deg(target->yaw);
+                        target->heading;
                     const int quadrant =
                         death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
                     const int32_t death_section =

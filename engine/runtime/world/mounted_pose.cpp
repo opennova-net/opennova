@@ -321,8 +321,8 @@ bool resolve_model_mounted_pose_from_parts(
 	// Retail transforms the userpoint through the live carrier matrix; integer
 	// mission mirrors must not quantize a moving helicopter's attachment frame.
 	// [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50, @0x4b0d42]
-	const double carrier_yaw = carrier.veh.yaw_seeded
-			? mission_yaw_deg_from_bam_heading(carrier.veh.yaw_bam) : carrier.yaw;
+	const double carrier_yaw = mission_yaw_deg_from_bam_heading(
+			carrier.veh.yaw_seeded ? carrier.veh.yaw_bam : carrier.heading);
 	const double carrier_pitch = carrier.veh.yaw_seeded
 			? carrier.veh.air_pitch_bam * kDegreesPerBam : carrier.pitch;
 	const double carrier_roll = carrier.veh.yaw_seeded

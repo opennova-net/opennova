@@ -12,6 +12,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include "../common/synthetic_mission.h"
 #include "../world/channel_clip_source.h"
@@ -239,7 +240,7 @@ static void test_emplacement_attachments() {
           gun_child->flags == parent->flags);
 
     parent->position = {30.f, 40.f, 5.f};
-    parent->yaw = 90;
+    parent->heading = placed_heading_bam(90);
     cw->run_logic_tick();
     plain_child = cw->registry.get(plain_h);
     CHECK(plain_child->position.x == 30.f && plain_child->position.y == 38.f &&
@@ -451,7 +452,7 @@ static void test_unresolved_emplacement_preserves_streamed_pose() {
     Entity child_seed{};
     child_seed.kind = EntityKind::Item;
     child_seed.position = {17.f, 23.f, 9.f};
-    child_seed.yaw = 37;
+    child_seed.heading = placed_heading_bam(37);
     child_seed.pitch = -4;
     child_seed.roll = 6;
     child_seed.emplacement_parent = parent_h;
@@ -466,7 +467,7 @@ static void test_unresolved_emplacement_preserves_streamed_pose() {
     CHECK(!child->emplacement_pose_metadata_resolved);
     CHECK(child->position.x == 17.f && child->position.y == 23.f &&
           child->position.z == 9.f);
-    CHECK(child->yaw == 37 && child->pitch == -4 && child->roll == 6);
+    CHECK(child->heading == placed_heading_bam(37) && child->pitch == -4 && child->roll == 6);
 }
 
 // D-HUD-20: the authored display name rides name_index through the embedder's

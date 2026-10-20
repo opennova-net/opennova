@@ -32,7 +32,7 @@ int EntityCommands::fire_ammo_at_target(int32_t ammo, int32_t target) {
     const Entity *marker = script_target(target);
     if (!marker || ammo == 0) return 1;
     world_.round_sim.fire_source(world_, nullptr, script_position(world_, *marker),
-            bam_heading_from_mission_yaw_deg(marker->yaw),
+            marker->heading,
             bam_from_degrees_wrapped(marker->pitch), uint8_t(ammo));
     return 0;
 }

@@ -136,7 +136,7 @@ struct Rig {
         b.kind = EntityKind::Building;
         b.net_id = 100;
         b.position = {10.0f, 10.0f, 0.0f};
-        b.yaw = 90;
+        b.heading = placed_heading_bam(90);
         b.alive = true;
         building = w.registry.spawn(2, b);
         Entity s;
@@ -298,7 +298,7 @@ struct DropRig {
         Entity deck;
         deck.kind = EntityKind::Item;
         deck.item_id = 42;
-        deck.yaw = 90;
+        deck.heading = placed_heading_bam(90);
         deck.position = at;
         deck.bound_radius = 4;
         const EntityHandle h = w.registry.spawn(1, deck);
@@ -314,7 +314,7 @@ struct DropRig {
         f.item_id = 4091;
         f.has_item_def = true;
         f.net_id = 7;
-        f.yaw = 30;
+        f.heading = placed_heading_bam(30);
         f.position = home;
         f.spawn_position = home;
         f.alive = true;
@@ -351,7 +351,7 @@ void test_drop_pose_and_motion() {
     CHECK(to_fixed(flag.position.z) == 5 * 65536 + 0x4000);
     CHECK(flag.veh.yaw_seeded);
     CHECK(flag.veh.yaw_bam == 0x52345678);
-    CHECK(flag.yaw == 334); // the whole-degree mirror: 90 - 115.6 deg, wrapped
+    CHECK(flag.heading == 0x52345678); // the Yaw word: the carrier word plus a quarter turn
     CHECK(flag.veh.air_pitch_bam == 0 && flag.veh.air_roll_bam == 0);
     CHECK(flag.veh.vel_x == 0 && flag.veh.vel_y == 0);
     CHECK(flag.veh.slide_z == 391);
@@ -577,7 +577,7 @@ void test_client_ground_query_names_the_wire_twin() {
     Entity twin_seed;
     twin_seed.kind = EntityKind::Item;
     twin_seed.item_id = 42;
-    twin_seed.yaw = 90;
+    twin_seed.heading = placed_heading_bam(90);
     twin_seed.position = {60.0f, 60.0f, 2.0f};
     const EntityHandle twin = rig.w.registry.spawn(1, twin_seed);
     WireDynamicCollisionProxy proxy;
@@ -630,7 +630,7 @@ void test_sync_restores_the_authored_heading() {
     CHECK(rig.w.match.sync_flag_to_authored_pose(rig.w, flag_h));
     CHECK(rig.at(flag_h).position.x == 0.0f && rig.at(flag_h).position.y == 0.0f &&
           rig.at(flag_h).position.z == 0.0f);
-    CHECK(rig.at(flag_h).yaw == 30);
+    CHECK(rig.at(flag_h).heading == placed_heading_bam(30));
     CHECK(rig.at(flag_h).veh.yaw_bam == spawn_angle_bam(60));
     rig.w.match.drain_gameplay_events();
     CHECK(!rig.w.match.sync_flag_to_authored_pose(rig.w, flag_h));

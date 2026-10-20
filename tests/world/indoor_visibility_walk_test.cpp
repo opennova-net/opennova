@@ -181,7 +181,7 @@ void list_buildings(testrig::MissionRig &rig) {
 		for (const DoorRecord &d : recs) counts[std::min(d.type, 7)]++;
 		std::printf("bldg bms=%d slot=%d %s pos (%.1f, %.1f, %.1f) yaw %d dist %.0f  recs t0=%d t1=%d t2=%d t3=%d t5=%d  win=%d open=%d link=%d\n",
 				e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), float(e.position.x), float(e.position.y),
-				float(e.position.z), static_cast<int>(e.yaw), testrig::planar_distance(e.position, spawn),
+				float(e.position.z), static_cast<int>(w::mission_yaw_whole_deg(e.heading)), testrig::planar_distance(e.position, spawn),
 				counts[0], counts[1], counts[2], counts[3], counts[5], fl.has_windows, fl.has_open,
 				fl.has_links);
 		for (const DoorRecord &d : recs) {
@@ -750,7 +750,7 @@ int main(int argc, char **argv) {
 		const w::Vec3 sp = rig.local.player_position();
 		const w::Entity *pl = rig.local.player();
 		std::printf("spawn: pos (%.2f, %.2f, %.2f) yaw %d letters 0x%02X plhit %s %s\n", sp.x, sp.y, sp.z,
-				pl != nullptr ? static_cast<int>(pl->yaw) : 0, rig.collision.local_player_blink_flags,
+				pl != nullptr ? static_cast<int>(w::mission_yaw_whole_deg(pl->heading)) : 0, rig.collision.local_player_blink_flags,
 				hit_str(pl != nullptr ? pl->blink_hits[0] : 0).c_str(),
 				hit_str(pl != nullptr ? pl->blink_hits[1] : 0).c_str());
 		w::EntityHandle nearest;
@@ -765,7 +765,7 @@ int main(int argc, char **argv) {
 			for (const DoorRecord &dr : portal_records(rig, e)) counts[std::min(dr.type, 7)]++;
 			std::printf("spawn-bldg bms=%d slot=%d %s d=%.1f pos (%.2f, %.2f, %.2f) yaw %d occ=%d recs t0=%d t1=%d t2=%d t3=%d t5=%d win=%d forced=0x%X\n",
 					e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), d, float(e.position.x), float(e.position.y),
-					float(e.position.z), static_cast<int>(e.yaw), occ, counts[0], counts[1], counts[2], counts[3],
+					float(e.position.z), static_cast<int>(w::mission_yaw_whole_deg(e.heading)), occ, counts[0], counts[1], counts[2], counts[3],
 					counts[5], fl.has_windows, rig.occlusion.forced_section_mask(e.handle));
 			if (const w::CollisionModel *cm = rig.collision.model_for(rig.world, e.handle)) {
 				for (size_t si = 0; si < cm->sections.size(); ++si) {
@@ -830,7 +830,7 @@ int main(int argc, char **argv) {
 			// (Math_BuildFixedPointMatrixFromEulerAngles + TransformPoint22), and
 			// copied unchanged into viewport+4 (byte_A78364) before the collect
 			// @0x5ca352..0x5ca37b -> Viewport_BuildProjectionMatrix @0x411136.
-			const double yaw0 = pl != nullptr ? static_cast<double>(pl->yaw) : 270.0;
+			const double yaw0 = pl != nullptr ? static_cast<double>(w::mission_yaw_whole_deg(pl->heading)) : 270.0;
 			for (const int pitch : {-20, 0, 20}) {
 				rig.local.teleport_local_player(sp, yaw0, static_cast<double>(pitch));
 				rig.tick(12);
@@ -873,7 +873,7 @@ int main(int argc, char **argv) {
 			// non-building entity within range, its blink quad, the
 			// collector's blink-hits gate, the frustum sphere, and the final
 			// verdict (the render wave's render_TOC runs only on an empty quad).
-			rig.local.teleport_local_player(sp, pl != nullptr ? static_cast<double>(pl->yaw) : 0.0, 0.0);
+			rig.local.teleport_local_player(sp, pl != nullptr ? static_cast<double>(w::mission_yaw_whole_deg(pl->heading)) : 0.0, 0.0);
 			rig.tick(2);
 			Frame fr;
 			run_frame(rig, *nb, none, fwd, fr);
@@ -953,7 +953,7 @@ int main(int argc, char **argv) {
 					expect(drawn, msg);
 				}
 			}
-			rig.local.teleport_local_player(sp, pl != nullptr ? static_cast<double>(pl->yaw) : 0.0, 0.0);
+			rig.local.teleport_local_player(sp, pl != nullptr ? static_cast<double>(w::mission_yaw_whole_deg(pl->heading)) : 0.0, 0.0);
 			rig.tick(2);
 		}
 		std::vector<Frame> frames;
@@ -1027,7 +1027,7 @@ int main(int argc, char **argv) {
 	if (!expect(bldg != nullptr, "a building with a floor-level exterior (type-2) record")) return 1;
 	std::printf("walk: building bms=%d slot=%d %s pos (%.2f, %.2f, %.2f) yaw %d; door rec %d A=%d B=%d at (%.2f, %.2f, %.2f) z %.2f..%.2f n (%.2f, %.2f, %.2f)\n",
 			bldg->bms_id, bldg->handle.slot(), item_label(rig, *bldg).c_str(), float(bldg->position.x),
-			float(bldg->position.y), float(bldg->position.z), static_cast<int>(bldg->yaw), door.index,
+			float(bldg->position.y), float(bldg->position.z), static_cast<int>(w::mission_yaw_whole_deg(bldg->heading)), door.index,
 			door.section_a, door.section_b, door.center[0], door.center[1], door.center[2],
 			door.min_z, door.max_z, door.normal[0], door.normal[1], door.normal[2]);
 

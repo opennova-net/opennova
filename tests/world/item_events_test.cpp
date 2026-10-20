@@ -157,7 +157,7 @@ int test_building_collapse() {
     traits->model_max_q16[1] = 3 * 65536;
     traits->particledeath = "Dust";
     traits->sound_death = "Collapse";
-    entity.yaw = 90; // Identity in the mission placement frame.
+    entity.heading = placed_heading_bam(90); // Identity in the mission placement frame.
     entity.position = {2, 4, 6};
     entity.uniform_scale_q16 = 4 * 65536; // Perimeter ignores entity scale.
     destruction_notify_item_damage(w, entity, 0);
@@ -296,7 +296,7 @@ int test_emitter_lifetime() {
     traits->particlefx_point_q16[0] = 2 * 65536;
     traits->particlefx_direction_q16[2] = 65536;
     traits->regional_sounds[0].base_ticks = 40;
-    entity.yaw = 90;
+    entity.heading = placed_heading_bam(90);
     entity.position = {10, 20, 30};
     entity.uniform_scale_q16 = 2 * 65536;
     auto scene = std::make_shared<p::EffectScene>();
@@ -366,7 +366,7 @@ int test_palm_sections() {
     t->model_pivots_q16 = {{{0, 0, 2*65536}}, {{0, 0, 4*65536}}};
     t->sound_death = "PalmBreak";
     w.tables.item_death_traits.set(900, *t);
-    e.position = {8, 16, 3}; e.yaw = 90;
+    e.position = {8, 16, 3}; e.heading = placed_heading_bam(90);
     destruction_notify_item_damage(w, e, 1, {2, 100});
     CHECK(e.palm_state == 0 && spawner.pieces.empty());
     CHECK(item_hidden_sections(e) == 0x38);
@@ -416,10 +416,10 @@ int test_palm_sections() {
     tick_item_death_motion(w, leaf, nullptr, 0, w.out.destruction);
     CHECK(leaf.position.x == 8 && leaf.position.z == .25f);
     CHECK(leaf.veh.vel_x == 1024 && leaf.veh.vel_y == -1024 && leaf.veh.slide_z == 16384);
-    const float yaw = leaf.yaw;
+    const float yaw = mission_yaw_whole_deg(leaf.heading);
     tick_item_death_motion(w, leaf, nullptr, 0, w.out.destruction);
     CHECK(leaf.position.x == 8.015625f && leaf.position.z == .5f);
-    CHECK(leaf.veh.slide_z == 16384 - 167 && leaf.yaw != yaw && leaf.pitch == 0);
+    CHECK(leaf.veh.slide_z == 16384 - 167 && mission_yaw_whole_deg(leaf.heading) != yaw && leaf.pitch == 0);
     CHECK(leaf.saved_live_pos[2] == 16384);
     e.health = 0;
     destruction_notify_item_damage(w, e, 2);
@@ -449,7 +449,7 @@ int test_tower_sections() {
     w.registry.configure_pool(2, 16); w.rules.mp_session = true;
     TestPieceSpawner spawner(w); w.item_piece_spawner = &spawner;
     const auto h = spawn(w, 2, 50, ItemDeathClass::kTower);
-    auto &e = *w.registry.get(h); e.position = {1,2,3}; e.yaw = 90;
+    auto &e = *w.registry.get(h); e.position = {1,2,3}; e.heading = placed_heading_bam(90);
     auto *t = w.tables.item_death_traits.get_mutable(50);
     t->model_loaded = true; t->husk_sub_part_count = 4;
     t->model_section_origins_q16 = {{{0,0,0}},{{0,0,4*65536}},{{0,0,8*65536}},{{0,0,12*65536}}};

@@ -1,6 +1,7 @@
 #include <runtime/world/world.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/angle.h>
 #include <base/io/bam.h>
 
 #include <algorithm>
@@ -62,7 +63,7 @@ struct Fixture {
         seed.kind = EntityKind::Organic;
         seed.item_id = 1; seed.item_type = 3; seed.has_item_def = true;
         seed.health = seed.health_max = 100; seed.leave_corpse = true;
-        seed.position = {x,y,z}; seed.yaw = 90;
+        seed.position = {x,y,z}; seed.heading = placed_heading_bam(90);
         const auto h = world.registry.spawn(0, seed);
         auto &body = *world.ai.at(world.ai.attach(h));
         body.net_id = seed.net_id; body.health = 100; body.inf.active = true;

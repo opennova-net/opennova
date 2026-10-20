@@ -74,7 +74,7 @@ void look_at(w::World &world, w::EntityHandle player_h, float tx, float ty, floa
 	const double dz = double(tz) + 0.1875 - player->position.z - player->eye_offset_z / 65536.0;
 	const double heading = std::atan2(dy, dx);
 	const double pitch = std::atan2(dz, std::hypot(dx, dy));
-	player->yaw = int16_t(std::lround(90.0 - heading * 180.0 / 3.14159265358979323846));
+	player->heading = w::placed_heading_bam(int16_t(std::lround(90.0 - heading * 180.0 / 3.14159265358979323846)));
 	player->pitch = int16_t(std::lround(pitch * 180.0 / 3.14159265358979323846));
 	if (w::AiEntity *body = world.ai.for_handle(player_h)) {
 		body->heading = int32_t(heading * opennova::io::kBamPerRadian);
@@ -763,7 +763,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	row.y = w::to_fixed(vehicle.position.y);
 	row.z = w::to_fixed(vehicle.position.z);
 	row.heading_known = true;
-	row.heading_bam = w::bam_heading_from_mission_yaw_deg(vehicle.yaw);
+	row.heading_bam = vehicle.heading;
 	row.net_has_compact = true;
 	row.compact_revision = 1;
 	auto &self = h.role.runtime->state().upsert(self_handle);
@@ -1568,7 +1568,7 @@ bool run_local_replica_turret_channel() {
  gun.has_graphic_model = true;
  gun.item_id = 123;
  gun.spawn_origin = 1u << 24;
- gun.yaw = 90;
+ gun.heading = w::placed_heading_bam(90);
  gun.item_attrib2 = def::DEF_ITEM_ATTRIB2_ISTURRET;
  gun.health = 100;
  gun.team = local->team;

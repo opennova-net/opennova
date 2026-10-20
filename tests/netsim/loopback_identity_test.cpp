@@ -242,7 +242,7 @@ bool run() {
 	// explicitly. EntityKind must never be used to guess compact record width.
 	seed.net_class_code = static_cast<uint8_t>(nw::EntityClass::Infantry);
 	seed.position = {10.0f, 20.0f, -5.0f};
-	seed.yaw = 0x0140;
+	seed.heading = w::placed_heading_bam(0x0140); // a placed row at mission yaw 320
 	seed.team = 1;
 	const w::EntityHandle h = world.registry.spawn(0, seed);
 	if (!expect(h.valid(), "entity spawned")) return false;
@@ -302,12 +302,11 @@ bool run() {
 	if (!expect(es.z == codec_recon(wz, wz),
 	            "z is the codec's exact reconstruction")) return false;
 
-	// Coarse heading round-trips: the high byte of the 32-bit engine-frame BAM that
-	// snapshot_of builds, rounded. The unmoved seed's heading is its placement angle:
+	// Coarse heading round-trips: the high byte of the entity's Yaw word that
+	// snapshot_of reads, rounded. The unmoved seed's word is its placement angle:
 	// ((90 - mission_yaw) << 16) / 360 truncated, then << 16.
 	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
-	const int32_t turn16 =
-			static_cast<int32_t>(static_cast<uint32_t>(90 - seed.yaw) << 16) / 360;
+	const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(90 - 0x0140) << 16) / 360;
 	const uint32_t engine_bam = static_cast<uint32_t>(turn16) << 16;
 	const uint8_t want_yaw = static_cast<uint8_t>((engine_bam + 0x00800000u) >> 24);
 	if (!expect(es.yaw_byte == want_yaw, "coarse yaw byte round-trips (engine-frame BAM)")) return false;
@@ -1050,7 +1049,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	soldier.item_id = 0x2000;
 	soldier.net_class_code = static_cast<uint8_t>(nw::EntityClass::Infantry);
 	soldier.position = {0.0f, 0.0f, 0.0f};
-	soldier.yaw = 90; // engine heading 0: makes the witnessed target-heading clamp literal.
+	soldier.heading = w::placed_heading_bam(90); // engine heading 0: makes the witnessed target-heading clamp literal.
 	const w::EntityHandle ih = world.registry.spawn(0, soldier);
 	if (!expect(ih.valid(), "infantry spawned")) return false;
 	ai.attach(ih);
@@ -1068,7 +1067,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	vehicle.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	vehicle.item_id = 0x1004;
 	vehicle.position = {100.0f, 200.0f, 10.0f};
-	vehicle.yaw = 90; // identity engine-frame carrier rotation
+	vehicle.heading = w::placed_heading_bam(90); // identity engine-frame carrier rotation
 	vehicle.pitch = 15;
 	vehicle.roll = -10;
 	vehicle.health = 3000;
@@ -1238,7 +1237,7 @@ bool run_apply_player_intent_stages_remote_peer() {
 	peer.kind = w::EntityKind::Organic;
 	peer.item_id = 0x14B9; // player infantry template
 	peer.position = {0.0f, 0.0f, 0.0f};
-	peer.yaw = 0;
+	peer.heading = w::placed_heading_bam(0);
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
 	if (!expect(ph.valid(), "peer spawned")) return false;
 
@@ -1272,7 +1271,7 @@ bool run_apply_player_intent_stages_remote_peer() {
 	if (!expect(pe != nullptr, "peer still present")) return false;
 	if (!expect(pe->position.x.q16 == 0 && pe->position.y.q16 == 0 && pe->position.z.q16 == 0,
 	            "a visible body's live position is not the wire pose")) return false;
-	if (!expect(pe->yaw == 45, "registry yaw = 90 - BAM/deg (== 45)")) return false;
+	if (!expect(pe->heading == w::placed_heading_bam(45), "registry yaw = 90 - BAM/deg (== 45)")) return false;
 
 	// Engine-frame AiEntity mirrored + smooth-target staged + net-snapped.
 	const w::AiEntity *ae = ai.for_handle(ph);

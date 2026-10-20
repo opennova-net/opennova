@@ -117,7 +117,7 @@ replication::ClientEntityState &seed_row(replication::ClientState &state,
 	row.y = fixed_of(e.position.y);
 	row.z = fixed_of(e.position.z);
 	row.heading_known = true;
-	row.heading_bam = w::bam_heading_from_mission_yaw_deg(e.yaw);
+	row.heading_bam = e.heading;
 	return row;
 }
 
@@ -182,7 +182,7 @@ bool run_carried_vehicles_predict_and_ride_their_carrier() {
 	const int32_t rider_lx = fixed_of(2.0f), rider_ly = 0, rider_lz = fixed_of(1.0f);
 	const WorldPose rider_seat = network_transform_local_to_world(rider_lx, rider_ly, rider_lz,
 			fixed_of(deck.position.x), fixed_of(deck.position.y), fixed_of(deck.position.z),
-			uint32_t(w::bam_heading_from_mission_yaw_deg(deck.yaw)), 0u, 0u);
+			uint32_t(deck.heading), 0u, 0u);
 	const w::Entity rider = hull_seed({float(rider_seat.x) / 65536.0f,
 	                                          float(rider_seat.y) / 65536.0f,
 	                                          float(rider_seat.z) / 65536.0f}, team);

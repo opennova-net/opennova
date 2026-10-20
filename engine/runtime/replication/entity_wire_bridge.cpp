@@ -86,14 +86,6 @@ uint8_t player_class_for_wire(const world::Entity &e) {
 	return e.player_class;
 }
 
-// Engine-frame heading BAM the wire carries at entity+16 — (90 - mission_yaw) deg, the
-// same convention snapshot_of writes and every spawn decoder reads (D-NET-86). The
-// whole-degree mirror is the BMS placement angle, so the dword is the spawn angle
-// retail keeps there, low 16 bits zero (world::spawn_angle_bam).
-int32_t engine_heading_bam(int16_t mission_yaw) {
-	return world::spawn_angle_bam(90 - mission_yaw);
-}
-
 // Pitch/roll are pure degree-to-BAM axes; only heading has the 90-degree frame inversion.
 int32_t engine_axis_bam(int16_t degrees) {
 	return world::spawn_angle_bam(degrees);
@@ -103,11 +95,12 @@ int32_t engine_axis_bam(int16_t degrees) {
 // BAM32 entity euler retail keeps on both sides of Entity_TransformWorldToLocal.
 // A seeded carrier (every vehicle past its first motor tick) poses its riders in
 // its live BAM frame (vehicle_mount.cpp entity_local_point_world), so the wire
-// undoes that same frame — through the whole-degree mirrors the seat-local bytes
+// undoes that same frame — through whole-degree mirrors the seat-local bytes
 // would drift by up to sin(0.5 deg) x the seat lever arm with every sub-degree of
-// carrier attitude. The mirrors remain the unseeded (flat placer) frame.
+// carrier attitude. An unseeded carrier's frame is its Yaw word and its placement
+// pitch / roll.
 int32_t carrier_heading_bam(const world::Entity &c) {
-	return c.veh.yaw_seeded ? c.veh.yaw_bam : engine_heading_bam(c.yaw);
+	return c.veh.yaw_seeded ? c.veh.yaw_bam : c.heading;
 }
 int32_t carrier_pitch_bam(const world::Entity &c) {
 	return c.veh.yaw_seeded ? c.veh.air_pitch_bam : engine_axis_bam(c.pitch);
@@ -177,18 +170,11 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.x = e.position.x.q16;
 	s.y = e.position.y.q16;
 	s.z = e.position.z.q16;
-	// Entity+16 on the wire is a 32-bit engine-frame BAM heading = the spawn angle of
-	// (90 - mission_yaw) (D-NET-86 / §5.23/§5.24 — the same convention promote.cpp and ai.cpp
-	// build from). Entity::yaw is mission yaw in DEGREES, so reconcile our two-store split
-	// (Entity::yaw degrees vs AiEntity::heading BAM) at the wire boundary here: the prior
-	// `yaw << 16` was both the wrong scale (deg*65536, ~182x off) and missing the (90 - yaw)
-	// frame inversion, collapsing nearly every facing to ~yaw 90 -> NPCs faced the wrong way.
-	// The encoder takes the rounded high byte and the present inverts (90 - bam/deg) back to
-	// mission yaw, so listen-server NPCs now face the same way as the AI-pool present and the
-	// local-player avatar (which bypasses this bridge). [orig: Entity_SpawnFromBMSRecord
-	// @0x40e9f0; resolves open question Q1]. A seeded mover keeps the dword itself, so
-	// its whole-degree mirror never reaches the wire: the vehicle compact rounds the
-	// high half of the full BAM [orig: Entity_SerializeVehicleState @0x460CEC..0x460D0A].
+	// Entity+16 on the wire is the entity's Yaw word, the engine-frame BAM32 (a placed
+	// row's spawn angle of 90 - mission yaw, a mover's live word) (D-NET-86,
+	// D-NET-NEW-L6-2). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66] A seeded
+	// mover keeps the dword itself: the vehicle compact rounds the high half of the
+	// full BAM [orig: Entity_SerializeVehicleState @0x460CEC..0x460D0A].
 	s.euler_z = carrier_heading_bam(e);
 	s.entity_class = entity_class_of(e);
 	s.health = e.health; // §5.10 field-17 tier numerator — non-zero keeps the player alive
@@ -439,7 +425,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		rec.pos_x = e.position.x.q16;
 		rec.pos_y = e.position.y.q16;
 		rec.pos_z = e.position.z.q16;
-		rec.orientation = engine_heading_bam(e.yaw);
+		rec.orientation = e.heading;
 		rec.team = e.team;
 		// aiState (+0x2B4), the low byte. [orig: NetPacket_SerializeEntityStatesToBuffer
 		//  @0x5030A0 - read @0x5032A3, stored @0x5032B6; NapiNPClientMsg_0x00C @0x42E730 -
@@ -789,7 +775,7 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 		rec.pos_x = e->position.x.q16;
 		rec.pos_y = e->position.y.q16;
 		rec.pos_z = e->position.z.q16;
-		rec.euler_z = engine_heading_bam(e->yaw); // entity+16 heading (gates 0x0001 if non-zero)
+		rec.euler_z = e->heading; // entity+16 heading (gates 0x0001 if non-zero)
 		rec.euler_x = engine_axis_bam(e->pitch);   // entity+20 pitch (0x0002 when non-zero)
 		rec.euler_y = engine_axis_bam(e->roll);    // entity+24 roll (0x0004 when non-zero)
 		rec.team_byte = e->team;
@@ -880,7 +866,7 @@ static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 	rec.pos_x = e.position.x.q16;
 	rec.pos_y = e.position.y.q16;
 	rec.pos_z = e.position.z.q16;
-	rec.movement_val = static_cast<uint32_t>(engine_heading_bam(e.yaw)); // entry+16 BAM (D-NET-59)
+	rec.movement_val = static_cast<uint32_t>(e.heading); // entry+16 BAM (D-NET-59)
 	// Pool-3 flag 0x02 is the raw entity+0 dword. For marker types whose
 	// BMS waypoint distance overrides that field (notably KOTH's 6006), this
 	// is the authored Q16 radius rather than an Euler component.
@@ -1021,11 +1007,8 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent, bool s
 		ent->position.y.q16 = wire_y;
 		ent->position.z.q16 = wire_z;
 	}
-	// BAM32 -> mission yaw degrees, rounded (the inverse of snapshot_of's spawn-angle
-	// heading), normalized into [0, 360): a value that rounds up to 360 is 0. The mirror
-	// of the live +0x10 store.
-	const long yaw_deg = std::lround(world::mission_yaw_deg_from_bam_heading(heading_bam));
-	ent->yaw = static_cast<int16_t>(((yaw_deg % 360) + 360) % 360);
+	// The live Yaw word, as received (carrier-composed when grounded) (D-NET-NEW-L6-2).
+	ent->heading = heading_bam;
 	world::AiEntity *ae = world.ai.for_handle(ent->handle);
 	if (ae != nullptr) {
 		ae->net_is_remote_peer = true;

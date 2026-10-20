@@ -540,7 +540,7 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 			// the engine-frame BAM = (90 - mission_yaw) deg (D-NET-86), NOT raw mission degrees. The
 			// spawned player's heading is its start marker's placement angle, so the high half is the
 			// spawn angle's, the one the 0x0F world-state load sends (world::spawn_angle_bam).
-			p.heading = static_cast<int16_t>(world::spawn_angle_bam(90 - e->yaw) >> 16);
+			p.heading = static_cast<int16_t>(e->heading >> 16);
 			// The pose event mirrors the same signed BAM32 high word as the C2S 0x0C path. The
 			// authoritative look pitch lives on AiEntity, not world::Entity; retain the zero default
 			// when a non-AI entity is bound. [orig: pose_from_session gss.client_pitch;

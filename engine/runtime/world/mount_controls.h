@@ -211,7 +211,7 @@ inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
 inline int32_t emplaced_gun_frame_heading(const Entity &mount) {
 	return mount.veh.yaw_seeded
 			? mount.veh.yaw_bam
-			: spawn_angle_bam(90 - mount.yaw);
+			: mount.heading;
 }
 
 inline int32_t emplaced_gun_frame_pitch(const Entity &mount) {
@@ -609,7 +609,7 @@ inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 		//  def test @0x440EA6..0x440EAB, root copy @0x4410EA..0x4411BC]
 		if (emplaced_slot_def(world, mount) == nullptr) return;
 		mount.position = Vec3{};
-		mount.yaw = 90; // engine heading 0
+		mount.heading = 0; // the memset Yaw word
 		mount.pitch = 0;
 		mount.roll = 0;
 		if (mount.veh.yaw_seeded) {

@@ -558,7 +558,7 @@ void test_org1_edge_reads_the_recorded_round() {
     for (const int32_t section : {0, 3}) {
         Org1Rig rig;
         arm_death(rig);
-        rig.entity().yaw = 90; // engine heading 0: a +X round arrives from behind
+        rig.entity().heading = placed_heading_bam(90); // engine heading 0: a +X round arrives from behind
         HitRecord &record = rig.w->round_sim.hit_record;
         record.has_round = true;
         record.round_vel_q16 = FixedVec3{10 << 16, 0, 0};

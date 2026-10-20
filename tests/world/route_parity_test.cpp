@@ -678,7 +678,7 @@ void test_ground_samples_refresh_the_link() {
     Entity deck{};
     deck.kind = EntityKind::Building;
     deck.position = {10.0f, 10.0f, 0.0f};
-    deck.yaw = 90; // engine heading 0
+    deck.heading = placed_heading_bam(90); // engine heading 0
     deck.alive = true;
     const EntityHandle deck_h = r.w.registry.spawn(2, deck);
     // A 3 u high, 4 u square type-1 box.

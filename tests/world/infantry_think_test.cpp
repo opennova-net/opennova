@@ -25,6 +25,7 @@
 #include <runtime/world/infantry.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::world;
 namespace io = opennova::io;
@@ -902,7 +903,7 @@ static void test_idle_facing_probes_turn_away_from_a_wall() {
     Entity wall{};
     wall.kind = EntityKind::Building;
     wall.alive = true;
-    wall.yaw = 90;
+    wall.heading = placed_heading_bam(90);
     wall.position = {1.5f, 0.0f, 0.0f};
     const EntityHandle wall_h = r.w.registry.spawn(2, wall);
     auto collision = std::make_unique<CollisionWorld>();
@@ -950,7 +951,7 @@ static void test_idle_facing_folds_each_blocked_fan_probe() {
     Entity wall{};
     wall.kind = EntityKind::Building;
     wall.alive = true;
-    wall.yaw = 90;
+    wall.heading = placed_heading_bam(90);
     wall.position = {1.5f, 0.0f, 0.0f};
     const EntityHandle east_h = r.w.registry.spawn(2, wall);
     wall.position = {-1.5f, 0.0f, 0.0f};
@@ -1131,7 +1132,7 @@ static void test_scan_skips_a_threat_behind_a_wall() {
     Entity wall{};
     wall.kind = EntityKind::Building;
     wall.alive = true;
-    wall.yaw = 90;
+    wall.heading = placed_heading_bam(90);
     wall.position = {0.0f, 3.0f, 0.0f};
     wall.item_type_index = 1; // the def row's ordinal: the +0x1C slice gate
     wall.has_item_def = true;

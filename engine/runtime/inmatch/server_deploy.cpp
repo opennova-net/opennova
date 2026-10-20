@@ -5,7 +5,6 @@
 #include <runtime/inmatch/server_message_dispatch.h> // Server_ReleasePlayerDeployment (the convert's deploy)
 
 #include <runtime/world/ai.h>           // AiEntity / AiSystem
-#include <runtime/world/angle.h>        // mission_yaw_deg_from_bam_heading
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_spawn.h> // warm_up_player_body
 #include <runtime/world/round_sim.h>     // RoundDeath (the Respawn key's death edge)
@@ -173,8 +172,8 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		world::SpawnPointResult held;
 		held.found = true;
 		held.position = player.position;
-		held.yaw = static_cast<int16_t>(world::mission_yaw_deg_from_bam_heading(0));
-		player.yaw = held.yaw;
+		held.heading_bam = 0;
+		player.heading = held.heading_bam;
 		player.pitch = 0;
 		player.roll = 0;
 		return held;
@@ -199,7 +198,7 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 			conn.reply.player_slot, conn.assigned_team, config.game_type, slot_state);
 	if (pose.found) {
 		player.position = pose.position;
-		player.yaw = pose.yaw;
+		player.heading = pose.heading_bam; // the copied word (D-NET-376, D-NET-NEW-L6-2)
 		player.pitch = pose.pitch;
 		player.roll = pose.roll;
 	}

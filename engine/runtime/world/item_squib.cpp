@@ -154,7 +154,7 @@ void tick_squib(World &world, Entity &entity) {
                 round.adm_index = entity.equipped_adm_index;
                 round.ammo_index = state.damage_ammo_index;
                 round.pos = entity.position;
-                round.yaw_bam = bam_heading_from_mission_yaw_deg(entity.yaw);
+                round.yaw_bam = entity.heading;
                 round.pitch_bam = bam_from_degrees_wrapped(entity.pitch);
                 round.roll_bam = bam_from_degrees_wrapped(entity.roll);
                 FixedVec3 velocity{entity.veh.vel_x,entity.veh.vel_y,entity.veh.slide_z};

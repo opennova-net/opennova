@@ -29,7 +29,7 @@ namespace {
 // [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6; the vehicle motors'
 //  live +0x10..+0x18]
 void entity_orientation_words(const Entity &entity, int32_t out[3]) {
-    out[0] = entity.veh.yaw_seeded ? entity.veh.yaw_bam : spawn_angle_bam(90 - entity.yaw);
+    out[0] = entity.veh.yaw_seeded ? entity.veh.yaw_bam : entity.heading;
     out[1] = entity.veh.yaw_seeded ? entity.veh.air_pitch_bam : spawn_angle_bam(entity.pitch);
     out[2] = entity.veh.yaw_seeded ? entity.veh.air_roll_bam : spawn_angle_bam(entity.roll);
 }
@@ -41,7 +41,6 @@ SpawnPointResult entity_pose(const Entity &entity) {
     // [orig: Server_PositionPlayerForSpawn @0x50CF60 - the copies
     //  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
     out.position = entity.position;
-    out.yaw = entity.yaw;
     out.pitch = entity.pitch;
     out.roll = entity.roll;
     int32_t words[3];
@@ -74,10 +73,8 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
     // The transformed words are the pose's position words (D-NET-507).
     out.position.set_q16({transformed[0], transformed[1], transformed[2]});
     // Entity_TransformLocalToWorld adds heading while retaining the marker's
-    // local pitch and roll. Entity stores the inverse mission-yaw convention.
-    out.yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-        static_cast<double>(parent->yaw) + marker.yaw - 90.0)));
-    // The heading word is the two words' sum, wrapping. [orig: @0x43BE7E]
+    // local pitch and roll: the heading word is the two words' sum, wrapping.
+    // [orig: @0x43BE7E]
     out.heading_bam = io::bam_add(parent_words[0], out.heading_bam);
     return out;
 }

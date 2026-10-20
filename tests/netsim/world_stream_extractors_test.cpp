@@ -12,6 +12,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -70,7 +71,7 @@ struct FourPoolWorld final : w::World {
 		organic.item_id = 0x0816;     // AI infantry
 		organic.display_name = "tango1"; // entity+0xF4 Name
 		organic.position = {10.0f, 20.0f, 1.5f};
-		organic.yaw = 30;
+		organic.heading = w::placed_heading_bam(30);
 		organic.team = 2;
 		organic.net_id = 0x4242;
 		organic.anim_slot = 5;
@@ -85,7 +86,7 @@ struct FourPoolWorld final : w::World {
 		item.ai_text_file = "d_crate";  // the AI slot's +156 BMS ai_textfile
 		item.position = {30.0f, 40.0f, 0.0f};
 		item.spawn_position = item.position; // where its model init placed it
-		item.yaw = 90;
+		item.heading = w::placed_heading_bam(90);
 		item.team = 1;
 		item.health = 250;
 		item.is_ai_capable = pool1_ai_capable;
@@ -95,7 +96,7 @@ struct FourPoolWorld final : w::World {
 		building.kind = w::EntityKind::Building;
 		building.item_id = 0x0123;    // armory-shaped static
 		building.position = {-5.0f, 6.0f, 2.0f};
-		building.yaw = 45;
+		building.heading = w::placed_heading_bam(45);
 		building.team = 0;
 		world.registry.spawn(2, with_def(building));
 
@@ -103,7 +104,7 @@ struct FourPoolWorld final : w::World {
 		marker.kind = w::EntityKind::Marker;
 		marker.item_id = 6006;        // authored KOTH hill marker
 		marker.position = {1.0f, 2.0f, 3.0f};
-		marker.yaw = 270;
+		marker.heading = w::placed_heading_bam(270);
 		marker.team = 1;
 		marker.bound_radius = 25.5f;
 		marker.net_id = 51; // its DcbId, the record's dword 2: the 0x20 net word (D-NET-517)
@@ -450,7 +451,7 @@ bool run_pool2_zone_block_rides_the_chain() {
 	trigger.kind = w::EntityKind::Building;
 	trigger.item_id = 0x0123;
 	trigger.position = {1.0f, 2.0f, 3.0f};
-	trigger.yaw = 90; // engine heading 0: no 0x0001
+	trigger.heading = w::placed_heading_bam(90); // engine heading 0: no 0x0001
 	trigger.zone_number = 2;
 	trigger.zone_radius = 70;
 	trigger.is_capture_trigger = true;
@@ -555,7 +556,7 @@ bool run_zone_outs_carry_within_a_call() {
 	trigger.kind = w::EntityKind::Building;
 	trigger.item_id = 0x0123;
 	trigger.position = {1.0f, 2.0f, 3.0f};
-	trigger.yaw = 90;
+	trigger.heading = w::placed_heading_bam(90);
 	trigger.zone_number = 2;
 	trigger.zone_radius = 30;
 	const w::EntityHandle trigger_h = world.registry.spawn(2, with_def(trigger));
@@ -799,7 +800,7 @@ bool run_full_entity_spawn_player() {
 	player.item_attrib = 0x100000u;      // AIData: exact retail name gate
 	player.display_name = "Player";
 	player.position = {12.0f, 34.0f, 5.0f};
-	player.yaw = 30;
+	player.heading = w::placed_heading_bam(30);
 	player.team = 1;
 	player.player_class = 0;             // unset -> must clamp to 8 on the wire
 	player.owner_connection_id = 0x0C;
@@ -881,7 +882,7 @@ bool run_full_entity_spawn_rich_fields() {
 	entity.seats[3].retail_slot = 0;
 	entity.seats[3].occupant = w::EntityHandle::make(0, 1);
 	entity.position = {-12.5f, 8.25f, 3.0f};
-	entity.yaw = 215;
+	entity.heading = w::placed_heading_bam(215);
 	entity.pitch = -15;
 	entity.ai_state = 0x1234;
 	entity.anim_slot = 6;
@@ -1007,7 +1008,7 @@ bool run_pool1_zone_block_rides_its_sources() {
 	spawn_point.kind = w::EntityKind::Item;
 	spawn_point.item_id = 0x0123;
 	spawn_point.position = {1.0f, 2.0f, 3.0f};
-	spawn_point.yaw = 90; // engine heading 0: no 0x0001
+	spawn_point.heading = w::placed_heading_bam(90); // engine heading 0: no 0x0001
 	spawn_point.is_spawn_point = true;
 	spawn_point.zone_radius = 0;
 	world.registry.spawn(1, with_def(spawn_point));
@@ -1052,7 +1053,7 @@ bool run_palm_state_rides_its_callbacks() {
 	palm.kind = w::EntityKind::Item;
 	palm.item_id = 0x0321;
 	palm.position = {1.0f, 2.0f, 3.0f};
-	palm.yaw = 90; // engine heading 0: no 0x0001
+	palm.heading = w::placed_heading_bam(90); // engine heading 0: no 0x0001
 	palm.palm_state_streamed = true;
 	palm.palm_state = 0; // standing
 	world.registry.spawn(1, with_def(palm));

@@ -287,14 +287,14 @@ CollisionMatrix entity_placement_matrix(const Entity &e);
 // [orig: Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
 //  the scale rides the rotation diagonal]
 void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16);
-// The collision placement of an entity from its mission eulers (degrees; the
-// yaw the mission heading, bam_heading_from_mission_yaw_deg), its 16.16
-// position and its item scale (collision_matrix_scale_rotation): a pure-yaw
+// The collision placement of an entity from its Yaw word (Entity::heading,
+// D-NET-NEW-L6-2), its pitch / roll degrees, its 16.16 position and its item
+// scale (collision_matrix_scale_rotation): a pure-yaw
 // placement keeps the quantized-table heading path bit-for-bit, and one
 // authored with pitch or roll (a rock seated on a slope) takes the full Euler
 // matrix so the shell leans with the visual. [orig: the entity orientation
 // matrix @ 0x613f40 serves every collision query]
-CollisionMatrix collision_matrix_from_placement(double yaw_deg, double pitch_deg,
+CollisionMatrix collision_matrix_from_placement(int32_t heading, double pitch_deg,
                                                 double roll_deg, const int32_t pos[3],
                                                 int32_t scale_q16);
 // A local box (min x, y, z, then max x, y, z; 16.16) as `matrix` places it:

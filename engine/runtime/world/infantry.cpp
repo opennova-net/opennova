@@ -2120,8 +2120,7 @@ void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {
         ent->alive = e.health > 0 && !org1_corpse;
         // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
         // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
-        ent->yaw = static_cast<int16_t>(
-            std::lround(normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(e.heading))));
+        ent->heading = e.heading;
         // Body-anim slot for the present pass. No brain state machine selects a body
         // animation, so the motor (player AND AI) derives the present-pass BodyAnim slot from
         // its selected clip state here — else every org1 soldier renders a static T-pose

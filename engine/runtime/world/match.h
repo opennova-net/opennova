@@ -560,10 +560,10 @@ class Match {
         int32_t return_ticks = 0;
         int32_t previous_x_q16 = 0;
         int32_t previous_y_q16 = 0;
-        // The authored heading as its whole-degree placement yaw: the
-        // definition pose's yaw word is its spawn angle, spawn_angle_bam(90 -
-        // yaw) (aiRuntime f0_7[7]).
-        int16_t home_yaw = 0;
+        // The definition pose's Yaw word (aiRuntime f0_7[7]): the row's word
+        // at its first carry service, its placement's spawn angle
+        // (D-NET-NEW-L6-2).
+        int32_t home_heading = 0;
     };
 
     void share_experience(const World &world, MatchPlayer &recipient, int32_t amount);

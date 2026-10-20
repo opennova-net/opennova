@@ -271,7 +271,7 @@ EntityPosition entity_local_point_world(const Entity &vehicle, const Vec3 &local
     //  @0x40EB42..0x40EBA6]
     const Vec3 &L = local;
     const int32_t heading = vehicle.veh.yaw_seeded ? vehicle.veh.yaw_bam
-            : spawn_angle_bam(90 - vehicle.yaw);
+            : vehicle.heading;
     const int32_t origin[3] = {0, 0, 0};
     const CollisionMatrix m = collision_matrix_from_euler(
             heading,
@@ -308,8 +308,7 @@ void VehicleSystem::presnap_attach_heading(Entity &occupant, const Entity &vehic
     const int32_t seat_heading = seat.type == SeatType::Gunner && !seat.attachment_frame
             ? io::bam_sub(carrier, emplaced_word_bam(vehicle.emplaced_gun_yaw_word))
             : io::bam_sub(carrier, bam_from_degrees_wrapped(seat.yaw_offset));
-    occupant.yaw = static_cast<int16_t>(
-            std::lround(mission_yaw_deg_from_bam_heading(seat_heading)));
+    occupant.heading = seat_heading;
     // The local player's look yaw takes the same value: the request runs outside
     // the tick, so the input-owned look carries it into the next one.
     // [orig: g_LocalPlayerLookYaw @0x436579 / @0x4365CE]
@@ -338,7 +337,7 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
                 ? -seat.yaw_offset : seat.yaw_offset;
         live.heading = vehicle.veh.yaw_seeded
                 ? io::bam_sub(vehicle.veh.yaw_bam, bam_from_degrees_wrapped(offset))
-                : io::bam_sub(spawn_angle_bam(90 - vehicle.yaw), bam_from_degrees_wrapped(offset));
+                : io::bam_sub(vehicle.heading, bam_from_degrees_wrapped(offset));
         live.pitch = vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
                 : spawn_angle_bam(vehicle.pitch);
         live.roll = vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
@@ -353,7 +352,7 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
     // frame's are the child's own.
     // [orig: Math_FixedPointMatrixToEulerAngles @0x613481..0x61348C]
     occ.position = live.position;
-    occ.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(live.heading)));
+    occ.heading = live.heading;
     occ.pitch = static_cast<int16_t>(std::lround(live.pitch * kDegreesPerBam));
     occ.roll = static_cast<int16_t>(std::lround(live.roll * kDegreesPerBam));
     if (seat.attachment_frame) {

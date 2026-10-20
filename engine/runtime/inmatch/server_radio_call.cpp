@@ -171,7 +171,7 @@ void designation_point(world::World &world, const world::Entity &sender, int32_t
 				body ? body->inf.eye_offset_y : sender.eye_offset_y);
 		fire[2] = io::bam_add(body ? body->self->position.z.q16 : sender.position.z.q16,
 				body ? body->inf.eye_offset_z : sender.eye_offset_z);
-		fire[3] = body ? body->heading : world::bam_heading_from_mission_yaw_deg(sender.yaw);
+		fire[3] = body ? body->heading : sender.heading;
 		fire[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch)
 		               : world::bam_from_degrees_wrapped(sender.pitch);
 		fire[5] = body ? body->roll : world::bam_from_degrees_wrapped(sender.roll);

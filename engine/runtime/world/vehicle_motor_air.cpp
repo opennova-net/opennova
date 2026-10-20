@@ -113,7 +113,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 			m.steer_target_bam = (move_order & Entity::kMoveOrderFreeLook) != 0
 					? m.yaw_bam
 					: (pilot != nullptr ? pilot->heading
-										: bam_heading_from_mission_yaw_deg(occ.yaw));
+										: occ.heading);
 		}
 	} else if (ground != INT32_MIN) {
 		m.net_alt_target = io::bam_sub(ground, 0x4000);
@@ -152,7 +152,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         // arming already landed the replicated pitch/roll, so only the yaw.
         // [orig: Entity_UpdateAircraftPhysics @0x49034C/@0x490355/@0x49035E;
         //  Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
-        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+        m.yaw_bam = veh.heading;
         if (!m.net_predicted) {
             m.air_pitch_bam = spawn_angle_bam(veh.pitch);
             m.air_roll_bam = spawn_angle_bam(veh.roll);
@@ -718,8 +718,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	veh.position.x.q16 = px;
 	veh.position.y.q16 = py;
 	veh.position.z.q16 = pz;
-    veh.yaw = static_cast<int16_t>(std::lround(
-            mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+    veh.heading = m.yaw_bam;
     // ...and the attitude with it. In the original these ARE the entity's own
     // Pitch/Roll -- the integration above writes entity+0x14/+0x18 directly, so
     // there is no separate motor copy to publish. Our split kept

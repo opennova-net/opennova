@@ -24,7 +24,7 @@ bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_t
 	// Godot (x,y,z) -> mission (x, -z, y): the inverse of the present (x,y,z) -> (x, z, -y) remap.
 	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),
 	                  static_cast<float>(p_position.y)};
-	spawn.yaw = static_cast<int16_t>(p_yaw_deg);
+	spawn.heading = opennova::world::placed_heading_bam(static_cast<int32_t>(p_yaw_deg));
 	spawn.team = static_cast<uint8_t>(p_team);
 	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	return kernel_->spawn_local_player(spawn);

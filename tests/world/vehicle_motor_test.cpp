@@ -127,7 +127,7 @@ struct Rig {
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         veh.item_attrib = kItemAttribPlayerControl;
         veh.position = {100.0f, 200.0f, 10.0f};
-        veh.yaw = 0;
+        veh.heading = placed_heading_bam(0);
         veh.health = 3000;
         veh.health_max = 3000;
         veh.alive = true;
@@ -294,7 +294,7 @@ void test_drive_forward() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08; // moving, dir 0 (forward)
-    r.drv().yaw = 0;               // steer target = vehicle heading
+    r.drv().heading = placed_heading_bam(0);               // steer target = vehicle heading
 
     const Vec3 start = r.veh().position;
     r.tick(1, t);
@@ -312,7 +312,7 @@ void test_drive_forward() {
     const float dy = r.veh().position.y - start.y;
     const float dist = std::sqrt(dx * dx + dy * dy);
     CHECK(dist > 1.0f);   // it MOVED
-    CHECK(r.veh().yaw == 0); // straight line: heading holds
+    CHECK(r.veh().heading == placed_heading_bam(0)); // straight line: heading holds
     CHECK(std::fabs(r.veh().position.z - start.z) < 0.01f); // flat-plane ground hold
 }
 
@@ -322,7 +322,7 @@ void test_reverse() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08 | 4; // moving, dir 4 (back)
-    r.drv().yaw = 0;
+    r.drv().heading = placed_heading_bam(0);
     r.tick(40, t);
     CHECK(r.veh().veh.speed < 0);
     CHECK(r.veh().veh.speed >= -(t.player_speed / 2) - 64);
@@ -336,10 +336,10 @@ void test_turn_in_place_holds() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08 | 2;
-    r.drv().yaw = 0;
+    r.drv().heading = placed_heading_bam(0);
     r.tick(60, t);
     CHECK(r.veh().veh.speed == 0);
-    CHECK(r.veh().yaw == 0);
+    CHECK(r.veh().heading == placed_heading_bam(0));
 }
 
 // Mouse steer: the steer target is the DRIVER's replicated yaw; while driving the
@@ -349,9 +349,9 @@ void test_steer_toward_driver_yaw() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08; // forward
-    r.drv().yaw = 40;              // want: vehicle turns toward mission yaw 40
+    r.drv().heading = placed_heading_bam(40);              // want: vehicle turns toward mission yaw 40
     r.tick(220, t);
-    const int yaw = r.veh().yaw;
+    const int yaw = mission_yaw_whole_deg(r.veh().heading);
     CHECK(yaw > 15);  // turned substantially toward the target...
     CHECK(yaw < 70);  // ...on the correct side (no runaway/oscillation)
 }
@@ -413,7 +413,7 @@ void test_no_driver_coasts() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08;
-    r.drv().yaw = 0;
+    r.drv().heading = placed_heading_bam(0);
     r.tick(30, t);
     CHECK(r.veh().veh.speed > 0);
     r.w.vehicles.detach(r.drv_h);
@@ -543,7 +543,7 @@ void test_dead_vehicle_holds() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08;
-    r.drv().yaw = 0;
+    r.drv().heading = placed_heading_bam(0);
     r.veh().health = 0;
     r.veh().flags |= 2u;
     r.tick(40, t);
@@ -1241,12 +1241,12 @@ void test_vehicle_impact_role_and_momentum_edge() {
 		// @0x462E94..0x462EA4, the radius leg @0x462ED6..0x462EE3]
 		other.def_mass = t.mass;
 		other.position = { 150.0f, 200.0f, 10.0f };
-		other.yaw = 90;
+		other.heading = placed_heading_bam(90);
 		other.bound_radius = 3.0f;
 		const EntityHandle target = r.w.registry.spawn(1, other);
 		collision.assign_entity(target, collision.add_model(vehicle_sound_test_wall()));
 		r.veh().position = { 146.0f, 200.0f, 10.0f };
-		r.veh().yaw = 90;
+		r.veh().heading = placed_heading_bam(90);
 		r.veh().bound_radius = 3.0f;
 		r.veh().health = 1000;
 		r.veh().veh.speed = r.veh().veh.cmd_speed = 30000;
@@ -2318,7 +2318,7 @@ void test_mover_prologue_stamps_saved_live_pose() {
 	{
 		Rig r;
 		r.w.vehicles.traits.set(r.veh().item_id, t);
-		r.veh().yaw = 1;
+		r.veh().heading = placed_heading_bam(1);
 		r.veh().pitch = 5;
 		r.veh().roll = -3;
 		const int32_t entry[3] = { to_fixed(r.veh().position.x), to_fixed(r.veh().position.y),
@@ -2515,7 +2515,7 @@ void test_skid_effects_and_sound_edges() {
 	auto &m = v.veh;
 	m.yaw_seeded = true;
 	m.yaw_bam = m.steer_target_bam = 0;
-	v.yaw = 90;
+	v.heading = placed_heading_bam(90);
 	v.uniform_scale_q16 = 2 << 16;
 	m.speed = m.cmd_speed = 20000;
 	m.contact_direction[1] = 65536;
@@ -2594,7 +2594,7 @@ void test_vehicle_carrier_follow_and_refresh() {
 	deck.position = { 100.0f, 200.0f, 5.0f };
 	deck.bound_radius = 30.0f;
 	deck.alive = true;
-	deck.yaw = 90;
+	deck.heading = placed_heading_bam(90);
 	deck.veh.yaw_seeded = true;
 	deck.veh.yaw_bam = 0;
 	const EntityHandle parent_h = r.w.registry.spawn(1, deck);

@@ -252,7 +252,7 @@ void entity_live_euler_bam(const Entity &e, int32_t out[3]) {
     // has run, else the whole-degree mission yaw every other row carries.
     out[0] = e.veh.yaw_seeded
             ? e.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
+            : e.heading;
     out[1] = e.veh.yaw_seeded ? e.veh.air_pitch_bam
                               : bam_from_degrees_wrapped(static_cast<double>(e.pitch));
     out[2] = e.veh.yaw_seeded ? e.veh.air_roll_bam
@@ -281,10 +281,9 @@ void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16) {
     }
 }
 
-CollisionMatrix collision_matrix_from_placement(double yaw_deg, double pitch_deg,
+CollisionMatrix collision_matrix_from_placement(int32_t heading, double pitch_deg,
                                                 double roll_deg, const int32_t pos[3],
                                                 int32_t scale_q16) {
-    const int32_t heading = bam_heading_from_mission_yaw_deg(yaw_deg);
     CollisionMatrix m = (pitch_deg != 0.0 || roll_deg != 0.0)
             ? collision_matrix_from_euler(heading, bam_from_degrees_wrapped(pitch_deg),
                                           bam_from_degrees_wrapped(roll_deg), pos)

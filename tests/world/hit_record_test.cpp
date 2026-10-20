@@ -60,7 +60,7 @@ struct KillRig {
         n.net_id = 60;
         n.team = 2;
         n.group_id = 4;
-        n.yaw = 90; // engine heading 0: a +X round arrives from behind
+        n.heading = placed_heading_bam(90); // engine heading 0: a +X round arrives from behind
         npc = w->registry.spawn(0, n);
         w->ai.at(w->ai.attach(npc))->inf.active = true;
     }

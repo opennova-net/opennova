@@ -17,6 +17,7 @@
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -133,7 +134,7 @@ world::EntityHandle add_player(world::World &world, uint32_t dcb, uint8_t team, 
 	e.owner_connection_id = dcb;
 	e.display_name = name;
 	e.position = {x, y, z};
-	e.yaw = yaw;
+	e.heading = world::placed_heading_bam(yaw);
 	e.health = 100;
 	e.alive = true;
 	return world.registry.spawn(0, e);

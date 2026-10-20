@@ -355,7 +355,7 @@ void pose_provider_turns_the_euler_by_the_point_direction() {
     World &world = *storage;
     world.registry.configure_pool(1, 2);
     Entity seed;
-    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.yaw = 0;
+    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.heading = placed_heading_bam(0);
     const auto handle = world.registry.spawn(1, seed);
     opennova::threedi::ThreediUserPoint point{};
     point.x = 65536; point.rot_y = 65536; point.subobject_index = -1;
@@ -390,7 +390,7 @@ void pose_provider_maps_the_userpoint_part_as_retail() {
     World &world = *storage;
     world.registry.configure_pool(1, 2);
     Entity seed;
-    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.yaw = 0;
+    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.heading = placed_heading_bam(0);
     const auto handle = world.registry.spawn(1, seed);
     // One point per part index: the root (0), -1, the count (1), past it (2), -2.
     opennova::threedi::ThreediUserPoint points[5] = {};

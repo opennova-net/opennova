@@ -608,7 +608,7 @@ bool check_spectator_convert_deploys() {
 	body->flags |= w::kEntityFlagDead;
 	body->health = 0;
 	body->alive = false;
-	body->yaw = 30;
+	body->heading = w::placed_heading_bam(30);
 	body->pitch = 5;
 	body->group_id = 4;
 	body->position = {40.0f, 50.0f, 6.0f};
@@ -629,7 +629,7 @@ bool check_spectator_convert_deploys() {
 			"the deploy's 620 protection overwrites the -1; the body stays hidden"))
 		return false;
 	if (!expect(body->position.x == 40.0f && body->position.y == 50.0f && body->position.z == 6.0f &&
-					body->yaw == 90 && body->pitch == 0 && !f.conn(0).reply.convert_holds_pose,
+					body->heading == w::placed_heading_bam(90) && body->pitch == 0 && !f.conn(0).reply.convert_holds_pose,
 			"the hold arm places nothing, zeroes the angle words and clears its latch"))
 		return false;
 	if (!expect(f.conn(0).link.respawn_delay_seconds == 5 &&

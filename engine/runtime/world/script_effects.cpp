@@ -24,7 +24,7 @@ ScriptEffectEvent descriptor(const World &world, const Entity &entity, const std
 // These are entity angles; no terrain normal or target-facing query participates.
 std::array<int32_t, 3> direction(const World &world, const Entity &entity) {
     const AiEntity *body = world.ai.for_handle(entity.handle);
-    const uint32_t yaw = uint32_t(body ? body->heading : bam_heading_from_mission_yaw_deg(entity.yaw));
+    const uint32_t yaw = uint32_t(body ? body->heading : entity.heading);
     const uint32_t pitch = uint32_t(body ? body->body_pitch : bam_from_degrees_wrapped(entity.pitch));
     const double yaw_phase = double(((yaw + 0x200000u) >> 22) & 1023u) * (2.0 * io::kPi / 1024.0);
     const double pitch_phase = double(((pitch + 0x200000u) >> 22) & 1023u) * (2.0 * io::kPi / 1024.0);

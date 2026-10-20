@@ -323,7 +323,7 @@ static void world_feeds() {
 	seed.has_item_def = true;
 	seed.item_type = 3;
 	seed.position = { 0, 0, 10 };
-	seed.yaw = 90;
+	seed.heading = placed_heading_bam(90);
 	const auto player = world.registry.spawn(0, seed);
 	world.cached.local_player = player;
 	world.ai.attach(player);

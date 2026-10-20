@@ -21,6 +21,12 @@ inline int32_t spawn_angle_bam(int32_t deg) {
     const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(deg) << 16) / 360;
     return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
 }
+// A placed row's Yaw word (Entity::heading) from its whole-degree mission yaw:
+// the spawn angle of 90 - yaw (D-NET-NEW-L6-2).
+// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+inline int32_t placed_heading_bam(int32_t yaw_deg) {
+    return spawn_angle_bam(90 - yaw_deg);
+}
 constexpr double kBamPerDegree = kBamFullTurn / 360.0;
 constexpr double kDegreesPerBam = 360.0 / kBamFullTurn;
 
@@ -49,6 +55,12 @@ inline int32_t bam_heading_from_mission_yaw_deg(double yaw_deg) {
 
 inline double mission_yaw_deg_from_bam_heading(int32_t heading_bam) {
     return normalize_mission_yaw_deg(90.0 - static_cast<double>(heading_bam) * kDegreesPerBam);
+}
+
+// A Yaw word as whole mission degrees in [0, 360), rounded: the display value
+// of the tooling cards (ours alone, not a retail store).
+inline int32_t mission_yaw_whole_deg(int32_t heading_bam) {
+    return static_cast<int32_t>(std::lround(mission_yaw_deg_from_bam_heading(heading_bam)) % 360);
 }
 
 } // namespace opennova::world

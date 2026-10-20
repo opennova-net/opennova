@@ -50,7 +50,7 @@ int32_t placement_angle_bam(int32_t degrees) {
 }
 
 int32_t carrier_heading_bam(const w::Entity &carrier) {
-	return placement_angle_bam(90 - carrier.yaw);
+	return carrier.heading; // the carrier's Yaw word
 }
 
 int32_t carrier_axis_bam(int16_t degrees) {
@@ -463,7 +463,7 @@ bool run_roundtrip_to_host_staging(bool hidden) {
 	                   : (pe->position.x.q16 == 0 && pe->position.y.q16 == 0 &&
 	                      pe->position.z.q16 == 0),
 	            "a hidden peer takes the source position, a visible one keeps its own")) return false;
-	if (!expect(pe->yaw == 45, "host peer yaw = 45 (from the joiner's heading)")) return false;
+	if (!expect(pe->heading == w::placed_heading_bam(45), "host peer yaw = 45 (from the joiner's heading)")) return false;
 	const w::AiEntity *ae = ai.for_handle(ph);
 	if (!expect(ae != nullptr, "host peer has an AiEntity")) return false;
 	if (!expect(ae->net_smooth_target[0] == sx && ae->net_smooth_target[1] == sy &&
@@ -506,7 +506,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	carrier_seed.item_attrib = w::kItemAttribPlayerControl;
 	carrier_seed.position = {10.0f, 20.0f, 2.0f};
-	carrier_seed.yaw = 90;
+	carrier_seed.heading = w::placed_heading_bam(90);
 	carrier_seed.health = 3000;
 	carrier_seed.health_max = 3000;
 	w::Seat seat;
@@ -530,7 +530,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	// refresh. Non-zero pitch/roll ensure the builder and apply use one full frame.
 	w::Entity *source_carrier = source.registry.get(source_carrier_h);
 	source_carrier->position = {85.0f, -20.0f, 7.0f};
-	source_carrier->yaw = -35;
+	source_carrier->heading = w::placed_heading_bam(-35);
 	source_carrier->pitch = 12;
 	source_carrier->roll = -7;
 	source_body->heading = 0x61230000; // independent mounted LOOK
@@ -566,7 +566,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	host_ai_system.attach(host_player_h);
 	w::Entity host_carrier_seed = carrier_seed;
 	host_carrier_seed.position = source_carrier->position;
-	host_carrier_seed.yaw = source_carrier->yaw;
+	host_carrier_seed.heading = source_carrier->heading;
 	host_carrier_seed.pitch = source_carrier->pitch;
 	host_carrier_seed.roll = source_carrier->roll;
 	const w::EntityHandle host_carrier_h = host.registry.spawn(1, host_carrier_seed);
@@ -631,7 +631,7 @@ bool run_ground_target_carrier_roundtrip() {
 	deck_seed.kind = w::EntityKind::Building;
 	deck_seed.item_id = 0x0465;
 	deck_seed.position = {-40.0f, 65.0f, 4.0f};
-	deck_seed.yaw = 25;
+	deck_seed.heading = w::placed_heading_bam(25);
 	deck_seed.pitch = -6;
 	deck_seed.roll = 4;
 	const w::EntityHandle source_deck_h = source.registry.spawn(2, deck_seed);
@@ -784,7 +784,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 		carrier_seed.has_item_def = true; // seats need the def (D-NET-422)
 		carrier_seed.item_id = 0x1004;
 		carrier_seed.position = {85.0f, -20.0f, 7.0f};
-		carrier_seed.yaw = static_cast<int16_t>(std::lround(yaw_deg));
+		carrier_seed.heading = w::placed_heading_bam(static_cast<int16_t>(std::lround(yaw_deg)));
 		carrier_seed.pitch = static_cast<int16_t>(std::lround(pitch_deg));
 		carrier_seed.roll = static_cast<int16_t>(std::lround(roll_deg));
 		carrier_seed.health = 3000;
@@ -871,12 +871,12 @@ bool run_mounted_echo_names_the_seat_ground_link() {
 	w::Entity deck_seed;
 	deck_seed.kind = w::EntityKind::Item;
 	deck_seed.position = {500.0f, 100.0f, 0.0f};
-	deck_seed.yaw = 30;
+	deck_seed.heading = w::placed_heading_bam(30);
 	const w::EntityHandle deck = world.registry.spawn(1, deck_seed);
 	w::Entity vehicle_seed;
 	vehicle_seed.kind = w::EntityKind::Item;
 	vehicle_seed.position = {85.0f, -20.0f, 7.0f};
-	vehicle_seed.yaw = -35;
+	vehicle_seed.heading = w::placed_heading_bam(-35);
 	const w::EntityHandle vehicle = world.registry.spawn(1, vehicle_seed);
 	w::Entity self_seed;
 	self_seed.kind = w::EntityKind::Organic;

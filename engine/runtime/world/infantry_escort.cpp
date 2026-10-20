@@ -13,7 +13,7 @@ namespace opennova::world {
 namespace {
 int32_t heading_of(const World &world, const Entity &entity) {
     const AiEntity *body = world.ai.for_handle(entity.handle);
-    return body ? body->heading : bam_heading_from_mission_yaw_deg(entity.yaw);
+    return body ? body->heading : entity.heading;
 }
 void anchor_of(World &world, const Entity &entity, SkeletalAnchor anchor, int32_t out[3]) {
     if (world.pose_provider &&

@@ -3186,7 +3186,7 @@ void test_item_callbacks_receive_geometric_section_on_both_peers() {
         const auto owner = world.registry.spawn(0, shooter);
         Entity seed; seed.kind = EntityKind::Building; seed.item_type = 5;
         seed.item_id = 812; seed.has_item_def = true; seed.health = 500;
-        seed.position = {4,0,0}; seed.yaw = 90;
+        seed.position = {4,0,0}; seed.heading = placed_heading_bam(90);
         const auto h = world.registry.spawn(2, seed);
         auto &target = *world.registry.get(h);
         if (!authority) target.item_section_damage[2] = 15;
@@ -3255,7 +3255,7 @@ struct PlayerVictimRig : HeapWorldFixture {
         PlayerSpawn spawn;
         spawn.position = {5.0f, 0.0f, 0.0f};
         spawn.net_id = 0xFFF1;
-        spawn.yaw = 90; // engine heading 0: the +X round arrives from behind
+        spawn.heading = placed_heading_bam(90); // engine heading 0: the +X round arrives from behind
         victim = spawn_remote_player(world, spawn);
         CHECK(victim.valid());
         if (Entity *v = world.registry.get(victim)) {
@@ -3636,7 +3636,7 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     PlayerSpawn spawn;
     spawn.position = {5.0f, 0.0f, 0.0f};
     spawn.net_id = 0xFFF0;
-    spawn.yaw = 90;
+    spawn.heading = placed_heading_bam(90);
     const EntityHandle victim = spawn_player(world, spawn); // the joiner's own body
     CHECK(victim.valid() && world.cached.local_player == victim);
     AiEntity *body = world.ai.for_handle(victim);

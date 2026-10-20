@@ -15,6 +15,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::world;
 
@@ -132,7 +133,7 @@ struct LosRig {
         seed.kind = EntityKind::Item;
         seed.alive = true;
         seed.health = 100;
-        seed.yaw = 90; // mission yaw 90 = engine heading 0 (identity rotation)
+        seed.heading = placed_heading_bam(90); // mission yaw 90 = engine heading 0 (identity rotation)
         seed.position = Vec3{static_cast<float>(x), static_cast<float>(y), 0.0f};
         const EntityHandle h = world.registry.spawn(1, seed);
         cw.assign_entity(h, cw.add_model(box_model(hx, hy, height)));
@@ -144,7 +145,7 @@ struct LosRig {
         Entity seed{};
         seed.kind = EntityKind::Building;
         seed.alive = true;
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.position = Vec3{static_cast<float>(x), static_cast<float>(y), 0.0f};
         const EntityHandle h = world.registry.spawn(2, seed);
         cw.assign_entity(h, model_id);
@@ -240,7 +241,7 @@ static void test_script_los_splits_at_twenty_units() {
     const EntityHandle watcher = rig->spawn_person(0, 0, 1);
     rig->at(watcher).item_id = 1001;
     rig->at(watcher).item_type_index = 1; // the predicates gate on ItemTypeIndex
-    rig->at(watcher).yaw = 90; // mission yaw 90 = engine heading 0: faces +X
+    rig->at(watcher).heading = placed_heading_bam(90); // mission yaw 90 = engine heading 0: faces +X
     const EntityHandle crate = rig->spawn_item(3, 0, 1, 1, 3); // inside the watcher's slice
     rig->at(crate).engine_flags |= 0x8000000u;
     const EntityHandle target = rig->spawn_person(15, 0, 1);

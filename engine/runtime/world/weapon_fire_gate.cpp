@@ -3,6 +3,7 @@
 #include <base/io/bam.h>
 #include <algorithm>
 #include <cmath>
+#include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -76,14 +77,20 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
                               bool replay_client_action) {
     if (replay_client_action || (weapon.flags & 0x200) != 0 ||
             ((owner.flags | owner.engine_flags) & 0x100u) == 0) return 0;
+    // The carrier's live Position and Yaw / Pitch / Roll words against its
+    // savedLivePose (+0x80..+0x94), each a dword compare (D-NET-NEW-L6-2: the
+    // degree mirrors shifted up never equal a stamped word).
+    // [orig: Server_ClientFiredRound @0x50C379..0x50C3D4]
     const Entity *carrier = world.registry.get(owner.ground_target);
-    if (carrier != nullptr && carrier->saved_live_valid &&
-            (carrier->position.x.q16 != carrier->saved_live_pos[0] ||
-             carrier->position.y.q16 != carrier->saved_live_pos[1] ||
-             carrier->position.z.q16 != carrier->saved_live_pos[2] ||
-             static_cast<int32_t>(uint32_t(carrier->yaw) << 16) != carrier->saved_live_yaw ||
-             static_cast<int32_t>(uint32_t(carrier->pitch) << 16) != carrier->saved_live_pitch ||
-             static_cast<int32_t>(uint32_t(carrier->roll) << 16) != carrier->saved_live_roll)) return 0;
+    if (carrier != nullptr && carrier->saved_live_valid) {
+        int32_t live[3];
+        int32_t yaw = 0, pitch = 0, roll = 0;
+        carrier_pose_fixed(*carrier, live, yaw, pitch, roll);
+        if (live[0] != carrier->saved_live_pos[0] || live[1] != carrier->saved_live_pos[1] ||
+                live[2] != carrier->saved_live_pos[2] || roll != carrier->saved_live_roll ||
+                yaw != carrier->saved_live_yaw || pitch != carrier->saved_live_pitch)
+            return 0;
+    }
     const int32_t dx = io::bam_sub(owner.position.x.q16, origin.x);
     const int32_t dy = io::bam_sub(owner.position.y.q16, origin.y);
     const int32_t dz = io::bam_sub(owner.position.z.q16, origin.z);

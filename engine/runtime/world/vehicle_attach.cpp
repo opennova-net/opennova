@@ -311,9 +311,9 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
         }
         world.vehicles.bind_use_gun_slot(occ, veh);
     }
-    // The entity's degree mirror as the entity carried it in, before the seat
-    // pose rewrites it (the look copy's fallback below, for an entity with no body).
-    const int16_t entry_yaw = occ.yaw;
+    // The entity's Yaw word as the entity carried it in, before the seat pose
+    // rewrites it (the look copy's fallback below, for an entity with no body).
+    const int32_t entry_heading = occ.heading;
     // Retail's attach stores no Position: the parent, bone, slot and flags only;
     // a body's own motor poses it from the seat on its next pass (D-NET-507: the
     // position is one store now, so the seat pose no longer lands early).
@@ -332,8 +332,7 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.net_stance_bits = 0;
     if (occ.handle == world.cached.local_player) {
         AiEntity *body = world.ai.for_handle(occ.handle);
-        const int32_t yaw = body != nullptr ? body->heading
-                                            : bam_heading_from_mission_yaw_deg(entry_yaw);
+        const int32_t yaw = body != nullptr ? body->heading : entry_heading;
         if (world.local_player_state != nullptr) {
             world.local_player_state->clear_stance_latches();
             world.local_player_state->input.look_heading = yaw;
@@ -950,8 +949,8 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     const int32_t max_aim_bam = player.mounted ? 59652320 : 1073741760;
     // The scan's view frame is the entity Yaw/Pitch (+0x10/+0x14) [orig: the
     // subtractions @0x4360b6 / @0x4360c6]: the body's BAM32 heading and pitch for
-    // every real player, the mission-degree mirror for a bare entity.
-    int32_t view_heading = bam_heading_from_mission_yaw_deg(player.yaw);
+    // every real player, the entity's Yaw word and pitch mirror for a bare entity.
+    int32_t view_heading = player.heading;
     int32_t view_pitch = static_cast<int32_t>(player.pitch * kBamPerDegree);
     if (const AiEntity *body = world.ai.for_handle(player.handle)) {
         view_heading = body->heading;

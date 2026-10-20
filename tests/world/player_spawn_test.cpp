@@ -90,7 +90,7 @@ int main() {
 
         PlayerSpawn ps;
         ps.position = {10.0f, 20.0f, 5.0f};
-        ps.yaw = 0;
+        ps.heading = placed_heading_bam(0);
         ps.team = 1;
         ps.net_id = 0xFFF0;
         const EntityHandle h = spawn_player(w, ps);
@@ -114,28 +114,27 @@ int main() {
         CHECK(ae->inf.is_local_player);
     }
 
-    // --- D-NET-376: the motor heading is the placement's copied word, never its
-    //     whole-degree mirror re-converted. JO:CA CP01's start marker (raw BMS yaw
-    //     -197) puts 0xCC160000 in retail's player +0x10 and look yaw (read from
-    //     the process); 163 degrees turned exactly would be 0xCC16C16C. A spawn
-    //     with no source pose still turns its yaw.
+    // --- D-NET-376, D-NET-NEW-L6-2: the body and the motor start from the
+    //     placement's copied word, never a whole-degree mirror re-converted.
+    //     JO:CA CP01's start marker (raw BMS yaw -197) puts 0xCC160000 in retail's
+    //     player +0x10 and look yaw (read from the process); 163 degrees turned
+    //     exactly would be 0xCC16C16C. A spawn with no source pose passes a placed
+    //     row's word.
     //     [orig: Entity_FindBestSpawnPoint @0x50CF38, @0x50CF4D]
     {
         World w;
         w.registry.configure_pool(0, 8);
         PlayerSpawn ps;
-        ps.yaw = -197;
-        ps.heading_bam = static_cast<int32_t>(0xCC160000u);
-        CHECK(player_spawn_heading(ps) == static_cast<int32_t>(0xCC160000u));
+        ps.heading = static_cast<int32_t>(0xCC160000u);
+        CHECK(placed_heading_bam(-197) == static_cast<int32_t>(0xCC160000u));
         const EntityHandle h = spawn_player(w, ps);
         const AiEntity *ae = w.ai.for_handle(h);
         CHECK(ae != nullptr && static_cast<uint32_t>(ae->heading) == 0xCC160000u);
         CHECK(ae != nullptr && static_cast<uint32_t>(ae->inf.body_heading) == 0xCC160000u);
-        CHECK(w.registry.get(h)->yaw == -197); // the mirror stays the record's
+        CHECK(static_cast<uint32_t>(w.registry.get(h)->heading) == 0xCC160000u); // the entity's word
 
-        PlayerSpawn synthetic;
-        synthetic.yaw = 163;
-        CHECK(player_spawn_heading(synthetic) == bam_heading_from_mission_yaw_deg(163.0));
+        // Yaw 163: the spawn angle of -73, ((-73 << 16) / 360) << 16 truncated.
+        CHECK(static_cast<uint32_t>(placed_heading_bam(163)) == 0xCC170000u);
     }
 
     // --- D-NET-144: spawns seed FULL health from the items.def Player hp when the traits sweep
@@ -401,7 +400,7 @@ int main() {
 
         PlayerSpawn ps;
         ps.position = {0.0f, 0.0f, 0.0f};
-        ps.yaw = 0;
+        ps.heading = placed_heading_bam(0);
         const EntityHandle h = spawn_player(w, ps);
         AiEntity &ae = *ai.at(0);
 

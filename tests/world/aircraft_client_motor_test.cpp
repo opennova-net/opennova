@@ -50,7 +50,7 @@ void make_rig(Rig &r) {
 	seed.kind = w::EntityKind::Item;
 	seed.item_id = 0x07DA; // Blackhawk wire type (items.def 102010)
 	seed.position = {100.0f, 200.0f, 60.0f};
-	seed.yaw = 90;
+	seed.heading = w::placed_heading_bam(90);
 	r.heli = r.world.registry.spawn(1, seed);
 	r.traits.family = w::VehicleFamily::Helicopter;
 	r.traits.unit_type = 5;
@@ -524,7 +524,7 @@ bool run_diagonal_key_pedal_yaw_and_free_look() {
 		pilot.player_class = 8;
 		pilot.health = pilot.health_max = 100;
 		pilot.alive = true;
-		pilot.yaw = 45; // a look far from the hull's own yaw
+		pilot.heading = w::placed_heading_bam(45); // a look far from the hull's own yaw
 		pilot.mounted = true;
 		pilot.mount_target = r.heli;
 		pilot.mount_type = w::SeatType::Controller;

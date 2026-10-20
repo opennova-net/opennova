@@ -99,8 +99,9 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 // Each extractor reads only the fields the engine/runtime/world Entity models; the wire fields a
 // freshly-promoted static/spawn does not carry (ammo, mount-occupancy block, AI trailer, ...) stay
 // zero — faithful for a load-time spawn record, and the flag word each encoder derives
-// (encode_*_batch) gates them out. The orientation field is the engine-frame heading BAM
-// (90 - yaw)*kBamPerDegree, the same convention snapshot_of / decode_* use (D-NET-86).
+// (encode_*_batch) gates them out. The orientation field is the entity's Yaw word
+// (Entity::heading, the engine-frame BAM32), as snapshot_of reads it (D-NET-86,
+// D-NET-NEW-L6-2).
 
 // pool-0 organics (AI infantry + players) -> S2C 0x0C [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0].
 // The batch is the same for every recipient: a player's flags word carries its own entity's bit0

@@ -38,6 +38,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 #include "common/mission_set.h"
 
 using namespace opennova::threedi;
@@ -157,7 +158,7 @@ int main() {
 	truck.net_id = 4098;
 	truck.alive = true;
 	truck.position = {0.0f, 0.0f, 0.0f};
-	truck.yaw = 0;
+	truck.heading = w::placed_heading_bam(0);
 	// Seats, from the authored user points. The real pipeline fills these via
 	// mission::extract_item_seat_specs; this harness builds the truck by hand,
 	// so without them mount() finds no seat and the dismount path is never
