@@ -49,8 +49,11 @@ const PlayerTemplate &player_spawn_row(const World &world, const PlayerSpawn &sp
         index = world.tables.player.item_type_index;
         return world.tables.player;
     }
+    // The record's word is read signed into the find's dword compare, so a word of
+    // 0x8000 or more matches no row and binds the first [orig: NapiNPClientMsg_0x00C
+    //  `movsx edx, ax` @0x42E840 -> ItemList_FindIndexByTypeId @0x42E844].
     const int32_t type_id = spawn.item_type_id >= 0
-            ? spawn.item_type_id
+            ? static_cast<int32_t>(static_cast<int16_t>(static_cast<uint16_t>(spawn.item_type_id)))
             : player_cammo_type_id(world, spawn.item_class != 0 ? spawn.item_class
                                                                 : spawn.player_class);
     index = item_index_by_type_id(world, type_id);
@@ -228,7 +231,12 @@ void rebind_player_camouflage_row(World &world, Entity &body) {
     body.armor_kz = retail_signed_i16(row.armor_kz);
     body.damage_reduc_pp = row.damage_reduc_pp;
     body.damage_reduc_max = row.damage_reduc_max;
-    if (row.item_hp.has_value() && *row.item_hp != 0) body.health_max = *row.item_hp;
+    // The readers of the def's hp word read the new def's, a zero word included (the
+    // field-17 tier's `movsx eax, word [def+17Ch]`): the body's copy follows it, as
+    // the spawn stamps it. [orig: Entity_GetHealthClassification @0x4AD4E0 - the def
+    //  @0x4AD4EF, the word @0x4AD505]
+    if (row.has_item_def && row.item_hp.has_value())
+        body.health_max = retail_signed_i16(*row.item_hp);
 }
 
 EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {

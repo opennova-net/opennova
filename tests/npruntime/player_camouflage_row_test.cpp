@@ -14,6 +14,7 @@
 
 #include <formats/def/def.h>
 #include <runtime/inmatch/charattr_table.h>
+#include <runtime/inmatch/server_spawn.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/ai.h>
@@ -24,6 +25,8 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+
+#include "host_test_setup.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -37,22 +40,27 @@ static int failures = 0;
 namespace {
 
 // Row 0 the "Null" marker (type 0), then three persons: 5305 (hp 150), 5310 (hp 120),
-// 5311 (hp 100).
+// 5311 (hp 100); then 5312 (hp 0) and the type 0x8000 (id 132768, hp 90).
 const char kItems[] =
 		"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
 		"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n type person\r\n hp 150\r\nend\r\n"
 		"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\nend\r\n"
-		"begin \"Generic Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\nend\r\n";
+		"begin \"Generic Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\nend\r\n"
+		"begin \"Hollow Soldier\"\r\n id 105312\r\n type person\r\n hp 0\r\nend\r\n"
+		"begin \"High Soldier\"\r\n id 132768\r\n type person\r\n hp 90\r\nend\r\n";
 
 // Classes 1..4 name 5310 everywhere; class 5 jungle 5310, desert 5305, arctic 5311; class 6
-// jungle 9999 (no row: the first row), desert 5311, arctic 5305.
+// jungle 9999 (no row: the first row), desert 5311, arctic 5305; class 7 5312 and class 8
+// 5311 everywhere.
 const char kCharattr[] =
 		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
 		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
 		"[CHARACTER3]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
 		"[CHARACTER4]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
 		"[CHARACTER5]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5311\r\n"
-		"[CHARACTER6]\r\nJUNGLE_CAMMO\t= 9999\r\nDESERT_CAMMO\t= 5311\r\nARCTIC_CAMMO\t= 5305\r\n";
+		"[CHARACTER6]\r\nJUNGLE_CAMMO\t= 9999\r\nDESERT_CAMMO\t= 5311\r\nARCTIC_CAMMO\t= 5305\r\n"
+		"[CHARACTER7]\r\nJUNGLE_CAMMO\t= 5312\r\nDESERT_CAMMO\t= 5312\r\nARCTIC_CAMMO\t= 5312\r\n"
+		"[CHARACTER8]\r\nJUNGLE_CAMMO\t= 5311\r\nDESERT_CAMMO\t= 5311\r\nARCTIC_CAMMO\t= 5311\r\n";
 
 struct Rig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
@@ -158,6 +166,87 @@ void test_the_loadout_accept_rebinds_the_row() {
 	CHECK(record_type(*r.world, *body) == 0x14BF);
 }
 
+// The accept's rebind reads the new def's hp word, a zero word included: the field-17
+// tier's denominator is the def's (signed) word, which the body's copy follows.
+// [orig: Entity_GetHealthClassification @0x4AD4E0 - the def @0x4AD4EF, `movsx eax, word
+//  [eax+17Ch]` @0x4AD505]
+void test_the_rebind_follows_the_new_def_hp_word() {
+	Rig r(0);
+	w::Entity *body = r.spawn(5);
+	CHECK(body != nullptr && body->health_max == 150);
+	if (body == nullptr) return;
+	body->player_class = 7;
+	w::rebind_player_camouflage_row(*r.world, *body);
+	CHECK(body->item_id == 5312 && body->item_type_index == 4);
+	CHECK(body->health_max == 0);
+	CHECK(body->health == 150);
+}
+
+// A joiner's own body binds its record's type word read signed: a word of 0x8000 or more
+// matches no row (the find compares the sign-extended dword) and binds the first row.
+// [orig: NapiNPClientMsg_0x00C `movsx edx, ax` @0x42E840 -> ItemList_FindIndexByTypeId
+//  @0x42E844, `cmp [ecx], esi` @0x49E120]
+void test_the_record_type_word_reads_signed() {
+	Rig r(0);
+	w::PlayerSpawn s;
+	s.player_class = 5;
+	s.net_id = r.next_net_id++;
+	s.from_wire_record = true;
+	s.item_type_id = 0x14BE;
+	const w::Entity *low = r.world->registry.get(w::spawn_remote_player(*r.world, s));
+	CHECK(low != nullptr && low->item_id == 0x14BE && low->item_type_index == 2);
+	s.net_id = r.next_net_id++;
+	s.item_type_id = 0x8000; // the row of id 132768 carries the type 0x8000
+	const w::Entity *high = r.world->registry.get(w::spawn_remote_player(*r.world, s));
+	CHECK(high != nullptr && high->item_id == 0 && high->item_type_index == 0);
+}
+
+// The add's camouflage class is the joiner's class word, unclamped; a zero word reads 8 in a
+// session and 1 out of one; the slot's class is the clamped word.
+// [orig: Server_PlayerAdd @0x51D02B (the word), `neg is_in_session; sbb; and 7; add 1`
+//  @0x51D033..0x51D040, the spawn @0x51D056, the clamp @0x51D0FA..0x51D10E]
+void test_the_add_arm_picks_its_camouflage_class() {
+	struct Case {
+		uint8_t word;
+		uint8_t in_session;
+		int32_t type;
+		int32_t index;
+		uint8_t slot_class;
+	};
+	const Case cases[] = {
+		{0, 1, 0x14BF, 3, 8}, // class 8's desert row
+		{0, 0, 0x14BE, 2, 8}, // class 1's
+		{3, 1, 0x14BE, 2, 8}, // class 3's row; the class clamps to 8
+		{6, 1, 0x14BF, 3, 6},
+	};
+	for (const Case &c : cases) {
+		Rig r(0);
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::GameConfig settings;
+		settings.max_players = 4;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Socketless, /*host_key=*/0, nullptr, settings);
+		ctx.world = r.world.get();
+		ctx.is_in_session = c.in_session;
+		inmatch::Server_InitNewRoundState(ctx);
+		inmatch::NapiNPConnection joiner;
+		joiner.type = 1;
+		joiner.connection_id = inmatch::kFirstJoinerDcb;
+		joiner.self_id_seen = true;
+		joiner.phase = inmatch::ConnectionPhase::Joined;
+		joiner.char_vars.char_class[0] = c.word;
+		joiner.char_vars.char_class[1] = c.word;
+		ctx.np_protocol.connection_list.push_back(joiner);
+		CHECK(inmatch::Server_ProcessPendingPlayerSpawns(ctx, *r.world) == 1);
+		const inmatch::NapiNPConnection &added = ctx.np_protocol.connection_list.back();
+		const w::Entity *body = r.world->registry.get(added.link.owned_entity);
+		CHECK(body != nullptr);
+		if (body == nullptr) continue;
+		CHECK(body->item_id == c.type && body->item_type_index == c.index);
+		CHECK(body->player_class == c.slot_class && added.slot_class == c.slot_class);
+	}
+}
+
 // A peer that read no charattr.def spawns its players from the seed (the stock class-8
 // desert row, 0x14B9).
 void test_no_charattr_keeps_the_seed() {
@@ -176,6 +265,9 @@ int main() {
 	test_the_add_resolves_by_its_own_class_word();
 	test_the_loadout_accept_rebinds_the_row();
 	test_no_charattr_keeps_the_seed();
+	test_the_rebind_follows_the_new_def_hp_word();
+	test_the_record_type_word_reads_signed();
+	test_the_add_arm_picks_its_camouflage_class();
 	if (failures != 0) {
 		std::printf("npruntime_player_camouflage_row: %d failure(s)\n", failures);
 		return 1;
