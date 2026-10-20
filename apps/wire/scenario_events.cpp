@@ -24,6 +24,17 @@ uint16_t read_u16(const std::vector<uint8_t> &body, size_t at) {
 	return static_cast<uint16_t>(body[at] | (body[at + 1] << 8));
 }
 
+// A console line's NUL-terminated text, as hex so a line with spaces stays one
+// field; decoded when the terminator is inside the body.
+std::string console_text(const std::vector<uint8_t> &body, bool &decoded) {
+	size_t length = 0;
+	while (length < body.size() && body[length] != 0) ++length;
+	decoded = length < body.size();
+	std::string hex;
+	for (size_t i = 0; i < length; ++i) hex += format("%02x", unsigned(body[i]));
+	return hex;
+}
+
 // The decoded fields for one S2C message; empty when the tag is not one a
 // scenario asserts on.
 std::string server_fields(const InGameMessage &m, bool &decoded) {
@@ -31,6 +42,12 @@ std::string server_fields(const InGameMessage &m, bool &decoded) {
 	const size_t len = m.payload.size();
 	size_t consumed = 0;
 	switch (static_cast<uint8_t>(m.tag & 0xFFu)) {
+		case s2c::CLIENT_CONSOLE_COMMAND:
+			// The authority's echo of a console line it did not take, sent to
+			// that line's sender alone, which runs it as its own command
+			// [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0 -- the
+			//  NETLOG handler @0x519A7B, the echo @0x519AB0..0x519AC5].
+			return "kind=console_echo text_hex=" + console_text(m.payload, decoded);
 		case s2c::ENTITY_DEATH: {
 			EntityDeathRecord v;
 			decoded = decode_entity_death(body, len, v, consumed);
@@ -110,6 +127,12 @@ std::string client_fields(const InGameMessage &m, ScenarioEventTracker &tracker,
 	const size_t len = m.payload.size();
 	size_t consumed = 0;
 	switch (static_cast<uint8_t>(m.tag & 0xFFu)) {
+		case c2s::ADMIN_NETLOG_COMMAND:
+			// A session peer's console line (the command prompt's
+			// callback), reliable [cstr line]
+			// [orig: Client_ProcessConsoleCommand @0x520E80 -- the peer's
+			//  QueueReliableMessage(4) @0x520F29].
+			return "kind=console_line text_hex=" + console_text(m.payload, decoded);
 		case c2s::FIRED_ROUND: {
 			ClientFiredRound v;
 			decoded = decode_client_fired_round(body, len, v, consumed);

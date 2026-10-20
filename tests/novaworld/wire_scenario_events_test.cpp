@@ -95,10 +95,22 @@ int main() {
 	TEST_EXPECT(line(message('C', c2s::ENTITY_UPLINK, uplink(0x005d, 0xffff))).find(
 			"carrier=0xffff") != std::string::npos);
 
+	// A console line and its echo carry the text as hex ("Ban 1"), flagged
+	// when the terminator is missing.
+	TEST_EXPECT(line(message('C', c2s::ADMIN_NETLOG_COMMAND, {'B', 'a', 'n', ' ', '1', 0}))
+			.find("dir=C session=32768 tag=0x04 kind=console_line text_hex=42616e2031 "
+			      "decode=1") != std::string::npos);
+	TEST_EXPECT(line(message('S', s2c::CLIENT_CONSOLE_COMMAND, {'h', 'i', 0}))
+			.find("tag=0x06 kind=console_echo text_hex=6869 decode=1") != std::string::npos);
+	TEST_EXPECT(line(message('S', s2c::CLIENT_CONSOLE_COMMAND, {'h', 'i'})).find(
+			"text_hex=6869 decode=0") != std::string::npos);
+
 	// Direction is part of the identity: C2S 0x13 is a radio call, S2C 0x06
-	// is not a fired round, and a settings-update record is never an event.
+	// is the console echo and never a fired round, and a settings-update
+	// record is never an event.
 	TEST_EXPECT(line(message('C', 0x13, {0x01, 0x00})).empty());
-	TEST_EXPECT(line(message('S', 0x06, encode_client_fired_round(round))).empty());
+	TEST_EXPECT(line(message('S', 0x06, encode_client_fired_round(round))).find(
+			"kind=console_echo") != std::string::npos);
 	InGameMessage settings = message('S', s2c::ENTITY_DEATH, {0x5d, 0x00, 0x00, 0x00});
 	settings.settings_update = true;
 	TEST_EXPECT(line(settings).empty());
