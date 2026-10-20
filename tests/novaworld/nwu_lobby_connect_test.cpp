@@ -804,6 +804,38 @@ void check_connect_log_gate_failures() {
 	}
 }
 
+// The gate worker's cadence with no reply: the probe at once, again whenever more than 2000 ms
+// passed since the last, none past 10000 ms since the first, where the worker stops (ours
+// reporting NWEC15 once): five probes. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - the
+// interval 0x7D0 @0x4CE7B4, the deadline 0x2710 @0x4CE7C6; CNapiGateManager_ProbeThreadProc
+// @0x6339E0 - the deadline test @0x633A58, the interval test @0x633A6A, the stamp @0x633B11]
+void check_gate_probe_cadence() {
+	Rig rig;
+	rig.lobby.open(rig.gate, rig.session);
+	rig.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+	CHECK(rig.gate.sent.size() == 1);
+	const std::vector<uint8_t> probe = rig.gate.sent.empty() ? std::vector<uint8_t>{}
+	                                                         : rig.gate.sent[0].second;
+	const auto probes_at = [&](uint32_t at) {
+		rig.lobby.tick(at);
+		return rig.gate.sent.size();
+	};
+	CHECK(probes_at(2000) == 1);  // not more than the interval yet
+	CHECK(probes_at(2001) == 2);
+	CHECK(probes_at(4001) == 2);  // 2000 since the last
+	CHECK(probes_at(4002) == 3);
+	CHECK(probes_at(6003) == 4);
+	CHECK(probes_at(8004) == 5);
+	CHECK(probes_at(10000) == 5 && rig.fatals.empty());
+	CHECK(probes_at(10001) == 5);
+	CHECK((rig.fatals == std::vector<std::string>{ novaworld_gate_error_tag(0, false) }));
+	CHECK(novaworld_gate_error_tag(0, false) == "NWEC15");
+	CHECK(probes_at(12500) == 5 && rig.fatals.size() == 1);
+	for (const auto &dg : rig.gate.sent)
+		CHECK(dg.second == probe && dg.first.port == GATE_DEFAULT_PORT);
+	rig.lobby.close();
+}
+
 // The gate reply's lines as its reader returns them: a LF, a CR or a CR LF ends one, an empty
 // line is one, the first NUL ends the text, and a line keeps 32767 characters, the next one
 // passed over. [orig: Napi_ReadLineFromBuffer @0x616CC0 - @0x616D1E, @0x616D23..0x616D3B,
@@ -853,7 +885,7 @@ std::vector<NapiMessage> client_statements(
 // vars); a removal sends ClientHostPlayerRemoved alone, its PlayerList change riding the next
 // update. [orig: Server_PlayerAdd @0x51CBC0 - @0x51D4B5, the +5 test @0x51D4BA,
 //  CPlayerManager_RebuildLists(0) @0x51D4C6; CPlayerManager_RebuildLists @0x4D4590 - the state-6
-//  test @0x4D459A, CNapiGameSession_SendHostUpdate @0x4D45B5; Server_HandlePlayerDisconnect
+//  test @0x4D4593, CNapiGameSession_SendHostUpdate @0x4D45B5; Server_HandlePlayerDisconnect
 //  @0x51B5C0 - the removal @0x51B5F3 / @0x51B601, no update]
 void check_host_player_add_sends_update() {
 	Rig rig;
@@ -932,6 +964,7 @@ int main() {
 	check_connect_log_gate_and_connect();
 	check_connect_log_give_ups();
 	check_connect_log_gate_failures();
+	check_gate_probe_cadence();
 	check_gate_response_lines();
 	check_short_protocol_packets_keep_the_connection();
 	check_disconnect_request_by_state();

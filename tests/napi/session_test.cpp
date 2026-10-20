@@ -75,8 +75,10 @@ bool check_timing_constants() {
 	if (!expect(make_session_app_id(9000, 0) == 1000u, "AppId wraps at 0x2328")) return false;
 	if (!expect(make_session_app_id(1234, 5) == 2239u, "AppId sums tick and rand")) return false;
 	if (!expect(SESSION_CONNECT_RETRANSMIT_MS == 3000u, "stage retransmit 3000 ms")) return false;
-	if (!expect(SESSION_GATE_PROBE_RETRY_MS == 3000u && SESSION_GATE_PROBE_TIMEOUT_MS == 30000u,
-	            "gate probe 3000 ms retry / 30000 ms deadline")) return false;
+	// Every fresh probe's cadence, over the 3000 / 30000 the context's creation stores.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - 0x7D0 @0x4CE7B4, 0x2710 @0x4CE7C6]
+	if (!expect(SESSION_GATE_PROBE_RETRY_MS == 2000u && SESSION_GATE_PROBE_TIMEOUT_MS == 10000u,
+	            "gate probe 2000 ms retry / 10000 ms deadline")) return false;
 	if (!expect(SESSION_GLSVSS_POLL_MS == 1000u, "GLSVSS poll 1000 ms")) return false;
 	if (!expect(SESSION_HOST_INFO_REFRESH_TICKS == 1860u, "host info refresh 0x744 ticks")) return false;
 	// The six-slot cookie-key ring [orig: CSessionIdRing_AdvanceAndGenerate @0x4dbb80].

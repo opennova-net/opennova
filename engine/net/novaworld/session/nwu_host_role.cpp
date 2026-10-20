@@ -205,7 +205,7 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 // [orig: Server_PlayerAdd @0x51cbc0 - @0x51d3f0, @0x51d421..0x51d4b5 (CNapiGameSession_OnPlayerChat
 //  @0x4d0e20, the state-6 wrapper around CNapiGameSession_SendPlayerAdded), the +5 byte cleared
 //  @0x51cf02 and tested @0x51d4ba, CPlayerManager_RebuildLists(edi = 0 @0x51d35f) @0x51d4c6;
-//  CPlayerManager_RebuildLists @0x4d4590 - the state-6 test @0x4d459a, its other callers
+//  CPlayerManager_RebuildLists @0x4d4590 - the state-6 test @0x4D4593, its other callers
 //  @0x4ff63a / @0x524903]
 void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 	players_[slot.slot] = slot;
@@ -218,7 +218,7 @@ void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 
 // The slot's vars leave the session's PlayerList in any state; ClientHostPlayerRemoved fires only
 // while hosting is established (state 6).
-// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — the state-6 wrapper @0x51b5f3
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the state-6 wrapper @0x51b5f3
 //  (CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40), then
 //  NapiLinkedList_RemoveByUserData on the PlayerList @0x51b601]
 void NwuHostRole::clear_player_slot(int slot) {

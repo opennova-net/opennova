@@ -124,7 +124,7 @@
 // crash: while no lobby instance is live (lobbydb::live_lobbies, the gates'
 // read: a lobby outage, a deployment's first release before its lobby runs)
 // the gate hands a starting opennova-serve no lobby, and it gives up past its
-// 30 s probe and exits (retail's, SESSION_GATE_PROBE_TIMEOUT_MS). So then no
+// 10 s probe and exits (retail's, SESSION_GATE_PROBE_TIMEOUT_MS). So then no
 // server is placed (each waits in provisioning, "waits for a live lobby"), an
 // exit places the server again with no restart counted, and the listing's
 // clocks wait (a listing server's timeout, a running one's listing_lost_ms:

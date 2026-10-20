@@ -72,14 +72,21 @@ inline uint32_t make_session_app_id(uint32_t tick_count, int rand_value) {
 }
 // The stage-retransmit cadence of the connect legs: the enumerator re-announces the 0x41 every
 // 3000 ms and the connecting NP connection re-sends its 0x42 join on the same interval while
-// its connect deadline runs; the gate probe worker repeats the probe every 3000 ms for 30000 ms.
+// its connect deadline runs.
 // [orig: CNapiGameSession_InitTransportConnection @0x4c9f9d (announce_interval_ms = 3000);
-//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 @0x629570..0x629595 (the join re-send);
-//  CNapiGateManager_Init @0x633f90 stores @0x634052 (3000) / @0x63405c (30000);
-//  CNapiGateManager_ProbeThreadProc @0x6339e0 @0x633a5e (deadline) / @0x633a70 (retry)]
+//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 @0x629570..0x629595 (the join re-send)]
 constexpr uint32_t SESSION_CONNECT_RETRANSMIT_MS = 3000u;
-constexpr uint32_t SESSION_GATE_PROBE_RETRY_MS = 3000u;
-constexpr uint32_t SESSION_GATE_PROBE_TIMEOUT_MS = 30000u;
+// The gate probe worker's cadence: every fresh probe sets the context's send interval to 2000 ms
+// and its deadline to 10000 ms before the worker starts, over the 3000 / 30000 the context's
+// creation stored, so the worker sends at 0 and then whenever more than 2000 ms passed since the
+// last send, and stops once more than 10000 ms passed since its start: five probes in 10 s.
+// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - the interval +0x104 = 0x7D0 @0x4CE7B4, the
+//  deadline +0x108 = 0x2710 @0x4CE7C6 (dfx2.exe @0x4CE840: @0x4CE944, @0x4CE956), over
+//  CNapiGateManager_Init @0x633F90's stores @0x634052 / @0x63405C;
+//  CNapiGateManager_ProbeThreadProc @0x6339E0 - the deadline test @0x633A58 (`ja` @0x633A5E), the
+//  interval test @0x633A6A (`jbe` @0x633A70), the last send's stamp @0x633B11]
+constexpr uint32_t SESSION_GATE_PROBE_RETRY_MS = 2000u;   // 0x7D0
+constexpr uint32_t SESSION_GATE_PROBE_TIMEOUT_MS = 10000u; // 0x2710
 // The periodic-update GLSVSS poll: once the NP connection is established (conn_state 5) and the
 // lobby session sits in state 4 (verified), the session checks its GLSVSS deadline at most once
 // per 1000 ms. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d4400 @0x4d44e3]

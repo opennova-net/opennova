@@ -119,13 +119,14 @@ struct JoinSent {
 };
 
 JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const std::string &app_id,
-		const std::string &glsvss_request = {}) {
+		const std::string &glsvss_request = {}, const std::vector<uint8_t> &cd_cookie = {}) {
 	JoinSent out;
 	inmatch::JoinerConnection joiner("Dfx2Joiner");
 	joiner.set_title(title);
 	joiner.set_cd_key_ids(ids);
 	if (!app_id.empty()) joiner.set_app_id(app_id);
 	joiner.set_glsvss_request(glsvss_request);
+	joiner.set_cd_cookie(cd_cookie);
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientHello hello;
@@ -230,6 +231,12 @@ void join_carries_the_glsvss_request() {
 	const JoinSent lan = join_of(dfx2(), cdkey::WireKeys{}, "", "[dfx2]kills");
 	expect(lan.ok && lan.join_fields == std::vector<std::string>{"VERSIONCRCSTRING"},
 	       "a LAN JOIN never carries it");
+	// After the CD cookie (the `g_AnnouncePayloadSize > 0` leg @0x42a2d5 ahead of the test
+	// @0x42a2dd).
+	const JoinSent cookie = join_of(dfx2(), cdkey::WireKeys{}, "3225", "[dfx2]kills", {0x50, 0x55, 0x42});
+	expect(cookie.ok && cookie.join_fields ==
+	               std::vector<std::string>{"VERSIONCRCSTRING", "CD", "GLSVSSREQUEST"},
+	       "GLSVSSREQUEST rides after the CD cookie");
 }
 
 } // namespace

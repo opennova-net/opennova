@@ -29,7 +29,9 @@ namespace opennova {
 //      recover the plaintext VAR-tagged response.
 //
 // [orig: CNapiGateManager_Init @0x633f90 (host "novaworld.net", port 7597,
-//  3000 ms retry, 30000 ms timeout); CNapiGateManager_ProbeThreadProc
+//  3000 ms retry, 30000 ms timeout, both overwritten with 2000 / 10000 by every
+//  fresh probe, CNapiGateManager_WaitForConnect @0x4CE6B0 @0x4CE7B4 / @0x4CE7C6:
+//  napi/session.h SESSION_GATE_PROBE_*); CNapiGateManager_ProbeThreadProc
 //  @0x6339e0; NapiSocket_SendTo @0x62cfa0; NapiSocket_EncodePacket @0x62c8f0]
 // (The demo-era anchors were jodemo.exe's CNapiGateManager_Init @0x4aecf0,
 //  sub_4AD130 and sub_5F5420 — jodemo addresses only: in retail 0x4aecf0 is

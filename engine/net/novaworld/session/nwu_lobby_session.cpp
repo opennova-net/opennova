@@ -316,10 +316,14 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	if (session_socket_ != nullptr && session_)
 		give_up_stalled_connect();
 
-	// The gate worker: while no gate response has landed, re-send the probe every
-	// SESSION_GATE_PROBE_RETRY_MS and give up past SESSION_GATE_PROBE_TIMEOUT_MS (the gate-error
-	// map with no response phase -> NWEC15). [orig: CNapiGateManager_ProbeThreadProc
-	//  @0x633a50..0x633a70]
+	// The gate worker: while no gate response has landed, re-send the probe once more than
+	// SESSION_GATE_PROBE_RETRY_MS (2000) passed since the last and give up once more than
+	// SESSION_GATE_PROBE_TIMEOUT_MS (10000) passed since the first, the cadence every fresh probe
+	// sets (session.h). Retail's worker then exits with no report and its menu waits on (the
+	// stuck state D-NET-NEW-L9-3 keeps out); ours reports the gate-error map with no response
+	// phase, NWEC15. [orig: CNapiGateManager_ProbeThreadProc @0x6339E0 - the deadline test
+	//  @0x633A58, the interval test @0x633A6A; CNapiGateManager_WaitForConnect @0x4CE6B0 - the
+	//  interval @0x4CE7B4, the deadline @0x4CE7C6]
 	if (probe_sent_ && !session_ && !gate_probe_datagram_.empty()) {
 		if (clock_ms_ - gate_started_ms_ > SESSION_GATE_PROBE_TIMEOUT_MS) {
 			gate_probe_datagram_.clear(); // report once
@@ -534,7 +538,7 @@ void NwuLobbySession::poll_gate() {
 		//  LOOP [%s]" ("n/a" @0x4CEEBE) @0x4CEF02, its stamp @0x4CEF12; "%s : GATE GATE SERVICE
 		//  SUCCEEDED.  EXTRACTING INFO." @0x4CF037; "%s : PROCESSING GATE DATA...(%ld bytes)"
 		//  (the length +0x38) @0x4CF083; "%s : GATE LINE #%2.2ld [%s]" @0x4CF10C, from line 1
-		//  @0x4CF0B4, each read @0x4CF4BE]
+		//  @0x4CF0B4 (the next number @0x4CF4BE), each read @0x4CF4E3]
 		if (connect_log_on()) {
 			connect_log("GATE DONE WITH GATE LOOP [n/a]");
 			gate_log_stamp_ms_ = clock_ms_;
