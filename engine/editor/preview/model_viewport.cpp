@@ -186,9 +186,13 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 			if (!read_first_person_options(value, options.first_person, error)) return false;
 		} else if (key == "fire") {
 			if (!read_clip_fire_options(value, options.fire, error)) return false;
+		} else if (key == "held") {
+			if (!read_held_weapon_options(value, options.held, error))
+				return false;
 		} else {
 			error = "Unknown model option \"" + key +
-			        "\" (it takes lod, ctrl, overlays, rig_model, bones, snap, sound, damage, first_person, fire).";
+					"\" (it takes lod, ctrl, overlays, rig_model, bones, snap, sound, damage, "
+					"first_person, fire, held).";
 			return false;
 		}
 	}
@@ -243,6 +247,7 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	options.set("damage", damage_options_to_json(held.damage));
 	options.set("first_person", first_person_options_to_json(held.first_person));
 	options.set("fire", clip_fire_options_to_json(held.fire));
+	options.set("held", held_weapon_options_to_json(held.held));
 	return options;
 }
 
@@ -728,6 +733,7 @@ void ModelViewport::reset_animation_() {
 	sound_cursor_ = -1;
 	clip_fire_.clear();
 	first_person_.clear();
+	held_.clear();
 	eye_ = false;
 }
 
@@ -915,6 +921,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_note_.clear();
 		clip_track_ = ClipSoundTrack();
 		first_person_.clear();
+		held_.clear();
 		eye_ = false;
 		// Until the first validation has read the project's references, the pairing item may not be read
 		// yet: said so, not that none pairs it (a validation after an edit reads with the graph built).
@@ -1003,6 +1010,12 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		sound_cursor_ = -1;
 	}
 	if (rig_moved) rig_read_ = stamped->stamps();
+	// A person's held weapon (DI-13's follow-up): the weapon the row plays with, from weapon.def as
+	// the game's load reads it, and the present row's attach (none on a weapon's map, whose first
+	// person draws the gun).
+	const bool held_moved = held_.refresh(view.findings.assets, view.project.scan.get(),
+			view.findings.graph.get(), sound_sources_.item(), clip_key_,
+			skeleton_ ? skeleton_->bone_count() : 0, first_person_.active(), options_.held);
 	// The clip's fire events (DI-24): what fires them (the item, the body the sounds bind, the rig's model and rig,
 	// the clip playing; none in first person, whose events nothing reads) and the run to the clock.
 	const anim::SkeletalClips::LoadedClip *playing =
@@ -1063,8 +1076,9 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		picture_.show(PreviewFollow::Key(), generation);
 		return picture_.built(FileStamps());
 	}
-	return rig_moved || options || document_moved || first_person_moved || eye_moved ? ViewportAction::Update
-	                                                                               : ViewportAction::Keep;
+	return rig_moved || options || document_moved || first_person_moved || eye_moved || held_moved
+			? ViewportAction::Update
+			: ViewportAction::Keep;
 }
 
 bool ModelViewport::takes_(const std::string &member) const {
@@ -1599,10 +1613,15 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	// A weapon's first person (DI-13): the gun and the arms, the eye, the actions and the one playing the row.
 	animation.set("first_person", first_person_json(first_person_, options_.first_person, clip_key_,
 	                                                first_person_action()));
+	// A person's held weapon (DI-13's follow-up): the weapon in the hand, how the row plays with
+	// it, where it hangs.
+	const std::vector<PreviewJoint> posed = joints(input.clock);
+	animation.set("held",
+			held_weapon_json(held_, options_.held, posed, camera(), size().width, size().height));
 	// The rig's bones as the clip poses them now: each by its name, its parent, where its joint
 	// stands and its pixel on the picture.
 	JsonValue bones = JsonValue::make_array();
-	for (const PreviewJoint &joint : joints(input.clock)) {
+	for (const PreviewJoint &joint : posed) {
 		JsonValue row = JsonValue::make_object();
 		row.set("bone", json_number(joint.bone));
 		row.set("name", json_string(joint.name));

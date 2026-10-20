@@ -20,7 +20,8 @@ extends GutTest
 ## share, a hit at its pixel names its record and a drag lands it on the pixel, one undo step; a table
 ## plays its clip on the rig at the preview clock's tick, its bones on the wire where the device's
 ## skeleton stands them (S17); a model destroyed as the item naming it is (DI-10: its husk drawn in its
-## place, the pieces' sections hidden, the destroy fade's registers on it, the death sound heard); two
+## place, the pieces' sections hidden, the destroy fade's registers on it, the death sound heard); a
+## person's row holds its weapon where the portable half hangs it (DI-13's follow-up); two
 ## models on devices of their own; the
 ## device cache holds four, the least recently used given up and made again at the camera it kept.
 ## S13 V6: a device builds its picture over the frames after the pump that takes the Rebuild (a
@@ -1504,6 +1505,91 @@ func test_a_clip_poses_the_bones_it_reports() -> void:
 				"bone %d marked where the picture draws it" % i)
 		marked += 1
 	assert_eq(marked, bones.size(), "every bone compared on the screen")
+
+
+## DI-13's follow-up: a person's row holds its weapon. The synthetic person (bone 16 its weapon
+## hand) plays a map of the rig19 clips as the player's item; the knife's row draws the knife's
+## third-person model in the device where the game's presenter hangs it
+## (EntityPresenter.held_weapon_attach_transform over the device's posed skeleton), which is where
+## the portable half says it hangs (the envelope's `held`: its place, its muzzle and its up),
+## turned with the hand; the walk's row draws the rifle there, turned with the body.
+func test_a_person_s_row_holds_its_weapon() -> void:
+	if _app == null:
+		return
+	var root := _new_project("Held Weapon Game")
+	var fixtures := ProjectSettings.globalize_path("res://../fixtures")
+	var person := FileAccess.get_file_as_bytes(fixtures.path_join("threedi/synth/person.3di"))
+	var gun := FileAccess.get_file_as_bytes(fixtures.path_join("threedi/synth/gun.3di"))
+	TestFs.write_bytes(self, root.path_join("models/person.3di"), person)
+	TestFs.write_bytes(self, root.path_join("models/knife_3.3di"), gun)
+	TestFs.write_bytes(self, root.path_join("models/rifle_3.3di"), gun)
+	for clip: String in ["rig19_rst", "rig19_idle", "rig19_walk"]:
+		var bytes := FileAccess.get_file_as_bytes(fixtures.path_join("anim/%s.bad" % clip))
+		TestFs.write_bytes(self, root.path_join("anims/%s.bad" % clip), bytes)
+	var map := 'anim_reset "rig19_rst"\nanim_walk_forward "rig19_walk"\nanim_knife "rig19_idle"\n'
+	var items := 'begin "Soldier"\nid 105305\ntype person\ngraphic person\nanim_def soldier\n'
+	items += "ai_function plyr\nmove_function org2\nend\n"
+	var weapons := 'weapon "WPN_RIFLE"\n\tclipsize 30\n\tgfx3 rifle_3\nend\n'
+	weapons += 'weapon "WPN_KNIFE"\n\tclipsize -1\n\tgfx3 knife_3\n\tspecial_hold 1\nend\n'
+	_write_crlf(root.path_join("anims/soldier.adm"), map)
+	_write_crlf(_project_file(root, "items.def"), items)
+	_write_crlf(_project_file(root, "weapon.def"), weapons)
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("anims/soldier.adm"))
+	var rows := [
+		["anim_knife", "WPN_KNIFE", "knife_3.3di", "hand"],
+		["anim_walk_forward", "WPN_RIFLE", "rifle_3.3di", "entity"],
+	]
+	for row: Array in rows:
+		var record: int = _seam.find_record(String(row[0]))
+		assert_gt(record, 0)
+		assert_true(_seam.select_record(record))
+		var preview := await _await_ready()
+		assert_eq(String(preview.get("status", "")), "ready", str(preview))
+		assert_true(_change({"clock": {"playing": false, "ticks": 0}}))
+		await get_tree().process_frame
+		await get_tree().process_frame
+		var held: Dictionary = _state().get("body", {}).get("animation", {}).get("held", {})
+		assert_eq(String(held.get("weapon", "")), String(row[1]), str(held))
+		assert_eq(String(held.get("frame", "")), String(row[3]), str(held))
+		var body: ObjectModel = null
+		var weapon: ObjectModel = null
+		for found: Variant in _device(preview).find_children("*", "ObjectModel", true, false):
+			var model := found as ObjectModel
+			if model.get_object_data() == null:
+				continue
+			if model.get_graphic_name() == String(row[2]):
+				weapon = model
+			elif model.has_skeleton():
+				body = model
+		assert_not_null(body, "the person draws")
+		assert_not_null(weapon, "%s draws its %s" % [row[1], row[2]])
+		if body == null or weapon == null:
+			return
+		assert_true(weapon.is_visible_in_tree(), "the weapon shows")
+		# The device's placement (the game's own) where the portable half says it hangs.
+		var placed: Transform3D = body.global_transform.affine_inverse() * weapon.global_transform
+		var near := Vector3.ONE * 0.002
+		var at := _vector(held.get("position"))
+		assert_almost_eq(placed.origin, at, near, "%s hangs where the envelope says" % row[1])
+		var muzzle := _vector(held.get("muzzle"))
+		assert_almost_eq(placed.basis.z.normalized(), muzzle, near, "its muzzle as it says")
+		var up := _vector(held.get("up"))
+		assert_almost_eq(placed.basis.y.normalized(), up, near, "its up as it says")
+
+
+## The project's file of `name`: where a blank project keeps it, else at its top.
+func _project_file(root: String, name: String) -> String:
+	for candidate: String in [root.path_join(name), root.path_join("defs").path_join(name)]:
+		if FileAccess.file_exists(candidate):
+			return candidate
+	return root.path_join(name)
+
+
+## `text` written to `path` with CRLF line ends, as the game's files are.
+func _write_crlf(path: String, text: String) -> void:
+	TestFs.write_bytes(self, path, TestFs.crlf(text).to_utf8_buffer())
 
 
 ## S13 V5: each open model its own viewport and its own device: the first again keeps its device and

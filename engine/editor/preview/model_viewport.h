@@ -16,6 +16,7 @@
 #include <editor/preview/preview_clip_fire.h>
 #include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/preview_first_person.h>
+#include <editor/preview/preview_held_weapon.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 #include <runtime/assets/asset_store.h>
@@ -71,11 +72,14 @@ struct ModelViewportOptions {
 	FirstPersonOptions first_person;
 	// How a clip's fire events show (DI-24, preview/preview_clip_fire): the range's target, the side seeing them.
 	ClipFireOptions fire;
+	// A person's held weapon (DI-13's follow-up, preview/preview_held_weapon): the weapon in the
+	// body's hand.
+	HeldWeaponOptions held;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
 				rig_model == other.rig_model && bones == other.bones && snap == other.snap &&
-				sound == other.sound && damage == other.damage && first_person == other.first_person &&
-				fire == other.fire;
+				sound == other.sound && damage == other.damage &&
+				first_person == other.first_person && fire == other.fire && held == other.held;
 	}
 	bool operator!=(const ModelViewportOptions &other) const { return !(*this == other); }
 };
@@ -85,8 +89,8 @@ struct ModelViewportOptions {
 std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
 // ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, bones, snap,
-// sound {mute, surface, body, female, profile}, damage {state, item}, first_person {view, character,
-// action, weapon}, fire {target, surface, range, enemy}}.
+// sound {mute, surface, body, female, profile}, damage {state, item}, first_person {view,
+// character, action, weapon}, fire {target, surface, range, enemy}, held {weapon}}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 
 // A model's viewport (ADR 0046 S10p2, S10p6, S13 V5; ViewportKind::Model): the model document at its
@@ -251,6 +255,10 @@ public:
 	// for none). The arms model the device draws on the gun's rig: first_person().arms_model().
 	const FirstPersonSources &first_person() const { return first_person_; }
 	const WeaponActionRun *first_person_action() const;
+	// A person's held weapon (DI-13's follow-up, preview/preview_held_weapon): the weapon a body's
+	// row plays with, its third-person model, and the present row's attach the device hangs it by
+	// from the rig's hand.
+	const HeldWeapon &held() const { return held_; }
 	// The sets an action's leg plays (its soundset as it begins, its soundsetend as it finishes), once, as a
 	// press of the leg's mark asks; false, with why, for no action tied to the row or a leg it has not.
 	bool press_leg(bool end, audio::SoundSelector &selector, const AssetScan *scan, std::vector<ClipSoundFired> &out,
@@ -412,6 +420,8 @@ private:
 	FirstPersonSources first_person_;
 	bool eye_ = false;
 	OrbitCamera eye_camera_;
+	// A person's held weapon (DI-13's follow-up).
+	HeldWeapon held_;
 	// An action leg's sound planned (fire_sounds, press_leg).
 	ClipSoundFired plan_leg_(const WeaponActionRun &run, const WeaponActionLeg &leg, int32_t tick, int32_t clip_tick,
 			audio::SoundSelector &selector, const AssetScan *scan) const;

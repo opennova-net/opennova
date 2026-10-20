@@ -8,12 +8,15 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <algorithm>
+
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <runtime/renderer/fp_viewmodel_spec.h>
+#include <runtime/renderer/object_lod.h>
 #include <runtime/world/player_present.h>
 
 #include "authoring/preview_backdrop.h"
@@ -21,6 +24,7 @@
 #include "object/avatar_database.h"
 #include "player/player_viewmodel_rig.h"
 #include "render/frame_fx.h"
+#include "simulation/entity_presenter.h"
 #include "util/string_convert.h"
 #include "util/texture_files.h"
 
@@ -70,6 +74,15 @@ ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&v
 	arms_->set_avatar_part(ObjectModel::AVATAR_PART_ARMS);
 	arms_->set_viewmodel_rig(true);
 	root->add_child(arms_);
+	// A person's held weapon (DI-13's follow-up), as the game's presenter builds one
+	// (EntityPresenter:: rebuild_held_weapon): beside the body, never under it, keeping every level
+	// and drawing the one the body's selects.
+	held_ = memnew(ObjectModel);
+	held_->set_panm_clock(clock_);
+	held_->set_authored_lod_enabled(true);
+	held_->set_presenter_driven_lod(true);
+	held_->set_visible(false);
+	root->add_child(held_);
 }
 
 void ModelViewportApplier::background(opennova::editor::PreviewBackground background) {
@@ -127,10 +140,12 @@ void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewpo
 	build_ = std::move(build);
 	// A clip's fire (DI-24): the project's files its effects' graphics, the scars' textures and the tracers' smoke are
 	// read through (mounted again where one read moved) as a clip fires; a model's picture fires nothing.
-	fire_files_ = model.animating() ? view.findings.assets : nullptr;
+	animation_files_ = model.animating() ? view.findings.assets : nullptr;
+	// The held weapon made again with the scene (its textures read again as the scene's are).
+	applied_held_ = UINT64_MAX;
 	if (mounted_) {
-		if (fire_files_) {
-			effects_->mount(fire_files_);
+		if (animation_files_) {
+			effects_->mount(animation_files_);
 			range_->set_resource_root(effects_->root());
 		} else {
 			release_fire_();
@@ -234,6 +249,7 @@ void ModelViewportApplier::apply_state_(const opennova::editor::ViewportModel &v
 	apply_first_person_registers_(viewport);
 	play_clip_(viewport, clock);
 	place_camera_(viewport);
+	apply_held_(viewport);
 }
 
 // A weapon's first-person map (DI-13): the per-submit writers the game's view model runs on every part,
@@ -260,12 +276,17 @@ void ModelViewportApplier::clear() {
 	data_.unref();
 	arms_->set_object_data(Ref<ObjectData>());
 	arms_data_.unref();
+	held_->set_object_data(Ref<ObjectData>());
+	held_->set_visible(false);
+	held_files_.reset();
+	applied_held_ = UINT64_MAX;
+	applied_held_lod_ = -1;
 	files_.reset();
 	applied_ctrl_.clear();
 	applied_lod_ = -1;
 	applied_team_ = INT32_MIN + 1;
 	release_fire_();
-	fire_files_.reset();
+	animation_files_.reset();
 }
 
 // The CTRL registers the picture reads at the clock (a register let go reads 0 again), and the sections
@@ -343,13 +364,65 @@ void ModelViewportApplier::play_clip_(const opennova::editor::ViewportModel &vie
 	}
 }
 
+void ModelViewportApplier::apply_held_(const opennova::editor::ViewportModel &viewport) {
+	const opennova::editor::HeldWeapon &held = model_of(viewport).held();
+	if (held.serial() != applied_held_) {
+		applied_held_ = held.serial();
+		applied_held_lod_ = -1;
+		held_->set_object_data(Ref<ObjectData>());
+		held_files_.reset();
+		// The weapon's third-person model as the viewport read it (its gfx3 through the game's
+		// store), its textures read through the project's files, each read noted.
+		if (held.model() && animation_files_) {
+			auto files = std::make_shared<opennova::StampedFiles>(animation_files_);
+			Ref<ObjectData> data;
+			data.instantiate();
+			data->open_from_model(held.model(), opennova::to_gd(held.model_file()),
+					std::make_shared<opennova::TextureFiles>(files));
+			held_->set_object_data(data);
+			held_->set_graphic_name(data->get_source_path());
+			held_files_ = files;
+		}
+	}
+	place_held_(viewport);
+}
+
+void ModelViewportApplier::place_held_(const opennova::editor::ViewportModel &viewport) {
+	const opennova::editor::ModelViewport &model = model_of(viewport);
+	const opennova::editor::HeldWeapon &held = model.held();
+	if (held_->get_object_data().is_null() || !held.model() || data_.is_null() ||
+			!model.skeleton() || model.clip_key().empty()) {
+		held_->set_visible(false);
+		return;
+	}
+	// The game's own placement, as its wire walk places a body's weapon (update_wire_held_weapon):
+	// bone 16 of the body as posed now, the present row's attach triple and its frame.
+	const float *attach = held.attach_deg();
+	const Variant placed = EntityPresenter::held_weapon_attach_transform(
+			object_, Vector3(attach[0], attach[1], attach[2]), held.hand_frame());
+	if (placed.get_type() != Variant::TRANSFORM3D) {
+		held_->set_visible(false);
+		return;
+	}
+	held_->set_global_transform(placed);
+	// The body's level clamped to the weapon's own count: an attachment never walks its own
+	// thresholds.
+	const int lod = opennova::renderer::attachment_lod_index(
+			std::max(model.lod(), 0), int(held.model()->lod_count));
+	if (lod >= 0 && lod != applied_held_lod_) {
+		held_->set_active_lod(lod);
+		applied_held_lod_ = lod;
+	}
+	held_->set_visible(true);
+}
+
 void ModelViewportApplier::apply_fire_(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::PreviewClock &clock) {
 	const opennova::editor::ClipFire &fire = model_of(viewport).clip_fire();
-	const bool firing = fire_files_ && fire.armed();
+	const bool firing = animation_files_ && fire.armed();
 	if (firing && !mounted_) {
 		make_fire_();
-		effects_->mount(fire_files_);
+		effects_->mount(animation_files_);
 		range_->set_resource_root(effects_->root());
 		mounted_ = true;
 	}
@@ -382,6 +455,8 @@ void ModelViewportApplier::apply(const opennova::editor::ViewportModel &viewport
 	apply_state_(viewport, clock);
 	apply_fire_(viewport, clock);
 	if (files_) report.files = files_->stamps();
+	if (held_files_)
+		report.files.add(held_files_->stamps());
 	if (mounted_) {
 		report.files.add(effects_->stamps());
 		report.missing = effects_->missing();
@@ -392,6 +467,7 @@ void ModelViewportApplier::tick(const opennova::editor::ViewportModel &viewport,
 	if (!build_) {
 		apply_registers_(viewport, clock);
 		play_clip_(viewport, clock);
+		place_held_(viewport);
 		apply_fire_(viewport, clock);
 	}
 	// A model with live part animations or a dynamic material stays awake and reads it.

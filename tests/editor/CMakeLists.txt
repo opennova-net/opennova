@@ -534,6 +534,10 @@ opennova_add_editor_test(clip_fire)
 # draws the view model before, the weapon's actions as the game's pump runs them and their sets.
 opennova_add_editor_test(first_person)
 
+# DI-13's follow-up: a person's held weapon in the model preview, the weapon each row plays with through the game's
+# own selectors, drawn by the present row's gate and hung from bone 16 as the game hangs it.
+opennova_add_editor_test(held_weapon)
+
 # DI-10: a model's damage states named in the game's words and played as the game destroys the item (the
 # husk swap, the pieces, the death sound, the destroy fade); an item of every death JO's damageable items die.
 opennova_add_editor_test(model_damage)
