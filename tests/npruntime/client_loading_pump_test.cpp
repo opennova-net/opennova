@@ -618,6 +618,74 @@ bool drive_into_the_world_stream(Harness &h, uint8_t period) {
 	return std::string(h.client.admission_stage_name()) == std::string("awaiting the world stream");
 }
 
+// A joiner the 0x0F admits with no self row (a spectator's release: the 0x0F clears the
+// deploy hold whatever the role) pings from its first game-loop boundary: the 0x2C's gate
+// reads the session, the role, the deploy hold and the round-over gate, never a body. Its
+// 0x0C, whose build reads the body, stays unsent.
+// [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c410 (the 0x2C's gate) and
+//  @0x42c44f..0x42c46d -> Player_BuildTag0CInputBody @0x42A550; NapiNPClientMsg_0x00F
+//  @0x42e391 (the hold's clear)]
+bool run_a_bodyless_joiner_pings() {
+	Harness h;
+	h.uplink = true;
+	if (!expect(drive_into_the_world_stream(h, 0), "bodyless: the world stream runs"))
+		return false;
+	(void)h.frame({make_protocol_message(0x1A, {})});
+	std::vector<uint8_t> world_state(23, 0);
+	std::vector<std::vector<uint8_t>> sent = h.frame({make_protocol_message(0x0F, world_state)});
+	if (!expect(!h.client.has_self_handle() &&
+	                    h.packets(sent, {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23, 0x2C}}),
+			"bodyless: the 0x0F's burst, then the frame's 0x2C and no 0x0C"))
+		return false;
+	for (int i = 0; i < 3; ++i) {
+		if (!expect(h.packets(h.frame(), {{0x2C}}),
+				"bodyless: one 0x2C at every open boundary, no 0x0C"))
+			return false;
+	}
+	return true;
+}
+
+// The main frame's 62-frame quality fold steps in the game loop's frames alone and starts
+// from the mission start's zero: no fold runs in the join's waits (a host scalar landing
+// there moves no level), the first game-loop frame folds at once, the next fold is 62
+// frames on, and a reload's mission start zeroes the countdown and resets the level.
+// [orig: Game_ProcessMainFrame @0x526537..0x526555 (dword_24D1DDC - 1, > 0 skips, else
+//  62) -> CNetQuality_UpdateMetrics @0x4C52C0; Game_StartMission's head @0x52439e (the
+//  zero) and CNetQuality_Reset @0x5243b4]
+bool run_the_quality_fold_starts_with_the_game_loop() {
+	Harness h;
+	h.client.set_observed_frame_rate(62); // the client window samples its floor 1
+	if (!expect(drive_into_the_world_stream(h, 0), "fold: the world stream runs"))
+		return false;
+	(void)h.frame({make_protocol_message(0x79, {0xAB})}); // 171: level 3 once folded
+	for (int i = 0; i < 130; ++i) {
+		(void)h.frame();
+		if (!expect(h.client.net_quality_level() == 0, "fold: no fold in the join's waits"))
+			return false;
+	}
+	(void)h.frame({make_protocol_message(0x1A, {})});
+	std::vector<uint8_t> world_state(23, 0);
+	(void)h.frame({make_protocol_message(0x0F, world_state)});
+	if (!expect(h.client.net_quality_level() == 0,
+			"fold: the 0x0F's own frame is the final wait's pass, no fold"))
+		return false;
+	(void)h.frame();
+	if (!expect(h.client.net_quality_level() == 3,
+			"fold: the first game-loop frame folds max(171, 1) at once: level 3"))
+		return false;
+	(void)h.frame({make_protocol_message(0x79, {0x60})}); // 96: level 2 at the next fold
+	for (int frame = 3; frame <= 62; ++frame) {
+		(void)h.frame();
+		if (!expect(h.client.net_quality_level() == 3, "fold: the level holds for 62 frames"))
+			return false;
+	}
+	(void)h.frame();
+	if (!expect(h.client.net_quality_level() == 2, "fold: the 63rd game-loop frame folds again"))
+		return false;
+	return expect(h.client.begin_mission_reload() && h.client.net_quality_level() == 0,
+			"fold: a reload's mission start resets the level");
+}
+
 // Game_StartMission's pumps from the S2C 0x1A to the final wait for the 0x0F, by where the
 // send-holdoff countdown c stood. The 0x1A's iteration of the game-start wait receives (a
 // step) and sends (a build only at a spent countdown, the one immediate header-only ACK,
@@ -844,6 +912,8 @@ int main() {
 	ok = run_timed_loops_pace_an_undictated_connection() && ok;
 	ok = run_an_early_release_stays_in_the_final_wait() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
+	ok = run_a_bodyless_joiner_pings() && ok;
+	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;

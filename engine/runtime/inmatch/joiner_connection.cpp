@@ -1191,6 +1191,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 							le32_pair(server_info_transfer_id_, 0)),
 			}));
 			post_auth_stage_ = PostAuthStage::AwaitServerInfo;
+			out.mission_start_head = true;
 		} else if (m.tag == s2c::FILE_TRANSFER_CHUNK &&
 		           post_auth_stage_ == PostAuthStage::AwaitServerInfo) {
 			FileTransferChunk chunk;

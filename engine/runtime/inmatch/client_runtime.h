@@ -856,6 +856,7 @@ private:
 	// dword_24D1DDC countdown (reload 62) gated is_in_session ->
 	// CNetQuality_UpdateMetrics @0x4C52C0 + CNetQuality_SetLevel @0x4C3060].
 	void update_net_quality();
+	void reset_mission_start_quality();
 	// The link-error callbacks a mask carries (kNetQualityLinkError*), onto
 	// the indicators at this frame's clock.
 	void apply_net_quality_link_errors(uint32_t mask);
@@ -923,7 +924,7 @@ private:
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.
 	replication::NetQualityWindow client_quality_window_;
 	int32_t observed_frame_rate_ = 0;                    // [orig: dword_24E1F10, 0 @0x52B727]
-	int32_t quality_update_countdown_ = 62;              // [orig: dword_24D1DDC]
+	int32_t quality_update_countdown_ = 0;               // [orig: dword_24D1DDC]
 	ChatFloodTable chat_flood_{};                        // [orig: @0xB3B788] (chat_flood.h)
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
 	// The host-dictated send period (CS dir-0 field 3, H:0x00 mask 8): the

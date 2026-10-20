@@ -220,6 +220,11 @@ public:
 		//  <- @0x4297fd; a short body seeds 0 @0x4297eb]
 		bool tick_seed_set = false;
 		uint32_t tick_seed = 0;
+		// The game-start flag entered Game_StartMission: its head zeroes the main
+		// frame's quality countdown and resets the quality object. [orig:
+		// Game_StartMission @0x524360 - `mov dword_24D1DDC, ebx` @0x52439e,
+		// CNetQuality_Reset(&g_NetQuality) @0x5243b4]
+		bool mission_start_head = false;
 		// The final mission-data chunk ended InitRandomSeedOrRequest's spin:
 		// Game_StartMission runs on to its globals reset, which clears the
 		// round-over gate a reset or round end received earlier in the join

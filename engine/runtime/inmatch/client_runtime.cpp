@@ -492,8 +492,20 @@ bool ClientRuntime::begin_mission_reload() {
 	view_.drain_script_remote_commands();
 	view_.drain_objective_notifications();
 	view_.drain_effect_commands();
+	reset_mission_start_quality();
 	framed_send_queue_.push_back(std::move(first));
 	return true;
+}
+
+// The mission start's head: the main frame's 62-frame quality countdown goes to 0, so
+// the mission's first game-loop frame folds at once, and the quality object resets.
+// The metrics object's reset (CNetStats_Reset @0x5243aa) has no separate client state
+// here: the replica state and the held window start empty.
+// [orig: Game_StartMission @0x524360 - `mov dword_24D1DDC, ebx` @0x52439e (ebx = 0),
+//  CNetQuality_Reset(&g_NetQuality) @0x5243b4]
+void ClientRuntime::reset_mission_start_quality() {
+	quality_update_countdown_ = 0;
+	hud::net_quality_reset(net_indicators_, view_.state().local_clock_ms);
 }
 
 void ClientRuntime::receive(const uint8_t *raw, std::size_t len) {
@@ -991,8 +1003,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		return outbound;
 
 	// The main frame's 62-frame quality fold runs ahead of the client net frame
-	// (the level it stores is what the 0x4C leg below reports).
-	if (role_ == Role::Joiner) update_net_quality();
+	// (the level it stores is what the 0x4C leg below reports). Its countdown steps
+	// in the game loop's frames alone, from the mission start's zero, so a mission's
+	// first fold is its first game-loop frame.
+	// [orig: Game_ProcessMainFrame @0x526537..0x526555 (dword_24D1DDC - 1, > 0 skips,
+	//  else 62); Game_StartMission's head `mov dword_24D1DDC, ebx` @0x52439e]
+	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_game_loop())
+		update_net_quality();
 	// Then the connection indicators step once, in a session, still ahead of
 	// the client net frame whose callbacks raise their flags [orig:
 	// Game_ProcessMainFrame — `cmp is_in_session` @0x526680 ->
@@ -1261,6 +1278,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// pass is cleared with the rest (JoinerConnection::mission_started).
 			// [orig: Game_StartMission `mov g_SpawnSuccessGate, ebx` @0x524a1f]
 			if (pr.mission_started) view_.state().spawn_success_gate = false;
+			if (pr.mission_start_head) reset_mission_start_quality();
 			if (pr.send_holdoff_set) {
 				// The CS handler stores the dictated period only. The earlier
 				// join-response leg reset this connection's counter to zero, so
@@ -1491,19 +1509,22 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			[&](std::vector<ProtocolMessage> &send_messages) {
 		// The witnessed deploy gate the 0x2C RTT ping and the 0x0C uplink share: is_in_session &&
 		// !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate. A Joiner is always
-		// !is_authority; deployed_ is the deploy hold (open). Death is not in it: a dead
-		// player's game loop pings every open boundary until the deploy pick re-arms the
-		// hold (D-NET-529). [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c410 and
-		//  @0x42c44f..0x42c46d; g_ClientDeployHold is set only by Input_HandleActionBinding
-		//  @0x49b067 and cleared by Game_InitNewRound @0x4227ce, the 0x5A @0x429713 and
-		//  the 0x0F @0x42e391]
+		// !is_authority; deployed_ is the deploy hold (open). Neither death nor the body is in
+		// it: a dead player's game loop pings every open boundary until the deploy pick
+		// re-arms the hold, and a joiner with no self row pings too (D-NET-529).
+		// [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c410 and @0x42c44f..0x42c46d;
+		//  g_ClientDeployHold is set by the game-start wait's entry (NapiClient_WaitForGameStart
+		//  @0x42cc14) and the deploy pick (Input_HandleActionBinding @0x49b067), and cleared
+		//  by Game_InitNewRound @0x4227ce, the 0x5A @0x429713 and the 0x0F @0x42e391]
 		const bool send_gate = joiner_->in_game_loop() && deployed_ &&
-				!view_.state().spawn_success_gate && joiner_->has_self_handle();
+				!view_.state().spawn_success_gate;
 		// The uplink's build refuses a body with no health or the dead flag: the
-		// authoritative spawn latch the death edge closes stands for it here.
+		// authoritative spawn latch the death edge closes stands for it here, and the
+		// self handle for the body it reads.
 		// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0`
 		//  @0x42a58f, `test byte [eax+24h], 2` @0x42a599, return 0]
-		const bool deployed_joiner = send_gate && authoritative_spawn_released_;
+		const bool deployed_joiner = send_gate && authoritative_spawn_released_ &&
+				joiner_->has_self_handle();
 
 		// (0x2C) RTT timestamp ping — Joiner only. [orig: Client_ProcessNetworkFrame @0x42c3fa..0x42c44a]. Body = [u32 ts][u8 1]
 		// (NetPacket_WriteInt32AndByte; echoFlag=1 requests the S2C 0x57 pong, §5.34). Retail uses

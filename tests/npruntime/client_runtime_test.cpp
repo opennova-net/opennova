@@ -5021,8 +5021,11 @@ bool run_host_chat_uplink() {
 
 // The client window of CNetQuality: a ring of 400 ms round trips scores the
 // ping term 102, and once five 62-frame samples fill the window the combined
-// scalar folds to level 2 [orig: CNetQuality_UpdateMetrics @0x4C52C0;
-// the Game_ProcessMainFrame countdown; CNetQuality_SetLevel @0x4C3060].
+// scalar folds to level 2. The countdown starts at the mission start's 0, so the
+// first game-loop frame folds at once, ahead of that frame's receive; the folds
+// fall on frames 1, 63, 125, ... [orig: CNetQuality_UpdateMetrics @0x4C52C0;
+// the Game_ProcessMainFrame countdown @0x526537..0x526555, zeroed by
+// Game_StartMission @0x52439e; CNetQuality_SetLevel @0x4C3060].
 bool run_client_quality_level_folds_the_ping_ring() {
 	const std::string client_scrk = "CLIENT-QUALITY-SCRK";
 	const std::string server_scrk = "SERVER-QUALITY-SCRK";
@@ -5048,13 +5051,21 @@ bool run_client_quality_level_folds_the_ping_ring() {
 	client.receive(datagram.data(), datagram.size());
 	(void)client.Client_ProcessNetworkFrame(1);
 	if (!expect(client.client_average_ping_ms() == 400 && client.net_quality_level() == 0,
-			"ten pongs fill the ring; the level waits for the 62-frame fold"))
+			"ten pongs fill the ring after frame 1's fold sampled the floor 1 (1/5 -> level 0)"))
 		return false;
 	for (uint32_t tick = 2; tick <= 62; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
-	if (!expect(client.net_quality_level() == 1,
-			"the first sample truncates to 102/5 -> level 1"))
+	if (!expect(client.net_quality_level() == 0, "the level waits for the next 62-frame fold"))
 		return false;
-	for (uint32_t tick = 63; tick <= 62 * 5; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+	(void)client.Client_ProcessNetworkFrame(63);
+	if (!expect(client.net_quality_level() == 1,
+			"the first ping sample truncates to (1 + 102)/5 -> level 1"))
+		return false;
+	for (uint32_t tick = 64; tick <= 62 * 4 + 1; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+	if (!expect(client.net_quality_level() == 1,
+			"four ping samples beside the floor fold (1 + 4 * 102)/5 -> level 1"))
+		return false;
+	for (uint32_t tick = 62 * 4 + 2; tick <= 62 * 5 + 1; ++tick)
+		(void)client.Client_ProcessNetworkFrame(tick);
 	return expect(client.net_quality_level() == 2 && client.state().net.level == 2 &&
 					client.state().net.ping_ms == 400,
 			"five samples of 102 fold to level 2 on the state as well");
@@ -5110,7 +5121,9 @@ bool run_client_quality_takes_the_host_metric() {
 	if (!expect(client.net_quality_level() == 3, "max(171, 1) buckets to level 3"))
 		return false;
 	host_metric(0x60); // 96: the 85..169 band
-	for (int i = 0; i < 62; ++i) (void)client.Client_ProcessNetworkFrame(tick++);
+	// The folds fall on frames 1, 63, 125, 187 (the countdown starts at the mission
+	// start's 0); frame 125's fold runs ahead of its receive, so 187 takes the 96.
+	for (int i = 0; i < 63; ++i) (void)client.Client_ProcessNetworkFrame(tick++);
 	if (!expect(client.net_quality_level() == 2, "a fresh 0x79 moves the level with it"))
 		return false;
 	EndRoundHeader header;
@@ -5147,10 +5160,9 @@ bool run_novaworld_exit_on_a_joiner() {
 	verified.nwu_in_use = true;
 	verified.nwu_session_flags = 0x1A;
 	verified.nwu_session_role = 1;
-	if (!expect(run(verified, 61) == 0, "the exit waits for the 62-frame block"))
-		return false;
-	if (!expect(run(verified, 62) == inmatch::kMissionExitNovaWorld,
-			"a verified-only word exits with 12 on the block"))
+	if (!expect(run(verified, 1) == inmatch::kMissionExitNovaWorld,
+			"a verified-only word exits with 12 on the block, which the mission's first "
+			"game-loop frame runs (the countdown starts at the mission start's 0)"))
 		return false;
 	hud::NovaWorldLinkFacts playing = verified;
 	playing.nwu_session_flags = 0x0A;
