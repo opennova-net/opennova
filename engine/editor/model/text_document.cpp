@@ -68,16 +68,27 @@ bool TextDocument::offset_of(size_t line_number, size_t column, size_t &offset) 
 	return true;
 }
 
-TextSpan TextDocument::span_at(size_t offset, size_t length) const {
-	offset = std::min(offset, text_.size());
-	// The last line starting at or before the offset.
-	const auto after = std::upper_bound(line_starts_.begin(), line_starts_.end(), offset);
-	const size_t index = size_t(after - line_starts_.begin()) - 1;
+std::vector<size_t> text_line_starts(const std::string &text) {
+	std::vector<size_t> starts{0};
+	for (size_t i = 0; i < text.size(); ++i)
+		if (text[i] == '\n') starts.push_back(i + 1);
+	return starts;
+}
+
+TextSpan text_span_at(const std::vector<size_t> &line_starts, size_t offset, size_t length) {
 	TextSpan span;
-	span.line = index + 1;
-	span.column = offset - line_starts_[index] + 1;
 	span.length = length;
+	if (line_starts.empty()) return span;
+	// The last line starting at or before the offset.
+	const auto after = std::upper_bound(line_starts.begin(), line_starts.end(), offset);
+	const size_t index = size_t(after - line_starts.begin()) - 1;
+	span.line = index + 1;
+	span.column = offset - line_starts[index] + 1;
 	return span;
+}
+
+TextSpan TextDocument::span_at(size_t offset, size_t length) const {
+	return text_span_at(line_starts_, std::min(offset, text_.size()), length);
 }
 
 bool TextDocument::span_text(const TextSpan &span, std::string &out) const {
@@ -140,11 +151,7 @@ Edit TextDocument::replace(const TextSpan &span, std::string text, bool coalesce
 	return edit;
 }
 
-void TextDocument::index_lines() {
-	line_starts_.assign(1, 0);
-	for (size_t i = 0; i < text_.size(); ++i)
-		if (text_[i] == '\n') line_starts_.push_back(i + 1);
-}
+void TextDocument::index_lines() { line_starts_ = text_line_starts(text_); }
 
 void TextDocument::replace_at(size_t offset, size_t count, const std::string &with) {
 	text_.replace(offset, count, with);

@@ -989,6 +989,16 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::NoCase, AssetKind::Particles)
 	        .never_missing()
 	        .row,
+	// A particle, by its [particledef]'s id among every particle file's, without case, the first registered of the
+	// name answering (the files register in the effect system's order [orig: CEffectSystem_Init @ 0x5F6070]): an
+	// effect's pdefs member [orig: CEffectBank_ResolveAllEntries @ 0x5E4920; CEffectWorld_FindParticleDefByName @
+	// 0x5E41D0, _stricmp @ 0x5E420C] and a particle's child_id [orig: CEffectDef_ResolveAllReferences @ 0x5E9D70]. A
+	// member's miss is the particle file's own finding (particle.effect_unresolved, the project check's), with what the
+	// game makes of the effect, and a child_id's none (unwitnessed): the graph's Missing is its badge alone.
+	Row(ReferenceKind::ParticleDefinition, "particle_definition", "the particle", "particle")
+	        .symbol(NameCase::NoCase, AssetKind::Particles)
+	        .never_missing()
+	        .row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {

@@ -98,6 +98,10 @@ struct GraphEdge {
 	// prefix, so a rename writes the number the new name forms, refusing a name no number forms; "" for
 	// a use that writes the name itself. A symbol kind's edge only.
 	std::string key_prefix;
+	// The bytes the reader's slot of a text's name holds, its terminator included (a pdefs member's 64-byte name slot
+	// [orig: CEffectBank_ResolveAllEntries @ 0x5E4920, the names from +340]), which a rename's new name must fit (as a
+	// field's FieldSchema::width); 0 for no bound.
+	size_t width = 0;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on
@@ -135,6 +139,10 @@ struct GraphSymbol {
 	// The line of its file it is defined on, where its type knows it (a stylesheet variable's
 	// first line); 0 for none.
 	size_t line = 0;
+	// In a text (a text document's definitions, a native text whose parser keeps its places: a particle file's ids),
+	// where the name is written, its locator the span's "line:column", which a rename replaces as it does a use's span
+	// (GraphEdge::span); a line of 0 for a record's definition.
+	TextSpan span;
 };
 
 // What one file references and defines.

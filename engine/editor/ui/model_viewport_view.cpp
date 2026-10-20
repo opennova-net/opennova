@@ -21,6 +21,7 @@
 #include <editor/documents/model_ctrl_words.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
+#include <editor/documents/sound_bank_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/animation_uses.h>
 #include <editor/preview/mission_items.h>
@@ -35,6 +36,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/reference_fields.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
@@ -334,14 +336,18 @@ void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row,
 		ImGui::EndDisabled();
 		ui_kit::tooltip("A female avatar: a player's body plays its item's sound_profileFemale (an NPC's never does).");
 		ImGui::SetNextItemWidth(unit * 10.0f);
+		// The profile bound a link to its SndProf.def record over the combo (F12, Ctrl+click, its menu).
+		ImGui::SetNextItemAllowOverlap();
 		if (ImGui::BeginCombo("Profile", sound.profile.empty() ? "Auto" : sound.profile.c_str())) {
 			if (ImGui::Selectable("Auto", sound.profile.empty())) sound.profile.clear();
 			ui_kit::tooltip("The paired item's sound_profile (default where it names none).");
 			for (const audio::SoundProfile &profile : model.sound_sources().profiles())
 				if (ImGui::Selectable(profile.name.c_str(), profile.name == sound.profile)) sound.profile = profile.name;
 			ImGui::EndCombo();
+		} else {
+			ui_kit::tooltip("The SndProf.def profile whose slots the events play: Auto is the paired item's.");
+			reference_jumps(workspace, {ReferenceKind::SoundProfile, binding.profile});
 		}
-		ui_kit::tooltip("The SndProf.def profile whose slots the events play: Auto is the paired item's.");
 		ImGui::PushTextWrapPos(unit * 24.0f);
 		ImGui::TextDisabled("%s", binding.profile_words.c_str());
 		ImGui::PopTextWrapPos();
@@ -701,13 +707,20 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		ui_kit::clipped_text(shots, clip_fire.words());
 		ImGui::PopStyleColor();
 	}
-	// The last sound the clip's events fired (DI-04), in words.
+	// The last sound the clip's events fired (DI-04): its set a link (in its bank where one is named) and its profile's,
+	// the sentence in the set's tooltip.
 	if (!model.sounds_fired().empty()) {
 		const ClipSoundFired &last = model.sounds_fired().back();
-		const std::string heard = (last.state == "played" ? "Heard: " : "Fired: ") + last.words;
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ui_kit::clipped_text(heard, heard);
-		ImGui::PopStyleColor();
+		ImGui::TextDisabled("%s", last.state == "played" ? "Heard:" : "Fired:");
+		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::Sound, last.set, last.bank.empty() ? std::string() : sound_bank_scope(last.bank)},
+		          "heard", last.words);
+		if (!last.profile.empty()) {
+			ImGui::SameLine();
+			ImGui::TextDisabled("of");
+			ImGui::SameLine();
+			name_link(workspace, {ReferenceKind::SoundProfile, last.profile}, "profile");
+		}
 	}
 }
 

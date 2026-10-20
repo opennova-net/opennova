@@ -131,6 +131,10 @@ protected:
 // no wave of the bank (the save refuses it); a layer heard in neither view, which no play admits
 // [orig: SoundBank_PlayTriggerEntries @ 0x75cd54]; a set with no member to play.
 std::vector<Diagnostic> validate_sound_bank_file(const DocumentBase &document);
+// The scope a bank's own names live in (its waves', its sets' as a lookup in that bank reads them): its file name,
+// upper case ("GAME.LWF"), of a path or a logical name.
+std::string sound_bank_scope(const std::string &path);
+
 // A sound set no bank the game searches has, added to a bank (ADR 0046 DI-15, DocumentType::define_symbol): a set
 // as Add set makes one, named as referenced; for a menu SOUND's set, only its own bank.
 bool define_sound_set(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);

@@ -224,6 +224,12 @@ bool missing_finding(const AssetGraph &graph, const Document &document, const No
 	return true;
 }
 
+bool missing_finding(const AssetGraph &graph, const GraphEdge &edge, Diagnostic &out) {
+	if (!reference_row(edge.kind).missing_message || graph.resolve(edge) != ReferenceStatus::Missing) return false;
+	out = graph.missing_finding(edge);
+	return true;
+}
+
 std::string reference_target_file(const AssetGraph &graph, const FieldUse &field, const Value &value) {
 	ReferenceKind kind;
 	std::string name, scope, file;
@@ -234,10 +240,16 @@ std::string reference_target_file(const AssetGraph &graph, const FieldUse &field
 
 std::vector<ReferenceTarget> reference_targets(const AssetGraph &graph, const AssetScan &scan, const FieldUse &field,
                                                const Value &value) {
-	std::vector<ReferenceTarget> out;
 	ReferenceKind kind;
 	std::string name, scope;
-	if (!reference_target(field, value, kind, name, scope)) return out;
+	if (!reference_target(field, value, kind, name, scope)) return {};
+	return reference_targets(graph, scan, kind, name, scope, field.loader_arg);
+}
+
+std::vector<ReferenceTarget> reference_targets(const AssetGraph &graph, const AssetScan &scan, ReferenceKind kind,
+                                               const std::string &name, const std::string &scope, int32_t loader_arg) {
+	std::vector<ReferenceTarget> out;
+	if (kind == ReferenceKind::None || name.empty()) return out;
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.names_symbol()) {
 		if (const GraphSymbol *symbol = graph.resolve_symbol(kind, name, scope)) out.push_back(symbol_target(scan, *symbol));
@@ -249,8 +261,7 @@ std::vector<ReferenceTarget> reference_targets(const AssetGraph &graph, const As
 	if (graph_names::is_style_reference(name))
 		if (const GraphSymbol *binding = graph.style_binding(name)) out.push_back(symbol_target(scan, *binding));
 	std::string file;
-	if (graph.resolve(kind, name, scope, &file, field.loader_arg) == ReferenceStatus::Present)
-		out.push_back(file_target(scan, file));
+	if (graph.resolve(kind, name, scope, &file, loader_arg) == ReferenceStatus::Present) out.push_back(file_target(scan, file));
 	return out;
 }
 

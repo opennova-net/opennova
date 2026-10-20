@@ -18,6 +18,11 @@ namespace opennova::editor {
 // edge is as it was. Every other byte of the file (its spacing, its comments, a line the game reads
 // over, its line ends) stays.
 bool native_text_kind(AssetKind kind);
+// Whether the engine's own parser of a native text kind keeps the places of what the text names and defines, so the
+// graph's edges and symbols of its files carry their spans (a particle file's: graph/extractors.cpp, extract_particles):
+// a name renamed everywhere is set at those spans as a text document's are (rename_transaction.h); a file's rename
+// still finds its token by reading the text again.
+bool native_text_places(AssetKind kind);
 
 // The names (before, after) are UTF-8, as the graph reads them; the text is the game's code page
 // (Windows-1252), each name looked for and written in its bytes there.

@@ -20,11 +20,13 @@ class ProjectCheck;
 // files interleaved by the upper-cased name, as one archive's table walks them [orig: CEffectSystem_Init
 // @ 0x5F6070 -> File_ParseASCIIFile with CEffectWorld_ParseSectionCallback @ 0x5ECB40]; the port of
 // that reader is formats/particle's load_particles, which reads every text as the game does (it refuses
-// none). Its findings are the reader's: an effect the file defines twice. What it names (each effect's
-// id, a symbol at its place; each table's id, a symbol; each graphic's texture; each particle's
-// curves, by their tables' ids) the asset graph reads through the same reader
-// (graph/extractors.cpp, extract_particles), so the type names no references of its own and a rename
-// rewrites its names as a native text's (graph/native_text_sites.h). Its Document tab is the script
+// none). Its findings are the reader's: an effect the file defines twice. What it defines (each effect's,
+// table's and particle's id, a symbol at its span) and names (each effect's pdefs members and each
+// particle's child_id, by their particles' ids; each particle's curves, by their tables' ids; each
+// graphic's texture; each at its span) the asset graph reads through the same reader, which keeps their
+// places (graph/extractors.cpp, extract_particles), so the type names no references of its own: a name
+// renamed everywhere is set at its spans as a text document's (graph/native_text_sites.h
+// native_text_places), a file's rename rewrites its token as a native text's. Its Document tab is the script
 // device (S13 V10); the Preview window plays the effect the text defines (preview/effect_viewport.h).
 std::unique_ptr<DocumentBase> make_particle_document();
 std::vector<Diagnostic> validate_particle_file(const DocumentBase &document);
@@ -69,7 +71,10 @@ bool define_particle_effect(const DocumentBase &document, const ReferenceSubject
 // - particle.effect_unresolved: an effect's pdefs member no file defines as a [particledef]. The game resolves an
 //   effect's particles all or none: the first it misses is logged (UNRESOLVED: EFFDEF <effect> missing PARDEF
 //   <particle>) and the effect keeps none of them, so it spawns nothing [orig: CEffectBank_ResolveAllEntries @
-//   0x5E4920, its find CEffectWorld_FindParticleDefByName @ 0x5E41D0, _stricmp @ 0x5E420C];
+//   0x5E4920, its find CEffectWorld_FindParticleDefByName @ 0x5E41D0, _stricmp @ 0x5E420C]. Its fixes, each an edit of
+//   the effect's own file (FindingFix::EditRecord): "Add particle X to <file>", the [particledef] block the engine's
+//   own writer makes of the particle at the game's defaults, after the file's last particle; and "Take X out of
+//   pdefs", where another member stays. A child_id no file defines takes no finding (its miss is unwitnessed);
 // - particle.curve_unresolved: a particle's *_func (its own or a graphic's) naming a table no file defines as a
 //   [tabledef]: the game logs it not found and draws that channel without its curve [orig:
 //   CEffectDef_ResolveTblDefReference @ 0x5E9630, its find CParticleManager_FindTableDefByName @ 0x5E9540].

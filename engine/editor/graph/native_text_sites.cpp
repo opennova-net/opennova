@@ -58,6 +58,8 @@ bool native_text_kind(AssetKind kind) {
 	       kind == AssetKind::HudPosDefs;
 }
 
+bool native_text_places(AssetKind kind) { return kind == AssetKind::Particles; }
+
 size_t rewrite_native_text(const std::string &file, AssetKind kind, const std::string &game, std::string &text,
                            const std::vector<NativeTextSite> &sites, std::vector<size_t> &missed) {
 	std::vector<GraphEdge> edges;
