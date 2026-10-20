@@ -7,6 +7,9 @@
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
+#include <runtime/inmatch/loaded_model_list.h> // the C2S 0x3D page (D-NET-527)
+#include <runtime/mission/runtime_boot.h>      // boot_files_from_index
+#include <formats/mission/bms_edit.h>          // mission_info (the header's terrain / environment)
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
@@ -693,24 +696,37 @@ void Simulation::set_join_world_ready(bool p_ready) {
 }
 
 void Simulation::finalize_loaded_model_challenge_snapshot() {
-	const int64_t count = ObjectData::network_challenge_model_count();
+	// The page the C2S 0x3D answers from is the model-def list the mission start's loads
+	// built, computed from the mount and the tables as retail's loads run, not from what
+	// this shell happened to render (D-NET-527; engine: inmatch/loaded_model_list.h). A
+	// joiner loads no mission body, so it has no special event.
+	namespace inmatch = opennova::inmatch;
+	std::vector<uint32_t> page;
+	if (kernel_ && assets_.root.is_valid()) {
+		const opennova::mission::BootFileSource files =
+				opennova::mission::boot_files_from_index(assets_.root->native_index());
+		const opennova::mission::MissionInfo info = opennova::mission::mission_info(kernel_->mission);
+		inmatch::MissionStartModelSources sources;
+		sources.files = &files;
+		const opennova::assets::AssetStore &models = kernel_->assets();
+		sources.model_loads = [&models](const std::string &file) { return models.model(file) != nullptr; };
+		sources.climate = kernel_->mission.header.climate;
+		sources.terrain = info.terrain;
+		sources.environment = info.environment;
+		sources.weapons = kernel_->weapon_defs_ok ? &kernel_->weapon_defs : nullptr;
+		sources.items = kernel_->items_table();
+		sources.ammo = &kernel_->world.tables.ammo;
+		sources.charattr = &net_.charattr_table;
+		sources.world = &kernel_->world;
+		sources.in_session = kernel_->world.rules.mp_session;
+		sources.special_event = !is_joiner() && inmatch::mission_has_special_event(kernel_->mission);
+		page = inmatch::build_mission_start_model_list(sources).freeze();
+	}
 	// The same frozen count is a host's S2C 0x68 cursor wrap (the role reads
 	// it every tick) [orig: Server_SendRandomSeedSync @0x511375 / @0x511391].
-	net_.loaded_model_list_count = count > 0 ? static_cast<uint32_t>(count) : 0u;
+	net_.loaded_model_list_count = static_cast<uint32_t>(page.size());
 	if (!is_joiner() || !runtime_) return;
-	if (count <= 0) {
-		runtime_->set_loaded_model_challenge_snapshot({});
-		return;
-	}
-	// NetPacket_WriteEntityIndexList writes ONE dword per frozen model-def row —
-	// a 5x-unrolled loop capped at 50 entries after the [u32 startIndex] header
-	// [orig: @0x42d950; the per-entry store @0x42d9f0, the 0x32 cap @0x42da7d].
-	// The complete writer/xref audit for this binary found no surviving writer to
-	// the source field after model resolution, so each included definition
-	// contributes one zero dword. Keep the inmatch seam value-based so a future
-	// witnessed writer can supply its actual row without changing paging.
-	runtime_->set_loaded_model_challenge_snapshot(
-			std::vector<uint32_t>(static_cast<std::size_t>(count), 0u));
+	runtime_->set_loaded_model_challenge_snapshot(std::move(page));
 }
 
 void Simulation::set_join_mission_start_loading(bool p_loading) {

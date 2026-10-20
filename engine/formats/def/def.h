@@ -1114,6 +1114,10 @@ typedef struct DefItemDef {
        next token]. Bytes, as `attrib_parent`. Appended (layout stability). */
     unsigned char attrib_good;
     unsigned char attrib_evil;
+    /* 'huskshadow <model>' -> the 16-byte name at +0xB0, copied unguarded (ours truncates), which the item's
+       model load loads as its husk-shadow model [orig: ItemDef_ParseProperty @0x49f45e..0x49f491 (the copy to
+       +0xB0); EntityDef_LoadModelsAndCallbacks @0x43a361..0x43a38a]. Appended (layout stability). */
+    char huskshadow[16];
 } DefItemDef;
 
 /* The file-wide vehicle spawn registry's slots: 'pcvehicle_spawnlist' ids take them in

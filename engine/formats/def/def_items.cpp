@@ -782,6 +782,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
         } else if (key_is(key, "huskfinal")) {
             copy_token(current.huskfinal, sizeof(current.huskfinal), tokens, 1);
             parsed = 1;
+        } else if (key_is(key, "huskshadow")) {
+            /* The second token copied into the 16-byte slot at +0xB0 [orig: @0x49f45e..0x49f491]. */
+            copy_token(current.huskshadow, sizeof(current.huskshadow), tokens, 1);
+            parsed = 1;
         } else if (key_is(key, "sounddeath")) {
             /* strncpy(.., tokens[2], 0x18) [orig: @0x49FE81] */
             copy_token(current.sounddeath, 25, tokens, 1);

@@ -140,22 +140,11 @@ public:
 	}
 
 	Error open_file(const String &p_path);
-	// Mounted .3DI loads also feed the retail-compatible network challenge registry.
-	// Foliage definitions pass false: retail marks their shared model-def node and
-	// excludes it from the snapshot built for C2S 0x3D.
-	Error open_from_resource_root(const Ref<ResourceRoot> &p_resource_root,
-			const String &p_name, bool p_include_in_network_challenge = true);
-	// A renderer mesh-cache hit is still a logical model-definition load in the
-	// new mission generation. Recreate retail's sticky foliage mark without
-	// reparsing/rebuilding the cached .3DI.
+	Error open_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 	// A parsed model an embedder holds (the editor's preview of a document as it would
-	// save), its textures read through `p_textures`. Not a mounted load: it registers no
-	// network-challenge model.
+	// save), its textures read through `p_textures`.
 	void open_from_model(const opennova::assets::Model &p_model, const String &p_name,
 			std::shared_ptr<const opennova::TextureFiles> p_textures);
-	static void mark_cached_network_challenge_foliage_model(const String &p_name);
-	static void reset_network_challenge_model_registry();
-	static int64_t network_challenge_model_count();
 
 	bool has_document() const;
 	String get_source_path() const;

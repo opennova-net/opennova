@@ -283,11 +283,6 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
 	last_load_timeline_ = timeline;
 	resource_root_ = p_resource_root;
-	// The shared .3DI definition cache resets before the environment and
-	// terrain stages (the load plan's first order witness): Celestial resolves
-	// its models from load_environment, and foliage loaded by terrain must
-	// remain present-but-excluded in the same generation.
-	ObjectData::reset_network_challenge_model_registry();
 	load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
 			p_mission->is_wire_header_only());
 	// Each stage below presents the plan's anchor when it starts.
@@ -343,10 +338,10 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		drive_.adopt_nw_client(session);
 		return runtime_error;
 	}
-	// The non-foliage loaded-.3DI page freezes once here (the load plan's
-	// freeze witness): MissionRoot.setup has now resolved the placed/wire
-	// mission models (including collision/husk definitions); late network spawns
-	// must not change this page.
+	// The C2S 0x3D page freezes once here (the load plan's freeze witness): the
+	// mission start's model-def list computed from the mount and the loaded tables
+	// (engine: inmatch/loaded_model_list.h, D-NET-527); late network spawns must not
+	// change this page.
 	Ref<Simulation> challenge_sim = get_runtime()->get_sim();
 	if (challenge_sim.is_valid() && !wire_header_join) {
 		if (challenge_sim->is_joiner()) {
@@ -756,7 +751,7 @@ bool GameWorld::apply_join_wire_til_if_ready() {
 // Complete the wire-only part of a retail join once the protocol reaches its
 // deployment/admission boundary. SessionDrive calls this before revealing
 // the world (or deploy map), guaranteeing the optional 0x45 overlay and the
-// renderer-backed C2S 0x3D snapshot reflect the completed initial stream.
+// C2S 0x3D page (inmatch/loaded_model_list.h) reflect the completed initial stream.
 bool GameWorld::settle_join_wire_assets() {
 	if (join_wire_assets_failed_) {
 		return false;

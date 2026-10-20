@@ -772,15 +772,6 @@ Ref<Mesh> FoliageDispatcher::load_mesh(const Ref<ResourceRoot> &p_resource_root,
   }
   const String mesh_key = _asset_cache_key(key, basename);
   if (asset_mesh_cache_.has(mesh_key)) {
-    // Game_StartMission resets the logical renderer-definition registry, but
-    // MainGame deliberately retains this expensive geometry cache with its
-    // mounted root. A cache hit in the new mission is still a loaded shared
-    // model-def node, so recreate retail's sticky foliage bit without parsing
-    // or rebuilding the .3DI.
-    const String cached_model_path = asset_model_path_cache_.has(mesh_key)
-                                         ? asset_model_path_cache_[mesh_key]
-                                         : basename + String(".3di");
-    ObjectData::mark_cached_network_challenge_foliage_model(cached_model_path);
     return asset_mesh_cache_[mesh_key];
   }
 
@@ -791,10 +782,7 @@ Ref<Mesh> FoliageDispatcher::load_mesh(const Ref<ResourceRoot> &p_resource_root,
 
   Ref<ObjectData> data;
   data.instantiate();
-  // Retail marks foliage model-def nodes before it freezes the C2S 0x3D
-  // renderer-definition snapshot; they remain renderable but are excluded from
-  // that network page. [orig: CEffectWorld_MarkModelsDirty @0x5b2220 writes node+0x3D4 before CEffectWorld_RebuildAllModelBuffers @0x5b3a80]
-  if (data->open_from_resource_root(p_resource_root, model_path, false) != OK) {
+  if (data->open_from_resource_root(p_resource_root, model_path) != OK) {
     return Ref<Mesh>();
   }
   const Array submeshes = data->build_lod_submeshes(0);

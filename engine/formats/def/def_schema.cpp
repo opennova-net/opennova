@@ -168,6 +168,7 @@ struct ReferenceRule {
 const ReferenceRule kReferences[] = {
 	{{kAnyKind, "graphic"}, DefReference::Model}, {{kAnyKind, "graphic_enemy"}, DefReference::Model},
 	{{kAnyKind, "husk"}, DefReference::Model}, {{kAnyKind, "huskfinal"}, DefReference::Model},
+	{{kItem, "huskshadow"}, DefReference::Model},
 	{{kAnyKind, "gfx1"}, DefReference::Model}, {{kAnyKind, "gfx1a"}, DefReference::Model},
 	{{kAnyKind, "gfx1b"}, DefReference::Model}, {{kAnyKind, "gfx3"}, DefReference::Model},
 	{{kAnyKind, "anim_def"}, DefReference::AnimationMap}, {{kAnyKind, "animadm"}, DefReference::AnimationMap},

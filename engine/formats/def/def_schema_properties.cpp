@@ -131,6 +131,7 @@ const std::vector<DefProperty> kItemProperties = {
 	{"hud_image", {"hud_image"}, DefEncoding::Plain, 1.0, ""},
 	{"unit_type", {"unit_type"}, DefEncoding::Plain, 1.0, ""},
 	{"huskfinal", {"huskfinal"}, DefEncoding::Plain, 1.0, ""},
+	{"huskshadow", {"huskshadow"}, DefEncoding::Plain, 1.0, ""},
 	{"husk_sub_parts", {"husk_sub_parts"}, DefEncoding::Plain, 1.0, ""},
 	{"id", {"id"}, DefEncoding::Plain, 1.0, ""},
 	{"mana", {"mana"}, DefEncoding::Plain, 1.0, ""},

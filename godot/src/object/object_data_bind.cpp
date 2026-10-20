@@ -8,15 +8,8 @@ using namespace novaobj;
 
 void ObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &ObjectData::open_file);
-	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name",
-			"include_in_network_challenge"), &ObjectData::open_from_resource_root,
-			DEFVAL(true));
-	ClassDB::bind_static_method("ObjectData",
-			D_METHOD("reset_network_challenge_model_registry"),
-			&ObjectData::reset_network_challenge_model_registry);
-	ClassDB::bind_static_method("ObjectData",
-			D_METHOD("network_challenge_model_count"),
-			&ObjectData::network_challenge_model_count);
+	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name"),
+			&ObjectData::open_from_resource_root);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &ObjectData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &ObjectData::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_lod_count"), &ObjectData::get_lod_count);

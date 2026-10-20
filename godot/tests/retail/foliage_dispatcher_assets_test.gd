@@ -2,8 +2,8 @@ extends GutTest
 
 # The vegetation asset resolver on FoliageDispatcher (the former veg_assets.gd,
 # folded into the dispatcher as instance state): the *veg*.3di listing, the
-# LOD0 mesh aggregate, the :fd texture bake, the network-challenge foliage
-# mark, and the per-root+instance cache keys.
+# LOD0 mesh aggregate, the :fd texture bake and the per-root+instance cache
+# keys.
 
 var _dispatcher: FoliageDispatcher = null
 
@@ -12,12 +12,10 @@ func before_each() -> void:
 	TestFs.remove_dir_recursive(_fixture_root())
 	_dispatcher = FoliageDispatcher.new()
 	add_child_autofree(_dispatcher)
-	ObjectData.reset_network_challenge_model_registry()
 
 
 func after_each() -> void:
 	_dispatcher = null
-	ObjectData.reset_network_challenge_model_registry()
 	TestFs.remove_dir_recursive(_fixture_root())
 
 

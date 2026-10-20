@@ -5010,6 +5010,10 @@ add_test(NAME npruntime_server_hello_nc COMMAND npruntime_server_hello_nc_test)
 add_executable(npruntime_joiner_mission_start_test npruntime/joiner_mission_start_test.cpp)
 target_link_libraries(npruntime_joiner_mission_start_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_joiner_mission_start COMMAND npruntime_joiner_mission_start_test)
+# The mission start's model-def list and the C2S 0x3D page it freezes (D-NET-527).
+add_executable(npruntime_loaded_model_list_test npruntime/loaded_model_list_test.cpp)
+target_link_libraries(npruntime_loaded_model_list_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_loaded_model_list COMMAND npruntime_loaded_model_list_test)
 
 # --- parity lane L3 (host tick) ---
 # The 0x0A writer's stores on the slot's body, slot by slot (D-NET-439, 461, 462).

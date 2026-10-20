@@ -527,6 +527,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L1 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_state.cpp        # the per-slot 0x0A writer (split off server_tick.cpp)
     # --- parity lane L2 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loaded_model_list.cpp # the mission start's model-def list, the C2S 0x3D page (D-NET-527)
     # --- parity lane L3 sources ---
     # --- parity lane L4 sources ---
     # --- parity lane L5 sources ---

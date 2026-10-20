@@ -17,7 +17,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 #include <utility>
 #include <vector>
 
@@ -140,5 +142,15 @@ private:
 	// [orig: PolyTrn_InitTextures @ 0x60c5c9].
 	std::array<uint8_t, 256> tile_surface_{};
 };
+
+// The terrain's foliage definitions' model names in slot order, as the terrain configuration's load
+// reads them (the mission's <terrain>.trn, overcast.def and its <environment>.env; `environment`
+// empty: none): the models Foliage_LoadDefAssets loads and marks, which the C2S 0x3D page leaves
+// out. Empty when the .trn is not there or the admission gate refuses it (the mission's load ends).
+// [orig: Foliage_LoadDefAssets @0x601260 - ThreediGp_LoadModel @0x6012cb,
+//  CEffectWorld_MarkModelsDirty @0x6012de; Terrain_LoadEnvironmentConfig @0x610940]
+std::vector<std::string> terrain_foliage_graphics(
+		const std::function<bool(const std::string &name, std::vector<uint8_t> &out)> &read_file,
+		const std::string &terrain_name, const std::string &environment);
 
 } // namespace opennova::terrain
