@@ -112,6 +112,13 @@ void insert_event(db::Database &db, int64_t id, const std::string &from, const s
 			{ BindValue(id), BindValue(from), BindValue(to), BindValue(detail) });
 }
 
+// A stop's cause on the server's open start, which its end keeps.
+void set_stop_cause(db::Database &db, int64_t id, StartCause cause) {
+	db.exec("UPDATE hosted_server_starts SET cause = $2 WHERE server_id = $1 AND ended_at IS NULL AND "
+			"cause IS NULL;",
+			{ BindValue(id), BindValue(std::string(start_cause_text(cause))) });
+}
+
 } // namespace
 
 const char *state_name(State state) {
@@ -303,6 +310,8 @@ const char *start_cause_text(StartCause cause) {
 		case StartCause::Crash: return "crash";
 		case StartCause::Fleet: return "fleet";
 		case StartCause::Stop: return "stop";
+		case StartCause::OwnerStop: return "owner_stop";
+		case StartCause::AdminStop: return "admin_stop";
 		case StartCause::Update: return "update";
 		case StartCause::Limits: return "limits";
 		case StartCause::NoData: return "no_data";
@@ -315,8 +324,9 @@ const char *start_cause_text(StartCause cause) {
 
 std::optional<StartCause> parse_start_cause(std::string_view text) {
 	for (const StartCause cause : { StartCause::Crash, StartCause::Fleet, StartCause::Stop,
-				 StartCause::Update, StartCause::Limits, StartCause::NoData, StartCause::Timeout,
-				 StartCause::LinkLost, StartCause::DataUnavailable }) {
+				 StartCause::OwnerStop, StartCause::AdminStop, StartCause::Update, StartCause::Limits,
+				 StartCause::NoData, StartCause::Timeout, StartCause::LinkLost,
+				 StartCause::DataUnavailable }) {
 		if (text == start_cause_text(cause)) return cause;
 	}
 	return std::nullopt;
@@ -344,12 +354,6 @@ bool end_start(db::Database &db, int64_t server_id, int64_t generation, StartCau
 					exit.exit_code ? BindValue(*exit.exit_code) : BindValue(std::monostate{}),
 					BindValue(db::Bool{ exit.oom }), BindValue(exit.reason) });
 	return db.changes() > 0;
-}
-
-void set_start_cause(db::Database &db, int64_t server_id, StartCause cause) {
-	db.exec("UPDATE hosted_server_starts SET cause = $2 WHERE server_id = $1 AND ended_at IS NULL AND "
-			"cause IS NULL;",
-			{ BindValue(server_id), BindValue(std::string(start_cause_text(cause))) });
 }
 
 std::vector<ServerStart> list_starts(db::Database &db, int64_t server_id, size_t limit) {
@@ -460,7 +464,7 @@ bool reset_restarts(db::Database &db, int64_t id) {
 	return db.changes() > 0;
 }
 
-bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
+bool request_stop(db::Database &db, int64_t id, const std::string &detail, StartCause cause) {
 	db::Transaction tx(db);
 	const auto rows = db.query("SELECT state FROM hosted_servers WHERE id = $1;", { BindValue(id) });
 	if (rows.empty()) return false;
@@ -471,6 +475,7 @@ bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
 			{ BindValue(id), BindValue(std::string(state_name(*state))) });
 	if (db.changes() == 0) return false;
 	insert_event(db, id, state_name(*state), state_name(State::Stopping), detail);
+	set_stop_cause(db, id, cause);
 	tx.commit();
 	return true;
 }
@@ -487,6 +492,7 @@ size_t request_stop_all(db::Database &db, const std::string &detail) {
 				{ BindValue(id), BindValue(from) });
 		if (db.changes() == 0) continue;
 		insert_event(db, id, from, state_name(State::Stopping), detail);
+		set_stop_cause(db, id, StartCause::AdminStop);
 		++stopped;
 	}
 	tx.commit();

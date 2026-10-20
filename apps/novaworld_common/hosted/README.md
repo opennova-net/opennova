@@ -87,8 +87,10 @@ this directory's.
   its cause. Each run is a row of `hosted_server_starts` (its generation): made when its
   slot is assigned (the machine and slot), its image, trees and log stream
   (`<server id>/g<generation>`) written when it renders, `running_at` once its agent
-  reports it running, and ended with its cause (`crash`, `timeout`, `fleet`, `stop`,
-  `update`, `limits`, `no_data`, `link_lost`, `data_unavailable`) and how its container
+  reports it running, and ended with its cause (`crash`, `timeout`, `fleet`, `owner_stop`
+  and `admin_stop` (who asked its stop), `stop` (the service's own stop, and every stop
+  before `0021_stop_causes.sql`), `update`, `limits`, `no_data`, `link_lost`,
+  `data_unavailable`) and how its container
   ended (its exit code, OOM flag and the server's exit line, or the agent's reason it never
   started). The stats' restarts are
   its crash and timeout ends. A start request (`hosted::request_server`) checks the entitlement, the
@@ -147,8 +149,10 @@ this directory's.
   timers.
 - **A stop** is the supervisor's own act: the row goes to `stopping` (asked by the owner
   or an admin, or by the supervisor for an account deleted or no longer active, or for the
-  owners' limits), the supervisor pushes `ServerStopHosting` to the listing (MsgCode 7,
-  scoped to the service account), and stops wanting the container once the listing has
+  owners' limits, its open start taking who asked as the cause its end keeps:
+  `owner_stop`, `admin_stop`, `stop`, `limits`), the supervisor pushes `ServerStopHosting`
+  to the listing (MsgCode 7, scoped to the service account), and stops wanting the
+  container once the listing has
   left the browser, or 60 s after the push. Its container exiting while `stopping`, with
   any code, finishes the stop. A stop is never read from an exit code
   (`apps/serve/README.md`, "Exit codes").

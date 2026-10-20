@@ -461,8 +461,7 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 	}
 	std::set<int64_t> stopped;
 	const auto stop_for = [&](int64_t id, const std::string &detail) {
-		if (!request_stop(db, id, detail)) return;
-		set_start_cause(db, id, StartCause::Limits);
+		if (!request_stop(db, id, detail, StartCause::Limits)) return;
 		stopped.insert(id);
 		std::printf("[hosted] server %lld: -> stopping (%s)\n", static_cast<long long>(id), detail.c_str());
 	};
@@ -502,7 +501,7 @@ void Supervisor::step(db::Database &db, const Fleet &fleet, const HostedServer &
 	if (s.state != State::Stopping) {
 		std::string why;
 		if (!owner_active(db, s, why)) {
-			if (request_stop(db, s.id, why)) {
+			if (request_stop(db, s.id, why, StartCause::Stop)) {
 				std::printf("[hosted] server %lld: %s -> stopping (%s)\n", static_cast<long long>(s.id),
 						state_name(s.state), why.c_str());
 			}
@@ -562,7 +561,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	// restart's backoff gives an admin time to withdraw a grant).
 	std::string why;
 	if (!owner_active(db, s, why)) {
-		if (request_stop(db, s.id, why)) {
+		if (request_stop(db, s.id, why, StartCause::Stop)) {
 			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),
 					why.c_str());
 		}
@@ -586,8 +585,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		++(other.own_machine ? own_rank : shared_rank);
 	}
 	const auto stop_for = [&](const std::string &limit) {
-		if (request_stop(db, s.id, limit)) {
-			set_start_cause(db, s.id, StartCause::Limits);
+		if (request_stop(db, s.id, limit, StartCause::Limits)) {
 			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),
 					limit.c_str());
 		}

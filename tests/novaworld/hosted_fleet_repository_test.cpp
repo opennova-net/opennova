@@ -770,11 +770,11 @@ int test_slots() {
 			c_starts[0].machine_id == own.id && c_starts[0].ended_at.empty() &&
 			c_starts[1].generation == 1 && !c_starts[1].ended_at.empty() &&
 			c_starts[1].cause == hosted::StartCause::Fleet);
-	// What it runs, its first report running, a cause asked ahead (a stop for its
-	// owner's limits) standing at its end, and the end once alone.
+	// What it runs, its first report running, a stop's cause asked ahead (one for
+	// its owner's limits) standing at its end, and the end once alone.
 	hosted::set_start_files(db, c, 2, kImage, 7, 8, std::to_string(c) + "/g2");
 	hosted::mark_start_running(db, c, 2);
-	hosted::set_start_cause(db, c, hosted::StartCause::Limits);
+	TEST_EXPECT(hosted::request_stop(db, c, "test", hosted::StartCause::Limits));
 	TEST_EXPECT(hosted::end_start(
 			db, c, 2, hosted::StartCause::Stop, { 3, false, "the session ended: x" }));
 	TEST_EXPECT(!hosted::end_start(db, c, 2, hosted::StartCause::Crash));
@@ -786,9 +786,10 @@ int test_slots() {
 			c_starts[0].cause == hosted::StartCause::Limits && c_starts[0].exit_code == 3 &&
 			c_starts[0].reason == "the session ended: x");
 	for (const hosted::StartCause cause : { hosted::StartCause::Crash, hosted::StartCause::Fleet,
-				 hosted::StartCause::Stop, hosted::StartCause::Update, hosted::StartCause::Limits,
-				 hosted::StartCause::NoData, hosted::StartCause::Timeout,
-				 hosted::StartCause::LinkLost, hosted::StartCause::DataUnavailable })
+				 hosted::StartCause::Stop, hosted::StartCause::OwnerStop, hosted::StartCause::AdminStop,
+				 hosted::StartCause::Update, hosted::StartCause::Limits, hosted::StartCause::NoData,
+				 hosted::StartCause::Timeout, hosted::StartCause::LinkLost,
+				 hosted::StartCause::DataUnavailable })
 		TEST_EXPECT(hosted::parse_start_cause(hosted::start_cause_text(cause)) == cause);
 	TEST_EXPECT(!hosted::parse_start_cause("restart"));
 	// A machine that no longer takes servers takes no slot.
