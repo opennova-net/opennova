@@ -290,12 +290,14 @@ int main_impl() {
 				"0x0F gameFlags bit1 advertises the target-less spawn restriction")) {
 			return 1;
 		}
-		// The fresh player carries its start marker's placement angles, so the i16
-		// yaw is the spawn angle's high half: yaw 0 -> (90 << 16) / 360 = 0x4000,
-		// where 90 x 11930464 >> 16 would give 0x3FFF.
+		// The i16 yaw is the heading word's high half. This Co-op word authors no
+		// 6094 / 6001 start (the 6002 is a deathmatch family's), so the add's
+		// placement stores nothing and the fresh player keeps the zeroed entity's
+		// heading word 0 (the start marker's 0x4000 rounding is pinned below).
 		// [orig: NetPacket_WriteWorldStateLoad0x0F `movzx edx, word ptr [ebp+12h]`
-		//  @0x502D6D; Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
-		if (!expect(state.yaw == 0x4000 && state.pitch == 0 && state.roll == 0,
+		//  @0x502D6D; Entity_SpawnFromAnimSlotProperty - the memset @0x43C3FE, the
+		//  placement @0x43C459]
+		if (!expect(state.yaw == 0 && state.pitch == 0 && state.roll == 0,
 				"0x0F yaw is the placement heading's high half")) {
 			return 1;
 		}

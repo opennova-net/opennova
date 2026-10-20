@@ -5,6 +5,7 @@
 #include <runtime/inmatch/server_initial_state.h> // Server_OnPlayerJoin (the 0x0B's join)
 #include <runtime/inmatch/server_message_dispatch.h> // broadcast_player_sync_on_join (the add's 0x46)
 
+#include <runtime/world/angle.h>        // mission_yaw_deg_from_bam_heading (the no-marker heading word)
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
 #include <runtime/world/spawn_select.h> // resolve_player_spawn_pose / world_has_spawn_zone
@@ -348,10 +349,14 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.pitch = sel.pitch;
 		spawn.roll = sel.roll;
 	} else {
-		// No start marker authored: spawn at the mission origin (terrain clamp grounds it). Never an
-		// NPC position. [orig: Entity_FindBestSpawnPoint @0x50ccc0 returns no marker -> caller fallback]
+		// No start marker authored: the placement stores nothing, so the body keeps the
+		// zeroed entity's words: position 0 and heading word 0 (mission yaw 90). Never an
+		// NPC position. [orig: Entity_SpawnFromAnimSlotProperty - the memset @0x43C3FE, the
+		//  placement @0x43C459; Entity_FindBestSpawnPoint @0x50CCC0 - no marker, no store
+		//  (@0x50CD20)]
 		spawn.position = {0.0f, 0.0f, 0.0f};
-		spawn.yaw = 0;
+		spawn.heading_bam = 0;
+		spawn.yaw = static_cast<int16_t>(world::mission_yaw_deg_from_bam_heading(0));
 	}
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	// [D-NET-112] A player carries no SSN (net_id 0) — faithful to the original, which identifies it by

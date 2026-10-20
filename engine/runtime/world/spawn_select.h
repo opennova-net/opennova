@@ -45,6 +45,12 @@ struct SpawnPointResult {
     // carry neither). [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
     uint32_t flags_or = 0;
     EntityHandle carrier;
+    // The scored-marker arm (every no-pick arm but Co-op's) warms the body up
+    // after its pick, a pick that found no marker included, which leaves the
+    // body where it stands (world::warm_up_player_body).
+    // [orig: Server_PositionPlayerForSpawn - Entity_FindBestSpawnPoint
+    //  @0x50D56C, Entity_WarmUpOrganicAnimation @0x50D572]
+    bool warm_up = false;
 };
 
 // The player-slot bytes the no-pick arm reads beside the assigned team: the

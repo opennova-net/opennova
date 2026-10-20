@@ -1237,6 +1237,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const bool npc_body = !e.inf.is_local_player && !e.net_is_remote_peer &&
             (tick_entity == nullptr ||
              ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagPlayer) == 0);
+    // A hidden player body runs nothing at all: the org2 head returns at Flags
+    // bit 0 ahead of its channels, its motion and its edge, so an added body
+    // waits unmoved for its join's placement and a held one for its deploy (a
+    // remote peer's leg returns there too, remote_player_body_anim).
+    // [orig: Entity_UpdateInfantryPlayerBody `test dl,1; jnz` @0x4B411E..0x4B4127;
+    //  the add's Flags |= 0x101 Entity_SpawnFromAnimSlotProperty @0x43C433 /
+    //  @0x43C508; the join's clear Server_OnPlayerJoin @0x51A7DA]
+    if (!npc_body && tick_entity != nullptr &&
+        ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagCarried) != 0)
+        return;
     // An org1 body with no animation channel runs nothing: the update's first test.
     // [orig: Entity_UpdateInfantryAI `mov ecx,[esi+188h]; cmp ecx,ebp; jz loc_4BFC8B`
     //  @0x4B9931..0x4B993B]

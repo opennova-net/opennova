@@ -216,16 +216,17 @@ int32_t deploy_spawn_protection_ticks(int title, const world::Entity *target) {
 world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		NapiNPConnection &conn, world::World &world, world::Entity &player,
 		world::EntityHandle target_zone) {
-	// The convert's hold arm: no placement; the three angle words are zeroed
-	// (the mission yaw of heading word 0 is 90) and the latch clears. The
-	// warmup it runs first is D-NET-431's. A revive latch the placement would
-	// have consumed is only cleared, as the leg's tail clears it on every
-	// deploy. [orig: Server_DeployPlayer - the latch test @0x517837,
+	// The convert's hold arm: no placement; the body warms up where it stands,
+	// then the three angle words are zeroed (the mission yaw of heading word 0
+	// is 90) and the latch clears. A revive latch the placement would have
+	// consumed is only cleared, as the leg's tail clears it on every deploy.
+	// [orig: Server_DeployPlayer - the latch test @0x517837,
 	//  Entity_WarmUpOrganicAnimation @0x517842, +0x10/+0x14/+0x18 = 0
 	//  @0x517849..0x517853, the clear @0x517859; +89932 = 0 @0x5179C7]
 	if (conn.reply.convert_holds_pose) {
 		conn.reply.convert_holds_pose = false;
 		conn.reply.revive_pose_valid = false;
+		world::warm_up_player_body(world, player);
 		world::SpawnPointResult held;
 		held.found = true;
 		held.position = player.position;
@@ -259,22 +260,23 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		player.pitch = pose.pitch;
 		player.roll = pose.roll;
 	}
+	// The scored arm warms the body up after its pick; a pick that found no
+	// marker leaves the body where it stands (the spawn-state reset then takes
+	// that spot as its spawn origin). [orig: Server_PositionPlayerForSpawn -
+	//  Entity_FindBestSpawnPoint @0x50D56C (no marker: no store), the warm-up
+	//  @0x50D572; Entity_ResetToSpawnState @0x4B9632..0x4B9644]
+	if (pose.warm_up) world::warm_up_player_body(world, player);
 	// A medic revive lands the player on the position the revive saved (its
-	// death position raised 0x4000) after the placement ran, so the angles stay
-	// the placement's: the picked marker's words, or the body's own when nothing
-	// was picked (D-NET-377). [orig: Server_PositionPlayerForSpawn
-	//  @0x50D60A..0x50D62A; GameEvent_RevivePlayer @0x517DCD..0x517E09 saves]
+	// death position raised 0x4000) after the placement ran, and warms up there,
+	// so the angles stay the placement's: the picked marker's words, or the
+	// body's own when nothing was picked (D-NET-377). [orig:
+	//  Server_PositionPlayerForSpawn @0x50D60A..0x50D62A, the warm-up @0x50D62D;
+	//  GameEvent_RevivePlayer @0x517DCD..0x517E09 saves]
 	if (conn.reply.revive_pose_valid) {
 		player.position.set_q16({conn.reply.revive_pos[0], conn.reply.revive_pos[1],
 				conn.reply.revive_pos[2]});
+		world::warm_up_player_body(world, player);
 		conn.reply.revive_pose_valid = false;
-	} else if (!pose.found) {
-		// No authored marker: the deploy transaction restores the position
-		// recorded by the previous Entity_ResetToSpawnState. Keeping this in the
-		// shared release makes C2S, wave, and listen-host paths identical.
-		// [orig: Server_DeployPlayer @0x517740 ->
-		// Entity_ResetToSpawnState @0x4B9610; D-NET-66]
-		player.position = player.spawn_position;
 	}
 	return pose;
 }

@@ -39,6 +39,16 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e);
 // [orig: Entity_InitOrganicAI @0x4BFCC0; warmup @0x4B8B20]
 void initialize_organic_ai(World &world, Entity &e);
 
+// The player placement's warm-up on a player body standing where the placement
+// left it: the organic warm-up (its dual updates on the body's channels as they
+// stand, the root rise and the ground solve) when the body holds its animation
+// channel, the result written back to the entity's words. The placement runs it
+// after the scored marker pick, for a revive and in the deploy's hold arm.
+// [orig: Entity_WarmUpOrganicAnimation @0x4B8B20; its callers
+//  Server_PositionPlayerForSpawn @0x50D572 / @0x50D62D, Server_DeployPlayer
+//  @0x517842]
+void warm_up_player_body(World &world, Entity &e);
+
 // What the organic init reads to choose the body state a person starts in: its definition
 // callback, which both person classes run (the org0 and org1 rows of the event-callback table
 // name it as their second function) [orig: g_EntityClassEventCallbackTable @0x813000, its rows

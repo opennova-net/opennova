@@ -1657,6 +1657,7 @@ int main() {
 	if (!run_death_feed_classifier_matrix()) return 1;
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(3, 4); // the deathmatch start markers (section 4)
 	w::AiSystem &ai = world.ai;
 	DeathAnimSource death_clips;
 	ai.is_authority = true;
@@ -2488,6 +2489,16 @@ int main() {
 		if (!expect(host->health == 0,
 		            "the host's own player waits for its pick: nothing deploys it on expiry"))
 			return 1;
+		// The deathmatch start markers at the spawn point: a placement that
+		// finds none leaves the body where it died [orig: Entity_FindBestSpawnPoint
+		// @0x50CD20], so the snap needs one of each family.
+		for (const int32_t marker_type : {6095, 6002}) {
+			w::Entity start;
+			start.kind = w::EntityKind::Marker;
+			start.item_id = marker_type;
+			start.position = {60.0f, 0.0f, 10.0f};
+			world.registry.spawn(3, start);
+		}
 		// Its Default Spawn pick rides its loopback as the ordinary C2S 0x0E
 		// [orig: Input_HandleActionBinding case 12 @0x49b17b, no authority test].
 		(void)inmatch::dispatch_session_replies(

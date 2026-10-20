@@ -83,7 +83,47 @@ int32_t warm_up_channels(InfantryState &inf, uint32_t net_id, bool parented, IRo
     return io::bam_add(rise, frame.dz);
 }
 
+// Entity_WarmUpOrganicAnimation on the body's channels as they stand: only for
+// a body holding its animation channel; the net-ID count of dual updates, the
+// vertical root motion and capsule bottom added to an unparented body's z, then
+// one ground solve that sets it down when it stands under one unit.
+// [orig: Entity_WarmUpOrganicAnimation @0x4B8B20 - the channel test
+//  @0x4B8B32..0x4B8B39, the loop @0x4B8B3F..0x4B8BA3, the parent test
+//  @0x4B8BA5, the resolver @0x4B8BDF, the settle @0x4B8BE7..0x4B8BF5]
+void warm_up_organic_body(World &world, AiSystem &ai, Entity &entity, AiEntity &body) {
+    InfantryState &inf = body.inf;
+    if (!infantry_has_anim_channel(inf, ai.root_motion)) return;
+    RootMotionFrame frame{};
+    const bool parented = entity.mount_target.valid();
+    body.pos[2] = io::bam_add(body.pos[2],
+            warm_up_channels(inf, uint32_t(body.net_id), parented, *ai.root_motion, ai.anim_rings, frame));
+    if (parented) return;
+    body.collide_state.skip_counter = 0;
+    if (ai.collision != nullptr) {
+        const int32_t clearance = ai.collision->resolve_entity(
+                world, entity.handle, body.collide_state, body.pos,
+                inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
+                body.heading, 0, false, ai.is_authority, world.logic_tick,
+                inf.anim_state, infantry_anim_flags(inf.anim_state), body.health);
+        if (clearance < kOrganicWarmupSettleQ16)
+            body.pos[2] = io::bam_sub(body.pos[2], clearance);
+    }
+    body.collide_state.skip_counter = 0;
+}
+
 } // namespace
+
+// See entity_spawn.h.
+void warm_up_player_body(World &world, Entity &entity) {
+    AiEntity *body = world.ai.for_handle(entity.handle);
+    if (body == nullptr || !body->inf.active) return;
+    // The placement wrote the entity's words; the warm-up works on them.
+    body->pos[0] = entity.position.x.q16;
+    body->pos[1] = entity.position.y.q16;
+    body->pos[2] = entity.position.z.q16;
+    warm_up_organic_body(world, world.ai, entity, *body);
+    entity.position.set_q16({body->pos[0], body->pos[1], body->pos[2]});
+}
 
 bool organic_init_class(const char *ai_function) {
     return ai_function != nullptr &&
@@ -201,28 +241,8 @@ void initialize_organic_ai(World &world, Entity &entity) {
                          ai.anim_rings);
 
     // Entity_WarmUpOrganicAnimation @0x4B8B20: secondary then primary,
-    // net-ID permutation, vertical root motion only, one final ground solve;
-    // only for a body holding its animation channel. [orig: the channel test
-    // @0x4B8B32..0x4B8B39]
-    if (infantry_has_anim_channel(inf, ai.root_motion)) {
-        RootMotionFrame frame{};
-        const bool parented = entity.mount_target.valid();
-        body->pos[2] = io::bam_add(body->pos[2],
-                warm_up_channels(inf, uint32_t(body->net_id), parented, *ai.root_motion, ai.anim_rings, frame));
-        if (!parented) {
-            body->collide_state.skip_counter = 0;
-            if (ai.collision != nullptr) {
-                const int32_t clearance = ai.collision->resolve_entity(
-                        world, entity.handle, body->collide_state, body->pos,
-                        inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
-                        body->heading, 0, false, ai.is_authority, world.logic_tick,
-                        inf.anim_state, infantry_anim_flags(inf.anim_state), body->health);
-                if (clearance < kOrganicWarmupSettleQ16)
-                    body->pos[2] = io::bam_sub(body->pos[2], clearance);
-            }
-            body->collide_state.skip_counter = 0;
-        }
-    }
+    // net-ID permutation, vertical root motion only, one final ground solve.
+    warm_up_organic_body(world, ai, entity, *body);
     entity.position.set_q16({body->pos[0], body->pos[1], body->pos[2]});
     // The source is savedLivePose, deliberately not the grounded position; the
     // offset is 3 u along the heading in the Q22 trig of retail's

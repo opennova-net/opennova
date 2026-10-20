@@ -5027,6 +5027,11 @@ add_test(NAME netsim_priority_list COMMAND netsim_priority_list_test)
 add_executable(npruntime_player_death_edge_test npruntime/player_death_edge_test.cpp)
 target_link_libraries(npruntime_player_death_edge_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_player_death_edge COMMAND npruntime_player_death_edge_test)
+# The player placement: the hidden body's frozen update, the markerless add and
+# deploy, the placement's warm-up (D-NET-NEW-L4-1, D-NET-431, D-NET-503).
+add_executable(npruntime_player_placement_test npruntime/player_placement_test.cpp)
+target_link_libraries(npruntime_player_placement_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_placement COMMAND npruntime_player_placement_test)
 
 # --- parity lane L5 (client replica) ---
 

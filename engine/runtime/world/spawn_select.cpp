@@ -299,16 +299,18 @@ SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
             : SpawnPointResult{};
     }
 
+    SpawnPointResult scored;
     if (primary_allowed && types.primary != 0 &&
         !markers_of_type(world, types.primary).empty()) {
         ++world.zones.spawn_cycle_counter;
-        return best_marker_pose(world, types.primary, spawning_player);
+        scored = best_marker_pose(world, types.primary, spawning_player);
+    } else {
+        ++world.zones.spawn_cycle_counter;
+        if (types.fallback != 0) scored = best_marker_pose(world, types.fallback, spawning_player);
     }
-
-    ++world.zones.spawn_cycle_counter;
-    return types.fallback != 0
-        ? best_marker_pose(world, types.fallback, spawning_player)
-        : SpawnPointResult{};
+    // [orig: Entity_FindBestSpawnPoint @0x50D56C, Entity_WarmUpOrganicAnimation @0x50D572]
+    scored.warm_up = true;
+    return scored;
 }
 
 } // namespace

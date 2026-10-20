@@ -30,6 +30,7 @@
 #include <net/title/title_identity.h>     // title_in_match (the 0x0F flags, DFX2-2)
 #include <runtime/world/ai.h>                     // AiEntity (the join's placement reaches the motor)
 #include <runtime/world/angle.h>                  // world::spawn_angle_bam (0x0F spawn pose)
+#include <runtime/world/entity_spawn.h>           // world::warm_up_player_body (the join placement)
 #include <runtime/world/entity.h>                 // world::Entity (0x0F spawn pose)
 #include <runtime/world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
 #include <runtime/world/world.h>
@@ -719,8 +720,13 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 			body->pitch = pose.pitch;
 			body->roll = pose.roll;
 			world::apply_spawn_point_latches(*body, pose);
-			// The motor's copy of the pose follows (our motor keeps its own position and
-			// heading words; the placement writes nothing else).
+		}
+		// The scored arm's warm-up, where the pick left the body (D-NET-431).
+		// [orig: Server_PositionPlayerForSpawn @0x50D572]
+		if (pose.warm_up) world::warm_up_player_body(world, *body);
+		// The motor's copy of the pose follows (our motor keeps its own position and
+		// heading words; the placement writes nothing else).
+		if (pose.found || pose.warm_up) {
 			if (world::AiEntity *motor = world.ai.for_handle(body->handle)) {
 				const int32_t placed[3] = {
 						body->position.x.q16, body->position.y.q16, body->position.z.q16};
@@ -728,8 +734,10 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 					motor->pos[axis] = placed[axis];
 					motor->net_smooth_target[axis] = placed[axis];
 				}
-				motor->heading = pose.heading_bam;
-				motor->net_smooth_heading = pose.heading_bam;
+				if (pose.found) {
+					motor->heading = pose.heading_bam;
+					motor->net_smooth_heading = pose.heading_bam;
+				}
 			}
 		}
 	}
