@@ -1143,13 +1143,10 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string out_p  = req.url_params.get("OUT")     ? req.url_params.get("OUT")     : game.page("login.htm");
 		const std::string msgbase = req.url_params.get("MSGBASE")? req.url_params.get("MSGBASE") : game.page("msg.htm");
 		const auto epask = cookies.count("EPASK") ? cookies.at("EPASK") : opennova::epask_to_string(epask_params_);
-		// An unactivated DFX2 client (its NWCDKIID no wire key) gets the activation login, ACT.
-		const char *act_p = req.url_params.get("ACT");
-		const auto nwcdkiid = cookies.find("NWCDKIID");
-		const std::string nwcdkiid_v = nwcdkiid == cookies.end() ? std::string() : nwcdkiid->second;
-		const bool activating = act_p != nullptr && *act_p != '\0' &&
-				cdkeys::needs_activation(game.title, nwcdkiid_v);
-		const std::string page_p = activating ? std::string(act_p) : out_p;
+		// Every client gets OUT, the plain login, whatever its NWCDKIID: the start page's ACT
+		// (DFX2's activation login) is never chosen. A DFX2 client whose NWCDKIID is no wire
+		// key is handed its key silently at the login's completion instead
+		// (CdKeyRoutes::login_activation; D-NET-725, the service's policy).
 
 		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n",
 				loggable(req.url).c_str(), loggable(in_p).c_str(), loggable(out_p).c_str(),
@@ -1165,7 +1162,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);
-		res.body = render_template_file(templates_dir, page_p, vars);
+		res.body = render_template_file(templates_dir, out_p, vars);
 		res.set_header("Content-Type", "text/html");
 		add_standard_headers(res);
 		add_cookie(res, "YOURIP",      req.remote_ip_address);
@@ -1536,8 +1533,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		add_cookie(res, "CHAR",     session->nwhandle.empty() ? "DevUser"    : session->nwhandle);
 		add_cookie(res, "PCID",     session->pcid.empty()     ? "00000001"   : session->pcid);
 		add_cookie(res, "EXPBITS",  session->exp_bits.empty() ? "3" : session->exp_bits);
-		// A DFX2 client not yet activated: its machine's NWACT, which its NovaWorld screen
-		// writes to the registry CDKIID (cd_key_routes.h).
+		// A DFX2 client whose NWCDKIID is no wire key (a keyless copy, as sold or byte-patched):
+		// its machine's NWACT, which its NovaWorld screen writes to the registry CDKIID
+		// (cd_key_routes.h), handed silently (D-NET-725).
 		const std::string nwact = impl_->cd_keys.login_activation(session->user_id, game, cookies);
 		if (!nwact.empty())
 			add_cookie(res, "NWACT", nwact);

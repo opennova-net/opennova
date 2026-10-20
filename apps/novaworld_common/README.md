@@ -869,17 +869,24 @@ browser variable, and its LAN host checks the wire `CDKIID` that value decodes t
   NWPSSK)`: machine-bound, A to Z, and the same every time that machine asks
   (`cd_key_activations` keeps one row per key and machine). The client's own leg (the mix
   down under its fingerprint, the registry chain decoded) gives back the wire key.
-- **The hand-off.** A DFX2 client sets `NWCDKIID` (the wire key its boot read decoded,
-  empty when unactivated) and `NWPSSK` (its 23-letter fingerprint) as browser variables
-  when it connects to NovaWorld, so every web request carries them as cookies.
-  `GET /NWStart.dll` answers a DFX2 client whose `NWCDKIID` is no wire key with the start
-  page's `ACT` page (`dfx2_0_actlogin.htm`, "Please login to activate this product")
-  instead of `OUT`. Its completed login (`GET /NWLogin.dll`) then carries
-  `Set-Cookie: NWACT=<value>` for the posted `NWPSSK`: the response's `SET-COOKIE`
-  lines land in the browser's one cookie jar, and the NovaWorld screen's idle update reads
-  `NWACT` from it, writes it to the registry `CDKIID`, validates it, and clears it (the
-  witness: the RE record's section 9). The registry write needs an administrator. An activated client, a JO client and a
-  client posting no `NWPSSK` get no `NWACT`.
+- **The hand-off.** A DFX2 client sets `NWCDKIID` (what its boot read's decode left: the
+  wire key, or empty when it has no `CDKIID`) and `NWPSSK` (its 23-letter fingerprint) as
+  browser variables when it connects to NovaWorld, so every web request carries them as
+  cookies. Nobody is asked to activate (D-NET-725): `GET /NWStart.dll` answers every
+  client with the start page's `OUT` page, the plain login, and never with the `ACT` page
+  DFX2's start page names (`dfx2_0_actlogin.htm`, "Please login to activate this
+  product"). The completed login (`GET /NWLogin.dll`) of a DFX2 client whose `NWCDKIID`
+  is no wire key carries `Set-Cookie: NWACT=<value>` for the posted `NWPSSK`: the
+  response's `SET-COOKIE` lines land in the browser's one cookie jar, and the NovaWorld
+  screen's idle update reads `NWACT` from it, writes it to the registry `CDKIID`,
+  validates it, and clears it (the witness: the RE record's section 9). The registry write
+  needs an administrator. An activated client, a JO client and a client posting no
+  `NWPSSK` get no `NWACT`. The three DFX2 copies players run: a retail-keyed one sends
+  its wire key and gets nothing; a keyless as-sold one (no `CDKIID`, or one this machine's
+  fingerprint does not decode) gets its key, which unlocks its menus and hosting at its
+  next start; a keyless byte-patched one (its registry read forced to succeed) sends the
+  same empty `NWCDKIID` and gets its key too, which its menus never needed but a stock
+  LAN host checks.
 - **Minting.** An account that has never held a DFX2 key gets one minted onto it at its
   first activation (`created_by` `auto`) while `ONNET_CD_KEY_AUTO_MINT` is on (the
   default; `0` turns it off, and then only a key an admin assigned activates). An account

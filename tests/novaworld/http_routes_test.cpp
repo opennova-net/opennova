@@ -2606,13 +2606,19 @@ int test_gsb_rosters(Harness &h) {
 
 // A retail DFX2 client's activation through the login (cd_key_routes.h login_activation), on
 // listeners of its own (their own retail login brakes), one minting an account's first key and
-// one not (ONNET_CD_KEY_AUTO_MINT=0). An unactivated client (its NWCDKIID empty) gets the
-// activation login at NWStart, and its completed login carries NWACT for the NWPSSK it posts:
-// the client's own reading of it (the mix under that fingerprint, the registry chain) gives the
-// wire key of the account's key, minted now. The same machine gets the same NWACT again, another
-// machine its own; an activated client (a wire key in NWCDKIID), a JO client and a client posting
-// no NWPSSK get none; an account whose key was revoked gets none and no new key; with minting
-// off, an account with no key gets none while one holding a key is activated.
+// one not (ONNET_CD_KEY_AUTO_MINT=0). Nobody is asked to activate (D-NET-725): NWStart renders
+// the plain login (OUT) for every client, never the start page's ACT. The NWCDKIID a DFX2 copy
+// sends is what its boot read's decode left, copied whatever the read's outcome, from a buffer
+// that starts empty [orig: CDKey_ReadRegistry @0x411b90 - the buffer emptied @0x411bf9, the copy
+// @0x411cc0..0x411cd3 (dfx2.exe)], so the three copies players run reach the service as: a
+// retail-keyed one, its wire key; a keyless as-sold one, empty (no CDKIID) or a value no wire key
+// (a CDKIID this machine's fingerprint does not decode); a keyless byte-patched one (the read
+// forced to succeed, its menus open), empty as well. A keyless copy's completed login carries
+// NWACT for the NWPSSK it posts: the client's own reading of it (the mix under that fingerprint,
+// the registry chain) gives the wire key of the account's key, minted now. The same machine gets
+// the same NWACT again, another machine its own; a retail-keyed client, a JO client and a client
+// posting no NWPSSK get none; an account whose key was revoked gets none and no new key; with
+// minting off, an account with no key gets none while one holding a key is activated.
 int test_dfx2_activation(Harness &h) {
 	namespace cdkey = opennova::cdkey;
 	constexpr const char *kMachineA = "ABCDEFGHIJKLMNOPQRSTUVW";
@@ -2669,8 +2675,7 @@ int test_dfx2_activation(Harness &h) {
 						{ { "EPASK", opennova::epask_to_string(epask), false },
 								{ "NAME", user, true }, { "PASSWORD", password, true },
 								{ "success", dfx2 ? "dfx2_0_main.htm" : "jop_2_main.htm", true },
-								{ "failure", dfx2 ? "dfx2_0_actlogin.htm" : "jop_2_login.htm",
-										true },
+								{ "failure", dfx2 ? "dfx2_0_login.htm" : "jop_2_login.htm", true },
 								{ "msgbase", dfx2 ? "dfx2_0_msg.htm" : "jop_2_msg.htm", true },
 								{ "relay", dfx2 ? "dfx2_0_relay.htm" : "jop_2_relay.htm", true },
 								{ "pfid", dfx2 ? "38" : "28", true } },
@@ -2687,6 +2692,7 @@ int test_dfx2_activation(Harness &h) {
 		out.completion = h.send_to(port, "GET", "/NWLogin.dll", jar.header());
 		return out;
 	};
+	// A keyless copy with no CDKIID (as sold, or byte-patched): an empty NWCDKIID.
 	const auto unactivated = [](const char *machine) {
 		return std::map<std::string, std::string>{ { "NWCDKIID", "" }, { "NWCDKIIDEXP1", "" },
 			{ "NWPSSK", machine } };
@@ -2700,12 +2706,13 @@ int test_dfx2_activation(Harness &h) {
 				: std::string();
 	};
 
-	// The first activation: the activation login, then the NWACT of a key minted for the account.
+	// The first activation, a byte-patched keyless copy (an empty NWCDKIID): the plain login, then
+	// the NWACT of a key minted for the account.
 	const int64_t player = make_account(h, "act_player", "pw-act-player");
 	TEST_EXPECT(player > 0);
 	auto login = retail_login(
 			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineA), true);
-	TEST_EXPECT(login.start_page == page("dfx2_0_actlogin.htm"));
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	TEST_EXPECT(login.completion.transport_ok && login.completion.code == 200);
 	TEST_EXPECT(body_text(login.completion).find("NovaWorld Main Menu") != std::string::npos);
 	const std::string nwact_a = set_cookie_value(login.completion, "NWACT");
@@ -2725,8 +2732,11 @@ int test_dfx2_activation(Harness &h) {
 			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineA), true);
 	TEST_EXPECT(set_cookie_value(login.completion, "NWACT") == nwact_a);
 	TEST_EXPECT(live_wire_key(player) == minted);
-	login = retail_login(
-			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineB), true);
+	// Machine B a keyless as-sold copy whose CDKIID this machine does not decode: its NWCDKIID no
+	// wire key, the plain login and its own NWACT.
+	login = retail_login(minting.bound_port(), "act_player", "pw-act-player",
+			{ { "NWCDKIID", "JUNK" }, { "NWCDKIIDEXP1", "" }, { "NWPSSK", kMachineB } }, true);
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
 	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
 	TEST_EXPECT(cdkey::read_activation(nwact_b, kMachineB, recovered) && recovered == wire_key);
@@ -2744,6 +2754,16 @@ int test_dfx2_activation(Harness &h) {
 			{ { "NWCDKIID", wire_key }, { "NWCDKIIDEXP1", "" }, { "NWPSSK", kMachineA } }, true);
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	// A retail-keyed copy (its key NovaLogic's, any serial under the wire chain) on an account
+	// with no key of ours: the login page, no NWACT and nothing minted.
+	const int64_t keyed = make_account(h, "act_keyed", "pw-act-keyed");
+	login = retail_login(minting.bound_port(), "act_keyed", "pw-act-keyed",
+			{ { "NWCDKIID", cdkey::make_wire_key("RETAIL-KEYED-COPY") }, { "NWCDKIIDEXP1", "" },
+					{ "NWPSSK", kMachineB } },
+			true);
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
+	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	TEST_EXPECT(live_wire_key(keyed).empty());
 	// No NWPSSK: nothing to bind an NWACT to, and nothing minted.
 	const int64_t bare = make_account(h, "act_bare", "pw-act-bare");
 	login = retail_login(
@@ -2782,7 +2802,7 @@ int test_dfx2_activation(Harness &h) {
 	const int64_t waiting = make_account(h, "act_waiting", "pw-act-waiting");
 	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
 			unactivated(kMachineB), true);
-	TEST_EXPECT(login.start_page == page("dfx2_0_actlogin.htm"));
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
 	TEST_EXPECT(live_wire_key(waiting).empty());
 	auto made = h.send(
