@@ -1462,6 +1462,82 @@ bool check_quartet_skips_a_spectator_slot() {
 	return expect(quartet_tags() == 4, "the latch cleared, the next walk sends the quartet");
 }
 
+// The integrity family spends one PRNG_Next16 draw per request it sends, the
+// slot's word filled and zeroed again, so every request carries 0: a 0x31
+// boundary with one resolvable ADM row draws once (the unresolved peer sends
+// and draws nothing), the next boundary's 0x30 to both peers draws twice.
+// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 - the 0x30 draw
+//  @0x5085A6..0x5085B9, the 0x31's ADM row @0x508605..0x508611 and draw
+//  @0x508613..0x508626; PRNG_Next16 @0x6130A0]
+bool check_integrity_family_draws_once_per_send() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.tables.weapons.entries.resize(0x21);
+	world.tables.weapons.entries[0x20].valid = true;
+	world.tables.weapons.entries[0x20].ammo_index = 0x1A;
+	ctx.world = &world;
+	ns::UdpSessionTransport ta(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport tb(ns::UdpSessionTransport::Role::Host);
+	const w::EntityHandle pa = w::spawn_remote_player(world, w::PlayerSpawn{});
+	const w::EntityHandle pb = w::spawn_remote_player(world, w::PlayerSpawn{});
+	for (const w::EntityHandle h : {pa, pb}) {
+		// Hold the bodies so only the family draws from the stream
+		// [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 skips a held +0x1C4].
+		world.registry.get(h)->motor_suspended = true;
+	}
+	world.registry.get(pa)->equipped_adm_index = 0x20;
+	world.registry.get(pb)->equipped_adm_index = 0xFF; // no ADM row
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &ta, ns::TransportMode::Client, pa, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			8, inmatch::NapiNPConnection::kTypeServerSide, &tb, ns::TransportMode::Client, pb, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 2;
+	world.match.upsert_player({pa, 1, "A"});
+	world.match.upsert_player({pb, 1, "B"});
+	world.prng16_state = 1;
+	ctx.integrity_entity_family_next = false;
+	const auto requests = [](ns::UdpSessionTransport &t, uint8_t tag) {
+		std::vector<std::vector<uint8_t>> out;
+		for (const ns::Datagram &d : drain(t))
+			if (d.tag == tag) out.push_back(d.body);
+		return out;
+	};
+	// PRNG_Next16 from state 1: s = rol4(s + rol11(s)) ^ 1.
+	const auto state_after = [](int draws) {
+		uint32_t s = 1;
+		for (int i = 0; i < draws; ++i) {
+			const uint32_t sum = s + ((s << 11) | (s >> 21));
+			s = ((sum << 4) | (sum >> 28)) ^ 1u;
+		}
+		return s;
+	};
+	ctx.scoreboard_broadcast_timer = 0x136u;
+	inmatch::Server_TickUpdate(ctx);
+	const auto a31 = requests(ta, s2c::LOADOUT_CRC_REQ);
+	const auto b31 = requests(tb, s2c::LOADOUT_CRC_REQ);
+	if (!expect(a31.size() == 1 && a31[0] == std::vector<uint8_t>({0x1A, 0x00, 0x00}) &&
+	                    b31.empty() && world.prng16_state == state_after(1),
+	            "a 0x31 boundary draws once for the one resolvable row and sends 0"))
+		return false;
+	ctx.scoreboard_broadcast_timer = 0x136u;
+	inmatch::Server_TickUpdate(ctx);
+	const auto a30 = requests(ta, s2c::ENTITY_CHECKSUM_REQ);
+	const auto b30 = requests(tb, s2c::ENTITY_CHECKSUM_REQ);
+	return expect(a30.size() == 1 && b30.size() == 1 &&
+	                      a30[0] == std::vector<uint8_t>({0xFF, 0x00, 0x00}) &&
+	                      b30[0] == a30[0] && world.prng16_state == state_after(3),
+	              "the next boundary's 0x30 to both peers draws twice");
+}
+
 // The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
 // every pass, once, whether or not its record changed and whatever the
 // recipient's state; the 0x6E goes, once, to a slot whose body's dead bit or
@@ -3177,6 +3253,7 @@ int main() {
 	ok = check_armory_reuse_cooldown() && ok;
 	ok = check_model_page_cursor_wraps_at_the_list_count() && ok;
 	ok = check_quartet_skips_a_spectator_slot() && ok;
+	ok = check_integrity_family_draws_once_per_send() && ok;
 	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;

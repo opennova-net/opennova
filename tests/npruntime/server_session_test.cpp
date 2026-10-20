@@ -3005,14 +3005,29 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 		std::vector<uint8_t> body;
 		bool reliable = true;
 	};
+	// Each integrity request spends one draw of the shared stream (D-NET-700).
+	int family_sends = 0;
 	auto drain = [&]() {
 		std::vector<Emitted> emitted;
 		opennova::replication::Datagram datagram;
 		while (transport.pop_outbound(datagram)) {
+			if (datagram.tag == opennova::s2c::ENTITY_CHECKSUM_REQ ||
+					datagram.tag == opennova::s2c::LOADOUT_CRC_REQ)
+				++family_sends;
 			emitted.push_back(
 					{datagram.tag, std::move(datagram.body), datagram.reliable});
 		}
 		return emitted;
+	};
+	// PRNG_Next16 from the fixture's state 1: s = rol4(s + rol11(s)) ^ 1, the
+	// low word [orig: PRNG_Next16 @0x6130A0].
+	auto prng16_draw = [](int draws) {
+		uint32_t state = 1;
+		for (int i = 0; i < draws; ++i) {
+			const uint32_t sum = state + ((state << 11) | (state >> 21));
+			state = ((sum << 4) | (sum >> 28)) ^ 1u;
+		}
+		return static_cast<uint16_t>(state);
 	};
 	auto find = [](const std::vector<Emitted> &messages, uint8_t tag)
 			-> const Emitted * {
@@ -3174,10 +3189,24 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	const Emitted *model_page = find(
 			first_control, opennova::s2c::LOADED_MODEL_PAGE_REQUEST);
 	// Retail lazily initializes one retained per-player seed with PRNG_Next16;
-	// 0x3D5D was one captured session's value, not a protocol constant.
+	// 0x3D5D was one captured session's value, not a protocol constant. Every
+	// integrity request before it spent one draw of the same stream
+	// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x5085AE / @0x50861B].
+	// The quartet runs at the tick head, so a family request of the same tick
+	// draws after the seed.
+	const int family_this_tick = static_cast<int>(std::count_if(
+			first_control.begin(), first_control.end(), [](const Emitted &m) {
+				return m.tag == opennova::s2c::ENTITY_CHECKSUM_REQ ||
+						m.tag == opennova::s2c::LOADOUT_CRC_REQ;
+			}));
+	const uint16_t expected_seed = prng16_draw(family_sends - family_this_tick + 1);
+	if (!expect(family_sends - family_this_tick > 0,
+	            "integrity requests went ahead of the first quartet"))
+		return false;
 	if (!expect(charattr != nullptr && charattr->body.size() == 4 &&
-	                    u32le(charattr->body) == 0x8011u &&
-	                    world.prng16_state == 0x8011u &&
+	                    u32le(charattr->body) == expected_seed &&
+	                    static_cast<uint16_t>(world.prng16_state) ==
+	                            prng16_draw(family_sends + 1) &&
 	                    charattr->reliable &&
 	                    input_state != nullptr &&
 	                    input_state->body == std::vector<uint8_t>({0x00, 0x00}) &&
@@ -3191,7 +3220,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	            "call 1,861 emits reliable 0x39/0x43 and transient 0x42/0x68"))
 		return false;
 	const uint32_t retained_seed = u32le(charattr->body);
-	if (!expect(world.next_prng16() == 0x8111u,
+	if (!expect(world.next_prng16() == prng16_draw(family_sends + 2),
 	            "the next throwable-bounce draw continues the control 0x39 stream"))
 		return false;
 

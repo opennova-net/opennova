@@ -590,10 +590,17 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
 // boundary the 0x16 rebuilt and broadcast to every active slot (no rows past
 // the round end, D-NET-635), then the integrity family to the state-6 slots
 // with a live entity (none past the round end, all in state 7), its toggle
-// flipping each boundary even when the walk sends nothing.
+// flipping each boundary even when the walk sends nothing. Each send fills the
+// slot's request word (+0x15F40 for the 0x30, +0x15F44 for the 0x31) from the
+// shared PRNG_Next16 stream when it is zero and zeroes it again before the
+// request carries it, so every send spends one draw and carries 0; the reply
+// handlers only read the word (the XOR salt, 0).
 // [orig: Server_TickUpdate @0x51D8F9..0x51D917 - the 0x16 @0x51D90D, the
 //  family @0x51D912; Server_BroadcastWeaponSlotStateToPlayers @0x508540 (state 6
-//  @0x508584, the toggle @0x50868E); Server_ProcessRoundEnd @0x51685E]
+//  @0x508584; the 0x30 draw @0x5085A6..0x5085B9, its word @0x5085CB..0x5085E1;
+//  the 0x31's ADM row @0x508605..0x508611, its draw @0x508613..0x508626 and word
+//  @0x508638..0x50864D; the toggle @0x50868E); Server_ValidateWeaponCRC
+//  @0x501F70 reads +89920 (@0x501FD6); Server_ProcessRoundEnd @0x51685E]
 void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 	++ctx.scoreboard_broadcast_timer;
 	if (ctx.scoreboard_broadcast_timer <= 0x136u) return;
@@ -611,21 +618,31 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		const world::Entity *player = integrity_player(conn, world);
 		if (player == nullptr) continue;
+		SessionReplyState &reply = conn.reply;
 		if (entity_integrity_family) {
-			conn.link.transport->host_send(
-					s2c::ENTITY_CHECKSUM_REQ, {0xFF, 0x00, 0x00},
+			if (reply.integrity_weapon_crc_salt == 0)
+				reply.integrity_weapon_crc_salt = next_maintenance_prng16(world);
+			reply.integrity_weapon_crc_salt = 0;
+			const uint32_t word = reply.integrity_weapon_crc_salt;
+			conn.link.transport->host_send(s2c::ENTITY_CHECKSUM_REQ,
+					{0xFF, static_cast<uint8_t>(word), static_cast<uint8_t>(word >> 8)},
 					/*reliable=*/false);
 			continue;
 		}
 		// AdmDef_GetEntryByIndex(*(u8 *)(entity+688)), then row =
 		// adm_entry[1] [orig: @0x508540]. An unresolved equipped ADM
-		// skips the request exactly as retail does; no fallback row exists.
+		// skips the request (and its draw) exactly as retail does; no
+		// fallback row exists.
 		const world::WeaponTableEntry *adm =
 				world.tables.weapons.by_index(player->equipped_adm_index);
 		if (adm != nullptr && adm->ammo_index >= 0 && adm->ammo_index <= 0xFF) {
-			conn.link.transport->host_send(
-					s2c::LOADOUT_CRC_REQ,
-					{static_cast<uint8_t>(adm->ammo_index), 0x00, 0x00},
+			if (reply.integrity_ammo_crc_salt == 0)
+				reply.integrity_ammo_crc_salt = next_maintenance_prng16(world);
+			reply.integrity_ammo_crc_salt = 0;
+			const uint32_t word = reply.integrity_ammo_crc_salt;
+			conn.link.transport->host_send(s2c::LOADOUT_CRC_REQ,
+					{static_cast<uint8_t>(adm->ammo_index), static_cast<uint8_t>(word),
+							static_cast<uint8_t>(word >> 8)},
 					/*reliable=*/false);
 		}
 	}
