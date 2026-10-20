@@ -1,13 +1,25 @@
 extends GutTest
 
+# A mounted gunner's avatar root follows the live `Usegun` frame of an
+# articulated emplacement: the seat point rides the gun's yawing cradle, so the
+# look input that turns the gun carries the seated body with it, within a
+# millimetre, and the body's basis turns with the cradle's live yaw. The gun is
+# the minted tripod (fixtures/gut/tripod_usegun_cradle.3di), shaped after the
+# retail 00TRc witness this replaced, E50triB (the 50cal on 360 tripod, item
+# 101881): its Usegun USRP row is owned by the articulated cradle (part 1).
 
-const MISSION := "00TRc.bms"
-const GUN_BMS_ID := 88
-const GUN_ITEM_ID := 101881
-const GUN_GRAPHIC := "E50triB"
-# The USE scan admits a seat only inside the player's view cone (just under
-# 90 deg standing); the spawn looks at the gun before pressing USE.
 const MountLook := preload("res://tests/support/mount_look.gd")
+
+const GUN_POSITION := Vector3(2.2, 0.4, 0.0)
+const GUN_ROTATION := Vector3(0.0, 20.0, 0.0)
+
+var _dir := ""
+
+
+func after_each() -> void:
+	if not _dir.is_empty():
+		TestFs.remove_dir_recursive(_dir)
+	_dir = ""
 
 
 func _mission_type_ids(mission: MissionData) -> PackedInt32Array:
@@ -25,32 +37,23 @@ func _mission_type_ids(mission: MissionData) -> PackedInt32Array:
 	return type_ids
 
 
-func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
-	var install_dir := RetailData.install()
-	if install_dir.is_empty():
-		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the 00TRc E50triB witness")
-		return
-
-	var root := ResourceRoot.new()
-	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
-	var mission := MissionData.new()
-	assert_eq(mission.open_from_resource_root(root, MISSION), OK)
+func test_mounted_avatar_root_follows_live_usegun_frame() -> void:
+	_dir = VehicleFixture.stage(self, "usegun_alignment")
+	var root := VehicleFixture.root_over(self, _dir)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
-
-	var gun: EntityRef = null
-	for raw in mission.get_all_entity_refs():
-		var entity: EntityRef = raw
-		if entity.bms_id == GUN_BMS_ID:
-			gun = entity
-			break
-	assert_not_null(gun, "00TRc contains the near-spawn .50 cal")
-	assert_eq(gun.item_id, GUN_ITEM_ID)
-	assert_eq(String(item_db.get_graphic(GUN_ITEM_ID)), GUN_GRAPHIC)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_not_null(mission.add_entity(MissionData.KIND_MARKER, 106001, Vector3.ZERO, Vector3.ZERO))
+	var gun: EntityRef = mission.add_entity(MissionData.KIND_ITEM, VehicleFixture.TRIPOD,
+			GUN_POSITION, GUN_ROTATION)
+	assert_not_null(gun)
+	assert_eq(gun.item_id, VehicleFixture.TRIPOD)
+	assert_eq(String(item_db.get_graphic(VehicleFixture.TRIPOD)), "tripod")
 
 	var data := ObjectData.new()
-	assert_eq(data.open_from_resource_root(root, GUN_GRAPHIC + ".3di"), OK)
-	# Build the expected frame from the retail USRP row directly. The production
+	assert_eq(data.open_from_resource_root(root, "tripod.3di"), OK)
+	# Build the expected frame from the model's USRP row directly. The production
 	# seat-spec/provider path below is only the system under test, never the oracle.
 	var userpoint_index := -1
 	for index in range(data.get_user_point_count()):
@@ -58,13 +61,12 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 		if candidate.name.nocasecmp_to("Usegun") == 0:
 			userpoint_index = index
 			break
-	assert_gte(userpoint_index, 0, "E50triB carries its retail Usegun USRP row")
+	assert_gte(userpoint_index, 0, "the tripod carries its Usegun USRP row")
 	if userpoint_index < 0:
 		return
 	var userpoint := data.get_user_point_info(userpoint_index)
 	var part_index := userpoint.subobject
-	assert_eq(part_index, 1, "E50triB Usegun is owned by the articulated gun part")
-
+	assert_eq(part_index, 1, "the tripod's Usegun is owned by the articulated cradle part")
 
 	# S16: the seat/mount table is the native extraction over items.def rows +
 	# .3di userpoints — the asset root must be installed before the seed walk.
@@ -81,7 +83,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var seat: EntityCardSeat = seats[0]
 	assert_eq(seat.get_source_name().to_lower(), "usegun")
 	assert_eq(seat.get_bone_index() - 1, userpoint_index,
-			"the runtime selected the exact retail Usegun row")
+			"the runtime selected the exact Usegun row")
 
 	assert_eq(sim.spawn_local_player_at_start(), 1)
 	sim.resolve_item_traits(item_db)
@@ -95,7 +97,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	sim.drain_local_player_weapon_events()
 
 	MountLook.face(self, sim, gun.position)
-	assert_true(sim.local_player_toggle_mount(), "the 00TRc spawn can mount E50triB")
+	assert_true(sim.local_player_toggle_mount(), "the spawn can mount the tripod")
 	sim.step()
 	sim.set_local_player_mouse(511, false)
 	sim.add_local_player_look(300.0, 0.0)
@@ -103,7 +105,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var weapon_state := sim.get_local_player_weapon_state()
 	var yaw_control := weapon_state.emplaced_gun_yaw
 	var pitch_control := weapon_state.emplaced_gun_pitch
-	assert_ne(yaw_control, 0, "look input drives E50triB's EWEAP_GUNYAW")
+	assert_ne(yaw_control, 0, "look input drives the tripod's EWEAP_GUNYAW")
 
 	var rest_parts: Dictionary = data.evaluate_panm(0, 0, {})
 	var live_parts: Dictionary = data.evaluate_panm(0, 0, {
@@ -112,6 +114,8 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	})
 	assert_true(rest_parts.has(part_index))
 	assert_true(live_parts.has(part_index))
+	assert_false((live_parts[part_index] as Transform3D).is_equal_approx(rest_parts[part_index]),
+			"the live yaw moves the seat's part: a static seat would prove nothing")
 	var authored_model_position: Vector3 = userpoint.position
 	var point_in_part := (rest_parts[part_index] as Transform3D).affine_inverse() \
 			* authored_model_position
@@ -122,7 +126,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var avatar_root_world := sim.get_local_player_position()
 	var drift := avatar_root_world.distance_to(live_usegun_world)
 	assert_lt(drift, 0.001,
-			"mounted avatar root %s must follow live E50triB Usegun %s (drift %.6f m)" % [
+			"mounted avatar root %s must follow the live Usegun %s (drift %.6f m)" % [
 				str(avatar_root_world), str(live_usegun_world), drift])
 	var overlay := sim.get_local_player_aim_overlay()
 	assert_true(overlay != null,
@@ -134,5 +138,5 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var basis_error_deg := rad_to_deg(expected_body_basis.get_rotation_quaternion().angle_to(
 			actual_body_basis.get_rotation_quaternion()))
 	assert_lt(basis_error_deg, 0.51,
-			"mounted avatar body must follow E50triB's live yaw frame (error %.6f deg)" % \
+			"mounted avatar body must follow the tripod's live yaw frame (error %.6f deg)" % \
 					basis_error_deg)

@@ -2,34 +2,43 @@ extends GutTest
 
 const MountLook := preload("res://tests/support/mount_look.gd")
 
-# Optional installed-data integration test over InstalledCombatHud: the
-# shipped Javelin/Stinger/mortar HUD transitions (sight cards, fonts, the
-# mortar's impact map) through the real presenter, and the tank/pilot seat
-# HUD. The viewport pixel leg of the deploy is the windowed script
-# tests/retail/windowed/hud_installed_assets_pixels_test.gd.
-var _rig: InstalledCombatHud
+# The combat HUD over authored launcher, mortar and vehicle data through the
+# real presenter and overlay: the Javelin / Stinger / mortar deploy transitions
+# (sight cards, fonts, the mortar's impact map) and the tank / pilot seat HUD
+# (the control seat's gear label, the pilot's AGL ladder, both gone on
+# dismount). The rows are VehicleFixture's and CombatHudRig's, authored
+# after the shipped weapon.def / items.def / hudpos.def rows the retail
+# witnesses these replaced read (Escalation's WPN_JAVELIN / WPN_STINGER /
+# WPN_MORTAR, the M1A1, T80 and Blackhawk); the sight art is minted at test
+# time. The viewport pixel leg is the windowed
+# tests/windowed/hud_installed_assets_pixels_test.gd.
+var _rig: CombatHudRig
+var _dirs: Array[String] = []
 
 
 func after_each() -> void:
 	if _rig != null:
 		_rig.release()
 	_rig = null
+	for dir in _dirs:
+		TestFs.remove_dir_recursive(dir)
+	_dirs.clear()
 
 
-func test_installed_launcher_and_mortar_hud_transitions() -> void:
-	_rig = InstalledCombatHud.boot(self)
+func test_launcher_and_mortar_hud_transitions() -> void:
+	_rig = CombatHudRig.boot(self)
 	if _rig == null:
 		return
-	for name: String in InstalledCombatHud.NAMES:
+	for name: String in CombatHudRig.NAMES:
 		_rig.deploy(self, name)
 		var weapon := _rig.weapons.get_weapon(_rig.weapons.find_weapon(name))
 		assert_eq(_rig.card.row_count(), weapon.get_sights().size())
 		for row in _rig.card.get_children():
-			assert_not_null(row.tex, name + " resolves its installed sight texture")
+			assert_not_null(row.tex, name + " resolves its sight texture")
 		var stats := _rig.hud.get_draw_list_stats()
-		assert_gt(stats.glyphs, 0, "installed HUD fonts render")
+		assert_gt(stats.glyphs, 0, "the HUD fonts render")
 		assert_false((_rig.hud.get_node("InsetScope") as HudInsetScope).is_scope_active(),
-				"these installed weapons do not author Scoped + Inset")
+				"these weapons do not author Scoped + Inset")
 		if name == "WPN_MORTAR":
 			assert_true(stats.big_map_visible, "deploying the mortar opens its impact map")
 			# The impact preview's rings are anti-aliased band sprites (nine for
@@ -47,17 +56,17 @@ func test_installed_launcher_and_mortar_hud_transitions() -> void:
 				"lowering the mortar closes the map")
 
 
-func test_installed_tank_and_pilot_hud_entry_exit() -> void:
-	var art := InstalledCombatHud.combat_root(self)
-	if art == null:
-		return
+func test_tank_and_pilot_hud_entry_exit() -> void:
+	var dir := VehicleFixture.stage(self, "hud_seats")
+	_dirs.append(dir)
+	var art := VehicleFixture.root_over(self, dir)
 	var items := ItemDatabase.new()
 	assert_eq(items.load_from_resource_root(art, "items.def"), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(art, "weapon.def"), OK)
 	var layout := HudPos.new()
 	assert_eq(layout.load_from_resource_root(art, "hudpos.def"), OK)
-	for item_id: int in [100164, 100165, 102010]:
+	for item_id: int in [VehicleFixture.TANK, VehicleFixture.TANK_T80, VehicleFixture.BLACKHAWK]:
 		var mission := MissionData.new()
 		assert_eq(mission.create_default(), OK)
 		var vehicle_position := Vector3(0, 0, 30)
@@ -98,7 +107,7 @@ func test_installed_tank_and_pilot_hud_entry_exit() -> void:
 		hud.set_combat_state(view, Transform3D.IDENTITY, Projection.IDENTITY, false, null, "E")
 		var mounted_stats := hud.get_draw_list_stats()
 		assert_gt(mounted_stats.glyphs, 0, "the control seat displays its gear label")
-		if item_id == 102010:
+		if item_id == VehicleFixture.BLACKHAWK:
 			assert_gte(mounted_stats.lines, 9, "the pilot sees the AGL ladder and readout connectors")
 		assert_true(sim.local_player_toggle_mount())
 		sim.step()

@@ -1,10 +1,16 @@
 extends GutTest
 
-## Installed M1A1 and T80: driver, turret and roof gun through the real seat
+## The M1A1 and T80 shapes: driver, turret and roof gun through the real seat
 ## requests; the mouse-wheel event router and authored HUD/weapon definitions.
+## The tanks are VehicleFixture's (the minted tank_turret hull, its turret and
+## roof-gun EWeap children, the cannons' shipped optics `scope_max_mag 10 2`)
+## placed beside the minimal world's spawn; the retail witness this replaced
+## placed the installed M1A1 and T80 on the 07TR training ground.
 const MountLook := preload("res://tests/support/mount_look.gd")
+const TANK_POSITION := Vector2(10.0, 4.0)
 var _presenter: LocalPlayerPresenter
 var _controls: ControlsModel
+var _dir := ""
 
 
 func after_each() -> void:
@@ -12,6 +18,9 @@ func after_each() -> void:
 		_presenter.teardown()
 	_presenter = null
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	if not _dir.is_empty():
+		TestFs.remove_dir_recursive(_dir)
+	_dir = ""
 
 
 func _advance(sim: Simulation, count := 90) -> void:
@@ -62,32 +71,21 @@ func _zoom(sim: Simulation, def: WeaponDef) -> void:
 	_controls.load_blob(original)
 
 
-func test_installed_tanks_seats_optics_and_hud() -> void:
-	if RetailData.install().is_empty():
-		pending("OPENNOVA_JO_DIR is required")
-		return
-	var root := RetailData.mount_tank_training()
-	assert_not_null(root, "the installed base or an expansion must serve 07TR.bms")
-	if root == null:
-		return
+func test_tanks_seats_optics_and_hud() -> void:
+	_dir = VehicleFixture.stage_world(self, "tank_parity")
+	var terrain := VehicleFixture.terrain(self, _dir)
+	var ground := VehicleFixture.ground_z(terrain, TANK_POSITION.x, TANK_POSITION.y)
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
-	gut.p("tank parity mount: " + root.get_expansion())
-	for item_id in [100164, 100165]:
-		var mission := MissionData.new()
-		assert_eq(mission.open_from_resource_root(root, "07TR.bms"), OK)
-		var placed_id := -1
-		for record: EntityRef in mission.get_all_entity_refs():
-			if record.item_id == 100164:
-				var added := mission.add_entity(MissionData.KIND_ITEM, item_id,
-						record.position + Vector3(0, 40, 0), mission.get_entity_rotation(record.kind, record.index))
-				placed_id = added.bms_id
-				break
+	assert_eq(weapons.load(_dir.path_join("weapon.def")), OK)
+	for item_id in [VehicleFixture.TANK, VehicleFixture.TANK_T80]:
+		var ids := []
+		var world := VehicleFixture.boot(self, _dir, [{
+			"item": item_id,
+			"pos": Vector3(TANK_POSITION.x, TANK_POSITION.y, ground),
+			"yaw": -119.0,
+		}], ids)
+		var placed_id: int = ids[0]
 		assert_gte(placed_id, 0)
-		var world := WorldFixture.make_world(self)
-		world.set_resource_root(root)
-		assert_eq(world.load_mission_data(mission, "07TR.bms"), OK)
-		world.set_process(false)
 		var camera := Camera3D.new()
 		add_child_autofree(camera)
 		camera.make_current()
@@ -126,9 +124,15 @@ func test_installed_tanks_seats_optics_and_hud() -> void:
 			gut.p("tank %d seat %d: %s" % [item_id, panel_seat, name])
 			if panel_seat > 0:
 				assert_ne(name, "")
+				# The seats' guns, as the retail run named them: the turret's cannon,
+				# then the roof .50 cal.
+				assert_eq(name, (["WPN_M1TURRET", "WPN_T80TURRET"][0 if item_id == VehicleFixture.TANK else 1]
+						if panel_seat == 1 else "WPN_EMPLCD50"))
 				assert_eq(world.local_player_hud_weapon_def().weapon_name, name)
 				var def := weapons.get_weapon(weapons.find_weapon(name))
 				assert_not_null(def)
+				if def != null and panel_seat == 1:
+					assert_gt(def.scope_max_mag, def.scope_min_mag, "the cannon's optic zooms")
 				if def != null:
 					_zoom(sim, def)
 		assert_true(sim.local_player_toggle_mount(), "dismount the roof gun")

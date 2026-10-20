@@ -140,6 +140,17 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 
 ## Other minted sets
 
+- `gut/*.3di` — `tests/fixtures/gut_vehicle_gen.cpp`: the GUT vehicle model set
+  (the same builder and parity writer as `threedi/synth`), standing in for the retail
+  mounts, door guns, carriers and tanks the GUT vehicle suites once crewed:
+  `tripod_usegun_cradle` (E50triB: `Usegun` on the yawing cradle), `minigun` (a
+  `WEAP_SPIN` barrel, `MFlash01` at its end), `fifty` (H50cal), `cannon` (M1trret),
+  `helo` (Dblkhwk1 / DAH62: `HELO_ROTOR` / `HELO_TAILROTOR`, `ctrlx05`, two `sitex`
+  points, the `Ewep01` / `Ewep02` door anchors), `gunboat` (Dmrk51: four anchors, two
+  off the hull plane) and `tank_turret` (Dm1a1: `ewep01` on the hull, `ewep02` on the
+  `VEHICLE_GUNYAW` ring). The guns pitch with the shipped sign (a positive
+  `EWEAP_GUNPITCH` dips the muzzle). Their item, weapon, ammo, HUD and AI rows are
+  authored in `godot/tests/support/vehicle_fixture.gd`.
 - `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp`.
 - `fnt/synth_*.fnt`, `cbin/synth_nlist*.kda`, `cbin/credits_image.png`,
   `cbin/particle_dot.tga` — `tests/fixtures/minimal_fnt_gen.cpp`,

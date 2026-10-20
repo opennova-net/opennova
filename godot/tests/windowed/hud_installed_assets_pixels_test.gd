@@ -1,13 +1,11 @@
 extends GutTest
 
-# The viewport pixel leg of the installed launcher/mortar HUD deploy
-# (tests/retail/hud_installed_assets_test.gd over InstalledCombatHud): at two
-# window sizes the raised HUD changes visible pixels over the background.
-# Needs OPENNOVA_JO_DIR with Javelin (Escalation or mod data) and a windowed
-# Forward+ run (`scripts/test_godot.sh --suite retail --windowed`: a
-# SubViewport readback).
+# The viewport pixel leg of the launcher/mortar HUD deploy
+# (tests/hud_installed_assets_test.gd over CombatHudRig): at two window sizes
+# the raised HUD changes visible pixels over the background. Needs a windowed
+# Forward+ run (`scripts/test_godot.sh --windowed`: a SubViewport readback).
 
-var _rig: InstalledCombatHud
+var _rig: CombatHudRig
 
 
 func after_each() -> void:
@@ -16,14 +14,14 @@ func after_each() -> void:
 	_rig = null
 
 
-func test_installed_launcher_and_mortar_hud_draws_visible_pixels() -> void:
+func test_launcher_and_mortar_hud_draws_visible_pixels() -> void:
 	if RenderingServer.get_rendering_device() == null:
 		pending("viewport readback needs a windowed Forward+ run")
 		return
-	_rig = InstalledCombatHud.boot(self)
+	_rig = CombatHudRig.boot(self)
 	if _rig == null:
 		return
-	for name: String in InstalledCombatHud.NAMES:
+	for name: String in CombatHudRig.NAMES:
 		_rig.deploy(self, name)
 		for size: Vector2i in [Vector2i(1024, 768), Vector2i(1920, 1080)]:
 			_rig.resize(size)

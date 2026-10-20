@@ -1,12 +1,17 @@
 extends GutTest
 
-# Drive the authored 03TR mounts through the same input/world/view path as
-# the shell. Camera direction is measured after the real mounted pose fold.
-const MISSION := "03TR.bms"
-const SPAWN_ATTACK_VEHICLE := 32
+# Drive authored mounts through the same input/world/view path as the shell.
+# Camera direction is measured after the real mounted pose fold. The mounts
+# are VehicleFixture's, placed beside the minimal world's spawn: the attack
+# truck with its .50 cal, the Little Bird (an EWeap carrier its pilot fires),
+# the Blackhawk with its two door miniguns (the minted minigun: a WEAP_SPIN
+# barrel, MFlash01 at its end, the Effect_MiniMuz fire action). The retail
+# witness these replaced crewed the same mounts in the 03TR training mission.
 
 var _presenter: LocalPlayerPresenter
 var _camera: Camera3D
+var _dir := ""
+var _vehicles := {}
 
 
 func after_each() -> void:
@@ -14,6 +19,11 @@ func after_each() -> void:
 		_presenter.teardown()
 	_presenter = null
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	if not _dir.is_empty():
+		TestFs.remove_dir_recursive(_dir)
+	_dir = ""
+	_vehicles.clear()
+	_flight.clear()
 
 
 # One shell frame: the input sample, then the world tick. The tick's local-view
@@ -28,18 +38,130 @@ func _frame(world: GameWorld, camera: Camera3D, ticks: int = 1) -> void:
 		world.tick(camera.global_position, camera.global_transform, Simulation.tick_dt(), frame_input)
 
 
+# The mounts' placements beside the spawn (mission x, y, yaw), each on the
+# ground of the Tmap relief.
+const PLACEMENTS := {
+	"truck": [VehicleFixture.ATTACK_TRUCK, Vector2(14.0, 6.0), -90.0],
+	"little_bird": [VehicleFixture.LITTLE_BIRD, Vector2(-16.0, 10.0), 0.0],
+	"blackhawk": [VehicleFixture.BLACKHAWK, Vector2(-14.0, -14.0), 90.0],
+}
+
+
 func _load_world() -> GameWorld:
-	var installed := RetailData.install()
-	if installed.is_empty():
-		pending("OPENNOVA_JO_DIR required for the authored 03TR mounted camera")
-		return null
-	var art := ResourceRoot.new()
-	assert_eq(art.mount_runtime(installed, ""), OK)
+	_dir = VehicleFixture.stage_world(self, "mounted_view")
+	var terrain := VehicleFixture.terrain(self, _dir)
+	var rows := []
+	for key: String in PLACEMENTS:
+		var p: Array = PLACEMENTS[key]
+		var at: Vector2 = p[1]
+		rows.append({"item": p[0], "pos": Vector3(at.x, at.y,
+				VehicleFixture.ground_z(terrain, at.x, at.y)), "yaw": p[2]})
+	var ids := []
+	var world := VehicleFixture.boot(self, _dir, rows, ids)
+	var keys := PLACEMENTS.keys()
+	for i in keys.size():
+		_vehicles[keys[i]] = ids[i]
+	var camera := Camera3D.new()
+	_camera = camera
+	add_child_autofree(camera)
+	camera.make_current()
+	_presenter = LocalPlayerPresenter.new()
+	add_child_autofree(_presenter)
+	_presenter.setup(world, camera, null, ControlsModel.new())
+	_presenter.set_input_override(PlayerMoveIntent.new())
+	await get_tree().process_frame
+	return world
+
+
+# The training flight (the 03TR objective helicopter's authoring, minted): the
+# Blackhawk with two door miniguns, two riders whose AI runs the board order
+# (waypoint_id 125, "Goto SSN and board", at the helicopter: one takes the
+# pilot's seat, the other the free minigun), and one event: the local
+# player crewing a minigun of the helicopter (PLYRONGUN) redirects its group
+# onto the route and sets its patrol speed, which each stop raises (03TR's
+# events 44..47: RedirectGroupTo + ChangeGroupAI PATROLSPEED, GroupAtWaypoint). The route's stops are waypoint
+# markers (type 6005) on path 1, the second off the first leg's heading so the
+# flight banks. The helicopter's own profile is a follow-waypoint HELO one at
+# the shipped H_BHawk.aip's values.
+const FLIGHT_HELI_AT := Vector2(-14.0, -14.0)
+const FLIGHT_SETTLE_FRAMES := 1124
+const FLIGHT_MEASURE_FRAMES := 400
+# The patrol speed the takeoff event sets and each stop then raises: 03TR's
+# events 44..47 (5, then 10, 20 and 60 at its route's nodes 1..3).
+const FLIGHT_SPEEDS := [5, 10, 20, 60]
+const FLIGHT_GROUP := 3
+const FLIGHT_PATH := 1
+# The helicopter faces mission +x (yaw 90); the first leg runs straight ahead,
+# the second turns off it.
+const FLIGHT_ROUTE := [Vector3(46.0, -14.0, 30.0), Vector3(100.0, -60.0, 40.0),
+		Vector3(180.0, -70.0, 40.0), Vector3(240.0, 10.0, 40.0)]
+const FLIGHT_PROFILE := """type HELO
+default_state HELO_FOLLOWWP
+combat_flags FOLLOW_WP COUNTER
+patrol_speed 70
+patrol_altitude 25
+patrol_climb 5
+combat_speed 90
+combat_altitude 40
+combat_climb 10
+flight_skill 4
+turn_rate 40
+accel_time 10
+"""
+
+var _flight := {}
+
+
+func _load_flight_world() -> GameWorld:
+	_dir = VehicleFixture.stage_world(self, "mounted_flight")
+	VehicleFixture.stage_infantry_clips(_dir)
+	assert_eq(DirAccess.copy_absolute(ProjectSettings.globalize_path(
+			VehicleFixture.SYNTH_MODELS + "/person.3di"), _dir.path_join("US01.3di")), OK)
+	WorldFixture.write_file(_dir.path_join("hbhawk.aip"), TestFs.crlf(FLIGHT_PROFILE))
+	var terrain := VehicleFixture.terrain(self, _dir)
+	var root := VehicleFixture.root_over(self, _dir)
 	var mission := MissionData.new()
-	assert_eq(mission.open_from_resource_root(art, MISSION), OK)
+	assert_eq(mission.open_from_resource_root(root, WorldFixture.MINIMAL_MISSION), OK)
+	var ground := VehicleFixture.ground_z(terrain, FLIGHT_HELI_AT.x, FLIGHT_HELI_AT.y)
+	var heli := mission.add_entity(MissionData.KIND_ITEM, VehicleFixture.BLACKHAWK,
+			Vector3(FLIGHT_HELI_AT.x, FLIGHT_HELI_AT.y, ground), Vector3(0, 90, 0))
+	assert_true(mission.set_entity_property_int(MissionData.KIND_ITEM, heli.index, "group", FLIGHT_GROUP))
+	assert_true(mission.set_entity_property_string(MissionData.KIND_ITEM, heli.index, "name2", "hbhawk"))
+	for i in FLIGHT_ROUTE.size():
+		var stop: Vector3 = FLIGHT_ROUTE[i]
+		stop.z += VehicleFixture.ground_z(terrain, stop.x, stop.y)
+		var marker := mission.add_entity(MissionData.KIND_MARKER, 106005, stop, Vector3.ZERO)
+		assert_true(mission.set_entity_property_int(MissionData.KIND_MARKER, marker.index, "waypoint_id", FLIGHT_PATH))
+		assert_true(mission.set_entity_property_int(MissionData.KIND_MARKER, marker.index, "wp_number", i + 1))
+	# A marker removal lays every path out again from its waypoint markers, as
+	# the original editor's writer does (bms_edit lay_out_waypoint_path, D-MIS-6).
+	var scratch := mission.add_entity(MissionData.KIND_MARKER, 106005, Vector3.ZERO, Vector3.ZERO)
+	assert_true(mission.remove_entity(MissionData.KIND_MARKER, scratch.index))
+	var riders := []
+	for offset in [Vector3(0.5, 0.0, 0.0), Vector3(-0.5, 0.0, 0.0)]:
+		var at: Vector3 = Vector3(FLIGHT_HELI_AT.x, FLIGHT_HELI_AT.y, 0.0) + offset
+		at.z = VehicleFixture.ground_z(terrain, at.x, at.y)
+		var rider := mission.add_entity(MissionData.KIND_ORGANIC, VehicleFixture.RIDER, at, Vector3.ZERO)
+		assert_true(mission.set_entity_property_int(MissionData.KIND_ORGANIC, rider.index, "team", 1))
+		assert_true(mission.set_entity_property_int(MissionData.KIND_ORGANIC, rider.index, "waypoint_id", 125))
+		assert_true(mission.set_entity_property_int(MissionData.KIND_ORGANIC, rider.index, "wp_number", heli.bms_id))
+		riders.append(rider.bms_id)
+	var event := mission.add_event(0, 0, 0)
+	assert_true(mission.add_event_trigger(event, 7, 41, heli.bms_id), "PLYRONGUN of the helicopter")
+	assert_true(mission.add_event_action(event, 1, 0, FLIGHT_GROUP, FLIGHT_PATH, 0), "RedirectGroupTo")
+	assert_true(mission.add_event_action(event, 3, 30, FLIGHT_GROUP, FLIGHT_SPEEDS[0]),
+			"ChangeGroupAI PATROLSPEED")
+	# Each stop reached raises the patrol speed (GroupAtWaypoint -> PATROLSPEED).
+	for node in range(1, FLIGHT_SPEEDS.size()):
+		var at_stop := mission.add_event(0, 0, 0)
+		assert_true(mission.add_event_trigger(at_stop, 1, 7, FLIGHT_GROUP, FLIGHT_PATH, node))
+		assert_true(mission.add_event_action(at_stop, 3, 30, FLIGHT_GROUP, FLIGHT_SPEEDS[node]))
+	assert_eq(mission.save_as(_dir.path_join("flight.bms")), OK)
+	# The board order's think gate staggers by net id ((tick + 36 * net_id) & 15):
+	# the first rider thinks second and finds the pilot's seat taken.
+	_flight = {"heli": heli.bms_id, "gunner": riders[0], "pilot": riders[1]}
 	var world := WorldFixture.make_world(self)
-	world.set_resource_root(art)
-	assert_eq(world.load_mission_data(mission, MISSION), OK)
+	assert_eq(WorldFixture.load_mission(world, _dir, "flight.bms"), OK, "the flight mission loads")
 	world.set_process(false)
 	var camera := Camera3D.new()
 	_camera = camera
@@ -53,13 +175,13 @@ func _load_world() -> GameWorld:
 	return world
 
 
-func test_03tr_truck_50cal_mouse_up_raises_the_camera() -> void:
+func test_truck_50cal_mouse_up_raises_the_camera() -> void:
 	var world := await _load_world()
 	if world == null:
 		return
 	var camera := _camera
 	var sim := world.get_sim()
-	assert_eq(sim.debug_crew_local_player(SPAWN_ATTACK_VEHICLE), OK)
+	assert_eq(sim.debug_crew_local_player(_vehicles["truck"]), OK)
 	assert_true(sim.local_player_select_seat(1), "select the truck's 50cal gunner seat")
 	_frame(world, camera, 24)
 	var player := sim.entity_card(sim.get_local_player_wire_handle())
@@ -75,12 +197,12 @@ func test_03tr_truck_50cal_mouse_up_raises_the_camera() -> void:
 			"moving the mouse up raises the mounted view instead of lowering it")
 
 
-func test_03tr_little_bird_pilot_fires_the_carrier_weapon() -> void:
+func test_little_bird_pilot_fires_the_carrier_weapon() -> void:
 	var world := await _load_world()
 	if world == null:
 		return
 	var sim := world.get_sim()
-	assert_eq(sim.debug_crew_local_player(41), OK)
+	assert_eq(sim.debug_crew_local_player(_vehicles["little_bird"]), OK)
 	_frame(world, _camera, 96)
 	var player := sim.entity_card(sim.get_local_player_wire_handle())
 	assert_true(player.is_mounted())
@@ -91,7 +213,7 @@ func test_03tr_little_bird_pilot_fires_the_carrier_weapon() -> void:
 		frame_input.set_weapon_input(true, tick == 0, false)
 		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
 	assert_gt(sim.get_local_player_weapon_state().fired_serial, fired_before,
-			"pilot input reaches the installed carrier weapon through the real presenter")
+			"pilot input reaches the carrier weapon through the real presenter")
 	_frame(world, _camera, 96)
 	var released := sim.get_local_player_weapon_state().fired_serial
 	_frame(world, _camera, 32)
@@ -99,20 +221,21 @@ func test_03tr_little_bird_pilot_fires_the_carrier_weapon() -> void:
 			"releasing the pilot trigger stops firing")
 
 
-func test_03tr_blackhawk_passengers_and_miniguns_stay_fixed_to_the_cabin() -> void:
-	var world := await _load_world()
+func test_blackhawk_passengers_and_miniguns_stay_fixed_to_the_cabin() -> void:
+	var world := await _load_flight_world()
 	if world == null:
 		return
 	var sim := world.get_sim()
-	assert_eq(sim.debug_crew_local_player(44), OK)
+	assert_eq(sim.debug_crew_local_player(_flight["heli"]), OK)
 	assert_true(sim.local_player_select_seat(1), "select the objective helicopter minigun")
-	# Let the authored NPC boarding and engine spool-up finish. The following
-	# interval contains the first banking turn of the real training flight.
-	_frame(world, _camera, 1124)
+	# Let the riders' boarding and the engine spool-up finish; the following
+	# interval holds the takeoff, the climb and the bank onto the second leg.
+	_frame(world, _camera, FLIGHT_SETTLE_FRAMES)
 	var index := world.get_runtime().get_entity_index()
-	var heli := index.resolve_single(44)
-	var riders: Array[Node3D] = [index.resolve_single(1748), index.resolve_single(1750)]
-	for ssn in [1748, 1750]:
+	var heli := index.resolve_single(_flight["heli"])
+	var riders: Array[Node3D] = [index.resolve_single(_flight["pilot"]),
+			index.resolve_single(_flight["gunner"])]
+	for ssn in [_flight["pilot"], _flight["gunner"]]:
 		assert_true(sim.entity_card_by_net_id(ssn).is_mounted(), "NPC has boarded before measuring")
 	var gun_handle := 0
 	var snapshot := sim.get_present_snapshot()
@@ -128,6 +251,7 @@ func test_03tr_blackhawk_passengers_and_miniguns_stay_fixed_to_the_cabin() -> vo
 	if heli == null or riders.has(null):
 		return
 	var start := heli.global_position
+	var start_heading := heli.global_basis.z
 	var previous_gun_basis := heli.global_basis.inverse() * riders[2].global_basis
 	var largest_gun_angle_step := 0.0
 	var previous_camera_forward := -_camera.global_basis.z
@@ -138,7 +262,7 @@ func test_03tr_blackhawk_passengers_and_miniguns_stay_fixed_to_the_cabin() -> vo
 	for rider in riders:
 		previous.append(heli.global_transform.affine_inverse() * rider.global_position)
 		largest_steps.append(0.0)
-	for tick in 400:
+	for tick in FLIGHT_MEASURE_FRAMES:
 		_frame(world, _camera)
 		var gun_basis := heli.global_basis.inverse() * riders[2].global_basis
 		largest_gun_angle_step = maxf(largest_gun_angle_step,
@@ -155,23 +279,28 @@ func test_03tr_blackhawk_passengers_and_miniguns_stay_fixed_to_the_cabin() -> vo
 			var relative: Vector3 = heli.global_transform.affine_inverse() * riders[i].global_position
 			largest_steps[i] = maxf(largest_steps[i], relative.distance_to(previous[i]))
 			previous[i] = relative
-	gut.p("03TR flight: moved %.3f; largest cabin-relative steps %s" % [heli.global_position.distance_to(start), largest_steps])
+	var turned_deg := rad_to_deg(Vector2(start_heading.x, start_heading.z).angle_to(
+			Vector2(heli.global_basis.z.x, heli.global_basis.z.z)))
+	gut.p("training flight: moved %.3f, turned %.2f deg; largest cabin-relative steps %s" % [
+			heli.global_position.distance_to(start), turned_deg, largest_steps])
 	assert_gt(heli.global_position.distance_to(start), 1.0, "the mission flies the helicopter")
+	assert_gt(absf(turned_deg), 10.0,
+			"the interval holds the bank onto the second leg (a straight flight would prove less)")
 	for step in largest_steps:
 		assert_lt(step, 0.002, "a seated body or gun stays fixed to the moving cabin")
 	assert_lt(largest_gun_angle_step, 0.001,
 			"the minigun's rigid frame turns with the cabin without one-degree snaps")
-	gut.p("03TR camera: largest forward-vector acceleration %.6f; gun angle step %.6f" % [largest_camera_delta_change, largest_gun_angle_step])
+	gut.p("training flight camera: largest forward-vector acceleration %.6f; gun angle step %.6f" % [largest_camera_delta_change, largest_gun_angle_step])
 	assert_lt(largest_camera_delta_change, 0.005,
 			"the minigun camera follows the flight without discrete pose snaps")
 
 
-func test_03tr_minigun_barrel_rotates_while_firing() -> void:
+func test_minigun_barrel_rotates_while_firing() -> void:
 	var world := await _load_world()
 	if world == null:
 		return
 	var sim := world.get_sim()
-	assert_eq(sim.debug_crew_local_player(44), OK)
+	assert_eq(sim.debug_crew_local_player(_vehicles["blackhawk"]), OK)
 	assert_true(sim.local_player_select_seat(1))
 	_frame(world, _camera, 96)
 	var gun_handle := 0
@@ -193,7 +322,7 @@ func test_03tr_minigun_barrel_rotates_while_firing() -> void:
 				(rotated[key] as Transform3D).basis):
 			barrel_id = int(key)
 			break
-	assert_gte(barrel_id, 0, "the installed minigun authors a WEAP_SPIN barrel")
+	assert_gte(barrel_id, 0, "the minigun authors a WEAP_SPIN barrel")
 	if barrel_id < 0:
 		return
 	var barrel := parts[barrel_id] as Node3D
@@ -216,7 +345,7 @@ func test_03tr_minigun_barrel_rotates_while_firing() -> void:
 		var unspun := data.evaluate_panm(0, clock.time_ms, without_spin)[barrel_id] as Transform3D
 		greatest_turn = maxf(greatest_turn, unspun.basis.get_rotation_quaternion().angle_to(
 				barrel.transform.basis.get_rotation_quaternion()))
-	gut.p("03TR minigun barrel: greatest turn %.6f; controls %s" % [greatest_turn, gun.get_ctrl_values()])
+	gut.p("minigun barrel: greatest turn %.6f; controls %s" % [greatest_turn, gun.get_ctrl_values()])
 	assert_gt(sim.get_local_player_weapon_state().fired_serial, fired_before,
 			"the mounted gun actually fires rounds")
 	assert_gt(greatest_turn, 0.1, "the minigun barrel visibly rotates while firing")
@@ -232,12 +361,12 @@ func test_03tr_minigun_barrel_rotates_while_firing() -> void:
 			"the barrel holds its final angle after coasting down")
 
 
-func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
+func test_minigun_flash_follows_the_mounted_muzzle() -> void:
 	var world := await _load_world()
 	if world == null:
 		return
 	var sim := world.get_sim()
-	assert_eq(sim.debug_crew_local_player(44), OK)
+	assert_eq(sim.debug_crew_local_player(_vehicles["blackhawk"]), OK)
 	assert_true(sim.local_player_select_seat(1))
 	_frame(world, _camera, 96)
 	assert_true(world.local_player_viewmodel_parts().is_empty(),
@@ -275,7 +404,7 @@ func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
 				(rotated[key] as Transform3D).basis):
 			barrel = parts[key]
 			break
-	assert_not_null(barrel, "the installed model has a spinning barrel")
+	assert_not_null(barrel, "the model has a spinning barrel")
 	if barrel == null:
 		return
 	var barrel_bounds := AABB()
@@ -350,36 +479,36 @@ func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
 		assert_gt(live_particles, 0, "the same muzzle-flash group still has visible particles")
 
 
-func test_03tr_npc_minigunner_remains_attached_during_takeoff() -> void:
-	var world := await _load_world()
+func test_npc_minigunner_remains_attached_during_takeoff() -> void:
+	var world := await _load_flight_world()
 	if world == null:
 		return
 	var sim := world.get_sim()
-	assert_eq(sim.debug_crew_local_player(44), OK)
+	assert_eq(sim.debug_crew_local_player(_flight["heli"]), OK)
 	assert_true(sim.local_player_select_seat(1), "crew the minigun that starts the flight objective")
 	_frame(world, _camera, 500)
-	var gunner := sim.entity_card_by_net_id(1750)
+	var gunner := sim.entity_card_by_net_id(_flight["gunner"])
 	assert_true(gunner.is_mounted(), "the NPC boards the other authored minigun")
 	assert_eq(gunner.get_mount_type(), 3)
 	if not gunner.is_mounted():
 		return
-	var start := sim.entity_card_by_net_id(44).get_mission_position()
+	var start := sim.entity_card_by_net_id(_flight["heli"]).get_mission_position()
 	var lost_seat := false
 	var max_distance := 0.0
 	# Eighty seconds covers takeoff, the first bank and sustained flight.
 	for tick in 5000:
 		_frame(world, _camera)
-		gunner = sim.entity_card_by_net_id(1750)
-		var heli := sim.entity_card_by_net_id(44)
+		gunner = sim.entity_card_by_net_id(_flight["gunner"])
+		var heli := sim.entity_card_by_net_id(_flight["heli"])
 		lost_seat = lost_seat or not gunner.is_mounted()
 		max_distance = maxf(max_distance,
 				gunner.get_mission_position().distance_to(heli.get_mission_position()))
-		var cabin := world.get_runtime().get_entity_index().resolve_single(44)
-		var rider := world.get_runtime().get_entity_index().resolve_single(1750)
+		var cabin := world.get_runtime().get_entity_index().resolve_single(_flight["heli"])
+		var rider := world.get_runtime().get_entity_index().resolve_single(_flight["gunner"])
 		max_distance = maxf(max_distance, rider.global_position.distance_to(cabin.global_position))
 		if tick % 64 == 0:
 			await get_tree().process_frame
-	assert_gt(sim.entity_card_by_net_id(44).get_mission_position().distance_to(start), 100.0,
+	assert_gt(sim.entity_card_by_net_id(_flight["heli"]).get_mission_position().distance_to(start), 100.0,
 			"the objective helicopter takes off and follows its route")
 	assert_false(lost_seat, "the NPC retains the minigun seat throughout flight")
 	assert_lt(max_distance, 6.0, "both the simulated and rendered NPC travel with the helicopter")

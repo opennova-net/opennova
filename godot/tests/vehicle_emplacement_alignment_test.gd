@@ -1,17 +1,31 @@
 extends GutTest
 
+# Emplaced-weapon attachments on authored carriers: the addeweap children sit at
+# their carrier's authored ewep anchors with the anchor's own forward through
+# the retail row-matrix frame, follow a driven carrier and stay collected with
+# it, and a crewed helicopter spins its rotor registers. The carriers are the
+# minted fixtures/gut models (tests/fixtures/gut_vehicle_gen.cpp) and the
+# synthetic carrier, staged under the graphic names VehicleFixture's items rows
+# give them; the retail witnesses these replaced were the 03TR Blackhawks
+# (Dblkhwk1, two ewep anchors each), the Mark V (Dmrk51, four anchors two of
+# which tilt off the hull plane) and the Dune Buggy (Dbuggy1, one 50cal).
 
-const MISSION := "03TR.bms"
-const CARRIER_ITEM_ID := 102010
-const CARRIER_TYPE_ID := 2010
-const CARRIER_GRAPHIC := "Dblkhwk1"
-const CHILD_TYPE_ID := 1871
+const CARRIER_ITEM_ID := VehicleFixture.BLACKHAWK
+const CARRIER_TYPE_ID := VehicleFixture.BLACKHAWK - 100000
+const CARRIER_GRAPHIC := "helo"
+const CHILD_TYPE_ID := VehicleFixture.MINIGUN - 100000
 const ANCHOR_NAMES := ["ewep01", "ewep02"]
-const DBUGGY_ITEM_ID := 101291
-const DBUGGY_GRAPHIC := "Dbuggy1"
-const MRK5_ITEM_ID := 101299
-const MRK5_TYPE_ID := 1299
-const MRK5_GRAPHIC := "Dmrk51"
+const DBUGGY_ITEM_ID := VehicleFixture.BUGGY
+const DBUGGY_GRAPHIC := "carrier"
+const MRK5_ITEM_ID := VehicleFixture.MARK_V
+const MRK5_TYPE_ID := VehicleFixture.MARK_V - 100000
+const MRK5_GRAPHIC := "gunboat"
+# The two Blackhawks' placements (mission axes, yaw): one parked level, one
+# turned, so the anchor frames compose with a real carrier rotation.
+const BLACKHAWK_PLACEMENTS := [
+	[Vector3(-40.0, 12.0, 3.0), Vector3(0.0, 90.0, 0.0)],
+	[Vector3(25.0, -30.0, 6.5), Vector3(0.0, -37.0, 0.0)],
+]
 
 
 var _drive_terrain_roots: Array[String] = []
@@ -28,10 +42,25 @@ func _driving_terrain() -> TerrainData:
 	return terrain
 
 
+var _stage_dirs: Array[String] = []
+
+
 func after_each() -> void:
 	for root in _resource_roots:
 		root.clear()
 	_resource_roots.clear()
+	for directory in _stage_dirs:
+		TestFs.remove_dir_recursive(directory)
+	_stage_dirs.clear()
+
+
+# The catalog root (VehicleFixture.stage) and its items table.
+func _catalog_root() -> ResourceRoot:
+	var directory := VehicleFixture.stage(self, "emplacement_alignment")
+	_stage_dirs.append(directory)
+	var root := VehicleFixture.root_over(self, directory)
+	_resource_roots.append(root)
+	return root
 
 
 func after_all() -> void:
@@ -157,31 +186,27 @@ func _synthetic_attachment_rows(
 	return rows
 
 
-func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
-	var install_dir := RetailData.install()
-	if install_dir.is_empty():
-		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the 03TR Blackhawk witness")
-		return
-
-	var root := ResourceRoot.new()
-	_resource_roots.append(root)
-	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
+func test_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
+	var root := _catalog_root()
 	var mission := MissionData.new()
-	assert_eq(mission.open_from_resource_root(root, MISSION), OK)
+	assert_eq(mission.create_default(), OK)
+	for placement: Array in BLACKHAWK_PLACEMENTS:
+		assert_not_null(mission.add_entity(MissionData.KIND_ITEM, CARRIER_ITEM_ID,
+				placement[0], placement[1]))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(CARRIER_ITEM_ID)), CARRIER_GRAPHIC)
 
 	var carriers := _blackhawk_carriers(mission)
-	assert_eq(carriers.size(), 2, "03TR carries the two base Blackhawks")
+	assert_eq(carriers.size(), 2, "the mission carries the two Blackhawks")
 	var data := ObjectData.new()
 	assert_eq(data.open_from_resource_root(root, CARRIER_GRAPHIC + ".3di"), OK)
 	var anchors := _blackhawk_anchors(data)
-	assert_eq(anchors.size(), 2, "Dblkhwk1 carries ewep01 and ewep02")
+	assert_eq(anchors.size(), 2, "the helicopter carries ewep01 and ewep02")
 	if carriers.size() != 2 or anchors.size() != 2:
 		return
 
-	# Build the expected frames directly from the retail BMS placement and USRP
+	# Build the expected frames directly from the BMS placement and USRP
 	# rows. The production item-spec/provider path below is the system under test.
 	var expected: Array = []
 	for carrier in carriers:
@@ -242,15 +267,8 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 						wanted["label"], alignment])
 
 
-func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
-	var install_dir := RetailData.install()
-	if install_dir.is_empty():
-		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the MRK5 witness")
-		return
-
-	var root := ResourceRoot.new()
-	_resource_roots.append(root)
-	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
+func test_mark_v_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
+	var root := _catalog_root()
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(MRK5_ITEM_ID)), MRK5_GRAPHIC)
@@ -305,7 +323,7 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 					).orthonormalized(),
 		})
 	assert_gt(nonplanar_count, 0,
-			"the MRK5 fixture distinguishes row-matrix conversion from yaw-only data")
+			"the Mark V fixture distinguishes row-matrix conversion from yaw-only data")
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -348,20 +366,14 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 				"%s up follows the converted retail frame" % wanted["label"])
 
 
-func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
+func test_blackhawk_rotor_register_spins_while_crewed() -> void:
 	# The rotor spin machine: a player-control item seeds its rate while the
 	# engine-running occupant latch holds, the speed ramps and the angle
 	# accumulates; the cveh callback publishes the angle's high word as
 	# HELO_ROTOR / HELO_TAILROTOR and the present applier stores it on the
 	# carrier model [orig: Entity_UpdatePartSpinAccumulator @0x4928B0;
 	#  BoneCallback_cveh_PublishControls @0x492ACA..0x492ADE].
-	var install_dir := RetailData.install()
-	if install_dir.is_empty():
-		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the Blackhawk witness")
-		return
-	var root := ResourceRoot.new()
-	_resource_roots.append(root)
-	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
+	var root := _catalog_root()
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(CARRIER_ITEM_ID)), CARRIER_GRAPHIC)
@@ -442,15 +454,8 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 			"both rotor ordinals publish the one +0x464 accumulator word")
 
 
-func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
-	var install_dir := RetailData.install()
-	if install_dir.is_empty():
-		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the DBuggy witness")
-		return
-
-	var root := ResourceRoot.new()
-	_resource_roots.append(root)
-	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
+func test_buggy_attachment_nodes_follow_when_driven() -> void:
+	var root := _catalog_root()
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(DBUGGY_ITEM_ID)), DBUGGY_GRAPHIC)
@@ -555,7 +560,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 			carrier_node.global_transform
 			if carrier_node != null else Transform3D.IDENTITY)
 	assert_gt(carrier_after.origin.distance_to(carrier_before.origin), 1.0,
-			"the real DBuggy model moved under player control")
+			"the buggy model moved under player control")
 	# The wheel phase integrates the speed word every driven tick and the cveh
 	# callback publishes its high word as VEHICLE_WHEELS, which the present
 	# applier stores on the carrier model as an owned CTRL override
@@ -573,7 +578,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 			(carrier_after.basis * Vector3.BACK).angle_to(
 					carrier_before.basis * Vector3.BACK),
 			deg_to_rad(5.0),
-			"the real DBuggy model turned under steering input")
+			"the buggy model turned under steering input")
 	for handle_v in relative_before:
 		var handle := int(handle_v)
 		var child_node := rt.get_entity_presenter().resolve_wire_handle(handle) as Node3D
@@ -652,25 +657,19 @@ func _camera_behind(origin: Vector3, travel: Vector3) -> Transform3D:
 	return Transform3D(Basis.looking_at(forward, Vector3.UP), eye)
 
 
-func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
+func test_buggy_attachment_stays_collected_when_driven_away() -> void:
 	# The listen host's own runtime spawns (the DBuggy's addeweap gun) pass the
 	# same collector gate as its placed rows, from their LIVE pose. The host's
 	# loopback 0x0A is header-only, so the decoded row keeps the spawn image:
 	# a sphere pinned there culled the gun as soon as the driven buggy left
 	# it behind ("the emplaced weapon disappears when you drive").
-	var install_dir := RetailData.install()
-	if install_dir.is_empty():
-		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the DBuggy witness")
-		return
-	var root := ResourceRoot.new()
-	_resource_roots.append(root)
-	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
+	var root := _catalog_root()
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	var child_types := {}
 	for authored: Dictionary in AuthoredItemFixture.read_rows(root)[DBUGGY_ITEM_ID]["attachments"]:
 		child_types[authored.item_id - 100000] = true
-	assert_gt(child_types.size(), 0, "the shipped DBuggy authors a child emplacement")
+	assert_gt(child_types.size(), 0, "the buggy authors a child emplacement")
 
 	var driving_terrain := _driving_terrain()
 	var mission := MissionData.new()
