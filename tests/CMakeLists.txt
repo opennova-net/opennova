@@ -5056,6 +5056,10 @@ add_test(NAME npruntime_load_stream_rows COMMAND npruntime_load_stream_rows_test
 add_executable(parked_hull_load_test world/parked_hull_load_test.cpp)
 target_link_libraries(parked_hull_load_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME parked_hull_load COMMAND parked_hull_load_test)
+# D-WPN-48: entity+0x308, the last selected weapon slot, and the unarmed seat's detach mount.
+add_executable(selected_slot_test world/selected_slot_test.cpp)
+target_link_libraries(selected_slot_test PRIVATE opennova_runtime)
+add_test(NAME selected_slot COMMAND selected_slot_test)
 
 # --- parity lane L8 (round/info/serve) ---
 

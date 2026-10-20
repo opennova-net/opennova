@@ -329,7 +329,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 }
 
 void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
-		const WeaponInventory *inventory) {
+		WeaponInventory *inventory, PlayerViewState &view) {
 	// The equipped slot and its def [orig: @0x4dfa5e..0x4dfa74].
 	if (!w.active) return;
 	// The detach mounts entity+0x308, else (no def of category < 11 there) the
@@ -338,10 +338,23 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 	// attach saved [orig: @0x494831; @0x546c31 / @0x546c48]. An unborrowed
 	// seat's is the last SELECTED slot, stale after a key switch or a cycle,
 	// which mount without selecting [orig: Player_SelectWeaponSlot's writes
-	// @0x4dd6da / @0x4dd7a8 / @0x4dd81c are its only others]; the port does not
-	// model it and clears whenever the weapon is active, which differs only
-	// where neither +0x308 nor the current slot has a def (D-WPN-48).
-	if (w.usegun_slot_active || w.usegun_switch != LocalUseGunSwitch::kNone) {
+	// @0x4dd6da / @0x4dd7a8 / @0x4dd81c are its only others], and the player
+	// leaves holding it: the whole mount runs, a same-category one queueing
+	// SWITCHRANK (D-WPN-48).
+	if (!w.usegun_slot_active && w.usegun_switch == LocalUseGunSwitch::kNone) {
+		if (inventory == nullptr) return;
+		const WeaponTable &table = world.tables.weapons;
+		int32_t target = inventory->selected_combo;
+		const WeaponInventorySlot *saved = inventory->slot(target);
+		const WeaponTableEntry *saved_def = saved != nullptr && saved->adm_index >= 0
+				? table.by_index(static_cast<uint8_t>(saved->adm_index))
+				: nullptr;
+		if (saved_def == nullptr || saved_def->category >= 11)
+			target = inventory->equipped_combo;
+		local_player_mount_weapon_slot(world, w, *inventory, view, target);
+		return;
+	}
+	{
 		const WeaponTable &table = world.tables.weapons;
 		const WeaponTableEntry *target = table.by_index(w.usegun_saved_adm);
 		if (target == nullptr || target->category >= 11) {

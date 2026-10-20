@@ -109,6 +109,27 @@ bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
     return armory_mode ? !candidate.armory_points.empty() : !candidate.seats.empty();
 }
 
+// The local player's borrowed attach saves its EquippedSlot at entity+0x308 before
+// the carrier's slot replaces it: a ctrlx seat whatever the slot, a UseGun seat
+// unless the slot's def carries flags 0x80, which keeps the old +0x308; a null
+// EquippedSlot leaves none. The process's detach ran first, so the EquippedSlot is
+// the personal one. [orig: Entity_AttachToVehicleSlot @0x49481D..0x494831 (a null
+// slot's leg @0x494867..0x494898); Entity_AttachToUseGunSlot @0x546BCF..0x546C31
+// (the 0x80 test @0x546BE0..0x546BEE), @0x546C48]
+void save_borrowed_selected_slot(World &world, WeaponInventory &inv, bool use_gun) {
+    const WeaponInventorySlot *slot = inv.slot(inv.equipped_combo);
+    if (slot == nullptr) {
+        inv.selected_combo = -1;
+        return;
+    }
+    if (use_gun && slot->adm_index >= 0) {
+        const WeaponTableEntry *def =
+                world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+        if (def != nullptr && (def->flags & 0x80) != 0) return;
+    }
+    inv.selected_combo = inv.equipped_combo;
+}
+
 // Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
 // the flags write; the remaining relationship fields are common. Returns false for a
 // control seat retail refuses, before any relationship write.
@@ -181,8 +202,13 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     //  Entity_AttachToUseGunSlot @0x546C27..0x546C4E]
     if (occ.mount_type == SeatType::Gunner ||
             (occ.mount_type == SeatType::Controller &&
-             (veh.item_attrib & kItemAttribEweap) != 0))
+             (veh.item_attrib & kItemAttribEweap) != 0)) {
+        if (occ.handle == world.cached.local_player && world.local_player_state != nullptr &&
+                world.local_player_state->inventory_valid)
+            save_borrowed_selected_slot(world, world.local_player_state->inventory,
+                                        occ.mount_type == SeatType::Gunner);
         world.vehicles.bind_use_gun_slot(occ, veh);
+    }
     // The entity's degree mirror as the entity carried it in, before the seat
     // pose rewrites it (the look copy's fallback below, for an entity with no body).
     const int16_t entry_yaw = occ.yaw;
@@ -662,7 +688,8 @@ bool VehicleSystem::detach(EntityHandle player) {
         local.clear_stance_latches();
         if (occ->mount_type == SeatType::Gunner || occ->mount_type == SeatType::Controller)
             local_weapon_detach_mount(world, local.weapon,
-                                      local.inventory_valid ? &local.inventory : nullptr);
+                                      local.inventory_valid ? &local.inventory : nullptr,
+                                      local.view);
     }
     if (veh != nullptr) {
         for (Seat &s : veh->seats) {

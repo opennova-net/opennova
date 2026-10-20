@@ -382,13 +382,13 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w);
 // The local player's seat-2 / seat-3 detach mounts entity+0x308 (a borrowed
 // seat's saved personal slot, else the last selected one) or, without a def of
 // category < 11 there, the current slot, and the mount, past its early-outs (a
-// target def, an equipped slot and def), clears the NVG scope restore latch.
-// Only the latch is modelled for every such detach; the rest of that mount for
-// an unborrowed control seat, and +0x308 itself, are D-WPN-48.
+// target def, an equipped slot and def), clears the NVG scope restore latch. A
+// borrowed seat's switch-out is staged by the UseGun transition; an unborrowed
+// seat's mount runs here (D-WPN-48).
 // [orig: Entity_DetachFromVehicle @0x43562a..0x43565f, the fallback
 //  @0x43564e..0x435658; Player_MountWeaponSlot @0x4dfa4d..0x4dfa74, @0x4dfb75]
 void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
-                               const WeaponInventory *inventory);
+                               WeaponInventory *inventory, PlayerViewState &view);
 
 // The pending -> equipped commit and the shared switch-outcome routing.
 void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,

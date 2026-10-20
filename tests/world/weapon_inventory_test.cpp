@@ -256,12 +256,15 @@ void test_select() {
     // -1 = the global scan directly [orig: @ 0x4dd76d].
     CHECK(weapon_select_slot(f.t, inv, -1, true));
     CHECK(inv.equipped_combo == 1 * 65 + 0);
-    // Seat-deferred commit stages pending only [orig: the parentSlot 2/3 gate].
-    // No pistol is loaded here, so category 2 falls through to the global scan
-    // and stages the knife.
+    // Seated, the select stores entity+0x308 alone [orig: the parentSlot 2/3 gate
+    // @0x4dd6fc; the global scan's +0x308 store @0x4dd81c]. No pistol is loaded here, so
+    // category 2 falls through to the global scan and selects the knife; the
+    // pending slot (a mount's) is untouched.
     inv.equipped_combo = 195;
+    inv.pending_combo = -1;
     CHECK(weapon_select_slot(f.t, inv, 130, false));
-    CHECK(inv.pending_combo == 1 * 65 + 0);
+    CHECK(inv.selected_combo == 1 * 65 + 0);
+    CHECK(inv.pending_combo == -1);
     CHECK(inv.equipped_combo == 195);
     // An empty inventory selects nothing.
     WeaponInventory empty;

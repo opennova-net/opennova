@@ -720,9 +720,9 @@ bool weapon_select_slot(const WeaponTable &table, WeaponInventory &inv, int32_t 
                         bool commit_equip) {
     // [orig: Player_SelectWeaponSlot @ 0x4DD680]
     auto stage = [&](int32_t c) {
-        inv.pending_combo = c; // [orig: entity+0x308 @ 0x4dd6da/0x4dd7a8]
-        if (commit_equip) inv.equipped_combo = c; // [orig: EquippedSlot @ 0x4dd704,
-                                                  //  gated on the seat state]
+        inv.selected_combo = c; // [orig: entity+0x308 @ 0x4dd6da / 0x4dd7a8 / 0x4dd81c]
+        if (commit_equip) inv.equipped_combo = c; // [orig: EquippedSlot @ 0x4dd704 /
+                                                  //  0x4dd7d2, gated on the seat state]
     };
     if (combo != -1) {
         int32_t group_base =

@@ -163,7 +163,17 @@ struct WeaponInventory {
     // @0x5405F0 / WeaponSlot_SetSharedLoadedRounds @0x540670, local table @0xB761E8].
     std::vector<int32_t> shared_clips;
     int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118 / g_CurrentWeaponSlot]
-    int32_t pending_combo = -1;  // [orig: entity+0x308 staged slot / g_PendingWeaponSlot]
+    // The slot a mount stages for the switch-out's completion to commit.
+    // [orig: g_PendingWeaponSlot, Player_MountWeaponSlot @0x4DFB16]
+    int32_t pending_combo = -1;
+    // entity+0x308: the last SELECTED slot (a select's own store, whether or not
+    // the seat lets it reach EquippedSlot), or the personal slot a borrowed seat's
+    // attach saved; -1 for none or a slot outside the personal table (a borrowed
+    // carrier's). A key switch and a cycle mount without selecting, and a detach
+    // never clears it. [orig: Player_SelectWeaponSlot @0x4DD6DA / @0x4DD7A8 /
+    // @0x4DD81C; Entity_AttachToVehicleSlot @0x494831; Entity_AttachToUseGunSlot
+    // @0x546C31 / @0x546C48; read by Entity_DetachFromVehicle @0x43563A]
+    int32_t selected_combo = -1;
     // entity+44 carry-presentation bits gathered by the fill (8 = def.flags&0x1000,
     // 0x10 = def.flags2&2) [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5415aa/0x5415bc].
     uint32_t carry_flags = 0;
@@ -183,6 +193,7 @@ struct WeaponInventory {
         shared_clips.assign(table.ammo_class_names.size(), 0);
         equipped_combo = -1;
         pending_combo = -1;
+        selected_combo = -1;
         carry_flags = 0;
         quick_switch_combo = -1;
         quick_switch_stash = -1;
@@ -378,9 +389,9 @@ int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &
 void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotState &routed,
                               const WeaponTableEntry &own_def, WeaponSlotState &own);
 
-// Player_SelectWeaponSlot @ 0x4DD680 — the category-level select. Stages the pending
-// slot; the caller commits pending->equipped unless seated (the original applies to
-// EquippedSlot only when !parentEntity || parentSlot not in {2,3}).
+// Player_SelectWeaponSlot @ 0x4DD680 — the category-level select. Stores the selected
+// slot (entity+0x308) and, unless seated (`commit_equip` false: the original applies
+// to EquippedSlot only when !parentEntity || parentSlot not in {2,3}), the equipped one.
 //   combo >= 0: the EXACT slot is taken only when its def has the flags2&1 NoSelect
 //   bit (the parachute-style forced equips); otherwise the first populated
 //   NON-NoSelect slot of the combo's category (rank order), else the first such slot
