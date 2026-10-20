@@ -174,6 +174,15 @@ inline uint32_t round_end_linger_ticks_for(int title) {
 	return title == gameprofile::GAME_DFX2 ? 1550u : 2790u;
 }
 
+// One node of the authority's NovaWorld squad registry (the list at 0x24E0E54, inside the
+// curated `g_SpawnWaveList`): a joined account's squad id, name and tag, one node per id.
+// [orig: CLinkedList_FindOrCreateByNetId @0x52B540 — node +12 id, +16 name[65], +81 tag[9]]
+struct SquadRegistryNode {
+	int32_t squad_id = 0;
+	std::string name;
+	std::string tag;
+};
+
 struct NapiNPServerCtx;
 
 // The host session's half of the transactions its world's entity update raises
@@ -233,7 +242,12 @@ struct NapiNPServerCtx {
 	//  Lobby_UpdateServerInfo's gates @0x4FE8D8..0x4FE8FA]
 	std::function<void()> on_update_server_info;
 	ServerBanLists bans;
-	GameConfig config;             // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
+	// The squad registry the C2S 0x4E walk reads (server_message_dispatch.cpp). Retail's player
+	// add files a node for a joiner with a nonzero squad id and the disconnect of a squad's
+	// last slot drops it; this host files none yet, so the registry stays empty, a LAN
+	// host's state. [orig: Server_PlayerAdd @0x51CE16; Server_HandlePlayerDisconnect @0x51B7F5]
+	std::vector<SquadRegistryNode> squad_registry;
+	GameConfig config;            // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)
 
 	// [§5.2a] The advertised weapon-restriction set (S2C 0x66). The original reads a 255-entry

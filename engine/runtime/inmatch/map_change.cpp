@@ -126,6 +126,7 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	conn.fire_tick_floor = 0;
 	conn.fire_disarmed_at = 0;
 	conn.fire_tick_mode = false;
+	conn.keepalive_ack_high_water = 0;
 	conn.phase = ConnectionPhase::PlayerAdded; // the slot stays active; its entity comes back
 	conn.discard_pre_deploy_uplinks = false;
 	conn.staged_frame_update.clear();

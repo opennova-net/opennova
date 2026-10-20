@@ -5081,6 +5081,11 @@ target_link_libraries(mounted_fire_path_test PRIVATE opennova_runtime)
 add_test(NAME mounted_fire_path COMMAND mounted_fire_path_test)
 
 # --- parity lane L8 (round/info/serve) ---
+# The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the
+# 0x4E squad registry walk, the 0x24 ban and punt line's sender authorization and replies.
+add_executable(npruntime_dispatch_remainder_test npruntime/dispatch_remainder_test.cpp)
+target_link_libraries(npruntime_dispatch_remainder_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_dispatch_remainder COMMAND npruntime_dispatch_remainder_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

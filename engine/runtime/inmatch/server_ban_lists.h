@@ -9,11 +9,13 @@
 
 #include <formats/banlist/address_ban_list.h>
 #include <formats/banlist/pcid_ban_list.h>
+#include <net/npwire/protocol_message.h> // ProtocolMessage (the 0x24 sender's replies)
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace opennova::inmatch {
 
@@ -92,13 +94,17 @@ void Server_KickDuplicatePcids(NapiNPServerCtx &ctx, bool quality_boundary);
 // [orig: CNapiNetwork_ValidateJoinRequest @0x4C6203..0x4C6217]
 bool Server_AddressBanned(const NapiNPServerCtx &ctx, uint32_t address);
 
-// The authority console's ban and punt line with no sender (authorized, and no chat back):
-// `BAN <#>` and `UNBAN <#>` over the PCID list (a connected slot's PCID; the host's own slot
-// refused), `PUNT <#|ALL>` (reason 33, `S.C:SP#` / `S.C:SPA`), `BANDWIDTH [n]` (the entity
-// send budget n / 5 clamped to 100..1600, 600 with no value). True when the line was one of
-// them (the caller's chain stops); a BAN or UNBAN with no list is still handled.
-// [orig: Server_HandleBanPuntCommand(line, 0) @0x50B380, from Client_ProcessConsoleCommand
-//  @0x520E80]
-bool Server_HandleBanPuntCommand(NapiNPServerCtx &ctx, std::string_view line);
+// The ban and punt line, the authority console's (no sender) or a slot's C2S 0x24: `BAN <#>`
+// and `UNBAN <#>` over the PCID list (a connected slot's PCID; the host's own slot refused),
+// `PUNT <#|ALL>` (reason 33, `S.C:SP#` / `S.C:SPA`), `BANDWIDTH [n]` (the entity send budget
+// n / 5 clamped to 100..1600, 600 with no value). A sender is authorized only as the local
+// slot: a remote one's BAN / UNBAN are handled with no effect and its PUNT / BANDWIDTH are
+// not handled. With a sender, BAN / UNBAN answer in S2C 0x14 channel-3 lines (the sender's
+// own into `sender_replies`; the "Banned Player" line to the banned slot). True when the line
+// was one of them (the caller's chain stops); a BAN or UNBAN with no list is still handled.
+// [orig: Server_HandleBanPuntCommand @0x50B380, from Client_ProcessConsoleCommand @0x520E80
+//  (sender 0) and NapiNPServerMsg_0x024 @0x514DC0 (the slot)]
+bool Server_HandleBanPuntCommand(NapiNPServerCtx &ctx, std::string_view line,
+		NapiNPConnection *sender = nullptr, std::vector<ProtocolMessage> *sender_replies = nullptr);
 
 } // namespace opennova::inmatch

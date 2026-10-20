@@ -503,6 +503,11 @@ struct NapiNPConnection {
 	uint32_t fire_tick_floor = 0;     // playerSlot+96472
 	uint32_t fire_disarmed_at = 0;   // playerSlot+96460 (host logic tick)
 	bool fire_tick_mode = false;    // playerSlot+96480
+	// The C2S 0x34 keepalive's high-water: the seed's roll sets it to the seed, the
+	// disarm and the round end clear it, and the 0x34 handler raises it; no other
+	// reader. [orig: NapiNPServerMsg_UpdateAck @0x5024B0 (the store @0x502503);
+	//  Server_SendRandomSeedToPlayer @0x5101DD / @0x510244; Server_ProcessRoundEnd @0x51675F]
+	uint32_t keepalive_ack_high_water = 0; // playerSlot+96476
 
 
 	// [orig: CNapiNPConnection_Create @0x62ACB0 direction mirroring, §6.5] 1 = server-side

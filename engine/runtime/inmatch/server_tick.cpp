@@ -365,6 +365,7 @@ std::vector<uint8_t> Server_RerollPlayerTickSeed(
 	connection.tick_seed =
 			((make_random_session_u32() & 0xFEu) + 1u) << 16;
 	connection.fire_tick_floor = connection.tick_seed;
+	connection.keepalive_ack_high_water = connection.tick_seed; // [orig: @0x5101DD]
 	connection.fire_disarmed_at = 0;
 	connection.fire_tick_mode = true;
 	std::vector<uint8_t> body;
@@ -381,6 +382,7 @@ std::vector<uint8_t> Server_DisarmPlayerTickSeed(
 	connection.fire_disarmed_at = host_tick;
 	connection.fire_tick_mode = false;
 	connection.tick_seed = 0;
+	connection.keepalive_ack_high_water = 0; // [orig: @0x510244]
 	return std::vector<uint8_t>(4, 0);
 }
 

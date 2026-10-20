@@ -19,6 +19,7 @@
 #include <runtime/inmatch/server_net_quality.h>  // the 0x2C return leg / 0x4C store
 #include <runtime/inmatch/server_vehicle_spawn.h> // the 0x40 / 0x42 handlers
 #include <runtime/inmatch/napi_np_server_ctx.h>  // ServerDispatchInputs::server_ctx
+#include <runtime/inmatch/server_ban_lists.h>    // Server_HandleBanPuntCommand (C2S 0x24)
 #include <runtime/inmatch/session_status.h>
 #include <runtime/world/weapon_table_build.h> // loadout_entry_permitted (D-NET-141)
 
@@ -359,6 +360,65 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 			pose.valid = true;
 		}
 	}
+}
+
+// The first u32 of a body, or 0 for a body shorter than four bytes (no partial read).
+// [orig: the `packet + 4 <= end` tests @0x5024E2 / @0x511245]
+uint32_t read_u32_or_zero(const std::vector<uint8_t> &payload) {
+	return payload.size() >= 4 ? read_u32_le_lenient(payload, 0) : 0u;
+}
+
+// C2S 0x34, the keepalive: the value raises the slot's high-water when the slot is in its
+// tick mode and the value is at or past both the seed and the high-water, each a signed
+// compare; nothing is sent.
+// [orig: NapiNPServerMsg_UpdateAck @0x5024B0 — the authority @0x5024B7, the read
+//  @0x5024E2..0x5024E8, the tick mode +96480 @0x5024EA, the seed +96464 `jl` @0x5024F3,
+//  the high-water +96476 `jl` @0x5024FB, the store @0x502503]
+void dispatch_keepalive_ack(NapiNPConnection &conn, const std::vector<uint8_t> &payload) {
+	const int32_t value = static_cast<int32_t>(read_u32_or_zero(payload));
+	if (!conn.fire_tick_mode) return;
+	if (value < static_cast<int32_t>(conn.tick_seed)) return;
+	if (value < static_cast<int32_t>(conn.keepalive_ack_high_water)) return;
+	conn.keepalive_ack_high_water = static_cast<uint32_t>(value);
+}
+
+// C2S 0x4E, the squad registry walk: the registry node with the smallest id strictly past
+// the value (signed; the first of equals, which the upsert never makes), sent back as
+// S2C 0x6A action 3 to the requester alone, reliable; no node, nothing (a LAN host's
+// registry is empty).
+// [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210 — the authority @0x511217, the
+//  read @0x511245..0x51124B, CLinkedList_FindNextByNetId @0x52B190 (called @0x511253; the
+//  signed `jle` @0x52B1B5 and `jge` @0x52B1BD), mask 32 @0x51126C, the slot @0x511276,
+//  NetPacket_SerializeMinimapSlot(.., 3, node) @0x51127C, the send @0x51129E]
+void dispatch_squad_registry_walk(const NapiNPServerCtx *ctx, const std::vector<uint8_t> &payload,
+		std::vector<ProtocolMessage> &replies) {
+	if (ctx == nullptr) return;
+	const int32_t after = static_cast<int32_t>(read_u32_or_zero(payload));
+	const SquadRegistryNode *best = nullptr;
+	for (const SquadRegistryNode &node : ctx->squad_registry) {
+		if (node.squad_id <= after) continue;
+		if (best != nullptr && node.squad_id >= best->squad_id) continue;
+		best = &node;
+	}
+	if (best == nullptr) return;
+	ClanRosterUpdate reply;
+	reply.action = kClanRosterWalkReply;
+	reply.account_id = static_cast<uint32_t>(best->squad_id);
+	reply.name = best->name;
+	reply.tag = best->tag;
+	replies.push_back(make_protocol_message(s2c::CLAN_ROSTER, encode_clan_roster_update(reply)));
+}
+
+// C2S 0x24, the ban and punt line: its body to the NUL (or the end) through the console's
+// handler with the sender, which authorizes the local slot alone, so a remote line does
+// nothing and draws nothing. [orig: NapiNPServerMsg_0x024 @0x514DC0 — the authority
+//  @0x514DC7, the slot @0x514DCD..0x514DDF, Server_HandleBanPuntCommand(body, slot) @0x514DE7]
+void dispatch_ban_punt_command(NapiNPServerCtx *ctx, NapiNPConnection &conn,
+		const std::vector<uint8_t> &payload, std::vector<ProtocolMessage> &replies) {
+	if (ctx == nullptr) return;
+	const auto nul = std::find(payload.begin(), payload.end(), uint8_t{0});
+	const std::string line(payload.begin(), nul);
+	Server_HandleBanPuntCommand(*ctx, line, &conn, &replies);
 }
 
 } // namespace
@@ -1290,6 +1350,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				for (ProtocolMessage &m : Server_HandleKillPageRequest(
 						inputs.server_ctx, conn, msg.payload, world))
 					replies.push_back(std::move(m));
+				break;
+			case c2s::KEEPALIVE: // [orig: NapiNPServerMsg_UpdateAck @0x5024B0]
+				dispatch_keepalive_ack(conn, msg.payload);
+				break;
+			case c2s::GAME_START_ACK: // the squad registry walk [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
+				dispatch_squad_registry_walk(inputs.server_ctx, msg.payload, replies);
+				break;
+			case c2s::BAN_PUNT_COMMAND: // [orig: NapiNPServerMsg_0x024 @0x514DC0]
+				dispatch_ban_punt_command(inputs.server_ctx, conn, msg.payload, replies);
 				break;
 			default:
 				// The command map's squad / waypoint / punt legs (server_squad.h); 0x48
