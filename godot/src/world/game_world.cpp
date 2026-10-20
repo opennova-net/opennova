@@ -75,6 +75,8 @@ void GameWorld::_ready() {
 		log_devices_->arm(LaunchFlags::parsed().log_switches,
 				opennova::inmatch::connect_log_header(
 						ResourceRoot::session_title(Ref<ResourceRoot>(), title_error)));
+		// The NovaWorld menu's gate and connect lines write the same log (D-NET-NEW-L8-8).
+		NovaWorldClient::set_process_connect_log(&log_devices_->connect());
 	}
 	// The world's own process step exists for exactly one thing: the joiner
 	// preload wait the session drive steps (switched on by load_as_joiner,
@@ -157,6 +159,7 @@ void GameWorld::_notification(int p_what) {
 		// The process's network shut down: the _inout.txt log, then the net log, each
 		// stops and flushes (ServerLogDevices::close carries the witness).
 		if (log_devices_ != nullptr) log_devices_->close(0u);
+		NovaWorldClient::set_process_connect_log(nullptr);
 		return;
 	}
 	if (p_what != NOTIFICATION_VISIBILITY_CHANGED || !is_node_ready()) {

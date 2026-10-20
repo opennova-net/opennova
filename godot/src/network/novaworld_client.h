@@ -35,6 +35,10 @@
 #include <utility>
 #include <vector>
 
+namespace opennova::inmatch {
+class ConnectLog;
+} // namespace opennova::inmatch
+
 namespace godot {
 
 class HostSessionOptions;
@@ -132,6 +136,9 @@ public:
 	// forgotten, so the next start() probes the gate again
 	// (opennova::NwuLobbySession::GateMemory::forget, D-NET-706).
 	static void forget_gate_response();
+	// The process's _connectlog.txt (the game world's log device, which `/CONNECTLOG` arms):
+	// the NovaWorld gate and connect lines go to it (null: none).
+	static void set_process_connect_log(opennova::inmatch::ConnectLog *log);
 	// The gate response's GLSVSSREQUEST (its wire bytes; empty without one), which a NovaWorld
 	// join's 0x00 JOIN carries (JoinTarget.glsvss_request, D-NET-723).
 	PackedByteArray get_glsvss_request() const;

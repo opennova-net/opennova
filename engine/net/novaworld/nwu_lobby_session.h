@@ -62,6 +62,12 @@ public:
 		// goes on with no NWU session (retail's NovaWorld menu then opens its web lobby, menu
 		// state 9). No session is created; match_facts().in_use stays false.
 		std::function<void()> on_sessionless;
+		// The process's _connectlog.txt (`/CONNECTLOG`; the embedder's inmatch::ConnectLog):
+		// whether it is on now, and one line's text, which the device stamps with the time and
+		// ends. Unset: off. The gate and connect lines are the menu's
+		// [orig: g_ConnectLogEnabled @0xB4C720; NapiFile_AppendLine("_connectlog.txt", ..)].
+		std::function<bool()> connect_log_on;
+		std::function<void(const std::string &)> connect_log;
 	};
 	struct Environment {
 		// The host role's AppId and cookie-key seeds. Unset: make_random_session_u32, the OS
@@ -80,6 +86,8 @@ public:
 		// and the 0x42's MaxPacketSize CU. [orig: InitNPConnection @0x4d3df4; ConnectToNovaWorld
 		//  @0x4d4913..0x4d493e]
 		int32_t max_packet_size = 0;
+		// The gate socket's bound port, which the connect log's gate lines name. Unset: 0.
+		std::function<uint16_t()> gate_local_port;
 	};
 	// The NovaWorld switches of the game's command line the gate response and the connect read
 	// (LaunchFlags): the POST address (resolved with DNS on; one that does not resolve overrides
@@ -280,6 +288,11 @@ private:
 	// A connect wait's failure: the session's reset (a connection still up tears down), the
 	// code's NWEC to on_fatal, then the connection dropped (session() null from here).
 	void fail_connect(int code);
+	// The connect log (Hooks::connect_log_on / connect_log): on now, and one line when on.
+	bool connect_log_on() const;
+	void connect_log(const std::string &text);
+	// The gate socket as the gate lines name it: its bind address and port.
+	std::string gate_socket_text() const;
 
 	Hooks hooks_;
 	Environment env_;
@@ -304,6 +317,8 @@ private:
 	// The gate worker: the probe re-sent every retry interval until the deadline.
 	uint32_t gate_started_ms_ = 0;
 	uint32_t gate_last_send_ms_ = 0;
+	// The connect log's gate stamp, written only while the log is on (dword_B5F440).
+	uint32_t gate_log_stamp_ms_ = 0;
 	// The first connect's poll, retail's NovaWorld menu running PollConnectPhase1, the validation
 	// wait, PollConnectPhase2 and the connection wait in turn: its stamp (dword_B5F444), its
 	// timed-out flag (dword_B5F448) and the give-up word the periodic update sets (session+0x12C:

@@ -101,10 +101,19 @@ struct Rig {
 	uint32_t flags_at_fatal = 0;
 	uint32_t jfc_at_fatal = 0;
 	uint32_t jfp_at_fatal = 0;
+	// The connect log: on when set, its lines in order (the gate socket bound on 2300).
+	bool log_on = false;
+	std::vector<std::string> log;
 	NwuLobbySession lobby;
 
-	Rig() : lobby(hooks(), NwuLobbySession::Environment{}) {
+	Rig() : lobby(hooks(), environment()) {
 		lobby.set_title(&kJo, kJo.gate_tag);
+	}
+
+	static NwuLobbySession::Environment environment() {
+		NwuLobbySession::Environment env;
+		env.gate_local_port = []() { return uint16_t{2300}; };
+		return env;
 	}
 
 	NwuLobbySession::Hooks hooks() {
@@ -121,6 +130,8 @@ struct Rig {
 			jfc_at_fatal = s->join_fail_code();
 			jfp_at_fatal = s->join_fail_param();
 		};
+		out.connect_log_on = [this]() { return log_on; };
+		out.connect_log = [this](const std::string &text) { log.push_back(text); };
 		return out;
 	}
 
@@ -604,8 +615,216 @@ void check_short_protocol_packets_keep_the_connection() {
 	rig.lobby.close();
 }
 
+// The connect log's gate and connect lines (D-NET-NEW-L8-8), each text as retail's sprintf makes
+// it (the device adds the time and the line end): the gate's start, its wait each frame past
+// 500 ms from the stamp (ahead of the reply's processing on the frame the reply lands), the
+// reply's size and every line its reader returns (an empty one too), the reflected address, and
+// ConnectToNovaWorld's lines around the session's start; then the validation wait's and the
+// connection wait's. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CE84D, @0x4CE88C,
+//  @0x4CEAE3; CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CEDF4, @0x4CEF02, @0x4CF037,
+//  @0x4CF083, @0x4CF10C, @0x4CF884; CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D46C3,
+//  @0x4D4751, @0x4D4B0C, @0x4D4BC2; CGameSession_WaitForNWUValidation @0x4D0F20 - @0x4D0F79,
+//  @0x4D11E3; CGameSession_WaitForNWUConnection @0x4D1230 - @0x4D13D3]
+void check_connect_log_gate_and_connect() {
+	Rig rig;
+	rig.log_on = true;
+	rig.lobby.open(rig.gate, rig.session);
+	rig.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+	CHECK((rig.log == std::vector<std::string>{ "GATE CONFIGURING GATE MANAGER.",
+			"GATE STARTING GATE SERVICE.",
+			"GATE GATE SERVICE STARTED \"jop:cus2\"... [0.0.0.0:2300]" }));
+	rig.log.clear();
+	rig.lobby.tick(400);
+	CHECK(rig.log.empty());
+	rig.lobby.tick(600);
+	CHECK((rig.log == std::vector<std::string>{ "GATE WAITING FOR REPLY... [0.0.0.0:2300]" }));
+	rig.log.clear();
+	const std::string body = "GATEPROTOCOL \"1.0\"\r\n\r\nVAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
+							 "VAR \"REFLECTEDIPADDRESS\" \"203.0.113.9\"\n"
+							 "VAR \"REFLECTEDPORTNUMBER\" \"7001\"";
+	rig.gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
+	rig.lobby.tick(1200);
+	const std::vector<std::string> want = { "GATE WAITING FOR REPLY... [0.0.0.0:2300]",
+		"GATE DONE WITH GATE LOOP [n/a]", "GATE GATE SERVICE SUCCEEDED.  EXTRACTING INFO.",
+		"PROCESSING GATE DATA...(" + std::to_string(body.size()) + " bytes)",
+		"GATE LINE #01 [GATEPROTOCOL \"1.0\"]", "GATE LINE #02 []",
+		"GATE LINE #03 [VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"]",
+		"GATE LINE #04 [VAR \"REFLECTEDIPADDRESS\" \"203.0.113.9\"]",
+		"GATE LINE #05 [VAR \"REFLECTEDPORTNUMBER\" \"7001\"]",
+		"GATE GATE SERVICE DONE AND SUCCESSFUL [yourip=203.0.113.9:7001].",
+		"NWU DO ALL KINDS OF STUFF.", "NWU INIT STUFF.",
+		"NWU ATTEMPTING TO CONNECT TO NOVAWORLD...", "NWU GOING INTO JOIN LOOP..." };
+	CHECK(rig.log == want);
+	for (std::size_t i = 0; i < rig.log.size() && i < want.size(); ++i) {
+		if (rig.log[i] != want[i])
+			std::printf("  line %zu: got [%s] want [%s]\n", i, rig.log[i].c_str(), want[i].c_str());
+	}
+	CHECK(rig.lobby.session() != nullptr);
+	if (rig.lobby.session() == nullptr)
+		return;
+	rig.log.clear();
+	rig.session.inbound.push_back(
+			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+	rig.lobby.tick(1300);
+	CHECK(rig.log.empty());
+	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
+	rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
+	rig.lobby.tick(1400);
+	CHECK((rig.log ==
+			std::vector<std::string>{ "NWU LEAVING JOIN LOOP...", "NWU WAITING FOR VALIDATION..." }));
+	rig.log.clear();
+	rig.session.inbound.push_back(
+			{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }) });
+	rig.lobby.tick(1500);
+	CHECK((rig.log == std::vector<std::string>{ "NWU YIPPEE WE ARE CONNECTED AND VALIDATED." }));
+	CHECK(rig.fatals.empty());
+	rig.lobby.close();
+}
+
+// The connect waits' failure lines, each ahead of its reset: the state-1 give-up's word, the
+// verify poll's 20 s and the connection wait's timeout, a session out of states 2..4, a session
+// not up at the connection wait. [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - @0x4D0F79,
+//  "%s : NWU FAILURE [%ld]!!!" @0x4D10BF, "%s : NWU FAILURE2 [%ld]!!!" @0x4D1185;
+//  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - @0x4D4DF9; CGameSession_WaitForNWUConnection
+//  @0x4D1230 - "%s : NWU TIMEOUT2!!!" @0x4D1287, "%s : NWU NOT CONNECTED FOR SOME REASON..."
+//  @0x4D1372]
+void check_connect_log_give_ups() {
+	{
+		Rig rig;
+		rig.log_on = true;
+		rig.start(10);
+		rig.log.clear();
+		rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1);
+		CHECK((rig.log ==
+				std::vector<std::string>{ "NWU LEAVING JOIN LOOP...", "NWU FAILURE [1]!!!" }));
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC42" });
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.log_on = true;
+		bring_to_verify(rig);
+		rig.log.clear();
+		rig.lobby.tick(200 + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
+		CHECK((rig.log == std::vector<std::string>{ "NWU 20 secs are up! (b)", "NWU TIMEOUT2!!!" }));
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC46" });
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.log_on = true;
+		const std::vector<uint8_t> auth = bring_to_verify(rig);
+		rig.log.clear();
+		rig.session.inbound.push_back(
+				{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "0" } }) });
+		rig.lobby.tick(300);
+		CHECK((rig.log == std::vector<std::string>{ "NWU NOT CONNECTED FOR SOME REASON..." }));
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC48" });
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.log_on = true;
+		rig.start(10);
+		rig.session.inbound.push_back(
+				{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+		rig.lobby.tick(100);
+		const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ClientAuth parsed;
+		CHECK(decode(auth, opcode, body) && parse_client_auth(body.data(), body.size(), parsed));
+		const DisconnectEvent stop = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+		rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
+		rig.session.inbound.push_back({ kServer,
+				nw_encode_outbound(
+						SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(parsed.ck, stop)) });
+		rig.log.clear();
+		rig.lobby.tick(200);
+		CHECK((rig.log ==
+				std::vector<std::string>{ "NWU LEAVING JOIN LOOP...", "NWU FAILURE2 [0]!!!" }));
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC45" });
+		rig.lobby.close();
+	}
+}
+
+// The gate's failures without a POST pair, a response the parse counts nothing of (no line but
+// the read ones), the log off (no line, whatever runs), and an entry over a kept response (no
+// gate line: ConnectToNovaWorld's alone). [orig: CNapiGateManager_ProcessResponse @0x4CED20 -
+//  "%s : GATE FAILING GATE SERVICE...NO NW POST IP" @0x4CF5EC, "...NO NW POST PORT" @0x4CF671,
+//  the count's -9 with no line @0x4CF4F1..0x4CF51E; CNapiGateManager_WaitForConnect @0x4CE6B0 -
+//  the kept test @0x4CE6CF]
+void check_connect_log_gate_failures() {
+	const auto gate_lines = [](const std::string &body) {
+		Rig rig;
+		rig.log_on = true;
+		rig.lobby.open(rig.gate, rig.session);
+		rig.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+		rig.gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
+		rig.log.clear();
+		rig.lobby.tick(10);
+		rig.lobby.close();
+		return std::make_pair(rig.log, rig.fatals);
+	};
+	const std::string port = "VAR \"POSTIPPORT\" \"7598\"";
+	const auto no_ip = gate_lines(port);
+	CHECK(!no_ip.first.empty() && no_ip.first.back() == "GATE FAILING GATE SERVICE...NO NW POST IP");
+	CHECK(no_ip.second == std::vector<std::string>{ "NWEC25" });
+	const auto no_port = gate_lines("VAR \"POSTIPADDRESS\" \"192.168.0.5\"");
+	CHECK(!no_port.first.empty() &&
+			no_port.first.back() == "GATE FAILING GATE SERVICE...NO NW POST PORT");
+	const auto none = gate_lines("GATEPROTOCOL \"1.0\"");
+	CHECK((none.first == std::vector<std::string>{ "GATE DONE WITH GATE LOOP [n/a]",
+			"GATE GATE SERVICE SUCCEEDED.  EXTRACTING INFO.", "PROCESSING GATE DATA...(18 bytes)",
+			"GATE LINE #01 [GATEPROTOCOL \"1.0\"]" }));
+	CHECK(none.second == std::vector<std::string>{ "NWEC25" });
+
+	{
+		Rig rig;
+		bring_to_verify(rig);
+		rig.lobby.tick(200 + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
+		CHECK(rig.log.empty() && rig.fatals == std::vector<std::string>{ "NWEC46" });
+		rig.lobby.close();
+	}
+	{
+		NwuLobbySession::GateMemory memory;
+		Rig first;
+		first.lobby.set_gate_memory(&memory);
+		first.start(10);
+		first.lobby.close();
+		Rig again;
+		again.log_on = true;
+		again.lobby.set_gate_memory(&memory);
+		again.lobby.open(again.gate, again.session);
+		again.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+		CHECK((again.log == std::vector<std::string>{ "NWU DO ALL KINDS OF STUFF.", "NWU INIT STUFF.",
+				"NWU ATTEMPTING TO CONNECT TO NOVAWORLD...", "NWU GOING INTO JOIN LOOP..." }));
+		again.lobby.close();
+	}
+}
+
+// The gate reply's lines as its reader returns them: a LF, a CR or a CR LF ends one, an empty
+// line is one, the first NUL ends the text, and a line keeps 32767 characters, the next one
+// passed over. [orig: Napi_ReadLineFromBuffer @0x616CC0 - @0x616D1E, @0x616D23..0x616D3B,
+//  @0x616D49..0x616D55; CNapiFileReader_ReadAndTokenizeLine @0x6336E0 - @0x63371A]
+void check_gate_response_lines() {
+	using namespace std::string_literals;
+	CHECK((gate_response_lines("a\r\nb\rc\n\nd\0e"s) ==
+			std::vector<std::string>{ "a", "b", "c", "", "d" }));
+	CHECK((gate_response_lines("x\n") == std::vector<std::string>{ "x" }));
+	CHECK(gate_response_lines("").empty());
+	CHECK((gate_response_lines("\r\n") == std::vector<std::string>{ "" }));
+	const std::string long_line = std::string(32768, 'x') + "\nY";
+	const std::vector<std::string> cut = gate_response_lines(long_line);
+	CHECK(cut.size() == 3 && cut[0] == std::string(32767, 'x') && cut[1].empty() && cut[2] == "Y");
+}
+
 int main() {
 	check_connect_error_tags();
+	check_connect_log_gate_and_connect();
+	check_connect_log_give_ups();
+	check_connect_log_gate_failures();
+	check_gate_response_lines();
 	check_short_protocol_packets_keep_the_connection();
 	check_disconnect_request_by_state();
 	check_state_one_give_up();

@@ -12,7 +12,9 @@
 #include <base/io/strutil.h>
 
 #include <array>
+#include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace opennova {
 
@@ -67,6 +69,24 @@ NwuLobbySession::NwuLobbySession(Hooks hooks, Environment env)
 
 uint32_t NwuLobbySession::random_u32() const {
 	return env_.random_u32 ? env_.random_u32() : make_random_session_u32();
+}
+
+bool NwuLobbySession::connect_log_on() const {
+	return hooks_.connect_log_on && hooks_.connect_log && hooks_.connect_log_on();
+}
+
+void NwuLobbySession::connect_log(const std::string &text) {
+	if (connect_log_on()) hooks_.connect_log(text);
+}
+
+// Napi_FormatAddress over the gate socket's bind address, 0 (the gate manager's), and its port.
+// [orig: Napi_FormatAddress @0x62DED0 - "%s:%ld" @0x62DF22; CNapiGateManager_WaitForConnect
+//  @0x4CE6B0 - the bind address 0 @0x4CE7D2; CNapiGateManager_CreateAndBindSocket @0x633770 -
+//  @0x6337FC; NapiUdpSocket_CreateAndBind @0x62D2A0 - the socket's address and port
+//  @0x62D4C1 / @0x62D4C4]
+std::string NwuLobbySession::gate_socket_text() const {
+	const uint16_t port = env_.gate_local_port ? env_.gate_local_port() : uint16_t{0};
+	return "0.0.0.0:" + std::to_string(port);
 }
 
 bool NwuLobbySession::resolve(const std::string &host, uint16_t port, PeerAddr &out) const {
@@ -163,6 +183,15 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	kept.response = GateResponse{};
 	kept.gate_host = gate_host;
 	kept.gate_port = gate_port;
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - "GATE CONFIGURING GATE MANAGER." the
+	//  append @0x4CE84D, "GATE STARTING GATE SERVICE." @0x4CE88C, the stamp @0x4CE896]
+	if (connect_log_on()) {
+		connect_log("GATE CONFIGURING GATE MANAGER.");
+		if (connect_log_on()) {
+			connect_log("GATE STARTING GATE SERVICE.");
+			gate_log_stamp_ms_ = clock_ms_;
+		}
+	}
 	// The gate manager's tag: the title's, or the boot's gt.ssc (set_title).
 	// [orig: CNapiGateManager_ProbeThreadProc @0x6339e0 - the tag's bytes @0x633aa1]
 	const std::vector<uint8_t> probe_dg = gate_probe_build(gate_tag_);
@@ -184,6 +213,15 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	probe_sent_ = true;
 	gate_started_ms_ = clock_ms_;
 	send_gate_probe();
+	// The service started: its tag and its socket, then the stamp.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - the socket @0x4CEA78..0x4CEA91, the
+	//  line "%s : GATE GATE SERVICE STARTED \"%s\"... [%s]" (the tag this+76) @0x4CEAE3, the
+	//  stamp @0x4CEAED]
+	if (connect_log_on()) {
+		connect_log("GATE GATE SERVICE STARTED \"" + gate_tag_ + "\"... [" + gate_socket_text() +
+				"]");
+		gate_log_stamp_ms_ = clock_ms_;
+	}
 }
 
 // The command line's POST pair over the gate's, each only when set (an address that resolves,
@@ -387,14 +425,25 @@ bool NwuLobbySession::poll_connect() {
 			if (session_->lobby_state() == 1) {
 				if (clock_ms_ - connect_stamp_ms_ <= SESSION_CONNECT_POLL_TIMEOUT_MS)
 					return false;
+				// [orig: CNapiGameSession_PollConnectPhase1 @0x4D4C30 - "%s : NWU 30 secs are
+				//  up! (a)" @0x4D4CA8, ahead of the give-up @0x4D4CB2]
+				connect_log("NWU 30 secs are up! (a)");
 				abort_connect();
 				connect_timed_out_ = true;
 			}
+			// The validation wait's lines, each ahead of its reset.
+			// [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - "%s : NWU LEAVING JOIN
+			//  LOOP..." @0x4D0F79; "%s : NWU TIMEOUT!!!" @0x4D0FC0; "%s : NWU FAILURE [%ld]!!!"
+			//  (the give-up word) @0x4D10BF; "%s : NWU FAILURE2 [%ld]!!!" (the session state
+			//  +0x11C) @0x4D1185; "%s : NWU WAITING FOR VALIDATION..." @0x4D11E3]
+			connect_log("NWU LEAVING JOIN LOOP...");
 			if (connect_timed_out_) {
+				connect_log("NWU TIMEOUT!!!");
 				fail_connect(kConnectPollTimedOut);
 				return true;
 			}
 			if (give_up_ != 0) {
+				connect_log("NWU FAILURE [" + std::to_string(give_up_) + "]!!!");
 				int code = kConnectGaveUpOther;
 				if (give_up_ == kGiveUpStateOne)
 					code = kConnectGaveUpInStateOne;
@@ -405,9 +454,11 @@ bool NwuLobbySession::poll_connect() {
 			}
 			const int state = session_->lobby_state();
 			if (state != 2 && state != 3 && state != 4) {
+				connect_log("NWU FAILURE2 [" + std::to_string(state) + "]!!!");
 				fail_connect(kConnectNotVerifying);
 				return true;
 			}
+			connect_log("NWU WAITING FOR VALIDATION...");
 			connect_stamp_ms_ = clock_ms_;
 			connect_poll_ = ConnectPoll::Verify;
 			return false;
@@ -418,16 +469,25 @@ bool NwuLobbySession::poll_connect() {
 				if (clock_ms_ - connect_stamp_ms_ <= SESSION_CONNECT_VERIFY_TIMEOUT_MS)
 					return false;
 				connect_timed_out_ = true;
+				// [orig: CNapiGameSession_PollConnectPhase2 @0x4D4D70 - the flag @0x4D4DBF, "%s :
+				//  NWU 20 secs are up! (b)" @0x4D4DF9, the give-up @0x4D4E03]
+				connect_log("NWU 20 secs are up! (b)");
 				abort_connect();
 			}
+			// [orig: CGameSession_WaitForNWUConnection @0x4D1230 - "%s : NWU TIMEOUT2!!!"
+			//  @0x4D1287; "%s : NWU NOT CONNECTED FOR SOME REASON..." @0x4D1372; "%s : NWU
+			//  YIPPEE WE ARE CONNECTED AND VALIDATED." @0x4D13D3]
 			if (connect_timed_out_) {
+				connect_log("NWU TIMEOUT2!!!");
 				fail_connect(kConnectVerifyTimedOut);
 				return true;
 			}
 			if ((session_->session_flags() & 0x2u) == 0) {
+				connect_log("NWU NOT CONNECTED FOR SOME REASON...");
 				fail_connect(kConnectNotConnected);
 				return true;
 			}
+			connect_log("NWU YIPPEE WE ARE CONNECTED AND VALIDATED.");
 			connect_poll_ = ConnectPoll::Done;
 			return false;
 		}
@@ -441,6 +501,14 @@ bool NwuLobbySession::poll_connect() {
 // [orig: CNapiGateManager_ProbeThreadProc @0x633b13..0x633bea (the receive, GATEAPI decrypt,
 //  SetResponseBuffer), @0x633b65..0x633c3b (state 2: CloseSocket @0x633c36, state 3)]
 void NwuLobbySession::poll_gate() {
+	// Each frame of the wait, while the service runs: the waiting line past 500 ms from the stamp.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the test @0x4CED49..0x4CED67, the
+	//  socket @0x4CED84..0x4CEDB0, "%s : GATE WAITING FOR REPLY... [%s]" @0x4CEDF4, the stamp
+	//  @0x4CEDFE]
+	if (probe_sent_ && connect_log_on() && clock_ms_ - gate_log_stamp_ms_ > 500u) {
+		connect_log("GATE WAITING FOR REPLY... [" + gate_socket_text() + "]");
+		gate_log_stamp_ms_ = clock_ms_;
+	}
 	uint8_t buf[65536];
 	for (;;) {
 		PeerAddr from;
@@ -456,8 +524,36 @@ void NwuLobbySession::poll_gate() {
 			continue;
 		}
 		inner.resize(inner_size);
+		const std::string plain = gate_response_decrypt(inner.data(), inner.size());
 		GateResponse parsed;
-		const bool counted = gate_response_decrypt_and_parse(inner.data(), inner.size(), parsed);
+		const bool counted = gate_response_parse(plain, parsed);
+		// The worker closed its socket with the reply it took, so the done line names none; the
+		// reply's processing then names its size and each line it reads.
+		// [orig: CNapiGateManager_ProbeThreadProc @0x6339E0 - CloseSocket @0x633C36, the status
+		//  3 @0x633C3B; CNapiGateManager_ProcessResponse @0x4CED20 - "%s : GATE DONE WITH GATE
+		//  LOOP [%s]" ("n/a" @0x4CEEBE) @0x4CEF02, its stamp @0x4CEF12; "%s : GATE GATE SERVICE
+		//  SUCCEEDED.  EXTRACTING INFO." @0x4CF037; "%s : PROCESSING GATE DATA...(%ld bytes)"
+		//  (the length +0x38) @0x4CF083; "%s : GATE LINE #%2.2ld [%s]" @0x4CF10C, from line 1
+		//  @0x4CF0B4, each read @0x4CF4BE]
+		if (connect_log_on()) {
+			connect_log("GATE DONE WITH GATE LOOP [n/a]");
+			gate_log_stamp_ms_ = clock_ms_;
+			if (connect_log_on()) {
+				connect_log("GATE GATE SERVICE SUCCEEDED.  EXTRACTING INFO.");
+				if (connect_log_on()) {
+					connect_log("PROCESSING GATE DATA...(" + std::to_string(plain.size()) +
+							" bytes)");
+				}
+			}
+		}
+		if (connect_log_on()) {
+			int32_t number = 1;
+			for (const std::string &line : gate_response_lines(plain)) {
+				char tag[32];
+				std::snprintf(tag, sizeof(tag), "GATE LINE #%2.2ld [", static_cast<long>(number++));
+				connect_log(tag + line + "]");
+			}
+		}
 
 		gate_answered_ = true;
 		gate_probe_datagram_.clear();
@@ -492,7 +588,16 @@ void NwuLobbySession::poll_gate() {
 		kept.in_use = !parsed.udp_novaworld.empty() || !command_line_.udp_novaworld.empty();
 		if (!kept.in_use) {
 			const std::array<uint8_t, 4> none{ 0, 0, 0, 0 };
-			if (kept.response.post_ip == none || kept.response.post_port == 0) {
+			// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - "%s : GATE FAILING GATE
+			//  SERVICE...NO NW POST IP" @0x4CF5EC, "...NO NW POST PORT" @0x4CF671]
+			if (kept.response.post_ip == none) {
+				connect_log("GATE FAILING GATE SERVICE...NO NW POST IP");
+				if (hooks_.on_fatal)
+					hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
+				return;
+			}
+			if (kept.response.post_port == 0) {
+				connect_log("GATE FAILING GATE SERVICE...NO NW POST PORT");
 				if (hooks_.on_fatal)
 					hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
 				return;
@@ -512,6 +617,17 @@ void NwuLobbySession::poll_gate() {
 		if (kept.use_junction != 0)
 			kept.junction_code.clear();
 		kept.response_kept = true;
+		// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - Napi_FormatAddress over the
+		//  REFLECTEDIPADDRESS / REFLECTEDPORTNUMBER words (g_NovaWorldServerAddr @0x4CF3A9,
+		//  g_NovaWorldServerPort @0x4CF3EA) @0x4CF850, "%s : GATE GATE SERVICE DONE AND
+		//  SUCCESSFUL [yourip=%s]." @0x4CF884]
+		if (connect_log_on()) {
+			const std::array<uint8_t, 4> &ip = kept.response.reflected_ip;
+			connect_log("GATE GATE SERVICE DONE AND SUCCESSFUL [yourip=" + std::to_string(ip[0]) +
+					"." + std::to_string(ip[1]) + "." + std::to_string(ip[2]) + "." +
+					std::to_string(ip[3]) + ":" +
+					std::to_string(static_cast<int32_t>(kept.response.reflected_port)) + "].");
+		}
 		connect_from_response();
 		return;
 	}
@@ -530,11 +646,16 @@ void NwuLobbySession::poll_gate() {
 //  CNapiGameSession_InitPlayerConnection @0x4D4B16]
 void NwuLobbySession::connect_from_response() {
 	const GateMemory &kept = memory();
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the in-use test @0x4D467D, "%s : NWU
+	//  DO ALL KINDS OF STUFF." @0x4D46C3; "%s : NWU INIT STUFF." @0x4D4751]
+	if (kept.in_use)
+		connect_log("NWU DO ALL KINDS OF STUFF.");
 	if (!kept.in_use) {
 		if (hooks_.on_sessionless)
 			hooks_.on_sessionless();
 		return;
 	}
+	connect_log("NWU INIT STUFF.");
 	targets_.clear();
 	if (!kept.junction_code.empty()) {
 		add_target(kept.junction_code);
@@ -545,7 +666,12 @@ void NwuLobbySession::connect_from_response() {
 		for (const std::string &address : kept.response.udp_novaworld)
 			add_target(address);
 	}
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - "%s : NWU ATTEMPTING TO CONNECT TO
+	//  NOVAWORLD..." @0x4D4B0C, InitPlayerConnection @0x4D4B16, "%s : NWU GOING INTO JOIN
+	//  LOOP..." @0x4D4BC2]
+	connect_log("NWU ATTEMPTING TO CONNECT TO NOVAWORLD...");
 	begin_session();
+	connect_log("NWU GOING INTO JOIN LOOP...");
 }
 
 // The session state machine and its ClientHello, once the gate response named the NW UDP

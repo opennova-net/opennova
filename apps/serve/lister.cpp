@@ -108,6 +108,13 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 								"[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)");
 						end(kExitFailed);
 					};
+					// The gate and connect lines to the server's _connectlog.txt.
+					hooks.connect_log_on = [this]() {
+						return options_.connect_log != nullptr && options_.connect_log->enabled();
+					};
+					hooks.connect_log = [this](const std::string &text) {
+						if (options_.connect_log != nullptr) options_.connect_log->line(text);
+					};
 					return hooks;
 				}(),
 				[this]() {
@@ -120,6 +127,7 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 						out.ip = net::NetDatagramSocket::to_peer(endpoint).ip;
 						return true;
 					};
+					env.gate_local_port = [this]() { return gate_port_; };
 					return env;
 				}()),
 		role_(lobby_, [this]() {
@@ -155,7 +163,7 @@ Lister::~Lister() {
 bool Lister::start() {
 	if (!source_.start(exit_code_))
 		return false;
-	gate_udp_ = net::ScopedSocket(net::udp_bind(0));
+	gate_udp_ = net::ScopedSocket(net::udp_bind(0, &gate_port_));
 	if (shared_session_socket_ == nullptr) session_udp_ = net::ScopedSocket(net::udp_bind(0));
 	if (!gate_udp_.is_valid() || (shared_session_socket_ == nullptr && !session_udp_.is_valid())) {
 		io::logf(LogLevel::kError, "[net] cannot bind the UDP sockets");

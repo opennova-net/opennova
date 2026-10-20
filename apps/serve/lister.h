@@ -13,6 +13,7 @@
 #include <net/novaworld/nwu_host_role.h>
 #include <net/novaworld/nwu_lobby_session.h>
 #include <net/npwire/idatagram_socket.h>
+#include <runtime/inmatch/punt_log.h> // inmatch::ConnectLog (the gate and connect lines)
 
 #include <cstdint>
 #include <future>
@@ -35,6 +36,9 @@ struct ListerOptions {
 	bool allow_public = false;
 	// With an account, the host leg logs in and fetches the HOSTKEY first, as the game's menu does.
 	Credentials credentials;
+	// The process's _connectlog.txt the gate and connect lines go to (the server's device; null:
+	// none). It outlives the lister.
+	inmatch::ConnectLog *connect_log = nullptr;
 };
 
 // opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account
@@ -112,6 +116,7 @@ private:
 	bool clock_started_ = false;
 
 	net::ScopedSocket gate_udp_;
+	uint16_t gate_port_ = 0; // gate_udp_'s bound port (the connect log's gate lines)
 	net::ScopedSocket session_udp_;
 	std::unique_ptr<net::NetDatagramSocket> gate_socket_;
 	// Unset when the session rides the embedder's socket.

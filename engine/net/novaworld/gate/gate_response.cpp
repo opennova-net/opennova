@@ -171,4 +171,32 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 	return out.var_count > 0;
 }
 
+std::vector<std::string> gate_response_lines(std::string_view body) {
+	// The buffer is the reply's bytes and a NUL (SetResponseBuffer's), read 0x8000 at a time.
+	// [orig: CNapiGateManager_SetResponseBuffer @0x633650 - the NUL @0x6336BC]
+	constexpr std::size_t kReadBuffer = 0x8000;
+	const auto at = [&](std::size_t i) { return i < body.size() ? body[i] : '\0'; };
+	std::vector<std::string> lines;
+	std::size_t pos = 0;
+	while (pos < body.size() && at(pos) != '\0') {
+		std::string line;
+		std::size_t src = pos;
+		std::size_t count = 0;
+		for (std::size_t remaining = kReadBuffer; remaining > 1; ++count) {
+			const char c = at(src);
+			if (c == '\0' || c == '\n') break;
+			if (c == '\r') {
+				if (at(src + 1) == '\n') ++count;
+				break;
+			}
+			line.push_back(c);
+			++src;
+			--remaining;
+		}
+		lines.push_back(std::move(line));
+		pos += at(src) == '\0' ? count : count + 1;
+	}
+	return lines;
+}
+
 } // namespace opennova

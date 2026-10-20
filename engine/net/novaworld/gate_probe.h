@@ -76,5 +76,8 @@ std::vector<uint8_t> gate_probe_build(std::string_view tag,
 bool gate_response_decrypt_and_parse(const uint8_t *data, size_t len,
                                      GateResponse &out,
                                      std::string_view nwu_key = GATE_NWU_KEY);
+// The plaintext alone (its lines are the connect log's; gate_response_lines).
+std::string gate_response_decrypt(const uint8_t *data, size_t len,
+                                  std::string_view nwu_key = GATE_NWU_KEY);
 
 } // namespace opennova

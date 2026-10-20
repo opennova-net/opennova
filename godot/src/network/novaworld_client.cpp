@@ -9,6 +9,7 @@
 #include "util/string_convert.h"
 
 #include <runtime/inmatch/host_config.h> // transport_bind_ports
+#include <runtime/inmatch/punt_log.h>   // ConnectLog (the gate and connect lines)
 
 #include <array>
 #include <godot_cpp/classes/http_client.hpp>
@@ -368,6 +369,14 @@ void NovaWorldClient::forget_gate_response() {
 	opennova::process_gate_memory().forget();
 }
 
+namespace {
+opennova::inmatch::ConnectLog *g_process_connect_log = nullptr;
+} // namespace
+
+void NovaWorldClient::set_process_connect_log(opennova::inmatch::ConnectLog *log) {
+	g_process_connect_log = log;
+}
+
 PackedByteArray NovaWorldClient::get_glsvss_request() const {
 	const std::string &request = lobby_.gate_response().glsvss_request;
 	PackedByteArray out;
@@ -490,6 +499,13 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 				String("The NovaWorld gate named no session server; its lobby without one is not "
 					   "supported."));
 	};
+	// The gate and connect lines to the process's _connectlog.txt.
+	hooks.connect_log_on = []() {
+		return g_process_connect_log != nullptr && g_process_connect_log->enabled();
+	};
+	hooks.connect_log = [](const std::string &text) {
+		if (g_process_connect_log != nullptr) g_process_connect_log->line(text);
+	};
 	return hooks;
 }
 
@@ -498,6 +514,9 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 opennova::NwuLobbySession::Environment NovaWorldClient::make_lobby_environment() {
 	opennova::NwuLobbySession::Environment env;
 	env.random_u32 = []() { return opennova::os_random_nonzero_u32(); };
+	env.gate_local_port = [this]() {
+		return static_cast<uint16_t>(gate_pump_.is_valid() ? gate_pump_->local_port() : 0);
+	};
 	env.resolve_ipv4 = [](const std::string &host, opennova::PeerAddr &out) {
 		IP *ip = IP::get_singleton();
 		if (ip == nullptr) return false;
