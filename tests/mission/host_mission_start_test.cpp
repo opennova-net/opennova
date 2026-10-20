@@ -6,9 +6,16 @@
 // clock, lets that frame's entity update run) until the own join: the receive
 // pump that hands over the own client's C2S 0x0B (queued at the mission
 // start's end, D-NET-NEW-L4-5) runs the join, whose own 0x0A writer hides the
-// undeployed body again ahead of the slot lists, so that frame holds. Ours
-// hands the 0x0B over on the first frame (the own client's send countdown is
-// D-NET-NEW-L1-17).
+// undeployed body again ahead of the slot lists, so that frame holds. The
+// 0x0B reaches the server on the first frame: the own connection's period is
+// one tick and the mission start's two client receives spend its countdown
+// ahead of the 0x0B's send, so a held listen host runs no update before its
+// own join's 0x0A (N = 0).
+// [orig: NapiNPServer_UpdateHoldoffTicks - the local connection's 1
+//  @0x4C5F53..0x4C5F69; CNapiNPConnection_PumpFlags - the step
+//  @0x6297A9..0x6297AC; Game_StartMission - the receives @0x525784 /
+//  @0x525BD9, the send @0x526255; NetClient_FlushAndSync's authority return
+//  @0x424719; CNapiNPConnection_PumpEnumeratorAndSend's gate @0x62927B]
 // [orig: Game_StartMission -- the round init @0x525BAF, the Player_InitPlayer
 //  call @0x525BBC; Player_InitPlayer @0x4E15F0 -- `Flags &= ~1` @0x4E19C2;
 //  Server_BuildEntitySlotLists @0x4F97A0 -- the Player bit @0x4F9815, the
@@ -140,9 +147,8 @@ void run_held_host(bool mission_start) {
 	// The receive pump's join holds the undeployed slot; it clears the body's
 	// hidden bit and its own 0x0A's writer sets it again, both inside the
 	// receive pump, ahead of the slot lists: the frame counts no human and its
-	// update holds, the mission start's unhide or not. (The unhide is counted on
-	// the frames the own 0x0B has not yet reached the server: D-NET-NEW-L1-17,
-	// the own client's send countdown.)
+	// update holds, the mission start's unhide or not: no frame between the
+	// load and the own join runs an update (N = 0, the header's arithmetic).
 	// [orig: Server_OnPlayerJoin - the clear @0x51A7DA, its 0x0A @0x51A82D ->
 	//  NetPacket_WritePlayerState (+89912 & 0x10) @0x4FF7B8; Server_TickUpdate -
 	//  the receive pump @0x51D895, Server_BuildEntitySlotLists @0x51D89A]
