@@ -68,9 +68,10 @@ static void send_throwable_events(NapiNPServerCtx &ctx, const world::World &worl
 		spawn.enemy_item_id = static_cast<uint16_t>(event.item_enemy);
 		spawn.slot_handle = event.entity;
 		spawn.parent_handle = event.parent_handle;
-		spawn.pos_x = world::to_fixed(event.pos.x);
-		spawn.pos_y = world::to_fixed(event.pos.y);
-		spawn.pos_z = world::to_fixed(event.pos.z);
+		// The resting round's Position words, raw (D-NET-507).
+		spawn.pos_x = event.pos.x.q16;
+		spawn.pos_y = event.pos.y.q16;
+		spawn.pos_z = event.pos.z.q16;
 		// Words 12/13/14 are the high halves of the resting round's
 		// entity+16/+20/+24 = the eulerZ/eulerX/eulerY triple (yaw heading,
 		// pitch, roll) — the same order every spawn record carries; the client

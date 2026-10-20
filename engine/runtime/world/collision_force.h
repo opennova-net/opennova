@@ -8,7 +8,7 @@ namespace opennova::world {
 struct World;
 struct Entity;
 struct EntityHandle;
-struct Vec3;
+struct FixedVec3;
 struct InfantryState;
 struct AmmoTableEntry;
 class IRootMotionSource;
@@ -18,7 +18,7 @@ class IRootMotionSource;
 // The velocity triple and the burn byte live on the infantry body, so an
 // entity without one (no AiEntity) has no target for either half.
 void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
-        uint8_t force_type, const Vec3 &source, EntityHandle attacker);
+        uint8_t force_type, const FixedVec3 &source, EntityHandle attacker);
 
 // The body half of the same function over the fields it writes: the hit-type
 // stamp and its moveTimer, then the force modes 1, 2 and 4's velocity kicks.
@@ -31,7 +31,7 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
 // [orig: Entity_ApplyCollisionForce @0x4AF4A0]
 int collision_force_body(const int32_t pos[2], int32_t heading, uint32_t flags,
         const int32_t *owner_group, int32_t group, uint8_t hit_type, uint8_t force_type,
-        const Vec3 &source, uint8_t &r_hit_type, int32_t &r_player_move_timer,
+        const FixedVec3 &source, uint8_t &r_hit_type, int32_t &r_player_move_timer,
         int32_t &r_move_timer, int32_t r_vel[3]);
 
 // The hit-time body roll: a projectile hit on a torso-stack bone (< 5) tips

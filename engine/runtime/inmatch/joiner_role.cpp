@@ -485,9 +485,9 @@ void JoinerRole::tick_local_weapon() {
 				: nullptr;
 		fired.ammo_index = handheld != nullptr ? handheld->ammo_index : -1;
 		fired.adm_index = params.adm_index;
-		fired.round.origin_x = world::to_fixed(params.origin.x);
-		fired.round.origin_y = world::to_fixed(params.origin.y);
-		fired.round.origin_z = world::to_fixed(params.origin.z);
+		fired.round.origin_x = params.origin.x.q16;
+		fired.round.origin_y = params.origin.y.q16;
+		fired.round.origin_z = params.origin.z.q16;
 		fired.round.dir_yaw = params.dir_yaw_bam;
 		fired.round.dir_pitch = params.dir_pitch_bam;
 		fired.round.mode_flags = 1;
@@ -1701,9 +1701,7 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 				static_cast<float>(shooter_row->z / kFixed16)};
 		round.shooter_pos_valid = true;
 	}
-	round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
-	round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;
-	round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
+	round.origin.set_q16({ev.origin_x, ev.origin_y, ev.origin_z}); // the wire's words (D-NET-507)
 	round.dir_yaw_bam = ev.dir_yaw_bam;
 	round.dir_pitch_bam = ev.dir_pitch_bam;
 	round.ammo_index = round_ammo;

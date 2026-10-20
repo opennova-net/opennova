@@ -53,13 +53,13 @@ GuidedInputs inputs(World &world, const LiveRound &r, bool authority, bool launc
     return in;
 }
 void copy_pose(const LiveRound &r, GuidedFlightState &s) {
-    s.pos[0] = to_fixed(r.pos.x); s.pos[1] = to_fixed(r.pos.y); s.pos[2] = to_fixed(r.pos.z);
+    s.pos[0] = r.pos.x.q16; s.pos[1] = r.pos.y.q16; s.pos[2] = r.pos.z.q16;
     s.yaw_bam = r.yaw_bam; s.pitch_bam = r.pitch_bam; s.roll_bam = r.roll_bam;
-    s.velocity[0] = to_fixed(r.vel.x); s.velocity[1] = to_fixed(r.vel.y); s.velocity[2] = to_fixed(r.vel.z);
+    s.velocity[0] = r.vel.x.q16; s.velocity[1] = r.vel.y.q16; s.velocity[2] = r.vel.z.q16;
 }
 void copy_motion(LiveRound &r) {
     r.yaw_bam = r.guided.yaw_bam; r.pitch_bam = r.guided.pitch_bam; r.roll_bam = r.guided.roll_bam;
-    r.vel = {float(r.guided.velocity[0]) / 65536.0f, float(r.guided.velocity[1]) / 65536.0f, float(r.guided.velocity[2]) / 65536.0f};
+    r.vel.set_q16({r.guided.velocity[0], r.guided.velocity[1], r.guided.velocity[2]}); // the words (D-NET-507)
 }
 }
 // [orig: EntitySlot_FindByNetId @0x4E70C0; dispatch's positive lifetime gate @0x4D6960]

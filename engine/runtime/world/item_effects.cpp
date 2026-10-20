@@ -228,7 +228,8 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
     const int index=world.tables.ammo.index_of(kItemExplosionAmmo);
     if (world.rules.logic_authority) if (const auto *ammo=world.tables.ammo.by_index(index)) {
         ExplosionEntry blast;
-        blast.pos=pos; blast.ammo_index=index; blast.type=ammo->kztype; blast.hit_word=1;
+        blast.pos.set_q16(position); // the words (D-NET-507)
+        blast.ammo_index=index; blast.type=ammo->kztype; blast.hit_word=1;
         if (source) blast.owner=source->handle;
         world.explosions.queue_explosion(world,blast);
     }

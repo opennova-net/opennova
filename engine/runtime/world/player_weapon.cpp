@@ -1459,7 +1459,6 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                 int32_t pose[6];
                 local_weapon_fire_pose(world, w, ev.fired_clip_before_consume,
                         player_view_scope_settled(view), pose);
-                const Vec3 origin{float(pose[0])/65536.0f, float(pose[1])/65536.0f, float(pose[2])/65536.0f};
                 const FixedVec3 fire_origin{pose[0], pose[1], pose[2]};
 				// The authority arm first passes its own-slot gate, then the
 				// round validation. [orig: Entity_FireWeaponAndSendPacket
@@ -1546,7 +1545,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				RoundSpawnParams round;
 				round.owner = world.cached.local_player;
 				round.shooter_handle = round_event.shooter_handle;
-				round.origin = origin;
+				round.origin.set_q16({pose[0], pose[1], pose[2]}); // the fire pose's words (D-NET-507)
 				round.dir_yaw_bam = dir_yaw;
 				round.dir_pitch_bam = dir_pitch;
 				round.ammo_index = adm->ammo_index;

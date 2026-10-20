@@ -150,7 +150,7 @@ RandomSpreadOffset weapon_calc_shotgun_spread_offset(
 // check). Shared with the throwable motors.
 // [orig: WeaponEffect_PushExplosionQueueEntry @ 0x4E83C0 — the type from word
 //  +0x2C @0x4E842E, the radius override fldz @0x4E83FA / fstp @0x4E8432]
-void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
+void detonate_round(World &world, const LiveRound &round, const EntityPosition &at,
                     const AmmoTableEntry &ammo) {
     ExplosionEntry explosion;
     explosion.pos = at;
@@ -815,7 +815,7 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
     // @0x4076D3..0x4076D5].
     if (ammo != nullptr)
         apply_collision_force(world, victim, ammo->secondary_anim, ammo->kz_physics,
-                              record.round_pos, record.round_owner);
+                              record.round_pos.q16(), record.round_owner);
     const bool dead = ((victim.flags | victim.engine_flags) & kEntityFlagDead) != 0;
     // [orig: the torso-stack roll @0x40755E..0x407575]
     if (!dead) apply_hit_body_roll(world.ai.for_handle(victim.handle), record.section, quadrant);
@@ -920,9 +920,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                 const Vec3 direction = fire_direction(
                     params.dir_yaw_bam, params.dir_pitch_bam);
                 ProjectileTrace trace;
-                trace.start = FixedVec3{to_fixed(params.origin.x),
-                                        to_fixed(params.origin.y),
-                                        to_fixed(params.origin.z)};
+                trace.start = params.origin.q16();
                 trace.end = FixedVec3{
                     trace.start.x + to_fixed(direction.x * ammo->kz_maxradius),
                     trace.start.y + to_fixed(direction.y * ammo->kz_maxradius),
@@ -1025,9 +1023,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         if (authoritative && designator != nullptr) {
             DesignationMark mark;
             mark.firer = params.owner;
-            mark.point[0] = to_fixed(params.origin.x);
-            mark.point[1] = to_fixed(params.origin.y);
-            mark.point[2] = to_fixed(params.origin.z);
+            mark.point[0] = params.origin.x.q16;
+            mark.point[1] = params.origin.y.q16;
+            mark.point[2] = params.origin.z.q16;
             mark.ticks = designator->designation_ticks;
             mark.radius_units = designator->hud_splash_radius;
             world.out.designation_marks.push_back(mark);
@@ -1157,8 +1155,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.shot_seq = round_id;
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
-    r.prev_z_q16 = to_fixed(params.origin.z); // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
-    r.vel = vec_from_fixed(launch_q16);
+    r.prev_z_q16 = params.origin.z.q16; // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
+    r.vel.set_q16(launch_q16); // [orig: +0x98 / +0x9C / +0xA0 @0x4ec5dd..0x4ec60d]
     r.age_ticks = 0;
     // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
     // ammo max_age (already in 62 Hz ticks).
@@ -1339,8 +1337,8 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.shot_seq = pellet_id;
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
-        r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]
-        r.vel = vec_from_fixed(launch_q16);
+        r.prev_z_q16 = params.origin.z.q16; // [orig: the spawn's +0x80 copy @0x4ec655]
+        r.vel.set_q16(launch_q16);
         r.max_age_ticks = ammo.max_age_ticks;
         r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
                                       : params.shooter_team;
@@ -1447,7 +1445,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                                                 collision.bone_index, *target, shooter,
                                                 r.ammo_index, world);
             if (authoritative && critical_hit) target->cause_flags |= 0x800u;
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16);
             if ((target->engine_flags & kEntityFlagIndestructible) != 0 ||
                 target->armor_impact == -1 ||
                 ammo->penetration_impact < target->armor_impact ||
@@ -1482,7 +1480,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             // [orig: Projectile_ProcessDamageOnTarget @0x4e8213..0x4e822b ->
             //  Player_OnDamageReceived @0x4dd880].
             if (target_not_dead && target->handle == world.cached.local_player && damage > 5) {
-                const int32_t at[3] = {to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
+                const int32_t at[3] = {r.pos.x.q16, r.pos.y.q16, r.pos.z.q16};
                 player_on_damage_received(world, radar_round_source(world, r,
                         static_cast<uint32_t>(&r - rounds.data())), at);
             }
@@ -1538,7 +1536,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                                             primary_section, secondary_section});
                     if (damage_target_is_person) {
                         // [orig: OrganicClass_HandleEvent @0x4074BA; twin @0x407822]
-                        apply_collision_force(world, *target, ammo->secondary_anim, ammo->kz_physics, r.pos, r.owner);
+                        apply_collision_force(world, *target, ammo->secondary_anim, ammo->kz_physics, r.pos.q16(), r.owner);
                     }
                     if (!damage_target_is_person) {
                         target->last_attacker = r.owner;
@@ -1759,7 +1757,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // @0x4E9E6D; the useownmove leg returns @0x4EA069 before it].
         if ((ammo_flags & kAmmoFlagUseOwnMove) == 0 &&
             (ammo_flags & def::DEF_AMMO_FLAG_NOCOLLIDE) == 0 && !r.indoors_word &&
-            to_fixed(r.pos.z) < -io::kFp16OneInt) {
+            r.pos.z.q16 < -io::kFp16OneInt) {
             if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
             r.active = false;
             --active_count;
@@ -1789,7 +1787,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     r.max_age_ticks == INT32_MAX ? INT32_MAX
                                                  : r.max_age_ticks - r.age_ticks;
                 const bool clipped = round_effect_should_release_for_water(
-                    ammo_flags, to_fixed(r.pos.z), world.env.water_z);
+                    ammo_flags, r.pos.z.q16, world.env.water_z);
                 if (clipped) {
                     r.move_effect_live = false;
                 } else if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
@@ -1829,8 +1827,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             continue;
         }
 
-        const FixedVec3 position_q16{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
-        FixedVec3 velocity_q16{to_fixed(r.vel.x), to_fixed(r.vel.y), to_fixed(r.vel.z)};
+        // The round's words as they stand [orig: Projectile_UpdatePhysics - Position
+        //  @0x4EA22C..0x4EA23D, velocity @0x4EA0DC..0x4EA0E8].
+        const FixedVec3 position_q16 = r.pos.q16();
+        FixedVec3 velocity_q16 = r.vel.q16();
 
         const FixedVec3 incoming_velocity_q16 = velocity_q16;
 
@@ -1850,7 +1850,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // another sweep.
         if (velocity_q16.x == 0 && velocity_q16.y == 0 && velocity_q16.z == 0) {
             velocity_q16.z -= kProjectileGravityQ16;
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16); // [orig: `vz -= 167` @0x4EA162]
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
                 r.active = false;
@@ -1909,12 +1909,12 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // The tick's tail runs the tracer whiz on every path through the
             // sweep [orig: Projectile_UpdatePhysics @0x4ea98e].
             round_tracer_whiz(world, r, ammo, position_q16, end_q16, incoming_velocity_q16);
-            r.pos = vec_from_fixed(end_q16);
+            r.pos.set_q16(end_q16); // [orig: the commit @0x4EAA3F..0x4EAA45]
             if (r.guided_family == GuidedFamily::None && (ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
             if (ammo != nullptr && r.guided_family == GuidedFamily::None)
                 apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z,
                                        /*surface_normal=*/0);
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16); // [orig: @0x4EAA5A, the drag @0x4EAA69]
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
                 r.active = false;
@@ -1965,7 +1965,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 impact_ammo_index = dud;
                 dud_replacement = r;
                 dud_replacement.ammo_index = dud;
-                dud_replacement.pos = impact_position;
+                dud_replacement.pos.set_q16(impact_q16);
                 dud_replacement.max_age_ticks =
                     ((dud_ammo->flags & kAmmoFlagNoAge) != 0)
                         ? INT32_MAX
@@ -2018,7 +2018,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (entity_impact_handler_leg && handler_has_def) {
             material_energy_survives =
                     subtract_material_energy(velocity_q16, r.mass_q16, material_cost);
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16);
         }
         // A victim already flagged dead drops the whole impact-effect
         // presentation for two face classes: a person body (itemDef+92 == 3)
@@ -2352,7 +2352,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 default:
                     break;
             }
-            if (produce) detonate_round(world, r, impact_position, *ammo);
+            if (produce) detonate_round(world, r, EntityPosition::of_q16(impact_q16), *ammo);
             kill_zone_pushed = produce;
         }
 
@@ -2412,14 +2412,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.y, incoming_velocity_q16.y),
                 beyond(position_q16.z, incoming_velocity_q16.z)};
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
-            r.pos = vec_from_fixed(next_position);
+            r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
             if (r.guided_family == GuidedFamily::None) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
                 if (ammo != nullptr)
                     apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
                             world.env.water_z, /*surface_normal=*/0);
             }
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16);
             continue;
         }
 
@@ -2450,14 +2450,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.y, incoming_velocity_q16.y),
                 beyond(position_q16.z, incoming_velocity_q16.z)};
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
-            r.pos = vec_from_fixed(next_position);
+            r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
             if (r.guided_family == GuidedFamily::None) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
                 if (ammo != nullptr)
                     apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
                             world.env.water_z, /*surface_normal=*/0);
             }
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16);
             continue;
         }
 

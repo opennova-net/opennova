@@ -98,6 +98,11 @@ struct EntityPosition {
         y.q16 = w.y;
         z.q16 = w.z;
     }
+    static EntityPosition of_q16(const FixedVec3 &w) {
+        EntityPosition p;
+        p.set_q16(w);
+        return p;
+    }
 };
 
 // Axis-aligned bounding box in mission space (Z-up, the original's frame).

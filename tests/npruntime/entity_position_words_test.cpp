@@ -41,6 +41,7 @@
 #include <runtime/world/geom.h>
 #include <runtime/world/match.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/round_sim.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
@@ -435,6 +436,10 @@ int gnl2_blast_point_is_the_raised_z_word() {
 	w::ItemDeathTraits traits;
 	traits.death_class = w::item_death_class_from_tag("gnl2");
 	world->tables.item_death_traits.set(500, traits);
+	w::AmmoTableEntry blast_ammo;
+	blast_ammo.valid = true;
+	blast_ammo.name = w::kItemExplosionAmmo;
+	world->tables.ammo.entries.push_back(blast_ammo);
 	w::destruction_notify_item_damage(*world, *world->registry.get(h), 1);
 	const w::ItemExplosionEvent *blast = nullptr;
 	for (const auto &event : world->out.entity_events)
@@ -445,6 +450,13 @@ int gnl2_blast_point_is_the_raised_z_word() {
 		return 1;
 	if (!expect(blast->count == 60 && yaw_100_heading(blast->heading),
 	            "the gnl2 heading is the row's Yaw word"))
+		return 1;
+	// The kill-zone entry's centre is the same words [orig: WeaponEffect_QueueExplosion
+	//  @0x4E8330; Projectile_ProcessExplosionQueue reads +0 / +4 / +8 @0x4EAF33..0x4EAF59].
+	if (!expect(world->explosions.queue.size() == 1 &&
+	                    same_words(world->explosions.queue[0].pos.q16(), kAshJoinerX, kTdhHostY,
+	                               kFarZ + 0x10000),
+	            "the queued blast's centre is the raised words"))
 		return 1;
 	std::printf("PASS gnl2_blast_point_is_the_raised_z_word\n");
 	return 0;
@@ -567,6 +579,45 @@ int flag_state_streams_the_words() {
 	return 0;
 }
 
+// A ballistic round flies on its words: the spawn keeps the origin's words, a
+// miss commits start + velocity as a word add, and the next tick starts from that
+// commit. [orig: RoundData_SpawnRound - Position and the +0x80 copy @0x4ec643..0x4ec655;
+//  Projectile_UpdatePhysics @0x4E9D70 - the end point @0x4EA232..0x4EA27D, the
+//  commit @0x4EAA3F..0x4EAA45, `vz -= 167` @0x4EAA5A]
+int round_flies_on_the_words() {
+	auto world = std::make_unique<w::World>();
+	w::AmmoTableEntry ammo;
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	world->tables.ammo.entries.push_back(ammo);
+	w::RoundSpawnParams params;
+	params.origin.set_q16({kFarZ, kAshJoinerX, kFarZ});
+	params.dir_yaw_bam = 0x12340000;
+	params.dir_pitch_bam = 0x01230000;
+	params.ammo_index = 0;
+	const int slot = world->round_sim.spawn(*world, params);
+	if (!expect(slot >= 0, "the round spawns")) return 1;
+	const w::LiveRound &r = world->round_sim.rounds[static_cast<size_t>(slot)];
+	if (!expect(same_words(r.pos.q16(), kFarZ, kAshJoinerX, kFarZ) && r.prev_z_q16 == kFarZ,
+	            "the round starts on the origin's words"))
+		return 1;
+	const w::FixedVec3 v0 = r.vel.q16();
+	world->round_sim.tick(*world, nullptr);
+	if (!expect(r.active && same_words(r.pos.q16(), kFarZ + v0.x, kAshJoinerX + v0.y, kFarZ + v0.z),
+	            "a miss commits start + velocity on the words"))
+		return 1;
+	const w::FixedVec3 p1 = r.pos.q16();
+	const w::FixedVec3 v1 = r.vel.q16();
+	if (!expect(v1.z != v0.z, "gravity and drag step the velocity words")) return 1;
+	world->round_sim.tick(*world, nullptr);
+	if (!expect(same_words(r.pos.q16(), p1.x + v1.x, p1.y + v1.y, p1.z + v1.z),
+	            "the next tick starts from the committed words"))
+		return 1;
+	std::printf("PASS round_flies_on_the_words\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -581,7 +632,8 @@ int main() {
 	const int barrel = barrel_blast_takes_the_yaw_word();
 	const int wreck = static_wreck_slides_on_the_words();
 	const int flag = flag_state_streams_the_words();
-	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag})
+	const int round = round_flies_on_the_words();
+	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round})
 		if (r != 0) return r;
 	return 0;
 }

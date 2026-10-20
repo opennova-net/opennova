@@ -608,9 +608,7 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     RoundSpawnParams rp;
     rp.owner = e.handle;
     rp.shooter_handle = e.handle.packed;
-    rp.origin.x = static_cast<float>(origin[0]) / io::kFp16One;
-    rp.origin.y = static_cast<float>(origin[1]) / io::kFp16One;
-    rp.origin.z = static_cast<float>(origin[2]) / io::kFp16One;
+    rp.origin.set_q16({origin[0], origin[1], origin[2]}); // the muzzle words (D-NET-507)
     rp.dir_yaw_bam = yaw_bam;
     rp.dir_pitch_bam = pitch_bam;
     rp.ammo_index = ammo_index;

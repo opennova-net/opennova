@@ -416,8 +416,8 @@ int32_t radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_si
 		if ((row.source & kRadarSourceRound) != 0) {
 			const size_t slot = row.source & kRadarSourceIndexMask;
 			if (slot < world.round_sim.rounds.size()) {
-				threat.x = to_fixed(world.round_sim.rounds[slot].pos.x);
-				threat.y = to_fixed(world.round_sim.rounds[slot].pos.y);
+				threat.x = world.round_sim.rounds[slot].pos.x.q16;
+				threat.y = world.round_sim.rounds[slot].pos.y.q16;
 			}
 		}
 		out.threats.push_back(threat);

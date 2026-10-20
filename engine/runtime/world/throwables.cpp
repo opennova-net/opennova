@@ -167,23 +167,22 @@ int16_t item_angle_degrees_from_bam(int32_t bam) {
     return static_cast<int16_t>(std::lround(double(bam) * kDegreesPerBam));
 }
 
+// The motors read and write the round's Position and velocity words in place
+// (D-NET-507). [orig: Entity_UpdateGrenadePhysics @0x4443D0 - the entity's
+//  +4/+8/+0xC and +0x98/+0x9C/+0xA0]
 void load_frame(const LiveRound &r, MotorFrame &f) {
-    f.px = to_fixed(r.pos.x);
-    f.py = to_fixed(r.pos.y);
-    f.pz = to_fixed(r.pos.z);
-    f.vx = to_fixed(r.vel.x);
-    f.vy = to_fixed(r.vel.y);
-    f.vz = to_fixed(r.vel.z);
+    f.px = r.pos.x.q16;
+    f.py = r.pos.y.q16;
+    f.pz = r.pos.z.q16;
+    f.vx = r.vel.x.q16;
+    f.vy = r.vel.y.q16;
+    f.vz = r.vel.z.q16;
     f.prev_z = f.pz;
 }
 
 void store_frame(LiveRound &r, const MotorFrame &f) {
-    r.pos.x = static_cast<float>(from_fixed(f.px));
-    r.pos.y = static_cast<float>(from_fixed(f.py));
-    r.pos.z = static_cast<float>(from_fixed(f.pz));
-    r.vel.x = static_cast<float>(from_fixed(f.vx));
-    r.vel.y = static_cast<float>(from_fixed(f.vy));
-    r.vel.z = static_cast<float>(from_fixed(f.vz));
+    r.pos.set_q16({f.px, f.py, f.pz});
+    r.vel.set_q16({f.vx, f.vy, f.vz});
 }
 
 int32_t horizontal_speed_q16(const MotorFrame &f) {
@@ -396,16 +395,14 @@ void follow_parent(World &world, LiveRound &r) {
         return;
     }
 	CarrierMotionPose p;
-	p.pos[0] = to_fixed(r.pos.x);
-	p.pos[1] = to_fixed(r.pos.y);
-    p.pos[2] = to_fixed(r.pos.z);
+	p.pos[0] = r.pos.x.q16;
+	p.pos[1] = r.pos.y.q16;
+    p.pos[2] = r.pos.z.q16;
     p.yaw_bam = r.yaw_bam;
     p.pitch_bam = r.pitch_bam;
     p.roll_bam = r.roll_bam;
 	follow_carrier_motion(*parent, p);
-	r.pos.x = static_cast<float>(from_fixed(p.pos[0]));
-	r.pos.y = static_cast<float>(from_fixed(p.pos[1]));
-    r.pos.z = static_cast<float>(from_fixed(p.pos[2]));
+	r.pos.set_q16({p.pos[0], p.pos[1], p.pos[2]});
     r.yaw_bam = p.yaw_bam;
     r.pitch_bam = p.pitch_bam;
     r.roll_bam = p.roll_bam;
@@ -527,9 +524,9 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
         saved = FixedVec3{f.px, f.py, f.pz};
         store_frame(r, f);
         follow_parent(world, r);
-        f.px = to_fixed(r.pos.x);
-        f.py = to_fixed(r.pos.y);
-        f.pz = to_fixed(r.pos.z);
+        f.px = r.pos.x.q16;
+        f.py = r.pos.y.q16;
+        f.pz = r.pos.z.q16;
     }
     // The floor under the saved point, queried 0x2000 above it: a pool-2/1
     // face below, else the terrain, which the round's Flags 0x800000 (its BB
@@ -636,16 +633,19 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
     // push tests no class. [orig: the flag @0x444A29; the push @0x444A0F]
     const int32_t remaining = r.max_age_ticks - elapsed;
     if (remaining == 2) {
-        if (r.pos.z >= from_fixed(water)) {
+        // The Z word against the water word, and the depth a word difference
+        // past 0x30000 (D-NET-507) [orig: `cmp ecx, eax; jge` @0x444984..0x444986,
+        //  `sub edx, ecx` / `cmp edx, 30000h` @0x4449A2..0x4449A4, `jg` @0x4449C2].
+        if (r.pos.z.q16 >= water) {
             r.det_at_expiry = true;
         } else {
-            const double depth = from_fixed(water) - r.pos.z;
+            const int32_t depth = io::bam_sub(water, r.pos.z.q16);
             // Tags 27 and 26 sit at the water surface, tag 25 at the round
             // [orig: the descriptor z = g_EnvWaterHeightFixed @0x4449BE for
             //  the calls @0x4449CC (26) / @0x4449DE (27); the round z
             //  restored @0x4449EE for @0x4449F2 (25)].
             const Vec3 surface{r.pos.x, r.pos.y, static_cast<float>(from_fixed(water))};
-            if (depth > 3.0) {
+            if (depth > 0x30000) {
                 push_motor_effect(world, sim, r, 27, surface, world.logic_tick);
                 push_motor_effect(world, sim, r, 25, r.pos, world.logic_tick);
             } else {
@@ -870,9 +870,9 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         start = FixedVec3{f.px, f.py, f.pz};
         store_frame(r, f);
         follow_parent(world, r);
-        f.px = to_fixed(r.pos.x);
-        f.py = to_fixed(r.pos.y);
-        f.pz = to_fixed(r.pos.z);
+        f.px = r.pos.x.q16;
+        f.py = r.pos.y.q16;
+        f.pz = r.pos.z.q16;
     }
     // The swept item raycast under the motor's ray context (the velocity over
     // the 3-D speed, that speed as the length; each pool's hit kept only below
@@ -997,12 +997,14 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     // [orig: satchel @0x4489F6..0x448A22, the conversion @0x448A2E..0x448C12,
     //  the client leg @0x448C1A..0x448C24; claymore @0x447981..0x4479AD,
     //  @0x4479B9..0x447B93, @0x447B9B..0x447BA5]
-    if (!r.parent.valid()) r.pos.z += static_cast<float>(from_fixed(4096));
+    // The Z word lifts by 0x1000, a word add (D-NET-507) [orig: `add edx, 1000h`
+    //  / `mov [esi+0Ch], edx` @0x448A07..0x448A0D; claymore @0x447992..0x447998].
+    if (!r.parent.valid()) r.pos.z.q16 = io::bam_add(r.pos.z.q16, 0x1000);
     r.spin_yaw = 0;
     r.spin_pitch = 0;
-    r.vel.z = 0.0f;
+    r.vel.z.q16 = 0;
     if (allow_consequences) {
-        r.vel = Vec3{0.0f, 0.0f, 0.0f};
+        r.vel.set_q16({0, 0, 0});
         world.throwables.place_from_round(world, r, ammo);
         return false; // the round slot releases [orig: source round expires]
     }
@@ -1033,8 +1035,7 @@ static void refresh_round_indoors(World &world, LiveRound &round,
     if (type == def::DEF_ITEM_TYPE_BUILDING || type == def::DEF_ITEM_TYPE_VEHICLE ||
             type == def::DEF_ITEM_TYPE_PERSON)
         return;
-    const int32_t at[3] = {to_fixed(round.pos.x), to_fixed(round.pos.y),
-                           to_fixed(round.pos.z)};
+    const int32_t at[3] = {round.pos.x.q16, round.pos.y.q16, round.pos.z.q16};
     BlinkAccum accum;
     collision->query_blink_boxes_at_point(world, at, accum);
     round.indoors_flags = (accum.flags & kBlinkIndoorsBit) != 0;
@@ -1345,8 +1346,7 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
     const size_t cap = world.registry.pool_capacity(pool);
     // Both variants trace from 0.3 u above the device [orig: +0x4CCC @0x43CA29
     // / @0x43CBD9].
-    const int32_t dev[3] = {to_fixed(device.pos.x), to_fixed(device.pos.y),
-                            to_fixed(device.pos.z)};
+    const int32_t dev[3] = {device.pos.x.q16, device.pos.y.q16, device.pos.z.q16};
     const int32_t eye[3] = {dev[0], dev[1], dev[2] + 0x4CCC};
     const int32_t max_range = to_fixed(max_range_units);
     for (size_t s = 0; s < cap; ++s) {
@@ -1500,9 +1500,7 @@ void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
             p.pitch_bam = d.pitch_bam;
             p.roll_bam = d.roll_bam;
             follow_carrier_motion(*parent, p);
-            d.pos = Vec3{ static_cast<float>(from_fixed(p.pos[0])),
-                static_cast<float>(from_fixed(p.pos[1])),
-                static_cast<float>(from_fixed(p.pos[2])) };
+            d.pos.set_q16({p.pos[0], p.pos[1], p.pos[2]});
             d.yaw_bam = p.yaw_bam;
             d.pitch_bam = p.pitch_bam;
             d.roll_bam = p.roll_bam;

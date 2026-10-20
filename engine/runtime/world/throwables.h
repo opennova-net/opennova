@@ -171,7 +171,7 @@ struct PlacedDevice {
     int32_t item_enemy = 0;       // [orig: ammo +20] foe variant; 0 -> friendly fallback
     uint8_t team = 0xFF;          // [orig: +354]
     ThrowClass think = ThrowClass::kNone;
-    Vec3 pos;                     // mission units
+    EntityPosition pos;           // the placed entity's words (D-NET-507)
     int32_t yaw_bam = 0;          // [orig: +16/+20/+24] facing (claymore cone axis)
     int32_t pitch_bam = 0;
     int32_t roll_bam = 0;
@@ -198,7 +198,7 @@ struct ThrowableEvents {
         int32_t item_enemy = 0;    //  carries both TrcrID words]
         uint16_t parent_handle = 0xFFFF;
         uint8_t team = 0xFF;
-        Vec3 pos;
+        EntityPosition pos;        // the resting round's words (S2C 0x59)
         int32_t yaw_bam = 0;
         int32_t pitch_bam = 0;
         int32_t roll_bam = 0;

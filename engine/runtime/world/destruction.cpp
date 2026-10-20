@@ -370,10 +370,10 @@ bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_ta
 // The fixed-point length of a victim's offset: the fixed deltas' length,
 // capped at 2147418112.0 and truncated [orig: pool 0 @0x4EAF66..0x4EAF97,
 // flt_7C19E0, _ftol2_sse].
-int32_t fixed_distance(const Vec3 &a, const Vec3 &b) {
-    const double dx = double(int32_t(uint32_t(to_fixed(a.x)) - uint32_t(to_fixed(b.x))));
-    const double dy = double(int32_t(uint32_t(to_fixed(a.y)) - uint32_t(to_fixed(b.y))));
-    const double dz = double(int32_t(uint32_t(to_fixed(a.z)) - uint32_t(to_fixed(b.z))));
+int32_t fixed_distance(const EntityPosition &a, const EntityPosition &b) {
+    const double dx = double(int32_t(uint32_t(a.x.q16) - uint32_t(b.x.q16)));
+    const double dy = double(int32_t(uint32_t(a.y.q16) - uint32_t(b.y.q16)));
+    const double dz = double(int32_t(uint32_t(a.z.q16) - uint32_t(b.z.q16)));
     double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (dist > 2147418112.0) dist = 2147418112.0;
     return io::retail_ftol_sse2(dist);
@@ -439,8 +439,8 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     // [orig: @0x4E666A..0x4E66B1 — the fpatan @0x4E668D; the shift @0x4E6725]
     const int quadrant = approach_quadrant(
             bam_heading_from_mission_yaw_deg(static_cast<double>(target.yaw)),
-            io::bam_sub(to_fixed(e.pos.x), target.position.x.q16),
-            io::bam_sub(to_fixed(e.pos.y), target.position.y.q16),
+            io::bam_sub(e.pos.x.q16, target.position.x.q16),
+            io::bam_sub(e.pos.y.q16, target.position.y.q16),
             kCollisionQuadrantBias);
     const int32_t before = target.health;
     if (before <= 0) return; // [orig: `test bp, bp; jle` @0x4E66B7..0x4E66BE]
@@ -572,8 +572,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
         //  `add ecx, 1FFFFFFFh; shr ecx, 1Eh` @ 0x4e6a58..0x4e6a5e].
         const int32_t heading_bam = bam_heading_from_mission_yaw_deg(target.yaw);
         const int quadrant = approach_quadrant(heading_bam,
-                io::bam_sub(to_fixed(e.pos.x), target.position.x.q16),
-                io::bam_sub(to_fixed(e.pos.y), target.position.y.q16), 0x1FFFFFFFu);
+                io::bam_sub(e.pos.x.q16, target.position.x.q16),
+                io::bam_sub(e.pos.y.q16, target.position.y.q16), 0x1FFFFFFFu);
         int cause = death_cause::kExplosive;
         if (d16 >= 0x40000 && d16 < 0x80000)
             cause = (death_rand16(world) < 0x4000) ? death_cause::kFire : death_cause::kExplosive;
@@ -605,7 +605,7 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             // entity (+0x20), the blip point the entry's position (+0x00)
             // [orig: @0x4e6b77..0x4e6b8a -> Player_OnDamageReceived @0x4dd880].
             if (target.handle == world.cached.local_player && e.type != ammo_kz::kMedic) {
-                const int32_t blast[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y), to_fixed(e.pos.z)};
+                const int32_t blast[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
                 player_on_damage_received(world, radar_entity_source(world, e.owner), blast);
             }
             if (target.health <= 0 && before > 0) {
@@ -640,7 +640,7 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
         const CollisionModel *model = collision->model(collision->entity_model_id(target.handle));
         CollisionMatrix matrix;
         if (model != nullptr && collision->entity_section_matrix(world, target.handle, 0, matrix)) {
-            const int32_t center[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y), to_fixed(e.pos.z)};
+            const int32_t center[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
             const int32_t radius = to_fixed(blast_radius);
             for (size_t i = 0; i < model->sections.size(); ++i) {
                 const CollisionSection &section = model->sections[i];
@@ -965,7 +965,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                     // Burn reacts before the damage callback's armor/team gates.
                     // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
                     if (t->item_type == 3)
-                        apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos, e.owner);
+                        apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos.q16(), e.owner);
                     // Then the victim's presentation, every pool-0 type: the
                     // ammo's kz_sound full-volume at the victim, and its
                     // secondary_effect into the victim's +0x1CC slot (the
@@ -1000,8 +1000,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                         t->damage_state == 0 &&
                         t->handle == world.cached.local_player &&
                         e.type != ammo_kz::kMedic) {
-                    const int32_t blast[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y),
-                            to_fixed(e.pos.z)};
+                    const int32_t blast[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
                     player_on_damage_received(world, radar_entity_source(world, e.owner), blast);
                 }
                 // The damage-disabled word keeps the callback away entirely
@@ -1125,10 +1124,15 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
         } else {
             const CollisionMatrix orientation = destruction_orientation(target);
             for (const Vec3 &p : traits->kz_points) {
-                const Vec3 offset = rotate_authored_point(orientation, p);
-                blast.pos = Vec3{target.position.x + offset.x,
-                                 target.position.y + offset.y,
-                                 target.position.z + offset.z};
+                // The user point through the entity's matrix onto its words
+                // (D-NET-507) [orig: Entity_QueueKzBlastAtUserPoints @0x4EABF0 -
+                //  Math_FixedPointTransformPoint22 @0x4EACB6].
+                const int32_t local[3] = {to_fixed(p.x), to_fixed(p.y), to_fixed(p.z)};
+                int32_t offset[3];
+                orientation.rotate_point(local, offset);
+                blast.pos.set_q16({io::bam_add(target.position.x.q16, offset[0]),
+                                   io::bam_add(target.position.y.q16, offset[1]),
+                                   io::bam_add(target.position.z.q16, offset[2])});
                 blast.radius_override = kKzPointBlastRadius; // [orig: the 5.0 at @ 0x4eace7]
                 world.explosions.queue_explosion(world, blast);
             }

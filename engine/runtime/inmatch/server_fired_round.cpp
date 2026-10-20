@@ -335,9 +335,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			world::RoundSpawnParams rp;
 			rp.owner = conn.link.owned_entity;
 			rp.shooter_handle = fr.shooter_handle;
-			rp.origin.x = opennova::io::fp16_16_to_float(fr.pos_x);
-			rp.origin.y = opennova::io::fp16_16_to_float(fr.pos_y);
-			rp.origin.z = opennova::io::fp16_16_to_float(fr.pos_z);
+			rp.origin.set_q16({fr.pos_x, fr.pos_y, fr.pos_z}); // the wire's words (D-NET-507)
 			rp.dir_yaw_bam = ev.dir_yaw;
 			rp.dir_pitch_bam = ev.dir_pitch;
 			rp.ammo_index = round_ammo;

@@ -43,14 +43,14 @@ int main() {
     // --- the burn half (force 0) -------------------------------------------
     // Source {-1,0,0} is straight ahead of a heading-0 body (multiplier 3);
     // {0,-1,0} sits at +90 degrees, exactly on the 0x3FFFFFC0 edge (multiplier 4).
-    apply_collision_force(world, entity, 1, 0, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 1, 0, {-65536, 0, 0}, owner);
     CHECK(inf.burn_state == 1 && inf.combat_move_timer == 36);
-    apply_collision_force(world, entity, 2, 0, {0, -1, 0}, owner);
+    apply_collision_force(world, entity, 2, 0, {0, -65536, 0}, owner);
     CHECK(inf.burn_state == 2 && inf.combat_move_timer == 48);
     world.registry.get(owner)->group_id = 2;
-    apply_collision_force(world, entity, 3, 0, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 3, 0, {-65536, 0, 0}, owner);
     CHECK(inf.burn_state == 3 && inf.combat_move_timer == 1);
-    apply_collision_force(world, entity, 4, 0, {0, -1, 0}, owner);
+    apply_collision_force(world, entity, 4, 0, {0, -65536, 0}, owner);
     CHECK(inf.burn_state == 4 && inf.combat_move_timer == 2);
     apply_collision_force(world, entity, 0, 0, {}, owner);
     CHECK(inf.burn_state == 4 && inf.combat_move_timer == 2);
@@ -106,80 +106,80 @@ int main() {
     // Force 1, live body: +5120 vertical, 9216-scaled planar kick along the
     // bearing. hit_type 0 still applies the force.
     reset_vel();
-    apply_collision_force(world, entity, 0, 1, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 1, {-65536, 0, 0}, owner);
     CHECK(inf.burn_state == 0);
     CHECK(inf.vel[2] == 5120 && inf.vel[0] == impulse(9216, c0) && inf.vel[1] == 0);
     // The slideDecay < 4096 gate: exactly 4096 blocks, 4095 passes.
     reset_vel();
     inf.vel[2] = 4096;
-    apply_collision_force(world, entity, 0, 1, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 1, {-65536, 0, 0}, owner);
     CHECK(inf.vel[2] == 4096 && inf.vel[0] == 0);
     inf.vel[2] = 4095;
-    apply_collision_force(world, entity, 0, 1, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 1, {-65536, 0, 0}, owner);
     CHECK(inf.vel[2] == 4095 + 5120 && inf.vel[0] == impulse(9216, c0));
     // Flags 0x40 (mounted/guarding) blocks the write.
     reset_vel();
     entity.engine_flags = kEntityFlagMounted;
-    apply_collision_force(world, entity, 0, 1, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 1, {-65536, 0, 0}, owner);
     CHECK(inf.vel[0] == 0 && inf.vel[1] == 0 && inf.vel[2] == 0);
     // Dead body: the smaller constants, and the burn store is skipped while the
     // force still applies.
     reset_vel();
     entity.engine_flags = kEntityFlagDead;
-    apply_collision_force(world, entity, 2, 1, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 2, 1, {-65536, 0, 0}, owner);
     CHECK(inf.burn_state == 0);
     CHECK(inf.vel[2] == 2560 && inf.vel[0] == impulse(4608, c0) && inf.vel[1] == 0);
 
     // Force 2, drift: planar only, gated on |vx| + |vy| < 4096.
     entity.engine_flags = 0;
     reset_vel();
-    apply_collision_force(world, entity, 0, 2, {0, -1, 0}, owner);
+    apply_collision_force(world, entity, 0, 2, {0, -65536, 0}, owner);
     CHECK(inf.vel[0] == impulse(9216, c90) && inf.vel[1] == impulse(9216, s90) && inf.vel[2] == 0);
     reset_vel();
     inf.vel[0] = 2048;
     inf.vel[1] = -2048;
-    apply_collision_force(world, entity, 0, 2, {0, -1, 0}, owner);
+    apply_collision_force(world, entity, 0, 2, {0, -65536, 0}, owner);
     CHECK(inf.vel[0] == 2048 && inf.vel[1] == -2048);
     inf.vel[0] = 2047;
-    apply_collision_force(world, entity, 0, 2, {0, -1, 0}, owner);
+    apply_collision_force(world, entity, 0, 2, {0, -65536, 0}, owner);
     CHECK(inf.vel[0] == 2047 + impulse(9216, c90) && inf.vel[1] == -2048 + impulse(9216, s90));
     reset_vel();
     entity.engine_flags = kEntityFlagDead;
-    apply_collision_force(world, entity, 0, 2, {0, -1, 0}, owner);
+    apply_collision_force(world, entity, 0, 2, {0, -65536, 0}, owner);
     CHECK(inf.vel[0] == impulse(2304, c90) && inf.vel[1] == impulse(2304, s90) && inf.vel[2] == 0);
 
     // Force 4, direct push: (table << 10) >> 22 planar, +1024 vertical, the
     // same slideDecay gate as force 1.
     entity.engine_flags = 0;
     reset_vel();
-    apply_collision_force(world, entity, 0, 4, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 4, {-65536, 0, 0}, owner);
     CHECK(inf.vel[0] == static_cast<int32_t>((static_cast<int64_t>(c0) << 10) >> 22));
     CHECK(inf.vel[1] == 0 && inf.vel[2] == 1024);
     reset_vel();
     inf.vel[2] = 4096;
-    apply_collision_force(world, entity, 0, 4, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 4, {-65536, 0, 0}, owner);
     CHECK(inf.vel[0] == 0 && inf.vel[2] == 4096);
 
     // Force 3, the hit blackout: only the local player arms it.
     auto &dim = world.weather.core.hit_dim;
     const auto clear_dim = [&dim]() { dim.intensity = 0; dim.fade_rate = 0; };
     clear_dim();
-    apply_collision_force(world, entity, 0, 3, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {-65536, 0, 0}, owner);
     CHECK(dim.intensity == 0 && dim.fade_rate == 0);
     world.cached.local_player = target;
     // Enemy (different command group): both facings resolve to rate 105.
-    apply_collision_force(world, entity, 0, 3, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {-65536, 0, 0}, owner);
     CHECK(dim.intensity == 0xA000 && dim.fade_rate == 105);
     clear_dim();
-    apply_collision_force(world, entity, 0, 3, {0, -1, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {0, -65536, 0}, owner);
     CHECK(dim.intensity == 0xA000 && dim.fade_rate == 105);
     // Friendly (same group + team) offline: facing 0x8000/93 = 352, behind 0x8000/124 = 264.
     world.registry.get(owner)->group_id = 2;
     clear_dim();
-    apply_collision_force(world, entity, 0, 3, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {-65536, 0, 0}, owner);
     CHECK(dim.intensity == 0xA000 && dim.fade_rate == 352);
     clear_dim();
-    apply_collision_force(world, entity, 0, 3, {0, -1, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {0, -65536, 0}, owner);
     CHECK(dim.intensity == 0xA000 && dim.fade_rate == 264);
     // Self hit is friendly whatever the group.
     world.registry.get(owner)->group_id = 1;
@@ -190,7 +190,7 @@ int main() {
     world.registry.get(owner)->group_id = 2;
     world.registry.get(owner)->team = 1;
     clear_dim();
-    apply_collision_force(world, entity, 0, 3, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {-65536, 0, 0}, owner);
     CHECK(dim.fade_rate == 105);
     world.registry.get(owner)->team = 0;
     // In session, a non-team game type (DM) makes every hit an enemy hit.
@@ -199,23 +199,23 @@ int main() {
     dm.game_type = 0;
     world.match.configure(dm);
     clear_dim();
-    apply_collision_force(world, entity, 0, 3, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {-65536, 0, 0}, owner);
     CHECK(dim.fade_rate == 105);
     // A team game type (TDM 0x10000) keeps the friendly leg ...
     MatchRules tdm;
     tdm.game_type = 0x10000u;
     world.match.configure(tdm);
     clear_dim();
-    apply_collision_force(world, entity, 0, 3, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {-65536, 0, 0}, owner);
     CHECK(dim.fade_rate == 352);
     // ... unless the rules word carries NoFriendlyFire (0x200).
     world.rules.no_friendly_fire = true;
     clear_dim();
-    apply_collision_force(world, entity, 0, 3, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {-65536, 0, 0}, owner);
     CHECK(dim.intensity == 0 && dim.fade_rate == 0);
     // NoFriendlyFire only matters in session.
     world.rules.mp_session = false;
-    apply_collision_force(world, entity, 0, 3, {-1, 0, 0}, owner);
+    apply_collision_force(world, entity, 0, 3, {-65536, 0, 0}, owner);
     CHECK(dim.fade_rate == 352);
     world.rules.no_friendly_fire = false;
     world.cached.local_player = EntityHandle{};

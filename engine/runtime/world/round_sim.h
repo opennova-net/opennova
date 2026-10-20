@@ -213,7 +213,7 @@ struct RoundSpawnParams {
     // 0xFF is only the truly-unresolvable-source arm.
     // [orig: the sourceEntity team copy @0x4ec705; the !sourceEntity arm @0x4ec721]
     uint8_t shooter_team = 0xFF;
-    Vec3 origin;                      // fire origin, mission units
+    EntityPosition origin;            // the fire origin's words (D-NET-507)
     int32_t dir_yaw_bam = 0;          // wire fire direction (engine-frame BAM32, §5.16)
     int32_t dir_pitch_bam = 0;
     int32_t ammo_index = -1;          // resolved adm round_type -> AmmoTable index
@@ -272,8 +272,12 @@ struct LiveRound {
     // potentially between two rendered frames during fixed-tick catch-up; a
     // slot index alone would teleport an old owned effect onto the new round.
     uint64_t presentation_generation = 0;
-    Vec3 pos;            // mission units
-    Vec3 vel;            // mission units per TICK [orig: velocity = ammo speed / 62]
+    // The round entity's Position (+4/+8/+0xC) and velocity (+152/+156/+160)
+    // words, 16.16 per tick; every motor store is word arithmetic (D-NET-507).
+    // [orig: Projectile_UpdatePhysics @0x4E9D70 - the position commit
+    //  @0x4EAA3F..0x4EAA45, the velocity reads @0x4EA0DC..0x4EA0E8]
+    EntityPosition pos;
+    EntityPosition vel;
     // round+680: (ammo weight in grains << 16) / 250. Kept on the round so
     // copied/dud rounds retain the original mass [orig: @0x4ec6b7].
     int32_t mass_q16 = 0;
@@ -509,7 +513,7 @@ struct RoundHit {
 // stood when the record was written.
 struct HitRecord {
     bool has_round = false;       // +0x40 non-null
-    Vec3 round_pos;               // the round's +0x04..+0x0C
+    EntityPosition round_pos;     // the round's +0x04..+0x0C words
     FixedVec3 round_vel_q16;      // the round's +0x98..+0xA0
     int32_t round_yaw_bam = 0;    // +0x0C..+0x14 (hitRecord[3..5])
     int32_t round_pitch_bam = 0;
@@ -796,7 +800,7 @@ private:
 // Queue a round's kill zone at its stop: the raw push, ungated; each caller
 // applies its producer's gates [orig: WeaponEffect_PushExplosionQueueEntry
 // @ 0x4E83C0]. Shared with the throwable motors (world/throwables.cpp).
-void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
+void detonate_round(World &world, const LiveRound &round, const EntityPosition &at,
                     const AmmoTableEntry &ammo);
 
 // The live occupant count of a vehicle and the occupant damage reduction the
