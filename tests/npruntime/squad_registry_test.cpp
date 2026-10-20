@@ -5,6 +5,8 @@
 //     0x1010 (every slot holder, itself included, its copy riding the spawn pump between the
 //     settings updates and the 0x05) and S2C 0x32 {3, name} on mask 0x80 ahead of the join line;
 //   - a second joiner of the squad overwrites the node's name and tag and sends neither;
+//   - two joiners of different squads added in one pump pass: the first hears the second's 0x6A
+//     after its own pump block;
 //   - the map change's slot reset keeps the key and the node;
 //   - the leave of a squad's second-to-last slot sends nothing; the last one's sends S2C 0x32
 //     {4, name}, then S2C 0x6A {2, id}, and frees the node;
@@ -263,6 +265,43 @@ void run_two_joiners_of_one_squad_and_their_leave() {
 	expect(f.ctx->squad_registry.empty(), "the node is freed");
 }
 
+// Two joiners of different squads added in one pump pass: retail's pump sends the first one's
+// whole block (0x03, settings, its own 0x6A, 0x05, 0x04, 0x7B) and restarts its walk before the
+// second add's 0x6A reaches it, so the first joiner hears the second squad after its 0x7B.
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the 0x7B @0x4C9111, goto LABEL_5
+//  @0x4C9128 ahead of the next add @0x4C903A]
+void run_two_squads_added_in_one_pass() {
+	SquadFixture f;
+	f.queue_joiner(0, "Able", 7, "Alpha Squad", "ALF");
+	f.queue_joiner(1, "Baker", 8, "Bravo Squad", "BRV");
+	expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 2,
+	       "one pump pass adds both joiners");
+	expect(drain(f.transports[0]).empty(), "Able hears nothing ahead of its pump block");
+	(void)drain(f.lan_transport);
+	(void)inmatch::tick_connections(*f.ctx, 16, f.tick++, /*respect_s2c_send_boundary=*/false,
+			/*run_spawn_pump=*/false);
+	const std::vector<ns::Datagram> able = drain(f.transports[0]);
+	const std::size_t own = index_of(able, opennova::s2c::CLAN_ROSTER);
+	const std::size_t start = index_of(able, opennova::s2c::GAME_START_SIGNAL);
+	const std::size_t info = index_of(able, opennova::s2c::FULL_PLAYER_INFO);
+	const std::size_t later = index_of(able, opennova::s2c::CLAN_ROSTER, own + 1);
+	expect(own < start && start < info && info < later && later < able.size() &&
+	               count_of(able, opennova::s2c::CLAN_ROSTER) == 2,
+	       "Able hears its own 0x6A ahead of the 0x05 and Baker's after its 0x7B");
+	opennova::ClanRosterUpdate update;
+	expect(own < able.size() && roster_update(able[own], update) && update.account_id == 7,
+	       "Able's first 0x6A is its own squad's");
+	expect(later < able.size() && roster_update(able[later], update) &&
+	               update.action == opennova::kClanRosterAdd && update.account_id == 8 &&
+	               update.name == "Bravo Squad" && update.tag == "BRV",
+	       "the one after its block is {1, 8, \"Bravo Squad\", \"BRV\"}");
+	const std::vector<ns::Datagram> baker = drain(f.transports[1]);
+	expect(count_of(baker, opennova::s2c::CLAN_ROSTER) == 1 &&
+	               index_of(baker, opennova::s2c::CLAN_ROSTER) <
+	                       index_of(baker, opennova::s2c::GAME_START_SIGNAL),
+	       "Baker, not yet added at Able's add, hears only its own 0x6A, ahead of its 0x05");
+}
+
 // A chat line from a squad member carries its tag; channel 12 reaches the slots of the
 // sender's key and team (on LAN every key is 0), never under the triplet filter.
 void run_chat_reads_the_squad_key() {
@@ -341,6 +380,7 @@ void run_session_create_clears_the_registry() {
 
 int main() {
 	run_two_joiners_of_one_squad_and_their_leave();
+	run_two_squads_added_in_one_pass();
 	run_chat_reads_the_squad_key();
 	run_session_create_clears_the_registry();
 	if (failures == 0) std::printf("npruntime_squad_registry: all passed\n");

@@ -443,6 +443,13 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 					config.config_bytes[6], *player_slot, capacity, team)));
 	messages.push_back(make_protocol_message(
 			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(config, mission_text_title, conn)));
+	// A later add's 0x6A follows the block: retail's pump finishes this slot's
+	// block and restarts its walk before the next add sends [orig:
+	//  CNapiServer_ProcessPendingPlayerSpawns - the 0x7B @0x4C9111, goto LABEL_5
+	//  @0x4C9128].
+	for (std::vector<uint8_t> &body : conn.squad_roster_after_pump)
+		messages.push_back(make_protocol_message(s2c::CLAN_ROSTER, std::move(body)));
+	conn.squad_roster_after_pump.clear();
 	return messages;
 }
 

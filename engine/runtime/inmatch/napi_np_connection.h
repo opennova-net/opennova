@@ -641,6 +641,14 @@ struct NapiNPConnection {
 	//  0x6A @0x51CEEF; CNapiServer_ProcessPendingPlayerSpawns - the add @0x4C903A, the
 	//  0x05 @0x4C909D]
 	std::vector<uint8_t> squad_roster_add_staged;
+	// The S2C 0x6A bodies a later add (or a leave) sent this slot while its own
+	// spawn pump block was still unsent: retail's pump sends an added slot's
+	// whole 0x03 / 0x05 / 0x04 / 0x7B block and restarts its walk before the
+	// next add's 0x6A reaches it, so the pump's metadata carries them after its
+	// 0x7B (build_spawn_pump_metadata).
+	// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the 0x7B
+	//  @0x4C9111, goto LABEL_5 @0x4C9128 ahead of the next add @0x4C903A]
+	std::vector<std::vector<uint8_t>> squad_roster_after_pump;
 	// The node's reject-pending byte: a later joiner's PCID matched this
 	// remote connection's, so the next S2C 0x79 boundary kicks it
 	// (Server_KickDuplicatePcids). Nothing clears it; the kick destroys the node.

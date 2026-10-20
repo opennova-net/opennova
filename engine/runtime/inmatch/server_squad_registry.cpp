@@ -15,14 +15,25 @@ namespace {
 // connection whose player has a slot (active, not a bot) and reads none of the
 // other bits but 0x10, which leaves out the listen host's own connection. No
 // slot-state test: a squad's first slot hears its own 0x6A while it loads.
+// A slot added earlier in the same pump pass has had its whole spawn block
+// sent in retail before this add runs, so its copy follows that block.
 // [orig: NapiNPServer_SendFiltered @0x4C87E0 - the slot gate @0x4C889F, the
-//  0x10 skip @0x4C88F6..0x4C88FA, the 0x1000 test @0x4C89B5..0x4C89B7]
+//  0x10 skip @0x4C88F6..0x4C88FA, the 0x1000 test @0x4C89B5..0x4C89B7;
+//  CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the 0x7B @0x4C9111,
+//  goto LABEL_5 @0x4C9128]
 void send_squad_roster(NapiNPServerCtx &ctx, const ClanRosterUpdate &update,
 		const NapiNPConnection *skip) {
 	const std::vector<uint8_t> body = encode_clan_roster_update(update);
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (&c == skip || c.link.transport == nullptr || !player_slot_active(c)) continue;
 		if (c.link.mode == replication::TransportMode::Loopback) continue; // 0x10
+		// The admitted joiner whose spawn block tick_connections has yet to queue.
+		if (c.type == NapiNPConnection::kTypeServerSide &&
+				c.admission_stage == GameAdmissionStage::Complete &&
+				c.reply.admission_metadata_pushed && !c.reply.spawn_metadata_pushed) {
+			c.squad_roster_after_pump.push_back(body);
+			continue;
+		}
 		c.link.transport->host_send(s2c::CLAN_ROSTER, body); // class 1, userParam 0
 	}
 }
