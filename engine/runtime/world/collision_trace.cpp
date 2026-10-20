@@ -623,7 +623,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     }
 
     // Water is pass two regardless of a ClipWater-style ammo flag. Retail
-    // requires a strict straddle, so an endpoint on the plane is not a hit.
+    // requires a strict straddle, so an endpoint on the plane is not a hit, and
+    // skips the pass on a water word of 0, its own test (unlike the float's and
+    // the drivers', which compare the raw word). [orig: Projectile_UpdatePhysics
+    //  `cmp g_EnvWaterHeightFixed, 0; jz` @0x4EA4BB..0x4EA4C2 ahead of the
+    //  Projectile_CheckWaterIntersection call @0x4EA4C9]
     const int32_t water_z = world.env.water_z;
     if (trace.walk_water && water_z != 0 &&
         ((trace.start.z > water_z && trace.end.z < water_z) ||

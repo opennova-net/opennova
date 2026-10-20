@@ -563,7 +563,10 @@ void test_corpse_rules() {
 			"another clip or another corpse seeds otherwise");
 
 	auto world = std::make_unique<World>();
-	expect(corpse_ragdoll_may_start(*world, -1000.0f), "a world with no water starts anywhere");
+	// A map without water carries the word 0, retail's float plane alike (no dry
+	// sentinel): hips above it start, hips below it keep the float.
+	expect(corpse_ragdoll_may_start(*world, 0.5f) && !corpse_ragdoll_may_start(*world, -1000.0f),
+			"the zero plane of a map without water is the float's");
 	world->env.water_z = 10 << 16;
 	expect(!corpse_ragdoll_may_start(*world, 10.0f) && !corpse_ragdoll_may_start(*world, 9.5f),
 			"hips at or below the water keep retail's float");

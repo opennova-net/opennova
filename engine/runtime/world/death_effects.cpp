@@ -163,7 +163,10 @@ void update_dead_wreck_effects(World &world, Entity &e, const ItemDeathTraits *t
 		float water_height, DestructionEvents &events) {
 	if (traits == nullptr || !traits->husk_model_loaded)
 		return;
-	const float water = water_height <= -1.0e8f ? 0.0f : water_height;
+	// The raw water word, 0 on a map without water: every test compares it
+	// with no dry sentinel. [orig: the compare branches @0x493237, @0x493245, @0x49330F,
+	//  @0x493349, @0x4933D1; Environment_InitDefaults @0x57C011..0x57C01E]
+	const float water = water_height;
 	const auto matrix = effect_frame(e);
 	Vec3 position = e.position;
 	for (uint8_t slot = 0; slot < 4; ++slot) {

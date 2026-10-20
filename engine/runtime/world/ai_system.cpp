@@ -1131,8 +1131,12 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
         result = sample(pos[0], pos[1]);                             // [orig: radius 0 -> center only]
     }
 
-    // [orig: if (*(entity+368) && (int)worldY > result) result = worldY] water-surface clamp.
-    if (clearance.has_occupant && field.has_water && field.water_y > result) {
+    // The water-surface clamp, on the raw word (0 on a map without water: no dry
+    // sentinel). [orig: Entity_CalcAverageGroundHeight `if (*(entity+368) &&
+    //  (int)g_EnvWaterHeightFixed > result) result = g_EnvWaterHeightFixed`
+    //  @0x45732F..0x457331; the word's default Environment_InitDefaults
+    //  @0x57C011..0x57C01E]
+    if (clearance.has_occupant && field.water_y > result) {
         result = field.water_y;
     }
     // [orig: the caller's brain+0x30 when dead (@0x45734D), else brain+0x2C (@0x457367),

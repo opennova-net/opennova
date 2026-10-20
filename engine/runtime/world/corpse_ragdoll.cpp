@@ -75,9 +75,12 @@ CorpseDeath corpse_death(int anim_state, uint32_t wire_key) {
 	return d;
 }
 
+// The plane is the raw water word, 0 on a map without water: retail's float has
+// no dry sentinel. [orig: the float's entry `cmp edx, g_EnvWaterHeightFixed`
+//  Entity_UpdateInfantryAI @0x4BFAFE, Entity_UpdateInfantryPlayerBody @0x4B803C;
+//  the word's default Environment_InitDefaults @0x57C011..0x57C01E]
 bool corpse_ragdoll_may_start(const World &world, float hips_height) {
-	return world.env.water_z == 0 ||
-			hips_height > static_cast<float>(world.env.water_z) * io::kInvFp16One;
+	return hips_height > static_cast<float>(world.env.water_z) * io::kInvFp16One;
 }
 
 int32_t LocalAvatarLife::observe(const World &world) {

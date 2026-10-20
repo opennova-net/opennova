@@ -368,16 +368,16 @@ int count_mounted_entities(const World &world, const Entity &veh) {
     return count;
 }
 
-// See ai.h. [orig: @0x48DFD3..0x48DFDF — `occupant->Position.z +
-// CameraOffset.z <= g_EnvWaterHeightFixed`]. Every caller passes a PLAYER
-// occupant. Retail's CameraOffset.z is live for a body holding its animation
-// channel (the body updater writes it every tick); our player bodies restamp it
-// only on a tick whose head had a clip (the stand-in for org2's unported channel
-// exit), so a player body that never derived one (0) has no head height to test
-// and keeps the wheel — a seated eye sits above the deck, never at it.
+// See ai.h. Every caller passes a PLAYER occupant. The compare is raw: the
+// water word is 0 on a map without water (no dry sentinel), and the eye word
+// is whatever the body's last restamp left.
+// [orig: Entity_UpdateWatercraftPhysics `mov eax,[ecx+74h]; add eax,[ecx+0Ch];
+//  cmp eax, g_EnvWaterHeightFixed; jle` @0x48DFD3..0x48DFDF; the twins
+//  Entity_UpdateVehiclePhysics @0x48B9A0..0x48B9AC and
+//  Entity_ProcessMovementSoundEffects @0x5294BE..0x5294CA; the word's default
+//  Environment_InitDefaults @0x57C011..0x57C01E]
 bool watercraft_driver_submerged(const World &world, const Entity &occ) {
-    if (world.env.water_z == 0 || occ.eye_offset_z == 0) return false;
-    return occ.position.z.q16 + occ.eye_offset_z <= world.env.water_z;
+    return io::bam_add(occ.position.z.q16, occ.eye_offset_z) <= world.env.water_z;
 }
 
 // Stuck escalation uses the live spawn-parent anchor and rejects dead parents.

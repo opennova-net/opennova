@@ -83,8 +83,9 @@ void record_eye_scope_leg(World &world, const AiEntity &e, const Entity &body, i
 void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_entity,
                                     int32_t capsule_bottom, uint32_t logic_tick) {
     if (tick_entity == nullptr) return;
+    // The raw word: 0 on a map without water, no dry sentinel. [orig:
+    //  Environment_InitDefaults @0x57C011..0x57C01E]
     const int32_t water = world.env.water_z;
-    if (water == 0) return; // our no-water-world sentinel (retail worlds always carry a plane)
 
     const uint32_t flags = tick_entity->flags;
     const bool was_afloat = (flags & kEntityFlagDrowning) != 0;
@@ -139,14 +140,8 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
     InfantryState &inf = e.inf;
     // This tick's scope legs replace the last's (the view tick drains them).
     world.out.water_scope_legs.count = 0;
+    // The raw word, as org1's: no dry sentinel.
     const int32_t water = world.env.water_z;
-    if (water == 0) {
-        // Our no-water-world sentinel: the channel is off, and stale float/dive
-        // bits clear so the gravity gate can never wedge on them.
-        tick_entity->flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
-        tick_entity->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
-        return;
-    }
     const uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
     const bool was_afloat = (flags & kEntityFlagDrowning) != 0;
     // [orig: @0x4b8020-0x4b804d `z - 0xA000*((Flags>>15)&1) + 0xA000 >= water

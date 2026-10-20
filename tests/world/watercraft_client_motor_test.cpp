@@ -2287,6 +2287,9 @@ bool run_authority_player_drive_uses_waterspeed() {
 	if (drv == nullptr) return false;
 	drv->player_class = 2;   // a human driver [orig: the Flags & 0x100 class]
 	drv->flags |= 0x100u;
+	// A seated eye above the plane (the body's CameraOffset restamp): the submerged
+	// test compares the raw words [orig: @0x48DFD3..0x48DFDF].
+	drv->eye_offset_z = 1 << 16;
 	drv->heading = w::placed_heading_bam(90); // mission yaw 90 = BAM heading 0 = +x, matching the hull
 	w::Entity *boat = r.world.registry.get(r.boat);
 	boat->heading = w::placed_heading_bam(90);
@@ -2351,9 +2354,18 @@ bool run_submerged_driver_hands_to_ai_leg() {
 	ok &= expect(w::watercraft_driver_submerged(r.world, *drv), "eye at the plane is submerged");
 	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	ok &= expect(boat->veh.cmd_speed == 0, "submerged driver's input is cut");
-	// No derived eye height: never cut.
+	// The compare is raw: an eye word of 0 tests the position alone.
+	// [orig: `add eax,[ecx+0Ch]; cmp eax, g_EnvWaterHeightFixed; jle` @0x48DFD3..0x48DFDF]
 	drv->eye_offset_z = 0;
-	ok &= expect(!w::watercraft_driver_submerged(r.world, *drv), "no eye height -> no cut");
+	ok &= expect(w::watercraft_driver_submerged(r.world, *drv),
+	             "an eye word of 0 compares the position alone");
+	// No dry sentinel: a map without water carries the word 0, and an eye at or
+	// under altitude 0 is submerged. [orig: Environment_InitDefaults @0x57C011..0x57C01E]
+	r.world.env.water_z = 0;
+	drv->position.z = 0.0f;
+	ok &= expect(w::watercraft_driver_submerged(r.world, *drv), "an eye at the zero plane is submerged");
+	drv->eye_offset_z = 1;
+	ok &= expect(!w::watercraft_driver_submerged(r.world, *drv), "an eye above the zero plane is not");
 	return ok;
 }
 

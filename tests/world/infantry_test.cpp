@@ -2032,7 +2032,10 @@ void test_local_player_swims_on_the_plane() {
     CHECK(!e->inf.airborne);
     CHECK(e->inf.anim_state == anim_state::kIdle);
 
-    // No water plane at all: the channel is off and can never latch.
+    // A map without water carries the word 0, the plane at altitude 0 (no dry
+    // sentinel): a body standing above it never latches.
+    // [orig: Entity_UpdateInfantryPlayerBody `cmp edx, g_EnvWaterHeightFixed`
+    //  @0x4B803C; Environment_InitDefaults @0x57C011..0x57C01E]
     world.env.water_z = 0;
     run_ticks(ai, world, 500, 520);
     CHECK((ent->flags & kEntityFlagDrowning) == 0);
