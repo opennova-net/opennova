@@ -38,13 +38,14 @@ namespace {
 // The row a player spawn binds: the record's type word for a joiner's own body,
 // else the class's camouflage item; the first row for a type no row carries. A
 // World with no items rows (no traits sweep) or whose peer read no charattr.def
-// (a native harness, a synthetic pack) spawns from the seed. [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the camouflage
-//  pick @0x43C399..0x43C3BE, ItemList_FindIndexByTypeId @0x43C3CA, the row
+// (a native harness, a synthetic pack) spawns from the seed.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the camouflage pick
+//  @0x43C399..0x43C3BE, ItemList_FindIndexByTypeId @0x43C3CA, the row
 //  @0x43C3CF..0x43C3D9; NapiNPClientMsg_0x00C @0x42E730 binds the record's type]
 const PlayerTemplate &player_spawn_row(const World &world, const PlayerSpawn &spawn,
                                        int32_t &index) {
     const std::vector<PlayerTemplate> &rows = world.tables.item_rows;
-    if (rows.empty() || (spawn.item_type_id < 0 && !world.tables.class_cammo_installed)) {
+    if (rows.empty() || !world.tables.class_cammo_installed) {
         index = world.tables.player.item_type_index;
         return world.tables.player;
     }
