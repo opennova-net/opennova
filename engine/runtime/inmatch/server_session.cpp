@@ -62,7 +62,7 @@ void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 	// quality (+0x0C, the 0x79 byte) and level (+0x00) all go to 0: a map
 	// change's first frame samples into an empty window, as a fresh session's.
 	// [orig: Game_StartMission @0x524360 - `xor ebx, ebx` @0x524381, the
-	//  countdown store `mov dword_24D1DDC, ebx` @0x52439E, CNetStats_Reset
+	//  countdown store `mov g_NetQualityUpdateCountdown, ebx` @0x52439E, CNetStats_Reset
 	//  @0x5243AA (@0x4C2FF0, this = g_NetQualityLevel @0x52438D)]
 	ctx.net_quality_sample_countdown = 0;
 	replication::net_quality_window_clear(ctx.host_quality_window);

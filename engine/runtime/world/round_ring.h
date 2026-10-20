@@ -62,7 +62,7 @@ struct RoundRing {
     // its send pump, so the entity update that follows the tick and the next tick's
     // receive pump and 0x0A fan read the same value; a mission change keeps it.
     // [orig: g_ServerFrameClock @0xC86FB0 - = 1 @0x51E815 (Session_ResetFrameCounters
-    //  @0x51E7F0, from Client_ResetDisconnectState @0x5202CA at a session start), `add 1`
+    //  @0x51E7F0, from Session_ResetForStart @0x5202CA at a session start), `add 1`
     //  @0x51E48C after CNapiNetwork_PumpServerProtocolSend @0x51E487 in Server_TickUpdate]
     uint32_t frame_clock = 1;
 

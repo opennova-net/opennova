@@ -19,7 +19,7 @@ std::vector<LoadoutSubmitEntry> resolve_side(const world::World &world,
 	if (p == nullptr) return rows;
 	for (const playersav::KitEntry &entry : p->entries) {
 		const int adm = world.tables.weapons.index_of(entry.name.c_str());
-		if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
+		if (adm < 0) continue; // [orig: the AdmDef_FindByName gate @0x42cf0b]
 		rows.push_back(LoadoutSubmitEntry{
 				static_cast<uint8_t>(adm),
 				static_cast<uint8_t>(entry.ammo_primary),
@@ -157,7 +157,7 @@ void build_joiner_loadout_kit(const world::World &world,
 				                      : world::weapon_kit_default(world.rules.title);
 		for (const world::WeaponKitEntry &entry : resident) {
 			const int adm = world.tables.weapons.index_of(entry.name.c_str());
-			if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
+			if (adm < 0) continue; // [orig: the AdmDef_FindByName gate @0x42cf0b]
 			out.rows.push_back(LoadoutSubmitEntry{
 					static_cast<uint8_t>(adm),
 					static_cast<uint8_t>(entry.ammo_primary),

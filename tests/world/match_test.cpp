@@ -1056,7 +1056,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     CHECK(flag_events.size() == 2);
     CHECK(flag_events[0].kind == MatchGameplayEventKind::FlagPickup);
     // The pickup feed's x/y are the flag's where it lay (the origin), not the carrier's
-    // 1.6 units off it. [orig: Server_HandleEntityDeath @0x517481..0x517488]
+    // 1.6 units off it. [orig: Server_BroadcastFlagPickupEvent @0x517481..0x517488]
     CHECK(flag_events[0].position.x.q16 == 0 && flag_events[0].position.y.q16 == 0);
     CHECK(flag_events[1].kind == MatchGameplayEventKind::FlagCapture);
     CHECK(flag_events[1].objective == red_flag);

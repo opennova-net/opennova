@@ -11,7 +11,7 @@
 //  CEffectDef_FindByTypeName @0x5b01a0 (stricmp @0x5b01c2), CEffectDef_Construct @0x5b01e0
 //  (the head insert @0x5b0229 / @0x5b0232), the failed load's destroy @0x5b623f;
 //  Game_StartMission @0x524360 - EffectWorld_DestroyAllAndInitDeviceCaps @0x524a6f;
-//  CEffectWorld_MarkModelsDirty @0x5b2220 (node+0x3D4); CEffectWorld_RebuildAllModelBuffers
+//  CEffectDef_MarkFoliage @0x5b2220 (node+0x3D4); CEffectWorld_RebuildAllModelBuffers
 //  @0x5B3A80 - the count @0x5b13b0..0x5b13d6, the values @0x5b142b]
 
 #include <runtime/inmatch/charattr_table.h>
@@ -52,7 +52,7 @@ public:
 	bool load(const std::string &name);
 	// A foliage definition's load: the node, marked; the mark is the node's for good, so a
 	// name another source also loads stays off the page [orig: Foliage_LoadDefAssets
-	// @0x601260 - ThreediGp_LoadModel @0x6012cb, CEffectWorld_MarkModelsDirty @0x6012de].
+	// @0x601260 - ThreediGp_LoadModel @0x6012cb, CEffectDef_MarkFoliage @0x6012de].
 	void load_foliage(const std::string &name);
 
 	// The frozen page: one dword per unmarked node, head first (the reverse of creation).

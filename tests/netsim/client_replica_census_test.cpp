@@ -3,10 +3,10 @@
 //   * S2C 0x79 lands the host's quality metric (CNetQuality +0x0C), 0 for an
 //     empty body [orig: NapiNPClientMsg_NetworkQuality @0x429B00];
 //   * S2C 0x70 keeps the vehicle-spawn rows and raises the received flag on
-//     every reply [orig: NapiNPClientMsg_HandleWeaponLoadoutList @0x429A30];
+//     every reply [orig: NapiNPClientMsg_HandleVehicleSpawnAvailability @0x429A30];
 //   * S2C 0x2A adds a server-command table entry off the authority, into the
 //     first slot empty or of its id [orig: NapiNPClientMsg_0x02A @0x425BA0 ->
-//     Chat_AddToHistory @0x422920];
+//     ServerCommandTable_AddEntry @0x422920];
 //   * the empty handlers (0x07, 0x1C, 0x5E, 0x5F, 0x65, 0x7F) and the stores no
 //     client code reads (0x1B, 0x7A) change nothing and are no unknown tag.
 // Bodies are built from the cited layouts, never captured.

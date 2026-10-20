@@ -31,7 +31,7 @@ void fill_objective_rows(const World &world, const hud::GameTextLookup &mission_
 // between-rounds gate with a team-1 win (the panel's box only).
 // [orig: HUD_DrawEndRoundStatistics @0x5b7676..0x5b783c;
 //  Cine_EpilogStateMachineUpdate @0x5765d0..0x57672d; the raised gate
-//  g_SpawnSuccessGate && g_EndRoundWinnerTeam == 1 @0x5b763b]
+//  g_RoundOver && g_EndRoundWinnerTeam == 1 @0x5b763b]
 hud::EndRoundStatisticsInput end_round_statistics_input(const World &world);
 
 } // namespace opennova::world

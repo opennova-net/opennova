@@ -43,7 +43,7 @@ const PICK_KEY := KEY_F6
 # as ARMORY: the world (and therefore the session socket) keeps ticking, only the
 # mouse is released and player input idles. Retail's dead player has no gameplay
 # input anyway — the uplink is held by g_ClientDeployHold and the input legs gate on
-# g_SpawnSuccessGate — so this state is what makes the spawn list clickable.
+# g_RoundOver — so this state is what makes the spawn list clickable.
 enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND, COMMAND_MAP }
 
 @onready var _world: GameWorld = $World

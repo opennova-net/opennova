@@ -353,7 +353,7 @@ void refresh_item_seat_spec(world::World &world,
 	// subType (field 0x80, the slot index the spawn stamped; absent = slot 0),
 	// which is the key the ewep class init reads the carrier def's slot anchor
 	// by, on every peer at mission start.
-	// [orig: Entity_SpawnWeaponOverlays subType = slot @0x40F40E;
+	// [orig: Entity_SpawnAddEWeapChildren subType = slot @0x40F40E;
 	//  Entity_InitBoneReferences @0x4415E1..0x4415FF; Game_StartMission ->
 	//  Entity_InitAllFromModels @0x52567F]
 	// Clear first so a later definition refresh cannot leave stale pose/capability

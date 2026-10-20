@@ -256,7 +256,7 @@ world::Entity *ClientWorldMaterializer::replica_world_entity(world::World &world
 	// with their spawn origins, and each carrier's addeweap children, which
 	// carry none but ride their carrier's attachment row. A row of neither is
 	// the joiner's own (a player, a piece) and no decoded row's.
-	// [orig: Entity_SpawnWeaponOverlays @0x40F300 - the child's pool-1 slot
+	// [orig: Entity_SpawnAddEWeapChildren @0x40F300 - the child's pool-1 slot
 	//  Pool_AllocEntry @0x40F393, its spawn @0x40F3FF; the joiner keys a
 	//  decoded row on that slot alone, NapiNPClientMsg_EntityDeath @0x42EBC6]
 	world::Entity *entity = world.registry.get(handle);

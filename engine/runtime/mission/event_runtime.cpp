@@ -679,7 +679,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // triggers later in this pass already see it, and a skipped play
             // never reaches it. The effect stays as the presentation log.
             // [orig: EventAction_Dispatch @0x4542E0 case 7 — the is_mp_session_peer
-            //  test @0x45443d, param2 == 1 @0x45444a, the g_SpawnSuccessGate test
+            //  test @0x45443d, param2 == 1 @0x45444a, the g_RoundOver test
             //  @0x454450, the Dialog_PlayByIndex call @0x454461]
             if (w.rules.mp_session_peer && (a.param2 == 1 || !w.match.outcome().ended)) {
                 w.script.dialog.play(w.tables.dialog_bank, w.tables.dialog_sounds, a.param1);
@@ -730,7 +730,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
         // @0x4542E0 (the Server_ProcessRoundEnd(1/2/0) calls @0x45447b/@0x454495/
         // @0x4544af)]; the round-over gate sits inside the callee [orig:
-        // Server_ProcessRoundEnd @0x5164F6, `cmp g_SpawnSuccessGate, ebx`],
+        // Server_ProcessRoundEnd @0x5164F6, `cmp g_RoundOver, ebx`],
         // which process_round_end's own latch ports. The "win" effect stays as
         // the presentation signal.
         case bms::ActionType::BlueWin:

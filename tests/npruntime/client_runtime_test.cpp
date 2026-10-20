@@ -1368,7 +1368,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 	// 0x16 came (the retail corpus: run_20260426_120859 and _120102 send it alone,
 	// _113242 beside the 0x16's one 0x22 re-request); a later 0x16 queues nothing at
 	// the connection, its per-row 0x22s are ClientRuntime's fold (D-NET-526)
-	// [orig: NapiClient_WaitForDisconnect @0x42CB20, the queue @0x42cb43;
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20, the queue @0x42cb43;
 	//  NapiNPClientMsg_PlayerList @0x42fc35].
 	server_seq.last_inbound_seq = 9;
 	constexpr uint32_t kMissionMpAttributes = 0x80003A06u;
@@ -3158,7 +3158,7 @@ bool run_host_client_keepalive_rides_the_loopback() {
 // place: a joiner's GETPLAYERLIST queues C2S 0x22 {0, 23799} and the 0x23 for the frame's
 // boundary; the listen host's own client takes the echo off its loopback and sends its
 // SERVER line's rest back over the local connection as C2S 0x24.
-// [orig: NapiNPClientMsg_HandleChatCommand @0x432BC0 -> NapiClientCmd_ParseAndExecute
+// [orig: NapiNPClientMsg_HandleConsoleEcho @0x432BC0 -> NapiClientCmd_ParseAndExecute
 //  @0x4329C0; NapiClientCmd_HandleDebugCommand @0x42c983..0x42c9a9 / @0x42c8f7]
 bool run_console_echo_runs_the_client_walk() {
 	const std::string client_scrk = "CLIENT-CONSOLE-ECHO-SCRK";
@@ -3282,7 +3282,7 @@ bool run_console_command_sends_the_line() {
 // The S2C 0x57's handler returns at once while the round-over gate is up: no pong for the
 // host's ping, no round trip measured for ours. The gate is read at the message's wire
 // position: a 0x57 ahead of the 0x1D in one packet is still answered, one behind it is not.
-// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - `cmp g_SpawnSuccessGate, 0` / `jnz locret`
+// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - `cmp g_RoundOver, 0` / `jnz locret`
 //  @0x432210..0x432217; NapiNPClientMsg_0x01D @0x430858 (the gate before the parse)]
 bool run_rtt_echo_waits_out_the_round_over_gate() {
 	const std::string client_scrk = "CLIENT-RTT-GATE-SCRK";
@@ -5656,7 +5656,7 @@ bool run_self_respawn_edge_releases_a_revive_deploy() {
 // built behind the deploy gate, and nothing drains the list on death. The gate holds no death
 // (D-NET-529): the frame's 0x2C leaves beside the queued 0x27; the dead body builds no 0x0C.
 // [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c4a3 (the 0x2C / 0x0C builds behind
-//  is_in_session && !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate), the tail
+//  is_in_session && !is_authority && !g_ClientDeployHold && !g_RoundOver), the tail
 //  @0x42c4b1 -> PumpClientProtocolSend @0x42c4bc in every branch;
 //  CNapiNPConnection_DrainMessageQueues @0x625600 runs only at join @0x629dfc / @0x62c26f
 //  and destroy @0x62a50a]

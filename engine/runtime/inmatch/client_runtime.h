@@ -292,7 +292,7 @@ public:
 	// 2 team, 12 squad, 11 crew; 4 red / 5 blue send only from a non-peer,
 	// and every process with a HUD is a session peer, so they queue nothing).
 	// The retail sender gates: non-empty; `!g_DeathScreenActive ||
-	// g_SpawnSuccessGate` — the local and crew keys test `!g_DeathScreenActive`
+	// g_RoundOver` — the local and crew keys test `!g_DeathScreenActive`
 	// alone; the flood table (a refusal is `Flooded`: the caller echoes the
 	// line); then the `<...>` strip. A joiner queues it reliable with the
 	// 310-flush lifetime; the listen host's own client (a peer too) sends it
@@ -436,8 +436,8 @@ public:
 	// THE COMMAND MAP'S SQUAD AND WAYPOINT SENDS (client_squad.cpp): each
 	// queues its one reliable C2S (a joiner on its held one-shot queue, the
 	// listen host's client on its loopback to its own server); false when no
-	// session carries it. [orig: NetPacket_SendChatMessage @0x42ddc0 (0x17),
-	//  NetPacket_SendEntityUpdate @0x42de00 (0x4F), NetPacket_SendWeaponSlotSwitch
+	// session carries it. [orig: NetPacket_SendUserWaypointCreate @0x42ddc0 (0x17),
+	//  NetPacket_SendUserWaypointRemove @0x42de00 (0x4F), NetPacket_SendWeaponSlotSwitch
 	//  @0x42dc10 (0x43), NetPacket_SendCommandType44 @0x42dc70 (0x44),
 	//  NetPacket_SendWeaponAction @0x42dcc0 (0x45), NetPacket_SendTeamChange
 	//  @0x42dd00 (0x46), NetPacket_SendVoteKick @0x42dd50 (0x4B), the punt vote
@@ -882,7 +882,7 @@ private:
 	void drain_visible_refreshes();
 	// The once-per-62-frames CNetQuality update + level fold that precedes the
 	// client net frame in the main frame [orig: Game_ProcessMainFrame — the
-	// dword_24D1DDC countdown (reload 62) gated is_in_session ->
+	// g_NetQualityUpdateCountdown countdown (reload 62) gated is_in_session ->
 	// CNetQuality_UpdateMetrics @0x4C52C0 + CNetQuality_SetLevel @0x4C3060].
 	void update_net_quality();
 	void reset_mission_start_quality();
@@ -953,7 +953,7 @@ private:
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.
 	replication::NetQualityWindow client_quality_window_;
 	int32_t observed_frame_rate_ = 0;                    // [orig: dword_24E1F10, 0 @0x52B727]
-	int32_t quality_update_countdown_ = 0;               // [orig: dword_24D1DDC]
+	int32_t quality_update_countdown_ = 0;               // [orig: g_NetQualityUpdateCountdown]
 	ChatFloodTable chat_flood_{};                        // [orig: @0xB3B788] (chat_flood.h)
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
 	// The host-dictated send period (CS dir-0 field 3, H:0x00 mask 8): the

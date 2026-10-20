@@ -21,11 +21,11 @@ constexpr uint32_t kPingRingCursor = 10;  // +100408 = entry 10 of the +100368 r
 constexpr uint16_t kPingStrikeLimit = 20; // strictly-greater after the increment
 constexpr uint32_t kPingChatMin = 36;
 constexpr uint32_t kPingChatMax = 37;
-constexpr uint32_t kNetQualitySampleFrames = 62; // dword_24D1DDC reload
+constexpr uint32_t kNetQualitySampleFrames = 62; // g_NetQualityUpdateCountdown reload
 
-// CNapiNPConnection_SendChatMessage(conn, "", code, tag) is the chat-coded
+// CNapiNPConnection_QueueDisconnectEvent(conn, "", code, tag) is the chat-coded
 // punt: the same H:0x03 description the join watchdog stages.
-// [orig: CNapiNPConnection_SendChatMessage @0x4C7EF0]
+// [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0]
 void stage_ping_punt(NapiNPConnection &conn, uint32_t code, const char *tag) {
 	DisconnectEvent event;
 	event.ds = 1;
@@ -86,7 +86,7 @@ void Server_StoreClientQuality(NapiNPConnection &conn, uint8_t reported) {
 }
 
 void Server_EmitQualityResends(NapiNPServerCtx &ctx, const world::World &world) {
-	// is_in_session && !g_PreRoundDelayTimer && !g_SpawnSuccessGate, the last
+	// is_in_session && !g_PreRoundDelayTimer && !g_RoundOver, the last
 	// the authority's round-over latch (Match's outcome)
 	// [orig: Server_TickUpdate @0x51DE4B..0x51DE5F; Server_ProcessRoundEnd's
 	//  store @0x5168E4, Game_StartMission's clear @0x524A1F].
@@ -135,7 +135,7 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 		ctx.mission_exit_reason = kMissionExitNovaWorld;
 	}
 	// The holds clear the send window instead of sampling it: the pre-round
-	// timer and, on the authority, the round-over latch (g_SpawnSuccessGate, set
+	// timer and, on the authority, the round-over latch (g_RoundOver, set
 	// by the round end, cleared by the next mission start: Match's outcome).
 	// g_NetSpawnSuspended is set only inside the synchronous mission load, so no
 	// sample ever sees it [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the gates

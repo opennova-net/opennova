@@ -1257,7 +1257,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					// waits for the 0x11 at its own send pace; a 0x16 queues only its per-row
 					// 0x22 re-requests (ClientRuntime's fold), which join the 0x09 when they
 					// land before that pace opens [orig: Game_StartMission @0x524360 (the
-					// call @0x524dab) -> NapiClient_WaitForDisconnect @0x42CB20 (the queue
+					// call @0x524dab) -> NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (the queue
 					// @0x42cb43, the send @0x42cb4d)].
 					periodic_replies.push_back(
 							make_protocol_message(c2s::CHECKSUM_RESPONSE, {}));
@@ -1604,7 +1604,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == s2c::RTT_ECHO) {
 			// While the round-over gate is up the handler returns at once: no pong for
 			// the host's ping, no round trip measured for ours.
-			// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - `cmp g_SpawnSuccessGate, 0`
+			// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - `cmp g_RoundOver, 0`
 			//  / `jnz locret` @0x432210..0x432217]
 			RttSample sample;
 			std::size_t consumed = 0;
@@ -2044,7 +2044,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		out.queued_send_messages.push_back(std::move(periodic_replies[reply]));
 	}
 	// The mission start's globals reset follows the pass that ended the mission-data spin.
-	// [orig: Game_StartMission `mov g_SpawnSuccessGate, ebx` @0x524a1f]
+	// [orig: Game_StartMission `mov g_RoundOver, ebx` @0x524a1f]
 	if (out.mission_started) round_over_gate_ = false;
 	if (admission.admitted && world_state_load_seen &&
 	    post_auth_stage_ == PostAuthStage::AwaitDeployment) {

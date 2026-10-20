@@ -15,7 +15,7 @@ extends Node
 ## through the Simulation feeds); this node owns only the device work: the
 ## HUD element, the compiled stat.mnu frame, its widgets and the cursor.
 ## [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (every HUD frame while
-##  g_SpawnSuccessGate && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
+##  g_RoundOver && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
 ##  Game_CloseInGameScreens (ex Server_ResetBalanceCounters) + Game_InitRespawnState +
 ##  Overlay_ComputeStatFieldColumnLayout(40, 984); every pass
 ##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay

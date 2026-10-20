@@ -146,7 +146,7 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 	// (1) The Avatars.def combos, three parts each at the climate's variant (graphic,
 	// graphic_j, graphic_s), the part's base graphic where the variant is empty
 	// [orig: Game_StartMission @0x524e24 (the joiner's arm; @0x525267 the other) ->
-	//  MinimapSlot_LoadModels_0 @0x57a0b0 (this = g_AvatarDefs, lod = g_BmsClimate) - the
+	//  Avatars_LoadComboModels @0x57a0b0 (this = g_AvatarDefs, lod = g_BmsClimate) - the
 	//  variant picks @0x57a0d8..0x57a0ed / @0x57a14d..0x57a163 / @0x57a1c2..0x57a1de, the
 	//  base fallbacks @0x57a0f0 / @0x57a166 / @0x57a1e4, the loads @0x57a0fd / @0x57a174 /
 	//  @0x57a1f5]
@@ -178,7 +178,7 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 
 	// (2) The world stream landed: no model load [orig: NapiClient_WaitForGameStart @0x524e29].
 	// (3) Every ammo row's friendly and foe tracer items [orig: AmmoDef_LoadAll @0x40b0b0
-	//  (@0x525495) -> AmmoDef_FreeModels @0x4098c0 - the row's +16 @0x4098e0 and +20
+	//  (@0x525495) -> AmmoDef_LoadTracerItemModels @0x4098c0 - the row's +16 @0x4098e0 and +20
 	//  @0x4098ef, each when nonzero, to g_AmmoDefCapacity @0x409906].
 	if (src.ammo != nullptr) {
 		for (const world::AmmoTableEntry &row : src.ammo->entries) {
@@ -277,7 +277,7 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 	// (7) The celestial models the environment names and upl.3di; the teardown cleared the
 	// models a mission before loaded [orig: EffectWorld_LoadCelestialModels @0x5adc50
 	// (@0x525724) - sun @0x5adc74, moon @0x5adc9c, glare @0x5adcd1, star @0x5add06, upl.3di
-	// @0x5add32; the clear Game_TeardownMission @0x52270e -> CEffectWorld_IsNameAvailable
+	// @0x5add32; the clear Game_TeardownMission @0x52270e -> EffectWorld_ResetCelestialModels
 	// @0x5abff0].
 	env::MissionEnv environment;
 	const env::EnvTextReader read_env = [&](const std::string &name, std::string &text) {
@@ -301,7 +301,7 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 			if (!name.empty()) list.load(name);
 	}
 	// (9) The terrain's foliage models, marked [orig: Game_StartMission @0x5259fd ->
-	// CRenderManager_ShutdownAllSubsystems @0x587000 -> sub_604DA0 (@0x604dbc) ->
+	// Render_InitTerrainSubsystems @0x587000 -> sub_604DA0 (@0x604dbc) ->
 	// Foliage_LoadDefAssets @0x601260].
 	const mission::BootFileSource *files = src.files;
 	const std::function<bool(const std::string &, std::vector<uint8_t> &)> read_file =

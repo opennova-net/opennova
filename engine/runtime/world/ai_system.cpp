@@ -656,7 +656,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         // host's own dispatcher: a UseGun gunner's addresses the gun (an EWeap,
         // so 0xFFFF), any other row's itself with the slot's combo (D-NET-336).
         // [orig: WeaponAction_Reload @0x5430B6..0x543108 (the authority gate
-        //  @0x5430D9, parentSlot 3 @0x5430EA..0x5430FF); NetPacket_SendEntityDeathNotification
+        //  @0x5430D9, parentSlot 3 @0x5430EA..0x5430FF); NetPacket_SendReloadRequest
         //  @0x43296C..0x432974]
         if (weapon_events.reload_requested && is_authority) {
             const Entity *addressed = owner.mount_type == SeatType::Gunner && owner.mounted

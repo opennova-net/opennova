@@ -1,7 +1,7 @@
 // The weapon.sav the original game ships beside its expansion: every record
 // PlayerProfile_InitDefaults' seed [orig: PlayerProfile_InitDefaults @0x54bb40]
 // with the avatar bytes its character table packs for a fresh profile
-// [orig: EntitySlot_LookupAndPackEntry @0x54bbea]: blue {0, 0, 0x0200}, red
+// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x54bbea]: blue {0, 0, 0x0200}, red
 // {7, 0, 0x8207}. Built from those values alone (no retail byte is carried);
 // the pinned JO:CA install's expansion/jox01/weapon.sav (git blob
 // 38c6b7d15bb7ef64fcecb39ae4ded7f4ac12833b, 337996 bytes) is these bytes, its

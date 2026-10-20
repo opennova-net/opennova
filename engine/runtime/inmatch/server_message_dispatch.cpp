@@ -386,7 +386,7 @@ void dispatch_keepalive_ack(NapiNPConnection &conn, const std::vector<uint8_t> &
 // the value (signed; the first of equals, which the upsert never makes), sent back as
 // S2C 0x6A action 3 to the requester alone, reliable; no node, nothing (a LAN host's
 // registry is empty).
-// [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210 — the authority @0x511217, the
+// [orig: NapiNPServerMsg_HandleSquadRegistryWalk @0x511210 — the authority @0x511217, the
 //  read @0x511245..0x51124B, CLinkedList_FindNextByNetId @0x52B190 (called @0x511253; the
 //  signed `jle` @0x52B1B5 and `jge` @0x52B1BD), mask 32 @0x51126C, the slot @0x511276,
 //  NetPacket_SerializeMinimapSlot(.., 3, node) @0x51127C, the send @0x51129E]
@@ -685,7 +685,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
 				dispatch_mission_chunk_request(config, msg, inputs, replies);
 				break;
-			case c2s::CHECKSUM_RESPONSE: // the player-sync request -> slot state 2 [orig: NapiNPServerMsg_0x009 @0x513200]
+			case c2s::CHECKSUM_RESPONSE: // the player-sync request -> slot state 2 [orig: NapiNPServerMsg_HandlePlayerSyncRequest @0x513200]
 				dispatch_player_sync_request(conn);
 				break;
 			case c2s::LOADOUT_SUBMIT: { // loadout request -> 0x5A [orig: NapiNPServerMsg_HandlePlayerLoadout (0x2F) @0x515790]
@@ -836,7 +836,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::TEAM_SPAWN_ACK: { // team/spawn ack [u16 team_change_index] — NO reply on a plain join.
 				// [orig: NapiNPServerMsg_0x029 @0x514F10] replies S2C 0x51 ONLY when the index
 				// resolves to an entity in g_TeamChangeEntityList @0xC947C8 (gated
-				// !g_NetSpawnSuspended && !g_SpawnSuccessGate), and that reply is a REAL
+				// !g_NetSpawnSuspended && !g_RoundOver), and that reply is a REAL
 				// NetPacket_WriteEntityPacket @0x506BB0 record. The golden retail-ashi5a session's
 				// deploy-time C 0x29 draws NO 0x51 anywhere. The client FIELD-PARSES 0x51 —
 				// NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 stamps team (+354) and NetId
@@ -1298,7 +1298,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// still holds in those slots (NapiNPClientMsg_DestroyEntityList
 				// @0x429730). The handler reads NO fields from the request. It answers
 				// on the authority only, is SKIPPED while g_NetSpawnSuspended or
-				// g_SpawnSuccessGate (round over) is set — our reachable analog of the
+				// g_RoundOver (round over) is set — our reachable analog of the
 				// latter is world->match.outcome().ended — and answers only a requester
 				// whose session player (conn+0x160) and its server slot (+0xC0) are
 				// bound, which our PlayerAdded phase stands for (the 0x22 and 0x0F
@@ -1359,7 +1359,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::KEEPALIVE: // [orig: NapiNPServerMsg_UpdateAck @0x5024B0]
 				dispatch_keepalive_ack(conn, msg.payload);
 				break;
-			case c2s::GAME_START_ACK: // the squad registry walk [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
+			case c2s::GAME_START_ACK: // the squad registry walk [orig: NapiNPServerMsg_HandleSquadRegistryWalk @0x511210]
 				dispatch_squad_registry_walk(inputs.server_ctx, msg.payload, replies);
 				break;
 			case c2s::BAN_PUNT_COMMAND: // [orig: NapiNPServerMsg_0x024 @0x514DC0]

@@ -727,13 +727,13 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		st.rtt_request_countdown = 0;                      // +89816 [orig: @0x51A758]
 		st.state6_entry_host_ms = ctx.np_protocol.host_run_duration_ms; // +100580 [orig: @0x51A770]
 		st.state6_entry_host_ms_valid = true;
-		// The entry also zeroes +452 and +448 (as CServerTick_SetPhase's does), which nothing
+		// The entry also zeroes +452 and +448 (as PlayerSlot_SetState's does), which nothing
 		// in the image sets otherwise; their readers reach no wire: +448 feeds the host's own
 		// status screen and the 0x16 row's status word, which goes only to a recipient whose
 		// +96481 byte is set, which JO never sets (build_player_list_message sends 0), and
 		// +452 has no slot reader at all (Network_DrawDebugScreen's +0x1C4 is the protocol
 		// connection's). [orig: Server_OnPlayerJoin @0x51A75E / @0x51A764;
-		//  CServerTick_SetPhase @0x5100C4 / @0x5100CA; Server_DrawStatusScreen @0x50A59E;
+		//  PlayerSlot_SetState @0x5100C4 / @0x5100CA; Server_DrawStatusScreen @0x50A59E;
 		//  Server_BuildAndBroadcastScoreboard @0x50DADF; Network_DrawDebugScreen @0x500FB5]
 	}
 
@@ -851,7 +851,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	//  the local and bot bytes @0x51A8A4..0x51A8B3, the first compare @0x51A8B9..0x51A8CE,
 	//  Server_WritePuntLog "HMCRC" @0x51A8E1, Server_LogCRCMismatchPunt(slot, 9, ..) @0x51A8F2,
 	//  the second @0x51A8FA..0x51A90F, "CMCRC" @0x51A922, (slot, 10, ..) @0x51A933;
-	//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_SendChatMessage(.., 33,
+	//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_QueueDisconnectEvent(.., 33,
 	//  "LogPuntEvent") @0x517F5A, the pending slot kept @0x4C7FF2]
 	const uint32_t mission_checksums[2] = {0, 0};
 	if (conn.type != NapiNPConnection::kTypeClientSide) {
@@ -894,11 +894,11 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		cease_fire.text = "* * * CEASE FIRE IS IN EFFECT! * * *";
 		out.push_back(InitialStateMessage{s2c::CHAT_BROADCAST, encode_chat_broadcast(cease_fire)});
 	}
-	// A join into a finished round (g_SpawnSuccessGate, our match outcome's `ended`) takes the
+	// A join into a finished round (g_RoundOver, our match outcome's `ended`) takes the
 	// round end's own legs: the zero 0x61 disarming the seed just sent, this slot's 0x1D
 	// header, game state 11 and slot state 7, the round-event watermark zeroed on leaving
 	// state 6 (the join just entered it).
-	// [orig: Server_OnPlayerJoin @0x51A9F8..0x51AA5C - `cmp g_SpawnSuccessGate` @0x51A9F8,
+	// [orig: Server_OnPlayerJoin @0x51A9F8..0x51AA5C - `cmp g_RoundOver` @0x51A9F8,
 	//  Server_SendRandomSeedToPlayer(slot, 0) @0x51AA02, EndRoundScoreboard_SerializeHeader
 	//  @0x51AA1E sent 0x1D @0x51AA3B, CNetPlayer_SetGameState(.., 11) @0x51AA44, +97544 = 0
 	//  @0x51AA56, slot state 7 @0x51AA5C; the header's form pick
@@ -948,10 +948,10 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// The producer runs only while the mission runs: g_MissionRunning is 0 from the mission
 	// load's start until its end and again from the round end (ours: no World yet, or the
 	// match outcome latched), and both tracks also wait while the round-over flag is up
-	// (g_SpawnSuccessGate, the same latch here). A joiner arriving in the post-round linger
+	// (g_RoundOver, the same latch here). A joiner arriving in the post-round linger
 	// so waits for the map change, its track where it stood. (D-NET-NEW-L1-7)
 	// [orig: Server_SendInitialGameStateToPlayer @0x51BBA0 - `cmp g_MissionRunning, ebx; jz`
-	//  @0x51BBA3..0x51BBA9; `cmp g_SpawnSuccessGate, ebx; jnz` @0x51BBE8..0x51BBEE (world
+	//  @0x51BBA3..0x51BBA9; `cmp g_RoundOver, ebx; jnz` @0x51BBE8..0x51BBEE (world
 	//  track) / @0x51BEFF..0x51BF05 (player-sync track); Game_SetMissionRunning(0)
 	//  @0x5245E3 and (1) @0x525D58 in Game_StartMission; the round end's clear
 	//  Server_ProcessRoundEnd @0x5164FC]
@@ -966,7 +966,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// producer sends nothing (D-NET-500). The host's own client sends its 0x09 in-process:
 	// the type-2 loopback applies the same handler here.
 	// [orig: Server_SendInitialGameStateToPlayer @0x51BBA0 - the slot-state switch
-	//  @0x51BBB4..0x51BBBB, the track @0x51BEFF; NapiNPServerMsg_0x009 @0x513200]
+	//  @0x51BBB4..0x51BBBB, the track @0x51BEFF; NapiNPServerMsg_HandlePlayerSyncRequest @0x513200]
 	if (!is_remote && conn.slot_state == PlayerSlotState::Added)
 		dispatch_player_sync_request(conn);
 	// Each pass of the track enters at subphase 8 at least: a fresh slot's 0, or the 0 the

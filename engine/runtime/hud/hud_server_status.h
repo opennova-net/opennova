@@ -42,7 +42,7 @@ struct ServerStatusSlot {
 	bool entity_dead = false; // the slot's entity (+0) with health (+286) <= 0
 	uint8_t team = 0;         // +0x1A0
 	// +0x1C0: the status word the roster's rights colours test. Its only
-	// writers store 0 [orig: CServerTick_SetPhase @0x5100ca, Server_OnPlayerJoin
+	// writers store 0 [orig: PlayerSlot_SetState @0x5100ca, Server_OnPlayerJoin
 	// @0x51a764], so the rights arm never colours a row.
 	uint32_t status_word = 0;
 	int32_t class_word = 0;   // +0x15EDC (89820), the soldier class

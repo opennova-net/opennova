@@ -4701,7 +4701,7 @@ add_test(NAME npruntime_session_soak COMMAND npruntime_session_soak_test)
 # The joiner's admission through retail's loading loops (D-NET-254): each stage's loop calls the
 # send pump its own way (per UI frame, a busy spin, or a 50 / 100 ms wall-clock pace), and only
 # Client_ProcessNetworkFrame gates it on the holdoff countdown. [orig: SaveFile_SendAndWaitForServerAck
-# @0x5204b0; CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0; NapiClient_WaitForDisconnect
+# @0x5204b0; CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0; NapiClient_SendPlayerSyncAndWaitForSyncTail
 # @0x42cb20; NapiClient_WaitForGameStart @0x42cc10]
 add_executable(npruntime_client_loading_pump_test npruntime/client_loading_pump_test.cpp)
 target_link_libraries(npruntime_client_loading_pump_test PRIVATE opennova_net opennova_runtime)

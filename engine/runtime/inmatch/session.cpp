@@ -69,7 +69,7 @@ void Role::apply_input(const TickInput &input) {
 	// own dead gate, @0x49D330..0x49D339, takes the same press first.)
 	// [orig: Input_HandleActionBinding @0x49AD40 -- bit 0x1 with the dead
 	//  read @0x49AD8A..0x49ADA0, 0x8000000 with g_DeployScreenActive
-	//  @0x49ADC8..0x49ADD7, bit 0x1 with g_SpawnSuccessGate @0x49ADFD (in a
+	//  @0x49ADC8..0x49ADD7, bit 0x1 with g_RoundOver @0x49ADFD (in a
 	//  session) / @0x49AE16; the deferred re-queue Input_FlushDeferredEvents
 	//  @0x497AC0 -> Input_QueueEvent]
 	if (input.consume_one_shots && (input.player.held_action_bits & HELD_MENU_OPEN) == 0) {
@@ -120,7 +120,7 @@ bool Role::request_respawn() {
 	// [orig: Input_HandleActionBinding -- the dead bit @0x49AD76..0x49AD7E,
 	//  bit 0 @0x49AD95..0x49ADA0; 0x400 @0x49ADB3..0x49ADC2 (g_ClientPreRoundTimer);
 	//  0x8000000 @0x49ADC8..0x49ADD7 (g_DeployScreenActive); the pause
-	//  @0x49ADDD..0x49ADE8; g_SpawnSuccessGate @0x49ADEE..0x49AE16; DeathScreen_FilterInputAction
+	//  @0x49ADDD..0x49ADE8; g_RoundOver @0x49ADEE..0x49AE16; DeathScreen_FilterInputAction
 	//  @0x49AE4C, Input_NullActionFilter @0x49AE68, Cine_FilterInputAction @0x49AE84, the
 	//  def+0x170 callback @0x49AEB6 (Input_HandleActionBinding_0's default
 	//  @0x4E13F9)]
@@ -439,7 +439,7 @@ void Session::step_hud_radar_frame() {
 	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
 			"the default gates run the pass");
 	ClientRuntime *runtime = role_->client_runtime();
-	// The pass's spawn-success early-out [orig: g_SpawnSuccessGate
+	// The pass's spawn-success early-out [orig: g_RoundOver
 	// @0x5a8084], live; the hud_detail-3 early-out and the map site are the
 	// embedder's HUD's.
 	const bool spawn_gate = runtime != nullptr && runtime->state().spawn_success_gate;

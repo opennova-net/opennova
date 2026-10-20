@@ -965,7 +965,7 @@ int pool1_fixture_bytes_impl() {
 	// before the carrier's init set REFLECTABLE), the turret's live attitude, team
 	// 1, the carrier as its target, the zero byte, the carrier's refNum 1 and its
 	// slot index 1 as subType. The position is float-exact near the record's.
-	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940; Entity_SpawnWeaponOverlays
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940; Entity_SpawnAddEWeapChildren
 	//  refNum @0x40F3B1, Flags @0x40F404, subType @0x40F40E]
 	w::World cworld;
 	cworld.registry.configure_pool(1, 0x60);

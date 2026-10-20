@@ -72,7 +72,7 @@ void vehicle_simple_contact(
 			}
 		}
 		const int32_t dx = io::bam_sub(points[best][0], x), dy = io::bam_sub(points[best][1], y);
-		// This contact uses the NEGATIVE atan scale dbl_7C57B8.
+		// This contact uses the NEGATIVE atan scale g_NegBamPerRadian.
 		int32_t impulse = io::bam_sub(
 				bam_of_atan2(io::bam_add(dy, first[best].fy), io::bam_add(dx, first[best].fx)),
 				bam_of_atan2(dy, dx));

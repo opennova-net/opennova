@@ -861,7 +861,7 @@ public:
     // pool 1 helo-brained then pool 0 players; 1 = pool 1 non-helo; 2 = pool 0 non-player;
     // 3 = pool 2) — into a scratch list, then the scoring core with the lazy LOS probe.
     // Entry gates: teamless-without-see-all and the round-end latch [orig:
-    // g_SpawnSuccessGate @0x24C1928] return null. `variant_a` runs
+    // g_RoundOver @0x24C1928] return null. `variant_a` runs
     // AI_FindBestTarget @0x465A50 instead, instruction-identical but for
     // the two arc bytes read signed (movsx @0x465A8C/0x465A9B against B's
     // movzx @0x466FBC/0x466FCB): the aircraft sites always, and

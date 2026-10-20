@@ -37,7 +37,7 @@ struct MatchRules {
     int title = gameprofile::GAME_JO;
     uint32_t game_type = 0;
     uint32_t game_time_minutes =
-        0;                    // SET GameTime / g_RespawnTime, despite the old host-field name
+        0;                    // SET GameTime / g_RoundTimeLimitMinutes, despite the old host-field name
     uint32_t score_limit = 0; // SET KillLimit / g_ScoreLimit
     uint32_t hill_limit_minutes = 0; // cfg koth_limit / g_TimeLimitMinutes
     uint32_t hill_delta = 5;         // cfg koth_delta / dword_24D2148
@@ -101,7 +101,7 @@ uint16_t default_score_exp_fanfare(int title);
 // Field 11 is the FLAGSAVE counter: GameEvent_ProcessScoring @0x52F550 case 8
 // (@0x52f8d1: ++slot dword 29 = field 11 @0x52f8d7, points += scoringTable[83]
 // = score.ini VAR slot 9 "FLAGSAVE" in the shipped name table off_830348),
-// dispatched by Server_BroadcastEntityDeathEvent @0x517A90 (push 8 @0x517b03)
+// dispatched by Server_BroadcastFlagSaveEvent @0x517A90 (push 8 @0x517b03)
 // from the flag-return interaction in Entity_ProcessWaypointInteraction
 // @0x4AD820 (@0x4ad8dc / @0x4ad921). The 0x56 row's sixth i16 reads it as
 // CPlayerStats_GetFieldPlusOne(stats, 0xA) @0x50918a. Retail's "ASSISTS" is
@@ -274,7 +274,7 @@ struct MatchPlayerPunt {
 
 // One outcome latch for every producer: automatic multiplayer rules and the
 // WAC/BMS Co-op/SP actions all converge here. Team 0 is a draw/no-team outcome.
-// [orig: g_SpawnSuccessGate @0x24c1928 (latched by Server_ProcessRoundEnd
+// [orig: g_RoundOver @0x24c1928 (latched by Server_ProcessRoundEnd
 // @0x5164F0 at @0x5168e4, cleared by Game_StartMission @0x524a1f),
 // g_RoundWinningTeam @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D
 // payload byte 0; memset 0 at mission start, so it stays 0 until the round ends)]
@@ -376,7 +376,7 @@ class Match {
     // MaxScore, KOTHLimit, ChangeTeamDelay and GameTime store the rule globals the round reads,
     // and GameTime restarts the round clock at `3720 * value` (a zero ends a timed round at its
     // next check). [orig: CAdminServer_HandleSetCommand @0x405A60 -- g_ScoreLimit, g_KillLimit,
-    // g_TimeLimitMinutes, g_CaptureDuration, g_RespawnTime and g_RoundTimeRemaining]
+    // g_TimeLimitMinutes, g_CaptureDuration, g_RoundTimeLimitMinutes and g_RoundTimeRemaining]
     MatchRules &live_rules() { return rules_; }
     void set_remaining_ticks(int32_t ticks) { remaining_ticks_ = ticks; }
     const MatchOutcome &outcome() const { return outcome_; }
@@ -522,7 +522,7 @@ class Match {
     // A client's round-over latch: S2C 0x1D raises the gate the host's round
     // end raises (the entity update and the target filters read it), with no
     // scoring pass and no board; the next mission start's fresh Match clears it.
-    // [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_SpawnSuccessGate,1`
+    // [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_RoundOver,1`
     //  @0x430858 under !is_authority; cleared by Game_StartMission @0x524A1F]
     void latch_round_over() { outcome_.ended = true; }
 

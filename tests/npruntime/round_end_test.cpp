@@ -5,7 +5,7 @@
 // auto-lose win condition [orig: Server_CheckWinConditions @0x51ad40, SP leg
 // @0x51ad6f — dead local player without the SinglePlayerRespawn attrib (0x40)], the
 // round-end latch + host effect [orig: Server_ProcessRoundEnd @0x5164f0], and the
-// post-round respawn hold [orig: the g_SpawnSuccessGate check @0x519af6].
+// post-round respawn hold [orig: the g_RoundOver check @0x519af6].
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -397,7 +397,7 @@ void test_tdm_round_wire_and_linger() {
 // in-game count still counted; the integrity family sends a state-7 slot
 // nothing while its toggle still flips, and the 0x79 keeps its own clock.
 // [orig: Server_TickUpdate @0x51D8F9..0x51D917, is_in_session @0x51D9A5,
-//  g_SpawnSuccessGate @0x51D9B1, the 0x79 @0x51E1B2..0x51E202;
+//  g_RoundOver @0x51D9B1, the 0x79 @0x51E1B2..0x51E202;
 //  Server_BroadcastWeaponSlotStateToPlayers - state 6 @0x508584, the toggle
 //  @0x50868E; Server_ProcessRoundEnd @0x51685E]
 void test_periodic_list_runs_through_the_linger() {

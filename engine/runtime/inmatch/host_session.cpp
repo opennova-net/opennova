@@ -97,7 +97,7 @@ std::vector<ProtocolMessage> send_session_batches(
 	// earlier node's overflow. This port defers Create to the send boundary, so the latch rides
 	// the record's place in the queue and keeps that first-cause-wins order; the 0x46 that
 	// answers the punt then makes the 0x86 burst echo this record. [orig:
-	//  CNapiNPConnection_SendChatMessage @0x4C7EF0 — the record @0x4c7f8e..0x4c7fe4,
+	//  CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 — the record @0x4c7f8e..0x4c7fe4,
 	//  latch-if-!valid @0x4c7ff2..0x4c8004, TrySendSessionInit @0x4c800c ->
 	//  NapiNPDataTransfer_SendDescription @0x628C80 serializes conn->disconnect_event and Creates
 	//  it with flag 0x10 @0x628e42; NapiNPMessage_Create's latch @0x6280f9..0x62810a]
@@ -628,7 +628,7 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	world::MatchRules match_rules;
 	match_rules.title = owner.ctx.config.title;
 	match_rules.game_type = owner.ctx.config.game_type;
-	// SET GameTime feeds g_RespawnTime in retail. The existing host model
+	// SET GameTime feeds g_RoundTimeLimitMinutes in retail. The existing host model
 	// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.
 	// [orig: Game_StartMission seed @0x524F66]
 	match_rules.game_time_minutes = owner.ctx.config.respawn_time;

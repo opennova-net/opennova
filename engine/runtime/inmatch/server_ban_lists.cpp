@@ -50,8 +50,8 @@ NapiNPConnection *slot_at(NapiNPServerCtx &ctx, int32_t index) {
 	return nullptr;
 }
 
-// CNapiNPConnection_SendChatMessage(connection, "", 33, detail): the disconnect description
-// with reason 33. [orig: CNapiNPConnection_SendChatMessage @0x4C7EF0]
+// CNapiNPConnection_QueueDisconnectEvent(connection, "", 33, detail): the disconnect description
+// with reason 33. [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0]
 void punt(NapiNPConnection &conn, const char *detail) {
 	DisconnectEvent event;
 	event.ds = 1;

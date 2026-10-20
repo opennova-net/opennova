@@ -5,8 +5,8 @@
 // the walk's order, the S2C 0x06 copy, the binding table's lookups (by token, and the CRC
 // compare against the token's text) and Client_ProcessLocalCommand's arms.
 // [orig: NapiClientCmd_ParseAndExecute @0x4329C0; NapiClientCmd_HandleDebugCommand @0x42C4D0;
-//  NapiClientCmd_HandleDebug @0x42CCE0; NetPacket_WriteObfuscatedString @0x42AEA0;
-//  NapiNPClientMsg_HandleChatCommand @0x432BC0; Client_ProcessLocalCommand @0x520BF0]
+//  NapiClientCmd_HandleServerCommandTable @0x42CCE0; NetPacket_WriteObfuscatedString @0x42AEA0;
+//  NapiNPClientMsg_HandleConsoleEcho @0x432BC0; Client_ProcessLocalCommand @0x520BF0]
 #include <runtime/inmatch/client_console.h>
 
 #include <base/vfs/vfs.h> // vfs_version_crc (CRC_ComputeCustomTable)

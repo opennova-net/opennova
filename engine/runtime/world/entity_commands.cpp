@@ -1379,7 +1379,7 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
     // Retail truncates toward zero (_ftol2_sse) over the NEGATED scale
     // -(2^31/pi); the sign folds out under the cdq-abs below, but the
     // truncation is load-bearing (llround here would drift 1 BAM32 LSB on
-    // half of all bearings). [orig: fpatan -> fmul dbl_7C57B8
+    // half of all bearings). [orig: fpatan -> fmul g_NegBamPerRadian
     // (-683565275.5764316) -> _ftol2_sse @0x4f195f-0x4f196f]
     const int32_t bearing_neg = static_cast<int32_t>(
             std::atan2(fdy, fdx) * -683565275.5764316);

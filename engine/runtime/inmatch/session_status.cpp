@@ -146,7 +146,7 @@ std::vector<uint8_t> serialize_session_status(
 	// 8. Objective Co-op (0x30020) suppresses it; training Co-op (0x10020)
 	// therefore carries both key 9 and key 8 in the retail oracle.
 	// [orig: Server_BuildStatusReport @0x530e71..0x530eac — is_in_session,
-	//  !(type & 0x20000), g_RespawnTime != 0]
+	//  !(type & 0x20000), g_RoundTimeLimitMinutes != 0]
 	if (in_session && !gtype::is_objective(game_type) && config.respawn_time != 0) {
 		options.emplace_back(8, config.respawn_time);
 	}

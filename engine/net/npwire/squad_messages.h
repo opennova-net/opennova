@@ -20,7 +20,7 @@ namespace opennova {
 // subordinate of the sender) and the waypoint entity's name (+244) and
 // position (+4/+8/+12).
 // [orig: NetPacket_WriteTypeNameAndPosition @0x42b160 (writer, from
-//  NetPacket_SendChatMessage @0x42ddc0 — the IDB name is a misnomer);
+//  NetPacket_SendUserWaypointCreate @0x42ddc0 — the IDB name is a misnomer);
 //  NapiNPServerMsg_HandleChatOrWhisper @0x514850 (reader)]
 struct WaypointShare {
 	uint8_t target = 0xFF;
@@ -49,7 +49,7 @@ WaypointCreate decode_waypoint_create(const uint8_t *body, size_t len);
 
 // C2S 0x4F (a user waypoint deleted) and S2C 0x7C (the relay): one packed
 // pool handle, 0xFFFF for an address outside every pool.
-// [orig: NetPacket_WriteEntityIndex16 @0x42b230 (from NetPacket_SendEntityUpdate
+// [orig: NetPacket_WriteEntityIndex16 @0x42b230 (from NetPacket_SendUserWaypointRemove
 //  @0x42de00); NapiNPServerMsg_0x04F @0x514a40; NapiNPClientMsg_0x07C @0x426020]
 std::vector<uint8_t> encode_entity_handle16(uint16_t handle);
 uint16_t decode_entity_handle16(const uint8_t *body, size_t len);

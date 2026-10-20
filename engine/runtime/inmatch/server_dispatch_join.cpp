@@ -38,7 +38,7 @@ namespace {
 // A game-layer join-gate rejection: the empty-string description record with
 // only the DPC reason set (DS=1 role, DC=2 class, DP1/DP2 0, DSTR/DDSTR "").
 // [orig: Server_ValidatePlayerJoinRequest @0x512100 failures ride
-// CNapiNPConnection_SendChatMessage @0x4c7ef0 with both strings g_EmptyStr ->
+// CNapiNPConnection_QueueDisconnectEvent @0x4c7ef0 with both strings g_EmptyStr ->
 // NapiNPDataTransfer_SendDescription @0x628c80]
 bool stage_join_gate_reject(NapiNPConnection &conn, uint32_t reason_dpc) {
 	DisconnectEvent event;
@@ -602,7 +602,7 @@ void dispatch_mission_chunk_request(const GameConfig &config, const ProtocolMess
 // See header. The net player's game-state test against 2 has no counterpart here: a
 // connection reaches this switch only past its admission (dispatch_admission), and the
 // handler needs the net player's slot, which the add links (player_slot_active).
-// [orig: NapiNPServerMsg_0x009 @0x513200 - the authority @0x513207, the net player
+// [orig: NapiNPServerMsg_HandlePlayerSyncRequest @0x513200 - the authority @0x513207, the net player
 //  @0x51320D, its slot @0x513218, game state 9 @0x51322D, the slot-state test @0x513238,
 //  the state-6 watermark clear @0x51323F, state 2 @0x513249]
 void dispatch_player_sync_request(NapiNPConnection &conn) {

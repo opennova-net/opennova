@@ -6139,7 +6139,7 @@ void test_cached_los_excludes_the_endpoint_carrier() {
 // m[4], m[6], m[8], m[10] (the side column and translation are inert). With
 // ftol = truncation and every product an `imul; shrd 22` (int64 >> 22):
 //   negy = -m[4] = -1970678; negupy = -m[6] = -1785386
-//   yaw   = ftol(atan2(-1970678, 3413315) * dbl_7C57B8 (-683565275.5764316))
+//   yaw   = ftol(atan2(-1970678, 3413315) * g_NegBamPerRadian (-683565275.5764316))
 //         = ftol(357913891.155) = 357913891
 //   sy = ftol(sin(yaw * dbl_7C3608) * 4194304) = ftol(2097209.775) = 2097209
 //   cy = ftol(cos(yaw * dbl_7C3608) * 4194304) = ftol(3632340.458) = 3632340

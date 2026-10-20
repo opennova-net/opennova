@@ -2,7 +2,7 @@
 // the 0x4E squad registry walk (S2C 0x6A action 3 to the requester, nothing past the last node
 // or from an empty registry) and the 0x24 ban and punt line (inert from a remote slot; the
 // local slot's BAN / UNBAN answered in channel-3 S2C 0x14 lines).
-// [orig: NapiNPServerMsg_UpdateAck @0x5024B0; NapiNPServerMsg_HandleMinimapSlotRequest
+// [orig: NapiNPServerMsg_UpdateAck @0x5024B0; NapiNPServerMsg_HandleSquadRegistryWalk
 //  @0x511210 -> CLinkedList_FindNextByNetId @0x52B190; NapiNPServerMsg_0x024 @0x514DC0 ->
 //  Server_HandleBanPuntCommand @0x50B380 -> Server_SendChatMessageToPlayer @0x508050]
 

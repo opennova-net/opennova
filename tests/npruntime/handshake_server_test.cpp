@@ -3122,7 +3122,7 @@ bool run_spectator_admission_codes_match_retail() {
 	// --- The game-layer 0x00 join gate answers the spectator codes as DPC
 	// punts through the connection-description record, after admission. ---
 	// [orig: Server_ValidatePlayerJoinRequest @0x512100 codes 14/15/16 via
-	// CNapiNPConnection_SendChatMessage @0x4c7ef0]
+	// CNapiNPConnection_QueueDisconnectEvent @0x4c7ef0]
 	const std::vector<uint8_t> join_payload = [] {
 		std::vector<uint8_t> payload;
 		const char name[] = "VERSIONCRCSTRING";

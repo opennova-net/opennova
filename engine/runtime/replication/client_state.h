@@ -1080,7 +1080,7 @@ struct ClientNetQuality {
 // to its C2S 0x42: each row in wire order up to the type-0 terminator or the
 // body end (an absent byte reads 0), and the received flag, raised on every
 // reply, which the vehicle-spawn screen clears when it opens and asks again.
-// [orig: NapiNPClientMsg_HandleWeaponLoadoutList @0x429A30 (a misnomer) - the
+// [orig: NapiNPClientMsg_HandleVehicleSpawnAvailability @0x429A30 (a misnomer) - the
 //  rows @0x429A60..0x429AB9 (stride 12 from 0xA81BB8), the count
 //  g_VehicleSpawnAvailabilityCount @0x429AC8 / @0x429AE2, the flag
 //  g_VehicleSpawnAvailabilityReceived @0x429ACE / @0x429AE7; read by
@@ -1099,9 +1099,9 @@ struct ClientVehicleSpawnAvailability {
 // table holds one.
 // [orig: NapiNPClientMsg_0x02A @0x425BA0 - the non-authority gate @0x425BB9, the
 //  10-byte read @0x425BC6..0x425BD8 (a short body leaves the stack entry
-//  unread); Chat_AddToHistory @0x422920 (a misnomer) - the slot walk
+//  unread); ServerCommandTable_AddEntry @0x422920 (a misnomer) - the slot walk
 //  @0x422927..0x422947, the copy @0x422957..0x422963; read by
-//  NapiClientCmd_HandleDebug @0x42CCE0 (@0x42CD00, @0x42CD6F); the host's table
+//  NapiClientCmd_HandleServerCommandTable @0x42CCE0 (@0x42CD00, @0x42CD6F); the host's table
 //  byte_82F1DC sent by Server_SendInitialGameStateToPlayer @0x51BBA0 (@0x51BFF6)]
 inline constexpr std::size_t kServerCommandSlots = 16;
 inline constexpr std::size_t kServerCommandEntryBytes = 10;
@@ -1208,7 +1208,7 @@ struct ClientState {
 	// Tab board's " [..]" suffix; a session start clears it
 	// [orig: g_ScoreboardStatusSuffixEnabled @0xA85B49 — the store
 	//  NapiNPClientMsg_HandleTextCommand @0x429f71, the parse gate @0x42fbfb,
-	//  the drawer test @0x423ef8, the reset Client_ResetDisconnectState
+	//  the drawer test @0x423ef8, the reset Session_ResetForStart
 	//  @0x5202d9].
 	uint8_t scoreboard_status_suffix = 0;
 	hud::KillAnnouncement kill_announcement;
@@ -1237,7 +1237,7 @@ struct ClientState {
 	// @0x42284e, NapiNPClientMsg_0x00F @0x42e396; read by the talk arms
 	// @0x49b9ad].
 	bool round_reset_hold = false;
-	// The round-over latch (g_SpawnSuccessGate): a client raises it on the
+	// The round-over latch (g_RoundOver): a client raises it on the
 	// 0x1D header ahead of its parse and on S2C 0x25; the authority's own
 	// round end raises it beside the 0x1D it broadcasts; only a mission start
 	// lowers it (ClientReplicaPipeline::begin_mission). The talk keys, the

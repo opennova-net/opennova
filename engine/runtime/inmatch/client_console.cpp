@@ -43,7 +43,7 @@ bool is_space(char ch) { return cp1252_isspace(static_cast<uint8_t>(ch)); }
 // letter is folded; a byte past 0x7F reaches the locale's map and comes back as
 // its unsigned upper-case byte (cp1252: a-acute..thorn less the divide sign, s-caron,
 // oe, z-caron, y-diaeresis).
-// [orig: NapiClientCmd_HandleDebug @0x42cd16..0x42cd1b, `movsx` then toupper]
+// [orig: NapiClientCmd_HandleServerCommandTable @0x42cd16..0x42cd1b, `movsx` then toupper]
 int32_t locale_toupper(char ch) {
 	const uint8_t b = static_cast<uint8_t>(ch);
 	if (b >= 'a' && b <= 'z') return b - 0x20;
@@ -166,7 +166,7 @@ bool client_handle_debug_command(const std::string &line, ClientConsoleContext &
 	return false;
 }
 
-// [orig: NapiClientCmd_HandleDebug @0x42CCE0 - the leading spaces @0x42cceb; the walk
+// [orig: NapiClientCmd_HandleServerCommandTable @0x42CCE0 - the leading spaces @0x42cceb; the walk
 //  over the sixteen ten-byte entries from the length byte (unk_A821F9) @0x42cd00..0x42cd50:
 //  a zero length skipped, a negative one taken at once with nothing compared @0x42cd14,
 //  else toupper(movsx line char) against movsx(name byte) XOR 0xFE @0x42cd16..0x42cd30 (an

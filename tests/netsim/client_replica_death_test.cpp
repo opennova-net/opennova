@@ -260,7 +260,7 @@ void test_world_state_load_blanks_the_hud_only_with_the_death_screen_up() {
 
 // The death-screen rising edge raises the spectator tip (event 22) unless the
 // round is over; a held bit raises nothing more.
-// [orig: NapiNPClientMsg_0x00A @0x42ffd0..0x42ffdf — `cmp g_SpawnSuccessGate`
+// [orig: NapiNPClientMsg_0x00A @0x42ffd0..0x42ffdf — `cmp g_RoundOver`
 //  then CTipSystem_HandleEvent(22)]
 void test_death_edge_raises_the_spectator_tip() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();

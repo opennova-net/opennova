@@ -174,7 +174,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// (a headless host): a fresh profile's over the mounted Avatars.def, as the
 	// boot's fresh record packs each side's first combo; an install with no
 	// Avatars.def takes the empty table's (D-NET-NEW-L2-7).
-	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> EntitySlot_LookupAndPackEntry
+	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> CAvatarDefs_PackFirstComboOfAlignment
 	//  @0x57AD40 over g_AvatarDefs; CAvatarDefs_Init @0x57B180 opens "Avatars.def"]
 	if (request.host != nullptr && !host_cfg.local_character_vars) {
 		CharacterRegistry characters;

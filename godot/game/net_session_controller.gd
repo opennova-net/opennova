@@ -223,7 +223,7 @@ func _start_lan_join(target: JoinTarget) -> void:
 	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
 	# them with the authoritative post-auth record before starting MissionRoot.
 	# Retail also holds the screen through the post-world-load connection/game-start
-	# waits [orig: NapiClient_WaitForDisconnect @ 0x42cb20 then
+	# waits [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @ 0x42cb20 then
 	# NapiClient_WaitForGameStart @ 0x42cc10]. GameWorld pumps the loaded runtime
 	# while hidden and reports the authoritative admission/deploy edge separately
 	# (docs/interface/loading-screen-re.md, the load-flow case matrix).

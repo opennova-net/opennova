@@ -5,7 +5,7 @@ extends RefCounted
 ## lose screen, their stage machines and timeouts); the shell mounts the
 ## MissionEndScreen, which draws the cine's live events every frame. The world
 ## keeps ticking underneath while gameplay input idles [orig: the post-round
-## input gate — the client input uplinks stop against g_SpawnSuccessGate
+## input gate — the client input uplinks stop against g_RoundOver
 ## @0x42c410]. The round-over keys
 ## run the engine's special-key leg (Simulation.round_over_key) and every exit
 ## rides the session's mission exit through the main frame's router

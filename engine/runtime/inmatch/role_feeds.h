@@ -114,7 +114,7 @@ int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones,
 uint32_t round_over_key(const RoleView &view, int vk, int restart_vk);
 
 // [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
-//  g_SpawnSuccessGate, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
+//  g_RoundOver, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
 //  g_EndRoundDrawFlag, dword_A81B2C = GetTickCount; the 0x56 board
 //  completion.] Role-agnostic: every role's view folds both lanes.
 EndRoundSessionState end_round_session_state(const RoleView &view);
@@ -180,7 +180,7 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 // 0x0A sub-block-1 copy on a joiner; the round-over latch is the folded 0x1D
 // header. [orig: HUD_DrawBreathBar @0x59D6F0 reads word_A85B7C and
 // g_WacVarBreathTime; HUD_DrawGameplayOverlays skips it while
-// g_SpawnSuccessGate @0x5BDECA..0x5BDED1; the 0x1D latch
+// g_RoundOver @0x5BDECA..0x5BDED1; the 0x1D latch
 // NapiNPClientMsg_0x01D @0x430840]
 struct BreathBarFacts {
 	int samples = 0;

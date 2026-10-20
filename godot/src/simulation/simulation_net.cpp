@@ -714,7 +714,7 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 		page = inmatch::mission_start_model_page(*kernel_, files, &net_.charattr_table, !is_joiner());
 	}
 	// The same frozen count is a host's S2C 0x68 cursor wrap (the role reads
-	// it every tick) [orig: Server_SendRandomSeedSync @0x511375 / @0x511391].
+	// it every tick) [orig: Server_SendLoadedModelPageRequest @0x511375 / @0x511391].
 	net_.loaded_model_list_count = static_cast<uint32_t>(page.size());
 	if (!is_joiner() || !runtime_) return;
 	runtime_->set_loaded_model_challenge_snapshot(std::move(page));

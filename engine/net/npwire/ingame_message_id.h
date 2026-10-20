@@ -159,7 +159,7 @@ inline constexpr uint8_t TRACKED_PLAYER_VOICE = 0x6D;
 // Per-vehicle-type spawn availability for the requester's team, from the
 // host's EntityLimit table: [u8 3] + rows [u16 typeId][u8 avail][u8 max] +
 // u16 0. Requester-only reply to c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST.
-// [orig: NapiNPClientMsg_HandleWeaponLoadoutList @0x429A30;
+// [orig: NapiNPClientMsg_HandleVehicleSpawnAvailability @0x429A30;
 //  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0]
 inline constexpr uint8_t VEHICLE_SPAWN_AVAILABILITY = 0x70;
 // The command map's squad legs (net/npwire/squad_messages.h): a member's
@@ -232,7 +232,7 @@ inline constexpr uint8_t RADIO_CALL_REQUEST = 0x13;        // i16 Radio-menu dig
 inline constexpr uint8_t EMOTE_REQUEST = 0x14;              // i16 Emotes-menu digit -> s2c::EMOTE_BROADCAST (retired misnomer: "object sound")
 // A user waypoint shared to the sender's subordinates (target 0xFF) or one
 // squad joiner (squad_messages.h WaypointShare).
-// [orig: NetPacket_SendChatMessage @0x42DDC0 (a misnomer) ->
+// [orig: NetPacket_SendUserWaypointCreate @0x42DDC0 (a misnomer) ->
 //  NapiNPServerMsg_HandleChatOrWhisper @0x514850 (a misnomer)]
 inline constexpr uint8_t WAYPOINT_SHARE = 0x17;
 // The weapon drop (44 B, NetPacket_WriteCompactEntityState @0x42AB40). No

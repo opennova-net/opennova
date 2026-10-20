@@ -7,7 +7,7 @@
 // name, its owner and team 0. The table holds up to 16 of them with one hover
 // byte each; the CMAP render places its delete button beside the hovered one.
 // Witness record: docs/interface/hud-re.md "The command map" (D-HUD-19).
-// [orig: Waypoint_CreateForPlayer @0x4dfcb0; the table g_ConnectionSlotTable
+// [orig: Waypoint_CreateForPlayer @0x4dfcb0; the table g_CMapUserWaypoints
 //  @0x252dcd0 (16 x {entity*, hover byte}), its count dword_252DD50 — both
 //  IDB names are misnomers]
 
@@ -88,7 +88,7 @@ struct UserWaypointTable {
 	// CMap_HandleWaypointCreateConfirm @0x54a1c3..0x54a1e5].
 	bool append(EntityHandle handle);
 	// The first hovered live entry's index, -1 when none [orig:
-	// CMap_DestroyFirstActiveLoadingEntity @0x5479b0..0x5479d3 — the entry, its
+	// CMap_OnUserWaypointClose @0x5479b0..0x5479d3 — the entry, its
 	// hover byte and the bound delete button].
 	int first_hovered() const;
 	// Drop entry `index` and shift the tail down one (the vacated last slot
@@ -106,12 +106,12 @@ struct UserWaypointTable {
 EntityHandle place_user_waypoint(World &world, int32_t x, int32_t y, const std::string &name);
 // The delete button: the first hovered placed waypoint destroyed and removed
 // from the table; its row, invalid when none is hovered.
-// [orig: CMap_DestroyFirstActiveLoadingEntity @0x547990 — the count gate
+// [orig: CMap_OnUserWaypointClose @0x547990 — the count gate
 //  @0x5479a5, j_Entity_Destroy @0x5479ee, the compaction @0x5479f3..0x547a37]
 EntityHandle delete_hovered_user_waypoint(World &world);
 // CLEAR_WAYPOINTS: every placed waypoint destroyed, the table cleared;
 // `removed` gets each row in table order.
-// [orig: Server_DestroyBatchedEntities @0x548110 (a misnomer) — the count
+// [orig: CMap_OnClearWaypoints @0x548110 (a misnomer) — the count
 //  gate @0x548121, the walk @0x548130..0x548150, the memset @0x54815e]
 void clear_user_waypoints(World &world, std::vector<EntityHandle> &removed);
 

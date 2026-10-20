@@ -360,8 +360,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// is re-resolved to the side's default: the first combo of the side's
 	// alignment, else entry 0, or 0 for an empty table (D-NET-137). The round
 	// init's kept slots were validated at their add.
-	// [orig: Server_PlayerAdd @0x51CBC0 - MinimapSlot_HasEntity (the combo find)
-	//  @0x51CF87, EntitySlot_LookupAndPackEntry(side 0) @0x51CF9D, slot+0x1BA
+	// [orig: Server_PlayerAdd @0x51CBC0 - CAvatarDefs_HasPackedId (the combo find)
+	//  @0x51CF87, CAvatarDefs_PackFirstComboOfAlignment(side 0) @0x51CF9D, slot+0x1BA
 	//  @0x51CFA5; @0x51CFB9, side 1 @0x51CFD0, slot+0x1BC @0x51CFD8]
 	if (!round_init) {
 		for (int side = 0; side < 2; ++side) {
@@ -436,8 +436,8 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// char id the entity+0x15C wire NetId [slot+440] — the joiner's own 0x0C record must echo the
 	// values it uploaded (golden ASH_I5A: VCB=4/CI1=0x8207 -> record 4/0x8207) or its client binds
 	// a wrong-type character slot: the D-NET-146 DBuggy1-shadow bug. The ids were validated
-	// against the host's Avatars.def above (D-NET-137) [orig: MinimapSlot_HasEntity @0x57b140 ->
-	// EntitySlot_LookupAndPackEntry @0x57ad40].
+	// against the host's Avatars.def above (D-NET-137) [orig: CAvatarDefs_HasPackedId @0x57b140 ->
+	// CAvatarDefs_PackFirstComboOfAlignment @0x57ad40].
 	// The pick reads the slot's team byte the assignment just wrote: a session
 	// spectator's team 0 takes side B in a team game (D-NET-NEW-L3-7).
 	// [orig: Server_PlayerAdd @0x51CFDF..0x51CFF7 - slot+0x1A0 against 1 and 3,
@@ -622,7 +622,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// An added slot is short of state 6 until its join, which the proximity
 	// pass, the alive-holder count and the capture census read (D-NET-441); the
 	// tick's stamp keeps the row in step after that.
-	// [orig: CNapiServer_ProcessPendingPlayerSpawns - CServerTick_SetPhase(slot, 1)
+	// [orig: CNapiServer_ProcessPendingPlayerSpawns - PlayerSlot_SetState(slot, 1)
 	//  @0x4C9123; Server_OnPlayerJoin's state 6 @0x51A712]
 	world.match.set_player_slot_in_game(h, false);
 
@@ -763,7 +763,7 @@ void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn
 }
 
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
-// !g_SpawnSuccessGate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
+// !g_RoundOver. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
 // Game_StartMission @0x524360); the original does NOT process spawns until the load completes and the
 // pool-3 start markers are promoted. [D-NET-116] The reimpl maps the retail
 // round-over gate to world::Match's sole outcome latch but has no dword_24D1DE0
@@ -828,7 +828,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				}
 				// The added player's net player enters game state 8 and its slot state 1,
 				// where it waits for its C2S 0x09 [orig: CNetPlayer_SetGameState(.., 8)
-				// @0x4C911A, CServerTick_SetPhase(slot, 1) @0x4C9123].
+				// @0x4C911A, PlayerSlot_SetState(slot, 1) @0x4C9123].
 				conn.burst.game_state = 8;
 				conn.slot_state = PlayerSlotState::Added;
 				// The pump's add is Server_PlayerAdd's, which writes the slot's

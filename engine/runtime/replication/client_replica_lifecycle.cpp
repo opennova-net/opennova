@@ -260,7 +260,7 @@ void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_
 // [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 — the handle gates
 //  @0x431c1a..0x431c49, Team @0x431c6d (!is_authority), the C2S 0x29
 //  {index + 1} @0x431c88..0x431c99, the player gate @0x431ca5, NetId
-//  @0x431cad with the MinimapSlot_HasEntity fallback @0x431cb4..0x431cde,
+//  @0x431cad with the CAvatarDefs_HasPackedId fallback @0x431cb4..0x431cde,
 //  CharacterEntity @0x431cfc, animSlot @0x431cff]
 void ClientReplicaPipeline::apply_team_change_confirm(const std::vector<uint8_t> &body) {
 	TeamChangeConfirm entry;

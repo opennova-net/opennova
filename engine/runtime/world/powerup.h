@@ -82,7 +82,7 @@ struct PowerupTable {
 
 // The row build: the parsed file plus the weapon table the `weapon` and `ammo`
 // names resolve against (retail resolves both at parse time, over the loaded
-// weapon.def) [orig: PowerUpDef_ParseProperty -- AvatarDef_FindByName @0x4431B7
+// weapon.def) [orig: PowerUpDef_ParseProperty -- AdmDef_FindByName @0x4431B7
 //  / AdmDef_GetIndexFromPtr @0x443211 for `weapon`, the class lookup AmmoClass_FindIdByName
 //  @0x443250 for `ammo`, an unknown class logging "ammo class error"].
 PowerupTable build_powerup_table(const def::DefPowerupFile &file, const WeaponTable &weapons);

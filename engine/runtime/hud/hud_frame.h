@@ -700,7 +700,7 @@ struct HudEndRoundOverlayState {
 // tables. [orig: HUD_DrawEndRoundStatistics @0x5b7600 while dword_24C18AC]
 struct HudEndRoundStatisticsState {
 	bool shown = false;
-	bool raised = false; // [orig: g_SpawnSuccessGate && winner == 1 @0x5b763b]
+	bool raised = false; // [orig: g_RoundOver && winner == 1 @0x5b763b]
 	std::string title;   // gametext ("Score", "SCORE_TITLE")
 	std::array<std::string, 4> labels;
 	std::array<std::string, 4> values;
@@ -1115,7 +1115,7 @@ struct HudFrameState {
 	// [orig: word_A85B7C, written only by NapiNPClientMsg_0x00A @0x430104], the
 	// drown limit's seconds [orig: g_WacVarBreathTime, from the same message
 	// @0x4301A1; 20 from WacScript_FreeAll @0x4f6381], the round-over latch the
-	// caller skips the bar under [orig: g_SpawnSuccessGate, tested
+	// caller skips the bar under [orig: g_RoundOver, tested
 	// @0x5BDECA..0x5BDED1], and the label the embedder resolves from gametext
 	// (Overlays/STROVER91).
 	int breath_samples = 0;

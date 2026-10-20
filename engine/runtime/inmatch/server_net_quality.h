@@ -47,7 +47,7 @@ void Server_EmitQualityResends(NapiNPServerCtx &ctx, const world::World &world);
 // loss counters (unmodeled: 0), then publish the folded 0..255 quality as the
 // S2C 0x79 byte. Eligible = an active, non-local slot whose control age has
 // matured (slot+383 >= 1860). [orig: Game_ProcessMainFrame @0x52658B under the
-//  dword_24D1DDC 62-frame countdown; CNetQuality_UpdateMetrics @0x4C52C0 send
+//  g_NetQualityUpdateCountdown 62-frame countdown; CNetQuality_UpdateMetrics @0x4C52C0 send
 //  window @0x4C531B..0x4C55DA; the 0x79 read of +0x0C @0x51E3C1]
 void Server_SampleHostNetQuality(NapiNPServerCtx &ctx);
 

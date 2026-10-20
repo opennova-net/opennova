@@ -920,7 +920,7 @@ std::vector<std::string> milestones(const RunFacts &run) {
 	// S2C 0x46 is no milestone: a joiner's first one answers the C2S 0x22 its first
 	// 0x16 provokes, so it rides the scoreboard's phase (order.S.0x46). The player-sync
 	// track's C2S 0x09 -> S2C 0x2C is one: the host runs the track only in slot state
-	// 2, which the 0x09 sets (NapiNPServerMsg_0x009 @0x513200, @0x513249;
+	// 2, which the 0x09 sets (NapiNPServerMsg_HandlePlayerSyncRequest @0x513200, @0x513249;
 	// Server_SendInitialGameStateToPlayer @0x51BBB4..0x51BBBB, its 0x2C @0x51BF5D).
 	static_assert(has_normalization("order.S.0x46"));
 	static const Milestone kMilestones[] = {

@@ -711,7 +711,7 @@ int main() {
 
     // As an addeweap child, the same def's subType 0xFF lands before the ewep
     // class init reads its anchor at subType -1: no userpoint, no designation,
-    // so it rides its carrier's root. [orig: Entity_SpawnWeaponOverlays
+    // so it rides its carrier's root. [orig: Entity_SpawnAddEWeapChildren
     //  @0x40F40E -> Entity_InitFromModel @0x40DCAF -> Entity_InitBoneReferences
     //  @0x4415F1]
     const Entity *shield_e = w.registry.get(shield_h);

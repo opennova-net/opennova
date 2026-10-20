@@ -728,9 +728,9 @@ void JoinerRole::pump() {
 	// the world's gate before the frame's entity update, which the gate then
 	// holds; a mission start lowers both (ClientReplicaPipeline::begin_mission
 	// beside the load's fresh Match).
-	// [orig: g_SpawnSuccessGate — NapiNPClientMsg_0x01D @0x430858,
+	// [orig: g_RoundOver — NapiNPClientMsg_0x01D @0x430858,
 	//  NapiNPClientMsg_GameReset @0x422849; Game_ProcessMainFrame -- the
-	//  is_in_session / g_SpawnSuccessGate tests @0x526734..0x526742]
+	//  is_in_session / g_RoundOver tests @0x526734..0x526742]
 	if (rt.state().spawn_success_gate) world.match.latch_round_over();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 

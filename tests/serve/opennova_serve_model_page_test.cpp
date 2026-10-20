@@ -8,7 +8,7 @@
 // of 0 ours handed over read 0 every quartet.
 // [orig: Game_StartMission @0x524360 (the call @0x525A6E) -> Render_InitMissionTextures
 //  @0x587120 (the call @0x58728C) -> CEffectWorld_RebuildAllModelBuffers @0x5B3A80;
-//  ThreediGp_LoadModel @0x5B6160; Server_SendRandomSeedSync @0x511360 (+50 @0x51137E, the wrap
+//  ThreediGp_LoadModel @0x5B6160; Server_SendLoadedModelPageRequest @0x511360 (+50 @0x51137E, the wrap
 //  @0x511391..0x511393)]
 #include "server.h"
 #include "serve_test_support.h"

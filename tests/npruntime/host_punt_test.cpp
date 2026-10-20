@@ -711,7 +711,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	// The staged punt latched its record when the description was admitted (the
 	// port's SendChatMessage latch rides send_session_batches); this fixture never
 	// runs that pump, so it installs the same record by hand.
-	// [orig: CNapiNPConnection_SendChatMessage @0x4c7ff2..0x4c8004]
+	// [orig: CNapiNPConnection_QueueDisconnectEvent @0x4c7ff2..0x4c8004]
 	const DisconnectEvent punt =
 			make_disconnect_event(1, 2, 0, 0, "t35", 33, "LogPuntEvent");
 	inmatch::latch_disconnect_event(conn, punt);

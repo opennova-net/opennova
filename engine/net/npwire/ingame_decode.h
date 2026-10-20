@@ -1591,7 +1591,7 @@ bool decode_burst_visible_request(const uint8_t *body, size_t len, size_t &consu
 // world-state-load reply burst (@0x42e647, beside 0x28/0x29/0x2D — §5.29); the
 // host's handler reads NO fields from it and answers S2C 0x5D with every empty
 // pool-0 slot index. The handler is authority-gated and skipped while
-// `g_NetSpawnSuspended` or `g_SpawnSuccessGate` (round over) is set. Because
+// `g_NetSpawnSuspended` or `g_RoundOver` (round over) is set. Because
 // the body is never read, this decoder consumes nothing and accepts any length —
 // the sender's exact filler (if retail writes any) is unwitnessed.
 // [orig: NapiNPServerMsg_SendEmptySlots @ 0x51a600; body builder @ 0x5160f0;
@@ -1892,7 +1892,7 @@ bool decode_network_quality(const uint8_t *body, size_t len,
                             uint8_t &out_quality, size_t &consumed);
 
 
-// S2C 0x2A — chat-history entry `[i32 a][i32 b][i16 c]` (10 B) → Chat_AddToHistory.
+// S2C 0x2A — chat-history entry `[i32 a][i32 b][i16 c]` (10 B) → ServerCommandTable_AddEntry.
 // [orig: NapiNPClientMsg_0x02A @ 0x425BA0]
 struct ChatHistoryEntry {
 	int32_t field_a = 0;
@@ -2137,7 +2137,7 @@ bool decode_clan_roster_update(const uint8_t *body, size_t len, ClanRosterUpdate
 // (@0x42e1b3 / @0x42e1d9); {netId} is the continuation queued from each 0x6A
 // action 3 (@0x43266c). The host answers with the smallest node id strictly
 // greater than the value as 0x6A action 3, or nothing when none exists.
-// [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210 — read @0x511245,
+// [orig: NapiNPServerMsg_HandleSquadRegistryWalk @0x511210 — read @0x511245,
 //  CLinkedList_FindNextByNetId @0x511253, NetPacket_SerializeMinimapSlot(3) @0x51127c, send @0x51129e]
 struct ClanRosterWalkRequest {
 	uint32_t after_account_id = 0;
@@ -2164,7 +2164,7 @@ bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
 // 0x510681, terminator @0x5106b8]. The client stores the leading byte
 // (g_VehicleSpawnAvailabilityLeadByte) and fills a 12-B-stride table until the
 // 0 word or fewer than two bytes remain; missing row bytes read 0 [orig:
-// NapiNPClientMsg_HandleWeaponLoadoutList @0x429a30 — count @0x429a53, the loop
+// NapiNPClientMsg_HandleVehicleSpawnAvailability @0x429a30 — count @0x429a53, the loop
 // @0x429a6a..0x429ab9]. Requester-only reply to C2S 0x42 (send_mask 32)
 // [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930].
 inline constexpr uint8_t kVehicleSpawnAvailabilityLeadingByte = 3;

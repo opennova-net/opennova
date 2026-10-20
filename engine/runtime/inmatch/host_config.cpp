@@ -183,12 +183,12 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.auto_balance_min_difference = cfg.autobalance_on_recycle_diff_min; // @0x551BDA
 	config.auto_balance_trigger_difference = cfg.autobalance_on_recycle_diff_max; // @0x551BEB
 
-	// The rule globals [orig: Game_ApplySessionSettingsToGlobals]: g_RespawnTime
+	// The rule globals [orig: Game_ApplySessionSettingsToGlobals]: g_RoundTimeLimitMinutes
 	// from `time_limit` @0x551CD2, g_TimeLimitMinutes from `koth_limit`
 	// @0x551CD8..0x551CDF, g_ReplayEnabled @0x551CBA, g_MaxTeamLives @0x551B67,
 	// g_ScoreLimit from `max_kills` and g_KillLimit from `max_score`
 	// @0x551B6D..0x551B8C, g_KothDelta @0x551CF4, g_FlagReturnTime2 @0x551CFE,
-	// g_WeaponViolationLimit from `mp_flagresettime` @0x551D0A.
+	// g_FlagCarryLimitSeconds from `mp_flagresettime` @0x551D0A.
 	config.respawn_time = static_cast<uint32_t>(cfg.time_limit);
 	config.time_limit_minutes = session_koth_limit_minutes(cfg.koth_limit);
 	config.replay_enabled = static_cast<uint32_t>(cfg.replay);

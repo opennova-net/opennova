@@ -744,7 +744,7 @@ bool test_joiner_native_reads_take_the_owned_lifetime() {
 // rides its carrier's attachment row) as the decoded slot's own entity, so a
 // destroyable child's husk (the 0x13 kill's land_class_husk) reaches its row;
 // a row with no origin and no attachment (the joiner's own spawn) lends none.
-// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnWeaponOverlays: the
+// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnAddEWeapChildren: the
 //  child's pool-1 slot, the Pool_AllocEntry call @0x40F393, its spawn @0x40F3FF]
 bool test_full_bms_child_husk_reaches_its_row() {
 	opennova::mission::MissionKernel kernel;

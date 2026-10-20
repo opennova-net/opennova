@@ -54,7 +54,7 @@ param(
     # E2: the round time limit in minutes for this cell. Both hosts read it
     # from the SERVER copy's game.cfg time_limit (retail:
     # Game_ApplySessionSettingsToGlobals @0x551CCC..0x551CD2 copies it to the
-    # misnamed g_RespawnTime, and Game_StartMission @0x525242..0x525251 starts
+    # misnamed g_RoundTimeLimitMinutes, and Game_StartMission @0x525242..0x525251 starts
     # a round that is not co-op with g_RoundTimeRemaining = it * 0xE88 ticks,
     # which Server_CheckWinConditions @0x51AF6E ends at zero; koth_limit is
     # the king-of-the-hill hold, @0x51AF0F..0x51AF18), so the runner writes it

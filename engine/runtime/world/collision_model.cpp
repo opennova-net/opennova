@@ -196,7 +196,7 @@ void collision_matrix_to_euler(const CollisionMatrix &matrix, int32_t out[3]) {
 	const int32_t neg_y = io::bam_sub(0, m[4]);
 	const int32_t neg_up_y = io::bam_sub(0, m[6]);
 	// Negative scale is deliberate, including signed-zero quadrant behavior.
-	// [orig: dbl_7C57B8 = -683565275.5764316 @0x613352]
+	// [orig: g_NegBamPerRadian = -683565275.5764316 @0x613352]
 	const int32_t yaw =
 			io::retail_ftol_sse2(std::atan2(double(neg_y), double(m[0])) * -io::kBamPerRadian);
 	const int32_t sy = io::retail_ftol_sse2(std::sin(double(yaw) * radians) * 4194304.0);

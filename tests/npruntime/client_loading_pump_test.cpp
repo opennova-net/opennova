@@ -11,7 +11,7 @@
 //   SaveFile_SendAndWaitForServerAck  the send pump only when MORE than 50 ms
 //                                    passed since its last call;
 //   InitRandomSeedOrRequest          a busy spin: receive + send every pass;
-//   NapiClient_WaitForDisconnect     the send pump only after MORE than 100 ms;
+//   NapiClient_SendPlayerSyncAndWaitForSyncTail     the send pump only after MORE than 100 ms;
 //   NapiClient_WaitForGameStart      a busy spin;
 //   Game_StartMission's 0x0F wait    a busy spin;
 //   Client_ProcessNetworkFrame       the holdoff-gated per-frame send block.
@@ -25,7 +25,7 @@
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 (state 5 @0x56a5bf..
 //  0x56a5dd, state 6 -> MultiPlayer_PumpJoinVerificationFrame @0x424740); SaveFile_SendAndWaitForServerAck
 //  @0x5204b0; CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0;
-//  NapiClient_WaitForDisconnect @0x42cb20; NapiClient_WaitForGameStart @0x42cc10;
+//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cb20; NapiClient_WaitForGameStart @0x42cc10;
 //  Game_StartMission's final loop @0x52628d..0x5262df; the main-loop gate
 //  Client_ProcessNetworkFrame @0x42c3dd]
 
@@ -316,12 +316,12 @@ bool run_admission_follows_the_retail_loading_loops() {
 			"the mission-data spin sends each 0x37 re-request on its own frame"))
 		return false;
 
-	// The final mission chunk ends the spin; NapiClient_WaitForDisconnect then
+	// The final mission chunk ends the spin; NapiClient_SendPlayerSyncAndWaitForSyncTail then
 	// queues the 0x09, finds the countdown running at its entry pump, and sends
 	// only after MORE than 100 ms. A list landing inside that pace queues its one
 	// 0x22 per unbound row behind the 0x09, so both leave in one packet: the retail
 	// corpus run_20260426_113242's [0x09][0x22 00 F7 1C] (D-NET-526)
-	// [orig: NapiClient_WaitForDisconnect @0x42CB20 (queue @0x42cb43, pace @0x42cbb5);
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (queue @0x42cb43, pace @0x42cbb5);
 	//  NapiNPClientMsg_PlayerList @0x42fc35].
 	if (!expect(h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 100, 80, 0x5A))})
 	                    .empty(),
@@ -650,7 +650,7 @@ bool run_a_bodyless_joiner_pings() {
 // there moves no level), the first game-loop frame folds at once, the next fold is 62
 // frames on, and a reload's mission start zeroes the countdown and resets the level, the
 // host scalar and the receive window.
-// [orig: Game_ProcessMainFrame @0x526537..0x526555 (dword_24D1DDC - 1, > 0 skips, else
+// [orig: Game_ProcessMainFrame @0x526537..0x526555 (g_NetQualityUpdateCountdown - 1, > 0 skips, else
 //  62) -> CNetQuality_UpdateMetrics @0x4C52C0; Game_StartMission's head @0x52439e (the
 //  zero), CNetStats_Reset @0x5243aa and CNetQuality_Reset @0x5243b4]
 bool run_the_quality_fold_starts_with_the_game_loop() {
@@ -839,7 +839,7 @@ bool run_the_net_frame_counter_steps_in_the_verification_wait() {
 // arriving afterwards draws its one 0x22 per unbound row in a later packet: the
 // retail corpus run_20260426_120102 ([0x09], [0x0A], then [0x22 00 F7 1C]); there
 // is no second 0x22 for slot 0 (D-NET-526).
-// [orig: Game_StartMission @0x524dab -> NapiClient_WaitForDisconnect @0x42CB20
+// [orig: Game_StartMission @0x524dab -> NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20
 //  (queue @0x42cb43, pace @0x42cbb5); NapiNPClientMsg_PlayerList @0x42fc35]
 bool run_the_sync_request_needs_no_player_list() {
 	Harness h;

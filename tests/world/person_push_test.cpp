@@ -8,7 +8,7 @@
 // [orig: Entity_MovementCollisionResolver @0x4B2BD0 -- v100 @0x4B3B07, the
 //  coarse reads @0x4B3B07..0x4B3B74, the dead skip @0x4B3B8D, the live
 //  distance @0x4B3BCA, (thr - dist) >> 2 @0x4B3BD0..0x4B3BD6, the fmul by
-//  dbl_7C57B8 (-2^31/pi, loaded @0x4B3AD2) @0x4B3BF6, the index
+//  g_NegBamPerRadian (-2^31/pi, loaded @0x4B3AD2) @0x4B3BF6, the index
 //  @0x4B3C04..0x4B3C0C, X @0x4B3C31, Y @0x4B3C40;
 //  Entity_BuildProximityLists_Pool01 -- entity+0 @0x4B93EB, the pool-0 walk
 //  @0x4B93D0..0x4B9419; Math_BuildSinTable @0x613050]

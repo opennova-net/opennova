@@ -118,7 +118,7 @@ int main() {
 	TEST_EXPECT(line(settings).empty());
 
 	// The kick: the host's connection-description record to the kicked player,
-	// reason 33 (Server_NotifyPlayerKicked -> CNapiNPConnection_SendChatMessage
+	// reason 33 (Server_NotifyPlayerKicked -> CNapiNPConnection_QueueDisconnectEvent
 	// @0x4C7EF0), as our own encoder writes it.
 	InGameMessage kick = message('S', 0x03, connection_description_to_bytes(
 			make_disconnect_event(1, 2, 0, 0, "STRSRV18", 33, "")));

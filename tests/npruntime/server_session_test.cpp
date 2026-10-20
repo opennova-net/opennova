@@ -215,7 +215,7 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 //  @0x50d9f0..0x50da0d (state 6 @0x50d9f6), the row loop
 //  @0x50da54..0x50db21, the in-game walk @0x50dd5b..0x50dda9;
 //  NetPacket_SerializeScoreboard0x16 @0x504bd6 / @0x504c30;
-//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_SendChatMessage
+//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_QueueDisconnectEvent
 //  @0x4C7EF0, the connection's disconnect event alone; Server_ProcessRoundEnd
 //  @0x51685E]
 bool check_host_scoreboard_status_and_counts() {
@@ -2752,8 +2752,8 @@ bool check_scoreboard_active_slot_filter_is_distinct() {
 // per-slot cache every authority pass and sends a reliable requester-only 0x81
 // on change. The primary-score projection is deliberately not involved. The
 // pass has no session test, and nothing goes while the round is over
-// (g_SpawnSuccessGate).
-// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - g_SpawnSuccessGate
+// (g_RoundOver).
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - g_RoundOver
 //        @0x5086A3..0x5086AA, active / state 6 / entity @0x508720..0x50873B;
 //        CPlayerStats_GetFieldPlusOne(player+0x48, 0x1C) @0x508749]
 bool check_requester_score_delta_refresh() {
@@ -3389,7 +3389,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 		return false;
 
 	// The cfg's allowcustomskins word suppresses only the 0x68
-	// [orig: Server_SendRandomSeedSync @0x511363..0x51136A].
+	// [orig: Server_SendLoadedModelPageRequest @0x511363..0x51136A].
 	ctx.config.allow_custom_skins = 1;
 	for (uint32_t i = 0; i < opennova::inmatch::CONTROL_REQUEST_PERIOD_TICKS; ++i) {
 		opennova::inmatch::Server_TickUpdate(ctx);

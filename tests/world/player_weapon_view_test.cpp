@@ -314,7 +314,7 @@ void test_round_ring_read_back() {
 // its parentEntity, and an EWeap entity's parameter word is 0xFFFF; any other
 // seat, or none, addresses the actor with the slot's parameter.
 // [orig: WeaponAction_Reload `cmp [edi+168h], 3` / `mov ecx, [edi+16Ch]`
-//  @0x5430EA..0x543103; NetPacket_SendEntityDeathNotification `test byte ptr
+//  @0x5430EA..0x543103; NetPacket_SendReloadRequest `test byte ptr
 //  [eax+54h], 20h` @0x43296C -> 0xFFFF @0x432974]
 void test_reload_request_addresses_the_seat_parent() {
 	Rig rig;

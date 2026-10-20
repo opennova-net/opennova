@@ -1183,7 +1183,7 @@ private:
 // that gun routes to (the host follows the gun's own redirect); every other
 // seat, the armed ctrlx included, addresses the actor.
 // [orig: WeaponAction_Reload `cmp [edi+168h], 3` / `mov ecx, [edi+16Ch]`
-//  @0x5430EA..0x543103 -> NetPacket_SendEntityDeathNotification @0x432930]
+//  @0x5430EA..0x543103 -> NetPacket_SendReloadRequest @0x432930]
 LocalWeaponReloadWire local_reload_request_wire(const World &world,
 		uint16_t actor_wire_handle, uint16_t param) {
 	const Entity *actor = world.registry.get(world.cached.local_player);
@@ -1195,7 +1195,7 @@ LocalWeaponReloadWire local_reload_request_wire(const World &world,
 	out.entity_handle = seat_parent != nullptr ? seat_parent->handle.packed : actor_wire_handle;
 	// The producer replaces the parameter word with 0xFFFF when the addressed
 	// entity is an EWeap; the host refills that entity's own slot route and
-	// never reads the word. [orig: NetPacket_SendEntityDeathNotification
+	// never reads the word. [orig: NetPacket_SendReloadRequest
 	//  `test byte ptr [eax+54h], 20h` @0x43296C -> 0xFFFF @0x432974, else the
 	//  caller's parameter @0x43299B; WeaponSlot_ReloadAmmo @0x54172D]
 	const Entity *addressed = seat_parent != nullptr ? seat_parent : actor;

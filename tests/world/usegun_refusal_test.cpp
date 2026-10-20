@@ -289,7 +289,7 @@ void test_the_local_player_holds_a_refused_gun_on_foot() {
 // slot queues its C2S 0x25 for the host's own dispatcher, which broadcasts S2C 0x49:
 // a UseGun gunner's addresses the gun (an EWeap: 0xFFFF), a slot held on foot the
 // holder with the slot's category * 65 + rank. [orig: WeaponAction_Reload
-// @0x5430B6..0x543108; NetPacket_SendEntityDeathNotification @0x43296C..0x432974]
+// @0x5430B6..0x543108; NetPacket_SendReloadRequest @0x43296C..0x432974]
 bool pump_until_reload(w::World &world) {
 	for (int i = 0; i < 200 && world.out.weapon_reloads.empty(); ++i) {
 		++world.logic_tick;

@@ -931,7 +931,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             // Yaw/pitch are TARGET-RELATIVE: entity Yaw/Pitch minus
                             // atan2 * -BAM (net +). The XY length is ftol'd to int
                             // before the pitch atan2. [orig: @ 0x4ae938-0x4ae9d9,
-                            // dbl_7C57B8 = -2^31/pi]
+                            // g_NegBamPerRadian = -2^31/pi]
                             ladder.yaw =
                                 target.yaw_bam -
                                 static_cast<int32_t>(std::atan2(-static_cast<double>(p0.ny),

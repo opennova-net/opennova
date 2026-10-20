@@ -346,7 +346,7 @@ void FirstPersonSources::read_characters_(const FileSource &files) {
 			}
 			characters_.push_back(std::move(character));
 		}
-		// A fresh profile's character: the first of the good side [orig: EntitySlot_LookupAndPackEntry
+		// A fresh profile's character: the first of the good side [orig: CAvatarDefs_PackFirstComboOfAlignment
 		// @0x57ad40, the seed PlayerSession_InitFromProfile @0x50cada].
 		seeded_ = registry.first_character_id(avatars::AVATAR_ALIGN_GOOD);
 	}

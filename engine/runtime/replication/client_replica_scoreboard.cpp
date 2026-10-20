@@ -356,7 +356,7 @@ void ClientReplicaPipeline::apply_spawn_slot_notice(const std::vector<uint8_t> &
 	}
 	if (notice.slot == local_player_slot_) {
 		// [orig: @0x431845..0x43185e — g_DeathScreenActive, then
-		//  !g_SpawnSuccessGate, then CTipSystem_HandleEvent(22)]
+		//  !g_RoundOver, then CTipSystem_HandleEvent(22)]
 		if (state_.death_screen_active && !state_.spawn_success_gate)
 			pending_effect_commands_.push_back(TipEventCommand{22});
 		return;

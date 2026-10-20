@@ -81,7 +81,7 @@ bool ClientRuntime::place_user_waypoint(world::World &world, int32_t x, int32_t 
 	const world::EntityHandle handle = world::place_user_waypoint(world, x, y, name);
 	const world::Entity *wp = world.registry.get(handle);
 	if (wp == nullptr) return false;
-	// NetPacket_SendChatMessage(255, waypoint): the row's name and position
+	// NetPacket_SendUserWaypointCreate(255, waypoint): the row's name and position
 	// [orig: @0x54a1be — NetPacket_WriteTypeNameAndPosition @0x42b160].
 	WaypointShare share;
 	share.target = 0xFF;
@@ -95,7 +95,7 @@ bool ClientRuntime::place_user_waypoint(world::World &world, int32_t x, int32_t 
 
 bool ClientRuntime::delete_hovered_user_waypoint(world::World &world) {
 	// The 0x4F precedes the destroy in retail; the handle is the same word
-	// [orig: NetPacket_SendEntityUpdate @0x5479e6, j_Entity_Destroy @0x5479ee].
+	// [orig: NetPacket_SendUserWaypointRemove @0x5479e6, j_Entity_Destroy @0x5479ee].
 	const world::EntityHandle handle = world::delete_hovered_user_waypoint(world);
 	if (!handle.valid()) return false;
 	queue_squad_message(c2s::WAYPOINT_DELETE, encode_entity_handle16(handle.packed));
@@ -183,7 +183,7 @@ void ClientRuntime::apply_squad_event(world::World &world,
 		// non-null table entry, the member's own slot the target, the row's
 		// name and its exact x / y / z dwords (a wiped row's zeros).
 		// [orig: Server_BroadcastChatToAllPlayers @0x549200 (a misnomer: the
-		//  push) — NetPacket_SendChatMessage(joiner+0x154, entry) per non-null
+		//  push) — NetPacket_SendUserWaypointCreate(joiner+0x154, entry) per non-null
 		//  entry @0x549210..0x54921f]
 		for (const world::UserWaypointTable::Entry &entry : world.user_waypoints.entries) {
 			if (!entry.handle.valid()) continue;

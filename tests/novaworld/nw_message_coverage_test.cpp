@@ -775,7 +775,7 @@ int check_S_6A_clan_roster() {
 }
 
 // C2S 0x4E — the clan-roster walk [u32 afterNetId]: {0} kick, {netId} continuation.
-// [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
+// [orig: NapiNPServerMsg_HandleSquadRegistryWalk @0x511210]
 int check_C_4E_clan_roster_walk() {
 	ClanRosterWalkRequest kick;
 	const std::vector<uint8_t> wire = encode_clan_roster_walk_request(kick);
@@ -798,7 +798,7 @@ int check_C_4E_clan_roster_walk() {
 
 // S2C 0x70 — vehicle-spawn availability: [u8 3] + rows [u16 typeId][u8 avail][u8 max]
 // + u16 0. Byte fixture pinned against the retail serializer's write order.
-// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; NapiNPClientMsg_HandleWeaponLoadoutList @0x429a30]
+// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; NapiNPClientMsg_HandleVehicleSpawnAvailability @0x429a30]
 int check_S_70_vehicle_spawn_availability() {
 	VehicleSpawnAvailabilityList list;
 	list.rows.push_back({1300, 1, 3});                                            // (1300,1,3): one left of the allotment

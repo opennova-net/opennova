@@ -9,7 +9,7 @@
 // The runtime computes these (inmatch::fresh_profile_character_vars over the mounted
 // file); only a test with no table installs this literal.
 // [orig: PlayerProfile_InitDefaults @0x54BB40 (class 8 @0x54bbe0 / @0x54bbe3, the packs
-//  @0x54bbea / @0x54bc0f) -> EntitySlot_LookupAndPackEntry @0x57AD40; the avatar byte via
+//  @0x54bbea / @0x54bc0f) -> CAvatarDefs_PackFirstComboOfAlignment @0x57AD40; the avatar byte via
 //  Avatars_ResolveSelectionIndex @0x57AE60; wire: retail join f=199140 (its VCB=4 is a
 //  saved profile override, not the fresh default)]
 

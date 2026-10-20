@@ -985,7 +985,7 @@ struct Entity {
     // carrier's refNum); the refNum the addeweap spawner hands a carrier that
     // had none does not, and the destroy's list removal clears it.
     // [orig: Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45 (the join);
-    //  Entity_SpawnWeaponOverlays @0x40F389 (the carrier's refNum, occupied
+    //  Entity_SpawnAddEWeapChildren @0x40F389 (the carrier's refNum, occupied
     //  only @0x40F4C7), the child record's refNum @0x40F3B1..0x40F3CF;
     //  Entity_Destroy @0x43E840..0x43E858 (the removal)]
     bool ref_group_member = false;

@@ -772,7 +772,7 @@ std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World
 		} else if (self != nullptr) {
 			// View-angle score: 256 - |elev - Pitch|>>25 - yawTerm, where yawTerm =
 			// |bearing - Yaw|>>24 folded +64 past 64 [orig: the two fpatan blocks
-			// @0x50e94a..0x50e9e2; the x(-2^31/pi) scale dbl_7C57B8 folds to plain
+			// @0x50e94a..0x50e9e2; the x(-2^31/pi) scale g_NegBamPerRadian folds to plain
 			// BAM deltas]. Can go negative behind the viewer.
 			// Squared in double like retail's fild/fmul — the int64 product can
 			// overflow at map-corner separations.

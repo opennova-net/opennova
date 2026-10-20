@@ -480,12 +480,12 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// [orig: Client_ProcessConsoleCommand @0x520F29; NapiNPServerMsg_HandleConsoleLine
 		//  @0x5199D0; NapiClientCmd_HandleDebugCommand @0x42c7ec;
 		//  NapiNPServerMsg_0x024 @0x514DC0]
-		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
+		// [orig: NetPacket_SendUserWaypointCreate @0x42dde6 (0x17),
 		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
 		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
 		//  NetPacket_SendWeaponAction @0x42dceb (0x45), NetPacket_SendTeamChange
 		//  @0x42dd19 (0x46), NetPacket_SendVoteKick @0x42dd69 (0x4B),
-		//  NetPacket_SendEntityUpdate @0x42de21 (0x4F),
+		//  NetPacket_SendUserWaypointRemove @0x42de21 (0x4F),
 		//  CMap_HandlePlayerListCallback @0x5488b9 (0x3F) — every sender name
 		//  a misnomer; CNapiNetwork_QueueReliableMessage @0x4c4fa0 queues on
 		//  the local client connection (this+0xE60)]
@@ -593,8 +593,8 @@ void HostRole::run_tick(const TickInput &input) {
 	kernel.local.view_session_inputs = view_session_inputs_for(
 			state.client_runtime.get(), /*joiner=*/false, kernel.local.local_player_dead(),
 			kernel.world.rules.mp_session);
-	// Server_SendRandomSeedSync's S2C 0x68 cursor wraps at the host's frozen
-	// loaded-model list count [orig: Server_SendRandomSeedSync @0x511375 /
+	// Server_SendLoadedModelPageRequest's S2C 0x68 cursor wraps at the host's frozen
+	// loaded-model list count [orig: Server_SendLoadedModelPageRequest @0x511375 /
 	// @0x511391].
 	state.host_owner.ctx.loaded_model_list_count = input.loaded_model_list_count;
 	const uint32_t now = state.host_owner.now_tick;
@@ -678,7 +678,7 @@ void HostRole::run_tick(const TickInput &input) {
 	// ours sends the local player's first when both reload on one tick. A host
 	// with no client of its own has no dispatcher queue to reach.
 	// [orig: WeaponAction_Reload @0x5430FF / @0x543103 ->
-	//  NetPacket_SendEntityDeathNotification -> CNapiNetwork_QueueReliableMessage @0x4329B7]
+	//  NetPacket_SendReloadRequest -> CNapiNetwork_QueueReliableMessage @0x4329B7]
 	if (state.host_owner.serve_and_play) {
 		for (const world::WeaponReloadRequest &request : kernel.world.out.weapon_reloads) {
 			opennova::WeaponReload reload;

@@ -26,7 +26,7 @@ namespace opennova::editor {
 //   (renderer::fp_viewmodel_spec) [orig: Player_RenderFirstPersonViewModel @0x4ded60, the arms submit with
 //   the gun's array @0x4df088]. The character is the one the editor chooses among Avatars.def's (the
 //   game's registry, inmatch::CharacterRegistry), else the one a fresh profile seeds (its first of the
-//   good side) [orig: EntitySlot_LookupAndPackEntry @0x57ad40].
+//   good side) [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40].
 // - The eye: the camera the game draws the view model before, the model at the weapon.def `pos` at the
 //   hip, turned by its cant and the rig's axis map (renderer::fp_viewmodel_pose, the game presenter's own
 //   placement), seen through the weapon's renderfov with the view model pass's near plane.
@@ -135,7 +135,7 @@ public:
 	const FirstPersonCharacter *character() const;
 	// The team the player is on, its character's side's: the game picks a player's character by the side
 	// its team is (team 1 the good side, any other the evil) [orig: NapiNPClientMsg 0x0C
-	// @0x42eae4..0x42eb03, side = team != 1 -> EntitySlot_LookupAndPackEntry @0x57ad40], so a good
+	// @0x42eae4..0x42eb03, side = team != 1 -> CAvatarDefs_PackFirstComboOfAlignment @0x57ad40], so a good
 	// character's player is team 1 and an evil one's team 2. The view model's TEX_TEAM is its byte
 	// (renderer::viewmodel_team_byte).
 	int team() const;

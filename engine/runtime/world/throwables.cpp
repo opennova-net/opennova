@@ -60,7 +60,7 @@ bool throwable_surface_accepts_stick(const FixedVec3 &normal_q16) {
 // +0x200000 rounding [orig: Math_BuildFixedPointRotationMatrixYXZ @ 0x615400
 // (yaw, 0, 0); Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0;
 // Math_TransformPointFixedPoint22 @ 0x412e90], then each atan2 leg scales by
-// dbl_7C57B8 = -2^31/pi (truncated) and folds -0x40000000 off the caller bias.
+// g_NegBamPerRadian = -2^31/pi (truncated) and folds -0x40000000 off the caller bias.
 // Yaw is written back verbatim; pitch reads atan2(z, y), roll atan2(z, x).
 void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
                           int32_t pitch_bias_bam, int32_t roll_bias_bam,
@@ -73,7 +73,7 @@ void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
     const int32_t lx = static_cast<int32_t>((ny * s + nx * c + 0x200000) >> 22);
     const int32_t ly = static_cast<int32_t>((ny * c + nx * -s + 0x200000) >> 22);
     const int32_t lz = normal_q16[2];
-    // Both legs scale by dbl_7C57B8 = -kBamPerRad.
+    // Both legs scale by g_NegBamPerRadian = -kBamPerRad.
     const int32_t roll_leg = static_cast<int32_t>(
             std::atan2(static_cast<double>(lz), static_cast<double>(lx)) * -kBamPerRad);
     const int32_t pitch_leg = static_cast<int32_t>(
@@ -1377,7 +1377,7 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
         double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         if (dist > 2147418112.0) dist = 2147418112.0; // [orig: flt_7C19E0]
         if (io::retail_ftol_sse2(dist) > max_range) continue;
-        // atan2 scales by dbl_7C57B8 = -kBamPerRad under the round-toward-zero
+        // atan2 scales by g_NegBamPerRadian = -kBamPerRad under the round-toward-zero
         // control word into a qword whose low dword is kept, and the angle is
         // -Yaw minus that: bearing minus Yaw. The abs is cdq/xor/sub and the
         // compare unsigned (`ja`), so 0x7FFFFFFF passes every bearing but the

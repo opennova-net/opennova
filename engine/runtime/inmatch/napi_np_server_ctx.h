@@ -300,7 +300,7 @@ struct NapiNPServerCtx {
 	uint8_t host_network_quality = 1;
 	// The host CNetQuality SEND window that derives the byte above, sampled
 	// every 62 frames while in session [orig: Game_ProcessMainFrame @0x52658B,
-	//  the dword_24D1DDC 62-frame countdown; CNetQuality_UpdateMetrics @0x4C52C0].
+	//  the g_NetQualityUpdateCountdown 62-frame countdown; CNetQuality_UpdateMetrics @0x4C52C0].
 	replication::NetQualityWindow host_quality_window;
 	uint32_t net_quality_sample_countdown = 0;
 	// The authority's bucketed 0..4 level off that window (the receive window
@@ -398,11 +398,11 @@ struct NapiNPServerCtx {
 	std::vector<uint8_t> round_end_board_stream;
 
 	// The count of the loaded-model list this host froze at its mission start
-	// (g_LoadedModelChallengeCount, which the IDB's CEffectWorld_GetViewportDimensions
+	// (g_LoadedModelChallengeCount, which the IDB's CEffectWorld_GetLoadedModelPage
 	// returns as a "height"), the wrap of the S2C 0x68's 50-row cursor.
 	// The role stamps it every tick from the embedder's frozen count; focused
-	// tests set it directly. [orig: CEffectWorld_GetViewportDimensions @0x5B1578;
-	//  Server_SendRandomSeedSync @0x511375 / @0x511391]
+	// tests set it directly. [orig: CEffectWorld_GetLoadedModelPage @0x5B1578;
+	//  Server_SendLoadedModelPageRequest @0x511375 / @0x511391]
 	uint32_t loaded_model_list_count = 0;
 	// --- reimpl-owned, NOT in the original singleton ---
 	// The authoritative simulation. Non-owning. The in-match replication seam (the per-connection
@@ -469,7 +469,7 @@ struct NapiNPServerCtx {
 	uint32_t server_info_transfer_id = 0;
 	uint32_t mission_metadata_transfer_id = 0;
 
-	// Retail's overloaded g_SpawnSuccessGate is deliberately not copied into
+	// Retail's overloaded g_RoundOver is deliberately not copied into
 	// this host context. Per-connection InitialStateBurst owns load progress;
 	// world::Match owns the round-over latch. The client retains the 0x1D header
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]

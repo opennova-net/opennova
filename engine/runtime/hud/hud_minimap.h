@@ -658,7 +658,7 @@ void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
 // The bearing every radar leg quantises: atan2(dx, dy) times `scale`, chopped
 // to 64 bits under the x87 control word with the low word kept. The add uses
 // +2^31/pi (dbl_7C19D8), the contact update and the threat ring its negation
-// (dbl_7C57B8).
+// (g_NegBamPerRadian).
 // [orig: Radar_AddBlip @0x59b2b4..0x59b2d1; Radar_UpdateContacts
 //  @0x59a8ab..0x59a8ca; HUD_DrawDirectionalIndicatorRing @0x5982b2..0x5982be]
 inline constexpr double kRadarBearingScale = 683565275.5764316;

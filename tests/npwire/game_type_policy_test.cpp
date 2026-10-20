@@ -3,7 +3,7 @@
 // bit-pack, the witnessed session rule defaults, and the BMS game-mode
 // single-select. The values were previously pinned by a GUT test against
 // GDScript twins; the engine home is the truth now.
-// [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0; EntitySlot_LookupAndPackEntry
+// [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0; CAvatarDefs_PackFirstComboOfAlignment
 //  @ 0x57AD40; Config_SetDefaults] [orig: dfx2med.exe MissionGeneralInfo_DialogProc]
 
 #include <formats/mission/bms.h>
@@ -51,7 +51,7 @@ int main() {
 			"no multiplayer attrib falls to the stock/training Co-op word");
 
 	// The character_id pack [alignment:1 | combo:6 | division:4 | nat:5]
-	// [orig: EntitySlot_LookupAndPackEntry @ 0x57AD40]: round-trips, and
+	// [orig: CAvatarDefs_PackFirstComboOfAlignment @ 0x57AD40]: round-trips, and
 	// the witnessed fresh-profile defaults reproduce.
 	const uint16_t packed = character_id::pack(3, 2, 5, 1);
 	CHECK(character_id::nationality(packed) == 3, "nationality round-trips");

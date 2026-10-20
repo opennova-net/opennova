@@ -183,7 +183,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	//   ServerCommand before its session exists keeps it clear, as
 	//   opennova-serve's session-less one does (ServeListing::on_command), so
 	//   only SetMPReset passes there;
-	// - the player table (dword_24C0CA0; the World here), only the
+	// - the player table (g_PlayerSlotTableReady; the World here), only the
 	//   player-targeted verbs and ChangeTeam / SwapTeam;
 	// - the token count, every verb that reads an argument it cannot default.
 	// SetMPReset tests the token count alone, so it runs on any receiver this

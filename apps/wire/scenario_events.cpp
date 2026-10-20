@@ -201,8 +201,8 @@ std::string format_scenario_event(const InGameMessage &message, uint64_t ts_nano
 		ScenarioEventTracker &tracker) {
 	// The session-level disconnect: the connection-description record (inner
 	// H:0x03, full tag 0x103), which a host sends the player it kicks
-	// (Server_NotifyPlayerKicked -> CNapiNPConnection_SendChatMessage @0x4C7EF0
-	// latches the event, reason code at +0x94; CNapiNPConnection_TrySendSessionInit
+	// (Server_NotifyPlayerKicked -> CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0
+	// latches the event, reason code at +0x94; CNapiNPConnection_SendDescriptionOnce
 	// @0x629750 -> NapiNPDataTransfer_SendDescription @0x628c80). The reason code
 	// is DPC, which the client's exit-reason switch reads (@0x4c6569).
 	if (message.tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {

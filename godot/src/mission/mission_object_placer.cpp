@@ -514,7 +514,7 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 // D-PLAYERINFO-1 (FIXED; the row keeps this note): with a
 // populated registry retail's client 0x0C fold re-stamps an UNKNOWN id to the
 // first combo of the entity's team side (NapiNPClientMsg 0x0C @0x42eae4..
-// @0x42eb03 -> EntitySlot_LookupAndPackEntry side = team != 1) — the
+// @0x42eb03 -> CAvatarDefs_PackFirstComboOfAlignment side = team != 1) — the
 // reimpl has no registry validation yet (D-NET-137) and shows the item model.
 Ref<PlayerVisualSpec> MissionObjectPlacer::resolve_player_visual_spec(
 		int p_runtime_type_id, int p_character_id) {

@@ -144,9 +144,9 @@ void route_script_remote_commands(NapiNPServerCtx &ctx, world::World &world) {
 // corresponding 8-B 0x1E event record.
 // The event and 0x2F state use active-player mask 0x80 (host included); CTF's
 // following 0x12 removal uses 0x90 (host excluded).
-// [orig: Entity_AttachCarriedObject @0x43C130 -> Server_HandleEntityDeath @0x517460
+// [orig: Entity_AttachCarriedObject @0x43C130 -> Server_BroadcastFlagPickupEvent @0x517460
 // (pickup event 0x14) -> Server_SendDestructibleDeathPacket @0x50D900;
-// Server_BroadcastEntityDeathEvent @0x517A90 (save event 0x15 then 0x2F);
+// Server_BroadcastFlagSaveEvent @0x517A90 (save event 0x15 then 0x2F);
 // Server_ProcessScoringAndBroadcast @0x5169C0 (capture event 0x13 then CTF
 // remove / other-mode reset); Entity_UpdateIdleCheck @0x408430 ->
 // Server_BroadcastOverlayDeathEvent @0x50F5A0 (return 0x23/0x24/0x25 then 0x2F);
@@ -564,7 +564,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// connection owner likewise rejects stale allocations and loopback nodes.
 	// [orig: WacCmd_PlayerPunt @0x4F0DA0; WacCmd_PlayerKillPunt @0x4F0D30;
 	// CNapiNPConnection_TrySendChatMessage @0x5006C0;
-	// CNapiNPConnection_SendChatMessage @0x4C7EF0]
+	// CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0]
 	for (const world::MatchPlayerPunt &punt : world.match.drain_player_punts()) {
 		const world::Entity *entity = world.registry.get(punt.entity);
 		if (entity == nullptr || entity->registry_spawn_id != punt.spawn_id ||

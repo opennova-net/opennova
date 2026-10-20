@@ -482,7 +482,7 @@ bool run_spawn_stamps_equipped_adm_from_midframe_grant() {
 // origin, riding its carrier's attachment row; it is the decoded slot's own
 // entity on both peers, so the replica rule takes it and a confirmed gunner
 // mount on it attaches the local body (D-NET-620).
-// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnWeaponOverlays: the
+// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnAddEWeapChildren: the
 //  Pool_AllocEntry call @0x40F393]
 bool run_full_bms_child_gun_mount() {
 	Harness h;
@@ -1636,8 +1636,8 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 
 // A folded S2C 0x1D latches the joiner's round-over gate, so the frame that
 // folds it holds its entity update, as retail's client does.
-// [orig: NapiNPClientMsg_0x01D @0x430858 (`mov g_SpawnSuccessGate,1`);
-//  Game_ProcessMainFrame -- the is_in_session / g_SpawnSuccessGate tests
+// [orig: NapiNPClientMsg_0x01D @0x430858 (`mov g_RoundOver,1`);
+//  Game_ProcessMainFrame -- the is_in_session / g_RoundOver tests
 //  @0x526734..0x526742 ahead of the Entity_UpdateAllEntities call @0x52674B]
 bool run_end_round_header_holds_the_entity_update() {
 	Harness h;

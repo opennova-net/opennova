@@ -333,7 +333,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 //  server-view arm @0x49b377..0x49b38f and game.mnu INGAME @0x49b3b6]
 struct HudEscapeInput {
 	bool in_session = false;
-	bool spawn_gate = false; // [orig: g_SpawnSuccessGate]
+	bool spawn_gate = false; // [orig: g_RoundOver]
 	bool authority = false;  // [orig: g_NapiNPCtx.is_authority]
 };
 uint32_t hud_toggles_escape(HudToggleState &state, const HudEscapeInput &input);
@@ -391,7 +391,7 @@ uint32_t hud_toggles_quit_dialog_key(HudToggleState &state, const HudQuitDialogK
 // (exit reason 1), any other key does nothing. In a session the leg's page
 // and ADVANCED keys (the end-of-round board's) are not this leg's; it
 // returns 0 there.
-// [orig: Input_HandleSpecialKeys @0x49c5c0 — the g_SpawnSuccessGate arm
+// [orig: Input_HandleSpecialKeys @0x49c5c0 — the g_RoundOver arm
 //  @0x49c7cf; the session/co-op test @0x49c7d5..0x49c7fd; the RESTART key
 //  (dword_B3B744) @0x49c86b / @0x49c871: g_EpilogScreenActive = 0 @0x49c879,
 //  the splash re-run under g_LoadScreenHasCustomBg && !is_in_session

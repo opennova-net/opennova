@@ -6,7 +6,7 @@
 // variant, the ammo rows' tracer items, weapon.def's gfx1 / gfx3, the reloaded items, the
 // celestial models and upl.3di, hudfx.def, the terrain's foliage).
 // [orig: ThreediGp_LoadModel @0x5B6160; CEffectDef_Construct @0x5b01e0; CEffectWorld_
-//  RebuildAllModelBuffers @0x5B3A80; MinimapSlot_LoadModels_0 @0x57a0b0; AmmoDef_FreeModels
+//  RebuildAllModelBuffers @0x5B3A80; Avatars_LoadComboModels @0x57a0b0; AmmoDef_LoadTracerItemModels
 //  @0x4098c0; WeaponDefs_ParseLineCallback @0x543680; Game_ReloadEntityModelsAndCallbacks
 //  @0x522830; EntityDef_LoadModelsAndCallbacks @0x439f50; EffectWorld_LoadCelestialModels
 //  @0x5adc50; HUD_InitOverlaySystem @0x5a4620; Foliage_LoadDefAssets @0x601260;

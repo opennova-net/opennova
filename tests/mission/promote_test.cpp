@@ -215,7 +215,7 @@ static void test_emplacement_attachments() {
     // Each child's subType is its slot index; the refNum-less carrier took the
     // lowest free refNum for its group, and every child carries it, the
     // carrier's command group and its Flags.
-    // [orig: Entity_SpawnWeaponOverlays @0x40F361..0x40F40E]
+    // [orig: Entity_SpawnAddEWeapChildren @0x40F361..0x40F40E]
     CHECK(plain_child->sub_type == 0 && gun_child->sub_type == 1 &&
           crosshair_child->sub_type == 2);
     CHECK(parent->ref_num == 1);
@@ -223,7 +223,7 @@ static void test_emplacement_attachments() {
           crosshair_child->ref_num == 1);
     // The children's records carry that refNum, so they join its group list;
     // the carrier the spawner handed it to does not.
-    // [orig: Entity_SpawnWeaponOverlays @0x40F389 / @0x40F4C7;
+    // [orig: Entity_SpawnAddEWeapChildren @0x40F389 / @0x40F4C7;
     //  Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45]
     CHECK(!parent->ref_group_member);
     CHECK(plain_child->ref_group_member && gun_child->ref_group_member &&
@@ -303,7 +303,7 @@ static void test_emplacement_attachments() {
 // its count held before the pass: a building carrier's slot spawns its child
 // into pool 1 (subType = its slot index), and a child's own slots are never
 // walked, so no grandchild spawns. [orig: Mission_LoadBMSFile
-//  @0x40FD49..0x40FD96; Entity_SpawnWeaponOverlays @0x40F300]
+//  @0x40FD49..0x40FD96; Entity_SpawnAddEWeapChildren @0x40F300]
 static void test_attachment_pass_walks_the_loaded_rows() {
     bms::File m{};
     m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));

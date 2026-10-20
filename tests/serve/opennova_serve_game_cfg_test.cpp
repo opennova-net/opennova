@@ -99,7 +99,7 @@ int main() {
 		cfg.servermsg = "the cfg's own message";  // kept
 		cfg.mp_max_players = 20;                 // the host file overrides it
 		cfg.max_kills = 30;                      // the host file overrides it
-		cfg.time_limit = 40;                     // kept: g_RespawnTime
+		cfg.time_limit = 40;                     // kept: g_RoundTimeLimitMinutes
 		cfg.mp_num_spectators_max = 3;           // game.cfg alone
 		cfg.enable_ai = 0;                       // game.cfg alone
 		cfg.mp_tod_continuity = 1;               // game.cfg alone

@@ -232,7 +232,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	const world::Entity *sender_entity = world.registry.get(sender.link.owned_entity);
 	if (sender_entity == nullptr) return replies;
 	const bool local_slot = sender.link.mode == replication::TransportMode::Loopback;
-	// (state 10/11 || slot+5) && (!spectator || g_SpawnSuccessGate) [orig: @0x5137D7]
+	// (state 10/11 || slot+5) && (!spectator || g_RoundOver) [orig: @0x5137D7]
 	if (!(is_in_match(sender) || local_slot)) return replies;
 	if (sender.link.spectator) return replies;
 	// The 1000 ms per-sender throttle [orig: slot+100360 @0x5137FF..0x513820].

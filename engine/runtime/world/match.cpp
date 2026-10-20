@@ -286,7 +286,7 @@ void Match::configure(const MatchRules &rules) {
     // Game_StartMission starts at -1 and seeds GameTime only for a network
     // session outside the Co-op waypoint family, and only when nonzero.
     // [orig: g_RoundTimeRemaining=-1 @0x524A89; seed
-    // 3720*g_RespawnTime @0x525242..0x525251; decrement @0x5266D6]
+    // 3720*g_RoundTimeLimitMinutes @0x525242..0x525251; decrement @0x5266D6]
     if (rules.game_time_minutes != 0 && !is_waypoint_family(rules.game_type)) {
         const uint64_t ticks = uint64_t(rules.game_time_minutes) * kTicksPerMinute;
         remaining_ticks_ = ticks > uint64_t(std::numeric_limits<int32_t>::max())
@@ -580,7 +580,7 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     // attach hands the sender the carrier and the flag, and the sender takes the x/y of
     // the second. [orig: Entity_AttachCarriedObject — push esi (the flag, its +0x1C4
     //  stored @0x43C191) @0x43C18F, push edi (the carrier) @0x43C190, the call @0x43C197;
-    //  Server_HandleEntityDeath @0x517460 — the flag's +4 / +8 @0x517481..0x517488, the
+    //  Server_BroadcastFlagPickupEvent @0x517460 — the flag's +4 / +8 @0x517481..0x517488, the
     //  carrier's pool index @0x517490]
     gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
                                 player_handle,
@@ -640,7 +640,7 @@ void Match::record_flag_save(World &world, EntityHandle player_handle,
     //  ++stats[11] (slot dword 29) @0x52f8d7, points += scoringTable[83]
     //  (score.ini FLAGSAVE, VAR slot 9) @0x52f8ec, the team mirror
     //  ++team[28] (= team field 11) @0x52f988 with the same award @0x52f98c;
-    //  dispatched by Server_BroadcastEntityDeathEvent @0x517A90 (push 8
+    //  dispatched by Server_BroadcastFlagSaveEvent @0x517A90 (push 8
     //  @0x517b03) from Entity_ProcessWaypointInteraction @0x4AD820]
     add_event(world, *scorer, MatchStats::kFlagSaves, score_value(9));
     add_team_event(entity->team, MatchStats::kFlagSaves, score_value(9));
@@ -1782,7 +1782,7 @@ void Match::update_flag_objectives(World &world) {
             // [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD912
             // / 4093 @0x4AD8A3..0x4AD8CD -> Entity_SyncPositionFromDefinition
             // @0x43A9B0 (the 0x20000 tests @0x43AA3B/@0x43AA4D, return 1
-            // @0x43A9BE) -> Server_BroadcastEntityDeathEvent @0x4AD8D3]
+            // @0x43A9BE) -> Server_BroadcastFlagSaveEvent @0x4AD8D3]
             if (state == nullptr)
                 continue;
             const int64_t dx = int64_t{target->position.x.q16} -

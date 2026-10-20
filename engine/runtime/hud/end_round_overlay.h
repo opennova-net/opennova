@@ -9,7 +9,7 @@
 // table, so each line carries its KEY + fallback and the printf-style
 // arguments, and the presenter resolves them.
 // [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (called every HUD frame
-//  while g_SpawnSuccessGate && is_in_session from HUD_DrawOverlayPanels @0x5c0072):
+//  while g_RoundOver && is_in_session from HUD_DrawOverlayPanels @0x5c0072):
 //  first pass Game_CloseInGameScreens (ex Server_ResetBalanceCounters) + Game_InitRespawnState +
 //  Overlay_ComputeStatFieldColumnLayout(40, 984) + byte_28E561C = 1; every
 //  pass UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay

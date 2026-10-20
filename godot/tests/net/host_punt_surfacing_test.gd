@@ -6,7 +6,7 @@ extends GutTest
 # host as DPC 33 / DC 2 / DSTR "t35" / DDSTR "LogPuntEvent": the six-minute
 # deploy-screen idle kick [orig: Server_TickUpdate's AFK arm (cmp eax, 57E40h @0x51e109
 # -> push 23h @0x51e13a) -> Server_LogCRCMismatchPunt @0x517ed0 ->
-# CNapiNPConnection_SendChatMessage @0x4c7ef0 -> NapiNPDataTransfer_SendDescription
+# CNapiNPConnection_QueueDisconnectEvent @0x4c7ef0 -> NapiNPDataTransfer_SendDescription
 # @0x628c80]. Retail's presentation is the ordinary mission exit, not a dialog — the
 # disconnect handler routes DPC 33 to Input_QueueEvent(3) @0x4c67a4 and reason 1 takes
 # the abort-leg teardown + nav-push "MainMenu" [orig: @0x568460 / @0x5684a8 -> @0x568654].

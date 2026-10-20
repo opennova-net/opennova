@@ -368,7 +368,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             // any id below 2^24; 0xFF when that id sits under 100000), neither a
             // userpoint index, so the child rides its carrier's root with no
             // anchor offset, and no C/G designation slot matches it.
-            // [orig: Entity_SpawnWeaponOverlays @0x40F40E then Entity_InitFromModel
+            // [orig: Entity_SpawnAddEWeapChildren @0x40F40E then Entity_InitFromModel
             //  @0x40F414 (subType = -1 @0x40DCAF) then the init callback @0x40F43E;
             //  Entity_InitBoneReferences @0x4415F1..0x44164A; ItemDef_ParseProperty
             //  addeweap type - 100000 @0x4A1BA3..0x4A1BAD]

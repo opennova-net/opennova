@@ -234,7 +234,7 @@ int main() {
 
 	// A one-sided Avatars.def: the side with no combo of its alignment takes
 	// entry 0's id (the other side's, its side bit kept) and its head voice
-	// [orig: EntitySlot_LookupAndPackEntry @0x57ad84..0x57adda].
+	// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad84..0x57adda].
 	{
 		opennova::inmatch::CharacterRegistry good_only;
 		good_only.add_entry(0, 0, 0, 3, 1, 1, AVATAR_ALIGN_GOOD, 4, false);

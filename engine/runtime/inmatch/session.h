@@ -106,8 +106,8 @@ struct TickInput {
 	bool consume_one_shots = false;
 	// The count of the loaded-model list the host froze at its mission start,
 	// which the host wraps its S2C 0x68 cursor at (0 until a list froze)
-	// [orig: Server_SendRandomSeedSync @0x511375 / @0x511391 reads
-	//  g_LoadedModelChallengeCount through CEffectWorld_GetViewportDimensions @0x5B1578].
+	// [orig: Server_SendLoadedModelPageRequest @0x511375 / @0x511391 reads
+	//  g_LoadedModelChallengeCount through CEffectWorld_GetLoadedModelPage @0x5B1578].
 	uint32_t loaded_model_list_count = 0;
 	// True on the last logic tick of this frame's batch, false while the bank
 	// catches up: the outer loop's "<16 ms of backlog left" flag the fire-loop

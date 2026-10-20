@@ -3,7 +3,7 @@
 // producer (tick_connections) between them, the way a stock client's Game_StartMission sends
 // them (net-re §5.70.7). Each case pins one witnessed rule:
 //   - D-NET-500: the player-sync track (its S2C 0x2C first) waits for the joiner's C2S 0x09,
-//     which enters slot state 2 [orig: NapiNPServerMsg_0x009 @0x513200 - game state 9
+//     which enters slot state 2 [orig: NapiNPServerMsg_HandlePlayerSyncRequest @0x513200 - game state 9
 //     @0x51322D, slot state 2 @0x513249; Server_SendInitialGameStateToPlayer @0x51BBA0 - the
 //     switch @0x51BBB4..0x51BBBB, the track @0x51BEFF, the 0x2C call @0x51BF5D];
 //   - D-NET-504: no S2C 0x16 rides the C2S 0x37 reply or a spawn: retail's one 0x16 serializer
@@ -616,7 +616,7 @@ bool run_the_spawn_pump_follows_the_scoreboard() {
 //  and "CMCRC" @0x51A922, Server_LogCRCMismatchPunt (slot, 9) @0x51A8F2 and (slot, 10)
 //  @0x51A933, ahead of the 0x4D @0x51A97A; NapiNPServerMsg_PlayerJoinRequest's reads
 //  @0x51AB5A..0x51AB91; Server_LogCRCMismatchPunt @0x517ED0 (the 33 / "LogPuntEvent" send
-//  @0x517F5A); CNapiNPConnection_SendChatMessage's kept pending event @0x4C7FF2]
+//  @0x517F5A); CNapiNPConnection_QueueDisconnectEvent's kept pending event @0x4C7FF2]
 bool run_join_punts_a_map_checksum_mismatch() {
 	const auto body = [](uint32_t a, uint32_t b) {
 		std::vector<uint8_t> out{0x00}; // the side password's empty C string

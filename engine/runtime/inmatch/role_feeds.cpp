@@ -87,7 +87,7 @@ uint32_t round_over_key(const RoleView &view, int vk, int restart_vk) {
 	if (view.kernel == nullptr) return 0;
 	world::World &w = view.kernel->world;
 	// The leg runs only behind the round-over gate: the authority's round end,
-	// a joiner's 0x1D [orig: `cmp g_SpawnSuccessGate, 0` @0x49c7cf; the writers
+	// a joiner's 0x1D [orig: `cmp g_RoundOver, 0` @0x49c7cf; the writers
 	// Server_ProcessRoundEnd @0x5168E4 and NapiNPClientMsg_0x01D @0x430858].
 	const bool gate = view.joiner
 			? view.runtime != nullptr && view.runtime->state().spawn_success_gate
@@ -1353,7 +1353,7 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 	f.death_screen = local_death_screen_active(view); // [orig: g_DeathScreenActive]
 	if (view.runtime != nullptr) {
 		const replication::ClientState &state = view.runtime->state();
-		f.spawn_gate = state.spawn_success_gate;  // [orig: g_SpawnSuccessGate]
+		f.spawn_gate = state.spawn_success_gate;  // [orig: g_RoundOver]
 		f.reset_hold = state.round_reset_hold;         // [orig: dword_24C195C]
 		f.team_game = (view.runtime->game_type() & 0x10000u) != 0u; // [orig: @0x49b9bf]
 	}

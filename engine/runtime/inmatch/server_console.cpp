@@ -147,7 +147,7 @@ hud::ChatSendResult Server_SendConsoleChat(NapiNPServerCtx &ctx, int dispatch,
 	using Result = hud::ChatSendResult;
 	if (dispatch != hud::kChatDispatchGlobal || !ctx.is_authority || ctx.is_mp_session_peer)
 		return Result::Refused;
-	// `(!g_DeathScreenActive || g_SpawnSuccessGate)` holds on a host with no
+	// `(!g_DeathScreenActive || g_RoundOver)` holds on a host with no
 	// player of its own (its death screen never rises) [orig: @0x49a931].
 	if (text.empty()) return Result::Refused;
 	if (!chat_flood_check(ctx.console_chat_flood, text, frame)) return Result::Flooded;

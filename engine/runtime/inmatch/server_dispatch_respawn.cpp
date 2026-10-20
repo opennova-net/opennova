@@ -268,9 +268,9 @@ void dispatch_respawn_request(const GameConfig &config, NapiNPConnection &conn,
 	if (!conn.burst.spawned) return;
 	// The round-over gate leads the handler: once the round ended no pick
 	// deploys, queues or answers, the round-end linger's dead joiners
-	// included (g_SpawnSuccessGate, our match outcome's `ended`, as the 0x29
+	// included (g_RoundOver, our match outcome's `ended`, as the 0x29
 	// and 0x5D cases read it). [orig: Server_ProcessClientRequestRespawn
-	// @0x519AF0 - `cmp g_SpawnSuccessGate, ebp` @0x519AF6, `jnz` @0x519B00 to
+	// @0x519AF0 - `cmp g_RoundOver, ebp` @0x519AF6, `jnz` @0x519B00 to
 	// the bare return @0x519DF2, ahead of the authority test @0x519B06]
 	if (world != nullptr && world->match.outcome().ended) return;
 	if (world == nullptr || !conn.link.owned_entity.valid()) {
@@ -404,7 +404,7 @@ void dispatch_spectator_respawn(const GameConfig &config, NapiNPConnection &conn
 	// a 0x4D) finds the slot converted, and the deploy's replies join this
 	// pump's. A short body reads 0.
 	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840 -- the
-	//  g_SpawnSuccessGate test @0x51C840..0x51C847, the latch @0x51C87C, the word
+	//  g_RoundOver test @0x51C840..0x51C847, the latch @0x51C87C, the word
 	//  @0x51C896..0x51C89C, Server_ConvertPlayerToSpectator(slot, word, 1) @0x51C8D5]
 	if (world == nullptr || inputs.server_ctx == nullptr) return;
 	if (world->match.outcome().ended) return;

@@ -3,7 +3,7 @@
 //   - the window's level: the first sample after a clear lands in slot 1 of five; one fps-0
 //     sample (bandwidth metric 255) in the window averages 51 (level 1) and two average 102
 //     (level 2), the buckets 1..84 / 85..169;
-//   - the round-over latch (g_SpawnSuccessGate on the authority, set by the round end) holds the
+//   - the round-over latch (g_RoundOver on the authority, set by the round end) holds the
 //     window cleared, the level 0, and stops the 1 Hz S2C 0x46 quality resends.
 // [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the gates @0x4C52EA..0x4C5308 ->
 //  CNetStats_ClearSendCounters @0x4C55E3, the cursor @0x4C530E..0x4C5318, the bandwidth term

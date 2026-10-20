@@ -741,7 +741,7 @@ constexpr int32_t mission_start_difficulty(uint32_t game_type) {
 // dispatcher, which broadcasts it as S2C 0x49. A UseGun gunner addresses its
 // gun (whose EWeap def sends 0xFFFF), any other row itself with its slot's
 // category * 65 + rank. [orig: WeaponAction_Reload @0x5430B6..0x543108;
-//  NetPacket_SendEntityDeathNotification @0x432930 (@0x43296C..0x432974,
+//  NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974,
 //  CNapiNetwork_QueueReliableMessage @0x4329B7)]
 struct WeaponReloadRequest {
 	uint16_t entity_handle = 0xFFFF;
@@ -1189,7 +1189,7 @@ public:
     // [orig: Game_ProcessMainFrame @0x526703..0x526742 -- `cmp is_authority`
     //  @0x526703, the humans/ticks tests @0x52671C..0x52672A, `cmp
     //  g_ClientPreRoundTimer` @0x52672C, `cmp is_in_session` @0x526734, `cmp
-    //  g_SpawnSuccessGate` @0x52673C; the latch writer Server_ProcessRoundEnd
+    //  g_RoundOver` @0x52673C; the latch writer Server_ProcessRoundEnd
     //  @0x5168E4]
     bool entity_update_admitted(bool is_authority) const {
         if (is_authority && !cached.peer_death_screen && cached.humans == 0 &&

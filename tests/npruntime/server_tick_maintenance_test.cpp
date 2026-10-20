@@ -1366,10 +1366,10 @@ bool check_armory_reuse_cooldown() {
 // count retail's misnamed viewport getter returns): with 305 frozen rows it
 // asks 50, 100, ..., 300, then 0, 50; with none frozen every request wraps to
 // 0; with allowcustomskins set no 0x68 goes at all.
-// [orig: Server_SendRandomSeedSync @0x511360 - the allowcustomskins test
+// [orig: Server_SendLoadedModelPageRequest @0x511360 - the allowcustomskins test
 //  @0x511363..0x51136A (Config_ParseSettingsLine @0x54F818 / @0x54F837), +50
 //  @0x51137E, the `jb` against g_LoadedModelChallengeCount
-//  (CEffectWorld_GetViewportDimensions @0x5B1578) @0x511391, the wrap
+//  (CEffectWorld_GetLoadedModelPage @0x5B1578) @0x511391, the wrap
 //  @0x511393, the send @0x5113D4]
 bool check_model_page_cursor_wraps_at_the_list_count() {
 	const auto cursors = [](uint32_t list_count, int quartets, int32_t allow_custom_skins) {

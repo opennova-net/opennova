@@ -212,7 +212,7 @@ struct ItemAttachmentSpawns {
 };
 // Each listed carrier's own addeweap slots, one child per slot; a child is never
 // walked for children of its own (a deployable's spawn calls it for one entity).
-// [orig: Entity_SpawnWeaponOverlays @0x40F300; Entity_SpawnDeployable @0x51C49A]
+// [orig: Entity_SpawnAddEWeapChildren @0x40F300; Entity_SpawnDeployable @0x51C49A]
 ItemAttachmentSpawns spawn_item_attachments(world::World &world,
         const std::vector<world::EntityHandle> &carriers, const std::vector<ItemSeatSpec> &specs);
 // The mission loader's pass: pool 1 then pool 2, each over the rows its count

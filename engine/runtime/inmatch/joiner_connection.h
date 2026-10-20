@@ -222,14 +222,14 @@ public:
 		uint32_t tick_seed = 0;
 		// The game-start flag entered Game_StartMission: its head zeroes the main
 		// frame's quality countdown and resets the quality object. [orig:
-		// Game_StartMission @0x524360 - `mov dword_24D1DDC, ebx` @0x52439e,
+		// Game_StartMission @0x524360 - `mov g_NetQualityUpdateCountdown, ebx` @0x52439e,
 		// CNetQuality_Reset(&g_NetQuality) @0x5243b4]
 		bool mission_start_head = false;
 		// The final mission-data chunk ended InitRandomSeedOrRequest's spin:
 		// Game_StartMission runs on to its globals reset, which clears the
 		// round-over gate a reset or round end received earlier in the join
 		// had raised. [orig: Game_StartMission @0x524a10..0x524a1f —
-		//  Chat_ClearAllChannels, `mov g_SpawnSuccessGate, ebx` (0), after the
+		//  Chat_ClearAllChannels, `mov g_RoundOver, ebx` (0), after the
 		//  InitRandomSeedOrRequest call @0x5248a7]
 		bool mission_started = false;
 		bool send_holdoff_set = false;
@@ -348,13 +348,13 @@ public:
 	// loops call the send pump only once MORE than their pace passed since the last call.
 	// [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 states 5/6 (@0x56a5dd, MultiPlayer_PumpJoinVerificationFrame
 	//  @0x424740 - its send @0x424767); SaveFile_SendAndWaitForServerAck @0x5204b0; InitRandomSeedOrRequest
-	//  @0x51e8f0; NapiClient_WaitForDisconnect @0x42cb20; NapiClient_WaitForGameStart @0x42cc10;
+	//  @0x51e8f0; NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cb20; NapiClient_WaitForGameStart @0x42cc10;
 	//  Game_StartMission's 0x0F wait @0x52628d..0x5262df; Client_ProcessNetworkFrame @0x42c3dd]
 	enum class SendPumpLoop : uint8_t {
 		NetworkFrame,    // a send per frame behind the countdown (UI frames, the in-match frame)
 		ServerInfoWait,  // SaveFile_SendAndWaitForServerAck: the send after > 50 ms
 		MissionDataWait, // CNapiGameSession_InitRandomSeedOrRequest: a busy spin
-		SyncTailWait,    // NapiClient_WaitForDisconnect: the send after > 100 ms
+		SyncTailWait,    // NapiClient_SendPlayerSyncAndWaitForSyncTail: the send after > 100 ms
 		WorldStreamWait, // NapiClient_WaitForGameStart: a busy spin
 		MissionStart,    // the 0x1A's frame: NapiClient_WaitForGameStart's last send, behind
 		                 // the countdown; then Game_StartMission's load, which pumps only at
@@ -508,7 +508,7 @@ public:
 	// The weapon table a submission with no kit seam resolves the fresh profile's page
 	// names through (AdmDef_FindIndexByName; a name it does not hold is dropped). Null =
 	// no table: every row drops, as retail's builder drops what no ADM def names.
-	// [orig: NetPacket_SendLoadoutSubmit @0x42cdc0 - the AvatarDef_FindByName gate
+	// [orig: NetPacket_SendLoadoutSubmit @0x42cdc0 - the AdmDef_FindByName gate
 	//  @0x42cf0b, AdmDef_FindIndexByName @0x42cf21]
 	void set_weapon_table(const world::WeaponTable *weapons) { weapons_ = weapons; }
 
@@ -843,7 +843,7 @@ public:
 	// screen, i.e. it EXITS THE MISSION with a reason. Our shell's analog is
 	// return-to-menu with the reason surfaced the way a join failure is.
 	// [orig: the punt path Server_LogCRCMismatchPunt @0x517ed0 ->
-	//  CNapiNPConnection_SendChatMessage @0x4c7ef0 -> NapiNPDataTransfer_SendDescription
+	//  CNapiNPConnection_QueueDisconnectEvent @0x4c7ef0 -> NapiNPDataTransfer_SendDescription
 	//  @0x628c80, received by CNapiNPConnection_HandleDescriptionPacket @0x621ae0;
 	//  the cs_dir0.timeout_ms reap @0x4ca4a0 (stores @0x4caa81/@0x4cab54); both land in
 	//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
@@ -1137,7 +1137,7 @@ private:
 	bool sync_tail_seen_ = false; // the host emits 0x11 exactly once; latch an early arrival
 	// The round-over gate in wire order for this connection's own handlers that read it
 	// (the 0x57's); the replica's ClientState::spawn_success_gate serves the frame.
-	// [orig: g_SpawnSuccessGate @0x24C1928]
+	// [orig: g_RoundOver @0x24C1928]
 	bool round_over_gate_ = false;
 	bool initial_admission_complete_ = false; // a S2C 0x0F seen in the deploy wait
 	bool deployment_pick_sent_ = false;

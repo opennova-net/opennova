@@ -235,7 +235,7 @@ struct GameConfig {
 	// quartet's S2C 0x68 when set (each has its one writer, so they agree)
 	// [orig: dword_24D218C <- cfg +0x524, Game_ApplySessionSettingsToGlobals @0x551C22;
 	//  Lobby_UpdateServerInfo @0x4FECD7; Config_ParseSettingsLine @0x54F837;
-	//  Server_SendRandomSeedSync @0x511363].
+	//  Server_SendLoadedModelPageRequest @0x511363].
 	int32_t allow_custom_skins = 0;
 	int32_t one_shot_kill = 0;                  // [orig: g_OneShotKill @0x24D219C]
 	// game.cfg `unlimited_vehicles`, stock 1: a destroyed PlayerControl hull
@@ -298,7 +298,7 @@ struct GameConfig {
 	// The five formerly-UNWITNESSED words were named 2026-07-01 by tracing each 0x08-block global to
 	// its Config_ParseSettingsLine @0x54f740 setting-name compare (via Game_ApplySessionSettingsToGlobals
 	// @0x551500, which copies the parsed cfg global into the live rule global).
-	uint32_t respawn_time = 0;         // [orig: g_RespawnTime @0x24D2140]      dword[0]; SET `GameTime`
+	uint32_t respawn_time = 0;         // [orig: g_RoundTimeLimitMinutes @0x24D2140]      dword[0]; SET `GameTime`
 	uint32_t time_limit_minutes = 0;  // [orig: g_TimeLimitMinutes @0x24D2144] dword[1]; SET `KOTHLimit`
 	uint32_t replay_enabled = 0;      // [orig: g_ReplayEnabled @0x24D2120 <- g_GameConfigState.unknownModeOption_46C @0x2550B24, cfg `replay`]      dword[2]
 	// Retail carries this setting through cfg/global/S2C 0x08 but never reads
@@ -315,7 +315,7 @@ struct GameConfig {
 	// carrier holding a flag this long drops it, the flag snaps home, and the
 	// carrier is killed. The IDB global name is a misnomer; the config field is
 	// the sibling of flagReturnTime above.
-	// [orig: g_GameConfigState.flagResetTime_420 -> g_WeaponViolationLimit
+	// [orig: g_GameConfigState.flagResetTime_420 -> g_FlagCarryLimitSeconds
 	//  @0x24D2178 via Game_ApplySessionSettingsToGlobals @0x551d0a; default
 	//  Config_SetDefaults @0x54D400; consumer Server_CheckPlayerViolations
 	//  @0x51ac75]

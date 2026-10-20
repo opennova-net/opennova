@@ -7,9 +7,9 @@
 // line is tokenized, then the server's command table (S2C 0x2A) is matched,
 // whose hit sends C2S 0x07, then the key-binding table queues an input action.
 // [orig: NapiClientCmd_ParseAndExecute @0x4329C0 - NapiClientCmd_HandleDebugCommand
-//  @0x4329f9, Config_TokenizeLine @0x432a3c, NapiClientCmd_HandleDebug @0x432a4e,
+//  @0x4329f9, Config_TokenizeLine @0x432a3c, NapiClientCmd_HandleServerCommandTable @0x432a4e,
 //  the binding walks @0x432a64..0x432b3e, Input_QueueEvent @0x432b4c / @0x432ba1;
-//  NapiNPClientMsg_HandleChatCommand @0x432BC0 (the 0x06 copy, 1023 characters);
+//  NapiNPClientMsg_HandleConsoleEcho @0x432BC0 (the 0x06 copy, 1023 characters);
 //  Client_ProcessConsoleCommand @0x520E80 (the authority's call @0x520f70)]
 
 #include <base/io/ascii_config.h>
@@ -98,13 +98,13 @@ struct ClientConsoleContext {
 // NapiClientCmd_HandleDebugCommand: true when one of the five debug commands
 // took the line.
 bool client_handle_debug_command(const std::string &line, ClientConsoleContext &ctx);
-// NapiClientCmd_HandleDebug: the server command table's walk; true when an
+// NapiClientCmd_HandleServerCommandTable: the server command table's walk; true when an
 // entry took the line (its C2S 0x07 queued).
 bool client_handle_server_command(const std::string &line, ClientConsoleContext &ctx);
 // NapiClientCmd_ParseAndExecute: true when the line was taken.
 bool client_parse_and_execute(const std::string &line, ClientConsoleContext &ctx);
 // The S2C 0x06 body as its handler copies it: up to the NUL, the body's end or
-// 1023 characters [orig: NapiNPClientMsg_HandleChatCommand @0x432beb..0x432c0f].
+// 1023 characters [orig: NapiNPClientMsg_HandleConsoleEcho @0x432beb..0x432c0f].
 std::string client_console_echo_line(const std::vector<uint8_t> &body);
 
 // NetPacket_WriteObfuscatedString's byte: the nibbles swapped through an 8-bit

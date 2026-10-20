@@ -4459,7 +4459,7 @@ int main() {
             CHECK(sys.acquire_target(w, e, out) == false);
         }
 
-        // The round-end latch nulls acquisition [orig: g_SpawnSuccessGate @0x24C1928].
+        // The round-end latch nulls acquisition [orig: g_RoundOver @0x24C1928].
         {
             auto w_heap = std::make_unique<World>();
             World &w = *w_heap;

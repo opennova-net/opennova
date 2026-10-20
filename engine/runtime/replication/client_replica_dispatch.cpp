@@ -351,7 +351,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		// A client raises the talk keys' reset hold until the next 0x0F and
 		// the round-over latch; the authority's arm only counts
 		// [orig: NapiNPClientMsg_GameReset @0x422800 — the is_authority test
-		// @0x422803, `g_SpawnSuccessGate = 1` @0x422849, `dword_24C195C = 1`
+		// @0x422803, `g_RoundOver = 1` @0x422849, `dword_24C195C = 1`
 		// @0x42284e].
 		if (!authority_recipient_) {
 			state_.round_reset_hold = true;
@@ -460,7 +460,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	}
 	case s2c::VEHICLE_SPAWN_AVAILABILITY: { // the reply to C2S 0x42 (0x70)
 		// Every reply stores its rows and raises the received flag, a short or
-		// unterminated body included [orig: NapiNPClientMsg_HandleWeaponLoadoutList
+		// unterminated body included [orig: NapiNPClientMsg_HandleVehicleSpawnAvailability
 		// @0x429A30 - both exits store the count and the flag @0x429AC8..0x429ACE /
 		// @0x429AE2..0x429AE7; sender NapiNPServerMsg_SendWeaponSlotStates @0x510930 (the
 		// send @0x51097D)].
@@ -500,7 +500,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	// (g_NetworkDelayTicks; its other access is the authority's own store), 0x7A
 	// a name into 0xA86C80 (written by the 0x7B, the connect and the disconnect
 	// besides, read by nothing).
-	// [orig: NapiNPClientMsg_HandleRandomSeed @0x426080 (a misnomer) - the stores
+	// [orig: NapiNPClientMsg_HandleNetworkDelay @0x426080 (a misnomer) - the stores
 	//  @0x42609C / @0x4260A4, sender Server_SetNetworkDelay @0x50CBC0 (the send @0x50CC01);
 	//  NapiNPClientMsg_HandlePlayerName @0x429B40 - the store @0x429B8D, sender
 	//  NapiNPServerMsg_0x002 @0x512FD0 (the send @0x5130D9); the other stores
@@ -512,7 +512,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		break;
 	// The echo of our console line: no replica state; the client runtime runs its
 	// command walk (inmatch::ClientRuntime::run_console_echo, D-NET-710)
-	// [orig: NapiNPClientMsg_HandleChatCommand @0x432BC0].
+	// [orig: NapiNPClientMsg_HandleConsoleEcho @0x432BC0].
 	case s2c::CLIENT_CONSOLE_COMMAND:
 		break;
 	default:

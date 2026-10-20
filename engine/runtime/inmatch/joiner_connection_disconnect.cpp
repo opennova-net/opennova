@@ -68,7 +68,7 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 	// gate answers its spectator / side-password / team failures through this same record
 	// (DPC 14..22), shown as their GDC text.
 	// [orig: the DC gate @0x4c6563 and the DPC switch @0x4c6569;
-	//  Server_ValidatePlayerJoinRequest @0x512100 via CNapiNPConnection_SendChatMessage
+	//  Server_ValidatePlayerJoinRequest @0x512100 via CNapiNPConnection_QueueDisconnectEvent
 	//  @0x4c7ef0]
 	const ConnectionErrorRecord record = connection_error_record();
 	host_disconnect_reason_ = "the host closed the session (" +

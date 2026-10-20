@@ -337,7 +337,7 @@ bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &li
 //  +100360 stamp @0x519A1E..0x519A3C, the copy @0x519A4D..0x519A72,
 //  Server_HandleAdminNetlogCommand @0x519A7B, NetBuffer_WriteString and
 //  SendFiltered(6, 0, 1) to the sender @0x519AB0..0x519AC5;
-//  NapiNPClientMsg_HandleChatCommand @0x432BC0]
+//  NapiNPClientMsg_HandleConsoleEcho @0x432BC0]
 void Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx, NapiNPConnection &sender,
 		const std::vector<uint8_t> &payload, uint32_t now_ms, std::vector<ProtocolMessage> &replies);
 

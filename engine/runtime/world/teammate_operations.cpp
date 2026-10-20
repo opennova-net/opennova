@@ -332,10 +332,10 @@ void TeammateOperations::update(World &world, Slot &slot) {
     case State::Land:
         if (air && patient) {
             // The land heading: 0x42000000 minus the truncated atan2 bearing
-            // scaled by dbl_7C57B8 = -2^31/pi (a NEGATIVE scale, so the
+            // scaled by g_NegBamPerRadian = -2^31/pi (a NEGATIVE scale, so the
             // subtraction adds the bearing).
             // [orig: HeliLift_UpdateSlotState @0x451730 — fpatan @0x451954,
-            //  fmul dbl_7C57B8 @0x451956, ftol @0x45195c, sub from 42000000h
+            //  fmul g_NegBamPerRadian @0x451956, ftol @0x45195c, sub from 42000000h
             //  @0x451961..0x451966, the stores @0x451970/@0x451973]
             const auto p = position(world, *patient), h = position(world, *heli);
             const double bearing = std::atan2(double(io::bam_sub(p[1], h[1])),

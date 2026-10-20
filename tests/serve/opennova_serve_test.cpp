@@ -252,7 +252,7 @@ int main() {
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	CHECK(joiner_sock.is_valid());
 	// The joiner's wall clock follows the frames this script drives (16 ms each), so its
-	// paced loading loops (the C2S 0x09 leaves NapiClient_WaitForDisconnect's > 100 ms
+	// paced loading loops (the C2S 0x09 leaves NapiClient_SendPlayerSyncAndWaitForSyncTail's > 100 ms
 	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
 	uint32_t tick = 1;
 	inmatch::ClientRuntime client("ServeJoiner", [&tick] { return uint64_t{tick} * 16u; });

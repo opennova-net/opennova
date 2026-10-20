@@ -40,7 +40,7 @@ struct ProfileDefaults {
 	uint32_t joystick_caps = 0;
 	// Per side, the character the character table's first entry of that side
 	// packs: its nationality and division ids and its packed id
-	// [orig: EntitySlot_LookupAndPackEntry @0x57ad40, called @0x54bbea /
+	// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40, called @0x54bbea /
 	// @0x54bc0f].
 	struct Avatar {
 		uint8_t nationality = 0;

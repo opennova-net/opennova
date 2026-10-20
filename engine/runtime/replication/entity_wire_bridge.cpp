@@ -387,7 +387,7 @@ uint16_t record_flags_word(const world::Entity &e) {
 // entity+0x15C, and every stream writes that word (D-NET-137). A receiving client
 // validates the record's id against its own table the same way.
 // [orig: Server_PlayerAdd @0x51CBC0 - slot+0x1BA / +0x1BC validated @0x51CF87..0x51CFD8;
-//  NapiNPClientMsg_0x00C - MinimapSlot_HasEntity on g_AvatarDefs @0x42eadb;
+//  NapiNPClientMsg_0x00C - CAvatarDefs_HasPackedId on g_AvatarDefs @0x42eadb;
 //  NetPacket_SerializeEntityStatesToBuffer @0x5030a0 - `movzx edi, word ptr [ecx+15Ch]`
 //  @0x5032CB. The packing (type bits 0-4, subtype 5-8, index 9-14, alignment 15) is the
 //  packer's @0x57ae47 and CAvatarDefs_FindComboByPackedId @0x57a270's; net-re §5.59]
@@ -923,7 +923,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 
 	// 3. Movement/spawn gate: skip the apply while entity+0x24 bit1 is set (spawning).
 	//    [orig: case 4 gate @0x4c2000 `test [edi+24h], 2; jnz skip`.] The host-session
-	//    globals the original also gates on (g_SpawnSuccessGate==0, playerSlot+0x20==6
+	//    globals the original also gates on (g_RoundOver==0, playerSlot+0x20==6
 	//    in-game, dword_C8D824==0 @0x4c200a-0x4c2028) hold for an active in-game peer and
 	//    are modeled implicitly here (the SP listen-server only drains C2S for joined peers).
 	if ((ent->flags & 0x2u) != 0)
@@ -1119,7 +1119,7 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 	const int32_t player_pitch = ae.pitch;   // +0x14 [orig: @0x50DF9D]
 	const int view_distance = view_distance_units(world); // movsx g_EnvFogDistCurrentHigh
 	constexpr double kMaxDistance = 2147418112.0;        // flt_7C19E0
-	constexpr double kRadiansToBam = -683565275.5764316; // dbl_7C57B8 (-2^31 / pi)
+	constexpr double kRadiansToBam = -683565275.5764316; // g_NegBamPerRadian (-2^31 / pi)
 
 	// The walk order: pool 0 then pool 1, each by slot. [orig: @0x50DFAF / @0x50E231]
 	std::vector<const ClientEntityState *> rows;

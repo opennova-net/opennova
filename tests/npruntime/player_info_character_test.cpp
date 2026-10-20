@@ -4,7 +4,7 @@
 // absent one takes the side's first combo, an empty registry leaves none; the
 // class outside 5..9 reads 8; the initial side; and the dialog save's shared
 // class stamped across both sides while the character stays per side.
-// [orig: EntitySlot_LookupAndPackEntry @0x57ad40; PlayerInfo_SaveFromDialog
+// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40; PlayerInfo_SaveFromDialog
 //  @0x55ee10, @0x55ee3f..0x55ee5a]
 
 #include <runtime/inmatch/player_info_character.h>
@@ -115,7 +115,7 @@ void test_snapshot_stamps_the_class() {
 
 // A one-sided Avatars.def: the side with no combo of its alignment takes entry
 // 0, the other side's first combo, as the packer leaves it in the side block
-// [orig: EntitySlot_LookupAndPackEntry @0x57ad84..0x57adda].
+// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad84..0x57adda].
 void test_one_sided_default() {
 	inmatch::CharacterRegistry good_only;
 	good_only.add_entry(0, 0, 0, 3, 1, 1, 0, 1, false);

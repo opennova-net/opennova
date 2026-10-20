@@ -558,7 +558,7 @@ namespace {
 // The reference registry: every refNum a spawned entity already holds. A
 // carrier without one takes the lowest free id (1..255, else 0) when its first
 // child spawns, and every child joins the carrier's group.
-// [orig: Entity_SpawnWeaponOverlays @0x40F361..0x40F389, the walk over
+// [orig: Entity_SpawnAddEWeapChildren @0x40F361..0x40F389, the walk over
 //  g_EntityReferenceRegistry.occupied]
 std::array<bool, 256> reference_registry(const World &world) {
     std::array<bool, 256> occupied{};
@@ -574,7 +574,7 @@ std::array<bool, 256> reference_registry(const World &world) {
 // Children use a non-BMS origin sentinel so the listen-server EntityPresenter
 // wire walk cannot defer them to an unrelated placed node with the same
 // (kind,index). A failed allocation ends the carrier's walk.
-// [orig: Entity_SpawnWeaponOverlays @0x40F300 — the pool allocation @0x40F393,
+// [orig: Entity_SpawnAddEWeapChildren @0x40F300 — the pool allocation @0x40F393,
 //  its failure exit @0x40F39F]
 void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         const std::vector<ItemSeatSpec> &specs, std::array<bool, 256> &ref_occupied,
@@ -602,7 +602,7 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         child_seed.kind = EntityKind::Item;
         child_seed.item_id = attachment.child_type_id;
         // The carrier's position words, copied raw (D-NET-507).
-        // [orig: Entity_SpawnWeaponOverlays @0x40F3C5..0x40F3EB]
+        // [orig: Entity_SpawnAddEWeapChildren @0x40F3C5..0x40F3EB]
         child_seed.position = carrier->position;
         child_seed.yaw = carrier->yaw;
         child_seed.pitch = carrier->pitch;
@@ -612,7 +612,7 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         // the spawn then copies the carrier's Flags over the child's and
         // stamps the slot index as its subType, the key the ewep class init
         // looks its anchor up by (a joiner's too).
-        // [orig: Entity_SpawnWeaponOverlays — group +0x11C @0x40F3BB, refNum
+        // [orig: Entity_SpawnAddEWeapChildren — group +0x11C @0x40F3BB, refNum
         //  +0x215 @0x40F3B1, Flags @0x40F404..0x40F408, subType = slot
         //  @0x40F40E; Entity_InitBoneReferences @0x4415E1..0x4415FF]
         child_seed.group_id = carrier->group_id;
@@ -627,7 +627,7 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
                 ? static_cast<uint8_t>(attachment.stored_slot - 1) : uint8_t{0};
         child_seed.spawn_origin = 0xFFFFFFFFu;
         // includeInUse 0: a destroyed row is passed over (D-NET-485).
-        // [orig: Entity_SpawnWeaponOverlays - `push 0` @0x40F38F, Pool_AllocEntry @0x40F393]
+        // [orig: Entity_SpawnAddEWeapChildren - `push 0` @0x40F38F, Pool_AllocEntry @0x40F393]
         const EntityHandle child_handle = world.registry.spawn(
                 pool_for_kind(EntityKind::Item), child_seed, EntityRegistry::Reuse::Fresh);
         if (!child_handle.valid()) {
@@ -986,7 +986,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         return opts.ai_profile_defaults(type_id).known &&
                (opts.item_attributes(type_id) & kItemAttribAIData) != 0;
     };
-    // dword_A77638, zeroed by the mission reset every load runs [orig: the
+    // g_BmsSpawnPhaseCounter, zeroed by the mission reset every load runs [orig: the
     // reset Mission_ResetBmsState @0x40DBD1, called
     // from Mission_LoadBMSFile @0x40F50E]
     uint32_t spawn_phase_counter = 0;
@@ -1057,8 +1057,8 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                 // counter modulo 60 into entity+0x2AC and the counter steps by
                 // 11, so the first blink/indoors refresh of the statics is spread
                 // over the first 60 ticks in 11-tick steps instead of all firing
-                // in the first cohort pass [orig: `mov ecx,dword_A77638 ...
-                // mov [esi+2ACh],ecx; add dword_A77638,0Bh` @0x40ec8c..0x40ecb8;
+                // in the first cohort pass [orig: `mov ecx,g_BmsSpawnPhaseCounter ...
+                // mov [esi+2ACh],ecx; add g_BmsSpawnPhaseCounter,0Bh` @0x40ec8c..0x40ecb8;
                 // the counter resets per load]. Vehicles re-stamp their own
                 // 0..15 phase below.
                 spawned->class_think_ticks = static_cast<int32_t>(spawn_phase_counter % 60u);

@@ -51,7 +51,7 @@ void AiSystem::queue_death_event(const World *world, AiEntity &e) {
 bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool variant_a) {
     scan_candidates_.clear();
     // Entry gates [orig: 0x466f60 head]. The round-end latch nulls acquisition outright
-    // [orig: g_SpawnSuccessGate @0x24C1928 nonzero -> return null @0x466fba]; the
+    // [orig: g_RoundOver @0x24C1928 nonzero -> return null @0x466fba]; the
     // teamless gate is mirrored in the scoring core (it is part of @0x466f60) — here it
     // only skips the wasted pool walk.
     if (world.match.outcome().ended) return false;
@@ -677,7 +677,7 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 	// A Player target is out while the local cheat word's 0x800 bit is up
 	// (World::rules.ai_rules_skip_local_player) and once the round has
 	// ended [orig: `test dword_24C1930,800h` @0x53A46E..0x53A478;
-	// g_SpawnSuccessGate @0x53A482..0x53A489].
+	// g_RoundOver @0x53A482..0x53A489].
 	if ((target_flags & kEntityFlagPlayer) != 0 &&
 			(world.rules.ai_rules_skip_local_player || world.match.outcome().ended))
 		return false;

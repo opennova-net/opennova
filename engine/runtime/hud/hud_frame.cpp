@@ -1573,7 +1573,7 @@ void HudFrameCompiler::emit_progress_bar(int xl, int yt, int xr, int yb, uint32_
 
 void HudFrameCompiler::element_breath_bar(const HudFrameState &state, float w, float h) {
 	// [orig: HUD_DrawBreathBar @0x59D6F0..0x59D9C9, whose only caller is
-	//  HUD_DrawGameplayOverlays @0x5BDED3, behind g_SpawnSuccessGate == 0
+	//  HUD_DrawGameplayOverlays @0x5BDED3, behind g_RoundOver == 0
 	//  @0x5BDECA..0x5BDED1]
 	if (state.spawn_success_gate) {
 		return;

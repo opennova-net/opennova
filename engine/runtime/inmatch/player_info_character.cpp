@@ -10,7 +10,7 @@ namespace opennova::inmatch {
 
 std::optional<PlayerInfoSideSelection> player_info_side_selection(const CharacterRegistry &registry,
 		int team, int nationality, int division, int combo, int player_class) {
-	// [orig: EntitySlot_LookupAndPackEntry @0x57ad40 -- the entry's authored
+	// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40 -- the entry's authored
 	//  numbers and side bit packed @0x57ae47]
 	const CharacterEntry *entry = registry.find_by_indices(nationality, division, combo);
 	if (entry == nullptr || entry->alignment != team) return std::nullopt;
@@ -31,7 +31,7 @@ namespace {
 // The side's retail default: the first combo of its alignment, else entry 0
 // whatever its side, with the authored numbers and packed id the side block
 // holds (a fallback's packed id keeps entry 0's side bit) and the entry's tree
-// indices beside them [orig: EntitySlot_LookupAndPackEntry @0x57ad40 - the side loop
+// indices beside them [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40 - the side loop
 // @0x57ad6b..0x57ad80, the entry-0 fallback @0x57ad84..0x57adda, the stores of
 // its outType / outSubtype and packed word in PlayerProfile_InitDefaults
 // @0x54bba2..0x54bc17].

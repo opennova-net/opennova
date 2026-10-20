@@ -565,7 +565,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         const int32_t ady = io::bam_sub(inf.aim_point[1], eye[1]);
         const int32_t adz = io::bam_sub(inf.aim_point[2], eye[2]);
         // The heading candidate: the chopped bearing [orig: @0x4BC832..0x4BC85C,
-        // dbl_7C57B8 negated] plus the heading error [orig: `mov ecx,[esp+60h];
+        // g_NegBamPerRadian negated] plus the heading error [orig: `mov ecx,[esp+60h];
         // sub ecx,eax` @0x4bc861..0x4bc865].
         const int32_t candidate = io::bam_add(
                 io::retail_ftol_sse2(std::atan2(double(ady), double(adx)) * io::kBamPerRadian),

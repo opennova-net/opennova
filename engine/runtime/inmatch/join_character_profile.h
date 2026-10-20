@@ -9,7 +9,7 @@
 // first combo of its alignment, else entry 0 (an Avatars.def with no combo of
 // that side's), class 8 (rifleman).
 // [orig: PlayerProfile_InitDefaults @0x54BB40 (the fresh profile),
-//  EntitySlot_LookupAndPackEntry @0x57AD40 (the per-side default),
+//  CAvatarDefs_PackFirstComboOfAlignment @0x57AD40 (the per-side default),
 //  Avatars_ResolveSelectionIndex @0x57AE60,
 //  CNapiServerInfo_SerializeToSession @0x4C3650 <- the profile's two 0x8006
 //  side blocks; a saved id the registry no longer resolves is reallocated to
@@ -101,7 +101,7 @@ inline JoinCharacterProfile join_character_profile(
 		// The retail default: the first combo of the side's alignment, else
 		// entry 0 whatever its side (an Avatars.def with no combo of this
 		// side's alignment packs the other side's first entry), so the id
-		// resolves with no side filter [orig: EntitySlot_LookupAndPackEntry
+		// resolves with no side filter [orig: CAvatarDefs_PackFirstComboOfAlignment
 		// @0x57ad40 - the side loop @0x57ad6b..0x57ad80, the entry-0 fallback
 		// @0x57ad84..0x57adda].
 		const CharacterEntry *first = registry.find_by_packed_id(
@@ -179,7 +179,7 @@ inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile
 // no-table form until its shell installs the mounted selection. The stock Avatars.def
 // gives {0x0200, 0x8207}, class 8 / 8, avatars 1 / 10 (the oracle in the tests).
 // [orig: PlayerProfile_InitDefaults @0x54BB40 - class 8 @0x54bbe0 / @0x54bbe3, the
-//  packs EntitySlot_LookupAndPackEntry @0x57AD40 (calls @0x54bbea / @0x54bc0f), the
+//  packs CAvatarDefs_PackFirstComboOfAlignment @0x57AD40 (calls @0x54bbea / @0x54bc0f), the
 //  voice overrides zeroed @0x54bc1e / @0x54bc24; Avatars_ResolveSelectionIndex
 //  @0x57AE60] (D-NET-NEW-L2-7)
 inline CharacterJoinVars fresh_profile_character_vars(const CharacterRegistry &registry) {

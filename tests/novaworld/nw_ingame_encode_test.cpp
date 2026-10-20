@@ -668,7 +668,7 @@ int test_join_window_kill_walk_roundtrip() {
 }
 
 // S2C 0x6A clan-roster + C2S 0x4E walk. [orig: NetPacket_SerializeMinimapSlot @0x5073B0 /
-//  NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
+//  NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; NapiNPServerMsg_HandleSquadRegistryWalk @0x511210]
 int test_clan_roster_roundtrip() {
 	for (uint8_t action : {kClanRosterAdd, kClanRosterWalkReply}) {
 		ClanRosterUpdate in;
@@ -727,7 +727,7 @@ int test_door_slot_action_roundtrip() {
 }
 
 // C2S 0x42 -> S2C 0x70 availability list and the C2S 0x40 pick.
-// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0 / NapiNPClientMsg_HandleWeaponLoadoutList
+// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0 / NapiNPClientMsg_HandleVehicleSpawnAvailability
 //  @0x429a30; NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
 int test_vehicle_spawn_codec_roundtrip() {
 	VehicleSpawnAvailabilityList list;

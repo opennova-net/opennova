@@ -81,7 +81,7 @@ inline constexpr size_t kChatPresetChars = 39;
 // What the dispatch arms read.
 struct ChatEntryFacts {
 	bool death_screen = false;       // [orig: g_DeathScreenActive]
-	bool spawn_gate = false;         // [orig: g_SpawnSuccessGate]
+	bool spawn_gate = false;         // [orig: g_RoundOver]
 	bool in_session = false;         // [orig: g_NapiNPCtx.is_in_session]
 	// Set by S2C 0x25 on a client, cleared by S2C 0x0F [orig: dword_24C195C
 	// — NapiNPClientMsg_GameReset @0x42284e, NapiNPClientMsg_0x00F @0x42e396].

@@ -42,7 +42,7 @@ static_assert(kDescriptionFlags == 0xA0);
 
 // The first description event owns the connection's disconnect slot: retail's
 // SendChatMessage keeps the first pending event and sends none once the
-// description went [orig: CNapiNPConnection_SendChatMessage @0x4C7EF0, the
+// description went [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0, the
 // sent byte conn+0x70D @0x4C7F58..0x4C7F5F, the pending slot conn+0x654
 // @0x4C7FF2..0x4C8004]. Closing the gameplay predicate here prevents later
 // producers from following it with an ordinary frame while HostOwner still has
@@ -115,7 +115,7 @@ namespace {
 // never carries protection. Runs before the receive pump, so a deploy admitted
 // this tick keeps its full 620.
 // [orig: Server_UpdateAllActivePlayerSlots @0x518820 — gate @0x51888c
-//  (!g_SpawnSuccessGate && !g_PreRoundDelayTimer), non-session zero
+//  (!g_RoundOver && !g_PreRoundDelayTimer), non-session zero
 //  @0x51889c, latch -1 @0x5188ac, decrement @0x5188b8..0x5188c5; caller
 //  Server_TickUpdate @0x51d88b ahead of the recv pump @0x51d895]
 void tick_spawn_protection(world::World &world, NapiNPConnection &conn) {
@@ -389,7 +389,7 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 		// punt above, this visit or an earlier one), but the quartet's own
 		// state still moves: the counts, the seed draw, the stamps and the
 		// cursor [orig: CNapiNPConnection_QueueMessage @0x628640, the
-		// `desc_sent` test @0x62864D (set by CNapiNPConnection_TrySendSessionInit
+		// `desc_sent` test @0x62864D (set by CNapiNPConnection_SendDescriptionOnce
 		// @0x629750)].
 		const bool queues = !conn.host_disconnect_sent;
 
@@ -435,10 +435,10 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 		// IDB's "viewport height" getter returns that count,
 		// g_LoadedModelChallengeCount), unsigned. The set branch's one store
 		// (slot+0x17D18 = dword_A87060 @0x5113E7) has no reader.
-		// [orig: Server_SendRandomSeedSync @0x511360 - the allowcustomskins test
+		// [orig: Server_SendLoadedModelPageRequest @0x511360 - the allowcustomskins test
 		//  @0x511363..0x51136A (g_GameConfigState+0x524, the cfg's allowcustomskins:
 		//  Config_ParseSettingsLine @0x54F818 / @0x54F837),
-		//  CEffectWorld_GetViewportDimensions @0x511375 (g_LoadedModelChallengeCount
+		//  CEffectWorld_GetLoadedModelPage @0x511375 (g_LoadedModelChallengeCount
 		//  @0x5B1578), +50 @0x51137E, `jb` @0x511391, the wrap @0x511393, mask 32
 		//  @0x5113C5, the send @0x5113D4]
 		if (ctx.config.allow_custom_skins == 0) {
@@ -458,11 +458,11 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 } // namespace
 
 // The 0x81 is the proximity pass's per-slot head: nothing while the round is
-// over (g_SpawnSuccessGate, which Match's outcome stands for), then each
+// over (g_RoundOver, which Match's outcome stands for), then each
 // active slot in state 6 with an entity, with no session test, stores its
 // Points when they changed and sends them through the filter's mask 32 to the
 // slot's own connection (none once its description closed it, is_in_match).
-// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - g_SpawnSuccessGate
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - g_RoundOver
 //  @0x5086A3..0x5086AA, active @0x508720, state 6 @0x50872A, the entity
 //  @0x50873B, Points @0x508749, the compare @0x50874E, the store @0x50875F,
 //  the send @0x508790; NapiNPServer_SendFiltered's mask-32 arm
@@ -775,7 +775,7 @@ void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 // instant waits for the next boundary and never receives a per-peer catch-up.
 // The duplicate-PCID kick follows.
 // [orig: Server_TickUpdate - the countdown @0x51E1B2..0x51E1C5, the send
-//  @0x51E1C7..0x51E202, Server_KickDuplicatePcids @0x51E20C, is_in_session
+//  @0x51E1C7..0x51E202, CNapiServer_DisconnectPendingSpawnBans @0x4C9290 (the call @0x51E20C), is_in_session
 //  @0x51E211]
 void emit_network_quality_boundary(NapiNPServerCtx &ctx) {
 	bool network_quality_boundary = ctx.network_quality_broadcast_countdown == 0;

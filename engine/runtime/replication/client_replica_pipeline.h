@@ -354,7 +354,7 @@ public:
 	// stays raw here; the presentation resolves it to the per-side default the
 	// same way it resolves a 0x0C record's.
 	// [orig: NapiNPClientMsg_TeamAssign @0x431b3a (animSlot) / @0x431b46
-	//  (NetId), the MinimapSlot_HasEntity fallback @0x431b4d..0x431b77, the
+	//  (NetId), the CAvatarDefs_HasPackedId fallback @0x431b4d..0x431b77, the
 	//  CharacterEntity rebind @0x431b8c..0x431b91]
 	void apply_player_identity(uint16_t handle, uint16_t net_id, uint8_t anim_slot);
 	// S2C 0x51: one entry of the host's team-change list (the C2S 0x29

@@ -241,7 +241,7 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 //   - the game-start flag leads through Game_StartMission into SaveFile_SendAndWaitForServerAck,
 //     which waits for the server-info transfer and sends only after MORE than 50 ms;
 //   - the transfer's end leads into InitRandomSeedOrRequest's spin over the mission data;
-//   - after the mission load, NapiClient_WaitForDisconnect queues the 0x09 and sends only after
+//   - after the mission load, NapiClient_SendPlayerSyncAndWaitForSyncTail queues the 0x09 and sends only after
 //     MORE than 100 ms, until S2C 0x11 sets dword_A82358;
 //   - NapiClient_WaitForGameStart queues the 0x0A and spins until S2C 0x1A sets dword_A82364;
 //   - Game_StartMission's last loop spins until S2C 0x0F sets g_ClientWorldStateLoaded, and
@@ -253,7 +253,7 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 //  (receive @0x42475d, send @0x424767) beside CUIScene_EndFrame/PreMenu_RenderFrame @0x56a66f..0x56a674;
 //  Game_StartMission @0x524360 -> SaveFile_SendAndWaitForServerAck (the call @0x524801;
 //  `GetTickCount() - last > 50` before its pump), CNapiGameSession_InitRandomSeedOrRequest
-//  (@0x5248a7; ungated pump every pass), NapiClient_WaitForDisconnect (@0x524dab; `> 100`
+//  (@0x5248a7; ungated pump every pass), NapiClient_SendPlayerSyncAndWaitForSyncTail (@0x524dab; `> 100`
 //  @0x42cbb5, returns on dword_A82358 @0x42cbe7, set by NapiNPClientMsg_0x011 @0x4226e0),
 //  NapiClient_WaitForGameStart (@0x524e29; pump @0x42cc92, returns on dword_A82364 @0x42ccbf,
 //  set by NapiNPClientMsg_0x01A @0x425ecb), the final loop @0x52628d..0x5262df (send @0x5262da,
@@ -285,7 +285,7 @@ JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 }
 
 // [orig: SaveFile_SendAndWaitForServerAck @0x5204b0 — `(int)(GetTickCount() - last) > 50`;
-//  NapiClient_WaitForDisconnect @0x42cbb5 — `> 100`]
+//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cbb5 — `> 100`]
 int32_t JoinerConnection::send_pump_loop_pace_ms(SendPumpLoop loop) {
 	switch (loop) {
 	case SendPumpLoop::ServerInfoWait: return 50;

@@ -34,7 +34,7 @@ struct PlayerInfoSideSelection {
 // side's alignment: avatar_a / avatar_b are the authored nationality and
 // division numbers, not the visible rows, and the packed word also carries the
 // authored combo number and the side bit
-// [orig: EntitySlot_LookupAndPackEntry @0x57ad40; the packed store @0x57ae47].
+// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40; the packed store @0x57ae47].
 std::optional<PlayerInfoSideSelection> player_info_side_selection(const CharacterRegistry &registry,
 		int team, int nationality, int division, int combo, int player_class);
 
@@ -49,7 +49,7 @@ public:
 	// Validate both remembered sides against the mounted Avatars.def: a saved
 	// side that still resolves is kept as saved, a stale or absent one takes
 	// the retail default, the first combo of the side's alignment
-	// [orig: EntitySlot_LookupAndPackEntry @0x57ad40 -- the side loop
+	// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40 -- the side loop
 	// @0x57ad6b..0x57ad80; PlayerProfile_InitDefaults @0x54bb40 seeds it, and
 	// PlayerSession_InitFromProfile @0x50ca80 reallocates a saved id the
 	// registry no longer resolves to it]. The class is the side's byte, else the
@@ -59,7 +59,7 @@ public:
 	// session (D-PLAYERINFO-33). An Avatars.def with no combo of the side's
 	// alignment gives that side entry 0, the other side's first combo, its
 	// numbers and packed id as the packer leaves them in the side block
-	// [orig: EntitySlot_LookupAndPackEntry @0x57ad84..0x57adda, the entry-0
+	// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad84..0x57adda, the entry-0
 	// fallback]; an empty registry (no Avatars.def) leaves neither side.
 	void set_registry(const CharacterRegistry &registry);
 

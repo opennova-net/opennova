@@ -122,8 +122,8 @@ enum class GameAdmissionStage : uint8_t {
 // 0x0A, the 0x80 send mask (with RoundOver) and the per-player maintenance walk test. The map
 // change returns a slot in states 2..7 to Added. Leaving Joined zeroes the slot's round-event
 // watermark (+97544) at every writer.
-// [orig: CNapiServer_ProcessPendingPlayerSpawns - CServerTick_SetPhase(slot, 1) @0x4C9123;
-//  NapiNPServerMsg_0x009 @0x513200 - 2 @0x513249; Server_SendInitialGameStateToPlayer
+// [orig: CNapiServer_ProcessPendingPlayerSpawns - PlayerSlot_SetState(slot, 1) @0x4C9123;
+//  NapiNPServerMsg_HandlePlayerSyncRequest @0x513200 - 2 @0x513249; Server_SendInitialGameStateToPlayer
 //  @0x51BBA0 - the track switch @0x51BBB4..0x51BBBB, 3 @0x51C134, 5 @0x51BEF3;
 //  NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260 - 4 @0x5132B1; Server_OnPlayerJoin
 //  @0x51A680 - 6 @0x51A712, 7 @0x51AA5C; Server_DisconnectAndResetAllPlayerSlots @0x516160 -

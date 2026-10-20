@@ -122,7 +122,7 @@ struct Connection {
 	// state 10 or slot state 6) arms it at the frame clock less one, leaving either state
 	// disarms it, and each walk stamps the clock (select_round_events). (D-NET-152)
 	// [orig: playerSlot+97544 - CNetPlayer_SetGameState @0x4C422D (enter 10) / @0x4C4135
-	//  (leave 10), CServerTick_SetPhase @0x5100B2 (enter 6) / @0x510056 (leave 6),
+	//  (leave 10), PlayerSlot_SetState @0x5100B2 (enter 6) / @0x510056 (leave 6),
 	//  Server_OnPlayerJoin @0x51A74C; Server_BuildRoundEventListForPlayer @0x4FFEE8 (the gate),
 	//  @0x5001A8..0x5001AE (the stamp)]
 	uint32_t round_watermark = 0;

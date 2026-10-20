@@ -718,7 +718,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         // (0x200000 - ang) index picks the away direction's own entry.
         // [orig: the live dx/dy @ 0x4b3b93-0x4b3ba4, the distance @ 0x4b3bca,
         //  (thr - dist) >> 2 @ 0x4b3bd0-0x4b3bd6, fpatan @ 0x4b3be1, the fmul
-        //  by dbl_7C57B8 = -2^31/pi (loaded @ 0x4b3ad2) @ 0x4b3bf6 and its
+        //  by g_NegBamPerRadian = -2^31/pi (loaded @ 0x4b3ad2) @ 0x4b3bf6 and its
         //  truncating fistp @ 0x4b3bfc, the index @ 0x4b3c04-0x4b3c0c, the
         //  cosine off_849934 @ 0x4b3c1e, X @ 0x4b3c31, Y @ 0x4b3c40]
         const auto push_away = [&](const int32_t live[3], int32_t threshold) {

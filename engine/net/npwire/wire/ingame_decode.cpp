@@ -2206,7 +2206,7 @@ bool decode_clan_roster_update(const uint8_t *body, size_t len, ClanRosterUpdate
 	return c.ok && c.p == c.end;
 }
 
-// C2S 0x4E clan-roster walk request. [orig: NapiNPServerMsg_HandleMinimapSlotRequest
+// C2S 0x4E clan-roster walk request. [orig: NapiNPServerMsg_HandleSquadRegistryWalk
 // @0x511210 — the u32 read @0x51124b, 0 when short @0x511247]
 bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
                                      ClanRosterWalkRequest &out, size_t &consumed) {
@@ -2218,7 +2218,7 @@ bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
 	return consumed == 4;
 }
 
-// S2C 0x70 vehicle-spawn availability list. [orig: NapiNPClientMsg_HandleWeaponLoadoutList
+// S2C 0x70 vehicle-spawn availability list. [orig: NapiNPClientMsg_HandleVehicleSpawnAvailability
 // @0x429a30 — leading byte @0x429a53 (0 when empty @0x429a4f), the row loop ends when
 // fewer than two bytes remain @0x429a6a or on the 0 word @0x429a74, and each missing
 // row byte reads 0 @0x429a7d / @0x429a8c]

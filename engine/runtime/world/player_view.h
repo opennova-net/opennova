@@ -436,7 +436,7 @@ struct PlayerViewState {
     // @0x5ca1f4..0x5ca24b]: the client-local death screen and its sub-mode
     // (g_DeathScreenSubMode: 0 free / 1 chase / 2 first person on the target; the
     // writers are the replica's spectate state), the local dead bit (`Flags & 2`), the
-    // end-of-round gate (g_SpawnSuccessGate) with the on-foot test
+    // end-of-round gate (g_RoundOver) with the on-foot test
     // (parentEntity == 0), and the two g_RulesFlags bits (bit 0 = no death
     // camera, bit 0x40 = server force-first-person while in session — both
     // admin `set` commands, no wire fold yet).
@@ -743,7 +743,7 @@ void player_view_binocular_sway_offset(float unit_random,
 // suppressed by a direction bit in the frame's input word, death, and round
 // end, but survives third person; the optical view additionally requires
 // first person. [orig: Player_UpdatePerFrame @0x4de37b..0x4de3c8 -- Health
-// @0x4de38d, g_SpawnSuccessGate @0x4de39e, `g_InputFlags & 0x1E` @0x4de3ae,
+// @0x4de38d, g_RoundOver @0x4de39e, `g_InputFlags & 0x1E` @0x4de3ae,
 // g_CameraMode == 1 @0x4de3bf]
 void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool round_ended);
 
