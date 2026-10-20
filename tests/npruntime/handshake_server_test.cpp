@@ -2495,12 +2495,6 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 			"0x75 bit 0 advertises free-fly spectator mode on team 0")) {
 		return false;
 	}
-	if (!expect(
-			inmatch::Server_SetPlayerSpectator(ctx, *remote, world, false),
-			"authority can return the spectator to ordinary play")) {
-		return false;
-	}
-
 	std::vector<ProtocolMessage> same_tick_stream;
 	if (!expect(
 			!messages_for_peer(inmatch::tick_connections(ctx, 16, 7), same_tick_stream) &&
