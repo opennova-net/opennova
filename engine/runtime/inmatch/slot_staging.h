@@ -3,13 +3,15 @@
 // slot holds. The onHook bridge's apply_pose_slot does the same on a retail
 // host: it walks the slot table (an index under the capacity, the row's
 // in-use byte, the Person at +0) and writes the Person's three Position
-// words. Position only: a staged heading never holds (the player's own look
-// returns next frame), and on the authority a staged pose holds against the
-// player's own uplinks only past the chase's 2-unit drop (D-NET-NEW-LP-2).
-// [orig: the slot walk Server_NotifyPlayerKicked @0x5082DE - the capacity test
+// words (the hook also writes yaw 0 and pitch 0; retail's authority has no
+// move-a-slot-body path of its own). Position only: a staged heading never holds
+// (the player's own look returns next frame), and on the authority a staged pose
+// holds against the player's own uplinks only past the chase's 2-unit drop
+// (D-NET-NEW-LP-2).
+// [orig: the slot walk Server_NotifyPlayerKicked @0x5082D0 - the capacity test
 //  @0x508304..0x508316, the row g_PlayerSlots + index * 0x188E8 @0x50831C..0x508322,
-//  the in-use byte +4 @0x50832E..0x508332; the authority's Position write for a
-//  slot's Person Server_PositionPlayerForSpawn @0x50CF60 - Person = [slot+0]
+//  the in-use byte +4 @0x50832E..0x508332; the Person's Position words, as the
+//  spawn placement writes them: Server_PositionPlayerForSpawn @0x50CF60 - Person = [slot+0]
 //  @0x50CF76 / @0x50CF7C, Position +4/+8/+0xC @0x50CFBE / @0x50CFCA / @0x50CFD0]
 #pragma once
 

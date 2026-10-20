@@ -146,7 +146,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e);
 
 // Host-side receive-apply of a decoded C2S 0x0C extended (type-10) player uplink to a
 // REMOTE PEER entity [orig: NetPacket_SerializePlayerState case 4 @0x4C09C0 -
-// @0x4C1D07..0x4C20A9; docs/net/novaworld-net-re.md §5.38a/§5.10], in retail's order:
+// @0x4C1CD6..0x4C20A9; docs/net/novaworld-net-re.md §5.38a/§5.10], in retail's order:
 // the movement-input byte, the state-flag bits 2-4 and the analog axes land whatever
 // the body's state; then, unless the body is dead, the round is over, the sender's slot
 // is not in game (`slot_in_game`, playerSlot+0x20 == 6) or the pre-round countdown runs,

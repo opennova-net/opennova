@@ -87,8 +87,8 @@ void test_the_mission_start_takes_the_byte_for_a_teamless_slot() {
 // own reset keeps the tick-seed words, which no mission store touches.
 // [orig: Server_ResetAllPlayerSlotFrameState @0x4FC356 / @0x4FC359 / @0x4FC35C,
 //  +0x14C @0x4FC3A3; the seed's disp32 writers Server_SendRandomSeedToPlayer
-//  @0x5101B3..0x51024C, Server_ProcessRoundEnd @0x516753..0x516767,
-//  Server_AllocatePlayerSlotTable @0x51C256]
+//  @0x5101B3..0x5101EF / @0x510237..0x51024A, Server_ProcessRoundEnd
+//  @0x516753..0x516765, Server_AllocatePlayerSlotTable @0x51C250..0x51C25C]
 void test_the_mission_start_clears_the_ping_words_and_keeps_the_seed() {
 	inmatch::NapiNPServerCtx ctx;
 	ctx.np_protocol.connection_list.push_back(slot(1, true, false, 0, 0x0058));

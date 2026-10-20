@@ -136,11 +136,11 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	// touches them; only the seed's arm and disarm, the round end's inline
 	// disarm and the session's slot-table allocation write them, and the next
 	// join re-arms. [orig: the disp32 writers Server_SendRandomSeedToPlayer
-	//  @0x5101B3..0x5101F1 (arm) / @0x510237..0x51024C (disarm),
-	//  Server_ProcessRoundEnd @0x516753..0x516767, Server_AllocatePlayerSlotTable
-	//  @0x51C256; none in Server_DisconnectAndResetAllPlayerSlots
-	//  @0x5163A4..0x516417 or Server_ResetAllPlayerSlotFrameState
-	//  @0x4FC350..0x4FC3C9]
+	//  @0x5101B3..0x5101EF (arm) / @0x510237..0x51024A (disarm),
+	//  Server_ProcessRoundEnd @0x516753..0x516765, Server_AllocatePlayerSlotTable
+	//  @0x51C250..0x51C25C (three byte stores); none in
+	//  Server_DisconnectAndResetAllPlayerSlots @0x5163A4..0x516432 or
+	//  Server_ResetAllPlayerSlotFrameState @0x4FC350..0x4FC3C9]
 	conn.phase = ConnectionPhase::PlayerAdded; // the slot stays active; its entity comes back
 	conn.discard_pre_deploy_uplinks = false;
 	conn.staged_frame_update.clear();

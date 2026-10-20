@@ -2551,6 +2551,30 @@ bool run_roundtrip() {
 	                    client.state().objective_show_lose == world.script.subgoals.show_lose,
 	            "objective Co-op frame folds all four authoritative subgoal masks")) return false;
 
+	// The next tick's 0x0A carries the chased step: its send block reads the body after
+	// the first bucket step (hx + 3277), ahead of the second step.
+	// [orig: Server_SendEntityStateToPlayer @0x517BEF..0x517C13; Entity_UpdateInfantryPlayerBody
+	//  @0x4B458A..0x4B45CA]
+	for (inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.peer == peer) connection.s2c_send_boundary_open = true;
+	inmatch::Server_TickUpdate(ctx);
+	bool got_step_0a = false;
+	while (udp_host.pop_outbound(raw)) {
+		if (raw.empty() || raw[0] != 0x0A) continue;
+		std::vector<uint8_t> inner(raw.begin() + 1, raw.end());
+		std::vector<uint8_t> dg83;
+		if (inmatch::frame_in_match_s2c(ctx, peer, 0x0A, inner, dg83)) {
+			client.receive(dg83.data(), dg83.size());
+			got_step_0a = true;
+		}
+	}
+	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
+		pump_host(std::move(d));
+	if (!expect(got_step_0a && client.state().anchor_x == hx + 3277 + je->eye_offset_x &&
+	                    client.state().anchor_y == hy + je->eye_offset_y &&
+	                    client.state().anchor_z == hz + je->eye_offset_z,
+	            "the next 0x0A anchors the joiner's eye one bucket step along")) return false;
+
 	// Partial 0x0A decoding is intentionally useful for entity presentation, but a
 	// packet that ends before the recipient tail must not manufacture health zero
 	// or close the deployed gate. The tail is after the selected sub-block.

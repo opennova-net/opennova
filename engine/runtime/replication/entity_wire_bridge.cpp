@@ -926,7 +926,9 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent, bool s
 	// 2. Never read-apply the host's OWN player — it is motor-from-raw-input, never a
 	//    self-applied pose (§5.38 / ADR-0012 amendment). Retail's read-apply has no such
 	//    test (it even refreshes g_LocalPlayerLookYaw for its own body, @0x4C2070..0x4C2078);
-	//    the owner gate already keeps the host's loopback from naming its own body.
+	//    it never fires on retail's wire: a retail authority never builds its own 0x0C
+	//    [orig: Client_ProcessNetworkFrame `cmp is_authority; jnz` @0x42C457..0x42C45D,
+	//    ahead of the Player_BuildTag0CInputBody call @0x42C482].
 	if (world.cached.local_player.valid() && ent->handle == world.cached.local_player)
 		return false;
 

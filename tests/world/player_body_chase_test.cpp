@@ -7,7 +7,7 @@
 // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the gates @0x4C2000..0x4C2028,
 //  the staging @0x4C2042..0x4C205E, the hidden-body position stores
 //  @0x4C207E..0x4C208E, progress @0x4C20A9; Entity_UpdateInfantryPlayerBody
-//  @0x4B40E0 - the chase @0x4B4299..0x4B4445, @0x4B4459..0x4B4612, the 512 cap
+//  @0x4B40E0 - the chase @0x4B4299..0x4B4445, @0x4B444A..0x4B4612, the 512 cap
 //  @0x4B4431..0x4B4435 / @0x4B464F..0x4B465F]
 // Every value below is derived from that arithmetic; core-only (no retail data).
 
