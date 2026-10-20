@@ -253,6 +253,25 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	kernel.wire_header_world = request.wire_header_world;
 	kernel.open_document(std::move(request.mission), basename, files);
 
+	// The per-class ATTRIBUTES words (Medic, KnifeBonus) the authority's medic
+	// heal, knife reach and medic-filtered sends read, and the classes'
+	// camouflage items the player spawns bind (the own player's in the
+	// bring-up below, D-NET-348). Retail loads charattr.def once, at boot on
+	// every peer, ahead of any mission; a missing or empty file leaves the
+	// cleared all-zero table (D-NET-345). A joiner's copy is its own, taken
+	// before it connects and carried by its runtime.
+	// [orig: Game_Run @0x4A7FE3 -> CharAttr_LoadFromDef @0x412140, which
+	//  memsets the 0x7C0-byte table first]
+	if (request.host != nullptr) {
+		if (!boot.charattr_read) {
+			std::vector<uint8_t> charattr_bytes;
+			if (!files.valid() || !files.read_file("charattr.def", charattr_bytes)) charattr_bytes.clear();
+			charattr_load(boot.charattr, charattr_bytes.data(), charattr_bytes.size());
+			boot.charattr_read = true;
+		}
+		install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
+	}
+
 	// The chat rings start every mission empty, once its BMS has loaded: on a
 	// map change CHAT GET and the status page list none of the last map's lines.
 	// [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels @0x497D30; the
@@ -355,20 +374,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		});
 	}
 
-	// The per-class ATTRIBUTES words (Medic, KnifeBonus) the authority's medic
-	// heal, knife reach and medic-filtered sends read. Retail loads charattr.def
-	// once, at boot on every peer; a missing or empty file leaves the cleared
-	// all-zero table (D-NET-345). A joiner's copy is its own, taken before it
-	// connects and carried by its runtime.
-	// [orig: Game_Run @0x4A7FE3 -> CharAttr_LoadFromDef @0x412140, which
-	//  memsets the 0x7C0-byte table first]
 	if (request.host != nullptr) {
-		if (!boot.charattr_read) {
-			std::vector<uint8_t> charattr_bytes;
-			if (!files.valid() || !files.read_file("charattr.def", charattr_bytes)) charattr_bytes.clear();
-			charattr_load(boot.charattr, charattr_bytes.data(), charattr_bytes.size());
-			boot.charattr_read = true;
-		}
 		// Each mission start on the authority zeroes and disables the
 		// properties the session's mp_No* words name (D-NET-374).
 		// [orig: Game_StartMission @0x525b90 -> Server_ResetRoundCounters
@@ -376,8 +382,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		//  CharAttr_ApplyMpRestrictions @0x4247D0; single player's
 		//  SinglePlayer_StartMission @0x561e7b runs the same step]
 		charattr_apply_restrictions(boot.charattr, charattr_restrictions);
-		kernel.world.tables.class_attribute_flags = charattr_class_attribute_rows(boot.charattr);
-		kernel.world.tables.charattr_disabled_word = charattr_pack_disabled(boot.charattr);
+		install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
 		// A map change's round init over the kept slots follows the
 		// PreMission pass and the round counters' reset with its charattr
 		// tail, where retail's mission start runs it (D-NET-354); a fresh

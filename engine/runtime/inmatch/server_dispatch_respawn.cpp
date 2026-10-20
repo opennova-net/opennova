@@ -13,6 +13,7 @@
 #include <net/title/title_identity.h> // title_in_match (the deploy's state byte, DFX2-11)
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle: the bound entity read through owned_entity
+#include <runtime/world/player_spawn.h> // player_item_row (the deploy raise, D-NET-348)
 #include <runtime/world/local_player.h>
 #include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
 #include <runtime/world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
@@ -131,9 +132,13 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// The deploy's and the reset's signed raises to the row's difficulty-aware ceiling: 0 leaves
 	// the hp-0 body's 1, a wrapped one a dead player's health [orig: Server_DeployPlayer ->
 	// Entity_RaiseHealthToMax @0x51782F; Entity_ResetToSpawnState @0x4B97BC].
-	const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp.has_value();
+	// The row is the body's own (its camouflage item's, D-NET-348) [orig:
+	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0 - the def `[edx+20h]` @0x43B8A4, its
+	//  healthMax `[eax+17Ch]` @0x43B8B4].
+	const world::PlayerTemplate &row = world::player_item_row(world, *player);
+	const bool def_hp = row.has_item_def && row.item_hp.has_value();
 	const int32_t ceiling = def_hp || player->health_max > 0 ? world::max_health_with_difficulty(
-			world, *player, def_hp ? *world.tables.player.item_hp : player->health_max) : 100;
+			world, *player, def_hp ? *row.item_hp : player->health_max) : 100;
 	if (world::retail_signed_i16(player->health) < ceiling) player->health = ceiling;
 	world::entity_reset_to_spawn_state(*player, ceiling);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)

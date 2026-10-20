@@ -35,6 +35,7 @@
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle: the bound entity read through owned_entity
 #include <runtime/world/local_player.h>
+#include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x2F accept, D-NET-348)
 #include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue (the 0x16 rows)
 #include <runtime/world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
 #include <runtime/world/world.h>  // world::World::registry (the authoritative roster, §6.9)
@@ -788,6 +789,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				loadout_player->player_class = grant.reply.avatar_class;
+				// Then the body's row by that class: its camouflage item (D-NET-348).
+				// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515AF3..0x515B93]
+				world::rebind_player_camouflage_row(*world, *loadout_player);
 				loadout_player->carry_flags =
 						(loadout_player->carry_flags & ~0x18u) | grant.carry_flags;
 				// The impact damage's copy of the slot's damage-class bytes (D-NET-508).

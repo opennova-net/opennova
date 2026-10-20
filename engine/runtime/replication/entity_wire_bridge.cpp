@@ -56,6 +56,14 @@ EntityClass entity_class_of(const world::Entity &e) {
 
 namespace {
 
+// A player's body: the Player bit (Flags 0x100) every player spawn sets, whatever
+// row its class's camouflage item bound (a player's type is that row's, D-NET-348).
+// [orig: Entity_SpawnFromAnimSlotProperty `or [esi+24h], 101h` @0x43C433 /
+//  @0x43C508]
+bool is_player_body(const world::Entity &e) {
+	return ((e.flags | e.engine_flags) & world::kEntityFlagPlayer) != 0;
+}
+
 // playerClass (entity+0x294) for the wire: a player MUST advertise a valid soldier class
 // (5..9) or the JOINER's client skips body-anim channel (+0x188) registration at round-load
 // and then cannot move/crouch/prone — the body motor early-bails on a NULL anim channel. The
@@ -81,7 +89,7 @@ namespace {
 // EXACT retail rule: Server_PlayerAdd @0x51d102 forces player_slot+89820 AND entity+660 to 8
 // when the requested class is outside [5,9] (grill 2026-07-01: byte-faithful).
 uint8_t player_class_for_wire(const world::Entity &e) {
-	if (e.item_id == kPlayerPersonTypeId && (e.player_class < 5 || e.player_class > 9))
+	if (is_player_body(e) && (e.player_class < 5 || e.player_class > 9))
 		return 8;
 	return e.player_class;
 }
@@ -360,7 +368,7 @@ uint32_t load_stream_flags_dword(const world::Entity &e) {
 // for every other body (an AI corpse streams its dead bit, a vehicle its REFLECTABLE bit;
 // D-NET-133).
 uint16_t record_flags_word(const world::Entity &e) {
-	return e.item_id == kPlayerPersonTypeId
+	return is_player_body(e)
 			? player_wire_flags(e)
 			: static_cast<uint16_t>(load_stream_flags_dword(e) & 0xFFFFu);
 }
@@ -440,7 +448,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		// (D-NET-137); any other row's word, which the BMS spawn's memset leaves 0.
 		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - `movzx edi, word ptr
 		//  [ecx+15Ch]` @0x5032CB; Entity_SpawnFromBMSRecord @0x40E9F0 - memset @0x40EA27]
-		rec.net_id = (e.item_id == kPlayerPersonTypeId)
+		rec.net_id = is_player_body(e)
 				? player_wire_net_id(e)
 				: e.minimap_net_id;
 		rec.player_class = player_class_for_wire(e);
@@ -537,7 +545,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 	rec.anim_slot = e.anim_slot;
 	// entity+0x15C for every row, as the 0x0C (D-NET-512).
 	// [orig: NetPacket_SerializeObjectToBuffer @0x504D10 - `mov dx, [ebx+15Ch]` @0x5051BF]
-	rec.net_id = (e.item_id == kPlayerPersonTypeId)
+	rec.net_id = is_player_body(e)
 			? player_wire_net_id(e)
 			: e.minimap_net_id;
 	rec.player_class = player_class_for_wire(e);

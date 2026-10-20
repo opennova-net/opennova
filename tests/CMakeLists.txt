@@ -5081,6 +5081,12 @@ add_test(NAME player_body_chase COMMAND player_body_chase_test)
 add_executable(npruntime_slot_staging_test npruntime/slot_staging_test.cpp)
 target_link_libraries(npruntime_slot_staging_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_slot_staging COMMAND npruntime_slot_staging_test)
+# D-NET-348: a player's body binds its class's charattr camouflage row by the
+# mission's climate (two classes, two climates, a miss reading the first row); the
+# 0x0C / 0x0A type words follow; the loadout accept rebinds the row.
+add_executable(npruntime_player_camouflage_row_test npruntime/player_camouflage_row_test.cpp)
+target_link_libraries(npruntime_player_camouflage_row_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_camouflage_row COMMAND npruntime_player_camouflage_row_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

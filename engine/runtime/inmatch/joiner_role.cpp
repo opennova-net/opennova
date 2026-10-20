@@ -593,6 +593,9 @@ void JoinerRole::sync_class_attribute_flags() {
 	static const CharAttrTable kNoTable{};
 	kernel_->world.tables.class_attribute_flags =
 			charattr_class_attribute_rows(live != nullptr ? *live : kNoTable);
+	kernel_->world.tables.class_cammo_type_ids =
+			charattr_class_cammo_rows(live != nullptr ? *live : kNoTable);
+	kernel_->world.tables.class_cammo_installed = live != nullptr && live->loaded;
 }
 
 // The joiner frame [orig: Game_ProcessMainFrame @0x5263f0 -- the client-side

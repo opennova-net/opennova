@@ -475,6 +475,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
 		const uint8_t cls = conn.char_vars.char_class[side];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
+		// The own add's class word is 0, which reads `is_in_session ? 8 : 1`: the
+		// body binds that class's camouflage item (D-NET-348) ahead of the class
+		// stores and the re-stamp above. [orig: Server_BuildPlayerInfoAndAdd's
+		//  local arm leaves player_info_buf[52] 0 (@0x51D63A); Server_PlayerAdd
+		//  @0x51D02B..0x51D040, the spawn @0x51D056]
+		spawn.item_class = ctx.is_in_session != 0 ? 8 : 1;
 	} else if (round_init) {
 		spawn.anim_slot = conn.char_vars.avatar[side];
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
@@ -484,6 +490,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		//  byte [ebp+15EDCh] @0x516B56, the Entity_SpawnFromAnimSlotProperty call
 		//  @0x516B67]
 		spawn.player_class = static_cast<uint8_t>(conn.slot_class);
+		spawn.item_class = spawn.player_class; // the same byte binds the camouflage item
 	} else {
 		spawn.anim_slot = conn.char_vars.avatar[side];       // raw echo; 0 = tag absent (retail)
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
@@ -496,6 +503,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		                                                     : conn.char_vars.char_class[0];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
 		conn.slot_class = spawn.player_class;
+		// The spawn binds the camouflage item of the add's word, ahead of the
+		// clamp (a zero word reads 8 in a session) (D-NET-348).
+		// [orig: Server_PlayerAdd @0x51D02B..0x51D040, the spawn @0x51D056, the
+		//  clamp @0x51D0FA..0x51D10E]
+		spawn.item_class = cls != 0 ? cls : static_cast<uint8_t>(ctx.is_in_session != 0 ? 8 : 1);
 	}
 
 	// Outside the team game types every player spawns BERSERK, everyone's enemy.
@@ -685,7 +697,9 @@ int32_t count_players_on_team(const NapiNPServerCtx &ctx, const world::World &wo
 		const NapiNPConnection &joining, uint8_t team) {
 	int32_t count = 0;
 	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 0 || e.item_id != world::kPlayerInfantryTypeId) return;
+		// A player body by its Player bit, whatever its camouflage row (D-NET-348).
+		if (e.handle.pool() != 0 || ((e.flags | e.engine_flags) & world::kEntityFlagPlayer) == 0)
+			return;
 		if (e.team == team) ++count;
 	});
 	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {

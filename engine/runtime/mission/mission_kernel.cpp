@@ -400,6 +400,9 @@ bool MissionKernel::load_mission_into_world(const KernelBootOptions &options) {
 void MissionKernel::register_mission_systems() {
 	events.load(mission.events, mission.triggers, mission.actions);
 	world.tables.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
+	// g_BmsClimate, which the player spawns read for their camouflage row
+	// (D-NET-348) [orig: Entity_SpawnFromAnimSlotProperty @0x43C391].
+	world.tables.bms_climate = static_cast<int32_t>(mission.header.climate);
 	// The net half stands its session up here — between the world wiring and
 	// the system registration, exactly where the SP listen host's bring-up
 	// sits inside the load (inmatch::HostRole::bring_up_singleplayer)
@@ -544,7 +547,9 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	if (m4 >= 0) {
 		std::vector<w::EntityHandle> handles;
 		world.registry.for_each([&](const w::Entity &e) {
-			if (e.item_id == w::kPlayerInfantryTypeId && e.equipped_adm_index == w::kAdmSlotNone)
+			// A player body by its Player bit, whatever its camouflage row (D-NET-348).
+			if (((e.flags | e.engine_flags) & w::kEntityFlagPlayer) != 0 &&
+					e.equipped_adm_index == w::kAdmSlotNone)
 				handles.push_back(e.handle);
 		});
 		for (const w::EntityHandle h : handles)

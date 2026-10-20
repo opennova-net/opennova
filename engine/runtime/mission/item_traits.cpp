@@ -106,6 +106,27 @@ bool graphic_model_loads(const DefItemDef *def, const assets::AssetStore *models
             models->has_source() && models->model(std::string(def->graphic)) != nullptr;
 }
 
+// One row's spawn traits (world::PlayerTemplate) from its def; a missing row
+// (null) reads none and keeps the seed's type id. The model slot is what the
+// row's graphic load returned, which a spawn copies into +0x30.
+// [orig: Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598]
+void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
+                    const assets::AssetStore *models) {
+    row.has_item_def = def != nullptr;
+    if (def != nullptr) row.type_id = def->id - mission::kItemIdOffset;
+    row.has_graphic_model = graphic_model_loads(def, models);
+    row.item_hp = world::retail_signed_i16(def != nullptr ? def->hp : 0);
+    row.critical_hp = world::retail_signed_i16(def != nullptr ? def->critical_hp : 0);
+    row.item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
+    row.item_attrib = def != nullptr ? def->attrib : 0u;
+    row.armor_impact = world::retail_signed_i16(def != nullptr ? def->armor_impact : 0);
+    row.armor_kz = world::retail_signed_i16(def != nullptr ? def->armor_kz : 0);
+    row.damage_reduc_pp = def != nullptr ? def->damage_reduc_pp : 0.0f;
+    row.damage_reduc_max = def != nullptr ? def->damage_reduc_max : 0.0f;
+    row.radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
+    row.heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
+}
+
 } // namespace
 
 world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
@@ -191,29 +212,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             waypoint_def != nullptr ? static_cast<int32_t>(waypoint_def - items.entries) : 0;
     world.tables.user_waypoint_item_type =
             static_cast<uint8_t>(waypoint_def != nullptr ? waypoint_def->type : 0);
-    world.tables.player.has_item_def = player_def != nullptr;
+    fill_spawn_row(world.tables.player, player_def, models);
     world.tables.player.item_type_index =
             player_def != nullptr ? static_cast<int32_t>(player_def - items.entries) : 0;
-    // The Player row's model slot, which a later spawn copies into +0x30.
-    // [orig: Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598]
-    world.tables.player.has_graphic_model = graphic_model_loads(player_def, models);
-    world.tables.player.item_hp =
-            world::retail_signed_i16(player_def != nullptr ? player_def->hp : 0);
-    world.tables.player.critical_hp =
-            world::retail_signed_i16(player_def != nullptr ? player_def->critical_hp : 0);
-    world.tables.player.item_type =
-            static_cast<uint8_t>(player_def != nullptr ? player_def->type : 0);
-    world.tables.player.item_attrib = player_def != nullptr ? player_def->attrib : 0u;
-    world.tables.player.armor_impact = world::retail_signed_i16(
-            player_def != nullptr ? player_def->armor_impact : 0);
-    world.tables.player.armor_kz = world::retail_signed_i16(
-            player_def != nullptr ? player_def->armor_kz : 0);
-    world.tables.player.damage_reduc_pp =
-            player_def != nullptr ? player_def->damage_reduc_pp : 0.0f;
-    world.tables.player.damage_reduc_max =
-            player_def != nullptr ? player_def->damage_reduc_max : 0.0f;
-    world.tables.player.radar_sig = player_def != nullptr ? (player_def->radar_sig & 0xFFFF) : 0;
-    world.tables.player.heat_sig = player_def != nullptr ? (player_def->heat_sig & 0xFFFF) : 0;
+    // Every row's spawn traits in load order, the rows a player's camouflage item
+    // is found among (D-NET-348) [orig: g_ItemDefs; ItemList_FindIndexByTypeId
+    //  @0x49E100; the binding Entity_SpawnFromAnimSlotProperty @0x43C3CF..0x43C3D9].
+    world.tables.item_rows.assign(items.count, world::PlayerTemplate{});
+    for (size_t i = 0; i < items.count; ++i)
+        fill_spawn_row(world.tables.item_rows[i], &items.entries[i], models);
     std::vector<world::EntityHandle> handles;
     world.registry.for_each(
             [&](const world::Entity &e) {

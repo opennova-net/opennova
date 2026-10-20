@@ -66,6 +66,12 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	// L is the client's body from the record: its item init's def word, not the
 	// authority's zeroed row (world/player_spawn.h).
 	spawn.from_wire_record = true;
+	// The record's type word binds the body's row (ItemList_FindIndexByTypeId,
+	// the first row for a type no row carries), not the class's camouflage item
+	// the authority resolved. [orig: NapiNPClientMsg_0x00C @0x42E730 - the type
+	//  read @0x42E83B, ItemList_FindIndexByTypeId @0x42E844, ItemTypeIndex
+	//  @0x42E84A]
+	spawn.item_type_id = s.item_type_id;
 	return spawn;
 }
 

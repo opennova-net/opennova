@@ -11,15 +11,58 @@
 
 namespace opennova::world {
 
+static_assert(PlayerTemplate{}.type_id == kPlayerInfantryTypeId);
+
+int32_t player_cammo_type_id(const World &world, uint8_t player_class) {
+    // The climate's property: 1 JUNGLE_CAMMO (10), 2 ARCTIC_CAMMO (12), any other
+    // DESERT_CAMMO (11); the class row (class - 1) & 0xF.
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C399..0x43C3BE;
+    //  CharAttr_GetCammoTypeId @0x4127B0]
+    const int32_t climate = world.tables.bms_climate;
+    const size_t property = climate == 1 ? 0 : climate == 2 ? 2 : 1;
+    const size_t row = static_cast<size_t>((player_class - 1) & 0xF);
+    return world.tables.class_cammo_type_ids[row][property];
+}
+
+int32_t item_index_by_type_id(const World &world, int32_t type_id) {
+    // [orig: ItemList_FindIndexByTypeId @0x49E100 - the walk @0x49E117..0x49E12F,
+    //  0 @0x49E12F / @0x49E131]
+    const std::vector<PlayerTemplate> &rows = world.tables.item_rows;
+    for (size_t i = 0; i < rows.size(); ++i)
+        if (rows[i].type_id == type_id) return static_cast<int32_t>(i);
+    return 0;
+}
+
 namespace {
 
-// The shared faithful §5.2b spawn: alloc a pool-0 0x14B9 entity, init health, place the pose,
+// The row a player spawn binds: the record's type word for a joiner's own body,
+// else the class's camouflage item; the first row for a type no row carries. A
+// World with no items rows (no traits sweep) or whose peer read no charattr.def
+// (a native harness, a synthetic pack) spawns from the seed. [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the camouflage
+//  pick @0x43C399..0x43C3BE, ItemList_FindIndexByTypeId @0x43C3CA, the row
+//  @0x43C3CF..0x43C3D9; NapiNPClientMsg_0x00C @0x42E730 binds the record's type]
+const PlayerTemplate &player_spawn_row(const World &world, const PlayerSpawn &spawn,
+                                       int32_t &index) {
+    const std::vector<PlayerTemplate> &rows = world.tables.item_rows;
+    if (rows.empty() || (spawn.item_type_id < 0 && !world.tables.class_cammo_installed)) {
+        index = world.tables.player.item_type_index;
+        return world.tables.player;
+    }
+    const int32_t type_id = spawn.item_type_id >= 0
+            ? spawn.item_type_id
+            : player_cammo_type_id(world, spawn.item_class != 0 ? spawn.item_class
+                                                                : spawn.player_class);
+    index = item_index_by_type_id(world, type_id);
+    return rows[static_cast<size_t>(index)];
+}
+
+// The shared faithful §5.2b spawn: alloc a pool-0 entity of the bound row, init health, place the pose,
 // clear the movement gate, and mount the infantry motor. `is_local` selects the host's OWN
 // player (input-ordered, publishes World::cached.local_player) vs a REMOTE peer (a joiner's
 // entity the host snaps from the wire — never the local player). [orig: net-re §5.2b/§5.38]
 EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is_local) {
     // The infantry motor (mounted below) requires an AiSystem. Bail BEFORE allocating a pool-0
-    // slot so a missing AiSystem never leaks a half-initialized 0x14B9 entity into the pool (the
+    // slot so a missing AiSystem never leaks a half-initialized player entity into the pool (the
     // per-tick spawn retry would otherwise orphan one every tick until the pool is exhausted).
 
     // The def hp word (itemDef+0x17C) once the traits sweep stored the Player row's (class-8
@@ -27,9 +70,11 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // stamped alongside so the §5.10 field-17 tier denominator reads the spawn value (full =>
     // tier 2 => the golden 0x28) even for a joiner spawning AFTER the mission-load sweep.
     // (D-NET-144)
-    const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp.has_value();
+    int32_t row_index = 0;
+    const PlayerTemplate &row = player_spawn_row(world, spawn, row_index);
+    const bool def_hp = row.has_item_def && row.item_hp.has_value();
     const int32_t hp = retail_signed_i16(
-        def_hp ? *world.tables.player.item_hp : static_cast<int32_t>(spawn.health));
+        def_hp ? *row.item_hp : static_cast<int32_t>(spawn.health));
     // A row word of 0: the class init's model init marks the body indestructible, the row's
     // two armor words -1, subType -1 and Health 1, which the ceiling-0 raises below leave
     // (D-PWR-10). [orig: PlayerClass_InitEntity @0x4B1060 - Entity_InitFromModel called
@@ -37,8 +82,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     //  def+0x192 = -1 @0x40DC95 / @0x40DC9F, Health = 1 @0x40DCA6, subType @0x40DCAF]
     const bool indestructible = def_hp && hp == 0;
 
-    // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
-    // placed pose. kind=Organic so entity_wire_bridge::entity_class_of resolves it as Player.
+    // §5.2b steps 1-4: a pool-0 player-infantry entity of the bound row's type (the stock
+    // class-8 desert row is 0x14B9), the row's health, placed pose. kind=Organic.
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - ItemTypeIndex @0x43C426, itemDef
+    //  @0x43C429]
     Entity seed;
     seed.net_id = spawn.net_id;
     // Key the player by its net_id as the bms_id too, so the host can resolve a player avatar
@@ -51,18 +98,18 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // admitted-player row to a placed node that does not exist, leaving the avatar unbuilt.
     seed.spawn_origin = kSpawnOriginNone;
     seed.kind = EntityKind::Organic;
-    seed.item_id = kPlayerInfantryTypeId;
-    seed.has_item_def = world.tables.player.has_item_def;
-    seed.item_type_index = world.tables.player.item_type_index;
-    seed.has_graphic_model = world.tables.player.has_graphic_model;
-    seed.item_type = world.tables.player.item_type;
-    seed.item_attrib = world.tables.player.item_attrib;
-    seed.armor_impact = retail_signed_i16(world.tables.player.armor_impact);
-    seed.armor_kz = retail_signed_i16(world.tables.player.armor_kz);
-    seed.damage_reduc_pp = world.tables.player.damage_reduc_pp;
-    seed.damage_reduc_max = world.tables.player.damage_reduc_max;
-    seed.radar_sig = world.tables.player.radar_sig; // AI engage caps [orig: @0x40e136]
-    seed.heat_sig = world.tables.player.heat_sig;
+    seed.item_id = row.type_id;
+    seed.has_item_def = row.has_item_def;
+    seed.item_type_index = row_index;
+    seed.has_graphic_model = row.has_graphic_model;
+    seed.item_type = row.item_type;
+    seed.item_attrib = row.item_attrib;
+    seed.armor_impact = retail_signed_i16(row.armor_impact);
+    seed.armor_kz = retail_signed_i16(row.armor_kz);
+    seed.damage_reduc_pp = row.damage_reduc_pp;
+    seed.damage_reduc_max = row.damage_reduc_max;
+    seed.radar_sig = row.radar_sig; // AI engage caps [orig: @0x40e136]
+    seed.heat_sig = row.heat_sig;
     if (indestructible) {
         seed.engine_flags |= kEntityFlagIndestructible;
         seed.armor_impact = -1;
@@ -78,7 +125,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // The wire record's item init stores the def word [orig: Entity_InitFromItemDef @0x49e550:
     // healthMax -> Health]; the authority's spawn zeroes it below.
     seed.health = hp;
-    seed.critical_hp = retail_signed_i16(world.tables.player.critical_hp);
+    seed.critical_hp = retail_signed_i16(row.critical_hp);
     seed.health_max = hp; // the §5.10 field-17 tier denominator (D-NET-144)
     seed.equipped_adm_index = spawn.equipped_adm_index; // entity+0x2B0 spawn default (D-NET-143)
     // entity+0x374 character selector + entity+0x15C wire NetId, picked per assigned team from
@@ -157,6 +204,31 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
 }
 
 } // namespace
+
+const PlayerTemplate &player_item_row(const World &world, const Entity &body) {
+    const std::vector<PlayerTemplate> &rows = world.tables.item_rows;
+    if (body.item_type_index < 0 || static_cast<size_t>(body.item_type_index) >= rows.size())
+        return world.tables.player;
+    return rows[static_cast<size_t>(body.item_type_index)];
+}
+
+void rebind_player_camouflage_row(World &world, Entity &body) {
+    if (world.tables.item_rows.empty() || !world.tables.class_cammo_installed) return;
+    const int32_t index =
+            item_index_by_type_id(world, player_cammo_type_id(world, body.player_class));
+    const PlayerTemplate &row = world.tables.item_rows[static_cast<size_t>(index)];
+    body.item_id = row.type_id;
+    body.item_type_index = index;
+    body.has_item_def = row.has_item_def;
+    body.has_graphic_model = row.has_graphic_model;
+    body.item_type = row.item_type;
+    body.item_attrib = row.item_attrib;
+    body.armor_impact = retail_signed_i16(row.armor_impact);
+    body.armor_kz = retail_signed_i16(row.armor_kz);
+    body.damage_reduc_pp = row.damage_reduc_pp;
+    body.damage_reduc_max = row.damage_reduc_max;
+    if (row.item_hp.has_value() && *row.item_hp != 0) body.health_max = *row.item_hp;
+}
 
 EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {
     return spawn_player_entity(world, spawn, /*is_local=*/true);

@@ -741,6 +741,9 @@ bool run_pool0_player_bit0_is_per_entity() {
 		player.item_type = 3;
 		player.team = 1;
 		player.flags = flags;
+		// A player is its Player bit, whatever its row (D-NET-348) [orig:
+		// Entity_SpawnFromAnimSlotProperty @0x43C433].
+		player.engine_flags |= w::kEntityFlagPlayer;
 		// The trait sweep's row and the body's AI slot (+0x68), which the 0x0C needs (D-NET-487).
 		const w::EntityHandle h = world.registry.spawn(0, with_def(player));
 		world.ai.attach(h);
@@ -805,6 +808,7 @@ bool run_full_entity_spawn_player() {
 	player.player_class = 0;             // unset -> must clamp to 8 on the wire
 	player.owner_connection_id = 0x0C;
 	player.minimap_net_id = 0x0200; // the add's validated side-A character id (+0x15C)
+	player.engine_flags |= w::kEntityFlagPlayer; // a player is its Player bit (D-NET-348)
 	const w::EntityHandle h = world.registry.spawn(0, player);
 	const w::Entity *e = world.registry.get(h);
 	if (!expect(e != nullptr, "player spawned")) return false;

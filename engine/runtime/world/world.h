@@ -447,9 +447,15 @@ struct ScriptState {
     int32_t heli_lift_active_count = 0;
 };
 
-// The Player items.def template, cached for host/late-join entities allocated
-// after the mission-wide trait sweep.
+// One items.def row's spawn traits: a player spawn binds its class's camouflage
+// row from MissionTables::item_rows (the sweep's copy of g_ItemDefs); a World
+// whose sweep never ran (a native harness) spawns from MissionTables::player.
 struct PlayerTemplate {
+    // The row's type id (items.def id less 100000, def+0x50), the type word the
+    // 0x0C / 0x0A records carry for a body bound to it [orig:
+    //  NetPacket_SerializeEntityStatesToBuffer `movzx edi, word ptr [eax+50h]` @0x5031DD].
+    // The harness seed's is the stock class-8 desert row's, 0x14B9.
+    int32_t type_id = 0x14B9;
     // Cached Player ItemDef presence and traits. The default true covers native harnesses that
     // seed the built-in Player directly; resolve_item_traits overwrites it with the database's
     // actual presence so a malformed/missing Player definition is not invented for late spawns.
@@ -568,7 +574,32 @@ struct MissionTables {
     // (surface + 4). Null = surface 1 everywhere, the sampler's no-charmap
     // default. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
     terrain::SurfaceTypeMap surface_map;
+    // The seed a World without items rows spawns its players from (a native
+    // harness), and the stock class-8 desert row (105305) the joiner-side
+    // readers with no body row read.
     PlayerTemplate player;
+    // Every items.def row's spawn traits, in load order (g_ItemDefs), stamped by
+    // the traits sweep: the rows ItemList_FindIndexByTypeId walks for a player's
+    // camouflage item (index 0, the first row, for a type no row carries).
+    // [orig: ItemList_FindIndexByTypeId @0x49E100 - the walk @0x49E117..0x49E12F,
+    //  0 @0x49E12F / @0x49E131]
+    std::vector<PlayerTemplate> item_rows;
+    // g_BmsClimate: the mission header's camouflage selector (header +0x84):
+    // 1 jungle, 2 arctic, any other desert, by which the player spawn picks its
+    // class's camouflage property. [orig: Entity_SpawnFromAnimSlotProperty
+    //  @0x43C399..0x43C3BE]
+    int32_t bms_climate = 0;
+    // CharAttr_GetCammoTypeId's answers per class row ((class - 1) & 0xF) for
+    // properties 10 (JUNGLE_CAMMO), 11 (DESERT_CAMMO) and 12 (ARCTIC_CAMMO), 0
+    // for an inactive row: the installer's copy of this peer's charattr table
+    // (inmatch::install_class_attribute_flags), with whether that table read a
+    // charattr.def (a World whose peer read none, a native harness or a
+    // synthetic pack, spawns its players from the seed; retail's boot reads a
+    // missing file as the zeroed table, see D-NET-348).
+    // [orig: CharAttr_GetCammoTypeId @0x4127B0 - inactive @0x4127C5,
+    //  10/11/12 @0x4127D2..0x4127DC]
+    std::array<std::array<int32_t, 3>, 16> class_cammo_type_ids{};
+    bool class_cammo_installed = false;
     // The mission header's attribute flags, stamped by the host at mission load
     // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn), the
     // objective Co-op mission start out of a session adding 0x40. Read by the

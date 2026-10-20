@@ -14,8 +14,12 @@
 namespace opennova::world {
 
 class World;
+struct PlayerTemplate;
 
-// The player infantry template id [orig: net-re §5.2b — type_id 0x14B9].
+// The stock class-8 desert camouflage row's type id (items.def 105305, "Player #1,
+// Multiplayer"), the seed a World with no items rows spawns its players as
+// [orig: net-re §5.2b — type_id 0x14B9]. A player's type is its class's
+// camouflage row's (player_cammo_type_id), not this id.
 inline constexpr int32_t kPlayerInfantryTypeId = 0x14B9;
 
 // The first pool-0 slot a player entity may occupy. Retail assigns players the LOWEST free pool-0
@@ -61,6 +65,17 @@ struct PlayerSpawn {
     // The spawn seed MUST carry it, or the World entity keeps player_class 0 (which build_pool0 masks to 8
     // on the wire, but the host's own logic then reads 0). [net-re §5.2b; host-diag 2026-07-01]
     uint8_t player_class = 8;
+    // The items.def type the body binds: -1 (the authority's spawn) resolves the
+    // camouflage item of `item_class` (0: of player_class) by the mission's
+    // climate (player_cammo_type_id); a joiner's own body from its 0x0C record
+    // passes the record's type word. The add resolves by its class word before
+    // its own class stores and clamp (Server_PlayerAdd's `is_in_session ? 8 : 1`
+    // for a zero word), so the two classes can differ.
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C399..0x43C3CA; Server_PlayerAdd
+    //  @0x51D02B..0x51D056, the stores @0x51D09A / @0x51D0A8, the clamp
+    //  @0x51D0FA..0x51D10E; NapiNPClientMsg_0x00C @0x42E730]
+    int32_t item_type_id = -1;
+    uint8_t item_class = 0;
     // Equipped-weapon AdmDef index (entity+0x2B0) — the 0x0A off-16 echo default. The inmatch
     // spawn resolves the WPN_M4AUTO table index when the armory is fed [orig: PlayerClass_InitEntity
     // @0x4B1116 resolves by name]; 0xFF = none (table-less hosts). (D-NET-143)
@@ -83,7 +98,36 @@ struct PlayerSpawn {
     bool berserk = false;
 };
 
-// Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry (0x14B9) entity; (2/3)
+// The class's camouflage item type id for the mission's climate: g_BmsClimate 1
+// JUNGLE_CAMMO, 2 ARCTIC_CAMMO, any other DESERT_CAMMO, of the class row
+// (class - 1) & 0xF the installer copied (0 for an inactive row).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C399..0x43C3BE ->
+//  CharAttr_GetCammoTypeId @0x4127B0]
+int32_t player_cammo_type_id(const World &world, uint8_t player_class);
+
+// ItemList_FindIndexByTypeId over the World's items rows: the first row of the
+// type, 0 (the first row) when none [orig: @0x49E100].
+int32_t item_index_by_type_id(const World &world, int32_t type_id);
+
+// A player body's bound row, by its ItemTypeIndex (the def the game reads the
+// body's healthMax and armor through); the seed in a World with no rows.
+// [orig: entity+0x20 itemDef = g_ItemDefs[entity+0x1C]]
+const PlayerTemplate &player_item_row(const World &world, const Entity &body);
+
+// The loadout accept's re-resolve of a player body's row by its (just stored)
+// class: the camouflage item by the climate, its ItemTypeIndex, the def (its type
+// word and the traits the game reads through the def: the type byte, the attribute
+// word, the armor words, the damage reduction, the model slot) and nothing the
+// spawn copied into the body (Health, Armor, the signatures, the callbacks, the
+// bound radius). A World whose spawns take the seed keeps the body as it is.
+// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790 - the entity test
+//  @0x515AEB..0x515AED, the climate pick @0x515AF3..0x515B42, ItemList_FindIndexByTypeId
+//  @0x515B47, ItemTypeIndex / itemDef @0x515B5A / @0x515B5D, the model slots
+//  @0x515B60..0x515B78]
+void rebind_player_camouflage_row(World &world, Entity &body);
+
+// Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry entity of its class's
+// camouflage row (player_spawn.cpp player_spawn_row); (2/3)
 // item-template health init; (4) place Position/Yaw/Team; (5) entity_reset_to_spawn_state
 // (clear the entity+36 movement gate). Then mount the infantry motor as the LOCAL PLAYER
 // (inf.active + inf.is_local_player; input-ordered, no AI route) and publish
@@ -94,7 +138,7 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn);
 // Spawn a REMOTE PEER's player entity on the host (a joiner). The SAME faithful §5.2b sequence
 // as spawn_player, EXCEPT it is NOT the host's own player: inf.is_local_player stays false and
 // World::cached.local_player is NOT republished (the host keeps its own player as the local
-// one). The peer is a full pool-0 0x14B9 entity the host SNAPs from the joiner's C2S 0x0C
+// one). The peer is a full pool-0 player entity the host chases from the joiner's C2S 0x0C
 // uplinks (replication EntityWireBridge::apply_player_intent) and the motor skips once the entity is
 // net-snapped. Pass a distinct net_id per joiner (the default 0xFFF0 is the host's own player).
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0 registers a
