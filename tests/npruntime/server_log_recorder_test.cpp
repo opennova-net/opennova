@@ -142,6 +142,7 @@ world::EntityHandle add_player(world::World &world, uint32_t dcb, uint8_t team, 
 
 void test_recorder_session() {
 	world::World world;
+	world.rules.mp_session = true; // a session (the single player's leg is below)
 	world.registry.configure_pool(0, 8);
 	const world::EntityHandle alice = add_player(world, 3, 1, "Alice", 70.0f, 25.0f, 56.25f, 0);
 	const world::EntityHandle bob = add_player(world, 5, 2, "Bob", -10.0f, 4.0f, 12.0f, 90);
@@ -227,9 +228,10 @@ void test_recorder_session() {
 	CHECK(file.size() > expected.size() &&
 			std::equal(expected.begin(), expected.end(), file.begin()));
 
-	// A session-less authority records every pool-0 row, a non-player as
-	// "#<DcbId>".
-	ctx.is_in_session = 0;
+	// A session-less authority (the single player, world.rules.mp_session off; our
+	// listen host keeps ctx.is_in_session 1 there) records every pool-0 row, a
+	// non-player as "#<DcbId>".
+	world.rules.mp_session = false;
 	CHECK(rec.open("sp.bms"));
 	CHECK(rec.file_name() == "host1.sph"); // host.sph exists
 	rec.write_mission_roster(ctx, world);

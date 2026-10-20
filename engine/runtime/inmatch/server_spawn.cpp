@@ -653,9 +653,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// [orig: Server_PlayerAdd's remote arm, @0x51CDE0..0x51CEEF; its local arm
 	//  @0x51CC33..0x51CC65 runs none of it]
 	if (!is_host_own && !round_init) Server_FileSquadRegistryNode(ctx, conn);
-	// The /PROFILE roster row, late in the add [orig: Server_PlayerAdd
-	//  @0x51d2fd..0x51d30f -> CServerLog_WritePlayerNameRecord].
-	if (ctx.logs.profile != nullptr) {
+	// The /PROFILE roster row, late in a remote add; the local arm jumps past it,
+	// so the host's own row is the mission start's roster pass's
+	// (HostRole's mission-start end) [orig: Server_PlayerAdd
+	//  @0x51d2fd..0x51d30f -> CServerLog_WritePlayerNameRecord; the local arm
+	//  @0x51CC29 -> `jmp loc_51D314` @0x51CC60].
+	if (ctx.logs.profile != nullptr && !is_host_own) {
 		if (const world::Entity *added = world.registry.get(h)) ctx.logs.profile->write_player(*added);
 	}
 	return h;

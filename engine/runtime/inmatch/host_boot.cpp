@@ -434,8 +434,10 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 
 	// The /PROFILE roster of the started mission's pool 0, at the start's
 	// tail [orig: Game_StartMission @0x526135..0x52617b, after
-	//  SpawnWaveList_BuildFromMission @0x526130].
-	if (boot.host != nullptr) {
+	//  SpawnWaveList_BuildFromMission @0x526130]. A host with its own client
+	// writes it inside the start's end, ahead of its own C2S 0x0B
+	// (HostRole's net_mission_start_end); one without writes it here.
+	if (boot.host != nullptr && !kernel.net_mission_start_end) {
 		const NapiNPServerCtx &ctx = boot.host->state.host_owner.ctx;
 		if (ctx.logs.profile != nullptr) ctx.logs.profile->write_mission_roster(ctx, kernel.world);
 	}

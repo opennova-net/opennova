@@ -183,8 +183,15 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	//  @0xA85B84, process-lived; Client_ProcessNetworkFrame @0x42C239 / @0x42C246].
 	state.client_runtime->use_process_state(client_process_);
 	state.host_owner.ctx.host_client = state.client_runtime.get();
-	// Its mission start ends with its C2S 0x0B (D-NET-NEW-L4-5).
-	kernel.net_mission_start_end = [this] { send_own_mission_status(); };
+	// Its mission start ends with the /PROFILE roster pass, then its C2S 0x0B
+	// (D-NET-NEW-L4-5) [orig: Game_StartMission - CServerLog_WritePlayerNameRecord
+	//  @0x52617B ahead of CNapiNetwork_QueueReliableMessage @0x52624B].
+	kernel.net_mission_start_end = [this] {
+		const NapiNPServerCtx &ctx = state.host_owner.ctx;
+		if (ctx.logs.profile != nullptr && kernel_ != nullptr)
+			ctx.logs.profile->write_mission_roster(ctx, kernel_->world);
+		send_own_mission_status();
+	};
 	// A fresh view counts its 0x0F / 0x50 folds from zero.
 	track_seen_ = ReplicaTrackSeen{};
 	state.client_runtime->set_profile(kernel.world.profile);
