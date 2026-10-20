@@ -466,6 +466,41 @@ bool check_retail_fire_admission() {
 } // namespace
 
 
+// D-NET-507: the host decodes the C2S 0x06's claimed origin as words and the
+// round spawns on them: 21,000 units out with low bits set (a float view loses
+// them), the round event carries the claimed words exactly. [orig:
+// Server_ClientFiredRound @0x50BAA0 - the claimed origin's reach on the words
+// @0x50C33C..0x50C362; RoundData_SpawnRound @0x4EC0D0 - Position
+// @0x4EC62B..0x4EC63A]
+bool check_fire_origin_keeps_the_words() {
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    const auto shooter = w::spawn_remote_player(world, player_spawn(1));
+    auto *player = world.registry.get(shooter);
+    const int32_t x = (21000 << 16) | 0x5F;
+    const int32_t y = -((300 << 16) | 0x1235);
+    const int32_t z = (12 << 16) | 0x0F0F;
+    player->position.set_q16({x, y, z});
+    world.tables.weapons.entries.resize(2);
+    auto &weapon = world.tables.weapons.entries[1];
+    weapon.valid = true;
+    weapon.clipsize = 4;
+    weapon.category = 1;
+    weapon.ammo_index = 1;
+    weapon.ammo_class_id = 1;
+    ns::UdpSessionTransport udp(ns::UdpSessionTransport::Role::Host);
+    std::vector<inmatch::NapiNPConnection> roster;
+    roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
+    slots_of(world, roster[0])[uint16_t(65)] = w::PersonalWeaponSlot{1, 4};
+    dispatch_fire(roster[0], roster, world,
+            fire_body(shooter.packed, 2, 1, x, y, z, 0, 0, 0xFFFF, 1, 0, 0));
+    if (!expect(world.out.rounds.count == 1, "the claimed origin on the shooter fires")) return false;
+    const w::RoundEvent &ev = world.out.rounds.records[0];
+    return expect(ev.origin_x == x && ev.origin_y == y && ev.origin_z == z,
+            "the round event carries the claimed origin's words");
+}
+
 bool check_fire_owner_environment_and_origin() {
     w::World world;
     world.registry.configure_pool(0, 4);
@@ -1031,6 +1066,7 @@ int main() {
 	if (!check_the_slot_weapon_fires()) return 1;
 	if (!check_refused_fire_mirrors_the_weapon()) return 1;
 	if (!check_fire_owner_environment_and_origin()) return 1;
+	if (!check_fire_origin_keeps_the_words()) return 1;
 	if (!check_retail_fire_admission()) return 1;
 	if (!check_mounted_slot_select_fire_and_reload()) return 1;
 	if (!check_duplicate_c2s_session_does_not_refire()) return 1;
