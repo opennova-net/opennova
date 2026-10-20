@@ -88,6 +88,12 @@ public:
 		int32_t max_packet_size = 0;
 		// The gate socket's bound port, which the connect log's gate lines name. Unset: 0.
 		std::function<uint16_t()> gate_local_port;
+		// The dedicated host's gate wait (opennova-serve, retail's command-line host): the
+		// worker's deadline reports nothing and stops the gate's receive, and the wait ends
+		// SESSION_DEDICATED_GATE_WAIT_MS after the probe with the gate service's stop line, then
+		// the gate-error map's NWEC15 to on_fatal. False: the menu's NWEC15 at the worker's
+		// deadline. [orig: CNapiGameSession_WaitForStateChange @0x4D1510]
+		bool dedicated_gate_wait = false;
 	};
 	// The NovaWorld switches of the game's command line the gate response and the connect read
 	// (LaunchFlags): the POST address (resolved with DNS on; one that does not resolve overrides
@@ -297,6 +303,9 @@ private:
 	// The connect log (Hooks::connect_log_on / connect_log): on now, and one line when on.
 	bool connect_log_on() const;
 	void connect_log(const std::string &text);
+	// The connection's state-5 callbacks' lines (ClientSession::Config::on_connection_up / _down).
+	void log_connection_up();
+	void log_connection_down();
 	// The gate socket as the gate lines name it: its bind address and port.
 	std::string gate_socket_text() const;
 
@@ -323,6 +332,8 @@ private:
 	// The gate worker: the probe re-sent every retry interval until the deadline.
 	uint32_t gate_started_ms_ = 0;
 	uint32_t gate_last_send_ms_ = 0;
+	// The dedicated host's gate wait ended (Environment::dedicated_gate_wait).
+	bool dedicated_wait_over_ = false;
 	// The connect log's gate stamp, written only while the log is on (dword_B5F440).
 	uint32_t gate_log_stamp_ms_ = 0;
 	// The first connect's poll, retail's NovaWorld menu running PollConnectPhase1, the validation

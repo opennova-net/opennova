@@ -196,6 +196,19 @@ public:
 		//  NapiNPManager_Create @0x62C5E0, its one caller CNapiNetwork_Init @0x4CA638]
 		std::function<ConnectionKeys()> connection_keys;
 
+		// The connection's two game-session callbacks: `on_connection_up` at each state-5 entry
+		// (the first connect's accepted 0x82 and every re-join's), after the 0x82's fields are
+		// kept and ahead of the session's state 2; `on_connection_down` at the teardown of a
+		// connection in state 5, after its 0x46 burst and ahead of the session's state 0. The
+		// embedder writes the connect log's lines from them.
+		// [orig: CNapiGameSession_InitPlayerConnection @0x4D4160 - conn+0xC0 =
+		//  CNapiGameSession_OnNovaWorldConnected @0x4D428E, conn+0xC4 = CNapiGameSession_OnDisconnect
+		//  @0x4D429B; CNapiNPConnection_OnStateChange @0x626060 - the state-5 call @0x626231;
+		//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the state-5 call @0x6254E7 after
+		//  the burst @0x6254BF..0x6254D3]
+		std::function<void()> on_connection_up;
+		std::function<void()> on_connection_down;
+
 		// The NovaWorld session connection of a title (complete:
 		// resolve_title_identity) whose gate manager holds `gate_tag`
 		// (title_gate_tag): NA, PV1 and BDAT set, the rest as defaulted.
@@ -530,6 +543,14 @@ public:
 	// [orig: CNapiGameSession_OnDisconnect @0x4cfb8e / @0x4cfbe3].
 	const std::string &server_web_domain() const { return server_web_domain_; }
 	const std::string &server_nwuid() const { return server_nwuid_; }
+	// The 0x82's NovaworldName CU (63 characters kept), "???" from a teardown on, and the 0x82's
+	// RIP / RPN (the address the server saw), as the connection keeps them.
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - the name's Napi_CopyString(.., 64)
+	//  into session+0x37C @0x4D15DC; CNapiGameSession_OnDisconnect @0x4CFAA0 - "???" @0x4CFB7B;
+	//  NapiNP_HandleServerJoinResponse @0x629840 - conn+0x38 / +0x3C @0x629D8F / @0x629D92]
+	const std::string &server_novaworld_name() const { return server_novaworld_name_; }
+	uint32_t server_reflected_ip() const { return server_rip_; }
+	uint32_t server_reflected_port() const { return server_rpn_; }
 	const std::string &sess_id_string() const { return sess_id_string_; }
 	const std::string &last_error() const { return last_error_; }
 	// The connection's cs_dir0 block: the NOVAWORLDUDP template overlaid by the 0x82 and the
@@ -610,6 +631,9 @@ private:
 	std::string server_scrk_;      // ServerAuth.scrk; decrypts inbound 0x83 inner
 	std::string server_nwuid_;     // ServerSessionInit NWUID — echoed in the verify
 	std::string server_web_domain_;// ServerSessionInit NovaworldWebDomainNameAndPortNumber
+	std::string server_novaworld_name_; // ServerSessionInit NovaworldName (session+0x37C)
+	uint32_t server_rip_ = 0;      // ServerSessionInit RIP (conn+0x38)
+	uint32_t server_rpn_ = 0;      // ServerSessionInit RPN (conn+0x3C)
 	std::string sess_id_string_;   // ServerVerifyResult.SessIdString
 	std::string last_error_;
 	CsConfig cs_ = novaworld_service_cs_config();

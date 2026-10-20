@@ -107,13 +107,15 @@ struct Rig {
 	std::vector<std::string> log;
 	NwuLobbySession lobby;
 
-	Rig() : lobby(hooks(), environment()) {
+	explicit Rig(bool dedicated_gate_wait = false)
+		: lobby(hooks(), environment(dedicated_gate_wait)) {
 		lobby.set_title(&kJo, kJo.gate_tag);
 	}
 
-	static NwuLobbySession::Environment environment() {
+	static NwuLobbySession::Environment environment(bool dedicated_gate_wait) {
 		NwuLobbySession::Environment env;
 		env.gate_local_port = []() { return uint16_t{2300}; };
+		env.dedicated_gate_wait = dedicated_gate_wait;
 		return env;
 	}
 
@@ -671,8 +673,9 @@ void check_connect_log_gate_and_connect() {
 	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
 	rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
 	rig.lobby.tick(1400);
-	CHECK((rig.log ==
-			std::vector<std::string>{ "NWU LEAVING JOIN LOOP...", "NWU WAITING FOR VALIDATION..." }));
+	// The 0x82's state-5 entry writes OnNovaWorldConnected's line ahead of the waits'.
+	CHECK((rig.log == std::vector<std::string>{ "NWU CONNECTED TO NOVAWORLD 127.0.0.1:64206 [NWServer]  [yourip=1.0.0.127:40000]",
+			"NWU LEAVING JOIN LOOP...", "NWU WAITING FOR VALIDATION..." }));
 	rig.log.clear();
 	rig.session.inbound.push_back(
 			{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }) });
@@ -707,7 +710,9 @@ void check_connect_log_give_ups() {
 		bring_to_verify(rig);
 		rig.log.clear();
 		rig.lobby.tick(200 + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
-		CHECK((rig.log == std::vector<std::string>{ "NWU 20 secs are up! (b)", "NWU TIMEOUT2!!!" }));
+		// The abort tears the connection down: OnDisconnect's line, no record latched.
+		CHECK((rig.log == std::vector<std::string>{ "NWU 20 secs are up! (b)", "NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
+				"NWU TIMEOUT2!!!" }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC46" });
 		rig.lobby.close();
 	}
@@ -719,7 +724,8 @@ void check_connect_log_give_ups() {
 		rig.session.inbound.push_back(
 				{ kServer, server_statement_to(auth, "ServerVerifyResult", { { "Success", "0" } }) });
 		rig.lobby.tick(300);
-		CHECK((rig.log == std::vector<std::string>{ "NWU NOT CONNECTED FOR SOME REASON..." }));
+		CHECK((rig.log == std::vector<std::string>{ "NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
+				"NWU NOT CONNECTED FOR SOME REASON..." }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC48" });
 		rig.lobby.close();
 	}
@@ -742,8 +748,11 @@ void check_connect_log_give_ups() {
 						SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(parsed.ck, stop)) });
 		rig.log.clear();
 		rig.lobby.tick(200);
-		CHECK((rig.log ==
-				std::vector<std::string>{ "NWU LEAVING JOIN LOOP...", "NWU FAILURE2 [0]!!!" }));
+		// The peer's goodbye latches its record (the receiver's role 1) ahead of the teardown.
+		CHECK((rig.log == std::vector<std::string>{ "NWU CONNECTED TO NOVAWORLD 127.0.0.1:64206 [NWServer]  [yourip=1.0.0.127:40000]",
+				"NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] "
+				"[1,2,0,0,\"\",0,\"NP.S:PT:STOP\"]",
+				"NWU LEAVING JOIN LOOP...", "NWU FAILURE2 [0]!!!" }));
 		CHECK(rig.fatals == std::vector<std::string>{ "NWEC45" });
 		rig.lobby.close();
 	}
@@ -833,6 +842,39 @@ void check_gate_probe_cadence() {
 	CHECK(probes_at(12500) == 5 && rig.fatals.size() == 1);
 	for (const auto &dg : rig.gate.sent)
 		CHECK(dg.second == probe && dg.first.port == GATE_DEFAULT_PORT);
+	rig.lobby.close();
+}
+
+// The dedicated host's gate wait: the worker's five probes and its silent end at 10 s, no reply
+// read after it, then at 20 s past the probe the gate service's stop line naming the worker's
+// socket and the hosting's end (NWEC15 to the hook), once. [orig:
+// CNapiGameSession_WaitForStateChange @0x4D1510 - the 0x4E20 compare @0x4D1546,
+// CNapiGameSession_StopHosting (the call @0x4D154A); CNapiGameSession_StopHosting @0x4CEC10 -
+// "%s : GATE STOPPING GATE SERVICE... [%s]" @0x4CECA4]
+void check_dedicated_gate_wait() {
+	Rig rig(/*dedicated_gate_wait=*/true);
+	rig.log_on = true;
+	rig.lobby.open(rig.gate, rig.session);
+	rig.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+	for (uint32_t at : { 2001u, 4002u, 6003u, 8004u, 10000u, 10001u })
+		rig.lobby.tick(at);
+	CHECK(rig.gate.sent.size() == 5 && rig.fatals.empty());
+	rig.gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT },
+			gate_reply("VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n") });
+	rig.log.clear();
+	rig.lobby.tick(15000);
+	CHECK(rig.gate.inbound.size() == 1 && rig.lobby.session() == nullptr);
+	CHECK((rig.log == std::vector<std::string>{ "GATE WAITING FOR REPLY... [0.0.0.0:2300]" }));
+	rig.log.clear();
+	rig.lobby.tick(20000);
+	CHECK(rig.fatals.empty());
+	rig.log.clear();
+	rig.lobby.tick(20001);
+	CHECK(!rig.log.empty() && rig.log.back() == "GATE STOPPING GATE SERVICE... [0.0.0.0:2300]");
+	CHECK(rig.fatals == std::vector<std::string>{ "NWEC15" });
+	rig.log.clear();
+	rig.lobby.tick(21000);
+	CHECK(rig.log.empty() && rig.fatals.size() == 1 && rig.gate.sent.size() == 5);
 	rig.lobby.close();
 }
 
@@ -965,6 +1007,7 @@ int main() {
 	check_connect_log_give_ups();
 	check_connect_log_gate_failures();
 	check_gate_probe_cadence();
+	check_dedicated_gate_wait();
 	check_gate_response_lines();
 	check_short_protocol_packets_keep_the_connection();
 	check_disconnect_request_by_state();

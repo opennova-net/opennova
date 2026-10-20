@@ -87,6 +87,13 @@ constexpr uint32_t SESSION_CONNECT_RETRANSMIT_MS = 3000u;
 //  interval test @0x633A6A (`jbe` @0x633A70), the last send's stamp @0x633B11]
 constexpr uint32_t SESSION_GATE_PROBE_RETRY_MS = 2000u;   // 0x7D0
 constexpr uint32_t SESSION_GATE_PROBE_TIMEOUT_MS = 10000u; // 0x2710
+// The dedicated host's gate wait: the command-line host polls the gate response while the gate
+// state is 1 and stops the gate service once more than 20000 ms passed since the probe started,
+// past the worker's own 10 s, so a gate that never answers ends its hosting at 20 s.
+// [orig: Game_HostMultiplayerSession @0x4A65A0 - CNapiGameSession_WaitForStateChange (the call
+//  @0x4A66B6); CNapiGameSession_WaitForStateChange @0x4D1510 - the stamp @0x4D152B, the 0x4E20
+//  compare @0x4D1546, CNapiGameSession_StopHosting (the call @0x4D154A), -1 @0x4D1555]
+constexpr uint32_t SESSION_DEDICATED_GATE_WAIT_MS = 20000u; // 0x4E20
 // The periodic-update GLSVSS poll: once the NP connection is established (conn_state 5) and the
 // lobby session sits in state 4 (verified), the session checks its GLSVSS deadline at most once
 // per 1000 ms. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d4400 @0x4d44e3]

@@ -128,6 +128,8 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 						return true;
 					};
 					env.gate_local_port = [this]() { return gate_port_; };
+					// The command-line host's gate wait (CNapiGameSession_WaitForStateChange).
+					env.dedicated_gate_wait = true;
 					return env;
 				}()),
 		role_(lobby_, [this]() {

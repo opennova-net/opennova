@@ -588,7 +588,11 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 		if (kv.first == "NWUID") server_nwuid_ = kv.second;
 		else if (kv.first == "NovaworldWebDomainNameAndPortNumber")
 			server_web_domain_ = kv.second;
+		else if (kv.first == "NovaworldName")
+			server_novaworld_name_ = napi_copy_string(kv.second, 64); // @0x4D15DC
 	}
+	server_rip_ = sa.rip; // [orig: @0x629D8F]
+	server_rpn_ = sa.rpn; // [orig: @0x629D92]
 	// The host's CS block overlays this connection's client-direction template (cs_dir0): each
 	// CLIENT-direction (byte 1) entry stores its slot raw (the reap window, the send intervals,
 	// the queue and pool bounds, the packet ceiling and budget); fields the 0x82 omits keep the
@@ -616,7 +620,11 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	reassembly_ = ProtocolReassemblyState{};
 	reconnect_.was_connected = false;
 	reconnect_.next_ms = 0;
-	// OnNovaWorldConnected marks every var list for a whole resend. [orig: @0x4d1570]
+	// The state-5 callback, OnNovaWorldConnected: its connect-log line, then the session's state 2,
+	// which marks every var list for a whole resend. [orig: CNapiNPConnection_OnStateChange
+	//  @0x626060 - @0x626231; CNapiGameSession_OnNovaWorldConnected @0x4D1570 - the line
+	//  @0x4D1871, SetState(2) @0x4D187D]
+	if (cfg_.on_connection_up) cfg_.on_connection_up();
 	set_lobby_state(2);
 }
 
@@ -657,6 +665,11 @@ void ClientSession::teardown_connection(std::vector<std::vector<uint8_t>> &out) 
 				disconnect_latched_ ? client_goodbye_to_bytes(server_sk_, disconnect_event_)
 				                    : client_goodbye_to_bytes(server_sk_));
 		for (size_t i = 0; i < disconnect_burst_count(); ++i) out.push_back(goodbye);
+		// The state-5 leg's callback after the burst, OnDisconnect: its connect-log line ahead of
+		// the session's reset. [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 -
+		//  @0x6254E7; CNapiGameSession_OnDisconnect @0x4CFAA0 - the line @0x4CFB5C, SetState(0)
+		//  @0x4CFB68]
+		if (cfg_.on_connection_down) cfg_.on_connection_down();
 	}
 	on_disconnected();
 	if (connected) {
@@ -710,6 +723,7 @@ void ClientSession::on_disconnected() {
 	host_state_ = HostState::Idle;
 	play_state_ = PlayState::Idle;
 	server_web_domain_ = "???";
+	server_novaworld_name_ = "???"; // [orig: CNapiGameSession_OnDisconnect @0x4CFB7B]
 	server_nwuid_.clear();
 	host_gsid_.clear();
 }

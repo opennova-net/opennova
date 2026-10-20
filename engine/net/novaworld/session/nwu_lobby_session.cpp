@@ -89,6 +89,35 @@ std::string NwuLobbySession::gate_socket_text() const {
 	return "0.0.0.0:" + std::to_string(port);
 }
 
+// OnNovaWorldConnected's line: the connection's server (its +0x30 / +0x34), the 0x82's
+// NovaworldName and the address it saw (RIP / RPN, the connection's +0x38 / +0x3C), each
+// address through Napi_FormatAddress ("%s:%ld"). [orig: CNapiGameSession_OnNovaWorldConnected
+//  @0x4D1570 - Napi_FormatAddress @0x4D181A / @0x4D1831, "%s : NWU CONNECTED TO NOVAWORLD %s [%s]
+//  [yourip=%s]" @0x4D1871]
+void NwuLobbySession::log_connection_up() {
+	if (!connect_log_on() || !session_) return;
+	const PeerAddr seen{ session_->server_reflected_ip(), 0 };
+	connect_log("NWU CONNECTED TO NOVAWORLD " + peer_addr_to_string(nw_peer_) + " [" +
+			session_->server_novaworld_name() + "]  [yourip=" + peer_addr_ip_to_string(seen) + ":" +
+			std::to_string(static_cast<int32_t>(session_->server_reflected_port())) + "]");
+}
+
+// OnDisconnect's line, ahead of its reset: the server, the 0x82's NovaworldName and the
+// connection's disconnect record (its role, class, the two parameters, the text, the reason code
+// and the tag; zeroed at the state-5 entry, so a teardown with none latched prints zeros).
+// [orig: CNapiGameSession_OnDisconnect @0x4CFAA0 - Napi_FormatAddress @0x4CFAF0, the record
+//  conn+0x658..0x664 / +0x668 / +0x6E8 / +0x6EC, "%s : NWU DISCONNECTING FROM NOVAWORLD %s [%s]
+//  [%ld,%ld,%ld,%ld,\"%s\",%ld,\"%s\"]" @0x4CFB5C]
+void NwuLobbySession::log_connection_down() {
+	if (!connect_log_on() || !session_) return;
+	const DisconnectEvent &record = session_->disconnect_event();
+	const auto value = [](uint32_t v) { return std::to_string(static_cast<int32_t>(v)); };
+	connect_log("NWU DISCONNECTING FROM NOVAWORLD " + peer_addr_to_string(nw_peer_) + " [" +
+			session_->server_novaworld_name() + "] [" + value(record.ds) + "," + value(record.dc) +
+			"," + value(record.dp1) + "," + value(record.dp2) + ",\"" + record.dstr + "\"," +
+			value(record.dpc) + ",\"" + record.ddstr + "\"]");
+}
+
 bool NwuLobbySession::resolve(const std::string &host, uint16_t port, PeerAddr &out) const {
 	PeerAddr addr;
 	const bool ok = env_.resolve_ipv4 ? env_.resolve_ipv4(host, addr) : parse_dotted_quad(host, addr);
@@ -151,6 +180,7 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	clock_ms_ = 0;
 	gate_started_ms_ = 0;
 	gate_last_send_ms_ = 0;
+	dedicated_wait_over_ = false;
 	connect_poll_ = ConnectPoll::Off;
 	connect_stamp_ms_ = 0;
 	connect_timed_out_ = false;
@@ -326,11 +356,31 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	//  interval @0x4CE7B4, the deadline @0x4CE7C6]
 	if (probe_sent_ && !session_ && !gate_probe_datagram_.empty()) {
 		if (clock_ms_ - gate_started_ms_ > SESSION_GATE_PROBE_TIMEOUT_MS) {
-			gate_probe_datagram_.clear(); // report once
-			if (hooks_.on_fatal) hooks_.on_fatal(novaworld_gate_error_tag(0, false));
-			return;
+			gate_probe_datagram_.clear(); // the worker is gone: report once, read no more
+			if (!env_.dedicated_gate_wait) {
+				if (hooks_.on_fatal) hooks_.on_fatal(novaworld_gate_error_tag(0, false));
+				return;
+			}
+		} else if (clock_ms_ - gate_last_send_ms_ > SESSION_GATE_PROBE_RETRY_MS) {
+			send_gate_probe();
 		}
-		if (clock_ms_ - gate_last_send_ms_ > SESSION_GATE_PROBE_RETRY_MS) send_gate_probe();
+	}
+	// The dedicated host's wait outlives the worker: past SESSION_DEDICATED_GATE_WAIT_MS with no
+	// response the gate service stops, its line naming the worker's socket, still open after a
+	// worker that left at its deadline, and the hosting ends. [orig:
+	//  CNapiGameSession_WaitForStateChange @0x4D1510 - @0x4D1546, the call @0x4D154A;
+	//  CNapiGameSession_StopHosting @0x4CEC10 - the socket +0x30 @0x4CEC3A, Napi_FormatAddress
+	//  @0x4CEC53 ("n/a" @0x4CEC63), "%s : GATE STOPPING GATE SERVICE... [%s]" @0x4CECA4, the stamp
+	//  @0x4CECB2, the context freed @0x4CECC7, the gate state 1 -> 0 @0x4CECEC]
+	if (env_.dedicated_gate_wait && probe_sent_ && !session_ && !gate_answered_ &&
+			!dedicated_wait_over_ && clock_ms_ - gate_started_ms_ > SESSION_DEDICATED_GATE_WAIT_MS) {
+		dedicated_wait_over_ = true;
+		if (connect_log_on()) {
+			connect_log("GATE STOPPING GATE SERVICE... [" + gate_socket_text() + "]");
+			gate_log_stamp_ms_ = clock_ms_;
+		}
+		if (hooks_.on_fatal) hooks_.on_fatal(novaworld_gate_error_tag(0, false));
+		return;
 	}
 
 	if (session_socket_ == nullptr || !session_)
@@ -509,10 +559,16 @@ void NwuLobbySession::poll_gate() {
 	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the test @0x4CED49..0x4CED67, the
 	//  socket @0x4CED84..0x4CEDB0, "%s : GATE WAITING FOR REPLY... [%s]" @0x4CEDF4, the stamp
 	//  @0x4CEDFE]
+	if (dedicated_wait_over_) return; // the dedicated wait stopped the gate service
 	if (probe_sent_ && connect_log_on() && clock_ms_ - gate_log_stamp_ms_ > 500u) {
 		connect_log("GATE WAITING FOR REPLY... [" + gate_socket_text() + "]");
 		gate_log_stamp_ms_ = clock_ms_;
 	}
+	// A worker gone at its deadline receives nothing more: its status stays 2 and the response's
+	// processing returns at its test every frame (D-NET-NEW-L9-3). [orig:
+	//  CNapiGateManager_ProbeThreadProc @0x6339E0 - the exit @0x633A5E;
+	//  CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CEE84]
+	if (probe_sent_ && gate_probe_datagram_.empty()) return;
 	uint8_t buf[65536];
 	for (;;) {
 		PeerAddr from;
@@ -712,6 +768,9 @@ void NwuLobbySession::begin_session() {
 	cfg.glsvss_agrms_ms = gate.glsvss_agrms;
 	// The "Cookie" var-list every Cookie-bearing statement re-serializes.
 	cfg.cookie_vars = hooks_.cookie_vars;
+	// The connection's state-5 callbacks' connect-log lines.
+	cfg.on_connection_up = [this]() { log_connection_up(); };
+	cfg.on_connection_down = [this]() { log_connection_down(); };
 
 	session_ = std::make_unique<ClientSession>(cfg);
 	session_->set_clock_ms(clock_ms_);
