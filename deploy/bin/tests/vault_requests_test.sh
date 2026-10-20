@@ -471,7 +471,7 @@ expect_requests "zone plan" 5 zone plan
 expect_tf_var TF_VAR_edge_auth_secret_prod app-prod edge_auth_secret
 expect_tf_var TF_VAR_edge_auth_secret_staging app-staging edge_auth_secret
 expect_tf_var AWS_ACCESS_KEY_ID aws-prod access_key_id
-expect_requests "github plan" 5 github plan
+expect_requests "github plan" 4 github plan
 expect_tf_var GITHUB_TOKEN github-terraform token
 expect_tf_var TF_VAR_members github-terraform members
 expect_tf_var TF_VAR_stripe_test_secret_key stripe-test restricted_key
