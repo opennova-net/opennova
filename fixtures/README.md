@@ -179,9 +179,9 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 - `rtxt/synth_*.bin` — `tests/fixtures/minimal_rtxt_gen.cpp`: the parity set
   `rtxt_synth_parity` grills — a multi-section game table with position hints, a
   menu table, a mission sidecar with cp1252 text and odd-length padding, and the
-  one-entry case. The shipped
-  string tables are read from the reference tree by the gated
-  `rtxt_jo_install_sweep` and the menu-driven GUT tests.
+  one-entry case, and `synth_variants.bin` / `synth_variants_aligned.bin`, the shapes the
+  shipped string tables take (empty sections first, between and last, CR LF and tab texts,
+  a duplicate key, a long text, repeated and empty texts, every padding value).
 - `gamecfg/synth_game.cfg` — `tests/fixtures/minimal_gamecfg_gen.cpp`: a `game.cfg`
   through `gamecfg::write` (CR LF, Game_SaveConfig's layout) from
   `tests/gamecfg/gamecfg_synth.h`, every written key off its default and a four-row weapon
