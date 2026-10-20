@@ -36,9 +36,9 @@ using namespace opennova;
 namespace {
 
 constexpr const char *kFixtureSha256 =
-		"1fbc8ea46ef3039943b97031357b73b6872b9b8bba809bd26a642d7f58a4e2a0";
+		"3e9cb3a5337c8859155bd3c02c4c656836daeeb2ca679c6e5ab115d6ca447f1a";
 constexpr const char *kOutputSha256 =
-		"34e08747528ad84e24232c6d206461d15f94563a04d5c814206557c52e259017";
+		"44e6d5e1658c50ef2894adfbe46cfd4b3dbe57141ed2daf260eed1939451b7fe";
 
 int g_failures = 0;
 
