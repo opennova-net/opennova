@@ -334,7 +334,11 @@ so the default suite is unchanged. An extension case may add:
   from the CLIENT copy or `-RetailLateClientRoot`, its own capture under the
   run's `late\`). An OpenNova late joiner is not wired yet, so a late-joiner
   case runs RR, RR-aa and OR. The summary's `late_joiner` records its run,
-  capture and `client_port`, the session the late join's verdict selects.
+  capture and `client_port`, the session the late join's verdict selects: the
+  suite judges such a case twice, the second time with `opennova-parity
+  --evidence late` (each run's late-joiner capture bound to that port, its steady
+  window from its readiness to the cell's steady end) into
+  `<case>.late.verdict.json`.
 - `topologies`: the cells the case has (default all five; RR and RR-aa always).
   The other cells report `not_applicable` and are not counted as missing.
 

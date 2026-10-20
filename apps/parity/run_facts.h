@@ -21,7 +21,10 @@ namespace opennova::parity {
 // Which capture of a run is its evidence: the summary's own evidence_capture
 // (the retail endpoint's capture for RR/RO/OR, the external one for OO), or the
 // external.pcapng every cell records.
-enum class EvidenceSource { Summary, External };
+// Summary: the summary's evidence capture. External: every run's external.pcapng.
+// Late: E3's late joiner, the summary's late_joiner capture bound to its client
+// port, its steady window from its readiness to the cell's steady end.
+enum class EvidenceSource { Summary, External, Late };
 
 struct RunInfo {
 	std::string label; // "rr", "rr_aa", "ro", "or", "oo"
@@ -39,6 +42,7 @@ struct RunInfo {
 	uint64_t steady_start_ns = 0;
 	uint64_t steady_end_ns = 0; // start + steady_seconds: the slice end
 	uint64_t steady_completed_ns = 0; // when the runner closed the window
+	int session = 0; // a fixed gameplay session (the late joiner's client port); 0 = bind
 };
 
 // Strict ISO-8601 UTC ("2026-10-11T12:34:56.1234567Z", 0..9 fraction digits)

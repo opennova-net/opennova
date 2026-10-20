@@ -647,6 +647,27 @@ foreach ($case in $selectedCases) {
         if ($caseResult.status -eq "PASS" -and $missing.Count -gt 0) {
             $caseResult.status = "INCOMPLETE"
         }
+        # E3: the late joiner's own session, judged as a second verdict (each
+        # run's late_joiner capture bound to its client port, from its readiness).
+        if (Get-CaseLateJoiner $case) {
+            $lateReport = Join-Path $suiteDir "$($case.id).late.verdict.json"
+            $lateArgs = @("--items", $itemsPath, "--out", $lateReport, "--evidence", "late")
+            foreach ($cell in $usable) {
+                $lateArgs += @($cell.Flag, $cellResults[$cell.Name].run_root)
+            }
+            $lateLines = @(& $parityExe @lateArgs)
+            $lateExit = $LASTEXITCODE
+            $lateLines | ForEach-Object { Write-Host $_ }
+            $lateStatus = @($lateLines | Where-Object { "$_" -like "PARITY_STATUS=*" } | Select-Object -Last 1)
+            $caseResult.late_status = if ($lateExit -in @(0, 1) -and $lateStatus.Count -eq 1) {
+                "$($lateStatus[0])".Substring("PARITY_STATUS=".Length)
+            } else { "ERROR" }
+            $caseResult.late_report = $lateReport
+            if ($caseResult.status -eq "PASS" -and $caseResult.late_status -ne "PASS") {
+                $caseResult.status = $caseResult.late_status
+            }
+            Write-Host "PARITY_SUITE_NOTE case=$($case.id) late joiner verdict=$($caseResult.late_status) report=$lateReport"
+        }
     }
     $caseResults.Add([pscustomobject] $caseResult)
     Write-Host ("PARITY_SUITE_CASE case=$($case.id) status=$($caseResult.status)" +

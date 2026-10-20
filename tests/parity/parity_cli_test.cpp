@@ -94,7 +94,7 @@ void write_pcap(const std::string &path, const std::vector<net::PcapDatagram> &d
 std::string make_run(const test_temp::TempDir &dir, const std::string &name,
 		const std::string &topology, const std::vector<net::PcapDatagram> &capture,
 		const std::string &steady_started = "1970-01-01T00:00:00.9000000Z",
-		const std::string &mission = "SELF.BMS") {
+		const std::string &mission = "SELF.BMS", bool late = false) {
 	const std::string run_dir = dir.file(name.c_str());
 	std::error_code ec;
 	std::filesystem::create_directories(io::os_path(run_dir + "/joiner"), ec);
@@ -113,6 +113,16 @@ std::string make_run(const test_temp::TempDir &dir, const std::string &name,
 	json.set("run_root", io::json_string(old_root));
 	json.set("evidence_capture", io::json_string(old_root + "/joiner/traffic.pcap"));
 	json.set("evidence_perspective", io::json_string("retail-client"));
+	if (late) {
+		// E3's late joiner: its own capture under late/ and its client port.
+		std::filesystem::create_directories(io::os_path(run_dir + "/late"), ec);
+		write_pcap(run_dir + "/late/traffic.pcap", capture);
+		io::JsonValue joiner = io::JsonValue::make_object();
+		joiner.set("capture_path", io::json_string(old_root + "/late/traffic.pcap"));
+		joiner.set("client_port", io::json_number(30000));
+		joiner.set("ready_utc", io::json_string("1970-01-01T00:00:01.0000000Z"));
+		json.set("late_joiner", std::move(joiner));
+	}
 	std::string error;
 	const std::string text = "\xEF\xBB\xBF" + io::json_write(json); // PowerShell 5.1 writes a BOM
 	check(io::write_file_atomic(run_dir + "/run-summary.json", text, error), "write summary");
@@ -200,6 +210,25 @@ int main(int argc, char **argv) {
 		args.insert(args.end(), { "--ro", ro, "--out", verdict, "--evidence", "external" });
 		const Result r = run(args);
 		check(r.code == parity::kExitPass, "--evidence external reads external.pcapng: " + r.err);
+	}
+	{
+		// --evidence late: each run's late_joiner capture, bound to its client port,
+		// from its readiness to the steady end; a run without one is an input error.
+		const std::string late_rr = make_run(dir, "late-rr", "RR", session,
+				"1970-01-01T00:00:00.9000000Z", "SELF.BMS", true);
+		const std::string late_aa = make_run(dir, "late-rr-aa", "RR", session,
+				"1970-01-01T00:00:00.9000000Z", "SELF.BMS", true);
+		const std::string late_or = make_run(dir, "late-or", "OR", session,
+				"1970-01-01T00:00:00.9000000Z", "SELF.BMS", true);
+		const Result r = run({ "--items", items, "--rr", late_rr, "--rr-aa", late_aa, "--or",
+				late_or, "--out", verdict, "--evidence", "late" });
+		check(r.code == parity::kExitPass,
+				"--evidence late judges the late joiner's session (exit " + std::to_string(r.code) +
+						"): " + r.out + r.err);
+		const Result missing = run({ "--items", items, "--rr", rr, "--rr-aa", aa, "--or", late_or,
+				"--out", verdict, "--evidence", "late" });
+		check(missing.code == parity::kExitUsage && contains(missing.err, "no late_joiner"),
+				"--evidence late refuses a run without a late joiner: " + missing.err);
 	}
 	{
 		// The A/A sanity: RR-aa as the reference, RR as both the floor and the subject.

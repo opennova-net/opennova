@@ -295,6 +295,26 @@ bool read_run_info(const std::string &run_dir, const std::string &label, Evidenc
 	if (source == EvidenceSource::External) {
 		out.capture = out.external_capture;
 		out.perspective = "external";
+	} else if (source == EvidenceSource::Late) {
+		// E3: the late joiner's own capture and session; its steady window opens
+		// at its readiness (it joins mid-window) and closes with the cell's.
+		const io::JsonValue *late = json.get("late_joiner");
+		if (!late || !late->is_object()) {
+			error = label + ": " + summary_path + " records no late_joiner";
+			return false;
+		}
+		recorded_capture = late->get_string("capture_path", "");
+		out.capture = resolve_capture(recorded_capture, run_root, run_dir);
+		out.session = static_cast<int>(late->get_number("client_port", 0.0));
+		out.perspective = "late-joiner";
+		uint64_t ready_ns = 0;
+		if (out.session <= 0 || !parse_utc_ns(late->get_string("ready_utc", ""), ready_ns) ||
+				ready_ns >= out.steady_end_ns) {
+			error = label + ": late_joiner needs a client_port and a ready_utc inside the steady window";
+			return false;
+		}
+		out.steady_start_ns = std::max(out.steady_start_ns, ready_ns);
+		out.steady_seconds = double(out.steady_end_ns - out.steady_start_ns) / 1e9;
 	} else {
 		out.capture = resolve_capture(recorded_capture, run_root, run_dir);
 	}
@@ -311,7 +331,7 @@ bool read_run_info(const std::string &run_dir, const std::string &label, Evidenc
 RunFacts make_run_facts(RunInfo info, wire::ParityTrace trace) {
 	RunFacts facts;
 	facts.info = std::move(info);
-	facts.session = bind_session(trace, facts.evidence);
+	facts.session = facts.info.session != 0 ? facts.info.session : bind_session(trace, facts.evidence);
 	const int session = facts.session;
 	facts.trace = std::move(trace);
 	wire::ParityTrace &t = facts.trace;

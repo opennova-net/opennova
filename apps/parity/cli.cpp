@@ -18,14 +18,16 @@ namespace {
 constexpr const char *kUsage =
 		"usage: opennova-parity --items <items.def> --rr <runDir> --rr-aa <runDir>\n"
 		"                       [--ro <runDir>] [--or <runDir>] [--oo <runDir>]\n"
-		"                       [--out <verdict.json>] [--evidence summary|external]\n"
+		"                       [--out <verdict.json>] [--evidence summary|external|late]\n"
 		"  Each runDir is a scripts/net/run_parity_topology.ps1 cell (run-summary.json\n"
 		"  beside its captures). Every subject topology is compared to RR, both\n"
 		"  directions; a distance fails beyond max(fixed floor, the RR-aa distance).\n"
 		"  A subject slot also takes an RR run (the A/A sanity: --rr <rr-aa>\n"
 		"  --rr-aa <rr> --ro <rr> must pass).\n"
 		"  --evidence external compares every run's external.pcapng instead of the\n"
-		"  summary's evidence capture. Exit 0 PASS, 1 FAIL, 2 usage or input error.\n";
+		"  summary's evidence capture. --evidence late compares E3's late joiner: each\n"
+		"  run's late_joiner capture, bound to its client port, from its readiness to\n"
+		"  the steady end. Exit 0 PASS, 1 FAIL, 2 usage or input error.\n";
 
 constexpr size_t kPrintedFailures = 40;
 
@@ -68,8 +70,10 @@ int run_cli(const std::vector<std::string> &args, std::FILE *out, std::FILE *err
 	if (values.count("--evidence")) {
 		if (values["--evidence"] == "external")
 			source = EvidenceSource::External;
+		else if (values["--evidence"] == "late")
+			source = EvidenceSource::Late;
 		else if (values["--evidence"] != "summary")
-			return usage(err, "--evidence is summary or external");
+			return usage(err, "--evidence is summary, external or late");
 	}
 	const std::string out_path =
 			values.count("--out") ? values["--out"] : std::string("parity-verdict.json");
