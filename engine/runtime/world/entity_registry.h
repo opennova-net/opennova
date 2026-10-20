@@ -68,8 +68,11 @@ public:
 
     void configure_pool(int pool, size_t capacity);
 
-    EntityHandle spawn(int pool, const Entity &seed); // kInvalid if pool full
-    EntityHandle spawn_from(int pool, size_t first_slot, const Entity &seed); // first free >= first_slot
+    // Pool_AllocEntry's includeInUse argument: 0 passes over a destroyed row (D-NET-485).
+    enum class Reuse : uint8_t { Destroyed, Fresh };
+    EntityHandle spawn(int pool, const Entity &seed, Reuse reuse = Reuse::Destroyed); // kInvalid if pool full
+    EntityHandle spawn_from(int pool, size_t first_slot, const Entity &seed,
+                            Reuse reuse = Reuse::Destroyed); // first free >= first_slot
     // Allocate exactly the packed pool/slot identity supplied by the wire.
     // Unlike spawn_from, this never falls through to a later free slot. Retail
     // load handlers select Pool_GetEntryUnchecked(pool, slot) and memset that
@@ -146,8 +149,9 @@ public:
     // clones (sections, dismemberment) in Entity_CloneFromTemplateByType
     // @0x4398BD / @0x439939 / @0x439962, the deployable's
     // Entity_CloneFromTemplateToPool1 @0x439840].
-    // An includeInUse-0 caller also passes over a destroyed row and grows the
-    // count, where ours reuses the row (D-NET-485). spawn_at stands for a
+    // An includeInUse-0 caller (Reuse::Fresh) also passes over a destroyed row
+    // (+0x219, which Entity_Destroy sets and the next occupant's write clears)
+    // and grows the count (D-NET-485). spawn_at stands for a
     // slotted load [orig: Pool_UpdateMaxUsed @0x441F40,
     // Pool_UpdateMaxUsedFromSlotId @0x442100]. A despawn never lowers it.
     size_t pool_used(int pool) const {
@@ -182,6 +186,9 @@ private:
     struct Pool {
         std::vector<Entity> slots;
         std::vector<char> used; // char (not bool) for stable addressing
+        // entity+0x219: set by a despawn [orig: Entity_Destroy - `mov byte ptr
+        // [esi+219h], 1` @0x43EA7F], cleared by the next occupant's spawn.
+        std::vector<char> destroyed;
         size_t live = 0;
         size_t used_count = 0; // g_PoolList[pool].used, the high-water mark (pool_used)
     };

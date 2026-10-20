@@ -113,7 +113,9 @@ void squib_event(World &world, Entity &entity, int phase) {
     if (!state.ammo_index || !world.tables.ammo.by_index(state.ammo_index)) return;
     Entity clone = entity; // the represented fields of retail's first 0x310 bytes
     clone.death_tick = world.logic_tick;
-    world.registry.spawn(1, clone);
+    // includeInUse 0: a destroyed row is passed over (D-NET-485).
+    // [orig: Entity_InitArcMovement - `push 0` @0x449BB3]
+    world.registry.spawn(1, clone, EntityRegistry::Reuse::Fresh);
 }
 void tick_squib(World &world, Entity &entity) {
     if (!entity.death_tick || entity.squib.interval <= 0) return;

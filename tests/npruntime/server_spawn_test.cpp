@@ -46,6 +46,10 @@ bool expect(bool cond, const char *msg) {
 // A World with an AiSystem (spawn_player requires it), pools 0 (players) and 3 (markers) configured,
 // and one authored 6002 DM fallback marker so the retail resolver finds a real spawn pose.
 void make_world(w::World &world) {
+	// items.def's Player row: each body's ItemTypeIndex and def (the 0x0C needs them, D-NET-487).
+	world.tables.player.has_item_def = true;
+	world.tables.player.item_type_index = 1;
+	world.tables.player.item_type = 3;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	w::Entity start;
@@ -72,6 +76,11 @@ int main() {
 	auto world_heap = std::make_unique<w::World>();
 	w::World &world = *world_heap;
 	w::AiSystem &ai = world.ai;
+	// items.def's Player row: each body's ItemTypeIndex and def, which the 0x0C needs
+	// (D-NET-487).
+	world.tables.player.has_item_def = true;
+	world.tables.player.item_type_index = 1;
+	world.tables.player.item_type = 3;
 	make_world(world);
 
 	// Stand up the listen host with its own loopback (P0->P1->P2), then wire the authoritative World.

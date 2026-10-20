@@ -924,6 +924,8 @@ bool run_0a_vehicle_budget_round_robin() {
 		veh.position = {120.0f, 100.0f, 10.0f};
 		veh.yaw = 90;
 		veh.team = 1;
+		veh.has_item_def = true; // the trait sweep's row (D-NET-487)
+		veh.item_type_index = 1;
 		if (!expect(world.registry.spawn(1, veh).valid(), "vehicle spawned")) return false;
 	}
 	// One UNRESOLVED pool-1 item (an ewep-like emplacement without a stamped class): it must
@@ -934,6 +936,8 @@ bool run_0a_vehicle_budget_round_robin() {
 		ewep.kind = w::EntityKind::Item;
 		ewep.item_id = 0x074D; // Mounted Grenade Launcher on Tripod (ai_function ewep)
 		ewep.position = {121.0f, 100.0f, 10.0f};
+		ewep.has_item_def = true; // the trait sweep's row (D-NET-487)
+		ewep.item_type_index = 1;
 		if (!expect(world.registry.spawn(1, ewep).valid(), "emplacement spawned")) return false;
 	}
 

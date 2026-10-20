@@ -1117,6 +1117,7 @@ struct DismembermentRig {
 		victim_seed.kind = w::EntityKind::Organic;
 		victim_seed.item_id = 1419;
 		victim_seed.has_item_def = true;
+		victim_seed.item_type_index = 1; // the trait sweep's row (D-NET-487)
 		victim_seed.item_type = 3;
 		victim_seed.item_attrib = victim_attrib;
 		// The items.def *_function class stamp the host's item-traits sweep

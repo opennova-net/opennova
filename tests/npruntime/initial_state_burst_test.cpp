@@ -79,6 +79,11 @@ int main_impl() {
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
+	// items.def's Player row: the host body's ItemTypeIndex and def (the 0x0C skips a row
+	// without them, D-NET-487).
+	world.tables.player.has_item_def = true;
+	world.tables.player.item_type_index = 1;
+	world.tables.player.item_type = 3;
 	{
 		w::Entity start;
 		start.kind = w::EntityKind::Marker;
@@ -810,10 +815,14 @@ int pool1_flags_field_impl() {
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 0x004A; // the capture's d_buggy
 	vehicle.item_type = 1;
+	vehicle.has_item_def = true;  // the trait sweep's row (D-NET-487)
+	vehicle.item_type_index = 1;
 	const w::EntityHandle vehicle_h = world.registry.spawn(1, vehicle);
 	w::Entity crate;
 	crate.kind = w::EntityKind::Item;
 	crate.item_id = 0x050E;
+	crate.has_item_def = true;  // the trait sweep's row (D-NET-487)
+	crate.item_type_index = 1;
 	const w::EntityHandle crate_h = world.registry.spawn(1, crate);
 	const auto record_of = [&](w::EntityHandle h, opennova::PoolSpawnRecord &out) {
 		const std::vector<uint8_t> wire =
@@ -876,6 +885,7 @@ int pool1_fixture_bytes_impl() {
 	w::World world;
 	world.registry.configure_pool(1, 0x50);
 	const auto place = [&](int slot, w::Entity item) {
+		item.item_type_index = 1; // the trait sweep's row (D-NET-487)
 		return world.registry.spawn_at(w::EntityHandle::make(1, slot), item);
 	};
 	w::Entity item;
@@ -912,6 +922,7 @@ int pool1_fixture_bytes_impl() {
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 0x004A;
 	vehicle.has_item_def = true;
+	vehicle.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	vehicle.item_type = 1;
 	vehicle.item_attrib = w::kItemAttribAIData;
 	vehicle.is_ai_capable = true;
@@ -959,11 +970,14 @@ int pool1_fixture_bytes_impl() {
 	w::Entity tank;
 	tank.kind = w::EntityKind::Item;
 	tank.item_id = 0x00A4;
+	tank.has_item_def = true;  // the trait sweep's row (D-NET-487)
+	tank.item_type_index = 1;
 	const w::EntityHandle tank_h = cworld.registry.spawn_at(w::EntityHandle::make(1, 0x2A), tank);
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.item_id = 0x00B6;
 	gun.has_item_def = true;
+	gun.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	gun.item_type = 6;
 	gun.engine_flags = w::kEntityFlagMatrixBuilt;
 	gun.position = {1148.75f, -278.5f, 75.0f};

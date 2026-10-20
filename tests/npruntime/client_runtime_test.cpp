@@ -3800,6 +3800,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	infantry.kind = w::EntityKind::Organic;
 	infantry.item_id = 5311; // US02 organic in the production Godot witness
 	infantry.has_item_def = true; // its person def, as the item-traits sweep stamps it
+	infantry.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	infantry.item_type = 3;
 	infantry.net_class_code = static_cast<uint8_t>(EntityClass::Infantry);
 	const w::EntityHandle infantry_h = world.registry.spawn(0, infantry);
@@ -3809,6 +3810,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.has_item_def = true; // seats need the def (D-NET-422)
+	gun.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	gun.item_id = 1294; // B50Cal ewep
 	gun.position = {0.0f, 8.0f, 0.0f};
 	gun.yaw = 45;

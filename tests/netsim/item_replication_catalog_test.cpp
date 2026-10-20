@@ -72,8 +72,6 @@ bool run_items_def_catalog() {
 	                    player->motion_family == ns::MotionFamily::Person &&
 	                    player->wire_entity_class() == EntityClass::Player,
 	            "player Person keeps codec and motion as separate axes")) return false;
-	if (!expect(player->allocation.retail_pool == ns::StoragePool::Unresolved,
-	            "catalog does not guess the retail allocation pool")) return false;
 	const std::optional<EntityClass> player_resolution =
 			catalog.resolve_wire_entity_class(5305);
 	if (!expect(player_resolution.has_value() &&

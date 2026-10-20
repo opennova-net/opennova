@@ -76,7 +76,7 @@ struct FourPoolWorld final : w::World {
 		organic.anim_slot = 5;
 		organic.has_item_def = true; // a retail organic always has its person def
 		organic.item_type = 3;       // ItemDefType person: the 0x0C def-type byte
-		world.registry.spawn(0, organic);
+		world.ai.attach(world.registry.spawn(0, with_def(organic))); // its AI slot (+0x68)
 
 		w::Entity item;
 		item.kind = w::EntityKind::Item;
@@ -89,7 +89,7 @@ struct FourPoolWorld final : w::World {
 		item.team = 1;
 		item.health = 250;
 		item.is_ai_capable = pool1_ai_capable;
-		world.registry.spawn(1, item);
+		world.registry.spawn(1, with_def(item));
 
 		w::Entity building;
 		building.kind = w::EntityKind::Building;
@@ -223,7 +223,7 @@ bool run_pool1_spawn_mount_handles() {
 	add_seat(3, w::EntityHandle{});
 	add_seat(8, w::EntityHandle::make(0, 8));
 	add_seat(0, w::EntityHandle::make(0, 1));
-	if (!expect(world.registry.spawn(1, carrier).valid(),
+	if (!expect(world.registry.spawn(1, with_def(carrier)).valid(),
 			"occupied pool-1 carrier spawned"))
 		return false;
 
@@ -262,14 +262,14 @@ bool run_pool1_spawn_parent_is_the_occupant() {
 	hull.kind = w::EntityKind::Item;
 	hull.item_id = 0x050E;
 	hull.primary_occupant = driver_h;
-	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
+	const w::EntityHandle hull_h = world.registry.spawn(1, with_def(hull));
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.item_id = 0x058B;
 	gun.emplacement_parent = hull_h;
 	gun.emplacement_parent_spawn_id = world.registry.get(hull_h)->registry_spawn_id;
 	gun.ground_target = hull_h;
-	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	const w::EntityHandle gun_h = world.registry.spawn(1, with_def(gun));
 	const auto decoded_record = [&](w::EntityHandle h, nw::PoolSpawnRecord &out) {
 		const std::vector<uint8_t> wire =
 				nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
@@ -611,10 +611,10 @@ bool run_zone_outs_carry_within_a_call() {
 	zone_a.item_id = 0x0321;
 	zone_a.zone_number = 2;
 	zone_a.zone_radius = 40;
-	const w::EntityHandle zone_a_h = world.registry.spawn(1, zone_a);
+	const w::EntityHandle zone_a_h = world.registry.spawn(1, with_def(zone_a));
 	w::Entity zone_b = zone_a;
 	zone_b.zone_number = 5;
-	world.registry.spawn(1, zone_b);
+	world.registry.spawn(1, with_def(zone_b));
 	nw::PoolSpawnBatch items = ns::build_pool1_spawn_batch(world);
 	ok &= expect(items.records.size() == 2 && items.records[1].zone_number_rank == 0x05,
 	             "before any hit a numbered entity streams its own zone number");
@@ -737,7 +737,10 @@ bool run_pool0_player_bit0_is_per_entity() {
 		player.item_type = 3;
 		player.team = 1;
 		player.flags = flags;
-		return world.registry.spawn(0, player);
+		// The trait sweep's row and the body's AI slot (+0x68), which the 0x0C needs (D-NET-487).
+		const w::EntityHandle h = world.registry.spawn(0, with_def(player));
+		world.ai.attach(h);
+		return h;
 	};
 	const w::EntityHandle host = spawn_player(0);
 	const w::EntityHandle a = spawn_player(1u);
@@ -1003,7 +1006,7 @@ bool run_pool1_zone_block_rides_its_sources() {
 	spawn_point.yaw = 90; // engine heading 0: no 0x0001
 	spawn_point.is_spawn_point = true;
 	spawn_point.zone_radius = 0;
-	world.registry.spawn(1, spawn_point);
+	world.registry.spawn(1, with_def(spawn_point));
 	const std::vector<uint8_t> wire =
 			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
 	const std::vector<uint8_t> want = {
@@ -1048,7 +1051,7 @@ bool run_palm_state_rides_its_callbacks() {
 	palm.yaw = 90; // engine heading 0: no 0x0001
 	palm.palm_state_streamed = true;
 	palm.palm_state = 0; // standing
-	world.registry.spawn(1, palm);
+	world.registry.spawn(1, with_def(palm));
 	const std::vector<uint8_t> wire =
 			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
 	const std::vector<uint8_t> want = {
@@ -1091,14 +1094,14 @@ bool run_freed_carrier_row_keeps_the_target_handle() {
 	w::Entity carrier;
 	carrier.kind = w::EntityKind::Item;
 	carrier.item_id = 0x00A4;
-	const w::EntityHandle carrier_h = world.registry.spawn(1, carrier);
+	const w::EntityHandle carrier_h = world.registry.spawn(1, with_def(carrier));
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.item_id = 0x00A6;
 	gun.has_item_def = true;
 	gun.ground_target = carrier_h;
 	gun.emplacement_parent = carrier_h;
-	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	const w::EntityHandle gun_h = world.registry.spawn(1, with_def(gun));
 	world.registry.despawn(carrier_h);
 	const std::vector<uint8_t> wire =
 			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));

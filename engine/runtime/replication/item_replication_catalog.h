@@ -49,17 +49,6 @@ enum class MotionFamily : uint8_t {
 	Guided,
 };
 
-// Retail pool membership comes from the still-unwitnessed Pool_Alloc caller
-// (D-NET-97). Allocation inputs are retained without inventing a pool from BMS
-// EntityKind or ItemDef.type.
-enum class StoragePool : uint8_t {
-	Unresolved = 0,
-	Organic,
-	Movable,
-	Static,
-	Marker,
-};
-
 enum class ItemReplicationCapability : uint32_t {
 	None = 0,
 	AiData = 1u << 0,
@@ -106,7 +95,6 @@ struct ItemAllocationTraits {
 	bool emplaced_weapon = false;
 	bool spawn_point = false;
 	bool vehicle_physics = false;
-	StoragePool retail_pool = StoragePool::Unresolved;
 };
 
 struct ItemReplicationCallbacks {

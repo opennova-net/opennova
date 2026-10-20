@@ -393,6 +393,11 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 	OrganicSpawnBatch batch;
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0) return;
+		// A row with no ItemTypeIndex (+0x1C), no def (+0x20) or no AI slot (+0x68) is
+		// passed over, uncounted (D-NET-487). [orig: NetPacket_SerializeEntityStatesToBuffer
+		//  @0x5030A0 - the tests @0x503134 / @0x50313E / @0x503148]
+		if (e.item_type_index == 0 || !e.has_item_def || w.ai.for_handle(e.handle) == nullptr)
+			return;
 		// The dismemberment clone is included: the original's join download
 		// serializes every pool-0 slot (single caller
 		// Server_SendInitialGameStateToPlayer @0x51bd24), and the 0x0C record
@@ -544,6 +549,10 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 	PoolSpawnBatch batch;
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 1) return;
+		// A row with no ItemTypeIndex (+0x1C) or no def (+0x20) is passed over, uncounted
+		// (D-NET-487). [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940 - the tests
+		//  @0x5039DD / @0x5039E6, ahead of the count @0x5039EF]
+		if (e.item_type_index == 0 || !e.has_item_def) return;
 		PoolSpawnRecord rec;
 		rec.slot_id = e.handle.packed;
 		rec.item_type_id = static_cast<uint16_t>(e.item_id);

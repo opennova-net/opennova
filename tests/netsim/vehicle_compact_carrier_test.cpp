@@ -87,6 +87,8 @@ w::Entity vehicle_seed(uint16_t item_id, w::Vec3 pos, int16_t yaw) {
 	v.position = pos;
 	v.yaw = yaw;
 	v.team = 1;
+	v.has_item_def = true; // the trait sweep's row (D-NET-487)
+	v.item_type_index = 1;
 	return v;
 }
 

@@ -937,6 +937,8 @@ bool run_parented_pool_spawn_follows_and_hides() {
 	parent_seed.health_max = 3000;
 	parent_seed.flags = 0x02u; // overloaded load/movement gate, not a death verdict
 	parent_seed.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+	parent_seed.has_item_def = true; // the trait sweep's row (D-NET-487)
+	parent_seed.item_type_index = 1;
 	const w::EntityHandle parent_h = world.registry.spawn(1, parent_seed);
 	if (!expect(parent_h.valid(), "attachment parent spawned")) return false;
 
@@ -955,6 +957,8 @@ bool run_parented_pool_spawn_follows_and_hides() {
 	// This fixture constructs the authority-side authored row directly rather
 	// than through mission promotion, so its exact attachment slot is known.
 	child_seed.emplacement_pose_metadata_resolved = true;
+	child_seed.has_item_def = true; // the trait sweep's row (D-NET-487)
+	child_seed.item_type_index = 1;
 	const w::EntityHandle child_h = world.registry.spawn(1, child_seed);
 	if (!expect(child_h.valid(), "attachment child spawned")) return false;
 
@@ -1056,6 +1060,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.has_item_def = true; // seats need the def (D-NET-422)
+	vehicle.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	vehicle.item_id = 0x1004;
 	vehicle.position = {100.0f, 200.0f, 10.0f};
 	vehicle.yaw = 90; // identity engine-frame carrier rotation
@@ -1435,6 +1440,7 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.has_item_def = true; // seats need the def (D-NET-422)
+	vehicle.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	vehicle.item_id = 0x1004;
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	vehicle.item_attrib = w::kItemAttribPlayerControl;

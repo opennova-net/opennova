@@ -18,6 +18,7 @@ void EntityRegistry::configure_pool(int pool, size_t capacity) {
     Pool &p = pools_[pool];
     p.slots.assign(capacity, Entity{});
     p.used.assign(capacity, 0);
+    p.destroyed.assign(capacity, 0);
     p.live = 0;
     p.used_count = 0; // [orig: Pool_Clear @0x442060 -- used = 0 @0x4420DE..0x4420F6]
 }
@@ -28,15 +29,21 @@ void EntityRegistry::set_pool_used(int pool, size_t count) {
     pools_[pool].used_count = count;
 }
 
-EntityHandle EntityRegistry::spawn(int pool, const Entity &seed) {
-    return spawn_from(pool, 0, seed);
+EntityHandle EntityRegistry::spawn(int pool, const Entity &seed, Reuse reuse) {
+    return spawn_from(pool, 0, seed, reuse);
 }
 
-EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entity &seed) {
+EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entity &seed,
+                                        Reuse reuse) {
     if (pool < 0 || pool >= kPoolCount) return EntityHandle{};
     Pool &p = pools_[pool];
     for (size_t s = first_slot; s < p.slots.size(); ++s) {
-        if (!p.used[s]) {
+        // Below the used count a Fresh (includeInUse-0) caller passes over a
+        // destroyed row; from the count up every row is free.
+        // [orig: Pool_AllocEntry @0x442230 -- the +0x219 test @0x442262..0x44226C]
+        const bool skip_destroyed =
+                reuse == Reuse::Fresh && s < p.used_count && p.destroyed[s];
+        if (!p.used[s] && !skip_destroyed) {
             EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
             p.slots[s] = seed;
             p.slots[s].handle = h;
@@ -45,6 +52,7 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
             p.slots[s].registry_spawn_id = next_spawn_id_++;
             if (next_spawn_id_ == 0) next_spawn_id_ = 1;
             p.used[s] = 1;
+            p.destroyed[s] = 0;
             ++p.live;
             // An includeInUse-1 allocation takes the first free row below the
             // used count when there is one, so the count moves only when the
@@ -74,6 +82,7 @@ EntityHandle EntityRegistry::spawn_at(EntityHandle h, const Entity &seed) {
     p.slots[slot].registry_spawn_id = next_spawn_id_++;
     if (next_spawn_id_ == 0) next_spawn_id_ = 1;
     p.used[slot] = 1;
+    p.destroyed[slot] = 0;
     ++p.live;
     // A slotted load raises the count to the slot + 1, never lowers it.
     // [orig: Pool_UpdateMaxUsedFromSlotId @0x442100 -- @0x442115..0x442123;
@@ -92,6 +101,7 @@ void EntityRegistry::despawn(EntityHandle h) {
     if (slot < 0 || static_cast<size_t>(slot) >= p.slots.size()) return;
     if (p.used[slot]) {
         p.used[slot] = 0;
+        p.destroyed[slot] = 1; // [orig: Entity_Destroy @0x43EA7F]
         --p.live;
     }
 }

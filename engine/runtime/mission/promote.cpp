@@ -628,8 +628,10 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         child_seed.sub_type = attachment.stored_slot != 0
                 ? static_cast<uint8_t>(attachment.stored_slot - 1) : uint8_t{0};
         child_seed.spawn_origin = 0xFFFFFFFFu;
-        const EntityHandle child_handle =
-                world.registry.spawn(pool_for_kind(EntityKind::Item), child_seed);
+        // includeInUse 0: a destroyed row is passed over (D-NET-485).
+        // [orig: Entity_SpawnWeaponOverlays - `push 0` @0x40F38F, Pool_AllocEntry @0x40F393]
+        const EntityHandle child_handle = world.registry.spawn(
+                pool_for_kind(EntityKind::Item), child_seed, EntityRegistry::Reuse::Fresh);
         if (!child_handle.valid()) {
             ++result.dropped;
             return;

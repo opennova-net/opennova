@@ -66,7 +66,11 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     seed.spawn_origin = kSpawnOriginNone;
     seed.spawn_phase = request.helicopter ? world.vehicle_ai_spawn_phase : 63;
     initialize_item_seats(seed, seat_specs);
-    const EntityHandle handle = world.registry.spawn(request.helicopter ? 1 : 0, seed);
+    // includeInUse 0: a destroyed row is passed over (D-NET-485). [orig:
+    //  Entity_CloneFromTemplate - `push 0` @0x439750 (pool 0);
+    //  Entity_CloneFromTemplateWithAI - `push 0` @0x4397D0 (pool 1)]
+    const EntityHandle handle = world.registry.spawn(request.helicopter ? 1 : 0, seed,
+            world::EntityRegistry::Reuse::Fresh);
     if (!handle.valid()) return {};
     world.ai.release(handle);
     const int index = world.ai.attach(handle);
