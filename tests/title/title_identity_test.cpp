@@ -151,6 +151,12 @@ void dfx2_row() {
 	CHECK(std::string(dfx2->lobby_pv1) == "0.0.0 2/10/2004 EM");
 	CHECK(std::string(dfx2->lobby_bdat) == "Jul  7 2009 11:33:09");
 	CHECK(std::string(dfx2->ver1) == "1" && std::string(dfx2->ver2) == "9013");
+	// The _connectlog.txt header's TITLE. [orig: Game_ParseCommandLineAndInit @0x4A7360 -
+	//  @0x4A7D60 (dfx2.exe); Game_ParseCommandLineAndInit @0x4A7D30]
+	CHECK(dfx2->connect_log_title != nullptr &&
+			std::string(dfx2->connect_log_title) == "DeltaForce: Xtreme 2");
+	CHECK(std::string(title_identity(gameprofile::GAME_JO)->connect_log_title) ==
+			"Joint Operations: Typhoon Rising");
 	CHECK(std::string(dfx2->product_code) == "dfx2");
 	CHECK(std::string(dfx2->gate_tag) == "dfx2:0:cus:buffy");
 	CHECK(std::string(dfx2->gate_tag_keys) == "dfx2:0:buffy");

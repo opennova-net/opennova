@@ -212,6 +212,9 @@ TitleIdentity dfx2_row() {
 	//  (dfx2.exe)]
 	t.ver1 = "1";
 	t.ver2 = "9013";
+	// [orig: Game_ParseCommandLineAndInit @0x4A7360 (dfx2.exe) - off_8144D8's literal into
+	//  g_TitleText @0x4A7D60..0x4A7D6C, the twin of Game_ParseCommandLineAndInit @0x4A7D30]
+	t.connect_log_title = "DeltaForce: Xtreme 2";
 	// [orig: [PRODUCTCODE] @0x4cdce8 (dfx2.exe)]
 	t.product_code = "dfx2";
 	// [orig: @0x4d1699 (dfx2.exe), the twin of CNapiGateManager_InitDefaults @0x4d1460]
