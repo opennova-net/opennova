@@ -33,7 +33,7 @@ struct TitleIdentity; // net/title/title_identity.h
 struct ClientHello {
 	std::string nvs;  // NAPI version string (e.g. "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic")
 	std::string co;   // Company (e.g. "NovaLogic Inc, Calabasas CA U.S.A.")
-	std::string ap;   // Application (e.g. "JOINTOPS.EXE")
+	std::string ap;   // Application: the sender's executable file name (e.g. "Jointops.exe")
 	std::string bdat; // Build date (e.g. "Jul 21 2009 18:54:41")
 	uint32_t de = 0;  // session_info[54], emitted only when nonzero
 	std::string pn;   // Protocol name (e.g. "NOVAWORLDUDP")
@@ -413,8 +413,9 @@ bool is_title_protocol_name(const TitleIdentity &title, std::string_view protoco
 //  @0x4ca8bb..0x4ca8c2]
 std::string title_protocol_version3(const TitleIdentity &title);
 
-// The title's 0x41. Its EIP / EPN are the caller's: the announce writes its
-// own destination, each only when nonzero.
+// The title's 0x41: the title's identity block, AP the running executable's file name
+// (read_exe_basename). Its EIP / EPN are the caller's: the announce writes its own
+// destination, each only when nonzero.
 ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_index);
 ClientAuth make_title_client_auth(const TitleIdentity &title, uint32_t client_index,
 		uint32_t client_key, uint32_t host_key, std::string_view player_name,

@@ -3,7 +3,8 @@
 // After NWJoin the client opens a session to the host and sends a ClientHello
 // whose PN flips the connection protocol from the lobby (NOVAWORLDUDP) to the
 // in-match game (JO's JOINTOPERATIONS). This pins the exact retail identity
-// populated by CNapiNetwork_Init @ 0x4ca4a0, through JO's title row. The lobby
+// populated by CNapiNetwork_Init @ 0x4ca4a0, through JO's title row and the
+// running executable's file name (AP). The lobby
 // (NOVAWORLDUDP) hello stays the service protocol's with the title's PV1, so the
 // per-PN identity selector cannot regress the lobby path.
 
@@ -69,7 +70,11 @@ int main() {
 	      "JO hello NVS == retail Milota version");
 	check(jo_hello.co == "NovaLogic Inc, Calabasas CA U.S.A.",
 	      "JO hello CO == retail NovaLogic company");
-	check(jo_hello.ap == "Jointops.exe", "JO hello AP == retail executable");
+	// D-NET-NEW-L9-2: AP is the running executable's file name (this test's own), cut to 63, as
+	// the network init reads it, not a title constant. [orig: CNapiNetwork_Init @0x4ca4a0 -
+	//  Napi_GetExeBasename (the call @0x4ca747), Napi_CopyString(proto+0x58, .., 0x40) @0x4ca759]
+	check(jo_hello.ap == read_exe_basename().substr(0, kLobbyApChars),
+	      "JO hello AP == the running executable's file name");
 	check(jo_hello.bdat == "Jul 21 2009 18:54:42", "JO hello BDAT == retail build stamp");
 	check(jo_hello.pn == "JOINTOPERATIONS", "JO hello PN == JOINTOPERATIONS");
 	check(jo_hello.pv1 == "0.0.0 1/12/2004 EM", "JO hello PV1 == game protocol date");

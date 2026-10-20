@@ -21,6 +21,7 @@
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <runtime/inmatch/integrity_sources.h>
 #include <net/npwire/lan_discovery.h>
+#include <net/novaworld/lobby_identity.h> // read_exe_basename (the protocol's AP, D-NET-NEW-L9-2)
 #include <runtime/inmatch/server_join_check.h> // Server_ValidatePlayerJoinRequest (the code-9 leg)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -407,7 +408,7 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	if (!expect(decoded_probe.nvs ==
 	                    "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic" &&
 	            decoded_probe.co == "NovaLogic Inc, Calabasas CA U.S.A." &&
-	            decoded_probe.ap == "Jointops.exe" &&
+	            decoded_probe.ap == read_exe_basename().substr(0, kLobbyApChars) &&
 	            decoded_probe.bdat == "Jul 21 2009 18:54:42" &&
 	            decoded_probe.pv1 == "0.0.0 1/12/2004 EM" && decoded_probe.pv2 == "16" &&
 	            decoded_probe.pg_present && decoded_probe.pg == direct_join_pg,
@@ -2796,9 +2797,9 @@ bool run_reconnect_counters_echo_rcnt() {
 }
 
 // A game host's 0x81 writes its OWN protocol identity -- the JO identity the network init
-// installed (CO, AP "Jointops.exe", the 2009 build stamp, PN, PG, PV1, PV2 "16", and the PV3
-// build string, D-NET-520) -- whatever the prober sent, plus UT, the host's uptime in ms,
-// whenever nonzero, and echoes the announce's EIP / EPN. [orig:
+// installed (CO, AP the running executable's file name (D-NET-NEW-L9-2), the 2009 build stamp,
+// PN, PG, PV1, PV2 "16", and the PV3 build string, D-NET-520) -- whatever the prober sent,
+// plus UT, the host's uptime in ms, whenever nonzero, and echoes the announce's EIP / EPN. [orig:
 // NapiNPProtocol_SendServerInfoPacket @0x620583..0x62078a (the protocol's identity strings, each
 // gated on non-empty), UT @0x62064f..0x620683, EIP / EPN @0x620baa..0x620be6; the identity
 // CNapiNetwork_Init @0x4ca4a0 installs]
@@ -2828,7 +2829,8 @@ bool run_host_server_hello_writes_its_own_identity() {
 	                    op == SESSION_OPCODE_SERVER_HELLO && parse_server_hello(body.data(), body.size(), sh),
 	            "the probe draws one 0x81")) return false;
 	const ClientHello self = make_title_client_hello(kJo, 0);
-	if (!expect(sh.co == self.co && sh.ap == "Jointops.exe" && sh.bdat == "Jul 21 2009 18:54:42",
+	if (!expect(sh.co == self.co && sh.ap == read_exe_basename().substr(0, kLobbyApChars) &&
+	                    sh.bdat == "Jul 21 2009 18:54:42",
 	            "the 0x81 carries the host's own CO / AP / BDAT")) return false;
 	if (!expect(sh.pn == "JOINTOPERATIONS" && sh.pv1 == self.pv1 && sh.pv2 == "16" && sh.pg == self.pg,
 	            "the 0x81 carries the host's own PN / PG / PV1 / PV2, not the prober's")) return false;

@@ -36,10 +36,6 @@ TitleIdentity jo_row() {
 	t.game_id = GAME_JO;
 	t.nvs = kNapiNpVersion;
 	t.co = kNovaLogicCompany;
-	// The executable's own file name, which the network init reads off its command line: the
-	// stock install's Jointops.exe. [orig: CNapiNetwork_Init @0x4ca747 -> Napi_GetExeBasename
-	//  @0x62e0b0, copied to proto+0x58 @0x4ca759]
-	t.ap = "Jointops.exe";
 	// [orig: CNapiNetwork_Init @0x4ca76c, the literal @0x7ca6d8]
 	t.bdat = "Jul 21 2009 18:54:42";
 	// [orig: CNapiNetwork_Init @0x4ca790, the literal @0x7ca6c8]
@@ -150,9 +146,6 @@ TitleIdentity dfx2_row() {
 	t.game_id = GAME_DFX2;
 	t.nvs = kNapiNpVersion;
 	t.co = kNovaLogicCompany;
-	// The executable's own file name: the stock install's dfx2.exe.
-	// [orig: @0x4ca8b7 -> the twin of Napi_GetExeBasename @0x7161e0 (dfx2.exe)]
-	t.ap = "dfx2.exe";
 	// The __DATE__ form, two spaces before the 7. [orig: @0x4ca8dc (dfx2.exe)]
 	t.bdat = "Jul  7 2009 11:33:09";
 	// [orig: @0x4ca900 (dfx2.exe)]
@@ -315,7 +308,6 @@ std::vector<std::string> title_identity_missing(const TitleIdentity &t, TitleIde
 	missing_if(out, profile == nullptr || profile->version_text == nullptr, "version text");
 	missing_if(out, t.nvs == nullptr, "NVS");
 	missing_if(out, t.co == nullptr, "CO");
-	missing_if(out, t.ap == nullptr, "AP");
 	missing_if(out, t.bdat == nullptr, "BDAT");
 	missing_if(out, t.pn == nullptr, "PN");
 	missing_if(out, !t.guid.has_value(), "PG");

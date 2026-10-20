@@ -13,6 +13,7 @@
 #include <net/novacrypto/pubcrypto.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/http_flow.h>
+#include <net/novaworld/lobby_identity.h> // read_exe_basename (the protocol's AP)
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/nwu_lobby_session.h>
 #include <net/npwire/idatagram_socket.h>
@@ -71,7 +72,6 @@ void jo_row() {
 	CHECK(std::string(jo->nvs) ==
 			"NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic");
 	CHECK(std::string(jo->co) == "NovaLogic Inc, Calabasas CA U.S.A.");
-	CHECK(std::string(jo->ap) == "Jointops.exe");
 	CHECK(std::string(jo->bdat) == "Jul 21 2009 18:54:42");
 	CHECK(std::string(jo->pn) == "JOINTOPERATIONS");
 	const std::array<uint8_t, 16> guid{0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
@@ -98,13 +98,14 @@ void jo_row() {
 	CHECK(title_identity_by_protocol_name("jointoperations") == jo);
 }
 
-// JO's hello and auth through the title are the bytes the hand-filled retail identity makes.
+// JO's hello and auth through the title are the bytes the hand-filled retail identity makes, AP
+// the running executable's file name (D-NET-NEW-L9-2).
 void jo_wire_bytes_unchanged() {
 	const TitleIdentity &jo = *title_identity(GAME_JO);
 	ClientHello expected;
 	expected.nvs = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
 	expected.co = "NovaLogic Inc, Calabasas CA U.S.A.";
-	expected.ap = "Jointops.exe";
+	expected.ap = read_exe_basename().substr(0, kLobbyApChars);
 	expected.bdat = "Jul 21 2009 18:54:42";
 	expected.pn = "JOINTOPERATIONS";
 	expected.pg = *jo.guid;
@@ -137,7 +138,6 @@ void dfx2_row() {
 	if (dfx2 == nullptr) return;
 	const TitleIdentity &jo = *title_identity(GAME_JO);
 	CHECK(std::string(dfx2->nvs) == std::string(jo.nvs) && std::string(dfx2->co) == jo.co);
-	CHECK(std::string(dfx2->ap) == "dfx2.exe");
 	CHECK(std::string(dfx2->bdat) == "Jul  7 2009 11:33:09");
 	CHECK(std::string(dfx2->pn) == "DELTAFORCEXTREME2");
 	const std::array<uint8_t, 16> guid{0xA6, 0x94, 0xE0, 0xC3, 0x49, 0xB7, 0x60, 0x4B,
@@ -173,7 +173,10 @@ void dfx2_row() {
 
 	// The hello: DFX2's block, which a JO identity does not match and a DFX2 one does.
 	const ClientHello hello = make_title_client_hello(*dfx2, 9);
-	CHECK(hello.pn == "DELTAFORCEXTREME2" && hello.pg == guid && hello.ap == "dfx2.exe" &&
+	// AP is the running executable's file name for DFX2 too. [orig: CNapiNetwork_Init @0x4ca610 -
+	//  Napi_GetExeBasename @0x7161e0 (the call @0x4ca8b7), the copy @0x4ca8c9 (dfx2.exe)]
+	CHECK(hello.pn == "DELTAFORCEXTREME2" && hello.pg == guid &&
+			hello.ap == read_exe_basename().substr(0, kLobbyApChars) &&
 			hello.pv1 == "1.0.0 3-23-2005 EM dfxowkjzf" && hello.bdat == "Jul  7 2009 11:33:09");
 	CHECK(matches_title_identity(*dfx2, hello));
 	CHECK(!matches_title_identity(jo, hello));

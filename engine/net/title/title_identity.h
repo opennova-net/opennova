@@ -108,7 +108,8 @@ struct TitleIdentity {
 	// PG and PV1 on both; PV2 on the 0x42).
 	const char *nvs = nullptr;
 	const char *co = nullptr;
-	const char *ap = nullptr;
+	// No AP: the protocol's is the running executable's file name, whatever the title
+	// (make_title_client_hello, D-NET-NEW-L9-2).
 	const char *bdat = nullptr;
 	const char *pn = nullptr;
 	std::optional<std::array<uint8_t, 16>> guid; // PG, the protocol GUID's 16 bytes
