@@ -685,7 +685,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			if (!first_husk_name.empty()) {
 				auto kz_it = state.husk_kz_points_by_graphic.find(husk_key);
 				if (kz_it == state.husk_kz_points_by_graphic.end()) {
-					std::vector<world::Vec3> kz_points;
+					std::vector<world::FixedVec3> kz_points;
 					if (husk_m3 != nullptr) {
 						const Threedi3di3 &hmodel3di = *husk_m3;
 						for (size_t up_index = 0;
@@ -694,14 +694,11 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 							const ThreediUserPoint &point = hmodel3di.user_points[up_index];
 							if (!strutil::iequals(point.name, "KZ"))
 								continue;
-							// Decoded model space is (-source y, source z, source x);
-							// destruction's placement math consumes mission-local (x, y, z).
-							float up_pos[3];
-							threedi_user_point_position(&point, up_pos);
-							kz_points.push_back(world::Vec3{
-									up_pos[2],
-									-up_pos[0],
-									up_pos[1]});
+							// The user point's own words, which are mission-local (x, y, z)
+							// as the blast reads them. [orig: Entity_QueueKzBlastAtUserPoints
+							//  @0x4EABF0 - `mov edx, [edi]` @0x4EAC93, `mov eax, [edi+4]`
+							//  @0x4EAC99, `mov ecx, [edi+8]` @0x4EACA0]
+							kz_points.push_back(world::FixedVec3{point.x, point.y, point.z});
 						}
 					}
 					kz_it = state.husk_kz_points_by_graphic.emplace(

@@ -32,12 +32,14 @@ CollisionRay int_context_ray(const FixedVec3 &start, const FixedVec3 &end, int32
 bool CollisionWorld::pool_row_hits_ray(const World &world, EntityHandle handle, const Entity &e,
         const CollisionRay &ray, EntityHandle excluded, const Entity *excluded_row) const {
     using namespace detail;
-    if (!e.has_item_def || !e.bound_radius || handle==excluded ||
+    if (!e.has_item_def || e.bound_radius.q16 == 0 || handle==excluded ||
             ((e.engine_flags|e.flags)&1u) ||
             (e.ground_target.valid() && e.ground_target==excluded)) return false;
     const int32_t p[]={e.position.x.q16,e.position.y.q16,
             e.position.z.q16};
-    const int32_t radius=int32_t(e.bound_radius*65536);
+    // The row's bound word (entity+0) [orig: Physics_RaycastAgainstEntityPool
+    //  @0x538720 - `mov eax, [edx]; test eax, eax; jz` @0x53879A..0x53879E]
+    const int32_t radius=e.bound_radius.q16;
     bool outside=false;
     for (int a=0;a<3;++a)
         outside |= std::min(ray.start[a],ray.end[a])>int64_t(p[a])+radius ||

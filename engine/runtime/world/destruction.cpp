@@ -26,6 +26,14 @@ using namespace opennova::crt;
 
 namespace opennova::world {
 
+int32_t death_water_q16(float water_height) {
+    return water_height <= -1.0e8f ? INT32_MIN : to_fixed(water_height);
+}
+
+int32_t entity_top_q16(const Entity &e) {
+    return io::bam_add(e.position.z.q16, e.bound_radius.q16);
+}
+
 namespace {
 
 // Authored impact slots use the entity pose; the fallback plays where the
@@ -48,6 +56,12 @@ void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *tr
 float world_water_z(const World &world) {
     return world.env.water_z != 0 ? static_cast<float>(world.env.water_z) / io::kFp16One
                                   : -1.0e9f;
+}
+
+// The water plane as the word retail compares against, INT32_MIN when none is
+// authored (below every word). [orig: g_EnvWaterHeightFixed @0x26c6454]
+int32_t world_water_q16(const World &world) {
+    return world.env.water_z != 0 ? world.env.water_z : INT32_MIN;
 }
 
 // The witnessed rol-xor PRNG stream the death paths roll [orig: the inline
@@ -114,10 +128,6 @@ constexpr int32_t kPiecePhysicsLandingOffsetQ16 = 0x8000;
 constexpr int32_t kPiecePhysicsYawStepBam = 0x02D82D82;
 constexpr int32_t kPiecePitchSnapThresholdBam = 0x02D82D80;
 constexpr int32_t kPiecePitchStepBam = 0x016C16C0;
-
-int32_t death_water_q16(float water_height) {
-    return water_height <= -1.0e8f ? INT32_MIN : to_fixed(water_height);
-}
 
 int16_t death_angle_degrees_from_bam(int32_t bam) {
     return static_cast<int16_t>(std::lround(double(bam) * kDegreesPerBam));
@@ -1096,7 +1106,8 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
     if (!silent && traits != nullptr && !traits->sound_death.empty())
         ev.sounds.push_back(DestructionSoundEvent{traits->sound_death, target.position});
     if (silent || traits == nullptr) return;
-	const bool submerged = target.position.z + target.bound_radius < world_water_z(world);
+	// [orig: Entity_InitDeathSounds @0x4939B0 - @0x493A6E..0x493A73, `jge` @0x493A79]
+	const bool submerged = entity_top_q16(target) < world_water_q16(world);
 	spawn_death_effect_banks(target, *traits, submerged, ev);
 	// The kz blasts: one kz_OrganicBlast r=5.0 per husk KZ user point, else one
 	// at the entity with r = kz ?: bound radius [orig:
@@ -1113,21 +1124,23 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
         blast.hit_word = 1;
         if (traits->kz_points.empty()) {
             blast.pos = target.position;
-            // The def's kz, else the bound word in whole units (an unsigned
-            // divide; 0 leaves the ammo's radius at the drain).
+            // The def's kz, else the bound word in whole units, a signed divide
+            // truncating toward zero (0 leaves the ammo's radius at the drain).
             // [orig: Entity_QueueKzBlastAtUserPoints @0x4EABF0 - the def +408
-            //  test @0x4ead26, `boundRadius / 0x10000` @0x4ead42]
+            //  test @0x4ead26, `mov eax, [esi]; cdq; and edx, 0FFFFh; add eax, edx;
+            //  sar eax, 10h` @0x4EAD30..0x4EAD3B, fild @0x4ead42]
             blast.radius_override = traits->kz != 0.0f
                     ? traits->kz
-                    : float(static_cast<uint32_t>(target.bound_radius.q16) / 0x10000u);
+                    : float(target.bound_radius.q16 / 65536);
             world.explosions.queue_explosion(world, blast);
         } else {
             const CollisionMatrix orientation = destruction_orientation(target);
-            for (const Vec3 &p : traits->kz_points) {
-                // The user point through the entity's matrix onto its words
+            for (const FixedVec3 &p : traits->kz_points) {
+                // The user point's words through the entity's matrix onto its words
                 // (D-NET-507) [orig: Entity_QueueKzBlastAtUserPoints @0x4EABF0 -
-                //  Math_FixedPointTransformPoint22 @0x4EACB6].
-                const int32_t local[3] = {to_fixed(p.x), to_fixed(p.y), to_fixed(p.z)};
+                //  the words @0x4EAC93..0x4EACAA, Math_FixedPointTransformPoint22
+                //  @0x4EACB6].
+                const int32_t local[3] = {p.x, p.y, p.z};
                 int32_t offset[3];
                 orientation.rotate_point(local, offset);
                 blast.pos.set_q16({io::bam_add(target.position.x.q16, offset[0]),
@@ -1186,9 +1199,10 @@ void process_destructible_death(World &world, Entity &target) {
                                           target.spawned_piece_mask, target.position});
     // The item's footprint retires the terrain pages composed under it
     // [orig: Entity_ProcessDestructibleDeath @ 0x43fc12..0x43fc5e].
+    // The box is the position words less and plus the bound word (twice on
+    // x / y), word arithmetic [orig: @0x43FC12..0x43FC42].
     world.out.terrain_scorches.emit_page_invalidation(
-            target.position.x.q16, target.position.y.q16,
-            int32_t(target.bound_radius * 65536));
+            target.position.x.q16, target.position.y.q16, target.bound_radius.q16);
     // The S2C 0x26 entity-state broadcast (Server_SendEntityStatePacket
     // @ 0x509d70) is the net track's emit — staged with the other MP legs
     // (tracked §24).
@@ -1209,7 +1223,9 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     if (traits == nullptr || !traits->husk_model_loaded) return 0;
     if ((target.engine_flags & kEntityFlagHusk) != 0) return 0;
-    if (target.position.z + target.bound_radius < world_water_z(world)) return 0;
+    // [orig: Entity_SpawnDeathPieces @0x493400 - `mov ecx, [ebp+0Ch]; mov edx, [ebp+0];
+    //  add edx, ecx; cmp edx, g_EnvWaterHeightFixed; jl` @0x4934D7..0x4934E5]
+    if (entity_top_q16(target) < world_water_q16(world)) return 0;
     // The explosion glow flash [orig: the LightPool_SpawnGlowEffect
     // (@ 0x5a8d83) call inside Entity_SpawnDeathPieces @ 0x49351a — 2x the
     // piece model's bound radius, non-decorations only; the presenter's light
@@ -1692,11 +1708,14 @@ void tick_item_death_motion(World &world, Entity &entity,
             world.out.terrain_scorches.emit_standard(
                     x_q16, y_q16, 7, world.logic_tick);
             if (world.rules.logic_authority) {
+                // The def's kz, else the bound word in whole units, a signed
+                // divide truncating toward zero. [orig: DeathPiece_PhysicsUpdate
+                //  @0x48F500 - the def +408 test @0x48F6BA, `mov eax, [esi]; cdq;
+                //  and edx, 0FFFFh; add eax, edx; sar eax, 10h` @0x48F6CF..0x48F6DA]
                 const float radius =
                         traits != nullptr && traits->kz != 0.0f
                         ? traits->kz
-                        : static_cast<float>(
-                                  static_cast<int32_t>(e->bound_radius));
+                        : static_cast<float>(e->bound_radius.q16 / 65536);
                 queue_named_landing_blast(
                         world, *e, kAmmoKzOrganicBlast, radius);
                 queue_named_landing_blast(
@@ -1782,7 +1801,12 @@ void tick_item_death_motion(World &world, Entity &entity,
     // Gravity [orig: -334/tick above water; below water the horizontal
     // halves per tick and the fall pins at -4096
     // @ 0x493fe5/@ 0x461ddf].
-    if (e->position.z + e->bound_radius >= water_height) {
+    // The top word against the water word, a signed compare.
+    // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - `mov eax, [esi];
+    //  add eax, [esi+0Ch]` @0x493FCB..0x493FCD, `cmp eax, g_EnvWaterHeightFixed;
+    //  jge` @0x493FDF..0x493FE5]
+    const int32_t water_q16 = death_water_q16(water_height);
+    if (entity_top_q16(*e) >= water_q16) {
         e->veh.slide_z -= 334;
     } else {
         e->veh.vel_x >>= 1;
@@ -1810,7 +1834,7 @@ void tick_item_death_motion(World &world, Entity &entity,
     // (@ 0x494034-0x49405e) is not taken here (world-wac-ai-re.md D-ITEM-9).
     if (traits != nullptr && ground != INT32_MIN)
         ground = io::bam_sub(ground, to_fixed(std::abs(traits->husk_rest_min_z)));
-    const float old_top = e->position.z + e->bound_radius;
+    const int32_t old_top_q16 = entity_top_q16(*e);
     // The pose advances by the velocity words, word arithmetic (D-NET-507).
     // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - @0x494077..0x49407D,
     //  the commit @0x49421C..0x494221; Entity_ProcessFallingDeathPhysics @0x461D30 -
@@ -1831,8 +1855,12 @@ void tick_item_death_motion(World &world, Entity &entity,
 			// The water-crossing splash [orig: @ 0x49409f-0x494100 — the def
 			// water-impact sound slot (+156), with the fallback when empty;
 			// dword_2C25C64 resolves to Effect_MedSplash].
-			if (routed_falling && new_z + e->bound_radius < water_height &&
-					old_top > water_height) {
+			// The new top below the water word and the old top above it, word
+			// adds and signed compares. [orig: @0x494086..0x49409F - `lea edx,
+			//  [eax+ebx]; cmp edx, ecx; jge`, `mov edx, [esi+0Ch]; add edx, eax;
+			//  cmp edx, ecx; jle`]
+			if (routed_falling && io::bam_add(new_z_q16, e->bound_radius.q16) < water_q16 &&
+					old_top_q16 > water_q16) {
 				events.effects.push_back(DestructionEffectEvent{
                 "Effect_MedSplash", Vec3{new_x, new_y, water_height},
                 Vec3{0.0f, 0.0f, 1.0f}});

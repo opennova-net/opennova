@@ -357,6 +357,15 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // [orig: Entity_SpawnFromBMSRecord @0x40EB33; Entity_InitFromModel @0x40E113..0x40E127]
     ae.heading = spawn_angle_bam(90 - e.yaw);
     ae.team = e.team;
+    // savedLivePose (+0x80..+0x88) takes the Position words at the model init,
+    // which runs for every row before the def's init callbacks, so the organic AI
+    // init's aim basis is the spawn position. [orig: Entity_InitFromModel @0x40DC30 -
+    //  `mov ecx, [edi]; mov [esi+80h], ecx` @0x40E14B..0x40E14D, +0x84 @0x40E15D /
+    //  @0x40E160, +0x88 @0x40E153 / @0x40E169; Entity_InitAllFromModels @0x40E460;
+    //  Entity_InitOrganicAI @0x4C01D0..0x4C01EE reads them into +0x30C..]
+    ae.net_saved_live_pose[0] = ae.self->position.x.q16;
+    ae.net_saved_live_pose[1] = ae.self->position.y.q16;
+    ae.net_saved_live_pose[2] = ae.self->position.z.q16;
 
     // [orig Entity_InitVehicleAI: brain[4]=brain[5]=brain[6]=0 @0x46028b..0x460291] initial
     // state 0 (re-stamped with the constant block below for the vehicle family).
@@ -928,7 +937,8 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         Aabb raw = b;
         raw.min.z = at.get_z_min(); raw.max.z = at.get_z_max();
         world.registry.register_area(std::string(), b, at.is_active(), at.id, raw,
-                                     zone_box_flat(at));
+                                     zone_box_flat(at),
+                                     std::array<int32_t, 4>{at.x_min, at.x_max, at.y_min, at.y_max});
     }
 
     // [orig: Mission_LoadBMSFile @0x40FCC3] Normalize each bounding-box axis.
@@ -949,14 +959,15 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             world.reverb.regions.push_back(r);
         }
         if (box.type != int32_t(bms::BoundingBoxType::Location)) continue;
-        Aabb bounds;
-        bounds.min = {std::min(box.min_x, box.max_x) / 65536.0f,
-                      std::min(box.min_y, box.max_y) / 65536.0f,
-                      std::min(box.min_z, box.max_z) / 65536.0f};
-        bounds.max = {std::max(box.min_x, box.max_x) / 65536.0f,
-                      std::max(box.min_y, box.max_y) / 65536.0f,
-                      std::max(box.min_z, box.max_z) / 65536.0f};
-        world.registry.register_location(bounds, box.ref_id);
+        LocationVolume location;
+        const int32_t lo[3] = {box.min_x, box.min_y, box.min_z};
+        const int32_t hi[3] = {box.max_x, box.max_y, box.max_z};
+        for (int i = 0; i < 3; ++i) {
+            location.min_q16[i] = std::min(lo[i], hi[i]);
+            location.max_q16[i] = std::max(lo[i], hi[i]);
+        }
+        location.id = box.ref_id;
+        world.registry.register_location(location);
     }
 
 	// Spawn actors + AI brains (organics are AI-driven; vehicles get brains in the vehicle

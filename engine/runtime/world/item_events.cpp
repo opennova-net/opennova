@@ -551,9 +551,10 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
             // @0x43F192..0x43F1DA; cran Entity_ProcessCraneCollapse
             // @0x440036..0x44007E; both call
             // Terrain_InvalidateTileCacheRegion @0x605C10].
+            // The box takes the bound word (entity+0) [orig: bld2 `mov ecx, [esi];
+            //  lea eax, [ecx+ecx]` @0x43F192..0x43F194].
             world.out.terrain_scorches.emit_page_invalidation(
-                    entity.position.x.q16, entity.position.y.q16,
-                    int32_t(entity.bound_radius * 65536));
+                    entity.position.x.q16, entity.position.y.q16, entity.bound_radius.q16);
             // Four stack arguments: x, y, kind, GPM radius. Crane's kind 0
             // is a no-op (and consumes no CRT draw).
             // [orig: bld2 @0x43F1E3..0x43F1F1; cran @0x440087..0x440095]

@@ -103,12 +103,30 @@ bool is_live_player(const Entity *entity) {
     return entity != nullptr && (entity->flags & kEntityFlagDead) == 0;
 }
 
-bool within_2d(const Vec3 &a, const Vec3 &b, float radius) {
-    if (radius < 0.0f)
+// A word delta made absolute as `cdq; xor; sub` does (wrapping).
+int32_t abs_word_delta(int32_t a, int32_t b) {
+    const int32_t d = io::bam_sub(a, b);
+    return d < 0 ? io::bam_sub(0, d) : d;
+}
+
+// The proximity test on the position words: each absolute X/Y delta against the
+// radius word, then the rounded 16.16 squares summed in a word, `fsqrt; fistp`
+// (nearest) and `<< 8` against it. [orig: Server_UpdateCaptureZoneProximity
+//  @0x5086A0 - the objective's 20 units @0x5088A9..0x508925, the hill's bound word
+//  @0x5089F1..0x508A68]
+bool within_2d(const EntityPosition &a, const EntityPosition &b, int32_t radius_q16) {
+    const int32_t adx = abs_word_delta(a.x.q16, b.x.q16);
+    const int32_t ady = abs_word_delta(a.y.q16, b.y.q16);
+    if (adx > radius_q16 || ady > radius_q16)
         return false;
-    const double dx = static_cast<double>(a.x) - static_cast<double>(b.x);
-    const double dy = static_cast<double>(a.y) - static_cast<double>(b.y);
-    return dx * dx + dy * dy <= static_cast<double>(radius) * radius;
+    const auto square = [](int32_t v) {
+        return static_cast<uint32_t>(static_cast<uint64_t>(int64_t(v) * v + 0x8000) >> 16);
+    };
+    const int32_t sum = static_cast<int32_t>(square(adx) + square(ady));
+    // fistp of a negative operand's NaN root stores the integer indefinite.
+    const int32_t root = sum < 0 ? INT32_MIN
+                                 : static_cast<int32_t>(std::nearbyint(std::sqrt(double(sum))));
+    return static_cast<int32_t>(static_cast<uint32_t>(root) << 8) <= radius_q16;
 }
 
 // The 32-bit `imul` the score multiplier rides.
@@ -1377,7 +1395,7 @@ void Match::update_objective_proximity(const World &world) {
             if (const Entity *owner = world.registry.get(objective->primary_occupant))
                 position_source = owner;
             if (live && within_2d(player_entity->position,
-                                  position_source->position, 20.0f))
+                                  position_source->position, 0x140000))
                 match_player.objective_proximity_mask |=
                     objective_proximity_bit(objective->item_id);
         }
@@ -1385,7 +1403,7 @@ void Match::update_objective_proximity(const World &world) {
         bool in_hill = false;
         for (const Entity *hill : hills) {
             if (!within_2d(player_entity->position, hill->position,
-                           hill->bound_radius))
+                           hill->bound_radius.q16))
                 continue;
             // The team modes OR the hill team's bit through a byte `shl`, its
             // count taken mod 32; the others set bit 0 whatever the team.
@@ -1401,10 +1419,22 @@ void Match::update_objective_proximity(const World &world) {
 
         bool in_capturable_entity = false;
         for (const Entity *zone : capturable_entities) {
-            const float radius = static_cast<float>(zone->zone_radius);
-            const float dz = std::fabs(player_entity->position.z - zone->position.z);
-            if (!within_2d(player_entity->position, zone->position, radius) ||
-                dz > radius * 0.5f)
+            // The zone's words less the player's, each made absolute (`cdq; xor; sub`,
+            // wrapping); the X/Y length saturated at flt_7C19E0 and truncated against
+            // the radius word (+0x15E << 16), then |dz| against half of it (a signed
+            // halving). [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - the
+            //  deltas @0x508B57..0x508B92, fsqrt @0x508B9A, the clamp
+            //  @0x508B9C..0x508BAF, `movzx eax, word ptr [edi+15Eh]; shl eax, 10h`
+            //  @0x508BB1..0x508BB8, `jg` @0x508BC4..0x508BC8, `cdq; sub eax, edx;
+            //  sar eax, 1` @0x508BD2..0x508BD5, `jg` @0x508BD7..0x508BDB]
+            const int32_t adx = abs_word_delta(zone->position.x.q16, player_entity->position.x.q16);
+            const int32_t ady = abs_word_delta(zone->position.y.q16, player_entity->position.y.q16);
+            const int32_t adz = abs_word_delta(zone->position.z.q16, player_entity->position.z.q16);
+            const int32_t radius_q16 =
+                    static_cast<int32_t>(static_cast<uint32_t>(zone->zone_radius) << 16);
+            const int32_t length = static_cast<int32_t>(std::min(
+                    std::sqrt(double(adx) * adx + double(ady) * ady), 2147418112.0)); // flt_7C19E0
+            if (length > radius_q16 || adz > radius_q16 / 2)
                 continue;
             if (!world.zones.is_capturable(1, *zone) &&
                 !world.zones.is_capturable(2, *zone))

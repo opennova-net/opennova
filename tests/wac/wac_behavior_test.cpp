@@ -1399,8 +1399,15 @@ static void test_wac_area_and_location_queries() {
     w.registry.register_area("authored", area, false, 37);
     Aabb duplicate; duplicate.min = {-100, -100, -100}; duplicate.max = {100, 100, 100};
     w.registry.register_area("duplicate", duplicate, true, 37);
-    w.registry.register_location(duplicate, 8);
-    w.registry.register_location(area, 9);
+    const auto location = [](const Aabb &b, int32_t id) {
+        LocationVolume v;
+        v.min_q16[0] = to_fixed(b.min.x); v.min_q16[1] = to_fixed(b.min.y); v.min_q16[2] = to_fixed(b.min.z);
+        v.max_q16[0] = to_fixed(b.max.x); v.max_q16[1] = to_fixed(b.max.y); v.max_q16[2] = to_fixed(b.max.z);
+        v.id = id;
+        return v;
+    };
+    w.registry.register_location(location(duplicate, 8));
+    w.registry.register_location(location(area, 9));
     e.position = Vec3{}; e.item_id = 2001; e.item_type_index = 7; e.net_id = 100;
     w.registry.spawn(2, e); // slot 0: packed blink hit must be nonzero
     const EntityHandle building = w.registry.spawn(2, e);

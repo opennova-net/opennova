@@ -187,16 +187,24 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 		radius = 57344;
 		inf.board_entry_stage = 1;
 		inf.board_anim = anim_state::kStop;
-		const double dx = target.position.x * 65536.0 - e.self->position.x.q16;
-		const double dy = target.position.y * 65536.0 - e.self->position.y.q16;
-		const int32_t bound = io::float_to_fp16_16(target.bound_radius) + 0x10000;
-		if (std::hypot(dx, dy) < bound && world.collision &&
+		// The target's X/Y less the body's, wrapping word deltas; the x87 length
+		// saturated at flt_7C19E0 and truncated, against the bound word plus one
+		// unit. [orig: Entity_UpdateInfantryAI @0x4BB42B..0x4BB43A (the deltas),
+		//  `add ebp, 10000h` @0x4BB45C, fsqrt @0x4BB47E, the flt_7C19E0 clamp
+		//  @0x4BB480..0x4BB491, _ftol2_sse @0x4BB495, `cmp eax, ebp; jge`
+		//  @0x4BB49A..0x4BB49C]
+		const int32_t dx = io::bam_sub(target.position.x.q16, e.self->position.x.q16);
+		const int32_t dy = io::bam_sub(target.position.y.q16, e.self->position.y.q16);
+		const int32_t bound = io::bam_add(target.bound_radius.q16, 0x10000);
+		const double length =
+				std::min(std::sqrt(double(dx) * dx + double(dy) * dy), 2147418112.0); // flt_7C19E0
+		if (static_cast<int32_t>(length) < bound && world.collision &&
 				!world.collision->entity_los_clear(
 						world, self.handle, self.handle, e.self->position.words().data(), goal, 0x4000, true)) {
 			// Walk around the near side of the target's bound when the E point
 			// is hidden by its hull. [orig: @0x4BB4A2..0x4BB591]
-			const int32_t yaw =
-					board_bearing_to(-static_cast<int32_t>(dx), -static_cast<int32_t>(dy));
+			// The body's X/Y less the target's [orig: @0x4BB4C1..0x4BB4D3].
+			const int32_t yaw = board_bearing_to(io::bam_sub(0, dx), io::bam_sub(0, dy));
 			// [orig: `fmul dbl_7C3608` @0x4BB4FB]
 			const double angle = yaw * io::kRadiansPerBamX87;
 			const int64_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);
@@ -409,7 +417,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 	int32_t goal[3] = { target->position.x.q16,
 		target->position.y.q16, target->position.z.q16 };
 	// Arrival radius [orig: @0x4BB325..0x4BB34A, 2-unit arm @0x4BB32E].
-	int32_t radius = io::float_to_fp16_16(target->bound_radius) + 0x10000;
+	int32_t radius = io::bam_add(target->bound_radius.q16, 0x10000); // `add edi, 10000h` @0x4BB344
 	if (entry_type && pc && vehicle_can_enter(world, self, *target)) {
 		VehicleSeatSelection best;
 		SeatSelectionMode mode = SeatSelectionMode::Any; // a non-attach command keeps Any

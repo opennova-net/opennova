@@ -67,10 +67,10 @@ void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &tr
     if (world.crt_rand.next() & 1) piece->death_anim_state |= 0xF0;
     for (int i = section; i < count; ++i) entity.spawned_piece_mask |= 1u << (i & 31);
     // The tower's footprint retires the terrain pages composed under it
-    // [orig: Entity_SpawnSectionEntity @ 0x44062E..0x440670].
+    // [orig: Entity_SpawnSectionEntity @ 0x44062E..0x440670; the bound word
+    //  `mov ecx, [esi]` @0x44062E].
     world.out.terrain_scorches.emit_page_invalidation(
-            entity.position.x.q16, entity.position.y.q16,
-            int32_t(entity.bound_radius * 65536));
+            entity.position.x.q16, entity.position.y.q16, entity.bound_radius.q16);
 }
 void fit_section_to_ground(Entity &entity, const int32_t end[3], int32_t ground) {
     // Per-product Q16 rounding, signed sum, x87 nearest sqrt, then <<8.

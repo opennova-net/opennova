@@ -65,7 +65,7 @@ void build_lfp_zones(const World &world, const SpawnZoneRegistry &registry,
         // (the same field the camera's eye drop reads @0x43862f) — so the
         // label reads to the objective's EDGE, floored at zero, then >> 16
         // [orig: @0x5990ac..0x599108; the subtrahend load @0x5990f3].
-        int32_t edge = d2 - io::q16_from_float(zone->bound_radius);
+        int32_t edge = d2 - zone->bound_radius.q16;
         if (edge < 0) edge = 0;
         row.distance_m = edge >> 16;
         out.push_back(row);

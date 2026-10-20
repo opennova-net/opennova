@@ -102,15 +102,21 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 			const VehicleTraits *resolved_traits = world.vehicles.traits.get(mass_source->item_id);
 			const int32_t other_mass = other->def_mass;
 			const int32_t resolved_mass = resolved_traits != nullptr ? resolved_traits->mass : 0;
+			// The bound words doubled by a wrapping add, signed compares.
+			// [orig: Entity_CheckCollisionState - `mov ebp, [eax]; mov edx, [edi];
+			//  add ebp, ebp; cmp edx, ebp; jle` @0x462ED6..0x462EDE; `add edx, edx;
+			//  cmp [ecx], edx; jge` @0x462EF0..0x462EF4]
 			if (int64_t(own_mass) > 2LL * other_mass ||
-					source.bound_radius > 2.0f * other->bound_radius) {
+					source.bound_radius.q16 >
+							io::bam_add(other->bound_radius.q16, other->bound_radius.q16)) {
 				other->flags |= 0x40u;
 				if (other->item_type == 1)
 					other->veh.contact_wake_tick = world.logic_tick;
 				continue;
 			}
 			push_other = can_push && int64_t(resolved_mass) < 2LL * own_mass &&
-					mass_source->bound_radius < 2.0f * source.bound_radius;
+					mass_source->bound_radius.q16 <
+							io::bam_add(source.bound_radius.q16, source.bound_radius.q16);
 		}
 		// Keep the cheap current bound ahead of section-matrix production.
 		q.points = points.data();

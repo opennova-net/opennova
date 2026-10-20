@@ -32,6 +32,10 @@ struct Area {
     // (mission::zone_box_flat): no zone parameter resolves to it [orig: the
     // load-time resolvers' box tests @0x453093/@0x45317e].
     bool flat = false;
+    // The record's own X/Y words as authored (x_min, x_max, y_min, y_max, not
+    // normalized), which the player-AWOL probe compares the position words
+    // against [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40 - @0x439D69..0x439D85].
+    std::array<int32_t, 4> record_xy_q16{};
 };
 
 // The seven default script groups, in their fixed slots 0..6: the names the
@@ -44,8 +48,11 @@ inline constexpr const char *kDefaultScriptGroupNames[kDefaultScriptGroupCount] 
     "emptygroup", "humans", "blueplayers", "redplayers", "ai", "blueai", "redai"
 };
 
+// A Location box (BMS bounding box type 5), each axis normalized to min / max
+// words [orig: Mission_LoadBMSFile @0x40FCC3].
 struct LocationVolume {
-    Aabb bounds;
+    int32_t min_q16[3] = {0, 0, 0};
+    int32_t max_q16[3] = {0, 0, 0};
     int32_t id = 0;
 };
 
@@ -112,16 +119,18 @@ public:
     // Named, first-class non-entity addressables.
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
     // authored record id [orig: zone record dword @0].
+    // `record_xy_q16`: the record's X/Y words; absent, the bounds' words.
     int register_area(std::string name, const Aabb &bounds, bool active = true,
                       int32_t zone_id = -1, std::optional<Aabb> script_bounds = {},
-                      bool flat = false);
+                      bool flat = false,
+                      std::optional<std::array<int32_t, 4>> record_xy_q16 = {});
     // The load-time id -> index resolve [orig: the @0x453000/@0x453100 scan over
     // record[0]]; -1 when no record carries the id.
     int area_index_by_zone_id(int32_t zone_id) const;
     const Area *area(int id) const;
     void clear_script_tables();
-    void register_location(const Aabb &bounds, int32_t id);
-    int32_t location_at(const Vec3 &position) const;
+    void register_location(const LocationVolume &location);
+    int32_t location_at(const EntityPosition &position) const;
 
     int intern_group(std::string_view name); // WAC named group, separate from BMS command groups
     static int default_script_group_index(std::string_view name);

@@ -917,10 +917,12 @@ void test_glass_userpoints_shatter_once_at_authored_radius() {
 }
 
 // The death blast's radius falls back from the def kz to the bound word in whole
-// units (an unsigned divide by 0x10000): a bound under one unit queues 0, which
-// leaves the ammo's radius to the drain; nothing floors it to one unit.
+// units, a signed divide by 0x10000 truncating toward zero: a bound under one unit
+// queues 0, which leaves the ammo's radius to the drain; nothing floors it to one
+// unit; a negative word truncates toward zero (-1.5 units gives -1, never 65534).
 // [orig: Entity_InitDeathSounds @0x4939b0 -> Entity_QueueKzBlastAtUserPoints -
-//  the def +408 test @0x4ead26, `boundRadius / 0x10000` @0x4ead42;
+//  the def +408 test @0x4ead26, `mov eax, [esi]; cdq; and edx, 0FFFFh; add eax,
+//  edx; sar eax, 10h` @0x4EAD30..0x4EAD3B, fild @0x4ead42;
 //  WeaponEffect_QueueExplosion @0x4E8330 stores the float as given @0x4e839d]
 void test_death_blast_radius_falls_back_to_the_bound_word() {
     auto w_heap = std::make_unique<World>();
@@ -950,6 +952,14 @@ void test_death_blast_radius_falls_back_to_the_bound_word() {
     destruction_notify_item_damage(w, *second, 1);
     CHECK(w.explosions.queue.size() == 1);
     if (!w.explosions.queue.empty()) CHECK(w.explosions.queue[0].radius_override == 2.0f);
+    // A negative bound word truncates toward zero: -0x18000 queues -1.
+    w.explosions.queue.clear();
+    seed.bound_radius.q16 = -0x18000;
+    Entity *third = w.registry.get(w.registry.spawn(1, seed));
+    third->health = 0;
+    destruction_notify_item_damage(w, *third, 1);
+    CHECK(w.explosions.queue.size() == 1);
+    if (!w.explosions.queue.empty()) CHECK(w.explosions.queue[0].radius_override == -1.0f);
 }
 
 // A blast without NoMItems walks pool 1, but an indestructible item in range
@@ -1098,7 +1108,7 @@ void test_kz_point_full_euler() {
     const EntityHandle h = w.registry.spawn(1, seed);
 
     ItemDeathTraits traits = barrel_traits();
-    traits.kz_points = {Vec3{1.5f, -0.5f, 0.75f}};
+    traits.kz_points = {FixedVec3{0x18000, -0x8000, 0xC000}}; // (1.5, -0.5, 0.75)
     w.tables.item_death_traits.set(500, traits);
     Entity *e = w.registry.get(h);
     destruction_notify_item_damage(w, *e, 1);
@@ -3417,7 +3427,7 @@ void test_gnrl_death_is_husk_sound_and_one_effect() {
 	w.logic_tick = 100;
 	const EntityHandle h = spawn_prop(w, 1, 500, 104);
 	ItemDeathTraits traits = class_traits(ItemDeathClass::kGnrl);
-	traits.kz_points = {Vec3{0.0f, 0.0f, 1.0f}}; // a KZ point the tree body would blast
+	traits.kz_points = {FixedVec3{0, 0, 0x10000}}; // a KZ point the tree body would blast
 	w.tables.item_death_traits.set(500, traits);
 	Entity *b = w.registry.get(h);
 

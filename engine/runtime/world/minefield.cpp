@@ -94,7 +94,9 @@ void MinefieldSystem::think(World &world, Entity &field) {
     std::array<bool, count> contacts{};
     for (int i = 0; i < count; ++i) positions[i] = point(field, i);
     const FixedVec3 center = position(field);
-    const int32_t radius = io::float_to_fp16_16(field.bound_radius);
+    // The field's bound word [orig: Entity_LandmineThink @0x441A40 - `cmp eax,
+    //  [ebp+0]` @0x441B9F].
+    const int32_t radius = field.bound_radius.q16;
     auto actor = [&](const MinefieldActor &body) {
         if (body.item_id == 0 || (body.flags & 1) ||
             distance(body.position, center) > radius) return;
@@ -118,7 +120,7 @@ void MinefieldSystem::think(World &world, Entity &field) {
     world.registry.for_each_in_pool(1, [&](const Entity &vehicle) {
         if (!vehicle.item_id || !vehicle.has_item_def ||
             vehicle.item_type != 1 || ((vehicle.engine_flags | vehicle.flags) & 1)) return;
-        const int32_t vehicle_radius = io::float_to_fp16_16(vehicle.bound_radius);
+        const int32_t vehicle_radius = vehicle.bound_radius.q16;
         FixedVec3 probe = position(vehicle);
         if (distance(probe, center) > add(radius, vehicle_radius)) return;
         probe.z = add(probe.z, 4096);

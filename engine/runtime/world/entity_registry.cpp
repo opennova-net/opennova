@@ -216,9 +216,13 @@ void EntityRegistry::by_group(uint8_t group, std::vector<EntityHandle> &out) con
 
 int EntityRegistry::register_area(std::string name, const Aabb &bounds, bool active,
                                   int32_t zone_id, std::optional<Aabb> script_bounds,
-                                  bool flat) {
+                                  bool flat,
+                                  std::optional<std::array<int32_t, 4>> record_xy_q16) {
+    const std::array<int32_t, 4> xy = record_xy_q16.value_or(std::array<int32_t, 4>{
+            to_fixed(bounds.min.x), to_fixed(bounds.max.x), to_fixed(bounds.min.y),
+            to_fixed(bounds.max.y)});
     areas_.push_back(Area{std::move(name), bounds, active, zone_id,
-                         script_bounds.value_or(bounds), flat});
+                         script_bounds.value_or(bounds), flat, xy});
     return static_cast<int>(areas_.size() - 1);
 }
 
@@ -243,19 +247,20 @@ void EntityRegistry::clear_script_tables() {
     group_members_.assign(kDefaultScriptGroupCount, {});
 }
 
-void EntityRegistry::register_location(const Aabb &bounds, int32_t id) {
-    locations_.push_back({bounds, id});
+void EntityRegistry::register_location(const LocationVolume &location) {
+    locations_.push_back(location);
 }
 
-int32_t EntityRegistry::location_at(const Vec3 &position) const {
-    // [orig: WacCmd_SsnLoc @0x4F0E90] Strict bounds, last matching type-5 box.
+int32_t EntityRegistry::location_at(const EntityPosition &position) const {
+    // Strict bounds on the words, signed compares; the last matching type-5 box.
+    // [orig: WacCmd_SsnLoc @0x4F0E90 - the box walk @0x4F0EFC..0x4F0F24]
     int32_t result = 0;
     for (const LocationVolume &location : locations_) {
-        const Aabb &b = location.bounds;
-        if (position.x > b.min.x && position.x < b.max.x &&
-                position.y > b.min.y && position.y < b.max.y &&
-                position.z > b.min.z && position.z < b.max.z)
-            result = location.id;
+        bool inside = true;
+        for (int i = 0; i < 3; ++i)
+            inside = inside && position.word(i) > location.min_q16[i] &&
+                     position.word(i) < location.max_q16[i];
+        if (inside) result = location.id;
     }
     return result;
 }

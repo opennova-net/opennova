@@ -234,11 +234,11 @@ struct ItemDeathTraits {
     // at the entity position (interned to the +0x4E2 handle at mission start)
     // [orig: Entity_TransitionToGroundDeath @ 0x493080 read @ 0x493088].
     std::string particlefinale;
-    // Husk-model "KZ" user points (model-local, mission axes) — each queues a
-    // kz_OrganicBlast r=5.0 at its full-Euler world pose; empty -> one blast
-    // at the entity position
-    // with r = kz ?: bound radius. [orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0]
-    std::vector<Vec3> kz_points;
+    // Husk-model "KZ" user points, the model's int32 words (model-local, mission
+    // axes) — each queues a kz_OrganicBlast r=5.0 at its full-Euler world pose;
+    // empty -> one blast at the entity position with r = kz ?: bound radius.
+    // [orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0 - the words @0x4EAC93..0x4EACAA]
+    std::vector<FixedVec3> kz_points;
     // Bridge husk "DEAD" user points (model-local, mission axes). UnitType 11
     // emits one un-attached Effect_ShockWaterBrdg at each transformed x/y and
     // the raw mission water plane; an empty bank has no origin fallback.
@@ -761,6 +761,16 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate);
 // `silent` = the callback flags' bit 0: the pieces fly without their type's
 // trail effect [orig: @0x493811 — the spawnEffect submit behind (frameFlags & 1)].
 uint32_t spawn_death_pieces(World &world, Entity &target, bool silent = false);
+
+// The death legs' water word: the given water height as a word, INT32_MIN for
+// the dry sentinel (no water authored). [orig: g_EnvWaterHeightFixed @0x26c6454]
+int32_t death_water_q16(float water_height);
+
+// An entity's top as the death legs test it against the water word: its Z word
+// plus its bound word (entity+0), a wrapping add. [orig: Entity_InitDeathSounds
+// @0x4939B0 - `mov eax, [esi+0Ch]; add eax, [esi]; cmp eax, g_EnvWaterHeightFixed`
+// @0x493A6E..0x493A73]
+int32_t entity_top_q16(const Entity &e);
 
 // Shared generic falling callback, also called explicitly by vehicle states 21/23.
 // [orig: Entity_ProcessFallingDeathPhysics @0x461D30]

@@ -340,7 +340,7 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
                 v.mount.carrier_pos_q16[0],
                 v.mount.carrier_pos_q16[1],
                 v.mount.carrier_pos_q16[2] +
-                        mount_anchor_lift_q16(to_fixed(v.mount.bound_radius)),
+                        mount_anchor_lift_q16(v.mount.bound_radius.q16),
             };
             // The look-ahead is not eased here: it belongs to every compose,
             // not to the tick (compose_chase_camera).

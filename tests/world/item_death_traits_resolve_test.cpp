@@ -167,6 +167,18 @@ void expected_points(const std::vector<uint8_t> &bytes, const char *name,
 
 bool same(const Vec3 &a, const Vec3 &b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
 
+// The KZ userpoints' own words, which are the mission-local (x, y, z) the blast
+// transforms [orig: Entity_QueueKzBlastAtUserPoints @0x4EABF0 - @0x4EAC93..0x4EACAA].
+void expected_words(const std::vector<uint8_t> &bytes, const char *name, std::vector<FixedVec3> &words) {
+    Threedi3di3 model{};
+    CHECK(threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) == 0);
+    for (size_t i = 0; model.user_points != nullptr && i < model.user_point_count; ++i) {
+        const ThreediUserPoint &point = model.user_points[i];
+        if (strutil::iequals(point.name, name)) words.push_back(FixedVec3{point.x, point.y, point.z});
+    }
+    threedi_3di3_free(&model);
+}
+
 } // namespace
 
 // The first husk's KZ bank: both "KZ" and "kz" reach the traits with their
@@ -185,9 +197,8 @@ static void test_first_husk_kz_and_dead_points_feed_death_traits() {
     // husk, the final husk is only the preferred death-piece model).
     std::vector<uint8_t> kz_bytes = with_renamed_user_point(armory, "Armory", "KZ");
     kz_bytes = with_renamed_user_point(kz_bytes, "Ground", "kz");
-    std::vector<Vec3> expected;
-    std::vector<Vec3> ignored;
-    expected_points(kz_bytes, "KZ", expected, ignored);
+    std::vector<FixedVec3> expected;
+    expected_words(kz_bytes, "KZ", expected);
     CHECK(expected.size() == 2); // the fixture carries a real multi-point KZ bank
     {
         const TempRoot root("kz");
@@ -201,7 +212,8 @@ static void test_first_husk_kz_and_dead_points_feed_death_traits() {
         CHECK(t->husk_model_loaded); // a successfully opened first husk supplies the retail live-model gate
         CHECK(t->kz_points.size() == expected.size()); // all first-husk KZ points reach the traits
         for (size_t i = 0; i < t->kz_points.size() && i < expected.size(); ++i)
-            CHECK(same(t->kz_points[i], expected[i])); // retail mission-local axes preserved
+            CHECK(t->kz_points[i].x == expected[i].x && t->kz_points[i].y == expected[i].y &&
+                  t->kz_points[i].z == expected[i].z); // the userpoint's own words
         CHECK(t->bridge_dead_points.empty());
     }
 
@@ -210,6 +222,7 @@ static void test_first_husk_kz_and_dead_points_feed_death_traits() {
     // independently of KZ.
     const std::vector<uint8_t> dead_bytes = with_renamed_user_point(armory, "Armory", "dEaD");
     std::vector<Vec3> expected_dead;
+    std::vector<Vec3> ignored;
     expected_points(dead_bytes, "DEAD", expected_dead, ignored);
     CHECK(expected_dead.size() == 1);
     {

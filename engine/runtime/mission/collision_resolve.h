@@ -70,7 +70,7 @@ struct CollisionResolveState {
 	// First-stage husk KZ points in mission-local axes. Kept independently
 	// from the collision-model cache because a husk graphic may already have
 	// been registered as another entity's main graphic.
-	std::unordered_map<std::string, std::vector<world::Vec3>>
+	std::unordered_map<std::string, std::vector<world::FixedVec3>>
 			husk_kz_points_by_graphic;
 	// First-stage husk DEAD points used only by the unitType-11 bridge water
 	// shock callback. Like KZ, huskFinal is not a source.

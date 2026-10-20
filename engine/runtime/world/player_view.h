@@ -136,7 +136,7 @@ struct MountedCameraInput {
     // its heading [orig: Math_TransformPointFixedPoint22 @0x412E90 of
     //  parentMatrix(+0xB4) x (0x60000, 0, 0), called @0x438855].
     int32_t lookahead_target_q16[3] = {0, 0, 0};
-    float bound_radius = 0.0f;              // carrier +0, mission units
+    PositionWord bound_radius;              // carrier +0: the word, its float view in units
     bool aircraft = false;                  // unit_type 3/4 [orig: @0x43861D]
     // The water plane every chase eye clears, on foot as well as mounted
     // [orig: g_EnvWaterHeightFixed + 0x4000 @0x438409..0x43841E].

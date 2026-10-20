@@ -104,7 +104,7 @@ static void test_bms_record_index_is_pool_slot() {
     m.items[0].id = 21;
     m.items.push_back(item(/*type_id=*/164, 30 << 16, 20 << 16, 3 << 16));
     m.items[1].id = 22;
-    m.organics.push_back(organic(1 << 16, 1 << 16, 0, 1, 0, 0));
+    m.organics.push_back(organic((300 << 16) | 0x1235, -((400 << 16) | 0x0C07), 0x2A0001, 1, 0, 0));
     m.organics[0].id = 31;
 
     auto w = std::make_unique<World>();
@@ -118,6 +118,12 @@ static void test_bms_record_index_is_pool_slot() {
     CHECK(h21.valid() && h21.pool() == 1 && h21.slot() == 0);
     CHECK(h22.valid() && h22.pool() == 1 && h22.slot() == 1);
     CHECK(h31.valid() && h31.pool() == 0 && h31.slot() == 0);
+    // The model init's savedLivePose is the placed words, the organic AI init's aim
+    // basis [orig: Entity_InitFromModel @0x40E14B..0x40E169].
+    const AiEntity *body = ai->for_handle(h31);
+    CHECK(body != nullptr && body->net_saved_live_pose[0] == ((300 << 16) | 0x1235) &&
+          body->net_saved_live_pose[1] == -((400 << 16) | 0x0C07) &&
+          body->net_saved_live_pose[2] == 0x2A0001);
 }
 
 static void test_emplacement_attachments() {
@@ -800,12 +806,13 @@ static void test_script_spatial_tables_are_promoted_and_replaced() {
     CHECK(promoted != nullptr && promoted->zone_id == 37);
     CHECK(promoted->bounds.max.z == bms::AreaTrigger::kUnboundedZMax);
     CHECK(promoted->script_bounds.max.z == 1);
-    CHECK(w->registry.location_at({0, 0, 0}) == 9);
-    CHECK(w->registry.location_at({2, 0, 0}) == 0);
+    CHECK(w->registry.location_at(EntityPosition::of_q16({0, 0, 0})) == 9);
+    CHECK(w->registry.location_at(EntityPosition::of_q16({2 << 16, 0, 0})) == 0); // strict
+    CHECK(w->registry.location_at(EntityPosition::of_q16({(2 << 16) - 1, 0, 0})) == 9);
     w->registry.intern_group("old_mission");
     mission::promote_mission(bms::File{}, *w, {});
     CHECK(w->registry.area(0) == nullptr);
-    CHECK(w->registry.location_at({0, 0, 0}) == 0);
+    CHECK(w->registry.location_at(EntityPosition::of_q16({0, 0, 0})) == 0);
     CHECK(w->registry.script_group_index("old_mission") == -1);
     CHECK(w->registry.script_group_index("humans") == 1);
     // The seven default groups hold their fixed slots, named as the mode's

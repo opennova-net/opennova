@@ -1100,8 +1100,11 @@ bool EntityCommands::local_player_out_of_bounds() const {
         if (!a) break;
         if (!a->active) continue;
         any_active = true;
-        if (p->position.x >= a->bounds.min.x && p->position.x <= a->bounds.max.x &&
-            p->position.y >= a->bounds.min.y && p->position.y <= a->bounds.max.y)
+        // The position words against the record's own words, signed compares
+        // [orig: @0x439D69..0x439D85].
+        const std::array<int32_t, 4> &xy = a->record_xy_q16;
+        if (p->position.x.q16 >= xy[0] && p->position.x.q16 <= xy[1] &&
+            p->position.y.q16 >= xy[2] && p->position.y.q16 <= xy[3])
             return false;
     }
     return any_active;
