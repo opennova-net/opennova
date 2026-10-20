@@ -43,6 +43,7 @@ struct RunInfo {
 	uint64_t steady_end_ns = 0; // start + steady_seconds: the slice end
 	uint64_t steady_completed_ns = 0; // when the runner closed the window
 	int session = 0; // a fixed gameplay session (the late joiner's client port); 0 = bind
+	bool rotation = false; // E2: the host plays a next mission inside the steady window
 };
 
 // Strict ISO-8601 UTC ("2026-10-11T12:34:56.1234567Z", 0..9 fraction digits)

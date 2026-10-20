@@ -939,6 +939,7 @@ std::vector<std::string> milestones(const RunFacts &run) {
 		{ "S:0x0a", 'S', 0x00A, false },
 	};
 	std::vector<std::pair<int, size_t>> found; // (first frame, definition order)
+	std::vector<std::string> names;
 	for (size_t m = 0; m < std::size(kMilestones); ++m) {
 		const Milestone &milestone = kMilestones[m];
 		int first = -1;
@@ -957,11 +958,41 @@ std::vector<std::string> milestones(const RunFacts &run) {
 		if (first >= 0)
 			found.emplace_back(first, m);
 	}
+	// E2's round end and rotation (a run whose host plays a next mission in the
+	// window): the first S2C 0x5D and the first 0x61 after it, the second 0x7B and
+	// 0x0B (the next mission's announcement and header) and the first 0x0A after
+	// that header (window.rotation_load_gap).
+	if (run.info.rotation) {
+		auto nth = [&](uint16_t identity, int occurrence, int after_frame) {
+			int seen = 0;
+			for (const wire::ParityEvent &event : run.trace.events)
+				if (event.dir == 'S' && event_identity(event) == identity &&
+						event.frame > after_frame && ++seen == occurrence)
+					return event.frame;
+			return -1;
+		};
+		const int sweep = nth(0x05D, 1, -1);
+		const int seed = sweep >= 0 ? nth(0x061, 1, sweep) : -1;
+		const int announce = nth(0x07B, 2, -1);
+		const int header = nth(0x00B, 2, -1);
+		const int frame = header >= 0 ? nth(0x00A, 1, header) : -1;
+		const std::pair<int, const char *> extra[] = { { sweep, "S:0x5d round" },
+			{ seed, "S:0x61 round" }, { announce, "S:0x7b next" }, { header, "S:0x0b next" },
+			{ frame, "S:0x0a next" } };
+		for (size_t i = 0; i < std::size(extra); ++i)
+			if (extra[i].first >= 0)
+				found.emplace_back(extra[i].first, std::size(kMilestones) + i);
+		std::sort(found.begin(), found.end());
+		for (const auto &entry : found)
+			names.push_back(entry.second < std::size(kMilestones)
+							? std::string(kMilestones[entry.second].name)
+							: std::string(extra[entry.second - std::size(kMilestones)].second));
+		return names;
+	}
 	std::sort(found.begin(), found.end());
-	std::vector<std::string> out;
 	for (const auto &entry : found)
-		out.push_back(kMilestones[entry.second].name);
-	return out;
+		names.push_back(kMilestones[entry.second].name);
+	return names;
 }
 
 void compare_milestones(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {

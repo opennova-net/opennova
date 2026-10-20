@@ -504,11 +504,16 @@ struct Case {
 };
 
 Case judge_case(wire::ParityTrace rr, wire::ParityTrace aa, wire::ParityTrace subject,
-		const char *topology = "RO") {
+		const char *topology = "RO", bool rotation = false) {
 	Case c;
-	c.rr = make_run_facts(info_for("rr", "RR"), std::move(rr));
-	c.aa = make_run_facts(info_for("rr_aa", "RR"), std::move(aa));
-	c.subject = make_run_facts(info_for("subject", topology), std::move(subject));
+	auto info = [rotation](const char *label, const char *top) {
+		RunInfo i = info_for(label, top);
+		i.rotation = rotation;
+		return i;
+	};
+	c.rr = make_run_facts(info("rr", "RR"), std::move(rr));
+	c.aa = make_run_facts(info("rr_aa", "RR"), std::move(aa));
+	c.subject = make_run_facts(info("subject", topology), std::move(subject));
 	c.verdict = judge(c.rr, c.aa, { { topology, &c.subject } });
 	return c;
 }
@@ -859,6 +864,43 @@ void test_tag_window() {
 		expect_row(judge_case(rr, aa, near), 'S', "tag_presence", "0x56:0", "pass");
 		expect_row(judge_case(rr, aa, far), 'S', "tag_presence", "0x56:0", "fail", "MISSING_TAG");
 	}
+}
+
+// E2's rotation: the steady gap that holds the next mission's header (a run's
+// second S2C 0x0B) is the declared load, not a stall; without a declared rotation
+// the same gap is STEADY_GAMEPLAY_GAP. The next mission joins the milestones.
+void test_rotation_load_gap() {
+	auto rotate = [](wire::ParityTrace trace) {
+		std::vector<wire::ParityFrameState> kept;
+		for (const wire::ParityFrameState &frame : trace.frames)
+			if (frame.ts_ns < 10 * kSec || frame.ts_ns > 13 * kSec)
+				kept.push_back(frame);
+		trace.frames = std::move(kept);
+		wire::ParityEvent header = trace.events.back();
+		header.dir = 'S';
+		header.full_tag = 0x00B;
+		header.settings_update = false;
+		header.ts_ns = 11500 * kMs;
+		header.frame = 99999;
+		header.body = bytes({ 0x42, 0x4D, 0x53, 0x0C });
+		header.length = header.body.size();
+		trace.events.push_back(header);
+		return trace;
+	};
+	auto gap = [](const Case &c) {
+		for (const EvidenceRow &row : c.verdict.evidence)
+			if (row.code == "STEADY_GAMEPLAY_GAP")
+				return true;
+		return false;
+	};
+	const Case declared = judge_case(rotate(scripted(1)), rotate(scripted(2)), rotate(scripted(3)),
+			"RO", true);
+	check(!gap(declared), "a declared rotation's load gap is no STEADY_GAMEPLAY_GAP");
+	const VerdictRow *milestones = find_row(declared.verdict.rows, 'B', "milestones", "");
+	check(milestones && milestones->value.subject.find("S:0x0b next") != std::string::npos,
+			"the next mission's header joins the milestones");
+	const Case undeclared = judge_case(rotate(scripted(1)), rotate(scripted(2)), rotate(scripted(3)));
+	check(gap(undeclared), "the same gap without a declared rotation is STEADY_GAMEPLAY_GAP");
 }
 
 void test_aa_widening() {
@@ -1896,6 +1938,7 @@ int main() {
 	test_cadence_counts();
 	test_pool_live_pose();
 	test_tag_window();
+	test_rotation_load_gap();
 	test_timestamps();
 	test_identical();
 	test_tag_histogram();

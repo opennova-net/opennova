@@ -335,6 +335,13 @@ inline constexpr Normalization kNormalizations[] = {
 			"OR ran 12 s longer than RR): the tag histogram takes each run's first packet "
 			"plus the shorter interval of the pair, so a stream on the mission clock (03TR's "
 			"0x40 overlay bursts every 1792 ticks) is not counted over different lengths" },
+	{ "window.rotation_load_gap", MaskKind::Field, 'B', 0, "E2 mission change", 0,
+			"a host whose rotation plays its next mission inside the steady window (E2) "
+			"stops gameplay while that mission loads: the steady gap holding the run's "
+			"second S2C 0x0B (the next mission's header) is the load, not a stall, and the "
+			"round end and the next mission's start join the milestones (the first 0x5D, "
+			"the first 0x61 after it, the second 0x7B and 0x0B, the first 0x0A after that "
+			"header)" },
 	{ "window.tag_presence_grace", MaskKind::Field, '*', 0, "tag window end", 0,
 			"an event on the mission clock lands at a different offset from each run's "
 			"join, so one near the window end falls inside one run's window and just past "

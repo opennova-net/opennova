@@ -143,10 +143,25 @@ void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<Eviden
 				label +
 						" decoded gameplay has no sample within 500 ms of a steady "
 						"window edge" });
+	// E2's declared load gap: a run whose host rotates to its next mission stops
+	// gameplay while that mission loads. The gap holding the next mission's
+	// header (the run's second S2C 0x0B) is the load, not a stall
+	// (window.rotation_load_gap).
+	static_assert(has_normalization("window.rotation_load_gap"));
+	uint64_t next_mission_ns = 0;
+	if (facts.info.rotation) {
+		int headers = 0;
+		for (const wire::ParityEvent &event : facts.trace.events)
+			if (event.dir == 'S' && event.full_tag == 0x00B && !event.settings_update && ++headers == 2) {
+				next_mission_ns = event.ts_ns;
+				break;
+			}
+	}
 	uint64_t widest = 0;
 	uint64_t previous = facts.info.steady_start_ns;
 	for (const uint64_t ts : samples) {
-		widest = std::max(widest, ts - previous);
+		if (!(next_mission_ns > previous && next_mission_ns < ts))
+			widest = std::max(widest, ts - previous);
 		previous = ts;
 	}
 	widest = std::max(widest, facts.info.steady_end_ns - previous);
@@ -274,6 +289,8 @@ bool read_run_info(const std::string &run_dir, const std::string &label, Evidenc
 		out.game_type = std::to_string(static_cast<uint64_t>(game_type->number));
 	}
 	out.port = json.get_int("port", 0);
+	const io::JsonValue *rotation = json.get("rotation");
+	out.rotation = rotation && rotation->is_array() && !rotation->array.empty();
 	out.steady_seconds = json.get_number("steady_seconds", 0.0);
 	if (!(out.steady_seconds > 0.0) || out.steady_seconds > 3600.0) {
 		error = label + ": steady_seconds must be a positive number of seconds";
