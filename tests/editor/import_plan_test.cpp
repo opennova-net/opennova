@@ -10,7 +10,8 @@
 // textures (the model's texture rows found by their type's rule, a missing one listed,
 // nothing the converter copies); an .mdt and a chunk file found, imported, resolved and
 // packed; the stylesheets the shell reads once the import is in; two lookups of one name
-// kept apart; a candidate taken for what it is, not its name; a PNG dependency copied as
+// kept apart; a screen looked for in the file its action loads, not where a planned menu defines
+// its name; a candidate taken for what it is, not its name; a PNG dependency copied as
 // the game's own and resolving; a bare relative source; a cycle of menus ending; the cap
 // stopping the walk and the selection, a converter's outputs whole or not at all; a symbol,
 // a sound and a mission text (a .mis) listed as not followed; and nothing written
@@ -613,6 +614,31 @@ static int test_plan_missing_lookups() {
 	return 0;
 }
 
+// A screen looked for in the file a SCREEN action loads, which a menu planned before defines in another file: the
+// plan's own definitions are of that file's scope alone (the game selects a screen in the file it loads), so the
+// file the action loads is looked in and, lacking the screen, the name is undefined there; a screen in a file no
+// place has is undefined too; a window of a name its screen already has is no definition (the lookup finds the
+// first).
+static int test_plan_screen_elsewhere() {
+	Project project("opennova_editor_plan_screen_elsewhere");
+	const std::string art = project.dir.file("art");
+	TEST_EXPECT(test_io::write_text(art + "/b.mnu", screen("ONE", window("STATIC", "W") + window("STATIC", "W"))) &&
+	            test_io::write_text(art + "/c.mnu", screen("TWO", window("STATIC", "X"))) &&
+	            test_io::write_text(art + "/a.mnu",
+	                                screen("A", window("BUTTON", "GO", go_to("c.mnu", "ONE") + go_to("gone.mnu", "LOST")))));
+	const ImportPlan plan = project.plan({{art + "/b.mnu", {}}, {art + "/a.mnu", {}}});
+	const ImportPlanRow *c = row_named(plan, "c.mnu");
+	const ImportPlanRow *gone = row_named(plan, "gone.mnu");
+	TEST_EXPECT(c && c->state == State::Found && gone && gone->state == State::NotFound && plan.rows.size() == 4);
+	size_t screens = 0;
+	for (const ImportNotFollowed &entry : plan.undefined) {
+		std::printf("  undefined: %s (%zu, the first in %s)\n", reference_row(entry.reference).token, entry.count, entry.first.c_str());
+		if (entry.reference == ReferenceKind::MenuScreen) screens += entry.count;
+	}
+	TEST_EXPECT(screens == 2);
+	return 0;
+}
+
 // A candidate counts by what it is, not by its name: a raw labels.bin the selection brings
 // is no string table for the menu naming it (the menu's table is not found: the project holds
 // one file of a name), and a folder's raw labels.bin gives way to the game install's string
@@ -1099,6 +1125,7 @@ int run_import_plan_tests() {
 	failures += test_plan_material_sources();
 	failures += test_plan_stylesheets();
 	failures += test_plan_missing_lookups();
+	failures += test_plan_screen_elsewhere();
 	failures += test_plan_kinds();
 	failures += test_plan_native_png();
 	failures += test_plan_relative_path();

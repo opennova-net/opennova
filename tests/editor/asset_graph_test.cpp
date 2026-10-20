@@ -9,7 +9,8 @@
 // by its type, as the runtime's loaders pick the file); unchanged files reused on the
 // next update; the rename transaction: the sites rewritten and the file moved, or
 // the refusals that leave everything as it was; and every ACTION target OpenNova's own menus
-// and the shipped menus' forms write, found. S12: the
+// and the shipped menus' forms write, found; what a missing name the game goes on without says
+// over the forms the shipped missions write. S12: the
 // reference kinds' table (D1), a symbol per defining field with its place (D2), and where Go
 // to leads and who uses a file (D3). S13 D3: an update patches only the files whose reading
 // changed and equals a graph built fresh over the same files after every scripted step (also
@@ -3386,6 +3387,12 @@ static int test_model_set_record_references() {
 	TEST_EXPECT(model->load(project.file(named), named, AssetKind::Model, "jo", error));
 	const std::vector<std::shared_ptr<const DocumentBase>> open = {model};
 	graph.update(project.paths, project.document, project.scan, open);
+	// Nothing to undo yet: an undo leaves the model as it is, and the graph with it.
+	const uint64_t loaded = model->revision(), generation = graph.generation();
+	model->undo();
+	TEST_EXPECT(model->revision() == loaded && !model->dirty() && !model->can_undo() &&
+	            !graph.update(project.paths, project.document, project.scan, open).changed &&
+	            graph.generation() == generation);
 	Seen seen({"model"});
 	// Each register reference of the model (its record and field) and the register it resolves to,
 	// by the register's identity: what the renumbering keeps, whatever indexes the edits leave.
@@ -3519,8 +3526,8 @@ static int test_install_incremental() {
 
 // The base layer over a mounted game install (minted from OpenNova's own game, minted_install.h): every file the
 // graph reads (models and clips included) read once for the names it defines, under a project of one menu naming
-// what only the install has: its stylesheet's font variable, a texture, a screen of its main menu; each resolves
-// through the base, and the base makes no finding.
+// what only the install has: its stylesheet's font variable, a texture, a screen of its main menu, and a sound set
+// of its global bank by name alone; each resolves through the base, and the base makes no finding.
 static int test_install_base_layer() {
 	test_temp::TempDir dir("opennova_asset_graph_install_base");
 	const std::string install = dir.file("install");
@@ -3584,6 +3591,16 @@ static int test_install_base_layer() {
 	            layer->file_named(file));
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuTexture, texture) == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuScreen, screen_name, "MAIN.MNU") == ReferenceStatus::Present);
+	// A sound set by its name alone, as an item or a mission names one: the game's search over its global banks in
+	// order (AssetGraph::sound_binding), the install's game.lwf among them through the base.
+	std::string set;
+	for (const GraphIndex::Ref ref : layer->index().symbols_of_kind(ReferenceKind::Sound)) {
+		const GraphSymbol &symbol = layer->index().symbol(ref);
+		if (set.empty() && !symbol.inert && opennova::strutil::iequals(fs::path(symbol.file).filename().string(), "game.lwf"))
+			set = symbol.name;
+	}
+	TEST_EXPECT(!set.empty() && graph.resolve(ReferenceKind::Sound, set, std::string(), &file) == ReferenceStatus::Present &&
+	            opennova::strutil::iequals(fs::path(file).filename().string(), "game.lwf"));
 	TEST_EXPECT(graph.missing_count() == 1 && graph.diagnostics().size() == 1 &&
 	            graph.diagnostics()[0].message.find("not_in_the_install.tga") != std::string::npos);
 	Seen seen({"main", "font"});
@@ -3591,8 +3608,43 @@ static int test_install_base_layer() {
 	return 0;
 }
 
+// What a missing reference's finding says where the game goes on without the name (the tolerated rows' words,
+// graph/reference_kinds.cpp), over the forms the shipped missions write them in (the minted mission logic.bms,
+// fixtures/editor/missions, editor_missions_gen: zones no area trigger holds named by triggers and actions, and
+// dialogs its mission's dialog bank would hold, which the project lacks) and an effect no particle file defines
+// where one defines stockeffect, which the game copies under a name it lacks.
+static int test_tolerated_missing_words() {
+	test_temp::TempDir dir("opennova_asset_graph_tolerated");
+	Project project(dir.file("project"));
+	TEST_EXPECT(project.made);
+	const std::vector<uint8_t> logic = test_io::read_file(test_paths_fixture("editor/missions/logic.bms"));
+	TEST_EXPECT(logic.size() > 4 && !test_io::is_lfs_pointer(logic) && test_io::write_file(project.file("missions/logic.bms"), logic));
+	TEST_EXPECT(rewrite(project.file("effects/fx.ptl"),
+	                    "[effectdef]\n{\n\tid = stockeffect;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n}\n"));
+	TEST_EXPECT(rewrite(project.file("defs/ammo.def"), "ammo AMMO_W\n\tfoeTrcrID 777\n\tsecondary_effect Effect_gone\nend\n"));
+	AssetGraph graph;
+	graph.update(project.paths, project.document, project.rescan(), {});
+	const auto said = [&graph](ReferenceKind kind, const std::string &words) {
+		for (const Diagnostic &d : graph.diagnostics())
+			if (d.code() == "reference.missing" && editor_test::reference_of(d).kind == kind &&
+			    d.severity == DiagnosticSeverity::Warning && d.message.find(words) != std::string::npos)
+				return true;
+		return false;
+	};
+	TEST_EXPECT(said(ReferenceKind::MissionZone,
+	                 "a zone id no area trigger of the mission has: the game makes a trigger naming it read false and an "
+	                 "action naming it do nothing."));
+	TEST_EXPECT(said(ReferenceKind::Dialog, ", a dialog bank the project does not have: the game plays no dialog of this "
+	                                        "mission."));
+	TEST_EXPECT(said(ReferenceKind::Particle, "Effect_gone") &&
+	            said(ReferenceKind::Particle, ", which no particle file of the project defines: the game plays a copy of "
+	                                          "stockeffect under that name."));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_tolerated_missing_words();
 	failures += test_generation();
 	failures += test_incremental_equals_fresh();
 	failures += test_patch_counts();

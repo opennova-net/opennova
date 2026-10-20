@@ -984,6 +984,16 @@ static int test_apply_install_mission_closure() {
 	const ActionOutcome imported = import(project.session, sources);
 	const double import_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - import_started).count();
 	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
+	// Its one Output line: the files, their bytes past a mebibyte in MB, the four kinds it holds most of and how
+	// many more.
+	const std::string imported_words = "Imported " + opennova::strutil::grouped(planned) + " files (";
+	bool worded = false;
+	for (size_t i = 0; i < view.activity.output.size(); ++i) {
+		const std::string &line = view.activity.output[i];
+		worded = worded || (line.rfind(imported_words, 0) == 0 && line.find(" MB): ") != std::string::npos &&
+		                    line.find(" more kind") != std::string::npos);
+	}
+	TEST_EXPECT(worded);
 	size_t references = 0, unresolved = 0, unplanned = 0;
 	for (const AssetEntry &entry : view.project.scan->entries)
 		for (const GraphEdge *edge : view.findings.graph->references_of(entry.relative_path)) {
