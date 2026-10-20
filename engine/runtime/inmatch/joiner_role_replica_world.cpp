@@ -158,6 +158,13 @@ void JoinerRole::spawn_and_arm_local_player() {
 		// damage classes + equipped adm on the fresh entity now. [orig:
 		// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
 		if (world::Entity *L = world.registry.get(h)) {
+			// Player_InitPlayer ends by clearing the local player's hidden bit, on a
+			// joiner as on a host, at every mission start; the frame's record fold
+			// (fold_local_record_flags) then re-hides it as the next 0x0A's writer does.
+			// [orig: Game_StartMission @0x525BBC -> Player_InitPlayer @0x4E15F0,
+			//  `and dword ptr [eax+24h], 0FFFFFFFEh` @0x4E19C2]
+			L->hidden = false;
+			L->flags &= ~world::kEntityFlagCarried;
 			if (lp.loadout.pending_player_class >= 5 &&
 					lp.loadout.pending_player_class <= 9)
 				L->player_class =
