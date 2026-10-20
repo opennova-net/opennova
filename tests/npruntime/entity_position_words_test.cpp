@@ -618,6 +618,56 @@ int round_flies_on_the_words() {
 	return 0;
 }
 
+// The 0x0C carries a mounted body's attachBoneId (+0x157), parentSlot (+0x168) and its
+// parent's packed handle (+0x16C); an unmounted one 0 / 0 / 0xFFFF.
+// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - @0x503353, @0x50336D,
+//  @0x50337B..0x5033DD, the null 0xFFFF @0x5033EC]
+int organic_record_streams_the_mount() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(0, 4);
+	world->registry.configure_pool(1, 4);
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 700;
+	vehicle.has_item_def = true;
+	const w::EntityHandle carrier = world->registry.spawn(1, vehicle);
+	w::Entity seed;
+	seed.kind = w::EntityKind::Organic;
+	seed.item_id = 5311;
+	seed.item_type = 3;
+	seed.item_type_index = 1;
+	seed.has_item_def = true;
+	const w::EntityHandle gunner = world->registry.spawn(0, seed);
+	const w::EntityHandle walker = world->registry.spawn(0, seed);
+	world->ai.attach(gunner);
+	world->ai.attach(walker);
+	w::Entity &g = *world->registry.get(gunner);
+	g.mounted = true;
+	g.mount_target = carrier;
+	g.mount_type = w::SeatType::Gunner;
+	g.mount_bone = 4;
+	const opennova::OrganicSpawnBatch c = ns::build_pool0_organic_batch(*world);
+	opennova::OrganicSpawnBatch out;
+	const std::vector<uint8_t> wire = opennova::encode_organic_spawn_batch(c);
+	if (!expect(opennova::decode_organic_spawn_batch(wire.data(), wire.size(), out) &&
+	                    out.records.size() == 2,
+	            "the 0x0C carries both bodies"))
+		return 1;
+	const opennova::OrganicSpawnRecord &mounted = out.records[0].slot_id == gunner.packed
+	                                                      ? out.records[0] : out.records[1];
+	const opennova::OrganicSpawnRecord &free = out.records[0].slot_id == gunner.packed
+	                                                   ? out.records[1] : out.records[0];
+	if (!expect(mounted.weapon_type == 4 && mounted.parent_slot == 3 &&
+	                    mounted.parent_handle == carrier.packed,
+	            "a mounted body streams its bone, seat type and parent handle"))
+		return 1;
+	if (!expect(free.weapon_type == 0 && free.parent_slot == 0 && free.parent_handle == 0xFFFF,
+	            "an unmounted body streams 0 / 0 / 0xFFFF"))
+		return 1;
+	std::printf("PASS organic_record_streams_the_mount\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -633,7 +683,8 @@ int main() {
 	const int wreck = static_wreck_slides_on_the_words();
 	const int flag = flag_state_streams_the_words();
 	const int round = round_flies_on_the_words();
-	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round})
+	const int mount = organic_record_streams_the_mount();
+	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag, round, mount})
 		if (r != 0) return r;
 	return 0;
 }

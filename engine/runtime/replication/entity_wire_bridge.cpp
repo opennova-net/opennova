@@ -384,8 +384,10 @@ uint16_t record_flags_word(const world::Entity &e) {
 // two). The host's player add takes each side's id from the joiner's JSP (CI0 / CI1, or the
 // listen host's own profile), validates it against the host's Avatars.def combos and re-resolves
 // a stale one to the side's default (0 with no table); the spawn stamps the assigned side's into
-// entity+0x15C, and every stream writes that word (D-NET-137).
+// entity+0x15C, and every stream writes that word (D-NET-137). A receiving client
+// validates the record's id against its own table the same way.
 // [orig: Server_PlayerAdd @0x51CBC0 - slot+0x1BA / +0x1BC validated @0x51CF87..0x51CFD8;
+//  NapiNPClientMsg_0x00C - MinimapSlot_HasEntity on g_AvatarDefs @0x42eadb;
 //  NetPacket_SerializeEntityStatesToBuffer @0x5030a0 - `movzx edi, word ptr [ecx+15Ch]`
 //  @0x5032CB. The packing (type bits 0-4, subtype 5-8, index 9-14, alignment 15) is the
 //  packer's @0x57ae47 and CAvatarDefs_FindComboByPackedId @0x57a270's; net-re §5.59]
@@ -441,9 +443,8 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		// spawn stamped it from the joiner's per-side VCA/VCB join var (golden joiner=4); NEVER the
 		// body-anim clip — echoing Entity::body_anim_slot here was the DBuggy1-shadow bug (D-NET-146).
 		rec.anim_slot = e.anim_slot;
-		// entity+0x15C for every row (D-NET-512): a player's per-team minimap/char-slot id picked
-		// at add (CI0/CI1 join vars) when present, else the D-NET-137 encoding shim (host's own
-		// player / var-less peers); any other row's word, which the BMS spawn's memset leaves 0.
+		// entity+0x15C for every row (D-NET-512): a player's character id the add validated
+		// (D-NET-137); any other row's word, which the BMS spawn's memset leaves 0.
 		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - `movzx edi, word ptr
 		//  [ecx+15Ch]` @0x5032CB; Entity_SpawnFromBMSRecord @0x40E9F0 - memset @0x40EA27]
 		rec.net_id = (e.item_id == kPlayerPersonTypeId)
@@ -451,6 +452,16 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 				: e.minimap_net_id;
 		rec.player_class = player_class_for_wire(e);
 		rec.player_slot_id = e.player_slot_id; // entity+0x154 [orig: @0x503316..0x503327]
+		// The mount: attachBoneId (+0x157), parentSlot (+0x168) and the parent's packed
+		// handle (+0x16C, 0xFFFF for none), so a joiner seats a mounted body on arrival.
+		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - +0x157 @0x503353,
+		//  +0x168 @0x50336D, +0x16C @0x50337B, the pool / slot pack @0x5033C7..0x5033DD,
+		//  the null 0xFFFF @0x5033EC; Entity_AttachToVehicleSlot @0x4946D0 writes them]
+		if (e.mounted) {
+			rec.weapon_type = e.mount_bone;
+			rec.parent_slot = static_cast<uint8_t>(e.mount_type);
+			rec.parent_handle = e.mount_target.packed;
+		}
 		batch.records.push_back(std::move(rec));
 	});
 	batch.entity_count = static_cast<uint16_t>(batch.records.size());
