@@ -106,6 +106,7 @@ struct FourPoolWorld final : w::World {
 		marker.yaw = 270;
 		marker.team = 1;
 		marker.bound_radius = 25.5f;
+		marker.net_id = 51; // its DcbId, the record's dword 2: the 0x20 net word (D-NET-517)
 		world.registry.spawn(3, with_def(marker));
 	}
 };
@@ -643,7 +644,7 @@ bool run_pool3_marker() {
 	if (!expect(out.records.size() == 1, "one decoded marker")) return false;
 	const nw::Pool3SyncRecord &r = out.records[0];
 	if (!expect(r.item_type_id == 6006, "marker type id")) return false;
-	if (!expect(r.net_handle == w::EntityHandle::make(3, 0).packed, "net_handle = pool-3 handle")) return false;
+	if (!expect(r.net_handle == 51, "net word = the DcbId (+0x7C), not the pool handle")) return false;
 	if (!expect(r.movement_val == static_cast<uint32_t>(heading_bam(270)), "movement_val = heading BAM (D-NET-59)")) return false;
 	if (!expect(r.orientation_val == static_cast<uint32_t>(w::to_fixed(25.5f)),
 	            "orientation_val = entity+0 authored marker radius")) return false;
@@ -665,6 +666,7 @@ bool run_pool3_marker_empty_slot_is_a_zero_word() {
 		w::Entity m;
 		m.kind = w::EntityKind::Marker;
 		m.item_id = 6002;
+		m.net_id = static_cast<uint16_t>(0x40 + i); // the DcbId net word (D-NET-517)
 		world.registry.spawn(3, with_def(m));
 	}
 	world.registry.despawn(w::EntityHandle::make(3, 1));
@@ -678,7 +680,7 @@ bool run_pool3_marker_empty_slot_is_a_zero_word() {
 	ok &= expect(nw::decode_pool3_sync_batch(wire.data(), wire.size(), out) &&
 	                     out.entity_count == 3 && out.records.size() == 3 &&
 	                     out.records[1].is_empty_slot &&
-	                     out.records[2].net_handle == w::EntityHandle::make(3, 2).packed,
+	                     out.records[2].net_handle == 0x42,
 	             "the record after the zero word lands on its own slot");
 	if (ok) std::printf("PASS pool3_marker_empty_slot_is_a_zero_word\n");
 	return ok;
@@ -700,11 +702,12 @@ bool run_pool3_marker_unknown_type_is_a_zero_word() {
 	w::Entity known;
 	known.kind = w::EntityKind::Marker;
 	known.item_id = 6002;
+	known.net_id = 0x0901; // the DcbId net word (D-NET-517)
 	world.registry.spawn(3, with_def(known));
 	const nw::Pool3SyncBatch batch = ns::build_pool3_marker_batch(world);
 	const bool ok = expect(world.registry.get(unknown_h) != nullptr && batch.records.size() == 2 &&
 	                               batch.records[0].is_empty_slot && !batch.records[1].is_empty_slot &&
-	                               batch.records[1].net_handle == w::EntityHandle::make(3, 1).packed,
+	                               batch.records[1].net_handle == 0x0901,
 	                       "a live marker of an unknown type streams as a zero word");
 	if (ok) std::printf("PASS pool3_marker_unknown_type_is_a_zero_word\n");
 	return ok;

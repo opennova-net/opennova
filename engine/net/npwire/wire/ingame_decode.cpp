@@ -262,7 +262,10 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 		rec.net_handle = c.u16();
 		if (rec.flags_byte & kPool3SyncHasTeamByte) rec.team_byte = c.u8();
 		if (rec.flags_byte & kPool3SyncHasWeaponType) rec.weapon_type = c.u16();
-		if (rec.flags_byte & kPool3SyncHasScoreByte) rec.score_byte = c.u8();
+		if (rec.flags_byte & kPool3SyncHasScoreByte) {
+			rec.score_present = true;
+			rec.score_byte = c.u8();
+		}
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;

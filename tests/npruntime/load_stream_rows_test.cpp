@@ -134,11 +134,67 @@ int fresh_allocation_passes_over_a_destroyed_row() {
 	return 0;
 }
 
+// D-NET-517: the 0x20 record's net word is the DcbId (+0x7C, the record's dword 2), +290 the
+// record's byte 81 sign-extended (0x04), +640 a 2044's location index (0x10) and +672's low
+// byte under the dword's gate (0x20).
+// [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 - @0x5035AD..0x503650;
+//  Entity_SpawnFromBMSRecord @0x40EBC1, @0x40EBD1..0x40EBD5, @0x40F18F / @0x40F20C,
+//  @0x40EC54 / @0x40F176]
+int pool3_record_streams_its_source_fields() {
+	bms::File m{};
+	const auto marker = [&](int32_t type_id, int32_t id) {
+		bms::Entity e = record(bms::ItemType::Marker, type_id, 1 << 16, 2 << 16, 0);
+		e.id = id;
+		m.markers.push_back(e);
+		return m.markers.size() - 1;
+	};
+	m.markers[marker(6005, 61)].ttool_index = 7;     // a waypoint: +672 = its ttool index
+	m.markers[marker(2044, 62)].map_symbol = 0xFF;   // +290 = -1 sign-extended
+	marker(2044, 63);                                // the second location: index 1
+	m.markers[marker(6001, 64)].next_ssn = 0x100;    // +672 nonzero, its low byte 0
+	auto world = std::make_unique<w::World>();
+	opennova::mission::promote_mission(m, *world, {});
+	world->registry.for_each_in_pool(3, [&](const w::Entity &e) {
+		w::Entity &row = *world->registry.get(e.handle);
+		row.item_type_index = 1; // the trait sweep's row
+		row.has_item_def = true;
+	});
+	const opennova::Pool3SyncBatch p = ns::build_pool3_marker_batch(*world);
+	const std::vector<uint8_t> wire = opennova::encode_pool3_sync_batch(p);
+	opennova::Pool3SyncBatch out;
+	if (!expect(opennova::decode_pool3_sync_batch(wire.data(), wire.size(), out) &&
+	                    out.records.size() == 4,
+	            "the four markers round-trip"))
+		return 1;
+	const opennova::Pool3SyncRecord &way = out.records[0], &loc0 = out.records[1],
+	                                    &loc1 = out.records[2], &gate = out.records[3];
+	if (!expect(way.net_handle == 61 && loc0.net_handle == 62 && loc1.net_handle == 63 &&
+	                    gate.net_handle == 64,
+	            "the net word is each record's DcbId"))
+		return 1;
+	if (!expect(loc0.ammo_count == 0xFFFF && (loc0.flags_byte & 0x04) != 0,
+	            "+290 is byte 81 sign-extended"))
+		return 1;
+	if (!expect(loc0.weapon_type == 0 && (loc0.flags_byte & 0x10) == 0 && loc1.weapon_type == 1 &&
+	                    (loc1.flags_byte & 0x10) != 0,
+	            "+640 is the location count at each 2044's spawn"))
+		return 1;
+	if (!expect(way.score_present && way.score_byte == 7,
+	            "+672 carries a waypoint's ttool index"))
+		return 1;
+	if (!expect(gate.score_present && gate.score_byte == 0 && (gate.flags_byte & 0x20) != 0,
+	            "+672's dword gates the byte: 0x100 sets the bit and writes 0x00"))
+		return 1;
+	std::printf("PASS pool3_record_streams_its_source_fields\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	const int net_id = organic_net_id_is_its_15c_word();
 	const int streams = streams_pass_over_rows_without_a_type_index_def_or_slot();
 	const int alloc = fresh_allocation_passes_over_a_destroyed_row();
-	return net_id != 0 ? net_id : streams != 0 ? streams : alloc;
+	const int pool3 = pool3_record_streams_its_source_fields();
+	return net_id != 0 ? net_id : streams != 0 ? streams : alloc != 0 ? alloc : pool3;
 }

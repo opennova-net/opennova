@@ -833,7 +833,10 @@ void stream_pool2_zone_blocks(const world::World &w, StaticEntityBatch &page) {
 static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 	Pool3SyncRecord rec;
 	rec.item_type_id = static_cast<uint16_t>(e.item_id);
-	rec.net_handle = e.handle.packed;            // entitySlot+124 — the wire handle (always)
+	// entitySlot+124 (always): the DcbId, the BMS record's dword 2 (D-NET-517).
+	// [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 - @0x5035D1..0x5035E2;
+	//  Entity_SpawnFromBMSRecord @0x40EBC1]
+	rec.net_handle = e.net_id;
 	// entitySlot+4/8/12 (always): the position words, raw (D-NET-507).
 	// [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 - @0x503543 / @0x503555 / @0x503567]
 	rec.pos_x = e.position.x.q16;
@@ -847,6 +850,15 @@ static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 	rec.orientation_val = static_cast<uint32_t>(
 			world::to_fixed(e.bound_radius));
 	rec.team_byte = e.team;
+	// The three source fields, each under its value gate (D-NET-517): +290 the record's
+	// byte 81 sign-extended (0x04), +640 a 2044's location index (0x10), +672's low byte
+	// gated on the dword (0x20). [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 -
+	//  +290 @0x5035AD..0x5035CC, +640 @0x50360B..0x50362A, +672 @0x503633..0x503650;
+	//  Entity_SpawnFromBMSRecord @0x40EBD1..0x40EBD5 (movsx), @0x40F18F, @0x40EC54 / @0x40F176]
+	rec.ammo_count = static_cast<uint16_t>(static_cast<int16_t>(static_cast<int8_t>(e.ammo_count)));
+	rec.weapon_type = static_cast<uint16_t>(e.location_index);
+	rec.score_present = e.script_next_ssn != 0;
+	rec.score_byte = static_cast<uint8_t>(e.script_next_ssn);
 	return rec;
 }
 

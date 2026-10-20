@@ -992,6 +992,10 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     // reset Mission_ResetBmsState @0x40DBD1, called
     // from Mission_LoadBMSFile @0x40F50E]
     uint32_t spawn_phase_counter = 0;
+    // g_LocationNameCount: each type-0x7FC spawn takes it and adds one, in the load's
+    // pool order (items, buildings, markers, organics) [orig: Entity_SpawnFromBMSRecord
+    //  @0x40E9F0 - the read @0x40F188, the store @0x40F18F, the add @0x40F20C].
+    int16_t location_name_count = 0;
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         // Pool 0's used count is the ACCEPTED record count while every
         // accepted record still lands at its record index, so with k
@@ -1023,6 +1027,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             if (e.type_id == 5305) e.type_id = 4999 + kBmsTeammateClass;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);
             if (record.type_id == 5305) seed.player_class = kBmsTeammateClass;
+            if (e.type_id == def::DEF_TYPE_NAMED_LOCATION) seed.location_index = location_name_count++;
             // The authored display name: name_index 0 = none; the resolver maps
             // the index through the mission RTXT [PeopleNames] STRNAME%03i entry
             // and the copy truncates at the retail 15 chars [orig:

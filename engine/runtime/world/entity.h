@@ -794,6 +794,10 @@ struct Entity {
     uint32_t death_tick = 0;
     // Squib callback/motor aliases of entity+0x270/+0x2A0..+0x30C.
     int32_t script_next_ssn = 0;
+    // entity+0x280: a type-0x7FC (2044) row's location index, the running count of the
+    // load's 2044 spawns in its pool order (D-NET-517). [orig: Entity_SpawnFromBMSRecord
+    //  @0x40E9F0 - g_LocationNameCount @0x40F188..0x40F18F, its increment @0x40F20C]
+    int16_t location_index = 0;
     struct SquibState {
         bool motor = false;
         int32_t ammo_index = 0; // signed word +0x160 (presentation)

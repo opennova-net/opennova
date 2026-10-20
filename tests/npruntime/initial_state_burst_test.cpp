@@ -1049,6 +1049,7 @@ int pool3_page_start_impl() {
 		m.position = {static_cast<float>(i), 20.0f, 1.0f};
 		m.item_type_index = 1; // the trait sweep's row: not an empty slot
 		m.has_item_def = true;
+		m.net_id = static_cast<uint16_t>(0x100 + i); // its DcbId, the net word (D-NET-517)
 		world.registry.spawn(3, m);
 	}
 	const std::vector<std::size_t> freed = {5, 10, 15, 32};
@@ -1092,7 +1093,7 @@ int pool3_page_start_impl() {
 				++zero_words;
 				continue;
 			}
-			if (!expect(r.net_handle == w::EntityHandle::make(3, static_cast<int>(slot)).packed,
+			if (!expect(r.net_handle == 0x100 + slot,
 			            "a record's slot is the page's start word plus its index"))
 				return 1;
 		}

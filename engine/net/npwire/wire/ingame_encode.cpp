@@ -79,7 +79,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch) {
 		if (rec.ammo_count)      flags |= kPool3SyncHasAmmoCount;      // entry+290 [orig: 0x5035b7]
 		if (rec.team_byte)       flags |= kPool3SyncHasTeamByte;       // entry+354 [orig: 0x5035f1]
 		if (rec.weapon_type)     flags |= kPool3SyncHasWeaponType;     // entry+640 [orig: 0x50360b]
-		if (rec.score_byte)      flags |= kPool3SyncHasScoreByte;      // entry+672 [orig: 0x503633]
+		if (rec.score_present || rec.score_byte) flags |= kPool3SyncHasScoreByte; // entry+672 dword [orig: 0x503633]
 
 		w.u8(flags);                    // [orig: *flags_location = flags @ 0x503660]
 		w.u32(uint32_t(rec.pos_x));     // entry+4  [orig: 0x503553]

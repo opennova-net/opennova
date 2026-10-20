@@ -244,7 +244,10 @@ struct Pool3SyncRecord {
 	uint16_t ammo_count = 0;          // 0x04     entitySlot+290
 	uint8_t  team_byte = 0;           // 0x08     entitySlot+354
 	uint16_t weapon_type = 0;         // 0x10     entitySlot+640
-	uint8_t  score_byte = 0;          // 0x20     entitySlot+672
+	uint8_t  score_byte = 0;          // 0x20     entitySlot+672 (its low byte)
+	// The 0x20 gate is the +672 DWORD, not its byte: a dword with a zero low byte still
+	// sets the bit and writes 0x00 [orig: NetPacket_SerializeEntityPoolToPacket @0x503633].
+	bool     score_present = false;
 };
 
 struct Pool3SyncBatch {
