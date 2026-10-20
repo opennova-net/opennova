@@ -3929,7 +3929,11 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	inmatch::start_host_session(owner, cfg);
 
 	// Match Simulation's startup order: construct/install the replica pipeline after host bring-up,
-	// then fold the queued initial stream and first whole-world compact frame together.
+	// then fold the queued initial stream and first whole-world compact frame together. The
+	// mission start's end queues the own client's C2S 0x0B, which the first frame's receive pump
+	// hands to its receiver (D-NET-NEW-L4-5).
+	if (!expect(inmatch::test::deliver_host_own_mission_status(owner.ctx, owner.now_tick),
+	            "the own client's 0x0B reaches its receiver")) return false;
 	inmatch::Server_TickUpdate(owner.ctx);
 	inmatch::ClientRuntime host_view(host_loop);
 	host_view.view().set_item_class_resolver([](uint16_t type_id) {

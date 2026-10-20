@@ -116,6 +116,14 @@ public:
 	// [orig: Game_StartMission -- the Player_InitPlayer call @0x525BBC;
 	//  Player_InitPlayer @0x4E15F0 -- `Flags &= ~1` @0x4E19C2].
 	void init_local_player_at_mission_start();
+	// The playing host's own client's mission-start end, as every session
+	// peer's: its C2S 0x0B queued and pumped onto the loopback, which the next
+	// frame's receive pump hands to the server's 0x0B receiver, whose join
+	// enters the host's own slot into the game (D-NET-NEW-L4-5). The kernel's
+	// complete_mission_start runs it last (MissionKernel::net_mission_start_end,
+	// installed with the client view), ahead of finish_mission_load
+	// [orig: Game_StartMission @0x526189..0x526255, ahead of @0x526267].
+	void send_own_mission_status();
 	// The mission load's end on the authority: the S2C 0x7B to every slot,
 	// and after a map change's bring-up a pump. Phase B of the host boot runs
 	// it [orig: Game_StartMission @0x52625F..0x526267].

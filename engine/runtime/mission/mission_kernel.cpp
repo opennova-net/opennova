@@ -979,6 +979,10 @@ bool MissionKernel::complete_mission_start() {
 	local.latch_attack_defend_role(mission_game_type_);
 	capture_baseline();
 	mission_start_pending = false;
+	// The start ends with a session peer's C2S 0x0B, the playing host's own
+	// client's included (D-NET-NEW-L4-5) [orig: Game_StartMission
+	// @0x526189..0x526255].
+	if (net_mission_start_end) net_mission_start_end();
 	return true;
 }
 

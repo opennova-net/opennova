@@ -262,8 +262,15 @@ public:
 	// the currents snap to the just-authored targets, the recovered clamps
 	// install, and 255 full ticks settle.
 	// Then count units, initialize authoritative vehicles and seal the restore
-	// point. Returns false if this load already completed the boundary.
+	// point, and end with the net half's mission-start end (below). Returns
+	// false if this load already completed the boundary.
 	bool complete_mission_start();
+	// The net half's mission-start end, which complete_mission_start runs last:
+	// a playing host's own client queues its C2S 0x0B there
+	// (inmatch::HostRole::send_own_mission_status, installed with its client
+	// view). Null = no session peer of its own (a dedicated host, a joiner,
+	// the bare kernel) [orig: Game_StartMission @0x526189..0x526255].
+	std::function<void()> net_mission_start_end;
 	// The precipitation pool's per-render update for a camera at (x, y, z)
 	// mission 16.16: the wrap into the camera volume and the re-floor of every
 	// wrapped drop on terrain / water / the first entity under it

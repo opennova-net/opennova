@@ -38,7 +38,6 @@ struct InitialStateStep {
 	std::vector<InitialStateMessage> messages;  // emitted this step (0 or more)
 	uint32_t world_batches_emitted = 0;         // world-stream batches sent this step (drives F3 readiness)
 	bool advanced = false;                      // false => burst not eligible / already complete
-	bool reached_in_game = false;               // emitted the world-stream terminator (game-state 9) this step
 };
 
 // The retail CNapiServerConfig_BuildFlags computation captured by
@@ -47,15 +46,17 @@ struct InitialStateStep {
 uint32_t build_server_config_flags(const NapiNPServerCtx &ctx);
 
 // Advance `conn.burst` by one phase step and return the message(s) to ship. Drive it once per frame
-// per non-spawned connection until reached_in_game. No-op (advanced=false) when ctx.world == nullptr,
-// the connection has not reached PlayerAdded, or its burst is already complete. Sets
-// conn.burst.spawned + game_state 9 on the terminator (the PeerSpawned source). now_tick sources the
-// 0x76 configured class-allow mask + 0x1A timestamp bodies. [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
+// per non-spawned connection; the world stream's 0x1A leaves the slot in state 5, awaiting its
+// C2S 0x0B (the host's own client's too: HostRole::send_own_mission_status), whose join sets
+// conn.burst.spawned (the PeerSpawned source). No-op (advanced=false) when ctx.world == nullptr,
+// the connection has not reached PlayerAdded, or its burst is already complete. now_tick sources
+// the 0x76 configured class-allow mask + 0x1A timestamp bodies.
+// [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
 InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                      uint32_t now_tick = 0);
 
-// The join: the C2S 0x0B's (a remote joiner's, from its dispatch; the host's own client's,
-// in-process, from the producer). Writes the slot's join words (chat stamp, the +89912 state
+// The join: the C2S 0x0B's, from its receiver (Server_HandlePlayerJoinRequest), a remote
+// joiner's and the host's own client's alike. Writes the slot's join words (chat stamp, the +89912 state
 // byte's bits, game state 10, and on the first state-6 entry the quality reset, the network
 // reset, the armory cooldown zero, the RTT countdown and the entry stamp), enters slot state 6
 // and returns this connection's game-start messages in order (0x41s, 0x42, 0x0F, 0x4D, 0x61,

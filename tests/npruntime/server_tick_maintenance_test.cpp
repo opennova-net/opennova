@@ -221,7 +221,7 @@ bool check_spawn_protection_seeded_at_creation() {
 				"the join zeroes the armory cooldown and clears the latch outside pre-round"))
 			return false;
 	}
-	// The listen host's own player takes the same 620 at its in-process join.
+	// The listen host's own player takes the same 620 at its join, its own C2S 0x0B's.
 	{
 		w::World world;
 		world.registry.configure_pool(0, 8);
@@ -239,8 +239,8 @@ bool check_spawn_protection_seeded_at_creation() {
 				"host-own creation fixture spawns the local player"))
 			return false;
 		inmatch::NapiNPConnection &own = ctx.np_protocol.connection_list.front();
-		for (int i = 0; i < 64 && !own.burst.spawned; ++i)
-			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx, own, /*now_tick=*/1);
+		std::vector<inmatch::InitialStateMessage> own_burst;
+		(void)inmatch::test::drive_host_own_burst_and_join(ctx, own, /*now_tick=*/1, own_burst);
 		const w::Entity *host = world.registry.get(world.cached.local_player);
 		if (!expect(own.burst.spawned && host != nullptr && host->damage_state == 620,
 				"the host's own player joins under the 620-tick protection"))

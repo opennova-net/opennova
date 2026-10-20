@@ -232,14 +232,8 @@ int placement_and_world_state_load_keep_the_words() {
 		return 1;
 
 	std::vector<inmatch::InitialStateMessage> emitted;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (auto &m : step.messages) emitted.push_back(m);
-		reached = step.reached_in_game;
-	}
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
 	const std::vector<uint8_t> *body = nullptr;
 	for (const inmatch::InitialStateMessage &m : emitted)
 		if (m.tag == 0x0F) body = &m.body;

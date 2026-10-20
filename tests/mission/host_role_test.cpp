@@ -831,9 +831,12 @@ int main() {
 			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
 		CHECK(own != nullptr);
 		if (own != nullptr && host.client_runtime != nullptr) {
-			CHECK(own->fire_tick_mode && own->tick_seed != 0);
-			// The seed rode the loopback to the host's own client.
+			// The own client's C2S 0x0B, queued at the mission start's end, joins it in
+			// the first frame's receive pump, whose seed rode the loopback to the host's
+			// own client (D-NET-NEW-L4-5).
+			CHECK(!own->fire_tick_mode);
 			role.run_tick(tick_input(0));
+			CHECK(own->fire_tick_mode && own->tick_seed != 0);
 			CHECK(host.client_runtime->current_tick() != 0);
 			for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
 			CHECK(host.client_runtime->current_tick() > own->fire_tick_floor);
@@ -1146,9 +1149,11 @@ int main() {
 			CHECK(!kernel.local.local_player_dead());
 			continue;
 		}
-		CHECK(own->link.respawn_pending && (player->flags & 1u) != 0);
+		// The add hid the held body; the own client's C2S 0x0B joins it held in the first
+		// frame's receive pump (D-NET-NEW-L4-5).
+		CHECK(!own->link.respawn_pending && (player->flags & 1u) != 0);
 		for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
-		CHECK(own->link.respawn_pending);
+		CHECK(own->link.respawn_pending && (player->flags & 1u) != 0);
 		CHECK(host.client_runtime->state().deploy_overlay_active);
 		CHECK(inmatch::death_menu_triggered(view));
 		CHECK(host.client_runtime->state().take_death_menu_open(

@@ -1,6 +1,7 @@
 #include <runtime/inmatch/host_role.h>
 
 #include <base/gameprofile/game_type.h>
+#include <base/gameprofile/gameprofile.h> // the title's version text (the own 0x0B's dword)
 #include <base/io/log.h>
 #include <base/io/perf_clock.h>
 #include <formats/mission/bms.h>
@@ -11,6 +12,7 @@
 #include <net/npwire/session_hello.h> // DisconnectEvent
 #include <net/title/title_identity.h> // title_in_match (the rules word's bits, DFX2-18)
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/joiner_connection.h> // build_mission_status (the own C2S 0x0B)
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/server_console.h>
@@ -23,6 +25,7 @@
 #include <runtime/world/player_loadout.h>
 
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -174,6 +177,8 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime = std::make_unique<inmatch::ClientRuntime>(state.host_loop);
 	state.host_owner.ctx.host_client = state.client_runtime.get();
+	// Its mission start ends with its C2S 0x0B (D-NET-NEW-L4-5).
+	kernel.net_mission_start_end = [this] { send_own_mission_status(); };
 	// A fresh view counts its 0x0F / 0x50 folds from zero.
 	track_seen_ = ReplicaTrackSeen{};
 	state.client_runtime->set_profile(kernel.world.profile);
@@ -351,6 +356,29 @@ void HostRole::init_local_player_at_mission_start() {
 		player->flags &= ~world::kEntityFlagCarried;
 }
 
+// See host_role.h. The 0x0B is the side password (g_SidePassword, the game
+// config's own entry, which a host's join menu never writes), the two map
+// checksums Mission_GetMapChecksums leaves zero and the packed build version;
+// the receiver reads only the checksums, past the string's NUL.
+// [orig: Game_StartMission - is_mp_session_peer @0x526189 / @0x52619A,
+//  Mission_GetMapChecksums @0x526209, NetPacket_WriteStringAndThreeInts
+//  @0x52622E (g_SidePassword @0x52621F, copied from g_GameConfigState+0x372 by
+//  Game_ApplySessionSettingsToGlobals @0x551D20..0x551D30),
+//  CNapiNetwork_QueueReliableMessage(0x0B) @0x52624B,
+//  CNapiNetwork_PumpClientProtocolSend @0x526255; the receiver
+//  NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
+void HostRole::send_own_mission_status() {
+	if (state.host_owner.ctx.is_mp_session_peer == 0 || !state.client_runtime) return;
+	const TitleIdentity *title = state.host_owner.ctx.np_protocol.identity;
+	const gameprofile::GameProfile *profile =
+			title != nullptr ? gameprofile::gameprofile_by_id(title->game_id) : nullptr;
+	if (!state.client_runtime->queue_host_message(c2s::MISSION_FILE_STATUS,
+				build_mission_status(std::string_view{},
+						packed_game_version(profile != nullptr ? profile->version_text : nullptr))))
+		return;
+	state.client_runtime->flush_host_sends();
+}
+
 void HostRole::pump_load() {
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();
@@ -441,6 +469,10 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// the same table's row raises the host slot's ack high-water (D-NET-604).
 		// [orig: Client_ProcessNetworkFrame @0x42C1E1; g_NPMsgInfoServer's 0x34
 		//  row @0x82B898 -> NapiNPServerMsg_UpdateAck @0x5024B0]
+		// So does its mission start's C2S 0x0B, whose receiver runs the join for
+		// the host's own slot as for a joiner's (D-NET-NEW-L4-5)
+		// [orig: Game_StartMission @0x52624B; NapiNPServerMsg_PlayerJoinRequest
+		//  @0x51AB10, from the receive pump @0x51D895].
 		// So do its console line (a session peer's CMD queues the reliable 0x04,
 		// whose handler echoes an untaken line back as S2C 0x06) and the 0x24 its
 		// own client's SERVER / BAN commands send back over the walk; both
@@ -470,10 +502,11 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET &&
 				dg.tag != c2s::SPECTATOR_RESPAWN && dg.tag != c2s::CLIENT_QUALITY &&
 				dg.tag != c2s::KEEPALIVE && dg.tag != c2s::ADMIN_NETLOG_COMMAND &&
-				dg.tag != c2s::BAN_PUNT_COMMAND) {
+				dg.tag != c2s::BAN_PUNT_COMMAND && dg.tag != c2s::MISSION_FILE_STATUS) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
+		// The 0x0B's receiver reads the host context too.
 		// The chat handler, the snapshot builder, the radio call (its
 		// designation table and zone test), the squad handlers, the team
 		// change, the Respawn key's 0x41 (the authority and the respawn
@@ -483,7 +516,7 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
 				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET ||
 				dg.tag == c2s::SPECTATOR_RESPAWN || dg.tag == c2s::ADMIN_NETLOG_COMMAND ||
-				dg.tag == c2s::BAN_PUNT_COMMAND;
+				dg.tag == c2s::BAN_PUNT_COMMAND || dg.tag == c2s::MISSION_FILE_STATUS;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;

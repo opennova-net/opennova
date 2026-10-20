@@ -201,19 +201,16 @@ int main_impl() {
 	// Drive the burst to completion, collecting the emitted (tag, body) in order.
 	// The HOST LOOPBACK (type-2) skips the loadout gate and drains in one shot — it has no remote
 	// client sending C2S 0x2F. The loadout gate only applies to REMOTE JOINERS (type-1).
+	// The world stream's 0x1A leaves the own slot in state 5; the own client's C2S 0x0B (its
+	// mission start's end) then joins it from the next receive pump (D-NET-NEW-L4-5).
 	std::vector<inmatch::InitialStateMessage> emitted;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step = inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (auto &m : step.messages) emitted.push_back(m);
-		reached = step.reached_in_game;
-	}
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
 
-	if (!expect(reached, "burst reached game-state 9 (the world-stream terminator)")) return 1;
+	if (!expect(reached, "the burst's 0x1A leaves the own slot in state 5 for its C2S 0x0B")) return 1;
 	if (!expect(conn.burst.spawned && conn.burst.game_state == 10 &&
 	                    conn.slot_state == inmatch::PlayerSlotState::Joined,
-	            "the loopback's in-process join marks spawned, game state 10, slot state 6")) return 1;
+	            "the own 0x0B's join marks spawned, game state 10, slot state 6")) return 1;
 	if (!expect(conn.phase == inmatch::ConnectionPhase::Spawned, "connection advanced to Spawned")) return 1;
 
 	// (1) The full §5.2a emitted tag order. Player-sync: 0x2C, 0x08, 0x2A×6, 0x1C, 0x0B, 0x66, 0x76,
@@ -466,23 +463,25 @@ int main_impl() {
 					if (!expect(ev.self_id == inmatch::kHostPlayerDcb, "F3 self_id == host dcb")) return 1;
 					if (!expect(ev.pose.pitch == kLookPitchHigh,
 					            "F3 world-path pose pitch == AiEntity BAM32 high word")) return 1;
-					if (f3_at < 0) f3_at = seq;
-				} else if (ev.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned) {
-					if (!expect(ev.self_id == inmatch::kHostPlayerDcb, "PeerSpawned self_id == host dcb")) return 1;
-					if (!expect(ev.pose.pitch == kLookPitchHigh,
-					            "PeerSpawned world-path pose pitch == AiEntity BAM32 high word")) return 1;
 					// The spawn marker's yaw 0 placement heading's high half, 0x4000
 					// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66].
 					if (!expect(ev.pose.heading == 0x4000,
-					            "PeerSpawned world-path pose heading == the placement heading's high half")) return 1;
+					            "F3 world-path pose heading == the placement heading's high half")) return 1;
+					if (f3_at < 0) f3_at = seq;
+				} else if (ev.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned) {
 					if (spawned_at < 0) spawned_at = seq;
 				}
 				++seq;
 			}
 		}
 		if (!expect(f3_at >= 0, "one-shot World burst still surfaces PeerEnteredWorldStreaming (F3)")) return 1;
-		if (!expect(spawned_at >= 0, "one-shot World burst surfaces PeerSpawned")) return 1;
-		if (!expect(f3_at < spawned_at, "F3 surfaces BEFORE PeerSpawned (dcb-timing order)")) return 1;
+		// The burst ends in slot state 5: the own slot joins from its own C2S 0x0B's receiver,
+		// not from the producer, so the burst surfaces no PeerSpawned (D-NET-NEW-L4-5).
+		if (!expect(spawned_at < 0 && !pose_conn.burst.spawned &&
+		                    pose_conn.slot_state == inmatch::PlayerSlotState::AwaitJoin,
+		            "the own burst ends in slot state 5, unjoined")) return 1;
+		(void)inmatch::test::host_own_join(ctx2, pose_conn, /*now_tick=*/1);
+		if (!expect(pose_conn.burst.spawned, "the own C2S 0x0B's join enters the game")) return 1;
 	}
 
 	// A bound World entity without an AiEntity keeps the historical zero-pitch fallback. In
@@ -586,7 +585,7 @@ int main_impl() {
 		for (int i = 0; i < 64 && !parked_for_spawn_menu; ++i) {
 			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;
-			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
+			if (!expect(!jconn.burst.spawned, "joiner not in-game while paced/gated")) return 1;
 			if (!s.messages.empty() && s.messages.front().tag == 0x1C) {
 				std::vector<uint8_t> tags;
 				for (const auto &m : s.messages) tags.push_back(m.tag);
@@ -618,7 +617,7 @@ int main_impl() {
 		for (int i = 0; i < 256 && !reached_await_join; ++i) {
 			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;
-			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
+			if (!expect(!jconn.burst.spawned, "joiner not in-game while paced/gated")) return 1;
 			reached_await_join = jconn.slot_state == inmatch::PlayerSlotState::AwaitJoin;
 		}
 		if (!expect(reached_await_join && jconn.burst.game_state == 9,
@@ -1067,15 +1066,11 @@ int pool3_page_start_impl() {
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	std::vector<std::vector<uint8_t>> pages;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (const auto &m : step.messages)
-			if (m.tag == 0x20) pages.push_back(m.body);
-		reached = step.reached_in_game;
-	}
+	std::vector<inmatch::InitialStateMessage> emitted;
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
+	for (const auto &m : emitted)
+		if (m.tag == 0x20) pages.push_back(m.body);
 	if (!expect(reached && pages.size() >= 2, "the 80 pool-3 slots take more than one 0x20 page"))
 		return 1;
 	std::vector<opennova::Pool3SyncBatch> batches(pages.size());
@@ -1184,14 +1179,8 @@ int location_names_by_name_index_impl() {
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const std::vector<uint8_t> *body = nullptr;
 	std::vector<inmatch::InitialStateMessage> emitted;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (auto &m : step.messages) emitted.push_back(m);
-		reached = step.reached_in_game;
-	}
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
 	for (const inmatch::InitialStateMessage &m : emitted)
 		if (m.tag == 0x0F) body = &m.body;
 	opennova::WorldStateLoad state;
@@ -1245,14 +1234,8 @@ int location_names_fall_back_to_marker_labels_impl() {
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const std::vector<uint8_t> *body = nullptr;
 	std::vector<inmatch::InitialStateMessage> emitted;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (auto &m : step.messages) emitted.push_back(m);
-		reached = step.reached_in_game;
-	}
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
 	for (const inmatch::InitialStateMessage &m : emitted)
 		if (m.tag == 0x0F) body = &m.body;
 	opennova::WorldStateLoad state;

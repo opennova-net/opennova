@@ -92,15 +92,11 @@ void join_own_player(JoinedHost &host, const TitleIdentity *title) {
 	inmatch::Server_ProcessPendingPlayerSpawns(host.ctx, host.world);
 	inmatch::NapiNPConnection &conn = host.ctx.np_protocol.connection_list[0];
 	std::vector<uint8_t> body;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(host.ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (const inmatch::InitialStateMessage &m : step.messages)
-			if (m.tag == 0x0F) body = m.body;
-		reached = step.reached_in_game;
-	}
+	std::vector<inmatch::InitialStateMessage> emitted;
+	const bool reached = inmatch::test::drive_host_own_burst_and_join(
+			host.ctx, conn, /*now_tick=*/1, emitted);
+	for (const inmatch::InitialStateMessage &m : emitted)
+		if (m.tag == 0x0F) body = m.body;
 	host.decoded = reached && !body.empty() &&
 			decode_world_state_load(body.data(), body.size(), host.state);
 }

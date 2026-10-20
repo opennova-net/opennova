@@ -1016,19 +1016,14 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 		advance_burst_one_phase(ctx, conn, step, now_tick, page_budget);
 		if (is_remote) break; // one step per send boundary
 	}
-	// The host's own client sends its C2S 0x0B in-process once its world loaded: the type-2
-	// loopback runs the join here (a remote joiner's runs from its 0x0B's dispatch,
-	// Server_HandlePlayerJoinRequest). The 0x0B is every session peer's, the host's own client
-	// included, and the receiver is the one player-path caller of the join (the other two are
-	// the bot arms behind the slot's +0x178E3 bot byte).
-	// [orig: Game_StartMission @0x526189 (the is_mp_session_peer gate) -> the C2S 0x0B
+	// The world stream's end leaves every slot, the host's own included, in state 5: the join
+	// runs from its C2S 0x0B's receiver alone, the one player-path caller (the other two are
+	// the bot arms behind the slot's +0x178E3 bot byte). The host's own client queues its 0x0B
+	// at its mission start's end (HostRole::send_own_mission_status), and the next frame's
+	// receive pump hands it to the receiver, as a joiner's (D-NET-NEW-L4-5).
+	// [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin @0x51ABA1 /
+	//  @0x51ABB5; Game_StartMission @0x526189 (the is_mp_session_peer gate) -> the C2S 0x0B
 	//  @0x52624B; the bot arms' calls @0x51B93A / @0x51D2E1, behind @0x51B928 / @0x51D2CF]
-	if (!is_remote && conn.slot_state == PlayerSlotState::AwaitJoin) {
-		// The host's own 0x0B sends the two zero checksums every joiner's does.
-		for (InitialStateMessage &m : Server_OnPlayerJoin(ctx, conn, now_tick, {0, 0}))
-			step.messages.push_back(std::move(m));
-		step.reached_in_game = true;
-	}
 
 	// Instrumentation (paced): log this tick's emitted tags, and a one-line summary when the burst
 	// finishes, so the host log shows the world-load stream cadence directly.
