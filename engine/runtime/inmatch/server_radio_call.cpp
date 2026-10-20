@@ -91,13 +91,13 @@ constexpr int32_t kDesignationRayUnits = 1000;
 // Q16 deltas (2-D for type 1, 3-D for types 2..5 and 7), saturated at
 // flt_7C19E0 and truncated. [orig: @0x51457f..0x514603]
 int32_t rule_distance(const world::Entity &a, const world::Entity &b, bool three_d) {
-	const auto delta = [](float p, float q) {
+	const auto delta = [](int32_t p, int32_t q) {
 		return static_cast<double>(static_cast<int32_t>(
-				static_cast<uint32_t>(world::to_fixed(p)) - static_cast<uint32_t>(world::to_fixed(q))));
+				static_cast<uint32_t>(p) - static_cast<uint32_t>(q)));
 	};
-	const double dx = delta(a.position.x, b.position.x);
-	const double dy = delta(a.position.y, b.position.y);
-	const double dz = three_d ? delta(a.position.z, b.position.z) : 0.0;
+	const double dx = delta(a.position.x.q16, b.position.x.q16);
+	const double dy = delta(a.position.y.q16, b.position.y.q16);
+	const double dz = three_d ? delta(a.position.z.q16, b.position.z.q16) : 0.0;
 	const double length = std::sqrt(dx * dx + dy * dy + dz * dz);
 	return static_cast<int32_t>(std::min(length, 2147418112.0));
 }

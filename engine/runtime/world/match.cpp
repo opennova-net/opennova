@@ -589,7 +589,7 @@ void Match::return_flag_home(World &world, EntityHandle flag_handle,
     Entity *flag = world.registry.get(flag_handle);
     if (state == nullptr || flag == nullptr)
         return;
-    const Vec3 event_position = flag->position;
+    const EntityPosition event_position = flag->position;
     if (Entity *carrier = world.registry.get(flag->primary_occupant);
         carrier != nullptr && carrier->mounted_child == flag_handle)
         carrier->mounted_child = EntityHandle{};
@@ -662,7 +662,7 @@ void Match::record_flag_capture(World &world, EntityHandle player_handle,
         add_team_record_event(1, MatchStats::kFlagCaptures, score_value(10));
     else if (flag->item_id == kNeutralFlag)
         add_team_event(carrier->team, MatchStats::kFlagCaptures, score_value(10));
-    const Vec3 capture_position = flag->position;
+    const EntityPosition capture_position = flag->position;
     const uint8_t flags_before = static_cast<uint8_t>(flag->flags);
     carrier->mounted_child = EntityHandle{};
     flag->primary_occupant = EntityHandle{};

@@ -489,6 +489,8 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 			}
 		}
 	}
+	// The position words, raw (D-NET-507). [orig: NetPacket_SerializeObjectToBuffer @0x504D10 -
+	//  entity+4 / +8 / +0xC @0x505131 / @0x505142 / @0x505155]
 	rec.pos_x = e.position.x.q16;
 	rec.pos_y = e.position.y.q16;
 	rec.pos_z = e.position.z.q16;

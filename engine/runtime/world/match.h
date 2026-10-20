@@ -335,8 +335,10 @@ struct MatchGameplayEvent {
     MatchGameplayEventKind kind = MatchGameplayEventKind::FlagPickup;
     EntityHandle actor;
     EntityHandle objective;
-    Vec3 position;           // event/feed position before capture/reset
-    Vec3 objective_position; // post-transition S2C 0x2F position
+    // The flag's position words (D-NET-507): before the capture/reset (the feed), and
+    // after the transition (the S2C 0x2F, which streams entity+4/+8/+0xC raw).
+    EntityPosition position;
+    EntityPosition objective_position;
     uint8_t objective_flags = 0;
     EntityHandle parent;
     EntityHandle ground;

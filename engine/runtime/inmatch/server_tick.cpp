@@ -157,7 +157,7 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 	for (const world::MatchGameplayEvent &event : events) {
 		uint8_t feed_type = 0;
 		uint8_t feed_actor = 0xFF;
-		world::Vec3 feed_position{};
+		world::EntityPosition feed_position;
 		switch (event.kind) {
 		case world::MatchGameplayEventKind::FlagPickup:
 			feed_type = 0x14;
@@ -189,9 +189,9 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 			feed.push_back(0xFF);
 			feed.push_back(0xFF);
 			io::append_u16_le(feed, static_cast<uint16_t>(
-					static_cast<uint32_t>(world::to_fixed(feed_position.x)) >> 16));
+					static_cast<uint32_t>(feed_position.x.q16) >> 16));
 			io::append_u16_le(feed, static_cast<uint16_t>(
-					static_cast<uint32_t>(world::to_fixed(feed_position.y)) >> 16));
+					static_cast<uint32_t>(feed_position.y.q16) >> 16));
 		}
 
 		std::vector<uint8_t> state_body;
@@ -199,9 +199,11 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 			ObjectiveEntityState state;
 			state.entity_handle = event.objective.packed;
 			state.flags_byte = event.objective_flags;
-			state.pos_x = world::to_fixed(event.objective_position.x);
-			state.pos_y = world::to_fixed(event.objective_position.y);
-			state.pos_z = world::to_fixed(event.objective_position.z);
+			// The flag's words, raw (D-NET-507). [orig: NetPacket_SerializeEntityWithParentAndTarget
+			//  @0x505810 - entity+4 / +8 / +0xC @0x505878 / @0x505889 / @0x50589F]
+			state.pos_x = event.objective_position.x.q16;
+			state.pos_y = event.objective_position.y.q16;
+			state.pos_z = event.objective_position.z.q16;
 			state.attach_handle = event.parent.packed;
 			state.ground_handle = event.ground.packed;
 			state_body = encode_objective_entity_state(state);

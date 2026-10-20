@@ -126,11 +126,11 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
     if (markers.empty())
         return {};
 
-    std::vector<Vec3> avoid;
+    std::vector<FixedVec3> avoid; // the players' position words (D-NET-507)
     world.registry.for_each([&](const Entity &entity) {
         if (entity.handle.pool() == 0 && entity.handle != spawning_player &&
             (entity.flags & kEntityFlagPlayer) != 0)
-            avoid.push_back(entity.position);
+            avoid.push_back(entity.position.q16());
     });
 
     // flt_7C19E0 is the shared float-to-int guard. The random arm is not an
@@ -145,13 +145,11 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
         ScoredMarker row;
         row.pose = marker_pose(world, *marker);
         int64_t nearest = kDistanceClampFixed;
-        for (const Vec3 &other : avoid) {
+        for (const FixedVec3 &other : avoid) {
             const long double dx =
-                static_cast<long double>(row.pose.position.x.q16) -
-                to_fixed(other.x);
+                static_cast<long double>(row.pose.position.x.q16) - other.x;
             const long double dy =
-                static_cast<long double>(row.pose.position.y.q16) -
-                to_fixed(other.y);
+                static_cast<long double>(row.pose.position.y.q16) - other.y;
             const long double distance = std::sqrt(dx * dx + dy * dy);
             if (distance < static_cast<long double>(nearest)) {
                 nearest = static_cast<int64_t>(distance);

@@ -268,8 +268,7 @@ bool JoinerRole::remote_claimant(const world::Entity &carrier, world::Entity &ou
 	out = world::Entity{};
 	out.handle = world::EntityHandle{rider->handle};
 	out.item_id = rider->type_id;
-	out.position = {opennova::io::fp16_16_to_float(rider->x),
-			opennova::io::fp16_16_to_float(rider->y), opennova::io::fp16_16_to_float(rider->z)};
+	out.position.set_q16({rider->x, rider->y, rider->z}); // the replica's words (D-NET-507)
 	out.team = rider->team_known ? rider->team : 0;
 	out.flags = rider->state_flags;
 	if (rider->cls == EntityClass::Player) {
