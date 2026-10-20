@@ -233,7 +233,7 @@ TitleIdentity dfx2_row() {
 	// service's gate gives this title. [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the
 	//  in-use word's skip of the POST tests @0x4CF541 / @0x4CF5A0, no key for TimeOnGateServer
 	//  (dfx2.exe's twin @0x4CEEB0 identical); Mission_DeobfuscateDescription @0x4CDAA0 -
-	//  [DOMAINNAME] @0x4CDB88, called @0x4D1665]
+	//  [DOMAINNAME] @0x4CDB88, called from CNapiGameSession_OnNovaWorldConnected @0x4D1665]
 	t.gate_reply_witnessed = true;
 	// The live DFX2 gate's startupurl carries &pfid=38 (docs/titles/dfx2-vs-jo-re.md §6.5).
 	t.pfid = 38;

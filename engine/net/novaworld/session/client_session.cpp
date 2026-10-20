@@ -183,7 +183,7 @@ ClientSession::ClientSession(Config config) : cfg_(std::move(config)) {}
 
 // InitFromSession's draws: the CK, then the SCRK, from the configured source or the process's
 // one manager LCG. [orig: CNapiNPConnection_InitFromSession @0x626320 - NapiNP_GenerateSessionKey
-//  @0x6263FB, CNapiNPConnection_GenerateTxKey @0x626401]
+//  @0x6263F4 (the CK, stored @0x6263FB), CNapiNPConnection_GenerateTxKey @0x626401]
 void ClientSession::draw_connection_keys() {
 	const ConnectionKeys keys = cfg_.connection_keys ? cfg_.connection_keys() : manager_connection_keys();
 	client_key_ = keys.key;
@@ -513,8 +513,8 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
 		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join.
 		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3, InitFromSession @0x627E8C;
-		//  CNapiNPConnection_InitFromSession @0x626320 — the keys @0x6263fb/@0x626401, the
-		//  cs_dir copies @0x626449/@0x62645c, state 3 @0x626496]
+		//  CNapiNPConnection_InitFromSession @0x626320 - the CK @0x6263F4 (stored @0x6263FB),
+		//  the SCRK @0x626401, the cs_dir copies @0x626449/@0x62645c, state 3 @0x626496]
 		reconnect_.probing = false;
 		connection_down_ = false;
 		draw_connection_keys();

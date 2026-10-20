@@ -9,7 +9,8 @@
 // [orig: CNapiGameSession_InitNPConnection @0x4D3BE0 - NapiNPProtocol_Create @0x4D3C89 (the
 //  counter +0xECC zeroed @0x625A81), CNapiNPConnection_Create @0x4D3F70 (@0x62B282..0x62B296);
 //  Nwu_HandleServerHello @0x626D20 - InitFromSession @0x627EE5; CNapiNPConnection_InitFromSession
-//  @0x626320 - NapiNP_GenerateSessionKey @0x6263FB, CNapiNPConnection_GenerateTxKey @0x626401;
+//  @0x626320 - NapiNP_GenerateSessionKey @0x6263F4 (the CK, stored @0x6263FB),
+//  CNapiNPConnection_GenerateTxKey @0x626401;
 //  NapiNPManager_Create @0x62C5E0, its one caller CNapiNetwork_Init @0x4CA638]
 
 #include <net/napi/envelope.h>

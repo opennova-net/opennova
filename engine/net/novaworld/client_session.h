@@ -188,8 +188,8 @@ public:
 		// NAPI manager serves both protocols; a test injects its own keys.
 		// [orig: Nwu_HandleServerHello @0x626D20 - the re-join's CNapiNPConnection_InitFromSession
 		//  @0x627E8C, the first connect's @0x627EE5; InitFromSession @0x626320 -
-		//  NapiNP_GenerateSessionKey(manager) @0x6263FB (CK), CNapiNPConnection_GenerateTxKey
-		//  @0x626401 (SCRK); the lobby protocol on g_NapiNPCtx's manager:
+		//  NapiNP_GenerateSessionKey(manager) @0x6263F4 (the CK, stored @0x6263FB),
+		//  CNapiNPConnection_GenerateTxKey @0x626401 (the SCRK); the lobby protocol on g_NapiNPCtx's manager:
 		//  CNapiGameSession_InitNPConnection @0x4D3BE0 - NapiNPProtocol_Create @0x4D3C89;
 		//  NapiNPManager_Create @0x62C5E0, its one caller CNapiNetwork_Init @0x4CA638]
 		std::function<ConnectionKeys()> connection_keys;
