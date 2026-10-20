@@ -72,6 +72,23 @@ void draw_box(Workspace &workspace, const TextureThumbnail *picture, ImVec2 at, 
 	paint.AddRect(at, end, frame);
 }
 
+// What a picture says of itself, a line each (within the wrap the caller pushed): reading it, the game's refusal,
+// or its facts (its alpha with `alpha`) and what this use's load makes of it.
+void picture_words(const TextureThumbnail *picture, TextureLoadTransform transform, bool alpha) {
+	if (!picture) {
+		ImGui::TextDisabled("Reading it...");
+		return;
+	}
+	if (picture->state != TextureThumbnail::State::Ready) {
+		ImGui::TextColored(ui_kit::refusal_color(), "The game cannot load it: %s", picture->refusal.c_str());
+		return;
+	}
+	ImGui::TextDisabled("%s", facts(*picture).c_str());
+	if (alpha && !picture->alpha.empty()) ImGui::TextDisabled("Alpha: %s", picture->alpha.c_str());
+	if (transform != TextureLoadTransform::None)
+		ImGui::TextDisabled("As this use loads it: %s", texture_load_transform_words(transform));
+}
+
 } // namespace
 
 std::string facts(const TextureThumbnail &thumbnail) {
@@ -109,14 +126,7 @@ void facts_block(Workspace &workspace, const std::string &file, TextureLoadTrans
 	const std::shared_ptr<const TextureThumbnail> made = picture_of(workspace, file, transform);
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
 	ImGui::TextUnformatted(basename_of(file).c_str());
-	if (!made) ImGui::TextDisabled("Reading it...");
-	else if (made->state != TextureThumbnail::State::Ready)
-		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Error), "The game cannot load it: %s", made->refusal.c_str());
-	else {
-		ImGui::TextDisabled("%s", facts(*made).c_str());
-		if (transform != TextureLoadTransform::None)
-			ImGui::TextDisabled("As this use loads it: %s", texture_load_transform_words(transform));
-	}
+	picture_words(made.get(), transform, false);
 	ImGui::PopTextWrapPos();
 }
 
@@ -128,19 +138,9 @@ void tooltip(Workspace &workspace, const std::string &file, TextureLoadTransform
 	ImGui::Dummy(ImVec2(kTooltipSide, kTooltipSide));
 	draw_box(workspace, picture.get(), at, kTooltipSide);
 	ImGui::TextUnformatted(file.c_str());
-	if (!picture) {
-		ImGui::TextDisabled("Reading it...");
-	} else if (picture->state != TextureThumbnail::State::Ready) {
-		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + kTooltipSide);
-		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Error), "The game cannot load it: %s",
-		                   picture->refusal.c_str());
-		ImGui::PopTextWrapPos();
-	} else {
-		ImGui::TextDisabled("%s", facts(*picture).c_str());
-		if (!picture->alpha.empty()) ImGui::TextDisabled("Alpha: %s", picture->alpha.c_str());
-		if (transform != TextureLoadTransform::None)
-			ImGui::TextDisabled("As this use loads it: %s", texture_load_transform_words(transform));
-	}
+	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + kTooltipSide);
+	picture_words(picture.get(), transform, true);
+	ImGui::PopTextWrapPos();
 	ImGui::EndTooltip();
 }
 
@@ -164,12 +164,8 @@ void reference_field(Workspace &workspace, const FieldUse &field, const Value &v
 		ImDrawList &paint = *ImGui::GetWindowDrawList();
 		paint.AddRect(at, ImVec2(at.x + side, at.y + side), ImGui::GetColorU32(ui_kit::reference_color(ReferenceStatus::Missing)));
 		ImGui::SameLine();
-		ImGui::BeginGroup();
-		ImGui::PushTextWrapPos(0.0f);
 		ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "Not found");
-		ImGui::TextDisabled("The project has no file the game loads for %s.", load.name.c_str());
-		ImGui::PopTextWrapPos();
-		ImGui::EndGroup();
+		ui_kit::tooltip("The project has no file the game loads for " + load.name + ".");
 		return;
 	}
 	// Its words beside it while they have a few words' room, else under it.
@@ -181,22 +177,11 @@ void reference_field(Workspace &workspace, const FieldUse &field, const Value &v
 	ImGui::PushTextWrapPos(0.0f);
 	const std::shared_ptr<const TextureThumbnail> picture = picture_of(workspace, load.file, load.transform);
 	const std::string name = basename_of(load.file);
-	if (!picture) {
-		ImGui::TextUnformatted(name.c_str());
-		ImGui::TextDisabled("Reading it...");
-	} else if (picture->state != TextureThumbnail::State::Ready) {
-		ImGui::TextUnformatted(name.c_str());
-		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Error), "The game cannot load it: %s",
-		                   picture->refusal.c_str());
-	} else {
-		// The file the loader opens, said where it is not the name written (a .tga's .dds).
-		ImGui::TextUnformatted(pff::normalized_logical_name(name) == pff::normalized_logical_name(load.name)
-		                               ? name.c_str()
-		                               : (name + " (the game loads it for " + load.name + ")").c_str());
-		ImGui::TextDisabled("%s", facts(*picture).c_str());
-		if (load.transform != TextureLoadTransform::None)
-			ImGui::TextDisabled("As this use loads it: %s", texture_load_transform_words(load.transform));
-	}
+	// The file the loader opens, said where it is not the name written (a .tga's .dds).
+	const bool as_written = !picture || picture->state != TextureThumbnail::State::Ready ||
+	                        pff::normalized_logical_name(name) == pff::normalized_logical_name(load.name);
+	ImGui::TextUnformatted(as_written ? name.c_str() : (name + " (the game loads it for " + load.name + ")").c_str());
+	picture_words(picture.get(), load.transform, false);
 	ImGui::PopTextWrapPos();
 	ImGui::EndGroup();
 }

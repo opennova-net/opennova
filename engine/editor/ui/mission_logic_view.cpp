@@ -124,9 +124,8 @@ void record_tools(Workspace &workspace, const MissionDocument &mission, const Vi
 	if (ui_kit::tool(row, "Down", editable && index + 1 < count,
 	                 index + 1 < count ? "Moves it after the one below it." : "It is the last.", true))
 		window_requests::edit(workspace, mission, EditOperation::Move, record, index + 1);
-	if (ui_kit::tool(row, "Move to event...", editable, "Moves it to the end of another event's list (one undo step).", true))
-		ImGui::OpenPopup("move_to");
-	if (ImGui::BeginPopup("move_to")) {
+	if (ui_kit::tool_popup(row, "Move to event...", "move_to", editable,
+	                       "Moves it to the end of another event's list (one undo step).", true)) {
 		if (const NodeId to = event_menu(mission, names, record.row)) {
 			std::vector<Edit> edits;
 			std::string refusal;

@@ -239,20 +239,15 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 		ui_kit::tooltip(tip);
 	}
 	// The layers.
-	row.next(ui_kit::button_width("Show"));
-	if (ImGui::Button("Show")) ImGui::OpenPopup("show");
-	if (ImGui::BeginPopup("show")) {
-		bool terrain = options.terrain, water = options.water;
-		const bool changed = ImGui::Checkbox("Terrain", &terrain) | ImGui::Checkbox("Water", &water);
-		if (changed) {
-			JsonValue show = JsonValue::make_object();
-			show.set("terrain", JsonValue::make_bool(terrain));
-			show.set("water", JsonValue::make_bool(water));
-			JsonValue change = JsonValue::make_object();
-			change.set("show", std::move(show));
-			set_viewport_member(workspace, model, "options", std::move(change));
-		}
-		ImGui::EndPopup();
+	bool terrain = options.terrain, water = options.water;
+	if (show_layers(row, "What the picture draws under the sky: the terrain, the water.",
+	                {{"Terrain", &terrain}, {"Water", &water}})) {
+		JsonValue show = JsonValue::make_object();
+		show.set("terrain", JsonValue::make_bool(terrain));
+		show.set("water", JsonValue::make_bool(water));
+		JsonValue change = JsonValue::make_object();
+		change.set("show", std::move(show));
+		set_viewport_member(workspace, model, "options", std::move(change));
 	}
 	if (ui_kit::tool(row, "Frame", true, "The eye back on the ground at the terrain's middle (F, or a double click)."))
 		workspace.request(request::set_viewport(model.path(), environment_camera_change(model.framed(context.width, context.height))));

@@ -628,8 +628,8 @@ void test_texture_previews() {
 	ui.drain();
 	std::string text = logged_frame(ui);
 	CHECK(text.find("Not found") != std::string::npos &&
-	              text.find("The project has no file the game loads for gone.tga.") != std::string::npos,
-	      "a texture the project lacks says so under its field");
+	              text.find("The project has no file the game loads for gone.tga.") == std::string::npos,
+	      "a texture the project lacks says so under its field (why, in its tooltip)");
 	Edit set;
 	set.address = project.item;
 	set.field = "hud_image";
@@ -684,8 +684,8 @@ void test_texture_import_section() {
 	ui.away();
 	ui.drain();
 	const std::string text = logged_frame(ui);
-	CHECK(text.find("Made from gone.png") != std::string::npos && text.find("change how it is made here") != std::string::npos,
-	      "its tab says what it is made from");
+	CHECK(text.find("Made from gone.png") != std::string::npos && text.find("change how it is made here") == std::string::npos,
+	      "its tab says what it is made from (how it is changed in the heading's tooltip)");
 	CHECK(text.find("Its uses ask for:") != std::string::npos && text.find("format tga") != std::string::npos,
 	      "what its uses ask, with why");
 	CHECK(text.find("DXT5: the retail model textures' form") == std::string::npos &&
@@ -873,8 +873,8 @@ void test_texture_set_aside_line() {
 	ui.away();
 	ui.drain();
 	const std::string text = logged_frame(ui);
-	CHECK(text.find("The game never reads this file: its loader opens wall.dds in its place.") != std::string::npos,
-	      "under its uses, that the game never reads it");
+	CHECK(text.find("The game never reads this file.") != std::string::npos,
+	      "under its uses, that the game never reads it (its loader's file in the tooltip)");
 	ImGuiWindow *info = nullptr;
 	for (ImGuiWindow *window : GImGui->Windows)
 		if (window->Active && std::strstr(window->Name, "texture_info")) info = window;

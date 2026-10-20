@@ -193,7 +193,7 @@ void test_page_tab() {
 	CHECK(!font.empty(), "nw_cdata.coo, a file the editor has no editor for");
 	const auto page_shows = [&] {
 		n.ui.frames(2);
-		return logged_frame(n.ui).find("Read by the game") != std::string::npos;
+		return logged_frame(n.ui).find("Show in folder") != std::string::npos;
 	};
 	n.go(request::open_document("main.mnu"));
 	n.go(request::open_document(font));

@@ -61,16 +61,7 @@ void map_menu(Workspace &workspace, const MissionMapViewport &model, const Viewp
 		workspace.request(request::edit_in_viewport(model.path(), std::move(duplicate)));
 	}
 	ui_kit::tooltip("A copy of the selection a snap step east (Ctrl+D).");
-	if (ImGui::MenuItem("Delete", "Delete", false, edits && selected)) {
-		std::vector<Edit> removes;
-		for (const NodeAddress &each : mission_view_removals(*mission, view.documents.selection.records)) {
-			Edit edit;
-			edit.operation = EditOperation::Remove;
-			edit.address = each;
-			removes.push_back(std::move(edit));
-		}
-		workspace.request(request::edit_record(model.path(), std::move(removes)));
-	}
+	if (ImGui::MenuItem("Delete", "Delete", false, edits && selected)) delete_mission_selection(workspace, *mission);
 	ImGui::Separator();
 	MissionMarkMenu menu;
 	menu.record = record;

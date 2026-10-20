@@ -342,8 +342,7 @@ void DocumentWindow::draw_find(const Document &document) {
 				const std::string title = document.record_title(hit.address);
 				const std::string line_text = title + " - " + hit.label + ": " + hit.text.substr(0, hit.text.find('\n'));
 				const bool shown = on_hit && size_t(i) == cursor.current();
-				if (ImGui::Selectable((ui_kit::fit(line_text, ImGui::GetContentRegionAvail().x) + "###hit").c_str(), shown))
-					show_hit(document, size_t(i));
+				if (ui_kit::fitted_selectable(line_text, "hit", shown)) show_hit(document, size_t(i));
 				if (shown && find_.scroll) {
 					ImGui::SetScrollHereY(0.5f);
 					find_.scroll = false;

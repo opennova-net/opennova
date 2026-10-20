@@ -144,8 +144,7 @@ void face_material(Workspace &workspace, const ModelDocument &model, const NodeA
 		return;
 	}
 	const std::string words = model_record_label(model, material, nullptr);
-	if (ImGui::Selectable((ui_kit::fit(words, ImGui::GetContentRegionAvail().x) + "###material").c_str()))
-		window_requests::select(workspace, model, material);
+	if (ui_kit::fitted_selectable(words, "material")) window_requests::select(workspace, model, material);
 	ui_kit::tooltip(words + "\nIts surface and flags are set on every face made from it: select it to set them "
 	                        "all at once.");
 }

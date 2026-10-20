@@ -18,6 +18,7 @@
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/mission_link_shapes.h>
+#include <editor/preview/mission_place.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -247,6 +248,17 @@ void select_members(Workspace &workspace, const MissionDocument &mission, const 
 }
 
 } // namespace
+
+void delete_mission_selection(Workspace &workspace, const MissionDocument &mission) {
+	std::vector<Edit> removes;
+	for (const NodeAddress &each : mission_view_removals(mission, workspace.view().documents.selection.records)) {
+		Edit edit;
+		edit.operation = EditOperation::Remove;
+		edit.address = each;
+		removes.push_back(std::move(edit));
+	}
+	workspace.request(request::edit_record(mission.path(), std::move(removes)));
+}
 
 NodeAddress mission_menu_event(const NodeAddress &primary) {
 	return mission_logic_record(primary) ? NodeAddress{ primary.row, node_kind(MissionKind::Event), 0 } : NodeAddress();

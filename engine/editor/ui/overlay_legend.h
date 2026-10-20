@@ -23,6 +23,9 @@ struct SessionView;
 // brush lays is its class or code, or with Erase the game's default it lays in their place (class 1, code 0).
 void draw_overlay_legend(Workspace &workspace, ViewportCanvas &ui, const std::string &path, ViewportKind kind,
                          const MissionOverlayImage &overlay, const std::vector<FoliageDef> &defs, bool open);
+// The ground overlay's choices as radio buttons (Nothing, Surface classes, Foliage), each its tip (the mission's 3D
+// view's Show popup, the terrain viewport's Over the terrain): the one picked this frame, else `current`.
+MissionGroundOverlay ground_overlay_choice(MissionGroundOverlay current);
 // The legend that draws: its title, tip, rows (the brush's marked) and words with no row.
 ViewportCanvas::Legend overlay_legend_of(const SessionView &view, const std::string &path, const MissionOverlayImage &overlay,
                                          const std::vector<FoliageDef> &defs, bool open);

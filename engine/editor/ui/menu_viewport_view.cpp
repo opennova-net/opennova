@@ -542,13 +542,11 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 			const std::string name =
 					note.widget >= 0 ? menu.render().compiler().widget_name(note.widget) : screen.name();
 			const std::string line = name + ": " + menu_note_message(note);
-			const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
 			ImGui::PushID(int(i));
-			if (ImGui::Selectable((shown + "###note").c_str())) {
+			if (ui_kit::fitted_selectable(line, "note")) {
 				const NodeAddress address = menu_note_address(note, document, screen, nullptr);
 				window_requests::select(workspace, document, address);
 			}
-			if (shown != line) ui_kit::tooltip(line);
 			ImGui::PopID();
 		}
 	}

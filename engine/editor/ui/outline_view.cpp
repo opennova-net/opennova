@@ -333,8 +333,7 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 				edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
 		// The type's own Add menu (an items.def's rows the engine looks for by their ids).
 		if (spec_.list_menu && spec_.list_menu_offers && spec_.list_menu_offers(document)) {
-			if (ui_kit::tool(row, spec_.list_menu_label, true, spec_.list_menu_tip)) ImGui::OpenPopup("list_menu");
-			if (ImGui::BeginPopup("list_menu")) {
+			if (ui_kit::tool_popup(row, spec_.list_menu_label, "list_menu", true, spec_.list_menu_tip)) {
 				spec_.list_menu(workspace, document);
 				ImGui::EndPopup();
 			}
