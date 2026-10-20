@@ -1206,10 +1206,13 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// A release can arrive during this recv pump. Do not let that newly-opened
 	// runtime gate transmit the corpse/stale pre-deploy pose in the same frame;
 	// L resumes uplinking only after the simulation has consumed the release and
-	// a later positive authoritative health tail.
+	// a later positive authoritative health tail. The body's own dead test is the
+	// builder's: a Health word of 0, or the dead bit (no alive latch, D-NET-433).
+	// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
+	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D]
 	const bool can_offer_uplink =
 			rt.is_deployed() && e != nullptr && ae != nullptr &&
-			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
+			world::retail_signed_i16(e->health) != 0 && (e->flags & 2u) == 0u &&
 			!redeploy_release_pending_;
 	rt.set_local_player_position(world); // L, the receive handlers' local player
 	if (can_offer_uplink) {

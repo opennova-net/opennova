@@ -1726,6 +1726,37 @@ bool run_uplink_carries_the_frame_statistics() {
 			"the 0x0C stat bytes carry the frame rate and CPU share low bytes");
 }
 
+// The uplink's own dead test is the builder's: a Health word of 0 or the dead
+// bit holds the C2S 0x0C; the alive latch alone does not, and a negative Health
+// word with the bit clear still sends (D-NET-433).
+// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
+//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D]
+bool run_uplink_dead_test_is_the_builders() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input); // the spawn frame
+	if (!expect(h.role.local_spawned(), "uplink dead test: L spawned")) return false;
+	ProtocolMessage message;
+	auto sends = [&](int32_t health, bool alive, bool dead_bit) {
+		w::Entity *local = h.kernel->world.registry.get(h.kernel->world.cached.local_player);
+		local->health = health;
+		local->alive = alive;
+		local->flags = dead_bit ? (local->flags | 2u) : (local->flags & ~2u);
+		h.socket.datagrams.clear();
+		h.role.run_tick(h.input);
+		return h.socket.last_message(0x0C, message);
+	};
+	if (!expect(sends(100, false, false), "the alive latch alone does not hold the uplink"))
+		return false;
+	if (!expect(!sends(100, true, true), "the dead bit holds the uplink")) return false;
+	if (!expect(sends(-5, true, false), "a negative Health word with the bit clear sends"))
+		return false;
+	return expect(!sends(0, true, false), "a Health word of 0 holds the uplink");
+}
+
 // A joiner's stance key only sends the C2S 0x1D (every press, the current
 // stance included); the latch follows the authority's 0x0A tail echo, which
 // re-latches it on every frame that carries the tail. [orig:
@@ -2648,6 +2679,7 @@ int main() {
 	ok &= run_rules_stamp_from_mp_attributes(0x3A02u, false);
 	ok &= run_uplink_carries_same_frame_input();
 	ok &= run_uplink_carries_the_frame_statistics();
+	ok &= run_uplink_dead_test_is_the_builders();
 	ok &= run_stance_follows_the_authority_echo();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();

@@ -67,9 +67,12 @@ void claim_entry(AiEntity &e, World &world, const Entity &target, int32_t comman
 		}
 	}
 	bool claimed[32] = {};
+	// The pool-0 walk skips an empty row, a dead body (its dead bit alone: no
+	// Health or alive test, D-NET-433), a row with no AI slot and the claimant.
+	// [orig: Entity_UpdateInfantryAI - +0x1C @0x4BB102, `test byte [eax+24h], 2`
+	//  @0x4BB108..0x4BB10C, +0x68 @0x4BB10E..0x4BB113, self @0x4BB115]
 	world.registry.for_each_in_pool(0, [&](const Entity &other) {
-		if (other.handle == e.handle || !other.alive || other.health <= 0 ||
-				(other.flags & kEntityFlagDead) != 0)
+		if (other.handle == e.handle || (other.flags & kEntityFlagDead) != 0)
 			return;
 		const AiEntity *brain = world.ai.for_handle(other.handle);
 		if (brain == nullptr)

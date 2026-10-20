@@ -2116,6 +2116,43 @@ struct EntryPointProvider final : IPoseProvider {
 	}
 };
 
+// The entry claim's walk reads a neighbour's dead bit alone (D-NET-433): a
+// claimant at Health 0 with the bit clear still holds its E1, so the brain
+// takes E2; with the bit set its claim is skipped and the brain takes E1.
+// [orig: Entity_UpdateInfantryAI - `test byte [eax+24h], 2` @0x4BB108..0x4BB10C,
+//  no Health read in the walk @0x4BB0F0..0x4BB149]
+void test_ai_entry_claim_reads_the_dead_bit_alone() {
+	for (const bool dead_bit : {false, true}) {
+		Rig r;
+		r.w.cached.local_player = {};
+		r.veh().item_type = 6;
+		r.veh().item_attrib = 0;
+		EntryPointProvider pose;
+		pose.points = { { "E1", { 110, 200, 10 } }, { "E2", { 110, 210, 10 } } };
+		r.w.pose_provider = &pose;
+		Entity other = r.player();
+		other.net_id = 89;
+		other.health = 0;
+		other.alive = false;
+		if (dead_bit) other.flags |= kEntityFlagDead;
+		const auto oh = r.w.registry.spawn(0, other);
+		auto &ob = *r.sys.at(r.sys.attach(oh));
+		ob.slot.f[37] = 125;
+		ob.slot.f[38] = 11;
+		ob.inf.board_entry_slot = 1;
+		r.player().net_id = 88;
+		auto &brain = *r.sys.at(r.sys.attach(r.player_h));
+		brain.slot.f[37] = 125;
+		brain.slot.f[38] = 11;
+		brain.self->position.x.q16 = 100 * 65536;
+		brain.self->position.y.q16 = 210 * 65536;
+		brain.self->position.z.q16 = 10 * 65536;
+		r.player().position = { 100.0f, 210.0f, 10.0f };
+		r.sys.infantry_think(brain, r.w);
+		CHECK(brain.inf.board_entry_slot == (dead_bit ? 1 : 2));
+	}
+}
+
 void test_ai_authored_entry_claim_and_stages() {
 	Rig r;
 	r.w.cached.local_player = {};
@@ -4979,6 +5016,7 @@ int main() {
 	test_vehicle_admission_stationary_threshold_and_deck();
 	test_seated_board_any_upgrades_on_64_tick_phase();
 	test_ai_authored_entry_claim_and_stages();
+	test_ai_entry_claim_reads_the_dead_bit_alone();
 	test_ai_boarding_moving_and_destroyed_carrier_admission();
 	test_enemy_occupant_blocks_scan();
     test_bms_mount_predicates();
