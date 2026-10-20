@@ -9,6 +9,7 @@
 #include <net/npwire/session_keys.h>      // the server-direction opcodes
 #include <net/title/title_identity.h>
 
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 
 #include <array>
@@ -777,15 +778,20 @@ void NwuLobbySession::connect_from_response() {
 	//  NOVAWORLD..." @0x4D4B0C, InitPlayerConnection @0x4D4B16, "%s : NWU GOING INTO JOIN
 	//  LOOP..." @0x4D4BC2]
 	connect_log("NWU ATTEMPTING TO CONNECT TO NOVAWORLD...");
-	begin_session();
+	const std::vector<uint8_t> first = begin_session();
 	connect_log("NWU GOING INTO JOIN LOOP...");
+	// The connection's first announce goes once the join loop runs: InitPlayerConnection starts the
+	// enumerator's timer and sends nothing; the loop's first network pump sends it.
+	// [orig: CNapiGameSession_InitPlayerConnection @0x4D4160 - NapiTimer_Start @0x4D43C2, no send
+	//  among its callees; CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0]
+	send(first);
 }
 
 // The session state machine and its ClientHello, once the gate response named the NW UDP
 // endpoint. The 0x42-join CU set is the one retail builds for any NovaWorld connection, browse
 // or host: all 11 chunks, type 2, the locale chunks empty on the join; UdpCode1/2 and MetTag come
 // from the gate. [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640]
-void NwuLobbySession::begin_session() {
+std::vector<uint8_t> NwuLobbySession::begin_session() {
 	// The connect makes a fresh lobby protocol, its connection counter 0, and one connection on
 	// it, whose index is the CI every 0x41 and the 0x42 carry: 1 at every connect. Its CK and
 	// SCRK are drawn at each 0x81 it takes, from the process's one manager LCG
@@ -818,6 +824,14 @@ void NwuLobbySession::begin_session() {
 	// The connection's state-5 callbacks' connect-log lines.
 	cfg.on_connection_up = [this]() { log_connection_up(); };
 	cfg.on_connection_down = [this]() { log_connection_down(); };
+	// [orig: Network_LogNWUProcessPacket @0x4CFC80 - Napi_FormatAddress of the connection's
+	//  +0x30 / +0x34 @0x4CFCC4, "%s : NWU PROCESSING %ld BYTES FROM %s" @0x4CFCFD, installed as
+	//  the protocol's +0x274 @0x4D42C2]
+	cfg.on_packet_processed = [this](std::size_t bytes) {
+		if (connect_log_on())
+			connect_log("NWU PROCESSING " + std::to_string(bytes) + " BYTES FROM " +
+					peer_addr_to_string(nw_peer_));
+	};
 
 	session_ = std::make_unique<ClientSession>(cfg);
 	session_->set_clock_ms(clock_ms_);
@@ -833,7 +847,7 @@ void NwuLobbySession::begin_session() {
 	give_up_ = 0;
 	connect_last_send_ms_ = clock_ms_;
 	if (hooks_.on_session_state) hooks_.on_session_state();
-	send(session_->start());
+	return session_->start();
 }
 
 // The announce (the 0x41) is the enumerator's and goes to every target in list order, one
@@ -863,6 +877,31 @@ void NwuLobbySession::send(const std::vector<uint8_t> &dg) {
 //  @0x61EC9F..0x61ECC6]
 void NwuLobbySession::send_one(const PeerAddr &to, const std::vector<uint8_t> &dg) {
 	if (to.ip == 0) return;
+	// Each NWU datagram the connection sends, ahead of the send: its length past the envelope
+	// (opcode included), its address, its opcode and, for a session packet, its packet sequence
+	// (0 for the others). [orig: Network_LogNWUSendPacket @0x4CDED0 - "%s : NWU SENDING %ld
+	//  BYTES TO %s [0x%2.2lx, p#%ld]" @0x4CDF5C, installed as the protocol's +0x270 @0x4D42B5;
+	//  its calls ahead of CNapiNPManager_SendTo: CNapiNPConnection_SendSessionPacket @0x61EDD0
+	//  (the opcode, packet_seq and total_len @0x61EFEA..0x61F00D), CNapiNPConnection_SendPing
+	//  @0x61F21A, CNapiNPConnection_SendDisconnectPacket @0x61F514,
+	//  CNapiNPConnection_SendEncryptedPayload @0x61F759, NapiNPSession_SendAnnouncePacket
+	//  @0x61FDAC (0x41, the target's address, p# 0, the length @0x61FD77..0x61FD7B),
+	//  CNapiNPConnection_SendClientJoin @0x6203C3 (0x42), CNapiNPConnection_SendMissingSeqList
+	//  @0x623720, each p# 0]
+	if (connect_log_on()) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (nw_decode_inbound(dg.data(), dg.size(), opcode, body)) {
+			const uint32_t packet_seq = opcode == SESSION_OPCODE_PROTOCOL_MESSAGE && body.size() >= 8
+					? io::read_u32_le(body.data() + 4)
+					: 0u;
+			char op[8];
+			std::snprintf(op, sizeof(op), "0x%2.2x", static_cast<unsigned>(opcode));
+			connect_log("NWU SENDING " + std::to_string(body.size() + 1) + " BYTES TO " +
+					peer_addr_to_string(to) + " [" + op + ", p#" +
+					std::to_string(static_cast<int32_t>(packet_seq)) + "]");
+		}
+	}
 	session_socket_->send_to(to, dg.data(), dg.size());
 	if (hooks_.on_sent) hooks_.on_sent(to, dg);
 }

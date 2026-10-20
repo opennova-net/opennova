@@ -106,6 +106,8 @@ struct Rig {
 	// The connect log: on when set, its lines in order (the gate socket bound on 2300).
 	bool log_on = false;
 	std::vector<std::string> log;
+	// The NWU packet lines (SENDING / PROCESSING), kept apart so the other pins read the rest.
+	std::vector<std::string> packet_log;
 	NwuLobbySession lobby;
 
 	explicit Rig(bool command_line_host = false)
@@ -135,7 +137,12 @@ struct Rig {
 			jfp_at_fatal = s->join_fail_param();
 		};
 		out.connect_log_on = [this]() { return log_on; };
-		out.connect_log = [this](const std::string &text) { log.push_back(text); };
+		out.connect_log = [this](const std::string &text) {
+			if (text.rfind("NWU SENDING ", 0) == 0 || text.rfind("NWU PROCESSING ", 0) == 0)
+				packet_log.push_back(text);
+			else
+				log.push_back(text);
+		};
 		return out;
 	}
 
@@ -686,6 +693,54 @@ void check_connect_log_gate_and_connect() {
 	rig.lobby.close();
 }
 
+// The NWU protocol's packet lines: each datagram the connection sends, ahead of its send, with
+// its length past the envelope (the opcode included), its address, its opcode and a session
+// packet's sequence (0 for the others); each session packet the parse takes with the same length
+// and the server's address. The connection's first announce goes once the join loop runs.
+// [orig: Network_LogNWUSendPacket @0x4CDED0 - @0x4CDF5C; CNapiNPConnection_SendSessionPacket
+//  @0x61EDD0 - @0x61EFEA..0x61F00D; NapiNPSession_SendAnnouncePacket @0x61FA00 - @0x61FDAC;
+//  CNapiNPConnection_SendClientJoin @0x61FE20 - @0x6203C3; Network_LogNWUProcessPacket @0x4CFC80
+//  - @0x4CFCFD; CNapiNPConnection_ParseMessages @0x625BC0 - @0x625D1A..0x625D3E;
+//  CNapiGameSession_InitPlayerConnection @0x4D4160 - NapiTimer_Start @0x4D43C2]
+void check_connect_log_packet_lines() {
+	Rig rig;
+	rig.log_on = true;
+	const std::vector<uint8_t> auth = bring_to_verify(rig);
+	CHECK(!auth.empty());
+	// The join loop's line comes ahead of the first announce's send.
+	CHECK(!rig.log.empty());
+	const auto sent_line = [&rig](std::size_t index, const char *op, uint32_t seq) {
+		if (index >= rig.session.sent.size()) return std::string();
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!decode(rig.session.sent[index].second, opcode, body)) return std::string();
+		return "NWU SENDING " + std::to_string(body.size() + 1) + " BYTES TO 127.0.0.1:64206 [" + op +
+		       ", p#" + std::to_string(seq) + "]";
+	};
+	CHECK(rig.packet_log.size() >= 2);
+	if (rig.packet_log.size() >= 2) {
+		CHECK(rig.packet_log[0] == sent_line(0, "0x41", 0));
+		CHECK(rig.packet_log[1] == sent_line(1, "0x42", 0));
+	}
+	// The one-shot ClientConnected, session packet 1, at the next pump.
+	const std::size_t before = rig.session.sent.size();
+	rig.packet_log.clear();
+	rig.lobby.tick(250);
+	CHECK(!rig.packet_log.empty() && rig.packet_log.front() == sent_line(before, "0x43", 1));
+	rig.packet_log.clear();
+	const std::vector<uint8_t> verify =
+			server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } });
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	CHECK(decode(verify, opcode, body));
+	rig.session.inbound.push_back({ kServer, verify });
+	rig.lobby.tick(300);
+	CHECK(!rig.packet_log.empty() &&
+			rig.packet_log.front() == "NWU PROCESSING " + std::to_string(body.size() + 1) +
+					" BYTES FROM 127.0.0.1:64206");
+	rig.lobby.close();
+}
+
 // The connect waits' failure lines, each ahead of its reset: the state-1 give-up's word, the
 // verify poll's 20 s and the connection wait's timeout, a session out of states 2..4, a session
 // not up at the connection wait. [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - @0x4D0F79,
@@ -1170,6 +1225,7 @@ int main() {
 	check_connect_error_tags();
 	check_connect_log_gate_and_connect();
 	check_connect_log_give_ups();
+	check_connect_log_packet_lines();
 	check_connect_log_gate_failures();
 	check_gate_probe_cadence();
 	check_command_line_host_gate_wait();

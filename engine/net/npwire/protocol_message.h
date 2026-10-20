@@ -290,6 +290,7 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
 struct QueuedSessionPacket {
 	ProtocolPacketHeader header{};
 	std::vector<ProtocolMessage> messages;
+	std::size_t body_bytes = 0; // the packet's body past its opcode (Packet::body_bytes)
 };
 
 // The default cs_dir0.packet_queue_max copied into every retail connection. The JOINTOPERATIONS
@@ -379,6 +380,12 @@ struct SessionDeframeAdmission {
 	struct Packet {
 		ProtocolPacketHeader header;
 		std::vector<ProtocolMessage> messages;
+		// The packet's body length past its opcode, what the parse is handed (a queued packet's
+		// as it was queued). [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 -
+		//  CNapiNPConnection_ParseMessages(conn, payload, payload_len) @0x626BFC, the queued
+		//  copy NapiNPPacket_CreateAndInsert @0x626C32; NapiNPProtocol_PumpRecvQueues @0x6266A0
+		//  - its ParseMessages (the call @0x62696B)]
+		std::size_t body_bytes = 0;
 	};
 
 	bool admitted = false;

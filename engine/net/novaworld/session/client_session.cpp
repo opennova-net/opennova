@@ -1064,6 +1064,7 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 
 	bool had_messages = false;
 	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
+		if (cfg_.on_packet_processed) cfg_.on_packet_processed(packet.body_bytes + 1);
 		if (!packet.messages.empty()) had_messages = true;
 		for (const ProtocolMessage &pm : packet.messages) {
 			// The ONE settings-flagged record that is not connection tuning: the connection

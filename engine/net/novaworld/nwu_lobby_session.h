@@ -286,7 +286,8 @@ public:
 	void connect_log(const std::string &text);
 
 private:
-	void begin_session();
+	// The session, its stamp and its first datagram (the caller sends it).
+	std::vector<uint8_t> begin_session();
 	// The connect over the gate memory's response: ConnectToNovaWorld's sessionless return, or
 	// its probe targets and the session.
 	void connect_from_response();

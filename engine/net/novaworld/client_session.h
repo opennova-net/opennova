@@ -208,6 +208,11 @@ public:
 		//  the burst @0x6254BF..0x6254D3]
 		std::function<void()> on_connection_up;
 		std::function<void()> on_connection_down;
+		// Each session packet the parse takes (the admitted in-order one and every queued one it
+		// releases, records or none), with its length, opcode included; the embedder writes the
+		// connect log's PROCESSING line. [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the
+		//  connection's +0x274 callback with len + 1 (@0x625D1A..0x625D3E)]
+		std::function<void(std::size_t bytes)> on_packet_processed;
 
 		// The NovaWorld session connection of a title (complete:
 		// resolve_title_identity) whose gate manager holds `gate_tag`

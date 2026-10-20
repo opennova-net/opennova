@@ -516,7 +516,7 @@ bool take_ready_session_packet(SessionSequencing &seq, SessionDeframeAdmission &
 	admission_out.admitted = true;
 	admission_out.max_ack_count = queued->second.header.ack_count;
 	admission_out.packets.push_back(SessionDeframeAdmission::Packet{
-			queued->second.header, std::move(queued->second.messages)});
+			queued->second.header, std::move(queued->second.messages), queued->second.body_bytes});
 	seq.last_inbound_seq = queued->first;
 	seq.queued_inbound.erase(queued);
 	return true;
@@ -571,7 +571,7 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 			admission_out->admitted = true;
 			admission_out->max_ack_count = hdr_out.ack_count;
 			admission_out->packets.push_back(
-					SessionDeframeAdmission::Packet{hdr_out, messages_out});
+					SessionDeframeAdmission::Packet{hdr_out, messages_out, body_len});
 		}
 		return true;
 	}
@@ -589,7 +589,7 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 		    (seq.packet_queue_max < 0 ||
 		     seq.queued_inbound.size() < static_cast<size_t>(seq.packet_queue_max))) {
 			seq.queued_inbound.emplace(
-					hdr_out.seq_num, QueuedSessionPacket{hdr_out, std::move(decoded)});
+					hdr_out.seq_num, QueuedSessionPacket{hdr_out, std::move(decoded), body_len});
 		}
 		return true;
 	}
@@ -608,7 +608,7 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 	admission.admitted = true;
 	admission.max_ack_count = hdr_out.ack_count;
 	admission.packets.push_back(
-			SessionDeframeAdmission::Packet{admitted_header, messages_out});
+			SessionDeframeAdmission::Packet{admitted_header, messages_out, body_len});
 	SessionDeframeAdmission successor;
 	while (drain_queued_successors && take_ready_session_packet(seq, successor)) {
 		for (const ProtocolMessage &message : successor.packets.front().messages)
