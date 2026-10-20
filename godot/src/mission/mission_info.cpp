@@ -16,8 +16,9 @@ String MissionInfo::get_briefing() const { return opennova::to_gd(value_.briefin
 String MissionInfo::get_terrain() const { return opennova::to_gd(value_.terrain); }
 String MissionInfo::get_environment() const { return opennova::to_gd(value_.environment); }
 
+// The header's fog bytes are blue first: the game reads red from byte 2 (env::bms_env_overrides_from_header).
 Color MissionInfo::get_fog_color() const {
-	return Color(value_.fog_color[0] / 255.0f, value_.fog_color[1] / 255.0f, value_.fog_color[2] / 255.0f);
+	return Color(value_.fog_color[2] / 255.0f, value_.fog_color[1] / 255.0f, value_.fog_color[0] / 255.0f);
 }
 
 Color MissionInfo::get_water_color() const {
