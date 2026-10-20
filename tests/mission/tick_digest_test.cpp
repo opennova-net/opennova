@@ -103,7 +103,12 @@ namespace {
 // digests it in place of the whole-degree mirror, which moves it from
 // 0x517e7adde3a32d91; digesting the word's rounded whole degrees gives that
 // value back, so no tick behaviour moved.
-constexpr uint64_t kSyntheticDigest = 0xe722d011570202edULL;
+// The synthetic mission has no player-start marker, so its player keeps the
+// zeroed entity's heading word 0, as retail's mission-start spawn leaves it
+// (D-NET-NEW-L1-19), where the spawn had stored the placed default
+// 0x40000000; that moves the chain from 0xe722d011570202ed (restoring the
+// default gives that value back).
+constexpr uint64_t kSyntheticDigest = 0xdcc41c0472d7226dULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {

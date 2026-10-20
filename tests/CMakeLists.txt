@@ -5013,6 +5013,11 @@ add_executable(npruntime_script_pass_order_test npruntime/script_pass_order_test
 target_link_libraries(npruntime_script_pass_order_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_script_pass_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_script_pass_order COMMAND npruntime_script_pass_order_test)
+# The single player's join places nothing; a session's join places the body again (D-NET-NEW-L1-19).
+add_executable(npruntime_sp_join_placement_test npruntime/sp_join_placement_test.cpp)
+target_link_libraries(npruntime_sp_join_placement_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_sp_join_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_sp_join_placement COMMAND npruntime_sp_join_placement_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

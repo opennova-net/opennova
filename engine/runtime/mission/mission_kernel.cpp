@@ -445,6 +445,15 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 		spawn.heading = sel.heading_bam;
 		spawn.pitch = sel.pitch;
 		spawn.roll = sel.roll;
+	} else {
+		// No start marker: the placement stores nothing, so the body keeps the
+		// zeroed entity's words, position 0 and heading word 0, as the session's
+		// add does (D-NET-NEW-L1-19). [orig: Server_InitAllPlayerEntitiesForRound
+		//  @0x516AA0 (the call @0x516B67) -> Entity_SpawnFromAnimSlotProperty - the
+		//  memset @0x43C3FE, the placement @0x43C459; Entity_FindBestSpawnPoint
+		//  @0x50CCC0 - no marker, no store (@0x50CD20)]
+		spawn.position = {0.0f, 0.0f, 0.0f};
+		spawn.heading = 0;
 	}
 	spawn.team = 1;
 	if (!spawn_local_player(spawn)) return -1;

@@ -744,8 +744,19 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// mode's next start marker off the spawn cycle. The motor takes the placed pose.
 	// [orig: Server_OnPlayerJoin @0x51A786 (in session @0x51A77D) -> Server_PositionPlayerForSpawn
 	//  @0x50CF60, the no-pick arm @0x50CFB1; Entity_SpawnFromAnimSlotProperty @0x43C459]
+	// The single player skips it (retail's is_in_session is 0 there; ours is the session
+	// fact world.rules.mp_session): the own body keeps the mission start's placement
+	// (MissionKernel::spawn_local_player_at_start), the marker's raw words with no settle,
+	// since that spawn places a body whose AI slot is not yet allocated and the warm-up
+	// returns on it (D-NET-NEW-L1-19).
+	// [orig: Server_OnPlayerJoin `cmp g_NapiNPCtx.is_in_session, ebx` @0x51A777, `jz`
+	//  @0x51A77D; Game_StartMission @0x525BAF -> Server_InitAllPlayerEntitiesForRound
+	//  @0x516AA0 (the Entity_SpawnFromAnimSlotProperty call @0x516B67, every active slot);
+	//  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C40B, the placement
+	//  @0x43C459 ahead of Entity_AllocateAISlot @0x43C48C; Entity_WarmUpOrganicAnimation
+	//  @0x4B8B20 - the +0x68 test @0x4B8B28..0x4B8B2C]
 	world::Entity *body = world.registry.get(conn.link.owned_entity);
-	if (ctx.is_in_session && body != nullptr) {
+	if (world.rules.mp_session && body != nullptr) {
 		const world::SpawnSlotState slot_state{conn.link.spectator, conn.spectator_restore_team};
 		const world::SpawnPointResult pose = world::resolve_player_spawn_pose(world, body->handle,
 				world::EntityHandle{}, st.player_slot, conn.assigned_team, ctx.config.game_type,

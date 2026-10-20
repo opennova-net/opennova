@@ -95,6 +95,9 @@ struct JoinFixture {
 
 	// `with_existing`: an already-joined client ahead of the joiner on the connection list.
 	explicit JoinFixture(bool with_existing) {
+		// A session host: remote joiners join only a session, and the join's placement
+		// runs in one (D-NET-NEW-L1-19).
+		world->rules.mp_session = true;
 		world->registry.configure_pool(0, 16);
 		world->registry.configure_pool(1, 8);
 		world->registry.configure_pool(2, 8);
