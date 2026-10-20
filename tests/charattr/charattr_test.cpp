@@ -5,9 +5,9 @@
 // it back to the same rows byte for byte (a float by its bits), a key at 0 left out; refuse a table no file loads
 // as, and one whose text would hold more values than the ConfigFile reader's pool of its text values takes. The
 // JO:CA-layout legs read the authored fixtures/charattr/charattr.def (JO:CA's live classes, commented-out block
-// and legacy block, its CHARACTER8 the shipped class-8 row): classes 1 to 9 read, the class-8 row hashing to the
-// capture-derived 0x22A25E01, the file written and read again the same table (the writer's form pinned by its
-// FNV-1a64), and the authored and the written text each under the pool.
+// and legacy block, every value ours): classes 1 to 9 read, the class-8 row's checksum pinned (our CRC proven
+// once against the capture-derived 0x22A25E01 on the shipped row), the file written and read again the same
+// table (the writer's form pinned by its FNV-1a64), and the authored and the written text each under the pool.
 // [orig: CharAttr_LoadFromDef @0x412140; CharAttr_GetClassChecksum @0x412aa0; ConfigFile_ParseText @0x7609e8]
 #include <cmath>
 #include <cstdint>
@@ -404,7 +404,7 @@ void synthetic_cammo() {
 
 // fixtures/charattr/charattr.def: an authored file in JO:CA's layout (the live classes 1 and 5..9, a
 // commented-out block, the legacy block below them: a second CHARACTER1, CHARACTER2..4 with the legacy keys
-// and their PREF_WEAP lists, a second CHARACTER5), its CHARACTER8 the shipped class-8 row.
+// and their PREF_WEAP lists, a second CHARACTER5), every value ours.
 std::string jo_layout() {
 	const std::vector<uint8_t> bytes =
 			test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/charattr/charattr.def");
@@ -413,11 +413,15 @@ std::string jo_layout() {
 
 // The writer's form of the authored file, pinned (the nw_codec_identity rule: a vector changes only with an
 // [orig] witness on the writer or a D-entry; `charattr_test --dump` prints it).
-constexpr size_t kWrittenBytes = 1966;
-constexpr uint64_t kWrittenFnv = UINT64_C(0xb77c35f7a5213050);
+// The authored class-8 row's checksum [orig: CharAttr_GetClassChecksum @0x412aa0], pinned once proven: the
+// retired charattr_retail leg matched row_crc on the shipped class-8 row to 0x22A25E01, the CRC a capture
+// witnessed for it (2026-10-19), so this pin moves only with that witness.
+constexpr uint32_t kClass8Crc = 0xA516E13Eu;
+constexpr size_t kWrittenBytes = 2015;
+constexpr uint64_t kWrittenFnv = UINT64_C(0x3fa64ce973e222ec);
 // The authored text's pool: its values read back as text and the bytes they ask.
-constexpr uint32_t kAuthoredValues = 202;
-constexpr uint32_t kAuthoredStringBytes = 195;
+constexpr uint32_t kAuthoredValues = 203;
+constexpr uint32_t kAuthoredStringBytes = 205;
 
 uint64_t fnv1a64(const std::string &text) {
 	return io::fnv1a64_bytes(io::kFnv1a64Offset, text.data(), text.size());
@@ -430,6 +434,7 @@ int dump() {
 	const std::string text = jo_layout();
 	const configfile::DataStringsPool authored =
 			configfile::data_strings_pool(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	std::printf("constexpr uint32_t kClass8Crc = 0x%08Xu;\n", row_crc(table.rows[7]));
 	std::printf("constexpr size_t kWrittenBytes = %zu;\nconstexpr uint64_t kWrittenFnv = UINT64_C(0x%016llx);\n"
 	            "constexpr uint32_t kAuthoredValues = %u;\nconstexpr uint32_t kAuthoredStringBytes = %u;\n",
 	            written.size(), static_cast<unsigned long long>(fnv1a64(written)), authored.values,
@@ -438,8 +443,8 @@ int dump() {
 }
 
 // JO:CA's layout read as the game reads it: classes 1 to 9 (2..4 from the legacy block, whose second CHARACTER1
-// and CHARACTER5 are never read), CHARACTER8's row hashing to 0x22A25E01, the CRC the capture witnessed for the
-// shipped class-8 row [orig: CharAttr_GetClassChecksum @0x412aa0]; written and read again the same table; the
+// and CHARACTER5 are never read), CHARACTER8's row hashing to the pinned kClass8Crc
+// [orig: CharAttr_GetClassChecksum @0x412aa0]; written and read again the same table; the
 // text as authored and as written each under the ConfigFile reader's pool (JO:CA's own file: 278 values over 288
 // bytes, witnessed by the retired charattr_retail leg, 2026-10-19).
 int jo_layout_legs() {
@@ -451,9 +456,10 @@ int jo_layout_legs() {
 	CHECK(charattr::read_table(bytes, text.size(), table, &reading));
 	CHECK(reading.classes == 9);
 	CHECK(table.rows[0].jungle_cammo == 5310 && table.rows[4].attributes == charattr::kMedic &&
-	      table.rows[7].attributes == charattr::kKnifeBonus && table.rows[1].jungle_cammo == 5300);
+	      table.rows[7].attributes == (charattr::kKnifeBonus | charattr::kAutoScope) &&
+	      table.rows[1].jungle_cammo == 5300);
 	CHECK(table.rows[3].attributes == (charattr::kMedic | charattr::kWaterGirl));
-	CHECK(row_crc(table.rows[7]) == 0x22A25E01u);
+	CHECK(row_crc(table.rows[7]) == kClass8Crc);
 	size_t repeated = 0;
 	for (const charattr::UnreadSection &unread : reading.unread)
 		repeated += unread.why == charattr::UnreadSection::Why::Repeated ? 1 : 0;
@@ -470,7 +476,7 @@ int jo_layout_legs() {
 		std::printf("FAIL JO:CA's layout: the writer's form is %zu bytes, fnv 0x%016llx\n", written.size(),
 		            static_cast<unsigned long long>(fnv1a64(written)));
 	CHECK(written.size() == kWrittenBytes && fnv1a64(written) == kWrittenFnv);
-	std::printf("JO:CA's layout: classes 1..9, CHARACTER8's row CRC 0x22A25E01, written and read the same; %u values "
+	std::printf("JO:CA's layout: classes 1..9, CHARACTER8's row CRC pinned, written and read the same; %u values "
 	            "over %u bytes as authored, %u over %u written\n",
 	            authored.values, authored.string_bytes, pool.values, pool.string_bytes);
 	// One value changed reads back changed.

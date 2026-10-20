@@ -4905,7 +4905,7 @@ add_test(NAME def_write COMMAND def_write_test)
 # charattr.def's loader and writer (formats/charattr, ADR 0003): the classes in order to the first
 # missing, the first section of a label, each value's source and the unread sections; written and read
 # again the same rows; the authored fixtures/charattr/charattr.def in JO:CA's layout (classes 1..9,
-# CHARACTER8's CRC 0x22A25E01, the writer's form pinned by FNV-1a64).
+# CHARACTER8's CRC pinned, the writer's form pinned by FNV-1a64).
 add_executable(charattr_test charattr/charattr_test.cpp)
 target_link_libraries(charattr_test PRIVATE opennova_base opennova_formats)
 target_include_directories(charattr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

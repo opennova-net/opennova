@@ -63,8 +63,8 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 witnessed values in the shipped files' grammar), `def/corpus/*.def` (every key JO:CA's items,
 weapon and ammo catalogs and its jox01 expansion's use, in their forms, with the lines the game
 reads nothing of, and a powerup table in the shipped one's shape: the `def_write` and
-`def_write_form` corpus legs'), `charattr/charattr.def` (JO:CA's charattr layout, its
-CHARACTER8 the shipped class-8 row: `charattr`), `avatars/jo_shaped.def` (an avatar table in
+`def_write_form` corpus legs'), `charattr/charattr.def` (JO:CA's charattr layout, every
+value ours: `charattr`), `avatars/jo_shaped.def` (an avatar table in
 the shipped one's shape: `avatars_parse`, `avatars_roundtrip`), `aip/*.aip` (AI profiles in
 JO's layout with the shipped profiles' constructs: `aip_write`), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
 `mnu/all_widgets.mnu`, `mnu/shipped_forms.mnu` (every element, attribute and lexical

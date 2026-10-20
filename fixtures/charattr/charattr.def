@@ -5,8 +5,7 @@
 // JO:CA's layout: the live classes 1 and 5..9, a commented-out block
 // of retired sections, then the legacy block (a second CHARACTER1,
 // CHARACTER2..4 and a second CHARACTER5, with the legacy keys and
-// PREF_WEAP lists the loader reads nothing of). CHARACTER8 carries the
-// shipped class-8 row, whose CRC the capture witnessed.
+// PREF_WEAP lists the loader reads nothing of). Every value is ours.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -82,21 +81,21 @@ ATTRIBUTES  	= AutoScope
 
 
 ////////////////////////////////////////
-//////// Class 8, as shipped ///////////
+//////// Pathfinder ////////////////////
 ////////////////////////////////////////
 [CHARACTER8]
-STEALTH			= 25
-HPBONUS			= 2
-RECOIL_MUTE 	= 0.75
-XHAIR_MUTE		= 2.5
-XHAIRDX_MUTE	= 2.5
-SCOPE_MUTE  	= 0.0
-RELOAD_MUTE  	= 0.5
-JUNGLE_CAMMO	= 5305
-DESERT_CAMMO	= 5305
-ARCTIC_CAMMO	= 5305
-RUN_MODIFIER	= 0
-ATTRIBUTES  	= KnifeBonus
+STEALTH			= 45
+HPBONUS			= 3
+RECOIL_MUTE 	= 0.85
+XHAIR_MUTE		= 1.75
+XHAIRDX_MUTE	= 2.75
+SCOPE_MUTE  	= 0.25
+RELOAD_MUTE  	= 0.4
+JUNGLE_CAMMO	= 5360
+DESERT_CAMMO	= 5361
+ARCTIC_CAMMO	= 5362
+RUN_MODIFIER	= 1
+ATTRIBUTES  	= KnifeBonus AutoScope
 
 
 ////////////////////////////////////////
