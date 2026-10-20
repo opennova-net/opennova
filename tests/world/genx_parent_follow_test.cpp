@@ -192,14 +192,20 @@ int main() {
     CHECK(w.commands.apply_group_ai_command(3, EntityCommands::kAiNodePath, 0, 0, 0) == 1);
     CHECK(rider.drop_motion == DropMotion::Ride && !rider.motor_suspended);
 
-    // A death the piece spawn refuses keeps the callback; one it accepts
-    // installs its own in its place.
+    // A death the piece spawn refuses keeps the callback: one already husked,
+    // or one whose husk is authored but not loaded (no model source here, so
+    // Comd2X never resolves) [orig: Entity_SpawnDeathPieces @0x4934AF..0x4934E5,
+    // the loaded huskFinal ?: husk object]. One it accepts installs its own in
+    // its place.
     ItemDeathTraits *traits = w.tables.item_death_traits.get_mutable(kDish);
-    CHECK(traits != nullptr && traits->has_husk);
+    CHECK(traits != nullptr && traits->has_husk && !traits->husk_model_loaded);
     rider.engine_flags |= kEntityFlagHusk;
     spawn_death_pieces(w, rider);
     CHECK(rider.drop_motion == DropMotion::Ride);
     rider.engine_flags &= ~kEntityFlagHusk;
+    spawn_death_pieces(w, rider);
+    CHECK(rider.drop_motion == DropMotion::Ride && rider.death_motion == DeathMotionMode::None);
+    traits->husk_model_loaded = true;
     spawn_death_pieces(w, rider);
     CHECK(rider.death_motion == DeathMotionMode::Generic);
     CHECK(rider.drop_motion == DropMotion::None);

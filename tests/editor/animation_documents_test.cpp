@@ -220,6 +220,9 @@ int clips() {
 		if (!v0_clip || v0_clip->events.size() < 2) return 1;
 		TEST_EXPECT(first.record_title({v0_clip->id, kEvent, v0_clip->collections[1][0]}) == "Frame 0" &&
 		            serialized(first) == v0);
+		// No trigger word, so no finding about one (the reader's -1 is no bit the file sets).
+		for (const Diagnostic &d : validate_animation_file(first))
+			TEST_EXPECT(d.code() != "animation.trigger_unknown" && d.code() != "animation.end_pose_trigger");
 	}
 	std::printf("clips: untouched saves, engine data edits, the motion refused, undo, a version 0 clip\n");
 	return 0;

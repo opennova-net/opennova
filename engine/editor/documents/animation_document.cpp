@@ -480,8 +480,11 @@ std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 		d.record = clip_document->record_path({row->id, kBone, d.child_id});
 		findings.push_back(std::move(d));
 	}
+	// A version 0 clip's events carry no trigger word (the reader leaves each -1, no bits of the file's; the editor holds
+	// the field Ignored, refine_field): the two checks below read the trigger word a version 1 clip writes.
+	const bool triggers = row->version != 0;
 	// A trigger on the end pose: the game never reads it (animation_end_pose).
-	for (size_t i = 0; i < row->events.size(); ++i) {
+	for (size_t i = 0; triggers && i < row->events.size(); ++i) {
 		if (!animation_end_pose(*row, i) || row->events[i].trigger == 0) continue;
 		Diagnostic d = make_finding(AnimationFinding::EndPoseTrigger, DiagnosticSeverity::Info,
 		                            "Frame " + std::to_string(i) + " is the clip's end pose: the game plays frames 0 to " +
@@ -520,7 +523,7 @@ std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 			                     {onto, off}});
 		findings.push_back(std::move(d));
 	}
-	for (size_t i = 0; i < row->events.size(); ++i) {
+	for (size_t i = 0; triggers && i < row->events.size(); ++i) {
 		if ((static_cast<uint32_t>(row->events[i].trigger) & ~known) == 0) continue;
 		Diagnostic d = make_finding(AnimationFinding::TriggerUnknown, DiagnosticSeverity::Info,
 		                            "Frame " + std::to_string(i) + " sets a trigger bit the engine does not read.",
