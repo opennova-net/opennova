@@ -41,8 +41,6 @@ void amount_or_null(crow::json::wvalue &out, const std::optional<PriceInfo> &pri
 		out["amount"] = nullptr;
 }
 
-bool is_terminal(const std::string &status) { return status == "canceled" || status == "incomplete_expired"; }
-
 // The subscription of `item` the account's page shows: a granting one (the
 // highest tier, else the newest), else the newest still open; nullptr for none.
 // Every candidate has a period end (the page shows it).
@@ -54,7 +52,7 @@ const SubscriptionRow *shown(const std::vector<SubscriptionRow> &rows, ItemKind 
 	}
 	if (best) return best;
 	for (const SubscriptionRow &r : rows) {
-		if (r.item == item && r.current_period_end && !is_terminal(r.status)) return &r;
+		if (r.item == item && r.current_period_end && !status_terminal(r.status)) return &r;
 	}
 	return nullptr;
 }
@@ -166,6 +164,8 @@ void BillingRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/me/billing").methods("GET"_method)([this](const crow::request &req) { return me_billing(req); });
 	CROW_ROUTE(app, "/api/billing/checkout")
 			.methods("POST"_method)([this](const crow::request &req) { return checkout(req); });
+	CROW_ROUTE(app, "/api/billing/checkout/cancel")
+			.methods("POST"_method)([this](const crow::request &req) { return cancel_checkout(req); });
 	CROW_ROUTE(app, "/api/billing/portal").methods("POST"_method)([this](const crow::request &req) { return portal(req); });
 	CROW_ROUTE(app, "/api/me/billing/sync")
 			.methods("POST"_method)([this](const crow::request &req) { return me_sync(req); });
@@ -317,7 +317,7 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	// Each dedicated machine its own subscription (a checkout sells one).
 	std::vector<crow::json::wvalue> machines;
 	for (const SubscriptionRow &r : rows) {
-		if (r.item != ItemKind::OwnMachine || is_terminal(r.status) || !r.current_period_end) continue;
+		if (r.item != ItemKind::OwnMachine || status_terminal(r.status) || !r.current_period_end) continue;
 		crow::json::wvalue s;
 		s["stripe_subscription_id"] = r.stripe_subscription_id;
 		s["quantity"] = r.quantity;
@@ -330,7 +330,7 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	out["static_addresses"] = e.static_addresses;
 	std::vector<crow::json::wvalue> addresses;
 	for (const SubscriptionRow &r : rows) {
-		if (r.item != ItemKind::StaticAddress || is_terminal(r.status) || !r.current_period_end) continue;
+		if (r.item != ItemKind::StaticAddress || status_terminal(r.status) || !r.current_period_end) continue;
 		crow::json::wvalue s;
 		s["stripe_subscription_id"] = r.stripe_subscription_id;
 		s["status"] = r.status;
@@ -642,6 +642,84 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	return no_store(json_reply(200, out));
 }
 
+// POST /api/billing/checkout/cancel — the account's open checkout session, its
+// buyer back from Stripe unpaid (?checkout=cancel): expired, and its
+// reservation dropped, so the room it held sells again now rather than at the
+// session's end (kCheckoutLifeS). {"released"}: whether a reservation went
+// (false with no open session, or one Stripe already calls paid: the webhook or
+// the success page's sync settles that one). require_user (401, 403 without the
+// CSRF header), 503 billing_disabled, the checkout bucket (429), 409
+// checkout_in_progress while a checkout of the account is starting, 503
+// stripe_unavailable.
+crow::response BillingRoutes::cancel_checkout(const crow::request &req) {
+	auto access = access_.require_user(req);
+	if (access.refusal) return std::move(*access.refusal);
+	const WebSessionUser &user = *access.user;
+	if (billing_ == nullptr) return disabled();
+	if (const int64_t wait = checkout_per_user_.take("billing|" + std::to_string(user.id), RateLimiter::Clock::now())) {
+		log_account(user, "checkout cancel", "rate_limited");
+		return too_many_requests(wait);
+	}
+	// Never beside a checkout of the account's starting (it settles this session itself).
+	{
+		std::lock_guard<std::mutex> lock(checkouts_mu_);
+		if (!checkouts_running_.insert(user.id).second)
+			return json_error(409, "checkout_in_progress", "a checkout of this account is already starting");
+	}
+	struct Running {
+		BillingRoutes &routes;
+		int64_t user_id;
+		~Running() {
+			std::lock_guard<std::mutex> lock(routes.checkouts_mu_);
+			routes.checkouts_running_.erase(user_id);
+		}
+	} running{ *this, user.id };
+	crow::json::wvalue out;
+	out["released"] = false;
+	std::optional<CustomerRow> customer;
+	try {
+		customer = customer_of(*pool_.acquire(), user.id);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/billing/checkout/cancel failed: %s\n", e.what());
+		return json_error(500, "db_error");
+	}
+	// A customer of the other Stripe mode names no session this key can read.
+	if (!customer || customer->open_checkout_session.empty() || customer->livemode != billing_->config().live())
+		return no_store(json_reply(200, out));
+	const std::string id = customer->open_checkout_session;
+	StripeClient &client = billing_->client();
+	StripeResult<CheckoutSession> session = client.get_checkout_session(id);
+	if (session.ok() && session.value->status == "open") {
+		if (client.expire_checkout_session(id).ok())
+			session.value->status = "expired";
+		else
+			session = client.get_checkout_session(id); // completed or expired meanwhile: read again
+	}
+	// Stripe knows no such session (in this mode): it holds nothing.
+	const bool unknown = !session.ok() && session.error.kind == StripeError::Kind::Rejected && session.error.status == 404;
+	if (!session.ok() && !unknown) {
+		log_account(user, "checkout cancel", "the session unread: " + stripe_error_text(session.error));
+		return stripe_unavailable();
+	}
+	if (!unknown && session.value->status == "complete") {
+		log_account(user, "checkout cancel", "the session is paid; nothing released");
+		return no_store(json_reply(200, out));
+	}
+	try {
+		auto db_conn = pool_.acquire();
+		db::Transaction tx(*db_conn);
+		const size_t dropped = drop_session_reservation(*db_conn, id);
+		set_open_checkout_session(*db_conn, user.id, "");
+		tx.commit();
+		out["released"] = dropped > 0;
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/billing/checkout/cancel failed: %s\n", e.what());
+		return json_error(500, "db_error");
+	}
+	log_account(user, "checkout cancel", "the session expired and its reservation dropped");
+	return no_store(json_reply(200, out));
+}
+
 // POST /api/billing/portal — a Customer Portal session for the account's Stripe
 // customer, {"url"}, returning to /me/support; with {"cancel_subscription":
 // "sub_..."} (one of the account's static-address subscriptions still open),
@@ -670,7 +748,7 @@ crow::response BillingRoutes::portal(const crow::request &req) {
 		customer = customer_of(*db_conn, user.id);
 		if (customer && !cancel.empty()) {
 			const auto row = find_subscription(*db_conn, cancel);
-			if (!row || row->user_id != user.id || row->item != ItemKind::StaticAddress || is_terminal(row->status))
+			if (!row || row->user_id != user.id || row->item != ItemKind::StaticAddress || status_terminal(row->status))
 				return json_error(404, "not_found", "this account has no such static-address subscription");
 		}
 	} catch (const db::Error &e) {

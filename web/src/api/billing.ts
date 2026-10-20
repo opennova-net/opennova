@@ -1,6 +1,6 @@
 // Support tiers and the account's billing (apps/novaworld_common/billing/,
 // README "Support tiers"): GET /api/billing/tiers (public), GET
-// /api/me/billing, POST /api/billing/checkout, POST /api/billing/portal and
+// /api/me/billing, POST /api/billing/checkout (and .../cancel), POST /api/billing/portal and
 // POST /api/me/billing/sync. The service creates the Stripe Checkout and
 // billing portal sessions and answers their `{url}`; the page then leaves for
 // Stripe through utils/navigate.ts. No Stripe key or Stripe.js reaches the
@@ -306,6 +306,11 @@ function pickUrl(data: unknown): string | null {
   return typeof url === 'string' && url !== '' ? url : null;
 }
 
+function pickReleased(data: unknown): boolean | null {
+  const released = (data as { released?: unknown } | null)?.released;
+  return typeof released === 'boolean' ? released : null;
+}
+
 // GET /api/billing/tiers: the tiers, the dedicated machine and the static
 // address on offer, with their prices; public.
 export function fetchTiers(signal?: AbortSignal): Promise<BillingResult<TiersResponse>> {
@@ -334,6 +339,13 @@ export function syncMyBilling(): Promise<BillingResult<MyBilling>> {
 // account is starting.
 export function startCheckout(item: BillingItem): Promise<BillingResult<string>> {
   return call(() => apiClient.post<unknown>('/billing/checkout', { item }), pickUrl);
+}
+
+// POST /api/billing/checkout/cancel: the account's open checkout session,
+// its buyer back unpaid, expired and its hold on the fleet's room dropped at
+// once; whether a hold went (false with none open, or one already paid).
+export function cancelCheckout(): Promise<BillingResult<boolean>> {
+  return call(() => apiClient.post<unknown>('/billing/checkout/cancel'), pickReleased);
 }
 
 // POST /api/billing/portal: a Stripe billing portal session; its URL. With

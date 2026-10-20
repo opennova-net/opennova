@@ -596,9 +596,12 @@ async function saveComp() {
   const sharedAfter = Math.max(n, e.tier_servers);
   const sharedOver = sharedRunning.length - sharedAfter;
   if (sharedOver > 0) {
-    const what = sharedOver === 1 ? 'its newest server there' : `its ${sharedOver} newest servers there`;
+    const what =
+      sharedOver === 1
+        ? 'their newest server there: its match ends for everyone on it'
+        : `their ${sharedOver} newest servers there: their matches end for everyone on them`;
     warnings.push(
-      `Lower ${u.username}'s shared servers to ${n}? They run ${sharedRunning.length} on shared machines, so the service stops ${what}: their matches end for everyone on them.`,
+      `Lower ${u.username}'s shared servers to ${n}? They run ${sharedRunning.length} on shared machines, so the service stops ${what}.`,
     );
   }
   // Its dedicated machines after it: the ones it pays for (no tier needed)
