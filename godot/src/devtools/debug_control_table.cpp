@@ -1082,14 +1082,21 @@ void DebugControlTable::register_spectator_row() {
 		Simulation *value = sim();
 		return value != nullptr ? Variant(value->is_local_spectator()) : Variant();
 	};
-	// The engine's own refusal (no local authority player) reads as
-	// unauthorized: tooling cannot manufacture spectator authority.
+	// The engine's own refusal (no local authority player, or a leave: retail
+	// has none, D-NET-407) reads as unauthorized: tooling cannot manufacture
+	// spectator authority. A false write over a player that is not a
+	// spectator asks for nothing and changes nothing, as a true write over a
+	// spectator does in the engine.
 	spectator.write = [this](const Variant &p_value) -> Error {
 		Simulation *value = sim();
 		if (value == nullptr) {
 			return ERR_UNAVAILABLE;
 		}
-		return value->set_local_spectator(from_variant<bool>(p_value)) ? OK : ERR_UNAUTHORIZED;
+		const bool wanted = from_variant<bool>(p_value);
+		if (!wanted && !value->is_local_spectator()) {
+			return OK;
+		}
+		return value->set_local_spectator(wanted) ? OK : ERR_UNAUTHORIZED;
 	};
 	authoritative(spectator);
 }
