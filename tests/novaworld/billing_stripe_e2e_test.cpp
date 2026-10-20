@@ -22,7 +22,7 @@
 // Gated twice. ONNET_STRIPE_TEST_SECRET_KEY names a Stripe TEST-mode key (sk_test_ or
 // rk_test_; a live key fails the test, never runs it): with none (unset, empty, or the
 // vault's REPLACE_ME, which CI's secret holds until it is filled) the test prints why and
-// exits 77 (Skipped) on a line the core suite accepts, so the suite passes on a machine
+// exits 77 (Skipped) on a line the suite accepts, so the suite passes on a machine
 // without the key. The prices are the test account's found by the lookup keys `stripe
 // setup` gives them (DEPLOY.md, "Monthly support tiers (Stripe)"). The database is
 // OPENNOVA_TEST_PG's, as for every pg test. Locally, from the vault and never on disk:
@@ -432,7 +432,7 @@ int run(const std::string &secret_key) {
 int main(int argc, char **argv) {
 	const char *key = std::getenv("ONNET_STRIPE_TEST_SECRET_KEY");
 	if (key == nullptr || *key == '\0' || std::string(key) == billing::kPlaceholder) {
-		// Not the pg tests' "SKIP: needs" line, which fails the core suite: without the
+		// Not the pg tests' "SKIP: needs" line, which fails the suite: without the
 		// key this test has nothing to run against (deploy/env/billing.e2e.env.tpl).
 		std::printf(
 				"STRIPE-E2E skipped: ONNET_STRIPE_TEST_SECRET_KEY names no Stripe test-mode key\n");

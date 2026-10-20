@@ -9,7 +9,7 @@ name: Net stack (Linux)
 # the kernel's ungated ctests, and of the machine agent (opennova-hostd, Linux
 # only, shipped in the serve image) with its ctests. ci.yml's test-linux job builds the same tree (same
 # directory, same flags, so the two share the linux-root compiler cache) and
-# runs the whole core suite over it on every push and PR. The service's
+# runs the whole suite over it on every push and PR. The service's
 # database tests make a database per case on the PostgreSQL service container
 # (OPENNOVA_TEST_PG), and the HTTP layer's tests keep their keys on the Valkey
 # one (OPENNOVA_TEST_REDIS).
