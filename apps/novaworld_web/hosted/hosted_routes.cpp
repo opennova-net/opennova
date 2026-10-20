@@ -367,6 +367,12 @@ void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, i
 	if (const auto why = stopped_because(s.state, in.last_start, admin)) {
 		crow::json::wvalue b;
 		b["cause"] = start_cause_text(why->cause);
+		if (why->limit) {
+			b["limit"]["kind"] = limit_kind_text(why->limit->kind);
+			b["limit"]["count"] = why->limit->count;
+		} else {
+			b["limit"] = nullptr;
+		}
 		if (why->exit_code)
 			b["exit_code"] = *why->exit_code;
 		else
@@ -449,8 +455,11 @@ void HostedRoutes::register_routes(WebApp &app) {
 // server_phase.h), stopped_because
 // ({cause: crash, timeout, fleet, stop (the service's, or one before
 // owner_stop and admin_stop told who), owner_stop, admin_stop, update, limits,
-// no_data, link_lost or data_unavailable, exit_code, oom, line: the server's own
-// last line} for a stopped or failed server, else null)}, without
+// no_data, link_lost or data_unavailable, limit ({kind: shared_servers,
+// no_shared_server or no_shared_room, count: the owner's shared servers or
+// dedicated machines then} for a limits stop that recorded it, else null),
+// exit_code, oom, line: the server's own last line} for a stopped or failed
+// server, else null)}, without
 // its events. 401 with no live session.
 crow::response HostedRoutes::me_servers(const crow::request &req) {
 	auto access = access_.require_user(req);

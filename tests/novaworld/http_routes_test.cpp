@@ -5686,7 +5686,8 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(str(json["server"]["stopped_because"]["cause"]) == "crash" &&
 			json["server"]["stopped_because"]["exit_code"].i() == 3 && !json["server"]["stopped_because"]["oom"].b() &&
 			str(json["server"]["stopped_because"]["line"]) ==
-					"the session ended: the NovaWorld service stopped the hosting");
+					"the session ended: the NovaWorld service stopped the hosting" &&
+			json["server"]["stopped_because"]["limit"].t() == crow::json::type::Null);
 	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(ana_first), { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && str(json["server"]["phase"]["name"]) == "stopped" &&
@@ -5711,6 +5712,16 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200 && json &&
 			str(json["server"]["stopped_because"]["line"]) ==
 					"its data could not be fetched: aws s3 sync exited 1: AccessDenied");
+	// A stop for its owner's limits: the limit it was past, and how many its
+	// owner had (no shared server free, 0 dedicated machines).
+	h.pool.acquire()->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, ended_at, "
+						   "cause, limit_kind, limit_count) VALUES ($1, 4, 99, 0, now(), 'limits', "
+						   "'no_shared_server', 0);",
+			{ opennova::db::BindValue(ana_first) });
+	json = crow::json::load(body_text(one(ana, ana_first)));
+	TEST_EXPECT(json && str(json["server"]["stopped_because"]["cause"]) == "limits" &&
+			str(json["server"]["stopped_because"]["limit"]["kind"]) == "no_shared_server" &&
+			json["server"]["stopped_because"]["limit"]["count"].i() == 0);
 
 	// Hosting off (the Secure listener runs with ONNET_HOSTED_PROVIDER none): 503.
 	std::string token;

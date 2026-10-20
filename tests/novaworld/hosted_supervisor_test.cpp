@@ -2215,7 +2215,8 @@ int test_own_machines_cut() {
 		TEST_EXPECT(starts.size() == 2 && starts[0].generation == generation + 1 &&
 				starts[0].machine_id == shared_machine && starts[0].ended_at.empty() &&
 				!starts[0].running_at.empty() && starts[1].machine_id == newer_machine &&
-				!starts[1].ended_at.empty() && starts[1].cause == hosted::StartCause::Limits);
+				!starts[1].ended_at.empty() && starts[1].cause == hosted::StartCause::Limits &&
+				!starts[1].limit);
 	}
 	// Nothing more moves or stops.
 	rig.step();
@@ -2253,7 +2254,12 @@ int test_own_machines_cut_no_room() {
 	TEST_EXPECT(has_event(*db, newer, "moved to a shared machine: its owner has 0 dedicated machines now"));
 	TEST_EXPECT(stopped_with(*db, older, "its owner has 0 dedicated machines now and the fleet has no shared room"));
 	TEST_EXPECT(rig.server(older)->own_machine && rig.machine_of(older) == older_machine);
-	TEST_EXPECT(hosted::list_starts(*db, older, 1)[0].cause == hosted::StartCause::Limits);
+	{
+		// The limit it was past: no shared room, its owner at 0 dedicated machines.
+		const auto start = hosted::list_starts(*db, older, 1)[0];
+		TEST_EXPECT(start.cause == hosted::StartCause::Limits && start.limit &&
+				start.limit->kind == hosted::LimitKind::NoSharedRoom && start.limit->count == 0);
+	}
 	TEST_EXPECT(rig.state(shared) == State::Running);
 	TEST_EXPECT(!hosted::fleet_has_room(*db, rig.config.placement, false));
 	// The stop ends as any (its listing gone), and its dedicated machine with it.
@@ -2334,13 +2340,23 @@ int test_pools_cut() {
 	rig.step(); // the push
 	rig.step(); // stopped
 	TEST_EXPECT(rig.state(shared_new) == State::Stopped);
+	{
+		// Its start ended for the limit it was past: 1 shared server.
+		const auto start = hosted::list_starts(*db, shared_new, 1)[0];
+		TEST_EXPECT(start.cause == hosted::StartCause::Limits && start.limit &&
+				start.limit->kind == hosted::LimitKind::SharedServers && start.limit->count == 1);
+	}
 
 	TEST_EXPECT(hosted::fleet_has_room(*db, rig.config.placement, false));
 	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 1, 1 }));
 	rig.step();
 	TEST_EXPECT(stopped_with(*db, own_new, "its owner has 1 dedicated machine now and no shared server free"));
 	TEST_EXPECT(rig.server(own_new)->own_machine && !has_event(*db, own_new, "moved to a shared machine"));
-	TEST_EXPECT(hosted::list_starts(*db, own_new, 1)[0].cause == hosted::StartCause::Limits);
+	{
+		const auto start = hosted::list_starts(*db, own_new, 1)[0];
+		TEST_EXPECT(start.cause == hosted::StartCause::Limits && start.limit &&
+				start.limit->kind == hosted::LimitKind::NoSharedServer && start.limit->count == 1);
+	}
 	TEST_EXPECT(rig.state(shared_old) == State::Running && rig.state(own_old) == State::Running &&
 			rig.server(own_old)->own_machine);
 	return 0;

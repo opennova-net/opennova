@@ -227,15 +227,6 @@ struct TransitionOptions {
 };
 bool transition(db::Database &db, int64_t id, State from, State to, const std::string &detail,
 		TransitionOptions options = {});
-enum class StartCause : uint8_t; // why a start ended (below, with a server's starts)
-// A stop asked for: a live server not already stopping goes to stopping, with
-// its event, and its open start (once it is placed) takes `cause`, who or what
-// asked: OwnerStop, AdminStop, Stop (the service's own) or Limits. Its end
-// keeps it. False when there was nothing to stop.
-bool request_stop(db::Database &db, int64_t id, const std::string &detail, StartCause cause);
-// Every live server's stop (the admin's kill switch, each AdminStop); how many
-// it asked.
-size_t request_stop_all(db::Database &db, const std::string &detail);
 // A running server's restarts back to 0 (its healthy run outlasted the
 // supervisor's restart window); false when it was not running or had none.
 bool reset_restarts(db::Database &db, int64_t id);
@@ -272,6 +263,32 @@ enum class StartCause : uint8_t {
 const char *start_cause_text(StartCause cause); // "crash", "fleet", ... "data_unavailable"
 std::optional<StartCause> parse_start_cause(std::string_view text);
 
+// The limit a limits stop's server was past (the supervisor's owners' limits):
+// its owner's servers on shared machines, or its owner's dedicated machines with
+// no shared server free to move it to, or no room on the shared machines for
+// it; and how many of them (shared servers, dedicated machines) its owner had.
+enum class LimitKind : uint8_t {
+	SharedServers,
+	NoSharedServer,
+	NoSharedRoom,
+};
+const char *limit_kind_text(LimitKind kind); // "shared_servers", "no_shared_server", "no_shared_room"
+std::optional<LimitKind> parse_limit_kind(std::string_view text);
+struct StopLimit {
+	LimitKind kind = LimitKind::SharedServers;
+	int count = 0;
+};
+
+// A stop asked for: a live server not already stopping goes to stopping, with
+// its event, and its open start (once it is placed) takes `cause`, who or what
+// asked: OwnerStop, AdminStop, Stop (the service's own) or Limits with the
+// `limit` it is past. Its end keeps them. False when there was nothing to stop.
+bool request_stop(db::Database &db, int64_t id, const std::string &detail, StartCause cause,
+		const std::optional<StopLimit> &limit = std::nullopt);
+// Every live server's stop (the admin's kill switch, each AdminStop); how many
+// it asked.
+size_t request_stop_all(db::Database &db, const std::string &detail);
+
 struct ServerStart {
 	int64_t server_id = 0;
 	int64_t generation = 0;
@@ -289,6 +306,7 @@ struct ServerStart {
 	bool oom = false;
 	std::string reason; // the server's exit line, or why it never started ("" for none)
 	std::optional<StartCause> cause; // set at its end (a stop's: when the stop was asked)
+	std::optional<StopLimit> limit; // a limits stop's (none before 0021)
 };
 
 // How a start's container ended, as its agent reported it.

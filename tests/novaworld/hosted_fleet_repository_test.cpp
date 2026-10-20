@@ -771,10 +771,12 @@ int test_slots() {
 			c_starts[1].generation == 1 && !c_starts[1].ended_at.empty() &&
 			c_starts[1].cause == hosted::StartCause::Fleet);
 	// What it runs, its first report running, a stop's cause asked ahead (one for
-	// its owner's limits) standing at its end, and the end once alone.
+	// its owner's limits, with the limit it is past) standing at its end, and the
+	// end once alone.
 	hosted::set_start_files(db, c, 2, kImage, 7, 8, std::to_string(c) + "/g2");
 	hosted::mark_start_running(db, c, 2);
-	TEST_EXPECT(hosted::request_stop(db, c, "test", hosted::StartCause::Limits));
+	TEST_EXPECT(hosted::request_stop(db, c, "test", hosted::StartCause::Limits,
+			hosted::StopLimit{ hosted::LimitKind::NoSharedRoom, 2 }));
 	TEST_EXPECT(hosted::end_start(
 			db, c, 2, hosted::StartCause::Stop, { 3, false, "the session ended: x" }));
 	TEST_EXPECT(!hosted::end_start(db, c, 2, hosted::StartCause::Crash));
@@ -785,6 +787,9 @@ int test_slots() {
 			!c_starts[0].running_at.empty() && !c_starts[0].ended_at.empty() &&
 			c_starts[0].cause == hosted::StartCause::Limits && c_starts[0].exit_code == 3 &&
 			c_starts[0].reason == "the session ended: x");
+	TEST_EXPECT(c_starts[0].limit && c_starts[0].limit->kind == hosted::LimitKind::NoSharedRoom &&
+			c_starts[0].limit->count == 2);
+	TEST_EXPECT(!hosted::list_starts(db, a, 1)[0].limit);
 	for (const hosted::StartCause cause : { hosted::StartCause::Crash, hosted::StartCause::Fleet,
 				 hosted::StartCause::Stop, hosted::StartCause::OwnerStop, hosted::StartCause::AdminStop,
 				 hosted::StartCause::Update, hosted::StartCause::Limits, hosted::StartCause::NoData,
@@ -792,6 +797,10 @@ int test_slots() {
 				 hosted::StartCause::DataUnavailable })
 		TEST_EXPECT(hosted::parse_start_cause(hosted::start_cause_text(cause)) == cause);
 	TEST_EXPECT(!hosted::parse_start_cause("restart"));
+	for (const hosted::LimitKind kind : { hosted::LimitKind::SharedServers, hosted::LimitKind::NoSharedServer,
+				 hosted::LimitKind::NoSharedRoom })
+		TEST_EXPECT(hosted::parse_limit_kind(hosted::limit_kind_text(kind)) == kind);
+	TEST_EXPECT(!hosted::parse_limit_kind("tier"));
 	// A machine that no longer takes servers takes no slot.
 	TEST_EXPECT(hosted::release_slot(db, b));
 	TEST_EXPECT(hosted::transition_machine(
