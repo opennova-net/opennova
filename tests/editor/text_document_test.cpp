@@ -15,18 +15,19 @@
 // line and column; the wire's span edits, refusals and pages of lines. The other types: a credits
 // file through the CBIN codec byte for byte and an edit written back in the form, one the text form
 // cannot carry held read only; a music script through its MUS text byte for byte, one with a message
-// file of two scripts held read only, a text that does not compile refused at its line and column; a shader in
-// the shader loader's SCR form byte for byte, a plain one a finding Save fixes. After the review: a
-// line end a type's reader reads otherwise (a script's LF alone and CR alone, a credits text's LF
-// alone) a finding a Rewrite fixes, Save writing every line CR LF as a step of the text; a credits
-// text's line the reader does not read whole refused, never saved short; a declared name no
-// reference; a text key's use one Rename everywhere leaves alone (refused); a rename that would take
-// over a use reaching another ammo through its fallback refused, and one of a definition reached
-// through it keeping the prefix once; a stale text site partial; the rename preview's text sites; a
-// closed music script's spans read by its scan's kind; a shader imported as stored; one compile of
-// a text for its findings and its references; a snapshot copying the text alone. The retail leg
-// (OPENNOVA_JO_DIR): the install's scripts, music scripts, credits and shaders read and validated,
-// its counts pinned.
+// file of two scripts held read only, a text that does not compile refused at its line and column,
+// a frame setup of no argument editable at no function's start and held read only at one
+// (D-MUS-16); a shader in the shader loader's SCR form byte for byte, a plain one a finding Save
+// fixes. After the review: a line end a type's reader reads otherwise (a script's LF alone and CR
+// alone, a credits text's LF alone) a finding a Rewrite fixes, Save writing every line CR LF as a
+// step of the text; a credits text's line the reader does not read whole refused, never saved
+// short; a declared name no reference; a text key's use one Rename everywhere leaves alone
+// (refused); a rename that would take over a use reaching another ammo through its fallback
+// refused, and one of a definition reached through it keeping the prefix once; a stale text site
+// partial; the rename preview's text sites; a closed music script's spans read by its scan's kind;
+// a shader imported as stored; one compile of a text for its findings and its references; a
+// snapshot copying the text alone. The retail leg (OPENNOVA_JO_DIR): the install's scripts, music
+// scripts, credits and shaders read and validated, its counts pinned.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -138,6 +139,29 @@ std::vector<uint8_t> script_in_two_chunks() {
 	if (opennova::mus::mus_encode_file(scripts, 2, &buffer, &size) == 0) out.assign(buffer, buffer + size);
 	opennova::mus::mus_free(buffer);
 	opennova::mus::mus_close(&file);
+	return out;
+}
+
+// A music script compiled from `text` and written in MDEdit's layout; `no_argument` makes its first
+// function's frame setup one of no argument (`38 00`, a function of no parameter, which the text
+// refuses).
+std::vector<uint8_t> music_script_of(const std::string &text, bool no_argument) {
+	opennova::mus::MusScript script{};
+	std::vector<uint8_t> out;
+	int line = 0, column = 0;
+	const char *message = nullptr;
+	if (opennova::mus::mus_compile(text.c_str(), &script, &line, &column, &message) == 0) {
+		if (no_argument && script.function_count > 0 &&
+				script.functions[0].start + 1 < script.code_size)
+			script.code[script.functions[0].start + 1] = 0;
+		const opennova::mus::MusScript *scripts[] = { &script };
+		uint8_t *buffer = nullptr;
+		size_t size = 0;
+		if (opennova::mus::mus_encode_file(scripts, 1, &buffer, &size) == 0)
+			out.assign(buffer, buffer + size);
+		opennova::mus::mus_free(buffer);
+	}
+	opennova::mus::mus_script_free(&script);
 	return out;
 }
 
@@ -1067,7 +1091,8 @@ static int test_credits_unread() {
 }
 
 // The music script type: its MUS text byte for byte (the minted script's MessageHandler its `handler`); a
-// file of two scripts held read only; a text that does not compile refused at its line and column.
+// file of two scripts held read only; a text that does not compile refused at its line and column;
+// a frame setup of no argument editable as `frame 0`, held read only as a function's `handler H()`.
 static int test_music_script() {
 	const std::string bin = repo_file("mus/synth_gamemus.bin");
 	TEST_EXPECT(!bin.empty());
@@ -1109,6 +1134,25 @@ static int test_music_script() {
 	TEST_EXPECT(has_code(held, "music_script.invalid_input") && held[0].severity == DiagnosticSeverity::Warning &&
 	            held[0].message.find("holds 2 scripts") != std::string::npos);
 	TEST_EXPECT(handled->rewrite_need() == DocumentBase::RewriteNeed::Unserializable);
+	// A frame setup of no argument (D-MUS-16): at no function's start its `frame 0`, which the text
+	// compiles back to its bytes (the VM runs it as the game does), so the file is editable; at a
+	// function's start its `handler H()`, which the text refuses (MDEdit's form for a function of
+	// no parameter is unwitnessed), so the file is held read only.
+	const std::vector<uint8_t> framed =
+			music_script_of("script t\nsection Begin\n{\n  frame 0\n  done\n}\n", false);
+	std::unique_ptr<DocumentBase> frame_none = type->make();
+	TEST_EXPECT(!framed.empty() &&
+			frame_none->load_bytes(framed, "t.bin", AssetKind::MusicScript, "jo", error) &&
+			!frame_none->blocked());
+	TEST_EXPECT(text_of(*frame_none)->text().find("frame 0\n") != std::string::npos &&
+			frame_none->serialize().text == std::string(framed.begin(), framed.end()));
+	const std::vector<uint8_t> function_none =
+			music_script_of("script t\nsection Begin\n{\n  done\n}\nhandler H(a)\n{\n}\n", true);
+	std::unique_ptr<DocumentBase> held_none = type->make();
+	TEST_EXPECT(!function_none.empty() &&
+			held_none->load_bytes(function_none, "t.bin", AssetKind::MusicScript, "jo", error) &&
+			held_none->blocked() &&
+			text_of(*held_none)->text().find("handler H()\n") != std::string::npos);
 	return 0;
 }
 

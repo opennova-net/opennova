@@ -94,8 +94,8 @@ public:
 	// them to Missionwin / Missionlose). Runs on any loaded script regardless
 	// of the streaming state; the handler's setstate lands at once and the
 	// sting's first entry plays on the next paced advance. Returns 0 when the
-	// frame ran, -1 with no script, -2 when the script carries no handler, -3
-	// on a return-stack overflow.
+	// frame ran, -1 with no script, -2 when the script carries no handler (the
+	// signal dropped, the plain step run).
 	int signal_end_track(int p_value);
 
 	// Engine callbacks (Node virtuals via godot-cpp)

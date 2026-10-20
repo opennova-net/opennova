@@ -422,7 +422,8 @@ typedef struct MusVMHooks {
        is written. var_index is the byte offset / 4 (Var00..Var15 fit indices
        0..15; user globals at index 16+). */
     void (*on_var_changed)    (void *user, uint8_t var_index, int32_t new_value);
-    /* GEcho intrinsic: pops 1 arg, fires this hook with the int32 value.
+    /* GEcho intrinsic: reads the data stack's top word (popping none, as every
+       method), fires this hook with the int32 value.
        Witnessed: Jointops.exe!Intrinsic_GEcho @ 0x6720C0. */
     void (*on_echo)           (void *user, int32_t arg);
     /* GSV / GSDV set master / right-channel volumes in 16.16 fixed point.
@@ -442,7 +443,8 @@ void mus_vm_destroy(MusVM *vm);
    immediately after. */
 void mus_vm_set_hooks(MusVM *vm, const MusVMHooks *hooks);
 
-/* Bind a parsed MusScript to the VM. Resets the data and call stacks, makes the
+/* Bind a parsed MusScript to the VM. Puts the data and call stacks' pointers at
+   their bases (their words stay, as the game's one pair keeps them), makes the
    instance's one zeroed block of the script's globals_size and locals_size, the
    globals at its start and the locals after them [orig: ScriptInstance_Init @
    0x672F78..0x672FA3], rounded up to 64 as the game's allocator gives it [orig:
@@ -466,7 +468,9 @@ void mus_vm_unload_script(MusVM *vm);
 void mus_vm_pause (MusVM *vm);
 void mus_vm_resume(MusVM *vm);
 
-/* Advance bytecode for one VM tick. The witnessed dispatch loop spends a
+/* Advance bytecode for one VM tick. Each run starts with both stacks at their
+   bases, whatever the last one left [orig: AudioVM_RunContext @ 0x672E89,
+   @ 0x672E8F]. The witnessed dispatch loop spends a
    32-instruction budget, then continues only while the data stack is not
    drained; halt opcodes (play/playw/done/setstate), pc out of bounds, and
    errors still stop earlier. dt_ms is currently informational (returned to
@@ -476,20 +480,21 @@ int mus_vm_tick(MusVM *vm, uint32_t dt_ms);
 
 /* The restart frame [orig: AudioVM_RunContext @ 0x672e95..0x672ec1 -- the step the
    per-update pump (sub_672EE0) and MusicCtx_SelectEndTrack @ 0x672fd0 share]:
-   when the context's restart byte (ctx+32) is set the step clears it, pushes
-   the current IP on the return stack, pushes (value, 0) on the data stack,
-   sets IP = the chunk's +0x40 MessageHandler pointer and runs the dispatch
-   loop. MusicCtx_SelectEndTrack(value) sets the byte and steps at once
-   whenever a script is loaded, so the flag never outlives the call; this
-   entry point is that pair. Server_ProcessRoundEnd's single-player tail
-   calls it with 1 (win, after Cine_InitPlayback @ 0x51696b) and 2 (lose,
-   after Cine_StartPlayback @ 0x51698f); retail gamemus.bin's handler
-   dispatches 1 -> Missionwin, 2 -> Missionlose, 0 -> the idle section.
+   the step starts both stacks at their bases; when the context's restart
+   byte (ctx+32) is set it clears it, pushes the current IP on the return
+   stack, pushes (byte, 0) on the data stack, sets IP = the chunk's +0x40
+   MessageHandler pointer and runs the dispatch loop. MusicCtx_SelectEndTrack(value)
+   sets the byte to the value's low byte and steps at once whenever a script is
+   loaded, so the flag never outlives the call; this entry point is that pair, a
+   value whose low byte is 0 running the plain step. Server_ProcessRoundEnd's
+   single-player tail calls it with 1 (win, after Cine_InitPlayback @ 0x51696b)
+   and 2 (lose, after Cine_StartPlayback @ 0x51698f); retail gamemus.bin's handler
+   dispatches 1 -> Missionwin, 2 -> Missionlose.
    Runs regardless of the RUNNING/STOPPED state (retail's step ignores the
    streaming-active flag; it needs only a loaded script). Returns 0 when the
-   frame ran, -1 with no script, -2 when the script carries no handler
-   (retail would read through a null chunk pointer), -3 on a return-stack
-   overflow. */
+   step ran, -1 with no script, -2 when the byte is set and the script carries
+   no handler: the signal is dropped and the plain step runs (retail reads
+   through a null pointer, D-MUS-27). */
 int mus_vm_signal(MusVM *vm, int32_t value);
 
 /* State accessors. */
@@ -497,8 +502,9 @@ MusVMState  mus_vm_state          (const MusVM *vm);
 const char *mus_vm_last_error     (const MusVM *vm);
 const char *mus_vm_current_section(const MusVM *vm);
 uint32_t    mus_vm_pc             (const MusVM *vm);
-/* Return-stack depth (the interrupted PCs `enter`-frames and the restart
-   frame push; `return` pops). */
+/* Return-stack depth as the last run left it: each run starts at 0, the restart
+   frame pushes the interrupted PC, `return` pops; `callv` writes its return at
+   the top without advancing it [orig: AudioVM_Op_CallV @ 0x672B95]. */
 int         mus_vm_call_depth     (const MusVM *vm);
 
 /* Globals area accessors (Var00..Var15 at byte offsets 0..60 = var_index 0..15;
