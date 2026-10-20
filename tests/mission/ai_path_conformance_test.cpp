@@ -6,8 +6,10 @@
 // do: a 430 s round plus a decode, through a sampled wire, to observe state we
 // own in-process.
 //
-// So this test is our side of that comparison: load the REAL shipped mission
-// through the engine's own mission kernel (the live host's boot: model-derived
+// So this test is our side of that comparison: load 00TRg's camp in miniature
+// (the mission set's garrison.bms: 00TRg's tripods and gunners, truck column,
+// boats and crews, a patrol on its loop, by their SSNs) through the engine's
+// own mission kernel (the live host's boot: model-derived
 // seats, items.def traits, the mission terrain, collision, root motion, the
 // WAC layers - ADR 0042 d3), tick the world headless, and report each AI's
 // authored routing inputs next to the distance it actually travelled.
@@ -25,14 +27,11 @@
 // spawn at the SAME position as retail and retail still walks them 625k/543k/583k
 // wire units, so they carry no placement ambiguity and no scenario confound.
 //
-// Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install), like the
-// other mission-kernel ctests.
-//
 // REPORT MODE: `ai_path_conformance_test --report` dumps the full per-slot table
 // (authored group/waypoint/wp_number + brain waypoint state + travel) plus the
 // event/trigger/area census. That dump is the diagnosis surface; the assertions
 // below are the regression pins. `--ticks <n>` (default 2500) and `--bms <name>`
-// (default 00TRg.bms) point the same harness at the 430 s capture budget or
+// (default garrison.bms, a mission of the set) point the same harness at the 430 s capture budget or
 // another mission; the ctest registration passes neither.
 #include <formats/mission/bms.h>
 #include <runtime/mission/event_runtime.h>
@@ -48,9 +47,8 @@
 #include <map>
 #include <string>
 #include <vector>
-#include "common/retail_mission_files.h"
-#include "common/retail_mission_open.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 namespace {
 
@@ -111,25 +109,26 @@ static bool has_flag(int argc, char **argv, const char *flag) {
 }
 
 int main(int argc, char **argv) {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install serving 00TRg.bms)");
 	const bool report = has_flag(argc, argv, "--report");
 	// Diagnostic parameterisation only (no behaviour change): the 05TRcoop
 	// bunker-garrison pin (SSNs 233/1254/2393, divergence-ledger.md:364) needs
 	// the SAME full-tick harness pointed at a different authored mission.
 	const char *bms_arg = arg_value(argc, argv, "--bms");
-	const std::string bms_name = (bms_arg != nullptr && *bms_arg) ? bms_arg : "00TRg.bms";
+	const std::string bms_name = (bms_arg != nullptr && *bms_arg) ? bms_arg : "garrison.bms";
 	// The mission through the engine's own boot (ADR 0042 d3): the rig's kernel
 	// mounts the install, extracts the seat specs from the models, installs the
 	// .aip profiles, promotes the mission, grounds the AI on the .cpt/.trn
 	// field, registers E_STAND.adm + each soldier's own .adm, resolves the
 	// items.def traits and the collision instances, loads weapon.def/ammo.def
 	// and the WAC layers - in the S9 order the shipping game runs.
-	testrig::RetailMissionRig rig;
-	std::string error, served_by;
-	if (!retail::open_mission(rig, install, bms_name, error, served_by))
-		return retail::skip((bms_name + " on the OPENNOVA_JO_DIR mount (base or an expansion) "
-		                     "or loose under OPENNOVA_JO_ASSETS").c_str());
+	test_mission_set::Root root("ai_path_conformance");
+	testrig::MissionRig rig;
+	std::string error;
+	const std::string served_by = "the mission set";
+	if (!expect(root.ok() && rig.open(root.path(), bms_name, error), (bms_name + " opens").c_str())) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
 	options.playable = true;       // the host's own player: the one human
 	options.listen_server = false; // the bare no-net tick
@@ -145,8 +144,8 @@ int main(int argc, char **argv) {
 	// INFANTRY DO NOT MOVE WITHOUT ROOT MOTION [orig: AnimMap_UpdateEntity
 	// @0x40b5f0]: the kernel registers E_STAND.adm as the default clip set; a
 	// mount without it cannot measure pathing at all.
-	if (rig.root_motion.empty())
-		return retail::skip("E_STAND.adm on the OPENNOVA_JO_DIR mount (infantry cannot locomote without clips)");
+	if (!expect(!rig.root_motion.empty(), "E_STAND.adm registers (infantry cannot locomote without clips)"))
+		return 1;
 	w::World &world = rig.world;
 	w::AiSystem &ai = rig.world.ai;
 	mission::BmsEventSystem &events = rig.events;

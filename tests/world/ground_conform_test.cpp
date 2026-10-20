@@ -6,8 +6,8 @@
 
 #include <runtime/world/ground_conform.h>
 
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <algorithm>
 #include <cmath>
@@ -196,7 +196,8 @@ void test_oscillator_two_decays() {
 	}
 }
 
-// The standing-still vertical-stability leg on the retail data: CP01 boots on
+// The standing-still vertical-stability leg: the mission set's infantry.bms (CP01's
+// start and foot soldiers by their shipped rows, on the minted soldier) boots on
 // the engine's boot policy, the local player stands with an EMPTY input packet
 // (no movement, no jump), the spawn settles, then the player's height is
 // sampled every tick for a watch window. A standing player must not oscillate:
@@ -204,23 +205,21 @@ void test_oscillator_two_decays() {
 // extremes and any anim-state changes printed so the waveform names the
 // mechanism (sawtooth = gravity accumulation between resolver snaps; smooth
 // loop-period wave = capsule-bottom-tracked dz; a flap to the airborne state =
-// the edge/jump path firing at rest). SKIP-LEG without OPENNOVA_JO_DIR.
+// the edge/jump path firing at rest).
 void test_cp01_standing_player_is_vertically_stable() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms)");
-		return;
-	}
-	opennova::testrig::RetailMissionRig rig;
+	test_mission_set::Root root("ground_conform");
+	CHECK(root.ok(), "the mission set stages");
+	opennova::testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "CP01.bms", error)) {
-		retail::skip_leg(error.c_str());
+	if (!rig.open(root.path(), "infantry.bms", error)) {
+		CHECK(false, "infantry.bms opens");
+		std::printf("  %s\n", error.c_str());
 		return;
 	}
 	opennova::testrig::BootOptions options;
-	CHECK(rig.boot(options, error), "CP01 boots for the standing leg");
+	CHECK(rig.boot(options, error), "the mission boots for the standing leg");
 	if (!rig.local.has_local_player() || !rig.has_terrain()) {
-		CHECK(false, "CP01 spawned the player over its terrain");
+		CHECK(false, "the mission spawned the player over its terrain");
 		return;
 	}
 	rig.install_weapon("WPN_M4AUTO");
@@ -254,8 +253,7 @@ void test_cp01_standing_player_is_vertically_stable() {
 
 } // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
 	test_travel_from_def();
 	test_compress_bottomed_absorbs_nothing();
 	test_compress_normal();

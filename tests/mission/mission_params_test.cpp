@@ -183,6 +183,8 @@ int test_names_and_domains() {
 	TEST_EXPECT(param_choices(K::Team).count == 3 && param_choices(K::Bool).count == 2 && param_choices(K::SubGoal).count == 8);
 	TEST_EXPECT(param_choices(K::Group).count == 0 && param_choices(K::Raw).count == 0);
 	TEST_EXPECT(std::string(param_kind_label(K::Unused)).empty() && std::string(param_kind_label(K::Path)) == "Waypoint list");
+	TEST_EXPECT(std::string(param_kind_label(K::Count)) == "Units" && std::string(param_kind_label(K::SpeedKph)) == "Speed" &&
+	            std::string(param_kind_label(K::Bool)) == "On" && std::string(param_kind_label(K::Team)) == "Team");
 	return 0;
 }
 

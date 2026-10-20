@@ -6,7 +6,7 @@
 // when no start marker exists, the post-PreMission baseline captured), a
 // the local role's tick advances the logic clock, the teleport/health seams round-trip
 // through both stores, and the CanFire verdict answers over the spawned
-// player. The retail-path legs stay in tests/common/retail_mission_files.
+// player. The mission-set legs ride tests/common/mission_rig.
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
 #include <formats/wac/bytecode.h>

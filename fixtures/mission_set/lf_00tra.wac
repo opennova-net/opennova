@@ -1,0 +1,3 @@
+If true(bluekills) then
+		Lose (1)
+endif

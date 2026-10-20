@@ -41,8 +41,8 @@
 
 #include "channel_clip_source.h"
 #include <runtime/world/world.h>
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 #include <string>
 
 using namespace opennova::world;
@@ -4221,16 +4221,17 @@ void test_out_of_range_enemy_is_approached() {
     CHECK(saw_fight_after_approach);
 }
 
-// ---- the weapon channel on the retail data (SKIP-LEG without OPENNOVA_JO_ASSETS) ----
+// ---- the weapon channel on the mission set (00TRg's camp, the player's clip table) ----
 // The body's weapon channel [orig: Entity_UpdateInfantryPlayerBody @0x4b5dc0..0x4b5e95, the weapon-channel selection leg]
-// on the shipped weapon.def + US01 clip set: a pistol's special_hold selects the
+// on the mission set's weapon.def (the Colt, the knife and the M4 by the shipped rows' fields)
+// and the player's table in US01's shape (mplayer.adm): a pistol's special_hold selects the
 // pistol hold pose, its reload plays reload2 (never the rifle reload), a knife
 // holds the knife pose and stamps knife_attack on the click, and a rifle reload
 // plays reload with an advancing playhead while the slot FSM sits in RELOAD,
 // returning to the primary-state mirror once the slot is idle again.
 namespace {
 
-int retail_hold_state(opennova::testrig::RetailMissionRig &rig, const char *weapon, int settle_ticks) {
+int hold_state(opennova::testrig::MissionRig &rig, const char *weapon, int settle_ticks) {
     if (!rig.install_weapon(weapon)) return -1;
     // The hold kind is re-read every selection pass from the entity's OWN
     // equipped index (the single wire byte at entity+0x2B0) [orig: @0x4b5dba].
@@ -4243,7 +4244,7 @@ int retail_hold_state(opennova::testrig::RetailMissionRig &rig, const char *weap
 
 // Burst-fire then press R; returns the first weapon-channel state that differs
 // from `hold` within `wait_ticks`, or -1. Flags `never_state` if it ever shows.
-int retail_fire_then_reload(opennova::testrig::RetailMissionRig &rig, int hold, int wait_ticks,
+int fire_then_reload(opennova::testrig::MissionRig &rig, int hold, int wait_ticks,
         int *r_never_seen, int never_state) {
     for (int t = 0; t < 20; ++t) {
         rig.local.set_weapon_input(true, t == 0, false);
@@ -4265,7 +4266,7 @@ int retail_fire_then_reload(opennova::testrig::RetailMissionRig &rig, int hold, 
     return seen;
 }
 
-void wait_slot_idle(opennova::testrig::RetailMissionRig &rig, int max_ticks) {
+void wait_slot_idle(opennova::testrig::MissionRig &rig, int max_ticks) {
     for (int t = 0; t < max_ticks; ++t) {
         if (rig.local.weapon.slot.current == weapon_action::kIdle && t > 5) return;
         rig.tick();
@@ -4274,21 +4275,18 @@ void wait_slot_idle(opennova::testrig::RetailMissionRig &rig, int max_ticks) {
 
 } // namespace
 
-static void test_retail_weapon_channel_holds() {
-    const std::string assets = retail::assets();
-    if (assets.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS (an extracted JO tree carrying 00TRg.bms, weapon.def and US01)");
-        return;
-    }
-    opennova::testrig::RetailMissionRig rig;
+static void test_weapon_channel_holds() {
+    test_mission_set::Root root("infantry_weapon_channel");
+    opennova::testrig::MissionRig rig;
     std::string error;
-    if (!rig.open(assets, "00TRg.bms", error)) {
-        retail::skip_leg(error.c_str());
+    if (!root.ok() || !rig.open(root.path(), "garrison.bms", error)) {
+        std::fprintf(stderr, "FAIL: garrison.bms opens for the weapon-channel leg: %s\n", error.c_str());
+        ++failures;
         return;
     }
     opennova::testrig::BootOptions options;
     if (!rig.boot(options, error)) {
-        std::fprintf(stderr, "FAIL: 00TRg boots for the weapon-channel leg: %s\n", error.c_str());
+        std::fprintf(stderr, "FAIL: garrison.bms boots for the weapon-channel leg: %s\n", error.c_str());
         ++failures;
         return;
     }
@@ -4298,12 +4296,12 @@ static void test_retail_weapon_channel_holds() {
     const AiEntity *pa = rig.local.player_ai();
 
     // Pistol: special_hold -> the pistol hold; its reload is reload2.
-    const int pistol = retail_hold_state(rig, "WPN_colt45", 40);
+    const int pistol = hold_state(rig, "WPN_colt45", 40);
     std::printf("weapon_channel: WPN_colt45 hold state %d (%s) hold_kind %d\n", pistol,
             pistol >= 0 ? opennova::anim::kAnimSlotNames[pistol] : "?", pa->inf.wpn_hold_kind);
     CHECK(pistol == anim_state::kHoldPistol);
     int saw_rifle_reload = 0;
-    const int pistol_reload = retail_fire_then_reload(rig, pistol, 40, &saw_rifle_reload, anim_state::kReload);
+    const int pistol_reload = fire_then_reload(rig, pistol, 40, &saw_rifle_reload, anim_state::kReload);
     std::printf("weapon_channel: pistol reload state %d (%s)\n", pistol_reload,
             pistol_reload >= 0 ? opennova::anim::kAnimSlotNames[pistol_reload] : "?");
     CHECK(pistol_reload == anim_state::kReload2); // pistol reload plays reload2
@@ -4313,7 +4311,7 @@ static void test_retail_weapon_channel_holds() {
     CHECK(pa->inf.wpn_state == anim_state::kHoldPistol); // post-reload back to the hold
 
     // Knife: the knife hold; the click stamps knife_attack, which then settles.
-    const int knife = retail_hold_state(rig, "WPN_KNIFE", 40);
+    const int knife = hold_state(rig, "WPN_KNIFE", 40);
     std::printf("weapon_channel: WPN_KNIFE hold state %d (%s) hold_kind %d\n", knife,
             knife >= 0 ? opennova::anim::kAnimSlotNames[knife] : "?", pa->inf.wpn_hold_kind);
     CHECK(knife == anim_state::kHoldKnife);
@@ -4344,12 +4342,12 @@ static void test_retail_weapon_channel_holds() {
 
     // Rifle: the channel mirrors the primary state; a reload plays reload with an
     // advancing playhead while the slot FSM is in RELOAD, then mirrors again.
-    const int rifle = retail_hold_state(rig, "WPN_M4AUTO", 40);
+    const int rifle = hold_state(rig, "WPN_M4AUTO", 40);
     std::printf("weapon_channel: WPN_M4AUTO hold state %d (%s) primary %d\n", rifle,
             rifle >= 0 ? opennova::anim::kAnimSlotNames[rifle] : "?", pa->inf.anim_state);
     CHECK(rifle == pa->inf.anim_state || rifle == anim_state::kIdle);
     int unused = 0;
-    const int rifle_reload = retail_fire_then_reload(rig, rifle, 40, &unused, -1);
+    const int rifle_reload = fire_then_reload(rig, rifle, 40, &unused, -1);
     std::printf("weapon_channel: rifle reload state %d (%s) slot action %d\n", rifle_reload,
             rifle_reload >= 0 ? opennova::anim::kAnimSlotNames[rifle_reload] : "?", rig.local.weapon.slot.current);
     CHECK(rifle_reload == anim_state::kReload);
@@ -5286,8 +5284,7 @@ void test_slope_probes_include_candidate_models() {
  CHECK(e->body_pitch == 0); // the flat height field alone has no slope
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     test_parachute_deployment_and_descent();
     test_slope_probes_include_candidate_models();
     test_downwash_query_and_body_selection();
@@ -6510,7 +6507,7 @@ int main(int argc, char **argv) {
     test_out_of_range_enemy_is_approached();
     test_infantry_parity_pins_2026_08_28();
     test_pre_attack_wins_when_previously_idle();
-    test_retail_weapon_channel_holds();
+    test_weapon_channel_holds();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

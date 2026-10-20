@@ -1,0 +1,884 @@
+begin "start, player"
+  id 106001
+  type marker
+  subtype LFP
+end
+
+begin "waypoint"
+  id 106005
+  type marker
+end
+
+begin "Player #1, Single player"
+  id 105310
+  type person
+  unit_type 9
+  graphic person
+  anim_def mplayer
+  attrib: aidata fo notool pfoil
+  ai_function plyr
+  disk_function PLAYER
+  phrase_set 0
+  move_function org2
+  input_function troop
+  hp 150
+  armor 0 0
+  radarsig 300
+  mana 0
+  sound_profile SP_Player
+end
+
+begin "Player #1, Multiplayer"
+  id 105305
+  type person
+  unit_type 9
+  graphic person
+  anim_def mplayer
+  attrib: aidata fo notool pfoil
+  ai_function plyr
+  disk_function PLAYER
+  phrase_set 0
+  move_function org2
+  input_function troop
+  hp 150
+  armor 0 0
+  radarsig 300
+  mana 0
+  sound_profile SP_Player
+end
+
+begin "Indonesian Soldier #2 with AK47"
+  id 101799
+  type person
+  graphic person
+  anim_def msoldier
+  attrib: evil aidata nodismember
+  deathtime	30
+  hp 100
+  radarsig 300
+  score 10
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 33
+  move_function org1
+  heatsig  0
+  radarsig 0
+  unit_type 9
+  clipsize 30
+  ammo_closeattack    AMMO_AK47_556MM
+  ammo_easyrocket     AMMO_AK47_556MM
+  ammo_advancedrocket AMMO_AK47_556MM
+  ammo_marker3        AMMO_AK47_556MM
+  launchups_closeattack	mflash01
+  launchups_rocket		mflash01
+  launchups_marker3		mflash01
+end
+
+begin "Friendly Soldier #3 with M16"
+  id 102072
+  type person
+  graphic person
+  anim_def msoldier
+  attrib: good aidata nodismember
+  deathtime	30
+  hp 100
+  radarsig 300
+  score 10
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 33
+  move_function org1
+  unit_type 9
+  clipsize 30
+  ammo_closeattack    AMMO_M16_556MM
+  ammo_easyrocket     AMMO_M16_556MM
+  ammo_advancedrocket AMMO_M16_556MM
+  ammo_marker3        AMMO_M16_556MM
+  launchups_closeattack	mflash01
+  launchups_rocket		mflash01
+  launchups_marker3		mflash01
+end
+
+begin "Friendly Soldier #4 with MP5"
+  id 102073
+  type person
+  graphic person
+  anim_def msoldier
+  attrib: good aidata nodismember
+  deathtime	30
+  hp 100
+  radarsig 300
+  score 10
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 33
+  move_function org1
+  unit_type 9
+  clipsize 30
+  ammo_closeattack    AMMO_MP5SP_9MM
+  ammo_easyrocket     AMMO_MP5SP_9MM
+  ammo_advancedrocket AMMO_MP5SP_9MM
+  ammo_marker3        AMMO_MP5SP_9MM
+  launchups_closeattack	mflash01
+  launchups_rocket		mflash01
+  launchups_marker3		mflash01
+end
+
+begin "Drivable Motorcycle"
+  id 100074
+  sid mbike
+  type vehicle
+  graphic mbike
+  attrib: AIData noscar neutral PlayerControl exp1 forceasset DynamicShadow
+  hp 1500
+  armor 10 10
+  criticalhp 300
+  criticaldrain 15
+  score 50
+  radarsig 500
+  ai_function cveh
+  render_function cveh
+  move_function cbike
+    turn_rate 110
+    turn_rate2 16
+    acceleration 25
+    deceleration 70
+    slip_speed 0
+    player_speed 80
+    slip_slope	50
+    max_slope	60
+    spring		1
+    spring_comp 15
+    shock		1
+    mass		1
+    minai		1
+    physics     1
+    lean		30
+    lean_velocity 40
+    torque 	9
+  default_aip d_buggy
+  unit_type 12
+end
+
+begin "Singe rock formation5"
+  id 101471
+  type decoration
+  attrib:
+  graphic mrock
+  hp 10
+  armor -1
+  ai_function gnrl
+end
+
+begin "Modular wooden Ladder 8m tall"
+  id 101622
+  type decoration
+  graphic mladder
+  attrib: notarget
+end
+
+begin "Drivable ATV"
+  id 101301
+  sid matv
+  type vehicle
+  graphic matv
+  attrib: AIData noscar neutral PlayerControl  forceasset DynamicShadow
+  hp 3000
+  armor 10 10
+  criticalhp 300
+  criticaldrain 15
+  score 50
+  radarsig 500
+  render_function cveh
+  ai_function cveh
+  move_function catv
+    turn_rate 75
+    turn_rate2 35
+    acceleration 30
+    deceleration 60
+    slip_speed 0
+    player_speed 65
+    water_speed 25
+    slip_slope	55
+    max_slope	65
+    physics     1
+    spring		3
+    shock		3
+    flip		45
+    mass 2
+    torque 3
+    minai		1
+    lean 0
+    lean_velocity 0
+    pitch 0
+    pitch_velocity 0
+    bob 0
+  default_aip d_buggy
+  unit_type 1
+end
+
+begin "Friendly Soldier #1 with M4"
+  id 102070
+  type person
+  graphic person
+  anim_def msoldier
+  attrib: good aidata nodismember
+  deathtime	30
+  hp 100
+  radarsig 300
+  score 10
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 33
+  move_function org1
+  unit_type 9
+  clipsize 30
+  ammo_closeattack    AMMO_CAR15_556MM
+  ammo_easyrocket     AMMO_CAR15_556MM
+  ammo_advancedrocket AMMO_CAR15_556MM
+  ammo_marker3        AMMO_CAR15_556MM
+  launchups_closeattack	mflash01
+  launchups_rocket		mflash01
+  launchups_marker3		mflash01
+end
+
+begin "Drivable Dune Buggy"
+  id 101291
+  sid mbuggy
+  type vehicle
+  graphic mbuggy
+  attrib: AIData noscar neutral PlayerControl  forceasset DynamicShadow
+  hp 3000
+  armor 10 10
+  criticalhp 300
+  criticaldrain 15
+  score 50
+  radarsig 500
+  ai_function cveh
+  render_function cveh
+  move_function cveh
+    turn_rate 65
+    turn_rate2 41
+    acceleration 15
+    deceleration 70
+    slip_speed 0
+    player_speed 94
+    slip_slope	50
+    max_slope	60
+    spring		1
+    spring_comp 35
+    shock		1
+    mass		3
+    minai		1
+    physics     1
+    flip		30
+    torque 	9
+	particlefx   Effect_whiteExhaust FX00
+	particlefxw2 Effect_DirtWake FX01
+	particlefxs Effect_DirtWakeS FX01
+  default_aip d_buggy
+  unit_type 1
+  addeweap ewep01 101419  15 37 92 92
+end
+
+begin "NON-Armored Emplaced 50cal for FAV"
+  id 101419
+  type object
+  graphic mount
+  attrib: EWeap forceasset
+  HP 10
+  armor -1
+  ai_function ewep
+  move_function ewep
+  render_function ewep
+  disk_function EMPLACE
+  phrase_set 4
+  primary_weapon WPN_EMPLCD50NA
+	weaplbup bullet
+	weaplmup mflash01
+	weaplcup bcasing
+	weaprbup bullet
+	weaprmup mflash01
+	weaprcup bcasing
+end
+
+begin "Concrete lane divider 6"
+  id 102289
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "Concrete lane divider 7"
+  id 102290
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "Concrete lane divider 8"
+  id 102291
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "All Un-marked Land Mine Section"
+	id 101896
+	type decoration
+	attrib: LandMine notarget NoShadow
+	hp 20
+	armor  -1 -1
+	graphic mlndmine
+    render_function lndm
+    ai_function lndm
+    ammo_closeattack    SMALLLANDMINE
+    ammo_marker3        LARGELANDMINE
+end
+
+begin "Blackhawk, MEDIVAC, both doors open"
+  id 101281
+  type vehicle
+  unit_type 3
+  graphic mheli
+  attrib: AIData Good easy notool
+  disk_function HELO
+  ai_function chel
+  move_function chel
+  render_function chel
+  hp 1600
+  score 100
+  armor -1
+end
+
+begin "Combat Medic01 Soldier w"
+  id 104520
+  type person
+  unit_type 9
+  graphic person
+  anim_def mmedic1
+  attrib: good aidata easy leavecorpse nodismember notool
+  hp 500
+  score 25
+  armor 0 0
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 53
+  move_function org1
+  radarsig 300
+  clipsize 30
+  ammo_closeattack    AMMO_CAR15_556MM
+  ammo_easyrocket     AMMO_CAR15_556MM
+  ammo_marker3        AMMO_CAR15_556MM
+end
+
+begin "Combat Medic02 Soldier no gun"
+  id 104529
+  type person
+  unit_type 9
+  graphic person
+  anim_def mmedic2
+  attrib: good aidata easy leavecorpse nodismember notool
+  hp 500
+  score 25
+  armor -1
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 53
+  move_function org1
+  radarsig 300
+  clipsize 30
+  ammo_closeattack    AMMO_CAR15_556MM
+  ammo_easyrocket     AMMO_CAR15_556MM
+  ammo_marker3        AMMO_CAR15_556MM
+end
+
+begin "teleport target"
+  id 106088
+  type marker
+  disk_function MARKER
+end
+
+begin "Open Building on Pier Piece"
+  id 101101
+  attrib: Landable reflect
+  type building
+  graphic house
+end
+
+begin "Power Generator Housing"
+  id 101132
+  type building
+  graphic armory
+  attrib: Landable
+end
+
+begin "Mobile Armory Version #2"
+  id 101165
+  type building
+  graphic armory
+  attrib: Landable Armory
+end
+
+begin "Armory Version #3"
+  id 101186
+  type decoration
+  graphic crate
+  attrib: Landable Armory
+end
+
+begin "Jungle Hut 1"
+  id 101202
+  attrib:
+  type building
+  graphic armory
+end
+
+begin "Jungle Hut 2"
+  id 101203
+  attrib:
+  type building
+  graphic armory
+end
+
+begin "Jungle Hut 3"
+  id 101204
+  attrib:
+  type building
+  graphic armory
+end
+
+begin "Concrete Bunker 1"
+  id 101205
+  attrib:  landable
+  type building
+  graphic armory
+end
+
+begin "Indonesian warehouse 2"
+  id 101207
+  attrib:  landable
+  type building
+  graphic armory
+end
+
+begin "Indonesian warehouse 3"
+  id 101208
+  attrib:  landable
+  type building
+  graphic armory
+end
+
+begin "Sand bag wall #1, 4 m. long, no skirt"
+  id 101309
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "Sand bag wall #2, 8 m. long"
+  id 101310
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "Drivable Zodiac"
+  id 101293
+  type vehicle
+  sid mzodiac
+  graphic mzodiac
+  attrib: AIData neutral Reflect PlayerControl  forceasset
+  ai_function cbot
+  move_function cbot
+    turn_rate  50
+    turn_rate2 30
+    acceleration 14
+    deceleration 28
+    water_speed 84
+    slip_slope 20
+    max_slope 25
+    mass 1
+    torque 3
+    speedpitch 25
+    turnroll 60
+    physics 1
+    minai 1
+    lean 10
+    lean_velocity 13
+    pitch 10
+    pitch_velocity 3
+    bob 5
+  	particlefxw3 fx_sml_wk FX00
+	particlefxw4 fx_sml_wk_f FX01
+  render_function cveh
+  hp 3000
+  armor 10 10
+  criticalhp 300
+  criticaldrain 15
+  radarsig 500
+  unit_type 5
+end
+
+begin "Drivable LCAC"
+  id 101296
+  type vehicle
+  sid mlcac
+  graphic mlcac
+  attrib: Landable noscar AIData neutral Reflect PlayerControl PilotOnly  forceasset
+  ai_function cbot
+  move_function catv
+    turn_rate 25
+    turn_rate2 15
+    acceleration 15
+    deceleration 20
+    slip_speed 5
+    water_speed 130
+    player_speed 50
+    slip_slope 35
+    max_slope 40
+    mass 160
+    minai 1
+    torque 3
+  render_function cveh
+  hp 15000
+  armor 40 40
+  criticalhp 1500
+  criticaldrain 60
+  radarsig 500
+  unit_type 8
+end
+
+begin "Drivable Mark V"
+  id 101299
+  sid mmarkv
+  type vehicle
+  unit_type 7
+  graphic mmarkv
+  attrib: Landable noscar AIData neutral Reflect PlayerControl  forceasset
+  ai_function cbot
+  move_function cbot
+    turn_rate 25
+    turn_rate2 16
+    acceleration 14
+    deceleration 28
+    water_speed 110
+    slip_slope 10
+    max_slope 20
+    mass 114
+    torque 3
+    physics 1
+    lean 10
+    lean_velocity 10
+    pitch 7
+    pitch_velocity 1
+    bob 3
+    minai 2
+	particlefxw3 Effect_Mark5Wake FX00
+	particlefxw4 Effect_mark5Wakef FX01
+  render_function cveh
+  hp 18000
+  armor 40 50
+  criticalhp 1800
+  criticaldrain 90
+  radarsig 500
+end
+
+begin "Drivable Indonesian Assault Boat"
+  id 101303
+  sid mmarkv
+  type vehicle
+  unit_type 7
+  graphic mmarkv
+  attrib: Landable noscar AIData neutral Reflect PlayerControl  forceasset
+  ai_function cbot
+  move_function cbot
+    turn_rate 24
+    turn_rate2 12
+    acceleration 10
+    deceleration 20
+    water_speed 100
+    slip_slope 10
+    max_slope 20
+    mass 100
+    torque 3
+    physics 1
+    lean 10
+    lean_velocity 10
+    pitch 7
+    pitch_velocity 1
+    bob 3
+    minai 2
+  render_function cveh
+  hp 18000
+  armor 40 50
+  criticalhp 1800
+  criticaldrain 90
+  radarsig 500
+end
+
+begin "50cal on 180 tripod"
+  id 101902
+  type object
+  graphic mtripod
+  attrib: EWeap
+  HP 10
+  armor -1
+  ai_function ewep
+  move_function ewep
+  render_function ewep
+  disk_function EMPLACE
+  primary_weapon WPN_EMP50TRI180
+  weaplbup bullet
+  weaplmup mflash01
+  weaplcup bcasing
+  weaprbup bullet
+  weaprmup mflash01
+  weaprcup bcasing
+end
+
+begin "Flyable Chinook"
+  id 101300
+  type vehicle
+  sid mchinook
+  graphic mchinook
+  attrib:  AIData noscar neutral missile PlayerControl PilotOnly NoShadow  forceasset
+  disk_function HELO
+  ai_function chel
+  move_function chel
+    turn_rate 55
+    turn_rate2 40
+    acceleration 12
+    deceleration 50
+    climb_speed  25
+    player_speed 110
+    slip_slope 30
+    max_slope 35
+    weathervane 30
+    torque 3
+    mass 110
+    minai 1
+  particlefx Effect_heloHeat1 fx00
+  render_function chel
+  hp 15000
+  armor 20 20
+  criticalhp 1500
+  criticaldrain 50
+  heatsig  950
+  radarsig 500
+  default_aip d_mh6
+  unit_type 3
+end
+
+begin "Flyable LITTLE BIRD with miniguns"
+  id 101306
+  sid mlbird
+  type vehicle
+  graphic mlbird
+  attrib: AIData noscar neutral missile PlayerControl PilotOnly  forceasset
+  disk_function HELO
+  ai_function chel
+  move_function chel
+    turn_rate 72
+    turn_rate2 60
+    acceleration 20
+    deceleration 40
+    climb_speed  35
+    player_speed 160
+    slip_slope 30
+    max_slope 35
+    weathervane 30
+    torque 3
+    mass 5
+    minai 1
+  particlefx Effect_heloHeat1 fx00
+  render_function chel
+  hp 5000
+  armor 20 20
+  criticalhp 500
+  criticaldrain 25
+  score 0
+  heatsig  600
+  radarsig 500
+  default_aip d_mh6
+  unit_type 3
+  attrib: EWeap
+  primary_weapon WPN_EMINIDFLT
+  weaplbup bullet02
+  weaplmup mflash02
+  weaplcup bcasing02
+  weaprbup bullet01
+  weaprmup mflash01
+  weaprcup bcasing01
+end
+
+begin "Jungle Bird 1"
+  id 102272
+  type person
+  graphic bird
+  anim_def msoldier
+  attrib: neutral aidata nodismember NoWeapon
+  deathtime 30
+  hp 30
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 2
+  move_function org1
+  score 10
+  fire_timer 5
+  max_attack_dist 0
+  min_engagement_dist 0
+  max_engagement_dist 0
+end
+
+begin "Armory Version #1"
+  id 101125
+  type building
+  graphic mhut
+  attrib: Landable
+end
+
+begin "Two story Main building"
+  id 101115
+  type building
+  graphic mhut
+  attrib: Landable
+end
+
+begin "Small steel hangar with rounded roof"
+  id 104209
+  type building
+  graphic armory
+  attrib: Landable
+end
+
+begin "Weathered light post no light"
+  id 101436
+  type decoration
+  graphic crate
+  attrib:
+end
+
+begin "Drivable M1A1 Tank"
+  id 100164
+  type vehicle
+  sid mm1a1
+  graphic mm1a1
+  Virtualdisplay mtankdrv  camera
+  input_function tank
+  attrib: AIData neutral NoScar PlayerControl  forceasset DynamicShadow
+  ai_function cveh
+  move_function ctank
+    turn_rate 30
+	turn_rate2 15
+    acceleration 8
+    deceleration 20
+    slip_speed 0
+    player_speed 68
+    slip_slope	70
+    max_slope	70
+    torque   7
+    mass 135
+    physics     1
+	spring 6
+    spring_comp 35
+	shock 2
+    minai		1
+    lean 0
+    lean_velocity 0
+    pitch 0
+    pitch_velocity 0
+    bob 0
+    flip 15
+	particlefx Effect_heloHeat1 FX00
+	particlefxw1 Effect_DirtWake_T FX01
+	particlefxw2 fx_tank_dch FX02
+  	particlefxw3 fx_sml_wk FX01
+	particlefxw4 fx_sml_wk_f FX01
+	particlefxs Effect_DirtWakeS FX01
+  render_function tank
+  default_aip d_5ton
+  unit_type 2
+  hp 26000
+  armor 80 80
+  criticalhp 5001
+  criticaldrain 100
+  score 20
+  radarsig 500
+end
+
+begin "Ground Spawn Marker - 5-Ton Truck"
+  id 101182
+  type marker
+  attrib: VehicleSpawn AutoInheritTeam
+  pcvehicle_spawnlist	1294 1294
+end
+
+begin "Drivable Transport Truck"
+  id 101294
+  type vehicle
+  sid mtruck
+  graphic mtruck
+  attrib: AIData neutral NoScar PlayerControl  forceasset DynamicShadow UseVK
+  ai_function cveh
+  move_function cveh
+    turn_rate 45
+    turn_rate2 30
+    acceleration 10
+    deceleration 20
+    slip_speed 0
+    player_speed 64
+    slip_slope	35
+    max_slope	50
+    top_heavy   10
+    torque 7
+    physics     1
+    spring		6
+    shock		6
+    flip        10
+    mass 11
+    minai		1
+  render_function cveh
+  default_aip d_5ton
+  unit_type 1
+  hp 10000
+  armor 20 20
+  criticalhp 1000
+  criticaldrain 50
+  score 20
+  radarsig 500
+end
+
+begin "Drivable Transport Truck with armory"
+  id 101420
+  type vehicle
+  sid mtruck2
+  graphic mtruck
+  attrib: AIData neutral NoScar PlayerControl  forceasset armory DynamicShadow UseVK
+  ai_function cveh
+  move_function cveh
+    turn_rate 45
+    turn_rate2 30
+    acceleration 10
+    deceleration 20
+    slip_speed 0
+    player_speed 64
+    slip_slope	35
+    max_slope	50
+    torque 7
+    physics     1
+    spring		6
+    shock		6
+    flip        10
+    mass 11
+    minai		1
+  render_function cveh
+  default_aip d_5ton
+  unit_type 1
+  hp 10000
+  armor 20 20
+  criticalhp 1000
+  criticaldrain 50
+  score 20
+  radarsig 500
+end

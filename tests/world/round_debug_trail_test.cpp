@@ -1,14 +1,14 @@
-// The RoundSim debug trail (world::RoundDebugEvent) over the SHIPPED ammo
-// table: a grenadehe spawned over nothing dies by its fuse, never by an
-// impact — the case the retired RoundDebugReport binding served to GUT
+// The RoundSim debug trail (world::RoundDebugEvent) over the ammo table: a
+// grenadehe spawned over nothing dies by its fuse, never by an impact -- the
+// case the retired RoundDebugReport binding served to GUT
 // (throwable_repro_test.gd's flight-until-the-fuse witness, ADR 0043 d10).
-// Asset-gated on the reference fixture set's ammo.def (a byte-exact copy of
-// BASE JO: the grenadehe row's max_age is the 4 s fuse, 248 ticks).
+// The table is the authored fixtures/def/ammo.def, whose grenadehe row carries
+// the shipped BASE JO row's values: max_age 4, the 4 s fuse, 248 ticks.
 #include <cstdio>
 #include <cstring>
 #include <string>
 
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 
 #include <formats/def/def.h>
 #include <runtime/world/ammo_table_build.h>
@@ -26,8 +26,7 @@ static int failures = 0;
     } while (0)
 
 int main() {
-    RETAIL_REQUIRE_OR_SKIP(ammo_path, retail::reference_fixture("def/ammo.def"),
-            "OPENNOVA_JO_ASSETS/fixtures/def/ammo.def (the shipped ammo table)");
+    const std::string ammo_path = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/ammo.def";
     DefAmmoFile ammo;
     std::memset(&ammo, 0, sizeof(ammo));
     CHECK(def_parse_ammo(ammo_path.c_str(), &ammo) == 0);
@@ -50,7 +49,7 @@ int main() {
     CHECK(thrower.valid());
 
     const int ammo_index = w.tables.ammo.index_of("grenadehe");
-    CHECK(ammo_index >= 0); // the real ammo.def grenadehe row
+    CHECK(ammo_index >= 0); // the grenadehe row
     if (ammo_index < 0) return 1;
 
     // Godot (0, 10, 0) along (1, 1, 0): mission origin (0, 0, 10), yaw 0,

@@ -76,12 +76,12 @@ function(opennova_add_parts name)
     endforeach()
 endfunction()
 
-# The retail-mission rig the asset-gated world/mission ctests share
-# (common/retail_mission_files.h): one real mission booted through the
+# The mission rig the world/mission ctests share (common/mission_rig.h): one
+# mission (the minted mission set's, common/mission_set.h) booted through the
 # engine's own mission::MissionKernel (ADR 0042 d3) and ticked on the SP
 # listen frame (inmatch::HostRole) or the local role's bare no-net tick; this
-# pair supplies only the retail terrain documents and the tick roles.
-add_library(opennova_test_rig STATIC common/retail_mission_files.cpp)
+# pair supplies only the tick roles.
+add_library(opennova_test_rig STATIC common/mission_rig.cpp)
 target_include_directories(opennova_test_rig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opennova_test_rig
     PUBLIC opennova_net opennova_runtime opennova_formats opennova_base)
@@ -637,7 +637,8 @@ add_test(NAME minimal_bms_gen COMMAND minimal_bms_gen_test)
 # fixtures/bms/synth_logic.bms + synth_logic.bin: the small mission with everything the
 # mission document and its picture read (every row kind, a path, two events naming one
 # another, the text keys its records form) and its string table, written by bms::write and
-# rtxt::write; editor_mission_document and editor_document_contract read them.
+# rtxt::write; editor_mission_document and editor_document_contract read them. Also
+# fixtures/bms/synth_areas.bms (a shipped training mission's areas), mission_mis_idempotency's.
 add_executable(mission_set_gen_test fixtures/mission_set_gen.cpp)
 target_link_libraries(mission_set_gen_test PRIVATE opennova_formats)
 target_include_directories(mission_set_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -671,12 +672,12 @@ target_compile_features(mission_mis_test PRIVATE cxx_std_17)
 add_test(NAME mission_mis COMMAND mission_mis_test)
 
 # .mis idempotency: .bms -> .mis (gen1) -> parse -> .mis (gen2), byte-equal, over the
-# minted dense mission, plus the shipped ash_i5b as an OPENNOVA_JO_ASSETS reference leg.
+# minted dense and areas missions, and the default kit over the authored armory.
 add_executable(mission_mis_idempotency_test mission/mission_mis_idempotency_test.cpp)
 target_link_libraries(mission_mis_idempotency_test PRIVATE opennova_formats)
 target_include_directories(mission_mis_idempotency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_mis_idempotency_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(mission_mis_idempotency COMMAND mission_mis_idempotency_test)
+add_test(NAME mission_mis_idempotency COMMAND mission_mis_idempotency_test)
 
 # The mission writer against the files it must write: parse->write compared with the
 # bytes read, section by section, then the canonical fixed point. The ordinary row
@@ -687,7 +688,7 @@ add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
 target_link_libraries(mission_corpus_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(mission_corpus COMMAND mission_corpus_test)
+add_test(NAME mission_corpus COMMAND mission_corpus_test)
 
 # LWF sound-profile tests: byte-exact parse->encode round-trip + mutate-reread
 # over the synthetic fixtures/lwf/menu.lwf; the banks as the tools leave them
@@ -747,12 +748,11 @@ add_executable(teammate_spawn_test mission/teammate_spawn_test.cpp)
 target_link_libraries(teammate_spawn_test PRIVATE opennova_test_rig)
 target_include_directories(teammate_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME teammate_spawn COMMAND teammate_spawn_test)
-set_tests_properties(teammate_spawn PROPERTIES SKIP_RETURN_CODE 77 LABELS retail)
 
 add_executable(infantry_spawn_test world/infantry_spawn_test.cpp)
 target_link_libraries(infantry_spawn_test PRIVATE opennova_runtime)
 target_include_directories(infantry_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(infantry_spawn COMMAND infantry_spawn_test)
+add_test(NAME infantry_spawn COMMAND infantry_spawn_test)
 
 add_executable(teammate_operations_test world/teammate_operations_test.cpp)
 target_link_libraries(teammate_operations_test PRIVATE opennova_runtime)
@@ -2638,7 +2638,7 @@ add_executable(minimap_overlay_test world/minimap_overlay_test.cpp)
 target_link_libraries(minimap_overlay_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(minimap_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(minimap_overlay_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(minimap_overlay COMMAND minimap_overlay_test)
+add_test(NAME minimap_overlay COMMAND minimap_overlay_test)
 
 # The guided-missile flight integrator (D-NET-64): ignition hold, boost ramp,
 # BAM turn clamp, the three termination tests and their ordering.
@@ -2757,7 +2757,7 @@ add_test(NAME renderer_scar_draw_list COMMAND renderer_scar_draw_list_test)
 add_executable(ground_conform_test world/ground_conform_test.cpp)
 target_link_libraries(ground_conform_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(ground_conform_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(ground_conform COMMAND ground_conform_test)
+add_test(NAME ground_conform COMMAND ground_conform_test)
 
 # The spring leg's WIRING (vehicle_suspension.cpp): def keys, the role-picked
 # parked latch + Flags 0x10 replication, the spring dt, the per-wheel step.
@@ -2904,13 +2904,13 @@ target_include_directories(husk_section_origins_test PRIVATE ${CMAKE_CURRENT_SOU
 target_compile_features(husk_section_origins_test PRIVATE cxx_std_17)
 add_test(NAME husk_section_origins COMMAND husk_section_origins_test)
 
-# Asset-gated (OPENNOVA_JO_ASSETS fixtures): the RoundSim debug trail over the
-# shipped ammo.def — a grenadehe dies by its fuse, never by an impact.
+# The RoundSim debug trail over the authored fixtures/def/ammo.def (the shipped
+# grenadehe row's values) — a grenadehe dies by its fuse, never by an impact.
 add_executable(round_debug_trail_test world/round_debug_trail_test.cpp)
 target_link_libraries(round_debug_trail_test PRIVATE opennova_runtime)
 target_include_directories(round_debug_trail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(round_debug_trail_test PRIVATE cxx_std_17)
-opennova_add_gated_test(round_debug_trail COMMAND round_debug_trail_test)
+add_test(NAME round_debug_trail COMMAND round_debug_trail_test)
 
 # The physics callback table (world/physics_class_table.h): a move_function
 # binds its row by whole name, ignoring case; anything else binds null.
@@ -2953,7 +2953,7 @@ target_compile_features(infantry_test PRIVATE cxx_std_17)
 if(MSVC)
     target_link_options(infantry_test PRIVATE "/STACK:16777216")
 endif()
-opennova_add_mixed_test(infantry COMMAND infantry_test)
+add_test(NAME infantry COMMAND infantry_test)
 
 add_executable(collision_force_test world/collision_force_test.cpp)
 target_link_libraries(collision_force_test PRIVATE opennova_runtime)
@@ -3015,7 +3015,7 @@ target_compile_features(doors_test PRIVATE cxx_std_17)
 if(MSVC)
     target_link_options(doors_test PRIVATE "/STACK:4194304")
 endif()
-opennova_add_mixed_test(doors COMMAND doors_test)
+add_test(NAME doors COMMAND doors_test)
 
 # World-object collision (Entity_TestCollisionSections @0x4aef90 / _RaycastCollisionModel
 # @0x413060 / _ComputeBoneCollisionForce @0x4ae150 / _ProcessCollisionAndPlatformPhysics
@@ -3056,7 +3056,7 @@ add_executable(truck_dismount_test world/truck_dismount_test.cpp)
 target_link_libraries(truck_dismount_test PRIVATE opennova_runtime)
 target_include_directories(truck_dismount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(truck_dismount_test PRIVATE cxx_std_17)
-opennova_add_gated_test(truck_dismount COMMAND truck_dismount_test)
+add_test(NAME truck_dismount COMMAND truck_dismount_test)
 
 # Authoritative projectile consequences through RoundSim's CollisionWorld seam:
 # pre-arm dud substitution, kinetic damage, NoDie, and physical zero-damage blockers.
@@ -3104,19 +3104,17 @@ target_include_directories(occlusion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(occlusion_test PRIVATE cxx_std_17)
 add_test(NAME occlusion COMMAND occlusion_test)
 
-# Real-asset occlusion probe: retail Armry01.3di (the 00TRa armory) through the
-# engine's 3DI3 read and occlusion-model build (the parsed struct IS the model,
-# ADR 0027), camera walked room to room, per-room section masks asserted
+# Model-file occlusion probe: the synthetic armory (the 00TRa armory's floor plan)
+# through the engine's 3DI3 read and occlusion-model build (the parsed struct IS the
+# model, ADR 0027), camera walked room to room, per-room section masks asserted
 # (window/portal/open-slot legs over authored OFAC topology).
-# Uses the committed Armry01 fixture in CI; OPENNOVA_JO_ASSETS can override it
-# for a retail-install parity run.
 add_executable(occlusion_armry_test world/occlusion_armry_test.cpp)
 target_link_libraries(occlusion_armry_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(occlusion_armry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(occlusion_armry_test PRIVATE cxx_std_17)
 target_compile_definitions(occlusion_armry_test PRIVATE
     OPENNOVA_ARMRY_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/threedi/synth/armory.3di")
-opennova_add_mixed_test(occlusion_armry COMMAND occlusion_armry_test)
+add_test(NAME occlusion_armry COMMAND occlusion_armry_test)
 
 # The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions
 # @0x541fa0, net-re §5.62): the ACTION-row bake (auto delays from clip ticks), the
@@ -4011,13 +4009,13 @@ target_compile_definitions(nwmsg_replay_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE
 add_test(NAME nwmsg_replay COMMAND nwmsg_replay_test)
 # R1 of the net parity proof ladder: every body in the retail captures decoded
 # to the byte and, where a struct encoder exists, re-encoded byte-identical
-# (net/npwire/ingame_body_codec.h). The _retail leg proves the authored
-# record-class table against the real items.def.
+# (net/npwire/ingame_body_codec.h), its record classes resolved through the
+# authored table and again through the same rows as items.def text.
 add_executable(nwmsg_codec_parity_test novaworld/nwmsg_codec_parity_test.cpp)
 target_link_libraries(nwmsg_codec_parity_test PRIVATE opennova_runtime opennova_formats opennova_net)
 target_include_directories(nwmsg_codec_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nwmsg_codec_parity_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
-opennova_add_mixed_test(nwmsg_codec_parity COMMAND nwmsg_codec_parity_test)
+add_test(NAME nwmsg_codec_parity COMMAND nwmsg_codec_parity_test)
 
 # opennova-wire --scenario-events: the decoded event lines the network-parity scenario
 # comparator (scripts/net/compare_scenario.py) consumes.
@@ -4324,12 +4322,13 @@ target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 
 # D-NET-141: the weapon.def armory table — witnessed index allocation (null@0 + file order),
-# ammo-clip resolution, and charfilter/teamfilter masks, against the committed fixture; §5.57.
+# ammo-clip resolution, and charfilter/teamfilter masks, against the authored fixtures/def/weapon.def
+# (the shipped table's order and pinned rows); the SIGHTS file check over a scratch mount; §5.57.
 add_executable(npruntime_weapon_table_test npruntime/weapon_table_test.cpp)
 target_link_libraries(npruntime_weapon_table_test
     PRIVATE opennova_net opennova_runtime opennova_formats opennova_base)
 target_include_directories(npruntime_weapon_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(npruntime_weapon_table COMMAND npruntime_weapon_table_test)
+add_test(NAME npruntime_weapon_table COMMAND npruntime_weapon_table_test)
 
 # D-NET-168 / D-NET-176 / D-NET-177: the S2C 0x50 team-assign re-latch + 0x2F re-submit, the
 # C2S 0x32 -> S2C 0x5D empty-slot sweep (entity removal) vs the bookkeeping-only 0x46 bit15, and
@@ -4411,37 +4410,35 @@ add_test(NAME npruntime_medic_recipient COMMAND npruntime_medic_recipient_test)
 # fast half of the host-parity loop; --report / --ticks / --bms for diagnosis).
 add_executable(ai_path_conformance_test mission/ai_path_conformance_test.cpp)
 target_link_libraries(ai_path_conformance_test PRIVATE opennova_test_rig)
-opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_test)
+add_test(NAME mission_ai_path_conformance COMMAND ai_path_conformance_test)
 
-# The retail-mission ports of the former in-game probes (ADR 0041: an
-# assertion over the portable engine is a ctest, not a probe), all on the
-# shared rig (common/retail_mission_files.h). Gated: OPENNOVA_JO_DIR (a packed
-# install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
+# The former retail-mission ports over the minted mission set (common/mission_set.h,
+# tests/fixtures/mission_set_gen.cpp): each boots its own mission set mission on the
+# shared rig, the scenario of the shipped training mission it is named after.
 foreach(port
-        world/truck_rest_00tra world/motorcycle_gravity_06tr
-        world/rock_collision_00trg world/ai_corpse world/ai_threat
-        world/ai_muzzle_pose
-        world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
-        mission/native_assets_00trg mission/buggy_01tr mission/fire_hold_01tr
-        mission/training_gameplay
-        mission/watercraft_02tr mission/parachute_09tr)
+        world/truck_rest_00tra world/motorcycle_gravity_06tr world/rock_collision_00trg
+        world/ai_corpse world/ai_threat world/ai_muzzle_pose world/ladder_00tra
+        mission/vehicle_ride_00tra mission/buggy_01tr mission/fire_hold_01tr
+        mission/defense_00trg mission/soak_00trg mission/native_assets_00trg
+        mission/training_gameplay mission/watercraft_02tr mission/parachute_09tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
-    opennova_add_gated_test(${port_name} COMMAND ${port_name}_test)
+    add_test(NAME ${port_name} COMMAND ${port_name}_test)
 endforeach()
 
 # The indoor-visibility walk (the "occlusion issues in a building" report):
-# the local player walked through a retail building's doorway on the shared
-# rig, the render-occlusion frame run over the game's camera every tick
-# (00TRa's armory door), and CP03's authored spawn (a doorway of HN_Bld1)
-# held still and swept. Gated: OPENNOVA_JO_DIR.
+# the local player walked through a building's doorway on the shared rig, the
+# render-occlusion frame run over the game's camera every tick (the mission
+# set's indoor.bms, 00TRa's armory door in miniature), and an authored spawn
+# just inside a doorway (spawn.bms, CP03's at HN_Bld1's door in miniature)
+# held still, posed and swept.
 add_executable(indoor_visibility_walk_test world/indoor_visibility_walk_test.cpp)
 target_link_libraries(indoor_visibility_walk_test PRIVATE opennova_test_rig)
-opennova_add_gated_test(indoor_visibility_walk_00tra
-    COMMAND indoor_visibility_walk_test --bms 00TRa.bms --bms-id 20 --door 5)
-opennova_add_gated_test(indoor_visibility_spawn_cp03
-    COMMAND indoor_visibility_walk_test --bms CP03.bms --spawn --idle 120 --yaw-step 45 --retail-truth)
+add_test(NAME indoor_visibility_walk_00tra
+    COMMAND indoor_visibility_walk_test --bms indoor.bms --bms-id 20 --door 5)
+add_test(NAME indoor_visibility_spawn_cp03
+    COMMAND indoor_visibility_walk_test --bms spawn.bms --spawn --idle 120 --yaw-step 45 --spawn-truth)
 # The blink rules those walks surfaced (synthetic rigs, no data gate): the
 # first-pass-only blink letters, and the parent blink-quad copies (the dropped
 # object, the ewep class callback and move function, a seated rider).
@@ -4450,27 +4447,28 @@ target_link_libraries(indoor_visibility_fixes_test PRIVATE opennova_runtime open
 target_include_directories(indoor_visibility_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME indoor_visibility_fixes COMMAND indoor_visibility_fixes_test)
 
-# The witnessed SP lose flow on the retail data, one executable per training
-# mission's WAC: 04TR carries both team legs, 00TRa only `true(bluekills) ->
-# Lose(1)` (the first mission's friendly-fire failure, the playthrough gate 8
-# of docs/world/npc-mission-completion.md). `--events` prints the mission's
-# BMS event table instead (the playthrough's authored-sequence reference).
+# The witnessed SP lose flow on the training missions' grounds in miniature (the
+# mission set's lf_*.bms, each with its own WAC): lf_04tr carries 04TR's two team
+# legs, lf_00tra 00TRa's only `true(bluekills) -> Lose(1)` (the first mission's
+# friendly-fire failure, the playthrough gate 8 of
+# docs/world/npc-mission-completion.md). `--events` prints the mission's BMS
+# event table instead (the playthrough's authored-sequence reference).
 add_executable(lose_flow_test mission/lose_flow_test.cpp)
 target_link_libraries(lose_flow_test PRIVATE opennova_test_rig)
-opennova_add_gated_test(lose_flow_04tr COMMAND lose_flow_test --bms 04TR.bms)
-opennova_add_gated_test(lose_flow_00tra COMMAND lose_flow_test --bms 00TRa.bms --victim-team 1)
+add_test(NAME lose_flow_04tr COMMAND lose_flow_test --bms lf_04tr.bms)
+add_test(NAME lose_flow_00tra COMMAND lose_flow_test --bms lf_00tra.bms --victim-team 1)
 # `--self-kill`: the player's own HE blast tallies nothing (no Player definition
 # authors a `score`), so the WAC's bluekills lose never fires on it.
-opennova_add_gated_test(lose_flow_04tr_self_kill COMMAND lose_flow_test --bms 04TR.bms --self-kill)
-opennova_add_gated_test(lose_flow_05tr_self_kill COMMAND lose_flow_test --bms 05TR.bms --self-kill)
+add_test(NAME lose_flow_04tr_self_kill COMMAND lose_flow_test --bms lf_04tr.bms --self-kill)
+add_test(NAME lose_flow_05tr_self_kill COMMAND lose_flow_test --bms lf_05tr.bms --self-kill)
 # `--win-event 38`: 01TR's only BlueWin, its five prerequisite events staged with
 # their authored actions; the round ends won and the engine's win epilog builds
 # its score screen over the mission's own tallies.
-opennova_add_gated_test(win_flow_01tr COMMAND lose_flow_test --bms 01TR.bms --win-event 38)
-# `--restart-boot`: 00TRa booted fresh and then as the SP restart's boot; the
+add_test(NAME win_flow_01tr COMMAND lose_flow_test --bms lf_01tr.bms --win-event 38)
+# `--restart-boot`: lf_00tra booted fresh and then as the SP restart's boot; the
 # restarted world equals the fresh launch at the same world ages (the spawn,
-# the fired-event set including event 11's authored activation delay).
-opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bms --restart-boot)
+# the fired-event set its events' authored activation delays grow).
+add_test(NAME restart_boot_00tra COMMAND lose_flow_test --bms lf_00tra.bms --restart-boot)
 
 # The remote player's reload clip chain and the weapon.def ACTION keys against
 # their tables, each over minted rigs staged into a temp root (the 19-bone
@@ -4483,18 +4481,20 @@ foreach(rig_test reload_clips weapon_action_clips)
     add_test(NAME anim_${rig_test} COMMAND anim_${rig_test}_test)
 endforeach()
 
-# The def/particle/npruntime probes that became gated ctests (ADR 0041):
-# each mounts the retail data through ResourceIndex itself and is Skipped
-# without OPENNOVA_JO_ASSETS / OPENNOVA_JO_DIR.
-foreach(gated
+
+# The npruntime probes that became ctests over minted data (ADR 0041): the
+# remote body-state arbitration over a clip set the test mints, the held-weapon
+# attach over the synthetic person rig and gun, the authored payload halves
+# over the mission set's payload mission.
+foreach(minted
         npruntime/remote_body_state npruntime/held_weapon_attach npruntime/authored_payload_00trg)
-    get_filename_component(gated_name ${gated} NAME)
-    get_filename_component(gated_dir ${gated} DIRECTORY)
-    add_executable(${gated_dir}_${gated_name}_test ${gated}_test.cpp)
-    target_link_libraries(${gated_dir}_${gated_name}_test PRIVATE opennova_net opennova_runtime)
-    target_include_directories(${gated_dir}_${gated_name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_features(${gated_dir}_${gated_name}_test PRIVATE cxx_std_17)
-    opennova_add_gated_test(${gated_dir}_${gated_name} COMMAND ${gated_dir}_${gated_name}_test)
+    get_filename_component(minted_name ${minted} NAME)
+    get_filename_component(minted_dir ${minted} DIRECTORY)
+    add_executable(${minted_dir}_${minted_name}_test ${minted}_test.cpp)
+    target_link_libraries(${minted_dir}_${minted_name}_test PRIVATE opennova_net opennova_runtime)
+    target_include_directories(${minted_dir}_${minted_name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(${minted_dir}_${minted_name}_test PRIVATE cxx_std_17)
+    add_test(NAME ${minted_dir}_${minted_name} COMMAND ${minted_dir}_${minted_name}_test)
 endforeach()
 
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
@@ -4509,7 +4509,7 @@ add_executable(npruntime_handshake_server_test npruntime/handshake_server_test.c
 target_link_libraries(npruntime_handshake_server_test
     PRIVATE opennova_net opennova_runtime opennova_formats)
 target_include_directories(npruntime_handshake_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(npruntime_handshake_server COMMAND npruntime_handshake_server_test)
+add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
 
 add_executable(npruntime_host_producers_test npruntime/host_producers_test.cpp)
 target_link_libraries(npruntime_host_producers_test PRIVATE opennova_net opennova_runtime)
@@ -4781,12 +4781,13 @@ target_link_libraries(npruntime_host_punt_test PRIVATE opennova_net opennova_run
 add_test(NAME npruntime_host_punt COMMAND npruntime_host_punt_test)
 
 # The anti-cheat challenge sources computed from definitions (inmatch/integrity_sources.h):
-# the ammo.def and weapon.def table images over synthetic corpora, and over the pinned install's
-# jox01 corpus against the live witness (75 ammo rows, the 0x47724F02 table CRC).
+# the ammo.def and weapon.def table images over synthetic corpora, and over a minted packed install
+# launched with its expansion (the path the pinned install's jox01 corpus matched the live witness on),
+# its CRCs pinned.
 add_executable(npruntime_integrity_sources_test npruntime/integrity_sources_test.cpp)
 target_link_libraries(npruntime_integrity_sources_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_integrity_sources_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(npruntime_integrity_sources COMMAND npruntime_integrity_sources_test)
+add_test(NAME npruntime_integrity_sources COMMAND npruntime_integrity_sources_test)
 
 # Server_TickUpdate's maintenance legs from the jo-c cross-check: the 620-tick spawn
 # protection and its fire clear, the 1 Hz 0x2F flag refresh, the violation sweep's carry
@@ -4819,31 +4820,30 @@ target_link_libraries(npruntime_two_endpoint_socket_test
     PRIVATE opennova_net opennova_runtime opennova_app_common opennova_base)
 add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socket_test)
 
-# weapon.sav player-profile parse/serialize tests (engine/formats/playersav).
-# The retail-corpus leg reads the install's weapon.sav (OPENNOVA_JO_DIR) and notes SKIP-LEG without it.
+# weapon.sav player-profile parse/serialize tests (engine/formats/playersav), the
+# shipped default file rebuilt from its seeds and pinned by digest.
 add_executable(playersav_weapon_sav_test playersav/weapon_sav_test.cpp)
 target_link_libraries(playersav_weapon_sav_test PRIVATE opennova_formats)
 target_include_directories(playersav_weapon_sav_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(playersav_weapon_sav_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(playersav_weapon_sav COMMAND playersav_weapon_sav_test)
+add_test(NAME playersav_weapon_sav COMMAND playersav_weapon_sav_test)
 
-# player.sav parse/serialize tests (engine/formats/playersav). The retail leg
-# checks the format against the installed program's save (Jointops.exe under
-# OPENNOVA_JO_DIR, read only).
+# player.sav parse/serialize tests (engine/formats/playersav), with the
+# program's own save constants pinned as cited values (the pinned Jointops.exe).
 add_executable(playersav_player_sav_test playersav/player_sav_test.cpp)
 target_link_libraries(playersav_player_sav_test PRIVATE opennova_formats)
 target_include_directories(playersav_player_sav_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(playersav_player_sav_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(playersav_player_sav COMMAND playersav_player_sav_test)
+add_test(NAME playersav_player_sav COMMAND playersav_player_sav_test)
 
 # The player profile's in-memory image, its load and save (engine/runtime/profile).
-# The retail legs check the default binding table and kit pages against the
-# installed program's static data and load and save the install's weapon.sav.
+# The default binding table and kit pages are pinned against the program's static
+# data, and the shipped default weapon.sav loads and saves in memory.
 add_executable(profile_player_profiles_test profile/player_profiles_test.cpp)
 target_link_libraries(profile_player_profiles_test PRIVATE opennova_runtime)
 target_include_directories(profile_player_profiles_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(profile_player_profiles_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(profile_player_profiles COMMAND profile_player_profiles_test)
+add_test(NAME profile_player_profiles COMMAND profile_player_profiles_test)
 
 # The in-engine dev tools (ADR 0039, engine/runtime/devtools). The frame-stats
 # board is unconditional; the ImGui pass and game-window test need
@@ -4901,10 +4901,12 @@ add_executable(minefield_test world/minefield_test.cpp)
 target_link_libraries(minefield_test PRIVATE opennova_runtime)
 add_test(NAME minefield COMMAND minefield_test)
 
-add_executable(minefield_retail_test world/minefield_retail_test.cpp)
-target_link_libraries(minefield_retail_test PRIVATE opennova_test_rig)
-target_include_directories(minefield_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(minefield_retail COMMAND minefield_retail_test)
+# The shipped minefield missions in miniature (the mission set's minefield.bms and
+# minefield_coop.bms): section counts, a mine firing on and killing the player, the reset.
+add_executable(minefield_missions_test world/minefield_missions_test.cpp)
+target_link_libraries(minefield_missions_test PRIVATE opennova_test_rig)
+target_include_directories(minefield_missions_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minefield_missions COMMAND minefield_missions_test)
 
 target_include_directories(minefield_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(minefield_replica_test netsim/minefield_replica_test.cpp)

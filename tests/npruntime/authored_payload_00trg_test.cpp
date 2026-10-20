@@ -1,14 +1,14 @@
-// The mission-authored halves of two S2C payloads on 00TRg, pinned against the
-// retail capture: the 0x7E briefing body — [info]/briefing3 then
-// [info]/briefing2 (or briefing), each NUL-terminated cp1252
+// The mission-authored halves of two S2C payloads on 00TRg's shape (the mission
+// set's payload.bms and payload.bin): the 0x7E briefing body — [info]/briefing3
+// then [info]/briefing2 (or briefing), each NUL-terminated cp1252
 // [orig: NetPacket_WriteBriefingText @0x506620] — and the 0x0F world-state's
 // deploy-map location labels (Locations/LOCATION001..) plus the blue player
 // route (exactly one blue path, DoesNotLoop|PlayerRoute, marker [12] — retail's
-// pool-3 slot 0x300c).
-// Gated on OPENNOVA_JO_DIR with the revx02 expansion mounted (the capture's
-// data set); an extracted OPENNOVA_JO_ASSETS tree carrying the same 00TRg pair
-// serves too.
-#include "common/retail_paths.h"
+// pool-3 slot 0x300c). The retail capture on revx02's 00TRg witnessed a 0-byte
+// briefing3 and an 810-byte briefing2 and the two labels below; the minted
+// table carries a briefing of that shape in our own words, so its body digest
+// is ours, pinned once.
+#include "common/mission_set.h"
 
 #include <base/io/sha256.h>
 #include <base/resource_index/resource_index.h>
@@ -34,42 +34,27 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-// The retail 0x7E witness on revx02's 00TRg.
+// The retail 0x7E witness on revx02's 00TRg: briefing3 0 bytes, briefing2 810.
 constexpr size_t kBriefing3Len = 0;
 constexpr size_t kBriefing2Len = 810;
-const char *const kBodySha256 =
-		"99ffe3380dd8fe7d06621c848532241d5426d83ac6832d12189984c315d94c07";
+// The minted body's digest (payload.bin's briefing, not the shipped text).
+const char *const kBodySha256 = "361009ed421d7dbad8fec771a1b84fe4788ea3b83c36c99021de74645ba08028";
 
 void put_cstr(std::vector<uint8_t> &b, const std::string &s) {
 	b.insert(b.end(), s.begin(), s.end());
 	b.push_back(0);
 }
 
-bool mount(ResourceIndex &index, std::string &where) {
-	const std::string install = retail::install();
-	if (!install.empty() && index.scan(install, "revx02") && index.mounted_expansion() == "revx02" &&
-			index.has_file("00TRg.bms")) {
-		where = install + " (revx02)";
-		return true;
-	}
-	const std::string assets = retail::assets();
-	if (!assets.empty() &&
-			(index.scan(assets) || index.scan(assets, std::string(), VfsMountMode::LooseOnly)) &&
-			index.has_file("00TRg.bms")) {
-		where = assets + " (loose)";
-		return true;
-	}
-	return false;
-}
 
 } // namespace
 
 int main() {
+	test_mission_set::Root root("authored_payload");
 	ResourceIndex index;
-	std::string where;
-	if (!mount(index, where))
-		return retail::skip("OPENNOVA_JO_DIR with the revx02 expansion (or OPENNOVA_JO_ASSETS) carrying 00TRg");
-	std::printf("authored_payload: 00TRg from %s\n", where.c_str());
+	if (!expect(root.ok() && index.scan(root.path(), std::string(), VfsMountMode::LooseOnly) &&
+						index.has_file("payload.bms"),
+				"the mission set mounts with payload.bms"))
+		return 1;
 
 	// --- 0x7E briefing body.
 	mission::BootFileSource files;
@@ -78,8 +63,8 @@ int main() {
 		return index.read_file(name, out);
 	};
 	std::vector<uint8_t> text_bytes;
-	const mission::MissionTextSource source = mission::resolve_mission_text(files, "00TRg", text_bytes);
-	if (!expect(source != mission::MissionTextSource::kNone, "00TRg resolves a mission text table"))
+	const mission::MissionTextSource source = mission::resolve_mission_text(files, "payload", text_bytes);
+	if (!expect(source != mission::MissionTextSource::kNone, "payload resolves a mission text table"))
 		return 1;
 	rtxt::File table;
 	std::string error;
@@ -99,22 +84,23 @@ int main() {
 	std::printf("authored_payload: briefing first_len=%zu second_len=%zu body_len=%zu sha256=%s\n",
 			briefing3.size(), briefing2.size(), body.size(), digest.c_str());
 	expect(briefing3.size() == kBriefing3Len, "briefing3 length matches the retail 0x7E witness");
-	expect(briefing2.size() == kBriefing2Len, "briefing2 length matches the retail 0x7E witness");
-	expect(digest == kBodySha256, "the 0x7E body digest matches the retail witness");
+	expect(briefing2.size() == kBriefing2Len, "briefing2 (not the first draft) at the retail 0x7E witness's length");
+	expect(body.size() == kBriefing3Len + kBriefing2Len + 2, "each half NUL-terminated");
+	expect(digest == kBodySha256, "the 0x7E body digest matches the pinned minted body");
 
 	// --- 0x0F locations.
 	const std::string loc1 = table.get_in_section("Locations", "LOCATION001");
 	const std::string loc2 = table.get_in_section("Locations", "LOCATION002");
 	std::printf("authored_payload: locations [%s] [%s]\n", loc1.c_str(), loc2.c_str());
 	expect(loc1 == "Weapons Cache" && loc2 == "Rebel Outpost",
-			"00TRg location strings match the retail 0x0F witness");
+			"the location strings match the retail 0x0F witness");
 
 	// --- 0x0F blue route.
 	std::vector<uint8_t> bms_bytes;
 	bms::File mission;
-	if (!expect(index.read_file("00TRg.bms", bms_bytes) &&
+	if (!expect(index.read_file("payload.bms", bms_bytes) &&
 						bms::parse(bms_bytes.data(), bms_bytes.size(), mission, error),
-				"00TRg.bms parses"))
+				"payload.bms parses"))
 		return 1;
 	std::vector<const bms::WaypointRecord *> blue;
 	for (const bms::WaypointRecord &rec : mission.waypoint_records)
@@ -122,7 +108,7 @@ int main() {
 			blue.push_back(&rec);
 	std::printf("authored_payload: %zu waypoint paths, %zu blue\n", mission.waypoint_records.size(),
 			blue.size());
-	if (expect(blue.size() == 1, "00TRg has exactly one blue player waypoint path")) {
+	if (expect(blue.size() == 1, "the mission has exactly one blue player waypoint path")) {
 		const bms::WaypointRecord &b = *blue[0];
 		std::printf("authored_payload: blue flags=%u markers=%zu first=%u\n",
 				static_cast<uint32_t>(b.flags), b.waypoint_numbers.size(),

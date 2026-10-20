@@ -9,7 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 #include <base/resource_index/resource_index.h>
 #include <runtime/mission/collision_resolve.h>
 #include <runtime/assets/asset_store.h>
@@ -209,14 +209,14 @@ static void test_pool_limit_and_wrapping_rate() {
     CHECK(wrap.doors.slot(e, 0)->state == 1);
 }
 
-static void test_retail_door_pose() {
-    const std::string assets = retail::assets();
-    if (assets.empty()) {
-        retail::skip_leg("door retail pose (OPENNOVA_JO_ASSETS unset)");
-        return;
-    }
+// A door building's pose over its model: the mission set's door.3di, minted in the shape of
+// the shipped IBlock01 (a "door" LOD whose part 1 swings on control register 0, DOOR_00, a
+// collision object per part), mounted as the game mounts a loose file, bound through the
+// shipped door row's items.def keys.
+static void test_door_building_pose() {
     ResourceIndex index;
-    CHECK(index.scan(assets, std::string(), VfsMountMode::LooseOnly));
+    CHECK(index.scan(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/mission_set", std::string(),
+            VfsMountMode::LooseOnly));
     assets::AssetStore models{&index};
 
     world::EntityPoseProvider pose;
@@ -227,7 +227,7 @@ static void test_retail_door_pose() {
     World w;
     w.registry.configure_pool(2, 1);
     const char source[] = "begin \"Iblock01\"\r\n id 101998\r\n type building\r\n"
-            " graphic Iblock01\r\n ai_function door\r\n move_function door\r\n"
+            " graphic door\r\n ai_function door\r\n move_function door\r\n"
             " first_door 2\r\n num_doors 1\r\n open_rate 2\r\nend\r\n";
     def::DefItemsFile items{};
     CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(source),
@@ -266,13 +266,12 @@ static void test_retail_door_pose() {
     CHECK(std::memcmp(fixed_closed.m, fixed_open.m, sizeof(fixed_closed.m)) == 0);
     int32_t pivot[3]{};
     CHECK(pose.resolve_section_pivot(w, h, 1, pivot));
-    std::printf("retail Iblock01: closed/open door transforms differ; building remains fixed\n");
+    std::printf("door building: closed/open door transforms differ; building remains fixed\n");
     def::def_free_items(&items);
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
-    test_retail_door_pose();
+int main() {
+    test_door_building_pose();
     test_parse_and_bind();
     test_motion_contact_sound_restart();
     test_wac_and_bms_pool_scope();

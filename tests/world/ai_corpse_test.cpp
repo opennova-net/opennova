@@ -1,5 +1,6 @@
-// P1c death presentation on the retail data (world-wac-ai-re §19): the local
-// player walks to the nearest foot NPC on CP01 and KILLS it with real rounds
+// P1c death presentation (world-wac-ai-re §19): the local player walks to the
+// nearest foot NPC of the mission set's infantry.bms (CP01's foot soldiers by
+// their shipped rows) and KILLS it with real rounds
 // (the local weapon pump -> RoundSim damage/death chain — the same path that
 // stages the death-anim selection, §19.2), then the corpse is watched:
 //
@@ -17,10 +18,10 @@
 // This is NOT a firefight-balance test: the incidental exchange is pinned by
 // scripted stores (guard hold on the target, per-tick player top-up), so the
 // player cannot lose the race and no assertion rides on it.
-// Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying CP01.bms);
-// no synthetic leg exists: the death matrix needs a retail infantry .adm.
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+// The death matrix is the minted soldier table's (msoldier.adm: every death slot,
+// 173..239, plays the minted death clip).
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <runtime/world/local_player_view.h>
 
@@ -53,7 +54,7 @@ struct Nearest {
 };
 
 // Whether the local player's eye sees the NPC 0.5 u above its origin.
-bool player_sees(testrig::RetailMissionRig &rig, const w::AiEntity &npc) {
+bool player_sees(testrig::MissionRig &rig, const w::AiEntity &npc) {
 	const w::Entity *player = rig.world.registry.get(rig.world.cached.local_player);
 	if (player == nullptr || rig.world.collision == nullptr) return false;
 	const w::Vec3 eye = w::player_eye_position(*player);
@@ -64,7 +65,7 @@ bool player_sees(testrig::RetailMissionRig &rig, const w::AiEntity &npc) {
 }
 
 // The nearest live foot NPC, or with `visible` the nearest one the player sees.
-Nearest nearest_npc(testrig::RetailMissionRig &rig, bool visible = false) {
+Nearest nearest_npc(testrig::MissionRig &rig, bool visible = false) {
 	Nearest best;
 	const w::Vec3 player = rig.local.player_position();
 	for (int i = 0; i < rig.world.ai.count(); ++i) {
@@ -87,13 +88,16 @@ Nearest nearest_npc(testrig::RetailMissionRig &rig, bool visible = false) {
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
-			"OPENNOVA_JO_ASSETS (an extracted retail tree carrying CP01.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("ai_corpse");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(assets, "CP01.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "infantry.bms", error), "infantry.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "CP01 boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}

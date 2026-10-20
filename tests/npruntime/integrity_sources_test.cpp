@@ -3,14 +3,14 @@
 // weapon.def tables rebuilt from synthetic corpora field by field (the
 // tokenizer's quirks, the allocation and inherit rules, the effects tables,
 // the tracer item resolve, the action bind's .adm duration rings and the
-// whole-table sanitizer), and, with --retail, from the pinned install's jox01
-// corpus against the live witness (integrity_oracles.h).
+// whole-table sanitizer), and from a minted packed install launched with its
+// expansion, the path the pinned install's jox01 corpus matched the live
+// witness on (integrity_oracles.h), its CRCs pinned.
 // [orig: AmmoDef_LoadAll @0x40B0B0; AmmoDef_ParseProperty @0x40A2D0;
 //  WeaponDefs_ParseLineCallback @0x543680; Anim_InitActions @0x541FA0;
 //  WeaponSlotDef_ComputeSanitizedChecksum @0x53F8F0;
 //  NetPacket_WriteEntityCRCChecksum @0x42B020]
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_paths.h"
 #include "integrity_oracles.h"
 
@@ -20,6 +20,7 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/bad/bad_build.h>
 #include <formats/lwf/lwf.h>
+#include <formats/pff/pff.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/inmatch/integrity_ammo_image.h>
@@ -580,7 +581,7 @@ void test_sources(const WeaponCorpus &c) {
 	CHECK(!inmatch::compute_integrity_sources(mission::BootFileSource{}, &assets).ammo_known);
 }
 
-// --- the retail corpus -----------------------------------------------------
+// --- a minted install with an expansion -------------------------------------
 
 inmatch::IntegritySources compute_from_install(
 		const std::string &root, const std::string &expansion) {
@@ -593,42 +594,130 @@ inmatch::IntegritySources compute_from_install(
 	return inmatch::compute_integrity_sources(mission::boot_files_from_index(index), &assets);
 }
 
-void test_retail_jox01() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the pinned install with its jox01 expansion)");
-		return;
-	}
-	// The pinned reference with its jox01 expansion, as a launch with
-	// `/exp jox01` mounts it; computed twice to show the sources carry no state
-	// from one mission load to the next.
-	const inmatch::IntegritySources jox01 = compute_from_install(install, "jox01");
-	const inmatch::IntegritySources again = compute_from_install(install, "jox01");
-	CHECK(jox01.ammo_known &&
-			jox01.ammo_row_crcs.size() == std::size(integrity_oracle::kJox01AmmoRowCrcs));
-	if (jox01.ammo_row_crcs.size() == std::size(integrity_oracle::kJox01AmmoRowCrcs)) {
-		for (size_t row = 0; row < jox01.ammo_row_crcs.size(); ++row) {
-			if (jox01.ammo_row_crcs[row] != integrity_oracle::kJox01AmmoRowCrcs[row]) {
-				std::printf("FAIL: jox01 ammo row 0x%02zX computed 0x%08X, witnessed 0x%08X\n", row,
-						jox01.ammo_row_crcs[row], integrity_oracle::kJox01AmmoRowCrcs[row]);
-				++g_failures;
-			}
+bool write_archive(const fs::path &path, const std::vector<std::pair<std::string, std::vector<uint8_t>>> &files) {
+	std::vector<pff::PffWriteEntry> entries;
+	for (const auto &file : files)
+		entries.push_back({ file.first.c_str(), file.second.data(), static_cast<uint32_t>(file.second.size()),
+				0, pff::PFF_NEW_ENTRY_TIMESTAMP, 0 });
+	std::error_code ignored;
+	fs::create_directories(path.parent_path(), ignored);
+	return pff::pff_write_archive(path.string().c_str(), pff::PFF_FORMAT_PFF3, entries.data(), entries.size()) ==
+			pff::PFF_WRITE_OK;
+}
+
+std::vector<uint8_t> file_bytes(const fs::path &path) {
+	std::vector<uint8_t> bytes;
+	test_io::read_file(path.string(), bytes);
+	return bytes;
+}
+
+// The sources a launch with `/exp xp1` computes over a minted install, as the
+// pinned JO:CA install with `/exp jox01` computes them (the retail match: its
+// 75 row CRCs and its table CRC are the live witness, integrity_oracles.h):
+// the base archive carries items.def, a base ammo.def and weapon.def, the
+// weapon's clips and a global sound bank (game.lwf), the expansion's archive its
+// own ammo.def and weapon.def (its rows naming every weapon class, sound keys
+// and an action with no animation),
+// which the mount serves over the base's. Computed twice, the sources carry
+// no state from one mission load to the next; the expansion's tables are the
+// ones read (the image builders over the same two texts give the same CRCs,
+// the base tables others); and the CRCs are pinned, so a change to either
+// image builder needs its witness.
+constexpr size_t kMintedAmmoRows = 4;
+constexpr int32_t kMintedWeaponNamedRows = 5;
+constexpr uint64_t kMintedAmmoRowDigest = UINT64_C(0x9031CC1874D7C574);
+constexpr uint32_t kMintedWeaponTableCrc = 0x0A670279u;
+
+void test_minted_install(const WeaponCorpus &c) {
+	const fs::path install = c.dir / "install";
+	const char kItems[] = "begin ITEM_ZERO\r\nid 100000\r\nend\r\nbegin TRACER_ONE\r\nid 101874\r\nend\r\n";
+	const char kBaseAmmo[] = "ammo AT_NULL\r\nend\r\nammo AMMO_556\r\nvelocity 3\r\nend\r\n";
+	const char kBaseWeapons[] =
+			"weapon WPN_A\r\nround_type AMMO_556\r\nanimadm wpn\r\n"
+			"action fire\r\nanim anim_wpn_fire\r\ndelayend auto\r\nend\r\nend\r\n";
+	const char kExpansionAmmo[] =
+			"ammo AT_NULL\r\nvelocity 0\r\nmax_age 0\r\ndrag 1\r\nend\r\n"
+			"ammo AMMO_556\r\nmax_age 3\r\nvelocity 854\r\ntumble_error 0.01\r\ndrag 0.255\r\n"
+			"weight_in_grains 62\r\nrecoil 8 9 11\r\npenetration_impact 20\r\npenetration_kz 20\r\n"
+			"armor_density 7 1 14\r\nkz_minradius 2.5\r\nkz_maxradius 2.5\r\nbullet_radius 0.00278\r\n"
+			"tracerRate 3\r\nscar_type 1\r\nend\r\n"
+			"ammo AMMO_40MM\r\nfrndlyTrcrID 1874\r\nmax_age 20\r\narm_age .30\r\nvelocity 74\r\n"
+			"recoil 28 28 28\r\nkz_minradius 4.0\r\nkz_maxradius 10.0\r\nkz_damage 150\r\n"
+			"min_damage 410\r\nmax_damage 410\r\nscorch_id 2\r\nscar_type 2\r\nkz_physics 1\r\n"
+			"flag LAWR\r\nflag forcetracer\r\nend\r\n"
+			"ammo grenadehe\r\nmax_age 4\r\nvelocity 30\r\nerror 1\r\nkz_minradius 6.0\r\n"
+			"kz_maxradius 12.0\r\nkz_damage 205\r\nflag useownmove\r\nflag priority\r\nend\r\n";
+	const char kExpansionWeapons[] =
+			"ammoclass_max_carry CLASS_556 1000\r\nammoclass_max_carry CLASS_40MM 1000\r\n"
+			"weapon WPN_A\r\ncategory 3\r\nrank 0\r\nteamfilter blue\r\ncharfilter rifleman\r\n"
+			"maxclips 10\r\nclipsize 30\r\nstartrounds 300\r\nerror 0.0165 0.2 0.25 0.0165 0.032 0.047\r\n"
+			"round_type AMMO_556\r\nammoclass CLASS_556 1\r\nflags auto\r\nweapon_class primary\r\n"
+			"soundhead GS_A_HEAD\r\nsoundtrailoff GS_A_TAIL\r\nsoundlockedtone GS_A_LOCK\r\nanimadm wpn\r\n"
+			"action fire\r\nanim anim_wpn_fire\r\ndelayend 3\r\nend\r\n"
+			"action recoil\r\nanim anim_wpn_recoil\r\ndelaystart auto\r\nend\r\nend\r\n"
+			"weapon WPN_A203\r\ncategory 3\r\nrank 1\r\nround_type AMMO_40MM\r\nclipsize 1\r\n"
+			"startrounds 6\r\nammoclass CLASS_40MM 1\r\nsameas WPN_A\r\nweapon_class secondary\r\nend\r\n"
+			"weapon WPN_GREN\r\ncategory 6\r\nrank 0\r\nround_type grenadehe\r\nweapon_class grenade\r\nend\r\n"
+			"weapon WPN_BINOC\r\ncategory 7\r\nrank 0\r\nweapon_class accessory\r\n"
+			"action idle\r\ndelayend auto\r\nend\r\nend\r\n";
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> base = {
+		{ "items.def", bytes_of(kItems) },
+		{ "ammo.def", bytes_of(kBaseAmmo) },
+		{ "weapon.def", bytes_of(kBaseWeapons) },
+		{ "wpn.adm", file_bytes(c.dir / "wpn.adm") },
+		// A global sound bank (the minted fixtures/lwf/menu.lwf in game.lwf's slot).
+		{ "game.lwf", file_bytes(fs::path(test_paths_repo_root(__FILE__)) / "fixtures" / "lwf" / "menu.lwf") },
+	};
+	for (const char *clip : { "rst.bad", "f.bad", "r1.bad", "r2.bad", "r3.bad", "i.bad" })
+		base.push_back({ clip, file_bytes(c.dir / clip) });
+	CHECK(write_archive(install / "resource.pff", base));
+	CHECK(write_archive(install / "expansion" / "xp1" / "xp1.pff",
+			{ { "ammo.def", bytes_of(kExpansionAmmo) }, { "weapon.def", bytes_of(kExpansionWeapons) } }));
+
+	const inmatch::IntegritySources xp1 = compute_from_install(install.string(), "xp1");
+	const inmatch::IntegritySources again = compute_from_install(install.string(), "xp1");
+	CHECK(xp1.ammo_known && xp1.ammo_row_crcs.size() == kMintedAmmoRows);
+	CHECK(xp1.weapon_table_known && xp1.weapon_named_rows == kMintedWeaponNamedRows);
+	CHECK(again.ammo_row_crcs == xp1.ammo_row_crcs && again.weapon_table_crc == xp1.weapon_table_crc);
+
+	// The expansion's texts through the image builders, over the install's own files.
+	{
+		LaunchFlags flags;
+		flags.expansion = "xp1";
+		ResourceIndex index;
+		CHECK(index.scan_install(install.string(), flags) == ResourceIndex::InstallScan::Mounted);
+		assets::AssetStore assets{ &index };
+		const mission::BootFileSource files = mission::boot_files_from_index(index);
+		const std::vector<uint8_t> items = bytes_of(kItems);
+		const std::vector<uint8_t> ammo_text = bytes_of(kExpansionAmmo);
+		const std::vector<uint8_t> weapon_text = bytes_of(kExpansionWeapons);
+		io::ConfigTokens tokens;
+		const AmmoRecordTable ammo = inmatch::build_ammo_record_table(ammo_text.data(), ammo_text.size(),
+				inmatch::read_integrity_item_rows(items.data(), items.size()), nullptr, tokens);
+		const WeaponRecordTable weapons = inmatch::build_weapon_record_table(
+				weapon_text.data(), weapon_text.size(), ammo, files, &assets, tokens);
+		for (size_t row = 0; row < xp1.ammo_row_crcs.size(); ++row) {
+			uint32_t crc = 0;
+			CHECK(ammo.row_crc(static_cast<int>(row), crc) && crc == xp1.ammo_row_crcs[row]);
 		}
+		CHECK(weapons.sanitized_crc() == xp1.weapon_table_crc);
 	}
-	CHECK(integrity_oracle::row_digest(jox01.ammo_row_crcs.data(), jox01.ammo_row_crcs.size()) ==
-			integrity_oracle::kJox01RowDigest);
-	CHECK(jox01.weapon_table_known &&
-			jox01.weapon_table_crc == integrity_oracle::kJox01WeaponTableCrc);
-	CHECK(again.ammo_row_crcs == jox01.ammo_row_crcs &&
-			again.weapon_table_crc == jox01.weapon_table_crc);
-	std::printf("jox01: %zu ammo rows, weapon table 0x%08X over %d named rows\n",
-			jox01.ammo_row_crcs.size(), jox01.weapon_table_crc, jox01.weapon_named_rows);
+	// The base mount alone reads the base tables.
+	const inmatch::IntegritySources base_only = compute_from_install(install.string(), std::string());
+	CHECK(base_only.ammo_known && base_only.ammo_row_crcs.size() == 2);
+	CHECK(base_only.weapon_table_known && base_only.weapon_table_crc != xp1.weapon_table_crc);
+
+	const uint64_t digest = integrity_oracle::row_digest(xp1.ammo_row_crcs.data(), xp1.ammo_row_crcs.size());
+	std::printf("minted xp1: %zu ammo rows (digest 0x%016llX), weapon table 0x%08X over %d named rows\n",
+			xp1.ammo_row_crcs.size(), static_cast<unsigned long long>(digest), xp1.weapon_table_crc,
+			xp1.weapon_named_rows);
+	CHECK(digest == kMintedAmmoRowDigest);
+	CHECK(xp1.weapon_table_crc == kMintedWeaponTableCrc);
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	test_item_rows();
 	test_ammo_fields();
 	test_ammo_tokenizer_quirks();
@@ -641,10 +730,9 @@ int main(int argc, char **argv) {
 	test_weapon_sanitizer(corpus);
 	test_weapon_uncomputable(corpus);
 	test_sources(corpus);
+	test_minted_install(corpus);
 	std::error_code ignored;
 	fs::remove_all(corpus.dir, ignored);
-	if (retail::selected())
-		test_retail_jox01();
 	if (g_failures != 0)
 		std::printf("%d failure(s)\n", g_failures);
 	return g_failures == 0 ? 0 : 1;

@@ -1,6 +1,10 @@
-// Retail data stays outside the repository; boot the two shipped lndm missions.
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+// The two shipped minefield missions in miniature (the mission set's minefield.bms, a
+// single-player mission in 00TRd's place, and minefield_coop.bms, an objective Co-op one in
+// CP09's): each boots, every section carries the shipped unmarked section's nine small and
+// five large mines (the minted mlndmine in Lndmine1's shape), a mine fires on the player and
+// kills him, and the baseline restores the field and the RNG.
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 #include <base/io/fixed.h>
 #include <runtime/world/entity_spawn.h>
 #include <cstdio>
@@ -9,11 +13,15 @@
 using namespace opennova;
 
 int main() {
-    const std::string root = retail::install();
-    if (root.empty()) return retail::skip("packed JO install is not configured");
-    for (const auto &mission : {std::pair<const char *, int>{"00TRd.bms", 98},
-                               {"CP09.bms", 74}}) {
-        auto rig = std::make_unique<testrig::RetailMissionRig>();
+    test_mission_set::Root set("minefield");
+    if (!set.ok()) {
+        std::fprintf(stderr, "FAIL the mission set does not stage\n");
+        return 1;
+    }
+    const std::string root = set.path();
+    for (const auto &mission : {std::pair<const char *, int>{"minefield.bms", 3},
+                               {"minefield_coop.bms", 2}}) {
+        auto rig = std::make_unique<testrig::MissionRig>();
         std::string error;
         if (!rig->open(root, mission.first, error)) {
             std::fprintf(stderr, "FAIL open %s: %s\n", mission.first, error.c_str());
@@ -55,7 +63,7 @@ int main() {
         if (field->section_mask & 1u) return 1;
         const auto *approaching = rig->world.registry.get(rig->world.cached.local_player);
         if (!approaching || approaching->health <= 0) return 1;
-        // CP09 is an objective Co-op mission: offline its player starts at the doubled ceiling
+        // The Co-op mission (CP09's kind) is an objective Co-op one: offline its player starts at the doubled ceiling
         // (D-PWR-2 [orig: Game_StartMission @0x525CC2..0x525D12]), which one small mine does not
         // empty. Pin that start, then bring the player to its def hp so the kill below is the
         // mine's alone.
@@ -87,7 +95,7 @@ int main() {
         rig->tick(); // pool-2 contacts queue after this tick's explosion drain
         const auto *player = rig->world.registry.get(rig->world.cached.local_player);
         if (!player || player->health > 0) {
-            std::fprintf(stderr, "FAIL %s: retail mine did not kill player (%d)\n",
+            std::fprintf(stderr, "FAIL %s: the mine did not kill the player (%d)\n",
                     mission.first, player ? player->health : -1);
             return 1;
         }

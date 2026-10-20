@@ -1,5 +1,8 @@
-// Vehicle mount / ride / drive on the retail data: 00TRa's ("Training:
-// Basics / Armory") vehicle gate end to end on the engine's own world:
+// Vehicle mount / ride / drive: 00TRa's ("Training: Basics / Armory") vehicle
+// gate end to end on the engine's own world, over the mission set's
+// vehicle_ride.bms (00TRa's truck, instructor, ATV, path 2 and events 0..2 by
+// their SSNs and indices; the minted mtruck and matv in the shipped DTruck1's
+// and Datv1's shapes):
 //
 //   * the USE-ITEM toggle mounts the local player into the DTruck1 (SSN 11)
 //     [orig: Entity_ToggleVehicleMount @0x436950 + the nearest-seat scan @0x435d50],
@@ -16,9 +19,8 @@
 // The camera mode the sim RESOLVES for each seat is checked through the local
 // view frame: the chase in a control seat, first person otherwise [orig: the
 // arbiter Render_ProcessMainSceneFrame @0x5ca1d2..0x5ca1f2].
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms).
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <runtime/world/vehicle_mount.h>
 
@@ -42,7 +44,7 @@ bool expect(bool cond, const char *msg) {
 constexpr uint16_t kTruckSsn = 11;
 constexpr uint16_t kAtvSsn = 1766;
 
-bool camera_check(testrig::RetailMissionRig &rig, const char *label, bool expect_third_person) {
+bool camera_check(testrig::MissionRig &rig, const char *label, bool expect_third_person) {
 	const w::LocalPlayerViewFrame f = rig.local.view_frame();
 	std::printf("ride: camera %s third_person=%d camera_mounted=%d selected=%d\n", label,
 			int(f.third_person), int(f.camera_mounted), int(f.third_person_selected));
@@ -56,7 +58,7 @@ bool control_seat(w::SeatType t) { return t == w::SeatType::Controller || t == w
 // Aim the local player's view at a world point through the input-owned look
 // mirrors; the next tick lands them on the body Yaw/Pitch the seat scan measures
 // its cone from [orig: Entity_FindNearestSeatOrArmory @0x4360b6 / @0x4360c6].
-void aim_local_at(testrig::RetailMissionRig &rig, const w::Vec3 &target) {
+void aim_local_at(testrig::MissionRig &rig, const w::Vec3 &target) {
 	const w::Entity *pl = rig.local.player();
 	if (pl == nullptr) return;
 	const w::Vec3 eye{ pl->position.x + pl->eye_offset_x / 65536.0f,
@@ -78,13 +80,16 @@ int first_free_seat(const w::Entity &vehicle) {
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("vehicle_ride");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "00TRa.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "vehicle_ride.bms", error), "vehicle_ride.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "00TRa boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}

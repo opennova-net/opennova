@@ -26,7 +26,7 @@
 //                    machine and never committed.
 #include "common/boot_file_source.h"
 #include "common/file_io.h"
-#include "common/retail_mission_files.h"
+#include "common/mission_rig.h"
 #include "common/retail_paths.h"
 #include "common/synthetic_mission.h"
 #include "common/test_paths.h"
@@ -252,7 +252,7 @@ int retail_chain(const std::string &mission_name, int ticks, bool listen) {
 		std::printf("SKIP: needs OPENNOVA_JO_DIR for --mission\n");
 		return retail::kSkipExitCode;
 	}
-	testrig::RetailMissionRig rig;
+	testrig::MissionRig rig;
 	std::string error;
 	if (!rig.open(root, mission_name, error)) {
 		std::printf("FAIL: open %s: %s\n", mission_name.c_str(), error.c_str());

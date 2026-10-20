@@ -1,13 +1,10 @@
-// Retail path glue for the asset-gated world/mission ctests (ADR 0042 d3):
+// The mission rig the world/mission ctests boot their missions on (ADR 0042 d3):
 // the engine's own mission::MissionKernel is the boot + state, the inmatch
 // roles (LocalRole / HostRole, ADR 0043 d3) are the ticks, and this pair keeps
-// only what a ctest needs on top — the listen/no-net role pick the
+// only what a ctest needs on top -- the listen/no-net role pick the
 // Session-driven tests bank on (the kernel boot loads the terrain field
-// through the mounted root itself).
-//
-// Gating is the caller's: open() (inherited from the kernel) takes the root
-// from retail::install() / retail::assets() and reports a missing file so the
-// test can retail::skip.
+// through the mounted root itself). The missions are the minted mission set's
+// (common/mission_set.h stages its root; open() is the kernel's own).
 #pragma once
 
 #include <base/io/bam.h>
@@ -50,9 +47,9 @@ using opennova::io::bam_from_radians;
 // The kernel plus the ctest-side half: the two tick roles. Everything a test reads or
 // mutates — world, ai, input, weapon, loadout, the player/entity/terrain/
 // observation seams — is the kernel's own public surface.
-class RetailMissionRig : public mission::MissionKernel {
+class MissionRig : public mission::MissionKernel {
 public:
-	RetailMissionRig();
+	MissionRig();
 
 	// The S9 boot over the opened mission (the kernel loads the terrain field
 	// through the mounted root itself), with the listen bring-up hook when
