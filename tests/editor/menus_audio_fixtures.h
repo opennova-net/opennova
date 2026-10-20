@@ -4,6 +4,7 @@
 // expansion projects under expansions/), and the variants a sweep requires by name, each a failure when it
 // is missing, never a skip. The JO corpus these sweeps once read from a retail install is closed, so each of
 // its variants is minted once (tests/fixtures/*_gen.cpp, the format's lane) and read here.
+#include <cstddef>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -22,10 +23,12 @@ struct Input {
 
 // Every file named with `extension` (compared without case) in each of `folders` (under the repo, not walked
 // down) and each of `required` (paths under the repo), in name order, each once (editor/variant_files.h's
-// sweep). False, naming each, when a required file is missing.
+// sweep, which skips our own game's unpulled LFS pointers: their count in `skipped`, where given). False, naming
+// each, when a required file is missing.
 inline bool inputs(const std::vector<std::string> &folders, const std::string &extension,
-                   const std::vector<std::string> &required, std::vector<Input> &out) {
+                   const std::vector<std::string> &required, std::vector<Input> &out, size_t *skipped = nullptr) {
 	const editor_test::VariantFiles found = editor_test::variant_files(folders, {extension}, required);
+	if (skipped) *skipped = found.skipped.size();
 	out.clear();
 	for (const std::string &label : found.files) out.push_back({label, editor_test::repo_path(label)});
 	for (const std::string &label : found.missing) std::printf("  FAIL the variant fixture %s is missing\n", label.c_str());
