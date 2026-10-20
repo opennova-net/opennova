@@ -6,6 +6,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/replication_model.h> // PlayerReplicationState (the 0x46 resend input)
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
+#include <runtime/inmatch/server_player_death.h>     // the entity update's staged sends
 #include <runtime/inmatch/server_tick.h>             // Server_RerollPlayerTickSeed
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
@@ -49,7 +50,7 @@ void send_medic_event(NapiNPServerCtx &ctx, uint8_t event, world::EntityHandle v
 			static_cast<uint8_t>(y_hi & 0xFF), static_cast<uint8_t>(y_hi >> 8)};
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (!is_in_match(c) || c.link.transport == nullptr) continue;
-		c.link.transport->host_send(s2c::GAME_EVENT, body);
+		send_entity_update_message(ctx, c, s2c::GAME_EVENT, body);
 	}
 }
 
@@ -98,7 +99,7 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 		for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
 			if (!is_medic_recipient(candidate, world, static_cast<int8_t>(victim->team)))
 				continue;
-			candidate.link.transport->host_send(s2c::PLAYER_DOWNED_STATE, body);
+			send_entity_update_message(ctx, candidate, s2c::PLAYER_DOWNED_STATE, body);
 		}
 	}
 	// The medic's MEDICSAVE [orig: GameEvent_RevivePlayer @0x517CD0 (the
@@ -122,9 +123,9 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 	// 0x3A (empty, mask 160 -> the victim's active slot, class 1 reliable)
 	// then the seed reroll [orig: @0x517E29..0x517E47].
 	if (is_in_match(*victim_connection) && victim_connection->link.transport != nullptr) {
-		victim_connection->link.transport->host_send(s2c::MEDIC_REVIVING, {});
-		victim_connection->link.transport->host_send(
-				s2c::TICK_SEED, Server_RerollPlayerTickSeed(*victim_connection));
+		send_entity_update_message(ctx, *victim_connection, s2c::MEDIC_REVIVING, {});
+		send_entity_update_message(ctx, *victim_connection, s2c::TICK_SEED,
+				Server_RerollPlayerTickSeed(*victim_connection));
 	}
 	// 0x1E event 38 only when the healer slot's hide bytes +97536/+97537 are
 	// clear (+97536 tracks the spectator latch +100567, +97537 is never set)
@@ -154,23 +155,37 @@ void heal_player(NapiNPServerCtx &ctx, world::World &world,
 
 } // namespace
 
+// GameEvent_HandleMedicInteraction's two transactions. dfx2.exe's medic
+// dispatcher keeps the tests and calls two empty functions where Jointops.exe
+// revives and heals (docs/titles/dfx2-vs-jo-re.md DFX2-19)
+// [orig: GameEvent_HandleMedicInteraction @0x4e6790 (@0x4e67d8, @0x4e6805)]
+// [orig: @0x4e38d0 - nullsub_114 @0x4fcff0 from @0x4e3918, nullsub_115
+//  @0x4fd000 from @0x4e3945 (dfx2.exe)].
+static void process_medic_interaction(NapiNPServerCtx &ctx, world::World &world,
+		const world::MedicInteraction &interaction) {
+	if (world.rules.title == gameprofile::GAME_DFX2) return;
+	if (interaction.revive)
+		revive_player(ctx, world, interaction);
+	else
+		heal_player(ctx, world, interaction);
+}
+
+// See napi_np_server_ctx.h: the explosion queue's medic arm, run where it
+// meets the target, ahead of the pool-0 walk, with its sends staged for the
+// next tick's head.
+// [orig: Entity_UpdateAllEntities -- Projectile_ProcessExplosionQueue @0x4C223F
+//  ahead of the pool-0 walk @0x4C2426; Projectile_ProcessExplosionQueue
+//  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790]
+void ServerEntityUpdateTransactions::medic_interaction(world::World &world,
+		const world::MedicInteraction &interaction) {
+	if (ctx == nullptr) return;
+	EntityUpdateStaging staging(*ctx, world, interaction.victim);
+	process_medic_interaction(*ctx, world, interaction);
+}
+
 void Server_RouteMedicInteractions(NapiNPServerCtx &ctx, world::World &world) {
-	if (world.round_sim.medic_interactions.empty()) return;
-	// dfx2.exe's medic dispatcher keeps the tests and calls two empty functions
-	// where Jointops.exe revives and heals (docs/titles/dfx2-vs-jo-re.md DFX2-19)
-	// [orig: GameEvent_HandleMedicInteraction @0x4e6790 (@0x4e67d8, @0x4e6805)]
-	// [orig: @0x4e38d0 - nullsub_114 @0x4fcff0 from @0x4e3918, nullsub_115
-	//  @0x4fd000 from @0x4e3945 (dfx2.exe)].
-	if (world.rules.title == gameprofile::GAME_DFX2) {
-		world.round_sim.medic_interactions.clear();
-		return;
-	}
-	for (const world::MedicInteraction &interaction : world.round_sim.medic_interactions) {
-		if (interaction.revive)
-			revive_player(ctx, world, interaction);
-		else
-			heal_player(ctx, world, interaction);
-	}
+	for (const world::MedicInteraction &interaction : world.round_sim.medic_interactions)
+		process_medic_interaction(ctx, world, interaction);
 	world.round_sim.medic_interactions.clear();
 }
 

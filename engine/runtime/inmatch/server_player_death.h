@@ -2,6 +2,9 @@
 
 #include <runtime/inmatch/napi_np_server_ctx.h> // NapiNPServerCtx
 
+#include <cstdint>
+#include <vector>
+
 namespace opennova::world {
 class World;
 struct Entity;
@@ -61,5 +64,32 @@ void kill_player_body_at_frame_tail(world::World &world, world::Entity *player);
 // Empty: no death waits for the frame tail. Server_TickUpdate still calls it
 // ahead of its entity pass.
 void arm_frame_tail_edges(world::World &world);
+
+// One send of a transaction: to the connection's transport, or, while the
+// entity update runs the transaction (an EntityUpdateStaging is open), into its
+// staged batch.
+void send_entity_update_message(NapiNPServerCtx &ctx, NapiNPConnection &c, uint8_t tag,
+		std::vector<uint8_t> body);
+
+// The scope of one transaction the entity update runs inline: its sends land in
+// one batch, which the scope's end queues behind a death-queue record naming it
+// (RoundDeath::staged_sends, the victim's), at that place among the update's
+// deaths; the next tick's head releases it there. Retail's update queues the
+// sends after the frame's send pump, so they lead the next frame.
+// [orig: Game_ProcessMainFrame -- the send pump @0x51E487 inside the
+//  Server_TickUpdate call @0x5266B6, then Entity_UpdateAllEntities @0x52674B]
+class EntityUpdateStaging {
+public:
+	EntityUpdateStaging(NapiNPServerCtx &ctx, world::World &world, world::EntityHandle victim);
+	~EntityUpdateStaging();
+	EntityUpdateStaging(const EntityUpdateStaging &) = delete;
+	EntityUpdateStaging &operator=(const EntityUpdateStaging &) = delete;
+
+private:
+	NapiNPServerCtx &ctx_;
+	world::World &world_;
+	world::EntityHandle victim_;
+	std::vector<StagedEntityUpdateSend> sends_;
+};
 
 } // namespace opennova::inmatch

@@ -138,23 +138,6 @@ PlayerDeathFeed classify_player_death(
 	return out;
 }
 
-// One send of the transaction: to the connection's transport, or, while the
-// entity update runs the transaction (the player body's edge), into the batch
-// the next tick's head releases.
-void send_death_message(NapiNPServerCtx &ctx, NapiNPConnection &c, uint8_t tag,
-		std::vector<uint8_t> body) {
-	if (ctx.entity_update_staging != nullptr) {
-		StagedEntityUpdateSend send;
-		send.connection_id = c.connection_id;
-		send.transport = c.link.transport;
-		send.tag = tag;
-		send.body = std::move(body);
-		ctx.entity_update_staging->push_back(std::move(send));
-		return;
-	}
-	c.link.transport->host_send(tag, std::move(body));
-}
-
 // The batch an edge record names, onto the transports of the connections
 // still there: a connection dropped since the entity update takes nothing, as
 // retail's slot teardown discards its queue.
@@ -175,6 +158,42 @@ void release_staged_sends(NapiNPServerCtx &ctx, uint32_t seq) {
 }
 
 } // namespace
+
+// See header.
+void send_entity_update_message(NapiNPServerCtx &ctx, NapiNPConnection &c, uint8_t tag,
+		std::vector<uint8_t> body) {
+	if (ctx.entity_update_staging != nullptr) {
+		StagedEntityUpdateSend send;
+		send.connection_id = c.connection_id;
+		send.transport = c.link.transport;
+		send.tag = tag;
+		send.body = std::move(body);
+		ctx.entity_update_staging->push_back(std::move(send));
+		return;
+	}
+	c.link.transport->host_send(tag, std::move(body));
+}
+
+// See header.
+EntityUpdateStaging::EntityUpdateStaging(NapiNPServerCtx &ctx, world::World &world,
+		world::EntityHandle victim)
+	: ctx_(ctx), world_(world), victim_(victim) {
+	ctx_.entity_update_staging = &sends_;
+}
+
+EntityUpdateStaging::~EntityUpdateStaging() {
+	ctx_.entity_update_staging = nullptr;
+	if (++ctx_.entity_update_batch_seq == 0) ++ctx_.entity_update_batch_seq;
+	StagedEntityUpdateBatch batch;
+	batch.seq = ctx_.entity_update_batch_seq;
+	batch.sends = std::move(sends_);
+	ctx_.entity_update_sends.push_back(std::move(batch));
+	world::RoundDeath marker;
+	marker.victim = victim_;
+	marker.victim_handle = victim_.packed;
+	marker.staged_sends = ctx_.entity_update_batch_seq;
+	world_.round_sim.deaths.push_back(marker);
+}
 
 // Drain the queued deaths in order. A player body's edge record releases the
 // sends its transaction staged in the entity update; a damage-time record for
@@ -352,7 +371,7 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 			if (!is_in_match(c) || c.link.transport == nullptr) continue;
 			if (c.link.mode == replication::TransportMode::Loopback) continue;
-			send_death_message(ctx, c, s2c::ENTITY_DEATH, body13);
+			send_entity_update_message(ctx, c, s2c::ENTITY_DEATH, body13);
 		}
 
 		// Retail DISARMS the victim immediately after 0x13 and before the
@@ -364,7 +383,7 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		if (victim_connection != nullptr &&
 				is_in_match(*victim_connection) &&
 				victim_connection->link.transport != nullptr) {
-			send_death_message(ctx, *victim_connection, s2c::TICK_SEED,
+			send_entity_update_message(ctx, *victim_connection, s2c::TICK_SEED,
 					Server_DisarmPlayerTickSeed(*victim_connection, world.logic_tick));
 		}
 
@@ -385,7 +404,7 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 				target.y = camera_entity->position.y.q16;
 				target.z = camera_entity->position.z.q16;
 			}
-			send_death_message(ctx, *victim_connection, s2c::DEATH_CAMERA_TARGET,
+			send_entity_update_message(ctx, *victim_connection, s2c::DEATH_CAMERA_TARGET,
 					encode_death_camera_target(target));
 		}
 
@@ -397,7 +416,7 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 			for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 				if (!is_in_match(c) || c.link.transport == nullptr)
 					continue;
-				send_death_message(ctx, c, s2c::GAME_EVENT, body1e);
+				send_entity_update_message(ctx, c, s2c::GAME_EVENT, body1e);
 			}
 		}
 
@@ -418,7 +437,7 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 				PlayerDownedState state;
 				state.entity_handle = d.victim_handle;
 				state.revive_seconds = seconds;
-				send_death_message(ctx, recipient, s2c::PLAYER_DOWNED_STATE,
+				send_entity_update_message(ctx, recipient, s2c::PLAYER_DOWNED_STATE,
 						encode_player_downed_state(state));
 			};
 			for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
@@ -469,9 +488,9 @@ void Server_RouteFrameTailEdges(NapiNPServerCtx &) {}
 
 // See napi_np_server_ctx.h. The player body's edge has latched the dead bit
 // and, unless a non-lethal hit staged the death selection (+0x2C0), cleared
-// +0x178, which the transaction credits as the edge leaves it. The record it
-// queues keeps the transaction's place among the entity update's other deaths
-// for its staged sends.
+// +0x178, which the transaction credits as the edge leaves it. Its staging
+// scope's record keeps the transaction's place among the entity update's other
+// deaths for its sends.
 // [orig: Entity_UpdateInfantryPlayerBody -- the +0x2C0 test and +0x178 clear
 //  @0x4B4C72..0x4B4C8D, the latch @0x4B4CB5..0x4B4CDB, `cmp is_authority`
 //  @0x4B4CE1, Entity_CheckAndProcessDeath @0x4B4CEA; GameEvent_PlayerDeath
@@ -495,17 +514,8 @@ void ServerEntityUpdateTransactions::player_death(world::World &world, world::En
 		break;
 	}
 	death.motor_edge = true;
-	std::vector<StagedEntityUpdateSend> sends;
-	ctx->entity_update_staging = &sends;
+	EntityUpdateStaging staging(*ctx, world, body.handle);
 	Server_ProcessPlayerDeath(*ctx, world, death);
-	ctx->entity_update_staging = nullptr;
-	if (++ctx->entity_update_batch_seq == 0) ++ctx->entity_update_batch_seq;
-	StagedEntityUpdateBatch batch;
-	batch.seq = ctx->entity_update_batch_seq;
-	batch.sends = std::move(sends);
-	ctx->entity_update_sends.push_back(std::move(batch));
-	death.staged_sends = ctx->entity_update_batch_seq;
-	world.round_sim.deaths.push_back(death);
 }
 
 } // namespace opennova::inmatch

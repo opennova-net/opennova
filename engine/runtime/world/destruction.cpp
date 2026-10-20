@@ -803,14 +803,21 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 const Vec3 d = vec_sub(t->position, e.pos);
                 const float bound = t->bound_radius > 0.0f ? t->bound_radius : 0.6f;
                 if (vec_len(d) - bound > medic_radius) continue;
+                // The authority's host session runs each transaction here, in
+                // the queue, ahead of the pool-0 walk (a heal closes a death
+                // edge its walk would raise); a world it does not drive keeps
+                // the interaction for the host's drain.
+                MedicInteraction interaction{t->handle, healer->handle, false};
                 if ((t->flags & kEntityFlagDead) != 0u) {
                     if (t->medic_reviving) continue;
-                    world.round_sim.medic_interactions.push_back(
-                            MedicInteraction{t->handle, healer->handle, /*revive=*/true});
-                } else if (retail_signed_i16(t->health) < retail_signed_i16(t->health_max)) {
-                    world.round_sim.medic_interactions.push_back(
-                            MedicInteraction{t->handle, healer->handle, /*revive=*/false});
+                    interaction.revive = true;
+                } else if (retail_signed_i16(t->health) >= retail_signed_i16(t->health_max)) {
+                    continue;
                 }
+                if (world.entity_update_transactions != nullptr)
+                    world.entity_update_transactions->medic_interaction(world, interaction);
+                else
+                    world.round_sim.medic_interactions.push_back(interaction);
             }
             continue;
         }

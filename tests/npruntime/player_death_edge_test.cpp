@@ -19,6 +19,7 @@
 //  @0x516F4F, +360 floored @0x516EC4..0x516EC6]
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/udp_session_transport.h>
@@ -29,6 +30,7 @@
 #include <runtime/world/system.h>
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
 
 #include <cstdio>
 #include <memory>
@@ -103,6 +105,34 @@ struct Fixture {
 		entity(i).health = 0;
 		entity(i).last_attacker = players[k];
 		entity(i).death_anim_state = w::compute_death_anim_state(0, 0, w::death_cause::kGeneric);
+	}
+	// Player k's body arms a medic kit on player i's body (both of team 2): the
+	// explosion queue's medic arm meets it in the next entity update, ahead of
+	// the pool-0 walk. [orig: Projectile_ProcessExplosionQueue @0x4EADFC, the
+	// Medic charattr test @0x4EADEA..0x4EADF4]
+	void medic_kit(size_t i, size_t k) {
+		entity(k).player_class = 5; // the Medic class
+		world.tables.class_attribute_flags[4] |= w::MissionTables::kCharAttrMedic;
+		entity(i).has_item_def = true;
+		entity(i).health_max = 100;
+		w::AmmoTableEntry kit;
+		kit.valid = true;
+		kit.kz_maxradius = 100.0f;
+		world.tables.ammo.entries.push_back(kit);
+		w::ExplosionEntry e;
+		e.pos = entity(i).position;
+		e.type = 3; // the medic kit
+		e.ammo_index = static_cast<int32_t>(world.tables.ammo.entries.size()) - 1;
+		e.owner = players[k];
+		world.explosions.queue_explosion(world, e);
+	}
+	// A C2S 0x41 from player i in this frame's receive pump.
+	void request_death_timeout_reset(size_t i) {
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &ctx;
+		(void)inmatch::dispatch_session_replies(ctx.config, conn(i),
+				{make_protocol_message(c2s::DEATH_TIMEOUT_RESET, {})}, 100,
+				ctx.np_protocol.connection_list, &world, inputs);
 	}
 	bool dead_bit(size_t i) {
 		return ((entity(i).flags | entity(i).engine_flags) & w::kEntityFlagDead) != 0u;
@@ -281,6 +311,74 @@ void test_own_clients_copy_holds_the_update() {
 	CHECK(f.dead_bit(0));
 }
 
+// D-NET-555: the flag reset's edge among its frame's entity update. A Health
+// store in the tick (the flag reset's -1) is the player body's edge in the
+// pool-0 walk, after the explosion queue, so a heal that queue admits for the
+// body (Health = max) closes the edge before it runs; the heal's sends then
+// lead the next frame ahead of the walk's deaths, in the update's order.
+// [orig: Server_CheckPlayerViolations -- Health -1 @0x51AC94;
+//  Entity_UpdateAllEntities -- Projectile_ProcessExplosionQueue @0x4C223F,
+//  the pool-0 walk @0x4C2426..0x4C2474; GameEvent_HandleMedicInteraction --
+//  the GameEvent_HealPlayer call @0x4E6805; GameEvent_HealPlayer -- Health =
+//  max @0x50DE7F, the 0x1E ev 45 @0x50DEAC..0x50DF02]
+void test_a_heal_in_the_queue_closes_the_edge() {
+	Fixture f;
+	HealthWrite store; // the tick's Health -1 (the flag reset's store)
+	store.body = f.players[1];
+	store.health = -1;
+	store.armed = true;
+	f.world.add_system(&store);
+	f.medic_kit(1, 2);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(!store.armed);
+	CHECK(!f.dead_bit(1));
+	CHECK(f.entity(1).health == 100);
+	inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<ns::Datagram> out = f.drain(0);
+	CHECK(f.deaths(out).empty());
+	bool heal_feed = false;
+	for (const ns::Datagram &d : out)
+		heal_feed = heal_feed || (d.tag == s2c::GAME_EVENT && !d.body.empty() && d.body[0] == 45);
+	CHECK(heal_feed);
+}
+
+// In one entity update the queue heals body 1 while the walk kills body 0: the
+// next frame carries the heal's 0x1E ev 45 ahead of body 0's 0x13.
+void test_the_queues_heal_leads_the_walks_death() {
+	Fixture f;
+	f.entity(1).health = 40;
+	f.medic_kit(1, 2);
+	f.hit(0, 2);
+	inmatch::Server_TickUpdate(f.ctx);
+	inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<ns::Datagram> out = f.drain(2);
+	int heal_at = -1;
+	const int death_at = Fixture::first(out, s2c::ENTITY_DEATH);
+	for (size_t k = 0; k < out.size() && heal_at < 0; ++k)
+		if (out[k].tag == s2c::GAME_EVENT && !out[k].body.empty() && out[k].body[0] == 45)
+			heal_at = static_cast<int>(k);
+	CHECK(f.dead_bit(0) && f.entity(1).health == 100);
+	CHECK(heal_at >= 0 && death_at > heal_at);
+}
+
+// D-NET-556's heal half, the previous frame's heal under this frame's 0x41: the
+// heal's Health = max landed in the previous entity update, the 0x41's Health 0
+// in this frame's pump lies over it, and the edge in this frame's update kills.
+// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_DeathTimeoutReset
+//  @0x510568; the edge Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA]
+void test_a_previous_frames_heal_keeps_the_0x41s_death() {
+	Fixture f;
+	f.entity(1).health = 40;
+	f.medic_kit(1, 2);
+	inmatch::Server_TickUpdate(f.ctx); // the heal, in this frame's update
+	CHECK(f.entity(1).health == 100);
+	f.request_death_timeout_reset(1);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.dead_bit(1));
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.deaths(f.drain(0)) == std::vector<uint16_t>{f.players[1].packed});
+}
+
 } // namespace
 
 int main() {
@@ -291,6 +389,9 @@ int main() {
 	test_hidden_body_is_skipped();
 	test_dedicated_host_updates_through_the_preround();
 	test_own_clients_copy_holds_the_update();
+	test_a_heal_in_the_queue_closes_the_edge();
+	test_the_queues_heal_leads_the_walks_death();
+	test_a_previous_frames_heal_keeps_the_0x41s_death();
 	if (failures == 0) std::printf("player_death_edge: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

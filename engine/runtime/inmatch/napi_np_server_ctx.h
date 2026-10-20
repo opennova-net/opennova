@@ -189,6 +189,8 @@ struct NapiNPServerCtx;
 struct ServerEntityUpdateTransactions final : world::IEntityUpdateTransactions {
 	NapiNPServerCtx *ctx = nullptr;
 	void player_death(world::World &world, world::Entity &body) override;
+	void medic_interaction(world::World &world,
+			const world::MedicInteraction &interaction) override; // server_medic.cpp
 };
 
 // A send an entity-update transaction made, held for the next server tick's head:
