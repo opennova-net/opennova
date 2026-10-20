@@ -1379,6 +1379,7 @@ function Stop-OpenNovaJoinerCooperatively {
     # 20 seconds; the process-shutdown evidence then proves the clean exit.
     $requestedUtc = [DateTime]::UtcNow.ToString("o")
     $quitAcknowledged = Stop-GameViaMcp -Port $JoinerMcpPort -Process $process -TimeoutSeconds 20
+    $quitAcknowledgedUtc = [DateTime]::UtcNow.ToString("o")
     if (-not $quitAcknowledged) {
         throw "OpenNova joiner did not exit within 20 seconds of game_control quit"
     }
@@ -1389,11 +1390,16 @@ function Stop-OpenNovaJoinerCooperatively {
         throw "OpenNova joiner cooperative shutdown was not clean: exact_fallback_required=$($shutdown.exact_fallback_required) exit_code=$($shutdown.exit_code)"
     }
     $requested = ConvertFrom-RunnerStrictUtcTimestamp $requestedUtc
+    $acknowledged = ConvertFrom-RunnerStrictUtcTimestamp $quitAcknowledgedUtc
     $completed = ConvertFrom-RunnerStrictUtcTimestamp ([string] $shutdown.completed_utc)
     $processStarted = [DateTimeOffset]::new($process.StartTime.ToUniversalTime())
-    if ($requested -lt $processStarted -or $completed -lt $requested -or
-            $completed -gt $requested.AddSeconds(25)) {
-        throw "OpenNova joiner shutdown timestamps drifted"
+    # Each leg within its own budget: the quit leg is Stop-GameViaMcp's two
+    # endpoint calls (10 s each) and its 20 s exit wait; the evidence leg is
+    # Stop-OpenNovaProcess's two launcher waits (ForceTimeoutMs, 5 s each).
+    if ($requested -lt $processStarted -or $acknowledged -lt $requested -or
+            $acknowledged -gt $requested.AddSeconds(40) -or $completed -lt $acknowledged -or
+            $completed -gt $acknowledged.AddSeconds(10)) {
+        throw "OpenNova joiner shutdown timestamps drifted: requested $requestedUtc, quit acknowledged $quitAcknowledgedUtc, completed $($shutdown.completed_utc)"
     }
     $script:OpenNovaJoinerShutdownWitness = [pscustomobject][ordered]@{
         schema = "opennova.parity-joiner-shutdown.v2"
@@ -1402,6 +1408,7 @@ function Stop-OpenNovaJoinerCooperatively {
         process_id = [int] $process.Id
         mcp_port = $JoinerMcpPort
         requested_utc = $requestedUtc
+        quit_acknowledged_utc = $quitAcknowledgedUtc
         completed_utc = [string] $shutdown.completed_utc
         quit_acknowledged = $true
         exit_code = [int] $shutdown.exit_code
