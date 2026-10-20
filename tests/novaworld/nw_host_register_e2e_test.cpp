@@ -498,8 +498,9 @@ int main() {
 		send(future_datagram);
 		std::this_thread::sleep_for(100ms);
 		{
+			// The count stays the stray-Hello leg's last served update's (Players 3).
 			const auto snap = listener.snapshot_hosted();
-			expect(!snap.empty() && snap[0].lobby.player_count == 2,
+			expect(!snap.empty() && snap[0].lobby.player_count == 3,
 			       "a lobby packet past a gap is held, not dispatched");
 		}
 		send(gap_datagram);
