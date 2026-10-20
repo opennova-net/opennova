@@ -98,7 +98,7 @@ const Route kRoutes[] = {
 	{AssetKind::Unknown, ArchiveSlot::None}, // resource.pff before S13 A8
 	{AssetKind::Archive, ArchiveSlot::None},
 	{AssetKind::Model, ArchiveSlot::Resource},
-	// Where retail packs every one (master's file_kind, its retail leg).
+	// Where retail packs every one (file_kind's table, witnessed once over JO:CA's archives).
 	{AssetKind::Animation, ArchiveSlot::Localres},
 	{AssetKind::AnimationMap, ArchiveSlot::Localres},
 	{AssetKind::FaceAnimation, ArchiveSlot::Resource},

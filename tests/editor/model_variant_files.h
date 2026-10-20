@@ -84,7 +84,7 @@ inline Files models() {
 	             });
 }
 
-// The Black Hawk Down GP models the threedi_gp rows mint (threedi_gp_retail's variants), one of each kind
+// The Black Hawk Down GP models the threedi_gp rows mint (the variants of the 677 BHD ships), one of each kind
 // BHD ships: a rigid GPM, the one skinned GPS (Oicw_1R) and a skinned GPP, each with the techniques the
 // migration notes (a bump or environment-mapped, a flat-colour, an additive and a region-textured material,
 // a flipbook on a BHD counter, a spinning part, a lens-flare user point, a face rounds pass through).

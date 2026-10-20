@@ -100,7 +100,7 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.
 - One suite, and no test reads retail data: a test's inputs are minted or authored
   fixtures and the tree's own `assets/`, and a witnessed retail value is pinned as a cited
-  constant (prove once, pin; [docs/asset-gated-tests.md](docs/asset-gated-tests.md));
+  constant (prove once, pin; [docs/test-suite.md](docs/test-suite.md));
   `scripts/ci/test_suites.py --check-layout` fails a test that names a retail root. No
   test reads a machine-local capture (the wire fixtures live in `fixtures/novaworld/`),
   and every env hook but `GODOT_BIN` is gone ([docs/dev-env-vars.md](docs/dev-env-vars.md),

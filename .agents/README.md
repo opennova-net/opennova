@@ -63,7 +63,7 @@ divergences in its §8 catalog):
 - **Capture → inspect loop**: host from the Godot game, `dumpcap`, then
   `opennova-wire --coverage <cap>` (undecoded backlog by volume) and `opennova-wire --stream <cap>`.
   The CI wire gates are `nw_codec_identity` and `nw_self_capture` over the committed
-  `fixtures/novaworld/` set (`docs/asset-gated-tests.md`, the two-tier gate). Full
+  `fixtures/novaworld/` set (`docs/test-suite.md`, the two-tier gate). Full
   loop in `scripts/net/README.md`.
 - **Server state authority is `world::EntityRegistry`** — the net layer reads handle/pose/
   team *through* it, never a parallel cache. Host bring-up is the one shared
