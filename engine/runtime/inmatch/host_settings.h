@@ -1,33 +1,41 @@
 #pragma once
 
 #include "game_config.h"
+#include <formats/gamecfg/game_cfg.h>
 #include <string_view>
 
 namespace opennova::inmatch {
 
-// Selected spin values and raw edit strings from the authored host dialog.
-// Absent controls leave the request untouched.
-// [orig: HostDialog_ReadSettings @ 0x555940;
-// Game_ApplySessionSettingsToGlobals @ 0x551500]
+// The MULTI_PLAYER_HOST screen works on the process's cfg block: it opens
+// showing the block's words, and its START reads every control back into the
+// block, saves it, and creates the session from it (host_config.h
+// host_session_settings), so a word the screen does not show keeps the
+// file's. [orig: UI_PopulateHostSettingsFromConfig @0x555FE0;
+// UI_HandleHostSessionStart @0x556D00 - HostDialog_ReadSettings @0x556E36,
+// Game_SaveConfig @0x556E72; CNapiGameSession_BuildAndCreateSession @0x5694D0]
+//
+// The controls, in the read's order. [orig: HostDialog_ReadSettings @0x555940]
 const std::vector<std::string_view>& host_dialog_controls();
-bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
-                               bool& serve_and_play, std::string_view control,
+// One control's selected spin value or raw edit string into the block, as the
+// read stores it: the edits by their byte caps, the numeric edits by strtol,
+// MAX_PLAYERS clamped to the title's screen cap (the block's table names the
+// title), the six attribute spins onto their mpattrib bits, ALLOW_SPECTATORS
+// keeping a nonzero spectator count. False for an unknown control.
+// [orig: HostDialog_ReadSettings @0x555940 - per control in host_settings.cpp]
+bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
                                const std::string& value);
-// The two arms of that read, for a writer that parses its own values (the
-// host file reads with atol): the seven text edits and their byte caps, and
-// every numeric control. False for a control the arm does not own.
-bool apply_host_dialog_text(GameConfig& config, std::string_view control,
-                            const std::string& value);
-bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
-                              bool& serve_and_play, std::string_view control,
-                              int32_t number);
-// The inverse: the value the host screen shows for a control before the user
-// touches it -- edit text, or the spin/checkbox item value as a decimal
-// string; GAME_LOCATION yields the country the shell matches against the
-// item names. Empty for an unknown control.
-// [orig: UI_PopulateHostSettingsFromConfig @ 0x555fe0]
-std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
-                              bool serve_and_play, std::string_view control);
+// The populate's one write: the block's cap clamped to the title's screen cap
+// before the screen shows it. [orig: UI_PopulateHostSettingsFromConfig
+// @0x556328..0x55632A]
+void populate_host_dialog(gamecfg::GameCfg& cfg);
+// What the host screen shows for a control from the block: edit text, or the
+// spin/checkbox item value as a decimal string; GAME_LOCATION yields the
+// country the shell matches against the item names (strnicmp over 3 chars).
+// The limits show the block's words as they stand (no session sentinel).
+// Empty for an unknown control.
+// [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - per control in
+//  host_settings.cpp]
+std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view control);
 // The live player-slot limit the session apply makes of a cap: the cap, plus
 // the host's own slot when dedicated (GameConfig::player_slot_limit), under the
 // title's ceiling (TitlePlayerCaps::session; `title` a gameprofile::GameId).

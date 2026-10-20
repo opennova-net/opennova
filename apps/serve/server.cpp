@@ -15,8 +15,6 @@
 #include <formats/avatars/avatars.h>
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
-#include <net/npwire/net_ports.h>
-#include <net/npwire/nw_session_framing.h> // NapiPrng (the bind scan's random start)
 #include <net/title/title_identity.h>
 #include <runtime/hud/hud_math.h> // hud_label_font_choice (HUD_InitAllFonts)
 #include <runtime/inmatch/host_config.h>
@@ -689,32 +687,17 @@ bool Server::route_mission_exit(int32_t reason) {
 // @0x62D2A0; net_ports.h]. The
 // embedder owns the socket layer (net::startup), which is process-wide.
 bool Server::open_socket(std::string &error) {
-	const gamecfg::GameCfg &cfg = config_.cfg();
-	const uint32_t first = options_.port
-			? *options_.port
-			: static_cast<uint32_t>(
-					  novaworld_ ? cfg.mp_novaworld_port_min : cfg.mp_lan_server_port_min);
-	const uint32_t max = static_cast<uint32_t>(
-			novaworld_ ? cfg.mp_novaworld_port_max : cfg.mp_lan_server_port_max);
-	const uint32_t delta = static_cast<uint32_t>(
-			novaworld_ ? cfg.mp_novaworld_port_delta : cfg.mp_lan_server_port_delta);
 	// The NovaWorld quad's random word starts the scan at a drawn port; the
-	// authority's LAN arm passes random 0 (net_ports.h bind_scan_attempts).
-	uint32_t start_index = 0;
-	if (novaworld_ && cfg.mp_novaworld_port_random != 0) {
-		const uint32_t attempts = bind_scan_attempts(first, max, delta);
-		if (attempts > 1) {
-			NapiPrng prng(napi_prng_platform_seed());
-			start_index = static_cast<uint32_t>(
-					prng.next_in_range(0, static_cast<int32_t>(attempts) - 1));
-		}
-	}
-	for (const uint16_t port : lan_host_bind_ports(first, max, delta, start_index)) {
+	// authority's LAN arm passes random 0 (inmatch::transport_bind_ports).
+	const std::vector<uint16_t> ports = inmatch::transport_bind_ports(config_.cfg(),
+			novaworld_ ? inmatch::NetworkType::NovaWorld : inmatch::NetworkType::Lan,
+			/*authority=*/true, options_.port);
+	for (const uint16_t port : ports) {
 		socket_ = net::udp_bind(port, &bound_port_);
 		if (socket_.is_valid()) break;
 	}
 	if (!socket_.is_valid()) {
-		error = "no port of the bind scan from " + std::to_string(first) + " is free";
+		error = "no port of the bind scan from " + std::to_string(ports.front()) + " is free";
 		return false;
 	}
 	datagrams_ = std::make_unique<net::NetDatagramSocket>(socket_);

@@ -6,6 +6,7 @@
 #include "util/string_convert.h"
 
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/host_settings.h>
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -64,6 +65,11 @@ void GameConfigBlock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_video_test_ran"), &GameConfigBlock::is_video_test_ran);
 	ClassDB::bind_method(D_METHOD("get_word", "key"), &GameConfigBlock::get_word);
 	ClassDB::bind_method(D_METHOD("set_word", "key", "value"), &GameConfigBlock::set_word);
+	ClassDB::bind_method(D_METHOD("host_dialog_values"), &GameConfigBlock::host_dialog_values);
+	ClassDB::bind_method(D_METHOD("single_player_mission_start"),
+			&GameConfigBlock::single_player_mission_start);
+	ClassDB::bind_method(D_METHOD("apply_host_dialog_control", "control", "value"),
+			&GameConfigBlock::apply_host_dialog_control);
 }
 
 void GameConfigBlock::set_path(const String &p_path) {
@@ -123,4 +129,18 @@ void GameConfigBlock::set_word(const String &p_key, int p_value) {
 		return;
 	}
 	UtilityFunctions::push_warning(vformat("GameConfigBlock: no word '%s'", p_key));
+}
+
+Dictionary GameConfigBlock::host_dialog_values() {
+	inmatch::populate_host_dialog(block_.cfg());
+	Dictionary values;
+	for (const std::string_view control : inmatch::host_dialog_controls())
+		values[String::utf8(control.data(), static_cast<int64_t>(control.size()))] =
+				opennova::to_gd(inmatch::host_dialog_value(block_.cfg(), control));
+	return values;
+}
+
+bool GameConfigBlock::apply_host_dialog_control(const String &p_control, const String &p_value) {
+	return inmatch::apply_host_dialog_control(
+			block_.cfg(), opennova::to_std(p_control), opennova::to_std(p_value));
 }

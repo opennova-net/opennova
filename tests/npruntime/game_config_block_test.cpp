@@ -8,6 +8,7 @@
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/game_config_block.h>
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/host_role.h> // singleplayer_game_config
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_session.h>
 
@@ -340,6 +341,17 @@ int main() {
 		const ServerCommandOutcome reset = run_host_server_command(
 				&ctx, nullptr, ConnectionMode::HostClient, &block, "SetMPReset", "", { "1" });
 		TEST_EXPECT(reset.handled && ctx.config.multiplayer_reset == 1 && block.mp_reset == 1);
+	}
+
+	// Single player's mission start stores 0x3A06 into the block's mpattrib after its save, and
+	// its SP session copies the same word [orig: SinglePlayer_StartMission - Game_SaveConfig
+	// @0x561BB2, the store @0x561BB7, the copy @0x561CDB].
+	{
+		GameConfigBlock block;
+		TEST_EXPECT(block.cfg().mpattrib == 14850); // the defaults' 0x3A02
+		block.single_player_mission_start();
+		TEST_EXPECT(block.cfg().mpattrib == 14854);
+		TEST_EXPECT(singleplayer_game_config(0, nullptr).mp_attributes == 14854u);
 	}
 
 	std::printf("game_config_block: ok\n");

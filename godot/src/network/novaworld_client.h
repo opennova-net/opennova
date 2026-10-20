@@ -27,6 +27,7 @@
 #include "rtxt/rtxt_string_file.h"
 #include "network/udp_pump.h"
 #include "network/udp_pump_datagram_socket.h"
+#include "player/game_config_block.h"
 #include "resource_index/resource_root.h"
 
 #include <cstdint>
@@ -107,6 +108,11 @@ public:
 	// not witnessed in full.
 	void set_resource_root(const Ref<ResourceRoot> &root) { resource_root_ = root; }
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
+
+	// The process's cfg block, whose mpnovaworld quad the session socket scans
+	// (inmatch::transport_bind_ports); none scans the quad's shipped defaults.
+	void set_game_config(const Ref<GameConfigBlock> &p_block) { game_config_ = p_block; }
+	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
 
 	// The gametext table the hosted Host list's STRNOVA / TimeOfDay tokens
 	// resolve through (null keeps the stock English fallbacks).
@@ -288,6 +294,7 @@ private:
 
 	Ref<RtxtStringFile> gametext_;
 	Ref<ResourceRoot> resource_root_;
+	Ref<GameConfigBlock> game_config_;
 
 	// State.
 	State state_ = STATE_IDLE;

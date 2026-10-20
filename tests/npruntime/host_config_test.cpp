@@ -15,6 +15,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -307,6 +308,64 @@ int main() {
 		zoom_block.mp_allowsniperscopezoom = 1;
 		sp.cfg_block = &zoom_block;
 		TEST_EXPECT(shell_host_config(sp).config.allow_sniper_scope_zoom);
+	}
+
+	// The game shell's host request is the block as it stands (host_screen_from_block): the
+	// name, the rules, the attribute word, the cap unclamped (the session create clamps it).
+	// [orig: UI_HandleHostSessionStart @0x556E36 / @0x556E72 -> CNapiGameSession_BuildAndCreateSession]
+	{
+		gamecfg::GameCfg block = gamecfg::defaults();
+		block.game_name = "Night Ops";
+		block.mp_max_players = 0;
+		block.mpattrib = 0x3A06;
+		block.time_limit = 25;
+		const HostScreenState request = host_screen_from_block(block);
+		TEST_EXPECT(request.config.server_name == "Night Ops");
+		TEST_EXPECT(request.config.mp_attributes == 0x3A06u);
+		TEST_EXPECT(request.player_limit == 0 && block.mp_max_players == 0);
+		TEST_EXPECT(host_session_settings(block).player_limit == 1 && block.mp_max_players == 1);
+	}
+
+	// The session socket's bind scan over the block's quads: a LAN authority the server quad
+	// with random 0, a LAN non-authority the client quad, a NovaWorld session either side the
+	// mpnovaworld quad; a first port in place of the min; a random word starts the scan at a
+	// drawn port of the same wrapping walk.
+	// [orig: CNapiNetwork_OpenTransportSocket @0x4C6A40 - @0x4C6AA2..0x4C6AB4,
+	//  @0x4C6AD9..0x4C6AF0, @0x4C6AF6..0x4C6B08; NapiUdpSocket_CreateAndBind @0x62D2A0]
+	{
+		gamecfg::GameCfg block = gamecfg::defaults();
+		block.mp_lan_server_port_min = 40000;
+		block.mp_lan_server_port_max = 40004;
+		block.mp_lan_server_port_delta = 2;
+		block.mp_lan_client_port_min = 41000;
+		block.mp_lan_client_port_max = 41001;
+		block.mp_lan_client_port_delta = 1;
+		block.mp_novaworld_port_min = 42000;
+		block.mp_novaworld_port_max = 42002;
+		block.mp_novaworld_port_delta = 1;
+		const std::vector<uint16_t> server =
+				transport_bind_ports(block, NetworkType::Lan, /*authority=*/true);
+		TEST_EXPECT((server == std::vector<uint16_t>{40000, 40002}));
+		TEST_EXPECT((transport_bind_ports(block, NetworkType::Lan, true, 40001) ==
+				std::vector<uint16_t>{40001, 40003}));
+		TEST_EXPECT((transport_bind_ports(block, NetworkType::Lan, false) ==
+				std::vector<uint16_t>{41000, 41001}));
+		TEST_EXPECT((transport_bind_ports(block, NetworkType::NovaWorld, true) ==
+				std::vector<uint16_t>{42000, 42001, 42002}));
+		TEST_EXPECT((transport_bind_ports(block, NetworkType::NovaWorld, false) ==
+				std::vector<uint16_t>{42000, 42001, 42002}));
+		// The server quad ignores the client quad's random word.
+		block.mp_lan_client_port_random = 1;
+		TEST_EXPECT((transport_bind_ports(block, NetworkType::Lan, true) == server));
+		// A random NovaWorld scan is the same three ports, rotated to its drawn start.
+		block.mp_novaworld_port_random = 1;
+		const std::vector<uint16_t> drawn =
+				transport_bind_ports(block, NetworkType::NovaWorld, false);
+		TEST_EXPECT(drawn.size() == 3);
+		if (drawn.size() == 3) {
+			for (std::size_t i = 0; i < 3; ++i)
+				TEST_EXPECT(drawn[i] == 42000 + (drawn[0] - 42000 + i) % 3);
+		}
 	}
 
 	std::printf("host_config: ok\n");

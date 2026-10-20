@@ -118,10 +118,45 @@ func test_a_host_request_takes_the_block_attribute_word() -> void:
 	GameCfgStore.reset()
 	var config := HostSessionConfig.new()
 	assert_eq(config.mp_attributes, 14854, "the request carries the file's word, 0x3A06")
-	assert_eq(config.dialog_value("TEAM_CHOOSE"), "1", "the screen shows TEAM_CHOOSE on")
+	assert_eq(GameCfgStore.block().host_dialog_values()["TEAM_CHOOSE"], "1",
+			"the screen shows TEAM_CHOOSE on")
 	_write_cfg("version = 29\r\nmpattrib = 14850\r\n")
 	GameCfgStore.reset()
 	assert_eq(HostSessionConfig.new().mp_attributes, 14850, "and the stock word when the file says so")
+
+
+func test_the_host_screen_shows_the_block_and_writes_it_back() -> void:
+	# The host screen opens on the block's words (its cap clamped to the
+	# screen's 64 in the block too), its START reads the controls back into the
+	# block, and the request, a launch-flag host's included, is the block's
+	# (D-NET-335) [orig: UI_PopulateHostSettingsFromConfig @0x555FE0;
+	# HostDialog_ReadSettings @0x556E36, Game_SaveConfig @0x556E72].
+	_write_cfg("version = 29\r\ngame_name = \"Night Ops\"\r\nmpmaxplayers = 80\r\ntime_limit = 25\r\n")
+	GameCfgStore.reset()
+	var block := GameCfgStore.block()
+	var shown: Dictionary = block.host_dialog_values()
+	assert_eq(shown["GAME_NAME"], "Night Ops", "the screen shows the file's name")
+	assert_eq(shown["TIME"], "25", "and its time limit")
+	assert_eq(shown["MAX_PLAYERS"], "64", "and its cap at the screen's 64")
+	assert_eq(block.get_word("mpmaxplayers"), 64, "the populate writes the clamp into the block")
+	assert_eq(HostSessionConfig.new().server_name, "Night Ops", "a launch-flag host hosts under it")
+	assert_true(block.apply_host_dialog_control("GAME_NAME", "Renamed"))
+	assert_true(block.apply_host_dialog_control("TEAM_CHOOSE", "1"))
+	assert_eq(HostSessionConfig.new().server_name, "Renamed", "START's read lands in the block")
+	assert_eq(HostSessionConfig.new().mp_attributes & 4, 4, "the switch onto its mpattrib bit")
+	assert_eq(GameCfgStore.save(), OK)
+	assert_string_contains(_saved_cfg(), "Renamed", "and the save writes it")
+
+
+func test_a_single_player_start_leaves_team_choose_in_the_block() -> void:
+	# Single player's mission start stores 0x3A06 into the block after its save,
+	# so a later host of the process advertises TeamChoose (D-NET-NEW-LP-4)
+	# [orig: SinglePlayer_StartMission @0x561BB2 / @0x561BB7].
+	_write_cfg("version = 29\r\nmpattrib = 14850\r\n")
+	GameCfgStore.reset()
+	GameCfgStore.block().single_player_mission_start()
+	assert_eq(GameCfgStore.block().get_word("mpattrib"), 14854, "the block's word is 0x3A06")
+	assert_eq(HostSessionConfig.new().mp_attributes, 14854, "and a later host's request carries it")
 
 
 func test_set_mp_reset_in_the_hosting_wait_is_stored_and_saved() -> void:

@@ -9,16 +9,17 @@
 //  Game_ApplySessionSettingsToGlobals @0x551500 at @0x5695B8;
 //  Game_StartMission calls it at @0x524662]. opennova-serve runs the dead
 // /HOST path over it (ADR 0051 d2). The game shell keeps the block too
-// (game_config_block.h): its session creates take the mpreset word from it and
-// a ServerCommand's config change lands in it, but its hosts still seed their
-// session from the host screen, which neither reads nor writes the block
-// (D-NET-335's open half).
+// (game_config_block.h): its session creates take the mpreset word from it, a
+// ServerCommand's config change lands in it, and its host screen shows the
+// block and writes it back at START (host_settings.h), the host request seeded
+// from the block (host_screen_from_block).
 
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_session.h> // HostConfig
 #include <runtime/inmatch/server_admin_command.h>
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -79,6 +80,28 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext);
 // [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0;
 //  Game_ApplySessionSettingsToGlobals @0x551500; per field in host_config.cpp]
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg);
+// The same mapping over the block as it stands, its cap unclamped: the game
+// shell's host request, which the session create clamps when it runs
+// (session_player_cap), as retail's create reads the block its host screen
+// wrote [orig: UI_HandleHostSessionStart @0x556E36 / @0x556E72 ->
+// CNapiGameSession_BuildAndCreateSession @0x5694D0].
+HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg);
+
+// The session socket's bind scan over the cfg block's port quads, as the
+// socket open picks them: a NovaWorld session, either side, the mpnovaworld
+// quad and its random word; a LAN authority the mplanserver quad with random
+// 0; a LAN non-authority the mplanclient quad and its random word. `first`, when
+// set, is the scan's first port in place of the quad's min (a launch
+// override). A set random word starts a scan of more than one port at
+// min + delta * the PRNG's draw in 0..attempts - 1 (net_ports.h
+// bind_scan_attempts / lan_host_bind_ports carry the scan's witness).
+// [orig: CNapiNetwork_OpenTransportSocket @0x4C6A40 - the network type
+//  @0x4C6A84..0x4C6A8D, the NovaWorld arm @0x4C6AF6..0x4C6B08, the LAN arm's
+//  authority test @0x4C6AD4..0x4C6AD7 -> the server quad @0x4C6AA2..0x4C6AB4
+//  (random 0), the client quad @0x4C6AD9..0x4C6AF0; NapiUdpSocket_CreateAndBind
+//  @0x62D2A0]
+std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first = std::nullopt);
 
 // The cfg block's words every session create reads, single player's and a
 // host's alike: mpreset (a nonzero word ends the create, server_session.h),

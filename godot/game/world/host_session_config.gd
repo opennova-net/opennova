@@ -50,27 +50,18 @@ var game_type_attr := ""  ## the GAME_TYPE spin's raw value attr (HG_COOP=2, ...
 
 
 func _init() -> void:
-	# Every session default not set here (the rule values, the lobby cap, the
-	# server type, g_GameType, the spectator and LAN-mode words, the custom
-	# text) is the native base's: the engine's host-screen baseline
-	# (inmatch::host_screen_default_config / HostScreenState), the one set the
-	# opennova-serve host file starts from too.
+	## Every session word is the process block's: retail's session create reads
+	## the cfg block, which its host screen showed and wrote back at START, so a
+	## word no control shows, and a host with no screen in front of it (the
+	## --lan-host launch), keeps the file's: the name (game_name), the cap, the
+	## server type, the rules, the attribute word (D-NET-335, D-NET-NEW-LP-4;
+	## the engine's inmatch::host_screen_from_block, host_config.h), and the LAN
+	## authority's first bind port (mplanserverportmin).
+	seed_from_block(GameCfgStore.block())
 	dir = ""           ## resource-dir override (dev/tests); empty = the CLI directory
-	## The session name: the Menu/UNTITLED gametext the retail config defaults
-	## copy in (its "!Untitled" default when the table lacks it).
-	server_name = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_MENU,
-			"UNTITLED", "!Untitled")
 	player_name = "Player"  ## the host's own callsign (rides ClientAuth like any player's)
 	expansion = ""     ## g_ExpansionName: what the process actually mounted; "" for base JO
 	channel = CHANNEL_LAN
-	bind_port = DEFAULT_LAN_PORT
-	## The attribute word is the process block's: retail's host screen shows its
-	## six switches from the block's mpattrib, its START writes them back into the
-	## block, and the session create copies the block's word, so the bits no
-	## switch shows, and a host with no screen in front of it (the --lan-host
-	## launch), keep the file's (D-NET-NEW-LP-4; the witness is the engine's
-	## inmatch::host_screen_default_config, host_file.h).
-	mp_attributes = GameCfgStore.block().get_word("mpattrib")
 
 
 ## The session slice for Simulation.configure_host_session as the typed record

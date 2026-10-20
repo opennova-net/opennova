@@ -62,9 +62,10 @@ namespace opennova::inmatch {
 GameConfig host_screen_default_config();
 
 // The session a host runs from: the session config and the words of the cfg
-// block the session reads beside it. The game's host screen fills it
-// through its read (apply_host_dialog_control); opennova-serve maps the
-// game.cfg block onto it (host_config.h host_session_settings). The defaults
+// block the session reads beside it. Both hosts map the game.cfg block onto
+// it (host_config.h): opennova-serve's session create (host_session_settings),
+// the game's host request (host_screen_from_block), whose screen reads into
+// the block first (host_settings.h apply_host_dialog_control). The defaults
 // are the cfg table's [orig: the MULTIPLAYER table @0x833050 -- mpmaxplayers
 // "64" @0x833278; the rest of the block zeroed by Config_SetDefaults' memset
 // @0x54D039..0x54D046, mp_gametype among it]; the lineup queue's words ride

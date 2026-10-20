@@ -70,6 +70,14 @@ namespace opennova::inmatch {
 // [orig: Game_RunVideoTestDialog @0x53EC10 from Game_InitSubsystems @0x4A7125]
 void run_video_test(gamecfg::GameCfg &cfg, int32_t desktop_width, int32_t desktop_height);
 
+// The attribute word single player's mission start stores into the block after
+// its save (TeamChoose on), the word its SP session copies too: a process that
+// started a single-player mission hosts with it and its next save point writes
+// it [orig: SinglePlayer_StartMission - Game_SaveConfig @0x561BB2, the store
+// `multiplayerAttributeFlags_34C = 3A06h` @0x561BB7, the copy into
+// game_settings.mp_attributes @0x561CDB].
+inline constexpr int32_t kSinglePlayerMpAttrib = 0x3A06;
+
 class GameConfigBlock {
 public:
 	// `path` is the file every read opens and the save writes: game.cfg in
@@ -150,6 +158,9 @@ public:
 	//  dword_252DD90 written only @0x55AD4F, @0x55AD5B and @0x55291D;
 	//  gametext.bin's one store @0x4A6FED]
 	void switch_expansion(std::string id, gamecfg::WeaponRoster weapons);
+	// Single player's mission start, after its save (the embedder's save
+	// point): the block's mpattrib becomes kSinglePlayerMpAttrib.
+	void single_player_mission_start() { cfg_.mpattrib = kSinglePlayerMpAttrib; }
 
 	// The last read: whether the file opened, whether its version discarded
 	// it for the defaults, and whether it set mpreset.

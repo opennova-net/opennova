@@ -240,16 +240,22 @@ bool Simulation::enable_host_listen(int p_port) {
 	net_.lan_host_pending = !installed;
 	if (net_.pump.is_null()) net_.pump.instantiate();
 	net_.pump->set_capture_path(net_.capture_pcap_path);
-	// The LAN host scans the retail port range from the requested port
-	// (D-NET-210; the sequence policy is npwire net_ports.h
-	// lan_host_bind_ports). Port 0 keeps the OS-assigned bind — the dev/test
-	// seam retail has no analog for.
+	// The LAN host scans from the requested port (the request's first port is
+	// the cfg block's mplanserverportmin) through the block's
+	// mplanserverportmax by its mplanserverportdelta, random 0 (D-NET-210;
+	// engine inmatch::transport_bind_ports) [orig: CNapiNetwork_OpenTransportSocket
+	// @0x4C6A40 - the authority arm @0x4C6AA2..0x4C6AB4]. Port 0 keeps the
+	// OS-assigned bind — the dev/test seam retail has no analog for.
 	bool bound = false;
 	if (p_port <= 0) {
 		bound = net_.pump->bind_listen(0) == 0;
 	} else {
-		for (const uint16_t port : opennova::lan_host_bind_ports(
-					 static_cast<uint32_t>(p_port))) {
+		const std::vector<uint16_t> ports = net_.game_config.is_valid()
+				? opennova::inmatch::transport_bind_ports(net_.game_config->native().cfg(),
+						  opennova::inmatch::NetworkType::Lan, /*authority=*/true,
+						  static_cast<uint32_t>(p_port))
+				: opennova::lan_host_bind_ports(static_cast<uint32_t>(p_port));
+		for (const uint16_t port : ports) {
 			if (net_.pump->bind_listen(port) == 0) {
 				bound = true;
 				break;

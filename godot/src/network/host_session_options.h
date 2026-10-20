@@ -14,6 +14,8 @@
 
 namespace godot {
 
+class GameConfigBlock;
+
 // The hosted-session request as the Simulation takes it
 // (Simulation.configure_host_session, which copies the whole config) and
 // reports it back (Simulation.get_host_session_config): the engine's
@@ -184,10 +186,10 @@ public:
 	// the request-only fields above stay out of it).
 	Dictionary to_json_value() const;
 	static PackedStringArray dialog_controls();
-	bool apply_dialog_control(const String &p_control, const String &p_value);
-	// The populate inverse: what the host screen shows for a control from this
-	// request (engine host_dialog_value).
-	String dialog_value(const String &p_control) const;
+	// The request the session create makes of the process's cfg block
+	// (inmatch::host_screen_from_block): every session word, the cap, the
+	// server type, and the LAN authority's first bind port (mplanserverportmin).
+	void seed_from_block(const Ref<GameConfigBlock> &p_block);
 	Ref<HostSessionOptions> duplicate_options() const;
 };
 

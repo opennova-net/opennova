@@ -269,6 +269,8 @@ func _create_client(start_now: bool = true) -> void:
 	_client = NovaWorldClient.new()
 	# The session speaks the mounted game's title (its identity and gate tag).
 	_client.resource_root = resource_root
+	# The session socket scans the process's cfg block's mpnovaworld quad.
+	_client.set_game_config(GameCfgStore.block())
 	add_child(_client)
 	_client.host = _resolved_host()
 	_client.gate_port = gate_port

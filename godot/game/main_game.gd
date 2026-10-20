@@ -971,6 +971,11 @@ func _save_profile_for_single_player() -> void:
 	PlayerProfile.store().record_mission_start(-1)
 	PlayerProfile.save()
 	GameCfgStore.save()
+	# Then the start's block write after the save: the attribute word's
+	# literal (TeamChoose on), which a later host of this process advertises
+	# and the next save point writes to game.cfg (D-NET-NEW-LP-4; the engine's
+	# GameConfigBlock::single_player_mission_start carries the witness).
+	GameCfgStore.block().single_player_mission_start()
 
 
 ## Boot an exact loose mission through the same loading

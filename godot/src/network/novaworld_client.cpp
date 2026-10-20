@@ -8,6 +8,8 @@
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
+#include <runtime/inmatch/host_config.h> // transport_bind_ports
+
 #include <array>
 #include <godot_cpp/classes/http_client.hpp>
 #include <godot_cpp/classes/http_request.hpp>
@@ -92,6 +94,8 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_player_name"), &NovaWorldClient::get_player_name);
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &NovaWorldClient::set_resource_root);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &NovaWorldClient::get_resource_root);
+	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &NovaWorldClient::set_game_config);
+	ClassDB::bind_method(D_METHOD("get_game_config"), &NovaWorldClient::get_game_config);
 	ClassDB::bind_method(D_METHOD("set_gametext", "gametext"), &NovaWorldClient::set_gametext);
 	ClassDB::bind_method(D_METHOD("get_gametext"), &NovaWorldClient::get_gametext);
 
@@ -293,11 +297,11 @@ void NovaWorldClient::start() {
 	lobby_.set_title(title, ResourceRoot::session_gate_tag(resource_root_, *title));
 
 	// The gate worker's socket (an OS-assigned port), and the NovaWorld network
-	// type's one socket: bound from the mpnovaworld range, it carries the NWU
+	// type's one socket: bound from the cfg block's mpnovaworld quad, its random
+	// word included (engine: inmatch::transport_bind_ports), it carries the NWU
 	// session now and, when this session hosts, the hosted match's game traffic
-	// too (the pump's demux, D-NET-346; engine: net/npwire/net_ports.h
-	// novaworld_bind_ports). Then the driver mints the ci/ck pair on them; a
-	// bind failure is the error state.
+	// too (the pump's demux, D-NET-346). Then the driver mints the ci/ck pair on
+	// them; a bind failure is the error state.
 	gate_pump_.instantiate();
 	nw_pump_.instantiate();
 	if (gate_pump_->bind_listen(0) != OK) {
@@ -305,7 +309,11 @@ void NovaWorldClient::start() {
 		return;
 	}
 	bool nw_bound = false;
-	for (const uint16_t port : opennova::novaworld_bind_ports()) {
+	const std::vector<uint16_t> nw_ports = game_config_.is_valid()
+			? opennova::inmatch::transport_bind_ports(game_config_->native().cfg(),
+					  opennova::inmatch::NetworkType::NovaWorld, /*authority=*/false)
+			: opennova::novaworld_bind_ports();
+	for (const uint16_t port : nw_ports) {
 		if (nw_pump_->bind_listen(port) == OK) {
 			nw_bound = true;
 			break;

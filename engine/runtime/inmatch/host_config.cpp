@@ -5,6 +5,8 @@
 #include <formats/def/def.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/playersav/player_sav.h>
+#include <net/npwire/net_ports.h>
+#include <net/npwire/nw_session_framing.h> // NapiPrng
 #include <runtime/inmatch/host_role.h> // singleplayer_game_config
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/server_session.h>
@@ -99,14 +101,19 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 }
 
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
+	// In session, the cap goes into 1..65 (dfx2.exe: 1..251) before the apply,
+	// written back into the block (session_player_cap carries the witness).
+	const int title = cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2
+	                                                         : gameprofile::GAME_JO;
+	cfg.mp_max_players = session_player_cap(cfg.mp_max_players, title);
+	return host_screen_from_block(cfg);
+}
+
+HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
 	// The block's table is its title's (gamecfg::config_var_rows): dfx2.exe's
 	// carries the one row Jointops.exe's lacks, so the session runs that title.
 	const int title = cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2
 	                                                         : gameprofile::GAME_JO;
-	// In session, the cap goes into 1..65 (dfx2.exe: 1..251) before the apply,
-	// written back into the block (session_player_cap carries the witness).
-	cfg.mp_max_players = session_player_cap(cfg.mp_max_players, title);
-
 	HostScreenState host;
 	GameConfig &config = host.config;
 	config.title = title;
@@ -241,6 +248,38 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// NapiNPServer_GetSendHoldoffTicks @0x4C4AD1, lanMode_544].
 	config.lan_mode = static_cast<uint32_t>(cfg.lanmode);
 	return host;
+}
+
+std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first) {
+	int32_t min = cfg.mp_lan_server_port_min;
+	int32_t max = cfg.mp_lan_server_port_max;
+	int32_t delta = cfg.mp_lan_server_port_delta;
+	int32_t random = 0;
+	if (type == NetworkType::NovaWorld) {
+		min = cfg.mp_novaworld_port_min;
+		max = cfg.mp_novaworld_port_max;
+		delta = cfg.mp_novaworld_port_delta;
+		random = cfg.mp_novaworld_port_random;
+	} else if (!authority) {
+		min = cfg.mp_lan_client_port_min;
+		max = cfg.mp_lan_client_port_max;
+		delta = cfg.mp_lan_client_port_delta;
+		random = cfg.mp_lan_client_port_random;
+	}
+	const uint32_t start = first ? *first : static_cast<uint32_t>(min);
+	uint32_t start_index = 0;
+	if (random != 0) {
+		const uint32_t attempts = bind_scan_attempts(
+				start, static_cast<uint32_t>(max), static_cast<uint32_t>(delta));
+		if (attempts > 1) {
+			NapiPrng prng(napi_prng_platform_seed());
+			start_index = static_cast<uint32_t>(
+					prng.next_in_range(0, static_cast<int32_t>(attempts) - 1));
+		}
+	}
+	return lan_host_bind_ports(start, static_cast<uint32_t>(max), static_cast<uint32_t>(delta),
+			start_index);
 }
 
 void store_server_command_config(

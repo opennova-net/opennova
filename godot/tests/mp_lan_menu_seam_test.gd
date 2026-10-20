@@ -8,6 +8,24 @@ extends GutTest
 # reports). The live two-machine flow (real discovery + a second client spawning)
 # is the manual smoke; this is the unit.
 
+var _run_dir := ""
+
+
+# The host screen shows the process's cfg block (GameCfgStore) and its START
+# writes the block back and saves it (D-NET-335): every test runs over a fresh
+# block in a working directory of its own.
+func before_each() -> void:
+	_run_dir = OS.get_cache_dir().path_join("opennova_mp_lan_menu_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(_run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
+	GameCfgStore.reset()
+
+
+func after_each() -> void:
+	GameCfgStore.reset()
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(_run_dir)
+
 
 
 # A REAL LanSession (typed seam) whose discovery feed is driven by hand: the
@@ -181,8 +199,9 @@ func test_start_game_defaults() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	var driver := _make_host_driver()
-	# The retail config defaults copy the Menu/UNTITLED gametext into the
-	# session name before the host screen is populated from the config.
+	# The host screen shows the cfg block, whose defaults copy the Menu/UNTITLED
+	# text into the session name (its "!Untitled" fallback with no gametext
+	# loaded into the block).
 	var previous_gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	var gametext := RtxtStringFile.new()
 	gametext.add_entry("UNTITLED", "!Untitled", gametext.add_section("Menu"), Vector2i.ZERO)
@@ -190,7 +209,7 @@ func test_start_game_defaults() -> void:
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
 	Strings.register_table(Strings.TABLE_GAMETEXT, previous_gametext)
 	assert_eq(driver.get_widget_text(driver.widget_id("GAME_NAME")), "!Untitled",
-			"the populate seeds GAME_NAME from the Menu/UNTITLED gametext")
+			"the populate seeds GAME_NAME from the block's game_name")
 	assert_eq(driver.get_widget_text(driver.widget_id("MAX_PLAYERS")),
 			str(HostSessionOptions.new().max_players),
 			"the populate seeds MAX_PLAYERS from the engine's host-screen cap")

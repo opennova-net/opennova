@@ -84,11 +84,11 @@ func maybe_launch_lan_from_flags() -> bool:
 		# means `auto`: derive it from the loaded mission. That distinction
 		# matters for 00TRg, whose zero mode resolves to retail's 0x10020 training Co-op.
 		var lan_gametype := LaunchFlags.lan_gametype()
+		# The session name, like every word no flag sets, is the cfg block's
+		# (HostSessionConfig seeds from it: D-NET-335). `--callsign` is the host
+		# player's callsign, matching LanHostCallsign in onhook.cfg.
 		var demo_config := HostSessionConfig.new()
 		demo_config.mission = lan_mission
-		# `--callsign` is the host player's callsign, matching LanHostCallsign in
-		# onhook.cfg. Retail's default GameName is the localized `Untitled ` value.
-		demo_config.server_name = "Untitled "
 		demo_config.max_players = LaunchFlags.lan_max_players(4)
 		demo_config.bind_port = LaunchFlags.lan_port(demo_config.bind_port)
 		demo_config.game_type_auto = lan_gametype < 0

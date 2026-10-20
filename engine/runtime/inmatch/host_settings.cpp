@@ -43,115 +43,122 @@ const std::vector<std::string_view>& host_dialog_controls() {
     return controls;
 }
 
-bool apply_host_dialog_text(GameConfig& config, std::string_view control,
-                            const std::string& value) {
-    // The edit capacities are literal byte counts (no invented -1).
-    // [orig: HostDialog_ReadSettings @ 0x555940;
-    // CStaticWnd_GetLabelText @ 0x657570]
-    if (control == "GAME_NAME") config.server_name = value.substr(0, 32);
-    else if (control == "SERVER_PASSWORD") config.server_password = value.substr(0, 17);
-    else if (control == "SERVER_MESSAGE") config.custom_text = value.substr(0, 128);
-    else if (control == "BLUE_PW") config.side_a_password = value.substr(0, 17);
-    else if (control == "RED_PW") config.side_b_password = value.substr(0, 17);
-    else if (control == "SPECTATOR_PW") config.spectator_password = value.substr(0, 17);
-    else if (control == "GAME_LOCATION") config.country = value.substr(0, 3);
-    else return false;
-    return true;
+namespace {
+
+// The title the block's table runs: dfx2.exe's carries the one row
+// Jointops.exe's lacks (gamecfg::config_var_rows).
+int block_title(const gamecfg::GameCfg& cfg) {
+    return cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2 : gameprofile::GAME_JO;
 }
 
-bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
-                              bool& serve_and_play, std::string_view control,
-                              int32_t number) {
+} // namespace
+
+bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
+                               const std::string& value) {
+    // The text edits by their capacities, literal byte counts (no invented -1)
+    // [orig: HostDialog_ReadSettings @0x555940 - GAME_NAME @0x555967 (32),
+    //  SERVER_PASSWORD @0x555990 (17), SERVER_MESSAGE @0x5559BC (128), BLUE_PW
+    //  @0x555E7F, RED_PW @0x555EA8, SPECTATOR_PW @0x555ED1 (17 each);
+    //  CStaticWnd_GetLabelText @0x657570]; the location's first three characters
+    // [orig: strncpy(country_3C5, item, min(len, 3)) @0x555A72].
+    if (control == "GAME_NAME") { cfg.game_name = value.substr(0, 32); return true; }
+    if (control == "SERVER_PASSWORD") { cfg.mp_host_game_password = value.substr(0, 17); return true; }
+    if (control == "SERVER_MESSAGE") { cfg.servermsg = value.substr(0, 128); return true; }
+    if (control == "BLUE_PW") { cfg.mp_host_side_password_a = value.substr(0, 17); return true; }
+    if (control == "RED_PW") { cfg.mp_host_side_password_b = value.substr(0, 17); return true; }
+    if (control == "SPECTATOR_PW") { cfg.mp_host_spectator_password = value.substr(0, 17); return true; }
+    if (control == "GAME_LOCATION") { cfg.country = value.substr(0, 3); return true; }
+    const int32_t number = edit_integer(value);
+    // The six attribute spins onto their mpattrib bits, four of them inverted
+    // [orig: @0x555CBC..0x555DE8].
     for (const FlagControl& flag : kFlagControls) {
         if (control != flag.control) continue;
-        if ((number != 0) != flag.inverted) config.mp_attributes |= flag.bit;
-        else config.mp_attributes &= ~flag.bit;
+        if ((number != 0) != flag.inverted) cfg.mpattrib = static_cast<int32_t>(static_cast<uint32_t>(cfg.mpattrib) | flag.bit);
+        else cfg.mpattrib = static_cast<int32_t>(static_cast<uint32_t>(cfg.mpattrib) & ~flag.bit);
         return true;
     }
-    if (control == "SERVERTYPE") serve_and_play = number == 0;
-    else if (control == "SERVER_PUNKBUSTER") config.server_punkbuster = number;
-    else if (control == "SERVER_LANONLY") config.server_lan_only = number;
-    else if (control == "CONNECTIONSPEED") config.connection_speed = number;
-    else if (control == "REPLAY") config.replay_enabled = static_cast<uint32_t>(number);
-    else if (control == "DELAY") config.start_delay = static_cast<uint32_t>(number);
-    else if (control == "RESPAWN") config.respawn_timeout = static_cast<uint32_t>(number);
-    else if (control == "TIME") config.respawn_time = static_cast<uint32_t>(number);
-    // Config's 500-point limits and nonpositive KOTH limit have distinct
-    // runtime sentinels; TIME has no such substitution.
-    // [orig: Game_ApplySessionSettingsToGlobals @ 0x551500]
-    else if (control == "KILL_LIMIT") config.score_limit = session_point_limit(number);
-    else if (control == "MAX_SCORE") config.max_score = session_point_limit(number);
-    else if (control == "MAX_KOTH") config.time_limit_minutes = session_koth_limit_minutes(number);
-    // The dialog read clamps its edit to the title's screen cap, 64 or 100
-    // (TitlePlayerCaps::host_screen) [orig: HostDialog_ReadSettings
-    // @ 0x555c25..0x555c2d] [orig: @0x553dd0 (dfx2.exe)].
+    // [orig: SERVERTYPE dedicatedServer_400 @0x5559DE, SERVER_PUNKBUSTER @0x555A9B,
+    //  SERVER_LANONLY hostLanOnly_340 @0x555AC0, CONNECTIONSPEED nwiSpType_540
+    //  @0x555AE5, REPLAY @0x555B0A, DELAY startDelay_410 @0x555B31, RESPAWN
+    //  respawnTimeout_47C @0x555B58, TIME timeLimit_470 @0x555B7F, KILL_LIMIT
+    //  maxKills_408 @0x555BA6, MAX_SCORE maxScore_40C @0x555BCD, MAX_KOTH
+    //  kothLimit_474 @0x555BF4, MAX_PLAYERS maxPlayers_3F4 @0x555C1B with the
+    //  screen cap @0x555C25..0x555C2D (dfx2.exe's 100 @0x553dd0), MAX_FF_KILLS
+    //  @0x555C54, TAKEOVER_TIME teamChangeTime_4C0 @0x555C7B, LFP_TAKEOVER
+    //  @0x555CA0, ALLOW_SPECTATORS @0x555E0A..0x555E23, ALLOW_AI enableAi_A14
+    //  @0x555E53, TOD_CONTINUITY @0x555EF3]
+    if (control == "SERVERTYPE") cfg.dedicated = number;
+    else if (control == "SERVER_PUNKBUSTER") cfg.sv_punkbuster = number;
+    else if (control == "SERVER_LANONLY") cfg.mp_novaworld_host_lan_only = number;
+    else if (control == "CONNECTIONSPEED") cfg.nwisptype = number;
+    else if (control == "REPLAY") cfg.replay = number;
+    else if (control == "DELAY") cfg.startdelay = number;
+    else if (control == "RESPAWN") cfg.timeout = number;
+    else if (control == "TIME") cfg.time_limit = number;
+    else if (control == "KILL_LIMIT") cfg.max_kills = number;
+    else if (control == "MAX_SCORE") cfg.max_score = number;
+    else if (control == "MAX_KOTH") cfg.koth_limit = number;
     else if (control == "MAX_PLAYERS")
-        player_limit = std::min(number, title_player_caps(config.title).host_screen);
-    else if (control == "MAX_FF_KILLS") config.max_friendly_kills = number;
-    else if (control == "TAKEOVER_TIME") config.capture_duration_seconds = number;
-    else if (control == "LFP_TAKEOVER") config.capture_speed_setting = number;
+        cfg.mp_max_players = std::min(number, title_player_caps(block_title(cfg)).host_screen);
+    else if (control == "MAX_FF_KILLS") cfg.numallowablefriendlykills = number;
+    else if (control == "TAKEOVER_TIME") cfg.teamchange_time = number;
+    else if (control == "LFP_TAKEOVER") cfg.mp_lfp_takeoverspeed = number;
     else if (control == "ALLOW_SPECTATORS") {
-        if (number == 0) config.spectator_slots = 0;
-        else if (config.spectator_slots == 0) config.spectator_slots = -1;
-    } else if (control == "ALLOW_AI") config.allow_ai = number != 0;
-    else if (control == "TOD_CONTINUITY") config.time_of_day_continuity = number;
+        if (number == 0) cfg.mp_num_spectators_max = 0;
+        else if (cfg.mp_num_spectators_max == 0) cfg.mp_num_spectators_max = -1;
+    } else if (control == "ALLOW_AI") cfg.enable_ai = number != 0 ? 1 : 0;
+    else if (control == "TOD_CONTINUITY") cfg.mp_tod_continuity = number;
     else return false;
     return true;
 }
 
-bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
-                               bool& serve_and_play, std::string_view control,
-                               const std::string& value) {
-    if (apply_host_dialog_text(config, control, value)) return true;
-    return apply_host_dialog_number(config, player_limit, serve_and_play, control,
-            edit_integer(value));
+void populate_host_dialog(gamecfg::GameCfg& cfg) {
+    // [orig: UI_PopulateHostSettingsFromConfig @0x556328..0x55632A, dword_83C79C]
+    // [orig: @0x5544cd (dfx2.exe)]
+    cfg.mp_max_players = std::min(cfg.mp_max_players, title_player_caps(block_title(cfg)).host_screen);
 }
 
-std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
-                              bool serve_and_play, std::string_view control) {
-    // The populate step that seeds the MULTI_PLAYER_HOST screen from the
-    // config before it shows: text edits by SetText, numeric edits by
-    // SetIntValue, spins by SelectItemByValue. MAX_PLAYERS is clamped to the
-    // title's screen cap (64; dfx2.exe's 100 [orig: @0x5544cd (dfx2.exe)])
-    // first; the four inverted flag spins show the bit CLEAR as 1; the 500-point
-    // and nonpositive-KOTH sentinels map back to their dialog numbers (the read
-    // side folds the apply's substitution into the config, see above).
-    // [orig: UI_PopulateHostSettingsFromConfig @0x555fe0 -- GAME_NAME @0x556015,
-    // SERVERTYPE @0x55608b, GAME_LOCATION strnicmp(country, item, 3) @0x5560fc,
-    // CONNECTIONSPEED @0x556187, MAX_PLAYERS clamp @0x556328 + SetIntValue
-    // @0x556358, TEAM_FF (flags & 0x200) == 0 @0x5563e1, ALLOW_SPECTATORS
-    // maxSpectators != 0 @0x55651a, TOD_CONTINUITY @0x5565e3]
-    if (control == "GAME_NAME") return config.server_name;
-    if (control == "SERVER_PASSWORD") return config.server_password;
-    if (control == "SERVER_MESSAGE") return config.custom_text;
-    if (control == "BLUE_PW") return config.side_a_password;
-    if (control == "RED_PW") return config.side_b_password;
-    if (control == "SPECTATOR_PW") return config.spectator_password;
-    if (control == "GAME_LOCATION") return config.country;
+std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view control) {
+    // Text edits by SetText, numeric edits by SetIntValue, spins by
+    // SelectItemByValue; the four inverted flag spins show the bit CLEAR as 1.
+    // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - GAME_NAME @0x556015,
+    //  SERVERTYPE @0x55608B, SERVER_LANONLY @0x5560B2, GAME_LOCATION strnicmp(country,
+    //  item, 3) @0x5560FC, SERVER_PUNKBUSTER @0x55614E, CONNECTIONSPEED @0x556187,
+    //  REPLAY @0x556222, DELAY @0x55624E, TIME @0x5562A0, MAX_SCORE @0x5562F2,
+    //  MAX_PLAYERS @0x556358, LFP_TAKEOVER @0x5563B2, TEAM_FF (flags & 0x200) == 0
+    //  @0x5563E1, FRIENDLY_TAG @0x556439, FF_WARNING @0x556468, TRACERS @0x5564EE,
+    //  ALLOW_SPECTATORS maxSpectators != 0 @0x55651A, ALLOW_AI @0x556541,
+    //  TOD_CONTINUITY @0x5565E3]
+    if (control == "GAME_NAME") return cfg.game_name;
+    if (control == "SERVER_PASSWORD") return cfg.mp_host_game_password;
+    if (control == "SERVER_MESSAGE") return cfg.servermsg;
+    if (control == "BLUE_PW") return cfg.mp_host_side_password_a;
+    if (control == "RED_PW") return cfg.mp_host_side_password_b;
+    if (control == "SPECTATOR_PW") return cfg.mp_host_spectator_password;
+    if (control == "GAME_LOCATION") return cfg.country;
     const auto number = [](int64_t value) { return std::to_string(value); };
     for (const FlagControl& flag : kFlagControls) {
         if (control != flag.control) continue;
-        return number(((config.mp_attributes & flag.bit) != 0) != flag.inverted ? 1 : 0);
+        return number(((static_cast<uint32_t>(cfg.mpattrib) & flag.bit) != 0) != flag.inverted ? 1 : 0);
     }
-    if (control == "SERVERTYPE") return number(serve_and_play ? 0 : 1);
-    if (control == "SERVER_PUNKBUSTER") return number(config.server_punkbuster);
-    if (control == "SERVER_LANONLY") return number(config.server_lan_only);
-    if (control == "CONNECTIONSPEED") return number(config.connection_speed);
-    if (control == "REPLAY") return number(config.replay_enabled);
-    if (control == "DELAY") return number(config.start_delay);
-    if (control == "RESPAWN") return number(config.respawn_timeout);
-    if (control == "TIME") return number(config.respawn_time);
-    if (control == "KILL_LIMIT") return number(config.score_limit == kSessionNoPointLimit ? 500 : config.score_limit);
-    if (control == "MAX_SCORE") return number(config.max_score == kSessionNoPointLimit ? 500 : config.max_score);
-    if (control == "MAX_KOTH") return number(config.time_limit_minutes == kSessionNoKothLimitMinutes ? 0 : config.time_limit_minutes);
-    if (control == "MAX_PLAYERS")
-        return number(std::min(player_limit, title_player_caps(config.title).host_screen));
-    if (control == "MAX_FF_KILLS") return number(config.max_friendly_kills);
-    if (control == "TAKEOVER_TIME") return number(config.capture_duration_seconds);
-    if (control == "LFP_TAKEOVER") return number(config.capture_speed_setting);
-    if (control == "ALLOW_SPECTATORS") return number(config.spectator_slots != 0 ? 1 : 0);
-    if (control == "ALLOW_AI") return number(config.allow_ai ? 1 : 0);
-    if (control == "TOD_CONTINUITY") return number(config.time_of_day_continuity);
+    if (control == "SERVERTYPE") return number(cfg.dedicated);
+    if (control == "SERVER_PUNKBUSTER") return number(cfg.sv_punkbuster);
+    if (control == "SERVER_LANONLY") return number(cfg.mp_novaworld_host_lan_only);
+    if (control == "CONNECTIONSPEED") return number(cfg.nwisptype);
+    if (control == "REPLAY") return number(cfg.replay);
+    if (control == "DELAY") return number(cfg.startdelay);
+    if (control == "RESPAWN") return number(cfg.timeout);
+    if (control == "TIME") return number(cfg.time_limit);
+    if (control == "KILL_LIMIT") return number(cfg.max_kills);
+    if (control == "MAX_SCORE") return number(cfg.max_score);
+    if (control == "MAX_KOTH") return number(cfg.koth_limit);
+    if (control == "MAX_PLAYERS") return number(cfg.mp_max_players);
+    if (control == "MAX_FF_KILLS") return number(cfg.numallowablefriendlykills);
+    if (control == "TAKEOVER_TIME") return number(cfg.teamchange_time);
+    if (control == "LFP_TAKEOVER") return number(cfg.mp_lfp_takeoverspeed);
+    if (control == "ALLOW_SPECTATORS") return number(cfg.mp_num_spectators_max != 0 ? 1 : 0);
+    if (control == "ALLOW_AI") return number(cfg.enable_ai);
+    if (control == "TOD_CONTINUITY") return number(cfg.mp_tod_continuity);
     return std::string();
 }
 

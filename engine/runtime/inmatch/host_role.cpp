@@ -11,6 +11,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // DisconnectEvent
 #include <net/title/title_identity.h> // title_in_match (the rules word's bits, DFX2-18)
+#include <runtime/inmatch/game_config_block.h> // kSinglePlayerMpAttrib
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h> // build_mission_status (the own C2S 0x0B)
 #include <runtime/inmatch/mission_rotation.h>
@@ -194,7 +195,7 @@ GameConfig singleplayer_game_config(uint32_t game_type,
 		const playersav::ProfileRecord *profile) {
 	inmatch::GameConfig config;
 	config.server_name = "SINGLEPLAYERGAME";
-	config.mp_attributes = 0x3A06u;
+	config.mp_attributes = static_cast<uint32_t>(kSinglePlayerMpAttrib);
 	config.max_players = 1;
 	config.game_type = game_type;
 	// The difficulty word, the S2C 0x08 block's seventh byte: the session
