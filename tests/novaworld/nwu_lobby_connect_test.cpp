@@ -923,6 +923,50 @@ std::vector<NapiMessage> client_statements(
 	return out;
 }
 
+// D-NET-571: the player's ESC during the first connect's poll. The connect poll (session state 1)
+// reads it past its timeout test: its line, the connect's give-up, then the validation wait's
+// escape leg (NWEC41); the verify poll (states 2 and 3) the same with its own lines (NWEC47), the
+// connection, up by then, torn down with its burst. No poll, no escape.
+// [orig: CNapiGameSession_PollConnectPhase1 @0x4D4C30 - "%s : NWU USER ESCAPED1" @0x4D4D22, the
+//  give-up @0x4D4D2C, dword_B5F44C @0x4D4D31; CGameSession_WaitForNWUValidation @0x4D0F20 - "%s :
+//  NWU USER HIT ESCAPE!!!" @0x4D102B, -16 @0x4D1041; CNapiGameSession_PollConnectPhase2 @0x4D4D70 -
+//  @0x4D4E39, "%s : NWU USER ESCAPED2" @0x4D4E73, @0x4D4E7D; CGameSession_WaitForNWUConnection
+//  @0x4D1230 - "%s : NWU USER HIT ESCAPE2!!!" @0x4D12F1, -22 @0x4D1324; UI_ShowNetworkErrorByCode
+//  @0x5584A0 - NWEC(25 - code)]
+void check_escape_legs() {
+	{
+		Rig rig;
+		CHECK(!rig.lobby.escape()); // nothing open
+		rig.log_on = true;
+		rig.start(10);
+		CHECK(rig.lobby.session() != nullptr && rig.lobby.session()->lobby_state() == 1);
+		rig.log.clear();
+		CHECK(rig.lobby.escape());
+		rig.lobby.tick(20);
+		CHECK((rig.log == std::vector<std::string>{ "NWU USER ESCAPED1", "NWU LEAVING JOIN LOOP...",
+				"NWU USER HIT ESCAPE!!!" }));
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC41" });
+		CHECK(rig.lobby.session() == nullptr);
+		CHECK(!rig.lobby.escape()); // the poll is over
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.log_on = true;
+		bring_to_verify(rig);
+		rig.log.clear();
+		const std::size_t sent = rig.session.sent.size();
+		CHECK(rig.lobby.escape());
+		rig.lobby.tick(300);
+		CHECK((rig.log == std::vector<std::string>{ "NWU USER ESCAPED2",
+				"NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
+				"NWU USER HIT ESCAPE2!!!" }));
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC47" });
+		CHECK(rig.session.sent.size() > sent); // the 0x46 burst
+		rig.lobby.close();
+	}
+}
+
 // ConnectOrHost's lines: the legs' checks in order (the start line; not set up; the wrong state
 // with the session's state; the attempt; the host leg's gate), and the host leg's result lines from
 // the host role: started and moving on, not hosting, the 60 s timeout's two around its
@@ -1070,6 +1114,7 @@ void check_host_player_add_sends_update() {
 int main() {
 	check_host_player_add_sends_update();
 	check_connect_or_host_lines();
+	check_escape_legs();
 	check_connect_error_tags();
 	check_connect_log_gate_and_connect();
 	check_connect_log_give_ups();

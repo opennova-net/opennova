@@ -184,6 +184,8 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	connect_poll_ = ConnectPoll::Off;
 	connect_stamp_ms_ = 0;
 	connect_timed_out_ = false;
+	connect_escaped_ = false;
+	escape_requested_ = false;
 	give_up_ = 0;
 	connect_last_send_ms_ = 0;
 }
@@ -322,6 +324,8 @@ namespace {
 //  states 2..4 -20 @0x4D1196; CGameSession_WaitForNWUConnection @0x4D1230 - the poll's timeout
 //  -21 @0x4D1296, a session whose flags lack bit 2 (states 2..8) -23 @0x4D1381]
 constexpr int kConnectPollTimedOut = -15;
+constexpr int kConnectEscaped = -16;        // NWEC41 [orig: @0x4D1041]
+constexpr int kConnectVerifyEscaped = -22;  // NWEC47 [orig: @0x4D1324]
 constexpr int kConnectGaveUpInStateOne = -17;
 constexpr int kConnectGaveUpConnectionDown = -18;
 constexpr int kConnectGaveUpOther = -19;
@@ -447,6 +451,8 @@ void NwuLobbySession::abort_connect() {
 void NwuLobbySession::fail_connect(int code) {
 	connect_poll_ = ConnectPoll::Done;
 	connect_timed_out_ = false;
+	connect_escaped_ = false;
+	escape_requested_ = false;
 	give_up_ = 0;
 	std::vector<std::vector<uint8_t>> out;
 	session_->request_disconnect(out);
@@ -473,17 +479,34 @@ void NwuLobbySession::fail_connect(int code) {
 //  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - the states @0x4D4D90..0x4D4D9E, the compare
 //  @0x4D4DB1, the flag @0x4D4DBF, the give-up @0x4D4E03; CGameSession_WaitForNWUConnection
 //  @0x4D1230 - the flag @0x4D1244, bit 2 @0x4D1332]
+bool NwuLobbySession::escape() {
+	if (connect_poll_ != ConnectPoll::Connect && connect_poll_ != ConnectPoll::Verify) return false;
+	escape_requested_ = true;
+	return true;
+}
+
 bool NwuLobbySession::poll_connect() {
 	switch (connect_poll_) {
 		case ConnectPoll::Connect: {
 			if (session_->lobby_state() == 1) {
-				if (clock_ms_ - connect_stamp_ms_ <= SESSION_CONNECT_POLL_TIMEOUT_MS)
+				if (clock_ms_ - connect_stamp_ms_ > SESSION_CONNECT_POLL_TIMEOUT_MS) {
+					// [orig: CNapiGameSession_PollConnectPhase1 @0x4D4C30 - "%s : NWU 30 secs are
+					//  up! (a)" @0x4D4CA8, ahead of the give-up @0x4D4CB2]
+					connect_log("NWU 30 secs are up! (a)");
+					abort_connect();
+					connect_timed_out_ = true;
+				} else if (escape_requested_) {
+					// The frame's key read past the timeout test: ESC gives the connect up.
+					// [orig: CNapiGameSession_PollConnectPhase1 @0x4D4C30 - Input_DequeueKeyEvent
+					//  @0x4D4CDE, 27 @0x4D4CE9, "%s : NWU USER ESCAPED1" @0x4D4D22, the give-up
+					//  @0x4D4D2C, the flag dword_B5F44C @0x4D4D31]
+					escape_requested_ = false;
+					connect_log("NWU USER ESCAPED1");
+					abort_connect();
+					connect_escaped_ = true;
+				} else {
 					return false;
-				// [orig: CNapiGameSession_PollConnectPhase1 @0x4D4C30 - "%s : NWU 30 secs are
-				//  up! (a)" @0x4D4CA8, ahead of the give-up @0x4D4CB2]
-				connect_log("NWU 30 secs are up! (a)");
-				abort_connect();
-				connect_timed_out_ = true;
+				}
 			}
 			// The validation wait's lines, each ahead of its reset.
 			// [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - "%s : NWU LEAVING JOIN
@@ -494,6 +517,13 @@ bool NwuLobbySession::poll_connect() {
 			if (connect_timed_out_) {
 				connect_log("NWU TIMEOUT!!!");
 				fail_connect(kConnectPollTimedOut);
+				return true;
+			}
+			// [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - the flag dword_B5F44C, "%s : NWU
+			//  USER HIT ESCAPE!!!" @0x4D102B, the reset @0x4D103B, -16 @0x4D1041]
+			if (connect_escaped_) {
+				connect_log("NWU USER HIT ESCAPE!!!");
+				fail_connect(kConnectEscaped);
 				return true;
 			}
 			if (give_up_ != 0) {
@@ -520,13 +550,23 @@ bool NwuLobbySession::poll_connect() {
 		case ConnectPoll::Verify: {
 			const int state = session_->lobby_state();
 			if (state == 2 || state == 3) {
-				if (clock_ms_ - connect_stamp_ms_ <= SESSION_CONNECT_VERIFY_TIMEOUT_MS)
+				if (clock_ms_ - connect_stamp_ms_ > SESSION_CONNECT_VERIFY_TIMEOUT_MS) {
+					connect_timed_out_ = true;
+					// [orig: CNapiGameSession_PollConnectPhase2 @0x4D4D70 - the flag @0x4D4DBF, "%s :
+					//  NWU 20 secs are up! (b)" @0x4D4DF9, the give-up @0x4D4E03]
+					connect_log("NWU 20 secs are up! (b)");
+					abort_connect();
+				} else if (escape_requested_) {
+					// [orig: CNapiGameSession_PollConnectPhase2 @0x4D4D70 - Input_DequeueKeyEvent
+					//  @0x4D4E25, 27 @0x4D4E30, the flag @0x4D4E39, "%s : NWU USER ESCAPED2"
+					//  @0x4D4E73, the give-up @0x4D4E7D]
+					escape_requested_ = false;
+					connect_escaped_ = true;
+					connect_log("NWU USER ESCAPED2");
+					abort_connect();
+				} else {
 					return false;
-				connect_timed_out_ = true;
-				// [orig: CNapiGameSession_PollConnectPhase2 @0x4D4D70 - the flag @0x4D4DBF, "%s :
-				//  NWU 20 secs are up! (b)" @0x4D4DF9, the give-up @0x4D4E03]
-				connect_log("NWU 20 secs are up! (b)");
-				abort_connect();
+				}
 			}
 			// [orig: CGameSession_WaitForNWUConnection @0x4D1230 - "%s : NWU TIMEOUT2!!!"
 			//  @0x4D1287; "%s : NWU NOT CONNECTED FOR SOME REASON..." @0x4D1372; "%s : NWU
@@ -534,6 +574,13 @@ bool NwuLobbySession::poll_connect() {
 			if (connect_timed_out_) {
 				connect_log("NWU TIMEOUT2!!!");
 				fail_connect(kConnectVerifyTimedOut);
+				return true;
+			}
+			// [orig: CGameSession_WaitForNWUConnection @0x4D1230 - the flag dword_B5F44C, "%s : NWU
+			//  USER HIT ESCAPE2!!!" @0x4D12F1, the reset @0x4D1305, -22 @0x4D1324]
+			if (connect_escaped_) {
+				connect_log("NWU USER HIT ESCAPE2!!!");
+				fail_connect(kConnectVerifyEscaped);
 				return true;
 			}
 			if ((session_->session_flags() & 0x2u) == 0) {
@@ -781,6 +828,8 @@ void NwuLobbySession::begin_session() {
 	connect_poll_ = ConnectPoll::Connect;
 	connect_stamp_ms_ = clock_ms_;
 	connect_timed_out_ = false;
+	connect_escaped_ = false;
+	escape_requested_ = false;
 	give_up_ = 0;
 	connect_last_send_ms_ = clock_ms_;
 	if (hooks_.on_session_state) hooks_.on_session_state();

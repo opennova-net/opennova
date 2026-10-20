@@ -128,6 +128,11 @@ public:
 	// Lifecycle.
 	void start();
 	void stop();
+	// The player's ESC while the NovaWorld menu waits: the first connect's poll gives the connect
+	// up with NWEC41 / NWEC47 (the error signal, a frame later), the play leg's poll leaves the
+	// play with NWEC03 (join_failed). False when neither waits (engine: NwuLobbySession::escape;
+	// connect_or_host.h's play lines).
+	bool escape_connect();
 	// The process exit's teardown (a session create's mpreset exit): the
 	// verified session's disconnect burst alone, with no ClientStopPlaying or
 	// ClientStopHosting, as the exit's atexit teardown of the NovaWorld session
@@ -376,6 +381,8 @@ private:
 	std::string pending_join_server_name_;
 	bool play_in_flight_ = false;
 	uint32_t play_started_ms_ = 0;
+	// The player's ESC the play poll reads at its next frame (escape_connect).
+	bool play_escape_requested_ = false;
 	opennova::ProxyRendezvousConfig join_proxy_;
 };
 

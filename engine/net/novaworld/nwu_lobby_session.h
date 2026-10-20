@@ -274,6 +274,13 @@ public:
 	uint32_t clock_ms() const { return clock_ms_; }
 	uint32_t random_u32() const;
 	bool command_line_host() const { return env_.command_line_host; }
+	// The player's ESC during the first connect's poll (the NovaWorld menu's states 5..8): the
+	// next poll frame that reads the keyboard (the connect poll in session state 1, the verify
+	// poll in states 2 and 3) writes its line, gives the connect up and reports NWEC41 / NWEC47
+	// through the waits. False (nothing taken) when no poll runs. [orig:
+	//  CNapiGameSession_PollConnectPhase1 @0x4D4C30 - @0x4D4CDE..0x4D4D31;
+	//  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - @0x4D4E25..0x4D4E7D]
+	bool escape();
 	// The connect log (Hooks::connect_log_on / connect_log): on now, and one line when on.
 	bool connect_log_on() const;
 	void connect_log(const std::string &text);
@@ -350,6 +357,10 @@ private:
 	ConnectPoll connect_poll_ = ConnectPoll::Off;
 	uint32_t connect_stamp_ms_ = 0;
 	bool connect_timed_out_ = false;
+	// The connect poll's escape flag (dword_B5F44C) and the player's ESC not yet read by a poll
+	// frame (escape()).
+	bool connect_escaped_ = false;
+	bool escape_requested_ = false;
 	int give_up_ = 0;
 	uint32_t connect_last_send_ms_ = 0;
 };

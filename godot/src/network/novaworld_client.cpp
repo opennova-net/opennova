@@ -102,6 +102,7 @@ void NovaWorldClient::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("start"), &NovaWorldClient::start);
 	ClassDB::bind_method(D_METHOD("stop"), &NovaWorldClient::stop);
+	ClassDB::bind_method(D_METHOD("escape_connect"), &NovaWorldClient::escape_connect);
 	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
 			&NovaWorldClient::forget_gate_response);
@@ -474,6 +475,13 @@ void NovaWorldClient::_process(double delta) {
 	    lobby_.clock_ms() - play_started_ms_ > opennova::SESSION_CONNECT_TIMEOUT_MS) {
 		lobby_.connect_log(opennova::kPlayTimeoutLine);
 		abort_playing(String(opennova::NWEC_PLAY_TIMEOUT));
+	} else if (play_in_flight_ && lobby_.session() && play_escape_requested_) {
+		// The frame's key read past the timeout test. [orig: CNapiGameSession_ConnectOrHost
+		//  @0x4D4F10 - Input_DequeueKeyEvent @0x4D54DA, 27, "%s : NWU STARTPLAYING user pressed
+		//  escape!!!" @0x4D5577, NWEC03 @0x4D558A, CGameSession_StopPlaying @0x4D5592]
+		play_escape_requested_ = false;
+		lobby_.connect_log(opennova::kPlayEscapedLine);
+		abort_playing(String(opennova::NWEC_PLAY_CANCELLED));
 	}
 }
 
@@ -1098,13 +1106,25 @@ void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	}
 	play_in_flight_ = true;
 	play_started_ms_ = lobby_.clock_ms();
+	// The play poll empties the key queue before its first read. [orig:
+	//  CNapiGameSession_ConnectOrHost @0x4D4F10 - Input_ResetKeyQueue @0x4D54A1]
+	play_escape_requested_ = false;
 }
 
 // A play the poll leaves: a timeout's (or an escape's) StopPlaying, then, as for a rejected
 // result, the not-playing line with the session's state. [orig: CNapiGameSession_ConnectOrHost
 //  @0x4D4F10 - CGameSession_StopPlaying (the call @0x4D5592), "%s : NWU STARTPLAYING failed.  Not
 //  in playing state[%ld]!!!" @0x4D55E7]
+bool NovaWorldClient::escape_connect() {
+	if (play_in_flight_) {
+		play_escape_requested_ = true;
+		return true;
+	}
+	return lobby_.escape();
+}
+
 void NovaWorldClient::abort_playing(const String &tag) {
+	play_escape_requested_ = false;
 	if (play_in_flight_ && lobby_.session()) {
 		lobby_.session()->stop_playing();
 	}

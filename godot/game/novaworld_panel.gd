@@ -1169,6 +1169,10 @@ func host_failed(reason: String) -> void:
 
 
 func _on_close_pressed() -> void:
+	# The player's ESC while the menu waits on the first connect or a play: the client gives
+	# it up with its NWEC (NWEC41 / NWEC47, the play's NWEC03), which this panel shows (D-NET-571).
+	if _client != null and _client.escape_connect():
+		return
 	_closing = true
 	if _client != null:
 		_client.stop()
