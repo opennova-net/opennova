@@ -187,12 +187,13 @@ target_link_libraries(threedi_gp_test PRIVATE opennova_formats)
 target_include_directories(threedi_gp_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(threedi_gp COMMAND threedi_gp_test)
 
-# Every retail .bad and .adm through the reader and the writer the editor
-# saves by: field-equal and a fixed point (OPENNOVA_JO_ASSETS).
-add_executable(anim_retail_rewrite_test anim/retail_rewrite_test.cpp)
-target_link_libraries(anim_retail_rewrite_test PRIVATE opennova_formats)
-target_include_directories(anim_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(anim_retail_rewrite COMMAND anim_retail_rewrite_test)
+# Every committed .bad and .adm under fixtures/anim (one clip per form the shipped
+# clips take among them) through the reader and the writer the editor saves by:
+# field-equal, a fixed point, and each write pinned by its FNV-1a64.
+add_executable(anim_rewrite_test anim/rewrite_test.cpp)
+target_link_libraries(anim_rewrite_test PRIVATE opennova_formats)
+target_include_directories(anim_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_rewrite COMMAND anim_rewrite_test)
 
 add_executable(threedi_compare_test threedi/compare_test.cpp threedi/threedi_compare.cpp)
 target_link_libraries(threedi_compare_test PRIVATE opennova_formats)

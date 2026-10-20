@@ -64,6 +64,33 @@
 //                                  reset positions the runtime never reads,
 //                                  bad_build.h); minted by hand from vm40_rst,
 //                                  not a clip the seam would write
+// And one clip per form the shipped clips take that the sets above do not
+// (witnessed over the 477 clips of JOTAC's tree, 2026-10-19), each a lone clip
+// or built deliberately where the construction seam would write the form
+// another way:
+//   fixtures/anim/rig19_short.bad  two frames, two keys a bone (one fewer than
+//                                  the frame count's fence post): DT1RST.BAD's
+//                                  and stgr_RST.bad's channels
+//   fixtures/anim/rig19_sparse.bad eleven frames, every bone keyed sparsely on a
+//                                  duration table of its own (1..4 frames a key,
+//                                  summing to the 12 fence posts): DVFLEE1E.BAD,
+//                                  the one sparse shipped clip
+//   fixtures/anim/rig19_v0.bad     a version 0 clip: 20-byte events with no
+//                                  trigger word (m60_rst / m60_1d / m60_1r)
+//   fixtures/anim/rig19_junk.bad   the exporter's leftovers the reader drops:
+//                                  every name's bytes past its NUL filled, the
+//                                  three bytes before the index byte set (202
+//                                  clips), one index byte not its bone's (12),
+//                                  the root's parent address and a leaf's child
+//                                  address stale, a parent's child address its
+//                                  last child's (every clip carries some), and
+//                                  flags 0x9 (a loop with bit 3, 26 clips)
+//   fixtures/anim/vm40_long.bad    nine keys a bone over four frames and the
+//                                  translation rows to match (M60_1i.bad: 181
+//                                  keys on 150 frames, rows to frame 182)
+//   fixtures/anim/vm40_nopad.bad   a translated clip with no pad row past row
+//                                  frame_count (stgr_RST.bad; 200 of the 202
+//                                  translated clips carry one)
 // Every turn is a rational rotation (a quaternion (t * axis, 1) normalized: t
 // the tangent of half the angle), so the bytes come out the same on every
 // platform. Default: rebuild every file in memory and byte-compare the
@@ -81,6 +108,7 @@
 #include "common/file_io.h"
 #include "common/test_paths.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -353,6 +381,146 @@ BadBuildSet make_vm_set() {
 	return set;
 }
 
+struct Minted {
+	std::string name;
+	std::vector<uint8_t> bytes;
+};
+
+// The lone clips (a clip minted on its own composes against its own first key).
+bool mint_lone(const BadBuildClip &clip, std::vector<Minted> &out) {
+	std::vector<uint8_t> bytes;
+	std::string why;
+	if (!bad_build_mint(clip, nullptr, bad_retail_limits(), bytes, &why)) {
+		std::fprintf(stderr, "FAIL: %s: %s\n", clip.name.c_str(), why.c_str());
+		return false;
+	}
+	out.push_back(Minted{clip.name + ".bad", std::move(bytes)});
+	return true;
+}
+
+BadBuildClip make_short() {
+	BadBuildClip clip = make_rst();
+	clip.name = "rig19_short";
+	for (size_t b = 0; b < clip.bones.size(); ++b) {
+		clip.bones[b].keys = {turn(static_cast<int>(b) % 3, 1.0 / 16.0), turn(static_cast<int>(b) % 3, 1.0 / 8.0)};
+		clip.bones[b].durations = {1, 1};
+	}
+	return clip;
+}
+
+BadBuildClip make_sparse() {
+	BadBuildClip clip;
+	clip.name = "rig19_sparse";
+	clip.flags = BAD_FLAG_LOOP;
+	clip.frame_count = 11;
+	clip.bones = rig_bones();
+	for (size_t b = 0; b < clip.bones.size(); ++b) {
+		// Bone b's keys hold 1, 2, .. 2 + b % 3 frames in turn, the last cut to
+		// the 12 fence posts (6 or 8 keys a bone).
+		uint32_t left = clip.frame_count + 1;
+		const uint32_t longest = 2 + static_cast<uint32_t>(b) % 3;
+		for (uint32_t k = 0; left > 0; ++k) {
+			const uint32_t hold = std::min<uint32_t>(left, 1 + k % longest);
+			clip.bones[b].durations.push_back(hold);
+			clip.bones[b].keys.push_back(turn(static_cast<int>(b) % 3, (2.0 + k) / 64.0));
+			left -= hold;
+		}
+	}
+	standing_events(clip);
+	return clip;
+}
+
+BadBuildClip make_v0() {
+	BadBuildClip clip = make_rst();
+	clip.name = "rig19_v0";
+	clip.version = 0;
+	key_every_bone(clip, [](int b, int k) { return turn(b % 3, (1.0 + k) / 32.0); });
+	return clip;
+}
+
+BadBuildClip make_long() {
+	BadBuildClip clip;
+	clip.name = "vm40_long";
+	clip.flags = BAD_FLAG_LOOP | BAD_FLAG_TRANSLATION;
+	clip.frame_count = 4;
+	clip.bones = vm_bones();
+	for (BadBuildBone &b : clip.bones) {
+		for (int k = 0; k < 9; ++k) {
+			b.keys.push_back(turn(kZ, k / 64.0));
+			b.durations.push_back(1);
+		}
+		for (uint32_t k = 0; k <= clip.frame_count; ++k) b.translations.push_back(BadBuildVec3{});
+	}
+	clip.events.assign(clip.frame_count + 1, BadBuildEvent{});
+	for (BadBuildEvent &e : clip.events) e.bottom = e.top = kVmStill;
+	return clip;
+}
+
+const Minted *find_minted(const std::vector<Minted> &out, const char *name) {
+	for (const Minted &m : out)
+		if (m.name == name) return &m;
+	return nullptr;
+}
+
+// The bone table's offset (header word 6) and a bone row's address in `bytes`.
+uint32_t bone_table(const std::vector<uint8_t> &bytes) {
+	return static_cast<uint32_t>(bytes[0x18]) | static_cast<uint32_t>(bytes[0x19]) << 8 |
+			static_cast<uint32_t>(bytes[0x1A]) << 16 | static_cast<uint32_t>(bytes[0x1B]) << 24;
+}
+
+void put_u32(std::vector<uint8_t> &bytes, size_t at, uint32_t v) {
+	for (int k = 0; k < 4; ++k) bytes[at + static_cast<size_t>(k)] = static_cast<uint8_t>(v >> (8 * k));
+}
+
+bool mint_quirks(std::vector<Minted> &out) {
+	if (!mint_lone(make_short(), out) || !mint_lone(make_sparse(), out) || !mint_lone(make_v0(), out)) return false;
+
+	// rig19_junk: the idle, flags 0x9, then the exporter's leftovers in its bone rows.
+	const Minted *idle = find_minted(out, "rig19_idle.bad");
+	if (idle == nullptr) return false;
+	BadFile bf{};
+	if (bad_parse_buffer(idle->bytes.data(), idle->bytes.size(), &bf) != 0) return false;
+	bf.flags = BAD_FLAG_LOOP | BAD_FLAG_BIT3;
+	Minted junk{"rig19_junk.bad", {}};
+	const bool wrote = bad_write_buffer(&bf, junk.bytes) == 0;
+	bad_free(&bf);
+	if (!wrote) return false;
+	const uint32_t bones = bone_table(junk.bytes);
+	for (uint32_t b = 0; b < 19; ++b) {
+		const size_t row = bones + 100u * b;
+		size_t len = 0;
+		while (junk.bytes[row + len] != 0) ++len;
+		for (size_t k = len + 1; k < 32; ++k) junk.bytes[row + k] = static_cast<uint8_t>(0x40 + (b * 7 + k) % 26);
+		junk.bytes[row + 32] = 0x11;
+		junk.bytes[row + 33] = 0x22;
+		junk.bytes[row + 34] = 0x33;
+	}
+	junk.bytes[bones + 100u * 3 + 35] = 0x5A;                  // bone 3's index byte
+	put_u32(junk.bytes, bones + 44, bones + 100u * 19);         // the root's parent address, past the table
+	put_u32(junk.bytes, bones + 100u * 2 + 40, bones + 100u * 13); // bone 2's child: its last child, the neck
+	put_u32(junk.bytes, bones + 100u * 18 + 40, 8);             // a leaf's child address
+	out.push_back(std::move(junk));
+
+	// vm40_long: nine keys on four frames, and translation rows to key 9 + 1.
+	if (!mint_lone(make_long(), out)) return false;
+	{
+		Minted &m = out.back();
+		const size_t row_bytes = 12u * 40u;
+		// The writer stores rows 0..4 and a pad row (6); M60_1i's rows run to its
+		// last key's fence post (10): four more, each repeating the last.
+		const std::vector<uint8_t> last(m.bytes.end() - static_cast<std::ptrdiff_t>(row_bytes), m.bytes.end());
+		for (int r = 0; r < 4; ++r) m.bytes.insert(m.bytes.end(), last.begin(), last.end());
+	}
+
+	// vm40_nopad: the translated reset without its pad row (the writer's last row).
+	const Minted *rst = find_minted(out, "vm40_rst.bad");
+	if (rst == nullptr) return false;
+	Minted nopad{"vm40_nopad.bad", rst->bytes};
+	nopad.bytes.resize(nopad.bytes.size() - 12u * 40u);
+	out.push_back(std::move(nopad));
+	return true;
+}
+
 // rig19_idle with `bone`'s every key turned 90 degrees about its local Y,
 // cur * (cos 45, 0, sin 45, 0) in (w, x, y, z), normalized as the runtime
 // reads a key (anim::bad_channel_quat): with cos 45 = sin 45 = k each part is
@@ -377,11 +545,6 @@ void twist_channel(BadFile &bf, int bone) {
 	}
 }
 
-struct Minted {
-	std::string name;
-	std::vector<uint8_t> bytes;
-};
-
 bool mint_set(const BadBuildSet &set, std::vector<Minted> &out) {
 	std::vector<BadMintedFile> files;
 	std::vector<BadBuildProblem> problems;
@@ -394,7 +557,7 @@ bool mint_set(const BadBuildSet &set, std::vector<Minted> &out) {
 }
 
 bool mint_all(std::vector<Minted> &out) {
-	if (!mint_set(make_set(), out) || !mint_set(make_vm_set(), out)) return false;
+	if (!mint_set(make_set(), out) || !mint_set(make_vm_set(), out) || !mint_quirks(out)) return false;
 	// The broken rig from the minted first-person reset.
 	for (const Minted &m : out) {
 		if (m.name != "vm40_rst.bad") continue;
@@ -451,6 +614,7 @@ void check_facts(const Minted &m) {
 				m.name + ": the 40-bone first-person rig, translated, standing still");
 		if (m.name == "vm40_rst.bad") expect(bf.frame_count == 1 && bf.num_translations == 80, m.name + ": one frame, rows 0..1");
 		if (m.name == "vm40_swt.bad") expect((bf.flags & BAD_FLAG_BIT3) != 0, m.name + ": flag bit 3");
+		if (m.name == "vm40_long.bad") expect(bf.frame_count == 4 && bf.channels[0].frame_count == 9, m.name + ": nine keys on four frames");
 		if (m.name == "vm40_brk.bad") {
 			int triplicated = 0;
 			for (size_t b = 1; b < bf.num_bones; ++b)
@@ -461,7 +625,7 @@ void check_facts(const Minted &m) {
 		bad_free(&bf);
 		return;
 	}
-	expect(bf.version == 1 && bf.header_size == 80 && bf.fps == 30 && bf.bone_count == 19 && bf.num_channels == 19 &&
+	expect(bf.version == (m.name == "rig19_v0.bad" ? 0u : 1u) && bf.header_size == 80 && bf.fps == 30 && bf.bone_count == 19 && bf.num_channels == 19 &&
 					bf.num_events == bf.frame_count + 1 && bf.num_translations == 0 &&
 					std::strcmp(bf.bones[0].name, "BN01 Hips") == 0 && bf.bones[0].parent_index == -1 &&
 					bf.bones[14].parent_index == 13 && std::strcmp(bf.bones[14].name, "BN15 Head") == 0,
@@ -470,6 +634,14 @@ void check_facts(const Minted &m) {
 		expect(bf.frame_count == 3 && bf.flags == BAD_FLAG_LOOP && bf.num_events == 4 && bf.channels[0].frame_count == 4 &&
 						std::strcmp(bf.bones[5].name, "BN06 R UpperArm") == 0 && std::strcmp(bf.bones[7].name, "BN08 R Thigh") == 0,
 				m.name + ": the stock idle's shape");
+	if (m.name == "rig19_short.bad")
+		expect(bf.frame_count == 2 && bf.channels[0].frame_count == 2, m.name + ": two keys on two frames");
+	if (m.name == "rig19_sparse.bad")
+		expect(bf.frame_count == 11 && bf.channels[0].frame_count < 12 && bf.channels[1].frame_count != bf.channels[0].frame_count,
+				m.name + ": sparse keys, a table a bone");
+	if (m.name == "rig19_v0.bad") expect(bf.events[0].trigger == -1, m.name + ": no trigger word");
+	if (m.name == "rig19_junk.bad")
+		expect(bf.flags == 0x9u && bf.bones[0].parent_index == -1 && bf.bones[3].parent_index == 2, m.name + ": the links still read");
 	if (m.name == "rig19_walk.bad")
 		expect(bf.frame_count == 30 && bf.events[0].trigger == 0x1 && bf.events[15].trigger == 0x2 && bf.events[8].trigger == 0x20,
 				m.name + ": the footsteps and the foley bit");
