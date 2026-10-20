@@ -5098,6 +5098,12 @@ add_test(NAME netsim_client_replica_census COMMAND netsim_client_replica_census_
 add_executable(npruntime_vehicle_menu_test npruntime/vehicle_menu_test.cpp)
 target_link_libraries(npruntime_vehicle_menu_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_vehicle_menu COMMAND npruntime_vehicle_menu_test)
+# D-NET-690 in the Godot world's sequence: a remote UseGun rider's gun words pose the joiner
+# world's ewep child at the carrier's articulated anchor (coop_two_sim's attachment shape).
+add_executable(netsim_joiner_usegun_rider_compose_test netsim/joiner_usegun_rider_compose_test.cpp)
+target_link_libraries(netsim_joiner_usegun_rider_compose_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(netsim_joiner_usegun_rider_compose_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME netsim_joiner_usegun_rider_compose COMMAND netsim_joiner_usegun_rider_compose_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

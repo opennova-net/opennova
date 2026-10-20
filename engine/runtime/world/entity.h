@@ -1133,6 +1133,15 @@ struct Entity {
     // [orig: render-class row 'ewep' @0x82CFA0 -> HUD_CacheWeaponSlotInfo
     //  @0x440930, installed by BoneCallback_LookupByTag @0x4E32ED..0x4E3306]
     bool emplaced_ctrl_publisher = false; // items.def render_function ewep
+    // A joiner's carrier whose UseGun seat a remote person holds: retail's
+    // joiner holds that rider as an entity attached to the seat, and its body
+    // update's seat call runs the writer on this carrier every tick
+    // (usegun_rider_writes_carrier). Ours keeps a remote person replica-only,
+    // so the joiner's replica gun channel stamps the fact here each frame
+    // (inmatch::tick_replica_emplaced_channels). Never set on an authority.
+    // [orig: Entity_UpdateInfantryPlayerBody seat type 3 @0x4B63A5, the call
+    //  @0x4B63C7; Entity_AttachToBoneAndUpdateTransform @0x546517..0x546518]
+    bool replica_usegun_rider = false;
     uint8_t emplaced_spin_ticks = 0; // entity+0x31B
     uint16_t emplaced_spin_phase = 0; // entity+0x320, WEAP_SPIN
     int16_t emplaced_gun_yaw_word = 0;   // entity+0x322

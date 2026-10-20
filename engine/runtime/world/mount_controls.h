@@ -66,7 +66,11 @@ inline int32_t emplaced_slot_heat_glow(const World &world, const Entity &gun) {
 // the seat.
 // [orig: Entity_AttachToBoneAndUpdateTransform userpoint gate
 //  @0x546424..0x54643F, the call @0x546517..0x546518]
+// On a joiner the rider may be a remote person the world does not hold; the
+// replica's gun channel marks its carrier (Entity::replica_usegun_rider).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B63A5..0x4B63C7]
 inline bool usegun_rider_writes_carrier(const World &world, const Entity &carrier) {
+	if (carrier.replica_usegun_rider) return true;
 	if (!carrier.primary_weapon_owner.valid()) return false;
 	const Entity *rider = world.registry.get(carrier.primary_weapon_owner);
 	if (rider == nullptr || !rider->alive || rider->health <= 0 ||

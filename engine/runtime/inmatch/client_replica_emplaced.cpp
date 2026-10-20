@@ -153,6 +153,16 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		// [orig: HUD_CacheWeaponSlotInfo @0x440930 via the 'ewep' render-class
 		//  row @0x82CFA0, no occupant test]
 		mount.emplaced_controls_valid = same_type && spin_source->emplaced_ctrl_publisher;
+		// Retail's joiner holds a remote gunner as an entity attached to this
+		// UseGun seat; its body update's seat call writes this carrier's words
+		// every tick unless the rider's Flags carry the hidden or the dead bit.
+		// Ours holds it in the replica alone, so the carrier's own row learns
+		// the rider here, each frame.
+		// [orig: Entity_UpdateInfantryPlayerBody -- the hidden-bit return
+		//  @0x4B411E..0x4B4127, seat type 3 @0x4B63A5, the call @0x4B63C7;
+		//  Entity_AttachToBoneAndUpdateTransform -- the dead-bit skip
+		//  @0x5463FC..0x546400, HUD_CacheWeaponSlotInfo(parent) @0x546517..0x546518]
+		if (local_mount != nullptr) local_mount->replica_usegun_rider = false;
 		const auto *spec = mission::item_seat_spec_for_type(specs, mount.type_id);
 		if (spec == nullptr)
 			continue;
@@ -192,6 +202,9 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				if (local_mount != nullptr) {
 					local_mount->emplaced_gun_yaw_word = channel.yaw;
 					local_mount->emplaced_gun_pitch_word = channel.pitch;
+					local_mount->replica_usegun_rider = occupant.handle != self_handle &&
+							(occupant.state_flags & (world::kEntityFlagCarried |
+									world::kEntityFlagDead)) == 0u;
 				}
 			}
 			occupant.yaw_byte =
