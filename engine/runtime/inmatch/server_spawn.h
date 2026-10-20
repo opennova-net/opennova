@@ -142,8 +142,9 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 // the entity's command group cleared, the entity hidden with health 1 and
 // damage disabled, its spawn-wave removal, the hold latch (the request named
 // no target), the deploy leg (Server_ReleasePlayerDeployment) over the
-// request's handle, whose private replies it returns (the handler's replies,
-// ahead of the 0x32), then S2C 0x32 [5][name] to every active player.
+// request's handle, its private sends queued on the slot's connection at their
+// call (returned instead to a transport-less fixture), then S2C 0x32 [5][name]
+// to every active player (D-NET-686).
 // [orig: Server_ConvertPlayerToSpectator
 //  @0x519E00: gates @0x519E16..0x519E3F, the convert @0x519E5B..0x519EA4,
 //  SpawnWaveList_RemovePlayer @0x519EB3, the latch @0x519EBC..0x519EC8,
@@ -152,9 +153,6 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 std::vector<ProtocolMessage> Server_ConvertPlayerToSpectator(NapiNPServerCtx &ctx,
 		NapiNPConnection &conn, world::World &world, uint16_t request);
 
-// Empty: no convert waits for the tick (the 0x51 converts inline in the
-// receive pump). Server_TickUpdate still calls it after the pump.
-void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &world);
 
 // The deploy leg's placement, between its raise and its spawn-state reset:
 // the convert's hold arm (conn.reply.convert_holds_pose) places nothing, the

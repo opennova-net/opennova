@@ -304,10 +304,23 @@ std::vector<ProtocolMessage> Server_ConvertPlayerToSpectator(NapiNPServerCtx &ct
 	//  sends 0xFFFF; Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
 	conn.reply.convert_holds_pose = request == 0xFFFFu;
 	// Server_DeployPlayer(player, handle) @0x519ECE: the deploy leg, its
-	// raises, placement, reset and private replies, before the 0x32.
+	// raises, placement, reset and private sends, each queued on the slot's
+	// connection at its call, so ahead of the 0x32 and of any later message's
+	// reply in this receive pump (D-NET-686); a transport-less fixture takes
+	// them as the handler's replies.
+	// [orig: Server_DeployPlayer - the 0x5A @0x5178F2, the 0x61 @0x51796A, the
+	//  0x1E event 58 @0x517A22; NapiNPServer_SendToConn @0x4C4F20 ->
+	//  CNapiNPConnection_QueueMessage @0x628640]
 	std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
 			ctx.config, conn, world, world::EntityHandle{request}, request,
 			ctx.logs.profile, ctx.np_protocol.identity);
+	if (conn.link.transport != nullptr) {
+		for (ProtocolMessage &message : deployment)
+			conn.link.transport->host_send(message.tag, std::move(message.payload),
+					message.reliable, message.flags.raw, message.capacity_exempt,
+					message.retention_flushes);
+		deployment.clear();
+	}
 	// S2C 0x32 [u8 5][cstr name], mask 128 [orig: @0x519EDC..0x519F43].
 	FormattedGameText text;
 	text.subtype = kGameTextPlayerSpectating;
@@ -319,9 +332,6 @@ std::vector<ProtocolMessage> Server_ConvertPlayerToSpectator(NapiNPServerCtx &ct
 	}
 	return deployment;
 }
-
-// Empty: the C2S 0x51 converts inline in the receive pump.
-void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &, world::World &) {}
 
 // The host side of the Respawn key's request -- see server_spawn.h.
 void Server_HandleDeathTimeoutReset(NapiNPServerCtx &ctx, NapiNPConnection &conn,

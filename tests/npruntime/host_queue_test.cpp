@@ -14,7 +14,10 @@
 //     sends lead the pump's and a message the pump handles is walked in the next frame [orig:
 //     Server_TickUpdate - Server_UpdateAllActivePlayerSlots @0x51D88B, then
 //     CNapiNetwork_PumpServerProtocolRecv @0x51D895; the walk's spawn-protection decrement
-//     @0x5188B8..0x5188C5, its frontier hint @0x51890C..0x5189A6].
+//     @0x5188B8..0x5188C5, its frontier hint @0x51890C..0x5189A6]; the C2S 0x51 convert runs
+//     inline in the pump, its sends ahead of a later message's reply [orig:
+//     Server_ProcessClientRequestSpectatorRespawn @0x51C8D5 -> Server_ConvertPlayerToSpectator
+//     @0x519E00].
 
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -127,18 +130,22 @@ struct QueueFixture {
 
 	inmatch::NapiNPConnection &conn() { return owner->ctx.np_protocol.connection_list.front(); }
 
-	// One C2S message in its own 0x43 datagram.
-	void receive(uint8_t tag, std::vector<uint8_t> payload) {
+	// C2S messages in one 0x43 datagram.
+	void receive_messages(const std::vector<ProtocolMessage> &messages) {
 		opennova::ProtocolPacketHeader header;
 		header.session_id = 0x55667788u;
 		header.seq_num = next_c2s_seq++;
 		header.ack_count = 0;
 		std::vector<uint8_t> body;
-		(void)opennova::encode_protocol_packet_plaintext(header,
-				{opennova::make_protocol_message(tag, std::move(payload))}, kClientScrk, body);
+		(void)opennova::encode_protocol_packet_plaintext(header, messages, kClientScrk, body);
 		socket.incoming.push_back(
 				{kPeer, opennova::nw_encode_outbound(opennova::SESSION_OPCODE_PROTOCOL_MESSAGE,
 						std::move(body))});
+	}
+
+	// One C2S message in its own 0x43 datagram.
+	void receive(uint8_t tag, std::vector<uint8_t> payload) {
+		receive_messages({opennova::make_protocol_message(tag, std::move(payload))});
 	}
 
 	// One C2S 0x2C RTT request (answered with an S2C 0x57).
@@ -359,6 +366,32 @@ bool run_own_client_requests_follow_the_entity_update_sends() {
 	              "the entity update's 0x13 leads the host player's reload relay");
 }
 
+// D-NET-686: the C2S 0x51 convert runs inline in the receive pump (retail's handler tail-jumps
+// into Server_ConvertPlayerToSpectator), so its sends queue at their calls: the deploy leg's
+// 0x5A and 0x61 (Server_DeployPlayer @0x5178F2, @0x51796A), then the 0x32 (@0x519F43), all
+// ahead of the reply to the 0x2C that follows the 0x51 in the same datagram. Ours used to
+// stage the convert for the tick, after the pump, so the 0x57 led them.
+bool run_the_convert_sends_lead_a_later_reply() {
+	QueueFixture f(/*joined=*/true, /*with_world=*/true);
+	f.world->rules.mp_session = true;
+	f.owner->ctx.config.permanent_death = true;
+	f.owner->ctx.config.spectator_slots = 1;
+	(void)f.give_body(f.conn(), 1);
+	f.receive_messages({opennova::make_protocol_message(0x51, {0xFF, 0xFF}),
+			opennova::make_protocol_message(0x2C, {1, 2, 3, 4, 1})});
+	f.pump();
+	if (!expect(f.conn().link.spectator, "the 0x51 converts the slot")) return false;
+	const std::vector<std::vector<ProtocolMessage>> sent = f.packets();
+	if (!expect(!sent.empty(), "the frame's boundary sends its queue")) return false;
+	const std::vector<ProtocolMessage> &packet = sent[0];
+	const std::size_t loadout = QueueFixture::index_of(packet, opennova::s2c::WEAPON_LOADOUT);
+	const std::size_t seed = QueueFixture::index_of(packet, opennova::s2c::TICK_SEED);
+	const std::size_t line = QueueFixture::index_of(packet, opennova::s2c::FORMATTED_GAME_TEXT);
+	const std::size_t reply = QueueFixture::index_of(packet, 0x57);
+	return expect(loadout < seed && seed < line && line < reply && reply < packet.size(),
+	              "the convert's 0x5A, 0x61 and 0x32 lead the later 0x2C's 0x57");
+}
+
 } // namespace
 
 int main() {
@@ -368,6 +401,7 @@ int main() {
 	if (!run_the_walk_leads_the_receive_pump()) ++failures;
 	if (!run_a_handled_message_is_walked_next_frame()) ++failures;
 	if (!run_own_client_requests_follow_the_entity_update_sends()) ++failures;
+	if (!run_the_convert_sends_lead_a_later_reply()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

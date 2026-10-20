@@ -604,11 +604,11 @@ bool check_spectator_convert_deploys() {
 					f.conn(0).link.spawn_target_hold_seconds == 4,
 			"the 0xFFFF deploy leaves the +360 delay and the +364 hold"))
 		return false;
-	// The deploy's private replies join the pump's replies, which the flush
-	// puts ahead of the 0x32 on the converted player's wire.
+	// The deploy's private sends queue on the converted player's connection at
+	// their calls, ahead of the 0x32 (D-NET-686).
 	std::vector<ns::Datagram> own = drain(f.transports[0]);
-	if (!expect(own_replies.size() >= 2 && own_replies[0].tag == s2c::WEAPON_LOADOUT &&
-					own_replies[1].tag == s2c::TICK_SEED && !own.empty() &&
+	if (!expect(own_replies.empty() && own.size() >= 3 &&
+					own[0].tag == s2c::WEAPON_LOADOUT && own[1].tag == s2c::TICK_SEED &&
 					own.back().tag == s2c::FORMATTED_GAME_TEXT,
 			"the deploy's 0x5A and 0x61 reach the converted player ahead of the 0x32"))
 		return false;
