@@ -1765,8 +1765,8 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
     // already occupy instead of evaluating the dry-entry arm at the waterline.
     const int32_t afloat_draft =
             static_cast<int32_t>(double(avg) - 0.9 * double(q));
-    m.plat_afloat = world.env.water_z != 0 &&
-            afloat_draft + v210 < world.env.water_z;
+    // The solve's compare reads the water word raw (plat_water_flag).
+    m.plat_afloat = afloat_draft + v210 < world.env.water_z;
     m.plat_solve_valid = true;
 	const bool trail_was_water = (veh.flags & 0x8000u) != 0;
 	veh.flags = m.plat_afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
@@ -2055,8 +2055,10 @@ static void watercraft_motor_core(World &world, Entity &veh,
         // Shore look-ahead: the witnessed single bilinear sample at the NEXT
         // position [orig: Terrain_SampleHeightBilinear(pos + vel)
         // @0x48EC19..0x48EC2D] — radius 0 with default clearance collapses
-        // calc_average_ground_height to exactly that center-only column.
-        if (world.tables.terrain != nullptr && world.env.water_z != 0) {
+        // calc_average_ground_height to exactly that center-only column. The
+        // sample is compared with the water word raw, no dry gate [orig: `cmp eax,
+        // g_EnvWaterHeightFixed; jl` @0x48EC35..0x48EC3B].
+        if (world.tables.terrain != nullptr) {
             const int32_t ahead3[3] = {px + m.vel_x, py + m.vel_y, pz};
             const GroundClearance clearance{};
             const int32_t ground =

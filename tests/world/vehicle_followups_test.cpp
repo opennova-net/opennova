@@ -792,6 +792,26 @@ void tank_sleep_gate_compares_attitude() {
         CHECK(v.veh.contact_solved_once == turned);
     }
 }
+// The contact solves' in-water flag compares the pads' average with the water word
+// raw: a map with no water authored keeps it 0, so pads averaging below Z 0 are in
+// water and above it dry, no dry sentinel [orig: Entity_ProcessTrackedVehiclePhysics
+// @0x47C1C0 (@0x47D516..0x47D53A); Environment_InitDefaults @0x57C010
+// (@0x57C011..0x57C01E)].
+void water_flag_reads_the_zero_word_raw() {
+    auto w = std::make_unique<World>();
+    Entity hull;
+    hull.flags = 0;
+    VehicleTraits t;
+    const int32_t below[4][3] = {{0, 0, -0x20000}, {0, 0, -0x20000}, {0, 0, -0x20000},
+                                 {0, 0, -0x20000}};
+    detail::plat_water_flag(*w, hull, t, below, 0x8000, 0, 0);
+    CHECK((hull.flags & 0x8000u) != 0);
+    const int32_t above[4][3] = {{0, 0, 0x20000}, {0, 0, 0x20000}, {0, 0, 0x20000},
+                                 {0, 0, 0x20000}};
+    detail::plat_water_flag(*w, hull, t, above, 0x8000, 0, 0);
+    CHECK((hull.flags & 0x8000u) == 0);
+}
+
 } // namespace
 
 // A severity-3 hit costs hull health unless the whole Flags word carries
@@ -850,6 +870,7 @@ void indestructible_hull_skips_landing_damage() {
 }
 
 int main() {
+    water_flag_reads_the_zero_word_raw();
     physics_boat_hard_strike_costs_a_hundred();
     indestructible_hull_skips_landing_damage();
     tank_belly_support_keeps_corners_grounded();

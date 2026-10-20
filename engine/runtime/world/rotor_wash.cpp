@@ -436,8 +436,9 @@ void RotorWashSystem::tick() {
 		// Terrain_OverlayAlloc @0x5CAFC4 (slot[31] there is the intensity
 		// word; the ray radius's `*(_ESI - 4)` @0x5CB265 is the DWORD index
 		// -4 = slot dword 27, the inner radius).
-		// [orig: WeatherParticle_UpdateAllEmitters @0x5CB4D1..0x5CB584;
-		//  WaterRing_SpawnAt @ 0x6108E0]
+		// The wake's own gate skips a zero water word (retail's one dry gate among
+		// the water readers) [orig: WeatherParticle_UpdateAllEmitters @0x5CB4BD..0x5CB4C4,
+		//  the wake @0x5CB4D1..0x5CB584; WaterRing_SpawnAt @ 0x6108E0]
 		if (world_.env.water_z != 0 && (world_.logic_tick & 7u) == 0) {
 			const int32_t height = io::bam_sub(z.frame.m[11], world_.env.water_z);
 			const float opacity = std::min(1.0f,

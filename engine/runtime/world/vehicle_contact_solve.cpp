@@ -357,15 +357,16 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // hull toward the waterline only on the amphibian dispatch (the mover's
     // hasWaterLevel arg: 0 via the cveh/ctrn dispatchers @0x48efce/@0x48f06e,
     // 2 via the catv/generic router @0x48f010) [orig: the per-pad
-    // `max(d, WaterZ - probeZ - v211)` legs @0x47D489..0x47D512].
-    if (traits.amphibian && world.env.water_z != 0) {
+    // `max(d, WaterZ - probeZ - v211)` legs @0x47D489..0x47D512, gated on that
+    // argument alone @0x47D45B..0x47D47B: the water word is read raw].
+    if (traits.amphibian) {
         for (int k = 0; k < 4; ++k) {
             const int32_t water_d =
                     world.env.water_z - probes[k][2] - hull_bottom_neg;
             if (water_d > d[k]) d[k] = water_d;
         }
     }
-	// Water hysteresis uses the pad radius and retains the no-water sentinel. Entry emits the
+	// Water hysteresis uses the pad radius against the raw water word. Entry emits the
 	// local effect and positioned sound; exit retires water trails.
 	// Witness sites: [orig: @0x47D516, @0x47D53A, @0x47D637, @0x47D6BB, @0x47D542, @0x47D629]
 	plat_water_flag(world, veh, traits, probes, r, hull_bottom_neg, world.env.water_z);
@@ -1350,16 +1351,15 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 		py += dy;
 	}
 
-	// Bike water entry uses the two-wheel mean without hysteresis and emits the local effect and
-	// positioned sound once.
-	// Witness sites: [orig: @0x479F7C, @0x479F90]
+	// Bike water entry uses the two-wheel mean without hysteresis, against the raw water word
+	// (0 with no water authored), and emits the local effect and positioned sound once.
+	// Witness sites: [orig: Entity_ProcessLightVehiclePhysics @0x479600 (the mean's compare
+	//  @0x47A577), @0x479F7C, @0x479F90]
 	const bool trail_was_water = (veh.flags & 0x8000u) != 0;
-	if (world.env.water_z != 0) {
-		if (((probes[0][2] + probes[1][2]) >> 1) >= world.env.water_z)
-            veh.flags &= ~0x8000u;
-        else
-            veh.flags |= 0x8000u;
-	}
+	if (((probes[0][2] + probes[1][2]) >> 1) >= world.env.water_z)
+        veh.flags &= ~0x8000u;
+    else
+        veh.flags |= 0x8000u;
 	vehicle_trail_water_transition(veh, traits, trail_was_water);
 	const int lowest_water_probe = probes[0][2] < probes[1][2] ? 0 : 1;
 	vehicle_water_entry(world, veh, probes[lowest_water_probe][0], probes[lowest_water_probe][1],

@@ -261,8 +261,11 @@ inline void plat_second_pass(World &world, Entity &vehicle, int32_t (&probes)[N]
 
 // The in-water flag with the r/2 hysteresis shared by the contact solves:
 // the four pad probes' average Z (lowered by r/2 while already in water)
-// against the hull-bottom reference and the world water plane. W == 0 = our
-// no-water-world sentinel (retail worlds always carry a plane).
+// against the hull-bottom reference and the world water word, compared raw: a
+// map with no water authored keeps the word 0, a plane at Z 0. [orig:
+// Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (@0x47D516..0x47D53A, `cmp edx, ebx;
+// jge`); Entity_ProcessAircraftContactPhysics @0x47EF10 (@0x48021A..0x480226);
+// Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
 void vehicle_water_entry(World &, Entity &, int32_t x, int32_t y, bool was_water);
 void vehicle_trail_water_transition(Entity &e, const VehicleTraits &traits, bool was_water);
 void vehicle_sample_trails(
@@ -272,8 +275,6 @@ void vehicle_update_trail_lane(
 template <int N>
 inline void plat_water_flag(World &world, Entity &veh, const VehicleTraits &traits,
 		const int32_t (&probes)[N][3], int32_t r, int32_t hull_bottom_neg, int32_t water_z) {
-	if (water_z == 0)
-		return;
 	const bool was_water = (veh.flags & 0x8000u) != 0;
 	int32_t avg = (probes[0][2] + probes[1][2] + probes[2][2] + probes[3][2]) >> 2;
 	if ((veh.flags & 0x8000u) != 0u)
