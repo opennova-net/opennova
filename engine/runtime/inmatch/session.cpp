@@ -156,10 +156,21 @@ bool Role::request_deployment_pick(uint16_t wire_value) {
 	const bool local_dead = kind() == RoleKind::Joiner ? runtime->local_player_dead()
 			: kernel.local.local_player_dead();
 	const replication::ClientState &cs = runtime->state();
-	if (local_dead && cs.permanent_death) {
-		if (!cs.spectators_allowed) return false;
-		return runtime->queue_spectator_convert();
-	}
+	const bool convert = local_dead && cs.permanent_death;
+	if (convert && !cs.spectators_allowed) return false;
+	// The shared head of both send arms, none of it on the spectators-off arm above:
+	// Input_ResetAllState (the deferred queue here; the key state and the key-press
+	// latches are the embedder's devices, through take_input_reset), the epilog
+	// screen's input event 83, which no handler takes (record 83 is a zero record,
+	// the dispatcher's switch sends 75..99 to its default, the cine filter takes
+	// other codes), then Dialog_ResetAll (D-NET-685).
+	// [orig: Input_HandleActionBinding @0x49AD40 - the spectators-off jump @0x49B03C,
+	//  Input_ResetAllState @0x49B042, the epilog test and Input_QueueEvent(0x53)
+	//  @0x49B047..0x49B058, Dialog_ResetAll @0x49B060, the hold @0x49B067]
+	kernel.local.clear_deferred_input();
+	input_reset_pending_ = true;
+	kernel.world.script.dialog.reset();
+	if (convert) return runtime->queue_spectator_convert();
 	return runtime->queue_deployment_pick(wire_value);
 }
 

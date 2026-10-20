@@ -245,8 +245,17 @@ public:
 	// The deploy action (dispatch 12) with its pick's [i16] wire value: a dead
 	// local player under permanent death converts to a spectator (the C2S
 	// 0x51) when spectators are allowed and does nothing when they are not;
-	// every other press sends the C2S 0x0E pick. True = queued.
+	// every other press sends the C2S 0x0E pick. Both send arms run the shared
+	// head first: the input reset (the deferred queue here, the devices through
+	// take_input_reset) and the dialog reset (D-NET-685). True = queued.
 	bool request_deployment_pick(uint16_t wire_value);
+	// Whether a role action owes the embedder's device input reset (the key state
+	// and the key-press latches of Input_ResetAllState); reading clears it.
+	bool take_input_reset() {
+		const bool due = input_reset_pending_;
+		input_reset_pending_ = false;
+		return due;
+	}
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera), as plain values off the role's replica runtime, plus
 	// the retail is_in_session fact (the world's mp_session rule: single
@@ -257,6 +266,7 @@ public:
 
 protected:
 	mission::MissionKernel *kernel_ = nullptr;
+	bool input_reset_pending_ = false; // take_input_reset
 };
 
 // The held / pressed action bits of InputPacket, the retail action rows the

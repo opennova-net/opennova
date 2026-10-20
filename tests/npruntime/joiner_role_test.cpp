@@ -2277,6 +2277,71 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 // [orig: Input_HandleActionBinding -- the dead bit @0x49AD7B, case 12
 //  @0x49B024..0x49B03C, the convert @0x49B085..0x49B0B9;
 //  NapiNPClientMsg_HandleSessionConfig @0x428386 / @0x42838C]
+// D-NET-685: the deploy action's shared head runs ahead of both send arms and on
+// neither of them on the spectators-off arm: the input reset (the deferred queue in the
+// kernel, the devices through the role's take_input_reset) and Dialog_ResetAll, then
+// the 0x0E pick or the 0x51 convert.
+// [orig: Input_HandleActionBinding @0x49AD40 - the spectators-off jump @0x49B03C,
+//  Input_ResetAllState @0x49B042, Dialog_ResetAll @0x49B060, the convert
+//  @0x49B065..0x49B0B9, the pick from @0x49B0C3]
+bool run_deploy_action_head_resets_input_and_dialogs() {
+	struct Case {
+		bool permanent;
+		bool spectators;
+		uint8_t sent; // the C2S the press sends, 0 for none
+	};
+	const Case cases[] = {{false, false, c2s::RESPAWN_REQUEST},
+			{true, true, c2s::SPECTATOR_RESPAWN}, {true, false, 0}};
+	bool ok = true;
+	for (const Case &c : cases) {
+		Harness h;
+		h.kernel->world.load_systems();
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		h.kernel->world.rules.mp_session = true;
+		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+		const auto deliver = [&](uint8_t tag, std::vector<uint8_t> body) {
+			std::vector<uint8_t> packet;
+			frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+					{make_protocol_message(tag, std::move(body))}, packet);
+			auto datagram =
+					nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+			h.role.runtime->receive(datagram.data(), datagram.size());
+			h.role.run_tick(h.input);
+		};
+		std::vector<uint8_t> config(47, 0);
+		const uint32_t rules = (c.permanent ? 0x8000u : 0u) | (c.spectators ? 0x2000u : 0u);
+		for (int i = 0; i < 4; ++i) config.push_back(static_cast<uint8_t>(rules >> (8 * i)));
+		deliver(s2c::SESSION_CONFIG, config);
+		FrameUpdate fu;
+		fu.local_tail_present = true;
+		fu.health = 0;
+		fu.complete = true;
+		deliver(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+		(void)h.role.take_input_reset();
+		(void)h.kernel->world.script.dialog.enqueue("dlg001", {});
+		if (!expect(!h.kernel->world.script.dialog.history().empty(),
+				"deploy head: a dialog is registered ahead of the press"))
+			return false;
+		h.socket.datagrams.clear();
+		const bool queued = h.role.request_deployment_pick(0xFFFFu);
+		const bool head = c.sent != 0;
+		ok &= expect(queued == head, "deploy head: the press queues on its send arms");
+		ok &= expect(h.role.take_input_reset() == head,
+				"deploy head: the input reset runs on both send arms, never on the spectators-off arm");
+		ok &= expect(h.kernel->world.script.dialog.history().empty() == head,
+				"deploy head: Dialog_ResetAll runs with it");
+		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+		ProtocolMessage m;
+		if (head)
+			ok &= expect(h.socket.last_message(c.sent, m),
+					"deploy head: the arm's message follows the head");
+	}
+	return ok;
+}
+
 bool run_deploy_action_converts_a_dead_permanent_death_player() {
 	bool ok = true;
 	for (const bool spectators : {true, false}) {
@@ -2714,6 +2779,7 @@ int main() {
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
+	ok &= run_deploy_action_head_resets_input_and_dialogs();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();
 	ok &= run_round_event_stance_reads_the_flags_legs();
 	ok &= run_alt_round_event_flies_its_ammo_byte();

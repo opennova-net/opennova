@@ -938,7 +938,11 @@ bool Simulation::is_joined_in_match() const {
 }
 
 bool Simulation::take_input_reset() {
-	return is_joiner() && runtime_ && runtime_->take_input_reset();
+	// The joiner's mission start owes one, and a role action (the deploy action's
+	// head, D-NET-685) another; both drain.
+	const bool mission_start = is_joiner() && runtime_ && runtime_->take_input_reset();
+	const bool action = active_role().take_input_reset();
+	return mission_start || action;
 }
 
 bool Simulation::is_join_initial_admission_complete() const {
