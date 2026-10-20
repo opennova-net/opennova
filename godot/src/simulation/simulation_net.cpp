@@ -661,7 +661,8 @@ bool Simulation::is_local_spectator() const {
 
 bool Simulation::set_local_spectator(bool p_spectator) {
 	// A joiner is non-authoritative: its S2C 0x75 state is intentionally
-	// read-only. F3 mutates only the in-process SP/listen-host player.
+	// read-only. F3 mutates only the in-process SP/listen-host player, one way:
+	// retail has no spectator leave (Server_SetPlayerSpectator refuses false).
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (is_joiner() || kernel_ == nullptr || ctx == nullptr || !ctx->is_authority) return false;
 	for (opennova::inmatch::NapiNPConnection &connection :
@@ -676,7 +677,6 @@ bool Simulation::set_local_spectator(bool p_spectator) {
 		}
 		kernel_->local.reset_local_player_input_to_player_facing();
 		set_local_player_weapon_input(false, false, false);
-		if (!p_spectator) respawn_local_player_loadout();
 		return true;
 	}
 	return false;

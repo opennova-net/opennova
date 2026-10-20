@@ -5,10 +5,9 @@
 #include <runtime/inmatch/server_message_dispatch.h> // Server_ReleasePlayerDeployment (the convert's deploy)
 
 #include <runtime/world/ai.h>           // AiEntity / AiSystem
-#include <runtime/world/angle.h>        // bam_heading_from_mission_yaw_deg
+#include <runtime/world/angle.h>        // mission_yaw_deg_from_bam_heading
 #include <runtime/world/entity.h>
-#include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state
-#include <runtime/world/infantry.h>     // infantry_respawn_snap
+#include <runtime/world/entity_spawn.h> // warm_up_player_body
 #include <runtime/world/round_sim.h>     // RoundDeath (the Respawn key's death edge)
 #include <runtime/world/spawn_select.h> // resolve_player_spawn_pose / world_has_spawn_zone
 #include <runtime/world/vehicle_attach.h>
@@ -24,109 +23,53 @@ namespace opennova::inmatch {
 
 bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		world::World &world, bool spectator) {
+	// Retail has no spectator leave: the slot latch (+0x188D7) is written by the add,
+	// the host slot's round init and the 0x51 convert, and cleared only by the next
+	// mission start's per-slot reset for a slot with a nonzero restore byte; the one
+	// leave routine (@0x519F50, its deploy call @0x51A00C) has no caller (D-NET-407).
+	// [orig: Server_PlayerAdd @0x51CD57 / @0x51CD83; Server_InitNewRoundState
+	//  @0x51CA6D; Server_ConvertPlayerToSpectator @0x519E61; the unreferenced twin
+	//  @0x519FA2; Server_ResetAllPlayerSlotFrameState @0x4FC320 (the clear @0x4FC372)]
+	if (!spectator) return false;
 	if (!ctx.is_authority || conn.phase < ConnectionPhase::PlayerAdded ||
 	    !conn.link.owned_entity.valid()) {
 		return false;
 	}
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (player == nullptr) return false;
-	if (conn.link.spectator == spectator) return true;
+	if (conn.link.spectator) return true;
 
 	world::AiEntity *ai =
 			world.ai.for_handle(player->handle);
 	world.vehicles.detach(player->handle);
-	// The deploy-hold bit is untouched on ENTERING spectator mode (retail's
-	// runtime conversion @0x519e76 leaves slot+89912 alone — a deployed
-	// convert has it clear, an undeployed one keeps holding it); LEAVING runs
-	// the deploy below, which clears it like the witnessed deploy leg
-	// [orig: Server_DeployPlayer @0x517791 `and 0xEF`].
+	// The deploy-hold bit is untouched on entering spectator mode (retail's
+	// runtime conversion @0x519e76 leaves slot+89912 alone: a deployed
+	// convert has it clear, an undeployed one keeps holding it).
 
-	if (spectator) {
-		// The restore byte (+100568) takes the slot team, 0 included, ahead of the
-		// latch and the slot team's clear (D-NET-584) [orig: Server_ConvertPlayerToSpectator
-		//  @0x519E55, the store @0x519E5B; the latch @0x519E61, the clear @0x519E6E]
-		conn.spectator_restore_team = conn.assigned_team;
-		conn.link.spectator = true;
-		// [orig: Server_ConvertPlayerToSpectator @0x519E76 — the runtime convert
-		//  writes the same slot latch the roster row mirrors]
-		world.match.set_player_spectator(conn.link.owned_entity, true);
-		conn.assigned_team = 0;
-		conn.assigned_team_valid = true;
-		world.match.set_player_slot_team(conn.link.owned_entity, 0); // the mirror (D-NET-650)
-		player->team = 0;
-		player->flags |= 1u;
-		// The witnessed spectator entity state: damage permanently disabled
-		// (-1 sentinel), not the 620-tick join countdown.
-		// [orig: Server_PlayerAdd @0x51cbc0 — entity+292 = -1]
-		player->damage_state = -1;
-		if (ai != nullptr) {
-			ai->team = 0;
-			ai->vel_x = 0;
-			ai->vel_y = 0;
-			ai->inf.player_moving = false;
-			ai->inf.vel[0] = ai->inf.vel[1] = ai->inf.vel[2] = 0;
-		}
-		return true;
-	}
-
-	conn.link.spectator = false;
-	world.match.set_player_spectator(conn.link.owned_entity, false);
-	conn.link.respawn_pending = false;
-	world.match.set_player_respawn_pending(conn.link.owned_entity, false);
-	uint8_t team = conn.spectator_restore_team;
-	if (team == 0) team = 1;
-	conn.assigned_team = team;
+	// The restore byte (+100568) takes the slot team, 0 included, ahead of the
+	// latch and the slot team's clear (D-NET-584) [orig: Server_ConvertPlayerToSpectator
+	//  @0x519E55, the store @0x519E5B; the latch @0x519E61, the clear @0x519E6E]
+	conn.spectator_restore_team = conn.assigned_team;
+	conn.link.spectator = true;
+	// [orig: Server_ConvertPlayerToSpectator @0x519E76 — the runtime convert
+	//  writes the same slot latch the roster row mirrors]
+	world.match.set_player_spectator(conn.link.owned_entity, true);
+	conn.assigned_team = 0;
 	conn.assigned_team_valid = true;
-	world.match.set_player_slot_team(conn.link.owned_entity, team); // the mirror (D-NET-650)
-	const world::SpawnPointResult selected = world::resolve_player_spawn_pose(
-			world, player->handle, world::EntityHandle{},
-			conn.reply.player_slot, team, ctx.config.game_type);
-	if (selected.found) {
-		// The marker's position words, copied raw (D-NET-507).
-		// [orig: Server_PositionPlayerForSpawn @0x50CF60 - the copies
-		//  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
-		player->position = selected.position;
-		player->yaw = selected.yaw;
-		player->pitch = selected.pitch;
-		player->roll = selected.roll;
-	}
-	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
-	world::apply_spawn_point_latches(*player, selected);
-	player->team = team;
-	player->flags &= ~1u;
-	player->flags &= ~world::kEntityFlagDead;
-	player->engine_flags &= ~world::kEntityFlagDead;
-	player->health = player->health_max > 0 ? player->health_max : 100;
-	player->alive = true;
-	world::entity_reset_to_spawn_state(*player);
-	// The deploy leg's spawn protection: 620 authority ticks for a non-bot slot
-	// whose revive latch (+89932) is clear; the reset itself never writes +292.
-	// Neither the bot slot nor the medic-revive deploy exists in our roster, so
-	// the two 0-stores are unreachable here.
-	// [orig: Server_DeployPlayer @0x517740 — 620 @0x517937/@0x517952/
-	//  @0x517960; 0 @0x51790a (bot) / @0x51791c (revive latch)]
-	player->damage_state = 620;
+	world.match.set_player_slot_team(conn.link.owned_entity, 0); // the mirror (D-NET-650)
+	player->team = 0;
+	player->flags |= 1u;
+	// The witnessed spectator entity state: damage permanently disabled
+	// (-1 sentinel), not the 620-tick join countdown.
+	// [orig: Server_PlayerAdd @0x51cbc0 — entity+292 = -1]
+	player->damage_state = -1;
 	if (ai != nullptr) {
-		const int32_t pos[3] = {
-				player->position.x.q16,
-				player->position.y.q16,
-				player->position.z.q16};
-		// The placement's copied heading word (D-NET-376) [orig:
-		// Server_PositionPlayerForSpawn @0x50D3F7; Entity_FindBestSpawnPoint
-		// @0x50CF38]; with no marker, the mirror's heading.
-		const int32_t heading = selected.found
-				? selected.heading_bam
-				: world::bam_heading_from_mission_yaw_deg(player->yaw);
-		const int16_t health = static_cast<int16_t>(
-				std::min<int32_t>(player->health, 32767));
-		ai->team = team;
-		world::infantry_respawn_snap(*ai, pos, heading, health);
+		ai->team = 0;
+		ai->vel_x = 0;
+		ai->vel_y = 0;
+		ai->inf.player_moving = false;
+		ai->inf.vel[0] = ai->inf.vel[1] = ai->inf.vel[2] = 0;
 	}
-	// The deploy's reset ends in the slice rebuild and the body's own list; the
-	// rest of this leg's gap to its twin is D-NET-407's [orig: the unreferenced
-	// leave routine @0x519F50 -> Server_DeployPlayer @0x51A00C ->
-	// Entity_ResetToSpawnState @0x517899 - the builder @0x4B98EB, the list @0x4B98F1].
-	if (world.collision != nullptr) world.collision->refresh_entity_proximity(world, *player);
 	return true;
 }
 

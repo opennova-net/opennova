@@ -142,8 +142,8 @@ int main() {
 	}
 
 	// The same authority transition backs the F3 checkbox and host-side tooling:
-	// it mutates the real connection/entity/AI state, then respawns through the
-	// ordinary marker chain when play resumes.
+	// it mutates the real connection/entity/AI state. There is no leave (retail
+	// has none, D-NET-407): the request is refused and nothing changes.
 	inmatch::NapiNPConnection &joiner_conn =
 			ctx.np_protocol.connection_list.back();
 	const w::EntityHandle joiner_handle = joiner_ent->handle;
@@ -162,36 +162,19 @@ int main() {
 	}
 	spectator->position = {900.0f, 901.0f, 902.0f};
 	if (!expect(
-			inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false),
-			"authority returns a spectator to play")) return 1;
-	w::Entity *restored = world.registry.get(joiner_handle);
-	// Leaving spectator mode is a deploy: the reset never touches entity+292 and
-	// the deploy leg re-seeds the 620-tick spawn protection
-	// [orig: Server_DeployPlayer @0x517937].
-	if (!expect(
-			!joiner_conn.link.spectator && restored != nullptr &&
-			restored->team == 1 && (restored->flags & 1u) == 0 &&
-			restored->damage_state == 620 && restored->alive &&
-			restored->position.x == 123.0f &&
-			restored->position.y == 456.0f &&
-			spectator_ai->team == 1,
-			"leaving spectator mode restores team, body, AI, and spawn pose")) {
-		return 1;
-	}
+			!inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false) &&
+			joiner_conn.link.spectator && spectator->team == 0 &&
+			(spectator->flags & 1u) != 0 && spectator->position.x == 900.0f,
+			"a spectator leave is refused and changes nothing")) return 1;
 	// The roster row mirrors the slot's team byte (+416) wherever the host
-	// writes it: the add, the spectator convert's clear and its restore, and a
-	// team change; a script team write to the body stores the entity byte
-	// alone and leaves it (D-NET-650).
+	// writes it: the add, the spectator convert's clear, and a team change; a
+	// script team write to the body stores the entity byte alone and leaves it
+	// (D-NET-650).
 	// [orig: Server_ConvertPlayerToSpectator @0x519E6E; Server_ChangeEntityTeam
 	//  @0x518DEF; Entity_SetTeamByNetId @0x43C680]
 	{
-		const w::MatchPlayer *row = world.match.player(joiner_handle);
-		if (!expect(row != nullptr && joiner_conn.assigned_team == 1 && row->slot_team == 1,
-				"the roster row carries the restored slot team")) return 1;
-		inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, true);
 		if (!expect(world.match.player(joiner_handle)->slot_team == 0,
 				"the spectator convert clears the mirrored slot team")) return 1;
-		inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false);
 		inmatch::Server_ChangeEntityTeam(ctx, world, joiner_handle, 2);
 		if (!expect(joiner_conn.assigned_team == 2 &&
 				world.match.player(joiner_handle)->slot_team == 2,
@@ -1089,10 +1072,9 @@ int main() {
 
 	// D-COL-21: a deploy's reset ends in the candidate-slice rebuild and the body's
 	// own list, so the deployed body walks a slice built at its placed pose at once
-	// and the 17-tick phase restarts there; both deploy legs, the release and the
-	// spectator leave. [orig: Server_DeployPlayer -> Entity_ResetToSpawnState
-	//  @0x517899 - the Entity_BuildProximityListsFromPools call @0x4B98EB, the
-	//  Entity_BuildProximityList call @0x4B98F1; the leave routine's deploy @0x51A00C]
+	// and the 17-tick phase restarts there. [orig: Server_DeployPlayer ->
+	//  Entity_ResetToSpawnState @0x517899 - the Entity_BuildProximityListsFromPools
+	//  call @0x4B98EB, the Entity_BuildProximityList call @0x4B98F1]
 	{
 		auto slice_world = std::make_unique<w::World>();
 		make_world(*slice_world); // the 6002 start at (123, 456, 7)
@@ -1154,15 +1136,6 @@ int main() {
 		                    collision.candidate_count(body_h) == 1,
 		            "slice: the deploy rebuilds the slice at the start")) return 1;
 		if (!expect(phase_restarted(), "slice: the deploy restarts the 17-tick phase")) return 1;
-		// The spectator leave deploys the same way.
-		if (!expect(inmatch::Server_SetPlayerSpectator(slice_ctx, own, *slice_world, true),
-		            "slice: the player enters spectator mode")) return 1;
-		stand_far();
-		if (!expect(inmatch::Server_SetPlayerSpectator(slice_ctx, own, *slice_world, false) &&
-		                    body->position.x == 123.0f && collision.candidate_count(body_h) == 1,
-		            "slice: the spectator leave rebuilds the slice at the start")) return 1;
-		if (!expect(phase_restarted(),
-		            "slice: the spectator leave restarts the 17-tick phase")) return 1;
 		slice_world->collision = nullptr;
 		slice_world->ai.collision = nullptr;
 	}

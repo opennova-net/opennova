@@ -4897,9 +4897,6 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, true);
 	ok = expect(watcher.link.spectator && watcher.link.respawn_pending && pending(b),
 	            "entering spectator mode leaves the undeployed bit alone") && ok;
-	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, false);
-	ok = expect(!watcher.link.respawn_pending && !pending(b),
-	            "a spectator's return to play clears the undeployed bit") && ok;
 	return ok;
 }
 

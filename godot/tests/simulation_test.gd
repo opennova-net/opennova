@@ -370,10 +370,12 @@ func test_host_spectator_options_and_live_f3_transition() -> void:
 	assert_almost_eq(flown.y, 0.0, 0.0001, "level flight does not climb")
 	sim.set_player_input(false, false, false, false, false, false, false)
 
-	assert_true(sim.set_local_spectator(false))
-	assert_false(sim.is_local_spectator())
+	# Retail has no spectator leave (D-NET-407): the toggle-off is refused and
+	# the slot stays a spectator until the next mission start's reset.
+	assert_false(sim.set_local_spectator(false))
+	assert_true(sim.is_local_spectator())
 	assert_true(sim.has_local_player(),
-			"leaving spectator mode respawns the same playable slot")
+			"the spectator keeps its slot and hidden body")
 
 
 func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:

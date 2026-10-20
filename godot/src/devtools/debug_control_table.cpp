@@ -1076,7 +1076,7 @@ void DebugControlTable::register_automation_actions() {
 
 void DebugControlTable::register_spectator_row() {
 	Entry &spectator = check(control_id::kLocalSpectator, "Player", "Spectator free camera",
-			"Detach the authority-owned local player from gameplay and unlock the free camera while the match continues ticking.",
+			"Detach the authority-owned local player from gameplay and unlock the free camera while the match continues ticking. One way: retail has no spectator leave.",
 			DebugControlRow::TARGET_SIM, DebugControlRow::OWNER_ENGINE);
 	spectator.read = [this]() -> Variant {
 		Simulation *value = sim();

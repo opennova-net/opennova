@@ -127,12 +127,15 @@ void stamp_player_list_add(NapiNPConnection &conn, const world::World &world);
 // server_deploy.cpp defines the deploy, death, spectator and team-change legs
 // declared below; admit_synthetic_peer stays with the add in server_spawn.cpp.
 
-// Mutate an already-added authoritative player between the ordinary body and
-// retail spectator state. The connection flag is serialized by S2C 0x75; the
-// neutral/hidden entity keeps its roster identity while simulation continues.
-// Disabling respawns through the ordinary marker chain. Authority-only.
+// Move an already-added authoritative player into retail spectator state (the
+// convert's slot/entity mutation). The connection flag is serialized by S2C
+// 0x75; the neutral/hidden entity keeps its roster identity while simulation
+// continues. `spectator` false is refused: retail has no leave, a converted
+// slot returns at the next mission start's per-slot reset (D-NET-407).
+// Authority-only.
 // [orig: Server_PlayerAdd @0x51cbc0; NapiNPClientMsg_SetSpectatorMode
-// @0x4259e0; Entity_UpdateInfantryPlayerBody @0x4b40e0]
+// @0x4259e0; Entity_UpdateInfantryPlayerBody @0x4b40e0;
+// Server_ResetAllPlayerSlotFrameState @0x4FC320]
 bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		world::World &world, bool spectator);
 

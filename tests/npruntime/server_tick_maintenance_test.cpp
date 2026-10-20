@@ -1227,13 +1227,9 @@ bool check_spectator_latch_mirrors_onto_the_roster_row() {
 			!world.match.player(player)->spectator,
 			"a joined player's roster row starts non-spectator"))
 		return false;
-	if (!expect(inmatch::Server_SetPlayerSpectator(ctx, roster[0], world, true) &&
+	return expect(inmatch::Server_SetPlayerSpectator(ctx, roster[0], world, true) &&
 			roster[0].link.spectator && world.match.player(player)->spectator,
-			"the runtime spectator convert mirrors the latch onto the roster row"))
-		return false;
-	(void)inmatch::Server_SetPlayerSpectator(ctx, roster[0], world, false);
-	return expect(!roster[0].link.spectator && !world.match.player(player)->spectator,
-			"leaving spectator mode clears the roster latch");
+			"the runtime spectator convert mirrors the latch onto the roster row");
 }
 
 // --------------------------------------------------------------------------
