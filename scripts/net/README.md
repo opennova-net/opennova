@@ -328,10 +328,13 @@ The coverage extensions keep their cases in `parity-extension-cases.json`
 so the default suite is unchanged. An extension case may add:
 
 - `rotation`: E2's missions after `mission` in the host's rotation, in play
-  order. The runner passes them as `-Rotation` and the retail host takes them
-  through `onhook_host_lan`'s `rotation` (an onHook pair with host rotation).
-  The OpenNova listen host has no rotation launch flag yet, so a rotation case
-  runs RR, RR-aa and RO only.
+  order. The runner passes them as `-Rotation`; the retail host takes them
+  through `onhook_host_lan`'s `rotation` (an onHook pair with host rotation),
+  the OpenNova host through `--lan-rotation` (`host_opennova.ps1 -Rotation`),
+  each appended at launch option 0 as the host screen's START appends its
+  selected rows. Our host leaves out a mission its catalog does not list, so
+  an OR or OO cell whose second mission header never arrives names a rotation
+  our host did not take.
 - `time_limit_minutes`: E2's round limit (`-TimeLimitMinutes`). Both hosts read
   it from the SERVER copy's `game.cfg` `time_limit` (retail starts a round
   that is not co-op with `time_limit` x 3720 ticks on its round timer;

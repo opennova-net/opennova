@@ -47,8 +47,9 @@ param(
     # Round end and rotation (extension E2): the missions after -Mission in
     # the host's rotation, .BMS basenames in play order (a comma-separated
     # list is accepted). A retail host takes them through onhook_host_lan's
-    # rotation (the stock host screen's selected-missions list); the OpenNova
-    # listen host has no rotation launch flag, so OR and OO refuse them.
+    # rotation (the stock host screen's selected-missions list), the OpenNova
+    # listen host through --lan-rotation (host_opennova.ps1 -Rotation), each
+    # appended at launch option 0.
     [string[]] $Rotation = @(),
 
     # E2: the round time limit in minutes for this cell. Both hosts read it
@@ -368,9 +369,6 @@ foreach ($entry in $RotationList) {
     if ($entry -notmatch '^[^\\/:*?"<>|,\x00-\x1f]+\.[Bb][Mm][Ss]$') {
         throw "Rotation entry '$entry' is not a .BMS basename."
     }
-}
-if ($RotationList.Count -gt 0 -and $Topology -in @("OR", "OO")) {
-    throw "-Rotation needs a retail host (RR or RO): the OpenNova listen host has no rotation launch flag."
 }
 if ($HostPlayerClass -ne 0 -and $Topology -in @("OR", "OO")) {
     throw "-HostPlayerClass needs a retail host (RR or RO): the OpenNova listen host's class from weapon.sav is unchecked."
@@ -2443,8 +2441,8 @@ function Start-OpenNovaHostExact {
     New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
     $script:OpenNovaHost = & $HostScript `
         -Mission $Mission -Name $HostCallsign -Port $Port -LanMode 1 `
-        -MaxPlayers 4 -GameType ([string] $GameType) -ResourceDir $ServerDir `
-        -WorkingDir $ServerDir -Expansion $Expansion `
+        -MaxPlayers 4 -GameType ([string] $GameType) -Rotation $RotationList `
+        -ResourceDir $ServerDir -WorkingDir $ServerDir -Expansion $Expansion `
         -LogFile (Join-Path $hostDir "godot.log") `
         -Resolution $Resolution -Windowed -McpPort $HostMcpPort `
         -SkipReadyCheck -PassThru

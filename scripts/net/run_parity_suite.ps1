@@ -253,11 +253,6 @@ function Read-ParityCases {
                 @($caseTopologies | Where-Object { $_ -cin @("RO", "OR", "OO") }).Count -eq 0) {
             throw "Parity case '$($case.id)': topologies needs RR, RR-aa and at least one subject"
         }
-        # The OpenNova listen host has no rotation launch flag (run_parity_topology.ps1).
-        if (@(Get-CaseRotation $case).Count -gt 0 -and
-                @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
-            throw "Parity case '$($case.id)': a rotation case runs RR, RR-aa and RO only"
-        }
         # char and click steps are onHook's: the OpenNova scenario_play driver
         # plays neither (run_parity_topology.ps1), so their actor stays retail.
         if ($case.PSObject.Properties.Name -contains "scenario") {
