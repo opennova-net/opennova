@@ -272,7 +272,7 @@ enum class LimitKind : uint8_t {
 	NoSharedServer,
 	NoSharedRoom,
 };
-const char *limit_kind_text(LimitKind kind); // "shared_servers", "no_shared_server", "no_shared_room"
+const char *limit_kind_text(LimitKind kind); // "shared_servers", ... "no_shared_room"
 std::optional<LimitKind> parse_limit_kind(std::string_view text);
 struct StopLimit {
 	LimitKind kind = LimitKind::SharedServers;
