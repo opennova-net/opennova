@@ -601,7 +601,8 @@ opennova_add_editor_test(query SOURCES editor_query_test.cpp)
 # on their records (never a build's gate, never the graph's findings twice), rendered
 # again only when something it read moved; every menu of the variant set (the format's minted
 # menus, our base game's: every screen renders in the document's order, every interned name a
-# graph edge).
+# graph edge), and every menu a packed install minted from our own game serves, layer by layer
+# (the base mount, then its expansion's, a menu a later layer serves unchanged swept once).
 opennova_add_editor_test(menu_render SOURCES menu_screen_render_test.cpp)
 
 # The imports (S8): the sidecars, the import pass, the scan and the build over the
@@ -747,12 +748,14 @@ opennova_add_editor_test(avatars SOURCES avatars_document_test.cpp)
 opennova_add_editor_test(strings SOURCES strings_document_test.cpp)
 
 # The menu's table (editor/documents/mnu_table, ADR 0046 S13 D10): every member reached by
-# exactly one field path or list, over a synthetic every-element menu and every menu of the
-# variant set (the format's minted menus, our base game's) rebuilt through the table.
+# exactly one field path or list, over a synthetic every-element menu, every menu of the
+# variant set (the format's minted menus, our base game's) and every menu a minted packed
+# install serves layer by layer, rebuilt through the table.
 opennova_add_editor_test(menu_table)
 
-# The menu document (S6c), the edits that must not lose authored data (S9d) and the variant
-# sweep through it (every menu of the variant set: the format's minted menus, our base game's).
+# The menu document (S6c), the edits that must not lose authored data (S9d) and the sweeps
+# through it: every menu of the variant set (the format's minted menus, our base game's), and
+# every menu a packed install minted from our own game serves, layer by layer.
 opennova_add_editor_test(menus SOURCES mnu_document_test.cpp)
 
 # The model's table (editor/documents/model_table.cpp, ADR 0046 S13 D10; the format's

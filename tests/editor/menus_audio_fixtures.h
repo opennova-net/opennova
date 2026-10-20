@@ -45,4 +45,18 @@ inline const std::vector<std::string> &menu_variants() {
 // base game's (assets/, the screens the game shows, modelled on the original's) and the variants above.
 inline bool menus(std::vector<Input> &out) { return inputs({"fixtures/mnu", "assets"}, ".mnu", menu_variants(), out); }
 
+// The expansion's own main.mnu for the menu rows' install legs (minted_install.h mint_with): the base game's with its
+// STARTUP screen's MUSICVAR 2, so the expansion's mount serves a menu of a base game's name with other bytes (swept
+// again) beside the ones it serves unchanged (counted once). False where assets/main.mnu holds no MUSICVAR 1.
+inline bool expansion_main_menu(std::vector<uint8_t> &out) {
+	const std::vector<uint8_t> base = editor_test::repo_bytes("assets/main.mnu");
+	std::string text(base.begin(), base.end());
+	const std::string from = "<MUSICVAR>1</MUSICVAR>";
+	const size_t at = text.find(from);
+	if (at == std::string::npos) return false;
+	text.replace(at, from.size(), "<MUSICVAR>2</MUSICVAR>");
+	out.assign(text.begin(), text.end());
+	return true;
+}
+
 } // namespace variant_fixtures

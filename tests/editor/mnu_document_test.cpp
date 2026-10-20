@@ -27,6 +27,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/project/project_files.h>
 #include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_runtime.h>
@@ -34,6 +35,7 @@
 #include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
 #include "editor/menus_audio_fixtures.h"
+#include "editor/minted_install.h"
 #include "common/test_expect.h"
 
 #include <algorithm>
@@ -1734,6 +1736,7 @@ int lookup_matches_the_runtime() {
 
 struct SweepTotals {
 	int menus = 0, screens = 0, windows = 0, records = 0, sets = 0, structural = 0, kinds = 0, failures = 0;
+	int repeats = 0; // menus a later mount layer served again byte for byte, not swept twice
 	// Fields whose same-value Set changed the bytes, by field id: each is a failure.
 	std::map<std::string, int> changed_by_set;
 };
@@ -1940,10 +1943,11 @@ void sweep_menu(const std::string &label, const std::string &absolute, const std
 }
 
 void print_totals(const char *leg, const SweepTotals &totals) {
-	std::printf("%s: %d menu(s) through MnuDocument: %d screen(s), %d record(s) (%d window(s)), %d same-value Set(s) "
-	            "each undone, %d structural edit(s) over %d list kind(s), %d failure(s)\n",
-	            leg, totals.menus, totals.screens, totals.records, totals.windows, totals.sets, totals.structural,
-	            totals.kinds, totals.failures);
+	std::printf("%s: %d menu(s) through MnuDocument (%d more served unchanged by a later layer): %d screen(s), "
+	            "%d record(s) (%d window(s)), %d same-value Set(s) each undone, %d structural edit(s) over %d "
+	            "list kind(s), %d failure(s)\n",
+	            leg, totals.menus, totals.repeats, totals.screens, totals.records, totals.windows, totals.sets,
+	            totals.structural, totals.kinds, totals.failures);
 	for (const auto &entry : totals.changed_by_set)
 		std::printf("  a same-value Set of %s changed the file %d time(s)\n", entry.first.c_str(), entry.second);
 }
@@ -1989,6 +1993,66 @@ int variant_sweep() {
 	                scratch.root(), totals);
 	print_totals("variant sweep", totals);
 	return all && totals.menus > 0 && totals.failures == 0 ? 0 : 1;
+}
+
+// Every .mnu one mount layer of a packed install serves (base, then each expansion), the way mnu_compat mounts it:
+// the stored bytes go through Document::load's own decode. A menu an earlier layer already served byte for byte is
+// counted, not swept again.
+void sweep_install_mount(const std::string &install, const std::string &expansion, const std::string &scratch,
+                         std::map<std::string, std::vector<uint8_t>> &seen, SweepTotals &totals) {
+	opennova::Vfs vfs;
+	if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) {
+		sweep_fail(totals, expansion.empty() ? "<install>" : expansion, "mount_game: " + vfs.last_error());
+		return;
+	}
+	for (const auto &location : vfs.list_files()) {
+		if (!opennova::strutil::ends_with_icase(location.logical_name, ".mnu")) continue;
+		const std::string label = (expansion.empty() ? std::string("<install>/") : expansion + "/") + location.logical_name;
+		std::vector<uint8_t> stored, decoded;
+		if (!vfs.read_file_raw(location.logical_name, stored) || !vfs.read_file(location.logical_name, decoded)) {
+			sweep_fail(totals, label, "unreadable");
+			continue;
+		}
+		std::vector<uint8_t> &earlier = seen[location.logical_name];
+		if (earlier == stored) {
+			++totals.repeats;
+			continue;
+		}
+		earlier = stored;
+		const std::string absolute = scratch + "/" + location.logical_name;
+		if (!test_io::write_file(absolute, stored)) {
+			sweep_fail(totals, label, "the scratch copy failed");
+			continue;
+		}
+		sweep_menu(label, absolute, decoded, scratch, totals);
+	}
+}
+
+// Every .mnu a packed install serves, the base mount's and then each expansion's, through MnuDocument: the install
+// minted from our own game (minted_install.h: the base game's project and the onjo1 expansion through our PFF
+// writer), the expansion carrying its own main.mnu (variant_fixtures::expansion_main_menu), so its mount serves one
+// menu of a base game's name with other bytes (swept) and the rest again unchanged (counted, not swept twice).
+int install_sweep() {
+	test_temp::TempDir scratch("opennova_menu_install_sweep");
+	const std::string install = scratch.file("install");
+	std::string minted;
+	SweepTotals totals;
+	std::vector<uint8_t> patched;
+	if (!variant_fixtures::expansion_main_menu(patched) ||
+	    !minted_install::mint_with(install, {{"main.mnu", minted_install::share(patched)}}, minted)) {
+		sweep_fail(totals, "<install>", "the install did not mint: " + minted);
+		return 1;
+	}
+	std::map<std::string, std::vector<uint8_t>> seen;
+	const std::vector<std::string> expansions = opennova::vfs_list_expansions(install);
+	sweep_install_mount(install, std::string(), scratch.root(), seen, totals);
+	const int base_menus = totals.menus;
+	for (const std::string &expansion : expansions) sweep_install_mount(install, expansion, scratch.root(), seen, totals);
+	if (totals.menus == 0) sweep_fail(totals, "<install>", "the packed install served no .mnu");
+	if (expansions.empty() || totals.repeats == 0) sweep_fail(totals, "<install>", "no later layer served a menu again");
+	if (totals.menus != base_menus + 1) sweep_fail(totals, "<install>", "the expansion's own main.mnu was not swept");
+	print_totals("install leg", totals);
+	return totals.failures == 0 ? 0 : 1;
 }
 
 } // namespace
@@ -2286,5 +2350,5 @@ int main() {
 	       nested_lists() || shipped_shape_edits() ||
 	       typed_clear_and_retype() || type_change_reads_as_the_game() || parse_notes() || blank_menu_edits() || name_is_its_own_edit() ||
 	       lookup_matches_the_runtime() ||
-	       variant_sweep();
+	       variant_sweep() || install_sweep();
 }

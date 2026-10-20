@@ -27,6 +27,7 @@
 
 #include <base/io/strutil.h>
 #include <base/vfs/file_source.h>
+#include <base/vfs/vfs.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
@@ -45,6 +46,7 @@
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/menus_audio_fixtures.h"
+#include "editor/minted_install.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -306,6 +308,17 @@ private:
 	std::map<std::string, std::string> files_;
 };
 
+// The files one mount of a packed install serves, as the game's loaders read them.
+class MountedFiles : public opennova::FileSource {
+public:
+	explicit MountedFiles(const opennova::Vfs &vfs) : vfs_(vfs) {}
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override { return vfs_.read_file(name, out); }
+	uint64_t stamp(const std::string &name) const override { return vfs_.has_file(name) ? 1 : 0; }
+
+private:
+	const opennova::Vfs &vfs_;
+};
+
 std::string resolved(const std::string &value, const std::map<std::string, std::string> &vars) {
 	if (value.size() < 2 || value.front() != '%' || value.back() != '%') return value;
 	for (const auto &var : vars)
@@ -405,6 +418,72 @@ static int test_variant_menus() {
 	for (const variant_fixtures::Input &menu : menus) sweep_menu(menu.label, menu.path, files, vars, totals);
 	print_totals("variant menus", totals);
 	return all && totals.menus > 0 && totals.failures == 0 ? 0 : 1;
+}
+
+// Every .mnu a packed install serves (the base mount, then each expansion's), read with the files that mount
+// serves; a menu a later layer serves byte for byte again is not swept twice. The install is minted from our own
+// game (minted_install.h: the base game's project and the onjo1 expansion through our PFF writer, the expansion
+// carrying its own main.mnu, variant_fixtures::expansion_main_menu).
+static int test_install_leg() {
+	test_temp::TempDir scratch("opennova_menu_render_install");
+	const std::string install = scratch.file("install");
+	std::string minted;
+	std::vector<uint8_t> patched;
+	if (!variant_fixtures::expansion_main_menu(patched) ||
+	    !minted_install::mint_with(install, {{"main.mnu", minted_install::share(patched)}}, minted)) {
+		std::printf("  FAIL the install did not mint: %s\n", minted.c_str());
+		return 1;
+	}
+	SweepTotals totals;
+	std::map<std::string, std::vector<uint8_t>> seen;
+	int repeats = 0, base_menus = 0;
+	std::vector<std::string> layers{std::string()};
+	for (const std::string &expansion : opennova::vfs_list_expansions(install)) layers.push_back(expansion);
+	for (const std::string &layer : layers) {
+		opennova::Vfs vfs;
+		if (!vfs.mount_game(install, layer, opennova::VfsMountMode::Packed)) {
+			std::printf("  FAIL mount_game(%s): %s\n", layer.c_str(), vfs.last_error().c_str());
+			++totals.failures;
+			continue;
+		}
+		MountedFiles files(vfs);
+		opennova::menu::MenuStyleSource style;
+		const std::map<std::string, std::string> &vars = style.vars(files);
+		for (const auto &location : vfs.list_files()) {
+			if (!opennova::strutil::ends_with_icase(location.logical_name, ".mnu")) continue;
+			std::vector<uint8_t> stored;
+			if (!vfs.read_file_raw(location.logical_name, stored)) continue;
+			std::vector<uint8_t> &earlier = seen[opennova::strutil::to_lower(location.logical_name)];
+			if (earlier == stored) {
+				++repeats;
+				continue;
+			}
+			earlier = stored;
+			const std::string path = scratch.file(location.logical_name.c_str());
+			if (!test_io::write_file(path, stored)) {
+				++totals.failures;
+				continue;
+			}
+			sweep_menu((layer.empty() ? std::string() : layer + "/") + location.logical_name, path, files, vars, totals);
+		}
+		if (layer.empty()) base_menus = totals.menus;
+	}
+	if (totals.menus != base_menus + 1) {
+		std::printf("  FAIL the expansion's own main.mnu was not swept\n");
+		++totals.failures;
+	}
+	if (totals.menus == 0) {
+		std::printf("  FAIL the packed install served no .mnu\n");
+		++totals.failures;
+	}
+	// The expansion's mount serves the base game's menus again, unchanged: each counted once.
+	if (layers.size() < 2 || repeats == 0) {
+		std::printf("  FAIL no later layer served a menu again (%zu layers)\n", layers.size());
+		++totals.failures;
+	}
+	print_totals("install leg", totals);
+	std::printf("install leg: %d more served unchanged by a later layer\n", repeats);
+	return totals.failures == 0 ? 0 : 1;
 }
 
 // A composition the render check moves with no graph change (S13 D4's second review): a font a menu
@@ -566,6 +645,7 @@ int main() {
 		{ "notes_alone_recompose", test_notes_alone_recompose },
 		{ "render_check_steps", test_render_check_steps },
 		{ "variant_menus", test_variant_menus },
+		{ "install_leg", test_install_leg },
 		{ "screen_level_note", test_screen_level_note },
 	};
 	for (const auto &entry : cases) {

@@ -21,11 +21,14 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 #include <editor/documents/mnu_table.h>
 #include <formats/mnu/mnu.h>
 #include <formats/mnu/mnu_layout.h>
 
+#include "common/temp_dir.h"
 #include "editor/menus_audio_fixtures.h"
+#include "editor/minted_install.h"
 
 namespace {
 
@@ -915,6 +918,56 @@ bool test_variant_menus() {
 	return true;
 }
 
+// Every .mnu a packed install serves (the base game's, then each expansion's, a later layer's copy of the same bytes
+// counted once: the menus editor_menus sweeps through MnuDocument), each rebuilt through the table alone. The install
+// is minted from our own game (minted_install.h: the base game's project and the onjo1 expansion, carrying its own
+// main.mnu, variant_fixtures::expansion_main_menu).
+bool test_install_menus() {
+	test_temp::TempDir dir("opennova_menu_table_install");
+	const std::string install = dir.file("install");
+	std::string minted;
+	std::vector<uint8_t> patched;
+	CHECK(variant_fixtures::expansion_main_menu(patched), "assets/main.mnu holds MUSICVAR 1");
+	CHECK(minted_install::mint_with(install, {{"main.mnu", minted_install::share(patched)}}, minted),
+	      "the install mints: " << minted);
+	std::map<std::string, std::vector<uint8_t>> seen;
+	size_t menus = 0, repeats = 0, records = 0, base_menus = 0;
+	std::vector<std::string> mounts = {std::string()};
+	for (const std::string &expansion : opennova::vfs_list_expansions(install)) mounts.push_back(expansion);
+	for (const std::string &expansion : mounts) {
+		opennova::Vfs vfs;
+		CHECK(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed),
+		      (expansion.empty() ? "<install>" : expansion) << ": " << vfs.last_error());
+		for (const auto &location : vfs.list_files()) {
+			const std::string &name = location.logical_name;
+			if (!opennova::strutil::ends_with_icase(name, ".mnu")) continue;
+			const std::string label = (expansion.empty() ? std::string("<install>/") : expansion + "/") + name;
+			std::vector<uint8_t> stored, decoded;
+			CHECK(vfs.read_file_raw(name, stored) && vfs.read_file(name, decoded), label << ": unreadable");
+			std::vector<uint8_t> &earlier = seen[name];
+			if (earlier == stored) {
+				++repeats;
+				continue;
+			}
+			earlier = stored;
+			mnu::Document doc;
+			std::string error;
+			CHECK(mnu::parse(decoded.data(), decoded.size(), doc, error), label << ": " << error);
+			records += walk(doc).size();
+			CHECK(rebuilds(doc, label), label << " rebuilt through the table");
+			++menus;
+		}
+		if (expansion.empty()) base_menus = menus;
+	}
+	CHECK(menus > 0, "the packed install served no .mnu");
+	CHECK(menus == base_menus + 1, "the expansion's own main.mnu rebuilt");
+	// The expansion's mount serves the base game's menus again, unchanged: each counted once.
+	CHECK(mounts.size() > 1 && repeats > 0, "a later layer served the base game's menus again");
+	std::cout << "  install leg: " << menus << " menus (" << repeats << " more served unchanged by a later layer), "
+	          << records << " records rebuilt through the table\n";
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -939,6 +992,7 @@ int main() {
 	RUN_TEST(test_owners);
 	RUN_TEST(test_type_change_reads_as_the_game);
 	RUN_TEST(test_variant_menus);
+	RUN_TEST(test_install_menus);
 	if (failed > 0) {
 		std::cerr << "\n" << failed << " test(s) FAILED\n";
 		return EXIT_FAILURE;

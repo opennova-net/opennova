@@ -451,4 +451,16 @@ inline bool mint(const std::string &dir, std::string &error) {
 	return false;
 }
 
+// The install of mint() with `extra` among the expansion's files: each served by the expansion's mount, in place of
+// a base game's file of its name where one has it (a later layer's own copy, as an expansion patches a menu).
+inline bool mint_with(const std::string &dir, const std::vector<File> &extra, std::string &error) {
+	std::vector<File> base, expansion;
+	if (base_game(base, error) && expansion_game(expansion, error)) {
+		expansion.insert(expansion.end(), extra.begin(), extra.end());
+		if (write_install(dir, base, kExpansion, expansion, error)) return true;
+	}
+	std::fprintf(stderr, "the minted install: %s\n", error.c_str());
+	return false;
+}
+
 } // namespace minted_install
