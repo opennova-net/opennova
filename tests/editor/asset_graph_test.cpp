@@ -1666,9 +1666,11 @@ static int test_reference_kind_rows() {
 		TEST_EXPECT(row.defined_in == AssetKind::Unknown || row.names_symbol());
 		// A Record reference names its collection, and the graph finds none missing (S13 D8).
 		TEST_EXPECT(record == (*row.collection != '\0') && (!row.none || record));
-		// A mission variable is the one symbol kind never missing: every index is a word of its mission's bank.
+		// The symbol kinds never missing: a mission variable (every index is a word of its mission's bank) and a
+		// particle's curve table (a miss is its particle file's own finding, particle.curve_unresolved).
 		TEST_EXPECT((row.missing_message != nullptr) ==
-		            (file || (row.names_symbol() && !record && kind != ReferenceKind::MissionVariable)));
+		            (file || (row.names_symbol() && !record && kind != ReferenceKind::MissionVariable &&
+		                      kind != ReferenceKind::ParticleTable)));
 		const bool tolerated = kind == ReferenceKind::Wave || kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
 		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
