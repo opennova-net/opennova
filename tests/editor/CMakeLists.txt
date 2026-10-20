@@ -29,18 +29,14 @@ function(opennova_add_editor_executable target)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
 endfunction()
 
-# opennova_add_editor_test(<stem> [MIXED [RETAIL_PARTS <part>...]] [NAME <ctest name>] [SOURCES <files...>]
-# [LIBS <libs...>]): the ctest row NAME (editor_<stem> unless given) running the executable <NAME>_test,
-# built from SOURCES (<stem>_test.cpp unless given) and linked against LIBS (opennova_editor unless given).
-# MIXED registers it through opennova_add_mixed_test: the row and its _retail twin, which RETAIL_PARTS
-# splits by the program's parts (tests/common/test_parts.h): the twin runs the first, and
-# <NAME>_retail_<part> each other, side by side (every case makes its own project in a pid-unique
-# TempDir, tests/common/temp_dir.h, so the parts need no lock between them). BAKES marks the rows as
-# whole TrnGen bakes' (tests/CMakeLists.txt opennova_bakes: a few at a time). TIMEOUT gives a row
-# its own bound in seconds, under ctest's default (600 for the rows whose bakes or build take every core
-# and run beside the others: the longest took 51 s on CI).
+# opennova_add_editor_test(<stem> [NAME <ctest name>] [SOURCES <files...>] [LIBS <libs...>]): the ctest
+# row NAME (editor_<stem> unless given) running the executable <NAME>_test, built from SOURCES
+# (<stem>_test.cpp unless given) and linked against LIBS (opennova_editor unless given). BAKES marks
+# the row as a whole TrnGen bake's (tests/CMakeLists.txt opennova_bakes: a few at a time). TIMEOUT
+# gives a row its own bound in seconds, under ctest's default (600 for the rows whose bakes or build
+# take every core and run beside the others: the longest took 51 s on CI).
 function(opennova_add_editor_test stem)
-    cmake_parse_arguments(T "MIXED;BAKES" "NAME;TIMEOUT" "SOURCES;LIBS;RETAIL_PARTS" ${ARGN})
+    cmake_parse_arguments(T "BAKES" "NAME;TIMEOUT" "SOURCES;LIBS" ${ARGN})
     if(T_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "opennova_add_editor_test(${stem}): unknown arguments ${T_UNPARSED_ARGUMENTS}")
     endif()
@@ -54,30 +50,12 @@ function(opennova_add_editor_test stem)
         set(T_LIBS opennova_editor)
     endif()
     opennova_add_editor_executable(${T_NAME}_test SOURCES ${T_SOURCES} LIBS ${T_LIBS})
-    if(T_RETAIL_PARTS AND NOT T_MIXED)
-        message(FATAL_ERROR "opennova_add_editor_test(${stem}): RETAIL_PARTS splits a MIXED row's twin")
-    endif()
-    if(T_MIXED)
-        opennova_add_mixed_test(${T_NAME} COMMAND ${T_NAME}_test RETAIL_PARTS ${T_RETAIL_PARTS}
-                                WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
-    else()
-        add_test(NAME ${T_NAME} COMMAND ${T_NAME}_test WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
-    endif()
-    set(rows ${T_NAME})
-    if(T_MIXED)
-        list(APPEND rows ${T_NAME}_retail)
-        if(T_RETAIL_PARTS)
-            list(SUBLIST T_RETAIL_PARTS 1 -1 others)
-            foreach(part IN LISTS others)
-                list(APPEND rows ${T_NAME}_retail_${part})
-            endforeach()
-        endif()
-    endif()
+    add_test(NAME ${T_NAME} COMMAND ${T_NAME}_test WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
     if(T_TIMEOUT)
-        set_tests_properties(${rows} PROPERTIES TIMEOUT ${T_TIMEOUT})
+        set_tests_properties(${T_NAME} PROPERTIES TIMEOUT ${T_TIMEOUT})
     endif()
     if(T_BAKES)
-        opennova_bakes(${rows})
+        opennova_bakes(${T_NAME})
     endif()
 endfunction()
 
@@ -948,9 +926,8 @@ opennova_add_editor_test(mission_map_terrain_view)
 # A mission entity's Height lock (S25): the field, the .mis companion's height_lock, the DI-28 words.
 opennova_add_editor_test(mission_height_lock)
 
-# Every row above, retail twins included, carries the `editor` label: CI's core leg runs as two
-# shards, `editor` (these rows) and `rest` (the core rows without it), each on its own runner
-# (scripts/ci/test_suites.py SHARDS). APPEND keeps a twin's `retail` label, so the suites are as
-# before. Keep this at the end of the file so it sees every row.
+# Every row above carries the `editor` label: CI's ctest leg runs as two shards, `editor` (these
+# rows) and `rest` (the rows without it), each on its own runner (scripts/ci/test_suites.py
+# SHARDS). APPEND keeps a row's other labels. Keep this at the end of the file so it sees every row.
 get_property(opennova_editor_rows DIRECTORY PROPERTY TESTS)
 set_property(TEST ${opennova_editor_rows} APPEND PROPERTY LABELS editor)

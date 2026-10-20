@@ -18,7 +18,6 @@
     "infra/*": ["*"]
   },
   "indirect_ok": [
-    "tests/common/retail_paths.h",
     "apps/novaworld_*/*",
     "deploy/*",
     "web/src/*",

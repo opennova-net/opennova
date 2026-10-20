@@ -2,12 +2,11 @@
 // tests/fixtures/minimal_gamecfg_gen.cpp through gamecfg::write) loads through
 // Game_LoadConfig's port and writes back byte for byte, in memory and through
 // load_file / save_file; the defaults write as Game_SaveConfig writes a fresh
-// state; and the activesrvr.txt marker is the dead host path's one line. With --retail
-// (by hand against an install: no CTest row, since the reference data carries no
-// game.cfg) the install's own retail-written game.cfg, read in place, writes back byte
-// for byte over the install's base weapon.def roster.
+// state; and the activesrvr.txt marker is the dead host path's one line. With
+// --install <dir> (by hand against a retail install: no CTest row, since a game.cfg is
+// a player-machine file) the install's own retail-written game.cfg, read in place,
+// writes back byte for byte over the install's base weapon.def roster.
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -147,16 +146,18 @@ int active_server_marker() {
 
 } // namespace
 
-// The retail leg (B-18): the install's own game.cfg, a file retail's Game_SaveConfig wrote,
-// read in place (never copied into the repository), loaded over the weapon roster of the
-// install's own base weapon.def (its archives, no expansion: the product the menu saves with)
-// and written back from the model alone, byte for byte.
+// The install leg (B-18, by hand): the install's own game.cfg, a file retail's
+// Game_SaveConfig wrote, read in place (never copied into the repository), loaded over the
+// weapon roster of the install's own base weapon.def (its archives, no expansion: the product
+// the menu saves with) and written back from the model alone, byte for byte.
 // [orig: Game_LoadConfig @0x551480; Game_SaveConfig @0x54C490; WeaponDef_LoadAll @0x54DD10]
-int retail_install_roundtrip() {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (its game.cfg and weapon.def)");
-	const std::string cfg_path = retail::join(install, "game.cfg");
-	if (!retail::file_exists(cfg_path)) return retail::skip_leg("the install's game.cfg");
+int install_roundtrip(const std::string &install) {
+	const std::string cfg_path = (std::filesystem::path(install) / "game.cfg").string();
+	std::error_code ec;
+	if (!std::filesystem::is_regular_file(cfg_path, ec)) {
+		std::fprintf(stderr, "FAIL: no game.cfg in %s\n", install.c_str());
+		return 1;
+	}
 	std::string written_by_retail;
 	TEST_EXPECT(test_io::read_file_text(cfg_path, written_by_retail));
 	opennova::ResourceIndex index;
@@ -181,12 +182,14 @@ int retail_install_roundtrip() {
 }
 
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+	std::string install;
+	for (int i = 1; i + 1 < argc; ++i)
+		if (std::string(argv[i]) == "--install") install = argv[i + 1];
 	const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/gamecfg/synth_game.cfg";
 	if (fixture_roundtrip(fixture) != 0) return 1;
 	if (defaults_write() != 0) return 1;
 	if (active_server_marker() != 0) return 1;
-	if (retail_install_roundtrip() != 0) return 1;
+	if (!install.empty() && install_roundtrip(install) != 0) return 1;
 	std::printf("OK: gamecfg roundtrip\n");
 	return 0;
 }

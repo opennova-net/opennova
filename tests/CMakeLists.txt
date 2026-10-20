@@ -1,46 +1,3 @@
-# Machine-local retail data gates (tests/common/retail_paths.h, the two
-# OPENNOVA_* roots in docs/asset-gated-tests.md): a gated test prints
-# "SKIP: needs <what>" and exits 77 when its data is absent, so ctest reports it
-# Skipped, never Passed. A test whose synthetic legs ran prints "SKIP-LEG:
-# needs <what>" for its missing retail leg and exits 0 (a plain add_test).
-function(opennova_add_gated_test name)
-    add_test(NAME ${name} ${ARGN})
-    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 LABELS retail)
-endfunction()
-
-# Mixed binaries expose synthetic cases without resolving either retail root.
-# The separately labeled compatibility entry also runs their retail assertions.
-# Serialize each pair because some legacy format tests share scratch filenames.
-# RETAIL_PARTS <first> <part>... splits the compatibility entry by the program's
-# parts (tests/common/test_parts.h): <name>_retail runs <first> (the program's
-# synthetic cases among them) and <name>_retail_<part> each other part, a part
-# of retail legs alone, side by side; the ordinary entry runs as before.
-function(opennova_add_mixed_test name)
-    cmake_parse_arguments(TEST "" "WORKING_DIRECTORY" "COMMAND;RETAIL_PARTS" ${ARGN})
-    add_test(NAME ${name} COMMAND ${TEST_COMMAND})
-    set(retail_rows ${name}_retail)
-    if(TEST_RETAIL_PARTS)
-        list(GET TEST_RETAIL_PARTS 0 first)
-        add_test(NAME ${name}_retail COMMAND ${TEST_COMMAND} --retail
-                 --part ${first} --parts ${TEST_RETAIL_PARTS})
-        foreach(part IN LISTS TEST_RETAIL_PARTS)
-            if(NOT part STREQUAL first)
-                add_test(NAME ${name}_retail_${part} COMMAND ${TEST_COMMAND} --retail
-                         --part ${part} --parts ${TEST_RETAIL_PARTS})
-                list(APPEND retail_rows ${name}_retail_${part})
-            endif()
-        endforeach()
-    else()
-        add_test(NAME ${name}_retail COMMAND ${TEST_COMMAND} --retail)
-    endif()
-    set_tests_properties(${retail_rows} PROPERTIES LABELS retail)
-    set_tests_properties(${name} ${name}_retail PROPERTIES RESOURCE_LOCK mixed_${name})
-    if(TEST_WORKING_DIRECTORY)
-        set_tests_properties(${name} ${retail_rows} PROPERTIES
-                             WORKING_DIRECTORY "${TEST_WORKING_DIRECTORY}")
-    endif()
-endfunction()
-
 # opennova_bakes(<row>...): rows that run whole TrnGen terrain bakes, each on as
 # many threads as the machine has (TerrainBakeInput::for_hardware, the editor's
 # bake_threads). scripts/build.sh runs ctest over tests/ctest_resources.json,
@@ -60,19 +17,14 @@ function(opennova_off_bakes)
     set_tests_properties(${ARGN} PROPERTIES RESOURCE_GROUPS "bakes:3")
 endfunction()
 
-# opennova_add_parts(<name> PARTS <part>... [GATED] COMMAND <command>...): a row
-# per part of a program split with tests/common/test_parts.h, <name>_<part>
-# running `<command> --part <part> --parts <part>...`, so the parts run side by
-# side and each row checks the list is the program's own; GATED registers each
-# row through opennova_add_gated_test (the retail label, exit 77 a skip).
+# opennova_add_parts(<name> PARTS <part>... COMMAND <command>...): a row per
+# part of a program split with tests/common/test_parts.h, <name>_<part> running
+# `<command> --part <part> --parts <part>...`, so the parts run side by side and
+# each row checks the list is the program's own.
 function(opennova_add_parts name)
-    cmake_parse_arguments(P "GATED" "" "PARTS;COMMAND" ${ARGN})
+    cmake_parse_arguments(P "" "" "PARTS;COMMAND" ${ARGN})
     foreach(part IN LISTS P_PARTS)
-        if(P_GATED)
-            opennova_add_gated_test(${name}_${part} COMMAND ${P_COMMAND} --part ${part} --parts ${P_PARTS})
-        else()
-            add_test(NAME ${name}_${part} COMMAND ${P_COMMAND} --part ${part} --parts ${P_PARTS})
-        endif()
+        add_test(NAME ${name}_${part} COMMAND ${P_COMMAND} --part ${part} --parts ${P_PARTS})
     endforeach()
 endfunction()
 
@@ -85,13 +37,6 @@ add_library(opennova_test_rig STATIC common/mission_rig.cpp)
 target_include_directories(opennova_test_rig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opennova_test_rig
     PUBLIC opennova_net opennova_runtime opennova_formats opennova_base)
-
-# The retail-root seam the gated tests share: a root resolves only to an
-# existing directory, so a root naming a missing folder skips like an unset one.
-add_executable(retail_paths_test common/retail_paths_test.cpp)
-target_compile_features(retail_paths_test PRIVATE cxx_std_17)
-target_include_directories(retail_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME retail_paths COMMAND retail_paths_test)
 
 # The parts seam the split programs share (common/test_parts.h, opennova_add_parts): a
 # row runs its part only when the registration's list of parts is the program's own.
@@ -680,10 +625,9 @@ target_compile_features(mission_mis_idempotency_test PRIVATE cxx_std_17)
 add_test(NAME mission_mis_idempotency COMMAND mission_mis_idempotency_test)
 
 # The mission writer against the files it must write: parse->write compared with the
-# bytes read, section by section, then the canonical fixed point. The ordinary row
-# reads the minted synth_dense.bms; the retail leg every mission the install ships,
-# out of its archives through the VFS (OPENNOVA_JO_DIR), each rewritten to its own
-# bytes but the named ones whose loadout chunk is damaged (D-EVT-7).
+# bytes read, section by section, then the canonical fixed point, over the minted
+# synth_dense.bms (its own bytes again) and the three minted damaged loadouts, which
+# differ from their rewrites in the loadout chunk alone (D-EVT-7).
 add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
 target_link_libraries(mission_corpus_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -738,7 +682,7 @@ add_test(NAME menu_lwf COMMAND menu_lwf_test)
 
 # score — score.ini scoring config: parse, canonical write, and the witnessed
 # row-index ladder. Committed fixture is AUTHORED (fixtures/score/score_sample.ini),
-# not retail data; <OPENNOVA_JO_ASSETS>/score.ini adds the retail sweep leg.
+# not retail data.
 add_executable(facial_animation_test world/facial_animation_test.cpp)
 target_link_libraries(facial_animation_test PRIVATE opennova_runtime)
 target_include_directories(facial_animation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -800,12 +744,12 @@ target_include_directories(minimal_gamecfg_gen_test PRIVATE ${CMAKE_CURRENT_SOUR
 add_test(NAME minimal_gamecfg_gen COMMAND minimal_gamecfg_gen_test)
 
 add_executable(gamecfg_roundtrip_test gamecfg/gamecfg_roundtrip_test.cpp)
-# opennova_runtime for game_cfg_weapon_roster (the retail leg's roster from weapon.def).
+# opennova_runtime for game_cfg_weapon_roster (the install leg's roster from weapon.def).
 target_link_libraries(gamecfg_roundtrip_test PRIVATE opennova_formats opennova_runtime)
 target_include_directories(gamecfg_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-# The core row only. The install leg (--retail) reads the install's own game.cfg, a
-# player-machine file the reference data never carries (gamecfg/game-cfg-re.md), so a
-# retail row could never be exercised in CI: run `gamecfg_roundtrip_test --retail` by hand.
+# The row runs the minted legs. The install leg reads a retail install's own game.cfg, a
+# player-machine file (gamecfg/game-cfg-re.md) no row can carry: run
+# `gamecfg_roundtrip_test --install <dir>` by hand.
 add_test(NAME gamecfg_roundtrip COMMAND gamecfg_roundtrip_test)
 
 add_executable(gamecfg_parse_test gamecfg/gamecfg_parse_test.cpp)
@@ -1247,7 +1191,7 @@ target_include_directories(minimal_fnt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
 # fixtures/cbin: the synthetic credits lists (synth_nlist*.kda through
-# cbin::encode; the shipped trio is cbin_roundtrip's reference-tree leg),
+# cbin::encode, in the JO, JOX01 and BHD shapes the shipped lists take),
 # credits_image.png (the 8x8 PNG the credits tests stage under the image name
 # the minted .kda references; a self-contained PNG writer) and particle_dot.tga
 # (the effect-world test's particle sprite).
@@ -3049,8 +2993,8 @@ target_link_libraries(collision_vertical_test PRIVATE opennova_runtime)
 target_compile_features(collision_vertical_test PRIVATE cxx_std_17)
 add_test(NAME collision_vertical COMMAND collision_vertical_test)
 
-# Asset-gated (OPENNOVA_JO_DIR): the 00TRg transport-unload repro over the
-# real DTruck1 collision; the pipeline preconditions are asserted, the escape
+# The 00TRg transport-unload repro over the mission set's minted truck, in the
+# shipped DTruck1's shape; the pipeline preconditions are asserted, the escape
 # verdict stays a report while the divergence is open.
 add_executable(truck_dismount_test world/truck_dismount_test.cpp)
 target_link_libraries(truck_dismount_test PRIVATE opennova_runtime)
@@ -3428,8 +3372,8 @@ add_test(NAME root_motion COMMAND root_motion_test)
 # WAC scripting. The registry oracle (165-command ISA + 28 param types from the
 # binary) exercises only the format half (engine/formats/wac); VM behavior (var
 # math, entity mutation, temporal/edge firing, env, authority) and the shipped
-# .wac corpus, compiled to the original compiler's listings, run against the
-# world (dirs via argv, else OPENNOVA_JO_ASSETS; Skipped without it).
+# .wac scripts the tree commits, compiled to the original compiler's listings,
+# run against the world.
 add_executable(wac_registry_oracle_test wac/wac_registry_oracle_test.cpp)
 target_link_libraries(wac_registry_oracle_test PRIVATE opennova_formats)
 target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3639,8 +3583,8 @@ add_test(NAME spectator_session COMMAND spectator_session_test)
 
 # The tick digest (ADR 0043): the per-tick state hash a structural slice must
 # leave unchanged. The ctest leg is the synthetic mission (committed chain,
-# determinism); `tick_digest_test --mission <name>` is the local retail tool
-# behind scripts/parity/tick_digest.py and is never a ctest leg.
+# determinism); `tick_digest_test --install <dir> --mission <name>` is the local
+# retail tool behind scripts/parity/tick_digest.py and is never a ctest row.
 add_executable(tick_digest_test mission/tick_digest_test.cpp)
 target_link_libraries(tick_digest_test PRIVATE opennova_test_rig)
 target_include_directories(tick_digest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
