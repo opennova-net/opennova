@@ -63,6 +63,7 @@ int test_default_binding_table() {
     TEST_EXPECT(table.size() == 109);
     for (size_t i = 1; i < table.size(); ++i) TEST_EXPECT(table[i - 1].id < table[i].id);
     const playersav::BindingEntry &command = table[0];
+    // The row's token, NUL-terminated inside the row [orig: @0x54c37a..0x54c38d].
     TEST_EXPECT(command.id == 1 && command.index == 1 && command.token == "command");
     TEST_EXPECT(command.flags == 0x05000800u && command.modes == 3 && command.action_class == 10);
     TEST_EXPECT(command.help == 10001 && command.primary == 0xC0);
