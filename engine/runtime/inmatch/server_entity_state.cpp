@@ -35,7 +35,13 @@ namespace {
 //  Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA]
 void write_player_state_body_stores(world::World &world, const NapiNPConnection &conn,
 		world::Entity &body) {
+	// Retail's one Flags dword: the clear takes every view of its bit 0 (a WAC
+	// hide, WacCmd_HideSsn's port, sets all three), so a script-hidden player
+	// body is unhidden by its slot's next 0x0A for the humans count and the
+	// play ticks too.
 	body.flags &= ~world::kEntityFlagCarried;
+	body.engine_flags &= ~world::kEntityFlagCarried;
+	body.hidden = false;
 	if (conn.link.spectator) restamp_spectator_body(world, conn);
 	if (world.preround_delay_seconds != 0) {
 		body.flags &= ~world::kEntityFlagDead;

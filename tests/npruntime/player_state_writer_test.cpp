@@ -264,6 +264,25 @@ void test_a_deployed_held_body_stays_hidden_until_its_0x0a() {
 	CHECK(f.world.cached.humans == 3);
 }
 
+// A player body a script hid (WacCmd_HideSsn's port sets every view of the
+// Flags bit 0) is unhidden by its slot's next 0x0A, every view, as retail's
+// one dword is: the tick after counts it among the humans again.
+// [orig: NetPacket_WritePlayerState `and [edi+24h], ecx` @0x4FF6D7;
+//  WacCmd_HideSsn @0x4F7750; Server_BuildEntitySlotLists's hidden skip @0x4F9820]
+void test_a_script_hidden_body_unhides_at_its_0x0a() {
+	Fixture f;
+	f.entity(1).flags |= w::kEntityFlagCarried;
+	f.entity(1).engine_flags |= w::kEntityFlagCarried;
+	f.entity(1).hidden = true;
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.world.cached.humans == 2); // counted ahead of the fan
+	CHECK((f.entity(1).flags & w::kEntityFlagCarried) == 0u);
+	CHECK((f.entity(1).engine_flags & w::kEntityFlagCarried) == 0u);
+	CHECK(!f.entity(1).hidden);
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.world.cached.humans == 3);
+}
+
 } // namespace
 
 int main() {
@@ -271,6 +290,7 @@ int main() {
 	test_each_slot_reads_the_slots_before_it_after_their_stores();
 	test_slots_write_in_slot_order_not_join_order();
 	test_a_deployed_held_body_stays_hidden_until_its_0x0a();
+	test_a_script_hidden_body_unhides_at_its_0x0a();
 	if (failures == 0) std::printf("player_state_writer: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
