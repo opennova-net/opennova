@@ -381,8 +381,9 @@ int test_graph() {
 // strip in another case than their files' (trntile10.tga for TRNTILE10.TGA); the sky maps' .pcx (Cloud01.pcx for
 // cloud01.pcx); a mission's tile set named without its extension (trntile10); a particle graphic in another case;
 // and a particle graphic and a HUD image whose files the install lacks (91 shipped references are so, every one of
-// a loader that does not gate). Every reference but those two resolves, each colour map among them, and none
-// refuses a build.
+// a loader that does not gate). A menu's .png and the names the game opens itself (the default loading screen
+// loadscrn.pcx, the MFD's MFD1.PCX) stand there as empty files too, their headers unread. Every reference but those
+// two resolves, each colour map among them, and none refuses a build.
 int test_shipped_references() {
 	test_temp::TempDir dir{"opennova_editor_texture_roles_shipped"};
 	editor_test::NoProcess platform;
@@ -406,7 +407,7 @@ int test_shipped_references() {
 	            test_io::write_text(root + "/terrains/noblend.trn", terrain("polytrn_colormap         Isle_c.tga\r\n")));
 	for (const char *file : {"Isle_c.tga", "Isle_d1.tga", "Isle_m.pcx", "Isle_f.pcx", "Reef_c.tga", "Reef_d1.tga", "Reef_m.pcx",
 	                         "Reef_f.pcx", "cove_c.tga", "cove_m2.tga", "det_d4.tga", "TRNTILE10.TGA", "cloud01.pcx", "cloud01b.pcx",
-	                         "CNFireBA.tga"})
+	                         "CNFireBA.tga", "credits1.png", "loadscrn.pcx", "MFD1.PCX"})
 		TEST_EXPECT(test_io::write_file(root + "/textures/" + file, {}));
 	{
 		std::ostringstream text;

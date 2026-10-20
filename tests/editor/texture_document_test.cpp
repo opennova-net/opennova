@@ -78,6 +78,8 @@ std::vector<uint8_t> pattern(uint32_t w, uint32_t h, uint8_t (*alpha)(size_t)) {
 uint8_t graded(size_t i) { return uint8_t(i * 16); }
 uint8_t cutout(size_t i) { return i % 3 ? 255 : 0; }
 uint8_t opaque(size_t) { return 255; }
+uint8_t half_or_whole(size_t i) { return i % 2 ? 255 : 128; }
+uint8_t half(size_t) { return 128; }
 
 std::vector<uint8_t> tga_of(const std::vector<uint8_t> &rgba, uint32_t w, uint32_t h) {
 	std::vector<uint8_t> out;
@@ -140,6 +142,11 @@ int test_decode() {
 	            fact(*image, "alpha") == "on or off: each texel 0 or 255 (a cut-out)");
 	image = decode_texture("plain.tga", tga_of(pattern(3, 2, opaque), 3, 2));
 	TEST_EXPECT(image->alpha == TextureAlpha::None && fact(*image, "size") == "3 x 2 (a side is no power of two)");
+	// Two alpha values that are not 0 and 255, or one that is neither, grade it: no cut-out.
+	image = decode_texture("veil.tga", tga_of(pattern(4, 2, half_or_whole), 4, 2));
+	TEST_EXPECT(image->alpha == TextureAlpha::Graded && fact(*image, "alpha") == "graded: 2 values from 128 to 255");
+	image = decode_texture("haze.tga", tga_of(pattern(4, 2, half), 4, 2));
+	TEST_EXPECT(image->alpha == TextureAlpha::Graded);
 	// A top-left TGA: the game reads it bottom up all the same, so it shows upside down.
 	std::vector<uint8_t> top = tga_of(rgba, 4, 4);
 	top[17] |= 0x20;

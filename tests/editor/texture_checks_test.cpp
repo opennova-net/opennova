@@ -176,6 +176,9 @@ int test_checks() {
 		TEST_EXPECT(test_io::write_file(t + "dotskin.pcx", pcx(8, 8, 8)) && test_io::write_file(t + "dotdet.tga", tga(8, 8)) &&
 		            test_io::write_file(t + "dotnorm.mdt", rgb));
 	}
+	// An alpha-tested flipbook's frames (rows of flag 1, the model flip-frame role) over 32-bit TGAs holding alpha:
+	// no cut-out finding.
+	TEST_EXPECT(test_io::write_file(t + "flame1.tga", tga(8, 8, 200)) && test_io::write_file(t + "flame2.tga", tga(8, 8, 200)));
 	// A char map holding classes past the twenty the tile set tables name (S25): listed, the build going on.
 	{
 		opennova::IndexedImage8 classes;
@@ -240,8 +243,10 @@ int test_checks() {
 	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
 	                                    "o3d 2\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
 	                                    "texture skin.pcx 1 0\ntexture wall.tga 2 0\nmaterial FF_ST_OP\ntexture big.mdt 3 4\n"
-	                                    "texture bump.tga 3 5\nmaterial VS_DOT3DIFF2\nmatflags 1\nalphatest 64\n"
+	                                    "texture bump.tga 3 5\ntexture wall.tga 2 0\nmaterial VS_DOT3DIFF2\nmatflags 1\nalphatest 64\n"
 	                                    "texture dotskin.pcx 1 0\ntexture dotdet.tga 2 0\ntexture dotnorm.mdt 3 4\n"
+	                                    "material VS_SKBASIC\nmatflags 1\nalphatest 128\ntexanim 2 0 10\n"
+	                                    "texture flame1.tga 1 0 1 0\ntexture flame2.tga 1 0 1 1\n"
 	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	ImportChoice model;
@@ -376,7 +381,9 @@ int test_checks() {
 			TEST_EXPECT(f.message.find("fits.tga") == std::string::npos);
 		}
 	TEST_EXPECT(too_big == 2);
-	TEST_EXPECT(has("texture.not_read", "textures/wall.tga", S::Warning, false));
+	// wall.tga, which two rows name, is passed over for wall.dds once: said once.
+	TEST_EXPECT(has("texture.not_read", "textures/wall.tga", S::Warning, false) &&
+	            std::count_if(found.begin(), found.end(), [](const Found &f) { return f.code == "texture.not_read"; }) == 1);
 	for (const Found &f : found) TEST_EXPECT(f.asset != "textures/det.tga");
 	TEST_EXPECT(has("texture.wrong_reader", "terrains/h.trn", S::Warning, false));
 	for (const Found &f : found)
@@ -400,10 +407,18 @@ int test_checks() {
 	for (const Found &f : found)
 		if (f.code == "texture.alpha_not_loaded") {
 			++cut_outs;
-			TEST_EXPECT(f.message.find("dotskin.pcx") == std::string::npos);
+			TEST_EXPECT(f.message.find("dotskin.pcx") == std::string::npos && f.message.find("flame") == std::string::npos);
 			TEST_EXPECT(f.message.find("every texel is kept, and nothing is cut out") != std::string::npos);
 		}
 	TEST_EXPECT(cut_outs == 2);
+	{
+		opennova::io::JsonValue args;
+		std::string error;
+		TEST_EXPECT(opennova::io::json_parse("{\"path\":\"flame2.tga\"}", args, error));
+		const opennova::io::JsonValue answer = session.query("texture_uses", args, error);
+		const opennova::io::JsonValue *uses = answer.get("uses");
+		TEST_EXPECT(error.empty() && uses && uses->array.size() == 1 && uses->array[0].get_string("role", "") == "model_flip_frame");
+	}
 	bool normal_cut = false;
 	for (const Found &f : found) normal_cut = normal_cut || (f.code == "texture.alpha_not_loaded" && f.message.find("dotnorm.mdt") != std::string::npos);
 	TEST_EXPECT(normal_cut);
