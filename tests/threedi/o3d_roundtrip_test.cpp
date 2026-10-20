@@ -1,19 +1,15 @@
-// Retail models through opennova-3di and back: `scene` writes each one as .o3d,
+// Models through opennova-3di and back: `scene` writes each one as .o3d,
 // `build` mints it again, and `compare` must call the two the same model
-// (strip layout and float noise aside). The models cover what the scene text
-// carries: Armry01 (bldg LODs, detail textures, lights, occlusion, blink
-// boxes, a register-driven rgbgen, strips sharing a vertex window), Dblkhwk1
-// (register-driven rotors in MTRX frames, an empty LOD, tangents, rotor strips
-// of two parts sharing one window), US01 (the skinned person layout), ArmsG
-// and Mp5b_1st (the first-person rig; collision faces the 8.8 grid collapses)
-// and FSldr03 (a skinned person with tangents whose vertices weight bone slots
-// past their strip's table, which the scene cannot name).
-// The CXLT table the scene carries must also come back row for row (US01,
-// ArmsG and Mp5b_1st ship rows that are not their sections' offsets).
+// (strip layout and float noise aside). The models are every committed .3di
+// under fixtures/threedi (tests/fixtures/minimal_3di_gen.cpp), standing for the
+// shipped models this row read until 2026-10-19 (Armry01, Dblkhwk1, US01,
+// ArmsG, Mp5b_1st, FSldr03, SASBODY1, sasmg): the armory's bldg LOD, detail
+// textures, lights, occlusion, blink boxes and register-driven rgbgen, the
+// skinned person and the first-person viewmodel, the vehicles' register-driven
+// parts, and the variants beside them.
+// The CXLT table the scene carries must also come back row for row.
 // The rebuild is a fixed point: build(scene(x)) byte for byte
-// build(scene(build(scene(x)))), over the six and SASBODY1 and sasmg (skinned
-// vertices whose fourth slot's rest a scene once printed into the first
-// pair's weight, so the second rebuild stored other floats).
+// build(scene(build(scene(x)))).
 //
 // Nothing is excused. Any line `compare` calls a difference fails the model,
 // and so does DRIFT (a value within its tolerance) outside the categories
@@ -23,26 +19,28 @@
 // exactly, the tangent frames included (`vt`), so drift there (a part pivot,
 // a render corner, a tangent, a skin weight, a part sphere) is a regression,
 // not noise.
-// Gated on OPENNOVA_JO_ASSETS (docs/asset-gated-tests.md).
 //
-//   o3d_retail_roundtrip_test <opennova-3di> <scratch dir>
+//   o3d_roundtrip_test <opennova-3di> <scratch dir>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include <formats/threedi/threedi_3di3.h>
 
-#include "common/retail_paths.h"
 #include "common/run_command.h"
+#include "common/test_paths.h"
 
 namespace {
 
 using test_cmd::quoted;
 using test_cmd::run;
 
-// The DRIFT categories a retail round trip may show (compare.cpp's names).
+// The DRIFT categories a round trip may show (compare.cpp's names).
 const char *const kDerivedDrift[] = {
 		"bullet-face corners (m, 8.8)",
 		"bullet-face normals (degrees)",
@@ -110,18 +108,32 @@ std::string bytes_of(const std::string &path) {
 
 int main(int argc, char **argv) {
 	if (argc != 3) {
-		std::fprintf(stderr, "usage: o3d_retail_roundtrip_test <opennova-3di> <scratch dir>\n");
+		std::fprintf(stderr, "usage: o3d_roundtrip_test <opennova-3di> <scratch dir>\n");
 		return 2;
 	}
 	const std::string cli = quoted(argv[1]);
 	const std::string dir = argv[2];
 	int failures = 0, ran = 0;
-	for (const char *name : {"Armry01", "Dblkhwk1", "US01", "ArmsG", "Mp5b_1st", "FSldr03", "SASBODY1", "sasmg"}) {
-		const std::string model = retail::asset_file((std::string(name) + ".3di").c_str());
-		if (model.empty()) {
-			std::printf("SKIP-LEG: needs %s.3di in OPENNOVA_JO_ASSETS\n", name);
-			continue;
-		}
+	const std::filesystem::path root = test_paths_fixture("threedi");
+	std::vector<std::filesystem::path> models;
+	std::error_code ec;
+	// The GUT suite's runtime witnesses written past what an author can state: a
+	// PANM row out of part order or a light on a part LOD 0 lacks, which `build`
+	// refuses by name (threedi_o3d_build pins the refusals).
+	const char *const kUnauthorable[] = {"armory_special1_slide_part1", "armory_special2_slide_part1",
+		"house_lod0_sine_rotx", "house_lod0_sine_rotx_uv1", "mount_heat_glow_slide_part1",
+		"shed_lght0_sub2_origin_atten100", "tank_special1_slide_ewep01"};
+	for (const auto &entry : std::filesystem::recursive_directory_iterator(root, ec)) {
+		if (!entry.is_regular_file(ec) || entry.path().extension() != ".3di") continue;
+		const std::string stem = entry.path().stem().string();
+		if (std::find(std::begin(kUnauthorable), std::end(kUnauthorable), stem) != std::end(kUnauthorable)) continue;
+		models.push_back(entry.path());
+	}
+	std::sort(models.begin(), models.end());
+	for (const std::filesystem::path &path : models) {
+		const std::string model = path.string();
+		const std::string stem = path.stem().string();
+		const char *name = stem.c_str();
 		++ran;
 		const std::string o3d = dir + "/" + name + ".rt.o3d";
 		const std::string rebuilt = dir + "/" + name + ".rt.3di";
@@ -141,20 +153,17 @@ int main(int argc, char **argv) {
 			++failures;
 			continue;
 		}
-		if (std::string(name) == "SASBODY1" || std::string(name) == "sasmg") continue; // the fixed point alone
 		const int compared = run(cli + " compare " + quoted(model) + " " + quoted(rebuilt) + " > " + quoted(report));
 		const bool derived = only_derived_drift(name, report);
 		if (compared != 0 || !derived) {
 			std::fprintf(stderr, "%s: the scene round trip is not the same model\n", name);
 			++failures;
 		} else if (!same_cxlt(model, rebuilt)) {
-			std::fprintf(stderr, "%s: the rebuilt CXLT table is not the shipped one\n", name);
+			std::fprintf(stderr, "%s: the rebuilt CXLT table is not the model's\n", name);
 			++failures;
 		}
 	}
-	if (ran == 0)
-		return retail::skip("OPENNOVA_JO_ASSETS with Armry01.3di, Dblkhwk1.3di, US01.3di, ArmsG.3di, Mp5b_1st.3di, FSldr03.3di, "
-		                    "SASBODY1.3di, sasmg.3di");
-	if (failures == 0) std::printf("o3d_retail_roundtrip_test: ok (%d models)\n", ran);
+	if (ran == 0) failures = 1;
+	if (failures == 0) std::printf("o3d_roundtrip_test: ok (%d models)\n", ran);
 	return failures == 0 ? 0 : 1;
 }
