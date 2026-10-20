@@ -88,6 +88,20 @@ public:
         entries.clear();
         current = -1;
         show = true;
+        route_markers_.clear();
+        holds_poi_list_ = false;
+    }
+
+    // The route's markers with their fields as the pool-3 entities hold them.
+    // Retail's list is pointers to entities, so when the point-of-interest list
+    // takes its place the route markers keep their name ids and done bytes, and
+    // the S2C 0x0F writer, which walks the mission's route table itself, reads
+    // them there in any game type (D-NET-NEW-LP-3).
+    // [orig: NetPacket_WriteWorldStateLoad0x0F - Pool_GetEntryUnchecked(3, ..)
+    //  @0x502F2D, entity+0x2A0 @0x502F48, entity+0x218 @0x502F5F;
+    //  Entity_BuildMapPoiLists @0x42de40 refills g_WaypointList only]
+    const std::vector<WaypointEntry> &route_markers() const {
+        return holds_poi_list_ ? route_markers_ : entries;
     }
 
     bool empty() const { return entries.empty(); }
@@ -160,6 +174,9 @@ private:
     // The KOTH re-step's guard: the entry the last cycle landed on
     // [orig: dword_B79434 @0x4dc31e / @0x4dc333].
     EntityHandle cycle_guard_;
+    // The route the point-of-interest list displaced, and whether it did.
+    std::vector<WaypointEntry> route_markers_;
+    bool holds_poi_list_ = false;
 };
 
 

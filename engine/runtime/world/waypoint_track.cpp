@@ -188,6 +188,9 @@ void WaypointTrack::build_map_poi_list(const EntityRegistry &registry) {
     // The count store; g_CurrentWaypoint is left as it was [orig: @0x42e0d4].
     const WaypointEntry *was = current_entry();
     const EntityHandle selected = was != nullptr ? was->handle() : EntityHandle{};
+    // The route's markers keep their fields (route_markers).
+    if (!holds_poi_list_) route_markers_ = std::move(entries);
+    holds_poi_list_ = true;
     entries = std::move(list);
     current = -1;
     if (selected.valid()) {

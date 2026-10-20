@@ -1039,7 +1039,7 @@ void print_tag_0f(const std::vector<uint8_t> &body) {
 	            ws.session_tick, fp16(ws.pos_x), fp16(ws.pos_y), fp16(ws.pos_z),
 	            int(ws.yaw), int(ws.pitch), int(ws.roll), unsigned(ws.game_flags),
 	            nonzero, unsigned(ws.waypoint_count), unsigned(ws.team_name_count),
-	            clean ? "" : " (DECODE INCOMPLETE)");
+	            !clean ? " (DECODE INCOMPLETE)" : ws.unread_bytes != 0 ? " (bytes unread)" : "");
 	for (std::size_t i = 0; i < ws.ammo_pools.size(); ++i) {
 		if (ws.ammo_pools[i] != 0)
 			std::printf("            score[%zu]=%d\n", i, ws.ammo_pools[i]);

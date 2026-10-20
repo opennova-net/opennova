@@ -67,6 +67,13 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		uint32_t now_tick, const std::array<uint32_t, 2> &client_checksums);
 
+// The S2C 0x0F body for `conn`: its body's pose and the game flags, its
+// ammo-pool image, the waypoint records (a team-1 body: the mission's player
+// route, any game type, D-NET-NEW-LP-3) and the host's location names.
+// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10]
+std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const NapiNPConnection &conn,
+		uint32_t now_tick);
+
 // The deploy-map LOCATION labels for every type-2044 marker the promoted
 // `world` holds (the spawn's admitted records), in spawn order: the mission
 // text's [Locations] string keyed by the record's own name_index, else that

@@ -1233,8 +1233,13 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 		out.ammo_pools[i] = int32_t(c.u32());
 	out.waypoint_count = c.u16();
 	if (!c.ok) return false;
-	// Waypoint records ride the wire ONLY for a waypoint gametype — an off-wire
-	// host gate, so the caller supplies the hint (default false).
+	// The reader takes the records only in a waypoint game type, its own (the
+	// caller's hint); the host writes them for a team-1 recipient in any, so
+	// elsewhere the cursor stays on them and the next word, the first record's
+	// pool-3 index, is read as the location-name count (D-NET-NEW-LP-3).
+	// [orig: NapiNPClientMsg_0x00F - the count @0x42E359, the gate
+	//  `(g_GameType & 0xFFFDFFFF) == 0x10020` @0x42E459, else
+	//  Entity_BuildMapPoiLists @0x42E4FD]
 	if (is_waypoint_gametype) {
 		out.waypoints.reserve(out.waypoint_count);
 		for (unsigned i = 0; i < out.waypoint_count; ++i) {
@@ -1248,12 +1253,23 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 	}
 	out.team_name_count = c.u16();
 	if (!c.ok) return false;
+	// Each name is read as retail's reader reads it: its bytes up to the NUL
+	// or the body's end, then the cursor steps past the NUL and is held at the
+	// end, so a count past the body's names reads empty names; whatever
+	// follows the last name stays unread.
+	// [orig: NapiNPClientMsg_0x00F - the count @0x42E50B..0x42E51B, the copy's
+	//  NUL / end tests @0x42E548 / @0x42E557 / @0x42E567, the step
+	//  `strlen + 1` @0x42E59B, the hold at the end @0x42E5A1..0x42E5A3]
 	out.team_names.reserve(out.team_name_count);
 	for (unsigned i = 0; i < out.team_name_count; ++i) {
-		out.team_names.push_back(c.cstr());
-		if (!c.ok) return false;
+		const uint8_t *name_end = c.p;
+		while (name_end < c.end && *name_end != 0) ++name_end;
+		out.team_names.emplace_back(reinterpret_cast<const char *>(c.p),
+				static_cast<size_t>(name_end - c.p));
+		c.p = name_end < c.end ? name_end + 1 : c.end;
 	}
-	return (c.p == c.end);
+	out.unread_bytes = static_cast<size_t>(c.end - c.p);
+	return true;
 }
 
 // S2C 0x3A medic-reviving. The handler takes no arguments and reads no

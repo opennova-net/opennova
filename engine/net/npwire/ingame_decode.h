@@ -1500,13 +1500,18 @@ bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &ou
 //       [orig: loop @0x42e324..0x42e34a -> WeaponSlots_RecalculateAmmoFromCapacity
 //        @0x42e424]; NOT a score table — the pre-2026-09-10 label was wrong)
 //   [u16 waypointCount]
-//     { u16 slotId, u16 nameId, u8 done } × waypointCount  // host-gametype-gated
+//     { u16 slotId, u16 nameId, u8 done } × waypointCount
 //   [u16 teamNameCount]
 //     cstring × teamNameCount
-// The waypoint records are gated on the HOST by (g_GameType & 0xFFFDFFFF) ==
-// 0x10020 (a waypoint gametype). That gate is NOT on the wire, so an off-wire
-// decoder takes the is_waypoint_gametype hint (default false; TDM/DM send
-// waypointCount 0 / no records). [orig: NapiNPClientMsg_0x00F @ 0x42E200]
+// The host writes the waypoint records for a team-1 recipient whatever the
+// game type; the READER takes them only when its game type is a waypoint one,
+// (g_GameType & 0xFFFDFFFF) == 0x10020, which the wire does not carry, so the
+// decoder takes the is_waypoint_gametype hint (default false). Outside it the
+// records stay unread and the first one's index word is read as the name
+// count (D-NET-NEW-LP-3). The names are read as the reader reads them: a name
+// ends at its NUL or the body's end, a count past the body's names reads empty
+// ones, and bytes after the last name stay unread (unread_bytes).
+// [orig: NapiNPClientMsg_0x00F @ 0x42E200; NetPacket_WriteWorldStateLoad0x0F @0x502D10]
 inline constexpr int kWorldStateAmmoPoolCount = 128; // (data - g_LocalAmmoPools)/4 @ 0x42e324
 struct WorldStateWaypoint {
 	uint16_t slot_id = 0;
@@ -1528,6 +1533,9 @@ struct WorldStateLoad {
 	std::vector<WorldStateWaypoint> waypoints;  // populated only when the hint is set
 	uint16_t team_name_count = 0;
 	std::vector<std::string> team_names;
+	// The bytes after the last name the reader reads (a non-waypoint game
+	// type's records shift the names; retail's reader ignores the rest).
+	size_t unread_bytes = 0;
 };
 bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &out,
                              bool is_waypoint_gametype = false);

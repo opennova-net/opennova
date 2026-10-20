@@ -23,7 +23,6 @@
 #include <runtime/mission/mission_text.h>         // MissionText::location_name (the 0x0F location names)
 #include <runtime/replication/client_state.h>     // kLocationNameSlotBytes (g_LocationNames' stride)
 #include <runtime/replication/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
-#include <base/gameprofile/game_type.h>          // is_waypoint_family (the §5.32 selector)
 #include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/visible_players.h>   // encode_spawn_slot_notice (0x4D)
@@ -175,14 +174,15 @@ std::vector<uint8_t> serialize_briefing_text(const NapiNPServerCtx &ctx) {
 	return b;
 }
 
+} // namespace
+
 // [orig: Server_SendEntityStateToPlayer @0x517ba0 / NapiNPClientMsg_0x00F @0x42E200; §5.29] S2C 0x0F
 // world-state-load — the game-start deploy unsticker. Carries the joiner's spawn pose, game flags, and
 // the fixed 128-entry ammo-pool block; the client handler clears its g_ClientDeployHold load-gate and queues
 // the post-load C2S burst (0x22/0x23/0x28/0x29/0x2D/0x32) that lets it deploy. Without it a retail
-// joiner world-loads but stays undeployed (floods C2S 0x0f) — the observed live "stuck at 7%". Minimal
-// faithful body: the TDM/DM path has waypointCount 0; waypoint Co-op serializes the recipient's
-// blue route plus MissionText-resolved location labels. Layout is the §5.29 field map consumed by
-// decode_world_state_load.
+// joiner world-loads but stays undeployed (floods C2S 0x0f) — the observed live "stuck at 7%". The
+// waypoint records follow the recipient's team byte and the mission's player route, in any game type,
+// then the location labels. Layout is the §5.29 field map consumed by decode_world_state_load.
 std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const NapiNPConnection &conn,
                                                 uint32_t now_tick) {
 	int32_t px = static_cast<int32_t>(ctx.config.spawn_x);
@@ -248,24 +248,35 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	// when this connection's C2S 0x2F loadout is accepted.
 	for (int32_t value : conn.reply.ammo_pools)
 		io::append_u32_le(b, static_cast<uint32_t>(value));
-	// The waypoint body is present only for the witnessed waypoint gametype and
-	// a blue/team-1 recipient. Promotion retains the first PlayerRoute route in
-	// World::waypoints; each entry's node is the corresponding pool-3 marker
-	// index, and the wire word IS that raw pool-3 index — NOT a 0x3000|node
+	// The waypoint records go to a team-1 recipient in any game type: the writer
+	// has no game-type gate, only the body's team byte and the first route row
+	// with flag bit 1 (2), whose count, capped at 128, it walks
+	// (D-NET-NEW-LP-3). Only the client's reader is gated on the waypoint
+	// game type, so outside it a stock joiner leaves the records unread and
+	// takes their first word as the location-name count; a listen host's own
+	// client does the same into the one g_LocationNames this writer reads
+	// (HostRole's own-0x0F copy), so a later joiner's 0x0F carries that list
+	// (retail's 03TR Deathmatch 0x0F: 4 records, then 26 names).
+	// Promotion retains that route in World::waypoints, whose route markers
+	// keep their fields when the host's own 0x0F puts the point-of-interest
+	// list in the route's place outside the waypoint game types
+	// (route_markers). Each entry's node is the corresponding pool-3 marker
+	// index, and the wire word IS that raw pool-3 index, NOT a 0x3000|node
 	// handle: the writer stores the same dword it passed to
-	// Pool_GetEntryUnchecked(3, index) (`movzx ecx, word ptr [ebx]` @0x502f35 ->
-	// `mov [edi], cx` @0x502f45), and the stock client indexes
+	// Pool_GetEntryUnchecked(3, index) (`movzx ecx, word ptr [ebx]` @0x502f35
+	// -> `mov [edi], cx` @0x502f45), and the stock client indexes
 	// `pool3.base + word * stride` with it unmasked (@0x42e4a3 ->
-	// Pool_GetEntryUnchecked @0x441fc0, then strncpy into that record). A
-	// 0x3000|node word sent a retail joiner 12288 records past the pool
-	// (corrected 2026-09-10, jo-c cross-check). [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e41..0x502edb]
-	const bool waypoint_gametype =
-			game_type::is_waypoint_family(ctx.config.game_type);
+	// Pool_GetEntryUnchecked @0x441fc0, then strncpy into that record).
+	// [orig: NetPacket_WriteWorldStateLoad0x0F - the team byte +0x162
+	//  @0x502E3A..0x502E41, the route scan @0x502E45..0x502E66, the count cap
+	//  @0x502EF6..0x502F03, the records @0x502F28..0x502F7A;
+	//  NapiNPClientMsg_0x00F's game-type gate @0x42E459]
 	std::vector<const world::WaypointEntry *> waypoints;
-	if (waypoint_gametype && recipient_team == 1 && ctx.world != nullptr) {
-		waypoints.reserve(std::min<std::size_t>(
-				ctx.world->script.waypoints.entries.size(), 128));
-		for (const world::WaypointEntry &entry : ctx.world->script.waypoints.entries) {
+	if (recipient_team == 1 && ctx.world != nullptr) {
+		const std::vector<world::WaypointEntry> &route =
+				ctx.world->script.waypoints.route_markers();
+		waypoints.reserve(std::min<std::size_t>(route.size(), 128));
+		for (const world::WaypointEntry &entry : route) {
 			if (waypoints.size() >= 128) break;
 			if (entry.node < 0 || entry.node > 0x0FFF) continue;
 			waypoints.push_back(&entry);
@@ -303,6 +314,8 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	}
 	return b; // 539 B + the location-name block (golden 624 B with the 6 ASH names)
 }
+
+namespace {
 
 // [orig: NetPacket_CopyTenBytes @0x503900 over the table @0x82F1D8] S2C 0x2A: one 10-byte record.
 // The table's six 16-byte rows (subphases 10..15) each carry threshold 0 and this same record
