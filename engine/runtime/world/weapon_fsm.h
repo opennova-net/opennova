@@ -380,9 +380,12 @@ struct WeaponFsmInputs {
     // runs, which only the local player and an entity with a non-person def take: a
     // person row's reload (a remote player's own slot, a borrower addressed as
     // itself) is refilled only by its own client's C2S 0x25 at the host
-    // (D-NET-336). [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 (the local
-    // test @0x42C0F8, the def test @0x42C103, the person arm @0x42C109..0x42C113);
-    // NapiNPServerMsg_HandleReloadRequest @0x514DF0 (the sender gate @0x514EFA)]
+    // (D-NET-336), and a dedicated host, which has no client of its own to carry
+    // the request, refills nothing. [orig: NapiNPClientMsg_WeaponReload_0x049
+    // @0x42C0A0 (the local test @0x42C0F8, the def test @0x42C103, the person arm
+    // @0x42C109..0x42C113); NapiNPServerMsg_HandleReloadRequest @0x514DF0 (the
+    // sender gate @0x514EFA); CNapiNetwork_QueueReliableMessage @0x4C4FA0
+    // (@0x4C4FA6..0x4C4FA8)]
     bool reload_refills = true;
     bool auto_reload = true;     // [orig: g_AutoReloadEnabled @ 0x24D2118]
     bool scope_active = false;   // g_WeaponScopeActive, the promoted byte, at the pump

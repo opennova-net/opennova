@@ -1698,8 +1698,10 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	//  single-slot FSM state and the inventory]
 	// Whichever switch action completes on the EquippedSlot commits the one
 	// g_PendingWeaponSlot word the UseGun mount stored, a personal SWITCHFROM the
-	// mount found running included (its queue wrote no SWITCHRANK over it); the
-	// completing action decides the SWITCHTO. [orig: WeaponAction_SwitchFrom @0x5433B0
+	// mount found running included: its SWITCHRANK queue writes none over a
+	// SWITCHFROM in its active phase, and over one in its done phase it does, and
+	// that SWITCHRANK commits instead (@0x5433CE..0x5433F4); the completing action
+	// decides the SWITCHTO. [orig: WeaponAction_SwitchFrom @0x5433B0
 	//  (the store @0x543475, WeaponSlot_TryQueueSwitchTo @0x5434A3);
 	//  WeaponAction_SwitchRank @0x543500 (the store @0x543539, no SWITCHTO);
 	//  WeaponSlot_TryQueueSwitchRank @0x53F1C0]

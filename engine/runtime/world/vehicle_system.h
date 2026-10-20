@@ -71,8 +71,8 @@ public:
 	//      same-team; same-team occupants never block multi-seat co-boarding];
 	//      after the authority's weapon-busy gate: the requester's EquippedSlot action
 	//      past EmptyIdle and not Overheated refuses [orig: @0x435B18..0x435B38]
-	//      (equipped_slot_busy; a remote player's own slots carry no action yet,
-	//      D-NET-336)
+	//      (equipped_slot_busy; a remote player's own row is read as the walk runs
+	//      it, D-NET-336)
 	//   4. seat occupancy: an occupied matching seat / an already-taken wire bone rejects
 	//      [orig: @0x435ba9 mountHandles[idx] != 0xFFFF];
 	//   5. an already-mounted requester detaches first [orig: @0x435bce];

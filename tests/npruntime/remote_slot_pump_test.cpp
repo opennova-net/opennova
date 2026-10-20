@@ -113,7 +113,7 @@ struct Rig {
 		acts[w::weapon_action::kReload].delay_start = 4;
 		acts[w::weapon_action::kReload].delay_end = 4;
 		// The player's def row: the walk visits only rows whose ItemTypeIndex is set
-		// [orig: WeaponAction_ProcessAllEntities @0x5426B9].
+		// [orig: WeaponAction_ProcessAllEntities @0x542690 (@0x5426B9)].
 		world.tables.player.item_type_index = 1;
 		w::PlayerSpawn spawn;
 		spawn.net_id = 0xFFF1;
@@ -163,7 +163,17 @@ void test_the_walk_cycles_a_remote_players_reload_until_its_own_request() {
 		}
 		r.world.out.weapon_reloads.clear();
 	}
-	CHECK(request_ticks.size() >= 2);
+	// One request per RELOAD entry: the RELOAD runs its counter through delay_start,
+	// then delay_end, past its entry tick; the tick it is spent hands over to IDLE,
+	// whose turn finds the clip empty with rounds left and queues RELOAD, which enters
+	// on the next tick [orig: WeaponAction_Reload @0x5430B0 (the finish @0x54316E);
+	// WeaponAction_Idle @0x542920 (the auto reload @0x5429A6..0x5429AF)].
+	const w::WeaponFsmAction &reload =
+			r.world.tables.weapons.entries[kRifleAdm].action_fsm.actions[w::weapon_action::kReload];
+	const uint32_t period = uint32_t(reload.delay_start + reload.delay_end + 2);
+	CHECK(request_ticks.size() >= 3);
+	for (size_t i = 1; i < request_ticks.size(); ++i)
+		CHECK(request_ticks[i] - request_ticks[i - 1] == period);
 	CHECK(r.row().clip == 0);
 	CHECK(r.conn().reply.ammo_pools[0] == 2);
 
@@ -184,8 +194,10 @@ void test_the_walk_cycles_a_remote_players_reload_until_its_own_request() {
 	CHECK(r.row().clip == 1);
 }
 
-// With no rounds left in the pool the recoil chains to EMPTYIDLE: nothing is requested.
-// [orig: WeaponAction_Recoil @0x542DD0 (the arbiter)]
+// With no rounds left in the pool the row reaches EMPTYIDLE: nothing is requested. A
+// remote row skips the recoil's arbiter (its owner is not the local player) and gets
+// there from IDLE's turn [orig: WeaponAction_Recoil @0x542DD0 (the local test
+// @0x542FE3..0x542FE9); WeaponAction_Idle @0x542920 (@0x5429CF)].
 void test_an_empty_pool_requests_nothing() {
 	Rig r;
 	r.conn().reply.ammo_pools[0] = 0;
@@ -202,11 +214,92 @@ void test_an_empty_pool_requests_nothing() {
 	CHECK(r.row().current == w::weapon_action::kEmptyIdle);
 }
 
+// The authority's attach process refuses while the requester's EquippedSlot is busy,
+// reading the action whatever slot it is: a remote player's is the row its accepted
+// 0x06 armed, so its 0x26 is refused while the row fires, recoils or reloads, and
+// accepted once the walk brings it back to IDLE, EMPTYIDLE or OVERHEATED [orig:
+// Entity_ProcessVehicleAttach @0x435AA0 (the EquippedSlot @0x435B18, the action
+// @0x435B29, the refusal @0x435B2C..0x435B38); NapiNPServerMsg_HandleVehicleAttach
+// @0x502390].
+std::vector<uint8_t> attach_body(uint16_t requester, uint16_t vehicle, uint8_t bone) {
+	std::vector<uint8_t> b;
+	put_u16(b, requester);
+	put_u16(b, vehicle);
+	b.push_back(bone);
+	b.push_back(0);
+	return b;
+}
+
+w::EntityHandle spawn_jeep(w::World &world) {
+	w::Entity jeep;
+	jeep.kind = w::EntityKind::Item;
+	jeep.has_item_def = true;
+	jeep.has_graphic_model = true;
+	jeep.health = jeep.health_max = 500;
+	jeep.alive = true;
+	w::Seat sit;
+	sit.type = w::SeatType::Passenger;
+	sit.bone_index = 1;
+	sit.source_name = "sitex00";
+	jeep.seats.push_back(sit);
+	return world.registry.spawn(1, jeep);
+}
+
+void test_a_busy_row_refuses_the_attach() {
+	for (const uint32_t pool : {0u, 2u}) {
+		Rig r;
+		r.world.registry.configure_pool(1, 2);
+		r.conn().reply.ammo_pools[0] = pool;
+		r.entity().health = 100;
+		r.entity().alive = true;
+		const w::EntityHandle jeep = spawn_jeep(r.world);
+		r.dispatch(c2s::FIRED_ROUND, fire_body(r.shooter.packed));
+		CHECK(r.row().current == w::weapon_action::kFire);
+		const std::vector<uint8_t> ask = attach_body(r.shooter.packed, jeep.packed, 1);
+		r.dispatch(c2s::VEHICLE_ATTACH_REQUEST, ask);
+		CHECK(!r.entity().mounted);
+		// The walk runs the row (FIRE, RECOIL, then IDLE's turn: EMPTYIDLE with the
+		// pool empty, else the cycling RELOAD until the player's own C2S 0x25 lands);
+		// each tick the request is refused while the action is past EMPTYIDLE and not
+		// OVERHEATED, and an accepted one is left again.
+		int refused_in_reload = 0, accepted = 0;
+		bool refilled = false;
+		for (int i = 0; i < 64; ++i) {
+			r.walk();
+			r.world.out.weapon_reloads.clear();
+			const int32_t action = r.row().current;
+			const bool busy = action >= w::weapon_action::kFire &&
+					action != w::weapon_action::kOverheated;
+			r.dispatch(c2s::VEHICLE_ATTACH_REQUEST, ask);
+			CHECK(r.entity().mounted == !busy);
+			if (r.entity().mounted) {
+				++accepted;
+				CHECK(r.world.vehicles.detach(r.shooter));
+			} else if (action == w::weapon_action::kReload) {
+				++refused_in_reload;
+			}
+			if (pool != 0 && !refilled && refused_in_reload >= 12) {
+				opennova::WeaponReload own;
+				own.entity_handle = r.shooter.packed;
+				own.reload_param = kCombo;
+				r.dispatch(c2s::WEAPON_RELOAD_REQUEST, opennova::encode_weapon_reload(own));
+				refilled = true;
+			}
+		}
+		CHECK(accepted > 0);
+		CHECK(pool == 0 ? refused_in_reload == 0 : refused_in_reload > 12);
+		CHECK(r.row().current ==
+				(pool == 0 ? w::weapon_action::kEmptyIdle : w::weapon_action::kIdle));
+		CHECK(r.row().clip == (pool == 0 ? 0 : 1));
+	}
+}
+
 } // namespace
 
 int main() {
 	test_the_walk_cycles_a_remote_players_reload_until_its_own_request();
 	test_an_empty_pool_requests_nothing();
+	test_a_busy_row_refuses_the_attach();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

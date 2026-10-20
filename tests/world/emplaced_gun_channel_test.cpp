@@ -49,7 +49,7 @@ struct Rig {
         Entity gun_seed;
         gun_seed.kind = EntityKind::Item;
         gun_seed.has_item_def = true; // seats need the def (D-NET-422)
-        gun_seed.item_type_index = 2; // a resolved def row: the walk skips row 0 (@0x5426F2)
+        gun_seed.item_type_index = 2; // a resolved def row: the walk skips row 0 (WeaponAction_ProcessAllEntities @0x542690, @0x5426F2)
         gun_seed.health = 100;
         gun_seed.alive = true;
         gun_seed.heading = placed_heading_bam(0);
@@ -66,7 +66,7 @@ struct Rig {
 
         Entity gunner;
         gunner.kind = EntityKind::Organic;
-        gunner.item_type_index = 3; // a resolved def row: the walk skips row 0 (@0x5426B9)
+        gunner.item_type_index = 3; // a resolved def row: the walk skips row 0 (WeaponAction_ProcessAllEntities @0x542690, @0x5426B9)
         gunner.player_class = 8;
         gunner.health = 100;
         gunner.alive = true;

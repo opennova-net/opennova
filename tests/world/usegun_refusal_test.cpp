@@ -409,6 +409,39 @@ void test_the_walk_relays_an_authority_reload() {
 	}
 }
 
+// D-NET-NEW-L7-4: the walk's request reaches the host's dispatcher only through the
+// authority's own client connection, which a dedicated host never creates; there the
+// queue sends nothing, no S2C 0x49 echo comes and an NPC gunner's gun is never
+// refilled: its RELOAD cycles, a request each cycle, and the clip stays empty. A
+// playing authority (single player, a listen host) refills the gun as its echo does.
+// [orig: CNapiGameSession_CreateSession @0x4C97C0 (is_authority and is_mp_session_peer
+// @0x4C9B6A..0x4C9B76, the store @0x4C9BA6); CNapiNetwork_QueueReliableMessage
+// @0x4C4FA0 (@0x4C4FA6..0x4C4FA8); NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0
+// (the def test @0x42C103, the refill @0x42C116)]
+void test_a_dedicated_host_refills_no_gun() {
+	for (const bool peer : {true, false}) {
+		Rig r(false);
+		r.world.rules.mp_session_peer = peer;
+		r.world.tables.weapons.entries[kGunAdm].action_fsm.clip_capacity = 100;
+		CHECK(r.attach(r.claimant_h, 0)); // the NPC gunner on the lone gun
+		w::WeaponSlotState &slot = r.gun().primary_weapon_slot;
+		slot.clip = 0;
+		slot.reserve = 100;
+		CHECK(pump_until_reload(r.world));
+		if (peer) {
+			CHECK(slot.clip == 100);
+			CHECK(slot.reserve == 0);
+			continue;
+		}
+		CHECK(slot.clip == 0);
+		CHECK(slot.reserve == 100);
+		r.world.out.weapon_reloads.clear();
+		CHECK(pump_until_reload(r.world));
+		CHECK(slot.clip == 0);
+		CHECK(slot.reserve == 100);
+	}
+}
+
 // A joiner whose personal SWITCHFROM is running when the host's forced UseGun attach lands
 // with a gun of the outgoing weapon's category: the mount stores the gun's slot as
 // g_PendingWeaponSlot and its SWITCHRANK queue writes nothing over the running SWITCHFROM,
@@ -549,6 +582,7 @@ int main() {
 	test_the_local_player_holds_a_refused_gun_on_foot();
 	test_a_weapon_key_ends_a_slot_held_on_foot();
 	test_the_walk_relays_an_authority_reload();
+	test_a_dedicated_host_refills_no_gun();
 	test_the_walk_queues_reloads_in_slot_order();
 	test_a_running_switchfrom_commits_the_forced_gun();
 	if (failures != 0) {

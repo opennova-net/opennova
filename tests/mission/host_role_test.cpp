@@ -430,6 +430,42 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 	}
 }
 
+// The gun's clip spent with rounds left: the walk's RELOAD queues the request
+// addressing the gun (an EWeap: 0xFFFF). A playing authority (single player) sends it
+// through its own client, the C2S 0x25 bytes [gun handle][FF FF] on the loopback, and
+// refills the gun as its S2C 0x49 echo does; a dedicated host has no client
+// connection: nothing is sent and the gun is never refilled (D-NET-NEW-L7-4). The
+// bare local role refills as the echo would. (A function of its own: main's frame is
+// near the 1 MB stack.)
+// [orig: WeaponAction_Reload @0x5430B0 (@0x5430FF); NetPacket_SendReloadRequest
+//  @0x432930 (0xFFFF @0x432972..0x432974); CNapiNetwork_QueueReliableMessage
+//  @0x4C4FA0 (@0x4C4FA6..0x4C4FA8); CNapiGameSession_CreateSession @0x4C97C0
+//  (@0x4C9B6A..0x4C9B76, @0x4C9BA6); NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0
+//  (the refill @0x42C116)]
+void check_gun_reload_relay(inmatch::Role &role, inmatch::HostRole *host, w::World &world,
+		w::EntityHandle gun_handle, int frame_kind) {
+	world.tables.weapons.entries.back().action_fsm.clip_capacity = 1;
+	world.registry.get(gun_handle)->primary_weapon_slot.clip = 0;
+	world.registry.get(gun_handle)->primary_weapon_slot.reserve = 5;
+	std::vector<std::vector<uint8_t>> sent;
+	for (int i = 0; i < 40; ++i) {
+		role.run_tick(tick_input(0));
+		if (host == nullptr) continue;
+		replication::Datagram d;
+		while (host->state.host_loop.host_recv(d))
+			if (d.tag == c2s::WEAPON_RELOAD_REQUEST) sent.push_back(d.body);
+	}
+	const std::vector<uint8_t> expected = {uint8_t(gun_handle.packed & 0xFF),
+			uint8_t(gun_handle.packed >> 8), 0xFF, 0xFF};
+	if (frame_kind == 0) {
+		CHECK(sent.size() == 1);
+		CHECK(!sent.empty() && sent[0] == expected);
+	} else {
+		CHECK(sent.empty());
+	}
+	CHECK(world.registry.get(gun_handle)->primary_weapon_slot.clip == (frame_kind == 1 ? 0 : 1));
+}
+
 int main() {
 	std::map<std::string, std::string> files;
 
@@ -927,7 +963,7 @@ int main() {
 		CHECK(world.vehicles.process_attach(npc, gun_handle, 1));
 		// The walk visits only rows with a resolved def row (ItemTypeIndex != 0); the
 		// synthetic mission's NPC has none of its own.
-		// [orig: WeaponAction_ProcessAllEntities @0x5426B9]
+		// [orig: WeaponAction_ProcessAllEntities @0x542690 (@0x5426B9)]
 		world.registry.get(npc)->item_type_index = 1;
 		w::Entity &live_gun = *world.registry.get(gun_handle);
 		CHECK(live_gun.primary_weapon_owner == npc);
@@ -939,6 +975,9 @@ int main() {
 		const int32_t last = (world.out.rounds.cursor + w::RoundRing::kCapacity - 1) %
 				w::RoundRing::kCapacity;
 		CHECK(world.out.rounds.records[static_cast<size_t>(last)].shooter_handle == npc.packed);
+
+		check_gun_reload_relay(role, frame_kind == 2 ? nullptr : host_storage.get(), world,
+				gun_handle, frame_kind);
 	}
 
 	// --- the authority-local fire gate on an MP listen host ------------------

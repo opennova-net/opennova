@@ -188,10 +188,13 @@ void borrow_carrier_slot(const World &world, Entity &occ, const Entity &carrier,
 // The authority's process refuses an attach while the requester's EquippedSlot is
 // busy: an action past EmptyIdle other than Overheated (fire, recoil, reload, the
 // dry click, a switch or a scope step). The local player's slot is its active
-// one (a borrowed gun's included); another entity's is the carrier slot it names.
-// The host keeps no action for a remote player's own slots (D-NET-336), so those
-// read idle. [orig: Entity_ProcessVehicleAttach @0x435B18..0x435B38, the action read
-//  @0x435B29]
+// one (a borrowed gun's included); another entity's is the slot it names: the
+// carrier slot it borrows, or a remote player's own row of its table, whose
+// action the accepted 0x06 arms and the weapon walk runs (D-NET-336). An NPC
+// person's own slot takes no request and reads idle.
+// [orig: Entity_ProcessVehicleAttach @0x435AA0 (the EquippedSlot @0x435B18, the
+//  action @0x435B29, the refusal @0x435B2C..0x435B38); a remote player's EquippedSlot
+//  is its record row: Server_ClientFiredRound @0x50BAA0 (@0x50C27F..0x50C28D)]
 bool equipped_slot_busy(World &world, const Entity &occ) {
     const WeaponSlotState *slot = nullptr;
     if (slot_pair_is_local(world, occ.handle)) {
@@ -200,6 +203,9 @@ bool equipped_slot_busy(World &world, const Entity &occ) {
     } else if (occ.equipped_slot.kind == WeaponSlotRef::kMount) {
         if (const Entity *mount = world.registry.get(occ.equipped_slot.mount))
             slot = world.vehicles.resolve_mounted_ammo_slot(*mount);
+    } else if (occ.equipped_slot.kind == WeaponSlotRef::kPersonal) {
+        auto it = occ.weapon_slots.find(occ.equipped_slot.combo);
+        if (it != occ.weapon_slots.end()) slot = &it->second;
     }
     return slot != nullptr && slot->current >= weapon_action::kFire &&
             slot->current != weapon_action::kOverheated;
