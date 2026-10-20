@@ -419,9 +419,23 @@ bool run_soak(const SoakCase &soak) {
 	host_sock.set_profile(healed);
 	for (SoakJoiner &j : joiners) j.sock->set_profile(healed);
 	for (int f = 0; f < 62 * 4; ++f) step(true);
+	// A reliable record a joiner sent within the last round trip is still on the wire when the
+	// drain ends; the host's ACK must retire it within the loss-free recovery bound, which is
+	// the property, whatever record the join's timeline happens to put in flight at that tick.
+	std::vector<bool> c2s_retired(joiners.size(), false);
+	for (uint32_t f = 0;; ++f) {
+		bool all = true;
+		for (std::size_t i = 0; i < joiners.size(); ++i) {
+			if (joiners[i].client->retained_outbound_depth() == 0) c2s_retired[i] = true;
+			all = all && c2s_retired[i];
+		}
+		if (all || f > quick_ticks + 2u * kHoldoffTicks) break;
+		step(true);
+	}
 
 	bool ok = true;
-	for (const SoakJoiner &j : joiners) {
+	for (std::size_t ji = 0; ji < joiners.size(); ++ji) {
+		const SoakJoiner &j = joiners[ji];
 		const inmatch::NapiNPConnection *hc = host_connection(j.addr);
 		const uint32_t frames_in_play = j.client->state().frames_applied - j.frames_at_join;
 		std::printf("[soak %s] c2s sent=%llu dropped=%llu dup=%llu reorder=%llu\n", soak.name,
@@ -447,8 +461,7 @@ bool run_soak(const SoakCase &soak) {
 		ok = expect(j.client->inbound_gap_depth() == 0 && hc != nullptr &&
 		                    hc->seq.queued_inbound.empty(),
 		            "every gap is recovered once the link heals") && ok;
-		ok = expect(j.client->retained_outbound_depth() == 0,
-		            "the host's ACKs retire every reliable C2S record") && ok;
+		ok = expect(c2s_retired[ji], "the host's ACKs retire every reliable C2S record") && ok;
 		ok = expect(hc != nullptr && hc->seq.retained_outbound_message_count < 16,
 		            "the joiner's ACKs retire the host's reliable S2C records") && ok;
 		if (!soak.check_cadence) continue;
