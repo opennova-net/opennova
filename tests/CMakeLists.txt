@@ -355,14 +355,14 @@ target_link_libraries(threedi_userpoint_test PRIVATE opennova_formats)
 target_include_directories(threedi_userpoint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_userpoint COMMAND threedi_userpoint_test)
 
-# Asset-gated (OPENNOVA_JO_DIR): the retail MTRL facts (Scrate1's constant
-# AlphaGen on an opaque, non-alpha-tested FF_ST_OP row) the projected-shadow
-# GUT witness keys on, read through the engine's 3DI3 parser.
-add_executable(threedi_retail_material_facts_test threedi/retail_material_facts_test.cpp)
-target_link_libraries(threedi_retail_material_facts_test PRIVATE opennova_base opennova_formats)
-target_include_directories(threedi_retail_material_facts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(threedi_retail_material_facts_test PRIVATE cxx_std_17)
-opennova_add_gated_test(threedi_retail_material_facts COMMAND threedi_retail_material_facts_test)
+# The MTRL facts (SCrate1's constant AlphaGen on an opaque, non-alpha-tested
+# FF_ST_OP row, minted as fixtures/threedi/crate_alphagen24.3di) the
+# projected-shadow GUT witness keys on, read through the engine's 3DI3 parser.
+add_executable(threedi_material_facts_test threedi/material_facts_test.cpp)
+target_link_libraries(threedi_material_facts_test PRIVATE opennova_base opennova_formats)
+target_include_directories(threedi_material_facts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(threedi_material_facts_test PRIVATE cxx_std_17)
+add_test(NAME threedi_material_facts COMMAND threedi_material_facts_test)
 
 add_executable(threedi_collision_3di_test threedi/collision_3di_test.cpp)
 target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
@@ -402,17 +402,16 @@ target_compile_features(minimal_bad_gen_test PRIVATE cxx_std_17)
 target_include_directories(minimal_bad_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_bad_gen COMMAND minimal_bad_gen_test)
 
-# ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
-# set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
+# ADM tests. adm_parse pins the minted first-person table fixtures/anim/vm40.adm;
+# the rest author their maps in memory.
 foreach(test comment trim_value parse variants write)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_formats)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test comment trim_value variants write)
+foreach(test comment trim_value parse variants write)
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()
-opennova_add_gated_test(adm_parse COMMAND adm_parse_test)
 
 # BAD tests: the null guard, the stock 19-bone idle's pins on the minted
 # fixtures/anim/rig19_idle.bad, and a translated reset's rows 0..frame_count
