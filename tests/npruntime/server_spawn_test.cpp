@@ -707,6 +707,50 @@ int main() {
 		            "the tally counts the rows' teams (team 1: 2, team 2: 1), not the bodies'")) return 1;
 	}
 
+	// The host's own add validates nothing: the local connection's add record takes the
+	// empty arm and Server_PlayerAdd's local branch, so the own ids stay the profile's,
+	// which were validated when it was applied; a joiner's ids are validated. With a table
+	// that names neither (here an empty one), the own player keeps its profile's 0x0400
+	// and a joiner's 0x0200 becomes the empty table's 0 (D-NET-137).
+	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 - the empty arm @0x51D5ED, the ids 0
+	//  @0x51D61B / @0x51D623, the JSP checks @0x51D6A4 / @0x51D6DD; Server_PlayerAdd
+	//  @0x51CBC0 - the local branch @0x51CC24..0x51CC60, the checks @0x51CF87 / @0x51CFB9]
+	{
+		auto ew_heap = std::make_unique<w::World>();
+		w::World &ew = *ew_heap;
+		make_world(ew);
+		ns::LoopbackChannel eloop;
+		inmatch::NapiNPServerCtx ectx;
+		inmatch::GameConfig settings;
+		settings.max_players = 8;
+		settings.game_type = 0x10010;
+		inmatch::test::bring_up_host(ectx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
+		                        /*host_key=*/0, &eloop, settings);
+		ectx.world = &ew;
+		inmatch::NapiNPConnection &own = ectx.np_protocol.connection_list.front();
+		own.char_vars.char_id[0] = 0x0400;
+		own.char_vars.char_id[1] = 0x8407;
+		inmatch::Server_InitNewRoundState(ectx);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ectx, ew) == 1, "own-add: host spawned")) return 1;
+		{
+			inmatch::NapiNPConnection joiner;
+			joiner.type = 1;
+			joiner.connection_id = inmatch::kFirstJoinerDcb;
+			joiner.self_id_seen = true;
+			joiner.phase = inmatch::ConnectionPhase::Joined;
+			joiner.char_vars.char_id[0] = 0x0200;
+			joiner.char_vars.char_id[1] = 0x0200;
+			ectx.np_protocol.connection_list.push_back(joiner);
+		}
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ectx, ew) == 1, "own-add: joiner spawned")) return 1;
+		const w::Entity *own_body = pool0_player(ew, inmatch::kHostPlayerDcb);
+		const w::Entity *joiner_body = pool0_player(ew, inmatch::kFirstJoinerDcb);
+		if (!expect(own_body != nullptr && own_body->team == 1 && own_body->minimap_net_id == 0x0400,
+		            "the host's own add keeps its profile's id")) return 1;
+		if (!expect(joiner_body != nullptr && joiner_body->minimap_net_id == 0,
+		            "a joiner's id the table lacks becomes the empty table's 0")) return 1;
+	}
+
 	// The standalone SP host: a campaign mission authors ONLY the Co-op 6001 start (every
 	// retail 00TR*/CP* .bms), and retail's spawn chain reaches it only through the stock
 	// Co-op g_GameType word (0x10020) the mission's attrib mode implies — the word the SP

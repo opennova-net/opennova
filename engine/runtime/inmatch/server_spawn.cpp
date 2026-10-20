@@ -356,14 +356,28 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	//  ServerLog_BufferAndFlush's g_CreateSvrLogTxt gate @0x4FC0C3..0x4FC0CA]
 	if (!player_slot.has_value()) return {};
 
-	// Each side's character id names a combo of the host's Avatars.def, else it
-	// is re-resolved to the side's default: the first combo of the side's
-	// alignment, else entry 0, or 0 for an empty table (D-NET-137). The round
-	// init's kept slots were validated at their add.
-	// [orig: Server_PlayerAdd @0x51CBC0 - CAvatarDefs_HasPackedId (the combo find)
-	//  @0x51CF87, CAvatarDefs_PackFirstComboOfAlignment(side 0) @0x51CF9D, slot+0x1BA
-	//  @0x51CFA5; @0x51CFB9, side 1 @0x51CFD0, slot+0x1BC @0x51CFD8]
-	if (!round_init) {
+	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
+	// type-1 node is a remote joiner the host snaps from the wire (never the local player). [ADR 0012]
+	const bool is_host_own = (conn.type == NapiNPConnection::kTypeClientSide);
+
+	// A joiner's two character ids each name a combo of the host's Avatars.def,
+	// else the side's default replaces it: the first combo of the side's
+	// alignment, else entry 0, or 0 for an empty table (D-NET-137). The build
+	// validates the JSP ids into the add record and the add validates them again
+	// (a no-op after the first pass). The host's own add carries none: the local
+	// connection's net-flags byte takes the record's empty arm and the add's local
+	// branch, so neither pass runs; the own ids were validated when the profile was
+	// applied (join_character_profile; the boot's fresh_profile_character_vars).
+	// The round init's kept slots were validated at their add.
+	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 - CAvatarDefs_HasPackedId @0x51D6A4,
+	//  CAvatarDefs_PackFirstComboOfAlignment(side 0) @0x51D6BA; @0x51D6DD, side 1
+	//  @0x51D6F4; the local connection's empty arm @0x51D5C3 / @0x51D5ED, the ids 0
+	//  @0x51D61B / @0x51D623; Server_PlayerAdd @0x51CBC0 - the local branch
+	//  @0x51CC24..0x51CC60; CAvatarDefs_HasPackedId @0x51CF87,
+	//  CAvatarDefs_PackFirstComboOfAlignment(side 0) @0x51CF9D, slot+0x1BA @0x51CFA5;
+	//  @0x51CFB9, side 1 @0x51CFD0, slot+0x1BC @0x51CFD8; the own ids:
+	//  PlayerSession_InitFromProfile @0x50CA80 - @0x50CAC4 / @0x50CAF1]
+	if (!round_init && !is_host_own) {
 		for (int side = 0; side < 2; ++side) {
 			if (ctx.characters.find_by_packed_id(conn.char_vars.char_id[side]) == nullptr)
 				conn.char_vars.char_id[side] = ctx.characters.first_character_id(side);
@@ -426,16 +440,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
 	spawn.equipped_adm_index = m4 >= 0 ? static_cast<uint8_t>(m4) : 0xFF;
 
-	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
-	// type-1 node is a remote joiner the host snaps from the wire (never the local player). [ADR 0012]
-	const bool is_host_own = (conn.type == NapiNPConnection::kTypeClientSide);
-
 	// Character stamp from the joiner's 0x42 CU vars, picked per ASSIGNED team — side A for teams
 	// 1/3 or any non-team-based game type, side B otherwise [orig: Server_PlayerAdd @0x51cbc0
 	// @0x51cff7]. The picked avatar byte is the entity+0x374 animSlot [@0x51d0b1] and the picked
 	// char id the entity+0x15C wire NetId [slot+440] — the joiner's own 0x0C record must echo the
 	// values it uploaded (golden ASH_I5A: VCB=4/CI1=0x8207 -> record 4/0x8207) or its client binds
-	// a wrong-type character slot: the D-NET-146 DBuggy1-shadow bug. The ids were validated
+	// a wrong-type character slot: the D-NET-146 DBuggy1-shadow bug. A joiner's ids were validated
 	// against the host's Avatars.def above (D-NET-137) [orig: CAvatarDefs_HasPackedId @0x57b140 ->
 	// CAvatarDefs_PackFirstComboOfAlignment @0x57ad40].
 	// The pick reads the slot's team byte the assignment just wrote: a session

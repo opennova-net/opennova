@@ -265,6 +265,34 @@ int main() {
 		CHECK(kernel.world.out.terrain_scorches.pending_page_invalidations().empty());
 	}
 
+	// --- the host's character table (D-NET-137): with none installed by the
+	// embedder, the boot takes the mounted Avatars.def, the file g_AvatarDefs
+	// loads, so a joiner's add validates against it; an embedder's table stands.
+	// [orig: CAvatarDefs_Init @0x57B180 - File_ParseASCIIFile("Avatars.def") @0x57B1D5]
+	{
+		const std::string avatars =
+				"define head H\r\n{\r\n\tgraphic h.3di\r\n\tcamo 0 0 0\r\n\tvoice 1\r\n\tsex m\r\n}\r\n"
+				"define body B\r\n{\r\n\tgraphic b.3di\r\n\tcamo 0 0 0\r\n}\r\n"
+				"define arms A\r\n{\r\n\tgraphic a.3di\r\n\tcamo 0 0 0\r\n}\r\n"
+				"nationality 0 N\r\n{\r\n\talignment good\r\n\tdivision 0 D\r\n\t{\r\n"
+				"\t\tcombo 1 H B A\r\n\t}\r\n}\r\n";
+		Host host;
+		host.files["Avatars.def"] = avatars;
+		std::string error;
+		CHECK(inmatch::boot_host_mission(host.request(0), host.boot, error));
+		const inmatch::CharacterRegistry &mounted = host.role.state.host_owner.ctx.characters;
+		CHECK(mounted.entries().size() == 1);
+		CHECK(mounted.find_by_packed_id(mounted.first_character_id(0)) != nullptr);
+
+		Host installed;
+		installed.files["Avatars.def"] = avatars;
+		inmatch::HostBootRequest r = installed.request(0);
+		r.host_cfg.characters.add_entry(1, 0, 0, 7, 0, 1, 1, 4, false); // 0x8207
+		r.host_cfg.characters.add_entry(1, 0, 1, 7, 0, 2, 1, 9, false); // 0x8407
+		CHECK(inmatch::boot_host_mission(std::move(r), installed.boot, error));
+		CHECK(installed.role.state.host_owner.ctx.characters.entries().size() == 2);
+	}
+
 	// --- the mission text and the mount's override table (D-NET-657): every
 	// lookup of the mission's table searches the expansion's override table
 	// first, so its briefing page reaches the S2C 0x7E source and its

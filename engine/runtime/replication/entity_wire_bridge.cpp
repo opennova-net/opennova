@@ -381,13 +381,16 @@ uint16_t record_flags_word(const world::Entity &e) {
 
 // entity+348 (0x15C) — the wire "net_id" is the player's character id, NOT the WAC SSN
 // (e.net_id, which players keep at 0 to stay out of find_by_net_id; D-NET-112 conflated the
-// two). The host's player add takes each side's id from the joiner's JSP (CI0 / CI1, or the
-// listen host's own profile), validates it against the host's Avatars.def combos and re-resolves
-// a stale one to the side's default (0 with no table); the spawn stamps the assigned side's into
-// entity+0x15C, and every stream writes that word (D-NET-137). A receiving client
-// validates the record's id against its own table the same way.
-// [orig: Server_PlayerAdd @0x51CBC0 - slot+0x1BA / +0x1BC validated @0x51CF87..0x51CFD8;
-//  NapiNPClientMsg_0x00C - CAvatarDefs_HasPackedId on g_AvatarDefs @0x42eadb;
+// two). The host's player add takes each side's id from the joiner's JSP (CI0 / CI1),
+// validates it against the host's Avatars.def combos and re-resolves a stale one to the side's
+// default (0 with no table); the listen host's own ids are its profile's, validated when the
+// profile was applied. The spawn stamps the assigned side's into entity+0x15C, and every stream
+// writes that word (D-NET-137). A receiving client validates the record's id against its own
+// table the same way.
+// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 - @0x51D6A4 / @0x51D6DD; Server_PlayerAdd
+//  @0x51CBC0 - slot+0x1BA / +0x1BC validated @0x51CF87..0x51CFD8; PlayerSession_InitFromProfile
+//  @0x50CA80 - @0x50CAC4 / @0x50CAF1; NapiNPClientMsg_0x00C @0x42E730 - CAvatarDefs_HasPackedId
+//  on g_AvatarDefs @0x42eadb;
 //  NetPacket_SerializeEntityStatesToBuffer @0x5030a0 - `movzx edi, word ptr [ecx+15Ch]`
 //  @0x5032CB. The packing (type bits 0-4, subtype 5-8, index 9-14, alignment 15) is the
 //  packer's @0x57ae47 and CAvatarDefs_FindComboByPackedId @0x57a270's; net-re §5.59]

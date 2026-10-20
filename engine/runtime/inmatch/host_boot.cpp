@@ -170,24 +170,30 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 			io::logf(io::LogLevel::kWarn, "host boot: score.ini rejected; the default table stands");
 	}
 
-	// The host's own slot's character selection when the embedder installed none
-	// (a headless host): a fresh profile's over the mounted Avatars.def, as the
-	// boot's fresh record packs each side's first combo; an install with no
-	// Avatars.def takes the empty table's (D-NET-NEW-L2-7).
-	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> CAvatarDefs_PackFirstComboOfAlignment
-	//  @0x57AD40 over g_AvatarDefs; CAvatarDefs_Init @0x57B180 opens "Avatars.def"]
-	if (request.host != nullptr && !host_cfg.local_character_vars) {
-		CharacterRegistry characters;
+	// The host's character table, g_AvatarDefs, which a joiner's add validates its
+	// ids against (D-NET-137): the embedder's when it installed one, else the
+	// mounted Avatars.def (empty without the file). A shell boot whose simulation
+	// was created after the world mounted its Avatars.def carries none.
+	// [orig: CAvatarDefs_Init @0x57B180 - File_ParseASCIIFile("Avatars.def") @0x57B1D5]
+	if (request.host != nullptr && host_cfg.characters.empty()) {
 		std::vector<uint8_t> avatars_bytes;
 		if (files.valid() && files.read_file("Avatars.def", avatars_bytes)) {
 			avatars::AvatarsFile avatars = {};
 			if (avatars::avatars_parse_memory(avatars_bytes.data(), avatars_bytes.size(),
 						&avatars) == 0)
-				characters = CharacterRegistry::from_file(avatars);
+				host_cfg.characters = CharacterRegistry::from_file(avatars);
 			avatars::avatars_free(&avatars);
 		}
-		host_cfg.local_character_vars = fresh_profile_character_vars(characters);
 	}
+
+	// The host's own slot's character selection when the embedder installed none
+	// (a headless host): a fresh profile's over that table, as the boot's fresh
+	// record packs each side's first combo; an install with no Avatars.def takes
+	// the empty table's (D-NET-NEW-L2-7).
+	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> CAvatarDefs_PackFirstComboOfAlignment
+	//  @0x57AD40 over g_AvatarDefs]
+	if (request.host != nullptr && !host_cfg.local_character_vars)
+		host_cfg.local_character_vars = fresh_profile_character_vars(host_cfg.characters);
 
 	// The mission's placed tiles: one shared array serving the S2C 0x45
 	// stream, the render overlay and the surface walk. The authority (every
