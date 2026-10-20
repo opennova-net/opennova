@@ -116,6 +116,38 @@ int32_t carrier_roll_bam(const world::Entity &c) {
 	return c.veh.yaw_seeded ? c.veh.air_roll_bam : engine_axis_bam(c.roll);
 }
 
+// The per-tick displacement metric both priority walks score every row by:
+// the row's Position less its mover-entry savedLivePose (+0x80..+0x88), less
+// the same delta of the row it stands on (+0x28 groundEntity), the z term
+// halved, then `min(sqrt(dx^2 + dy^2 + dz^2), 2147418112.0) >> 6`, clamped to
+// 255. A row no mover has stamped reads a zero delta, as the spawn's own
+// savedLivePose = Position store leaves it.
+// [orig: Server_BuildEntityPriorityList @0x50E590 - pool 0
+//  @0x50E9D9..0x50EA5A (Position @0x50E86A..0x50E86D, the saved pose
+//  @0x50E9B3 / @0x50E9B9 / @0x50E9DC, the carrier +0x28 @0x50E9E5..0x50EA13,
+//  `sar ecx, 1` @0x50EA15, fsqrt @0x50EA2F, the clamp 0x4EFFFE00 @0x50EA3C,
+//  `sar ecx, 6` @0x50EA4F, 255 @0x50EA52..0x50EA5A); pool 1 the same
+//  @0x50EE7B..0x50EF04; Entity_InitFromModel's spawn store @0x40E14D..0x40E169]
+uint8_t tick_displacement_q6(const world::World &w, const world::Entity &e) {
+	const auto delta = [](const world::Entity &x, int axis) {
+		const int32_t cur = axis == 0 ? x.position.x.q16
+				: axis == 1             ? x.position.y.q16
+				                        : x.position.z.q16;
+		const int32_t saved = x.saved_live_valid ? x.saved_live_pos[axis] : cur;
+		return static_cast<uint32_t>(cur) - static_cast<uint32_t>(saved);
+	};
+	uint32_t d[3] = {delta(e, 0), delta(e, 1), delta(e, 2)};
+	if (const world::Entity *carrier = w.registry.get(e.ground_target))
+		for (int axis = 0; axis < 3; ++axis) d[axis] -= delta(*carrier, axis);
+	const double dx = static_cast<double>(static_cast<int32_t>(d[0]));
+	const double dy = static_cast<double>(static_cast<int32_t>(d[1]));
+	const double dz = static_cast<double>(static_cast<int32_t>(d[2]) >> 1);
+	double magnitude = std::sqrt(dx * dx + dy * dy + dz * dz);
+	if (magnitude > 2147418112.0) magnitude = 2147418112.0;
+	const int32_t metric = static_cast<int32_t>(magnitude) >> 6;
+	return static_cast<uint8_t>(metric > 255 ? 255 : metric);
+}
+
 } // namespace
 
 uint8_t health_classification_byte(int32_t health, int32_t health_max, uint8_t player_class) {
@@ -240,17 +272,8 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 			}
 		}
 		// Priority-feed fills (D-NET-139 full terms; the World-aware seam).
+		s.tick_speed_q6 = tick_displacement_q6(w, e);
 		if (s.entity_class == EntityClass::Vehicle) {
-			// The per-tick displacement metric off the authority motor's own
-			// integration step (vel_x/vel_y/slide_z ARE this tick's deltas):
-			// sqrt(dx^2 + dy^2 + (dz/2)^2) >> 6, clamp 255
-			// [orig: the build metric @0x50e9e5..0x50ea5a].
-			const double mx = static_cast<double>(e.veh.vel_x);
-			const double my = static_cast<double>(e.veh.vel_y);
-			const double mz = static_cast<double>(e.veh.slide_z >> 1);
-			const int32_t mag =
-					static_cast<int32_t>(std::sqrt(mx * mx + my * my + mz * mz)) >> 6;
-			s.tick_speed_q6 = static_cast<uint8_t>(mag > 255 ? 255 : (mag < 0 ? 0 : mag));
 			// A live controller occupies the hull [orig: entity+0x170 @0x50efc9].
 			s.occupied = e.primary_occupant.valid();
 		}

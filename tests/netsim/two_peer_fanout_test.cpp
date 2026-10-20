@@ -1111,7 +1111,12 @@ bool run_0a_priority_view_terms() {
 		veh.yaw = 90;
 		veh.team = 2; // enemy of the recipient
 		veh.primary_occupant = crew_h;    // occupied [orig: entity+0x170 @0x50efc9]
-		veh.veh.vel_x = 0x8000;           // this tick's displacement -> speed metric 255
+		// This tick's displacement off the mover-entry saved pose (+0x80):
+		// 0x8000 >> 6 = 512 -> speed metric 255 [orig: @0x50EE7B..0x50EF04].
+		veh.saved_live_pos[0] = veh.position.x.q16 - 0x8000;
+		veh.saved_live_pos[1] = veh.position.y.q16;
+		veh.saved_live_pos[2] = veh.position.z.q16;
+		veh.saved_live_valid = true;
 		b_h = world.registry.spawn(1, veh);
 		if (!expect(b_h.valid(), "vehicle B spawned")) return false;
 	}

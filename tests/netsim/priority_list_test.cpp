@@ -193,12 +193,61 @@ void test_negative_score_keys_at_the_prior() {
 	CHECK((order == std::vector<uint16_t>{a.packed, b.packed}));
 }
 
+// D-NET-349: every row's speed metric is its Position less its mover-entry
+// savedLivePose (+0x80), less the same delta of the row it stands on (+0x28),
+// the z term halved: sqrt(dx^2 + dy^2 + (dz/2)^2) >> 6, clamped to 255. A
+// person (pool 0) walking 0x2000 along x reads 128; the same walk on a deck
+// that moved 0x1000 along x reads 64; a 0x10000 rise alone reads
+// (0x10000 / 2) >> 6 = 512, clamped to 255; an unstamped row reads 0.
+// [orig: Server_BuildEntityPriorityList - pool 0 @0x50E9D9..0x50EA5A (the
+//  saved pose @0x50E9B3 / @0x50E9B9 / @0x50E9DC, +0x28 @0x50E9E5..0x50EA13,
+//  `sar ecx, 1` @0x50EA15, `sar ecx, 6` @0x50EA4F, 255 @0x50EA52..0x50EA5A);
+//  pool 1 @0x50EE7B..0x50EF04]
+void test_tick_displacement_reads_the_saved_pose() {
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	const w::EntityHandle walker = w::spawn_remote_player(world, at(0.0f, 1));
+	const w::EntityHandle rider = w::spawn_remote_player(world, at(5.0f, 2));
+	const w::EntityHandle riser = w::spawn_remote_player(world, at(10.0f, 3));
+	const w::EntityHandle still = w::spawn_remote_player(world, at(15.0f, 4));
+	w::Entity deck_seed;
+	deck_seed.kind = w::EntityKind::Item;
+	deck_seed.item_id = 0x050D;
+	const w::EntityHandle deck = world.registry.spawn(1, deck_seed);
+	const auto moved = [&](w::EntityHandle h, int32_t dx, int32_t dz) {
+		w::Entity &e = *world.registry.get(h);
+		e.saved_live_pos[0] = e.position.x.q16 - dx;
+		e.saved_live_pos[1] = e.position.y.q16;
+		e.saved_live_pos[2] = e.position.z.q16 - dz;
+		e.saved_live_valid = true;
+	};
+	moved(walker, 0x2000, 0);
+	moved(rider, 0x2000, 0);
+	moved(deck, 0x1000, 0);
+	world.registry.get(rider)->ground_target = deck;
+	moved(riser, 0, 0x10000);
+	world.registry.get(still)->saved_live_valid = false;
+	const std::vector<GameEntitySnapshot> ents = ns::snapshot_world(world);
+	const auto metric = [&](w::EntityHandle h) {
+		for (const GameEntitySnapshot &row : ents)
+			if (row.wire_handle == h.packed) return int(row.tick_speed_q6);
+		return -1;
+	};
+	CHECK(metric(walker) == 0x2000 >> 6);
+	CHECK(metric(rider) == 0x1000 >> 6);
+	CHECK(metric(riser) == 255);
+	CHECK(metric(still) == 0);
+}
+
 } // namespace
 
 int main() {
 	test_bound_radius_moves_a_row_inside_the_gate();
 	test_tracked_slots_despawn_ahead_of_the_frame();
 	test_negative_score_keys_at_the_prior();
+	test_tick_displacement_reads_the_saved_pose();
 	if (failures == 0) std::printf("priority_list: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
