@@ -91,6 +91,11 @@
 //   fixtures/anim/vm40_nopad.bad   a translated clip with no pad row past row
 //                                  frame_count (stgr_RST.bad; 200 of the 202
 //                                  translated clips carry one)
+//   fixtures/anim/rig19_b3.bad     flags 0x8: bit 3 alone, no loop, no
+//                                  translation (Idl_rld.bad, the one such clip)
+//   fixtures/anim/vm40_b3lp.bad    flags 0xB: bit 3 on a translated loop
+//                                  (74gl_1d.bad, FNC_1i.bad, M4_1e.bad, P90_1d.bad:
+//                                  six clips)
 // Every turn is a rational rotation (a quaternion (t * axis, 1) normalized: t
 // the tangent of half the angle), so the bytes come out the same on every
 // platform. Default: rebuild every file in memory and byte-compare the
@@ -438,6 +443,20 @@ BadBuildClip make_v0() {
 	return clip;
 }
 
+BadBuildClip make_b3() {
+	BadBuildClip clip = make_rst();
+	clip.name = "rig19_b3";
+	clip.flags = BAD_FLAG_BIT3;
+	key_every_bone(clip, [](int b, int k) { return turn(b % 3, (3.0 + k) / 64.0); });
+	return clip;
+}
+
+BadBuildClip make_b3lp() {
+	BadBuildClip clip = vm_clip("vm40_b3lp", 6, BAD_FLAG_LOOP | BAD_FLAG_BIT3,
+			arms_turn(kX, [](int k) { return (k <= 3 ? k : 6 - k) / 32.0; }), no_slide);
+	return clip;
+}
+
 BadBuildClip make_long() {
 	BadBuildClip clip;
 	clip.name = "vm40_long";
@@ -473,7 +492,9 @@ void put_u32(std::vector<uint8_t> &bytes, size_t at, uint32_t v) {
 }
 
 bool mint_quirks(std::vector<Minted> &out) {
-	if (!mint_lone(make_short(), out) || !mint_lone(make_sparse(), out) || !mint_lone(make_v0(), out)) return false;
+	if (!mint_lone(make_short(), out) || !mint_lone(make_sparse(), out) || !mint_lone(make_v0(), out) ||
+			!mint_lone(make_b3(), out) || !mint_lone(make_b3lp(), out))
+		return false;
 
 	// rig19_junk: the idle, flags 0x9, then the exporter's leftovers in its bone rows.
 	const Minted *idle = find_minted(out, "rig19_idle.bad");
@@ -614,6 +635,7 @@ void check_facts(const Minted &m) {
 				m.name + ": the 40-bone first-person rig, translated, standing still");
 		if (m.name == "vm40_rst.bad") expect(bf.frame_count == 1 && bf.num_translations == 80, m.name + ": one frame, rows 0..1");
 		if (m.name == "vm40_swt.bad") expect((bf.flags & BAD_FLAG_BIT3) != 0, m.name + ": flag bit 3");
+		if (m.name == "vm40_b3lp.bad") expect(bf.flags == 0xBu, m.name + ": flags 0xB");
 		if (m.name == "vm40_long.bad") expect(bf.frame_count == 4 && bf.channels[0].frame_count == 9, m.name + ": nine keys on four frames");
 		if (m.name == "vm40_brk.bad") {
 			int triplicated = 0;
@@ -640,6 +662,7 @@ void check_facts(const Minted &m) {
 		expect(bf.frame_count == 11 && bf.channels[0].frame_count < 12 && bf.channels[1].frame_count != bf.channels[0].frame_count,
 				m.name + ": sparse keys, a table a bone");
 	if (m.name == "rig19_v0.bad") expect(bf.events[0].trigger == -1, m.name + ": no trigger word");
+	if (m.name == "rig19_b3.bad") expect(bf.flags == BAD_FLAG_BIT3, m.name + ": flags 0x8");
 	if (m.name == "rig19_junk.bad")
 		expect(bf.flags == 0x9u && bf.bones[0].parent_index == -1 && bf.bones[3].parent_index == 2, m.name + ": the links still read");
 	if (m.name == "rig19_walk.bad")

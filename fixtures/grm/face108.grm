@@ -288,7 +288,7 @@ gestures  9
     parm        11  -0.0312  -0.0156  Brow
     parm        12  0.0312  0.0000  Static
     parm        13  -0.0000  0.0156  MouthLeft
-    parm        14  -0.0312  0.0312  MouthRight
+    parm        14  -0.0312  0.0312  
     parm        15  0.0312  -0.0312  Brow
     parm        16  -0.0000  -0.0156  Static
     parm        17  -0.0312  0.0000  MouthLeft

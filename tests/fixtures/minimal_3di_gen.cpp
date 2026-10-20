@@ -78,6 +78,7 @@
 
 #include "common/test_paths.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -490,7 +491,16 @@ Model make_mount() {
 	m.add_control_register("EWEAP_GUNYAW");
 	m.add_control_register("EWEAP_GUNPITCH");
 	// The retail B50Cal articulation: the cradle yaws on register 1, the gun
-	// yaws on 1 and pitches on 2 (rotation x = the authored yaw axis).
+	// yaws on 1 and pitches on 2 (rotation x = the authored yaw axis), the gun's
+	// row in MTRX frame 1, a half turn about the model's y (diag(-1, 1, -1)),
+	// which turns its pitch the shipped way (B50Cal.3di's and H50Cal.3di's gun
+	// rows and frame, witnessed 2026-10-19).
+	ThreediMatrix4x4 half_turn{};
+	half_turn.m[0] = -1.0f;
+	half_turn.m[5] = 1.0f;
+	half_turn.m[10] = -1.0f;
+	half_turn.m[15] = 1.0f;
+	m.frames.push_back(half_turn);
 	ThreediPartAnimation &r0 = m.add_panm(lod, 0, 0, threedi_panm_pack_flags(0, 2, 1, 0));
 	r0.rotation_x = track(0, 0, 0, 0, 16384);
 	ThreediPartAnimation &r1 = m.add_panm(lod, 1, 0, threedi_panm_pack_flags(0, 2, 1, 0));
@@ -499,6 +509,7 @@ Model make_mount() {
 	ThreediPartAnimation &r2 = m.add_panm(lod, 2, 0, threedi_panm_pack_flags(0, 2, 1, 0));
 	r2.rotation_x = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16384);
 	r2.rotation_y = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 2, 0, 16384, 0);
+	r2.matrix_index = 1;
 	m.add_user_point("BCasing", Vec3{-0.3, -0.07, 0.48}, Vec3{0.0, -1.0, 0.0}, 2, kUserPointEffect);
 	m.add_user_point("Bullet", Vec3{1.7, 0.0, 0.48}, kForward, 2, kUserPointEffect);
 	m.add_user_point("Camera", Vec3{-0.85, 0.0, 0.6}, kForward, 2, kUserPointGameplay);
@@ -753,7 +764,18 @@ struct Recipe {
 	Edit edit;
 	// The directory under fixtures/ the file lands in.
 	const char *dir = "threedi/synth";
+	// A form the shipped models carry that no author states: an edit of the
+	// model as the file holds it, between the mint and the writer.
+	std::function<void(Threedi3di3 &)> raw;
 };
+
+// The quiet NaN word the shipped MTRX rows carry.
+float nan_word() {
+	const uint32_t bits = 0x7FC00000u;
+	float f;
+	std::memcpy(&f, &bits, sizeof(f));
+	return f;
+}
 
 void rename_register(Model &m, int index, const char *name) { m.control_registers[index] = name; }
 
@@ -963,6 +985,103 @@ const std::vector<Recipe> &recipes() {
 		{"panm_live_08_axis_scaley", nullptr, nullptr},
 		{"panm_live_09_translation", nullptr, nullptr},
 		{"panm_inert_10_rotrev", nullptr, nullptr},
+		// --- the forms the shipped models carry past what an author states (the
+		// retired threedi_retail_rewrite row read each back as its own bytes;
+		// witnessed 2026-10-19 in the model named) ---
+		// CFAC pad bytes that are not zero.
+		{"crate_cfac_pad", make_crate, nullptr, "threedi/synth", [](Threedi3di3 &t) {
+			for (size_t f = 0; f < t.collision->face_count; ++f) {
+				t.collision->faces[f].pad[0] = 0x5A;
+				t.collision->faces[f].pad[1] = static_cast<uint8_t>(f);
+				t.collision->faces[f].pad[2] = 0x80;
+			}
+		}},
+		// Face flags 0x100, 0x101, 0x400, 0x401, 0x500, 0x501.
+		{"armory_cfac_flags", make_armory, nullptr, "threedi/synth", [](Threedi3di3 &t) {
+			const uint32_t flags[6] = {0x100, 0x101, 0x400, 0x401, 0x500, 0x501};
+			for (size_t f = 0; f < 6; ++f) t.collision->faces[f].material_flags = flags[f];
+		}},
+		// LOD 1's PANM chunk present and empty beside LOD 0's rows (CNet01, Flsh_1st).
+		{"pump_panm_empty_lod1", make_pump, nullptr, "threedi/synth",
+				[](Threedi3di3 &t) { t.lods[1].part_animation_count = 0; }},
+		// LOD 1 holds no part, strip or vertex (CNet01).
+		{"pump_lod1_empty", make_pump, nullptr, "threedi/synth", [](Threedi3di3 &t) {
+			ThreediLod &l = t.lods[1];
+			l.render_object_count = 0;
+			l.strip_count = 0;
+			l.vertices.count = 0;
+			l.indices.count = 0;
+			l.part_animation_count = 0;
+		}},
+		// A strip naming a material one past the table's end (Tent1).
+		{"house_strip_material_past", make_house, nullptr, "threedi/synth",
+				[](Threedi3di3 &t) { t.lods[0].strips[2].material_index = static_cast<int32_t>(t.material_count); }},
+		// A texture row with an empty name (Det_1st).
+		{"crate_texture_unnamed", make_crate, nullptr, "threedi/synth",
+				[](Threedi3di3 &t) { std::memset(t.materials[0].textures[0].name, 0, sizeof(t.materials[0].textures[0].name)); }},
+		// MTRX rows carrying -0 words and a translation, row 0 not the identity's bytes (B50Cal).
+		{"mount_mtrx_translated", make_mount, nullptr, "threedi/synth", [](Threedi3di3 &t) {
+			ThreediMatrix4x4 &row0 = t.mtrx.matrices[0];
+			row0.m[1] = row0.m[4] = row0.m[6] = row0.m[9] = row0.m[12] = row0.m[13] = row0.m[14] = -0.0f;
+			ThreediMatrix4x4 &row1 = t.mtrx.matrices[1];
+			row1.m[1] = -0.0f;
+			row1.m[12] = 0.0625f;
+			row1.m[14] = 0.125f;
+		}},
+		// An MTRX row of NaN words (US01's; B50Cal's row 2).
+		{"person_mtrx_nan", make_person, [](Model &m) {
+			ThreediMatrix4x4 row{};
+			for (int r = 0; r < 3; ++r)
+				for (int c = 0; c < 3; ++c) row.m[r * 4 + c] = nan_word();
+			row.m[15] = 1.0f;
+			m.frames.push_back(row);
+		}},
+		// Omni lights flagged 2, 3, 6, 16, 18, 64, 65, 66, 146, 160, one axis word -0.0.
+		{"shed_lght_omni_flags", make_shed, [](Model &m) {
+			const uint8_t flags[10] = {2, 3, 6, 16, 18, 64, 65, 66, 146, 160};
+			m.lights[0].flags = flags[0];
+			for (int i = 1; i < 10; ++i)
+				m.add_light(Vec3{0.25 * i - 1.0, 0.0, 1.25}, 0.0, 3.0, 24, 0, kWarm, kBlack, flags[i]);
+		}, "threedi/synth", [](Threedi3di3 &t) { t.lights[0].rotation[0] = -0.0f; }},
+		// Volume flags above 0x3E on two blink boxes (Armry02).
+		{"armory_bvol_flags_high", make_armory, nullptr, "threedi/synth", [](Threedi3di3 &t) {
+			int set = 0;
+			for (size_t v = 0; v < t.collision->volume_count && set < 2; ++v)
+				if (t.collision->volumes[v].collidable_type == 8) t.collision->volumes[v].flags = set++ == 0 ? 0x6E : 0x12E;
+		}},
+		// A flipbook on the register clock over flagged, framed rows (ArmGlove's: TEX_CAMO1
+		// picks among four diffuse and four detail frames; the normal map stays).
+		{"person_flipbook_register", make_person, [](Model &m) {
+			m.add_control_register("TEX_CAMO1");
+			ThreediMaterial &mat = m.materials[0];
+			mat.texture_count = 0;
+			const char *names[2][4] = {{"body_a.tga", "body_b.tga", "body_c.tga", "body_d.tga"},
+				{"pat_a.tga", "pat_b.tga", "pat_c.tga", "pat_d.tga"}};
+			for (int slot = 0; slot < 2; ++slot)
+				for (int f = 0; f < 4; ++f) {
+					ThreediMaterialTexture &t = mat.textures[mat.texture_count++];
+					std::snprintf(t.name, sizeof(t.name), "%s", names[slot][f]);
+					t.slot = static_cast<uint8_t>(slot == 0 ? THREEDI_TEX_SLOT_DIFFUSE : THREEDI_TEX_SLOT_DETAIL);
+					t.type = THREEDI_TEX_TYPE_DIFFUSE;
+					t.flags = THREEDI_TEX_FLAG_ANIMATED;
+					t.frame = static_cast<uint8_t>(f);
+				}
+			ThreediMaterialTexture &n = mat.textures[mat.texture_count++];
+			std::snprintf(n.name, sizeof(n.name), "%s", "body.mdt");
+			n.slot = THREEDI_TEX_SLOT_NORMAL;
+			n.type = THREEDI_TEX_TYPE_NORMAL_MDT;
+			mat.animation.num_frames = 4;
+			mat.animation.animation_type = 1;
+			mat.animation.cycle_frame_time = 0;
+		}},
+		// Volume types 0, 5, 9, 10, 12, 13 and 16 beside the crate's own.
+		{"crate_bvol_types", make_crate, [](Model &m) {
+			const Box b = box(-0.5, -0.5, 0.0, 0.5, 0.5, 1.0);
+			for (int32_t type : {0, 5, 9, 10, 12, 13, 16}) m.add_volume(0, type, 0, b);
+		}},
+		// A user point on part -1 (Bed01).
+		{"crate_usrp_no_part", make_crate, nullptr, "threedi/synth",
+				[](Threedi3di3 &t) { t.user_points[0].subobject_index = -1; }},
 		// --- the constant AlphaGen crate (fixtures/threedi/crate_alphagen24.3di) ---
 		{"crate_alphagen24", make_crate, [](Model &m) {
 			ThreediMaterial &mat = m.materials[0];
@@ -1024,6 +1143,60 @@ struct Parsed {
 	bool safe() const { return model.collision == nullptr || threedi_3di3_collision_is_runtime_safe(model.collision) == 1; }
 };
 
+// The quirk each form-carrying variant holds, read back off the committed
+// bytes; false for every other recipe.
+bool check_quirk(const std::string &name, const Parsed &p) {
+	const Threedi3di3 &t = p.model;
+	if (name == "crate_cfac_pad") {
+		expect(t.collision->face_count == 12 && t.collision->faces[3].pad[0] == 0x5A && t.collision->faces[3].pad[1] == 3,
+				name + ": CFAC pad bytes");
+	} else if (name == "armory_cfac_flags") {
+		expect(t.collision->faces[0].material_flags == 0x100 && t.collision->faces[5].material_flags == 0x501,
+				name + ": face flags");
+	} else if (name == "pump_panm_empty_lod1") {
+		expect(t.lod_count == 2 && t.lods[1].part_animation_count == 0 && t.lods[0].part_animation_count == 5,
+				name + ": an empty LOD 1 PANM");
+	} else if (name == "pump_lod1_empty") {
+		expect(t.lod_count == 2 && t.lods[1].render_object_count == 0 && t.lods[1].strip_count == 0 &&
+						t.lods[1].vertices.count == 0,
+				name + ": an empty LOD 1");
+	} else if (name == "house_strip_material_past") {
+		expect(t.lods[0].strips[2].material_index == static_cast<int32_t>(t.material_count), name + ": a strip past the table");
+	} else if (name == "crate_texture_unnamed") {
+		expect(t.materials[0].texture_count == 1 && t.materials[0].textures[0].name[0] == '\0', name + ": an unnamed row");
+	} else if (name == "mount_mtrx_translated") {
+		expect(t.mtrx.count == 2 && std::signbit(t.mtrx.matrices[0].m[1]) && t.mtrx.matrices[1].m[12] == 0.0625f,
+				name + ": MTRX -0 words and a translation");
+	} else if (name == "person_mtrx_nan") {
+		expect(t.mtrx.count == 2 && std::isnan(t.mtrx.matrices[1].m[0]) && t.mtrx.matrices[1].m[15] == 1.0f,
+				name + ": an MTRX row of NaN");
+	} else if (name == "shed_lght_omni_flags") {
+		expect(t.light_count == 10 && t.lights[0].flags == 2 && t.lights[8].flags == 146 && t.lights[9].flags == 160 &&
+						std::signbit(t.lights[0].rotation[0]) && t.lights[0].rotation[0] == 0.0f,
+				name + ": light flags and a -0.0 axis word");
+	} else if (name == "armory_bvol_flags_high") {
+		int high = 0;
+		for (size_t v = 0; v < t.collision->volume_count; ++v) high += t.collision->volumes[v].flags > 0x3E ? 1 : 0;
+		expect(high == 2, name + ": two volume flags above 0x3E");
+	} else if (name == "person_flipbook_register") {
+		const ThreediMaterial &m = t.materials[0];
+		expect(m.texture_count == 9 && m.animation.num_frames == 4 && m.animation.animation_type == 1 &&
+						m.textures[5].slot == THREEDI_TEX_SLOT_DETAIL && m.textures[5].frame == 1 &&
+						(m.textures[5].flags & THREEDI_TEX_FLAG_ANIMATED) != 0 && !std::strcmp(p.reg(0), "TEX_CAMO1"),
+				name + ": a register flipbook");
+	} else if (name == "crate_bvol_types") {
+		const int32_t types[7] = {0, 5, 9, 10, 12, 13, 16};
+		bool all = p.bvols() == 8;
+		for (int32_t type : types) all = all && p.bvol_type_count(type) == 1;
+		expect(all, name + ": volume types");
+	} else if (name == "crate_usrp_no_part") {
+		expect(t.user_points[0].subobject_index == -1, name + ": a user point on part -1");
+	} else {
+		return false;
+	}
+	return true;
+}
+
 int slide_moves_part(const Parsed &p, int part, int reg) {
 	if (p.rows(0) != 1) return 0;
 	const ThreediPartAnimation &r = p.row(0, 0);
@@ -1036,6 +1209,7 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (!expect(p.ok, name + ": committed bytes parse")) return;
 	expect(p.safe(), name + ": collision block is runtime safe");
 	expect(p.model.header.has_header && p.model.header.lod_count_decl == static_cast<int32_t>(p.model.lod_count), name + ": GHDR");
+	if (check_quirk(name, p)) return;
 	const std::string base = name.substr(0, name.find('_'));
 	if (base == "crate") {
 		expect(p.parts() == 1 && p.cobjs() == 1 && p.faces(0) == 12 && p.bvols() == 1 && !std::strcmp(p.point(0), "ground"), name + ": crate facts");
@@ -1171,6 +1345,15 @@ int main(int argc, char **argv) {
 		const Model model = build_recipe(recipe);
 		std::vector<uint8_t> bytes;
 		if (!expect(mint(model, bytes), std::string(recipe.file) + ": the writer accepts the model")) continue;
+		if (recipe.raw) {
+			Threedi3di3 t{};
+			if (!expect(threedi_3di3_read_memory(bytes.data(), bytes.size(), &t) == 0, std::string(recipe.file) + ": reads"))
+				continue;
+			recipe.raw(t);
+			const int rc = threedi_3di3_write_memory(&t, bytes);
+			threedi_3di3_free(&t);
+			if (!expect(rc == 0, std::string(recipe.file) + ": the writer takes the edited model")) continue;
+		}
 		if (write_mode) {
 			std::ofstream o(path, std::ios::binary);
 			o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));

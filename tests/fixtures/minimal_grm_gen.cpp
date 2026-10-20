@@ -6,7 +6,8 @@
 // the retired grm_roundtrip_retail row pinned it (2026-10-19): 108 vertices,
 // 143 triangles, nine gestures of 22 parameters each, the first named "Sad",
 // saved in 2002, and the tool's absolute texture paths (a drive and
-// backslashes, which the game strips: grm::texture_load_name). Every index past
+// backslashes, which the game strips: grm::texture_load_name), and a parameter
+// with no group (its line ending on the separator). Every index past
 // 9 and 99 takes the writer's wider columns, which a small face never reaches.
 // The vertices and offsets are ours: a 12 x 9 grid of texture points, four
 // groups, each gesture moving the groups by its own eighth.
@@ -72,6 +73,9 @@ grm::File make_face() {
 		}
 		f.gestures.push_back(gesture);
 	}
+	// A parameter with no group: the line ends on its separator (19 shipped parm
+	// lines do, Delta01.grm's parameter 14 among them).
+	f.gestures[0].parameters[14].group.clear();
 	return f;
 }
 
@@ -98,7 +102,7 @@ int main(int argc, char **argv) {
 	expect(grm::parse(bytes.data(), bytes.size(), back, error), "the face reads back: " + error);
 	expect(back.vertices.size() == 108 && back.triangles.size() == 143 && back.gestures.size() == 9 &&
 					back.gestures[0].name == "Sad" && back.gestures[0].parameters.size() == 22 &&
-					back.saved.year == 2002,
+					back.saved.year == 2002 && back.gestures[0].parameters[14].group.empty(),
 			"the face's shape");
 	if (failures == 0 && !write_mode) std::printf("OK: fixtures/grm/face108.grm byte-reproducible\n");
 	return failures == 0 ? 0 : 1;

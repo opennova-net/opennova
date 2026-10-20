@@ -119,10 +119,12 @@ int main(int argc, char **argv) {
 	std::error_code ec;
 	// The GUT suite's runtime witnesses written past what an author can state: a
 	// PANM row out of part order or a light on a part LOD 0 lacks, which `build`
-	// refuses by name (threedi_o3d_build pins the refusals).
+	// refuses by name (threedi_o3d_build pins the refusals); and a strip naming a
+	// material past the table's end (Tent1's), which the scene, naming a strip's
+	// material by its row, has no word for (threedi_rewrite carries it).
 	const char *const kUnauthorable[] = {"armory_special1_slide_part1", "armory_special2_slide_part1",
 		"house_lod0_sine_rotx", "house_lod0_sine_rotx_uv1", "mount_heat_glow_slide_part1",
-		"shed_lght0_sub2_origin_atten100", "tank_special1_slide_ewep01"};
+		"shed_lght0_sub2_origin_atten100", "tank_special1_slide_ewep01", "house_strip_material_past"};
 	for (const auto &entry : std::filesystem::recursive_directory_iterator(root, ec)) {
 		if (!entry.is_regular_file(ec) || entry.path().extension() != ".3di") continue;
 		const std::string stem = entry.path().stem().string();
