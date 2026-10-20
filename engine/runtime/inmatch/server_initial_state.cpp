@@ -26,9 +26,9 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/visible_players.h>   // encode_spawn_slot_notice (0x4D)
 #include <net/title/title_identity.h>     // title_in_match (the 0x0F flags, DFX2-2)
+#include <runtime/world/ai.h>                     // AiEntity (the join's placement reaches the motor)
 #include <runtime/world/angle.h>                  // world::spawn_angle_bam (0x0F spawn pose)
 #include <runtime/world/entity.h>                 // world::Entity (0x0F spawn pose)
-#include <runtime/world/geom.h>                   // world::to_fixed (0x0F spawn pose)
 #include <runtime/world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
 #include <runtime/world/world.h>
 #include <base/io/le.h>
@@ -696,6 +696,54 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		st.state6_entry_host_ms_valid = true;
 	}
 
+	// The join places the body again, in session (D-NET-503): the add hid it and placed it
+	// (Entity_SpawnFromAnimSlotProperty's call with a spawn word of 0xFFFF), nothing moved it
+	// since, and this second no-pick placement (a spawn word whose low half is 0, which no
+	// target resolves) is the one the 0x0F carries: the Co-op arm's marker copy, or a team
+	// mode's next start marker off the spawn cycle. The motor takes the placed pose.
+	// [orig: Server_OnPlayerJoin @0x51A786 (in session @0x51A77D) -> Server_PositionPlayerForSpawn
+	//  @0x50CF60, the no-pick arm @0x50CFB1; Entity_SpawnFromAnimSlotProperty @0x43C459]
+	world::Entity *body = world.registry.get(conn.link.owned_entity);
+	if (ctx.is_in_session && body != nullptr) {
+		const world::SpawnSlotState slot_state{conn.link.spectator, conn.spectator_restore_team};
+		const world::SpawnPointResult pose = world::resolve_player_spawn_pose(world, body->handle,
+				world::EntityHandle{}, st.player_slot, conn.assigned_team, ctx.config.game_type,
+				slot_state);
+		if (pose.found) {
+			body->position = pose.position;
+			body->yaw = pose.yaw;
+			body->pitch = pose.pitch;
+			body->roll = pose.roll;
+			world::apply_spawn_point_latches(*body, pose);
+			// The motor's copy of the pose follows (our motor keeps its own position and
+			// heading words; the placement writes nothing else).
+			if (world::AiEntity *motor = world.ai.for_handle(body->handle)) {
+				const int32_t placed[3] = {
+						body->position.x.q16, body->position.y.q16, body->position.z.q16};
+				for (int axis = 0; axis < 3; ++axis) {
+					motor->pos[axis] = placed[axis];
+					motor->net_smooth_target[axis] = placed[axis];
+				}
+				motor->heading = pose.heading_bam;
+				motor->net_smooth_heading = pose.heading_bam;
+			}
+		}
+	}
+	// A spectator's body stays hidden and damage-disabled; any other's hidden bit clears
+	// (+96481, the gate's other byte, the add zeroes @0x51D534 and nothing sets). The 0x0A
+	// writer's header ORs it back while the slot is undeployed, the join's own 0x0A first.
+	// [orig: Server_OnPlayerJoin @0x51A78E..0x51A7DA (the spectator arm @0x51A7AE / @0x51A7B3,
+	//  the clear @0x51A7DA); NetPacket_WritePlayerState @0x4FF7AA..0x4FF7B8]
+	if (body != nullptr) {
+		if (conn.link.spectator) {
+			body->flags |= 1u;
+			body->damage_state = -1;
+		} else {
+			body->flags &= ~1u;
+		}
+		if (conn.link.respawn_pending) body->flags |= 1u;
+	}
+
 	// The tail: the deploy unsticker. Without it a retail joiner world-loads but stays
 	// undeployed (floods C2S 0x0F, "stuck at 7%"). 0x41 per charattr restriction, 0x42 the
 	// charattr latches, 0x0F world-state-load (clears the client's g_ClientDeployHold
@@ -721,6 +769,11 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	out.push_back(InitialStateMessage{s2c::CHARATTR_DISABLED_PROPERTIES,
 			{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)}, /*reliable=*/false});
 	out.push_back(InitialStateMessage{0x0F, std::move(wsl)}); // world-state-load (§5.29)
+	// Every joined body starts under the 620-tick spawn protection, stored after the 0x0F
+	// (a bot slot +96483 stores 0; our roster has none): the per-tick arm counts it down in a
+	// live MP session and holds a spectator at -1 (D-NET-217).
+	// [orig: Server_OnPlayerJoin @0x51A86E..0x51A882 (620 @0x51A882, the bot's 0 @0x51A878)]
+	if (body != nullptr) body->damage_state = 620;
 	// The join notice: this slot's copy rides the bundle, every other in-game client gets
 	// the same byte now and re-requests its visible-players snapshot. [orig: Server_OnPlayerJoin
 	//  @0x51a93f..0x51a97a (send_mask 0x80) -> NapiNPClientMsg_HandleSpawnSlot @0x4317B0]

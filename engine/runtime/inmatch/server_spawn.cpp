@@ -461,25 +461,23 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 
 	// The join (Server_OnPlayerJoin, server_initial_state.cpp) writes the slot's state byte and
 	// the armory cooldown; the add writes neither (D-NET-502) [orig: Server_PlayerAdd
-	// @0x51CBC0, its row memset @0x51CD06]. A pending body is hidden from the add on.
-	// [orig: NetPacket_WritePlayerState @0x4FF7B3..0x4FF7B8 ORs entity+36 bit0 each frame
-	//  while +89912 & 0x10]
+	// @0x51CBC0, its row memset @0x51CD06]. A remote add's body is hidden until its join
+	// (D-NET-503) [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Flags |= 0x101
+	// @0x43C433 and again @0x43C508]. The host's own add binds its local player (retail's
+	// local arm spawns nothing, @0x51CC33..0x51CC5D), hidden while it is undeployed in a
+	// session [orig: NetPacket_WritePlayerState @0x4FF7AA..0x4FF7B8].
 	const TitleInMatch &title_rules = title_in_match(ctx.np_protocol.identity);
-	if ((world.zones.has_spawn_zone() || title_rules.join_state_fixed) &&
-			(!is_host_own || world.rules.mp_session) && !conn.link.spectator) {
+	const bool held = (world.zones.has_spawn_zone() || title_rules.join_state_fixed) &&
+			world.rules.mp_session;
+	if (!is_host_own || (held && !conn.link.spectator)) {
 		if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
 	}
-	// Every created player entity starts under the 620-tick spawn protection
-	// (entity+292): the round-init creation stores 620 for every active slot and
-	// the join stores it unconditionally after the 0x0F send (a bot slot +96483
-	// stores 0; our roster has none). It is host-own and spawn-zone independent.
-	// The per-tick arm in Server_TickUpdate counts it down in a live MP session,
-	// zeroes it outside one, and holds a spectator at -1 (the unwitnessed +97538
-	// latch our spectator bit stands in for, D-NET-217; the join's own -1 store
-	// @0x51a7b3 is overwritten by that same 620 and restored by the arm).
-	// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 @0x516bba;
-	//  Server_OnPlayerJoin @0x51A680 @0x51a882 (620), @0x51a878 (bot 0)]
-	if (world::Entity *pe = world.registry.get(h)) pe->damage_state = 620;
+	// The round init's re-add stores the 620-tick spawn protection for every active slot;
+	// a pump add's body carries none until its join stores it after the 0x0F.
+	// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 @0x516bba; Server_OnPlayerJoin
+	//  @0x51A882]
+	if (round_init)
+		if (world::Entity *pe = world.registry.get(h)) pe->damage_state = 620;
 	if (conn.link.spectator) {
 		// Retail still creates a player entity for a spectator, but leaves it
 		// hidden and permanently damage-disabled while S2C 0x75 drives the

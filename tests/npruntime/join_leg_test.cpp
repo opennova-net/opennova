@@ -243,6 +243,48 @@ bool run_one_step_per_boundary() {
 	return true;
 }
 
+// D-NET-503: the add's body is hidden and carries no spawn protection; the join places it
+// again (whatever moved it), clears its hidden bit, and the 0x0F carries the join's placement,
+// then the 620 [orig: Entity_SpawnFromAnimSlotProperty @0x43C433 / @0x43C508; Server_OnPlayerJoin
+// @0x51A786, @0x51A7DA, the 0x0F @0x51A864 / @0x51A869, 620 @0x51A882].
+bool run_join_places_the_hidden_body() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	inmatch::NapiNPConnection &j = f.joiner();
+	w::Entity *body = f.world->registry.get(j.link.owned_entity);
+	if (!expect(body != nullptr && (body->flags & 1u) != 0 && body->damage_state == 0,
+	            "the add's body is hidden, with no spawn protection")) return false;
+	const int32_t marker[3] = {body->position.x.q16, body->position.y.q16, body->position.z.q16};
+	body->position.set_q16({marker[0] + 0x8000, marker[1], marker[2] + 0xD999}); // moved off it
+	(void)f.send(opennova::c2s::CHECKSUM_RESPONSE);
+	for (int i = 0; i < 64 && j.slot_state != inmatch::PlayerSlotState::AwaitWorldRequest; ++i)
+		(void)f.pump();
+	(void)f.send(opennova::c2s::SPAWN_MENU_REQUEST);
+	for (int i = 0; i < 256 && j.slot_state != inmatch::PlayerSlotState::AwaitJoin; ++i)
+		(void)f.pump();
+	(void)f.send(opennova::c2s::MISSION_FILE_STATUS, {0x00});
+	std::vector<uint8_t> state_load;
+	ns::Datagram d;
+	while (f.joiner_transport.pop_outbound(d))
+		if (d.tag == opennova::s2c::WORLD_STATE_LOAD) state_load = d.body;
+	body = f.world->registry.get(j.link.owned_entity);
+	if (!expect(body != nullptr && body->position.x.q16 == marker[0] &&
+	                    body->position.y.q16 == marker[1] && body->position.z.q16 == marker[2],
+	            "the join places the body on its start marker again")) return false;
+	if (!expect((body->flags & 1u) == 0 && body->damage_state == 620,
+	            "the join clears the hidden bit and stores the 620 protection")) return false;
+	auto word = [&state_load](std::size_t at) {
+		return static_cast<int32_t>(static_cast<uint32_t>(state_load[at]) |
+				(static_cast<uint32_t>(state_load[at + 1]) << 8) |
+				(static_cast<uint32_t>(state_load[at + 2]) << 16) |
+				(static_cast<uint32_t>(state_load[at + 3]) << 24));
+	};
+	return expect(state_load.size() >= 16 && word(4) == marker[0] && word(8) == marker[1] &&
+	                      word(12) == marker[2],
+	              "the 0x0F carries the join's placement");
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +292,7 @@ int main() {
 	if (!run_track_waits_for_player_sync_request()) ++failures;
 	if (!run_no_player_list_off_the_scoreboard_clock()) ++failures;
 	if (!run_one_step_per_boundary()) ++failures;
+	if (!run_join_places_the_hidden_body()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;
