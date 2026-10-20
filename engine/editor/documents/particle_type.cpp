@@ -12,6 +12,7 @@
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/file_stamps.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/particle_keys.h>
 #include <editor/documents/project_check.h>
 #include <editor/documents/text_types.h>
 #include <editor/project/project_document.h>
@@ -138,39 +139,6 @@ struct LoadedParticles {
 	particle::ParticlePlaces places;
 };
 
-// The last place the block (`kind`, `index`) writes `key` (without case: the reader folds known keys, and of a key
-// written twice the last is read).
-const particle::KeyPlace *key_place(const particle::ParticlePlaces &places, particle::BlockKind kind, size_t index,
-		const std::string &key) {
-	const particle::KeyPlace *found = nullptr;
-	for (const particle::KeyPlace &place : places.keys)
-		if (place.block == kind && place.index == index && strutil::iequals(place.key, key)) found = &place;
-	return found;
-}
-
-// The line and column (1-based) of `name` inside the value `place` holds (the value's start where it does not
-// stand alone among the commas): where Problems opens the file.
-void name_place(const std::string &text, const particle::KeyPlace &place, const std::string &name, size_t &line,
-		size_t &column) {
-	const auto separates = [](char c) { return c == ',' || c == ' ' || c == '\t'; };
-	const size_t end = std::min(text.size(), place.offset + place.length);
-	size_t at = place.offset;
-	for (size_t from = place.offset; from < end && !name.empty();) {
-		const size_t found = text.find(name, from);
-		if (found == std::string::npos || found + name.size() > end) break;
-		const char before = found > place.offset ? text[found - 1] : ',';
-		const char after = found + name.size() < end ? text[found + name.size()] : ',';
-		if (separates(before) && separates(after)) {
-			at = found;
-			break;
-		}
-		from = found + 1;
-	}
-	const size_t newline = at == 0 ? std::string::npos : text.rfind('\n', at - 1);
-	line = size_t(std::max(place.line, 0));
-	column = at - (newline == std::string::npos ? 0 : newline + 1) + 1;
-}
-
 class ParticleProjectCheck final : public ProjectCheck {
 public:
 	bool update(const ProjectCheckInput &input) override {
@@ -223,11 +191,17 @@ public:
 	}
 
 private:
+	// A finding at `name`, the `nth` name of the value `place` holds (particle_value_name; the value's start where the
+	// word is another): where Problems opens the file; at the fallback where the block writes no such key.
 	void add_(ParticleFinding code, std::string message, const LoadedParticles &read, const particle::KeyPlace *place,
-			const std::string &name, int fallback_line, int fallback_column) {
+			size_t nth, const std::string &name, int fallback_line, int fallback_column) {
 		Diagnostic d = make_finding(finding_code(code), DiagnosticSeverity::Warning, std::move(message), read.path);
 		if (place) {
-			name_place(read.text, *place, name, d.line, d.column);
+			size_t at = place->offset;
+			particle_value_name(read.text, place->offset, place->length, nth, name, at);
+			const size_t newline = at == 0 ? std::string::npos : read.text.rfind('\n', at - 1);
+			d.line = size_t(std::max(place->line, 0));
+			d.column = at - (newline == std::string::npos ? 0 : newline + 1) + 1;
 		} else {
 			d.line = size_t(std::max(fallback_line, 0));
 			d.column = size_t(std::max(fallback_column, 0));
@@ -243,10 +217,12 @@ private:
 		// CEffectWorld_FindParticleDefByName @ 0x5E41D0, _stricmp @ 0x5E420C].
 		for (size_t e = 0; e < read.file.effects.size(); ++e) {
 			const particle::EffectDef &effect = read.file.effects[e];
-			const particle::KeyPlace *place = key_place(read.places, BlockKind::Effect, e, "pdefs");
+			const particle::KeyPlace *place = particle_key_place(read.places, BlockKind::Effect, e, "pdefs");
 			const std::string shown = effect.id.empty() ? std::string("an effect of no id") : "the effect " + effect.id;
 			std::string first;
+			size_t word = 0; // the member's word in the line (a member of no name is a slot past the line's words)
 			for (const std::string &member : effect.pdefs) {
+				const size_t nth = member.empty() ? word : word++;
 				// A member of no name (the editor's Add writes one) is no name to report.
 				if (member.empty() || particles.count(strutil::to_lower(member))) continue;
 				if (first.empty()) first = member;
@@ -255,7 +231,7 @@ private:
 						"game loads: the game resolves an effect's particles all or none, so " + shown +
 								" spawns nothing (the game's log: UNRESOLVED: EFFDEF " + effect.id + " missing PARDEF " +
 								first + "). Define the particle, or take it out of pdefs.",
-						read, place, member, effect.id_line, effect.id_column);
+						read, place, nth, member, effect.id_line, effect.id_column);
 			}
 		}
 		// A particle's curves, each by its table's id among every file's [tabledef]s, without case: a miss is a
@@ -265,14 +241,14 @@ private:
 			const particle::ParticleDef &definition = read.file.particles[p];
 			const auto curve = [&](const particle::CurveRef &ref, const std::string &key, const char *channel) {
 				if (!ref.present || ref.name.empty() || tables.count(strutil::to_lower(ref.name))) return;
-				const particle::KeyPlace *place = key_place(read.places, BlockKind::Particle, p, key);
+				const particle::KeyPlace *place = particle_key_place(read.places, BlockKind::Particle, p, key);
 				// A graphic's curve no line of its own wrote: the copy its graphicN line took of the particle's.
 				if (!place && key[0] == 'g') return;
 				add_(ParticleFinding::CurveUnresolved,
 						"The table " + ref.name + ", which " + key + " of the particle " + definition.id + " names, is "
 						"defined by no particle file the game loads: the game logs it not found and draws the particle's " +
 								channel + " without its curve. Define the table, or name another.",
-						read, place, ref.name, 0, 0);
+						read, place, 0, ref.name, 0, 0);
 			};
 			curve(definition.scale_func, "scale_func", "scale");
 			curve(definition.alpha_func, "alpha_func", "alpha");

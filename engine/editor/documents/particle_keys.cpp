@@ -172,6 +172,39 @@ void layout_at(const std::string &text, const ParticleKeyBlock &block, const std
 
 } // namespace
 
+const particle::KeyPlace *particle_key_place(const particle::ParticlePlaces &places, BlockKind kind, size_t index,
+		const std::string &key) {
+	const particle::KeyPlace *found = nullptr;
+	for (const particle::KeyPlace &place : places.keys)
+		if (place.block == kind && place.index == index && strutil::iequals(place.key, key)) found = &place;
+	return found;
+}
+
+bool particle_value_name(const std::string &text, size_t offset, size_t length, size_t nth, const std::string &name,
+		size_t &at) {
+	const size_t end = std::min(text.size(), offset + length);
+	const auto cuts = [](char c, bool quoted) { return c == '"' || (!quoted && (c == ' ' || c == '\t' || c == ',')); };
+	bool quoted = false;
+	size_t count = 0;
+	for (size_t i = std::min(offset, end); i < end;) {
+		if (cuts(text[i], quoted)) {
+			if (text[i] == '"') quoted = !quoted;
+			++i;
+			continue;
+		}
+		size_t j = i;
+		while (j < end && !cuts(text[j], quoted)) ++j;
+		const bool separator = j - i == 1 && text[i] == '=';
+		if (!separator && count++ == nth) {
+			if (text.compare(i, j - i, name) != 0) return false;
+			at = i;
+			return true;
+		}
+		i = j;
+	}
+	return false;
+}
+
 std::vector<ParticleKeyBlock> particle_key_blocks(const TextDocument &document, bool *read) {
 	std::vector<ParticleKeyBlock> out;
 	particle::ParticleFile file;

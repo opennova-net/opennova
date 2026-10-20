@@ -35,6 +35,23 @@ struct ParticleKeyBlock {
 	std::vector<ParticleKeyField> fields;
 };
 
+// The bytes the game keeps an effect's pdefs member's name in, its terminator included: the 64-byte name slots from
+// +340 its resolve reads [orig: CEffectBank_ResolveAllEntries @ 0x5E4920]; a longer name the slot cannot hold.
+inline constexpr std::size_t kPdefsNameSlot = 64;
+
+// The last place the block (`kind`, `index`) writes `key`, without case (the reader folds the keys it knows, and of a
+// key written twice it keeps the last); null for none.
+const particle::KeyPlace *particle_key_place(const particle::ParticlePlaces &places, particle::BlockKind kind,
+		std::size_t index, const std::string &key);
+// Where a name a key's value holds is written: the `nth` (from 0) word of the value at `offset`, `length` bytes of
+// `text`, the words as the game's tokenizer cuts them (a blank, a tab or a ',' between, a '"' toggling a quoted run
+// whose blanks and commas are its own [orig: Config_TokenizeLine @ 0x53CB60]; a '=' alone a separator the reader's
+// token helper passes over [orig: CParticleDefEntry_NextToken @ 0x5DFFB0]): its offset in `text`, when that word is
+// `name` as the reader took it (a word the reader takes otherwise, one holding a separator its helper strips, is no
+// place of the name). False for none: the value holds fewer words, or that word is another.
+bool particle_value_name(const std::string &text, std::size_t offset, std::size_t length, std::size_t nth,
+		const std::string &name, std::size_t &at);
+
 // The blocks of the text as the game's reader reads it, in the text's order; none where it stops in the text, which
 // `read` says (a text of no block the reader takes whole reads too).
 std::vector<ParticleKeyBlock> particle_key_blocks(const TextDocument &document, bool *read = nullptr);

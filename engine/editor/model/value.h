@@ -98,6 +98,7 @@ enum class ReferenceKind {
 	MusicStream,    // a music bank's stream by its place, in the bank the scope names (a music script's play)
 	ItemName,       // an item by its primary name, the first of it without case (an ammo's tracer, by the ammo's name)
 	ParticleTable,  // a particle file's [tabledef] by its id, without case (a particle's curve: its *_func, a graphic's)
+	ParticleDefinition, // a particle file's [particledef] by its id, without case (an effect's pdefs member, a child_id)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is
