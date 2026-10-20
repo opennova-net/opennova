@@ -395,6 +395,22 @@ void test_a_spectator_slots_death_stops_at_the_latch() {
 	CHECK(Fixture::first(out_run, s2c::GAME_EVENT) < 0);
 }
 
+// A player body no active slot holds (a leaver's lingering body) dies with no 0x13 and
+// no feed: Entity_ValidatePtr finds no slot and the transaction returns after the
+// carried-object drop. [orig: GameEvent_PlayerDeath - Entity_ValidatePtr @0x516E48
+// (@0x500910), the null `jz` @0x516E52..0x516E54 to @0x517442..0x51745A]
+void test_a_body_no_slot_holds_dies_without_a_0x13() {
+	Fixture f;
+	f.conn(0).link.owned_entity = {}; // the slot no longer holds the body
+	f.hit(0, 1);
+	inmatch::Server_TickUpdate(f.ctx);
+	inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<ns::Datagram> out = f.drain(1);
+	for (const uint16_t victim : f.deaths(out)) CHECK(victim != f.players[0].packed);
+	CHECK(Fixture::first(out, s2c::GAME_EVENT) < 0);
+	CHECK(f.entity(0).health == 0);
+}
+
 // A hidden body (Flags bit 0, a held slot's, which every 0x0A re-sets) at
 // Health 0: the edge skips it. [orig: NetPacket_WritePlayerState @0x4FF6D7 /
 // @0x4FF7B8]
@@ -610,6 +626,7 @@ int main() {
 	test_kill_player_dies_twice();
 	test_kill_player_unstaged_dies_killerless_twice();
 	test_a_spectator_slots_death_stops_at_the_latch();
+	test_a_body_no_slot_holds_dies_without_a_0x13();
 	test_hidden_body_is_skipped();
 	test_dedicated_host_updates_through_the_preround();
 	test_own_clients_copy_holds_the_update();

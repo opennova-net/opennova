@@ -270,14 +270,23 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 	}
 	// The player transaction's head: a mounted victim leaves its seat, every
 	// pool-0 AI body's link to it goes, and a slot whose spectator latch is set
-	// stops there: no 0x13, holds, scoring or carried-object drop.
-	// [orig: GameEvent_PlayerDeath -- the +0x16C test and
+	// stops there: no 0x13, holds, scoring or carried-object drop. A body no
+	// active slot holds (a leaver's lingering body) stops there too, dropping
+	// what it carries. [orig: GameEvent_PlayerDeath -- the +0x16C test and
 	//  Entity_DetachFromVehicleIfServer @0x516DE7..0x516DFF, the pool-0 walk
-	//  @0x516E07..0x516E45, Entity_ValidatePtr @0x516E48, the latch
-	//  `cmp [edi+188D7h], bl` @0x516E5A, the return @0x516E60]
+	//  @0x516E07..0x516E45, Entity_ValidatePtr @0x516E48 (the active slot
+	//  holding the body, @0x500910), its null `jz` @0x516E52..0x516E54 to the
+	//  carried test `cmp [esi+268h], 0` @0x517442 and Entity_DropCarriedObject
+	//  @0x51744C; the latch `cmp [edi+188D7h], bl` @0x516E5A, the return
+	//  @0x516E60]
 	if (victim_is_player) {
 		if (victim_entity->mounted) world.vehicles.detach(d.victim);
-		if (victim_connection != nullptr && victim_connection->link.spectator) {
+		if (victim_connection == nullptr) {
+			world.match.unlink_point_share_links(world, d.victim);
+			world.match.drop_carried_object(world, d.victim);
+			return;
+		}
+		if (victim_connection->link.spectator) {
 			world.match.unlink_point_share_links(world, d.victim);
 			return;
 		}
