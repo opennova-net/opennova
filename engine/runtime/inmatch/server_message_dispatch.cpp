@@ -401,7 +401,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	const IntegritySources &integrity = config.integrity_sources;
 
 	if (conn.admission_stage != GameAdmissionStage::Complete)
-		return dispatch_admission(config, conn, messages, now_tick, roster, world, inputs);
+		return dispatch_admission(config, conn, messages, now_tick, roster, inputs);
 
 	for (const ProtocolMessage &msg : messages) {
 		// Protocol-control + settings-update frames are not gameplay messages (the original filters
@@ -555,7 +555,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				dispatch_join_form_post(now_tick, replies);
 				break;
 			case c2s::JOIN_PADDING_ECHO: // duplicate GLB_JOIN reply after admission
-				dispatch_join_padding_echo(config, conn, now_tick, roster, world, inputs, replies);
+				dispatch_join_padding_echo(config, conn, now_tick, inputs, replies);
 				break;
 			case c2s::PLAYER_SYNC_REQUEST: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot

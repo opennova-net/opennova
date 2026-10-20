@@ -26,7 +26,7 @@ namespace opennova::inmatch {
 // connection). Every call returns; the in-match switch never runs for it.
 std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 		NapiNPConnection &conn, const std::vector<ProtocolMessage> &messages,
-		uint32_t now_tick, std::vector<NapiNPConnection> &roster, world::World *world,
+		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
 		const ServerDispatchInputs &inputs);
 
 // The case bodies of the in-match switch.
@@ -34,8 +34,8 @@ void dispatch_join(NapiNPConnection &conn, const ProtocolMessage &msg,
 		std::vector<ProtocolMessage> &replies);                            // C2S 0x00
 void dispatch_join_form_post(uint32_t now_tick, std::vector<ProtocolMessage> &replies); // C2S 0x01
 void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
-		uint32_t now_tick, std::vector<NapiNPConnection> &roster, world::World *world,
-		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies); // C2S 0x02
+		uint32_t now_tick, const ServerDispatchInputs &inputs,
+		std::vector<ProtocolMessage> &replies);                            // C2S 0x02
 void dispatch_file_chunk_request(const GameConfig &config, const ProtocolMessage &msg,
 		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies); // C2S 0x33
 void dispatch_mission_chunk_request(const GameConfig &config, const ProtocolMessage &msg,

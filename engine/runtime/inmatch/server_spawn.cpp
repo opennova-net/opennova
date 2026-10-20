@@ -155,9 +155,9 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	return 0;
 }
 
-// Roster slots are stable identities. Retail walks the fixed player-slot table and installs the
-// player into the first empty row; counting live players collides after a non-tail leave.
-// [orig: Server_PlayerAdd @0x51CBC0 writes the first free dword_A87048 row]
+// Roster slots are stable identities: a row is active while a connection claims it (its add,
+// or its pre-add reservation, the stand-in until D-NET-715 drops the 0x02's).
+// [orig: the slot's active byte +4, Server_PlayerAdd @0x51CBC0]
 bool connection_claims_player_slot(const NapiNPConnection &connection) {
 	return connection.reply.player_slot_reserved ||
 			connection.phase >= ConnectionPhase::PlayerAdded ||
@@ -169,13 +169,19 @@ bool connection_claims_player_slot(const NapiNPConnection &connection) {
 // remote add picks among the inactive rows only, so no joiner ever holds slot
 // 0. A Serve Only host builds no local connection and leaves that row
 // connectionless, so its first joiner takes slot 1 and its NovaWorld
-// PlayerList never names slot 0 (D-NET-350).
+// PlayerList never names slot 0 (D-NET-350). Of the inactive rows the pick
+// takes the one free the longest: the first inactive row is the best until a
+// later one's free-tick count is greater, signed, so a tie keeps the lowest
+// index; after a leave the next joiner takes the row freed earliest or never
+// used, not the one just freed (D-NET-351).
 // [orig: Server_InitNewRoundState @0x51c99a..0x51ca3c (slot 0 active, local);
 //  Server_PlayerAdd @0x51cc31..0x51cc65 (the local add -> g_LocalNetPlayer),
-//  @0x51cc9a -> PlayerSlot_PickFreeSlot @0x4fd7d0 (only rows whose +4 active byte is 0)]
+//  @0x51cc9a -> PlayerSlot_PickFreeSlot @0x4FD7B0 - the active byte @0x4FD7D0, the
+//  first best @0x4FD7DA, `cmp edx, edi; jle` @0x4FD7E2..0x4FD7EA]
 std::optional<uint8_t> first_free_player_slot(
 		const std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection *joining, uint32_t slot_capacity) {
+		const NapiNPConnection *joining, uint32_t slot_capacity,
+		const PlayerRowFreeTicks *free_ticks) {
 	std::array<bool, 256> occupied{};
 	for (const NapiNPConnection &connection : roster) {
 		if (&connection == joining ||
@@ -185,10 +191,17 @@ std::optional<uint8_t> first_free_player_slot(
 	const bool remote = joining != nullptr && joining->type == NapiNPConnection::kTypeServerSide;
 	const std::size_t bounded_capacity =
 			std::min<std::size_t>(slot_capacity, occupied.size());
+	std::optional<uint8_t> best;
+	int32_t best_ticks = 0;
 	for (std::size_t slot = remote ? 1 : 0; slot < bounded_capacity; ++slot) {
-		if (!occupied[slot]) return static_cast<uint8_t>(slot);
+		if (occupied[slot]) continue;
+		const int32_t ticks = free_ticks != nullptr ? (*free_ticks)[slot] : 0;
+		if (!best.has_value() || ticks > best_ticks) {
+			best = static_cast<uint8_t>(slot);
+			best_ticks = ticks;
+		}
 	}
-	return std::nullopt;
+	return best;
 }
 
 // A host with no player profile of its own (opennova-serve keeps none) reads a
@@ -226,7 +239,7 @@ void init_host_slot_row(NapiNPServerCtx &ctx) {
 
 std::optional<uint8_t> Server_ReservePlayerSlot(
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		uint32_t slot_capacity) {
+		uint32_t slot_capacity, PlayerRowFreeTicks *free_ticks) {
 	if (connection_claims_player_slot(conn)) {
 		if (conn.reply.player_slot >= slot_capacity) return std::nullopt;
 		// A repeated post-handshake send and the alternate explicit-bind seam
@@ -241,11 +254,26 @@ std::optional<uint8_t> Server_ReservePlayerSlot(
 	}
 
 	const std::optional<uint8_t> slot =
-			first_free_player_slot(roster, &conn, slot_capacity);
+			first_free_player_slot(roster, &conn, slot_capacity, free_ticks);
 	if (!slot.has_value()) return std::nullopt;
 	conn.reply.player_slot = *slot;
 	conn.reply.player_slot_reserved = true;
+	if (free_ticks != nullptr) (*free_ticks)[*slot] = 0; // [orig: the add's memset @0x51CD06]
 	return slot;
+}
+
+void Server_AdvanceFreeRowTicks(NapiNPServerCtx &ctx) {
+	std::array<bool, 256> active{};
+	active[0] = ctx.host_slot.active;
+	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection_claims_player_slot(connection)) active[connection.reply.player_slot] = true;
+	const std::size_t rows = std::min<std::size_t>(
+			ctx.config.total_player_slot_capacity(), ctx.player_row_free_ticks.size());
+	for (std::size_t row = 0; row < rows; ++row) {
+		if (active[row]) continue;
+		int32_t &ticks = ctx.player_row_free_ticks[row];
+		if (ticks < 0x7FFFFFFF) ++ticks;
+	}
 }
 
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
@@ -288,6 +316,9 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// state init and keeps it [orig: `mov g_ServerJoinLocked, ebx(0)` @0x51CAAA].
 	ctx.join_locked = false;
 	if (!ctx.is_authority) return;
+	// The table's allocation zeroes every row, the free-tick counts included
+	// [orig: Server_AllocatePlayerSlotTable @0x51C1CB, from @0x51C97B].
+	ctx.player_row_free_ticks.fill(0);
 	init_host_slot_row(ctx);
 	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority
@@ -313,7 +344,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(
 					ctx.np_protocol.connection_list, conn,
-					ctx.config.total_player_slot_capacity());
+					ctx.config.total_player_slot_capacity(), &ctx.player_row_free_ticks);
 	// With no free row retail disconnects the first bot row's player and picks again; JO
 	// has no bot rows (the bot byte's one store copies the add event's robot word, which
 	// the one add builder zeroes), so it disconnects nobody, logs to the _svrlog ring
@@ -688,16 +719,20 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 			// exchange (and may later restamp its dcb via 0x48). Mid-handshake nodes are skipped.
 			if (!conn.self_id_seen) continue;
 			if (conn.phase >= ConnectionPhase::PlayerAdded) continue; // already spawned
+			if (conn.spawn_queue_unlinked) continue; // off the pending list [orig: @0x4C8E68..0x4C8E6C]
 			// NetPlayer state 4: the NovaWorld ticket result is outstanding, so
 			// the player is not yet in the pump's state-6 population.
 			// [orig: CNetPlayer_SetGameState(player, 4) @0x4C8BCA, back to 6 only
 			//  in HandlePlayEnterResponse @0x4D1C11]
 			if (conn.player_enter_pending()) continue;
 			if (has_spawn_slots && balance_join_admits(ctx, conn, world)) {
-				// Retail unlinks the node before the add, so a failed add (pool
-				// full, no AiSystem) leaves the walk; only a successful add
-				// restarts it from the head [orig: unlink @0x4C8FF6, goto LABEL_5
-				// @0x4C9128].
+				// Retail unlinks the node and sends its 0x03 before the add, so a
+				// failed add (no free row, pool full) leaves a joiner with no row,
+				// no body and no further message, which the walk never visits
+				// again; either way the walk restarts from the head (D-NET-715).
+				// [orig: NapiNode_UnlinkFromList @0x4C8FF6, the 0x03 @0x4C9034, the
+				//  add @0x4C903A, the success test @0x4C904E, goto LABEL_5 @0x4C9128]
+				conn.spawn_queue_unlinked = true;
 				// A remote add's slot memset zeroes its damage-class bytes, which
 				// the round init's re-add keeps; the host's own add arm skips the
 				// memset, its bytes the slot table's allocation zero, as its fresh
@@ -707,8 +742,14 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// @0x51C1CB].
 				if (conn.type == NapiNPConnection::kTypeServerSide)
 					conn.ammo_damage_classes.fill(0);
-				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false).valid())
-					continue;
+				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false).valid()) {
+					// The unlink's 0x03 is all it gets (framed by tick_connections, the
+					// held-joiner 0x03's writer).
+					if (conn.type == NapiNPConnection::kTypeServerSide)
+						conn.reply.admission_hold_nag_pending = true;
+					restart = true;
+					break;
+				}
 				// The added player's net player enters game state 8 and its slot state 1,
 				// where it waits for its C2S 0x09 [orig: CNetPlayer_SetGameState(.., 8)
 				// @0x4C911A, CServerTick_SetPhase(slot, 1) @0x4C9123].
@@ -789,7 +830,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	}
 	const std::optional<uint8_t> player_slot = Server_ReservePlayerSlot(
 			ctx.np_protocol.connection_list, *conn,
-			ctx.config.total_player_slot_capacity());
+			ctx.config.total_player_slot_capacity(), &ctx.player_row_free_ticks);
 	if (!player_slot.has_value()) {
 		world.registry.despawn(h);
 		if (created_connection) ctx.np_protocol.connection_list.pop_back();

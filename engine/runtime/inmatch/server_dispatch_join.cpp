@@ -293,28 +293,17 @@ void append_connection_settings(const GameConfig &cfg,
 }
 
 void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
-                             std::vector<NapiNPConnection> &roster, world::World *world,
                              const NapiNPServerCtx *ctx, std::vector<ProtocolMessage> &out) {
-	// Retail's 0x02 handler picks no slot row: it stamps the timing and the holdoff, sends the
-	// 0x01 / 0x7A / 0x7B / 0x03 records and sets game state 7, and Server_PlayerAdd picks the
-	// row at the add. So a joiner the lineup queue admitted past the rows completes its
-	// admission, and the spawn pump holds it past the cap (re-sending the 0x03) until a row
-	// frees. Ours reserves a row here when one is free (the delayed 0x04 and the live entity
-	// then agree); with none, the add reserves it.
+	// Retail's 0x02 handler picks no slot row and assigns no team: it stamps the timing and
+	// the holdoff, sends the 0x01 / 0x7A / 0x7B / 0x03 records and sets game state 7;
+	// Server_PlayerAdd picks the row and assigns the team at the add, which the spawn pump's
+	// 0x04 then sends. So a joiner the lineup queue admitted past the cap completes its
+	// admission holding nothing, weighs on no other joiner's team, and the spawn pump holds
+	// it (re-sending the 0x03) until the cap admits it (D-NET-714, D-NET-715).
 	// [orig: the C2S 0x02 handler @0x512FD0 - NapiNPServer_UpdateHoldoffTicks @0x513068, the
 	//  sends @0x5130AC..0x5131D5, game state 7 @0x51319C; Server_PlayerAdd's row pick
-	//  @0x51CC9A; CNapiServer_ProcessPendingPlayerSpawns's cap @0x4C8E13]
-	const uint8_t capacity =
-			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig: g_PlayerSlotCapacity @0x24c0ca4]
-	(void)Server_ReservePlayerSlot(roster, conn, capacity);
-	// Team is allocated at admission, even though it is intentionally not serialized until
-	// the later spawn-pump packet. Player-add consumes this reservation, so the delayed 0x04
-	// and the live entity cannot disagree.
-	if (world != nullptr) {
-		(void)Server_ReservePlayerTeam(cfg, /*is_in_session=*/true, roster, conn, *world,
-				ctx != nullptr ? ctx->rotation : nullptr, ctx != nullptr ? &ctx->host_slot : nullptr);
-	}
-
+	//  @0x51CC9A, Server_AssignPlayerTeam @0x4FE310; CNapiServer_ProcessPendingPlayerSpawns's
+	//  cap @0x4C8E13]
 	// The both-direction send-holdoff dictation (H:0x00 mask 8 / CS field 3)
 	// [orig: NapiNPServer_UpdateHoldoffTicks @0x4c5f40 sends @0x4c5fc0/@0x4c5fcb;
 	// the golden NovaWorld capture carries 0x0C = 12 here]. OpenNova dictates
@@ -451,7 +440,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 // See header. The admission FSM ahead of the in-match switch.
 std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 		NapiNPConnection &conn, const std::vector<ProtocolMessage> &messages,
-		uint32_t now_tick, std::vector<NapiNPConnection> &roster, world::World *world,
+		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
 		const ServerDispatchInputs &inputs) {
 	std::vector<ProtocolMessage> replies;
 	SessionReplyState &st = conn.reply;
@@ -527,7 +516,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				return {};
 			}
 			if (!st.admission_metadata_pushed) {
-				emit_admission_metadata(config, conn, roster, world, inputs.server_ctx, replies);
+				emit_admission_metadata(config, conn, inputs.server_ctx, replies);
 				st.admission_metadata_pushed = true;
 				st.admission_completed_tick = now_tick;
 			}
@@ -560,14 +549,14 @@ void dispatch_join_form_post(uint32_t now_tick, std::vector<ProtocolMessage> &re
 
 // See header.
 void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
-		uint32_t now_tick, std::vector<NapiNPConnection> &roster, world::World *world,
-		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies) {
+		uint32_t now_tick, const ServerDispatchInputs &inputs,
+		std::vector<ProtocolMessage> &replies) {
 	SessionReplyState &st = conn.reply;
 	// The first valid echo is consumed by the admission FSM above. A synthetic
 	// caller entering here gets the same one-shot metadata; spawn metadata and
 	// roster remain tick-owned boundaries.
 	if (!st.admission_metadata_pushed) {
-		emit_admission_metadata(config, conn, roster, world, inputs.server_ctx, replies);
+		emit_admission_metadata(config, conn, inputs.server_ctx, replies);
 		st.admission_metadata_pushed = true;
 		st.admission_completed_tick = now_tick;
 	}

@@ -692,6 +692,11 @@ struct NapiNPConnection {
 	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches. LAN latches the
 	// host-assigned id after admission 0x02; a later 0x48 echo may restamp it (NovaWorld supplies it).
 	bool self_id_seen = false;             // true only once player admission has completed
+	// The spawn pump took the node off its pending list, ahead of its add: it never walks it
+	// again, whether the add succeeded or failed (D-NET-715).
+	// [orig: CNapiServer_ProcessPendingPlayerSpawns - the pending test (net player +0x18)
+	//  @0x4C8E68..0x4C8E6C, NapiNode_UnlinkFromList @0x4C8FF6]
+	bool spawn_queue_unlinked = false;
 	bool world_stream_announced = false;   // F3 edge-latch (PeerEnteredWorldStreaming fires once)
 	bool spawned_announced = false;        // edge-latch (PeerSpawned fires once)
 

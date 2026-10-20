@@ -3,6 +3,7 @@
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
 #include <runtime/inmatch/server_overlay_state.h>     // the 14-tick minimap overlay visits
 #include <runtime/inmatch/server_player_death.h>     // the flag reset's Health store (kill_player_body_at_frame_tail)
+#include <runtime/inmatch/server_spawn.h>            // Server_AdvanceFreeRowTicks (the tail walk's free rows)
 
 #include <algorithm>
 #include <cstdint>
@@ -568,6 +569,7 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
 		body.push_back(1);
 		conn.link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
 	}
+	Server_AdvanceFreeRowTicks(ctx); // the same walk's inactive rows (D-NET-351)
 }
 
 // The scoreboard boundary, every tick after the script pass and ahead of the

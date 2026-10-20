@@ -202,6 +202,9 @@ struct StagedEntityUpdateBatch {
 	std::vector<StagedEntityUpdateSend> sends;
 };
 
+// One count per player-slot row (at most 251 rows, Server_InitNewRoundState's clamp).
+using PlayerRowFreeTicks = std::array<int32_t, 256>;
+
 struct NapiNPServerCtx {
 	NetworkType transport_mode = NetworkType::Lan; // [orig +0x50]
 	SocketMode socket_state = SocketMode::Socketless; // [orig +0x54]
@@ -604,6 +607,15 @@ struct NapiNPServerCtx {
 	// A Serve Only host's own slot 0 (HostSlotRow); inactive on a listen host,
 	// whose loopback connection holds slot 0.
 	HostSlotRow host_slot;
+	// Each player-slot row's free-tick count (+0x180): the server ticks since the
+	// row was freed, or since the table was allocated, saturating at 0x7FFFFFFF.
+	// The table's allocation and a row's add zero it; the tick's tail walk steps
+	// every inactive row's (Server_AdvanceFreeRowTicks); a remote add takes the
+	// row free the longest (D-NET-351).
+	// [orig: slot +0x180 - Server_TickUpdate @0x51E3A0..0x51E3A4, @0x51E457..0x51E467;
+	//  PlayerSlot_PickFreeSlot @0x4FD7D0..0x4FD7EE; the memsets
+	//  Server_AllocatePlayerSlotTable @0x51C1CB, Server_PlayerAdd @0x51CD06]
+	PlayerRowFreeTicks player_row_free_ticks{};
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.

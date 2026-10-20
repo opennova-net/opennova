@@ -52,16 +52,27 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const world::World &world, const HostRotation *rotation = nullptr,
 		const HostSlotRow *host_slot = nullptr);
 
-// Reserve the first free fixed roster-table row before S2C 0x04 advertises it.
-// Existing player bindings and other pre-spawn reservations both occupy rows;
-// repeated calls for one connection return the same row. Player-add consumes
-// the reservation, while erasing the connection releases it. No row at or
-// above the advertised slot capacity can be reserved.
-// [orig: Server_PlayerAdd's dword_A87048 row is already attached to the
-// playerSlot record consumed by NetPacket_WriteSlotAssignment @0x502b30]
+// Reserve a free fixed roster-table row before S2C 0x04 advertises it: of the
+// inactive rows below `slot_capacity`, the one free the longest by
+// `free_ticks` (signed, the lowest index on a tie; null counts all zero), a
+// remote never row 0; the reservation zeroes the row's count, as the add's
+// memset does. Existing player bindings and other pre-spawn reservations both
+// occupy rows; repeated calls for one connection return the same row.
+// Player-add consumes the reservation, while erasing the connection releases
+// it (D-NET-351).
+// [orig: Server_PlayerAdd @0x51CC9A -> PlayerSlot_PickFreeSlot @0x4FD7B0
+//  (@0x4FD7D0..0x4FD7EE), the memset @0x51CD06; NetPacket_WriteSlotAssignment
+//  @0x502B30 reads the row]
 std::optional<uint8_t> Server_ReservePlayerSlot(
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		uint32_t slot_capacity);
+		uint32_t slot_capacity, PlayerRowFreeTicks *free_ticks = nullptr);
+
+// The server tick's tail walk's arm for an inactive row: its free-tick count
+// steps once, saturating at 0x7FFFFFFF (D-NET-351). A row is active while a
+// connection claims it, or (row 0) while a Serve Only host's own row is.
+// [orig: Server_TickUpdate - `cmp byte ptr [esi+4], 0; jz` @0x51E3A0..0x51E3A4,
+//  @0x51E457..0x51E467]
+void Server_AdvanceFreeRowTicks(NapiNPServerCtx &ctx);
 
 // §5.2a step 1 — [orig: Server_InitNewRoundState @0x51c8e0]. Set up the local-player/round context
 // for an authority host. Structural: clears the loading-progress counter for a fresh round (the

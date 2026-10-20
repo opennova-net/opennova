@@ -17,6 +17,10 @@
 //     Server_SendInitialGameStateToPlayer @0x51BBA3..0x51BBA9, @0x51BEFF..0x51BF05];
 //   - D-NET-401: the player-slot table is the slot limit alone [orig: Server_InitNewRoundState
 //     @0x51C948..0x51C97B];
+//   - D-NET-351: a remote add takes the row free the longest [orig: PlayerSlot_PickFreeSlot
+//     @0x4FD7B0; Server_TickUpdate @0x51E457..0x51E467];
+//   - D-NET-715: the spawn pump unlinks a joiner before its add, so a failed add leaves it
+//     bodyless and never walked again [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8FF6];
 //   - D-NET-NEW-L1-8: the join arms the round-event watermark at the frame clock less one
 //     [orig: CNetPlayer_SetGameState @0x4C422D; Server_OnPlayerJoin @0x51A74C;
 //     Server_BuildRoundEventListForPlayer @0x4FFEE8, @0x5001A8..0x5001AE].
@@ -523,6 +527,140 @@ bool run_slot_table_is_the_slot_limit() {
 	return expect(false, "the spawn pump's metadata carries a 0x04");
 }
 
+// A Serve Only host (cap 5, six rows: the host's row 0 and 1..5) and admitted joiners
+// waiting for the spawn pump. Heap-held, as JoinFixture.
+struct SlotFixture {
+	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	opennova::bms::File mission;
+	std::vector<std::unique_ptr<ns::UdpSessionTransport>> transports;
+
+	explicit SlotFixture(int pool0_rows = 16) {
+		world->registry.configure_pool(0, pool0_rows);
+		world->registry.configure_pool(3, 4);
+		w::Entity start;
+		start.kind = w::EntityKind::Marker;
+		start.item_id = 6002;
+		start.position = {10.0f, 20.0f, 1.0f};
+		start.item_type_index = 1;
+		start.has_item_def = true;
+		world->registry.spawn(3, start);
+		opennova::mission::make_default(mission);
+		inmatch::GameConfig config;
+		config.max_players = 5;
+		config.dedicated_server = true;
+		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Socketless, /*host_key=*/0, nullptr, config);
+		ctx->world = world.get();
+		ctx->mission = &mission;
+		inmatch::Server_InitNewRoundState(*ctx);
+	}
+
+	inmatch::NapiNPConnection &admit(uint16_t port) {
+		transports.push_back(
+				std::make_unique<ns::UdpSessionTransport>(ns::UdpSessionTransport::Role::Host));
+		inmatch::NapiNPConnection &c = ctx->np_protocol.connection_list.emplace_back();
+		c.type = inmatch::NapiNPConnection::kTypeServerSide;
+		c.peer = opennova::PeerAddr{0x0100007Fu, port};
+		c.connection_id = inmatch::kFirstJoinerDcb + port;
+		c.player_name = "J" + std::to_string(port);
+		c.phase = inmatch::ConnectionPhase::Joined;
+		c.admission_stage = inmatch::GameAdmissionStage::Complete;
+		c.self_id_seen = true;
+		c.link.transport = transports.back().get();
+		c.link.mode = ns::TransportMode::Client;
+		return c;
+	}
+
+	inmatch::NapiNPConnection *find(uint16_t port) {
+		for (inmatch::NapiNPConnection &c : ctx->np_protocol.connection_list)
+			if (c.peer.port == port) return &c;
+		return nullptr;
+	}
+
+	int row_of(uint16_t port) {
+		const inmatch::NapiNPConnection *c = find(port);
+		return c != nullptr && c->phase >= inmatch::ConnectionPhase::PlayerAdded
+				? c->reply.player_slot : -1;
+	}
+
+	void ticks(int n) {
+		for (int i = 0; i < n; ++i) inmatch::Server_AdvanceFreeRowTicks(*ctx);
+	}
+};
+
+// D-NET-351: each inactive row's +0x180 counts the server ticks since it was freed (or the
+// table allocated); a remote add takes the inactive row whose count is greatest, the lowest
+// index on a tie. So joiners fill rows 1, 2, 3 in turn, and after the first leaves the next
+// joiner takes row 4 (never used), not row 1 (just freed); rows 4 and 5 taken, row 1 comes
+// next. The server tick steps every inactive row's count once and no active row's.
+// [orig: PlayerSlot_PickFreeSlot @0x4FD7B0 - @0x4FD7D0, @0x4FD7DA, @0x4FD7E2..0x4FD7EA;
+//  Server_TickUpdate @0x51E3A0..0x51E3A4, @0x51E457..0x51E467; Server_PlayerAdd's memset
+//  @0x51CD06; Server_AllocatePlayerSlotTable @0x51C1CB]
+bool run_the_pick_takes_the_row_free_longest() {
+	SlotFixture f;
+	f.ticks(10);
+	(void)f.admit(31001);
+	(void)f.admit(31002);
+	(void)f.admit(31003);
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(f.row_of(31001) == 1 && f.row_of(31002) == 2 && f.row_of(31003) == 3,
+	            "equal counts: the joiners take rows 1, 2, 3")) return false;
+	if (!expect(f.ctx->player_row_free_ticks[1] == 0 && f.ctx->player_row_free_ticks[4] == 10,
+	            "the add zeroes its row; a free row keeps counting")) return false;
+	const uint32_t before = f.ctx->player_row_free_ticks[4];
+	inmatch::Server_TickUpdate(*f.ctx);
+	if (!expect(f.ctx->player_row_free_ticks[4] == before + 1 &&
+	                    f.ctx->player_row_free_ticks[1] == 0 && f.ctx->player_row_free_ticks[0] == 0,
+	            "one server tick steps each inactive row once, no active row")) return false;
+	if (!expect(inmatch::destroy_connection(*f.ctx, f.find(31001)->peer, nullptr),
+	            "the first joiner leaves")) return false;
+	f.ticks(3);
+	(void)f.admit(31004);
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(f.row_of(31004) == 4, "after the leave the next joiner takes row 4, not row 1"))
+		return false;
+	(void)f.admit(31005);
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	(void)f.admit(31006);
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	return expect(f.row_of(31005) == 5 && f.row_of(31006) == 1,
+	              "rows 4 and 5 taken, the freed row 1 comes next");
+}
+
+// D-NET-715: the pump takes the joiner off its pending list and sends its 0x03 before the add,
+// so an add that fails (here the player pool is full) leaves it connected with no row, no body
+// and no disconnect; the pump never walks it again, so no second attempt and no further 0x03.
+// [orig: CNapiServer_ProcessPendingPlayerSpawns - the pending test @0x4C8E68..0x4C8E6C,
+//  NapiNode_UnlinkFromList @0x4C8FF6, the 0x03 @0x4C9034, the add @0x4C903A, its success test
+//  @0x4C904E, goto LABEL_5 @0x4C9128]
+bool run_a_failed_add_leaves_the_joiner_bodyless() {
+	SlotFixture f(/*pool0_rows=*/1);
+	w::Entity filler;
+	filler.kind = w::EntityKind::Organic;
+	(void)f.world->registry.spawn(0, filler); // the one pool-0 row taken
+	inmatch::NapiNPConnection &j = f.admit(31101);
+	ns::UdpSessionTransport *transport = f.transports.back().get();
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 0,
+	            "the add fails")) return false;
+	if (!expect(!j.link.owned_entity.valid() && j.phase < inmatch::ConnectionPhase::PlayerAdded &&
+	                    !j.host_disconnect_sent && !j.pending_disconnect && j.spawn_queue_unlinked,
+	            "no body, no row, no disconnect; off the pending list")) return false;
+	auto sync_ticks = [&](uint32_t tick) {
+		(void)inmatch::tick_connections(*f.ctx, /*elapsed_ms=*/16, tick);
+		int count = 0;
+		ns::Datagram d;
+		while (transport->pop_outbound(d))
+			if (d.tag == opennova::s2c::SYNC_TICK) ++count;
+		return count;
+	};
+	if (!expect(sync_ticks(5) == 1, "its unlink's 0x03 is the one message it gets")) return false;
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(!j.link.owned_entity.valid() && sync_ticks(6) == 0,
+	            "the pump never walks it again: no second add, no further 0x03")) return false;
+	return expect(f.find(31101) != nullptr, "the joiner stays connected");
+}
+
 } // namespace
 
 int main() {
@@ -537,6 +675,8 @@ int main() {
 	if (!run_track_waits_while_the_round_is_over()) ++failures;
 	if (!run_join_arms_the_round_watermark()) ++failures;
 	if (!run_slot_table_is_the_slot_limit()) ++failures;
+	if (!run_the_pick_takes_the_row_free_longest()) ++failures;
+	if (!run_a_failed_add_leaves_the_joiner_bodyless()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;
