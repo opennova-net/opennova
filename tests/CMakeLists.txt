@@ -4436,7 +4436,7 @@ opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bm
 # without OPENNOVA_JO_ASSETS / OPENNOVA_JO_DIR.
 foreach(gated
         anim/reload_clips_us01 anim/weapon_action_clips
-        npruntime/held_weapon_attach npruntime/authored_payload_00trg
+        npruntime/authored_payload_00trg
         particle/gore_set_catalog)
     get_filename_component(gated_name ${gated} NAME)
     get_filename_component(gated_dir ${gated} DIRECTORY)
@@ -4448,9 +4448,10 @@ foreach(gated
 endforeach()
 
 # The npruntime probes that became ctests over minted data (ADR 0041): the
-# remote body-state arbitration over a clip set the test mints.
+# remote body-state arbitration over a clip set the test mints, the held-weapon
+# attach over the synthetic person rig and gun.
 foreach(minted
-        npruntime/remote_body_state)
+        npruntime/remote_body_state npruntime/held_weapon_attach)
     get_filename_component(minted_name ${minted} NAME)
     get_filename_component(minted_dir ${minted} DIRECTORY)
     add_executable(${minted_dir}_${minted_name}_test ${minted}_test.cpp)
