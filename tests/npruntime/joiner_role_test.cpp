@@ -2232,13 +2232,41 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 		// A live health tail; the self record's dead bit decides below.
 		h.role.runtime->state().local_health = 100;
 		if (in_session) {
-			// The self record carries the dead bit (byte13 0x02 -> Flags & 2):
-			// the row's bit-0 gate drops the key.
+			// The self record carries the dead bit (byte13 0x02): it zeroes the local
+			// entity's Health and the frame's body tick latches Flags & 2, which the
+			// row's bit-0 gate reads, so the key drops; a later record alive is the
+			// respawn arm, which clears it.
+			// [orig: NetPacket_SerializePlayerState @0x4C10F1..0x4C10FB, @0x4C1109;
+			//  Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4C02]
+			SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+			const auto self_record = [&](uint8_t flags) {
+				FrameUpdate fu;
+				fu.carried_handle = 0xFFFF;
+				fu.health = 100; // a live tail: the record's dead bit decides
+				FrameUpdateRecord rec;
+				rec.handle = 0x0005;
+				rec.type_id = w::kPlayerInfantryTypeId;
+				rec.cls = EntityClass::Player;
+				rec.player.carrier_handle = 0xFFFF;
+				rec.player.state_flags = flags;
+				fu.records.push_back(rec);
+				std::vector<uint8_t> packet;
+				frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+						{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))},
+						packet);
+				auto datagram = nw_encode_outbound(
+						SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+				h.role.runtime->receive(datagram.data(), datagram.size());
+				h.role.run_tick(h.input);
+			};
 			{
+				// The spawn stream's row (a compact record never creates one).
 				replication::ClientEntityState &self = h.role.runtime->state().upsert(0x0005);
-				self.state_flags_known = true;
-				self.state_flags |= 0x02u;
+				self.cls = EntityClass::Player;
+				self.type_id = w::kPlayerInfantryTypeId;
 			}
+			self_record(0x00);
+			self_record(0x02);
 			ok &= expect(h.role.runtime->local_player_dead(),
 					"respawn key: the self record's dead bit reads dead");
 			body->inf.anim_state = w::anim_state::kWalkForward;
@@ -2247,8 +2275,7 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 					"respawn key: a dead L takes no reset");
 			for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
 			ok &= expect(!respawn_sent(h.socket), "respawn key: a dead L sends nothing");
-			if (replication::ClientEntityState *self = h.role.runtime->state().find(0x0005))
-				self->state_flags &= ~0x02u;
+			self_record(0x00);
 			ok &= expect(!h.role.runtime->local_player_dead(), "respawn key: L lives again");
 		}
 		body->inf.anim_state = w::anim_state::kWalkForward;
@@ -2266,6 +2293,33 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 		h.kernel->set_items_table(nullptr);
 	}
 	return ok;
+}
+
+// D-NET-562: the Respawn key's head reads the local entity, which the joiner has from
+// its mission start's Player_InitPlayer, live (its dead bit clear) until a Health of 0
+// latches it. Before L spawns and before the first 0x0A tail (the replica's Health still
+// its zero default) the key resets the input and sends the bodiless 0x41.
+// [orig: Input_HandleActionBinding @0x49AD40 - a6 @0x49AD76..0x49AD7E, the row's bit 0
+//  @0x49AD95..0x49ADA0, case 55 @0x49B20B..0x49B22A; Game_StartMission @0x524360 -
+//  Player_InitPlayer @0x525BBC]
+bool run_respawn_key_before_the_first_tail() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.kernel->world.rules.mp_session = true;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	if (!expect(!h.role.local_spawned() && h.role.runtime->state().local_health == 0 &&
+				h.role.runtime->state().health_updates_applied == 0,
+			"respawn before the tail: no L yet, no tail folded"))
+		return false;
+	if (!expect(!h.role.runtime->local_player_dead() && h.role.request_respawn(),
+			"respawn before the tail: the mission start's entity reads live and the key is taken"))
+		return false;
+	for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+	ProtocolMessage m;
+	return expect(h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m) && m.payload.empty(),
+			"respawn before the tail: one bodiless 0x41 leaves");
 }
 
 // The deploy action on a joiner (dispatch 12) under permanent death (the S2C
@@ -2778,6 +2832,7 @@ int main() {
 	ok &= run_tail_armor_lands_on_l();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
+	ok &= run_respawn_key_before_the_first_tail();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_deploy_action_head_resets_input_and_dialogs();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();

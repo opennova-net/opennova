@@ -223,6 +223,27 @@ void ClientRuntime::set_local_player_position(const world::World &world) {
 	local_player_position_[2] = player->position.z.q16;
 }
 
+void ClientRuntime::step_local_dead_latch() {
+	// The body's death edge, in the entity update after this frame's receive: a
+	// Health of 0 or less (a folded tail's, or the zero a dead self record stores)
+	// latches the local entity's dead bit when the body tick runs: in the game loop,
+	// out of the pre-round and the session's round-over hold (the entity update's
+	// skip), and not under the local death screen (the body tick's return at its
+	// head) (D-NET-562) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B40F8..
+	// 0x4B411A, the edge @0x4B4BF1..0x4B4C02; Game_ProcessMainFrame @0x526703..0x526742;
+	// NetPacket_SerializePlayerState @0x4C10F1..0x4C10FB].
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_game_loop()) return;
+	const replication::ClientState &cs = view_.state();
+	const replication::ClientEntityState *self =
+			joiner_->has_self_handle() ? cs.find(joiner_->self_handle()) : nullptr;
+	const bool record_dead =
+			self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
+	const bool health_zero = (cs.health_updates_applied != 0 && cs.local_health <= 0) || record_dead;
+	const bool body_ticks = cs.preround_delay_seconds == 0 &&
+			!(joiner_->in_session() && cs.spawn_success_gate) && !cs.death_screen_active;
+	if (health_zero && body_ticks) local_dead_latch_ = true;
+}
+
 void ClientRuntime::adopt_tracked_window(const ZoneTimerWindow &window) {
 	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0, the cluster arm
 	//  @0x428c39..0x428d60]
@@ -438,6 +459,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	authoritative_spawn_release_revision_ = 0;
 	self_team_revision_ = 0;
 	self_assigned_team_ = 0;
+	local_dead_latch_ = false;
 	local_resubmit_revision_ = 0;
 	cleared_player_slots_.clear();
 	current_tick_ = 0;
@@ -481,6 +503,7 @@ bool ClientRuntime::begin_mission_reload() {
 	authoritative_ammo_pools_.fill(0);
 	deployed_ = false;
 	authoritative_spawn_released_ = false;
+	local_dead_latch_ = false; // the next mission start's Player_InitPlayer
 	cleared_player_slots_.clear();
 	// The previous mission's replica goes with its world. The round gate the
 	// 0x25 raised holds until the reload's mission start clears it
@@ -1282,6 +1305,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				const bool self_row_before = self_before != nullptr;
 				const uint32_t self_respawns_before =
 						self_row_before ? self_before->respawn_revision : 0u;
+				const uint32_t self_compact_before =
+						self_row_before ? self_before->compact_revision : 0u;
 				const uint32_t world_state_before = view_.state().world_state.revision;
 				// The zone messages run at their place in the pump, as every handler does,
 				// so a 0x53 measures from the local Position the handlers before it left
@@ -1311,6 +1336,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 						if (joiner_->release_deployment_on_respawn())
 							respawn_release_in_poll = true;
 					}
+					// The respawn arm tests the local entity's own dead bit: a self
+					// record alive while it is set clears it (local_player_dead)
+					// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test bl, 2`
+					//  @0x4C1005, `test byte [edi+24h], 2` @0x4C1109].
+					if (self_after != nullptr && self_after->compact_revision != self_compact_before &&
+							self_after->state_flags_known && (self_after->state_flags & 0x02u) == 0)
+						local_dead_latch_ = false;
 				}
 				// The 0x0F handler writes the local player's Position the same way
 				// [orig: NapiNPClientMsg_0x00F @0x42E200, the pose stores past its
@@ -1428,6 +1460,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		std::vector<uint8_t> missing_request = joiner_->finish_receive_pump();
 		if (!missing_request.empty()) outbound.push_back(std::move(missing_request));
 		apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
+		// The frame's entity update follows its receive: the local body's death edge.
+		step_local_dead_latch();
 		// The recipient-specific 0x0A tail is the authoritative local health channel. Close the
 		// deployed gate on a fresh death frame before this same client frame reaches its send block.
 		// Positive health deliberately does not reopen it: respawn remains owned by the deploy flow.

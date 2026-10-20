@@ -124,10 +124,15 @@ bool Role::request_respawn() {
 	//  @0x49AE4C, Input_NullActionFilter @0x49AE68, Cine_FilterInputAction @0x49AE84, the
 	//  def+0x170 callback @0x49AEB6 (Input_HandleActionBinding_0's default
 	//  @0x4E13F9)]
-	if (!kernel.world.cached.local_player.valid()) return false;
-	const bool local_dead = joiner ? runtime != nullptr && runtime->local_player_dead()
+	// The head reads the local entity, which a joiner has from its mission start's
+	// Player_InitPlayer whether or not L has spawned (D-NET-562) [orig:
+	// Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC].
+	if (joiner ? runtime == nullptr || !runtime->local_entity_bound()
+	           : !kernel.world.cached.local_player.valid())
+		return false;
+	const bool local_dead = joiner ? runtime->local_player_dead()
 			: kernel.local.local_player_dead();
-	const bool round_over = joiner ? runtime != nullptr && runtime->state().spawn_success_gate
+	const bool round_over = joiner ? runtime->state().spawn_success_gate
 			: kernel.world.match.outcome().ended;
 	if (local_dead || round_over || kernel.world.preround_delay_seconds != 0 ||
 			(runtime != nullptr && runtime->state().deploy_overlay_active))

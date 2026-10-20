@@ -795,15 +795,25 @@ public:
 	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }
-	// The joiner's read of its own dead bit: the recipient-local 0x0A health
-	// tail (the client stores it as its own Health) or the self record's dead
-	// bit (byte13 bit 0x02 -> Flags & 2 in the local apply [orig: @0x4c1005]).
-	bool local_player_dead() const {
-		const replication::ClientState &cs = state();
-		if (cs.local_health <= 0) return true;
-		if (!has_self_handle()) return false;
-		const replication::ClientEntityState *self = cs.find(self_handle());
-		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
+	// The joiner's read of its own dead bit, the local entity's Flags & 2 the input
+	// dispatcher's head reads (and nothing else): live from the mission start's
+	// Player_InitPlayer, latched by the body's death edge from a Health of 0 or less
+	// (the recipient-local 0x0A tail, or a dead self record's zero) on a frame whose
+	// entity update runs it (not in the pre-round, not under the session's round-over
+	// hold, not under the local death screen, whose body tick returns at its head), and
+	// cleared by a self record's respawn arm (the record alive while the bit is set).
+	// So before the first tail the joiner reads alive (D-NET-562).
+	// [orig: Input_HandleActionBinding @0x49AD40 - a6 @0x49AD76..0x49AD7E;
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the death-screen return
+	//  @0x4B40F8..0x4B411A, the death edge @0x4B4BF1..0x4B4C02; Game_ProcessMainFrame
+	//  @0x5263F0 - the entity update's skip @0x526703..0x526742;
+	//  NetPacket_SerializePlayerState @0x4C09C0 - the dead record's Health zero
+	//  @0x4C10F1..0x4C10FB, the respawn arm @0x4C1109]
+	bool local_player_dead() const { return local_dead_latch_; }
+	// The joiner's local player entity exists: a mission start's Player_InitPlayer
+	// bound it (JoinerConnection::local_player_entity), L spawned or not.
+	bool local_entity_bound() const {
+		return joiner_ && joiner_->local_player_entity() != 0xFFFFu;
 	}
 	JoinerConnection::Phase phase() const {
 		return joiner_ ? joiner_->phase() : JoinerConnection::Phase::Idle;
@@ -967,6 +977,10 @@ private:
 	// The stamp found a local player (retail's g_LocalPlayerEntity non-null): the
 	// receive's own Position writes (the respawn arm, the 0x0F) land only then.
 	bool local_player_present_ = false;
+	// local_player_dead's latch (the local entity's Flags & 2).
+	bool local_dead_latch_ = false;
+	// The body tick's death edge over this frame's fold (local_player_dead).
+	void step_local_dead_latch();
 	// The client-side 1 Hz revive countdown over the roster: every 63rd frame
 	// each active slot with an entity and a nonzero revive window loses one
 	// second [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA —
