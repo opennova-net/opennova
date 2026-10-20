@@ -54,6 +54,7 @@
 // [orig: Client_ProcessNetworkFrame @0x42c180; PumpClientProtocolRecv @0x42c228 / Send @0x42c4bc;
 //  Player_BuildTag0CInputBody @0x42a550; docs/net §5.44]. No socket I/O lives here.
 namespace opennova::world { class World; }
+namespace opennova::audio { struct DialogLineRef; }
 namespace opennova::def { struct DefItemsFile; }
 
 namespace opennova::inmatch {
@@ -502,6 +503,14 @@ public:
 	// colour (a dialog line's "EX Cannot load audio" and subtitle), drained
 	// with the other feed lanes once per frame.
 	std::vector<hud::FeedPost> drain_ring_posts();
+	// The authority's own playback of a dialog line its queue loads (the listen host's or single
+	// player's client): with no wave of the line's name in the dialog bank's sounds, "EX Cannot
+	// load audio: <name>" on the SYSTEM ring in 0xFFFF2222; then the line's subtitle on the CHAT
+	// ring in white, both 930 ticks, as the joiner's leg posts them.
+	// [orig: Dialog_LoadAudioClip @0x44DCC0 - the missing wave @0x44DD5D..0x44DD74
+	//  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle @0x44DDCD..0x44DE3C and its
+	//  hook @0x44DEC9 (Chat_AddSystemMessageIfValid)]
+	void post_authority_dialog_line(const world::World &world, const audio::DialogLineRef &line);
 	// THE CMAP SCREEN'S OWN LEGS (client_squad.cpp): the world halves
 	// (world/user_waypoints.h) plus their sends — the placed waypoint's C2S
 	// 0x17 (target 0xFF) [orig: @0x54a1be], each removed one's C2S 0x4F

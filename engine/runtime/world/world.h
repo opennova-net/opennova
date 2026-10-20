@@ -835,6 +835,16 @@ struct DesignationMark {
 // removals, the round ring, water crossings) and the presentation (effects,
 // destruction, scars, scorches, the sound queues). Nothing in the sim reads
 // an outbox back; the drains clear them.
+// A co-op dialog line the presentation plays (a non-authority's S2C 0x28): the dialog by its
+// name, the line's index and the local player's class, the clip's locale.
+// [orig: NapiNPClientMsg_0x028 @0x425B40 -> Dialog_PlayByNameAndSlot @0x44E3F0, the class
+//  @0x425B88..0x425B94]
+struct DialogLineOrder {
+    std::string dialog_name;
+    int32_t line = 0;
+    int32_t player_class = 0;
+};
+
 struct WorldOutbox {
     // Preserve the callback's send order across 0x21 explosions, 0x26 state,
     // and 0x12 removal. The host drains this once, excluding its loopback.
@@ -915,6 +925,8 @@ struct WorldOutbox {
     // present layer drains into positional one-shots.
     std::vector<SoundSlotEvent> slot_sounds;
     SoundEmitterMailbox sound_emitters;
+    // The co-op dialog lines to play, drained by the presentation.
+    std::vector<DialogLineOrder> dialog_lines;
     // The weather tick's thunder one-shots (weather_state.h carries the
     // cites); the presentation owner drains them per frame.
     std::vector<WeatherSoundEvent> weather_sounds;
@@ -945,6 +957,7 @@ struct WorldOutbox {
         terrain_scorches.clear_pending();
         slot_sounds.clear();
         sound_emitters.clear();
+        dialog_lines.clear();
         weather_sounds.clear();
         (void)fire_sounds.drain();
     }

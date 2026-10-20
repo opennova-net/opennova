@@ -106,7 +106,7 @@ std::string dialog_line_text(const rtxt::File *text_override, const rtxt::File *
 		const dbf::Line &line);
 
 // A co-op dialog line a client plays on S2C 0x28 (the effect pass's
-// "dialog_line" record): the dialog by its exact name in the loaded bank's
+// world::DialogLineOrder): the dialog by its exact name in the loaded bank's
 // order, then the line's wave, its "<class><name>" variant first (the class
 // is the local player's, the "%d%s" prefix) and its bare name next, and its
 // subtitle (dialog_line_text). Retail plays the clip at once on a dialog

@@ -6,6 +6,7 @@
 //  @0x50A0D0; NapiNPClientMsg_0x028 @0x425B40 -> Dialog_PlayByNameAndSlot
 //  @0x44E3F0]
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_role.h> // authority_dialog_line_loaded
 #include <runtime/inmatch/server_chat.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -58,8 +59,8 @@ void test_fold() {
 	CHECK(view.drain_effect_commands().empty());
 }
 
-// The effect pass hands the presentation the line with the local player's
-// class.
+// The effect pass hands the presentation the line as a typed order with the
+// local player's class.
 void test_effect_pass() {
 	auto world = std::make_unique<w::World>();
 	world->registry.configure_pool(0, 4);
@@ -70,11 +71,13 @@ void test_effect_pass() {
 	inmatch::ClientRuntime runtime("DialogLine");
 	runtime.view().apply(s2c::DIALOG_LINE, line_body("dlg007", 1));
 	runtime.apply_received_effects(*world);
-	CHECK(world->out.effects.count("dialog_line") == 1);
-	for (const w::Effect &e : world->out.effects.entries()) {
-		if (e.kind != "dialog_line") continue;
-		CHECK(e.str == "dlg007" && e.a == 1 && e.b == 3);
+	CHECK(world->out.dialog_lines.size() == 1);
+	if (world->out.dialog_lines.size() == 1) {
+		const w::DialogLineOrder &order = world->out.dialog_lines.front();
+		CHECK(order.dialog_name == "dlg007" && order.line == 1 && order.player_class == 3);
 	}
+	world->out.discard_presentation();
+	CHECK(world->out.dialog_lines.empty());
 }
 
 // D-NET-286: the line's chat legs. A line no bank carries posts "EX Cannot
@@ -168,13 +171,73 @@ void test_host_fan() {
 	};
 	const std::vector<ns::Datagram> remote = take(remote_wire);
 	CHECK(remote.size() == 1);
+	// [cstr "dlg012"][i16 4] [orig: NetPacket_WriteCStringAndShort @0x5038A0]
+	const std::vector<uint8_t> want = {'d', 'l', 'g', '0', '1', '2', 0x00, 0x04, 0x00};
 	if (remote.size() == 1)
-		CHECK(remote[0].tag == s2c::DIALOG_LINE && remote[0].body == line_body("dlg012", 4));
+		CHECK(remote[0].tag == s2c::DIALOG_LINE && remote[0].body == want);
 	CHECK(take(local_wire).empty());
 	CHECK(take(loading_wire).empty());
 	ctx.is_authority = 0;
 	inmatch::Server_BroadcastDialogLine(ctx, "dlg012", 5);
 	CHECK(take(remote_wire).empty());
+}
+
+// The authority's load: its own client posts the line's chat legs (the missing
+// wave first, then the subtitle), then the line goes to the in-match remotes,
+// never to the listen host's own connection (mask 0x90).
+// [orig: Dialog_UpdatePlayback @0x44E599 / @0x44E5A5; Dialog_LoadAudioClip
+//  @0x44DD74, @0x44DEC9]
+void test_authority_load() {
+	auto world = std::make_unique<w::World>();
+	dbf::File bank;
+	dbf::Group group;
+	group.group_name = "dlg012";
+	dbf::Line line0;
+	line0.def_id_name = "MISSING";
+	line0.sequence = "_00001";
+	group.lines.push_back(line0);
+	bank.groups.push_back(group);
+	rtxt::File text;
+	text.sections.push_back(rtxt::Section{"Info", 2});
+	rtxt::Entry title, second;
+	title.key = "title";
+	title.text = "Title";
+	second.key = "second";
+	second.text = "Hold the line.";
+	text.entries = {title, second};
+	world->tables.dialog_bank = &bank;
+	world->tables.mission_text = &text;
+
+	ns::LoopbackChannel remote_wire, local_wire;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostClient);
+	ctx.is_in_session = 1;
+	auto &list = ctx.np_protocol.connection_list;
+	list.push_back(conn_fixture::make_conn(1, 1, &remote_wire, ns::TransportMode::Client,
+			w::EntityHandle{}, true));
+	list.push_back(conn_fixture::make_conn(2, 2, &local_wire, ns::TransportMode::Loopback,
+			w::EntityHandle{}, true));
+	inmatch::ClientRuntime own("ListenHost");
+	audio::DialogLineRef ref;
+	ref.wave = "MISSING";
+	ref.dialog_name = "dlg012";
+	ref.line = 0;
+	inmatch::authority_dialog_line_loaded(ctx, &own, *world, ref);
+	const std::vector<hud::FeedPost> posts = own.drain_ring_posts();
+	CHECK(posts.size() == 2);
+	if (posts.size() == 2) {
+		CHECK(posts[0].sink == hud::ChatSink::System && posts[0].argb == 0xFFFF2222u &&
+				posts[0].text == "EX Cannot load audio: MISSING");
+		CHECK(posts[1].sink == hud::ChatSink::Chat && posts[1].argb == 0xFFFFFFFFu &&
+				posts[1].text == "Hold the line.");
+	}
+	ns::Datagram d;
+	CHECK(remote_wire.client_recv(d) && d.tag == s2c::DIALOG_LINE &&
+			d.body == (std::vector<uint8_t>{'d', 'l', 'g', '0', '1', '2', 0x00, 0x00, 0x00}));
+	CHECK(!local_wire.client_recv(d));
+	// A Serve Only host has no client of its own: the line goes out all the same.
+	inmatch::authority_dialog_line_loaded(ctx, nullptr, *world, ref);
+	CHECK(remote_wire.client_recv(d) && d.tag == s2c::DIALOG_LINE);
 }
 
 } // namespace
@@ -184,6 +247,7 @@ int main() {
 	test_effect_pass();
 	test_chat_legs();
 	test_host_fan();
+	test_authority_load();
 	std::printf("dialog_line: %d failures\n", failures);
 	return failures ? 1 : 0;
 }

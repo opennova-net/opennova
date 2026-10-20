@@ -1,6 +1,7 @@
 #include "simulation/simulation.h"
 #include "util/axes.h"
 
+#include <runtime/inmatch/host_role.h> // HostRole::dialog_line_loaded
 #include <runtime/mission/mission_kernel.h>
 
 using namespace godot;
@@ -26,6 +27,25 @@ void Simulation::set_script_voice_resolver(opennova::world::ScriptVoiceChannel::
 
 opennova::audio::DialogQueue *Simulation::dialog_queue() {
     return kernel_ ? &kernel_->world.script.dialog : nullptr;
+}
+
+void Simulation::tick_dialog_queue(bool p_frame_rendered,
+        const opennova::audio::DialogQueue::LoadLine &p_load,
+        const opennova::audio::DialogQueue::VoicePlaying &p_playing) {
+    if (!kernel_) return;
+    kernel_->world.script.dialog.tick(p_frame_rendered,
+            [this, &p_load](const opennova::audio::DialogLineRef &p_line) {
+                const opennova::audio::DialogClip clip = p_load(p_line);
+                if (host_role_ != nullptr) host_role_->dialog_line_loaded(p_line);
+                return clip;
+            },
+            p_playing);
+}
+
+void Simulation::drain_dialog_lines(std::vector<opennova::world::DialogLineOrder> &r_lines) {
+    r_lines.clear();
+    if (!kernel_) return;
+    r_lines.swap(kernel_->world.out.dialog_lines);
 }
 
 bool Simulation::play_dialog(int p_dialog_index) {

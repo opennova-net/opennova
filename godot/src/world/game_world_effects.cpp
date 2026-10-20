@@ -32,19 +32,26 @@ void GameWorld::route_mission_effects(const Array &p_effects) {
 			continue;
 		}
 		const String kind = eff->get_kind();
-		if (kind == "dialog_line") {
-			// A co-op host's dialog line: name in the text, line in a, the local
-			// player's class in b (engine: client_effects / resolve_dialog_line).
-			if (audio != nullptr) {
-				audio->play_dialog_line(eff->get_text(), eff->get_a(), eff->get_b());
-			}
-		} else if (kind == "dialog_wav") {
+		if (kind == "dialog_wav") {
 			// WAC wave/pwave: a scripted voice .wav by filename on its own channel.
 			if (audio != nullptr) {
 				audio->sync_script_voice();
 			}
 		}
 	}
+}
+
+// A co-op host's dialog lines this peer plays (engine: client_effects' typed order,
+// resolve_dialog_line), each at once on a voice of its own.
+void GameWorld::route_dialog_lines() {
+	const Ref<Simulation> sim = get_sim();
+	MissionAudio *audio = get_mission_audio();
+	if (sim.is_null()) return;
+	std::vector<opennova::world::DialogLineOrder> lines;
+	sim->drain_dialog_lines(lines);
+	if (audio == nullptr) return;
+	for (const opennova::world::DialogLineOrder &line : lines)
+		audio->play_dialog_line(opennova::to_gd(line.dialog_name), line.line, line.player_class);
 }
 
 void GameWorld::route_script_effects() {
@@ -167,6 +174,7 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	route_terrain_scorches();
 	route_round_impacts();
     route_script_effects();
+	route_dialog_lines();
 	// The dialog channel's playback tick, once a logic tick, after this tick's
 	// PlayWavList dialogs registered in the world's dialog table: its slots
 	// load their lines on their timers (runtime/audio/dialog_queue).

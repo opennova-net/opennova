@@ -75,6 +75,14 @@ struct HostBringup {
 GameConfig singleplayer_game_config(uint32_t game_type,
 		const playersav::ProfileRecord *profile = nullptr);
 
+// Dialog_UpdatePlayback's load of a line on the authority: the line's chat legs on its own
+// client (none on a Serve Only host, which plays no dialog), then the S2C 0x28 to every in-match
+// slot but the listen host's own (Server_BroadcastDialogLine). The device has loaded and played
+// the line's wave first. [orig: Dialog_UpdatePlayback @0x44E470 - Dialog_LoadAudioClip
+//  @0x44E599, then Server_SendEntityStateToAll(dialog+4, entry) @0x44E5A5]
+void authority_dialog_line_loaded(NapiNPServerCtx &ctx, ClientRuntime *own_client,
+		const world::World &world, const audio::DialogLineRef &line);
+
 class HostRole final : public Role {
 public:
 	HostRole();
@@ -210,6 +218,10 @@ private:
 	// (NapiNPServerCtx::bind_spawned_body), installed after a bring-up's own spawn.
 	void install_spawned_body_bind();
 	void make_client_runtime(uint32_t game_type);
+public:
+	// A line the world's dialog queue loads on this host (authority_dialog_line_loaded).
+	void dialog_line_loaded(const audio::DialogLineRef &line);
+private:
 	// The client words the host's own runtime steps: the embedder's (HostConfig::client_process),
 	// else the role's own, which every runtime the role makes (a map change, a retry) shares.
 	ClientProcessState own_client_process_;

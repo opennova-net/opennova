@@ -585,11 +585,10 @@ void MissionAudio::advance_dialog_tick() {
 	const bool rendered = dialog_frame_rendered_;
 	dialog_frame_rendered_ = false;
 	const Ref<Simulation> sim = _simulation();
-	opennova::audio::DialogQueue *queue = sim.is_valid() ? sim->dialog_queue() : nullptr;
-	if (queue == nullptr) {
+	if (sim.is_null()) {
 		return;
 	}
-	queue->tick(rendered,
+	sim->tick_dialog_queue(rendered,
 			[this](const opennova::audio::DialogLineRef &p_line) { return _load_dialog_line(p_line); },
 			[this](uint64_t p_voice) { return _dialog_voice_playing(p_voice); });
 }
@@ -651,11 +650,10 @@ AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &
 
 // A line the dialog queue loads: its wave read and decoded through the VFS (a
 // missing .wav extension tolerated), what the game's wave loader records of it
-// for the line's hold (runtime/audio/dialog_queue dialog_clip_hold), a voice of
-// the dialog channel at the wave's volume byte, then the line's report to the
-// co-op broadcast (engine: Simulation::broadcast_dialog_line ->
-// Server_BroadcastDialogLine), made for every line the queue loads, its wave
-// or none (docs/audio/lwf-dbf-sound-re.md D-SND-42, the dialog line timing).
+// for the line's hold (runtime/audio/dialog_queue dialog_clip_hold) and a voice of
+// the dialog channel at the wave's volume byte. The authority's leg (its chat
+// lines and the co-op broadcast) runs after it in the engine
+// (Simulation::tick_dialog_queue; docs/audio/lwf-dbf-sound-re.md D-SND-42).
 opennova::audio::DialogClip MissionAudio::_load_dialog_line(const opennova::audio::DialogLineRef &p_line) {
 	opennova::audio::DialogClip clip;
 	if (!p_line.file.empty() && root_attached_ && resource_root_.is_valid()) {
@@ -675,12 +673,6 @@ opennova::audio::DialogClip MissionAudio::_load_dialog_line(const opennova::audi
 				dialog_voice_id_ = ObjectID(voice->get_instance_id());
 				clip.voice = static_cast<uint64_t>(voice->get_instance_id());
 			}
-		}
-	}
-	if (p_line.line >= 0) {
-		const Ref<Simulation> sim = _simulation();
-		if (sim.is_valid()) {
-			sim->broadcast_dialog_line(p_line.dialog_name, p_line.line);
 		}
 	}
 	return clip;

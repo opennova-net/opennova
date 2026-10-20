@@ -16,6 +16,7 @@
 #include <runtime/inmatch/joiner_connection.h> // build_mission_status (the own C2S 0x0B)
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/null_datagram_socket.h>
+#include <runtime/inmatch/server_chat.h> // Server_BroadcastDialogLine
 #include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_log_recorder.h>
@@ -887,6 +888,17 @@ bool HostRole::reset_to_baseline(SessionError &error) {
 		inmatch::Server_RearmMinimapInitialScan(state.host_owner.ctx);
 	}
 	return true;
+}
+
+void authority_dialog_line_loaded(NapiNPServerCtx &ctx, ClientRuntime *own_client,
+		const world::World &world, const audio::DialogLineRef &line) {
+	if (own_client != nullptr) own_client->post_authority_dialog_line(world, line);
+	Server_BroadcastDialogLine(ctx, line.dialog_name, static_cast<int16_t>(line.line));
+}
+
+void HostRole::dialog_line_loaded(const audio::DialogLineRef &line) {
+	if (kernel() == nullptr) return;
+	authority_dialog_line_loaded(state.host_owner.ctx, state.client_runtime.get(), kernel()->world, line);
 }
 
 } // namespace opennova::inmatch

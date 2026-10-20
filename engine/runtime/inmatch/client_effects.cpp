@@ -262,14 +262,13 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             if (const world::Entity *entity = world.registry.get(handle))
                 world.doors.apply_wire_row(*entity, door->number, door->state);
         } else if (const auto *dialog = std::get_if<replication::DialogLineCommand>(&request)) {
-            // The line rides the presentation's effect log with the local
+            // The line goes to the presentation as a typed order with the local
             // player's class, the clip's locale. [orig: NapiNPClientMsg_0x028
             //  @0x425b88..0x425b94]
             const world::Entity *local = world.registry.get(world.cached.local_player);
             const int32_t player_class =
                     local != nullptr ? static_cast<int32_t>(local->player_class) : 0;
-            world.out.effects.push({"dialog_line", dialog->line, player_class, 0, 0,
-                    dialog->dialog_name});
+            world.out.dialog_lines.push_back({dialog->dialog_name, dialog->line, player_class});
             // The line's chat legs: with no clip, "EX Cannot load audio: <def
             // name>" on the SYSTEM ring in -56798 (0xFFFF2222); then the
             // subtitle on the CHAT ring in -1 (white), both 930 ticks. The
@@ -446,4 +445,20 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 : world::Vec3{});
     }
 }
+void ClientRuntime::post_authority_dialog_line(const world::World &world,
+		const audio::DialogLineRef &line) {
+	// [orig: Dialog_LoadAudioClip @0x44DD46 (g_DialogAudioSoundData null), @0x44DD74]
+	if (line.file.empty())
+		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System, 0xFFFF2222u,
+				"EX Cannot load audio: " + line.wave, false});
+	// The subtitle: the line of the loaded bank the queue's line names, its [Mission Dialog]
+	// entry first (audio::dialog_line_text). [orig: @0x44DDCD..0x44DE3C, @0x44DEC9]
+	const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(world.tables.dialog_bank,
+			world.tables.dialog_sounds, world.tables.text_override, world.tables.mission_text,
+			line.dialog_name, line.line, 0);
+	if (resolved.line_found && !resolved.text.empty())
+		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat, 0xFFFFFFFFu,
+				resolved.text, false});
+}
+
 } // namespace opennova::inmatch

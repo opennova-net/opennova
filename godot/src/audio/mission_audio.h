@@ -176,7 +176,7 @@ public:
 	// broadcast. A frame rendered since the previous dialog tick (tick() marks
 	// one) starts a fresh line's hold. Nothing without a simulation.
 	void advance_dialog_tick();
-	// A co-op dialog line the host sent (the "dialog_line" effect): the
+	// A co-op dialog line the host sent (world::DialogLineOrder): the
 	// engine's resolution (runtime/audio/dialog_queue resolve_dialog_line)
 	// picks the clip, which plays at once on a voice of its own, outside the
 	// queue. Returns true when a clip spawned.

@@ -977,7 +977,6 @@ public:
 	int local_medic_request_serial() const;
 	bool send_team_change_request(); // DEATH's SWAP_TEAMS (ClientRuntime::queue_team_change_request)
 	bool local_player_dead() const; // the one role-agnostic read of the local player's dead bit
-	void broadcast_dialog_line(const std::string &p_dialog, int p_line); // Server_BroadcastDialogLine
 	// The end-of-round presentation feed (net-re §5.68; simulation_end_round.cpp):
 	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
 	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)
@@ -1587,6 +1586,13 @@ public:
 	bool play_script_wave(const String &p_filename);
 	// The world's one dialog table, which mission audio plays (runtime/audio/dialog_queue.h).
 	opennova::audio::DialogQueue *dialog_queue();
+	// One dialog tick over the world's table: the device loads and plays each line, then the
+	// authority's leg runs at the load (engine inmatch::authority_dialog_line_loaded: the chat
+	// legs on the host's own client, then the S2C 0x28). Nothing without a kernel.
+	void tick_dialog_queue(bool p_frame_rendered, const opennova::audio::DialogQueue::LoadLine &p_load,
+			const opennova::audio::DialogQueue::VoicePlaying &p_playing);
+	// The co-op dialog lines a non-authority plays (world::WorldOutbox::dialog_lines).
+	void drain_dialog_lines(std::vector<opennova::world::DialogLineOrder> &r_lines);
 	bool play_dialog(int p_dialog_index); // the PlayWavList play by number (probes, tools)
 	TypedArray<SoundEmitterRow> drain_sound_emitters();
 
