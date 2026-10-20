@@ -109,6 +109,22 @@ int main() {
         TEST_EXPECT(approx(v.x, 0.0f) && approx(v.y, 1.0f) && approx(v.z, 0.0f));
     }
 
+    // --- a bind's rows as a quaternion, each of Shepperd's four branches: a small turn (the
+    // trace's), and 150 degrees about x, y and z (each axis's own: a body rig's bind turns its
+    // limbs past a quarter turn, as the shipped binds do) ---
+    {
+        const float c = -0.8660254f, s = 0.5f; // cos and sin of 150 degrees
+        const float rx[9] = {1, 0, 0, 0, c, -s, 0, s, c};
+        const float ry[9] = {c, 0, s, 0, 1, 0, -s, 0, c};
+        const float rz[9] = {c, -s, 0, s, c, 0, 0, 0, 1};
+        const float half_c = 0.25881905f, half_s = 0.96592583f; // cos and sin of 75 degrees
+        TEST_EXPECT(quat_approx(mat3_to_quat(rx), {half_c, half_s, 0, 0}));
+        TEST_EXPECT(quat_approx(mat3_to_quat(ry), {half_c, 0, half_s, 0}));
+        TEST_EXPECT(quat_approx(mat3_to_quat(rz), {half_c, 0, 0, half_s}));
+        const float id[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        TEST_EXPECT(quat_approx(mat3_to_quat(id), {1, 0, 0, 0}));
+    }
+
     // --- sample the 19-bone rig ---
     const std::string rig19 = test_paths_fixture("anim/rig19_idle.bad");
     BadFile bad = {};
