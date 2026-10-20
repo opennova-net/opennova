@@ -348,11 +348,13 @@ struct HudLayout {
 	//  @0x5be210..0x5be228; the callback @0x5bb7a0 (no function boundary in
 	//  the IDB), stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841]. JO:CA ships
 	// NO hud.def (none in resource/localres/language.pff), so on the retail
-	// title the rows stay 0: the width is 4 and HUD_WordWrapText returns 1 at the
-	// first character (@0x5809ea..0x5809fc, no space yet) — a retail chat
-	// line NEVER wraps. These are NOT the HUDCHATTEXT pair (that is the feed
-	// anchor dword_27237A8/AC): a layout builder must leave them absent
-	// unless it parsed a hud.def, and absent, a line is never wrapped.
+	// title the rows stay 0 and the width is 4, which still splits a line that
+	// begins with a space, or with a glyph of extent 3 or less followed by a
+	// space [orig: HUD_WordWrapText @0x580980]; ordinary lines do not wrap
+	// (the no-space leg @0x5809ea..0x5809fc).
+	// These are NOT the HUDCHATTEXT pair (that is the feed anchor
+	// dword_27237A8/AC): a layout builder must leave them absent unless it
+	// parsed a hud.def, and absent, the client wraps no line (D-HUD-58).
 	int chat_box_x1 = 0;
 	int chat_box_x2 = 0;
 	bool chat_box_present = false;
@@ -640,9 +642,9 @@ struct HudFriendlyTag {
 	//  HudFrameState::radio_request_icon_viewer.
 	bool radio_request = false;
 	// The player slot's squad colour index (slot+0x33) into kHudSquadColors;
-	// 0 = no override. Client-local: its only writer is the CMAP entity
-	// click [orig: CMap_EntityWidgetHandler @0x5485E4 — (idx + 1) % 14], so
-	// the seam defaults 0 until that producer lands (D-HUD-20).
+	// 0 = no override. Client-local: its only writer is the CMAP TEAMLIST
+	// Map-column click [orig: CMap_EntityWidgetHandler @0x5485E4 — (idx + 1) % 14],
+	// ported as menu::command_map_team_list_click (D-HUD-19).
 	uint8_t squad_color_index = 0;
 };
 

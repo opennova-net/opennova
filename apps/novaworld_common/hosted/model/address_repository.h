@@ -193,7 +193,8 @@ struct UncoveredAddress {
 	// Judged with the account's subscriptions (the billing cache's dedicated
 	// machines and addresses): the fleet's pass confirms it as a
 	// subscription's lapse. False for one the account's row and its admin's
-	// grant alone judged.
+	// grant alone judged, the account's subscriptions all ended for good
+	// (billing::status_terminal) or none.
 	bool cached = false;
 };
 std::vector<UncoveredAddress> uncovered_comp_addresses(db::Database &db, int64_t now);

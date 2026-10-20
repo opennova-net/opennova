@@ -12,7 +12,7 @@
           <RouterLink v-if="i.machine_id" :to="`/admin/fleet/machines/${i.machine_id}`" class="text-accent hover:text-ink-bright">
             Machine {{ i.machine_id }}</RouterLink
           ><span v-else class="text-warn">A machine with no machine-id</span>
-          <template v-if="i.kind"> ({{ i.kind }})</template>:
+          <template v-if="i.kind"> ({{ i.kind === 'own' ? 'dedicated' : i.kind }})</template>:
           <span :class="i.agent_connected ? '' : 'font-semibold text-danger'">{{
             i.agent_connected ? 'its ECS agent connected' : 'its ECS agent NOT connected'
           }}</span>, {{ i.status.toLowerCase() }}, {{ countLabel(i.running_tasks, 'task') }} running<template v-if="i.pending_tasks"

@@ -56,6 +56,7 @@
         :retry="from?.state === 'failed'"
         :shared-free="sharedFree(data.entitlement)"
         :own-machines-free="ownMachinesFree(data.entitlement)"
+        :own-machines="data.entitlement.own_machines"
         :previous-own-machine="from?.own_machine ?? false"
         :addresses="free"
         :preferred-address-id="preferredAddress(free, data.servers, from)"

@@ -538,12 +538,13 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			// [orig: BoneCallback_cveh_PublishControls @ 0x4929B0;
 			//  stores @0x4929D7 / @0x4929F1]
 			write_present_vehicle_motion_controls(r, kernel.world, *ent);
-			// Only a carrier in the witnessed live UseGun attachment relation
-			// publishes its inline MountSlot's HEAT_GLOW, including owned cold
-			// zero. A joiner has no heat-window/ownership state in its compact
-			// row and must not synthesize one.
-			// [orig: attachment call @ 0x546518;
-			//  HUD_CacheWeaponSlotInfo stores @ 0x440969 / @ 0x440991]
+			// HEAT_GLOW from the inline MountSlot, including owned cold zero:
+			// every 'ewep' render class publishes it, occupied or not, and any
+			// other carrier only in the live UseGun attachment relation
+			// (world_model_heat_glow_for). A joiner has no heat-window/ownership
+			// state in its compact row and must not synthesize one.
+			// [orig: HUD_CacheWeaponSlotInfo @ 0x440930, stores @ 0x440969 /
+			//  @ 0x440991; the attachment call @ 0x546518]
 			write_present_world_model_heat_glow(r, kernel.world, *ent);
 		}
 		// The local first-person UseGun parent cull is a render verdict of THIS
@@ -930,10 +931,11 @@ static void write_world_present_row(const PresentRowsContext &context,
 	// motor fields [orig: BoneCallback_cveh_PublishControls @0x4929B0, stores
 	// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md].
 	write_present_vehicle_motion_controls(r, w, e);
-	// Only a carrier in the witnessed live UseGun attachment relation
-	// publishes its inline MountSlot's HEAT_GLOW, including owned cold zero.
-	// [orig: attachment call @0x546518; HUD_CacheWeaponSlotInfo stores
-	//  @0x440969 / @0x440991; see docs/world/world-wac-ai-re.md]
+	// HEAT_GLOW from the inline MountSlot, including owned cold zero: every
+	// 'ewep' render class publishes it, occupied or not, and any other carrier
+	// only in the live UseGun attachment relation (world_model_heat_glow_for).
+	// [orig: HUD_CacheWeaponSlotInfo @0x440930, stores @0x440969 / @0x440991;
+	//  the attachment call @0x546518; see docs/threedi/3di-gp-format-re.md]
 	write_present_world_model_heat_glow(r, w, e);
 	// The local first-person UseGun parent cull is a render verdict of THIS
 	// machine's own mount state [orig: Entity_RenderVehicleModel @0x4407d0

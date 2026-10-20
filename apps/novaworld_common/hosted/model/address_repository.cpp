@@ -315,7 +315,11 @@ std::vector<UncoveredAddress> uncovered_comp_addresses(db::Database &db, int64_t
 			continue;
 		}
 		const billing::Entitlement e = billing::entitlement_of(db, *owner, now);
-		const bool cached = !billing::subscriptions_of(db, *owner).empty();
+		// The billing cache judges it while a subscription of the account may
+		// still change (one canceled or expired never grants again).
+		const std::vector<billing::SubscriptionRow> subscriptions = billing::subscriptions_of(db, *owner);
+		const bool cached = std::any_of(subscriptions.begin(), subscriptions.end(),
+				[](const billing::SubscriptionRow &s) { return !billing::status_terminal(s.status); });
 		const char *why = "its account's dedicated machines no longer cover it";
 		// The newest that count past the dedicated machines; then the failed ones
 		// (counted by none: billing comp_addresses_of) past the room left, which

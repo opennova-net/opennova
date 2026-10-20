@@ -261,7 +261,7 @@ describe('UserDetailSection', () => {
     confirm.mockReturnValueOnce(false);
     await submitGrant(wrapper, 1, 1);
     expect(confirm).toHaveBeenCalledWith(
-      "Lower player7's shared servers to 1? They run 3 on shared machines, so the service stops its 2 newest servers there: their matches end for everyone on them.",
+      "Lower player7's shared servers to 1? They run 3 on shared machines, so the service stops their 2 newest servers there: their matches end for everyone on them.",
     );
     expect(comp).not.toHaveBeenCalled();
   });
@@ -296,7 +296,7 @@ describe('UserDetailSection', () => {
     // Both pools cut at once: one confirm says both.
     await submitGrant(wrapper, 0, 0);
     const both = confirm.mock.lastCall![0] as string;
-    expect(both).toContain("Lower player7's shared servers to 0? They run 1 on shared machines, so the service stops its newest server there");
+    expect(both).toContain("Lower player7's shared servers to 0? They run 1 on shared machines, so the service stops their newest server there");
     expect(both).toContain("Lower player7's dedicated machines to 0? Their 2 newest servers on dedicated machines stop");
   });
 
@@ -364,7 +364,7 @@ describe('UserDetailSection', () => {
     const { wrapper } = await mountSection();
     confirm.mockReturnValueOnce(false);
     await submitGrant(wrapper, 0, 0);
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('They run 2 on shared machines, so the service stops its newest server there'));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('They run 2 on shared machines, so the service stops their newest server there'));
     expect(comp).not.toHaveBeenCalled();
   });
 

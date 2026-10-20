@@ -21,15 +21,13 @@ std::string meta(const Metadata &metadata, const char *key) {
 	return it == metadata.end() ? std::string() : it->second;
 }
 
-bool is_terminal(const std::string &status) { return status == "canceled" || status == "incomplete_expired"; }
-
 // The reservation of the checkout that made `row` (its opennova_reservation
 // metadata) dropped once the row counts in its place: it grants, or it ended.
 // One still incomplete (its payment pending) keeps the reservation to its end.
 void settle_reservation(db::Database &db, const Subscription &s, const SubscriptionRow &row, int64_t now) {
 	const auto id = strutil::parse_llong(meta(s.metadata, kMetaReservation));
 	if (!id || *id <= 0 || !row.user_id) return;
-	if (subscription_grants(row, now) || is_terminal(row.status)) drop_reservation(db, *id, *row.user_id);
+	if (subscription_grants(row, now) || status_terminal(row.status)) drop_reservation(db, *id, *row.user_id);
 }
 
 // Stripe no longer knows it (in this mode, on this account).

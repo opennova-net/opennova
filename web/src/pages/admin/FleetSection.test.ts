@@ -66,6 +66,8 @@ describe('FleetSection', () => {
     expect(panel.text()).toContain('hostd runs on 1 of 1 machine in opennova-prod-fleet (opennova-prod-hostd:5).');
     const instance = panel.get('li.fleet-cluster-instance');
     expect(instance.text()).toContain('Machine 1 (shared)');
+    // A dedicated machine reads as one, never by its kind's identifier.
+    expect(panel.findAll('li.fleet-cluster-instance').map((li) => li.text()).join(' ')).not.toContain('(own)');
     expect(instance.text()).toContain('its ECS agent connected');
     expect(instance.text()).toContain('1 task running');
     expect(instance.text()).toContain('ami-0aaa');
