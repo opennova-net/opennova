@@ -28,6 +28,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/file_page_view.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
@@ -43,7 +44,6 @@ namespace {
 
 // An open document's name in Files.
 const ImVec4 kOpenColor(0.55f, 0.78f, 1.0f, 1.0f);
-const ImVec4 kRefusalColor(0.95f, 0.55f, 0.45f, 1.0f);
 
 // The scan's entry at a project-relative path (its path index's binary search), or null.
 const AssetEntry *entry_at(const SessionView &view, const std::string &path) {
@@ -107,8 +107,13 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		if (popup_.dismissed()) window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		return;
 	}
-	if (terrain) ImGui::TextUnformatted("New terrain from images");
-	else ImGui::Text("New file: %s", asset_kind_label(kind));
+	if (terrain) {
+		ImGui::TextUnformatted("New terrain from images");
+		ui_kit::tooltip("Each image is a file on disk (copied into art/terrain/) or a file of the project; the terrain is "
+		                "imported from them, and imported again when one changes.");
+	} else {
+		ImGui::Text("New file: %s", asset_kind_label(kind));
+	}
 	// A folder's New here (DI-25): the folder it is made in.
 	if (!terrain && !held.folder.empty())
 		ImGui::TextDisabled("In %s", held.folder == "/" ? "the top level of the project" : (held.folder + "/").c_str());
@@ -131,11 +136,9 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	// it makes).
 	const std::string file = terrain ? std::string(name) + ".trn" : std::string(name);
 	const bool in_use = named && v.project.scan->find(file) != nullptr;
-	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
-	else if (in_use) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", file.c_str());
-	if (terrain)
-		ImGui::TextWrapped("Each image is a file on disk (copied into art/terrain/) or a file of the project; the "
-		                   "terrain is imported from them, and imported again when one changes.");
+	// Why Create waits, whole: the prompt grows to hold it.
+	if (named && !fits) ImGui::TextColored(ui_kit::refusal_color(), "%s", message.c_str());
+	else if (in_use) ImGui::TextColored(ui_kit::refusal_color(), "The project has a file named %s already.", file.c_str());
 	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
 	// text, or one of the project's files its reference loads. A project is its own files, so a
 	// kind the project has no file of says to import one.
@@ -168,7 +171,8 @@ void NewFilePrompt::draw(Workspace &workspace) {
 				for (const AssetEntry &entry : v.project.scan->entries) offered += entry.kind == wanted ? 1 : 0;
 			}
 			if (offered == 0)
-				ImGui::TextColored(kRefusalColor, "The project has no %s: import one first (Files > Import).", param.token);
+				ImGui::TextColored(ui_kit::refusal_color(), "The project has no %s: import one first (Files > Import).",
+				                   param.token);
 		}
 		ImGui::PopID();
 		given = given && (!param.required || !values_[i].empty());
@@ -505,8 +509,8 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (v.project.scan->entries.empty()) {
 		ui_kit::empty_state("The project has no files yet.", "Import files, or make one with New.");
 	} else if (narrowed && matches.empty()) {
-		ui_kit::empty_state(kind_shown_ != AssetKind::kCount && filter_.text[0] == '\0' ? "The project has no file of this kind."
-		                                                                              : "No file matches the filter.");
+		if (filter_.text[0] == '\0') ui_kit::empty_state("The project has no file of this kind.");
+		else if (ui_kit::nothing_matches(filter_.text, "file")) send_filter(true, false);
 	} else if (const bool kind_fits = ImGui::GetContentRegionAvail().x >= ImGui::GetFontSize() * kKindRoomEm;
 	           // "project_files": a table id of its own since the Kind column shows by default, so a layout an
 	           // earlier editor saved with it hidden (its default then) does not hide it (the UX round's project lane).
@@ -939,7 +943,7 @@ void FilesWindow::draw_move_menu(const SessionView &view, const AssetEntry &entr
 	ImGui::BeginDisabled(!named || folder == here);
 	const bool move = ImGui::Button("Move");
 	ImGui::EndDisabled();
-	if (new_folder_[0] != '\0' && !named) ImGui::TextColored(kRefusalColor, "%s", why.c_str());
+	if (new_folder_[0] != '\0' && !named) ImGui::TextColored(ui_kit::refusal_color(), "%s", why.c_str());
 	if ((move || enter) && named && folder != here) move_to(folder);
 	ImGui::EndMenu();
 }
@@ -1103,14 +1107,12 @@ void FilesWindow::draw_card(const SessionView &view) {
 		if (!open) close_card();
 		return;
 	}
-	ImGui::PushTextWrapPos(0.0f);
-	ImGui::Text("%s, %s", card.kind_label.c_str(), strutil::byte_size_text(card.size).c_str());
-	ImGui::TextDisabled("%s", card.path.c_str());
-	ImGui::Spacing();
-	ImGui::TextWrapped("%s", card.what.c_str());
-	ImGui::TextWrapped("%s", card.build.c_str());
-	if (!card.imported_from.empty()) ImGui::TextWrapped("Made from %s by its import.", card.imported_from.c_str());
-	ImGui::PopTextWrapPos();
+	// Its kind and size, what it is behind a help mark (the page's head, without the name the title says); where it is,
+	// where a build puts it and what it is made from a line each.
+	draw_file_card_head(card, false);
+	ui_kit::quiet_text(card.path);
+	ui_kit::clipped_text(card.build);
+	if (!card.imported_from.empty()) ui_kit::clipped_text("Made from " + card.imported_from + " by its import.");
 	// A wave's sound, as the game decodes it, played by the editor.
 	if (card.wave) {
 		ImGui::Spacing();
@@ -1157,16 +1159,11 @@ void FilesWindow::draw_card(const SessionView &view) {
 				}
 				ImGui::Dummy(ImVec2(width, height));
 			}
-			if (!card.sound.plays) {
-				ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
-				ImGui::TextWrapped("The game's loader refuses it: %s Import it again to write it as the game plays it.",
-				                   card.sound.refusal.c_str());
-				ImGui::PopStyleColor();
-			}
+			if (!card.sound.plays)
+				ui_kit::refusal_text("The game's loader refuses it: " + card.sound.refusal +
+				                     " Import it again to write it as the game plays it.");
 		} else {
-			ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
-			ImGui::TextWrapped("The game cannot play it: %s", card.sound.error.c_str());
-			ImGui::PopStyleColor();
+			ui_kit::refusal_text("The game cannot play it: " + card.sound.error);
 		}
 	}
 	ImGui::Spacing();
@@ -1192,7 +1189,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	const bool names_any = !card.names.empty() || asset_kind_row(card.kind).names_files;
 	if (names_any && ImGui::CollapsingHeader(names.c_str(), card.names.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
 		if (card.names.empty())
-			ui_kit::empty_state(card.reading ? "The project's references are still being read." : "No other file or record.");
+			ui_kit::empty_state(card.reading ? ui_kit::reading_references() : "No other file or record.");
 		else if (ImGui::BeginTable("names", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 2.0f);
@@ -1210,8 +1207,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 					ImGui::TableNextColumn();
 					const bool goes = !named.target.file.empty();
 					if (goes) {
-						if (ImGui::Selectable((ui_kit::fit(named.value, ImGui::GetContentRegionAvail().x) + "###go").c_str()))
-							window_requests::go_to(workspace_, named.target);
+						if (ui_kit::fitted_selectable(named.value, "go")) window_requests::go_to(workspace_, named.target);
 						ui_kit::tooltip(window_requests::go_to_words(named.target));
 					} else {
 						ui_kit::clipped_text(named.value);
@@ -1232,7 +1228,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	const std::string users = "Named by (" + count(card.used_by.size()) + ")###users";
 	if (ImGui::CollapsingHeader(users.c_str(), card.used_by.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
 		if (card.used_by.empty())
-			ui_kit::empty_state(card.reading ? "The project's references are still being read."
+			ui_kit::empty_state(card.reading ? ui_kit::reading_references()
 			                                 : "No file of the project names it or what it defines.");
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(card.used_by.size()));
@@ -1241,8 +1237,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 				const FileCard::User &user = card.used_by[size_t(i)];
 				ImGui::PushID(i);
 				const std::string line = user.file + ": " + (user.record.empty() ? "" : user.record + " - ") + user.field;
-				if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###use").c_str()))
-					window_requests::go_to(workspace_, user.target);
+				if (ui_kit::fitted_selectable(line, "use")) window_requests::go_to(workspace_, user.target);
 				ui_kit::tooltip(line + "\n" + window_requests::go_to_words(user.target));
 				ImGui::PopID();
 			}

@@ -99,9 +99,11 @@ void definitions(Workspace &workspace, const FileCard &card, bool reveal) {
 
 } // namespace
 
-void draw_file_card_head(const FileCard &card) {
-	ImGui::TextUnformatted(card.name.c_str());
-	ImGui::SameLine();
+void draw_file_card_head(const FileCard &card, bool named) {
+	if (named) {
+		ImGui::TextUnformatted(card.name.c_str());
+		ImGui::SameLine();
+	}
 	ImGui::TextDisabled("%s, %s", card.kind_label.c_str(), strutil::byte_size_text(card.size).c_str());
 	ui_kit::help_mark(card.what + "\nRead by the game: " + card.read_by + "\n" + card.build + " " + card.editor +
 	                  (card.cite.empty() ? std::string() : "\nAs the original game was seen to do: " + card.cite));

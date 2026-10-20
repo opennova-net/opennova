@@ -1283,7 +1283,7 @@ void test_files_window() {
 	              text.find("readme.txt") == std::string::npos && text.find("menus") == std::string::npos,
 	      "a filter lists its matches flat");
 	type_into(ui, item_id(files, {"##filter"}), "zzz");
-	CHECK(logged_frame(ui).find("No file matches the filter.") != std::string::npos, "no match");
+	CHECK(logged_frame(ui).find("No file matches") != std::string::npos, "no match");
 	type_into(ui, item_id(files, {"##filter"}), "");
 	ui.drain();
 
