@@ -112,7 +112,7 @@ them.
 | Asset | Source | Author | Licence | Used for |
 |---|---|---|---|---|
 | Universal Animation Library [Standard] (`Idle_Loop`, `Pistol_Idle_Loop`, `Pistol_Reload`, `Walk_Loop`, `Jog_Fwd_Loop`, `Sprint_Loop`, `Crouch_Idle_Loop`, `Jump_Start`, `Jump_Loop`, `Swim_Idle_Loop`, `Swim_Fwd_Loop`, `Death01`) | [OpenGameArt](https://opengameart.org/content/universal-animation-library) (also [quaternius.com](https://quaternius.com/packs/universalanimationlibrary.html)) | Quaternius | CC0 1.0 | Retargeted onto the person rig: the idles, the walk, every run and crouched run (the strafes and back runs are the jog under a turned lower body or played backwards), the sprint, the jump, the swim and the first death; the pistol hold `on_pist_hold` (`Pistol_Idle_Loop` stretched to 2 s) and the pistol reload `on_pist_rload` (`Pistol_Reload` at its own 1.67 s) |
-| Universal Animation Library 2 [Standard] (`Hit_Knockback`, `Idle_Lantern_Loop`, `Sword_Regular_A`, `OverhandThrow`) | [OpenGameArt](https://opengameart.org/content/universal-animation-library-2) | Quaternius | CC0 1.0 | The second death (the grenade deaths); the knife hold's free arm, head and breath (`Idle_Lantern_Loop`, 2.5 s over 2 s); the knife attack `on_knife_atk` (`Sword_Regular_A`'s slash at its own speed, between two eases from and back to the knife hold); the grenade hold `on_gren_hold` (`OverhandThrow`'s raised arm, held) and the grenade throw `on_gren_throw` (`OverhandThrow` from that arm through the release and follow-through, easing back to the hold) |
+| Universal Animation Library 2 [Standard] (`Hit_Knockback`, `Idle_Lantern_Loop`, `Sword_Regular_A`, `OverhandThrow`) | [OpenGameArt](https://opengameart.org/content/universal-animation-library-2) | Quaternius | CC0 1.0 | The second death (the grenade deaths); the knife hold's head and breath (`Idle_Lantern_Loop`, 2.5 s over 2 s); the knife attack's clavicles (`Sword_Regular_A`); the grenade hold `on_gren_hold` (`OverhandThrow`'s raised arm, held) and the grenade throw's clavicles, neck and head (`OverhandThrow`) |
 
 The animation libraries are not in the repository: the clips in the `.blend` are
 their retargeted, refitted bakes (CC0 permits it), and the libraries themselves
@@ -138,16 +138,29 @@ hold and everything else from the body's own clip. The sources above are carried
 onto the rig by the direction of each bone; the attacks and the grenade clips
 keep their arms as the source's chest carries them, with a third of the chest's
 own turn, so the source's lunge does not throw the arms about over a torso that
-stays still. Ours, keyed by hand: the knife arm of the knife hold (the hand low
-by the right hip), the binoculars (the left hand at the eyes, the right arm down
-with the weapon, a slow breath) and the scoped hold `on_scope` (our rifle hold
-`on_idle` raised to the cheek with the head bowed onto the stock, over 2 s).
+stays still. Ours, keyed by hand: both arms of the knife hold (the right hand
+hanging at the right side, the left at the left), of the knife attack
+`on_knife_atk` (a slash across the chest: out to the right, across to the left
+hip, back across and out to the right, the head held as the hold holds it) and of
+the grenade throw `on_gren_throw` (wound back by the ear, held a beat, over the
+top, let go in front, carried through low and back toward the hold), each on a few
+key poses with Blender's curves between them (the hands placed by a two-bone solve,
+the elbows toward where the original's point); the binoculars (the left hand at the
+eyes, the right arm down with the weapon, a slow breath) and the scoped hold
+`on_scope` (our rifle hold `on_idle` raised to the cheek with the head bowed onto
+the stock, over 2 s). The weapon channel takes those bones' turns in the model's
+own frame (`engine/runtime/anim/aim_overlay.h`, `splice_weapon_channel_rotations`),
+so the hands are placed from each shoulder in the model's frame, not the chest's.
 What was taken from the original's own hold clips (`US01.adm`'s `IDL_PST`,
-`IDL_KNF`, `IDL_GND`, `IDL_BNC`, `Dt1idlA3`) is measurement only, no clip: their
-lengths and loop flags, where the hands sit against the head or the chest (the
-knife hand, the grenade hand, both binocular hands, the scoped hold's hands), and
-the right hand's turn from rest in the pistol, knife and grenade holds and the
-left hand's at the binoculars, which each hold copies so the item the game hangs
+`IDL_KNF`, `IDL_GND`, `IDL_BNC`, `Dt1idlA3`, and the attacks `ATT_KNF` and
+`ATT_GND`) is measurement only, no clip: their lengths and loop flags, where the
+hands sit against the head or the chest (the knife hand, the grenade hand, both
+binocular hands, the scoped hold's hands; for the knife hold and the two attacks,
+each hand's place from its shoulder in arm lengths and where its elbow points, at
+the attacks' key frames only: the knife attack's 0, 3, 7, 12 and 15, the throw's 0,
+8, 15 and 19), and
+the right hand's turn from rest in the pistol, knife and grenade holds (and at
+the attacks' key frames) and the left hand's at the binoculars, which each copies so the item the game hangs
 from the hand at a fixed turn (the knife, a grenade, the pistol while it
 reloads, the binoculars) points where the original's does.
 
