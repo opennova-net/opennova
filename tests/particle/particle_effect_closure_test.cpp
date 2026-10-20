@@ -253,7 +253,8 @@ std::vector<particle::EffectCatalogDocument> shipped_shapes() {
 }
 
 // Every effect the catalog defines spawns from its closure exactly as from the whole catalog, the first
-// registration of each id the one asked for: one shadowed effect, the empty one spawning nothing.
+// registration of each id the one asked for: one shadowed effect. The block of no pdefs line is no
+// effect to the game, so the catalog holds none of it [orig: CParticleTableDef_ParseScriptLine @ 0x5E93CB].
 int test_shipped_shapes() {
 	const std::vector<particle::EffectCatalogDocument> documents = shipped_shapes();
 	particle::EffectSceneConfig whole;
@@ -277,7 +278,7 @@ int test_shipped_shapes() {
 			spawned += a.status == particle::EffectSpawnStatus::Spawned;
 			shadowed += closure.shadowed;
 		}
-	TEST_EXPECT(effects == 9 && spawned == 8 && shadowed == 1);
+	TEST_EXPECT(effects == 8 && spawned == 8 && shadowed == 1);
 	// The fire is the first file's (its two-layer flame), the shadowed one's member never asked for.
 	const particle::EffectClosure fire = particle::effect_closure(documents, "EFFECT_FIRE");
 	TEST_EXPECT(fire.source == "a_fx.ptl" && fire.members == std::vector<std::string>({"Fire_Flame"}) &&

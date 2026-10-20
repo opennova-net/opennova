@@ -234,8 +234,10 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 
 bool extract_particles(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	particle::ParticleFile file;
+	particle::ParticlePlaces places;
 	particle::ParseError parse_error;
-	if (!particle::load_particles_from_buffer(reinterpret_cast<const char *>(bytes.data()), bytes.size(), file, parse_error)) {
+	if (!particle::load_particles_with_places(reinterpret_cast<const char *>(bytes.data()), bytes.size(), file, places,
+	                                          parse_error)) {
 		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The particle file could not be read.", name);
 		return false;
 	}
@@ -254,11 +256,20 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 	// the text again, native_text_place).
 	for (const particle::TableDef &table : file.tables)
 		if (!table.id.empty()) out.symbols.push_back(symbol_of(ReferenceKind::ParticleTable, table.id, name, table.id));
-	for (const particle::ParticleDef &definition : file.particles) {
+	for (size_t index = 0; index < file.particles.size(); ++index) {
+		const particle::ParticleDef &definition = file.particles[index];
 		// Each curve the particle names, its own and each graphic's, as the game resolves them once every particle
 		// file is loaded [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630], each key the site a rename rewrites.
+		// A graphic's curve a graphicN line copied from the particle's is no line of its own: the particle's
+		// line it came from is the site [orig: CParticleDefEntry_ParseGraphicProperty @ 0x5e3550].
+		const auto written = [&](const std::string &key) {
+			return std::any_of(places.keys.begin(), places.keys.end(), [&](const particle::KeyPlace &place) {
+				return place.block == particle::BlockKind::Particle && place.index == index &&
+				       opennova::strutil::iequals(place.key, key);
+			});
+		};
 		const auto curve = [&](const particle::CurveRef &ref, const std::string &key) {
-			if (ref.present && !ref.name.empty())
+			if (ref.present && !ref.name.empty() && written(key))
 				out.edges.push_back(edge_of(name, definition.id, key, ReferenceKind::ParticleTable, ref.name, std::string(), true));
 		};
 		curve(definition.scale_func, "scale_func");

@@ -253,9 +253,11 @@ int test_lexical_forms() {
 	}
 	std::printf("  lexical_forms.ptl: %zu blocks, %zu keys (%zu effect, %zu particle, %zu table, %zu handles)\n",
 	            read.places.blocks.size(), read.places.keys.size(), by_kind[0], by_kind[1], by_kind[2], by_kind[3]);
-	TEST_EXPECT(read.places.blocks.size() == 9 && read.file.effects.size() == 2 && read.file.particles.size() == 3 &&
+	// Lex_Quiet's effect block holds no pdefs line, so it is no effect and no block to the game, nor
+	// is its id key placed [orig: CParticleTableDef_ParseScriptLine @ 0x5E93CB].
+	TEST_EXPECT(read.places.blocks.size() == 8 && read.file.effects.size() == 1 && read.file.particles.size() == 3 &&
 	            read.file.tables.size() == 2 && read.file.table_handles.size() == 2);
-	TEST_EXPECT(read.places.keys.size() == 288 && by_kind[0] == 3 && by_kind[1] == 208 && by_kind[2] == 66 &&
+	TEST_EXPECT(read.places.keys.size() == 287 && by_kind[0] == 2 && by_kind[1] == 208 && by_kind[2] == 66 &&
 	            by_kind[3] == 11);
 	// The forms, each at its place: a word value inside its blanks, a graphic of no texture, the second emit_dur.
 	const particle::KeyPlace *flags = place_of(read.places, BlockKind::Particle, "flags");
