@@ -159,6 +159,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 ## Other minted sets
 
 - `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp`.
+- `terrain/variants` — `tests/fixtures/terrain_variants_gen.cpp`: one file per form the
+  shipped terrain files take (the char, foliage, picture, sky and 24-bit PCX; the
+  three true-colour TGA forms; MED's `.til`; the shipped `.cpt` with every CDEP block
+  width), each pinned as its sweep writes it again (`pcx_shipped_forms`,
+  `tga_shipped_forms`, `til_shipped_form`, `cpt_shipped_form`).
 - `fnt/synth_*.fnt`, `cbin/synth_nlist*.kda`, `cbin/credits_image.png`,
   `cbin/particle_dot.tga` — `tests/fixtures/minimal_fnt_gen.cpp`,
   `minimal_cbin_gen.cpp`: the credits lists in their JO, JOX01 and BHD shapes
@@ -169,7 +174,8 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   the synthetic environment (every keyword authored, ten time-of-day keyframes,
   written by `save_env`) and the two sky maps it names (the bright square-rooted
   cloud field and the modulation layer centered at 128), 64x64 indexed PCX by our
-  writer. The shipped `.env` set is the gated `env_jo_install` sweep.
+  writer. The shipped `.env` line forms are the authored `env/line_forms.env`
+  (`env_shipped_forms`).
 - `rtxt/synth_*.bin` — `tests/fixtures/minimal_rtxt_gen.cpp`: the parity set
   `rtxt_synth_parity` grills — a multi-section game table with position hints, a
   menu table, a mission sidecar with cp1252 text and odd-length padding, and the

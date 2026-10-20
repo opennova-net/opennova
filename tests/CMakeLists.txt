@@ -1415,11 +1415,12 @@ target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
 
-# Every shipped char and foliage map read with its carried form and written again the same bytes.
-add_executable(pcx_retail_maps_test pcx/pcx_retail_maps_test.cpp)
-target_link_libraries(pcx_retail_maps_test PRIVATE opennova_formats)
-target_include_directories(pcx_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(pcx_retail_maps COMMAND pcx_retail_maps_test)
+# The indexed PCX forms the shipped files take (fixtures/terrain/variants): the char and foliage maps read with
+# their carried form, every paintable one written again the same bytes, pinned.
+add_executable(pcx_shipped_forms_test pcx/pcx_shipped_forms_test.cpp)
+target_link_libraries(pcx_shipped_forms_test PRIVATE opennova_formats)
+target_include_directories(pcx_shipped_forms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pcx_shipped_forms COMMAND pcx_shipped_forms_test)
 
 # The 256-colour quantizer an 8-bit PCX is written through (formats/pcx/pcx_quantize.h).
 add_executable(pcx_quantize_test pcx/pcx_quantize_test.cpp)
@@ -1464,12 +1465,12 @@ target_link_libraries(tga_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(tga_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_roundtrip COMMAND tga_roundtrip_test)
 
-# Every shipped terrain colour map, detail blend map and tile atlas read with its form and written again the
-# same bytes.
-add_executable(tga_retail_maps_test tga/tga_retail_maps_test.cpp)
-target_link_libraries(tga_retail_maps_test PRIVATE opennova_formats)
-target_include_directories(tga_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(tga_retail_maps COMMAND tga_retail_maps_test)
+# The true-colour TGA forms the shipped files take (fixtures/terrain/variants): the colour map, detail blend map
+# and tile atlas read with their form, every paintable one written again the same bytes, pinned.
+add_executable(tga_shipped_forms_test tga/tga_shipped_forms_test.cpp)
+target_link_libraries(tga_shipped_forms_test PRIVATE opennova_formats)
+target_include_directories(tga_shipped_forms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_shipped_forms COMMAND tga_shipped_forms_test)
 
 add_executable(dds_write_test dds/dds_write_test.cpp)
 target_link_libraries(dds_write_test PRIVATE opennova_formats)
@@ -1514,10 +1515,12 @@ target_link_libraries(til_render_uv_test PRIVATE opennova_formats)
 target_include_directories(til_render_uv_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME til_render_uv COMMAND til_render_uv_test)
 
-add_executable(til_retail_sweep_test til/til_retail_sweep_test.cpp)
-target_link_libraries(til_retail_sweep_test PRIVATE opennova_formats)
-target_include_directories(til_retail_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(til_retail_sweep COMMAND til_retail_sweep_test)
+# The .til form the shipped overlays take (fixtures/terrain/variants/med.til): MED's header, the records' forms,
+# written again the same bytes, pinned.
+add_executable(til_shipped_form_test til/til_shipped_form_test.cpp)
+target_link_libraries(til_shipped_form_test PRIVATE opennova_formats)
+target_include_directories(til_shipped_form_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME til_shipped_form COMMAND til_shipped_form_test)
 
 add_executable(foliage_map_test foliage/foliage_map_test.cpp)
 target_link_libraries(foliage_map_test PRIVATE opennova_formats)
@@ -1607,14 +1610,13 @@ target_link_libraries(cpt_trngen_region_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_region_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_parts(cpt_trngen_region_bake PARTS state regions locks walk COMMAND cpt_trngen_region_bake_test)
 opennova_bakes(cpt_trngen_region_bake_state cpt_trngen_region_bake_regions cpt_trngen_region_bake_locks)
-# Over the shipped .cpt files (a cold bake's state from the atlas; the W3 draw-back report).
-add_executable(cpt_region_bake_retail_test cpt/trngen_region_bake_retail_test.cpp)
-target_link_libraries(cpt_region_bake_retail_test PRIVATE opennova_formats)
-target_include_directories(cpt_region_bake_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_parts(cpt_region_bake_retail PARTS draw_back dvxi5 dvxg3 g14 dvxi4 dvxg9 GATED
-                   COMMAND cpt_region_bake_retail_test)
-opennova_bakes(cpt_region_bake_retail_dvxi5 cpt_region_bake_retail_dvxg3 cpt_region_bake_retail_g14
-               cpt_region_bake_retail_dvxi4 cpt_region_bake_retail_dvxg9)
+# Over a .cpt in the form TrnGen ships, minted (its own tiles with six flipped faces, the atlas their draw-back):
+# the W3 draw-back, and a cold bake's state from the atlas with its region legs, open and under g14's locks.
+add_executable(cpt_region_bake_shipped_test cpt/trngen_region_bake_shipped_test.cpp)
+target_link_libraries(cpt_region_bake_shipped_test PRIVATE opennova_formats)
+target_include_directories(cpt_region_bake_shipped_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_parts(cpt_region_bake_shipped PARTS draw_back open locked COMMAND cpt_region_bake_shipped_test)
+opennova_bakes(cpt_region_bake_shipped_open cpt_region_bake_shipped_locked)
 # By hand: the region bake's cost per node level (`trngen_region_bake_bench [threads]`).
 add_executable(trngen_region_bake_bench EXCLUDE_FROM_ALL cpt/trngen_region_bake_bench.cpp)
 target_link_libraries(trngen_region_bake_bench PRIVATE opennova_formats)
@@ -1778,10 +1780,12 @@ add_executable(hud_loading_background_test hud/loading_background_test.cpp)
 target_link_libraries(hud_loading_background_test PRIVATE opennova_runtime)
 add_test(NAME hud_loading_background COMMAND hud_loading_background_test)
 
-add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
-target_link_libraries(jo_env_sweep_test PRIVATE opennova_formats opennova_base)
-target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(env_jo_install COMMAND jo_env_sweep_test)
+# The .env line forms the shipped environments take (the authored fixtures/env/line_forms.env) and synth_full.env:
+# each parses and saved reads the same; the text facts the env divergences rest on.
+add_executable(env_shipped_forms_test env/env_shipped_forms_test.cpp)
+target_link_libraries(env_shipped_forms_test PRIVATE opennova_formats opennova_base)
+target_include_directories(env_shipped_forms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_shipped_forms COMMAND env_shipped_forms_test)
 
 add_executable(terrain_lighting_test terrain/terrain_lighting_test.cpp)
 target_link_libraries(terrain_lighting_test PRIVATE opennova_runtime)
@@ -1794,11 +1798,11 @@ target_include_directories(terrain_texture_preprocess_test PRIVATE ${CMAKE_CURRE
 add_test(NAME terrain_texture_preprocess COMMAND terrain_texture_preprocess_test)
 
 # A terrain's char map and foliage map made from a picture (runtime/terrain
-# terrain_map_source); the _retail row reads JO:CA's Dvxi5_m.pcx and Dvxi5_f.pcx.
+# terrain_map_source), and the shipped maps' forms (fixtures/terrain/variants) read the same way.
 add_executable(terrain_map_source_test terrain/terrain_map_source_test.cpp)
 target_link_libraries(terrain_map_source_test PRIVATE opennova_runtime)
 target_include_directories(terrain_map_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(terrain_map_source COMMAND terrain_map_source_test)
+add_test(NAME terrain_map_source COMMAND terrain_map_source_test)
 
 add_executable(terrain_lod_family_test terrain/terrain_lod_family_test.cpp)
 target_link_libraries(terrain_lod_family_test PRIVATE opennova_runtime)
@@ -1844,7 +1848,7 @@ add_test(NAME terrain_tile_composition_cache COMMAND terrain_tile_composition_ca
 add_executable(terrain_tile_composer_test terrain/terrain_tile_composer_test.cpp)
 target_link_libraries(terrain_tile_composer_test PRIVATE opennova_runtime)
 target_include_directories(terrain_tile_composer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(terrain_tile_composer COMMAND terrain_tile_composer_test)
+add_test(NAME terrain_tile_composer COMMAND terrain_tile_composer_test)
 
 # The page-composition thread pool (runtime/terrain/terrain_tile_composition_worker.h):
 # no sources = no work, a queued job composes one 256x256 page, a rejected
@@ -2218,7 +2222,7 @@ add_test(NAME menu_frame_notes COMMAND menu_frame_notes_test)
 
 # A marquee's credits over both ConfigFile forms (runtime/menu/menu_credits.h): a
 # CBIN file read as its text form reads, the minted synth_nlist trio, and the
-# shipped lists from the reference fixture set (the _retail row).
+# minted lists of the shipped lists' shapes, their counts pinned.
 add_executable(menu_credits_test menu/menu_credits_test.cpp)
 target_link_libraries(menu_credits_test PRIVATE opennova_runtime)
 target_include_directories(menu_credits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2287,30 +2291,39 @@ endforeach()
 
 # The synthetic terrain map fixtures/terrain/tmap (Tmap.trn/.cpt/_f.pcx):
 # minted by our own writers, byte-compared every run (--write regenerates).
-# The retail .cpt polydata is swept behind OPENNOVA_JO_ASSETS.
 add_executable(minimal_terrain_gen_test fixtures/minimal_terrain_gen.cpp)
 target_link_libraries(minimal_terrain_gen_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(minimal_terrain_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_terrain_gen COMMAND minimal_terrain_gen_test)
 
-add_executable(cpt_jo_assets_sweep_test terrain/cpt_jo_assets_sweep_test.cpp)
-target_link_libraries(cpt_jo_assets_sweep_test PRIVATE opennova_formats)
-target_include_directories(cpt_jo_assets_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(cpt_jo_assets_sweep COMMAND cpt_jo_assets_sweep_test)
+# fixtures/terrain/variants: one file per form the shipped JO:CA terrain files take (the char, foliage, picture,
+# sky and 24-bit PCX; the three true-colour TGA forms; MED's .til; the shipped .cpt), minted by our own
+# writers and byte-compared every run (--write regenerates).
+add_executable(terrain_variants_gen_test fixtures/terrain_variants_gen.cpp)
+target_link_libraries(terrain_variants_gen_test PRIVATE opennova_formats)
+target_include_directories(terrain_variants_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_variants_gen COMMAND terrain_variants_gen_test)
+
+# The .cpt form the shipped polydata takes (fixtures/terrain/variants/shipped.cpt) and Tmap.cpt: the header facts,
+# every CDEP block width, written again the same bytes, pinned.
+add_executable(cpt_shipped_form_test terrain/cpt_shipped_form_test.cpp)
+target_link_libraries(cpt_shipped_form_test PRIVATE opennova_formats)
+target_include_directories(cpt_shipped_form_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_shipped_form COMMAND cpt_shipped_form_test)
 
 # D-TERRAIN-18: a mission's terrain reads overcast.def and its .env after the
 # .trn through the terrain's parser (formats/trn load_mission_trn), over the
-# Tmap fixture and synthetic later files; the runtime's field-store load with it.
-# Retail leg: every JO:CA terrain under overcast.def and each shipped .env.
+# Tmap fixture and synthetic later files; the runtime's field-store load with it; the shipped
+# .trn line forms (fixtures/terrain/forms) under overcast.def's form and each .env form.
 add_executable(trn_mission_load_test terrain/trn_mission_load_test.cpp)
 target_link_libraries(trn_mission_load_test PRIVATE opennova_runtime opennova_formats opennova_base)
 target_include_directories(trn_mission_load_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(trn_mission_load COMMAND trn_mission_load_test)
+add_test(NAME trn_mission_load COMMAND trn_mission_load_test)
 
 add_executable(trn_config_roundtrip_test terrain/trn_config_roundtrip_test.cpp)
 target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(trn_config_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(trn_config_roundtrip COMMAND trn_config_roundtrip_test)
+add_test(NAME trn_config_roundtrip COMMAND trn_config_roundtrip_test)
 
 # Terrain world->source coordinate transform kernel
 # (engine/runtime/terrain_query/coords.h): the shared runtime and bounds-checked
@@ -2395,8 +2408,8 @@ foreach(name smallest minimal_effect multi_section multi_layer table_handles
     add_test(NAME particle_${name} COMMAND particle_${name}_test)
 endforeach()
 # effect_pose pins the spawn poses every producer hands the scene; effect_closure
-# (mixed) one effect's closure and several folded, the retail leg every effect
-# of the install's catalog alike from its closure (OPENNOVA_JO_DIR).
+# one effect's closure and several folded, and every effect of a catalog of the
+# shipped files' cross-file shapes alike from its closure.
 foreach(name emitter emit_shape translate effect_scene_contract effect_pose effect_closure)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_runtime)
@@ -2494,8 +2507,7 @@ target_include_directories(mnu_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mnu_compat COMMAND mnu_compat_test)
 
 # Round-trip key-coverage: catches attributes/tags dropped at parse time, which
-# the idempotence sweep above cannot see (see ADR 0002). The same fifteen
-# reference menus; gated on OPENNOVA_JO_ASSETS.
+# the idempotence sweep above cannot see (see ADR 0002). The same menus.
 add_executable(mnu_coverage_test mnu/mnu_coverage_test.cpp)
 target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

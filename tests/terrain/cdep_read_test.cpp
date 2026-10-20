@@ -1,8 +1,7 @@
 // CDEP header parity over the synthetic map fixtures/terrain/tmap/Tmap.cpt
 // (tests/fixtures/minimal_terrain_gen.cpp): the header decode, the depth
 // buffer shape and the full 1024-to-64 tile quadtree the generator mints.
-// The retail CDEP files are swept by cpt_jo_assets_sweep_test behind
-// OPENNOVA_JO_ASSETS.
+// The shipped CDEP form (every block width) is cpt_shipped_form's.
 
 #include <formats/cpt/cpt.h>
 #include "common/test_paths.h"
