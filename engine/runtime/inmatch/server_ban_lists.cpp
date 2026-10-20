@@ -201,7 +201,8 @@ bool Server_AddressBanned(const NapiNPServerCtx &ctx, uint32_t address) {
 // [orig: Server_HandleBanPuntCommand @0x50B380. The sender is authorized when there is none
 //  (the console's 0) or it is the local slot (+5) @0x50B3BE..0x50B3CA; every chat reply is
 //  gated on a sender, so the console's line draws none. The line through
-//  String_TokenizeQuotedToArray @0x50B3DE; fewer than one token is not handled. With two or
+//  String_TokenizeQuotedToArray @0x616D60 (the call @0x50B3DE); fewer than one token is not
+//  handled. With two or
 //  more tokens:
 //  - BAN @0x50B41B: unauthorized or with no list, handled with nothing @0x50B43A; else `atol`
 //    of token 1 range-checked 0..capacity (inclusive, "Player number %ld out of range."

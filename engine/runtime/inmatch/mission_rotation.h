@@ -106,9 +106,15 @@ struct MissionRotation {
 
 // The session-level rotation state: the words the round end, the map change
 // and the team assignment read beside the list. Process globals in retail;
-// the embedder owns one for its whole run (the half toggle and the latch are
-// never reset, so a session that ended mid-map hands a set toggle to the
-// next, §5.70.5) and the host context points at it.
+// the embedder owns one for its whole run (the half toggle, the latch and the
+// side-to-team map are never reset, so a session that ended mid-map hands a
+// set toggle and swapped sides to the next, §5.70.5) and the host context
+// points at it; the per-session words reset at their own points (the START
+// seed, the round init's LASTGAME clear, the host start's round count).
+// [orig: g_RotationIsFlipped, g_RotationSetNextLatch, g_RotationSideTeam0 /
+//  g_RotationSideTeam1, whose only writers are Game_TeardownMission
+//  @0x522501..0x522520, PostMenu_RouteMissionExit @0x5685F9 / @0x568607 /
+//  @0x568624 and CAdminServer_HandleMissionCommand's SETNEXT @0x4066DF]
 struct HostRotation {
 	MissionRotation list;
 	// [orig: g_RotationIsFlipped (byte_24D217E)] set while a launch-option

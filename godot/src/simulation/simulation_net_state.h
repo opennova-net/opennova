@@ -89,11 +89,8 @@ struct SimulationNetState {
 	// ended mid-map hands them to the next: the game world owns the one
 	// HostRotation for its whole run (use_host_rotation) and the session
 	// words reset at their own points (the seed, the round init, the host
-	// start). A simulation with no owner (a tool, a test) keeps its own.
-	// [orig: g_RotationIsFlipped, g_RotationSetNextLatch, g_RotationSideTeam0 /
-	//  g_RotationSideTeam1, whose only writers are Game_TeardownMission
-	//  @0x522501..0x522520, PostMenu_RouteMissionExit @0x5685F9 / @0x568607 / @0x568624
-	//  and CAdminServer_HandleMissionCommand's SETNEXT @0x4066DF]
+	// start). A simulation with no owner (a tool, a test) keeps its own. The
+	// witness is HostRotation's (inmatch/mission_rotation.h).
 	std::vector<std::string> rotation_missions;
 	std::vector<int32_t> rotation_launch_options;
 	std::vector<opennova::mission_catalog::Row> rotation_catalog;
