@@ -2,8 +2,8 @@
 // the catalog registers first, its members all or nothing, its child chains, every table, and a scene
 // over it alone spawning what the whole catalog spawns, particle for particle; the stock effect for an
 // unknown name. Several names' closures folded into one config (effect_closures), each effect and
-// definition once. The retail leg (OPENNOVA_JO_DIR): every effect the install's catalog defines spawns
-// from its closure exactly as from the whole catalog.
+// definition once. And every effect of a catalog of the shipped files' cross-file shapes spawns from its
+// closure exactly as from the whole catalog.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -11,12 +11,10 @@
 #include <vector>
 
 #include <base/io/strutil.h>
-#include <base/resource_index/resource_index.h>
 #include <formats/particle/parser.h>
 #include <runtime/particle/effect_closure.h>
 #include <runtime/particle/effect_scene.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 
 namespace particle = opennova::particle;
@@ -186,34 +184,64 @@ int test_closures() {
 	return 0;
 }
 
-// Every effect the install's catalog defines spawns from its closure exactly as from the whole catalog.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's particle files)");
-		return 0;
-	}
-	opennova::ResourceIndex index;
-	TEST_EXPECT(index.scan(install));
-	std::vector<particle::EffectCatalogDocument> documents;
-	for (const std::string &name : index.effect_files()) {
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(index.read_file(name, bytes));
-		particle::EffectCatalogDocument read;
-		read.source = name;
-		particle::ParseError error;
-		if (!particle::load_particles_from_buffer(reinterpret_cast<const char *>(bytes.data()), bytes.size(), read.file,
-		                                          error)) {
-			std::printf("retail: %s does not read (%s, line %d)\n", name.c_str(), error.message.c_str(), error.line);
-			continue;
-		}
-		documents.push_back(std::move(read));
-	}
+// A particle definition of the shipped files' fuller shape: `child` its child, `curves` its curve keys
+// whole ("alpha_func = fade", "g2_scale_func = burn invert"), a second layer when `layers` is 2.
+std::string shaped_particle(const std::string &id, const std::string &child, const std::vector<std::string> &curves,
+                            int layers = 1) {
+	std::string out = "[particledef]\n{\nid\t= " + id + ";\n";
+	if (!child.empty()) out += "child_id\t= " + child + ";\n";
+	out += "move\t=  NORMAL ;\n\n\temit_dur\t= 0.300;\n\temit_rate\t= 30.000;\n\temit_burst\t= 2;\n\temit_dur\t= 0.300;\n"
+	       "\tage\t= 0.500;\n\tscale\t= 0.400;\n\tspeed\t= 3.000;\n\tspread\t= 45.000;\n\tgravity\t= 1.000;\n";
+	for (const std::string &curve : curves) out += "\t" + curve + ";\n";
+	for (int layer = 1; layer <= layers; ++layer)
+		out += "\tgraphic" + std::to_string(layer) + " =\tlayer" + std::to_string(layer) + ".tga, additive;\n\tg" +
+		       std::to_string(layer) + "_scale\t= 0.500;\n";
+	return out + "\n}\n\n";
+}
+
+// The shapes of the references between the shipped effect files (the 85 of the JO:CA install, read once on
+// 2026-10-19 by the retired particle_effect_closure_retail row): an effect naming particles another file
+// defines (122 members), a particle whose child another file defines (1), curves naming a table of another
+// file (5735; table.ptl's and troytabl.ptl's tables) or of their own, reversed (1256) or inverted (4), an
+// emit rate curve (26); an effect (37), a particle (160) and a table (104) a later file defines again, the
+// first registration standing; a member named twice in one effect (3); an effect of no members (3); a
+// member named in another case than its particle's (3); child chains two deep (44).
+std::vector<particle::EffectCatalogDocument> shipped_shapes() {
+	return {
+	        document("a_fx.ptl",
+	                 effect_text("Effect_Hit", "Hit_Spark, Hit_Dust, Hit_Spark") +
+	                         shaped_particle("Hit_Dust", "Hit_Grit", {"alpha_func = fade", "scale_func = grow reverse"}) +
+	                         effect_text("Effect_Fire", "Fire_Flame") +
+	                         shaped_particle("Fire_Flame", "",
+	                                         {"emit_rate_func = slow", "scale_func = burn", "g1_alpha_func = fade",
+	                                          "g2_scale_func = burn invert", "g2_alpha_func = fade reverse"},
+	                                         2) +
+	                         table_text("burn", 180)),
+	        document("b_fx.ptl",
+	                 effect_text("effect_fire", "Hit_Spark") +
+	                         shaped_particle("FIRE_FLAME", "", {"scale_func = grow"}) +
+	                         shaped_particle("Hit_Spark", "Hit_Ember", {"red_func = fade", "green_func = fade",
+	                                                                    "blue_func = fade invert"}) +
+	                         shaped_particle("Hit_Ember", "Hit_Ash", {"g1_scale_func = grow reverse"}) +
+	                         effect_text("Effect_Case", "HIT_DUST, hit_ember") +
+	                         "[effectdef]\n{\n\tid = Effect_None;\n\n}\n\n" + table_text("burn", 40)),
+	        document("c_fx.ptl", shaped_particle("Hit_Grit", "", {"alpha_func = fade"}) +
+	                                     shaped_particle("Hit_Ash", "", {"scale_func = slow reverse"}) +
+	                                     effect_text("Effect_Grit", "Hit_Grit")),
+	        document("table.ptl", table_text("fade", 255) + table_text("grow", 128) + table_text("slow", 64)),
+	        document("stock.ptl", effect_text("stockeffect", "Stock_Puff") + shaped_particle("Stock_Puff", "", {})),
+	};
+}
+
+// Every effect the catalog defines spawns from its closure exactly as from the whole catalog, the first
+// registration of each id the one asked for: one shadowed effect, the empty one spawning nothing.
+int test_shipped_shapes() {
+	const std::vector<particle::EffectCatalogDocument> documents = shipped_shapes();
 	particle::EffectSceneConfig whole;
 	whole.documents = documents;
 	particle::EffectScene full;
 	full.open(whole);
-	size_t effects = 0, spawned = 0;
+	size_t effects = 0, spawned = 0, shadowed = 0;
 	std::vector<std::string> seen;
 	for (const particle::EffectCatalogDocument &read : documents)
 		for (const particle::EffectDef &effect : read.file.effects) {
@@ -224,24 +252,32 @@ int test_retail() {
 			particle::EffectScene alone;
 			alone.open(closure.config);
 			const Ran a = run(full, effect.id, 25), b = run(alone, effect.id, 25);
-			if (!same_run(a, b)) std::fprintf(stderr, "retail: %s differs alone\n", effect.id.c_str());
+			if (!same_run(a, b)) std::fprintf(stderr, "shapes: %s differs alone\n", effect.id.c_str());
 			TEST_EXPECT(same_run(a, b) && closure.spawns() == (a.status == particle::EffectSpawnStatus::Spawned));
 			++effects;
 			spawned += a.status == particle::EffectSpawnStatus::Spawned;
+			shadowed += closure.shadowed;
 		}
-	TEST_EXPECT(documents.size() > 50 && effects > 100);
-	std::printf("retail: %zu particle files, %zu effects, %zu spawn, each alike from its closure\n", documents.size(),
-	            effects, spawned);
+	TEST_EXPECT(effects == 6 && spawned == 5 && shadowed == 1);
+	// The fire is the first file's (its two-layer flame), the shadowed one's member never asked for.
+	const particle::EffectClosure fire = particle::effect_closure(documents, "EFFECT_FIRE");
+	TEST_EXPECT(fire.source == "a_fx.ptl" && fire.members == std::vector<std::string>({"Fire_Flame"}) &&
+	            fire.definitions.size() == 1 && fire.definitions[0].source == "a_fx.ptl");
+	// The hit: its members across two files, the member named twice, the children across a file and two deep.
+	const particle::EffectClosure hit = particle::effect_closure(documents, "Effect_Hit");
+	TEST_EXPECT(hit.spawns() && hit.unresolved_member == 3 && hit.definitions.size() == 5);
+	const Ran ran = run(full, "Effect_Hit", 7);
+	TEST_EXPECT(ran.status == particle::EffectSpawnStatus::Spawned && ran.counts.particle_count > 0);
+	std::printf("shapes: %zu files, %zu effects, %zu spawn, each alike from its closure\n", documents.size(), effects,
+	            spawned);
 	return 0;
 }
-
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (test_closure() != 0) return 1;
 	if (test_closures() != 0) return 1;
-	if (test_retail() != 0) return 1;
+	if (test_shipped_shapes() != 0) return 1;
 	std::printf("particle_effect_closure: ok\n");
 	return 0;
 }

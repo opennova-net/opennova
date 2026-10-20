@@ -1,14 +1,16 @@
 // pff_apply_edits (engine/formats/pff), the archive edit an update's COPY and REMOVE rows make
 // in place of retail's pack.exe (D-UPD-1, ADR 0061 d8): adds stored plain with the row's time
 // and the updater's file CRC as their checksum, removes dropped, every other entry kept as
-// stored, nothing written when nothing changes. The retail leg checks the checksum convention
-// over every entry of the JO:CA install's localres.pff and jox01L.pff (docs/update/updater-re.md
-// §10: the 2005 build's entries carry the plain CRC-32/BZIP2, the one patched entry, localres's
-// main.mnu of 2009-07-24, the file CRC with the unroll defect), and edits a copy of jox01L.pff.
+// stored, nothing written when nothing changes. Over archives laid out as the stock packers left
+// JO:CA's localres.pff and jox01L.pff (tests/pff/pff_packer_archive.h), the checksum convention reads
+// back (docs/update/updater-re.md §10: the 2005 build's entries carry the plain CRC-32/BZIP2, the one
+// patched entry, localres's main.mnu of 2009-07-24, the file CRC with the unroll defect), and an edit
+// of the jox01L copy keeps the packed entries.
 
-#include "common/retail_paths.h"
+#include "common/file_io.h"
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
+#include "pff/pff_packer_archive.h"
 
 #include <formats/pff/pff.h>
 #include <formats/update/update_crc.h>
@@ -98,7 +100,7 @@ int test_edits() {
 
 // Every entry's checksum word is the plain CRC-32/BZIP2 of its stored bytes (the 2005 build's),
 // or, for an entry a patch wrote, the updater's file CRC; `patched` collects the latter's names.
-int check_retail_checksums(
+int check_packer_checksums(
 		const std::string &path, uint32_t &checked, std::vector<std::string> &patched) {
 	PffArchive archive{};
 	TEST_EXPECT(pff_open(&archive, path.c_str()) == 0);
@@ -123,27 +125,56 @@ int check_retail_checksums(
 	return 0;
 }
 
-int retail_leg() {
-	const std::string install = retail::install();
-	if (install.empty())
-		return retail::skip_leg("OPENNOVA_JO_DIR (the packed JO:CA install)");
-	const std::string localres = retail::join(install, "localres.pff");
-	const std::string jox01l =
-			retail::join(retail::join(retail::join(install, "expansion"), "jox01"), "jox01L.pff");
-	if (!retail::file_exists(localres) || !retail::file_exists(jox01l))
-		return retail::skip_leg("localres.pff and expansion/jox01/jox01L.pff in OPENNOVA_JO_DIR");
+// JO:CA's patch history (docs/update/updater-re.md §10), witnessed over every entry of the install's
+// localres.pff and jox01L.pff by the retired update_pff_retail row: the 2005 build's entries carry the
+// plain CRC-32/BZIP2, and exactly one entry carries the file CRC with the unroll defect, localres.pff's
+// main.mnu, stamped 1248404912 (2009-07-24 03:08:32 UTC; its word 0x99A39EA0 over its 7261 bytes).
+constexpr const char *kPatchedEntry = "main.mnu";
+constexpr uint32_t kPatchedTime = 1248404912u;
+
+pff_packer::Entry packed(const char *name, std::vector<uint8_t> data, uint32_t time, bool patched = false) {
+	pff_packer::Entry e;
+	e.name = name;
+	e.data = std::move(data);
+	e.time = time;
+	e.checksum = patched ? opennova::update::file_crc(e.data.data(), e.data.size()) : pff_packer::plain_checksum(e.data);
+	return e;
+}
+
+// The two archives laid out as the stock packers left them (tests/pff/pff_packer_archive.h): a
+// localres.pff whose one patched entry is main.mnu, a jox01L.pff of the 2005 build alone. Each entry's
+// checksum convention reads back so, main.mnu the one patched; and an edit of the jox01L copy keeps
+// every other entry's stored bytes, time and checksum.
+int test_packer_archives() {
+	test_temp::TempDir dir("pff_apply_edits_packer");
+	const std::string localres = dir.file("localres.pff");
+	const std::string jox01l = dir.file("jox01L.pff");
+	// Payloads of 4 bytes or more, where the defect (each 4-byte step reading one byte four times)
+	// tells the two CRCs apart.
+	TEST_EXPECT(test_io::write_file(localres,
+			pff_packer::archive({
+					packed("menu_style.mns", pff_packer::payload(1, 41), 1121734066u),
+					packed(kPatchedEntry, pff_packer::payload(2, 73), kPatchedTime, true),
+					packed("qd50_024.bad", pff_packer::payload(3, 37), 1125078666u),
+					packed("I_walkf.bad", pff_packer::payload(4, 9), 473418166u),
+			})));
+	TEST_EXPECT(test_io::write_file(jox01l,
+			pff_packer::archive({
+					packed("jox01.bin", pff_packer::payload(5, 45), 1078812964u),
+					packed("JOX01L.LWF", pff_packer::payload(6, 29), 1121734066u),
+					packed("CP14.pcx", pff_packer::payload(7, 66), 1121734066u),
+			})));
 	uint32_t checked = 0;
 	std::vector<std::string> patched;
-	if (check_retail_checksums(localres, checked, patched) != 0)
+	if (check_packer_checksums(localres, checked, patched) != 0)
 		return 1;
-	if (check_retail_checksums(jox01l, checked, patched) != 0)
+	if (check_packer_checksums(jox01l, checked, patched) != 0)
 		return 1;
-	// The one entry a patch wrote, localres.pff's main.mnu (2009-07-24).
-	TEST_EXPECT(patched == std::vector<std::string>{ "main.mnu" });
+	TEST_EXPECT(checked == 7);
+	TEST_EXPECT(patched == std::vector<std::string>{ kPatchedEntry });
 
-	// An edit of a copy keeps every other retail entry's stored bytes, time and checksum.
-	test_temp::TempDir dir("pff_apply_edits_retail");
-	const std::string copy = dir.file("jox01L.pff");
+	// An edit of a copy keeps every other packed entry's stored bytes, time and checksum.
+	const std::string copy = dir.file("jox01L_copy.pff");
 	std::filesystem::copy_file(opennova::io::os_path(jox01l), opennova::io::os_path(copy));
 	PffArchive source{};
 	TEST_EXPECT(pff_open(&source, jox01l.c_str()) == 0);
@@ -165,22 +196,22 @@ int retail_leg() {
 			break;
 		TEST_EXPECT(after->size == before.size && after->flags == before.flags &&
 				after->timestamp == before.timestamp && after->checksum == before.checksum);
+		TEST_EXPECT(entry_bytes(edited, name.c_str()) == entry_bytes(source, name.c_str()));
 	}
 	TEST_EXPECT(entry_bytes(edited, "opennova.txt") == bytes("added"));
 	pff_close(&edited);
 	pff_close(&source);
-	std::printf("retail leg: %u entries checked (main.mnu the one patched); jox01L.pff edited\n",
+	std::printf("packer archives: %u entries checked (main.mnu the one patched); jox01L.pff edited\n",
 			checked);
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (int rc = test_edits())
 		return rc;
-	if (int rc = retail_leg())
+	if (int rc = test_packer_archives())
 		return rc;
 	std::printf("update_pff: ok\n");
 	return 0;

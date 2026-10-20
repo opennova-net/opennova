@@ -132,6 +132,55 @@ File synth_tiny_table() {
 	return make_table("Info", {{"TITLE", "x"}});
 }
 
+// A long briefing text from integer data: numbered sentences to `length` bytes.
+std::string long_text(size_t length) {
+	std::string out;
+	for (int n = 1; out.size() < length; ++n) out += "Sector " + std::to_string(n) + " holds. ";
+	out.resize(length);
+	return out;
+}
+
+// The shapes the shipped tables take beyond the four above (the JO:CA install's RTXT bins, surveyed
+// once on 2026-10-19 by the retired rtxt_jo_install_sweep): sections of no string first (72 tables),
+// between others (153) and last (1); texts broken across lines with CR LF (243 texts), one with a tab;
+// a key twice in one section (CP08.bin's STRWINCOND003 and 005); texts up to 11853 bytes; the same
+// text under several keys; empty texts. The text blob ends on each of the four dword offsets in the
+// shipped bins (the padding before the section meta 0..3 bytes); the four tables above leave 1, 1, 1
+// and 2, this one 3 and synth_variants_aligned.bin 0.
+File synth_variants_table() {
+	File f;
+	add_section(f, "Empty", {});
+	add_section(f, "Brief", {
+	                            {"BRIEF_1", "Hold the ridge.\r\nWait for the convoy.\r\n"},
+	                            {"BRIEF_2", "Grid\t42 north."},
+	                            {"BRIEF_LONG", "-"},
+	                            {"BRIEF_3", ""},
+	                            {"BRIEF_4", "Hold the ridge."},
+	                            {"BRIEF_5", "Hold the ridge."},
+	                        });
+	add_section(f, "Between", {});
+	add_section(f, "Win", {
+	                          {"WIN_1", "Take the hill", 12, 300},
+	                          {"WIN_1", "Take the hill again"},
+	                          {"WIN_2", ""},
+	                      });
+	add_section(f, "Last", {});
+	// The long text is built, not a literal.
+	static const std::string kLong = long_text(11853);
+	for (Entry &e : f.entries)
+		if (e.key == "BRIEF_LONG") e.text = kLong;
+	return f;
+}
+
+// A table of a section of no string ahead of one whose text blob ends on a dword (no padding before the
+// section meta, 34 of the shipped bins).
+File synth_variants_aligned_table() {
+	File f;
+	add_section(f, "Empty", {});
+	add_section(f, "Info", {{"TITLE", "Bridge"}, {"OBJ_1", "Hold"}});
+	return f;
+}
+
 using test_io::read_file;
 
 struct Target {
@@ -208,6 +257,8 @@ int main(int argc, char **argv) {
 	    {"synth_menu.bin", synth_menu_table},
 	    {"synth_mission.bin", synth_mission_table},
 	    {"synth_tiny.bin", synth_tiny_table},
+	    {"synth_variants.bin", synth_variants_table},
+	    {"synth_variants_aligned.bin", synth_variants_aligned_table},
 	};
 	int failures = run(RTXT_FIXTURE_DIR, fixture_targets, sizeof(fixture_targets) / sizeof(fixture_targets[0]),
 	                write_mode);

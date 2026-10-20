@@ -3,8 +3,8 @@
 // key's value as the reader takes it at its place (blanks and ';'s around it left out; a key of no value at its
 // line's end); a value replaced at its place reads back as that key changed and nothing else; every particle key
 // the table names the reader reads (none kept as unknown), lod and the handles the ones the game does not, a
-// table's rows by the game's rule, and a key outside it none. The _retail leg: every effect file of the install
-// (base and each expansion), each key's value at its place, none of no value and none the table lacks.
+// table's rows by the game's rule, and a key outside it none. And the shipped effect files' own forms
+// (fixtures/particle/lexical_forms.ptl): each key's value at its place, none of no value and none the table lacks.
 #include <formats/particle/parser.h>
 #include <formats/particle/particle.h>
 
@@ -15,10 +15,7 @@
 #include <string>
 #include <vector>
 
-#include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
-
-#include "common/retail_paths.h"
+#include "common/file_io.h"
 #include "common/test_expect.h"
 
 using namespace opennova;
@@ -224,71 +221,58 @@ std::string value_on_line(const std::string &text, size_t offset) {
 	return value.substr(lead);
 }
 
-// Every effect file the install serves (base, then each expansion's own or changed), through the packed archives
-// as the game reads them: each parses, each block's close a '}' line, each key's value at its place exactly the
-// value on its line, none of no value, every key one the table names; the counts pinned.
-int test_retail() {
-	const std::string install = retail::install();
-	std::map<std::string, std::vector<uint8_t>> base;
-	size_t files = 0, blocks = 0, keys = 0;
+/// The shipped effect files' own forms (fixtures/particle/lexical_forms.ptl, authored in the layout
+// NovaLogic's effect tool writes, which the retired particle_key_places_retail row met across all 85 of the
+// JO:CA install's .ptl/.ptu/.ptg files): CR LF lines, the file ending in a blank line and one NUL byte; the
+// head keys of a particle unindented, the rest after a tab, each key and its '=' a tab apart, a word value
+// as `=  WORDS ;` (two blanks after the '=', one before the ';'), a graphic as `graphicN =<tab>` and one of
+// no texture (`, blend`); emit_dur twice in a block; curves reversed and inverted; a table's edit handles
+// closed by `};`; blank lines inside and between blocks. Each parses, each block's close a '}', each key's
+// value at its place exactly the value on its line, none of no value, every key one the table names, no
+// particle key kept unknown; the counts pinned.
+int test_lexical_forms() {
+	const std::string path = std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/particle/lexical_forms.ptl";
+	std::string text;
+	TEST_EXPECT(test_io::read_file_text(path, text));
+	TEST_EXPECT(text.size() > 2 && text[text.size() - 1] == '\0' && text.compare(text.size() - 3, 2, "\r\n") == 0);
+	const Parsed read = parsed(text);
+	TEST_EXPECT(read.ok);
 	size_t by_kind[4] = {0, 0, 0, 0};
-	std::vector<std::string> mounts{std::string()};
-	for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-	for (const std::string &expansion : mounts) {
-		opennova::Vfs vfs;
-		TEST_EXPECT(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed));
-		for (const auto &location : vfs.list_files()) {
-			const std::string name = retail::lower_ascii(location.logical_name);
-			if (name.size() < 4) continue;
-			const std::string ext = name.substr(name.size() - 4);
-			if (ext != ".ptl" && ext != ".ptu" && ext != ".ptg") continue;
-			std::vector<uint8_t> bytes;
-			if (!vfs.read_file(location.logical_name, bytes)) continue;
-			if (expansion.empty()) {
-				base[name] = bytes;
-			} else {
-				const auto held = base.find(name);
-				if (held != base.end() && held->second == bytes) continue; // the base's file, counted there
-			}
-			++files;
-			const std::string text(bytes.begin(), bytes.end());
-			const Parsed read = parsed(text);
-			if (!read.ok) std::fprintf(stderr, "%s does not parse\n", name.c_str());
-			TEST_EXPECT(read.ok);
-			for (const particle::BlockPlace &block : read.places.blocks) {
-				++blocks;
-				TEST_EXPECT(block.close_offset < text.size() && text[block.close_offset] == '}');
-			}
-			for (const particle::ParticleDef &def : read.file.particles) TEST_EXPECT(def.unknown_keys.empty());
-			for (const particle::KeyPlace &key : read.places.keys) {
-				++keys;
-				++by_kind[static_cast<size_t>(key.block)];
-				const std::string at = text.substr(key.offset, key.length);
-				if (at != value_on_line(text, key.offset) || at.empty() || !particle::key_row(key.block, key.key))
-					std::fprintf(stderr, "%s:%d %s: \"%s\"\n", name.c_str(), key.line, key.key.c_str(), at.c_str());
-				TEST_EXPECT(at == value_on_line(text, key.offset) && !at.empty());
-				TEST_EXPECT(particle::key_row(key.block, key.key) != nullptr);
-			}
-		}
+	for (const particle::BlockPlace &block : read.places.blocks)
+		TEST_EXPECT(block.close_offset < text.size() && text[block.close_offset] == '}');
+	for (const particle::ParticleDef &def : read.file.particles) TEST_EXPECT(def.unknown_keys.empty());
+	for (const particle::KeyPlace &key : read.places.keys) {
+		++by_kind[static_cast<size_t>(key.block)];
+		const std::string at = text.substr(key.offset, key.length);
+		if (at != value_on_line(text, key.offset) || at.empty() || !particle::key_row(key.block, key.key))
+			std::fprintf(stderr, "lexical_forms.ptl:%d %s: \"%s\"\n", key.line, key.key.c_str(), at.c_str());
+		TEST_EXPECT(at == value_on_line(text, key.offset) && !at.empty());
+		TEST_EXPECT(particle::key_row(key.block, key.key) != nullptr);
 	}
-	std::printf("  %zu effect files, %zu blocks, %zu keys (%zu effect, %zu particle, %zu table, %zu handles)\n", files,
-	            blocks, keys, by_kind[0], by_kind[1], by_kind[2], by_kind[3]);
-	TEST_EXPECT(files == 85 && blocks == 2895 && keys == 123369);
-	TEST_EXPECT(by_kind[0] == 1098 && by_kind[1] == 104627 && by_kind[2] == 16467 && by_kind[3] == 1177);
+	std::printf("  lexical_forms.ptl: %zu blocks, %zu keys (%zu effect, %zu particle, %zu table, %zu handles)\n",
+	            read.places.blocks.size(), read.places.keys.size(), by_kind[0], by_kind[1], by_kind[2], by_kind[3]);
+	TEST_EXPECT(read.places.blocks.size() == 9 && read.file.effects.size() == 2 && read.file.particles.size() == 3 &&
+	            read.file.tables.size() == 2 && read.file.table_handles.size() == 2);
+	TEST_EXPECT(read.places.keys.size() == 288 && by_kind[0] == 3 && by_kind[1] == 208 && by_kind[2] == 66 &&
+	            by_kind[3] == 11);
+	// The forms, each at its place: a word value inside its blanks, a graphic of no texture, the second emit_dur.
+	const particle::KeyPlace *flags = place_of(read.places, BlockKind::Particle, "flags");
+	TEST_EXPECT(flags && text.substr(flags->offset, flags->length) == "ONDEATH COLLIDEKILL AMBIENTCOLOR");
+	const particle::KeyPlace *bare = place_of(read.places, BlockKind::Particle, "graphic2");
+	TEST_EXPECT(bare && text.substr(bare->offset, bare->length) == ", blend");
+	size_t emit_durs = 0;
+	for (const particle::KeyPlace &key : read.places.keys)
+		emit_durs += key.block == BlockKind::Particle && key.index == 0 && key.key == "emit_dur";
+	TEST_EXPECT(emit_durs == 2);
 	return 0;
 }
-
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = test_places();
 	failures += test_empty_value();
 	failures += test_rows();
-	if (retail::install().empty())
-		retail::skip_leg("OPENNOVA_JO_DIR (every effect file the install serves)");
-	else
-		failures += test_retail();
+	failures += test_lexical_forms();
 	if (failures == 0) std::printf("particle_key_places: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

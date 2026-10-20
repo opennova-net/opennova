@@ -84,7 +84,9 @@ charattr-shaped ConfigFile texts on either side of the text reader's data-string
 pool: 64 values and 65 over a 64-byte pool, the `configfile_data_strings_pool` and
 `editor_config_overrun` ctests'),
 `particle/gorehit.ptu` (the gore-set half of the effect catalog, written in the
-retail `.ptu` grammar with our own effect), `grm/person.grm` (an authored facial
+retail `.ptu` grammar with our own effect), `particle/lexical_forms.ptl` (our own
+effects in the layout NovaLogic's effect tool writes: the shipped files' line
+forms, the `};` handle close and the trailing NUL, `particle_key_places`'), `grm/person.grm` (an authored facial
 rig; `grm_roundtrip` pins it byte-for-byte through the writer),
 `threedi/o3d/*.o3d` (the authored `.o3d` scenes the `opennova-3di` ctests and
 the Blender add-on's package smoke test build), `wac/text_document.wac` (a script

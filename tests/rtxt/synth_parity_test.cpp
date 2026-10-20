@@ -1,9 +1,11 @@
 // Grills engine/formats/rtxt over the minted synthetic string tables
 // (fixtures/rtxt, tests/fixtures/minimal_rtxt_gen.cpp): a multi-section game
 // table with position hints, a menu table, a mission sidecar with cp1252 text
-// and odd-length padding, and the one-entry case. The same two checks over the
-// shipped retail bins (gametext, menutxt, the mission sidecars, gameerr,
-// vmacros, keyhelp) are the gated install sweep (rtxt_jo_install_sweep).
+// and odd-length padding, the one-entry case, and the shapes the shipped bins
+// take beyond those (synth_variants.bin: sections of no string first, between
+// and last, CR LF and tab texts, a key twice in one section, an 11853-byte
+// text, repeated and empty texts), which the retired rtxt_jo_install_sweep
+// held every RTXT bin of the JO:CA install to.
 //
 // Each fixture must (a) obey the raw format invariants and (b) survive
 // parse -> write byte-for-byte.
@@ -14,6 +16,7 @@
 int main() {
   const char *names[] = {
       "synth_game.bin", "synth_menu.bin", "synth_mission.bin", "synth_tiny.bin",
+      "synth_variants.bin", "synth_variants_aligned.bin",
   };
 
   int failures = 0;
@@ -33,6 +36,7 @@ int main() {
     std::fprintf(stderr, "FAIL: %d synthetic-fixture check(s) failed\n", failures);
     return 1;
   }
-  std::printf("OK: 4 synthetic string tables byte-stable through parse/write\n");
+  std::printf("OK: %zu synthetic string tables byte-stable through parse/write\n",
+              sizeof(names) / sizeof(names[0]));
   return 0;
 }

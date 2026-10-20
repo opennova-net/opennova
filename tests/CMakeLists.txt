@@ -428,16 +428,16 @@ target_link_libraries(bad_build_test PRIVATE opennova_formats)
 target_include_directories(bad_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(bad_build COMMAND bad_build_test)
 
-# Native BIKi menu-video decoder: a deterministic generated bitstream plus an
-# OPENNOVA_JO_DIR-gated retail smoke test.
+# Native BIKi menu-video decoder: a deterministic generated bitstream, and the decoder's
+# stages over built bitstreams (the header's refusals, the trees, every bundle refill,
+# every block type and scaled subtype, the DCT and the residue walk; two frames pinned).
 add_executable(bink_test bink/bink_test.cpp)
 target_link_libraries(bink_test PRIVATE opennova_formats)
 add_test(NAME bink COMMAND bink_test)
 
-add_executable(bink_retail_test bink/bink_retail_test.cpp)
-target_include_directories(bink_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(bink_retail_test PRIVATE opennova_formats)
-opennova_add_gated_test(bink_retail COMMAND bink_retail_test)
+add_executable(bink_stages_test bink/bink_stages_test.cpp)
+target_link_libraries(bink_stages_test PRIVATE opennova_formats)
+add_test(NAME bink_stages COMMAND bink_stages_test)
 
 # ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
 # world<->local self-consistency on the shipped BINOC.bad (a reference-set SKIP-LEG leg).
@@ -788,8 +788,8 @@ add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
 # The updater (docs/update/updater-re.md, ADR 0061): its formats (the checksums, the INI
 # dialect, the wizard, the command file, SERVER.LST, 1ZLN, 1SFS) over synthetic inputs and the
 # minted fixtures/update/synth_update.sfs; its wire, both directions; pff_apply_edits, the
-# archive edit in place of pack.exe, with the JO:CA archives' checksum convention as its
-# OPENNOVA_JO_DIR leg.
+# archive edit in place of pack.exe, with the JO:CA archives' checksum convention over archives
+# laid out as the stock packers left them (tests/pff/pff_packer_archive.h).
 add_executable(minimal_update_gen_test fixtures/minimal_update_gen.cpp)
 target_link_libraries(minimal_update_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_update_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -808,7 +808,7 @@ add_test(NAME update_wire COMMAND update_wire_test)
 add_executable(update_pff_test update/update_pff_test.cpp)
 target_link_libraries(update_pff_test PRIVATE opennova_formats)
 target_include_directories(update_pff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(update_pff COMMAND update_pff_test)
+add_test(NAME update_pff COMMAND update_pff_test)
 
 add_executable(update_server_test update/update_server_test.cpp)
 target_link_libraries(update_server_test PRIVATE opennova_net)
@@ -933,12 +933,13 @@ target_link_libraries(pff_stream_writer_test PRIVATE opennova_formats)
 target_include_directories(pff_stream_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_stream_writer COMMAND pff_stream_writer_test)
 
-# The writer against retail's own archives: every JO:CA .pff written again with nothing changed is
-# its bytes (the directory in payload order, the packer's footer; ADR 0008 as amended).
-add_executable(pff_retail_rewrite_test pff/pff_retail_rewrite_test.cpp)
-target_link_libraries(pff_retail_rewrite_test PRIVATE opennova_formats)
-target_include_directories(pff_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(pff_retail_rewrite COMMAND pff_retail_rewrite_test)
+# The writer against the retail packer's layout: an archive laid out as pack.exe lays out every
+# JO:CA .pff, written again with nothing changed, is its bytes (the directory in payload order, the
+# packer's footer; ADR 0008 as amended), the laid-out bytes pinned by FNV-1a64 vectors.
+add_executable(pff_packer_rewrite_test pff/pff_packer_rewrite_test.cpp)
+target_link_libraries(pff_packer_rewrite_test PRIVATE opennova_formats)
+target_include_directories(pff_packer_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pff_packer_rewrite COMMAND pff_packer_rewrite_test)
 
 # Game profile table tests
 add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
@@ -1232,13 +1233,6 @@ target_compile_definitions(rtxt_synth_parity_test PRIVATE
     RTXT_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/rtxt")
 add_test(NAME rtxt_synth_parity COMMAND rtxt_synth_parity_test)
 
-# Full-install RTXT sweep through the engine-faithful VFS (skips unless OPENNOVA_JO_DIR set)
-add_executable(rtxt_jo_install_sweep_test rtxt/jo_install_sweep_test.cpp)
-target_include_directories(rtxt_jo_install_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(rtxt_jo_install_sweep_test PRIVATE opennova_formats opennova_base)
-target_include_directories(rtxt_jo_install_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
-opennova_add_gated_test(rtxt_jo_install_sweep COMMAND rtxt_jo_install_sweep_test)
-
 # Resource directory index tests
 add_executable(resource_index_test resource_index/resource_index_test.cpp)
 target_link_libraries(resource_index_test PRIVATE opennova_base)
@@ -1251,7 +1245,7 @@ add_executable(file_kind_test resource_index/file_kind_test.cpp)
 target_link_libraries(file_kind_test PRIVATE opennova_formats opennova_base)
 target_include_directories(file_kind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(file_kind_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(file_kind COMMAND file_kind_test)
+add_test(NAME file_kind COMMAND file_kind_test)
 
 # Launch flags + the boot resource-dir ladder (base/resource_index/boot_policy.h).
 add_executable(boot_policy_test resource_index/boot_policy_test.cpp)
@@ -2229,7 +2223,7 @@ add_test(NAME menu_frame_notes COMMAND menu_frame_notes_test)
 add_executable(menu_credits_test menu/menu_credits_test.cpp)
 target_link_libraries(menu_credits_test PRIVATE opennova_runtime)
 target_include_directories(menu_credits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(menu_credits COMMAND menu_credits_test)
+add_test(NAME menu_credits COMMAND menu_credits_test)
 
 # Every shipped screen through the frame compiler: the reference fixture menus
 # (gated) and every .mnu the packed install serves, with its assets (SKIP-LEG).
@@ -2379,8 +2373,8 @@ target_include_directories(terrain_atlas_routing_test PRIVATE ${CMAKE_CURRENT_SO
 add_test(NAME terrain_atlas_routing COMMAND terrain_atlas_routing_test)
 
 # fixtures/particle/synth_*.ptl: the five synthetic particle files the focused
-# tests read, written by save_particles from integer data (the shipped corpus
-# is particle_smoke_all_fixtures' OPENNOVA_JO_ASSETS leg).
+# tests read, written by save_particles from integer data (the shipped corpus's
+# own forms are the authored lexical_forms.ptl).
 add_executable(minimal_particle_gen_test fixtures/minimal_particle_gen.cpp)
 target_link_libraries(minimal_particle_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_particle_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2398,14 +2392,8 @@ foreach(name smallest minimal_effect multi_section multi_layer table_handles
     target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    if(name STREQUAL "smoke_all_fixtures" OR name STREQUAL "key_places")
-        opennova_add_mixed_test(particle_${name} COMMAND particle_${name}_test)
-    else()
-        add_test(NAME particle_${name} COMMAND particle_${name}_test)
-    endif()
+    add_test(NAME particle_${name} COMMAND particle_${name}_test)
 endforeach()
-# The key places' retail leg reads every effect file the install serves through the VFS.
-target_link_libraries(particle_key_places_test PRIVATE opennova_base)
 # effect_pose pins the spawn poses every producer hands the scene; effect_closure
 # (mixed) one effect's closure and several folded, the retail leg every effect
 # of the install's catalog alike from its closure (OPENNOVA_JO_DIR).
@@ -2414,15 +2402,15 @@ foreach(name emitter emit_shape translate effect_scene_contract effect_pose effe
     target_link_libraries(particle_${name}_test PRIVATE opennova_runtime)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    if(name STREQUAL "effect_closure")
-        opennova_add_mixed_test(particle_${name} COMMAND particle_${name}_test)
-    else()
-        add_test(NAME particle_${name} COMMAND particle_${name}_test)
-    endif()
+    add_test(NAME particle_${name} COMMAND particle_${name}_test)
 endforeach()
-# particle_smoke_all_fixtures is mixed: the committed fixtures/particle sweep
-# always runs; the extracted retail corpus leg rides OPENNOVA_JO_ASSETS
-# (SKIP-LEG without it).
+# The effect catalog's gore set over minted mounts (D-PTL-24): the US mount, the same with
+# SHOTGNFX's typo'd Effect_SGvBody, the German mount.
+add_executable(particle_gore_set_catalog_test particle/gore_set_catalog_test.cpp)
+target_link_libraries(particle_gore_set_catalog_test PRIVATE opennova_runtime)
+target_include_directories(particle_gore_set_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(particle_gore_set_catalog_test PRIVATE cxx_std_17)
+add_test(NAME particle_gore_set_catalog COMMAND particle_gore_set_catalog_test)
 
 # CBIN tests
 add_executable(cbin_unit_test cbin/cbin_unit_test.cpp)
@@ -2434,7 +2422,7 @@ add_executable(cbin_roundtrip_test cbin/cbin_roundtrip_test.cpp)
 target_link_libraries(cbin_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cbin_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(cbin_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-opennova_add_mixed_test(cbin_roundtrip COMMAND cbin_roundtrip_test)
+add_test(NAME cbin_roundtrip COMMAND cbin_roundtrip_test)
 
 add_executable(cbin_display_view_test cbin/cbin_display_view_test.cpp)
 target_link_libraries(cbin_display_view_test PRIVATE opennova_formats)
@@ -4434,8 +4422,7 @@ opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bm
 # without OPENNOVA_JO_ASSETS / OPENNOVA_JO_DIR.
 foreach(gated
         anim/reload_clips_us01 anim/weapon_action_clips
-        npruntime/remote_body_state npruntime/held_weapon_attach npruntime/authored_payload_00trg
-        particle/gore_set_catalog)
+        npruntime/remote_body_state npruntime/held_weapon_attach npruntime/authored_payload_00trg)
     get_filename_component(gated_name ${gated} NAME)
     get_filename_component(gated_dir ${gated} DIRECTORY)
     add_executable(${gated_dir}_${gated_name}_test ${gated}_test.cpp)
