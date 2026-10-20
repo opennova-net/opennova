@@ -1399,6 +1399,51 @@ static int test_original_data() {
 	return 0;
 }
 
+// The game's own data's check reads a texture through the install as the game is served it (ProjectPaths::files,
+// the texture checks' file-source fix): the default loading screen the install packs in its archive, of a size
+// other than the 800 x 600 the game lays the screen out for, makes the finding the project's copy of it makes, which
+// is then the game's own. The check read the install's folder before, where a packed file is not, and found nothing.
+static int test_original_textures() {
+	test_temp::TempDir dir("opennova_editor_problems_original_textures");
+	// An 8-bit PCX of 640 x 480: its header, its rows, its palette.
+	std::vector<uint8_t> screen(128, 0);
+	screen[0] = 0x0A;
+	screen[1] = 5;
+	screen[2] = 1;
+	screen[3] = 8;
+	screen[8] = uint8_t(639 & 0xFF);
+	screen[9] = uint8_t(639 >> 8);
+	screen[10] = uint8_t(479 & 0xFF);
+	screen[11] = uint8_t(479 >> 8);
+	screen[65] = 1;
+	screen[66] = uint8_t(640 & 0xFF);
+	screen[67] = uint8_t(640 >> 8);
+	screen.resize(screen.size() + size_t(640) * 480, 0);
+	screen.push_back(0x0C);
+	screen.resize(screen.size() + 768, 0);
+	const std::string install = dir.file("install");
+	const opennova::pff::PffWriteEntry entries[] = {{"loadscrn.pcx", screen.data(), uint32_t(screen.size()), 0, 0, 0}};
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Original textures"));
+	const SessionView &v = session.view();
+	TEST_EXPECT(test_io::write_file(v.project.root + "/textures/loadscrn.pcx", screen));
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	size_t row = SIZE_MAX;
+	for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
+		if (v.findings.diagnostics[i].code() == "texture.loading_screen_size" && v.findings.diagnostics[i].asset == "textures/loadscrn.pcx")
+			row = i;
+	TEST_EXPECT(row != SIZE_MAX && session.originals().validations() == 1);
+	TEST_EXPECT(row != SIZE_MAX && in_original_data(row, v));
+	std::printf("original textures: read through the install's archive, the game's own\n");
+	return 0;
+}
+
 // The rows' marks over the install's findings by hand (the UX round's problems lane): each of the install's
 // findings of a file taken by one row (an item and its duplicate name the same missing shadow, the install
 // has it once: the first row's is the game's own, the duplicate's the modder's); a finding the install
@@ -1811,6 +1856,7 @@ int main() {
 	failures += test_optional_group();
 	failures += test_placeholders();
 	failures += test_original_data();
+	failures += test_original_textures();
 	if (failures == 0) std::printf("editor_problems: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

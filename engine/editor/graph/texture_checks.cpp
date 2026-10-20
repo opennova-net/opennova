@@ -5,11 +5,15 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <cstdio>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 
 #include <base/io/bits.h>
+#include <base/io/file_io.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/trn/charmap_legend.h>
@@ -68,10 +72,12 @@ const char *reader_words(TextureReader reader) {
 }
 
 // Each file's header as a reader reads it, kept while the file's stamp stands (a composition reads only
-// the files that moved since).
+// the files that moved since) and the source it was read through (held weakly: one let go is never taken for
+// another at its address; none for the project's folder).
 struct Kept {
 	uint64_t size = 0;
 	int64_t modified = 0;
+	std::weak_ptr<const FileSource> source;
 	TextureHeader header;
 };
 std::mutex g_mutex;
@@ -96,27 +102,89 @@ struct Walk {
 };
 UseCheckMemo<WalkKey, Walk> g_walks;
 
-// The header of `entry` under `root` as `reader` reads it, kept (g_mutex held).
-const TextureHeader *kept_header(const std::string &root, const AssetEntry *entry, TextureReader reader) {
+// The bytes a header is read from: a PCX's 128 (pcx_read_header), which hold a PNG's signature and IHDR too
+// (png_header_size, png_header_form: 26). A TGA's and a DDS's header is read from the whole file, which a BFC1's
+// unpacking and the reads past its end (tga_short, the DXT5's first level) need.
+constexpr size_t kHeaderPrefixBytes = 128;
+size_t header_prefix(TextureReader reader) {
+	return reader == TextureReader::Pcx || reader == TextureReader::Png ? kHeaderPrefixBytes : 0;
+}
+
+// Where a file of the validation's scan is read from, the key what it read is kept by: through the paths' source
+// by its logical name where they have one (the game install as the game is served it, ProjectPaths::files), else
+// the file under the project's folder.
+std::string read_place(const ProjectPaths &paths, const AssetEntry &entry) {
+	return paths.files ? paths.root + "|" + entry.logical_name : join_path(paths.root, entry.relative_path);
+}
+
+// A file of the validation's scan read as read_place says, its first `prefix` bytes only where nonzero (the
+// project's folder read no further; a source's file is read whole, then cut).
+bool read_texture_file(const ProjectPaths &paths, const AssetEntry &entry, size_t prefix, std::vector<uint8_t> &out,
+                       size_t &read, std::string &error) {
+	out.clear();
+	read = 0;
+	if (paths.files) {
+		if (!paths.files->read(entry.logical_name, out)) {
+			error = entry.logical_name + " could not be read.";
+			return false;
+		}
+		read = out.size();
+		if (prefix && out.size() > prefix) out.resize(prefix);
+		return true;
+	}
+	const std::string path = join_path(paths.root, entry.relative_path);
+	if (!prefix) {
+		const bool ok = io::read_file_bytes(path, out, error);
+		read = out.size();
+		return ok;
+	}
+	std::FILE *f = io::fopen_utf8(path.c_str(), "rb");
+	if (!f) {
+		error = "cannot open " + path;
+		return false;
+	}
+	out.resize(prefix);
+	const size_t got = std::fread(out.data(), 1, prefix, f);
+	const bool ok = std::ferror(f) == 0;
+	std::fclose(f);
+	out.resize(ok ? got : 0);
+	read = out.size();
+	if (!ok) error = "cannot read " + path;
+	return ok;
+}
+
+// Whether a kept read is of `entry` as the scan lists it, through the same source.
+template <typename K> bool kept_current(const K &kept, const ProjectPaths &paths, const AssetEntry &entry) {
+	return kept.size == entry.size_bytes && kept.modified == entry.modified_ticks && kept.source.lock() == paths.files;
+}
+
+// The header of `entry` as `reader` reads it, read where read_place says and kept; null for no file or no reader
+// (g_mutex held). `read` the bytes it read now (0 where it was kept).
+const TextureHeader *kept_header(const ProjectPaths &paths, const AssetEntry *entry, TextureReader reader,
+                                 size_t *read = nullptr) {
+	if (read) *read = 0;
 	if (!entry || reader == TextureReader::None) return nullptr;
-	const auto key = std::make_pair(join_path(root, entry->relative_path), reader);
+	const auto key = std::make_pair(read_place(paths, *entry), reader);
 	const auto found = g_headers.find(key);
-	if (found != g_headers.end() && found->second.size == entry->size_bytes && found->second.modified == entry->modified_ticks)
-		return &found->second.header;
+	if (found != g_headers.end() && kept_current(found->second, paths, *entry)) return &found->second.header;
 	std::vector<uint8_t> bytes;
 	std::string error;
+	size_t bytes_read = 0;
 	Kept kept;
 	kept.size = entry->size_bytes;
 	kept.modified = entry->modified_ticks;
-	if (io::read_file_bytes(key.first, bytes, error)) kept.header = texture_header_as(reader, bytes);
+	kept.source = paths.files;
+	if (read_texture_file(paths, *entry, header_prefix(reader), bytes, bytes_read, error))
+		kept.header = texture_header_as(reader, bytes);
 	else kept.header.refusal = error;
 	++g_stats.headers_read;
-	g_stats.header_bytes += bytes.size();
+	g_stats.header_bytes += bytes_read;
+	if (read) *read = bytes_read;
 	return &(g_headers[key] = std::move(kept)).header;
 }
 
 const TextureHeader *header_of(const ValidationInput &input, const std::string &relative, TextureReader reader) {
-	return kept_header(input.paths.root, input.scan.at_path(relative), reader);
+	return kept_header(input.paths, input.scan.at_path(relative), reader);
 }
 
 // A char map's classes at or past the twenty the tile set tables name (TSD_NULL to TSD_*, formats/trn
@@ -125,34 +193,41 @@ const TextureHeader *header_of(const ValidationInput &input, const std::string &
 struct KeptClasses {
 	uint64_t size = 0;
 	int64_t modified = 0;
+	std::weak_ptr<const FileSource> source;
 	size_t past = 0;
 	int highest = -1;
 };
 std::map<std::string, KeptClasses> g_classes;
 
-const KeptClasses *char_map_classes(const ValidationInput &input, const std::string &relative) {
-	const AssetEntry *entry = input.scan.at_path(relative);
+const KeptClasses *kept_classes(const ProjectPaths &paths, const AssetEntry *entry, size_t *read = nullptr) {
+	if (read) *read = 0;
 	if (!entry) return nullptr;
-	const std::string path = join_path(input.paths.root, entry->relative_path);
-	const auto found = g_classes.find(path);
-	if (found != g_classes.end() && found->second.size == entry->size_bytes && found->second.modified == entry->modified_ticks)
-		return &found->second;
+	const std::string place = read_place(paths, *entry);
+	const auto found = g_classes.find(place);
+	if (found != g_classes.end() && kept_current(found->second, paths, *entry)) return &found->second;
 	KeptClasses kept;
 	kept.size = entry->size_bytes;
 	kept.modified = entry->modified_ticks;
+	kept.source = paths.files;
 	std::vector<uint8_t> bytes;
 	std::string error;
+	size_t bytes_read = 0;
 	IndexedImage8 image;
-	const bool read = io::read_file_bytes(path, bytes, error);
+	const bool ok = read_texture_file(paths, *entry, 0, bytes, bytes_read, error);
 	++g_stats.headers_read;
-	g_stats.header_bytes += bytes.size();
-	if (read && decode_pcx_indexed(bytes.data(), bytes.size(), image, error))
+	g_stats.header_bytes += bytes_read;
+	if (read) *read = bytes_read;
+	if (ok && decode_pcx_indexed(bytes.data(), bytes.size(), image, error))
 		for (const uint8_t index : image.indices)
 			if (index >= kCharmapLegendCount) {
 				++kept.past;
 				kept.highest = std::max(kept.highest, int(index));
 			}
-	return &(g_classes[path] = kept);
+	return &(g_classes[place] = kept);
+}
+
+const KeptClasses *char_map_classes(const ValidationInput &input, const std::string &relative) {
+	return kept_classes(input.paths, input.scan.at_path(relative));
 }
 
 // Where a use is, in words: "the terrain colour map of isle.trn".
@@ -396,23 +471,62 @@ std::string tga_reader_words(const TgaReaderRead &read, const TextureHeader &hea
 	return std::string();
 }
 
+// What a use's check reads, resolved (check_use's first half, and texture_use_reads'): its role and what the use says
+// of itself, the file its loader opens (`served`, the load, and the reader it reads the file by), and the project's
+// file of the name written; for a terrain's detail map, the reader its own name picks instead (`detail`: the TGA
+// reader for a .tga, the PCX reader for a .pcx, None for neither). False for no role, or a use that loads no
+// project file.
+struct UseTarget {
+	R role = R::kCount;
+	TextureUseContext context;
+	const TextureRoleRow *row = nullptr;
+	std::string served;
+	TextureLoad load;
+	TextureReader reader = TextureReader::None;
+	const AssetEntry *written = nullptr;
+	TextureReader detail = TextureReader::None;
+};
+
+bool use_target(const AssetGraph &graph, const ValidationInput &input, const GraphEdge &edge, UseTarget &out) {
+	out.role = texture_role_of_edge(edge, nullptr, out.context);
+	if (out.role == R::kCount) return false;
+	out.row = &texture_role_row(out.role);
+	if (graph.resolve(edge, &out.served) != ReferenceStatus::Present || out.served.empty()) return false;
+	const TextureNameTest exists = [&graph](const std::string &name) { return graph.has_file(name); };
+	out.load = edge.kind == ReferenceKind::Texture ? texture_reference_load(edge.value, edge.loader_arg, exists)
+	                                               : texture_load(out.row->loader, edge.value, exists);
+	out.reader = reader_of(out.load.reader);
+	out.written = input.scan.find(basename_of(edge.value));
+	if (out.role == R::TerrainDetailCoefficient) {
+		// A terrain's detail map is made into its detail coefficient from the name as written, through the TGA
+		// reader for a .tga and the PCX reader for a .pcx, never a .dds [orig: Texture_GenerateNormalMap @
+		// 0x58C116..0x58C159, from PolyTrn_InitTextures @ 0x60B155]: its sizes are that file's.
+		const std::string named = strutil::to_lower(utf8_of(path_of(basename_of(edge.value)).extension()));
+		out.detail = named == ".tga" ? TextureReader::Tga : named == ".pcx" ? TextureReader::Pcx : TextureReader::None;
+	}
+	return true;
+}
+
+bool is_texture_use(const GraphEdge &edge) {
+	return edge.kind == ReferenceKind::Texture || edge.kind == ReferenceKind::MenuTexture ||
+	       edge.kind == ReferenceKind::LoadingImage;
+}
+
 void check_use(const AssetGraph &graph, const ValidationInput &input, const GraphEdge &edge,
                std::set<std::pair<std::string, std::string>> &passed_over, std::set<std::string> &costed,
                std::vector<Diagnostic> &out) {
-	TextureUseContext context;
-	const R role = texture_role_of_edge(edge, nullptr, context);
-	if (role == R::kCount) return;
-	const TextureRoleRow &row = texture_role_row(role);
-	std::string served;
-	if (graph.resolve(edge, &served) != ReferenceStatus::Present || served.empty()) return;
-	const TextureNameTest exists = [&graph](const std::string &name) { return graph.has_file(name); };
-	const TextureLoad load = edge.kind == ReferenceKind::Texture ? texture_reference_load(edge.value, edge.loader_arg, exists)
-	                                                             : texture_load(row.loader, edge.value, exists);
+	UseTarget target;
+	if (!use_target(graph, input, edge, target)) return;
+	const R role = target.role;
+	const TextureUseContext &context = target.context;
+	const TextureRoleRow &row = *target.row;
+	const std::string &served = target.served;
+	const TextureLoad &load = target.load;
 	const std::string where = use_words(row, edge);
 	// A file of the name written that the loader passes over for another (a .tga beside the .dds a model
 	// row loads) [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B5C0]: on that file, once. Not a
 	// terrain detail's, which the game reads by its own name too (texture_role_read_by_name).
-	const AssetEntry *written = input.scan.find(basename_of(edge.value));
+	const AssetEntry *written = target.written;
 	if (written && written->kind == AssetKind::Texture && written->relative_path != served && !renderer::texture_role_read_by_name(role) &&
 	    passed_over.insert({written->relative_path, served}).second)
 		out.push_back(make_finding(finding_code(TextureFinding::NotRead), DiagnosticSeverity::Warning,
@@ -422,12 +536,9 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	const auto add = [&](F code, DiagnosticSeverity severity, const std::string &message) {
 		out.push_back(on_use(edge, code, severity, message));
 	};
-	// A terrain's detail map is made into its detail coefficient from the name as written, through the TGA
-	// reader for a .tga and the PCX reader for a .pcx, never a .dds [orig: Texture_GenerateNormalMap @
-	// 0x58C116..0x58C159, from PolyTrn_InitTextures @ 0x60B155]: its sizes are that file's.
+	// A terrain's detail map, made into its coefficient by its own name (use_target): its sizes are that file's.
 	if (role == R::TerrainDetailCoefficient) {
-		const std::string named = strutil::to_lower(utf8_of(path_of(basename_of(edge.value)).extension()));
-		const TextureReader by = named == ".tga" ? TextureReader::Tga : named == ".pcx" ? TextureReader::Pcx : TextureReader::None;
+		const TextureReader by = target.detail;
 		const TextureHeader *source = written && by != TextureReader::None ? header_of(input, written->relative_path, by) : nullptr;
 		if (!source || !source->read) {
 			add(F::TextureWrongReader, DiagnosticSeverity::Warning,
@@ -441,7 +552,7 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 		check_sizes(role, written->logical_name, *source, where, context, add);
 		return;
 	}
-	const TextureReader reader = reader_of(load.reader);
+	const TextureReader reader = target.reader;
 	const TextureHeader *header = header_of(input, served, reader);
 	if (!header) return;
 	// A terrain's colour map and detail blend map go through the TGA reader whatever the file holds, which fails
@@ -524,8 +635,53 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 
 TextureHeader texture_file_header(const std::string &root, const AssetEntry &entry, TextureReader reader) {
 	const std::lock_guard<std::mutex> lock(g_mutex);
-	const TextureHeader *header = kept_header(root, &entry, reader);
+	ProjectPaths paths;
+	paths.root = root;
+	const TextureHeader *header = kept_header(paths, &entry, reader);
 	return header ? *header : TextureHeader();
+}
+
+std::vector<TextureRead> texture_use_reads(const AssetGraph &graph, const ValidationInput &input) {
+	std::vector<TextureRead> out;
+	{
+		// None while the check keeps its walk of the graph and the scan as they stand: a composition reads nothing.
+		const std::lock_guard<std::mutex> lock(g_mutex);
+		const WalkKey key{graph.generation(), input.scan.serial(), input.paths.root, input.paths.files.get()};
+		if (key.serial != 0)
+			if (const Walk *kept = g_walks.find(key); kept && kept->files.lock() == input.paths.files) return out;
+	}
+	std::set<std::tuple<const AssetEntry *, TextureReader, bool>> listed;
+	const auto add = [&](const AssetEntry *entry, TextureReader reader, bool classes) {
+		if (entry && reader != TextureReader::None && listed.insert({entry, reader, classes}).second)
+			out.push_back({entry, reader, classes});
+	};
+	graph.for_each_edge([&](const GraphEdge &edge) {
+		UseTarget target;
+		if (!is_texture_use(edge) || !use_target(graph, input, edge, target)) return;
+		if (target.role == R::TerrainDetailCoefficient) {
+			add(target.written, target.detail, false);
+			return;
+		}
+		const AssetEntry *served = input.scan.at_path(target.served);
+		add(served, target.reader, false);
+		// A char map's classes (check_use reads its texels past a header its loader reads).
+		if (target.role == R::TerrainCharMap && target.reader == TextureReader::Pcx)
+			add(served, TextureReader::Pcx, true);
+	});
+	for (const FixedTextureName &fixed : fixed_texture_names()) {
+		if (fixed.role != R::HudMfd && fixed.role != R::LoadingScreen) continue;
+		const AssetEntry *entry = input.scan.find(fixed.name);
+		if (entry && entry->kind == AssetKind::Texture) add(entry, TextureReader::Pcx, false);
+	}
+	return out;
+}
+
+uint64_t read_texture_use(const ValidationInput &input, const TextureRead &read) {
+	const std::lock_guard<std::mutex> lock(g_mutex);
+	size_t bytes = 0;
+	if (read.classes) kept_classes(input.paths, read.entry, &bytes);
+	else kept_header(input.paths, read.entry, read.reader, &bytes);
+	return bytes;
 }
 
 TextureCheckStats texture_check_stats() {
@@ -554,9 +710,7 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
 	std::set<std::pair<std::string, std::string>> passed_over;
 	std::set<std::string> costed;
 	graph.for_each_edge([&](const GraphEdge &edge) {
-		if (edge.kind == ReferenceKind::Texture || edge.kind == ReferenceKind::MenuTexture ||
-		    edge.kind == ReferenceKind::LoadingImage)
-			check_use(graph, input, edge, passed_over, costed, found);
+		if (is_texture_use(edge)) check_use(graph, input, edge, passed_over, costed, found);
 	});
 	// The names the game opens itself whose sizes it asks for: the MFD's, the default loading screen's.
 	for (const FixedTextureName &fixed : fixed_texture_names()) {

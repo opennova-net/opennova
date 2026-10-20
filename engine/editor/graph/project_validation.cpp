@@ -55,7 +55,7 @@ ProjectValidation::ProjectValidation(AssetGraph &graph, ValidationCache &cache, 
 		graph_(graph), cache_(cache), readings_(readings), generation_(graph.generation()) {}
 
 bool ProjectValidation::graph_moved() const {
-	return (phase_ == Phase::Files || phase_ == Phase::Done) && graph_.generation() != generation_;
+	return graph_read() && graph_.generation() != generation_;
 }
 
 bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
@@ -97,10 +97,28 @@ bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
 			// The update, a step of its own: it takes the readings and resolves what they reach.
 			graph_.update(input.paths, input.project, input.scan, input.open, &readings_);
 			readings_.clear();
-			cache_.begin();
-			files_ = validation_files(input.scan);
-			phase_ = Phase::Files;
+			phase_ = Phase::Uses;
 			return false;
+		case Phase::Uses: {
+			// The headers the texture check reads of the files its uses' loaders open (none where it keeps its
+			// walk of this graph and scan), listed once over the updated graph, then one a step: the check
+			// composes from them, reading none (a project's thousands of textures were read in one composition).
+			if (!uses_listed_) {
+				uses_ = texture_use_reads(graph_, input);
+				uses_listed_ = true;
+				break;
+			}
+			if (uses_next_ == uses_.size()) {
+				cache_.begin();
+				files_ = validation_files(input.scan);
+				phase_ = Phase::Files;
+				break;
+			}
+			const TextureRead &read = uses_[uses_next_++];
+			current_ = read.entry->relative_path;
+			spent += kValidationFileCost + read_texture_use(input, read);
+			break;
+		}
 		case Phase::Files: {
 			if (next_ == files_.size()) {
 				cache_.end();
