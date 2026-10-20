@@ -349,7 +349,11 @@ int main() {
 	// UDPNOVAWORLD needs the POST address and port: without either the gate fails (state -9, the
 	// menu's NWEC25), with both the connect goes on with no NWU session (on_sessionless, no
 	// session, the in-use word clear). The command line's POST pair stands in for the gate's.
-	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the in-use word @0x4CF525..0x4CF541,
+	// D-NET-708: a reply whose parse counts no field (no VAR line, or VAR lines of no key the
+	// parse knows) fails the gate the same way, ahead of the in-use word, so a /UDPNOVAWORLD
+	// switch does not save it.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the count test @0x4CF4ED..0x4CF4EF and
+	//  its -9 (the switch @0x4CF51E), the in-use word @0x4CF525..0x4CF541,
 	//  the command line's POST pair @0x4CF54B..0x4CF562, the in-use test @0x4CF599..0x4CF5A0,
 	//  the address @0x4CF5A6, the port @0x4CF627, -9 @0x4CF6AC;
 	//  UI_ProcessLANSessionStateMachine @0x558DE0 - NWEC25 @0x5590FD]
@@ -366,6 +370,10 @@ int main() {
 		post_switches.post_port_number = 7000;
 		NwuLobbySession::CommandLine unresolved_post = post_switches;
 		unresolved_post.post_ip_address = "nowhere.example";
+		NwuLobbySession::CommandLine udp_switch;
+		udp_switch.udp_novaworld = { "127.0.0.5:7001" };
+		const std::string no_var = "GATEPROTOCOL \"1.0\"\r\n";
+		const std::string unknown_key = "VAR \"TimeOnGateServer\" \"Wed Oct 14 07:50:11 2026\"\r\n";
 		const std::string post_ip = "VAR \"POSTIPADDRESS\" \"192.168.0.5\"\r\n";
 		const std::string post_port = "VAR \"POSTIPPORT\" \"7598\"\r\n";
 		const std::string lobby_name = "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n";
@@ -379,6 +387,8 @@ int main() {
 			{ lobby_name + post_ip + post_port, { none, false, true, nullptr } },
 			{ lobby_name, { post_switches, false, true, nullptr } },
 			{ lobby_name + post_port, { unresolved_post, false, false, "NWEC25" } },
+			{ no_var, { none, false, false, "NWEC25" } },
+			{ unknown_key, { udp_switch, false, false, "NWEC25" } },
 		};
 		for (const auto &[body, want] : cases) {
 			MemorySocket gate;

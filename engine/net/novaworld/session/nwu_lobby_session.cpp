@@ -437,14 +437,22 @@ void NwuLobbySession::poll_gate() {
 		}
 		inner.resize(inner_size);
 		GateResponse parsed;
-		if (!gate_response_decrypt_and_parse(inner.data(), inner.size(), parsed)) {
-			if (hooks_.on_soft_error) hooks_.on_soft_error("bad gate response");
-			continue;
-		}
+		const bool counted = gate_response_decrypt_and_parse(inner.data(), inner.size(), parsed);
 
 		gate_answered_ = true;
 		gate_probe_datagram_.clear();
 		gate_response_ = parsed;
+		// The reply the worker took is the gate's answer: one whose parse counted no field (no
+		// VAR line of a key the parse knows, or no line at all) fails the gate as state -9, the
+		// menu's NWEC25, as a reply with no POST pair does below.
+		// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the first line's read failing
+		//  @0x4CF0C0, the count test @0x4CF4ED..0x4CF4EF, the state's switch @0x4CF51E, -9
+		//  stored @0x4CF6AC]
+		if (!counted) {
+			if (hooks_.on_fatal)
+				hooks_.on_fatal(novaworld_gate_error_tag(-9, true));
+			return;
+		}
 		apply_command_line_overrides();
 		if (hooks_.on_gate_response)
 			hooks_.on_gate_response(gate_response_);

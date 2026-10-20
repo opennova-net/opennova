@@ -156,17 +156,18 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 			out.glsvss_rims = io::retail_atol(value.c_str());
 		} else if (strutil::iequals(key, "GLSVSSAGRMS")) {
 			out.glsvss_agrms = io::retail_atol(value.c_str());
-		} else if (strutil::iequals(key, "CUS")) {
-			// Phantom key: counted for read-result parity but not retained.
-		} else if (strutil::iequals(key, "PVT")) {
-			// Phantom key: counted for read-result parity but not retained.
 		} else {
 			matched = false;
 		}
+		// Only the nineteen keys above count; any other VAR key is passed over uncounted.
+		// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - an unmatched key's jump to the next
+		//  line @0x4CF4A7, the count @0x4CF4BB]
 		if (matched) {
 			++out.var_count;
 		}
 	}
+	// False when no field counted: the gate's parse then fails the gate (state -9).
+	// [orig: ProcessResponse @0x4CF4ED..0x4CF4EF]
 	return out.var_count > 0;
 }
 

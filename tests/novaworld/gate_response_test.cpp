@@ -55,7 +55,9 @@ bool check_all_known_keys() {
 			"VAR PVT private-flag\n";
 	opennova::GateResponse r;
 	if (!expect(opennova::gate_response_parse(body, r), "full response parses")) return false;
-	if (!expect(r.var_count == 21, "21 VARs absorbed")) return false;
+	// D-NET-708: the nineteen keys of the parse's ladder count; CUS and PVT are no keys of it.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF4A7, @0x4CF4BB]
+	if (!expect(r.var_count == 19, "19 VARs absorbed")) return false;
 	if (!expect(r.lobby_name == "jop_2_consumer", "LOBBYNAME")) return false;
 	if (!expect(r.use_junction == 1, "USEJUNCTION")) return false;
 	if (!expect(r.clear_junction == 0, "CLEARJUNCTION")) return false;
@@ -103,7 +105,7 @@ bool check_ignores_unknown_and_malformed() {
 // The REAL gate (and our server's gate_listener.cpp) quote every key and
 // value: `VAR "POSTIPADDRESS" "127.0.0.1"`. Retail's tokenizer
 // (String_TokenizeQuotedToArray @ 0x616d60) strips the quotes; ours must too,
-// or the parse rejects the reply and the client logs "bad gate response".
+// or the parse counts no field and the client fails the gate (NWEC25).
 bool check_quoted_response() {
 	const std::string body =
 			"GATEPROTOCOL \"1.0\"\r\n"                        // non-VAR line, skipped
@@ -112,7 +114,7 @@ bool check_quoted_response() {
 			"VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
 			"VAR \"STARTUPURL\" \"http://127.0.0.1:8080\"\r\n"
 			"VAR \"LOBBYNAME\" \"jop 2 consumer\"\r\n"        // value with internal space
-			"VAR \"CUS\" \"\"\r\n";                            // empty quoted value
+			"VAR \"UDPCODE2\" \"\"\r\n";                       // empty quoted value
 	opennova::GateResponse r;
 	if (!expect(opennova::gate_response_parse(body, r), "quoted gate response parses")) return false;
 	if (!expect(r.var_count == 6, "6 quoted VARs absorbed (GATEPROTOCOL skipped)")) return false;
@@ -123,6 +125,7 @@ bool check_quoted_response() {
 			"quoted UDPNOVAWORLD stripped")) return false;
 	if (!expect(r.startup_url == "http://127.0.0.1:8080", "quoted STARTUPURL stripped")) return false;
 	if (!expect(r.lobby_name == "jop 2 consumer", "quoted value keeps its internal space")) return false;
+	if (!expect(r.udp_code2.empty(), "an empty quoted value")) return false;
 	return true;
 }
 
@@ -329,6 +332,9 @@ bool check_empty_returns_false() {
 	if (!expect(!opennova::gate_response_parse("", r), "empty response returns false")) return false;
 	if (!expect(!opennova::gate_response_parse("junk without VAR\n", r),
 			"no VAR lines returns false")) return false;
+	// D-NET-708: VAR lines of no key the parse knows count nothing either.
+	if (!expect(!opennova::gate_response_parse("VAR CUS x\nVAR PVT y\nVAR TimeOnGateServer z\n", r),
+			"unknown keys alone return false")) return false;
 	return true;
 }
 

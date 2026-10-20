@@ -103,6 +103,8 @@ struct GateResponse {
 // Parse a gate-server response (the plaintext, post-NWU-decrypt body).
 // Returns true if at least one VAR line was absorbed. Tolerant of blank
 // lines and unknown keys (ignored, consistent with the binary).
+// False when the body holds no VAR line of a known key (var_count 0): the NovaWorld connect
+// then fails the gate as state -9 (NwuLobbySession::poll_gate; D-NET-708).
 bool gate_response_parse(std::string_view body, GateResponse &out);
 
 // The engine's dotted quad: four octets, each a digit at once (no white space, no sign)
