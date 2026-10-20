@@ -1520,7 +1520,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 
 	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
 	// is_mp_session_peer alone, so the game loop's frame steps the timer and reports dead
-	// or alive (D-NET-529). [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279]
+	// or alive (D-NET-529). The count is the process's (the embedder's ClientProcessState,
+	// handed over by the JoinerRole): it runs free across joins and missions, so a later
+	// join's first report lands at its phase, not 311 frames in (D-NET-602).
+	// [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279, its one caller
+	//  Game_ProcessMainFrame @0x526692; g_NetQualityReportTimer @0xA85B84]
 	if (!replay_mode_ && joiner_->in_game_loop()) {
 		if (process_state().step_net_quality_report()) {
 			ProtocolMessage quality = make_protocol_message(

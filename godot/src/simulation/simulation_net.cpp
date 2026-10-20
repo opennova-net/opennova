@@ -640,6 +640,8 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
 	joiner_role_->set_title(title);
+	// The process's 0x4C report count runs on across joins (ClientProcessState).
+	joiner_role_->use_process_state(net_.client_process);
 	if (net_.join_transport.is_valid() && net_.join_transport->is_open()) {
 		// The join goes on with the browse's socket, the one the row was found on:
 		// retail's client has one transport socket per network type, and the join

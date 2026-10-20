@@ -86,6 +86,15 @@ public:
 	// The title identity every runtime this role creates speaks (ClientRuntime::set_title):
 	// configure before create_runtime. A runtime with none refuses to start.
 	void set_title(const TitleIdentity *title) { title_ = title; }
+	// The process-lived client words every runtime this role creates steps
+	// (ClientRuntime::use_process_state; null: each runtime its own): the 0x4C report
+	// count runs free across joins and missions as retail's global does (D-NET-602).
+	// [orig: g_NetQualityReportTimer @0xA85B84 - Client_ProcessNetworkFrame @0x42C239 /
+	//  @0x42C246, its only writers]
+	void use_process_state(ClientProcessState *state) {
+		client_process_ = state;
+		if (runtime) runtime->use_process_state(state);
+	}
 	// The pre-mission subset of the frame: the same socket and runtime advance
 	// the retail connect exchange, but no World exists yet to tick and the
 	// runtime's world-ready gate suppresses the load/spawn drive. The hello
@@ -288,6 +297,7 @@ private:
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};
 	const TitleIdentity *title_ = nullptr; // set_title
+	ClientProcessState *client_process_ = nullptr; // use_process_state
 	int64_t last_net_us_ = 0;
 	// g_StatsAvgFps / g_StatsCpuPercent as the session last handed them over.
 	int32_t uplink_avg_fps_ = 0;

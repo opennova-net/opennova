@@ -5783,6 +5783,47 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 //  @0x42c23e..0x42c279; the 0x2C gate @0x42c3ee..0x42c410, the 0x0C's @0x42c44f..0x42c46d;
 //  Player_BuildTag0CInputBody @0x42A550 (@0x42a58f, @0x42a599); CNetQuality_UpdateMetrics
 //  @0x4C52C0, the held test @0x4c5606..0x4c5630; Input_HandleActionBinding @0x49b067]
+// D-NET-602: the 0x4C report count is the process's. Its only writers are the client
+// net frame's step and its zero at the report, so it runs free across joins: a second
+// join's first report lands at the count's phase, 311 - 200 = 111 frames in after a
+// first join ran 200, where a fresh count would wait 311.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the step @0x42C22D..0x42C239, the zero
+//  @0x42C246, the queue @0x42C279; g_NetQualityReportTimer @0xA85B84]
+bool run_the_report_timer_runs_for_the_process() {
+	const auto first_report = [](inmatch::ClientProcessState *process, int frames,
+			const char *scrk_tag) {
+		const std::string client_scrk = std::string("CLIENT-") + scrk_tag;
+		const std::string server_scrk = std::string("SERVER-") + scrk_tag;
+		inmatch::ClientRuntime client("ReportTimer", [] { return uint64_t{5000}; });
+		client.set_title(&kJo);
+		client.use_process_state(process);
+		client.seed_session(0x52535455u, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
+				w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+		const PlayerExtendedUplink uplink;
+		for (int frame = 1; frame <= frames; ++frame) {
+			for (const std::vector<uint8_t> &datagram :
+					client.Client_ProcessNetworkFrame(uplink, static_cast<uint32_t>(frame))) {
+				ProtocolPacketHeader header;
+				std::vector<ProtocolMessage> messages;
+				if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+				for (const ProtocolMessage &message : messages)
+					if (message.tag == c2s::CLIENT_QUALITY) return frame;
+			}
+		}
+		return 0;
+	};
+	inmatch::ClientProcessState process;
+	if (!expect(first_report(&process, 200, "TIMER-A") == 0 &&
+				process.net_quality_report_timer == 200,
+			"a first join's 200 frames count on the process's word"))
+		return false;
+	if (!expect(first_report(&process, 400, "TIMER-B") == 111,
+			"a second join's first 0x4C lands at the running phase, 111 frames in"))
+		return false;
+	return expect(first_report(nullptr, 400, "TIMER-C") == 311,
+			"a runtime with no process word starts its own count: 311 frames in");
+}
+
 bool run_dead_joiner_keeps_pinging_every_boundary() {
 	struct Tally {
 		int boundaries = 0;
@@ -8427,6 +8468,7 @@ int main() {
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
 	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
 	                run_dead_joiner_keeps_pinging_every_boundary() &&
+	                run_the_report_timer_runs_for_the_process() &&
 	                run_mounted_slot_select_and_reload_producers() &&
 	                run_same_packet_holdoff_keeps_first_admission_boundary_open() &&
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&

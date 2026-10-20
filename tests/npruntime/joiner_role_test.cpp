@@ -2644,6 +2644,31 @@ bool run_zoom_rule_follows_the_session_flags() {
 	return expect(!world.rules.allow_sniper_scope_zoom, "zoom rule: bit 16 clear locks it");
 }
 
+// D-NET-602: the role hands every runtime it creates the process's 0x4C count, a
+// rebuild included: a count standing at 300 reports on the 11th game-loop frame.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the step @0x42C22D..0x42C239, the
+//  zero @0x42C246; g_NetQualityReportTimer @0xA85B84]
+bool run_role_runtimes_step_the_process_report_count() {
+	Harness h;
+	inmatch::ClientProcessState process;
+	process.net_quality_report_timer = 300;
+	h.role.use_process_state(&process);
+	h.role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "", "");
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId, 0,
+	                             0, /*replay_mode=*/false);
+	int first = 0;
+	for (int frame = 1; frame <= 20 && first == 0; ++frame) {
+		h.socket.datagrams.clear();
+		h.role.run_tick(h.input);
+		ProtocolMessage report;
+		if (h.socket.last_message(0x4C, report)) first = frame;
+	}
+	return expect(first == 11, "the role's runtime reports at the process count's phase");
+}
+
 int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
@@ -2694,6 +2719,7 @@ int main() {
 	ok &= run_alt_round_event_flies_its_ammo_byte();
 	ok &= run_round_event_needs_a_resolved_shooter();
 	ok &= run_zoom_rule_follows_the_session_flags();
+	ok &= run_role_runtimes_step_the_process_report_count();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

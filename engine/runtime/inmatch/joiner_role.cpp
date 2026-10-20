@@ -75,6 +75,7 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	// The connect's peer: the 0x41's EIP / EPN on a dial, the 0x42's SIP / SPN.
 	runtime->set_host_address(host_addr_);
 	runtime->set_title(title_);
+	runtime->use_process_state(client_process_);
 	return *runtime;
 }
 
