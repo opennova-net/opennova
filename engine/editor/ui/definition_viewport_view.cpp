@@ -421,7 +421,6 @@ void DefinitionViewportView::draw_empty(Workspace &workspace, const ViewportMode
 
 void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportModel &viewport, ViewportContext &context) {
 	const auto &model = static_cast<const DefinitionViewport &>(viewport);
-	const SessionView &view = workspace.view();
 	const PreviewClock &clock = context.input.clock;
 	ui_kit::WrapRow row;
 	options_row(workspace, model, row);
