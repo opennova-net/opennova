@@ -27,6 +27,8 @@
 
 #include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/punt_log.h>
+#include <runtime/inmatch/server_files.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/novaworld_link.h>
 #include <runtime/inmatch/host_session.h>
@@ -76,6 +78,7 @@
 #include <array>
 #include <cstdio>
 #include <memory>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -5860,6 +5863,56 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 // first join ran 200, where a fresh count would wait 311.
 // [orig: Client_ProcessNetworkFrame @0x42C180 - the step @0x42C22D..0x42C239, the zero
 //  @0x42C246, the queue @0x42C279; g_NetQualityReportTimer @0xA85B84]
+// NEW-L8-8's joiner half: the client's S2C 0x61 (the session key) closes the connect
+// log while it is on: its "<time> : NET CLIENT DISABLING CONNECTLOG ..." line, then off
+// for the process; a later 0x61 writes nothing.
+// [orig: NapiNPClientMsg_HandleSessionKey @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
+//  @0x4297F1, the text @0x7C5398, the append @0x429831, the clear @0x42983E]
+bool run_the_session_key_closes_the_connect_log() {
+	struct MemoryFiles final : inmatch::ServerFileSink {
+		std::map<std::string, std::string> files;
+		bool exists(const std::string &name) override { return files.count(name) != 0; }
+		void remove(const std::string &name) override { files.erase(name); }
+		bool write(const std::string &name, std::string_view bytes, bool append) override {
+			if (!append) files[name].clear();
+			files[name].append(bytes.data(), bytes.size());
+			return true;
+		}
+	};
+	MemoryFiles files;
+	inmatch::ConnectLog log(files);
+	log.set_clock([] { return std::string("T"); });
+	log.start(inmatch::ConnectLogHeader{});
+	const std::size_t header_bytes = files.files[inmatch::kConnectLogFile].size();
+	const std::string client_scrk = "CLIENT-CONNECTLOG-SCRK";
+	const std::string server_scrk = "SERVER-CONNECTLOG-SCRK";
+	inmatch::ClientRuntime client("ConnectLog", [] { return uint64_t{4000}; });
+	client.set_title(&kJo);
+	client.set_connect_log(&log);
+	client.seed_session(0x50607082u, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
+			w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	uint32_t tick = 1;
+	const auto session_key = [&] {
+		const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+				{make_protocol_message(s2c::TICK_SEED, {0x10, 0x00, 0x00, 0x00})});
+		client.receive(dg.data(), dg.size());
+		(void)client.Client_ProcessNetworkFrame(tick++);
+	};
+	if (!expect(log.enabled(), "connect log: /CONNECTLOG armed it")) return false;
+	session_key();
+	const std::string &text = files.files[inmatch::kConnectLogFile];
+	if (!expect(!log.enabled() &&
+				text.substr(header_bytes) ==
+						"T : NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.\r\n",
+			"connect log: the session key writes the client's disabling line and turns it off"))
+		return false;
+	const std::size_t closed_bytes = text.size();
+	session_key();
+	return expect(files.files[inmatch::kConnectLogFile].size() == closed_bytes,
+			"connect log: a later session key writes nothing");
+}
+
 bool run_the_report_timer_runs_for_the_process() {
 	const auto first_report = [](inmatch::ClientProcessState *process, int frames,
 			const char *scrk_tag) {
@@ -8541,6 +8594,7 @@ int main() {
 	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
 	                run_dead_joiner_keeps_pinging_every_boundary() &&
 	                run_the_report_timer_runs_for_the_process() &&
+	                run_the_session_key_closes_the_connect_log() &&
 	                run_mounted_slot_select_and_reload_producers() &&
 	                run_same_packet_holdoff_keeps_first_admission_boundary_open() &&
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&

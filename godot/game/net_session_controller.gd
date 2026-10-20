@@ -137,6 +137,9 @@ func _begin_launch_browse(port: int) -> void:
 	_launch_browse = LanSession.new()
 	_launch_browse.name = "LaunchBrowse"
 	_launch_browse.resource_root = _resource_root()
+	# The browse's socket binds on the block's client quad (engine
+	# inmatch::transport_bind_ports, D-NET-NEW-L8-10).
+	_launch_browse.game_config = GameCfgStore.block()
 	add_child(_launch_browse)
 	_launch_browse.servers_changed.connect(_on_launch_browse_rows.bind(_launch_browse))
 	_launch_browse.browse_finished.connect(_on_launch_browse_finished.bind(_launch_browse))
@@ -279,6 +282,7 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	_spectator_probe = LanSession.new()
 	_spectator_probe.name = "SpectatorPreflight"
 	_spectator_probe.resource_root = _resource_root()
+	_spectator_probe.game_config = GameCfgStore.block()
 	_spectator_probe.set_windowed(false)
 	if _novaworld_client != null:
 		_spectator_probe.set_transport(_novaworld_client.get_game_pump())

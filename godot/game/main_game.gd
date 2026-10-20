@@ -871,6 +871,9 @@ func _wire_shell() -> void:
 	_lan_session = LanSession.new()
 	_lan_session.name = "LanSession"
 	_lan_session.resource_root = _root
+	# The LAN search's socket binds on the block's client quad (engine
+	# inmatch::transport_bind_ports, D-NET-NEW-L8-10).
+	_lan_session.game_config = GameCfgStore.block()
 	add_child(_lan_session)
 	_mp_companion.set_lan_session(_lan_session)
 	_menu_shell.add_companion(_mp_companion)

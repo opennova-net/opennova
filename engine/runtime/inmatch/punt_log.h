@@ -86,6 +86,10 @@ public:
 	// The server's first new connection: its disabling line, then off for the
 	// process [orig: NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF].
 	void disable_at_server_connection();
+	// A client's S2C 0x61 (the session key): its disabling line while the log is on,
+	// then off for the process [orig: NapiNPClientMsg_HandleSessionKey @0x4297C0 -
+	// @0x4297F1..0x42983E].
+	void disable_at_client_session_key();
 	// The clock tests stub (Napi_GetTimeString's text).
 	void set_clock(std::function<std::string()> now) { now_ = std::move(now); }
 

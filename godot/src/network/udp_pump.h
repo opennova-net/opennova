@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 #include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -52,6 +56,15 @@ public:
 	// default destination, so every source is read. The LAN browse opens its
 	// transport this way; the join goes on with it (D-NET-NEW-R3-3).
 	int bind_client();
+	// The client arm's scan and bind address the next bind_client (and dial) uses: the
+	// cfg block's mplanclient quad with its random word and the block's mpipaddressstring
+	// (engine: inmatch::transport_bind_ports(block, Lan, false) / transport_bind_address,
+	// D-NET-NEW-L8-10). Unset: the shipped client quad over every interface.
+	void set_client_bind_scan(std::vector<uint16_t> ports, uint32_t address) {
+		client_bind_ports_ = std::move(ports);
+		client_bind_address_ = address;
+		client_bind_scan_set_ = true;
+	}
 	// Allow sends to a broadcast address (the LAN browse's 255.255.255.255).
 	void set_broadcast_enabled(bool p_enabled);
 
@@ -114,6 +127,9 @@ private:
 
 	Ref<PacketPeerUDP> socket_;
 	int local_port_ = 0;
+	std::vector<uint16_t> client_bind_ports_; // set_client_bind_scan
+	uint32_t client_bind_address_ = 0;
+	bool client_bind_scan_set_ = false;
 	String dest_ip_;
 	int dest_port_ = 0;
 

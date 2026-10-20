@@ -180,6 +180,17 @@ void ConnectLog::disable_at_server_connection() {
 	enabled_ = false;
 }
 
+void ConnectLog::disable_at_client_session_key() {
+	// [orig: NapiNPClientMsg_HandleSessionKey @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
+	//  @0x4297F1, "%s : NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE."
+	//  @0x7C5398 (the sprintf @0x42981F), the append @0x429831, g_ConnectLogEnabled = 0
+	//  @0x42983E; NapiLib_SetManagerCallbacks @0x429848 resets the manager's packet
+	//  loggers, which this port does not run]
+	if (!enabled_) return;
+	line("NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.");
+	enabled_ = false;
+}
+
 void PuntLog::arm_punt_log() {
 	files_.remove(kPuntFile);  // [orig: DeleteFileA @0x4a784a / @0x4a7880]
 	punt_armed_ = true;        // [orig: @0x4a7844 / @0x4a787a]

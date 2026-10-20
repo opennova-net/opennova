@@ -157,6 +157,8 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->set_title(title);
 	// The process's client words: the 0x4C report count runs on across joins.
 	join_preload_sim_->use_client_process(&world_->client_process_);
+	// The process's log devices: the join's session key closes the connect log.
+	join_preload_sim_->use_log_devices(world_->log_devices_.get());
 	// The join's JSR and JSPP are the process's join-screen words: this target's commit
 	// (an answered choice) writes them, and every join sends what they hold
 	// (engine: inmatch/client_runtime.h ClientProcessState; D-NET-NEW-L2-12).

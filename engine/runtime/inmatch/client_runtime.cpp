@@ -1,4 +1,5 @@
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/punt_log.h> // ConnectLog (the 0x61's connect-log close)
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/novaworld_link.h> // the NovaWorld exit
 
@@ -1166,6 +1167,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				if (datagram.tag == s2c::TICK_SEED) {
 					current_tick_ = datagram.body.size() >= 4 ? io::read_u32_le(datagram.body.data()) : 0u;
 					last_keepalive_tick_ = current_tick_;
+					if (connect_log_ != nullptr) connect_log_->disable_at_client_session_key();
 				}
 				// The world-state load's completion burst carries this
 				// client's first player-slot refresh: C2S 0x22 {0, 0x5CF7}
@@ -1384,6 +1386,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			if (pr.tick_seed_set) {
 				current_tick_ = pr.tick_seed;
 				last_keepalive_tick_ = pr.tick_seed;
+				// The same handler closes the connect log [orig:
+				// NapiNPClientMsg_HandleSessionKey @0x4297C0 - @0x4297F1..0x42983E].
+				if (connect_log_ != nullptr) connect_log_->disable_at_client_session_key();
 			}
 			// The mission start's globals reset follows the whole receive pass
 			// that ended the mission-data spin, so a reset folded in the same

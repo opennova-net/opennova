@@ -664,6 +664,14 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	} else {
 		if (net_.pump.is_null()) net_.pump.instantiate();
 		net_.pump->set_capture_path(net_.capture_pcap_path);
+		// The dial's socket open is the client arm's: the block's mplanclient quad
+		// with its random word, on its mpipaddressstring (engine:
+		// inmatch::transport_bind_ports(block, Lan, false), D-NET-NEW-L8-10).
+		if (net_.game_config.is_valid())
+			net_.pump->set_client_bind_scan(
+					opennova::inmatch::transport_bind_ports(net_.game_config->native().cfg(),
+							opennova::inmatch::NetworkType::Lan, /*authority=*/false),
+					opennova::inmatch::transport_bind_address(net_.game_config->native().cfg()));
 		if (net_.pump->dial(p_host_ip, p_port) != 0) {
 			(void)install_offline_role();
 			return false;
@@ -686,6 +694,9 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 			opennova::to_std(p_spectator_password),
 			opennova::to_std(p_server_password),
 			opennova::to_std(p_join_password));
+	// The process's _connectlog.txt, which the session key's handler closes.
+	runtime_->set_connect_log(net_.log_devices != nullptr ? net_.log_devices->logs().connect
+	                                                     : nullptr);
 	install_charattr_table();
 	install_character_join_vars();
 	install_auto_medic_preference();

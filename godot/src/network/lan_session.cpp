@@ -10,6 +10,7 @@
 #include "util/string_convert.h"
 
 #include <net/novaworld/lobby_vars.h> // resolve_address_without_dns
+#include <runtime/inmatch/host_config.h> // transport_bind_ports / transport_bind_address
 #include <net/npwire/peer_addr.h>
 
 #include <array>
@@ -94,6 +95,11 @@ void LanSession::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "resource_root", PROPERTY_HINT_RESOURCE_TYPE, "ResourceRoot"),
 	             "set_resource_root", "get_resource_root");
+	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &LanSession::set_game_config);
+	ClassDB::bind_method(D_METHOD("get_game_config"), &LanSession::get_game_config);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "game_config", PROPERTY_HINT_RESOURCE_TYPE,
+	                     "GameConfigBlock"),
+	             "set_game_config", "get_game_config");
 
 	ADD_SIGNAL(MethodInfo("servers_changed", PropertyInfo(Variant::ARRAY, "servers")));
 	// The browse window expired (the 30 s gate): the LAN screen re-enables its
@@ -141,6 +147,13 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 		// `--capture-pcap <path>` (LaunchFlags) records the browse and the join it
 		// hands its socket to.
 		pump_->set_capture_path(LaunchFlags::capture_pcap());
+		// The client arm's quad and address from the block (engine:
+		// inmatch::transport_bind_ports, D-NET-NEW-L8-10).
+		if (game_config_.is_valid())
+			pump_->set_client_bind_scan(
+					opennova::inmatch::transport_bind_ports(game_config_->native().cfg(),
+							opennova::inmatch::NetworkType::Lan, /*authority=*/false),
+					opennova::inmatch::transport_bind_address(game_config_->native().cfg()));
 		const int bind_error = pump_->bind_client();
 		if (bind_error != static_cast<int>(OK)) {
 			pump_.unref();

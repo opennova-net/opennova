@@ -12,6 +12,7 @@
 #include "network/lan_server_row.h"
 #include "network/udp_pump.h"
 #include "network/udp_pump_datagram_socket.h"
+#include "player/game_config_block.h"
 #include "resource_index/resource_root.h"
 
 #include <memory>
@@ -48,6 +49,12 @@ public:
 	// title's identity is not witnessed in full.
 	void set_resource_root(const Ref<ResourceRoot> &root) { resource_root_ = root; }
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
+	// The process's cfg block, whose mplanclient quad (and its random word) and
+	// mpipaddressstring the browse's own transport binds on (engine:
+	// inmatch::transport_bind_ports(block, Lan, false), D-NET-NEW-L8-10). Null: the
+	// shipped client quad over every interface.
+	void set_game_config(const Ref<GameConfigBlock> &block) { game_config_ = block; }
+	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
 
 	// `connect_type` is the network connect type the browse runs under
 	// (opennova::kLanConnectType*): the LAN screen browses as LAN, a NovaWorld
@@ -97,6 +104,7 @@ private:
 
 	opennova::LanDiscoveryBrowser browser_;
 	Ref<ResourceRoot> resource_root_;
+	Ref<GameConfigBlock> game_config_;
 	// The transport and the game protocol's view of it while the enumerator runs.
 	Ref<UdpPump> pump_;
 	bool pump_installed_ = false; // pump_ is its owner's (set_transport), never closed here

@@ -59,6 +59,8 @@ namespace opennova::def { struct DefItemsFile; }
 
 namespace opennova::inmatch {
 
+class ConnectLog; // punt_log.h
+
 // The client half's process-lived word: retail keeps the 0x4C report's frame count in a
 // global for the whole process, so it runs on across sessions, map changes and roles; only the
 // report zeroes it. The embedder that outlives its sessions owns one and hands it to every
@@ -108,6 +110,9 @@ public:
 		if (joiner_) joiner_->use_local_player_entity_word(state != nullptr ? &state->local_player_entity : nullptr);
 	}
 	enum class Role : uint8_t { Joiner, HostClient };
+	// The process's _connectlog.txt (punt_log.h ConnectLog; null: off): every S2C 0x61
+	// this client handles closes it (ConnectLog::disable_at_client_session_key).
+	void set_connect_log(ConnectLog *log) { connect_log_ = log; }
 
 	// Remote-joiner runtime. Transport-less: framed bytes in via receive(), framed bytes out via
 	// the start()/Client_ProcessNetworkFrame() return values (the owner pumps the socket).
@@ -979,6 +984,7 @@ private:
 	bool local_player_present_ = false;
 	// local_player_dead's latch (the local entity's Flags & 2).
 	bool local_dead_latch_ = false;
+	ConnectLog *connect_log_ = nullptr; // set_connect_log
 	// The body tick's death edge over this frame's fold (local_player_dead).
 	void step_local_dead_latch();
 	// The client-side 1 Hz revive countdown over the roster: every 63rd frame

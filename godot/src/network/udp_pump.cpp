@@ -106,12 +106,17 @@ int UdpPump::bind_listen_at(int port, uint32_t address) {
 int UdpPump::bind_client() {
 	close();
 	socket_.instantiate();
-	// The client arm of the socket open scans the authored client port range
-	// from its min, as retail's does; every bind failing leaves no transport
-	// (net_ports.h lan_client_bind_ports, D-NET-294).
+	// The client arm of the socket open scans the cfg block's client quad from the
+	// start its random word draws, on the block's address, as retail's does; every
+	// bind failing leaves no transport (engine: inmatch::transport_bind_ports,
+	// D-NET-NEW-L8-10; without a block the shipped quad, net_ports.h
+	// lan_client_bind_ports, D-NET-294).
+	const std::vector<uint16_t> ports = client_bind_scan_set_ ? client_bind_ports_
+	                                                          : opennova::lan_client_bind_ports();
+	const String address = opennova::to_gd(opennova::in_addr_text(client_bind_address_));
 	Error err = ERR_CANT_OPEN;
-	for (const uint16_t candidate : opennova::lan_client_bind_ports()) {
-		err = socket_->bind(candidate, "0.0.0.0");
+	for (const uint16_t candidate : ports) {
+		err = socket_->bind(candidate, address);
 		if (err == OK) break;
 	}
 	if (err != OK) {
