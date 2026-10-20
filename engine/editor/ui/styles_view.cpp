@@ -42,13 +42,6 @@ const char *sheet_status(const SessionView &view, const FindingsIndex &findings,
 	return "Read by the game.";
 }
 
-// A line's note in a cell, dimmed and cut to the cell (whole, or `tip`, in its tooltip).
-void quiet_text(const std::string &text, const std::string &tip = std::string()) {
-	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-	ui_kit::clipped_text(text, tip);
-	ImGui::PopStyleColor();
-}
-
 // A colour swatch over the value, read and written as the game's AARRGGBB word (the
 // Inspector's HexArgb swatch).
 void color_cell(Workspace &workspace, const Document &document, const NodeAddress &address, const std::string &value) {
@@ -342,7 +335,7 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 				ImGui::TableNextColumn();
 				used_by_cell(workspace, use.users);
 				ImGui::TableNextColumn();
-				if (!read) quiet_text("not read by the game");
+				if (!read) ui_kit::quiet_text("not read by the game");
 			}
 			ImGui::PopID();
 		}

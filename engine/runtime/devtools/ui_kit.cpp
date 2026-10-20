@@ -221,13 +221,51 @@ void tooltip(const std::string &text) {
 
 void empty_state(const char *text, const char *hint) {
 	note(text);
-	if (hint) note(hint);
+	if (hint) tooltip(hint);
 }
 
 void note(const std::string &text) {
 	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 	ImGui::TextWrapped("%s", text.c_str());
 	ImGui::PopStyleColor();
+}
+
+void quiet_text(const std::string &text, const std::string &tip) {
+	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+	clipped_text(text, tip);
+	ImGui::PopStyleColor();
+}
+
+void help_mark(const std::string &tip) {
+	ImGui::SameLine();
+	ImGui::TextDisabled("(?)");
+	tooltip(tip);
+}
+
+bool nothing_matches(char *filter, const char *what) {
+	const std::string said = std::string("No ") + what + " matches \"" + filter + "\".";
+	const ImGuiStyle &style = ImGui::GetStyle();
+	const float clear = ImGui::CalcTextSize("Clear").x + style.FramePadding.x * 2.0f + style.ItemSpacing.x;
+	const std::string shown = fit(said, ImGui::GetContentRegionAvail().x - clear);
+	ImGui::TextDisabled("%s", shown.c_str());
+	tooltip(shown != said ? said : std::string());
+	ImGui::SameLine();
+	const bool cleared = ImGui::SmallButton("Clear##nothing");
+	tooltip("Clear the filter.");
+	if (cleared) filter[0] = '\0';
+	return cleared;
+}
+
+bool fitted_selectable(const std::string &line, const char *id, bool selected) {
+	const std::string shown = fit(line, ImGui::GetContentRegionAvail().x);
+	const bool pressed = ImGui::Selectable((shown + "###" + id).c_str(), selected);
+	if (shown != line) tooltip(line);
+	return pressed;
+}
+
+bool tool_popup(WrapRow &row, const char *label, const char *popup, bool enabled, const std::string &tip, bool small) {
+	if (tool(row, label, enabled, tip, small)) ImGui::OpenPopup(popup);
+	return ImGui::BeginPopup(popup);
 }
 
 }  // namespace opennova::devtools::ui_kit

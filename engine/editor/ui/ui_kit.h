@@ -1,3 +1,16 @@
+// The prose rule every window of the editor keeps (the declutter pass; the maintainer's "the UI is cramped
+// with overly verbose notes and tips"):
+// - Inline: values, counts, names and live state; the one context line under a canvas; a one-line red
+//   refusal that disables a control (refusal_text); a one-line amber warning that changes what a button
+//   does (warning_line); the text of a confirmation modal.
+// - Tooltip: how-to steps, what a control does, the game rule behind a value, the rest of any sentence
+//   over one line (help_mark when no control carries it).
+// - Cut: anything said twice, click-here tails, prose about the editor's own layout.
+// - Empty state: one line (empty_state); the how-to goes in its tooltip.
+// - Lengths: an inline line at most ~60 characters, drawn with clipped_text or quiet_text, never wrapped
+//   prose; a tooltip at most two sentences.
+// - Session strings (a status, a refusal, a document's save words) are asserted by tests and read over
+//   MCP: they keep their words, and only where they are drawn changes.
 #pragma once
 
 #include <cstddef>
@@ -51,6 +64,22 @@ private:
 
 // The colours of a finding's severity (Problems' marks, Output's lines).
 ImVec4 severity_color(DiagnosticSeverity severity);
+// The warning's colour (a value the game reads otherwise, a line that changes what a button does) and the
+// refusal's (why a control cannot act): the Warning and Error severities'.
+ImVec4 warning_color();
+ImVec4 refusal_color();
+// A one-line amber warning that changes what a control does, cut to the line: hovered, `tip` when one is
+// given, else the whole text when it was cut.
+void warning_line(const std::string &text, const std::string &tip = std::string());
+// A one-line red refusal (why the control beside it cannot act), cut to the line, whole in its tooltip.
+void refusal_text(const std::string &text);
+// The words a view shows while the project's references are still being read.
+const char *reading_references();
+// A button that names what it acts on, `verb` then `name` ("Import gametext.bin..."; `tail` after the name),
+// cut to what is left of the line in its middle (a name's end tells two apart), its id the verb's whatever the
+// name: pressed only while `enabled`, `tip` its tooltip.
+bool named_action(const std::string &verb, const std::string &name, const char *tail, bool enabled,
+                  const std::string &tip, bool small = false);
 // A finding's severity as a mark as high as a control, drawn (the editor's font has no
 // symbols): an error a filled red circle, a warning an amber triangle, a note a grey ring.
 // Hovered, it says which.
