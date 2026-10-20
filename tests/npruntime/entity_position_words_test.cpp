@@ -15,6 +15,7 @@
 // 0x01B8B334), the ASH_I5A trailer x -1389996326 (ours -1389996288), and a 21,000-unit
 // word with low bits set; each loses bits through a float.
 
+#include "conn_fixture.h"
 #include "host_test_setup.h"
 
 #include <runtime/inmatch/loopback_channel.h>
@@ -23,16 +24,23 @@
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/server_tick.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <formats/mission/bms.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 #include <runtime/mission/promote.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/match.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
@@ -67,6 +75,30 @@ int32_t through_float(int32_t word) {
 
 bool same_words(const w::FixedVec3 &a, int32_t x, int32_t y, int32_t z) {
 	return a.x == x && a.y == y && a.z == z;
+}
+
+// A placed row at mission yaw 100 keeps the Yaw word ((90 - 100) << 16) / 360 << 16
+// with a truncating divide, 0xF8E40000; the S2C 0x21 streams its high half 0xF8E4.
+// The wrapped-degree conversion floors 350 degrees to 0xF8E38E38 (one lower on the
+// wire). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
+//  NetPacket_SerializeEntityEventToBuffer `movzx ecx, word ptr [ecx+0Eh]` @0x505685]
+bool yaw_100_heading(int32_t heading) {
+	return heading == static_cast<int32_t>(0xF8E40000u) && w::spawn_angle_bam(90 - 100) == heading &&
+	       (static_cast<uint32_t>(w::bam_heading_from_mission_yaw_deg(100.0)) >> 16) == 0xF8E3u;
+}
+
+std::vector<opennova::ObjectiveEntityState> objective_states(opennova::replication::UdpSessionTransport &t) {
+	std::vector<opennova::ObjectiveEntityState> out;
+	opennova::replication::Datagram d;
+	while (t.pop_outbound(d)) {
+		if (d.tag != opennova::s2c::OBJECTIVE_ENTITY_STATE) continue;
+		opennova::ObjectiveEntityState state;
+		size_t consumed = 0;
+		if (opennova::decode_objective_entity_state(d.body.data(), d.body.size(), state, consumed) &&
+		    consumed == d.body.size())
+			out.push_back(state);
+	}
+	return out;
 }
 
 bms::Entity record(bms::ItemType type, int32_t type_id, int32_t x, int32_t y, int32_t z) {
@@ -347,6 +379,42 @@ int zone_placement_keeps_the_words() {
 	return 0;
 }
 
+// The 6007 walk compares the word length, not the float views': at 21,000 units
+// (a float view's ulp is 128 words) a row one word past the radius word is out,
+// though both float views round up and sit exactly 3.0 units apart.
+// [orig: Server_PositionPlayerForSpawn @0x50CF60 - the radius `shl eax, 10h`
+//  @0x50D03B, the deltas @0x50D098 / @0x50D09B, _ftol2_sse @0x50D0C4, `jg` @0x50D0CD]
+int scatter_walk_takes_the_word_length() {
+	const int32_t zone_x = (21000 << 16) + 0x41;
+	const int32_t row_x = zone_x + (3 << 16) + 1;
+	if (!expect(through_float(row_x) - through_float(zone_x) == (3 << 16),
+	            "the float views sit exactly on the radius"))
+		return 1;
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(0, 4);
+	world->registry.configure_pool(2, 4);
+	world->registry.configure_pool(3, 8);
+	w::Entity zone;
+	zone.has_item_def = true;
+	zone.zone_number = 1;
+	zone.zone_radius = 3;
+	zone.position.set_q16({zone_x, 0, 0});
+	const w::EntityHandle zone_h = world->registry.spawn(2, zone);
+	w::Entity scatter;
+	scatter.item_id = 6007;
+	scatter.has_item_def = true;
+	scatter.position.set_q16({row_x, 0, 0});
+	world->registry.spawn(3, scatter);
+	world->zones.spawn_cycle_counter = 1; // the float test would pick the row here
+	const w::SpawnPointResult placed = w::resolve_player_spawn_pose(*world, {}, zone_h, 0, 1, 0);
+	if (!expect(placed.found && placed.position.x.q16 == zone_x &&
+	                    world->zones.spawn_cycle_counter == 1,
+	            "a 6007 row one word past the radius word is out of the walk"))
+		return 1;
+	std::printf("PASS scatter_walk_takes_the_word_length\n");
+	return 0;
+}
+
 // The gnl2 expiry's blast point, which the S2C item-explosion event streams:
 // the row's X/Y words and its Z word raised by 0x10000, raw.
 // [orig: Entity_HandleDeathEvent @0x4070F0 - the pose copy @0x4071F4..0x40722F,
@@ -361,6 +429,7 @@ int gnl2_blast_point_is_the_raised_z_word() {
 	seed.item_id = 500;
 	seed.has_item_def = true;
 	seed.position.set_q16({kAshJoinerX, kTdhHostY, kFarZ});
+	seed.yaw = 100;
 	seed.engine_flags = w::kEntityFlagDead; // the expiry leg (Flags & 2)
 	const w::EntityHandle h = world->registry.spawn(1, seed);
 	w::ItemDeathTraits traits;
@@ -374,7 +443,127 @@ int gnl2_blast_point_is_the_raised_z_word() {
 	                    same_words(blast->position, kAshJoinerX, kTdhHostY, kFarZ + 0x10000),
 	            "the gnl2 blast point is the row's words, the z word raised by 0x10000"))
 		return 1;
+	if (!expect(blast->count == 60 && yaw_100_heading(blast->heading),
+	            "the gnl2 heading is the row's Yaw word"))
+		return 1;
 	std::printf("PASS gnl2_blast_point_is_the_raised_z_word\n");
+	return 0;
+}
+
+// The barrel's blast pose is the row's words (no raise) and its Yaw word, ten
+// draws, no attacker. [orig: Entity_HandleDeathOnAuthority @0x407CC0 - the words
+//  @0x407CDB..0x407CE4, the Yaw word @0x407CE8 / @0x407CEB, `push 0Ah` @0x407CEF,
+//  `push 0` @0x407D04]
+int barrel_blast_takes_the_yaw_word() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(1, 4);
+	world->rules.logic_authority = true;
+	world->rules.mp_session = true;
+	w::Entity seed;
+	seed.kind = w::EntityKind::Item;
+	seed.item_id = 501;
+	seed.has_item_def = true;
+	seed.position.set_q16({kAshTrailerX, kTdhHostY, kFarZ});
+	seed.yaw = 100;
+	seed.engine_flags = w::kEntityFlagDead;
+	const w::EntityHandle h = world->registry.spawn(1, seed);
+	w::ItemDeathTraits traits;
+	traits.death_class = w::item_death_class_from_tag("brrl");
+	world->tables.item_death_traits.set(501, traits);
+	w::destruction_notify_item_damage(*world, *world->registry.get(h), 1);
+	const w::ItemExplosionEvent *blast = nullptr;
+	for (const auto &event : world->out.entity_events)
+		if (const auto *x = std::get_if<w::ItemExplosionEvent>(&event)) blast = x;
+	if (!expect(blast != nullptr && same_words(blast->position, kAshTrailerX, kTdhHostY, kFarZ) &&
+	                    blast->count == 10 && blast->source == 0xFFFF &&
+	                    yaw_100_heading(blast->heading),
+	            "the barrel blast is the row's words and its Yaw word"))
+		return 1;
+	std::printf("PASS barrel_blast_takes_the_yaw_word\n");
+	return 0;
+}
+
+// The static wreck slides by adding its velocity words to its position words.
+// [orig: Entity_UpdateStaticDeathPhysics @0x494230 - `add [edi], eax` @0x4942D4,
+//  `add [esi+8], eax` @0x4942EA, `add [esi+0Ch], eax` @0x4942F9]
+int static_wreck_slides_on_the_words() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(1, 4);
+	w::Entity seed;
+	seed.kind = w::EntityKind::Item;
+	seed.item_id = 502;
+	seed.position.set_q16({kFarZ, kAshJoinerX, kTdhHostY});
+	seed.engine_flags = w::kEntityFlagHusk;
+	seed.death_motion = w::DeathMotionMode::Static;
+	const w::EntityHandle h = world->registry.spawn(1, seed);
+	w::Entity &e = *world->registry.get(h);
+	e.veh.vel_x = 0x10001;
+	e.veh.vel_y = -0x8003;
+	e.veh.slide_z = 0x35;
+	w::tick_item_death_motion(*world, e, nullptr, -1.0e9f, world->out.destruction);
+	if (!expect(same_words(e.position.q16(), kFarZ + 0x10001, kAshJoinerX - 0x8003, kTdhHostY + 0x35),
+	            "the wreck's slide is a word add"))
+		return 1;
+	std::printf("PASS static_wreck_slides_on_the_words\n");
+	return 0;
+}
+
+// The S2C 0x2F streams a flag's words raw: the carry break's drop pose is the
+// carrier's words, its home pose the spawn backup's.
+// [orig: NetPacket_SerializeEntityWithParentAndTarget @0x505810 - entity+4 / +8 /
+//  +0xC @0x505878 / @0x505889 / @0x50589F; Entity_SyncPositionFromDefinition
+//  @0x43A9B0 - the snap @0x43AA7D..0x43AA96]
+int flag_state_streams_the_words() {
+	auto world = std::make_unique<w::World>();
+	world->rules.mp_session = true;
+	world->registry.configure_pool(0, 4);
+	world->registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = opennova::game_type::kCaptureTheFlag;
+	world->match.configure(rules);
+	w::PlayerSpawn spawn;
+	spawn.position.set_q16({kAshJoinerX, kTdhHostY, 2 << 16});
+	spawn.team = 1;
+	const w::EntityHandle carrier = w::spawn_remote_player(*world, spawn);
+	world->match.upsert_player({carrier, 3, "Carrier"});
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4091;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position.set_q16({kAshTrailerX, kFarZ, 2 << 16});
+	flag_seed.position = spawn.position;
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world->registry.spawn(1, flag_seed);
+	world->registry.get(carrier)->mounted_child = flag;
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = world.get();
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	ctx.config.flag_reset_seconds = 1;
+	ctx.config.permanent_death = true;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(conn_fixture::make_seeded_conn(
+			3, 1, &remote, ns::TransportMode::Client, carrier, true));
+	// Run to the limit second (the carry breaks there), then one tick for the queued pair.
+	for (int i = 0; i < 4 && world->registry.get(carrier)->mounted_child.valid(); ++i) {
+		do {
+			inmatch::Server_TickUpdate(ctx);
+		} while (!ctx.world->match.periodic_second());
+	}
+	objective_states(remote);
+	inmatch::Server_TickUpdate(ctx);
+	const std::vector<opennova::ObjectiveEntityState> pair = objective_states(remote);
+	if (!expect(pair.size() == 2 && pair[0].entity_handle == flag.packed &&
+	                    pair[0].pos_x == kAshJoinerX && pair[0].pos_y == kTdhHostY &&
+	                    pair[1].entity_handle == flag.packed && pair[1].pos_x == kAshTrailerX &&
+	                    pair[1].pos_y == kFarZ,
+	            "the drop and home 0x2F stream the carrier's and the spawn backup's words"))
+		return 1;
+	std::printf("PASS flag_state_streams_the_words\n");
 	return 0;
 }
 
@@ -387,8 +576,12 @@ int main() {
 	const int slot = ai_slot_reads_its_entity_words();
 	const int chat = nearest_location_takes_the_word_distances();
 	const int zone = zone_placement_keeps_the_words();
+	const int scatter = scatter_walk_takes_the_word_length();
 	const int gnl2 = gnl2_blast_point_is_the_raised_z_word();
-	for (const int r : {lossy, streams, placement, slot, chat, zone, gnl2})
+	const int barrel = barrel_blast_takes_the_yaw_word();
+	const int wreck = static_wreck_slides_on_the_words();
+	const int flag = flag_state_streams_the_words();
+	for (const int r : {lossy, streams, placement, slot, chat, zone, scatter, gnl2, barrel, wreck, flag})
 		if (r != 0) return r;
 	return 0;
 }

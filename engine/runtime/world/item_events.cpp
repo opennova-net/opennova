@@ -285,13 +285,17 @@ void gnrc_death_event(World &world, Entity &target, int phase, int32_t section,
 void gnl2_death_expiry(World &world, Entity &target, int32_t section) {
 	target.class_think_ticks = kGnl2DeathThinkTicks;
 	// The blast point is the row's X/Y words and its Z word raised by 0x10000,
-	// copied raw (D-NET-507). [orig: Entity_HandleDeathEvent @0x4070F0 - the
-	//  pose copy @0x4071F4..0x40722F, `add eax, 10000h` @0x40720D, into
-	//  Server_BroadcastExplosionEffect @0x407233]
+	// copied raw (D-NET-507); the heading is the row's Yaw word, which for a
+	// placed row is its spawn angle (low half zero), so the S2C 0x21 streams
+	// that word's high half (D-NET-NEW-V6-1). [orig: Entity_HandleDeathEvent
+	//  @0x4070F0 - the pose copy @0x4071F4..0x40722F, `add eax, 10000h`
+	//  @0x40720D, the Yaw word `mov ecx, [esi+10h]` @0x40720A stored @0x407226,
+	//  into Server_BroadcastExplosionEffect @0x407233; the Yaw word
+	//  Entity_SpawnFromBMSRecord @0x40EB66]
     spawn_item_explosion(world, world.registry.get(target.last_attacker),
             {target.position.x.q16, target.position.y.q16,
              io::bam_add(target.position.z.q16, 0x10000)},
-            bam_heading_from_mission_yaw_deg(target.yaw), 60);
+            spawn_angle_bam(90 - target.yaw), 60);
     emit_item_state(world, target, section);
 	land_class_husk(world, target);
 	if (target.death_tick == 0) target.death_tick = world.logic_tick;
@@ -437,9 +441,14 @@ void tree_death_event(World &world, Entity &target, int phase, int32_t section) 
 void barrel_event(World &world, Entity &target) {
     if (!world.rules.logic_authority) return;
     if ((target.engine_flags & kEntityFlagDead) != 0) {
+        // The pose is the row's words and its Yaw word (a placed row's spawn
+        // angle), raw (D-NET-NEW-V6-1). [orig: Entity_HandleDeathOnAuthority
+        //  @0x407CC0 - the words @0x407CDB..0x407CE4, the Yaw word `mov eax,
+        //  [esi+10h]` @0x407CE8 stored @0x407CEB, `push 0Ah` @0x407CEF, the call
+        //  @0x407D0E; the Yaw word Entity_SpawnFromBMSRecord @0x40EB66]
         spawn_item_explosion(world, nullptr,
                 {target.position.x.q16,target.position.y.q16,target.position.z.q16},
-                bam_heading_from_mission_yaw_deg(target.yaw), 10);
+                spawn_angle_bam(90 - target.yaw), 10);
         if (world.rules.mp_session) world.out.entity_events.push_back(EntityRemoveEvent{target.handle.packed});
         world.commands.remove_ssn(target.handle);
     } else if (target.health > 0) {
