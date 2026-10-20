@@ -1954,6 +1954,28 @@ bool run_client_reducer_preserves_packet_message_order() {
 
 using opennova::inmatch::NullDatagramSocket;
 
+// The host's one S2C 0x16 producer is Server_TickUpdate's scoreboard clock (D-NET-504), which
+// the tick_connections-only harnesses below do not run; our joiner holds its C2S 0x09 for its
+// first list (D-NET-526). The stand-in delivers the clock's list to the added `peer` every 311
+// host ticks [orig: Server_TickUpdate @0x51D8F9..0x51D917].
+struct HarnessScoreboardClock {
+	uint32_t timer = 0;
+	void tick(inmatch::NapiNPServerCtx &ctx, const PeerAddr &peer, w::World &world,
+			inmatch::ClientRuntime &client) {
+		if (++timer <= 0x136u) return;
+		timer = 0;
+		for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+			if (!(c.peer == peer) || c.phase < inmatch::ConnectionPhase::PlayerAdded) continue;
+			std::vector<uint8_t> list;
+			if (inmatch::frame_in_match_s2c_batch(ctx, peer,
+					{inmatch::build_player_list_message(
+							ctx.config, ctx.np_protocol.connection_list, &world)},
+					list))
+				client.receive(list.data(), list.size());
+		}
+	}
+};
+
 struct HostPumpHookProbe {
 	inmatch::HostOwner *owner = nullptr;
 	w::World *world = nullptr;
@@ -2075,7 +2097,11 @@ bool run_roundtrip() {
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host's own player spawned (cached.local_player)")) return false;
 
-	inmatch::ClientRuntime client(kName);
+	// The joiner's wall clock follows the host time the harness drives (tick_connections'
+	// 300 ms per call below), so its paced wait loops (the 0x11 wait's send pump, §5.70.7)
+	// release as they would in real time.
+	uint64_t client_clock_ms = 1;
+	inmatch::ClientRuntime client(kName, [&client_clock_ms] { return client_clock_ms; });
 	client.set_title(&kJo);
 	client.set_world_ready(false); // discover the authoritative mission before installing its world
 	inmatch::CharacterJoinVars join_profile;
@@ -2274,6 +2300,7 @@ bool run_roundtrip() {
 	client.set_world_ready(true);
 
 	// --- 2) Spawn-gate burst, driven entirely from the per-frame client role. ---
+	HarnessScoreboardClock scoreboard_clock;
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
 		// Several host ticks per frame so entity_batch_count climbs through world streaming (F3) and the
@@ -2287,6 +2314,8 @@ bool run_roundtrip() {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
+			client_clock_ms += 300;
+			scoreboard_clock.tick(ctx, peer, world, client);
 		}
 	}
 	if (!expect(spawned, "the spawn-gate burst trips PeerSpawned")) return false;
@@ -2762,6 +2791,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	if (!expect(client.mission_known(), "zones: joiner learned the mission")) return false;
 	client.set_world_ready(true);
 
+	HarnessScoreboardClock scoreboard_clock;
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
 		for (int k = 0; k < 6; ++k) {
@@ -2771,6 +2801,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
+			scoreboard_clock.tick(ctx, peer, world, client);
 		}
 	}
 	if (!expect(spawned && spawn_name == kName, "zones: spawn gate tripped for the joiner")) return false;
@@ -3936,12 +3967,6 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	conn.phase = inmatch::ConnectionPhase::PendingSpawn;
 	conn.link.transport = peer_link.transport.get();
 	conn.link.mode = ns::TransportMode::Client;
-	conn.reply.roster_pushed = true;
-	conn.reply.roster_completed_tick = 0;
-	conn.burst.sync_state = 4;
-	conn.burst.world_stream_phase = 8;
-	conn.burst.loadout_received = true;
-	conn.reply.mission_status_received = true; // the stock client's 0x0B, the bundle trigger
 	conn.burst.entity_batch_count = 1;
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
 	owner.ctx.np_protocol.next_connection_id = inmatch::kFirstJoinerDcb + 1;
@@ -3966,16 +3991,19 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 		if (candidate.peer == peer) remote = &candidate;
 	}
 	if (!expect(hook.calls == 1, "pre-Server_TickUpdate hook runs exactly once")) return false;
-	if (!expect(hook.saw_spawned_connection && hook.saw_live_entity && hook.saw_ai_component,
-			"hook observes the remote spawned and AI-attached by tick_connections")) return false;
+	// The add creates the body; the join (its C2S 0x0B, after the 0x09 / 0x0A legs) is a
+	// later pump's, so the remote is added, not yet joined (D-NET-500).
+	if (!expect(!hook.saw_spawned_connection && hook.saw_live_entity && hook.saw_ai_component,
+			"hook observes the remote added and AI-attached by tick_connections")) return false;
 	if (!expect(hook.saw_before_logic && hook.saw_before_fan,
 			"hook runs before the remote's first logic tick and 0x0A fan")) return false;
 	if (!expect(logic_probe.ticks == 1 && logic_probe.first_tick_saw_hook &&
 				logic_probe.first_tick_saw_player,
 			"first authoritative logic tick observes completed registration")) return false;
 	if (!expect(world.logic_tick == 1, "host pump advances exactly one logic tick")) return false;
-	if (!expect(remote != nullptr && remote->link.s2c_phase == 1,
-			"the first authoritative 0x0A fan follows registration")) return false;
+	if (!expect(remote != nullptr && remote->link.s2c_phase == 0 &&
+	                    remote->slot_state == inmatch::PlayerSlotState::Added,
+			"no 0x0A fan reaches the added remote before its join")) return false;
 	return true;
 }
 

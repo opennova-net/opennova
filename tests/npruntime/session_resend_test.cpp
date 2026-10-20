@@ -509,7 +509,6 @@ bool check_host_owes_an_ack_for_c2s_records() {
 	inmatch::HostOwner owner;
 	seed_host(owner.ctx);
 	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	inmatch::arm_s2c_send_holdoff(conn, 12);
 	ScriptedDatagramSocket sock;
 	SessionSequencing client_tx{1, 0};
@@ -559,7 +558,6 @@ bool check_host_frames_under_the_negotiated_ceiling() {
 	seed_host(owner.ctx);
 	inmatch::admit_peer(owner, kPeer);
 	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.timeouts.max_packet_bytes = 576;
 	ScriptedDatagramSocket sock;
 	for (uint8_t i = 0; i < 3; ++i)
@@ -577,7 +575,6 @@ bool check_host_keepalive_waits_while_a_packet_is_held() {
 	inmatch::HostOwner owner;
 	seed_host(owner.ctx);
 	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	ScriptedDatagramSocket sock;
 	// C2S sequence 2 arrives ahead of a lost 1 (header-only: it owes no ACK).
 	SessionSequencing client_tx{2, 0};

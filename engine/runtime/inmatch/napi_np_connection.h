@@ -115,18 +115,36 @@ enum class GameAdmissionStage : uint8_t {
 	Rejected,
 };
 
+// The player slot's state word (+0x20): where the slot is between its add and its join. The add
+// leaves it Added; the joiner's C2S 0x09 (sent once its mission load completes) starts the
+// player-sync track, whose tail parks it for the C2S 0x0A; the 0x0A starts the world stream,
+// whose end parks it for the C2S 0x0B; the 0x0B's join enters Joined, the state the per-frame
+// 0x0A, the 0x80 send mask (with RoundOver) and the per-player maintenance walk test. The map
+// change returns a slot in states 2..7 to Added. Leaving Joined zeroes the slot's round-event
+// watermark (+97544) at every writer.
+// [orig: CNapiServer_ProcessPendingPlayerSpawns - CServerTick_SetPhase(slot, 1) @0x4C9123;
+//  NapiNPServerMsg_0x009 @0x513200 - 2 @0x513249; Server_SendInitialGameStateToPlayer
+//  @0x51BBA0 - the track switch @0x51BBB4..0x51BBBB, 3 @0x51C134, 5 @0x51BEF3;
+//  NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260 - 4 @0x5132B1; Server_OnPlayerJoin
+//  @0x51A680 - 6 @0x51A712, 7 @0x51AA5C; Server_DisconnectAndResetAllPlayerSlots @0x516160 -
+//  1 @0x5161FD..0x5163AA; NapiNPServer_SendFiltered 0x80 @0x4C8948..0x4C8953]
+enum class PlayerSlotState : uint8_t {
+	Free = 0,              // the add's row memset [orig: Server_PlayerAdd @0x51CD06]
+	Added = 1,             // the add's, awaiting the C2S 0x09
+	PlayerSync = 2,        // the player-sync track (0x2C, 0x08, the 0x2A rows, the tail)
+	AwaitWorldRequest = 3, // the track's tail ran; awaiting the C2S 0x0A
+	WorldStream = 4,       // the world stream (0x10, 0x0D, 0x0C, 0x20, 0x45, 0x7E, 0x1A)
+	AwaitJoin = 5,         // the world stream ended with its 0x1A; awaiting the C2S 0x0B
+	Joined = 6,            // the join ran: in game
+	RoundOver = 7,         // joined into a finished round
+};
+
 // The §5.2a initial-state burst cursor for one connection — Server_SendInitialGameStateToPlayer's
-// per-player phase counters, folded onto the connection node like P2 folded PeerState. After P3 this
-// is the SINGLE authority for the connection's spawn-gate progress (the F3 / PeerSpawned latches read
-// entity_batch_count / spawned here, no longer the game_runtime GameSessionState).
-// [orig: the playerSlot+0x20 sync-state + playerSlot+89878/89882/89884 phase counters; net-re §5.2a]
+// per-player phase counters, folded onto the connection node like P2 folded PeerState. The slot's
+// own state word is NapiNPConnection::slot_state; this carries the producer's cursors and the
+// F3 / PeerSpawned latches (entity_batch_count / spawned).
+// [orig: playerSlot+89878/89882/89884 phase counters; net-re §5.2a]
 struct InitialStateBurst {
-	uint8_t  sync_state = 0;            // [playerSlot+0x20] 0 idle / 2 player-sync / 3 WAIT for the
-	                                    // client's C2S 0x0A spawn-menu request / 4 world-stream / 5 done.
-	                                    // State 3 is the load gate: the player-sync tail parks here
-	                                    // [orig: @0x51c134] and ONLY NapiNPServerMsg_HandlePlayerSpawnRequest
-	                                    // @0x513260 (C2S 0x0A) advances 3 -> 4 — the world stream never
-	                                    // races a client that hasn't asked for it (D-NET-150).
 	// The player-sync tags, one per subphase, and the world-stream phases
 	// (server_initial_state.cpp walks both) [orig: playerSlot+89878/+89882].
 	enum PlayerSyncSubphase : uint16_t {
@@ -234,7 +252,8 @@ inline CharacterJoinVars retail_fresh_profile_character_vars() {
 // (Server_ClientFiredRound @0x50c0d7); the u16 clip = slot+16 (WeaponSlot_CanFire
 // @0x541ba0 reads it, Weapon_ConsumeAmmo @0x540850 decrements it, WeaponSlot_ReloadAmmo
 // @0x541720 refills it)]. The shared ammo pools (adm+220 belt / adm+216 ammo-point
-// classes) and the +96472 fire-rate stamp are deferred — D-NET-152 tails.
+// classes) and the +96472 fire-rate stamp are the connection's, not this struct's
+// (`ammo_pools`; `fire_tick_floor`, stamped in server_fired_round.cpp).
 struct WeaponSlotState {
 	uint8_t adm_index = 0; // the weapon bound to this combo [orig: slot+32 adm ptr]
 	int16_t clip = 0;      // rounds left in the magazine [orig: slot+16]
@@ -343,12 +362,12 @@ struct SessionReplyState {
 	LoadoutSubmit loadout_buffer;
 	bool loadout_buffer_set = false;
 	bool mission_status_received = false; // an accepted 0x0B (Server_HandlePlayerJoinRequest)
-	// Retail's join completion is three packet boundaries, not one semantic
+	// Retail's admission completion is two packet boundaries, not one semantic
 	// bag. The C2S 0x02 handler emits admission metadata; a later pending-spawn
-	// pump replays settings + 0x04; the first 0x37 response then carries 0x64 +
-	// the initial 0x16 beside any queued 0x75. Keeping independent latches
-	// prevents a serializer refactor from moving 0x04 or 0x16 earlier (the retail
-	// client resets its team between the first two packets).
+	// pump replays settings + 0x04. Keeping independent latches prevents a
+	// serializer refactor from moving 0x04 earlier (the retail client resets its
+	// team between the two packets). The joiner's first 0x16 is the scoreboard
+	// clock's, whatever its join leg (D-NET-504).
 	bool admission_metadata_pushed = false;
 	bool spawn_metadata_pushed = false;
 	// A pending player the spawn pump HELD (capacity or team balance) is re-sent
@@ -359,16 +378,9 @@ struct SessionReplyState {
 	uint32_t admission_hold_nag_host_ms = 0;
 	bool admission_hold_nag_host_ms_valid = false;
 	uint32_t admission_completed_tick = 0;
-	bool roster_pushed = false;
-	uint32_t roster_completed_tick = 0;
-	// Roster versioning (D-NET-155): roster_counted marks this connection's spawn as
-	// tallied into NapiNPProtocol.roster_generation; roster_seen_gen is the last roster
-	// version 0x16-pushed to this client — stale => re-push (covers the own-spawn grow,
-	// golden 0x16 31→39 just before deploy, AND every later join/leave; the old
-	// one-shot-per-connection re-push left existing clients' player lists stale when a
-	// later joiner arrived — the v29 stuck HUD count).
+	// The join's 0x32 line and 0x46 push to the in-game clients went out for this
+	// slot (tick_connections, once per slot).
 	bool roster_counted = false;
-	uint32_t roster_seen_gen = 0;
 	// Retail's 0x30/0x31 integrity family rides the global scoreboard countdown,
 	// so it has no per-connection epoch/serial. Network quality retains its own
 	// independently witnessed global clock.
@@ -519,6 +531,8 @@ struct NapiNPConnection {
 
 	// Where this node is in its lifecycle (above).
 	ConnectionPhase phase = ConnectionPhase::New;
+	// The player slot's state word (+0x20, PlayerSlotState above).
+	PlayerSlotState slot_state = PlayerSlotState::Free;
 
 	// The byte transport + the pool-0 entity this connection drives + the per-connection send
 	// filter, modeled by replication::Connection (TransportMode, owned_entity, send_mask). The

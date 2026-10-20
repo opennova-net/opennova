@@ -716,7 +716,7 @@ void HostRole::close() {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide || conn.link.transport == nullptr)
 			continue;
-		if (conn.burst.sync_state >= 2)
+		if (conn.slot_state >= PlayerSlotState::PlayerSync)
 			conn.link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
 					/*reliable=*/false);
 	}

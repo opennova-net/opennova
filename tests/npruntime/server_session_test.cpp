@@ -981,7 +981,6 @@ bool check_host_pump_batches_one_send_boundary() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk =
 			"SERVERBATCHSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 	conn.client_scrk =
@@ -1091,9 +1090,7 @@ bool check_initial_stream_batches_with_reactive_reply() {
 	conn.admission_stage = opennova::inmatch::GameAdmissionStage::Complete;
 	conn.reply.admission_metadata_pushed = true;
 	conn.reply.spawn_metadata_pushed = true;
-	conn.reply.roster_pushed = true;
-	conn.reply.roster_completed_tick = 0;
-	conn.burst.sync_state = 2;
+	conn.slot_state = opennova::inmatch::PlayerSlotState::PlayerSync;
 	conn.burst.player_sync_subphase = 8;
 	conn.link.owned_entity = owned;
 	conn.server_scrk =
@@ -1153,7 +1150,6 @@ bool check_host_frame_failure_preserves_owner_queue() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.client_ck = 0x10203040u;
 	conn.link.transport = peer_link.transport.get();
 	conn.link.mode = opennova::replication::TransportMode::Client;
@@ -1208,7 +1204,6 @@ bool check_requeued_fragment_run_overflows_per_node() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk =
 			"SERVERFRAGRUNSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456";
 	conn.client_ck = 0x10203040u;
@@ -1328,7 +1323,6 @@ bool check_host_idle_send_interval_keepalive() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk =
 			"SERVERIDLEKEEPALIVESCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0";
 	conn.client_ck = 0x10203040u;
@@ -1421,7 +1415,6 @@ bool check_host_send_interval_legs_run_every_tick() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk = "SERVERPERTICKLEGSSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012";
 	conn.client_ck = 0x10203041u;
 	conn.link.transport = peer_link.transport.get();
@@ -1496,7 +1489,6 @@ bool check_host_builds_at_most_field_14_packets() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk = "SERVERPACKETBUDGETSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ01";
 	conn.client_ck = 0x10203042u;
 	conn.link.transport = peer_link.transport.get();
@@ -1548,7 +1540,6 @@ bool check_host_admits_exact_retail_message_prefix() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk =
 			"SERVERMSGPREFIXSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
 	conn.client_ck = 0x10203040u;
@@ -1624,8 +1615,6 @@ bool check_host_admits_exact_retail_message_prefix() {
 	transient_conn.type = 1;
 	transient_conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	transient_conn.burst.spawned = true;
-	transient_conn.reply.roster_seen_gen =
-			transient_owner.ctx.np_protocol.roster_generation;
 	transient_conn.server_scrk =
 			"SERVERTRANSIENTCAPSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123";
 	transient_conn.client_ck = 0x50607080u;
@@ -1725,7 +1714,6 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk =
 			"SERVERHOLDOFFSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	conn.client_scrk =
@@ -1847,7 +1835,6 @@ bool check_host_s2c_holdoff_is_per_connection() {
 		conn.type = 1;
 		conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 		conn.burst.spawned = true;
-		conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 		conn.server_scrk = server_scrk;
 		conn.client_ck = client_ck;
 		conn.link.transport = peer_link.transport.get();
@@ -2131,7 +2118,6 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk =
 			"SERVERFRAGSWEEPSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	conn.client_ck = 0x55667788u;
@@ -2295,7 +2281,6 @@ bool check_fragment_group_overflows_per_node() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.server_scrk =
 			"SERVERFRAGCAPSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	conn.client_ck = 0x55667788u;

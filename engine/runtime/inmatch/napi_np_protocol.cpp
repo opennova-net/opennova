@@ -303,7 +303,6 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 				other.link.transport->host_send(
 						0x5D, encode_destroy_entity_list(leave_sweep));
 		}
-		++ctx.np_protocol.roster_generation;
 	}
 
 	list.erase(it);
@@ -1373,27 +1372,10 @@ std::vector<TickOut> tick_connections(
 		const bool send_boundary_closed =
 				respect_s2c_send_boundary && conn.type == NapiNPConnection::kTypeServerSide &&
 				!conn.s2c_send_boundary_open;
-		if (conn.burst.spawned) {
-			// Spawned peers: Server_TickUpdate owns their per-frame 0x0A — but the roster
-			// version check must keep running here so EXISTING clients learn about LATER
-			// joins/leaves (D-NET-155). The first cut only evaluated it below this skip,
-			// i.e. once, on each connection's own burst-completion tick — the v30 wire
-			// showed the first joiner never received the grown 47-B 0x16 when the second
-			// spawned (its HUD count stayed at 2).
-			if (send_boundary_closed) continue;
-			TickOut to;
-			to.peer = conn.peer;
-			if (conn.type == NapiNPConnection::kTypeServerSide &&
-			    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
-				std::vector<ProtocolMessage> roster_reply{build_player_list_message(
-						ctx.config, ctx.np_protocol.connection_list, ctx.world)};
-				std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
-				if (!dg.empty()) to.outbound.push_back(std::move(dg));
-				conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
-			}
-			if (!to.outbound.empty()) out.push_back(std::move(to));
-			continue;
-		}
+		// Joined peers: Server_TickUpdate owns their per-frame 0x0A, and the scoreboard
+		// clock their S2C 0x16 (a later join or leave reaches them at its next boundary,
+		// D-NET-504).
+		if (conn.burst.spawned) continue;
 
 		TickOut to;
 		to.peer = conn.peer;
@@ -1453,33 +1435,22 @@ std::vector<TickOut> tick_connections(
 			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
 		}
-		// Advance this connection's §5.2a burst one step and frame/ship the bodies (built from real
-		// World/bms state). conn.burst is authoritative for the spawn-gate latches.
-		// Golden ordering: admission, spawn metadata, then the 0x16 player-list PRECEDE the
-		// §5.2a world-stream. Without this gate, the burst fires in the same pump as the C2S 0x42
-		// join — before the post-handshake round-trip (C2S 0x01→S2C 0x02→C2S 0x02→burst) has
-		// completed, so the retail client receives the world-stream before it has reached join-FSM
-		// state 6 verification. roster_pushed is set by the first C2S 0x37 reply; the host's own loopback
-		// (type 2) bypasses the gate. Remote peers have no timeout shortcut: the bundled client now
-		// drives this captured exchange, and bypassing it marks malformed/out-of-order joins as players.
-		const bool roster_ready =
-				conn.type != NapiNPConnection::kTypeServerSide ||
-				(conn.admission_stage == GameAdmissionStage::Complete &&
-				 conn.reply.roster_pushed &&
-				 now_tick != conn.reply.roster_completed_tick);
-		if (conn.phase >= ConnectionPhase::PlayerAdded && roster_ready) {
+		// Advance this connection's §5.2a burst at its send boundary and ship the bodies
+		// (built from real World/bms state). The producer acts on the slot's state alone:
+		// the player-sync track waits for the joiner's C2S 0x09 (slot state 2), which a
+		// stock client sends once its mission load completes (D-NET-500), so the track
+		// never lands in that blocking load. The host's own loopback (type 2) sends its
+		// 0x09 in-process (Server_SendInitialGameStateToPlayer applies it).
+		// [orig: Server_TickUpdate's tail slot walk @0x51E385..0x51E47C, the call @0x51E3E4
+		//  at the connection's open send boundary @0x51E3D6..0x51E3DD]
+		if (conn.phase >= ConnectionPhase::PlayerAdded) {
 			InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, conn, now_tick);
 			ship_burst_messages(conn, step.messages, to.outbound);
 		}
 
-		// Roster versioning (D-NET-155): the first time we observe ANY connection spawned,
-		// the roster grew — bump the generation so EVERY in-match client refreshes its 0x16
-		// player list (the HUD player count follows it). The old one-shot-per-connection
-		// re-push only reached the JOINING client, so existing clients' lists went stale
-		// when a later joiner arrived (v29: HUD stuck at 2 with 3 players in).
+		// The join line and the join-time 0x46 push, once per slot.
 		if (conn.burst.spawned && !conn.reply.roster_counted) {
 			conn.reply.roster_counted = true;
-			++ctx.np_protocol.roster_generation;
 			// The join-time 0x46 push (fieldFlags 0x1CF7) to every EXISTING in-match client,
 			// so its next 0x16's new row is ACCEPTED instead of dropped + 0x22-retried — the
 			// unknown-slot churn behind the stale HUD count (D-NET-158). The
@@ -1488,18 +1459,6 @@ std::vector<TickOut> tick_connections(
 			broadcast_player_joined_text(ctx.np_protocol.connection_list, conn, ctx.world);
 			broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list, conn,
 			                              ctx.world);
-		}
-		// (Re)push the list to a spawned joiner whenever its seen generation is stale.
-		// Covers the joiner's OWN spawn — the client needs its own slot to bind its local
-		// player and deploy (golden: 0x16 31→39 just before the first C2S 0x0C) — and every
-		// later roster change (join/leave). One framed push per generation per connection.
-		if (conn.type == NapiNPConnection::kTypeServerSide && conn.burst.spawned &&
-		    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
-			std::vector<ProtocolMessage> roster_reply{
-					build_player_list_message(ctx.config, ctx.np_protocol.connection_list, ctx.world)};
-			std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
-			if (!dg.empty()) to.outbound.push_back(std::move(dg));
-			conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 		}
 
 		// Surface the F3 / PeerSpawned events from conn.burst (verbatim predicates). Same latch as the

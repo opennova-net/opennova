@@ -584,28 +584,38 @@ void dispatch_file_chunk_request(const GameConfig &config, const ProtocolMessage
 					chunk_request_offset(msg.payload, inputs.server_info_transfer_id))));
 }
 
-// See header. [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
-void dispatch_mission_chunk_request(const GameConfig &config, NapiNPConnection &conn,
-		const ProtocolMessage &msg, uint32_t now_tick, std::vector<NapiNPConnection> &roster,
-		world::World *world, const ServerDispatchInputs &inputs,
-		std::vector<ProtocolMessage> &replies) {
+// See header. The 0x64 chunk is the handler's one send: the joiner's first S2C 0x16 is the
+// scoreboard clock's (emit_periodic_session_maintenance), whose one serializer call is the
+// periodic broadcast, so no list rides this reply (D-NET-504).
+// [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0; NetPacket_SerializeScoreboard0x16
+//  @0x504B80, its one call Server_BuildAndBroadcastScoreboard @0x50D960 (@0x50DDE2), whose one
+//  caller is Server_TickUpdate (@0x51D90D) past g_ScoreboardBroadcastTimer's 0x136
+//  (@0x51D8F9..0x51D917)]
+void dispatch_mission_chunk_request(const GameConfig &config, const ProtocolMessage &msg,
+		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies) {
 	replies.push_back(make_protocol_message(
 			s2c::MISSION_DATA_CHUNK,
 			build_tag64_mission_metadata(
 					config, inputs.mission_metadata_blob,
 					inputs.mission_metadata_transfer_id,
 					chunk_request_offset(msg.payload, inputs.mission_metadata_transfer_id))));
-	// The retail 00TRg join tail shares one send boundary:
-	// queued 0x75, this 0x64, then the initial 0x16. Publishing the
-	// roster on the preceding host tick makes the client request an
-	// early 0x46 repair and changes both ordering and packet grouping.
-	if (conn.reply.spawn_metadata_pushed &&
-	    !conn.reply.roster_pushed) {
-		replies.push_back(build_player_list_message(
-				config, roster, world));
-		conn.reply.roster_pushed = true;
-		conn.reply.roster_completed_tick = now_tick;
+}
+
+// See header. The net player's game-state test against 2 has no counterpart here: a
+// connection reaches this switch only past its admission (dispatch_admission), and the
+// handler needs the net player's slot, which the add links (player_slot_active).
+// [orig: NapiNPServerMsg_0x009 @0x513200 - the authority @0x513207, the net player
+//  @0x51320D, its slot @0x513218, game state 9 @0x51322D, the slot-state test @0x513238,
+//  the state-6 watermark clear @0x51323F, state 2 @0x513249]
+void dispatch_player_sync_request(NapiNPConnection &conn) {
+	if (!player_slot_active(conn)) return;
+	conn.burst.game_state = 9;
+	if (conn.slot_state == PlayerSlotState::PlayerSync) return;
+	if (conn.slot_state == PlayerSlotState::Joined) {
+		conn.link.round_watermark = 0;
+		conn.link.round_watermark_armed = false;
 	}
+	conn.slot_state = PlayerSlotState::PlayerSync;
 }
 
 void broadcast_player_sync_on_join(const GameConfig &config,

@@ -183,7 +183,10 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	inmatch::start_host_session(owner, host_cfg);
 
 	MemoryDatagramSocket sock;
-	inmatch::ClientRuntime client("SelfCapture");
+	// The joiner's wall clock follows the host ticks this script drives (16 ms each), so its
+	// paced wait loops release as they would in real time, whatever the machine's speed.
+	uint64_t client_ms = 1;
+	inmatch::ClientRuntime client("SelfCapture", [&client_ms] { return client_ms; });
 	client.set_title(&kJo);
 
 	int cap_seq = 0;
@@ -202,6 +205,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	};
 	auto pump_and_deliver = [&]() {
 		inmatch::host_session_pump(owner, sock);
+		client_ms += 16;
 		for (const std::vector<uint8_t> &d : sock.outbound) {
 			record(kHostPort, kJoinerPort, d); // S2C
 			client.receive(d.data(), d.size());

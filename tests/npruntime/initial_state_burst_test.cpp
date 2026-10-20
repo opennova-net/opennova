@@ -544,7 +544,24 @@ int main_impl() {
 		jconn.type = 1;
 		jconn.connection_id = inmatch::kFirstJoinerDcb;
 		jconn.phase = inmatch::ConnectionPhase::PlayerAdded;
-		jconn.burst.sync_state = 0;
+		jconn.slot_state = inmatch::PlayerSlotState::Added;
+		// D-NET-500: the added slot's track waits for the joiner's C2S 0x09 (sent once its
+		// mission load completed); until then the producer sends nothing.
+		for (int i = 0; i < 4; ++i) {
+			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			if (!expect(s.messages.empty(), "no player-sync record before the C2S 0x09")) return 1;
+		}
+		{
+			inmatch::ServerDispatchInputs inputs;
+			inputs.server_ctx = &ctx3;
+			std::vector<opennova::ProtocolMessage> msgs;
+			msgs.push_back(opennova::make_protocol_message(opennova::c2s::CHECKSUM_RESPONSE, {}));
+			const std::vector<opennova::ProtocolMessage> replies = inmatch::dispatch_session_replies(
+					ctx3.config, jconn, msgs, 1, ctx3.np_protocol.connection_list, &w3, inputs);
+			if (!expect(replies.empty() && jconn.slot_state == inmatch::PlayerSlotState::PlayerSync &&
+			                    jconn.burst.game_state == 9,
+			            "the C2S 0x09 answers nothing and enters slot state 2, game state 9")) return 1;
+		}
 
 		// A REMOTE (type-1) joiner is PACED: each call emits only a few datagrams (kPacedMsgsPerTick),
 		// so the burst takes many calls to stream the player-sync tail — and then PARKS at sync-state
@@ -571,7 +588,7 @@ int main_impl() {
 				if (!expect(m.tag != 0x10 && m.tag != 0x0D && m.tag != 0x0C && m.tag != 0x20,
 				            "no world-stream tag before the client's C2S 0x0A (D-NET-150)")) return 1;
 			}
-			if (jconn.burst.sync_state == 3) parked_for_spawn_menu = true;
+			if (jconn.slot_state == inmatch::PlayerSlotState::AwaitWorldRequest) parked_for_spawn_menu = true;
 		}
 		if (!expect(parked_for_spawn_menu, "player-sync tail parks at sync-state 3 (awaiting C2S 0x0A)")) return 1;
 		if (!expect(saw_atomic_player_sync_tail,
@@ -584,7 +601,7 @@ int main_impl() {
 		// Simulate the client's C2S 0x0A spawn-menu request (what the dispatch case 0x0A applies)
 		// [orig: NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260].
 		jconn.burst.game_state = 9;
-		jconn.burst.sync_state = 4;
+		jconn.slot_state = inmatch::PlayerSlotState::WorldStream;
 		jconn.burst.world_stream_phase = 0;
 		bool reached_loadout_gate = false;
 		for (int i = 0; i < 256 && !reached_loadout_gate; ++i) {
@@ -593,7 +610,7 @@ int main_impl() {
 			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
 			// The per-tick budget means each call emits a bounded number of datagrams (the game-start
 			// bundle is the only atomic >budget batch, and it's past the gate).
-			if (jconn.burst.sync_state == 4 && jconn.burst.world_stream_phase == 8 &&
+			if (jconn.slot_state == inmatch::PlayerSlotState::WorldStream && jconn.burst.world_stream_phase == 8 &&
 			    !jconn.burst.loadout_received) {
 				reached_loadout_gate = true;
 			}
@@ -687,17 +704,20 @@ int main_impl() {
 		sconn.connection_id = inmatch::kFirstJoinerDcb;
 		sconn.phase = inmatch::ConnectionPhase::PlayerAdded;
 		sconn.link.spectator = as_spectator;
-		for (int i = 0; i < 64 && sconn.burst.sync_state != 3; ++i)
+		sconn.slot_state = inmatch::PlayerSlotState::PlayerSync; // its C2S 0x09
+		for (int i = 0; i < 64 && sconn.slot_state != inmatch::PlayerSlotState::AwaitWorldRequest; ++i)
 			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, /*now_tick=*/1);
-		if (!expect(sconn.burst.sync_state == 3, "the joiner's player sync parks at state 3"))
+		if (!expect(sconn.slot_state == inmatch::PlayerSlotState::AwaitWorldRequest,
+		            "the joiner's player sync parks at state 3"))
 			return 1;
 		sconn.burst.game_state = 9; // the C2S 0x0A advance
-		sconn.burst.sync_state = 4;
+		sconn.slot_state = inmatch::PlayerSlotState::WorldStream;
 		sconn.burst.world_stream_phase = 0;
 		bool gated = false;
 		for (int i = 0; i < 256 && !gated; ++i) {
 			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, /*now_tick=*/1);
-			gated = sconn.burst.sync_state == 4 && sconn.burst.world_stream_phase == 8;
+			gated = sconn.slot_state == inmatch::PlayerSlotState::WorldStream &&
+			        sconn.burst.world_stream_phase == 8;
 		}
 		if (!expect(gated, "the joiner's burst reaches the phase-8 gate")) return 1;
 		// An accepted 0x2F alone opens nothing.

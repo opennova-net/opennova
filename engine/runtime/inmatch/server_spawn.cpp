@@ -724,6 +724,11 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 					conn.ammo_damage_classes.fill(0);
 				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false).valid())
 					continue;
+				// The added player's net player enters game state 8 and its slot state 1,
+				// where it waits for its C2S 0x09 [orig: CNetPlayer_SetGameState(.., 8)
+				// @0x4C911A, CServerTick_SetPhase(slot, 1) @0x4C9123].
+				conn.burst.game_state = 8;
+				conn.slot_state = PlayerSlotState::Added;
 				// The pump's add is Server_PlayerAdd's, which writes the slot's
 				// PlayerList entry; the map change's round init re-adds a kept
 				// slot through no PlayerAdd and writes none, so its PlayerTeam
@@ -811,6 +816,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->link.mode = replication::TransportMode::Client;
 	conn->phase = ConnectionPhase::PlayerAdded;
 	conn->burst.spawned = true; // in-match (is_in_match): drained + emitted by Server_TickUpdate
+	conn->slot_state = PlayerSlotState::Joined;
 	conn->reply.player_slot = *player_slot;
 	conn->reply.player_slot_reserved = false;
 	// The admitted player's name is its record's and its entity's Name, as on

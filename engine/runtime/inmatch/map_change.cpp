@@ -78,8 +78,9 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 // and the slot's kit: its loadout buffer, ammo pools, loaded-round buckets
 // and slot table, which the reset does not store to (the round init rebuilds
 // the slot table from them), and the retained list body.
-// The burst starts over at the kept slot's next C2S 0x37 (the 0x16 push),
-// as a stock joiner's reload asks for it.
+// The burst's cursors start over; the slot's state word is the caller's (the
+// reset returns a slot in states 2..7 to state 1, so the kept joiner's reload
+// starts the player-sync track again with its C2S 0x09).
 // [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 -- the entity
 //  pointer, +360..+368, +376, +380, +460, +89856, +89864, +89868, +89932,
 //  +94372..+94380 cleared @0x5163B2..0x516417, the stats block re-inited
@@ -109,7 +110,6 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	reply.spawn_metadata_pushed = kept.spawn_metadata_pushed;
 	reply.admission_completed_tick = kept.admission_completed_tick;
 	reply.roster_counted = kept.roster_counted;
-	reply.roster_seen_gen = kept.roster_seen_gen;
 	reply.player_name = kept.player_name;
 	reply.player_slot = kept.player_slot;
 	// The kit outlives the mission [orig: the reset's stores @0x5163B2..0x516417
@@ -134,7 +134,9 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	conn.pending_guidance.clear();
 	conn.world_stream_announced = false;
 	conn.spawned_announced = false;
+	const uint8_t game_state = conn.burst.game_state;
 	conn.burst = InitialStateBurst{};
+	conn.burst.game_state = game_state;
 	// The slot table (+0x1D0) is left as well; the round init rebuilds it
 	// [orig: the reset stores +0x1CC alone @0x5163B2..0x516417;
 	//  Server_InitAllPlayerEntitiesForRound @0x516BF3..0x516C20].
@@ -153,7 +155,8 @@ void reset_all_player_slots(HostRole &role) {
 	HostRotation *rotation = role.rotation();
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!slot_active(conn)) continue;
-		if (conn.burst.sync_state >= 2 && conn.link.transport != nullptr) {
+		const bool synced = conn.slot_state >= PlayerSlotState::PlayerSync;
+		if (synced && conn.link.transport != nullptr) {
 			if (conn.type == NapiNPConnection::kTypeServerSide) {
 				conn.link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
 						/*reliable=*/false);
@@ -168,6 +171,13 @@ void reset_all_player_slots(HostRole &role) {
 				// [orig: NapiNPClientMsg_GameReset @0x422855]
 				++rotation->round_count;
 			}
+		}
+		// A slot in states 2..7: its net player back to game state 8, the slot to
+		// state 1 [orig: @0x5161E1 / @0x5161FD (state 2) .. @0x516392 / @0x5163AA
+		//  (state 7)].
+		if (synced) {
+			conn.burst.game_state = 8;
+			conn.slot_state = PlayerSlotState::Added;
 		}
 		reset_slot_for_next_mission(conn);
 	}
@@ -281,9 +291,6 @@ void init_all_player_entities_for_round(HostRole &role) {
 			if (world::Entity *player = world.registry.get(h))
 				PlayerSlot_RebuildKitForRound(*conn, world, *player);
 	}
-	// Every kept slot names a new entity: the roster every in-match client
-	// holds is stale.
-	++ctx.np_protocol.roster_generation;
 }
 
 void Server_BroadcastPlayerInfoToAll(NapiNPServerCtx &ctx) {

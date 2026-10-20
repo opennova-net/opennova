@@ -563,7 +563,6 @@ bool check_host_control_punt(uint32_t charattr_silence,
 	conn.link.mode = replication::TransportMode::Client;
 	conn.link.transport = &transport;
 	conn.link.owned_entity = player;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.reply.minimap_initial_scan_pending = false;
 	conn.reply.control_live_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 	conn.reply.control_request_countdown = 1;
@@ -968,7 +967,6 @@ bool check_host_pool_overflow_disconnects_with_msgcre() {
 	conn.server_scrk = kServerScrk;
 	conn.link.mode = replication::TransportMode::Client;
 	conn.link.transport = &transport;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.seq = inmatch::make_jo_game_session_sequencing(2, 0);
 	conn.seq.retained_outbound[1] = std::vector<ProtocolMessage>(
 			JO_SESSION_OUTBOUND_MESSAGE_MAX - 1, make_protocol_message(0x60, {}));
@@ -1186,7 +1184,7 @@ bool check_host_close_bursts_stop_to_every_connection() {
 		conn.phase = inmatch::ConnectionPhase::InMatch;
 		conn.admission_stage = inmatch::GameAdmissionStage::Complete;
 		conn.burst.spawned = true;
-		conn.burst.sync_state = 5;
+		conn.slot_state = inmatch::PlayerSlotState::Joined;
 		conn.spawned_announced = true;
 		conn.client_ck = kClientKey + static_cast<uint32_t>(i);
 		conn.server_sk = kServerKey;
@@ -1385,7 +1383,6 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	conn.link.mode = replication::TransportMode::Client;
 	conn.link.transport = &transport;
 	conn.link.owned_entity = player;
-	conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 	conn.reply.minimap_initial_scan_pending = false;
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
@@ -1518,7 +1515,6 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	else
 		conn.link.transport = &transport;
 	conn.link.owned_entity = player;
-	conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 	conn.reply.minimap_initial_scan_pending = false;
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();

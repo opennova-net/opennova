@@ -38,9 +38,13 @@ void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn
 		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies); // C2S 0x02
 void dispatch_file_chunk_request(const GameConfig &config, const ProtocolMessage &msg,
 		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies); // C2S 0x33
-void dispatch_mission_chunk_request(const GameConfig &config, NapiNPConnection &conn,
-		const ProtocolMessage &msg, uint32_t now_tick, std::vector<NapiNPConnection> &roster,
-		world::World *world, const ServerDispatchInputs &inputs,
-		std::vector<ProtocolMessage> &replies);                            // C2S 0x37
+void dispatch_mission_chunk_request(const GameConfig &config, const ProtocolMessage &msg,
+		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies); // C2S 0x37
+
+// C2S 0x09, the joiner's player-sync request (its mission load completed): an added slot's
+// net player enters game state 9 and the slot the player-sync track (PlayerSlotState::PlayerSync),
+// which Server_SendInitialGameStateToPlayer then runs. No reply. The host's own client sends it
+// in-process: the producer applies it for the type-2 loopback.
+void dispatch_player_sync_request(NapiNPConnection &conn);
 
 } // namespace opennova::inmatch

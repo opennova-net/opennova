@@ -4991,6 +4991,10 @@ opennova_add_gated_test(ragdoll_us01 COMMAND ragdoll_us01_test)
 # The net parity program's per-lane blocks: each lane adds its rows inside its own block.
 
 # --- parity lane L1 (join/host) ---
+add_executable(npruntime_join_leg_test npruntime/join_leg_test.cpp)
+target_link_libraries(npruntime_join_leg_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_join_leg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_join_leg COMMAND npruntime_join_leg_test)
 
 # --- parity lane L2 (joiner) ---
 

@@ -1,6 +1,7 @@
 #include <runtime/inmatch/server_initial_state.h>
 
 #include <runtime/inmatch/batch_chunker.h> // inmatch::slice_batch_pages (the shared byte-budget pager, ADR 0013)
+#include <runtime/inmatch/server_dispatch_join.h> // dispatch_player_sync_request (the loopback's own 0x09)
 #include <runtime/inmatch/server_flags.h> // the flag word's named bits
 #include <runtime/inmatch/server_tick.h> // Server_RerollPlayerTickSeed
 #include <runtime/inmatch/server_visible_players.h> // fan_spawn_slot_notice
@@ -370,7 +371,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 	bool is_world_batch = false;
 	bool world_pool_done = true; // false when a world-stream pool was paused mid-pool (budget hit)
 
-	if (b.sync_state == 2 && b.player_sync_subphase == InitialStateBurst::kSyncNoop) {
+	if (conn.slot_state == PlayerSlotState::PlayerSync &&
+			b.player_sync_subphase == InitialStateBurst::kSyncNoop) {
 		// Retail treats subphase 16 as one atomic player-sync tail, even though
 		// it contains five semantic records. The 00TRg oracle carries exactly
 		// [0x1C,0x0B,0x66,0x76,0x11] in one 0x83 boundary after the sixth 0x2A.
@@ -394,7 +396,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		step.messages.push_back(
 				InitialStateMessage{s2c::DISCONNECT_UNLOCK, {}});
 		b.player_sync_subphase = InitialStateBurst::kSyncDisconnectUnlock;
-	} else if (b.sync_state == 2) {
+	} else if (conn.slot_state == PlayerSlotState::PlayerSync) {
 		// Player-sync track: one tag per subphase (8..20), then -> world-stream.
 		switch (b.player_sync_subphase) {
 		case InitialStateBurst::kSyncMissionMapNames: tag = s2c::MISSION_MAP_NAMES; action = Action::EmitBody; break;  // NetPacket_WriteServerNameAndMapFile @0x505780
@@ -410,7 +412,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		case InitialStateBurst::kSyncDisconnectUnlock: tag = s2c::DISCONNECT_UNLOCK; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x11 empty payload, LAST of the §5.5 bundle]
 		default: break;
 		}
-	} else if (b.sync_state == 4) {
+	} else if (conn.slot_state == PlayerSlotState::WorldStream) {
 		// World-stream track: stream EACH pool in FULL, PAGED into per-datagram batches. A retail joiner
 		// needs the complete static / pool-1 / pool-3 world to finish loading the map — the prior
 		// minimal stream (empty 0x10, skipped 0x0D, spawn-marker-only 0x20) stalled a live retail join at
@@ -665,7 +667,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 	}
 
 	// Advance the cursor and handle track transitions / the terminator.
-	if (b.sync_state == 2) {
+	if (conn.slot_state == PlayerSlotState::PlayerSync) {
 		if (b.player_sync_subphase >= InitialStateBurst::kSyncDisconnectUnlock) {
 			// Player-sync tail [orig: 0x51c113..0x51c13c]: game state 9, sync state -> 3, subphase
 			// reset. State 3 PARKS the burst — the world stream starts only when the client's C2S
@@ -674,18 +676,18 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			// f=201713). Streaming without that request is what raced a cold retail client's
 			// mission build and mis-bound its own CharacterEntity (D-NET-150).
 			b.game_state = 9;          // [orig: CNetPlayer_SetGameState(.., 9) @0x51c11c]
-			b.sync_state = 3;          // [orig: @0x51c134]
+			conn.slot_state = PlayerSlotState::AwaitWorldRequest; // [orig: @0x51c134]
 			b.player_sync_subphase = InitialStateBurst::kSyncDone; // [orig: @0x51c13c]
 		} else {
 			++b.player_sync_subphase;
 		}
-	} else if (b.sync_state == 4) {
+	} else if (conn.slot_state == PlayerSlotState::WorldStream) {
 		// A paged world-stream pool (phases 1-4) that hit the per-tick budget mid-pool is NOT done —
 		// stay on this phase and resume from b.phase_loop_counter next tick (the pacing resume point).
 		if (!world_pool_done) {
 			// remain on the same world_stream_phase; cursor saved in b.phase_loop_counter
 		} else if (b.world_stream_phase >= InitialStateBurst::kStreamGameStartBundle) { // phase 8 = the game-start bundle (deploy unsticker)
-			b.sync_state = 5;          // done
+			conn.slot_state = PlayerSlotState::Joined; // [orig: Server_OnPlayerJoin @0x51A712]
 			b.game_state = 9;          // [orig: CNetPlayer_SetGameState(.., 9) — in-game]
 			b.spawned = true;          // the PeerSpawned source
 			conn.phase = ConnectionPhase::Spawned;
@@ -713,11 +715,20 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	if (conn.burst.spawned) return step;              // already complete
 
 	InitialStateBurst &b = conn.burst;
-	if (b.sync_state == 0) {                            // start the player-sync track
-		b.sync_state = 2;
+	const bool is_remote = (conn.type == NapiNPConnection::kTypeServerSide);
+	// The player-sync track runs in slot state 2 alone, which only the joiner's C2S 0x09
+	// sets (dispatch_player_sync_request) once its mission load completed; until then the
+	// producer sends nothing (D-NET-500). The host's own client sends its 0x09 in-process:
+	// the type-2 loopback applies the same handler here.
+	// [orig: Server_SendInitialGameStateToPlayer @0x51BBA0 - the slot-state switch
+	//  @0x51BBB4..0x51BBBB, the track @0x51BEFF; NapiNPServerMsg_0x009 @0x513200]
+	if (!is_remote && conn.slot_state == PlayerSlotState::Added)
+		dispatch_player_sync_request(conn);
+	// Each pass of the track enters at subphase 8 at least: a fresh slot's 0, or the 0 the
+	// last tail left [orig: @0x51BF2D..0x51BF2F].
+	if (conn.slot_state == PlayerSlotState::PlayerSync &&
+			b.player_sync_subphase < InitialStateBurst::kSyncMissionMapNames)
 		b.player_sync_subphase = InitialStateBurst::kSyncMissionMapNames;
-		b.game_state = 8;                              // [orig: CNetPlayer_SetGameState(.., 8)]
-	}
 
 	// [orig: Server_SendInitialGameStateToPlayer @0x51bba0] PACED — the original streams the §5.2a
 	// burst onto the wire over ~150 frames (~1 batch/2 frames), NOT one-shot. Emit at most
@@ -732,7 +743,6 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// Most remote phases produce one record per eligible boundary. The witnessed
 	// player-sync tail (subphase 16) and game-start bundle are atomic exceptions.
 	constexpr std::size_t kPacedMsgsPerTick = 1; // ~1 datagram/host-frame; golden is ~0.4 batch/frame
-	const bool is_remote = (conn.type == NapiNPConnection::kTypeServerSide);
 	const std::size_t budget = is_remote ? kPacedMsgsPerTick : 0xFFFFu; // loopback: effectively unpaced
 
 	// Backlog throttle [orig: 0x51bf1b (player-sync track) / 0x51bc04 (world-stream track)]: the
@@ -749,8 +759,10 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 		if (outstanding >= 20) return step; // stalled on the client's acks — resume when they arrive
 	}
 
-	while (b.sync_state != 5) {
-		if (b.sync_state == 3) {
+	while (conn.slot_state == PlayerSlotState::PlayerSync ||
+			conn.slot_state == PlayerSlotState::AwaitWorldRequest ||
+			conn.slot_state == PlayerSlotState::WorldStream) {
+		if (conn.slot_state == PlayerSlotState::AwaitWorldRequest) {
 			// PARKED [orig: @0x51c134 leaves state 3; the emitter has no state-3 arm]: the world
 			// stream starts only when the client's C2S 0x0A spawn-menu request advances 3 -> 4
 			// (dispatch port of NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260). No timeout —
@@ -760,7 +772,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 			// @0x42cc10] — so the type-2 loopback applies the handler's advance inline.
 			if (is_remote) break;
 			b.game_state = 9;         // [orig: CNetPlayer_SetGameState(.., 9) @0x513295]
-			b.sync_state = 4;         // [orig: @0x5132b1]
+			conn.slot_state = PlayerSlotState::WorldStream; // [orig: @0x5132b1]
 			b.world_stream_phase = InitialStateBurst::kStreamInit; // [orig: @0x5132f6]
 		}
 		// The game-start bundle's trigger is the client's C2S 0x0B mission-file
@@ -780,7 +792,8 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 		// @0x52624B; the 0x0B receiver's gates @0x51AB21..0x51AB4B;
 		// NapiNPServerMsg_HandlePlayerLoadout @0x5157EB..0x5157F2].
 		const bool bundle_trigger_seen = conn.reply.mission_status_received;
-		if (is_remote && b.sync_state == 4 && b.world_stream_phase == InitialStateBurst::kStreamGameStartBundle && !bundle_trigger_seen) {
+		if (is_remote && conn.slot_state == PlayerSlotState::WorldStream &&
+				b.world_stream_phase == InitialStateBurst::kStreamGameStartBundle && !bundle_trigger_seen) {
 			// WAIT for the client's C2S 0x0B before the game-start bundle AND the per-frame
 			// 0x0A stream, with NO timeout. The golden retail host emits NOTHING in-match
 			// until the joiner's 0x2F/0x0B: its first S2C 0x0A directly follows the 0x5A
@@ -811,7 +824,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 		}
 		opennova::io::logf(opennova::io::LogLevel::kDebug,
 		"[burst] tick: %zu msg(s) | %s%s", step.messages.size(), seq.c_str(),
-		             b.sync_state == 5 ? "(§5.2a COMPLETE)" : "");
+		             conn.slot_state == PlayerSlotState::Joined ? "(§5.2a COMPLETE)" : "");
 	}
 
 	step.advanced = true;

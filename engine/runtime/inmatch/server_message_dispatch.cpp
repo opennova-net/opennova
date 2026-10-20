@@ -627,7 +627,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				dispatch_file_chunk_request(config, msg, inputs, replies);
 				break;
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
-				dispatch_mission_chunk_request(config, conn, msg, now_tick, roster, world, inputs, replies);
+				dispatch_mission_chunk_request(config, msg, inputs, replies);
+				break;
+			case c2s::CHECKSUM_RESPONSE: // the player-sync request -> slot state 2 [orig: NapiNPServerMsg_0x009 @0x513200]
+				dispatch_player_sync_request(conn);
 				break;
 			case c2s::LOADOUT_SUBMIT: { // loadout request -> 0x5A [orig: NapiNPServerMsg_HandlePlayerLoadout (0x2F) @0x515790]
 				// Golden (f317-318): C 0x2F -> S 0x5A + game-start bundle. The 0x5A populates
@@ -755,10 +758,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// the full world stream on EVERY spawn-menu visit (state 5 -> 4 + phase reset);
 				// our tick loop skips spawned connections, so the mid-game re-stream stays an
 				// open divergence (see the D-NET-150 record).
-				if (!conn.burst.spawned && conn.burst.sync_state != 0) {
+				if (!conn.burst.spawned && conn.slot_state != PlayerSlotState::Free) {
 					conn.burst.game_state = 9;              // [orig: @0x513295]
-					if (conn.burst.sync_state != 4)
-						conn.burst.sync_state = 4;          // [orig: @0x5132a0/@0x5132b1]
+					if (conn.slot_state != PlayerSlotState::WorldStream)
+						conn.slot_state = PlayerSlotState::WorldStream; // [orig: @0x5132a0/@0x5132b1]
 					conn.burst.world_stream_phase = InitialStateBurst::kStreamInit; // [orig: @0x5132f6]
 				}
 				// Golden (f161-162): C 0x0A (empty) -> S 0x19 (4 B tick) ONLY. The prior
@@ -1293,8 +1296,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(std::move(m));
 				break;
 			default:
-				// The command map's squad / waypoint / punt legs (server_squad.h); 0x09
-				// checksum / 0x48 + per-frame client updates: consumed (no reactive reply).
+				// The command map's squad / waypoint / punt legs (server_squad.h); 0x48
+				// + per-frame client updates: consumed (no reactive reply).
 				if (inputs.server_ctx != nullptr && world != nullptr)
 					Server_HandleSquadMessage(*inputs.server_ctx, conn, msg.tag, msg.payload, *world);
 				break;
