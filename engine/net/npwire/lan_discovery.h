@@ -64,11 +64,13 @@ bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, 
                                uint32_t client_index, LanDiscoveryServer &out);
 
 // The connection index a browse's announces carry (LanDiscoveryBrowser::begin's
-// `client_index`). Every enumerate creates its client connection twice: the
+// `client_index`). Every browse ours runs creates its client connection twice: the
 // screen's own create, then InitTransportConnection's, which destroys the first
 // before anything is sent on it and creates again; each create steps the game
 // protocol's connection counter, so the browse's CI (and the join's that goes on
-// with it, D-NET-521) is the counter's second step.
+// with it, D-NET-521) is the counter's second step. (The LAN screen's search under
+// connect type 1 skips the screen's create and creates once, @0x558367 -> @0x5583a9;
+// ours never searches under type 1.)
 // [orig: UI_EnumerateAndJoinSession @0x569f50 - CNapiGameSession_CreateServerConnection
 //  @0x56a011, then CNapiGameSession_InitTransportConnection @0x56a097; the LAN
 //  screen's search - the create @0x55837e (connect type 2) / @0x55836e (type 3), then
