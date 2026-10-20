@@ -33,7 +33,8 @@
 //   fixtures/anim/rig19_rld2.bad   15, 16) turn and come back over 20 frames
 //   fixtures/anim/rig19_dthf.bad   the four torso deaths (forward, right, back,
 //   fixtures/anim/rig19_dthr.bad   left): the whole body tips 43.6 degrees over
-//   fixtures/anim/rig19_dthb.bad   30 frames, one-shot
+//   fixtures/anim/rig19_dthb.bad   30 frames, one-shot (the back death's odd
+//                                  bones keyed from the opposite hemisphere)
 //   fixtures/anim/rig19_dthl.bad
 //   fixtures/anim/rig19_walk.bad   a walk loop: 30 frames stepping 1/16 forward
 //                                  a frame, the legs swinging, footsteps (bits
@@ -272,14 +273,20 @@ BadBuildClip make_reload(const char *name, int axis) {
 
 // Forward tips the body's up toward +x (a positive turn about y), right toward
 // -y (a positive turn about x), back and left the opposite ways.
-BadBuildClip make_death(const char *name, int axis, double sign) {
+BadBuildClip make_death(const char *name, int axis, double sign, bool flipped = false) {
 	BadBuildClip clip;
 	clip.name = name;
 	clip.frame_count = 30;
 	clip.bones = rig_bones();
 	// Every bone takes the hips' turn: the body tips whole, to t = 0.4 (43.6
-	// degrees) at the last frame.
-	key_every_bone(clip, [axis, sign](int, int k) { return turn(axis, sign * 0.4 * k / 30.0); });
+	// degrees) at the last frame. `flipped` stores the odd bones' keys from the
+	// opposite hemisphere, (-x, -y, -z, -w): the same turns, as the shipped clips
+	// store keys from either one (bad_build.h), so a pose's neighbouring bones can
+	// hold opposite signs.
+	key_every_bone(clip, [axis, sign, flipped](int b, int k) {
+		const BadBuildQuat q = turn(axis, sign * 0.4 * k / 30.0);
+		return flipped && b % 2 == 1 ? BadBuildQuat{-q.x, -q.y, -q.z, -q.w} : q;
+	});
 	standing_events(clip);
 	return clip;
 }
@@ -312,7 +319,7 @@ BadBuildSet make_set() {
 	BadBuildSet set;
 	set.adm_name = "rig19.adm";
 	set.clips = {make_rst(), make_idle(), make_crouch(), make_reload("rig19_rld1", kY), make_reload("rig19_rld2", kZ),
-		make_death("rig19_dthf", kY, 1.0), make_death("rig19_dthr", kX, 1.0), make_death("rig19_dthb", kY, -1.0),
+		make_death("rig19_dthf", kY, 1.0), make_death("rig19_dthr", kX, 1.0), make_death("rig19_dthb", kY, -1.0, true),
 		make_death("rig19_dthl", kX, -1.0), make_walk()};
 	set.rows = {{"anim_reset", {"rig19_rst"}}, {"anim_idle", {"rig19_idle"}}, {"anim_idle_crouch", {"rig19_crch"}},
 		{"anim_walk_forward", {"rig19_walk"}}, {"anim_reload", {"rig19_rld1"}}, {"anim_reload2", {"rig19_rld2"}},

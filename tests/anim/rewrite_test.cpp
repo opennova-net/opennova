@@ -59,7 +59,7 @@ const Vector kExpected[] = {
 		{"rig19.adm", 377u, 0x8f0dc1b9a749a337ull},
 		{"rig19_b3.bad", 3344u, 0xeb52215aa54cc9d8ull},
 		{"rig19_crch.bad", 3344u, 0xf13beeff754681b7ull},
-		{"rig19_dthb.bad", 13592u, 0x2a188ef23b29a36eull},
+		{"rig19_dthb.bad", 13592u, 0x3703cece13cc706eull},
 		{"rig19_dthf.bad", 13592u, 0xd36ce266768305eeull},
 		{"rig19_dthl.bad", 13592u, 0x69966147b8a2a52eull},
 		{"rig19_dthr.bad", 13592u, 0x4b58d15ac2ebd1aeull},
