@@ -1021,7 +1021,9 @@ bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
             // alias: its socketless local body carries net_id 0 (D-NET-112).
             const bool local_alias = !world_.rules.mp_session && ssn == mission::kPlayerSsn &&
                     handle == world_.cached.local_player && entity->net_id == 0;
-            if ((entity->net_id == ssn || local_alias) && area->bounds.contains(entity->position))
+            // The position words against the record's words (D-NET-507)
+            // [orig: @0x43E596..0x43E5C1].
+            if ((entity->net_id == ssn || local_alias) && area->trigger_contains(entity->position))
                 return true;
         }
     }
@@ -1038,7 +1040,9 @@ bool EntityCommands::group_in_area(int32_t group, int area_id) const {
             const Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
             if (entity == nullptr || static_cast<int16_t>(entity->group_id) != group) continue;
             if (pool == 0 && ((entity->flags | entity->engine_flags) & 1u) != 0) continue;
-            if (area->bounds.contains(entity->position)) return true;
+            // The position words against the record's words (D-NET-507) [orig: the
+            // box @0x43C752..0x43C77A, the compares @0x43C7C2..0x43C7E8].
+            if (area->trigger_contains(entity->position)) return true;
         }
     }
     return false;
@@ -1054,11 +1058,13 @@ bool EntityCommands::ssn_in_script_area(EntityTarget target, int32_t zone_id,
     const int index = world_.registry.area_index_by_zone_id(zone_id);
     const Area *area = index < 128 ? world_.registry.area(index) : nullptr;
     if (area == nullptr) return false;
-    const Aabb &b = area->script_bounds;
-    const Vec3 &p = entity->position;
-    return p.x >= b.min.x && p.x <= b.max.x &&
-           p.y >= b.min.y && p.y <= b.max.y &&
-           (!three_dimensional || (p.z >= b.min.z && p.z <= b.max.z));
+    // The position words against the record's X/Y words and, in 3D, its raw Z
+    // words, signed inclusive (D-NET-507). [orig: WacCmd_SsnArea @0x4F1020 -
+    //  @0x4F10A6..0x4F10BD; WacCmd_SsnArea3D @0x4F0F60 - @0x4F0FE6..0x4F100E]
+    const EntityPosition &p = entity->position;
+    return area->xy_contains(p) &&
+           (!three_dimensional ||
+            (p.z.q16 >= area->record_z_q16[0] && p.z.q16 <= area->record_z_q16[1]));
 }
 
 bool EntityCommands::ssn_at_location(EntityTarget target, int32_t location) const {

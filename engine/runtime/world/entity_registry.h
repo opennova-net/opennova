@@ -36,6 +36,27 @@ struct Area {
     // normalized), which the player-AWOL probe compares the position words
     // against [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40 - @0x439D69..0x439D85].
     std::array<int32_t, 4> record_xy_q16{};
+    // The trigger tests' Z words: the record's z_min / z_max when it constrains
+    // Z, else 0xC0000000 / 0x40000000 [orig: Entity_IsBmsRefInTriggerBounds
+    // @0x43E510 - `test byte [eax+1Ch], 2` @0x43E531, the defaults
+    // @0x43E553..0x43E55B]; and the record's raw Z words the WAC 3D test reads
+    // [orig: WacCmd_SsnArea3D @0x4F0F60 - @0x4F1000..0x4F100E].
+    std::array<int32_t, 2> trigger_z_q16{};
+    std::array<int32_t, 2> record_z_q16{};
+
+    // The position words against the record's X/Y words, signed inclusive
+    // (D-NET-507). [orig: WacCmd_SsnArea @0x4F1020 - @0x4F10A6..0x4F10BD]
+    bool xy_contains(const EntityPosition &p) const {
+        return p.x.q16 >= record_xy_q16[0] && p.x.q16 <= record_xy_q16[1] &&
+               p.y.q16 >= record_xy_q16[2] && p.y.q16 <= record_xy_q16[3];
+    }
+    // The trigger tests' box: the X/Y words and the trigger Z words, signed
+    // inclusive. [orig: Entity_IsBmsRefInTriggerBounds @0x43E510 - the compares
+    //  @0x43E596..0x43E5C1; EventTrigger_AnySatchelInArea @0x547160 -
+    //  @0x5471F3..0x547215]
+    bool trigger_contains(const EntityPosition &p) const {
+        return xy_contains(p) && p.z.q16 >= trigger_z_q16[0] && p.z.q16 <= trigger_z_q16[1];
+    }
 };
 
 // The seven default script groups, in their fixed slots 0..6: the names the
@@ -120,10 +141,14 @@ public:
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
     // authored record id [orig: zone record dword @0].
     // `record_xy_q16`: the record's X/Y words; absent, the bounds' words.
+    // `trigger_z_q16` / `record_z_q16`: the trigger Z words and the raw record Z
+    // words; absent, the bounds' / script bounds' words.
     int register_area(std::string name, const Aabb &bounds, bool active = true,
                       int32_t zone_id = -1, std::optional<Aabb> script_bounds = {},
                       bool flat = false,
-                      std::optional<std::array<int32_t, 4>> record_xy_q16 = {});
+                      std::optional<std::array<int32_t, 4>> record_xy_q16 = {},
+                      std::optional<std::array<int32_t, 2>> trigger_z_q16 = {},
+                      std::optional<std::array<int32_t, 2>> record_z_q16 = {});
     // The load-time id -> index resolve [orig: the @0x453000/@0x453100 scan over
     // record[0]]; -1 when no record carries the id.
     int area_index_by_zone_id(int32_t zone_id) const;

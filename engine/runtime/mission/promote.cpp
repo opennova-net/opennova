@@ -939,9 +939,18 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         // @0x453000/@0x453100 match record[0]; mission::zone_box_flat].
         Aabb raw = b;
         raw.min.z = at.get_z_min(); raw.max.z = at.get_z_max();
+        // The record's words ride along for the tests that compare them: the
+        // trigger Z words (the record's when it constrains Z, else
+        // 0xC0000000 / 0x40000000) and the raw Z words (D-NET-507).
+        // [orig: Entity_IsBmsRefInTriggerBounds @0x43E531..0x43E56F;
+        //  WacCmd_SsnArea3D @0x4F1000..0x4F100E]
+        const std::array<int32_t, 2> trigger_z = at.constrains_z()
+                ? std::array<int32_t, 2>{at.z_min, at.z_max}
+                : std::array<int32_t, 2>{static_cast<int32_t>(0xC0000000u), 0x40000000};
         world.registry.register_area(std::string(), b, at.is_active(), at.id, raw,
                                      zone_box_flat(at),
-                                     std::array<int32_t, 4>{at.x_min, at.x_max, at.y_min, at.y_max});
+                                     std::array<int32_t, 4>{at.x_min, at.x_max, at.y_min, at.y_max},
+                                     trigger_z, std::array<int32_t, 2>{at.z_min, at.z_max});
     }
 
     // [orig: Mission_LoadBMSFile @0x40FCC3] Normalize each bounding-box axis.

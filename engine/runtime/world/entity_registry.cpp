@@ -217,12 +217,19 @@ void EntityRegistry::by_group(uint8_t group, std::vector<EntityHandle> &out) con
 int EntityRegistry::register_area(std::string name, const Aabb &bounds, bool active,
                                   int32_t zone_id, std::optional<Aabb> script_bounds,
                                   bool flat,
-                                  std::optional<std::array<int32_t, 4>> record_xy_q16) {
+                                  std::optional<std::array<int32_t, 4>> record_xy_q16,
+                                  std::optional<std::array<int32_t, 2>> trigger_z_q16,
+                                  std::optional<std::array<int32_t, 2>> record_z_q16) {
     const std::array<int32_t, 4> xy = record_xy_q16.value_or(std::array<int32_t, 4>{
             to_fixed(bounds.min.x), to_fixed(bounds.max.x), to_fixed(bounds.min.y),
             to_fixed(bounds.max.y)});
-    areas_.push_back(Area{std::move(name), bounds, active, zone_id,
-                         script_bounds.value_or(bounds), flat, xy});
+    const Aabb raw = script_bounds.value_or(bounds);
+    const std::array<int32_t, 2> trigger_z = trigger_z_q16.value_or(
+            std::array<int32_t, 2>{to_fixed(bounds.min.z), to_fixed(bounds.max.z)});
+    const std::array<int32_t, 2> record_z = record_z_q16.value_or(
+            std::array<int32_t, 2>{to_fixed(raw.min.z), to_fixed(raw.max.z)});
+    areas_.push_back(Area{std::move(name), bounds, active, zone_id, raw, flat, xy, trigger_z,
+                         record_z});
     return static_cast<int>(areas_.size() - 1);
 }
 

@@ -1410,6 +1410,41 @@ static void test_player_awol_probe_reads_the_record_words() {
     CHECK(sys.awol_count() == 0); // on x_min: in
 }
 
+// D-NET-507: the within-area triggers and the WAC area tests compare the position
+// words with the area record's own words, signed inclusive: a body one word under
+// the record's x_min is out although the float bounds' view rounds it in; the
+// triggers' Z is the record's when it constrains Z, else +-0x40000000, and the WAC
+// 3D test reads the raw record Z words.
+// [orig: Entity_IsBmsRefInTriggerBounds @0x43E510 - @0x43E531..0x43E5C1;
+//  WacCmd_SsnArea @0x4F1020 - @0x4F10A6..0x4F10BD; WacCmd_SsnArea3D @0x4F0F60 -
+//  @0x4F0FE6..0x4F100E]
+static void test_area_tests_read_the_record_words() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    world::Aabb zone;
+    zone.min = {10.0f, 0.0f, -16384.0f};
+    zone.max = {100.0f, 100.0f, 16384.0f};
+    const std::array<int32_t, 4> xy = {(10 << 16) | 0x1234, 100 << 16, 0, 100 << 16};
+    const int index = w.registry.register_area(
+            "", zone, /*active=*/true, /*zone_id=*/7, {}, false, xy,
+            std::array<int32_t, 2>{static_cast<int32_t>(0xC0000000u), 0x40000000},
+            std::array<int32_t, 2>{-(5 << 16), 5 << 16});
+    world::Entity seed{};
+    seed.alive = true;
+    seed.net_id = 42;
+    seed.item_type_index = 1;
+    seed.position.set_q16({(10 << 16) | 0x1233, 50 << 16, 6 << 16});
+    const world::EntityHandle h = w.registry.spawn(0, seed);
+    CHECK(!w.commands.ssn_in_area(42, index)); // one word under x_min
+    CHECK(!w.commands.ssn_in_script_area(world::EntityTarget(h), 7, false));
+    w.registry.get(h)->position.x.q16 = (10 << 16) | 0x1234;
+    CHECK(w.commands.ssn_in_area(42, index)); // on x_min; z inside +-0x40000000
+    CHECK(w.commands.ssn_in_script_area(world::EntityTarget(h), 7, false));
+    CHECK(!w.commands.ssn_in_script_area(world::EntityTarget(h), 7, true)); // z past the raw 5 << 16
+    w.registry.get(h)->position.z.q16 = 5 << 16;
+    CHECK(w.commands.ssn_in_script_area(world::EntityTarget(h), 7, true));
+}
+
 // The cat-7 mount-sub dispatch must discriminate the four predicates — the shipped
 // IDB carried PERMUTED names for exactly these, so a permuted case map is the
 // realistic defect and every row below catches one permutation.
@@ -2978,6 +3013,7 @@ int main() {
     test_teammate_triggers();
     test_player_awol_counter_and_trigger();
     test_player_awol_probe_reads_the_record_words();
+    test_area_tests_read_the_record_words();
     test_player_mount_trigger_dispatch();
     test_player_input_bit_triggers();
     test_player_berserk_trigger();

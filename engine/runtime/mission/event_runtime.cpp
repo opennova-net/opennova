@@ -146,11 +146,12 @@ void BmsEventSystem::resolve_zone_refs(World &w) {
                 // [orig: EventTrigger_ResolveZoneActionRefs @0x453100 — the
                 //  index @0x453183, x_min @0x45318d, y_min @0x453197, x_max
                 //  @0x4531a1, y_max @0x4531ab]
-                const world::Aabb &box = w.registry.area(idx)->bounds;
-                a.param1 = world::to_fixed(box.min.x);
-                a.param3 = world::to_fixed(box.min.y);
-                a.param4 = world::to_fixed(box.max.x);
-                a.reserved1 = world::to_fixed(box.max.y);
+                // The record's own words, raw (D-NET-507).
+                const std::array<int32_t, 4> &box = w.registry.area(idx)->record_xy_q16;
+                a.param1 = box[0];
+                a.param3 = box[2];
+                a.param4 = box[1];
+                a.reserved1 = box[3];
             }
         }
     }
@@ -477,7 +478,7 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                         if (e == nullptr || e->registry_spawn_id != d.entity_spawn_id) continue;
                         const world::AmmoTableEntry *ammo = w.tables.ammo.by_index(d.ammo_index);
                         if (ammo == nullptr || !strutil::iequals(ammo->name, "satchel")) continue;
-                        if (area->bounds.contains(e->position)) return true;
+                        if (area->trigger_contains(e->position)) return true; // the words (D-NET-507)
                     }
                     return false;
                 }
