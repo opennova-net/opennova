@@ -474,12 +474,18 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
     }
     // Corpse expiry is the shared destroy: the facial slot, scar entries and
     // incoming references go with the row, not only the registry slot and the
-    // brain. [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810;
-    //  the updater then leaves through loc_4BFC89 @0x4B9F9B]
+    // brain. The destroy notifies no peer: no S2C 0x12 rides it (the
+    // remove-and-notify is the script, vehicle and disconnect paths', never
+    // this leg's); a joiner tracking the row is despawned by the priority
+    // list's freed-row test instead.
+    // [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810
+    //  (no send among its callees); the updater then leaves through loc_4BFC89
+    //  @0x4B9F9B; Server_RemoveEntityAndNotify @0x50A270 has no caller in
+    //  Entity_UpdateInfantryAI; the freed-row despawn
+    //  Server_BuildEntityPriorityList @0x50E7F3]
     release_corpse_effect(world, entity);
     entity.hidden = true;
     const EntityHandle handle = entity.handle;
-    world.out.entity_events.push_back(EntityRemoveEvent{handle.packed});
     world.commands.remove_ssn(handle);
     if (ai.collision != nullptr) ai.collision->refresh_after_registry_change(world);
     return NpcCorpseStep::Removed;

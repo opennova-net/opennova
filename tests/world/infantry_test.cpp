@@ -3266,8 +3266,15 @@ void test_death_presentation() {
         run_ticks(ai, w, 3, 5); // drain toward 0: the corpse pose holds while the row lives
         CHECK(!ent->hidden);
         CHECK(e->inf.anim_state == anim_state::kDeathPungi); // the corpse pose held
+        w.out.entity_events.clear();
         run_ticks(ai, w, 5, 8); // timer 0 -> despawn; the brain goes with the row
         CHECK(ent->hidden);
+        // The destroy notifies no peer: no 0x12 removal rides the corpse's
+        // expiry [orig: Entity_Destroy @0x43e810, called @0x4B9F93; D-NET-NEW-L3-11].
+        bool removal_sent = false;
+        for (const auto &event : w.out.entity_events)
+            removal_sent = removal_sent || std::holds_alternative<EntityRemoveEvent>(event);
+        CHECK(!removal_sent);
         // [orig: Entity_Destroy @0x43e810 memsets the brain @0x43e995, and the
         //  updater leaves through loc_4BFC89 @0x4b9f9b: no pose survives the row]
         CHECK(ai.for_handle(h) == nullptr);
@@ -3424,7 +3431,8 @@ void test_npc_respawn_counts_and_spawn_reset() {
     r.tick(4, 7);
     CHECK(r.storage->registry.get(r.handle) == nullptr);
     CHECK(r.storage->ai.for_handle(r.handle) == nullptr);
-    CHECK(r.storage->out.entity_events.size() == 1);
+    // The destroy notifies no peer [orig: Entity_Destroy @0x43E810; D-NET-NEW-L3-11].
+    CHECK(r.storage->out.entity_events.empty());
 
     for (int16_t count : {int16_t(100), int16_t(32767)}) {
         NpcRespawnRig endless;
@@ -5342,7 +5350,7 @@ static void test_npc_corpse_expiry_runs_the_shared_destroy() {
     r.tick(1, 6);
     CHECK(w.registry.get(r.handle) == nullptr);
     CHECK(w.ai.for_handle(r.handle) == nullptr);
-    CHECK(w.out.entity_events.size() == 1);
+    CHECK(w.out.entity_events.empty()); // no 0x12 rides the destroy (D-NET-NEW-L3-11)
     CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kPriorityTarget] == 0);
     CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kDamageInfo] == 0);
     CHECK(!w.out.scars.world_ring().slots[3].live);
