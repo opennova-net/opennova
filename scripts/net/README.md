@@ -24,6 +24,7 @@ does not hash-bind binaries, retail trees or a corpus.
 | `run_lan_pair.ps1` | Start a local OpenNova host/joiner pair (MCP ports 8975/8976). |
 | `run_parity_topology.ps1` | Run one explicitly configured live topology, optionally playing a scenario (`-Scenario`). |
 | `run_parity_suite.ps1` | Run every case of `parity-cases.json` as RR, RR-aa, RO, OR and OO cells (resumable), then judge each case with `opennova-parity`. |
+| `parity_preflight.ps1` | Read-only check of everything a suite binds (retail copies, hook pair, `game.cfg`, corpus pins, Godot, capture, judges, the CI GDExtension, ports); run it before a suite. |
 | `parity-cases.json` | The tracked parity case table (`opennova.parity-cases.v1`). |
 | `compare_scenario.py` | Check scenario runs against their expectations and against the RR reference. |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
@@ -197,6 +198,35 @@ for the first failures, `PARITY_AA_WIDENED=<n>`, `PARITY_STATUS=PASS|FAIL`,
 usage or input error (nothing judged).
 
 ### The suite
+
+Before a suite, `parity_preflight.ps1` (read-only; it launches nothing)
+checks every input the suite binds and prints one `PARITY_PREFLIGHT <check>
+PASS|FAIL <detail>` line each, then `PARITY_PREFLIGHT_STATUS`: both
+`Jointops.exe` the pinned jox01 image; both copies' onHook proxy
+`binkw32.dll` one build, the one beside `onhook-mcp.exe`, with `binkw32_.dll`
+present; the SERVER `game.cfg` `game_name` and port range against the case
+table; the corpus against its pins; the Godot 4.6.1 console wrapper and its
+runtime; dumpcap and the Npcap loopback adapter; the three judges newer than
+their sources; a clean checkout; both template_debug DLLs in `godot\bin` equal
+to the `gdext_windows_template_debug` artifact of `-DllRunId`, a `ci.yml` run
+whose commit's `engine/` and `godot/` trees equal HEAD's (the artifact is
+fetched to `%TEMP%`); the MCP ports and the case ports free; no `Jointops.exe`
+running. `-ExpectOnHookMcpSha256`, `-ExpectOnHookProxySha256` and
+`-ExpectGodotLauncherSha256` pin those builds too.
+
+```powershell
+powershell -File scripts\net\parity_preflight.ps1 -CorpusRoot C:\retail\corpus `
+    -RetailServerRoot C:\retail\jox01\SERVER -RetailClientRoot C:\retail\jox01\CLIENT `
+    -OnHookMcpPath C:\opennova-int\onhook\onhook-mcp.exe `
+    -GodotLauncher C:\Godot\Godot_v4.6.1-stable_win64_console.exe -DllRunId <run id>
+```
+
+The OpenNova cells run the CI build: fetch the `ci.yml` run of a commit whose
+`engine/`, `godot/src`, `godot/game` and `godot/probes` trees equal the
+checkout's (`gh run download <id> -R opennova-net/opennova -n
+gdext_windows_template_debug -D godot\bin`, then `scripts/bootstrap_godot.sh`
+and one `--headless --path godot --import`), and build the judges at the
+same commit.
 
 `run_parity_suite.ps1` runs the tracked case table through
 `run_parity_topology.ps1`, five cells per case with identical inputs (RunId
