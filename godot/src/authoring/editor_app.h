@@ -106,7 +106,10 @@ public:
 	// (ViewportDeviceCache::building), the preview clock plays over a picture drawn (drawn: the clock plays by
 	// default, so it never counts alone), the wire asked (request_json, query_json: the editor MCP) or the
 	// running game's logic is polled (its Logic pane shows). Vsync and the low-processor mode stay as they are.
-	static constexpr int kIdleFps = 20;
+	// An idle frame costs the process some 6 ms of a core whatever the project (Godot's frame and its draw; the
+	// layout under 1 ms on a 22,000-file project): 10 a second is some 6% of a core, 20 twice that, and the first
+	// input after idle is answered within a tenth of a second.
+	static constexpr int kIdleFps = 10;
 	static constexpr int kFallbackFps = 60;
 	static constexpr int kQuietFrames = 30;
 	void set_frame_pacing(bool p_on);
