@@ -1,7 +1,8 @@
-/* Parse pins for engine/formats/mus: the minted fixtures/mus/synth_gamemus.bin
-   (tests/fixtures/synth_mus_gen.cpp) unconditionally; the shipped jo_gamemus.bin
-   from the reference fixture set behind OPENNOVA_JO_ASSETS (the byte offsets
-   MDEdit laid out, the retail section labels and source path). */
+/* Parse pins for engine/formats/mus over the minted programs (tests/fixtures/synth_mus_gen.cpp, every
+   one in MDEdit's layout): synth_gamemus.bin, the shipped gamemus.bin's shape (eight sections, its
+   MessageHandler function); and synth_forms.bin, the shipped menu programs' form (menumus.bin and
+   jox01's MJox01.bin: eleven sections, no handler function, a global of the script's own past
+   Var00..Var15 in its debug table, the globals 0x44 bytes). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +10,6 @@
 
 #include <string>
 
-#include "common/retail_paths.h"
 
 using namespace opennova::mus;
 
@@ -25,9 +25,7 @@ static int passed = 0, failed = 0;
 #endif
 
 #define SYNTH_GAMEMUS MUS_FIXTURE_DIR "/synth_gamemus.bin"
-
-/* The shipped table's path from the reference fixture set; set in main. */
-static std::string g_retail_gamemus;
+#define SYNTH_FORMS MUS_FIXTURE_DIR "/synth_forms.bin"
 
 static uint8_t *slurp(const char *path, size_t *out_size) {
     FILE *f = fopen(path, "rb");
@@ -94,43 +92,32 @@ static int test_open_synth_gamemus(void) {
     return 1;
 }
 
-/* The shipped gamescript, as MDEdit laid it out. */
-static int test_open_jo_gamemus(void) {
-    size_t n;
-    uint8_t *buf = slurp(g_retail_gamemus.c_str(), &n);
-    CHECK(buf, "fixture present");
+/* The forms program, as MDEdit lays a shipped menu program out: the menuscript chunk, the globals 0x44
+   bytes (Var00..Var15 and `counter` at 64 in the debug table), no locals, eleven sections from Begin,
+   entry 0 after the leading nop, no handler function (the +0x40 entry the code's start, as menumus.bin's
+   0x94 is its bytecode's), the frame base 0x20, a line per statement, the authored source path. */
+static int test_open_synth_forms(void) {
     MusFile mf;
-    int rc = mus_open_memory(&mf, buf, n);
-    CHECK(rc == 0, "open succeeded");
-    CHECK(mf.header.magic == MUS_MAGIC_SCR0, "magic");
-    CHECK(mf.header.chunk_count == 1, "single chunk");
-    CHECK(mf.header.name_count == 11, "11 intrinsic names");
-    CHECK(mf.scripts != NULL, "scripts allocated");
-    CHECK(strncmp(mf.scripts[0].name, "gamescript", 10) == 0, "first script gamescript");
-    CHECK(mf.scripts[0].globals_size == 0x40, "globals_size 0x40");
-    CHECK(mf.scripts[0].locals_size == 0x28, "locals_size 0x28");
-    CHECK(mf.scripts[0].section_count == 8, "8 sections");
-    CHECK(mf.scripts[0].entry_section_index == 0, "entry section 0");
-    /* Bytecode size: bytecode_offset 0x88, strings_offset 0x10C (the code's end) => 132 bytes. */
-    CHECK(mf.scripts[0].code_size == 132, "code_size 132 bytes");
-    CHECK(mf.scripts[0].code != NULL, "code allocated");
-    /* First opcode of section 0 entry-PC is at chunk+0x89; the byte at +0x88 is 0x00 (nop). */
-    CHECK(mf.scripts[0].code[0] == 0x00, "first opcode is nop");
-    /* Section table content matches witness. */
-    /* code_offset is bytecode-relative (0x89 chunk-relative - 0x88 bytecode_offset = 0x01). */
-    CHECK(mf.scripts[0].sections[0].code_offset == 0x01, "sec[0] code_offset (bytecode-relative)");
-    CHECK(mf.scripts[0].sections[7].code_offset == 0x54, "sec[7] code_offset (bytecode-relative)");
-    /* Section names are populated from the editor debug-export table when present.
-       The fixture is MDEdit-built and carries the original section labels. */
-    CHECK(strcmp(mf.scripts[0].sections[0].name, "Begin") == 0, "sec[0] name Begin");
-    CHECK(strcmp(mf.scripts[0].sections[7].name, "Multiplayerstart") == 0,
-          "sec[7] name Multiplayerstart");
-    /* Editor source path lives at the head of the debug section. */
-    CHECK(strstr(mf.scripts[0].source_path, "gamemus.mus") != NULL,
-          "source_path embeds gamemus.mus");
+    CHECK(mus_open(&mf, SYNTH_FORMS) == 0, "open succeeded");
+    CHECK(mf.header.magic == MUS_MAGIC_SCR0 && mf.header.chunk_count == 1 && mf.header.name_count == 11,
+          "one chunk, the eleven method names");
+    const MusScript *s = &mf.scripts[0];
+    CHECK(strncmp(s->name, "menuscript", 10) == 0, "first script menuscript");
+    CHECK(s->globals_size == 0x44 && s->locals_size == 0, "globals 0x44, no locals");
+    CHECK(s->section_count == 11 && s->entry_section_index == 0, "11 sections, entry 0");
+    CHECK(s->code_size == 320 && s->code[0] == 0x00 && s->sections[0].code_offset == 1,
+          "the entry section after MDEdit's leading nop");
+    CHECK(strcmp(s->sections[0].name, "Begin") == 0 && strcmp(s->sections[10].name, "Server") == 0,
+          "the debug table's labels");
+    CHECK(s->has_message_handler && s->message_handler_offset == 0 && s->function_count == 0 && s->local_count == 0,
+          "no handler function: the +0x40 entry the code's start");
+    CHECK(s->locals_frame_offset == 0x20, "the frame base MDEdit writes");
+    CHECK(s->variable_count == 17 && strcmp(s->variables[16].name, "counter") == 0 &&
+          s->variables[16].byte_offset == 64, "the script's own global past Var15");
+    CHECK(s->line_count == 78, "a line per statement");
+    CHECK(strstr(s->source_path, "synth_forms.mus") != NULL, "source_path embeds synth_forms.mus");
     CHECK(check_intrinsics(&mf), "intrinsics");
     mus_close(&mf);
-    free(buf);
     return 1;
 }
 
@@ -231,26 +218,26 @@ static int test_find_section_synth(void) {
     return find_section_over(SYNTH_GAMEMUS, win_index, win_offset);
 }
 
-static int test_find_section_jo(void) {
-    return find_section_over(g_retail_gamemus.c_str(), 3, 0x21);
+static int test_find_section_forms(void) {
+    /* Route, the fifth section the forms program declares, entered at its code's 0x73. */
+    MusFile mf;
+    CHECK(mus_open(&mf, SYNTH_FORMS) == 0, "open");
+    const MusSection *route = mus_find_section(&mf.scripts[0], "Route");
+    CHECK(route != NULL && route == &mf.scripts[0].sections[4] && route->code_offset == 0x73, "Route found");
+    CHECK(mus_find_section(&mf.scripts[0], "Win000") == NULL, "a section another program names, missed");
+    mus_close(&mf);
+    return 1;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main(void) {
     RUN_TEST(test_open_synth_gamemus);
+    RUN_TEST(test_open_synth_forms);
     RUN_TEST(test_close_idempotent);
     RUN_TEST(test_open_file);
     RUN_TEST(test_reads_the_same);
     RUN_TEST(test_open_missing_file);
     RUN_TEST(test_find_section_synth);
-
-    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
-    if (g_retail_gamemus.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_gamemus.bin (the shipped game script)");
-    } else {
-        RUN_TEST(test_open_jo_gamemus);
-        RUN_TEST(test_find_section_jo);
-    }
+    RUN_TEST(test_find_section_forms);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

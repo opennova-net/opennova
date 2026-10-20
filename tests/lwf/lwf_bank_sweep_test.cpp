@@ -1,11 +1,13 @@
-// Retail sound-profile sweep: every .lwf / .pwf directly under the extracted
-// asset tree parses, is written from its fields and read back as the same bank
-// (the stale bytes the authoring tools left past a name, a path or a count
-// written zero, ADR 0003; the count of banks whose bytes so differ printed), our
-// writer's bytes a fixed point, and carries the structural facts the reader's
-// contract states: 'LWF1' magic, single_count == the singles table, at least one
-// set/layer/member, and every member's single index in range. Reports Skipped
-// without OPENNOVA_JO_ASSETS.
+// The sound-profile banks as the authoring tools leave them, swept as every shipped .lwf / .pwf once
+// was: the minted fixtures/lwf/menu.lwf (our writer's bytes) and fixtures/lwf/stale.lwf (a bank whose
+// bytes hold the tools' stale memory in the four places JO:CA's banks hold it, 18 of its 22:
+// tests/fixtures/minimal_lwf_gen.cpp). Each parses, is written from its fields and read back as the same
+// bank, our writer's bytes a fixed point, and carries the structural facts the reader's contract states:
+// 'LWF1' magic, single_count == the singles table, at least one set/layer/member, every member's single
+// index in range. Its write differs from its bytes in the stale bytes alone (ADR 0003): the stale bank's
+// in each of the four places, the writer's own in none. The writer's bytes of each are pinned
+// (FNV-1a64): a change to a vector is a change to the bytes the writer writes, which needs an [orig]
+// witness or a D-SND entry (`lwf_bank_sweep_test --dump` prints the table).
 
 #include <formats/lwf/lwf.h>
 
@@ -13,12 +15,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 #include "common/file_io.h"
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 
 namespace {
 
@@ -60,10 +60,6 @@ bool same_bank(const File &a, const File &b) {
 	}
 	return true;
 }
-
-int g_differ = 0;
-// The shipped banks (JO:CA's 22) whose bytes the writer changes, in their stale bytes alone.
-constexpr int kShippedDiffer = 18;
 
 // The bank's bytes with what the writer writes zero or computes as it writes them: a name's or a
 // path's bytes past its terminator (in a bank not of the 'LWF1' magic, a name of 28 characters or
@@ -132,15 +128,37 @@ std::vector<uint8_t> stale_masked(const std::vector<uint8_t> &bytes, const File 
 	return m;
 }
 
-bool is_profile(const std::filesystem::path &path) {
-	std::string ext = path.extension().string();
-	for (char &c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-	return ext == ".lwf" || ext == ".pwf";
+uint64_t fnv1a64(const std::vector<uint8_t> &bytes) {
+	uint64_t h = 1469598103934665603ull;
+	for (uint8_t b : bytes) {
+		h ^= b;
+		h *= 1099511628211ull;
+	}
+	return h;
 }
 
-int check(const std::filesystem::path &path) {
-	const std::string name = path.filename().string();
-	const std::vector<uint8_t> original = test_io::read_file(path.string());
+struct Vector {
+	const char *name;
+	size_t len;
+	uint64_t hash;
+};
+
+// The writer's bytes of each bank.
+const Vector kExpected[] = {
+	{"menu.lwf", 1440u, 0xde196f08e1bafac4ull},
+	{"stale.lwf", 3912u, 0x02111cd47f543f76ull},
+};
+
+struct Bank {
+	const char *name;
+	bool stale;  // its bytes hold the tools' stale memory, so its write differs
+};
+const Bank kBanks[] = {{"menu.lwf", false}, {"stale.lwf", true}};
+
+int check(const Bank &bank, const Vector &pin, bool dump) {
+	const std::string name = bank.name;
+	const std::vector<uint8_t> original =
+			test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/lwf/" + name);
 	if (original.empty()) {
 		std::printf("FAIL: %s unreadable or empty\n", name.c_str());
 		return 1;
@@ -170,6 +188,11 @@ int check(const std::filesystem::path &path) {
 		std::printf("FAIL: %s encode: %s\n", name.c_str(), error.c_str());
 		return failures + 1;
 	}
+	if (dump) {
+		std::printf("\t{\"%s\", %zuu, 0x%016llxull},\n", name.c_str(), encoded.size(),
+				(unsigned long long)fnv1a64(encoded));
+		return 0;
+	}
 	opennova::lwf::File again;
 	std::vector<uint8_t> twice;
 	if (!opennova::lwf::parse_lwf_buffer(encoded.data(), encoded.size(), again, error) ||
@@ -181,41 +204,34 @@ int check(const std::filesystem::path &path) {
 		++failures;
 	}
 	if (encoded != stale_masked(original, file)) {
-		std::printf("FAIL: %s differs from the shipped bytes past the stale ones\n", name.c_str());
+		std::printf("FAIL: %s differs from its bytes past the stale ones\n", name.c_str());
 		++failures;
 	}
-	if (encoded != original)
-		++g_differ;
+	if ((encoded != original) != bank.stale) {
+		std::printf("FAIL: %s's write %s its bytes\n", name.c_str(), bank.stale ? "is" : "is not");
+		++failures;
+	}
+	if (name != pin.name || encoded.size() != pin.len || fnv1a64(encoded) != pin.hash) {
+		std::printf("FAIL: %s written: %zu bytes, hash 0x%016llx; pinned %s, %zu bytes, 0x%016llx\n", name.c_str(),
+				encoded.size(), (unsigned long long)fnv1a64(encoded), pin.name, pin.len,
+				(unsigned long long)pin.hash);
+		++failures;
+	}
 	return failures;
 }
 
 } // namespace
 
-int main() {
-	const std::string assets = retail::assets();
-	if (assets.empty())
-		return retail::skip("OPENNOVA_JO_ASSETS (the extracted retail tree with its loose .lwf/.pwf sound profiles)");
+int main(int argc, char **argv) {
+	const bool dump = argc > 1 && std::strcmp(argv[1], "--dump") == 0;
+	if (dump) std::printf("const Vector kExpected[] = {\n");
 	int failures = 0;
-	int swept = 0;
-	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(assets)) {
-		if (!entry.is_regular_file() || !is_profile(entry.path())) continue;
-		failures += check(entry.path());
-		++swept;
+	for (size_t i = 0; i < sizeof(kBanks) / sizeof(kBanks[0]); ++i)
+		failures += check(kBanks[i], kExpected[i], dump);
+	if (dump) {
+		std::printf("};\n");
+		return 0;
 	}
-	if (swept == 0) {
-		std::printf("FAIL: no .lwf/.pwf directly under %s\n", assets.c_str());
-		return 1;
-	}
-	std::printf(
-			"lwf_jo_assets_sweep: %d profiles, %d failures, %d written with stale bytes zeroed\n",
-			swept, failures, g_differ);
-	// The shipped banks whose stale bytes the writer zeroes (JO:CA's tree: 22 banks, kShippedDiffer
-	// of them).
-	if (swept != 22 || g_differ != kShippedDiffer) {
-		std::printf("FAIL: %d of %d banks differ in their stale bytes; JO:CA's 22, %d of them, "
-					"expected\n",
-				g_differ, swept, kShippedDiffer);
-		++failures;
-	}
+	std::printf("lwf_bank_sweep: %zu banks, %d failures\n", sizeof(kBanks) / sizeof(kBanks[0]), failures);
 	return failures == 0 ? 0 : 1;
 }

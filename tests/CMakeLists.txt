@@ -655,24 +655,26 @@ target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
 opennova_add_mixed_test(mission_corpus COMMAND mission_corpus_test)
 
 # LWF sound-profile tests: byte-exact parse->encode round-trip + mutate-reread
-# over the synthetic fixtures/lwf/menu.lwf; the retail profiles are swept
-# behind OPENNOVA_JO_ASSETS.
+# over the synthetic fixtures/lwf/menu.lwf; the banks as the tools leave them
+# are lwf_bank_sweep's.
 add_executable(lwf_roundtrip_test lwf/lwf_roundtrip_test.cpp)
 target_link_libraries(lwf_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(lwf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME lwf_roundtrip COMMAND lwf_roundtrip_test)
 
-# fixtures/lwf/menu.lwf + tone.wav are minted by our own writers and
-# byte-compared every run (--write regenerates).
+# fixtures/lwf/menu.lwf, tone.wav, stale.lwf and the two IMA ADPCM waves are
+# minted by our own writers and byte-compared every run (--write regenerates).
 add_executable(minimal_lwf_gen_test fixtures/minimal_lwf_gen.cpp)
 target_link_libraries(minimal_lwf_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_lwf_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_lwf_gen COMMAND minimal_lwf_gen_test)
 
-add_executable(lwf_jo_assets_sweep_test lwf/lwf_jo_assets_sweep_test.cpp)
-target_link_libraries(lwf_jo_assets_sweep_test PRIVATE opennova_formats)
-target_include_directories(lwf_jo_assets_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(lwf_jo_assets_sweep COMMAND lwf_jo_assets_sweep_test)
+# The banks as the authoring tools leave them (menu.lwf, stale.lwf): parse, a write
+# that differs in the stale bytes alone, a fixed point, the writer's bytes pinned.
+add_executable(lwf_bank_sweep_test lwf/lwf_bank_sweep_test.cpp)
+target_link_libraries(lwf_bank_sweep_test PRIVATE opennova_formats)
+target_include_directories(lwf_bank_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lwf_bank_sweep COMMAND lwf_bank_sweep_test)
 
 add_executable(wav_pcm_test lwf/wav_pcm_test.cpp)
 target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
@@ -680,11 +682,12 @@ add_test(NAME wav_pcm COMMAND wav_pcm_test)
 
 # A wave as the game's loader takes it (formats/lwf/wav_source.h): its acceptance walk
 # [orig: Audio_LoadWavFileFromArchive @ 0x766480], a source wave read and converted into the
-# form it takes; the retail leg every shipped wave through the walk (OPENNOVA_JO_ASSETS).
+# form it takes; every form the shipped waves take, the two IMA ADPCM ones minted
+# (fixtures/lwf/ima_adpcm*.wav) and decoded as a reference decode decodes them.
 add_executable(wav_source_test lwf/wav_source_test.cpp)
 target_link_libraries(wav_source_test PRIVATE opennova_formats)
 target_include_directories(wav_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(wav_source COMMAND wav_source_test)
+add_test(NAME wav_source COMMAND wav_source_test)
 
 add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
 target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
@@ -770,8 +773,8 @@ target_include_directories(gamecfg_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME gamecfg_parse COMMAND gamecfg_parse_test)
 
 # DBF dialog bank: byte-exact round-trip + dlg-id -> def-id mapping over the
-# minted fixtures/dbf/synth_bank.dbf, plus the shipped 00TRg.DBF as an
-# OPENNOVA_JO_ASSETS reference-fixture leg.
+# minted fixtures/dbf/synth_bank.dbf, and the stale bytes of 04TR.DBF's form
+# (fixtures/dbf/stale_bank.dbf) written zero; the writer's bytes pinned.
 add_executable(minimal_dbf_gen_test fixtures/minimal_dbf_gen.cpp)
 target_link_libraries(minimal_dbf_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_dbf_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -780,7 +783,7 @@ add_test(NAME minimal_dbf_gen COMMAND minimal_dbf_gen_test)
 add_executable(dbf_roundtrip_test dbf/dbf_roundtrip_test.cpp)
 target_link_libraries(dbf_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(dbf_roundtrip COMMAND dbf_roundtrip_test)
+add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
 
 # The updater (docs/update/updater-re.md, ADR 0061): its formats (the checksums, the INI
 # dialect, the wizard, the command file, SERVER.LST, 1ZLN, 1SFS) over synthetic inputs and the
@@ -886,7 +889,7 @@ add_executable(oneshot_play_test audio/oneshot_play_test.cpp)
 target_link_libraries(oneshot_play_test PRIVATE opennova_runtime)
 target_include_directories(oneshot_play_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(oneshot_play_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(audio_oneshot_play COMMAND oneshot_play_test)
+add_test(NAME audio_oneshot_play COMMAND oneshot_play_test)
 
 # The presenting-peer gate inside the fire-sound plays and the own-channel key
 # the ready rows carry (world/fire_sound.h; sibling of world/fire_sound_test).
@@ -905,7 +908,8 @@ target_include_directories(dialog_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(dialog_queue_test PRIVATE cxx_std_17)
 add_test(NAME audio_dialog_queue COMMAND dialog_queue_test)
 
-# SndProf.def sound-profile parse + lookup (asset-gated retail spot check via JO_ASSETS).
+# SndProf.def sound-profile parse + lookup, the writer, and the shipped file's stale-slot rows authored in
+# its layout.
 add_executable(sound_profile_test audio/sound_profile_test.cpp)
 target_link_libraries(sound_profile_test PRIVATE opennova_runtime)
 target_include_directories(sound_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1013,24 +1017,25 @@ endif()
 add_test(NAME sbf_roundtrip COMMAND sbf_roundtrip_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-# The synthetic bank the SBF tests read (fixtures/sbf/synth_gamemus.sbf) is
-# minted by our own encoder and byte-compared every run (--write regenerates).
+# The banks the SBF tests read (fixtures/sbf/synth_gamemus.sbf, the writer's own;
+# tool_bank.sbf, the retail encoder's leavings) are minted from our own encoder and
+# byte-compared every run (--write regenerates).
 add_executable(minimal_sbf_gen_test fixtures/minimal_sbf_gen.cpp)
 target_link_libraries(minimal_sbf_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_sbf_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_sbf_gen COMMAND minimal_sbf_gen_test)
 
-# The retail banks (gamemus.sbf + menumus.sbf) are swept behind OPENNOVA_JO_DIR.
-add_executable(sbf_jo_install_sweep_test sbf/sbf_jo_install_sweep_test.cpp)
-target_link_libraries(sbf_jo_install_sweep_test PRIVATE opennova_formats)
-target_include_directories(sbf_jo_install_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(sbf_jo_install_sweep COMMAND sbf_jo_install_sweep_test)
+# Both bank forms swept: header facts, every chunk decoding, the model's write
+# differing in never-read bytes alone, the writer's bytes pinned.
+add_executable(sbf_bank_sweep_test sbf/sbf_bank_sweep_test.cpp)
+target_link_libraries(sbf_bank_sweep_test PRIVATE opennova_formats)
+target_include_directories(sbf_bank_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME sbf_bank_sweep COMMAND sbf_bank_sweep_test)
 
-# MUS tests. fixtures/mus/synth_{gamemus,menumus}.bin and the decompile golden
-# golden_synth_gamemus.mus.txt: two authored programs through mus_compile +
-# mus_encode_file; the shipped jo_gamemus.bin / jo_menumus.bin (their text pinned by
-# mus_decompile's retail leg and compiled back byte for byte, no golden of them)
-# are each fixture test's OPENNOVA_JO_ASSETS reference leg.
+# MUS tests. fixtures/mus/synth_{gamemus,menumus,forms}.bin and the decompile goldens
+# golden_synth_{gamemus,forms}.mus.txt: three authored programs through mus_compile +
+# mus_encode_file in MDEdit's layout, the forms program the shipped menu programs'
+# form (a global of its own, assignments, `==` and `&&`, nested ifs, plays past 255).
 add_executable(synth_mus_gen_test fixtures/synth_mus_gen.cpp)
 target_link_libraries(synth_mus_gen_test PRIVATE opennova_formats)
 target_include_directories(synth_mus_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1046,7 +1051,7 @@ target_link_libraries(mus_parse_test PRIVATE opennova_formats)
 target_include_directories(mus_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_parse_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-opennova_add_mixed_test(mus_parse COMMAND mus_parse_test
+add_test(NAME mus_parse COMMAND mus_parse_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(mus_compat_test mus/mus_compat_test.cpp)
@@ -1054,7 +1059,7 @@ target_link_libraries(mus_compat_test PRIVATE opennova_formats)
 target_include_directories(mus_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_compat_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-opennova_add_mixed_test(mus_compat COMMAND mus_compat_test
+add_test(NAME mus_compat COMMAND mus_compat_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(mus_decompile_test mus/mus_decompile_test.cpp)
@@ -1062,7 +1067,7 @@ target_link_libraries(mus_decompile_test PRIVATE opennova_formats)
 target_include_directories(mus_decompile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_decompile_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-opennova_add_mixed_test(mus_decompile COMMAND mus_decompile_test
+add_test(NAME mus_decompile COMMAND mus_decompile_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(mus_compile_test mus/mus_compile_test.cpp)
@@ -1075,7 +1080,7 @@ target_link_libraries(mus_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(mus_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_roundtrip_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-opennova_add_mixed_test(mus_roundtrip COMMAND mus_roundtrip_test
+add_test(NAME mus_roundtrip COMMAND mus_roundtrip_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(mus_names_roundtrip_test mus/mus_names_roundtrip_test.cpp)
@@ -1083,7 +1088,7 @@ target_link_libraries(mus_names_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(mus_names_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_names_roundtrip_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-opennova_add_mixed_test(mus_names_roundtrip COMMAND mus_names_roundtrip_test
+add_test(NAME mus_names_roundtrip COMMAND mus_names_roundtrip_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Entry-section round-trip: the compiler hardcodes entry_section_index = 0, so a
@@ -1095,7 +1100,7 @@ target_link_libraries(mus_entry_roundtrip_test PRIVATE opennova_base opennova_fo
 target_include_directories(mus_entry_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_entry_roundtrip_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-opennova_add_mixed_test(mus_entry_roundtrip COMMAND mus_entry_roundtrip_test
+add_test(NAME mus_entry_roundtrip COMMAND mus_entry_roundtrip_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Authored-program behavior: compile the canonical .mus TEXT the visual editor
@@ -1115,7 +1120,7 @@ target_link_libraries(mus_vm_test PRIVATE opennova_formats)
 target_include_directories(mus_vm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_vm_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-opennova_add_mixed_test(mus_vm COMMAND mus_vm_test
+add_test(NAME mus_vm COMMAND mus_vm_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(mus_vm_fixes_test mus/mus_vm_fixes_test.cpp)
@@ -1131,7 +1136,7 @@ target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_base opennova
 target_include_directories(mus_encode_idempotence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_encode_idempotence_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")
-opennova_add_mixed_test(mus_encode_idempotence COMMAND mus_encode_idempotence_test
+add_test(NAME mus_encode_idempotence COMMAND mus_encode_idempotence_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # VFS tests (mount precedence, mount_game expansion override, SCR decode-on-read)

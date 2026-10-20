@@ -1,8 +1,8 @@
 /* SBF parse: the header/index/entry reads over the synthetic bank
    fixtures/sbf/synth_gamemus.sbf (minted by tests/fixtures/minimal_sbf_gen.cpp;
    13 entries, SILENCE first as one partial chunk of 0x08A8 samples, TONE01
-   spanning three chunks). The retail banks are swept by
-   sbf_jo_install_sweep_test behind OPENNOVA_JO_DIR. */
+   spanning three chunks). Both shipped bank forms are swept by
+   sbf_bank_sweep_test. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

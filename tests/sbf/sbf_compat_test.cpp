@@ -1,6 +1,6 @@
 /* SBF compat: parse + decode the first chunk of every committed SBF fixture.
-   Fixtures only (the retail banks are swept by sbf_jo_install_sweep_test
-   behind OPENNOVA_JO_DIR); a missing/bad fixture is a failure. */
+   Fixtures only (both shipped bank forms are swept by sbf_bank_sweep_test);
+   a missing/bad fixture is a failure. */
 
 #include <stdio.h>
 #include <string.h>
