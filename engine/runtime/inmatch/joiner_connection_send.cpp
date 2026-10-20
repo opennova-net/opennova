@@ -266,8 +266,6 @@ JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 		return SendPumpLoop::ServerInfoWait;
 	case PostAuthStage::AwaitMissionData:
 		return SendPumpLoop::MissionDataWait;
-	case PostAuthStage::AwaitPlayerList:
-		return SendPumpLoop::SyncTailWait;
 	case PostAuthStage::AwaitInitialSyncTail:
 		return pending_spawn_menu_request_ ? SendPumpLoop::WorldStreamWait
 		                                   : SendPumpLoop::SyncTailWait;

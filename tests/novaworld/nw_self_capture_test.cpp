@@ -244,7 +244,16 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d); // fold + 0x2C
 		++tick;
 	}
-	return true;
+
+	// Phase C: in-match frames until the host's scoreboard clock lands its S2C 0x16 (every 311
+	// host ticks [orig: Server_TickUpdate @0x51D8F9..0x51D917]). The join no longer waits for
+	// that list (D-NET-526), so the script carries the clock's list here.
+	for (int f = 0; f < 400 && !client.state().scoreboard.known; ++f) {
+		pump_and_deliver();
+		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
+		++tick;
+	}
+	return expect(client.state().scoreboard.known, "the host's scoreboard clock reached the joiner");
 }
 
 std::map<Key, long> histogram(const std::vector<CaptureDatagram> &caps) {

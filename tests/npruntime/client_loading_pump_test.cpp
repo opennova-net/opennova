@@ -296,24 +296,31 @@ bool run_admission_follows_the_retail_loading_loops() {
 
 	// The final mission chunk ends the spin; NapiClient_WaitForDisconnect then
 	// queues the 0x09, finds the countdown running at its entry pump, and sends
-	// only after MORE than 100 ms.
+	// only after MORE than 100 ms. A list landing inside that pace queues its one
+	// 0x22 per unbound row behind the 0x09, so both leave in one packet: the retail
+	// corpus run_20260426_113242's [0x09][0x22 00 F7 1C] (D-NET-526)
+	// [orig: NapiClient_WaitForDisconnect @0x42CB20 (queue @0x42cb43, pace @0x42cbb5);
+	//  NapiNPClientMsg_PlayerList @0x42fc35].
 	if (!expect(h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 100, 80, 0x5A))})
 	                    .empty(),
 			"the final mission chunk enters WaitForDisconnect without building"))
 		return false;
-	if (!expect(h.frame({make_protocol_message(0x16, player_list({{0, 1}, {1, 2}}))}).empty(),
-			"the player list's 0x09+0x22 waits inside WaitForDisconnect's pace"))
+	if (!expect(h.frame({make_protocol_message(0x16, player_list({{0, 1}}))}).empty(),
+			"the player list's 0x22 waits inside WaitForDisconnect's pace"))
 		return false;
 	for (int held = 2; held <= 6; ++held) {
 		if (!expect(h.frame().empty(), "WaitForDisconnect holds its send pump for 100 ms"))
 			return false;
 	}
-	// (The reducer's per-row 0x22 re-requests for the list's unbound slots ride
-	// the same boundary in a later packet.)
 	sent = h.frame();
-	if (!expect(!sent.empty() && h.tags_of(sent[0], tags0) &&
-	                    tags0 == std::vector<uint8_t>({0x09, 0x22}),
-			"the first send pump past 100 ms carries the 0x09+0x22"))
+	ProtocolPacketHeader sync_header;
+	std::vector<ProtocolMessage> sync_messages;
+	if (!expect(sent.size() == 1 &&
+	                    decode_client_session(sent[0], h.auth.scrk, sync_header, sync_messages) &&
+	                    sync_messages.size() == 2 && sync_messages[0].tag == 0x09 &&
+	                    sync_messages[0].payload.empty() && sync_messages[1].tag == 0x22 &&
+	                    sync_messages[1].payload == std::vector<uint8_t>({0x00, 0xF7, 0x1C}),
+			"the first send pump past 100 ms carries the 0x09, then the row's one 0x22"))
 		return false;
 
 	// S2C 0x11 ends WaitForDisconnect; NapiClient_WaitForGameStart queues the
@@ -520,6 +527,49 @@ bool run_a_reset_before_the_mission_start_is_cleared() {
 			"reset: the joiner does not leave the match it is loading");
 }
 
+// The C2S 0x09 needs no S2C 0x16: with no list yet it leaves alone at
+// WaitForDisconnect's first pace, the 0x11 then releases the 0x0A, and a list
+// arriving afterwards draws its one 0x22 per unbound row in a later packet: the
+// retail corpus run_20260426_120102 ([0x09], [0x0A], then [0x22 00 F7 1C]); there
+// is no second 0x22 for slot 0 (D-NET-526).
+// [orig: Game_StartMission @0x524dab -> NapiClient_WaitForDisconnect @0x42CB20
+//  (queue @0x42cb43, pace @0x42cbb5); NapiNPClientMsg_PlayerList @0x42fc35]
+bool run_the_sync_request_needs_no_player_list() {
+	Harness h;
+	if (!expect(h.handshake(), "sync: handshake")) return false;
+	h.frame({settings_record(0), settings_record(1)});
+	h.frame({make_protocol_message(0x00, {})});
+	std::vector<uint8_t> probe(64, 0);
+	probe[8] = 16;
+	h.frame({make_protocol_message(0x02, probe)});
+	h.frame({holdoff_record(12), make_protocol_message(0x03, {0x01})});
+	h.frame({make_protocol_message(0x05, {0x01}),
+			make_protocol_message(0x04, slot_assignment(0x02)),
+			make_protocol_message(0x7B, full_player_info())});
+	(void)frame_until_sent(h, 16);
+	(void)h.frame({make_protocol_message(0x60, transfer_chunk(1, 171, 0, 171, 0xA5))});
+	if (!expect(h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 0, 180, 0x5A))})
+	                    .empty(),
+			"sync: the final mission chunk builds nothing on its frame"))
+		return false;
+	if (!expect(h.one_packet(frame_until_sent(h, 16), {0x09}),
+			"sync: the 0x09 leaves alone at the pace, no player list seen"))
+		return false;
+	if (!expect(h.one_packet(h.frame({make_protocol_message(0x11, {})}), {0x0A}),
+			"sync: the sync tail releases the 0x0A"))
+		return false;
+	// The world-stream wait builds on every frame, so the 0x22 leaves on the list's own.
+	const std::vector<std::vector<uint8_t>> sent =
+			h.frame({make_protocol_message(0x16, player_list({{0, 1}}))});
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	return expect(sent.size() == 1 &&
+	                      decode_client_session(sent[0], h.auth.scrk, header, messages) &&
+	                      messages.size() == 1 && messages[0].tag == 0x22 &&
+	                      messages[0].payload == std::vector<uint8_t>({0x00, 0xF7, 0x1C}),
+			"sync: the later list draws exactly one 0x22 for its unbound row");
+}
+
 // The join screen reads where the join stands: the dial until ServerAuth
 // accepts, the connect until the host's S2C 0x00, the verification until its
 // S2C 0x01 reads 1, the host's S2C 0x03 queue record, and the game start at
@@ -564,6 +614,7 @@ int main() {
 	ok = run_timed_loops_pace_an_undictated_connection() && ok;
 	ok = run_an_in_match_joiner_keeps_the_frame_gate() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
+	ok = run_the_sync_request_needs_no_player_list() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");
 	return ok ? 0 : 1;

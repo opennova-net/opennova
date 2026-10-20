@@ -140,7 +140,6 @@ const char *JoinerConnection::post_auth_stage_name() const {
 	case PostAuthStage::AwaitGameStart: return "awaiting the game-start flag";
 	case PostAuthStage::AwaitServerInfo: return "awaiting the server-info transfer";
 	case PostAuthStage::AwaitMissionData: return "awaiting the mission-data transfer";
-	case PostAuthStage::AwaitPlayerList: return "awaiting the player list";
 	case PostAuthStage::AwaitInitialSyncTail: return "awaiting the pre-world sync tail";
 	case PostAuthStage::AwaitWorldStreamEnd: return "awaiting the world stream";
 	case PostAuthStage::AwaitMissionStart: return "loading the mission start";

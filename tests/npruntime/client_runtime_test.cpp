@@ -1353,9 +1353,12 @@ bool run_retail_post_auth_prelude(bool mission_start_loading) {
 		return false;
 	}
 
-	// Golden frames 21-23: the final mission-data chunk is followed by a valid
-	// player list. The client carries the pending ACK into ONE grouped 0x09+0x22
-	// packet instead of manufacturing an intervening header-only sequence.
+	// The final mission-data chunk queues the empty C2S 0x09 at once, whatever S2C
+	// 0x16 came (the retail corpus: run_20260426_120859 and _120102 send it alone,
+	// _113242 beside the 0x16's one 0x22 re-request); a later 0x16 queues nothing at
+	// the connection, its per-row 0x22s are ClientRuntime's fold (D-NET-526)
+	// [orig: NapiClient_WaitForDisconnect @0x42CB20, the queue @0x42cb43;
+	//  NapiNPClientMsg_PlayerList @0x42fc35].
 	server_seq.last_inbound_seq = 9;
 	constexpr uint32_t kMissionMpAttributes = 0x80003A06u;
 	std::vector<uint8_t> mission_data_chunk =
@@ -1380,9 +1383,24 @@ bool run_retail_post_auth_prelude(bool mission_start_loading) {
 			joiner.handle_datagram(
 					mission_data_datagram.data(), mission_data_datagram.size());
 	if (!expect(mission_data_result.outbound.empty() &&
+			mission_data_result.queued_send_messages.size() == 1 &&
+			mission_data_result.queued_send_messages[0].reliable &&
 			joiner.mp_attributes() == kMissionMpAttributes &&
 			joiner.session_max_players() == kMissionMaxPlayers,
-			"final mission-data chunk waits for the player-list boundary")) {
+			"final mission-data chunk queues the reliable 0x09")) {
+		return false;
+	}
+	const std::vector<std::vector<uint8_t>> sync_request =
+			joiner.frame_messages(mission_data_result.queued_send_messages);
+	if (!expect(sync_request.size() == 1 &&
+				decode_client_session(
+						sync_request[0], client_auth.scrk,
+						client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 10, 7) &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x09 &&
+				client_messages[0].payload.empty(),
+			"the 0x09 leaves alone, carrying the final chunk's ACK")) {
 		return false;
 	}
 
@@ -1393,18 +1411,9 @@ bool run_retail_post_auth_prelude(bool mission_start_loading) {
 	const inmatch::JoinerConnection::PollResult player_list_result =
 			joiner.handle_datagram(
 					player_list_datagram.data(), player_list_datagram.size());
-	if (!expect(player_list_result.outbound.size() == 1 &&
-				decode_client_session(
-						player_list_result.outbound[0], client_auth.scrk,
-						client_header, client_messages) &&
-				matches_client_header(client_header, kServerKey, 10, 8) &&
-				client_messages.size() == 2 &&
-				client_messages[0].tag == 0x09 &&
-				client_messages[0].payload.empty() &&
-				client_messages[1].tag == 0x22 &&
-				client_messages[1].payload ==
-						std::vector<uint8_t>({0x00, 0xF7, 0x1C}),
-			"player list emits retail frame 23's grouped 0x09+0x22 packet")) {
+	if (!expect(player_list_result.outbound.empty() &&
+				player_list_result.queued_send_messages.empty(),
+			"the player list sends nothing from the connection: no fused 0x22")) {
 		return false;
 	}
 
@@ -1773,8 +1782,9 @@ bool run_early_sync_tail_latch() {
 		return false;
 	}
 
-	// Completing the transfers + player list applies the latch: the grouped 0x09+0x22
-	// releases, preload_ready trips, and (world_ready default) pump releases the 0x0A.
+	// Completing the transfers applies the latch: the final 0x64 queues the 0x09 alone
+	// (no S2C 0x16 needed, D-NET-526), preload_ready trips, and (world_ready default) pump
+	// releases the 0x0A.
 	server_seq.last_inbound_seq = 7;
 	const std::vector<uint8_t> server_info_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1787,25 +1797,23 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> mission_data_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x64, retail_transfer_chunk(1, 64, 0x5A))});
-	if (!expect(joiner.handle_datagram(
-				mission_data_datagram.data(), mission_data_datagram.size()).outbound.empty(),
-			"early-tail: mission-data final waits for the player list")) {
+	const inmatch::JoinerConnection::PollResult mission_data_result = joiner.handle_datagram(
+			mission_data_datagram.data(), mission_data_datagram.size());
+	if (!expect(mission_data_result.outbound.empty() &&
+				mission_data_result.queued_send_messages.size() == 1 &&
+				mission_data_result.queued_send_messages[0].tag == 0x09 &&
+				mission_data_result.queued_send_messages[0].payload.empty() &&
+				joiner.preload_ready(),
+			"early-tail: the final 0x64 queues the 0x09 and applies the latched 0x11")) {
 		return false;
 	}
-	const std::vector<uint8_t> player_list_datagram = frame_server_session(
-			server_seq, server_scrk, client_auth.ck,
-			{make_protocol_message(0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
-	const inmatch::JoinerConnection::PollResult player_list_result = joiner.handle_datagram(
-			player_list_datagram.data(), player_list_datagram.size());
-	if (!expect(player_list_result.outbound.size() == 1 &&
+	const std::vector<std::vector<uint8_t>> sync_request =
+			joiner.frame_messages(mission_data_result.queued_send_messages);
+	if (!expect(sync_request.size() == 1 &&
 				decode_client_session(
-						player_list_result.outbound[0], client_auth.scrk,
-						client_header, client_messages) &&
-				client_messages.size() == 2 &&
-				client_messages[0].tag == 0x09 &&
-				client_messages[1].tag == 0x22 &&
-				joiner.preload_ready(),
-			"early-tail: reaching the sync tail applies the latched 0x11")) {
+						sync_request[0], client_auth.scrk, client_header, client_messages) &&
+				client_messages.size() == 1 && client_messages[0].tag == 0x09,
+			"early-tail: the 0x09 leaves alone at its send boundary")) {
 		return false;
 	}
 	const std::vector<std::vector<uint8_t>> world_release = joiner.pump(0);
@@ -1968,28 +1976,6 @@ bool run_client_reducer_preserves_packet_message_order() {
 }
 
 using opennova::inmatch::NullDatagramSocket;
-
-// The host's one S2C 0x16 producer is Server_TickUpdate's scoreboard clock (D-NET-504), which
-// the tick_connections-only harnesses below do not run; our joiner holds its C2S 0x09 for its
-// first list (D-NET-526). The stand-in delivers the clock's list to the added `peer` every 311
-// host ticks [orig: Server_TickUpdate @0x51D8F9..0x51D917].
-struct HarnessScoreboardClock {
-	uint32_t timer = 0;
-	void tick(inmatch::NapiNPServerCtx &ctx, const PeerAddr &peer, w::World &world,
-			inmatch::ClientRuntime &client) {
-		if (++timer <= 0x136u) return;
-		timer = 0;
-		for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
-			if (!(c.peer == peer) || c.phase < inmatch::ConnectionPhase::PlayerAdded) continue;
-			std::vector<uint8_t> list;
-			if (inmatch::frame_in_match_s2c_batch(ctx, peer,
-					{inmatch::build_player_list_message(
-							ctx.config, ctx.np_protocol.connection_list, &world)},
-					list))
-				client.receive(list.data(), list.size());
-		}
-	}
-};
 
 struct HostPumpHookProbe {
 	inmatch::HostOwner *owner = nullptr;
@@ -2315,7 +2301,6 @@ bool run_roundtrip() {
 	client.set_world_ready(true);
 
 	// --- 2) Spawn-gate burst, driven entirely from the per-frame client role. ---
-	HarnessScoreboardClock scoreboard_clock;
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
 		// Several host ticks per frame so entity_batch_count climbs through world streaming (F3) and the
@@ -2330,7 +2315,6 @@ bool run_roundtrip() {
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
 			client_clock_ms += 300;
-			scoreboard_clock.tick(ctx, peer, world, client);
 		}
 	}
 	if (!expect(spawned, "the spawn-gate burst trips PeerSpawned")) return false;
@@ -2806,7 +2790,6 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	if (!expect(client.mission_known(), "zones: joiner learned the mission")) return false;
 	client.set_world_ready(true);
 
-	HarnessScoreboardClock scoreboard_clock;
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
 		for (int k = 0; k < 6; ++k) {
@@ -2816,7 +2799,6 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
-			scoreboard_clock.tick(ctx, peer, world, client);
 		}
 	}
 	if (!expect(spawned && spawn_name == kName, "zones: spawn gate tripped for the joiner")) return false;

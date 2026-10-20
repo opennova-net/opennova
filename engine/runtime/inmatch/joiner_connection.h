@@ -934,7 +934,6 @@ private:
 		AwaitGameStart,
 		AwaitServerInfo,
 		AwaitMissionData,
-		AwaitPlayerList,
 		AwaitInitialSyncTail,
 		AwaitWorldStreamEnd,
 		AwaitMissionStart, // the 0x1A released the mission start; its end owes the 0x2F pair
@@ -1094,7 +1093,6 @@ private:
 	std::vector<uint32_t> loaded_model_challenge_snapshot_;
 	bool preload_ready_ = false; // terminal pre-world S2C 0x11 received and ACK boundary reached
 	bool sync_tail_seen_ = false; // the host emits 0x11 exactly once; latch an early arrival
-	bool player_list_seen_ = false; // valid S2C 0x16 may arrive before the 0x64 transfer completes
 	bool initial_admission_complete_ = false; // a S2C 0x0F seen in the deploy wait
 	bool deployment_pick_sent_ = false;
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E

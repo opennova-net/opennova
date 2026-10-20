@@ -241,7 +241,6 @@ std::vector<uint8_t> JoinerConnection::start() {
 	session_rtt_ms_ = 0;
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
-	player_list_seen_ = false;
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
@@ -1225,40 +1224,28 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 						server_name_ = block_string(52);
 						map_file_ = block_string(84);
 					}
-					post_auth_stage_ = PostAuthStage::AwaitPlayerList;
 					out.mission_started = true;
-					if (player_list_seen_) {
-						out.outbound.push_back(frame_session({
-								make_protocol_message(c2s::CHECKSUM_RESPONSE, {}),
-								make_protocol_message(
-										0x22, {0x00, 0xF7, 0x1C}),
-						}));
-						enter_initial_sync_tail();
-					}
+					// The mission start's joiner arm queues the empty reliable C2S 0x09 once
+					// the mission-data leg and its local load ran, whatever S2C 0x16 came, and
+					// waits for the 0x11 at its own send pace; a 0x16 queues only its per-row
+					// 0x22 re-requests (ClientRuntime's fold), which join the 0x09 when they
+					// land before that pace opens [orig: Game_StartMission @0x524360 (the
+					// call @0x524dab) -> NapiClient_WaitForDisconnect @0x42CB20 (the queue
+					// @0x42cb43, the send @0x42cb4d)].
+					periodic_replies.push_back(
+							make_protocol_message(c2s::CHECKSUM_RESPONSE, {}));
+					enter_initial_sync_tail();
 				}
 			}
 		} else if (m.tag == s2c::PLAYER_LIST) {
 			PlayerList player_list;
 			if (decode_player_list(
 					m.payload.data(), m.payload.size(), player_list)) {
-				// Beyond the join-gate latch below, the body IS the Tab
-				// board's data (D-HUD-24): surface it on the canonical
-				// reducer stream so ClientReplicaPipeline::apply_player_list
-				// folds it — ClientRuntime applies inbound_reducer alone.
+				// The body IS the Tab board's data (D-HUD-24), folded from the
+				// canonical reducer stream by ClientReplicaPipeline::apply_player_list;
+				// it gates nothing in the join (D-NET-526).
 				// [orig: NapiNPClientMsg_PlayerList @0x42FAE0]
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				player_list_seen_ = true;
-				if (post_auth_stage_ == PostAuthStage::AwaitPlayerList) {
-					// Golden frame 23: transition marker and first player-sync request share
-					// one packet. OpenNova hosts may send 0x16 early, so the latch above lets
-					// the final 0x64 release the same wire packet without a compatibility fork.
-					out.outbound.push_back(frame_session({
-							make_protocol_message(c2s::CHECKSUM_RESPONSE, {}),
-							make_protocol_message(
-									0x22, {0x00, 0xF7, 0x1C}),
-					}));
-					enter_initial_sync_tail();
-				}
 			}
 		} else if (m.tag == s2c::END_ROUND_HEADER) {
 			EndRoundHeader header;
@@ -2135,7 +2122,6 @@ std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
 	// it) and the session's identity stay.
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
-	player_list_seen_ = false;
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;

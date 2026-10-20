@@ -450,7 +450,7 @@ func test_joiner_full_bms_load_admits_against_the_joined_session_player_cap() ->
 	assert_true(joiner.enable_join("127.0.0.1", host.get_host_listen_port(), "CapJoiner"))
 	joiner.set_join_world_ready(false)
 	# Retail authenticates and drains the pre-load burst (the 0x60/0x64
-	# transfers, the player list, the terminal 0x11) before it builds a world.
+	# transfers, the C2S 0x09, the terminal 0x11) before it builds a world.
 	var preloaded := false
 	for _i in range(600):
 		joiner.poll_join_preload()
