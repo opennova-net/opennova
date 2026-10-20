@@ -57,6 +57,17 @@ namespace {
 // The mission start's context resets [orig: Game_StartMission].
 void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 	ctx.config = config;
+	// The head of every mission start zeroes the main frame's 62-frame quality
+	// countdown and resets the metrics object, whose send window, folded
+	// quality (+0x0C, the 0x79 byte) and level (+0x00) all go to 0: a map
+	// change's first frame samples into an empty window, as a fresh session's.
+	// [orig: Game_StartMission @0x524360 - `xor ebx, ebx` @0x524381, the
+	//  countdown store `mov dword_24D1DDC, ebx` @0x52439E, CNetStats_Reset
+	//  @0x5243AA (@0x4C2FF0, this = g_NetQualityLevel @0x52438D)]
+	ctx.net_quality_sample_countdown = 0;
+	replication::net_quality_window_clear(ctx.host_quality_window);
+	ctx.host_network_quality = 0;
+	ctx.net_quality_level = 0;
 	// Game_StartMission runs Nbstat_StartupInit once per mission, clearing the
 	// shared scoreboard/integrity counter but deliberately leaving the separate
 	// process-global 0x30/0x31 family toggle untouched.

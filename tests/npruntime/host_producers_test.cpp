@@ -340,6 +340,38 @@ bool check_host_quality_window() {
 			"an unmeasured frame rate samples the ceiling 255");
 }
 
+// A mission start zeroes the 62-frame countdown and resets the send window,
+// its folded quality and level: a map change's first frame samples into an
+// empty window, so one sample averages /5 as a fresh session's first does.
+// [orig: Game_StartMission @0x524360 - the countdown store @0x52439E,
+//  CNetStats_Reset @0x5243AA (@0x4C2FF0); the sample @0x52658B]
+bool check_mission_start_resets_the_quality_sample() {
+	HostFixture f(2);
+	f.ctx.stats_avg_fps = 8; // frame pressure 128 every sample
+	f.ctx.host_quality_window = ns::NetQualityWindow{};
+	for (int i = 0; i < 5; ++i) {
+		f.ctx.net_quality_sample_countdown = 1;
+		inmatch::Server_SampleHostNetQuality(f.ctx);
+	}
+	inmatch::Server_SampleHostNetQuality(f.ctx); // 61 frames to go
+	if (!expect(f.ctx.host_network_quality == 128 && f.ctx.net_quality_level == 2 &&
+					f.ctx.net_quality_sample_countdown == 61,
+			"five samples fill the window, the countdown mid-way"))
+		return false;
+	inmatch::continue_session(f.ctx, f.ctx.config);
+	if (!expect(f.ctx.net_quality_sample_countdown == 0 &&
+					f.ctx.host_quality_window.avg_bandwidth == 0 &&
+					f.ctx.host_quality_window.bandwidth[0] == 0 &&
+					f.ctx.host_quality_window.cursor == 0 &&
+					f.ctx.host_network_quality == 0 && f.ctx.net_quality_level == 0,
+			"the mission start zeroes the countdown, the window, the quality and the level"))
+		return false;
+	inmatch::Server_SampleHostNetQuality(f.ctx);
+	return expect(f.ctx.net_quality_sample_countdown == 62 &&
+					f.ctx.host_network_quality == 128 / 5,
+			"the next frame samples into the empty window");
+}
+
 // The NovaWorld exit leads the host's 62-frame block too (D-NET-220): a
 // NovaWorld host whose registration's NWU session is in use exits with 12 once
 // the word holds neither 2 nor 3, and HostRole reports it on either host kind
@@ -1979,6 +2011,7 @@ int main() {
 	ok = check_ping_dispatch_return_leg() && ok;
 	ok = check_client_quality_store_and_resend() && ok;
 	ok = check_host_quality_window() && ok;
+	ok = check_mission_start_resets_the_quality_sample() && ok;
 	ok = check_host_novaworld_exit() && ok;
 	ok = check_chat_helpers() && ok;
 	ok = check_chat_routing() && ok;
