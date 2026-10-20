@@ -321,7 +321,8 @@ inline uint8_t death_piece_type_index(const uint8_t (&types)[17], int section) {
 struct ExplosionEntry {
     // The entry's centre words (+0 / +4 / +8), D-NET-507 [orig:
     // WeaponEffect_QueueExplosion @0x4E8330; Projectile_ProcessExplosionQueue
-    // reads them @0x4EAF33 / @0x4EAF46 / @0x4EAF59].
+    // @0x4EAD80 reads them in its `sub` @0x4EAF31 / @0x4EAF43 / @0x4EAF56, the
+    // deltas stored @0x4EAF33 / @0x4EAF46 / @0x4EAF59].
     EntityPosition pos;
     int32_t dir_bam = 0;
     int32_t type = 0;          // ammo kztype: 1 knife/ram, 2 standard, 3 medic,

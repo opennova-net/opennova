@@ -86,7 +86,8 @@ bool same_words(const w::FixedVec3 &a, int32_t x, int32_t y, int32_t z) {
 // with a truncating divide, 0xF8E40000; the S2C 0x21 streams its high half 0xF8E4.
 // The wrapped-degree conversion floors 350 degrees to 0xF8E38E38 (one lower on the
 // wire). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
-//  NetPacket_SerializeEntityEventToBuffer `movzx ecx, word ptr [ecx+0Eh]` @0x505685]
+//  NetPacket_SerializeEntityEventToBuffer @0x5055A0 - `movzx ecx, word ptr [ecx+0Eh]`
+//  @0x505685]
 bool yaw_100_heading(int32_t heading) {
 	return heading == static_cast<int32_t>(0xF8E40000u) && w::spawn_angle_bam(90 - 100) == heading &&
 	       (static_cast<uint32_t>(w::bam_heading_from_mission_yaw_deg(100.0)) >> 16) == 0xF8E3u;
@@ -456,7 +457,9 @@ int gnl2_blast_point_is_the_raised_z_word() {
 	            "the gnl2 heading is the row's Yaw word"))
 		return 1;
 	// The kill-zone entry's centre is the same words [orig: WeaponEffect_QueueExplosion
-	//  @0x4E8330; Projectile_ProcessExplosionQueue reads +0 / +4 / +8 @0x4EAF33..0x4EAF59].
+	//  @0x4E8330; Projectile_ProcessExplosionQueue @0x4EAD80 reads +0 / +4 / +8 in its
+	//  `sub` @0x4EAF31 / @0x4EAF43 / @0x4EAF56, the deltas stored @0x4EAF33 / @0x4EAF46 /
+	//  @0x4EAF59].
 	if (!expect(world->explosions.queue.size() == 1 &&
 	                    same_words(world->explosions.queue[0].pos.q16(), kAshJoinerX, kTdhHostY,
 	                               kFarZ + 0x10000),
@@ -585,7 +588,8 @@ int flag_state_streams_the_words() {
 
 // A ballistic round flies on its words: the spawn keeps the origin's words, a
 // miss commits start + velocity as a word add, and the next tick starts from that
-// commit. [orig: RoundData_SpawnRound - Position and the +0x80 copy @0x4ec643..0x4ec655;
+// commit. [orig: RoundData_SpawnRound @0x4EC0D0 - Position @0x4EC62B..0x4EC63A, the +0x80
+//  copy @0x4EC643..0x4EC655;
 //  Projectile_UpdatePhysics @0x4E9D70 - the end point @0x4EA232..0x4EA27D, the
 //  commit @0x4EAA3F..0x4EAA45, `vz -= 167` @0x4EAA5A]
 int round_flies_on_the_words() {

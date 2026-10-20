@@ -1155,7 +1155,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.shot_seq = round_id;
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
-    r.prev_z_q16 = params.origin.z.q16; // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
+    // [orig: RoundData_SpawnRound @0x4EC0D0 - Position @0x4EC62B / @0x4EC631 / @0x4EC63A,
+    //  the +0x80..+0x88 copy @0x4EC643..0x4EC655]
+    r.prev_z_q16 = params.origin.z.q16;
     r.vel.set_q16(launch_q16); // [orig: +0x98 / +0x9C / +0xA0 @0x4ec5dd..0x4ec60d]
     r.age_ticks = 0;
     // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the

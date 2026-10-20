@@ -213,7 +213,8 @@ void test_entityless_adm_arm_uses_the_supplied_shooter_pos() {
                   RoundConsequenceMode::VisualOnly) >= 0);
     out = r.drain();
     CHECK(out.size() == 3);
-    if (!out.empty()) CHECK(out[0].pos.z == float(p.origin.z)); // the origin's word
+    // The origin's word: 1.7 truncated to 0x1B333, read back.
+    if (!out.empty()) CHECK(out[0].pos.z == 0x1B333 / 65536.0f);
 }
 
 // A full 128-slot pool drops further delayed sounds, exactly like the retail
