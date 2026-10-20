@@ -953,6 +953,11 @@ bool run_parented_pool_spawn_follows_and_hides() {
 	child_seed.emplacement_parent_spawn_id =
 			world.registry.get(parent_h)->registry_spawn_id;
 	child_seed.ground_target = parent_h; // mission promotion's groundEntity link
+	// An anchor offset rides a resolved userpoint: its 1-based index (+0x319) is
+	// nonzero. A zero index names none, and the child copies its carrier's root
+	// pose with no offset. [orig: Entity_UpdateTransformAndTurret - the index
+	// gate @0x440F04..0x440F34, the root copy @0x441153..0x4411BC]
+	child_seed.emplacement_bone = 1;
 	child_seed.emplacement_local = {2.0f, 0.0f, 0.0f};
 	// This fixture constructs the authority-side authored row directly rather
 	// than through mission promotion, so its exact attachment slot is known.
