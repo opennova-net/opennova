@@ -40,7 +40,10 @@ describe('HostedServerCard', () => {
     expect(starting.get('.hosted-phase').text()).toBe('Starting a machine for it. This is taking longer than usual.');
 
     const ended = mount(HostedServerCard, {
-      props: { server: hostedServer(2, { state: 'stopped', stopped_because: { cause: 'update', exit_code: 0, oom: false, line: '' } }), now: Date.now() },
+      props: {
+        server: hostedServer(2, { state: 'stopped', stopped_because: { cause: 'update', limit: null, exit_code: 0, oom: false, line: '' } }),
+        now: Date.now(),
+      },
       global: { plugins: [router] },
     });
     expect(ended.find('.hosted-phase').exists()).toBe(false);
