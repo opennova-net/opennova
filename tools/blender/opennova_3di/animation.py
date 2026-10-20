@@ -59,7 +59,7 @@
 # vel.z, lateral vel.x of a frame), stands its origin `bottom` above the
 # ground, takes the vertical from the change in bottom and reads top as the
 # capsule's top [orig: AnimMap_UpdateEntity @0x40b5f0]. What retail's own
-# exporter measured is read off the corpus under OPENNOVA_JO_ASSETS, not
+# exporter measured is read off the shipped JO:CA corpus, not
 # witnessed in code: over the 30 person tables (185,661 frames) top is the
 # head bone's height within 1 cm in 91% of frames (median 0.2 mm), a planted
 # foot slides back by the step (|slide| / |step| median 1.000 over the run

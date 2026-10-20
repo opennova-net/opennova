@@ -208,7 +208,7 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
        bytecode_offset and the next-thing chunk-relative offset (debug info,
        string section, or section table if it sits after bytecode). The
        engine never stores an explicit bytecode_size; this matches the
-       layout pattern seen in jo_gamemus.bin (bytecode 0x88..0x10C = 132 B). */
+       layout pattern seen in the shipped JO gamescript (bytecode 0x88..0x10C = 132 B). */
     if (ch.bytecode_offset > 0) {
         if ((uint64_t)chunk_off + ch.bytecode_offset > size) return -12;
         uint32_t chunk_max = (uint32_t)(size - chunk_off);

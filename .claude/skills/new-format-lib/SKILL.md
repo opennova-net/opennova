@@ -1,6 +1,6 @@
 ---
 name: new-format-lib
-description: Scaffolds a new NovaLogic format library under engine/formats/ end to end — group-CMake registration, opennova namespace, parser/writer, fixtures with LFS and asset-gating policy, roundtrip ctest, and optional GDExtension binding — or extracts an existing parser out of a runtime lib into its formats/ home. Use when adding support for a new game file format, or when moving a format parser to engine/formats/.
+description: Scaffolds a new NovaLogic format library under engine/formats/ end to end — group-CMake registration, opennova namespace, parser/writer, fixtures with LFS and the no-retail-data policy, roundtrip ctest, and optional GDExtension binding — or extracts an existing parser out of a runtime lib into its formats/ home. Use when adding support for a new game file format, or when moving a format parser to engine/formats/.
 ---
 
 # Add (or extract) a format library under engine/formats/
@@ -77,27 +77,21 @@ FFI wrapper. One thing still matters:
   a `tests/fixtures/minimal_*_gen.cpp` generator through our own writer and
   byte-compared by that generator's ctest), AUTHORED (text we wrote, with a row
   in `scripts/lint/fixture_allowlist.json`) or KEEP (the retail-interop wire
-  captures, allowed only under `fixtures/novaworld/`). Prefer minting; a retail
-  file a test needs comes from the reference fixture set
-  (`retail::reference_fixture`), never the tree. Binary fixtures are LFS via
+  captures, allowed only under `fixtures/novaworld/`). Prefer minting. Binary
+  fixtures are LFS via
   `.gitattributes` `fixtures/**`, plain-text ones are plain git blobs (a new
   text extension gets its carve-out there in the same change), and every file
   is capped at 2 MiB — after `git add`, verify with `git lfs status` that the
   binaries staged as LFS objects, then run `python scripts/lint/fixture_lint.py --report`
   (CI runs it `--enforce --require-pulled`).
-- Bulk retail corpora are NEVER committed (copyright). Gate a sweep test on one
-  of the two machine roots through `tests/common/retail_paths.h`
-  (`retail::install()` / `retail::assets()` / `retail::reference_fixture(rel)`, with `RETAIL_REQUIRE_OR_SKIP` or `retail::skip`):
-  absent data returns exit 77, and the test is registered with
-  `opennova_add_gated_test` (CTest's `retail` label) so ctest reports Skipped,
-  never Passed. A test with synthetic legs too calls `retail::configure_mixed`
-  and is registered with `opennova_add_mixed_test`: the plain entry runs the
-  synthetic legs alone, the labelled `<name>_retail` entry adds the retail ones
-  (a missing retail leg prints `retail::skip_leg` and exits 0, which the retail
-  suite refuses). Never read the environment directly (`scripts/lint/env_lint.py`
-  hard-fails it) and never exit 0 on missing data. The label is the record:
-  `scripts/ci/test_suites.py` takes each suite's inventory from it
-  (`docs/asset-gated-tests.md`), so there is no expectation table to update.
+- Bulk retail corpora are NEVER committed (copyright), and no test reads one
+  (`scripts/ci/test_suites.py --check-layout` fails a test that names a retail
+  root). The corpus is closed: mint one fixture per form the shipped files take
+  through the generator (a NovaLogic tool's quirk built deliberately, cited to
+  its witness or D-entry), pin the writer's output on them with FNV-1a64
+  vectors, and assert a witnessed retail value as a cited constant (prove once,
+  pin; `docs/asset-gated-tests.md`). Never read the environment
+  (`scripts/lint/env_lint.py` hard-fails it).
 - Record where each committed sample came from in the test header comment.
 
 ## 4. Tests (`tests/<name>/`)
@@ -107,8 +101,8 @@ No test framework: plain `main()` with `TEST_EXPECT` from
 (see `tests/dbf/dbf_roundtrip_test.cpp`). Minimum: parse test + byte-exact
 roundtrip against the committed fixture. Wire into `tests/CMakeLists.txt`
 following the dbf block — one executable per test, link `opennova_formats`,
-`add_test(NAME <name>_roundtrip ...)` (dbf's carries a retail leg, so it uses
-`opennova_add_mixed_test`; its `minimal_dbf_gen` is the minted-fixture exemplar).
+`add_test(NAME <name>_roundtrip ...)` (its `minimal_dbf_gen` is the minted-fixture
+exemplar).
 
 Run loop:
 
@@ -124,9 +118,8 @@ Run loop:
   `godot/src/register_types.cpp` (`godot/src` already links the group —
   no CMake link edit), then `bash scripts/build_godot.sh` and fully restart
   any open editor (no hot-reload). Add a GDScript smoke test
-  `godot/tests/<name>_data_test.gd` over the committed fixture (a core script
-  never reads retail data); a script that needs retail data lives under
-  `godot/tests/retail/` instead. Run it via the `gut` skill.
+  `godot/tests/<name>_data_test.gd` over the committed fixture (no script reads
+  retail data). Run it via the `gut` skill.
 - Format libraries remain independent of authoring workspaces, inspectors,
   project surfaces, and import flows: nothing under `formats/` includes or
   links the editor group (ADR 0046 decision 3, which superseded ADR 0045's

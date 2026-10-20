@@ -13,8 +13,8 @@
 //                            particle (a gravitating top-aligned burst) that
 //                            the authored gorehit.ptu also references
 //
-// No retail file is carried: the shipped .ptl corpus is the OPENNOVA_JO_ASSETS
-// leg of particle_smoke_all_fixtures.
+// No retail file is carried: the shipped .ptl files' forms are the authored
+// lexical_forms.ptl, which particle_smoke_all_fixtures also sweeps.
 //
 // Default: rebuild in memory and byte-compare the committed files. `--write`
 // (re)writes them.
