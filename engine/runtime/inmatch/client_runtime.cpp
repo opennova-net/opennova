@@ -948,7 +948,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		const UplinkBuilder *build_uplink, uint32_t now_tick) {
 	devtools::ProfileLap lap(profile_);
 	std::vector<std::vector<uint8_t>> outbound;
-	std::vector<ProtocolMessage> send_messages;
 	// Session loss is a terminal owner state, not only a receive-side event. A
 	// prior host description (or the silence reap below) must stop the next frame
 	// before its tick/housekeeping producers can mint fresh C2S traffic.
@@ -959,6 +958,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		pending_reload_notifications_.clear();
 		return outbound;
 	}
+	// A released mission start whose load the embedder still runs: retail is inside
+	// Game_StartMission, which runs no client net frame (no tick, no housekeeping, no
+	// receive, no send) until the load's own pumps (push_mission_start_end). What arrives
+	// waits in the queue. [orig: Game_StartMission @0x524e29..0x526255]
+	if (joiner_ != nullptr && joiner_->mission_start_released() &&
+			joiner_->mission_start_loading())
+		return outbound;
 
 	// The main frame's 62-frame quality fold runs ahead of the client net frame
 	// (the level it stores is what the 0x4C leg below reports).
@@ -1437,36 +1443,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// the loading loop of its admission stage, which calls the send pump its own
 	// way (step_send_pump_loop, D-NET-254).
 	const bool send_block_open = step_send_pump_loop();
-	if (send_block_open) {
-		// These packets already own the connection's earliest allocated
-		// sequences. Preserve wire/retention fidelity by releasing them unchanged
-		// and before framing any later semantic work below.
-		// One build sends at most cs_dir0 field 14's packets (the template's -1 is
-		// unbounded); what it leaves stays queued for the next build, in order.
-		// [orig: BuildOutgoingPackets @0x62844e, @0x62860b..0x628619]
-		const std::size_t build_budget =
-				max_packets_per_build(joiner_->session_timeouts().max_packets_per_tick);
-		std::size_t packets_built = 0;
-		while (!framed_send_queue_.empty() && packets_built < build_budget) {
-			outbound.push_back(std::move(framed_send_queue_.front()));
-			framed_send_queue_.pop_front();
-			++packets_built;
-		}
-		// The connection's one queue, in the order its producers ran: the housekeeping,
-		// the receive handlers' replies, the input one-shots, the deploy pick (input case
-		// 12 queues it @0x49b17b), the armory's loadout re-submit (@0x42d085) and the
-		// gameplay records. Once queued they leave at this boundary whatever the deploy
-		// gate now says (D-NET-235): each producer gated itself when it queued, only the
-		// 0x2C and 0x0C builds below sit behind the gate, and nothing drains the list on
-		// death.
-		// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
-		//  @0x628640; Client_ProcessNetworkFrame tail @0x42c4b1 -> PumpClientProtocolSend
-		//  @0x42c4bc in every branch; DrainMessageQueues @0x625600 runs only at join
-		//  and destroy]
-		while (!send_queue_.empty()) {
-			send_messages.push_back(std::move(send_queue_.front()));
-			send_queue_.pop_front();
-		}
+	if (send_block_open) build_send_boundary(outbound, now_tick,
+			[&](std::vector<ProtocolMessage> &send_messages) {
 		// The witnessed deploy gate the 0x2C RTT ping and the 0x0C uplink share: is_in_session &&
 		// !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate. A Joiner is always !is_authority;
 		// deployed_ and authoritative_spawn_released_ model those two independent gates.
@@ -1502,40 +1480,17 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			uplink_message.reliable = false; // Client_ProcessNetworkFrame @0x42C4A3 userParam=1
 			send_messages.push_back(std::move(uplink_message));
 		}
-		JoinerConnection::FrameMessagesResult framed;
-		if (packets_built < build_budget) {
-			framed = joiner_->frame_messages_detailed(send_messages,
-					joiner_->packet_ceiling_bytes(), build_budget - packets_built);
-		} else {
-			framed.unbuilt = std::move(send_messages);
-		}
-		for (std::vector<uint8_t> &datagram : framed.datagrams)
-			outbound.push_back(std::move(datagram));
-		if (framed.frame_failed) {
-			// Capacity rejection is final, like retail's failed per-node Create.
-			// Only an admitted node that could not be encoded/framed remains owned
-			// by this runtime and is retried ahead of later producers.
-			for (std::size_t i = framed.framed_count;
-			     i < framed.admitted_count; ++i) {
-				send_queue_.push_back(std::move(send_messages[i]));
-			}
-		}
-		for (auto it = framed.unbuilt.rbegin(); it != framed.unbuilt.rend(); ++it)
-			send_queue_.push_front(std::move(*it));
-		// Connection send boundary: advance the pre-spawn drive, emit retained-message
-		// active probes, and flush an ACK only if no substantive C2S producer above
-		// already carried it. Retail places this pump inside the same field-3 gate
-		// (the 0x44 request is not here: the receive pump above sends it).
-		for (std::vector<uint8_t> &d : joiner_->pump(now_tick))
-			outbound.push_back(std::move(d));
-		// Retail builds every packet at connection+0x64C, prunes message nodes
-		// against that same value, then increments it exactly once. MTU splits
-		// therefore remain one flush, and held frames never age finite records.
-		joiner_->complete_send_flush();
 		// (step_send_pump_loop re-armed the countdown from the stored dictated
 		// period when it counted out [orig: the PumpFlags 0x200 reload-when-0
 		// @0x629802]: the in-match boundary reopens every send_holdoff_ticks_
 		// ticks, 0 = per-tick.)
+	});
+	// The frame that received the 0x1A with no load to run goes straight on into the
+	// mission start's end: Game_StartMission leaves NapiClient_WaitForGameStart after its
+	// last send and runs its pumps [orig: @0x42cc92 -> @0x42ccbf -> @0x524e29].
+	if (joiner_->mission_start_released() && !joiner_->mission_start_loading()) {
+		for (std::vector<uint8_t> &d : push_mission_start_end())
+			outbound.push_back(std::move(d));
 	}
 	// The stale-carrier sweep runs in the entity update, after the client net frame,
 	// so its 0x0F requests queue behind this frame's send block and leave at the next
@@ -1581,6 +1536,120 @@ void ClientRuntime::queue_carrier_repair_requests() {
 //  NapiClient_WaitForDisconnect @0x42cb20 (stamp @0x42cb70, entry pump @0x42cb4d,
 //  `> 100` @0x42cbb5); CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0 and
 //  NapiClient_WaitForGameStart @0x42cc10 (send every pass)]
+void ClientRuntime::build_send_boundary(std::vector<std::vector<uint8_t>> &outbound,
+		uint32_t now_tick, const std::function<void(std::vector<ProtocolMessage> &)> &append) {
+	// These packets already own the connection's earliest allocated
+	// sequences. Preserve wire/retention fidelity by releasing them unchanged
+	// and before framing any later semantic work below.
+	// One build sends at most cs_dir0 field 14's packets (the template's -1 is
+	// unbounded); what it leaves stays queued for the next build, in order.
+	// [orig: BuildOutgoingPackets @0x62844e, @0x62860b..0x628619]
+	const std::size_t build_budget =
+			max_packets_per_build(joiner_->session_timeouts().max_packets_per_tick);
+	std::size_t packets_built = 0;
+	while (!framed_send_queue_.empty() && packets_built < build_budget) {
+		outbound.push_back(std::move(framed_send_queue_.front()));
+		framed_send_queue_.pop_front();
+		++packets_built;
+	}
+	// The connection's one queue, in the order its producers ran: the housekeeping,
+	// the receive handlers' replies, the input one-shots, the deploy pick (input case
+	// 12 queues it @0x49b17b), the armory's loadout re-submit (@0x42d085) and the
+	// gameplay records. Once queued they leave at this boundary whatever the deploy
+	// gate now says (D-NET-235): each producer gated itself when it queued, only the
+	// frame's 0x2C and 0x0C builds sit behind the gate, and nothing drains the list on
+	// death.
+	// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
+	//  @0x628640; Client_ProcessNetworkFrame tail @0x42c4b1 -> PumpClientProtocolSend
+	//  @0x42c4bc in every branch; DrainMessageQueues @0x625600 runs only at join
+	//  and destroy]
+	std::vector<ProtocolMessage> send_messages;
+	while (!send_queue_.empty()) {
+		send_messages.push_back(std::move(send_queue_.front()));
+		send_queue_.pop_front();
+	}
+	if (append) append(send_messages);
+	JoinerConnection::FrameMessagesResult framed;
+	if (packets_built < build_budget) {
+		framed = joiner_->frame_messages_detailed(send_messages,
+				joiner_->packet_ceiling_bytes(), build_budget - packets_built);
+	} else {
+		framed.unbuilt = std::move(send_messages);
+	}
+	for (std::vector<uint8_t> &datagram : framed.datagrams)
+		outbound.push_back(std::move(datagram));
+	if (framed.frame_failed) {
+		// Capacity rejection is final, like retail's failed per-node Create.
+		// Only an admitted node that could not be encoded/framed remains owned
+		// by this runtime and is retried ahead of later producers.
+		for (std::size_t i = framed.framed_count;
+		     i < framed.admitted_count; ++i) {
+			send_queue_.push_back(std::move(send_messages[i]));
+		}
+	}
+	for (auto it = framed.unbuilt.rbegin(); it != framed.unbuilt.rend(); ++it)
+		send_queue_.push_front(std::move(*it));
+	// Connection send boundary: advance the pre-spawn drive, emit retained-message
+	// active probes, and flush an ACK only if no substantive C2S producer above
+	// already carried it. Retail places this pump inside the same field-3 gate
+	// (the 0x44 request is not here: the receive pump sends it).
+	for (std::vector<uint8_t> &d : joiner_->pump(now_tick))
+		outbound.push_back(std::move(d));
+	// Retail builds every packet at connection+0x64C, prunes message nodes
+	// against that same value, then increments it exactly once. MTU splits
+	// therefore remain one flush, and held frames never age finite records.
+	joiner_->complete_send_flush();
+}
+
+std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
+	std::vector<std::vector<uint8_t>> outbound;
+	JoinerConnection::MissionStartSubmissions submissions;
+	if (joiner_ == nullptr || !joiner_->take_mission_start_submissions(submissions))
+		return outbound;
+	// Game_StartMission's pumps between the 0x1A and the final wait for the S2C 0x0F.
+	// A receive pump steps the countdown (the load's two drain what arrived; ours waits in
+	// the queue for the next frame); a send pump builds only at a spent countdown and
+	// reloads it from the dictated period, and every send pump call ages the flush.
+	// [orig: CNapiNPConnection_PumpFlags @0x629780 - the step @0x6297ac, the flush
+	//  @0x6297d5, the reload @0x629802; CNapiNPConnection_PumpEnumeratorAndSend
+	//  @0x6290c0 - the build gate @0x62927b]
+	const uint32_t now_tick = current_tick_;
+	auto receive_pump = [this] {
+		if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
+	};
+	auto send_pump = [&] {
+		if (send_holdoff_countdown_ != 0) {
+			joiner_->complete_send_flush();
+			return;
+		}
+		build_send_boundary(outbound, now_tick);
+		send_holdoff_countdown_ = send_holdoff_ticks_;
+	};
+	// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x424710 (the send
+	//  pump @0x42472c) called @0x5253ef; the receive @0x525784; the first 0x2F queued
+	//  @0x525836; NetClient_FlushAndSync @0x5258a2, @0x5258ea, @0x5259f1, @0x525a61
+	//  (ahead of the model freeze @0x525a6e), @0x525aca; the receive @0x525bd9; the second
+	//  0x2F @0x525c2e and the 0x0B @0x52624b queued; the send @0x526255]
+	send_pump();
+	receive_pump();
+	send_queue_.push_back(std::move(submissions.first_loadout));
+	for (int call = 0; call < 5; ++call) send_pump();
+	receive_pump();
+	send_queue_.push_back(std::move(submissions.second_loadout));
+	send_queue_.push_back(std::move(submissions.mission_status));
+	send_pump();
+	// The final wait for the S2C 0x0F spins its receive and send pumps: what the
+	// countdown held leaves once the spin has spent it, ahead of anything a later frame
+	// receives. [orig: Game_StartMission @0x52628d..0x5262df - the receive @0x5262be,
+	//  the send @0x5262da]
+	for (uint32_t spin = 0; !send_queue_.empty() && spin <= 2u * send_holdoff_ticks_ + 2u;
+			++spin) {
+		receive_pump();
+		send_pump();
+	}
+	return outbound;
+}
+
 bool ClientRuntime::step_send_pump_loop() {
 	const bool counted_out = send_holdoff_countdown_ <= 1;
 	if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
@@ -1590,7 +1659,16 @@ bool ClientRuntime::step_send_pump_loop() {
 	const bool entered = loop != send_pump_loop_;
 	send_pump_loop_ = loop;
 	const int32_t pace_ms = JoinerConnection::send_pump_loop_pace_ms(loop);
-	if (loop == JoinerConnection::SendPumpLoop::NetworkFrame) return counted_out;
+	// The 0x1A's iteration of the game-start wait: its receive took the countdown's
+	// step, and its send builds only on a spent countdown (the one immediate ACK of the
+	// 0x1A) before the loop exits into the mission start's load.
+	// [orig: NapiClient_WaitForGameStart - receive @0x42cc88, send @0x42cc92, the exit
+	//  test @0x42ccbf; CNapiNPConnection_PumpFlags @0x629780 - the step @0x6297ac, the
+	//  reload @0x629802; the build gate CNapiNPConnection_PumpEnumeratorAndSend
+	//  @0x62927b]
+	if (loop == JoinerConnection::SendPumpLoop::NetworkFrame ||
+			loop == JoinerConnection::SendPumpLoop::MissionStart)
+		return counted_out;
 	if (pace_ms == 0) return true; // a busy spin
 	const uint32_t now_ms = joiner_->monotonic_milliseconds32();
 	if (entered) {

@@ -143,7 +143,6 @@ struct Harness {
 	static constexpr uint32_t kServerKey = 0x0C0FFEE1u;
 	uint64_t now_ms = 100000;
 	uint32_t tick = 1;
-	uint32_t dictation_tick = 0; // the frame that received the holdoff dictation
 	inmatch::ClientRuntime client{"LoadingPump", [this] { return now_ms; }};
 	std::string server_scrk = "SERVER-LOADING-PUMP-SCRK";
 	ClientAuth auth;
@@ -174,6 +173,25 @@ struct Harness {
 		tags.clear();
 		for (const ProtocolMessage &m : messages) tags.push_back(m.tag);
 		return true;
+	}
+	// Each sent datagram's tags against `want`, one list per datagram, in order.
+	bool packets(const std::vector<std::vector<uint8_t>> &sent,
+			const std::vector<std::vector<uint8_t>> &want) {
+		std::vector<std::vector<uint8_t>> got;
+		for (const std::vector<uint8_t> &dg : sent) {
+			std::vector<uint8_t> tags;
+			if (!tags_of(dg, tags)) tags = {0xFF, 0xFF};
+			got.push_back(tags);
+		}
+		if (got == want) return true;
+		std::fprintf(stderr, "  sent %zu datagram(s):", got.size());
+		for (const std::vector<uint8_t> &tags : got) {
+			std::fprintf(stderr, " [");
+			for (uint8_t tag : tags) std::fprintf(stderr, " %02X", tag);
+			std::fprintf(stderr, " ]");
+		}
+		std::fprintf(stderr, "\n");
+		return false;
 	}
 	bool one_packet(const std::vector<std::vector<uint8_t>> &sent,
 			std::vector<uint8_t> want) {
@@ -336,10 +354,12 @@ bool run_admission_follows_the_retail_loading_loops() {
 			"and again on the next world-stream frame, whatever the countdown"))
 		return false;
 
-	// S2C 0x1A ends the world stream; the loadout pair and the 0x0B ride the
-	// final 0x0F wait's spin.
-	if (!expect(h.one_packet(h.frame({make_protocol_message(0x1A, {})}), {0x2F, 0x2F, 0x0B}),
-			"the loadout pair and status leave on the 0x1A's frame"))
+	// S2C 0x1A ends the world stream. Its receive spent the countdown, so the wait's
+	// last send ACKs it at once (header-only); the mission start's own pumps then find
+	// the reloaded countdown, and the loadout pair and the 0x0B leave together from the
+	// final 0x0F wait's spin (D-NET-NEW-L2-6).
+	if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), {{}, {0x2F, 0x2F, 0x0B}}),
+			"the 0x1A's immediate ACK, then the loadout pair and status together"))
 		return false;
 
 	// S2C 0x0F ends Game_StartMission. From here Client_ProcessNetworkFrame's
@@ -409,7 +429,6 @@ bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
 	probe[8] = 16;
 	(void)h.frame({make_protocol_message(0x02, probe)});
 	(void)h.frame({holdoff_record(period), make_protocol_message(0x03, {0x01})});
-	h.dictation_tick = h.tick - 1;
 	(void)h.frame({make_protocol_message(0x05, {0x01}),
 			make_protocol_message(0x04, slot_assignment(0x02)),
 			make_protocol_message(0x7B, full_player_info())});
@@ -452,6 +471,7 @@ bool run_an_in_match_joiner_keeps_the_frame_gate() {
 		Harness h;
 		if (!drive_to_an_early_in_match_release(h, 6)) return false;
 		int opened_frames = 0;
+		int last_opened = -1;
 		for (int i = 0; i < 18; ++i) {
 			const bool pack_frame = h.client.send_block_opens_this_frame();
 			const uint32_t flushes = h.client.send_flush_counter();
@@ -460,12 +480,15 @@ bool run_an_in_match_joiner_keeps_the_frame_gate() {
 			if (!expect(opened == pack_frame,
 					"in match: the send block opens exactly on the input pack's frames"))
 				return false;
-			// The countdown kept its frame cycle through the loading loops: the in-match
-			// boundaries fall on the dictation frame's cycle.
-			if (!expect(opened == ((h.tick - 1 - h.dictation_tick) % 6 == 0),
-					"in match: the boundaries continue the countdown's cycle from the dictation"))
+			// The boundaries fall one dictated period apart. Their phase is wherever the
+			// mission start's own pumps left the countdown (D-NET-NEW-L2-6).
+			if (opened && !expect(last_opened < 0 || i - last_opened == 6,
+					"in match: the boundaries are one dictated period apart"))
 				return false;
-			if (opened) ++opened_frames;
+			if (opened) {
+				last_opened = i;
+				++opened_frames;
+			}
 		}
 		if (!expect(opened_frames == 3, "in match: one send boundary per dictated period of 6"))
 			return false;
@@ -525,6 +548,108 @@ bool run_a_reset_before_the_mission_start_is_cleared() {
 	for (int i = 0; i < 8; ++i) h.frame();
 	return expect(h.client.mission_exit_reason() == inmatch::kMissionExitNone,
 			"reset: the joiner does not leave the match it is loading");
+}
+
+// Drive the admission under a dictated `period` into NapiClient_WaitForGameStart: the
+// transfers, the 0x09, the 0x11 and its 0x0A, the world stream running.
+bool drive_into_the_world_stream(Harness &h, uint8_t period) {
+	if (!h.handshake()) return false;
+	(void)h.frame({settings_record(0), settings_record(1)});
+	(void)h.frame({make_protocol_message(0x00, {})});
+	std::vector<uint8_t> probe(64, 0);
+	probe[8] = 16;
+	(void)h.frame({make_protocol_message(0x02, probe)});
+	(void)h.frame({holdoff_record(period), make_protocol_message(0x03, {0x01})});
+	(void)h.frame({make_protocol_message(0x05, {0x01}),
+			make_protocol_message(0x04, slot_assignment(0x02)),
+			make_protocol_message(0x7B, full_player_info())});
+	(void)frame_until_sent(h, 16);
+	(void)h.frame({make_protocol_message(0x60, transfer_chunk(1, 171, 0, 171, 0xA5))});
+	(void)h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 0, 180, 0x5A))});
+	(void)frame_until_sent(h, 16);
+	(void)h.frame({make_protocol_message(0x11, {})});
+	return std::string(h.client.admission_stage_name()) == std::string("awaiting the world stream");
+}
+
+// Game_StartMission's pumps from the S2C 0x1A to the final wait for the 0x0F, by where the
+// send-holdoff countdown c stood. The 0x1A's iteration of the game-start wait receives (a
+// step) and sends (a build only at a spent countdown, the one immediate header-only ACK,
+// reloading c to the dictated period N); the load receives twice (@0x525784, @0x525bd9) and
+// builds only at c = 0 at its send pumps (@0x5258a2 after the first 0x2F, @0x526255 after
+// the second and the 0x0B); the final 0x0F wait spins until c is spent. So c = 1 after the
+// wait sends the first 0x2F alone and the rest from the 0x0F wait; c = 2 sends all three at
+// @0x526255; c >= 3 (N after an immediate ACK) all three from the 0x0F wait; N = 0 builds at
+// every pump. Nothing else leaves between the 0x1A and the submissions, and a mission start
+// whose load runs after the release neither receives nor sends until its load ends.
+// [orig: NapiClient_WaitForGameStart @0x42cc10 - @0x42cc88, @0x42cc92, @0x42ccbf;
+//  Game_StartMission @0x524360 - @0x5253ef, @0x525784, @0x525836, @0x5258a2..@0x525aca,
+//  @0x525bd9, @0x525c2e, @0x52624b, @0x526255, the 0x0F wait @0x5262be / @0x5262da;
+//  CNapiNPConnection_PumpFlags @0x629780 (@0x6297ac, @0x629802);
+//  CNapiNPConnection_PumpEnumeratorAndSend @0x62927b; LP's 2026-10-11 captures: one
+//  immediate header-only ACK on 03TR, none on 01TR, then nothing until the submissions]
+bool run_the_mission_start_submissions_follow_the_countdown() {
+	struct Case {
+		uint32_t countdown_before; // c ahead of the 0x1A's frame
+		std::vector<std::vector<uint8_t>> sent;
+		const char *what;
+	};
+	const Case cases[] = {
+			{1, {{}, {0x2F, 0x2F, 0x0B}}, "spent by the 0x1A: its ACK, then all three from the 0x0F wait"},
+			{2, {{0x2F}, {0x2F, 0x0B}}, "c = 1 at the exit: the first 0x2F alone, then the rest"},
+			{3, {{0x2F, 0x2F, 0x0B}}, "c = 2 at the exit: all three at the load's last send"},
+			{4, {{0x2F, 0x2F, 0x0B}}, "c = 3 at the exit: all three from the 0x0F wait"},
+	};
+	for (const Case &c : cases) {
+		Harness h;
+		if (!expect(drive_into_the_world_stream(h, 12), "submissions: the world stream runs"))
+			return false;
+		for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != c.countdown_before; ++i)
+			(void)h.frame();
+		if (!expect(h.client.send_holdoff_countdown() == c.countdown_before,
+				"submissions: the countdown stands where the case needs it"))
+			return false;
+		if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), c.sent), c.what))
+			return false;
+		if (!expect(h.client.send_holdoff_countdown() == 12,
+				"submissions: the last build reloaded the countdown"))
+			return false;
+	}
+	{
+		Harness h;
+		if (!expect(drive_into_the_world_stream(h, 0), "submissions: N = 0 world stream"))
+			return false;
+		if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}),
+							{{}, {0x2F}, {0x2F, 0x0B}}),
+				"N = 0: every pump builds: the ACK, the first 0x2F, the second with the 0x0B"))
+			return false;
+	}
+	// A shell whose load runs after the release: no frame receives or sends while it
+	// loads, a list that arrives waits in the queue, and the push builds by the countdown.
+	Harness h;
+	if (!expect(drive_into_the_world_stream(h, 12), "loading: the world stream runs"))
+		return false;
+	h.client.set_mission_start_loading(true);
+	for (int i = 0; i < 24 && h.client.send_holdoff_countdown() != 3; ++i) (void)h.frame();
+	if (!expect(h.frame({make_protocol_message(0x1A, {})}).empty() &&
+						h.client.mission_start_released(),
+			"loading: no immediate ACK at c = 3; the 0x1A releases the mission start"))
+		return false;
+	const uint32_t flushes = h.client.send_flush_counter();
+	for (int i = 0; i < 6; ++i) {
+		if (!expect(h.frame({make_protocol_message(0x16, player_list({{0, 1}}))}).empty() &&
+							h.client.send_flush_counter() == flushes,
+				"loading: the frames neither receive nor send while the load runs"))
+			return false;
+	}
+	if (!expect(h.packets(h.client.push_mission_start_end(), {{0x2F, 0x2F, 0x0B}}) &&
+						!h.client.mission_start_released(),
+			"loading: the load's end sends all three at its last send (c = 2 at the exit)"))
+		return false;
+	std::vector<uint8_t> tags;
+	const std::vector<std::vector<uint8_t>> after = h.frame();
+	return expect(!after.empty() && h.tags_of(after[0], tags) && !tags.empty() &&
+						tags[0] == 0x22,
+			"loading: the held lists fold at the next frame and draw their 0x22");
 }
 
 // The C2S 0x09 needs no S2C 0x16: with no list yet it leaves alone at
@@ -615,6 +740,7 @@ int main() {
 	ok = run_an_in_match_joiner_keeps_the_frame_gate() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
+	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");
 	return ok ? 0 : 1;

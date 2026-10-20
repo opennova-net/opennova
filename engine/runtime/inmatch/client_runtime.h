@@ -538,16 +538,21 @@ public:
 		if (joiner_)
 			joiner_->set_loaded_model_challenge_snapshot(std::move(values));
 	}
-	// The mission start's end (JoinerConnection::set_mission_start_loading /
-	// push_mission_start_end): an embedder whose load runs after the S2C 0x1A declares it,
-	// and once its load has ended sends the two 0x2F and the 0x0B at once.
+	// The mission start's end (JoinerConnection::set_mission_start_loading): an embedder
+	// whose load runs after the S2C 0x1A declares it, and once its load has ended calls
+	// push_mission_start_end for the datagrams to send. While the released mission start
+	// loads, the frame neither receives nor sends: retail is inside Game_StartMission's
+	// load, which pumps only at its own points. Without the declaration the frame that
+	// received the 0x1A pushes at once.
 	void set_mission_start_loading(bool loading) {
 		if (joiner_) joiner_->set_mission_start_loading(loading);
 	}
 	bool mission_start_released() const { return joiner_ && joiner_->mission_start_released(); }
-	std::vector<uint8_t> push_mission_start_end() {
-		return joiner_ ? joiner_->push_mission_start_end() : std::vector<uint8_t>{};
-	}
+	// Game_StartMission's network pumps from the 0x1A to the final wait for the S2C 0x0F,
+	// in its order: its receive pumps step the send-holdoff countdown, its send pumps build
+	// only at a spent countdown and reload it, so the first 0x2F, the second and the 0x0B
+	// leave in one packet or two by where the countdown stood (D-NET-NEW-L2-6).
+	std::vector<std::vector<uint8_t>> push_mission_start_end();
 	void set_weapon_table(const world::WeaponTable *weapons) {
 		if (joiner_) joiner_->set_weapon_table(weapons);
 	}
@@ -924,6 +929,11 @@ private:
 	// The receive pump's countdown step plus whether this frame's send pump call builds,
 	// per the loop the joiner's admission stage runs in.
 	bool step_send_pump_loop();
+	// One PumpClientProtocolSend build: the pre-framed packets, the connection's queue,
+	// then what `append` adds behind it (the frame's own 0x2C / 0x0C), the boundary's pump
+	// (its ACK) and the one flush.
+	void build_send_boundary(std::vector<std::vector<uint8_t>> &outbound, uint32_t now_tick,
+			const std::function<void(std::vector<ProtocolMessage> &)> &append = {});
 	// The C2S 0x0F self-heal requests the replica fold and the stale-carrier sweep raised,
 	// appended to the one queue where their producer ran.
 	void queue_carrier_repair_requests();

@@ -1067,14 +1067,12 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 // mission start's C2S 0x0B leads with the same text, its first 16 characters (D-NET-NEW-R3-4)
 // [orig: UI_JoinSelectedSession @0x569bf4..0x569bfa; Game_ApplySessionSettingsToGlobals
 //  @0x551d20..0x551d30, strncpy 0x11 @0x55202a].
-bool run_retail_post_auth_prelude(bool mission_start_loading,
-		const std::string &side_password = {}) {
+bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 	constexpr uint32_t kServerKey = 0x11223344u;
 	constexpr uint32_t kConnectionId = 3;
 	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
 	inmatch::JoinerConnection joiner("RetailPrelude");
 	joiner.set_title(&kJo);
-	joiner.set_mission_start_loading(mission_start_loading);
 	joiner.set_join_request(inmatch::JoinRole::Player, "", "", side_password);
 
 	// Drive the real 0x41/0x42 builders so the post-auth fixture uses this
@@ -1481,23 +1479,21 @@ bool run_retail_post_auth_prelude(bool mission_start_loading,
 	const inmatch::JoinerConnection::PollResult world_end_result =
 			joiner.handle_datagram(
 					world_end_datagram.data(), world_end_datagram.size());
-	std::vector<uint8_t> mission_start_end;
-	if (mission_start_loading) {
-		if (!expect(world_end_result.outbound.empty() && joiner.mission_start_released(),
-				"a loading mission start: the 0x1A releases it and sends nothing")) {
-			return false;
-		}
-		mission_start_end = joiner.push_mission_start_end();
-		if (!expect(!joiner.mission_start_released() && joiner.push_mission_start_end().empty(),
-				"the mission start's end pushes once")) {
-			return false;
-		}
-	} else if (world_end_result.outbound.size() == 1) {
-		mission_start_end = world_end_result.outbound[0];
+	// The 0x1A only releases the mission start; its submissions are the runtime's to
+	// queue and pump (ClientRuntime::push_mission_start_end, D-NET-NEW-L2-6).
+	inmatch::JoinerConnection::MissionStartSubmissions submissions;
+	if (!expect(world_end_result.outbound.empty() && joiner.mission_start_released() &&
+				joiner.take_mission_start_submissions(submissions) &&
+				!joiner.mission_start_released() &&
+				!joiner.take_mission_start_submissions(submissions),
+			"the 0x1A releases the mission start, whose submissions are taken once")) {
+		return false;
 	}
-	if (!expect((mission_start_loading || world_end_result.outbound.size() == 1) &&
+	const std::vector<std::vector<uint8_t>> mission_start_end = joiner.frame_messages(
+			{submissions.first_loadout, submissions.second_loadout, submissions.mission_status});
+	if (!expect(mission_start_end.size() == 1 &&
 				decode_client_session(
-						mission_start_end, client_auth.scrk,
+						mission_start_end[0], client_auth.scrk,
 						client_header, client_messages) &&
 				matches_client_header(client_header, kServerKey, 13, 10) &&
 				client_messages.size() == 3 &&
@@ -1508,9 +1504,8 @@ bool run_retail_post_auth_prelude(bool mission_start_loading,
 				client_messages[2].tag == 0x0B &&
 				client_messages[2].payload ==
 						inmatch::build_mission_status(side_password.substr(0, 16), 0x01070507u),
-			"world-stream 0x1A ends a mission start whose load already ran: the "
-			"fresh-profile loadout pair (team from the 0x04 tail) and the 0x0B, which "
-			"leads with the JSP's text")) {
+			"the mission start's submissions: the fresh-profile loadout pair (team from "
+			"the 0x04 tail) and the 0x0B, which leads with the JSP's text")) {
 		return false;
 	}
 	// The same 0x1A ends the game-start wait: the mission start's input reset
@@ -1838,22 +1833,20 @@ bool run_early_sync_tail_latch() {
 		return false;
 	}
 
-	// Continuity past the latch: the world-stream terminator still triggers the
-	// grouped loadout/status packet.
+	// Continuity past the latch: the world-stream terminator still releases the
+	// mission start and its loadout/status submissions.
 	server_seq.last_inbound_seq = 11;
 	const std::vector<uint8_t> world_end_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x1A, {})});
 	const inmatch::JoinerConnection::PollResult world_end_result = joiner.handle_datagram(
 			world_end_datagram.data(), world_end_datagram.size());
-	return expect(world_end_result.outbound.size() == 1 &&
-				decode_client_session(
-						world_end_result.outbound[0], client_auth.scrk,
-						client_header, client_messages) &&
-				client_messages.size() == 3 &&
-				client_messages[0].tag == 0x2F &&
-				client_messages[1].tag == 0x2F &&
-				client_messages[2].tag == 0x0B,
+	inmatch::JoinerConnection::MissionStartSubmissions submissions;
+	return expect(world_end_result.outbound.empty() &&
+				joiner.take_mission_start_submissions(submissions) &&
+				submissions.first_loadout.tag == 0x2F &&
+				submissions.second_loadout.tag == 0x2F &&
+				submissions.mission_status.tag == 0x0B,
 			"early-tail: the FSM continues normally past the latched stage");
 }
 
@@ -7886,9 +7879,8 @@ int main() {
 	                run_seeded_objective_layout_hint() &&
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&
-	                run_retail_post_auth_prelude(false) &&
-	                run_retail_post_auth_prelude(true) &&
-	                run_retail_post_auth_prelude(true, "TeamPassword1234567") &&
+	                run_retail_post_auth_prelude() &&
+	                run_retail_post_auth_prelude("TeamPassword1234567") &&
 	                run_novaworld_join_tokens_ride_the_wire() &&
 	                run_early_sync_tail_latch() &&
 	                run_client_reducer_preserves_packet_message_order() &&

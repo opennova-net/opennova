@@ -274,6 +274,7 @@ JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 	case PostAuthStage::AwaitWorldStreamEnd:
 		return SendPumpLoop::WorldStreamWait;
 	case PostAuthStage::AwaitMissionStart:
+		return SendPumpLoop::MissionStart;
 	case PostAuthStage::AwaitDeployment:
 		return SendPumpLoop::WorldStateWait;
 	default:
@@ -432,33 +433,25 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 	return submit;
 }
 
-std::vector<uint8_t> JoinerConnection::frame_mission_start_end() {
-	if (post_auth_stage_ != PostAuthStage::AwaitMissionStart) return {};
+bool JoinerConnection::take_mission_start_submissions(MissionStartSubmissions &out) {
+	if (post_auth_stage_ != PostAuthStage::AwaitMissionStart) return false;
 	// The SAME per-side profile kit twice — first with the fixed slot 195, then with the
-	// spawn fill's equipped slot — and the mission status, queued in that order and
-	// pushed together. "Per-side" is literal: the latched team byte picks the profile
-	// side block, and that block's class byte picks the page [orig: @0x525767].
+	// spawn fill's equipped slot — and the mission status, in that order. "Per-side" is
+	// literal: the latched team byte picks the profile side block, and that block's class
+	// byte picks the page [orig: @0x525767].
 	// [orig: Game_StartMission @0x525836 / @0x525c2e -> NetPacket_SendLoadoutSubmit
-	//  @0x42cdc0; the 0x0B @0x52623f..0x52624b; the push @0x526255]
+	//  @0x42cdc0; the 0x0B @0x52623f..0x52624b]
 	const LoadoutSubmit first = build_profile_loadout_submit(assigned_team_, false);
 	const LoadoutSubmit second = build_profile_loadout_submit(assigned_team_, true);
 	const gameprofile::GameProfile *profile =
 			title_ != nullptr ? gameprofile::gameprofile_by_id(title_->game_id) : nullptr;
-	std::vector<uint8_t> out = frame_session({
-			make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(first)),
-			make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second)),
-			make_protocol_message(0x0B, build_mission_status(mission_status_side_password(),
-					packed_game_version(profile != nullptr ? profile->version_text : nullptr))),
-	});
+	out.first_loadout = make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(first));
+	out.second_loadout = make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second));
+	out.mission_status = make_protocol_message(0x0B, build_mission_status(
+			mission_status_side_password(),
+			packed_game_version(profile != nullptr ? profile->version_text : nullptr)));
 	post_auth_stage_ = PostAuthStage::AwaitDeployment;
-	return out;
-}
-
-std::vector<uint8_t> JoinerConnection::push_mission_start_end() {
-	std::vector<uint8_t> datagram = frame_mission_start_end();
-	// The explicit push sends the whole queue at once [orig: @0x526255].
-	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
-	return datagram;
+	return true;
 }
 
 std::vector<uint8_t> JoinerConnection::frame_loadout_resubmit() {

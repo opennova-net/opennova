@@ -351,6 +351,9 @@ public:
 		MissionDataWait, // CNapiGameSession_InitRandomSeedOrRequest: a busy spin
 		SyncTailWait,    // NapiClient_WaitForDisconnect: the send after > 100 ms
 		WorldStreamWait, // NapiClient_WaitForGameStart: a busy spin
+		MissionStart,    // the 0x1A's frame: NapiClient_WaitForGameStart's last send, behind
+		                 // the countdown; then Game_StartMission's load, which pumps only at
+		                 // its own points (ClientRuntime::push_mission_start_end)
 		WorldStateWait,  // Game_StartMission's final wait for S2C 0x0F: a busy spin
 	};
 	SendPumpLoop send_pump_loop() const;
@@ -505,25 +508,31 @@ public:
 	void set_weapon_table(const world::WeaponTable *weapons) { weapons_ = weapons; }
 
 	// The end of the joiner's mission start. Retail's Game_StartMission waits for the S2C
-	// 0x1A (NapiClient_WaitForGameStart), runs the whole definition and model load, sends
+	// 0x1A (NapiClient_WaitForGameStart), runs the whole definition and model load, queues
 	// the first 0x2F (slot 195), freezes the loaded-model list, runs Player_InitPlayer,
-	// sends the second 0x2F (the spawn fill's slot) and the 0x0B, and pushes all three in
-	// one explicit send. An embedder whose mission-start load runs AFTER the release sets
-	// `loading` before the 0x1A arrives: the 0x1A then only releases the mission start
-	// (stage AwaitMissionStart), and frame_mission_start_end() frames the three once its
-	// load has ended. Without it (the load ran before the release) the 0x1A frames them
-	// at once.
+	// queues the second 0x2F (the spawn fill's slot) and the 0x0B, and pumps them out at
+	// its send points (ClientRuntime::push_mission_start_end). The 0x1A only releases the
+	// mission start (stage AwaitMissionStart). An embedder whose mission-start load runs
+	// AFTER the release sets `loading` before the 0x1A arrives and pushes once its load
+	// has ended; without it (no load to run) the runtime pushes in the 0x1A's frame.
 	// [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart @0x524e29, the
 	//  loads @0x525495..0x525762, the first 0x2F @0x525836, the freeze @0x525a6e,
 	//  Player_InitPlayer @0x525bbc, the second 0x2F @0x525c2e, the 0x0B
 	//  @0x52620e..0x52624b, CNapiNetwork_PumpClientProtocolSend @0x526255]
 	void set_mission_start_loading(bool loading) { mission_start_loading_ = loading; }
+	bool mission_start_loading() const { return mission_start_loading_; }
 	bool mission_start_released() const {
 		return post_auth_stage_ == PostAuthStage::AwaitMissionStart;
 	}
-	// The mission start's end once the 0x1A released it: the two 0x2F and the 0x0B framed
-	// as one packet for the caller to send at once (the explicit push). Empty otherwise.
-	std::vector<uint8_t> push_mission_start_end();
+	// The mission start's three submissions once the 0x1A released it, in retail's order,
+	// unframed (the runtime queues each at its own point); the stage moves on to the final
+	// wait for the S2C 0x0F. False when the mission start is not released.
+	struct MissionStartSubmissions {
+		ProtocolMessage first_loadout;  // C2S 0x2F, slot 195 [orig: @0x525836]
+		ProtocolMessage second_loadout; // C2S 0x2F, the spawn fill's slot [orig: @0x525c2e]
+		ProtocolMessage mission_status; // C2S 0x0B [orig: @0x52624b]
+	};
+	bool take_mission_start_submissions(MissionStartSubmissions &out);
 
 	// The current profile's per-side character selections, serialized into the
 	// game-session ClientAuth as CI0/CI1/TR/CTA/CTB/VCA/VCB. Configure this before
@@ -967,9 +976,6 @@ private:
 	std::vector<uint8_t> build_client_hello();
 	std::vector<uint8_t> build_client_auth();
 	std::vector<uint8_t> frame_session(const std::vector<ProtocolMessage> &messages);
-	// The two 0x2F and the 0x0B of the mission start's end, framed (AwaitMissionStart ->
-	// AwaitDeployment); empty in any other stage.
-	std::vector<uint8_t> frame_mission_start_end();
 	std::vector<uint8_t> frame_inner_pending(
 			uint8_t tag, std::vector<uint8_t> body) {
 		return frame_session({make_protocol_message(tag, std::move(body))});

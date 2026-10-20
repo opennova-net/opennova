@@ -1558,14 +1558,12 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == s2c::WAIT_FOR_GAME_START_ACK &&
 		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd) {
 			// The world-stream terminator ends the game-start wait and releases the mission
-			// start, whose end sends the loadout/status submission (frame_mission_start_end):
-			// at once when the embedder's load already ran, else when it ends.
-			// [orig: NapiClient_WaitForGameStart @0x42cc10 from Game_StartMission @0x524e29]
+			// start, whose end queues and pumps the loadout/status submissions
+			// (ClientRuntime::push_mission_start_end): in this frame when the embedder has no
+			// load to run, else when its load ends.
+			// [orig: NapiClient_WaitForGameStart @0x42cc10 (the exit test @0x42ccbf) from
+			//  Game_StartMission @0x524e29]
 			post_auth_stage_ = PostAuthStage::AwaitMissionStart;
-			if (!mission_start_loading_) {
-				std::vector<uint8_t> end = frame_mission_start_end();
-				if (!end.empty()) out.outbound.push_back(std::move(end));
-			}
 			out.game_start_acked = true;
 		} else if (m.tag == s2c::RTT_ECHO) {
 			RttSample sample;
