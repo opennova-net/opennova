@@ -354,11 +354,11 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
 // (pose_mounted_occupant) through the carrier's FULL orientation frame, our
 // stand-in for the posed bone transform
 // [orig: Bone_BuildAttachmentMatrix @0x56c630 in the scan @0x435fe7].
-Vec3 local_point_world_pos(const Entity &veh, const Vec3 &local) {
+EntityPosition local_point_world_pos(const Entity &veh, const Vec3 &local) {
     return entity_local_point_world(veh, local);
 }
 
-Vec3 seat_world_pos(World &world, const Entity &veh, const Seat &s) {
+EntityPosition seat_world_pos(World &world, const Entity &veh, const Seat &s) {
     // USE scores every seat kind (sitex, ctrlx, drvrx and UseGun alike) at
     // its live bone through the carrier's attachment build: the carrier's
     // render-class CTRL callback, then its PANM/bones. That is the provider's
@@ -979,10 +979,11 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
 
     // One candidate point [orig: the shared score/gate block @0x435fe7..0x4361c2 (seats) =
     // @0x43624d..0x436417 (armory points)]. Returns true when it becomes the best hit.
-    const auto consider = [&](const Entity &cand, const Vec3 &sp, int index, SeatType type) {
-        const int32_t dx = to_fixed(sp.x) - eye_x;
-        const int32_t dy = to_fixed(sp.y) - eye_y;
-        const int32_t dz = to_fixed(sp.z) - eye_z + 0x3000;
+    // The candidate point's words less the eye's, the Z biased +0x3000 (D-NET-507).
+    const auto consider = [&](const Entity &cand, const EntityPosition &sp, int index, SeatType type) {
+        const int32_t dx = io::bam_sub(sp.x.q16, eye_x);
+        const int32_t dy = io::bam_sub(sp.y.q16, eye_y);
+        const int32_t dz = io::bam_add(io::bam_sub(sp.z.q16, eye_z), 0x3000);
         // The horizontal and 3D reaches [orig: @0x436047..0x43608a].
         const double horiz_sq = static_cast<double>(dx) * dx + static_cast<double>(dy) * dy;
         const int32_t horiz = ftol_clamped(std::sqrt(horiz_sq));
@@ -1067,17 +1068,23 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
 
     // One label point [orig: the shared draw block @0x5a3553..0x5a36c9 — the +0.1875 u
     // lift, the 4.0 u 3D gate from the player POSITION, LOS, then the draw].
-    const auto emit = [&](const Entity &cand, const Vec3 &point, int index, SeatType type,
+    const auto emit = [&](const Entity &cand, const EntityPosition &point, int index, SeatType type,
                           bool armory) {
-        Vec3 lifted = point;
-        lifted.z += 0.1875f; // [orig: point.z = boneZ + 12288 @0x5a3585]
-        const double dx = static_cast<double>(lifted.x) - static_cast<double>(player.position.x);
-        const double dy = static_cast<double>(lifted.y) - static_cast<double>(player.position.y);
-        const double dz = static_cast<double>(lifted.z) - static_cast<double>(player.position.z);
-        const double d3 = std::sqrt(dx * dx + dy * dy + dz * dz);
-        // [orig: the label radius @0x5a35f0 — dist < 0x40000 (4.0 u), FULL 3D, from the
-        // entity position (not the eye)]
-        if (static_cast<int32_t>(d3 * 65536.0) >= 0x40000) return;
+        // The LOS point is lifted 0x3000; the distance takes the UNLIFTED point's
+        // words less the player's Position words, the x87 length saturated and
+        // truncated, against 0x40000 (D-NET-507).
+        // [orig: HUD_DrawVehicleSeatAndArmoryLabels - `lea esi, [edx+3000h]`
+        //  @0x5a357f, the deltas `sub edx, [esi+0Ch]` / `sub eax, [esi+4]` /
+        //  `sub ecx, [esi+8]` @0x5a359a..0x5a35a0, fsqrt and flt_7C19E0
+        //  @0x5a35cf..0x5a35e6, `cmp eax, 40000h; jge` @0x5a35eb..0x5a35f0]
+        EntityPosition lifted = point;
+        lifted.z.q16 = io::bam_add(point.z.q16, 0x3000);
+        const double dx = double(io::bam_sub(point.x.q16, player.position.x.q16));
+        const double dy = double(io::bam_sub(point.y.q16, player.position.y.q16));
+        const double dz = double(io::bam_sub(point.z.q16, player.position.z.q16));
+        double d3 = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (d3 > 2147418112.0) d3 = 2147418112.0; // flt_7C19E0
+        if (static_cast<int32_t>(d3) >= 0x40000) return;
 		if (!point_los_clear(world, player, cand, lifted, true))
 			return;
 		AttachLabel label;

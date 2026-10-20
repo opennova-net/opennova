@@ -1942,6 +1942,41 @@ void test_carrier_without_a_def_takes_no_rider() {
 	}
 }
 
+// D-NET-507: the label pass measures the UNLIFTED seat point's words from the
+// player's Position words, the x87 length truncated, against 0x40000; only the
+// LOS point is lifted 0x3000. A seat 0x3FFFF words out on the player's level
+// labels (its lifted point lies past 0x40000) and one 0x40000 out does not.
+// [orig: HUD_DrawVehicleSeatAndArmoryLabels - the lift `lea esi, [edx+3000h]`
+//  @0x5a357f, the deltas @0x5a359a..0x5a35a0, the length @0x5a35cf..0x5a35e6,
+//  `cmp eax, 40000h; jge` @0x5a35eb..0x5a35f0]
+void test_label_distance_takes_the_unlifted_words() {
+	for (const int32_t reach : {0x3FFFF, 0x40000}) {
+		Rig r(2.0f);
+		const Entity &pl = r.player();
+		Entity bare;
+		bare.kind = EntityKind::Item;
+		bare.has_item_def = true;
+		bare.has_graphic_model = true;
+		bare.position.set_q16({pl.position.x.q16 + reach, pl.position.y.q16, pl.position.z.q16});
+		bare.heading = 0; // the identity frame: the seat point is the row's words
+		bare.health = 500;
+		bare.health_max = 500;
+		bare.alive = true;
+		Seat sit;
+		sit.type = SeatType::Passenger;
+		sit.bone_index = 1;
+		sit.source_name = "sitex00";
+		sit.seat_local = {0.0f, 0.0f, 0.0f};
+		bare.seats.push_back(sit);
+		const EntityHandle bare_h = r.w.registry.spawn(1, bare);
+		std::vector<AttachLabel> labels;
+		r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
+		bool saw = false;
+		for (const AttachLabel &l : labels) saw = saw || l.entity == bare_h;
+		CHECK(saw == (reach == 0x3FFFF));
+	}
+}
+
 // A candidate with its def but no graphic model (+0x30; a BMS marker, which
 // the mission start's model pass gives none, keeps its type's seat rows)
 // offers nothing: the use-key scan and the label pass skip it, so does the
@@ -5011,6 +5046,7 @@ int main() {
 	test_enemy_on_carried_gun_blocks_root_and_sibling();
 	test_carrier_without_a_def_takes_no_rider();
 	test_carrier_without_a_model_takes_no_rider();
+	test_label_distance_takes_the_unlifted_words();
 	test_attach_yaw_snaps_at_the_request_alone();
 	test_vehicle_admission_stationary_threshold_and_deck();
 	test_seated_board_any_upgrades_on_64_tick_phase();
