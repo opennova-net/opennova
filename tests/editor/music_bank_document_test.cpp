@@ -290,8 +290,15 @@ int test_every_bank() {
 		TEST_EXPECT(fixed);
 		const std::vector<Diagnostic> findings = validate_music_bank_file(bank);
 		for (const Diagnostic &d : findings) TEST_EXPECT(d.severity != DiagnosticSeverity::Error);
-		if (input.label == kStaleChunks)
-			TEST_EXPECT(written != bytes && has_code(findings, "music_bank.ignored_input"));
+		if (input.label == kStaleChunks) {
+			// Both the encoder's leavings are listed: the chunks' reserved pair and their tails past the audio.
+			const auto listed = [&](const char *words) {
+				return std::any_of(bank.issues().begin(), bank.issues().end(),
+				                   [&](const SourceIssue &issue) { return issue.message.find(words) != std::string::npos; });
+			};
+			TEST_EXPECT(written != bytes && has_code(findings, "music_bank.ignored_input") &&
+			            listed("another pair of never-read header bytes") && listed("never-read bytes past their audio"));
+		}
 		streams += bank.bank_row()->streams.size();
 		++banks;
 	}

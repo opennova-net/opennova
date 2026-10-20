@@ -9,9 +9,9 @@
 // file reparses with every edit in place; serialize issues sit on the record and field
 // that cause them; the validator resolves fonts and colors through the stylesheet. S9d:
 // the edits that must not lose authored data, and the variant sweep: every menu of the variant
-// set (the format's minted menus, our base game's) through the document (a Set of every field's
-// own value, then a structural edit of every list kind, undone byte for byte and read back after
-// a save). S9p1:
+// set (the format's minted menus, our base game's, a screen holding a window of no name) through
+// the document (a Set of every field's own value, then a structural edit of every list kind,
+// undone byte for byte and read back after a save). S9p1:
 // a parse note on input retail ignores warns, one on input retail crashes or hangs on
 // blocks the menu and the build. S13 D5: a screen's or a window's NAME set is its own edit, and
 // Rename everywhere rewrites its uses. S27: a window's TYPE set makes the window what the new type reads.
@@ -1948,9 +1948,25 @@ void print_totals(const char *leg, const SweepTotals &totals) {
 		std::printf("  a same-value Set of %s changed the file %d time(s)\n", entry.first.c_str(), entry.second);
 }
 
+// A screen whose first window holds a window of no name, as shipped screens hold some of their plain labels: the
+// sweep's copy of that first window names its windows anew and leaves the nameless one as it is (make_names_unique).
+const char *const kNamelessChild = "<SCREEN>\r\n"
+                                   "\t<NAME>PLAIN</NAME>\r\n"
+                                   "\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+                                   "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+                                   "\t\t<WINDOW type=\"static\">\r\n"
+                                   "\t\t\t<POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>\r\n"
+                                   "\t\t\t<STRING>Label</STRING>\r\n"
+                                   "\t\t</WINDOW>\r\n"
+                                   "\t\t<WINDOW type=\"button\" name=\"GO\">\r\n"
+                                   "\t\t\t<POSITION><LEFT>100</LEFT><TOP>200</TOP><RIGHT>300</RIGHT><BOTTOM>240</BOTTOM></POSITION>\r\n"
+                                   "\t\t</WINDOW>\r\n"
+                                   "\t</WINDOW>\r\n"
+                                   "</SCREEN>\r\n";
+
 // Every menu of the variant set (menus_audio_fixtures.h: fixtures/mnu/'s, the format's minted variants of the
 // shipped menus' forms among them, and our base game's), read loose: the stored bytes through Document::load's own
-// decode, the game's loader's decode (vfs_decode_payload) for the format's parse.
+// decode, the game's loader's decode (vfs_decode_payload) for the format's parse; then the nameless-window screen.
 int variant_sweep() {
 	std::vector<variant_fixtures::Input> menus;
 	const bool all = variant_fixtures::menus(menus);
@@ -1966,6 +1982,11 @@ int variant_sweep() {
 		opennova::vfs_decode_payload(decoded);
 		sweep_menu(menu.label, menu.path, decoded, scratch.root(), totals);
 	}
+	test_temp::TempDir authored("opennova_menu_variant_nameless");
+	const std::string nameless = authored.file("nameless.mnu");
+	if (!test_io::write_text(nameless, kNamelessChild)) sweep_fail(totals, "nameless.mnu", "unwritable");
+	else sweep_menu("nameless.mnu", nameless, std::vector<uint8_t>(kNamelessChild, kNamelessChild + std::strlen(kNamelessChild)),
+	                scratch.root(), totals);
 	print_totals("variant sweep", totals);
 	return all && totals.menus > 0 && totals.failures == 0 ? 0 : 1;
 }

@@ -8,7 +8,8 @@
 // texture the project lacks is the graph's finding, the preview's note only; the build
 // still packs. A menu renders again only when it or a file it read moves, or a variable it
 // names changes (S13 D4: a stylesheet edit that changes no variable renders nothing). The check
-// renders a menu a step (S13 A3), its rows those of one run to its end.
+// renders a menu a step (S13 A3), its rows those of one run to its end. A note no window names
+// (a font a LIST_BOX alone names) sits on the screen.
 // Every screen of every menu of the variant set (the format's minted menus, our base game's),
 // read with our base game's files beside it, renders, in the document's order, and every
 // texture and font name the compiler interns is an edge of the asset graph (the split the
@@ -511,6 +512,53 @@ static int test_render_check_steps() {
 	return 0;
 }
 
+// A note no window of the screen names sits on the screen itself (menu_note_address): a font a combo box's
+// LIST_BOX alone names, which the project holds and the game cannot read, is a Problems row on the screen (no
+// window, no field) and, in the menu_render query, a note of no window.
+static int test_screen_level_note() {
+	test_temp::TempDir dir("opennova_menu_render_screen_note");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Screen note"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	std::string font;
+	for (const AssetEntry &asset : view.project.scan->entries)
+		if (asset.kind == AssetKind::Font) {
+			font = asset.relative_path;
+			break;
+		}
+	TEST_EXPECT(!font.empty());
+	if (font.empty()) return 1;
+	const std::string fonts = std::filesystem::path(root + "/" + font).parent_path().generic_string();
+	TEST_EXPECT(test_io::write_text(fonts + "/listfont.fnt", "not a font"));
+	TEST_EXPECT(test_io::write_text(root + "/menus/combo.mnu",
+			"<SCREEN>\r\n<NAME>PICK</NAME>\r\n<WINDOW TYPE=\"COMBOBOX\" NAME=\"CHOICE\">\r\n"
+			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>190</RIGHT><BOTTOM>24</BOTTOM></POSITION>\r\n"
+			"<LIST_BOX>\r\n<POSITION><LEFT>0</LEFT><TOP>24</TOP><RIGHT>190</RIGHT><BOTTOM>136</BOTTOM></POSITION>\r\n"
+			"<FONT><NAME>listfont.fnt</NAME></FONT>\r\n</LIST_BOX>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	const Diagnostic *row = nullptr;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == "menu.render.font_unreadable" && d.asset == "menus/combo.mnu") row = &d;
+	TEST_EXPECT(row && row->record == "PICK" && row->child_id == 0 && row->field.empty() &&
+			row->record_kind == node_kind(MenuKind::Screen));
+	const MenuRenderCheck *check = menu_render_check(view.findings.project_checks.get());
+	const MnuDocument *document = check ? check->document("menus/combo.mnu") : nullptr;
+	TEST_EXPECT(document && !document->rows().empty());
+	if (!document || document->rows().empty()) return 1;
+	const opennova::io::JsonValue json = menu_render_to_json(view, "menus/combo.mnu", document->rows()[0]->id, JsonPage());
+	TEST_EXPECT(json.get("notes"));
+	bool on_screen = false;
+	for (const opennova::io::JsonValue &note : json.get("notes")->array)
+		on_screen = on_screen || (note.get_string("code", "") == "font_unreadable" && note.get_number("index", 0) == -1 &&
+		                          note.get_number("id", 1) == 0 && note.get_string("field", "x").empty());
+	TEST_EXPECT(on_screen);
+	return 0;
+}
+
 int main() {
 	const std::pair<const char *, int (*)()> cases[] = {
 		{ "blank_startup", test_blank_startup },
@@ -518,6 +566,7 @@ int main() {
 		{ "notes_alone_recompose", test_notes_alone_recompose },
 		{ "render_check_steps", test_render_check_steps },
 		{ "variant_menus", test_variant_menus },
+		{ "screen_level_note", test_screen_level_note },
 	};
 	for (const auto &entry : cases) {
 		std::fflush(stdout);
