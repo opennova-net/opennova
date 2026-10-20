@@ -106,6 +106,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 // of a kept slot does not.
 void stamp_player_list_add(NapiNPConnection &conn, const world::World &world);
 
+// server_deploy.cpp defines the deploy, death, spectator and team-change legs
+// declared below; admit_synthetic_peer stays with the add in server_spawn.cpp.
+
 // Mutate an already-added authoritative player between the ordinary body and
 // retail spectator state. The connection flag is serialized by S2C 0x75; the
 // neutral/hidden entity keeps its roster identity while simulation continues.

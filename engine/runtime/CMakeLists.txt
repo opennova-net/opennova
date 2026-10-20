@@ -488,6 +488,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/punt_log.cpp # _PUNT.TXT, _CHEAT.TXT and punt.log
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_deploy.cpp               # the deploy, death, spectator and team-change legs (split off server_spawn.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_routes.cpp       # the item events, crossings and guidance routes (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_loadout_grant.cpp        # the C2S 0x2F grant family (split off server_message_dispatch.cpp)
