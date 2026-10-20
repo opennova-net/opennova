@@ -585,7 +585,7 @@ void dispatch_file_chunk_request(const GameConfig &config, const ProtocolMessage
 }
 
 // See header. The 0x64 chunk is the handler's one send: the joiner's first S2C 0x16 is the
-// scoreboard clock's (emit_periodic_session_maintenance), whose one serializer call is the
+// scoreboard clock's (emit_scoreboard_boundary), whose one serializer call is the
 // periodic broadcast, so no list rides this reply (D-NET-504).
 // [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0; NetPacket_SerializeScoreboard0x16
 //  @0x504B80, its one call Server_BuildAndBroadcastScoreboard @0x50D960 (@0x50DDE2), whose one

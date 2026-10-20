@@ -146,11 +146,18 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	uint32_t ping_sum = 0;
 	uint32_t active = 0;
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		// *(player-1) && !*player (not the local slot) && !slot+96478 &&
-		// slot+383 >= 1860 [orig: @0x4C53C0..0x4C53F1]
+		// The slot's active byte, not the local slot (+5), not a bot
+		// (+0x178E3), and its play ticks (slot+0x184) at least 1860
+		// [orig: CNetQuality_UpdateMetrics @0x4C5376..0x4C5398, `cmp [edi+17Fh],
+		//  744h` with edi = slot+5 @0x4C538E]
+		const world::MatchPlayer *row =
+				ctx.world != nullptr ? ctx.world->match.player(conn.link.owned_entity)
+						: nullptr;
 		if (!is_in_match(conn) ||
 				conn.link.mode == replication::TransportMode::Loopback ||
-				conn.reply.control_live_ticks < CONTROL_REQUEST_LIVE_GATE_TICKS)
+				row == nullptr ||
+				static_cast<int32_t>(row->play_ticks) <
+						static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS))
 			continue;
 		uint32_t mean = Server_PlayerAveragePingMs(conn);
 		if (mean > 0xFFu) mean = 0xFFu;               // per-slot clamp @0x4C540B

@@ -1381,7 +1381,8 @@ bool check_model_page_cursor_wraps_at_the_list_count() {
 		self.phase = inmatch::ConnectionPhase::InMatch;
 		self.burst.spawned = true;
 		self.link.owned_entity = player;
-		self.reply.control_live_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+		world.match.upsert_player({player, 0, "Host"});
+		world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 		std::vector<uint32_t> out;
 		for (int q = 0; q < quartets; ++q) {
 			self.reply.control_request_countdown = 0;

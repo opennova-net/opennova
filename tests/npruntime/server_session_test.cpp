@@ -2859,7 +2859,10 @@ bool check_listen_host_receives_targeted_maintenance() {
 	self.burst.spawned = true;
 	self.link.owned_entity = player;
 	self.reply.player_name = "ListenHost";
-	self.reply.control_live_ticks =
+	// The quartet's live age is the slot's play ticks (slot+0x184)
+	// [orig: Server_UpdateAllActivePlayerSlots @0x5189DA..0x5189E4].
+	world.match.upsert_player({player, 0, "ListenHost"});
+	world.match.player(player)->play_ticks =
 			opennova::inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 	self.reply.control_request_countdown = 0;
 
@@ -2889,11 +2892,14 @@ bool check_listen_host_receives_targeted_maintenance() {
 	const std::size_t model_i =
 			index_of(opennova::s2c::LOADED_MODEL_PAGE_REQUEST);
 	const std::size_t frame_i = index_of(opennova::s2c::PER_FRAME_UPDATE);
-	return expect(scoreboard_i < integrity_i && integrity_i < quality_i &&
-	                      quality_i < charattr_i && charattr_i < input_i &&
-	                      input_i < time_i && time_i < model_i &&
-	                      model_i < frame_i,
-	              "listen-host slot receives ordered 0x16/0x31/0x79/quartet/0x0A maintenance");
+	// The quartet rides the tick-head walk, the 0x16 and the family the
+	// scoreboard boundary after the script pass, the 0x79 the tail of the
+	// periodic block, the 0x0A the per-slot fan [orig: Server_TickUpdate - the walk
+	// @0x51D88B, @0x51D90D / @0x51D912, @0x51E1B2, @0x51E3E4].
+	return expect(charattr_i < input_i && input_i < time_i && time_i < model_i &&
+	                      model_i < scoreboard_i && scoreboard_i < integrity_i &&
+	                      integrity_i < quality_i && quality_i < frame_i,
+	              "listen-host slot receives ordered quartet/0x16/0x31/0x79/0x0A maintenance");
 }
 
 // Retail maintenance follows authoritative player-slot state, not free-running
@@ -2920,6 +2926,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 			opennova::world::spawn_remote_player(world, player_spawn);
 	if (!expect(player.valid(), "maintenance peer's player entity spawned"))
 		return false;
+	world.match.upsert_player({player, 1, "Peer"});
 	opennova::world::Entity *player_entity = world.registry.get(player);
 	// The player body's per-tick recoil draw shares the PRNG_Next16 stream the
 	// control seed reads: suspend the body (+0x1C4 held, as AINODEPATH does) so
@@ -3021,15 +3028,17 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	            "quality countdown reload emits exactly 0x136 boundaries later"))
 		return false;
 
-	// Deploy pending pauses the control live-age increment; it never erases age
+	// A held slot's body is hidden (its 0x0A re-sets bit 0 while the hold is
+	// up), which pauses the live age (the play ticks); it never erases age
 	// already accrued. Filter 0x80 remains independent and still admits the slot.
-	const uint32_t age_before_pending =
-			ctx.np_protocol.connection_list.front().reply.control_live_ticks;
+	// [orig: Server_TickUpdate `test [eax+24h], 1` @0x51D971;
+	//  NetPacket_WritePlayerState @0x4FF7B8]
+	const uint32_t age_before_pending = world.match.player(player)->play_ticks;
 	ctx.np_protocol.connection_list.front().link.respawn_pending = true;
+	player_entity->flags |= 1u;
 	opennova::inmatch::Server_TickUpdate(ctx);
 	const std::vector<Emitted> pending_before_live = drain();
-	if (!expect(ctx.np_protocol.connection_list.front().reply.control_live_ticks ==
-	                    age_before_pending &&
+	if (!expect(world.match.player(player)->play_ticks == age_before_pending &&
 	                    find(pending_before_live,
 	                            opennova::s2c::CHARATTR_CRC_CHALLENGE) == nullptr,
 	            "deploy pending pauses without resetting the control live age"))
@@ -3091,11 +3100,9 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	            "world tick 744 cannot bypass retail's 1,860-live-tick gate"))
 		return false;
 
-	uint32_t live_calls =
-			ctx.np_protocol.connection_list.front().reply.control_live_ticks;
 	bool early_quartet = false;
-	for (; live_calls < opennova::inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
-			++live_calls) {
+	while (world.match.player(player)->play_ticks <
+			opennova::inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS) {
 		opennova::inmatch::Server_TickUpdate(ctx);
 		const std::vector<Emitted> messages = drain();
 		early_quartet = early_quartet ||
@@ -3109,7 +3116,6 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 		return false;
 
 	opennova::inmatch::Server_TickUpdate(ctx); // next call observes age 1,860
-	++live_calls;
 	const std::vector<Emitted> first_control = drain();
 	const Emitted *charattr = find(
 			first_control, opennova::s2c::CHARATTR_CRC_CHALLENGE);
@@ -3298,10 +3304,10 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	// After maturity, deploy/death presentation does not reset or pause the
 	// quartet countdown: UpdateAll checks its slot blockers and the saved age,
 	// not entity health or the respawn-pending bit. Age itself pauses while hidden.
-	const uint32_t mature_age =
-			ctx.np_protocol.connection_list.front().reply.control_live_ticks;
+	const uint32_t mature_age = world.match.player(player)->play_ticks;
 	ctx.np_protocol.connection_list.front().reply.control_request_countdown = 1;
 	ctx.np_protocol.connection_list.front().link.respawn_pending = true;
+	player_entity->flags |= 1u; // the held slot's 0x0A keeps its body hidden
 	player_entity->alive = false;
 	player_entity->health = 0;
 	player_entity->engine_flags |= opennova::world::kEntityFlagDead;
@@ -3320,8 +3326,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	                    find(deploy_pending, opennova::s2c::TIME_SYNC_PING) != nullptr &&
 	                    find(deploy_pending,
 	                            opennova::s2c::LOADED_MODEL_PAGE_REQUEST) != nullptr &&
-	                    ctx.np_protocol.connection_list.front().reply.control_live_ticks ==
-	                            mature_age,
+	                    world.match.player(player)->play_ticks == mature_age,
 	            "mature countdown continues through dead/deploy pending while age pauses"))
 		return false;
 	ctx.np_protocol.connection_list.front().link.respawn_pending = false;

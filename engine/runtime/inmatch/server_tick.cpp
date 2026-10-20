@@ -555,6 +555,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			break;
 		}
 	}
+	// The scoreboard boundary follows the script pass's BMS quarter pass and
+	// precedes the play-tick walk [orig: Server_TickUpdate @0x51D8F9..0x51D917].
+	emit_scoreboard_boundary(ctx, world);
 	advance_play_ticks(ctx, world);
 	lap.restart();
 	world.match.advance_tick(
@@ -675,10 +678,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			}
 		}
 	}
-
-	// Queue per-peer retail maintenance so the requests share HostSession's next open
-	// S2C boundary with the 0x0A fan above; it runs through the linger too (D-NET-654).
-	emit_periodic_session_maintenance(ctx, world, periodic_second);
 
 	// (2d) The capture transaction at 1 Hz [orig: the
 	// Server_TickUpdate g_PeriodicSecondTimer block @0x51DF50..0x51DF8C: proximity ->
@@ -902,37 +901,19 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 	}
 
-	// (2c) Spawn-wave status: requester-specific S2C 0x6E at 1 Hz, sent once, to
-	// every in-match player whose body's dead bit or slot's hold (+89912 & 0x10)
-	// is set; the Health word is not read.
-	// [orig: Server_TickUpdate - the slot's state 6 and entity @0x51E062..0x51E06C,
-	//  `test [eax+24h], 2` @0x51E083, the hold @0x51E089, mask 32 @0x51E09D,
-	//  NetPacket_WriteSpawnWaveStatus @0x507490 (the call @0x51E0AD), userParam 1
-	//  @0x51E0C4]
-	if (ctx.is_in_session && !world.match.outcome().ended &&
-			periodic_second) {
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-			bool dead = false;
-			if (conn.link.owned_entity.valid()) {
-				const world::Entity *e = world.registry.get(conn.link.owned_entity);
-				dead = e != nullptr &&
-						((e->flags | e->engine_flags) & world::kEntityFlagDead) != 0;
-			}
-			if (conn.link.respawn_pending || dead)
-				conn.link.transport->host_send(
-						s2c::SPAWN_WAVE_STATUS,
-						build_spawn_wave_status_body(
-								world, conn), // the slot's rows (D-NET-581)
-						/*reliable=*/false);
-		}
-	}
+	// (2c) The periodic second's slot walk after the capture transaction: the
+	// dead-age counter, the 0x6E, the t35 and t7 punts
+	// [orig: Server_TickUpdate @0x51DFB0..0x51E1A5].
+	if (periodic_second) update_periodic_slot_walk(ctx, world);
 
 	// The last statement of retail's periodic-second block: every player's kit
 	// weight is recomputed from its live rows [orig: Server_TickUpdate @0x51e1ab
 	// -> Server_RecalculateAllPlayerScores @0x5014E0].
 	if (periodic_second)
 		Server_RecalculateAllPlayerKitWeights(ctx.np_protocol.connection_list, world);
+	// The 0x79 boundary and the duplicate-PCID kick, every tick, through the
+	// linger too (D-NET-654) [orig: Server_TickUpdate @0x51E1B2..0x51E20C].
+	emit_network_quality_boundary(ctx);
 
 	// The in-session team-mode downed-state resend, on its own 62-tick countdown
 	// [orig: Server_TickUpdate @0x51E2D0..0x51E378].

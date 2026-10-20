@@ -15,7 +15,8 @@ namespace opennova::inmatch {
 // The per-slot whole-second countdowns of the periodic-second block.
 void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world);
 
-// The per-player maintenance walk at the tick head, ahead of the receive pump.
+// The per-player maintenance walk at the tick head, ahead of the receive pump
+// (spawn protection, the overlay visit, the frontier hint, the control quartet).
 void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world);
 
 // The 1 Hz violation sweep (the flag carry limit, the friendly-kill and
@@ -31,10 +32,17 @@ void emit_requester_score_refreshes(NapiNPServerCtx &ctx, world::World &world);
 // The per-slot RTT request clock.
 void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world);
 
-// The stock host's per-peer maintenance requests (0x16, the integrity family,
-// 0x79, the control quartet) and the age and silence punts.
-void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world,
-		bool periodic_second);
+// The scoreboard boundary (the 0x16 and the integrity family), every tick after
+// the script pass and ahead of the play-tick walk.
+void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world);
+
+// The periodic second's slot walk after the capture transaction (the dead-age
+// counter, the 0x6E, the t35 and t7 punts).
+void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world);
+
+// The 0x79 countdown and the duplicate-PCID kick, every tick after the periodic
+// second's block.
+void emit_network_quality_boundary(NapiNPServerCtx &ctx);
 
 // The play-tick walk after the script pass.
 void advance_play_ticks(NapiNPServerCtx &ctx, world::World &world);

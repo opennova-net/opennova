@@ -373,13 +373,12 @@ struct SessionReplyState {
 	// so it has no per-connection epoch/serial. Network quality retains its own
 	// independently witnessed global clock.
 	// Per-player maintenance state [orig: Server_UpdateAllActivePlayerSlots
-	// @0x518820]. Eligible active player slots (including the listen host) accrue
-	// the 1,860-tick age after the quartet check; hidden/deploy-pending pauses
-	// (never resets) that age. The join's network reset seeds the 744-tick
-	// countdown (PlayerSlot_ResetNetworkState @0x4F9FD0, @0x4FA021), so the first
-	// quartet comes 744 gated calls after the age gate opens (D-NET-532). Once
-	// mature, its countdown continues through death/deploy presentation state.
-	uint32_t control_live_ticks = 0;
+	// @0x518820]. The quartet's age is the slot's play ticks (slot+0x184,
+	// world::MatchPlayer::play_ticks). The join's network reset seeds the
+	// 744-tick countdown (PlayerSlot_ResetNetworkState @0x4F9FD0, @0x4FA021), so
+	// the first quartet comes 744 gated calls after the age gate opens
+	// (D-NET-532). Once mature, its countdown continues through death/deploy
+	// presentation state.
 	uint32_t control_request_countdown = 0;
 	uint32_t charattr_unanswered_count = 0;
 	uint32_t time_sync_unanswered_count = 0;

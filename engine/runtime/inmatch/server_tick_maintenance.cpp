@@ -147,11 +147,14 @@ void emit_frontier_hint(world::World &world, NapiNPConnection &conn) {
 	conn.reply.frontier_hint_pending = false;
 }
 
+void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnection &conn);
+
 } // namespace
 
 // The per-player maintenance walk at the tick head, ahead of the receive pump:
-// per slot, the spawn-protection arm, the minimap overlay visit, then the
-// frontier hint. All three sit in the walk's state-6 block, and the round end
+// per slot, the spawn-protection arm, the minimap overlay visit, the frontier
+// hint, then the control quartet. All four sit in the walk's state-6 block, and
+// the round end
 // moves every slot to state 7, which the match outcome stands for here, so
 // none runs through the end-round linger. The walk is the slot table's, in
 // slot order: a visit's carrier pass can flush its ring to another slot, so
@@ -159,7 +162,8 @@ void emit_frontier_hint(world::World &world, NapiNPConnection &conn) {
 // [orig: Server_UpdateAllActivePlayerSlots @0x518820 - the slot-index walk
 //  @0x518824..0x518A81, the state test @0x518878, the protection
 //  @0x5188AC..0x5188C5, the overlay visit @0x5188D6, the frontier hint
-//  @0x518929; called @0x51D88B; Server_ProcessRoundEnd's state 7 @0x51685E]
+//  @0x518929, the quartet @0x5189AD..0x518A79; called @0x51D88B;
+//  Server_ProcessRoundEnd's state 7 @0x51685E]
 void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.match.outcome().ended) return;
 	std::vector<NapiNPConnection *> slots;
@@ -172,6 +176,7 @@ void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 		tick_spawn_protection(world, *conn);
 		emit_minimap_overlay_for_slot(ctx, world, *conn);
 		emit_frontier_hint(world, *conn);
+		run_control_quartet(ctx, world, *conn);
 	}
 }
 
@@ -306,13 +311,6 @@ const world::Entity *integrity_player(
 	return player;
 }
 
-const world::Entity *control_age_player(
-		const NapiNPConnection &conn, const world::World &world) {
-	if (!is_in_match(conn) || conn.link.transport == nullptr)
-		return nullptr;
-	return world.registry.get(conn.link.owned_entity);
-}
-
 bool scoreboard_recipient(const NapiNPConnection &conn) {
 	// The 0x16 send walk uses the broader active-player mask 0x20. It does not
 	// reuse either integrity's state-6/entity gate or quality's state-6/7
@@ -324,6 +322,99 @@ bool scoreboard_recipient(const NapiNPConnection &conn) {
 			conn.phase >= ConnectionPhase::PlayerAdded &&
 			conn.phase < ConnectionPhase::Goodbye &&
 			conn.link.owned_entity.valid() && conn.link.transport != nullptr;
+}
+
+} // namespace
+
+namespace {
+
+// The control quartet, in the walk's state-6 block after the frontier hint: in
+// session, for a slot whose live age has reached 1860 (slot+0x184, the play
+// ticks the play-tick walk adds to later in the tick, so the previous ticks'
+// value), the two silence punts (the character-attribute silence first), then
+// the 744-tick countdown and, at its zero, the 0x39 / 0x42, the 0x43 and the
+// 0x68. Once mature, the countdown runs on through death and deploy states.
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 - is_in_session @0x5189AD,
+//  the live age `(int)slot[97] >= 1860` @0x5189DA..0x5189E4, the punts
+//  @0x5189F5..0x518A3A, the countdown @0x518A42..0x518A5D, the sends @0x518A67 /
+//  @0x518A73 / @0x518A79; the play-tick walk's slot test and add
+//  @0x51D95E..0x51D97E, the add @0x51D977]
+void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnection &conn) {
+	const world::MatchPlayer *row = world.match.player(conn.link.owned_entity);
+	if (!ctx.is_in_session || !is_in_match(conn) || conn.link.transport == nullptr ||
+			row == nullptr ||
+			static_cast<int32_t>(row->play_ticks) <
+					static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS))
+		return;
+	SessionReplyState &reply = conn.reply;
+	if (reply.charattr_unanswered_count >= kPuntSilenceLimit) {
+		stage_host_punt(conn, kPuntCharattrSilence);
+		return;
+	}
+	if (reply.time_sync_unanswered_count >= kPuntSilenceLimit) {
+		stage_host_punt(conn, kPuntTimeSyncSilence);
+		return;
+	}
+	bool control_due = reply.control_request_countdown == 0;
+	if (!control_due) {
+		--reply.control_request_countdown;
+		control_due = reply.control_request_countdown == 0;
+	}
+	if (control_due) {
+		reply.control_request_countdown = CONTROL_REQUEST_PERIOD_TICKS;
+
+		++reply.charattr_unanswered_count;
+		++reply.time_sync_unanswered_count;
+		if (reply.control_challenge_seed == 0)
+			reply.control_challenge_seed = next_maintenance_prng16(world);
+		std::vector<uint8_t> challenge;
+		io::append_u32_le(challenge, reply.control_challenge_seed);
+		conn.link.transport->host_send(
+				s2c::CHARATTR_CRC_CHALLENGE, std::move(challenge));
+
+		// The authority's charattr disable latches, eight packed into bits
+		// 0..5/12/13 (0 until a session's mp_No* word raised one, so every
+		// healthy-LAN capture carries 0; D-NET-374).
+		// [orig: Server_SendEntityHandleAndInputState @0x507BF2..0x507C29 ->
+		//  CharAttr_PackDisabledProperties @0x412550 (IDB
+		//  Input_PackStateFlags until 2026-10-12)]
+		const uint16_t latches = world.tables.charattr_disabled_word;
+		conn.link.transport->host_send(s2c::CHARATTR_DISABLED_PROPERTIES,
+				{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
+				/*reliable=*/false);
+
+		const uint32_t host_ms =
+				io::host_milliseconds_for_logic_tick(world.logic_tick);
+		if (reply.time_sync_host_baseline_ms == 0)
+			reply.time_sync_host_baseline_ms = host_ms;
+		if (reply.time_sync_round_host_ms == 0) {
+			++reply.time_sync_sequence;
+			reply.time_sync_round_host_ms = host_ms;
+		}
+		std::vector<uint8_t> time_sync;
+		io::append_u32_le(time_sync, reply.time_sync_sequence);
+		conn.link.transport->host_send(
+				s2c::TIME_SYNC_PING, std::move(time_sync));
+
+		// A dedicated host sends no 0x68; any other advances the slot's
+		// cursor by 50 and wraps it to 0 at its own frozen loaded-model
+		// list count (the IDB's "viewport height" getter returns that
+		// count, g_LoadedModelChallengeCount), unsigned.
+		// [orig: Server_SendRandomSeedSync @0x511360 - the dedicated test
+		//  @0x511363..0x51136A, CEffectWorld_GetViewportDimensions @0x511375
+		//  (g_LoadedModelChallengeCount @0x5B1578), +50 @0x51137E, `jb`
+		//  @0x511391, the wrap @0x511393, mask 32 @0x5113C5, the send @0x5113D4]
+		if (ctx.connection_mode != ConnectionMode::HostOnly) {
+			reply.loaded_model_page_cursor += 50u;
+			if (reply.loaded_model_page_cursor >= ctx.loaded_model_list_count)
+				reply.loaded_model_page_cursor = 0;
+			std::vector<uint8_t> model_page;
+			io::append_u32_le(model_page, reply.loaded_model_page_cursor);
+			conn.link.transport->host_send(
+					s2c::LOADED_MODEL_PAGE_REQUEST, std::move(model_page),
+					/*reliable=*/false);
+		}
+	}
 }
 
 } // namespace
@@ -479,256 +570,149 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
 	}
 }
 
-// Emit the stock host's player maintenance requests. Integrity is a global
-// scoreboard-cadence broadcast and remains active while a live player holds the
-// deployment UI. Network quality owns a separate global countdown. The control
-// quartet has an authoritative slot-state/live-age gate and is never derived
-// from a world-clock epoch.
-// [orig: Server_TickUpdate @0x51D7E0 -> @0x508540; per-player quartet
-// Server_UpdateAllActivePlayerSlots @0x518820]
-// `periodic_second` is the shared one-second boundary: the dead-age counter
-// below lives inside retail's g_PeriodicSecondTimer block and advances once
-// per second, not once per tick.
-void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world,
-		bool periodic_second) {
-	// Retail advances both global clocks before its is_in_session gates. The
-	// scoreboard counter is increment-before-compare and the family toggle flips
-	// once per crossed boundary even if the recipient walk sends nothing.
-	// [orig: Server_TickUpdate @0x51D8F9..0x51D917;
-	// Server_BroadcastWeaponSlotStateToPlayers @0x50868E]
-	bool integrity_boundary = false;
-	bool entity_integrity_family = false;
+// The scoreboard boundary, every tick after the script pass and ahead of the
+// play-tick walk, ahead of the session and round-over tests with none of its
+// own: the scoreboard clock (incremented before its compare) and on each
+// boundary the 0x16 rebuilt and broadcast to every active slot (no rows past
+// the round end, D-NET-635), then the integrity family to the state-6 slots
+// with a live entity (none past the round end, all in state 7), its toggle
+// flipping each boundary even when the walk sends nothing.
+// [orig: Server_TickUpdate @0x51D8F9..0x51D917 - the 0x16 @0x51D90D, the
+//  family @0x51D912; Server_BroadcastWeaponSlotStateToPlayers @0x508540 (state 6
+//  @0x508584, the toggle @0x50868E); Server_ProcessRoundEnd @0x51685E]
+void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 	++ctx.scoreboard_broadcast_timer;
-	if (ctx.scoreboard_broadcast_timer > 0x136u) {
-		ctx.scoreboard_broadcast_timer = 0;
-		integrity_boundary = true;
-		entity_integrity_family = ctx.integrity_entity_family_next;
-		ctx.integrity_entity_family_next = !ctx.integrity_entity_family_next;
-	}
-	bool network_quality_boundary =
-			ctx.network_quality_broadcast_countdown == 0;
-	if (!network_quality_boundary) {
-		--ctx.network_quality_broadcast_countdown;
-		network_quality_boundary =
-				ctx.network_quality_broadcast_countdown == 0;
-	}
-	if (network_quality_boundary)
-		ctx.network_quality_broadcast_countdown =
-				NETWORK_QUALITY_BROADCAST_PERIOD_TICKS;
-	// Ahead of retail's session and round-over tests: the 0x16 to every active
-	// slot (no rows past the round end, D-NET-635), the integrity family to
-	// state-6 slots alone (none past it, all in state 7; the toggle above flips
-	// regardless), the 0x79 to states 6 / 7. [orig: the 0x16 @0x51D90D, the family
-	//  @0x51D912, is_in_session @0x51D9A5, g_SpawnSuccessGate @0x51D9B1; the 0x79
-	//  @0x51E1B2 ahead of @0x51E211; state 6 @0x508584; Server_ProcessRoundEnd @0x51685E]
-	const bool round_over = world.match.outcome().ended;
-	const ProtocolMessage scoreboard = integrity_boundary
-			? build_player_list_message(
-					ctx.config, ctx.np_protocol.connection_list, &world)
-			: ProtocolMessage{};
+	if (ctx.scoreboard_broadcast_timer <= 0x136u) return;
+	ctx.scoreboard_broadcast_timer = 0;
+	const bool entity_integrity_family = ctx.integrity_entity_family_next;
+	ctx.integrity_entity_family_next = !ctx.integrity_entity_family_next;
+	const ProtocolMessage scoreboard =
+			build_player_list_message(ctx.config, ctx.np_protocol.connection_list, &world);
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		const world::Entity *player = round_over ? nullptr : integrity_player(conn, world);
-		// The retail boundary rebuilds and broadcasts the transient 0x16 before
-		// entering the integrity family walk. Keep both semantic records on the
-		// same owner boundary and in that order. [orig: @0x51D90D/@0x51D912]
-		if (integrity_boundary && scoreboard_recipient(conn)) {
+		if (scoreboard_recipient(conn))
 			conn.link.transport->host_send(
 					scoreboard.tag, scoreboard.payload, scoreboard.reliable);
-		}
-		if (player != nullptr && integrity_boundary) {
-			if (entity_integrity_family) {
-				conn.link.transport->host_send(
-						s2c::ENTITY_CHECKSUM_REQ, {0xFF, 0x00, 0x00},
-						/*reliable=*/false);
-			} else {
-				// AdmDef_GetEntryByIndex(*(u8 *)(entity+688)), then row =
-				// adm_entry[1] [orig: @0x508540]. An unresolved equipped ADM
-				// skips the request exactly as retail does; no fallback row exists.
-				const world::WeaponTableEntry *adm =
-						world.tables.weapons.by_index(player->equipped_adm_index);
-				if (adm != nullptr && adm->ammo_index >= 0 && adm->ammo_index <= 0xFF) {
-					conn.link.transport->host_send(
-							s2c::LOADOUT_CRC_REQ,
-							{static_cast<uint8_t>(adm->ammo_index), 0x00, 0x00},
-							/*reliable=*/false);
-				}
-			}
-		}
-
-		// Despite its old "spectator flag" label, S2C 0x79 is the low byte
-		// of CNetStats.host_quality. Retail's global countdown starts at zero,
-		// reloads to 0x136, and sends with filter 0x80 (player-slot states 6/7,
-		// including dead or respawn-pending slots; no entity-health gate).
-		// This is one GLOBAL host boundary: a player filtered out at that instant
-		// waits for the next boundary and never receives a per-peer catch-up.
-		if (network_quality_boundary && active_player_recipient(conn)) {
+	}
+	if (world.match.outcome().ended) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		const world::Entity *player = integrity_player(conn, world);
+		if (player == nullptr) continue;
+		if (entity_integrity_family) {
 			conn.link.transport->host_send(
-					s2c::NETWORK_QUALITY, {ctx.host_network_quality});
+					s2c::ENTITY_CHECKSUM_REQ, {0xFF, 0x00, 0x00},
+					/*reliable=*/false);
+			continue;
+		}
+		// AdmDef_GetEntryByIndex(*(u8 *)(entity+688)), then row =
+		// adm_entry[1] [orig: @0x508540]. An unresolved equipped ADM
+		// skips the request exactly as retail does; no fallback row exists.
+		const world::WeaponTableEntry *adm =
+				world.tables.weapons.by_index(player->equipped_adm_index);
+		if (adm != nullptr && adm->ammo_index >= 0 && adm->ammo_index <= 0xFF) {
+			conn.link.transport->host_send(
+					s2c::LOADOUT_CRC_REQ,
+					{static_cast<uint8_t>(adm->ammo_index), 0x00, 0x00},
+					/*reliable=*/false);
 		}
 	}
-	Server_KickDuplicatePcids(ctx, network_quality_boundary); // [orig: @0x51E20C]
-	// State-6 work: the quartet and the punts under retail's session tests, the two age
-	// counters under state 6 alone, so their session gate is ours (D-NET-696; no production
-	// path clears is_in_session) [orig: @0x5189AD, @0x51E0D4; @0x51D966, @0x51E062].
-	if (!ctx.is_in_session || round_over) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+}
+
+// The periodic second's slot walk, after the capture transaction, slot by slot
+// in slot order: for a state-6 slot with an entity, the dead-age counter (the
+// consecutive periodic seconds its body carries the dead bit, zeroed by a live
+// second) and the S2C 0x6E (sent once) when the body's dead bit or the slot's
+// hold is set, with no session test; then in session the t35 deploy-idle punt
+// and the t7 dead-too-long punt, the second reached after the first (whose
+// latch then refuses it). The round end moves every slot to state 7, which the
+// match outcome stands for. The t35 arm: a remote slot held (+89912 & 0x10)
+// strictly over six minutes from its state-6 entry stamp, not a spectator. The
+// t7 arm's exclusions, all at the punt and none at the counter: permanent
+// death, the local slot (+0x5, ours the type-1 test), the bot byte (+0x178E3,
+// never set), the spectator latch (+0x188D7), the punt latch (+0x15F28, ours
+// host_disconnect_sent) and /NOPUNT (dword_B4C698, not modelled); the counter
+// is compared after its increment, so the punt lands after 361 dead seconds.
+// [orig: Server_TickUpdate - the walk @0x51DFB0..0x51E1A5; state 6 and the
+//  entity @0x51E062..0x51E06C, the counter @0x51E06E..0x51E07D, the 0x6E
+//  @0x51E083..0x51E0CF (userParam 1 @0x51E0C4; NetPacket_WriteSpawnWaveStatus
+//  @0x507490 re-tests the dead bit @0x5074BC and the hold @0x5074C2);
+//  is_in_session @0x51E0D4, state 6
+//  and the entity @0x51E0E0..0x51E0EC; t35: the hold @0x51E0F2, the stamp
+//  @0x51E0FD..0x51E10E (0x57E40), +0x5 @0x51E110, +0x178E3 @0x51E116, the
+//  spectator latch @0x51E11F, +0x15F28 @0x51E128, the punt @0x51E13D; t7: the
+//  dead bit @0x51E145..0x51E14B, the counter `cmp 168h` @0x51E14D,
+//  permanentDeath @0x51E159, +0x5 @0x51E161, +0x178E3 @0x51E167, the spectator
+//  latch @0x51E170, +0x15F28 @0x51E179, dword_B4C698 @0x51E181, the punt
+//  @0x51E18E; Server_ProcessRoundEnd's state 7 @0x51685E]
+void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
+	if (world.match.outcome().ended) return;
+	std::vector<NapiNPConnection *> slots;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) slots.push_back(&conn);
+	std::stable_sort(slots.begin(), slots.end(),
+			[](const NapiNPConnection *a, const NapiNPConnection *b) {
+				return a->reply.player_slot < b->reply.player_slot;
+			});
+	for (NapiNPConnection *slot : slots) {
+		NapiNPConnection &conn = *slot;
 		SessionReplyState &reply = conn.reply;
-		// UpdateAllActivePlayerSlots checks the PREVIOUS live-age value. Age is
-		// incremented later in Server_TickUpdate only for a state-6 player entity
-		// whose Flags bit 0 is clear. Pending/hidden pauses rather than resets age;
-		// health and Flags bit 0x02 do not enter either gate. Once age is mature,
-		// the quartet countdown continues through death/deploy presentation state.
-		// [orig: quartet gate @0x5189E4; age increment @0x51D95E..0x51D97E]
-		const world::Entity *age_player = control_age_player(conn, world);
-		const bool control_gate = ctx.is_in_session && is_in_match(conn) &&
-				conn.link.transport != nullptr &&
-				reply.control_live_ticks >= CONTROL_REQUEST_LIVE_GATE_TICKS;
-		// Retail tests both silence counters before touching the quartet
-		// countdown. Character-attribute silence has precedence when both are
-		// over the limit, and the event is not delayed until another request is
-		// due. [orig: gates/calls @0x5189E4]
-		if (control_gate &&
-				reply.charattr_unanswered_count >= kPuntSilenceLimit) {
-			stage_host_punt(conn, kPuntCharattrSilence);
-			continue;
-		}
-		if (control_gate &&
-				reply.time_sync_unanswered_count >= kPuntSilenceLimit) {
-			stage_host_punt(conn, kPuntTimeSyncSilence);
-			continue;
-		}
-		if (control_gate) {
-			bool control_due = reply.control_request_countdown == 0;
-			if (!control_due) {
-				--reply.control_request_countdown;
-				control_due = reply.control_request_countdown == 0;
-			}
-			if (control_due) {
-				reply.control_request_countdown = CONTROL_REQUEST_PERIOD_TICKS;
-
-				++reply.charattr_unanswered_count;
-				++reply.time_sync_unanswered_count;
-				if (reply.control_challenge_seed == 0)
-					reply.control_challenge_seed = next_maintenance_prng16(world);
-				std::vector<uint8_t> challenge;
-				io::append_u32_le(challenge, reply.control_challenge_seed);
-				conn.link.transport->host_send(
-						s2c::CHARATTR_CRC_CHALLENGE, std::move(challenge));
-
-				// The authority's charattr disable latches, eight packed into bits
-				// 0..5/12/13 (0 until a session's mp_No* word raised one, so every
-				// healthy-LAN capture carries 0; D-NET-374).
-				// [orig: Server_SendEntityHandleAndInputState @0x507BF2..0x507C29 ->
-				//  CharAttr_PackDisabledProperties @0x412550 (IDB
-				//  Input_PackStateFlags until 2026-10-12)]
-				const uint16_t latches = world.tables.charattr_disabled_word;
-				conn.link.transport->host_send(s2c::CHARATTR_DISABLED_PROPERTIES,
-						{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
-						/*reliable=*/false);
-
-				const uint32_t host_ms =
-						io::host_milliseconds_for_logic_tick(world.logic_tick);
-				if (reply.time_sync_host_baseline_ms == 0)
-					reply.time_sync_host_baseline_ms = host_ms;
-				if (reply.time_sync_round_host_ms == 0) {
-					++reply.time_sync_sequence;
-					reply.time_sync_round_host_ms = host_ms;
-				}
-				std::vector<uint8_t> time_sync;
-				io::append_u32_le(time_sync, reply.time_sync_sequence);
-				conn.link.transport->host_send(
-						s2c::TIME_SYNC_PING, std::move(time_sync));
-
-				// A dedicated host sends no 0x68; any other advances the slot's
-				// cursor by 50 and wraps it to 0 at its own frozen loaded-model
-				// list count (the IDB's "viewport height" getter returns that
-				// count, g_LoadedModelChallengeCount), unsigned.
-				// [orig: Server_SendRandomSeedSync @0x511360 - the dedicated test
-				//  @0x511363..0x51136A, CEffectWorld_GetViewportDimensions @0x511375
-				//  (g_LoadedModelChallengeCount @0x5B1578), +50 @0x51137E, `jb`
-				//  @0x511391, the wrap @0x511393, mask 32 @0x5113C5, the send @0x5113D4]
-				if (ctx.connection_mode != ConnectionMode::HostOnly) {
-					reply.loaded_model_page_cursor += 50u;
-					if (reply.loaded_model_page_cursor >= ctx.loaded_model_list_count)
-						reply.loaded_model_page_cursor = 0;
-					std::vector<uint8_t> model_page;
-					io::append_u32_le(model_page, reply.loaded_model_page_cursor);
-					conn.link.transport->host_send(
-							s2c::LOADED_MODEL_PAGE_REQUEST, std::move(model_page),
-							/*reliable=*/false);
-				}
-			}
-		}
-
-		// A remote player held in the join-time state-byte 0x10 deployment
-		// state for strictly more than six minutes receives t35. This is based
-		// on the state-6 entry timestamp, not world ticks or entity damage time,
-		// and remains eligible before the initial burst reaches InMatch. A
-		// spectator holds the deploy bit forever and is explicitly EXEMPT
-		// [orig: Server_TickUpdate @0x51E109, compare 0x57E40; the spectator
-		// bail `cmp slot+100567, 0` @0x51e11f].
-		const bool join_deploy_idle_gate = ctx.is_in_session &&
-				!conn.host_disconnect_sent && conn.type == NapiNPConnection::kTypeServerSide &&
+		// State 6 with an entity (ours's added, in-match slot with its body).
+		const bool state6 = is_in_match(conn) &&
 				conn.phase >= ConnectionPhase::PlayerAdded &&
-				conn.phase < ConnectionPhase::Goodbye &&
+				conn.phase < ConnectionPhase::Goodbye;
+		const world::Entity *body =
+				state6 ? world.registry.get(conn.link.owned_entity) : nullptr;
+		if (body == nullptr) continue;
+		const bool dead = ((body->flags | body->engine_flags) & world::kEntityFlagDead) != 0;
+		reply.dead_live_seconds = dead ? reply.dead_live_seconds + 1 : 0;
+		if ((dead || conn.link.respawn_pending) && conn.link.transport != nullptr)
+			conn.link.transport->host_send(
+					s2c::SPAWN_WAVE_STATUS,
+					build_spawn_wave_status_body(world, conn), // the slot's rows (D-NET-581)
+					/*reliable=*/false);
+		if (!ctx.is_in_session) continue;
+		const bool join_deploy_idle_gate = !conn.host_disconnect_sent &&
+				conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.link.transport != nullptr &&
-				conn.link.owned_entity.valid() &&
-				world.registry.get(conn.link.owned_entity) != nullptr &&
 				conn.link.respawn_pending &&
 				!conn.link.spectator &&
 				reply.state6_entry_host_ms_valid;
 		if (join_deploy_idle_gate &&
 				static_cast<uint32_t>(ctx.np_protocol.host_run_duration_ms -
-						reply.state6_entry_host_ms) > kJoinDeployIdleLimitMs) {
+						reply.state6_entry_host_ms) > kJoinDeployIdleLimitMs)
 			stage_host_punt(conn, kPuntJoinDeployIdle);
-			continue;
-		}
-		// The dead-age arm owns an independent consecutive-SECOND counter. It
-		// does not derive elapsed time from Entity::death_tick: the counter and
-		// its compare sit inside the g_PeriodicSecondTimer block (reload 62),
-		// so retail increments the player-slot dword once per periodic second
-		// while a state-6 entity has Flags bit 0x02 set, resets it as soon as
-		// the bit clears, and compares after the increment — punt type 7 lands
-		// after 361 seconds dead, not 361 ticks (5.8 s). The punt's exclusions,
-		// in retail all at the punt and none at the counter: permanent death (ours
-		// `config.permanent_death`), the local slot (+0x5, ours the type-1 test),
-		// the bot byte (+0x178E3, never set), the spectator latch (+0x188D7, ours
-		// `conn.link.spectator`, as the t35 arm tests it), the punt latch
-		// (+0x15F28, ours `conn.host_disconnect_sent`) and /NOPUNT (dword_B4C698,
-		// not modelled).
-		// [orig: Server_TickUpdate @0x51D7E0 — periodic gate reload 62
-		//  @0x51DB93; counter @0x51E062..0x51E07D; the exclusions: permanentDeath
-		//  @0x51E159, +0x5 @0x51E161, +0x178E3 @0x51E167, the spectator latch
-		//  `cmp byte ptr [esi+188D7h], 0` @0x51E170, +0x15F28 @0x51E179,
-		//  dword_B4C698 @0x51E181; punt @0x51E187..0x51E18E]
-		if (periodic_second) {
-			const bool dead_state6 = ctx.is_in_session &&
-					!conn.host_disconnect_sent && conn.type == NapiNPConnection::kTypeServerSide &&
-					conn.phase >= ConnectionPhase::PlayerAdded &&
-					conn.phase < ConnectionPhase::Goodbye &&
-					age_player != nullptr &&
-					((age_player->flags | age_player->engine_flags) &
-							world::kEntityFlagDead) != 0;
-			if (dead_state6) {
-				++reply.dead_live_seconds;
-			} else {
-				reply.dead_live_seconds = 0;
-			}
-			if (dead_state6 &&
-					reply.dead_live_seconds > kDeadLiveSecondLimit &&
-					!ctx.config.permanent_death && !conn.link.spectator) {
-				stage_host_punt(conn, kPuntDeadTooLong);
-				continue;
-			}
-		}
-
-		const bool age_eligible = age_player != nullptr &&
-				!conn.link.respawn_pending &&
-				((age_player->flags | age_player->engine_flags) & 1u) == 0;
-		if (age_eligible &&
-				reply.control_live_ticks < CONTROL_REQUEST_LIVE_GATE_TICKS)
-			++reply.control_live_ticks;
+		if (dead && reply.dead_live_seconds > kDeadLiveSecondLimit &&
+				!ctx.config.permanent_death &&
+				conn.type == NapiNPConnection::kTypeServerSide &&
+				!conn.link.spectator && !conn.host_disconnect_sent)
+			stage_host_punt(conn, kPuntDeadTooLong);
 	}
+}
+
+// The 0x79 countdown, every tick after the periodic second's block, ahead of the
+// session test with none of its own: S2C 0x79 is the low byte of
+// CNetStats.host_quality (despite its old "spectator flag" label). The global
+// countdown starts at zero, reloads to 0x136 and sends with filter 0x80
+// (player-slot states 6/7, dead or held slots included; no entity-health
+// gate). This is one GLOBAL host boundary: a player filtered out at that
+// instant waits for the next boundary and never receives a per-peer catch-up.
+// The duplicate-PCID kick follows.
+// [orig: Server_TickUpdate - the countdown @0x51E1B2..0x51E1C5, the send
+//  @0x51E1C7..0x51E202, Server_KickDuplicatePcids @0x51E20C, is_in_session
+//  @0x51E211]
+void emit_network_quality_boundary(NapiNPServerCtx &ctx) {
+	bool network_quality_boundary = ctx.network_quality_broadcast_countdown == 0;
+	if (!network_quality_boundary) {
+		--ctx.network_quality_broadcast_countdown;
+		network_quality_boundary = ctx.network_quality_broadcast_countdown == 0;
+	}
+	if (network_quality_boundary) {
+		ctx.network_quality_broadcast_countdown = NETWORK_QUALITY_BROADCAST_PERIOD_TICKS;
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (active_player_recipient(conn))
+				conn.link.transport->host_send(
+						s2c::NETWORK_QUALITY, {ctx.host_network_quality});
+		}
+	}
+	Server_KickDuplicatePcids(ctx, network_quality_boundary);
 }
 
 // The play-tick walk after the script pass: every active slot in state 6

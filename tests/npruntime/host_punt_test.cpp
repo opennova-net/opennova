@@ -565,7 +565,8 @@ bool check_host_control_punt(uint32_t charattr_silence,
 	conn.link.transport = &transport;
 	conn.link.owned_entity = player;
 	conn.reply.minimap_initial_scan_pending = false;
-	conn.reply.control_live_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	world.match.upsert_player({player, 1, "P"});
+	world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 	conn.reply.control_request_countdown = 1;
 	conn.reply.charattr_unanswered_count = charattr_silence;
 	conn.reply.time_sync_unanswered_count = time_sync_silence;
@@ -1290,6 +1291,14 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 		return false;
 
 	// The joined slot takes its per-frame 0x0A each tick; no record is the description.
+	// The punt is evaluated in the periodic second's slot walk, so each check runs to
+	// the next periodic second [orig: Server_TickUpdate @0x51E0D4..0x51E13D, inside
+	// the block reloaded 62 @0x51DB93].
+	auto tick_second = [&]() {
+		do {
+			inmatch::Server_TickUpdate(ctx);
+		} while (!world.match.periodic_second());
+	};
 	auto expect_no_description = [&](const char *message) {
 		replication::Datagram datagram;
 		bool description = false;
@@ -1300,38 +1309,44 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	const uint32_t state6_ms = live.reply.state6_entry_host_ms;
 	live.reply.state6_entry_host_ms_valid = false;
 	ctx.np_protocol.host_run_duration_ms = state6_ms + 360001u;
-	inmatch::Server_TickUpdate(ctx);
+	tick_second();
 	if (!expect_no_description("an invalid state-6 timestamp blocks t35"))
 		return false;
 
 	live.reply.state6_entry_host_ms_valid = true;
 	live.phase = inmatch::ConnectionPhase::PendingSpawn;
-	inmatch::Server_TickUpdate(ctx);
+	tick_second();
 	if (!expect_no_description("a pre-state-6 player cannot receive t35"))
 		return false;
 
 	live.phase = inmatch::ConnectionPhase::PlayerAdded;
 	live.link.respawn_pending = false;
-	inmatch::Server_TickUpdate(ctx);
+	tick_second();
 	if (!expect_no_description("deployment release blocks the join-idle punt"))
 		return false;
 
 	live.link.respawn_pending = true;
 	ctx.np_protocol.host_run_duration_ms = state6_ms + 360000u;
-	inmatch::Server_TickUpdate(ctx);
+	tick_second();
 	if (!expect_no_description("exactly six minutes is not strictly over the t35 limit"))
 		return false;
 
+	// The slot's 0x6E (it is held) leads the punt in its walk turn; the
+	// description is the last record it is sent [orig: @0x51E0AD, @0x51E13D].
 	ctx.np_protocol.host_run_duration_ms = state6_ms + 360001u;
-	inmatch::Server_TickUpdate(ctx);
-	replication::Datagram punt;
+	tick_second();
+	std::vector<replication::Datagram> sent;
+	{
+		replication::Datagram datagram;
+		while (transport.pop_outbound(datagram)) sent.push_back(datagram);
+	}
+	const replication::Datagram *punt = sent.empty() ? nullptr : &sent.back();
 	if (!expect(live.host_disconnect_sent &&
 				live.host_disconnect_mismatch_type == 35 &&
-				transport.pop_outbound(punt) &&
-				!transport.has_outbound() && punt.reliable &&
-				punt.protocol_flags_raw == kDescriptionFlags &&
-				punt.tag == hightag::DESCRIPTION_PACKET &&
-				punt.body == kCapturedPunt,
+				punt != nullptr && punt->reliable &&
+				punt->protocol_flags_raw == kDescriptionFlags &&
+				punt->tag == hightag::DESCRIPTION_PACKET &&
+				punt->body == kCapturedPunt,
 			"the first millisecond over six minutes emits the captured t35 record"))
 		return false;
 
@@ -1349,7 +1364,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	const std::vector<uint8_t> wire = frame_s2c(
 			server_tx,
 			{make_protocol_message(
-					punt.tag, punt.body, punt.protocol_flags_raw)});
+					punt->tag, punt->body, punt->protocol_flags_raw)});
 	inmatch::JoinerConnection joiner("IdlePuntReceiver");
 	joiner.set_title(&kJo);
 	seed_joiner(joiner);

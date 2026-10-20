@@ -309,7 +309,8 @@ bool check_host_quality_window() {
 	if (!expect(f.ctx.net_quality_sample_countdown == 62, "the countdown reloads 62"))
 		return false;
 	// One slot mature with a 1000 ms mean ping: 255/1000*1000 -> 255, /5 = 51.
-	f.conn(0).reply.control_live_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	f.world.match.upsert_player({f.players[0], 1, "P"});
+	f.world.match.player(f.players[0])->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 	for (uint32_t i = 0; i < 10; ++i) f.conn(0).reply.rtt_ring[i] = 1000;
 	f.ctx.net_quality_sample_countdown = 1;
 	inmatch::Server_SampleHostNetQuality(f.ctx);
