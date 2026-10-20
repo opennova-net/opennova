@@ -3990,28 +3990,15 @@ const SIM_PAGE_ROWS := [
 
 
 static func _page_row(row: Array) -> String:
-	var text := 'weapon "%s"
- category %d
- rank %d
- round_type "%s"
-' % [
+	var text := 'weapon "%s"\n category %d\n rank %d\n round_type "%s"\n' % [
 			row[0], row[1], row[2], row[3]]
-	text += " clipsize %d
- startrounds %d
-" % [row[4], row[5]]
+	text += " clipsize %d\n startrounds %d\n" % [row[4], row[5]]
 	if not String(row[6]).is_empty():
-		text += " weapon_class %s
-" % row[6]
+		text += " weapon_class %s\n" % row[6]
 	for action in ["idle", "switchto", "switchfrom"]:
-		var delays := "" if action == "idle" else "  delaystart 1
-  delayend 1
-"
-		text += ' action "%s"
-%s  function wpn_std_%s
- end
-' % [action, delays, action]
-	return text + "end
-"
+		var delays := "" if action == "idle" else "  delaystart 1\n  delayend 1\n"
+		text += ' action "%s"\n%s  function wpn_std_%s\n end\n' % [action, delays, action]
+	return text + "end\n"
 
 
 # [shipped ammo.def `ammo AMMO_CAR15_556MM`]: the ballistic header (velocity
