@@ -551,16 +551,20 @@ bool run_round_end_disarms_the_watermark() {
 // The spawn pump runs in the server tick's periodic block, after the script pass and the
 // scoreboard boundary, never from the receive pump: a player added on a scoreboard frame is not
 // in that frame's 0x16, and an in-match client takes the 0x16 ahead of the add's join line and
-// 0x46. The host's receive pump (tick_connections with run_spawn_pump false) adds nobody.
+// 0x46, then its own 0x81 when its Points moved (the proximity pass sits after the pump).
+// The host's receive pump (tick_connections with run_spawn_pump false) adds nobody.
 // [orig: Server_TickUpdate - the scoreboard @0x51D8F9..0x51D917, the periodic block's
 //  CNapiNetwork_CheckPlayerTimeouts @0x51DBF3 then CNapiServer_ProcessPendingPlayerSpawns
-//  @0x51DBFD; Server_PlayerAdd's 0x32 @0x51D291 and 0x46 @0x51D2CA]
+//  @0x51DBFD; Server_PlayerAdd's 0x32 @0x51D291 and 0x46 @0x51D2CA;
+//  Server_UpdateCaptureZoneProximity @0x51DF50]
 bool run_the_spawn_pump_follows_the_scoreboard() {
 	JoinFixture f(/*with_existing=*/true);
 	inmatch::NapiNPConnection &existing = f.ctx->np_protocol.connection_list.front();
 	w::Entity body;
 	body.kind = w::EntityKind::Organic;
 	existing.link.owned_entity = f.world->registry.spawn(0, body);
+	f.world->match.upsert_player({existing.link.owned_entity, 0, "Existing", {}});
+	f.world->match.player(existing.link.owned_entity)->stats[w::MatchStats::kPoints] = 3;
 	f.ctx->scoreboard_broadcast_timer = 0x136; // this tick is a scoreboard boundary
 	inmatch::Server_TickUpdate(*f.ctx);        // and a periodic second (the first countdown)
 	if (!expect(f.world->match.periodic_second() &&
@@ -575,6 +579,14 @@ bool run_the_spawn_pump_follows_the_scoreboard() {
 	}
 	if (!expect(list < joined && joined < sync && sync < tags.size(),
 	            "the 0x16, then the add's join line and its 0x46")) return false;
+	// The existing player's Points moved since its last 0x81: the refresh goes out at the
+	// proximity pass's place, after the add [orig: Server_UpdateCaptureZoneProximity called
+	// @0x51DF50, after CNapiServer_ProcessPendingPlayerSpawns @0x51DBFD].
+	std::size_t refresh = tags.size();
+	for (std::size_t i = 0; i < tags.size(); ++i)
+		if (tags[i] == opennova::s2c::SCORE_DELTA_SOUND && refresh == tags.size()) refresh = i;
+	if (!expect(sync < refresh && refresh < tags.size(),
+	            "the existing player's 0x81 follows the add's 0x46")) return false;
 	// A second joiner pending while the periodic verdict still reads true: the host's
 	// receive pump adds nobody.
 	inmatch::NapiNPConnection &second = f.ctx->np_protocol.connection_list.emplace_back();

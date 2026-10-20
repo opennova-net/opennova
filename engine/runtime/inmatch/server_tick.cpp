@@ -638,16 +638,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			--world.preround_delay_seconds;
 	}
 
-	// Retail's per-player proximity pass (item 1 of the one-second block)
-	// begins by comparing CRenderState field 0x1C (raw accumulated Points) with
-	// a player-slot cache and targets reliable S2C 0x81 to that requester on
-	// change. Match ran the pass itself in advance_tick; the wire half rides the
-	// same service, after the authority's event scorers and before the capture
-	// transaction, so zone-capture points are observed by the following pass.
-	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0; the active-slot loop
-	// head @0x508720..0x508724; the 0x81 sync @0x508790]
-	if (periodic_second) emit_requester_score_refreshes(ctx, world);
-
 	// The periodic block's first two callees: the join-phase watchdog, then the
 	// pending-player spawn pump, after the script pass and the scoreboard
 	// boundary, so a player added on a scoreboard frame is in the next 0x16,
@@ -664,6 +654,19 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// admission callees and ahead of the capture/win pass
 	// [orig: Server_TickUpdate @0x51DE79..0x51DF4A, before @0x51DF50].
 	if (periodic_second) Server_EmitQualityResends(ctx, world);
+	// Retail's per-player proximity pass begins by comparing CRenderState field
+	// 0x1C (raw accumulated Points) with a player-slot cache and targets reliable
+	// S2C 0x81 to that requester on change. Match ran the pass itself in
+	// advance_tick; the wire half rides the call's place in the periodic block:
+	// after the spawn pump and the quality resend walk, so a periodic frame's
+	// add goes out ahead of an existing player's 0x81, and ahead of the win
+	// check and the capture transaction, so zone-capture points are observed by
+	// the following pass.
+	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0, called @0x51DF50 after
+	//  @0x51DBFD and @0x51DE79..0x51DF4A, ahead of Game_AccumulateTeamScores
+	//  @0x51DF55 and Server_CheckWinConditions @0x51DF5A; the active-slot loop
+	//  head @0x508720..0x508724; the 0x81 sync @0x508790]
+	if (periodic_second) emit_requester_score_refreshes(ctx, world);
 
 	// (2c) Win conditions at 1 Hz [orig: the g_PeriodicSecondTimer block in
 	// Server_TickUpdate @0x51D7E0 — reload 62 @0x51db93 — calls
