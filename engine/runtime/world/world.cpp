@@ -644,8 +644,6 @@ void World::run_entity_pass(const TickContext &ctx) {
     // the server tick's periodic second (Server_TickUpdate @ 0x51db6d, reload
     // 0x3E @ 0x51db93 -> the EntityPool_RecountLiveByGroup call @ 0x51dc02).
     if (ctx.is_authority && pre_mission) recount_group_initials();
-    // The host session armed its transactions for this pass alone.
-    entity_update_transactions = nullptr;
 	++logic_tick; // [orig: g_CurrentTick @0x24c1968 advances once per frame tick]
 	// Audio-less/headless hosts never drain presentation. Retire their bounded
     // latest-intent rows on the same logic clock so old entity lifetimes cannot

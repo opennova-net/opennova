@@ -984,7 +984,7 @@ public:
     IEntityIdleTimers *entity_idle_timers = nullptr;
     IRemoteWeaponTables *remote_weapon_tables = nullptr;
     // The authority's inline transactions (entity_update_transactions.h): armed
-    // by the host session for its tick, disarmed by run_entity_pass's tail.
+    // by the host session around its tick's entity pass (Server_TickUpdate).
     IEntityUpdateTransactions *entity_update_transactions = nullptr;
     // The lifetime groups (declared above): what the script owns, what the
     // embedder feeds once, what the host stamps, what the drains consume.

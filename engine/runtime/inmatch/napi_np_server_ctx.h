@@ -333,11 +333,6 @@ struct NapiNPServerCtx {
 	//  NapiNPServerMsg_0x029 @0x514F7C]
 	std::vector<world::EntityHandle> team_change_entities;
 
-	// Whether this frame's entity update ran (Server_TickUpdate's step 4, behind
-	// its admission gate). Nothing reads it since no death waits for the frame
-	// tail; server_tick.cpp still writes it.
-	bool entity_update_ran = false;
-
 	// The transactions the world's entity update raises inline (the player
 	// body's death edge), and the sends they staged: retail's update queues them
 	// after the frame's send pump, so they lead the next frame's queue, released

@@ -400,10 +400,6 @@ struct RoundDeath {
     // Entity_CheckAndProcessDeath @0x51B550; the tally Score_ProcessKillEvent
     // @0x4FD400 is called only from the damage paths]
     bool motor_edge = false;
-    // Never set: a player body's death is its edge's (org2_owns_death_transaction),
-    // so nothing queues a death for it. The server tick's head still reads it
-    // (server_tick.cpp) until that read goes.
-    bool player_edge = false;
     // Nonzero for the record of a transaction the entity update ran inline (a
     // player body's death edge, the explosion queue's medic arm: the host
     // session's IEntityUpdateTransactions): the record keeps the place in the

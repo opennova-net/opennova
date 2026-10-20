@@ -528,12 +528,6 @@ void Server_RunPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 	player_death_transaction(ctx, world, death, true);
 }
 
-// See header: no death waits for the frame tail.
-void arm_frame_tail_edges(world::World &) {}
-
-// See header: no death waits for the frame tail.
-void Server_RouteFrameTailEdges(NapiNPServerCtx &) {}
-
 // See napi_np_server_ctx.h. The player body's edge has latched the dead bit
 // and, unless a non-lethal hit staged the death selection (+0x2C0), cleared
 // +0x178, which the transaction credits as the edge leaves it. Its staging

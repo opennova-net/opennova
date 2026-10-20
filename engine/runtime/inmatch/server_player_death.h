@@ -14,13 +14,8 @@ struct RoundDeath;
 // The host's player-death transaction and the death queue beside it (split
 // off server_tick.cpp): the one retail transaction, which a player body's death
 // edge raises inside the entity update (ServerEntityUpdateTransactions,
-// napi_np_server_ctx.h), and the queue's drains at the tick's three places.
+// napi_np_server_ctx.h), and the queue's drains (the tick's head and its route).
 namespace opennova::inmatch {
-
-// Empty: no death waits for the frame tail any more, since the player body's
-// edge raises its transaction inside the entity update. host_session_pump
-// still calls it after its flush.
-void Server_RouteFrameTailEdges(NapiNPServerCtx &ctx);
 
 // One transport-free RoundDeath through the one retail player-death
 // transaction: 0x13 remote fan, victim 0x61 seed, victim 0x52 camera, optional
@@ -61,7 +56,6 @@ void Server_RunPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 enum class EdgeDrain {
 	Route,
 	HoldAtHead,
-	AfterConverts,
 };
 
 // Drain the queued deaths in order (the definition carries the witness).
@@ -71,10 +65,6 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world,
 // The flag reset's Health = -1 on a carrier's body, whose death edge in this
 // frame's entity update raises the transaction.
 void kill_player_body_at_frame_tail(world::World &world, world::Entity *player);
-
-// Empty: no death waits for the frame tail. Server_TickUpdate still calls it
-// ahead of its entity pass.
-void arm_frame_tail_edges(world::World &world);
 
 // One send of a transaction: to the connection's transport, or, while the
 // entity update runs the transaction (an EntityUpdateStaging is open), into its
