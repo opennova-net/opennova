@@ -328,10 +328,14 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 		victim_entity->flags |= 2u;
 		victim_entity->alive = false;
 	}
-	// The dead/protection latch is the player leg's alone.
-	// [orig: Entity_CheckAndProcessDeath tests Flags & 0x100
-	// @0x51B555..0x51B55D before GameEvent_PlayerDeath]
-	if (victim_is_player) victim_entity->damage_state = -1;
+	// The death stores nothing to the damage-disabled word (+0x124): its -1
+	// writers are the spectator convert, the player add, the join and the
+	// observer leg of the player-state write, so a dead player keeps the word
+	// it had and the explosion sweep's medic arm reaches its revive.
+	// [orig: GameEvent_PlayerDeath @0x516DD0 has no +0x124 store; the -1 stores
+	//  Server_ConvertPlayerToSpectator @0x519E98, Server_PlayerAdd @0x51D0E0,
+	//  Server_OnPlayerJoin @0x51A7B3, NetPacket_WritePlayerState @0x4FF71E;
+	//  Projectile_ProcessExplosionQueue's +0x124 skip @0x4EAFA8..0x4EAFAF]
 	if (victim_connection != nullptr) {
 		// A normal other-player kill opens the exact 120-second revive
 		// window. Self/environment and knife/headshot cause bits clear it.

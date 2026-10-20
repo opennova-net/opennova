@@ -283,15 +283,17 @@ Vec3 rotate_authored_point(const CollisionMatrix &orientation, const Vec3 &point
                 rotated[2] * io::kInvFp16One};
 }
 
-// LOS between two points: collision-world walk when available (terrain +
-// pools), else the terrain leg alone; no data -> clear. Endpoints carry the
-// witnessed +0.25 u lift [orig: the +0x4000 z adds @ 0x4eb4ca..0x4eb4f6].
+// LOS between two word points: collision-world walk when available (terrain +
+// pools), else the terrain leg alone; no data -> clear. The callers pass the
+// words retail builds: pool 0 the victim's and the entry's Position words raw
+// with a -0x4000 height offset (-0x2000 for the knife), pool 1 both Z words
+// lifted 0x4000 with -0x4000 (D-NET-507). [orig: Projectile_ProcessExplosionQueue
+// @0x4EAD80 - pool 0 @0x4EB0A8..0x4EB0D7, @0x4EB138, the call @0x4EB162; pool 1
+// @0x4EB479..0x4EB4C3, the call @0x4EB4CA]
 bool blast_los_clear(World &world, CollisionWorld *collision,
                      const terrain::TerrainHeightField *terrain,
-                     const Vec3 &from, const Vec3 &to,
-                     EntityHandle endpoint, float z_bias, bool query_parent_cleared) {
-    const int32_t a[3] = {to_fixed(from.x), to_fixed(from.y), to_fixed(from.z + z_bias)};
-    const int32_t b[3] = {to_fixed(to.x), to_fixed(to.y), to_fixed(to.z + z_bias)};
+                     const int32_t a[3], const int32_t b[3],
+                     EntityHandle endpoint, int32_t height_offset, bool query_parent_cleared) {
     if (collision != nullptr) {
         const CollisionWorld::RayDebugScope ray_scope(
                 collision, CollisionWorld::RayDebugCategory::kExplosionLos);
@@ -303,18 +305,19 @@ bool blast_los_clear(World &world, CollisionWorld *collision,
         // just below terrain remains reachable. The pool-0 leg also nulls the
         // victim's parentEntity around the call (@0x4eb158/@0x4eb16c).
         // [orig: Projectile_ProcessExplosionQueue @ 0x4EAD80, calls @ 0x4EB162/0x4EB4CA]
-        return collision->entity_los_clear(world, endpoint, {}, a, b, -0x4000,
+        return collision->entity_los_clear(world, endpoint, {}, a, b, height_offset,
                                            /*all_types=*/true, query_parent_cleared);
     }
     if (terrain != nullptr && terrain->valid()) {
-        // The same null-entity terrain leg when no collision device is bound.
+        // The same null-entity terrain leg when no collision device is bound:
+        // the ray rides the height offset's negation above the points.
         // [orig: Physics_CheckTerrainLineOfSight @ 0x53B080]
         const auto buried = [&](const int32_t p[3]) {
             return terrain::height_field_height_bilinear_fixed(*terrain, p[0], p[1]) > p[2];
         };
         if (buried(a) || buried(b)) return true;
-        const int32_t raised_a[3] = {a[0], a[1], a[2] + 0x4000};
-        const int32_t raised_b[3] = {b[0], b[1], b[2] + 0x4000};
+        const int32_t raised_a[3] = {a[0], a[1], io::bam_sub(a[2], height_offset)};
+        const int32_t raised_b[3] = {b[0], b[1], io::bam_sub(b[2], height_offset)};
         return !los_terrain_blocked(*terrain, raised_a, raised_b);
     }
     return true;
@@ -381,18 +384,48 @@ bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, int32_t dx, int32
 // (D-NET-507). [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - pool 0
 //  @0x4EAF29..0x4EAFA2, pool 1 @0x4EB3CD..0x4EB44F, pool 2 @0x4EB604..0x4EB690]
 struct SweepWords {
-    int32_t dx = 0, dy = 0;
+    int32_t dx = 0, dy = 0, dz = 0;
     int32_t length = 0;
 };
 int32_t fixed_distance(const EntityPosition &a, const EntityPosition &b);
+int32_t x87_length(int32_t dx, int32_t dy, int32_t dz);
 bool sweep_within(const Entity &t, const ExplosionEntry &e, int32_t reach, SweepWords &out) {
     out.dx = io::bam_sub(t.position.x.q16, e.pos.x.q16);
     out.dy = io::bam_sub(t.position.y.q16, e.pos.y.q16);
-    const int32_t dz = io::bam_sub(t.position.z.q16, e.pos.z.q16);
-    if (io::bam_abs(out.dx) > reach || io::bam_abs(out.dy) > reach || io::bam_abs(dz) > reach)
+    out.dz = io::bam_sub(t.position.z.q16, e.pos.z.q16);
+    if (io::bam_abs(out.dx) > reach || io::bam_abs(out.dy) > reach || io::bam_abs(out.dz) > reach)
         return false;
     out.length = fixed_distance(t.position, e.pos);
     return out.length <= reach;
+}
+
+// Pool 2's distance from the entry to the victim's model box, the graphic
+// model's +0x18 (X/Y) and +0x1C (Z) half-extents about the Position words: per
+// axis the entry's overshoot past the near face (wrapping words, 0 inside),
+// each held to the radius word, then their saturated truncated x87 length,
+// held to it too (the bound sphere is not this leg's surface). Both extents
+// are 0 for every 3DI3 model (ItemDeathTraits::model_radius_xy_q16 / _z_q16),
+// so the box is the Position point. [orig: Projectile_ProcessExplosionQueue
+// @0x4EAD80 - @0x4EB6FD..0x4EB7AE, the length @0x4EB7B4..0x4EB7EA]
+bool pool2_box_distance(const Entity &t, const ExplosionEntry &e, const SweepWords &sw,
+                        int32_t half_xy, int32_t half_z, int32_t radius, int32_t &out) {
+    const auto axis = [&](int32_t victim, int32_t entry, int32_t victim_less_entry,
+                          int32_t half) {
+        int32_t d = 0;
+        if (entry > io::bam_add(victim, half))
+            d = io::bam_sub(io::bam_sub(entry, victim), half); // @0x4EB70E..0x4EB724
+        if (entry < io::bam_sub(victim, half))
+            d = io::bam_sub(victim_less_entry, half); // @0x4EB728..0x4EB734
+        return d;
+    };
+    const int32_t dx = axis(t.position.x.q16, e.pos.x.q16, sw.dx, half_xy);
+    if (dx > radius) return false; // @0x4EB738..0x4EB73C
+    const int32_t dy = axis(t.position.y.q16, e.pos.y.q16, sw.dy, half_xy);
+    if (dy > radius) return false; // @0x4EB76F..0x4EB773
+    const int32_t dz = axis(t.position.z.q16, e.pos.z.q16, sw.dz, half_z);
+    if (dz > radius) return false; // @0x4EB7AA..0x4EB7AE
+    out = x87_length(dx, dy, dz);
+    return out <= radius; // @0x4EB7E6..0x4EB7EA
 }
 
 // The victim's distance to the blast past its bound word, a signed subtract
@@ -407,9 +440,17 @@ int32_t sweep_surface(int32_t length, int32_t bound) {
 // capped at 2147418112.0 and truncated [orig: pool 0 @0x4EAF66..0x4EAF97,
 // flt_7C19E0, _ftol2_sse].
 int32_t fixed_distance(const EntityPosition &a, const EntityPosition &b) {
-    const double dx = double(int32_t(uint32_t(a.x.q16) - uint32_t(b.x.q16)));
-    const double dy = double(int32_t(uint32_t(a.y.q16) - uint32_t(b.y.q16)));
-    const double dz = double(int32_t(uint32_t(a.z.q16) - uint32_t(b.z.q16)));
+    return x87_length(io::bam_sub(a.x.q16, b.x.q16), io::bam_sub(a.y.q16, b.y.q16),
+                      io::bam_sub(a.z.q16, b.z.q16));
+}
+
+// The three words' x87 length, (dx^2 + dy^2) + dz^2, saturated at flt_7C19E0
+// and truncated [orig: pool 0 @0x4EAF66..0x4EAF97; pool 2's box length
+// @0x4EB7B4..0x4EB7DF].
+int32_t x87_length(int32_t dx_word, int32_t dy_word, int32_t dz_word) {
+    const double dx = double(dx_word);
+    const double dy = double(dy_word);
+    const double dz = double(dz_word);
     double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (dist > 2147418112.0) dist = 2147418112.0;
     return io::retail_ftol_sse2(dist);
@@ -449,8 +490,40 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
 
 // The per-victim callback a queue entry's type installs [orig: the jumptable
 // @ 0x4eadc6 targets — Entity_ApplyWeaponDamage, Entity_ApplyVehicleCollisionDamage,
-// nullsub_91].
-enum class KillZoneCallback : uint8_t { None, WeaponDamage, Melee };
+// GameEvent_HandleMedicInteraction, nullsub_91].
+enum class KillZoneCallback : uint8_t { None, WeaponDamage, Melee, Medic };
+
+// The kz-type-3 callback for one pool-0 victim: a person that is not the
+// healer, a live healer, the same team; a DEAD victim not already being revived
+// is revived, a live one below its max health healed. The max is the def hp:
+// the difficulty scaling touches only the local player outside a network
+// session, where GameEvent_HealPlayer never finds the second player slot it
+// needs. The authority's host session runs each transaction here, in the
+// queue, ahead of the pool-0 walk (a heal closes a death edge its walk would
+// raise); a world it does not drive keeps the interaction for the host's drain.
+// [orig: GameEvent_HandleMedicInteraction @0x4E6790 - the victim's def type 3
+//  @0x4E679C, the healer (entry+0x20) @0x4E67A3, the gates @0x4E67A6..0x4E67BD,
+//  the dead arm @0x4E67C2..0x4E67D8, the live arm @0x4E67E3..0x4E6805;
+//  Entity_GetMaxHealthWithDifficulty @0x43B8A0, the session and local-player
+//  tests @0x43B8AD..0x43B8C6]
+void medic_interaction_callback(World &world, Entity &target, const ExplosionEntry &e) {
+    if (target.item_type != 3) return;
+    const Entity *healer = world.registry.get(e.owner);
+    if (healer == nullptr || healer == &target || (healer->flags & kEntityFlagDead) != 0u ||
+            healer->team != target.team)
+        return;
+    MedicInteraction interaction{target.handle, healer->handle, false};
+    if ((target.flags & kEntityFlagDead) != 0u) {
+        if (target.medic_reviving) return;
+        interaction.revive = true;
+    } else if (retail_signed_i16(target.health) >= retail_signed_i16(target.health_max)) {
+        return;
+    }
+    if (world.entity_update_transactions != nullptr)
+        world.entity_update_transactions->medic_interaction(world, interaction);
+    else
+        world.round_sim.medic_interactions.push_back(interaction);
+}
 
 // The ammo's kill-zone damage as the drain and its callbacks read it: the
 // kz_damage word off-session or on the session authority, 0 on a session
@@ -801,73 +874,15 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         ++events.explosions_processed;
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(e.ammo_index);
         if (ammo == nullptr) continue;
-        // Type dispatch [orig: the switch @ 0x4eadc6]: 3 (the medic kit) routes
-        // to the medic interaction below; every other type picks its per-victim
-        // callback and radius further down.
-        if (e.type == ammo_kz::kMedic) {
-            // The kz-type-3 callback is GameEvent_HandleMedicInteraction only
-            // when the owner's class carries the Medic charattr (AnimMap slot
-            // bit 8) [orig: Projectile_ProcessExplosionQueue case 3
-            // @0x4EADDD..0x4EADFC, the charattr test @0x4EADEA..0x4EADF4]. Per
-            // organic in the blast radius (the ordinary pool-0 sweep shape): a
-            // person that is not the healer, a live healer, the same team; a
-            // DEAD target that is not already being revived is revived, a live
-            // one below its max health is healed. The max is the def hp: the
-            // difficulty scaling touches only the local player outside a
-            // network session, where GameEvent_HealPlayer never finds the
-            // second player slot it needs.
-            // [orig: GameEvent_HandleMedicInteraction @0x4E6790 — gates
-            //  @0x4E679C..0x4E67BD, dead arm @0x4E67C2..0x4E67D8, live arm
-            //  @0x4E67E3..0x4E6805; Entity_GetMaxHealthWithDifficulty @0x43B8A0,
-            //  the session and local-player tests @0x43B8AD..0x43B8C6]
-            const Entity *healer = world.registry.get(e.owner);
-            if (healer == nullptr ||
-                    !world.tables.class_has_attribute(healer->player_class,
-                            MissionTables::kCharAttrMedic) ||
-                    (healer->flags & kEntityFlagDead) != 0u)
-                continue;
-            // The pool-0 sweep's words: the reach (the bound word plus twice the
-            // radius word), the surface floored at 0 against the radius word
-            // (D-NET-507) [orig: @0x4EAF29..0x4EAFA2, @0x4EB03C..0x4EB06C].
-            const int32_t medic_q16 = e.radius_override != 0.0f
-                    ? to_fixed(e.radius_override) : to_fixed(ammo->kz_maxradius);
-            if (medic_q16 == 0) continue; // [orig: the kill switch `jz` @0x4EAE84]
-            const size_t pool0 = world.registry.pool_capacity(0);
-            for (size_t s = 0; s < pool0; ++s) {
-                Entity *t = world.registry.get(EntityHandle::make(0, static_cast<int>(s)));
-                if (t == nullptr || t == healer || t->kind != EntityKind::Organic) continue;
-                if (t->team != healer->team) continue;
-                const int32_t bound = t->bound_radius.q16;
-                SweepWords sw;
-                if (!sweep_within(*t, e, static_cast<int32_t>(static_cast<uint32_t>(bound) +
-                                         2u * static_cast<uint32_t>(medic_q16)), sw))
-                    continue;
-                if (sweep_surface(sw.length, bound) > medic_q16) continue;
-                // The authority's host session runs each transaction here, in
-                // the queue, ahead of the pool-0 walk (a heal closes a death
-                // edge its walk would raise); a world it does not drive keeps
-                // the interaction for the host's drain.
-                MedicInteraction interaction{t->handle, healer->handle, false};
-                if ((t->flags & kEntityFlagDead) != 0u) {
-                    if (t->medic_reviving) continue;
-                    interaction.revive = true;
-                } else if (retail_signed_i16(t->health) >= retail_signed_i16(t->health_max)) {
-                    continue;
-                }
-                if (world.entity_update_transactions != nullptr)
-                    world.entity_update_transactions->medic_interaction(world, interaction);
-                else
-                    world.round_sim.medic_interactions.push_back(interaction);
-            }
-            continue;
-        }
         // The callback and radius each type takes [orig: the jumptable
         // @ 0x4eadc6]: 2/5/6/7 the weapon damage at kz_maxradius (@ 0x4eadcd);
         // 1 the knife callback at kz_maxradius, one unit wider when the
-        // source's class carries KnifeBonus (@ 0x4eae0c..0x4eae34); 4 the
-        // weapon damage at the source's bound radius when there is a source
-        // (@ 0x4eae3c..0x4eae52); any other type a no-op callback at radius 0
-        // (@ 0x4eae56). A nonzero override replaces the radius
+        // source's class carries KnifeBonus (@ 0x4eae0c..0x4eae34); 3 the medic
+        // interaction at kz_maxradius when the source's class carries Medic
+        // (AnimMap slot bit 8), else no callback at radius 0 (@0x4EADDD..0x4EAE0A);
+        // 4 the weapon damage at the source's bound radius when there is a
+        // source (@ 0x4eae3c..0x4eae52); any other type a no-op callback at
+        // radius 0 (@ 0x4eae56). A nonzero override replaces the radius
         // (@ 0x4eae64..0x4eae80) and a zero radius drops the whole entry, the
         // kill switch for zero-radius bullet rows (@ 0x4eae84).
         // The radius is a word (var_AC): the ammo's kz_maxradius word, the
@@ -884,6 +899,16 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                         world.tables.class_has_attribute(
                                 source->player_class, MissionTables::kCharAttrKnifeBonus))
                     radius_q16 = io::bam_add(radius_q16, 0x10000); // [orig: add edi, 10000h @ 0x4eae34]
+                break;
+            case ammo_kz::kMedic:
+                // [orig: the charattr test @0x4EADEA..0x4EADF4, the radius
+                //  @0x4EADF9, the callback @0x4EADFC]
+                if (source != nullptr &&
+                        world.tables.class_has_attribute(
+                                source->player_class, MissionTables::kCharAttrMedic)) {
+                    callback = KillZoneCallback::Medic;
+                    radius_q16 = to_fixed(ammo->kz_maxradius);
+                }
                 break;
             case ammo_kz::kStandard:
             case ammo_kz::kC4:
@@ -912,25 +937,45 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         const auto pair_protected = [&](const Entity &t) {
             return damage_pair_protected(world, t, resolved_entity);
         };
+        // The in-session same-team skip pools 1 and 2 run in the sweep itself
+        // for a victim whose def authors attrib 0x8000, against the entry's
+        // source (entry+0x20), ahead of the cone: such a victim takes neither the
+        // callback nor the attacker fill nor the blast-center store [orig: pool 1
+        // @0x4EB4DA..0x4EB502, pool 2 @0x4EB6A1..0x4EB6C9].
+        const auto session_team_immune = [&](const Entity &t) {
+            if (!world.rules.mp_session || source == nullptr) return false;
+            const ItemDeathTraits *traits = world.tables.item_death_traits.get(t.item_id);
+            return traits != nullptr && traits->team_protect && t.team == source->team;
+        };
         // One victim's callback, then the drain's own attacker store when the
         // callback left the victim without one [orig: `call [esp+var_9C]`
         // @ 0x4eb312 / @ 0x4eb58c / @ 0x4eb868, the +0x178 fallbacks
         // @ 0x4eb319..0x4eb329 / @ 0x4eb593..0x4eb5a4 / @ 0x4eb86f..0x4eb880].
+        // The leg stores the entry's +0x28 word into the victim's +0x1BA ahead
+        // of the call (@0x4EB184 / @0x4EB585 / @0x4EB861); no reader of that
+        // word is ported.
         const auto run_callback = [&](Entity &t, int32_t surface) {
             if (callback == KillZoneCallback::WeaponDamage)
                 entity_apply_weapon_damage(world, collision, t, e, surface, radius_q16);
             else if (callback == KillZoneCallback::Melee)
                 entity_apply_melee_damage(world, t, e);
+            else if (callback == KillZoneCallback::Medic)
+                medic_interaction_callback(world, t, e);
             if (!t.last_attacker.valid()) t.last_attacker = resolved;
         };
+        const int32_t entry_words[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
 
         // --- pool 0, organics [orig: @ 0x4eaeda-0x4eb32c] — skipped when the
-        // ammo flags NoOItems [orig: the & 0x80000 gate @ 0x4eaece]. ---
+        // ammo flags NoOItems [orig: the & 0x80000 gate @ 0x4eaece]. Every
+        // type runs it, the medic kit included. ---
         if ((ammo->flags & kAmmoFlagNoOItems) == 0) {
             const size_t pool0 = world.registry.pool_capacity(0);
             for (size_t s = 0; s < pool0; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(0, static_cast<int>(s)));
-                if (t == nullptr || (t->engine_flags & 0x1u) != 0) continue;
+                // A row with no ItemTypeIndex, or Flags & 1, leaves the walk
+                // [orig: @0x4EAF15..0x4EAF23].
+                if (t == nullptr || t->item_type_index == 0 || (t->engine_flags & 0x1u) != 0)
+                    continue;
                 // The organic reaction band reaches the bound word plus twice
                 // the radius word [orig: `mov ebx, [edi]; lea ebp, [ebx+eax*2]`
                 // @0x4eaf29..0x4eaf2b].
@@ -939,7 +984,13 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                         static_cast<uint32_t>(bound) + 2u * static_cast<uint32_t>(radius_q16));
                 SweepWords sw;
                 if (!sweep_within(*t, e, reach, sw)) continue;
-                if (t->health <= 0 && (t->engine_flags & kEntityFlagDead) != 0) continue;
+                // A victim whose damage-disabled word (entity+0x124: spawn
+                // protection or the dead latch) is set skips straight to the
+                // +0x1BA store and the player arm, whose own +0x124 test and the
+                // kill event's null attacker leave nothing, then the callback's
+                // +0x124 skip: nothing reaches it [orig: `cmp dword ptr [edi+124h],
+                // 0; jnz loc_4EB178` @0x4EAFA8..0x4EAFAF; @0x4EB2C4, @0x4EB2FA..0x4EB300].
+                if (t->damage_state != 0) continue;
                 // The knife's zone (kztype 1, rounds_kz_Knife) skips the cone in
                 // a session for a victim within its kz_minradius, and otherwise
                 // runs the compare even at a zero half-angle; every other type
@@ -955,6 +1006,19 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 } else if (!cone_gate(e, cone_half, sw.dx, sw.dy)) {
                     continue;
                 }
+                // The slash (kztype 7) never reaches its source, and from a
+                // source with an AI slot only the slot's target (+0xC)
+                // [orig: @0x4EB000..0x4EB028].
+                if (e.type == ammo_kz::kSlash && source != nullptr) {
+                    if (t == source) continue;
+                    if (const AiEntity *slot_owner = world.ai.for_handle(source->handle)) {
+                        if (slot_owner->slot.f[3] == 0 ||
+                                slot_owner->slot.f[3] != static_cast<int32_t>(t->handle.packed) + 1)
+                            continue;
+                    }
+                }
+                // The knife never reaches its own source [orig: @0x4EB02E..0x4EB036].
+                if (e.type == ammo_kz::kKnife && t->handle == e.owner) continue;
                 const int32_t surface = sweep_surface(sw.length, bound);
                 // The OUTER-BAND flinch, ahead of the blast-radius cut: an
                 // organic anywhere in the 2x reaction band takes the ammo
@@ -972,62 +1036,74 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // @0x4eb07c, the call @0x4eb086].
                 if (e.type != ammo_kz::kMedic && t->handle != resolved && pair_protected(*t))
                     continue;
-                if (e.type != ammo_kz::kRadiusBlast) {
-                    // The mounted-occupant gate ahead of the LOS [orig: the
-                    // parentSlot switch @0x4eb0e2..0x4eb136]: seats 1/2/5 with
-                    // a parent that has no ItemDef, or a type-1 (vehicle)
-                    // parent, leave the sweep — a crew takes its damage through
-                    // the vehicle; seat 3 (a gun standing on something) leaves
-                    // it when the parent's groundEntity is a vehicle. Every
-                    // other seat state falls through to the LOS.
-                    const SeatType seat = t->mount_type;
-                    const Entity *parent = t->mount_target.valid()
-                            ? world.registry.get(t->mount_target) : nullptr;
-                    if (seat == SeatType::Passenger || seat == SeatType::Controller ||
-                            seat == SeatType::Driver) {
-                        if (parent != nullptr && (!parent->has_item_def || parent->item_type == 1))
-                            continue;
-                    } else if (seat == SeatType::Gunner) {
-                        const Entity *ground = (parent != nullptr && parent->ground_target.valid())
-                                ? world.registry.get(parent->ground_target) : nullptr;
-                        if (ground != nullptr && ground->has_item_def && ground->item_type == 1)
+                // An ammo whose kz_damage word is 0 skips the seat gate and the
+                // LOS [orig: `cmp word ptr [eax+2Eh], 0; jz loc_4EB178`
+                // @0x4EB09D..0x4EB0A2].
+                if (ammo->kz_damage != 0) {
+                    // The knife's LOS runs at -0x2000 and skips the seat gate;
+                    // type 4 skips both [orig: `sub eax, 1; jz` @0x4EB0CF..0x4EB0DB
+                    // -> `mov ecx, 0FFFFE000h` @0x4EB138; `sub eax, 3; jz`
+                    // @0x4EB0DD..0x4EB0E0; `cmp ebp, 4; jz` @0x4EB13D..0x4EB140].
+                    int32_t height_offset = -0x4000; // [orig: @0x4EB0D2]
+                    if (e.type == ammo_kz::kKnife) {
+                        height_offset = -0x2000;
+                    } else if (e.type != ammo_kz::kRadiusBlast) {
+                        // The mounted-occupant gate ahead of the LOS [orig: the
+                        // parentSlot switch @0x4eb0e2..0x4eb136]: seats 1/2/5 with
+                        // a parent that has no ItemDef, or a type-1 (vehicle)
+                        // parent, leave the sweep — a crew takes its damage through
+                        // the vehicle; seat 3 (a gun standing on something) leaves
+                        // it when the parent's groundEntity is a vehicle. Every
+                        // other seat state falls through to the LOS.
+                        const SeatType seat = t->mount_type;
+                        const Entity *parent = t->mount_target.valid()
+                                ? world.registry.get(t->mount_target) : nullptr;
+                        if (seat == SeatType::Passenger || seat == SeatType::Controller ||
+                                seat == SeatType::Driver) {
+                            if (parent != nullptr && (!parent->has_item_def || parent->item_type == 1))
+                                continue;
+                        } else if (seat == SeatType::Gunner) {
+                            const Entity *ground = (parent != nullptr && parent->ground_target.valid())
+                                    ? world.registry.get(parent->ground_target) : nullptr;
+                            if (ground != nullptr && ground->has_item_def && ground->item_type == 1)
+                                continue;
+                        }
+                    }
+                    // The LOS gate from the victim's Position words to the
+                    // entry's, unlifted [orig: @0x4EB0A8..0x4EB0CA, the call
+                    // @0x4eb162]. The victim's parentEntity is NULLED around the
+                    // call, so its own mount hull is a blocker here.
+                    if (e.type != ammo_kz::kRadiusBlast) {
+                        const int32_t victim_words[3] = {
+                                t->position.x.q16, t->position.y.q16, t->position.z.q16};
+                        if (!blast_los_clear(world, collision, terrain, victim_words, entry_words,
+                                             t->handle, height_offset, /*query_parent_cleared=*/true))
                             continue;
                     }
-                    // The LOS gate [orig: @ 0x4eb162 — type 4 direct hits skip
-                    // it]. The victim's parentEntity is NULLED around the call,
-                    // so its own mount hull is a blocker here.
-                    if (!blast_los_clear(world, collision, terrain, t->position, e.pos,
-                                         t->handle, 0.0f, /*query_parent_cleared=*/true))
-                        continue;
                 }
-                // A victim whose damage-disabled word (entity+0x124: spawn
-                // protection or the dead latch) is set skips the burn, the hit
-                // emitter and every later leg [orig: `cmp [edi+124h], ebx; jnz`
-                // @ 0x4eb17e..0x4eb18b].
-                if (t->damage_state == 0) {
-                    // Burn reacts before the damage callback's armor/team gates.
-                    // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
-                    if (t->item_type == 3)
-                        apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos.q16(), e.owner);
-                    // Then the victim's presentation, every pool-0 type: the
-                    // ammo's kz_sound full-volume at the victim, and its
-                    // secondary_effect into the victim's +0x1CC slot (the
-                    // witness sits on spawn_victim_hit_emitter).
-                    // [orig: @0x4EB1DA..0x4EB1EA (the +0x4C set ->
-                    //  Entity_PlaySound3D_FullVolume), @0x4EB1F2..0x4EB292 (the
-                    //  +0x48 effect)]
-                    if (!ammo->kz_sound.empty())
-                        world.out.fire_sounds.play_immediate(ammo->kz_sound.c_str(),
-                                t->position, t->bms_id, t->handle.packed);
-                    if (!ammo->secondary_effect.empty())
-                        spawn_victim_hit_emitter(*t, ammo->secondary_effect, events);
-                    // An entry that deals no damage here stops after the burn:
-                    // a zero kz_damage, or any entry on a non-authority session
-                    // peer, where the damage read returns 0; the medic kit is
-                    // the exception [orig: Entity_GetNetIdIfAuthority @0x4E4010
-                    // called @ 0x4eb2a0, the type-3 test @ 0x4eb2ac..0x4eb2b0].
-                    if (kz_damage_if_authority(world, *ammo) == 0) continue;
-                }
+                // Burn reacts before the damage callback's armor/team gates.
+                // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
+                if (t->item_type == 3)
+                    apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos.q16(), e.owner);
+                // Then the victim's presentation, every pool-0 type: the
+                // ammo's kz_sound full-volume at the victim, and its
+                // secondary_effect into the victim's +0x1CC slot (the
+                // witness sits on spawn_victim_hit_emitter).
+                // [orig: @0x4EB1DA..0x4EB1EA (the +0x4C set ->
+                //  Entity_PlaySound3D_FullVolume), @0x4EB1F2..0x4EB292 (the
+                //  +0x48 effect)]
+                if (!ammo->kz_sound.empty())
+                    world.out.fire_sounds.play_immediate(ammo->kz_sound.c_str(),
+                            t->position, t->bms_id, t->handle.packed);
+                if (!ammo->secondary_effect.empty())
+                    spawn_victim_hit_emitter(*t, ammo->secondary_effect, events);
+                // An entry that deals no damage here stops after the burn:
+                // a zero kz_damage, or any entry on a non-authority session
+                // peer, where the damage read returns 0; the medic kit is
+                // the exception [orig: Entity_GetNetIdIfAuthority @0x4E4010
+                // called @ 0x4eb2a0, the type-3 test @ 0x4eb2ac..0x4eb2b0].
+                if (kz_damage_if_authority(world, *ammo) == 0 && e.type != ammo_kz::kMedic)
+                    continue;
                 // A LIVE player body inside the blast arms the local damage
                 // feedback a SECOND time, ahead of the damage callback: retail
                 // gates on Flags & 0x100 (Player) && !(Flags & 2) (alive), the
@@ -1040,15 +1116,10 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 //  Score_ProcessNetworkKillEvent @0x4eb2f2 -> @0x4fd49d]
                 if (((t->flags | t->engine_flags) & kEntityFlagPlayer) != 0 &&
                         (t->engine_flags & kEntityFlagDead) == 0 &&
-                        t->damage_state == 0 &&
                         t->handle == world.cached.local_player &&
                         e.type != ammo_kz::kMedic) {
-                    const int32_t blast[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
-                    player_on_damage_received(world, radar_entity_source(world, e.owner), blast);
+                    player_on_damage_received(world, radar_entity_source(world, e.owner), entry_words);
                 }
-                // The damage-disabled word keeps the callback away entirely
-                // [orig: `cmp [edi+124h], ebx; jnz` @ 0x4eb2fa..0x4eb300].
-                if (t->damage_state != 0) continue;
                 run_callback(*t, surface);
             }
         }
@@ -1058,36 +1129,52 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         // [orig: @ 0x4eb337..0x4eb343], and nor does an entry that deals no
         // damage (a zero kz_damage, or a non-authority session peer)
         // [orig: @ 0x4eb349..0x4eb36c] — pool 2 included.
-        if (e.type == ammo_kz::kKnife || kz_damage_if_authority(world, *ammo) == 0) continue;
+        if (e.type == ammo_kz::kKnife || e.type == ammo_kz::kMedic ||
+                kz_damage_if_authority(world, *ammo) == 0)
+            continue;
         if ((ammo->flags & kAmmoFlagNoMItems) == 0) {
             const size_t pool1 = world.registry.pool_capacity(1);
             for (size_t s = 0; s < pool1; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(1, static_cast<int>(s)));
-                if (t == nullptr) continue;
+                if (t == nullptr || t->item_type_index == 0) continue; // [orig: @0x4EB3B5]
                 if ((t->engine_flags & 0x1u) != 0 ||
                     (t->engine_flags & kEntityFlagIndestructible) != 0)
-                    continue; // [orig: @ 0x4eb3cb]
+                    continue; // [orig: @ 0x4eb3bf..0x4eb3cb]
                 // The reach is the bound word plus the radius word [orig:
                 // `mov ebp, [edi]; add ebp, var_AC` @0x4eb3d2..0x4eb3d4].
                 const int32_t bound = t->bound_radius.q16;
                 SweepWords sw;
                 if (!sweep_within(*t, e, io::bam_add(bound, radius_q16), sw)) continue;
                 if (pair_protected(*t)) continue; // [orig: @0x4eb45b]
-                // LOS with the witnessed +0.25 lift [orig: @ 0x4eb4ca]; this
-                // leg leaves the item's parentEntity in place.
-                if (e.type != ammo_kz::kRadiusBlast &&
-                    !blast_los_clear(world, collision, terrain, t->position, e.pos,
-                                     t->handle, 0.25f, /*query_parent_cleared=*/false))
-                    continue;
+                // The LOS from the victim's Position words to the entry's, both
+                // Z words lifted 0x4000, for every type when the ammo's
+                // kz_damage word is nonzero; this leg leaves the item's
+                // parentEntity in place [orig: `cmp word ptr [eax+2Eh], 0; jz`
+                // @0x4EB472..0x4EB477, the points @0x4EB479..0x4EB4C3, the call
+                // @0x4EB4CA].
+                if (ammo->kz_damage != 0) {
+                    const int32_t victim_words[3] = {t->position.x.q16, t->position.y.q16,
+                            io::bam_add(t->position.z.q16, 0x4000)};
+                    const int32_t lifted_entry[3] = {entry_words[0], entry_words[1],
+                            io::bam_add(entry_words[2], 0x4000)};
+                    if (!blast_los_clear(world, collision, terrain, victim_words, lifted_entry,
+                                         t->handle, -0x4000, /*query_parent_cleared=*/false))
+                        continue;
+                }
+                if (session_team_immune(*t)) continue;
                 if (!cone_gate(e, cone_half, sw.dx, sw.dy)) continue;
                 // An item with a zero bound word leaves the sweep [orig: `mov ecx,
                 // [edi]; test ecx, ecx; jz` @0x4eb535..0x4eb539].
                 if (bound == 0) continue;
-                // Tree-class targets record the blast center as the debris
+                // A live row whose death callback is the destructible one takes
+                // the entry's words into its savedLivePose, the section-debris
                 // launch origin [orig: the deathCallback ==
-                // Entity_HandleDestructibleDeathEvent check @ 0x4eb553].
-                if (t->health > 0 && runs_tree_death_body(world, *t))
-                    t->death_blast_center = e.pos;
+                // Entity_HandleDestructibleDeathEvent check @0x4EB53F, Health > 0
+                // @0x4EB54B, the stores @0x4EB555..0x4EB569].
+                if (t->health > 0 && runs_tree_death_body(world, *t)) {
+                    std::copy_n(entry_words, 3, t->saved_live_pos);
+                    t->saved_live_valid = true;
+                }
                 run_callback(*t, sweep_surface(sw.length, bound));
             }
         }
@@ -1098,18 +1185,25 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
             const size_t pool2 = world.registry.pool_capacity(2);
             for (size_t s = 0; s < pool2; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(2, static_cast<int>(s)));
-                if (t == nullptr || (t->engine_flags & 0x1u) != 0) continue;
+                if (t == nullptr || t->item_type_index == 0 || (t->engine_flags & 0x1u) != 0)
+                    continue; // [orig: @0x4EB5F4..0x4EB602]
                 // The reach is the bound word plus the radius word [orig:
                 // `mov ebp, [edi]; add ebp, var_AC` @0x4eb609..0x4eb60b].
                 const int32_t bound = t->bound_radius.q16;
                 SweepWords sw;
                 if (!sweep_within(*t, e, io::bam_add(bound, radius_q16), sw)) continue;
+                // A row with no graphic model (entity+0x30) leaves the walk
+                // [orig: `mov ebp, [edi+30h]; test ebp, ebp; jz` @0x4EB696..0x4EB69B].
+                if (!t->has_graphic_model) continue;
+                if (session_team_immune(*t)) continue;
                 if (!cone_gate(e, cone_half, sw.dx, sw.dy)) continue;
-                // The witnessed AABB-face distance refinement rides the model
-                // bounds [orig: @ 0x4eb700-0x4eb7f6]; the bound-sphere reach
-                // stands in until per-model AABBs reach the world (tracked).
-                const int32_t surface = sweep_surface(sw.length, bound);
-                if (surface > radius_q16) continue;
+                const ItemDeathTraits *traits = world.tables.item_death_traits.get(t->item_id);
+                int32_t distance = 0;
+                if (!pool2_box_distance(*t, e, sw,
+                                        traits != nullptr ? traits->model_radius_xy_q16 : 0,
+                                        traits != nullptr ? traits->model_radius_z_q16 : 0,
+                                        radius_q16, distance))
+                    continue;
                 if (pair_protected(*t)) continue; // [orig: @0x4eb7f6]
                 // Window shatter at the GLASS1..4 user points [orig:
                 // Terrain_SpawnEffectsAtUserPoint x4 @ 0x4eb814-0x4eb85d].
@@ -1117,9 +1211,9 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // leg emits the already transformed transient effect rows.
                 shatter_glass_points(
                         world, *t, e.pos, ammo->kz_maxradius, events);
-                if (t->health > 0 && runs_tree_death_body(world, *t))
-                    t->death_blast_center = e.pos;
-                run_callback(*t, surface);
+                // Pool 2 stores no blast center, and hands the callback the box
+                // distance [orig: `push ebx` @0x4EB85E].
+                run_callback(*t, distance);
             }
         }
     }
@@ -1200,7 +1294,7 @@ void process_destructible_death(World &world, Entity &target) {
         world.collision->ensure_entity_instance(world, target.handle);
         const std::vector<SectionDebrisSample> samples =
                 world.collision->sample_section_debris(
-                        world, target.handle, target.death_blast_center);
+                        world, target.handle, target.saved_live_pos);
         // Material 17 (foliage) spawns with the ENTITY as the descriptor's
         // owner tag (+12), so its group takes the section gate; wood spawns
         // with tag 0 [orig: Entity_SpawnSectionDebris @ 0x43F580 — the entity

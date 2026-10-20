@@ -848,10 +848,6 @@ struct Entity {
     // attacker [orig: @ 0x4eb319/@ 0x4eb593; the dead-attacker chain walk
     // @ 0x4eae95..0x4eaece].
     EntityHandle last_attacker;
-    // The blast center a queued explosion stamped before this entity died — the
-    // section-debris launch origin (entity+0x80 savedLivePose reuse; only
-    // destructible-class entities receive it) [orig: @ 0x4eb553-0x4eb569].
-    Vec3 death_blast_center;
     // Per-intact-model glass userpoint one-shot state. Retail marks the exact
     // point broken before rolling its four presentation effects; the dynamic
     // bit bank keeps the state entity-local when one item type has many placed

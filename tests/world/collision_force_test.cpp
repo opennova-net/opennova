@@ -26,6 +26,7 @@ int main() {
     seed.kind = EntityKind::Organic;
     seed.has_item_def = true;
     seed.item_type = 3;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     seed.health = 100;
     seed.group_id = 1;
     const auto owner = world.registry.spawn(0, seed);

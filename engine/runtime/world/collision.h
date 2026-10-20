@@ -1746,11 +1746,13 @@ public:
 
     // Retail's per-section collision-triangle debris sampler. The transform
     // callback is resolved through the same target view as projectile traces;
-    // an absent/invalid model produces no synthetic fallback.
-    // [orig: Entity_SpawnSectionDebris @0x43f580]
+    // an absent/invalid model produces no synthetic fallback. The launch origin
+    // is the entity's savedLivePose words (D-NET-507), all zero for the radial
+    // fallback. [orig: Entity_SpawnSectionDebris @0x43f580 - the +0x80 / +0x84 /
+    // +0x88 reads and their zero test @0x43F6BD..0x43F6D8]
     std::vector<SectionDebrisSample> sample_section_debris(
             const World &world, EntityHandle h,
-            const Vec3 &blast_center) const;
+            const int32_t blast_center[3]) const;
 
     // Read-only world-space geometry snapshot for an embedder collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /

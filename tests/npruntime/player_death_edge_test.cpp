@@ -117,6 +117,11 @@ struct Fixture {
 		entity(k).player_class = 5; // the Medic class
 		world.tables.class_attribute_flags[4] |= w::MissionTables::kCharAttrMedic;
 		entity(i).has_item_def = true;
+		// The sweep walks a row with an ItemTypeIndex; the callback heals a
+		// person (def type 3). [orig: @0x4EAF15; GameEvent_HandleMedicInteraction
+		// @0x4E679C]
+		entity(i).item_type_index = 1;
+		entity(i).item_type = 3;
 		entity(i).health_max = 100;
 		w::AmmoTableEntry kit;
 		kit.valid = true;

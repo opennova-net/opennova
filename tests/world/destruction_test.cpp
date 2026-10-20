@@ -251,6 +251,7 @@ void test_explosion_damage_gates() {
     w.registry.configure_pool(1, 8);
 
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     seed.kind = EntityKind::Item;
     seed.item_id = 500;
     seed.health = 120;
@@ -296,6 +297,7 @@ void test_explosion_damage_gates() {
     armored.armor_blast = 60; // > penetration_kz 50
     w.tables.item_death_traits.set(500, armored);
     Entity attacker_seed;
+    attacker_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     attacker_seed.kind = EntityKind::Organic;
     attacker_seed.health = 100;
     attacker_seed.team = 2; // an enemy of the teamless barrel: the pair is not protected
@@ -348,12 +350,14 @@ void test_explosion_sweep_runs_on_words() {
         w.registry.configure_pool(1, 4);
         const int32_t radius = to_fixed(w.tables.ammo.entries[1].kz_maxradius);
         Entity attacker_seed;
+        attacker_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         attacker_seed.kind = EntityKind::Organic;
         attacker_seed.health = 100;
         attacker_seed.team = 2;
         attacker_seed.position.set_q16({0, 0, 0});
         const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
         Entity seed;
+        seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         seed.kind = pool == 0 ? EntityKind::Organic : EntityKind::Item;
         seed.item_id = 500;
         seed.health = 120;
@@ -395,6 +399,7 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
     w.registry.configure_pool(0, 4);
     w.out.fire_sounds.set_listener(Vec3{0.0f, 0.0f, 0.0f});
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     seed.kind = EntityKind::Organic;
     seed.health = 100;
     seed.health_max = 100;
@@ -457,6 +462,8 @@ void test_multiplayer_destroy_buildings_rule() {
     w.registry.configure_pool(2, 2);
 
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
+    seed.has_graphic_model = true; // pool 2's +0x30 model gate
     seed.kind = EntityKind::Building;
     seed.item_id = 501;
     seed.health = 120;
@@ -501,6 +508,7 @@ void test_explosion_los_excludes_victim_hull() {
     w.registry.configure_pool(1, 4);
 
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     seed.kind = EntityKind::Item;
     seed.item_id = 500;
     seed.has_item_def = true;
@@ -525,9 +533,13 @@ void test_explosion_los_excludes_victim_hull() {
     CHECK(w.registry.get(victim)->health < 120);
 }
 
-// Pool 1's type-4/direct-hit walk bypasses LOS entirely. A solid wall blocks a
-// standard blast, but cannot shield the directly hit movable item.
-void test_radius_blast_skips_pool1_los() {
+// Pool 1 runs its LOS for every type whenever the ammo's kz_damage word is
+// nonzero: a solid wall shields the movable item from a standard blast and from
+// a type-4 (radius-blast) entry alike; only pool 0 skips the LOS for type 4.
+// [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - pool 1 `cmp word ptr
+//  [eax+2Eh], 0; jz` @0x4EB472..0x4EB477, the LOS @0x4EB4CA with no type test;
+//  pool 0's `cmp ebp, 4; jz` @0x4EB13D..0x4EB140]
+void test_pool1_los_runs_for_every_type() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
     seed_ammo(w);
@@ -547,6 +559,8 @@ void test_radius_blast_skips_pool1_los() {
     w.tables.item_death_traits.set(500, barrel_traits());
 
     Entity wall_seed;
+    wall_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
+    wall_seed.has_graphic_model = true; // pool 2's +0x30 model gate
     wall_seed.kind = EntityKind::Building;
     wall_seed.item_id = 501;
     wall_seed.position = Vec3{2.0f, 0.0f, 0.0f};
@@ -568,7 +582,7 @@ void test_radius_blast_skips_pool1_los() {
     e.type = ammo_kz::kRadiusBlast;
     w.explosions.queue_explosion(w, e);
     w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
-    CHECK(w.registry.get(victim)->health < 120);
+    CHECK(w.registry.get(victim)->health == 120);
 }
 
 // Only the movable-item LOS walk lifts both endpoints by 0.25 units. Pool 0
@@ -592,6 +606,8 @@ void test_organic_blast_los_is_unlifted() {
     const EntityHandle victim = w.registry.spawn(0, victim_seed);
 
     Entity wall_seed;
+    wall_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
+    wall_seed.has_graphic_model = true; // pool 2's +0x30 model gate
     wall_seed.kind = EntityKind::Building;
     wall_seed.item_id = 501;
     wall_seed.position = Vec3{2.0f, 0.0f, 0.0f};
@@ -629,6 +645,7 @@ void test_explosion_cone_wrap() {
 
         const double radians = target_deg * 3.14159265358979323846 / 180.0;
         Entity seed;
+        seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         seed.kind = EntityKind::Item;
         seed.item_id = 500;
         seed.health = 120;
@@ -672,6 +689,7 @@ void test_explosion_resolves_attacker_chain_for_events() {
     w.registry.configure_pool(1, 4);
 
     Entity live_seed;
+    live_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     live_seed.kind = EntityKind::Organic;
     live_seed.health = 100;
     live_seed.team = 2; // the resolved attacker is an enemy of its teamless victims
@@ -685,6 +703,7 @@ void test_explosion_resolves_attacker_chain_for_events() {
     const EntityHandle dead_owner = w.registry.spawn(0, dead_seed);
 
     Entity organic_seed;
+    organic_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     organic_seed.kind = EntityKind::Organic;
     organic_seed.health = 40;
     organic_seed.health_max = 40;
@@ -693,6 +712,7 @@ void test_explosion_resolves_attacker_chain_for_events() {
     const EntityHandle organic = w.registry.spawn(0, organic_seed);
 
     Entity item_seed;
+    item_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     item_seed.kind = EntityKind::Item;
     item_seed.item_id = 500;
     item_seed.health = 40;
@@ -741,12 +761,14 @@ void test_destructible_death_chain() {
     w.registry.configure_pool(1, 8);
 
     Entity organic_seed;
+    organic_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     organic_seed.kind = EntityKind::Organic;
     organic_seed.health = 100;
     organic_seed.position = Vec3{12.0f, 0.0f, 0.0f}; // 2 u from the barrel
     const EntityHandle bystander = w.registry.spawn(0, organic_seed);
 
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     seed.kind = EntityKind::Item;
     seed.item_id = 500;
     seed.health = 30;
@@ -800,6 +822,7 @@ void test_destructible_death_chain() {
     CHECK(w.explosions.queue[0].radius_override == 4.0f);
     // Draining it hurts the 2 u bystander but NOT another item (NoMItems).
     Entity item2_seed;
+    item2_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     item2_seed.kind = EntityKind::Item;
     item2_seed.item_id = 500;
     item2_seed.health = 100;
@@ -829,7 +852,11 @@ void test_section_debris_samples_collision_faces() {
     seed.health = 0;
     seed.position = Vec3{10.0f, 20.0f, 30.0f};
     seed.heading = placed_heading_bam(90); // identity mission placement rotation
-    seed.death_blast_center = Vec3{9.0f, 20.0f, 30.0f};
+    // The pool-1 sweep's blast-center store lands in savedLivePose.
+    seed.saved_live_pos[0] = to_fixed(9.0f);
+    seed.saved_live_pos[1] = to_fixed(20.0f);
+    seed.saved_live_pos[2] = to_fixed(30.0f);
+    seed.saved_live_valid = true;
     const EntityHandle target = w.registry.spawn(1, seed);
     w.tables.item_death_traits.set(500, barrel_traits());
 
@@ -903,6 +930,8 @@ void test_glass_userpoints_shatter_once_at_authored_radius() {
     w.tables.item_death_traits.set(900, traits);
 
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
+    seed.has_graphic_model = true; // pool 2's +0x30 model gate
     seed.kind = EntityKind::Building;
     seed.item_id = 900;
     seed.health = 1000;
@@ -1026,6 +1055,7 @@ void test_mitem_blast_spares_indestructible_items() {
     w.registry.configure_pool(1, 4);
     w.tables.item_death_traits.set(502, barrel_traits());
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     seed.kind = EntityKind::Item;
     seed.item_id = 502;
     seed.health = 100;
@@ -3961,6 +3991,7 @@ int mounted_blast_health(SeatType seat_type, int seat_index, bool gun_on_vehicle
     ammo.kz_maxradius = 8;
     ammo.flags = kAmmoFlagNoMItems | kAmmoFlagNoDItems;
     Entity vehicle;
+    vehicle.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     vehicle.kind = EntityKind::Item;
     vehicle.has_item_def = true;
     vehicle.item_type = 1;
@@ -3976,6 +4007,7 @@ int mounted_blast_health(SeatType seat_type, int seat_index, bool gun_on_vehicle
     }
     EntityHandle vh = w.registry.spawn(1, vehicle);
     Entity passenger;
+    passenger.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     passenger.kind = EntityKind::Organic;
     passenger.health = 100;
     passenger.health_max = 100;
@@ -4008,6 +4040,8 @@ void test_blast_breaks_flagged_sections_at_transformed_box_centers() {
     seed_ammo(w);
     w.registry.configure_pool(2, 4);
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
+    seed.has_graphic_model = true; // pool 2's +0x30 model gate
     seed.kind = EntityKind::Building;
     seed.item_type = 5;
     seed.has_item_def = true;
@@ -4066,6 +4100,7 @@ void test_blast_on_a_crewed_vehicle_scales_by_occupants() {
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     Entity hull;
+    hull.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     hull.kind = EntityKind::Item;
     hull.item_id = 700;
     hull.has_item_def = true;
@@ -4077,6 +4112,7 @@ void test_blast_on_a_crewed_vehicle_scales_by_occupants() {
     const EntityHandle vehicle = w.registry.spawn(1, hull);
     for (int i = 0; i < 2; ++i) {
         Entity rider;
+        rider.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         rider.kind = EntityKind::Organic;
         rider.has_item_def = true;
         rider.item_type = 3;
@@ -4105,6 +4141,7 @@ void test_dfx2_blast_on_a_crewed_vehicle_keeps_the_whole_damage() {
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     Entity hull;
+    hull.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     hull.kind = EntityKind::Item;
     hull.item_id = 700;
     hull.has_item_def = true;
@@ -4116,6 +4153,7 @@ void test_dfx2_blast_on_a_crewed_vehicle_keeps_the_whole_damage() {
     const EntityHandle vehicle = w.registry.spawn(1, hull);
     for (int i = 0; i < 2; ++i) {
         Entity rider;
+        rider.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         rider.kind = EntityKind::Organic;
         rider.has_item_def = true;
         rider.item_type = 3;
@@ -4147,6 +4185,7 @@ void test_blast_respects_the_damage_disabled_word() {
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     Entity piece;
+    piece.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     piece.kind = EntityKind::Item;
     piece.item_id = 500;
     piece.health = piece.health_max = 120;
@@ -4156,6 +4195,7 @@ void test_blast_respects_the_damage_disabled_word() {
     const EntityHandle item = w.registry.spawn(1, piece);
     w.tables.item_death_traits.set(500, barrel_traits());
     Entity person;
+    person.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     person.kind = EntityKind::Organic;
     person.has_item_def = true;
     person.item_type = 3;
@@ -4191,12 +4231,15 @@ void test_zero_damage_blast_still_runs_the_item_leg() {
     w.registry.configure_pool(0, 2);
     w.registry.configure_pool(2, 4);
     Entity shooter;
+    shooter.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     shooter.kind = EntityKind::Organic;
     shooter.health = 100;
     shooter.team = 2; // an enemy of the teamless building (D-WPN-42)
     shooter.position = Vec3{200.0f, 0.0f, 0.0f};
     const EntityHandle owner = w.registry.spawn(0, shooter);
     Entity seed;
+    seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
+    seed.has_graphic_model = true; // pool 2's +0x30 model gate
     seed.kind = EntityKind::Building;
     seed.item_id = 510;
     seed.item_type = 5;
@@ -4245,6 +4288,7 @@ void test_zero_damage_person_blast_still_draws_the_cause_roll() {
         seed_ammo(w);
         w.registry.configure_pool(0, 2);
         Entity person;
+        person.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         person.kind = EntityKind::Organic;
         person.has_item_def = true;
         person.item_type = 3;
@@ -4282,6 +4326,7 @@ void test_person_blast_quadrant_faces_the_blast() {
     seed_ammo(w);
     w.registry.configure_pool(0, 2);
     Entity person;
+    person.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     person.kind = EntityKind::Organic;
     person.has_item_def = true;
     person.item_type = 3;
@@ -4313,6 +4358,7 @@ void test_zero_damage_kill_zone_still_burns() {
     w.tables.ammo.entries[1].secondary_anim = 1;
     w.registry.configure_pool(0, 2);
     Entity person;
+    person.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     person.kind = EntityKind::Organic;
     person.has_item_def = true;
     person.item_type = 3;
@@ -4344,12 +4390,14 @@ void test_team_immunity_compares_the_blast_source() {
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     Entity enemy;
+    enemy.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     enemy.kind = EntityKind::Organic;
     enemy.health = 100;
     enemy.team = 2;
     enemy.position = Vec3{200.0f, 0.0f, 0.0f};
     const EntityHandle killer = w.registry.spawn(0, enemy);
     Entity truck;
+    truck.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     truck.kind = EntityKind::Item;
     truck.health = 0;
     truck.engine_flags |= kEntityFlagDead;
@@ -4358,6 +4406,7 @@ void test_team_immunity_compares_the_blast_source() {
     truck.position = Vec3{300.0f, 0.0f, 0.0f};
     const EntityHandle source = w.registry.spawn(1, truck);
     Entity crate;
+    crate.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     crate.kind = EntityKind::Item;
     crate.item_id = 520;
     crate.health = crate.health_max = 120;
@@ -4378,6 +4427,152 @@ void test_team_immunity_compares_the_blast_source() {
     CHECK(w.registry.get(protected_item)->last_attacker == killer);
 }
 
+// In a session the same-team skip for a def with attrib 0x8000 sits in the
+// sweep itself (pools 1 and 2), against the entry's source, ahead of the cone:
+// the immune row takes neither the callback nor the drain's attacker fill nor,
+// for a destructible-class row, the blast-center store into its savedLivePose.
+// Off-session only the callback's own test spares it, and the fill and the
+// store land (the store takes the entry's words).
+// [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - pool 1 @0x4EB4DA..0x4EB502,
+//  the store @0x4EB555..0x4EB569, the fill @0x4EB593..0x4EB5A4; pool 2
+//  @0x4EB6A1..0x4EB6C9, the fill @0x4EB86F..0x4EB880]
+void test_session_team_immunity_skips_inside_the_sweep() {
+    for (const bool session : {false, true}) {
+        auto storage = std::make_unique<World>();
+        World &w = *storage;
+        seed_ammo(w);
+        w.rules.mp_session = session;
+        w.rules.logic_authority = true;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(2, 4);
+        Entity shooter;
+        shooter.item_type_index = 1;
+        shooter.kind = EntityKind::Organic;
+        shooter.health = 100;
+        shooter.team = 1;
+        shooter.flags |= kEntityFlagPlayer; // a player's blast passes the pair gate
+        shooter.position = Vec3{200.0f, 0.0f, 0.0f};
+        const EntityHandle source = w.registry.spawn(0, shooter);
+        Entity tree;
+        tree.item_type_index = 1;
+        tree.kind = EntityKind::Item;
+        tree.item_id = 530;
+        tree.health = tree.health_max = 120;
+        tree.team = 1;
+        tree.bound_radius = 1.0f;
+        tree.position = Vec3{1.0f, 0.0f, 0.0f};
+        const EntityHandle item = w.registry.spawn(1, tree);
+        Entity hut = tree;
+        hut.has_graphic_model = true;
+        hut.kind = EntityKind::Building;
+        hut.position = Vec3{-1.0f, 0.0f, 0.0f};
+        const EntityHandle building = w.registry.spawn(2, hut);
+        ItemDeathTraits traits;
+        traits.team_protect = true;
+        traits.death_class = ItemDeathClass::kTree;
+        w.tables.item_death_traits.set(530, traits);
+        ExplosionEntry e;
+        e.pos = EntityPosition::of_q16({0x8123, 0x4321, 0x11});
+        e.type = ammo_kz::kStandard;
+        e.ammo_index = 1;
+        e.owner = source;
+        run_blast(w, e);
+        const Entity *it = w.registry.get(item);
+        const Entity *bd = w.registry.get(building);
+        CHECK(it->health == 120 && bd->health == 120);
+        CHECK(it->last_attacker.valid() == !session);
+        CHECK(bd->last_attacker.valid() == !session);
+        CHECK(it->saved_live_valid == !session);
+        if (!session)
+            CHECK(it->saved_live_pos[0] == 0x8123 && it->saved_live_pos[1] == 0x4321 &&
+                  it->saved_live_pos[2] == 0x11);
+        CHECK(!bd->saved_live_valid); // pool 2 stores no blast center
+    }
+}
+
+// Pool 2 measures the entry against the model box about the Position words
+// (the graphic model's +0x18 / +0x1C half-extents, 0 for a 3DI3 model), not the
+// bound sphere: a building whose bound reaches the blast but whose centre lies
+// past the radius word is spared, one inside takes the callback with the box
+// length (the falloff reads it: 0x50123 from kz_minradius 1 to the radius 8
+// leaves 43 of 100, where the bound sphere's surface took all 100), and a row
+// with no graphic model is skipped.
+// [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - the model gate
+//  @0x4EB696..0x4EB69B; the box @0x4EB6FD..0x4EB7AE, its length
+//  @0x4EB7B4..0x4EB7EA; `push ebx` @0x4EB85E; Entity_ApplyWeaponDamage's
+//  falloff @0x4E6943..0x4E699C]
+void test_pool2_measures_the_model_box() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(2, 4);
+    Entity seed;
+    seed.item_type_index = 1;
+    seed.has_graphic_model = true;
+    seed.kind = EntityKind::Building;
+    seed.item_id = 540;
+    seed.health = seed.health_max = 1000;
+    seed.bound_radius = 4.0f;
+    seed.position = EntityPosition::of_q16({0xA0000, 0, 0}); // 10 u: bound reaches, box not
+    const EntityHandle far_row = w.registry.spawn(2, seed);
+    seed.position = EntityPosition::of_q16({0, 0x50123, 0});
+    const EntityHandle near_row = w.registry.spawn(2, seed);
+    seed.has_graphic_model = false;
+    seed.position = EntityPosition::of_q16({0, -0x20000, 0});
+    const EntityHandle bare_row = w.registry.spawn(2, seed);
+    w.tables.item_death_traits.set(540, ItemDeathTraits{});
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    run_blast(w, e);
+    CHECK(w.registry.get(far_row)->health == 1000);
+    CHECK(w.registry.get(near_row)->health == 1000 - 43);
+    CHECK(w.registry.get(bare_row)->health == 1000);
+}
+
+// The slash (kztype 7) never reaches its source, and from a source with an AI
+// slot only the slot's target (+0xC): a bystander inside the radius is spared,
+// and a slot with no target spares everyone.
+// [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - @0x4EB000..0x4EB028]
+void test_slash_reaches_only_the_slot_target() {
+    for (const bool targeted : {true, false}) {
+        auto storage = std::make_unique<World>();
+        World &w = *storage;
+        seed_ammo(w);
+        w.tables.ammo.entries[1].kztype = ammo_kz::kSlash;
+        w.registry.configure_pool(0, 4);
+        Entity person;
+        person.item_type_index = 1;
+        person.kind = EntityKind::Organic;
+        person.has_item_def = true;
+        person.item_type = 3;
+        person.health = person.health_max = 100;
+        person.bound_radius = 0.6f;
+        person.team = 1;
+        person.position = Vec3{0.5f, 0.0f, 0.0f};
+        const EntityHandle source = w.registry.spawn(0, person);
+        person.team = 2;
+        person.position = Vec3{2.0f, 0.0f, 0.0f};
+        const EntityHandle bystander = w.registry.spawn(0, person);
+        person.position = Vec3{-2.0f, 0.0f, 0.0f};
+        const EntityHandle target = w.registry.spawn(0, person);
+        w.ai.attach(source);
+        w.ai.for_handle(source)->slot.f[3] =
+                targeted ? static_cast<int32_t>(target.packed) + 1 : 0;
+        ExplosionEntry e;
+        e.pos = Vec3{};
+        e.type = ammo_kz::kSlash;
+        e.ammo_index = 1;
+        e.owner = source;
+        run_blast(w, e);
+        CHECK(w.registry.get(source)->health == 100);
+        CHECK(w.registry.get(bystander)->health == 100);
+        CHECK((w.registry.get(target)->health < 100) == targeted);
+    }
+}
+
 // The blast legs ask the friendly-fire gate of (victim, resolved attacker): a
 // same-side NPC source spares the barrel, a human player's lands unless the host
 // rules NoFriendlyFire, an enemy's always lands. [orig: Projectile_ProcessExplosionQueue
@@ -4389,12 +4584,14 @@ void test_blast_friendly_fire_gate() {
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     Entity npc;
+    npc.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     npc.kind = EntityKind::Organic;
     npc.health = 100;
     npc.team = 1;
     npc.position = Vec3{50.0f, 0.0f, 0.0f};
     const EntityHandle source = w.registry.spawn(0, npc);
     Entity barrel;
+    barrel.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     barrel.kind = EntityKind::Item;
     barrel.item_id = 500;
     barrel.health = barrel.health_max = 120;
@@ -4436,12 +4633,14 @@ void test_dead_unattributed_source_credits_no_one() {
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     Entity dead;
+    dead.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     dead.kind = EntityKind::Item;
     dead.health = 0;
     dead.engine_flags |= kEntityFlagDead;
     dead.position = Vec3{300.0f, 0.0f, 0.0f};
     const EntityHandle source = w.registry.spawn(1, dead);
     Entity person;
+    person.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     person.kind = EntityKind::Organic;
     person.has_item_def = true;
     person.item_type = 3;
@@ -4449,6 +4648,7 @@ void test_dead_unattributed_source_credits_no_one() {
     person.bound_radius = 0.6f;
     const EntityHandle body = w.registry.spawn(0, person);
     Entity barrel;
+    barrel.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     barrel.kind = EntityKind::Item;
     barrel.item_id = 500;
     barrel.health = barrel.health_max = 40;
@@ -4491,6 +4691,7 @@ void test_session_peer_without_authority_applies_no_blast() {
     w.registry.configure_pool(0, 2);
     w.registry.configure_pool(1, 2);
     Entity person;
+    person.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     person.kind = EntityKind::Organic;
     person.has_item_def = true;
     person.item_type = 3;
@@ -4499,6 +4700,7 @@ void test_session_peer_without_authority_applies_no_blast() {
     person.position = Vec3{-1.0f, 0.0f, 0.0f};
     const EntityHandle body = w.registry.spawn(0, person);
     Entity barrel;
+    barrel.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     barrel.kind = EntityKind::Item;
     barrel.item_id = 500;
     barrel.health = barrel.health_max = 120;
@@ -4541,6 +4743,7 @@ void test_player_blast_and_knife_run_the_waypoint_tail() {
         w.tables.ammo.entries.push_back(cut); // index 4
         w.registry.configure_pool(0, 4);
         Entity source;
+        source.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         source.kind = EntityKind::Organic;
         source.has_item_def = true;
         source.item_type = 3;
@@ -4548,6 +4751,7 @@ void test_player_blast_and_knife_run_the_waypoint_tail() {
         source.team = 2;
         const EntityHandle attacker = w.registry.spawn(0, source);
         Entity player;
+        player.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         player.kind = EntityKind::Organic;
         player.has_item_def = true;
         player.item_type = 3;
@@ -4602,6 +4806,7 @@ void test_knife_kill_zone() {
     knife.kz_damage = 150;
     knife.kz_maxradius = 1.5f;
     Entity attacker_seed;
+    attacker_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     attacker_seed.kind = EntityKind::Organic;
     attacker_seed.has_item_def = true;
     attacker_seed.item_type = 3;
@@ -4619,6 +4824,7 @@ void test_knife_kill_zone() {
     far_seed.position = Vec3{-2.6f, 0.0f, 0.0f}; // surface 2.0: past 1.5, inside 2.5
     const EntityHandle far_victim = w.registry.spawn(0, far_seed);
     Entity crate;
+    crate.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     crate.kind = EntityKind::Item;
     crate.item_id = 500;
     crate.health = crate.health_max = 120;
@@ -4680,6 +4886,7 @@ void test_knife_cone_session_and_zero_half_angle() {
         knife.kz_maxradius = 1.5f;
         knife.kz_pieslice_bam = half_bam;
         Entity attacker_seed;
+        attacker_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         attacker_seed.kind = EntityKind::Organic;
         attacker_seed.has_item_def = true;
         attacker_seed.item_type = 3;
@@ -4733,6 +4940,7 @@ void test_medic_kill_zone_queues_both_arms() {
     kit.kz_maxradius = 3.0f;
     w.tables.class_attribute_flags[(5u - 1u) & 0xFu] = MissionTables::kCharAttrMedic;
     Entity medic_seed;
+    medic_seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
     medic_seed.kind = EntityKind::Organic;
     medic_seed.has_item_def = true;
     medic_seed.item_type = 3;
@@ -4756,7 +4964,7 @@ void test_medic_kill_zone_queues_both_arms() {
     const EntityHandle downed = w.registry.spawn(0, downed_seed);
     Entity enemy_seed = hurt_seed;
     enemy_seed.team = 2;
-    w.registry.spawn(0, enemy_seed);
+    const EntityHandle enemy = w.registry.spawn(0, enemy_seed);
     ExplosionEntry e;
     e.pos = Vec3{};
     e.type = ammo_kz::kMedic;
@@ -4770,6 +4978,11 @@ void test_medic_kill_zone_queues_both_arms() {
     CHECK(queued.size() == 2 && queued[1].victim == downed && queued[1].revive &&
           queued[1].healer == medic);
     CHECK(w.registry.get(hurt)->health == 40);
+    // The kit runs the whole pool-0 leg, so the drain's attacker fill lands on
+    // every swept person the callback left without one, healed or not
+    // [orig: @0x4EB319..0x4EB329].
+    CHECK(w.registry.get(hurt)->last_attacker == medic);
+    CHECK(w.registry.get(enemy)->last_attacker == medic);
 }
 
 int main() {
@@ -4781,6 +4994,9 @@ int main() {
     test_person_blast_quadrant_faces_the_blast();
     test_zero_damage_kill_zone_still_burns();
     test_team_immunity_compares_the_blast_source();
+    test_session_team_immunity_skips_inside_the_sweep();
+    test_pool2_measures_the_model_box();
+    test_slash_reaches_only_the_slot_target();
     test_blast_friendly_fire_gate();
     test_dead_unattributed_source_credits_no_one();
     test_session_peer_without_authority_applies_no_blast();
@@ -4817,7 +5033,7 @@ int main() {
     test_blast_victim_hit_emitter_and_kz_sound();
     test_multiplayer_destroy_buildings_rule();
     test_explosion_los_excludes_victim_hull();
-    test_radius_blast_skips_pool1_los();
+    test_pool1_los_runs_for_every_type();
     test_organic_blast_los_is_unlifted();
     test_explosion_cone_wrap();
     test_explosion_resolves_attacker_chain_for_events();

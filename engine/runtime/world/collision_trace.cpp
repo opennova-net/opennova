@@ -153,7 +153,7 @@ bool CollisionWorld::entity_section_matrix(const World &world, EntityHandle h, i
 }
 
 std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
-        const World &world, EntityHandle h, const Vec3 &blast_center) const {
+        const World &world, EntityHandle h, const int32_t blast_center[3]) const {
     std::vector<SectionDebrisSample> out;
     CollisionTargetView scratch;
     std::vector<CollisionMatrix> matrices;
@@ -170,9 +170,7 @@ std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
     const int64_t stride = (total_faces * 256) / 150;
     if (stride <= 0) return out;
 
-    const int32_t blast_fixed[3] = {
-            to_fixed(blast_center.x), to_fixed(blast_center.y),
-            to_fixed(blast_center.z)};
+    const int32_t blast_fixed[3] = {blast_center[0], blast_center[1], blast_center[2]};
     const bool has_blast_center =
             blast_fixed[0] != 0 || blast_fixed[1] != 0 || blast_fixed[2] != 0;
     constexpr int32_t kRadialFallbackPitchBam = 754974675;

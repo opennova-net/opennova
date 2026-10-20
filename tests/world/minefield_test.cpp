@@ -51,6 +51,7 @@ struct Rig {
     EntityHandle actor(float x, float z, uint8_t stance = 0) {
         Entity seed;
         seed.item_id = 1;
+        seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         seed.position = {x, 0, z};
         seed.net_stance_bits = stance;
         return world.registry.spawn(0, seed);
