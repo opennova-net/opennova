@@ -477,6 +477,9 @@ static int test_scr_decode_policy() {
     std::vector<uint8_t> retail_detect = as_bytes(retail);
     CHECK(opennova::vfs_decode_payload(retail_detect, opennova::VFS_SCR_VERSION_DETECT), "decode retail version-detect ok");
     CHECK(as_string(retail_detect) == plaintext, "version-detect still correct for retail version-1 files");
+    std::vector<uint8_t> retail_forced = as_bytes(retail);
+    CHECK(opennova::vfs_decode_payload(retail_forced, opennova::VFS_SCR_FORCE_JO_DFX2), "decode FORCE_JO_DFX2 ok");
+    CHECK(as_string(retail_forced) == plaintext, "FORCE_JO_DFX2 recovers a retail-style file");
     return 1;
 }
 
