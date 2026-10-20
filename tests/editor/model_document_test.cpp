@@ -14,6 +14,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
+#include <editor/documents/model_labels.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
@@ -160,6 +161,10 @@ int composed_forms() {
 		const ModelRow *row = document.model_row();
 		TEST_EXPECT(row && row->lods.size() >= 2 && row->lods.back().panm.empty() &&
 		            row->lods.back().lod.render_object_count == 0 && row->lods.back().lod.strip_count == 0);
+		if (!row || row->lods.size() < 2) return 1;
+		const std::string empty_lod =
+				model_record_label(document, {row->id, node_kind(ModelKind::Lod), row->ids.lists[0].back().id}, nullptr);
+		TEST_EXPECT(empty_lod.size() >= 10 && empty_lod.compare(empty_lod.size() - 10, 10, ", no parts") == 0);
 		TEST_EXPECT(serialized(document) == emptied);
 		Threedi3di3 back{};
 		const std::vector<uint8_t> bytes = serialized(document);
@@ -506,7 +511,13 @@ int shipped_forms_validate() {
 	// catalog (DT801's VEHICLE_TIRE14); a LOD that takes over at more pixels than the one before it (Cboat05's LOD
 	// 1 at 57 after LOD 0's 0); two user points of one name, in any case (CmbtHlmt's GFLASH01).
 	TEST_EXPECT(form("mount.3di", "an empty register name", [&](ModelDocument &d) {
-		return edits(d, {set_edit({model_of(d), kRegister, d.model_row()->ids.lists[4][1].id}, "name", std::string())});
+		const NodeAddress reg{model_of(d), kRegister, d.model_row()->ids.lists[4][1].id};
+		if (!edits(d, {set_edit(reg, "name", std::string())})) return false;
+		// Its record by its place alone; the rows reading it name no register in their words (the cradle's yaw).
+		const NodeAddress cradle{model_of(d), kPanm, d.model_row()->ids.lists[0][0].lists[0][1].id};
+		const std::string words = model_record_label(d, cradle, nullptr);
+		return model_record_label(d, reg, nullptr) == "1: (no name)" && words.find("turns") != std::string::npos &&
+		       words.back() != ' ' && words.find("EWEAP") == std::string::npos;
 	}, "model.register_unknown"));
 	TEST_EXPECT(form("mount.3di", "a register past the catalog", [&](ModelDocument &d) {
 		return edits(d, {set_edit({model_of(d), kRegister, d.model_row()->ids.lists[4][2].id}, "name",

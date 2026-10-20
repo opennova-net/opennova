@@ -427,6 +427,7 @@ int volumes_inside_boxes() {
 // none, and the volume shows as its box (the install's 39, Brdg02X's seventh plane); planes reaching past the
 // box are clipped to it (I_LFP2's and I_LFPB's, by 8 cm; here a slanted top 0.2 m past); a box stored inside
 // out (z above z: the install's four, I_Base1's walls) is named so, its planes' solid standing as authored.
+// And a bullet face rounds pass through is named so.
 int other_volumes() {
 	std::istringstream text(R"(o3d 2
 model VOLUMES
@@ -470,6 +471,10 @@ cp 0 1 0 0
 cp 0 -1 0 -1
 cp 0 0 1 -1
 cp 0 0 -1 0
+cv 0 -1 0
+cv 0 1 0
+cv 0 1 2
+cf 0 1 2 1 256
 )");
 	std::vector<uint8_t> bytes;
 	std::vector<SceneFinding> findings;
@@ -501,14 +506,21 @@ cp 0 0 -1 0
 	// The ladder: one polygon, its facing, inside its box.
 	TEST_EXPECT(solid[0].size() == 1 && inside_box(solid[0], c.volumes[0]) &&
 	            model_volume_type(4).family == ModelVolumeFamily::Ladder && !named(0, "its box"));
-	// No solid: the box drawn, its twelve edges on its corners.
-	TEST_EXPECT(solid[1].empty() && named(1, ", its box (its planes bound no solid)") && !shapes[1].edges.empty());
+	// No solid: the box drawn, its edges and its six sides' twelve triangles.
+	TEST_EXPECT(solid[1].empty() && named(1, ", its box (its planes bound no solid)") && !shapes[1].edges.empty() &&
+	            shapes[1].triangles.size() == 36);
 	// Past its box: the planes' own solid reaches past it, the one the game tests stays in it.
 	TEST_EXPECT(past_box(own[2], c.volumes[2]) > 0.1 && !solid[2].empty() && inside_box(solid[2], c.volumes[2]));
 	// Inside out: named so, the planes' six facets standing.
 	TEST_EXPECT(named(3, "its box inside out") && solid[3].size() == 6 && !named(3, "planes bound no solid"));
 	for (size_t v = 0; v < 4; ++v) TEST_EXPECT(shapes[v].kind == ModelCollisionKind::Volume && shapes[v].index == int(v));
-	std::printf("other volumes: a flat ladder, planes bounding none, planes past the box, a box inside out\n");
+	// A face rounds pass (flag 0x100: the rotor blades', 10,066 shipped faces) says so in its name.
+	ModelOverlayOptions faces;
+	faces.bullet_faces = true;
+	const std::vector<ModelCollisionShape> face_shapes = model_collision_shapes(row->base, 0, 0, bus, faces);
+	TEST_EXPECT(face_shapes.size() == 1 && face_shapes[0].name == "Face 1: Dirt, bullets pass");
+	std::printf("other volumes: a flat ladder, planes bounding none, planes past the box, a box inside out; a face "
+	            "rounds pass\n");
 	return 0;
 }
 

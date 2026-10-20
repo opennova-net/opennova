@@ -314,6 +314,9 @@ int words() {
 	            model_user_point_role("ground ").empty() && model_user_point_role("UseGun") == "gunner's seat" &&
 	            model_user_point_role(std::string("drvrx01\0ab", 10)) == "driver's seat" &&
 	            model_user_point_role(std::string("UseGun\0ab", 9)) == "gunner's seat");
+	// A point both muzzles fire from, and the weapons' aim origin (mission::kUserPointNames' bullet02 and TARGET).
+	TEST_EXPECT(model_user_point_role("bullet02") == "weapon muzzle (primary and secondary)" &&
+	            model_user_point_role("TARGET") == "weapons' aim origin");
 
 	// A LOD past one whose threshold is 0 is never drawn by distance.
 	ModelRow levels = *row;
@@ -340,6 +343,17 @@ int words() {
 	            model_surface_words(17).energy_cost == 8.0);
 	TEST_EXPECT(!model_surface_words(14).passes && model_surface_label(14) == "Metal");
 	TEST_EXPECT(model_surface_choices()[16].label == "Cloth (rounds pass)");
+	// A spinner's row and a billboard's in words (Fan01's spinner, CMoon1's billboard).
+	for (const auto &turn : {std::make_pair(int64_t(1), "spins"), std::make_pair(int64_t(3), "faces the camera")}) {
+		Edit rotation;
+		rotation.address = panm;
+		rotation.field = "flags.rotation";
+		rotation.value = turn.first;
+		Diagnostic error;
+		TEST_EXPECT(document.apply(rotation, error));
+		TEST_EXPECT(model_record_label(document, panm, nullptr).find(std::string(": ") + turn.second) != std::string::npos);
+		document.undo();
+	}
 
 	// A face by its surface; the armory's faces.
 	ModelDocument armory;
@@ -359,6 +373,17 @@ int words() {
 	const NodeAddress face{collision->id, kFace, collision->ids.lists[2][0].id};
 	const std::string face_words = model_record_label(armory, face, nullptr);
 	TEST_EXPECT(face_words.rfind("Face 1: ", 0) == 0);
+	// A light owned by no group (subobject 0, the shipped lights' commonest: CmpFire1's) names no part.
+	{
+		Edit owner;
+		owner.address = {armory_row->id, node_kind(ModelKind::Light), armory_row->ids.lists[kModelLights][0].id};
+		owner.field = "part";
+		owner.value = int64_t(0);
+		Diagnostic error;
+		TEST_EXPECT(armory.apply(owner, error));
+		const std::string light = model_record_label(armory, owner.address, nullptr);
+		TEST_EXPECT(light.rfind("Light 1: ", 0) == 0 && light.find(", on ") == std::string::npos);
+	}
 	// The value words: a face's surface by name; a user point's part by the add-on's name.
 	const DocumentType *type = document_type(DocumentTypeId::Model);
 	TEST_EXPECT(type && type->record_label == model_record_label && type->value_label == model_value_label);
@@ -497,8 +522,11 @@ int own_triangles() {
 // over one triangle (the install's 1,772 such faces, Armry02's among them) takes it twice; a face on no
 // triangle (a first-person gun's own collision mesh; Barbrol1's 8 of 183 faces) takes no material; a face
 // near a sheet stored both ways but on neither's corners, the side wound with it taken by the face made from
-// it, takes the side wound against it (NVG's one face); and a material whose faces carry two surfaces is
-// mixed (Cboat08's, Dbtr801's, Dcboat04's), its common surface the most faces'.
+// it, takes the side wound against it (NVG's one face); a face near a triangle others took and near no other
+// takes it all the same; and a material whose faces carry two surfaces is mixed (Cboat08's, Dbtr801's,
+// Dcboat04's), its common surface the most faces'. The faces' LOD is the one meeting the most: a later LOD
+// meeting none and an empty one are passed over (CNet01's empty LOD 3). And a model whose faces all wind
+// against its triangles (two shipped models) finds each face's triangle as one wound with it.
 int other_faces() {
 	std::istringstream text(R"(o3d 2
 model FACES
@@ -528,6 +556,15 @@ v 4 1 0 -1 0 0 1 1
 v 4 1 2 -1 0 0 1 0
 t 0 2 1
 panm 0 0
+lod 100 gnrc
+part 0 0 0 0
+mesh 0 0
+v 0 -5 0 1 0 0 0 1
+v 0 -4 0 1 0 0 1 1
+v 0 -4 1 1 0 0 1 0
+t 0 1 2
+panm 0 0
+lod 0 gnrc
 cobj 0 0 0 0
 cv 0 -1 0
 cv 0 1 0
@@ -540,12 +577,14 @@ cv 4 -1 0
 cv 4 1 0
 cv 4 1 2
 cv 4 1 2.0078125
+cv 0 1 2.015625
 cf 0 1 2 14
 cf 0 1 2 14
 cf 0 2 3 17
 cf 4 5 6 14
 cf 7 8 9 14
 cf 7 8 10 14
+cf 0 1 11 14
 )");
 	std::vector<uint8_t> bytes;
 	std::vector<SceneFinding> findings;
@@ -556,28 +595,61 @@ cf 7 8 10 14
 	Diagnostic error;
 	TEST_EXPECT(document.load_bytes(bytes, "faces.3di", AssetKind::Model, "jo", error));
 	const CollisionRow *collision = document.collision_row();
-	TEST_EXPECT(collision && collision->faces.size() == 6);
-	if (!collision || collision->faces.size() != 6) return 1;
+	TEST_EXPECT(collision && collision->faces.size() == 7);
+	if (!collision || collision->faces.size() != 7) return 1;
 	const auto made = model_face_materials(document.model_row()->base);
 	// The wall's two faces over its first triangle and one over its second; none on the face at x = 10; the
-	// front's face, then the one near it on the back.
-	TEST_EXPECT(made->lod == 0 && made->matched == 5 && made->against == 1);
-	TEST_EXPECT((made->material == std::vector<int>{0, 0, 0, -1, 1, 2}));
+	// front's face, then the one near it on the back; the one near the wall's first triangle, taken twice.
+	TEST_EXPECT(made->lod == 0 && made->matched == 6 && made->against == 1);
+	TEST_EXPECT((made->material == std::vector<int>{0, 0, 0, -1, 1, 2, 0}));
 	TEST_EXPECT(model_faces_without_material(document) == 1);
 	size_t checked = 0, wrong = 0;
 	std::string first;
 	faces_on_their_own_triangles(*document.model_row()->base, *made, checked, wrong, first);
 	TEST_EXPECT(checked == 4 && wrong == 0);
-	// The wall's material: three faces, two of Metal (14) and one of Foliage (17), so mixed.
+	// The wall's material: four faces, three of Metal (14) and one of Foliage (17), so mixed.
 	const ModelRow *row = document.model_row();
 	ModelMaterialSurface surface;
-	TEST_EXPECT(model_material_surface(document, row->ids.lists[kModelMaterials][0].id, surface) && surface.faces == 3 &&
+	TEST_EXPECT(model_material_surface(document, row->ids.lists[kModelMaterials][0].id, surface) && surface.faces == 4 &&
 	            surface.mixed() && surface.common() == 14 && surface.differing.size() == 1 &&
 	            model_material_surface_words(surface).find("Mixed:") == 0);
 	TEST_EXPECT(model_differing_faces(document, row->ids.lists[kModelMaterials][0].id).size() == 1);
 	TEST_EXPECT(model_material_surface(document, row->ids.lists[kModelMaterials][2].id, surface) && surface.faces == 1 &&
 	            !surface.mixed());
-	std::printf("other faces: one stored twice, one on no triangle, one near a taken side, a mixed material\n");
+
+	// Faces wound against their triangles, all of them: the model's own relation, each face its triangle's.
+	std::istringstream against(R"(o3d 2
+model AGAINST
+material FF_MT_OP
+texture wall.tga 1 0 0 0
+lod 200 gnrc
+part 0 0 0 0
+mesh 0 0
+v 0 -1 0 1 0 0 0 1
+v 0 1 0 1 0 0 1 1
+v 0 1 2 1 0 0 1 0
+v 0 -1 2 1 0 0 0 0
+t 0 1 2
+t 0 2 3
+panm 0 0
+cobj 0 0 0 0
+cv 0 -1 0
+cv 0 1 0
+cv 0 1 2
+cv 0 -1 2
+cf 0 2 1 14
+cf 0 3 2 15
+)");
+	std::vector<uint8_t> wound;
+	findings.clear();
+	TEST_EXPECT(threedi_o3d_build(against, opennova::renderer::retail_model_target(), wound, findings));
+	ModelDocument reversed;
+	TEST_EXPECT(reversed.load_bytes(wound, "against.3di", AssetKind::Model, "jo", error));
+	TEST_EXPECT(reversed.collision_row() && reversed.collision_row()->faces.size() == 2);
+	const auto back = model_face_materials(reversed.model_row()->base);
+	TEST_EXPECT(back->lod == 0 && back->matched == 2 && back->against == 0 && (back->material == std::vector<int>{0, 0}));
+	std::printf("other faces: one stored twice, one on no triangle, one near a taken side, a mixed material, a model "
+	            "wound against its triangles\n");
 	return 0;
 }
 

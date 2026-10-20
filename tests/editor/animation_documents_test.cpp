@@ -145,6 +145,15 @@ int clips() {
 		TEST_EXPECT(document.record_title(event) == "Frame 0: left footstep");
 		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(0x2 | 0x40 | 0x10000)), error));
 		TEST_EXPECT(document.record_title(event) == "Frame 0: right footstep, sound 2, an unread bit (0x10000)");
+		// A bit the engine reads nowhere is a note on its frame (five shipped clips set bits 0x800 to 0x8000,
+		// COLT_1F's and DET_1F's among them).
+		size_t unread = 0;
+		for (const Diagnostic &d : validate_animation_file(document))
+			unread += d.row() == &finding_code(AnimationFinding::TriggerUnknown) && d.child_id == event.child &&
+			                          d.severity == DiagnosticSeverity::Info && d.field == "trigger"
+			                  ? 1
+			                  : 0;
+		TEST_EXPECT(unread == 1);
 		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(0)), error) && document.record_title(event) == "Frame 0");
 		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(1)), error));
 	}
@@ -199,7 +208,20 @@ int clips() {
 	TEST_EXPECT(document.save(error));
 	while (document.can_undo()) document.undo();
 	TEST_EXPECT(serialized(document) == source);
-	std::printf("clips: untouched saves, engine data edits, the motion refused, undo\n");
+
+	// A version 0 clip's events carry no trigger word (m60_rst's, m60_1d's, m60_1r's; the model lane mints the
+	// form, fixtures/anim/rig19_v0.bad): its frames are titled by their number alone.
+	{
+		const std::vector<uint8_t> v0 = model_variants::bytes_of("fixtures/anim/rig19_v0.bad");
+		AnimationDocument first;
+		TEST_EXPECT(!v0.empty() && first.load_bytes(v0, "rig19_v0.bad", AssetKind::Animation, "jo", error));
+		const ClipRow *v0_clip = first.clip();
+		TEST_EXPECT(v0_clip && v0_clip->version == 0 && v0_clip->events.size() > 1);
+		if (!v0_clip || v0_clip->events.size() < 2) return 1;
+		TEST_EXPECT(first.record_title({v0_clip->id, kEvent, v0_clip->collections[1][0]}) == "Frame 0" &&
+		            serialized(first) == v0);
+	}
+	std::printf("clips: untouched saves, engine data edits, the motion refused, undo, a version 0 clip\n");
 	return 0;
 }
 
