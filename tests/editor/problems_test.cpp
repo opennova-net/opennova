@@ -1653,6 +1653,51 @@ static int test_plan_refusals_are_rows() {
 	return 0;
 }
 
+// The perf query's counter of the build plans the rows' marks made (problems.blocker_plans).
+static size_t blocker_plans(ProjectSession &session) {
+	std::string error;
+	const opennova::io::JsonValue answer = session.query("perf", opennova::io::JsonValue(), error);
+	const opennova::io::JsonValue *problems = answer.get("problems");
+	return problems ? size_t(problems->get_number("blocker_plans", 0)) : 0;
+}
+
+// The rows' marks are planned again only when what the plan reads moved (plan_blockers over the scan, the
+// requirements, the gate, the build's target, the base's names and the files packed as shipped): a validation
+// that composes the rows and leaves those as they were (a document opened, then closed) plans none and marks the
+// rows as they were; a file the plan refuses, added, plans again, its rows marked as blocking (the scan's rule on
+// its name and the plan's word).
+static int test_marks_planned_once() {
+	test_temp::TempDir dir("opennova_editor_problems_marks_planned");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Marks planned"));
+	const SessionView &v = session.view();
+	TEST_EXPECT(test_io::write_text(v.project.root + "/scripts/plain.wac", "// a script\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(v.findings.marks && v.findings.marks->rows == v.findings.diagnostics.size());
+	if (!v.findings.marks) return 1;
+	const FindingMarks marks = *v.findings.marks;
+	const std::vector<Diagnostic> rows = v.findings.diagnostics;
+	const size_t plans = blocker_plans(session), compositions = session.problems_compositions();
+	const size_t blocking = count_problems(v).blocking;
+	TEST_EXPECT(plans > 0);
+	editor_test::handle_to_end(session, request::open_document("scripts/plain.wac"));
+	editor_test::handle_to_end(session, request::close_document("scripts/plain.wac"));
+	TEST_EXPECT(blocker_plans(session) == plans && v.findings.diagnostics == rows && v.findings.marks &&
+	            *v.findings.marks == marks);
+	std::printf("marks planned once: %zu composition(s) since, no plan\n", session.problems_compositions() - compositions);
+	TEST_EXPECT(test_io::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(blocker_plans(session) > plans);
+	size_t unstorable = SIZE_MAX;
+	for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
+		if (v.findings.diagnostics[i].code() == "build.name_unstorable") unstorable = i;
+	TEST_EXPECT(unstorable != SIZE_MAX && blocks_the_build(unstorable, v) && count_problems(v).blocking == blocking + 2);
+	std::printf("marks planned once: planned again when the plan's own word moved\n");
+	return 0;
+}
+
 // The demo round's bug 10: the required files landing take their "required file missing" rows out of
 // Problems at once, while the validation the change left due has yet to run (an import's 27 such rows
 // stood until the validation after it ended); the other rows wait for it, which then composes them.
@@ -1682,6 +1727,7 @@ static int test_requirements_at_once() {
 int main() {
 	int failures = 0;
 	failures += test_requirements_at_once();
+	failures += test_marks_planned_once();
 	failures += test_original_marks();
 	failures += test_blocking();
 	failures += test_fix_all_served_whole();

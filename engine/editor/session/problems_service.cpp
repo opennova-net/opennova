@@ -61,9 +61,33 @@ struct ProblemsService::Pass {
 	bool graph_shown = false; // Graph moved for its update
 };
 
+// What the rows' marks were last planned over (mark_rows): the scan's serial and the requirements made with it,
+// the gate's rows, the build's target, the base game's names and the files packed as shipped. While each
+// stands the plan's refusals do (plan_blockers reads nothing else but the expansion's table, which a save of it
+// rescans).
+struct ProblemsService::BlockerMemo {
+	bool made = false;
+	uint64_t serial = 0;
+	std::shared_ptr<const RequirementReport> requirements;
+	std::vector<Diagnostic> gate;
+	BuildTarget target;
+	std::vector<std::string> base_files;
+	ShippedFiles shipped;
+
+	bool same(uint64_t serial_now, const std::shared_ptr<const RequirementReport> &requirements_now,
+	          const BuildTarget &target_now, const std::vector<std::string> &base_now,
+	          const ShippedFiles &shipped_now) const {
+		return made && serial_now != 0 && serial == serial_now && requirements == requirements_now &&
+		       target.expansion == target_now.expansion && target.install == target_now.install &&
+		       target.game == target_now.game && target.base_project == target_now.base_project &&
+		       base_files == base_now && shipped.original == shipped_now.original &&
+		       shipped.unsaved == shipped_now.unsaved;
+	}
+};
+
 ProblemsService::ProblemsService(SessionCore &core) :
 		core_(core), view_(core.view()), checks_(std::make_shared<ProjectChecks>()),
-		originals_(std::make_unique<OriginalFiles>()) {
+		originals_(std::make_unique<OriginalFiles>()), blocker_memo_(std::make_unique<BlockerMemo>()) {
 	view_.findings.graph = graph_;
 	view_.findings.assets = assets_;
 	view_.findings.project_checks = checks_;
@@ -212,26 +236,40 @@ void ProblemsService::show_originals() {
 	core_.touch(ViewConcern::Findings);
 }
 
-// The gate as it stands among the rows (gate_findings' range), never composing: empty when the rows no
-// longer hold it.
-std::vector<Diagnostic> ProblemsService::gate_rows() const {
-	const std::vector<Diagnostic> &rows = view_.findings.diagnostics;
-	if (gate_size_ + gate_tail_ + trailing_ > rows.size()) return {};
-	const auto end = rows.end() - static_cast<std::ptrdiff_t>(gate_tail_ + trailing_);
-	return std::vector<Diagnostic>(end - static_cast<std::ptrdiff_t>(gate_size_), end);
-}
-
 void ProblemsService::mark_rows() {
-	blockers_.clear();
+	BlockerMemo &memo = *blocker_memo_;
 	if (view_.project.open && view_.project.scan && view_.project.requirements && view_.project.document) {
 		// The plan a build would make (ADR 0046 S16): the project's target, an expansion's gate over its base
-		// game's names, and the game's own bytes packed as stored.
-		const std::vector<Diagnostic> gate = gate_rows();
-		const BaseNames base{&view_.project.base_files};
-		const ShippedFiles shipped = core_.shipped_files(gate);
-		++blocker_plans_;
-		blockers_ = build_blockers(plan_build(core_.paths(), *view_.project.scan, *view_.project.requirements, gate,
-		                                      core_.build_target(), &base, &shipped));
+		// game's names, and the game's own bytes packed as stored; its refusals alone (plan_blockers), planned
+		// again only when what they are made of moved. The gate is compared where it stands among the rows
+		// (gate_findings' range, none when the rows no longer hold it), never composing, and copied only when
+		// it moved.
+		const std::vector<Diagnostic> &rows = view_.findings.diagnostics;
+		const bool held = gate_size_ + gate_tail_ + trailing_ <= rows.size();
+		const auto end = held ? rows.end() - static_cast<std::ptrdiff_t>(gate_tail_ + trailing_) : rows.end();
+		const auto begin = held ? end - static_cast<std::ptrdiff_t>(gate_size_) : rows.end();
+		if (size_t(end - begin) != memo.gate.size() || !std::equal(begin, end, memo.gate.begin())) {
+			memo.gate.assign(begin, end);
+			memo.made = false;
+		}
+		const BuildTarget target = core_.build_target();
+		const ShippedFiles shipped = core_.shipped_files(memo.gate);
+		const uint64_t serial = view_.project.scan->serial();
+		if (!memo.same(serial, view_.project.requirements, target, view_.project.base_files, shipped)) {
+			const BaseNames base{&view_.project.base_files};
+			++blocker_plans_;
+			blockers_ = plan_blockers(core_.paths(), *view_.project.scan, *view_.project.requirements, memo.gate, target,
+			                          &base, &shipped);
+			memo.made = true;
+			memo.serial = serial;
+			memo.requirements = view_.project.requirements;
+			memo.target = target;
+			memo.base_files = view_.project.base_files;
+			memo.shipped = shipped;
+		}
+	} else {
+		blockers_.clear();
+		*blocker_memo_ = BlockerMemo();
 	}
 	auto marks = std::make_shared<const FindingMarks>(
 	        mark_findings(view_.findings.diagnostics, view_.findings.originals.get(), &blockers_));
@@ -423,6 +461,7 @@ void ProblemsService::clear() {
 	originals_->clear();
 	originals_needed_ = false;
 	blockers_.clear();
+	*blocker_memo_ = BlockerMemo();
 	view_.findings.marks.reset();
 	show_originals();
 	show_validation();

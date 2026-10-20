@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
@@ -119,10 +120,16 @@ FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalDa
 	marks.original.assign(rows.size(), 0);
 	marks.blocking.assign(rows.size(), 0);
 	std::map<std::string, std::map<std::string, size_t>> left;
+	// The plan's refusals by a hash of each (a row asks whether it is one of them: thousands of rows over
+	// hundreds of refusals), the answer a search of the list gives.
+	std::unordered_set<const Diagnostic *, DiagnosticHash, DiagnosticPointerEqual> refused;
+	if (blockers) {
+		refused.reserve(blockers->size());
+		for (const Diagnostic &d : *blockers) refused.insert(&d);
+	}
 	for (size_t i = 0; i < rows.size(); ++i) {
 		const Diagnostic &d = rows[i];
-		const bool blocks = blocks_build(d) &&
-		                    (!blockers || std::find(blockers->begin(), blockers->end(), d) != blockers->end());
+		const bool blocks = blocks_build(d) && (!blockers || refused.count(&d) != 0);
 		if (blocks) {
 			marks.blocking[i] = 1;
 			++marks.blocking_count;

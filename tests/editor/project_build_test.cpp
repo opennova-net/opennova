@@ -53,9 +53,11 @@
 #include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
 
+#include "common/file_io.h"
 #include "common/sparse_file.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/minted_install.h"
 
 using namespace opennova::editor;
 using opennova::pff::normalized_logical_name;
@@ -955,6 +957,74 @@ static size_t count_code(const std::vector<Diagnostic> &findings, const char *co
 	size_t count = 0;
 	for (const Diagnostic &d : findings) count += d.code() == code ? 1 : 0;
 	return count;
+}
+
+// The plan's refusals alone (plan_blockers, what Problems marks and the build_gate query lists) are the plan's
+// (plan_build's blockers), and its findings the plan's, over OpenNova's own game (assets/, minted_install.h's
+// stand-ins for what rides LFS) as the standalone game and over its expansion (expansions/onjo1) as that expansion,
+// over the base game's names and with none; each with the plan's own word on three files (an archive, a name no
+// archive stores, a player's file), in a gate that holds them (the Problems rows' gate) and in one that does not.
+// Each archive's entries are in their normalized names' order (the scan's keys).
+static int test_plan_blockers_are_the_plans() {
+	std::vector<minted_install::File> base_game, expansion_game;
+	std::string error;
+	TEST_EXPECT(minted_install::base_game(base_game, error) && minted_install::expansion_game(expansion_game, error));
+	std::vector<std::string> base_names;
+	for (const minted_install::File &file : base_game) base_names.push_back(file.name);
+	std::sort(base_names.begin(), base_names.end(),
+	          [](const std::string &a, const std::string &b) { return normalized_logical_name(a) < normalized_logical_name(b); });
+	const BaseNames base{&base_names};
+	for (const bool expansion : {false, true}) {
+		Project p(expansion ? "opennova_editor_build_blockers_expansion" : "opennova_editor_build_blockers_base");
+		TEST_EXPECT(p.create());
+		for (const minted_install::File &file : expansion ? expansion_game : base_game)
+			TEST_EXPECT(test_io::write_file(p.root + "/" + file.name, *file.bytes));
+		const opennova::pff::PffWriteEntry packed[] = {{"note.txt", reinterpret_cast<const uint8_t *>("x"), 1, 0, 0, 0}};
+		TEST_EXPECT(opennova::pff::pff_write_archive((p.root + "/extra.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, packed,
+		                                             1) == opennova::pff::PFF_WRITE_OK);
+		TEST_EXPECT(test_io::write_text(p.root + "/scripts/a_name_far_too_long_for_it.wac", "// a script\r\n"));
+		TEST_EXPECT(test_io::write_text(p.root + "/_errlog.txt", "a log"));
+		BuildTarget target;
+		if (expansion) {
+			p.doc.expansion.name = minted_install::kExpansion;
+			target.expansion = minted_install::kExpansion;
+			target.game = p.doc.target_game;
+		}
+		const AssetScan scan = scan_project_assets(p.paths, p.doc);
+		const RequirementReport requirements = evaluate_requirements(p.doc, scan);
+		AssetGraph graph;
+		ValidationCache cache;
+		const std::vector<std::shared_ptr<const DocumentBase>> open;
+		const std::vector<Diagnostic> documents = validate_project({p.paths, p.doc, scan, open}, graph, cache);
+		std::vector<Diagnostic> rows = documents;
+		const std::vector<Diagnostic> own = plan_scan_findings(scan, p.doc.expansion.name);
+		TEST_EXPECT(count_code(own, "build.archive_in_project") == 1 && count_code(own, "build.name_unstorable") == 1 &&
+		            count_code(own, "build.player_file") == 1);
+		rows.insert(rows.end(), own.begin(), own.end());
+		const std::vector<const std::vector<Diagnostic> *> gates{&documents, &rows};
+		const std::vector<const BaseNames *> bases{expansion ? &base : nullptr, nullptr};
+		for (const std::vector<Diagnostic> *gate : gates)
+			for (const BaseNames *over : bases) {
+				const BuildPlan plan = plan_build(p.paths, scan, requirements, *gate, target, over);
+				std::vector<Diagnostic> findings;
+				const std::vector<Diagnostic> blockers = plan_blockers(p.paths, scan, requirements, *gate, target, over, nullptr,
+				                                                       &findings);
+				TEST_EXPECT(blockers == plan.blockers && findings == plan.diagnostics && plan.ok == blockers.empty());
+				TEST_EXPECT(plan_blockers(p.paths, scan, requirements, *gate, target, over) == blockers);
+				// The plan's own words once each, whichever gate it read; the name no archive stores among its refusals.
+				TEST_EXPECT(count_code(findings, "build.archive_in_project") == 1 && count_code(findings, "build.player_file") == 1 &&
+				            count_code(findings, "build.name_unstorable") == 1 && count_code(blockers, "build.name_unstorable") == 1);
+				TEST_EXPECT(count_code(findings, "build.expansion.base_missing") == (expansion && !over ? 1u : 0u));
+				for (const BuildArchive &archive : plan.archives)
+					TEST_EXPECT(std::is_sorted(archive.entries.begin(), archive.entries.end(),
+					                           [](const BuildEntry &a, const BuildEntry &b) {
+						                           return normalized_logical_name(a.logical_name) <
+						                                  normalized_logical_name(b.logical_name);
+					                           }));
+			}
+	}
+	std::printf("plan blockers: the plan's refusals, over the base game and its expansion\n");
+	return 0;
 }
 
 // An export's listed files: every file it wrote but its record.
@@ -1955,6 +2025,7 @@ int main() {
 	failures += test_lean_packing();
 	failures += test_base_gate();
 	failures += test_expansion_table_texts();
+	failures += test_plan_blockers_are_the_plans();
 	if (failures == 0) std::printf("editor_project_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

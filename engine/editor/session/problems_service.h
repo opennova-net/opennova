@@ -202,9 +202,6 @@ private:
 	bool step_originals(uint64_t bytes);
 	// The view's originals made the check's where they moved, the rows marked again (Findings then moves).
 	void show_originals();
-	// The gate as it stands among the rows (gate_findings' range), never composing: none when the rows
-	// no longer hold it.
-	std::vector<Diagnostic> gate_rows() const;
 
 	SessionCore &core_;
 	SessionView &view_;
@@ -252,6 +249,10 @@ private:
 	bool originals_needed_ = false;
 	// The plan's refusals the rows were last marked against (mark_rows), which a reported finding's mark reads.
 	std::vector<Diagnostic> blockers_;
+	// What they were planned over (problems_service.cpp), kept while it stands: a composition that leaves the
+	// gate, the scan and the build's target as they were plans none.
+	struct BlockerMemo;
+	std::unique_ptr<BlockerMemo> blocker_memo_;
 };
 
 } // namespace opennova::editor
