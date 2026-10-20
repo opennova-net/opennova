@@ -369,7 +369,7 @@ weapon "WPN_GRENADEHE"
 	flags WhileSwimming
 	flags PowerThrow
 	clipweight 1.1
-	pos -4.332 -3.84 -173.766 0 0 0
+	pos -33 8 -177 0 0 0
 	action "idle"
 		anim anim_wpn_idle
 		delayend 125
@@ -394,7 +394,6 @@ weapon "WPN_GRENADEHE"
 	end
 	action "reload"
 		anim anim_wpn_reload
-		soundset GF_ONGNADE_ST
 		delayend auto
 		function wpn_std_reload
 	end
@@ -406,7 +405,7 @@ weapon "WPN_GRENADEHE"
 	action "switchto"
 		anim anim_wpn_switchto
 		soundset GF_ONGNADE_ST
-		delaystart 88
+		delaystart 34
 		function wpn_std_idle
 	end
 	action "switchfrom"
@@ -458,7 +457,7 @@ weapon "WPN_GRENADESM"
 	flags WhileSwimming
 	flags PowerThrow
 	clipweight 1.1
-	pos -4.332 -3.84 -173.766 0 0 0
+	pos -33 8 -177 0 0 0
 	action "idle"
 		anim anim_wpn_idle
 		delayend 125
@@ -483,7 +482,6 @@ weapon "WPN_GRENADESM"
 	end
 	action "reload"
 		anim anim_wpn_reload
-		soundset GF_ONGNADE_ST
 		delayend auto
 		function wpn_std_reload
 	end
@@ -495,7 +493,7 @@ weapon "WPN_GRENADESM"
 	action "switchto"
 		anim anim_wpn_switchto
 		soundset GF_ONGNADE_ST
-		delaystart 88
+		delaystart 34
 		function wpn_std_idle
 	end
 	action "switchfrom"
