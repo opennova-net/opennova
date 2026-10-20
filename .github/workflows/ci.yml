@@ -162,9 +162,9 @@ jobs:
           # in scripts/lint/fixture_allowlist.json; LFS-tracked, under 2 MiB,
           # referenced by a test or doc, and materialized in this checkout.
           python scripts/lint/fixture_lint.py --enforce --require-pulled
-          # Environment-variable gate (docs/dev-env-vars.md): the two machine
-          # roots through their resolvers, GODOT_BIN in the scripts, the
-          # deployed service's own config and the OS variables; nothing else.
+          # Environment-variable gate (docs/dev-env-vars.md): GODOT_BIN in the
+          # scripts, the deployed service's own config and the OS variables;
+          # nothing else.
           python scripts/lint/env_lint.py --enforce
           # Vocabulary conventions (CLAUDE.md): no Nova/nova_ prefix (ADR 0040).
           python scripts/lint/conventions_lint.py --enforce

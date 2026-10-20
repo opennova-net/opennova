@@ -47,12 +47,10 @@ error or an unregistered GDExtension class (stale/missing DLL).
 ## Single file / single test (isolation runs)
 
 The wrapper takes no per-file selection. Its flags are `--keep-user-dir` (keeps
-the run's isolated `user://` for inspection), `--suite core|retail|all` (default
-`all`; `core` unsets the retail roots, `retail` requires both and rejects every
-skip) and `--windowed` (with any suite: only the graphics scripts,
-`tests/windowed/` for core and `tests/retail/windowed/` for retail, Forward+; a
-windowed run fails on any pending test except, under `all`, a missing-data
-skip). For one file, invoke GUT directly:
+the run's isolated `user://` for inspection), `--shard shells|world` (one of
+CI's two shards) and `--windowed` (only the graphics scripts, `tests/windowed/`,
+under Forward+; a windowed run fails on any pending test). For one file, invoke
+GUT directly:
 
     "$GODOT_BIN" --headless --path godot -s addons/gut/gut_cmdln.gd \
       -gtest=res://tests/<file>_test.gd -gexit
@@ -85,18 +83,14 @@ including `user://opennova.cfg`). On any reported failure:
 
 `extends GutTest`, named `*_test.gd`, anywhere under `godot/tests/` (subdirs
 are collected). Repo fixtures are reached one level above `res://`:
-`ProjectSettings.globalize_path("res://").path_join("../fixtures/...")`. A script
-that needs retail data lives under `godot/tests/retail/` and may `pending` only
-there: `--suite retail` rejects any skip, and `--suite core` fails a core script
-that reads `RetailData` or reports a root-gated skip (`godot/tests/CLAUDE.md`,
-`scripts/ci/test_suites.py`). A script whose every test needs a RenderingDevice
-lives under `godot/tests/windowed/` (core) or `godot/tests/retail/windowed/` and
-runs only with `--windowed`; headless it is never selected. A headless script that
-mixes in RD-gated methods keeps them `pending` until they are split into a
-windowed sibling. A green `--suite all` count does not prove
-coverage; check for pending/skipped lines when you expected assets present.
-Retail data comes from the two roots through `RetailData`
-(`godot/tests/support/retail_data.gd`), never a bespoke env var.
+`ProjectSettings.globalize_path("res://").path_join("../fixtures/...")`. No test
+reads retail data: its inputs are minted or authored fixtures and the tree's own
+`assets/` (`godot/tests/CLAUDE.md`; `scripts/ci/test_suites.py --check-layout`
+fails a script that names a retail root). A script whose every test needs a
+RenderingDevice lives under `godot/tests/windowed/` and runs only with
+`--windowed`; headless it is never selected. A headless script that mixes in
+RD-gated methods keeps them `pending` until they are split into a windowed
+sibling, so a green count does not prove coverage: check for pending lines.
 Runtime probes are not GUT scripts: they live under `godot/probes/` as `game_probe`
 tools (`docs/mcp.md`); only their contract tests live here. Never bulk-edit `.gd` files with
 PowerShell 5.1 Get/Set-Content (BOM mangling) — do bulk text rewrites with bash

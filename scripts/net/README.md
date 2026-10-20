@@ -47,7 +47,7 @@ pwsh -File scripts\net\detect_capture.ps1
 pwsh -File scripts\net\capture.ps1 -Action start -Tag retail-ref
 # Run the session, then stop with the same tag the start command used.
 pwsh -File scripts\net\capture.ps1 -Action stop -Tag retail-ref
-pwsh -File scripts\net\decode.ps1 -Capture <capture.pcapng> -Stream
+pwsh -File scripts\net\decode.ps1 -Capture <capture.pcapng> -Items <items.def> -Stream
 ```
 
 NovaWorld traffic can contain credentials, account identity, and machine paths.
