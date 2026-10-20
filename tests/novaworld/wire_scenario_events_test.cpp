@@ -8,6 +8,8 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
 
 #include <string>
 #include <vector>
@@ -114,6 +116,18 @@ int main() {
 	InGameMessage settings = message('S', s2c::ENTITY_DEATH, {0x5d, 0x00, 0x00, 0x00});
 	settings.settings_update = true;
 	TEST_EXPECT(line(settings).empty());
+
+	// The kick: the host's connection-description record to the kicked player,
+	// reason 33 (Server_NotifyPlayerKicked -> CNapiNPConnection_SendChatMessage
+	// @0x4C7EF0), as our own encoder writes it.
+	InGameMessage kick = message('S', 0x03, connection_description_to_bytes(
+			make_disconnect_event(1, 2, 0, 0, "STRSRV18", 33, "")));
+	kick.tag = PROTOCOL_TAG_CONNECTION_DESCRIPTION;
+	kick.settings_update = true;
+	TEST_EXPECT(line(kick) ==
+			"SCENARIO_EVENT frame=7 ts_ns=1791065947917321000 dir=S session=32768 "
+			"tag=0x103 kind=disconnect class=2 reason=33 tag_hex= "
+			"text_hex=5354525352563138 decode=1");
 
 	std::printf("opennova-wire scenario events: ok\n");
 	return 0;

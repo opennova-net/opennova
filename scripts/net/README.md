@@ -425,6 +425,13 @@ counts must also equal the reference (RR when given). Capture-local fields
 (frame, time, session, positions) and the scenario's `expect.mask` fields are
 excluded.
 
+A session-level disconnect prints as `kind=disconnect` (full tag 0x103, the
+connection-description record), with `class`, `reason` (DPC, the code the
+client's exit-reason switch reads) and the two strings in hex. A host sends it to
+the player it kicks, reason 33 (`Server_NotifyPlayerKicked` ->
+`CNapiNPConnection_SendChatMessage @0x4C7EF0`). That is what a kick scenario
+expects.
+
 | Scenario | Mission / mode | Play | Notes |
 | --- | --- | --- | --- |
 | `self_nade` | 01TR co-op | select the frag, look down, 40-tick throw at the feet | `game_event.type` is masked: retail draws the suicide message type 1..3 from its PRNG (`GameEvent_PlayerDeath @0x5170ed`). Reload requests are sequence-only: a retail client repeats C2S 0x25 until the 0x49 echo refills the slot, so the count follows the round trip. |

@@ -2,6 +2,8 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -186,12 +188,37 @@ std::string client_fields(const InGameMessage &m, ScenarioEventTracker &tracker,
 	}
 }
 
+// A string field as hex (a reason with spaces stays one field).
+std::string text_hex(const std::string &text) {
+	std::string hex;
+	for (const unsigned char c : text) hex += format("%02x", unsigned(c));
+	return hex;
+}
+
 } // namespace
 
 std::string format_scenario_event(const InGameMessage &message, uint64_t ts_nanos,
 		ScenarioEventTracker &tracker) {
-	// Settings-update records share the low dispatch byte but are not these
-	// gameplay messages.
+	// The session-level disconnect: the connection-description record (inner
+	// H:0x03, full tag 0x103), which a host sends the player it kicks
+	// (Server_NotifyPlayerKicked -> CNapiNPConnection_SendChatMessage @0x4C7EF0
+	// latches the event, reason code at +0x94; CNapiNPConnection_TrySendSessionInit
+	// @0x629750 -> NapiNPDataTransfer_SendDescription @0x628c80). The reason code
+	// is DPC, which the client's exit-reason switch reads (@0x4c6569).
+	if (message.tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
+		DisconnectEvent event;
+		const bool decoded = parse_disconnect_event(
+				message.payload.data(), message.payload.size(), event);
+		return format("SCENARIO_EVENT frame=%d ts_ns=%llu dir=%c session=%d tag=0x103 ",
+		              message.frame_index, static_cast<unsigned long long>(ts_nanos),
+		              message.dir, message.session) +
+		       format("kind=disconnect class=%u reason=%u tag_hex=", unsigned(event.dc),
+		              unsigned(event.dpc)) +
+		       text_hex(event.ddstr) + " text_hex=" + text_hex(event.dstr) +
+		       (decoded ? " decode=1" : " decode=0");
+	}
+	// Other settings-update records share the low dispatch byte but are not
+	// these gameplay messages.
 	if (message.settings_update) return {};
 	bool decoded = false;
 	const std::string fields = message.dir == 'S'
