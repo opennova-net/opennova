@@ -432,6 +432,9 @@ public:
 	// feed the destroy's refNum walk (erase_entity_tree). Without a catalog a
 	// row has no def and the walk never runs. Null clears both.
 	void set_item_catalog(std::shared_ptr<const ItemReplicationCatalog> catalog);
+	// A row's def as the client's handlers read it (entity+0x20): its wire
+	// type's catalog profile, or null without a catalog or a definition.
+	const ItemReplicationProfile *item_def(uint16_t type_id) const;
 
 	// Inject the embedder's .adm root-motion source (JOINER role): armed rows
 	// (rm_adm_id >= 0, stamped by the embedder) advance their own AnimMap
@@ -641,9 +644,6 @@ private:
 	bool has_water_ = false;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
 	std::shared_ptr<const ItemReplicationCatalog> item_catalog_; // the items.def def facts
-	// A row's def as the destroy reads it (entity+0x20): its wire type's
-	// catalog profile, or null without a catalog or a definition.
-	const ItemReplicationProfile *item_def(uint16_t type_id) const;
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;

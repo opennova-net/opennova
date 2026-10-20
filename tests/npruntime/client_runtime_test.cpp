@@ -2975,6 +2975,22 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 		if (type_id == 0x14B9u) return EntityClass::Player;
 		return EntityClass::Unknown;
 	});
+	// The items.def facts the handler's person test reads (ItemDef+0x5C): the
+	// player def a person (3); a second def the class map calls Player whose
+	// type is not one (D-NET-189).
+	constexpr uint16_t kOddPlayerType = 0x14BAu;
+	{
+		replication::ItemReplicationDefinition person;
+		person.definition_id = replication::ItemReplicationCatalog::kDefinitionIdOffset + 0x14B9;
+		person.item_type = 3;
+		person.ai_function = "plyr";
+		person.move_function = "org2";
+		replication::ItemReplicationDefinition odd = person;
+		odd.definition_id = replication::ItemReplicationCatalog::kDefinitionIdOffset + kOddPlayerType;
+		odd.item_type = 1;
+		client.view().set_item_catalog(std::make_shared<const replication::ItemReplicationCatalog>(
+				replication::ItemReplicationCatalog::from_definitions({person, odd})));
+	}
 
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> spawn = frame_server_session(
@@ -2989,15 +3005,22 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 	replication::ClientEntityState &non_person =
 			client.state().upsert(kNonPersonHandle);
 	non_person.cls = EntityClass::Vehicle;
+	// A Player-class row whose def is not a person takes no stamp.
+	constexpr uint16_t kOddHandle = 0x0009;
+	replication::ClientEntityState &odd = client.state().upsert(kOddHandle);
+	odd.cls = EntityClass::Player;
+	odd.type_id = kOddPlayerType;
 
 	const WeaponReload reload{kRemoteHandle, 0x00C5};
 	const WeaponReload non_person_reload{kNonPersonHandle, 0x00C6};
+	const WeaponReload odd_reload{kOddHandle, 0x00C7};
 	const std::vector<uint8_t> reload_echo = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{
 					make_protocol_message(0x49, encode_weapon_reload(reload)),
 					make_protocol_message(
 							0x49, encode_weapon_reload(non_person_reload)),
+					make_protocol_message(0x49, encode_weapon_reload(odd_reload)),
 			});
 	client.receive(reload_echo.data(), reload_echo.size());
 	(void)client.Client_ProcessNetworkFrame(2);
@@ -3016,10 +3039,14 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 				non_person.pitch_kick_accum == 0,
 			"reload order: the runtime does not invent the unmodeled non-Person refill"))
 		return false;
+	const replication::ClientEntityState *odd_after = client.state().find(kOddHandle);
+	if (!expect(odd_after != nullptr && odd_after->arms_dip_ticks == 0,
+			"reload order: the person test is the def's type, not the row's class"))
+		return false;
 
 	const std::vector<WeaponReload> notifications =
 			client.drain_reload_notifications();
-	return expect(notifications.size() == 2 &&
+	return expect(notifications.size() == 3 &&
 					notifications[0].entity_handle == kRemoteHandle &&
 					notifications[0].reload_param == reload.reload_param &&
 					notifications[1].entity_handle == kNonPersonHandle &&

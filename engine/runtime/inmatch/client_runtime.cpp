@@ -990,18 +990,22 @@ void ClientRuntime::stage_reload_notifications_before_body_tick() {
 		// therefore visible to Entity_UpdateInfantryPlayerBody later in the same
 		// Game_ProcessMainFrame. Self reloads take the WeaponSlot_ReloadAmmo branch,
 		// and a non-Person EWeap entity's refill runs in the joiner's drain
-		// (VehicleSystem::reload_weapon_slot).
-		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42c0a0;
-		//  remote Person stamp @0x42c10b; Client_ProcessNetworkFrame @0x526692;
-		//  Entity_UpdateAllEntities @0x52674b]
+		// (VehicleSystem::reload_weapon_slot). The person test is the addressed
+		// row's def type, ItemType_Person (3); a row with no def takes neither
+		// branch (D-NET-189).
+		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 -- the itemDef null
+		//  test @0x42C0FE..0x42C103, `cmp [ecx+5Ch], 3` @0x42C105, the stamp
+		//  @0x42C10B; Client_ProcessNetworkFrame @0x526692; Entity_UpdateAllEntities
+		//  @0x52674b]
 		if (role_ == Role::Joiner &&
 				(!joiner_->has_self_handle() ||
 					reload.entity_handle != joiner_->self_handle())) {
+			constexpr int32_t kItemTypePerson = 3;
 			replication::ClientEntityState *peer =
 					view_.state().find(reload.entity_handle);
-			if (peer != nullptr &&
-					(peer->cls == EntityClass::Player ||
-						peer->cls == EntityClass::Infantry))
+			const replication::ItemReplicationProfile *def =
+					peer != nullptr ? view_.item_def(peer->type_id) : nullptr;
+			if (def != nullptr && def->allocation.item_type == kItemTypePerson)
 				peer->arms_dip_ticks = 80;
 		}
 		pending_reload_notifications_.push_back(reload);
