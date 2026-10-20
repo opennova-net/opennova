@@ -1,6 +1,7 @@
 #include <runtime/inmatch/server_tick_maintenance.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
+#include <runtime/inmatch/server_dispatch_join.h> // admission_padding_probe
 #include <runtime/inmatch/server_overlay_state.h>     // the 14-tick minimap overlay visits
 #include <runtime/inmatch/server_player_death.h>     // the flag reset's Health store (kill_player_body_at_frame_tail)
 #include <runtime/inmatch/server_spawn.h>            // Server_AdvanceFreeRowTicks (the tail walk's free rows)
@@ -571,14 +572,14 @@ void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 }
 
 // The ServerPlayerEnterResult for a held joiner: Success admits it into the
-// spawn pump's population (state 6); a failure latches {DC 2, DP1 MsgCode,
+// spawn pump's population (state 6) and sends the 0x02 probe; a failure latches {DC 2, DP1 MsgCode,
 // "NWU:NWPENTERFAIL", DPC 44} and tears the peer down. False when no held
 // connection carries that id.
 // [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — the state-4
 //  gate @0x4D1B3E, SetGameState(6) @0x4D1C11, the failure record
 //  @0x4D1B62..0x4D1BD0, TrySendSessionInit @0x4D1BF7]
 bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
-		bool success, int32_t msg_code) {
+		bool success, int32_t msg_code, uint32_t now_tick) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide ||
 				conn.connection_id != connection_id || !conn.player_enter_pending() ||
@@ -586,6 +587,14 @@ bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 			continue;
 		if (success) {
 			conn.player_enter_admitted = true;
+			// State 6, then the probe the C2S 0x01 held under the ticket gate.
+			// [orig: @0x4D1C11 SetGameState(6), @0x4D1C19 SendFileTransferChunk(0)]
+			if (conn.admission_stage == GameAdmissionStage::AwaitPlayEnter &&
+					conn.link.transport != nullptr) {
+				ProtocolMessage probe = admission_padding_probe(conn, now_tick);
+				conn.link.transport->host_send(probe.tag, std::move(probe.payload), probe.reliable,
+						probe.flags.raw, probe.capacity_exempt, probe.retention_flushes);
+			}
 			return true;
 		}
 		DisconnectEvent event;

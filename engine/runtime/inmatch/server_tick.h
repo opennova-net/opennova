@@ -124,10 +124,11 @@ void Server_RecalculateAllPlayerKitWeights(
 void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx);
 // The service's ServerPlayerEnterResult for a held joiner (see
 // NapiNPServerCtx::on_player_enter_request). Success admits it into the spawn
-// pump; a failure punts it with "NWU:NWPENTERFAIL" carrying MsgCode.
+// pump and sends the S2C 0x02 probe the C2S 0x01 held (stamped `now_tick`); a
+// failure punts it with "NWU:NWPENTERFAIL" carrying MsgCode.
 // [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
 bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
-		bool success, int32_t msg_code);
+		bool success, int32_t msg_code, uint32_t now_tick);
 
 // Re-arm every connection's ONE-SHOT minimap initial scan (the pool-2
 // non-spawn-point sweep emit_minimap_overlay_for_slot runs once per client

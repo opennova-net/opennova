@@ -5209,6 +5209,11 @@ add_executable(npruntime_overlay_set_spelling_test npruntime/overlay_set_spellin
 target_link_libraries(npruntime_overlay_set_spelling_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_overlay_set_spelling_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_overlay_set_spelling COMMAND npruntime_overlay_set_spelling_test)
+# NEW-L8-12: under the join-ticket gate the 0x01 holds the probe; the enter result sends it.
+add_executable(npruntime_ticket_probe_timing_test npruntime/ticket_probe_timing_test.cpp)
+target_link_libraries(npruntime_ticket_probe_timing_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_ticket_probe_timing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_ticket_probe_timing COMMAND npruntime_ticket_probe_timing_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

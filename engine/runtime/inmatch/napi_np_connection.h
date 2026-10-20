@@ -111,6 +111,10 @@ enum class GameAdmissionStage : uint8_t {
 	Complete = 0,
 	AwaitJoinRequest,
 	AwaitFormPost,
+	// The C2S 0x01 under the NovaWorld join-ticket gate: NetPlayer state 3, no probe yet; the
+	// service's enter result sends it (Server_ApplyPlayerEnterResult).
+	// [orig: NapiNPServerMsg_HandleJoinRequest @0x512FA2..0x512FA6 (state 3, return)]
+	AwaitPlayEnter,
 	AwaitPaddingEcho,
 	Rejected,
 };

@@ -465,7 +465,7 @@ bool Simulation::apply_player_enter_result(uint32_t p_connection_id, bool p_succ
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr) return false;
 	return opennova::inmatch::Server_ApplyPlayerEnterResult(*ctx, p_connection_id, p_success,
-			p_msg_code);
+			p_msg_code, host_role_ != nullptr ? host_role_->state.host_owner.now_tick : 0u);
 }
 
 // The lockgame action at the authority (HudToggles' EVENT_JOIN_LOCK_TOGGLED, in a session on the

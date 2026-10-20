@@ -154,7 +154,8 @@ void ServeListing::on_command(const ServerCommand &command) {
 void ServeListing::on_player_enter_result(const ClientSession::PlayerEnterResult &result) {
 	if (role_ == nullptr) return;
 	if (!inmatch::Server_ApplyPlayerEnterResult(role_->state.host_owner.ctx, result.connection_id,
-	                                            result.success != 0, result.msg_code)) {
+	                                            result.success != 0, result.msg_code,
+	                                            role_->state.host_owner.now_tick)) {
 		io::logf(LogLevel::kDebug, "[host] ServerPlayerEnterResult for connection %u matched no held joiner",
 		         result.connection_id);
 	}

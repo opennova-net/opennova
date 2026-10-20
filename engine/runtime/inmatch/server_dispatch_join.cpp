@@ -453,6 +453,15 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 	return messages;
 }
 
+// See header.
+ProtocolMessage admission_padding_probe(NapiNPConnection &conn, uint32_t now_tick) {
+	std::vector<uint8_t> challenge = build_tag02_push(now_tick);
+	conn.admission_padding_x = io::read_u32_le(challenge.data());
+	conn.admission_padding_y = io::read_u32_le(challenge.data() + 4);
+	conn.admission_stage = GameAdmissionStage::AwaitPaddingEcho;
+	return make_protocol_message(s2c::JOIN_PADDING_PROBE, std::move(challenge));
+}
+
 // See header. The admission FSM ahead of the in-match switch.
 std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 		NapiNPConnection &conn, const std::vector<ProtocolMessage> &messages,
@@ -513,17 +522,24 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				conn.admission_stage = GameAdmissionStage::Rejected;
 				return {};
 			}
-			// State 3 under the ticket gate, else state 6 [orig: @0x512F87..0x512FB3].
+			// State 3 under the ticket gate, which returns with no probe: the enter result's
+			// success sends it (Server_ApplyPlayerEnterResult). Else state 6 and the probe at
+			// once. [orig: @0x512F87..0x512FA6 (the gate, state 3, return); @0x512FAF..0x512FBD
+			//  (state 6, SendFileTransferChunk(0))]
 			conn.join_ticket_validation =
 					inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
-			std::vector<uint8_t> challenge = build_tag02_push(now_tick);
-			conn.admission_padding_x = io::read_u32_le(challenge.data());
-			conn.admission_padding_y = io::read_u32_le(challenge.data() + 4);
-			replies.push_back(
-					make_protocol_message(s2c::JOIN_PADDING_PROBE, std::move(challenge)));
-			conn.admission_stage = GameAdmissionStage::AwaitPaddingEcho;
+			if (conn.join_ticket_validation) {
+				conn.admission_stage = GameAdmissionStage::AwaitPlayEnter;
+				return replies;
+			}
+			replies.push_back(admission_padding_probe(conn, now_tick));
 			return replies;
 		}
+
+		case GameAdmissionStage::AwaitPlayEnter:
+			// The joiner waits for the probe; a gameplay record now is out of turn.
+			conn.admission_stage = GameAdmissionStage::Rejected;
+			return {};
 
 		case GameAdmissionStage::AwaitPaddingEcho:
 			if (admission_message->tag != 0x02 ||

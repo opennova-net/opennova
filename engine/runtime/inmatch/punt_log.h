@@ -63,7 +63,7 @@ inline constexpr const char *kNapiLineEnding = "\r\n";
 
 // The _connectlog.txt debug log: off unless `/CONNECTLOG` armed it, every
 // line `"<time> : <text>"` through NapiFile_AppendLine while it is on
-// [orig: g_ConnectLogEnabled @0xB4C720; its ~80 readers each test it, then
+// [orig: g_ConnectLogEnabled @0xB4C720; its 82 readers each test it, then
 // Napi_GetTimeString, sprintf("%s : ...") and NapiFile_AppendLine("_connectlog.txt")].
 inline constexpr const char *kConnectLogFile = "_connectlog.txt";
 struct ConnectLogHeader {

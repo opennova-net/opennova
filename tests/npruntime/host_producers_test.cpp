@@ -1606,15 +1606,15 @@ bool check_player_enter_hook() {
 		return false;
 	if (!expect(conn_by_id(20).player_enter_pending(), "the joiner waits in state 4")) return false;
 	// Success admits; a failure punts with NWPENTERFAIL; the third times out.
-	if (!expect(inmatch::Server_ApplyPlayerEnterResult(f.ctx, 20, true, 0) &&
+	if (!expect(inmatch::Server_ApplyPlayerEnterResult(f.ctx, 20, true, 0, 0) &&
 					!conn_by_id(20).player_enter_pending() && !conn_by_id(20).host_disconnect_sent,
 			"a successful result releases the hold"))
 		return false;
-	if (!expect(inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, false, 6001) &&
+	if (!expect(inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, false, 6001, 0) &&
 					conn_by_id(21).host_disconnect_sent,
 			"a failed result punts the joiner"))
 		return false;
-	if (!expect(!inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, true, 0),
+	if (!expect(!inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, true, 0, 0),
 			"a result for a settled joiner is refused"))
 		return false;
 	f.ctx.np_protocol.host_run_duration_ms = 0x1D4C0u;
