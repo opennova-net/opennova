@@ -82,12 +82,44 @@ void test_the_mission_start_takes_the_byte_for_a_teamless_slot() {
 	CHECK(teamless.link.spectator && teamless.assigned_team == 0);
 }
 
+// The mission start's other per-slot legs: the ping word and both strike
+// counters and the score-sound cache go to 0 for every slot; the map change's
+// own reset keeps the tick-seed words, which no mission store touches.
+// [orig: Server_ResetAllPlayerSlotFrameState @0x4FC356 / @0x4FC359 / @0x4FC35C,
+//  +0x14C @0x4FC3A3; the seed's disp32 writers Server_SendRandomSeedToPlayer
+//  @0x5101B3..0x51024C, Server_ProcessRoundEnd @0x516753..0x516767,
+//  Server_AllocatePlayerSlotTable @0x51C256]
+void test_the_mission_start_clears_the_ping_words_and_keeps_the_seed() {
+	inmatch::NapiNPServerCtx ctx;
+	ctx.np_protocol.connection_list.push_back(slot(1, true, false, 0, 0x0058));
+	inmatch::NapiNPConnection &row = ctx.np_protocol.connection_list[0];
+	row.reply.rtt_ms = 83;
+	row.reply.min_ping_strikes = 4;
+	row.reply.max_ping_strikes = 7;
+	row.reply.score_delta_sound_value = 12;
+	row.seed_armed_clock = 900;
+	row.fire_disarmed_at = 1200;
+	row.tick_seed = 0x1234;
+	row.fire_tick_floor = 950;
+	row.fire_tick_mode = true;
+	row.keepalive_ack_high_water = 1180;
+	inmatch::reset_slot_for_next_mission(row);
+	CHECK(row.seed_armed_clock == 900 && row.fire_disarmed_at == 1200 && row.tick_seed == 0x1234 &&
+			row.fire_tick_floor == 950 && row.fire_tick_mode && row.keepalive_ack_high_water == 1180);
+	CHECK(row.reply.rtt_ms == 83); // the map change keeps the ping history
+	inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
+	CHECK(row.reply.rtt_ms == 0 && row.reply.min_ping_strikes == 0 &&
+			row.reply.max_ping_strikes == 0 && row.reply.score_delta_sound_value == 0);
+	CHECK(row.tick_seed == 0x1234 && row.fire_disarmed_at == 1200);
+}
+
 } // namespace
 
 int main() {
 	test_a_fresh_row_has_no_restore_byte();
 	test_the_swap_and_the_mission_start_restore_a_converted_slot();
 	test_the_mission_start_takes_the_byte_for_a_teamless_slot();
+	test_the_mission_start_clears_the_ping_words_and_keeps_the_seed();
 	if (failures == 0) std::printf("restore_team: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

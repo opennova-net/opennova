@@ -126,11 +126,17 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 
 	conn.score = 0;
 	conn.score_wire_mirror = 0;
-	conn.tick_seed = 0;
-	conn.fire_tick_floor = 0;
-	conn.fire_disarmed_at = 0;
-	conn.fire_tick_mode = false;
-	conn.keepalive_ack_high_water = 0;
+	// The tick-seed transaction's words (+0x178C8..+0x178E0: the armed clock,
+	// the disarm stamp, the seed, the fire floor, the keepalive high water, the
+	// mode byte) outlive the mission: no mission-change or mission-start store
+	// touches them; only the seed's arm and disarm, the round end's inline
+	// disarm and the session's slot-table allocation write them, and the next
+	// join re-arms. [orig: the disp32 writers Server_SendRandomSeedToPlayer
+	//  @0x5101B3..0x5101F1 (arm) / @0x510237..0x51024C (disarm),
+	//  Server_ProcessRoundEnd @0x516753..0x516767, Server_AllocatePlayerSlotTable
+	//  @0x51C256; none in Server_DisconnectAndResetAllPlayerSlots
+	//  @0x5163A4..0x516417 or Server_ResetAllPlayerSlotFrameState
+	//  @0x4FC350..0x4FC3C9]
 	conn.phase = ConnectionPhase::PlayerAdded; // the slot stays active; its entity comes back
 	conn.discard_pre_deploy_uplinks = false;
 	conn.staged_frame_update.clear();
@@ -259,12 +265,23 @@ MapChangeStep begin_host_map_change(HostRole &role,
 
 // See map_change.h.
 // [orig: Server_ResetAllPlayerSlotFrameState @0x4FC320 -- the table test
-//  @0x4FC323, the row walk @0x4FC350..0x4FC3DE; the latch +100567 @0x4FC350,
-//  the restore byte @0x4FC362..0x4FC36A, the slot team test @0x4FC36C, the
-//  clears of +100567, +100579, +97537 and +97536 @0x4FC372..0x4FC384, the
-//  team store @0x4FC38C, the byte's clear @0x4FC398]
+//  @0x4FC323, the row walk @0x4FC350..0x4FC3DE; the ping word +0x170C0 and the
+//  two strike counters +0x170C4 / +0x170C6 @0x4FC356 / @0x4FC359 / @0x4FC35C;
+//  the latch +100567 @0x4FC350, the restore byte @0x4FC362..0x4FC36A, the slot
+//  team test @0x4FC36C, the clears of +100567, +100579, +97537 and +97536
+//  @0x4FC372..0x4FC384, the team store @0x4FC38C, the byte's clear @0x4FC398;
+//  the stats record CPlayerStats_ResetAllArrays(+0x48) @0x4FC39E, the
+//  score-sound cache +0x14C @0x4FC3A3, the script vars and the periodic
+//  counter +0x188..+0x19C @0x4FC3A9..0x4FC3C9]
+// The stats record, the script vars and the periodic counter belong to the
+// world's Match row, which the next mission's load builds fresh (its rows are
+// re-added at the round init), so those legs hold by construction.
 void Server_ResetAllPlayerSlotFrameState(NapiNPServerCtx &ctx) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		conn.reply.rtt_ms = 0;
+		conn.reply.min_ping_strikes = 0;
+		conn.reply.max_ping_strikes = 0;
+		conn.reply.score_delta_sound_value = 0;
 		const uint8_t restore = conn.spectator_restore_team;
 		if (conn.link.spectator && restore != 0) {
 			// +100579 is never set in JO and +97536 / +97537 follow the latch
