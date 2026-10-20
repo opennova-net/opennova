@@ -707,7 +707,8 @@ static int test_device_cache() {
 // rest given up (the second here, the first bumped); five viewports a view asks for every frame keep
 // four devices and the fifth waits, rather than thrashing. A workspace's cache pins the Preview's
 // target of the kind the Preview window shows alone (the menu's while a menu is shown), a headless
-// one every kind's.
+// one every kind's. A picture is drawn in a round a canvas asked for a held device in (a pin draws
+// none); where every target is pinned, a device holding its picture stands for one drawn.
 static int test_cache_rounds() {
 	test_temp::TempDir dir("opennova_editor_viewport_rounds");
 	NoProcess platform;
@@ -773,6 +774,14 @@ static int test_cache_rounds() {
 		shown.cache.set_pin_all_targets(false);
 		shown.sync(pins);
 		TEST_EXPECT(shown.held(menu, ViewportKind::Menu) && !shown.held(model, ViewportKind::Model) && shown.cache.size() == 1);
+		// A picture drawn (the Shell's frame pacing): a canvas's ask of a held device in the round a sync closes,
+		// none in the next; a pin alone draws nothing.
+		TEST_EXPECT(!shown.cache.drawn());
+		TEST_EXPECT(shown.cache.device(menu, ViewportKind::Menu) != nullptr && !shown.cache.drawn());
+		shown.sync(pins);
+		TEST_EXPECT(shown.cache.drawn());
+		shown.sync(pins);
+		TEST_EXPECT(!shown.cache.drawn());
 		TEST_EXPECT(!pins.viewports().find(model, ViewportKind::Model)->attached());
 		pins.handle(request::open_document(model));
 		TEST_EXPECT(pinned.documents.preview_shown == ViewportKind::Model);
@@ -783,6 +792,8 @@ static int test_cache_rounds() {
 	FakeDevices headless;
 	headless.sync(pins);
 	TEST_EXPECT(headless.held(model, ViewportKind::Model) && headless.held(menu, ViewportKind::Menu));
+	// Where nothing draws to ask, a device holding its picture stands for one drawn.
+	TEST_EXPECT(headless.cache.drawn());
 	std::printf("test_cache_rounds passed\n");
 	return 0;
 }
@@ -1908,8 +1919,8 @@ static int test_packed_animated_menu() {
 
 // S13 V6: devices that build their pictures over the Shell's frames, a unit a step (FakeDevice with
 // `units`), through a real session. A build of four units: its viewport loading for three frames
-// (the envelope's status, reason and progress, nothing of it drawn), ready after the fourth, one
-// Rebuild across its frames, each unit moving the Viewports concern and built frames moving nothing; a
+// (the envelope's status, reason and progress, nothing of it drawn, the cache building), ready after
+// the fourth, one Rebuild across its frames, each unit moving the Viewports concern and built frames moving nothing; a
 // Rebuild while one runs dropping it and beginning the newer generation from its first unit, the last
 // picture drawn until it ends; an Update while one runs folded into it (never taken, the build ending
 // with the state as it then is), one after it taken; a Clear while one runs dropping it with the
@@ -1974,6 +1985,8 @@ static int test_builds() {
 					build.get_number("done", 0) == 4.0 && build.get_number("total", 0) == 4.0);
 		}
 		TEST_EXPECT(model->builds() == 1 && count(held->taken, ViewportAction::Rebuild) == 1);
+		// The Shell's frame pacing: building while its units run, not once it is built.
+		TEST_EXPECT(devices.cache.building() == (frame < 4));
 	}
 	FakeDevice *device = devices.held(path, ViewportKind::Model);
 	if (!device) return 1;

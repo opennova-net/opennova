@@ -15,8 +15,8 @@
 // right button apart from a press, the keys a camera flies by, a line of text drawn); Files (its folders, the file count, the kind hidden
 // until the header's menu shows it, a filter's flat list, a click and a double click, New
 // and its name prompt, Rename..., only the rows that show drawn, a folded folder's files out of a
-// Shift+click's run); the import dialog; the OS window's title; and the view
-// events' mailboxes (each event held until its window draws, taken once). The mission's view
+// Shift+click's run); the import dialog; the OS window's title; what a frame saw of a person (the
+// frame pacing's input); and the view events' mailboxes (each event held until its window draws, taken once). The mission's view
 // in the Document window (ADR 0046 S14): its toolbar raises SetViewports alone, a marquee over
 // its picture one SelectRecord across the four pools, which the Inspector shows as one shared
 // form whose change is one batch over every record.
@@ -3157,6 +3157,42 @@ void test_files_shift_click_skips_folded() {
 	CHECK(asked.path == "zed.txt" && asked.paths == Paths({"a/one.txt", "a/two.txt"}), "the folded folder's files left out");
 }
 
+// What the workspace's last frame saw of a person (EditorWindows::input_seen, the Shell's frame pacing): nothing in a
+// frame with no input; the mouse moved, a button held, a key held and a character each something, and nothing again
+// in the frame after each ends.
+void test_input_seen() {
+	SessionView v = seeded_view();
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(4);
+	ui.away();
+	ui.frames(2);
+	CHECK(!ui.windows.input_seen(), "a frame with no input: nothing");
+	ui.mouse(400.0f, 300.0f);
+	CHECK(ui.windows.input_seen(), "the mouse moved");
+	ui.away();
+	ui.frames(1);
+	CHECK(!ui.windows.input_seen(), "the mouse still: nothing");
+	ui.button(true);
+	ui.frames(2);
+	CHECK(ui.windows.input_seen(), "a button held");
+	ui.button(false);
+	ui.frames(1);
+	CHECK(!ui.windows.input_seen(), "let go: nothing");
+	ui.key(ImGuiKey_A, true);
+	ui.frames(2);
+	CHECK(ui.windows.input_seen(), "a key held");
+	ui.key(ImGuiKey_A, false);
+	ui.frames(1);
+	CHECK(!ui.windows.input_seen(), "let go: nothing");
+	ImGui::GetIO().AddInputCharactersUTF8("x");
+	ui.frames(1);
+	CHECK(ui.windows.input_seen(), "a character typed");
+	ui.frames(1);
+	CHECK(!ui.windows.input_seen(), "nothing after it");
+	ui.drain();
+}
+
 // "Import N files": how many rows the import dialog's last frame has checked (-1: none said).
 int import_count(Ui &ui) {
 	const std::string text = logged_frame(ui);
@@ -3398,6 +3434,7 @@ void run_workspace_tests() {
 	test_canvas_fill_input();
 	test_canvas_keys_stay_in_its_window();
 	test_window_title();
+	test_input_seen();
 	test_view_event_mailboxes();
 	test_view_event_mailbox_cap();
 }

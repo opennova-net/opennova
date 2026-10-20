@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
@@ -20,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -113,6 +115,10 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_open_externally"), &EditorApp::get_open_externally);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "open_externally"), "set_open_externally", "get_open_externally");
 	ClassDB::bind_method(D_METHOD("get_last_external_open"), &EditorApp::get_last_external_open);
+	ClassDB::bind_method(D_METHOD("set_frame_pacing", "on"), &EditorApp::set_frame_pacing);
+	ClassDB::bind_method(D_METHOD("get_frame_pacing"), &EditorApp::get_frame_pacing);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "frame_pacing"), "set_frame_pacing", "get_frame_pacing");
+	ClassDB::bind_method(D_METHOD("get_frame_pacing_state"), &EditorApp::get_frame_pacing_state);
 
 	ClassDB::bind_method(D_METHOD("set_settings_path", "path"), &EditorApp::set_settings_path);
 	ClassDB::bind_method(D_METHOD("get_settings_path"), &EditorApp::get_settings_path);
@@ -128,6 +134,7 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_files_selected", "files"), &EditorApp::_on_files_selected);
 	ClassDB::bind_method(D_METHOD("_on_picker_canceled"), &EditorApp::_on_picker_canceled);
 	ClassDB::bind_method(D_METHOD("_on_files_dropped", "files"), &EditorApp::_on_files_dropped);
+	ClassDB::bind_method(D_METHOD("_on_window_resized"), &EditorApp::_on_window_resized);
 	ClassDB::bind_method(D_METHOD("drop_files", "files", "at"), &EditorApp::drop_files);
 	ClassDB::bind_method(D_METHOD("drop_files_at_screen", "files", "screen"), &EditorApp::drop_files_at_screen);
 	ClassDB::bind_method(D_METHOD("get_last_drop_at"), &EditorApp::get_last_drop_at);
@@ -225,8 +232,14 @@ void EditorApp::_ready() {
 	}
 	// Files the OS drops on the editor's own window, for the item they land on (S18: an image on a texture's
 	// tab or a texture field, a Replace).
-	if (get_tree()->get_current_scene() == this && get_window() != nullptr)
+	if (get_tree()->get_current_scene() == this && get_window() != nullptr) {
 		get_window()->connect("files_dropped", Callable(this, "_on_files_dropped"));
+		// A resize draws at the display's rate (frame pacing): the OS takes the pointer while it lasts.
+		get_window()->connect("size_changed", Callable(this, "_on_window_resized"));
+	}
+	// Frame pacing is the windowed editor's: a headless run (the tests, the packaging smoke) drops what the scene
+	// set, and a test that paces turns it on after.
+	if (frame_pacing_ && DisplayServer::get_singleton()->get_name() == "headless") frame_pacing_ = false;
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
 	for (int i = 0; i < args.size(); ++i) {
 		if (args[i] == kSmokeFlag) {
@@ -354,6 +367,7 @@ void EditorApp::minimize_window_after_capture() {
 }
 
 void EditorApp::_exit_tree() {
+	release_frame_cap_();
 	mcp_service_ = nullptr; // a child: it leaves with the tree and stops its server
 	mcp_port_ = 0;
 	show_system_pointer_(true);
@@ -424,9 +438,68 @@ void EditorApp::_process(double p_delta) {
 		session_->frame_times().add(opennova::editor::FramePhase::Devices,
 				opennova::editor::steady_clock_us() - devices_start);
 	}
+	pace_frame_();
+}
+
+void EditorApp::set_frame_pacing(bool p_on) {
+	frame_pacing_ = p_on;
+	quiet_frames_ = 0;
+	if (!p_on) release_frame_cap_();
+}
+
+String EditorApp::get_frame_pacing_state() const {
+	if (!frame_pacing_ || !frame_capped_) return "off";
+	return quiet_frames_ >= kQuietFrames ? "idle" : "active";
+}
+
+void EditorApp::release_frame_cap_() {
+	if (!frame_capped_) return;
+	frame_capped_ = false;
+	Engine::get_singleton()->set_max_fps(max_fps_found_);
+}
+
+bool EditorApp::frame_active_() {
+	bool active = root_input_ || resized_ || wire_asked_;
+	root_input_ = resized_ = wire_asked_ = false;
+#if OPENNOVA_EDITOR_UI
+	active = active || windows_->input_seen();
+#endif
+	if (!session_) return active;
+	active = active || session_->busy() || (session_->live_logic_reachable() && session_->live_logic_polling());
+	if (devices_)
+		active = active || devices_->building() || (session_->viewports().clock().playing() && devices_->drawn());
+	return active;
+}
+
+// After the frame's work: the cap for the frames that follow, the display's rate while active (read as pacing
+// starts, as it wakes from idle and every kFallbackFps frames while active: the window may move to another
+// screen), kIdleFps once quiet for kQuietFrames frames.
+void EditorApp::pace_frame_() {
+	if (!frame_pacing_ || !is_inside_tree()) return;
+	const bool was_idle = quiet_frames_ >= kQuietFrames;
+	quiet_frames_ = frame_active_() ? 0 : std::min(quiet_frames_ + 1, kQuietFrames);
+	const bool idle = quiet_frames_ >= kQuietFrames;
+	Engine *engine = Engine::get_singleton();
+	const uint64_t frame = engine->get_process_frames();
+	if (!idle && (display_fps_ == 0 || was_idle || frame - display_read_frame_ >= uint64_t(kFallbackFps))) {
+		const double rate = DisplayServer::get_singleton()->screen_get_refresh_rate();
+		display_fps_ = rate > 0.0 ? int(std::lround(rate)) : kFallbackFps;
+		display_read_frame_ = frame;
+	}
+	if (!frame_capped_) {
+		max_fps_found_ = engine->get_max_fps();
+		frame_capped_ = true;
+	}
+	const int fps = idle ? kIdleFps : display_fps_;
+	if (engine->get_max_fps() != fps) engine->set_max_fps(fps);
+}
+
+void EditorApp::_on_window_resized() {
+	resized_ = true;
 }
 
 void EditorApp::_input(const Ref<InputEvent> &p_event) {
+	root_input_ = true; // frame pacing: a person is here
 	const InputEventMouseButton *button = Object::cast_to<InputEventMouseButton>(p_event.ptr());
 	if (button == nullptr || !session_) return;
 	const MouseButton which = button->get_button_index();
@@ -834,6 +907,7 @@ String json_text(const opennova::io::JsonValue &value) { return opennova::to_gd(
 
 String EditorApp::request_json(const String &p_json) {
 	ensure_session();
+	wire_asked_ = true; // frame pacing: the MCP's answers come at the display's rate
 	opennova::io::JsonValue json;
 	std::string error;
 	opennova::editor::EditorRequest shell;
@@ -850,6 +924,7 @@ String EditorApp::request_json(const String &p_json) {
 
 String EditorApp::query_json(const String &p_name, const String &p_args) {
 	ensure_session();
+	wire_asked_ = true;
 	opennova::io::JsonValue args, answer;
 	std::string error;
 	if (!opennova::io::json_parse(opennova::to_std(p_args), args, error)) {

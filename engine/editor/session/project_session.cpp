@@ -285,6 +285,16 @@ void ProjectSession::set_poll_budget(const PollBudget &budget) {
 	impl_->core.set_poll_budget(budget);
 }
 
+bool ProjectSession::busy() const {
+	const Impl &session = *impl_;
+	const SessionView &view = session.core.view();
+	// The validation's status runs through the game's own data's check too (ProblemsService::show_validation).
+	return session.problems.validating() || view.activity.validation.running || view.activity.operation.running() ||
+	       view.project.outside_waiting > 0 || view.project.outside_sweeping || !view.documents.baking.empty() ||
+	       (view.project.open && view.documents.thumbnails && view.documents.thumbnails->pending()) ||
+	       view.workspace.sound.state == WorkspaceView::SoundState::Starting;
+}
+
 void ProjectSession::set_workspace_kept(bool kept) {
 	impl_->core.set_workspace_kept(kept);
 }
