@@ -314,6 +314,7 @@ function Test-ScenarioEndsJoinerSession {
 
 $script:ScenarioSpec = $null
 $script:ScenarioWitness = $null
+$script:ScenarioEarlySetup = $null
 if ($Scenario) {
     if ($ExerciseInput -or $WireOnly) {
         throw "A scenario plays with neither ExerciseInput nor WireOnly: its steps drive the joiner."
@@ -519,6 +520,120 @@ catch {
     Write-Warning "No runner transcript: $($_.Exception.Message)"
 }
 
+# Per-call MCP timing. c2 saw three RO joiner quits acknowledged 43..114 s after
+# the request, and endpoint timeouts before the window in the cells with our
+# host. Every game MCP message (Send-GameMcpMessage, wrapped here) and every
+# onHook call lands in <run>\mcp-calls.jsonl with its duration and outcome.
+# Our process's CPU time is taken across the call; a slow call also takes its
+# window's responsiveness and its memory. A slow call overruns its own
+# long-poll wait by 2 s or more, and it also prints a run note.
+$script:McpCallLog = Join-Path $RunRoot "mcp-calls.jsonl"
+$script:SendGameMcpMessageUntimed = ${function:Send-GameMcpMessage}
+
+function Get-McpCallProcessCpuMs {
+    param([System.Diagnostics.Process] $Process)
+    if (-not $Process) { return $null }
+    try {
+        $Process.Refresh()
+        if ($Process.HasExited) { return $null }
+        return [long] $Process.TotalProcessorTime.TotalMilliseconds
+    }
+    catch { return $null }
+}
+
+function Write-McpCallTiming {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Role,
+        [Parameter(Mandatory = $true)] [string] $Call,
+        [Parameter(Mandatory = $true)] [DateTime] $StartedUtc,
+        [Parameter(Mandatory = $true)] [long] $ElapsedMs,
+        [Parameter(Mandatory = $true)] [string] $Outcome,
+        [long] $WaitMs = 0,
+        [System.Diagnostics.Process] $Process = $null,
+        $CpuBeforeMs = $null,
+        # onHook calls wait on purpose (a launch, a played script): logged, never noted.
+        [switch] $NoNote
+    )
+    try {
+        $slow = $ElapsedMs -ge ($WaitMs + 2000)
+        $record = [ordered]@{
+            utc = $StartedUtc.ToString("o")
+            role = $Role
+            call = $Call
+            ms = $ElapsedMs
+            wait_ms = $WaitMs
+            outcome = $Outcome
+            in_window = [bool] $script:SteadyStartedUtc -and -not $script:SteadyCompletedUtc
+        }
+        $detail = ""
+        if ($Process) {
+            $record.pid = $Process.Id
+            $cpuAfter = Get-McpCallProcessCpuMs $Process
+            if ($null -ne $CpuBeforeMs -and $null -ne $cpuAfter) {
+                $record.cpu_ms = $cpuAfter - [long] $CpuBeforeMs
+            }
+            if ($slow -and $null -ne $cpuAfter) {
+                # Responding is a 5 s SendMessageTimeout on the main window:
+                # false means its thread did not pump messages.
+                $record.responding = [bool] $Process.Responding
+                $record.threads = $Process.Threads.Count
+                $record.working_set_mb = [int] ($Process.WorkingSet64 / 1MB)
+                $detail = " cpu_ms=$($record.cpu_ms) responding=$($record.responding) threads=$($record.threads) ws_mb=$($record.working_set_mb)"
+            }
+        }
+        Add-Content -LiteralPath $script:McpCallLog -Value ($record | ConvertTo-Json -Compress)
+        if ($slow -and -not $NoNote) {
+            Write-Host ("PARITY_RUN_NOTE mcp slow: {0} {1} {2} ms (wait {3} ms) {4}{5}" -f
+                $Role, $Call, $ElapsedMs, $WaitMs, $Outcome, $detail)
+        }
+    }
+    catch {
+        Write-Host "PARITY_RUN_NOTE mcp timing not recorded: $($_.Exception.Message)"
+    }
+}
+
+function Send-GameMcpMessage {
+    param(
+        [Parameter(Mandatory = $true)] [int] $Port,
+        [Parameter(Mandatory = $true)] [hashtable] $Message,
+        [int] $TimeoutSeconds = 120
+    )
+    $role = "game:$Port"
+    $process = $null
+    if ($Port -eq $HostMcpPort) { $role = "host"; $process = $script:OpenNovaHost }
+    elseif ($Port -eq $JoinerMcpPort) { $role = "joiner"; $process = $script:OpenNovaJoiner }
+    $call = [string] $Message.method
+    $waitMs = 0
+    if ($Message.ContainsKey("params") -and $Message.params -is [hashtable] -and
+            $Message.params.ContainsKey("name")) {
+        $call += " " + [string] $Message.params.name
+        $arguments = $Message.params.arguments
+        if ($arguments -is [hashtable]) {
+            foreach ($key in @("op", "name", "action")) {
+                if ($arguments.ContainsKey($key)) { $call += " $key=$($arguments[$key])" }
+            }
+            if ($arguments.ContainsKey("wait_ms")) { $waitMs = [long] $arguments.wait_ms }
+        }
+    }
+    $cpuBefore = Get-McpCallProcessCpuMs $process
+    $startedUtc = [DateTime]::UtcNow
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    $outcome = "ok"
+    try {
+        return (& $script:SendGameMcpMessageUntimed -Port $Port -Message $Message -TimeoutSeconds $TimeoutSeconds)
+    }
+    catch {
+        $outcome = if (Test-GameMcpTransportTimeout $_) { "timeout" } else { "error" }
+        throw
+    }
+    finally {
+        $watch.Stop()
+        Write-McpCallTiming -Role $role -Call $call -StartedUtc $startedUtc `
+            -ElapsedMs $watch.ElapsedMilliseconds -Outcome $outcome -WaitMs $waitMs `
+            -Process $process -CpuBeforeMs $cpuBefore
+    }
+}
+
 $script:Mcp = $null
 $script:McpRequestId = 0
 $script:CaptureStarted = $false
@@ -591,9 +706,17 @@ function Invoke-OnHookRpc {
         method = $Method
         params = $Params
     } | ConvertTo-Json -Depth 20 -Compress
+    $call = $Method
+    if ($Params.ContainsKey("name")) { $call += " " + [string] $Params.name }
+    $startedUtc = [DateTime]::UtcNow
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $script:Mcp.StandardInput.WriteLine($request)
     $script:Mcp.StandardInput.Flush()
     $line = $script:Mcp.StandardOutput.ReadLine()
+    $watch.Stop()
+    Write-McpCallTiming -Role "onhook" -Call $call -StartedUtc $startedUtc `
+        -ElapsedMs $watch.ElapsedMilliseconds -NoNote `
+        -Outcome $(if ([string]::IsNullOrWhiteSpace($line)) { "empty" } else { "ok" })
     if ([string]::IsNullOrWhiteSpace($line)) {
         throw "onhook MCP returned no JSON-RPC response"
     }
@@ -1457,7 +1580,10 @@ function Invoke-ScenarioStage {
     param(
         [Parameter(Mandatory = $true)] [object[]] $Steps,
         $Setup = $null,
-        [string] $RetailInstanceId = ""
+        [string] $RetailInstanceId = "",
+        # The setup pose alone (Invoke-ScenarioSetupBeforeWindow): a retail
+        # actor plays no input; an OpenNova actor plays -Steps, the lone end.
+        [switch] $SetupOnly
     )
     $hasPose = $null -ne $Setup -and $null -ne $Setup.pose
     $actor = [string] $script:ScenarioSpec.actor
@@ -1477,6 +1603,9 @@ function Invoke-ScenarioStage {
                 instance_id = $RetailInstanceId
                 path = $snapshotPath
             })
+        }
+        if ($SetupOnly) {
+            return [pscustomobject]@{ driver = "onhook_load_debug_snapshot"; setup = $setupResult; record = $null }
         }
         $played = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_play_input" -Arguments @{
             instance_id = $RetailInstanceId
@@ -1521,10 +1650,60 @@ function Invoke-ScenarioStage {
     return [pscustomobject]@{ driver = "scenario_play"; setup = $record.setup; record = $record }
 }
 
+# A scenario with no prelude takes its staging and its setup pose BEFORE the
+# steady window opens, so every run's window starts on the posed state.
+# Applied inside the window, the pose landed 0.03..0.44 s in, and the S2C frame
+# period (about 190 ms) decided whether one pre-pose frame fell inside the
+# window, and the pose jump with it. c2 03TR read entity_P orientation range 64
+# on RR, RR-aa and OR against 5 on RO and OO. A prelude (the deploy key) must
+# come before the pose, so a scenario with one keeps its whole play in the window.
+function Test-ScenarioSetupBeforeWindow {
+    $spec = $script:ScenarioSpec
+    if (-not $spec) { return $false }
+    $names = @($spec.PSObject.Properties.Name)
+    if ($names -contains "prelude") { return $false }
+    return ($names -contains "staging") -or ($names -contains "setup" -and $null -ne $spec.setup)
+}
+
+function Invoke-ScenarioSetupBeforeWindow {
+    param(
+        [string] $RetailJoinerInstanceId = "",
+        [string] $RetailHostInstanceId = ""
+    )
+    if (-not (Test-ScenarioSetupBeforeWindow)) { return }
+    if ($script:SteadyStartedUtc) {
+        throw "Scenario setup must precede the steady-window start"
+    }
+    if ($script:ScenarioEarlySetup) {
+        throw "Scenario setup was already applied in run $RunId"
+    }
+    $spec = $script:ScenarioSpec
+    $retailInstanceId = if ([string] $spec.actor -eq "host") {
+        $RetailHostInstanceId
+    } else {
+        $RetailJoinerInstanceId
+    }
+    $startedUtc = [DateTime]::UtcNow.ToString("o")
+    $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
+    $setup = $null
+    if ($spec.PSObject.Properties.Name -contains "setup" -and $null -ne $spec.setup) {
+        $setup = (Invoke-ScenarioStage -Steps @([pscustomobject]@{ tick = 0; end = $true }) `
+            -Setup $spec.setup -RetailInstanceId $retailInstanceId -SetupOnly).setup
+    }
+    $script:ScenarioEarlySetup = [pscustomobject]@{
+        started_utc = $startedUtc
+        applied_utc = [DateTime]::UtcNow.ToString("o")
+        staging = $staging
+        setup = $setup
+    }
+}
+
 # Plays -Scenario on its actor (the joiner or the host) right after the
 # steady window starts: its prelude stage when it has one (e.g. the deploy
 # key on a deploy_hold run), then the setup pose and the steps, then the
-# settle. A pose sticks only on the authority's own player: a client snaps
+# settle; a scenario with no prelude took its staging and setup pose just
+# before the window (Invoke-ScenarioSetupBeforeWindow). A pose sticks only on
+# the authority's own player: a client snaps
 # its players to the host's replicated pose past 2 units
 # [orig: Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A, skipped on the
 #  authority @0x4B432A], so a posed scenario's actor is the host.
@@ -1552,8 +1731,17 @@ function Invoke-ScenarioIfRequested {
         $prelude = Invoke-ScenarioStage -Steps @($spec.prelude) `
             -RetailInstanceId $retailInstanceId
     }
-    $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
-    $setup = if ($spec.PSObject.Properties.Name -contains "setup") { $spec.setup } else { $null }
+    $early = $script:ScenarioEarlySetup
+    if (Test-ScenarioSetupBeforeWindow) {
+        if (-not $early) {
+            throw "Scenario $($spec.name) has no prelude: its staging and setup must land before the steady window"
+        }
+        $staging = $early.staging
+        $setup = $null
+    } else {
+        $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
+        $setup = if ($spec.PSObject.Properties.Name -contains "setup") { $spec.setup } else { $null }
+    }
     $main = Invoke-ScenarioStage -Steps @($spec.steps) -Setup $setup `
         -RetailInstanceId $retailInstanceId
     $playedUtc = [DateTime]::UtcNow.ToString("o")
@@ -1579,7 +1767,10 @@ function Invoke-ScenarioIfRequested {
         settle_seconds = [int] $spec.settle_seconds
         prelude = $(if ($prelude) { $prelude.record } else { $null })
         staging = $staging
-        setup = $main.setup
+        setup = $(if ($early) { $early.setup } else { $main.setup })
+        setup_before_window = $(if ($early) {
+            [pscustomobject]@{ started_utc = $early.started_utc; applied_utc = $early.applied_utc }
+        } else { $null })
         record = $main.record
     }
 }
@@ -2449,6 +2640,8 @@ try {
                     joiner_pid = $script:RetailJoinerProcess.Id
                     wire_ready = $script:WireReadyWitness
                 }
+                Invoke-ScenarioSetupBeforeWindow -RetailJoinerInstanceId ([string] $retailJoiner.instance_id) `
+                    -RetailHostInstanceId $hostInstanceId
                 Begin-SteadyWindow
                 Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $retailJoiner.instance_id) `
                     -RetailHostInstanceId $hostInstanceId
@@ -2524,6 +2717,8 @@ try {
             $null = Wait-ParityWireReady
             $script:Acceptance | Add-Member -NotePropertyName wire_ready `
                 -NotePropertyValue $script:WireReadyWitness -Force
+            Invoke-ScenarioSetupBeforeWindow -RetailJoinerInstanceId ([string] $pair.joiner.instance_id) `
+                -RetailHostInstanceId ([string] $pair.host.instance_id)
             Begin-SteadyWindow
             Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $pair.joiner.instance_id) `
                 -RetailHostInstanceId ([string] $pair.host.instance_id)
@@ -2582,6 +2777,7 @@ try {
                     opennova_joiner = $joinerAcceptance
                     wire_ready = $script:WireReadyWitness
                 }
+                Invoke-ScenarioSetupBeforeWindow -RetailHostInstanceId $hostInstanceId
                 Begin-SteadyWindow
                 Invoke-ScenarioIfRequested -RetailHostInstanceId $hostInstanceId
                 Wait-UntilSteadyDeadline
@@ -2643,6 +2839,7 @@ try {
             $null = Wait-ParityWireReady
             $script:Acceptance | Add-Member -NotePropertyName wire_ready `
                 -NotePropertyValue $script:WireReadyWitness -Force
+            Invoke-ScenarioSetupBeforeWindow -RetailHostInstanceId ([string] $retailHost.instance_id)
             Begin-SteadyWindow
             Invoke-ScenarioIfRequested -RetailHostInstanceId ([string] $retailHost.instance_id)
             if ($ExerciseInput) {
@@ -2764,6 +2961,7 @@ try {
                     $script:RetailInstanceIds.Add($script:RetailInstanceId)
                 }
                 $null = Wait-ParityWireReady
+                Invoke-ScenarioSetupBeforeWindow -RetailJoinerInstanceId $script:RetailInstanceId
                 Begin-SteadyWindow
                 Invoke-ScenarioIfRequested -RetailJoinerInstanceId $script:RetailInstanceId
                 if ($ExerciseInput) {
@@ -2824,6 +3022,7 @@ try {
             $script:EvidencePerspective = "external"
             $script:EvidenceRole = "external"
             $null = Wait-ParityWireReady
+            Invoke-ScenarioSetupBeforeWindow
             Begin-SteadyWindow
             Invoke-ScenarioIfRequested
             if ($ExerciseInput) {

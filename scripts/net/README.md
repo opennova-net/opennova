@@ -302,6 +302,16 @@ at the clamp (i1's and c1's R1 rows). The runner therefore:
 
 Scripted input keeps its own virtual focus.
 
+Every MCP call a cell makes lands in `mcp-calls.jsonl` in its run root, one line
+per call: the game MCP's messages to our host or joiner, and the onHook calls.
+Each line carries the call, its duration, its long-poll wait and its outcome
+(`ok`, `timeout` or `error`), whether the steady window was open, and our
+process's CPU time across the call. A game MCP call that overruns its wait by
+2 s or more also records the window's `responding` state, the thread count and
+the working set, and prints a `PARITY_RUN_NOTE mcp slow:` line. Our game
+answers its endpoint from the main thread, so such a call shows what that
+thread was doing.
+
 Both hosts run in the SERVER copy: retail's `Jointops.exe` in its install, the
 OpenNova host with `--working-dir` on it (`host_opennova.ps1 -WorkingDir`).
 Each reads the copy's `game.cfg` and `player.sav` at its start and writes them
@@ -446,7 +456,15 @@ the stage's start (`down`/`up`/`press` an action code, `look_px` raw mouse
 pixels, `char` one typed character, `click` a named menu widget, `end`), then
 a settle. `run_parity_topology.ps1 -Scenario <file>`
 plays it right after the steady window starts, on `in_match` and on
-`deploy_hold` runs (a prelude can press the deploy key). A retail actor plays
+`deploy_hold` runs (a prelude can press the deploy key). A scenario with no
+prelude takes its staging and setup pose just before the window opens, so every
+run's window starts on the posed state. Applied inside the window, the pose
+landed a fraction of a second in, and the S2C frame period (about 190 ms)
+decided whether one pre-pose frame was measured with the jump. c2 03TR read the
+host body's orientation range as 64 on RR, RR-aa and OR and as 5 on RO and OO.
+The witness's `setup_before_window` records that stage's start and end. A
+prelude must come before the pose, so a scenario with one plays wholly inside
+the window. A retail actor plays
 through onHook's virtual keyboard (`onhook_play_input`, bridge protocol 1.10,
 on both of retail's input-frame paths), an OpenNova actor through the
 `scenario_play` probe, whose scripted keys also arrive as the bound key's own
