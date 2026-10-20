@@ -652,6 +652,25 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);
         weapon_sound_publish(world, owner, weapon->action_fsm, weapon_events);
+        // A reload the walk began on the authority queues its C2S 0x25 into the
+        // host's own dispatcher: a UseGun gunner's addresses the gun (an EWeap,
+        // so 0xFFFF), any other row's itself with the slot's combo (D-NET-336).
+        // [orig: WeaponAction_Reload @0x5430B6..0x543108 (the authority gate
+        //  @0x5430D9, parentSlot 3 @0x5430EA..0x5430FF); NetPacket_SendEntityDeathNotification
+        //  @0x43296C..0x432974]
+        if (weapon_events.reload_requested && is_authority) {
+            const Entity *addressed = owner.mount_type == SeatType::Gunner && owner.mounted
+                    ? world.registry.get(owner.mount_target) : nullptr;
+            if (addressed == nullptr) addressed = &owner;
+            WeaponReloadRequest request;
+            request.entity_handle = addressed->handle.packed;
+            request.reload_param = addressed->has_item_def &&
+                    (addressed->item_attrib & kItemAttribEweap) != 0
+                    ? uint16_t(0xFFFF)
+                    : static_cast<uint16_t>(static_cast<uint16_t>(weapon->category) * 65u +
+                                            static_cast<uint16_t>(weapon->rank));
+            world.out.weapon_reloads.push_back(request);
+        }
         if (!weapon_events.fired || !is_authority || !seated) return;
 
         // The slot owner is the gunner, while its def/ammo live on the parent.

@@ -640,6 +640,21 @@ void HostRole::run_tick(const TickInput &input) {
 		state.host_loop.client_send(0x25, opennova::encode_weapon_reload(reload));
 		kernel.local.last_reload = world::LocalWeaponReloadWire{};
 	}
+	// The walk's reloads for every other row ride the same client, in walk order
+	// (D-NET-336). Retail queues each at its row, the local player's among them;
+	// ours sends the local player's first when both reload on one tick. A host
+	// with no client of its own has no dispatcher queue to reach.
+	// [orig: WeaponAction_Reload @0x5430FF / @0x543103 ->
+	//  NetPacket_SendEntityDeathNotification -> CNapiNetwork_QueueReliableMessage @0x4329B7]
+	if (state.host_owner.serve_and_play) {
+		for (const world::WeaponReloadRequest &request : kernel.world.out.weapon_reloads) {
+			opennova::WeaponReload reload;
+			reload.entity_handle = request.entity_handle;
+			reload.reload_param = request.reload_param;
+			state.host_loop.client_send(0x25, opennova::encode_weapon_reload(reload));
+		}
+	}
+	kernel.world.out.weapon_reloads.clear();
 	tail.mark(devtools::Slot::SIM_PLAYER_TAIL);
 	// The host's measurable net leg for the stats board: the ClientState fold
 	// (host_loop -> ClientState). The S2C serialize/emit half rides inside

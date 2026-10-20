@@ -736,6 +736,18 @@ constexpr int32_t mission_start_difficulty(uint32_t game_type) {
 // [orig: Server_BroadcastEntityActionPacket @0x5080d0; its producers
 //  HUD_ShowObjectiveNotification @0x5ba2e0 (the call @0x5ba3df) and
 //  GameMsg_AddChatLineAndRelay @0x5ba170 (the call @0x5ba1c3)]
+// A reload the authority's weapon walk began on a row other than the local
+// player's: the C2S 0x25 body WeaponAction_Reload queues into the host's own
+// dispatcher, which broadcasts it as S2C 0x49. A UseGun gunner addresses its
+// gun (whose EWeap def sends 0xFFFF), any other row itself with its slot's
+// category * 65 + rank. [orig: WeaponAction_Reload @0x5430B6..0x543108;
+//  NetPacket_SendEntityDeathNotification @0x432930 (@0x43296C..0x432974,
+//  CNapiNetwork_QueueReliableMessage @0x4329B7)]
+struct WeaponReloadRequest {
+	uint16_t entity_handle = 0xFFFF;
+	uint16_t reload_param = 0;
+};
+
 struct HudRelay {
     uint8_t kind = 0;
     int32_t slot = 0;
@@ -836,6 +848,10 @@ struct WorldOutbox {
     // the host tick lands a remote picker's on its connection's slot table and
     // fans S2C 0x35 for each.
     std::vector<PowerupWeaponGrant> powerup_weapon_grants;
+    // The weapon walk's authority reloads for rows other than the local player's
+    // (WeaponReloadRequest above); a listen host relays them through its own
+    // client like its player's (D-NET-336).
+    std::vector<WeaponReloadRequest> weapon_reloads;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // replication emit. [orig: g_RoundRing @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
