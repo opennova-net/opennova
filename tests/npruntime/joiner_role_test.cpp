@@ -2326,6 +2326,51 @@ bool run_respawn_key_before_the_first_tail() {
 			"respawn before the tail: one bodiless 0x41 leaves");
 }
 
+// D-NET-562's pre-round leg: a client runs no entity update while its pre-round timer
+// (the 0x0A's phase-0 byte) is nonzero, so a Health of 0 a tail stores in the pre-round
+// latches no dead bit; the first frame whose tail reads the timer 0 runs the body tick
+// and its death edge.
+// [orig: Game_ProcessMainFrame @0x5263F0 - `cmp g_ClientPreRoundTimer` @0x52672C,
+//  Entity_UpdateAllEntities @0x52674B; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
+//  death edge @0x4B4BF1..0x4B4C02; NapiNPClientMsg_0x00A @0x430064]
+bool run_a_preround_death_latches_when_the_round_opens() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	h.kernel->world.rules.mp_session = true;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	const auto deliver_dead_tail = [&](uint8_t preround) {
+		FrameUpdate fu;
+		fu.local_tail_present = true;
+		fu.health = 0;
+		fu.complete = true;
+		fu.weapon.present = true;
+		fu.weapon.preround_timer = preround;
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	deliver_dead_tail(5);
+	bool ok = expect(h.role.runtime->state().preround_delay_seconds == 5 &&
+			h.role.runtime->state().health_updates_applied != 0 &&
+			h.role.runtime->state().local_health == 0 && !h.role.runtime->local_player_dead(),
+			"pre-round death: a Health of 0 in the pre-round latches no dead bit");
+	h.role.run_tick(h.input);
+	ok &= expect(!h.role.runtime->local_player_dead(),
+			"pre-round death: the held timer keeps the body tick off");
+	deliver_dead_tail(0);
+	ok &= expect(h.role.runtime->local_player_dead(),
+			"pre-round death: the round's first body tick latches the dead bit");
+	return ok;
+}
+
 // The deploy action on a joiner (dispatch 12) under permanent death (the S2C
 // 0x08 bit 15): a player killed by a 0x0A tail at Health 0 is back in the
 // deploy flow, owing a pick, and its press sends the reliable 0x51 [i16
@@ -2837,6 +2882,7 @@ int main() {
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();
+	ok &= run_a_preround_death_latches_when_the_round_opens();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_deploy_action_head_resets_input_and_dialogs();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();

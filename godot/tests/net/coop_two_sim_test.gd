@@ -2231,6 +2231,17 @@ func test_joiner_deploy_release_keeps_the_last_granted_kit() -> void:
 		OS.delay_msec(2)
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
 			"the pre-round submit is granted")
+	# The death comes once the round runs: a client runs no entity update while its
+	# pre-round timer (the 0x0A's phase-0 byte) is nonzero, so the body tick whose
+	# death edge latches the dead bit from a Health of 0 waits for the round, and a
+	# joiner killed in the pre-round reads alive until it opens (D-NET-562). Let the
+	# timer run out (StartDelay seconds of authority ticks); the grant survives it.
+	# [orig: Game_ProcessMainFrame @0x5263F0 - `cmp g_ClientPreRoundTimer` @0x52672C,
+	#  Entity_UpdateAllEntities @0x52674B; Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	#  the death edge @0x4B4BF1..0x4B4C02]
+	for _i in range(PREROUND_START_DELAY * 62 + 40):
+		joiner.step()
+		host.step()
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's death transaction killed the joiner")
 	if not joiner.is_local_player_dead():
