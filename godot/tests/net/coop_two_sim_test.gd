@@ -139,10 +139,12 @@ func _attachment_row(anchor_name: String, ambiguous: bool) -> String:
 # bound (D-NET-422), and the table's own 105004 row follows and loses. The row
 # alone would not do: the sweep stamps every body its table lacks Unknown, so a
 # player (row 105305) no longer falls back to Player (entity_class_of) and the
-# joiner cannot size its record.
+# joiner cannot size its record. The "Null" row leads, as in the shipped table,
+# so the carrier's ItemTypeIndex is not 0 and the 0x0D streams it (D-NET-487).
 func _attachment_traits_db(anchor_name: String) -> ItemDatabase:
 	return ItemDbFixture.load_with(self, "coop_attachment_traits.def",
-			_attachment_row(anchor_name, false), ItemDbFixture.fixture_text(self))
+			ItemDbFixture.NULL_ROW + _attachment_row(anchor_name, false),
+			ItemDbFixture.fixture_text(self))
 
 
 func _combat_mission() -> MissionData:
@@ -226,7 +228,11 @@ func _net_watercraft_item_db() -> ItemDatabase:
 	assert_true(base_items.contains("  graphic Dbuggy1\n"))
 	base_items = base_items.replace(
 			"  graphic Dbuggy1\n", "  graphic carrierzero\n")
-	return ItemDbFixture.load_with(self, "net_watercraft_items.def", base_items,
+	# The "Null" row leads, as in the shipped table: the committed table's first
+	# row (the Dune Buggy) would otherwise take ItemTypeIndex 0, which the 0x0D
+	# passes over (D-NET-487).
+	return ItemDbFixture.load_with(self, "net_watercraft_items.def",
+			ItemDbFixture.NULL_ROW + base_items,
 			"""begin "Net Watercraft Fixture"
   id 105008
   type vehicle
