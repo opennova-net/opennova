@@ -24,12 +24,11 @@ enum class TrnSourceRule : uint8_t {
 	// mission's environment before the .env [orig: Environment_LoadTimeOfDayConfig @ 0x57DB30, the .trn pass
 	// @ 0x57DBCC..0x57DBDE]. Blocks; `token` the keyword as written.
 	EnvironmentKey,
-	// A water_rgb line short of its three values (`read` the values it has): the missing ones are where earlier,
-	// longer lines left the tokenizer's slots; a save writes the three read.
+	// A water_rgb line short of its three values (`read` the values it has): the missing ones are
+	// where earlier, longer lines left the tokenizer's slots; a save writes the three read. (A
+	// value below 0 or past a byte is no issue: the record keeps it as read, and the parser packs
+	// it, env::scale_rgb_and_pack.)
 	ShortColour,
-	// A water_rgb value past a byte (`read` as read, `kept` the byte the parser keeps) [orig:
-	// TimeOfDay_ParseProperty @ 0x57CAF6; Color_ScaleRGBAndPack @ 0x57F890].
-	ColourByte,
 	// A water_murk past 0.99, held at 0.99 [orig: TimeOfDay_ParseProperty @ 0x57CB7C..0x57CBA9].
 	MurkClamp,
 	// A match line of more than FOLIAGE_MATCH_CODES codes: up to seven are kept, the first four compared [orig:

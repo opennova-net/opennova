@@ -292,12 +292,17 @@ int test_document() {
 	TEST_EXPECT(!set(*document, row, "polytrn_sectorcount", int64_t(6), &why) && why.find("power of two") != std::string::npos);
 	TEST_EXPECT(!set(*document, row, "polytrn_sectorcount", int64_t(32), &why));
 	TEST_EXPECT(!set(*document, row, "water_murk", 1.0, &why) && why.find("0.99") != std::string::npos);
-	TEST_EXPECT(!set(*document, row, "water_rgb_r", int64_t(300), &why));
+	// The water colour holds the line's values below 0 and past a byte (the environment's parser
+	// packs them, env #11), within the mission's environment record's reach.
+	TEST_EXPECT(!set(*document, row, "water_rgb_r", int64_t(8355904), &why) &&
+			why.find("8355903") != std::string::npos);
 	TEST_EXPECT(!set(*document, row, "water_height", int64_t(70000), &why) && why.find("half metres") != std::string::npos);
 	TEST_EXPECT(!set(*document, row, "polytrn_colormap", std::string("my map.tga"), &why) && why.find("space") != std::string::npos);
 	TEST_EXPECT(!set(*document, first_foliage, "match_1", int64_t(300), &why));
 	TEST_EXPECT(!set(*document, first_foliage, "attrib", int64_t(4), &why) && why.find("forceon") != std::string::npos);
 	TEST_EXPECT(set(*document, row, "polytrn_sectorcount", int64_t(8)) && set(*document, row, "water_murk", 0.5));
+	TEST_EXPECT(set(*document, row, "water_rgb_r", int64_t(-5)) &&
+			read(*document, row, "water_rgb_r") == Value(int64_t(-5)));
 	// The codes in order, as the one match line writes them: a code past the next is refused; one set to 0 (none)
 	// leaves the line, the codes after it moving up.
 	TEST_EXPECT(!set(*document, first_foliage, "match_3", int64_t(251), &why) && why.find("give code 2 first") != std::string::npos);
@@ -317,8 +322,9 @@ int test_document() {
 	const SerializeResult written = document->serialize();
 	TEST_EXPECT(written.ok());
 	const TrnConfig back = parsed(written.text);
-	TEST_EXPECT(back.sector_count == 8 && back.sector_rows == 5 && back.sector_grid[4][0] == 2 && back.water_murk == 0.5f &&
-	            back.creator == "Someone" && back.water_rgb_set && back.water_rgb[1] == 81);
+	TEST_EXPECT(back.sector_count == 8 && back.sector_rows == 5 && back.sector_grid[4][0] == 2 &&
+			back.water_murk == 0.5f && back.creator == "Someone" && back.water_rgb_set &&
+			back.water_rgb[0] == -5 && back.water_rgb[1] == 81);
 	TEST_EXPECT(back.foliage_defs.size() == 4 && back.foliage_defs[0].match[1] == 251 &&
 	            back.foliage_defs[3].color_upper == 2 && back.foliage_defs[3].attrib_flags == opennova::FOLIAGE_ATTRIB_SHADOW);
 	const std::string differs = config_difference(*document->config(), back);

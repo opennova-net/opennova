@@ -1,8 +1,10 @@
-// The .env reader's report of the lines it reads otherwise than the record holds (formats/env env_source_issues):
-// a keyword read over, a line skipped, a colour line short of its values, a time that reads as another, a last line
-// no CR LF ends, a 17th tod_begin, an envscale after a colour it scales otherwise (blocking), a terrain key kept and
-// one no line can write back (blocking) [orig: TimeOfDay_ParseProperty @ 0x57c590; File_ParseASCIIFile
-// @ 0x53D8C7..0x53D8F5; Terrain_ParseConfigCallback @ 0x60F330 for the terrain keys, D-TERRAIN-18].
+// The .env reader's report of the lines it reads otherwise than the record holds (formats/env
+// env_source_issues): a keyword read over, a line skipped, a colour line short of its values, a
+// time that reads as another, a last line no CR LF ends, a 17th tod_begin, an envscale after a
+// colour it scales otherwise (blocking), a colour value the record cannot hold (blocking), a
+// terrain key kept and one no line can write back (blocking) [orig: TimeOfDay_ParseProperty
+// @ 0x57c590; File_ParseASCIIFile @ 0x53D8C7..0x53D8F5; Terrain_ParseConfigCallback @ 0x60F330 for
+// the terrain keys, D-TERRAIN-18].
 #include <formats/env/env_source_issue.h>
 
 #include <cstdio>
@@ -57,6 +59,18 @@ int test_blocking() {
 		TEST_EXPECT(issues.size() == 1 && has_issue(issues, 1, true, "envscale") && issues[0].field == "water_rgb");
 		TEST_EXPECT(env_source_issues("envscale 2\r\nwater_rgb 100,100,100\r\nsky_height 175\r\n").empty());
 	}
+	// A colour value the record cannot hold (env.h rgb01_to_line_channel): 16777217 has no float of
+	// its own, so a save would write a neighbour. Values below 0 or past a byte within the record's
+	// reach are no issue (the parser packs them, env #11), nor any value on the scratch keyframe,
+	// which keeps the packed bytes.
+	{
+		const std::vector<EnvSourceIssue> issues = env_source_issues(
+				"tod_begin 1200\r\n    sun_rgb 16777217,0,0\r\ntod_end\r\nsky_height 175\r\n");
+		TEST_EXPECT(issues.size() == 1 && has_issue(issues, 2, true, "16777217 would save as") &&
+				issues[0].field == "sun_rgb");
+		TEST_EXPECT(env_source_issues("water_rgb -5,300,8355903\r\nsky_height 175\r\n").empty());
+		TEST_EXPECT(env_source_issues("sun_rgb 16777217,0,0\r\nsky_height 175\r\n").empty());
+	}
 	// A terrain keyword is the terrain's (D-TERRAIN-18): no issue. horizon and terrain_name are read by no arm of either
 	// reader (formats/trn trn_parser_key): skipped lines.
 	TEST_EXPECT(env_source_issues("polytrn_colormap map.tga\r\nsky_height 175\r\n").empty());
@@ -69,7 +83,8 @@ int test_blocking() {
 		for (int i = 0; i < 28; ++i) line += " 1";
 		TEST_EXPECT(has_issue(env_source_issues("sky_height 175\r\n" + line + " x y\r\n"), 2, true, "cannot be written again"));
 	}
-	std::printf("blocking: an envscale after a colour, a terrain key no line writes back; terrain keys kept\n");
+	std::printf("blocking: an envscale after a colour, a colour value the record cannot hold, a "
+				"terrain key no line writes back; terrain keys kept\n");
 	return 0;
 }
 

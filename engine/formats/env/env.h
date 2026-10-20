@@ -44,12 +44,40 @@ inline Rgb packed_to_rgb01(uint32_t packed) {
 	return c;
 }
 
+// A colour line's channel as the record keeps it: the whole value the parser's atol reads from its
+// token, over 255, below 0 or past a byte alike, since the parser stores no channel but packs the
+// three [orig: TimeOfDay_ParseProperty @ 0x57c590, every *_rgb arm's j__atol of tokens[2..4] into
+// Color_ScaleRGBAndPack @ 0x57f890]. rgb01_to_line_channel reads the whole value back (floor(v x
+// 255 + 0.5), saturating at the 32-bit range): exactly, for every value within +-8355903, fused
+// multiply-add or not; past that the float can hold a neighbour (env_source_issues blocks such a
+// line).
+inline float line_channel_to_rgb01(int32_t value) {
+	return static_cast<float>(value) / 255.0f;
+}
+int32_t rgb01_to_line_channel(float channel);
+// The record's exact reach for a line's channel (above): -kLineChannelExact..kLineChannelExact.
+inline constexpr int32_t kLineChannelExact = 8355903;
+
+// The parser's colour pack [orig: Color_ScaleRGBAndPack @ 0x57f890]: each channel times `scale` at
+// single precision, truncated toward zero by _ftol2_sse (out of range, 0x80000000), held at 255
+// from above alone (r @ 0x57f8a5, g @ 0x57f8bf, b @ 0x57f8d7), then ((r << 8 | g) << 8) | b on 32
+// bits (@ 0x57f8e4..0x57f8ef). A negative channel keeps its low byte and its sign bits fill every
+// byte above it: r -5, g 0x40, b 0x20 pack 0xFFFB4020, g -5 makes the red byte 0xFF, and r -300
+// packs 0xFED44020. The RGB bytes are the colour every consumer reads; the top byte reaches only
+// the water's world-sync word (env-tod-re #11). The `Rgb` form takes a line's channels as the
+// record keeps them (line_channel_to_rgb01).
+uint32_t scale_rgb_and_pack(int32_t r, int32_t g, int32_t b, float scale);
+uint32_t scale_rgb_and_pack(const Rgb &line, float scale);
+
 struct Vec3 {
 	float x = 0.0f;
 	float y = 0.0f;
 	float z = 0.0f;
 };
 
+// A timed keyframe's colours are its lines' channels as the record keeps them
+// (line_channel_to_rgb01), packed under the envscale where interpolate_tod reads them; the scratch
+// keyframe's (Config::scratch) are the packed bytes themselves.
 struct Keyframe {
 	int time = 0;
 	Rgb sun;
@@ -113,6 +141,9 @@ struct Config {
 	int curtime = 1500;
 	float fog_level = 1024.0f;
 	int fog_type = 1;
+	// terrain_rgb is held to bytes at the parse; the other colours are their lines' channels as the
+	// record keeps them (line_channel_to_rgb01), packed under the envscale where the engine view
+	// reads them (scale_rgb_and_pack).
 	Rgb terrain_rgb = {1.0f, 1.0f, 1.0f};
 	Rgb water_rgb = {104.0f / 255.0f, 80.0f / 255.0f, 57.0f / 255.0f};
 	float water_height = 0.0f;
@@ -147,7 +178,20 @@ struct Config {
 	// parser packs it [orig: Color_ScaleRGBAndPack @ 0x57f890]. The targets a world with
 	// no keyframe table runs on.
 	Keyframe scratch = scratch_keyframe_defaults();
+	// The water word a mission's header sets over the parsed one, its three bytes packed as they
+	// are, no envscale [orig: Game_LoadTerrainDuringConnect @ 0x520774..0x5207a8 ->
+	// Environment_SetWaterColor @ 0x57d510]. No .env keyword: apply_bms_overrides alone sets it,
+	// and water_color_word reads it in place of water_rgb's pack.
+	bool water_word_set = false;
+	uint32_t water_word = 0;
 };
+
+// g_EnvWaterColor as a mission runs on it: the header's word where it set one, else water_rgb
+// packed under the envscale [orig: TimeOfDay_ParseProperty @ 0x57cb3c; Environment_SetWaterColor
+// @ 0x57d510]. The whole word, its top byte included, is what the client's world-sync payload
+// carries and the authority compares [orig: NetPacket_WriteWorldSyncState @ 0x42d7e1;
+// Server_HandleClientCRCValidation @ 0x519448].
+uint32_t water_color_word(const Config &config);
 
 // The engine parses at most 16 TOD keyframes. A later tod_begin neither takes a slot nor
 // moves the slot pointer, so its color lines land where the pointer already is: the 16th
@@ -278,11 +322,13 @@ struct KeyframeSegment {
 };
 KeyframeSegment find_keyframe_segment(const std::vector<int> &times_hours_fp, int t_hours_fp);
 
-// Interpolates in 16.16 HOURS space with the engine's integer math: byte
-// quantization (x envscale, truncated, clamped <= 255) before the lerp,
-// per-channel (t*(b-a) + (a<<16) + 0x8000) >> 16 rounding, truncating segment
-// fraction, 24h wrap, and the t > 63356 full-snap quirk.
-// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 + helpers]
+// Interpolates in 16.16 HOURS space with the engine's integer math: each keyframe
+// colour packed as the parser packs it (scale_rgb_and_pack under `envscale`)
+// before the lerp, the lerp per byte of the packed words, (t*(b-a) + (a<<16) +
+// 0x8000) >> 16, its top byte 0, truncating segment fraction, 24h wrap, and the
+// t > 63356 full-snap quirk.
+// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 + helpers;
+//  Color_InterpolateRGB888 @ 0x57c2f0]
 TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, float envscale = 1.0f);
 
 // The overcast cross-fade: the final TOD colors interpolated between the .env
@@ -324,7 +370,7 @@ struct BmsEnvOverrides {
 	bool has_fog_level = false;    // attrib bit 0x2
 	float fog_level = 0.0f;        // world units
 	bool has_fog_color = false;    // attrib bit 0x4
-	Rgb fog_color;
+	Rgb fog_color;                 // the dword's bytes as the game reads them (red the third)
 	bool has_water_color = false; // any RGB byte nonzero
 	Rgb water_color;
 	bool has_water_murk = false; // murk byte nonzero
@@ -333,15 +379,23 @@ struct BmsEnvOverrides {
 	int start_time = 0;          // HHMM
 };
 
-// Applies the override layer onto a parsed Config (the engine mutates its
-// globals; we mutate a copy so the base file stays authoritative).
+// Applies the override layer onto a parsed Config (the engine mutates its globals; we mutate a copy
+// so the base file stays authoritative). The fog color is the fog block's parsed target, which the
+// scratch keyframe holds (no envscale): the per-tick compute writes that target from the keyframes
+// whenever a table exists, so the header's color stands only in a world with none [orig:
+// Game_StartMission @ 0x52538d..0x525393; Environment_ComputeTimeOfDayColors @ 0x57e1a0, gated
+// @ 0x57de8a]. The water color is the water word itself, no envscale (Config::water_word).
 void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides);
 
-// The override layer a mission header authors: the water height (attrib bit
-// 0x1; file s16 half-units), the fog distance (0x2), the fog color (0x4, bytes
-// -> 0..1), and the ungated water color (any byte nonzero) and murk (byte
-// nonzero, * 0.01). start_time is local-play state the caller adds.
-// [orig: Game_LoadTerrainDuringConnect @ 0x520710 + Game_StartMission @ 0x525371]
+// The override layer a mission header authors: the water height (attrib bit 0x1; file s16
+// half-units), the fog distance (0x2), the fog color (0x4), and the ungated water color (any byte
+// nonzero) and murk (byte nonzero, * 0.01). The game reads the fog color as the dword over
+// fog_color[0..2] and the byte after them, so its red is fog_color[2] and its blue fog_color[0]
+// [orig: Game_StartMission @ 0x52538d, mov edx, g_BmsFogColorOverride @ 0xa76270, the header as
+// BMS_LoadAndValidateHeader @ 0x40e250 freads it]; the water color it packs from its three bytes,
+// red the first [orig: Game_LoadTerrainDuringConnect @ 0x520794..0x5207a5]. start_time is
+// local-play state the caller adds. [orig: Game_LoadTerrainDuringConnect @ 0x520710 +
+// Game_StartMission @ 0x525371]
 BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_override,
                                               int fog_override, const int fog_color[3],
                                               const int water_color[3], int water_murk);

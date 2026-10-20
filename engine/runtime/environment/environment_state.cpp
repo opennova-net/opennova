@@ -458,7 +458,10 @@ Rgb EnvironmentState::water_color() const {
 	if (config_ == nullptr) {
 		return Rgb{0.408f, 0.314f, 0.224f};
 	}
-	return global_color_target(config_->water_rgb);
+	// g_EnvWaterColor: a mission header's word, else the line's pack under
+	// the envscale [orig: Environment_SetWaterColor @ 0x57d510;
+	// Color_ScaleRGBAndPack @ 0x57f890].
+	return packed_to_rgb01(water_color_word(*config_));
 }
 
 bool EnvironmentState::has_water_height() const {
@@ -816,21 +819,11 @@ SceneFogValues EnvironmentState::build_viewmodel_fog(bool sky_dome_drawn) const 
 
 // --- color math ------------------------------------------------------------
 
-float EnvironmentState::scale_global_channel(float channel, float envscale) {
-	const int authored_byte = std::clamp(
-			static_cast<int>(channel * 255.0f + 0.5f), 0, 255);
-	const int scaled_byte = std::clamp(
-			static_cast<int>(static_cast<float>(authored_byte) * envscale), 0,
-			255);
-	return static_cast<float>(scaled_byte) / 255.0f;
-}
-
 Rgb EnvironmentState::scale_global_color(const Rgb &color, float envscale) {
-	return Rgb{
-		scale_global_channel(color.r, envscale),
-		scale_global_channel(color.g, envscale),
-		scale_global_channel(color.b, envscale),
-	};
+	// The line packed as the parser packs it, a negative channel's sign bits
+	// in the bytes above it; the RGB bytes are what every reader takes
+	// [orig: Color_ScaleRGBAndPack @ 0x57f890].
+	return packed_to_rgb01(scale_rgb_and_pack(color, envscale));
 }
 
 Rgb EnvironmentState::global_color_target(const Rgb &color) const {
