@@ -7,10 +7,7 @@
 
 #include <runtime/audio/oneshot_play.h>
 
-#include "common/file_io.h"
 #include "common/test_expect.h"
-#include "common/retail_paths.h"
-
 
 #include <string>
 #include <vector>
@@ -411,29 +408,35 @@ int test_set_view_bit_gate_and_rejected_pitch_rng() {
     return 0;
 }
 
-int test_retail_tank_sets_select_view_layers() {
-    const auto path = retail::asset_file("JOx01.LWF");
-    if (path.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS/JOx01.LWF (tank fire/reload view layers)");
-        return 0;
-    }
-    std::vector<uint8_t> bytes;
-    TEST_EXPECT(test_io::read_file(path, bytes));
-    lwf::File bank;
-    std::string error;
-    TEST_EXPECT(lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank, error));
+// The tank's fire and reload sets as JOx01.LWF ships them (GS_TANK: three layers, flags 0xF, 0xD and 0xB;
+// GF_TANK_RL: one, 0xB; every set's range 10000), built here with those flags: the view gate picks, per
+// listener view, the layers whose flags carry its bit (internal 2, external 4), so the fire plays its
+// both-views layer and its internal one in first person and its external one outside, and the reload
+// plays only in first person.
+int test_tank_sets_select_view_layers() {
+    BankBuilder b;
+    const auto shot = b.member(255, 255);
+    const auto echo = b.member(255, 100);
+    const auto mech = b.member(220, 255);
+    const auto both = b.layer(300, 0, 0xF, {shot, shot, shot});
+    const auto outside = b.layer(990, 0, 0xD, {echo, echo});
+    const auto inside = b.layer(55, 0, 0xB, {mech, mech});
+    b.set("GS_TANK", 10000, {both, outside, inside});
+    const auto reload_member = b.member(190, 255);
+    const auto reload_layer = b.layer(30, 0, 0xB, {reload_member});
+    b.set("GF_TANK_RL", 10000, {reload_layer});
     SoundSetIndex index;
-    index.add_bank(0, bank);
-    const auto fire = index.find("GS_TANK"), reload = index.find("GF_TANK_RL");
+    index.add_bank(0, b.file);
+    const auto fire = index.find("gs_tank"), reload = index.find("GF_TANK_RL");
     TEST_EXPECT(fire.valid() && reload.valid());
     SoundSelector selector;
-    const auto internal = plan_oneshot_at_distance(bank, fire, 0, selector, 2);
-    const auto external = plan_oneshot_at_distance(bank, fire, 0, selector, 4);
+    const auto internal = plan_oneshot_at_distance(b.file, fire, 0, selector, 2);
+    const auto external = plan_oneshot_at_distance(b.file, fire, 0, selector, 4);
     TEST_EXPECT(internal.voices.size() == 2 && external.voices.size() == 2);
     TEST_EXPECT(internal.voices[0].layer == 0 && internal.voices[1].layer == 2);
     TEST_EXPECT(external.voices[0].layer == 0 && external.voices[1].layer == 1);
-    TEST_EXPECT(plan_oneshot_at_distance(bank, reload, 0, selector, 2).voices.size() == 1);
-    TEST_EXPECT(plan_oneshot_at_distance(bank, reload, 0, selector, 4).voices.empty());
+    TEST_EXPECT(plan_oneshot_at_distance(b.file, reload, 0, selector, 2).voices.size() == 1);
+    TEST_EXPECT(plan_oneshot_at_distance(b.file, reload, 0, selector, 4).voices.empty());
     return 0;
 }
 
@@ -572,13 +575,12 @@ int test_listener_view_flags() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
 	int failed = test_radio_selection_keeps_unity_pitch_and_gates_view_layers();
 	failed |= test_listener_view_flags();
     failed |= test_view_gate_precedes_selection_and_pitch();
     failed |= test_set_view_bit_gate_and_rejected_pitch_rng();
-    failed |= test_retail_tank_sets_select_view_layers();
+    failed |= test_tank_sets_select_view_layers();
 	failed |= test_sound_id_is_nonzero_per_entity();
 	failed |= test_index_is_case_insensitive_and_first_bank_wins();
 	failed |= test_pitch_draws_and_channel_pool();

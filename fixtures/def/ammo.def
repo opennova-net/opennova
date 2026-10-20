@@ -1,0 +1,73 @@
+// Authored for def_parse_ammo (fixtures/README.md): the ammo blocks its pins read, each holding
+// only the keys the test reads, in the grammar JO's ammo.def is written in (tab runs, a key's
+// case as JO spells it: frndlyTrcrID, tracerRate, Mf_Light, ai_Launcheffect; `flag` lines; an
+// effects_table). Each value is the test's witnessed pin.
+
+ammo AT_NULL
+	velocity			0
+end
+
+ammo ROCKET
+	frndlyTrcrID		4502
+	velocity			390
+	penetration_impact	100
+	penetration_kz		100
+
+    ai_launch		GS_AT4
+
+	tracer_type		rocket
+
+	scorch_id 2
+
+	light_move     6.0   128 120 80
+	light_impact   10.0  255 192 96  0.2
+
+	flag LAWR
+	flag NoGravity
+	flag forcetracer
+end
+
+ammo AMMO_CAR15_556MM
+	max_age				3
+	arm_age				0
+	velocity			854
+	error				0
+	tumble_error		0.01
+	drag				0.255
+	weight_in_grains	62
+	max_damage			0
+	recoil				8 9 11
+	penetration_impact	20
+	kztype				rounds_kz_C4
+	bullet_radius		0.00278
+
+	tracerRate	 3
+
+    ai_launch		GS_M4AI
+	ai_Launcheffect Effect_CAR15MF
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+end
+
+ammo claymore
+	frndlyTrcrID		1895
+	foeTrcrID			1895
+	kz_pieslice			24
+end
+
+ammo grenadesm
+	frndlyTrcrID		1875
+	max_age		30
+	arm_age		5
+	velocity	30
+
+	effects_table
+		move			Effect_SmokeToss	none				0
+	end
+end
+
+ammo grenadefb
+    kz_physics 3
+    secondary_anim  2
+end

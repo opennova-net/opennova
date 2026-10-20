@@ -5,7 +5,6 @@
 
 #include <string>
 
-#include "common/retail_paths.h"
 
 using namespace opennova::mus;
 
@@ -20,7 +19,6 @@ static int passed = 0, failed = 0;
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
 
-static std::string g_retail_gamemus;
 
 /* Roundtrip: decompile(compile(decompile(x))) must equal decompile(x).
 
@@ -28,9 +26,10 @@ static std::string g_retail_gamemus;
    decompiler at the text-level: any text the decompiler can produce, the
    compiler must accept, and re-decompiling the recompiled bytecode must
    yield the same text. The bytecode itself is allowed to differ (different
-   but equivalent opcode sequences are fine). Runs over the minted
-   synth_gamemus.bin unconditionally and over the shipped jo_gamemus.bin from
-   the reference fixture set (OPENNOVA_JO_ASSETS) as the retail leg. */
+   but equivalent opcode sequences are fine). Runs over the minted programs
+   (tests/fixtures/synth_mus_gen.cpp): synth_gamemus.bin and synth_menumus.bin, the
+   shipped pair's shapes, and synth_forms.bin, the shipped menu programs' form (a
+   global of its own, assignments, `==` and `&&`, nested ifs, plays past 255). */
 static int roundtrip(const char *path) {
     MusFile mf;
     int rc = mus_open(&mf, path);
@@ -101,21 +100,14 @@ static int test_roundtrip_synth_menumus(void) {
     return roundtrip(MUS_FIXTURE_DIR "/synth_menumus.bin");
 }
 
-static int test_roundtrip_jo_gamemus(void) {
-    return roundtrip(g_retail_gamemus.c_str());
+static int test_roundtrip_synth_forms(void) {
+    return roundtrip(MUS_FIXTURE_DIR "/synth_forms.bin");
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main(void) {
     RUN_TEST(test_roundtrip_synth_gamemus);
     RUN_TEST(test_roundtrip_synth_menumus);
-
-    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
-    if (g_retail_gamemus.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_gamemus.bin (the shipped game script)");
-    } else {
-        RUN_TEST(test_roundtrip_jo_gamemus);
-    }
+    RUN_TEST(test_roundtrip_synth_forms);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

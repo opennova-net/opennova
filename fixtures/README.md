@@ -58,8 +58,24 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 
 ## Authored files
 
-`def/items.def` (test rows 106100..), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
-`mnu/all_widgets.mnu`, `mns/test_style.mns`, `score/score_sample.ini`,
+`def/items.def` (test rows 106100..), `def/weapon.def`, `def/ammo.def` and `def/hudpos.def`
+(the rows and keys the `def_parse_*`, `hud_layout` and `def_write_hudpos` pins read, their
+witnessed values in the shipped files' grammar), `def/corpus/*.def` (every key JO:CA's items,
+weapon and ammo catalogs and its jox01 expansion's use, in their forms, with the lines the game
+reads nothing of, and a powerup table in the shipped one's shape: the `def_write` and
+`def_write_form` corpus legs'), `charattr/charattr.def` (JO:CA's charattr layout, every
+value ours: `charattr`), `avatars/jo_shaped.def` (an avatar table in
+the shipped one's shape: `avatars_parse`, `avatars_roundtrip`), `aip/*.aip` (AI profiles in
+JO's layout with the shipped profiles' constructs: `aip_write`), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
+`mnu/all_widgets.mnu`, `mnu/shipped_forms.mnu` (every element, attribute and lexical
+form the shipped JO menus use, in their CR LF code-page form, the two slips their quotes
+make among them: the menu format sweeps' variant fixture), `mnu/render_cases.mnu` and
+`mnu/hotkeys.mnu` (the drawing and keyboard cases the shipped screens hold, the
+`menu_render_corpus` and `menu_runtime_corpus` ctests'), `mns/test_style.mns`,
+`mns/shipped_form.mns` (the shipped stylesheets' line forms), `env/line_forms.env` and
+`terrain/forms/line_forms16.trn` / `line_forms8.trn` (the line forms the shipped `.env`
+and `.trn` files take, the `env_shipped_forms` and `trn_mission_load` ctests'),
+`score/score_sample.ini`,
 `anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`, and
 `weapon_timing.txt`, the `opennova-3di weapon timing` input the Blender packaging
 workflow runs),
@@ -68,7 +84,9 @@ charattr-shaped ConfigFile texts on either side of the text reader's data-string
 pool: 64 values and 65 over a 64-byte pool, the `configfile_data_strings_pool` and
 `editor_config_overrun` ctests'),
 `particle/gorehit.ptu` (the gore-set half of the effect catalog, written in the
-retail `.ptu` grammar with our own effect), `grm/person.grm` (an authored facial
+retail `.ptu` grammar with our own effect), `particle/lexical_forms.ptl` (our own
+effects in the layout NovaLogic's effect tool writes: the shipped files' line
+forms, the `};` handle close and the trailing NUL, `particle_key_places`'), `grm/person.grm` (an authored facial
 rig; `grm_roundtrip` pins it byte-for-byte through the writer),
 `threedi/o3d/*.o3d` (the authored `.o3d` scenes the `opennova-3di` ctests and
 the Blender add-on's package smoke test build), `wac/text_document.wac` (a script
@@ -141,6 +159,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 ## Other minted sets
 
 - `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp`.
+- `terrain/variants` — `tests/fixtures/terrain_variants_gen.cpp`: one file per form the
+  shipped terrain files take (the char, foliage, picture, sky and 24-bit PCX; the
+  three true-colour TGA forms; MED's `.til`; the shipped `.cpt` with every CDEP block
+  width), each pinned as its sweep writes it again (`pcx_shipped_forms`,
+  `tga_shipped_forms`, `til_shipped_form`, `cpt_shipped_form`).
 - `fnt/synth_*.fnt`, `cbin/synth_nlist*.kda`, `cbin/credits_image.png`,
   `cbin/particle_dot.tga` — `tests/fixtures/minimal_fnt_gen.cpp`,
   `minimal_cbin_gen.cpp`: the credits lists in their JO, JOX01 and BHD shapes
@@ -151,13 +174,14 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   the synthetic environment (every keyword authored, ten time-of-day keyframes,
   written by `save_env`) and the two sky maps it names (the bright square-rooted
   cloud field and the modulation layer centered at 128), 64x64 indexed PCX by our
-  writer. The shipped `.env` set is the gated `env_jo_install` sweep.
+  writer. The shipped `.env` line forms are the authored `env/line_forms.env`
+  (`env_shipped_forms`).
 - `rtxt/synth_*.bin` — `tests/fixtures/minimal_rtxt_gen.cpp`: the parity set
   `rtxt_synth_parity` grills — a multi-section game table with position hints, a
   menu table, a mission sidecar with cp1252 text and odd-length padding, and the
-  one-entry case. The shipped
-  string tables are read from the reference tree by the gated
-  `rtxt_jo_install_sweep` and the menu-driven GUT tests.
+  one-entry case, and `synth_variants.bin` / `synth_variants_aligned.bin`, the shapes the
+  shipped string tables take (empty sections first, between and last, CR LF and tab texts,
+  a duplicate key, a long text, repeated and empty texts, every padding value).
 - `gamecfg/synth_game.cfg` — `tests/fixtures/minimal_gamecfg_gen.cpp`: a `game.cfg`
   through `gamecfg::write` (CR LF, Game_SaveConfig's layout) from
   `tests/gamecfg/gamecfg_synth.h`, every written key off its default and a four-row weapon

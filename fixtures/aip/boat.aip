@@ -1,0 +1,54 @@
+description     "Boat - authored"
+type			GROUND
+subtype			BOAT
+default_state	GROUND_PRETTY		
+
+rank			1
+view_fov		90	
+view_dist		300	
+radar_fov		180	
+radar_dist		300	
+priority_air		0
+priority_ground		2
+priority_organics	5
+
+evade_flags			COUNTER
+combat_flags		NO_CAP COUNTER
+
+react_time		3
+aim_skill		2
+check_six_rate		5	
+target_eval_rate	3
+tether_dist		40
+
+primary_weap		0	
+primary_ammo		0	
+primary_rate		0	
+primary_fov			0	
+primary_range		0	
+primary_facing		0
+primary_flags		0
+
+secondary_weap		50CAL	
+secondary_ammo		-1	
+secondary_rate		0.15	
+secondary_fov		120	
+secondary_range		200	
+secondary_facing	180
+secondary_flags		WEAPON_TURRET WEAPON_SLOW
+
+patrol_speed		20	
+combat_speed		35	
+
+min_speed		0	
+min_chase_dist		80	
+max_chase_dist		400	
+
+drive_skill		1
+turn_rate		30	
+
+accel_time		8
+
+
+radio_distance		0
+radio_delay		0

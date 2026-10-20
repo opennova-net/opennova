@@ -1,0 +1,234 @@
+//////////////////////////////////////////////////////////////////////
+//
+// charattr.def, authored for the charattr tests (fixtures/README.md)
+//
+// JO:CA's layout: the live classes 1 and 5..9, a commented-out block
+// of retired sections, then the legacy block (a second CHARACTER1,
+// CHARACTER2..4 and a second CHARACTER5, with the legacy keys and
+// PREF_WEAP lists the loader reads nothing of). Every value is ours.
+//
+//////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////
+//////// Rifleman //////////////////////
+////////////////////////////////////////
+[CHARACTER1]
+STEALTH			= 20
+HPBONUS			= 1
+RECOIL_MUTE 	= 0.65
+XHAIR_MUTE		= 1.5
+XHAIRDX_MUTE	= 1.5
+SCOPE_MUTE  	= 0.0
+RELOAD_MUTE  	= 0.5
+JUNGLE_CAMMO	= 5310
+DESERT_CAMMO	= 5311
+ARCTIC_CAMMO	= 5312
+RUN_MODIFIER	= 0
+ATTRIBUTES  	= AutoScope
+
+////////////////////////////////////////
+//////// Medic /////////////////////////
+////////////////////////////////////////
+[CHARACTER5]
+STEALTH			= 15
+HPBONUS			= 0
+RECOIL_MUTE 	= 0.85
+XHAIR_MUTE		= 2.0
+XHAIRDX_MUTE	= 2.0
+SCOPE_MUTE  	= 1.0
+RELOAD_MUTE  	= 0.5
+JUNGLE_CAMMO	= 5320
+DESERT_CAMMO	= 5321
+ARCTIC_CAMMO	= 5322
+RUN_MODIFIER	= 1
+ATTRIBUTES  	= Medic
+
+////////////////////////////////////////
+//////// Sniper ////////////////////////
+////////////////////////////////////////
+[CHARACTER6]
+STEALTH			= 35
+HPBONUS			= 0
+RECOIL_MUTE 	= 0.95
+XHAIR_MUTE		= 3.5
+XHAIRDX_MUTE	= 3.5
+SCOPE_MUTE  	= 0.5
+RELOAD_MUTE  	= 1.0
+JUNGLE_CAMMO	= 5330
+DESERT_CAMMO	= 5331
+ARCTIC_CAMMO	= 5332
+RUN_MODIFIER	= 0
+ATTRIBUTES  	= AutoScope
+
+////////////////////////////////////////
+//////// Gunner ////////////////////////
+////////////////////////////////////////
+[CHARACTER7]
+STEALTH			= 10
+HPBONUS			= 3
+RECOIL_MUTE 	= 0.45
+XHAIR_MUTE		= 1.0
+XHAIRDX_MUTE	= 1.0
+SCOPE_MUTE  	= 0.0
+RELOAD_MUTE  	= 1.5
+JUNGLE_CAMMO	= 5340
+DESERT_CAMMO	= 5341
+ARCTIC_CAMMO	= 5342
+RUN_MODIFIER	= -1
+ATTRIBUTES  	= AutoScope
+
+
+
+////////////////////////////////////////
+//////// Pathfinder ////////////////////
+////////////////////////////////////////
+[CHARACTER8]
+STEALTH			= 45
+HPBONUS			= 3
+RECOIL_MUTE 	= 0.85
+XHAIR_MUTE		= 1.75
+XHAIRDX_MUTE	= 2.75
+SCOPE_MUTE  	= 0.25
+RELOAD_MUTE  	= 0.4
+JUNGLE_CAMMO	= 5360
+DESERT_CAMMO	= 5361
+ARCTIC_CAMMO	= 5362
+RUN_MODIFIER	= 1
+ATTRIBUTES  	= KnifeBonus AutoScope
+
+
+////////////////////////////////////////
+//////// Engineer //////////////////////
+////////////////////////////////////////
+[CHARACTER9]
+STEALTH			= 30
+HPBONUS			= 1
+RECOIL_MUTE 	= 0.55
+XHAIR_MUTE		= 2.5
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.0
+RELOAD_MUTE  	= 0.75
+JUNGLE_CAMMO	= 5350
+DESERT_CAMMO	= 5351
+ARCTIC_CAMMO	= 5352
+RUN_MODIFIER	= 2
+ATTRIBUTES  	= KnifeBonus
+
+
+
+
+
+
+
+////////////////////////////////////////
+//////// Retired sections //////////////
+////////////////////////////////////////
+//[CHARACTER10]
+//STEALTH			= 5
+//HPBONUS			= 0
+//RECOIL_MUTE 	= 0.5
+//ATTRIBUTES  	= NULL
+
+
+//////////////
+[CHARACTER1]
+STRENGTH		= 28.0
+STEALTH			= 20
+HPBONUS			= 1
+CRAWL_SPEED 	= 1.0
+RUN_SPEED		= 1.0
+WALK_SPEED		= 1.0
+SWIM_SPEED		= 1.0
+RECOIL_MUTE 	= 0.65
+XHAIR_MUTE		= 1.5
+XHAIRDX_MUTE	= 1.5
+SCOPE_MUTE  	= 0.0
+RELOAD_MUTE  	= 0.5
+PREF_WEAP		= 1,2,3,4,10,11,12	// rifles
+JUNGLE_CAMMO	= 5300
+DESERT_CAMMO	= 5301
+ARCTIC_CAMMO	= 5302
+ATTRIBUTES  	= AutoScope
+
+//////////////
+[CHARACTER2]
+STRENGTH		= 31.5
+STEALTH			= 10
+HPBONUS			= 2
+CRAWL_SPEED 	= 0.9
+RUN_SPEED		= 0.95
+WALK_SPEED		= 1.0
+SWIM_SPEED		= 0.9
+RECOIL_MUTE 	= 0.5
+XHAIR_MUTE		= 1.0
+XHAIRDX_MUTE	= 1.0
+SCOPE_MUTE  	= 0.0
+RELOAD_MUTE  	= 1.25
+PREF_WEAP		= 5,6,7,20,21,22,23	// machine guns
+JUNGLE_CAMMO	= 5300
+DESERT_CAMMO	= 5301
+ARCTIC_CAMMO	= 5302
+ATTRIBUTES  	= NULL
+
+//////////
+[CHARACTER3]
+STRENGTH		= 24.0
+STEALTH			= 40
+HPBONUS			= 0
+CRAWL_SPEED 	= 1.1
+RUN_SPEED		= 1.1
+WALK_SPEED		= 1.0
+SWIM_SPEED		= 1.1
+RECOIL_MUTE 	= 0.85
+XHAIR_MUTE		= 2.5
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.25
+RELOAD_MUTE  	= 0.75
+PREF_WEAP		= 8,9,30,31,32,33,34,35,36	// pistols, carbines
+JUNGLE_CAMMO	= 5303
+DESERT_CAMMO	= 5304
+ARCTIC_CAMMO	= 5305
+ATTRIBUTES  	= KnifeBonus
+
+/////////////
+[CHARACTER4]
+STRENGTH		= 26.0
+STEALTH			= 25
+HPBONUS			= 1
+CRAWL_SPEED 	= 1.0
+RUN_SPEED		= 1.05
+WALK_SPEED		= 1.0
+SWIM_SPEED		= 1.2
+RECOIL_MUTE 	= 0.7
+XHAIR_MUTE		= 2.0
+XHAIRDX_MUTE	= 2.25
+SCOPE_MUTE  	= 0.5
+RELOAD_MUTE  	= 0.75
+PREF_WEAP		= 8,9,40,41,42	// pistols, rifles
+JUNGLE_CAMMO	= 5306
+DESERT_CAMMO	= 5307
+ARCTIC_CAMMO	= 5308
+ATTRIBUTES  	= Medic WaterGirl
+
+///////////////
+[CHARACTER5]
+STRENGTH		= 27.5
+STEALTH			= 15
+HPBONUS			= 0
+CRAWL_SPEED 	= 1.0
+RUN_SPEED		= 1.0
+WALK_SPEED		= 1.0
+SWIM_SPEED		= 1.0
+RECOIL_MUTE 	= 0.8
+XHAIR_MUTE		= 2.25
+XHAIRDX_MUTE	= 2.25
+SCOPE_MUTE  	= 0.75
+RELOAD_MUTE  	= 0.5
+PREF_WEAP		= 50,51,52		// grenade launchers
+JUNGLE_CAMMO	= 5300
+DESERT_CAMMO	= 5301
+ARCTIC_CAMMO	= 5302
+ATTRIBUTES		= NULL
+
+

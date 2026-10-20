@@ -3,7 +3,8 @@
    parse-dropped key is absent on both sides of parse->serialize->parse, so the
    test stays green while authored data is lost. See ADR 0002.
 
-   For each shipped menu we take the multiset of path-qualified element and
+   For each of the tree's menus (tests/mnu/repo_menus.h; shipped_forms.mnu holds
+   every element and attribute the shipped JO menus use) we take the multiset of path-qualified element and
    attribute occurrences in the tree retail's reader builds from the original
    bytes (mnu_xml, the structural translation of NapiXML_ParseElementTree
    @ 0x769d70) and in the tree it builds from serialize(parse(original)). The
@@ -22,7 +23,7 @@
 #include <formats/mnu/mnu_xml.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
+#include "repo_menus.h"
 
 using Occurrences = std::map<std::string, int>;
 
@@ -99,19 +100,16 @@ static int check_menu(const char *path) {
 }
 
 int main(void) {
-  // The full shipped revx02 JO-family menu set (15 files) from the reference
-  // fixture set (the whole test is gated on it). Every one must round-trip
-  // without losing an authored key retail reads.
-  static const char *const kMenus[] = {
-      "jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player", "jo_weapon", "jo_loadout",
-      "jo_color", "jo_cmap", "jo_stat", "jo_death", "jo_vehicle", "jo_item_db", "jo_splash",
-  };
-  std::vector<std::string> paths;
-  for (const char *name : kMenus) {
-    const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
-    if (path.empty())
-      return retail::skip("OPENNOVA_JO_ASSETS/fixtures/mnu/jo_*.mnu (the fifteen shipped revx02 menus)");
-    paths.push_back(path);
+  // The tree's menus (tests/mnu/repo_menus.h): the authored set, shipped_forms.mnu among
+  // them (every element and attribute the shipped JO menus use, in their byte form), and
+  // the base game's screens. Every one must round-trip without losing an authored key
+  // retail reads.
+  // all_widgets.mnu's <ORIENTATION>VERTICAL</ORIENTATION> reads as nothing (only a HORIZONTAL
+  // text sets anything [orig: @ 0x64c745]): the written menu drops it, under mnu::parse's note.
+  const std::vector<std::string> paths = repo_menus::menus();
+  if (!repo_menus::holds(paths, "shipped_forms.mnu")) {
+    fprintf(stderr, "fixtures/mnu/shipped_forms.mnu (the shipped menus' forms) is missing\n");
+    return 1;
   }
   int fail = 0;
   for (const std::string &p : paths)

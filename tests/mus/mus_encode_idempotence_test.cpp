@@ -1,32 +1,28 @@
 /* Write-path parity for MUS: a program decompiled to its MUS text, compiled and encoded again is its own bytes.
-
    The text form is the tool's own authoring syntax (the game reads only the binary); the compiler writes MDEdit's
    layout (mus_compile.cpp: the leading nop, the code padded to four bytes, the editor debug section with its
    sections, globals, functions, their parameters and the line table, the alignment and the name table), and the
    decompiler puts each statement on the line the table names. So encode(compile(decompile(x))) == x byte for
-   byte: the minted pair (synth_{gamemus,menumus}.bin, the encoder's own output; the gamescript carries a
-   MessageHandler function) in core; the reference fixture set's shipped pair (OPENNOVA_JO_ASSETS) and every
-   music script the install's archives hold, base and each installed expansion's (OPENNOVA_JO_DIR: gamemus.bin,
-   menumus.bin, jox01's GJox01.bin and MJox01.bin), as the retail legs. And the text is a fixed point: the
-   recompiled program decompiles to the same text. Each file is first written from its model alone (read, then
-   mus_encode_file over its parsed programs: the method table, the chunk's fields and its tables as read), which
-   is its own bytes too. */
+   byte, as it is for every music script the shipped install's archives hold (base and jox01's: gamemus.bin,
+   menumus.bin, GJox01.bin, MJox01.bin), over the minted programs (tests/fixtures/synth_mus_gen.cpp): the pair in
+   the shipped pair's shapes (synth_{gamemus,menumus}.bin; the gamescript carries a MessageHandler function) and
+   synth_forms.bin, the shipped menu programs' form (a global of its own, assignments, `==` and `&&`, nested ifs,
+   plays past 255 through the word-wide play, the layout's text with no `#line`). And the text is a fixed
+   point: the recompiled program decompiles to the same text. Each file is first written from its model alone
+   (read, then mus_encode_file over its parsed programs: the method table, the chunk's fields and its tables as
+   read), which is its own bytes too. */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <algorithm>
-#include <filesystem>
-#include <map>
 #include <string>
 #include <vector>
 
-#include <base/vfs/vfs.h>
 #include <formats/mus/mus.h>
 #include <formats/sbf/sbf.h>
 
-#include "common/retail_paths.h"
 
 using namespace opennova::mus;
 
@@ -41,7 +37,6 @@ static int passed = 0, failed = 0;
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
 
-static std::string g_retail_gamemus, g_retail_menumus;
 
 static bool decompile(const MusScript &s, std::string &text) {
     const int needed = mus_decompile(&s, NULL, 0);
@@ -109,6 +104,21 @@ static int assert_text_roundtrip(const std::vector<uint8_t> &bytes, const std::s
     return 1;
 }
 
+/* The writer's bytes of each minted program (FNV-1a64): a change to a vector is a change to the bytes the
+   compiler and the encoder write, which needs an [orig] witness (MDEdit's layout) or a D-MUS entry
+   (`mus_encode_idempotence_test --dump` prints the table). */
+struct WriterPin {
+    const char *name;
+    size_t len;
+    uint64_t hash;
+};
+static const WriterPin kWriterPins[] = {
+    {"synth_gamemus.bin", 2313u, 0xabc7a9acdd8d76d7ull},
+    {"synth_menumus.bin", 1849u, 0xe66fd68fead52c63ull},
+    {"synth_forms.bin", 2953u, 0x9ba058c5c92bf940ull},
+};
+static bool g_dump = false;
+
 static int roundtrip_file(const char *path) {
     FILE *f = fopen(path, "rb");
     CHECK(f != NULL, "open the file");
@@ -119,164 +129,98 @@ static int roundtrip_file(const char *path) {
     const bool read = fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
     fclose(f);
     CHECK(read, "read the file");
-    return assert_text_roundtrip(bytes, path);
+    if (!assert_text_roundtrip(bytes, path)) return 0;
+    /* The bytes the writer wrote back, pinned. */
+    const char *name = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
+    uint64_t h = 1469598103934665603ull;
+    for (const uint8_t b : bytes) h = (h ^ b) * 1099511628211ull;
+    if (g_dump) {
+        printf("\n\t{\"%s\", %zuu, 0x%016llxull},", name, bytes.size(), (unsigned long long)h);
+        return 1;
+    }
+    for (const WriterPin &pin : kWriterPins)
+        if (strcmp(pin.name, name) == 0) {
+            if (pin.len != bytes.size() || pin.hash != h)
+                fprintf(stderr, "  %s written: %zu bytes, 0x%016llx; pinned %zu bytes, 0x%016llx\n", name,
+                        bytes.size(), (unsigned long long)h, pin.len, (unsigned long long)pin.hash);
+            CHECK(pin.len == bytes.size() && pin.hash == h, "the writer's bytes as pinned");
+            return 1;
+        }
+    CHECK(false, "a pin for every program");
+    return 0;
 }
 
 static int test_synth_gamemus(void) { return roundtrip_file(MUS_FIXTURE_DIR "/synth_gamemus.bin"); }
 static int test_synth_menumus(void) { return roundtrip_file(MUS_FIXTURE_DIR "/synth_menumus.bin"); }
-static int test_reference_gamemus(void) { return roundtrip_file(g_retail_gamemus.c_str()); }
-static int test_reference_menumus(void) { return roundtrip_file(g_retail_menumus.c_str()); }
+static int test_synth_forms(void) { return roundtrip_file(MUS_FIXTURE_DIR "/synth_forms.bin"); }
 
-/* Every SCR0 program the install's archives hold, base and each installed expansion's: the game's own pair
-   (GAMEMUS.BIN, MENUMUS.BIN) and each expansion's G<name>.bin and M<name>.bin [orig: Expansion_LoadAssets @
-   0x4A4798, @ 0x4A4906..0x4A494A] each required by name, and a .bin of the SCR0 magic that does not validate a
-   failure, never passed over. */
-static int test_install_scripts(void) {
-    const std::string install = retail::install();
-    std::vector<std::string> mounts{std::string()};
-    std::vector<std::string> required{"gamemus.bin", "menumus.bin"};
-    for (const std::string &expansion : retail::expansions()) {
-        mounts.push_back(expansion);
-        required.push_back(retail::lower_ascii("g" + expansion + ".bin"));
-        required.push_back(retail::lower_ascii("m" + expansion + ".bin"));
-    }
-    size_t programs = 0;
-    std::vector<std::string> seen;
-    for (const std::string &expansion : mounts) {
-        opennova::Vfs vfs;
-        CHECK(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed), "mount the install");
-        for (const auto &location : vfs.list_files()) {
-            const std::string &name = location.logical_name;
-            if (name.size() < 4 || retail::lower_ascii(name.substr(name.size() - 4)) != ".bin") continue;
-            std::vector<uint8_t> bytes;
-            if (!vfs.read_file(name, bytes) || bytes.size() < 4) continue;
-            const uint32_t magic = uint32_t(bytes[0]) | uint32_t(bytes[1]) << 8 | uint32_t(bytes[2]) << 16 |
-                                   uint32_t(bytes[3]) << 24;
-            if (magic != MUS_MAGIC_SCR0) continue;
-            if (mus_validate(bytes.data(), bytes.size()) != 0) {
-                fprintf(stderr, "  FAIL: %s holds the SCR0 magic and does not validate\n", name.c_str());
-                return 0;
-            }
-            const std::string key = retail::lower_ascii(name);
-            if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
-            seen.push_back(key);
-            if (!assert_text_roundtrip(bytes, name + (expansion.empty() ? std::string() : " (" + expansion + ")")))
-                return 0;
-            ++programs;
-        }
-    }
-    for (const std::string &name : required) {
-        if (std::find(seen.begin(), seen.end(), name) == seen.end())
-            fprintf(stderr, "  FAIL: the install's %s did not go through its text\n", name.c_str());
-        CHECK(std::find(seen.begin(), seen.end(), name) != seen.end(), "each music script the game opens");
-    }
-    printf("\n  %zu shipped music scripts, each through its text byte for byte\n", programs);
+/* A script's plays (mus_compile_plays over its MUS text), each with the sound index it compiles to. */
+static int script_plays(const char *path, std::vector<MusPlayUse> &plays) {
+    MusFile mf;
+    CHECK(mus_open(&mf, path) == 0, "open the script");
+    std::string text;
+    const bool decompiled = decompile(mf.scripts[0], text);
+    mus_close(&mf);
+    CHECK(decompiled, "decompile the script");
+    MusScript compiled = {};
+    int line = 0, col = 0;
+    const char *err = NULL;
+    CHECK(mus_compile_plays(text.c_str(), &compiled, &plays, &line, &col, &err) == 0, "compile its text");
+    mus_script_free(&compiled);
     return 1;
 }
 
-/* A file of `dir` by its name without case (the install's own spelling), "" for none. */
-static std::string file_in(const std::string &dir, const std::string &name) {
-    std::error_code ec;
-    for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
-        if (entry.is_regular_file() &&
-                retail::lower_ascii(entry.path().filename().string()) == retail::lower_ascii(name))
-            return entry.path().string();
-    return std::string();
-}
-
-/* Every shipped script's plays (mus_compile_plays over its MUS text) against the bank it plays from
-   (mus_bank_name, a loose file beside the install's archives, an expansion's in its folder): every play's index
-   below the bank's count of streams. One past would play the bank's first stream's data in its place [orig:
-   AudioVM_StartSound @ 0x671FF0 -> AudioVM_SelectStream @ 0x671BC4..0x671BCC, an index past the entries made 0], which no
-   shipped script does. The counts are pinned. */
-static int test_install_plays(void) {
-    const std::string install = retail::install();
-    std::vector<std::string> mounts{std::string()};
-    for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-    /* A script's plays and its bank's streams, as measured. */
-    const std::map<std::string, std::pair<size_t, uint32_t>> pinned = {
-        {"gamemus.bin", {32, 13}}, {"menumus.bin", {191, 47}}, {"gjox01.bin", {32, 13}}, {"mjox01.bin", {884, 317}}};
-    std::vector<std::string> seen;
-    for (const std::string &expansion : mounts) {
-        opennova::Vfs vfs;
-        CHECK(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed), "mount the install");
-        std::vector<std::string> scripts{"gamemus.bin", "menumus.bin"};
-        if (!expansion.empty()) scripts = {"g" + expansion + ".bin", "m" + expansion + ".bin"};
-        for (const std::string &script : scripts) {
-            const std::string key = retail::lower_ascii(script);
-            if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
-            seen.push_back(key);
-            std::vector<uint8_t> bytes;
-            CHECK(vfs.read_file(script, bytes), "read a music script the game opens");
-            MusFile mf;
-            CHECK(mus_open_memory(&mf, bytes.data(), bytes.size()) == 0, "open the script");
-            std::string text;
-            const bool decompiled = decompile(mf.scripts[0], text);
-            mus_close(&mf);
-            CHECK(decompiled, "decompile the script");
-            MusScript compiled = {};
-            std::vector<MusPlayUse> plays;
-            int line = 0, col = 0;
-            const char *err = NULL;
-            CHECK(mus_compile_plays(text.c_str(), &compiled, &plays, &line, &col, &err) == 0, "compile its text");
-            mus_script_free(&compiled);
-            /* The bank: the base game's beside the archives, an expansion's in its folder. */
-            const std::string bank_name = mus_bank_name(script);
-            const std::string dir = expansion.empty() ? install : install + "/expansion/" + expansion;
-            const std::string bank_path = file_in(dir, bank_name);
-            CHECK(!bank_path.empty(), "the script's bank beside it");
-            FILE *f = fopen(bank_path.c_str(), "rb");
-            CHECK(f != NULL, "open the bank");
-            std::vector<uint8_t> bank;
-            fseek(f, 0, SEEK_END);
-            bank.resize((size_t)ftell(f));
-            fseek(f, 0, SEEK_SET);
-            const bool bank_read = fread(bank.data(), 1, bank.size(), f) == bank.size();
-            fclose(f);
-            CHECK(bank_read, "read the bank");
-            opennova::sbf::SbfArchive arc = {};
-            CHECK(opennova::sbf::sbf_open_memory(&arc, bank.data(), bank.size()) == 0, "open the bank");
-            const uint32_t streams = arc.header.entry_count;
-            opennova::sbf::sbf_close(&arc);
-            uint32_t highest = 0;
-            for (const MusPlayUse &play : plays) {
-                highest = std::max(highest, play.index);
-                if (play.index >= streams)
-                    fprintf(stderr, "  %s: a play of stream %u, past its bank's %u\n", script.c_str(), play.index,
-                            streams);
-                CHECK(play.index < streams, "every play's stream one its bank has");
-            }
-            printf("\n  %s: %zu plays, the highest %u, %s %u streams", script.c_str(), plays.size(), highest,
-                   bank_name.c_str(), streams);
-            const auto expect = pinned.find(key);
-            CHECK(expect != pinned.end() && expect->second.first == plays.size() && expect->second.second == streams,
-                  "the measured counts");
-        }
+/* A script's plays against the bank it plays from: every play's index below the bank's count of streams. One
+   past would play the bank's first stream's data in its place [orig: AudioVM_StartSound @ 0x671FF0 ->
+   AudioVM_SelectStream @ 0x671BC4..0x671BCC, an index past the entries made 0], which no shipped script does
+   (gamemus.bin's 32 plays over GAMEMUS.SBF's 13 streams, menumus.bin's 191 over 47, GJox01.bin's 32 over 13,
+   MJox01.bin's 884 over 317). Over the minted pair: synth_gamemus.bin's plays over synth_gamemus.sbf (its bank
+   by mus_bank_name, GAMEMUS.SBF's shape). And the forms program's plays, the three past 255 among them, each
+   at the index its text names. The counts are pinned. */
+static int test_minted_plays(void) {
+    std::vector<MusPlayUse> plays;
+    CHECK(script_plays(MUS_FIXTURE_DIR "/synth_gamemus.bin", plays), "the gamescript's plays");
+    CHECK(mus_bank_name("synth_gamemus.bin") == "SYNTH_GAMEMUS.SBF", "the script's bank by its name");
+    FILE *f = fopen(MUS_FIXTURE_DIR "/../sbf/synth_gamemus.sbf", "rb");
+    CHECK(f != NULL, "open the bank");
+    std::vector<uint8_t> bank;
+    fseek(f, 0, SEEK_END);
+    bank.resize((size_t)ftell(f));
+    fseek(f, 0, SEEK_SET);
+    const bool bank_read = fread(bank.data(), 1, bank.size(), f) == bank.size();
+    fclose(f);
+    CHECK(bank_read, "read the bank");
+    opennova::sbf::SbfArchive arc = {};
+    CHECK(opennova::sbf::sbf_open_memory(&arc, bank.data(), bank.size()) == 0, "open the bank");
+    const uint32_t streams = arc.header.entry_count;
+    opennova::sbf::sbf_close(&arc);
+    uint32_t highest = 0;
+    for (const MusPlayUse &play : plays) {
+        highest = std::max(highest, play.index);
+        CHECK(play.index < streams, "every play's stream one its bank has");
     }
-    CHECK(seen.size() == pinned.size(), "every music script the game opens");
-    printf("\n");
+    printf("\n  synth_gamemus.bin: %zu plays, the highest %u, %u streams", plays.size(), highest, streams);
+    CHECK(plays.size() == 9 && highest == 6 && streams == 13, "the minted pair's counts");
+
+    std::vector<MusPlayUse> forms;
+    CHECK(script_plays(MUS_FIXTURE_DIR "/synth_forms.bin", forms), "the forms program's plays");
+    uint32_t past = 0;
+    highest = 0;
+    for (const MusPlayUse &play : forms) {
+        highest = std::max(highest, play.index);
+        past += play.index > 255 ? 1 : 0;
+    }
+    printf("\n  synth_forms.bin: %zu plays, the highest %u, %u past 255\n", forms.size(), highest, past);
+    CHECK(forms.size() == 15 && highest == 316 && past == 3, "the forms program's counts");
     return 1;
 }
 
 int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+    g_dump = argc > 1 && strcmp(argv[1], "--dump") == 0;
     RUN_TEST(test_synth_gamemus);
     RUN_TEST(test_synth_menumus);
-
-    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
-    g_retail_menumus = retail::reference_fixture("mus/jo_menumus.bin");
-    if (g_retail_gamemus.empty() || g_retail_menumus.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_{gamemus,menumus}.bin (the shipped programs)");
-    } else {
-        RUN_TEST(test_reference_gamemus);
-        RUN_TEST(test_reference_menumus);
-    }
-    if (retail::install().empty()) {
-        retail::skip_leg("OPENNOVA_JO_DIR (every music script the install's archives hold)");
-    } else {
-        RUN_TEST(test_install_scripts);
-        RUN_TEST(test_install_plays);
-    }
+    RUN_TEST(test_synth_forms);
+    RUN_TEST(test_minted_plays);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

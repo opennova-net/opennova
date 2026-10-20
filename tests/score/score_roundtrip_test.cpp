@@ -17,12 +17,15 @@
 // down the tables' names, never the file's spelling of them, and refuses a model
 // its text would not read back as (the #1098 review, F1 and F6).
 //
-// The retail leg (--retail) reads <OPENNOVA_JO_DIR>/score.ini: its 12 blocks, its
+// The game's own table: the twelve rows GameType_CreateDefaultSettings makes (the
+// runtime's world::default_match_score_values / default_match_score_fields) written
+// as ScoreConfig_SaveFile writes them ARE the shipped JO:CA score.ini byte for byte
+// (the game wrote it with these defaults; its length and FNV-1a64 pinned), with
 // Co-op row 2's ENEMYKILL 5 (the value the S2C 0x81 score mirror reproduces in the
-// retail capture: 5, 10, 20, ... 220), and the writer's own form of it IS the
-// shipped file byte for byte (the game wrote it with these defaults), and reads
-// back as the same model.
+// retail capture: 5, 10, 20, ... 220), and read back as the same model.
 #include <formats/score/score.h>
+#include <base/io/hash.h>
+#include <runtime/world/match.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -33,7 +36,6 @@
 #include <fstream>
 #include <string>
 #include <vector>
-#include "common/retail_paths.h"
 
 namespace {
 
@@ -56,10 +58,46 @@ score::File round_trip(const score::File &file) {
 	return parsed(text_of(out));
 }
 
+
+uint64_t fnv1a64(const std::vector<uint8_t> &bytes) {
+	return io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+}
+
+// JO:CA's score.ini (the file beside Jointops.exe): its length and FNV-1a64.
+constexpr size_t kShippedScoreIniBytes = 15444;
+constexpr uint64_t kShippedScoreIniFnv = UINT64_C(0x167e145e27248554);
+
+// The twelve rows the game makes before it reads score.ini [orig: GameType_CreateDefaultSettings @ 0x52DD00], in
+// the ladder's order the writer puts them down (row 2 first under index 0, `if (!i) i = 2` @ 0x52CF4C): each
+// row's default FIELD list and its VAR words (world::default_match_score_fields / default_match_score_values for
+// a g_GameType of the row, Jointops.exe's), the fanfare the defaults' 0 0.
+score::File game_defaults() {
+	// A g_GameType each row's ladder arm takes [orig: ScoreConfig_LoadScoringTableForGameType @ 0x52D300].
+	static const struct {
+		int row;
+		uint32_t game_type;
+	} kRows[] = { { 2, 0x30020u }, { 1, 0x10000u }, { 2, 0x30020u }, { 3, 65537u }, { 4, 1u }, { 5, 589826u },
+		{ 6, 65538u }, { 7, 65540u }, { 8, 65544u }, { 9, 65552u }, { 10, 327696u }, { 11, 0u } };
+	score::File file;
+	const uint16_t fanfare = world::default_score_exp_fanfare(gameprofile::GAME_JO);
+	file.exp_fanfare[0] = fanfare & 0xFF;
+	file.exp_fanfare[1] = fanfare >> 8;
+	for (const auto &r : kRows) {
+		score::GameTypeBlock block;
+		block.row = r.row;
+		for (const world::MatchScoreField &f : world::default_match_score_fields(r.game_type))
+			block.fields.push_back({ f.field, f.enabled });
+		const std::array<int32_t, 39> values = world::default_match_score_values(r.game_type, gameprofile::GAME_JO);
+		for (const score::Name &name : score::var_names())
+			block.vars.push_back({ name.id, values[static_cast<size_t>(name.id)] });
+		file.blocks.push_back(block);
+	}
+	return file;
+}
+
 } // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
 	const std::string fixture =
 			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/score/score_sample.ini";
 	const std::vector<uint8_t> bytes = test_io::read_file(fixture);
@@ -275,44 +313,41 @@ int main(int argc, char **argv) {
 		std::printf("review: names by id, the tables' spelling written; 34 FIELDs; unreadable models refused\n");
 	}
 
-	// --- retail: <OPENNOVA_JO_DIR>/score.ini, the score table the install
-	// ships loose beside its archives (never inside a .pff, so never in an
-	// extracted tree) ---
-	const std::string install = retail::install();
-	const std::string retail_ini =
-			install.empty() ? std::string() : retail::join(install, "score.ini");
-	if (retail_ini.empty() || !retail::file_exists(retail_ini)) {
-		retail::skip_leg("OPENNOVA_JO_DIR/score.ini (the retail score table beside the archives)");
-	} else {
-		const std::vector<uint8_t> rbytes = test_io::read_file(retail_ini.c_str());
-		TEST_EXPECT(!rbytes.empty());
-			score::File rfile;
-			TEST_EXPECT(score::parse(rbytes.data(), rbytes.size(), rfile, error));
-			TEST_EXPECT(rfile.blocks.size() == 12);
-			const score::GameTypeBlock *rcoop = rfile.blocks.size() > 2 ? &rfile.blocks[2] : nullptr;
-			TEST_EXPECT(rcoop != nullptr && rcoop->row == 2);
-		if (rcoop != nullptr) TEST_EXPECT(score::var_value(*rcoop, "ENEMYKILL", -1) == 5);
-			// The 0 -> 2 remap is only unobservable because the shipped blocks
-			// 0 and 2 agree; assert that rather than assume it.
-			const score::GameTypeBlock *r0 = rfile.blocks.empty() ? nullptr : &rfile.blocks[0];
-			if (r0 != nullptr && rcoop != nullptr) {
-				score::File a, b;
-				a.blocks.push_back(*r0);
-				b.blocks.push_back(*rcoop);
-				TEST_EXPECT(score::equal(a, b));
-			}
-		// The writer's own form is the shipped file, byte for byte: the game wrote it [orig: ScoreConfig_SaveFile @
-		// 0x52CDD0].
-			std::vector<uint8_t> renc;
-			TEST_EXPECT(score::write(rfile, renc, error));
-		TEST_EXPECT(renc == rbytes);
-		// The game's reader takes the written file as the shipped one: the same fields.
-		TEST_EXPECT(score::equal(parsed(text_of(renc)), rfile));
-		score::File edited = rfile;
+	// --- the game's own score.ini: the twelve rows GameType_CreateDefaultSettings makes, written as
+	// ScoreConfig_SaveFile writes them when no score.ini is there [orig: @ 0x52F50C..0x52F528] ---
+	{
+		const score::File defaults = game_defaults();
+		std::vector<uint8_t> encoded;
+		TEST_EXPECT(score::write(defaults, encoded, error));
+		// JO:CA's score.ini, shipped loose beside its archives, is this writer's output over these defaults byte for
+		// byte: the game wrote it [orig: ScoreConfig_SaveFile @ 0x52CDD0]. Its length and FNV-1a64, witnessed over
+		// the shipped file by the retired score_roundtrip_retail leg (2026-10-19); a change needs an [orig] witness
+		// on the writer or the defaults (world::default_match_score_values / default_match_score_fields).
+		if (encoded.size() != kShippedScoreIniBytes || fnv1a64(encoded) != kShippedScoreIniFnv)
+			std::printf("FAIL defaults: %zu bytes, fnv 0x%016llx\n", encoded.size(),
+			            static_cast<unsigned long long>(fnv1a64(encoded)));
+		TEST_EXPECT(encoded.size() == kShippedScoreIniBytes);
+		TEST_EXPECT(fnv1a64(encoded) == kShippedScoreIniFnv);
+		score::File read_back;
+		TEST_EXPECT(score::parse(encoded.data(), encoded.size(), read_back, error));
+		TEST_EXPECT(read_back.blocks.size() == 12 && score::equal(read_back, defaults));
+		// Co-op row 2's ENEMYKILL 5: the value the S2C 0x81 score mirror reproduces in the retail capture (5, 10,
+		// 20, ... 220).
+		const score::GameTypeBlock *coop = read_back.blocks.size() > 2 ? &read_back.blocks[2] : nullptr;
+		TEST_EXPECT(coop != nullptr && coop->row == 2);
+		if (coop != nullptr) TEST_EXPECT(score::var_value(*coop, "ENEMYKILL", -1) == 5);
+		// The 0 -> 2 remap is only unobservable because blocks 0 and 2 agree; assert that rather than assume it.
+		if (coop != nullptr) {
+			score::File a, b;
+			a.blocks.push_back(read_back.blocks[0]);
+			b.blocks.push_back(*coop);
+			TEST_EXPECT(score::equal(a, b));
+		}
+		score::File edited = read_back;
 		edited.blocks[3].vars[0].value += 1;
 		TEST_EXPECT(score::equal(round_trip(edited), edited));
-		std::printf("retail: score.ini is the writer's own form byte for byte, read back as the same fields; an edit "
-		            "reads back\n");
+		std::printf("defaults: the game's twelve rows written are the shipped score.ini (%zu bytes, its FNV-1a64), "
+		            "read back as the same fields; an edit reads back\n", encoded.size());
 	}
 
 	std::printf("score roundtrip tests passed\n");

@@ -7,7 +7,7 @@
 #include <formats/def/def.h>
 #include <string>
 
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 
 using namespace opennova::def;
 
@@ -226,20 +226,17 @@ static int sidless_block_legs() {
     return ok ? 0 : 1;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     if (synthetic_legs() != 0) return 1;
     if (tokenizer_legs() != 0) return 1;
     if (atof_legs() != 0) return 1;
     if (sidless_block_legs() != 0) return 1;
     if (value_cap_legs() != 0) return 1;
-    /* Every remaining leg reads the reference fixture's hudpos.def (the memory
-       legs compare against its path parse), so they gate on the reference
-       fixture set (OPENNOVA_JO_ASSETS). It is an earlier build's layout, not
-       either of JO:CA's (docs/interface/hud-re.md "Render pipeline"). */
-    const std::string fixture = retail::reference_fixture("def/hudpos.def");
-    if (fixture.empty())
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (an earlier build's HUD layout, not JO:CA's)");
+    /* Every remaining leg reads fixtures/def/hudpos.def (the memory legs compare against its
+       path parse): an authored layout in the spellings JO's hudpos.def files use, carrying the
+       pins the retired reference-fixture leg read (that file an earlier build's layout, not
+       either of JO:CA's: docs/interface/hud-re.md "Render pipeline"). */
+    const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/hudpos.def";
     const char *path = fixture.c_str();
 
     DefHudPosFile hudpos;
@@ -251,7 +248,7 @@ int main(int argc, char **argv) {
 
     const DefHudPosDef *hud = &hudpos.hud;
 
-    /* Fonts: this reference hudpos.def (not JO:CA's, whose two files author
+    /* Fonts: this hudpos.def (like the earlier build's, not JO:CA's, whose two files author
        fonthud1_hi / fonthud1_lo) names its face on a bare
        `fonthud1` line, which is no key: HUD_ParseHudposToken @0x59F370 compares
        whole tokens with _stricmp against fonthud1_hi / fonthud1_lo, so both
@@ -291,6 +288,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "FAIL: stancecolor_good mismatch: r=%d,g=%d,b=%d,a=%d\n",
                 hud->stancecolor_good.r, hud->stancecolor_good.g,
                 hud->stancecolor_good.b, hud->stancecolor_good.a);
+        def_free_hudpos(&hudpos);
+        return 1;
+    }
+    /* A channel with leading zeros (`047,079,255`, JO's spelling) reads as its decimal. */
+    if (hud->tagcolor_blueteam.r != 47 || hud->tagcolor_blueteam.g != 79 ||
+        hud->tagcolor_blueteam.b != 255 || hud->tagcolor_redteam.g != 0) {
+        fprintf(stderr, "FAIL: tagcolor_blueteam mismatch: %d,%d,%d\n", hud->tagcolor_blueteam.r,
+                hud->tagcolor_blueteam.g, hud->tagcolor_blueteam.b);
         def_free_hudpos(&hudpos);
         return 1;
     }
@@ -648,11 +653,24 @@ int main(int argc, char **argv) {
     /* VEHICLE_HUD blocks parse IN PARALLEL with the raw_lines passthrough:
        the typed blocks appear AND every line still round-trips through
        raw_lines [orig: HUD_ParseHudposToken @0x59F370 - the token arms and
-       the VEHICLE_END commit]. The tracked fixture carries 28 blocks. */
-    if (hud->vehicle_huds_count == 0) {
-        fprintf(stderr, "FAIL: no VEHICLE_HUD blocks parsed\n");
+       the VEHICLE_END commit]. The fixture carries three blocks. */
+    if (hud->vehicle_huds_count != 3) {
+        fprintf(stderr, "FAIL: %zu VEHICLE_HUD blocks parsed, not 3\n", hud->vehicle_huds_count);
         def_free_hudpos(&hudpos);
         return 1;
+    }
+    /* JO:CA's own spellings: `emplace 1 35,206` (a blank for the count's comma) reads as
+       `emplace 1,35,206` would, and a block seats seven. */
+    {
+        const DefVehicleHudBlock *truck = &hud->vehicle_huds[1];
+        if (strcmp(truck->sid, "dtruck1") != 0 || truck->emplace_count != 1 ||
+            truck->emplace_x[0] != 20 || truck->emplace_y[0] != 210 || truck->seat_count != 7 ||
+            truck->seat_x[6] != 30 || truck->seat_y[6] != 190) {
+            fprintf(stderr, "FAIL: dtruck1 block: sid '%s' emplace %d @ %d,%d seats %d\n", truck->sid,
+                    truck->emplace_count, truck->emplace_x[0], truck->emplace_y[0], truck->seat_count);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
     }
     {
         const DefVehicleHudBlock *buggy = NULL;
