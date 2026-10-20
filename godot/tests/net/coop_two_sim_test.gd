@@ -949,6 +949,14 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
+	# That zero is a fresh death edge on the authority's player body, so its death
+	# transaction arms the pick hold again (three seconds this soon after the zone
+	# deployment), during which a pick is silently dropped: settle past it as the
+	# first leg does. [orig: GameEvent_PlayerDeath @0x516ec4..0x516eeb; the +360
+	#  refusal @0x519cf2]
+	for _i in range(260):
+		host.step()
+		joiner.step()
 
 	# The player's 0x0E pick is released by an ACK-qualified 0x5A. That edge
 	# reuses L (rather than spawning a second local entity), but revival still
