@@ -1307,8 +1307,8 @@ function Start-RetailHostExact {
     $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_host_lan" `
         -Arguments (Get-RetailHostArguments -OutputDir $hostDir))
     Assert-OnHookRoleLaunch -Tool "onhook_host_lan" -Result $result
-    Assert-RetailHostRotation -Result $result
     $script:OwnedRetailRuns.Add([string] $result.run_id)
+    Assert-RetailHostRotation -Result $result
     $script:RetailHostProcess = Get-Process -Id ([int] $result.pid) -ErrorAction Stop
     Bind-EffectiveRetailConfig -Role server -Source (Join-Path $ServerDir "onhook.cfg")
     $probeOutput = @(& $ProbeExe --host 127.0.0.1 --port $Port --timeout-ms 240000 `
@@ -1854,7 +1854,7 @@ try {
                 $script:RetailHostProcess = $null
                 break
             }
-            $pairResult = Invoke-OnHookTool -Name "onhook_run_lan_pair" -Arguments @{
+            $pairArguments = @{
                 mission = $Mission
                 host_game_dir = $ServerDir
                 joiner_game_dir = $ClientDir
@@ -1873,9 +1873,12 @@ try {
                 stock_observer = $StockObserver
                 wait_timeout_ms = 240000
             }
+            if ($RotationList.Count -gt 0) { $pairArguments.rotation = @($RotationList) }
+            $pairResult = Invoke-OnHookTool -Name "onhook_run_lan_pair" -Arguments $pairArguments
             $pair = Get-StructuredResult $pairResult
             $script:OwnedRetailRuns.Add([string] $pair.host.run_id)
             $script:OwnedRetailRuns.Add([string] $pair.joiner.run_id)
+            Assert-RetailHostRotation -Result $pair
             Assert-RetailStock -Tool "onhook_run_lan_pair host" `
                 -Reported $pair.host.instance.stock_observer
             Assert-RetailStock -Tool "onhook_run_lan_pair joiner" `
