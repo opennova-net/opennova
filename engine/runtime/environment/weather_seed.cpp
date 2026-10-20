@@ -1,7 +1,5 @@
 #include <runtime/environment/weather_seed.h>
 
-#include <runtime/environment/environment_state.h>
-
 #include <formats/env/tod_clock.h>
 
 #include <algorithm>
@@ -44,9 +42,9 @@ world::WeatherSeed weather_seed_from_config(const Config &config, const bms::Hea
 	seed.tod_advance_per_tick = static_cast<uint32_t>(
 			tod_advance_per_tick(static_cast<int>(header.minutes_per_day)));
 	seed.fog_type = config.fog_type;
-	// g_EnvLightningColor takes the parser's envscaled byte color.
-	seed.lightning_color = rgb01_to_packed(EnvironmentState::scale_global_color(
-			config.lightning_rgb, config.envscale));
+	// g_EnvLightningColor is the parser's pack of the line [orig: TimeOfDay_ParseProperty
+	// @ 0x57c844 <- Color_ScaleRGBAndPack @ 0x57f890].
+	seed.lightning_color = scale_rgb_and_pack(config.lightning_rgb, config.envscale);
 	seed.wind_scale = 256;
 	seed.tod_keyframed = !config.keyframes.empty();
 	return seed;

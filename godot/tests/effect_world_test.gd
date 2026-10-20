@@ -151,7 +151,7 @@ func test_gore_set_effects_load_and_resolve_across_extensions() -> void:
 	assert_gt(handle, 0, "the .ptu effectdef interns")
 	assert_eq(world.effect_name_for_handle(handle), "Effect_GoreHit")
 
-	# Effect_GoreHit's pdefs list mixes its own particledef with `Buildup dots` from
+	# Effect_GoreHit's pdefs list mixes its own particledef with `Buildup_dots` from
 	# synth_minimal_effect.ptl. The catalog registers every particledef across ALL documents before
 	# resolving ANY effectdef, so the reference resolves across extensions. An effect
 	# with any unresolved pdef is cleared WHOLE (D-PTL-8 all-or-nothing) and spawns

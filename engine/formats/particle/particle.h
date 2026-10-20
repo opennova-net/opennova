@@ -16,8 +16,9 @@ inline constexpr int kMaxParticleFlipFrames = 256;
 
 // Engine: Joint Operations particle effect format (.ptl).
 // IDB: retail Jointops.exe.
-// Section dispatcher: CEffectWorld_ParseSectionCallback @ 0x5ecb40.
-// Definition hydrator: CParticleDef_ParseFromConfigMap @ 0x5ed210 (size 0x1da5).
+// Section dispatcher: CEffectWorld_ParseSectionCallback @ 0x5ecb40, its line readers
+// CParticleTableDef_ParseScriptLine @ 0x5e92b0, CParticleDef_ParseProperties @ 0x5ea320 and
+// CEffectTableDef_ParseCallback @ 0x5e4010 (parser.h).
 // See docs/particles/ptl-format-re.md §2 for the witness matrix and field-offset table.
 
 struct Color3 {
@@ -146,10 +147,12 @@ std::string format_particle_flags(std::uint32_t bits);
 // [orig: CParticleDef_ParseProperties @ 0x5EA5F0..0x5EA617, _stricmp over the names @ 0x846A20].
 bool is_particle_flag_name(std::string_view token) noexcept;
 
-// "table12", "table12 reverse", "table12 inverse"/"table12 invert", or both
-// modifiers in any order. Engine: per-func dispatch in
-// CParticleDef_ParseProperties (e.g. scale_func @ 0x5eafdd) sets bit 0x02 on
-// "reverse" and bit 0x01 on "inverse"; its writer spells that bit "invert".
+// "table12", "table12 reverse", "table12 inverse", or both modifiers in any
+// order (D-PTL-20). Engine: per-func dispatch in CParticleDef_ParseProperties
+// (e.g. scale_func @ 0x5eafdd) ORs bit 0x02 on "reverse" and bit 0x01 on
+// "inverse" into the entry's mask, which no later line clears. NovaLogic's
+// writers spell that bit "invert", which the reader takes for no modifier;
+// ours spells it "inverse".
 //
 // `baked_lut` mirrors the runtime LUT pointer the engine writes at
 // CurveRef-equivalent offset +68 (e.g. graphic+480 for alpha_func, +552 for
@@ -162,7 +165,7 @@ struct CurveRef {
 	std::string name;
 	bool reverse = false;
 	bool inverse = false;
-	bool present = false;                          // true once any *_func key has been seen
+	bool present = false;                          // true once a *_func line wrote it (or the graphicN line that copied it)
 	bool baked = false;                            // true after bake_particle_def_curves resolves a TableDef
 	std::array<std::uint8_t, 256> baked_lut{};
 };
@@ -171,10 +174,13 @@ struct CurveRef {
 // (CParticleDefEntry_ParseGraphicProperty @ 0x5e3550). Field offsets in
 // comments are within the layer block.
 struct GraphicLayer {
-	int index = 0;                 // 1..4 once present (header line "graphicN = ...")
+	int index = 0;                 // 1..4: the layer's slot + 1
+	// The layer is one of the particle's graphic count: graphic1 sets the count to one, each other
+	// graphicN line adds one, up to four [orig: CParticleDefEntry_ParseGraphicProperty @ 0x5e357e..
+	// 0x5e35b9]; a definition of no graphic line has one, its first layer at the game's defaults
+	// [orig: CParticleSystemDef_InitDefaults @ 0x5e1550].
 	bool present = false;
 	std::string texture;           // +0..259, e.g. "dirtpuf.tga"; may be empty ("blank" layer)
-	std::string blend_mode_raw;    // +260..323, lowercased input to ParseBlendMode
 	BlendMode blend_mode = BlendMode::Blend;  // +324, result of CParticleDefEntry_ParseBlendMode @ 0x5e29f0
 	int flip_frames = 1;           // +716, default 1; consumers clamp to 1..256
 	int flip_rate = 8;             // +720
@@ -185,8 +191,10 @@ struct GraphicLayer {
 	// `bake_graphic_uv_rects` with horizontal-strip defaults; atlas-bake
 	// support would replace the defaults with explicit per-frame rects.
 	std::vector<UvRect> baked_uv_rects;
+	// The layer's own: a graphicN line copies the particle's colours, alpha, scale, scale_adj and
+	// curves into its layer as they stand at that line, and the layer's keys write over them
+	// [orig: CParticleDefEntry_ParseGraphicProperty @ 0x5e3635..0x5e36ec].
 	Color3 color1, color2, color3, color4;   // +700/+704/+708/+712
-	bool color_overrides_set = false;
 	float alpha = 1.0f;            // +408
 	float scale = 0.0f;            // +328
 	float scale_adj = 0.0f;        // +332
@@ -203,9 +211,7 @@ struct GraphicLayer {
 struct ParticleDef {
 	std::string id;             // +0
 	std::string child_id;       // +132
-	std::string flags_raw;      // +136 — preserved verbatim from source for round-trip
 	std::uint32_t flags = 0;    // +136 — FlagTable_ParseFromString @ 0x5df970 over the flag table @ 0x846A18 (see particle_flag::*)
-	std::string move_raw;       // +140 — preserved verbatim
 	std::uint32_t move = 0;     // +140 — FlagTable_ParseFromString @ 0x5df970 over the move table @ 0x848800 (see move_flag::*)
 	float lod = 0.0f;           // observed in corpus; CParticleDef_ParseProperties has no `lod` case — value is silently ignored on parse but written by CParticleDef_SaveToFile @ 0x5e4d70
 
@@ -267,19 +273,19 @@ struct ParticleDef {
 	// Graphics — 4 layers @ +148/+936/+1724/+2512
 	std::array<GraphicLayer, 4> graphics{};
 
-	// Forward-compatibility: keys not in CParticleDef_ParseFromConfigMap's
-	// dispatch switch are silently dropped by the engine. We preserve them so
-	// new editor keys round-trip without surprises.
+	// Keys the reader has no case for, each with its value as written: the game reads nothing of
+	// them [orig: CParticleDef_ParseProperties @ 0x5ea320, no arm]; the port keeps them for the
+	// writer, so a key a mod's tool adds goes round.
 	std::vector<std::pair<std::string, std::string>> unknown_keys;
 };
 
 struct EffectDef {
 	std::string id;
 	std::vector<std::string> pdefs;   // ordered list of ParticleDef.id references
-	// Where the text it was read from wrote it, as the parser counts lines (1-based, a line
-	// ending at its LF; 0 for an effect not read from a text): its section's first line (the
-	// [effectdef] header) and last (its closing brace), and the value of the `id` that named it
-	// (its line, and its column, 1-based, in bytes). The writers read none of them; the
+	// Where the text it was read from wrote it, as the walk counts lines (1-based, a line
+	// ending at its CR LF; 0 for an effect not read from a text): the section header its pdefs
+	// line followed and its closing brace, and the value of the `id` line that named it (its
+	// line, and its column, 1-based, in bytes; 0 where that line was in another file). The writers read none of them; the
 	// OpenNova Editor's Go to and its effect preview do (ADR 0046, DI-14).
 	int first_line = 0;
 	int last_line = 0;
@@ -287,10 +293,16 @@ struct EffectDef {
 	int id_column = 0;
 };
 
-// 32 rows × 8 uint8_t observed in every corpus file. The smoke test asserts.
+// A table: its 256-byte LUT (+0x148 of the game's 0x250-byte table), as 32 rows of 8, and the
+// transform-flags dword after it (+0x248): 0 for a table a [tabledef] block makes [orig:
+// CEffectTableDef_ParseCallback @ 0x5e4070], the inverse 0x01 / reverse 0x02 mask for the clone a
+// modified reference resolves to (bake_particle_def_curves). The game's table reader writes the
+// rows as one stream of bytes through a cursor, so a row that runs past the LUT writes the flags
+// (parser.cpp). Bytes no row wrote are 0 (an uninitialized heap block in retail, D-PTL-39).
 struct TableDef {
 	std::string id;
 	std::vector<std::array<std::uint8_t, 8>> rows;
+	std::uint32_t flags = 0;
 };
 
 // Editor-only metadata for a [tabledef]. Runtime ignores it.
@@ -304,13 +316,14 @@ struct TableEditHandles {
 // [effectdef], a [particledef], a [tabledef], or the original editor's [tabledef_edithandles].
 enum class BlockKind : std::uint8_t { Effect, Particle, Table, Handles };
 
-// Where the text a ParticleFile was read from writes its blocks and their keys, as the parser counts lines
-// (1-based, a line ending at its LF), read only where asked (load_particles_with_places: the game's loads keep
-// none). A block: its kind and its index among the file's blocks of that kind (effects, particles, tables,
-// table_handles), its section line, its closing brace's line and that line's first byte. A key: its block, the
-// key as written, its line, and its value as the reader takes it (after the '=' and the blanks after it, before
-// the ';'s and blanks ending the line), by its first byte and its length; a key of no value, the end of its line
-// before its line end (never into the next line). A value replaced there, the text read again, changes that key
+// Where the text a ParticleFile was read from writes its blocks and their keys, as the walk counts lines
+// (1-based, a line ending at its CR LF), read only where asked (load_particles_with_places: the game's loads
+// keep none). A block, as the reader registers it: its kind and its index among the file's blocks of that kind
+// (effects, particles, tables, table_handles), the section header before it, its closing brace's line and that
+// line's first byte. A key, each line the reader reads in an open block: its block, the key as written (the
+// line's first token), its line, and its value as the reader takes it (from its first token after the key and
+// any '=' to the end of its last before the line's ';', the blanks and separators that end it left out), by
+// its first byte and its length; a key of no value, the line's ';', else its end (never into the next line). A value replaced there, the text read again, changes that key
 // alone. The writers read none of them; the OpenNova Editor's key panel does (ADR 0046 S23 B).
 struct BlockPlace {
 	BlockKind kind = BlockKind::Particle;
@@ -337,7 +350,7 @@ struct ParticlePlaces {
 // and j__atol (@0x76AB1B); FlagTable_ParseFromString @ 0x5df970; CParticleDefEntry_ParseBlendMode @ 0x5e29f0;
 // the [effectdef] reader CParticleTableDef_ParseScriptLine @ 0x5e92b0, its IDB name notwithstanding; the
 // [tabledef] reader CEffectTableDef_ParseCallback @ 0x5e4010]; the parser here reads each so (parser.cpp), but
-// for a table's rows (KeyRow).
+// for a table's rows (KeyRow), whose values are bytes of one stream.
 enum class KeyValueKind : std::uint8_t {
 	Text,     // a name as written: an id, a child particle's id, a collision sound set
 	Real,     // a number, through atof
@@ -364,14 +377,14 @@ enum class KeyValueKind : std::uint8_t {
 // A table's rows are not keys by number: the game's table reader takes `id` (without case) and any other key
 // holding a 't' (with case) as the table's next row, in the order written, up to 32, its values a stream of
 // bytes through atol, up to 8 a row, a short row's next row going on from its last byte [orig:
-// CEffectTableDef_ParseCallback @ 0x5e4010, strstr(key, "t") @ 0x5e4120]. key_row matches so; the parser here
-// takes tl1..tl32 by their numbers, 8 bytes each (D-PTL-32).
+// CEffectTableDef_ParseCallback @ 0x5e4010, strstr(key, "t") @ 0x5e4120]. key_row matches so, as the parser
+// reads them.
 // `read`: false for a key the game's reader has no case for: lod, which only the writer writes [orig:
 // CParticleDef_SaveToFile @ 0x5e4d70, its format "lod\t= %5.3f;\n" @ 0x7dd328, which no reader compares a key
 // with], and the keys of a [tabledef_edithandles] block (its table, its handle count, its smoothing and each
 // handle by its number, handle0 on), which the game never reaches (its header ends the
 // file's walk [orig: CEffectWorld_ParseSectionCallback @ 0x5ecb40 -> File_ParseASCIIFile @ 0x53d942]; the
-// parser here reads them and the blocks after, D-PTL-32).
+// parser reads the handle blocks alone past that line, for the original editor's sake).
 struct KeyRow {
 	BlockKind block = BlockKind::Particle;
 	const char *key = "";

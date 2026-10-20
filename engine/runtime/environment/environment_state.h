@@ -542,12 +542,13 @@ public:
 		return {eye_y < water_height, eye_y <= water_height};
 	}
 
-	// Global (non-TOD) colors stay raw on the document so editor/export
-	// round-trips do not bake envscale into authored values. The runtime view
-	// performs the same byte quantize -> envscale truncation -> saturation as
-	// the retail parser [orig: Color_ScaleRGBAndPack @ 0x57f890;
+	// Global (non-TOD) colors stay as their lines wrote them on the document so
+	// editor/export round-trips do not bake envscale into authored values. The
+	// runtime view packs each the way the retail parser does (env::
+	// scale_rgb_and_pack: x envscale, truncated, held at 255 from above, a
+	// negative channel's sign bits filling the bytes above it) and reads the
+	// packed word's RGB bytes [orig: Color_ScaleRGBAndPack @ 0x57f890;
 	// divergence #8].
-	static float scale_global_channel(float channel, float envscale);
 	static Rgb scale_global_color(const Rgb &color, float envscale);
 
 	// Fog/skyfog blocks operate in undoubled authored bytes; render colors

@@ -402,8 +402,9 @@ static int test_compile_minimal_single_section(void) {
 /* What the text refuses, each where MDEdit's debug table or the game would not read it as written: a function's name
    or a parameter's `Function::name` past the table's 31 characters (cut, it would match no parameter), a function or
    a parameter twice, a function and a section of one name, an `enter` to a section no block defines (it would sit at
-   the code's leading nop), a function of no parameter and a `frame 0` (D-MUS-16). An error's line is the text's
-   own, whatever `#line` says. */
+   the code's leading nop) and a function of no parameter, MDEdit's form for which is unwitnessed (D-MUS-16). A
+   `frame 0` compiles to its `38 00`, which the VM runs as the game does (mus_vm_test, D-MUS-16). An error's line is
+   the text's own, whatever `#line` says. */
 static int test_function_rules(void) {
     int line = 0;
     const auto refused = [&line](const std::string &body) {
@@ -428,7 +429,10 @@ static int test_function_rules(void) {
     CHECK(refused("section Begin\n{\n  on (Var01) enter Begin Nowhere\n}\n"), "a table's enter to one");
     CHECK(refused("declsection Nowhere\nsection Begin\n{\n  done\n}\n"), "a declsection of a section defined nowhere");
     CHECK(refused(begin + "handler H()\n{\n}\n"), "a function of no parameter");
-    CHECK(refused("section Begin\n{\n  frame 0\n  done\n}\n"), "a frame setup of none");
+    const char *frame0 = "script test\nsection Begin\n{\n  frame 0\n  done\n}\n";
+    std::string text;
+    CHECK(round_trips(frame0, &text) && text.find("frame 0\n") != std::string::npos, "a frame setup of none");
+    CHECK(bytecode(frame0).find(std::string("\x38\x00\x3F", 3)) != std::string::npos, "frame 0 is 38 00");
     CHECK(!refused("section Begin\n{\n  frame 2\n  done\n}\n"), "a frame setup of two");
     CHECK(refused("section Begin\n{\n#line 500\n  play nowhere\n}\n") && line == 5, "an error at its own line");
     // A section's name past 31 characters, refused wherever it is named, never cut to one another name could share.

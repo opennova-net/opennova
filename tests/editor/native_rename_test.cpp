@@ -52,14 +52,14 @@ int test_rewrite_text() {
 	TEST_EXPECT(trn == "; polytrn_colormap map.tga, the old map\r\npolytrn_colormap \"map.tga\"\r\npolytrn_detailmap grain.tga\r\n"
 	                   "polytrn_polydata isle.cpt\r\npolytrn_colormap land.tga ; the one read\r\n");
 	// A particle file: two definitions name the same graphic, each a site; a comment between them keeps it.
-	std::string ptl = "[particledef]\n{\n\tid = a;\n\tgraphic1 = spark.tga, additive;\n}\n// spark.tga\n[particledef]\n{\n"
-	                  "\tid = b;\n\tgraphic1 = spark.tga,blend;\n\tgraphic2 = smoke.tga;\n}\n";
+	std::string ptl = "[particledef]\r\n{\r\n\tid = a;\r\n\tgraphic1 = spark.tga, additive;\r\n}\r\n// spark.tga\r\n[particledef]\r\n{\r\n"
+	                  "\tid = b;\r\n\tgraphic1 = spark.tga,blend;\r\n\tgraphic2 = smoke.tga;\r\n}\r\n";
 	TEST_EXPECT(rewrite_native_text("fx.ptl", AssetKind::Particles, "jo", ptl,
 	                                {{"a", "graphic1", "spark.tga", "fire.tga"}, {"b", "graphic1", "spark.tga", "fire.tga"}},
 	                                missed) == 2 &&
 	            missed.empty());
-	TEST_EXPECT(ptl == "[particledef]\n{\n\tid = a;\n\tgraphic1 = fire.tga, additive;\n}\n// spark.tga\n[particledef]\n{\n"
-	                   "\tid = b;\n\tgraphic1 = fire.tga,blend;\n\tgraphic2 = smoke.tga;\n}\n");
+	TEST_EXPECT(ptl == "[particledef]\r\n{\r\n\tid = a;\r\n\tgraphic1 = fire.tga, additive;\r\n}\r\n// spark.tga\r\n[particledef]\r\n{\r\n"
+	                   "\tid = b;\r\n\tgraphic1 = fire.tga,blend;\r\n\tgraphic2 = smoke.tga;\r\n}\r\n");
 	// The HUD layout: the stance's icon, and the static frame the HUD reads (the last line authored).
 	std::string hud = "// stance.tga\r\nHUDSTANCE 0 10 10 stance.tga STAND\r\nSTATICFRAME frame.tga 0 0\r\nSTATICFRAME frame.tga 4 4\r\n";
 	TEST_EXPECT(rewrite_native_text("hudpos.def", AssetKind::HudPosDefs, "jo", hud,
@@ -101,8 +101,8 @@ int test_native_text_place() {
 	            line == 10 && column == 17);
 	// (A face animation is a record document since round S23: a Go to lands on its face's field, not a line.)
 	// A particle file's effect (a symbol the record names): its id's line.
-	const std::string ptl = "[particledef]\n{\n\tid = spark;\n\tgraphic1 = spark.tga;\n}\n[effectdef]\n{\n\tid = Hit;\n"
-	                        "\tpdefs = spark;\n}\n";
+	const std::string ptl = "[particledef]\r\n{\r\n\tid = spark;\r\n\tgraphic1 = spark.tga;\r\n}\r\n[effectdef]\r\n{\r\n\tid = Hit;\r\n"
+	                        "\tpdefs = spark;\r\n}\r\n";
 	Extracted read;
 	Diagnostic error;
 	TEST_EXPECT(extract_from_bytes("fx.ptl", AssetKind::Particles, std::vector<uint8_t>(ptl.begin(), ptl.end()), "jo", read, error) &&

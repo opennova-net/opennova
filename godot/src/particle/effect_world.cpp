@@ -10,6 +10,7 @@
 #include "util/string_convert.h"
 
 #include <base/io/fixed.h>
+#include <formats/particle/parser.h>
 
 #include <array>
 #include <vector>
@@ -184,6 +185,8 @@ int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 	// The effect files in the archive walk's order, `.ptl` and the gore set
 	// interleaved, less what it skips (ResourceIndex::effect_files, D-VFS-13).
 	const PackedStringArray names = p_root->effect_files();
+	// One reader state through every file: the effect readers' globals outlive a file.
+	opennova::particle::ParticleReadState read_state;
 	for (int64_t i = 0; i < names.size(); ++i) {
 		const String logical_name = names[i];
 		if (logical_name.is_empty()) {
@@ -195,7 +198,7 @@ int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 		}
 		Ref<ParticleFile> file;
 		file.instantiate();
-		if (file->load_from_buffer(bytes, logical_name) != OK) {
+		if (file->load_from_buffer_after(bytes, logical_name, read_state) != OK) {
 			UtilityFunctions::push_warning(vformat("effect world: failed to parse %s", logical_name));
 			continue;
 		}

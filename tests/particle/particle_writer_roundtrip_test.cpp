@@ -40,6 +40,7 @@ bool vec3_equal(const opennova::particle::Vec3 &a, const opennova::particle::Vec
 
 bool graphics_equal(const opennova::particle::GraphicLayer &a, const opennova::particle::GraphicLayer &b, std::string &diff) {
 	if (a.present != b.present)        { diff = "present"; return false; }
+	if (!a.present) return true; // a layer past the graphic count is neither written nor read
 	if (a.index != b.index)            { diff = "index"; return false; }
 	if (a.texture != b.texture)        { diff = "texture"; return false; }
 	if (a.blend_mode != b.blend_mode)  { diff = "blend_mode"; return false; }
@@ -49,7 +50,6 @@ bool graphics_equal(const opennova::particle::GraphicLayer &a, const opennova::p
 	if (!colors_equal(a.color2, b.color2)) { diff = "color2"; return false; }
 	if (!colors_equal(a.color3, b.color3)) { diff = "color3"; return false; }
 	if (!colors_equal(a.color4, b.color4)) { diff = "color4"; return false; }
-	if (a.color_overrides_set != b.color_overrides_set) { diff = "color_overrides_set"; return false; }
 	if (!near(a.alpha, b.alpha))           { diff = "alpha"; return false; }
 	if (!near(a.scale, b.scale))           { diff = "scale"; return false; }
 	if (!near(a.scale_adj, b.scale_adj))   { diff = "scale_adj"; return false; }
@@ -126,12 +126,15 @@ bool particles_equal(const opennova::particle::ParticleDef &a, const opennova::p
 	return true;
 }
 
+// A particle the game's reader gives back as it is (every name one word, the layers from the first, each holding
+// the particle's curves its graphicN line copies, a layer's own curve carrying the bits of the one it writes over,
+// flip_frames 1 on every layer but the last): every field the writer emits reads back.
 bool roundtrip_synthetic_full_particle() {
 	using namespace opennova::particle;
 	ParticleFile first;
 	ParticleDef p;
-	p.id = "synthetic full particle";
-	p.child_id = "child particle";
+	p.id = "synthetic_full_particle";
+	p.child_id = "child_particle";
 	p.flags = particle_flag::EmitVector | particle_flag::AmbientColor;
 	p.move = move_flag::Normal | move_flag::Orbit;
 	p.lod = 0.125f;
@@ -139,7 +142,7 @@ bool roundtrip_synthetic_full_particle() {
 	p.emit_dur_adj = 0.125f;
 	p.emit_rate = 12.500f;
 	p.emit_rate_adj = 2.250f;
-	p.emit_rate_func = {"emit curve", true, false, true};
+	p.emit_rate_func = {"emit_curve", true, false, true};
 	p.emit_delay = 0.375f;
 	p.emit_burst = 3;
 	p.emit_maxoverride = 77;
@@ -152,12 +155,12 @@ bool roundtrip_synthetic_full_particle() {
 	p.age_adj = 0.875f;
 	p.scale = 2.250f;
 	p.scale_adj = 0.125f;
-	p.scale_func = {"scale curve", false, true, true};
+	p.scale_func = {"scale_curve", false, true, true};
 	p.alpha = 0.875f;
-	p.alpha_func = {"alpha curve", true, true, true};
-	p.red_func = {"red curve", false, false, true};
-	p.green_func = {"green curve", true, false, true};
-	p.blue_func = {"blue curve", false, true, true};
+	p.alpha_func = {"alpha_curve", true, true, true};
+	p.red_func = {"red_curve", false, false, true};
+	p.green_func = {"green_curve", true, false, true};
+	p.blue_func = {"blue_curve", false, true, true};
 	p.color1 = {1, 2, 3};
 	p.color2 = {4, 5, 6};
 	p.color3 = {7, 8, 9};
@@ -176,16 +179,29 @@ bool roundtrip_synthetic_full_particle() {
 	p.spread = 40.0f; p.spread_skip = 5.0f;
 	p.orbitalspeed = 2.5f; p.orbitalspeed_adj = 1.5f;
 	p.orbital_axis = {0.0f, 0.0f, 1.0f};
-	p.collide_sounds[3] = "impact sound";
+	p.collide_sounds[3] = "impact_sound";
 	p.unknown_keys.emplace_back("future_mode", "precise");
 	p.unknown_keys.emplace_back("future_value", "one, two");
 	p.unknown_keys.emplace_back("g1_future_mode", "first");
 	p.unknown_keys.emplace_back("g1_future_mode", "second");
+	for (int slot = 0; slot < 2; ++slot) {
+		GraphicLayer &layer = p.graphics[static_cast<std::size_t>(slot)];
+		layer.index = slot + 1;
+		layer.present = true;
+		layer.scale_func = p.scale_func;
+		layer.alpha_func = p.alpha_func;
+		layer.red_func = p.red_func;
+		layer.green_func = p.green_func;
+		layer.blue_func = p.blue_func;
+	}
+	GraphicLayer &g1 = p.graphics[0];
+	g1.texture = "first.tga";
+	g1.blend_mode = BlendMode::Premult;
+	g1.color1 = g1.color2 = g1.color3 = g1.color4 = {41, 42, 43};
+	g1.alpha = 0.5f;
+	g1.scale = 1.5f;
 	GraphicLayer &g2 = p.graphics[1];
-	g2.index = 2;
-	g2.present = true;
-	g2.texture = "sparse texture.tga";
-	g2.blend_mode_raw = "additive";
+	g2.texture = "second.tga";
 	g2.blend_mode = BlendMode::Additive;
 	g2.flip_frames = 4;
 	g2.flip_rate = 6;
@@ -193,35 +209,41 @@ bool roundtrip_synthetic_full_particle() {
 	g2.color2 = {24, 25, 26};
 	g2.color3 = {27, 28, 29};
 	g2.color4 = {30, 31, 32};
-	g2.color_overrides_set = true;
 	g2.alpha = 0.375f;
 	g2.scale = 3.250f;
 	g2.scale_adj = 0.750f;
-	g2.alpha_func = {"layer-only alpha", false, true, true};
+	g2.alpha_func = {"layer_alpha", true, true, true};
 	first.particles.push_back(p);
 
 	std::ostringstream serialized;
 	std::string write_error;
 	if (!save_particles(serialized, first, write_error)) return false;
 	const std::string text = serialized.str();
-	if (!expect(text.find("graphic2") != std::string::npos,
-			"sparse graphic keeps authored slot")) return false;
-	if (!expect(text.find("graphic1") == std::string::npos,
-			"sparse graphic does not compact to slot 1")) return false;
+	if (!expect(text.find("graphic1") != std::string::npos && text.find("graphic2") != std::string::npos,
+			"both graphics are written")) return false;
 	if (!expect(text.find("g2_alpha\t=") != std::string::npos,
 			"per-layer alpha is serialized")) return false;
-	if (!expect(text.find("g2_alpha_func\t=") != std::string::npos,
-			"per-layer-only curve is serialized")) return false;
+	if (!expect(text.find("g2_alpha_func\t= layer_alpha inverse reverse;") != std::string::npos,
+			"the layer's own curve is serialized")) return false;
+	if (!expect(text.find("g1_red_func\t= red_curve;") != std::string::npos,
+			"a layer writes the curve its graphic line copied")) return false;
+	bool crlf = !text.empty();
+	for (std::size_t i = 0; i < text.size(); ++i)
+		if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r')) crlf = false;
+	if (!expect(crlf, "every line ends CR LF")) return false;
 	if (!expect(text.find("future_mode") != std::string::npos,
 			"unknown particle key is serialized")) return false;
 	if (!expect(text.find("g1_future_mode") != std::string::npos,
 			"graphic-shaped unknown particle key is serialized")) return false;
-	if (!expect(text.find("emit_rate_func\t= emit curve reverse;") != std::string::npos,
+	if (!expect(text.find("emit_rate_func\t= emit_curve reverse;") != std::string::npos,
 			"reverse-only curve uses the retail writer token")) return false;
-	if (!expect(text.find("scale_func\t= scale curve invert;") != std::string::npos,
-			"inverse curve uses retail's invert spelling")) return false;
-	if (!expect(text.find("alpha_func\t= alpha curve invert reverse;") != std::string::npos,
-			"combined modifiers use retail's invert-first order")) return false;
+	// Bit 0x01 is the word the game's reader takes, `inverse`, where NovaLogic's writers spell `invert`, which it
+	// reads as no modifier (D-PTL-20); the bits in their writers' order.
+	if (!expect(text.find("scale_func\t= scale_curve inverse;") != std::string::npos,
+			"an inverse curve is written as the reader takes it")) return false;
+	if (!expect(text.find("alpha_func\t= alpha_curve inverse reverse;") != std::string::npos,
+			"combined modifiers in the retail writers' order")) return false;
+	if (!expect(text.find("invert") == std::string::npos, "no curve line spells invert")) return false;
 
 	std::istringstream replay(text);
 	ParticleFile second;

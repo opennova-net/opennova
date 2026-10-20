@@ -123,7 +123,7 @@ static func mint_tmap_mission(test: GutTest, seam: RefCounted, root: String, opt
 		copy_fixture(test, "threedi/synth/" + name, root.path_join("models").path_join(name))
 	if bool(opts.get("puff", false)):
 		var particles := root.path_join("particles")
-		write(test, particles.path_join("fx.ptl"), PUFF_PTL.to_utf8_buffer())
+		write(test, particles.path_join("fx.ptl"), TestFs.crlf(PUFF_PTL).to_utf8_buffer())
 		copy_fixture(test, "cbin/particle_dot.tga", particles.path_join("particle_dot.tga"))
 	seam.request({"kind": "rescan"})
 	test.assert_true(seam.settled, "a Rescan steps across pumps (S13 A3)")

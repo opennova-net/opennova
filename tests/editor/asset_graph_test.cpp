@@ -561,25 +561,22 @@ static int test_native_extractors() {
 		editor_test::handle_to_end(session, request::rescan());
 	}
 
-	// A native file the graph cannot read is a warning, its references unchecked, kept
-	// while the file is unchanged: a particle file, which opens as a text (DI-14), the particle type's
-	// (particle.unreadable, the reader's words at the place it stops), the graph's own reading of it
-	// failing still; a document type's file that does not load (a mission, a model, a menu) is its
-	// validator's error, not the graph's.
+	// A document type's file that does not load (a mission, a model, a menu) is its validator's error, not the
+	// graph's. A particle file the graph always reads: the game's reader refuses no text (an open block is
+	// nothing it registers, formats/particle parser.cpp), so it is no failed file and has no finding.
 	TEST_EXPECT(test_io::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
 	TEST_EXPECT(test_io::write_text(root + "/broken.bms", "not a mission"));
 	TEST_EXPECT(test_io::write_text(root + "/broken.3di", "not a model"));
 	TEST_EXPECT(test_io::write_file(root + "/broken.mnu", {0xFF, 0xFE, 0x41}));
 	editor_test::handle_to_end(session, request::rescan());
 	const std::vector<Diagnostic> &diagnostics = session.view().findings.diagnostics;
-	const auto unreadable = [&diagnostics](const std::string &asset) {
+	const auto findings_of = [&diagnostics](const std::string &asset) {
 		size_t n = 0;
-		for (const Diagnostic &d : diagnostics)
-			n += d.code() == "particle.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
+		for (const Diagnostic &d : diagnostics) n += d.asset == asset ? 1 : 0;
 		return n;
 	};
-	TEST_EXPECT(unreadable("broken.ptl") == 1 && count_code(diagnostics, "graph.unreadable") == 0);
-	TEST_EXPECT(graph.stats().files_failed == 4);
+	TEST_EXPECT(findings_of("broken.ptl") == 0 && count_code(diagnostics, "graph.unreadable") == 0);
+	TEST_EXPECT(graph.stats().files_failed == 3);
 	bool mission_error = false;
 	for (const Diagnostic &d : diagnostics)
 		mission_error = mission_error || (d.asset == "broken.bms" && d.severity == DiagnosticSeverity::Error);
@@ -593,7 +590,7 @@ static int test_native_extractors() {
 		model_error = model_error || (d.asset == "broken.3di" && d.severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(model_error);
 	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(graph.stats().files_failed == 0 && unreadable("broken.ptl") == 1);
+	TEST_EXPECT(graph.stats().files_failed == 0 && findings_of("broken.ptl") == 0);
 	fs::remove(fs::path(root) / "broken.ptl");
 	fs::remove(fs::path(root) / "broken.bms");
 	fs::remove(fs::path(root) / "broken.3di");

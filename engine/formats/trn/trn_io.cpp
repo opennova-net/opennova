@@ -115,13 +115,15 @@ void walk_trn(const std::string &text, TrnConfig &out, TrnWalk &walk, bool own, 
 				return;
 			}
 			if (key == "water_rgb") {
-				// The environment reader's arms over the terrain's lines (trn.h): a colour's three bytes as
-				// atol of tokens 2..4 packed at the load's envscale of 1, held to a byte [orig:
-				// TimeOfDay_ParseProperty @ 0x57caf6; Color_ScaleRGBAndPack @ 0x57f890], the murk's atof held
-				// at 0.99 [orig: TimeOfDay_ParseProperty @ 0x57cb7c..0x57cba9].
+				// The environment reader's arms over the terrain's lines (trn.h): a colour's three
+				// values as atol of tokens 2..4, kept as read, since the parser stores no channel
+				// but packs the three (env::scale_rgb_and_pack, at the load's envscale of 1: past
+				// 255 held there, a negative value's sign bits in the bytes above it) [orig:
+				// TimeOfDay_ParseProperty @ 0x57caf6; Color_ScaleRGBAndPack @ 0x57f890], the murk's
+				// atof held at 0.99 [orig: TimeOfDay_ParseProperty @ 0x57cb7c..0x57cba9].
 				out.water_rgb_set = true;
 				for (int c = 0; c < 3; ++c)
-					out.water_rgb[static_cast<size_t>(c)] = std::clamp(io::retail_atol(tokens.token(1 + c)), 0, 255);
+					out.water_rgb[static_cast<size_t>(c)] = io::retail_atol(tokens.token(1 + c));
 				return;
 			}
 			if (key == "water_murk") {

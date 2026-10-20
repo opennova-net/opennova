@@ -122,6 +122,25 @@ std::vector<EnvSourceIssue> env_source_issues(const std::string &text) {
 			      "This colour line has " + std::to_string(tokens.count - 1) +
 			              " of its three values: the game reads the missing ones from where earlier, longer lines left "
 			              "them, and a save writes the three it read.");
+		// A colour value the record cannot hold: a timed keyframe's line and a global colour's keep
+		// each channel as a float (env.h rgb01_to_line_channel), so a value past +-8355903 can read
+		// back as a neighbour, and a save would change what the game packs. A line on the scratch
+		// keyframe keeps the packed bytes, which the parse makes from the whole value; terrain_rgb
+		// is held to bytes.
+		if (colour_line && key != "terrain_rgb" && (on_slot || !is_tod_color_key(key))) {
+			for (int c = 1; c <= 3; ++c) {
+				const int32_t read = io::retail_atol(tokens.token(c));
+				const int32_t kept = rgb01_to_line_channel(line_channel_to_rgb01(read));
+				if (kept == read)
+					continue;
+				issue(true, line, key,
+						"The engine's environment record holds a colour's value within " +
+								std::to_string(kLineChannelExact) + " of 0 exactly: this line's " +
+								std::to_string(read) + " would save as " + std::to_string(kept) +
+								". Correct the line in the file.");
+				break;
+			}
+		}
 		if (key == "envscale") envscale = static_cast<float>(io::retail_atof(value));
 		// The scaled colours the record scales by the last envscale: a keyframe's, and the global ones.
 		if (is_envscaled_key(key) && (on_slot || !is_tod_color_key(key))) scaled.push_back({line, key, envscale});

@@ -20,8 +20,8 @@
    jox01's MJox01.bin; its GJox01.bin is gamemus.bin byte for byte); the container, the chunk and its tables and
    the name table are MDEdit's own writers' (MDEdit.exe, read through a headless database: its chunk writer
    sub_40DF30 @ 0x40DF30 and its linker sub_40E6E0 @ 0x40E6E0), while what the samples lack of its code
-   generation (a second function, a function of no parameter, the line table's places for constructs none of
-   them holds) is extrapolated: a nop at the code's start (the bytecode's first byte, where the chunk's main entry and, with no
+   generation (a second function, the line table's places for constructs none of them holds; a function of no
+   parameter, unwitnessed, is refused, D-MUS-16) is extrapolated: a nop at the code's start (the bytecode's first byte, where the chunk's main entry and, with no
    MessageHandler function, its +0x40 handler pointer both point), the code padded with nops to four bytes, and
    the editor debug section MDEdit writes beside it (the source path, the sections, the globals Var00..Var15 and
    the user's, the functions and their parameters, and a line table: each statement's first instruction, an
@@ -1048,16 +1048,12 @@ int Compiler::parse_stmt(const char **err) {
 }
 
 int Compiler::parse_stmt_at(const char **err) {
-    /* frame N: the frame setup outside a function's start [orig: AudioVM_Op_Enter @ 0x672C20]. */
+    /* frame N: the frame setup outside a function's start [orig: AudioVM_Op_Enter @ 0x672C20], `frame 0`
+       its one word moved below the frame base as the game moves it (mus_vm.cpp op_enter). */
     if (lex.cur_kind == Tok::KwFrame) {
         lex.advance();
         if (lex.cur_kind != Tok::Number || lex.cur_out_of_range || (uint32_t)lex.cur_int > 255) {
-            *err = "expected an argument count (1..255) after 'frame'";
-            return -1;
-        }
-        /* `frame 0`: the game moves a word all the same (D-MUS-16), refused as a function of none is. */
-        if (lex.cur_int == 0) {
-            *err = "a frame setup of no argument, which the game does not run as written (D-MUS-16)";
+            *err = "expected an argument count (0..255) after 'frame'";
             return -1;
         }
         emit.byte((uint8_t)MUS_OP_ENTER);
@@ -1539,11 +1535,13 @@ int Compiler::parse_handler(const char **err) {
         *err = "expected ')' to close the function's parameters";
         return -1;
     }
-    /* A frame setup of no argument: the game's copy loop still moves one word, into the word below the frame
-       base [orig: AudioVM_Op_Enter @ 0x672C3C..0x672C47], and MDEdit's form for a function of no parameter is
-       unwitnessed: refused (D-MUS-16). */
+    /* A function of no parameter: MDEdit's code for one is unwitnessed (a frame setup `enter 0` or none, and the
+       locals size it gives it), and no shipped script holds one; its `enter 0` would move a word into the word
+       below the frame base [orig: AudioVM_Op_Enter @ 0x672C3C..0x672C47], which the locals size written here, the
+       parameters' (0 where no function has one), puts past the instance's globals_size + locals_size. Refused
+       (D-MUS-16). */
     if (params == 0) {
-        *err = "a function of no parameter, which the game's frame setup does not run as written (D-MUS-16)";
+        *err = "a function of no parameter, whose form in MDEdit's layout is unwitnessed (D-MUS-16)";
         return -1;
     }
     lex.advance();

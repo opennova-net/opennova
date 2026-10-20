@@ -49,7 +49,7 @@ int main() {
 	const opennova::particle::EffectDef &effect = file.effects[0];
 	if (!expect(effect.id == "Buildup", "effect id parses")) return 1;
 	if (!expect(effect.pdefs.size() == 1, "effect has one pdef ref")) return 1;
-	if (!expect(effect.pdefs[0] == "Buildup dots", "pdef id with whitespace parses")) return 1;
+	if (!expect(effect.pdefs[0] == "Buildup_dots", "pdef id parses")) return 1;
 
 	// The former ParticleFile binding lookup: ordered, case-insensitive and
 	// null on a miss, with the complete authored pdef list retained.
@@ -61,11 +61,11 @@ int main() {
 			"effect lookup preserves first definition order")) return 1;
 
 	const opennova::particle::ParticleDef &particle = file.particles[0];
-	if (!expect(particle.id == "Buildup dots", "particle id with whitespace parses")) return 1;
-	if (!expect(file.find_particle("bUILDUP DOTS") == &particle,
+	if (!expect(particle.id == "Buildup_dots", "particle id parses")) return 1;
+	if (!expect(file.find_particle("bUILDUP_DOTS") == &particle,
 			"find_particle folds case [orig: CEffectWorld_FindParticleDefByName @ 0x5e41d0]")) return 1;
-	if (!expect(particle.flags_raw == "TOPALIGN", "flags strip surrounding whitespace")) return 1;
-	if (!expect(particle.move_raw == "GRAVITATE", "move enum parses")) return 1;
+	if (!expect(particle.flags == opennova::particle::particle_flag::TopAlign, "flags parse")) return 1;
+	if (!expect(particle.move == opennova::particle::move_flag::Gravitate, "move enum parses")) return 1;
 	if (!expect(near(particle.gravity, 600.0f), "gravity parses as float")) return 1;
 	if (!expect(near(particle.spread, 180.0f), "spread parses as float")) return 1;
 	if (!expect(particle.emit_burst == 1, "emit_burst parses as int")) return 1;
@@ -83,7 +83,7 @@ int main() {
 	if (!expect(g1.present, "graphic1 is present")) return 1;
 	if (!expect(g1.index == 1, "graphic1 has index 1")) return 1;
 	if (!expect(g1.texture == "spark.tga", "graphic1 texture parses")) return 1;
-	if (!expect(g1.blend_mode_raw == "additive", "graphic1 blend mode parses lowercase")) return 1;
+	if (!expect(g1.blend_mode == opennova::particle::BlendMode::Additive, "graphic1 blend mode parses")) return 1;
 	if (!expect(g1.flip_frames == 1, "g1 flip_frames parses")) return 1;
 	if (!expect(g1.flip_rate == 8, "g1 flip_rate parses")) return 1;
 	if (!expect(near(g1.scale, 2.0f), "g1 scale parses (override)")) return 1;
@@ -94,17 +94,17 @@ int main() {
 	if (!expect(!particle.graphics[3].present, "graphic4 is absent")) return 1;
 
 	// find_particle helper
-	const opennova::particle::ParticleDef *found = file.find_particle("Buildup dots");
-	if (!expect(found != nullptr && found->id == "Buildup dots", "find_particle resolves by id")) return 1;
+	const opennova::particle::ParticleDef *found = file.find_particle("Buildup_dots");
+	if (!expect(found != nullptr && found->id == "Buildup_dots", "find_particle resolves by id")) return 1;
 	if (!expect(file.find_particle("nope") == nullptr, "find_particle returns null on miss")) return 1;
 
 	constexpr char oversized_flipbook[] =
-			"[particledef]\n"
-			"{\n"
-			"id = Oversized Flipbook;\n"
-			"graphic1 = frame.tga, additive;\n"
-			"g1_flip_frames = 999999;\n"
-			"}\n";
+			"[particledef]\r\n"
+			"{\r\n"
+			"id = Oversized_Flipbook;\r\n"
+			"graphic1 = frame.tga, additive;\r\n"
+			"g1_flip_frames = 999999;\r\n"
+			"}\r\n";
 	opennova::particle::ParticleFile bounded_file;
 	opennova::particle::ParseError bounded_error;
 	if (!opennova::particle::load_particles_from_buffer(oversized_flipbook,

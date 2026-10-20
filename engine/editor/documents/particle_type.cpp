@@ -21,11 +21,9 @@ namespace opennova::editor {
 
 namespace {
 
-// All listed: the game runs a mission over a particle file it does not read (its effects missing, a
-// name of one interned as the stock effect), over one that defines an effect twice, and over names inside
+// All listed: the game runs a mission over a particle file that defines an effect twice, and over names inside
 // the files it does not resolve (an effect that spawns nothing, a channel drawn without its curve).
 constexpr FindingCodeEntry<ParticleFinding> kFindingEntries[] = {
-	{ ParticleFinding::Unreadable, listed_code("particle.unreadable") },
 	{ ParticleFinding::DuplicateEffect, listed_code("particle.duplicate_effect") },
 	{ ParticleFinding::EffectUnresolved, listed_code("particle.effect_unresolved") },
 	{ ParticleFinding::CurveUnresolved, listed_code("particle.curve_unresolved") },
@@ -54,7 +52,8 @@ Diagnostic particle_finding(ParticleFinding code, std::string message, const Tex
 
 std::unique_ptr<DocumentBase> make_particle_document() {
 	// The file is its text (a stored SCR form unwrapped by the document's load, as the game's text
-	// reader takes either [orig: File_ParseASCIIFile @ 0x53D860]); the reader ends a line at its LF.
+	// reader takes either [orig: File_ParseASCIIFile @ 0x53D860]); the reader ends a line at a CR LF
+	// alone (documents/line_ends.h says what it makes of an LF).
 	return std::make_unique<TextDocument>();
 }
 
@@ -69,16 +68,7 @@ std::vector<Diagnostic> validate_particle_file(const DocumentBase &document) {
 	if (!text) return findings;
 	particle::ParticleFile file;
 	particle::ParseError error;
-	if (!read_particle_text(*text, file, error)) {
-		// The reader returns at the first line it cannot take, and the effect system keeps nothing of the
-		// file (the port's line walk, D-PTL-32 [orig: CEffectWorld_ParseSectionCallback @ 0x5ECB40]).
-		findings.push_back(particle_finding(ParticleFinding::Unreadable,
-				"The game's particle reader stops here: " + reader_sentence(error.message) +
-						" None of the file's effects, particles or tables load, a name only this file defines "
-						"spawns the stock effect, and the editor cannot check what the file names.",
-				*text, error.line, error.column));
-		return findings;
-	}
+	read_particle_text(*text, file, error);
 	// An effect defined again in the file: the effect system's by-name walk returns the first it holds,
 	// without case [orig: CEffectWorld_FindEffectDefByName @ 0x5E34F0, _stricmp @ 0x5E352C].
 	std::map<std::string, const particle::EffectDef *> first;
@@ -97,27 +87,27 @@ std::vector<Diagnostic> validate_particle_file(const DocumentBase &document) {
 bool define_particle_effect(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
 	const TextDocument *text = text_of(document);
 	if (!text || missing.kind != ReferenceKind::Particle || missing.target.empty()) return false;
-	// A file the reader stops in loads nothing: an effect added to it would not load either.
 	particle::ParticleFile read;
 	particle::ParseError error;
-	if (!read_particle_text(*text, read, error)) return false;
-	// The block the engine's own writer makes of an effect of that id and nothing else.
+	read_particle_text(*text, read, error);
+	// The block the engine's own writer makes of an effect of that id and a pdefs line of no particle: the game's
+	// reader makes an effect only at a pdefs line [orig: CParticleTableDef_ParseScriptLine @ 0x5e93b0..0x5e9430].
 	particle::ParticleFile made;
 	particle::EffectDef effect;
 	effect.id = missing.target;
+	effect.pdefs.push_back(std::string());
 	made.effects.push_back(std::move(effect));
 	std::ostringstream written;
 	std::string write_error;
 	if (!particle::save_particles(written, made, write_error)) return false;
 	std::string block = written.str();
-	// In the file's line ends: CR LF where its lines end so.
-	if (text->text().find("\r\n") != std::string::npos) {
-		std::string crlf;
-		for (const char c : block) {
-			if (c == '\n') crlf += '\r';
-			crlf += c;
-		}
-		block = std::move(crlf);
+	// In the file's line ends: the writer's CR LF, an LF alone where the file's lines end so (the line-ends rule
+	// says what the game reads of such a file, documents/line_ends.h).
+	if (!text->text().empty() && text->text().find("\r\n") == std::string::npos) {
+		std::string lf;
+		for (const char c : block)
+			if (c != '\r') lf += c;
+		block = std::move(lf);
 	}
 	// After the file's last effect, where the writer puts every effect (before its particles and tables), else
 	// at its end.
@@ -131,8 +121,8 @@ bool define_particle_effect(const DocumentBase &document, const ReferenceSubject
 	out.label = "Add effect " + missing.target + " to " + file;
 	out.detail = "Writes an effect block of id " + missing.target + " into " + file + " " +
 	             (after ? "after its last effect" : "at its end") + ", as the game's own effect writer writes one: its "
-	             "id alone, no particles yet. The game then spawns it by that name (nothing until its particles are "
-	             "named) where it now spawns the stock effect.";
+	             "id and a pdefs line of no particle yet. The game then holds an effect of that name, which spawns "
+	             "nothing until its particles are named, where it now spawns the stock effect.";
 	return true;
 }
 
@@ -201,9 +191,11 @@ public:
 		stamps_ = FileStamps();
 		order_ = order;
 		made_ = true;
-		// Every file loaded first, as the effect system loads them, then every name resolved among them all.
+		// Every file loaded first, as the effect system loads them (one reader state through them all), then every
+		// name resolved among them all.
 		std::vector<LoadedParticles> loaded;
 		std::set<std::string> particles, tables;
+		particle::ParticleReadState state;
 		for (const std::string &name : order) {
 			std::vector<uint8_t> bytes;
 			stamps_.note(name, input.files.stamp(name));
@@ -213,8 +205,8 @@ public:
 			read.path = entry ? entry->relative_path : name;
 			read.text.assign(bytes.begin(), bytes.end());
 			particle::ParseError error;
-			if (!particle::load_particles_with_places(read.text.data(), read.text.size(), read.file, read.places, error))
-				continue;
+			particle::load_particles_with_places(read.text.data(), read.text.size(), read.file, read.places, state,
+					error);
 			for (const particle::ParticleDef &definition : read.file.particles) particles.insert(strutil::to_lower(definition.id));
 			for (const particle::TableDef &table : read.file.tables) tables.insert(strutil::to_lower(table.id));
 			loaded.push_back(std::move(read));
@@ -255,7 +247,8 @@ private:
 			const std::string shown = effect.id.empty() ? std::string("an effect of no id") : "the effect " + effect.id;
 			std::string first;
 			for (const std::string &member : effect.pdefs) {
-				if (particles.count(strutil::to_lower(member))) continue;
+				// A member of no name (the editor's Add writes one) is no name to report.
+				if (member.empty() || particles.count(strutil::to_lower(member))) continue;
 				if (first.empty()) first = member;
 				add_(ParticleFinding::EffectUnresolved,
 						"The particle " + member + ", which " + shown + " names, is defined by no particle file the "
@@ -272,11 +265,14 @@ private:
 			const particle::ParticleDef &definition = read.file.particles[p];
 			const auto curve = [&](const particle::CurveRef &ref, const std::string &key, const char *channel) {
 				if (!ref.present || ref.name.empty() || tables.count(strutil::to_lower(ref.name))) return;
+				const particle::KeyPlace *place = key_place(read.places, BlockKind::Particle, p, key);
+				// A graphic's curve no line of its own wrote: the copy its graphicN line took of the particle's.
+				if (!place && key[0] == 'g') return;
 				add_(ParticleFinding::CurveUnresolved,
 						"The table " + ref.name + ", which " + key + " of the particle " + definition.id + " names, is "
 						"defined by no particle file the game loads: the game logs it not found and draws the particle's " +
 								channel + " without its curve. Define the table, or name another.",
-						read, key_place(read.places, BlockKind::Particle, p, key), ref.name, 0, 0);
+						read, place, ref.name, 0, 0);
 			};
 			curve(definition.scale_func, "scale_func", "scale");
 			curve(definition.alpha_func, "alpha_func", "alpha");

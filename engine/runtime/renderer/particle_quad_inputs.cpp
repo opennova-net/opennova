@@ -10,13 +10,6 @@ namespace {
 
 using particle::CurveRef;
 
-// The LUT a channel reads: the graphic's own when it baked one, else the
-// definition's (the graphic's LUT pointers as CEffectDef_ResolveAllReferences
-// @ 0x5e9d70 resolves them, docs/particles/ptl-format-re.md §2.4).
-const CurveRef &resolved_curve(const CurveRef &graphic_curve, const CurveRef &definition_curve) {
-	return graphic_curve.baked ? graphic_curve : definition_curve;
-}
-
 // The manager tint byte a ParticleQuadTints multiplier stands for (1.0 = 128),
 // rounded as the environment rounds its colour bytes; past 255 it is 255.
 std::uint32_t tint_byte(float multiplier) {
@@ -95,26 +88,23 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	// @ 0x5e70b0..0x5e70d2 (blue); the twins
 	// CParticleEmitter_RenderStaticBillboards @ 0x5f50e5..0x5f51a5 and
 	// CParticleEmitter_RenderTopAlignedBillboards @ 0x5f5a97..0x5f5b57]
-	// (D-PTL-36).
-	auto curved = [&](std::uint32_t flag, const CurveRef &graphic_curve,
-						  const CurveRef &definition_curve, std::uint32_t channel) -> std::uint32_t {
+	// (D-PTL-36). Each LUT is the graphic's own, the one its graphicN line
+	// copied from the definition among them (the graphic's LUT pointers as
+	// CEffectDef_ResolveAllReferences @ 0x5e9d70 resolves them; the builders read
+	// graphic+0x1E0.. alone).
+	auto curved = [&](std::uint32_t flag, const CurveRef &curve, std::uint32_t channel) -> std::uint32_t {
 		if ((particle.flags & flag) == 0)
 			return channel;
-		const CurveRef &curve = resolved_curve(graphic_curve, definition_curve);
 		if (!curve.baked)
 			return channel;
 		return (static_cast<std::uint32_t>(curve.baked_lut[static_cast<std::size_t>(lut_index)]) *
 					   channel) >>
 				8;
 	};
-	const std::uint32_t alpha =
-			curved(AlphaCurve, graphic.alpha_func, definition.alpha_func, particle.alpha);
-	const std::uint32_t curved_red =
-			curved(RedCurve, graphic.red_func, definition.red_func, particle.color.r);
-	const std::uint32_t curved_green =
-			curved(GreenCurve, graphic.green_func, definition.green_func, particle.color.g);
-	const std::uint32_t curved_blue =
-			curved(BlueCurve, graphic.blue_func, definition.blue_func, particle.color.b);
+	const std::uint32_t alpha = curved(AlphaCurve, graphic.alpha_func, particle.alpha);
+	const std::uint32_t curved_red = curved(RedCurve, graphic.red_func, particle.color.r);
+	const std::uint32_t curved_green = curved(GreenCurve, graphic.green_func, particle.color.g);
+	const std::uint32_t curved_blue = curved(BlueCurve, graphic.blue_func, particle.color.b);
 
 	// The scale curve blends two LUT bytes by the phase fraction and scales the
 	// base size by the result / 128, then by 0.5 into the half extent
@@ -127,19 +117,16 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	// [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e7100..0x5e710a; the
 	// twins CParticleEmitter_RenderStaticBillboards @ 0x5f51c4..0x5f51db and
 	// CParticleEmitter_RenderTopAlignedBillboards @ 0x5f5b76..0x5f5b8d]
-	// (D-PTL-35). Retail reads lut[i + 1] one byte past the table at i = 255,
-	// the TableDef's transform-flags byte at +0x248 (0 for a base curve); the
-	// port clamps to lut[255], an open divergence (D-PTL-11).
+	// (D-PTL-35). At i = 255 the lut[i + 1] read lands one byte past the
+	// table, on the resolved TableDef's transform-flags byte at +0x248: 0 for a
+	// base curve, the inverse/reverse mask for a transformed one, so the last
+	// sample blends toward that byte (D-PTL-11; particle_scale_curve_blend).
 	float scale_multiplier = 1.0f;
 	if ((particle.flags & ScaleCurve) != 0) {
-		const CurveRef &curve = resolved_curve(graphic.scale_func, definition.scale_func);
+		const CurveRef &curve = graphic.scale_func;
 		if (curve.baked) {
-			const std::uint8_t index_sample = curve.baked_lut[static_cast<std::size_t>(lut_index)];
-			const std::uint8_t next_sample =
-					curve.baked_lut[static_cast<std::size_t>(std::min(lut_index + 1, 255))];
-			const float blended = static_cast<float>(next_sample) * (1.0f - lut_fraction) +
-					static_cast<float>(index_sample) * lut_fraction;
-			scale_multiplier = blended / 128.0f;
+			scale_multiplier =
+					particle::particle_scale_curve_blend(curve, lut_index, lut_fraction) / 128.0f;
 		}
 	}
 	const float size = particle.size * scale_multiplier;

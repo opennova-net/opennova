@@ -36,12 +36,32 @@ void token_rgb(const io::ConfigTokens &tokens, int rgb[3]) {
 	for (int i = 0; i < 3; ++i) rgb[i] = io::retail_atol(tokens.token(1 + i));
 }
 
+// terrain_rgb's bytes, held to 0..255 (its arm packs no Color_ScaleRGBAndPack).
 void parse_rgb(const io::ConfigTokens &tokens, Rgb &out, float scale = 1.0f) {
 	int rgb[3];
 	token_rgb(tokens, rgb);
 	out.r = clamp_float(static_cast<float>(rgb[0]) * scale / 255.0f, 0.0f, 1.0f);
 	out.g = clamp_float(static_cast<float>(rgb[1]) * scale / 255.0f, 0.0f, 1.0f);
 	out.b = clamp_float(static_cast<float>(rgb[2]) * scale / 255.0f, 0.0f, 1.0f);
+}
+
+// A colour line's channels as the record keeps them, whole values below 0 or past a byte alike
+// (env.h line_channel_to_rgb01): the parser packs them, it stores no channel [orig:
+// TimeOfDay_ParseProperty @ 0x57c590, each *_rgb arm's atol of tokens[2..4] into
+// Color_ScaleRGBAndPack @ 0x57f890].
+void parse_rgb_line(const io::ConfigTokens &tokens, Rgb &out) {
+	int rgb[3];
+	token_rgb(tokens, rgb);
+	out.r = line_channel_to_rgb01(rgb[0]);
+	out.g = line_channel_to_rgb01(rgb[1]);
+	out.b = line_channel_to_rgb01(rgb[2]);
+}
+
+// A colour line's channels as the parser reads them back: each whole value as the record keeps it.
+std::string rgb_line_to_string(const Rgb &color) {
+	return std::to_string(rgb01_to_line_channel(color.r)) + "," +
+			std::to_string(rgb01_to_line_channel(color.g)) + "," +
+			std::to_string(rgb01_to_line_channel(color.b));
 }
 
 std::string rgb_to_string(const Rgb &color) {
@@ -93,18 +113,15 @@ std::string name_token(const std::string &name) {
 	return quoted ? "\"" + name + "\"" : name;
 }
 
-// The parser's color pack: each byte times the envscale read so far, truncated, clamped
-// to 255 [orig: Color_ScaleRGBAndPack @ 0x57f890]. We also clamp at 0, where the original
-// has no lower clamp and packs a negative channel by sign extension (its low byte kept,
-// every byte above it 0xFF, @ 0x57f8e4..0x57f8ef): an open divergence, env-tod-re #11.
+// The scratch keyframe's color: the line packed with the envscale read so far, kept as the
+// packed word's RGB bytes [orig: Color_ScaleRGBAndPack @ 0x57f890] (scale_rgb_and_pack: a
+// negative channel's sign bits fill the bytes above it). The packed top byte is not kept: the
+// load copies the scratch into the color blocks' parsed targets (@ 0x57dce0..0x57dd57), where
+// it is only the smoother's fourth lane, and no reader takes that lane (env-tod-re #11).
 void parse_rgb_baked(const io::ConfigTokens &tokens, Rgb &out, float envscale) {
 	int rgb[3];
 	token_rgb(tokens, rgb);
-	float *channels[3] = {&out.r, &out.g, &out.b};
-	for (int i = 0; i < 3; ++i) {
-		const int baked = std::clamp<int>(static_cast<int>(static_cast<float>(rgb[i]) * envscale), 0, 255);
-		*channels[i] = static_cast<float>(baked) / 255.0f;
-	}
+	out = packed_to_rgb01(scale_rgb_and_pack(rgb[0], rgb[1], rgb[2], envscale));
 }
 
 // `baked`: the keyframe is the scratch slot, whose colors are kept as the parser packs them
@@ -118,7 +135,7 @@ void assign_tod_color(Keyframe &keyframe, const std::string &key, const io::Conf
 	// a per-keyframe flag — tracked divergence #9 in docs/env/env-tod-re.md.
 	const auto parse = [baked, envscale](const io::ConfigTokens &tokens, Rgb &out) {
 		if (baked) parse_rgb_baked(tokens, out, envscale);
-		else parse_rgb(tokens, out);
+		else parse_rgb_line(tokens, out);
 	};
 	if (key == "sun_rgb") {
 		parse(value, keyframe.sun);
@@ -151,31 +168,69 @@ void assign_tod_color(Keyframe &keyframe, const std::string &key, const io::Conf
 	}
 }
 
-// Quantize one channel the way the parser stores it: file byte scaled by
-// envscale, truncated, clamped to 255 [orig: Color_ScaleRGBAndPack @ 0x57f890].
-// (The original has no lower clamp and packs a negative channel by sign
-// extension, @ 0x57f8e4..0x57f8ef; we clamp at 0, an open divergence: #11 in
-// docs/env/env-tod-re.md.)
-int quantize_channel(float normalized, float envscale) {
-	const int byte_value = std::clamp<int>(static_cast<int>(normalized * 255.0f + 0.5f), 0, 255);
-	const int scaled = static_cast<int>(static_cast<float>(byte_value) * envscale);
-	return std::clamp<int>(scaled, 0, 255);
+// Two packed colors lerped per byte, each (t * (b - a) + (a << 16) + 0x8000) >> 16 over the
+// low three bytes, the top byte 0: `t` is 16.16 in 0..0x10000, so each byte stays a byte
+// [orig: Color_InterpolateRGB888 @ 0x57c2f0: green @ 0x57c329, blue @ 0x57c342, red masked
+// 0xFF0000 @ 0x57c34e].
+uint32_t interpolate_rgb888(uint32_t a, uint32_t b, int32_t t) {
+	const auto lerp = [t](uint32_t packed_a, uint32_t packed_b, int shift) -> uint32_t {
+		const int32_t from = static_cast<int32_t>((packed_a >> shift) & 0xFFu);
+		const int32_t to = static_cast<int32_t>((packed_b >> shift) & 0xFFu);
+		const int32_t sum = t * (to - from) + (from << 16) + 0x8000;
+		return ((static_cast<uint32_t>(sum) >> 16) & 0xFFu) << shift;
+	};
+	return lerp(a, b, 16) | lerp(a, b, 8) | lerp(a, b, 0);
 }
 
-// Integer channel lerp with round-half-up [orig: Color_InterpolateRGB888 @ 0x57c2f0].
-int lerp_channel(int a, int b, int fraction_fp) {
-	return static_cast<int>((static_cast<int64_t>(fraction_fp) * (b - a) + (static_cast<int64_t>(a) << 16) + 0x8000) >> 16);
-}
-
-Rgb lerp_rgb_quantized(const Rgb &a, const Rgb &b, int fraction_fp, float envscale) {
-	Rgb out;
-	out.r = static_cast<float>(lerp_channel(quantize_channel(a.r, envscale), quantize_channel(b.r, envscale), fraction_fp)) / 255.0f;
-	out.g = static_cast<float>(lerp_channel(quantize_channel(a.g, envscale), quantize_channel(b.g, envscale), fraction_fp)) / 255.0f;
-	out.b = static_cast<float>(lerp_channel(quantize_channel(a.b, envscale), quantize_channel(b.b, envscale), fraction_fp)) / 255.0f;
-	return out;
+// Two keyframe colors as the per-tick compute lerps them: each line packed under the envscale
+// (divergence #8: the one the pass ended on, where the parser packs each line under the one
+// read before it), then the byte lerp [orig: Color_ScaleRGBAndPack @ 0x57f890 at the parse;
+// Environment_LerpKeyframeSet @ 0x57c3b0 -> Color_InterpolateRGB888 @ 0x57c2f0].
+Rgb lerp_rgb_lines(const Rgb &a, const Rgb &b, int fraction_fp, float envscale) {
+	const uint32_t from = scale_rgb_and_pack(a, envscale);
+	const uint32_t to = scale_rgb_and_pack(b, envscale);
+	return packed_to_rgb01(interpolate_rgb888(from, to, fraction_fp));
 }
 
 } // namespace
+
+int32_t rgb01_to_line_channel(float channel) {
+	const float whole = std::floor(channel * 255.0f + 0.5f);
+	if (!(whole == whole))
+		return 0;
+	if (whole <= -2147483648.0f)
+		return INT32_MIN;
+	if (whole >= 2147483648.0f)
+		return INT32_MAX;
+	return static_cast<int32_t>(whole);
+}
+
+uint32_t scale_rgb_and_pack(int32_t r, int32_t g, int32_t b, float scale) {
+	// fild the channel, fmul by the scale, _ftol2_sse (the product rounds to single precision,
+	// the x87's after the device's creation without D3DCREATE_FPU_PRESERVE; a channel within
+	// 2^24 converts to the float exactly, so the float product is the fmul's), then the top
+	// clamp alone [orig: Color_ScaleRGBAndPack @ 0x57f890..0x57f8ad (r), @ 0x57f8b2..0x57f8c7
+	// (g), @ 0x57f8cc..0x57f8df (b); _ftol2_sse @ 0x76bc00; CGfxDevice_CreateDevice @ 0x67e9fd].
+	const auto channel = [scale](int32_t value) -> uint32_t {
+		const float product = static_cast<float>(value) * scale;
+		const int32_t scaled = io::retail_ftol_sse2(static_cast<double>(product));
+		return static_cast<uint32_t>(scaled > 255 ? 255 : scaled);
+	};
+	// mov eax, r; shl eax, 8; or eax, g; shl eax, 8; or eax, b [orig: @ 0x57f8e4..0x57f8ef].
+	return (((channel(r) << 8) | channel(g)) << 8) | channel(b);
+}
+
+uint32_t scale_rgb_and_pack(const Rgb &line, float scale) {
+	return scale_rgb_and_pack(rgb01_to_line_channel(line.r), rgb01_to_line_channel(line.g),
+			rgb01_to_line_channel(line.b), scale);
+}
+
+uint32_t water_color_word(const Config &config) {
+	// The header's Environment_SetWaterColor stands over the parse's pack: it runs after the
+	// passes [orig: Game_LoadTerrainDuringConnect @ 0x52073b (the load), @ 0x5207a8 (the set)].
+	if (config.water_word_set) return config.water_word;
+	return scale_rgb_and_pack(config.water_rgb, config.envscale);
+}
 
 // A time token as HHMM, read by position: the last two characters are the
 // minutes, the one or two before them the hours, each digit's byte less '0';
@@ -392,22 +447,22 @@ void parse_tod_pass(const std::string &text, Config &out, TodParse &parse) {
 		} else if (key == "terrain_rgb") {
 			parse_rgb(tokens, out.terrain_rgb);
 		} else if (key == "water_rgb") {
-			parse_rgb(tokens, out.water_rgb);
+			parse_rgb_line(tokens, out.water_rgb);
 		} else if (key == "water_height") {
 			// Integer parse; engine stores <<15 (half world units in 16.16)
 			// [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
 			out.water_height = static_cast<float>(io::retail_atol(value));
 			out.water_height_set = true;
 		} else if (key == "cloud_rgb") {
-			parse_rgb(tokens, out.cloud_rgb);
+			parse_rgb_line(tokens, out.cloud_rgb);
 		} else if (key == "vertex_rgb") {
-			parse_rgb(tokens, out.vertex_rgb);
+			parse_rgb_line(tokens, out.vertex_rgb);
 		} else if (key == "lightning_rgb") {
-			parse_rgb(tokens, out.lightning_rgb);
+			parse_rgb_line(tokens, out.lightning_rgb);
 		} else if (key == "ceiling_rgb") {
-			parse_rgb(tokens, out.ceiling_rgb);
+			parse_rgb_line(tokens, out.ceiling_rgb);
 		} else if (key == "floor_rgb") {
-			parse_rgb(tokens, out.floor_rgb);
+			parse_rgb_line(tokens, out.floor_rgb);
 		} else if (key == "sky_speed") {
 			// Integer parse; engine stores <<10 [orig: TimeOfDay_ParseProperty @ 0x57cbf1].
 			out.sky_speed = static_cast<float>(io::retail_atol(value));
@@ -487,8 +542,8 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 		const Keyframe &scratch = cfg.scratch;
 		bool any = false;
 		const auto line = [&](const char *key, const Rgb &value, const Rgb &seeded, bool force = false) {
-			if (!force && rgb_to_string(value) == rgb_to_string(seeded)) return;
-			output << key << " " << rgb_to_string(value) << NL;
+			if (!force && rgb_line_to_string(value) == rgb_line_to_string(seeded)) return;
+			output << key << " " << rgb_line_to_string(value) << NL;
 			any = true;
 		};
 		line("sun_rgb", scratch.sun, seed.sun);
@@ -497,8 +552,8 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 		line("ground_rgb", scratch.ground, seed.ground);
 		// skyfog before fog, both when either moved: a fog line mirrors into a skyfog that
 		// still holds its seed (@ 0x57c9b8), so the pair reads back as written.
-		const bool fog_moved = rgb_to_string(scratch.fog) != rgb_to_string(seed.fog) ||
-				rgb_to_string(scratch.skyfog) != rgb_to_string(seed.skyfog);
+		const bool fog_moved = rgb_line_to_string(scratch.fog) != rgb_line_to_string(seed.fog) ||
+				rgb_line_to_string(scratch.skyfog) != rgb_line_to_string(seed.skyfog);
 		line("skyfog_rgb", scratch.skyfog, seed.skyfog, fog_moved);
 		line("fog_rgb", scratch.fog, seed.fog, fog_moved);
 		line("skybase_rgb", scratch.skybase, seed.skybase);
@@ -514,7 +569,7 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << "iris_percent " << number_to_string(cfg.iris_percent) << NL;
 	output << "iris_center " << number_to_string(cfg.iris_center) << NL;
 	output << NL;
-	output << "water_rgb " << rgb_to_string(cfg.water_rgb) << NL;
+	output << "water_rgb " << rgb_line_to_string(cfg.water_rgb) << NL;
 	if (cfg.water_height_set) {
 		output << "water_height " << whole_to_string(cfg.water_height) << NL;
 	}
@@ -533,18 +588,18 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << "fog_level " << whole_to_string(cfg.fog_level) << NL;
 	output << "fog_type " << cfg.fog_type << NL;
 	output << NL;
-	output << "cloud_rgb " << rgb_to_string(cfg.cloud_rgb) << NL;
+	output << "cloud_rgb " << rgb_line_to_string(cfg.cloud_rgb) << NL;
 	output << "terrain_rgb " << rgb_to_string(cfg.terrain_rgb) << NL;
-	output << "vertex_rgb " << rgb_to_string(cfg.vertex_rgb) << NL;
+	output << "vertex_rgb " << rgb_line_to_string(cfg.vertex_rgb) << NL;
 	output << NL;
-	output << "lightning_rgb " << rgb_to_string(cfg.lightning_rgb) << NL;
+	output << "lightning_rgb " << rgb_line_to_string(cfg.lightning_rgb) << NL;
 	output << "sun_3di " << name_token(cfg.sun_3di) << NL;
 	output << "moon_3di " << name_token(cfg.moon_3di) << NL;
 	output << "glare_3di " << name_token(cfg.glare_3di) << NL;
 	output << "star_3di " << name_token(cfg.star_3di) << NL;
 	output << NL;
-	output << "ceiling_rgb " << rgb_to_string(cfg.ceiling_rgb) << NL;
-	output << "floor_rgb " << rgb_to_string(cfg.floor_rgb) << NL;
+	output << "ceiling_rgb " << rgb_line_to_string(cfg.ceiling_rgb) << NL;
+	output << "floor_rgb " << rgb_line_to_string(cfg.floor_rgb) << NL;
 	output << NL;
 	// Four HHMM digits: the time token reads by position, so a time before 01:00 written short
 	// ("30") would read as 00:00 [orig: Environment_ParseTimeString @ 0x57c500, a token shorter
@@ -563,18 +618,18 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	for (const Keyframe &keyframe : keyframes) {
 		output << NL;
 		output << "tod_begin " << format_tod_time(keyframe.time) << NL;
-		output << "    sun_rgb " << rgb_to_string(keyframe.sun) << NL;
-		output << "    moon_rgb " << rgb_to_string(keyframe.moon) << NL;
-		output << "    sky_rgb " << rgb_to_string(keyframe.sky) << NL;
-		output << "    ground_rgb " << rgb_to_string(keyframe.ground) << NL;
-		output << "    skyfog_rgb " << rgb_to_string(keyframe.skyfog) << NL;
-		output << "    fog_rgb " << rgb_to_string(keyframe.fog) << NL;
-		output << "    skybase_rgb " << rgb_to_string(keyframe.skybase) << NL;
-		output << "    skybright_rgb " << rgb_to_string(keyframe.skybright) << NL;
-		output << "    skyhighlight_rgb " << rgb_to_string(keyframe.skyhighlight) << NL;
-		output << "    cloudbase_rgb " << rgb_to_string(keyframe.cloudbase) << NL;
-		output << "    cloudhighlight_rgb " << rgb_to_string(keyframe.cloudhighlight) << NL;
-		output << "    cloudedge_rgb " << rgb_to_string(keyframe.cloudedge) << NL;
+		output << "    sun_rgb " << rgb_line_to_string(keyframe.sun) << NL;
+		output << "    moon_rgb " << rgb_line_to_string(keyframe.moon) << NL;
+		output << "    sky_rgb " << rgb_line_to_string(keyframe.sky) << NL;
+		output << "    ground_rgb " << rgb_line_to_string(keyframe.ground) << NL;
+		output << "    skyfog_rgb " << rgb_line_to_string(keyframe.skyfog) << NL;
+		output << "    fog_rgb " << rgb_line_to_string(keyframe.fog) << NL;
+		output << "    skybase_rgb " << rgb_line_to_string(keyframe.skybase) << NL;
+		output << "    skybright_rgb " << rgb_line_to_string(keyframe.skybright) << NL;
+		output << "    skyhighlight_rgb " << rgb_line_to_string(keyframe.skyhighlight) << NL;
+		output << "    cloudbase_rgb " << rgb_line_to_string(keyframe.cloudbase) << NL;
+		output << "    cloudhighlight_rgb " << rgb_line_to_string(keyframe.cloudhighlight) << NL;
+		output << "    cloudedge_rgb " << rgb_line_to_string(keyframe.cloudedge) << NL;
 		output << "tod_end" << NL;
 	}
 
@@ -588,9 +643,9 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 namespace {
 
 Rgb lerp_rgb_bytes(const Rgb &a, const Rgb &b, int fraction_fp) {
-	// Both inputs are already-quantized engine bytes (envscale applied at
-	// interpolation), so the lerp runs at scale 1.
-	return lerp_rgb_quantized(a, b, fraction_fp, 1.0f);
+	// Both inputs are the interpolated sets' bytes (the packs already made), so the
+	// lerp reads them as they are [orig: Color_InterpolateRGB888 @ 0x57c2f0].
+	return packed_to_rgb01(interpolate_rgb888(rgb01_to_packed(a), rgb01_to_packed(b), fraction_fp));
 }
 
 } // namespace
@@ -694,18 +749,18 @@ TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, flo
 
 	const Keyframe &a = sorted[static_cast<size_t>(segment.lo)];
 	const Keyframe &b = sorted[static_cast<size_t>(segment.hi)];
-	state.sun = lerp_rgb_quantized(a.sun, b.sun, fraction, envscale);
-	state.ground = lerp_rgb_quantized(a.ground, b.ground, fraction, envscale);
-	state.fog = lerp_rgb_quantized(a.fog, b.fog, fraction, envscale);
-	state.sky = lerp_rgb_quantized(a.sky, b.sky, fraction, envscale);
-	state.moon = lerp_rgb_quantized(a.moon, b.moon, fraction, envscale);
-	state.skyfog = lerp_rgb_quantized(a.skyfog, b.skyfog, fraction, envscale);
-	state.skybase = lerp_rgb_quantized(a.skybase, b.skybase, fraction, envscale);
-	state.skybright = lerp_rgb_quantized(a.skybright, b.skybright, fraction, envscale);
-	state.skyhighlight = lerp_rgb_quantized(a.skyhighlight, b.skyhighlight, fraction, envscale);
-	state.cloudbase = lerp_rgb_quantized(a.cloudbase, b.cloudbase, fraction, envscale);
-	state.cloudhighlight = lerp_rgb_quantized(a.cloudhighlight, b.cloudhighlight, fraction, envscale);
-	state.cloudedge = lerp_rgb_quantized(a.cloudedge, b.cloudedge, fraction, envscale);
+	state.sun = lerp_rgb_lines(a.sun, b.sun, fraction, envscale);
+	state.ground = lerp_rgb_lines(a.ground, b.ground, fraction, envscale);
+	state.fog = lerp_rgb_lines(a.fog, b.fog, fraction, envscale);
+	state.sky = lerp_rgb_lines(a.sky, b.sky, fraction, envscale);
+	state.moon = lerp_rgb_lines(a.moon, b.moon, fraction, envscale);
+	state.skyfog = lerp_rgb_lines(a.skyfog, b.skyfog, fraction, envscale);
+	state.skybase = lerp_rgb_lines(a.skybase, b.skybase, fraction, envscale);
+	state.skybright = lerp_rgb_lines(a.skybright, b.skybright, fraction, envscale);
+	state.skyhighlight = lerp_rgb_lines(a.skyhighlight, b.skyhighlight, fraction, envscale);
+	state.cloudbase = lerp_rgb_lines(a.cloudbase, b.cloudbase, fraction, envscale);
+	state.cloudhighlight = lerp_rgb_lines(a.cloudhighlight, b.cloudhighlight, fraction, envscale);
+	state.cloudedge = lerp_rgb_lines(a.cloudedge, b.cloudedge, fraction, envscale);
 	return state;
 }
 
