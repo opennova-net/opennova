@@ -88,7 +88,20 @@ param(
     # role with StockObserver (retail stock, the hook only observing) and
     # requires the loaded hook to confirm it; the summary records the
     # relaxation.
-    [switch] $AllowModifiedRetail
+    [switch] $AllowModifiedRetail,
+
+    # How the OpenNova joiner (RO, OO) reaches the host. `browse` searches as
+    # the LAN screen does and joins the row on -Port (`--lan-join
+    # browse:<port>`), as onHook's retail joiner does, so its 0x41s are the
+    # broadcast announces a retail joiner sends. `direct` dials
+    # 127.0.0.1:<port>, whose 0x41 names the dialed host as its EIP: a
+    # diagnostic only. The summary records it (joiner_dial).
+    [ValidateSet("browse", "direct")]
+    [string] $JoinerDial = "browse",
+
+    # Diagnostic only: run from a checkout with uncommitted tracked changes.
+    # A verdict-bearing run is evidence for its repo_commit alone.
+    [switch] $AllowDirtyRepo
 )
 
 $ErrorActionPreference = "Stop"
@@ -266,7 +279,25 @@ function Get-FileSha256OrNull {
 }
 $RepoCommit = (& git -C $Repo rev-parse HEAD 2>$null)
 $RepoDirty = [bool] (& git -C $Repo status --porcelain --untracked-files=no 2>$null)
+if ($RepoDirty -and -not $AllowDirtyRepo) {
+    throw "The checkout has uncommitted tracked changes; a run is evidence for repo_commit alone (-AllowDirtyRepo for a diagnostic run)."
+}
 $GdextensionDll = Join-Path $Repo "godot\bin\libopennova.windows.template_debug.x86_64.dll"
+# A `--path godot` source run loads the editor variant (bin/opennova.gdextension's
+# plain windows.debug.x86_64 row), so both variants are recorded.
+$GdextensionEditorDll = Join-Path $Repo "godot\bin\libopennova_editor.windows.template_debug.x86_64.dll"
+# The onHook proxy (binkw32.dll, forwarding to the renamed original) in both
+# copies is one build, recorded as the run's hook identity with the MCP exe.
+$OnHookProxySha256 = Get-FileSha256OrNull (Join-Path $ServerDir "binkw32.dll")
+$clientProxySha256 = Get-FileSha256OrNull (Join-Path $ClientDir "binkw32.dll")
+if (-not $OnHookProxySha256 -or $OnHookProxySha256 -ne $clientProxySha256) {
+    throw "The SERVER and CLIENT copies do not hold the same onHook proxy binkw32.dll ($OnHookProxySha256 vs $clientProxySha256)."
+}
+foreach ($copy in @($ServerDir, $ClientDir)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $copy "binkw32_.dll") -PathType Leaf)) {
+        throw "$copy has no binkw32_.dll, the original Bink DLL the onHook proxy forwards to."
+    }
+}
 # A retail LAN host binds only inside its game.cfg mplanserverportmin..max
 # (stock JO:CA: 32768..32787), so a port outside the SERVER copy's own range can
 # never host a retail cell.
@@ -1543,13 +1574,14 @@ function Wait-OpenNovaHostLoaded {
 function Start-OpenNovaJoinerExact {
     $joinerDir = Join-Path $RunRoot "joiner"
     New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
+    $joinTarget = if ($JoinerDial -eq "browse") { "browse:$Port" } else { "127.0.0.1:$Port" }
     $script:OpenNovaJoiner = Start-OpenNovaProcess `
         -GodotArguments @(
             "--windowed", "--resolution", $Resolution,
             "--log-file", (Join-Path $joinerDir "godot.log")
         ) `
         -GameArguments (@(
-            "--lan-join", "127.0.0.1:$Port",
+            "--lan-join", $joinTarget,
             "--callsign", $JoinerCallsign
         ) + @(
             "--resource-dir", $ClientDir, "/exp", $Expansion
@@ -1637,7 +1669,7 @@ function Wait-OpenNovaJoinerReady {
 }
 
 try {
-    Write-Host "PARITY_RUN_BEGIN topology=$Topology mission=$Mission game_type=$GameType port=$Port resolution=$Resolution run=$RunId"
+    Write-Host "PARITY_RUN_BEGIN topology=$Topology mission=$Mission game_type=$GameType port=$Port resolution=$Resolution joiner_dial=$JoinerDial run=$RunId"
     Assert-UdpPortUnowned
     Start-OnHookMcp
 
@@ -2305,9 +2337,16 @@ $summary = [pscustomobject]@{
     retail_exe_sha256 = $RetailServerExeSha256
     retail_stock_observer = [bool] $StockObserver
     onhook_mcp_sha256 = (Get-FileHash -LiteralPath $McpExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    onhook_proxy_sha256 = $OnHookProxySha256
+    # Both hosts here are listen hosts (a playing host); a dedicated host
+    # (opennova-serve, a retail Serve Only host) is another kind.
+    host_kind = "listen"
+    joiner_dial = $(if ($Topology -in @("RO", "OO")) { $JoinerDial } else { $null })
     repo_commit = [string] $RepoCommit
     repo_dirty = $RepoDirty
+    allow_dirty_repo = [bool] $AllowDirtyRepo
     gdextension_sha256 = Get-FileSha256OrNull $GdextensionDll
+    gdextension_editor_sha256 = Get-FileSha256OrNull $GdextensionEditorDll
     godot_launcher_sha256 = Get-FileSha256OrNull $GodotLauncher
     run_id = $RunId
     suite_id = $SuiteId

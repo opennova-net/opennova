@@ -110,6 +110,19 @@ from a shell without a console, and a verdict-bearing run needs the wrapper's
 ownership proof (`-AllowDirectRuntime` relaxes it for diagnostics only and is
 recorded in the summary).
 
+The OpenNova joiner joins as a retail joiner does: `--lan-join browse:<port>`
+searches as the LAN screen does (the broadcast over the retail port range) and
+joins the row on the case port, so its 0x41 is the broadcast announce (EIP
+0xFFFFFFFF, EPN the port) a retail joiner sends. `-JoinerDial direct` dials
+127.0.0.1 instead, whose 0x41 names the dialed host: a diagnostic only. Each
+run refuses a checkout with uncommitted tracked changes unless
+`-AllowDirtyRepo` (a diagnostic), and refuses SERVER and CLIENT copies whose
+onHook proxy `binkw32.dll` differ or lack `binkw32_.dll`. The summary records
+`joiner_dial`, `host_kind`, `repo_commit`, `repo_dirty`, the onHook exe and
+proxy hashes (`onhook_mcp_sha256`, `onhook_proxy_sha256`), both GDExtension
+variants (`gdextension_sha256`, and `gdextension_editor_sha256`, the one a
+`--path godot` run loads) and the Godot launcher's hash.
+
 The OpenNova joiner's readiness is `game_probe parity_joiner_ready` (blocking;
 `-AutoDeploy` sends the default deployment pick), every later snapshot is
 `parity_joiner_state`, an exercised run's motion gate is `parity_joiner_motion`
