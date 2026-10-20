@@ -824,6 +824,10 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		authority->registry.configure_pool(1, 16);
 		authority->load_systems();
 		w::Entity peer = *local;
+		// A seated eye above the zero water plane (the body's CameraOffset): the
+		// driver's submerged test compares the raw words, no dry sentinel
+		// (D-NET-NEW-L4-8) [orig: Entity_UpdateVehiclePhysics @0x48B9A0..0x48B9AC].
+		peer.eye_offset_z = 1 << 16;
 		peer.mounted = false;
 		peer.mount_target = {};
 		peer.mount_seat = -1;
