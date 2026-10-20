@@ -441,6 +441,10 @@ bool JoinerConnection::take_mission_start_submissions(MissionStartSubmissions &o
 	// [orig: Game_StartMission @0x525836 / @0x525c2e -> NetPacket_SendLoadoutSubmit
 	//  @0x42cdc0; the 0x0B @0x52623f..0x52624b]
 	const LoadoutSubmit first = build_profile_loadout_submit(assigned_team_, false);
+	// Player_InitPlayer between the two binds the local player entity to the joiner's
+	// own entity (the S2C 0x50's compares read it from here on) [orig: Game_StartMission
+	// @0x524360 - the call @0x525BBC; Player_InitPlayer @0x4E15F0 - the store @0x4E17EB].
+	if (has_self_handle_) *local_player_entity_ = self_handle_;
 	const LoadoutSubmit second = build_profile_loadout_submit(assigned_team_, true);
 	const gameprofile::GameProfile *profile =
 			title_ != nullptr ? gameprofile::gameprofile_by_id(title_->game_id) : nullptr;

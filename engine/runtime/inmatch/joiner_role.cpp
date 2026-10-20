@@ -1279,13 +1279,21 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		const uint64_t self_team_revision = rt.self_team_revision();
 		if (self_team_revision > self_team_revision_seen_) {
 			self_team_revision_seen_ = self_team_revision;
-			const uint8_t assigned = rt.assigned_team();
+			// Leg 2's store on the joiner's own entity (not the g_LocalTeam latch,
+			// which the local arm alone takes, D-NET-572).
+			const uint8_t assigned = rt.self_assigned_team();
 			if (world::Entity *L =
 					world.registry.get(world.cached.local_player)) {
 				L->team = assigned;
 			}
 			world.round_sim.local_team = assigned;
-			// The 0x50 handler also RE-SELECTS the newly assigned side's profile page
+		}
+	}
+	{
+		const uint64_t local_resubmit_revision = rt.local_resubmit_revision();
+		if (local_resubmit_revision > local_resubmit_revision_seen_) {
+			local_resubmit_revision_seen_ = local_resubmit_revision;
+			// The 0x50 handler's local arm RE-SELECTS the newly assigned side's profile page
 			// and re-submits it: profileData = (team==1||team==3) ? blue : red, class
 			// = *profileData, page = profileData + {6,2054,4102,6150,8198}
 			// [orig: NapiNPClientMsg_TeamAssign @0x431a35..@0x431a9e — the submit
@@ -1514,6 +1522,7 @@ void JoinerRole::reset_for_join() {
 	started_ = false;
 	local_spawned_ = false;
 	deployment_release_revision_seen_ = 0;
+	local_resubmit_revision_seen_ = 0;
 	mounted_ammo_revision_seen_ = 0;
 	redeploy_release_pending_ = false;
 	redeploy_health_updates_at_release_ = 0;

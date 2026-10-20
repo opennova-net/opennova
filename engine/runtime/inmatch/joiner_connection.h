@@ -240,6 +240,10 @@ public:
 		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — g_LocalTeam store @0x4319db]
 		bool self_team_changed = false;
 		uint8_t self_team = 0;
+		// The 0x50 named the local player entity (g_LocalPlayerEntity), so its
+		// handler's local arm ran: the per-side profile reselect and the C2S 0x2F
+		// re-submission [orig: @0x431A1B..0x431A9E].
+		bool local_resubmit = false;
 		// Diagnostic summary of S2C 0x50; entity state is folded only from the
 		// corresponding raw inbound_gameplay record.
 		std::vector<std::pair<uint16_t, uint8_t>> entity_team_assigns;
@@ -914,6 +918,17 @@ public:
 	// delivers 0x04 ahead of the 0x1A submission trigger, and a harness that cares must
 	// feed the 0x04 it expects.
 	uint8_t assigned_team() const { return assigned_team_; }
+	// Retail's g_LocalPlayerEntity as the pool slot it points at: the mission start's
+	// Player_InitPlayer binds it to the joiner's own entity, nothing in a session clears
+	// it, so it lives for the process (the embedder's word: use_local_player_entity_word)
+	// and, between a mission's end and the next mission start's Player_InitPlayer, still
+	// names the previous mission's slot. The S2C 0x50's latch and local arm compare it.
+	// [orig: Player_InitPlayer @0x4E15F0 - the store @0x4E17EB; NapiNPClientMsg_TeamAssign
+	//  @0x431910 - the compares @0x4319CF, @0x431A1B, @0x431B0A]
+	uint16_t local_player_entity() const { return *local_player_entity_; }
+	void use_local_player_entity_word(uint16_t *word) {
+		local_player_entity_ = word != nullptr ? word : &own_local_player_entity_;
+	}
 	bool spectator() const { return spectator_mode_; }
 	// Retail's host-global class availability word, replaced by every S2C 0x76.
 	// The malformed/short handler value is zero; before the initial-state message,
@@ -1112,6 +1127,8 @@ private:
 	// g_LocalTeam @0x425499]. Zero-initialized like retail's global: 0x04 always precedes the
 	// 0x1A submission trigger in a real admission, so harnesses must feed the 0x04 they expect.
 	uint8_t assigned_team_ = 0;
+	uint16_t own_local_player_entity_ = 0xFFFFu;
+	uint16_t *local_player_entity_ = &own_local_player_entity_; // local_player_entity()
 	uint16_t class_allow_mask_ = 0x03FFu;
 	uint8_t local_player_slot_ = 0; // S2C 0x04 body byte 17 (see local_player_slot())
 	// Inclusive final roster slot for the S2C 0x46 queue-ack walk, supplied by

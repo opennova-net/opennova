@@ -88,6 +88,10 @@ struct ClientProcessState {
 	//  UI_JoinSelectedSession's copies @0x569c5d / @0x569c6a]
 	bool join_spectate = false;
 	std::string join_spectator_password;
+	// g_LocalPlayerEntity as the pool slot it points at (JoinerConnection::
+	// local_player_entity): bound by each mission start's Player_InitPlayer, never cleared.
+	// [orig: Player_InitPlayer @0x4E15F0 - the store @0x4E17EB]
+	uint16_t local_player_entity = 0xFFFFu;
 	// The commit's process half: the spectate state always, the shared password only
 	// when SPECTATE was checked (else it went to the side password, which is the join's).
 	void commit_join_choice(bool spectate, const std::string &spectator_password) {
@@ -99,7 +103,10 @@ struct ClientProcessState {
 class ClientRuntime {
 public:
 	// The process-lived client words this runtime steps (null: its own).
-	void use_process_state(ClientProcessState *state) { external_process_ = state; }
+	void use_process_state(ClientProcessState *state) {
+		external_process_ = state;
+		if (joiner_) joiner_->use_local_player_entity_word(state != nullptr ? &state->local_player_entity : nullptr);
+	}
 	enum class Role : uint8_t { Joiner, HostClient };
 
 	// Remote-joiner runtime. Transport-less: framed bytes in via receive(), framed bytes out via
@@ -710,6 +717,12 @@ public:
 	// simulation re-styles friend/foe when it advances (the 0x04 latch at join is
 	// consumed through the spawn instead). [orig: g_LocalTeam store @0x4319db]
 	uint64_t self_team_revision() const { return self_team_revision_; }
+	// The team the last self S2C 0x50 stored on the joiner's own entity (its leg 2,
+	// whether or not that entity is the local one yet) [orig: @0x4319EE].
+	uint8_t self_assigned_team() const { return self_assigned_team_; }
+	// Bumps on every S2C 0x50 whose local arm ran (the per-side reselect and the 0x2F)
+	// [orig: NapiNPClientMsg_TeamAssign @0x431A1B..0x431A9E].
+	uint64_t local_resubmit_revision() const { return local_resubmit_revision_; }
 	// Roster slots whose bookkeeping the host cleared via S2C 0x46 bit15. Draining
 	// keeps it a one-shot; the associated ENTITY row is deliberately untouched
 	// (only S2C 0x5D retires an entity). [orig: @0x431411..0x43144c]
@@ -1014,6 +1027,8 @@ private:
 	bool authoritative_spawn_released_ = false;
 	uint64_t authoritative_spawn_release_revision_ = 0;
 	uint64_t self_team_revision_ = 0;           // S2C 0x50 self re-latch edges
+	uint8_t self_assigned_team_ = 0;            // self_assigned_team
+	uint64_t local_resubmit_revision_ = 0;      // local_resubmit_revision
 	std::vector<uint8_t> cleared_player_slots_; // S2C 0x46 bit15 roster clears
 
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of

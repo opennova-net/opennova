@@ -626,6 +626,67 @@ bool drive_into_the_world_stream(Harness &h, uint8_t period) {
 	return std::string(h.client.admission_stage_name()) == std::string("awaiting the world stream");
 }
 
+// D-NET-572: a self S2C 0x50 ahead of the process's first mission start latches nothing
+// and re-submits nothing: the handler's latch and its local arm compare the entity with
+// g_LocalPlayerEntity, which only the mission start's Player_InitPlayer binds, so the
+// mission start's two 0x2F carry the older team. After the mission start the same 0x50
+// latches the team and re-submits a 0x2F on it.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the compares @0x4319CF / @0x431A1B, the
+//  latch @0x4319DB, the submit @0x431A9E; Game_StartMission @0x524360 - the first 0x2F
+//  @0x525836, Player_InitPlayer @0x525BBC (its store @0x4E17EB), the second @0x525C2E]
+bool run_a_self_team_assign_waits_for_the_mission_starts_player_init() {
+	Harness h;
+	if (!expect(drive_into_the_world_stream(h, 0), "team assign: the world stream runs"))
+		return false;
+	OrganicSpawnBatch batch;
+	batch.entity_count = 1;
+	OrganicSpawnRecord self;
+	self.slot_id = 0x00C6;
+	self.def_type = 3;
+	self.item_type_id = 0x14B9;
+	self.owner_connection_id = 4; // the 0x82's MI
+	self.minimap_flags = 0x100;
+	self.entity_name = "LoadingPump";
+	self.team = 2;
+	self.net_id = 7;
+	batch.records.push_back(self);
+	(void)h.frame({make_protocol_message(0x0C, encode_organic_spawn_batch(batch))});
+	if (!expect(h.client.has_self_handle() && h.client.self_handle() == 0x00C6 &&
+				h.client.assigned_team() == 2,
+			"team assign: the self entity is bound; the 0x04 latched team 2"))
+		return false;
+	const std::vector<uint8_t> to_team_1 = {0xC6, 0x00, 0x01, 0x00, 0x00, 0x00};
+	const auto loadout_teams = [&](const std::vector<std::vector<uint8_t>> &sent) {
+		std::vector<uint8_t> teams;
+		for (const std::vector<uint8_t> &datagram : sent) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_client_session(datagram, h.auth.scrk, header, messages)) continue;
+			for (const ProtocolMessage &m : messages)
+				if (m.tag == 0x2F && !m.payload.empty()) teams.push_back(m.payload[0]);
+		}
+		return teams;
+	};
+	std::vector<std::vector<uint8_t>> sent =
+			h.frame({make_protocol_message(0x50, to_team_1)});
+	for (int i = 0; i < 4; ++i) {
+		const std::vector<std::vector<uint8_t>> more = h.frame();
+		sent.insert(sent.end(), more.begin(), more.end());
+	}
+	if (!expect(h.client.assigned_team() == 2 && loadout_teams(sent).empty(),
+			"before the mission start: no latch and no 0x2F"))
+		return false;
+	sent = h.frame({make_protocol_message(0x1A, {})});
+	if (!expect(loadout_teams(sent) == std::vector<uint8_t>({2, 2}),
+			"the mission start's two 0x2F carry the older team"))
+		return false;
+	sent = h.frame({make_protocol_message(0x50, to_team_1)});
+	for (int i = 0; i < 4 && loadout_teams(sent).empty(); ++i) sent = h.frame();
+	return expect(h.client.assigned_team() == 1 &&
+						loadout_teams(sent) == std::vector<uint8_t>({1}),
+			"after the mission start: the 0x50 latches team 1 and re-submits a 0x2F on it");
+}
+
 // A joiner the 0x0F admits with no self row (a spectator's release: the 0x0F clears the
 // deploy hold whatever the role) pings from its first game-loop boundary: the 0x2C's gate
 // reads the session, the role, the deploy hold and the round-over gate, never a body. Its
@@ -928,6 +989,7 @@ int main() {
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
 	ok = run_timed_loops_pace_an_undictated_connection() && ok;
 	ok = run_an_early_release_stays_in_the_final_wait() && ok;
+	ok = run_a_self_team_assign_waits_for_the_mission_starts_player_init() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_a_bodyless_joiner_pings() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;

@@ -437,6 +437,8 @@ std::vector<uint8_t> ClientRuntime::start() {
 	authoritative_spawn_released_ = false;
 	authoritative_spawn_release_revision_ = 0;
 	self_team_revision_ = 0;
+	self_assigned_team_ = 0;
+	local_resubmit_revision_ = 0;
 	cleared_player_slots_.clear();
 	current_tick_ = 0;
 	slot_refresh_frames_ = 0;
@@ -1380,7 +1382,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				++authoritative_ammo_pools_revision_;
 			}
 			// The local-team latch has client-session consequences beyond entity state.
-			if (pr.self_team_changed) ++self_team_revision_;
+			if (pr.self_team_changed) {
+				++self_team_revision_;
+				self_assigned_team_ = pr.self_team;
+			}
+			if (pr.local_resubmit) ++local_resubmit_revision_;
 			// S2C 0x46 bit15 — roster bookkeeping only; the entity row stays.
 			// [orig: PlayerSlot_ClearAndUnlink @0x434730 via @0x431411..0x43144c]
 			for (uint8_t slot : pr.cleared_player_slots)

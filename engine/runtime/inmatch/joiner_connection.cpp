@@ -1458,8 +1458,16 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				// pool's table [orig: @0x431984..0x4319b3].
 				out.entity_team_assigns.emplace_back(
 						assign.entity_handle, assign.team);
+				// Leg (1) and the local arm compare the 0x50's entity with the local
+				// player entity, which only the mission start's Player_InitPlayer binds:
+				// a self 0x50 ahead of the process's first mission start latches nothing
+				// and re-submits nothing (the mission start's submissions read the older
+				// g_LocalTeam), and one after a mission start, or a stale binding that
+				// names the same slot, runs both (D-NET-572).
+				// [orig: `cmp entity, g_LocalPlayerEntity` @0x4319CF, the latch @0x4319db]
+				const bool local_entity = assign.entity_handle == *local_player_entity_;
+				if (local_entity) assigned_team_ = assign.team;
 				if (has_self_handle_ && assign.entity_handle == self_handle_) {
-					assigned_team_ = assign.team; // [orig: @0x4319db]
 					// Leg (2) lands on the joiner's own dcb whether or not its
 					// mission start has made it the local entity yet, so L spawns
 					// on it: Player_InitPlayer reads that Team.
@@ -1467,33 +1475,25 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					spawn_.team = assign.team;
 					out.self_team_changed = true;
 					out.self_team = assign.team;
-					// The re-submission exists only after the 0x1A-released
-					// initial pair (the profile/armory state it rebuilds is
-					// in-world state). The per-side profile reselect
-					// (@0x431a35..0x431a9a) is PORTED: the NEW team byte picks the
-					// profile side block, that block's own class byte is the wire
-					// class, and the page that class indexes is the kit — so a
-					// joiner pushed across the line submits a kit the new side's
-					// class can legally hold. The C2S 0x22/0x23 pair that
-					// follows (@0x431acb..0x431b05) is the replica fold's
-					// (ClientReplicaPipeline, S2C 0x50), as is the identity
-					// pair @0x431b3a..0x431b91 on the replica row (D-NET-253);
-					// L's pair and the Player_InitPlayer(1) re-run @0x431b14
-					// are D-NET-570, and this leg's latch and re-submission
-					// ahead of the mission start's Player_InitPlayer, D-NET-572.
-					if (post_auth_stage_ == PostAuthStage::AwaitDeployment ||
-					    post_auth_stage_ == PostAuthStage::AwaitDeployPick ||
-					    post_auth_stage_ == PostAuthStage::AwaitDeployRelease ||
-					    post_auth_stage_ == PostAuthStage::Complete) {
-						// [orig: @0x431a9e passes slot 195 RAW — the
-						//  pre-Player_InitPlayer form, NOT the live
-						//  g_CurrentWeaponSlot]
-						const LoadoutSubmit resubmit =
-								build_profile_loadout_submit(
-										assigned_team_, false);
-						periodic_replies.push_back(make_protocol_message(
-								0x2F, encode_loadout_submit(resubmit)));
-					}
+				}
+				// The local arm (a player entity, Flags & 0x100, that is the local one):
+				// the per-side profile reselect, PORTED -- the latched team byte picks the
+				// profile side block, that block's class byte is the wire class, and the
+				// page that class indexes is the kit -- and ONE C2S 0x2F with slot 195 RAW
+				// (the pre-Player_InitPlayer form, NOT g_CurrentWeaponSlot). The C2S
+				// 0x22/0x23 pair that follows (@0x431acb..0x431b05) is the replica fold's
+				// (ClientReplicaPipeline, S2C 0x50), as is the identity pair
+				// @0x431b3a..0x431b91 on the replica row (D-NET-253); L's pair and the
+				// Player_InitPlayer(1) re-run @0x431b14 (same compare @0x431B0A) are
+				// D-NET-570.
+				// [orig: `test Flags, 100h` @0x431A15, `cmp entity, g_LocalPlayerEntity`
+				//  @0x431A1B, the reselect @0x431a35..0x431a9a, the submit @0x431a9e]
+				if (local_entity) {
+					const LoadoutSubmit resubmit =
+							build_profile_loadout_submit(assigned_team_, false);
+					periodic_replies.push_back(make_protocol_message(
+							0x2F, encode_loadout_submit(resubmit)));
+					out.local_resubmit = true;
 				}
 			}
 		} else if (m.tag == s2c::EMPTY_SLOT_SWEEP) {
@@ -2104,6 +2104,8 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	// frame_session stamps next_seq then post-increments; last_ack -> 0x43 ack_count
 	self_handle_ = self_handle;
 	has_self_handle_ = true;
+	// A seeded session is past its mission start's Player_InitPlayer.
+	*local_player_entity_ = self_handle;
 	spawn_.item_type_id = self_type;
 	spawn_.team = self_team;
 	game_type_ = game_type;
