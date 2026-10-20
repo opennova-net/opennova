@@ -18,6 +18,10 @@ $script:GameMcpHostPort = 8975
 $script:GameMcpJoinerPort = 8976
 $script:GameMcpSessions = @{}
 $script:GameMcpRequestId = 0
+# The endpoint never answers "Expect: 100-continue", which Windows PowerShell's
+# .NET sends with every POST: the first request of each connection pool would
+# hold its body 350 ms (the continue timeout) before sending it.
+[System.Net.ServicePointManager]::Expect100Continue = $false
 
 # The launch behind every other window (game_mcp.py's BehindLaunch says why and
 # how). Here the start runs on a background thread while the caller proves the
@@ -334,6 +338,11 @@ function Send-GameMcpMessage {
         [Parameter(Mandatory = $true)] [hashtable] $Message,
         [int] $TimeoutSeconds = 120
     )
+    # No progress records: Windows PowerShell's Invoke-WebRequest writes one to
+    # the console host for each chunk of the response it reads (a cross-process
+    # call per chunk, outside -TimeoutSec), most of a call's client time. The
+    # local preference leaves the caller's as it is.
+    $ProgressPreference = "SilentlyContinue"
     $json = $Message | ConvertTo-Json -Depth 32 -Compress
     $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($json)
     $headers = @{ Accept = "application/json" }
