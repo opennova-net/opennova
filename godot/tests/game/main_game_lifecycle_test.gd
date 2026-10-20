@@ -261,8 +261,12 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 	target.host_ip = "127.0.0.1"
 	target.port = 9
 	target.server_name = "shutdown barrier probe"
-	# This fixture exercises shutdown during an already-decided player join;
-	# unknown direct targets now perform spectator discovery before loading.
+	# This fixture exercises shutdown during an already-decided player join: a
+	# browse row's target (its flag word known, no passwords). A target without
+	# the flag word enumerates its endpoint before any load, whatever its role
+	# (D-NET-703); with no browse socket handed over, the join binds its own.
+	target.server_flags = 0
+	target.discovered_session = true
 	target.role_explicit = true
 	var weak_target: WeakRef = weakref(target)
 	_shell.join_lan_server(target)
