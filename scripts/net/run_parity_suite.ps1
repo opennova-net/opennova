@@ -126,6 +126,26 @@ function Split-ListArgument {
         Where-Object { $_ })
 }
 
+# A case's optional field, or $Default when the case omits it (StrictMode
+# refuses a missing property). An array comes back unrolled: wrap the call in
+# @() to keep a one-entry or empty list a list.
+function Get-CaseField {
+    param($Case, [string] $Name, $Default)
+    if ($Case.PSObject.Properties.Name -contains $Name) { return $Case.$Name }
+    return $Default
+}
+
+# The extension cases' optional inputs (scripts\net\parity-extension-cases.json):
+# rotation (E2: the host's missions after `mission`), time_limit_minutes (E2:
+# the cell's round limit) and topologies (the cells the case has; default all
+# five, RR and RR-aa always among them).
+function Get-CaseRotation { param($Case) return @(Get-CaseField $Case "rotation" @()) }
+function Get-CaseTimeLimit { param($Case) return [int] (Get-CaseField $Case "time_limit_minutes" 0) }
+function Get-CaseTopologies {
+    param($Case)
+    return @(Get-CaseField $Case "topologies" @("RR", "RR-aa", "RO", "OR", "OO"))
+}
+
 # An app builds from apps\<dir> as opennova-<dir, kebab-cased>.exe.
 function Find-App {
     param([string] $Dir)
@@ -192,6 +212,30 @@ function Read-ParityCases {
         if ([int] $case.port -lt 1 -or [int] $case.port -gt 65535) {
             throw "Parity case '$($case.id)': port must be 1-65535"
         }
+        foreach ($entry in @(Get-CaseRotation $case)) {
+            if ("$entry" -notmatch '^[^\\/:*?"<>|,\x00-\x1f]+\.[Bb][Mm][Ss]$') {
+                throw "Parity case '$($case.id)': rotation entry '$entry' is not a .BMS basename"
+            }
+        }
+        $limit = Get-CaseTimeLimit $case
+        if ($limit -lt 0 -or $limit -gt 600) {
+            throw "Parity case '$($case.id)': time_limit_minutes must be 0-600"
+        }
+        $caseTopologies = @(Get-CaseTopologies $case)
+        foreach ($name in $caseTopologies) {
+            if ($name -cnotin @("RR", "RR-aa", "RO", "OR", "OO")) {
+                throw "Parity case '$($case.id)': unknown topology '$name'"
+            }
+        }
+        if ("RR" -cnotin $caseTopologies -or "RR-aa" -cnotin $caseTopologies -or
+                @($caseTopologies | Where-Object { $_ -cin @("RO", "OR", "OO") }).Count -eq 0) {
+            throw "Parity case '$($case.id)': topologies needs RR, RR-aa and at least one subject"
+        }
+        # The OpenNova listen host has no rotation launch flag (run_parity_topology.ps1).
+        if (@(Get-CaseRotation $case).Count -gt 0 -and
+                @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
+            throw "Parity case '$($case.id)': a rotation case runs RR, RR-aa and RO only"
+        }
     }
     return $table
 }
@@ -225,6 +269,10 @@ function Get-CellArguments {
         $arguments += @("-Scenario", (Join-Path $PSScriptRoot ("scenarios\" + [string] $Case.scenario)))
     }
     if ($Cell.Topology -in @("RO", "OO")) { $arguments += @("-JoinerDial", $JoinerDial) }
+    $rotation = @(Get-CaseRotation $Case)
+    if ($rotation.Count -gt 0) { $arguments += @("-Rotation", ($rotation -join ",")) }
+    $limit = Get-CaseTimeLimit $Case
+    if ($limit -gt 0) { $arguments += @("-TimeLimitMinutes", [string] $limit) }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
     return $arguments
 }
@@ -284,6 +332,22 @@ function Get-ReferenceMismatches {
         elseif ([string] $Summary.$name -cne $want) {
             $reasons.Add("$name $($Summary.$name) is not $want")
         }
+    }
+    # E2 inputs, checked when the case has them (a summary from before E2
+    # records neither and is evidence only for a case without them).
+    $rotation = (@(Get-CaseRotation $Case) -join ",")
+    $recordedRotation = if ($fields -contains "rotation") {
+        (@($Summary.rotation | ForEach-Object { [string] $_ }) -join ",")
+    } else { "" }
+    if ($recordedRotation -cne $rotation) {
+        $reasons.Add("rotation '$recordedRotation' is not '$rotation'")
+    }
+    $limit = Get-CaseTimeLimit $Case
+    $recordedLimit = if ($fields -contains "time_limit_minutes") {
+        [int] $Summary.time_limit_minutes
+    } else { 0 }
+    if ($recordedLimit -ne $limit) {
+        $reasons.Add("time_limit_minutes $recordedLimit is not $limit")
     }
     if ($fields -contains "retail_stock_observer" -and -not [bool] $Summary.retail_stock_observer) {
         $reasons.Add("the retail roles ran without StockObserver")
@@ -410,7 +474,18 @@ foreach ($case in $selectedCases) {
     $reference = if ($ReferencePrefix) { $references[[string] $case.id] } else { $null }
 
     $cellResults = [ordered]@{}
+    $caseTopologies = @(Get-CaseTopologies $case)
     foreach ($cell in $Cells) {
+        if ($cell.Name -cnotin $caseTopologies) {
+            Write-Host "PARITY_SUITE_CELL case=$($case.id) topology=$($cell.Name) run=- status=not_applicable"
+            $cellResults[$cell.Name] = [pscustomobject]@{
+                run_id = ""
+                run_root = ""
+                status = "not_applicable"
+                selected = $false
+            }
+            continue
+        }
         if ($reference -and $reference.ContainsKey($cell.Name)) {
             $ref = $reference[$cell.Name]
             Write-Host "PARITY_SUITE_CELL case=$($case.id) topology=$($cell.Name) run=$($ref.run_id) status=referenced"
@@ -487,7 +562,8 @@ foreach ($case in $selectedCases) {
 
     $usable = @($Cells | Where-Object { $cellResults[$_.Name].status -in @("ran", "reused", "referenced") })
     $subjects = @($usable | Where-Object { $_.Name -in @("RO", "OR", "OO") })
-    $missing = @($Cells | Where-Object { $_.Name -in @("RO", "OR", "OO") -and $_ -notin $subjects } |
+    $missing = @($Cells | Where-Object { $_.Name -in @("RO", "OR", "OO") -and
+            $_.Name -cin $caseTopologies -and $_ -notin $subjects } |
         ForEach-Object { $_.Name })
     # A referenced RR is evidence only for subjects whose retail role loaded the
     # same rendered hook config: RO's retail host (server), OR's retail joiner

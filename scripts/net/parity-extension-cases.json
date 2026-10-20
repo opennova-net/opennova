@@ -1,0 +1,22 @@
+{
+  "schema": "opennova.parity-cases.v1",
+  "expansion": "jox01",
+  "host_session_name": "Untitled ",
+  "items_sha256": "585641510877d0b88f33c221c081d487f2d4f0abad874886f594a7db760a9964",
+  "cases": [
+    {
+      "id": "tdh-i3a-tdm-round",
+      "mission": "TDH_I3A.bms",
+      "mission_sha256": "8978c7afac2d7ba0f1b09c5a358412c74bace3424f31dd647a4aadc8f5811a33",
+      "game_type": 65536,
+      "port": 32787,
+      "readiness": "in_match",
+      "steady_seconds": 120,
+      "exercise_input": true,
+      "auto_deploy": true,
+      "rotation": ["BTDH_G11A.bms"],
+      "time_limit_minutes": 2,
+      "topologies": ["RR", "RR-aa", "RO"]
+    }
+  ]
+}

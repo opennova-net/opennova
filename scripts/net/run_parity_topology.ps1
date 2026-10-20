@@ -44,6 +44,22 @@ param(
     # records every step's applied logic tick.
     [string] $Scenario = "",
 
+    # Round end and rotation (extension E2): the missions after -Mission in
+    # the host's rotation, .BMS basenames in play order (a comma-separated
+    # list is accepted). A retail host takes them through onhook_host_lan's
+    # rotation (the stock host screen's selected-missions list); the OpenNova
+    # listen host has no rotation launch flag, so OR and OO refuse them.
+    [string[]] $Rotation = @(),
+
+    # E2: the round time limit in minutes for this cell. Both hosts read it
+    # from the SERVER copy's game.cfg koth_limit (retail:
+    # Game_ApplySessionSettingsToGlobals @0x551CBF..0x551CDF ->
+    # g_TimeLimitMinutes), so the runner writes it there for the cell and
+    # restores the file's exact bytes once every process has stopped. 0 keeps
+    # the copy's own value and leaves the file alone.
+    [ValidateRange(0, 600)]
+    [int] $TimeLimitMinutes = 0,
+
     [ValidatePattern('^[1-9][0-9]{2,4}x[1-9][0-9]{2,4}$')]
     [string] $Resolution = "1920x1080",
 
@@ -234,6 +250,18 @@ if ($MissionArtifactPath) {
     if ($actualMissionHash -ne $MissionSha256) {
         throw "Mission artifact SHA-256 drift: $ResolvedMissionArtifact"
     }
+}
+# E2's rotation tail, one entry per mission (powershell -File passes a
+# comma-separated list as one string).
+$RotationList = @($Rotation | ForEach-Object { "$_".Split(',') } |
+    ForEach-Object { $_.Trim() } | Where-Object { $_ })
+foreach ($entry in $RotationList) {
+    if ($entry -notmatch '^[^\\/:*?"<>|,\x00-\x1f]+\.[Bb][Mm][Ss]$') {
+        throw "Rotation entry '$entry' is not a .BMS basename."
+    }
+}
+if ($RotationList.Count -gt 0 -and $Topology -in @("OR", "OO")) {
+    throw "-Rotation needs a retail host (RR or RO): the OpenNova listen host has no rotation launch flag."
 }
 
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
@@ -806,6 +834,59 @@ function Publish-MotionGate {
     }
 }
 
+# E2's time limit: the SERVER copy's game.cfg koth_limit for this cell (the
+# retail host reads the file at its start, the OpenNova host mounts the same
+# copy). The cell's exact original bytes are kept and written back by the
+# cleanup once every process has stopped: retail saves game.cfg at its exit
+# (Game_SaveConfig from Game_Run), which would otherwise leave the limit in
+# the copy for the next cell.
+$script:ServerGameCfgOriginal = $null
+$script:ServerGameCfgOverride = $null
+function Set-ServerTimeLimit {
+    $path = Join-Path $ServerDir "game.cfg"
+    $latin1 = [Text.Encoding]::GetEncoding(28591)
+    $original = [IO.File]::ReadAllBytes($path)
+    $text = $latin1.GetString($original)
+    $found = [regex]::Matches($text, '(?m)^[ \t]*koth_limit[ \t]*=[ \t]*"?(\d+)"?')
+    if ($found.Count -ne 1) {
+        throw "SERVER game.cfg holds $($found.Count) koth_limit lines; the time limit needs exactly one."
+    }
+    $digits = $found[0].Groups[1]
+    $updated = $text.Substring(0, $digits.Index) + [string] $TimeLimitMinutes +
+        $text.Substring($digits.Index + $digits.Length)
+    $bytes = $latin1.GetBytes($updated)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $script:ServerGameCfgOverride = [pscustomobject][ordered]@{
+        path = $path
+        key = "koth_limit"
+        value = $TimeLimitMinutes
+        original_value = [int] $digits.Value
+        original_sha256 = ([BitConverter]::ToString($sha.ComputeHash($original)) -replace '-', '').ToLowerInvariant()
+        effective_sha256 = ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant()
+        restored = $false
+    }
+    $script:ServerGameCfgOriginal = $original
+    [IO.File]::WriteAllBytes($path, $bytes)
+    Write-Host "PARITY_RUN_NOTE SERVER game.cfg koth_limit $($digits.Value) -> $TimeLimitMinutes for this cell"
+}
+
+function Restore-ServerGameCfg {
+    if (-not $script:ServerGameCfgOriginal) { return }
+    foreach ($process in @($script:RetailHostProcess, $script:RetailProcess, $script:OpenNovaHost)) {
+        if ($process) {
+            try { $null = $process.WaitForExit(15000) } catch {}
+        }
+    }
+    $path = $script:ServerGameCfgOverride.path
+    [IO.File]::WriteAllBytes($path, $script:ServerGameCfgOriginal)
+    $restoredHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($restoredHash -ne $script:ServerGameCfgOverride.original_sha256) {
+        throw "SERVER game.cfg restore left $restoredHash, not the cell's original $($script:ServerGameCfgOverride.original_sha256)"
+    }
+    $script:ServerGameCfgOverride.restored = $true
+    $script:ServerGameCfgOriginal = $null
+}
+
 function Wait-UntilSteadyDeadline {
     if (-not $script:SteadyStartedUtc -or $script:SteadyCompletedUtc) {
         throw "Steady deadline wait is out of order"
@@ -1183,10 +1264,11 @@ function Assert-OnHookRoleLaunch {
     Assert-RetailStock -Tool $Tool -Reported $reported
 }
 
-function Start-RetailHostExact {
-    $hostDir = Join-Path $RunRoot "host"
-    New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
-    $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_host_lan" -Arguments @{
+# onhook_host_lan's arguments for this cell's retail host; the rotation key
+# only when the cell has a tail, so every other cell's call is unchanged.
+function Get-RetailHostArguments {
+    param([Parameter(Mandatory = $true)] [string] $OutputDir)
+    $arguments = @{
         mission = $Mission
         game_dir = $ServerDir
         expansion = $Expansion
@@ -1195,14 +1277,37 @@ function Start-RetailHostExact {
         game_type = [string] $GameType
         max_players = 4
         run_id = "$RunId-host"
-        output_dir = $hostDir
+        output_dir = $OutputDir
         capture = $true
         windowed = $true
         allow_many = $true
         stock_observer = $StockObserver
         wait_timeout_ms = 240000
-    })
+    }
+    if ($RotationList.Count -gt 0) { $arguments.rotation = @($RotationList) }
+    return $arguments
+}
+
+# The hook echoes the rotation it built; a hook pair without it (before
+# opennova-int's host rotation) cannot host an E2 cell.
+function Assert-RetailHostRotation {
+    param([Parameter(Mandatory = $true)] $Result)
+    if ($RotationList.Count -eq 0) { return }
+    $echo = if ($Result.PSObject.Properties.Name -contains "rotation") {
+        @($Result.rotation | ForEach-Object { [string] $_ })
+    } else { $null }
+    if ($null -eq $echo -or ($echo -join ',') -cne ($RotationList -join ',')) {
+        throw "onhook_host_lan did not build the requested rotation ($($RotationList -join ',')); deploy an onHook pair with host rotation."
+    }
+}
+
+function Start-RetailHostExact {
+    $hostDir = Join-Path $RunRoot "host"
+    New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
+    $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_host_lan" `
+        -Arguments (Get-RetailHostArguments -OutputDir $hostDir))
     Assert-OnHookRoleLaunch -Tool "onhook_host_lan" -Result $result
+    Assert-RetailHostRotation -Result $result
     $script:OwnedRetailRuns.Add([string] $result.run_id)
     $script:RetailHostProcess = Get-Process -Id ([int] $result.pid) -ErrorAction Stop
     Bind-EffectiveRetailConfig -Role server -Source (Join-Path $ServerDir "onhook.cfg")
@@ -1678,6 +1783,7 @@ function Wait-OpenNovaJoinerReady {
 try {
     Write-Host "PARITY_RUN_BEGIN topology=$Topology mission=$Mission game_type=$GameType port=$Port resolution=$Resolution joiner_dial=$JoinerDial run=$RunId"
     Assert-UdpPortUnowned
+    if ($TimeLimitMinutes -gt 0) { Set-ServerTimeLimit }
     Start-OnHookMcp
 
     # Exercise the tracked capture wrapper used by the runbook so every suite
@@ -1879,25 +1985,12 @@ try {
                 $script:RetailHostProcess = $null
                 break
             }
-            $hostResult = Invoke-OnHookTool -Name "onhook_host_lan" -Arguments @{
-                mission = $Mission
-                game_dir = $ServerDir
-                expansion = $Expansion
-                port = $Port
-                callsign = $HostCallsign
-                game_type = [string] $GameType
-                max_players = 4
-                run_id = "$RunId-host"
-                output_dir = $RunRoot
-                capture = $true
-                windowed = $true
-                allow_many = $true
-                stock_observer = $StockObserver
-                wait_timeout_ms = 240000
-            }
+            $hostResult = Invoke-OnHookTool -Name "onhook_host_lan" `
+                -Arguments (Get-RetailHostArguments -OutputDir $RunRoot)
             $retailHost = Get-StructuredResult $hostResult
             $script:OwnedRetailRuns.Add([string] $retailHost.run_id)
             Assert-OnHookRoleLaunch -Tool "onhook_host_lan" -Result $retailHost
+            Assert-RetailHostRotation -Result $retailHost
             Bind-EffectiveRetailConfig -Role server -Source (Join-Path $ServerDir "onhook.cfg")
             $script:EvidenceCapture = [string] $retailHost.capture_path
             $script:EvidencePerspective = "retail-host"
@@ -2281,6 +2374,11 @@ finally {
             Stop-Process -Id $script:Mcp.Id -Force -ErrorAction SilentlyContinue
         }
     }
+
+    if ($script:ServerGameCfgOriginal) {
+        try { Restore-ServerGameCfg }
+        catch { Add-CleanupFailure "SERVER game.cfg restore failed: $($_.Exception.Message)" }
+    }
 }
 
 if ($script:CleanupFailure) {
@@ -2348,7 +2446,13 @@ $summary = [pscustomobject]@{
     # Both hosts here are listen hosts (a playing host); a dedicated host
     # (opennova-serve, a retail Serve Only host) is another kind.
     host_kind = "listen"
-    joiner_dial = $(if ($Topology -in @("RO", "OO")) { $JoinerDial } else { $null })
+    # E2: the host's rotation tail (empty: one mission) and the cell's round
+    # time limit (0: the copy's own game.cfg value), with the game.cfg write
+    # and its restore.
+    rotation = @($RotationList)
+    time_limit_minutes = $TimeLimitMinutes
+    server_game_cfg_override = $script:ServerGameCfgOverride
+    joiner_dial =$(if ($Topology -in @("RO", "OO")) { $JoinerDial } else { $null })
     repo_commit = [string] $RepoCommit
     repo_dirty = $RepoDirty
     allow_dirty_repo = [bool] $AllowDirtyRepo

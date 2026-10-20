@@ -282,6 +282,26 @@ fixes `expansion` (`jox01`), `items_sha256` and `host_session_name`, which must 
 SERVER copy's `game.cfg` `game_name` byte for byte (`"Untitled "`, with the
 trailing space).
 
+The coverage extensions keep their cases in `parity-extension-cases.json`
+(same schema; run with `-CasesPath scripts\net\parity-extension-cases.json`),
+so the default suite is unchanged. An extension case may add:
+
+- `rotation`: E2's missions after `mission` in the host's rotation, in play
+  order. The runner passes them as `-Rotation` and the retail host takes them
+  through `onhook_host_lan`'s `rotation` (an onHook pair with host rotation).
+  The OpenNova listen host has no rotation launch flag yet, so a rotation case
+  runs RR, RR-aa and RO only.
+- `time_limit_minutes`: E2's round limit (`-TimeLimitMinutes`). Both hosts read
+  it from the SERVER copy's `game.cfg` `koth_limit` (retail's
+  `g_TimeLimitMinutes`), so the runner writes it there for the cell and
+  restores the file's exact bytes after every process has stopped. The summary
+  records the write and the restore as `server_game_cfg_override`.
+- `topologies`: the cells the case has (default all five; RR and RR-aa always).
+  The other cells report `not_applicable` and are not counted as missing.
+
+The summary records `rotation` and `time_limit_minutes`, and a reference is
+reused only for a case with the same values.
+
 ### Comparing two suites
 
 `diff_verdicts.py` (standard library only) compares two suites' verdict
