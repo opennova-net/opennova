@@ -1137,9 +1137,7 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 		if (!(conn.peer == peer)) continue;
 		conn.phase = inmatch::ConnectionPhase::PlayerAdded;
 		conn.burst.spawned = true;
-		conn.reply.roster_counted = true;
 	}
-	const uint32_t roster_before = ctx.np_protocol.roster_generation;
 
 	ClientAuth replacement = make_valid_client_auth(
 			2, 0xC0FFEE22u, kHostKey, "ReplacementJoiner",
@@ -1173,8 +1171,6 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 				"endpoint replacement releases the emplaced-gun seat and control latches")) {
 		return false;
 	}
-	if (!expect(ctx.np_protocol.roster_generation == roster_before + 1,
-	            "endpoint replacement advances the roster generation")) return false;
 	const inmatch::NapiNPConnection &fresh = ctx.np_protocol.connection_list.front();
 	if (!expect(fresh.client_ci == replacement.ci && fresh.client_ck == replacement.ck &&
 	                    fresh.player_name == replacement.na &&
@@ -1216,7 +1212,6 @@ bool run_inactive_peer_is_reaped() {
 		if (!(conn.peer == peer)) continue;
 		conn.phase = inmatch::ConnectionPhase::PlayerAdded;
 		conn.burst.spawned = true;
-		conn.reply.roster_counted = true;
 		conn.receive_inactive_ms = 119999;
 	}
 
@@ -1894,8 +1889,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 							inmatch::connection_count(ctx) == 1 &&
 							ctx.np_protocol.connection_list.front().self_id_seen &&
 							ctx.np_protocol.connection_list.front().reply.admission_metadata_pushed &&
-							!ctx.np_protocol.connection_list.front().reply.spawn_metadata_pushed &&
-							!ctx.np_protocol.connection_list.front().reply.roster_pushed,
+							!ctx.np_protocol.connection_list.front().reply.spawn_metadata_pushed,
 					"valid 0x02 echo completes admission and emits post-handshake metadata")) {
 			return false;
 		}
@@ -1903,16 +1897,14 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		inmatch::tick_connections(ctx, 16, 103);
 		if (!expect(
 					ctx.np_protocol.connection_list.front().link.owned_entity.valid() &&
-							ctx.np_protocol.connection_list.front().reply.spawn_metadata_pushed &&
-							!ctx.np_protocol.connection_list.front().reply.roster_pushed,
+							ctx.np_protocol.connection_list.front().reply.spawn_metadata_pushed,
 					"next tick spawns the player and emits only spawn metadata")) {
 			return false;
 		}
 		const std::vector<inmatch::TickOut> pre_metadata_tick =
 				inmatch::tick_connections(ctx, 16, 104);
 		if (!expect(
-					pre_metadata_tick.empty() &&
-					!ctx.np_protocol.connection_list.front().reply.roster_pushed,
+					pre_metadata_tick.empty(),
 					"following tick waits for the mission-metadata boundary")) {
 			return false;
 		}
@@ -1924,10 +1916,8 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 						{make_protocol_message(0x37, {})}, 105,
 						ctx.np_protocol.connection_list, &w);
 		if (!expect(
-					connection.reply.roster_pushed &&
-					join_tail.size() == 2 && join_tail[0].tag == 0x64 &&
-					join_tail[1].tag == 0x16,
-					"0x37 publishes mission metadata and the first roster together")) {
+					join_tail.size() == 1 && join_tail[0].tag == 0x64,
+					"0x37 publishes the mission metadata alone (the first roster is the scoreboard clock's)")) {
 			return false;
 		}
 	}
@@ -2471,9 +2461,9 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 	}
 
 	if (!expect(
-			join_tail.size() == 3 && join_tail[0].tag == 0x75 &&
-			join_tail[1].tag == 0x64 && join_tail[2].tag == 0x16,
-			"the first 0x37 boundary is exactly 0x75 + 0x64 + 0x16")) {
+			join_tail.size() == 2 && join_tail[0].tag == 0x75 &&
+			join_tail[1].tag == 0x64,
+			"the first 0x37 boundary is exactly 0x75 + 0x64 (the 0x16 is the scoreboard clock's)")) {
 		return false;
 	}
 	if (!expect(
@@ -2502,14 +2492,17 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 	if (!expect(
 			!messages_for_peer(inmatch::tick_connections(ctx, 16, 7), same_tick_stream) &&
 			same_tick_stream.empty(),
-			"world streaming waits until after the roster send boundary")) {
+			"the player-sync track waits for the joiner's C2S 0x09 (D-NET-500)")) {
 		return false;
 	}
+	(void)inmatch::dispatch_session_replies(
+			ctx.config, *remote, {make_protocol_message(0x09, {})},
+			8, ctx.np_protocol.connection_list, &world);
 	std::vector<ProtocolMessage> next_tick_stream;
 	return expect(
 			messages_for_peer(inmatch::tick_connections(ctx, 16, 8), next_tick_stream) &&
 			!next_tick_stream.empty() && !reply_has_tag(next_tick_stream, 0x16),
-			"world streaming begins on the following tick without another roster");
+			"the player-sync track begins after the C2S 0x09, without a roster");
 }
 
 // The PR #403 retail-to-retail LAN witness sends the joining client's ClientAuth.NA
@@ -4370,7 +4363,6 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	host.link.owned_entity = host_handle;
 	host.reply.player_slot = 0;
 	host.reply.player_name = "OpenNovaHost403";
-	host.reply.roster_counted = true;
 	ctx.np_protocol.connection_list.push_back(std::move(host));
 
 	const PeerAddr peer{0x0100007Fu, 32786};
@@ -4389,9 +4381,6 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	joiner.reply.player_name = "RetailJoin403";
 	joiner.assigned_team = 1;
 	joiner.assigned_team_valid = true;
-	joiner.reply.roster_pushed = true;
-	joiner.reply.roster_counted = true;
-	joiner.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 	joiner.server_scrk =
 			"PERIODICSCOREBOARDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
 	joiner.client_ck = 0x40340340u;
