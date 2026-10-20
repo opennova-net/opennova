@@ -65,7 +65,19 @@ namespace opennova::inmatch {
 // [orig: g_NetQualityReportTimer @0xA85B84 - its only writers Client_ProcessNetworkFrame
 //  @0x42C239 (the step) and @0x42C246 (the zero at the report)]
 struct ClientProcessState {
+	// The report's period: the 311th step fires. [orig: Client_ProcessNetworkFrame @0x42C23E]
+	static constexpr uint32_t kNetQualityReportInterval = 310;
 	uint32_t net_quality_report_timer = 0;
+	// One client net frame's step, which every mission frame of every role runs (a Serve Only
+	// host's included, with no client runtime): true at the 311th, which zeroes the word before
+	// the session test, so the caller's report (in session, a session peer) is its own.
+	// [orig: Game_ProcessMainFrame @0x526692 (the unconditional call); Client_ProcessNetworkFrame
+	//  @0x42C22D..0x42C23E (the step), @0x42C246 (the zero), @0x42C24C / @0x42C254 (the tests)]
+	bool step_net_quality_report() {
+		if (++net_quality_report_timer <= kNetQualityReportInterval) return false;
+		net_quality_report_timer = 0;
+		return true;
+	}
 };
 
 class ClientRuntime {
@@ -980,8 +992,8 @@ private:
 	// process-lived word (use_process_state), else this runtime's own.
 	ClientProcessState own_process_;
 	ClientProcessState *external_process_ = nullptr;
-	uint32_t &net_quality_timer() {
-		return (external_process_ != nullptr ? *external_process_ : own_process_).net_quality_report_timer;
+	ClientProcessState &process_state() {
+		return external_process_ != nullptr ? *external_process_ : own_process_;
 	}
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_Tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
 	                                     // and decremented, but never compared in @0x42C180;

@@ -31,7 +31,7 @@ namespace {
 
 // §5.44 housekeeping cadences/constants, witnessed in [orig: Client_ProcessNetworkFrame @0x42c180].
 constexpr uint32_t kKeepaliveInterval = 29760; // 0x34 keepalive period in ticks [orig: Client_ProcessNetworkFrame @0x42c1c0]
-constexpr uint32_t kNetQualityInterval = 310;  // 0x4C net-quality report period [orig: Client_ProcessNetworkFrame @0x42c23e]
+constexpr uint32_t kNetQualityInterval = ClientProcessState::kNetQualityReportInterval; // the 0x4C period
 constexpr uint32_t kTag2CCooldown = 62;        // 0x2C vestigial/telemetry set-value [orig: Client_ProcessNetworkFrame @0x42c412], never a gate
 
 // Retail's x86 IMUL/ADD timer arithmetic wraps at 32 bits. Perform the
@@ -1495,11 +1495,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// [orig: Client_ProcessNetworkFrame @0x42C180 - the timer
 		//  @0x42C22D..0x42C23E, is_in_session @0x42C240, is_mp_session_peer
 		//  @0x42C24E, the queue @0x42C279]
-		if (++net_quality_timer() > kNetQualityInterval) {
-			net_quality_timer() = 0;
-			if (view_.mp_session())
-				queue_host_message(c2s::CLIENT_QUALITY, {net_quality_level()});
-		}
+		if (process_state().step_net_quality_report() && view_.mp_session())
+			queue_host_message(c2s::CLIENT_QUALITY, {net_quality_level()});
 		// host: no connect-drive, no keepalive send, no 0x0C. Its send block
 		// opens every frame, so the held one-shots leave here, after the
 		// receive fold: the local connection has no peer address, and its own
@@ -1525,8 +1522,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// is_mp_session_peer alone, so the game loop's frame steps the timer and reports dead
 	// or alive (D-NET-529). [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279]
 	if (!replay_mode_ && joiner_->in_game_loop()) {
-		if (++net_quality_timer() > kNetQualityInterval) {
-			net_quality_timer() = 0;
+		if (process_state().step_net_quality_report()) {
 			ProtocolMessage quality = make_protocol_message(
 					0x4C, std::vector<uint8_t>{net_quality_level()});
 			// This is neither indefinitely reliable nor one-send: retail passes

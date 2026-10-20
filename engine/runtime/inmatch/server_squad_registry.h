@@ -29,7 +29,7 @@ namespace opennova::inmatch {
 const SquadRegistryNode *find_squad_registry_node(const NapiNPServerCtx &ctx, int32_t squad_id);
 
 // The active player slots whose squad key is `key`; 0 for a key of 0.
-// [orig: CSlotArray152_CountActiveByKey @0x500660 - the key test @0x500669,
+// [orig: CSlotArray152_CountActiveByKey @0x500660 - the key test @0x500667 (its jnz @0x500669),
 //  the active byte (+4) @0x500690, the key (+0x188DC) @0x500699, its jnz @0x50069B]
 int32_t count_active_slots_by_squad_key(const NapiNPServerCtx &ctx, int32_t key);
 

@@ -401,4 +401,9 @@ uint32_t resolve_address_without_dns(const std::string &host) {
 	return address == 0xFFFFFFFFu ? 0u : address;
 }
 
+std::string in_addr_text(uint32_t address) {
+	return std::to_string(address & 0xFFu) + "." + std::to_string((address >> 8) & 0xFFu) + "." +
+	       std::to_string((address >> 16) & 0xFFu) + "." + std::to_string((address >> 24) & 0xFFu);
+}
+
 } // namespace opennova

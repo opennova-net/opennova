@@ -88,7 +88,7 @@ public:
 	HOST_SESSION_INT(game_type, game_type)
 	HOST_SESSION_INT(mp_attributes, mp_attributes)
 	HOST_SESSION_INT(class_allow_mask, class_allow_mask)
-	HOST_SESSION_INT(respawn_time, respawn_time)
+	HOST_SESSION_INT(round_time_limit_minutes, round_time_limit_minutes)
 	HOST_SESSION_INT(time_limit_minutes, time_limit_minutes)
 	HOST_SESSION_INT(replay_enabled, replay_enabled)
 	HOST_SESSION_INT(max_team_lives, max_team_lives)

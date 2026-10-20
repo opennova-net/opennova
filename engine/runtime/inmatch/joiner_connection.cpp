@@ -352,7 +352,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// BT is the account ban state (1/2 reject, DC=6/7; 0 for LAN). The rest are stored/display
 	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB). VERSIONSTRING is the binary's own
 	// sprintf("V%i.%i.%i.%i", ...), the title's profile's version text (JO's 1, 7, 5, 7)
-	// [orig: Game_ParseCommandLineAndInit @0x4a7d81 into byte_B4C0B0, copied @0x569b5c]; COUNTRYCODE
+	// [orig: Game_ParseCommandLineAndInit @0x4a7d81 into g_VersionText, copied @0x569b5c]; COUNTRYCODE
 	// is the install's CC.BIN, omitted when empty
 	// [orig: @0x569b70; the strlen gate @0x4c385a] (D-NET-296).
 	// [wire: retail-lan-host-join-session ClientAuth; orig: NapiNetConfig_LoadFromConnTags

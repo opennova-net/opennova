@@ -5,6 +5,7 @@
 #include <formats/def/def.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/playersav/player_sav.h>
+#include <net/novaworld/lobby_vars.h> // resolve_address_without_dns, in_addr_text
 #include <net/npwire/net_ports.h>
 #include <net/npwire/nw_session_framing.h> // NapiPrng
 #include <runtime/inmatch/host_role.h> // singleplayer_game_config
@@ -73,10 +74,11 @@ void apply_session_create_words(GameConfig &config, const gamecfg::GameCfg &cfg)
 HostConfig shell_host_config(const ShellHostSource &source) {
 	HostConfig host;
 	if (source.lan_config != nullptr) {
+		// The name as the request carries it, empty included: the create copies the block's
+		// word with no default [orig: CNapiGameSession_BuildAndCreateSession @0x5695D2
+		// Napi_CopyString(.., serverName_3A5, 32); Game_ApplySessionSettingsToGlobals
+		// @0x551FEB strncpy(g_ServerNameStr, serverName_3A5, 0x1F)].
 		host.config = *source.lan_config;
-		// Ours: a host-screen config that carries no name (a tool's or a
-		// test's; the screen seeds Menu/UNTITLED) still advertises one.
-		if (host.config.server_name.empty()) host.config.server_name = "OpenNova LAN Host";
 		host.config.max_players = source.lan_max_players;
 		host.config.dedicated_server = !source.lan_serve_and_play;
 		host.socket_mode = SocketMode::Lan;
@@ -100,12 +102,18 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 	return host;
 }
 
+int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, int title) {
+	const int32_t cap = session_player_cap(requested, title);
+	if (block != nullptr) block->mp_max_players = cap;
+	return cap;
+}
+
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// In session, the cap goes into 1..65 (dfx2.exe: 1..251) before the apply,
-	// written back into the block (session_player_cap carries the witness).
+	// written back into the block (store_session_player_cap carries the witness).
 	const int title = cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2
 	                                                         : gameprofile::GAME_JO;
-	cfg.mp_max_players = session_player_cap(cfg.mp_max_players, title);
+	(void)store_session_player_cap(&cfg, cfg.mp_max_players, title);
 	return host_screen_from_block(cfg);
 }
 
@@ -196,7 +204,7 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
 	// g_ScoreLimit from `max_kills` and g_KillLimit from `max_score`
 	// @0x551B6D..0x551B8C, g_KothDelta @0x551CF4, g_FlagReturnTime2 @0x551CFE,
 	// g_FlagCarryLimitSeconds from `mp_flagresettime` @0x551D0A.
-	config.respawn_time = static_cast<uint32_t>(cfg.time_limit);
+	config.round_time_limit_minutes = static_cast<uint32_t>(cfg.time_limit);
 	config.time_limit_minutes = session_koth_limit_minutes(cfg.koth_limit);
 	config.replay_enabled = static_cast<uint32_t>(cfg.replay);
 	config.max_team_lives = static_cast<uint32_t>(cfg.max_team_lives);
@@ -250,36 +258,54 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
 	return host;
 }
 
+TransportPortQuad transport_port_quad(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first) {
+	TransportPortQuad quad{cfg.mp_lan_server_port_min, cfg.mp_lan_server_port_max,
+			cfg.mp_lan_server_port_delta, 0};
+	if (type == NetworkType::NovaWorld) {
+		quad = {cfg.mp_novaworld_port_min, cfg.mp_novaworld_port_max, cfg.mp_novaworld_port_delta,
+				cfg.mp_novaworld_port_random};
+	} else if (!authority) {
+		quad = {cfg.mp_lan_client_port_min, cfg.mp_lan_client_port_max,
+				cfg.mp_lan_client_port_delta, cfg.mp_lan_client_port_random};
+	}
+	if (first) quad.min = static_cast<int32_t>(*first);
+	return quad;
+}
+
 std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkType type,
 		bool authority, std::optional<uint32_t> first) {
-	int32_t min = cfg.mp_lan_server_port_min;
-	int32_t max = cfg.mp_lan_server_port_max;
-	int32_t delta = cfg.mp_lan_server_port_delta;
-	int32_t random = 0;
-	if (type == NetworkType::NovaWorld) {
-		min = cfg.mp_novaworld_port_min;
-		max = cfg.mp_novaworld_port_max;
-		delta = cfg.mp_novaworld_port_delta;
-		random = cfg.mp_novaworld_port_random;
-	} else if (!authority) {
-		min = cfg.mp_lan_client_port_min;
-		max = cfg.mp_lan_client_port_max;
-		delta = cfg.mp_lan_client_port_delta;
-		random = cfg.mp_lan_client_port_random;
-	}
-	const uint32_t start = first ? *first : static_cast<uint32_t>(min);
+	const TransportPortQuad quad = transport_port_quad(cfg, type, authority, first);
+	const uint32_t start = static_cast<uint32_t>(quad.min);
 	uint32_t start_index = 0;
-	if (random != 0) {
+	if (quad.random != 0) {
 		const uint32_t attempts = bind_scan_attempts(
-				start, static_cast<uint32_t>(max), static_cast<uint32_t>(delta));
+				start, static_cast<uint32_t>(quad.max), static_cast<uint32_t>(quad.delta));
 		if (attempts > 1) {
 			NapiPrng prng(napi_prng_platform_seed());
 			start_index = static_cast<uint32_t>(
 					prng.next_in_range(0, static_cast<int32_t>(attempts) - 1));
 		}
 	}
-	return lan_host_bind_ports(start, static_cast<uint32_t>(max), static_cast<uint32_t>(delta),
-			start_index);
+	return lan_host_bind_ports(start, static_cast<uint32_t>(quad.max),
+			static_cast<uint32_t>(quad.delta), start_index);
+}
+
+uint32_t transport_bind_address(const gamecfg::GameCfg &cfg) {
+	return resolve_address_without_dns(cfg.mp_ip_address_string);
+}
+
+std::string transport_socket_error_text(uint32_t address, const TransportPortQuad &quad) {
+	// The failure's sprintf (transport_socket_error_text's declaration carries the witness).
+	return "NET SOCKET SETUP ERROR!!!!!!!!  CANNOT CREATE SOCKET WITH PARAMS: IP=" +
+	       in_addr_text(address) + ", PORTMIN=" + std::to_string(quad.min) +
+	       " PORTMAX=" + std::to_string(quad.max) + ", PORTDELTA=" + std::to_string(quad.delta) +
+	       ", PORTRANDOM=" + std::to_string(quad.random) + "!!!!!";
+}
+
+std::string transport_socket_setup_text(uint32_t address, uint32_t port) {
+	// Napi_FormatAddress's "%s:%ld" inside the line's brackets.
+	return "NET SOCKET SETUP [" + in_addr_text(address) + ":" + std::to_string(port) + "]";
 }
 
 void store_server_command_config(

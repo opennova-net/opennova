@@ -695,32 +695,31 @@ bool Server::route_mission_exit(int32_t reason) {
 bool Server::open_socket(std::string &error) {
 	// The NovaWorld quad's random word starts the scan at a drawn port; the
 	// authority's LAN arm passes random 0 (inmatch::transport_bind_ports).
-	const std::vector<uint16_t> ports = inmatch::transport_bind_ports(config_.cfg(),
-			novaworld_ ? inmatch::NetworkType::NovaWorld : inmatch::NetworkType::Lan,
-			/*authority=*/true, options_.port);
+	const inmatch::NetworkType type =
+			novaworld_ ? inmatch::NetworkType::NovaWorld : inmatch::NetworkType::Lan;
+	const std::optional<uint32_t> first =
+			options_.port ? std::optional<uint32_t>(*options_.port) : std::nullopt;
+	const std::vector<uint16_t> ports =
+			inmatch::transport_bind_ports(config_.cfg(), type, /*authority=*/true, first);
+	// Every port of the scan binds on the block's mpipaddressstring (inmatch::
+	// transport_bind_address carries the witness).
+	const uint32_t address = inmatch::transport_bind_address(config_.cfg());
 	// The connect log's socket lines [orig: CNapiNetwork_OpenTransportSocket - "%s : NET
 	//  SETTING UP SOCKET...." @0x4C6BA0..0x4C6BD7, the setup @0x4C6C7B..0x4C6CFA, the failure
 	//  @0x4C6BF2..0x4C6C6B].
 	inmatch::ConnectLog &connect_log = log_devices_.connect();
 	connect_log.line("NET SETTING UP SOCKET....");
 	for (const uint16_t port : ports) {
-		socket_ = net::udp_bind(port, &bound_port_);
+		socket_ = net::udp_bind(port, &bound_port_, address);
 		if (socket_.is_valid()) break;
 	}
 	if (!socket_.is_valid()) {
-		const gamecfg::GameCfg &cfg = config_.cfg();
-		const bool nw = novaworld_;
-		connect_log.line("NET SOCKET SETUP ERROR!!!!!!!!  CANNOT CREATE SOCKET WITH PARAMS: IP=" +
-				std::string("0.0.0.0") + ", PORTMIN=" +
-				std::to_string(options_.port ? int32_t{*options_.port}
-				                             : (nw ? cfg.mp_novaworld_port_min : cfg.mp_lan_server_port_min)) +
-				" PORTMAX=" + std::to_string(nw ? cfg.mp_novaworld_port_max : cfg.mp_lan_server_port_max) +
-				", PORTDELTA=" + std::to_string(nw ? cfg.mp_novaworld_port_delta : cfg.mp_lan_server_port_delta) +
-				", PORTRANDOM=" + std::to_string(nw ? cfg.mp_novaworld_port_random : 0) + "!!!!!");
+		connect_log.line(inmatch::transport_socket_error_text(address,
+				inmatch::transport_port_quad(config_.cfg(), type, /*authority=*/true, first)));
 		error = "no port of the bind scan from " + std::to_string(ports.front()) + " is free";
 		return false;
 	}
-	connect_log.line("NET SOCKET SETUP [0.0.0.0:" + std::to_string(bound_port_) + "]");
+	connect_log.line(inmatch::transport_socket_setup_text(address, bound_port_));
 	datagrams_ = std::make_unique<net::NetDatagramSocket>(socket_);
 	demux_ = std::make_unique<DatagramDemux>(*datagrams_);
 	return true;

@@ -453,7 +453,7 @@ void test_get_and_set() {
 	host.console->set_scene(inmatch::AdminScene::GameLoop);
 	expect_eq(c.one("GET"), "USAGE -  GET [GAMESTATE] [GAMESETTINGS]", "GET's usage");
 
-	host.ctx.config.respawn_time = 25;
+	host.ctx.config.round_time_limit_minutes = 25;
 	host.world.match.set_remaining_ticks(21 * 3720 + 100);
 	host.block.game_name = "A Very Long Server Name Of 31 C";
 	const std::string settings = c.one("GET GAMESETTINGS");
@@ -487,7 +487,7 @@ void test_get_and_set() {
 	               after.find("FatBullets           = 7\n") != std::string::npos && host.world.rules.fat_bullets,
 	       "atof and the raw atol word");
 	c.one("SET GameTime 2");
-	expect(host.world.match.remaining_ticks() == 2 * 3720 && host.ctx.config.respawn_time == 2,
+	expect(host.world.match.remaining_ticks() == 2 * 3720 && host.ctx.config.round_time_limit_minutes == 2,
 	       "GameTime restarts the round clock at 3720 x value");
 	expect_eq(c.one("SET ServerName a b c"), "OK - Setting Changed.", "ServerName");
 	expect(host.block.game_name == "a b c " && host.ctx.np_protocol.session_name == "a b c ",

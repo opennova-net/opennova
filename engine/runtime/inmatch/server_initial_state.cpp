@@ -104,7 +104,7 @@ std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 	const GameConfig &r = ctx.config;
 	std::vector<uint8_t> b;
 	b.reserve(51);
-	io::append_u32_le(b, r.respawn_time);
+	io::append_u32_le(b, r.round_time_limit_minutes);
 	io::append_u32_le(b, r.time_limit_minutes);
 	io::append_u32_le(b, r.replay_enabled);      // [orig: g_ReplayEnabled @0x24D2120, SET `replay`]
 	io::append_u32_le(b, r.game_type);

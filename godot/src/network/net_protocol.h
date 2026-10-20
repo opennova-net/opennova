@@ -66,7 +66,7 @@ public:
 		MAX_CALLSIGN_LENGTH = opennova::game_rules::kMaxCallsignLength,
 
 		// The Config_SetDefaults session-rule baseline (base/gameprofile game_type.h).
-		DEFAULT_RESPAWN_TIME = opennova::game_rules::kDefaultRespawnTime,
+		DEFAULT_ROUND_TIME_LIMIT_MINUTES = opennova::game_rules::kDefaultRoundTimeLimitMinutes,
 		DEFAULT_TIME_LIMIT_MINUTES = opennova::game_rules::kDefaultTimeLimitMinutes,
 		DEFAULT_REPLAY_ENABLED = opennova::game_rules::kDefaultReplayEnabled,
 		DEFAULT_MAX_TEAM_LIVES = opennova::game_rules::kDefaultMaxTeamLives,

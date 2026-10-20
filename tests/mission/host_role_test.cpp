@@ -343,6 +343,93 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 	}
 }
 
+// Its own frame, like check_quality_report_runs_on.
+void check_serve_only_steps_quality_count(std::map<std::string, std::string> &files) {
+	// --- a Serve Only host steps the process's 0x4C count ----------------------
+	// Retail's main frame runs the client net frame in every role, so a Serve Only host steps
+	// the count (and zeroes it past 310) with no report; a listen host the same process runs
+	// next reports on the phase the dedicated frames left: after N of them, at (311 - N) + 1.
+	// [orig: Game_ProcessMainFrame @0x526692; Client_ProcessNetworkFrame @0x42C239 / @0x42C246]
+	// Few enough that the listen client's level is measured by its first report (a 0 level
+	// stores nothing the test can see).
+	constexpr int kDedicatedFrames = 10;
+	inmatch::ClientProcessState process;
+	{
+		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		ms::MissionKernel &kernel = *kernel_owner;
+		inmatch::HostRole &role = *role_owner;
+		role.bind(kernel);
+		kernel.open_document(two_entity_mission(), "serve_only_quality", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
+			cfg.config.server_name = "serve_only_quality";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = false;
+			cfg.client_process = &process;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(role.state.client_runtime == nullptr);
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		for (int frame = 0; frame < kDedicatedFrames; ++frame) role.run_tick(tick_input(0));
+		CHECK(process.net_quality_report_timer == static_cast<uint32_t>(kDedicatedFrames));
+	}
+	{
+		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		ms::MissionKernel &kernel = *kernel_owner;
+		inmatch::HostRole &role = *role_owner;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "serve_only_then_listen", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
+			cfg.config.server_name = "serve_only_then_listen";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			cfg.client_process = &process;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		role.observe_frame_rate(62);
+		kernel.capture_baseline();
+		int stored_at = -1;
+		for (int frame = 1; frame <= 600 && stored_at < 0; ++frame) {
+			role.run_tick(tick_input(0));
+			for (const inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+				if (conn.link.owned_entity == kernel.world.cached.local_player &&
+						conn.reply.client_quality != 0)
+					stored_at = frame;
+		}
+		std::printf("host_role: after %d Serve Only frames the listen client's 0x4C stored at frame %d\n",
+				kDedicatedFrames, stored_at);
+		CHECK(stored_at == (311 - kDedicatedFrames) + 1);
+	}
+}
+
 int main() {
 	std::map<std::string, std::string> files;
 
@@ -1383,6 +1470,7 @@ int main() {
 	}
 
 	check_quality_report_runs_on(files);
+	check_serve_only_steps_quality_count(files);
 
 	check_own_world_state_location_names(files);
 

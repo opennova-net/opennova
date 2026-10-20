@@ -4103,7 +4103,7 @@ bool check_session_status_reply_matches_retail_writer() {
 	config.mission_name = "Training: Grenade Launcher";
 	config.game_type = 0x10020u;
 	config.max_players = 4;
-	config.respawn_time = 30;
+	config.round_time_limit_minutes = 30;
 
 	std::vector<opennova::inmatch::NapiNPConnection> roster(2);
 	roster[0].type = 2;

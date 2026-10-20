@@ -735,6 +735,12 @@ void HostRole::run_tick(const TickInput &input) {
 		// the waypoint gametypes (the route stays the promotion's).
 		apply_replica_track(kernel.world, state.client_runtime->state(),
 				state.client_runtime->game_type(), /*route_from_wire=*/false, track_seen_);
+	} else {
+		// A Serve Only host has no client runtime, but its main frame runs the client net
+		// frame all the same, which steps the process's 0x4C count (no report: not a session
+		// peer). [orig: Game_ProcessMainFrame @0x526692 (no role test); Client_ProcessNetworkFrame
+		//  @0x42C239 / @0x42C246]
+		(void)client_process_->step_net_quality_report();
 	}
 	ctx.net_quality_link_errors = 0;
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;

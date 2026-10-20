@@ -144,7 +144,7 @@ int main() {
 			CHECK(config.custom_text == "the cfg's own message");
 			CHECK(config.max_players == 8u && config.player_slot_limit() == 9u); // + the dedicated slot
 			CHECK(config.score_limit == 20u);
-			CHECK(config.respawn_time == 40u);
+			CHECK(config.round_time_limit_minutes == 40u);
 			CHECK(config.spectator_slots == 3);
 			CHECK(!config.allow_ai);
 			CHECK(config.time_of_day_continuity == 1);
@@ -185,6 +185,60 @@ int main() {
 			fs::remove(work / gamecfg::kFileName);
 			server->stop();
 			CHECK(!fs::exists(work / gamecfg::kFileName));
+		}
+	}
+
+	// --- 1a. the socket's bind address and its connect-log lines: the block's
+	//     mpipaddressstring is the bind address of every port of the scan, and
+	//     the lines name it; a held port fails the scan with the ERROR line over
+	//     the stored quad, random 0 on the authority's LAN arm.
+	//     [orig: CNapiNetwork_OpenTransportSocket @0x4C6B12 (the address),
+	//      @0x4C6BA0..0x4C6BD7, @0x4C6BF2..0x4C6C6B, @0x4C6C7B..0x4C6CFA]
+	{
+		const fs::path work = serve_test::fresh_dir("game_cfg_bind_address");
+		dirs.push_back(work);
+		serve_test::ScopedCwd cwd(work);
+		gamecfg::GameCfg cfg = gamecfg::defaults();
+		cfg.mp_ip_address_string = "127.0.0.1";
+		constexpr uint32_t kLoopback = 0x0100007Fu; // 127.0.0.1 as the platform stores it
+		std::string error;
+		{
+			uint16_t held_port = 0;
+			net::ScopedSocket held(net::udp_bind(0, &held_port, kLoopback));
+			CHECK(held.is_valid());
+			gamecfg::GameCfg written = cfg;
+			written.mp_lan_server_port_min = held_port;
+			written.mp_lan_server_port_max = held_port;
+			std::string save_error;
+			CHECK(gamecfg::save_file(gamecfg::kFileName, written, {}, save_error));
+			serve::ServeOptions options;
+			CHECK(serve::parse_serve_options({"--resource-dir", root.string(), "/HOST",
+					(root / "mission_only.host").string(), "--loose-root", "/CONNECTLOG"},
+					options, error) == 0);
+			serve::Server held_out(options);
+			CHECK(!held_out.start(error));
+			const std::string log = serve_test::read_text(work / "_connectlog.txt");
+			const std::string want = " : NET SOCKET SETUP ERROR!!!!!!!!  CANNOT CREATE SOCKET WITH PARAMS: "
+					"IP=127.0.0.1, PORTMIN=" + std::to_string(held_port) +
+					" PORTMAX=" + std::to_string(held_port) +
+					", PORTDELTA=" + std::to_string(written.mp_lan_server_port_delta) +
+					", PORTRANDOM=0!!!!!\r\n";
+			CHECK(log.find(" : NET SETTING UP SOCKET....\r\n") != std::string::npos);
+			CHECK(log.find(want) != std::string::npos);
+			if (log.find(want) == std::string::npos) std::printf("connect log:\n%s\n", log.c_str());
+		}
+		std::unique_ptr<serve::Server> server =
+				start_server(root, root / "mission_only.host", &cfg, error, {"/CONNECTLOG"});
+		if (!server) std::printf("start: %s\n", error.c_str());
+		CHECK(server != nullptr);
+		if (server) {
+			const std::string log = serve_test::read_text(work / "_connectlog.txt");
+			const std::string setting_up = " : NET SETTING UP SOCKET....\r\n";
+			const std::string setup =
+					" : NET SOCKET SETUP [127.0.0.1:" + std::to_string(server->bound_port()) + "]\r\n";
+			CHECK(log.find(setting_up) != std::string::npos && log.find(setup) != std::string::npos &&
+					log.find(setting_up) < log.find(setup));
+			server->stop();
 		}
 	}
 
@@ -232,7 +286,7 @@ int main() {
 			CHECK(config.server_name == "!Untitled");
 			CHECK(config.max_players == 64u && config.player_slot_limit() == 65u); // + the dedicated slot
 			CHECK(config.score_limit == game_rules::kDefaultScoreLimit);
-			CHECK(config.respawn_time == game_rules::kDefaultRespawnTime);
+			CHECK(config.round_time_limit_minutes == game_rules::kDefaultRoundTimeLimitMinutes);
 			CHECK(config.spectator_slots == 0 && config.allow_ai);
 			CHECK(fs::exists(work / gamecfg::kFileName));
 			CHECK(fs::exists(work / gamecfg::kActiveServerMarkerFileName));

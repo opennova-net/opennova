@@ -186,7 +186,7 @@ std::string AdminConsole::game_settings_reply() const {
 	out += settings_row("DoMaxPingCheck", itos(c.do_max_ping_check));
 	out += settings_row("MaxPing", itos(static_cast<int32_t>(c.max_ping)));
 	out += settings_row("MaxFriendlyKills", itos(c.max_friendly_kills));
-	out += settings_row("GameTime", itos(remaining / 60 / 62) + "/" + itos(static_cast<int32_t>(c.respawn_time)));
+	out += settings_row("GameTime", itos(remaining / 60 / 62) + "/" + itos(static_cast<int32_t>(c.round_time_limit_minutes)));
 	out += settings_row("FriendlyFire", itos((rules & GameConfig::kMpAttribNoFriendlyFire) == 0));
 	out += settings_row("FriendlyTags", itos((rules & GameConfig::kMpAttribNoFriendlyTag) == 0));
 	out += settings_row("TeamTriggerClaymore", itos((rules >> 15) & 1u));
@@ -343,7 +343,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		if (block != nullptr) block->numallowablefriendlykills = v;
 	} else if (strutil::iequals(key, "GameTime")) {
 		// The round clock restarts at the full new limit: g_RoundTimeRemaining = 3720 * value.
-		c.respawn_time = static_cast<uint32_t>(v);
+		c.round_time_limit_minutes = static_cast<uint32_t>(v);
 		if (block != nullptr) block->time_limit = v;
 		if (world != nullptr) {
 			world->match.live_rules().game_time_minutes = static_cast<uint32_t>(v);

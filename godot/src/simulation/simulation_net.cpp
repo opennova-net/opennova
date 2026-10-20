@@ -253,9 +253,13 @@ bool Simulation::enable_host_listen(int p_port) {
 	// mplanserverportmax by its mplanserverportdelta, random 0 (D-NET-210; the
 	// witness is engine inmatch::transport_bind_ports). Port 0 keeps the
 	// OS-assigned bind — the dev/test seam retail has no analog for.
+	// Each bind is on the block's mpipaddressstring (engine: inmatch::transport_bind_address).
+	const uint32_t address = net_.game_config.is_valid()
+			? opennova::inmatch::transport_bind_address(net_.game_config->native().cfg())
+			: 0u;
 	bool bound = false;
 	if (p_port <= 0) {
-		bound = net_.pump->bind_listen(0) == 0;
+		bound = net_.pump->bind_listen_at(0, address) == 0;
 	} else {
 		const std::vector<uint16_t> ports = net_.game_config.is_valid()
 				? opennova::inmatch::transport_bind_ports(net_.game_config->native().cfg(),
@@ -263,7 +267,7 @@ bool Simulation::enable_host_listen(int p_port) {
 						  static_cast<uint32_t>(p_port))
 				: opennova::lan_host_bind_ports(static_cast<uint32_t>(p_port));
 		for (const uint16_t port : ports) {
-			if (net_.pump->bind_listen(port) == 0) {
+			if (net_.pump->bind_listen_at(port, address) == 0) {
 				bound = true;
 				break;
 			}
@@ -481,11 +485,14 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	}
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
 	// loopback fold at bring-up; max_players is the session's advertised and admitted cap: the
-	// session create's 1..65 clamp, the title's (this host is in session). The dedicated word makes
-	// the engine's slot limit (GameConfig::player_slot_limit) carry the host's own slot on top.
+	// session create's 1..65 clamp, the title's (this host is in session), stored back into the
+	// process block as the create stores it (engine: inmatch::store_session_player_cap). The
+	// dedicated word makes the engine's slot limit (GameConfig::player_slot_limit) carry the host's
+	// own slot on top.
 	net_.host_serve_and_play = p_options->get_serve_and_play();
-	net_.host_max_players = static_cast<uint32_t>(
-			opennova::inmatch::session_player_cap(p_options->get_max_players(), config.title));
+	net_.host_max_players = static_cast<uint32_t>(opennova::inmatch::store_session_player_cap(
+			net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr,
+			p_options->get_max_players(), config.title));
 	config.max_players = net_.host_max_players;
 	config.dedicated_server = !net_.host_serve_and_play;
 	net_.host_session_config = std::move(config);

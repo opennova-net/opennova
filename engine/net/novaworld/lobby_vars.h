@@ -96,7 +96,7 @@ struct HostRegistration {
 	uint32_t game_server_baffle_key = 0;      // GameServerBaffleKey (dword_C8FC70)
 	int bb_mode = 0;                          // BBMode (dword_24D21A4)
 	std::string gcc;                          // GCC (byte_C87044)
-	std::string version;                      // GV and Version (byte_B4C0B0)
+	std::string version;                      // GV and Version (g_VersionText)
 	// The gate reply's METEXT (g_IsDedicatedServer, a misnomer: its one writer is the gate parse):
 	// set, the Host list carries the CountryName / Lang / TZB trio, whatever the dedicated mode
 	// (D-NET-347). NwuHostRole sets it from the session's gate response; the trio's values are the
@@ -271,5 +271,10 @@ uint32_t platform_inet_addr(const std::string &text);
 // [orig: Napi_ResolveAddress @0x62DF90 - Napi_StrCaseEqual @0x62DF9B..0x62DFA7, inet_addr
 //  @0x62DFAD, its -1 test @0x62DFB6, 0 with DNS off @0x62DFD8]
 uint32_t resolve_address_without_dns(const std::string &host);
+
+// inet_ntoa's text of an address word packed as the platform stores it (the first octet in the
+// lowest-addressed byte): "a.b.c.d". [orig: Network_FormatIPAddressToString @0x62DE80 and
+// Napi_FormatAddress @0x62DED0, both through inet_ntoa (@0x62DE98, @0x62DF05)]
+std::string in_addr_text(uint32_t address);
 
 } // namespace opennova

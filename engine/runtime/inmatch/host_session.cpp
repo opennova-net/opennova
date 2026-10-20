@@ -628,10 +628,10 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	world::MatchRules match_rules;
 	match_rules.title = owner.ctx.config.title;
 	match_rules.game_type = owner.ctx.config.game_type;
-	// SET GameTime feeds g_RoundTimeLimitMinutes in retail. The existing host model
-	// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.
+	// SET GameTime feeds g_RoundTimeLimitMinutes (GameConfig::round_time_limit_minutes);
+	// KOTHLimit/time_limit_minutes is unrelated.
 	// [orig: Game_StartMission seed @0x524F66]
-	match_rules.game_time_minutes = owner.ctx.config.respawn_time;
+	match_rules.game_time_minutes = owner.ctx.config.round_time_limit_minutes;
 	match_rules.score_limit = owner.ctx.config.score_limit;
 	match_rules.hill_limit_minutes = owner.ctx.config.time_limit_minutes;
 	match_rules.hill_delta = owner.ctx.config.koth_delta;

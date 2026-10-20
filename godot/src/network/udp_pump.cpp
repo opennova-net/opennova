@@ -3,6 +3,7 @@
 #include "network/udp_pump_datagram_socket.h"
 #include "util/string_convert.h"
 
+#include <net/novaworld/lobby_vars.h> // in_addr_text
 #include <net/npwire/net_ports.h> // lan_client_bind_ports
 
 #include <godot_cpp/classes/ip.hpp>
@@ -81,9 +82,13 @@ void UdpPump::record_(bool inbound, const String &peer_ip, int peer_port,
 }
 
 int UdpPump::bind_listen(int port) {
+	return bind_listen_at(port, 0u);
+}
+
+int UdpPump::bind_listen_at(int port, uint32_t address) {
 	close();
 	socket_.instantiate();
-	const Error err = socket_->bind(port, "0.0.0.0");
+	const Error err = socket_->bind(port, opennova::to_gd(opennova::in_addr_text(address)));
 	if (err != OK) {
 		socket_.unref();
 		return static_cast<int>(err);

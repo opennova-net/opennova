@@ -106,7 +106,7 @@ constexpr FlagKey kFlagKeys[] = {
 
 GameConfig host_screen_default_config() {
 	GameConfig config;
-	config.respawn_time = game_rules::kDefaultRespawnTime;
+	config.round_time_limit_minutes = game_rules::kDefaultRoundTimeLimitMinutes;
 	config.time_limit_minutes = game_rules::kDefaultTimeLimitMinutes;
 	config.replay_enabled = game_rules::kDefaultReplayEnabled;
 	config.max_team_lives = game_rules::kDefaultMaxTeamLives;

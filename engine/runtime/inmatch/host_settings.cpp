@@ -113,7 +113,7 @@ bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
 }
 
 void populate_host_dialog(gamecfg::GameCfg& cfg) {
-    // [orig: UI_PopulateHostSettingsFromConfig @0x556328..0x55632A, dword_83C79C]
+    // [orig: UI_PopulateHostSettingsFromConfig @0x556328..0x55632A, g_HostScreenMaxPlayers]
     // [orig: @0x5544cd (dfx2.exe)]
     cfg.mp_max_players = std::min(cfg.mp_max_players, title_player_caps(block_title(cfg)).host_screen);
 }
@@ -179,7 +179,7 @@ TitlePlayerCaps title_player_caps(int title) {
     if (title == gameprofile::GAME_DFX2) {
         caps.session = kMaxPlayersCapDfx2;
         // [orig: dfx2.exe g_HostMaxPlayersCap @0x835f0c = 100], against Jointops.exe's 64
-        // [orig: dword_83C79C @0x83C79C]
+        // [orig: g_HostScreenMaxPlayers @0x83C79C]
         caps.host_screen = 100;
     }
     return caps;

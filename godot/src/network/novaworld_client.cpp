@@ -316,8 +316,12 @@ void NovaWorldClient::start() {
 			? opennova::inmatch::transport_bind_ports(game_config_->native().cfg(),
 					  opennova::inmatch::NetworkType::NovaWorld, /*authority=*/false)
 			: opennova::novaworld_bind_ports();
+	// On the block's mpipaddressstring, whatever the network type (inmatch::transport_bind_address).
+	const uint32_t nw_address = game_config_.is_valid()
+			? opennova::inmatch::transport_bind_address(game_config_->native().cfg())
+			: 0u;
 	for (const uint16_t port : nw_ports) {
-		if (nw_pump_->bind_listen(port) == OK) {
+		if (nw_pump_->bind_listen_at(port, nw_address) == OK) {
 			nw_bound = true;
 			break;
 		}

@@ -80,6 +80,13 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext);
 // [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0;
 //  Game_ApplySessionSettingsToGlobals @0x551500; per field in host_config.cpp]
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg);
+// The session create's cap over the process block: `requested` clamped into the title's 1..65
+// (session_player_cap) and the clamp stored back into the block's mpmaxplayers, so the next
+// populate and the next game.cfg save read it (null `block`: none to store into). Both hosts
+// run it: host_session_settings over the block's own word and the game's host request.
+// [orig: CNapiGameSession_BuildAndCreateSession @0x569554 (in session), @0x56955F (below 1 -> 1
+//  into maxPlayers_3F4), @0x56956C (above 65 -> 65 into maxPlayers_3F4)]
+int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, int title);
 // The same mapping over the block as it stands, its cap unclamped: the game
 // shell's host request, which the session create clamps when it runs
 // (session_player_cap), as retail's create reads the block its host screen
@@ -102,6 +109,31 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg);
 //  @0x62D2A0]
 std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkType type,
 		bool authority, std::optional<uint32_t> first = std::nullopt);
+// The port quad the socket open stores for the scan (min, max, delta, random), by the same arms
+// as transport_bind_ports, `first` in place of the min.
+// [orig: CNapiNetwork_OpenTransportSocket @0x4C6B2F..0x4C6B5A, the manager's +0x90..+0x9C]
+struct TransportPortQuad {
+	int32_t min = 0;
+	int32_t max = 0;
+	int32_t delta = 0;
+	int32_t random = 0;
+};
+TransportPortQuad transport_port_quad(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first = std::nullopt);
+// The socket open's bind address: the block's mpipaddressstring through Napi_ResolveAddress with
+// DNS off ("255.255.255.255" the broadcast word, a text inet_addr does not read 0, i.e. every
+// interface), whatever the network type. [orig: CNapiNetwork_OpenTransportSocket @0x4C6B12
+// Napi_ResolveAddress(multiplayerIpAddress_1F8, 0) into the manager's +0x8C;
+// NapiUdpSocket_CreateAndBind @0x62D2D5 / @0x62D42C (the bind's sin_addr)]
+uint32_t transport_bind_address(const gamecfg::GameCfg &cfg);
+// The socket open's two result lines in _connectlog.txt, past their "<time> : " prefix: the
+// failure names the bind address and the stored quad, the success the bound socket's address
+// and port. [orig: CNapiNetwork_OpenTransportSocket - the failure @0x4C6BF2..0x4C6C6B
+// (Network_FormatIPAddressToString of +0x8C, then +0x90..+0x9C), the success
+// @0x4C6C7B..0x4C6CFA (Napi_FormatAddress of the socket's bindAddress and boundPort,
+// NapiUdpSocket_CreateAndBind @0x62D4C1 / @0x62D4C4)]
+std::string transport_socket_error_text(uint32_t address, const TransportPortQuad &quad);
+std::string transport_socket_setup_text(uint32_t address, uint32_t port);
 
 // The cfg block's words every session create reads, single player's and a
 // host's alike: mpreset (a nonzero word ends the create, server_session.h),

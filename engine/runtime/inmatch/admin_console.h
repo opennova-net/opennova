@@ -84,7 +84,7 @@ public:
 		const CharacterRegistry *characters = nullptr;
 		// CMD VERSION's two texts, the binary's version and its title, each printed at its
 		// start [orig: Game_ParseCommandLineAndInit @0x4A7D30..0x4A7D3C (the title
-		//  off_8154D8), @0x4A7D75..0x4A7D90 ("V%i.%i.%i.%i" into byte_B4C0B0)].
+		//  off_8154D8), @0x4A7D75..0x4A7D90 ("V%i.%i.%i.%i" into g_VersionText)].
 		std::string version_text;
 		std::string title_text;
 		// A listen host's SYSTEM ring (Chat_AddMessageChannel2), which CMD VERSION posts to.

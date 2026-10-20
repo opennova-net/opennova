@@ -294,11 +294,11 @@ struct GameConfig {
 	// --- §6.9 rule globals — the S2C 0x08 ServerConfig block [orig: ServerConfig_SerializeToPacket
 	// @0x505bd0]. dword[3] is `game_type` above; the rest are the standalone g_* rule globals in wire
 	// order. Default 0 for a dev host; a real host / the golden seeds them (retail frame 146:
-	// [respawn 30, timelimit 10, _, gametype, _, score 50, _, startdelay, _, _]).
+	// [round time 30, timelimit 10, _, gametype, _, score 50, _, startdelay, _, _]).
 	// The five formerly-UNWITNESSED words were named 2026-07-01 by tracing each 0x08-block global to
 	// its Config_ParseSettingsLine @0x54f740 setting-name compare (via Game_ApplySessionSettingsToGlobals
 	// @0x551500, which copies the parsed cfg global into the live rule global).
-	uint32_t respawn_time = 0;         // [orig: g_RoundTimeLimitMinutes @0x24D2140]      dword[0]; SET `GameTime`
+	uint32_t round_time_limit_minutes = 0; // [orig: g_RoundTimeLimitMinutes @0x24D2140] dword[0]; SET `GameTime`
 	uint32_t time_limit_minutes = 0;  // [orig: g_TimeLimitMinutes @0x24D2144] dword[1]; SET `KOTHLimit`
 	uint32_t replay_enabled = 0;      // [orig: g_ReplayEnabled @0x24D2120 <- g_GameConfigState.unknownModeOption_46C @0x2550B24, cfg `replay`]      dword[2]
 	// Retail carries this setting through cfg/global/S2C 0x08 but never reads

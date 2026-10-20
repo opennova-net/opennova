@@ -42,6 +42,9 @@ public:
 	// HOST: bind a listen socket on `port` (all interfaces; 0 = an OS-assigned ephemeral port).
 	// Returns a Godot Error (OK == 0).
 	int bind_listen(int port);
+	// The same on `address`, an in_addr word as the platform stores it (0: every interface): the
+	// session socket's bind address (engine: inmatch::transport_bind_address).
+	int bind_listen_at(int port, uint32_t address);
 	// JOINER: bind an ephemeral local socket and set the default destination to host:port.
 	int dial(const String &host, int port);
 	// The client arm's socket open alone: bind over the authored client port range,

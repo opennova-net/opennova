@@ -89,7 +89,7 @@ int main() {
 		const HostScreenState host = host_session_settings(cfg);
 		const GameConfig screen = host_screen_default_config();
 		const GameConfig &c = host.config;
-		TEST_EXPECT(c.respawn_time == screen.respawn_time);
+		TEST_EXPECT(c.round_time_limit_minutes == screen.round_time_limit_minutes);
 		TEST_EXPECT(c.time_limit_minutes == screen.time_limit_minutes);
 		TEST_EXPECT(c.replay_enabled == screen.replay_enabled);
 		TEST_EXPECT(c.max_team_lives == screen.max_team_lives);
@@ -221,7 +221,7 @@ int main() {
 		TEST_EXPECT(c.change_team_interval_seconds == 120 && c.change_team_penalty_seconds == 20);
 		TEST_EXPECT(c.auto_balance_enabled && c.auto_balance_min_difference == 2 &&
 				c.auto_balance_trigger_difference == 3);
-		TEST_EXPECT(c.respawn_time == 45u);
+		TEST_EXPECT(c.round_time_limit_minutes == 45u);
 		TEST_EXPECT(c.time_limit_minutes == kSessionNoKothLimitMinutes); // KOTH 0
 		TEST_EXPECT(c.replay_enabled == 0u);
 		TEST_EXPECT(c.score_limit == kSessionNoPointLimit && c.max_score == 12u);
@@ -274,7 +274,9 @@ int main() {
 		source.profile = &profile;
 		source.cfg_block = &block;
 		HostConfig host = shell_host_config(source);
-		TEST_EXPECT(host.config.server_name == "OpenNova LAN Host");
+		// An empty name advertises "": the create copies the block word with no default
+		// [orig: CNapiGameSession_BuildAndCreateSession @0x5695D2].
+		TEST_EXPECT(host.config.server_name.empty());
 		TEST_EXPECT(host.config.game_type == game_type::kTeamDeathmatch);
 		TEST_EXPECT(host.config.max_players == 9u && host.config.dedicated_server);
 		TEST_EXPECT(host.socket_mode == SocketMode::Lan && !host.serve_and_play);
@@ -322,17 +324,26 @@ int main() {
 		const HostScreenState request = host_screen_from_block(block);
 		TEST_EXPECT(request.config.server_name == "Night Ops");
 		TEST_EXPECT(request.config.mp_attributes == 0x3A06u);
-		// time_limit is the round's minutes, the misnamed g_RoundTimeLimitMinutes the mission start seeds
+		// time_limit is the round's minutes, g_RoundTimeLimitMinutes, which the mission start seeds
 		// the round clock from (world::MatchRules::game_time_minutes, 3720 ticks a minute)
 		// [orig: Game_ApplySessionSettingsToGlobals @0x551CCC..0x551CD2; Game_StartMission
 		//  @0x525242..0x525251].
-		TEST_EXPECT(request.config.respawn_time == 25);
+		TEST_EXPECT(request.config.round_time_limit_minutes == 25);
 		TEST_EXPECT(request.player_limit == 0 && block.mp_max_players == 0);
 		TEST_EXPECT(host_session_settings(block).player_limit == 1 && block.mp_max_players == 1);
+		// The game's request takes the same clamp into the process block: a cap of 80 leaves 65
+		// there, a cap of 0 leaves 1 [orig: CNapiGameSession_BuildAndCreateSession @0x56955F,
+		// @0x56956C into maxPlayers_3F4].
+		block.mp_max_players = 80;
+		TEST_EXPECT(store_session_player_cap(&block, block.mp_max_players, gameprofile::GAME_JO) == 65 &&
+				block.mp_max_players == 65);
+		TEST_EXPECT(store_session_player_cap(&block, 0, gameprofile::GAME_JO) == 1 &&
+				block.mp_max_players == 1);
+		TEST_EXPECT(store_session_player_cap(nullptr, 99, gameprofile::GAME_JO) == 65);
 		// A fresh block (Config_SetDefaults' words) makes the host screen's rule baseline.
 		const GameConfig fresh = host_screen_from_block(gamecfg::defaults()).config;
 		const GameConfig baseline = host_screen_default_config();
-		TEST_EXPECT(fresh.respawn_time == baseline.respawn_time);
+		TEST_EXPECT(fresh.round_time_limit_minutes == baseline.round_time_limit_minutes);
 		TEST_EXPECT(fresh.time_limit_minutes == baseline.time_limit_minutes);
 		TEST_EXPECT(fresh.replay_enabled == baseline.replay_enabled);
 		TEST_EXPECT(fresh.max_team_lives == baseline.max_team_lives);
@@ -397,6 +408,30 @@ int main() {
 			for (std::size_t i = 0; i < 3; ++i)
 				TEST_EXPECT(drawn[i] == 42000 + (drawn[0] - 42000 + i) % 3);
 		}
+		// The quad the socket open stores: the arm's words, the first port over the min.
+		const TransportPortQuad nw = transport_port_quad(block, NetworkType::NovaWorld, true);
+		TEST_EXPECT(nw.min == 42000 && nw.max == 42002 && nw.delta == 1 && nw.random == 1);
+		const TransportPortQuad lan = transport_port_quad(block, NetworkType::Lan, true, 40001);
+		TEST_EXPECT(lan.min == 40001 && lan.max == 40004 && lan.delta == 2 && lan.random == 0);
+	}
+
+	// The socket's bind address is the block's mpipaddressstring with DNS off, and the two
+	// connect-log result lines name it [orig: CNapiNetwork_OpenTransportSocket @0x4C6B12;
+	// Napi_ResolveAddress @0x62DF90; the lines @0x4C6BF2..0x4C6C6B, @0x4C6C7B..0x4C6CFA].
+	{
+		gamecfg::GameCfg block = gamecfg::defaults();
+		TEST_EXPECT(transport_bind_address(block) == 0u); // the shipped "0.0.0.0"
+		block.mp_ip_address_string = "10.1.2.3";
+		TEST_EXPECT(transport_bind_address(block) == 0x0302010Au);
+		block.mp_ip_address_string = "a.host.name"; // no DNS: every interface
+		TEST_EXPECT(transport_bind_address(block) == 0u);
+		block.mp_ip_address_string = "255.255.255.255";
+		TEST_EXPECT(transport_bind_address(block) == 0xFFFFFFFFu);
+		const TransportPortQuad quad{40000, 40004, 2, 0};
+		TEST_EXPECT(transport_socket_error_text(0x0302010Au, quad) ==
+				"NET SOCKET SETUP ERROR!!!!!!!!  CANNOT CREATE SOCKET WITH PARAMS: IP=10.1.2.3, "
+				"PORTMIN=40000 PORTMAX=40004, PORTDELTA=2, PORTRANDOM=0!!!!!");
+		TEST_EXPECT(transport_socket_setup_text(0u, 40002) == "NET SOCKET SETUP [0.0.0.0:40002]");
 	}
 
 	std::printf("host_config: ok\n");

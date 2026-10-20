@@ -64,7 +64,7 @@ int main() {
 			"the stock evil-side default packs to 0x8207");
 
 	// The witnessed session rule defaults [orig: Config_SetDefaults].
-	CHECK(game_rules::kDefaultRespawnTime == 30, "respawn default");
+	CHECK(game_rules::kDefaultRoundTimeLimitMinutes == 30, "respawn default");
 	CHECK(game_rules::kDefaultTimeLimitMinutes == 10, "time-limit default");
 	CHECK(game_rules::kDefaultMaxTeamLives == 100, "team-lives default");
 	CHECK(game_rules::kDefaultScoreLimit == 50, "score default");

@@ -378,7 +378,7 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	var options := config.to_session_options()
 	assert_eq(options.class_allow_mask, 0x03FF,
 			"ordinary host requests carry retail's all-ten-classes default")
-	assert_eq(options.respawn_time, 30)
+	assert_eq(options.round_time_limit_minutes, 30)
 	assert_eq(options.time_limit_minutes, 10)
 	assert_eq(options.replay_enabled, 1)
 	assert_eq(options.max_team_lives, 100)
@@ -462,7 +462,7 @@ func test_host_rule_controls_reach_native_session_configuration() -> void:
 	assert_eq(options.custom_text, "Squad night")
 	assert_eq(options.start_delay, 7)
 	assert_eq(options.respawn_timeout, 8)
-	assert_eq(options.respawn_time, 45, "TIME feeds the round-time global")
+	assert_eq(options.round_time_limit_minutes, 45, "TIME feeds the round-time global")
 	assert_eq(options.time_limit_minutes, 0x2222222)
 	assert_eq(options.score_limit, 65000)
 	assert_eq(options.max_score, 65000)
