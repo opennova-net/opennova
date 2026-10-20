@@ -1014,7 +1014,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			// so a slot's records read the bodies of the slots written before it
 			// after their stores and those after it before theirs.
 			// [orig: Server_TickUpdate's per-slot loop @0x51E3A0..0x51E47C, the
-			//  call @0x51E3E4 -> Server_SendEntityStateToPlayer @0x51BBDC]
+			//  call @0x51E3E4 -> Server_SendInitialGameStateToPlayer @0x51BBA0 (its
+			//  state-6 call @0x51BBDC) -> Server_SendEntityStateToPlayer @0x517BA0]
 			conn.frame_update_staged =
 					write_entity_state(ctx, world, conn, ents, conn.staged_frame_update);
 		}
