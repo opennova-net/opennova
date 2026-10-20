@@ -5041,6 +5041,11 @@ add_test(NAME npruntime_player_placement COMMAND npruntime_player_placement_test
 add_executable(host_mission_start_test mission/host_mission_start_test.cpp)
 target_link_libraries(host_mission_start_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME host_mission_start COMMAND host_mission_start_test)
+# The movement resolver's person push: the away direction on both axes, the
+# entity+0 threshold, a joiner's remote persons in the table (D-NET-NEW-L4-2).
+add_executable(person_push_test world/person_push_test.cpp)
+target_link_libraries(person_push_test PRIVATE opennova_runtime)
+add_test(NAME person_push COMMAND person_push_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

@@ -820,6 +820,10 @@ struct WirePersonCollisionProxy {
     bool player = false;
     bool mounted = false;
     bool moving = false;
+    // The row's Flags dead bit (0x02): the person repulsion passes over a
+    // dead peer, a trace does not.
+    // [orig: Entity_MovementCollisionResolver, the +36 & 2 skip @ 0x4b3b8d]
+    bool dead = false;
 };
 
 // One decoded pool-1 mover (vehicle, emplacement, runtime item) projected into
@@ -1860,6 +1864,10 @@ private:
     };
     struct PersonSlot { // [orig: g_PersonProx* dword tables]
         int32_t x = 0, y = 0, z = 0, radius = 0;
+        // The row's raw boundRadius word, the table's radius the repulsion
+        // reads; `radius` is the projectile slot's, widened for a posed body.
+        // [orig: g_PersonProxRadius = entity+0 @ 0x4b93eb]
+        int32_t bound = 0;
         EntityHandle h;
     };
     struct CandidateSlice {

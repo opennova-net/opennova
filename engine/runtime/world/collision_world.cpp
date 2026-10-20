@@ -813,6 +813,7 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         const CollisionModel *attached =
             inst != instances_.end() ? model(inst->second.model_id) : nullptr;
         p.radius = entity_proximity_radius(*this, e, attached);
+        p.bound = e.bound_radius > 0.0f ? to_fixed(e.bound_radius) : 0;
         // A published live pose can place bones far from the feet (seated
         // poses, corpse spreads, the off-body pose regression test). Widen
         // the SLOT to the pose's own bone-sphere reach so the projectile

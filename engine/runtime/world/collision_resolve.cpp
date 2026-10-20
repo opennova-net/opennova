@@ -702,37 +702,103 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         if ((ent != nullptr && (ent->flags & kEntityFlagParachute) != 0) ||
             (replica_flags_ != nullptr && (*replica_flags_ & kEntityFlagParachute) != 0))
             my_radius += 0x20000;
-        for (const PersonSlot &p : persons_) {
-            if (p.h == source) continue;
-            const int32_t threshold = 30 * (my_radius + p.radius) / 100;
-            // Snapshot positions for the coarse reject... [orig: the g_PersonProx*
-            // table reads @ 0x4b3b07-0x4b3b74]
-            const int32_t ddx = p.x - pos[0];
-            const int32_t ddy = p.y - pos[1];
-            const int32_t ddz = p.z - pos[2];
+        // The table's snapshot for the coarse reject: each axis, then the
+        // planar length. [orig: the g_PersonProx* reads @ 0x4b3b07-0x4b3b74]
+        const auto in_reach = [&](int32_t sx, int32_t sy, int32_t sz, int32_t threshold) {
+            const int32_t ddx = sx - pos[0];
+            const int32_t ddy = sy - pos[1];
+            const int32_t ddz = sz - pos[2];
             if (abs32(ddx) > threshold || abs32(ddy) > threshold || abs32(ddz) > threshold)
-                continue;
-            if (vec_len_ftol(ddx, ddy, 0) > threshold) continue;
-            // ...then the LIVE entity for the second distance and the push, and
-            // the dead/hidden peer skip. [orig: g_PersonProxEntity re-read
-            // @ 0x4b3b7a-0x4b3bca, the +36 & 2 skip @ 0x4b3b8d]
-            const Entity *peer = world.registry.get(p.h);
-            if (peer == nullptr || (peer->flags & 2u) != 0) continue;
-            int32_t live[3];
-            entity_pos_fixed(*peer, live);
+                return false;
+            return vec_len_ftol(ddx, ddy, 0) <= threshold;
+        };
+        // One person's push on its LIVE position: the planar distance, a
+        // quarter of the overlap, along the direction away from the peer. The
+        // loop scales the fpatan by the NEGATIVE BAM-per-radian double, so the
+        // (0x200000 - ang) index picks the away direction's own entry.
+        // [orig: the live dx/dy @ 0x4b3b93-0x4b3ba4, the distance @ 0x4b3bca,
+        //  (thr - dist) >> 2 @ 0x4b3bd0-0x4b3bd6, fpatan @ 0x4b3be1, the fmul
+        //  by dbl_7C57B8 = -2^31/pi (loaded @ 0x4b3ad2) @ 0x4b3bf6 and its
+        //  truncating fistp @ 0x4b3bfc, the index @ 0x4b3c04-0x4b3c0c, the
+        //  cosine off_849934 @ 0x4b3c1e, X @ 0x4b3c31, Y @ 0x4b3c40]
+        const auto push_away = [&](const int32_t live[3], int32_t threshold) {
             const int32_t dist = vec_len_ftol(pos[0] - live[0], pos[1] - live[1], 0);
-            if (dist > threshold) continue;
+            if (dist > threshold) return;
             const int32_t amount = (threshold - dist) >> 2;
-            const int32_t ang = static_cast<int32_t>(
+            const uint32_t ang = static_cast<uint32_t>(static_cast<int64_t>(
                 std::atan2(static_cast<double>(pos[1] - live[1]),
                            static_cast<double>(pos[0] - live[0])) *
-                io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
-            const uint32_t idx = (0x200000u - static_cast<uint32_t>(ang)) >> 22;
+                -io::kBamPerRadian));
+            const uint32_t idx = (0x200000u - ang) >> 22;
             const DirTable &t = dir_table();
             const int32_t sn = t.sin22[idx & 1023];
             const int32_t cs = t.sin22[(idx & 1023) + 256];
             pos[0] += static_cast<int32_t>((static_cast<int64_t>(amount) * cs) >> 22);
             pos[1] += static_cast<int32_t>((static_cast<int64_t>(amount) * sn) >> 22);
+        };
+        // A pool-0 row: the threshold is 30% of the two boundRadius words
+        // (entity+0, the table's radius), then the live entity for the second
+        // distance and the push, skipping self and a dead peer.
+        // [orig: v100 = 30 * (boundRadius + g_PersonProxRadius) / 100
+        //  @ 0x4b3b07; g_PersonProxRadius = entity+0 @ 0x4b93eb; the
+        //  g_PersonProxEntity re-read @ 0x4b3b7a, self @ 0x4b3b83, the +36 & 2
+        //  skip @ 0x4b3b8d]
+        const auto person_push = [&](const PersonSlot &p) {
+            if (p.h == source) return;
+            const int32_t threshold = 30 * (my_radius + p.bound) / 100;
+            if (!in_reach(p.x, p.y, p.z, threshold)) return;
+            const Entity *peer = world.registry.get(p.h);
+            if (peer == nullptr || (peer->flags & 2u) != 0) return;
+            int32_t live[3];
+            entity_pos_fixed(*peer, live);
+            push_away(live, threshold);
+        };
+        // A joiner's remote person is a pool-0 entity of the client's own,
+        // built from the 0x0C at its wire slot, so it is a row of the same
+        // table: its decoded position (the live one), its model's boundRadius,
+        // and its folded dead bit. [orig: NapiNPClientMsg_0x00C @ 0x42E730
+        //  creates it; Entity_BuildProximityLists_Pool01 @ 0x4b93d0-0x4b9419
+        //  walks pool 0 on every peer, from Entity_UpdateAllEntities
+        //  @ 0x4c240a]
+        const auto proxy_push = [&](const WirePersonCollisionProxy &proxy) {
+            if (proxy.dead) return;
+            const int32_t threshold = 30 * (my_radius + proxy.bound_radius_q16) / 100;
+            const int32_t live[3] = {proxy.position_q16.x, proxy.position_q16.y,
+                                     proxy.position_q16.z};
+            if (!in_reach(live[0], live[1], live[2], threshold)) return;
+            push_away(live, threshold);
+        };
+        if (ent == nullptr || wire_person_proxies_.empty()) {
+            for (const PersonSlot &p : persons_) person_push(p);
+        } else {
+            // The table's pool-0 slot order: the local body at its wire slot,
+            // the remote persons at theirs (the projectile walk's merge).
+            struct RepulseEntry {
+                uint16_t key = 0;
+                bool is_proxy = false;
+                uint32_t index = 0;
+            };
+            std::vector<RepulseEntry> walk;
+            walk.reserve(persons_.size() + wire_person_proxies_.size());
+            for (size_t i = 0; i < persons_.size(); ++i) {
+                const PersonSlot &slot = persons_[i];
+                const uint16_t key = (wire_local_player_handle_ != EntityHandle::kInvalid &&
+                                      slot.h == world.cached.local_player)
+                        ? wire_local_player_handle_
+                        : slot.h.packed;
+                walk.push_back({key, false, static_cast<uint32_t>(i)});
+            }
+            for (size_t i = 0; i < wire_person_proxies_.size(); ++i)
+                walk.push_back({wire_person_proxies_[i].wire_handle, true,
+                                static_cast<uint32_t>(i)});
+            std::stable_sort(walk.begin(), walk.end(),
+                             [](const RepulseEntry &a, const RepulseEntry &b) {
+                                 return a.key < b.key;
+                             });
+            for (const RepulseEntry &e : walk) {
+                if (e.is_proxy) proxy_push(wire_person_proxies_[e.index]);
+                else person_push(persons_[e.index]);
+            }
         }
         // The staged REPLICA peers walk the SAME witnessed loop (threshold
         // 30% of summed radii, push (thr - dist)/4 through the quantized
@@ -744,25 +810,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             const ReplicaPeer &p = replica_peers_[pi];
             if (p.handle == replica_exclude_handle_) return;
             const int32_t threshold = 30 * (my_radius + p.radius) / 100;
-            const int32_t ddx = p.x - pos[0];
-            const int32_t ddy = p.y - pos[1];
-            const int32_t ddz = p.z - pos[2];
-            if (abs32(ddx) > threshold || abs32(ddy) > threshold || abs32(ddz) > threshold)
-                return;
-            if (vec_len_ftol(ddx, ddy, 0) > threshold) return;
-            const int32_t dist = vec_len_ftol(pos[0] - p.x, pos[1] - p.y, 0);
-            if (dist > threshold) return;
-            const int32_t amount = (threshold - dist) >> 2;
-            const int32_t ang = static_cast<int32_t>(
-                std::atan2(static_cast<double>(pos[1] - p.y),
-                           static_cast<double>(pos[0] - p.x)) *
-                io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
-            const uint32_t idx = (0x200000u - static_cast<uint32_t>(ang)) >> 22;
-            const DirTable &t = dir_table();
-            const int32_t sn = t.sin22[idx & 1023];
-            const int32_t cs = t.sin22[(idx & 1023) + 256];
-            pos[0] += static_cast<int32_t>((static_cast<int64_t>(amount) * cs) >> 22);
-            pos[1] += static_cast<int32_t>((static_cast<int64_t>(amount) * sn) >> 22);
+            if (!in_reach(p.x, p.y, p.z, threshold)) return;
+            const int32_t live[3] = {p.x, p.y, p.z};
+            push_away(live, threshold);
         };
         // The cell gather: every peer that can pass the threshold test lies
         // within max_reach of the row on x and y. The gather covers TWICE
