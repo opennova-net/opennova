@@ -13,6 +13,7 @@
 #include <runtime/world/zone_chain.h>
 
 #include <cstdio>
+#include <memory>
 
 using namespace opennova::world;
 
@@ -896,8 +897,24 @@ void test_refused_touch_is_recorded_for_the_host() {
     CHECK(events_of<ZoneCaptureEvents::Flip>(ev2).size() == 1);
 }
 
+// The sweep's state test is the hidden bit alone (D-NET-433): a zone whose
+// alive latch is clear still registers; a hidden zone (Flags bit 0) does not.
+// [orig: ZoneSlotChain_BuildFromMission @0x4A2E89..0x4A2E8D / @0x4A2ECD..0x4A2ED1]
+void test_the_sweep_reads_the_hidden_bit_alone() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(1, 8);
+    const EntityHandle unlatched = spawn_zone(*w, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle hidden = spawn_zone(*w, 2, 2, {10.0f, 0.0f, 0.0f});
+    w->registry.get(unlatched)->alive = false;
+    w->registry.get(hidden)->flags |= kEntityFlagCarried;
+    w->zones.build_chain_from_mission();
+    CHECK(w->zones.chain.zones.size() == 1);
+    CHECK(!w->zones.chain.zones.empty() && w->zones.chain.zones[0] == unlatched);
+}
+
 int main() {
     test_build_and_masks();
+    test_the_sweep_reads_the_hidden_bit_alone();
     test_frontier_rule();
     test_owned_zone_mask_and_latch();
     test_capture_progression();
