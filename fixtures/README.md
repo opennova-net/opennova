@@ -146,7 +146,10 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   `tripod_usegun_cradle` (E50triB: `Usegun` on the yawing cradle), `minigun` (a
   `WEAP_SPIN` barrel, `MFlash01` at its end), `fifty` (H50cal), `cannon` (M1trret),
   `helo` (Dblkhwk1 / DAH62: `HELO_ROTOR` / `HELO_TAILROTOR`, `ctrlx05`, two `sitex`
-  points, the `Ewep01` / `Ewep02` door anchors), `gunboat` (Dmrk51: four anchors, two
+  points, the `Ewep01` / `Ewep02` door anchors, the pods' `BULLET01..04` /
+  `MFLASH01..04`), `twingun` (Ka50gun: `bullet01` / `bullet02` on the twin-barrel gun,
+  `usegun` well behind it), `lcac` (Dlcac1: one flat deck hull a tank and its crew
+  ride, `ctrlx11`), `gunboat` (Dmrk51: four anchors, two
   off the hull plane) and `tank_turret` (Dm1a1: `ewep01` on the hull, `ewep02` on the
   `VEHICLE_GUNYAW` ring). The guns pitch with the shipped sign (a positive
   `EWEAP_GUNPITCH` dips the muzzle). Their item, weapon, ammo, HUD and AI rows are

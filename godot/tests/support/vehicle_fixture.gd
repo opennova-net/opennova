@@ -27,8 +27,10 @@ const TANK_T80 := 100165    # Drivable T80 Tank
 const TANK_TURRET := 100166 # Turret for M1A1
 const T80_TURRET := 100167  # Turret for T80
 const TANK_ROOF_GUN := 100182 # Gun for M1A1 (the roof .50 cal, OnTurret)
-const G_HELO := 100171      # Flyable Apache (addeweapG chin gun)
-const G_CHIN_GUN := 100183  # the Apache's G child
+const G_HELO := 100171      # Flyable Apache (addeweapG chin gun, four rocket pods)
+const G_CHIN_GUN := 100183  # the Apache's G child (a single-barrel gun)
+const G_HELO_KA52 := 100172 # Flyable Ka-52 (addeweapG chin gun, two rocket pods)
+const G_KA52_GUN := 100184  # the Ka-52's G child (twin barrels, the gunner in the cockpit)
 const BLACKHAWK := 102010   # Flyable Blackhawk
 const MINIGUN := 101871     # Minigun for the Blackhawk
 const LITTLE_BIRD := 101306 # Flyable LITTLE BIRD with miniguns (an EWeap carrier)
@@ -41,7 +43,13 @@ const MARK_V_GUN_A := 101991
 const MARK_V_GUN_B := 101988
 const TRIPOD := 101881      # 50cal on 360 tripod (E50triB)
 const TARGET_TANK := 100169 # a tank course's target T80 (no turret child, low hp)
-const TARGET_APC := 101213  # a tank course's target APC (07TR's APC wave id)
+# A tank course's target APC (07TR's APC wave id): PlayerControl with a husk, as the
+# shipped BTR-80 (husk Dbtr801X), so a destroyed one holds its dead state (the wreck's
+# death motion keeps the parked-mover stamp off it) and respawns where it spawned
+# [orig: AI_TickState_VehicleDead @0x467EA0]; on the tank hull, whose face box takes
+# the course's aim height, and 9000 hp, two cannon rounds.
+const TARGET_APC := 101213
+const LCAC := 101296        # Drivable LCAC (Landable: a tank and its crew ride its deck)
 const RIDER := 102048       # an NPC rider (person)
 
 ## graphic name -> the committed model that stands in for it.
@@ -52,10 +60,12 @@ const MODELS := {
 	"fifty": GUT_MODELS + "/fifty.3di",
 	"helo": GUT_MODELS + "/helo.3di",
 	"minigun": GUT_MODELS + "/minigun.3di",
+	"twingun": GUT_MODELS + "/twingun.3di",
 	"carrier": SYNTH_MODELS + "/carrier.3di",
 	"mount": SYNTH_MODELS + "/mount.3di",
 	"gunboat": GUT_MODELS + "/gunboat.3di",
 	"tripod": GUT_MODELS + "/tripod_usegun_cradle.3di",
+	"lcac": GUT_MODELS + "/lcac.3di",
 	# The driver's virtual display (`Virtualdisplay tankdrvr camera`): like the
 	# shipped tankdrvr.3di, a model that authors a `camera` userpoint.
 	"tankdrvr": SYNTH_MODELS + "/mount.3di",
@@ -70,6 +80,15 @@ const EWEAP_POINTS := """  weaplbup bullet
   weaprbup bullet
   weaprmup mflash01
   weaprcup bcasing
+"""
+
+# The Ka-52 gun's inline-slot points: left and right barrels (Gun for Dka501).
+const KA52_GUN_POINTS := """  weaplbup bullet01
+  weaplmup mflash01
+  weaplcup bcasing01
+  weaprbup bullet02
+  weaprmup mflash02
+  weaprcup bcasing02
 """
 
 # The turret's inline-slot points (Turret for M1A1: the bullet01 muzzle row).
@@ -100,22 +119,16 @@ static func _eweap(name: String, id: int, graphic: String, weapon: String, attri
 
 
 ## The vehicle rows (shipped items.def shapes, trimmed to what the suites read:
-## the classes, the motion block, the attachments, the virtual display), and
-## the Player template row (105305, kPlayerInfantryTypeId 0x14B9 + the item id
-## offset): a spawned player takes its items.def index as its +0x1C word, and a
-## pool-0 source with a zero word builds no proximity slice, so USE would find
-## no seat [orig: Entity_BuildProximityListsFromPools @0x4B8EF9..0x4B8F00].
+## the classes, the motion block, the attachments, the virtual display). They
+## follow the minimal pack's rows in the staged items.def, so none of them sits
+## on row 0: an entity's +0x1C word is its row's index and 0 reads as "no
+## item", failing every ItemTypeIndex gate (the BMS player-mount triggers', the
+## script commands', the proximity-slice build) [orig:
+## Entity_IsLocalPlayerOnGunOfSsn @0x4f11e0 head;
+## Entity_BuildProximityListsFromPools @0x4B8EF9..0x4B8F00]. None of their ids
+## is one of the pack's, so the order shadows nothing.
 static func items_text() -> String:
-	# Row 0 is the null item, as it is in every shipped items.def: an entity's
-	# +0x1C word is its row's index and 0 reads as "no item", so a vehicle on row
-	# 0 would fail every ItemTypeIndex gate (the BMS player-mount triggers', the
-	# script commands') [orig: Entity_IsLocalPlayerOnGunOfSsn @0x4f11e0 head].
-	var text := """begin "Null"
-  id 100000
-  type marker
-end
-
-begin "Drivable M1A1 Tank"
+	var text := """begin "Drivable M1A1 Tank"
   id 100164
   type vehicle
   sid Dm1a1
@@ -198,11 +211,51 @@ begin "Flyable Apache"
   primary_weapon WPN_HELOROCKET
   weaplbup BULLET01
   weaplmup MFLASH01
-  weaplcup bcasing01
-  weaprbup BULLET01
-  weaprmup MFLASH01
-  weaprcup bcasing01
+  weaplcup MFLASH01
+  weaprbup BULLET02
+  weaprmup MFLASH02
+  weaprcup MFLASH02
+  weaplbup2 BULLET03
+  weaplmup2 MFLASH03
+  weaplcup2 MFLASH03
+  weaprbup2 BULLET04
+  weaprmup2 MFLASH04
+  weaprcup2 MFLASH04
   addeweapG Ewep01 100183 70 10 100 100
+end
+
+begin "Flyable Ka-52"
+  id 100172
+  type vehicle
+  sid Dka501
+  unit_type 3
+  graphic helo
+  attrib: noscar AIData PlayerControl forceasset EWeap
+  ai_function chel
+  disk_function HELO
+  move_function chel
+  turn_rate 50
+  turn_rate2 35
+  acceleration 25
+  deceleration 60
+  climb_speed 35
+  player_speed 140
+  slip_slope 30
+  max_slope 35
+  torque 3
+  mass 17
+  minai 1
+  render_function chel
+  hp 8000
+  rotor_parts 1 2
+  primary_weapon WPN_HELOROCKET
+  weaplbup BULLET01
+  weaplmup MFLASH01
+  weaplcup MFLASH01
+  weaprbup BULLET02
+  weaprmup MFLASH02
+  weaprcup MFLASH02
+  addeweapG Ewep01 100184 70 10 100 100
 end
 
 begin "Flyable Blackhawk"
@@ -349,8 +402,9 @@ begin "Training target APC"
   id 101213
   type vehicle
   sid Dapc1
-  graphic carrier
-  attrib: AIData NoScar forceasset
+  graphic tank_turret
+  husk tank_turret
+  attrib: AIData NoScar PlayerControl forceasset
   ai_function cveh
   move_function cveh
   render_function cveh
@@ -366,19 +420,32 @@ begin "Training target APC"
   torque 5
   minai 1
   unit_type 1
-  hp 2000
+  hp 9000
 end
 
-begin "Player #1, Multiplayer"
-  id 105305
-  type person
-  unit_type 9
-  graphic US01
-  anim_def US01
-  hp 150
-  ai_function plyr
-  disk_function PLAYER
-  move_function org2
+begin "Drivable LCAC"
+  id 101296
+  type vehicle
+  sid DLcac1
+  graphic lcac
+  attrib: Landable noscar AIData neutral PlayerControl PilotOnly forceasset
+  ai_function cbot
+  move_function catv
+  turn_rate 25
+  turn_rate2 15
+  acceleration 15
+  deceleration 20
+  slip_speed 5
+  water_speed 130
+  player_speed 50
+  slip_slope 35
+  max_slope 40
+  mass 160
+  minai 1
+  torque 3
+  render_function cveh
+  hp 15000
+  unit_type 8
 end
 
 begin "Rider"
@@ -394,7 +461,8 @@ end
 	text += _eweap("Turret for M1A1", TANK_TURRET, "turret", "WPN_M1TURRET", " IsTurret", CANNON_POINTS)
 	text += _eweap("Turret for T80", T80_TURRET, "turret", "WPN_T80TURRET", " IsTurret", CANNON_POINTS)
 	text += _eweap("Gun for M1A1", TANK_ROOF_GUN, "roofgun", "WPN_EMPLCD50", " OnTurret")
-	text += _eweap("Apache chin gun", G_CHIN_GUN, "minigun", "WPN_HELOGUN")
+	text += _eweap("Gun for Dapche1", G_CHIN_GUN, "minigun", "WPN_HELOGUN")
+	text += _eweap("Gun for Dka501", G_KA52_GUN, "twingun", "WPN_HELOGUN", "", KA52_GUN_POINTS)
 	text += _eweap("Minigun for the Blackhawk", MINIGUN, "minigun", "WPN_EMPLCDMINI")
 	text += _eweap("Attack vehicle 50cal", TRUCK_GUN, "fifty", "WPN_EMPLCD50NA")
 	text += _eweap("NON-Armored Emplaced 50cal for FAV", BUGGY_GUN, "mount", "WPN_EMPLCD50NA")
@@ -407,13 +475,17 @@ end
 ## One emplaced weapon row: the header the suites read and the seven actions
 ## every shipped emplaced row authors (idle, fire, recoil, reload, empty,
 ## switchto, switchfrom). `fields` carries the row's own keys; `fire_particle`
-## the fire action's muzzle effect and its user point.
+## the fire action's muzzle effect and its user point; `reload_delays` the
+## reload action's delaystart / delayend (zero: an immediate reload).
 static func emplaced_weapon(name: String, rank: int, round_type: String, clip: int,
 		start: int, fields: String, fire_particle := "", fire_delay_end := 1,
-		recoil_delay_end := 7) -> String:
+		recoil_delay_end := 7, reload_delays := Vector2i.ZERO) -> String:
 	var particle := ""
 	if not fire_particle.is_empty():
 		particle = "  particle %s\n  particleuserpoint mflash01\n" % fire_particle
+	var reload := "  delayend 0\n"
+	if reload_delays != Vector2i.ZERO:
+		reload = "  delaystart %d\n  delayend %d\n" % [reload_delays.x, reload_delays.y]
 	return """weapon "%s"
  category 11
  rank %d
@@ -435,8 +507,7 @@ static func emplaced_weapon(name: String, rank: int, round_type: String, clip: i
   function wpn_std_recoil
  end
  action "reload"
-  delayend 0
-  function wpn_std_reload
+%s  function wpn_std_reload
  end
  action "empty"
   delayend 0
@@ -453,13 +524,17 @@ static func emplaced_weapon(name: String, rank: int, round_type: String, clip: i
   function wpn_std_switchfrom
  end
 end
-""" % [name, rank, round_type, clip, start, fields, fire_delay_end, particle, recoil_delay_end]
+""" % [name, rank, round_type, clip, start, fields, fire_delay_end, particle, recoil_delay_end, reload]
 
 
 ## The weapon table: the minimal pack's personal rifle (the player's kit) and
 ## every mounted gun the vehicles carry. The cannon rows carry the shipped
 ## optics: `scope_max_mag 10 2` (the maximum and the slot-init seed) and two
-## sights rows, ForceScoped (weapon.def WPN_M1TURRET / WPN_T80TURRET).
+## sights rows, ForceScoped, and the shipped one-round clip, 40 rounds and
+## reload (delaystart 100, delayend 307) (weapon.def WPN_M1TURRET /
+## WPN_T80TURRET).
+const CANNON_RELOAD := Vector2i(100, 307)
+
 static func weapon_text() -> String:
 	var personal := FileAccess.get_file_as_string(RuntimeFixture.file("weapon.def"))
 	var cannon_fields := """ targetpitchmax 10
@@ -521,9 +596,10 @@ static func weapon_text() -> String:
  sights helo_pip.tga 480 351 543 416 blend
 """
 	return personal \
-		+ emplaced_weapon("WPN_M1TURRET", 21, "M1Round", 1, 40, cannon_fields, "", 0, 30) \
+		+ emplaced_weapon("WPN_M1TURRET", 21, "M1Round", 1, 40, cannon_fields, "", 0, 30,
+				CANNON_RELOAD) \
 		+ emplaced_weapon("WPN_T80TURRET", 22, "M1Round", 1, 40, cannon_fields.replace(
-				"attach_M1Turret", "attach_T80Turret"), "", 0, 30) \
+				"attach_M1Turret", "attach_T80Turret"), "", 0, 30, CANNON_RELOAD) \
 		+ emplaced_weapon("WPN_EMPLCD50", 0, "50cal", -1, 500, fifty_fields) \
 		+ emplaced_weapon("WPN_EMPLCD50NA", 0, "50cal", -1, 500, fifty_fields) \
 		+ emplaced_weapon("WPN_EMPLCDMINI", 1, "minirnds", -1, 500, mini_fields,
@@ -547,12 +623,14 @@ end
 """ % [name, velocity, max_age, min_damage, max_damage]
 
 
-## The pack's ammo plus one row per round type the mounted guns fire.
+## The pack's ammo plus one row per round type the mounted guns fire. A cannon
+## round takes a course APC (9000) to its finishing mark (6000 or less) and the
+## next one destroys it.
 static func ammo_text() -> String:
 	return FileAccess.get_file_as_string(RuntimeFixture.file("ammo.def")) \
 		+ _ammo("50cal", 3000, 5, 80, 120) \
 		+ _ammo("minirnds", 3000, 5, 40, 60) \
-		+ _ammo("M1Round", 1200, 2, 3000, 4000) \
+		+ _ammo("M1Round", 1200, 2, 4500, 4500) \
 		+ _ammo("30mm", 2500, 6, 200, 300) \
 		+ _ammo("ROCKET", 600, 10, 1000, 1500)
 
@@ -673,31 +751,33 @@ static func _write_catalog(dir: String, items_prefix: String, items_suffix: Stri
 	write_effects(dir)
 
 
-## A flat root carrying the catalog (and the minimal pack's person rows, which
-## the riders and the local player read). Callers remove it with
+## A flat root carrying the catalog after the minimal pack's rows (the person
+## rows the riders and the local player read). Callers remove it with
 ## TestFs.remove_dir_recursive.
 static func stage(test: GutTest, label: String) -> String:
 	var dir := TestFs.cache_dir(test, "vehicle_" + label)
 	var pack_items := FileAccess.get_file_as_string(RuntimeFixture.file("items.def"))
-	_write_catalog(dir, "", "\n" + pack_items)
+	_write_catalog(dir, pack_items + "\n", "")
 	return dir
 
 
-## The catalog over the minimal pack (mnml.bms on the Tmap relief). The rows
-## lead items.def (a type id resolves to its first row).
+## The catalog over the minimal pack (mnml.bms on the Tmap relief its mnml.cpt
+## carries). The pack's own rows lead items.def, the Player template row the
+## spawned player takes among them, then the catalog's.
 static func stage_world(test: GutTest, label: String) -> String:
-	var dir := WorldFixture.stage_minimal_root("vehicle_" + label, true)
-	var pack_items := FileAccess.get_file_as_string(dir.path_join("items.def"))
-	_write_catalog(dir, "", "\n" + pack_items)
+	var dir := WorldFixture.stage_minimal_root("vehicle_" + label)
+	var pack_items := FileAccess.get_file_as_string(RuntimeFixture.file("items.def"))
+	_write_catalog(dir, pack_items + "\n", "")
 	return dir
 
 
-## The infantry clips the riders board and ride with: the synthetic person
-## table (fixtures/anim/US01.adm: reset, idle and the emplaced rows over
-## idle.bad) as the default infantry map E_STAND.adm and as the riders' own.
+## The infantry clips the riders walk over, board and ride with: the synthetic
+## soldier table (fixtures/anim/soldier.adm: idle, walk, jog and run over
+## idle.bad / walk.bad) as the default infantry map E_STAND.adm and as the
+## riders' own.
 static func stage_infantry_clips(dir: String) -> void:
-	for pair: Array in [["US01.adm", "E_STAND.adm"], ["US01.adm", "US01.adm"],
-			["idle.bad", "idle.bad"]]:
+	for pair: Array in [["soldier.adm", "E_STAND.adm"], ["soldier.adm", "US01.adm"],
+			["idle.bad", "idle.bad"], ["walk.bad", "walk.bad"]]:
 		var err := DirAccess.copy_absolute(
 				ProjectSettings.globalize_path("res://../fixtures/anim/" + String(pair[0])),
 				dir.path_join(String(pair[1])))

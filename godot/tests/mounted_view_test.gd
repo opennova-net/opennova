@@ -85,6 +85,9 @@ func _load_world() -> GameWorld:
 # the shipped H_BHawk.aip's values.
 const FLIGHT_HELI_AT := Vector2(-14.0, -14.0)
 const FLIGHT_SETTLE_FRAMES := 1124
+# The riders start a walk away from the helicopter: the nearer arrives first
+# and takes the best seat, the pilot's; the farther takes the free minigun.
+const FLIGHT_RIDER_OFFSETS := [Vector3(3.0, 3.0, 0.0), Vector3(-6.0, -8.0, 0.0)]
 const FLIGHT_MEASURE_FRAMES := 400
 # The patrol speed the takeoff event sets and each stop then raises: 03TR's
 # events 44..47 (5, then 10, 20 and 60 at its route's nodes 1..3).
@@ -93,8 +96,8 @@ const FLIGHT_GROUP := 3
 const FLIGHT_PATH := 1
 # The helicopter faces mission +x (yaw 90); the first leg runs straight ahead,
 # the second turns off it.
-const FLIGHT_ROUTE := [Vector3(46.0, -14.0, 30.0), Vector3(100.0, -60.0, 40.0),
-		Vector3(180.0, -70.0, 40.0), Vector3(240.0, 10.0, 40.0)]
+const FLIGHT_ROUTE := [Vector3(22.0, -14.0, 30.0), Vector3(30.0, -80.0, 40.0),
+		Vector3(100.0, -120.0, 40.0), Vector3(200.0, -80.0, 40.0)]
 const FLIGHT_PROFILE := """type HELO
 default_state HELO_FOLLOWWP
 combat_flags FOLLOW_WP COUNTER
@@ -138,7 +141,7 @@ func _load_flight_world() -> GameWorld:
 	var scratch := mission.add_entity(MissionData.KIND_MARKER, 106005, Vector3.ZERO, Vector3.ZERO)
 	assert_true(mission.remove_entity(MissionData.KIND_MARKER, scratch.index))
 	var riders := []
-	for offset in [Vector3(0.5, 0.0, 0.0), Vector3(-0.5, 0.0, 0.0)]:
+	for offset in FLIGHT_RIDER_OFFSETS:
 		var at: Vector3 = Vector3(FLIGHT_HELI_AT.x, FLIGHT_HELI_AT.y, 0.0) + offset
 		at.z = VehicleFixture.ground_z(terrain, at.x, at.y)
 		var rider := mission.add_entity(MissionData.KIND_ORGANIC, VehicleFixture.RIDER, at, Vector3.ZERO)
@@ -157,9 +160,7 @@ func _load_flight_world() -> GameWorld:
 		assert_true(mission.add_event_trigger(at_stop, 1, 7, FLIGHT_GROUP, FLIGHT_PATH, node))
 		assert_true(mission.add_event_action(at_stop, 3, 30, FLIGHT_GROUP, FLIGHT_SPEEDS[node]))
 	assert_eq(mission.save_as(_dir.path_join("flight.bms")), OK)
-	# The board order's think gate staggers by net id ((tick + 36 * net_id) & 15):
-	# the first rider thinks second and finds the pilot's seat taken.
-	_flight = {"heli": heli.bms_id, "gunner": riders[0], "pilot": riders[1]}
+	_flight = {"heli": heli.bms_id, "pilot": riders[0], "gunner": riders[1]}
 	var world := WorldFixture.make_world(self)
 	assert_eq(WorldFixture.load_mission(world, _dir, "flight.bms"), OK, "the flight mission loads")
 	world.set_process(false)

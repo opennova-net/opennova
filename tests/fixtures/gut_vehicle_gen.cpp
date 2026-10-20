@@ -24,17 +24,24 @@
 //   cannon   the M1trret shape: base + cradle + gun, CTRL EWEAP_GUNYAW /
 //            EWEAP_GUNPITCH, `camera`, `bullet01`, `mflash01` on the gun,
 //            `usegun` on the base
+//   twingun  the Ka50gun shape: mount + cradle + twin-barrel gun, `bullet01` /
+//            `bullet02` (left and right), `camera`, `usegun` well behind the
+//            gun (the gunner sits in the cockpit)
 //   helo     the Dblkhwk1 / DAH62 shape: hull + main rotor + tail rotor, CTRL
 //            HELO_ROTOR / HELO_TAILROTOR spinning the rotors; `ctrlx05` (the
 //            pilot), two `sitex` passenger points, `Ewep01` / `Ewep02` door
-//            anchors facing out of the left and right doors, the pilot gun's
-//            `BULLET01` / `MFLASH01` / `bcasing01`, `ground`, `FX00`
+//            anchors facing out of the left and right doors, the carrier
+//            weapon's pods `BULLET01..04` / `MFLASH01..04` / `bcasing01..02`,
+//            `ground`, `FX00`
 //   gunboat  the Dmrk51 shape: one hull part, `ctrlx22`, four `ewep01..04`
 //            anchors, ewep02 and ewep03 tilted off the hull plane (the
 //            row-matrix conversion witnesses), `FX00`
 //   tank_turret  the Dm1a1 shape: hull + turret ring part on VEHICLE_GUNYAW;
 //            `ctrlx25`, `ewep01` on the hull (the turret child's mount),
 //            `ewep02` on the ring (the roof gun's), `fx00`, `ground`
+//   lcac     the Dlcac1 shape: one flat-decked hull a tank and its crew stand
+//            on, the pilot's cab on the left bow; `ctrlx11` (the pilot, as
+//            Dlcac1's), `sitex00`, `FX00` astern
 // Default: rebuild every file in memory and byte-compare the committed copies;
 // `--write` (re)writes them. Every run re-reads the committed bytes and checks
 // the authored facts the consumers pin.
@@ -237,6 +244,40 @@ Model make_cannon() {
 	return m;
 }
 
+Model make_twingun() {
+	Model m;
+	m.name = "twingun";
+	const int lod = m.add_lod();
+	const int mat = m.add_material("FF_ST_OP", "twingun.tga");
+	const Box mount = box(-0.15, -0.15, 0.0, 0.15, 0.15, 0.25);
+	const Box cradle = box(-0.2, -0.3, 0.25, 0.2, 0.3, 0.4);
+	const Box guns = box(-0.3, -0.28, 0.4, 1.7, 0.28, 0.6);
+	const int p_mount = m.add_part(lod, 0, Vec3{});
+	m.add_box(lod, p_mount, mat, mount);
+	const int p_cradle = m.add_part(lod, 0, Vec3{0.0, 0.0, 0.3});
+	m.add_box(lod, p_cradle, mat, cradle);
+	const int p_gun = m.add_part(lod, 0, Vec3{0.0, 0.0, 0.5});
+	m.add_box(lod, p_gun, mat, guns);
+	m.add_control_register("EWEAP_GUNYAW");
+	m.add_control_register("EWEAP_GUNPITCH");
+	m.add_panm(lod, p_mount, 0);
+	yaw_row(m, lod, p_cradle, 0);
+	yaw_pitch_row(m, lod, p_gun, 0, 0, 1);
+	m.add_user_point("bullet01", Vec3{1.75, -0.19, 0.5}, kForward, p_gun, kUserPointEffect);
+	m.add_user_point("bullet02", Vec3{1.75, 0.19, 0.5}, kForward, p_gun, kUserPointEffect);
+	m.add_user_point("mflash01", Vec3{1.72, -0.19, 0.5}, kForward, p_gun, kUserPointEffect);
+	m.add_user_point("mflash02", Vec3{1.72, 0.19, 0.5}, kForward, p_gun, kUserPointEffect);
+	m.add_user_point("bcasing02", Vec3{0.03, 0.35, 0.45}, kLeft, p_gun, kUserPointEffect);
+	m.add_user_point("camera", Vec3{1.34, 0.0, 0.8}, kForward, p_gun, kUserPointGameplay);
+	m.add_user_point("bcasing01", Vec3{0.03, -0.36, 0.45}, kRight, p_gun, kUserPointEffect);
+	// The gunner sits in the cockpit well behind the chin turret.
+	m.add_user_point("usegun", Vec3{-2.3, 0.4, 0.77}, kForward, p_mount, kUserPointGameplay);
+	solid_cobj(m, 0, Vec3{}, mount);
+	m.add_cobj(0, Vec3{0.0, 0.0, 0.3});
+	m.add_cobj(0, Vec3{0.0, 0.0, 0.5});
+	return m;
+}
+
 Model make_helo() {
 	Model m;
 	m.name = "helo";
@@ -274,6 +315,15 @@ Model make_helo() {
 	m.add_user_point("MFLASH01", Vec3{2.8, -1.2, 0.6}, kForward, p_hull, kUserPointEffect);
 	m.add_user_point("bcasing01", Vec3{2.4, -1.2, 0.6}, kRight, p_hull, kUserPointEffect);
 	m.add_user_point("FX00", Vec3{-2.0, 0.0, 2.2}, kBackward, -1, kUserPointEffect);
+	// The other rocket pods: the attack helicopters fire their own weapon from
+	// two (Dka501: bullet01/02) or four (Dapche1: bullet01..04) stub-wing points.
+	m.add_user_point("BULLET02", Vec3{2.9, 1.2, 0.6}, kForward, p_hull, kUserPointEffect);
+	m.add_user_point("MFLASH02", Vec3{2.8, 1.2, 0.6}, kForward, p_hull, kUserPointEffect);
+	m.add_user_point("bcasing02", Vec3{2.4, 1.2, 0.6}, kLeft, p_hull, kUserPointEffect);
+	m.add_user_point("BULLET03", Vec3{2.9, -0.9, 0.5}, kForward, p_hull, kUserPointEffect);
+	m.add_user_point("MFLASH03", Vec3{2.8, -0.9, 0.5}, kForward, p_hull, kUserPointEffect);
+	m.add_user_point("BULLET04", Vec3{2.9, 0.9, 0.5}, kForward, p_hull, kUserPointEffect);
+	m.add_user_point("MFLASH04", Vec3{2.8, 0.9, 0.5}, kForward, p_hull, kUserPointEffect);
 	// The hull's collision is the cabin floor, so the seats above it stand clear
 	// of the hull's own volumes.
 	solid_cobj(m, 0, Vec3{}, box(-2.5, -1.0, 0.3, 2.5, 1.0, 0.8));
@@ -339,6 +389,28 @@ Model make_tank_turret() {
 	return m;
 }
 
+Model make_lcac() {
+	Model m;
+	m.name = "lcac";
+	const int lod = m.add_lod();
+	const int paint = m.add_material("FF_ST_OP", "lcac.tga");
+	const Box hull = box(-13.0, -6.0, 0.0, 13.0, 6.0, 1.2);
+	const Box cab = box(6.0, 4.5, 1.2, 10.0, 6.0, 4.0);
+	const int p_hull = m.add_part(lod, 0, Vec3{});
+	m.add_box(lod, p_hull, paint, hull);
+	m.add_box(lod, p_hull, paint, cab);
+	m.add_panm(lod, p_hull, 0);
+	m.add_user_point("ctrlx11", Vec3{8.7, 5.25, 1.4}, kForward, p_hull, kUserPointGameplay);
+	m.add_user_point("sitex00", Vec3{7.6, 5.25, 1.4}, kForward, p_hull, kUserPointGameplay);
+	m.add_user_point("FX00", Vec3{-13.1, 0.0, 0.5}, kBackward, -1, kUserPointEffect);
+	const int c_hull = m.add_cobj(0);
+	m.add_face_box(c_hull, hull);
+	m.add_volume(c_hull, 1, 0, hull);
+	m.add_face_box(c_hull, cab);
+	m.add_volume(c_hull, 1, 0, cab);
+	return m;
+}
+
 struct Recipe {
 	const char *file;
 	Model (*make)();
@@ -350,9 +422,11 @@ const std::vector<Recipe> &recipes() {
 			{"minigun", make_minigun},
 			{"fifty", make_fifty},
 			{"cannon", make_cannon},
+			{"twingun", make_twingun},
 			{"helo", make_helo},
 			{"gunboat", make_gunboat},
 			{"tank_turret", make_tank_turret},
+			{"lcac", make_lcac},
 	};
 	return kRecipes;
 }
@@ -398,6 +472,9 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	} else if (name == "cannon") {
 		expect(p.parts() == 3 && !std::strcmp(p.reg(1), "EWEAP_GUNPITCH") && p.sub("camera") == 2 && p.sub("usegun") == 0,
 				name + ": the M1trret shape");
+	} else if (name == "twingun") {
+		expect(p.parts() == 3 && p.sub("bullet01") == 2 && p.sub("bullet02") == 2 && p.sub("usegun") == 0,
+				name + ": the Ka50gun shape");
 	} else if (name == "helo") {
 		expect(p.parts() == 3 && !std::strcmp(p.reg(0), "HELO_ROTOR") && !std::strcmp(p.reg(1), "HELO_TAILROTOR") &&
 						p.point("ctrlx05") == 0 && p.point("Ewep01") >= 0 && p.point("Ewep02") >= 0,
@@ -408,6 +485,9 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	} else if (name == "tank_turret") {
 		expect(p.parts() == 2 && p.sub("ewep01") == 0 && p.sub("ewep02") == 1 && !std::strcmp(p.reg(0), "VEHICLE_GUNYAW"),
 				name + ": the hull ring anchor and the ring's roof anchor");
+	} else if (name == "lcac") {
+		expect(p.parts() == 1 && p.point("ctrlx11") == 0 && p.sub("ctrlx11") == 0 && p.model.ctrl.count == 0,
+				name + ": one deck hull, the pilot on it");
 	}
 }
 
