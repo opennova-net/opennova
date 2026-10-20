@@ -213,8 +213,8 @@ void weapon_row(Workspace &workspace, const DefinitionViewport &model, const Pre
 	if (!range.ammo_alone())
 		ui_kit::clipped_text(std::string(line) + (range.ammo().empty() ? std::string() : " of " + range.ammo()));
 	if (weapon.card_up())
-		ui_kit::clipped_text("The sights card is up: the game draws the scope's card in the gun's place (the HUD "
-		                     "preview draws cards).");
+		ui_kit::quiet_text("The sights card is up.",
+		                   "The game draws the scope's card in the gun's place (the HUD preview draws cards).");
 	const std::vector<WeaponRangeEvent> &events = range.events();
 	if (!events.empty() && ImGui::TreeNode("fired", "What it did (%d)", int(events.size()))) {
 		const size_t shown = std::min<size_t>(events.size(), 48);
@@ -309,11 +309,12 @@ void impact_board(Workspace &workspace, const DefinitionViewport &model) {
 	if (!ImGui::TreeNodeEx("impacts", ImGuiTreeNodeFlags_DefaultOpen, "Impact rows by surface (%d)",
 	                       int(board.surfaces.size())))
 		return;
-	ui_kit::clipped_text("A round plays its row for the class it strikes (the class + 4); a row " + board.ammo +
-	                             " lacks plays " + (board.null_ammo.empty() ? std::string("ammo def 0") : board.null_ammo) +
-	                             "'s bank at the tag's place (" + std::to_string(board.null_rows) + " rows authored there).",
-	                     "AmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd: the ammo's rows searched for the tag, else "
-	                     "word_A2EB28 + 16 x tag, ammo def 0's packed bank.");
+	ui_kit::quiet_text("A round plays the row of the class it strikes.",
+	                   "Its row is the class + 4; a row " + board.ammo + " lacks plays " +
+	                           (board.null_ammo.empty() ? std::string("ammo def 0") : board.null_ammo) +
+	                           "'s bank at the tag's place (" + std::to_string(board.null_rows) +
+	                           " rows authored there).\nAmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd: the ammo's rows "
+	                           "searched for the tag, else word_A2EB28 + 16 x tag, ammo def 0's packed bank.");
 	{
 		ui_kit::WrapRow row;
 		const std::string mission = place_in_mission_target(view);

@@ -517,7 +517,8 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 			ImGui::PopID();
 		}
 	if (popup.choices.empty()) ui_kit::empty_state("The project has no names of this kind yet.");
-	else if (shown.empty()) ui_kit::empty_state(popup.filter[0] ? "Nothing matches the filter." : "Every name is unreachable.");
+	else if (shown.empty() && !popup.filter[0]) ui_kit::empty_state("Every name is unreachable.");
+	else if (shown.empty() && ui_kit::nothing_matches(popup.filter, "name")) popup.cursor = 0;
 	ImGui::EndChild();
 	// The hovered texture's (else the highlighted one's) picture, larger, with what it is, as the
 	// field's loader would load it.
@@ -653,7 +654,7 @@ bool ReferencePicker::completions(Workspace &workspace, const Key &key, const Fi
 				if (!completion.fits)
 					tip += "\nThe field holds " + std::to_string(limit) +
 					       " characters: the game reads this name cut, which no lookup finds.";
-				return tip + "\nEnter or a click takes it; Tab the first.";
+				return tip + "\nEnter takes it; Tab the first.";
 			});
 			ImGui::SameLine(0.0f, 0.0f);
 			ImGui::SetCursorPosX(ImGui::GetStyle().WindowPadding.x);

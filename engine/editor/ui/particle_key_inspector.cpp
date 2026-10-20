@@ -262,7 +262,7 @@ void draw_particle_key_inspector(Workspace &workspace, const DocumentBase &docum
 			                "line).");
 	}
 	ImGui::EndDisabled();
-	if (!state.refused.empty()) ImGui::TextWrapped("%s", state.refused.c_str());
+	if (!state.refused.empty()) ui_kit::refusal_text(state.refused);
 	ImGui::Spacing();
 }
 

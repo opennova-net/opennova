@@ -33,10 +33,9 @@ std::vector<ReferenceTarget> jump_targets(const SessionView &view, const Referen
 // A reference's Go to, to the places the game's lookup reaches (made only while the tool is hovered, pressed or its
 // menu open): one gone to, or several offered in a menu (a font through a style variable: the variable where the
 // game reads it, or the file its value names). `pressed` is the tool's press (the item just drawn); its tooltip is
-// `tip`, then where it leads after `lead`.
-void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value, bool pressed, const std::string &tip,
-                const char *lead);
-void go_to_tool(Workspace &workspace, const ReferenceSubject &name, bool pressed, const std::string &tip, const char *lead);
+// `tip`, then where it leads and its keys.
+void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value, bool pressed, const std::string &tip);
+void go_to_tool(Workspace &workspace, const ReferenceSubject &name, bool pressed, const std::string &tip);
 
 // A reference's jumps over the item just drawn (its value's control, drawn after SetNextItemAllowOverlap): while it
 // is under the pointer or has the keyboard, what F12 (Go to definition) and Shift+F12 (Find usages) act on, the uses

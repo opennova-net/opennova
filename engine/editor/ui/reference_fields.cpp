@@ -20,7 +20,7 @@ namespace {
 using Targets = std::function<std::vector<ReferenceTarget>()>;
 
 // go_to_tool over the targets `targets_of` makes (asked only while the tool is hovered, pressed or its menu open).
-void go_to_tool(Workspace &workspace, const Targets &targets_of, bool pressed, const std::string &tip, const char *lead) {
+void go_to_tool(Workspace &workspace, const Targets &targets_of, bool pressed, const std::string &tip) {
 	const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
 	if (pressed || hovered) {
 		const std::vector<ReferenceTarget> targets = targets_of();
@@ -28,9 +28,8 @@ void go_to_tool(Workspace &workspace, const Targets &targets_of, bool pressed, c
 		else if (pressed && !targets.empty()) ImGui::OpenPopup("go to");
 		if (hovered)
 			ui_kit::tooltip(targets.empty() ? tip
-			                                : tip + (tip.empty() ? "" : "\n") + lead + go_to_words(targets) +
-			                                          "\nThe keys: F12 with the pointer on the value, or Ctrl+click it; "
-			                                          "Shift+F12 lists its uses.");
+			                                : tip + (tip.empty() ? "" : "\n") + go_to_words(targets) +
+			                                          "\nF12, or Ctrl+click the value; Shift+F12 lists its uses.");
 	}
 	if (!ImGui::BeginPopup("go to")) return;
 	for (const ReferenceTarget &target : targets_of())
@@ -125,15 +124,14 @@ std::vector<ReferenceTarget> jump_targets(const SessionView &view, const Referen
 	return out;
 }
 
-void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value, bool pressed, const std::string &tip,
-                const char *lead) {
+void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value, bool pressed, const std::string &tip) {
 	const SessionView &view = workspace.view();
 	if (!view.findings.graph || !view.project.scan) return;
 	go_to_tool(workspace, [&] { return reference_targets(*view.findings.graph, *view.project.scan, field, value); }, pressed,
-	           tip, lead);
+	           tip);
 }
 
-void go_to_tool(Workspace &workspace, const ReferenceSubject &name, bool pressed, const std::string &tip, const char *lead) {
+void go_to_tool(Workspace &workspace, const ReferenceSubject &name, bool pressed, const std::string &tip) {
 	const SessionView &view = workspace.view();
 	if (!view.findings.graph || !view.project.scan) return;
 	go_to_tool(workspace,
@@ -141,7 +139,7 @@ void go_to_tool(Workspace &workspace, const ReferenceSubject &name, bool pressed
 		           return reference_targets(*view.findings.graph, *view.project.scan, name.kind, name.target, name.scope,
 		                                    name.loader_arg);
 	           },
-	           pressed, tip, lead);
+	           pressed, tip);
 }
 
 void reference_jumps(Workspace &workspace, const FieldUse &field, const Value &value) {
@@ -222,9 +220,9 @@ bool text_reference_field(Workspace &workspace, ReferencePicker &picker, const T
 	const std::string words = std::string(ui_kit::reference_word(status)) + ": " + reference_row(place.kind).label + " " +
 	                          place.value;
 	if (status == ReferenceStatus::Present) {
-		go_to_tool(workspace, name, pressed, words, "A click: ");
+		go_to_tool(workspace, name, pressed, words);
 	} else if (status == ReferenceStatus::Missing) {
-		ui_kit::tooltip(words + ", which nothing of the project defines.\nA click: what fixes it.");
+		ui_kit::tooltip(words + ", which nothing of the project defines.");
 		picker.draw_fixes(workspace, place, pressed);
 	} else {
 		ui_kit::tooltip(words);

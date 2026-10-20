@@ -211,8 +211,8 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 			ImGui::AlignTextToFramePadding();
 			if (ImGui::TextLink((ui_kit::fit(paired, ImGui::GetContentRegionAvail().x) + "###paired").c_str()))
 				window_requests::go_to(workspace, rig.pairing);
-			ui_kit::tooltip(paired + "\nThe record whose graphic and animation map pair this model with the map: a click " +
-			                (rig.pairing.editable ? "opens " : "shows ") + rig.pairing.file + " at it.");
+			ui_kit::tooltip(paired + "\nThe record whose graphic and animation map pair this model with the map.\n" +
+			                window_requests::go_to_words(rig.pairing));
 		} else if (!paired.empty()) {
 			row.next(std::min(ui_kit::text_width(paired.c_str()), ImGui::GetFontSize() * 8.0f));
 			ImGui::AlignTextToFramePadding();
@@ -229,12 +229,8 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 				           ", played in turn from the last)";
 			ui_kit::clipped_text(playing, playing + "\n" + key);
 		}
-		if (!model.clip_note().empty() || !model.detail().empty()) {
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
-			if (!model.clip_note().empty()) ImGui::TextWrapped("%s", model.clip_note().c_str());
-			if (!model.detail().empty()) ImGui::TextWrapped("%s", model.detail().c_str());
-			ImGui::PopStyleColor();
-		}
+		if (!model.clip_note().empty()) ui_kit::warning_line(model.clip_note());
+		if (!model.detail().empty()) ui_kit::warning_line(model.detail());
 	}
 	tools_->toolbar(workspace, model, context);
 	// A LOD with no part draws nothing (retail ships empty LODs): said, not left a blank picture.
@@ -267,7 +263,7 @@ void ModelViewportView::Tools::rig_chooser(Workspace &workspace, ui_kit::WrapRow
 			ImGui::SetKeyboardFocusHere();
 		}
 		ImGui::SetNextItemWidth(-FLT_MIN);
-		ImGui::InputTextWithHint("##rig_filter", "Type part of a model's name", rig_filter, sizeof(rig_filter));
+		ui_kit::filter_box("##rig_filter", rig_filter, sizeof(rig_filter), "Type part of a model's name", 0.0f, nullptr, false);
 		const std::string wanted = strutil::to_lower(rig_filter);
 		const auto shown = [&](const std::string &name) {
 			return wanted.empty() || strutil::to_lower(name).find(wanted) != std::string::npos;
@@ -307,11 +303,9 @@ void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row,
 	ClipSoundOptions &sound = options.sound;
 	const ClipSoundBinding &binding = model.sound_binding();
 	const char *label = sound.mute ? "Sound (muted)###sound" : "Sound###sound";
-	row.next(ui_kit::button_width(label));
-	if (ImGui::Button(label)) ImGui::OpenPopup("sound");
-	ui_kit::tooltip("What the clip's events play as it runs, as the game plays them: " + binding.profile_words + "\n" +
-	                binding.body_words);
-	if (ImGui::BeginPopup("sound")) {
+	if (ui_kit::tool_popup(row, label, "sound", true,
+	                       "What the clip's events play as it runs, as the game plays them: " + binding.profile_words + "\n" +
+	                               binding.body_words)) {
 		const float unit = ImGui::GetFontSize();
 		ImGui::Checkbox("Mute", &sound.mute);
 		ui_kit::tooltip("The events still fire and say what they play; nothing is heard.");
@@ -364,10 +358,9 @@ void ModelViewportView::Tools::fire(Workspace &workspace, ui_kit::WrapRow &row, 
 	ClipFireOptions &fire = options.fire;
 	const ClipFire &clip_fire = model.clip_fire();
 	const char *label = clip_fire.armed() ? "Fire###fire" : "Fire (none)###fire";
-	row.next(ui_kit::button_width(label));
-	if (ImGui::Button(label)) ImGui::OpenPopup("fire");
-	ui_kit::tooltip("What the clip's fire events fire as it runs, as the game's NPC body fires them: " + clip_fire.words());
-	if (ImGui::BeginPopup("fire")) {
+	if (ui_kit::tool_popup(row, label, "fire", true,
+	                       "What the clip's fire events fire as it runs, as the game's NPC body fires them: " +
+	                               clip_fire.words())) {
 		const float unit = ImGui::GetFontSize();
 		ImGui::PushTextWrapPos(unit * 26.0f);
 		ImGui::TextUnformatted(clip_fire.words().c_str());
@@ -415,14 +408,11 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 	FirstPersonOptions &chosen = options.first_person;
 	const FirstPersonSources &sources = model.first_person();
 	const char *label = model.eye_view() ? "First person (eye)###first_person" : "First person###first_person";
-	row.next(ui_kit::button_width(label));
-	if (ImGui::Button(label)) ImGui::OpenPopup("first_person");
-	ui_kit::tooltip(sources.words());
-	if (ImGui::BeginPopup("first_person")) {
+	if (ui_kit::tool_popup(row, label, "first_person", true, sources.words())) {
 		const float unit = ImGui::GetFontSize();
 		ImGui::PushTextWrapPos(unit * 26.0f);
 		ImGui::TextUnformatted(sources.words().c_str());
-		if (!sources.arms_note().empty()) ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", sources.arms_note().c_str());
+		if (!sources.arms_note().empty()) ImGui::TextColored(ui_kit::warning_color(), "%s", sources.arms_note().c_str());
 		ImGui::PopTextWrapPos();
 		int view = chosen.eye ? 1 : 0;
 		ImGui::RadioButton("Orbit", &view, 0);
@@ -460,7 +450,7 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 			                "view record and its actions.");
 		}
 		if (!sources.weapon_note().empty())
-			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", sources.weapon_note().c_str());
+			ImGui::TextColored(ui_kit::warning_color(), "%s", sources.weapon_note().c_str());
 		const std::vector<const WeaponActionRun *> playing = sources.actions_playing(model.clip_key());
 		const WeaponActionRun *action = model.first_person_action();
 		if (playing.size() > 1) {
@@ -642,10 +632,7 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		const bool shoots = model.clip_fire().armed() && !model.first_person().active() &&
 		                    (under->trigger & anim::kAnimEventFireMask) != 0;
 		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
-		                "): " + animation_trigger_words(under->trigger) + "." + plays + fires +
-		                (shoots    ? "\nClick to go there and fire it once."
-		                 : audible ? "\nClick to go there and hear it."
-		                           : "\nClick to go there."));
+		                "): " + animation_trigger_words(under->trigger) + "." + plays + fires);
 		if (clicked) {
 			seek_ticks(workspace, model, under->tick, true);
 			// A press plays the event once, as the game plays it, and fires its shots once (play_sound {frame}).
@@ -664,7 +651,7 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		}
 	} else if (leg_under) {
 		// A leg of the weapon's action (DI-13): what it plays, and a press plays it once.
-		ui_kit::tooltip(leg_under->words + "\nClick to go there and hear it.");
+		ui_kit::tooltip(leg_under->words);
 		if (clicked) {
 			seek_ticks(workspace, model, std::min(leg_under->tick, length), true);
 			workspace.request(request::play_action_leg(model.path(), leg_under->end));
@@ -781,17 +768,14 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	if (model.animating()) sound(workspace, row, model);
 	if (model.animating() && !model.first_person().active()) fire(workspace, row, model);
 	if (model.animating() && model.first_person().active()) first_person(workspace, row, model);
-	row.next(ui_kit::button_width("Show"));
-	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
-	ui_kit::tooltip("What the viewport marks over the model, and the collision it draws.");
-	if (ImGui::BeginPopup("marks")) {
+	if (ui_kit::tool_popup(row, "Show", "marks", true, "What the viewport marks over the model, and the collision it draws.")) {
 		ImGui::Checkbox("User points", &options.overlays.user_points);
 		ImGui::Checkbox("Lights", &options.overlays.lights);
 		ImGui::Checkbox("Part pivots", &options.overlays.pivots);
 		if (model.animating()) {
 			ImGui::Checkbox("Bones", &options.bones);
-			ui_kit::tooltip("The rig's bones as the clip poses them, each named under the pointer; in the "
-			                "clip's own document a click on one selects it.");
+			ui_kit::tooltip("The rig's bones as the clip poses them, each named under the pointer (selected in the clip's "
+			                "own document).");
 		} else {
 			// The collision (S17, preview/model_collision): a layer per thing the game tests the model
 			// against, each in its colour, its count, what the game does with it in its tooltip.
@@ -845,15 +829,11 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	}
 	ui_kit::tooltip("Look at the selected marker or collision record, or at the whole model (F).");
 	if (!model.animating()) place_in_mission(workspace, row, model);
-	row.next(ui_kit::button_width("Registers"));
-	ImGui::BeginDisabled(shown.ctrl.count == 0);
-	if (ImGui::Button("Registers")) ImGui::OpenPopup("registers");
-	ImGui::EndDisabled();
-	ui_kit::tooltip(shown.ctrl.count == 0 ? "The model declares no CTRL registers."
-	                                      : "The model's CTRL registers by what drives them in the game: hold one at "
-	                                        "a value, as the game's entity would drive it.");
 	if (options != model.options()) set_options(workspace, model, options);
-	if (ImGui::BeginPopup("registers")) {
+	if (ui_kit::tool_popup(row, "Registers", "registers", shown.ctrl.count != 0,
+	                       shown.ctrl.count == 0 ? "The model declares no CTRL registers."
+	                                             : "The model's CTRL registers by what drives them in the game: hold one "
+	                                               "at a value, as the game's entity would drive it.")) {
 		registers(workspace, model, context.input.clock);
 		ImGui::EndPopup();
 	}
@@ -861,11 +841,9 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	if (!model.animating() && !model.damage_uses().empty()) {
 		const bool destroyed = model.options().damage.state == DamageState::Destroyed;
 		const char *label = destroyed ? "Damage (destroyed)###damage" : "Damage###damage";
-		row.next(ui_kit::button_width(label));
-		if (ImGui::Button(label)) ImGui::OpenPopup("damage");
-		ui_kit::tooltip("The model intact or destroyed, as the game destroys the item naming it: the husk swapped "
-		                "in, the pieces, the destroy fade on the preview clock; Play destroy runs it from the death.");
-		if (ImGui::BeginPopup("damage")) {
+		if (ui_kit::tool_popup(row, label, "damage", true,
+		                       "The model intact or destroyed, as the game destroys the item naming it: the husk swapped "
+		                       "in, the pieces, the destroy fade on the preview clock; Play destroy runs it from the death.")) {
 			damage(workspace, model, context.input.clock);
 			ImGui::EndPopup();
 		}
@@ -877,10 +855,9 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		const std::vector<ModelAnimation> maps = model_animations(*view.findings.graph, *view.project.scan, model.path());
 		if (!maps.empty()) {
 			const std::string label = "Animations (" + std::to_string(maps.size()) + ")";
-			row.next(ui_kit::button_width(label.c_str()));
-			if (ImGui::Button(label.c_str())) ImGui::OpenPopup("animations");
-			ui_kit::tooltip("The animation maps the items using this model play on it. Open one to play its clips here.");
-			if (ImGui::BeginPopup("animations")) {
+			if (ui_kit::tool_popup(row, label.c_str(), "animations", true,
+			                       "The animation maps the items using this model play on it. Open one to play its clips "
+			                       "here.")) {
 				for (const ModelAnimation &played : maps) {
 					const std::string name = io::utf8_file_name(played.map);
 					const std::string line = name + "  (" + played.record + (played.via.empty() ? "" : ", " + played.via) + ")";
@@ -983,8 +960,7 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 		ui_kit::tooltip("Play this item's death.");
 		ImGui::SameLine();
 		const std::string line = use.item + " (" + io::utf8_file_name(use.file) + ") " + as;
-		if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###use").c_str()) && use.edge &&
-		    view.project.scan)
+		if (ui_kit::fitted_selectable(line, "use") && use.edge && view.project.scan)
 			window_requests::go_to(workspace, usage_target(*view.project.scan, *use.edge));
 		ui_kit::tooltip("Go to " + use.item + "'s " + use.field + " in " + use.file + ".");
 		ImGui::PopID();
@@ -1024,7 +1000,7 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 	ImGui::EndDisabled();
 	ui_kit::tooltip("Destroy the item from its death: the clock from tick 0, run.");
 	if (!model.damage_note().empty()) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
+		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::warning_color());
 		ImGui::TextWrapped("%s", model.damage_note().c_str());
 		ImGui::PopStyleColor();
 	}
@@ -1057,13 +1033,8 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 	ImGui::PopTextWrapPos();
 	if (play) options.damage.state = DamageState::Destroyed;
 	if (options != model.options()) set_options(workspace, model, options);
-	if (play) {
-		// The death from its tick: the clock at 0, run.
-		io::JsonValue from = io::JsonValue::make_object();
-		from.set("ticks", io::json_number(0));
-		from.set("playing", io::JsonValue::make_bool(true));
-		workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(from))));
-	}
+	// The death from its tick: the clock at 0, run.
+	if (play) replay_clock(workspace, model, true);
 }
 
 } // namespace opennova::editor

@@ -2527,8 +2527,9 @@ void test_inspector_kinds_alike() {
 	ui.away();
 	ui.drain();
 	std::string shown = logged_frame(ui);
-	CHECK(shown.find("3 records selected (1 Crate, 2 Barrel): a change here sets every one of them.") != std::string::npos,
-	      "a crate and two barrels: the shared form, counted by kind");
+	CHECK(shown.find("3 records selected (1 Crate, 2 Barrel)") != std::string::npos &&
+	              shown.find("a change here sets every one") == std::string::npos,
+	      "a crate and two barrels: the shared form, counted by kind (what a change does in its tooltip)");
 	CHECK(shown.find("of different kinds") == std::string::npos && shown.find("(mixed)") != std::string::npos,
 	      "no note that the kinds differ; what differs is marked");
 	// The weight typed: one batch, a Set on each record under its own kind.
