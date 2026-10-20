@@ -273,8 +273,9 @@ private:
 	// The S2C 0x0F landing on L: the authoritative pose (+ look yaw, the
 	// un-hide) and, for a waypoint gametype, the host-filtered route.
 	void apply_world_state_load();
-	// The self player record's Flags onto L under 0xE1, once per folded record.
-	void fold_local_record_flags();
+	// The self player record onto L, once per folded record: its Flags under 0xE1, then
+	// the mount edge's position snap (D-NET-NEW-L2-13).
+	void fold_local_record();
 	void apply_authoritative_health();
 	void sync_authoritative_mount();
 	void apply_mounted_ammo_update();

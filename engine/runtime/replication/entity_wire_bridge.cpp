@@ -1259,7 +1259,8 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
 	// ground link (a vehicle on open ground has none). The seat resolves to
 	// its materialized row; a record whose seat has no row was dropped before
 	// that store, so the link stands. The standing record's carrier store
-	// (@0x4C1358) is not modeled: an unmounted player keeps its own link.
+	// (@0x4C1358) lands on the joiner's body in the receive
+	// (JoinerRole::fold_local_record), so an unmounted body's link is the record's.
 	// [orig: NetPacket_SerializePlayerState case 2 -- the carrier resolve and
 	//  its no-itemDef drop @0x4C105E..0x4C10C7, Entity_TryAttachOrDetach
 	//  @0x4C1329, `parentEntity->groundEntity` @0x4C1346..0x4C1353]

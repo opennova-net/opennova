@@ -16,6 +16,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
 
@@ -101,6 +102,12 @@ struct Harness {
 	// One 0x0A carrying the tail and the self player record with `flags`, then
 	// the frame that receives it.
 	void frame(uint8_t flags) {
+		PlayerCompactRecord player;
+		player.carrier_handle = 0xFFFF;
+		player.state_flags = flags;
+		frame(player);
+	}
+	void frame(const PlayerCompactRecord &player) {
 		FrameUpdate fu;
 		fu.carried_handle = 0xFFFF;
 		fu.health = 100;
@@ -108,8 +115,7 @@ struct Harness {
 		rec.handle = kSelf;
 		rec.type_id = w::kPlayerInfantryTypeId;
 		rec.cls = EntityClass::Player;
-		rec.player.carrier_handle = 0xFFFF;
-		rec.player.state_flags = flags;
+		rec.player = player;
 		fu.records.push_back(rec);
 		std::vector<uint8_t> packet;
 		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
@@ -175,11 +181,111 @@ bool run_the_self_record_flags_ride_back_the_same_frame() {
 			"clear: the uplink reports 0");
 }
 
+// The record's mount edge runs in the receive too: the attach-or-detach, then the
+// local player's snap to the record's world sample, so the same frame's C2S 0x0C
+// carries the new relation's ground link and the snapped position (D-NET-NEW-L2-13).
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FE4..0x4C0FF0,
+//  Entity_TryAttachOrDetach @0x4C1317 (@0x436610), the local snap @0x4C132B..0x4C1343,
+//  the ground link @0x4C1346..0x4C1358; Client_ProcessNetworkFrame @0x42C180, the
+//  receive @0x42C228 ahead of the send block @0x42C482]
+bool run_the_self_record_mount_edge_snaps_l() {
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "mount edge: L spawned")) return false;
+	auto &self_row = h.role.runtime->state().upsert(kSelf);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	h.frame(0x00);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->alive, "mount edge: L alive")) return false;
+	// A vehicle 6 u off L with a controller seat on bone 1, and its replica row.
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 1291;
+	vehicle.has_item_def = true;
+	vehicle.has_graphic_model = true;
+	vehicle.item_type = 1;
+	vehicle.item_attrib = 0x40u;
+	vehicle.net_class_code = static_cast<uint8_t>(EntityClass::Vehicle);
+	vehicle.spawn_origin = (1u << 24) | 3u;
+	vehicle.position = local->position;
+	vehicle.position.x += 6.0f;
+	vehicle.health = vehicle.health_max = 3000;
+	vehicle.team = local->team;
+	w::Seat controller;
+	controller.type = w::SeatType::Controller;
+	controller.bone_index = 1;
+	controller.retail_slot = 8;
+	controller.source_name = "ctrlx00";
+	vehicle.seats.push_back(controller);
+	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
+	auto &row = h.role.runtime->state().upsert(vh.packed);
+	row.type_id = static_cast<uint16_t>(vehicle.item_id);
+	row.cls = EntityClass::Vehicle;
+	row.x = w::to_fixed(vehicle.position.x);
+	row.y = w::to_fixed(vehicle.position.y);
+	row.z = w::to_fixed(vehicle.position.z);
+	row.heading_known = true;
+	row.net_has_compact = true;
+	row.compact_revision = 1;
+	const int32_t pre[3] = {local->position.x.q16, local->position.y.q16,
+			local->position.z.q16};
+
+	// The attach edge: the record seats L on bone 1 at a seat-local offset.
+	PlayerCompactRecord seated;
+	seated.carrier_handle = vh.packed;
+	seated.vehicle_bone = 1;
+	seated.state_flags = static_cast<uint8_t>(w::kEntityFlagMounted);
+	seated.pos_x_compressed = 0x0010;
+	seated.pos_y_compressed = 0x0008;
+	std::size_t from = h.socket.datagrams.size();
+	h.frame(seated);
+	std::vector<PlayerExtendedUplink> ups = uplinks_since(h.socket, from);
+	const replication::ClientEntityState *self = h.role.runtime->state().find(kSelf);
+	local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->mounted && local->mount_target == vh,
+			"attach edge: the record's seat attaches L"))
+		return false;
+	if (!expect(self != nullptr && (self->x != pre[0] || self->y != pre[1]),
+			"attach edge: the record's sample is not where L stood"))
+		return false;
+	if (!expect(!ups.empty() && ups.back().carrier_handle == 0xFFFFu &&
+					ups.back().pos_x == self->x && ups.back().pos_y == self->y &&
+					ups.back().pos_z == self->z,
+			"attach edge: the frame's 0x0C carries the record's world sample under the "
+			"seat's ground link (none on open ground)"))
+		return false;
+
+	// The detach edge: the record leaves the seat at a world sample of its own.
+	PlayerCompactRecord standing;
+	standing.carrier_handle = 0xFFFF;
+	standing.pos_x_compressed = 0x0040;
+	standing.pos_y_compressed = 0x0020;
+	from = h.socket.datagrams.size();
+	h.frame(standing);
+	ups = uplinks_since(h.socket, from);
+	self = h.role.runtime->state().find(kSelf);
+	local = h.kernel->local.player();
+	if (!expect(local != nullptr && !local->mounted,
+			"detach edge: the record's empty seat detaches L"))
+		return false;
+	return expect(!ups.empty() && ups.back().carrier_handle == 0xFFFFu &&
+					ups.back().pos_x == self->x && ups.back().pos_y == self->y &&
+					ups.back().pos_z == self->z,
+			"detach edge: the frame's 0x0C carries the record's world sample, unparented");
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok &= run_the_self_record_flags_ride_back_the_same_frame();
+	ok &= run_the_self_record_mount_edge_snaps_l();
 	if (ok) std::printf("joiner_record_flags: ok\n");
 	return ok ? 0 : 1;
 }

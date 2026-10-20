@@ -157,7 +157,7 @@ void JoinerRole::spawn_and_arm_local_player() {
 		if (world::Entity *L = world.registry.get(h)) {
 			// Player_InitPlayer ends by clearing the local player's hidden bit, on a
 			// joiner as on a host, at every mission start; the frame's record fold
-			// (fold_local_record_flags) then re-hides it as the next 0x0A's writer does.
+			// (fold_local_record) then re-hides it as the next 0x0A's writer does.
 			// [orig: Game_StartMission @0x525BBC -> Player_InitPlayer @0x4E15F0,
 			//  `and dword ptr [eax+24h], 0FFFFFFFEh` @0x4E19C2]
 			L->hidden = false;
@@ -226,7 +226,7 @@ void JoinerRole::spawn_and_arm_local_player() {
 //  `cmp edi, g_LocalPlayerEntity` @0x4C12F7, `and ebx, 0E1h` @0x4C12FF, the store
 //  @0x4C1311; the uplink's raw byte @0x4C1B17; Client_ProcessNetworkFrame @0x42C180,
 //  the receive @0x42C228 ahead of the send block @0x42C482]
-void JoinerRole::fold_local_record_flags() {
+void JoinerRole::fold_local_record() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
 	ClientRuntime &rt = *runtime;
@@ -242,6 +242,57 @@ void JoinerRole::fold_local_record_flags() {
 	const uint32_t wire = self->state_flags;
 	local->flags ^= (local->flags ^ wire) & kLocalRecordFlagsMask;
 	local->engine_flags ^= (local->engine_flags ^ wire) & kLocalRecordFlagsMask;
+	// Then the record's mount relation, inside the receive: the attach-or-detach runs
+	// (the mount sync) and returns 1 on an attach attempt (the bone or the carrier
+	// changed, or a control seat whose occupant is not this body) or on a detach of a
+	// mounted body; for the local player the 1 then snaps Position to the record's world
+	// sample the fold staged, so the same frame's 0x0C carries the new relation and the
+	// snapped position (D-NET-NEW-L2-13). The frame's later mount sync still takes a
+	// carrier this frame materialized.
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage +0x234..+0x23C
+	//  @0x4C0FE4..0x4C0FF0, Entity_TryAttachOrDetach @0x436610 (the call @0x4C1317; the
+	//  attach test @0x4366DD, Entity_GetBoneSlotType @0x434ED0 types 2 / 3 / 5, the detach
+	//  test @0x436768), the local snap @0x4C1323..0x4C1343]
+	world::Entity *carrier = self->carrier_handle != world::EntityHandle::kInvalid &&
+					self->mount_bone != 0
+			? replica_world_entity(world, world::EntityHandle{self->carrier_handle})
+			: nullptr;
+	bool edge = false;
+	if (carrier != nullptr) {
+		world::SeatType seat_type = world::SeatType::None;
+		for (const world::Seat &seat : carrier->seats)
+			if (seat.bone_index == self->mount_bone) {
+				seat_type = seat.type;
+				break;
+			}
+		const bool claims = world::is_vehicle_control_seat(seat_type) ||
+				seat_type == world::SeatType::Gunner;
+		// The carrier's occupant names this body as L or, before the mount sync
+		// reconciles it, as H (one body in retail).
+		const bool occupant_is_self = carrier->primary_occupant == local->handle ||
+				carrier->primary_occupant.packed == rt.self_handle();
+		edge = !local->mounted ||
+				local->mount_target != world::EntityHandle{self->carrier_handle} ||
+				local->mount_bone != self->mount_bone || (claims && !occupant_is_self);
+	} else {
+		edge = local->mounted;
+	}
+	const int32_t sample[3] = {self->x, self->y, self->z};
+	const uint16_t wire_carrier = self->carrier_handle;
+	sync_authoritative_mount();
+	if (edge) local->position.set_q16({sample[0], sample[1], sample[2]});
+	// The ground link last: a mounted body takes its mount's, any other the record's
+	// carrier (a deck or floor the host echoes with bone 0; none for 0xFFFF), so a
+	// detach's 0x0C leaves unparented.
+	// [orig: @0x4C1346..0x4C1358 - `parentEntity->groundEntity`, else the resolved
+	//  record carrier (ebp; zeroed @0x4C0FAB for none)]
+	const world::Entity *mount = local->mounted ? world.registry.get(local->mount_target) : nullptr;
+	const world::Entity *record_carrier = wire_carrier != world::EntityHandle::kInvalid
+			? replica_world_entity(world, world::EntityHandle{wire_carrier})
+			: nullptr;
+	local->ground_target = mount != nullptr ? mount->ground_target
+			: record_carrier != nullptr        ? record_carrier->handle
+			                                   : world::EntityHandle{};
 }
 
 // The 0x0A tail is the authoritative health source for the recipient's OWN
