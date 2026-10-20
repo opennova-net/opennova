@@ -414,8 +414,14 @@ static void test_onptick_reads_the_slot_play_ticks() {
     CHECK(slot->play_ticks == 124);
     f.run(f.select(f.actor) + "onptick(2) store(v1)\nonptick(1) store(v2)\nontick(0) store(v3)\n");
     CHECK(f.value(1) == 1 && f.value(2) == 0 && f.value(3) == 1);
-    // A hidden body (Flags bit 0) pauses the count; a pending deploy with a
-    // visible body does not, nor does a closed session.
+    // A hidden body (Flags bit 0) pauses the count. A held (deploy-pending)
+    // slot counts while its body is visible, which is until the slot's next
+    // 0x0A: the play-tick add precedes the per-slot writer in the tick, and
+    // the writer re-sets the hidden bit while the hold is up and clears it
+    // once the hold is gone. A closed session does not pause the count.
+    // [orig: Server_TickUpdate - the add @0x51D977 ahead of the per-slot 0x0A
+    //  @0x51E3E4; NetPacket_WritePlayerState - the clear @0x4FF6D7, the held
+    //  re-set @0x4FF7B8]
     f.world.registry.get(f.actor)->flags |= kEntityFlagCarried;
     nm::Server_TickUpdate(f.ctx);
     CHECK(slot->play_ticks == 124);
@@ -423,7 +429,11 @@ static void test_onptick_reads_the_slot_play_ticks() {
     f.ctx.np_protocol.connection_list.front().link.respawn_pending = true;
     nm::Server_TickUpdate(f.ctx);
     CHECK(slot->play_ticks == 125);
+    nm::Server_TickUpdate(f.ctx); // hidden by the held slot's 0x0A
+    CHECK(slot->play_ticks == 125);
     f.ctx.np_protocol.connection_list.front().link.respawn_pending = false;
+    nm::Server_TickUpdate(f.ctx); // still hidden at the add; this 0x0A clears it
+    CHECK(slot->play_ticks == 125);
     f.ctx.is_in_session = 0;
     nm::Server_TickUpdate(f.ctx);
     CHECK(slot->play_ticks == 126);
