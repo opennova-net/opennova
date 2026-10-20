@@ -39,10 +39,16 @@
 //            the cabin COBJ carries its own CVRT run and CXLT (2, 0, 1/2)
 //   tank     hull + turret; ctrlx25 (row 1), ewep01 on the turret, ground;
 //            the turret yaws on VEHICLE_GUNYAW
+// Outside the set, fixtures/threedi/crate_alphagen24.3di: the crate wearing
+// retail's constant AlphaGen on an opaque material, the MTRL row JOTAC's
+// SCrate1.3di carries (FF_ST_OP, two-sided, alphagen style 24 reg -1 start 128,
+// no alpha test: witnessed 2026-10-19, the retired threedi_retail_material_facts
+// row), which the projected-shadow witness keys on.
 // Default: rebuild every file in memory and byte-compare the committed
 // copies; `--write` (re)writes them. Every run re-reads the committed bytes
 // and checks the authored facts the consumers pin.
 #include "fixtures/minimal_3di_builder.h"
+#include "fixtures/person_rig.h"
 
 #include <formats/threedi/threedi_panm_pose.h>
 
@@ -236,13 +242,12 @@ Model make_person() {
 	const int mat = m.add_material("VS_SKBASIC", "person.tga");
 	// The retail person rig order (CharModel): pelvis; spine; chest; clavicles;
 	// upper arms; thighs; forearms; shins; neck; head; hands; feet. Origin at
-	// the pelvis, feet a little over a unit below it.
-	const int parents[19] = {0, 0, 1, 2, 2, 3, 4, 0, 0, 5, 6, 7, 8, 2, 13, 10, 9, 11, 12};
-	const Vec3 pivots[19] = {{0, 0, 0}, {0, 0, 0.125}, {0, 0, 0.375}, {0, -0.0625, 0.625},
-		{0, 0.0625, 0.625}, {0, -0.25, 0.625}, {0, 0.25, 0.625}, {0, -0.125, 0}, {0, 0.125, 0},
-		{0, -0.4375, 0.4375}, {0, 0.4375, 0.4375}, {0, -0.125, -0.4375}, {0, 0.125, -0.4375},
-		{0, 0, 0.6875}, {0.03125, 0, 0.75}, {0, 0.6875, 0.3125}, {0, -0.6875, 0.3125},
-		{-0.0625, -0.125, -0.875}, {-0.0625, 0.125, -0.875}};
+	// the pelvis, feet a little over a unit below it (person_rig.h, which the
+	// rig19 clip set shares).
+	const int *parents = person_rig::kParents;
+	Vec3 pivots[person_rig::kBones];
+	for (int i = 0; i < person_rig::kBones; ++i)
+		pivots[i] = Vec3{person_rig::kPivots[i][0], person_rig::kPivots[i][1], person_rig::kPivots[i][2]};
 	// Each bone's box spans from its pivot toward its child (or a stub).
 	const Box boxes[19] = {box(-0.125, -0.125, -0.0625, 0.125, 0.125, 0.125),
 		box(-0.1, -0.1, 0.125, 0.1, 0.1, 0.375), box(-0.125, -0.15, 0.375, 0.125, 0.15, 0.625),
@@ -582,6 +587,8 @@ struct Recipe {
 	const char *file;
 	Model (*base)();
 	Edit edit;
+	// The directory under fixtures/ the file lands in.
+	const char *dir = "threedi/synth";
 };
 
 void rename_register(Model &m, int index, const char *name) { m.control_registers[index] = name; }
@@ -788,6 +795,15 @@ const std::vector<Recipe> &recipes() {
 		{"panm_live_08_axis_scaley", nullptr, nullptr},
 		{"panm_live_09_translation", nullptr, nullptr},
 		{"panm_inert_10_rotrev", nullptr, nullptr},
+		// --- the constant AlphaGen crate (fixtures/threedi/crate_alphagen24.3di) ---
+		{"crate_alphagen24", make_crate, [](Model &m) {
+			ThreediMaterial &mat = m.materials[0];
+			mat.material_flags = THREEDI_MATERIAL_FLAG_TWO_SIDED;
+			mat.alpha_gen.style = 24;
+			mat.alpha_gen.reg = -1;
+			mat.alpha_gen.start = 128;
+			mat.alpha_gen.end = 0;
+		}, "threedi"},
 	};
 	return kRecipes;
 }
@@ -938,6 +954,11 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "house") expect(!p.live(0), name + ": inert");
 	if (name == "house_lod0_sine_rotx") expect(p.live(0) && p.model.materials[0].u_params.style == 0, name + ": live, uv 0");
 	if (name == "house_lod0_sine_rotx_uv1") expect(p.live(0) && p.model.materials[0].u_params.style == 1, name + ": live, uv 1");
+	if (name == "crate_alphagen24")
+		expect(!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP") && p.model.materials[0].alpha_gen.style == 24 &&
+						p.model.materials[0].alpha_gen.start == 128 &&
+						(p.model.materials[0].material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) == 0,
+				name + ": constant AlphaGen on an opaque row");
 	if (name == "house_mtrl0_uvscroll16_alphatest")
 		expect((p.model.materials[0].material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0 && p.model.materials[0].u_params.style == 16 && p.model.materials[0].u_params.gen_rate == 1.0f &&
 						!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP#UV"),
@@ -956,10 +977,11 @@ int main(int argc, char **argv) {
 	bool write_mode = false;
 	for (int i = 1; i < argc; ++i)
 		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
-	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth";
-	std::filesystem::create_directories(dir);
+	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/";
 
 	for (const Recipe &recipe : recipes()) {
+		const std::string dir = fixtures + recipe.dir;
+		std::filesystem::create_directories(dir);
 		const std::string path = dir + "/" + recipe.file + ".3di";
 		const Model model = build_recipe(recipe);
 		std::vector<uint8_t> bytes;

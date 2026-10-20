@@ -8,7 +8,11 @@
   ],
   "authored": [
     "fixtures/README.md",
-    "fixtures/anim/*",
+    "fixtures/anim/idle.bad",
+    "fixtures/anim/soldier.adm",
+    "fixtures/anim/US01.adm",
+    "fixtures/anim/walk.bad",
+    "fixtures/anim/weapon_timing.txt",
     "fixtures/configfile/*.def",
     "fixtures/def/items.def",
     "fixtures/grm/person.grm",

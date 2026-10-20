@@ -391,6 +391,17 @@ target_compile_features(minimal_3di_gen_test PRIVATE cxx_std_17)
 target_include_directories(minimal_3di_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
 
+# The synthetic person clip set fixtures/anim/rig19* (the table, the reset, the
+# stock 19-bone idle's shape and its two-bone twist, a crouch, two reloads, the
+# four torso deaths and a walk), minted through the clip construction seam on
+# the rig fixtures/threedi/synth/person.3di carries (tests/fixtures/person_rig.h)
+# and byte-compared every run (--write regenerates).
+add_executable(minimal_bad_gen_test fixtures/minimal_bad_gen.cpp)
+target_link_libraries(minimal_bad_gen_test PRIVATE opennova_runtime opennova_formats)
+target_compile_features(minimal_bad_gen_test PRIVATE cxx_std_17)
+target_include_directories(minimal_bad_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_bad_gen COMMAND minimal_bad_gen_test)
+
 # ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
 # set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
 foreach(test comment trim_value parse variants write)
@@ -403,28 +414,28 @@ foreach(test comment trim_value variants write)
 endforeach()
 opennova_add_gated_test(adm_parse COMMAND adm_parse_test)
 
-# BAD tests: the null guard unconditionally, the shipped BINOC.bad pins as the
-# reference-set SKIP-LEG leg, and 357_RST.bad's translation rows 0..frame_count
-# (OPENNOVA_JO_ASSETS, SKIP-LEG).
+# BAD tests: the null guard, the stock 19-bone idle's pins on the minted
+# fixtures/anim/rig19_idle.bad, and a translated reset's rows 0..frame_count
+# (fixtures/anim/vm40_rst.bad).
 add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_formats)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(bad_parse COMMAND bad_parse_test)
+add_test(NAME bad_parse COMMAND bad_parse_test)
 # bad_roundtrip: the writer and the construction seam against the reader -- our
 # fixtures byte-exact, a from-scratch clip field-equal and re-write-stable, the
-# builder's derived bone table pinned, BINOC.bad as the SKIP-LEG leg.
+# builder's derived bone table pinned.
 add_executable(bad_roundtrip_test bad/bad_roundtrip_test.cpp)
 target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(bad_roundtrip COMMAND bad_roundtrip_test)
+add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 # bad_build: the construction seam -- the frame maps, the derived bind and
 # position, the events' bottom and top written as stated, the refusals, and the
-# canonical table, with SKIP-LEG retail legs over both derivations (BINOC.bad's
-# bind; DT1PRONE.BAD's positions through DT1RST.BAD's bind).
+# canonical table, with both derivations pinned on witnessed shipped values
+# (BINOC.bad's bind; DT1PRONE.BAD's positions through DT1RST.BAD's bind).
 add_executable(bad_build_test bad/bad_build_test.cpp)
 target_link_libraries(bad_build_test PRIVATE opennova_formats)
 target_include_directories(bad_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(bad_build COMMAND bad_build_test)
+add_test(NAME bad_build COMMAND bad_build_test)
 
 # Native BIKi menu-video decoder: a deterministic generated bitstream plus an
 # OPENNOVA_JO_DIR-gated retail smoke test.
@@ -438,12 +449,12 @@ target_link_libraries(bink_retail_test PRIVATE opennova_formats)
 opennova_add_gated_test(bink_retail COMMAND bink_retail_test)
 
 # ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
-# world<->local self-consistency on the shipped BINOC.bad (a reference-set SKIP-LEG leg).
+# world<->local self-consistency on the minted 19-bone fixtures/anim/rig19_idle.bad.
 add_executable(anim_sample_test anim/anim_sample_test.cpp)
 target_link_libraries(anim_sample_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(anim_sample_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(anim_sample COMMAND anim_sample_test)
+add_test(NAME anim_sample COMMAND anim_sample_test)
 
 # ANIM positions_from_model over the retail viewmodel corpus (the retail half of
 # the former tests/test_bad_pos_derivation.py; synthetic exactness stays in
@@ -1345,14 +1356,13 @@ target_link_libraries(anim_adm_ring_table_test PRIVATE opennova_runtime)
 target_include_directories(anim_adm_ring_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME anim_adm_ring_table COMMAND anim_adm_ring_table_test)
 
-# The SECONDARY (weapon) channel composition over the shipped BINOC.bad rig
-# plus its BINOC_twist.bad (the two-bone twist minted once from the retired
-# writer; the test asserts that provenance before probing). Both come from the
-# reference fixture set; gated on OPENNOVA_JO_ASSETS.
+# The SECONDARY (weapon) channel composition over the minted 19-bone
+# fixtures/anim/rig19_idle.bad plus its rig19_twist.bad (the two-bone twist; the
+# test asserts that provenance before probing).
 add_executable(anim_skeletal_clips_weapon_channel_test anim/skeletal_clips_weapon_channel_test.cpp)
 target_link_libraries(anim_skeletal_clips_weapon_channel_test PRIVATE opennova_runtime)
 target_include_directories(anim_skeletal_clips_weapon_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(anim_skeletal_clips_weapon_channel COMMAND anim_skeletal_clips_weapon_channel_test)
+add_test(NAME anim_skeletal_clips_weapon_channel COMMAND anim_skeletal_clips_weapon_channel_test)
 
 add_executable(anim_person_rows_past_clip_test anim/person_rows_past_clip_test.cpp)
 target_link_libraries(anim_person_rows_past_clip_test PRIVATE opennova_runtime)

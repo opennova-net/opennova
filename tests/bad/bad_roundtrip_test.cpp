@@ -1,7 +1,7 @@
-// The .bad writer against the reader: our own fixtures write back byte-exact,
-// a from-scratch file survives write -> parse field-for-field and re-writes
-// to the same bytes, and the shipped BINOC.bad (OPENNOVA_JO_ASSETS, SKIP-LEG)
-// parses -> writes -> parses field-equal.
+// The .bad writer against the reader: our own fixtures write back byte-exact
+// (the one-bone clips, the minted stock-idle and translated-reset shapes), and
+// a from-scratch file survives write -> parse field-for-field and re-writes to
+// the same bytes.
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_write.h>
 
@@ -13,7 +13,6 @@
 
 #include "common/bad_equal.h"
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -85,16 +84,15 @@ struct Scratch {
 
 } // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
-    // `--dump <path>` writes the retail leg's rewritten bytes for a byte diff.
-    const char *dump_path = (argc >= 3 && std::strcmp(argv[1], "--dump") == 0) ? argv[2] : nullptr;
+int main() {
     std::vector<uint8_t> bytes;
     TEST_EXPECT(bad_write_buffer(nullptr, bytes) == -1);
 
     // Our own fixtures: parse -> write reproduces the committed bytes.
     const std::string root = std::string(test_paths_repo_root(__FILE__));
-    for (const char *name : {"idle.bad", "walk.bad"}) {
+    // rig19_idle.bad is the stock 19-bone idle's shape, vm40_rst.bad the translated
+    // 40-bone reset's (tests/fixtures/minimal_bad_gen.cpp).
+    for (const char *name : {"idle.bad", "walk.bad", "rig19_idle.bad", "rig19_twist.bad", "vm40_rst.bad"}) {
         const std::string path = root + "/fixtures/anim/" + name;
         std::vector<uint8_t> committed;
         TEST_EXPECT(test_io::read_file(path, committed) && !committed.empty());
@@ -147,29 +145,5 @@ int main(int argc, char **argv) {
         TEST_EXPECT(bad_write_buffer(&scratch.file, bytes) == -1);
     }
 
-    // The retail leg: the shipped 19-bone BINOC.bad parses -> writes -> parses field-equal.
-    const std::string fixture = retail::reference_fixture("bad/BINOC.bad");
-    if (fixture.empty()) {
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bad/BINOC.bad (the shipped 19-bone rig)");
-    }
-    std::vector<uint8_t> retail_bytes;
-    TEST_EXPECT(test_io::read_file(fixture, retail_bytes) && !retail_bytes.empty());
-    BadFile retail_file = {};
-    TEST_EXPECT(bad_parse_buffer(retail_bytes.data(), retail_bytes.size(), &retail_file) == 0);
-    TEST_EXPECT(bad_write_buffer(&retail_file, bytes) == 0);
-    BadFile rewritten = {};
-    TEST_EXPECT(bad_parse_buffer(bytes.data(), bytes.size(), &rewritten) == 0);
-    TEST_EXPECT(field_equal(retail_file, rewritten));
-    std::printf("retail leg: BINOC.bad parse -> write -> parse field-equal (%zu -> %zu bytes, %s)\n",
-                retail_bytes.size(), bytes.size(), bytes == retail_bytes ? "byte-identical" : "retail's post-NUL name bytes are uninitialized junk");
-    if (dump_path != nullptr) {
-        FILE *f = std::fopen(dump_path, "wb");
-        if (f != nullptr) {
-            std::fwrite(bytes.data(), 1, bytes.size(), f);
-            std::fclose(f);
-        }
-    }
-    bad_free(&rewritten);
-    bad_free(&retail_file);
     return 0;
 }
