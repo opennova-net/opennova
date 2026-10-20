@@ -244,30 +244,8 @@ void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
             if (record.has_round) person_class_round_legs(world, e, record);
             return;
         }
-        // plyr: a body already flagged dead returns at once. Phase 1 with a
-        // recorded round runs the round legs (its network kill scorer only
-        // reaches GameEvent_ProcessScoring case 2, which the port does not
-        // model, live hits included); with none the scorer returns at once.
-        // The health tail then stages the default death clip when none is
-        // staged, and a mounted body leaves its seat on the authority; every
-        // event re-arms the think cadence.
-        // [orig: Entity_HandleDamageAndTriggerZones @0x40772A (dead return),
-        //  the round test @0x4078D8..0x4078DA, legs @0x407777..0x407A7C;
-        //  Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D (null round);
-        //  GameEvent_ProcessScoring case 2 @0x52FC22; tail @0x407AC5..0x407AE7
-        //  (Entity_ComputeAnimSlotIndex(e, 0, 0, 1)), @0x407AED..0x407B20
-        //  (Entity_DetachFromVehicleIfServer), @0x407B5E]
-        if ((flags & kEntityFlagDead) != 0 || phase != 1) return;
-        if (record.has_round) person_class_round_legs(world, e, record);
-        if (retail_signed_i16(e.health) <= 0) {
-            if (e.death_anim_state == 0)
-                e.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
-            if (world.ai.is_authority && e.mounted) world.commands.dismount(e.handle);
-        }
-        // The callback's shared tail: the waypoint visits between the two
-        // think re-arms. [orig: @0x407B64..0x407C6B]
-        player_body_waypoint_visits(world, e);
-        e.spawn_phase = 64;
+        // plyr: the person class callback (infantry.h player_body_class_event).
+        player_body_class_event(world, e, phase);
         return;
     }
     if (e.is_ai_capable) {

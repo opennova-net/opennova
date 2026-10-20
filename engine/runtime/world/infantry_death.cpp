@@ -5,6 +5,7 @@
 // [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55; the player-body twin in
 //  Entity_UpdateInfantryPlayerBody @0x4B4C4A..0x4B4CEA]
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/round_sim.h> // person_class_round_legs
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -198,6 +199,36 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
         d.motor_edge = true;
         world.round_sim.deaths.push_back(d);
     }
+}
+
+// See the infantry.h contract.
+void player_body_class_event(World &world, Entity &body, int event) {
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return; // [orig: @0x40772F]
+    if (event == 1) {
+        // A recorded round's legs; with none the network kill scorer returns
+        // at once [orig: the round test @0x4078D8..0x4078DA, the legs
+        //  @0x407777..0x407A7C; Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D].
+        const HitRecord &record = world.round_sim.hit_record;
+        if (record.has_round) person_class_round_legs(world, body, record);
+    } else if (event == 4) {
+        // [orig: `cmp is_authority` @0x407A94, the parent @0x407A96,
+        //  Entity_DetachFromVehicleIfServer @0x407AAA]
+        if (world.ai.is_authority && body.mounted) world.commands.dismount(body.handle);
+    }
+    if (retail_signed_i16(body.health) <= 0) {
+        if (body.death_anim_state == 0)
+            body.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
+        // The staged clip becomes the primary channel's request, the deferred
+        // one cleared [orig: +0x2BC @0x407AFB, +0x2B8 @0x407B01].
+        if (AiEntity *motor = world.ai.for_handle(body.handle)) {
+            motor->inf.anim_state = body.death_anim_state;
+            motor->inf.anim_pending = 0;
+        }
+        if (world.ai.is_authority && body.mounted) world.commands.dismount(body.handle);
+    }
+    if (event != 4 && event != 1 && event != 3 && event != 5) body.cause_flags &= ~0xF00u;
+    body.spawn_phase = 64;
+    player_body_waypoint_visits(world, body);
 }
 
 } // namespace opennova::world

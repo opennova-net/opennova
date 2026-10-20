@@ -931,14 +931,6 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
 }
 
 // See the infantry.h contract. [orig: Entity_HandleDamageAndTriggerZones
-// @0x40772f return; @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm]
-void player_body_class_think(Entity &body) {
-    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
-    body.cause_flags &= ~0xF00u;
-    body.spawn_phase = 64;
-}
-
-// See the infantry.h contract. [orig: Entity_HandleDamageAndTriggerZones
 //  channel @0x407B64..0x407B6C, team 1/2 @0x407B72..0x407B80, node count
 //  @0x407B86..0x407B94, the node walk @0x407BA0..0x407C6B (Pool_GetEntryUnchecked
 //  @0x407BBD), the unsigned octagon @0x407BC4..0x407BFB, SetBitB
@@ -1386,10 +1378,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     //  the edge gate follows @0x4b4bf1]
     if (tick_entity != nullptr && !npc_body &&
         (tick_flags & kEntityFlagPlayer) != 0) {
-        if (tick_entity->spawn_phase <= 0) {
-            player_body_class_think(*tick_entity);
-            player_body_waypoint_visits(world, *tick_entity);
-        }
+        if (tick_entity->spawn_phase <= 0) player_body_class_event(world, *tick_entity, 0);
         --tick_entity->spawn_phase;
     }
     // The radio-request latch (0x6D call 6) ages on the body's raw 64-tick

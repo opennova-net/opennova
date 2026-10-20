@@ -842,6 +842,11 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 	body->death_anim_state = staged
 			? w::compute_death_anim_state(0, 0, w::death_cause::kGeneric)
 			: 0;
+	// The 64-tick think fired just before: its health tail would stage the
+	// default selection for a Health <= 0 body in the reset's own update.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B4BC9..0x4B4BE9;
+	//  Entity_HandleDamageAndTriggerZones @0x407ACF..0x407AE7]
+	body->spawn_phase = 64;
 
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;

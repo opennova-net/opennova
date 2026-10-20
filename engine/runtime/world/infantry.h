@@ -170,15 +170,25 @@ int compute_death_anim_state(int bone_index, int quadrant, int cause);
 // - 0x60000000) >> 30; atan2 scale 683565275.5764316 = 2^32/2pi]
 int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, float round_vel_y);
 
-// The plyr class callback's non-hit events (0 = the body update's 64-tick think,
-// 2 = the blast applier's notify): a live player body clears the kill-cause bits
-// 8..11 of entity+0x2C (Entity::cause_flags) and re-arms the think cadence
-// (Entity::spawn_phase = 64); a body already flagged dead returns first. The hit
-// event (1) only re-arms — RoundSim's person leg does that inline.
-// [orig: Entity_HandleDamageAndTriggerZones @0x40772f (Flags&2 return);
-//  @0x407b4d..0x407b4f (damageType not in {4,1,3,5} -> +0x2C &= 0xFFFFF0FF);
-//  @0x407b5e / @0x407c71 (spawnPhase = 64)]
-void player_body_class_think(Entity &body);
+class World;
+// The plyr class callback, entity+0x1C8(body, event, 0), for every event: a body
+// already flagged dead returns at once; event 1 with a recorded round runs the
+// round legs, event 4 takes a mounted body off its seat on the authority; then
+// the shared tail: a body at Health <= 0 stages the default death clip when none
+// is staged, requests the staged clip on its primary channel (+0x2BC, the
+// deferred +0x2B8 cleared) and leaves a seat on the authority; an event outside
+// {1, 3, 4, 5} (0 = the body update's 64-tick think and the drowning, 2 = the
+// blast applier's notify) clears the kill-cause bits 8..11 of entity+0x2C
+// (Entity::cause_flags); the think cadence re-arms (Entity::spawn_phase = 64)
+// and the waypoint tail runs.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407720 -- the Flags&2 return
+//  @0x40772F, the event-1 arm @0x40773C..0x407A86, the event-4 arm
+//  @0x407A8B..0x407AC2, the health tail @0x407AC5..0x407B33
+//  (Entity_ComputeAnimSlotIndex(e, 0, 0, 1) @0x407ADF, +0x2BC @0x407AFB, +0x2B8
+//  @0x407B01, Entity_DetachFromVehicleIfServer @0x407B20), the cause clear
+//  @0x407B3B..0x407B4F, the re-arms @0x407B5E / @0x407C71, the waypoint tail
+//  @0x407B64..0x407C6B]
+void player_body_class_event(World &world, Entity &body, int event);
 
 class World;
 // The plyr class callback's waypoint tail, run on every event it handles for a

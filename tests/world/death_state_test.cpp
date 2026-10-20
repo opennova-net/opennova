@@ -59,21 +59,26 @@ void test_death_ctrl_register_formula() {
 // [orig: Entity_HandleDamageAndTriggerZones @0x40772f; @0x407b4d..0x407b4f;
 //  @0x407b5e / @0x407c71]
 void test_player_body_class_think_clears_and_rearms() {
-	Entity live;
-	live.flags = kEntityFlagPlayer;
-	live.engine_flags = kEntityFlagPlayer;
+	auto world = std::make_unique<World>();
+	world->registry.configure_pool(0, 4);
+	Entity seed;
+	seed.kind = EntityKind::Organic;
+	seed.flags = kEntityFlagPlayer;
+	seed.engine_flags = kEntityFlagPlayer;
+	seed.health = 100;
+	Entity &live = *world->registry.get(world->registry.spawn(0, seed));
 	live.cause_flags = 0xF0Fu;
 	live.spawn_phase = -3;
-	player_body_class_think(live);
+	player_body_class_event(*world, live, 0);
 	CHECK(live.cause_flags == 0x00Fu);
 	CHECK(live.spawn_phase == 64);
 
-	Entity dead = live;
+	Entity &dead = *world->registry.get(world->registry.spawn(0, seed));
 	dead.cause_flags = 0x800u;
 	dead.spawn_phase = 0;
 	dead.flags |= kEntityFlagDead;
 	dead.engine_flags |= kEntityFlagDead;
-	player_body_class_think(dead);
+	player_body_class_event(*world, dead, 0);
 	CHECK(dead.cause_flags == 0x800u);
 	CHECK(dead.spawn_phase == 0);
 }

@@ -121,16 +121,20 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 			continue;
 		}
 		// The drowning: the attacker slot (+0x178) cleared, so the death reports
-		// no killer, the drown death selection and Health -1; the body's death
-		// edge in this frame's entity update raises the ordinary death
-		// transaction.
+		// no killer, the drown death selection and Health -1, then the body's
+		// class callback with event 0 (its health tail requests the drown clip
+		// and takes a mounted body off its seat; the kill-cause bits clear and
+		// the think re-arms); the body's death edge in this frame's entity
+		// update raises the ordinary death transaction.
 		// [orig: `mov [ecx+178h],ebx` @0x50D800; Entity_ComputeAnimSlotIndex
 		//  call @0x50D80A; `mov word ptr [eax+11Eh],0FFFFh` @0x50D819; the
-		//  +0x1C8 call @0x50D838; Entity_UpdateInfantryPlayerBody @0x4B4CEA]
+		//  +0x1C8 call (body, 0, 0) @0x50D824..0x50D838;
+		//  Entity_UpdateInfantryPlayerBody @0x4B4CEA]
 		player->last_attacker = world::EntityHandle{};
 		player->death_anim_state = world::compute_death_anim_state(
 				0, 0, world::death_cause::kDrown);
 		player->health = -1;
+		world::player_body_class_event(world, *player, 0);
 	}
 }
 
