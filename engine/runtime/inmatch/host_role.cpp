@@ -437,6 +437,10 @@ void HostRole::drain_host_client_gameplay_requests() {
 		//  CNapiNetwork_QueueReliableMessage @0x4c4fa0; CNapiNetwork_Init
 		//  @0x4CA8E7 (g_NPMsgInfoServer @0x82B5D8, its 0x4C row @0x82B9E8) ->
 		//  NapiNPServerMsg_0x04C @0x5111B0]
+		// So does its 0x34 keepalive: the leg has no authority test either, and
+		// the same table's row raises the host slot's ack high-water (D-NET-604).
+		// [orig: Client_ProcessNetworkFrame @0x42C1E1; g_NPMsgInfoServer's 0x34
+		//  row @0x82B898 -> NapiNPServerMsg_UpdateAck @0x5024B0]
 		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
 		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
 		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
@@ -457,7 +461,8 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
 				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE &&
 				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET &&
-				dg.tag != c2s::SPECTATOR_RESPAWN && dg.tag != c2s::CLIENT_QUALITY) {
+				dg.tag != c2s::SPECTATOR_RESPAWN && dg.tag != c2s::CLIENT_QUALITY &&
+				dg.tag != c2s::KEEPALIVE) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}

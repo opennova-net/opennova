@@ -1004,13 +1004,18 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	view_.state().local_clock_ms += static_cast<uint32_t>(io::kTickMs);
 
 	// (0x34) keepalive — runs for EVERYONE (NOT authority-gated), emitted before the recv pump in the
-	// original [orig: Client_ProcessNetworkFrame @0x42c1a9..0x42c1ec]. Only a Joiner has a 0x43 framing path here (the HostClient's
-	// own-loopback keepalive is a no-op over the wire — deferred-and-logged, P6 §5.44). Suppressed in
-	// golden-replay mode.
-	if (joiner_ != nullptr && !replay_mode_ && current_tick_ != 0 &&
-	    current_tick_ - last_keepalive_tick_ > kKeepaliveInterval) {
-		send_queue_.push_back(
-				make_protocol_message(c2s::KEEPALIVE, le32(current_tick_)));
+	// original [orig: Client_ProcessNetworkFrame @0x42c1a9..0x42c1ec]. The listen host's own
+	// client seeds its tick from its looped-back 0x61 like any client, so it queues the 0x34 on
+	// its local connection too, whose server handler raises its slot's ack high-water
+	// (D-NET-604) [orig: the queue CNapiNetwork_QueueReliableMessage(0x34, 1, 0) @0x42c1e1;
+	// NapiNPServerMsg_UpdateAck @0x5024B0]. Suppressed in golden-replay mode.
+	if ((joiner_ != nullptr || role_ == Role::HostClient) && !replay_mode_ &&
+	    current_tick_ != 0 && current_tick_ - last_keepalive_tick_ > kKeepaliveInterval) {
+		if (role_ == Role::HostClient)
+			(void)queue_host_message(c2s::KEEPALIVE, le32(current_tick_));
+		else
+			send_queue_.push_back(
+					make_protocol_message(c2s::KEEPALIVE, le32(current_tick_)));
 		last_keepalive_tick_ = current_tick_;
 	}
 	// A joiner that has heard nothing for three whole seconds raises the

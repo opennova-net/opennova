@@ -3114,6 +3114,42 @@ bool run_host_client_reports_its_quality_over_the_loopback() {
 	return true;
 }
 
+// D-NET-604's send half: the listen host's own client seeds its tick from its looped-back
+// S2C 0x61 and, once the tick runs 29760 past the last keepalive, queues the C2S 0x34
+// [u32 tick] on its local connection like any client (no authority test); unseeded it
+// sends none. [orig: Client_ProcessNetworkFrame @0x42C180 - the seeded test
+// @0x42c1a9, `> 29760` @0x42c1c0, the queue @0x42c1e1; NapiNPClientMsg_HandleSessionKey
+// @0x4297c0 (no role gate)]
+bool run_host_client_keepalive_rides_the_loopback() {
+	for (const bool seeded : {true, false}) {
+		ns::LoopbackChannel host_loop;
+		inmatch::ClientRuntime host_view(host_loop);
+		host_view.view().set_mp_session(true);
+		constexpr uint32_t kSeed = 0x00012345u;
+		if (seeded) host_loop.host_send(s2c::TICK_SEED, {0x45, 0x23, 0x01, 0x00});
+		std::vector<std::pair<uint32_t, uint32_t>> sent; // frame, body tick
+		for (uint32_t frame = 1; frame <= 29762 + 29761; ++frame) {
+			host_view.Client_ProcessNetworkFrame(frame);
+			ns::Datagram datagram;
+			while (host_loop.host_recv(datagram)) {
+				if (datagram.tag != c2s::KEEPALIVE) continue;
+				if (!expect(datagram.body.size() == 4, "the 0x34 body is one u32"))
+					return false;
+				sent.emplace_back(frame, io::read_u32_le(datagram.body.data()));
+			}
+		}
+		// The seed lands in frame 1's receive; frame k's tick is seed + k - 1, and the
+		// first frame whose tick is more than 29760 past the seed sends it.
+		const std::vector<std::pair<uint32_t, uint32_t>> want = seeded
+				? std::vector<std::pair<uint32_t, uint32_t>>{{29762, kSeed + 29761},
+				                                             {29762 + 29761, kSeed + 2 * 29761}}
+				: std::vector<std::pair<uint32_t, uint32_t>>{};
+		if (!expect(sent == want, "the listen client's 0x34 rides its loopback, seeded only"))
+			return false;
+	}
+	return true;
+}
+
 bool run_host_zone_timer_value_matches_retail_entry() {
 	ns::LoopbackChannel host_loop;
 	inmatch::ClientRuntime host_view(host_loop);
@@ -8091,6 +8127,7 @@ int main() {
 	                run_joiner_remote_reload_stamps_before_same_frame_body_tick() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
 	                run_host_client_reports_its_quality_over_the_loopback() &&
+	                run_host_client_keepalive_rides_the_loopback() &&
 	                run_joiner_weapon_pickup_reaches_the_pipeline() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
