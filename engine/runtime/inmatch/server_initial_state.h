@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -26,6 +27,11 @@ struct InitialStateMessage {
 	uint8_t tag = 0;
 	std::vector<uint8_t> body;
 	bool reliable = true;
+	// Not a record: the join's map-checksum punt at this place among its sends
+	// (Server_LogCRCMismatchPunt's type, 9 HMCRC or 10 CMCRC, and the punt-log reason), which
+	// the 0x0B receiver stages on the connection (D-NET-NEW-L1-5).
+	uint32_t host_punt = 0;
+	const char *host_punt_reason = nullptr;
 };
 
 struct InitialStateStep {
@@ -53,10 +59,13 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 // byte's bits, game state 10, and on the first state-6 entry the quality reset, the network
 // reset, the armory cooldown zero, the RTT countdown and the entry stamp), enters slot state 6
 // and returns this connection's game-start messages in order (0x41s, 0x42, 0x0F, 0x4D, 0x61,
-// 0x3E); the 0x4D's copies to the other joined clients go out on their transports.
+// 0x3E); the 0x4D's copies to the other joined clients go out on their transports. The 0x0B's
+// two map checksums (`client_checksums`, 0 where its body ends first) are compared against the
+// mission's after the 0x0F: a remote slot's mismatch is a punt among the messages
+// (InitialStateMessage::host_punt).
 // [orig: Server_OnPlayerJoin @0x51A680]
 std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiNPConnection &conn,
-		uint32_t now_tick);
+		uint32_t now_tick, const std::array<uint32_t, 2> &client_checksums);
 
 // The deploy-map LOCATION labels for every type-2044 marker the promoted
 // `world` holds (the spawn's admitted records), in spawn order: the mission

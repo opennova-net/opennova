@@ -2011,6 +2011,8 @@ bool check_script_change_reaches_the_same_frame() {
 			ctx, config, opennova::inmatch::SessionStartup{}, &loopback);
 	if (!expect(ctx.np_protocol.connection_list.size() == 1,
 	            "same-frame fixture has one host client")) return false;
+	// An added, in-match host client: the tick's periodic spawn pump passes it over.
+	ctx.np_protocol.connection_list.front().phase = opennova::inmatch::ConnectionPhase::InMatch;
 	ctx.np_protocol.connection_list.front().burst.spawned = true;
 	opennova::world::World world;
 	world.registry.configure_pool(0, 2);
@@ -2056,6 +2058,8 @@ bool check_host_loopback_does_not_inherit_udp_envelope() {
 			ctx, config, opennova::inmatch::SessionStartup{}, &loopback);
 	if (!expect(ctx.np_protocol.connection_list.size() == 1,
 	            "loopback envelope fixture has one host client")) return false;
+	// An added, in-match host client: the tick's periodic spawn pump passes it over.
+	ctx.np_protocol.connection_list.front().phase = opennova::inmatch::ConnectionPhase::InMatch;
 	ctx.np_protocol.connection_list.front().burst.spawned = true;
 
 	opennova::world::World world;
@@ -4768,7 +4772,7 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	const opennova::world::EntityHandle a =
 			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, deployer, world,
 					/*round_init=*/false);
-	(void)opennova::inmatch::Server_OnPlayerJoin(ctx, deployer, 1); // its C2S 0x0B
+	(void)opennova::inmatch::Server_OnPlayerJoin(ctx, deployer, 1, {0, 0}); // its C2S 0x0B
 	if (!expect(deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held &&
 	                    deployer.reply.chat_last_ms == 0,
 	            "the join sets the frontier-hint bit and clears the nag state"))
@@ -4776,7 +4780,7 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	const opennova::world::EntityHandle b =
 			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, watcher, world,
 					/*round_init=*/false);
-	(void)opennova::inmatch::Server_OnPlayerJoin(ctx, watcher, 1); // its C2S 0x0B
+	(void)opennova::inmatch::Server_OnPlayerJoin(ctx, watcher, 1, {0, 0}); // its C2S 0x0B
 	auto pending = [&world](opennova::world::EntityHandle handle) {
 		const opennova::world::MatchPlayer *row = world.match.player(handle);
 		return row != nullptr && row->respawn_pending;

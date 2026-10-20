@@ -1,7 +1,8 @@
 // Retail 0x44/0x84 missing-sequence recovery across the two public in-match runtime seams.
 //
 // Each direction drops packet 1, delivers packet 2, observes the exact NACK, and feeds the
-// reconstructed packet 1 back through the receiver so its queued packet 2 drains. The tests also
+// reconstructed packet 1 back through the receiver so its queued packet 2 drains (on the host, in
+// the receive pump's list walk after the batch's datagrams). The tests also
 // pin key validation, malformed-body rejection, current-ACK retransmit headers, and ACK retirement.
 
 #include <runtime/inmatch/host_session.h>
@@ -210,8 +211,16 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 		return false;
 	if (!expect(inmatch::handle_server_datagram(
 			ctx, kPeer, c2s2.data(), c2s2.size(), 1).outbound.empty() &&
+	                    ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 2 &&
+	                    ctx.np_protocol.connection_list[0].seq.queued_inbound.size() == 1,
+	            "later C2S packet in the batch closes the gap, parsed alone"))
+		return false;
+	// The receive pump's list walk, after every datagram, replays the successor (NEW-L1-9)
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x626910..0x6269E8].
+	if (!expect(inmatch::replay_ready_session_packets(ctx, 1).size() == 1 &&
+	                    ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 3 &&
 	                    ctx.np_protocol.connection_list[0].seq.queued_inbound.empty(),
-	            "later C2S packet in the batch closes and drains the gap"))
+	            "the batch's list walk drains the gap"))
 		return false;
 	if (!expect(inmatch::flush_server_missing_requests(ctx).empty() &&
 	                    !ctx.np_protocol.connection_list[0].seq.missing_request_pending,
@@ -569,6 +578,77 @@ bool check_host_frames_under_the_negotiated_ceiling() {
 	              "three 300-byte records leave in two packets of at most 576 bytes");
 }
 
+// NEW-L1-9: the host's receive pump parses an in-order packet on arrival, but the queued
+// successors a gap-filling packet makes contiguous wait for the connection-list walk after
+// every datagram of that pump. So with A's sequence 2 queued, then A's 1 and B's 1 in one
+// pump, B's 1 is handled before A's 2 (ours used to drain A's 2 right after A's 1).
+// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the FIFO pass @0x6266CA..0x6267B2, its
+//  handler call @0x6267AD; HandleSessionPacket's in-order parse @0x626BEB..0x626BFC and its
+//  queue @0x626C32; the list walk @0x626910..0x6269E8, ParseMessages @0x62696B]
+bool check_host_list_walk_replays_after_every_datagram() {
+	constexpr PeerAddr kPeerB{0x0100007Fu, 30125};
+	inmatch::HostOwner owner;
+	seed_host(owner.ctx);
+	inmatch::NapiNPConnection b = owner.ctx.np_protocol.connection_list[0];
+	b.peer = kPeerB;
+	b.connection_id = 4;
+	owner.ctx.np_protocol.connection_list.push_back(std::move(b));
+	const SessionCrypto c2s{kClientScrk, {}, kServerKey};
+	SessionSequencing a_tx{1, 0};
+	SessionSequencing b_tx{1, 0};
+	std::vector<uint8_t> a1, a2, b1;
+	if (!expect(frame_test_session_datagram(a_tx, c2s, SESSION_OPCODE_PROTOCOL_MESSAGE,
+				{make_protocol_message(c2s::ENTITY_UPLINK, {0xA1})}, a1) &&
+	                    frame_test_session_datagram(a_tx, c2s, SESSION_OPCODE_PROTOCOL_MESSAGE,
+				{make_protocol_message(c2s::ENTITY_UPLINK, {0xA2})}, a2) &&
+	                    frame_test_session_datagram(b_tx, c2s, SESSION_OPCODE_PROTOCOL_MESSAGE,
+				{make_protocol_message(c2s::ENTITY_UPLINK, {0xB1})}, b1),
+	            "frame A's 1 and 2 and B's 1"))
+		return false;
+	ScriptedDatagramSocket sock;
+	sock.inbound.emplace_back(kPeer, std::move(a2));
+	sock.inbound.emplace_back(kPeer, std::move(a1));
+	sock.inbound.emplace_back(kPeerB, std::move(b1));
+	std::vector<uint8_t> order;
+	inmatch::host_session_pump(owner, sock, nullptr, nullptr,
+			[](void *context, const inmatch::HostAcceptEvent &event) {
+				if (event.kind != inmatch::HostAcceptEvent::Kind::PeerC2SInMatch) return;
+				for (const ProtocolMessage &m : event.in_match_c2s)
+					static_cast<std::vector<uint8_t> *>(context)->push_back(m.payload.at(0));
+			},
+			&order);
+	return expect(order == std::vector<uint8_t>({0xA1, 0xB1, 0xA2}) &&
+	                      owner.ctx.np_protocol.connection_list[0].seq.queued_inbound.empty(),
+	              "A's 1, B's 1, then the walk's A's 2");
+}
+
+// D-NET-NEW-L1-11: with sequence 3 queued, the batch's 2 and then a second copy of 3 (a
+// duplicate, or a resend overtaking the original) both arrive in order and are parsed on
+// arrival; the queued copy of 3 is dropped with the second's admission, so no stale packet
+// sits below the frontier ahead of the later queue (retail's walk stops at such a head).
+// [orig: HandleSessionPacket's in-order parse @0x626BEB..0x626BFC; PumpRecvQueues' walk head
+//  test @0x626960]
+bool check_host_drops_a_queued_copy_parsed_in_order() {
+	inmatch::NapiNPServerCtx ctx;
+	seed_host(ctx);
+	ctx.np_protocol.connection_list[0].seq.last_inbound_seq = 1;
+	const SessionCrypto c2s{kClientScrk, {}, kServerKey};
+	SessionSequencing client_tx{2, 0};
+	std::vector<uint8_t> c2s2, c2s3;
+	if (!expect(frame_test_session_datagram(client_tx, c2s, SESSION_OPCODE_PROTOCOL_MESSAGE,
+				{make_protocol_message(0x34, {0x02})}, c2s2) &&
+	                    frame_test_session_datagram(client_tx, c2s, SESSION_OPCODE_PROTOCOL_MESSAGE,
+				{make_protocol_message(0x34, {0x03})}, c2s3),
+	            "frame C2S 2 and 3")) return false;
+	(void)inmatch::handle_server_datagram(ctx, kPeer, c2s3.data(), c2s3.size(), 1);
+	(void)inmatch::handle_server_datagram(ctx, kPeer, c2s2.data(), c2s2.size(), 1);
+	(void)inmatch::handle_server_datagram(ctx, kPeer, c2s3.data(), c2s3.size(), 1);
+	const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
+	return expect(conn.seq.last_inbound_seq == 3 && conn.seq.queued_inbound.empty() &&
+	                      inmatch::replay_ready_session_packets(ctx, 1).empty(),
+	              "the in-order copy is parsed, the queued one dropped, the walk replays nothing");
+}
+
 // D-NET-236 (host): the EMPTY leg waits while an out-of-order C2S packet is held.
 // [orig: CNapiNPConnection_PumpSendIntervals `cmp [esi+7A8h], 0` @0x629053]
 bool check_host_keepalive_waits_while_a_packet_is_held() {
@@ -698,6 +778,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	inmatch::handle_server_datagram(
 			ctx, kPeer, resend.immediate_outbound[0].data(),
 			resend.immediate_outbound[0].size(), 11);
+	(void)inmatch::replay_ready_session_packets(ctx, 11); // the batch's list walk
 	if (!expect(ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 2 &&
 	                    ctx.np_protocol.connection_list[0].seq.queued_inbound.empty(),
 	            "recovered C2S sequence one admits and drains queued sequence two"))
@@ -891,6 +972,8 @@ int main() {
 	ok = check_host_owes_an_ack_for_c2s_records() && ok;
 	ok = check_host_frames_under_the_negotiated_ceiling() && ok;
 	ok = check_host_keepalive_waits_while_a_packet_is_held() && ok;
+	ok = check_host_list_walk_replays_after_every_datagram() && ok;
+	ok = check_host_drops_a_queued_copy_parsed_in_order() && ok;
 	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
 	ok = check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() && ok;
 	ok = check_c2s_fragments_dispatch_once_after_final() && ok;

@@ -207,7 +207,7 @@ bool check_spawn_protection_seeded_at_creation() {
 				"a remote add's body is hidden, with no spawn protection"))
 			return false;
 		std::vector<ProtocolMessage> join_replies;
-		inmatch::Server_HandlePlayerJoinRequest(&ctx, live, &world, /*now_tick=*/1, join_replies);
+		inmatch::Server_HandlePlayerJoinRequest(&ctx, live, &world, /*now_tick=*/1, {0x00}, join_replies);
 		entity = world.registry.get(player);
 		if (!expect(entity != nullptr && entity->damage_state == 620,
 				"a zone-less joiner's join stores the 620-tick protection"))

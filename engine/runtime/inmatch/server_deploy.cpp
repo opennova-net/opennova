@@ -308,7 +308,8 @@ std::vector<ProtocolMessage> Server_ConvertPlayerToSpectator(NapiNPServerCtx &ct
 	// connection at its call, so ahead of the 0x32 and of any later message's
 	// reply in this receive pump (D-NET-686); a transport-less fixture takes
 	// them as the handler's replies.
-	// [orig: Server_DeployPlayer - the 0x5A @0x5178F2, the 0x61 @0x51796A, the
+	// [orig: Server_DeployPlayer - the 0x5A @0x5178F2, the 0x61 (its push 1
+	//  @0x51796A, the call @0x51796D), the
 	//  0x1E event 58 @0x517A22; NapiNPServer_SendToConn @0x4C4F20 ->
 	//  CNapiNPConnection_QueueMessage @0x628640]
 	std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(

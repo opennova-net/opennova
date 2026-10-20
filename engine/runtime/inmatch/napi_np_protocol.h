@@ -116,6 +116,21 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
                                     const uint8_t *raw, std::size_t len, uint32_t now_tick = 0,
                                     bool defer_in_match_replies = false);
 
+// The receive pump's connection-list walk, after every datagram of the pump: each server-side
+// connection in list order replays the queued session packets whose gap a datagram closed, one
+// packet at a time, through the same parse as an in-order arrival (NEW-L1-9). Each result is
+// the owner's to consume like a datagram's.
+// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the FIFO pass @0x6266CA..0x6267B2, then the
+//  walk @0x626910..0x6269E8: the type gate @0x626939, the head test @0x626960,
+//  CNapiNPConnection_ParseMessages @0x62696B; the list's order is creation order,
+//  CNapiNPConnection_Create appending each node @0x62B17D..0x62B1AE]
+struct ReplayedSessionPacket {
+	PeerAddr peer;
+	HandleResult result;
+};
+std::vector<ReplayedSessionPacket> replay_ready_session_packets(
+		NapiNPServerCtx &ctx, uint32_t now_tick, bool defer_in_match_replies = false);
+
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while
 // handle_server_datagram drains; only here, after later datagrams could have closed the gap, does
 // the host emit one 0x84 per connection whose ordered queue is still nonempty. This is the
@@ -129,9 +144,11 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx);
 // Drive the periodic emitter for every connection NOT yet Spawned (so entity_batch_count climbs and
 // the spawn gate opens) and frame each session's replies. PeerEnteredWorldStreaming surfaces here
 // the tick a peer's batches start (F3). Spawned peers are skipped — Server_TickUpdate owns their 0x0A.
+// `run_spawn_pump` runs the pending-player spawn pump first on the periodic second; the host's
+// own frame passes false, since Server_TickUpdate runs the pump in its periodic block.
 std::vector<TickOut> tick_connections(
 		NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick,
-		bool respect_s2c_send_boundary = false);
+		bool respect_s2c_send_boundary = false, bool run_spawn_pump = true);
 
 // Wrap one in-match S2C inner message (e.g. the per-frame 0x0A body) into a fully-framed 0x83 SESSION
 // datagram for `peer`, using that connection's live SCRK + seq (advances its outbound seq). False

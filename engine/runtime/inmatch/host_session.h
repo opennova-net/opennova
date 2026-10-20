@@ -95,16 +95,19 @@ void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEven
 //           at once; then the send-boundary clocks
 //       (2) tick_connections: pre-spawn §5.2a bursts + surface F3/spawned, then
 //           `before_server_tick`, then the records the handlers raised, behind their sends
-//       then the tick's single C2S drain, one logic tick and the per-connection 0x0A fan
+//       then the tick's single C2S drain, one logic tick, on the periodic second the
+//       spawn pump (after the scoreboard), and the per-connection 0x0A fan
 //   (4) S2C flush: on each peer's send boundary, ship pre-framed 0x83 packets,
 //       then pop its transport's identity [tag][body] -> frame/batch as 0x83 -> send
 //   (5) drain an unused embedder loopback for HostOnly; preserve the HostClient local view
 // A tick that does not run (no world, or not the authority) leaves (1) and (2) to the
-// owner, after it. `before_server_tick`, when supplied, runs after tick_connections has
-// completed any player spawns and before their first authoritative logic update / 0x0A fan.
+// owner, after it. `before_server_tick`, when supplied, runs after tick_connections and
+// before the tick's logic update / 0x0A fan; a body the tick's spawn pump adds binds at its
+// spawn (NapiNPServerCtx::bind_spawned_body).
 // `own_client_drain`, when supplied, dispatches the listen host's own client's queued
-// requests: its node leads every remote's on the protocol's connection list, so the receive
-// pump handles its messages first. The opaque contexts keep this shared owner loop
+// requests: they reach retail's protocol FIFO through the manager's loopback FIFO, which the
+// manager's receive drains ahead of the socket, so the receive pump's FIFO pass, in arrival
+// order, handles them first. The opaque contexts keep this shared owner loop
 // independent of embedder-specific state. Advances owner.now_tick by 1.
 using HostBeforeServerTickFn = void (*)(void *context);
 using HostOwnClientDrainFn = void (*)(void *context);

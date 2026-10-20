@@ -968,6 +968,10 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	out.events.push_back(std::move(ev));
 }
 
+void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const PeerAddr &peer,
+		const SessionDeframeAdmission &admission, uint32_t now_tick, HandleResult &out,
+		bool defer_in_match_replies);
+
 // 0x43 SESSION -> 0x83 SESSION (produces the reactive §5.1 replies; surfaces F3 + spawn + in-match
 // C2S off conn.burst). [orig: NapiNPProtocol_HandleSessionPacket @0x626A00]
 void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
@@ -987,14 +991,30 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	NapiNPConnection &conn = *connp;
 
 	// Host recv: decrypt with the joiner's client_scrk; deframe latches conn.seq.last_inbound_seq.
+	// An in-order packet is parsed at once; the queued successors its arrival made contiguous
+	// wait for the receive pump's connection-list walk, after every datagram of this pump
+	// (replay_ready_session_packets; NEW-L1-9).
+	// [orig: HandleSessionPacket @0x626A00 - the in-order test @0x626BEB, ParseMessages
+	//  @0x626BFC; NapiNPProtocol_PumpRecvQueues's walk @0x626910..0x6269E8 after its FIFO pass]
 	ProtocolPacketHeader hdr;
-	std::vector<ProtocolMessage> messages;
+	std::vector<ProtocolMessage> flat;
 	SessionDeframeAdmission admission;
 	if (!deframe_session_packet(
 			conn.seq, SessionCrypto{{}, conn.client_scrk, 0, conn.server_sk}, body.data(),
-	                            body.size(), hdr, messages, &admission)) {
+	                            body.size(), hdr, flat, &admission,
+	                            /*drain_queued_successors=*/false)) {
 		return;
 	}
+	parse_admitted_session(ctx, conn, peer, admission, now_tick, out, defer_in_match_replies);
+}
+
+// CNapiNPConnection_ParseMessages over what one call admitted: the activity stamp, the ACK, the
+// fragment fold and the per-message dispatch. A call that admitted nothing (a stale, duplicate
+// or future packet) still runs the tail. [orig: CNapiNPConnection_ParseMessages @0x625BC0]
+void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const PeerAddr &peer,
+		const SessionDeframeAdmission &admission, uint32_t now_tick, HandleResult &out,
+		bool defer_in_match_replies) {
+	std::vector<ProtocolMessage> messages;
 	// The reap clock is stamped ONLY when the packet is delivered in order: retail's
 	// HandleSessionPacket reaches ParseMessages (which writes conn+0x5E8 before its message loop,
 	// so a zero-message keepalive counts) solely for seq == recv_ack_seq+1 or the in-order drain
@@ -1029,7 +1049,6 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// FIRST/MID/FINAL stream before every metadata and gameplay consumer below;
 	// a partial record is not itself a semantic C2S message.
 	std::vector<ProtocolMessage> semantic_messages;
-	semantic_messages.reserve(messages.size());
 	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
 		for (const ProtocolMessage &physical : packet.messages) {
 			std::vector<uint8_t> payload;
@@ -1346,6 +1365,30 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	return out;
 }
 
+std::vector<ReplayedSessionPacket> replay_ready_session_packets(
+		NapiNPServerCtx &ctx, uint32_t now_tick, bool defer_in_match_replies) {
+	std::vector<ReplayedSessionPacket> out;
+	// A handler may tear its connection down mid-walk: walk the list as it stands, by address.
+	std::vector<PeerAddr> walk;
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		if (conn.type == NapiNPConnection::kTypeServerSide) walk.push_back(conn.peer);
+	for (const PeerAddr &peer : walk) {
+		for (;;) {
+			NapiNPConnection *conn = find_connection(ctx, peer);
+			// The punted node replays nothing, as it takes no datagram (handle_server_datagram).
+			if (conn == nullptr || conn->host_disconnect_sent) break;
+			SessionDeframeAdmission admission;
+			if (!take_ready_session_packet(conn->seq, admission)) break;
+			ReplayedSessionPacket replayed;
+			replayed.peer = peer;
+			parse_admitted_session(ctx, *conn, peer, admission, now_tick, replayed.result,
+					defer_in_match_replies);
+			out.push_back(std::move(replayed));
+		}
+	}
+	return out;
+}
+
 std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 	std::vector<TickOut> out;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -1376,7 +1419,7 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 
 std::vector<TickOut> tick_connections(
 		NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick,
-		bool respect_s2c_send_boundary) {
+		bool respect_s2c_send_boundary, bool run_spawn_pump) {
 	std::vector<TickOut> out;
 	// Pump the JO receive timeout before any spawn/burst work. Collect keys first because the complete
 	// teardown erases vector nodes and may broadcast roster removal through surviving transports.
@@ -1423,12 +1466,13 @@ std::vector<TickOut> tick_connections(
 		out.push_back(std::move(destroyed));
 	}
 
-	// P3 World-driven path: the pending-player spawn pump runs on the shared periodic
-	// second — the call sits inside Server_TickUpdate's g_PeriodicSecondTimer block,
-	// not on every tick — before walking the connections to advance their bursts. The
-	// bring-up call for the host's own player (host_session.cpp) is direct.
+	// The pending-player spawn pump runs on the shared periodic second, its call inside
+	// Server_TickUpdate's g_PeriodicSecondTimer block; the host's frame runs it there, after
+	// the scoreboard (run_spawn_pump false). A caller outside that frame (a fixture, a
+	// bring-up) runs it here, ahead of the connections' bursts. The bring-up call for the host's
+	// own player (host_session.cpp) is direct.
 	// [orig: Server_TickUpdate @0x51DBFD inside the reload-62 block @0x51DB93]
-	if (ctx.world != nullptr && ctx.world->match.periodic_second())
+	if (run_spawn_pump && ctx.world != nullptr && ctx.world->match.periodic_second())
 		Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {

@@ -19,13 +19,16 @@
 //     @0x51C948..0x51C97B];
 //   - D-NET-351: a remote add takes the row free the longest [orig: PlayerSlot_PickFreeSlot
 //     @0x4FD7B0; Server_TickUpdate @0x51E457..0x51E467];
-//   - D-NET-715: the spawn pump unlinks a joiner before its add, so a failed add leaves it
-//     bodyless and never walked again [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8FF6];
+//   - D-NET-715: the spawn pump unlinks a joiner before its add, so a failed add (no free row)
+//     leaves it rowless and never walked again [orig: CNapiServer_ProcessPendingPlayerSpawns
+//     @0x4C8FF6];
+//   - D-NET-714: a held joiner has no team [orig: Server_AssignPlayerTeam @0x4FE310];
 //   - D-NET-NEW-L1-8: the join arms the round-event watermark at the frame clock less one
 //     [orig: CNetPlayer_SetGameState @0x4C422D; Server_OnPlayerJoin @0x51A74C;
 //     Server_BuildRoundEventListForPlayer @0x4FFEE8, @0x5001A8..0x5001AE].
 
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/server_dispatch_join.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
@@ -39,6 +42,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h> // parse_disconnect_event (the checksum punt's record)
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h> // to_fixed
 #include <runtime/world/world.h>
@@ -163,8 +167,8 @@ struct JoinFixture {
 	}
 
 	// The joiner's C2S 0x0B; returns the datagrams its transport took.
-	std::vector<ns::Datagram> join() {
-		(void)send(opennova::c2s::MISSION_FILE_STATUS, {0x00});
+	std::vector<ns::Datagram> join(std::vector<uint8_t> body = {0x00}) {
+		(void)send(opennova::c2s::MISSION_FILE_STATUS, std::move(body));
 		std::vector<ns::Datagram> out;
 		ns::Datagram d;
 		while (joiner_transport.pop_outbound(d)) out.push_back(d);
@@ -502,6 +506,149 @@ bool run_join_arms_the_round_watermark() {
 	              "the next 0x0A carries the entity update's round");
 }
 
+// NEW-L1-8: the round end disarms each joined slot's watermark: its game state leaves 10 and
+// its slot state leaves 6 for 7, each leg zeroing the word.
+// [orig: Server_ProcessRoundEnd - the slot test @0x516730..0x516740, CNetPlayer_SetGameState(11)
+//  @0x516846 (leaving 10 zeroes +0x17D08 @0x4C4135), the state-6 zero @0x516858, slot state 7
+//  @0x51685E]
+bool run_round_end_disarms_the_watermark() {
+	JoinFixture f(/*with_existing=*/false);
+	f.world->rules.mp_session = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	if (!expect(f.drive_to_await_join(), "the world stream parks the slot in state 5"))
+		return false;
+	f.world->out.rounds.frame_clock = 50;
+	(void)f.join();
+	const inmatch::NapiNPConnection &j = f.joiner();
+	if (!expect(j.link.round_watermark == 50 && j.slot_state == inmatch::PlayerSlotState::Joined,
+	            "the join arms the watermark in slot state 6")) return false;
+	f.world->process_round_end(1);
+	f.joiner().s2c_send_boundary_open = true;
+	inmatch::Server_TickUpdate(*f.ctx);
+	return expect(j.burst.game_state == 11 && j.slot_state == inmatch::PlayerSlotState::RoundOver &&
+	                      j.link.round_watermark == 0,
+	              "the round end: game state 11, slot state 7, the watermark disarmed");
+}
+
+// The spawn pump runs in the server tick's periodic block, after the script pass and the
+// scoreboard boundary, never from the receive pump: a player added on a scoreboard frame is not
+// in that frame's 0x16, and an in-match client takes the 0x16 ahead of the add's join line and
+// 0x46. The host's receive pump (tick_connections with run_spawn_pump false) adds nobody.
+// [orig: Server_TickUpdate - the scoreboard @0x51D8F9..0x51D917, the periodic block's
+//  CNapiNetwork_CheckPlayerTimeouts @0x51DBF3 then CNapiServer_ProcessPendingPlayerSpawns
+//  @0x51DBFD; Server_PlayerAdd's 0x32 @0x51D291 and 0x46 @0x51D2CA]
+bool run_the_spawn_pump_follows_the_scoreboard() {
+	JoinFixture f(/*with_existing=*/true);
+	inmatch::NapiNPConnection &existing = f.ctx->np_protocol.connection_list.front();
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	existing.link.owned_entity = f.world->registry.spawn(0, body);
+	f.ctx->scoreboard_broadcast_timer = 0x136; // this tick is a scoreboard boundary
+	inmatch::Server_TickUpdate(*f.ctx);        // and a periodic second (the first countdown)
+	if (!expect(f.world->match.periodic_second() &&
+	                    f.joiner().phase >= inmatch::ConnectionPhase::PlayerAdded,
+	            "the tick's periodic block adds the joiner")) return false;
+	const std::vector<uint8_t> tags = JoinFixture::drain(f.existing_transport);
+	std::size_t list = tags.size(), joined = tags.size(), sync = tags.size();
+	for (std::size_t i = 0; i < tags.size(); ++i) {
+		if (tags[i] == opennova::s2c::PLAYER_LIST && list == tags.size()) list = i;
+		if (tags[i] == opennova::s2c::FORMATTED_GAME_TEXT && joined == tags.size()) joined = i;
+		if (tags[i] == opennova::s2c::PLAYER_SYNC && sync == tags.size()) sync = i;
+	}
+	if (!expect(list < joined && joined < sync && sync < tags.size(),
+	            "the 0x16, then the add's join line and its 0x46")) return false;
+	// A second joiner pending while the periodic verdict still reads true: the host's
+	// receive pump adds nobody.
+	inmatch::NapiNPConnection &second = f.ctx->np_protocol.connection_list.emplace_back();
+	second.type = inmatch::NapiNPConnection::kTypeServerSide;
+	second.peer = opennova::PeerAddr{0x0100007Fu, 30003};
+	second.connection_id = inmatch::kFirstJoinerDcb + 2;
+	second.phase = inmatch::ConnectionPhase::Joined;
+	second.admission_stage = inmatch::GameAdmissionStage::Complete;
+	second.self_id_seen = true;
+	(void)inmatch::tick_connections(*f.ctx, /*elapsed_ms=*/16, /*now_tick=*/2,
+			/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false);
+	return expect(f.world->match.periodic_second() &&
+	                      second.phase < inmatch::ConnectionPhase::PlayerAdded,
+	              "the receive pump runs no spawn pump");
+}
+
+// D-NET-NEW-L1-5: the join compares the 0x0B's two map checksums against the mission's, which
+// Mission_GetMapChecksums stores as 0 (the stub a stock joiner's mission start also reads, so a
+// stock 0x0B carries two zeros). A remote slot's mismatch punts it after the 0x0F: the HMCRC
+// leg's description ("t9", DPC 33, "LogPuntEvent") among the join's sends, the CMCRC leg then
+// finding the slot punted. Zeros, or a body that ends before them, pass.
+// [orig: Server_OnPlayerJoin - Mission_GetMapChecksums @0x51A89C (@0x6108A8 / @0x6108AE), the
+//  compares @0x51A8B7..0x51A8CE / @0x51A8F8..0x51A90F, Server_LogCRCMismatchPunt (slot, 9)
+//  @0x51A8F2 and (slot, 10) @0x51A933, ahead of the 0x4D @0x51A97A;
+//  NapiNPServerMsg_PlayerJoinRequest's reads @0x51AB5A..0x51AB91;
+//  Server_LogCRCMismatchPunt @0x517ED0 (the 33 / "LogPuntEvent" send @0x517F5A)]
+bool run_join_punts_a_map_checksum_mismatch() {
+	const auto body = [](uint32_t a, uint32_t b) {
+		std::vector<uint8_t> out{0x00}; // the side password's empty C string
+		for (const uint32_t v : {a, b, 0x01070507u})
+			for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+		return out;
+	};
+	const auto punts = [](const std::vector<ns::Datagram> &sent, std::vector<std::string> &dstr,
+			std::size_t &first_at) {
+		first_at = sent.size();
+		for (std::size_t i = 0; i < sent.size(); ++i) {
+			if (sent[i].protocol_flags_raw != 0xA0) continue;
+			opennova::DisconnectEvent event;
+			if (!opennova::parse_disconnect_event(sent[i].body.data(), sent[i].body.size(), event))
+				continue;
+			if (event.dpc != 33 || event.ddstr != "LogPuntEvent") continue;
+			if (first_at == sent.size()) first_at = i;
+			dstr.push_back(event.dstr);
+		}
+	};
+	{
+		JoinFixture f(/*with_existing=*/false);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+		                    f.drive_to_await_join(),
+		            "the joiner reaches slot state 5")) return false;
+		const std::vector<ns::Datagram> sent = f.join(body(0x1234u, 0x5678u));
+		std::vector<std::string> dstr;
+		std::size_t at = 0;
+		punts(sent, dstr, at);
+		std::size_t world_load = sent.size(), notice = sent.size();
+		for (std::size_t i = 0; i < sent.size(); ++i) {
+			if (sent[i].tag == opennova::s2c::WORLD_STATE_LOAD && sent[i].protocol_flags_raw == 0)
+				world_load = i;
+			if (sent[i].tag == opennova::s2c::SPAWN_SLOT_NOTICE) notice = i;
+		}
+		if (!expect(dstr == std::vector<std::string>{"t9"} && f.joiner().host_disconnect_sent,
+		            "a mismatched HMCRC punts once, t9 / 33 / LogPuntEvent")) return false;
+		if (!expect(world_load < at && at < notice,
+		            "the punt sits after the 0x0F, ahead of the 0x4D")) return false;
+	}
+	{
+		JoinFixture f(/*with_existing=*/false);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+		                    f.drive_to_await_join(),
+		            "the joiner reaches slot state 5")) return false;
+		std::vector<std::string> dstr;
+		std::size_t at = 0;
+		punts(f.join(body(0, 0x5678u)), dstr, at);
+		if (!expect(dstr == std::vector<std::string>{"t10"}, "a mismatched CMCRC alone punts t10"))
+			return false;
+	}
+	for (const std::vector<uint8_t> &clean : {body(0, 0), std::vector<uint8_t>{0x00}}) {
+		JoinFixture f(/*with_existing=*/false);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+		                    f.drive_to_await_join(),
+		            "the joiner reaches slot state 5")) return false;
+		std::vector<std::string> dstr;
+		std::size_t at = 0;
+		punts(f.join(clean), dstr, at);
+		if (!expect(dstr.empty() && !f.joiner().host_disconnect_sent,
+		            "zero checksums (or none) pass")) return false;
+	}
+	return true;
+}
+
 // D-NET-401: the player-slot table is the slot limit alone. A Serve Only host's spectator
 // limit adds no rows; its spawn pump's 0x04 sends that count (byte 18) and the joiner's row.
 // [orig: Server_InitNewRoundState - the limit @0x51C948..0x51C96B (maxPlayers plus the
@@ -629,22 +776,32 @@ bool run_the_pick_takes_the_row_free_longest() {
 }
 
 // D-NET-715: the pump takes the joiner off its pending list and sends its 0x03 before the add,
-// so an add that fails (here the player pool is full) leaves it connected with no row, no body
-// and no disconnect; the pump never walks it again, so no second attempt and no further 0x03.
-// [orig: CNapiServer_ProcessPendingPlayerSpawns - the pending test @0x4C8E68..0x4C8E6C,
-//  NapiNode_UnlinkFromList @0x4C8FF6, the 0x03 @0x4C9034, the add @0x4C903A, its success test
-//  @0x4C904E, goto LABEL_5 @0x4C9128]
-bool run_a_failed_add_leaves_the_joiner_bodyless() {
-	SlotFixture f(/*pool0_rows=*/1);
-	w::Entity filler;
-	filler.kind = w::EntityKind::Organic;
-	(void)f.world->registry.spawn(0, filler); // the one pool-0 row taken
-	inmatch::NapiNPConnection &j = f.admit(31101);
+// so an add that fails leaves it connected with no row, no body and no disconnect; the pump
+// never walks it again, so no second attempt and no further 0x03. Retail's add fails only with
+// no free row (its entity spawn failing is no failure): here the cap admits the joiner (four
+// players of five) while every row is claimed, the last by a connection the cap does not count
+// (retail: an active row whose net player is null).
+// [orig: CNapiServer_ProcessPendingPlayerSpawns - the cap @0x4C8E02..0x4C8E13, the pending test
+//  @0x4C8E68..0x4C8E6C, NapiNode_UnlinkFromList @0x4C8FF6, the 0x03 @0x4C9034, the add
+//  @0x4C903A, its success test @0x4C904E, goto LABEL_5 @0x4C9128; Server_PlayerAdd's null
+//  returns @0x51CC01 and @0x51CCDA; Server_CountAlivePlayers @0x4FD770]
+bool run_a_failed_add_leaves_the_joiner_rowless() {
+	SlotFixture f;
+	for (uint16_t port = 31101; port <= 31104; ++port) (void)f.admit(port);
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(f.row_of(31101) == 1 && f.row_of(31104) == 4, "four players hold rows 1..4"))
+		return false;
+	inmatch::NapiNPConnection &holder = f.admit(31105);
+	holder.self_id_seen = false; // never pending: the pump passes it over
+	holder.reply.player_slot = 5;
+	holder.reply.player_slot_reserved = true;
+	inmatch::NapiNPConnection &j = f.admit(31106);
 	ns::UdpSessionTransport *transport = f.transports.back().get();
 	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 0,
-	            "the add fails")) return false;
+	            "the cap admits it, no row is free: the add fails")) return false;
 	if (!expect(!j.link.owned_entity.valid() && j.phase < inmatch::ConnectionPhase::PlayerAdded &&
-	                    !j.host_disconnect_sent && !j.pending_disconnect && j.spawn_queue_unlinked,
+	                    !j.reply.player_slot_reserved && !j.host_disconnect_sent &&
+	                    !j.pending_disconnect && j.spawn_queue_unlinked,
 	            "no body, no row, no disconnect; off the pending list")) return false;
 	auto sync_ticks = [&](uint32_t tick) {
 		(void)inmatch::tick_connections(*f.ctx, /*elapsed_ms=*/16, tick);
@@ -655,10 +812,39 @@ bool run_a_failed_add_leaves_the_joiner_bodyless() {
 		return count;
 	};
 	if (!expect(sync_ticks(5) == 1, "its unlink's 0x03 is the one message it gets")) return false;
+	holder.reply.player_slot_reserved = false; // a row frees: the pump still never walks it
 	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
 	if (!expect(!j.link.owned_entity.valid() && sync_ticks(6) == 0,
 	            "the pump never walks it again: no second add, no further 0x03")) return false;
-	return expect(f.find(31101) != nullptr, "the joiner stays connected");
+	return expect(f.find(31106) != nullptr, "the joiner stays connected");
+}
+
+// D-NET-714: the C2S 0x02 handler picks no row and assigns no team; the add does both. So
+// a joiner the cap holds keeps no team after its admission, and a later joiner's team pick
+// does not count it.
+// [orig: the C2S 0x02 handler @0x512FD0 (its callees name neither PlayerSlot_PickFreeSlot nor
+//  Server_AssignPlayerTeam); Server_AssignPlayerTeam @0x4FE310, called from Server_PlayerAdd
+//  @0x51CF4A; Server_CountPlayersOnTeam @0x501630]
+bool run_a_held_joiner_has_no_team() {
+	SlotFixture f;
+	f.ctx->config.max_players = 1; // the cap holds the second joiner
+	inmatch::NapiNPConnection &first = f.admit(31201);
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(first.phase >= inmatch::ConnectionPhase::PlayerAdded && first.assigned_team_valid,
+	            "the first joiner is added with its team")) return false;
+	inmatch::NapiNPConnection &held = f.admit(31202);
+	// Its C2S 0x02 (the padding echo): the admission's records, no row, no team.
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = f.ctx.get();
+	std::vector<opennova::ProtocolMessage> replies;
+	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/3, inputs, replies);
+	if (!expect(!replies.empty() && held.reply.admission_metadata_pushed &&
+	                    !held.assigned_team_valid && !held.reply.player_slot_reserved,
+	            "the 0x02 sends its records and picks no row and no team")) return false;
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	return expect(held.phase < inmatch::ConnectionPhase::PlayerAdded && !held.assigned_team_valid &&
+	                      !held.reply.player_slot_reserved && !held.spawn_queue_unlinked,
+	              "a held joiner holds no row and no team");
 }
 
 } // namespace
@@ -674,9 +860,13 @@ int main() {
 	if (!run_join_into_a_finished_round()) ++failures;
 	if (!run_track_waits_while_the_round_is_over()) ++failures;
 	if (!run_join_arms_the_round_watermark()) ++failures;
+	if (!run_round_end_disarms_the_watermark()) ++failures;
+	if (!run_the_spawn_pump_follows_the_scoreboard()) ++failures;
+	if (!run_join_punts_a_map_checksum_mismatch()) ++failures;
 	if (!run_slot_table_is_the_slot_limit()) ++failures;
 	if (!run_the_pick_takes_the_row_free_longest()) ++failures;
-	if (!run_a_failed_add_leaves_the_joiner_bodyless()) ++failures;
+	if (!run_a_failed_add_leaves_the_joiner_rowless()) ++failures;
+	if (!run_a_held_joiner_has_no_team()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

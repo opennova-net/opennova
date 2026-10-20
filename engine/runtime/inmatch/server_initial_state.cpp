@@ -653,7 +653,7 @@ void PlayerSlot_ResetNetworkState(const NapiNPServerCtx &ctx, NapiNPConnection &
 
 // [orig: Server_OnPlayerJoin @0x51A680]
 std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiNPConnection &conn,
-		uint32_t now_tick) {
+		uint32_t now_tick, const std::array<uint32_t, 2> &client_checksums) {
 	std::vector<InitialStateMessage> out;
 	world::World &world = *ctx.world;
 	SessionReplyState &st = conn.reply;
@@ -806,6 +806,33 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// by Server_SendEntityOverlayState @0x50FF60, which nothing calls; +96488 = the 0x0B's
 	// client version (@0x51A951) is never read; +97540 (cleared @0x51A98A..0x51A992) is read
 	// by that test alone.
+	// The map checksums: the mission's (Mission_GetMapChecksums stores 0 into both, as the
+	// joiner's own mission start does for the two it sends) against the 0x0B's. For a slot
+	// that is not the host's own (nor a bot's, which JO has none of), each mismatch logs its
+	// HMCRC / CMCRC line and punts type 9 / 10 (the "t9" / "t10" description, DPC 33), here
+	// among the sends, after the 0x0F; the second finds the slot already punted
+	// (D-NET-NEW-L1-5). `/NOPUNT` is not modelled (no port host sets it).
+	// [orig: Server_OnPlayerJoin - Mission_GetMapChecksums @0x51A89C (@0x6108A8 / @0x6108AE),
+	//  the local and bot bytes @0x51A8A0..0x51A8AD, the first compare @0x51A8B7..0x51A8CE,
+	//  Server_WritePuntLog "HMCRC" @0x51A8E1, Server_LogCRCMismatchPunt(slot, 9, ..) @0x51A8F2,
+	//  the second @0x51A8F8..0x51A90F, "CMCRC" @0x51A922, (slot, 10, ..) @0x51A933;
+	//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_SendChatMessage(.., 33,
+	//  "LogPuntEvent") @0x517F5A]
+	const uint32_t mission_checksums[2] = {0, 0};
+	if (conn.type != NapiNPConnection::kTypeClientSide) {
+		if (client_checksums[0] != mission_checksums[0]) {
+			InitialStateMessage punt;
+			punt.host_punt = 9;
+			punt.host_punt_reason = "HMCRC";
+			out.push_back(std::move(punt));
+		}
+		if (client_checksums[1] != mission_checksums[1]) {
+			InitialStateMessage punt;
+			punt.host_punt = 10;
+			punt.host_punt_reason = "CMCRC";
+			out.push_back(std::move(punt));
+		}
+	}
 	// The join notice: this slot's copy rides the bundle, every other in-game client gets
 	// the same byte now and re-requests its visible-players snapshot. [orig: Server_OnPlayerJoin
 	//  @0x51a93f..0x51a97a (send_mask 0x80) -> NapiNPClientMsg_HandleSpawnSlot @0x4317B0]
@@ -962,7 +989,8 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// [orig: Game_StartMission @0x526189 (the is_mp_session_peer gate) -> the C2S 0x0B
 	//  @0x52624B; the bot arms' calls @0x51B93A / @0x51D2E1, behind @0x51B928 / @0x51D2CF]
 	if (!is_remote && conn.slot_state == PlayerSlotState::AwaitJoin) {
-		for (InitialStateMessage &m : Server_OnPlayerJoin(ctx, conn, now_tick))
+		// The host's own 0x0B sends the two zero checksums every joiner's does.
+		for (InitialStateMessage &m : Server_OnPlayerJoin(ctx, conn, now_tick, {0, 0}))
 			step.messages.push_back(std::move(m));
 		step.reached_in_game = true;
 	}

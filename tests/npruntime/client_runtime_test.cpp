@@ -3957,8 +3957,12 @@ bool run_host_startup_maps_no_tracers_rule() {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// (E) Host-owner registration boundary: a player created by tick_connections must be visible to
-// adapter registration before its first authoritative body tick and per-connection 0x0A fan.
+// (E) Host-owner registration boundary: the spawn pump runs in the server tick's periodic block,
+// after the before-tick hook and the script pass, and a body it adds registers at its spawn
+// (bind_spawned_body), ahead of its first entity update and any 0x0A fan.
+// [orig: Server_TickUpdate - the script pass @0x51D8BF, CNapiServer_ProcessPendingPlayerSpawns
+//  @0x51DBFD; Entity_SpawnFromAnimSlotProperty @0x43C390 - the AnimMap_RegisterEntity call
+//  @0x43C4DF; Game_ProcessMainFrame's Entity_UpdateAllEntities @0x52674B after the tick]
 // ---------------------------------------------------------------------------------------------------
 bool run_host_pump_hook_observes_remote_before_first_tick() {
 	w::World world;
@@ -3995,11 +3999,20 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	FirstLogicTickProbe logic_probe;
 	logic_probe.hook = &hook;
 	world.add_system(&logic_probe);
+	// The registration seam at the body's spawn.
+	bool bound_live = false;
+	bool bound_ai = false;
+	bool bound_before_update = false;
+	owner.ctx.bind_spawned_body = [&](w::EntityHandle body) {
+		if (world.registry.get(body) == nullptr ||
+				world.registry.get(body)->owner_connection_id != inmatch::kFirstJoinerDcb)
+			return;
+		bound_live = true;
+		bound_ai = ai.for_handle(body) != nullptr;
+		bound_before_update = world.logic_tick == 0;
+	};
 
-	// The pending-player spawn pump admits on the match's periodic second: this
-	// pump is the one that follows it. [orig: CNapiServer_ProcessPendingPlayerSpawns
-	//  @0x4C8DC0, called from Server_TickUpdate @0x51DBFD inside the reload-62 block]
-	world.match.advance_tick(world);
+	// A fresh match's first tick is a periodic second: its spawn pump adds the remote.
 	NullDatagramSocket sock;
 	inmatch::host_session_pump(owner, sock, &observe_host_before_server_tick, &hook);
 
@@ -4008,17 +4021,19 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 		if (candidate.peer == peer) remote = &candidate;
 	}
 	if (!expect(hook.calls == 1, "pre-Server_TickUpdate hook runs exactly once")) return false;
+	if (!expect(!hook.saw_live_entity && hook.saw_before_logic,
+			"the hook and the script pass run before the periodic block's add")) return false;
+	if (!expect(logic_probe.ticks == 1 && logic_probe.first_tick_saw_hook &&
+				!logic_probe.first_tick_saw_player,
+			"the frame's script pass precedes the add")) return false;
+	if (!expect(bound_live && bound_ai && bound_before_update,
+			"the added body registers at its spawn, AI-attached, before its first update"))
+		return false;
+	if (!expect(world.logic_tick == 1, "host pump advances exactly one logic tick")) return false;
 	// The add creates the body; the join (its C2S 0x0B, after the 0x09 / 0x0A legs) is a
 	// later pump's, so the remote is added, not yet joined (D-NET-500).
-	if (!expect(!hook.saw_spawned_connection && hook.saw_live_entity && hook.saw_ai_component,
-			"hook observes the remote added and AI-attached by tick_connections")) return false;
-	if (!expect(hook.saw_before_logic && hook.saw_before_fan,
-			"hook runs before the remote's first logic tick and 0x0A fan")) return false;
-	if (!expect(logic_probe.ticks == 1 && logic_probe.first_tick_saw_hook &&
-				logic_probe.first_tick_saw_player,
-			"first authoritative logic tick observes completed registration")) return false;
-	if (!expect(world.logic_tick == 1, "host pump advances exactly one logic tick")) return false;
-	if (!expect(remote != nullptr && remote->link.s2c_phase == 0 &&
+	if (!expect(remote != nullptr && remote->link.owned_entity.valid() &&
+	                    remote->link.s2c_phase == 0 &&
 	                    remote->slot_state == inmatch::PlayerSlotState::Added,
 			"no 0x0A fan reaches the added remote before its join")) return false;
 	return true;

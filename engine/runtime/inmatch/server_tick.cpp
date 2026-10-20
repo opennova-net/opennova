@@ -11,7 +11,7 @@
 #include <runtime/inmatch/server_powerup.h>          // the remote grant tables and the S2C 0x35 fan
 #include <runtime/inmatch/server_entity_routes.h>    // the item events, crossings and guidance
 #include <runtime/inmatch/server_entity_state.h>     // the per-slot 0x0A writer (Server_SendEntityStateToPlayer)
-#include <runtime/inmatch/server_spawn.h>            // the admitted 0x51 spectator converts
+#include <runtime/inmatch/server_spawn.h>            // the spawn pump, the admitted 0x51 spectator converts
 #include <runtime/inmatch/server_tick_maintenance.h> // the per-tick and periodic-second maintenance legs
 
 #include <algorithm>
@@ -292,6 +292,13 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 								non_team_header),
 						non_team_header));
 		conn.burst.game_state = 11;
+		// Leaving game state 10, then slot state 6 (the loop's only slots), disarms the
+		// round-event watermark, and the slot enters state 7 (NEW-L1-8)
+		// [orig: Server_ProcessRoundEnd - the slot test @0x516730..0x516740,
+		//  CNetPlayer_SetGameState(11) @0x516846 (leaving 10 zeroes +0x17D08 @0x4C4135),
+		//  the state-6 zero @0x516858, slot state 7 @0x51685E].
+		conn.link.round_watermark = 0;
+		conn.slot_state = PlayerSlotState::RoundOver;
 	}
 	// The round tallies: a Team Deathmatch, Team KOTH or CTF round counts,
 	// and the winning side 1..4 scores a win [orig: Server_ProcessRoundEnd
@@ -623,12 +630,15 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	if (periodic_second) emit_requester_score_refreshes(ctx, world);
 
 	// The periodic block's first two callees: the join-phase watchdog, then the
-	// pending-player spawn pump (run by tick_connections on this same
-	// boundary) [orig: @0x51DBF3 CNapiNetwork_CheckPlayerTimeouts, @0x51DBFD
-	// CNapiServer_ProcessPendingPlayerSpawns].
+	// pending-player spawn pump, after the script pass and the scoreboard
+	// boundary, so a player added on a scoreboard frame is in the next 0x16,
+	// not this one's; the receive pump runs no pump of its own
+	// [orig: @0x51DBF3 CNapiNetwork_CheckPlayerTimeouts, @0x51DBFD
+	// CNapiServer_ProcessPendingPlayerSpawns; the script pass @0x51D8BF and the
+	// scoreboard @0x51D8F9..0x51D917 ahead of them].
 	if (periodic_second) Server_CheckPlayerTimeouts(ctx);
-	// The live group recount, the periodic block's third callee (the pending
-	// spawns between them ride tick_connections on this boundary).
+	if (periodic_second) Server_ProcessPendingPlayerSpawns(ctx, world);
+	// The live group recount, the periodic block's third callee.
 	// [orig: Server_TickUpdate — the EntityPool_RecountLiveByGroup call @0x51DC02]
 	if (periodic_second) world.recount_group_live();
 	// The 1 Hz 0x46 quality resend walk sits after the periodic block's

@@ -60,7 +60,7 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 // occupy rows; repeated calls for one connection return the same row.
 // Player-add consumes the reservation, while erasing the connection releases
 // it (D-NET-351).
-// [orig: Server_PlayerAdd @0x51CC9A -> PlayerSlot_PickFreeSlot @0x4FD7B0
+// [orig: Server_PlayerAdd, the call @0x51CC95 -> PlayerSlot_PickFreeSlot @0x4FD7B0
 //  (@0x4FD7D0..0x4FD7EE), the memset @0x51CD06; NetPacket_WriteSlotAssignment
 //  @0x502B30 reads the row]
 std::optional<uint8_t> Server_ReservePlayerSlot(
@@ -88,15 +88,19 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 
 // The C2S 0x0B mission-file report, the join's one player-path trigger: from an added slot
 // whose net player is not yet in game state 10 and whose entity exists it runs the join
-// (Server_OnPlayerJoin), whose game-start messages go out on the connection's transport
-// (into `replies` for a transport-less test seam); any other 0x0B is dropped. (D-NET-678,
-// D-NET-502)
+// (Server_OnPlayerJoin) with the body's two map checksums, whose game-start messages go out
+// on the connection's transport in order, a checksum punt staged at its place (into
+// `replies` for a transport-less test seam, which stages none); any other 0x0B is dropped.
+// The body: the side password's C string, then three u32 (two checksums, the version), each
+// 0 where the body ends first. (D-NET-678, D-NET-502, D-NET-NEW-L1-5)
 // [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 - the authority @0x51AB10..0x51AB17
 //  (the dispatcher's), the player context @0x51AB21..0x51AB29, the slot
 //  @0x51AB30..0x51AB38, game state 10 @0x51AB3E..0x51AB45, the slot's entity
-//  @0x51AB47..0x51AB4B; the Server_OnPlayerJoin calls @0x51ABA1 / @0x51ABB5]
+//  @0x51AB47..0x51AB4B; the string's end @0x51AB5A..0x51AB73, the checksums
+//  @0x51AB7A..0x51AB91; the Server_OnPlayerJoin calls @0x51ABA1 / @0x51ABB5]
 void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn,
-		world::World *world, uint32_t now_tick, std::vector<ProtocolMessage> &replies);
+		world::World *world, uint32_t now_tick, const std::vector<uint8_t> &body,
+		std::vector<ProtocolMessage> &replies);
 
 // §5.2a step 2 (per player) — [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd
 // @0x51cbc0]. Build the spawn pose from the mission's promoted start markers (§5.2c,

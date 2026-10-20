@@ -4,6 +4,8 @@
 #include <runtime/inmatch/server_chat.h> // broadcast_player_joined_text (the add's 0x32 line)
 #include <runtime/inmatch/server_initial_state.h> // Server_OnPlayerJoin (the 0x0B's join)
 #include <runtime/inmatch/server_message_dispatch.h> // broadcast_player_sync_on_join (the add's 0x46)
+#include <runtime/inmatch/server_files.h> // server_logs_punt (the join's HMCRC / CMCRC lines)
+#include <runtime/inmatch/server_tick.h> // Server_StageHostPunt (the join's checksum punts)
 
 #include <runtime/world/angle.h>        // mission_yaw_deg_from_bam_heading (the no-marker heading word)
 #include <runtime/world/entity.h>
@@ -155,9 +157,9 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	return 0;
 }
 
-// Roster slots are stable identities: a row is active while a connection claims it (its add,
-// or its pre-add reservation, the stand-in until D-NET-715 drops the 0x02's).
-// [orig: the slot's active byte +4, Server_PlayerAdd @0x51CBC0]
+// Roster slots are stable identities: a row is active while a connection claims it, from the
+// add's pick (the reservation it takes before the body spawns) on.
+// [orig: the slot's active byte +4, Server_PlayerAdd @0x51CBC0 (stored @0x51CD14)]
 bool connection_claims_player_slot(const NapiNPConnection &connection) {
 	return connection.reply.player_slot_reserved ||
 			connection.phase >= ConnectionPhase::PlayerAdded ||
@@ -176,7 +178,7 @@ bool connection_claims_player_slot(const NapiNPConnection &connection) {
 // used, not the one just freed (D-NET-351).
 // [orig: Server_InitNewRoundState @0x51c99a..0x51ca3c (slot 0 active, local);
 //  Server_PlayerAdd @0x51cc31..0x51cc65 (the local add -> g_LocalNetPlayer),
-//  @0x51cc9a -> PlayerSlot_PickFreeSlot @0x4FD7B0 - the active byte @0x4FD7D0, the
+//  the call @0x51CC95 -> PlayerSlot_PickFreeSlot @0x4FD7B0 - the active byte @0x4FD7D0, the
 //  first best @0x4FD7DA, `cmp edx, edi; jle` @0x4FD7E2..0x4FD7EA]
 std::optional<uint8_t> first_free_player_slot(
 		const std::vector<NapiNPConnection> &roster,
@@ -673,12 +675,30 @@ bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &con
 
 // See header. [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
 void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn,
-		world::World *world, uint32_t now_tick, std::vector<ProtocolMessage> &replies) {
+		world::World *world, uint32_t now_tick, const std::vector<uint8_t> &body,
+		std::vector<ProtocolMessage> &replies) {
 	if (ctx == nullptr || world == nullptr || ctx->world != world) return;
 	if (!player_slot_active(conn) || conn.burst.game_state == 10) return;
 	if (world->registry.get(conn.link.owned_entity) == nullptr) return;
+	std::size_t at = std::find(body.begin(), body.end(), uint8_t{0}) - body.begin();
+	at = std::min(at + 1, body.size()); // past the string's NUL, clamped to the end
+	std::array<uint32_t, 2> checksums{0, 0};
+	for (uint32_t &checksum : checksums) {
+		if (at + 4 > body.size()) break;
+		checksum = static_cast<uint32_t>(body[at]) | (static_cast<uint32_t>(body[at + 1]) << 8) |
+				(static_cast<uint32_t>(body[at + 2]) << 16) |
+				(static_cast<uint32_t>(body[at + 3]) << 24);
+		at += 4;
+	}
 	// [orig: the Server_OnPlayerJoin calls @0x51ABA1 / @0x51ABB5]
-	for (InitialStateMessage &m : Server_OnPlayerJoin(*ctx, conn, now_tick)) {
+	for (InitialStateMessage &m : Server_OnPlayerJoin(*ctx, conn, now_tick, checksums)) {
+		if (m.host_punt != 0) {
+			// The punt-log line, then the description [orig: Server_OnPlayerJoin @0x51A8E1 ahead of
+			//  @0x51A8F2; @0x51A922 ahead of @0x51A933].
+			server_logs_punt(ctx->logs, conn, m.host_punt_reason);
+			(void)Server_StageHostPunt(conn, m.host_punt);
+			continue;
+		}
 		if (conn.link.transport != nullptr) {
 			conn.link.transport->host_send(m.tag, std::move(m.body), m.reliable);
 		} else {
@@ -727,9 +747,9 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 			if (conn.player_enter_pending()) continue;
 			if (has_spawn_slots && balance_join_admits(ctx, conn, world)) {
 				// Retail unlinks the node and sends its 0x03 before the add, so a
-				// failed add (no free row, pool full) leaves a joiner with no row,
-				// no body and no further message, which the walk never visits
-				// again; either way the walk restarts from the head (D-NET-715).
+				// failed add (no free row) leaves a joiner with no row, no body and
+				// no further message, which the walk never visits again; either
+				// way the walk restarts from the head (D-NET-715).
 				// [orig: NapiNode_UnlinkFromList @0x4C8FF6, the 0x03 @0x4C9034, the
 				//  add @0x4C903A, the success test @0x4C904E, goto LABEL_5 @0x4C9128]
 				conn.spawn_queue_unlinked = true;

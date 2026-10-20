@@ -1282,7 +1282,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	const opennova::world::EntityHandle player =
 			inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world, /*round_init=*/false);
 	// The join (its C2S 0x0B) writes the pending bit and the state-6 stamp (D-NET-502).
-	(void)inmatch::Server_OnPlayerJoin(ctx, live, 1);
+	(void)inmatch::Server_OnPlayerJoin(ctx, live, 1, {0, 0});
 	if (!expect(player.valid() && live.link.respawn_pending &&
 				live.phase == inmatch::ConnectionPhase::Spawned &&
 				live.reply.state6_entry_host_ms_valid &&

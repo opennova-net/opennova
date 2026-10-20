@@ -1102,7 +1102,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				dispatch_spectator_respawn(config, conn, msg, world, inputs, replies);
 				break;
 			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
-				Server_HandlePlayerJoinRequest(inputs.server_ctx, conn, world, now_tick, replies);
+				Server_HandlePlayerJoinRequest(
+						inputs.server_ctx, conn, world, now_tick, msg.payload, replies);
 				break;
 			case c2s::FIRED_ROUND: // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
 				Server_HandleClientFiredRound(config, conn, msg.payload.data(), msg.payload.size(), world);

@@ -509,11 +509,25 @@ bool decode_session_resend_list(const uint8_t *body, size_t body_len,
 	return true;
 }
 
+bool take_ready_session_packet(SessionSequencing &seq, SessionDeframeAdmission &admission_out) {
+	admission_out = SessionDeframeAdmission{};
+	auto queued = seq.queued_inbound.find(seq.last_inbound_seq + 1);
+	if (queued == seq.queued_inbound.end()) return false;
+	admission_out.admitted = true;
+	admission_out.max_ack_count = queued->second.header.ack_count;
+	admission_out.packets.push_back(SessionDeframeAdmission::Packet{
+			queued->second.header, std::move(queued->second.messages)});
+	seq.last_inbound_seq = queued->first;
+	seq.queued_inbound.erase(queued);
+	return true;
+}
+
 bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                             const uint8_t *body, size_t body_len,
                             ProtocolPacketHeader &hdr_out,
                             std::vector<ProtocolMessage> &messages_out,
-                            SessionDeframeAdmission *admission_out) {
+                            SessionDeframeAdmission *admission_out,
+                            bool drain_queued_successors) {
 	if (admission_out != nullptr) *admission_out = SessionDeframeAdmission{};
 	// Retail validates the receiver-local session key before it reads the sequence number or enters
 	// ParseMessages. Parse only the plaintext header here so a stale packet from a prior connection
@@ -571,22 +585,24 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 	const ProtocolPacketHeader admitted_header = hdr_out;
 	messages_out = std::move(decoded);
 	seq.last_inbound_seq = hdr_out.seq_num;
+	// A copy of this packet queued earlier (a duplicate, or the original of a resend that
+	// overtook it) would sit below the frontier for good, ahead of every later queued packet.
+	// Retail leaves it at the head of its ordered list, where its connection-list walk stops
+	// at once until a resend refills the frontier; it is dropped here, a deliberate fix
+	// (D-NET-NEW-L1-11). [orig: HandleSessionPacket's in-order parse @0x626BEB..0x626BFC tests
+	//  no queue; PumpRecvQueues' walk stops at a head that is not recv_ack + 1 @0x626960]
+	seq.queued_inbound.erase(hdr_out.seq_num);
 	SessionDeframeAdmission admission;
 	admission.admitted = true;
 	admission.max_ack_count = hdr_out.ack_count;
 	admission.packets.push_back(
 			SessionDeframeAdmission::Packet{admitted_header, messages_out});
-	for (;;) {
-		auto queued = seq.queued_inbound.find(seq.last_inbound_seq + 1);
-		if (queued == seq.queued_inbound.end()) break;
-		admission.packets.push_back(SessionDeframeAdmission::Packet{
-				queued->second.header, queued->second.messages});
-		for (ProtocolMessage &message : queued->second.messages)
-			messages_out.push_back(std::move(message));
-		admission.max_ack_count = std::max(
-				admission.max_ack_count, queued->second.header.ack_count);
-		seq.last_inbound_seq = queued->first;
-		seq.queued_inbound.erase(queued);
+	SessionDeframeAdmission successor;
+	while (drain_queued_successors && take_ready_session_packet(seq, successor)) {
+		for (const ProtocolMessage &message : successor.packets.front().messages)
+			messages_out.push_back(message);
+		admission.max_ack_count = std::max(admission.max_ack_count, successor.max_ack_count);
+		admission.packets.push_back(std::move(successor.packets.front()));
 	}
 	// `hdr_out` describes the datagram passed to this call. Draining queued successors must not
 	// silently replace it with the last recovered packet's header; packet-local headers are exposed

@@ -186,6 +186,10 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 	// @0x42E730, which never calls the builder; world::spawn_player already
 	// rebuilt there, so this rebuild adds no edge, it rereads the radius.
 	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
+	// The body's animation map registers at its spawn, so a player the server tick's spawn
+	// pump adds is grounded before its first update [orig: Entity_SpawnFromAnimSlotProperty
+	// @0x43C390 - the AnimMap_RegisterEntity @0x40BB60 call @0x43C4DF].
+	resolve_new_infantry_adm_ids();
 }
 
 int MissionKernel::resolve_collision_instances() {

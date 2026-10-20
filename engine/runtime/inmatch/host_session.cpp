@@ -231,15 +231,8 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock,
 		uint32_t now, HostEventObserverFn event_observer, void *event_observer_context) {
 	auto &pending_session_messages = owner.pending_session_messages;
-	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the socket owner.
-	uint8_t buf[4096];
-	for (;;) {
-		PeerAddr peer{};
-		const int n = sock.recv_from(buf, sizeof(buf), peer);
-		if (n <= 0) break; // 0 = nothing left/timeout, <0 = error
-		HandleResult r = handle_server_datagram(
-				owner.ctx, peer, buf, static_cast<std::size_t>(n), now,
-				/*defer_in_match_replies=*/true);
+	// One handled datagram's (or replayed packet's) output, consumed in place.
+	auto consume = [&](const PeerAddr &peer, HandleResult &r) {
 		// Same-address replacement reports PeerGoodbye for the OLD occupant after
 		// the protocol layer has already installed the fresh connection and built
 		// its 0x82/0x83 auth result. Retire the old owner's queues/link before
@@ -276,7 +269,25 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 			if (event_observer != nullptr)
 				event_observer(event_observer_context, ev);
 		}
+	};
+	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the socket owner.
+	uint8_t buf[4096];
+	for (;;) {
+		PeerAddr peer{};
+		const int n = sock.recv_from(buf, sizeof(buf), peer);
+		if (n <= 0) break; // 0 = nothing left/timeout, <0 = error
+		HandleResult r = handle_server_datagram(
+				owner.ctx, peer, buf, static_cast<std::size_t>(n), now,
+				/*defer_in_match_replies=*/true);
+		consume(peer, r);
 	}
+	// The connection-list walk after every datagram: the queued packets whose gap a datagram
+	// closed, per connection in list order (NEW-L1-9).
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the walk @0x626910..0x6269E8,
+	//  CNapiNPConnection_ParseMessages @0x62696B, after the FIFO pass @0x6266CA..0x6267B2]
+	for (ReplayedSessionPacket &replayed : replay_ready_session_packets(
+			owner.ctx, now, /*defer_in_match_replies=*/true))
+		consume(replayed.peer, replayed.result);
 	// The receive pump's per-connection tail: resolve the missing-sequence latch only after the
 	// receive FIFO is empty (a later datagram in this same drain may have closed the gap), and
 	// send the 0x84 at once — the server receive pump runs every Server_TickUpdate, outside the
@@ -340,17 +351,21 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 
 	// (1) and (2), the receive pump, which (3) Server_TickUpdate runs after its per-player
 	// walk, so the walk reads what the last frame left and a message handled now is walked
-	// next frame (D-NET-686). The host's own client's requests first: its node leads every
-	// remote's on the protocol's connection list, which the pump walks from the head, each
-	// node's messages in turn. Then the recv-drain, the 0x84 tail and the send-boundary
-	// clocks; the connection producers; and the records the handlers raised, behind their
-	// sends.
+	// next frame (D-NET-686). The pump's FIFO pass handles every queued datagram in arrival
+	// order, an in-order session packet parsed at once. The host's own client's requests come
+	// first: its sends to the local address go to the manager's loopback FIFO, which the
+	// manager's receive, earlier in the frame, drains ahead of the socket, queueing each on the
+	// protocol FIFO ahead of every remote datagram. Then the recv-drain, the 0x84 tail and the
+	// send-boundary clocks; the connection producers; and the records the handlers raised,
+	// behind their sends.
 	// [orig: Server_TickUpdate - Server_UpdateAllActivePlayerSlots @0x51D88B,
 	//  CNapiNetwork_PumpServerProtocolRecv @0x51D895; NapiNPProtocol_PumpRecvQueues @0x6266A0 -
-	//  the list walk @0x626910..0x6269E8, CNapiNPConnection_ParseMessages @0x62696B;
-	//  CNapiNPConnection_Create appends each node @0x62B17D..0x62B1AE;
-	//  CNapiGameSession_CreateSession creates the local client's node @0x4C9B9C and joins it
-	//  @0x4C9C6F, ahead of any remote]
+	//  the FIFO pass @0x6266CA..0x6267B2, its handler call @0x6267AD -> Nwu_HandleClientSession
+	//  @0x626CF0 -> NapiNPProtocol_HandleSessionPacket @0x626A00, the in-order test @0x626BEB,
+	//  ParseMessages @0x626BFC; CNapiNPManager_SendTo's address-0 arm @0x61EC59, the loopback
+	//  FIFO write @0x61ECC6; NapiNPManager_PumpReceive @0x623010 reads that FIFO
+	//  @0x623084..0x6230B3 ahead of NapiNPManager_RecvFromSocket @0x6230EB, from
+	//  Game_ProcessMainFrame's CNapiNetwork_PumpManagerReceive call @0x526528]
 	bool received = false;
 	auto receive_pump = [&]() {
 		received = true;
@@ -361,7 +376,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		// (2) tick_connections: drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
 		for (TickOut &t : tick_connections(
 				owner.ctx, /*elapsed_ms=*/16, now,
-				/*respect_s2c_send_boundary=*/true)) {
+				/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false)) {
 			for (const std::vector<uint8_t> &dg : t.outbound) {
 				send_or_stage_established_datagram(owner, sock, t.peer, dg);
 			}

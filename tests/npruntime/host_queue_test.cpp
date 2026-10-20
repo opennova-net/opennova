@@ -368,7 +368,7 @@ bool run_own_client_requests_follow_the_entity_update_sends() {
 
 // D-NET-686: the C2S 0x51 convert runs inline in the receive pump (retail's handler tail-jumps
 // into Server_ConvertPlayerToSpectator), so its sends queue at their calls: the deploy leg's
-// 0x5A and 0x61 (Server_DeployPlayer @0x5178F2, @0x51796A), then the 0x32 (@0x519F43), all
+// 0x5A and 0x61 (Server_DeployPlayer @0x5178F2, the 0x61 call @0x51796D), then the 0x32 (@0x519F43), all
 // ahead of the reply to the 0x2C that follows the 0x51 in the same datagram. Ours used to
 // stage the convert for the tick, after the pump, so the 0x57 led them.
 bool run_the_convert_sends_lead_a_later_reply() {
