@@ -320,9 +320,10 @@ opennova_off_bakes(nw_server_command_push_e2e)
 # forget_owner reaches both, one drained leaves the gate handing out the address while both
 # listings stay and both drained leave it silent, a lobby's start reaps a stale instance with its
 # rows and leaves the others', a clean stop deletes its instance, and a host whose lobby was
-# replaced behind the address (its receive window run out by its clock) reconnects there and is
-# listed on the new instance. Under the loopback lock: its packet windows are protocol assertions. POSIX (it binds
-# 127.0.0.x).
+# replaced behind the address gets the goodbye the stopped lobby left from the new one at its next
+# packet (another key, another address: none), reconnects there at once and is listed on the new
+# instance; with no goodbye left, it does so once its receive window runs out by its clock. Under
+# the loopback lock: its packet windows are protocol assertions. POSIX (it binds 127.0.0.x).
 if(UNIX)
     add_executable(lobby_instances_e2e_test novaworld/lobby_instances_e2e_test.cpp)
     target_link_libraries(lobby_instances_e2e_test PRIVATE
@@ -359,11 +360,12 @@ target_include_directories(host_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_key_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(host_key COMMAND host_key_test)
 
-# The lobby's tables below the listener (net/novaworld/lobby_repository.h, migrations 0006, 0009
-# and 0012): its instances (two at one endpoint) and the RID sequence, its session rows, the pushes, ends and forget_owner
+# The lobby's tables below the listener (net/novaworld/lobby_repository.h, migrations 0006, 0009,
+# 0012, 0020 and 0021): its instances (two at one endpoint) and the RID sequence, its session rows, the pushes, ends and forget_owner
 # the routes and the supervisor queue for it (answered from the session rows as the lobby would,
 # bearing the session's lobby_id, a forget_owner one per instance), each instance's take in
-# insert order with the expiry, a session's delete taking its commands, and clear_unheld. A
+# insert order with the expiry, a session's delete taking its commands, clear_unheld, and the
+# goodbyes a clean stop leaves (listed in their window, replaced by address, the older deleted). A
 # migrated database per case; runs on every service build.
 add_executable(lobby_repository_test novaworld/lobby_repository_test.cpp)
 target_link_libraries(lobby_repository_test PRIVATE opennova_novaworld_service)

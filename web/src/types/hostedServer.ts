@@ -184,21 +184,37 @@ export interface ServerPhase {
   line?: string;
 }
 
-// Why a stopped or failed server's last run ended: its cause, how its
-// container ended, and the server's own last line ('' for none).
+// Why a stopped or failed server's last run ended: its cause (for a stop, who
+// stopped it: its owner, an admin, or the service itself, 'stop', which is also
+// every stop from before the service told them apart), a limits stop's limit,
+// how its container ended, and the server's own last line ('' for none).
 export type StopCause =
   | 'crash'
   | 'timeout'
   | 'fleet'
   | 'stop'
+  | 'owner_stop'
+  | 'admin_stop'
   | 'update'
   | 'limits'
   | 'no_data'
   | 'link_lost'
   | 'data_unavailable';
 
+// The limit a limits stop's server was past: its owner's shared servers, or
+// its owner's dedicated machines with no shared server free to move it to, or
+// no room on the shared machines; `count` how many of them its owner had then.
+export type StopLimitKind = 'shared_servers' | 'no_shared_server' | 'no_shared_room';
+
+export interface StopLimit {
+  kind: StopLimitKind | (string & {});
+  count: number;
+}
+
 export interface StoppedBecause {
   cause: StopCause | (string & {});
+  // A limits stop's; null for any other end, and for an older limits stop.
+  limit: StopLimit | null;
   exit_code: number | null;
   // It ran out of memory.
   oom: boolean;

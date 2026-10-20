@@ -206,8 +206,10 @@ resource "aws_lb_target_group" "public" {
   # 10 s for the lobby, long enough for an exchange in flight (a join's 3 s
   # resends, a command's 250 ms take) and short because no session can follow
   # its task anyway: a host whose flow moves reaches a lobby that holds no
-  # session for it, and lists again by timing out (240 s) and reconnecting,
-  # so a longer delay would only hold the deploy.
+  # session for it, which sends it the goodbye the stopped task's lobby left
+  # (lobby_goodbyes), and it reconnects and lists again at once (by timing
+  # out, 240 s, after a task that died without its stop), so a longer delay
+  # would only hold the deploy.
   deregistration_delay = each.key == "lobby" ? 10 : 30
   # A UDP flow ends with the delay. Left open, a flow its client's keepalives
   # keep fresh would stay on the deregistered task past its stop, and the

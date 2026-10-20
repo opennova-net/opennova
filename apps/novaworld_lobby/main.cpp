@@ -9,8 +9,10 @@
 // (lobby_commands). A redeploy of any other program leaves it serving. Its own
 // stop drains its instance and stops at once: on ECS the load balancer has
 // sent it no new client since its deregistration and ended its flows before
-// the stop's signal, and a host whose session it held reconnects to the same
-// address, which reaches a live lobby.
+// the stop's signal, so the goodbye it owes each session it held can no longer
+// reach that session from here. It leaves them (lobby_goodbyes) for the lobby
+// each session's next packet reaches, which sends it in this one's place, and
+// the host reconnects to the same address at once and lists again there.
 
 #include "core/loggable.h"
 #include "nw_udp_listener.h"
@@ -114,8 +116,9 @@ int run(const program::Boot &boot) {
 	// the NW UDP listener's stop() and the manager's shutdown clean up their
 	// lobby rows). The instance drains first, so no gate counts it as taking
 	// clients from its next read of the instances; then the NW UDP receive
-	// thread (it returns its lease as it exits; the lobby's stop deletes its
-	// instance), then the connections. No wait: which lobby a client reaches
+	// thread (it returns its lease as it exits; the lobby's stop leaves its
+	// sessions' goodbyes and deletes its instance), then the connections. No
+	// wait: which lobby a client reaches
 	// is the load balancer's, which stopped sending this task new clients at
 	// its deregistration and ended its flows before the signal (ECS stops a
 	// task behind a load balancer only once its target has drained).

@@ -87,8 +87,10 @@ this directory's.
   its cause. Each run is a row of `hosted_server_starts` (its generation): made when its
   slot is assigned (the machine and slot), its image, trees and log stream
   (`<server id>/g<generation>`) written when it renders, `running_at` once its agent
-  reports it running, and ended with its cause (`crash`, `timeout`, `fleet`, `stop`,
-  `update`, `limits`, `no_data`, `link_lost`, `data_unavailable`) and how its container
+  reports it running, and ended with its cause (`crash`, `timeout`, `fleet`, `owner_stop`
+  and `admin_stop` (who asked its stop), `stop` (the service's own stop, and every stop
+  before `0021_stop_causes.sql`), `update`, `limits`, `no_data`, `link_lost`,
+  `data_unavailable`) and how its container
   ended (its exit code, OOM flag and the server's exit line, or the agent's reason it never
   started). The stats' restarts are
   its crash and timeout ends. A start request (`hosted::request_server`) checks the entitlement, the
@@ -117,7 +119,10 @@ this directory's.
   moves onto a free dedicated machine. Each event names why: `its owner's support tier
   allows 1 hosted server on shared machines`, `moved to a shared machine: its owner has 1
   dedicated machine now`, `its owner has 1 dedicated machine now and no shared server
-  free`, `its owner has 0 dedicated machines now and the fleet has no shared room`. The brake on the
+  free`, `its owner has 0 dedicated machines now and the fleet has no shared room`; a
+  stopped server's start keeps the limit it was past (`limit_kind` `shared_servers`,
+  `no_shared_server` or `no_shared_room`, and `limit_count`, its owner's shared servers
+  or dedicated machines then), which its owner's page says in the owner's words. The brake on the
   brake: a pass that would stop or move the servers of more owners than max(2, half the
   owners with live servers) reads as the billing cache gone wrong, so it acts on none,
   logs `[hosted] ERROR the owners' limits held: ...` and holds (the heartbeat's
@@ -147,8 +152,10 @@ this directory's.
   timers.
 - **A stop** is the supervisor's own act: the row goes to `stopping` (asked by the owner
   or an admin, or by the supervisor for an account deleted or no longer active, or for the
-  owners' limits), the supervisor pushes `ServerStopHosting` to the listing (MsgCode 7,
-  scoped to the service account), and stops wanting the container once the listing has
+  owners' limits, its open start taking who asked as the cause its end keeps:
+  `owner_stop`, `admin_stop`, `stop`, `limits`), the supervisor pushes `ServerStopHosting`
+  to the listing (MsgCode 7, scoped to the service account), and stops wanting the
+  container once the listing has
   left the browser, or 60 s after the push. Its container exiting while `stopping`, with
   any code, finishes the stop. A stop is never read from an exit code
   (`apps/serve/README.md`, "Exit codes").
@@ -206,8 +213,9 @@ this directory's.
   the listing and the admin link. Three checks in a row with no answer on the link fail
   the server. A listing no check has found for 8 min places the server again, no restart
   counted: every lobby of a deployment shares one address, so a lobby's replacement lists
-  it again within about 4.5 min (the service README's "Lobby instances"), and the 8 min
-  are the safety net. While its machine is lost, or no lobby is live, the clock waits.
+  it again within its next update and reconnect, under a minute (the old lobby's goodbye,
+  the service README's "Lobby instances"), or about 4.5 min after a lobby that died
+  without its stop, and the 8 min are the safety net. While its machine is lost, or no lobby is live, the clock waits.
   Nothing reaps an idle server or ends one for its age.
 - **Reconciliation** at the supervisor's start: a machine row still `launching` whose job
   is gone fails; a `fleet.sweep` job runs (every cloud machine the driver lists that no
@@ -535,7 +543,7 @@ writes need the CSRF header.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) and `stopped_because` (an ended server's last run: its cause, exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
+| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end, and for a limits stop before `0021_stop_causes.sql`), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
 | `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason, why it lapsed and times) |

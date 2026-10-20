@@ -446,7 +446,7 @@ int test_naming_and_starts() {
 	TEST_EXPECT(start(ana, true, smoke).outcome == hosted::RequestOutcome::AddressUnavailable);
 	TEST_EXPECT(start(ana, true, std::nullopt).outcome == hosted::RequestOutcome::Created);
 	// Ended, it is free again; a lapse lets a server go of it.
-	TEST_EXPECT(hosted::request_stop(db, made.id, "test") &&
+	TEST_EXPECT(hosted::request_stop(db, made.id, "test", hosted::StartCause::OwnerStop) &&
 			hosted::transition(db, made.id, hosted::State::Stopping, hosted::State::Stopped, "test"));
 	TEST_EXPECT(!hosted::server_of_address(db, smoke));
 	const auto again = start(ana, true, smoke);

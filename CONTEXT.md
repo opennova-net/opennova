@@ -192,8 +192,17 @@ The program that runs one **lobby instance**, NovaWorld UDP on port 64206, its s
 its own memory; as many run as the deployment wants, all behind one lobby address, which
 each announces (`ONNET_LOBBY_ENDPOINT`: on ECS the load balancer's at the gate's address,
 which spreads the clients across them). Only its own restart drops its sessions, and its
-hosts reconnect to the same address and list again.
+hosts reconnect to the same address and list again: at once on the **lobby goodbye** its
+clean stop left, else past their 240 s of receive silence.
 _Avoid_: edge, lobby server, frontend
+
+**Lobby goodbye**:
+The ServerGoodBye a **lobby instance**'s clean stop owes each session it held, which the
+load balancer's ended flows keep it from sending, so it leaves a row per session in
+`lobby_goodbyes` (the session's address, the SK its packets carry, the client's CK); the
+lobby that session's next packet reaches sends it in its place, and the client reconnects
+there at once.
+_Avoid_: handoff (no session moves), migration
 
 **Lobby instance**:
 One lobby's NovaWorld UDP lobby (`lobby_instances`: its own id, the endpoint every

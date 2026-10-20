@@ -24,8 +24,9 @@
 //      stalled and exits it alone (70), while the others run on, and a push
 //      still reaches the host;
 //   5. the lobby is restarted: it alone drops its own sessions and listings
-//      (the host's session row and its listing gone), and its new run, an
-//      instance of its own at the same address, takes clients again.
+//      (the host's session row and its listing gone), its stop leaving the
+//      goodbye it owed each of the two sessions, and its new run, an instance
+//      of its own at the same address, takes clients again.
 //
 // Built only with BUILD_NOVAWORLD_HTTP; POSIX only. One loopback e2e row at a time
 // (service_tests.cmake opennova_loopback_e2e).
@@ -487,6 +488,9 @@ int run(const Binaries &bin) {
 	host.abandon();
 	sitter.abandon();
 	E2E_EXPECT(stop_program(lobby, SIGTERM));
+	// Its stop left the goodbye it owed each session it held, for the lobby their next packets
+	// reach (lobby_goodbyes).
+	E2E_EXPECT(opennova::lobbydb::list_goodbyes(db, 240).size() == 2);
 	if (!start_program(lobby))
 		return fail("the lobby boots again");
 	E2E_EXPECT(!session_of(host) && !session_of(sitter));

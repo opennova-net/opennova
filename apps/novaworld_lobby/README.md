@@ -6,7 +6,9 @@ the one lobby address every lobby announces (`ONNET_LOBBY_ENDPOINT`: on ECS the 
 balancer's, the gate's Elastic IP and UDP 64206, which spreads the clients across the lobby
 tasks), holds its sessions in its own memory, writes their rows and takes the lobby
 commands the other programs address to them. Its stop drains its instance and stops at once
-(the balancer drained its task first). `GET /livez` on `ONNET_HEALTH_PORT` (8081).
+(the balancer drained its task first), leaving the goodbye it owes each session it held
+(`lobby_goodbyes`) for the lobby that session's next packet reaches, which sends it, so the
+host reconnects there at once. `GET /livez` on `ONNET_HEALTH_PORT` (8081).
 
 The service as a whole, its six programs, their settings, the database, Redis, the health
 checks and the tests: [`../novaworld_common/README.md`](../novaworld_common/README.md). The

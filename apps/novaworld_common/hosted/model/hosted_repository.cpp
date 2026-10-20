@@ -112,6 +112,17 @@ void insert_event(db::Database &db, int64_t id, const std::string &from, const s
 			{ BindValue(id), BindValue(from), BindValue(to), BindValue(detail) });
 }
 
+// A stop's cause (and a limits stop's limit) on the server's open start, which
+// its end keeps.
+void set_stop_cause(
+		db::Database &db, int64_t id, StartCause cause, const std::optional<StopLimit> &limit) {
+	db.exec("UPDATE hosted_server_starts SET cause = $2, limit_kind = $3, limit_count = $4 "
+			"WHERE server_id = $1 AND ended_at IS NULL AND cause IS NULL;",
+			{ BindValue(id), BindValue(std::string(start_cause_text(cause))),
+					limit ? BindValue(std::string(limit_kind_text(limit->kind))) : BindValue(std::monostate{}),
+					limit ? BindValue(static_cast<int64_t>(limit->count)) : BindValue(std::monostate{}) });
+}
+
 } // namespace
 
 const char *state_name(State state) {
@@ -303,6 +314,8 @@ const char *start_cause_text(StartCause cause) {
 		case StartCause::Crash: return "crash";
 		case StartCause::Fleet: return "fleet";
 		case StartCause::Stop: return "stop";
+		case StartCause::OwnerStop: return "owner_stop";
+		case StartCause::AdminStop: return "admin_stop";
 		case StartCause::Update: return "update";
 		case StartCause::Limits: return "limits";
 		case StartCause::NoData: return "no_data";
@@ -315,9 +328,27 @@ const char *start_cause_text(StartCause cause) {
 
 std::optional<StartCause> parse_start_cause(std::string_view text) {
 	for (const StartCause cause : { StartCause::Crash, StartCause::Fleet, StartCause::Stop,
-				 StartCause::Update, StartCause::Limits, StartCause::NoData, StartCause::Timeout,
-				 StartCause::LinkLost, StartCause::DataUnavailable }) {
+				 StartCause::OwnerStop, StartCause::AdminStop, StartCause::Update, StartCause::Limits,
+				 StartCause::NoData, StartCause::Timeout, StartCause::LinkLost,
+				 StartCause::DataUnavailable }) {
 		if (text == start_cause_text(cause)) return cause;
+	}
+	return std::nullopt;
+}
+
+const char *limit_kind_text(LimitKind kind) {
+	switch (kind) {
+		case LimitKind::SharedServers: return "shared_servers";
+		case LimitKind::NoSharedServer: return "no_shared_server";
+		case LimitKind::NoSharedRoom: return "no_shared_room";
+	}
+	return "shared_servers";
+}
+
+std::optional<LimitKind> parse_limit_kind(std::string_view text) {
+	for (const LimitKind kind :
+			{ LimitKind::SharedServers, LimitKind::NoSharedServer, LimitKind::NoSharedRoom }) {
+		if (text == limit_kind_text(kind)) return kind;
 	}
 	return std::nullopt;
 }
@@ -346,18 +377,12 @@ bool end_start(db::Database &db, int64_t server_id, int64_t generation, StartCau
 	return db.changes() > 0;
 }
 
-void set_start_cause(db::Database &db, int64_t server_id, StartCause cause) {
-	db.exec("UPDATE hosted_server_starts SET cause = $2 WHERE server_id = $1 AND ended_at IS NULL AND "
-			"cause IS NULL;",
-			{ BindValue(server_id), BindValue(std::string(start_cause_text(cause))) });
-}
-
 std::vector<ServerStart> list_starts(db::Database &db, int64_t server_id, size_t limit) {
 	std::vector<ServerStart> out;
 	for (const db::Row &r : db.query("SELECT server_id, generation, machine_id, slot, serve_image, base_tree_id, "
 									 "expansion_tree_id, log_stream, placed_at, running_at, ended_at, exit_code, "
-									 "oom, reason, cause FROM hosted_server_starts WHERE server_id = $1 "
-									 "ORDER BY generation DESC LIMIT $2;",
+									 "oom, reason, cause, limit_kind, limit_count FROM hosted_server_starts "
+									 "WHERE server_id = $1 ORDER BY generation DESC LIMIT $2;",
 				 { BindValue(server_id), BindValue(static_cast<int64_t>(limit)) })) {
 		ServerStart s;
 		s.server_id = r.as_int(0).value_or(0);
@@ -375,6 +400,9 @@ std::vector<ServerStart> list_starts(db::Database &db, int64_t server_id, size_t
 		s.oom = r.as_int(12).value_or(0) != 0;
 		s.reason = r.as_text(13).value_or("");
 		if (const auto cause = r.as_text(14)) s.cause = parse_start_cause(*cause);
+		const auto kind = r.as_text(15);
+		const auto limit_kind = kind ? parse_limit_kind(*kind) : std::nullopt;
+		if (limit_kind) s.limit = StopLimit{ *limit_kind, static_cast<int>(r.as_int(16).value_or(0)) };
 		out.push_back(std::move(s));
 	}
 	return out;
@@ -460,7 +488,8 @@ bool reset_restarts(db::Database &db, int64_t id) {
 	return db.changes() > 0;
 }
 
-bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
+bool request_stop(db::Database &db, int64_t id, const std::string &detail, StartCause cause,
+		const std::optional<StopLimit> &limit) {
 	db::Transaction tx(db);
 	const auto rows = db.query("SELECT state FROM hosted_servers WHERE id = $1;", { BindValue(id) });
 	if (rows.empty()) return false;
@@ -471,6 +500,7 @@ bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
 			{ BindValue(id), BindValue(std::string(state_name(*state))) });
 	if (db.changes() == 0) return false;
 	insert_event(db, id, state_name(*state), state_name(State::Stopping), detail);
+	set_stop_cause(db, id, cause, limit);
 	tx.commit();
 	return true;
 }
@@ -487,6 +517,7 @@ size_t request_stop_all(db::Database &db, const std::string &detail) {
 				{ BindValue(id), BindValue(from) });
 		if (db.changes() == 0) continue;
 		insert_event(db, id, from, state_name(State::Stopping), detail);
+		set_stop_cause(db, id, StartCause::AdminStop, std::nullopt);
 		++stopped;
 	}
 	tx.commit();
