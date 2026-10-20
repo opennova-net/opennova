@@ -1269,6 +1269,9 @@ bool run_inactive_peer_is_reaped() {
 	}
 	auto in_order = craft_session(scrk, server_sk, admitted_seq + 1, {});
 	inmatch::handle_server_datagram(ctx, peer, in_order.data(), in_order.size(), 6);
+	// The receive batch's connection-list walk replays the queued successor (NEW-L1-9)
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x626910..0x6269E8].
+	(void)inmatch::replay_ready_session_packets(ctx, 6);
 	if (!expect(ctx.np_protocol.connection_list.front().receive_inactive_ms == 0 &&
 	                    ctx.np_protocol.connection_list.front().seq.queued_inbound.empty(),
 	            "an in-order zero-message 0x43 resets the inactivity clock (and drains the gap)"))
@@ -1624,28 +1627,30 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		ctx.transport_mode = inmatch::NetworkType::NovaWorld;
 		ctx.novaworld_app_id = 3225;
 		const std::vector<uint8_t> join = retail_join_request(config.expansion);
-		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+		// Past the app-id leg, the cookie's: this JOIN carries no CD, refused 23 (D-NET-702)
+		// [orig: Server_ValidatePlayerJoinRequest @0x5125F2..0x512605, @0x512969].
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join) == 23,
 				"a NovaWorld joiner naming the session's AppId passes the app-id leg")) return false;
 		joiner.join_environment.app_id = 0;
-		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 9,
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join) == 9,
 				"a NovaWorld joiner with no APPID is refused 9")) return false;
 		joiner.join_environment.app_id = 3226;
-		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 9,
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join) == 9,
 				"a NovaWorld joiner naming another AppId is refused 9")) return false;
 		joiner.join_environment.bn = 0;
-		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 2,
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join) == 2,
 				"the build values' refusal still comes first")) return false;
 		joiner.join_environment.bn = 1;
 		inmatch::GameConfig expansion_config;
 		expansion_config.expansion = "jox01";
-		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(expansion_config, &ctx, joiner, roster, join, true) == 9,
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(expansion_config, &ctx, joiner, roster, join) == 9,
 				"the app-id leg runs ahead of the expansion's 47")) return false;
 		ctx.is_in_session = 0;
-		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join) == 0,
 				"a NovaWorld host out of session runs no app-id leg")) return false;
 		ctx.is_in_session = 1;
 		ctx.transport_mode = inmatch::NetworkType::Lan;
-		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join) == 0,
 				"a LAN session runs no app-id leg")) return false;
 	}
 
