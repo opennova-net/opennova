@@ -12,7 +12,7 @@ namespace opennova {
 
 // Thin SQL wrapper around the lobby's tables (backend/migrations/0006_lobby_commands.sql,
 // 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql,
-// 0020_lobby_live_view.sql, 0021_lobby_goodbyes.sql): `lobby_instances`, the
+// 0020_lobby_live_view.sql, 0022_lobby_goodbyes.sql): `lobby_instances`, the
 // lobbies that run (one per lobby process, each its own id, all announcing the deployment's one
 // lobby address), `lobby_sessions`, the NovaWorld sessions each lobby holds, which
 // that lobby alone writes and everything else reads, `lobby_goodbyes`, the goodbyes a lobby's

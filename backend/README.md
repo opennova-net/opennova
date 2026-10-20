@@ -34,7 +34,7 @@ the only way in and out of the lobby's memory (apps/novaworld_common/README.md
 "Connection lifecycle"). `0020_lobby_live_view.sql` adds the account each lobby
 session signed in as and the server it plays on, the task each lobby instance
 runs as, and keys a listing's joiners (`host_players`) by their account, so its
-roster is who plays on it now ("Listed servers and owners"). `0021_lobby_goodbyes.sql`
+roster is who plays on it now ("Listed servers and owners"). `0022_lobby_goodbyes.sql`
 adds the goodbyes a lobby's clean stop leaves for the sessions it held
 (`lobby_goodbyes`), which the lobby their next packets reach sends in its place
 ("Lobby instances").

@@ -1,6 +1,6 @@
 // The lobby's tables below the listener (engine/net/novaworld/lobby_repository.h, migrations
 // 0006_lobby_commands.sql, 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql,
-// 0020_lobby_live_view.sql and 0021_lobby_goodbyes.sql), on a migrated database per case: the
+// 0020_lobby_live_view.sql and 0022_lobby_goodbyes.sql), on a migrated database per case: the
 // goodbyes a lobby's clean stop leaves (listed within their window, replaced by address, the
 // older deleted by the next stop's write), the lobby instances (each
 // registration a row of its own naming its task, two

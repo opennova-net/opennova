@@ -968,7 +968,7 @@ int test_lobby_instances_tables() {
 	return 0;
 }
 
-// The goodbyes a lobby's clean stop leaves (0021_lobby_goodbyes.sql): one per address, stamped
+// The goodbyes a lobby's clean stop leaves (0022_lobby_goodbyes.sql): one per address, stamped
 // as it is left; an SK of 0 (no session's), a key past 32 bits and a port past 16 refused.
 int test_lobby_goodbyes_table() {
 	TestDatabase scratch({ /*migrate=*/true });

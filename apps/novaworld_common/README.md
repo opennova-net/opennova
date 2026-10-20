@@ -466,7 +466,7 @@ port) and keeps each flow on one task.
   ServerGoodBye from the lobby address, or 240 s of silence), so with one address a host
   whose lobby went away is listed again on a live one with no restart; retail self-hosts
   recover the same way.
-- **The goodbyes** (`0021_lobby_goodbyes.sql`, `lobbydb::leave_goodbyes` / `list_goodbyes`;
+- **The goodbyes** (`0022_lobby_goodbyes.sql`, `lobbydb::leave_goodbyes` / `list_goodbyes`;
   service policy): a NAPI server that stops sends each connection its ServerGoodBye burst
   (`{1, 9, 0, 0, "", 0, "NP.C:SH:STOP"}`), but behind the balancer a stopping lobby's flows
   ended before its stop's signal, so its burst would reach no one. Its clean stop leaves a
