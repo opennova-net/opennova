@@ -4,11 +4,8 @@
 #include <runtime/inmatch/client_replica_present.h> // the emplaced/overlay/held-weapon writers
 #include <runtime/inmatch/client_replica_emplaced.h> // the joiner's carrier gun words
 #include <runtime/inmatch/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
-#include <runtime/inmatch/replica_query.h> // client_entity_for_handle
 #include <runtime/inmatch/napi_np_server_ctx.h> // the listen host's player slots (EquippedSlot)
-#include <runtime/world/mounted_pose.h> // the ONE mounted matrix path (S4b)
 #include <runtime/world/pose_inputs.h> // seat/mount pose predicates + aim inputs (ADR 0028)
-#include <runtime/mission/seat_spec_extract.h> // item_seat_spec_for_type
 #include <runtime/world/mount_controls.h> // heat-glow + emplaced turret CTRL sources (ADR 0028)
 #include <runtime/world/present_rows.h>
 #include <runtime/world/vehicle_motor.h> // vehicle_ctrl_registers
@@ -25,9 +22,7 @@
 #include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
-#include <formats/threedi/threedi_ctrl_catalog.h>
 #include <base/io/fixed.h>
-#include <base/io/strutil.h> // iequals
 
 #include <cmath>
 #include <cstring>
@@ -172,10 +167,6 @@ void write_pool_held_weapon(float *r, const PresentRowsContext &context,
 			((e.flags | e.engine_flags) & kEntityFlagDead) != 0, inputs, ae.inf.wpn_state);
 }
 
-// The EWEAP articulation registers a mounted gun's .3di CTRL table names.
-inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
-inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
-
 // The row's door count plus, for a row that publishes any, one
 // (row index, count, phases...) entry on the side table.
 inline void write_present_doors(float *row, int row_index, const World &world,
@@ -242,85 +233,6 @@ inline void write_present_vehicle_motion_controls(float *record, const World &wo
 	record[PF_VEHICLE_WHEELS] = static_cast<float>(controls.wheels);
 	for (size_t i = 0; i < controls.tires.size(); ++i)
 		record[PF_VEHICLE_TIRE00 + i] = static_cast<float>(controls.tires[i]);
-}
-
-// S4b (ADR 0028): the joiner's addeweap reconstruction rides the SAME engine
-// resolver the host authority runs (world::resolve_model_mounted_pose) —
-// one mounted matrix path. The model resolves through the shared asset store by the
-// installed spec's graphic key, exactly like the host-side resolver.
-bool resolve_client_eweap_attachment_pose(
-		const replication::ClientEntityState &child,
-		const replication::ClientState &state,
-		const std::vector<mission::ItemSeatSpec> &specs,
-		const std::unordered_map<int32_t, std::string> &graphics_by_type,
-		const assets::AssetStore &models,
-		uint32_t time_ms, MountedPose &out) {
-	// The carrier is the child's followed one (its 0x0D target), never the
-	// occupant back-reference the parent field carries.
-	const uint16_t carrier_handle = replication::persistent_carrier_handle(child);
-	if (carrier_handle == EntityHandle::kInvalid) return false;
-	const replication::ClientEntityState *parent =
-			client_entity_for_handle(state, carrier_handle);
-	if (parent == nullptr) return false;
-	const mission::ItemSeatSpec *parent_spec =
-			mission::item_seat_spec_for_type(specs, parent->type_id);
-	if (parent_spec == nullptr) return false;
-
-	// The 0x0D relation names only the parent, not the authored attachment slot.
-	// Reconstruct only when the child type selects exactly one authored row and
-	// that row resolves a userpoint; duplicate same-type rows are intentionally
-	// left on the rigid fallback.
-	const mission::ItemEmplacementAttachmentSpec *attachment = nullptr;
-	for (const mission::ItemEmplacementAttachmentSpec &candidate :
-			parent_spec->emplacement_attachments) {
-		if (candidate.child_type_id != static_cast<int32_t>(child.type_id))
-			continue;
-		if (attachment != nullptr) return false;
-		attachment = &candidate;
-	}
-	if (attachment == nullptr || !attachment->anchor_found ||
-			attachment->anchor.bone_index == 0)
-		return false;
-	const auto graphic_found = graphics_by_type.find(parent->type_id);
-	if (graphic_found == graphics_by_type.end() || !models.has_source())
-		return false;
-	const Threedi3di3 *model_ptr = models.model(graphic_found->second).get();
-	if (model_ptr == nullptr) return false;
-
-	// Remote generic PLAYPARTANIM phases are not in ClientEntityState. Do not
-	// synthesize them from timing or repurpose a wire field. EWEAP is the one safe
-	// articulated family: the joiner tick retains both semantic controls after
-	// the shared slew, gunner tether and authored window clamp.
-	EmplacedWeaponControls emplaced;
-	if (!emplaced_weapon_controls_for_client(*parent, emplaced))
-		return false;
-	const Threedi3di3 &model = *model_ptr;
-	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
-		return false;
-	bool has_eweap_control = false;
-	for (uint32_t slot = 0; slot < model.ctrl.count; ++slot) {
-		const char *name = model.ctrl.registers[slot].name;
-		if (strutil::iequals(name, kEmplacedGunYawRegister) ||
-				strutil::iequals(name, kEmplacedGunPitchRegister)) {
-			has_eweap_control = true;
-			break;
-		}
-	}
-	if (!has_eweap_control) return false;
-	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
-	ctrl_values[THREEDI_CTRL_EWEAP_GUNYAW] = static_cast<int32_t>(emplaced.gun_yaw);
-	ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] = static_cast<int32_t>(emplaced.gun_pitch);
-	ctrl_values[THREEDI_CTRL_WEAP_SPIN] = emplaced.spin;
-
-	Entity carrier;
-	carrier.item_id = static_cast<int32_t>(parent->type_id);
-	carrier.position.set_q16({parent->x, parent->y, parent->z});
-	carrier.veh.yaw_seeded = true;
-	carrier.veh.yaw_bam = parent->heading_bam;
-	carrier.veh.air_pitch_bam = parent->pitch_bam;
-	carrier.veh.air_roll_bam = parent->roll_bam;
-	return world::resolve_model_mounted_pose(
-			model, carrier, attachment->anchor, ctrl_values, time_ms, out);
 }
 
 // Entity_RenderVehicleModel's local UseGun predicate is a render verdict,
@@ -613,14 +525,9 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				ent != nullptr && ent->emplacement_parent.valid() &&
 				ent->emplacement_pose_metadata_resolved &&
 				ent->emplacement_parent.packed == replication::persistent_carrier_handle(es);
-		MountedPose client_attachment_pose;
-		const uint32_t attachment_time_ms = kernel.panm_time_override_ms >= 0
-				? static_cast<uint32_t>(kernel.panm_time_override_ms)
-				: kernel.world.logic_tick * 16u;
-		const bool reconstructed_client_attachment_pose = joiner &&
-				resolve_client_eweap_attachment_pose(
-						es, cs, kernel.seat_specs, kernel.mounted_graphics,
-						kernel.assets(), attachment_time_ms, client_attachment_pose);
+		// A joiner's addeweap child takes its pose from its row, which carries
+		// the joiner's own world compose (the ewep update at the subType's
+		// anchor, read back by JoinerRole::mirror_mission_entities, D-NET-690).
 		if (authoritative_attachment_pose) {
 			// NoNetworkCallback addeweap children have only their 0x0D spawn pose in
 			// ClientState. The host has already advanced their authoritative userpoint
@@ -632,18 +539,11 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_PITCH_DEG] = static_cast<float>(pool_present_pitch_deg(*ent));
 			r[PF_YAW_DEG] = static_cast<float>(pool_present_yaw_deg(*ent, nullptr, EntityClass::Unknown));
 			r[PF_ROLL_DEG] = static_cast<float>(pool_present_roll_deg(*ent));
-		} else if (reconstructed_client_attachment_pose) {
-			r[PF_POS_X] = client_attachment_pose.position.x;
-			r[PF_POS_Y] = client_attachment_pose.position.z;
-			r[PF_POS_Z] = -client_attachment_pose.position.y;
-			r[PF_PITCH_DEG] = static_cast<float>(client_attachment_pose.pitch * kDegreesPerBam);
-			r[PF_YAW_DEG] = static_cast<float>(mission_yaw_deg_from_bam_heading(client_attachment_pose.heading));
-			r[PF_ROLL_DEG] = static_cast<float>(client_attachment_pose.roll * kDegreesPerBam);
 		}
 		// No unattached else: the projection already wrote the decoded wire
 		// pose — the chased/snapped position, the vehicle BAM32 euler X/Y, and
 		// the full-16-bit-precision heading (net-re §5.38e, D-NET-196). The
-		// two attachment branches above and the host's authoritative registry
+		// attachment branch above and the host's authoritative registry
 		// pitch/roll (the `ent` block) override it where a better source
 		// exists; re-deriving the wire pose here would re-clobber the host's
 		// live vehicle attitude with the stale spawn/dead-pose eulers.

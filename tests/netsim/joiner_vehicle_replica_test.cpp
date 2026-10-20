@@ -323,6 +323,137 @@ bool run_unresolved_attachment_follows_its_target_carrier() {
 	return ok;
 }
 
+// D-NET-690: an addeweap child the joiner's world resolves runs the ewep class
+// update there, every frame, with no role gate: the update composes it from the
+// carrier at the anchor its subType names, and with no anchor copies the
+// carrier's root pose. Its 0x0D pose is only the spawn seed: the world row takes
+// it once and the decoded row reads the world's pose back, never a rigid
+// child-in-carrier offset.
+// [orig: NapiNPClientMsg_0x00D +0x1C4 @0x43331A; Entity_UpdatePool1Slot
+//  @0x4B8E53; Entity_UpdateTransformAndTurret @0x440CA0, the root copy
+//  @0x441153..0x4411BC]
+bool run_resolved_attachment_runs_the_ewep_update() {
+	Harness h;
+	bool ok = true;
+	w::World &world = h.kernel->world;
+	static constexpr uint16_t kGunType = 1871;
+	h.role.runtime->view().set_item_class_resolver(
+			[](uint16_t type) -> std::optional<EntityClass> {
+				if (type == kTankType) return EntityClass::Vehicle;
+				if (type == kGunType) return EntityClass::NoNetworkCallback;
+				if (type == w::kPlayerInfantryTypeId) return EntityClass::Player;
+				return std::nullopt;
+			});
+	w::Entity gun_seed;
+	gun_seed.kind = w::EntityKind::Item;
+	gun_seed.item_id = kGunType;
+	gun_seed.spawn_origin = (1u << 24) | 4u;
+	gun_seed.position = h.hull().position;
+	gun_seed.emplaced_update = true;
+	gun_seed.emplacement_parent = h.tank;
+	gun_seed.emplacement_parent_spawn_id = h.hull().registry_spawn_id;
+	gun_seed.emplacement_pose_metadata_resolved = true;
+	gun_seed.emplacement_bone = 0; // no anchor: the root copy
+	const w::EntityHandle gun = world.registry.spawn(1, gun_seed);
+	ok &= expect(gun.valid(), "ewep: the attached gun spawned");
+	replication::ClientEntityState &row = h.role.runtime->state().upsert(gun.packed);
+	row.type_id = kGunType;
+	row.cls = EntityClass::NoNetworkCallback;
+	// The 0x0D seed sits 2.0 off the carrier with a heading of its own.
+	row.x = h.hull().position.x.q16 + 2 * 65536;
+	row.y = h.hull().position.y.q16;
+	row.z = h.hull().position.z.q16;
+	row.heading_bam = w::bam_heading_from_mission_yaw_deg(30);
+	row.target_handle = h.tank.packed;
+	row.spawn_revision = 1;
+	h.role.run_tick(h.input);
+	h.role.run_tick(h.input);
+	const w::Entity *live = world.registry.get(gun);
+	const w::Entity &carrier = h.hull();
+	const replication::ClientEntityState *after = h.role.runtime->state().find(gun.packed);
+	ok &= expect(after != nullptr &&
+					after->world_class_update ==
+							replication::ClientEntityState::WorldClassUpdate::Ewep,
+			"ewep: the row is the world's class update's");
+	ok &= expect(live != nullptr && live->position.x.q16 == carrier.position.x.q16 &&
+					live->position.y.q16 == carrier.position.y.q16 &&
+					live->position.z.q16 == carrier.position.z.q16,
+			"ewep: the world row took the carrier's root pose, not the 0x0D offset");
+	ok &= expect(after != nullptr && live != nullptr && after->x == live->position.x.q16 &&
+					after->y == live->position.y.q16 && after->z == live->position.z.q16 &&
+					after->heading_bam == live->veh.yaw_bam,
+			"ewep: the decoded row reads the world's composed pose back");
+	return ok;
+}
+
+// D-NET-690: a genx row on a joiner runs its own update, the ground ride and
+// the fall a dead ground installs; no wire record writes it after the join and
+// its update stores no Flags, so the dead carrier neither hides it nor holds it
+// at its last ridden pose.
+// [orig: the genx row @0x82AC10 -> Entity_UpdateParentTransform @0x4A88B0, the
+//  re-fall @0x4A8CBF..0x4A8CDC; Entity_UpdatePositionAndTransform's store
+//  @0x4AE01A..0x4AE01F]
+bool run_genx_row_rides_and_falls_on_its_own() {
+	Harness h;
+	bool ok = true;
+	w::World &world = h.kernel->world;
+	static constexpr uint16_t kCrateType = 1872;
+	h.role.runtime->view().set_item_class_resolver(
+			[](uint16_t type) -> std::optional<EntityClass> {
+				if (type == kTankType) return EntityClass::Vehicle;
+				if (type == kCrateType) return EntityClass::NoNetworkCallback;
+				if (type == w::kPlayerInfantryTypeId) return EntityClass::Player;
+				return std::nullopt;
+			});
+	w::Entity crate_seed;
+	crate_seed.kind = w::EntityKind::Item;
+	crate_seed.item_id = kCrateType;
+	crate_seed.spawn_origin = (1u << 24) | 5u;
+	crate_seed.position = h.hull().position;
+	crate_seed.parent_follow_update = true;
+	crate_seed.drop_motion = w::DropMotion::Ride;
+	crate_seed.ground_target = h.tank;
+	const w::EntityHandle crate = world.registry.spawn(1, crate_seed);
+	ok &= expect(crate.valid(), "genx: the crate spawned");
+	replication::ClientEntityState &row = h.role.runtime->state().upsert(crate.packed);
+	row.type_id = kCrateType;
+	row.cls = EntityClass::NoNetworkCallback;
+	row.x = h.hull().position.x.q16;
+	row.y = h.hull().position.y.q16;
+	row.z = h.hull().position.z.q16 + 3 * 65536;
+	row.target_handle = h.tank.packed;
+	row.spawn_revision = 1;
+	h.role.run_tick(h.input);
+	// The carrier dies on both sides.
+	replication::ClientEntityState *carrier_row = h.role.runtime->state().find(h.tank.packed);
+	if (carrier_row != nullptr) {
+		carrier_row->health_known = true;
+		carrier_row->health_word = 0;
+	}
+	h.hull().alive = false;
+	h.hull().flags |= w::kEntityFlagDead;
+	h.hull().health = 0;
+	h.role.run_tick(h.input);
+	const w::Entity *live = world.registry.get(crate);
+	const replication::ClientEntityState *after = h.role.runtime->state().find(crate.packed);
+	ok &= expect(live != nullptr && live->drop_motion == w::DropMotion::Fall,
+			"genx: the dead ground installed the fall");
+	ok &= expect(after != nullptr && (after->state_flags & w::kEntityFlagCarried) == 0,
+			"genx: the dead carrier does not hide the row (the hide is the ewep update's)");
+	// The fall moves the world row; the decoded row follows it and the mirror
+	// no longer writes the row's last pose back.
+	if (w::Entity *moving = world.registry.get(crate)) moving->position.z.q16 -= 65536;
+	live = world.registry.get(crate);
+	const int32_t fallen_z = live != nullptr ? live->position.z.q16 : 0;
+	h.role.run_tick(h.input);
+	live = world.registry.get(crate);
+	after = h.role.runtime->state().find(crate.packed);
+	ok &= expect(live != nullptr && live->position.z.q16 == fallen_z && after != nullptr &&
+					after->z == fallen_z,
+			"genx: the world row keeps its fall and the decoded row reads it");
+	return ok;
+}
+
 } // namespace
 
 // A streamed pool-2 building takes its def's "armory*" points on the joiner,
@@ -435,6 +566,8 @@ int main() {
 	ok &= run_freeze_predicate_and_pivot_clear();
 	ok &= run_remote_driver_is_the_claimant();
 	ok &= run_unresolved_attachment_follows_its_target_carrier();
+	ok &= run_resolved_attachment_runs_the_ewep_update();
+	ok &= run_genx_row_rides_and_falls_on_its_own();
 	ok &= run_streamed_building_takes_its_armory_points();
 	ok &= run_topology_resweep_keeps_initialized_words();
 	if (!ok || failures != 0) {

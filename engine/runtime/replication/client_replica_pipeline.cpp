@@ -424,9 +424,10 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 	//  @0x440ca0 — groundEntity read @0x440cbf, bone re-resolve @0x440cfd,
 	//  carrier-matrix bone compose @0x44109d with position+Euler adoption
 	//  @0x4410dd, no-bone verbatim carrier-pose adoption @0x4410ea..0x4411bc]
-	// Without model bone tables at this layer, the recompose below carries the
-	// rigid child-in-carrier pose captured from the 0x0D absolutes — the same
-	// client-subset simplification the parent-follow path already pins.
+	// A joiner's world runs that update itself for every row it holds (the row's
+	// world_class_update, D-NET-690); without model bone tables at this layer,
+	// the recompose below carries the rigid child-in-carrier pose captured from
+	// the 0x0D absolutes for a row no world holds.
 	std::vector<uint16_t> persistent_carrier(state_.entities.size(), wire_handle::kInvalid);
 	for (std::size_t i = 0; i < state_.entities.size(); ++i) {
 		const ClientEntityState &child = state_.entities[i];
@@ -510,6 +511,12 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			// vehicle to its spawn-time occupant — on non-COOP retail hosts,
 			// "a vehicle follows the player around" (one per map, whichever
 			// spawn record carried flag 0x0100).
+			// A genx row the joiner's world rides runs its own update: the ride
+			// and the fall, no stale-carrier sweep and no hide (D-NET-690).
+			// [orig: the genx row @0x82AC10 -> Entity_UpdateParentTransform
+			//  @0x4A88B0, which stores no Flags]
+			if (child.world_class_update == ClientEntityState::WorldClassUpdate::Genx)
+				continue;
 			ClientEntityState *parent = find_row(persistent_carrier[child_index]);
 			if (parent == nullptr) {
 				// The pure-client stale-carrier sweep [orig: @0x440d41..
@@ -529,6 +536,15 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 				continue;
 			}
 			child.carrier_missing_ticks = 0;
+			// An ewep row the joiner's world composes: the class update poses it
+			// from the carrier's posed model at its subType's anchor and owns the
+			// dead-carrier hide; the world's pose is read back into this row
+			// (JoinerRole::mirror_mission_entities, D-NET-690).
+			// [orig: Entity_UpdateTransformAndTurret @0x440CA0 -- the hide
+			//  @0x440CDD, Bone_BuildAttachmentMatrix @0x44109D, the adoption
+			//  @0x4410DD]
+			if (child.world_class_update == ClientEntityState::WorldClassUpdate::Ewep)
+				continue;
 			// The dead-carrier leg. Retail's client HIDES the child in place —
 			// carrier Flags & 2 -> child Flags |= 1, return, no pose follow — and
 			// the live carrier's vehicle block clears the child's low Flags bits

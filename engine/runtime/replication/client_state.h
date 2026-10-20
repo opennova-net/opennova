@@ -507,10 +507,12 @@ struct ClientEntityState {
 	// Pool-1 0x0D entity+368 relationship. The spawn positions are absolute;
 	// ClientReplicaPipeline captures this row's rigid carrier-local pose after the
 	// whole batch is present, then recomposes it from the followed carrier's live
-	// pose each tick. This is the retail path for NoNetworkCallback addeweap
-	// children; the followed carrier is target_handle (groundEntity) when set,
-	// else this parent (non-pool-0 only, D-NET-195). The parent_local_* cluster
-	// below stores the captured pose for whichever carrier is followed.
+	// pose each tick, for a NoNetworkCallback row whose class update no world runs
+	// (world_class_update None below: a row a joiner's world does not hold; with
+	// one, the world runs the ewep or genx update, D-NET-690). The followed carrier
+	// is target_handle (groundEntity) when set, else this parent (non-pool-0 only,
+	// D-NET-195). The parent_local_* cluster below stores the captured pose for
+	// whichever carrier is followed.
 	uint16_t parent_handle = 0xFFFF;
 	int32_t parent_local_x = 0;
 	int32_t parent_local_y = 0;
@@ -522,6 +524,24 @@ struct ClientEntityState {
 	int32_t parent_local_pitch_bam = 0;
 	int32_t parent_local_roll_bam = 0;
 	bool parent_pose_valid = false;
+	// The class update a joiner's world runs for this row (D-NET-690). A row
+	// no compact writes takes the def's move function as its update at its
+	// 0x0D, and the pool-1 update calls it every frame on a joiner too: the
+	// ewep update composes an addeweap child from its carrier's posed model
+	// at the anchor its subType names (and owns the dead-carrier hide), the
+	// genx update rides the ground entity and falls when it dies. Where the
+	// joiner's world holds such a row it runs that update itself, so the
+	// recompose above skips the row (an ewep row keeps the update's
+	// stale-carrier sweep) and JoinerRole::mirror_mission_entities seeds the
+	// world row from the 0x0D once per spawn, then reads the world's pose
+	// back. Not a wire field.
+	// [orig: NapiNPClientMsg_0x00D def+0x158 -> +0x1C4 @0x43331A;
+	//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (no role gate); the ewep row
+	//  @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0, the genx row
+	//  @0x82AC10 -> Entity_UpdateParentTransform @0x4A88B0]
+	enum class WorldClassUpdate : uint8_t { None, Ewep, Genx };
+	WorldClassUpdate world_class_update = WorldClassUpdate::None;
+	uint32_t world_seeded_spawn_revision = 0;
 	// The 0x0D record's separate TARGET relationship: the STRUCTURAL carrier a
 	// pool-1 mounted child rides (retail groundEntity, entity+40) — an occupied
 	// boat gun's target is the DRIVING hull while parent_handle above carries

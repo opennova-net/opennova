@@ -602,6 +602,30 @@ void JoinerRole::apply_mounted_ammo_update() {
 // spawn origin, riding their carrier's attachment row) alike; the joiner's own
 // spawns (the spawn-origin sentinel, no attachment) are skipped. Those rows
 // also mirror orientation/team because collision and seat consumers observe them.
+namespace {
+
+// The class update the joiner's world runs for a row no compact writes: an
+// addeweap child whose world row resolved its anchor on the carrier it
+// follows (the ewep update composes it), or a genx row (its ride and fall).
+// Any other row keeps the replica's follow.
+// [orig: the ewep row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0;
+//  the genx row @0x82AC10 -> Entity_UpdateParentTransform @0x4A88B0]
+replication::ClientEntityState::WorldClassUpdate world_class_update_for(
+		const replication::ClientEntityState &es, const world::Entity &local) {
+	using Update = replication::ClientEntityState::WorldClassUpdate;
+	if (es.cls != EntityClass::NoNetworkCallback) return Update::None;
+	const uint16_t carrier = replication::persistent_carrier_handle(es);
+	if (carrier == world::EntityHandle::kInvalid) return Update::None;
+	if (local.emplaced_update)
+		return local.emplacement_pose_metadata_resolved &&
+						local.emplacement_parent.packed == carrier
+				? Update::Ewep
+				: Update::None;
+	return local.parent_follow_update ? Update::Genx : Update::None;
+}
+
+} // namespace
+
 void JoinerRole::mirror_mission_entities() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
@@ -630,6 +654,52 @@ void JoinerRole::mirror_mission_entities() {
 				es.pitch_bam = local->veh.air_pitch_bam;
 				es.roll_bam = local->veh.air_roll_bam;
 			}
+			continue;
+		}
+		// A row no compact writes runs the def's move function as its update,
+		// with no role gate, and nothing on the wire writes its pose after the
+		// 0x0D: where the world runs that update (the ewep compose at the
+		// subType's anchor, the genx ride and fall), the 0x0D's pose seeds the
+		// world row once per spawn and the row reads the world's pose back
+		// from then on (D-NET-690).
+		// [orig: NapiNPClientMsg_0x00D @0x432C40 -- Position @0x432D8F..0x432DB6,
+		//  the euler words @0x432DCA..0x432DF8, def+0x158 -> +0x1C4 @0x43331A;
+		//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
+		es.world_class_update = world_class_update_for(es, *local);
+		if (es.world_class_update !=
+				replication::ClientEntityState::WorldClassUpdate::None) {
+			if (es.world_seeded_spawn_revision != es.spawn_revision) {
+				es.world_seeded_spawn_revision = es.spawn_revision;
+				local->position.set_q16({es.x, es.y, es.z});
+				local->veh.yaw_seeded = true;
+				local->veh.yaw_bam = es.heading_bam;
+				local->veh.air_pitch_bam = es.pitch_bam;
+				local->veh.air_roll_bam = es.roll_bam;
+				local->yaw = static_cast<int16_t>(std::lround(
+						world::mission_yaw_deg_from_bam_heading(es.heading_bam)));
+				local->pitch = static_cast<int16_t>(std::lround(
+						double(es.pitch_bam) * world::kDegreesPerBam));
+				local->roll = static_cast<int16_t>(std::lround(
+						double(es.roll_bam) * world::kDegreesPerBam));
+				if (es.team_known) local->team = es.team;
+				continue;
+			}
+			es.x = local->position.x.q16;
+			es.y = local->position.y.q16;
+			es.z = local->position.z.q16;
+			if (local->veh.yaw_seeded) {
+				es.heading_bam = local->veh.yaw_bam;
+				es.pitch_bam = local->veh.air_pitch_bam;
+				es.roll_bam = local->veh.air_roll_bam;
+				es.yaw_byte = static_cast<uint8_t>(static_cast<uint32_t>(es.heading_bam) >> 24);
+			}
+			// The class update's Flags bits: the ewep hide of a dead hull's
+			// children and its clear on a live vehicle carrier.
+			// [orig: Entity_UpdateTransformAndTurret @0x440CDD, @0x440EB3]
+			constexpr uint8_t kClassBits = static_cast<uint8_t>(world::kEntityFlagCarried |
+					world::kEntityFlagDead | world::kEntityFlagHusk);
+			es.state_flags = static_cast<uint8_t>((es.state_flags & ~kClassBits) |
+					(local->flags & kClassBits));
 			continue;
 		}
 		// Pools 1..3 are live client rows, not just presentation records. Keep

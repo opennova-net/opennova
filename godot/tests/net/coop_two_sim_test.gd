@@ -1034,9 +1034,9 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 
 func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -> void:
 	# A child hanging from an articulated EWEAP userpoint has no live compact of
-	# its own. The remote client has enough stock wire state to recover this one
-	# family: the parent's pose plus its decoded gunner's yaw/pitch. Generic
-	# PLAYPARTANIM is intentionally not part of this contract.
+	# its own: the remote client's world runs its ewep class update, composing
+	# it from the carrier's posed model, whose EWEAP words follow the decoded
+	# gunner's yaw/pitch (D-NET-690).
 	var model := ObjectData.new()
 	assert_eq(model.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/synth/mount.3di")), OK)
@@ -1146,15 +1146,19 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_lt(joiner_after.distance_to(host_after), 0.35,
 			"decoded gunner controls reconstruct the remote articulated anchor")
 
-	# The stock child record identifies parent + type, not the authored attachment
-	# row. If that type occurs more than once, even when only one row resolved a
-	# userpoint, a remote client must keep the spawn-derived rigid pose rather than
-	# guess which sibling owns the decoded child.
+	# The child's subType names its stored attachment slot, and the ewep class
+	# update anchors it there on every peer (D-NET-690): a same-type sibling row
+	# in the carrier's table does not unseat it, so the remote child keeps
+	# following the articulated anchor.
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			_attachment_items_db(anchor_name, true), PackedInt32Array([5004])))
-	var ambiguous_position := _present_position_for_type(joiner, 1419)
-	assert_lt(ambiguous_position.distance_to(joiner_before), 0.01,
-			"ambiguous same-type children retain the rigid decoded fallback")
+	for _tick in range(5):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	var sibling_position := _present_position_for_type(joiner, 1419)
+	assert_lt(sibling_position.distance_to(_present_position_for_type(host, 1419)), 0.35,
+			"a same-type sibling row leaves the child on its subType's anchor")
 
 
 func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
