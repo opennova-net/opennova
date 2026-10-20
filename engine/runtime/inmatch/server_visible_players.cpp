@@ -7,7 +7,6 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/visible_players.h>
 #include <runtime/inmatch/session_transport.h>
-#include <runtime/world/world.h>
 
 namespace opennova::inmatch {
 
@@ -20,19 +19,19 @@ bool slot_live(const NapiNPConnection &c) {
 			c.link.owned_entity.valid();
 }
 
-// The slot's team byte (slot+0x1A0), read through the bound entity like every
-// roster reply (D-NET-132); a World-less path has no team.
-uint8_t slot_team(const NapiNPConnection &c, const world::World *world) {
-	if (world == nullptr) return 0;
-	const world::Entity *e = world->registry.get(c.link.owned_entity);
-	return e != nullptr ? e->team : uint8_t{0};
+// The slot's own team byte (slot+0x1A0), not its body's: a script team write
+// to the body moves the entity's byte alone (D-NET-593).
+// [orig: NetPacket_SerializeVisiblePlayersSnapshot - the requester's
+//  `movzx eax, [esi+1A0h]` @0x50636B, each slot's compare @0x506440]
+uint8_t slot_team(const NapiNPConnection &c) {
+	return c.assigned_team_valid ? c.assigned_team : uint8_t{0};
 }
 
 } // namespace
 
 std::vector<uint8_t> build_visible_players_snapshot(const NapiNPConnection &requester,
-		const std::vector<NapiNPConnection> &roster, const world::World *world,
-		uint32_t game_type, bool mp_session_peer) {
+		const std::vector<NapiNPConnection> &roster, uint32_t game_type,
+		bool mp_session_peer) {
 	VisiblePlayers out;
 	// An inactive requester writes count 0 [orig: @0x50635a..0x5063ac].
 	if (!slot_live(requester)) return encode_visible_players(out);
@@ -40,7 +39,7 @@ std::vector<uint8_t> build_visible_players_snapshot(const NapiNPConnection &requ
 	// 0x200 bit from its spawn, which reads as team 255: no other slot matches.
 	// [orig: @0x506372..0x50638c; the set @0x43c546..0x43c54f]
 	const uint8_t requester_team =
-			(game_type & 0x10000u) == 0 ? uint8_t{0xFF} : slot_team(requester, world);
+			(game_type & 0x10000u) == 0 ? uint8_t{0xFF} : slot_team(requester);
 	// The slot table walks in slot order [orig: g_PlayerSlots stride 100584
 	// @0x5063c0..0x50649b].
 	std::vector<const NapiNPConnection *> slots;
@@ -58,7 +57,7 @@ std::vector<uint8_t> build_visible_players_snapshot(const NapiNPConnection &requ
 		// pair is always admitted (+96481 has no writer).
 		if (c->link.spectator) continue;
 		const bool self = c == &requester;
-		if (!self && slot_team(*c, world) != requester_team) continue; // @0x506440
+		if (!self && slot_team(*c) != requester_team) continue; // @0x506440
 		VisiblePlayers::Entry e;
 		e.slot = c->reply.player_slot;                  // slot+0x14 @0x506445
 		e.entity_handle = c->link.owned_entity.packed; // the packed handle @0x506485

@@ -100,7 +100,11 @@ bool Server_HandleVehicleSpawnRequest(NapiNPServerCtx &ctx, NapiNPConnection &co
 		}
 	}
 	if (item_id == 0) return false;                               // @0x51C55E
-	const uint8_t team = player->team;
+	// The requester's slot team, not its body's (D-NET-593): the restriction,
+	// the limit, the spawn and the vehicle's team byte all read it [orig: the slot
+	//  through the net player @0x51C4E3; `slot+0x1A0` @0x51C5F6, @0x51C69E,
+	//  @0x51C6BD].
+	const uint8_t team = conn.assigned_team_valid ? conn.assigned_team : uint8_t{0};
 	if (source->team != 0 && source->team != team) return false; // @0x51C5C6..0x51C5F6
 	// The unlimited-vehicles word skips the EntityLimit table [orig:
 	// g_RulesUnlimitedVehicles @0x51C5E2..0x51C5E9].

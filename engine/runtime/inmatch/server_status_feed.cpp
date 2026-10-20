@@ -38,14 +38,14 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 		// -> +0x5E8 @0x50a525..0x50a561; the clock napi_np_connection.h
 		// receive_inactive_ms].
 		slot.idle_seconds = slot.local ? 0 : static_cast<int32_t>(c.receive_inactive_ms / 1000u);
+		// The slot's own team byte, not its body's (D-NET-593) [orig:
+		//  `movzx eax, byte ptr [ebx+1A0h]` @0x50A565, the colour switch @0x50A571].
 		slot.team = c.assigned_team_valid ? c.assigned_team : uint8_t{0};
 		if (world == nullptr) continue;
 		if (const world::Entity *e = world->registry.get(c.link.owned_entity)) {
-			// The team byte and the class word through the bound entity
-			// (D-NET-132; the medic gate reads the class the same way), the
-			// dead test on its signed health [orig: `*(__int16 *)(entity + 286)
-			// <= 0` @0x50a674..0x50a68e].
-			slot.team = e->team;
+			// The class word through the bound entity (D-NET-132; the medic
+			// gate reads the class the same way), the dead test on its signed
+			// health [orig: `*(__int16 *)(entity + 286) <= 0` @0x50a674..0x50a68e].
 			slot.class_word = e->player_class;
 			slot.entity_dead = e->health <= 0;
 		}

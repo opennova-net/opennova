@@ -57,7 +57,7 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 // {name, team} from the player add, ahead of its 0x46 push, and subtype 2
 // {name, team} from the disconnect, before the leaver's entity is torn down.
 // The name is the slot's own (the ClientAuth NA the reply echoes); the team
-// the slot's live entity's, else the reserved assignment. The squadron pair
+// the slot's own team byte, not its body's (D-NET-593). The squadron pair
 // 3/4 beside them needs a NovaWorld clan-registry node, which an opennova
 // host never keeps (LAN accounts are 0).
 // [orig: Server_PlayerAdd @0x51d213..0x51d291 (send_mask 0x80, [u8 1][cstr
@@ -65,9 +65,9 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 //  Server_HandlePlayerDisconnect @0x51b69b..0x51b6d3 (send_mask 0x80,
 //  NetPacket_SerializeMinimapSlot_0(.., 2); subtype 4 @0x51b6d8..0x51b781)]
 void broadcast_player_joined_text(std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &joined, const world::World *world);
+		const NapiNPConnection &joined);
 void broadcast_player_leaving_text(std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &leaver, const world::World *world);
+		const NapiNPConnection &leaver);
 
 // The co-op dialog line: when the authority's dialog playback loads line
 // `line` of dialog `dialog_name` (the entry index before it advances), S2C

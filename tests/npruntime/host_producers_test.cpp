@@ -731,8 +731,7 @@ bool check_spectator_convert_stores_the_slot_team() {
 bool check_join_leave_lines() {
 	HostFixture f(3);
 	for (auto &t : f.transports) (void)drain(t);
-	inmatch::broadcast_player_joined_text(f.ctx.np_protocol.connection_list,
-			f.conn(0), &f.world);
+	inmatch::broadcast_player_joined_text(f.ctx.np_protocol.connection_list, f.conn(0));
 	const std::vector<uint8_t> joined = {1, 'P', '1', 0, 1};
 	const auto count = [](std::vector<ns::Datagram> dgs, const std::vector<uint8_t> &want) {
 		int n = 0;
@@ -746,8 +745,7 @@ bool check_join_leave_lines() {
 					count(drain(f.transports[2]), joined) == 1,
 			"every other in-match player gets [1][name][team]"))
 		return false;
-	inmatch::broadcast_player_leaving_text(f.ctx.np_protocol.connection_list, f.conn(1),
-			&f.world);
+	inmatch::broadcast_player_leaving_text(f.ctx.np_protocol.connection_list, f.conn(1));
 	const std::vector<uint8_t> leaving = {2, 'P', '2', 0, 2};
 	if (!expect(count(drain(f.transports[1]), leaving) == 0, "the leaver gets no line"))
 		return false;

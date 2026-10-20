@@ -37,6 +37,11 @@
 #include <runtime/inmatch/server_player_death.h> // Server_ProcessPlayerDeath
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
+#include <runtime/inmatch/server_chat.h>            // the 0x32 join line (D-NET-593)
+#include <runtime/inmatch/server_status_feed.h>     // the status page (D-NET-593)
+#include <runtime/inmatch/server_visible_players.h> // the 0x4C snapshot (D-NET-593)
+#include <runtime/hud/hud_server_status.h>
+#include <net/npwire/visible_players.h>
 
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/session_transport.h>
@@ -1663,6 +1668,65 @@ bool check_a_loading_joiner_takes_no_proximity_or_census_place() {
 	if (!expect(lr->periodic_score_ticks == 1, "joined, its next pass counts it"))
 		return false;
 	return expect(friendlies() == 2, "joined, the census counts both");
+}
+
+// D-NET-593: a script team write moves a body's team byte alone; the readers
+// of the slot's own team byte keep the slot's. The visible-players snapshot
+// lists the requester's slot-team mates, the 0x32 join line carries the slot
+// team, and the status page colours by it.
+// [orig: NetPacket_SerializeVisiblePlayersSnapshot @0x50636B / @0x506440;
+//  Server_PlayerAdd @0x51D25C; Server_DrawStatusScreen @0x50A565]
+bool check_slot_team_readers_ignore_a_body_team_write() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.game_type = game_type::kTeamDeathmatch;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	ctx.world = &world;
+	std::array<ns::UdpSessionTransport, 3> wires{
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host),
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host),
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host)};
+	const std::array<uint8_t, 3> slot_teams{1, 1, 2};
+	for (int i = 0; i < 3; ++i) {
+		const w::EntityHandle h =
+				w::spawn_remote_player(world, player_spawn(10.0f * float(i), 0, 0, slot_teams[i]));
+		ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+				static_cast<uint32_t>(7 + i), inmatch::NapiNPConnection::kTypeServerSide,
+				&wires[i], ns::TransportMode::Client, h, true));
+		inmatch::NapiNPConnection &c = ctx.np_protocol.connection_list.back();
+		c.reply.player_slot = static_cast<uint32_t>(i + 1);
+		c.reply.player_name = std::string(1, static_cast<char>('A' + i));
+		c.assigned_team = slot_teams[i];
+		c.assigned_team_valid = true;
+	}
+	inmatch::NapiNPConnection &a = ctx.np_protocol.connection_list[0];
+	world.registry.get(a.link.owned_entity)->team = 2; // the script's write to the body
+	VisiblePlayers seen;
+	const std::vector<uint8_t> snapshot = inmatch::build_visible_players_snapshot(
+			a, ctx.np_protocol.connection_list, game_type::kTeamDeathmatch, false);
+	decode_visible_players(snapshot.data(), snapshot.size(), seen);
+	if (!expect(seen.entries.size() == 2 && seen.entries[0].slot == 1 && seen.entries[1].slot == 2,
+	            "the snapshot lists the requester's slot-team mates"))
+		return false;
+	for (auto &wire : wires) (void)drain(wire);
+	inmatch::broadcast_player_joined_text(ctx.np_protocol.connection_list, a);
+	const std::vector<uint8_t> line = {1, 'A', 0, 1};
+	bool carried = false;
+	for (const ns::Datagram &d : drain(wires[1]))
+		carried = carried || (d.tag == s2c::FORMATTED_GAME_TEXT && d.body == line);
+	if (!expect(carried, "the join line carries the slot team"))
+		return false;
+	hud::ServerStatusPageState page;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	return expect(page.slots.size() > 1 && page.slots[1].team == 1,
+	              "the status page colours by the slot team");
 }
 
 // The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
@@ -3383,6 +3447,7 @@ int main() {
 	ok = check_integrity_family_draws_once_per_send() && ok;
 	ok = check_entity_state_fan_runs_out_of_session() && ok;
 	ok = check_a_loading_joiner_takes_no_proximity_or_census_place() && ok;
+	ok = check_slot_team_readers_ignore_a_body_team_write() && ok;
 	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;

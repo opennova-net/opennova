@@ -1076,8 +1076,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			case c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST: { // [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
-				// No fields read; the reply is the requester's team availability
-				// (mask 32, reliable).
+				// No fields read; the reply is the availability for the
+				// requester's slot team, not its body's (D-NET-593) (mask 32,
+				// reliable). [orig: the slot through the net player
+				//  @0x51093D..0x510947; NetPacket_SerializeWeaponOverlaySlots_0's
+				//  `slot+0x1A0` @0x5105CD]
 				if (world == nullptr || inputs.server_ctx == nullptr ||
 						!conn.link.owned_entity.valid())
 					break;
@@ -1086,7 +1089,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				replies.push_back(make_protocol_message(
 						s2c::VEHICLE_SPAWN_AVAILABILITY,
 						Server_BuildVehicleSpawnAvailability(*inputs.server_ctx, *world,
-								requester->team)));
+								conn.assigned_team_valid ? conn.assigned_team : uint8_t{0})));
 				break;
 			}
 			case c2s::VEHICLE_SPAWN_REQUEST: { // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
@@ -1343,8 +1346,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						? inputs.server_ctx->is_mp_session_peer != 0
 						: (world != nullptr && world->rules.mp_session_peer);
 				replies.push_back(make_protocol_message(s2c::VISIBLE_PLAYERS,
-						build_visible_players_snapshot(conn, roster, world,
-								config.game_type, peer)));
+						build_visible_players_snapshot(conn, roster, config.game_type, peer)));
 				break;
 			}
 			case c2s::LOADOUT_REQUEST: // the join-window kill page -> S2C 0x4E (server_kill_page.h)

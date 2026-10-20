@@ -238,7 +238,7 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// The leave line first, while the leaver's entity still stands
 		// [orig: Server_HandlePlayerDisconnect @0x51b6d3, before the teardown
 		// @0x51b809..0x51b82e].
-		broadcast_player_leaving_text(list, *it, ctx.world);
+		broadcast_player_leaving_text(list, *it);
 		const bool freed_pool0_entity = ctx.world != nullptr && owned_entity.valid() &&
 				owned_entity.pool() == 0;
 		const uint16_t freed_pool0_slot =

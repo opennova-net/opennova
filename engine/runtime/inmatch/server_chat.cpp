@@ -339,15 +339,14 @@ namespace {
 // One join/leave line to every OTHER in-match connection [orig: the
 // send_mask 0x80 SendFiltered(0x32, reliable) @0x51d28a / @0x51b6d3].
 void fan_game_text(std::vector<NapiNPConnection> &roster, const NapiNPConnection &subject,
-		int8_t subtype, const world::World *world) {
+		int8_t subtype) {
 	FormattedGameText text;
 	text.subtype = subtype;
 	text.text = subject.reply.player_name; // [orig: slot+0x28]
-	// [orig: slot+0x1A0] — the live entity's team, else the reservation
-	uint8_t team = subject.assigned_team_valid ? subject.assigned_team : uint8_t{0};
-	if (world != nullptr && subject.link.owned_entity.valid()) {
-		if (const world::Entity *e = world->registry.get(subject.link.owned_entity)) team = e->team;
-	}
+	// The slot's own team byte, not its body's (D-NET-593) [orig: Server_PlayerAdd
+	//  `slot+0x1A0` @0x51D25C (the join's type 1); NetPacket_SerializeMinimapSlot_0
+	//  @0x505B80 (the leave's type 2)].
+	const uint8_t team = subject.assigned_team_valid ? subject.assigned_team : uint8_t{0};
 	text.team = static_cast<int8_t>(team);
 	const std::vector<uint8_t> body = encode_formatted_game_text(text);
 	for (NapiNPConnection &c : roster) {
@@ -359,13 +358,13 @@ void fan_game_text(std::vector<NapiNPConnection> &roster, const NapiNPConnection
 } // namespace
 
 void broadcast_player_joined_text(std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &joined, const world::World *world) {
-	fan_game_text(roster, joined, kGameTextPlayerJoined, world); // [orig: @0x51d21e]
+		const NapiNPConnection &joined) {
+	fan_game_text(roster, joined, kGameTextPlayerJoined); // [orig: @0x51d21e]
 }
 
 void broadcast_player_leaving_text(std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &leaver, const world::World *world) {
-	fan_game_text(roster, leaver, kGameTextPlayerLeaving, world); // [orig: @0x51b6a8]
+		const NapiNPConnection &leaver) {
+	fan_game_text(roster, leaver, kGameTextPlayerLeaving); // [orig: @0x51b6a8]
 }
 
 void Server_BroadcastDialogLine(NapiNPServerCtx &ctx, const std::string &dialog_name,

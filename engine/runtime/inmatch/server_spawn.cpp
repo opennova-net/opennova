@@ -789,7 +789,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// dropped and 0x22-retried (D-NET-158).
 				// [orig: Server_PlayerAdd @0x51CBC0 - the 0x32 @0x51D291, the 0x46
 				//  @0x51D2BF / @0x51D2CA, ahead of the bot's join @0x51D2E1]
-				broadcast_player_joined_text(ctx.np_protocol.connection_list, conn, &world);
+				broadcast_player_joined_text(ctx.np_protocol.connection_list, conn);
 				broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list,
 						conn, &world);
 				++spawned;
