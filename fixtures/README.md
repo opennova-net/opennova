@@ -271,7 +271,9 @@ words, the guard, the reload, the death, the ladder's hold, climb up and down, t
 the roll), the tables `msoldier.adm` and `E_STAND.adm` (the shipped soldier's slots) and
 `mplayer.adm` (the shipped player's, its standing moves the run `mp_runf.bad` and its run_2 and
 run_3 the fast runs `mp_runk.bad` and `mp_runw.bad`, in the shape of US01's DT1runF, RunFastK and
-RunFastW), `mmedic1.adm` and `mmedic2.adm` (the soldier's and the
+RunFastW, and its weapon channel's reloads, knife attack and pistol and knife holds `mp_rld.bad`,
+`mp_rld2.bad`, `mp_knfatt.bad`, `mp_pistol.bad` and `mp_knife.bad`, in the shape of US01's
+IDL_RLD, IDL_RLD2, ATT_KNF, IDL_PST and IDL_KNF), `mmedic1.adm` and `mmedic2.adm` (the soldier's and the
 shipped medics' drag poses: the draggee; the dragger's idle and walk), and the first-person M4's clips `mfp_*.bad` and table
 `mfp_m4.adm` (the shipped M4_1st table's slots).
 

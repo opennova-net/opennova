@@ -2912,7 +2912,7 @@ target_compile_features(infantry_test PRIVATE cxx_std_17)
 if(MSVC)
     target_link_options(infantry_test PRIVATE "/STACK:16777216")
 endif()
-opennova_add_mixed_test(infantry COMMAND infantry_test)
+add_test(NAME infantry COMMAND infantry_test)
 
 add_executable(collision_force_test world/collision_force_test.cpp)
 target_link_libraries(collision_force_test PRIVATE opennova_runtime)

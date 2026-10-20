@@ -1952,13 +1952,29 @@ opennova::bad::BadBuildClip player_fast_run_clip(const char *name, double metres
 	return clip;
 }
 
+// The player's weapon-channel clips, in the shape of US01's: the reload (IDL_RLD: 43 frames, the
+// clip flag 0x8), the second reload a one-shot (IDL_RLD2: 50 frames), the knife attack (ATT_KNF:
+// 15 frames, looping), the pistol hold (IDL_PST: 60 frames, looping) and the knife hold (IDL_KNF:
+// one frame, looping).
+std::vector<opennova::bad::BadBuildClip> player_weapon_clips() {
+	opennova::bad::BadBuildClip reload = one_bone_clip("mp_rld", 43, false, 0.95, 0.95, 1.69, 0.0, 0, 0);
+	reload.flags = 0x8u;
+	return {
+		reload,
+		one_bone_clip("mp_rld2", 50, false, 0.95, 0.95, 1.69, 0.0, 0, 0),
+		one_bone_clip("mp_knfatt", 15, true, 0.95, 0.95, 1.69, 0.0, 0, 0),
+		one_bone_clip("mp_pistol", 60, true, 0.95, 0.95, 1.69, 0.0, 0, 0),
+		one_bone_clip("mp_knife", 1, true, 0.95, 0.95, 1.69, 0.0, 0, 0),
+	};
+}
+
 // The soldier's clips, in the shape of the shipped soldiers' (Dt1rst, I_idle1, I_walkf and the
 // death matrix's clips): the reset; a standing idle; the walk (152 frames at 0.0619 m a frame, the
 // footstep word 0x2 every 14th frame, as I_walkf authors its eleven); a run; a crouch and a prone
 // idle and walk; an attack and a guard hold; a reload; a death that lowers the hips to the ground;
 // and the ladder's hold, its climb up (0.8 a loop on the clip's vertical lane) and down.
 std::vector<opennova::bad::BadBuildClip> soldier_clips() {
-	return {
+	std::vector<opennova::bad::BadBuildClip> clips = {
 		one_bone_clip("ms_rst", 2, true, 1.0185, 1.0185, 1.7756, 0.0, 0, 0),
 		one_bone_clip("ms_idle", 8, true, 0.95, 0.95, 1.69, 0.0, 0, 0),
 		one_bone_clip("ms_walk", 152, true, 0.98, 0.98, 1.72, 0.0619, 0x2, 14),
@@ -1980,6 +1996,8 @@ std::vector<opennova::bad::BadBuildClip> soldier_clips() {
 		player_fast_run_clip("mp_runk", 7.84),
 		player_fast_run_clip("mp_runw", 8.36),
 	};
+	for (const opennova::bad::BadBuildClip &clip : player_weapon_clips()) clips.push_back(clip);
+	return clips;
 }
 
 // The clip a body slot plays: a death slot the death; a walk or the wash walk the walk, a run, a jog
@@ -2089,8 +2107,8 @@ bool build_soldier_table(std::vector<uint8_t> &bytes, std::string &err) {
 	return build_body_table(soldier_authors, bytes, err);
 }
 
-// mplayer.adm: the player's, its eight standing moves (US01's walk_* rows) the run and its run_2
-// and run_3 the fast runs.
+// mplayer.adm: the player's, its eight standing moves (US01's walk_* rows) the run, its run_2
+// and run_3 the fast runs and its weapon-channel rows the player's weapon clips.
 bool build_player_table(std::vector<uint8_t> &bytes, std::string &err) {
 	std::vector<std::pair<std::string, std::string>> rows;
 	for (int s = 0; s < 240; ++s) {
@@ -2098,8 +2116,12 @@ bool build_player_table(std::vector<uint8_t> &bytes, std::string &err) {
 		if (!player_authors(slot)) continue;
 		const bool run = slot.rfind("walk_", 0) == 0 && slot.rfind("walk_crouch", 0) != 0 &&
 				slot.rfind("walk_prone", 0) != 0;
+		static const std::pair<const char *, const char *> kWeaponRows[] = {{"reload", "mp_rld"},
+			{"reload2", "mp_rld2"}, {"knife_attack", "mp_knfatt"}, {"pistol", "mp_pistol"}, {"knife", "mp_knife"}};
 		const char *clip = run ? "mp_runf" : slot == "run_2" ? "mp_runk" : slot == "run_3" ? "mp_runw"
 		                                                                         : soldier_slot_clip(slot);
+		for (const auto &row : kWeaponRows)
+			if (slot == row.first) clip = row.second;
 		rows.push_back({"anim_" + slot, clip});
 	}
 	return mint_table(rows, soldier_clips(), bytes, err);
