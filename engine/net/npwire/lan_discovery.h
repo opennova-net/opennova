@@ -172,7 +172,8 @@ enum class LanRowChange : uint8_t {
 // [orig: CNapiNetwork_SetTransportMode @0x4c8750 - the same mode returns at once
 //  @0x4c8766, the one open @0x4c8796; CNapiNetwork_StartClientConnection @0x4ca160 -
 //  the ctx's one client connection @0x4ca1c2, its enumerator stopped @0x4ca1d8 and
-//  the row found among its entries (NapiNPEnumerator_FindTimerById, the call @0x4CA1EE)]
+//  the row found among its entries (NapiNPEnumerator_FindTimerById, the call @0x4CA1EE, its
+//  result stored @0x4ca1f8)]
 // [orig: UI_ProcessLANSessionStateMachine @0x558de0 — the key hit @0x5593c4
 //  falls through to the next node, the miss @0x5593e3 appends @0x5593fa..0x559521;
 //  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the port walk
