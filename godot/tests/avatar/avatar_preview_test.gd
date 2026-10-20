@@ -4,8 +4,8 @@ extends GutTest
 # parts name synthetic .3di basenames no root carries, so load_combo composes
 # zero models but must not error (a missing graphic skips its slot); the
 # lifecycle (clear()/load_combo) is exercised on the SubViewport scaffold. The
-# retail-root cases over the shipped table live in the retail half
-# (tests/retail/avatar/avatar_preview_test.gd).
+# composed-part cases mount the synthetic models (fixtures/threedi/synth) and
+# the minted 19-bone person clip.
 const AvatarPreviewScript = preload("res://game/avatar/avatar_preview.gd")
 const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
@@ -252,6 +252,62 @@ func test_preview_skeletal_builds_when_bad_assets_resolve() -> void:
 		assert_true(sk.has_clip("anim_idle"), "the idle clip is registered under anim_idle")
 	assert_eq(_preview.preview_skeletal(), sk, "the skeletal idle is cached (built once)")
 
+
+# The menu portrait binds the skeletal idle onto the skinned head/body parts
+# [orig: PlayerInfo_InitPreviewModel @ 0x5600d0: Dt1rst.bad's rest, PI_Idle.BAD's
+# clip]. The body is the synthetic nineteen-part skinned person.3di (the retail
+# person rig order) and both clips are the minted 19-bone person clip, so the
+# idle binds onto a rig of the shape a shipped third-person body carries.
+func test_runtime_portrait_binds_idle_on_skinned_parts() -> void:
+	var dir := TestFs.cache_dir(self, "avatar_portrait_idle")
+	TestFs.copy(self, "res://../fixtures/threedi/synth/person.3di", dir.path_join("person.3di"))
+	for name in ["Dt1rst.bad", "PI_Idle.BAD"]:
+		TestFs.copy(self, ProjectSettings.globalize_path("res://../fixtures/anim/rig19_idle.bad"),
+				dir.path_join(name))
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	var def_path := dir.path_join("Avatars.def")
+	TestFs.write_text(self, def_path, "define head HEAD
+{
+ graphic person.3di
+}
+"
+			+ "define body BODY
+{
+ graphic person.3di
+}
+"
+			+ "nationality 0 NAT
+{
+ alignment good
+ division 0 DIV
+ {
+"
+			+ "  combo 1 HEAD BODY
+ }
+}
+")
+	var db := AvatarDatabase.new()
+	assert_eq(db.load(def_path), OK)
+	var combo := db.get_combo(0, 0, 0)
+	assert_not_null(combo)
+	if combo == null:
+		TestFs.remove_dir_recursive(dir)
+		return
+	_preview.set_resource_root(root)
+	_preview.load_combo(combo)
+	await get_tree().process_frame
+	var body = _preview.get_part_model("body")
+	assert_true(is_instance_valid(body), "the body part composes from person.3di")
+	if is_instance_valid(body):
+		var data = body.get_object_data()
+		assert_not_null(data)
+		assert_true(data != null and data.is_skinned(0), "the synthetic body part is vertex-skinned")
+		assert_true(body.has_skeleton(), "the skinned body part builds a Skeleton3D under the idle")
+		assert_eq(body.get_active_body_clip(), "anim_idle", "the idle clip is playing on the part")
+	_preview.clear()
+	await get_tree().process_frame
+	TestFs.remove_dir_recursive(dir)
 
 func _staged_idle_root():
 	# Read the committed clip through ResourceRoot (C++ path-normalized; FileAccess chokes on

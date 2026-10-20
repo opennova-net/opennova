@@ -123,6 +123,19 @@ func test_sp_setup_loads_image_only() -> void:
 	assert_eq(screen.session_overlay_lines(), PackedStringArray(["", "", "", ""]))
 
 
+func test_mp_setup_carries_the_session_variables() -> void:
+	_register_gametext()
+	var screen := _setup_screen(LoadingScreenInfo.make("00TRg.bms", true, "DEMOHOST",
+			"Trainingsmission", 0x10010, "Welcome aboard"))
+	assert_true(screen.has_session_overlay())
+	var lines := screen.session_overlay_lines()
+	assert_eq(lines[0], "DEMOHOST")
+	assert_eq(lines[1], "Trainingsmission")
+	assert_ne(lines[2], "", "LTGT_AAS resolves from the gametext table")
+	assert_eq(lines[3], "Welcome aboard")
+	Strings.register_table("gametext", null)
+
+
 func test_present_tracks_exact_stage_progress() -> void:
 	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	screen.set_progress(50)
@@ -204,6 +217,15 @@ func _setup_screen(info: LoadingScreenInfo) -> LoadingScreen:
 	screen.setup(root, info)
 	assert_true(screen.has_background(), "the test pcx decodes into a texture")
 	return screen
+
+
+# Our own base game's gametext.bin (assets/, ADR 0048), whose table carries the
+# LTGT_* game-type labels the loading screen's session line reads.
+func _register_gametext() -> void:
+	var table := RtxtStringFile.new()
+	assert_eq(table.load_from_byte_array(FileAccess.get_file_as_bytes(
+			"res://../assets/gametext.bin")), OK, "assets/gametext.bin loads")
+	Strings.register_table("gametext", table)
 
 
 func _make_temp_dir(name: String) -> String:

@@ -26,10 +26,19 @@ const FIRST_PAGE_OFFSET := 6
 
 const BLUE_CLASS := 8
 const RED_CLASS := 6
-# Every name below exists in the reference fixture set's def/weapon.def (94 rows,
-# 1-based ADM space; staged through RetailData.def_root()).
+# Every name below is a row of ArmoryFixture's loadout catalog (authored rows under
+# the shipped weapon names).
 const BLUE_PAGE := ["WPN_KNIFE", "WPN_M4AUTO", "WPN_colt45"]
 const RED_PAGE := ["WPN_KNIFE2", "WPN_DRAGUNOV", "WPN_357"]
+# Deliberately absent from both pages: if it shows up in the local pool, the pool was
+# built from something other than the profile page.
+const OFF_PAGE := "WPN_M9Beretta"
+
+
+func _def_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(ArmoryFixture.stage_loadout_catalog("weapon_profile_kit")), OK)
+	return root
 
 
 func _page_blob(names: Array) -> PackedByteArray:
@@ -85,6 +94,36 @@ func test_a_malformed_profile_leaves_the_defaults() -> void:
 	assert_eq(String(summary.blue.kit[0]), "WPN_M4AUTO", "the rifleman's default page")
 	var sim := Simulation.new()
 	assert_eq(sim.use_player_profile(profiles), OK, "the defaults are a usable profile")
+
+
+func test_an_unlatched_team_commits_no_page() -> void:
+	# The side selector is the S2C 0x04 tail byte [orig: g_LocalTeam @0x425499], and
+	# side_for_team maps anything that is not 1 or 3 to the RED block [orig: @0x525798].
+	# Retail cannot reach the page copy before that byte is latched — admission delivers
+	# 0x04 long before Game_StartMission runs — but our catalog can land first. Copying at
+	# team 0 would therefore commit the WRONG side's page. This asserts we wait instead.
+	#
+	# This case caught a live defect: the first revision seeded unconditionally and a
+	# blue-side joiner briefly held the red page.
+	var sim := Simulation.new()
+	assert_true(sim.enable_join("127.0.0.1", 32768, "ProfileKitTest"),
+			"enable_join should arm the joiner role")
+	assert_true(sim.is_joiner())
+	assert_eq(sim.load_weapon_table(_def_root(), "weapon.def"), OK)
+	# Loaded AFTER the catalog on purpose: the shell can only read the profile once the
+	# sim exists, so this edge has to be handled too. An earlier revision seeded only at
+	# catalog load and silently shipped the defaults.
+	assert_eq(sim.use_player_profile(_profiles(_make_weapon_sav())), OK)
+
+	var inv := sim.get_local_player_inventory()
+	var held := []
+	for row in inv.slots:
+		held.append((row as PlayerInventorySlot).name)
+	for name in RED_PAGE:
+		assert_does_not_have(held, name,
+				"%s is on the RED page; an unlatched team must not commit a side" % name)
+	assert_does_not_have(held, OFF_PAGE,
+			"%s is on no page at all" % OFF_PAGE)
 
 
 func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> void:

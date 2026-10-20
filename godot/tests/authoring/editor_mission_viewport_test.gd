@@ -344,6 +344,196 @@ func test_the_mission_builds_over_frames() -> void:
 	assert_eq(String(state.get("status", "")), "ready")
 
 
+## The scale witness: the shipped mission with the most entities (ASH_I1gA.bms, 2,193 entities,
+## the retail leg's measurement) stands as the minted mission grown to that count. It is packed with
+## its closure (the Tmap terrain and its textures, the environment, the item table, the models)
+## into a game install minted as PFF archives, imported with its dependencies into a new project
+## on that install (the flow's end-to-end import: apply_project_settings' game_install,
+## preview_install_import, import_files), opened, and its picture built over the Shell's frames
+## at a budget of 0 (one unit a frame) to `ready`: the units in the build's order, the terrain
+## built, every entity drawn placed (one placement, none lifted or hidden). Prints what the import
+## and the build cost (frames, frame_us, unit_us, total_us), each label's units and time, and the
+## three longest units: the measurement the first-picture budget and the stepped placement (D5)
+## are read against.
+const LARGEST_MISSION_ENTITIES := 2193
+const LARGEST_MISSION := "synth_large.bms"
+## How long the picture's build may stand still (no unit run) before it counts as a hang: the build
+## takes as long as it takes while it moves.
+const BUILD_STALL_MS := 120000
+
+
+## The minted mission at `path` grown to `count` entities: rows of the mission's own placed items
+## and buildings (their item ids, so the project's item table draws them) on a 4 u grid beside its
+## first item, alternating three items to one building.
+func _grow_mission(path: String, count: int) -> void:
+	var m := MissionData.new()
+	assert_eq(m.open_file(path), OK)
+	var items: Array = m.get_entity_refs(MissionData.KIND_ITEM)
+	var buildings: Array = m.get_entity_refs(MissionData.KIND_BUILDING)
+	assert_false(items.is_empty(), "the minted mission places items")
+	assert_false(buildings.is_empty(), "the minted mission places buildings")
+	if items.is_empty() or buildings.is_empty():
+		return
+	var origin: Vector3 = (items[0] as EntityRef).position
+	var total := m.get_all_entity_refs().size()
+	var n := 0
+	while total < count:
+		var at := origin + Vector3(4.0 * (n % 48), 4.0 * (n / 48), 0.0)
+		if n % 4 == 3:
+			m.add_entity(MissionData.KIND_BUILDING, (buildings[0] as EntityRef).item_id, at, Vector3.ZERO)
+		else:
+			m.add_entity(MissionData.KIND_ITEM, (items[n % items.size()] as EntityRef).item_id, at, Vector3.ZERO)
+		n += 1
+		total += 1
+	assert_eq(m.get_all_entity_refs().size(), count, "the mission grown to the witnessed scale")
+	assert_eq(m.save_as(path), OK)
+
+
+## A game install holding the grown mission's closure: the Tmap mission's files as
+## EditorFixture.mint_tmap_mission writes them for a project (into a scratch folder), the mission
+## grown and renamed LARGEST_MISSION, packed flat into the boot table's archives as retail places
+## them (the mission and the defs in localres.pff, the rest in resource.pff; language.pff empty).
+func _mint_install(name: String) -> String:
+	var source := OS.get_cache_dir().path_join("opennova editor %s source %d" % [name, Time.get_ticks_usec()])
+	var install := OS.get_cache_dir().path_join("opennova editor %s install %d" % [name, Time.get_ticks_usec()])
+	_dirs.append(source)
+	_dirs.append(install)
+	assert_eq(DirAccess.make_dir_recursive_absolute(install), OK)
+	var options := _picture_files()
+	options["small"] = true
+	EditorFixture.mint_tmap_mission(self, _seam, source, options)
+	_grow_mission(source.path_join(EditorFixture.MISSION), LARGEST_MISSION_ENTITIES)
+	var localres: Array = []
+	var resource: Array = []
+	for folder in DirAccess.get_directories_at(source):
+		for file_name in DirAccess.get_files_at(source.path_join(folder)):
+			var bytes := FileAccess.get_file_as_bytes(source.path_join(folder).path_join(file_name))
+			# A PFF entry holds bytes: the project's empty overcast.def has no archived twin.
+			if bytes.is_empty():
+				continue
+			var entry_name := LARGEST_MISSION if file_name == EditorFixture.MISSION.get_file() else file_name
+			var entry := {"name": entry_name, "bytes": bytes}
+			if entry_name.get_extension().to_lower() in ["bms", "def"]:
+				localres.append(entry)
+			else:
+				resource.append(entry)
+	WorldFixture.write_pff(self, install.path_join("localres.pff"), localres)
+	WorldFixture.write_pff(self, install.path_join("resource.pff"), resource)
+	WorldFixture.write_pff(self, install.path_join("language.pff"), [])
+	return install
+
+
+## A request served and its operation settled (the seam's request settles it for as long as it
+## moves): whether it was done.
+func _served(fields: Dictionary) -> bool:
+	var answer: Dictionary = _seam.request(fields)
+	var done := bool(answer.get("outcome", {}).get("done", false))
+	assert_true(done, "%s: %s" % [String(fields.get("kind", "")), str(answer).left(400)])
+	return done and bool(_seam.settled)
+
+
+func test_the_largest_mission_builds() -> void:
+	if _app == null:
+		return
+	# A bare new project, as the import flow makes one: what it lacks (the item table, the models
+	# its items draw) the install serves as its base game.
+	var project := OS.get_cache_dir().path_join("opennova editor largest mission %d" % Time.get_ticks_usec())
+	_dirs.append(project)
+	assert_true(_seam.new_project(project, "Largest Mission"))
+	var install := _mint_install("largest mission")
+	assert_true(_served({"kind": "apply_project_settings", "settings": {"game_install": install, "mission": true}}))
+	var started := Time.get_ticks_msec()
+	assert_true(_served({"kind": "preview_install_import", "names": [LARGEST_MISSION], "with_dependencies": true}))
+	var plan: Dictionary = _seam.query("import_preview", {"limit": 1})
+	assert_gt(int(plan.get("count", 0)), 0, "the closure planned: %s" % str(plan).left(400))
+	assert_true(_served({"kind": "import_files", "planned": true, "plan": int(plan.get("plan", 0))}))
+	gut.p("%s's closure: %d files, %.1f MB, imported in %.1f s" % [LARGEST_MISSION, int(plan.get("count", 0)),
+			float(plan.get("total_bytes", 0)) / 1e6, float(Time.get_ticks_msec() - started) / 1000.0])
+
+	_app.build_budget_ms = 0
+	# The import files a mission under the project's missions/ folder.
+	assert_true(_seam.open_document("missions/" + LARGEST_MISSION), "%s opens" % LARGEST_MISSION)
+	var path := String(_seam.state(["documents"]).get("documents", {}).get("active", ""))
+	assert_true(path.to_lower().ends_with(LARGEST_MISSION), path)
+	_app.pump()
+	var state := _state(path)
+	assert_eq(String(state.get("status", "")), "loading", str(state).left(400))
+	# One unit a frame: what each frame's unit cost is the build's total_us moving, the unit the one
+	# the progress named before it ran (its label is what the next unit makes).
+	var labels: PackedStringArray = []
+	var units_by_label := {}
+	var us_by_label := {}
+	var units: Array = []
+	var built := _build_of(state)
+	var moved_at := Time.get_ticks_msec()
+	while String(state.get("status", "")) == "loading" and Time.get_ticks_msec() - moved_at < BUILD_STALL_MS:
+		var label := String(_progress_of(state).get("label", ""))
+		var done := int(_progress_of(state).get("done", 0))
+		var spent := int(built.get("total_us", 0))
+		await get_tree().process_frame
+		state = _state(path)
+		var now := _build_of(state)
+		var ran := int(_progress_of(state).get("done", done)) - done
+		if String(state.get("status", "")) != "loading":
+			ran = maxi(ran, 1)
+		if ran <= 0:
+			built = now
+			continue
+		moved_at = Time.get_ticks_msec()
+		if labels.is_empty() or labels[labels.size() - 1] != label:
+			labels.append(label)
+		var cost := int(now.get("total_us", spent)) - spent
+		units.append([cost, label, int(units_by_label.get(label, 0)) + 1])
+		units_by_label[label] = int(units_by_label.get(label, 0)) + ran
+		us_by_label[label] = int(us_by_label.get(label, 0)) + cost
+		built = now
+	_app.pump()
+	state = _state(path)
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(400))
+	built = _build_of(state)
+	assert_eq(int(built.get("done", 0)), int(built.get("total", -1)), str(built))
+	assert_eq(int(state.get("builds", 0)), 1)
+	assert_eq(labels, PackedStringArray(["environment", "terrain files", "terrain", "sky", "water", "items", "models",
+			"place", "shadows", "pose"]))
+	for label in ["terrain", "models", "place"]:
+		assert_gt(int(units_by_label.get(label, 0)), 0, "the build's %s units" % label)
+	assert_true(bool(state.get("body", {}).get("ground", false)), "the terrain built: a surface a ray lands on")
+	assert_eq(int(_app.get_mission_device_count(path, "placements")), 1, "one placement")
+	assert_gt(int(_app.get_mission_device_count(path, "placed")), 0, "the entities placed")
+	assert_eq(int(_app.get_mission_device_count(path, "lifted")), 0)
+	assert_eq(int(_app.get_mission_device_count(path, "hidden")), 0)
+
+	units.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) > int(b[0]))
+	var longest := PackedStringArray()
+	for i in mini(3, units.size()):
+		var label := String(units[i][1])
+		longest.append("%s %d of %d, %.1f ms" % [label, int(units[i][2]), int(units_by_label.get(label, 0)),
+				float(units[i][0]) / 1000.0])
+	var by_label := PackedStringArray()
+	for label in labels:
+		by_label.append("%s %d units %.1f ms" % [label, int(units_by_label.get(label, 0)),
+				float(us_by_label.get(label, 0)) / 1000.0])
+	gut.p("%d entities at 0 ms a frame: %d units over %d frames, frame_us %d, unit_us %d, total_us %d; %d placed, %d lifted, place %.1f ms" % [
+			LARGEST_MISSION_ENTITIES, int(built.get("total", 0)), int(built.get("frames", 0)),
+			int(built.get("frame_us", 0)), int(built.get("unit_us", 0)), int(built.get("total_us", 0)),
+			int(_app.get_mission_device_count(path, "placed")), int(_app.get_mission_device_count(path, "lifted")),
+			float(_app.get_mission_device_count(path, "place_us")) / 1000.0])
+	gut.p("  by label: " + ", ".join(by_label))
+	gut.p("  the three longest units: " + ", ".join(longest))
+
+
+## The state's progress ({} for none: a progress is null once ready) and its device's build.
+func _progress_of(state: Dictionary) -> Dictionary:
+	var progress: Variant = state.get("progress")
+	return progress if progress is Dictionary else {}
+
+
+func _build_of(state: Dictionary) -> Dictionary:
+	var device: Variant = state.get("device")
+	var build: Variant = device.get("build") if device is Dictionary else null
+	return build if build is Dictionary else {}
+
+
 ## DI-29: the ground overlay the options ask reaches the device's terrain as an Update: the surface classes'
 ## picture (its size the body's), then the foliage's, then none; the build generation stands.
 func test_the_ground_overlay_tints_the_terrain() -> void:

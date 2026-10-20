@@ -4,6 +4,14 @@ extends GutTest
 # verify a serialize round-trip plus the core mutation surface.
 
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
+# Our own base game's stylesheet (assets/, ADR 0048): it defines the shipped
+# menu_style.mns's names in the shipped order (the reference set's
+# mns/menu_style.mns: 12 defines, DEF_FONTNAME first, DEF_IMAGE_DEFAULT_BG last),
+# with our own values, behind a comment header the game's reader skips.
+const MENU_STYLE := "res://../assets/menu_style.mns"
+const MENU_STYLE_DEFINES := 12
+const MENU_STYLE_FIRST := "DEF_FONTNAME"
+const MENU_STYLE_LAST := "DEF_IMAGE_DEFAULT_BG"
 
 
 func _load_doc() -> MnuDocument:
@@ -221,6 +229,57 @@ func test_mns_entry_add_rename_remove_move() -> void:
 	assert_false(sheet.is_valid_variable_name("BAD NAME"), "whitespace rejects")
 	assert_false(sheet.is_valid_variable_value("a//b"), "values cannot carry comment starts")
 	assert_false(sheet.is_valid_variable_value("a\\b"), "a lone backslash continues the value")
+
+
+func _menu_style_bytes() -> PackedByteArray:
+	var bytes := FileAccess.get_file_as_bytes(MENU_STYLE)
+	assert_gt(bytes.size(), 0, "assets/menu_style.mns is readable")
+	return bytes
+
+
+func test_mns_entries_expose_document_order() -> void:
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes(_menu_style_bytes()), OK, "the stylesheet loads")
+	assert_true(sheet.is_runtime_valid(), "the game reads the whole sheet")
+	var entries := sheet.get_entries()
+	assert_eq(entries.size(), MENU_STYLE_DEFINES, "the shipped sheet's 12 defines")
+	assert_eq(sheet.get_entry_count(), MENU_STYLE_DEFINES, "entry count matches")
+	if entries.size() != MENU_STYLE_DEFINES:
+		return
+	assert_eq(String((entries[0] as Dictionary).get("name", "")), MENU_STYLE_FIRST,
+			"authored case, the reader's order")
+	assert_eq(String((entries[MENU_STYLE_DEFINES - 1] as Dictionary).get("name", "")),
+			MENU_STYLE_LAST, "last define")
+
+
+# A whole stylesheet written in the writer's form reads back as the same list.
+func test_mns_written_sheet_reads_back() -> void:
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes(_menu_style_bytes()), OK)
+	var written := sheet.to_byte_array()
+	assert_gt(written.size(), 0, "the list has a written form")
+	var again := MnsStyleSheet.new()
+	assert_eq(again.load_from_bytes(written), OK)
+	assert_true(again.is_runtime_valid(), "the game reads the whole written sheet")
+	assert_eq(again.get_entries(), sheet.get_entries(), "the written sheet reads back as the list")
+
+
+func test_mns_set_variable_changes_one_line_and_emits_changed() -> void:
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes(_menu_style_bytes()), OK)
+	var before := sheet.get_source_text().split("\r\n")
+	watch_signals(sheet)
+	sheet.set_variable("DEF_TEXT_FG", "11223344")
+	assert_signal_emit_count(sheet, "changed", 1, "a real edit emits changed once")
+	sheet.set_variable("DEF_TEXT_FG", "11223344")
+	assert_signal_emit_count(sheet, "changed", 1, "an equal value is a no-op (no dirty flip)")
+	var after := sheet.get_source_text().split("\r\n")
+	assert_eq(after.size(), before.size(), "line count unchanged")
+	var diffs := 0
+	for i in before.size():
+		if after[i] != before[i]:
+			diffs += 1
+	assert_eq(diffs, 1, "a value edit changes exactly its own line of the written form")
 
 
 # --- M10.1: item-row authoring (list / multi / spinlist / combo) ----------------

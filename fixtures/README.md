@@ -158,6 +158,20 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 
 ## Other minted sets
 
+- `gut/*.3di` — `tests/fixtures/gut_vehicle_gen.cpp`: the GUT vehicle model set
+  (the same builder and parity writer as `threedi/synth`), standing in for the retail
+  mounts, door guns, carriers and tanks the GUT vehicle suites once crewed:
+  `tripod_usegun_cradle` (E50triB: `Usegun` on the yawing cradle), `minigun` (a
+  `WEAP_SPIN` barrel, `MFlash01` at its end), `fifty` (H50cal), `cannon` (M1trret),
+  `helo` (Dblkhwk1 / DAH62: `HELO_ROTOR` / `HELO_TAILROTOR`, `ctrlx05`, two `sitex`
+  points, the `Ewep01` / `Ewep02` door anchors, the pods' `BULLET01..04` /
+  `MFLASH01..04`), `twingun` (Ka50gun: `bullet01` / `bullet02` on the twin-barrel gun,
+  `usegun` well behind it), `lcac` (Dlcac1: one flat deck hull a tank and its crew
+  ride, `ctrlx11`), `gunboat` (Dmrk51: four anchors, two
+  off the hull plane) and `tank_turret` (Dm1a1: `ewep01` on the hull, `ewep02` on the
+  `VEHICLE_GUNYAW` ring). The guns pitch with the shipped sign (a positive
+  `EWEAP_GUNPITCH` dips the muzzle). Their item, weapon, ammo, HUD and AI rows are
+  authored in `godot/tests/support/vehicle_fixture.gd`.
 - `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp`.
 - `terrain/variants` — `tests/fixtures/terrain_variants_gen.cpp`: one file per form the
   shipped terrain files take (the char, foliage, picture, sky and 24-bit PCX; the
@@ -225,3 +239,12 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   reference-tree leg.
 - `dbf/synth_bank.dbf` — `tests/fixtures/minimal_dbf_gen.cpp`: eleven dialog groups
   through `encode_dbf`; the shipped 00TRg bank is `dbf_roundtrip`'s reference-tree leg.
+- `gut/armory_floor.3di`, `gut/door_block.3di`, `gut/light_post.3di` —
+  `tests/fixtures/gut_world_gen.cpp`, through the synthetic model builder and the
+  parity writer: the synthetic armory's floor plan, blink boxes (each 0.1 below the
+  floor) and OCCL topology standing on the floor slab 00TRa's Armry01 authors as
+  its COBJ 0 volume 0 (`blink_reopen_edge_test.gd`, the windowed
+  `static_decoration_lighting_test.gd`); the IBlock01 shape, a block and its door
+  part turning rotation x on CTRL `DOOR_00` from 0 to -5688
+  (`mission_present_pass_test.gd`); and a 4-unit post in the Lpost01 shape, no
+  light (`static_decoration_lighting_test.gd`).
