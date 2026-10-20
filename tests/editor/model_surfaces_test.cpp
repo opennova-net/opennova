@@ -8,10 +8,11 @@
 // row; past 23 the `obj` row); the records read in words (a LOD by what it draws at and its parts, a
 // part by the add-on's PN## name, a user point by its role, a face by its surface).
 //
-// Retail (a leg, OPENNOVA_JO_DIR): every model the game install serves: how many faces find their
-// material, and how many materials hold faces of more than one surface (the shipped "mixed" ones); every
-// face lying on a triangle it was made from (the triangle's corners on the 8.8 grid the face's, wound with
-// it) takes that triangle's material.
+// The shipped forms: over every model of the format's fixtures (the synthetic set and the forms of the
+// shipped models the threedi rows mint, model_variant_files.h), every face lying on a triangle it was made
+// from (the triangle's corners on the 8.8 grid the face's, wound with it) takes that triangle's material;
+// and a model minted with the shipped models' other faces (one stored twice, one on no triangle, one near
+// a triangle another took, and a material whose faces carry two surfaces) finds each its material.
 #include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
@@ -28,9 +29,7 @@
 #include <tuple>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_o3d_lower.h>
@@ -39,12 +38,11 @@
 #include <runtime/renderer/object_lod.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/model_variant_files.h"
 
 using namespace opennova::editor;
-using opennova::pff::normalized_logical_name;
 using namespace opennova::threedi;
 namespace fs = std::filesystem;
 
@@ -368,8 +366,6 @@ int words() {
 	return 0;
 }
 
-// Every model the game install serves: the faces that find their material, and the materials whose
-// faces carry more than one surface.
 // The faces of `base` lying corner for corner (within the 8.8 grid) on a triangle of the collision LOD
 // wound with them: each must have taken one such triangle's material (a sheet stored both ways puts two
 // triangles on one face's corners, only one wound with it). Counts the faces checked and those wrong.
@@ -473,92 +469,126 @@ void faces_on_their_own_triangles(const Threedi3di3 &base, const ModelFaceMateri
 		}
 }
 
-int retail_surfaces() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every model's faces and their materials)");
-	const ProjectDocument project;
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string());
-	std::set<std::string> seen;
-	size_t models = 0, with_faces = 0, faces = 0, matched = 0, all_matched = 0;
-	size_t materials = 0, mixed = 0, mixed_models = 0, differing = 0, flags_mixed = 0, ambiguous = 0, against = 0;
-	std::map<std::string, size_t> examples;
-	size_t on_own = 0, wrong = 0, on_own_wrong_models = 0;
-	std::map<std::string, std::string> wrong_examples;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::gameprofile::gameprofile_scr_policy_for_code(project.target_game.c_str()));
-		TEST_EXPECT(game.mount_game(root, expansion) && game.has_mounted_archive());
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(fs::path(file.logical_name).extension().string()) != ".3di") continue;
-			if (!seen.insert(file.source_path + "|" + normalized_logical_name(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			if (!game.read_file(file.logical_name, bytes) || bytes.size() < 4 || std::memcmp(bytes.data(), "3DI3", 4) != 0)
-				continue;
-			ModelDocument document;
-			Diagnostic error;
-			if (!document.load_bytes(bytes, file.logical_name, AssetKind::Model, project.target_game, error)) continue;
-			++models;
-			const CollisionRow *collision = document.collision_row();
-			if (!collision || collision->faces.empty()) continue;
-			++with_faces;
-			const auto made = model_face_materials(document.model_row()->base);
-			faces += collision->faces.size();
-			matched += made->matched;
-			all_matched += made->matched == collision->faces.size() ? 1 : 0;
-			ambiguous += made->ambiguous;
-			against += made->against;
-			{
-				std::string first;
-				const size_t before = wrong;
-				faces_on_their_own_triangles(*document.model_row()->base, *made, on_own, wrong, first);
-				if (wrong > before && wrong_examples.size() < 8) wrong_examples[file.logical_name] = first;
-				on_own_wrong_models += wrong > before ? 1 : 0;
-			}
-			bool any = false;
-			const ModelRow *row = document.model_row();
-			for (size_t i = 0; i < row->materials.size(); ++i) {
-				ModelMaterialSurface surface;
-				if (!model_material_surface(document, row->ids.lists[kModelMaterials][i].id, surface) || !surface.faces) continue;
-				++materials;
-				for (const ModelFlagCount &flag : surface.flags) flags_mixed += flag.on && flag.on != surface.faces ? 1 : 0;
-				if (!surface.mixed()) continue;
-				++mixed;
-				differing += surface.differing.size();
-				any = true;
-				if (examples.size() < 8) examples[file.logical_name] = surface.differing.size();
-			}
-			mixed_models += any ? 1 : 0;
-		}
+// Every model of the format's fixtures (each form of the shipped models the threedi rows mint there): a face
+// on a triangle of its own wound with it takes that triangle's material (the install's 603,427 such faces
+// took theirs, Dpuma1's faces 369 and 1323 each its own side's of a sheet stored both ways).
+int own_triangles() {
+	const model_variants::Files models = model_variants::models();
+	size_t checked = 0, wrong = 0;
+	for (const std::string &path : models.paths) {
+		ModelDocument document;
+		Diagnostic error;
+		TEST_EXPECT(document.load_bytes(model_variants::bytes_of(path), path, AssetKind::Model, "jo", error));
+		const CollisionRow *collision = document.collision_row();
+		if (!collision || collision->faces.empty()) continue;
+		const auto made = model_face_materials(document.model_row()->base);
+		std::string first;
+		const size_t before = wrong;
+		faces_on_their_own_triangles(*document.model_row()->base, *made, checked, wrong, first);
+		if (wrong > before) std::printf("own triangles: %s: %s\n", path.c_str(), first.c_str());
 	}
-	if (models == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's models in its archives");
-	std::printf("retail surfaces: %zu models, %zu with bullet faces (%zu faces, %zu find their material, %zu models "
-	            "whole); %zu materials with faces, %zu of them mixed (%zu faces differ) in %zu models; %zu material "
-	            "flags mixed\n",
-	            models, with_faces, faces, matched, all_matched, materials, mixed, differing, mixed_models, flags_mixed);
-	for (const auto &e : examples) std::printf("retail surfaces: mixed in %s (%zu faces differ)\n", e.first.c_str(), e.second);
-	std::printf("retail surfaces: %zu faces had triangles of more than one material about them (their corners and winding chose); %zu "
-	            "took a triangle wound against them\n",
-	            ambiguous, against);
-	std::printf("retail surfaces: %zu faces lie on a triangle of their own wound with them; %zu of them took "
-	            "another's material (in %zu models)\n",
-	            on_own, wrong, on_own_wrong_models);
-	for (const auto &e : wrong_examples) std::printf("retail surfaces: %s: %s\n", e.first.c_str(), e.second.c_str());
-	// Nearly every face is a triangle of a render LOD (a first-person gun's own collision mesh aside), and a
-	// face on a triangle of its own takes that triangle's material (Dpuma1's faces 369 and 1323, a sheet
-	// stored both ways, each its own side's).
-	TEST_EXPECT(matched * 10 >= faces * 9);
-	TEST_EXPECT(on_own * 10 >= faces * 9 && wrong == 0);
+	TEST_EXPECT(checked > 100 && wrong == 0);
+	std::printf("own triangles: %zu faces on a triangle of their own wound with them, each its triangle's material\n",
+	            checked);
+	return model_variants::report_missing(models) == 0 ? 0 : 1;
+}
+
+// The shipped models' other faces, each against the triangles it lies by, in one model: a face stored twice
+// over one triangle (the install's 1,772 such faces, Armry02's among them) takes it twice; a face on no
+// triangle (a first-person gun's own collision mesh; Barbrol1's 8 of 183 faces) takes no material; a face
+// near a sheet stored both ways but on neither's corners, the side wound with it taken by the face made from
+// it, takes the side wound against it (NVG's one face); and a material whose faces carry two surfaces is
+// mixed (Cboat08's, Dbtr801's, Dcboat04's), its common surface the most faces'.
+int other_faces() {
+	std::istringstream text(R"(o3d 2
+model FACES
+material FF_MT_OP
+texture wall.tga 1 0 0 0
+material FF_MT_OP
+texture front.tga 1 0 0 0
+material FF_MT_OP
+texture back.tga 1 0 0 0
+lod 200 gnrc
+part 0 0 0 0
+mesh 0 0
+v 0 -1 0 1 0 0 0 1
+v 0 1 0 1 0 0 1 1
+v 0 1 2 1 0 0 1 0
+v 0 -1 2 1 0 0 0 0
+t 0 1 2
+t 0 2 3
+mesh 1 0
+v 4 -1 0 1 0 0 0 1
+v 4 1 0 1 0 0 1 1
+v 4 1 2 1 0 0 1 0
+t 0 1 2
+mesh 2 0
+v 4 -1 0 -1 0 0 0 1
+v 4 1 0 -1 0 0 1 1
+v 4 1 2 -1 0 0 1 0
+t 0 2 1
+panm 0 0
+cobj 0 0 0 0
+cv 0 -1 0
+cv 0 1 0
+cv 0 1 2
+cv 0 -1 2
+cv 10 -1 0
+cv 10 1 0
+cv 10 1 2
+cv 4 -1 0
+cv 4 1 0
+cv 4 1 2
+cv 4 1 2.0078125
+cf 0 1 2 14
+cf 0 1 2 14
+cf 0 2 3 17
+cf 4 5 6 14
+cf 7 8 9 14
+cf 7 8 10 14
+)");
+	std::vector<uint8_t> bytes;
+	std::vector<SceneFinding> findings;
+	const bool built = threedi_o3d_build(text, opennova::renderer::retail_model_target(), bytes, findings);
+	for (const SceneFinding &f : findings) std::printf("other faces: line %d: %s\n", f.line, f.message.c_str());
+	TEST_EXPECT(built);
+	ModelDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes, "faces.3di", AssetKind::Model, "jo", error));
+	const CollisionRow *collision = document.collision_row();
+	TEST_EXPECT(collision && collision->faces.size() == 6);
+	if (!collision || collision->faces.size() != 6) return 1;
+	const auto made = model_face_materials(document.model_row()->base);
+	// The wall's two faces over its first triangle and one over its second; none on the face at x = 10; the
+	// front's face, then the one near it on the back.
+	TEST_EXPECT(made->lod == 0 && made->matched == 5 && made->against == 1);
+	TEST_EXPECT((made->material == std::vector<int>{0, 0, 0, -1, 1, 2}));
+	TEST_EXPECT(model_faces_without_material(document) == 1);
+	size_t checked = 0, wrong = 0;
+	std::string first;
+	faces_on_their_own_triangles(*document.model_row()->base, *made, checked, wrong, first);
+	TEST_EXPECT(checked == 4 && wrong == 0);
+	// The wall's material: three faces, two of Metal (14) and one of Foliage (17), so mixed.
+	const ModelRow *row = document.model_row();
+	ModelMaterialSurface surface;
+	TEST_EXPECT(model_material_surface(document, row->ids.lists[kModelMaterials][0].id, surface) && surface.faces == 3 &&
+	            surface.mixed() && surface.common() == 14 && surface.differing.size() == 1 &&
+	            model_material_surface_words(surface).find("Mixed:") == 0);
+	TEST_EXPECT(model_differing_faces(document, row->ids.lists[kModelMaterials][0].id).size() == 1);
+	TEST_EXPECT(model_material_surface(document, row->ids.lists[kModelMaterials][2].id, surface) && surface.faces == 1 &&
+	            !surface.mixed());
+	std::printf("other faces: one stored twice, one on no triangle, one near a taken side, a mixed material\n");
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (faces_find_their_materials() != 0) return 1;
 	if (two_sided_sheet() != 0) return 1;
+	if (other_faces() != 0) return 1;
 	if (set_on_a_material() != 0) return 1;
 	if (words() != 0) return 1;
-	return retail_surfaces();
+	// The sweep over the format's fixtures last: it names every variant it lacks.
+	return own_triangles();
 }
