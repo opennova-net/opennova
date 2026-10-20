@@ -764,8 +764,10 @@ bool point_los_clear(World &world, const Entity &player, const Entity &cand, con
 bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &player,
 		const HostileMountIndex &hostile_mounts) {
 	if (cand.handle == player.handle) return true;
-    if (!cand.alive || cand.health <= 0) return true; // [orig: Flags & 2 skip]
-    if ((cand.flags & 2u) != 0) return true;
+	// The dead bit alone, in either view: no Health, no latch.
+	// [orig: Entity_FindNearestSeatOrArmory `test byte [esi+24h],2` @0x435E2B;
+	//  HUD_DrawVehicleSeatAndArmoryLabels @0x5A336F]
+	if (((cand.flags | cand.engine_flags) & kEntityFlagDead) != 0) return true;
 	// A candidate with no ItemDef offers nothing, seat or armory point [orig: the
 	// scan @0x435e35..0x435e3a, the labels @0x5a335a..0x5a335f].
 	if (!cand.has_item_def) return true;
@@ -781,7 +783,9 @@ bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &
 	const Entity *ground = world.registry.get(cand.ground_target);
 	if (cand.item_type == 6 && ground != nullptr && ground->has_item_def &&
 			(ground->item_attrib & kItemAttribPlayerControl) != 0)
-		return !ground->alive || ground->health <= 0 || (ground->flags & kEntityFlagDead) != 0 ||
+		// Its PlayerControl carrier on the same dead bit [orig: @0x435E8B; the labels
+		// @0x5A33AF].
+		return ((ground->flags | ground->engine_flags) & kEntityFlagDead) != 0 ||
 				hostile_mounts.blocks(ground->handle);
 	return false;
 }

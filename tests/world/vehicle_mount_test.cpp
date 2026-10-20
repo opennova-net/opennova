@@ -1212,6 +1212,57 @@ void test_seat_gates_read_the_dead_bit_alone() {
     CHECK(!find_best_vehicle_seat(r.w, r.veh_h, r.player_h, selected));
 }
 
+// The USE scan rejects a candidate on its dead bit alone (either view), never its
+// Health or the alive latch, and a type-6 child's PlayerControl carrier the same
+// way (D-NET-433's scan site). [orig: Entity_FindNearestSeatOrArmory @0x435D50 - the
+// candidate @0x435E2B, the carrier @0x435E8B; HUD_DrawVehicleSeatAndArmoryLabels
+// @0x5A336F / @0x5A33AF]
+void test_use_scan_reads_the_dead_bit_alone() {
+    {
+        Rig r;
+        VehicleSeatSelection hit;
+        r.veh().health = 0;
+        r.veh().alive = false;
+        CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+        CHECK(hit.vehicle == r.veh_h);
+        r.veh().health = 2000;
+        r.veh().alive = true;
+        r.veh().engine_flags |= kEntityFlagDead;
+        CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+        r.veh().engine_flags &= ~kEntityFlagDead;
+        r.veh().flags |= kEntityFlagDead;
+        CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+    }
+    {
+        // A type-6 child on the carrier: the carrier's dead bit rejects it, its
+        // Health does not.
+        Rig r;
+        r.veh().seats.clear(); // the child's seat is the only one
+        Entity child;
+        child.kind = EntityKind::Item;
+        child.has_item_def = true;
+        child.has_graphic_model = true;
+        child.item_type = 6;
+        child.health = 100;
+        child.alive = true;
+        child.position = r.veh().position;
+        child.ground_target = r.veh_h;
+        Seat gunner;
+        gunner.type = SeatType::Gunner;
+        gunner.bone_index = 5;
+        gunner.seat_local = {0.5f, 1.5f, 1.0f}; // where the rig's ctrlx seat sat
+        child.seats.push_back(gunner);
+        const EntityHandle child_h = r.w.registry.spawn(1, child);
+        VehicleSeatSelection hit;
+        r.veh().health = 0;
+        r.veh().alive = false;
+        CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+        CHECK(hit.vehicle == child_h);
+        r.veh().engine_flags |= kEntityFlagDead;
+        CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+    }
+}
+
 // The portable whole-registry walk is only for a world that never built the
 // collision tables. Once a live table build has happened, the retail BSS-zero
 // cadence leaves the first 16 ticks deliberately sliceless.
@@ -4722,6 +4773,7 @@ int main() {
     test_binoculars_survive_all_but_the_camera_reset();
     test_best_seat_walks_vehicle_children();
     test_seat_gates_read_the_dead_bit_alone();
+    test_use_scan_reads_the_dead_bit_alone();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
     test_post_epoch_player_spawn_discovers_nearby_seat_immediately();
     test_restore_refreshes_completed_candidate_epoch();
