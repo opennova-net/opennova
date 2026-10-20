@@ -3019,8 +3019,7 @@ bool run_side_password_admission() {
 		} else {
 			if (!expect(!replies.empty() && replies.front().tag == s2c::INIT,
 					"valid side credential admits JOIN")) return false;
-			auto world = std::make_unique<opennova::world::World>();
-			if (!expect(inmatch::Server_ReservePlayerTeam(config, true, roster, conn, *world) ==
+			if (!expect(inmatch::Server_ReservePlayerTeam(config, true, roster, conn) ==
 					test.team, "the submitted password selects the matching side")) return false;
 		}
 		conn.link.transport = nullptr;
