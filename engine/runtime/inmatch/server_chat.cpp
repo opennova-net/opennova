@@ -189,11 +189,14 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	char set_name[24] = {};
 	audio::compose_entity_sound_set(requester->anim_slot, audio::kEntitySoundMedicRequest,
 			set_name, sizeof(set_name));
-	if (world->tables.sound_sets == nullptr || !world->tables.sound_sets->has(set_name))
-		return replies;
+	if (world->tables.sound_sets == nullptr) return replies;
+	const audio::SetLocation medic_set = world->tables.sound_sets->find(set_name);
+	if (!medic_set.valid()) return replies;
 	PlaySoundCommand cmd;
 	cmd.flag = 1;
-	cmd.sound_name = set_name;
+	// The resolved set's own spelling (audio::SetLocation::name) [orig:
+	//  NetPacket_WriteOverlayAction @0x505D99..0x505DAA].
+	cmd.sound_name = medic_set.name;
 	cmd.has_pos = true;
 	cmd.pos_x = static_cast<int16_t>(requester->position.x.q16 >> 16);
 	cmd.pos_y = static_cast<int16_t>(requester->position.y.q16 >> 16);

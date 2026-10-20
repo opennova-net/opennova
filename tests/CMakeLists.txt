@@ -5204,6 +5204,11 @@ add_executable(npruntime_punt_slot_readers_test npruntime/punt_slot_readers_test
 target_link_libraries(npruntime_punt_slot_readers_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_punt_slot_readers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_punt_slot_readers COMMAND npruntime_punt_slot_readers_test)
+# D-NET-670: the mask-128 0x34 carries the resolved set's own spelling (the water-crossing fan).
+add_executable(npruntime_overlay_set_spelling_test npruntime/overlay_set_spelling_test.cpp)
+target_link_libraries(npruntime_overlay_set_spelling_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_overlay_set_spelling_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_overlay_set_spelling COMMAND npruntime_overlay_set_spelling_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

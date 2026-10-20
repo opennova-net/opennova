@@ -29,10 +29,13 @@ void fan_entity_sound_in_match(NapiNPServerCtx &ctx, world::World &world,
 	char set_name[24] = {};
 	audio::compose_entity_sound_set(source.anim_slot, type, set_name, sizeof(set_name));
 	if (set_name[0] == 0) return;
-	if (world.tables.sound_sets == nullptr || !world.tables.sound_sets->has(set_name)) return;
+	if (world.tables.sound_sets == nullptr) return;
+	const audio::SetLocation set = world.tables.sound_sets->find(set_name);
+	if (!set.valid()) return;
 	PlaySoundCommand cmd;
 	cmd.flag = 1;
-	cmd.sound_name = set_name;
+	// The resolved set's own spelling [orig: NetPacket_WriteOverlayAction @0x505D99..0x505DAA].
+	cmd.sound_name = set.name;
 	cmd.has_pos = true;
 	cmd.pos_x = static_cast<int16_t>(source.position.x.q16 >> 16);
 	cmd.pos_y = static_cast<int16_t>(source.position.y.q16 >> 16);

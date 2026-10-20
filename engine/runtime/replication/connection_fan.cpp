@@ -18,6 +18,7 @@
 #include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
 #include <runtime/world/vehicle_mount.h>
 
+#include <runtime/audio/oneshot_play.h> // SoundSetIndex (the 0x34 set's spelling)
 #include <runtime/replication/entity_wire_bridge.h> // health_classification_byte (the field-17 pack)
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
@@ -1193,7 +1194,13 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 	for (const world::WaterCrossEvent &ev : world.out.water_crossings.events) {
 		PlaySoundCommand cmd;
 		cmd.flag = 1; // positioned
-		cmd.sound_name = ev.airborne ? kWaterCrossAirborneEffect : kWaterCrossWadeEffect;
+		// The set the mission start resolved, spelled as its bank spells it (the route drops a
+		// crossing whose set no loaded bank holds) [orig: DialogSystem_Init @0x527692..0x5276C0;
+		// NetPacket_WriteOverlayAction @0x505D99..0x505DAA].
+		const char *wanted = ev.airborne ? kWaterCrossAirborneEffect : kWaterCrossWadeEffect;
+		const audio::SetLocation set = world.tables.sound_sets != nullptr
+				? world.tables.sound_sets->find(wanted) : audio::SetLocation{};
+		cmd.sound_name = set.valid() ? set.name : std::string(wanted);
 		cmd.has_pos = true;
 		cmd.pos_x = static_cast<int16_t>(ev.x >> 16);
 		cmd.pos_y = static_cast<int16_t>(ev.y >> 16);
