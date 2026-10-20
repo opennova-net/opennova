@@ -20,6 +20,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 
 #include <cstdint>
@@ -241,6 +242,88 @@ void test_tick_displacement_reads_the_saved_pose() {
 	CHECK(metric(still) == 0);
 }
 
+// D-NET-349: the serializer takes one priority-list row and then one round
+// event per turn under the shared budget, read after each turn, so a budget of
+// two turns carries two rows and two rounds in the order 1, 2, 1, 2; with no
+// budget limit the shorter list runs out and the other continues alone.
+// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - the header gate
+//  @0x50F09D..0x50F0A3, the row @0x50F0DE..0x50F2E2, the round
+//  @0x50F312..0x50F331, the budget @0x50F34B, the no-progress test @0x50F0CC]
+void test_rows_and_rounds_take_turns() {
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle me = w::spawn_remote_player(world, at(0.0f, 1));
+	const w::EntityHandle a = w::spawn_remote_player(world, at(5.0f, 2));
+	(void)w::spawn_remote_player(world, at(10.0f, 3));
+	(void)w::spawn_remote_player(world, at(15.0f, 4));
+	const std::vector<GameEntitySnapshot> ents = ns::snapshot_world(world);
+	const int saved_budget = ns::entity_send_budget();
+	struct Frame {
+		std::vector<uint8_t> body;
+		std::size_t rows = 0;
+		std::size_t rounds = 0;
+	};
+	const auto frame = [&](int budget, int round_count) {
+		world.out.rounds.clear();
+		world.out.rounds.frame_clock = 5;
+		for (int i = 0; i < round_count; ++i) {
+			w::RoundEvent ev;
+			ev.shooter_handle = a.packed;
+			ev.shot_seq = static_cast<uint16_t>(i + 1);
+			world.out.rounds.add(ev);
+		}
+		ns::set_entity_send_budget(budget);
+		ns::LoopbackChannel ch;
+		ns::Connection conn{&ch, ns::TransportMode::Loopback, me, 0};
+		conn.round_watermark = 4;
+		Frame f;
+		for (const ns::Datagram &d : emit(world, conn, ents)) {
+			if (d.tag != s2c::PER_FRAME_UPDATE) continue;
+			FrameUpdate fu;
+			CHECK(decode_frame_update(d.body.data(), d.body.size(),
+					[](uint16_t) { return EntityClass::Player; }, fu));
+			f.body = d.body;
+			f.rows = fu.records.size();
+			f.rounds = fu.round_events.size();
+		}
+		return f;
+	};
+	// The four rows alone, then with the three rounds: each player row is its
+	// 5-byte head and the compact, each round 18 bytes, the rest the header
+	// (its terminator included).
+	const Frame rows_only = frame(1600, 0);
+	const Frame all = frame(1600, 3);
+	CHECK(rows_only.rows == 4 && all.rows == 4 && all.rounds == 3);
+	const std::size_t row_bytes = 5 + encode_player_compact_record(PlayerCompactRecord{}).size();
+	const std::size_t round_bytes = (all.body.size() - rows_only.body.size()) / 3;
+	CHECK(round_bytes == 18);
+	const std::size_t header = rows_only.body.size() - 4 * row_bytes;
+	// No limit: the turns 1 2, 1 2, 1 2, then the fourth row alone.
+	std::size_t at = header - 1;
+	for (int turn = 0; turn < 4; ++turn) {
+		CHECK(all.body[at] == 1);
+		at += row_bytes;
+		if (turn < 3) {
+			CHECK(all.body[at] == 2);
+			at += round_bytes;
+		}
+	}
+	CHECK(all.body[at] == 0 && at + 1 == all.body.size());
+	// The least budget (100): the budget is read after each turn, so the turn
+	// that reaches it completes and the walk stops there; two turns here, two
+	// rows and two rounds in the order 1, 2, 1, 2 (rounds-first took three
+	// rounds and one row).
+	CHECK(header + row_bytes + round_bytes < 100 &&
+			header + 2 * (row_bytes + round_bytes) >= 100);
+	const Frame two = frame(100, 3);
+	CHECK(two.rows == 2 && two.rounds == 2);
+	CHECK(two.body[header - 1] == 1 && two.body[header - 1 + row_bytes] == 2 &&
+			two.body[header - 1 + row_bytes + round_bytes] == 1 &&
+			two.body[header - 1 + 2 * row_bytes + round_bytes] == 2);
+	ns::set_entity_send_budget(saved_budget);
+}
+
 } // namespace
 
 int main() {
@@ -248,6 +331,7 @@ int main() {
 	test_tracked_slots_despawn_ahead_of_the_frame();
 	test_negative_score_keys_at_the_prior();
 	test_tick_displacement_reads_the_saved_pose();
+	test_rows_and_rounds_take_turns();
 	if (failures == 0) std::printf("priority_list: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

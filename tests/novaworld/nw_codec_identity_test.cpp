@@ -288,7 +288,9 @@ std::vector<Case> build_corpus() {
 		add("round_event_full", encode_round_event_record(r));
 	}
 
-	// §5.9 frame updates: weapon sub-block + 3 record classes + fired round; env; mounted ammo.
+	// §5.9 frame updates: weapon sub-block + 3 record classes + fired round (the round in
+	// the first turn, after the first record: @0x50F070 pairs them, D-NET-349); env;
+	// mounted ammo.
 	{
 		FrameUpdate in;
 		in.anchor_x = 0x00112233; in.anchor_y = int32_t(0xFFAABBCC); in.anchor_z = 0x0044EE55;
@@ -474,7 +476,7 @@ const Vector kExpected[] = {
 	{"player_compact", 18u, 0xbafd9f635ff779ddull},
 	{"weapon_reload", 4u, 0x8782b4b93b79634dull},
 	{"round_event_full", 20u, 0xd2e48e24792ddda7ull},
-	{"frame_update_aim_records_hit", 119u, 0x349686e3ae154f3dull},
+	{"frame_update_aim_records_hit", 119u, 0x6c11da30daf83b3dull},
 	{"frame_update_env", 33u, 0x1973cd328c07f6f4ull},
 	{"frame_update_mount_ammo", 39u, 0x85c11fb07e2c99c1ull},
 	{"terrain_load_header_chunk", 56u, 0x6e19dba1c492390dull},

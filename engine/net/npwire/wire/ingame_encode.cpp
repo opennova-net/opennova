@@ -576,42 +576,49 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 		}
 	}
 
-	// Event loop: tag=1 per-entity compacts, then tag=2 round events, then tag=0.
-	// (The original interleaves 1/2 pairs under the send budget
-	// [orig: NetPacket_SerializeEntityStatesToPacket @0x50f070]; the retail decode loop
-	// is tag-driven, so grouped order is read identically.)
-	for (const FrameUpdateRecord &rec : fu.records) {
-		switch (rec.cls) {
-		case EntityClass::Player:
-			w.u8(1);
-			w.u16(rec.handle);
-			w.u16(rec.type_id);
-			append(encode_player_compact_record(rec.player));
-			break;
-		case EntityClass::Vehicle:
-			w.u8(1);
-			w.u16(rec.handle);
-			w.u16(rec.type_id);
-			append(encode_vehicle_compact_record(rec.vehicle));
-			break;
-		case EntityClass::Infantry:
-			w.u8(1);
-			w.u16(rec.handle);
-			w.u16(rec.type_id);
-			append(encode_infantry_compact_record(rec.infantry));
-			break;
-		case EntityClass::NoNetworkCallback:
-			w.u8(1);
-			w.u16(rec.handle);
-			w.u16(rec.type_id);
-			break;
-		default:
-			break;
+	// Event loop: each turn writes the next tag-1 per-entity compact, then the
+	// next tag-2 round event, until both lists are spent; then tag 0. The host's
+	// budget walk chose how many of each this frame carries, in the same pairs.
+	// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - the priority
+	//  list's record (tag 1 @0x50F257) then the g_RoundEventRefs chain's
+	//  (tag 2 @0x50F326, NetPacket_SerializeRoundEvent @0x50F331) in each turn,
+	//  the terminator @0x50F366]
+	const std::size_t turns = std::max(fu.records.size(), fu.round_events.size());
+	for (std::size_t turn = 0; turn < turns; ++turn) {
+		if (turn < fu.records.size()) {
+			const FrameUpdateRecord &rec = fu.records[turn];
+			switch (rec.cls) {
+			case EntityClass::Player:
+				w.u8(1);
+				w.u16(rec.handle);
+				w.u16(rec.type_id);
+				append(encode_player_compact_record(rec.player));
+				break;
+			case EntityClass::Vehicle:
+				w.u8(1);
+				w.u16(rec.handle);
+				w.u16(rec.type_id);
+				append(encode_vehicle_compact_record(rec.vehicle));
+				break;
+			case EntityClass::Infantry:
+				w.u8(1);
+				w.u16(rec.handle);
+				w.u16(rec.type_id);
+				append(encode_infantry_compact_record(rec.infantry));
+				break;
+			case EntityClass::NoNetworkCallback:
+				w.u8(1);
+				w.u16(rec.handle);
+				w.u16(rec.type_id);
+				break;
+			default:
+				break;
+			}
 		}
-	}
-	for (const RoundEventRecord &ev : fu.round_events) {
-		w.u8(2);
-		append(encode_round_event_record(ev));
+		if (turn < fu.round_events.size()) {
+			w.u8(2);
+			append(encode_round_event_record(fu.round_events[turn]));
+		}
 	}
 	w.u8(0); // event-loop terminator
 	return out;

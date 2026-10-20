@@ -601,19 +601,14 @@ bool tracked_slot_despawns(const world::World &w, const Connection &conn,
 //     shell sort, not stable: the keys are small integers and tie routinely (for a dead or
 //     deploying recipient a saturated, unmoved far entity scores exactly 255), so the
 //     candidates enter in retail's order, pool 0 then pool 1, each by slot];
-//  4. take records until the byte budget (header included) is exhausted — the budget is
-//     a SOFT cap checked after each record [orig: @0x50f34b], so the record in flight
-//     completes; a selected entity's age resets to 0 [orig: @0x50f168].
-// Round-robin across frames is EMERGENT from aging: starved entities' keys climb and
-// age >= 50 force-admits them past the distance gate.
-std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
+// The serializer's budget walk (serialize_frame_records) takes the list's records in this
+// order, paired with the round events. Round-robin across frames is EMERGENT from aging:
+// starved entities' keys climb and age >= 50 force-admits them past the distance gate.
+std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World &w,
                                                       Connection &conn,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
                                                       const int32_t (&body)[3],
-                                                      std::size_t header_bytes,
-                                                      std::size_t hard_frame_limit,
-                                                      std::size_t frame_budget,
                                                       std::vector<uint16_t> *despawned) {
 	devtools::ProfileLap lap(w.profile);
 	// 1. Age sweep: a saturating +1 in 32-byte strides over the age block's 0x5B0 bytes
@@ -885,30 +880,10 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	world::shell_sort_by_value(scored, [](const Scored &s) { return s.key; });
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SORT);
 
-	// 4. Budget walk (soft cap, header included) + age reset and last-sent cache
-	// stamps on selection [orig: @0x50f168 age; @0x50f17c heading (Yaw+0x800000)>>24;
-	// the @0x50f22x speed-metric tail].
-	std::vector<GameEntitySnapshot> selected;
-	std::size_t written = header_bytes;
-	for (const Scored &s : scored) {
-		const std::size_t record_bytes = record_wire_size(*s.snap);
-		if (hard_frame_limit != 0 &&
-				(written > hard_frame_limit ||
-				 record_bytes > hard_frame_limit - written))
-			continue;
-		selected.push_back(*s.snap);
-		std::size_t idx = 0;
-		if (priority_cache_index(*s.snap, idx)) {
-			conn.s2c_entity_age[idx] = 0;
-			conn.s2c_entity_heading[idx] = static_cast<uint8_t>(
-					(static_cast<uint32_t>(s.snap->euler_z) + 0x800000u) >> 24);
-			conn.s2c_entity_speed[idx] = s.snap->tick_speed_q6;
-		}
-		written += record_bytes;
-		if (written >= frame_budget) break; // [orig: @0x50f34b]
-	}
-	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_BUDGET);
-	return selected;
+	std::vector<const GameEntitySnapshot *> listed;
+	listed.reserve(scored.size());
+	for (const Scored &s : scored) listed.push_back(s.snap);
+	return listed;
 }
 
 // ---------------------------------------------------------------------------
@@ -924,9 +899,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 // ---------------------------------------------------------------------------
 std::vector<RoundEventRecord> select_round_events(const world::World &w, Connection &conn,
                                                   const PlayerReplicationState &anchor,
-                                                  const int32_t (&body)[3],
-                                                  std::size_t budget_left,
-                                                  std::size_t hard_budget_left) {
+                                                  const int32_t (&body)[3]) {
 	std::vector<RoundEventRecord> out;
 	const world::RoundRing &ring = w.out.rounds;
 
@@ -935,7 +908,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 	// ones never do (NEW-L1-8).
 	// [orig: the playerSlot+97544 test @0x4FFEE8, its jz past the stamp to @0x5001B5]
 	if (conn.round_watermark == 0) return out;
-	if (ring.count == 0 || budget_left == 0) {
+	if (ring.count == 0) {
 		conn.round_watermark = ring.frame_clock; // [orig: @0x5001A8..0x5001AE]
 		return out;
 	}
@@ -1007,10 +980,8 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 	//  @0x4FFF24..0x500157, its CPairList_ShellSortByValue call @0x50016a].
 	world::shell_sort_by_value(scored, [](const ScoredRound &s) { return s.score; });
 
-	// Convert to wire records — capped at 255 [orig: the g_RoundEventRefs array
-	// @0x500190] and by the remaining frame budget (soft cap, like the tag-1 walk
-	// [orig: @0x50f34b]).
-	std::size_t written = 0;
+	// Convert to wire records, capped at 255 [orig: the g_RoundEventRefs array
+	// @0x500190]; the serializer's budget walk takes them in this order.
 	for (const ScoredRound &s : scored) {
 		if (out.size() >= 255) break;
 		const world::RoundEvent &ev = *s.ev;
@@ -1039,19 +1010,70 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		// Direction BAM high words, rounded [orig: @0x504a18/@0x504a3c].
 		rec.yaw_bam_high = uint16_t((uint32_t(ev.dir_yaw) + 0x8000u) >> 16);
 		rec.pitch_bam_high = uint16_t((uint32_t(ev.dir_pitch) + 0x8000u) >> 16);
-
-		const std::size_t wire = 1 /*tag*/ + 17 + ((rec.flags & 0x80) ? 1u : 0u) +
-		                         ((rec.flags & 0x40) ? 2u : 0u);
-		if (hard_budget_left != std::numeric_limits<std::size_t>::max() &&
-				(written > hard_budget_left || wire > hard_budget_left - written))
-			continue;
 		out.push_back(rec);
-		written += wire;
-		if (written >= budget_left) break;
 	}
 
 	conn.round_watermark = ring.frame_clock; // [orig: the frame clock @0x5001A8, stored @0x5001AE]
 	return out;
+}
+
+// The serializer's budget walk over the two lists, one turn at a time: the
+// priority list's next row (its tag-1 record; the selection resets its age and
+// stamps its last-sent heading and speed caches), then the round chain's next
+// event (its tag-2 record). The 600-byte budget is soft, read after each turn
+// with the header counted, so the turn in flight completes; a turn that writes
+// nothing ends the walk, as does a header already at the budget. The encoder
+// writes the chosen records in the same pairs. A record past the hard body cap
+// (the joiner's datagram bound) is passed over, where retail's buffer check
+// would fault.
+// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - the header gate
+//  @0x50F0A3, the no-progress test @0x50F0CC, the row @0x50F0DE..0x50F2E2 (the
+//  age @0x50F168, the heading @0x50F17C, the speed @0x50F241), the round
+//  @0x50F312..0x50F331, the budget @0x50F34B]
+void serialize_frame_records(Connection &conn,
+                             const std::vector<const GameEntitySnapshot *> &listed,
+                             const std::vector<RoundEventRecord> &listed_rounds,
+                             std::size_t header_bytes, std::size_t hard_frame_limit,
+                             std::size_t frame_budget,
+                             std::vector<GameEntitySnapshot> &selected,
+                             std::vector<RoundEventRecord> &rounds) {
+	const auto fits = [&](std::size_t written, std::size_t bytes) {
+		return hard_frame_limit == 0 ||
+				(written <= hard_frame_limit && bytes <= hard_frame_limit - written);
+	};
+	std::size_t written = header_bytes;
+	if (written >= frame_budget) return;
+	std::size_t row = 0;
+	std::size_t round = 0;
+	for (;;) {
+		const std::size_t before = written;
+		if (row < listed.size()) {
+			const GameEntitySnapshot &snap = *listed[row++];
+			const std::size_t bytes = record_wire_size(snap);
+			if (fits(written, bytes)) {
+				selected.push_back(snap);
+				std::size_t idx = 0;
+				if (priority_cache_index(snap, idx)) {
+					conn.s2c_entity_age[idx] = 0;
+					conn.s2c_entity_heading[idx] = static_cast<uint8_t>(
+							(static_cast<uint32_t>(snap.euler_z) + 0x800000u) >> 24);
+					conn.s2c_entity_speed[idx] = snap.tick_speed_q6;
+				}
+				written += bytes;
+			}
+		}
+		if (round < listed_rounds.size()) {
+			const RoundEventRecord &rec = listed_rounds[round++];
+			const std::size_t bytes = 1 /*tag*/ + 17 + ((rec.flags & 0x80) ? 1u : 0u) +
+					((rec.flags & 0x40) ? 2u : 0u);
+			if (fits(written, bytes)) {
+				rounds.push_back(rec);
+				written += bytes;
+			}
+		}
+		if (written >= frame_budget) break; // [orig: @0x50F34B]
+		if (written == before) break;      // [orig: @0x50F0CC, the next turn's test]
+	}
 }
 
 // Header wire size for a given flags2, mirroring encode_frame_update: 12-B anchor +
@@ -1385,33 +1407,21 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// Server_BuildEntityPriorityList @ 0x50e590 + the NetPacket_SerializeEntityStatesToPacket
 	// @ 0x50f070 budget loop].
 	const std::size_t header_bytes = frame_header_bytes(flags2, game_type, hs);
-	const std::size_t hard_event_bytes = max_frame_body_bytes == 0
-			? std::numeric_limits<std::size_t>::max()
-			: (max_frame_body_bytes > header_bytes
-					? max_frame_body_bytes - header_bytes
-					: 0);
 	lap.mark(devtools::Slot::SIM_REPLICATION_FAN_SETUP);
-	// Round events FIRST under the shared frame budget [orig: the @0x50f312 interleave
-	// serves tag-2 refs inside the SAME @0x50f070 budget loop as the tag-1 records].
-	// The first grouped-order port handed rounds only the leftovers — a real-world
-	// entity set (players + ~21 vehicles) fills the 600-B budget alone, so tag-2
-	// starved to ZERO on the wire and the sweep still advanced the watermark,
-	// discarding every round echo (v29; D-NET-154). Rounds are rare and <= 20 B each;
-	// entities absorb the remainder — same cap, and the retail decode loop is
-	// tag-driven either way. (D-NET-152/154)
-	std::vector<RoundEventRecord> rounds =
-			select_round_events(
-					w, conn, anchor, body,
-					frame_budget > header_bytes ? frame_budget - header_bytes : 0,
-					hard_event_bytes);
-	std::size_t rounds_bytes = 0;
-	for (const RoundEventRecord &r : rounds)
-		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
+	// The round list first, as the priority list's builder calls the round
+	// builder at its head [orig: Server_BuildRoundEventListForPlayer @0x4FFEE0,
+	// called @0x50E59C], then the priority list, then the serializer's walk
+	// takes one of each per turn under the shared budget (D-NET-349; before it
+	// ours wrote every round ahead of the rows, D-NET-152/154).
+	const std::vector<RoundEventRecord> listed_rounds = select_round_events(w, conn, anchor, body);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ROUNDS);
-	std::vector<GameEntitySnapshot> selected =
-			select_frame_entities(
-					w, conn, ents, anchor, body, header_bytes + rounds_bytes,
-					max_frame_body_bytes, frame_budget, despawned);
+	const std::vector<const GameEntitySnapshot *> listed =
+			select_frame_entities(w, conn, ents, anchor, body, despawned);
+	std::vector<GameEntitySnapshot> selected;
+	std::vector<RoundEventRecord> rounds;
+	serialize_frame_records(conn, listed, listed_rounds, header_bytes, max_frame_body_bytes,
+			frame_budget, selected, rounds);
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_BUDGET);
 	// The list read the recipient's body as the caller's snapshot holds it,
 	// ahead of the writer's stores (the hide bit, the spectator restamp, the
 	// pre-round dead-bit clear, which the host applies before this call); its
