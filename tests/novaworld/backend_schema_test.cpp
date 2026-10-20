@@ -91,7 +91,7 @@ int test_migrations_create_expected_tables() {
 		"games", "host_keys", "host_players", "host_roster", "hosted_address_orphans", "hosted_addresses",
 		"hosted_admin_links", "hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
 		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
-		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "lobby_commands", "lobby_instances",
+		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "lobby_commands", "lobby_goodbyes", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
 		"program_hourly", "program_samples", "release_sections", "releases", "server_status",
 		"service_meta", "unknown_messages", "web_sessions" };
@@ -968,6 +968,28 @@ int test_lobby_instances_tables() {
 	return 0;
 }
 
+// The goodbyes a lobby's clean stop leaves (0021_lobby_goodbyes.sql): one per address, stamped
+// as it is left; an SK of 0 (no session's), a key past 32 bits and a port past 16 refused.
+int test_lobby_goodbyes_table() {
+	TestDatabase scratch({ /*migrate=*/true });
+	Database db = scratch.open();
+	const std::string goodbye =
+			"INSERT INTO lobby_goodbyes (peer_ip, peer_port, server_sk, client_ck) VALUES ";
+	db.exec(goodbye + "('10.0.0.3', 32768, 1, 0);");
+	TEST_EXPECT(db.query("SELECT 1 FROM lobby_goodbyes "
+						 "WHERE left_at > now() - interval '1 minute';")
+						.size() == 1);
+	TEST_EXPECT(has_index(db, "lobby_goodbyes", "lobby_goodbyes_pkey"));
+	TEST_EXPECT(refused(db, goodbye + "('10.0.0.3', 32768, 2, 2);"));
+	TEST_EXPECT(refused(db, goodbye + "('10.0.0.4', 32768, 0, 2);"));
+	TEST_EXPECT(refused(db, goodbye + "('10.0.0.4', 32768, 4294967296, 2);"));
+	TEST_EXPECT(refused(db, goodbye + "('10.0.0.4', 32768, 2, 4294967296);"));
+	TEST_EXPECT(refused(db, goodbye + "('10.0.0.4', 65536, 2, 2);"));
+	db.exec(goodbye + "('10.0.0.3', 32769, 4294967295, 4294967295);");
+	TEST_EXPECT(db.query("SELECT 1 FROM lobby_goodbyes;").size() == 2);
+	return 0;
+}
+
 // 0020_lobby_live_view.sql over a database migrated to the ones before it: a listing's joiners
 // keyed by their account (a row with none goes, one per account and listing stays, its latest
 // join, and the port of 0 goes), an account's delete taking its rows; the session rows' account
@@ -1064,11 +1086,14 @@ int main(int argc, char **argv) {
 		return 1;
 	if (test_lobby_live_view_migration() != 0)
 		return 1;
+	if (test_lobby_goodbyes_table() != 0)
+		return 1;
 	if (test_fleet_tables() != 0)
 		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "
 				"server games, "
-				"cd keys, billing, account email, jobs, fleet state, the lobby live view)\n");
+				"cd keys, billing, account email, jobs, fleet state, the lobby live view, the "
+				"lobby goodbyes)\n");
 	return 0;
 }

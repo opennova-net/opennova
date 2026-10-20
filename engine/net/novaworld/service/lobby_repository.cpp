@@ -339,6 +339,64 @@ std::optional<int64_t> login_account(db::Database &db, const std::string &sessio
 	return rows.front().as_int(0);
 }
 
+void leave_goodbyes(
+		db::Database &db, const std::vector<Goodbye> &goodbyes, int64_t max_age_seconds) {
+	db.exec("DELETE FROM lobby_goodbyes WHERE left_at < now() - make_interval(secs => $1);",
+			{ i64(max_age_seconds) });
+	if (goodbyes.empty())
+		return;
+	// Four array literals the statement casts, one row per index; each address quoted, its " and
+	// \ escaped, as a text array's element is.
+	std::string ips = "{";
+	std::string ports = "{";
+	std::string sks = "{";
+	std::string cks = "{";
+	for (std::size_t i = 0; i < goodbyes.size(); ++i) {
+		if (i != 0) {
+			ips += ',';
+			ports += ',';
+			sks += ',';
+			cks += ',';
+		}
+		ips += '"';
+		for (const char c : goodbyes[i].peer_ip) {
+			if (c == '"' || c == '\\')
+				ips += '\\';
+			ips += c;
+		}
+		ips += '"';
+		ports += std::to_string(goodbyes[i].peer_port);
+		sks += std::to_string(goodbyes[i].server_sk);
+		cks += std::to_string(goodbyes[i].client_ck);
+	}
+	ips += '}';
+	ports += '}';
+	sks += '}';
+	cks += '}';
+	db.exec("INSERT INTO lobby_goodbyes (peer_ip, peer_port, server_sk, client_ck) "
+			"SELECT * FROM unnest($1::text[], $2::bigint[], $3::bigint[], $4::bigint[]) "
+			"ON CONFLICT (peer_ip, peer_port) DO UPDATE SET server_sk = EXCLUDED.server_sk, "
+			"client_ck = EXCLUDED.client_ck, left_at = now();",
+			{ str(ips), str(ports), str(sks), str(cks) });
+}
+
+std::vector<Goodbye> list_goodbyes(db::Database &db, int64_t max_age_seconds) {
+	std::vector<Goodbye> out;
+	for (const auto &r : db.query("SELECT peer_ip, peer_port, server_sk, client_ck "
+								  "FROM lobby_goodbyes "
+								  "WHERE left_at >= now() - make_interval(secs => $1) "
+								  "ORDER BY peer_ip, peer_port;",
+				 { i64(max_age_seconds) })) {
+		Goodbye g;
+		g.peer_ip = r.as_text(0).value_or("");
+		g.peer_port = static_cast<int>(r.as_int(1).value_or(0));
+		g.server_sk = static_cast<uint32_t>(r.as_int(2).value_or(0));
+		g.client_ck = static_cast<uint32_t>(r.as_int(3).value_or(0));
+		out.push_back(std::move(g));
+	}
+	return out;
+}
+
 const char *push_result_name(PushResult result) {
 	switch (result) {
 		case PushResult::Queued:
