@@ -208,7 +208,7 @@ void test_the_warm_up_lifts_an_unparented_player_body() {
 	w::warm_up_player_body(*world, *body);
 	CHECK(body->position.z.q16 > z0 + 65536);
 	CHECK(body->position.x.q16 == 5 * 65536 && body->position.y.q16 == 6 * 65536);
-	CHECK(motor->pos[2] == body->position.z.q16);
+	CHECK(motor->self == body); // the motor works on the body's own words (D-NET-507)
 	const int32_t z1 = body->position.z.q16;
 	body->mount_target = h; // any parent
 	w::warm_up_player_body(*world, *body);

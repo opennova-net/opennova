@@ -4,6 +4,7 @@
 #include <runtime/world/entity_spawn.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 #include <runtime/world/ai.h>
@@ -95,18 +96,22 @@ void warm_up_organic_body(World &world, AiSystem &ai, Entity &entity, AiEntity &
     if (!infantry_has_anim_channel(inf, ai.root_motion)) return;
     RootMotionFrame frame{};
     const bool parented = entity.mount_target.valid();
-    body.pos[2] = io::bam_add(body.pos[2],
+    // The entity's own Position words (D-NET-507).
+    EntityPosition &position = body.self->position;
+    position.z.q16 = io::bam_add(position.z.q16,
             warm_up_channels(inf, uint32_t(body.net_id), parented, *ai.root_motion, ai.anim_rings, frame));
     if (parented) return;
     body.collide_state.skip_counter = 0;
     if (ai.collision != nullptr) {
+        std::array<int32_t, 3> pos = position.words();
         const int32_t clearance = ai.collision->resolve_entity(
-                world, entity.handle, body.collide_state, body.pos,
+                world, entity.handle, body.collide_state, pos.data(),
                 inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
                 body.heading, 0, false, ai.is_authority, world.logic_tick,
                 inf.anim_state, infantry_anim_flags(inf.anim_state), body.health);
+        position.set_q16({pos[0], pos[1], pos[2]});
         if (clearance < kOrganicWarmupSettleQ16)
-            body.pos[2] = io::bam_sub(body.pos[2], clearance);
+            position.z.q16 = io::bam_sub(position.z.q16, clearance);
     }
     body.collide_state.skip_counter = 0;
 }
@@ -118,11 +123,7 @@ void warm_up_player_body(World &world, Entity &entity) {
     AiEntity *body = world.ai.for_handle(entity.handle);
     if (body == nullptr || !body->inf.active) return;
     // The placement wrote the entity's words; the warm-up works on them.
-    body->pos[0] = entity.position.x.q16;
-    body->pos[1] = entity.position.y.q16;
-    body->pos[2] = entity.position.z.q16;
     warm_up_organic_body(world, world.ai, entity, *body);
-    entity.position.set_q16({body->pos[0], body->pos[1], body->pos[2]});
 }
 
 bool organic_init_class(const char *ai_function) {
