@@ -8,6 +8,7 @@
 // per-PN identity selector cannot regress the lobby path.
 
 #include <net/novaworld/client_session.h>
+#include <net/novaworld/lobby_identity.h>
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include <net/npwire/session_hello.h>
@@ -90,6 +91,32 @@ int main() {
 
 	// The selector actually switched the GUID.
 	check(jo_hello.pg != nw_hello.pg, "JO and lobby PG GUIDs differ");
+
+	// D-NET-722: the lobby hello's CO is the company constant and its AP the running executable's
+	// file name (this test's own), as the 0x42 carries them too.
+	// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - CO @0x4d3cae, AP Napi_GetExeBasename
+	//  @0x4d3cc3, Napi_CopyString(.., 0x40) @0x4d3cd2]
+	check(nw_hello.co == "NovaLogic Inc, Calabasas CA U.S.A.", "lobby hello CO == the company constant");
+	const std::string exe = read_exe_basename();
+	// How the test was started decides what the first token holds (ctest passes a '/' path,
+	// which retail's basename keeps whole), so only its name is pinned here.
+	check(exe.find("jointops_hello_test") != std::string::npos, "the running executable's name is read");
+	check(nw_hello.ap == exe.substr(0, kLobbyApChars), "lobby hello AP == the running executable's file name");
+
+	// The command line's first token, quote-aware, from past its last backslash on; a '/' is no
+	// separator to retail's basename.
+	// [orig: Napi_GetExeBasename @0x62E0B0 - String_TokenizeQuotedToArray @0x62E13E;
+	//  Path_BasenameInPlace @0x617530 - the backslash test @0x617550]
+	check(exe_basename_from_command_line("\"C:\\Games\\Joint Operations\\Jointops.exe\" /w") ==
+	              "Jointops.exe",
+	      "a quoted path with spaces gives its file name");
+	check(exe_basename_from_command_line("C:\\nw\\dfx2.exe /mod x") == "dfx2.exe",
+	      "an unquoted path gives its file name");
+	check(exe_basename_from_command_line("jointops /lan") == "jointops", "a bare name is kept whole");
+	check(exe_basename_from_command_line("C:/Games/Jointops.exe") == "C:/Games/Jointops.exe",
+	      "a '/' path is kept whole");
+	check(exe_basename_from_command_line("dir\\") == "", "a trailing backslash leaves nothing");
+	check(exe_basename_from_command_line("   ").empty(), "no token gives nothing");
 
 	if (g_failures == 0) {
 		std::printf("jointops_hello: all checks passed\n");

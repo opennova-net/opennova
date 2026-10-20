@@ -13,8 +13,11 @@
 #include <ipifcons.h>
 #endif
 
+#include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
+
 #include <algorithm>
 #include <cstdint>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -90,6 +93,30 @@ bool read_retail_machine_inputs(RetailMachineInputs &out) {
 #else
 	(void)out;
 	return false;
+#endif
+}
+
+// [orig: Napi_GetExeBasename @0x62E0B0 - the first token @0x62E13E; Path_BasenameInPlace
+//  @0x617530 - each backslash moves the start past it @0x617550..0x617555, the rest copied
+//  @0x617566..0x617570]
+std::string exe_basename_from_command_line(std::string_view command_line) {
+	const std::vector<std::string> tokens = tokenize_quoted(command_line);
+	if (tokens.empty()) return {};
+	const std::string &path = tokens.front();
+	const std::size_t slash = path.rfind('\\');
+	return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+std::string read_exe_basename() {
+#ifdef _WIN32
+	const char *command_line = GetCommandLineA();
+	return command_line == nullptr ? std::string() : exe_basename_from_command_line(command_line);
+#else
+	std::ifstream in("/proc/self/cmdline", std::ios::binary);
+	std::string first;
+	std::getline(in, first, '\0');
+	const std::size_t slash = first.rfind('/');
+	return slash == std::string::npos ? first : first.substr(slash + 1);
 #endif
 }
 

@@ -113,13 +113,15 @@ public:
 		//   PN   == the server game id "NOVAWORLDUDP",
 		//   PV1  == the title's lobby PV1 (JO's "0.0.0 2/10/2004 EM"),
 		//   PG   == the 16-byte protocol GUID (added in build_client_hello).
-		// CO/AP/BDAT are read but never validated, so CO and AP stay our identity;
-		// BDAT is the title's (a free field). The constants are
-		// CNapiGameSession_InitNPConnection @ 0x4d3be0's; the title's two come from
-		// lobby() (TitleIdentity::lobby_pv1 / lobby_bdat).
+		// CO/AP/BDAT are read but never validated. lobby() fills them as retail's lobby
+		// connection does: CO the company constant (TitleIdentity::co), AP the running
+		// executable's file name (read_exe_basename) kept to 63 characters, BDAT the title's
+		// lobby BDAT; the title's PV1 is its lobby_pv1 (D-NET-722).
+		// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - CO @0x4d3cae, AP
+		//  Napi_GetExeBasename @0x4d3cc3 copied with Napi_CopyString(.., 0x40) @0x4d3cd2]
 		std::string nvs  = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
-		std::string co   = "OpenNova";
-		std::string ap   = "OpennovaGodotClient.exe";
+		std::string co;
+		std::string ap;
 		std::string bdat;                            // the title's lobby BDAT (free field)
 		std::string pn   = "NOVAWORLDUDP";           // validated == server game id
 		std::string pv1;                             // the title's lobby PV1, validated
@@ -715,7 +717,10 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 // gate response (ProcessResponse @ 0x4ced20) and are empty against the
 // permissive OpenNova gate.
 struct NovaWorldJoinCu {
-	std::string application = "OpennovaGodotClient.exe";  // exe basename
+	// Application: the running executable's file name (read_exe_basename), its 512-byte read
+	// whole. [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640 - Napi_GetExeBasename(.., 0x200)
+	//  @0x4d4780, the CU @0x4d4798]
+	std::string application;
 	// BuildDateAndTime: the title's lobby BDAT (TitleIdentity::lobby_bdat).
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d479d]
 	std::string build_date_and_time;

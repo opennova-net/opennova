@@ -92,6 +92,7 @@ struct ExpectedCu {
 int main() {
 	// ---- 1. make_novaworld_join_cu builds the retail set ------------------
 	NovaWorldJoinCu in;
+	in.application = "Jointops.exe"; // the running executable's file name (read_exe_basename)
 	in.build_date_and_time = "Jul 21 2009 18:54:41"; // JO's lobby BDAT (TitleIdentity::lobby_bdat)
 	in.gate_tag = "jop:cus2";
 	in.met_tag = "metlabel-xyz";
@@ -100,7 +101,7 @@ int main() {
 	auto cu = make_novaworld_join_cu(in);
 
 	const ExpectedCu expected[] = {
-	    {"Application", "OpennovaGodotClient.exe"},
+	    {"Application", "Jointops.exe"},
 	    {"BuildDateAndTime", "Jul 21 2009 18:54:41"},
 	    {"Debug", "0"},
 	    {"CountryName", ""},
