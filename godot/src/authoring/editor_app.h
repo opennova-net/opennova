@@ -292,6 +292,7 @@ private:
 	// The external round trip (S18, DI-01): when the files were last checked, the last view event taken, and
 	// the file the last open_externally named.
 	uint64_t last_disk_check_ms_ = 0;
+	int64_t frame_started_us_ = 0; // the frame under way's start (the perf query's Wall)
 	uint64_t external_seq_ = 0;
 	bool open_externally_ = true;
 	String last_external_open_;

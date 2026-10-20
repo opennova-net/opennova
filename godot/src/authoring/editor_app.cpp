@@ -35,6 +35,7 @@
 #include <editor/run/launch_plan.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/file_preferences_store.h>
+#include <editor/session/frame_times.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_operation.h>
@@ -379,6 +380,18 @@ void EditorApp::free_retired_() {
 }
 
 void EditorApp::_process(double p_delta) {
+	// The frame before ends here (its Wall the time from its start to this one's), and this one is measured
+	// from now (the perf query, session/frame_times.h): the layout, the requests, the poll and the devices.
+	const int64_t frame_start = opennova::editor::steady_clock_us();
+	if (session_) {
+		opennova::editor::FrameTimes &times = session_->frame_times();
+		if (times.in_frame()) {
+			times.add(opennova::editor::FramePhase::Wall, frame_start - frame_started_us_);
+			times.end_frame();
+		}
+		times.begin_frame();
+	}
+	frame_started_us_ = frame_start;
 	// What the last frame gave up: its draw is done.
 	free_retired_();
 	ImGuiPassNode::_process(p_delta); // the layout pass (no-op headless): the windows raise requests
@@ -392,6 +405,7 @@ void EditorApp::_process(double p_delta) {
 	// nothing to look at, whichever window asked last), the steady one from then on; a budget of 0 is
 	// a test's one unit a frame whatever.
 	if (devices_) {
+		const int64_t devices_start = opennova::editor::steady_clock_us();
 		session_->advance(p_delta);
 		// What the previewed clip's events fired as the clock ran, heard now (DI-04).
 		pump_clip_sounds_();
@@ -407,6 +421,8 @@ void EditorApp::_process(double p_delta) {
 		devices_->step(session_->viewports(),
 				[start, budget] { return Time::get_singleton()->get_ticks_usec() - start < budget; });
 		ObjectModel::advance_awake_frame(p_delta);
+		session_->frame_times().add(opennova::editor::FramePhase::Devices,
+				opennova::editor::steady_clock_us() - devices_start);
 	}
 }
 
@@ -433,7 +449,8 @@ void EditorApp::before_layout(double) {
 #endif
 }
 
-void EditorApp::after_layout(uint64_t, bool, int64_t) {
+void EditorApp::after_layout(uint64_t, bool, int64_t p_layout_us) {
+	if (session_) session_->frame_times().add(opennova::editor::FramePhase::Layout, p_layout_us);
 #if OPENNOVA_EDITOR_UI
 	windows_->end_frame();
 	// One pointer over a picture that draws the game's (a menu's, DI-08): the system one hidden while a
@@ -456,8 +473,11 @@ void EditorApp::pump() {
 	// What the devices raised inside the last pump (a burst's EndEdit as its device was given up),
 	// then the windows' requests of this frame (a burst of keystrokes, a drag), then the poll, whose
 	// budget steps the validation they left due first (S13 A3: no request runs it).
+	opennova::editor::FrameTimes &times = session_->frame_times();
+	const int64_t requests_start = opennova::editor::steady_clock_us();
 	serve_queued_device_requests_();
 	drain_requests();
+	times.add(opennova::editor::FramePhase::Requests, opennova::editor::steady_clock_us() - requests_start);
 	// What another program saves comes back (S18, DI-01): a check once a second whether or not the window
 	// has the focus (an editor an MCP client launched never has it), sooner while a file waits to hold still
 	// or the focus-in's sweep runs.
@@ -466,7 +486,9 @@ void EditorApp::pump() {
 	const int64_t interval = project.outside_waiting || project.outside_sweeping ? opennova::editor::kDiskHoldStillMs
 	                                                                            : opennova::editor::kDiskCheckMs;
 	if (int64_t(now - last_disk_check_ms_) >= interval) refresh_changed_sources_(false);
+	const int64_t poll_start = opennova::editor::steady_clock_us();
 	session_->poll();
+	times.add(opennova::editor::FramePhase::Poll, opennova::editor::steady_clock_us() - poll_start);
 	// The running game's logic asked of it, and the calls play_debug queued made (S24 Live).
 	play_link_.step(*session_, int64_t(now));
 	// A game started behind (play {behind}) kept behind while it starts.
@@ -475,7 +497,11 @@ void EditorApp::pump() {
 	pump_sound_();
 	// The devices follow their viewports: the Preview's targets given one, each taking what its
 	// viewport asks.
-	if (devices_) devices_->sync(session_->viewports(), session_->view());
+	if (devices_) {
+		const int64_t sync_start = opennova::editor::steady_clock_us();
+		devices_->sync(session_->viewports(), session_->view());
+		times.add(opennova::editor::FramePhase::Devices, opennova::editor::steady_clock_us() - sync_start);
+	}
 	apply_window_title();
 	if (session_->view().dialogs.quit_requested) get_tree()->quit(0);
 }

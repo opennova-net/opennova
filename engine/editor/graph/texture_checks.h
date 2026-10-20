@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -31,6 +32,16 @@ enum class CoreFinding;
 // names the game opens itself, the MFD's sides and the default loading screen's size.
 void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
                         std::vector<Diagnostic> &out);
+
+// What the texture check has read since the process started (the perf query): the headers it read from
+// their files (each read once while its file's stamp stands), the bytes those reads took, and the walks of
+// the graph's texture uses it made.
+struct TextureCheckStats {
+	uint64_t headers_read = 0;
+	uint64_t header_bytes = 0;
+	uint64_t use_walks = 0;
+};
+TextureCheckStats texture_check_stats();
 
 // A project file's header as `reader` reads it (`root` the project's directory), read once and kept while
 // the file's stamp (the scan's size and last write) stands: the use check's read of it, which the uses'

@@ -197,8 +197,10 @@ bool ProblemsService::step_originals(uint64_t bytes) {
 	if (!originals_needed_ || originals_->settled()) return true;
 	// The install validated as a project of its own, nothing of the session's read (the polls step this
 	// only once no validation of the project is due or under way).
+	const int64_t started = steady_clock_us();
 	const bool done = originals_->step(bytes);
 	show_originals();
+	spent_.originals_us += steady_clock_us() - started;
 	if (done) show_validation(); // the counts stand from here
 	return done;
 }
@@ -227,6 +229,7 @@ void ProblemsService::mark_rows() {
 		const std::vector<Diagnostic> gate = gate_rows();
 		const BaseNames base{&view_.project.base_files};
 		const ShippedFiles shipped = core_.shipped_files(gate);
+		++blocker_plans_;
 		blockers_ = build_blockers(plan_build(core_.paths(), *view_.project.scan, *view_.project.requirements, gate,
 		                                      core_.build_target(), &base, &shipped));
 	}
@@ -270,6 +273,12 @@ void ProblemsService::show_validation() {
 }
 
 void ProblemsService::compose_rows(bool keep_reported) {
+	const int64_t started = steady_clock_us();
+	compose_rows_now(keep_reported);
+	spent_.compose_us += steady_clock_us() - started;
+}
+
+void ProblemsService::compose_rows_now(bool keep_reported) {
 	read_once_ = true;
 	const bool moved = pass_->validation.moved() || pass_->checks_moved || moved_since_composed_;
 	moved_since_composed_ = false;

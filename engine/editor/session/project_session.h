@@ -25,6 +25,7 @@ struct BakeTestHold;
 struct PollBudget;
 struct SessionView;
 struct ValidationStats;
+class FrameTimes;
 struct ViewportMouse;
 
 // The one open project and everything the editor does to it (ADR 0046 S13 A2): open and
@@ -137,6 +138,9 @@ public:
 	// How many times the Problems rows were composed: a validation that finds nothing they are
 	// made of moved composes none (for the tests).
 	size_t problems_compositions() const;
+	// The Shell's frames as they ran (session/frame_times.h, the perf query): the Shell begins and ends each,
+	// adding its own phases; the poll adds its parts.
+	FrameTimes &frame_times();
 	// The game's own data's baseline (S15, session/original_files.h): the install validated once (for the
 	// tests and the measure).
 	const OriginalFiles &originals() const;

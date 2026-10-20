@@ -23,6 +23,7 @@
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
+#include <editor/graph/texture_checks.h>
 #include <editor/graph/jump_queries.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
@@ -43,6 +44,7 @@
 #include <editor/session/finding_codes.h>
 #include <editor/session/mission_queries.h>
 #include <editor/session/model_json.h>
+#include <editor/session/original_files.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/query_support.h>
 #include <editor/session/record_batch.h>
@@ -801,6 +803,57 @@ JsonValue answer_operation(const QueryContext &context, const QueryArgs &, std::
 	return activity_operation_to_json(context.core.view());
 }
 
+// What the editor's frames and its validation cost (the perf query): the Shell's frames (FrameTimes' summary)
+// and the counters behind them, each all told since the session started.
+JsonValue answer_perf(const QueryContext &context, const QueryArgs &, std::string &) {
+	SessionCore &core = context.core;
+	const auto number = [](auto value) { return JsonValue::make_number(double(value)); };
+	JsonValue out = JsonValue::make_object();
+	out.set("frames", core.frame_times().json());
+	const ProblemsService &problems = core.problems();
+	JsonValue rows = JsonValue::make_object();
+	rows.set("compositions", number(problems.compositions()));
+	rows.set("compose_us", number(problems.spent().compose_us));
+	rows.set("blocker_plans", number(problems.blocker_plans()));
+	out.set("problems", std::move(rows));
+	const ValidationStats &validation = problems.validation_stats();
+	JsonValue files = JsonValue::make_object();
+	files.set("passes", number(validation.passes));
+	files.set("files_validated", number(validation.files_validated));
+	files.set("files_reused", number(validation.files_reused));
+	files.set("files_loaded", number(validation.files_loaded));
+	files.set("files_dropped", number(validation.files_dropped));
+	out.set("validation", std::move(files));
+	const GraphStats &graph = problems.graph().stats();
+	JsonValue edges = JsonValue::make_object();
+	edges.set("files_extracted", number(graph.files_extracted));
+	edges.set("files_reused", number(graph.files_reused));
+	edges.set("files_patched", number(graph.files_patched));
+	edges.set("edges_resolved", number(graph.edges_resolved));
+	edges.set("findings_made", number(graph.findings_made));
+	out.set("graph", std::move(edges));
+	const OriginalFiles &originals = problems.originals();
+	JsonValue install = JsonValue::make_object();
+	install.set("validations", number(originals.validations()));
+	install.set("files", number(originals.files()));
+	install.set("last_ms", number(originals.last_ms()));
+	install.set("us", number(problems.spent().originals_us));
+	out.set("originals", std::move(install));
+	const TextureCheckStats textures = texture_check_stats();
+	JsonValue headers = JsonValue::make_object();
+	headers.set("headers_read", number(textures.headers_read));
+	headers.set("header_bytes", number(textures.header_bytes));
+	headers.set("use_walks", number(textures.use_walks));
+	out.set("textures", std::move(headers));
+	const ValidationStatus &status = core.view().activity.validation;
+	JsonValue running = JsonValue::make_object();
+	running.set("running", JsonValue::make_bool(status.running));
+	running.set("done", number(status.done));
+	running.set("total", number(status.total));
+	out.set("status", std::move(running));
+	return out;
+}
+
 // What a build would be refused for, nothing built (S13 A7): the build's own plan
 // (project_build/build_plan.h) over the files as last scanned, the requirements and the Problems
 // rows the build gates on (an error whose code gates: blocks_build); `blocked` exactly when that
@@ -1343,6 +1396,15 @@ constexpr EditorQueryRow kRows[] = {
 			"edit there sets it), whether the block writes it, and what the reader takes it as.")
 			.row,
 	Query(K::Terrain, "terrain", answer_terrain, kTerrainParams, kTerrainReads, kTerrainDoc).chooses(kTerrainChoices).row, // S25
+	Query(K::Perf, "perf", answer_perf, concern_set({ C::Operation, C::Findings }),
+			"What the editor's frames and its validation cost: frames, the Shell's last 512 frames (frames held, "
+			"total_frames, slow and stall: those over 50 and 100 ms, held and all told; phases: wall, layout, requests, "
+			"poll, validation, compose, operation, originals and devices, each its mean, p50, p95 and max in "
+			"microseconds; worst: the slowest frame's phases); problems (compositions, compose_us, blocker_plans); "
+			"validation (the last pass's files); graph (the last update's files and edges); originals (validations, "
+			"files, last_ms, us); textures (headers_read, header_bytes, use_walks); and status (the validation's "
+			"running, done, total). Every count is all told since the editor started.")
+			.row,
 };
 
 static_assert(std::size(kRows) == kEditorQueryKindCount, "every query kind has exactly one row");

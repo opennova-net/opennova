@@ -146,6 +146,14 @@ public:
 	// How many times the rows were composed: a validation that finds nothing they are made of
 	// moved composes none (for the tests).
 	size_t compositions() const { return compositions_; }
+	// What the rows and their marks cost (the perf query): the composition's and the game's own data's
+	// steps' microseconds all told, and how many build plans marking the rows made.
+	struct Spent {
+		int64_t compose_us = 0;
+		int64_t originals_us = 0;
+	};
+	const Spent &spent() const { return spent_; }
+	size_t blocker_plans() const { return blocker_plans_; }
 
 	// The Problems query as the query seam's problems row asks it (editor_queries.h, S13 A5): the
 	// rows the query shows, kept while the view and the query stand, and their fixes, kept while
@@ -187,6 +195,7 @@ private:
 	// The rows, from the pass that ended (its files' findings moved or not, a pass it took the place
 	// of having moved them, and the project checks') and, with `keep_reported`, what was reported.
 	void compose_rows(bool keep_reported);
+	void compose_rows_now(bool keep_reported); // compose_rows untimed
 	// The check of the game's own data asked again of the rows as they stand; one step of it within
 	// `bytes`, true when none is left.
 	void want_originals();
@@ -218,6 +227,8 @@ private:
 	// show_requirements put in their place since).
 	std::vector<Diagnostic> lead_scan_, lead_requirements_;
 	size_t compositions_ = 0;
+	Spent spent_;
+	size_t blocker_plans_ = 0;
 	// The last build's own findings (those its report adds to the Problems rows it was gated on:
 	// the plan's own, a step that failed), Problems rows until the next build starts or the
 	// project closes.

@@ -243,10 +243,23 @@ void ProjectSession::poll() {
 	session.core.lapse_wire_gestures();
 	const PollBudget budget = session.core.poll_budget();
 	const int64_t started = budget.ms > 0 ? steady_clock_ms() : 0;
+	// The frame under way learns what each part cost (the perf query): the validation's steps less the
+	// composition and the game's own data's steps they ran, which it learns apart.
+	FrameTimes &times = session.core.frame_times();
+	const ProblemsService::Spent before = session.problems.spent();
+	const int64_t validation_start = steady_clock_us();
 	session.problems.step_validation(budget, steady_clock_ms);
+	const int64_t validation_end = steady_clock_us();
+	const ProblemsService::Spent &after = session.problems.spent();
+	const int64_t composed = after.compose_us - before.compose_us;
+	const int64_t originals = after.originals_us - before.originals_us;
+	times.add(FramePhase::Validation, validation_end - validation_start - composed - originals);
+	times.add(FramePhase::Compose, composed);
+	times.add(FramePhase::Originals, originals);
 	PollBudget rest = budget;
 	if (budget.ms > 0) rest.ms = std::max<int64_t>(0, budget.ms - (steady_clock_ms() - started));
 	session.core.step_operation(rest);
+	times.add(FramePhase::Operation, steady_clock_us() - validation_end);
 	session.play.poll();
 	// S25: a bake that finished lands in its stroke's step; a stroke that ended starts its file's bake.
 	session.sculpt.poll();
@@ -262,6 +275,10 @@ void ProjectSession::poll() {
 		const std::function<int64_t()> clock = budget.ms > 0 ? std::function<int64_t()>(steady_clock_ms) : std::function<int64_t()>();
 		view.documents.thumbnails->step(view, kThumbnailPollBytes, clock, started + budget.ms);
 	}
+}
+
+FrameTimes &ProjectSession::frame_times() {
+	return impl_->core.frame_times();
 }
 
 void ProjectSession::set_poll_budget(const PollBudget &budget) {

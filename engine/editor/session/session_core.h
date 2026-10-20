@@ -19,6 +19,7 @@
 #include <editor/requirements/requirements.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/frame_times.h>
 #include <editor/session/original_bytes.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/view_revisions.h>
@@ -170,6 +171,9 @@ public:
 	OperationSlot &operations() { return operations_; }
 	void set_poll_budget(const PollBudget &budget) { poll_budget_ = budget; }
 	const PollBudget &poll_budget() const { return poll_budget_; }
+	// The Shell's frames as they ran (the perf query): the poll adds its parts to the frame under way.
+	FrameTimes &frame_times() { return frame_times_; }
+	const FrameTimes &frame_times() const { return frame_times_; }
 	// `operation` started in the slot: its id, 0 while another runs.
 	uint64_t start_operation(std::unique_ptr<SessionOperation> operation);
 	// The running operation's steps within `budget` (the poll's: what its validation steps left of
@@ -430,6 +434,7 @@ private:
 	bool workspace_kept_ = true; // set_workspace_kept
 	OperationSlot operations_;
 	PollBudget poll_budget_ = kDefaultPollBudget;
+	FrameTimes frame_times_;
 	SessionView view_;
 	audio::SoundSelector sound_selector_;
 	std::shared_ptr<Viewports> viewports_;

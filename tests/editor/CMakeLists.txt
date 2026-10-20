@@ -882,6 +882,9 @@ opennova_add_editor_test(terrain_family BAKES)
 # The raster core's history (S25).
 opennova_add_editor_test(raster_history)
 
+# The Shell's frames and the perf query (session/frame_times.h).
+opennova_add_editor_test(frame_times)
+
 # The raster document (S25).
 opennova_add_editor_test(raster_document)
 

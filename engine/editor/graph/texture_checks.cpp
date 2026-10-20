@@ -74,6 +74,7 @@ struct Kept {
 };
 std::mutex g_mutex;
 std::map<std::pair<std::string, TextureReader>, Kept> g_headers;
+TextureCheckStats g_stats; // g_mutex held
 
 // The header of `entry` under `root` as `reader` reads it, kept (g_mutex held).
 const TextureHeader *kept_header(const std::string &root, const AssetEntry *entry, TextureReader reader) {
@@ -89,6 +90,8 @@ const TextureHeader *kept_header(const std::string &root, const AssetEntry *entr
 	kept.modified = entry->modified_ticks;
 	if (io::read_file_bytes(key.first, bytes, error)) kept.header = texture_header_as(reader, bytes);
 	else kept.header.refusal = error;
+	++g_stats.headers_read;
+	g_stats.header_bytes += bytes.size();
 	return &(g_headers[key] = std::move(kept)).header;
 }
 
@@ -120,7 +123,10 @@ const KeptClasses *char_map_classes(const ValidationInput &input, const std::str
 	std::vector<uint8_t> bytes;
 	std::string error;
 	IndexedImage8 image;
-	if (io::read_file_bytes(path, bytes, error) && decode_pcx_indexed(bytes.data(), bytes.size(), image, error))
+	const bool read = io::read_file_bytes(path, bytes, error);
+	++g_stats.headers_read;
+	g_stats.header_bytes += bytes.size();
+	if (read && decode_pcx_indexed(bytes.data(), bytes.size(), image, error))
 		for (const uint8_t index : image.indices)
 			if (index >= kCharmapLegendCount) {
 				++kept.past;
@@ -502,6 +508,11 @@ TextureHeader texture_file_header(const std::string &root, const AssetEntry &ent
 	return header ? *header : TextureHeader();
 }
 
+TextureCheckStats texture_check_stats() {
+	const std::lock_guard<std::mutex> lock(g_mutex);
+	return g_stats;
+}
+
 void check_texture_role(renderer::TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
                         const TextureFindingSink &add, const TextureUseContext &context) {
 	check_sizes(role, file, header, where, context, add);
@@ -511,6 +522,7 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
                         std::vector<Diagnostic> &out) {
 	(void)files;
 	const std::lock_guard<std::mutex> lock(g_mutex);
+	++g_stats.use_walks;
 	std::set<std::pair<std::string, std::string>> passed_over;
 	std::set<std::string> costed;
 	graph.for_each_edge([&](const GraphEdge &edge) {

@@ -336,6 +336,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/viewport_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/particle_keys_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/frame_times.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_family.cpp
