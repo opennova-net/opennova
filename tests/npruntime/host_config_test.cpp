@@ -322,7 +322,7 @@ int main() {
 		const HostScreenState request = host_screen_from_block(block);
 		TEST_EXPECT(request.config.server_name == "Night Ops");
 		TEST_EXPECT(request.config.mp_attributes == 0x3A06u);
-		// time_limit is the round's minutes, the misnamed g_RespawnTime the mission start seeds
+		// time_limit is the round's minutes, the misnamed g_RoundTimeLimitMinutes the mission start seeds
 		// the round clock from (world::MatchRules::game_time_minutes, 3720 ticks a minute)
 		// [orig: Game_ApplySessionSettingsToGlobals @0x551CCC..0x551CD2; Game_StartMission
 		//  @0x525242..0x525251].

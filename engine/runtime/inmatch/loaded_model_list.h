@@ -100,7 +100,7 @@ struct MissionStartModelSources {
 	// The terrain's foliage defs load: on every host but a dedicated one (in session, the
 	// authority, not a session peer), whose mission start jumps past the render setup that
 	// is their only caller [orig: Game_StartMission @0x524360 - the flag @0x524942..0x524964,
-	// the branch @0x5259AE..0x5259BF past CRenderManager_ShutdownAllSubsystems @0x5259FD].
+	// the branch @0x5259AE..0x5259BF past Render_InitTerrainSubsystems @0x5259FD].
 	bool foliage = true;
 };
 
