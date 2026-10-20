@@ -99,12 +99,6 @@ std::vector<WeaponKitEntry> local_loadout_kit(const World &world,
 bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
                                     int player_class);
 
-// Stamp the local entity's per-ammo damage-class bytes from the resident kit
-// (the default kit when none is set) [orig: the flags byte of each kit tuple;
-// net-re §5.63].
-void local_loadout_sync_damage_classes(World &world,
-                                       const LocalPlayerLoadout &loadout);
-
 // The Player_InitPlayer weapon leg [orig: @ 0x4e15f0:
 // AvatarDef_BuildDisplayList (restrictionData) -> WeaponSlotPool_ResetAllEntries
 // -> WeaponSlotTable_LoadAllFromDefs -> WeaponSlots_SeedAmmoPoolsFromDefs ->

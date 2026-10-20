@@ -5170,6 +5170,11 @@ add_test(NAME npruntime_remote_slot_pump COMMAND npruntime_remote_slot_pump_test
 add_executable(npruntime_loadout_availability_test npruntime/loadout_availability_test.cpp)
 target_link_libraries(npruntime_loadout_availability_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_loadout_availability COMMAND npruntime_loadout_availability_test)
+# D-NET-691: the local player's damage-class bytes: the spawn rebuild writes none, the
+# out-of-session armory apply stores the raw fourth values, an in-session apply none.
+add_executable(damage_class_bytes_test world/damage_class_bytes_test.cpp)
+target_link_libraries(damage_class_bytes_test PRIVATE opennova_runtime)
+add_test(NAME damage_class_bytes COMMAND damage_class_bytes_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

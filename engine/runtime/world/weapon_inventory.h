@@ -99,10 +99,14 @@ std::vector<WeaponKitEntry> weapon_kit_filter_by_availability(
         const std::vector<WeaponKitEntry> &kit, const WeaponTable &table,
         const WeaponAvailability &avail);
 
-// Build the player-slot table consumed by Weapon_CalcImpactDamage: each kit
-// row's fourth value is stored at its resolved AmmoDef index. Raw byte 1 means
-// x0.9, 2 means x1.1, and every other value is neutral.
-void weapon_kit_build_damage_classes(const std::vector<WeaponKitEntry> &kit,
+// The out-of-session armory apply's stores into the slot's damage-class bytes, the
+// table Weapon_CalcImpactDamage reads: each kit row whose name resolves stores the low
+// byte of its fourth value, raw, at its weapon's round ammo index; nothing is cleared
+// first (the table grows to `ammo_count` with zeros). A weapon with no round keeps
+// retail's -1 index, whose store aliases the bytes before the table: dropped
+// (D-NET-692). [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the name test
+// @0x565E41, the atol @0x565F3D, the store @0x566182..0x56618C)]
+void weapon_kit_store_damage_classes(const std::vector<WeaponKitEntry> &kit,
                                      const WeaponTable &table, size_t ammo_count,
                                      std::vector<uint8_t> &out);
 

@@ -610,13 +610,17 @@ void test_defaults() {
     CHECK(weapon_combo::kDefaultSpawnCombo == 195);
 }
 
+// D-NET-691: the out-of-session armory apply stores each resolved entry's fourth value,
+// its low byte raw, at the weapon's round ammo index, and clears nothing.
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the name test @0x565E41, the atol
+//  @0x565F3D, the store @0x566182..0x56618C)]
 void test_kit_damage_classes() {
     Fixture f;
     f.t.entries[static_cast<size_t>(f.pistol)].ammo_index = 2;
     f.t.entries[static_cast<size_t>(f.m4)].ammo_index = 4;
     f.t.entries[static_cast<size_t>(f.ak)].ammo_index = 7;
-    std::vector<uint8_t> classes(10, 99);
-    weapon_kit_build_damage_classes(
+    std::vector<uint8_t> classes;
+    weapon_kit_store_damage_classes(
             {{"WPN_M4AUTO", -1, -1, 1}, {"WPN_PISTOL", -1, -1, 2},
              {"WPN_NOSUCH", -1, -1, 2}},
             f.t, 10, classes);
@@ -624,10 +628,10 @@ void test_kit_damage_classes() {
     CHECK(classes[4] == 1 && classes[2] == 2);
     CHECK(classes[7] == 0 && classes[9] == 0);
 
-    // A new accepted kit clears values from the previous one before stamping.
-    weapon_kit_build_damage_classes({{"WPN_AK47AUTO", -1, -1, 2}},
+    // A later apply clears nothing; a -1 stores its low byte, 0xFF.
+    weapon_kit_store_damage_classes({{"WPN_AK47AUTO", -1, -1, -1}},
                                     f.t, 10, classes);
-    CHECK(classes[4] == 0 && classes[2] == 0 && classes[7] == 2);
+    CHECK(classes[4] == 1 && classes[2] == 2 && classes[7] == 0xFF);
 }
 
 } // namespace

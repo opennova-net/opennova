@@ -172,7 +172,9 @@ void JoinerRole::spawn_and_arm_local_player() {
 					lp.loadout.pending_player_class <= 9)
 				L->player_class =
 						static_cast<uint8_t>(lp.loadout.pending_player_class);
-			world::local_loadout_sync_damage_classes(world, lp.loadout);
+			// No damage-class bytes: in a session only the host's accept writes them
+			// (D-NET-691) [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E92;
+			//  WeaponLoadout_ApplyFromBuffer's in-session leg sends @0x565D94].
 			if (lp.inventory_valid && lp.inventory.equipped_combo >= 0) {
 				const world::WeaponInventorySlot *slot =
 						lp.inventory.slot(lp.inventory.equipped_combo);

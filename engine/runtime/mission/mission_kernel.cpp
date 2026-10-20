@@ -585,7 +585,6 @@ bool MissionKernel::load_ammo_table(const BootFileSource &files,
 	// The whiz radius rides the loaded sound sets (the boot mounts them first).
 	w::resolve_ammo_whiz_radii(world.tables.ammo, world.tables.sound_sets);
 	w::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
-	w::local_loadout_sync_damage_classes(world, local.loadout);
 	ammo_ok = true;
 	return true;
 }

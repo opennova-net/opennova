@@ -96,24 +96,17 @@ bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
     return true;
 }
 
-void local_loadout_sync_damage_classes(World &world,
-                                       const LocalPlayerLoadout &loadout) {
-    Entity *e = world.registry.get(world.cached.local_player);
-    if (e == nullptr) return;
-    e->ammo_damage_class.assign(world.tables.ammo.entries.size(), 0);
-    const std::vector<WeaponKitEntry> kit = local_loadout_kit(world, loadout);
-    weapon_kit_build_damage_classes(kit, world.tables.weapons,
-            world.tables.ammo.entries.size(), e->ammo_damage_class);
-}
-
 void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
                            LocalPlayerWeapon &weapon, WeaponInventory &inventory,
                            bool &inventory_valid, bool select_spawn_default) {
     // [orig: Player_InitPlayer @ 0x4e15f0 — the full leg sequence in the
-    //  header note.] Entity-optional: a joiner rebuilds before L spawns.
+    //  header note.] Entity-optional: a joiner rebuilds before L spawns. It writes
+    //  none of the slot's damage-class bytes: their writers are the 0x2F accept
+    //  and the out-of-session armory apply alone (D-NET-691) [orig: the four
+    //  +0x15E58 sites: Weapon_CalcImpactDamage @0x4ECA24, Server_SendWeaponSlotListToPlayer
+    //  @0x502871, the accept @0x515E92, WeaponLoadout_ApplyFromBuffer @0x56618C].
     Entity *e = world.registry.get(world.cached.local_player);
     const WeaponTable &table = world.tables.weapons;
-    local_loadout_sync_damage_classes(world, loadout);
     if (table.empty()) return;
     const std::vector<WeaponKitEntry> kit = local_loadout_kit(world, loadout);
     inventory.reset(table);
@@ -200,6 +193,16 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     loadout.spawn_kit = std::move(accepted);
     local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
             /*select_spawn_default=*/true);
+    // Out of a session the apply stores each entry's fourth value, raw, into the
+    // local slot's damage-class bytes, clearing nothing; in a session it sends the
+    // 0x2F instead and the accept stores (D-NET-691). [orig: WeaponLoadout_ApplyFromBuffer
+    //  @0x565CD0 - is_in_session @0x565D4D (the send @0x565D94), the local entity
+    //  @0x565DA8, the store @0x566182..0x56618C]
+    if (!world.rules.mp_session) {
+        if (Entity *local = world.registry.get(world.cached.local_player))
+            weapon_kit_store_damage_classes(loadout.spawn_kit, world.tables.weapons,
+                    world.tables.ammo.entries.size(), local->ammo_damage_class);
+    }
     // The ACCEPT leg applies the REQUESTED ammo over the default seed: pool =
     // min(req, maxclips) * clipsize when requested, else startrounds RAW on
     // the main leg; every sub-variant of another ammo class takes ammo_secondary
