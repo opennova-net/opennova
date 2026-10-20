@@ -145,8 +145,11 @@ public:
 		std::string junction_code;
 		// The menu's teardown: the response no longer kept and the form gone with the menu; the
 		// in-use word stays (its one writer is the next response).
+		// The shell's expansion reload runs it (menu_shell.gd, NovaWorldClient.forget_gate_response),
+		// as retail's reload runs the teardown with the flag set.
 		// [orig: Menu_TeardownShellAndCloseBinkVideos @0x54E430 - under dword_2551104 @0x54E4A3,
-		//  g_GameMenu destroyed @0x54E4BA..0x54E4C2, dword_B5FF48 = 0 @0x54E4C8]
+		//  g_GameMenu destroyed @0x54E4BA..0x54E4C2, dword_B5FF48 = 0 @0x54E4C8;
+		//  Game_ReloadExpansionAndMods @0x552710 - the flag @0x552756, the call @0x55275C]
 		void forget() {
 			response_kept = false;
 			junction_code.clear();
