@@ -502,6 +502,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		if (!bodyless_name.empty()) conn.reply.player_name = bodyless_name;
 		conn.phase = ConnectionPhase::PlayerAdded;
 		conn.reply.player_slot_reserved = false;
+		// The remote arm's squad leg runs ahead of the body spawn, so a bodyless
+		// row files its node too [orig: @0x51CDE0..0x51CEEF, ahead of @0x51D056].
+		if (!is_host_own && !round_init) Server_FileSquadRegistryNode(ctx, conn);
 		return h;
 	}
 	// The body binds its items.def row at its spawn: a mid-match join's and a
