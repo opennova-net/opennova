@@ -1881,8 +1881,9 @@ int test_witnessed_rules() {
 
 // The minted missions' parameters naming nothing, as editor_missions_gen.cpp's forms place them: logic.bms's 16
 // entity parameters of an SSN no record holds (four triggers', twelve actions') and its two zone parameters of a
-// zone no area has; records.bms's one SSN command whose rider no record holds.
-constexpr size_t kLogicEntitiesMissing = 16, kLogicZonesMissing = 2, kRecordsEntitiesMissing = 1;
+// zone no area has; records.bms's one SSN command whose rider no record holds and its one negated area trigger of a
+// zone no area has.
+constexpr size_t kLogicEntitiesMissing = 16, kLogicZonesMissing = 2, kRecordsEntitiesMissing = 1, kRecordsZonesMissing = 1;
 
 // The validator's findings over the minted missions, by code, each of a form the shipped missions hold (over the
 // 115: a path counted past its slots, CP19.bms's; entities on empty paths; paths of one stop; starts past a path's
@@ -1984,14 +1985,14 @@ int test_sweep() {
 		zone_missing += own_zone_missing;
 		// The minted missions' references naming nothing, where their forms place them (editor_missions_gen.cpp):
 		// logic.bms's entity parameters of an SSN no record holds (4321, 99) and its zone parameters of a zone none
-		// has (77); records.bms's SSN command riding an SSN none holds (4321).
+		// has (77); records.bms's SSN command riding an SSN none holds (4321) and its area trigger of zone 55.
 		if (file.path.rfind("fixtures/editor/missions/", 0) == 0)
 			std::printf("  %s: %zu entity parameters naming no SSN, %zu zone parameters naming no zone\n", file.path.c_str(),
 			            own_entity_missing, own_zone_missing);
 		if (mission_sweep::minted(file, "logic.bms"))
 			TEST_EXPECT(own_entity_missing == kLogicEntitiesMissing && own_zone_missing == kLogicZonesMissing);
 		if (mission_sweep::minted(file, "records.bms"))
-			TEST_EXPECT(own_entity_missing == kRecordsEntitiesMissing && own_zone_missing == 0);
+			TEST_EXPECT(own_entity_missing == kRecordsEntitiesMissing && own_zone_missing == kRecordsZonesMissing);
 		std::map<std::string, size_t> &codes = findings_by_mission[file.path];
 		for (const Diagnostic &d : type.validate_file(*document)) ++codes[d.code()];
 		// The stops named by place (S24): the first path whose stop past its first a Redirect names (else any

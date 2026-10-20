@@ -590,8 +590,11 @@ constexpr const char *kMarkerItems = "begin \"Named Location\"\nid 102044\ntype 
                                      "begin \"Team 1 Start\"\nid 106003\ntype marker\nend\n"
                                      "begin \"Team 2 Start\"\nid 106004\ntype marker\nend\n";
 
+// A win message past the 60 characters a sentence quotes of a text (mission_sentence.cpp quoted).
+constexpr const char *kLongMessage = "The gate is ours, and the road to the ridge lies open past the river crossing";
+
 // records.bms's table, authored: some of the keys its numbers form (a location, a person, waypoints, the objectives'
-// rows, directives and chat lines), the others none (as a shipped mission's table lacks some it names).
+// rows, directives, chat lines and a lose message), the others none (as a shipped mission's table lacks some it names).
 std::vector<uint8_t> records_table() {
 	opennova::rtxt::File table;
 	const auto section = [&table](const char *name, std::initializer_list<std::pair<const char *, const char *>> rows) {
@@ -602,8 +605,9 @@ std::vector<uint8_t> records_table() {
 	section("Locations", {{"LOCATION000", "Ridge"}});
 	section("PeopleNames", {{"STRNAME002", "Cpl. Ortiz"}});
 	section("WPNames", {{"STRWPNAME000", "Gate"}, {"STRWPNAME003", "Bridge"}});
-	section("WinConditions", {{"STRWINCOND004", "Ridge held"}, {"STRWINCOND001", "Gate taken"}, {"STRWINMSG001", "The gate is ours"}});
-	section("LoseConditions", {{"STRLOSEDIRECTIVE001", "Hold the ridge"}});
+	section("WinConditions", {{"STRWINCOND004", "Ridge held"}, {"STRWINCOND001", "Gate taken"}, {"STRWINMSG001", kLongMessage},
+	                          {"STRWINDIRECTIVE000", "Take the ridge"}});
+	section("LoseConditions", {{"STRLOSEDIRECTIVE001", "Hold the ridge"}, {"STRLOSEMSG001", "The ridge is lost"}});
 	std::vector<uint8_t> bytes;
 	std::string error;
 	opennova::rtxt::write(table, bytes, error);
@@ -725,6 +729,19 @@ int test_sweep() {
 	// scale.bms (the bound is the mission's mean of the thread's CPU, which neither a loaded machine nor one slow
 	// row moves; the install's 115 averaged 41 us a row, their slowest 117).
 	TEST_EXPECT(scale_per_row_us >= 0 && scale_per_row_us < 200.0);
+	// records.bms's objectives in words with its table: a message past 60 characters cut as the sentence quotes it, a
+	// shown directive by its text (its slot's id 0), a lose slot by its message.
+	for (const mission_sweep::Mission &file : sweep) {
+		if (!mission_sweep::minted(file, "records.bms")) continue;
+		std::unique_ptr<Document> document = open(file.bytes, file.name.c_str());
+		TEST_EXPECT(document);
+		if (!document) return 1;
+		const std::string sentence = record_display(*document, row_at(*document, MissionKind::Event, 1), &names);
+		TEST_EXPECT(sentence.find("saying '" + std::string(kLongMessage).substr(0, 57) + "...'") != std::string::npos &&
+		            sentence.find(": 'Take the ridge'") != std::string::npos);
+		TEST_EXPECT(same(shown(*document, row_at(*document, MissionKind::Mission, 0), "lose_conditions[0]", &names).text,
+		                 "A lose objective: its message \"The ridge is lost\""));
+	}
 	TEST_EXPECT(mission_sweep::none_missing(missing));
 	return 0;
 }

@@ -35,7 +35,7 @@
 //                stale slot word past them (09TR.bms's path 13), the path flags 1, 2 and 3; the three
 //                area flags; boxes of type 1 (-2, -1) and 5; a loadout of three- and four-string records
 //                naming weapons the project has and has not; the events whose stops, waypoints and
-//                objectives these name.
+//                objectives these name, one with a negated area trigger of a zone no area has.
 //   scale.bms    every table at the most records any shipped mission holds in it (291 items
 //                (ASH_I1gA.bms), 1200 buildings (TKX_C1A.bms), 767 markers (CP09.bms), 230 organics
 //                (CP14.bms), 37 areas (CP01.bms), 229 events holding 515 triggers and 592 actions
@@ -590,10 +590,10 @@ bool build_records(std::vector<uint8_t> &bytes, std::string &err) {
 		e.ttool_index = w % 4 == 0 ? -1 : 0;
 	}
 
-	// Markers. Path 1's four waypoints, numbered sparsely (0, 2, 5, 9: a waypoint number at or past the count,
-	// 81 shipped), named -1 ("STRWPNAME-01"), 0 and 3, the second advancing on event 2 (73 shipped), the
-	// others on none (-1).
-	const int32_t sparse[4] = {0, 2, 5, 9};
+	// Markers. Path 1's four waypoints, numbered sparsely (0, 2, 5, 40: a waypoint number at or past the count,
+	// 81 shipped, one past the 32 slots too), named -1 ("STRWPNAME-01"), 0 and 3, the second advancing on event 2
+	// (73 shipped), the others on none (-1).
+	const int32_t sparse[4] = {0, 2, 5, 40};
 	for (int c = 0; c < 4; ++c) {
 		const size_t i = place(doc, EntityKind::Marker, kWaypoint, 301 + c, -200 + 100.0 * c, -200);
 		bms::Entity &e = at(doc, EntityKind::Marker, i);
@@ -676,9 +676,10 @@ bool build_records(std::vector<uint8_t> &bytes, std::string &err) {
 	doc.bounding_boxes.push_back(box(60, 60, 160, 160, 5, 95));
 	mission::sync_counts(doc);
 
-	// The events: a group at path 1's third stop sends it on from its fourth; the walker at path 4's 34th
-	// (past its slots) sent to its 36th; the objectives shown, won and lost (the directives' and the chat lines'
-	// keys); the event waypoint 2 advances on.
+	// The events: a group at path 1's third stop and not in zone 55, which no area has (a negated trigger the game
+	// drops, reading it true), sends it on from its fourth; the walker at path 4's 34th (past its slots) sent to its
+	// 36th; the objectives shown, won and lost (the directives' and the chat lines' keys); the event waypoint 2
+	// advances on.
 	const auto trigger = [](int32_t main, int32_t sub, int32_t p1, int32_t p2 = U, int32_t p3 = U) {
 		bms::Trigger t{};
 		t.main_type = static_cast<bms::TriggerMainType>(main);
@@ -699,7 +700,8 @@ bool build_records(std::vector<uint8_t> &bytes, std::string &err) {
 		return a;
 	};
 	std::vector<mission::EventChain> chains(3, chain());
-	chains[0].triggers = {trigger(1, 7, 1, 1, 2)};
+	chains[0].triggers = {trigger(1, 7, 1, 1, 2), trigger(1, 10, 2, 55)};
+	chains[0].triggers[1].condition_flags = bms::Trigger::kConditionNegated;
 	chains[0].actions = {action(1, 1, 1, 3)};
 	chains[1].triggers = {trigger(2, 7, 1, 4, 33)};
 	chains[1].actions = {action(19, 1, 4, 35), action(35, 4, 1), action(14, 2), action(15, 1), action(36, 1, 1)};
