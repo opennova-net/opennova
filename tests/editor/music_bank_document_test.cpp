@@ -269,7 +269,10 @@ const char *const kStaleChunks = "fixtures/sbf/tool_bank.sbf";
 int test_every_bank() {
 	std::vector<variant_fixtures::Input> inputs, more;
 	const bool all = variant_fixtures::inputs({"fixtures/sbf", "assets"}, ".sbf", {kStaleChunks}, inputs);
-	TEST_EXPECT(variant_fixtures::inputs({"expansions/onjo1/music"}, ".sbf", {}, more) && !more.empty());
+	// The expansion's folder holds banks (each swept, or an unpulled LFS pointer skipped).
+	size_t unpulled = 0;
+	TEST_EXPECT(variant_fixtures::inputs({"expansions/onjo1/music"}, ".sbf", {}, more, &unpulled) &&
+	            more.size() + unpulled > 0);
 	inputs.insert(inputs.end(), more.begin(), more.end());
 	size_t banks = 0, streams = 0;
 	for (const variant_fixtures::Input &input : inputs) {

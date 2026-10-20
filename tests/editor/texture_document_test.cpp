@@ -454,9 +454,16 @@ int test_fixtures(const std::string &repo, std::map<std::string, size_t> &read) 
 		++base_game;
 	}
 	TEST_EXPECT(base_game > 100);
-	size_t failed = 0;
+	size_t failed = 0, unpulled = 0;
 	for (const std::string &file : files) {
 		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
+		// Our own game's files ride Git LFS, and CI's test jobs pull fixtures/ alone: a pointer is skipped, said (the
+		// forms are the minted fixtures' and test_shipped_forms').
+		if ((file.rfind("assets/", 0) == 0 || file.rfind("expansions/", 0) == 0) && test_io::is_lfs_pointer(bytes)) {
+			std::printf("[skip] %s is an unpulled LFS pointer\n", file.c_str());
+			++unpulled;
+			continue;
+		}
 		const bool whole = !bytes.empty() && opens_whole(file, bytes);
 		std::unique_ptr<DocumentBase> document = make_texture_document();
 		Diagnostic error;
@@ -471,7 +478,9 @@ int test_fixtures(const std::string &repo, std::map<std::string, size_t> &read) 
 		++read[extension_of(file)];
 	}
 	TEST_EXPECT(failed == 0);
-	std::printf("fixtures: %zu texture files (%zu of the base game) each opened whole and saved as read\n", files.size(), base_game);
+	std::printf("fixtures: %zu texture files (%zu of the base game, %zu unpulled LFS pointers skipped) each opened whole "
+	            "and saved as read\n",
+	            files.size() - unpulled, base_game, unpulled);
 	return 0;
 }
 
