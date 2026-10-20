@@ -420,6 +420,9 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
 	route_throwable_events(ctx, world);
+	// The designator rounds' marks and their mode-1 0x1E notices (D-NET-NEW-L3-4)
+	// [orig: RoundData_SpawnRound @0x4EC270 -> EntityTracker_RegisterOrUpdate @0x511580].
+	Server_RouteDesignationMarks(ctx.np_protocol.connection_list, ctx.designations, world);
 	route_round_deaths(ctx, world, EdgeDrain::HoldAtHead); // releases the last update's staged sends
 	Server_RouteMedicInteractions(ctx, world);
 	Server_ApplyPowerupGrants(ctx.np_protocol.connection_list, world);

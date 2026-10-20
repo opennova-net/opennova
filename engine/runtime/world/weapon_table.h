@@ -66,6 +66,10 @@ struct WeaponTableEntry {
     std::string attach_text_id;
 	std::string hud_icon, crosshair, commanders_x, hud_loadout_select;
 	int32_t hud_splash_radius = 0; // engine units [orig: AdmDef+0x454 @0x4DEBBD]
+	// 'designation_time' x 62: a designator round's mark life in server ticks
+	// [orig: AdmDef+0x458, WeaponDefs_ParseLineCallback @0x544895; read by
+	//  RoundData_SpawnRound @0x4EC264].
+	int32_t designation_ticks = 0;
     std::string voice_macro_token; // [orig: WeaponDefs_ParseLineCallback @0x543C29]
     // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
     // The switch/select paths read: flags bit 0x8000000 = QuickSwitch, the ToSpecial

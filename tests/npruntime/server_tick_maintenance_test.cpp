@@ -1775,6 +1775,89 @@ bool check_host_quality_samples_ahead_of_the_receive_pump() {
 	return expect(pumped == before, "the pump's ping waits for the next sample");
 }
 
+// D-NET-NEW-L3-4: a designator round (a DesignateTarget ammo) flies nothing:
+// the authority marks its firer's mode-1 designation at the spawn point with
+// the weapon's life (+0x458) and radius (+0x454), and a fresh mode-1 row sends
+// S2C 0x1E [0x30][the firer's pool-0 index][0xFF 0xFF][0 0 0 0] to every
+// in-match slot on the firer's team; the owner's next mark refreshes its row
+// with no second notice.
+// [orig: RoundData_SpawnRound @0x4EC249..0x4EC270; EntityTracker_RegisterOrUpdate
+//  @0x511580 - the notice test @0x5115DC, the body @0x511608..0x511632, the send
+//  @0x511645, the stores @0x511656..0x511676]
+bool check_designator_round_marks_and_notifies_the_team() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.game_type = game_type::kTeamDeathmatch;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.rules.projectile_authority = true;
+	world.registry.configure_pool(0, 8);
+	ctx.world = &world;
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries[0].flags = w::kAmmoFlagDesignateTarget;
+	world.tables.weapons.entries.resize(0x21);
+	world.tables.weapons.entries[0x20].valid = true;
+	world.tables.weapons.entries[0x20].designation_ticks = 30 * 62;
+	world.tables.weapons.entries[0x20].hud_splash_radius = 10;
+	std::array<ns::UdpSessionTransport, 3> wires{
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host),
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host),
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host)};
+	const std::array<uint8_t, 3> teams{1, 1, 2};
+	std::array<w::EntityHandle, 3> bodies{};
+	for (int i = 0; i < 3; ++i) {
+		bodies[i] = w::spawn_remote_player(world, player_spawn(10.0f * float(i), 0, 0, teams[i]));
+		ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+				static_cast<uint32_t>(7 + i), inmatch::NapiNPConnection::kTypeServerSide,
+				&wires[i], ns::TransportMode::Client, bodies[i], true));
+		inmatch::NapiNPConnection &c = ctx.np_protocol.connection_list.back();
+		c.reply.player_slot = static_cast<uint32_t>(i + 1);
+		c.assigned_team = teams[i];
+		c.assigned_team_valid = true;
+	}
+	w::RoundSpawnParams shot;
+	shot.owner = bodies[0];
+	shot.ammo_index = 0;
+	shot.adm_index = 0x20;
+	shot.origin = {100.0f, 200.0f, 5.0f};
+	if (!expect(world.round_sim.spawn(world, shot, w::RoundConsequenceMode::Authoritative) == -1 &&
+	                    world.out.designation_marks.size() == 1,
+	            "a designator round flies nothing and leaves one mark"))
+		return false;
+	for (auto &wire : wires) (void)drain(wire);
+	inmatch::Server_TickUpdate(ctx); // the tick head routes the marks
+	const std::vector<uint8_t> notice = {0x30, static_cast<uint8_t>(bodies[0].slot()),
+			0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+	const auto notices = [&](ns::UdpSessionTransport &wire) {
+		int n = 0;
+		for (const ns::Datagram &d : drain(wire))
+			if (d.tag == s2c::GAME_EVENT && d.body == notice) ++n;
+		return n;
+	};
+	if (!expect(notices(wires[0]) == 1 && notices(wires[1]) == 1 && notices(wires[2]) == 0,
+	            "the fresh mode-1 row notifies the firer's team alone"))
+		return false;
+	const inmatch::ServerDesignation *row = nullptr;
+	for (const inmatch::ServerDesignation &r : ctx.designations)
+		if (r.owner == bodies[0]) row = &r;
+	if (!expect(row != nullptr && row->mode == 1 && row->point[0] == 100 * 65536 &&
+	                    row->point[1] == 200 * 65536 && row->point[2] == 5 * 65536 &&
+	                    row->radius_q16 == 10 * 65536 && row->remaining_ticks == 30 * 62 - 1,
+	            "the row holds the point, the radius and the life (one tick aged)"))
+		return false;
+	(void)world.round_sim.spawn(world, shot, w::RoundConsequenceMode::Authoritative);
+	inmatch::Server_TickUpdate(ctx);
+	return expect(notices(wires[0]) == 0 && notices(wires[1]) == 0 &&
+	                      row->remaining_ticks == 30 * 62 - 1,
+	              "the owner's next mark refreshes its row with no second notice");
+}
+
 // The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
 // every pass, once, whether or not its record changed and whatever the
 // recipient's state; the 0x6E goes, once, to a slot whose body's dead bit or
@@ -3495,6 +3578,7 @@ int main() {
 	ok = check_a_loading_joiner_takes_no_proximity_or_census_place() && ok;
 	ok = check_slot_team_readers_ignore_a_body_team_write() && ok;
 	ok = check_host_quality_samples_ahead_of_the_receive_pump() && ok;
+	ok = check_designator_round_marks_and_notifies_the_team() && ok;
 	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;

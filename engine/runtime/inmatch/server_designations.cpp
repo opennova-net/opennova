@@ -10,9 +10,10 @@
 
 namespace opennova::inmatch {
 
-void Server_RegisterDesignation(ServerDesignationTable &table, world::EntityHandle owner,
+bool Server_RegisterDesignation(ServerDesignationTable &table, world::EntityHandle owner,
 		const int32_t point[3], int32_t ticks, int32_t radius_units, uint8_t mode) {
 	ServerDesignation *row = nullptr;
+	bool fresh = false;
 	// The owner's own row wins [orig: @0x51158d..0x5115a5].
 	for (ServerDesignation &candidate : table) {
 		if (candidate.owner.valid() && candidate.owner == owner) {
@@ -25,11 +26,15 @@ void Server_RegisterDesignation(ServerDesignationTable &table, world::EntityHand
 		for (ServerDesignation &candidate : table) {
 			if (candidate.remaining_ticks == 0 && !candidate.owner.valid()) {
 				row = &candidate;
+				fresh = true;
 				break;
 			}
 		}
 	}
-	if (row == nullptr) return; // a full table drops the mark [orig: @0x51164c]
+	if (row == nullptr) return false; // a full table drops the mark [orig: @0x51164c]
+	// The mode-1 notice: a fresh row, or the owner's row not yet in mode 1
+	// [orig: @0x5115D2 / @0x51168D, `cmp byte ptr [slot+24], 1` @0x5115DC].
+	const bool notice = mode == 1 && (fresh || row->mode != 1);
 	// [orig: @0x511656..0x511676]
 	row->owner = owner;
 	row->remaining_ticks = ticks;
@@ -38,6 +43,32 @@ void Server_RegisterDesignation(ServerDesignationTable &table, world::EntityHand
 	row->point[2] = point[2];
 	row->radius_q16 = static_cast<int32_t>(static_cast<uint32_t>(radius_units) << 16);
 	row->mode = mode;
+	return notice;
+}
+
+void Server_RouteDesignationMarks(std::vector<NapiNPConnection> &roster,
+		ServerDesignationTable &table, world::World &world) {
+	for (const world::DesignationMark &mark : world.out.designation_marks) {
+		const world::Entity *firer = world.registry.get(mark.firer);
+		if (firer == nullptr) continue;
+		if (!Server_RegisterDesignation(table, mark.firer, mark.point, mark.ticks,
+					mark.radius_units, /*mode=*/1))
+			continue;
+		// The filter is the firer entity's team byte, sign-extended; the
+		// mask's 0x100 arm compares each slot's own team byte, zero-extended.
+		// [orig: entity+354 @0x5115E8; NapiNPServer_SendFiltered
+		//  @0x4C896A..0x4C8977]
+		const int32_t team = static_cast<int8_t>(firer->team);
+		const std::vector<uint8_t> body = {0x30, world::pool0_index_byte(mark.firer),
+				0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+		for (NapiNPConnection &c : roster) {
+			if (!active_player_recipient(c) ||
+					static_cast<int32_t>(c.assigned_team_valid ? c.assigned_team : 0) != team)
+				continue;
+			c.link.transport->host_send(s2c::GAME_EVENT, body);
+		}
+	}
+	world.out.designation_marks.clear();
 }
 
 void Server_TickDesignations(ServerDesignationTable &table) {

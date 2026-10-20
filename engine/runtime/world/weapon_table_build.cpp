@@ -193,6 +193,7 @@ world::WeaponTable build_weapon_table(
 		e.hud_icon = d.hudicon;
 		e.crosshair = d.crosshair;
 		e.hud_splash_radius = d.splash;
+		e.designation_ticks = d.designation_ticks;
 		e.commanders_x = d.commanders_x;
 		e.hud_loadout_select = d.hud_loadout_select;
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]

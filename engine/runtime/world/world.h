@@ -799,6 +799,18 @@ struct HudFrameCounters {
     }
 };
 
+// A designator round's mark: a DesignateTarget ammo spawns no round, and the
+// authority registers its firer's mode-1 designation at the spawn point
+// instead, with the firing weapon's life (+0x458) and radius (+0x454).
+// [orig: RoundData_SpawnRound @0x4EC249..0x4EC270 -> EntityTracker_RegisterOrUpdate
+//  @0x511580 (firer, point, ticks, radius, mode 1)]
+struct DesignationMark {
+    EntityHandle firer;
+    int32_t point[3] = {}; // Q16
+    int32_t ticks = 0;
+    int32_t radius_units = 0;
+};
+
 // What the sim produced this tick for someone else to drain: the wire (entity
 // removals, the round ring, water crossings) and the presentation (effects,
 // destruction, scars, scorches, the sound queues). Nothing in the sim reads
@@ -859,6 +871,9 @@ struct WorldOutbox {
     // the server tick to send as S2C 0x23; script_remote_command.h carries the
     // witness. Cleared by the drain; a client-side World never fills it.
     std::vector<ScriptRemoteCommand> script_remote_commands;
+    // The designator rounds' marks for the host's designation table and its
+    // S2C 0x1E notice; the host tick drains them.
+    std::vector<DesignationMark> designation_marks;
     // The impact-scar rings (world-wac-ai-re §24.9): 128 per-entity rings + the
     // terrain ring, written by the round stop and cleared on death. Presentation
     // state — the shell compiles it into quads each frame; it is NOT part of the

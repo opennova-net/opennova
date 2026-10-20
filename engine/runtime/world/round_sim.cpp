@@ -1015,9 +1015,23 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     }
     if ((ammo->flags & kAmmoFlagDesignateTarget) != 0) {
         // The designator dispatches to its tracker instead of allocating a
-        // projectile. That tracker is outside RoundSim; critically, this return
-        // precedes both shotgun/ordinary spawn and recoil.
-        // [orig: RoundData_SpawnRound @0x4EC249]
+        // projectile: the authority marks its firer's designation at the spawn
+        // point, for the firing weapon's life and radius (the host's table owns
+        // it); this return precedes both shotgun/ordinary spawn and recoil.
+        // [orig: RoundData_SpawnRound @0x4EC249, the authority test @0x4EC251,
+        //  the weapon's +0x454 / +0x458 @0x4EC25E / @0x4EC264,
+        //  EntityTracker_RegisterOrUpdate(firer, point, ticks, radius, 1) @0x4EC270]
+        const WeaponTableEntry *designator = world.tables.weapons.by_index(params.adm_index);
+        if (authoritative && designator != nullptr) {
+            DesignationMark mark;
+            mark.firer = params.owner;
+            mark.point[0] = to_fixed(params.origin.x);
+            mark.point[1] = to_fixed(params.origin.y);
+            mark.point[2] = to_fixed(params.origin.z);
+            mark.ticks = designator->designation_ticks;
+            mark.radius_units = designator->hud_splash_radius;
+            world.out.designation_marks.push_back(mark);
+        }
         return -1;
     }
     if ((ammo->flags & kAmmoFlagClaymore) != 0) {

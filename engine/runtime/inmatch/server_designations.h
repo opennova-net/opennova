@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include <runtime/world/entity.h>
 
@@ -38,14 +39,26 @@ using ServerDesignationTable = std::array<ServerDesignation, kServerDesignationC
 // Register `owner`'s mark, or refresh the row it already holds: the owner's
 // row first, else the first free row (no life and no owner); with neither the
 // mark is dropped. The row takes the owner, the point, `ticks`, `radius_units`
-// << 16 and `mode`. The mode-1 arm's S2C 0x1E notice (a designator round's
-// registration, RoundData_SpawnRound @0x4ec270) is not ported with this
-// function: no port caller registers mode 1.
+// << 16 and `mode`. True when the mode-1 notice is due: a mode-1 mark on a
+// fresh row or on the owner's row while its mode was not 1 (the caller sends
+// it, Server_RouteDesignationMarks). A full table reads a null row's mode in
+// retail (an original crash, no stock wire effect); ours drops the mark.
 // [orig: EntityTracker_RegisterOrUpdate @0x511580 — the owner scan
-//  @0x51158d..0x5115a5, the free scan @0x5115a9..0x5115c9, the stores
+//  @0x51158d..0x5115a5, the free scan @0x5115a9..0x5115c9, the mode-1 tests
+//  @0x5115D2 / @0x51168D and the row's mode @0x5115DC, the stores
 //  @0x511656..0x511676]
-void Server_RegisterDesignation(ServerDesignationTable &table, world::EntityHandle owner,
+bool Server_RegisterDesignation(ServerDesignationTable &table, world::EntityHandle owner,
 		const int32_t point[3], int32_t ticks, int32_t radius_units, uint8_t mode);
+
+// The world's designator marks (WorldOutbox::designation_marks), in the order
+// the rounds spawned: each registers its firer's mode-1 row, and a due notice
+// sends S2C 0x1E [0x30][the firer's pool-0 index][0xFF 0xFF][0 0 0 0] to every
+// state-6/7 slot whose own team byte is the firer entity's team (mask 0x180).
+// [orig: EntityTracker_RegisterOrUpdate @0x511580 - the filter entity+354
+//  @0x5115E8, mask 384 @0x5115ED, Pool_GetIndexFromPtr @0x511608, 48 @0x511618,
+//  0xFFFF @0x51161F, 0 @0x511632, SendFiltered(0x1E, 1, 0, 8) @0x511645]
+void Server_RouteDesignationMarks(std::vector<NapiNPConnection> &roster,
+		ServerDesignationTable &table, world::World &world);
 
 // One server tick: a positive life counts down, and the row whose life just
 // reached zero drops its owner (freeing it). A row registered with no life
