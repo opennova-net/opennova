@@ -6,8 +6,8 @@
 // reader (read, write, read, write: the two writes agree) on both models; the synthetic GPM
 // lowered back from its migration, the lowering a fixed point after one step, and a skinned
 // model or a technique BHD has no form for refused. The minted leg takes the GP models of
-// fixtures/threedi_gp (tests/fixtures/minimal_gp_gen.cpp: one per construct the 677 GP models
-// BHD ships use, the GPM, GPS and GPP kinds and every migration note they raised when this row
+// fixtures/threedi_gp (tests/fixtures/minimal_gp_gen.cpp: one per GP kind, between them every
+// construct the 677 GP models BHD ships use and every migration note they raised when this row
 // read them, 2026-10-19): each parses, migrates, reads back as 3DI3 with a runtime-safe
 // collision block and keeps its LOD, primitive and section counts; the writer is a fixed point
 // on each; every rigid one (GPM) lowers back to the GP whose migration is the first migration
@@ -358,11 +358,9 @@ struct Vector {
 
 // Each minted model's migration (region 0), in name order.
 const Vector kMigrated[] = {
-		{"gpm_bump.3di", 4274u, 0x1a646f9ff1999e7aull},
-		{"gpm_mats.3di", 6946u, 0xa3cac4e22bda7b84ull},
-		{"gpm_parts.3di", 2950u, 0x931edd3b4d61cfe3ull},
-		{"gpp_skin.3di", 1454u, 0x3433715e4b5b859bull},
-		{"gps_gun.3di", 1454u, 0xea59f87fb4121d79ull},
+		{"synth_gpm.3di", 14600u, 0xba7c23db7ac11dc8ull},
+		{"synth_gpp.3di", 4158u, 0xef52cecf80f989e6ull},
+		{"synth_gps.3di", 1454u, 0x0ea7060eb9616025ull},
 };
 
 // The notes the 677 BHD models raised, every one of which the minted set must raise.
@@ -477,7 +475,7 @@ int minted_corpus(bool dump) {
 	for (const std::string &name : rewritten_apart) std::printf("  written back apart from its source: %s\n", name.c_str());
 	for (const auto &n : notes_seen) std::printf("  %6d  %s\n", n.second, n.first.c_str());
 	TEST_EXPECT(failed == 0);
-	TEST_EXPECT(kinds[gp::Kind::Gpm] == 3 && kinds[gp::Kind::Gps] == 1 && kinds[gp::Kind::Gpp] == 1);
+	TEST_EXPECT(kinds[gp::Kind::Gpm] == 1 && kinds[gp::Kind::Gps] == 1 && kinds[gp::Kind::Gpp] == 1);
 	TEST_EXPECT(lowered == kinds[gp::Kind::Gpm]);
 	for (const char *note : kCorpusNotes) {
 		bool raised = false;

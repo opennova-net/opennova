@@ -180,8 +180,9 @@ target_link_libraries(threedi_rewrite_test PRIVATE opennova_formats)
 target_include_directories(threedi_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_rewrite COMMAND threedi_rewrite_test)
 
-# The BHD GP models fixtures/threedi_gp (one per construct BHD's 677 ship), minted through
-# the GP writer from common/gp_model_bytes.h and byte-compared every run (--write regenerates).
+# The BHD GP models fixtures/threedi_gp (one per GP kind, between them every construct
+# BHD's 677 ship), minted through the GP writer from common/gp_model_bytes.h and
+# byte-compared every run (--write regenerates).
 add_executable(minimal_gp_gen_test fixtures/minimal_gp_gen.cpp)
 target_link_libraries(minimal_gp_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_gp_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

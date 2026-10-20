@@ -1,29 +1,32 @@
 // Generator + guard for the Black Hawk Down GP models fixtures/threedi_gp
-// (fixtures/README.md): one model per construct the 677 GP models BHD ships use
-// (witnessed 2026-10-19 by the retired threedi_gp_retail row: 610 GPM, 1 GPS,
-// 66 GPP, and the migration notes they raised), minted through our own GP
-// writer (formats/threedi_gp/threedi_gp_write.h, the tool's layout [orig:
-// GP_WriteModel @ 0x4490EF (df4oed.exe)]) from the byte-built synthetic models
-// in common/gp_model_bytes.h, each edited to carry its construct, so no retail
-// bytes live in the tree (ADR 0003):
-//   fixtures/threedi_gp/gpm_mats.3di   a rigid model whose LOD holds one material
-//                                      per state BHD's corpus draws that JO has no
-//                                      form for: a clamped texture, a flat colour,
-//                                      an environment pass, a lit material with a
-//                                      colour generator, an alpha-blended and an
-//                                      alpha-tested self-lit one, an additive one,
-//                                      one that ignored its texture's alpha, a
-//                                      flipbook on a counter JO lacks, a texture by
-//                                      mission region
-//   fixtures/threedi_gp/gpm_bump.3di   a rigid model with a tangent stream and two
-//                                      bump materials, one with a second stage
-//   fixtures/threedi_gp/gpm_parts.3di  a rigid model with a spinning part (a fan, a
-//                                      rotor), a lens-flare user point and a face
-//                                      BHD's rounds pass through (flag 0x2)
-//   fixtures/threedi_gp/gps_gun.3di    the GPS kind (Oicw_1R.3di, BHD's one): two
+// (fixtures/README.md): one model per GP kind, between them every construct the
+// 677 GP models BHD ships use (witnessed 2026-10-19 by the retired
+// threedi_gp_retail row: 610 GPM, 1 GPS, 66 GPP, and the migration notes they
+// raised), minted through our own GP writer (formats/threedi_gp/threedi_gp_write.h,
+// the tool's layout [orig: GP_WriteModel @ 0x4490EF (df4oed.exe)]) from the
+// byte-built synthetic models in common/gp_model_bytes.h, each edited to carry its
+// constructs, so no retail bytes live in the tree (ADR 0003):
+//   fixtures/threedi_gp/synth_gpm.3di  a rigid model whose LOD holds one material per
+//                                      state BHD draws that JO has no form for (a
+//                                      clamped texture, a flat colour, an environment
+//                                      pass, a lit material with a colour generator,
+//                                      alpha-blended and alpha-tested self-lit ones,
+//                                      an additive one, ones that ignored their
+//                                      texture's alpha, a texture by mission region),
+//                                      flipbooks on counter 3 (no JO control) and 4
+//                                      (the team), a second stage, the bump techniques
+//                                      (1, 1 paired, 2 paired, 4, 11, 14) over a
+//                                      tangent stream, a spinning part, a lens-flare
+//                                      user point, a face BHD's rounds pass through
+//                                      (flag 0x2), an occlusion record narrowest
+//                                      across x and z, and a second LOD sharing all
+//                                      but one material with view-aligned rows and a
+//                                      three-axis scale
+//   fixtures/threedi_gp/synth_gps.3di  the GPS kind (Oicw_1R.3di, BHD's one): two
 //                                      bones a primitive, one weight a vertex
-//   fixtures/threedi_gp/gpp_skin.3di   the GPP kind: a skinned model on a global
-//                                      batch over a two-part palette
+//   fixtures/threedi_gp/synth_gpp.3di  the GPP kind: a skinned model on a global batch
+//                                      over a two-part palette, a tangent stream and
+//                                      the skinned bump techniques (11, 8, 8 paired, 16)
 // Default: rebuild every file in memory and byte-compare the committed copies;
 // `--write` (re)writes them.
 #include <formats/threedi_gp/threedi_gp.h>
@@ -75,16 +78,6 @@ void add_drawn(gp::File &f, const gp::Material &m, const std::vector<gp::Materia
 	++rm.batches[0].opaque_count;
 }
 
-// The synthetic rigid model without its tangent stream: BHD's models stream
-// tangents only where a bump material reads them (every shipped GPM lowers back
-// to its own migration; a stream nothing reads the lowering leaves out).
-gp::File rigid() {
-	gp::File f = parsed(gp_test::gpm_model());
-	f.vertex_stream.clear();
-	f.header.flags &= ~gp::kFlagVertexStream;
-	return f;
-}
-
 // Material 0 of the synthetic model as a plain lit, textured, opaque material.
 gp::Material plain(const gp::File &f) {
 	gp::Material m = f.lods[0].materials[0];
@@ -96,8 +89,10 @@ gp::Material plain(const gp::File &f) {
 	return m;
 }
 
-gp::File make_mats() {
-	gp::File f = rigid();
+gp::File make_gpm() {
+	gp::File f = parsed(gp_test::gpm_model());
+	f.header.name = "synth_gpm";
+	// --- the states BHD draws that JO has no form for, one material each ---
 	gp::Material m = plain(f);
 	m.attributes = gp::kMaterialClamp; // a clamped texture
 	add_drawn(f, m);
@@ -126,43 +121,53 @@ gp::File make_mats() {
 	m.blend = 4; // additive
 	add_drawn(f, m);
 	m = plain(f);
-	m.blend = 2; // alpha-blended on the material's own alpha, not the texture's
+	m.blend = 2; // alpha-blended on the material's own constant alpha, not the texture's
 	m.alpha_source = 1;
 	m.alpha = 160;
 	add_drawn(f, m);
 	m = plain(f);
-	m.attributes = gp::kMaterialFlipbook; // a flipbook on counter 3, which JO has no control for
-	m.frame_count = 2;
-	m.frame_counter = 3;
-	m.frame_rate = 8;
-	gp::Material frame = plain(f);
-	frame.region_textures = {1, 1, 1};
-	add_drawn(f, m, {frame});
+	m.blend = 2; // ... and on a running alpha generator scaled by it
+	m.alpha_source = 1;
+	m.alpha = 128;
+	m.alpha_gen = gp::Generator{0x18, 0, 256, 255, 64};
+	add_drawn(f, m);
 	m = plain(f);
 	m.region_textures = {0, 1, 0}; // a texture by mission region
 	add_drawn(f, m);
-	f.header.name = "gpm_mats";
-	return f;
-}
-
-gp::File make_bump() {
-	gp::File f = parsed(gp_test::gpm_model());
-	gp::Material m = plain(f);
-	m.attributes = gp::kMaterialBump; // VS_PHONGT's structure, with a second stage
-	m.shader = 2;
-	m.paired = 1;
-	add_drawn(f, m, {plain(f)});
+	// --- flipbooks: on counter 3, which JO has no control for; on counter 4, the player's team ---
+	gp::Material frame = plain(f);
+	frame.region_textures = {1, 1, 1};
 	m = plain(f);
-	m.attributes = gp::kMaterialBump; // VS_DOT3DIFF's
-	m.shader = 1;
+	m.attributes = gp::kMaterialFlipbook;
+	m.frame_count = 2;
+	m.frame_counter = 3;
+	m.frame_rate = 8;
+	add_drawn(f, m, {frame});
+	m.frame_counter = 4;
+	add_drawn(f, m, {frame});
+	// --- a fixed-function material with its second stage ---
+	m = plain(f);
+	m.paired = 1;
+	add_drawn(f, m, {frame});
+	// --- bump materials over the model's tangent stream, by BHD technique ---
+	m = plain(f);
+	m.attributes = gp::kMaterialBump;
+	m.shader = 1; // VS_DOT3DIFF
 	add_drawn(f, m);
-	f.header.name = "gpm_bump";
-	return f;
-}
-
-gp::File make_parts() {
-	gp::File f = rigid();
-	// Part 1 spins: three rates a second (Y, X, Z, in turns a second).
+	m.paired = 1; // VS_DOT3DIFF2, with its second stage
+	add_drawn(f, m, {frame});
+	m.paired = 0;
+	m.shader = 2; // VS_PHONGT, its second stage dropped
+	m.paired = 1;
+	add_drawn(f, m, {frame});
+	m.paired = 0;
+	m.shader = 4; // VS_PHONGT
+	add_drawn(f, m);
+	m.shader = 11; // VS_PHONGO
+	add_drawn(f, m);
+	m.shader = 14; // VS_TRACER
+	add_drawn(f, m);
+	// --- parts: part 1 spins (three rates a second, Y, X, Z); a lens-flare user point ---
 	gp::PartAnimation &row = f.lods[0].part_animations[1];
 	row.flags = gp::kPanmAnimated | gp::kPanmSpinner;
 	row.spin = {0.0f, 2.0f, 0.0f};
@@ -171,14 +176,31 @@ gp::File make_parts() {
 	flare.name = "flare";
 	f.user_points.push_back(flare);
 	f.header.user_point_count = static_cast<int32_t>(f.user_points.size());
-	f.header.name = "gpm_parts";
+	// --- the occlusion record narrowest across x and z (its sphere's radius the xz one) ---
+	f.occlusion[0].vertices = {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 2.0f, 0.0f}};
+	// --- a second LOD: the first's, its additive material's texture swapped (so the
+	// migration shares every material but that one), its rows the view-aligned forms
+	// and a three-axis scale ---
+	gp::RenderModel lod1 = f.lods[0];
+	lod1.materials[1].region_textures = {0, 0, 0};
+	lod1.part_animations[0].flags = gp::kPanmAnimated | gp::kPanmViewA | gp::kPanmScale3;
+	lod1.part_animations[0].tracks[3] = gp::Generator{0, 0, 0, 256, 256};
+	lod1.part_animations[0].tracks[4] = gp::Generator{0x18, 0, 256, 256, 512};
+	lod1.part_animations[0].tracks[5] = gp::Generator{0, 0, 0, 256, 256};
+	lod1.part_animations[1].flags = gp::kPanmAnimated | gp::kPanmViewB;
+	lod1.part_animations[1].spin = {};
+	f.lods.push_back(lod1);
+	f.header.lod_count = 2;
+	f.header.thresholds[1] = 0;
+	f.header.thresholds[0] = 64 << 16;
+	f.header.tags[1] = f.header.tags[0];
 	return f;
 }
 
 gp::File make_gps() {
 	gp::File f = parsed(gp_test::gpp_model());
 	f.header.kind = gp::Kind::Gps;
-	f.header.name = "gps_gun";
+	f.header.name = "synth_gps";
 	// One weight a vertex, bone A's: three quarters, then a quarter.
 	for (size_t i = 0; i < f.vertices.size(); ++i) f.vertices[i].blend = i % 2 == 0 ? 0.75f : 0.25f;
 	// A primitive's two bones are the low bytes of the words at +24 and +28.
@@ -194,7 +216,25 @@ gp::File make_gps() {
 
 gp::File make_gpp() {
 	gp::File f = parsed(gp_test::gpp_model());
-	f.header.name = "gpp_skin";
+	f.header.name = "synth_gpp";
+	// A tangent stream (S then T a vertex) and the skinned bump techniques BHD ships.
+	f.header.flags |= gp::kFlagVertexStream;
+	f.vertex_stream.assign(f.vertices.size() * 24, 0);
+	for (size_t v = 0; v < f.vertices.size(); ++v) {
+		const float st[6] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+		std::memcpy(f.vertex_stream.data() + v * 24, st, sizeof(st));
+	}
+	gp::Material m = plain(f);
+	m.attributes = gp::kMaterialBump;
+	m.shader = 11; // VS_SKBUMPPHONGOBJ
+	add_drawn(f, m);
+	m.shader = 8; // VS_SKBUMPDIFFT
+	add_drawn(f, m);
+	m.paired = 1; // VS_SKBUMPDIFFT2, with its second stage
+	add_drawn(f, m, {plain(f)});
+	m.paired = 0;
+	m.shader = 16; // VS_SKBUMPPHONGT
+	add_drawn(f, m);
 	return f;
 }
 
@@ -203,8 +243,7 @@ struct Recipe {
 	gp::File (*make)();
 };
 
-const Recipe kRecipes[] = {{"gpm_mats", make_mats}, {"gpm_bump", make_bump}, {"gpm_parts", make_parts},
-	{"gps_gun", make_gps}, {"gpp_skin", make_gpp}};
+const Recipe kRecipes[] = {{"synth_gpm", make_gpm}, {"synth_gps", make_gps}, {"synth_gpp", make_gpp}};
 
 } // namespace
 
