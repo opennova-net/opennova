@@ -329,6 +329,17 @@ inline constexpr Normalization kNormalizations[] = {
 			"the client UDP port is ephemeral: each run binds its one gameplay session" },
 	{ "trace.ts_ns", MaskKind::Field, '*', 0, "ts_ns", 0,
 			"capture timestamps are wall clock: only rates, gaps and windows compare" },
+	{ "window.tag_common_length", MaskKind::Field, '*', 0, "tag window", 0,
+			"how long a run's comparison interval is (the session's first packet to the "
+			"steady end) follows the runner's readiness detection, not the wire (c1's 03TR "
+			"OR ran 12 s longer than RR): the tag histogram takes each run's first packet "
+			"plus the shorter interval of the pair, so a stream on the mission clock (03TR's "
+			"0x40 overlay bursts every 1792 ticks) is not counted over different lengths" },
+	{ "window.tag_presence_grace", MaskKind::Field, '*', 0, "tag window end", 0,
+			"an event on the mission clock lands at a different offset from each run's "
+			"join, so one near the window end falls inside one run's window and just past "
+			"the other's (c1's 03TR RO 0x12, 0.5 s past): an identity is not missing when "
+			"it lands within 10 s past that run's window end" },
 	{ "trace.read_time", MaskKind::Field, '*', 0, "ts_ns (hook capture)", 0,
 			"an onHook capture stamps a datagram when the process READS it, so reads bunch "
 			"through the joiner's blocking loads: wire timing (scoreboard_cadence) reads the "

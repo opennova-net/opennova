@@ -812,6 +812,55 @@ void test_cadence_counts() {
 	}
 }
 
+// The tag histogram's window: each run's first packet plus the pair's shorter
+// comparison interval, so a run whose readiness took longer is not counted over
+// more of the mission clock; and an identity landing just past a run's window end
+// is not missing (10 s presence grace), while one far past it is.
+void test_tag_window() {
+	auto add = [](wire::ParityTrace &trace, uint16_t identity, const std::vector<uint64_t> &times) {
+		const wire::ParityEvent model = trace.events.back();
+		for (const uint64_t ts : times) {
+			wire::ParityEvent e = model;
+			e.dir = 'S';
+			e.full_tag = identity;
+			e.ts_ns = ts;
+			e.body = bytes({ 3, 0 });
+			e.length = e.body.size();
+			trace.events.push_back(e);
+		}
+	};
+	auto burst = [](uint64_t from_ms) {
+		std::vector<uint64_t> out;
+		for (uint64_t i = 0; i < 10; ++i)
+			out.push_back((from_ms + i * 90) * kMs);
+		return out;
+	};
+	auto longer = [](wire::ParityTrace &trace) {
+		// The session's first packet a second earlier: a longer comparison interval.
+		wire::ParityPacket early = trace.packets.front();
+		early.ts_ns -= 1 * kSec;
+		trace.packets.insert(trace.packets.begin(), early);
+	};
+	{
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), subject = scripted(3);
+		add(rr, 0x055, burst(10000));
+		add(aa, 0x055, burst(10000));
+		add(subject, 0x055, burst(10000));
+		add(subject, 0x055, burst(19050)); // past the common window, inside its own interval
+		longer(subject);
+		expect_row(judge_case(rr, aa, subject), 'S', "tag_count", "0x55:0", "pass");
+	}
+	{
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), near = scripted(3), far = scripted(3);
+		add(rr, 0x056, { 18 * kSec });
+		add(aa, 0x056, { 18 * kSec });
+		add(near, 0x056, { 20500 * kMs });
+		add(far, 0x056, { 35 * kSec });
+		expect_row(judge_case(rr, aa, near), 'S', "tag_presence", "0x56:0", "pass");
+		expect_row(judge_case(rr, aa, far), 'S', "tag_presence", "0x56:0", "fail", "MISSING_TAG");
+	}
+}
+
 void test_aa_widening() {
 	// RR-aa itself carries half of RR's S2C 0x2C: retail's noise. A subject as far
 	// off passes, against the widened floor; the aa row reports the widening.
@@ -1846,6 +1895,7 @@ int main() {
 	test_body_masks();
 	test_cadence_counts();
 	test_pool_live_pose();
+	test_tag_window();
 	test_timestamps();
 	test_identical();
 	test_tag_histogram();

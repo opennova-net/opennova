@@ -49,7 +49,9 @@ MetricValue metric(char dir, const char *name, std::string key, const char *code
 }
 
 // ---------------------------------------------------------------------------
-// The tag histogram over the comparison interval
+// The tag histogram over the pair's common tag window: each run's first packet
+// plus the shorter of the two comparison intervals (window.tag_common_length),
+// with a presence grace past it (window.tag_presence_grace).
 
 struct TagStats {
 	size_t count = 0;
@@ -65,10 +67,15 @@ struct TagProfile {
 	std::vector<uint16_t> first_order;
 };
 
-TagProfile tag_profile(const RunFacts &run, char dir) {
+// The end of a run's tag window: its first packet plus the pair's common length.
+uint64_t tag_window_end(const RunFacts &run, double common_ms) {
+	return run.first_packet_ns + static_cast<uint64_t>(common_ms * 1e6);
+}
+
+TagProfile tag_profile(const RunFacts &run, char dir, uint64_t end_ns) {
 	TagProfile profile;
 	for (const wire::ParityEvent &event : run.trace.events) {
-		if (event.dir != dir || !run.in_comparison(event.ts_ns))
+		if (event.dir != dir || event.ts_ns > end_ns)
 			continue;
 		const uint16_t identity = event_identity(event);
 		auto inserted = profile.tags.try_emplace(identity);
@@ -96,11 +103,25 @@ std::set<std::string> length_keys(const std::set<size_t> &lengths) {
 	return out;
 }
 
+// Whether `identity` occurs in `run` after `from_ns`, up to `to_ns`.
+bool seen_between(const RunFacts &run, char dir, uint16_t identity, uint64_t from_ns, uint64_t to_ns) {
+	for (const wire::ParityEvent &event : run.trace.events)
+		if (event.dir == dir && event.ts_ns > from_ns && event.ts_ns <= to_ns &&
+				event_identity(event) == identity)
+			return true;
+	return false;
+}
+
 void compare_tags(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("event.gameplay_body"));
-	const TagProfile a = tag_profile(rr, dir);
-	const TagProfile b = tag_profile(other, dir);
+	static_assert(has_normalization("window.tag_common_length"));
+	static_assert(has_normalization("window.tag_presence_grace"));
+	constexpr uint64_t kPresenceGraceNs = 10ull * 1000000000ull;
+	const double common_ms = std::min(rr.comparison_ms, other.comparison_ms);
+	const uint64_t end_a = tag_window_end(rr, common_ms), end_b = tag_window_end(other, common_ms);
+	const TagProfile a = tag_profile(rr, dir, end_a);
+	const TagProfile b = tag_profile(other, dir, end_b);
 	std::set<uint16_t> identities;
 	for (const auto &entry : a.tags)
 		identities.insert(entry.first);
@@ -111,11 +132,18 @@ void compare_tags(
 		const auto in_b = b.tags.find(identity);
 		const bool has_a = in_a != a.tags.end(), has_b = in_b != b.tags.end();
 		const std::string key = identity_key(identity);
+		// An identity one side carries is not missing on the other when it lands
+		// just past that side's window end: the cut, not the wire.
+		const bool graced = has_a != has_b &&
+				(has_a ? seen_between(other, dir, identity, end_b, end_b + kPresenceGraceNs)
+					   : seen_between(rr, dir, identity, end_a, end_a + kPresenceGraceNs));
 		MetricValue presence = metric(dir, "tag_presence", key,
 				has_a && !has_b			  ? "MISSING_TAG"
 						: !has_a && has_b ? "UNEXPECTED_TAG"
 										  : "TAG_PRESENCE");
-		presence.distance = has_a == has_b ? 0.0 : 1.0;
+		presence.distance = has_a == has_b || graced ? 0.0 : 1.0;
+		if (graced)
+			presence.detail = "past the window end, inside the 10 s presence grace";
 		presence.subject = has_b ? "present" : "absent";
 		presence.reference = has_a ? "present" : "absent";
 		out.push_back(presence);
@@ -124,17 +152,13 @@ void compare_tags(
 		const TagStats &sa = in_a->second, &sb = in_b->second;
 
 		MetricValue count = metric(dir, "tag_count", key, "COUNT_MISMATCH");
-		const double cadence =
-				sa.count < 20 ? periodic_cadence_ms(sa.times, rr.info.steady_end_ns) : 0.0;
+		const double cadence = sa.count < 20 ? periodic_cadence_ms(sa.times, end_a) : 0.0;
 		if (cadence > 0.0) {
 			const uint64_t first = *std::min_element(sb.times.begin(), sb.times.end());
-			const double span_ms = other.info.steady_end_ns > first
-					? double(other.info.steady_end_ns - first) / 1e6
-					: 0.0;
+			const double span_ms = end_b > first ? double(end_b - first) / 1e6 : 0.0;
 			cadence_count_metric(count, double(sa.count), cadence, double(sb.count), span_ms);
 		} else {
-			count_metric(
-					count, double(sa.count), rr.comparison_ms, double(sb.count), other.comparison_ms);
+			count_metric(count, double(sa.count), common_ms, double(sb.count), common_ms);
 		}
 		out.push_back(count);
 
