@@ -69,8 +69,9 @@ constexpr BatchPageLimit terrain_tiles() { return BatchPageLimit::pre_write(650)
 // NetPacket_SerializeEntityPoolToPacket_0 @0x503940 (@0x5039EF, @0x503F9C);
 // NetPacket_SerializeEntityStatesToBuffer @0x5030A0 (@0x5033F7, @0x50340D);
 // NetPacket_SerializeEntityPoolToPacket @0x503460 (@0x503687, @0x503694)]. Both modes always ship at
-// least one record per page, and a page whose first record crosses alone steps past it (retail's cursor
-// would resend it every call; no record of the four pools reaches budget - headroom). `encode_page(off,
+// least one record per page; a page whose first record crosses alone keeps the cursor on it, so every
+// later page resends it, as retail's cursor does whatever the page's count (D-NET-414; no record of the
+// four pools reaches budget - headroom). `encode_page(off,
 // cnt)` returns the encoded body for records [off, off+cnt); the cursor is retained when the per-call
 // page budget is exhausted.
 template <typename EncodePage>
@@ -99,7 +100,7 @@ BatchPageResult slice_batch_pages(std::size_t n_records, BatchPageLimit limit,
 			body.swap(grown);
 			++cnt;
 		}
-		i += crossed && cnt > 1 ? cnt - 1 : cnt;
+		i += crossed ? cnt - 1 : cnt;
 		out.pages.push_back(std::move(body));
 	}
 	out.next_cursor = i;
