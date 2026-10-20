@@ -1393,9 +1393,7 @@ func _reference_layout() -> HudPos:
 	var dir := TestFs.cache_dir(self, "hud_overlay_reference")
 	_temp_dirs.append(dir)
 	TestFs.write_text(self, dir.path_join("hudpos.def"),
-			"
-".join(PackedStringArray(REFERENCE_LAYOUT_ROWS)) + "
-")
+			"\n".join(PackedStringArray(REFERENCE_LAYOUT_ROWS)) + "\n")
 	var hp := HudPos.new()
 	assert_eq(hp.load(dir.path_join("hudpos.def")), OK, "the reference rows load")
 	return hp

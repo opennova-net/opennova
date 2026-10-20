@@ -264,13 +264,9 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	# those values: the synthetic table with its 0x0402 combo's arms (SYN_ARMS_4)
 	# authored as the shipped row's.
 	var source := FileAccess.get_file_as_string(ProjectSettings.globalize_path(
-			"res://../fixtures/avatars/synth_avatars.def")).replace("
-", "
-")
-	var shipped_shape := source.replace("	graphic		synth_arms_4.3di
-	camo		0 0 0",
-			"	graphic		IndoArms.3di
-	camo		1 0 0")
+			"res://../fixtures/avatars/synth_avatars.def")).replace("\r\n", "\n")
+	var shipped_shape := source.replace("\tgraphic\t\tsynth_arms_4.3di\n\tcamo\t\t0 0 0",
+			"\tgraphic\t\tIndoArms.3di\n\tcamo\t\t1 0 0")
 	assert_ne(shipped_shape, source, "the 0x0402 combo's arms row is authored as the shipped one")
 	var staged := TestFs.cache_dir(self, "render_fixture_avatars").path_join("Avatars.def")
 	TestFs.write_text(self, staged, shipped_shape)

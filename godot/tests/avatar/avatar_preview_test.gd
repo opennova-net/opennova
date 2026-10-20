@@ -267,26 +267,10 @@ func test_runtime_portrait_binds_idle_on_skinned_parts() -> void:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
 	var def_path := dir.path_join("Avatars.def")
-	TestFs.write_text(self, def_path, "define head HEAD
-{
- graphic person.3di
-}
-"
-			+ "define body BODY
-{
- graphic person.3di
-}
-"
-			+ "nationality 0 NAT
-{
- alignment good
- division 0 DIV
- {
-"
-			+ "  combo 1 HEAD BODY
- }
-}
-")
+	TestFs.write_text(self, def_path, "define head HEAD\n{\n graphic person.3di\n}\n"
+			+ "define body BODY\n{\n graphic person.3di\n}\n"
+			+ "nationality 0 NAT\n{\n alignment good\n division 0 DIV\n {\n"
+			+ "  combo 1 HEAD BODY\n }\n}\n")
 	var db := AvatarDatabase.new()
 	assert_eq(db.load(def_path), OK)
 	var combo := db.get_combo(0, 0, 0)

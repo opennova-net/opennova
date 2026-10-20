@@ -490,8 +490,7 @@ end
 
 func _listen_def_root() -> String:
 	return DefFixture.stage_catalog("listen_server",
-			"ammoclass_max_carry CLASS_556MM 1000
-"
+			"ammoclass_max_carry CLASS_556MM 1000\n"
 			+ DefFixture.weapon_row("WPN_M4AUTO", 3, 0, 30, "auto")
 			+ LISTEN_AVENGER_ROW)
 
