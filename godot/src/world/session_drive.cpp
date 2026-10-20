@@ -167,13 +167,8 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// This shell loads the joiner's mission start after the S2C 0x1A releases it
 	// (the host's streamed assets, the loaded-model freeze), and its end sends the
 	// two 0x2F and the 0x0B (engine: inmatch/joiner_connection.h
-	// set_mission_start_loading, D-NET-531); the 0x0B leads with the config's side
-	// password.
+	// set_mission_start_loading, D-NET-531).
 	join_preload_sim_->set_join_mission_start_loading(true);
-	{
-		Ref<GameConfigBlock> block = world_->get_game_config();
-		if (block.is_valid()) join_preload_sim_->set_join_side_password(block->native().cfg().side_password);
-	}
 	// The JOIN VERSIONCRCSTRING checksum reads the loose
 	// expansion/<name>/version.txt under this install root (D-NET-166).
 	join_preload_sim_->set_join_expansion_version_root(resource_root->get_root_dir());

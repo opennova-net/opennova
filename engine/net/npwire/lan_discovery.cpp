@@ -195,9 +195,10 @@ bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 	// A cold host that binds its port mid-window is only discoverable because
 	// the enumerator keeps announcing. The re-announce is due strictly after
 	// the interval [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 —
-	// the interval select @0x6290ed (3000 for an enumerator), the last send read
-	// @0x629108, `!last_send || tick_count - last_send_tick > interval` @0x629119,
-	// the restamp @0x62911f].
+	// the interval select @0x6290ed (the session's +0x14 interval, which the client
+	// browse sets to 3000: CNapiGameSession_InitTransportConnection @0x4c9f9d), the last
+	// send read @0x629108, `!last_send || tick_count - last_send_tick > interval`
+	// @0x629119, the restamp @0x62911f].
 	if (announce_elapsed_s_ > kLanAnnounceIntervalSeconds) {
 		announce_elapsed_s_ = 0.0;
 		announce_due = true;

@@ -855,11 +855,9 @@ public:
 	// The joiner's mission start (engine: inmatch/joiner_connection.h
 	// set_mission_start_loading): the shell declares its load runs after the S2C 0x1A,
 	// reads the release, and once the load has ended pushes the two 0x2F and the 0x0B.
-	// The side password is the config's (game.cfg's side_password field, code-page bytes).
 	void set_join_mission_start_loading(bool p_loading);
 	bool is_join_mission_start_released() const;
 	void finish_join_mission_start();
-	void set_join_side_password(const std::string &p_password);
 	bool poll_join_preload();
 	bool is_join_preload_ready() const;
 	// The joiner's admission-FSM stage name (diagnostics: the shell's post-load join

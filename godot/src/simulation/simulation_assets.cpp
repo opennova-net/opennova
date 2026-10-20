@@ -143,7 +143,6 @@ void Simulation::install_join_cd_cookie() {
 void Simulation::install_join_mission_start() {
 	if (!runtime_) return;
 	runtime_->set_mission_start_loading(net_.join_mission_start_loading);
-	runtime_->set_side_password(net_.join_side_password);
 }
 
 int Simulation::set_character_avatar_database(

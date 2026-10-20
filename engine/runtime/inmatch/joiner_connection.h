@@ -304,7 +304,9 @@ public:
 	//  +0x34 @0x6263ae..0x6263b7 (SendClientJoin's SIP / SPN @0x6201a9) and to the peer
 	//  conn+0x158 / +0x15C @0x6263c3..0x6263dc; NapiNPSession_SendAnnouncePacket @0x61fa00 -
 	//  EIP / EPN from its destination @0x61fcf5..0x61fd47; the direct join's resolved address
-	//  CNapiGameSession_InitTransportConnection @0x4c9eb5..0x4c9ec3]
+	//  CNapiGameSession_InitTransportConnection @0x4c9eb5..0x4c9ec3]. A join from a browse
+	// row connects to the row's address, the ServerHello's source the browse kept
+	// [orig: Nwu_HandleServerHello @0x626d20 - @0x62769d / @0x6276a1].
 	void set_host_address(const PeerAddr &host) { host_address_ = host; }
 
 	// Feed one inbound datagram (off the socket, CRC envelope intact). Returns the reply datagrams +
@@ -522,10 +524,6 @@ public:
 	// The mission start's end once the 0x1A released it: the two 0x2F and the 0x0B framed
 	// as one packet for the caller to send at once (the explicit push). Empty otherwise.
 	std::vector<uint8_t> push_mission_start_end();
-	// The config's side password the C2S 0x0B carries first (g_SidePassword, copied from
-	// the session settings' side password; empty on a stock config)
-	// [orig: Game_ApplySessionSettingsToGlobals @0x551d20..0x551d30 / @0x55202a].
-	void set_side_password(std::string password) { side_password_ = std::move(password); }
 
 	// The current profile's per-side character selections, serialized into the
 	// game-session ClientAuth as CI0/CI1/TR/CTA/CTB/VCA/VCB. Configure this before
@@ -552,6 +550,16 @@ public:
 		server_password_ = std::move(server_password);
 		join_password_ = join_password.substr(0, 63);
 	}
+	// The side password the C2S 0x0B carries first: the same entry the JSP carries.
+	// Retail clears the session settings' side password at a client join's start, the
+	// pre-game menu's team-password entry writes it, the JOIN's JSP copies it, and the
+	// mission start applies it to g_SidePassword through a 17-byte strncpy; past 16
+	// characters that string has no NUL inside the field, so ours keeps the 16.
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56a434 (the clear);
+	//  UI_PreGameMenuStateMachine @0x568c45 (the entry); UI_JoinSelectedSession
+	//  @0x569bf4..0x569bfa (the JSP, Napi_CopyString 0x40); Game_StartMission @0x524662 ->
+	//  Game_ApplySessionSettingsToGlobals @0x551d20..0x551d30, strncpy 0x11 @0x55202a]
+	std::string mission_status_side_password() const { return join_password_.substr(0, 16); }
 
 	// The install root the JOIN VERSIONCRCSTRING checksum is computed from
 	// (D-NET-166): at JOIN-build time the joiner CRCs the loose
@@ -1080,7 +1088,6 @@ private:
 	bool loadout_kit_set_ = false;
 	const world::WeaponTable *weapons_ = nullptr; // set_weapon_table
 	bool mission_start_loading_ = false;          // set_mission_start_loading
-	std::string side_password_;                   // set_side_password
 	CharacterJoinVars character_join_vars_{};
 	uint32_t auto_medic_disabled_ = 0; // profile +1660 (set_auto_medic_preference)
 	uint8_t current_player_class_ = 0; // authoritative S2C 0x5A avatarClass

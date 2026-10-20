@@ -715,11 +715,6 @@ void Simulation::set_join_mission_start_loading(bool p_loading) {
 	install_join_mission_start();
 }
 
-void Simulation::set_join_side_password(const std::string &p_password) {
-	net_.join_side_password = p_password;
-	install_join_mission_start();
-}
-
 bool Simulation::is_join_mission_start_released() const {
 	return is_joiner() && runtime_ != nullptr && runtime_->mission_start_released();
 }

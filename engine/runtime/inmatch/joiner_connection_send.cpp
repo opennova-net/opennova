@@ -35,7 +35,9 @@ namespace {
 // re-announces once MORE than 3000 ms passed since its last send (the first send leaves at
 // once, start()), the browse's own interval (LanDiscoveryBrowser, kLanAnnounceIntervalSeconds).
 // [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the interval select @0x6290ed
-//  (3000 for an enumerator), `tick - last_send > interval` @0x629119]
+//  (the session's +0x14 interval, which the client browse sets to 3000:
+//  CNapiGameSession_InitTransportConnection @0x4c9f9d), `tick - last_send > interval`
+//  @0x629119]
 constexpr uint64_t kEnumerateAnnounceMilliseconds =
 		static_cast<uint64_t>(kLanAnnounceIntervalSeconds * 1000.0);
 
@@ -445,7 +447,7 @@ std::vector<uint8_t> JoinerConnection::frame_mission_start_end() {
 	std::vector<uint8_t> out = frame_session({
 			make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(first)),
 			make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second)),
-			make_protocol_message(0x0B, build_mission_status(side_password_,
+			make_protocol_message(0x0B, build_mission_status(mission_status_side_password(),
 					packed_game_version(profile != nullptr ? profile->version_text : nullptr))),
 	});
 	post_auth_stage_ = PostAuthStage::AwaitDeployment;
