@@ -2199,9 +2199,13 @@ bool run_listen_host_lifecycle() {
 	return true;
 }
 
-// S2C 0x04 precedes the next host-side player-add pass, so byte 17 must be an
-// authoritative reservation rather than the default reply-state zero. This also
-// proves two admissions drained before spawn cannot advertise the same identity.
+// Retail's C2S 0x02 handler picks no row; the spawn pump's add picks it and the
+// S2C 0x04 sent after the add publishes it (D-NET-715), so two admissions drained
+// before the pump hold nothing and are added to distinct rows, and a replacement's
+// add takes the freed row.
+// [orig: the C2S 0x02 handler @0x512FD0; Server_PlayerAdd @0x51CC9A ->
+//  PlayerSlot_PickFreeSlot @0x4FD7B0; CNapiServer_ProcessPendingPlayerSpawns, the 0x04
+//  @0x4C90D7]
 bool run_post_handshake_slot_is_reserved_until_spawn() {
 	world::World world;
 	world::AiSystem &ai = world.ai;
@@ -2246,8 +2250,8 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 			second_reserved = connection.reply.player_slot_reserved;
 	}
 	if (!expect(
-				first_reserved && second_reserved,
-				"both advertised slots remain reserved until player-add")) {
+				!first_reserved && !second_reserved,
+				"neither C2S 0x02 picks a row; the add does")) {
 		return false;
 	}
 
@@ -2277,7 +2281,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 						first_slot.payload.size() >= 19 && first_slot.payload[17] == 1 &&
 				slot_message_for(second_peer, second_server_scrk, second_slot) &&
 						second_slot.payload.size() >= 19 && second_slot.payload[17] == 2,
-				"spawn-pump 0x04 publishes the two distinct reserved slots")) {
+				"the spawn pump's 0x04 publishes the two distinct rows its adds picked")) {
 		return false;
 	}
 	uint8_t first_spawned_slot = 0xFF;
@@ -2299,7 +2303,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 	if (!expect(
 				first_spawned_slot == 1 && second_spawned_slot == 2 &&
 						!spawned_reservation_left,
-				"spawn consumes the exact two slots advertised pre-spawn")) {
+				"the adds hold the two rows their 0x04s published")) {
 		return false;
 	}
 
@@ -2315,18 +2319,21 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 				replacement_server_scrk)) {
 		return false;
 	}
+	advance_to_periodic_second(world);
+	(void)inmatch::tick_connections(ctx, 16, 7);
 	const inmatch::NapiNPConnection *replacement = nullptr;
 	for (const inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection.peer == replacement_peer) replacement = &connection;
 	if (!expect(
-				replacement != nullptr && replacement->reply.player_slot_reserved &&
+				replacement != nullptr &&
+						replacement->phase >= inmatch::ConnectionPhase::PlayerAdded &&
 						replacement->reply.player_slot == 1,
-				"replacement admission reserves the released slot 1")) {
+				"the replacement's add takes the released row 1")) {
 		return false;
 	}
 	if (!expect(
 				inmatch::destroy_connection(ctx, replacement_peer, nullptr),
-				"pre-spawn teardown releases an advertised reservation")) {
+				"its teardown releases the row")) {
 		return false;
 	}
 	const PeerAddr second_replacement_peer{0x0100007Fu, 31213};
@@ -2336,15 +2343,17 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 				second_replacement_server_scrk)) {
 		return false;
 	}
+	advance_to_periodic_second(world);
+	(void)inmatch::tick_connections(ctx, 16, 8);
 	const inmatch::NapiNPConnection *second_replacement = nullptr;
 	for (const inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection.peer == second_replacement_peer)
 			second_replacement = &connection;
 	return expect(
 			second_replacement != nullptr &&
-					second_replacement->reply.player_slot_reserved &&
+					second_replacement->phase >= inmatch::ConnectionPhase::PlayerAdded &&
 					second_replacement->reply.player_slot == 1,
-			"a later admission reuses the pre-spawn reservation after teardown");
+			"a later joiner's add takes row 1 again after that teardown");
 }
 
 // Retail does not coalesce the C2S 0x02 handler and the pending-player spawn
@@ -3416,10 +3425,10 @@ bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 		if (c.peer == first_peer) first = &c;
 		if (c.peer == second_peer) second = &c;
 	}
-	if (!expect(first != nullptr && second != nullptr && first->reply.player_slot_reserved &&
+	if (!expect(first != nullptr && second != nullptr && !first->reply.player_slot_reserved &&
 	                    !second->reply.player_slot_reserved &&
 	                    second->admission_stage == inmatch::GameAdmissionStage::Complete,
-	            "the first holds the joiner row; the second completes its admission without one"))
+	            "neither 0x02 picks a row; the second completes its admission without one"))
 		return false;
 
 	advance_to_periodic_second(world);
