@@ -782,7 +782,9 @@ WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
     int32_t group = handle / weapon_combo::kRanksPerCategory;
     int32_t rank = handle % weapon_combo::kRanksPerCategory;
     (void)rank;
-    const WeaponTableEntry *eq = entry_at(table, inv, inv.equipped_combo);
+    const WeaponTableEntry *eq = gates.borrowed_def != nullptr
+            ? gates.borrowed_def
+            : entry_at(table, inv, inv.equipped_combo);
     if (eq != nullptr && gates.equipped_valid) {
         // The FSM gate: blocked while firing; reload blocks same-category presses;
         // recoil blocks cross-category presses [orig: @ 0x4e0192..0x4e0223].
@@ -837,7 +839,9 @@ WeaponSwitchOutcome weapon_cycle_slot(const WeaponTable &table, WeaponInventory 
     // [orig: Player_CycleWeaponSlot @ 0x4DFE70]
     WeaponSwitchOutcome out;
     if (gates.seat_blocked) return out; // [orig: parentSlot 2/3/5 @ 0x4dfe91]
-    const WeaponTableEntry *eq = entry_at(table, inv, inv.equipped_combo);
+    const WeaponTableEntry *eq = gates.borrowed_def != nullptr
+            ? gates.borrowed_def
+            : entry_at(table, inv, inv.equipped_combo);
     if (eq == nullptr || !gates.equipped_valid) return out; // [orig: @ 0x4dfe9f]
     int32_t step;
     if (direction > 0) step = 1;

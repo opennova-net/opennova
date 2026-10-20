@@ -412,6 +412,13 @@ struct WeaponSwitchGates {
     // category) [orig: @ 0x4e0192..0x4e0223 mount-state gate].
     int32_t equipped_action = 0;
     bool equipped_valid = false; // an equipped slot with a def exists
+    // The EquippedSlot's def when that slot is a borrowed gun's (a UseGun seat's, or
+    // one held on foot after a refused attach, D-NET-420); null names the inventory's
+    // equipped slot. Both walks read the EquippedSlot's own def [orig:
+    // Player_SwitchToWeaponByHandle @0x4E0170 (EquippedSlot @0x4E01F6, its def's
+    // category compare @0x4E0271); Player_CycleWeaponSlot @0x4DFE70 (the start index
+    // from EquippedSlot->Def @0x4DFE97..0x4DFEDB)].
+    const WeaponTableEntry *borrowed_def = nullptr;
 };
 
 struct WeaponSwitchOutcome {

@@ -2,10 +2,12 @@
 // borrows no slot (a helicopter pilot's) to a gun that lends its own (a UseGun seat, or
 // an EWeap carrier's ctrlx). Retail's process detaches first, and that detach mounts the
 // personal slot (+0x308, else the current one) [orig: Entity_ProcessVehicleAttach
-// @0x435BCE -> Entity_DetachFromVehicle @0x43562A..0x43565F]; the attach then mounts the
-// gun's slot through the same Player_MountWeaponSlot, whose store of g_PendingWeaponSlot
-// replaces the personal one [orig: Entity_AttachToUseGunSlot @0x546C38;
-// Entity_AttachToVehicleSlot @0x494838; Player_MountWeaponSlot @0x4DFB16], so the
+// @0x435AA0 (the call @0x435BCE) -> Entity_DetachFromVehicle @0x4355F0 (the mount
+// @0x43562A..0x43565F)]; the attach then mounts the gun's slot through the same
+// Player_MountWeaponSlot, whose store of g_PendingWeaponSlot replaces the personal one
+// [orig: Entity_AttachToUseGunSlot @0x546B80 (the call @0x546C38);
+// Entity_AttachToVehicleSlot @0x4946D0 (the call @0x494838); Player_MountWeaponSlot
+// @0x4DFA40 (the store @0x4DFB16)], so the
 // switch-out's completion takes the gun's slot and the gun fires. Ours kept the detach's
 // personal mount in flight beside the attach's and committed it at the same completion,
 // handing the player's equipped def back to the rifle and drawing its first-person model

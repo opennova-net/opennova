@@ -22,6 +22,8 @@
 
 #include <cstdio>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -285,6 +287,78 @@ void test_the_local_player_holds_a_refused_gun_on_foot() {
 	world.local_player_state = nullptr;
 }
 
+// The real pump ends that hold: a category key mounts the personal slot over the gun's
+// (the EquippedSlot's def, category 9, against the rifle's 3: SWITCHFROM queued on the
+// gun's slot), and its completion stores g_PendingWeaponSlot as the EquippedSlot and
+// draws the rifle [orig: Player_SwitchToWeaponByHandle @0x4E0170 (the compare
+// @0x4E0271); Player_MountWeaponSlot @0x4DFA40 (@0x4DFB16, @0x4DFB9E);
+// WeaponAction_SwitchFrom @0x5433B0 (the local completion @0x543464..0x5434A3)].
+void test_a_weapon_key_ends_a_slot_held_on_foot() {
+	Rig r;
+	w::World &world = r.world;
+	CHECK(r.attach(r.claimant_h, 0));
+	world.cached.local_player = r.requester_h;
+	w::LocalPlayer local(world);
+	world.local_player_state = &local;
+	local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
+	local.loadout.spawn_kit_set = true;
+	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory,
+			local.inventory_valid, /*select_spawn_default=*/true);
+	const int32_t personal = local.inventory.equipped_combo;
+	CHECK(personal == kRifleCombo);
+	// The shell: each switch event installs the def it names.
+	const auto install = [&](const std::string &name, bool preserve) {
+		w::WeaponInstallData data;
+		data.name = name;
+		data.clipsize = world.tables.weapons.entries[size_t(
+				world.tables.weapons.index_of(name.c_str()))].clipsize;
+		data.table_baked = true;
+		w::local_weapon_install(world, local.weapon, data, preserve, false,
+				&local.inventory, local.view);
+	};
+	std::vector<w::WeaponPresentationEvent> seen;
+	const auto pump = [&]() {
+		++world.logic_tick;
+		local.pump_local_weapon();
+		const std::vector<w::WeaponPresentationEvent> events = local.weapon.events;
+		local.weapon.events.clear();
+		for (const w::WeaponPresentationEvent &e : events) {
+			seen.push_back(e);
+			if (!e.switch_to_weapon.empty()) install(e.switch_to_weapon, e.preserve_slot_state);
+		}
+	};
+	install("WPN_M4AUTO", false);
+	for (int i = 0; i < 8; ++i) pump();
+
+	CHECK(!r.attach(r.requester_h, r.use_gun_index()));
+	CHECK(local.weapon.usegun_slot_active && local.weapon.usegun_on_foot);
+	for (int i = 0; i < 4; ++i) pump();
+	CHECK(local.weapon.usegun_on_foot);
+	seen.clear();
+
+	// The rifle's key: the walk reads the gun's def as the EquippedSlot's.
+	const w::WeaponSwitchOutcome out = w::weapon_switch_to_handle(world.tables.weapons,
+			local.inventory, kRifleCombo,
+			w::local_weapon_switch_gates(world, local.weapon, &local.inventory));
+	CHECK(out.kind == w::WeaponSwitchOutcome::kMount && !out.same_category);
+	w::handle_weapon_switch_outcome(world, local.weapon, &local.inventory, out, local.view);
+	CHECK(local.weapon.switch_in_flight);
+	CHECK(r.gun().primary_weapon_slot.next == w::weapon_action::kSwitchFrom);
+	for (int i = 0; i < 32 && local.weapon.usegun_on_foot; ++i) pump();
+	CHECK(!local.weapon.usegun_on_foot && !local.weapon.usegun_slot_active);
+	CHECK(!local.weapon.switch_in_flight);
+	CHECK(local.inventory.equipped_combo == personal);
+	CHECK(r.requester().equipped_adm_index == kRifleAdm);
+	// The completed SWITCHFROM draws the rifle (a fresh slot entering SWITCHTO).
+	bool drew_rifle = false;
+	for (const w::WeaponPresentationEvent &e : seen)
+		if (e.switch_to_weapon == "WPN_M4AUTO" && !e.preserve_slot_state) drew_rifle = true;
+	CHECK(drew_rifle);
+	CHECK(local.weapon.slot.next == w::weapon_action::kSwitchTo ||
+			local.weapon.slot.current == w::weapon_action::kSwitchTo);
+	world.local_player_state = nullptr;
+}
+
 // D-NET-336 (the walk's leg): a reload the authority's walk begins on another row's
 // slot queues its C2S 0x25 for the host's own dispatcher, which broadcasts S2C 0x49:
 // a UseGun gunner's addresses the gun (an EWeap: 0xFFFF), a slot held on foot the
@@ -343,6 +417,7 @@ int main() {
 	test_a_lone_guns_gunner_refuses_at_the_seat_first();
 	test_a_seat_detach_points_the_slot_at_the_saved_one();
 	test_the_local_player_holds_a_refused_gun_on_foot();
+	test_a_weapon_key_ends_a_slot_held_on_foot();
 	test_the_walk_relays_an_authority_reload();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

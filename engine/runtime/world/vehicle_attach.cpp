@@ -870,7 +870,8 @@ bool point_los_clear(World &world, const Entity &player, const Entity &cand, con
 // The per-entity reject set of the scan and the label pass: the dead skip, the
 // itemDef and model presence and a vehicle's enemy occupant are shared; the
 // carrier (+0x28) block differs (below).
-// [orig: Entity_FindNearestSeatOrArmory @0x435E28..0x435EAE;
+// [orig: Entity_FindNearestSeatOrArmory @0x435D50 (the rejects @0x435E28..0x435EA1;
+//  @0x435EA7..0x435EAE is the Flags 0x20000 matrix branch, no reject);
 //  HUD_DrawVehicleSeatAndArmoryLabels @0x5A335A..0x5A33D9]
 bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &player,
 		const HostileMountIndex &hostile_mounts, bool label_pass) {

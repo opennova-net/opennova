@@ -101,6 +101,11 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 			inventory->equipped_combo >= 0 &&
 			inventory->slot(inventory->equipped_combo) != nullptr &&
 			inventory->slot(inventory->equipped_combo)->adm_index >= 0;
+	// A borrowed gun's slot is the EquippedSlot, its def the walks' (D-NET-420).
+	if (w.usegun_slot_active) {
+		gates.borrowed_def = world.tables.weapons.by_index(w.usegun_weapon_adm);
+		gates.equipped_valid = gates.borrowed_def != nullptr;
+	}
 	const WeaponSlotState *active_slot = active_local_weapon_slot(world, w);
 	gates.equipped_action =
 			w.active ? active_slot->current : weapon_action::kIdle;
@@ -234,8 +239,9 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 	if (player == nullptr) return;
 	// UseGun and an EWeap carrier's ctrlx seat both borrow the carrier's
 	// persistent slot through the same Player_MountWeaponSlot call.
-	// [orig: Entity_AttachToUseGunSlot @0x546C38; Entity_AttachToVehicleSlot
-	//  EWeap gate @0x49480B..0x49480F, call @0x494838]
+	// [orig: Entity_AttachToUseGunSlot @0x546B80 (the Player_MountWeaponSlot call
+	//  @0x546C38); Entity_AttachToVehicleSlot @0x4946D0 (the EWeap gate
+	//  @0x49480B..0x49480F, the call @0x494838)]
 	Entity *mounted_parent = player->mounted
 			? world.registry.get(player->mount_target) : nullptr;
 	if (player->mount_type != SeatType::Gunner &&
@@ -282,9 +288,12 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		// before it staged there: a personal mount still in flight (the previous
 		// control seat's detach mount, run by the same process ahead of this
 		// attach) no longer commits; the switch-out's completion takes the
-		// carrier's slot. [orig: Player_MountWeaponSlot @0x4DFB16, called from
-		// Entity_AttachToVehicleSlot @0x494838 and Entity_AttachToUseGunSlot
-		// @0x546C38; the earlier detach Entity_ProcessVehicleAttach @0x435BCE]
+		// carrier's slot. [orig: Player_MountWeaponSlot @0x4DFA40 (the
+		// g_PendingWeaponSlot store @0x4DFB16), called from
+		// Entity_AttachToVehicleSlot @0x4946D0 (the call @0x494838) and
+		// Entity_AttachToUseGunSlot @0x546B80 (the call @0x546C38); the earlier
+		// detach, Entity_ProcessVehicleAttach @0x435AA0 (the
+		// Entity_DetachFromVehicle call @0x435BCE)]
 		w.switch_in_flight = false;
 		w.usegun_pending_mount = p_mount.handle;
 		w.usegun_pending_weapon_adm = target_adm;
@@ -429,14 +438,19 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	w.switch_in_flight = false;
 	w.switch_deferred_action = -1;
 	if (inventory == nullptr) return;
+	// The completing action is the EquippedSlot's, a borrowed slot held on foot's
+	// included, read before the commit replaces it.
+	const bool completed_rank = w.active &&
+			active_local_weapon_slot(world, w)->current == weapon_action::kSwitchRank;
 	Entity *e = world.registry.get(world.cached.local_player);
 	const int32_t combo = inventory->pending_combo;
 	const WeaponInventorySlot *slot = inventory->slot(combo);
 	if (slot == nullptr || slot->adm_index < 0) return;
 	inventory->equipped_combo = combo;
 	// The personal slot is the EquippedSlot now: a borrow held on foot ends
-	// (D-NET-420) [orig: WeaponAction_SwitchFrom @0x543475 / WeaponAction_SwitchRank
-	// @0x543539 store g_PendingWeaponSlot as the EquippedSlot].
+	// (D-NET-420) [orig: WeaponAction_SwitchFrom @0x5433B0 (the store @0x543475) /
+	// WeaponAction_SwitchRank @0x543500 (the store @0x543539) put g_PendingWeaponSlot
+	// in the EquippedSlot].
 	if (w.usegun_on_foot) {
 		w.usegun_on_foot = false;
 		w.usegun_slot_active = false;
@@ -461,8 +475,7 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// the target's draw. Treating a fire-mode change as SWITCHFROM inserted a
 	// second animation and its draw lockout after the mode-switch action.
 	// [orig: WeaponAction_SwitchRank @0x543500 vs SwitchFrom @0x543475]
-	w.start_in_switchto = !w.active ||
-			active_local_weapon_slot(world, w)->current != weapon_action::kSwitchRank;
+	w.start_in_switchto = !completed_rank;
 	if (e == nullptr) {
 		w.presentation_pending = true;
 		return;
@@ -545,8 +558,12 @@ void local_player_mount_weapon_slot(World &world, LocalPlayerWeapon &w,
 			? table.by_index(static_cast<uint8_t>(slot->adm_index))
 			: nullptr;
 	if (def == nullptr) return; // @0x4DFA58
+	// The EquippedSlot's def: a borrowed gun's slot names the gun's (D-NET-420)
+	// [orig: g_LocalPlayerEntity->EquippedSlot @0x4DFA63, its def @0x4DFB7B..0x4DFB8B].
 	const WeaponInventorySlot *equipped = inventory.slot(inventory.equipped_combo);
-	const WeaponTableEntry *equipped_def = equipped != nullptr && equipped->adm_index >= 0
+	const WeaponTableEntry *equipped_def = w.usegun_slot_active
+			? table.by_index(w.usegun_weapon_adm)
+			: equipped != nullptr && equipped->adm_index >= 0
 			? table.by_index(static_cast<uint8_t>(equipped->adm_index))
 			: nullptr;
 	if (equipped_def == nullptr) return; // @0x4DFA6B..0x4DFA71
@@ -1704,12 +1721,17 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 										io.inventory)), view);
 			}
 		}
-		// A queued manual switch commits at the outgoing SWITCHFROM/SWITCHRANK
-		// swap seam [orig: the completion consumes g_PendingWeaponSlot].
-		if (w.switch_in_flight && ev.switch_completed) {
-			commit_pending_weapon_switch(world, w, io.inventory);
-		}
 	}
+	// A queued manual switch commits at the outgoing SWITCHFROM/SWITCHRANK swap
+	// seam, a borrowed slot held on foot's included: a weapon key or a seat-2/3
+	// detach mounts the personal slot over it (D-NET-420); the ammo bridge above
+	// stays off for the gun's slot [orig: Player_MountWeaponSlot @0x4DFA40 (the
+	// g_PendingWeaponSlot store @0x4DFB16, the queue @0x4DFB9E);
+	// WeaponAction_SwitchFrom @0x5433B0 (the local completion @0x543464..0x543475);
+	// WeaponAction_SwitchRank @0x543500 (@0x543528..0x543539)].
+	if (io.inventory != nullptr && (!borrowed_usegun_slot || w.usegun_on_foot) &&
+			w.switch_in_flight && ev.switch_completed)
+		commit_pending_weapon_switch(world, w, io.inventory);
 	// The FSM's scope legs already ran inside the tick (LocalWeaponScope);
 	// the serials count the calls for the dev tools.
 	if (ev.unscope) ++w.unscope_serial;
