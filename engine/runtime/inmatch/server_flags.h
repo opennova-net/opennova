@@ -57,23 +57,30 @@ enum class JoinEntryStep {
 	Prompt, // ask the player/spectator question
 };
 
-// An answered target dials once every password its word demands is given (a
-// spectator never owes a side password); an undiscovered word enumerates the
-// endpoint first, once (`preflighted`: the enumeration already ran, answered
-// or not); a word offering a choice — spectators (and their password), a
-// server or side password — prompts; anything else dials. TeamChoose alone
-// (a plain team game, 0x904) is not a choice: retail tests the discovered
-// word against 0x6038 and joins at once (D-NET-268).
-// [orig: UI_EnumerateAndJoinSession @0x56a296 `test g_PreGameServerFlags, 6038h` ->
-//  state 8 (PRE_JOINSESSIONCHOICE) or state 4 (join); the choice panels
+// An undiscovered word enumerates the endpoint first, whatever the player has
+// answered: retail joins only a session its enumerator discovered, and its
+// enumerate-and-join loop runs until the first one or the player's abort (no
+// time limit, no row-less dial; D-NET-703), so a join always has the word. Then
+// an answered target dials once every password its word demands is given (a
+// spectator never owes a side password); a word offering a choice — spectators
+// (and their password), a server or side password — prompts; anything else
+// dials. TeamChoose alone (a plain team game, 0x904) is not a choice: retail
+// tests the discovered word against 0x6038 and joins at once (D-NET-268). The
+// player's abort while enumerating (ABORT_CANCEL) destroys the session and
+// returns to the main menu.
+// [orig: UI_EnumerateAndJoinSession @0x569f50 - the loop @0x56a0c1..0x56a0f9,
+//  @0x56a296 `test g_PreGameServerFlags, 6038h` -> state 8
+//  (PRE_JOINSESSIONCHOICE) or state 4 (join); the choice panels
 //  UI_ShowPreGameMenuByState @0x568d10 (0x8 password, 0x2000 spectate, 0x30
-//  team password)]
-inline JoinEntryStep join_entry_step(const JoinEntryFacts &facts, bool preflighted) {
+//  team password); PreMenu_OnAbortCancel @0x568CA0 (g_PreMenuAbortRequested
+//  @0x568caa, PreMenu state 9) -> MultiPlayer_JoinSessionStateMachine
+//  @0x56a3e3..0x56a401 (FullDestroy, the main menu)]
+inline JoinEntryStep join_entry_step(const JoinEntryFacts &facts) {
 	const int32_t flags = facts.server_flags;
+	if (!server_flags_known(flags)) return JoinEntryStep::Preflight;
 	if (facts.role_explicit && (!server_password_required(flags) || facts.server_password_given) &&
 			(facts.spectator || !server_has_side_password(flags) || facts.side_password_given))
 		return JoinEntryStep::Dial;
-	if (!server_flags_known(flags) && !preflighted) return JoinEntryStep::Preflight;
 	if (server_allows_spectators(flags) || server_spectator_password_required(flags) ||
 			server_password_required(flags) || server_has_side_password(flags))
 		return JoinEntryStep::Prompt;

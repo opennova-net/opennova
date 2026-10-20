@@ -1,8 +1,9 @@
 // The server config flag word a joiner reads (inmatch/server_flags.h): the
 // named bits match the witnessed BuildFlags literals [orig:
 // CNapiServerConfig_BuildFlags @0x4c4dc0], an undiscovered word answers false
-// to every read, and the join entry's step — dial, enumerate first, or ask the
-// player/spectator question — follows the word and what the player answered.
+// to every read, and the join entry's step — enumerate first (always, for an
+// undiscovered word), dial, or ask the player/spectator question — follows the
+// word and what the player answered.
 #include <runtime/inmatch/server_flags.h>
 
 #include <cstdio>
@@ -32,45 +33,47 @@ int main() {
 	CHECK(server_allows_spectators(0x2000) && !server_spectator_password_required(0x2000));
 	CHECK(server_spectator_password_required(0x6000));
 
-	// The entry: nothing known -> enumerate once, then dial.
+	// The entry: nothing known -> enumerate.
 	JoinEntryFacts facts;
-	CHECK(join_entry_step(facts, false) == JoinEntryStep::Preflight);
-	CHECK(join_entry_step(facts, true) == JoinEntryStep::Dial);
+	CHECK(join_entry_step(facts) == JoinEntryStep::Preflight);
 	// A word with no choice dials at once.
 	facts.server_flags = 0x904 & ~0x4;
-	CHECK(join_entry_step(facts, false) == JoinEntryStep::Dial);
+	CHECK(join_entry_step(facts) == JoinEntryStep::Dial);
 	// TeamChoose alone opens no join choice: retail tests the discovered word
 	// against 0x6038 (server password, side passwords, spectators, spectator
 	// password) and dials a plain team game (0x904) at once.
 	// [orig: UI_EnumerateAndJoinSession @0x56a296 `test g_PreGameServerFlags, 6038h`]
 	facts.server_flags = 0x904;
-	CHECK(join_entry_step(facts, false) == JoinEntryStep::Dial);
+	CHECK(join_entry_step(facts) == JoinEntryStep::Dial);
 	facts.server_flags = static_cast<int32_t>(server_flag::kTeamChoice);
-	CHECK(join_entry_step(facts, true) == JoinEntryStep::Dial);
+	CHECK(join_entry_step(facts) == JoinEntryStep::Dial);
 	// Each choice bit prompts.
 	for (const uint32_t bit : { server_flag::kServerPassword,
 				 server_flag::kSideAPassword, server_flag::kSideBPassword, server_flag::kSpectators,
 				 server_flag::kSpectators | server_flag::kSpectatorPassword }) {
 		facts.server_flags = static_cast<int32_t>(0x900u | bit);
-		CHECK(join_entry_step(facts, false) == JoinEntryStep::Prompt);
-		CHECK(join_entry_step(facts, true) == JoinEntryStep::Prompt);
+		CHECK(join_entry_step(facts) == JoinEntryStep::Prompt);
+		CHECK(join_entry_step(facts) == JoinEntryStep::Prompt);
 	}
 	// An answered role dials once the passwords its word demands are given.
 	facts.server_flags = static_cast<int32_t>(server_flag::kServerPassword | server_flag::kSideAPassword);
 	facts.role_explicit = true;
-	CHECK(join_entry_step(facts, false) == JoinEntryStep::Prompt); // both missing
+	CHECK(join_entry_step(facts) == JoinEntryStep::Prompt); // both missing
 	facts.server_password_given = true;
-	CHECK(join_entry_step(facts, false) == JoinEntryStep::Prompt); // the side password missing
+	CHECK(join_entry_step(facts) == JoinEntryStep::Prompt); // the side password missing
 	facts.side_password_given = true;
-	CHECK(join_entry_step(facts, false) == JoinEntryStep::Dial);
+	CHECK(join_entry_step(facts) == JoinEntryStep::Dial);
 	// A spectator never owes a side password.
 	facts.side_password_given = false;
 	facts.spectator = true;
-	CHECK(join_entry_step(facts, false) == JoinEntryStep::Dial);
-	// An answered role on an undiscovered word (the --lan-join launch flag) dials, never enumerates.
+	CHECK(join_entry_step(facts) == JoinEntryStep::Dial);
+	// An answered role on an undiscovered word (the --lan-join launch flag with --spectator)
+	// enumerates too: retail joins only a discovered session, its enumerate-and-join loop
+	// running until one answers or the player aborts (D-NET-703).
+	// [orig: UI_EnumerateAndJoinSession @0x569f50 - the loop @0x56a0c1..0x56a0f9]
 	facts.server_flags = -1;
 	facts.server_password_given = false;
-	CHECK(join_entry_step(facts, false) == JoinEntryStep::Dial);
+	CHECK(join_entry_step(facts) == JoinEntryStep::Preflight);
 
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

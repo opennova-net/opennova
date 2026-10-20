@@ -44,6 +44,13 @@ public:
 	int bind_listen(int port);
 	// JOINER: bind an ephemeral local socket and set the default destination to host:port.
 	int dial(const String &host, int port);
+	// The client arm's socket open alone: bind over the authored client port range,
+	// scanned from its min (net_ports.h lan_client_bind_ports, D-NET-294), with no
+	// default destination, so every source is read. The LAN browse opens its
+	// transport this way; the join goes on with it (D-NET-NEW-R3-3).
+	int bind_client();
+	// Allow sends to a broadcast address (the LAN browse's 255.255.255.255).
+	void set_broadcast_enabled(bool p_enabled);
 
 	bool is_open() const { return socket_.is_valid(); }
 	int local_port() const { return local_port_; }

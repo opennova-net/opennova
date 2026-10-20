@@ -54,9 +54,16 @@ private:
 // (UdpPump::demux, D-NET-346): the game's protocol is attached to the socket
 // for this adapter's lifetime, so the game's queue fills only while a match
 // reads it, and it keeps the shared pump alive.
+//
+// A joiner's connection on the shared socket reads only its peer's datagrams
+// (`peer`, nonzero): the game protocol resolves a client connection by the
+// datagram's source address and port, and a datagram from elsewhere reaches
+// none (engine: net/npwire/datagram_demux.h carries the witness). A host's (no
+// peer) reads every source.
 class UdpPumpGameSocket : public opennova::IDatagramSocket {
 public:
-	explicit UdpPumpGameSocket(const Ref<UdpPump> &pump) : pump_(pump) {
+	explicit UdpPumpGameSocket(const Ref<UdpPump> &pump, const opennova::PeerAddr &peer = {})
+			: pump_(pump), peer_(peer) {
 		if (pump_.is_valid()) pump_->demux().set_game_attached(true);
 	}
 	~UdpPumpGameSocket() override {
@@ -65,7 +72,10 @@ public:
 
 	int recv_from(uint8_t *buf, std::size_t cap, opennova::PeerAddr &from) override {
 		if (pump_.is_null() || !pump_->is_open()) return 0;
-		return pump_->demux().game().recv_from(buf, cap, from);
+		for (;;) {
+			const int n = pump_->demux().game().recv_from(buf, cap, from);
+			if (n <= 0 || peer_.port == 0 || from == peer_) return n;
+		}
 	}
 
 	void send_to(const opennova::PeerAddr &to, const uint8_t *data, std::size_t len) override {
@@ -75,6 +85,7 @@ public:
 
 private:
 	Ref<UdpPump> pump_;
+	opennova::PeerAddr peer_{};
 };
 
 } // namespace godot

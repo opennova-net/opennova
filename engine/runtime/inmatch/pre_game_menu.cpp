@@ -98,6 +98,8 @@ void fold_join_queue_record(JoinQueueRecord &record, const uint8_t *data, size_t
 std::string join_screen_text(JoinScreenStage stage, const JoinQueueRecord &queue,
 		uint64_t now_ms, const rtxt::File *override_table, const rtxt::File *gameerr) {
 	switch (stage) {
+	case JoinScreenStage::Enumerating:
+		return gameerr_text(override_table, gameerr, "PRE_ENUMSESSION");
 	case JoinScreenStage::Joining:
 		return gameerr_text(override_table, gameerr, "PRE_JOININGSESSION");
 	case JoinScreenStage::Connecting:

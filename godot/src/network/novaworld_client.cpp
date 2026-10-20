@@ -117,6 +117,7 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_hosting"), &NovaWorldClient::is_hosting);
 	ClassDB::bind_method(D_METHOD("stop_hosting"), &NovaWorldClient::stop_hosting);
 	ClassDB::bind_method(D_METHOD("stop_playing"), &NovaWorldClient::stop_playing);
+	ClassDB::bind_method(D_METHOD("get_game_pump"), &NovaWorldClient::get_game_pump);
 	ClassDB::bind_method(D_METHOD("has_join_proxy"), &NovaWorldClient::has_join_proxy);
 	ClassDB::bind_method(D_METHOD("copy_join_proxy_to", "target"), &NovaWorldClient::copy_join_proxy_to);
 	ClassDB::bind_method(D_METHOD("get_join_lobby_number"), &NovaWorldClient::get_join_lobby_number);

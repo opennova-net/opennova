@@ -5,11 +5,11 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include "resource_index/launch_flags.h"
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
 #include <net/novaworld/lobby_vars.h> // resolve_address_without_dns
-#include <net/npwire/nw_session_framing.h> // next_connection_index
 #include <net/npwire/peer_addr.h>
 
 #include <array>
@@ -81,6 +81,10 @@ void LanSession::_bind_methods() {
 			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)),
 			DEFVAL(int(opennova::kLanConnectTypeLan)));
 	ClassDB::bind_method(D_METHOD("set_proxy_from_target", "target"), &LanSession::set_proxy_from_target);
+	ClassDB::bind_method(D_METHOD("set_windowed", "windowed"), &LanSession::set_windowed);
+	ClassDB::bind_method(D_METHOD("is_windowed"), &LanSession::is_windowed);
+	ClassDB::bind_method(D_METHOD("set_transport", "pump"), &LanSession::set_transport);
+	ClassDB::bind_method(D_METHOD("take_transport"), &LanSession::take_transport);
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &LanSession::set_resource_root);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &LanSession::get_resource_root);
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
@@ -104,7 +108,7 @@ void LanSession::_ready() {
 
 int LanSession::start_browsing(const String &destination, int port_min, int port_max,
 		int connect_type) {
-	stop();
+	stop_enumerator();
 	servers_.clear();
 	emit_signal("servers_changed", get_servers());
 
@@ -115,31 +119,41 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 		return static_cast<int>(ERR_UNCONFIGURED);
 	}
 	const String target = destination.strip_edges();
+	// The enumerator's connection: created twice, as every enumerate's is, so its
+	// CI is the counter's second step (next_browse_connection_index).
 	if (target.is_empty() ||
-			!browser_.begin(*title, opennova::next_connection_index(), enumerate_address(target),
-					port_min, port_max, connect_type)) {
+			!browser_.begin(*title, opennova::next_browse_connection_index(),
+					enumerate_address(target), port_min, port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);
 	}
 
-	socket_.instantiate();
-	// The browse socket is the client arm's: the authored client port range,
-	// scanned from its min (net_ports.h lan_client_bind_ports, D-NET-294).
-	Error bind_error = ERR_CANT_OPEN;
-	for (const uint16_t candidate : opennova::lan_client_bind_ports()) {
-		bind_error = socket_->bind(candidate, "0.0.0.0");
-		if (bind_error == OK) break;
+	// The transport: the installed one (the NovaWorld session's), else the browse's
+	// own, bound once over the client arm's port range and kept across browses
+	// (net_ports.h lan_client_bind_ports, D-NET-294).
+	if (pump_.is_null() || !pump_->is_open()) {
+		if (pump_installed_) {
+			browser_.stop();
+			emit_error("LAN browse transport is closed");
+			return static_cast<int>(ERR_UNCONFIGURED);
+		}
+		pump_.instantiate();
+		// `--capture-pcap <path>` (LaunchFlags) records the browse and the join it
+		// hands its socket to.
+		pump_->set_capture_path(LaunchFlags::capture_pcap());
+		const int bind_error = pump_->bind_client();
+		if (bind_error != static_cast<int>(OK)) {
+			pump_.unref();
+			browser_.stop();
+			emit_error(String("LAN browse socket bind failed (error ") +
+					String::num_int64(static_cast<int64_t>(bind_error)) + ")");
+			return bind_error;
+		}
+		pump_->set_broadcast_enabled(true);
 	}
-	if (bind_error != OK) {
-		socket_.unref();
-		browser_.stop();
-		emit_error(String("LAN browse socket bind failed (error ") +
-				String::num_int64(static_cast<int64_t>(bind_error)) + ")");
-		return static_cast<int>(bind_error);
-	}
-	socket_->set_broadcast_enabled(true);
-
-	browse_target_ = target;
+	// The game protocol reads the socket while the enumerator runs (a NovaWorld
+	// session's datagrams stay its own: the pump's demux).
+	game_ = std::make_unique<UdpPumpGameSocket>(pump_);
 
 	Error first_send_error = OK;
 	const int sent = send_probe_burst(first_send_error);
@@ -160,41 +174,60 @@ void LanSession::set_proxy_from_target(const Ref<JoinTarget> &target) {
 	browser_.set_proxy(target.is_valid() ? target->get_join_proxy() : opennova::ProxyRendezvousConfig{});
 }
 
+void LanSession::set_transport(const Ref<UdpPump> &p_pump) {
+	stop();
+	pump_ = p_pump;
+	pump_installed_ = p_pump.is_valid();
+}
+
+Ref<UdpPump> LanSession::take_transport() {
+	stop_enumerator();
+	Ref<UdpPump> out = pump_;
+	pump_.unref();
+	pump_installed_ = false;
+	return out;
+}
+
 int LanSession::send_probe_burst(Error &first_send_error) {
 	int sent = 0;
-	if (!socket_.is_valid()) {
+	if (pump_.is_null() || !pump_->is_open()) {
 		return sent;
 	}
 	// The enumerator's burst in its order (LanDiscoveryBrowser::burst): the proxy
-	// rendezvous to the game node when installed, then one announce per port, each
-	// naming its own destination as EIP / EPN. `sent` counts the announces.
+	// rendezvous to the game node when installed, then one announce per port to the
+	// enumerate address, each naming its own destination as EIP / EPN. `sent`
+	// counts the announces; an unresolved target (address 0) takes none.
 	for (const opennova::LanBurstDatagram &datagram : browser_.burst()) {
-		const Error destination_error = datagram.rendezvous
-				? socket_->set_dest_address(
-						opennova::to_gd(opennova::peer_addr_ip_to_string(datagram.node)),
-						datagram.node.port)
-				: socket_->set_dest_address(browse_target_, datagram.port);
-		if (destination_error != OK) {
-			if (first_send_error == OK) first_send_error = destination_error;
+		const opennova::PeerAddr to = datagram.rendezvous
+				? datagram.node
+				: opennova::PeerAddr{browser_.enumerate_ip(), static_cast<uint16_t>(datagram.port)};
+		if (to.ip == 0) {
+			if (first_send_error == OK) first_send_error = ERR_CANT_RESOLVE;
 			continue;
 		}
-		const Error send_error = socket_->put_packet(to_packed_bytes(datagram.bytes));
-		if (send_error == OK) {
+		const int send_error = pump_->send_to(
+				opennova::to_gd(opennova::peer_addr_ip_to_string(to)), to.port,
+				to_packed_bytes(datagram.bytes));
+		if (send_error == static_cast<int>(OK)) {
 			if (!datagram.rendezvous) ++sent;
 		} else if (first_send_error == OK) {
-			first_send_error = send_error;
+			first_send_error = static_cast<Error>(send_error);
 		}
 	}
 	return sent;
 }
 
-void LanSession::stop() {
-	if (socket_.is_valid()) {
-		socket_->close();
-	}
-	socket_.unref();
+void LanSession::stop_enumerator() {
+	game_.reset();
 	browser_.stop();
 	set_process(false);
+}
+
+void LanSession::stop() {
+	stop_enumerator();
+	if (pump_.is_valid() && !pump_installed_) pump_->close();
+	pump_.unref();
+	pump_installed_ = false;
 }
 
 TypedArray<LanServerRow> LanSession::get_servers() const {
@@ -202,7 +235,7 @@ TypedArray<LanServerRow> LanSession::get_servers() const {
 }
 
 void LanSession::_process(double delta) {
-	if (!browser_.browsing() || !socket_.is_valid()) {
+	if (!browser_.browsing() || game_ == nullptr) {
 		return;
 	}
 
@@ -223,12 +256,14 @@ void LanSession::_process(double delta) {
 
 void LanSession::poll_replies() {
 	bool changed = false;
-	while (socket_.is_valid() && socket_->get_available_packet_count() > 0) {
-		const PackedByteArray packet = socket_->get_packet();
-		const std::string source_ip = opennova::to_std(socket_->get_packet_ip());
-		const int source_port = static_cast<int>(socket_->get_packet_port());
-		if (browser_.accept_reply(packet.ptr(), static_cast<size_t>(packet.size()),
-					source_ip, source_port) != opennova::LanRowChange::kNone)
+	uint8_t buf[4096];
+	while (game_ != nullptr) {
+		opennova::PeerAddr from{};
+		const int n = game_->recv_from(buf, sizeof(buf), from);
+		if (n <= 0) break;
+		if (browser_.accept_reply(buf, static_cast<size_t>(n),
+					opennova::peer_addr_ip_to_string(from), static_cast<int>(from.port)) !=
+				opennova::LanRowChange::kNone)
 			changed = true;
 	}
 	if (changed) rebuild_rows();

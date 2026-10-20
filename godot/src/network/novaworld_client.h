@@ -149,7 +149,8 @@ public:
 	opennova::NwuHostRole &host_role() { return host_role_; }
 	// The NovaWorld network type's one socket: a hosting session's match rides
 	// it (its demux's game view), so the service's observed NWU source is the
-	// game endpoint (D-NET-346).
+	// game endpoint (D-NET-346); a join's browse and connection ride it too
+	// (D-NET-NEW-R3-3).
 	Ref<UdpPump> get_game_pump() const { return nw_pump_; }
 	// The gate reply the lobby HTTP legs resolve their base URL from; null
 	// until a gate response landed.

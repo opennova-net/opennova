@@ -19,7 +19,7 @@ Ref<JoinTarget> JoinTarget::from_lan_row(const Ref<LanServerRow> &p_row) {
 	// before it connects.
 	target->expansion_ = p_row->get_expansion();
 	target->expansion_known_ = true;
-	// The row's record already holds the 0x81: the join skips the 0x41.
+	// The row's record already holds the 0x81: the join sends no 0x41 of its own.
 	target->discovered_session_ = true;
 	target->session_host_key_ = p_row->get_host_key();
 	target->session_password_required_ = p_row->get_password_required();
@@ -57,6 +57,10 @@ void JoinTarget::_bind_methods() {
 	JOIN_TARGET_PROPERTY(Variant::BOOL, session_password_required)
 	JOIN_TARGET_PROPERTY(Variant::INT, session_client_index)
 #undef JOIN_TARGET_PROPERTY
+	ClassDB::bind_method(D_METHOD("get_transport"), &JoinTarget::get_transport);
+	ClassDB::bind_method(D_METHOD("set_transport", "pump"), &JoinTarget::set_transport);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "transport", PROPERTY_HINT_RESOURCE_TYPE, "UdpPump"),
+			"set_transport", "get_transport");
 	ClassDB::bind_method(D_METHOD("has_join_proxy"), &JoinTarget::has_join_proxy);
 	ClassDB::bind_method(D_METHOD("has_team_password"), &JoinTarget::has_team_password);
 	ClassDB::bind_method(D_METHOD("allows_spectators"), &JoinTarget::allows_spectators);
@@ -64,7 +68,7 @@ void JoinTarget::_bind_methods() {
 			&JoinTarget::server_password_required);
 	ClassDB::bind_method(D_METHOD("spectator_password_required"),
 			&JoinTarget::spectator_password_required);
-	ClassDB::bind_method(D_METHOD("entry_step", "preflighted"), &JoinTarget::entry_step);
+	ClassDB::bind_method(D_METHOD("entry_step"), &JoinTarget::entry_step);
 	ClassDB::bind_static_method("JoinTarget", D_METHOD("from_lan_row", "row"),
 			&JoinTarget::from_lan_row);
 	BIND_ENUM_CONSTANT(ROLE_PLAYER);

@@ -32,6 +32,7 @@ public:
 		STAGE_VERIFYING = static_cast<int>(opennova::inmatch::JoinScreenStage::Verifying),
 		STAGE_QUEUED = static_cast<int>(opennova::inmatch::JoinScreenStage::Queued),
 		STAGE_STARTING = static_cast<int>(opennova::inmatch::JoinScreenStage::Starting),
+		STAGE_ENUMERATING = static_cast<int>(opennova::inmatch::JoinScreenStage::Enumerating),
 	};
 	enum Panel {
 		PANEL_ERROR = static_cast<int>(opennova::inmatch::PreGamePanel::Error),
@@ -50,6 +51,11 @@ public:
 	// The MESSAGES line for this read (inmatch::join_screen_text).
 	String message_text(const Ref<RtxtStringFile> &p_override_table,
 			const Ref<RtxtStringFile> &p_gameerr) const;
+
+	// The MESSAGES line of a stage that has no queue record, read before any
+	// connection exists (the enumerate-and-join's PRE_ENUMSESSION).
+	static String stage_text(int p_stage, const Ref<RtxtStringFile> &p_override_table,
+			const Ref<RtxtStringFile> &p_gameerr);
 
 	// pre.mnu's panel windows: how many, each one's name, and whether a panel
 	// state shows it (inmatch::pre_game_windows).

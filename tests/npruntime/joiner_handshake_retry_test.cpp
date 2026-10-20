@@ -117,10 +117,12 @@ bool run_idle_keepalive_waits_while_a_packet_is_held() {
 }
 
 bool run_dropped_hello_and_auth_recover() {
-	// The capture-pinned 0x41 retransmit cadence — deliberately NOT the 10000-ms session
-	// active-send interval — and retail's connect-state 0x42 cadence: re-sent once MORE than
-	// 2000 ms passed [orig: StartClientConnection @0x4ca2ab; PumpStateMachine @0x629588].
-	constexpr uint64_t kHandshakeRetryMs = 1000;
+	// The enumerator's 0x41 re-announce, once MORE than 3000 ms passed with no time limit
+	// (D-NET-703) — deliberately NOT the 10000-ms session active-send interval — and retail's
+	// connect-state 0x42 cadence: re-sent once MORE than 2000 ms passed
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - @0x6290ed, @0x629119;
+	//  StartClientConnection @0x4ca2ab; PumpStateMachine @0x629588].
+	constexpr uint64_t kHandshakeRetryMs = 3000;
 	constexpr uint64_t kClientJoinRetryMs = 2000;
 	const PeerAddr peer{0x0100007Fu, 32769};
 
@@ -143,15 +145,15 @@ bool run_dropped_hello_and_auth_recover() {
 			"handshake retry timer arms without an immediate duplicate")) {
 		return false;
 	}
-	now_ms = kHandshakeRetryMs - 1;
+	now_ms = kHandshakeRetryMs;
 	if (!expect(client.Client_ProcessNetworkFrame(7).empty(),
-			"ClientHello is not retried before the active-send interval")) {
+			"ClientHello is not re-announced until MORE than 3000 ms passed")) {
 		return false;
 	}
 
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E112u);
-	now_ms = kHandshakeRetryMs;
+	now_ms = kHandshakeRetryMs + 1;
 	const std::vector<std::vector<uint8_t>> hello_retry =
 			client.Client_ProcessNetworkFrame(7);
 	if (!expect(hello_retry.size() == 1 && hello_retry[0] == first_hello,
@@ -177,12 +179,12 @@ bool run_dropped_hello_and_auth_recover() {
 	}
 	const std::vector<uint8_t> first_auth = auth_out[0];
 
-	now_ms = kHandshakeRetryMs + kClientJoinRetryMs;
+	now_ms = kHandshakeRetryMs + 1 + kClientJoinRetryMs;
 	if (!expect(client.Client_ProcessNetworkFrame(1).empty(),
 			"ClientAuth is not retried until MORE than 2000 ms passed")) {
 		return false;
 	}
-	now_ms = kHandshakeRetryMs + kClientJoinRetryMs + 1;
+	now_ms = kHandshakeRetryMs + 1 + kClientJoinRetryMs + 1;
 	const std::vector<std::vector<uint8_t>> auth_retry =
 			client.Client_ProcessNetworkFrame(1);
 	if (!expect(auth_retry.size() == 1 && auth_retry[0] == first_auth,
@@ -423,8 +425,9 @@ bool run_connect_writes_pv3_and_its_peer() {
 // D-NET-521: one connection enumerates and joins. The connection counter pre-increments and
 // steps over 0; a LAN browse takes the process's next index for its 0x41s, and the join from a
 // row it discovered goes on with that connection: its first datagram is a 0x42 with the browse's
-// CI, which the host's 0x82 echoes and the joiner accepts. A dial without a row creates its own
-// connection and takes the next index.
+// CI, which the host's 0x82 echoes and the joiner accepts. A join without a row enumerates on
+// its own connection, created as every enumerate's is, so its CI is the counter's second step
+// (D-NET-703; next_browse_connection_index).
 // [orig: CNapiNPConnection_Create @0x62acb0 - @0x62b282..0x62b296; CNapiNetwork_StartClientConnection
 //  @0x4ca160 (the connection ctx+0xE60 whose enumerator found the session @0x4ca1dd..0x4ca1ee) ->
 //  CNapiNPConnection_InitFromSession @0x626320]
@@ -475,6 +478,9 @@ bool run_one_connection_index_per_join() {
 	                    auth.ci == browse_ci && join.client_index() == browse_ci,
 	            "one index: the row's join sends a 0x42 with the browse's CI"))
 		return false;
+	if (!expect(join.join_screen_stage() == inmatch::JoinScreenStage::Joining,
+	            "one index: the row's join reads PRE_JOININGSESSION"))
+		return false;
 	const inmatch::HandleResult admitted =
 			inmatch::handle_server_datagram(host, joiner_peer, first.data(), first.size(), 1);
 	ServerAuth sa;
@@ -491,8 +497,12 @@ bool run_one_connection_index_per_join() {
 	            "one index: the joiner accepts the 0x82 for its CI"))
 		return false;
 
-	// The process's counter as it stands, and the index the next connection takes.
+	// The process's counter as it stands, and the index a join without a row carries: the
+	// enumerate creates its connection twice and keeps the second.
+	// [orig: UI_EnumerateAndJoinSession @0x569f50 - CreateServerConnection @0x56a011, then
+	//  InitTransportConnection @0x56a097, whose own create @0x4c9e16 replaces the first]
 	uint32_t expected = next_connection_index();
+	advance_connection_index(expected);
 	advance_connection_index(expected);
 	inmatch::JoinerConnection dial("FreshConnection", [&now_ms] { return now_ms; });
 	dial.set_title(&kJo);
@@ -501,8 +511,10 @@ bool run_one_connection_index_per_join() {
 	return expect(nw_decode_inbound(hello_datagram.data(), hello_datagram.size(), opcode, body) &&
 	                      opcode == SESSION_OPCODE_CLIENT_HELLO &&
 	                      parse_client_hello(body.data(), body.size(), hello) &&
-	                      hello.ci == expected && dial.client_index() == expected,
-	              "one index: a dial without a row takes the process's next index");
+	                      hello.ci == expected && dial.client_index() == expected &&
+	                      dial.join_screen_stage() == inmatch::JoinScreenStage::Enumerating,
+	              "one index: a join without a row enumerates (PRE_ENUMSESSION) with the "
+	              "counter's second step");
 }
 
 // A flat-TLV body with every field named `unwanted` left out, the rest as written.

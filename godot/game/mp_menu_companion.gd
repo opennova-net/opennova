@@ -177,7 +177,12 @@ func _on_list_activated(id: int, row: int) -> void:
 func _on_lan_join() -> void:
 	if _selected_server < 0 or _selected_server >= _servers.size():
 		return
-	lan_join_requested.emit(JoinTarget.from_lan_row(_servers[_selected_server]))
+	var target := JoinTarget.from_lan_row(_servers[_selected_server])
+	# The join goes on with the search's socket (D-NET-NEW-R3-3); a search whose
+	# window closed has none, and the join opens the client arm's again.
+	if _lan_session != null:
+		target.transport = _lan_session.take_transport()
+	lan_join_requested.emit(target)
 
 
 # --- Host-settings screen (MULTI_PLAYER_HOST) ---------------------------------

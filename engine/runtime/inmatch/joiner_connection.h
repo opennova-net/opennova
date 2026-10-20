@@ -95,7 +95,7 @@ public:
 
 	enum class Phase {
 		Idle,     // nothing sent yet
-		Hello,    // ClientHello sent, awaiting ServerHello
+		Hello,    // the enumerator's ClientHello announce outstanding, awaiting a ServerHello
 		Auth,     // ClientAuth sent, awaiting ServerAuth
 		Driving,  // ServerAuth accepted; reactive admission/world/deployment FSM is active
 		InMatch,  // self handle is known and gameplay may run; deploy UI can independently remain pending
@@ -235,14 +235,17 @@ public:
 	void set_title(const TitleIdentity *title) { title_ = title; }
 	const TitleIdentity *title() const { return title_; }
 
-	// Begin the handshake. Returns the ClientHello datagram to send (Idle -> Hello); empty,
-	// with last_error() saying why, when no title identity is set.
+	// Begin the join. From a discovered session: the ClientAuth (Idle -> Auth). Without
+	// one: retail's enumerate-and-join on this one connection, the announce to the host
+	// (Idle -> Hello) re-sent every > 3000 ms with no time limit until the session answers
+	// and the connect goes on with this connection (D-NET-703). Empty, with last_error()
+	// saying why, when no title identity is set.
 	std::vector<uint8_t> start();
 	// The browse row's record of the host's 0x81 (a LAN row the player picked):
 	// a join from a discovered session goes straight to the 0x42 with the row's
 	// HK and SF -- no new 0x41 -- as retail's connect takes HK, address and port
 	// from the session record into the connect state. Configure before start();
-	// `present == false` (a bare dial) sends the 0x41 first.
+	// `present == false` enumerates on this connection first.
 	// [orig: UI_JoinSelectedSession @0x5699d0 -> CNapiNetwork_StartClientConnection
 	//  @0x4ca160 -> CNapiNPConnection_InitFromSession @0x626320 (the record's HK
 	//  @0x62639c, address/port @0x6263ae..0x6263b7, state 3 @0x626496)]
@@ -275,9 +278,10 @@ public:
 	PollResult handle_datagram(const uint8_t *raw, std::size_t len);
 
 	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram, measured by the
-	// monotonic wall clock (independent of render/simulation cadence): the 0x41 every 1000 ms, the
-	// 0x42 once more than 2000 ms passed, failing the join with connect error 2 (NCC002) once the
-	// 0x42 leg has waited more than 30000 ms.
+	// monotonic wall clock (independent of render/simulation cadence): the 0x41 once more than
+	// 3000 ms passed (the enumerator, no time limit), the 0x42 once more than 2000 ms passed,
+	// failing the join with connect error 2 (NCC002) once the 0x42 leg has waited more than
+	// 30000 ms.
 	// Once Driving, flush deferred ACKs, the active-interval header-only probes, and the held C2S
 	// 0x0A after local world readiness. Semantic admission transitions are emitted reactively from
 	// handle_datagram(); the 0x44 missing-sequence request belongs to finish_receive_pump().

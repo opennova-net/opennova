@@ -32,6 +32,7 @@
 #include <runtime/inmatch/role_feeds.h> // scoreboard_feed
 #include <runtime/world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
 #include <net/npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
+#include <net/novaworld/lobby_vars.h> // resolve_address_without_dns (the join's row address)
 #include <base/vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
 #include <net/npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
@@ -538,6 +539,8 @@ void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
 		session.client_index = static_cast<uint32_t>(p_target->get_session_client_index());
 	}
 	net_.join_discovered_session = std::move(session);
+	// ... and the browse's socket (D-NET-NEW-R3-3).
+	net_.join_transport = p_target.is_valid() ? p_target->get_transport() : Ref<UdpPump>();
 	// Applied to a live joiner runtime now and on each (re)load in enable_join.
 	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);
 }
@@ -569,17 +572,38 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
 	joiner_role_->set_title(title);
-	if (net_.pump.is_null()) net_.pump.instantiate();
-	net_.pump->set_capture_path(net_.capture_pcap_path);
-	if (net_.pump->dial(p_host_ip, p_port) != 0) {
-		(void)install_offline_role();
-		return false;
+	if (net_.join_transport.is_valid() && net_.join_transport->is_open()) {
+		// The join goes on with the browse's socket, the one the row was found on:
+		// retail's client has one transport socket per network type, and the join
+		// continues on the browse's connection (on NovaWorld the lobby session's
+		// socket, its demux keeping the two protocols apart). The connection reads
+		// its peer's datagrams alone (engine: net/npwire/lan_discovery.h, the
+		// browser's transport; net/npwire/datagram_demux.h, the per-source lookup).
+		// The row's address is the 0x81's source, a dotted quad.
+		const opennova::PeerAddr host{
+				opennova::resolve_address_without_dns(opennova::to_std(p_host_ip)),
+				static_cast<uint16_t>(p_port)};
+		if (host.ip == 0) {
+			(void)install_offline_role();
+			return false;
+		}
+		net_.pump = net_.join_transport;
+		net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
+				std::make_unique<UdpPumpGameSocket>(net_.pump, host));
+		joiner_role_->set_socket(net_.pump_socket.get(), host);
+	} else {
+		if (net_.pump.is_null()) net_.pump.instantiate();
+		net_.pump->set_capture_path(net_.capture_pcap_path);
+		if (net_.pump->dial(p_host_ip, p_port) != 0) {
+			(void)install_offline_role();
+			return false;
+		}
+		// The joiner role reads and writes the dialed pump through the adapter
+		// from now on.
+		net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
+				std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr()));
+		joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	}
-	// The joiner role reads and writes the dialed pump through the adapter
-	// from now on.
-	net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
-			std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr()));
-	joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
 	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's

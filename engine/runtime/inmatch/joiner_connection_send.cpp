@@ -5,6 +5,8 @@
 // out of joiner_connection.cpp; the class header is the shared declaration.
 #include <runtime/inmatch/joiner_connection.h>
 
+#include <net/npwire/lan_discovery.h> // kLanAnnounceIntervalSeconds
+
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
@@ -25,11 +27,13 @@ namespace opennova::inmatch {
 
 namespace {
 
-// The 0x41 ClientHello leg's retransmit cadence. A retail game join sends no 0x41 at all: it
-// joins from the browse row, whose session record already holds the 0x81, and goes straight to
-// the connect state below. Our joiner has no browse row, so its Hello leg stands in for the
-// browse probe of that one host; this stays a capture-pinned policy value (about one second).
-constexpr uint64_t kClientHelloRetryMilliseconds = 1000;
+// The enumerate-and-join's announce cadence on a connection with no row: the enumerator
+// re-announces once MORE than 3000 ms passed since its last send (the first send leaves at
+// once, start()), the browse's own interval (LanDiscoveryBrowser, kLanAnnounceIntervalSeconds).
+// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the interval select @0x6290ed
+//  (3000 for an enumerator), `tick - last_send > interval` @0x629119]
+constexpr uint64_t kEnumerateAnnounceMilliseconds =
+		static_cast<uint64_t>(kLanAnnounceIntervalSeconds * 1000.0);
 
 // The connect state (retail state 3) of a JO game join: the 0x42 ClientJoin is re-sent once
 // MORE than 2000 ms passed since the last send, and the join fails once MORE than 30000 ms passed
@@ -293,7 +297,7 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 			return out;
 		}
 		if (now_ms >= handshake_last_send_ms_ &&
-		    now_ms - handshake_last_send_ms_ >= kClientHelloRetryMilliseconds) {
+		    now_ms - handshake_last_send_ms_ > kEnumerateAnnounceMilliseconds) {
 			handshake_last_send_ms_ = now_ms;
 			out.push_back(handshake_retry_datagram_);
 		}

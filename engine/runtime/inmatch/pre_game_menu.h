@@ -55,6 +55,7 @@ enum class JoinScreenStage : int {
 	Verifying = 2,   // S2C 0x00 answered; the S2C 0x01 verification is not 1 yet (state 6)
 	Queued = 3,      // verified; waiting in the host's join queue for S2C 0x05 (state 6)
 	Starting = 4,    // S2C 0x05: the game starts and the loading screen takes over (state 7)
+	Enumerating = 5, // the enumerate-and-join's browse, until a session answers (state 3)
 };
 
 // The host's S2C 0x03 join-queue record as the client keeps it: queued, the
@@ -74,12 +75,14 @@ struct JoinQueueRecord {
 void fold_join_queue_record(JoinQueueRecord &record, const uint8_t *data, size_t size,
 		uint64_t now_ms);
 
-// The status line for a stage: gameerr "Generic Strings" PRE_JOININGSESSION /
-// PRE_CONNECTING / PRE_VERIFYING / PRE_CONNECTED, and for Queued the queue
+// The status line for a stage: gameerr "Generic Strings" PRE_ENUMSESSION /
+// PRE_JOININGSESSION / PRE_CONNECTING / PRE_VERIFYING / PRE_CONNECTED, and for Queued the queue
 // line: WAITXXXPEOPLEINFRONT1 (position - 1 ahead) / 2 (one ahead) / 3 (next)
 // followed by a space and WAITTIMEDISPLAY (hours, minutes, seconds queued),
 // or WAITTOJOIN when the record holds no valid position.
-// [orig: MultiPlayer_JoinSessionStateMachine — "Joining Session..." stamped
+// [orig: UI_EnumerateAndJoinSession @0x569f50 - PRE_ENUMSESSION on the pre-game
+//  menu @0x56a0ac..0x56a0b4 ahead of the enumerate loop;
+//  MultiPlayer_JoinSessionStateMachine — "Joining Session..." stamped
 //  before the dial (state 4), PRE_CONNECTING on its success, PRE_VERIFYING
 //  @0x56a649, the queue line @0x56a75e..0x56a8f1, PRE_CONNECTED @0x56a90b]
 std::string join_screen_text(JoinScreenStage stage, const JoinQueueRecord &queue,

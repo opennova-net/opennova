@@ -98,6 +98,8 @@ var _sp_restart_info: LoadingScreenInfo = null  # the last SP load: the restart'
 var _sp_restart_loader := Callable()
 # The join screen (pre.mnu PRE_GAME_MENU) a join runs on until the host starts the game.
 var _join_screen := PreGameMenuPresenter.new()
+# The enumerate-and-join's abort while its join screen is up (begin_join_enumerate).
+var _join_enumerate_abort := Callable()
 var _shutdown_prepared := false
 var _shutdown_resources_released := false
 var _quit_requested := false
@@ -1169,6 +1171,26 @@ func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 		_on_world_load_failed("mission load handoff could not start")
 
 
+## A join's enumerate-and-join: the join screen shows retail's PRE_ENUMSESSION
+## line with ABORT_CANCEL while the browse runs (no time limit); Cancel runs
+## `abort`, which leaves to the menu (engine: inmatch/pre_game_menu.h, D-NET-703).
+func begin_join_enumerate(abort: Callable) -> void:
+	if not _join_screen.open(_root, self):
+		return
+	_join_enumerate_abort = abort
+	_join_screen.show_progress(JoinScreenStatus.stage_text(JoinScreenStatus.STAGE_ENUMERATING,
+			Strings.get_override_table(), Strings.get_table(Strings.TABLE_GAMEERR)))
+
+
+## The enumerate ended (a session answered, or the join was abandoned): its
+## join screen closes; a join that goes on opens it again.
+func end_join_enumerate() -> void:
+	if not _join_enumerate_abort.is_valid():
+		return
+	_join_enumerate_abort = Callable()
+	_join_screen.close()
+
+
 ## The join screen is up (the probe and test read).
 func is_join_screen_open() -> bool:
 	return _join_screen.is_open()
@@ -1187,6 +1209,12 @@ func _on_join_game_starting() -> void:
 # Cancel on the join screen: an abandoned join leaves the way a cancelled load
 # does; a failure already shown leaves to the menu it came from.
 func _on_join_screen_cancelled() -> void:
+	if _join_enumerate_abort.is_valid():
+		var abort := _join_enumerate_abort
+		_join_enumerate_abort = Callable()
+		_join_screen.close()
+		abort.call()
+		return
 	_join_screen.close()
 	if _world_load_pending and _world != null and _world.cancel_join_preload():
 		return

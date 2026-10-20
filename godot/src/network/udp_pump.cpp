@@ -98,11 +98,8 @@ int UdpPump::bind_listen(int port) {
 	return static_cast<int>(OK);
 }
 
-int UdpPump::dial(const String &host, int port) {
+int UdpPump::bind_client() {
 	close();
-	const String resolved_host = IP::get_singleton()->resolve_hostname(host, IP::TYPE_IPV4);
-	if (resolved_host.is_empty()) return static_cast<int>(ERR_CANT_RESOLVE);
-
 	socket_.instantiate();
 	// The client arm of the socket open scans the authored client port range
 	// from its min, as retail's does; every bind failing leaves no transport
@@ -117,13 +114,26 @@ int UdpPump::dial(const String &host, int port) {
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
+	capture_ = opennova::net::PcapUdpWriter::from_path(
+			opennova::to_std(capture_path_));
+	return static_cast<int>(OK);
+}
+
+void UdpPump::set_broadcast_enabled(bool p_enabled) {
+	if (socket_.is_valid()) socket_->set_broadcast_enabled(p_enabled);
+}
+
+int UdpPump::dial(const String &host, int port) {
+	close();
+	const String resolved_host = IP::get_singleton()->resolve_hostname(host, IP::TYPE_IPV4);
+	if (resolved_host.is_empty()) return static_cast<int>(ERR_CANT_RESOLVE);
+	const int bound = bind_client();
+	if (bound != static_cast<int>(OK)) return bound;
 	// Retain a numeric endpoint: packet sources are reported numerically, so
 	// names such as "localhost" can be compared when poll() admits packets.
 	dest_ip_ = resolved_host;
 	dest_port_ = port;
 	socket_->set_dest_address(dest_ip_, port);
-	capture_ = opennova::net::PcapUdpWriter::from_path(
-			opennova::to_std(capture_path_));
 	if (capture_ != nullptr) {
 		print_verbose(String("UdpPump: recording joiner traffic to ") +
 				dest_ip_ + ":" + itos(dest_port_));
@@ -219,6 +229,8 @@ int UdpPump::send_to_host(const PackedByteArray &bytes) {
 void UdpPump::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bind_listen", "port"), &UdpPump::bind_listen);
 	ClassDB::bind_method(D_METHOD("dial", "host", "port"), &UdpPump::dial);
+	ClassDB::bind_method(D_METHOD("bind_client"), &UdpPump::bind_client);
+	ClassDB::bind_method(D_METHOD("set_broadcast_enabled", "enabled"), &UdpPump::set_broadcast_enabled);
 	ClassDB::bind_method(D_METHOD("is_open"), &UdpPump::is_open);
 	ClassDB::bind_method(D_METHOD("local_port"), &UdpPump::local_port);
 	ClassDB::bind_method(D_METHOD("close"), &UdpPump::close);

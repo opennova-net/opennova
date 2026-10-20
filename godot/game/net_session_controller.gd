@@ -41,7 +41,6 @@ var _spectator_probe_serial := 0
 var _launch_browse: LanSession
 var _launch_browse_port := 0
 
-const SPECTATOR_PREFLIGHT_SECONDS := 1.0
 const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
@@ -148,8 +147,10 @@ func _on_launch_browse_rows(rows: Array, browse: LanSession) -> void:
 		var row := candidate as LanServerRow
 		if row == null or (_launch_browse_port != 0 and row.port != _launch_browse_port):
 			continue
-		_cancel_launch_browse()
 		var target := JoinTarget.from_lan_row(row)
+		# The join goes on with the search's socket (D-NET-NEW-R3-3).
+		target.transport = _launch_browse.take_transport()
+		_cancel_launch_browse()
 		_apply_launch_join_role(target)
 		join_lan_server(target)
 		return
@@ -202,9 +203,9 @@ func join_lan_server(target: JoinTarget) -> void:
 	_cancel_spectator_probe()
 	_dismiss_join_role_prompt()
 	# The entry's step is the engine's (inmatch/server_flags.h join_entry_step):
-	# dial, enumerate the endpoint for its flag word first, or ask the retail
-	# player/spectator question.
-	match target.entry_step(false):
+	# enumerate the endpoint for its flag word first (every target without one),
+	# dial, or ask the retail player/spectator question.
+	match target.entry_step():
 		JoinTarget.ENTRY_PREFLIGHT:
 			_begin_spectator_preflight(target)
 		JoinTarget.ENTRY_PROMPT:
@@ -255,11 +256,17 @@ func _start_lan_join(target: JoinTarget) -> void:
 		_world.load_mission_as_joiner.bind(target))
 
 
-# NovaWorld rows and direct --lan-join targets do not carry ServerHello.P2.
-# Query the resolved game endpoint itself before authentication, using the same
-# 0x41/0x81 enumerator exchange as the LAN browser; the row it finds is the
-# join's discovered session (D-NET-521). A silent/non-enumerating
-# endpoint falls back to the ordinary player join after a short bounded wait.
+# NovaWorld rows and direct --lan-join targets do not carry ServerHello.P2:
+# retail's enumerate-and-join browses the endpoint and joins only a session it
+# discovered. The browse runs with no time limit, its first announce at once and
+# then every 3 s, until the session answers or the player aborts on the join
+# screen (PRE_ENUMSESSION, ABORT_CANCEL); there is no row-less fallback dial
+# (D-NET-703). The row it finds is the join's discovered session, and the join
+# goes on with the browse's socket and the row's address (D-NET-521,
+# D-NET-NEW-R3-3). A NovaWorld join's browse rides the NovaWorld session's
+# socket, and its proxy rendezvous rides the browse (D-NET-712). The witness
+# rides the engine (inmatch/server_flags.h join_entry_step, inmatch/pre_game_menu.h
+# PRE_ENUMSESSION, net/npwire/lan_discovery.h set_windowed).
 func _begin_spectator_preflight(target: JoinTarget) -> void:
 	_spectator_probe_serial += 1
 	var serial := _spectator_probe_serial
@@ -267,6 +274,9 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	_spectator_probe = LanSession.new()
 	_spectator_probe.name = "SpectatorPreflight"
 	_spectator_probe.resource_root = _resource_root()
+	_spectator_probe.set_windowed(false)
+	if _novaworld_client != null:
+		_spectator_probe.set_transport(_novaworld_client.get_game_pump())
 	add_child(_spectator_probe)
 	_spectator_probe.servers_changed.connect(
 			_on_spectator_preflight_rows.bind(_spectator_probe, target, serial))
@@ -279,10 +289,12 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	var err := int(_spectator_probe.start_browsing(
 			target.host_ip, target.port, target.port, target.network_type))
 	if err != OK:
-		_finish_spectator_preflight(_spectator_probe, target, serial, null)
+		push_warning("NetSessionController: the join could not enumerate %s:%d (error %d)"
+				% [target.host_ip, target.port, err])
+		_abort_spectator_preflight()
 		return
-	get_tree().create_timer(SPECTATOR_PREFLIGHT_SECONDS).timeout.connect(
-			_on_spectator_preflight_timeout.bind(serial))
+	if _shell != null:
+		_shell.begin_join_enumerate(_abort_spectator_preflight)
 
 
 func _on_spectator_preflight_rows(rows: Array, probe: LanSession,
@@ -300,54 +312,40 @@ func _on_spectator_preflight_rows(rows: Array, probe: LanSession,
 		if typed.port == target.port:
 			row = typed
 			break
-	_finish_spectator_preflight(probe, target, serial, row)
-
-
-func _on_spectator_preflight_timeout(serial: int) -> void:
-	# The enumerator can finish and queue_free itself long before this timer.
-	# Bind only the value serial: retaining a typed Node argument would make
-	# Godot attempt to convert a previously freed Object when timeout fires.
-	if serial != _spectator_probe_serial:
-		return
-	var probe := _spectator_probe
-	var target := _spectator_probe_target
-	if probe == null or target == null:
-		return
-	_finish_spectator_preflight(probe, target, serial, null)
+	_finish_spectator_preflight(probe, target, row)
 
 
 func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
-		serial: int, row: LanServerRow) -> void:
-	if (
-			probe != _spectator_probe
-			or target != _spectator_probe_target
-			or serial != _spectator_probe_serial
-	):
-		return
-	if row != null:
-		target.server_flags = row.server_flags
-		# The enumerated 0x81's SUS2 names the host's expansion.
-		target.expansion = row.expansion
-		target.expansion_known = true
-		if target.server_name.is_empty():
-			target.server_name = row.server_name
-		if target.game_type < 0:
-			target.game_type = row.gametype
-		# The row is the join's discovered session: the join goes on with the
-		# browse's connection, straight to the 0x42 with the row's HK and SF and
-		# the browse's CI, so the only 0x41s are the browse's (D-NET-521; the
-		# engine's JoinerConnection::DiscoveredSession carries the witness).
-		target.discovered_session = true
-		target.session_host_key = row.host_key
-		target.session_password_required = row.password_required
-		target.session_client_index = row.client_index
+		row: LanServerRow) -> void:
+	target.server_flags = row.server_flags
+	# The enumerated 0x81's SUS2 names the host's expansion.
+	target.expansion = row.expansion
+	target.expansion_known = true
+	if target.server_name.is_empty():
+		target.server_name = row.server_name
+	if target.game_type < 0:
+		target.game_type = row.gametype
+	# The row is the join's discovered session: the join goes on with the
+	# browse's connection, straight to the 0x42 with the row's HK and SF and
+	# the browse's CI, so the only 0x41s are the browse's (D-NET-521; the
+	# engine's JoinerConnection::DiscoveredSession carries the witness). It
+	# connects to the address the session answered from, on the browse's socket
+	# (engine: inmatch/joiner_connection.h set_host_address carries the witness).
+	target.discovered_session = true
+	target.session_host_key = row.host_key
+	target.session_password_required = row.password_required
+	target.session_client_index = row.client_index
+	target.host_ip = row.host_ip
+	target.port = row.port
+	target.transport = probe.take_transport()
 	_cancel_spectator_probe()
-	if target.entry_step(true) == JoinTarget.ENTRY_PROMPT:
+	if target.entry_step() == JoinTarget.ENTRY_PROMPT:
 		_show_join_role_prompt(target)
 	else:
 		_start_lan_join(target)
 
 
+# Stop the enumerate-and-join's browse (its join screen with it).
 func _cancel_spectator_probe() -> void:
 	_spectator_probe_serial += 1
 	if _spectator_probe != null:
@@ -355,6 +353,17 @@ func _cancel_spectator_probe() -> void:
 		_spectator_probe.queue_free()
 	_spectator_probe = null
 	_spectator_probe_target = null
+	if _shell != null:
+		_shell.end_join_enumerate()
+
+
+# ABORT_CANCEL while the join enumerates: retail's state 9 destroys the session
+# and returns to the main menu (engine: inmatch/server_flags.h join_entry_step).
+func _abort_spectator_preflight() -> void:
+	_cancel_spectator_probe()
+	_release_novaworld_client()
+	if _menu_shell != null:
+		_menu_shell.show_menu()
 
 
 # Retail exposes this decision after enumeration whenever P2 bit 0x2000 is

@@ -63,6 +63,20 @@ std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint3
 bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, size_t size,
                                uint32_t client_index, LanDiscoveryServer &out);
 
+// The connection index a browse's announces carry (LanDiscoveryBrowser::begin's
+// `client_index`). Every enumerate creates its client connection twice: the
+// screen's own create, then InitTransportConnection's, which destroys the first
+// before anything is sent on it and creates again; each create steps the game
+// protocol's connection counter, so the browse's CI (and the join's that goes on
+// with it, D-NET-521) is the counter's second step.
+// [orig: UI_EnumerateAndJoinSession @0x569f50 - CNapiGameSession_CreateServerConnection
+//  @0x56a011, then CNapiGameSession_InitTransportConnection @0x56a097; the LAN
+//  screen's search - the create @0x55837e (connect type 2) / @0x55836e (type 3), then
+//  InitTransportConnection @0x5583b0; InitTransportConnection @0x4c9e10 - its create
+//  @0x4c9e16; CNapiGameSession_CreateServerConnection - the destroy @0x4c9d7d, the
+//  create @0x4c9d9c; CNapiNPConnection_Create @0x62b282 steps the counter]
+uint32_t next_browse_connection_index();
+
 // The witnessed browse window: the LAN screen's state machine re-enables
 // LAN_SEARCH (MP_SEARCH) once GetTickCount() - search_start > 0x7530
 // (30000 ms) — strictly greater, so the window is still open at exactly
@@ -145,9 +159,18 @@ enum class LanRowChange : uint8_t {
 // 0x81), the 32-row cap, and first-sighting rows: retail's row table keys on
 // the session id and a repeat sighting adds and updates nothing, so a row
 // keeps the counts it was first seen with for the whole window. The embedder
-// owns the socket: it sends `probe(port)` to every port in the range on begin
-// and whenever `advance` reports an announce due, feeds every received datagram
-// to `accept_reply`, and stops when `advance` returns false.
+// owns the socket: it sends `burst()` on begin and whenever `advance` reports
+// an announce due, feeds every received datagram to `accept_reply`, and stops
+// when `advance` returns false. That socket is the client's one transport socket
+// for its network type, and the join from a discovered row goes on with it and
+// with the enumerator's connection (D-NET-NEW-R3-3): retail opens one transport
+// socket per mode and never re-opens it between the browse and the join, the join
+// takes the ctx's one client connection, and the NovaWorld lobby protocol rides the
+// same manager and socket (net/npwire/datagram_demux.h).
+// [orig: CNapiNetwork_SetTransportMode @0x4c8750 - the same mode returns at once
+//  @0x4c8766, the one open @0x4c8796; CNapiNetwork_StartClientConnection @0x4ca160 -
+//  the ctx's one client connection @0x4ca1c2, its enumerator stopped @0x4ca1d8 and
+//  the row found among its entries @0x4ca1f8]
 // [orig: UI_ProcessLANSessionStateMachine @0x558de0 — the key hit @0x5593c4
 //  falls through to the next node, the miss @0x5593e3 appends @0x5593fa..0x559521;
 //  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the port walk
@@ -167,6 +190,15 @@ public:
 	bool begin(const TitleIdentity &title, uint32_t client_index, uint32_t enumerate_ip,
 	           int port_min, int port_max, int connect_type);
 	void stop();
+	// Whether the window expires (the LAN screen's 30-second search, the default).
+	// The join's enumerate-and-join runs without one: its loop ends only on the
+	// first discovered session or the player's abort (D-NET-703). Kept across
+	// begin/stop; set before begin.
+	// [orig: UI_EnumerateAndJoinSession @0x569f50 - the loop @0x56a0c1..0x56a0f9,
+	//  no time limit; UI_ProcessLANSessionStateMachine @0x558de0 - the 0x7530 gate
+	//  @0x55933a]
+	void set_windowed(bool windowed) { windowed_ = windowed; }
+	bool windowed() const { return windowed_; }
 	bool browsing() const { return browsing_; }
 	int port_min() const { return port_min_; }
 	int port_max() const { return port_max_; }
@@ -197,8 +229,9 @@ public:
 	std::vector<LanBurstDatagram> burst() const;
 
 	// One outer frame: false once the window has expired (the browse is
-	// stopped); `announce_due` is set when a re-announce burst falls due this
-	// frame (the announce clock restarts from zero, not from the overshoot).
+	// stopped; never for an unwindowed browse); `announce_due` is set when a
+	// re-announce burst falls due this frame (the announce clock restarts from
+	// zero, not from the overshoot).
 	bool advance(double delta_seconds, bool &announce_due);
 
 	// A datagram received from (source_ip, source_port) while browsing.
@@ -221,6 +254,7 @@ private:
 	double browse_elapsed_s_ = 0.0;
 	double announce_elapsed_s_ = 0.0;
 	bool browsing_ = false;
+	bool windowed_ = true;
 };
 
 } // namespace opennova

@@ -36,7 +36,7 @@ func test_preflight_row_becomes_the_discovered_session() -> void:
 	var target := JoinTarget.new()
 	target.host_ip = "127.0.0.1"
 	target.port = 32768
-	assert_eq(target.entry_step(false), JoinTarget.ENTRY_PREFLIGHT,
+	assert_eq(target.entry_step(), JoinTarget.ENTRY_PREFLIGHT,
 			"a target with no flag word enumerates first")
 	assert_false(target.discovered_session)
 	controller.join_lan_server(target)
@@ -46,19 +46,50 @@ func test_preflight_row_becomes_the_discovered_session() -> void:
 	assert_not_null(probe, "the bare target starts the preflight browse")
 	if probe == null:
 		return
-	var row := LanServerRow.make("Preflight Host", "127.0.0.1", 32768)
+	assert_false(probe.is_windowed(), "the enumerate-and-join browse has no time limit")
+	# The session answers from another address than the one dialed (a name, a
+	# broadcast or a multi-homed host): the join goes there.
+	var row := LanServerRow.make("Preflight Host", "192.0.2.9", 32768)
 	row.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS
 	row.host_key = 0x0FE0E118
 	row.password_required = true
 	row.client_index = 7
 	probe.servers_changed.emit([row])
 	assert_true(target.discovered_session, "the preflight row is the join's discovered session")
+	assert_eq(target.host_ip, "192.0.2.9", "the join goes to the address the session answered from")
+	assert_not_null(target.transport, "the join goes on with the browse's socket")
 	assert_eq(target.session_host_key, 0x0FE0E118, "the row's HK rides the join")
 	assert_true(target.session_password_required, "the row's SF rides the join")
 	assert_eq(target.session_client_index, 7, "the join carries the browse's CI")
 	assert_eq(target.server_flags, JoinTarget.FLAG_ALLOW_SPECTATORS)
 	assert_not_null(layer.get_node_or_null("JoinRolePrompt"),
 			"the row's spectator flag asks the role question")
+
+
+# D-NET-703: the enumerate-and-join never gives up on its own and never dials
+# without a row: a silent endpoint keeps the browse running past the old 1 s
+# fallback, with no prompt and no join, until a session answers or the player
+# aborts.
+func test_silent_endpoint_keeps_enumerating_without_a_fallback_dial() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = 9
+	target.join_role = JoinTarget.ROLE_SPECTATOR
+	target.role_explicit = true
+	assert_eq(target.entry_step(), JoinTarget.ENTRY_PREFLIGHT,
+			"an answered role on an undiscovered word enumerates too")
+	controller.join_lan_server(target)
+	var probe := controller.get_node_or_null("SpectatorPreflight") as LanSession
+	assert_not_null(probe, "the bare target starts the enumerate")
+	if probe == null:
+		return
+	await get_tree().create_timer(1.5).timeout
+	assert_true(is_instance_valid(probe) and probe.is_browsing(), "still enumerating after 1.5 s")
+	assert_false(target.discovered_session, "no row-less join")
+	assert_null(layer.get_node_or_null("JoinRolePrompt"))
 
 
 func test_discovered_spectator_host_prompts_before_joining() -> void:
@@ -185,9 +216,9 @@ func test_team_choose_host_prompts_for_the_side_password_with_no_team_control() 
 # no credentials (the engine's join_entry_step, ctest join_entry).
 func test_team_choice_alone_dials_without_a_prompt() -> void:
 	var target := _target(JoinTarget.FLAG_TEAM_CHOICE)
-	assert_eq(target.entry_step(false), JoinTarget.ENTRY_DIAL,
+	assert_eq(target.entry_step(), JoinTarget.ENTRY_DIAL,
 			"a plain team game opens no join choice")
-	assert_eq(_target(0x904).entry_step(true), JoinTarget.ENTRY_DIAL,
+	assert_eq(_target(0x904).entry_step(), JoinTarget.ENTRY_DIAL,
 			"a stock LAN team game (P2 0x904) dials")
 	assert_eq(target.join_password, "", "no credential is invented")
 

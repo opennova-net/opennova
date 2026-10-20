@@ -407,6 +407,35 @@ void test_proxy_rendezvous_leads_each_burst() {
     for (const LanBurstDatagram &d : announces) CHECK(!d.rendezvous);
 }
 
+// D-NET-703: the enumerate-and-join's browse has no window: it keeps re-announcing every
+// > 3000 ms past the LAN screen's 30 s until a session answers or the player aborts. And every
+// enumerate creates its connection twice, so the browse's CI is the counter's second step.
+// [orig: UI_EnumerateAndJoinSession @0x569f50 - the loop @0x56a0c1..0x56a0f9;
+//  CreateServerConnection @0x56a011 then InitTransportConnection @0x56a097 (its create @0x4c9e16);
+//  the LAN search's create @0x55837e then @0x5583b0]
+void test_enumerate_and_join_browse_has_no_window() {
+    opennova::LanDiscoveryBrowser b;
+    CHECK(b.windowed());
+    b.set_windowed(false);
+    CHECK(b.begin(kJo, 9, 0x0100007Fu, 32768, 32768, kLanConnectTypeNovaWorld));
+    int bursts = 0;
+    bool due = false;
+    for (int i = 0; i < 1000; ++i) { // 100 s at 0.1 s frames
+        CHECK(b.advance(0.1, due));
+        if (due) ++bursts;
+    }
+    CHECK(b.browsing());
+    CHECK(bursts >= 30 && bursts <= 33);
+    b.stop();
+    CHECK(!b.browsing() && !b.windowed()); // the mode outlives the window
+
+    uint32_t counter = next_connection_index();
+    const uint32_t browse_ci = next_browse_connection_index();
+    advance_connection_index(counter);
+    advance_connection_index(counter);
+    CHECK(browse_ci == counter);
+}
+
 int main() {
     test_begin_validates_the_range_and_fixes_one_identity();
     test_each_port_gets_an_announce_naming_its_destination();
@@ -419,6 +448,7 @@ int main() {
     test_browse_admits_only_its_network_type();
     test_reply_without_sf_is_listed();
     test_proxy_rendezvous_leads_each_burst();
+    test_enumerate_and_join_browse_has_no_window();
     if (failures == 0) std::printf("lan_discovery_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

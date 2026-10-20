@@ -110,6 +110,11 @@ std::string endpoint_key(const std::string &address, int port) {
 
 } // namespace
 
+uint32_t next_browse_connection_index() {
+	(void)next_connection_index(); // the screen's create, destroyed unsent
+	return next_connection_index(); // InitTransportConnection's, the enumerator's
+}
+
 // [orig: NetPacket_ValidateChannelType @0x4c49b0 — the flags arrive as int16]
 bool lan_session_admits_connect_type(int connect_type, uint32_t server_flags) {
 	const uint16_t flags = static_cast<uint16_t>(server_flags);
@@ -181,8 +186,9 @@ bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 	if (!browsing_) return false;
 	browse_elapsed_s_ += delta_seconds;
 	announce_elapsed_s_ += delta_seconds;
-	// Strictly greater: `GetTickCount() - search_start > 0x7530` @0x55933a.
-	if (browse_elapsed_s_ > kLanBrowseWindowSeconds) {
+	// Strictly greater: `GetTickCount() - search_start > 0x7530` @0x55933a; the
+	// enumerate-and-join's loop has no window (set_windowed).
+	if (windowed_ && browse_elapsed_s_ > kLanBrowseWindowSeconds) {
 		stop();
 		return false;
 	}

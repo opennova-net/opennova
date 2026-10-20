@@ -4,6 +4,7 @@
 #include <formats/mission/bms.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/flat_tlv.h>         // append_flat_tlv (the C2S 0x00 JOIN body)
+#include <net/npwire/lan_discovery.h>    // build_lan_discovery_probe, next_browse_connection_index
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
@@ -219,13 +220,13 @@ std::vector<uint8_t> JoinerConnection::start() {
 	client_key_ = keys.key;
 	conn_.client_scrk = keys.scrk;
 	// The CI: a join from a discovered session goes on with the browse's connection
-	// and its index; a dial without one creates its connection, which takes the
-	// process's next index (D-NET-521).
+	// and its index (D-NET-521); one with no row enumerates on its own connection,
+	// created as every enumerate's is, the counter's second step (D-NET-703).
 	// [orig: CNapiNetwork_StartClientConnection @0x4ca160 (the enumerator's connection
 	//  ctx+0xE60); CNapiNPConnection_Create @0x62b282..0x62b296]
 	client_index_ = discovered_.present && discovered_.client_index != 0
 			? discovered_.client_index
-			: next_connection_index();
+			: discovered_.present ? next_connection_index() : next_browse_connection_index();
 	server_hk_ = 0;
 	server_password_required_ = false;
 	conn_.server_sk = 0;
@@ -306,6 +307,15 @@ std::vector<uint8_t> JoinerConnection::start() {
 		handshake_retry_clock_armed_ = true;
 		return handshake_retry_datagram_;
 	}
+	// No row: retail's enumerate-and-join on one connection. The enumerator announces
+	// to the target at once and then every > 3000 ms, with no time limit, until a
+	// session answers; the join then goes on with this same connection, its CI and
+	// socket (D-NET-703).
+	// [orig: UI_EnumerateAndJoinSession @0x569f50 - InitTransportConnection @0x56a097,
+	//  the loop @0x56a0c1..0x56a0f9 (no time limit, no fallback dial);
+	//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the first pump sends
+	//  (no last send @0x629119); CNapiNetwork_StartClientConnection @0x4ca160 on the
+	//  same connection]
 	phase_ = Phase::Hello;
 	handshake_retry_datagram_ = build_client_hello();
 	handshake_last_send_ms_ = monotonic_milliseconds_();
@@ -314,16 +324,13 @@ std::vector<uint8_t> JoinerConnection::start() {
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
-	// The browse and connect legs use the same title identity. The callsign
-	// belongs in ClientAuth.NA (not CO) and is later echoed into the organic-spawn
-	// named organic record by the host. A dial without a row announces to the dialed
-	// host, whose address and port the announce writes as its EIP / EPN.
+	// The enumerator's announce, the browse's own (build_lan_discovery_probe): the
+	// title identity, this connection's CI, and the target's address and port as its
+	// EIP / EPN. The callsign belongs in ClientAuth.NA (not CO) and is later echoed
+	// into the organic-spawn named organic record by the host.
 	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - @0x61fcf5..0x61fd47;
 	//  CNapiGameSession_InitTransportConnection @0x4c9ec3 (the resolved address)]
-	ClientHello hello = make_title_client_hello(*title_, client_index_);
-	hello.eip = host_address_.ip;
-	hello.epn = host_address_.port;
-	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	return build_lan_discovery_probe(*title_, client_index_, host_address_.ip, host_address_.port);
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
@@ -584,6 +591,9 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 }
 
 JoinScreenStage JoinerConnection::join_screen_stage() const {
+	// The enumerate-and-join's browse reads PRE_ENUMSESSION until a session answers
+	// [orig: UI_EnumerateAndJoinSession @0x569f50 - @0x56a0ac..0x56a0b4].
+	if (phase_ == Phase::Hello) return JoinScreenStage::Enumerating;
 	switch (post_auth_stage_) {
 	case PostAuthStage::Inactive:
 		return JoinScreenStage::Joining;

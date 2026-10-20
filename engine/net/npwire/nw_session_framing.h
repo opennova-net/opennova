@@ -111,10 +111,11 @@ uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 // as its index. Retail steps it for the client side's connections (type 2) and the
 // host's server-side ones (type 1) alike; a client connection's index is the CI its
 // 0x41s and 0x42 carry. `advance_connection_index` steps the given counter;
-// `next_connection_index` steps the process's one counter. A LAN browse's enumerator
-// connection takes one, and the join from a row it discovered goes on with that same
-// connection, so the browse's 0x41s and the join's 0x42 carry one CI; a dial without
-// a row creates its own connection and takes the next. Only our client connections
+// `next_connection_index` steps the process's one counter. A browse creates its
+// enumerator connection twice and keeps the second (next_browse_connection_index,
+// net/npwire/lan_discovery.h), and the join from a row it discovered goes on with that
+// same connection, so the browse's 0x41s and the join's 0x42 carry one CI; a join with
+// no row enumerates on its own connection, created the same way. Only our client connections
 // step it: the host's server-side creates do not (D-NET-713; a server-side index never
 // reaches the wire, the 0x82 echoing the client's CI, so only a later client
 // connection in the same process numbers differently).

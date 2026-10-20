@@ -27,6 +27,7 @@ const rtxt::File &gameerr() {
 		rtxt::File f;
 		f.sections.push_back(rtxt::Section{"Generic Strings", 0});
 		const std::vector<std::pair<std::string, std::string>> rows = {
+				{"PRE_ENUMSESSION", "(the PRE_ENUMSESSION row)"},
 				{"PRE_JOININGSESSION", "Joining Session..."},
 				{"PRE_CONNECTING", "Connecting to server..."},
 				{"PRE_VERIFYING", "Verifying Session..."},
@@ -109,6 +110,11 @@ bool run_each_stage_writes_its_line() {
 					text(JoinScreenStage::Verifying, none, 0) == "Verifying Session..." &&
 					text(JoinScreenStage::Starting, none, 0) == "Starting game...",
 			"the dial, connect, verify and start lines"))
+		return false;
+	// The enumerate-and-join's browse reads PRE_ENUMSESSION (D-NET-703)
+	// [orig: UI_EnumerateAndJoinSession @0x569f50 - @0x56a0ac..0x56a0b4].
+	if (!expect(text(JoinScreenStage::Enumerating, none, 0) == "(the PRE_ENUMSESSION row)",
+			"the enumerate line"))
 		return false;
 	if (!expect(text(JoinScreenStage::Queued, none, 0) == "Waiting in line to join server....",
 			"a queue with no valid position reads WAITTOJOIN"))

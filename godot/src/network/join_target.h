@@ -6,6 +6,8 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include "network/udp_pump.h"
+
 #include <net/novaworld/proxy_rendezvous.h> // ProxyRendezvousConfig (the proxy-assisted join)
 #include <net/npwire/net_ports.h>
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType
@@ -86,7 +88,7 @@ public:
 	void set_expansion_known(bool p_value) { expansion_known_ = p_value; }
 	// The browse row's session record (a LAN row's 0x81 HK and SF): a join
 	// from it goes straight to the 0x42 (JoinerConnection::DiscoveredSession).
-	// `discovered_session` false = a bare dial that sends the 0x41 first.
+	// `discovered_session` false = a target the shell enumerates first (D-NET-703).
 	bool get_discovered_session() const { return discovered_session_; }
 	void set_discovered_session(bool p_value) { discovered_session_ = p_value; }
 	int64_t get_session_host_key() const { return session_host_key_; }
@@ -97,6 +99,13 @@ public:
 	// the join taking a fresh one (JoinerConnection::DiscoveredSession::client_index).
 	int64_t get_session_client_index() const { return session_client_index_; }
 	void set_session_client_index(int64_t p_value) { session_client_index_ = p_value; }
+
+	// The client's transport socket the join goes on with (D-NET-NEW-R3-3): the
+	// browse's that found the row (LanSession.take_transport), which on NovaWorld is
+	// the session's own (NovaWorldClient.get_game_pump). Null = the join binds its own
+	// over the client port range.
+	Ref<UdpPump> get_transport() const { return transport_; }
+	void set_transport(const Ref<UdpPump> &p_pump) { transport_ = p_pump; }
 
 	int get_port() const { return port_; }
 	void set_port(int p_port) { port_ = p_port; }
@@ -145,17 +154,17 @@ public:
 	bool spectator_password_required() const {
 		return opennova::inmatch::server_spectator_password_required(server_flags_);
 	}
-	// What the shell does with this target before dialing: dial, enumerate
-	// the endpoint for its flag word first (`preflighted`: that enumeration
-	// already ran), or ask the player/spectator question.
-	int entry_step(bool p_preflighted) const {
+	// What the shell does with this target before dialing: enumerate the
+	// endpoint for its flag word first (every target without one), dial, or ask
+	// the player/spectator question.
+	int entry_step() const {
 		opennova::inmatch::JoinEntryFacts facts;
 		facts.server_flags = server_flags_;
 		facts.role_explicit = role_explicit_;
 		facts.spectator = join_role_ == ROLE_SPECTATOR;
 		facts.server_password_given = !server_password_.is_empty();
 		facts.side_password_given = !join_password_.is_empty();
-		switch (opennova::inmatch::join_entry_step(facts, p_preflighted)) {
+		switch (opennova::inmatch::join_entry_step(facts)) {
 		case opennova::inmatch::JoinEntryStep::Preflight: return ENTRY_PREFLIGHT;
 		case opennova::inmatch::JoinEntryStep::Prompt: return ENTRY_PROMPT;
 		case opennova::inmatch::JoinEntryStep::Dial: break;
@@ -195,6 +204,7 @@ private:
 	int64_t session_client_index_ = 0;
 	bool role_explicit_ = false;
 	opennova::ProxyRendezvousConfig join_proxy_;
+	Ref<UdpPump> transport_;
 	int lobby_number_ = 0;
 };
 
