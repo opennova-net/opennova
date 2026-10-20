@@ -901,6 +901,9 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		// Its PlayerTeam / PlayerType are the match's, as for any added player.
 		self.team = "0";
 		self.type = "0";
+		// The local player's slot: its add sends ClientHostPlayerAdded alone (engine:
+		// HostPlayerSlot::local, D-NET-659).
+		self.local = true;
 		for (const opennova::inmatch::HostPlayerListRow &row : sim->host_player_list_rows()) {
 			if (!row.own) continue;
 			self.team = row.slot.team;

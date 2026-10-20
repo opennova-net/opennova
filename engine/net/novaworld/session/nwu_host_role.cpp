@@ -223,9 +223,10 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 // request is out rides the first update's PlayerList); ClientHostPlayerAdded fires only while
 // hosting is established (state 6), the session's gate. Then the add runs the lists' update with
 // 0, which in state 6 sends the changed lists as a ClientHostUpdate at once: the new slot's vars
-// and whatever else is marked (D-NET-490). The slot's +5 byte the update's test reads is cleared
-// by the add itself, so the update always runs; a removal runs none (the update's callers are the
-// server-info update, the add and the mission start).
+// and whatever else is marked (D-NET-490), unless the slot's +5 byte is set: a joiner's add clears
+// it, the local player's slot keeps the round init's 1, so the listen host's own add sends its
+// statement alone (HostPlayerSlot::local, D-NET-659). A removal runs none (the update's callers
+// are the server-info update, the add and the mission start).
 // [orig: Server_PlayerAdd @0x51cbc0 - @0x51d3f0, @0x51d421..0x51d4b5 (CNapiGameSession_OnPlayerChat
 //  @0x4d0e20, the state-6 wrapper around CNapiGameSession_SendPlayerAdded), the +5 byte cleared
 //  @0x51cf02 and tested @0x51d4ba, CPlayerManager_RebuildLists(edi = 0 @0x51d35f) @0x51d4c6;
@@ -236,7 +237,7 @@ void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 	cfg_.player_count = static_cast<int>(players_.size());
 	if (ClientSession *session = lobby_.session()) {
 		session->send_host_player_added(slot);
-		session->send_host_update(/*include_all=*/false);
+		if (!slot.local) session->send_host_update(/*include_all=*/false);
 	}
 }
 

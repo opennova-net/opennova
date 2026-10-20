@@ -131,6 +131,13 @@ struct HostPlayerSlot {
 	std::string pcid;          // PlayerPCID
 	std::string team;          // PlayerTeam
 	std::string type;          // PlayerType
+	// The add's own state, not a var: the local player's slot (a listen host's own), whose +5
+	// byte the session create's round init sets, so its add runs no lists' update; a joiner's add
+	// clears its slot's. [orig: Server_InitNewRoundState @0x51C8E0 - g_LocalNetPlayer +5 = 1
+	//  @0x51CA35 (from CNapiGameSession_BuildAndCreateSession @0x5695B3, ahead of the create's own
+	//  add); Server_PlayerAdd @0x51CBC0 - the local path @0x51CC33..0x51CC60 writes no +5, a
+	//  joiner's +5 = 0 @0x51CF02, the test @0x51D4BA]
+	bool local = false;
 };
 
 // The Host list's gametext tokens, each looked up by (section, key): the NovaWorld STRNOVA07..12

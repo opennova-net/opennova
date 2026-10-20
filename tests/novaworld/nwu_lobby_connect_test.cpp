@@ -1108,6 +1108,25 @@ void check_host_player_add_sends_update() {
 	statements = client_statements(sent, session->client_scrk());
 	CHECK(statements.size() == 1 && !statements.empty() &&
 			statements[0].name == "ClientHostPlayerRemoved");
+
+	// D-NET-659: the local player's slot keeps the round init's +5, so a listen host's own add
+	// sends its statement alone, the PlayerList change riding the next update. [orig:
+	// Server_InitNewRoundState @0x51C8E0 - +5 = 1 @0x51CA35; Server_PlayerAdd @0x51CBC0 - the
+	// local path @0x51CC33..0x51CC60, the test @0x51D4BA]
+	before = rig.session.sent.size();
+	HostPlayerSlot own;
+	own.slot = 0;
+	own.player_name = "Host";
+	own.ip_and_port = "0.0.0.0:0";
+	own.local = true;
+	role.set_player_slot(own);
+	rig.lobby.tick(360);
+	sent.clear();
+	for (std::size_t i = before; i < rig.session.sent.size(); ++i)
+		sent.push_back(rig.session.sent[i].second);
+	statements = client_statements(sent, session->client_scrk());
+	CHECK(statements.size() == 1 && !statements.empty() &&
+			statements[0].name == "ClientHostPlayerAdded");
 	rig.lobby.close();
 }
 
