@@ -35,10 +35,14 @@ inline constexpr int kChatDispatchCrew = 109;   // row 62 Crew (U)
 inline constexpr int kChatDispatchSquad = 110;  // row 61 Squad (Ctrl+Y)
 inline constexpr int kChatDispatchLocal = 111;  // row 58 Local (T)
 inline constexpr int kChatDispatchRepeat = 112; // row 57 Chat (Enter)
-// The console-mode dispatch: a begin with this id keeps the capture open
-// across Enter [orig: `dword_B3E318 = chatChannel == 20` @0x4981a0]. No
-// caller in the image passes it (the talk arms pass 100..111, the cine
-// editor 0), so the console window it gates is unreachable in stock play.
+// The command entry: input actions 1 (row 71 "command", the backquote) and 20
+// (row 72 "command2", Ctrl+backquote) open the capture with the STRMISC_ENTERCMD
+// prompt and the console command as its sender; action 20's begin passes its own
+// code, so its capture stays open across Enter (the console mode).
+// [orig: Input_HandleActionBinding cases 1, 20 @0x49AEF7..0x49AF10 ->
+//  Chat_BeginChatInput(prompt, NULL, j_Client_ProcessConsoleCommand, 0x3C, action)
+//  @0x49bb16; `dword_B3E318 = chatChannel == 20` @0x4981a0]
+inline constexpr int kChatDispatchCommand = 1;
 inline constexpr int kChatDispatchConsole = 20;
 
 // The C2S 0x0D channel byte each dispatch's sender writes, -1 for none
@@ -106,7 +110,9 @@ struct ChatEntryFacts {
 enum class ChatSendResult : uint8_t { Refused, Sent, Flooded, Broadcast };
 // The begin's stored sender [orig: dword_B3E1D4]: the dispatch picks the
 // C2S channel (chat_dispatch_channel); `text` is in/out — the flood check
-// cuts it to 59 characters in place.
+// cuts it to 59 characters in place. The command entry's dispatches (1, 20)
+// store the console command instead (Client_ProcessConsoleCommand), which
+// stamps no debounce: its sender reports Refused.
 using ChatSender = std::function<ChatSendResult(int dispatch, std::string &text)>;
 
 // Events a dispatch or key reports.
@@ -124,8 +130,9 @@ inline constexpr uint32_t kFloodEcho = 0x20;  // the sender flooded: echo the li
 // The talk rows the embedder samples, in catalog order (the first-match key
 // scan fires the lowest row) [orig: the static catalog @0x8159cb rows 57
 // "talk" (Enter, dispatch 112), 58 "ltalk" (T, 111), 59 "gtalk" (Ctrl+T,
-// 101), 60 "stalk" (Y, 100), 61 "sqtalk" (Ctrl+Y, 110), 62 "ctalk" (U, 109);
-// the scan @0x49d42f].
+// 101), 60 "stalk" (Y, 100), 61 "sqtalk" (Ctrl+Y, 110), 62 "ctalk" (U, 109),
+// and the command entry's 71 "command" (backquote, 1) and 72 "command2"
+// (Ctrl+backquote, 20); the scan @0x49d42f].
 enum ChatTalkRow : int {
 	kChatRowTalk,
 	kChatRowLocal,
@@ -133,6 +140,8 @@ enum ChatTalkRow : int {
 	kChatRowTeam,
 	kChatRowSquad,
 	kChatRowCrew,
+	kChatRowCommand,
+	kChatRowCommand2,
 	kChatTalkRowCount,
 };
 const char *chat_talk_row_token(int row);

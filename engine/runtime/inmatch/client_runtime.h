@@ -305,6 +305,29 @@ public:
 	//  (11), Chat_SendAllMessage @0x49AC70 (4), Chat_SendBlueTeamMessage @0x49ABA0 (5) ->
 	//  CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
 	hud::ChatSendResult queue_chat_message(uint8_t channel, std::string &text, uint32_t frame);
+	// The command entry's sender, Client_ProcessConsoleCommand's client half: the
+	// one-second guard (which compares the tick with the last stamp minus 1000,
+	// unsigned, so it drops a line only after the tick ran backwards or within the
+	// tick's first second), Client_ProcessLocalCommand's arms (client_console.h),
+	// then a session peer queues the raw line as reliable C2S 0x04 [line][NUL]
+	// (user param 0): a joiner on its connection, the listen host's own client over
+	// its loopback to its own server. True when the line was taken. The authority's
+	// arm (a host that is not a session peer) is AdminConsole::console_command's.
+	// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
+	//  Client_ProcessLocalCommand @0x520eec, NetPacket_WriteNullableString @0x42A430
+	//  and QueueReliableMessage(4, 1, 0) @0x520f29]
+	bool console_command(const std::string &line);
+	// The local arms' seams the embedder owns (SAVEKEYS, SAVENFO, VERSION's title);
+	// in_session, version_line and queue_action are this runtime's.
+	void set_local_command_seams(ClientLocalCommandSeams seams) {
+		local_command_seams_ = std::move(seams);
+	}
+	// Where the console's input actions go (Input_QueueEvent: the binding arms of the
+	// local command and of the S2C 0x06 walk): the embedder's action dispatch by code.
+	// Unset: a taken line's action goes nowhere.
+	void set_console_action_sink(ClientConsoleQueueAction sink) {
+		console_action_sink_ = std::move(sink);
+	}
 	// An Emotes / Radio menu pick (1..10): C2S 0x14 / C2S 0x13 [i16 value].
 	// The sender carries no gate of its own: CNapiNetwork_QueueReliableMessage
 	// queues on any live connection. A joiner queues it with the one-send
@@ -956,6 +979,12 @@ private:
 	// posted to the SYSTEM ring (client_console.h, D-NET-710).
 	void run_console_echo(const std::vector<uint8_t> &body);
 	ClientConsoleState console_state_; // the process's console debug words
+	uint32_t console_guard_ms_ = 0;   // [orig: g_ConsoleCommandLastTick @0x24D1E04]
+	ClientLocalCommandSeams local_command_seams_;
+	ClientConsoleQueueAction console_action_sink_;
+	// GetTickCount for the console guard: the joiner's monotonic clock, else the
+	// process's steady clock.
+	uint32_t console_tick_ms() const;
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

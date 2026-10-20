@@ -74,6 +74,8 @@ constexpr TalkRowSpec kTalkRows[kChatTalkRowCount] = {
 	{ "stalk", kChatDispatchTeam },
 	{ "sqtalk", kChatDispatchSquad },
 	{ "ctalk", kChatDispatchCrew },
+	{ "command", kChatDispatchCommand },
+	{ "command2", kChatDispatchConsole },
 };
 
 } // namespace
@@ -183,6 +185,14 @@ uint32_t ChatEntry::dispatch(int action, const ChatEntryFacts &f, const GameText
 			return begin(game_text(gametext, "Misc", chat_dispatch_prompt_key(action), ""), 60,
 					action);
 		}
+		case kChatDispatchCommand:
+		case kChatDispatchConsole:
+			// The command entry: no gate, no debounce, no remembered action. Its
+			// CapsLock release ahead of the begin is a keyboard-device call
+			// (Input_ReleaseCapsLockIfActive, a SendInput of VK_CAPITAL), not
+			// modeled. [orig: @0x49AEF7..0x49AF10, the shared tail @0x49bb08..0x49bb16:
+			//  GameText_GetString("Misc", "STRMISC_ENTERCMD"), cap 0x3C, the action]
+			return begin(game_text(gametext, "Misc", "STRMISC_ENTERCMD", ""), 0x3C, action);
 		case kChatDispatchRed:
 		case kChatDispatchBlue:
 			// The host-only pair: no debounce, no reset hold, no remembered

@@ -2,14 +2,17 @@
 // the cited original's arithmetic: the five debug commands' lines, state and sends, the
 // server command table's match (an ASCII name never meets a typed line; a negative length
 // takes any; a high-byte name folds through the locale), the C2S 0x07 body's nibble swap,
-// the walk's order, and the S2C 0x06 copy.
+// the walk's order, the S2C 0x06 copy, the binding table's lookups (by token, and the CRC
+// compare against the token's text) and Client_ProcessLocalCommand's arms.
 // [orig: NapiClientCmd_ParseAndExecute @0x4329C0; NapiClientCmd_HandleDebugCommand @0x42C4D0;
 //  NapiClientCmd_HandleDebug @0x42CCE0; NetPacket_WriteObfuscatedString @0x42AEA0;
-//  NapiNPClientMsg_HandleChatCommand @0x432BC0]
+//  NapiNPClientMsg_HandleChatCommand @0x432BC0; Client_ProcessLocalCommand @0x520BF0]
 #include <runtime/inmatch/client_console.h>
 
+#include <base/vfs/vfs.h> // vfs_version_crc (CRC_ComputeCustomTable)
 #include <net/npwire/ingame_message_id.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -54,6 +57,48 @@ struct Run {
 			table[slot][i + 2] = static_cast<uint8_t>(name[i] ^ 0xFE);
 	}
 };
+
+// Four characters as the little-endian dword a token field's head reads as.
+int32_t text_dword(const char *text) {
+	uint32_t value = 0;
+	for (int i = 0; i < 4 && text[i] != 0; ++i)
+		value |= static_cast<uint32_t>(static_cast<uint8_t>(text[i])) << (8 * i);
+	return static_cast<int32_t>(value);
+}
+
+// A line `prefix` + four bytes whose CRC_ComputeCustomTable value is `target`: the MSB-first
+// table step is linear, so four steps from the prefix's state add
+// T[i0] << 24 ^ T[i1] << 16 ^ T[i2] << 8 ^ T[i3] to it shifted out; each table entry's low
+// byte names its index.
+std::string forced_crc_line(const std::string &prefix, int32_t target) {
+	uint32_t table[256];
+	for (uint32_t i = 0; i < 256; ++i) {
+		uint32_t c = i << 24;
+		for (int k = 0; k < 8; ++k) c = (c & 0x80000000u) ? (c << 1) ^ 0x04C11DB7u : c << 1;
+		table[i] = c;
+	}
+	uint32_t rest = static_cast<uint32_t>(target);
+	uint8_t index[4] = {};
+	for (int k = 3; k >= 0; --k) {
+		const int shift = 8 * (3 - k);
+		const uint8_t want = static_cast<uint8_t>(rest >> shift);
+		for (uint32_t i = 0; i < 256; ++i) {
+			if (static_cast<uint8_t>(table[i]) == want) {
+				index[k] = static_cast<uint8_t>(i);
+				rest ^= table[i] << shift;
+				break;
+			}
+		}
+	}
+	uint32_t crc = static_cast<uint32_t>(
+			vfs_version_crc(reinterpret_cast<const uint8_t *>(prefix.data()), prefix.size()));
+	std::string line = prefix;
+	for (int k = 0; k < 4; ++k) {
+		line.push_back(static_cast<char>(static_cast<uint8_t>(crc >> 24) ^ index[k]));
+		crc = (crc << 8) ^ table[index[k]];
+	}
+	return line;
+}
 
 std::vector<uint8_t> bytes(const std::string &s, bool nul = true) {
 	std::vector<uint8_t> out(s.begin(), s.end());
@@ -127,11 +172,13 @@ int main() {
 	}
 	{
 		// The table: a stock host's "NULL" entry never meets a typed line (the stored
-		// byte sign-extends before the XOR), so the walk falls through to the bindings.
+		// byte sign-extends before the XOR), so the walk falls through to the bindings,
+		// where "null" is row 65's token (action code 0): taken there, nothing sent.
 		Run r(true, false, false);
 		r.entry(0, 0x00, 4, bytes("NULL", false));
-		check(!r.run("NULL hello") && r.sends.empty(), "an ASCII name never matches");
-		check(!r.run("null") && r.sends.empty(), "nor in lower case");
+		check(r.run("NULL hello") && r.sends.empty(), "an ASCII name never matches");
+		check(r.run("null") && r.sends.empty(), "nor in lower case");
+		check(!r.run("hello") && r.sends.empty(), "an unbound line is not taken");
 		// A negative length takes any line at once: the id, then the line past its
 		// leading spaces, nibble-swapped, reliable for 310 flushes.
 		r.entry(1, 0x05, 0x80, {});
@@ -163,12 +210,67 @@ int main() {
 		check(r.run("GETPLAYERLIST") && r.sends.size() == 2, "the debug commands come first");
 		check(!r.run("  ; a comment") && r.sends.empty(), "no tokens: nothing taken");
 		Run b(true, false, false);
-		bool bound = false;
-		b.ctx.queue_binding = [&](const io::ConfigTokens &tokens) {
-			bound = tokens.count == 2 && std::string(tokens.token(0)) == "ScreenShot";
-			return bound;
+		std::vector<std::vector<int32_t>> actions;
+		b.ctx.queue_action = [&](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+			actions.push_back({code, p1, p2, p3});
 		};
-		check(b.run("ScreenShot 1") && bound, "an untaken line reaches the binding arm");
+		// The binding arm: the first token against the re-laid table by name (any case),
+		// the record index being the action code (row 69 PrintScreen is code 2, row 10
+		// Crouch 169), then up to three atol parameters by the token count.
+		check(b.run("printscreen") && actions.back() == std::vector<int32_t>{2, 0, 0, 0},
+				"an untaken line reaches the binding arm: its action code, no parameters");
+		check(b.run("Crouch 5 -6") && actions.back() == std::vector<int32_t>{169, 5, -6, 0},
+				"two parameters");
+		check(b.run("Crouch 1 2 3") && actions.back() == std::vector<int32_t>{169, 1, 2, 3},
+				"three parameters");
+		const std::size_t before = actions.size();
+		check(!b.run("Crouch 1 2 3 4") && actions.size() == before,
+				"more than three parameters: not taken");
+		check(!b.run("no_such_binding") && actions.size() == before, "no binding: not taken");
+	}
+	{
+		// The CRC compare reads the token's first four bytes as a dword (a zero record's
+		// zeros): "Crou" is code 169's; 0 meets the first code no row carries (5).
+		check(client_binding_by_crc(text_dword("Crou")) == 169,
+				"the CRC compare reads the token's text");
+		check(client_binding_by_crc(0) == 5, "a zero record's dword is 0");
+		check(client_binding_by_token("NULL") == 0 && client_binding_by_token("nothing") == -1,
+				"by token: case-insensitive");
+	}
+	{
+		// Client_ProcessLocalCommand's arms: `pb_` behind a leading slash, SAVEKEYS,
+		// SAVENFO, VERSION by prefix; out of a session the line's CRC queues the code.
+		ClientLocalCommandSeams seams;
+		int keys = 0, nfo = 0;
+		std::string version;
+		std::vector<std::vector<int32_t>> actions;
+		seams.save_keys = [&] { ++keys; };
+		seams.save_nfo = [&] { ++nfo; };
+		seams.version_text = "V1.7.5.7";
+		seams.title_text = "Joint Operations: Typhoon Rising";
+		seams.version_line = [&](const std::string &text) { version = text; };
+		seams.queue_action = [&](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+			actions.push_back({code, p1, p2, p3});
+		};
+		seams.in_session = true;
+		check(client_process_local_command("/PB_SV_RESTART", seams), "a pb_ line is taken");
+		check(client_process_local_command("savekeys", seams) && keys == 1, "SAVEKEYS");
+		check(client_process_local_command("SAVENFO now", seams) && nfo == 1, "SAVENFO");
+		check(client_process_local_command("VERSION", seams) &&
+						version == "Version V1.7.5.7  - Joint Operations: Typhoon Rising",
+				"VERSION's line");
+		const std::string forced = forced_crc_line("x", text_dword("Crou"));
+		check(vfs_version_crc(reinterpret_cast<const uint8_t *>(forced.data()), forced.size()) ==
+						text_dword("Crou"),
+				"the forced line's CRC is the token's text");
+		check(!client_process_local_command(forced, seams) && actions.empty(),
+				"in a session the CRC arm does not run");
+		seams.in_session = false;
+		check(client_process_local_command(forced, seams) && actions.size() == 1 &&
+						actions[0] == std::vector<int32_t>{169, 0, 0, 0},
+				"out of a session a line whose CRC meets a token's text queues its code");
+		check(!client_process_local_command("hello", seams) && actions.size() == 1,
+				"out of a session any other line is not taken");
 	}
 	{
 		// The 0x06 copy: to the NUL, the body's end, or 1023 characters.

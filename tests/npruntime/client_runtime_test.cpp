@@ -3204,6 +3204,81 @@ bool run_console_echo_runs_the_client_walk() {
 	return expect(saw_line, "the listen client's echoed SERVER line comes back as 0x24");
 }
 
+// The command entry's sender, Client_ProcessConsoleCommand's client half (D-NET-710): a
+// joiner queues the raw line as reliable C2S 0x04 [line][NUL] on its connection; the local
+// arms take theirs first (VERSION posts its line, nothing leaves); the listen host's own
+// client sends the line over its loopback; the one-second guard compares the tick with the
+// last stamp minus 1000 unsigned, so it never drops a line once the tick is past its first
+// second, and drops one inside it.
+// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
+//  Client_ProcessLocalCommand @0x520eec, NetPacket_WriteNullableString @0x42A430,
+//  QueueReliableMessage(4, 1, 0) @0x520f29]
+bool run_console_command_sends_the_line() {
+	const std::string client_scrk = "CLIENT-CONSOLE-LINE-SCRK";
+	const std::string server_scrk = "SERVER-CONSOLE-LINE-SCRK";
+	uint64_t now = 7000;
+	inmatch::ClientRuntime client("ConsoleLine", [&now] { return now; });
+	client.set_title(&kJo);
+	client.seed_session(0x434F4E4Cu, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	const auto lines_sent = [&](uint32_t tick) {
+		std::vector<std::vector<uint8_t>> bodies;
+		for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(tick)) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+			for (const ProtocolMessage &m : messages)
+				if (m.tag == c2s::ADMIN_NETLOG_COMMAND) bodies.push_back(m.payload);
+		}
+		return bodies;
+	};
+	if (!expect(client.console_command("SERVER kick 2") &&
+	                    lines_sent(1) == std::vector<std::vector<uint8_t>>{
+	                            {'S', 'E', 'R', 'V', 'E', 'R', ' ', 'k', 'i', 'c', 'k', ' ', '2', 0}},
+			"a joiner's line leaves as C2S 0x04 [line][NUL]"))
+		return false;
+	// The same tick again: no throttle (the guard's compare is against the stamp - 1000).
+	if (!expect(client.console_command("again") && lines_sent(2).size() == 1,
+			"a second line in the same tick still leaves"))
+		return false;
+	if (!expect(client.console_command("version") && lines_sent(3).empty(),
+			"VERSION is a local arm: nothing leaves"))
+		return false;
+	bool version_line = false;
+	for (const hud::FeedPost &post : client.drain_ring_posts())
+		version_line = version_line ||
+				(post.text.rfind("Version V", 0) == 0 && post.argb == 0xFFFFFFFFu);
+	if (!expect(version_line, "VERSION posts the profile's version text in -1"))
+		return false;
+	// Inside the tick's first second the stamp minus 1000 wraps: the next line is dropped.
+	inmatch::ClientRuntime early("ConsoleEarly", [&now] { return now; });
+	early.set_title(&kJo);
+	early.seed_session(0x434F4E45u, 1u, client_scrk, server_scrk,
+	                   1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                   0, 0x00100000u, /*replay_mode=*/false);
+	now = 500;
+	if (!expect(early.console_command("first"), "the first line is stamped at 500"))
+		return false;
+	now = 600;
+	if (!expect(!early.console_command("second"),
+			"600 < 500 - 1000 (unsigned): the guard drops the line"))
+		return false;
+
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	host_view.view().set_mp_session(true);
+	if (!expect(host_view.console_command("NETLOG"), "the listen client takes its line"))
+		return false;
+	host_view.Client_ProcessNetworkFrame(1);
+	ns::Datagram datagram;
+	bool saw_line = false;
+	while (host_loop.host_recv(datagram))
+		if (datagram.tag == c2s::ADMIN_NETLOG_COMMAND)
+			saw_line = datagram.body == std::vector<uint8_t>{'N', 'E', 'T', 'L', 'O', 'G', 0};
+	return expect(saw_line, "the listen host's own client sends its line over the loopback");
+}
+
 bool run_host_zone_timer_value_matches_retail_entry() {
 	ns::LoopbackChannel host_loop;
 	inmatch::ClientRuntime host_view(host_loop);
@@ -8270,6 +8345,7 @@ int main() {
 	                run_client_quality_level_folds_the_ping_ring() &&
 	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
 	                run_client_quality_takes_the_host_metric() &&
+	                run_console_command_sends_the_line() &&
 	                run_novaworld_exit_on_a_joiner() &&
 	                run_mission_exit_routes() &&
 	                run_joiner_goodbye_tears_down_host();

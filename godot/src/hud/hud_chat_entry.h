@@ -33,6 +33,7 @@ public:
 		EVENT_FLOOD_ECHO = opennova::hud::chat_entry_event::kFloodEcho,
 	};
 	enum Row {
+		ROW_COMMAND = opennova::hud::kChatRowCommand, // the first command-entry row
 		ROW_COUNT = opennova::hud::kChatTalkRowCount,
 	};
 

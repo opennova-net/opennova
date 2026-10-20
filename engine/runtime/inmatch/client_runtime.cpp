@@ -8,10 +8,13 @@
 
 #include <runtime/world/world.h>
 
+#include <base/gameprofile/gameprofile.h> // VERSION's version text
+#include <net/title/title_identity.h> // the title the VERSION line reads
 #include <base/io/le.h>
 #include <base/io/tick_rate.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <utility>
 #include <cmath>
@@ -1600,6 +1603,7 @@ void ClientRuntime::run_console_echo(const std::vector<uint8_t> &body) {
 	ctx.state = &console_state_;
 	ctx.queued = &sends;
 	ctx.system_lines = &lines;
+	ctx.queue_action = console_action_sink_;
 	(void)client_parse_and_execute(client_console_echo_line(body), ctx);
 	for (ProtocolMessage &message : sends) {
 		if (role_ == Role::HostClient)
@@ -1610,6 +1614,44 @@ void ClientRuntime::run_console_echo(const std::vector<uint8_t> &body) {
 	for (std::string &line : lines)
 		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
 				hud::kHudColorWhite, std::move(line), false});
+}
+
+uint32_t ClientRuntime::console_tick_ms() const {
+	if (joiner_ != nullptr) return joiner_->monotonic_milliseconds32();
+	return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+bool ClientRuntime::console_command(const std::string &line) {
+	// [orig: @0x520ea4..0x520ec7 - `test ecx, ecx; jz` (no stamp yet), `add ecx, -1000`,
+	//  `cmp eax, ecx; jb` the drop, then the stamp]
+	const uint32_t now = console_tick_ms();
+	if (console_guard_ms_ != 0 && now < console_guard_ms_ - 1000u) return false;
+	console_guard_ms_ = now;
+	const bool peer = role_ == Role::Joiner ? joiner_ != nullptr && joiner_->in_session()
+	                                        : view_.mp_session();
+	ClientLocalCommandSeams seams = local_command_seams_;
+	seams.in_session = peer;
+	const TitleIdentity *title = joiner_ != nullptr ? joiner_->title() : nullptr;
+	if (seams.version_text.empty() && title != nullptr) {
+		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id);
+		if (profile != nullptr && profile->version_text != nullptr)
+			seams.version_text = profile->version_text;
+	}
+	seams.version_line = [this](const std::string &text) {
+		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
+				0xFFFFFFFFu, text, false});
+	};
+	seams.queue_action = console_action_sink_;
+	if (client_process_local_command(line, seams)) return true;
+	if (!peer) return false;
+	std::vector<uint8_t> body(line.begin(), line.end());
+	body.push_back(0);
+	if (role_ == Role::HostClient) return queue_host_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
+	ProtocolMessage message = make_protocol_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
+	message.retention_flushes = 0; // user param 0: held until acknowledged
+	send_queue_.push_back(std::move(message));
+	return true;
 }
 
 void ClientRuntime::queue_carrier_repair_requests() {

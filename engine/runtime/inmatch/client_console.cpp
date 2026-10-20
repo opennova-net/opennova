@@ -2,9 +2,12 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <base/vfs/vfs.h> // vfs_version_crc (CRC_ComputeCustomTable)
+#include <runtime/controls/controls.h> // the binding records by action code
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 #include <net/npwire/ingame_message_id.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
@@ -214,13 +217,120 @@ bool client_handle_server_command(const std::string &line, ClientConsoleContext 
 	return false;
 }
 
+namespace {
+
+// Record i's config token: the catalog row whose action code is i, "" for a zero record.
+const char *binding_token(int record) {
+	const controls::ActionDef *def = controls::action_for_code(record);
+	return def != nullptr && def->token != nullptr ? def->token : "";
+}
+
+// The token field's first dword: up to four token bytes over the zero-filled field.
+int32_t token_dword(const char *token) {
+	uint32_t value = 0;
+	for (int i = 0; i < 4 && token[i] != '\0'; ++i)
+		value |= static_cast<uint32_t>(static_cast<uint8_t>(token[i])) << (8 * i);
+	return static_cast<int32_t>(value);
+}
+
+// The MSVC CRT atol on the 32-bit long: leading white space, a sign, the digits;
+// an out-of-range value saturates.
+int32_t crt_atol(const char *text) {
+	if (text == nullptr) return 0;
+	const long long value = std::strtoll(text, nullptr, 10);
+	if (value > INT32_MAX) return INT32_MAX;
+	if (value < INT32_MIN) return INT32_MIN;
+	return static_cast<int32_t>(value);
+}
+
+int32_t line_crc(const std::string &text) {
+	return vfs_version_crc(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+}
+
+} // namespace
+
+int client_binding_by_token(const std::string &name) {
+	for (int record = 0; record < kClientBindingRecords; ++record)
+		if (strutil::iequals(name, binding_token(record))) return record;
+	return -1;
+}
+
+int client_binding_by_crc(int32_t crc) {
+	for (int record = 0; record < kClientBindingRecords; ++record)
+		if (token_dword(binding_token(record)) == crc) return record;
+	return -1;
+}
+
+// PunkBuster's command hook comes first in retail and is not modeled (D-NET-371). A `pb_`
+// line is taken whatever PunkBuster's state: retail hands it to the PunkBuster module
+// (`pb_sv_` to its server half, any other to its client half), each a call that does
+// nothing with no PunkBuster context, and returns 1.
+// [orig: Client_ProcessLocalCommand @0x520BF0 - PBServer_InvokeCommandCallback @0x520C2A;
+//  the `pb_` arm @0x520C3B..0x520CB6 (the '/' or '\' skip @0x520C3B..0x520C45,
+//  strnicmp(.., "pb_", 3) @0x520C50 (the string @0x7CCF84), "sv_" @0x520C6B, the PunkBuster
+//  calls @0x520C94 / @0x520CC9 (0x4DA3F0 / 0x4D7ED0, each a no-op with no context
+//  0xB608F4)), the WAC overlays @0x520CF1, SAVEKEYS @0x520D10 (KeyBinding_DumpAllToFile
+//  @0x54C0A0), SAVENFO @0x520D4B, VERSION @0x520D8E (the format @0x7D00AC,
+//  Chat_AddMessageChannel2(.., -1, 930) @0x520DC2), the out-of-session
+//  arm @0x520DF2..0x520E5B: `is_in_session || !*line` returns 0, CRC_ComputeCustomTable
+//  @0x520e0d over the whole line, the record walk @0x520e17..0x520e30,
+//  Input_QueueEvent(record's code word, 0, 0, 0) @0x520e5b]
+bool client_process_local_command(const std::string &line, const ClientLocalCommandSeams &seams) {
+	const std::size_t skip = !line.empty() && (line[0] == '/' || line[0] == '\\') ? 1 : 0;
+	if (strutil::starts_with_icase(std::string_view(line).substr(skip), "pb_")) return true;
+	if (strutil::starts_with_icase(line, "SAVEKEYS")) {
+		if (seams.save_keys) seams.save_keys();
+		return true;
+	}
+	if (strutil::starts_with_icase(line, "SAVENFO")) {
+		if (seams.save_nfo) seams.save_nfo();
+		return true;
+	}
+	if (strutil::starts_with_icase(line, "VERSION")) {
+		if (seams.version_line)
+			seams.version_line("Version " + seams.version_text + "  - " + seams.title_text);
+		return true;
+	}
+	if (seams.in_session || line.empty()) return false;
+	const int record = client_binding_by_crc(line_crc(line));
+	if (record < 0) return false;
+	// The record's own code word: its index for a catalog row, 0 for a zero record.
+	const int code = controls::action_for_code(record) != nullptr ? record : 0;
+	if (seams.queue_action) seams.queue_action(code, 0, 0, 0);
+	return true;
+}
+
+// [orig: NapiClientCmd_ParseAndExecute @0x4329C0 - the name walk @0x432a64..0x432a94, the
+//  CRC walk @0x432aa9..0x432b3e (the "%8x" text it formats is unused), the queue by the token
+//  count @0x432b43..0x432ba1 (1: no parameters; 2: atol(token 2); 3: tokens 2, 3; 4: tokens
+//  2, 3, 4; more: return 0)]
 bool client_parse_and_execute(const std::string &line, ClientConsoleContext &ctx) {
 	if (client_handle_debug_command(line, ctx)) return true;
 	io::ConfigTokens tokens;
 	io::tokenize_config_line(line.c_str(), tokens);
 	if (tokens.count == 0) return false;
 	if (client_handle_server_command(line, ctx)) return true;
-	return ctx.queue_binding && ctx.queue_binding(tokens);
+	const std::string name = tokens.tokens[0] != nullptr ? tokens.tokens[0] : "";
+	int record = client_binding_by_token(name);
+	if (record < 0) record = client_binding_by_crc(line_crc(name));
+	if (record < 0) return false;
+	int32_t p1 = 0, p2 = 0, p3 = 0;
+	switch (tokens.count) {
+	case 1: break;
+	case 2: p1 = crt_atol(tokens.tokens[1]); break;
+	case 3:
+		p2 = crt_atol(tokens.tokens[2]);
+		p1 = crt_atol(tokens.tokens[1]);
+		break;
+	case 4:
+		p3 = crt_atol(tokens.tokens[3]);
+		p2 = crt_atol(tokens.tokens[2]);
+		p1 = crt_atol(tokens.tokens[1]);
+		break;
+	default: return false;
+	}
+	if (ctx.queue_action) ctx.queue_action(record, p1, p2, p3);
+	return true;
 }
 
 } // namespace opennova::inmatch

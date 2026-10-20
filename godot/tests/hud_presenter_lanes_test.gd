@@ -144,9 +144,9 @@ func test_board_page_keys_and_chat_line_gates() -> void:
 			"An open in-session board takes PgUp.")
 	hud.reset_scoreboard_page()
 	var chat := HudChatEntry.new()
-	var every_row := (1 << HudChatEntry.ROW_COUNT) - 1
+	var talk_rows := (1 << HudChatEntry.ROW_COMMAND) - 1
 	chat.poll_rows(0, true, null, null, 100)
-	chat.poll_rows(every_row, true, null, null, 101)
+	chat.poll_rows(talk_rows, true, null, null, 101)
 	assert_false(chat.is_capturing(), "No session, no chat line.")
 	var before := hud.get_draw_list_stats().glyphs
 	hud.set_frame_clocks(101, 101, 101, 101)
@@ -158,3 +158,12 @@ func test_board_page_keys_and_chat_line_gates() -> void:
 	key.pressed = true
 	assert_false(chat.key_event(key, null, null, 102), "A closed chat line takes no key.")
 	assert_eq(HudChatEntry.row_token(1), "ltalk", "The talk rows ride the catalog tokens.")
+	# The command entry (input actions 1 and 20) has no session gate: its row opens the
+	# line out of a session too (engine hud_chat_entry kChatDispatchCommand).
+	assert_eq(HudChatEntry.row_token(HudChatEntry.ROW_COMMAND), "command",
+			"The command entry rides the catalog's command row.")
+	var command := HudChatEntry.new()
+	command.poll_rows(0, true, null, null, 200)
+	command.poll_rows(1 << HudChatEntry.ROW_COMMAND, true, null, null, 201)
+	assert_true(command.is_capturing(), "The command row opens its line out of a session.")
+	assert_eq(command.get_open_dispatch(), 1, "The command row dispatches input action 1.")

@@ -632,49 +632,36 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 	replies.emplace_back("OK - Weapon availbility changed.");
 }
 
-// Client_ProcessLocalCommand's arms a host reaches with no client of its own: each takes a
-// line its prefix opens. PunkBuster's command hook comes first in retail and is not modeled
-// (D-NET-371). A `pb_` line, behind one leading '/' or '\\', is taken whatever PunkBuster's
-// state: retail hands it to the PunkBuster module (`pb_sv_` to its server half, any other to
-// its client half), each a call that does nothing with no PunkBuster context, and returns 1.
-// The WAC overlay toggles by name are not modeled (D-NET-371); SAVEKEYS is
-// taken here, its keylist.key dump of the profile's binding table not modeled, nor is the arm
-// past VERSION, which out of a session matches the line's CRC against the binding table and
-// queues its input action (D-NET-710). SAVENFO writes debug.nfo (entity_usage_text); VERSION posts
-// "Version <version>  - <title>" to the SYSTEM ring in white with the 930-tick life.
-// [orig: Client_ProcessLocalCommand @0x520BF0 — PBServer_InvokeCommandCallback @0x520C2A; the `pb_` arm
-//  @0x520C3B..0x520CB6: the '/' or '\\' skip @0x520C3B..0x520C45, strnicmp(.., "pb_", 3)
-//  @0x520C50 (the string @0x7CCF84), "sv_" @0x520C6B, the PunkBuster calls @0x520C94 /
-//  @0x520CC9 (0x4DA3F0 / 0x4D7ED0, each a no-op with no context 0xB608F4), return 1; the
-//  WAC overlays @0x520CF1, SAVEKEYS @0x520D10 (KeyBinding_DumpAllToFile @0x54C0A0), SAVENFO
-//  @0x520D4B (Entity_DumpUsageStatistics("debug.nfo") @0x520D5C), VERSION @0x520D8E (the
-//  format @0x7D00AC, Chat_AddMessageChannel2(.., -1, 930) @0x520DC2), the binding CRC
-//  @0x520DF2..0x520E5B]
+// Client_ProcessLocalCommand's arms a host reaches with no client of its own
+// (client_process_local_command, client_console.h): a `pb_` line is taken, PunkBuster's;
+// SAVEKEYS is taken, a host with no client holding no binding table to dump; SAVENFO writes
+// debug.nfo (entity_usage_text); VERSION posts "Version <version>  - <title>" to the SYSTEM
+// ring in white with the 930-tick life; out of a session the binding CRC arm has no input
+// layer to queue to here.
+// [orig: Client_ProcessLocalCommand @0x520BF0 - SAVENFO @0x520D4B
+//  (Entity_DumpUsageStatistics("debug.nfo") @0x520D5C); fopen("w+") @0x40E6B2]
 bool AdminConsole::local_command(const std::string &line) {
-	const size_t skip = !line.empty() && (line[0] == '/' || line[0] == '\\') ? 1 : 0;
-	if (strutil::starts_with_icase(std::string_view(line).substr(skip), "pb_")) return true;
-	if (strutil::starts_with_icase(line, "SAVEKEYS")) return true;
-	if (strutil::starts_with_icase(line, "SAVENFO")) {
+	ClientLocalCommandSeams seams;
+	seams.in_session = ctx_.is_in_session != 0;
+	seams.save_nfo = [this] {
 		const char *name = "debug.nfo";
 		const std::string file = entity_usage_file_name(name);
 		const def::DefItemsFile *items = seams_.items_table ? seams_.items_table() : nullptr;
-		if (ctx_.world != nullptr && ctx_.logs.files != nullptr && !file.empty()) {
-			// fopen("w+"): text mode, each '\n' on the disk a CR LF [orig: @0x40E6B2].
-			std::string text;
-			for (const char c : entity_usage_text(*ctx_.world, items, name)) {
-				if (c == '\n') text += '\r';
-				text += c;
-			}
-			(void)ctx_.logs.files->write(file, text, /*append=*/false);
+		if (ctx_.world == nullptr || ctx_.logs.files == nullptr || file.empty()) return;
+		// fopen("w+"): text mode, each '\n' on the disk a CR LF.
+		std::string text;
+		for (const char c : entity_usage_text(*ctx_.world, items, name)) {
+			if (c == '\n') text += '\r';
+			text += c;
 		}
-		return true;
-	}
-	if (strutil::starts_with_icase(line, "VERSION")) {
-		const std::string text = "Version " + seams_.version_text + "  - " + seams_.title_text;
+		(void)ctx_.logs.files->write(file, text, /*append=*/false);
+	};
+	seams.version_text = seams_.version_text;
+	seams.title_text = seams_.title_text;
+	seams.version_line = [this](const std::string &text) {
 		if (seams_.system_message) seams_.system_message(text, 0xFFFFFFFFu);
-		return true;
-	}
-	return false;
+	};
+	return client_process_local_command(line, seams);
 }
 
 // The host's own console line: Client_ProcessLocalCommand's arms first; then a session peer

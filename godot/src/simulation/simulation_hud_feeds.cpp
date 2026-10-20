@@ -153,6 +153,14 @@ opennova::hud::ChatEntryFacts Simulation::chat_entry_facts(uint32_t p_frame) con
 
 opennova::hud::ChatSendResult Simulation::send_chat_line(int p_dispatch, std::string &r_text,
 		uint32_t p_frame) {
+	// The command entry's stored sender is the console command, which stamps no
+	// talk debounce (D-NET-710) [orig: Input_HandleActionBinding cases 1, 20 ->
+	// Chat_BeginChatInput(.., j_Client_ProcessConsoleCommand, ..) @0x49bb16].
+	if (p_dispatch == opennova::hud::kChatDispatchCommand ||
+			p_dispatch == opennova::hud::kChatDispatchConsole) {
+		if (runtime_ != nullptr) (void)runtime_->console_command(r_text);
+		return opennova::hud::ChatSendResult::Refused;
+	}
 	const int channel = opennova::hud::chat_dispatch_channel(p_dispatch);
 	if (runtime_ == nullptr || channel < 0) return opennova::hud::ChatSendResult::Refused;
 	return runtime_->queue_chat_message(static_cast<uint8_t>(channel), r_text, p_frame);
