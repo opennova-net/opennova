@@ -256,9 +256,19 @@ int main() {
 				{make_protocol_message(c2s::MEDIC_REQUEST,
 						encode_medic_request(request))},
 				world.logic_tick, roster, &world, inputs);
-		expect(own.size() == 1 && own[0].tag == s2c::CHAT_BROADCAST &&
-                own[0].reliable && own[0].retention_flushes == 310,
-				"the requester gets the chat line back");
+		// The requester's own 0x14 is queued at its call, ahead of the 0x34 help
+		// call it hears too, not returned behind the handler (the dual-send audit)
+		// [orig: Server_BroadcastMedicRequest @0x51550B ahead of @0x51552F].
+		expect(own.empty(), "the requester's chat line is no reply");
+		const auto victim_rows = drain(victim_wire);
+		std::size_t own_chat = victim_rows.size(), own_help = victim_rows.size();
+		for (std::size_t i = 0; i < victim_rows.size(); ++i) {
+			if (victim_rows[i][0] == s2c::CHAT_BROADCAST && own_chat == victim_rows.size())
+				own_chat = i;
+			if (victim_rows[i][0] == 0x34 && own_help == victim_rows.size()) own_help = i;
+		}
+		expect(own_chat < own_help && own_help < victim_rows.size(),
+				"the requester gets the chat line back, ahead of its own help call");
 		const auto medic_rows = drain(medic_wire);
 		const auto medic_downed = bodies_of(medic_rows, s2c::PLAYER_DOWNED_STATE);
 		expect(medic_downed.size() == 1 &&
@@ -270,7 +280,7 @@ int main() {
 				"request: the dead Medic receives the STRSRV_MEDREQ chat line");
 		expect(bodies_of(medic_rows, 0x34).size() == 1,
 				"request: the dead Medic hears the mask-128 help call (0x34)");
-		expect(bodies_of(drain(victim_wire), 0x34).size() == 1,
+		expect(bodies_of(victim_rows, 0x34).size() == 1,
 				"request: the downed requester hears its own help call (0x34)");
 		const auto rifleman_rows = drain(rifleman_wire);
 		expect(bodies_of(rifleman_rows, s2c::PLAYER_DOWNED_STATE).empty() &&

@@ -2272,15 +2272,25 @@ int main() {
 		const std::vector<ProtocolMessage> own = send_medic_request(roster[2]);
 		const Drained medic = drain_all(udp_b);
 		const Drained host_side = drain_all(loop);
+		const Drained requester = drain_all(udp_c);
 		if (!expect(medic.tag(0x54).size() == 1 && medic.tag(0x54)[0] == victim_window,
 		            "the medic receives the live revive window without bit 7"))
 			return 1;
 		if (!expect(medic.tag(0x14).size() == 1 && medic.tag(0x14)[0] == chat_line,
 		            "the medic receives STRSRV_MEDREQ as chat channel 2 from the victim's slot"))
 			return 1;
-		if (!expect(own.size() == 1 && own[0].tag == s2c::CHAT_BROADCAST &&
-		                    own[0].payload == chat_line,
-		            "the requester receives the chat line alone (mask 0x20), never a 0x54"))
+		// The requester's copy is queued at its call (mask 0x20 @0x51550B), ahead of
+		// the help call's 0x34 it hears too (@0x51552F), not returned as a reply.
+		std::size_t chat_at = requester.raw.size(), help_at = requester.raw.size();
+		for (std::size_t i = 0; i < requester.raw.size(); ++i) {
+			if (requester.raw[i][0] == s2c::CHAT_BROADCAST && chat_at == requester.raw.size())
+				chat_at = i;
+			if (requester.raw[i][0] == 0x34 && help_at == requester.raw.size()) help_at = i;
+		}
+		if (!expect(own.empty() && requester.tag(0x14).size() == 1 &&
+		                    requester.tag(0x14)[0] == chat_line && chat_at < help_at &&
+		                    help_at < requester.raw.size(),
+		            "the requester receives the chat line alone (mask 0x20), never a 0x54, ahead of the 0x34"))
 			return 1;
 		if (!expect(host_side.tag(0x54).empty() && host_side.tag(0x14).empty(),
 		            "a same-team non-medic receives neither the window nor the chat"))
@@ -2298,7 +2308,7 @@ int main() {
 			return 1;
 		if (!expect(roster[2].link.medic_request_active, "the once-only latch closes"))
 			return 1;
-		if (!expect(drain_all(udp_c).tag(0x54).empty(),
+		if (!expect(requester.tag(0x54).empty(),
 		            "the requester's transport carries no 0x54 for its own call"))
 			return 1;
 
@@ -2309,7 +2319,7 @@ int main() {
 		if (!expect(medic_again.tag(0x54).empty() &&
 		                    medic_again.tag(0x14).size() == 1 &&
 		                    medic_again.tag(0x34).size() == 1 &&
-		                    again.size() == 1 && again[0].tag == s2c::CHAT_BROADCAST,
+		                    again.empty() && drain_all(udp_c).tag(0x14).size() == 1,
 		            "a repeat call re-sends the chat and sound but the latch hides the 0x54"))
 			return 1;
 		// The latched state now folds bit 7 into every later 0x54 / 0x46.
@@ -2445,8 +2455,10 @@ int main() {
 		const std::vector<uint8_t> host_line = encode_chat_broadcast(
 				ChatBroadcast{2, roster[0].reply.player_slot,
 						world.registry.get(ha)->name + " needs a medic!"});
-		if (!expect(host_call.size() == 1 && host_call[0].tag == s2c::CHAT_BROADCAST &&
-		                    host_call[0].payload == host_line,
+		// Its own copy rides its loopback at the call (@0x51550B), not a reply.
+		const Drained host_own = drain_all(loop);
+		if (!expect(host_call.empty() && host_own.tag(0x14).size() == 1 &&
+		                    host_own.tag(0x14)[0] == host_line,
 		            "the loopback host's own call returns its chat line"))
 			return 1;
 		const Drained medic_side = drain_all(udp_b);

@@ -158,10 +158,21 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 		candidate.link.transport->host_send(
 				s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);
 	}
-	// [orig: Server_BroadcastMedicRequest @0x5154AC..0x51550B]
-	ProtocolMessage own_chat = make_protocol_message(s2c::CHAT_BROADCAST, body);
-	own_chat.retention_flushes = kChatRetentionFlushes;
-	replies.push_back(std::move(own_chat));
+	// The requester's own copy is the second send (mask 0x20, the target slot),
+	// queued at its call: ahead of the help call's 0x34, which the requester
+	// hears too, not behind the handler's return (the dual-send audit). A
+	// connection with no transport (a test seam) takes it as the reply.
+	// [orig: Server_BroadcastMedicRequest - the Medics' 0x14 (mask 0x5C0)
+	//  @0x5154DC, the requester's (mask 0x20) @0x51550B, the latch @0x515510,
+	//  then Server_SendOverlayActionToAlive @0x51552F]
+	if (conn.link.transport != nullptr) {
+		conn.link.transport->host_send(
+				s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);
+	} else {
+		ProtocolMessage own_chat = make_protocol_message(s2c::CHAT_BROADCAST, body);
+		own_chat.retention_flushes = kChatRetentionFlushes;
+		replies.push_back(std::move(own_chat));
+	}
 	conn.link.medic_request_active = true;
 	// The help call: the requester's body-model composite "<prefix>_MEDIC_REQUEST",
 	// positioned at the requester, to every slot in state 6/7 (mask 128, which
