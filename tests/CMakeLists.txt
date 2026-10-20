@@ -743,10 +743,16 @@ target_link_libraries(infantry_escort_test PRIVATE opennova_runtime)
 target_include_directories(infantry_escort_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME infantry_escort COMMAND infantry_escort_test)
 
+# fixtures/grm/face108.grm: a face at the scale of the ones BHD ships, through the GRM writer.
+add_executable(minimal_grm_gen_test fixtures/minimal_grm_gen.cpp)
+target_link_libraries(minimal_grm_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_grm_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_grm_gen COMMAND minimal_grm_gen_test)
+
 add_executable(grm_roundtrip_test grm/grm_roundtrip_test.cpp)
 target_link_libraries(grm_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(grm_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(grm_roundtrip COMMAND grm_roundtrip_test)
+add_test(NAME grm_roundtrip COMMAND grm_roundtrip_test)
 
 add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
 target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
