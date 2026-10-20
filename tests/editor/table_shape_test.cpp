@@ -21,7 +21,8 @@
 // item's player_speed in km/h) resolves the same 4 and runs the family's parser 3 times over the line
 // alone and 2 times over the whole record, which the log line times. The powerup tables (the one above and
 // the format's variants, its fixtures: the shipped table's shape among them) through the same sweep, each
-// generated back as the format's writer writes what its parser reads, and a fixed point.
+// generated back as the format's writer writes what its parser reads, and a fixed point. A weapon table's
+// findings each on the record it stands in, an action's on the action.
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -34,6 +35,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/catalog_validation.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
@@ -750,6 +752,28 @@ int powerup_tables() {
 	return failures;
 }
 
+// A weapon table's lines the game reads nothing of, each a finding on the record it stands in
+// (catalog_validation's placing, by the record's place, else by its name over every record a walk of the rows
+// meets, a weapon's actions among them): a line before every record on none, a line inside an action on that
+// action of its weapon.
+int catalog_findings_placed() {
+	const char *const text = "stray 1\r\nweapon \"WPN_TEST\"\r\ncategory 1\r\naction \"Fire\"\r\nfunction Shoot 1 2\r\n"
+	                         "bogus 5\r\nend\r\naction \"Reload\"\r\ndelaystart 2\r\nend\r\nend\r\n";
+	DefCatalogDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(text_bytes(text), "weapon.def", AssetKind::WeaponDefs, "JO", error) &&
+	            document.rows().size() == 1);
+	const std::vector<Diagnostic> findings = validate_catalog_file(document);
+	TEST_EXPECT(findings.size() == 2);
+	if (findings.size() != 2) return 1;
+	TEST_EXPECT(findings[0].code() == "catalog.ignored_input" && findings[0].line == 1 && findings[0].row_id == 0);
+	TEST_EXPECT(findings[1].code() == "catalog.ignored_input" && findings[1].line == 6 && findings[1].record == "Fire" &&
+	            findings[1].row_id == document.rows()[0]->id && findings[1].child_id != 0 &&
+	            findings[1].record_kind == node_kind(def::DefRecordKind::Action));
+	std::printf("catalog findings: a line before every record on none, a line in an action on the action\n");
+	return 0;
+}
+
 #undef SHAPE_CHECK
 
 } // namespace
@@ -762,6 +786,7 @@ int main() {
 	if (core_over_a_table() != 0) return 1;
 	if (keystroke_in_a_catalog() != 0) return 1;
 	if (powerup_tables() != 0) return 1;
+	if (catalog_findings_placed() != 0) return 1;
 	std::printf("editor_table_shape: all tests passed\n");
 	return 0;
 }

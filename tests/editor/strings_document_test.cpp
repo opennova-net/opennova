@@ -461,7 +461,7 @@ int section_names_and_moves() {
 // Every RTXT table of the format's variants (its fixtures) and of the base game (assets/: its global tables and
 // its mission's) through the document, and the minted ungrouped table: an unedited save writes the stored bytes,
 // or, for a table whose strings are not grouped as the game reads them (the document's regroup note), the format's
-// regrouped table; none opens blocked.
+// regrouped table; none opens blocked. A table cut short opens none.
 int variant_tables() {
 	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/rtxt", "assets"}, {".bin"});
 	int failures = editor_test::report_missing(variants);
@@ -497,8 +497,17 @@ int variant_tables() {
 	}
 	// Both legs: the files' tables (grouped, as every table JO:CA ships is) and the minted one, which is not.
 	TEST_EXPECT(tables > 1 && same > 0 && regrouped > 0);
-	std::printf("variants: %zu string tables, %zu saved byte for byte, %zu regrouped as the game reads them\n", tables,
-	            same, regrouped);
+	// A table the format's reader refuses (one cut inside its entries) opens no document: the parse finding.
+	const std::vector<uint8_t> whole = minted_table();
+	StringsDocument cut;
+	Diagnostic refused;
+	TEST_EXPECT(whole.size() > 24 &&
+	            !cut.load_bytes(std::vector<uint8_t>(whole.begin(), whole.begin() + 24), "cut.bin", AssetKind::Strings, "jo",
+	                            refused) &&
+	            refused.code() == "document.parse");
+	std::printf("variants: %zu string tables, %zu saved byte for byte, %zu regrouped as the game reads them; a cut one "
+	            "refused\n",
+	            tables, same, regrouped);
 	return failures;
 }
 

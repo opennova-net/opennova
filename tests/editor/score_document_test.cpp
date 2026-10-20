@@ -202,7 +202,9 @@ int test_findings() {
 // The game's own score.ini is ScoreConfig_SaveFile's output [orig: @ 0x52CDD0]: a block for each of the table's
 // twelve rows by index, row 2's put down first under index 0 [orig: @ 0x52CF4C], so COOP twice and the two alike
 // (JO:CA's: 12 blocks, the document's 13 rows with the file's own). Minted in that form (each block its own
-// columns and points), the document saves it byte for byte, with no note and no finding.
+// columns and points), the document saves it byte for byte, with no note and no finding: the second COOP block's
+// columns, compared one by one with the first's, change nothing the row holds. One of its columns another byte,
+// and the second block is the repeated game type's finding.
 int test_writer_form() {
 	score::File file;
 	for (int index = 0; index < 12; ++index) {
@@ -210,7 +212,7 @@ int test_writer_form() {
 		block.row = index == 0 ? 2 : index;
 		const int seed = index == 0 ? 2 : index;
 		block.fields.push_back({score::field_id("NUMENEMYKILLS"), 1});
-		if (seed % 2) block.fields.push_back({score::field_id("NUMDEATHS"), 1});
+		if (seed % 2 == 0) block.fields.push_back({score::field_id("NUMDEATHS"), 1});
 		block.vars.push_back({score::var_id("FIRE"), 0});
 		block.vars.push_back({score::var_id("ENEMYKILL"), 5 + seed});
 		if (seed % 3 == 0) block.vars.push_back({score::var_id("FRIENDLYKILL"), -seed});
@@ -226,6 +228,14 @@ int test_writer_form() {
 	const SerializeResult saved = document.serialize();
 	TEST_EXPECT(saved.ok() && saved.text == std::string(bytes.begin(), bytes.end()) && saved.notes.empty());
 	TEST_EXPECT(validate_score_file(document).empty());
+	score::File other = file;
+	other.blocks[2].fields.back().value = 0;
+	TEST_EXPECT(score::write(other, bytes, why));
+	ScoreDocument repeated;
+	TEST_EXPECT(repeated.load_bytes(bytes, "score.ini", AssetKind::Score, "jo", error));
+	const std::vector<Diagnostic> findings = validate_score_file(repeated);
+	TEST_EXPECT(findings.size() == 1 && findings[0].code() == "score.game_type_repeated" &&
+	            findings[0].row_id == repeated.rows()[3]->id);
 	std::printf("writer form: a score.ini of the game's twelve blocks, %zu rows, saved byte for byte\n",
 	            document.rows().size());
 	return 0;
