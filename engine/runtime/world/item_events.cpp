@@ -284,9 +284,13 @@ void gnrc_death_event(World &world, Entity &target, int phase, int32_t section,
 // @0x407242, death tick if unset @0x407258, +0x2AC = 0x20 @0x40725f.
 void gnl2_death_expiry(World &world, Entity &target, int32_t section) {
 	target.class_think_ticks = kGnl2DeathThinkTicks;
-	const Vec3 raised{target.position.x, target.position.y, target.position.z + 1.0f};
+	// The blast point is the row's X/Y words and its Z word raised by 0x10000,
+	// copied raw (D-NET-507). [orig: Entity_HandleDeathEvent @0x4070F0 - the
+	//  pose copy @0x4071F4..0x40722F, `add eax, 10000h` @0x40720D, into
+	//  Server_BroadcastExplosionEffect @0x407233]
     spawn_item_explosion(world, world.registry.get(target.last_attacker),
-            {to_fixed(raised.x),to_fixed(raised.y),to_fixed(raised.z)},
+            {target.position.x.q16, target.position.y.q16,
+             io::bam_add(target.position.z.q16, 0x10000)},
             bam_heading_from_mission_yaw_deg(target.yaw), 60);
     emit_item_state(world, target, section);
 	land_class_husk(world, target);

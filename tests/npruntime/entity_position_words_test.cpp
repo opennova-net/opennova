@@ -30,6 +30,7 @@
 #include <runtime/mission/promote.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/spawn_select.h>
@@ -38,6 +39,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -351,6 +353,37 @@ int zone_placement_keeps_the_words() {
 	return 0;
 }
 
+// The gnl2 expiry's blast point, which the S2C item-explosion event streams:
+// the row's X/Y words and its Z word raised by 0x10000, raw.
+// [orig: Entity_HandleDeathEvent @0x4070F0 - the pose copy @0x4071F4..0x40722F,
+//  `add eax, 10000h` @0x40720D]
+int gnl2_blast_point_is_the_raised_z_word() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(1, 4);
+	world->rules.logic_authority = true;
+	world->rules.mp_session = true;
+	w::Entity seed;
+	seed.kind = w::EntityKind::Item;
+	seed.item_id = 500;
+	seed.has_item_def = true;
+	seed.position.set_q16({kAshJoinerX, kTdhHostY, kFarZ});
+	seed.engine_flags = w::kEntityFlagDead; // the expiry leg (Flags & 2)
+	const w::EntityHandle h = world->registry.spawn(1, seed);
+	w::ItemDeathTraits traits;
+	traits.death_class = w::item_death_class_from_tag("gnl2");
+	world->tables.item_death_traits.set(500, traits);
+	w::destruction_notify_item_damage(*world, *world->registry.get(h), 1);
+	const w::ItemExplosionEvent *blast = nullptr;
+	for (const auto &event : world->out.entity_events)
+		if (const auto *x = std::get_if<w::ItemExplosionEvent>(&event)) blast = x;
+	if (!expect(blast != nullptr &&
+	                    same_words(blast->position, kAshJoinerX, kTdhHostY, kFarZ + 0x10000),
+	            "the gnl2 blast point is the row's words, the z word raised by 0x10000"))
+		return 1;
+	std::printf("PASS gnl2_blast_point_is_the_raised_z_word\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -360,7 +393,8 @@ int main() {
 	const int slot = ai_slot_reads_its_entity_words();
 	const int chat = nearest_location_takes_the_word_distances();
 	const int zone = zone_placement_keeps_the_words();
-	for (const int r : {lossy, streams, placement, slot, chat, zone})
+	const int gnl2 = gnl2_blast_point_is_the_raised_z_word();
+	for (const int r : {lossy, streams, placement, slot, chat, zone, gnl2})
 		if (r != 0) return r;
 	return 0;
 }
