@@ -100,8 +100,8 @@ int main() {
 
 	w::Entity *truck = rig.world.registry.by_net_id(kTruckSsn);
 	if (!expect(truck != nullptr, "truck SSN 11 is in the world")) return 1;
-	std::printf("ride: truck pos=(%.1f, %.1f, %.1f) seats=%zu\n", truck->position.x, truck->position.y,
-			truck->position.z, truck->seats.size());
+	std::printf("ride: truck pos=(%.1f, %.1f, %.1f) seats=%zu\n", float(truck->position.x), float(truck->position.y),
+			float(truck->position.z), truck->seats.size());
 	if (!expect(!truck->seats.empty(), "the truck has seats (seat specs fed)")) return 1;
 	const w::EntityHandle truck_handle = truck->handle;
 	const w::EntityHandle player_handle = rig.world.cached.local_player;

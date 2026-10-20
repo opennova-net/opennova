@@ -180,8 +180,8 @@ void list_buildings(testrig::MissionRig &rig) {
 		int counts[8] = {};
 		for (const DoorRecord &d : recs) counts[std::min(d.type, 7)]++;
 		std::printf("bldg bms=%d slot=%d %s pos (%.1f, %.1f, %.1f) yaw %d dist %.0f  recs t0=%d t1=%d t2=%d t3=%d t5=%d  win=%d open=%d link=%d\n",
-				e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), e.position.x, e.position.y,
-				e.position.z, static_cast<int>(e.yaw), testrig::planar_distance(e.position, spawn),
+				e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), float(e.position.x), float(e.position.y),
+				float(e.position.z), static_cast<int>(e.yaw), testrig::planar_distance(e.position, spawn),
 				counts[0], counts[1], counts[2], counts[3], counts[5], fl.has_windows, fl.has_open,
 				fl.has_links);
 		for (const DoorRecord &d : recs) {
@@ -764,8 +764,8 @@ int main(int argc, char **argv) {
 			int counts[8] = {};
 			for (const DoorRecord &dr : portal_records(rig, e)) counts[std::min(dr.type, 7)]++;
 			std::printf("spawn-bldg bms=%d slot=%d %s d=%.1f pos (%.2f, %.2f, %.2f) yaw %d occ=%d recs t0=%d t1=%d t2=%d t3=%d t5=%d win=%d forced=0x%X\n",
-					e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), d, e.position.x, e.position.y,
-					e.position.z, static_cast<int>(e.yaw), occ, counts[0], counts[1], counts[2], counts[3],
+					e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), d, float(e.position.x), float(e.position.y),
+					float(e.position.z), static_cast<int>(e.yaw), occ, counts[0], counts[1], counts[2], counts[3],
 					counts[5], fl.has_windows, rig.occlusion.forced_section_mask(e.handle));
 			if (const w::CollisionModel *cm = rig.collision.model_for(rig.world, e.handle)) {
 				for (size_t si = 0; si < cm->sections.size(); ++si) {
@@ -795,8 +795,8 @@ int main(int argc, char **argv) {
 			if (testrig::planar_distance(e.position, sp) > opt.radius) return;
 			std::printf("spawn-ent bms=%d h=%u %s kind %d d=%.1f pos (%.2f, %.2f, %.2f) hits %s %s flags&1=%u\n",
 					e.bms_id, static_cast<unsigned>(e.handle.packed), item_label(rig, e).c_str(),
-					static_cast<int>(e.kind), testrig::planar_distance(e.position, sp), e.position.x,
-					e.position.y, e.position.z, hit_str(e.blink_hits[0]).c_str(),
+					static_cast<int>(e.kind), testrig::planar_distance(e.position, sp), float(e.position.x),
+					float(e.position.y), float(e.position.z), hit_str(e.blink_hits[0]).c_str(),
 					hit_str(e.blink_hits[1]).c_str(), static_cast<unsigned>(e.flags & 1u));
 		});
 		const w::Entity *nb = rig.world.registry.get(nearest);
@@ -986,8 +986,8 @@ int main(int argc, char **argv) {
 			if (e.blink_hits[0] == 0) ++stale;
 			std::printf("scan: bms=%d h=%u pool=%d %s kind %d pos (%.2f, %.2f, %.2f) hits %s query %s%s\n",
 					e.bms_id, static_cast<unsigned>(e.handle.packed), e.handle.pool(),
-					item_label(rig, e).c_str(), static_cast<int>(e.kind), e.position.x, e.position.y,
-					e.position.z, hit_str(e.blink_hits[0]).c_str(), hit_str(q.hits[0]).c_str(),
+					item_label(rig, e).c_str(), static_cast<int>(e.kind), float(e.position.x), float(e.position.y),
+					float(e.position.z), hit_str(e.blink_hits[0]).c_str(), hit_str(q.hits[0]).c_str(),
 					e.blink_hits[0] == 0 ? "  <- EMPTY QUAD INSIDE A BOX" : "");
 		});
 		std::printf("scan: %d entities carry a blink quad; %d sit in a box with an empty quad\n",
@@ -1026,8 +1026,8 @@ int main(int argc, char **argv) {
 	const w::Entity *bldg = rig.world.registry.get(bldg_handle);
 	if (!expect(bldg != nullptr, "a building with a floor-level exterior (type-2) record")) return 1;
 	std::printf("walk: building bms=%d slot=%d %s pos (%.2f, %.2f, %.2f) yaw %d; door rec %d A=%d B=%d at (%.2f, %.2f, %.2f) z %.2f..%.2f n (%.2f, %.2f, %.2f)\n",
-			bldg->bms_id, bldg->handle.slot(), item_label(rig, *bldg).c_str(), bldg->position.x,
-			bldg->position.y, bldg->position.z, static_cast<int>(bldg->yaw), door.index,
+			bldg->bms_id, bldg->handle.slot(), item_label(rig, *bldg).c_str(), float(bldg->position.x),
+			float(bldg->position.y), float(bldg->position.z), static_cast<int>(bldg->yaw), door.index,
 			door.section_a, door.section_b, door.center[0], door.center[1], door.center[2],
 			door.min_z, door.max_z, door.normal[0], door.normal[1], door.normal[2]);
 
@@ -1064,8 +1064,8 @@ int main(int argc, char **argv) {
 			if ((e.kind == w::EntityKind::Building && w::building_def_row(e)) || e.kind == w::EntityKind::Marker) return;
 			if (testrig::planar_distance(e.position, dc) > 25.0f) return;
 			std::printf("near: bms=%d %s kind %d pos (%.2f, %.2f, %.2f) hits %s %s %s flags&1=%u\n",
-					e.bms_id, item_label(rig, e).c_str(), static_cast<int>(e.kind), e.position.x,
-					e.position.y, e.position.z, hit_str(e.blink_hits[0]).c_str(),
+					e.bms_id, item_label(rig, e).c_str(), static_cast<int>(e.kind), float(e.position.x),
+					float(e.position.y), float(e.position.z), hit_str(e.blink_hits[0]).c_str(),
 					hit_str(e.blink_hits[1]).c_str(), hit_str(e.blink_hits[2]).c_str(),
 					static_cast<unsigned>(e.flags & 1u));
 		});

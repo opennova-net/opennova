@@ -258,7 +258,7 @@ int main() {
 				bodies[bi].pos[1] = fx(se->position.y);
 				bodies[bi].pos[2] = fx(se->position.z);
 				std::printf("    body %zu at (%.2f,%.2f,%.2f)\n", bi,
-				            se->position.x, se->position.y, se->position.z);
+				            float(se->position.x), float(se->position.y), float(se->position.z));
 			}
 		}
 	}

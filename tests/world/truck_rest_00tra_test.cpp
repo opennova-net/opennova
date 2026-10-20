@@ -80,7 +80,7 @@ int main() {
 		const float rest_error = veh->position.z - ground;
 		const bool ok = std::fabs(rest_error) <= kMaxRestError;
 		std::printf("truck-rest: ssn=%u pool=%d pos=(%.3f, %.3f, %.3f) ground=%.3f rest_error=%+.3f alive=%d hidden=%d %s\n",
-				unsigned(ssn), veh->handle.pool(), veh->position.x, veh->position.y, veh->position.z,
+				unsigned(ssn), veh->handle.pool(), float(veh->position.x), float(veh->position.y), float(veh->position.z),
 				ground, rest_error, int(veh->alive), int(veh->hidden), ok ? "OK" : "FLOATING");
 		std::snprintf(msg, sizeof(msg), "ssn %u rests its origin on the terrain", unsigned(ssn));
 		if (!expect(ok, msg) && std::fabs(rest_error - kOldFloat) < 0.1f)
@@ -109,7 +109,7 @@ int main() {
 			const float ground = rig.ground_height(after->position.x, after->position.y);
 			const float rest_error = after->position.z - ground;
 			std::printf("truck-rest: drop-test ssn=%u settled=%.3f ground=%.3f rest_error=%+.3f\n",
-					unsigned(ssn), after->position.z, ground, rest_error);
+					unsigned(ssn), float(after->position.z), ground, rest_error);
 			if (!expect(std::fabs(after->position.z - (pos.z + 2.0f)) >= 0.05f,
 						"the drop test settled — the ground solve ran"))
 				;
@@ -131,7 +131,7 @@ int main() {
 		const w::Entity *fallen = rig.world.registry.get(handle);
 		if (expect(fallen != nullptr, "the dropped truck is still in the world")) {
 			std::printf("truck-rest: hard fall ssn=%u z %.3f -> %.3f crashed=%d\n", unsigned(ssn), rest.z + 40.0f,
-					fallen->position.z, int(fallen->veh.crashed));
+					float(fallen->position.z), int(fallen->veh.crashed));
 			expect(fallen->position.z < rest.z + 5.0f, "the dropped truck came down");
 			expect(fallen->veh.crashed != 0, "a 40 u fall latches the truck's crash");
 		}

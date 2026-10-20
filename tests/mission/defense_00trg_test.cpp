@@ -187,8 +187,8 @@ int main(int argc, char **argv) {
 			const w::Entity *veh = rig.world.registry.by_net_id(row.ssn);
 			if (veh == nullptr) continue;
 			char buf[200];
-			std::snprintf(buf, sizeof(buf), "ssn=%u pos=(%.1f,%.1f,%.2f)", unsigned(row.ssn), veh->position.x,
-					veh->position.y, veh->position.z);
+			std::snprintf(buf, sizeof(buf), "ssn=%u pos=(%.1f,%.1f,%.2f)", unsigned(row.ssn), float(veh->position.x),
+					float(veh->position.y), float(veh->position.z));
 			line += buf;
 			if (const w::AiEntity *brain = rig.world.ai.for_handle(veh->handle)) {
 				const int wp_ch = brain->brain.f[w::AiBrain::kWpChannel];
