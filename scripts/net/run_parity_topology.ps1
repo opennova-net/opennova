@@ -64,6 +64,12 @@ param(
     [ValidateRange(0, 600)]
     [int] $TimeLimitMinutes = 0,
 
+    # The pinned SHA-256 of the SERVER copy's game.cfg (the case table's
+    # server_game_cfg_sha256): the cell refuses a copy whose game.cfg differs
+    # at its start. Empty skips the check (a diagnostic run).
+    [ValidatePattern('^(?:|[0-9a-f]{64})$')]
+    [string] $ServerGameCfgSha256 = "",
+
     # Late join (extension E3): a second joiner of the first joiner's kind
     # joins during the steady window, after the first joiner's scripted input,
     # so the host serves a join with a remote player already in the match and
@@ -893,18 +899,86 @@ function Publish-MotionGate {
     }
 }
 
+# The SERVER copy's mutable files. Both hosts run in that copy: retail's
+# Jointops.exe in its install, ours through --working-dir. Each reads game.cfg
+# and player.sav at its start and writes them, and weapon.sav (the root's and
+# the expansion's), at its save points: retail saves at its exit
+# (Game_SaveConfig from Game_Run). Every cell starts from the same bytes:
+# game.cfg's are the case table's pin (-ServerGameCfgSha256), and the cleanup
+# writes each file's start bytes back once every process has stopped (and
+# deletes one the cell created).
+$script:ServerCopyFiles = @()
+function Get-BytesSha256([byte[]] $Bytes) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes)) -replace '-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+
+function Save-ServerCopyFiles {
+    $relative = @("game.cfg", "player.sav", "weapon.sav")
+    if ($Expansion) { $relative += (Join-Path (Join-Path "expansion" $Expansion) "weapon.sav") }
+    $script:ServerCopyFiles = @(foreach ($rel in $relative) {
+        $path = Join-Path $ServerDir $rel
+        $exists = Test-Path -LiteralPath $path -PathType Leaf
+        $bytes = if ($exists) { [IO.File]::ReadAllBytes($path) } else { $null }
+        $sha = if ($exists) { Get-BytesSha256 $bytes } else { "" }
+        [pscustomobject][ordered]@{
+            file = $rel
+            path = $path
+            bytes = $bytes
+            sha256 = $sha
+            effective_sha256 = $sha
+            written_during_cell = $false
+            restored = $false
+        }
+    })
+    $cfg = $script:ServerCopyFiles | Where-Object { $_.file -eq "game.cfg" }
+    if (-not $cfg.sha256) { throw "The SERVER copy has no game.cfg: $($cfg.path)" }
+    if ($ServerGameCfgSha256 -and $cfg.sha256 -cne $ServerGameCfgSha256) {
+        throw "SERVER game.cfg is $($cfg.sha256), not the pinned $ServerGameCfgSha256 (a cell left it changed, or the copy moved on: restore it, or re-pin the case table)."
+    }
+}
+
+function Restore-ServerCopyFiles {
+    if (-not $script:ServerCopyFiles.Count) { return }
+    foreach ($process in @($script:RetailHostProcess, $script:RetailProcess, $script:OpenNovaHost)) {
+        if ($process) {
+            try { $null = $process.WaitForExit(15000) } catch {}
+        }
+    }
+    $failures = @()
+    foreach ($entry in $script:ServerCopyFiles) {
+        $present = Test-Path -LiteralPath $entry.path -PathType Leaf
+        $now = if ($present) { (Get-FileHash -LiteralPath $entry.path -Algorithm SHA256).Hash.ToLowerInvariant() } else { "" }
+        $entry.written_during_cell = $now -ne $entry.effective_sha256
+        if ($now -eq $entry.sha256) { $entry.restored = $true; continue }
+        if ($null -eq $entry.bytes) {
+            Remove-Item -LiteralPath $entry.path -Force
+        } else {
+            [IO.File]::WriteAllBytes($entry.path, $entry.bytes)
+        }
+        $after = if (Test-Path -LiteralPath $entry.path -PathType Leaf) { (Get-FileHash -LiteralPath $entry.path -Algorithm SHA256).Hash.ToLowerInvariant() } else { "" }
+        if ($after -ne $entry.sha256) {
+            $failures += "$($entry.file) left $after, not the cell's start $($entry.sha256)"
+        } else {
+            $entry.restored = $true
+        }
+    }
+    if ($script:ServerGameCfgOverride) {
+        $script:ServerGameCfgOverride.restored = [bool] ($script:ServerCopyFiles | Where-Object { $_.file -eq "game.cfg" }).restored
+    }
+    if ($failures.Count) { throw ("SERVER copy restore: " + ($failures -join "; ")) }
+}
+
 # E2's time limit: the SERVER copy's game.cfg time_limit for this cell (the
-# retail host reads the file at its start, the OpenNova host mounts the same
-# copy). The cell's exact original bytes are kept and written back by the
-# cleanup once every process has stopped: retail saves game.cfg at its exit
-# (Game_SaveConfig from Game_Run), which would otherwise leave the limit in
-# the copy for the next cell.
-$script:ServerGameCfgOriginal = $null
+# retail host reads the file at its start, the OpenNova host runs in the same
+# copy). The cleanup's restore takes the copy back to the cell's start bytes.
 $script:ServerGameCfgOverride = $null
 function Set-ServerTimeLimit {
-    $path = Join-Path $ServerDir "game.cfg"
+    $cfg = $script:ServerCopyFiles | Where-Object { $_.file -eq "game.cfg" }
+    $path = $cfg.path
     $latin1 = [Text.Encoding]::GetEncoding(28591)
-    $original = [IO.File]::ReadAllBytes($path)
+    $original = $cfg.bytes
     $text = $latin1.GetString($original)
     $found = [regex]::Matches($text, '(?m)^[ \t]*time_limit[ \t]*=[ \t]*"?(\d+)"?')
     if ($found.Count -ne 1) {
@@ -914,36 +988,18 @@ function Set-ServerTimeLimit {
     $updated = $text.Substring(0, $digits.Index) + [string] $TimeLimitMinutes +
         $text.Substring($digits.Index + $digits.Length)
     $bytes = $latin1.GetBytes($updated)
-    $sha = [Security.Cryptography.SHA256]::Create()
     $script:ServerGameCfgOverride = [pscustomobject][ordered]@{
         path = $path
         key = "time_limit"
         value = $TimeLimitMinutes
         original_value = [int] $digits.Value
-        original_sha256 = ([BitConverter]::ToString($sha.ComputeHash($original)) -replace '-', '').ToLowerInvariant()
-        effective_sha256 = ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant()
+        original_sha256 = $cfg.sha256
+        effective_sha256 = Get-BytesSha256 $bytes
         restored = $false
     }
-    $script:ServerGameCfgOriginal = $original
+    $cfg.effective_sha256 = $script:ServerGameCfgOverride.effective_sha256
     [IO.File]::WriteAllBytes($path, $bytes)
     Write-Host "PARITY_RUN_NOTE SERVER game.cfg time_limit $($digits.Value) -> $TimeLimitMinutes for this cell"
-}
-
-function Restore-ServerGameCfg {
-    if (-not $script:ServerGameCfgOriginal) { return }
-    foreach ($process in @($script:RetailHostProcess, $script:RetailProcess, $script:OpenNovaHost)) {
-        if ($process) {
-            try { $null = $process.WaitForExit(15000) } catch {}
-        }
-    }
-    $path = $script:ServerGameCfgOverride.path
-    [IO.File]::WriteAllBytes($path, $script:ServerGameCfgOriginal)
-    $restoredHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($restoredHash -ne $script:ServerGameCfgOverride.original_sha256) {
-        throw "SERVER game.cfg restore left $restoredHash, not the cell's original $($script:ServerGameCfgOverride.original_sha256)"
-    }
-    $script:ServerGameCfgOverride.restored = $true
-    $script:ServerGameCfgOriginal = $null
 }
 
 function Wait-UntilSteadyDeadline {
@@ -1806,7 +1862,7 @@ function Start-OpenNovaHostExact {
     $script:OpenNovaHost = & $HostScript `
         -Mission $Mission -Name $HostCallsign -Port $Port -LanMode 1 `
         -MaxPlayers 4 -GameType ([string] $GameType) -ResourceDir $ServerDir `
-        -Expansion $Expansion `
+        -WorkingDir $ServerDir -Expansion $Expansion `
         -LogFile (Join-Path $hostDir "godot.log") `
         -Resolution $Resolution -Windowed -McpPort $HostMcpPort `
         -SkipReadyCheck -PassThru
@@ -1954,6 +2010,7 @@ function Wait-OpenNovaJoinerReady {
 try {
     Write-Host "PARITY_RUN_BEGIN topology=$Topology mission=$Mission game_type=$GameType port=$Port resolution=$Resolution joiner_dial=$JoinerDial run=$RunId"
     Assert-UdpPortUnowned
+    Save-ServerCopyFiles
     if ($TimeLimitMinutes -gt 0) { Set-ServerTimeLimit }
     Start-OnHookMcp
 
@@ -2557,9 +2614,9 @@ finally {
         }
     }
 
-    if ($script:ServerGameCfgOriginal) {
-        try { Restore-ServerGameCfg }
-        catch { Add-CleanupFailure "SERVER game.cfg restore failed: $($_.Exception.Message)" }
+    if ($script:ServerCopyFiles.Count) {
+        try { Restore-ServerCopyFiles }
+        catch { Add-CleanupFailure "SERVER copy restore failed: $($_.Exception.Message)" }
     }
 }
 
@@ -2634,6 +2691,20 @@ $summary = [pscustomobject]@{
     rotation = @($RotationList)
     time_limit_minutes = $TimeLimitMinutes
     server_game_cfg_override = $script:ServerGameCfgOverride
+    # The SERVER copy's mutable files: each one's start hash (game.cfg's is
+    # the case table's pin), whether the cell's processes wrote it, and the
+    # restore of its start bytes.
+    server_copy_files = @($script:ServerCopyFiles | ForEach-Object {
+        [pscustomobject][ordered]@{
+            file = $_.file
+            sha256 = $_.sha256
+            written_during_cell = $_.written_during_cell
+            restored = $_.restored
+        }
+    })
+    # The OpenNova host's working directory (OR, OO): the SERVER copy, as
+    # retail's host runs in its install.
+    opennova_host_working_dir = $(if ($Topology -in @("OR", "OO")) { $ServerDir } else { $null })
     # E3: the late joiner (null without -LateJoiner): its run, capture and
     # client port (the comparator's session selector), ready and final state.
     late_joiner = $script:LateJoinerWitness

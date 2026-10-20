@@ -19,9 +19,10 @@
 #                   one commit), and the pin when given
 #   onhook_mcp      onhook-mcp.exe's hash (the pin when given)
 #   bink_original   both copies hold binkw32_.dll, the original the proxy forwards to
-#   server_cfg      the SERVER game.cfg game_name is the case table's
-#                   host_session_name byte for byte, and every case port lies in
-#                   its mplanserverportmin..max
+#   server_cfg      the SERVER game.cfg is the case table's pin
+#                   (server_game_cfg_sha256: both hosts run in that copy), its
+#                   game_name is the table's host_session_name byte for byte, and
+#                   every case port lies in its mplanserverportmin..max
 #   corpus          items.def and every case mission match the case table's pins
 #   godot_launcher  the Godot 4.6.1 console wrapper and the runtime beside it
 #                   (the pin when given)
@@ -176,10 +177,13 @@ if (Test-Path -LiteralPath $cfgPath -PathType Leaf) {
             [int] $_.port -lt $bounds["mplanserverportmin"] -or [int] $_.port -gt $bounds["mplanserverportmax"]
         } | ForEach-Object { "$($_.id):$($_.port)" })
     }
+    $cfgSha = Get-Sha256OrEmpty $cfgPath
     $cfgOk = $null -ne $gameName -and
         [string]::Equals($gameName, [string] $table.host_session_name, [StringComparison]::Ordinal) -and
-        $bounds.Count -eq 2 -and $outside.Count -eq 0
-    $cfgDetail = ("game_name=" + $(if ($null -ne $gameName) { "'$gameName'" } else { "absent" }) +
+        $bounds.Count -eq 2 -and $outside.Count -eq 0 -and
+        $cfgSha -ceq [string] $table.server_game_cfg_sha256
+    $cfgDetail = ("sha256=$(Format-Hash $cfgSha) pinned=$($table.server_game_cfg_sha256) " +
+        "game_name=" + $(if ($null -ne $gameName) { "'$gameName'" } else { "absent" }) +
         " expected='$($table.host_session_name)'" +
         " ports=$(if ($bounds.Count -eq 2) { "$($bounds['mplanserverportmin'])..$($bounds['mplanserverportmax'])" } else { 'absent' })" +
         " outside=$(if ($outside.Count) { $outside -join ',' } else { '-' })")

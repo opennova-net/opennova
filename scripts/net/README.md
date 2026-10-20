@@ -206,8 +206,8 @@ checks every input the suite binds and prints one `PARITY_PREFLIGHT <check>
 PASS|FAIL <detail>` line each, then `PARITY_PREFLIGHT_STATUS`: both
 `Jointops.exe` the pinned jox01 image; both copies' onHook proxy
 `binkw32.dll` one build, the one beside `onhook-mcp.exe`, with `binkw32_.dll`
-present; the SERVER `game.cfg` `game_name` and port range against the case
-table; the corpus against its pins; the Godot 4.6.1 console wrapper and its
+present; the SERVER `game.cfg` against the case table's pin, and its
+`game_name` and port range against the table; the corpus against its pins; the Godot 4.6.1 console wrapper and its
 runtime; dumpcap and the Npcap loopback adapter; the three judges newer than
 their sources; a clean checkout; both template_debug DLLs in `godot\bin` equal
 to the `gdext_windows_template_debug` artifact of `-DllRunId`, a `ci.yml` run
@@ -280,7 +280,18 @@ window's start in place of the input exercise (a reference is reused only
 when it played the same scenario). The table
 fixes `expansion` (`jox01`), `items_sha256` and `host_session_name`, which must equal the
 SERVER copy's `game.cfg` `game_name` byte for byte (`"Untitled "`, with the
-trailing space).
+trailing space), and `server_game_cfg_sha256`, the SERVER `game.cfg` pin.
+
+Both hosts run in the SERVER copy: retail's `Jointops.exe` in its install, the
+OpenNova host with `--working-dir` on it (`host_opennova.ps1 -WorkingDir`).
+Each reads the copy's `game.cfg` and `player.sav` at its start and writes them
+(and `weapon.sav`, the root's and the expansion's) at its save points; retail
+saves at its exit. Every cell refuses a copy whose `game.cfg` is not the pin
+(`-ServerGameCfgSha256`; the suite passes the table's) and, once every process
+has stopped, writes each of those files' start bytes back (deleting one the cell
+created). The summary's `server_copy_files` records each file's start hash,
+whether the cell's processes wrote it, and the restore; a reference is reused
+only when it started from the pinned `game.cfg`.
 
 The coverage extensions keep their cases in `parity-extension-cases.json`
 (same schema; run with `-CasesPath scripts\net\parity-extension-cases.json`),
@@ -295,8 +306,7 @@ so the default suite is unchanged. An extension case may add:
   it from the SERVER copy's `game.cfg` `time_limit` (retail starts a round
   that is not co-op with `time_limit` x 3720 ticks on its round timer;
   `koth_limit` is the king-of-the-hill hold), so the runner writes it there
-  for the cell and
-  restores the file's exact bytes after every process has stopped. The summary
+  for the cell; the cell's restore (above) takes it back. The summary
   records the write and the restore as `server_game_cfg_override`.
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's
   kind and joins during the steady window, after the first joiner's scripted

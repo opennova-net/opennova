@@ -177,6 +177,12 @@ function Read-ParityCases {
             [string] $table.items_sha256 -notmatch '^[0-9a-f]{64}$') {
         throw "$Path pins no items_sha256"
     }
+    # The SERVER copy's game.cfg is pinned too: both hosts run in that copy and
+    # read it; every cell checks it at its start and restores it at its end.
+    if (-not ($table.PSObject.Properties.Name -contains "server_game_cfg_sha256") -or
+            [string] $table.server_game_cfg_sha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "$Path pins no server_game_cfg_sha256"
+    }
     $ids = @{}
     foreach ($case in @($table.cases)) {
         foreach ($field in @("id", "mission", "mission_sha256", "game_type", "port", "readiness",
@@ -268,7 +274,8 @@ function Get-CellArguments {
         "-OnHookMcpPath", $OnHookMcpPath,
         "-GodotLauncher", $GodotLauncher,
         "-HostMcpPort", [string] $HostMcpPort,
-        "-JoinerMcpPort", [string] $JoinerMcpPort
+        "-JoinerMcpPort", [string] $JoinerMcpPort,
+        "-ServerGameCfgSha256", [string] $Table.server_game_cfg_sha256
     )
     if ($Resolution) { $arguments += @("-Resolution", $Resolution) }
     if ([bool] $Case.auto_deploy) { $arguments += "-AutoDeploy" }
@@ -364,6 +371,12 @@ function Get-ReferenceMismatches {
     }
     if ($fields -contains "retail_stock_observer" -and -not [bool] $Summary.retail_stock_observer) {
         $reasons.Add("the retail roles ran without StockObserver")
+    }
+    $recordedCfg = if ($fields -contains "server_copy_files") {
+        [string] (@($Summary.server_copy_files) | Where-Object { $_.file -eq "game.cfg" } | Select-Object -First 1).sha256
+    } else { "" }
+    if ($recordedCfg -cne [string] $script:Table.server_game_cfg_sha256) {
+        $reasons.Add("SERVER game.cfg '$recordedCfg' is not the pinned $($script:Table.server_game_cfg_sha256)")
     }
     $wantScenario = if ($Case.PSObject.Properties.Name -contains "scenario") {
         [string] (Get-Content -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $Case.scenario)) -Raw |
