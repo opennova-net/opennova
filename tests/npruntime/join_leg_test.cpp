@@ -9,10 +9,17 @@
 //   - D-NET-504: no S2C 0x16 rides the C2S 0x37 reply or a spawn: retail's one 0x16 serializer
 //     call is the scoreboard clock's [orig: Server_BuildAndBroadcastScoreboard @0x50D960
 //     (@0x50DDE2), called from Server_TickUpdate @0x51D90D].
+//   - D-NET-501: the join's bundle carries the slot's first 0x0A between the 0x42 and the 0x0F,
+//     and the tail's cease-fire line and round-over legs [orig: Server_OnPlayerJoin @0x51A680 -
+//     0x42 @0x51A81F, Server_SendEntityStateToPlayer @0x51A82D, 0x0F @0x51A869, 0x4D @0x51A97A,
+//     0x61 @0x51A982, 0x14 @0x51A9F3, the round-over legs @0x51A9F8..0x51AA5C, 0x3E @0x51AAEE];
+//   - D-NET-NEW-L1-7: the producer waits while the round is over [orig:
+//     Server_SendInitialGameStateToPlayer @0x51BBA3..0x51BBA9, @0x51BEFF..0x51BF05].
 
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/udp_session_transport.h>
 
 #include "host_test_setup.h"
@@ -26,6 +33,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -127,6 +135,28 @@ struct JoinFixture {
 				world.get(), inputs))
 			tags.push_back(m.tag);
 		return tags;
+	}
+
+	// Drives the added joiner through its C2S 0x09 and 0x0A legs to slot state 5, draining
+	// everything the producer sent on the way.
+	bool drive_to_await_join() {
+		(void)send(opennova::c2s::CHECKSUM_RESPONSE);
+		for (int i = 0; i < 64 && joiner().slot_state != inmatch::PlayerSlotState::AwaitWorldRequest; ++i)
+			(void)pump();
+		(void)send(opennova::c2s::SPAWN_MENU_REQUEST);
+		for (int i = 0; i < 256 && joiner().slot_state != inmatch::PlayerSlotState::AwaitJoin; ++i)
+			(void)pump();
+		(void)drain(joiner_transport);
+		return joiner().slot_state == inmatch::PlayerSlotState::AwaitJoin;
+	}
+
+	// The joiner's C2S 0x0B; returns the datagrams its transport took.
+	std::vector<ns::Datagram> join() {
+		(void)send(opennova::c2s::MISSION_FILE_STATUS, {0x00});
+		std::vector<ns::Datagram> out;
+		ns::Datagram d;
+		while (joiner_transport.pop_outbound(d)) out.push_back(d);
+		return out;
 	}
 };
 
@@ -285,6 +315,113 @@ bool run_join_places_the_hidden_body() {
 	              "the 0x0F carries the join's placement");
 }
 
+std::vector<uint8_t> tags_of(const std::vector<ns::Datagram> &datagrams) {
+	std::vector<uint8_t> tags;
+	for (const ns::Datagram &d : datagrams) tags.push_back(d.tag);
+	return tags;
+}
+
+// D-NET-501: the join's game-start bundle, in retail's order: the 0x42, the slot's first 0x0A
+// (in session), the 0x0F, the 0x4D, the 0x61 seed and the 0x3E; no restriction word set, no
+// cease fire, the round running.
+bool run_join_bundle_carries_the_first_entity_state() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	if (!expect(f.drive_to_await_join(), "the world stream parks the slot in state 5"))
+		return false;
+	const std::vector<ns::Datagram> bundle = f.join();
+	const std::vector<uint8_t> want = {
+			opennova::s2c::CHARATTR_DISABLED_PROPERTIES, opennova::s2c::PER_FRAME_UPDATE,
+			opennova::s2c::WORLD_STATE_LOAD, opennova::s2c::SPAWN_SLOT_NOTICE,
+			opennova::s2c::TICK_SEED, opennova::s2c::MAP_OVERLAY_RESET};
+	if (!expect(tags_of(bundle) == want,
+	            "the bundle is 0x42, 0x0A, 0x0F, 0x4D, 0x61, 0x3E")) return false;
+	if (!expect(!bundle[1].reliable && !bundle[1].body.empty(),
+	            "the join's 0x0A is the unreliable per-frame update")) return false;
+	if (!expect(f.joiner().slot_state == inmatch::PlayerSlotState::Joined &&
+	                    f.joiner().burst.game_state == 10,
+	            "the join leaves slot state 6 and game state 10")) return false;
+	// The tick's own 0x0A follows the tail at the slot's next fan.
+	f.joiner().s2c_send_boundary_open = true;
+	inmatch::Server_TickUpdate(*f.ctx);
+	const std::vector<uint8_t> next = JoinFixture::drain(f.joiner_transport);
+	return expect(contains(next, opennova::s2c::PER_FRAME_UPDATE),
+	              "the server tick's 0x0A follows the bundle");
+}
+
+// FOUND-6: a cease fire in effect adds one reliable chat line after the seed, channel 0,
+// sender slot 0xFF [orig: Server_OnPlayerJoin @0x51A998..0x51A9F3].
+bool run_join_tells_the_cease_fire() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	if (!expect(f.drive_to_await_join(), "the world stream parks the slot in state 5"))
+		return false;
+	f.world->rules.cease_fire = true;
+	const std::vector<ns::Datagram> bundle = f.join();
+	const std::vector<uint8_t> tags = tags_of(bundle);
+	if (!expect(tags.size() == 7 && tags[4] == opennova::s2c::TICK_SEED &&
+	                    tags[5] == opennova::s2c::CHAT_BROADCAST &&
+	                    tags[6] == opennova::s2c::MAP_OVERLAY_RESET,
+	            "the cease-fire 0x14 sits between the 0x61 and the 0x3E")) return false;
+	const std::string text = "* * * CEASE FIRE IS IN EFFECT! * * *";
+	std::vector<uint8_t> want = {0x00, 0xFF};
+	want.insert(want.end(), text.begin(), text.end());
+	want.push_back(0x00);
+	return expect(bundle[5].body == want && bundle[5].reliable,
+	              "the line is [channel 0][sender 0xFF][text], reliable");
+}
+
+// FOUND-6: a join into a finished round takes the round end's legs after its seed: the zero
+// 0x61, this slot's 0x1D, game state 11 and slot state 7 [orig: Server_OnPlayerJoin
+// @0x51A9F8..0x51AA5C].
+bool run_join_into_a_finished_round() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	if (!expect(f.drive_to_await_join(), "the world stream parks the slot in state 5"))
+		return false;
+	f.world->process_round_end(1);
+	if (!expect(f.world->match.outcome().ended, "the round ended")) return false;
+	const std::vector<ns::Datagram> bundle = f.join();
+	const std::vector<uint8_t> tags = tags_of(bundle);
+	const std::vector<uint8_t> want = {
+			opennova::s2c::CHARATTR_DISABLED_PROPERTIES, opennova::s2c::PER_FRAME_UPDATE,
+			opennova::s2c::WORLD_STATE_LOAD, opennova::s2c::SPAWN_SLOT_NOTICE,
+			opennova::s2c::TICK_SEED, opennova::s2c::TICK_SEED, opennova::s2c::END_ROUND_HEADER,
+			opennova::s2c::MAP_OVERLAY_RESET};
+	if (!expect(tags == want, "the round-over legs follow the seed, ahead of the 0x3E"))
+		return false;
+	if (!expect(bundle[4].body != std::vector<uint8_t>(4, 0) &&
+	                    bundle[5].body == std::vector<uint8_t>(4, 0),
+	            "the join's seed, then the zero seed")) return false;
+	const inmatch::NapiNPConnection &j = f.joiner();
+	return expect(j.slot_state == inmatch::PlayerSlotState::RoundOver &&
+	                      j.burst.game_state == 11 && !j.link.round_watermark_armed &&
+	                      j.tick_seed == 0,
+	              "slot state 7, game state 11, the watermark and the seed cleared");
+}
+
+// D-NET-NEW-L1-7: once the round is over the producer sends nothing and holds the track
+// where it stood [orig: Server_SendInitialGameStateToPlayer @0x51BBA3..0x51BBA9,
+// @0x51BEFF..0x51BF05].
+bool run_track_waits_while_the_round_is_over() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	inmatch::NapiNPConnection &j = f.joiner();
+	(void)f.send(opennova::c2s::CHECKSUM_RESPONSE);
+	f.world->process_round_end(1);
+	for (int i = 0; i < 16; ++i) {
+		if (!expect(f.pump().empty(), "no player-sync record after the round end")) return false;
+	}
+	return expect(j.slot_state == inmatch::PlayerSlotState::PlayerSync &&
+	                      j.burst.player_sync_subphase <
+	                              inmatch::InitialStateBurst::kSyncMissionMapNames + 1,
+	              "the track holds where it stood");
+}
+
 } // namespace
 
 int main() {
@@ -293,6 +430,10 @@ int main() {
 	if (!run_no_player_list_off_the_scoreboard_clock()) ++failures;
 	if (!run_one_step_per_boundary()) ++failures;
 	if (!run_join_places_the_hidden_body()) ++failures;
+	if (!run_join_bundle_carries_the_first_entity_state()) ++failures;
+	if (!run_join_tells_the_cease_fire()) ++failures;
+	if (!run_join_into_a_finished_round()) ++failures;
+	if (!run_track_waits_while_the_round_is_over()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

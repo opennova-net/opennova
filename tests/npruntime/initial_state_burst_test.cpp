@@ -220,13 +220,14 @@ int main_impl() {
 	// 0x11 (matches the retail-lan-host-join golden frames 144-160). World-stream streams EVERY pool in
 	// full (paged ~640 B/datagram): 0x10 pool-2, 0x0D pool-1, 0x0C pool-0, 0x20 pool-3, then the
 	// mission-text 0x7E and 0x1A. Then
-	// the GAME-START BUNDLE 0x42 / 0x0F / 0x4D / 0x61 / 0x3E (the deploy unsticker — clears the joiner's
-	// load-gate; matches golden frames 318-319). (0x45 terrain remains absent.) In THIS
+	// the GAME-START BUNDLE 0x42 / 0x0A / 0x0F / 0x4D / 0x61 / 0x3E (the deploy unsticker — clears the
+	// joiner's load-gate; matches golden frames 318-319; the in-session 0x0A is the slot's first,
+	// D-NET-501 [orig: Server_OnPlayerJoin @0x51A82D]). (0x45 terrain remains absent.) In THIS
 	// minimal World pool-1 is empty (header-only 0x0D page); pool-2 carries one building so the
 	// 0x10 page also pins the D-NET-147 fields.
 	const std::vector<uint8_t> want_order = {0x2C, 0x08, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A,
 	                                         0x1C, 0x0B, 0x66, 0x76, 0x11, 0x10, 0x0D, 0x0C, 0x20, 0x7E, 0x1A,
-	                                         0x42, 0x0F, 0x4D, 0x61, 0x3E};
+	                                         0x42, 0x0A, 0x0F, 0x4D, 0x61, 0x3E};
 	std::vector<uint8_t> got_order;
 	for (auto &m : emitted) got_order.push_back(m.tag);
 	if (!expect(got_order == want_order, "emitted tag order matches §5.2a (full player-sync + world-stream)")) {

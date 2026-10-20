@@ -1,7 +1,9 @@
 #include <runtime/inmatch/server_initial_state.h>
 
 #include <runtime/inmatch/batch_chunker.h> // inmatch::slice_batch_pages (the shared byte-budget pager, ADR 0013)
+#include <runtime/inmatch/end_round_protocol.h> // build_end_round_header (a join into a finished round)
 #include <runtime/inmatch/server_dispatch_join.h> // dispatch_player_sync_request (the loopback's own 0x09)
+#include <runtime/inmatch/server_entity_state.h> // Server_SendEntityStateToPlayer (the join's 0x0A)
 #include <runtime/inmatch/server_flags.h> // the flag word's named bits
 #include <runtime/inmatch/server_tick.h> // Server_RerollPlayerTickSeed
 #include <runtime/inmatch/server_visible_players.h> // fan_spawn_slot_notice
@@ -748,10 +750,10 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 
 	// The tail: the deploy unsticker. Without it a retail joiner world-loads but stays
 	// undeployed (floods C2S 0x0F, "stuck at 7%"). 0x41 per charattr restriction, 0x42 the
-	// charattr latches, 0x0F world-state-load (clears the client's g_ClientDeployHold
-	// load-gate and queues its deploy burst), 0x4D player-index, 0x61 session-key/seed, 0x3E
-	// terminator. [§5.29 / §5.43 / D-NET-114]
-	std::vector<uint8_t> wsl = serialize_world_state_load(ctx, conn, now_tick);
+	// charattr latches, in session the slot's first 0x0A, 0x0F world-state-load (clears the
+	// client's g_ClientDeployHold load-gate and queues its deploy burst), 0x4D player-index,
+	// 0x61 session-key/seed, the cease-fire line and the round-over legs when they apply,
+	// 0x3E terminator. [§5.29 / §5.43 / D-NET-114]
 	// Each set restriction word, one 0x41 of the property it disables, to this slot alone
 	// (D-NET-374). [orig: Server_OnPlayerJoin @0x51a7e2 -> Server_SendCharAttrRestrictionsToPlayer
 	//  @0x509950: g_SessionNoCharAbilities -> 0 @0x5099b4, g_SessionNoWeaponRecoil -> 5 @0x5099eb,
@@ -770,12 +772,30 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	const uint16_t latches = world.tables.charattr_disabled_word;
 	out.push_back(InitialStateMessage{s2c::CHARATTR_DISABLED_PROPERTIES,
 			{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)}, /*reliable=*/false});
-	out.push_back(InitialStateMessage{0x0F, std::move(wsl)}); // world-state-load (§5.29)
+	// In session the slot's entity state goes out now, ahead of the 0x0F, so the joiner reads
+	// one 0x0A before its world-state load and the server tick's next after the tail
+	// (D-NET-501). The slot is in state 6 already; the frame reads the body as the join
+	// placed it, before the 620 below.
+	// [orig: Server_OnPlayerJoin @0x51A82A..0x51A82D -> Server_SendEntityStateToPlayer
+	//  @0x517BA0 (the state-6 gate @0x517BD6, sent 0x0A msgClass 0 userParam 1 @0x517CB5)]
+	if (ctx.is_in_session) {
+		std::vector<uint8_t> frame;
+		if (Server_SendEntityStateToPlayer(ctx, world, conn, frame))
+			out.push_back(InitialStateMessage{s2c::PER_FRAME_UPDATE, std::move(frame),
+					/*reliable=*/false});
+	}
+	// [orig: Server_OnPlayerJoin @0x51A864 -> NetPacket_WriteWorldStateLoad0x0F @0x502D10,
+	//  sent @0x51A869]
+	out.push_back(InitialStateMessage{0x0F, serialize_world_state_load(ctx, conn, now_tick)});
 	// Every joined body starts under the 620-tick spawn protection, stored after the 0x0F
 	// (a bot slot +96483 stores 0; our roster has none): the per-tick arm counts it down in a
 	// live MP session and holds a spectator at -1 (D-NET-217).
 	// [orig: Server_OnPlayerJoin @0x51A86E..0x51A882 (620 @0x51A882, the bot's 0 @0x51A878)]
 	if (body != nullptr) body->damage_state = 620;
+	// The join's other slot words have no reader to port: +89940 = 0 (@0x51A896) is read only
+	// by Server_SendEntityOverlayState @0x50FF60, which nothing calls; +96488 = the 0x0B's
+	// client version (@0x51A951) is never read; +97540 (cleared @0x51A98A..0x51A992) is read
+	// by that test alone.
 	// The join notice: this slot's copy rides the bundle, every other in-game client gets
 	// the same byte now and re-requests its visible-players snapshot. [orig: Server_OnPlayerJoin
 	//  @0x51a93f..0x51a97a (send_mask 0x80) -> NapiNPClientMsg_HandleSpawnSlot @0x4317B0]
@@ -789,6 +809,51 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// [orig: Server_SendRandomSeedToPlayer @0x5101a0 - value @0x5101d4
 	//  ((rand() & 0xFE) + 1) << 16; join sender @0x51a982]
 	out.push_back(InitialStateMessage{0x61, Server_RerollPlayerTickSeed(conn)});
+	// A cease fire in effect tells the joiner so: one reliable chat line, channel 0, sender
+	// slot 0xFF.
+	// [orig: Server_OnPlayerJoin @0x51A998..0x51A9F3 - `cmp g_InCeaseFire` @0x51A998, the text
+	//  @0x51A9A7, NetPacket_WriteTwoBytesAndCString(.., 0xFF, 0, ..) @0x51A9B9..0x51A9D6, sent
+	//  0x14 msgClass 1 userParam 0 @0x51A9F3]
+	if (world.rules.cease_fire) {
+		ChatBroadcast cease_fire;
+		cease_fire.channel = 0;
+		cease_fire.sender_slot = 0xFF;
+		cease_fire.text = "* * * CEASE FIRE IS IN EFFECT! * * *";
+		out.push_back(InitialStateMessage{s2c::CHAT_BROADCAST, encode_chat_broadcast(cease_fire)});
+	}
+	// A join into a finished round (g_SpawnSuccessGate, our match outcome's `ended`) takes the
+	// round end's own legs: the zero 0x61 disarming the seed just sent, this slot's 0x1D
+	// header, game state 11 and slot state 7, the round-event watermark zeroed on leaving
+	// state 6 (the join just entered it).
+	// [orig: Server_OnPlayerJoin @0x51A9F8..0x51AA5C - `cmp g_SpawnSuccessGate` @0x51A9F8,
+	//  Server_SendRandomSeedToPlayer(slot, 0) @0x51AA02, EndRoundScoreboard_SerializeHeader
+	//  @0x51AA1E sent 0x1D @0x51AA3B, CNetPlayer_SetGameState(.., 11) @0x51AA44, +97544 = 0
+	//  @0x51AA56, slot state 7 @0x51AA5C; the header's form pick
+	//  EndRoundScoreboard_SerializeHeader @0x5052a6]
+	if (world.match.outcome().ended) {
+		out.push_back(InitialStateMessage{
+				s2c::TICK_SEED, Server_DisarmPlayerTickSeed(conn, world.logic_tick)});
+		const world::MatchResult &result = world.match.result();
+		const bool non_team_header =
+				world.rules.mp_session && (result.game_type & 0x10000u) == 0;
+		out.push_back(InitialStateMessage{s2c::END_ROUND_HEADER,
+				encode_end_round_header(
+						build_end_round_header(result, static_cast<uint8_t>(st.player_slot),
+								non_team_header),
+						non_team_header)});
+		conn.burst.game_state = 11;
+		if (conn.slot_state != PlayerSlotState::RoundOver) {
+			if (conn.slot_state == PlayerSlotState::Joined) {
+				conn.link.round_watermark = 0;
+				conn.link.round_watermark_armed = false;
+			}
+			conn.slot_state = PlayerSlotState::RoundOver;
+		}
+	}
+	// The NovaWorld minutes-left line (Client/STRCLI02 over the net player's +0x48, behind its
+	// byte +0x4C) has no setter in JO: NapiNPPlayer_Create zeroes the byte (@0x4C79CC) and
+	// this join clears it (@0x51AAC9), so the leg never sends. [orig: Server_OnPlayerJoin
+	//  @0x51AA64..0x51AAC9]
 	// The last of the tail: the joiner clears its map-overlay banks
 	// [orig: Server_OnPlayerJoin @0x51aaee -> NapiNPClientMsg_0x03E @0x4226D0].
 	out.push_back(InitialStateMessage{s2c::MAP_OVERLAY_RESET, {}});
@@ -808,6 +873,17 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 
 	// Eligible only once the connection's pool-0 entity exists (PlayerAdded) and the World is wired.
 	if (ctx.world == nullptr) return step;            // P2 unit-test path: no-op (keep-green lever)
+	// The producer runs only while the mission runs: g_MissionRunning is 0 from the mission
+	// load's start until its end and again from the round end (ours: no World yet, or the
+	// match outcome latched), and both tracks also wait while the round-over flag is up
+	// (g_SpawnSuccessGate, the same latch here). A joiner arriving in the post-round linger
+	// so waits for the map change, its track where it stood. (D-NET-NEW-L1-7)
+	// [orig: Server_SendInitialGameStateToPlayer @0x51BBA0 - `cmp g_MissionRunning, ebx; jz`
+	//  @0x51BBA3..0x51BBA9; `cmp g_SpawnSuccessGate, ebx; jnz` @0x51BBE8..0x51BBEE (world
+	//  track) / @0x51BEFF..0x51BF05 (player-sync track); Game_SetMissionRunning(0)
+	//  @0x5245E3 and (1) @0x525D58 in Game_StartMission; the round end's clear
+	//  Server_ProcessRoundEnd @0x5164FC]
+	if (ctx.world->match.outcome().ended) return step;
 	if (conn.phase < ConnectionPhase::PlayerAdded) return step;
 	if (conn.burst.spawned) return step;              // already complete
 
