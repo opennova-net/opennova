@@ -1208,6 +1208,11 @@ void test_vehicle_impact_role_and_momentum_edge() {
 		other.has_item_def = true;
 		other.has_graphic_model = true;
 		other.item_attrib = 0x40;
+		// The def's own +0x908 word, which the traits sweep stamps for every def:
+		// the contact wake compares it, not the traits table, so an equal hull is
+		// pushed rather than woken. [orig: Entity_CheckCollisionState
+		// @0x462E94..0x462EA4, the radius leg @0x462ED6..0x462EE3]
+		other.def_mass = t.mass;
 		other.position = { 150.0f, 200.0f, 10.0f };
 		other.yaw = 90;
 		other.bound_radius = 3.0f;
