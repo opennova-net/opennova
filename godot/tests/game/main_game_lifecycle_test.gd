@@ -466,6 +466,11 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	assert_true(host.enable_host_listen(0))
 	var streamed_til := TilFixture.bytes_for_cell(4)
 	host.set_terrain_til_data(streamed_til)
+	# A retail host always holds its items table: the S2C 0x0C streams a pool-0
+	# body (here the host's own player) only with an ItemTypeIndex, a def and an
+	# AI slot (D-NET-487), and the "Null" row leads as in the shipped table.
+	host.resolve_item_traits(ItemDbFixture.load_with(self, "lifecycle_host_items.def",
+			ItemDbFixture.NULL_ROW, ItemDbFixture.fixture_text(self)))
 	assert_true(host.load_from_mission_data(mission))
 
 	var observed := {"local_load": false, "held": false, "held_progress": -1}
