@@ -213,8 +213,16 @@ static int test_rows_as_before() {
 		// reference the game loads on without is a warning, the fixture items' graphic and husk models among them
 		// (the same rows gave ee46e4c2). S26 (the writers write their models alone, #1098): the menus' parse notes
 		// what a save leaves out (an ITEM's VALUE 0, a default FLAGS word, a MARQUEE_WND's ORIENTATION and STRING),
-		// nine menu.ignored_input (the 377 rows before them gave dcf0da91).
-		{ "fixtures", fixture_files, false, 386, 0x745d680f80fbcc07ull },
+		// nine menu.ignored_input (the 377 rows before them gave dcf0da91). The retail-free program's variant fixtures
+		// (fixtures/def, rtxt, mnu, threedi/synth and anim, minted once for each form the shipped files take) add the
+		// findings those forms make in a project of the fixtures alone: the models, fonts, string tables, menus and
+		// shaders they name that the project lacks (reference.missing), the input the menus' and tables' readers
+		// leave out (menu.ignored_input, animation_map.ignored_input), a table's repeated key (strings.key_duplicate)
+		// and a material no strip draws (model.material_unused); weapon.def defines the items' weapons (four
+		// reference.missing go) and shipped_forms.mnu names %TRIM_COLOR% (style.unused goes); the mnu reader notes a
+		// first ORIENTATION other than HORIZONTAL (all_widgets.mnu's VolumeBar, one menu.ignored_input; the 386
+		// rows before them gave 745d680f).
+		{ "fixtures", fixture_files, false, 702, 0x5b4e0791d1c03f93ull },
 		// S26: the stylesheet is the list the game reads (its earlier DUP inert no more: the list holds DUP once, its last
 		// value), and what a save does not write of it one style.ignored_input (the 15 rows before gave e39ad421).
 		{ "styles", style_files, false, 15, 0xec187e567b03a96aull },

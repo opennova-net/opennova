@@ -72,7 +72,7 @@ const Vector kExpected[] = {
 		{"rig19_sprs.bad", 4800u, 0x915e727be10f6145ull},
 		{"rig19_twist.bad", 3672u, 0xe031ef3aaf159d7cull},
 		{"rig19_v0.bad", 3332u, 0x1287915a43f691e0ull},
-		{"rig19_walk.bad", 13592u, 0x8bec0f99729b75f9ull},
+		{"rig19_walk.bad", 13592u, 0xc1a65213c77f5630ull}, // its end pose holds no footstep (minimal_bad_gen)
 		{"soldier.adm", 207u, 0x04b6f61fef708d81ull},
 		{"vm40.adm", 276u, 0x1188df81b1b43874ull},
 		{"vm40_b3lp.bad", 13688u, 0x597ee5bfc55368f5ull},
