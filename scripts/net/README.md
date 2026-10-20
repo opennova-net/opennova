@@ -25,6 +25,8 @@ does not hash-bind binaries, retail trees or a corpus.
 | `run_parity_topology.ps1` | Run one explicitly configured live topology, optionally playing a scenario (`-Scenario`). |
 | `run_parity_suite.ps1` | Run every case of `parity-cases.json` as RR, RR-aa, RO, OR and OO cells (resumable), then judge each case with `opennova-parity`. |
 | `parity_preflight.ps1` | Read-only check of everything a suite binds (retail copies, hook pair, `game.cfg`, corpus pins, Godot, capture, judges, the CI GDExtension, ports); run it before a suite. |
+| `diff_verdicts.py` | Compare two suites' verdicts row by row (FIXED, REGRESSED, PERSISTS, NEW, GONE, SKIP-CHANGE), with the widening report, the D-NET attribution and the minting queue. |
+| `parity-attribution.json` | The verdict-row to D-NET attribution table (`opennova.parity-attribution.v1`), transcribed from `docs/net/lan-parity-verdict.md`. |
 | `parity-cases.json` | The tracked parity case table (`opennova.parity-cases.v1`). |
 | `compare_scenario.py` | Check scenario runs against their expectations and against the RR reference. |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
@@ -276,6 +278,38 @@ A case (`parity-cases.json`, `opennova.parity-cases.v1`) gives `id`,
 fixes `expansion` (`jox01`), `items_sha256` and `host_session_name`, which must equal the
 SERVER copy's `game.cfg` `game_name` byte for byte (`"Untitled "`, with the
 trailing space).
+
+### Comparing two suites
+
+`diff_verdicts.py` (standard library only) compares two suites' verdict
+directories (`.scratch\parity-suites\<prefix>\` or its evidence copy) row by
+row, each row keyed by case, topology, direction, metric and key, within the
+cases both suites judged:
+
+```powershell
+python scripts\net\diff_verdicts.py --old <old suite dir> --new <new suite dir> `
+    --out <triage dir> --attribution scripts\net\parity-attribution.json `
+    [--fixed D-NET-505,D-NET-520] [--lanes <lane table>]
+```
+
+A row is FIXED (failed, now passes), REGRESSED (passed, now fails), PERSISTS
+(fails in both; the distance delta is reported), NEW (fails, absent before),
+GONE (failed, now absent) or SKIP-CHANGE (skip or short on one side). The
+widening report lists every A/A row widened in either suite with its floor,
+both A/A distances and each new subject row's distance, flagging a subject
+that passes only on the widened threshold, and counts the keys widened per
+case. `--attribution` labels each failing or fixed row with the D-NET rows
+whose entries match it (`parity-attribution.json`: topologies, direction,
+metric and key patterns, cases; each entry's `basis` says whether it is a
+Findings row, a consequence the record lists, the record's 03TR / CP04
+attribution by metric, or an inferred mechanical consequence); a failing row
+nothing matches joins the minting queue. `--fixed` checks rows claimed fixed:
+the earlier failing rows attributed to each, and which still fail. Every
+failing row is written as a triage line (case, topology, direction, metric,
+key, code, distance / floor / A/A / threshold, subject, RR, class,
+attribution, lane, capture references, note) into `verdict-diff.md`, with
+`verdict-diff.json` beside it; stdout carries `VERDICT_DIFF` lines and
+`VERDICT_DIFF_REPORT`.
 
 ## Scenario parity (ADR 0050 R5)
 

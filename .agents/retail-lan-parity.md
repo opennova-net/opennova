@@ -165,6 +165,22 @@ and instance IDs and stop them with `onhook_stop_run`. Prefer the repository top
 comparing all four paths because it applies the same capture, readiness, and
 artifact layout to each cell.
 
+## Before and after a suite
+
+Run `scripts/net/parity_preflight.ps1` first (read-only): the retail copies,
+the hook pair, the SERVER `game.cfg`, the pinned corpus, Godot, capture, the
+judges, the CI GDExtension of `-DllRunId` and the ports, one PASS / FAIL line
+each. The OpenNova cells run the CI `gdext_windows_template_debug` build of a
+commit whose `engine/` and `godot/` trees equal the checkout's, never a local
+one. `run_parity_suite.ps1 -ReferencePrefix <prefix>` reuses an earlier
+suite's RR and RR-aa cells while the retail identity and hook configs match.
+After a suite, `scripts/net/diff_verdicts.py` compares its verdicts with an
+earlier suite's, labels each failing row with its D-NET row
+(`scripts/net/parity-attribution.json`) and queues the unlabelled ones for
+minting (`scripts/net/README.md`, "Comparing two suites"). Copy the run roots
+and the suite directory into the machine-local evidence store after every
+suite; they never enter Git.
+
 ## Acceptance
 
 - The same case inputs were used for all four topologies.
