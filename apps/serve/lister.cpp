@@ -169,7 +169,15 @@ Lister::~Lister() {
 bool Lister::start() {
 	if (!source_.start(exit_code_))
 		return false;
-	gate_udp_ = net::ScopedSocket(net::udp_bind(0, &gate_port_));
+	// The gate worker's socket binds on every interface over the block's mpgateserverlocalport
+	// quad, the first free port of its scan (D-NET-NEW-L9-5); the session socket is the host's.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE7D2 (the bind address 0), @0x4CE7DE..0x4CE810
+	//  (the quad into the context); CNapiGateManager_CreateAndBindSocket @0x633770 - the address
+	//  and the quad into the bind @0x6337D4..0x633824, NapiUdpSocket_CreateAndBind @0x633830]
+	for (const uint16_t port : options_.gate_ports) {
+		gate_udp_ = net::ScopedSocket(net::udp_bind(port, &gate_port_, 0));
+		if (gate_udp_.is_valid()) break;
+	}
 	if (shared_session_socket_ == nullptr) session_udp_ = net::ScopedSocket(net::udp_bind(0));
 	if (!gate_udp_.is_valid() || (shared_session_socket_ == nullptr && !session_udp_.is_valid())) {
 		io::logf(LogLevel::kError, "[net] cannot bind the UDP sockets");

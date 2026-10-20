@@ -13,7 +13,9 @@
 #include <net/novaworld/nwu_host_role.h>
 #include <net/novaworld/nwu_lobby_session.h>
 #include <runtime/inmatch/server_files.h> // ServerLogs, server_logs_inout_line
+#include <formats/gamecfg/game_cfg.h> // gamecfg::defaults (the shipped gate quad)
 #include <net/npwire/idatagram_socket.h>
+#include <runtime/inmatch/host_config.h> // inmatch::gate_bind_ports (the gate socket's scan)
 #include <runtime/inmatch/punt_log.h> // inmatch::ConnectLog (the gate and connect lines)
 
 #include <cstdint>
@@ -43,6 +45,10 @@ struct ListerOptions {
 	// The process's log devices, whose `/INOUT` switch takes the session's stop-hosting line
 	// (inmatch::server_logs_inout_line; null: none). It outlives the lister.
 	const inmatch::ServerLogs *server_logs = nullptr;
+	// The gate socket's bind scan, in order, on every interface: the process block's
+	// mpgateserverlocalport quad (inmatch::gate_bind_ports; the server passes its game.cfg's),
+	// the shipped block's when the embedder has none.
+	std::vector<uint16_t> gate_ports = inmatch::gate_bind_ports(gamecfg::defaults());
 };
 
 // opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account
@@ -82,6 +88,8 @@ public:
 	void publish_server_info();
 
 	int exit_code() const { return exit_code_; }
+	// The gate socket's bound port (0 before start): the probe's source port.
+	uint16_t gate_port() const { return gate_port_; }
 	bool hosting() const { return role_.is_hosting(); }
 	bool finished() const { return phase_ == Phase::Done; }
 	// The session and its host leg, for the source behind a live server (the GSID, the join

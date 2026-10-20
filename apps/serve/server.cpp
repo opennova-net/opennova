@@ -787,6 +787,7 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	lister_options.connect_log = &log_devices_.connect();
 	server_logs_ = log_devices_.logs();
 	lister_options.server_logs = &server_logs_;
+	lister_options.gate_ports = inmatch::gate_bind_ports(config_.cfg());
 	last_lister_exit_ = -1;
 	lister_ = std::make_unique<Lister>(lister_options, *listing_, &demux_->session());
 	const NwuLobbySession &lobby = lister_->lobby();

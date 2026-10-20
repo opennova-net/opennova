@@ -5239,6 +5239,12 @@ add_executable(npruntime_ticket_probe_timing_test npruntime/ticket_probe_timing_
 target_link_libraries(npruntime_ticket_probe_timing_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_ticket_probe_timing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_ticket_probe_timing COMMAND npruntime_ticket_probe_timing_test)
+# D-NET-NEW-L9-5 (V-L9-s3's F2, the lister's site): opennova-serve's gate socket binds the first free
+# port of the block's mpgateserverlocalport scan on every interface.
+add_executable(opennova_serve_lister_gate_bind_test serve/opennova_serve_lister_gate_bind_test.cpp)
+target_link_libraries(opennova_serve_lister_gate_bind_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_lister_gate_bind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_lister_gate_bind COMMAND opennova_serve_lister_gate_bind_test)
 
 # --- parity lane L9 (NovaWorld) ---
 
