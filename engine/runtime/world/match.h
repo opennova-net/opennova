@@ -611,12 +611,13 @@ class Match {
     std::vector<MatchPlayer> players_;
     std::vector<MatchPlayerPunt> player_punts_;
     // The team records: 70 of them, indexed by the entity's team byte with no bound test, so a
-    // kill bonus of a team 5..69 lands in a record the boards never walk (the serializer of a
-    // player of that team reads it). A team past the table (70..127, and 128..255 sign-extended
-    // before it) is retail's out-of-bounds write, which ours drops.
+    // kill bonus of a team 5..69 lands in a record the boards never walk; the spawn positioning
+    // reads the deaths of its slot team's record (spawn_select.cpp no_pick_pose). A team past
+    // the table (70..127, and 128..255 sign-extended before it) is retail's out-of-bounds write,
+    // which ours drops (D-NET-680, PERMANENT: a deliberate fix of a retail bug).
     // [orig: Game_CountAlivePlayersPerTeam @0x5001D5 (the clear's 0x46 records);
     //  GameEvent_ProcessScoring @0x52F65F..0x52F66C / @0x52F6AB..0x52F6B8 (movsx, imul 154h);
-    //  NetPacket_SerializePlayerSlotToBuffer @0x5068D5..0x5068E2]
+    //  Server_PositionPlayerForSpawn @0x50D1C6..0x50D1DB (movzx of the slot team)]
     // On the heap: the World a test holds on its stack does not grow by the 65 extra records.
     static constexpr size_t kTeamRecordCount = 70;
     std::vector<MatchStats> teams_ = std::vector<MatchStats>(kTeamRecordCount);
