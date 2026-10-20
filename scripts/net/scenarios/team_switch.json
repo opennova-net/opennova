@@ -21,7 +21,7 @@
       {"dir": "S", "kind": "game_event", "type": ["1", "2", "3"], "attacker": "actor", "victim": "0", "aux": "0"},
       {"dir": "S", "kind": "team_assign", "entity": "actor"},
       {"dir": "S", "kind": "entity_death", "entity": "actor"},
-      {"dir": "S", "kind": "game_event"}
+      {"dir": "S", "kind": "game_event", "type": "22", "attacker": "actor", "victim": "0", "aux": "0"}
     ],
     "count_kinds": ["entity_death", "team_assign", "game_event"],
     "mask": {"game_event": ["type"]}

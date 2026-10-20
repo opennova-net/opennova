@@ -79,8 +79,7 @@
       "steady_seconds": 90,
       "exercise_input": false,
       "auto_deploy": true,
-      "scenario": "tdm_frag_respawn.json",
-      "topologies": ["RR", "RR-aa", "RO"]
+      "scenario": "tdm_frag_respawn.json"
     },
     {
       "id": "01tr-coop-aikill",
@@ -92,8 +91,7 @@
       "steady_seconds": 60,
       "exercise_input": false,
       "auto_deploy": true,
-      "scenario": "coop_ai_kill.json",
-      "topologies": ["RR", "RR-aa", "RO"]
+      "scenario": "coop_ai_kill.json"
     },
     {
       "id": "tdh-i3a-tdm-swap",
@@ -119,7 +117,8 @@
       "exercise_input": false,
       "auto_deploy": true,
       "scenario": "permanent_death.json",
-      "permanent_death": true
+      "permanent_death": true,
+      "note": "The retail-side spectator convert stays unexercised: onhook_host_lan zeroes the retail host's spectator quota (g_GameConfigState+0x26C; opennova-int lan_host.c ConfigureLanSession) for the whole session, and the pinned game.cfg holds mpnumspectatorsmax 0 for the OpenNova host. The case pins SPACE sends nothing (no C2S 0x51; the joiner stays dead) on every topology."
     },
     {
       "id": "01tr-coop-revive",

@@ -246,9 +246,10 @@ function Read-ParityScenario {
         }
     }
     # E5's staging: positions the host gives players' slots before the actor
-    # plays (a joiner's own pose would not stick, above). A staged slot takes
-    # a position only: its own client puts its heading back within one frame
-    # (the E5 pose-stick probe), so a scenario declares none.
+    # plays (a joiner's own pose would not stick, above), on every topology
+    # (Invoke-ScenarioStaging). A staged slot takes a position only: its own
+    # client puts its heading back within one frame (the E5 pose-stick
+    # probe), so a scenario declares none.
     if ($spec.PSObject.Properties.Name -contains "staging") {
         $staging = @($spec.staging)
         if ($staging.Count -lt 1) {
@@ -263,9 +264,6 @@ function Read-ParityScenario {
                     @($fields | Where-Object { $_ -notin @("slot", "position_bms") }).Count -gt 0) {
                 throw "Scenario $($spec.name): each staging entry is a slot 0..254 and its position_bms [x, y, z], no heading"
             }
-        }
-        if ($Topology -in @("OR", "OO")) {
-            throw "Scenario $($spec.name) stages players through the host; the OpenNova host has no slot pose yet (RR and RO only)"
         }
     }
     # A typed character or a menu click is onHook's (char: opennova-int #73;
@@ -1400,18 +1398,41 @@ function Write-ScenarioPoseSnapshot {
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Path -Encoding ASCII
 }
 
-# E5: the scenario's staging positions, applied by the retail host to each
-# listed slot (onhook_load_debug_snapshot target_slot, opennova-int #74), in
-# order, before the actor's setup and steps. A position sticks only when it
-# is more than two units from where that player stands: nearer, its own
-# uplink pulls it back; past two units its client snaps to the host's
-# [orig: Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A]. The snapshot
-# format needs an orientation, so the runner writes yaw 0 and pitch 0; the
-# player's own client puts its heading back on the next frame.
+# E5: the scenario's staging positions, given by the host to each listed slot
+# in order, after the prelude and before the actor's setup and steps. A
+# retail host applies them through onhook_load_debug_snapshot target_slot
+# (opennova-int #74); an OpenNova host through the stage_slot probe
+# (godot/probes/net/stage_slot_probe.gd: the authority's three Position words
+# of the body the slot holds, inmatch::stage_slot_position), which answers a
+# result per entry, and a refused entry fails the cell. A position sticks
+# only when it is more than two units from where that player stands: nearer,
+# its own uplink pulls it back; past two units its client snaps to the
+# host's [orig: Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A]. The
+# snapshot format needs an orientation, so the retail leg writes yaw 0 and
+# pitch 0; the player's own client puts its heading back on the next frame.
 function Invoke-ScenarioStaging {
     param([string] $RetailHostInstanceId = "")
     $spec = $script:ScenarioSpec
     if (-not ($spec.PSObject.Properties.Name -contains "staging")) { return $null }
+    if ($Topology -in @("OR", "OO")) {
+        $staging = @(@($spec.staging) | ForEach-Object {
+            @{ slot = [int] $_.slot; position_bms = @($_.position_bms) }
+        })
+        $status = Invoke-GameProbe -Port $HostMcpPort -Name "stage_slot" -Process $script:OpenNovaHost `
+            -TimeoutSeconds 120 -PollMs 500 -Arguments @{ staging = $staging }
+        $data = if ($status.verdict) { $status.verdict.data } else { $null }
+        $entries = @(if ($data -and $data.PSObject.Properties["entries"]) { $data.entries })
+        $refused = @($entries | Where-Object { [string] $_.result -ne "staged" } |
+            ForEach-Object { "entry $($_.index): $($_.result)" })
+        if ([string] $status.state -ne "passed" -or -not [bool] $status.verdict.ok -or
+                $entries.Count -ne $staging.Count -or $refused.Count -gt 0) {
+            $why = if ($refused.Count -gt 0) { $refused -join "; " }
+                elseif ($status.verdict) { [string] $status.verdict.summary }
+                else { [string] $status.error }
+            throw "OpenNova host did not stage scenario $($spec.name): state=$($status.state) $why"
+        }
+        return [pscustomobject]@{ driver = "stage_slot"; logic_tick = $data.logic_tick; entries = $entries }
+    }
     if (-not $RetailHostInstanceId) {
         throw "Scenario staging on $Topology needs the retail host's instance id"
     }
@@ -1429,7 +1450,7 @@ function Invoke-ScenarioStaging {
         })))
         ++$index
     }
-    return $applied.ToArray()
+    return [pscustomobject]@{ driver = "onhook_load_debug_snapshot"; entries = $applied.ToArray() }
 }
 
 function Invoke-ScenarioStage {

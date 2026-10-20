@@ -345,8 +345,9 @@ so the default suite is unchanged. An extension case may add:
   both side bytes of record `player_index` in the SERVER copy's active
   `weapon.sav` (the expansion's), as the PLAYER_INFO dialog does, and the
   cell's restore writes the file back (`server_player_class_override`
-  records it). A retail host only: whether the OpenNova listen host takes its
-  class from that record is unchecked, so OR and OO refuse it.
+  records it). A retail host only: whether the OpenNova listen host's player
+  takes its class from that record is unchecked, so OR and OO refuse it (and
+  `01tr-coop-revive` keeps RR, RR-aa and RO until it is).
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's
   kind and joins during the steady window, after the first joiner's scripted
   input. In RR and OR it is retail (`onhook_join_lan`, callsign `ParityLate`,
@@ -360,6 +361,8 @@ so the default suite is unchanged. An extension case may add:
   `<case>.late.verdict.json`.
 - `topologies`: the cells the case has (default all five; RR and RR-aa always).
   The other cells report `not_applicable` and are not counted as missing.
+- `note`: free text for the reader (what the case cannot exercise and why);
+  nothing reads it.
 
 `01tr-coop-selfnade` is the dying joiner's case: 01TR co-op playing
 `self_nade` (the joiner frags its own feet), with an 80 s steady window over
@@ -371,13 +374,14 @@ standard cases play the input exercise: `tdh-i3a-tdm-hostkill` (the host
 shoots the joiner dead), `tdh-i3a-tdm-fragrespawn` (the joiner's frag kills
 the staged host and itself, then the joiner respawns), `01tr-coop-aikill` (the
 staged joiner shoots a co-op AI), `01tr-coop-drive` (`drive`) and
-`ash-i5a-aas-capture` (`capture_base`). A case whose scenario stages players
-runs RR, RR-aa and RO only, and the suite refuses one that lists OR or OO.
-E5's widening adds three: `tdh-i3a-tdm-swap` (`team_switch`: the joiner
+`ash-i5a-aas-capture` (`capture_base`), each on all five cells: a staged
+scenario's OpenNova host (OR, OO) stages through the `stage_slot` probe
+(below). E5's widening adds three: `tdh-i3a-tdm-swap` (`team_switch`: the joiner
 dies and clicks the death screen's SWAP TEAMS; RR, RR-aa and OR, the click
 being onHook's), `tdh-i3a-tdm-permdeath` (`permanent_death`, with
 `permanent_death`; all five) and `01tr-coop-revive` (`medic_revive`, with
-`host_player_class` 5; RR, RR-aa and RO). A case whose scenario types or
+`host_player_class` 5; RR, RR-aa and RO: the OpenNova host's class from
+`weapon.sav` is unchecked, above). A case whose scenario types or
 clicks (`char`, `click`) keeps that actor retail, and the suite refuses a
 cell where it would be OpenNova's: the `scenario_play` driver plays neither
 yet.
@@ -387,12 +391,15 @@ permanent death sends C2S 0x51 only while the session allows spectators
 (S2C 0x08 bit 13, `CNapiServerConfig_BuildFlags @0x4C4E82`, from the host's
 `mpnumspectatorsmax`), and the convert also needs that quota
 (`Server_ProcessClientRequestSpectatorRespawn @0x51C840`). `onhook_host_lan`
-sets the retail host's quota to 0 for the whole session (a nonzero quota
+sets the retail host's quota (`g_GameConfigState+0x26C`) to 0 for the whole
+session (opennova-int `lan_host.c` `ConfigureLanSession`: a nonzero quota
 sends the host into the menu's player or spectator choice, which a direct
 launch cannot answer), and the pinned `game.cfg` holds 0 for the OpenNova
-host, so `permanent_death` judges the other leg: the dead joiner's SPACE
-sends nothing and the joiner stays dead (`Input_HandleActionBinding` case 12,
-@0x49B024..0x49B03C), which `count_kinds` pins.
+host, so the retail-side spectator convert stays unexercised and
+`permanent_death` judges the other leg on every topology: the dead joiner's
+SPACE sends nothing and the joiner stays dead (`Input_HandleActionBinding`
+case 12, @0x49B024..0x49B03C), which `count_kinds` pins. The case's `note`
+says so.
 
 The summary records `rotation`, `time_limit_minutes`, `late_joiner`,
 `permanent_death` and `host_player_class`, and a reference is reused only for
@@ -457,10 +464,16 @@ A scenario may also list `staging` (E5): `[{"slot": n, "position_bms": [x, y,
 z]}]`, positions the host gives players' slots after the prelude and before
 the actor's setup, so the snap above carries them to the joiner. A retail host
 applies them through `onhook_load_debug_snapshot`'s `target_slot` (an onHook
-pair with `apply_pose_slot`, opennova-int #74); the OpenNova host has no slot
-pose yet, so a staged scenario runs RR and RO. The scenario witness records
-each staging result, and `compare_scenario.py` requires every run to have
-played the same staging. The E5 probe (two TDH RR cells) showed what sticks:
+pair with `apply_pose_slot`, opennova-int #74); an OpenNova host (OR, OO)
+through the `stage_slot` probe on its MCP port (`game_probe stage_slot
+{"staging": [...]}`, `godot/probes/net/stage_slot_probe.gd`), which writes the
+three Position words of the body that slot holds, as `apply_pose_slot` does
+(`inmatch::stage_slot_position`), and answers one result per entry. An entry
+the OpenNova host refuses (an empty slot, a player with no body, a position
+outside the fixed-point range) fails the cell. The scenario witness records
+the driver and each entry's result, and `compare_scenario.py` requires every
+run to have played the same staging. The E5 probe (two TDH RR cells) showed
+what sticks:
 
 - a position more than two units from where that player stands sticks (its
   client snaps to it); a nearer one is pulled back by the player's own next
@@ -468,9 +481,10 @@ played the same staging. The E5 probe (two TDH RR cells) showed what sticks:
   when it is staged.
 - z settles onto the ground, so a staging z is on or near the ground.
 - the heading never sticks: the host's next frame carries the player's own
-  heading again. A staging entry has no heading (the runner writes yaw 0 and
-  pitch 0, which the snapshot format needs); a joiner actor's heading comes
-  from its own setup pose.
+  heading again. A staging entry has no heading (for a retail host the runner
+  writes yaw 0 and pitch 0, which the snapshot format needs; `stage_slot`
+  refuses any field but the position); a joiner actor's heading comes from its
+  own setup pose.
 
 A scenario whose play ends the joiner's session (E4's `kick`) says
 `"ends_joiner_session": true`. The runner then reads the joiner's closing
@@ -522,9 +536,9 @@ expects.
 | `kick` | TDH_I3A team deathmatch | the host opens the command prompt (action 1), types `PUNT ALL`, return | E4. A host's typed line goes to the admin commands, not the binding names, in session (`Client_ProcessConsoleCommand @0x520E80`; the binding-name match in `Client_ProcessLocalCommand @0x520BF0` is offline only). `PUNT ALL` sends every connected non-host player the session disconnect with an empty reason, code 33 and the tag `S.C:SPA` (`Server_HandleBanPuntCommand @0x50B380`, the send @0x50B951; `PUNT <slot>` tags `S.C:SP#`, @0x50B9C6). `BAN <slot>` only adds the player's PCID to `banlist.txt` and disconnects no one. The joiner's capture (RR) or the host's (RO) carries it as `kind=disconnect`. A retail host needs an onHook pair with `char` steps (opennova-int #73). |
 | `capture_base` | ASH_I5A Advance & Secure, `deploy_hold` | the host deploys with SPACE (auto team spawn), is posed inside zone 2's bunker (`0x1032`) and holds it | The zone drains (mode 0, -2730/s), turns (0x1E 60, 0x50 to team 1, 0x1E 52 and 56) and secures (mode 1, +1820/s, 0x1E 59) in about a minute. The first timer sample's `value` is masked: it depends on where the 1 Hz block falls after the pose. |
 | `tdm_host_kill` | TDH_I3A team deathmatch (`tdh-i3a-tdm-hostkill`) | the host, posed 4 units east of the joiner's spawn (33.4, -16.0, 16.8) facing it and aiming 10 degrees down, taps fire eight times | An enemy kill of a remote client: S2C 0x13, the victim's zero 0x61 and its 0x52, then 0x1E type 4..6 (10..12 on a head hit) (`GameEvent_PlayerDeath @0x516DD0`). `game_event.type` is masked (the PRNG draw). The joiner stays dead (no client respawns by itself). No staging, so it runs on every topology. |
-| `tdm_frag_respawn` | TDH_I3A team deathmatch (`tdh-i3a-tdm-fragrespawn`) | the host is staged 1.6 units east of the joiner's spawn; the joiner throws a frag at its feet (the `self_nade` play), then presses SPACE twice once its respawn delay has run | The frag kills the host (0x1E 4..6) and the joiner (1..3), as `frag_kill` does in deathmatch. A dead player's SPACE is the death screen's auto team pick, C2S 0x0E 0xFFFE (`Input_HandleSpecialKeys @0x49CA06..0x49CA0D`); the host drops picks while the `timeout` delay (5 s in the pinned `game.cfg`) runs, and a client never retries, hence the second press. The deploy's S2C 0x61 carries a nonzero seed (`Server_DeployPlayer @0x517740`), masked; TDH has no frontier zone, so no 0x1E 58 follows (@0x5179D9..0x5179E0). |
-| `coop_ai_kill` | 01TR co-op (`01tr-coop-aikill`) | the joiner is staged 4 units behind the standing AI 0x0000 at (241.9, 840.8, 43.0) and faces its back, aiming 6 degrees down, and taps fire eight times | The client's fire (C2S 0x06) and the host's AI death (S2C 0x13 for 0x0000). Nearby AI may answer the fire, so nothing after the death is counted. |
-| `team_switch` | TDH_I3A team deathmatch (`tdh-i3a-tdm-swap`) | the joiner frags its own feet (the `self_nade` play) and, on the death screen, clicks SWAP TEAMS | The host's answer (`NapiNPServerMsg_0x04D_ChangeTeam @0x518F70`): S2C 0x50 for the joiner (`Server_ChangeEntityTeam`), the S2C 0x14 system line (C2Blue / C2Red), then the killer-less death inline (S2C 0x13 again and its 0x1E), its hold the 60 s `mpchangeteam_penalty`. C2S 0x4D and S2C 0x14 have no scenario kind yet. The pinned `game.cfg` passes every gate: TeamChoose (`mpattrib` bit 4, which also shows the button, `DeathScreen_UpdateUI @0x553443..0x5534AA`), no autobalance, no earlier switch inside `mpchangeteam_interval`. `game_event.type` is masked (the PRNG draws). |
-| `permanent_death` | TDH_I3A team deathmatch (`tdh-i3a-tdm-permdeath`, `permanent_death`) | the joiner frags its own feet and presses SPACE twice | No spectator quota (above), so SPACE sends nothing and the joiner stays dead; `count_kinds` pins one death and one 0x61. |
+| `tdm_frag_respawn` | TDH_I3A team deathmatch (`tdh-i3a-tdm-fragrespawn`) | the host is staged 1.6 units east of the joiner's spawn; the joiner throws a frag at its feet (the `self_nade` play), then presses SPACE twice once its respawn delay has run | The frag kills the host (0x1E 4..6) and the joiner (1..3), as `frag_kill` does in deathmatch. A dead player's SPACE is the death screen's auto team pick, C2S 0x0E 0xFFFE (`Input_HandleSpecialKeys @0x49CA06..0x49CA0D`); the host drops picks while the `timeout` delay (5 s in the pinned `game.cfg`) runs, and a client never retries, hence the second press. The deploy's S2C 0x61 carries a nonzero seed (`Server_DeployPlayer @0x517740`), masked; TDH has no frontier zone, so no 0x1E 58 follows (@0x5179D9..0x5179E0). All five cells: an OpenNova host stages its own slot 0 through `stage_slot`. |
+| `coop_ai_kill` | 01TR co-op (`01tr-coop-aikill`) | the joiner is staged 4 units behind the standing AI 0x0000 at (241.9, 840.8, 43.0) and faces its back, aiming 6 degrees down, and taps fire eight times | The client's fire (C2S 0x06) and the host's AI death (S2C 0x13 for 0x0000). Nearby AI may answer the fire, so nothing after the death is counted. All five cells: an OpenNova host stages slot 1 through `stage_slot`. |
+| `team_switch` | TDH_I3A team deathmatch (`tdh-i3a-tdm-swap`) | the joiner frags its own feet (the `self_nade` play) and, on the death screen, clicks SWAP TEAMS | The host's answer (`NapiNPServerMsg_0x04D_ChangeTeam @0x518F70`): S2C 0x50 for the joiner (`Server_ChangeEntityTeam`), the S2C 0x14 system line (C2Blue / C2Red), then the killer-less death inline (Health 0 and the last attacker +0x178 cleared, then `GameEvent_PlayerDeath`: @0x51904C..0x519059 for one team, @0x5190BA..0x5190C7 for the other; S2C 0x13 again and its 0x1E), its hold the 60 s `mpchangeteam_penalty`. That 0x1E takes the killer-less arm (the +0x178 test @0x516FF4..0x516FFC): type 26 for a breath count over four times `g_WacVarBreathTime` (the drowning, which clears +0x178 itself), 23 for the 0x200 cause bit, else 22 (@0x517302..0x51732A), with the victim's own pool index as its attacker and zero victim and aux (@0x516FA5, @0x517336..0x51734C), so the switch's second 0x1E is type 22 [actor, 0, 0]. C2S 0x4D and S2C 0x14 have no scenario kind yet. The pinned `game.cfg` passes every gate: TeamChoose (`mpattrib` bit 4, which also shows the button, `DeathScreen_UpdateUI @0x553443..0x5534AA`), no autobalance, no earlier switch inside `mpchangeteam_interval`. `game_event.type` is masked across runs (the suicide's PRNG draw); the sequence still pins the second one to 22 in every run. |
+| `permanent_death` | TDH_I3A team deathmatch (`tdh-i3a-tdm-permdeath`, `permanent_death`) | the joiner frags its own feet and presses SPACE twice | No spectator quota (above): `onhook_host_lan` zeroes the retail host's (`g_GameConfigState+0x26C`, `lan_host.c` `ConfigureLanSession`), so the retail-side spectator convert stays unexercised, and the case pins SPACE sends nothing (no C2S 0x51; the joiner stays dead) on every topology; `count_kinds` pins one death and one 0x61. |
 | `medic_revive` | 01TR co-op (`01tr-coop-revive`, `host_player_class` 5) | the joiner is staged 4 units in front of the standing AI 0x0000, which kills it; the host, a medic posed 4 units behind the AI and facing it, shoots the AI, selects the medpack (209), walks to the body, looks down and fires the medpack | The revive (`GameEvent_RevivePlayer @0x517CD0`) needs a class-5 healer, the victim's revive window open (a death by another player or AI opens it), the victim's auto-medic on (both copies' profiles have it) and a last attacker that is neither the healer nor the victim. Its wire to the joiner: the reroll S2C 0x61 (masked) and S2C 0x1E event 38 [victim, healer, 0xFF]; its S2C 0x54 goes to same-team medics only and its S2C 0x3A has no kind. Co-op 01TR with the AI as the killer: the victim must be on the medic's team and killed by neither, which two players in co-op with an AI give, where TDM would need a third player the runner cannot script. Nothing is counted (nearby AI may join in). |
 | `dm_host_walk` | 03TR deathmatch (the `03tr-dm` suite case) | the host, posed on the shared spawn (0, 0, 62.4) facing +y, walks the runner's input exercise legs (forward, strafe, back, each with its mouse turn) | The case's play. The joiner exercise walked a retail host's joiner (spawned facing yaw 0x00) off the spawn ledge to its death on some runs and not others, so the 03TR A/A floor was a coin flip; the posed host stays on the raised side. `expect` is empty: the suite judges the run by its parity metrics. |
