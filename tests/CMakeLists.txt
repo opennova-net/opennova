@@ -611,7 +611,8 @@ add_test(NAME minimal_bms_gen COMMAND minimal_bms_gen_test)
 # fixtures/bms/synth_logic.bms + synth_logic.bin: the small mission with everything the
 # mission document and its picture read (every row kind, a path, two events naming one
 # another, the text keys its records form) and its string table, written by bms::write and
-# rtxt::write; editor_mission_document and editor_document_contract read them.
+# rtxt::write; editor_mission_document and editor_document_contract read them. Also
+# fixtures/bms/synth_areas.bms (a shipped training mission's areas), mission_mis_idempotency's.
 add_executable(mission_set_gen_test fixtures/mission_set_gen.cpp)
 target_link_libraries(mission_set_gen_test PRIVATE opennova_formats)
 target_include_directories(mission_set_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -645,12 +646,12 @@ target_compile_features(mission_mis_test PRIVATE cxx_std_17)
 add_test(NAME mission_mis COMMAND mission_mis_test)
 
 # .mis idempotency: .bms -> .mis (gen1) -> parse -> .mis (gen2), byte-equal, over the
-# minted dense mission, plus the shipped ash_i5b as an OPENNOVA_JO_ASSETS reference leg.
+# minted dense and areas missions, and the default kit over the authored armory.
 add_executable(mission_mis_idempotency_test mission/mission_mis_idempotency_test.cpp)
 target_link_libraries(mission_mis_idempotency_test PRIVATE opennova_formats)
 target_include_directories(mission_mis_idempotency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_mis_idempotency_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(mission_mis_idempotency COMMAND mission_mis_idempotency_test)
+add_test(NAME mission_mis_idempotency COMMAND mission_mis_idempotency_test)
 
 # The mission writer against the files it must write: parse->write compared with the
 # bytes read, section by section, then the canonical fixed point. The ordinary row

@@ -12,6 +12,9 @@
 // (LOCATION001, STRNAME001, STRWINDIRECTIVE001, STRWINCOND001, STRLOSEDIRECTIVE001). No retail byte is
 // carried.
 //
+// Also fixtures/bms/synth_areas.bms: the area triggers of a shipped training mission's shape
+// (build_areas_mission), which the .mis idempotency test round-trips by zone id.
+//
 // Default: rebuild in memory and byte-compare the committed files. `--write` (re)writes them.
 #include "common/test_paths.h"
 
@@ -237,6 +240,49 @@ bool build_table(std::vector<uint8_t> &bytes, std::string &err) {
 	return true;
 }
 
+// fixtures/bms/synth_areas.bms: a mission whose area triggers take the shape of a shipped
+// training mission's (03TR: thirteen zones over ids 1..15 with gaps, most constrain-Z, flag 2),
+// with the mission boundary (flag 1) beside them and a record in each of the four pools, so its
+// .mis export carries every area by zone id with its flags and bounds (D-MIS-14).
+bool build_areas_mission(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	mission::make_default(doc);
+	std::string edit_error;
+	if (!mission::set_header_string(doc, "mission_name", "Synthetic Areas", edit_error) ||
+	    !mission::set_header_string(doc, "designer", "OpenNova", edit_error) ||
+	    !mission::set_header_string(doc, "terrain", "Tmap", edit_error)) {
+		err = "header authoring failed: " + edit_error;
+		return false;
+	}
+	bms::set_game_mode(doc.header.attrib_flags, uint32_t(bms::AttribFlags::Coop));
+	place(doc, EntityKind::Item, 106100, -40.0f, -40.0f, 0);
+	place(doc, EntityKind::Building, 106101, 80.0f, 60.0f, 90);
+	place(doc, EntityKind::Marker, mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT, 10.0f, 10.0f, 0);
+	place(doc, EntityKind::Organic, 106102, -20.0f, 30.0f, 180);
+	const auto fixed = [](double units) { return bms::to_fixed_16_16(units); };
+	// Zone ids with the shipped gaps (6 and 13 unused); the constrain-Z ones carry a Z band.
+	const int32_t ids[] = {1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 14, 15};
+	for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); ++i) {
+		const double x = -400.0 + 60.0 * static_cast<double>(i);
+		const bool constrain_z = ids[i] >= 4 && ids[i] != 14;
+		doc.area_triggers.push_back(bms::AreaTrigger{ids[i], fixed(x), fixed(x + 40.0), fixed(-30.0 - i),
+		                                             fixed(30.0 + i), constrain_z ? fixed(10.0) : 0,
+		                                             constrain_z ? fixed(40.0 + i) : 0,
+		                                             constrain_z ? bms::AreaTrigger::kFlagConstrainZ : 0u});
+	}
+	doc.area_triggers.push_back(bms::AreaTrigger{30, fixed(-512), fixed(512), fixed(-512), fixed(512), 0, 0,
+	                                             bms::AreaTrigger::kFlagMissionArea});
+	mission::sync_counts(doc);
+	if (!bms::write(doc, bytes, err)) return false;
+	bms::File back;
+	if (!bms::parse(bytes.data(), bytes.size(), back, err)) return false;
+	if (!bms::equal(doc, back) || back.area_triggers.size() != 14) {
+		err = "the re-parsed mission lost a record";
+		return false;
+	}
+	return true;
+}
+
 int emit(const std::string &path, const std::vector<uint8_t> &bytes, bool write_mode) {
 	if (write_mode) {
 		std::ofstream o(path, std::ios::binary);
@@ -266,10 +312,12 @@ int main(int argc, char **argv) {
 		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
 	const std::string root = std::string(test_paths_repo_root(__FILE__)) + "/";
 
-	std::vector<uint8_t> mission_bytes, table_bytes;
+	std::vector<uint8_t> mission_bytes, table_bytes, areas_bytes;
 	std::string err;
 	if (!expect(build_mission(mission_bytes, err), ("synth_logic.bms: " + err).c_str())) return 1;
 	if (!expect(build_table(table_bytes, err), ("synth_logic.bin: " + err).c_str())) return 1;
+	if (!expect(build_areas_mission(areas_bytes, err), ("synth_areas.bms: " + err).c_str())) return 1;
 	if (emit(root + "fixtures/bms/synth_logic.bms", mission_bytes, write_mode) != 0) return 1;
-	return emit(root + "fixtures/bms/synth_logic.bin", table_bytes, write_mode);
+	if (emit(root + "fixtures/bms/synth_logic.bin", table_bytes, write_mode) != 0) return 1;
+	return emit(root + "fixtures/bms/synth_areas.bms", areas_bytes, write_mode);
 }

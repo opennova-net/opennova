@@ -184,8 +184,8 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 - `bms/synth_dense.bms` — `tests/fixtures/minimal_bms_gen.cpp`: a dense mission
   authored through the `bms_edit` free functions and written by `bms::write` (four populated
   pools, one item id each, zero-valued optional fields, the minted terrain and
-  environment in its header); the shipped ash_i5b is `mission_mis_idempotency`'s
-  reference-tree leg and the whole shipped corpus is `mission_corpus`'s retail leg
+  environment in its header), which `mission_mis_idempotency` round-trips through `.mis`
+  and `mission_corpus` rewrites; the whole shipped corpus is `mission_corpus`'s retail leg
   (the install's archives, through the VFS).
 - `bms/synth_logic.bms`, `bms/synth_logic.bin` — `tests/fixtures/mission_set_gen.cpp`: the
   small mission the mission document and its picture read (every row kind on the minted
@@ -193,6 +193,10 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   a path, two area triggers (zones 20 and 30), two events naming one another, a four-entry loadout, the first
   win and lose directives) through `bms::write`, and its string table (the keys its records
   form: `LOCATION001`, `STRNAME001`, the win and lose directives) through `rtxt::write`.
+- `bms/synth_areas.bms` — `tests/fixtures/mission_set_gen.cpp`: a shipped training mission's
+  area triggers (03TR's shape: thirteen zones over ids 1..15 with gaps, most constrain-Z) beside
+  the mission boundary and a record in each pool, which `mission_mis_idempotency` round-trips
+  through `.mis` by zone id.
 - `particle/synth_*.ptl` — `tests/fixtures/minimal_particle_gen.cpp`: five particle
   files through `save_particles` (a lone table, a table with its edit handles,
   seven effects over a blank particle, a three-layer particle with curves and

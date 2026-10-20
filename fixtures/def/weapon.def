@@ -273,6 +273,10 @@ weapon "WPN_M16"
 end
 
 weapon "WPN_M16M203BURST"
+	category 3
+	rank     7
+	loadout_selectable	1
+	loadout_subclasses	2
 end
 
 weapon "WPN_M16M203"
@@ -466,6 +470,8 @@ weapon "WPN_CLAYMORE"
 end
 
 weapon "WPN_AT4"
+	loadout_selectable	1
+	loadout_subclasses	0
 end
 
 weapon "WPN_MORTAR"
