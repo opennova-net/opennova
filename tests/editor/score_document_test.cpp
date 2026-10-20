@@ -3,9 +3,10 @@
 // and fanfare first, then its GAMETYPE blocks, each its scoreboard columns (FIELD lines) and points (VAR lines); a
 // value changed changes its own line, a column added goes after the block's last, a block added is the first game
 // type the file lacks; a name no table has refused; the game's reading of the file as findings (a version other than
-// 40, a fanfare it does not keep, a block of no game type's name, a game type's second block). The retail leg
-// (OPENNOVA_JO_DIR): the install's loose score.ini through the document, saved byte for byte (it is that writer's
-// output), no finding.
+// 40, a fanfare it does not keep, a block of no game type's name, a game type's second block). A table in that
+// writer's own form, as the game writes its score.ini (every game type's block), saved byte for byte with no note
+// and no finding; the format's variants (its fixtures) through the document, saved as the writer writes what the
+// reader reads, a fixed point.
 #include <editor/documents/document_types.h>
 #include <editor/documents/score_document.h>
 #include <formats/score/score.h>
@@ -16,9 +17,9 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/variant_files.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -198,30 +199,70 @@ int test_findings() {
 	return 0;
 }
 
-int test_retail() {
-	const std::string install = retail::install();
-	const std::string path = install.empty() ? std::string() : retail::join(install, "score.ini");
-	if (path.empty() || !retail::file_exists(path)) {
-		retail::skip_leg("OPENNOVA_JO_DIR/score.ini (the install's score table through the document)");
-		return 0;
+// The game's own score.ini is ScoreConfig_SaveFile's output [orig: @ 0x52CDD0]: a block for each of the table's
+// twelve rows by index, row 2's put down first under index 0 [orig: @ 0x52CF4C], so COOP twice and the two alike
+// (JO:CA's: 12 blocks, the document's 13 rows with the file's own). Minted in that form (each block its own
+// columns and points), the document saves it byte for byte, with no note and no finding.
+int test_writer_form() {
+	score::File file;
+	for (int index = 0; index < 12; ++index) {
+		score::GameTypeBlock block;
+		block.row = index == 0 ? 2 : index;
+		const int seed = index == 0 ? 2 : index;
+		block.fields.push_back({score::field_id("NUMENEMYKILLS"), 1});
+		if (seed % 2) block.fields.push_back({score::field_id("NUMDEATHS"), 1});
+		block.vars.push_back({score::var_id("FIRE"), 0});
+		block.vars.push_back({score::var_id("ENEMYKILL"), 5 + seed});
+		if (seed % 3 == 0) block.vars.push_back({score::var_id("FRIENDLYKILL"), -seed});
+		file.blocks.push_back(block);
 	}
-	const std::vector<uint8_t> bytes = test_io::read_file(path);
+	std::vector<uint8_t> bytes;
+	std::string why;
+	TEST_EXPECT(score::write(file, bytes, why));
 	ScoreDocument document;
 	Diagnostic error;
 	TEST_EXPECT(document.load_bytes(bytes, "score.ini", AssetKind::Score, "jo", error));
-	TEST_EXPECT(!document.blocked() && document.rows().size() > 1);
-	const SerializeResult written = document.serialize();
-	TEST_EXPECT(written.ok() && written.text == std::string(bytes.begin(), bytes.end()) && written.notes.empty());
+	TEST_EXPECT(!document.blocked() && document.rows().size() == 13);
+	const SerializeResult saved = document.serialize();
+	TEST_EXPECT(saved.ok() && saved.text == std::string(bytes.begin(), bytes.end()) && saved.notes.empty());
 	TEST_EXPECT(validate_score_file(document).empty());
-	std::printf("retail: the install's score.ini through the document, %zu rows, saved byte for byte\n",
+	std::printf("writer form: a score.ini of the game's twelve blocks, %zu rows, saved byte for byte\n",
 	            document.rows().size());
 	return 0;
 }
 
+// The format's variants: each score.ini its fixtures hold (the authored sample, the format's row's shapes) through
+// the document, unblocked, saved as the writer writes what the reader reads, that save read again the same text;
+// one in the writer's own form saved byte for byte with no note.
+int test_variants() {
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/score"}, {".ini"});
+	int failures = editor_test::report_missing(variants);
+	for (const std::string &path : variants.files) {
+		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
+		const std::string text(bytes.begin(), bytes.end());
+		ScoreDocument document;
+		Diagnostic error;
+		TEST_EXPECT(!bytes.empty() && document.load_bytes(bytes, "score.ini", AssetKind::Score, "jo", error));
+		TEST_EXPECT(!document.blocked() && document.rows().size() > 1);
+		const SerializeResult saved = document.serialize();
+		ScoreDocument again;
+		if (!saved.ok() || written(text).empty() || saved.text != written(text) ||
+		    !again.load_bytes(bytes_of(saved.text), "score.ini", AssetKind::Score, "jo", error) ||
+		    again.serialize().text != saved.text || (written(text) == text && !saved.notes.empty())) {
+			std::fprintf(stderr, "FAIL %s is not saved as the format's writer writes it\n", path.c_str());
+			++failures;
+			continue;
+		}
+		std::printf("variant: %s, %zu rows, saved as the writer writes it%s\n", path.c_str(), document.rows().size(),
+		            written(text) == text ? ", byte for byte" : "");
+	}
+	TEST_EXPECT(!variants.files.empty());
+	return failures;
+}
+
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	if (test_rows() || test_findings() || test_retail()) return 1;
+int main() {
+	if (test_rows() || test_findings() || test_writer_form() || test_variants()) return 1;
 	return 0;
 }

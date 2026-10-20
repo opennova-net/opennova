@@ -2,8 +2,8 @@
 // blocks as the game's reader reads them, each key it writes at its span with what the reader takes it as, the keys
 // of its kind it lacks; a set rewriting that one value's span (the rest of the text as it stood), a key the block
 // lacks put on its own line before the block's closing brace in its indent and line end; a value the reader would
-// take otherwise refused with why; the query over a session; the retail leg (OPENNOVA_JO_DIR): every particle file
-// of the install read so, each key's text at its span its value.
+// take otherwise refused with why; the query over a session; the format's variants (its fixtures) and the base
+// game's particle files read so, each key's text at its span its value.
 #include <algorithm>
 #include <cstdio>
 #include <memory>
@@ -12,22 +12,19 @@
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
 #include <editor/assets/asset_type_registry.h>
-#include <editor/assets/install_view.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/particle_keys.h>
 #include <editor/model/text_document.h>
-#include <editor/project/project_document.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/variant_files.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
@@ -204,28 +201,23 @@ int test_query() {
 	return 0;
 }
 
-// The install's particle files: each read by the game's reader into blocks, each key's text at its span its value.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's particle files)");
-		return 0;
-	}
-	ProjectDocument project;
-	project.target_game = "jo";
-	InstallView view;
-	std::string view_error;
-	TEST_EXPECT(view.open(install_spec(install, project), view_error));
+// The format's variants (its fixtures) and the base game's particle files (assets/), of every extension the type
+// owns: each read by the game's reader into blocks, each key's text at its span its value.
+int test_variants() {
+	const editor_test::VariantFiles variants =
+			editor_test::variant_files({"fixtures/particle", "assets"}, {".ptl", ".ptu", ".ptg"});
+	int failures = editor_test::report_missing(variants);
 	size_t files = 0, blocks = 0, keys = 0;
-	for (const opennova::VfsFileLocation &location : view.vfs().list_files()) {
-		if (classify_asset(location.logical_name, nullptr) != AssetKind::Particles) continue;
-		std::vector<uint8_t> bytes;
-		if (!view.vfs().read_file_raw(location.logical_name, bytes)) continue;
+	for (const std::string &path : variants.files) {
+		TEST_EXPECT(classify_asset(path, nullptr) == AssetKind::Particles);
+		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
 		std::unique_ptr<DocumentBase> document = document_type_for(AssetKind::Particles)->make();
 		Diagnostic error;
-		if (!document->load_bytes(bytes, location.logical_name, AssetKind::Particles, "jo", error)) continue;
+		TEST_EXPECT(!bytes.empty() && document->load_bytes(bytes, path, AssetKind::Particles, "jo", error));
 		const TextDocument &text = *text_of(*document);
-		const std::vector<ParticleKeyBlock> read = particle_key_blocks(text);
+		bool read_whole = false;
+		const std::vector<ParticleKeyBlock> read = particle_key_blocks(text, &read_whole);
+		TEST_EXPECT(read_whole && !read.empty());
 		++files;
 		blocks += read.size();
 		for (const ParticleKeyBlock &block : read)
@@ -233,23 +225,25 @@ int test_retail() {
 				if (!field.present) continue;
 				++keys;
 				std::string spelled;
-				TEST_EXPECT(text.span_text(field.span, spelled) && spelled == field.value);
+				if (!text.span_text(field.span, spelled) || spelled != field.value) {
+					std::fprintf(stderr, "FAIL %s:%zu %s: \"%s\" at its span, \"%s\" read\n", path.c_str(), field.span.line,
+					             field.key.c_str(), spelled.c_str(), field.value.c_str());
+					++failures;
+				}
 			}
 	}
-	std::printf("retail: %zu particle files, %zu blocks, %zu keys at their spans\n", files, blocks, keys);
-	// The install's counts, pinned (Joint Operations: Combined Arms, its base's particle files of every extension).
-	TEST_EXPECT(files == 85 && blocks == 2895 && keys == 123369);
-	return 0;
+	std::printf("variants: %zu particle files, %zu blocks, %zu keys at their spans\n", files, blocks, keys);
+	TEST_EXPECT(files >= 6 && keys > 0);
+	return failures;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = test_blocks_and_sets();
 	failures += test_line_order();
 	failures += test_query();
-	failures += test_retail();
+	failures += test_variants();
 	if (failures == 0) std::printf("editor_particle_keys: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
