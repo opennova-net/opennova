@@ -42,6 +42,10 @@ struct TextureCheckStats {
 	uint64_t use_walks = 0;
 };
 TextureCheckStats texture_check_stats();
+// What the check keeps let go: its walks of the uses (each kept while the graph's state, the scan, the project's
+// folder and the files' source stand) and the headers and char map classes it read (use_checks.h's
+// forget_use_checks).
+void forget_texture_checks();
 
 // A project file's header as `reader` reads it (`root` the project's directory), read once and kept while
 // the file's stamp (the scan's size and last write) stands: the use check's read of it, which the uses'

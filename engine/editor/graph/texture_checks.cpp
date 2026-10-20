@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -22,6 +23,7 @@
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/texture_uses.h>
+#include <editor/graph/use_checks.h>
 #include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/particle/particle.h>
@@ -75,6 +77,24 @@ struct Kept {
 std::mutex g_mutex;
 std::map<std::pair<std::string, TextureReader>, Kept> g_headers;
 TextureCheckStats g_stats; // g_mutex held
+
+// A walk of the uses' findings, kept while what it read stands (g_mutex held): the graph's state (every edge and
+// what it resolves to), the scan (each file's stamp, so each header read), the project's folder and the source
+// its files are read through (held weakly: one let go is never taken for another at its address). A composition
+// after an edit that left the graph as it was walks nothing.
+struct WalkKey {
+	uint64_t generation = 0, serial = 0;
+	std::string root;
+	const FileSource *files = nullptr;
+	bool operator==(const WalkKey &o) const {
+		return generation == o.generation && serial == o.serial && root == o.root && files == o.files;
+	}
+};
+struct Walk {
+	std::weak_ptr<const FileSource> files;
+	std::vector<Diagnostic> findings;
+};
+UseCheckMemo<WalkKey, Walk> g_walks;
 
 // The header of `entry` under `root` as `reader` reads it, kept (g_mutex held).
 const TextureHeader *kept_header(const std::string &root, const AssetEntry *entry, TextureReader reader) {
@@ -522,13 +542,21 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
                         std::vector<Diagnostic> &out) {
 	(void)files;
 	const std::lock_guard<std::mutex> lock(g_mutex);
+	// The walk kept while the graph, the scan and the files it read stand (a scan never indexed keeps none).
+	const WalkKey key{graph.generation(), input.scan.serial(), input.paths.root, input.paths.files.get()};
+	if (key.serial != 0)
+		if (const Walk *kept = g_walks.find(key); kept && kept->files.lock() == input.paths.files) {
+			out.insert(out.end(), kept->findings.begin(), kept->findings.end());
+			return;
+		}
 	++g_stats.use_walks;
+	std::vector<Diagnostic> found;
 	std::set<std::pair<std::string, std::string>> passed_over;
 	std::set<std::string> costed;
 	graph.for_each_edge([&](const GraphEdge &edge) {
 		if (edge.kind == ReferenceKind::Texture || edge.kind == ReferenceKind::MenuTexture ||
 		    edge.kind == ReferenceKind::LoadingImage)
-			check_use(graph, input, edge, passed_over, costed, out);
+			check_use(graph, input, edge, passed_over, costed, found);
 	});
 	// The names the game opens itself whose sizes it asks for: the MFD's, the default loading screen's.
 	for (const FixedTextureName &fixed : fixed_texture_names()) {
@@ -539,9 +567,18 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
 		if (!header || !header->read) continue;
 		check_sizes(fixed.role, entry->logical_name, *header, std::string("which the game opens by name ") + fixed.what,
 		            TextureUseContext(), [&](F code, DiagnosticSeverity severity, const std::string &message) {
-			            out.push_back(make_finding(finding_code(code), severity, message, entry->relative_path));
+			            found.push_back(make_finding(finding_code(code), severity, message, entry->relative_path));
 		            });
 	}
+	out.insert(out.end(), found.begin(), found.end());
+	if (key.serial != 0) g_walks.keep(key, {input.paths.files, std::move(found)});
+}
+
+void forget_texture_checks() {
+	const std::lock_guard<std::mutex> lock(g_mutex);
+	g_walks.clear();
+	g_headers.clear();
+	g_classes.clear();
 }
 
 } // namespace opennova::editor

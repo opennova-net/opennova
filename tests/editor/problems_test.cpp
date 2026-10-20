@@ -29,8 +29,10 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/graph/texture_checks.h>
 #include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
+#include <editor/project/project_findings.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
@@ -1698,6 +1700,69 @@ static int test_marks_planned_once() {
 	return 0;
 }
 
+// The cross-file checks' answers are kept between compositions by what they were made of (graph/use_checks.h:
+// the texture uses' walk by the graph's generation, the scan's serial and the files' source): an edit of a menu that
+// leaves its references as they were (its window moved) walks the uses no more, the rows as they were; the image
+// it names retargeted walks them once; every kept answer let go (forget_kept_answers), the next composition makes
+// each again, the rows as the kept answers made them.
+static int test_use_checks_kept() {
+	test_temp::TempDir dir("opennova_editor_problems_use_checks_kept");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Kept"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const std::string menu = "<SCREEN>\r\n\t<NAME>KEPT</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	                         "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	                         "\t\t<APPEARANCE type=\"image\" state=\"default\">logo.tga</APPEARANCE>\r\n\t</WINDOW>\r\n"
+	                         "</SCREEN>\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/menus/kept.mnu", menu) &&
+	            test_io::write_file(root + "/textures/logo.tga", editor_test::tga_bytes()) &&
+	            test_io::write_file(root + "/textures/other.tga", editor_test::tga_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("menus/kept.mnu"));
+	const Document *opened = records_of(*session.document_for("menus/kept.mnu"));
+	TEST_EXPECT(opened != nullptr);
+	if (!opened) return 1;
+	// The window and its appearance, by the graph's edge naming the image.
+	NodeAddress appearance, window;
+	std::string image_field;
+	for (const GraphEdge *edge : v.findings.graph->references_of("menus/kept.mnu"))
+		if (edge->value == "logo.tga") {
+			appearance = edge->address;
+			image_field = edge->field;
+		}
+	TEST_EXPECT(appearance.row != 0 && !image_field.empty());
+	const std::vector<NodeAddress> owners = opened->ancestors(appearance);
+	TEST_EXPECT(!owners.empty());
+	if (owners.empty()) return 1;
+	window = owners.back();
+	const auto move_window = [&](int64_t left) {
+		Edit moved;
+		moved.address = window;
+		moved.field = "position.left";
+		moved.value = left;
+		editor_test::handle_to_end(session, request::edit_record("menus/kept.mnu", moved));
+	};
+	const uint64_t walks = texture_check_stats().use_walks;
+	const std::vector<Diagnostic> rows = v.findings.diagnostics;
+	move_window(10);
+	TEST_EXPECT(texture_check_stats().use_walks == walks && v.findings.diagnostics == rows);
+	Edit retarget;
+	retarget.address = appearance;
+	retarget.field = image_field;
+	retarget.value = std::string("other.tga");
+	editor_test::handle_to_end(session, request::edit_record("menus/kept.mnu", retarget));
+	TEST_EXPECT(texture_check_stats().use_walks == walks + 1);
+	const std::vector<Diagnostic> retargeted = v.findings.diagnostics;
+	forget_kept_answers();
+	move_window(20);
+	TEST_EXPECT(texture_check_stats().use_walks == walks + 2 && v.findings.diagnostics == retargeted);
+	std::printf("use checks kept: walked again only when the graph moved, the rows as before\n");
+	return 0;
+}
+
 // The demo round's bug 10: the required files landing take their "required file missing" rows out of
 // Problems at once, while the validation the change left due has yet to run (an import's 27 such rows
 // stood until the validation after it ended); the other rows wait for it, which then composes them.
@@ -1728,6 +1793,7 @@ int main() {
 	int failures = 0;
 	failures += test_requirements_at_once();
 	failures += test_marks_planned_once();
+	failures += test_use_checks_kept();
 	failures += test_original_marks();
 	failures += test_blocking();
 	failures += test_fix_all_served_whole();
