@@ -76,12 +76,18 @@ void test_roster_and_facts() {
 			replication::TransportMode::Loopback, host, true);
 	h.reply.player_slot = 0;
 	h.reply.player_name = "Host";
+	// The status screen reads the slot's own team byte, not the body's
+	// [orig: Server_DrawStatusScreen @0x50A565] (D-NET-593).
+	h.assigned_team_valid = true;
+	h.assigned_team = 1;
 	h.receive_inactive_ms = 9000; // the host's own slot has no reap clock
 	ctx.np_protocol.connection_list.push_back(h);
 	inmatch::NapiNPConnection j = conn_fixture::make_conn(2, 1, &joe_wire,
 			replication::TransportMode::Client, joe, true);
 	j.reply.player_slot = 2;
 	j.reply.player_name = "Joe";
+	j.assigned_team_valid = true;
+	j.assigned_team = 2;
 	j.receive_inactive_ms = 3500;
 	ctx.np_protocol.connection_list.push_back(j);
 	// A joiner added but still loading (no completed burst), spectating.
