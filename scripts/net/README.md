@@ -214,8 +214,9 @@ powershell -File scripts\net\run_parity_suite.ps1 -CorpusRoot C:\retail\corpus `
 
 `-CorpusRoot` holds the extracted `items.def` and `missions\<MISSION>` (the
 layout the wire-readiness gate reads; see `.agents/retail-lan-parity.md`). The
-suite hashes each mission artifact for the runner, and a case may pin it with
-`mission_sha256`. A cell whose run root already holds `run-summary.json` is
+corpus is pinned: the suite refuses an `items.def` off the table's
+`items_sha256` and a mission off its case's `mission_sha256`, and hands each
+mission's hash to the runner. A cell whose run root already holds `run-summary.json` is
 reused, so rerunning with the same `-Prefix` resumes a suite. A run root
 without one is a failed attempt, moved aside to `<RunId>.failed-<stamp>` before
 the cell runs again. `-Cases` and `-Topologies` choose which cells run; each
@@ -223,12 +224,26 @@ case's verdict judges every successful cell it has. PASS needs every selected
 cell to succeed and every selected case judged PASS with RO, OR and OO all
 present. The verdicts and `suite-summary.json` land in
 `.scratch\parity-suites\<prefix>\`. `-Plan` prints the cells and their runner
-arguments and runs nothing.
+arguments and runs nothing. The suite prints `PARITY_SUITE_PREFIX` and
+`PARITY_SUITE_DLL` (both GDExtension variants' hashes and the commit), which
+`suite-summary.json` keeps with the joiner dial and the reference.
+
+`-ReferencePrefix <prefix>` judges the subject cells against an earlier suite's
+RR and RR-aa cells instead of running new ones (`-ReferenceRoot`: where those
+run roots live, `.scratch\runs` by default, or the evidence copy
+`retail-parity\runs-<prefix>` once a suite's runs moved there). A reference is
+taken only while its summaries record the current `Jointops.exe`,
+`onhook-mcp.exe` and onHook proxy hashes, the case's mission hash and inputs,
+and StockObserver, and its RR and RR-aa rendered the same hook configs; a
+subject whose retail role's config differs from the reference's (RO's host,
+OR's joiner) leaves its case unjudged (`ERROR`). Every cell refuses a dirty
+checkout unless `-AllowDirtyRepo`, and the OpenNova joiner browses unless
+`-JoinerDial direct` (both diagnostics, passed through to the runner).
 
 A case (`parity-cases.json`, `opennova.parity-cases.v1`) gives `id`,
-`mission`, `game_type`, `port` (inside the SERVER copy's `mplanserverportmin`..`max`, stock 32768-32787), `readiness` (`in_match` or
+`mission`, `mission_sha256`, `game_type`, `port` (inside the SERVER copy's `mplanserverportmin`..`max`, stock 32768-32787), `readiness` (`in_match` or
 `deploy_hold`), `steady_seconds`, `exercise_input` and `auto_deploy`. The table
-fixes `expansion` (`jox01`) and `host_session_name`, which must equal the
+fixes `expansion` (`jox01`), `items_sha256` and `host_session_name`, which must equal the
 SERVER copy's `game.cfg` `game_name` byte for byte (`"Untitled "`, with the
 trailing space).
 

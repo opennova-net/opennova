@@ -2,10 +2,12 @@
   "schema": "opennova.parity-cases.v1",
   "expansion": "jox01",
   "host_session_name": "Untitled ",
+  "items_sha256": "585641510877d0b88f33c221c081d487f2d4f0abad874886f594a7db760a9964",
   "cases": [
     {
       "id": "01tr-coop",
       "mission": "01TR.bms",
+      "mission_sha256": "7ceb5dac231f6dd0a78a41302889cb325629369cf7599ee31b506a98ea2cd590",
       "game_type": 65568,
       "port": 32786,
       "readiness": "in_match",
@@ -16,6 +18,7 @@
     {
       "id": "tdh-i3a-tdm",
       "mission": "TDH_I3A.bms",
+      "mission_sha256": "8978c7afac2d7ba0f1b09c5a358412c74bace3424f31dd647a4aadc8f5811a33",
       "game_type": 65536,
       "port": 32787,
       "readiness": "in_match",
@@ -26,6 +29,7 @@
     {
       "id": "03tr-dm",
       "mission": "03TR.bms",
+      "mission_sha256": "c22c4e431f56561c9a15f994e34464765ad8f19d1c3c11a583dda7ca95f41083",
       "game_type": 0,
       "port": 32785,
       "readiness": "in_match",
@@ -36,6 +40,7 @@
     {
       "id": "cp04-objcoop-deploy",
       "mission": "CP04.bms",
+      "mission_sha256": "ade019ca4b3d8cd6851abeec6ca8ffa2357d2b9b83a2cd348eebf4a82f9e8346",
       "game_type": 196640,
       "port": 32784,
       "readiness": "deploy_hold",
@@ -46,6 +51,7 @@
     {
       "id": "ash-i5a-aas-deploy",
       "mission": "ASH_I5A.BMS",
+      "mission_sha256": "81521961f7c4d6cca08ef37d741c147f98c2f75bf4e5a7a107021076181e8c14",
       "game_type": 65552,
       "port": 32787,
       "readiness": "deploy_hold",
