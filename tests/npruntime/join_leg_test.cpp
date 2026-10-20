@@ -15,6 +15,8 @@
 //     0x61 @0x51A982, 0x14 @0x51A9F3, the round-over legs @0x51A9F8..0x51AA5C, 0x3E @0x51AAEE];
 //   - D-NET-NEW-L1-7: the producer waits while the round is over [orig:
 //     Server_SendInitialGameStateToPlayer @0x51BBA3..0x51BBA9, @0x51BEFF..0x51BF05];
+//   - D-NET-401: the player-slot table is the slot limit alone [orig: Server_InitNewRoundState
+//     @0x51C948..0x51C97B];
 //   - D-NET-NEW-L1-8: the join arms the round-event watermark at the frame clock less one
 //     [orig: CNetPlayer_SetGameState @0x4C422D; Server_OnPlayerJoin @0x51A74C;
 //     Server_BuildRoundEventListForPlayer @0x4FFEE8, @0x5001A8..0x5001AE].
@@ -496,6 +498,31 @@ bool run_join_arms_the_round_watermark() {
 	              "the next 0x0A carries the entity update's round");
 }
 
+// D-NET-401: the player-slot table is the slot limit alone. A Serve Only host's spectator
+// limit adds no rows; its spawn pump's 0x04 sends that count (byte 18) and the joiner's row.
+// [orig: Server_InitNewRoundState - the limit @0x51C948..0x51C96B (maxPlayers plus the
+//  dedicated host's row), @0x51C976, Server_AllocatePlayerSlotTable @0x51C97B, the count
+//  @0x51C1E7; NetPacket_WriteSlotAssignment @0x502B30, the count byte @0x502BB4]
+bool run_slot_table_is_the_slot_limit() {
+	JoinFixture f(/*with_existing=*/false);
+	f.ctx->config.dedicated_server = true;
+	f.ctx->config.spectator_slots = 3;
+	const uint32_t limit = f.ctx->config.player_slot_limit();
+	if (!expect(limit == 5 && f.ctx->config.total_player_slot_capacity() == limit,
+	            "the table is max_players plus the host's row, no spectator rows")) return false;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	const std::vector<opennova::ProtocolMessage> metadata = inmatch::build_spawn_pump_metadata(
+			f.ctx->config, f.ctx->mission_text_title, f.joiner(), f.ctx->np_protocol.connection_list,
+			f.world.get(), f.ctx->rotation, &f.ctx->host_slot);
+	for (const opennova::ProtocolMessage &m : metadata) {
+		if (m.tag != 0x04) continue;
+		return expect(m.payload.size() >= 19 && m.payload[18] == limit && m.payload[17] == 1,
+		              "the 0x04 sends the slot limit and the joiner's row 1");
+	}
+	return expect(false, "the spawn pump's metadata carries a 0x04");
+}
+
 } // namespace
 
 int main() {
@@ -509,6 +536,7 @@ int main() {
 	if (!run_join_into_a_finished_round()) ++failures;
 	if (!run_track_waits_while_the_round_is_over()) ++failures;
 	if (!run_join_arms_the_round_watermark()) ++failures;
+	if (!run_slot_table_is_the_slot_limit()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

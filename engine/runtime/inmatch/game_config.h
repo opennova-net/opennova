@@ -94,8 +94,8 @@ struct GameConfig {
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
 	// Signed spectator limit: 0 disables spectating, -1 shares max_players, and
 	// a positive value is the game-layer join's spectator count (DPC 15); it
-	// never widens the 0x42 gate (join_capacity). Our slot table still grows by
-	// a positive count (total_player_slot_capacity, D-NET-401).
+	// never widens the 0x42 gate (join_capacity) nor the slot table: a spectator
+	// takes an ordinary row (D-NET-401).
 	// [orig: maxSpectators_26C, HostDialog_ReadSettings @0x555940;
 	//  Server_ValidatePlayerJoinRequest @0x51235C]
 	int32_t spectator_slots = 0;
@@ -483,18 +483,14 @@ struct GameConfig {
 	//  Server_InitPlayerSlotSystem @0x4243B2; Entity_SpawnFromBMSRecord @0x40EA86]
 	uint32_t player_slot_limit() const;
 
-	// The fixed player-slot table: the slot limit, grown by the positive
-	// spectator count and clamped to 251 rows. Retail's table is the slot limit
-	// alone (D-NET-401), and a limit past 65 allocates none (D-NET-402); its
-	// gate admits the lineup queue past the cap (join_capacity), so it can admit
-	// more connections than it has rows, which is D-NET-401's open half.
-	// [orig: g_PlayerSlotCapacity @0x24C0CA4 = the slot limit,
-	//  Server_InitNewRoundState @0x51C976..0x51C97B]
-	uint32_t total_player_slot_capacity() const {
-		const uint64_t total = static_cast<uint64_t>(player_slot_limit()) +
-				(spectator_slots > 0 ? static_cast<uint32_t>(spectator_slots) : 0u);
-		return static_cast<uint32_t>(total < 251u ? total : 251u);
-	}
+	// The fixed player-slot table: the slot limit alone, a spectator taking an
+	// ordinary row (D-NET-401). A limit past 65, which retail's allocator refuses
+	// (its table then keeps what it held), sizes a working table here
+	// (D-NET-402, PERMANENT: a fixed retail bug).
+	// [orig: Server_InitNewRoundState - the limit @0x51C948..0x51C96B, stored
+	//  @0x51C976, Server_AllocatePlayerSlotTable(limit) @0x51C97B;
+	//  g_PlayerSlotCapacity @0x24C0CA4 = the count @0x51C1E7]
+	uint32_t total_player_slot_capacity() const { return player_slot_limit(); }
 
 	// The lineup queue counts at the join gate: on, with a positive size.
 	// [orig: CNapiNetwork_ValidateJoinRequest - `test edx, edx` over ctx+0xF2C

@@ -314,6 +314,13 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 			Server_ReservePlayerSlot(
 					ctx.np_protocol.connection_list, conn,
 					ctx.config.total_player_slot_capacity());
+	// With no free row retail disconnects the first bot row's player and picks again; JO
+	// has no bot rows (the bot byte's one store copies the add event's robot word, which
+	// the one add builder zeroes), so it disconnects nobody, logs to the _svrlog ring
+	// nothing writes, and the add fails (D-NET-401).
+	// [orig: Server_PlayerAdd @0x51CCA0..0x51CCCB -> PlayerSlot_FindFirstBot @0x500A50 (the
+	//  bot byte +0x178E3 @0x500A60), its store @0x51CD77; the log @0x51CCCD..0x51CCD2;
+	//  ServerLog_BufferAndFlush's g_CreateSvrLogTxt gate @0x4FC0C3..0x4FC0CA]
 	if (!player_slot.has_value()) return {};
 
 	world::PlayerSpawn spawn;
