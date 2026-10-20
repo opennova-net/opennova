@@ -7,7 +7,7 @@ extends GutTest
 ## than before. The drag is the wire's (`edit_in_viewport`'s brush drag, a sample at each picture pixel under one
 ## gesture, as the canvas's brush half raises a stroke's samples): imgui-godot reads ImGui's pointer from the OS's each
 ## frame (DisplayServer.mouse_get_position), which no test may move (editor_mission_logic_device_test.gd). A
-## tests/windowed/ script, run by `scripts/test_godot.sh --suite core --windowed`.
+## tests/windowed/ script, run by `scripts/test_godot.sh --windowed`.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")

@@ -10,8 +10,7 @@
 // calls produces byte-identical InGameMessages (same order, same fields, same
 // payload bytes) to ONE batch decode_capture_to_messages() over the same
 // datagrams. It exercises that on an inline two-session capture (runs in CI with
-// no fixtures) and, when present, on the real 3-player probe3_again capture (the
-// strong multi-client / fragmented / real-SCRK case; SKIP-LEG when absent).
+// no fixtures).
 
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>

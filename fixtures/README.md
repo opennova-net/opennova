@@ -14,10 +14,9 @@ Every file under `fixtures/` belongs to one of three classes:
 - **Keep** — the small retail-interop set: original files kept as-is so the
   parsers prove they read what the shipped game wrote.
 
-Retail corpora (whole installs, extracted asset trees, captures) never live here;
-tests that need them run behind the `OPENNOVA_*` gates
-(`docs/asset-gated-tests.md`); the retail files those gated tests need in CI live
-in the private `opennova-net/opennova-reference-assets` repository.
+Retail corpora (whole installs, extracted asset trees, captures) never live here,
+and no test reads one: each form the shipped corpus takes is minted or authored
+here, and a witnessed value is pinned as a cited constant in its test.
 
 ## Rules (enforced by `scripts/lint/fixture_lint.py`)
 
@@ -26,9 +25,7 @@ in the private `opennova-net/opennova-reference-assets` repository.
   self-capture carries a `minted_by` row instead); authored and
   keep files carry a row in `scripts/lint/fixture_allowlist.json`. A retail blob
   outside the keep rows fails the lint, and a keep row may live only under
-  `novaworld/` (the lint refuses any other): every other retail file the tests
-  read comes from the reference fixture set (`docs/asset-gated-tests.md`), never
-  from this tree.
+  `novaworld/` (the lint refuses any other).
 - Every file is referenced by a test, a probe, the ctest registration, a workflow,
   a script, or this README (a `docs/` mention does not count): a fixture nothing
   reads is deleted, not kept.
@@ -48,9 +45,7 @@ gate.
 
 The NovaWorld wire captures, kept byte-for-byte because the codec tests replay
 what a retail peer sent (the bytes are the product). Everything else that ever
-came from a retail install was replaced by a minted or authored file, or moved to
-the reference fixture set the gated tests read (`retail::reference_fixture`,
-`RetailData.fixture`; `docs/asset-gated-tests.md`).
+came from a retail install was replaced by a minted or authored file.
 
 | Files | Why they stay |
 |---|---|
@@ -155,9 +150,7 @@ control register 0, values 0..4, no speed):
 
 Every consumer that pins a number pins the authored one: the bird's 18 faces,
 the armory's 24 collision faces (COBJ 1's 8 faces = 24 vertices move under a
-slide, the other 48 stay), the person's head sphere. Retail-only assertions
-(the six retail controlled models' PANM/CTRL bytes, the 00TRa armory's own
-occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
+slide, the other 48 stay), the person's head sphere.
 
 ## Other minted sets
 
@@ -184,8 +177,7 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 - `fnt/synth_*.fnt`, `cbin/synth_nlist*.kda`, `cbin/credits_image.png`,
   `cbin/particle_dot.tga` — `tests/fixtures/minimal_fnt_gen.cpp`,
   `minimal_cbin_gen.cpp`: the credits lists in their JO, JOX01 and BHD shapes
-  through `cbin::encode` (the shipped trio is `cbin_roundtrip`'s reference-tree
-  leg), the image and font stand-ins the tests stage beside them, and the .tga
+  through `cbin::encode`, the image and font stand-ins the tests stage beside them, and the .tga
   sprite the effect-world test's synthetic particle file names.
 - `env/synth_full.env`, `env/cloud01.pcx`, `env/cloud01b.pcx` — `tests/fixtures/minimal_env_gen.cpp`:
   the synthetic environment (every keyword authored, ten time-of-day keyframes,
@@ -214,14 +206,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   `tests/fixtures/synth_mus_gen.cpp`: two music-director programs authored in the
   MDEdit source dialect through `mus_compile` + `mus_encode_file` (the gamescript
   in the shipped eight-section routing shape, the menuscript a Var02-dispatched
-  state machine) and the decompiler's own golden over the gamescript. The shipped
-  programs are the reference-tree legs of the mus ctests (their text compiled back to
-  their own bytes, mus_decompile's retail leg pinning where its lines fall).
+  state machine) and the decompiler's own golden over the gamescript.
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.
 - `avatars/synth_avatars.def` — `tests/fixtures/minimal_avatars_gen.cpp`: the avatar
   table through `avatars_write` (26 parts, eight nationalities of divisions and
-  combos with both `skipdemo` flag levels, four good and four evil); the shipped
-  table is the reference-tree leg of `avatars_parse` and `avatars_roundtrip`.
+  combos with both `skipdemo` flag levels, four good and four evil).
 - `bms/synth_dense.bms` — `tests/fixtures/minimal_bms_gen.cpp`: a dense mission
   authored through the `bms_edit` free functions and written by `bms::write` (four populated
   pools, one item id each, zero-valued optional fields, the minted terrain and
@@ -254,10 +243,9 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   files through `save_particles` (a lone table, a table with its edit handles,
   seven effects over a blank particle, a three-layer particle with curves and
   per-layer colours, and the `Buildup` effect the authored `gorehit.ptu` also
-  references); the shipped `.ptl` corpus is `particle_smoke_all_fixtures`'
-  reference-tree leg.
+  references).
 - `dbf/synth_bank.dbf` — `tests/fixtures/minimal_dbf_gen.cpp`: eleven dialog groups
-  through `encode_dbf`; the shipped 00TRg bank is `dbf_roundtrip`'s reference-tree leg.
+  through `encode_dbf`.
 - `gut/armory_floor.3di`, `gut/door_block.3di`, `gut/light_post.3di` —
   `tests/fixtures/gut_world_gen.cpp`, through the synthetic model builder and the
   parity writer: the synthetic armory's floor plan, blink boxes (each 0.1 below the

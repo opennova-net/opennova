@@ -546,12 +546,6 @@ def tail(path: Path, lines: int = 40) -> str:
     return "\n".join(text.splitlines()[-lines:])
 
 
-def retail_install() -> str:
-    """The packed retail install (OPENNOVA_JO_DIR, docs/asset-gated-tests.md); '' when unset."""
-    value = os.environ.get("OPENNOVA_JO_DIR", "").strip()
-    return value if value and Path(value).is_dir() else ""
-
-
 # --- subcommands --------------------------------------------------------------
 
 
@@ -583,9 +577,6 @@ def cmd_launch(args: argparse.Namespace) -> int:
         argv.append("/d")
     if args.loose_root:
         argv.append("--loose-root")
-    resource_dir = args.resource_dir or retail_install()
-    if resource_dir and not args.resource_dir:
-        setattr(args, "resource_dir", resource_dir)
     for attribute, flag in GAME_VALUE_FLAGS:
         value = getattr(args, attribute, None)
         if value not in (None, ""):
@@ -988,7 +979,7 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--timeout", type=float, default=240.0, help="seconds to wait for the endpoint")
     launch.add_argument("--loose", action="store_true", help="/d: loose files beside the archives override them")
     launch.add_argument("--loose-root", action="store_true", help="--loose-root: mount an archive-less directory as loose files")
-    launch.add_argument("--resource-dir", default=None, help="game data directory (default: OPENNOVA_JO_DIR)")
+    launch.add_argument("--resource-dir", default=None, help="game data directory (default: the base game, assets/)")
     launch.add_argument("--exp", default=None, help="/exp <name>: mount an expansion")
     launch.add_argument("--game", default=None, help="/game <code>: jo, jodemo, ...")
     launch.add_argument("--loose-mission", default=None, help="boot this loose .bms from --resource-dir")

@@ -54,7 +54,6 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
-#include "common/retail_paths.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);

@@ -1,4 +1,4 @@
-"""Regression tests for suite isolation and missing-coverage detection."""
+"""Regression tests for the suite's selection and missing-coverage detection."""
 import importlib.util
 import json
 import re
@@ -27,146 +27,84 @@ class SuiteChecks(unittest.TestCase):
     def report(self, body):
         return self.write("result.xml", "<testsuites><testsuite>" + body + "</testsuite></testsuites>")
 
-    def test_core_and_retail_are_disjoint_and_exclude_windowed(self):
-        for name in ["plain", "windowed/raster", "retail/compat", "retail/windowed/pixel"]:
+    def test_windowed_scripts_are_their_own_selection(self):
+        for name in ["plain", "net/wire", "windowed/raster"]:
             self.write("godot/tests/" + name + "_test.gd", "extends GutTest\nfunc test_works():\n\tpass\n")
-        core = suites.godot_scripts(self.root, "core")
-        retail = suites.godot_scripts(self.root, "retail")
-        self.assertEqual(core, ["res://tests/plain_test.gd"])
-        self.assertEqual(retail, ["res://tests/retail/compat_test.gd"])
-        self.assertEqual(suites.godot_scripts(self.root, "all"), core + retail)
-        self.assertEqual(suites.godot_scripts(self.root, "core", windowed=True),
+        self.assertEqual(suites.godot_scripts(self.root),
+                         ["res://tests/net/wire_test.gd", "res://tests/plain_test.gd"])
+        self.assertEqual(suites.godot_scripts(self.root, windowed=True),
                          ["res://tests/windowed/raster_test.gd"])
-        self.assertEqual(suites.godot_scripts(self.root, "retail", windowed=True),
-                         ["res://tests/retail/windowed/pixel_test.gd"])
-        self.assertEqual(suites.godot_scripts(self.root, "all", windowed=True),
-                         ["res://tests/retail/windowed/pixel_test.gd", "res://tests/windowed/raster_test.gd"])
 
     def test_windowed_run_fails_on_a_pending_test(self):
         report = self.report('<testcase classname="tests/windowed/raster_test.gd" name="test_pixel">'
             '<skipped>RenderingDevice unavailable</skipped></testcase>')
+        self.assertEqual(suites.check_report(report, ["res://tests/windowed/raster_test.gd"], godot=True), [])
         self.assertEqual(suites.check_report(report, ["res://tests/windowed/raster_test.gd"],
-            godot=True, suite="core"), [])
-        self.assertEqual(suites.check_report(report, ["res://tests/windowed/raster_test.gd"],
-            godot=True, suite="core", windowed=True),
+            godot=True, windowed=True),
             ["windowed test skipped: tests/windowed/raster_test.gd:test_pixel"])
         log = self.write("gut.log", "res://tests/windowed/raster_test.gd\n"
             "- [Pending]: RenderingDevice unavailable under this Godot renderer\n")
-        self.assertEqual(suites.check_log(log, "core"), [])
-        self.assertEqual(len(suites.check_log(log, "core", windowed=True)), 1)
+        self.assertEqual(suites.check_log(log), [])
+        self.assertEqual(len(suites.check_log(log, windowed=True)), 1)
 
-    def test_windowed_all_keeps_missing_data_skips(self):
-        root_skip = ('<testcase classname="tests/retail/windowed/pixel_test.gd" name="test_pixel">'
-            '<skipped>needs OPENNOVA_JO_DIR</skipped></testcase>')
-        report = self.report(root_skip)
-        scripts = ["res://tests/retail/windowed/pixel_test.gd"]
-        self.assertEqual(suites.check_report(report, scripts, godot=True, suite="all", windowed=True), [])
-        self.assertIn("retail test skipped: tests/retail/windowed/pixel_test.gd:test_pixel",
-            suites.check_report(report, scripts, godot=True, suite="retail", windowed=True))
-        log = self.write("gut.log", "res://tests/retail/windowed/pixel_test.gd\n"
-            "- [Pending]: needs OPENNOVA_JO_DIR\n"
-            "- [Pending]: RenderingDevice unavailable under this Godot renderer\n")
-        self.assertEqual(len(suites.check_log(log, "all", windowed=True)), 1)
-
-    def test_core_layout_covers_windowed_core_scripts(self):
+    def test_layout_rejects_retail_reads_under_either_test_tree(self):
         self.write("godot/tests/windowed/raster_test.gd", "func test_one():\n\tRetailData.assets()\n")
-        self.assertEqual(suites.layout_errors(self.root),
-                         ["core script reads retail data: res://tests/windowed/raster_test.gd"])
-
-    def test_native_migration_record_is_validated(self):
-        self.write("scripts/ci/native_migration.json", json.dumps({
-            "mixed_entries": ["one", "two_x"], "sources": ["tests/one_test.cpp"]}))
-        self.write("tests/CMakeLists.txt", "opennova_add_mixed_test(one COMMAND one_test)\n"
-            "foreach(t x)\n    opennova_add_mixed_test(two_${t} COMMAND two_${t}_test)\nendforeach()\n")
-        self.assertEqual(suites.layout_errors(self.root),
-                         ["native migration source missing: tests/one_test.cpp"])
-        self.write("tests/one_test.cpp", "")
-        self.assertEqual(suites.layout_errors(self.root), [])
-        self.write("scripts/ci/native_migration.json", json.dumps({
-            "mixed_entries": ["one", "three"], "sources": ["tests/one_test.cpp"]}))
-        self.assertEqual(suites.layout_errors(self.root),
-                         ["native migration entry is not a mixed ctest: three"])
+        self.write("godot/tests/env_test.gd", 'func test_two():\n\tOS.get_environment("OPENNOVA_JO_DIR")\n')
+        self.write("tests/world/walk_test.cpp", '#include "common/retail_paths.h"\n')
+        self.write("tests/mission/boot_test.cpp", '#include "common/retail_mission_files.h"\n')
+        self.write("tests/plain_test.cpp", "int main() { return 0; }\n")
+        self.write("tests/fixtures/blob.bin", "OPENNOVA_JO_ASSETS")
+        self.assertEqual(suites.layout_errors(self.root), [
+            "test reads retail data (retail_mission_files): tests/mission/boot_test.cpp",
+            "test reads retail data (retail_paths): tests/world/walk_test.cpp",
+            "test reads retail data (OPENNOVA_JO_): godot/tests/env_test.gd",
+            "test reads retail data (RetailData): godot/tests/windowed/raster_test.gd",
+        ])
 
     def test_missing_native_test_and_unexpected_test_fail(self):
         report = self.report('<testcase name="unexpected"/>')
-        errors = suites.check_report(report, ["required"], godot=False, suite="core")
+        errors = suites.check_report(report, ["required"], godot=False)
         self.assertIn("not in report: required", errors)
         self.assertIn("unexpected test: unexpected", errors)
 
     def test_missing_method_is_not_hidden_by_a_passing_sibling(self):
         report = self.report('<testcase classname="tests/example_test.gd" name="test_first"/>')
         errors = suites.check_report(report, ["res://tests/example_test.gd"], godot=True,
-            suite="core", methods={"res://tests/example_test.gd": ["test_first", "test_second"]})
+            methods={"res://tests/example_test.gd": ["test_first", "test_second"]})
         self.assertEqual(errors, ["method not in report: tests/example_test.gd:test_second"])
 
     def test_gut_classname_without_resource_prefix_matches(self):
         report = self.report('<testcase classname="tests/example_test.gd" name="test_first"/>')
-        self.assertEqual(suites.check_report(report, ["res://tests/example_test.gd"],
-            godot=True, suite="core"), [])
+        self.assertEqual(suites.check_report(report, ["res://tests/example_test.gd"], godot=True), [])
 
-    def test_retail_skip_and_skipped_leg_fail(self):
-        report = self.report('<testcase name="whole"><skipped/></testcase>'
-            '<testcase name="mixed"><system-out>' + "padding " * 2000 +
-            'SKIP-LEG: needs data</system-out></testcase>')
-        errors = suites.check_report(report, ["whole", "mixed"], godot=False, suite="retail")
-        self.assertTrue(any("retail test skipped" in e for e in errors))
-        self.assertTrue(any("retail coverage not exercised" in e for e in errors))
+    def test_a_data_skip_fails(self):
+        report = self.report('<testcase name="pg"><system-out>' + "padding " * 2000 +
+            'SKIP: needs a PostgreSQL server</system-out></testcase>')
+        self.assertEqual(suites.check_report(report, ["pg"], godot=False), ["test skipped: :pg"])
 
-    def test_accidental_gate_in_core_fails(self):
-        report = self.report('<testcase name="gate"><system-out>SKIP: needs a game</system-out></testcase>')
-        self.assertTrue(suites.check_report(report, ["gate"], godot=False, suite="core"))
-
-    def test_graphics_pending_is_allowed_in_core_but_retail_pending_is_not(self):
+    def test_graphics_pending_is_allowed_headless(self):
         report = self.report('<testcase classname="tests/pixel_test.gd" name="test_pixel">'
             '<skipped>RenderingDevice unavailable</skipped></testcase>')
-        self.assertEqual(suites.check_report(report, ["res://tests/pixel_test.gd"],
-            godot=True, suite="core"), [])
-        report = self.report('<testcase classname="tests/pixel_test.gd" name="test_pixel">'
-            '<skipped>OPENNOVA_JO_ASSETS required</skipped></testcase>')
-        self.assertTrue(suites.check_report(report, ["res://tests/pixel_test.gd"],
-            godot=True, suite="core"))
+        self.assertEqual(suites.check_report(report, ["res://tests/pixel_test.gd"], godot=True), [])
 
     def test_empty_run_fails(self):
         report = self.report("")
-        self.assertTrue(suites.check_report(report, [], godot=False, suite="core"))
-
-    def test_retail_requires_both_existing_directories(self):
-        with patch.dict(suites.os.environ, {}, clear=True):
-            self.assertEqual(len(suites.check_roots()), 2)
-        ordinary_file = self.write("not-a-directory", "fixture")
-        with patch.dict(suites.os.environ, {"OPENNOVA_JO_DIR": str(self.root),
-                "OPENNOVA_JO_ASSETS": str(ordinary_file)}, clear=True):
-            self.assertEqual(suites.check_roots(), ["OPENNOVA_JO_ASSETS must name an existing directory"])
-        with patch.dict(suites.os.environ, {name: str(self.root) for name in suites.ROOTS}, clear=True):
-            self.assertEqual(suites.check_roots(), [])
+        self.assertTrue(suites.check_report(report, [], godot=False))
 
     def test_parse_errors_and_silent_collection_drop_fail(self):
         log = self.write("gut.log", "SCRIPT ERROR: Parse Error: missing class\n"
             "Ignoring script res://tests/lost_test.gd because it does not extend GutTest\n")
-        self.assertEqual(len(suites.check_log(log, "core")), 2)
+        self.assertEqual(len(suites.check_log(log)), 2)
 
-    def test_all_only_accepts_explicit_retail_script_skips(self):
-        log = self.write("gut.log", "res://tests/retail/data_test.gd\n"
-            "- [Script skipped]: OPENNOVA_JO_ASSETS is required\n"
-            "res://tests/core_test.gd\n- [Script skipped]: OPENNOVA_JO_ASSETS is required\n")
-        self.assertEqual(suites.skipped_retail_scripts(log), {"tests/retail/data_test.gd"})
-
-    def test_core_layout_rejects_direct_and_helper_retail_access(self):
-        self.write("godot/tests/one_test.gd", "func test_one():\n\tRetailData.assets()\n")
-        self.write("godot/tests/two_test.gd", "func test_two():\n\tPresenterFixture.stage(self, 'x', {})\n")
-        self.assertEqual(len(suites.layout_errors(self.root)), 2)
-
-    def test_ctest_inventory_uses_labels_in_both_directions(self):
+    def test_ctest_inventory_selects_by_shard(self):
         with patch.object(suites.subprocess, "check_output", return_value=json.dumps(
                 {"tests": [{"name": "one"}]})) as command:
-            self.assertEqual(suites.ctest_inventory(self.root, "core"), ["one"])
-            self.assertEqual(command.call_args.args[0][-2:], ["-LE", "^retail$"])
-            suites.ctest_inventory(self.root, "retail")
-            self.assertEqual(command.call_args.args[0][-2:], ["-L", "^retail$"])
-            suites.ctest_inventory(self.root, "core", "editor")
-            self.assertEqual(command.call_args.args[0][-4:], suites.SHARDS["editor"])
+            self.assertEqual(suites.ctest_inventory(self.root), ["one"])
+            self.assertEqual(command.call_args.args[0][-1], "--show-only=json-v1")
+            suites.ctest_inventory(self.root, "editor")
+            self.assertEqual(command.call_args.args[0][-2:], suites.SHARDS["editor"])
 
-    def test_core_shards_partition_the_core_suite(self):
+    def test_ctest_shards_partition_the_suite(self):
         def selects(args, labels):
             # ctest: -L keeps a test with a label matching, -LE drops one.
             picked = True
@@ -175,41 +113,23 @@ class SuiteChecks(unittest.TestCase):
                 picked = picked and (hit if flag == "-L" else not hit)
             return picked
 
-        core = suites.ctest_selection("core")
-        for labels in ([], ["editor"], ["retail"], ["editor", "retail"], ["retail", "editor"], ["other"]):
-            shards = [name for name in suites.SHARDS if selects(suites.ctest_selection("core", name), labels)]
-            self.assertEqual(len(shards), 1 if selects(core, labels) else 0, labels)
-        with self.assertRaises(ValueError):
-            suites.ctest_selection("retail", "editor")
+        self.assertEqual(suites.ctest_selection(), [])
+        for labels in ([], ["editor"], ["redis"], ["editor", "redis"], ["other"]):
+            shards = [name for name in suites.SHARDS if selects(suites.ctest_selection(name), labels)]
+            self.assertEqual(len(shards), 1, labels)
 
-    def test_godot_shards_partition_each_suite(self):
+    def test_godot_shards_partition_the_suite(self):
         for name in ["plain", "net/wire", "authoring/editor", "game/shell", "mcp/server", "probes/probe",
-                     "audio/mix", "retail/compat", "retail/game/menu", "windowed/raster"]:
+                     "audio/mix", "windowed/raster"]:
             self.write("godot/tests/" + name + "_test.gd", "extends GutTest\nfunc test_works():\n\tpass\n")
-        core = suites.godot_scripts(self.root, "core")
-        shards = {name: suites.godot_scripts(self.root, "core", shard=name) for name in suites.GODOT_SHARDS}
-        self.assertEqual(sorted(shards["shells"] + shards["world"]), core)
+        scripts = suites.godot_scripts(self.root)
+        shards = {name: suites.godot_scripts(self.root, shard=name) for name in suites.GODOT_SHARDS}
+        self.assertEqual(sorted(shards["shells"] + shards["world"]), scripts)
         self.assertFalse(set(shards["shells"]) & set(shards["world"]))
         self.assertEqual(shards["shells"], ["res://tests/authoring/editor_test.gd", "res://tests/game/shell_test.gd",
                                             "res://tests/mcp/server_test.gd", "res://tests/probes/probe_test.gd"])
-        retail = suites.godot_scripts(self.root, "retail")
-        retail_shards = {name: suites.godot_scripts(self.root, "retail", shard=name) for name in suites.GODOT_SHARDS}
-        self.assertEqual(sorted(retail_shards["shells"] + retail_shards["world"]), retail)
-        self.assertEqual(retail_shards["shells"], ["res://tests/retail/game/menu_test.gd"])
         with self.assertRaises(ValueError):
-            suites.godot_scripts(self.root, "all", shard="shells")
-        with self.assertRaises(ValueError):
-            suites.godot_scripts(self.root, "core", shard="editor")
-
-    def test_migration_cannot_lose_an_original_method(self):
-        self.write("scripts/ci/retail_migration.json", json.dumps([{
-            "original_script": "godot/tests/example_test.gd",
-            "core_script": "godot/tests/example_test.gd", "core_methods": ["test_original"],
-            "retail_script": None, "retail_methods": []}]))
-        errors = suites.layout_errors(self.root)
-        self.assertEqual(errors, ["migrated method missing: godot/tests/example_test.gd:test_original"])
-        self.write("godot/tests/example_test.gd", "extends GutTest\nfunc test_original():\n\tpass\n")
-        self.assertEqual(suites.layout_errors(self.root), [])
+            suites.godot_scripts(self.root, shard="editor")
 
 
 if __name__ == "__main__":

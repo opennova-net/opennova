@@ -101,7 +101,6 @@ make_vault() {
     price_tier2=REPLACE_ME price_tier3=REPLACE_ME price_own_machine=REPLACE_ME price_static_address=REPLACE_ME
   mkitem github-terraform API_CREDENTIAL token=SECRETVALUEgithubtoken billing_email=billing@example.org \
     "members=$MEMBERS_JSON"
-  mkitem reference-assets API_CREDENTIAL token=SECRETVALUEreferenceassets
 }
 # A fixture field's value.
 fixture() { jq -j --arg l "$2" '[.fields[] | select(.label == $l) | .value][0]' "$STUB_VAULT_DIR/$1.json"; }

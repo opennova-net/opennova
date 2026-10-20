@@ -8,8 +8,8 @@
    [orig: AudioVM_LoadScriptFile @ 0x672D20 (the compile path is the write-inverse); docs/audio/mus-sbf-re.md]
 
    Phase D scope: produce bytecode that round-trips through
-   `decompile(compile(decompile(x))) == decompile(x)` against the
-   `fixtures/mus/jo_gamemus.bin` golden.
+   `decompile(compile(decompile(x))) == decompile(x)` against the minted
+   `fixtures/mus/synth_gamemus.bin` and `synth_forms.bin`.
 
    The compiler is original work: there is no engine-shipped reference. The
    inverse opcode table is derived by walking the decompiler's `kOps[256]`
@@ -767,7 +767,7 @@ struct Compiler {
 
     /* push <int>: 0x01 (u8) when 0..255, else 0x02 (u32). The decompiler
        prints raw decimal regardless, so we can pick whichever fits. The
-       jo_gamemus.bin original uses 0x01 for small values -- we follow it. */
+       shipped JO gamescript uses 0x01 for small values -- we follow it. */
     void emit_push_int(int32_t v) {
         if (v >= 0 && v <= 255) {
             emit.byte(0x01);
@@ -1329,8 +1329,8 @@ int Compiler::parse_stmt_at(const char **err) {
            (1 opcode + 4 header + count*entry_size body); Jointops.exe's
            VmOp_TableExec @ 0x672BB0 reads it as `add esi, skip; dec esi` to
            land the next opcode, so an incorrect (or zero) value scrambles
-           the dispatcher on out-of-range indices. Witnessed: jo_gamemus
-           tablexec @ 0x00c8 has size=3, entry_stride=2 → skip_size = 0x0b. */
+           the dispatcher on out-of-range indices. Witnessed: the shipped JO
+           gamescript's tablexec @ 0x00c8 has size=3, entry_stride=2 → skip_size = 0x0b. */
         uint32_t total_size = 5u + (uint32_t)ntargets * (uint32_t)entry_size;
         /* skip_size is a single byte the VM uses to step past the table; a wrapped
            value scrambles the dispatcher on out-of-range indices. Reachable with a

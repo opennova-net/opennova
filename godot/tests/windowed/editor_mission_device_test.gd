@@ -3,7 +3,7 @@ extends GutTest
 ## S14 V8 (ADR 0046 S14, E13): the editor's mission device in a window, its renderer rendering and the
 ## Document window's canvas drawing the device each frame (the editor's ImGui pass attached), over a
 ## project minted from the fixtures (the mission, its terrain and textures, its env, the item table,
-## the models). A tests/windowed/ script, run by `scripts/test_godot.sh --suite core --windowed`.
+## the models). A tests/windowed/ script, run by `scripts/test_godot.sh --windowed`.
 ## - The picture shows the terrain: where the terrain lies, the picture with the terrain layer shown
 ##   differs from the picture with it off (the option an Update, nothing built again).
 ## - The render token: with a model drawn in the Preview window in the same frames, the two devices

@@ -3,7 +3,7 @@ extends GutTest
 # The menus on the original's raster (engine menu/menu_frame.h, renderer/d3d9_raster.h):
 # a draw list is the original's window coordinates, which Direct3D 9 rasterises with
 # pixel centres on the integers. Every pin renders a real MenuFrame through the device:
-# a tests/windowed/ script, run by `scripts/test_godot.sh --suite core --windowed` (a
+# a tests/windowed/ script, run by `scripts/test_godot.sh --windowed` (a
 # headless run pends it).
 # - The edges: each the float product of the design point and the scale pair, truncated
 #   (the x87 unit at Direct3D 9's single precision), and an outline lit as Direct3D 9's

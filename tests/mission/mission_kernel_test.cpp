@@ -462,7 +462,7 @@ static void test_board_walk_reaches_a_kernel_named_point() {
 	if (test_io::is_lfs_pointer(mount)) {
 		// A checkout without the LFS fixtures (the net-linux job pulls only
 		// fixtures/novaworld) carries the pointer, not the model.
-		std::printf("SKIP-LEG: needs the LFS fixture fixtures/threedi/synth/mount.3di\n");
+		std::printf("[skip] fixtures/threedi/synth/mount.3di is an unpulled LFS pointer\n");
 		return;
 	}
 	CHECK(!mount.empty() && test_io::write_file(root + "/NamedMount.3di", mount));
@@ -548,7 +548,7 @@ static void test_player_spawn_slice_reads_its_model_radius() {
 	const std::vector<uint8_t> mount = test_io::read_file(
 			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/mount.3di");
 	if (test_io::is_lfs_pointer(mount)) {
-		std::printf("SKIP-LEG: needs the LFS fixture fixtures/threedi/synth/mount.3di\n");
+		std::printf("[skip] fixtures/threedi/synth/mount.3di is an unpulled LFS pointer\n");
 		return;
 	}
 	CHECK(!mount.empty() && test_io::write_file(root + "/SliceMount.3di", mount));

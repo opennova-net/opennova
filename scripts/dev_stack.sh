@@ -10,8 +10,7 @@
 #
 #   scripts/dev_stack.sh up [options]   build the images and start the stack
 #     --data <dir>          host game servers on this game folder (a licensed
-#                           Joint Operations install; default: OPENNOVA_JO_DIR
-#                           when it names a folder): once the stack is up, its
+#                           Joint Operations install): once the stack is up, its
 #                           base files (resource.pff, localres.pff,
 #                           language.pff; version.txt, score.ini, _NSTMOUT.TXT
 #                           and gt.ssc when present) are uploaded into the
@@ -25,7 +24,8 @@
 #     --synthetic-data      host on the synthetic data set instead (one
 #                           deathmatch map packed into the three archives, no
 #                           licensed byte: what CI runs)
-#     --no-hosting          no hosted servers, whatever OPENNOVA_JO_DIR says
+#     --no-hosting          no hosted servers, whatever --data or
+#                           --synthetic-data say
 #     --address <ipv4>      the address everything announces (default: this
 #                           machine's LAN address); never loopback
 #     --prebuilt <dir>      build the images from a Linux build tree's binaries
@@ -384,11 +384,6 @@ cmd_up() {
         || die "no LAN address found; name the one to announce with --address <ipv4>"
     [[ "$address" != 127.* ]] || die "--address cannot be loopback: the stack's containers reach it too"
 
-    # The data set: --data, else OPENNOVA_JO_DIR (a retail install), else none.
-    if [[ "$hosting_off" == 0 && "$synthetic" == 0 && -z "$data" && -n "${OPENNOVA_JO_DIR:-}" \
-            && -d "${OPENNOVA_JO_DIR:-}" ]]; then
-        data="$OPENNOVA_JO_DIR"
-    fi
     [[ "$hosting_off" == 0 ]] || { data=""; synthetic=0; }
     local hosting=0
     if [[ "$synthetic" == 1 || -n "$data" ]]; then hosting=1; fi

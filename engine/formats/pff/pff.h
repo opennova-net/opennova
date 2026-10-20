@@ -269,9 +269,10 @@ int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
 bool pff_entry_is_dead_space(const PffEntry &entry);
 
 /* pff_apply_edits with nothing to apply, written whatever: the archive at `path` written to
-   `out_path` (never `path` itself) with every entry kept as an edit keeps it. A retail archive
-   written so is its own bytes (ctest pff_retail_rewrite, over JO:CA's five). Returns PFF_WRITE_OK
-   or a PFF_WRITE_ERR_* code (PFF_WRITE_ERR_IO for an archive that does not open). */
+   `out_path` (never `path` itself) with every entry kept as an edit keeps it. An archive laid
+   out as pack.exe lays one out, written so, is its own bytes (ctest pff_packer_rewrite).
+   Returns PFF_WRITE_OK or a PFF_WRITE_ERR_* code (PFF_WRITE_ERR_IO for an archive that does
+   not open). */
 int pff_write_archive_again(const char *path, const char *out_path);
 
 /* `archive`'s entries (indices into archive->entries, which pff_open sorts by name) in the order

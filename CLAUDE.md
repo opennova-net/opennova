@@ -43,16 +43,16 @@ easier to relay than to rediscover.
 - `art/` — authoring sources (Blender scenes and their textures, all LFS) whose exports
   land in `assets/`.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
-- `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a mixed
-  row (`blender_<name>` plus a retail-labelled `_retail` row) when Blender 5.x is on PATH,
-  run against the source-tree add-on; the Blender packaging workflow runs them against
-  the installed zip (`tools/blender/opennova_3di/README.md`).
+- `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a
+  `blender_<name>` row when Blender 5.x is on PATH, run against the source-tree add-on;
+  the Blender packaging workflow runs them against the installed zip
+  (`tools/blender/opennova_3di/README.md`).
 - `fixtures/` — test inputs, each minted (by a `tests/fixtures/*_gen.cpp` generator
   through our own writer), authored, or keep (the small retail-interop set); binaries are
   LFS-tracked, text fixtures plain blobs (`.gitattributes`), and each is classified by
   `scripts/lint/fixture_lint.py` (`fixtures/README.md`, ADR 0041).
-- `scripts/` — the build/test/bootstrap/package entry points, `ci/` (suite selection and
-  attestation, `test_suites.py`), `lint/` (the CI gates), and the `ida/`, `mcp/`, `net/`,
+- `scripts/` — the build/test/bootstrap/package entry points, `ci/` (the shards and the
+  suite's attestation, `test_suites.py`), `lint/` (the CI gates), and the `ida/`, `mcp/`, `net/`,
   `oracles/`, `parity/` and `render/` helper scripts.
 - `docs/` — the golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly
@@ -74,9 +74,9 @@ processes in the main checkout outside the worktree, so sandboxed runs can fail 
 processes.
 
 ```bash
-scripts/build.sh          # C++ build + ctest (Release); --suite core|retail|all (default all), --no-godot, --jobs N
+scripts/build.sh          # C++ build + ctest (Release); --no-godot, --jobs N, --shard editor|rest (one of CI's two)
 scripts/build_godot.sh    # both GDExtension variants -> godot/bin/ (--runtime-only for one); fully restart the editor after
-scripts/test_godot.sh     # GUT headless; --suite core|retail|all (default all); --windowed runs the RD-only tests/windowed/ + tests/retail/windowed/ scripts (local, no CI job)
+scripts/test_godot.sh     # GUT headless; --shard shells|world (one of CI's two); --windowed runs the RD-only tests/windowed/ scripts (local, no CI job)
 python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv)
 python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (docs repo; --write regenerates)
 ```
@@ -94,19 +94,18 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   -DBUILD_NOVAWORLD_HTTP=ON`; its database tests need a PostgreSQL server,
   `-DOPENNOVA_TEST_PG=<uri>` (`scripts/dev_postgres.sh up` runs one and prints it), and
   its HTTP layer's tests a Redis server, `-DOPENNOVA_TEST_REDIS=<url>`
-  (`scripts/dev_redis.sh up`), or they skip, which `--suite core` fails.
+  (`scripts/dev_redis.sh up`), or they skip, which the suite fails.
 - Full ctest is ~90 s. Scope during focused work:
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.
-- `--suite core` runs with both retail roots unset. `--suite retail` requires
-  `OPENNOVA_JO_DIR` and `OPENNOVA_JO_ASSETS` and fails on missing or skipped coverage.
-  The default `--suite all` permits explicit missing-data skips; its green result
-  never proves those cases exercised retail data. Suite selection, migration records, local setup, and the
-  never-commit-captures policy live in [docs/asset-gated-tests.md](docs/asset-gated-tests.md);
-  every other env hook is gone ([docs/dev-env-vars.md](docs/dev-env-vars.md),
-  `scripts/lint/env_lint.py`). Machine paths go in `.claude/settings.local.json` `env`
-  (never tracked); no test reads a machine-local capture (the wire fixtures live in
-  `fixtures/novaworld/`).
+- One suite, and no test reads retail data: a test's inputs are minted or authored
+  fixtures and the tree's own `assets/`, and a witnessed retail value is pinned as a cited
+  constant (prove once, pin; [docs/asset-gated-tests.md](docs/asset-gated-tests.md));
+  `scripts/ci/test_suites.py --check-layout` fails a test that names a retail root. No
+  test reads a machine-local capture (the wire fixtures live in `fixtures/novaworld/`),
+  and every env hook but `GODOT_BIN` is gone ([docs/dev-env-vars.md](docs/dev-env-vars.md),
+  `scripts/lint/env_lint.py`): a tool that runs against a retail install takes it as an
+  argument (`--resource-dir`, `--install`).
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
   Do bulk text rewrites with bash sed/perl, not PowerShell.
 

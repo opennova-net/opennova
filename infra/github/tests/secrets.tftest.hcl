@@ -49,25 +49,11 @@ override_resource {
 variables {
   billing_email          = "billing@example.com"
   members                = { mock-admin = "admin", mock-member = "member" }
-  reference_assets_token = "github_pat_mock"
   stripe_test_secret_key = "rk_test_mock"
   aws_account_id_prod    = "111111111111"
   aws_account_id_staging = "222222222222"
   aws_region_prod        = "us-east-1"
   aws_region_staging     = "us-east-2"
-}
-
-run "reference_assets_token" {
-  command = plan
-
-  assert {
-    condition     = github_actions_secret.reference_assets_token.repository == "opennova" && github_actions_secret.reference_assets_token.secret_name == "REFERENCE_ASSETS_TOKEN"
-    error_message = "the retail legs read REFERENCE_ASSETS_TOKEN from opennova-net/opennova"
-  }
-  assert {
-    condition     = github_actions_secret.reference_assets_token.value == var.reference_assets_token
-    error_message = "the secret's value is the vault item reference-assets"
-  }
 }
 
 run "stripe_test_secret_key" {

@@ -201,9 +201,10 @@ stack_tf_op() {
   TF_DATA_DIR="$STACK_DATA_DIR" vault_env_run "$STACK_ENV_TPL" terraform -chdir="$STACK_DIR" "$@"
 }
 
-# plan|apply|import|output|list of the stack the STACK_* name, its state in
-# the S3 bucket $STATE_BUCKET (S3's own lock file holds a run's lock); apply
-# plans to a file and applies that plan after --yes or the typed STACK_WORD.
+# plan|apply|import|state-rm|output|list of the stack the STACK_* name, its
+# state in the S3 bucket $STATE_BUCKET (S3's own lock file holds a run's lock);
+# apply plans to a file and applies that plan after --yes or the typed
+# STACK_WORD.
 stack_run() {
   [ -n "$STATE_BUCKET" ] || die "no state bucket for $STACK_LABEL (the org stack writes it to the vault)"
   stack_tf init -input=false -reconfigure \
@@ -219,8 +220,8 @@ stack_run_body() {
   local action="${1:-plan}" rc=0 plan="$SECRETS_DIR/tfplan"
   shift || true
   case "$action" in
-    plan|apply|import|output|list) ;;
-    *) die "unknown: $STACK_LABEL $action (try: plan|apply|import|output|list)" ;;
+    plan|apply|import|state-rm|output|list) ;;
+    *) die "unknown: $STACK_LABEL $action (try: plan|apply|import|state-rm|output|list)" ;;
   esac
   case "$action" in
     plan) stack_tf_op plan -input=false "$@" ;;
@@ -236,6 +237,9 @@ stack_run_body() {
     import)
       [ $# -eq 2 ] || die "$STACK_LABEL import needs ADDRESS ID"
       stack_tf_op import -input=false "$1" "$2" ;;
+    state-rm)
+      [ $# -ge 1 ] || die "$STACK_LABEL state-rm needs an ADDRESS"
+      stack_tf state rm "$@" ;;
     output) stack_tf output "$@" ;;
     list)   stack_tf state list "$@" ;;
   esac

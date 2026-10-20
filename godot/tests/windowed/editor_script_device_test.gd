@@ -8,7 +8,7 @@ extends GutTest
 ## edit of the document; Ctrl+Z is the editor's undo (its shortcut), never the control's, and takes
 ## the control back to the document's text; a press and its release in one frame outside the control lets its focus go. The pointer's pass-through is not driven here: the
 ## imgui-godot layer reads the OS cursor, which a test does not move. A tests/windowed/ script, run
-## by `scripts/test_godot.sh --suite core --windowed`.
+## by `scripts/test_godot.sh --windowed`.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const SCRIPT := "scripts/text_document.wac"

@@ -31,8 +31,8 @@ Rules (each hit names the file and the rule):
                 "authored" / "keep" glob in the allowlist; a "minted_by"
                 row's generator must be a registered ctest source; a "keep"
                 glob lives only under fixtures/novaworld/ (the sanctioned wire
-                captures) -- every other retail file reads from the reference
-                fixture set (docs/asset-gated-tests.md), never from the tree
+                captures) -- no other retail file is in the tree, and no test
+                reads one
   pulled        (--require-pulled, CI) every LFS-tracked fixture is
                 materialized in the working tree, not a pointer stub
 
@@ -236,7 +236,7 @@ def main() -> int:
     for glob in allow.get("keep", []):
         if not glob.startswith("fixtures/novaworld/"):
             hits["provenance"].append(
-                f"{glob}: keep rows live only under fixtures/novaworld/ (retail files read from the reference fixture set)")
+                f"{glob}: keep rows live only under fixtures/novaworld/ (no other retail file belongs in the tree)")
     for rel in size_exceptions:
         if rel not in fixtures:
             hits["size"].append(f"{rel}: size exception names an untracked file")

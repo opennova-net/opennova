@@ -364,7 +364,7 @@ void test_graphic_model_is_the_loads_result() {
     const std::vector<uint8_t> mount = test_io::read_file(
             std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/mount.3di");
     if (mount.empty() || test_io::is_lfs_pointer(mount)) {
-        std::printf("SKIP-LEG: needs the LFS fixture fixtures/threedi/synth/mount.3di\n");
+        std::printf("[skip] fixtures/threedi/synth/mount.3di is an unpulled LFS pointer\n");
         return;
     }
     const std::string root = std::string(test_paths_temp_dir()) + "/" +

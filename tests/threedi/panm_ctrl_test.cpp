@@ -1,8 +1,6 @@
 // PANM/CTRL byte stability through the parity writer: the chunk bytes of the
 // synthetic register-controlled models (fixtures/threedi/synth) must survive
-// a read -> write round trip unchanged, and, when OPENNOVA_JO_ASSETS names an
-// extracted retail tree, the six retail controlled models it carries
-// (docs/asset-gated-tests.md).
+// a read -> write round trip unchanged.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
