@@ -24,8 +24,8 @@
 // live, a model's scene held while a gesture is open in its document and built once at its end, a
 // hold only over a picture the device holds; a model marker's drag an Update a sample, never a
 // Rebuild; the menu's caret on the preview clock with no configure, the device's frame drawn again
-// only as the caret's half of the blink changes (and, with OPENNOVA_JO_DIR, mp.mnu's GAME_NAME box
-// blinking its caret on it).
+// only as the caret's half of the blink changes (and a packed install's screen's edit box, minted
+// here, blinking its caret on it).
 //
 // ADR 0046 S14 (D3): a mission's drag through a real session and a fake device is Updates alone and
 // one undo step; the mission kind keeps two devices, a third mission given one giving up the least
@@ -35,13 +35,18 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <variant>
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mission_document.h>
@@ -64,9 +69,9 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/pff/pff.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -1785,20 +1790,68 @@ private:
 	const opennova::Vfs &vfs_;
 };
 
+// A menu of the edit boxes a walk for a blinking caret meets: on LOCKED a read-only box in a font that loads and a box
+// in a font the install lacks, neither drawing a caret; on HOST, in the stylesheet's font, a label of four letters and
+// the NAME box, empty, whose caret draws (mp.mnu's MULTI_PLAYER_HOST and its GAME_NAME box, the first of JO's).
+const char *const kEditBoxes = "<SCREEN>\r\n"
+							   "\t<NAME>LOCKED</NAME>\r\n"
+							   "\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+							   "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+							   "\t\t<WINDOW type=\"edit\" name=\"SHOWN\" READONLY>\r\n"
+							   "\t\t\t<POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>400</RIGHT><BOTTOM>140</BOTTOM></POSITION>\r\n"
+							   "\t\t\t<FONT><NAME>%DEF_FONTNAME%</NAME></FONT>\r\n"
+							   "\t\t</WINDOW>\r\n"
+							   "\t\t<WINDOW type=\"multiline_edit\" name=\"LOST\">\r\n"
+							   "\t\t\t<POSITION><LEFT>100</LEFT><TOP>200</TOP><RIGHT>400</RIGHT><BOTTOM>300</BOTTOM></POSITION>\r\n"
+							   "\t\t\t<FONT><NAME>nowhere.fnt</NAME></FONT>\r\n"
+							   "\t\t</WINDOW>\r\n"
+							   "\t</WINDOW>\r\n"
+							   "</SCREEN>\r\n"
+							   "<SCREEN>\r\n"
+							   "\t<NAME>HOST</NAME>\r\n"
+							   "\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+							   "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+							   "\t\t<FONT><NAME>%DEF_FONTNAME%</NAME><DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG></FONT>\r\n"
+							   "\t\t<WINDOW type=\"static\" name=\"LABEL\">\r\n"
+							   "\t\t\t<POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>\r\n"
+							   "\t\t\t<STRING>Host</STRING>\r\n"
+							   "\t\t</WINDOW>\r\n"
+							   "\t\t<WINDOW type=\"edit\" name=\"NAME\" MAXCHAR=\"31\">\r\n"
+							   "\t\t\t<POSITION><LEFT>100</LEFT><TOP>200</TOP><RIGHT>400</RIGHT><BOTTOM>240</BOTTOM></POSITION>\r\n"
+							   "\t\t</WINDOW>\r\n"
+							   "\t</WINDOW>\r\n"
+							   "</SCREEN>\r\n";
+
+// A packed install of the edit boxes' menu, its stylesheet and its font (the minted fixtures/fnt/synth_1page.fnt) in
+// localres.pff, where JO's install keeps its menus, written by the engine's PFF writer.
+bool write_edit_box_install(const std::string &install) {
+	const std::string style = "DEF_FONTNAME\tcaret.fnt\r\nDEF_TEXT_FG\tFFFFFFFF\r\n";
+	const std::string menu = kEditBoxes;
+	const std::vector<uint8_t> font = test_io::read_file(test_paths_repo_root(__FILE__) + std::string("/fixtures/fnt/synth_1page.fnt"));
+	if (font.empty()) return false;
+	const opennova::pff::PffWriteEntry entries[] = {
+		{"boxes.mnu", reinterpret_cast<const uint8_t *>(menu.data()), uint32_t(menu.size()), 0, 0, 0},
+		{"menu_style.mns", reinterpret_cast<const uint8_t *>(style.data()), uint32_t(style.size()), 0, 0, 0},
+		{"caret.fnt", font.data(), uint32_t(font.size()), 0, 0, 0},
+	};
+	std::error_code ec;
+	std::filesystem::create_directories(opennova::io::os_path(install), ec);
+	return opennova::pff::pff_write_archive((install + "/localres.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries,
+	                                        uint32_t(std::size(entries))) == opennova::pff::PFF_WRITE_OK;
+}
+
 } // namespace
 
-// The retail leg (OPENNOVA_JO_DIR): a shipped screen's edit box blinks its caret on the preview
-// clock. The .mnu files the packed install serves, read with the files that mount serves, until a
-// screen holding an edit box whose caret draws (a font that loads, not read only), which is mp.mnu's
-// MULTI_PLAYER_HOST and its GAME_NAME box: held focused as a viewport's options hold it, its frame
-// configured once and compiled at the clock's every quarter of the blink, 198 glyphs in the blink's
-// hidden half and 199 (the caret) in its shown half.
-static int test_retail_animated_menu() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (a shipped screen's edit box blinking its caret on the preview clock)");
-		return 0;
-	}
+// A packed install's screen's edit box blinks its caret on the preview clock. The .mnu files the packed install
+// serves (one minted here with the engine's PFF writer), read with the files that mount serves, until a screen holding
+// an edit box whose caret draws (a font that loads, not read only), which is HOST's NAME box: held focused as a
+// viewport's options hold it, its frame configured once and compiled at the clock's every quarter of the blink, the
+// label's four glyphs in the blink's hidden half and the caret one more in its shown half (JO's mp.mnu draws 198 and
+// 199 on MULTI_PLAYER_HOST: the screen's text, then the caret).
+static int test_packed_animated_menu() {
+	test_temp::TempDir scratch("opennova_viewport_packed_clock");
+	const std::string install = scratch.file("install");
+	TEST_EXPECT(write_edit_box_install(install));
 	opennova::Vfs vfs;
 	if (!vfs.mount_game(install, "", opennova::VfsMountMode::Packed)) {
 		std::printf("  FAIL mount_game: %s\n", vfs.last_error().c_str());
@@ -1807,11 +1860,10 @@ static int test_retail_animated_menu() {
 	const MountedFiles files(vfs);
 	opennova::menu::MenuStyleSource style;
 	const std::map<std::string, std::string> &vars = style.vars(files);
-	test_temp::TempDir scratch("opennova_viewport_retail_clock");
 	size_t menus = 0, screens = 0;
 	for (const auto &location : vfs.list_files()) {
 		const std::string &name = location.logical_name;
-		if (name.size() < 4 || retail::lower_ascii(name.substr(name.size() - 4)) != ".mnu") continue;
+		if (name.size() < 4 || opennova::strutil::to_lower(name.substr(name.size() - 4)) != ".mnu") continue;
 		std::vector<uint8_t> stored;
 		const std::string at = scratch.file(name.c_str());
 		if (!vfs.read_file_raw(name, stored) || !test_io::write_file(at, stored)) continue;
@@ -1843,15 +1895,14 @@ static int test_retail_animated_menu() {
 					glyphs[quarter] = render.compile(1.0f, 1.0f).glyphs.size();
 				}
 				if (!(glyphs[2] > glyphs[0])) continue; // no caret drawn (no font, read only)
-				// The first is mp.mnu's MULTI_PLAYER_HOST, its GAME_NAME box: 198 glyphs, the caret one more.
-				TEST_EXPECT(retail::lower_ascii(name) == "mp.mnu" && row->name() == "MULTI_PLAYER_HOST" &&
-						compiler.widget_name(index) == "GAME_NAME");
-				TEST_EXPECT(glyphs[0] == 198 && glyphs[1] == 198 && glyphs[2] == 199 && glyphs[3] == 199);
+				TEST_EXPECT(opennova::strutil::to_lower(name) == "boxes.mnu" && row->name() == "HOST" &&
+						compiler.widget_name(index) == "NAME");
+				TEST_EXPECT(glyphs[0] == 4 && glyphs[1] == 4 && glyphs[2] == 5 && glyphs[3] == 5);
 				return 0;
 			}
 		}
 	}
-	std::printf("  FAIL no shipped screen holds an edit box whose caret draws (%zu menus, %zu screens)\n", menus, screens);
+	std::printf("  FAIL no packed screen holds an edit box whose caret draws (%zu menus, %zu screens)\n", menus, screens);
 	return 1;
 }
 
@@ -2330,8 +2381,7 @@ static int test_backdrop_kinds() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	TEST_EXPECT(test_backdrop_kinds() == 0);
 	TEST_EXPECT(test_scene_state_arbitration() == 0);
 	TEST_EXPECT(test_kind_limit() == 0);
@@ -2350,7 +2400,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_gesture_holds_rebuild() == 0);
 	TEST_EXPECT(test_hold_needs_a_picture() == 0);
 	TEST_EXPECT(test_menu_clock() == 0);
-	TEST_EXPECT(test_retail_animated_menu() == 0);
+	TEST_EXPECT(test_packed_animated_menu() == 0);
 	TEST_EXPECT(test_builds() == 0);
 	TEST_EXPECT(test_follow_reads() == 0);
 	std::printf("editor_viewport: all tests passed\n");
