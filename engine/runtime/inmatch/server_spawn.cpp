@@ -484,7 +484,26 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	spawn.berserk = (ctx.config.game_type & 0x10000u) == 0;
 	const world::EntityHandle h =
 			is_host_own ? world::spawn_player(world, spawn) : world::spawn_remote_player(world, spawn);
-	if (!h.valid()) return h;
+	if (!h.valid()) {
+		// A body that does not spawn (pool 0's rows all taken) leaves the row added and
+		// bodyless: only the entity's own stores are skipped, the slot keeps its class,
+		// team and name, and the add returns the row; the pump takes its success arm, and
+		// the row's 0x0B is dropped while it holds no entity (D-NET-NEW-L1-10). A map
+		// change's re-add leaves the kept row bodyless the same way.
+		// [orig: Server_PlayerAdd - Entity_SpawnFromAnimSlotProperty @0x51D056, slot+0
+		//  @0x51D060, the null skip @0x51D063, the class stores @0x51D09A / @0x51D0A0,
+		//  the entity guards @0x51D0A6 / @0x51D0D3 / @0x51D114, the row returned
+		//  @0x51D53A; EntityPool_Allocate's pool-0 capacity 0x100 @0x4421CD;
+		//  NapiNPServerMsg_PlayerJoinRequest's entity test @0x51AB47]
+		conn.link.owned_entity = {};
+		conn.reply.player_slot = *player_slot;
+		const std::string &bodyless_name =
+				!conn.player_name.empty() ? conn.player_name : ctx.config.player_name;
+		if (!bodyless_name.empty()) conn.reply.player_name = bodyless_name;
+		conn.phase = ConnectionPhase::PlayerAdded;
+		conn.reply.player_slot_reserved = false;
+		return h;
+	}
 	// The body binds its items.def row at its spawn: a mid-match join's and a
 	// map change's kept slot's alike (D-NET-395) [orig: the Server_PlayerAdd
 	// call @0x51D7A7 -> its Entity_SpawnFromAnimSlotProperty call @0x51D056 (the
@@ -610,25 +629,31 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 }
 
 // The add's PlayerList entry: PlayerTeam the entity's signed team byte,
-// PlayerType its class [orig: Server_PlayerAdd: movsx entity+0x162 @0x51D368,
-// entity+0x294 @0x51D382, the SetOrCreates @0x51D48F / @0x51D4AA].
+// PlayerType its class; with no body, the slot's team byte (+416, unsigned) and
+// class (+89820) [orig: Server_PlayerAdd: movsx entity+0x162 @0x51D368,
+// entity+0x294 @0x51D382; the bodyless arm's slot+0x1A0 @0x51D398 and
+// slot+0x15EDC @0x51D3AF; the SetOrCreates @0x51D48F / @0x51D4AA].
 void stamp_player_list_add(NapiNPConnection &conn, const world::World &world) {
 	const world::Entity *player = world.registry.get(conn.link.owned_entity);
-	if (player == nullptr) return;
+	if (player == nullptr) {
+		conn.player_list_team = conn.assigned_team_valid ? conn.assigned_team : 0;
+		conn.player_list_type = conn.slot_class;
+		return;
+	}
 	conn.player_list_team = static_cast<int8_t>(player->team);
 	conn.player_list_type = player->player_class;
 }
 
 namespace {
 
-// Server_CountAlivePlayers: the active player-slot rows that carry a bound
-// entity/connection [orig: @0x4FD770 — slot byte +4 && dword +28].
+// Server_CountAlivePlayers: the active player-slot rows that carry a net
+// player, body or not (a bodyless add counts, D-NET-NEW-L1-10) [orig: @0x4FD770
+// - the active byte +4 @0x4FD785, the net player +28 @0x4FD78B].
 uint32_t count_alive_players(const NapiNPServerCtx &ctx) {
 	uint32_t count = 0;
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.phase >= ConnectionPhase::PlayerAdded &&
-				conn.phase < ConnectionPhase::Goodbye &&
-				conn.link.owned_entity.valid())
+				conn.phase < ConnectionPhase::Goodbye)
 			++count;
 	}
 	return count;
@@ -777,7 +802,10 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// @0x51C1CB].
 				if (conn.type == NapiNPConnection::kTypeServerSide)
 					conn.ammo_damage_classes.fill(0);
-				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false).valid()) {
+				// The add fails only with no free row; a bodyless add is a success
+				// (D-NET-NEW-L1-10) [orig: the success test @0x4C904E on the row].
+				(void)Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false);
+				if (conn.phase < ConnectionPhase::PlayerAdded) {
 					// The unlink's 0x03 is all it gets (framed by tick_connections, the
 					// held-joiner 0x03's writer).
 					if (conn.type == NapiNPConnection::kTypeServerSide)

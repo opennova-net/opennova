@@ -895,6 +895,69 @@ bool run_a_held_joiner_has_no_team() {
 	              "a held joiner holds no row and no team");
 }
 
+// D-NET-NEW-L1-10: a body that does not spawn (every pool-0 row taken) leaves the add
+// bodyless and successful: the row is the joiner's, the pump takes its success arm (the
+// 0x05 / 0x04 / 0x7B, game state 8, slot state 1), the joined clients get the add's 0x32 and
+// the row's 0x46 in its 0x8000 form, the PlayerList entry is the slot's, and the joiner's
+// 0x0B is dropped while the row holds no entity, so it never joins.
+// [orig: Server_PlayerAdd - Entity_SpawnFromAnimSlotProperty @0x51D056, slot+0 @0x51D060,
+//  the null skip @0x51D063, the row returned @0x51D53A, the 0x32 @0x51D291, the 0x46
+//  @0x51D2CA, the slot's team and class @0x51D398 / @0x51D3AF;
+//  CNapiServer_ProcessPendingPlayerSpawns - the success test @0x4C904E, 0x05 @0x4C909D, 0x04
+//  @0x4C90D7, 0x7B @0x4C9111, game state 8 @0x4C911A, slot state 1 @0x4C9123;
+//  NetPacket_SerializePlayerSync0x46 - 0x8000 with no entity @0x505ede..0x505ee0;
+//  NapiNPServerMsg_PlayerJoinRequest's entity test @0x51AB47]
+bool run_a_bodyless_add_keeps_its_row() {
+	JoinFixture f(/*with_existing=*/true);
+	for (int i = 0; i < 64; ++i) {
+		w::Entity filler;
+		filler.kind = w::EntityKind::Organic;
+		if (!f.world->registry.spawn(0, filler).valid()) break;
+	}
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "pool 0 full: the add still succeeds")) return false;
+	inmatch::NapiNPConnection &j = f.joiner();
+	if (!expect(j.phase == inmatch::ConnectionPhase::PlayerAdded && !j.link.owned_entity.valid() &&
+	                    !j.reply.player_slot_reserved && j.slot_state == inmatch::PlayerSlotState::Added &&
+	                    j.burst.game_state == 8,
+	            "a bodyless row: added, slot state 1, game state 8")) return false;
+	if (!expect(j.player_list_team == j.assigned_team && j.player_list_type == j.slot_class,
+	            "the PlayerList entry is the slot's team and class")) return false;
+	std::vector<ns::Datagram> existing;
+	ns::Datagram d;
+	while (f.existing_transport.pop_outbound(d)) existing.push_back(d);
+	std::size_t text_at = existing.size(), sync_at = existing.size();
+	for (std::size_t i = 0; i < existing.size(); ++i) {
+		if (existing[i].tag == 0x32 && text_at == existing.size()) text_at = i;
+		if (existing[i].tag == 0x46 && sync_at == existing.size()) sync_at = i;
+	}
+	if (!expect(text_at < sync_at && sync_at < existing.size() &&
+	                    existing[sync_at].body ==
+	                            std::vector<uint8_t>({static_cast<uint8_t>(j.reply.player_slot),
+	                                                  0x00, 0x80}),
+	            "the joined client takes the 0x32, then the row's 0x46 in its 0x8000 form"))
+		return false;
+	std::vector<uint8_t> metadata;
+	const std::vector<opennova::ProtocolMessage> pump_records = inmatch::build_spawn_pump_metadata(
+			f.ctx->config, f.ctx->mission_text_title, j, f.ctx->np_protocol.connection_list,
+			f.world.get(), f.ctx->rotation, &f.ctx->host_slot);
+	for (const opennova::ProtocolMessage &m : pump_records) metadata.push_back(m.tag);
+	const opennova::ProtocolMessage *assignment = nullptr;
+	for (const opennova::ProtocolMessage &m : pump_records)
+		if (m.tag == 0x04) assignment = &m;
+	if (!expect(contains(metadata, 0x05) && contains(metadata, 0x7B) && assignment != nullptr &&
+	                    assignment->payload.size() == 24 &&
+	                    assignment->payload[17] == j.reply.player_slot &&
+	                    assignment->payload[23] == j.assigned_team,
+	            "the pump's success arm: the 0x05, the row's 0x04 (its slot and team), the 0x7B"))
+		return false;
+	if (!expect(f.drive_to_await_join(), "the bodyless row streams to slot state 5")) return false;
+	const std::vector<ns::Datagram> sent = f.join();
+	return expect(sent.empty() && !j.burst.spawned &&
+	                      j.slot_state == inmatch::PlayerSlotState::AwaitJoin,
+	              "its 0x0B is dropped: no join while the row holds no entity");
+}
+
 } // namespace
 
 int main() {
@@ -915,6 +978,7 @@ int main() {
 	if (!run_the_pick_takes_the_row_free_longest()) ++failures;
 	if (!run_a_failed_add_leaves_the_joiner_rowless()) ++failures;
 	if (!run_a_held_joiner_has_no_team()) ++failures;
+	if (!run_a_bodyless_add_keeps_its_row()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

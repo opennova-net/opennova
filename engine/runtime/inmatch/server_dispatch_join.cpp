@@ -623,8 +623,14 @@ void broadcast_player_sync_on_join(const GameConfig &config,
 	// JOINER's own concern) to every in-game connection]. Staged on each recipient's transport
 	// like the other broadcast handlers (0x49 relay / the leave removal); the per-connection
 	// flush frames it with that connection's own sequencing.
+	// A bodyless row (its body did not spawn, D-NET-NEW-L1-10) serializes the 0x8000
+	// header alone [orig: NetPacket_SerializePlayerSync0x46 - the entity test @0x505ede,
+	// 0x8000 @0x505ee0, the early return @0x505f37].
 	const PlayerReplicationState rep = make_rep_state(config, joined, world);
-	const std::vector<uint8_t> body = encode_player_sync(rep, kPlayerSyncJoinBroadcastFields);
+	const std::vector<uint8_t> body = joined.link.owned_entity.valid()
+			? encode_player_sync(rep, kPlayerSyncJoinBroadcastFields)
+			: encode_player_sync_removal(static_cast<uint8_t>(joined.reply.player_slot),
+					/*with_ack=*/false);
 	for (NapiNPConnection &c : roster) {
 		if (&c == &joined || !is_in_match(c) || c.link.transport == nullptr) continue;
 		c.link.transport->host_send(s2c::PLAYER_SYNC, body);
