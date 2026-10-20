@@ -64,6 +64,29 @@ param(
     [ValidateRange(0, 600)]
     [int] $TimeLimitMinutes = 0,
 
+    # E5's permanent death: the SERVER copy's game.cfg mp_permanent_death = 1
+    # for this cell, restored with the copy's files after it. Both hosts read
+    # it there (retail: g_GameConfigState.permanentDeath_5E4, which becomes
+    # g_SessionPermanentDeath on the authority @0x5522AA; ours: host_config's
+    # permanent_death), so every topology takes it.
+    [switch] $PermanentDeath,
+
+    # E5's medic: the host player's class for this cell (5..9; 0 keeps the
+    # copy's). The class is the current weapon.sav record's side byte
+    # (+0 blue, +0x8006 red), which the session start clamps to 5..9 into
+    # g_CharClassTeam1/2 [orig: Game_ApplySessionSettingsToGlobals
+    # @0x5516BB..0x551720] and Game_StartMission hands the local player
+    # [orig: @0x524EE3..0x524F23 -> PlayerSession_InitFromProfile, the slot
+    # class @0x50CB7C]. The runner writes both side bytes, as the PLAYER_INFO
+    # dialog's class loop does [orig: PlayerInfo_SaveFromDialog
+    # @0x55EE3F..0x55EE6D], in the SERVER copy's active weapon.sav (the
+    # expansion's when one is active [orig: PlayerProfile_LoadAllFromDisk
+    # @0x54F68C..0x54F6B7]) at game.cfg's player_index; the cell's restore
+    # takes the file back. A retail host only: whether the OpenNova listen host
+    # takes its class from that record is unchecked, so OR and OO refuse it.
+    [ValidateSet(0, 5, 6, 7, 8, 9)]
+    [int] $HostPlayerClass = 0,
+
     # The pinned SHA-256 of the SERVER copy's game.cfg (the case table's
     # server_game_cfg_sha256): the cell refuses a copy whose game.cfg differs
     # at its start. Empty skips the check (a diagnostic run).
@@ -245,6 +268,28 @@ function Read-ParityScenario {
             throw "Scenario $($spec.name) stages players through the host; the OpenNova host has no slot pose yet (RR and RO only)"
         }
     }
+    # A typed character or a menu click is onHook's (char: opennova-int #73;
+    # click: #75, a named menu widget the menu's own pump clicks). The
+    # OpenNova scenario_play driver (ScriptedInput) plays down, up, press,
+    # look_px and end only, so an OpenNova actor refuses such a script.
+    $openNovaActor = ([string] $spec.actor -eq "joiner" -and $Topology -in @("RO", "OO")) -or
+        ([string] $spec.actor -eq "host" -and $Topology -in @("OR", "OO"))
+    $retailOnly = @(@($spec.steps) + @(if ($spec.PSObject.Properties.Name -contains "prelude") { @($spec.prelude) }) |
+        Where-Object { $_.PSObject.Properties.Name -contains "char" -or $_.PSObject.Properties.Name -contains "click" })
+    if ($retailOnly.Count -gt 0 -and $openNovaActor) {
+        throw "Scenario $($spec.name) types or clicks (char/click steps); the OpenNova $($spec.actor) plays neither yet, so a retail $($spec.actor) only"
+    }
+    foreach ($step in $retailOnly) {
+        if ($step.PSObject.Properties.Name -contains "click") {
+            $click = $step.click
+            $names = @($click.PSObject.Properties.Name)
+            if ($names.Count -ne 2 -or "screen" -notin $names -or "control" -notin $names -or
+                    [string] $click.screen -notmatch '^[\x21-\x7e]{1,31}$' -or
+                    [string] $click.control -notmatch '^[\x21-\x7e]{1,31}$') {
+                throw "Scenario $($spec.name): a click names a menu widget as {screen, control}, each 1-31 printable characters"
+            }
+        }
+    }
     # E4's kick: the host's play ends the joiner's session (PUNT ALL,
     # Server_HandleBanPuntCommand @0x50B380), so the steady window's end does
     # not wait for that joiner in match. A retail host actor only (the
@@ -327,6 +372,9 @@ foreach ($entry in $RotationList) {
 }
 if ($RotationList.Count -gt 0 -and $Topology -in @("OR", "OO")) {
     throw "-Rotation needs a retail host (RR or RO): the OpenNova listen host has no rotation launch flag."
+}
+if ($HostPlayerClass -ne 0 -and $Topology -in @("OR", "OO")) {
+    throw "-HostPlayerClass needs a retail host (RR or RO): the OpenNova listen host's class from weapon.sav is unchecked."
 }
 if ($LateJoiner -and $Topology -in @("RO", "OO")) {
     throw "-LateJoiner needs a retail joiner (RR or OR): an OpenNova late joiner is not wired yet."
@@ -1215,42 +1263,96 @@ function Restore-ServerCopyFiles {
             $entry.restored = $true
         }
     }
-    if ($script:ServerGameCfgOverride) {
-        $script:ServerGameCfgOverride.restored = [bool] ($script:ServerCopyFiles | Where-Object { $_.file -eq "game.cfg" }).restored
+    foreach ($override in $script:ServerGameCfgOverrides) {
+        $override.restored = [bool] ($script:ServerCopyFiles | Where-Object { $_.file -eq "game.cfg" }).restored
+    }
+    if ($script:ServerPlayerClassOverride) {
+        $script:ServerPlayerClassOverride.restored = [bool] ($script:ServerCopyFiles |
+            Where-Object { $_.file -eq $script:ServerPlayerClassOverride.file }).restored
     }
     if ($failures.Count) { throw ("SERVER copy restore: " + ($failures -join "; ")) }
 }
 
-# E2's time limit: the SERVER copy's game.cfg time_limit for this cell (the
-# retail host reads the file at its start, the OpenNova host runs in the same
-# copy). The cleanup's restore takes the copy back to the cell's start bytes.
-$script:ServerGameCfgOverride = $null
-function Set-ServerTimeLimit {
+# The cell's writes into the SERVER copy's game.cfg, one integer key each:
+# E2's time_limit and E5's mp_permanent_death. The retail host reads the file
+# at its start and the OpenNova host runs in the same copy; each write starts
+# from the file as the previous one left it, and the cleanup's restore takes
+# the copy back to the cell's start bytes (the pin).
+$script:ServerGameCfgOverrides = [System.Collections.Generic.List[object]]::new()
+function Set-ServerGameCfgValue {
+    param([Parameter(Mandatory = $true)] [string] $Key, [Parameter(Mandatory = $true)] [int] $Value)
     $cfg = $script:ServerCopyFiles | Where-Object { $_.file -eq "game.cfg" }
     $path = $cfg.path
     $latin1 = [Text.Encoding]::GetEncoding(28591)
-    $original = $cfg.bytes
-    $text = $latin1.GetString($original)
-    $found = [regex]::Matches($text, '(?m)^[ \t]*time_limit[ \t]*=[ \t]*"?(\d+)"?')
+    $before = [IO.File]::ReadAllBytes($path)
+    $text = $latin1.GetString($before)
+    $found = [regex]::Matches($text, '(?m)^[ \t]*' + [regex]::Escape($Key) + '[ \t]*=[ \t]*"?(\d+)"?')
     if ($found.Count -ne 1) {
-        throw "SERVER game.cfg holds $($found.Count) time_limit lines; the time limit needs exactly one."
+        throw "SERVER game.cfg holds $($found.Count) $Key lines; the cell's write needs exactly one."
     }
     $digits = $found[0].Groups[1]
-    $updated = $text.Substring(0, $digits.Index) + [string] $TimeLimitMinutes +
+    $updated = $text.Substring(0, $digits.Index) + [string] $Value +
         $text.Substring($digits.Index + $digits.Length)
     $bytes = $latin1.GetBytes($updated)
-    $script:ServerGameCfgOverride = [pscustomobject][ordered]@{
+    $override = [pscustomobject][ordered]@{
         path = $path
-        key = "time_limit"
-        value = $TimeLimitMinutes
+        key = $Key
+        value = $Value
         original_value = [int] $digits.Value
         original_sha256 = $cfg.sha256
         effective_sha256 = Get-BytesSha256 $bytes
         restored = $false
     }
-    $cfg.effective_sha256 = $script:ServerGameCfgOverride.effective_sha256
+    $script:ServerGameCfgOverrides.Add($override)
+    $cfg.effective_sha256 = $override.effective_sha256
     [IO.File]::WriteAllBytes($path, $bytes)
-    Write-Host "PARITY_RUN_NOTE SERVER game.cfg time_limit $($digits.Value) -> $TimeLimitMinutes for this cell"
+    Write-Host "PARITY_RUN_NOTE SERVER game.cfg $Key $($digits.Value) -> $Value for this cell"
+}
+
+# E5's medic: the host player's class into the SERVER copy's active weapon.sav
+# record (game.cfg's player_index), both side bytes. weapon.sav is a 16-byte
+# header ("FPBC", "0211") then five 0x1080C-byte records; a record's blue side
+# block starts at +0 and its red at +0x8006, each with the class byte first
+# [orig: PlayerProfile_LoadAllFromDisk @0x54F4D0, the record loop; the
+# session start's reads @0x5516BB..0x551720]. The cleanup's restore writes the
+# file's start bytes back.
+$script:ServerPlayerClassOverride = $null
+function Set-ServerHostPlayerClass {
+    $cfgText = [Text.Encoding]::GetEncoding(28591).GetString(
+        [IO.File]::ReadAllBytes(($script:ServerCopyFiles | Where-Object { $_.file -eq "game.cfg" }).path))
+    $index = [regex]::Matches($cfgText, '(?m)^[ \t]*player_index[ \t]*=[ \t]*"?(\d+)"?')
+    if ($index.Count -ne 1) {
+        throw "SERVER game.cfg holds $($index.Count) player_index lines; the class write needs exactly one."
+    }
+    $slot = [int] $index[0].Groups[1].Value
+    if ($slot -gt 4) { throw "SERVER game.cfg player_index $slot names no weapon.sav record (0..4)." }
+    $rel = if ($Expansion) { Join-Path (Join-Path "expansion" $Expansion) "weapon.sav" } else { "weapon.sav" }
+    $entry = $script:ServerCopyFiles | Where-Object { $_.file -eq $rel }
+    if (-not $entry -or $null -eq $entry.bytes) { throw "The SERVER copy has no $rel to write the host's class into." }
+    $bytes = [byte[]] $entry.bytes.Clone()
+    $record = 16 + $slot * 0x1080C
+    $blue = $record
+    $red = $record + 0x8006
+    $magic = [Text.Encoding]::ASCII.GetString($bytes, 0, 8)
+    if ($magic -cne "FPBC0211" -or $bytes.Length -lt $record + 0x1080C) {
+        throw "SERVER $rel is not a weapon.sav with record $slot (header '$magic', $($bytes.Length) bytes)."
+    }
+    $original = @([int] $bytes[$blue], [int] $bytes[$red])
+    $bytes[$blue] = [byte] $HostPlayerClass
+    $bytes[$red] = [byte] $HostPlayerClass
+    $script:ServerPlayerClassOverride = [pscustomobject][ordered]@{
+        file = $rel
+        record = $slot
+        offsets = @($blue, $red)
+        value = $HostPlayerClass
+        original_values = $original
+        original_sha256 = $entry.sha256
+        effective_sha256 = Get-BytesSha256 $bytes
+        restored = $false
+    }
+    $entry.effective_sha256 = $script:ServerPlayerClassOverride.effective_sha256
+    [IO.File]::WriteAllBytes($entry.path, $bytes)
+    Write-Host "PARITY_RUN_NOTE SERVER $rel record $slot class $($original -join '/') -> $HostPlayerClass for this cell"
 }
 
 function Wait-UntilSteadyDeadline {
@@ -1369,6 +1471,14 @@ function Invoke-ScenarioStage {
         })
         if ([string] $played.state -notin @("done", "expired") -or $unapplied.Count -gt 0) {
             throw "Retail scenario $($script:ScenarioSpec.name) did not play: state=$($played.state) result=$($played.result) unapplied=$($unapplied.Count)"
+        }
+        # A click whose widget was not on screen on its tick pressed nothing
+        # (its screen not the current one, or the control hidden or disabled).
+        $missed = @($played.steps | Where-Object {
+            [string] $_.kind -eq "click" -and [bool] $_.widget_missed
+        })
+        if ($missed.Count -gt 0) {
+            throw "Retail scenario $($script:ScenarioSpec.name) did not play: $($missed.Count) click(s) found no widget on screen (steps $(@($missed.index) -join ','))"
         }
         return [pscustomobject]@{ driver = "onhook_play_input"; setup = $setupResult; record = $played }
     }
@@ -2272,7 +2382,9 @@ try {
     Assert-UdpPortUnowned
     Save-ServerCopyFiles
     Start-DesktopGuard
-    if ($TimeLimitMinutes -gt 0) { Set-ServerTimeLimit }
+    if ($TimeLimitMinutes -gt 0) { Set-ServerGameCfgValue -Key "time_limit" -Value $TimeLimitMinutes }
+    if ($PermanentDeath) { Set-ServerGameCfgValue -Key "mp_permanent_death" -Value 1 }
+    if ($HostPlayerClass -ne 0) { Set-ServerHostPlayerClass }
     Start-OnHookMcp
 
     # Exercise the tracked capture wrapper used by the runbook so every suite
@@ -2962,7 +3074,12 @@ $summary = [pscustomobject]@{
     # and its restore.
     rotation = @($RotationList)
     time_limit_minutes = $TimeLimitMinutes
-    server_game_cfg_override = $script:ServerGameCfgOverride
+    # E5: permanent death and the host player's class (0: the copy's own),
+    # with every game.cfg and weapon.sav write and its restore.
+    permanent_death = [bool] $PermanentDeath
+    host_player_class = $HostPlayerClass
+    server_game_cfg_overrides = @($script:ServerGameCfgOverrides)
+    server_player_class_override = $script:ServerPlayerClassOverride
     # The SERVER copy's mutable files: each one's start hash (game.cfg's is
     # the case table's pin), whether the cell's processes wrote it, and the
     # restore of its start bytes.

@@ -144,6 +144,11 @@ function Get-CaseRotation { param($Case) return @(Get-CaseField $Case "rotation"
 # steady window (retail only so far: RR, RR-aa, OR).
 function Get-CaseLateJoiner { param($Case) return [bool] (Get-CaseField $Case "late_joiner" $false) }
 function Get-CaseTimeLimit { param($Case) return [int] (Get-CaseField $Case "time_limit_minutes" 0) }
+# permanent_death (E5: the SERVER game.cfg's mp_permanent_death = 1 for the
+# cell) and host_player_class (E5: the retail host's class, 5..9, written into
+# the SERVER copy's weapon.sav record; 0 keeps the copy's).
+function Get-CasePermanentDeath { param($Case) return [bool] (Get-CaseField $Case "permanent_death" $false) }
+function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Case "host_player_class" 0) }
 function Get-CaseTopologies {
     param($Case)
     return @(Get-CaseField $Case "topologies" @("RR", "RR-aa", "RO", "OR", "OO"))
@@ -230,6 +235,14 @@ function Read-ParityCases {
         if ($limit -lt 0 -or $limit -gt 600) {
             throw "Parity case '$($case.id)': time_limit_minutes must be 0-600"
         }
+        if ($case.PSObject.Properties.Name -contains "permanent_death" -and
+                $case.permanent_death -isnot [bool]) {
+            throw "Parity case '$($case.id)': permanent_death is true or false"
+        }
+        $class = Get-CaseHostPlayerClass $case
+        if ($class -notin @(0, 5, 6, 7, 8, 9)) {
+            throw "Parity case '$($case.id)': host_player_class is 5-9 (0 keeps the copy's)"
+        }
         $caseTopologies = @(Get-CaseTopologies $case)
         foreach ($name in $caseTopologies) {
             if ($name -cnotin @("RR", "RR-aa", "RO", "OR", "OO")) {
@@ -252,6 +265,21 @@ function Read-ParityCases {
                     ConvertFrom-Json).PSObject.Properties.Name -contains "staging") -and
                 @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
             throw "Parity case '$($case.id)': a staged scenario runs RR, RR-aa and RO only"
+        }
+        # char and click steps are onHook's: the OpenNova scenario_play driver
+        # plays neither (run_parity_topology.ps1), so their actor stays retail.
+        if ($case.PSObject.Properties.Name -contains "scenario") {
+            $play = Get-Content -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $case.scenario)) -Raw | ConvertFrom-Json
+            $typed = @(@($play.steps) + @(if ($play.PSObject.Properties.Name -contains "prelude") { @($play.prelude) }) |
+                Where-Object { $_.PSObject.Properties.Name -contains "char" -or $_.PSObject.Properties.Name -contains "click" })
+            $openNovaActorCells = if ([string] $play.actor -eq "host") { @("OR", "OO") } else { @("RO", "OO") }
+            if ($typed.Count -gt 0 -and @($caseTopologies | Where-Object { $_ -cin $openNovaActorCells }).Count -gt 0) {
+                throw "Parity case '$($case.id)': its scenario types or clicks, so its $($play.actor) stays retail (no $($openNovaActorCells -join ' or '))"
+            }
+        }
+        # The host's class is written for a retail host (run_parity_topology.ps1).
+        if ($class -ne 0 -and @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
+            throw "Parity case '$($case.id)': a host_player_class case runs RR, RR-aa and RO only"
         }
         # The runner wires a retail late joiner only (run_parity_topology.ps1).
         if ((Get-CaseLateJoiner $case) -and
@@ -296,6 +324,9 @@ function Get-CellArguments {
     if ($rotation.Count -gt 0) { $arguments += @("-Rotation", ($rotation -join ",")) }
     $limit = Get-CaseTimeLimit $Case
     if ($limit -gt 0) { $arguments += @("-TimeLimitMinutes", [string] $limit) }
+    if (Get-CasePermanentDeath $Case) { $arguments += "-PermanentDeath" }
+    $class = Get-CaseHostPlayerClass $Case
+    if ($class -ne 0) { $arguments += @("-HostPlayerClass", [string] $class) }
     if (Get-CaseLateJoiner $Case) { $arguments += "-LateJoiner" }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
     return $arguments
@@ -372,6 +403,16 @@ function Get-ReferenceMismatches {
     } else { 0 }
     if ($recordedLimit -ne $limit) {
         $reasons.Add("time_limit_minutes $recordedLimit is not $limit")
+    }
+    # E5 inputs: a summary from before E5 records neither (evidence only for a
+    # case without them).
+    $recordedPermanent = ($fields -contains "permanent_death") -and [bool] $Summary.permanent_death
+    if ($recordedPermanent -ne (Get-CasePermanentDeath $Case)) {
+        $reasons.Add("permanent_death $recordedPermanent is not $(Get-CasePermanentDeath $Case)")
+    }
+    $recordedClass = if ($fields -contains "host_player_class") { [int] $Summary.host_player_class } else { 0 }
+    if ($recordedClass -ne (Get-CaseHostPlayerClass $Case)) {
+        $reasons.Add("host_player_class $recordedClass is not $(Get-CaseHostPlayerClass $Case)")
     }
     $recordedLate = ($fields -contains "late_joiner") -and ($null -ne $Summary.late_joiner)
     if ($recordedLate -ne (Get-CaseLateJoiner $Case)) {

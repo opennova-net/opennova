@@ -1,0 +1,50 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "medic_revive",
+  "mission": "01TR.bms",
+  "game_type": 65568,
+  "actor": "host",
+  "staging": [
+    {"slot": 1, "position_bms": [238.4, 842.8, 43.5]}
+  ],
+  "setup": {"pose": {"position_bms": [245.4, 838.8, 43.5], "yaw": 300, "pitch": -6}},
+  "steps": [
+    {"tick": 700, "down": 149},
+    {"tick": 706, "up": 149},
+    {"tick": 712, "down": 149},
+    {"tick": 718, "up": 149},
+    {"tick": 724, "down": 149},
+    {"tick": 730, "up": 149},
+    {"tick": 736, "down": 149},
+    {"tick": 742, "up": 149},
+    {"tick": 748, "down": 149},
+    {"tick": 754, "up": 149},
+    {"tick": 760, "down": 149},
+    {"tick": 766, "up": 149},
+    {"tick": 772, "down": 149},
+    {"tick": 778, "up": 149},
+    {"tick": 784, "down": 149},
+    {"tick": 790, "up": 149},
+    {"tick": 850, "press": 209},
+    {"tick": 960, "down": 152},
+    {"tick": 1030, "up": 152},
+    {"tick": 1040, "look_px": [0, 250]},
+    {"tick": 1046, "look_px": [0, 250]},
+    {"tick": 1080, "down": 149},
+    {"tick": 1110, "up": 149},
+    {"tick": 1140, "down": 149},
+    {"tick": 1170, "up": 149},
+    {"tick": 1200, "down": 149},
+    {"tick": 1260, "up": 149},
+    {"tick": 1500, "end": true}
+  ],
+  "settle_seconds": 10,
+  "expect": {
+    "sequence": [
+      {"dir": "S", "kind": "entity_death", "entity": "0x0000"},
+      {"dir": "S", "kind": "tick_seed"},
+      {"dir": "S", "kind": "game_event", "type": "38", "victim": "actor", "aux": "255"}
+    ],
+    "mask": {"tick_seed": ["seed"]}
+  }
+}

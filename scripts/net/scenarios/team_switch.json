@@ -1,0 +1,29 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "team_switch",
+  "mission": "TDH_I3A.bms",
+  "game_type": 65536,
+  "actor": "joiner",
+  "steps": [
+    {"tick": 0, "press": 205},
+    {"tick": 40, "look_px": [0, 400]},
+    {"tick": 45, "look_px": [0, 400]},
+    {"tick": 80, "down": 149},
+    {"tick": 120, "up": 149},
+    {"tick": 1200, "click": {"screen": "DEATH", "control": "SWAP_TEAMS"}},
+    {"tick": 1500, "end": true}
+  ],
+  "settle_seconds": 10,
+  "expect": {
+    "sequence": [
+      {"dir": "C", "kind": "fired_round", "shooter": "actor", "target": "0xffff"},
+      {"dir": "S", "kind": "entity_death", "entity": "actor"},
+      {"dir": "S", "kind": "game_event", "type": ["1", "2", "3"], "attacker": "actor", "victim": "0", "aux": "0"},
+      {"dir": "S", "kind": "team_assign", "entity": "actor"},
+      {"dir": "S", "kind": "entity_death", "entity": "actor"},
+      {"dir": "S", "kind": "game_event"}
+    ],
+    "count_kinds": ["entity_death", "team_assign", "game_event"],
+    "mask": {"game_event": ["type"]}
+  }
+}

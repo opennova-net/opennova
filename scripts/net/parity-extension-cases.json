@@ -96,6 +96,46 @@
       "topologies": ["RR", "RR-aa", "RO"]
     },
     {
+      "id": "tdh-i3a-tdm-swap",
+      "mission": "TDH_I3A.bms",
+      "mission_sha256": "8978c7afac2d7ba0f1b09c5a358412c74bace3424f31dd647a4aadc8f5811a33",
+      "game_type": 65536,
+      "port": 32787,
+      "readiness": "in_match",
+      "steady_seconds": 60,
+      "exercise_input": false,
+      "auto_deploy": true,
+      "scenario": "team_switch.json",
+      "topologies": ["RR", "RR-aa", "OR"]
+    },
+    {
+      "id": "tdh-i3a-tdm-permdeath",
+      "mission": "TDH_I3A.bms",
+      "mission_sha256": "8978c7afac2d7ba0f1b09c5a358412c74bace3424f31dd647a4aadc8f5811a33",
+      "game_type": 65536,
+      "port": 32787,
+      "readiness": "in_match",
+      "steady_seconds": 60,
+      "exercise_input": false,
+      "auto_deploy": true,
+      "scenario": "permanent_death.json",
+      "permanent_death": true
+    },
+    {
+      "id": "01tr-coop-revive",
+      "mission": "01TR.bms",
+      "mission_sha256": "7ceb5dac231f6dd0a78a41302889cb325629369cf7599ee31b506a98ea2cd590",
+      "game_type": 65568,
+      "port": 32786,
+      "readiness": "in_match",
+      "steady_seconds": 60,
+      "exercise_input": false,
+      "auto_deploy": true,
+      "scenario": "medic_revive.json",
+      "host_player_class": 5,
+      "topologies": ["RR", "RR-aa", "RO"]
+    },
+    {
       "id": "01tr-coop-drive",
       "mission": "01TR.bms",
       "mission_sha256": "7ceb5dac231f6dd0a78a41302889cb325629369cf7599ee31b506a98ea2cd590",
