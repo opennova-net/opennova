@@ -775,7 +775,8 @@ void player_body_authority_chase(AiEntity &e, Entity &body) {
             // Over 2 units: off the authority the body snaps to the target; on it
             // nothing moves. Either way the target, the bucket and the angle steps
             // clear. [orig: `cmp eax, 20000h; jle` @0x4B431F..0x4B4324, the client's
-            //  snap skipped `cmp is_authority` @0x4B4330, the clears @0x4B4367..0x4B4386]
+            //  snap skipped `cmp edi(is_authority), eax; jnz` @0x4B432A..0x4B4330, the clears
+            //  @0x4B4367..0x4B4386]
             e.net_smooth_target[0] = 0;
             e.net_smooth_target[1] = 0;
             e.net_smooth_target[2] = 0;
@@ -801,8 +802,9 @@ void player_body_authority_chase(AiEntity &e, Entity &body) {
             // the body's vertical speed (+0xA0) exceeds 1670.
             // [orig: the angle deltas @0x4B444A..0x4B445E, the bucket @0x4B4466, the
             //  steps @0x4B458A..0x4B45CA, the angles @0x4B45C4..0x4B45DF, `cmp
-            //  is_authority` @0x4B45EC, the vertical-speed abs @0x4B45EE..0x4B45F9,
-            //  z = 0 @0x4B4600, `cmp 686h; jle` @0x4B4606, x/y = 0 @0x4B460C / @0x4B4612]
+            //  is_authority` @0x4B45E5..0x4B45EC, the vertical-speed abs @0x4B45EE..0x4B45F9,
+            //  z = 0 @0x4B4600, `cmp eax, 686h` @0x4B45FB / `jle` @0x4B4606, x/y = 0
+            //  @0x4B460C / @0x4B4612]
             const int32_t dh = io::bam_sub(e.net_smooth_heading, e.heading);
             const int32_t dp = io::bam_sub(e.net_smooth_pitch, e.pitch);
             e.net_interp_steps = kAuthorityBucket;
