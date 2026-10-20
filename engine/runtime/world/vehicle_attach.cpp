@@ -190,7 +190,8 @@ void borrow_carrier_slot(const World &world, Entity &occ, const Entity &carrier,
 // dry click, a switch or a scope step). The local player's slot is its active
 // one (a borrowed gun's included); another entity's is the carrier slot it names.
 // The host keeps no action for a remote player's own slots (D-NET-336), so those
-// read idle. [orig: Entity_ProcessVehicleAttach @0x435B18..0x435B38]
+// read idle. [orig: Entity_ProcessVehicleAttach @0x435B18..0x435B38, the action read
+//  @0x435B29]
 bool equipped_slot_busy(World &world, const Entity &occ) {
     const WeaponSlotState *slot = nullptr;
     if (slot_pair_is_local(world, occ.handle)) {
@@ -869,7 +870,7 @@ bool point_los_clear(World &world, const Entity &player, const Entity &cand, con
 // The per-entity reject set of the scan and the label pass: the dead skip, the
 // itemDef and model presence and a vehicle's enemy occupant are shared; the
 // carrier (+0x28) block differs (below).
-// [orig: Entity_FindNearestSeatOrArmory @0x435E28..0x435EA1;
+// [orig: Entity_FindNearestSeatOrArmory @0x435E28..0x435EAE;
 //  HUD_DrawVehicleSeatAndArmoryLabels @0x5A335A..0x5A33D9]
 bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &player,
 		const HostileMountIndex &hostile_mounts, bool label_pass) {
