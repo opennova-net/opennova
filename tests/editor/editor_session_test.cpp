@@ -129,6 +129,7 @@ static int test_lifecycle() {
 	ProjectSession session(platform, preferences);
 	TEST_EXPECT(!session.project_open());
 	TEST_EXPECT(session.view().project.recent_projects.empty());
+	TEST_EXPECT(!session.busy()); // nothing for the polls to do
 
 	// The shell-only kinds are declined; the portable ones served.
 	EditorRequest pick = request::pick_directory(PickPurpose::OpenProject);
@@ -188,6 +189,7 @@ static int test_lifecycle() {
 		++polls;
 		TEST_EXPECT(polls < 200);
 		if (!v.activity.operation.running()) break;
+		TEST_EXPECT(session.busy()); // the Shell's frame pacing keeps the display's rate meanwhile
 		TEST_EXPECT(v.activity.operation.done >= done &&
 				v.activity.operation.done <= v.activity.operation.total &&
 				v.activity.operation.unit == OperationUnit::Bytes &&
@@ -431,6 +433,44 @@ static int test_lifecycle() {
 // and the process seam widens it (CP_UTF8), so the project is made, listed, imported into, built and
 // played where its path says, and a file named so is listed by that name. Checked through the
 // system's own UTF-16 names (base/io/os_path.h), not the editor's conversions.
+// What keeps the Shell's frames at the display's rate (ProjectSession::busy, its frame pacing): nothing with no
+// project; an Open stepped across polls, then the validation it leaves due; nothing once they end; an edit's
+// validation until the polls have stepped it.
+static int test_busy() {
+	test_temp::TempDir dir("opennova_editor_session_busy");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	TEST_EXPECT(!session.busy());
+	session.handle(request::new_project(dir.file("Busy"), "Busy"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	session.run_operations();
+	TEST_EXPECT(session.project_open() && !session.busy());
+	session.set_poll_budget({0, 64 * 1024});
+	session.handle(request::rescan());
+	TEST_EXPECT(session.busy() && v.activity.operation.running());
+	size_t polls = 0;
+	for (; session.busy() && polls < 1000; ++polls) session.poll();
+	TEST_EXPECT(polls > 1 && !session.busy() && !v.activity.operation.running() && !v.activity.validation.running);
+	// An edit leaves the validation due: work until a poll steps it.
+	session.handle(request::open_document("items.def"));
+	session.run_operations();
+	Document *items = session.document_for("items.def");
+	TEST_EXPECT(items != nullptr && !items->rows().empty() && !session.busy());
+	if (!items || items->rows().empty()) return 1;
+	EditorRequest set = request::edit_record(items->path(), Edit());
+	set.edits[0].address = NodeAddress{items->rows()[0]->id, items->rows()[0]->kind, 0};
+	set.edits[0].field = "type";
+	set.edits[0].value = int64_t(0);
+	session.handle(set);
+	TEST_EXPECT(session.last_edit_ok() && session.busy());
+	for (polls = 0; session.busy() && polls < 1000; ++polls) session.poll();
+	TEST_EXPECT(polls >= 1 && !session.busy());
+	return 0;
+}
+
 static int test_utf8_project_path() {
 	namespace io = opennova::io;
 	test_temp::TempDir dir("opennova_editor_Jos\xC3\xA9_\xE3\x83\xA2\xE3\x83\x87\xE3\x83\xAB"); // José_モデル
@@ -4860,6 +4900,7 @@ int main() {
 	failures += test_play_settings_per_project();
 	failures += test_import();
 	failures += test_lifecycle();
+	failures += test_busy();
 	failures += test_utf8_project_path();
 	failures += test_outcomes_and_refusals();
 	failures += test_validation_cost();

@@ -38,9 +38,7 @@ const ImVec4 kChoreRefusalColor(0.95f, 0.55f, 0.45f, 1.0f);
 const ImVec4 kChoreWarningColor(0.95f, 0.8f, 0.4f, 1.0f);
 
 const AssetEntry *chore_entry_at(const SessionView &view, const std::string &path) {
-	for (const AssetEntry &entry : view.project.scan->entries)
-		if (entry.relative_path == path) return &entry;
-	return nullptr;
+	return view.project.scan->at_path(path);
 }
 
 // Whether `path` lies in `folder`.
@@ -73,14 +71,21 @@ std::vector<std::string> FilesWindow::others_of(const SessionView &view, const s
 void FilesWindow::choose(const std::string &path) {
 	const ImGuiIO &io = ImGui::GetIO();
 	if (io.KeyShift && !selected_.empty() && selected_ != path) {
-		// The run of rows from the one selected to this one, as they were last drawn.
-		const auto from = std::find(rows_.begin(), rows_.end(), selected_);
-		const auto to = std::find(rows_.begin(), rows_.end(), path);
-		if (from != rows_.end() && to != rows_.end()) {
+		// The run of rows from the one selected to this one, as they show: the flat list's, or the tree's files
+		// (none of a folded folder's), each a scan index.
+		const std::vector<AssetEntry> &entries = workspace_.view().project.scan->entries;
+		const std::vector<size_t> &rows = rows_flat_ ? matches_ : rows_;
+		size_t from = rows.size(), to = rows.size();
+		for (size_t i = 0; i < rows.size() && (from == rows.size() || to == rows.size()); ++i) {
+			if (rows[i] >= entries.size()) continue;
+			const std::string &at = entries[rows[i]].relative_path;
+			if (at == selected_) from = i;
+			if (at == path) to = i;
+		}
+		if (from < rows.size() && to < rows.size()) {
 			also_.clear();
-			const auto first = std::min(from, to), last = std::max(from, to);
-			for (auto it = first; it <= last; ++it)
-				if (*it != path) also_.push_back(*it);
+			for (size_t i = std::min(from, to); i <= std::max(from, to); ++i)
+				if (entries[rows[i]].relative_path != path) also_.push_back(entries[rows[i]].relative_path);
 			selected_ = path;
 			return;
 		}

@@ -410,6 +410,15 @@ void EditorWindows::end_frame() {
 	if (document_window_) document_window_->end_frame();
 	// A drop no item took within two frames is none's (the frame it came in may have drawn before it).
 	if (!dropped_.paths.empty() && --dropped_.frames <= 0) dropped_ = Dropped();
+	// What the frame saw of a person: the input events its NewFrame took (each a change: Dear ImGui drops one
+	// that repeats the state), a button or a key still held, an item active.
+	input_seen_ = false;
+	if (const ImGuiContext *context = ImGui::GetCurrentContext()) {
+		bool held = ImGui::IsAnyMouseDown() || ImGui::IsAnyItemActive();
+		for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END && !held; ++key)
+			held = ImGui::IsKeyDown(static_cast<ImGuiKey>(key));
+		input_seen_ = held || !context->InputEventsTrail.empty();
+	}
 	in_frame_ = false;
 	for (EditorRequest &request : deferred_) requests_.push_back(std::move(request));
 	deferred_.clear();
