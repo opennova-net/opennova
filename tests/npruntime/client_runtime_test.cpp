@@ -870,17 +870,12 @@ bool run_class_allow_mask_follows_retail_host() {
 // The capture-default C2S 0x2F body, re-derived independently of the production encoder:
 // [u8 team][u8 class 8][u32 slot] + the golden seven ADM rows ("-1" ammo/flags -> 0xFF) + 0xFF.
 // [wire: retail-lan-host-join-session f317-318; orig: NetPacket_SendLoadoutSubmit @0x42cdc0]
-std::vector<uint8_t> canned_loadout_body(uint8_t team, uint8_t slot_low_byte) {
-	std::vector<uint8_t> body = {team, 0x08, slot_low_byte, 0x00, 0x00, 0x00};
-	for (uint8_t adm : {uint8_t{0x18}, uint8_t{0x03}, uint8_t{0x2C}, uint8_t{0x28},
-	                    uint8_t{0x29}, uint8_t{0x2A}, uint8_t{0x02}}) {
-		body.push_back(adm);
-		body.push_back(0xFF);
-		body.push_back(0xFF);
-		body.push_back(0xFF);
-	}
-	body.push_back(0xFF);
-	return body;
+// A joiner with no kit seam and no weapon table submits the fresh profile's side class
+// (8) with every page row dropped (no ADM def names them) and slot 195 both times (no
+// local slot table to fill) [orig: NetPacket_SendLoadoutSubmit @0x42cdc0 - the name gate
+// @0x42cf0b; Player_InitPlayer @0x4e17ff].
+std::vector<uint8_t> fresh_no_table_loadout_body(uint8_t team) {
+	return {team, 0x08, 0xC3, 0x00, 0x00, 0x00, 0xFF};
 }
 
 // The two NovaWorld-only join tokens on the wire, decoded back off the framed
@@ -1062,12 +1057,19 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	              "no CC.BIN and a zero bias omit COUNTRYCODE and TZB");
 }
 
-bool run_retail_post_auth_prelude() {
+// `mission_start_loading`: the embedder's mission-start load runs after the S2C 0x1A
+// (the shell's), so the 0x1A only releases the mission start and its end pushes the
+// 0x2F pair and the 0x0B (D-NET-531); else the load already ran and the 0x1A sends them.
+// [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart @0x524e29, the loads
+//  @0x525495..0x525762, the 0x2F @0x525836 / @0x525c2e, the 0x0B @0x52624b, the push
+//  @0x526255]
+bool run_retail_post_auth_prelude(bool mission_start_loading) {
 	constexpr uint32_t kServerKey = 0x11223344u;
 	constexpr uint32_t kConnectionId = 3;
 	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
 	inmatch::JoinerConnection joiner("RetailPrelude");
 	joiner.set_title(&kJo);
+	joiner.set_mission_start_loading(mission_start_loading);
 
 	// Drive the real 0x41/0x42 builders so the post-auth fixture uses this
 	// connection's live client key and SCRK.
@@ -1460,22 +1462,35 @@ bool run_retail_post_auth_prelude() {
 	const inmatch::JoinerConnection::PollResult world_end_result =
 			joiner.handle_datagram(
 					world_end_datagram.data(), world_end_datagram.size());
-	if (!expect(world_end_result.outbound.size() == 1 &&
+	std::vector<uint8_t> mission_start_end;
+	if (mission_start_loading) {
+		if (!expect(world_end_result.outbound.empty() && joiner.mission_start_released(),
+				"a loading mission start: the 0x1A releases it and sends nothing")) {
+			return false;
+		}
+		mission_start_end = joiner.push_mission_start_end();
+		if (!expect(!joiner.mission_start_released() && joiner.push_mission_start_end().empty(),
+				"the mission start's end pushes once")) {
+			return false;
+		}
+	} else if (world_end_result.outbound.size() == 1) {
+		mission_start_end = world_end_result.outbound[0];
+	}
+	if (!expect((mission_start_loading || world_end_result.outbound.size() == 1) &&
 				decode_client_session(
-						world_end_result.outbound[0], client_auth.scrk,
+						mission_start_end, client_auth.scrk,
 						client_header, client_messages) &&
 				matches_client_header(client_header, kServerKey, 13, 10) &&
 				client_messages.size() == 3 &&
 				client_messages[0].tag == 0x2F &&
-				client_messages[0].payload ==
-						canned_loadout_body(0x02, 0xC3) &&
+				client_messages[0].payload == fresh_no_table_loadout_body(0x02) &&
 				client_messages[1].tag == 0x2F &&
-				client_messages[1].payload ==
-						canned_loadout_body(0x02, 0xD4) &&
+				client_messages[1].payload == fresh_no_table_loadout_body(0x02) &&
 				client_messages[2].tag == 0x0B &&
-				!client_messages[2].payload.empty(),
-			"world-stream 0x1A triggers the capture-default loadout pair "
-			"(team from the 0x04 tail, slots 195/212)")) {
+				client_messages[2].payload ==
+						inmatch::build_mission_status("", 0x01070507u),
+			"world-stream 0x1A ends a mission start whose load already ran: the "
+			"fresh-profile loadout pair (team from the 0x04 tail) and the 0x0B")) {
 		return false;
 	}
 	// The same 0x1A ends the game-start wait: the mission start's input reset
@@ -7876,7 +7891,8 @@ int main() {
 	                run_seeded_objective_layout_hint() &&
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&
-	                run_retail_post_auth_prelude() &&
+	                run_retail_post_auth_prelude(false) &&
+	                run_retail_post_auth_prelude(true) &&
 	                run_novaworld_join_tokens_ride_the_wire() &&
 	                run_early_sync_tail_latch() &&
 	                run_client_reducer_preserves_packet_message_order() &&

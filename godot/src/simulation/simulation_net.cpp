@@ -622,6 +622,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_expansion_version_root();
 	install_app_id();
 	install_join_cd_cookie();
+	install_join_mission_start();
 	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
 	install_item_catalog();
 	// The kind-derived world rules (no authority, an mp session) applied with
@@ -707,6 +708,24 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 	// witnessed writer can supply its actual row without changing paging.
 	runtime_->set_loaded_model_challenge_snapshot(
 			std::vector<uint32_t>(static_cast<std::size_t>(count), 0u));
+}
+
+void Simulation::set_join_mission_start_loading(bool p_loading) {
+	net_.join_mission_start_loading = p_loading;
+	install_join_mission_start();
+}
+
+void Simulation::set_join_side_password(const std::string &p_password) {
+	net_.join_side_password = p_password;
+	install_join_mission_start();
+}
+
+bool Simulation::is_join_mission_start_released() const {
+	return is_joiner() && runtime_ != nullptr && runtime_->mission_start_released();
+}
+
+void Simulation::finish_join_mission_start() {
+	if (joiner_role_ != nullptr) joiner_role_->push_mission_start_end();
 }
 
 bool Simulation::poll_join_preload() {

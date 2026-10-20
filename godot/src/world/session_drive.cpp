@@ -164,6 +164,16 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 		return ERR_CANT_CONNECT;
 	}
 	join_preload_sim_->set_join_world_ready(false);
+	// This shell loads the joiner's mission start after the S2C 0x1A releases it
+	// (the host's streamed assets, the loaded-model freeze), and its end sends the
+	// two 0x2F and the 0x0B (engine: inmatch/joiner_connection.h
+	// set_mission_start_loading, D-NET-531); the 0x0B leads with the config's side
+	// password.
+	join_preload_sim_->set_join_mission_start_loading(true);
+	{
+		Ref<GameConfigBlock> block = world_->get_game_config();
+		if (block.is_valid()) join_preload_sim_->set_join_side_password(block->native().cfg().side_password);
+	}
 	// The JOIN VERSIONCRCSTRING checksum reads the loose
 	// expansion/<name>/version.txt under this install root (D-NET-166).
 	join_preload_sim_->set_join_expansion_version_root(resource_root->get_root_dir());
@@ -402,6 +412,18 @@ void SessionDrive::update_joiner_admission_signals() {
 	if (sim.is_null() || !sim->is_joiner()) {
 		policy_->disarm_admission_watch();
 		return;
+	}
+	// The S2C 0x1A released the joiner's mission start: its load runs now (the
+	// host's streamed assets settle and the loaded-model list freezes), and its end
+	// pushes the two 0x2F and the 0x0B (engine: inmatch/joiner_connection.h
+	// set_mission_start_loading, D-NET-531).
+	if (sim->is_join_mission_start_released()) {
+		if (!world_->settle_join_wire_assets()) {
+			world_->report_join_wire_asset_failure(
+					"join: failed to settle the host's streamed mission assets");
+			return;
+		}
+		sim->finish_join_mission_start();
 	}
 	const String loss_reason = sim->get_session_loss_reason();
 	const bool deploy_pending = sim->is_join_deploy_pick_pending();

@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
+#include <string_view>
 #include <array>
 #include <functional>
 #include <string>
@@ -45,8 +46,9 @@
 //   <- S2C 0x05/0x60/0x64/0x16       : reactively complete admission and file-transfer requests
 //   <- S2C 0x11                       : ACK terminal pre-world sync; hold 0x0A until world ready
 //   <- S2C 0x0C organic-spawn (0x83)  : owner-ID match self and retain wire handle H
-//   <- S2C 0x1A                       : send the 0x2F/0x2F/0x0B loadout/status bundle (the
-//                                       binding's kit via set_loadout_kit, else the capture default)
+//   <- S2C 0x1A                       : releases the mission start; at its end (at once, or once
+//                                       the embedder's load ends) the 0x2F/0x2F/0x0B bundle (the
+//                                       binding's kit via set_loadout_kit, else the fresh profile's)
 //   <- initial S2C 0x5A grants, 0x0F  : open gameplay once H is known; the 0x0F completes admission
 //                                      for any role (D-NET-678); if zones, keep deploy UI pending
 //                                      (headless callers immediately send C2S 0x0E {FFFF} and re-arm hold)
@@ -60,7 +62,39 @@
 // until both H and the deployment release are known.
 // [orig: Player_FindLocalPlayerEntity @0x4E0090; NapiNPClientMsg_0x00C @0x42E730;
 // NapiNP_GetLocalConnectionId @0x4C6D40]. The owner pumps bytes; no socket I/O here.
+namespace opennova::world {
+struct WeaponTable;
+} // namespace opennova::world
+
 namespace opennova::inmatch {
+
+// The C2S 0x0B mission status a joiner's mission start ends with: the side password with
+// its NUL, the two map checksums the stub leaves zero, and the build's packed version dword.
+// [orig: Game_StartMission @0x524360 - Mission_GetMapChecksums @0x6108a0 called @0x526209
+//  (it stores 0 into both outputs @0x6108a8 / @0x6108ae), NetPacket_WriteStringAndThreeInts
+//  @0x52622e over g_SidePassword, the two zeros and g_GameVersionPacked @0x52620e;
+//  NetPacket_WriteStringAndThreeInts @0x42a4d0 - the string and its NUL @0x42a4ef..0x42a501,
+//  three u32 LE @0x42a520 / @0x42a531 / @0x42a547]
+std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32_t version_packed);
+// The build's packed version dword: the four numbers its "V%i.%i.%i.%i" text prints, the
+// first in the high byte (JO and DFX2 V1.7.5.7 -> 0x01070507, the JO demo's V1.0.0.9 ->
+// 0x01000009, DFX's V1.7.1.9 -> 0x01070109, each the dword its binary stores beside the
+// sprintf). 0 for a text that is not four numbers (a title with no witnessed version).
+// [orig: g_GameVersionPacked @0x829f38 (read @0x52620e); Game_ParseCommandLineAndInit
+//  @0x4a7310 - the dword 0x01070507 @0x4a7d86 beside the sprintf @0x4a7d75..0x4a7d90]
+uint32_t packed_game_version(const char *version_text);
+// The C2S 0x2F a joiner with no kit seam submits: the fresh profile's, as retail's builder
+// makes it for a profile weapon.sav never wrote. The side block `team` names (class 8 on both
+// sides of a fresh record) picks the class and its default page; each row's name resolves
+// through `weapons` to its ADM index (a name the table lacks drops, as do all with no table),
+// and the three values are the page's "-1" strings' atol low bytes. The slot is the fixed 195:
+// the first submission's, and the second's spawn-fill slot while no local slot table exists.
+// [orig: PlayerProfile_InitDefaults @0x54bb40 (playersav::make_defaults); Game_StartMission
+//  @0x525793..0x525836 (the side block, its class byte, the page copy) and @0x525c2e;
+//  NetPacket_SendLoadoutSubmit @0x42cdc0 - the name gate @0x42cf0b, the index @0x42cf21,
+//  atol @0x42cf7c / @0x42cfbc / @0x42cff7; Player_InitPlayer @0x4e15f0 - 195 @0x4e17ff,
+//  a failed select keeps it]
+LoadoutSubmit fresh_profile_loadout_submit(const world::WeaponTable *weapons, uint8_t team);
 
 // The OS time-zone bias in minutes, UTC = local + bias, of standard (not
 // daylight) time: the standard-library equivalent of TIME_ZONE_INFORMATION.Bias.
@@ -461,6 +495,37 @@ public:
 		loadout_kit_ = std::move(kit);
 		loadout_kit_set_ = true;
 	}
+	// The weapon table a submission with no kit seam resolves the fresh profile's page
+	// names through (AdmDef_FindIndexByName; a name it does not hold is dropped). Null =
+	// no table: every row drops, as retail's builder drops what no ADM def names.
+	// [orig: NetPacket_SendLoadoutSubmit @0x42cdc0 - the AvatarDef_FindByName gate
+	//  @0x42cf0b, AdmDef_FindIndexByName @0x42cf21]
+	void set_weapon_table(const world::WeaponTable *weapons) { weapons_ = weapons; }
+
+	// The end of the joiner's mission start. Retail's Game_StartMission waits for the S2C
+	// 0x1A (NapiClient_WaitForGameStart), runs the whole definition and model load, sends
+	// the first 0x2F (slot 195), freezes the loaded-model list, runs Player_InitPlayer,
+	// sends the second 0x2F (the spawn fill's slot) and the 0x0B, and pushes all three in
+	// one explicit send. An embedder whose mission-start load runs AFTER the release sets
+	// `loading` before the 0x1A arrives: the 0x1A then only releases the mission start
+	// (stage AwaitMissionStart), and frame_mission_start_end() frames the three once its
+	// load has ended. Without it (the load ran before the release) the 0x1A frames them
+	// at once.
+	// [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart @0x524e29, the
+	//  loads @0x525495..0x525762, the first 0x2F @0x525836, the freeze @0x525a6e,
+	//  Player_InitPlayer @0x525bbc, the second 0x2F @0x525c2e, the 0x0B
+	//  @0x52620e..0x52624b, CNapiNetwork_PumpClientProtocolSend @0x526255]
+	void set_mission_start_loading(bool loading) { mission_start_loading_ = loading; }
+	bool mission_start_released() const {
+		return post_auth_stage_ == PostAuthStage::AwaitMissionStart;
+	}
+	// The mission start's end once the 0x1A released it: the two 0x2F and the 0x0B framed
+	// as one packet for the caller to send at once (the explicit push). Empty otherwise.
+	std::vector<uint8_t> push_mission_start_end();
+	// The config's side password the C2S 0x0B carries first (g_SidePassword, copied from
+	// the session settings' side password; empty on a stock config)
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551d20..0x551d30 / @0x55202a].
+	void set_side_password(std::string password) { side_password_ = std::move(password); }
 
 	// The current profile's per-side character selections, serialized into the
 	// game-session ClientAuth as CI0/CI1/TR/CTA/CTB/VCA/VCB. Configure this before
@@ -872,6 +937,7 @@ private:
 		AwaitPlayerList,
 		AwaitInitialSyncTail,
 		AwaitWorldStreamEnd,
+		AwaitMissionStart, // the 0x1A released the mission start; its end owes the 0x2F pair
 		AwaitDeployment,
 		AwaitDeployPick,    // player-paced: grants+policy complete, the pick is the player's
 		AwaitDeployRelease,
@@ -894,6 +960,9 @@ private:
 	std::vector<uint8_t> build_client_hello();
 	std::vector<uint8_t> build_client_auth();
 	std::vector<uint8_t> frame_session(const std::vector<ProtocolMessage> &messages);
+	// The two 0x2F and the 0x0B of the mission start's end, framed (AwaitMissionStart ->
+	// AwaitDeployment); empty in any other stage.
+	std::vector<uint8_t> frame_mission_start_end();
 	std::vector<uint8_t> frame_inner_pending(
 			uint8_t tag, std::vector<uint8_t> body) {
 		return frame_session({make_protocol_message(tag, std::move(body))});
@@ -1010,6 +1079,9 @@ private:
 	uint32_t net_frame_counter_ = 0;
 	LoadoutKit loadout_kit_;      // binding-injected submission content (see set_loadout_kit)
 	bool loadout_kit_set_ = false;
+	const world::WeaponTable *weapons_ = nullptr; // set_weapon_table
+	bool mission_start_loading_ = false;          // set_mission_start_loading
+	std::string side_password_;                   // set_side_password
 	CharacterJoinVars character_join_vars_{};
 	uint32_t auto_medic_disabled_ = 0; // profile +1660 (set_auto_medic_preference)
 	uint8_t current_player_class_ = 0; // authoritative S2C 0x5A avatarClass

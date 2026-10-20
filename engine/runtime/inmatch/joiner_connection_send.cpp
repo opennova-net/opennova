@@ -14,6 +14,10 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h> // title_in_match (the 0x2F class byte, DFX2-12)
+#include <formats/playersav/weapon_sav.h> // make_defaults (the fresh profile's kit)
+#include <runtime/world/weapon_table.h>   // index_of (the fresh kit's ADM lookups)
+#include <base/gameprofile/gameprofile.h>  // the title's version text (the 0x0B dword)
+#include <base/io/le.h>                   // append_u32_le (the 0x0B body)
 #include <formats/mission/bms.h>      // bms::Header (the mission type byte)
 
 #include <algorithm>
@@ -65,28 +69,54 @@ constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 //  @0x4ca4a0 stores 10000 @0x4caac5/@0x4cab98 and 30000 @0x4caab5/@0x4cab88; the reaping
 //  timeout_ms = 120000 is stored @0x4caa81/@0x4cab54]
 
-// The golden joiner's profile kit (retail-lan-host-join-session): the capture default every
-// headless caller keeps submitting. Rows carry the profile's "-1" ammo/flags strings (atol
-// low byte -> 0xFF) [orig: the kit tuple buffer NetPacket_SendLoadoutSubmit @0x42cdc0 walks].
-LoadoutSubmit build_retail_default_loadout_submit(uint8_t team, bool alternate) {
+} // namespace
+
+LoadoutSubmit fresh_profile_loadout_submit(const world::WeaponTable *weapons, uint8_t team) {
+	static const playersav::Record fresh = playersav::make_defaults().slots[0];
+	const playersav::Side &side = fresh.side(playersav::side_for_team(team));
+	uint8_t player_class = side.player_class;
+	if (player_class < 5 || player_class > 9) player_class = 8;
 	LoadoutSubmit submit;
 	submit.team = team;
-	submit.player_class = 0x08;
-	// First submission: the fixed Primary-key slot 195 (pre-Player_InitPlayer the slot table is
-	// empty, so the builder's side-mask resolution returns the argument raw). Second: the live
-	// g_CurrentWeaponSlot after the spawn fill — the golden kit's primary landed at category 3
-	// rank 17 = 212. [orig: Game_StartMission @0x525836 (195) / @0x525c2e (g_CurrentWeaponSlot)]
-	submit.weapon_slot_index = alternate ? 212u : 195u;
-	for (uint8_t adm : {
-			uint8_t{0x18}, uint8_t{0x03}, uint8_t{0x2C}, uint8_t{0x28},
-			uint8_t{0x29}, uint8_t{0x2A}, uint8_t{0x02},
-	}) {
-		submit.entries.push_back(LoadoutSubmitEntry{adm, 0xFF, 0xFF, 0xFF});
+	submit.player_class = player_class;
+	submit.weapon_slot_index = 195u;
+	const playersav::KitPage *page = side.page_for_class(player_class);
+	if (page != nullptr && weapons != nullptr) {
+		for (const playersav::KitEntry &entry : page->entries) {
+			const int adm = weapons->index_of(entry.name.c_str());
+			if (adm < 0) continue;
+			submit.entries.push_back(LoadoutSubmitEntry{static_cast<uint8_t>(adm),
+					static_cast<uint8_t>(entry.ammo_primary),
+					static_cast<uint8_t>(entry.ammo_secondary),
+					static_cast<uint8_t>(entry.flags)});
+		}
 	}
 	return submit;
 }
 
-} // namespace
+std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32_t version_packed) {
+	std::vector<uint8_t> body(side_password.begin(), side_password.end());
+	body.push_back(0);
+	io::append_u32_le(body, 0);
+	io::append_u32_le(body, 0);
+	io::append_u32_le(body, version_packed);
+	return body;
+}
+
+uint32_t packed_game_version(const char *version_text) {
+	if (version_text == nullptr || (version_text[0] != 'V' && version_text[0] != 'v')) return 0;
+	uint32_t packed = 0;
+	const char *p = version_text + 1;
+	for (int i = 0; i < 4; ++i) {
+		if (*p < '0' || *p > '9') return 0;
+		uint32_t value = 0;
+		while (*p >= '0' && *p <= '9') value = value * 10u + static_cast<uint32_t>(*p++ - '0');
+		if (value > 0xFFu) return 0;
+		packed = (packed << 8) | value;
+		if (i < 3 && *p++ != '.') return 0;
+	}
+	return *p == '\0' ? packed : 0;
+}
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {
 	if (session_lost() || phase_ == Phase::Error) return {};
@@ -243,6 +273,7 @@ JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 		                                   : SendPumpLoop::SyncTailWait;
 	case PostAuthStage::AwaitWorldStreamEnd:
 		return SendPumpLoop::WorldStreamWait;
+	case PostAuthStage::AwaitMissionStart:
 	case PostAuthStage::AwaitDeployment:
 		return SendPumpLoop::WorldStateWait;
 	default:
@@ -378,7 +409,7 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 	// [orig: Game_StartMission @0x525767-0x525836 (join) and NapiNPClientMsg_TeamAssign
 	//  @0x431a35..0x431a9a (the S2C 0x50 reselect)]
 	if (!loadout_kit_set_) {
-		LoadoutSubmit submit = build_retail_default_loadout_submit(team, alternate);
+		LoadoutSubmit submit = fresh_profile_loadout_submit(weapons_, team);
 		submit.player_class = loadout_wire_class(submit.player_class);
 		return submit;
 	}
@@ -399,6 +430,35 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 			? static_cast<uint32_t>(loadout_kit_.equipped_combo)
 			: 195u;
 	return submit;
+}
+
+std::vector<uint8_t> JoinerConnection::frame_mission_start_end() {
+	if (post_auth_stage_ != PostAuthStage::AwaitMissionStart) return {};
+	// The SAME per-side profile kit twice — first with the fixed slot 195, then with the
+	// spawn fill's equipped slot — and the mission status, queued in that order and
+	// pushed together. "Per-side" is literal: the latched team byte picks the profile
+	// side block, and that block's class byte picks the page [orig: @0x525767].
+	// [orig: Game_StartMission @0x525836 / @0x525c2e -> NetPacket_SendLoadoutSubmit
+	//  @0x42cdc0; the 0x0B @0x52623f..0x52624b; the push @0x526255]
+	const LoadoutSubmit first = build_profile_loadout_submit(assigned_team_, false);
+	const LoadoutSubmit second = build_profile_loadout_submit(assigned_team_, true);
+	const gameprofile::GameProfile *profile =
+			title_ != nullptr ? gameprofile::gameprofile_by_id(title_->game_id) : nullptr;
+	std::vector<uint8_t> out = frame_session({
+			make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(first)),
+			make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second)),
+			make_protocol_message(0x0B, build_mission_status(side_password_,
+					packed_game_version(profile != nullptr ? profile->version_text : nullptr))),
+	});
+	post_auth_stage_ = PostAuthStage::AwaitDeployment;
+	return out;
+}
+
+std::vector<uint8_t> JoinerConnection::push_mission_start_end() {
+	std::vector<uint8_t> datagram = frame_mission_start_end();
+	// The explicit push sends the whole queue at once [orig: @0x526255].
+	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
+	return datagram;
 }
 
 std::vector<uint8_t> JoinerConnection::frame_loadout_resubmit() {
@@ -433,7 +493,7 @@ bool JoinerConnection::prepare_loadout_resubmit(
 				: 195u;
 		submit.entries = loadout_kit_.rows;
 	} else {
-		submit = build_retail_default_loadout_submit(assigned_team_, true);
+		submit = fresh_profile_loadout_submit(weapons_, assigned_team_);
 	}
 	submit.player_class = loadout_wire_class(submit.player_class);
 	message_out = make_protocol_message(

@@ -68,6 +68,9 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	join_password_ = join_password;
 	runtime = std::make_unique<ClientRuntime>(player_name);
 	runtime->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
+	// A submission with no kit seam resolves the fresh profile's page through the
+	// kernel's weapon table (JoinerConnection::set_weapon_table).
+	runtime->set_weapon_table(kernel_ != nullptr ? &kernel_->world.tables.weapons : nullptr);
 	runtime->set_join_request(join_role, spectator_password, server_password, join_password);
 	// The connect's peer: the 0x41's EIP / EPN on a dial, the 0x42's SIP / SPN.
 	runtime->set_host_address(host_addr_);
@@ -80,6 +83,7 @@ void JoinerRole::bind(mission::MissionKernel &kernel) {
 	// rebind); only the new one is touched.
 	Role::bind(kernel);
 	if (runtime) runtime->set_profile(&kernel.profile);
+	if (runtime) runtime->set_weapon_table(&kernel.world.tables.weapons);
 	// The +368 readers (the vehicle sound and part-spin gates) resolve remote
 	// claimants through this role's decoded state.
 	kernel.world.vehicles.occupancy_source = this;
@@ -117,6 +121,14 @@ void JoinerRole::set_socket(opennova::IDatagramSocket *socket, const PeerAddr &h
 void JoinerRole::send(const std::vector<uint8_t> &dg) {
 	if (socket_ == nullptr || dg.empty()) return;
 	socket_->send_to(host_addr_, dg.data(), dg.size());
+}
+
+// The mission start's end: the two 0x2F and the 0x0B pushed at once once the
+// S2C 0x1A released it [orig: Game_StartMission @0x524360 -
+// CNapiNetwork_PumpClientProtocolSend @0x526255].
+void JoinerRole::push_mission_start_end() {
+	if (!runtime) return;
+	send(runtime->push_mission_start_end());
 }
 
 // Drain every datagram pending on the socket into the runtime's recv fold

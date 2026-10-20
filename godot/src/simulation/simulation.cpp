@@ -564,6 +564,7 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 			install_character_join_vars();
 			install_auto_medic_preference();
 			install_expansion_version_root();
+			install_join_mission_start();
 		}
 		if (is_joiner()) {
 			net_.joiner_applied_loadout_revision = 0;

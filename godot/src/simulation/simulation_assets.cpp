@@ -140,6 +140,12 @@ void Simulation::install_join_cd_cookie() {
 	runtime_->set_join_cd_cookie(net_.join_cd_cookie);
 }
 
+void Simulation::install_join_mission_start() {
+	if (!runtime_) return;
+	runtime_->set_mission_start_loading(net_.join_mission_start_loading);
+	runtime_->set_side_password(net_.join_side_password);
+}
+
 int Simulation::set_character_avatar_database(
 		const Ref<AvatarDatabase> &p_avatar_db) {
 	assets_.character_sex_rows.clear();

@@ -143,6 +143,7 @@ const char *JoinerConnection::post_auth_stage_name() const {
 	case PostAuthStage::AwaitPlayerList: return "awaiting the player list";
 	case PostAuthStage::AwaitInitialSyncTail: return "awaiting the pre-world sync tail";
 	case PostAuthStage::AwaitWorldStreamEnd: return "awaiting the world stream";
+	case PostAuthStage::AwaitMissionStart: return "loading the mission start";
 	case PostAuthStage::AwaitDeployment: return "awaiting the world state (S2C 0x0F)";
 	case PostAuthStage::AwaitDeployPick: return "awaiting the player's deployment pick";
 	case PostAuthStage::AwaitDeployRelease: return "awaiting the deployment release";

@@ -151,15 +151,6 @@ std::vector<uint8_t> le32_value(uint32_t value) {
 	return body;
 }
 
-std::vector<uint8_t> build_retail_mission_status() {
-	std::vector<uint8_t> body(13, 0);
-	body[9] = 0x07;
-	body[10] = 0x05;
-	body[11] = 0x07;
-	body[12] = 0x01;
-	return body;
-}
-
 // The settings-flagged H:0x00 record, decoded by the shared receiver port
 // (npwire decode_cs_config_update, CNapiNPConnection_HandleCSConfigUpdate).
 bool is_cs_config_update(const ProtocolMessage &message) {
@@ -1579,26 +1570,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				release_deployment(/*deployment_complete=*/false);
 		} else if (m.tag == s2c::WAIT_FOR_GAME_START_ACK &&
 		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd) {
-			// The world-stream terminator releases retail's loadout/status submission: the SAME
-			// per-side profile kit twice — first with the fixed Primary-key slot 195, then with
-			// the live equipped slot — plus the witnessed nonzero mission-status tail. The kit
-			// content comes from the binding seam when set (the shell's applied loadout); the
-			// capture-default kit keeps headless callers byte-identical.
-			// [orig: Game_StartMission @0x525836/@0x525c2e -> NetPacket_SendLoadoutSubmit
-			//  @0x42cdc0; the 0x0B status tail rides the same flush]
-			// "Per-side" is literal: the latched team byte picks the profile side
-			// block, and that block's class byte picks the page [orig: @0x525767].
-			const LoadoutSubmit first =
-					build_profile_loadout_submit(assigned_team_, false);
-			const LoadoutSubmit second =
-					build_profile_loadout_submit(assigned_team_, true);
-			out.outbound.push_back(frame_session({
-					make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(first)),
-					make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second)),
-					make_protocol_message(
-							0x0B, build_retail_mission_status()),
-			}));
-			post_auth_stage_ = PostAuthStage::AwaitDeployment;
+			// The world-stream terminator ends the game-start wait and releases the mission
+			// start, whose end sends the loadout/status submission (frame_mission_start_end):
+			// at once when the embedder's load already ran, else when it ends.
+			// [orig: NapiClient_WaitForGameStart @0x42cc10 from Game_StartMission @0x524e29]
+			post_auth_stage_ = PostAuthStage::AwaitMissionStart;
+			if (!mission_start_loading_) {
+				std::vector<uint8_t> end = frame_mission_start_end();
+				if (!end.empty()) out.outbound.push_back(std::move(end));
+			}
 			out.game_start_acked = true;
 		} else if (m.tag == s2c::RTT_ECHO) {
 			RttSample sample;

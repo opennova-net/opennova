@@ -538,6 +538,22 @@ public:
 		if (joiner_)
 			joiner_->set_loaded_model_challenge_snapshot(std::move(values));
 	}
+	// The mission start's end (JoinerConnection::set_mission_start_loading /
+	// push_mission_start_end): an embedder whose load runs after the S2C 0x1A declares it,
+	// and once its load has ended sends the two 0x2F and the 0x0B at once.
+	void set_mission_start_loading(bool loading) {
+		if (joiner_) joiner_->set_mission_start_loading(loading);
+	}
+	bool mission_start_released() const { return joiner_ && joiner_->mission_start_released(); }
+	std::vector<uint8_t> push_mission_start_end() {
+		return joiner_ ? joiner_->push_mission_start_end() : std::vector<uint8_t>{};
+	}
+	void set_weapon_table(const world::WeaponTable *weapons) {
+		if (joiner_) joiner_->set_weapon_table(weapons);
+	}
+	void set_side_password(std::string password) {
+		if (joiner_) joiner_->set_side_password(std::move(password));
+	}
 	// Queue the armory-ACCEPT loadout re-submission: one C2S 0x2F from the current kit seam,
 	// queued now as NetPacket_SendLoadoutSubmit queues it at the ACCEPT, so it leaves at the
 	// next open boundary in queue order [orig: @0x42d085] (JoinerConnection::prepare_loadout_resubmit).

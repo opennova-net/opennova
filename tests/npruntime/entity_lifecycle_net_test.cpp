@@ -24,6 +24,7 @@
 // Every assertion starts from a state where the asserted value DIFFERS from its prior
 // value, so a no-op implementation cannot pass.
 
+#include <formats/playersav/weapon_sav.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -351,13 +352,27 @@ bool run_team_assign_reselects_the_new_sides_profile() {
 	return true;
 }
 
-// A caller that never calls set_loadout_kit keeps the canned capture kit BYTE FOR BYTE —
-// the headless ctests, nw_replay and seed_in_match all pin it. The per-side seam must not
-// disturb that fallback.
+// A caller that never calls set_loadout_kit submits the fresh profile's kit, its page resolved
+// through the installed weapon table (D-NET-531): the S2C 0x50 re-submit carries it under the
+// NEW team byte and slot 195 raw. The per-side seam must not disturb that fallback.
+// [orig: NapiNPClientMsg_TeamAssign @0x431a9e; NetPacket_SendLoadoutSubmit @0x42cdc0 -
+//  @0x42cf0b, @0x42cf21]
 bool run_team_assign_default_kit_stays_byte_identical() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("DefaultKitJoiner", [] { return uint64_t(0); });
-	// deliberately NO set_loadout_kit
+	// deliberately NO set_loadout_kit; a synthetic weapon table holding the fresh red
+	// page's names behind an unrelated entry
+	const opennova::playersav::KitPage red =
+			opennova::playersav::default_kit_page(opennova::playersav::SideId::Red, 8);
+	w::WeaponTable table;
+	table.entries.resize(red.entries.size() + 1);
+	table.entries[0].name = "WPN_SYNTHETIC";
+	table.entries[0].valid = true;
+	for (std::size_t i = 0; i < red.entries.size(); ++i) {
+		table.entries[i + 1].name = red.entries[i].name;
+		table.entries[i + 1].valid = true;
+	}
+	joiner.set_weapon_table(&table);
 	joiner.seed_in_match(kSessionId, kClientKey, kClientScrk, kServerScrk,
 						 1, 0, kSelf, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -380,20 +395,16 @@ bool run_team_assign_default_kit_stays_byte_identical() {
 			"0x50-default: the unset-kit path still re-submits exactly once"))
 		return false;
 
-	// The golden joiner's profile kit from retail-lan-host-join-session, under the NEW
-	// team byte and slot 195 raw.
+	// The fresh red class-8 page, each row at its table index, under the NEW team byte
+	// and slot 195 raw.
 	LoadoutSubmit want;
 	want.team = 2;
 	want.player_class = 0x08;
 	want.weapon_slot_index = 195;
-	for (uint8_t adm : {
-			uint8_t{0x18}, uint8_t{0x03}, uint8_t{0x2C}, uint8_t{0x28},
-			uint8_t{0x29}, uint8_t{0x2A}, uint8_t{0x02},
-	}) {
-		want.entries.push_back(LoadoutSubmitEntry{adm, 0xFF, 0xFF, 0xFF});
-	}
-	return expect(payload == encode_loadout_submit(want),
-			"0x50-default: the canned capture kit goes out BYTE-IDENTICAL");
+	for (std::size_t i = 0; i < red.entries.size(); ++i)
+		want.entries.push_back(LoadoutSubmitEntry{static_cast<uint8_t>(i + 1), 0xFF, 0xFF, 0xFF});
+	return expect(!red.entries.empty() && payload == encode_loadout_submit(want),
+			"0x50-default: the fresh profile's kit goes out, resolved through the table");
 }
 
 // A 0x50 for a REMOTE handle folds the team onto that row and sends nothing.

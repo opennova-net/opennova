@@ -4997,6 +4997,11 @@ target_include_directories(npruntime_join_leg_test PRIVATE ${CMAKE_CURRENT_SOURC
 add_test(NAME npruntime_join_leg COMMAND npruntime_join_leg_test)
 
 # --- parity lane L2 (joiner) ---
+# The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B
+# and the fresh profile's 0x2F kit resolved through the weapon table.
+add_executable(npruntime_joiner_mission_start_test npruntime/joiner_mission_start_test.cpp)
+target_link_libraries(npruntime_joiner_mission_start_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_mission_start COMMAND npruntime_joiner_mission_start_test)
 
 # --- parity lane L3 (host tick) ---
 

@@ -120,6 +120,11 @@ struct SimulationNetState {
 	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
 	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.
 	std::string app_id = "0";
+	// The joiner's mission-start seam (JoinerConnection::set_mission_start_loading /
+	// set_side_password): the shell's load runs after the S2C 0x1A, and the config's
+	// side password the C2S 0x0B carries. Retained across rebuilds.
+	bool join_mission_start_loading = false;
+	std::string join_side_password;
 	// The joiner's network type (JoinTarget::network_type; retail's
 	// g_NapiNPCtx.transport_mode on the client). Retained across rebuilds.
 	opennova::inmatch::NetworkType join_network_type = opennova::inmatch::NetworkType::Lan;

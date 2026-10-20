@@ -91,6 +91,10 @@ public:
 	// runtime's world-ready gate suppresses the load/spawn drive. The hello
 	// latch and the per-frame clock are shared with the in-mission frame.
 	void poll_preload();
+	// The end of a mission start whose load ran after the S2C 0x1A
+	// (ClientRuntime::set_mission_start_loading): sends the two 0x2F and the 0x0B
+	// at once; nothing before the release or after the send.
+	void push_mission_start_end();
 	// The witnessed key handlers queue one C2S 0x1D with the action id; it leaves
 	// inside the next open send boundary [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
 	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7].

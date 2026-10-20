@@ -520,6 +520,8 @@ private:
 	void install_app_id();
 	// Install the retained CD identity cookie (packed PUB* blob) on the runtime.
 	void install_join_cd_cookie();
+	// Install the retained mission-start seam (the load flag, the side password).
+	void install_join_mission_start();
 	// The host's session record for a mission of `p_game_type` (the UI host config or the SP
 	// listen server's); host_bringup() adds the retained .til, text and Server strings for the
 	// in-memory loads, which stage it themselves (the file boot's engine phase A stages its own).
@@ -850,6 +852,14 @@ public:
 	// mission/render model setup and before revealing the loaded world; later
 	// S2C entity spawns and presentation loads deliberately cannot mutate it.
 	void finalize_loaded_model_challenge_snapshot();
+	// The joiner's mission start (engine: inmatch/joiner_connection.h
+	// set_mission_start_loading): the shell declares its load runs after the S2C 0x1A,
+	// reads the release, and once the load has ended pushes the two 0x2F and the 0x0B.
+	// The side password is the config's (game.cfg's side_password field, code-page bytes).
+	void set_join_mission_start_loading(bool p_loading);
+	bool is_join_mission_start_released() const;
+	void finish_join_mission_start();
+	void set_join_side_password(const std::string &p_password);
 	bool poll_join_preload();
 	bool is_join_preload_ready() const;
 	// The joiner's admission-FSM stage name (diagnostics: the shell's post-load join
