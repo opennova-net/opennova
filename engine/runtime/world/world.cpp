@@ -739,6 +739,11 @@ void World::pump_weapon_actions() {
 // transport emits the per-recipient wire transaction from this frozen result.
 void World::process_round_end(int32_t winning_team) {
     if (!match.finish(winning_team, *this)) return; // double-run guard + frozen board [orig: @0x516502/@0x516528]
+    // A latch inside the script pass sends here, at the call: the records the
+    // pass raised before it, then the round end's own (D-NET-NEW-V3-1)
+    // [orig: Server_ProcessRoundEnd @0x5164F0 - the per-slot sends
+    //  @0x516790..0x51685E, ahead of the SP tail @0x51691D].
+    if (script_pass_sends != nullptr) script_pass_sends->send_round_end(*this);
     // Match::finish applies the winner marker and builds the immutable board in
     // the original pre-send order [orig: GameEvent_ProcessScoring @0x52f550;
     // Server_BuildEndOfRoundScoreboard @0x508f30]. The authority net tail sends,

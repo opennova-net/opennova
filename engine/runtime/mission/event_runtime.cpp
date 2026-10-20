@@ -920,8 +920,14 @@ void BmsEventSystem::fire(World &w, size_t index) {
     // [orig: immediate @0x454C92/@0x454CAB; delayed @0x454D01/@0x454D13]
     const int action_count = se.event.action_count < 128
             ? se.event.action_count : static_cast<int>(se.event.action_count) - 256;
-    for (int a = 0; a < action_count && static_cast<size_t>(a) < se.actions.size(); ++a)
+    // Each action's sends go out at its dispatch, ahead of the next action's
+    // (a Win's round end at its own latch, process_round_end) (D-NET-NEW-V3-1)
+    // [orig: EventTrigger_UpdateEntry @0x454C30 - the EventAction_Dispatch calls
+    //  @0x454CA6 / @0x454D0E].
+    for (int a = 0; a < action_count && static_cast<size_t>(a) < se.actions.size(); ++a) {
         dispatch_action(w, se.actions[static_cast<size_t>(a)], event, se.event.action_index + a);
+        w.send_script_pass_records();
+    }
     // The waypoint completion hook: a fired event completes every route marker
     // linked to its index (the original computes the index from the record's
     // position in g_Events; events_ mirrors that array order).

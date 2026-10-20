@@ -1004,6 +1004,30 @@ public:
     virtual void update_entity_idle_timers(World &world) = 0;
 };
 
+// The host session's sends inside the script pass. Retail queues each record
+// the pass raises at its call (NapiNPServer_SendFiltered queues on the
+// connection there and then), so a record a later call raises follows every
+// send an earlier call made, a round end's 0x61 / 0x1D included: the WAC VM's
+// 0x23 goes ahead of its own local call, each WAC command's and each BMS
+// action's records go out at that call, and a Win's round end announces at its
+// latch. Server_TickUpdate installs one around its script pass; a world
+// without a host session has none.
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 (SendFiltered(0x23) @0x4F5E74 /
+//  @0x4F5ED1 ahead of the call switch @0x4F5EF6); EventTrigger_UpdateEntry
+//  @0x454C30 (one EventAction_Dispatch per action, the calls @0x454CA6 /
+//  @0x454D0E); WacAction_Win @0x4ED4A0 (the Server_ProcessRoundEnd call
+//  @0x4ED4A5); NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage
+//  @0x628640]
+class IScriptPassSends {
+public:
+    virtual ~IScriptPassSends() = default;
+    // Send every record the pass raised since the last call.
+    virtual void send_raised(World &world) = 0;
+    // A round end latched inside the pass: what the pass raised before the
+    // latch, then the round end's own sends.
+    virtual void send_round_end(World &world) = 0;
+};
+
 // The authority's per-player weapon tables for a REMOTE player: retail's
 // player-slot block behind Entity_ValidatePtr, its 780-slot table at +0x1D0,
 // its class pools at +0x15A58 and its shared clips at +0x15C58. The host
@@ -1077,6 +1101,9 @@ public:
     // kernel between WAC and BMS; the host session installs the idle timers.
     ServerIdleLegs server_idle_legs;
     IEntityIdleTimers *entity_idle_timers = nullptr;
+    // The script pass's sends (IScriptPassSends above), installed by the host
+    // session around run_script_pass.
+    IScriptPassSends *script_pass_sends = nullptr;
     IRemoteWeaponTables *remote_weapon_tables = nullptr;
     // The authority's inline transactions (entity_update_transactions.h): armed
     // by the host session around its tick's entity pass (Server_TickUpdate).
@@ -1356,6 +1383,11 @@ public:
     // producers — the WAC win/lose handlers, the BMS Blue/Red/GreenWin actions, and
     // the server win-condition check. [orig: Server_ProcessRoundEnd @0x5164f0]
     void process_round_end(int32_t winning_team);
+    // A script call's records go out at the call while the host session's
+    // script pass runs (IScriptPassSends); a no-op otherwise.
+    void send_script_pass_records() {
+        if (script_pass_sends != nullptr) script_pass_sends->send_raised(*this);
+    }
 
     // The round-over RESTART key's world half (hud::hud_round_over_key took
     // it): the end screen comes down and the mission exits for the SP

@@ -370,6 +370,69 @@ void clear_priority_target_marks(world::World &world) {
 	}
 }
 
+// What the script pass raised, sent in its call's place: the item events and
+// HUD relays, the WAC punts, the replicated WAC commands (0x23), the deaths
+// (their broadcasts staged before the 0x0A fan, §5.60) and the flag events.
+// [orig: Server_SendItemDeathState @0x50C840 and Server_BroadcastEntityActionPacket
+//  @0x5080D0 from the class callbacks and the HUD notice; WacScript_ExecuteBytecode's
+//  SendFiltered(0x23) @0x4F5E74 / @0x4F5ED1; NapiNPServer_SendFiltered @0x4C87E0
+//  queueing at the call]
+void route_script_pass_records(NapiNPServerCtx &ctx, world::World &world) {
+	Server_FanEntityEvents(ctx, world);
+	// WAC punts are connection descriptions, not gameplay damage or chat.
+	// The original slot wrapper ignores departed/retired slots; the live
+	// connection owner likewise rejects stale allocations and loopback nodes.
+	// [orig: WacCmd_PlayerPunt @0x4F0DA0; WacCmd_PlayerKillPunt @0x4F0D30;
+	// CNapiNPConnection_TrySendChatMessage @0x5006C0;
+	// CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0]
+	for (const world::MatchPlayerPunt &punt : world.match.drain_player_punts()) {
+		const world::Entity *entity = world.registry.get(punt.entity);
+		if (entity == nullptr || entity->registry_spawn_id != punt.spawn_id ||
+				world.match.player(punt.entity) == nullptr)
+			continue;
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (conn.link.owned_entity != punt.entity ||
+					(conn.link.owned_entity_spawn_id != 0 &&
+					 conn.link.owned_entity_spawn_id != punt.spawn_id))
+				continue;
+			DisconnectEvent event;
+			event.ds = 1;
+			event.dc = 2;
+			event.dpc = punt.reason;
+			event.ddstr = "wac punt";
+			Server_StageHostDisconnect(conn, event);
+			break;
+		}
+	}
+	route_script_remote_commands(ctx, world);
+	route_round_deaths(ctx, world);
+	route_match_gameplay_events(ctx, world);
+}
+
+// The script pass's sends at their calls (world::IScriptPassSends): a WAC
+// command's or a BMS action's records after its call, and a WAC Win / Lose or a
+// BMS Blue / Red / GreenWin round end at its latch, behind what the pass raised
+// before it, so a record a later call raises (the BMS quarter pass after a WAC
+// win, a later action of the Win's trigger) follows the 0x61 / 0x1D.
+// [orig: WacAction_Win @0x4ED4A0 (the call @0x4ED4A5), WacAction_Lose @0x4ED3F0
+//  (the relay @0x4ED411, the call @0x4ED44A), EventAction_Dispatch @0x4542E0 (the
+//  calls @0x45447B / @0x454495 / @0x4544AF) -> Server_ProcessRoundEnd @0x5164F0;
+//  no round-over test between the WAC tick @0x51D8BF and the quarter pass @0x51D8F4]
+class ScriptPassSends final : public world::IScriptPassSends {
+public:
+	explicit ScriptPassSends(NapiNPServerCtx &ctx) : ctx_(ctx) {}
+	void send_raised(world::World &world) override {
+		route_script_pass_records(ctx_, world);
+	}
+	void send_round_end(world::World &world) override {
+		route_script_pass_records(ctx_, world);
+		announce_round_end(ctx_, world);
+	}
+
+private:
+	NapiNPServerCtx &ctx_;
+};
+
 } // namespace
 
 
@@ -555,56 +618,26 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//  WacScript_AdvanceTick call @0x51D8BF, the Server_UpdatePlayerBreathTimers
 	//  call @0x51D8D7, the EventTrigger_UpdateQuarterRoundRobin call @0x51D8F4]
 	ServerIdleTimers idle_timers(ctx);
+	ScriptPassSends script_sends(ctx);
 	world.entity_idle_timers = &idle_timers;
+	world.script_pass_sends = &script_sends;
 	const world::TickContext tick = world.begin_tick(
 			/*is_authority=*/true,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
 	world.run_script_pass(tick);
+	world.script_pass_sends = nullptr;
 	world.entity_idle_timers = nullptr;
-	Server_FanEntityEvents(ctx, world);
-	// WAC punts are connection descriptions, not gameplay damage or chat.
-	// The original slot wrapper ignores departed/retired slots; the live
-	// connection owner likewise rejects stale allocations and loopback nodes.
-	// [orig: WacCmd_PlayerPunt @0x4F0DA0; WacCmd_PlayerKillPunt @0x4F0D30;
-	// CNapiNPConnection_TrySendChatMessage @0x5006C0;
-	// CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0]
-	for (const world::MatchPlayerPunt &punt : world.match.drain_player_punts()) {
-		const world::Entity *entity = world.registry.get(punt.entity);
-		if (entity == nullptr || entity->registry_spawn_id != punt.spawn_id ||
-				world.match.player(punt.entity) == nullptr)
-			continue;
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (conn.link.owned_entity != punt.entity ||
-					(conn.link.owned_entity_spawn_id != 0 &&
-					 conn.link.owned_entity_spawn_id != punt.spawn_id))
-				continue;
-			DisconnectEvent event;
-			event.ds = 1;
-			event.dc = 2;
-			event.dpc = punt.reason;
-			event.ddstr = "wac punt";
-			Server_StageHostDisconnect(conn, event);
-			break;
-		}
-	}
-	// The rest of what the pass raised: retail sends each inline as the script
-	// runs, so all of it precedes the scoreboard boundary and the frame's 0x0A fan:
-	// the replicated WAC commands (0x23), the deaths (their broadcasts staged
-	// before the 0x0A fan, §5.60), the flag events, then a WAC Win / Lose or a BMS
-	// Blue / Red / GreenWin round end, whose 0x61 / 0x1D follow the records the
-	// pass raised and whose slots are in state 7 before the periodic block's sweep
-	// and flag refresh (D-NET-NEW-L1-16, D-NET-NEW-V3-1). The entity pass's records
-	// were routed at the head of this call; a round already announced (the
-	// admin's, inline) is a no-op.
-	// [orig: WacScript_ExecuteBytecode's SendFiltered(0x23) @0x4F5E74 / @0x4F5ED1;
-	//  WacAction_Win @0x4ED4A5, WacAction_Lose @0x4ED44A, EventAction_Dispatch
-	//  @0x45447B / @0x454495 / @0x4544AF -> Server_ProcessRoundEnd @0x5164F0;
-	//  from WacScript_AdvanceTick @0x51D8BF and EventTrigger_UpdateQuarterRoundRobin
+	// Each WAC command's and each BMS action's records went out at the call, a
+	// Win / Lose round end at its latch (ScriptPassSends): what is left is what
+	// the pass raised outside a script call. All of it precedes the scoreboard
+	// boundary and the frame's 0x0A fan, and a script-ended round's slots are in
+	// state 7 before the periodic block's sweep and flag refresh
+	// (D-NET-NEW-L1-16, D-NET-NEW-V3-1). The entity pass's records were routed at
+	// the head of this call; a round already announced is a no-op.
+	// [orig: WacScript_AdvanceTick @0x51D8BF and EventTrigger_UpdateQuarterRoundRobin
 	//  @0x51D8F4, ahead of the scoreboard @0x51D90D]
-	route_script_remote_commands(ctx, world);
-	route_round_deaths(ctx, world);
-	route_match_gameplay_events(ctx, world);
+	route_script_pass_records(ctx, world);
 	announce_round_end(ctx, world);
 	// The scoreboard boundary follows the script pass's BMS quarter pass and
 	// precedes the play-tick walk [orig: Server_TickUpdate @0x51D8F9..0x51D917].

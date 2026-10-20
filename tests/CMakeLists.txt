@@ -5008,6 +5008,11 @@ add_test(NAME npruntime_server_hello_nc COMMAND npruntime_server_hello_nc_test)
 add_executable(world_state_waypoints_test mission/world_state_waypoints_test.cpp)
 target_link_libraries(world_state_waypoints_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME world_state_waypoints COMMAND world_state_waypoints_test)
+# The script pass's sends at their calls: a WAC / BMS Win announces at its latch (D-NET-NEW-V3-1).
+add_executable(npruntime_script_pass_order_test npruntime/script_pass_order_test.cpp)
+target_link_libraries(npruntime_script_pass_order_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_script_pass_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_script_pass_order COMMAND npruntime_script_pass_order_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B
