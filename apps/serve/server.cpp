@@ -5,6 +5,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/crt_ftol.h> // retail_atol (/maxplayers)
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
@@ -15,6 +16,7 @@
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/net_ports.h>
+#include <net/npwire/nw_session_framing.h> // NapiPrng (the bind scan's random start)
 #include <net/title/title_identity.h>
 #include <runtime/hud/hud_math.h> // hud_label_font_choice (HUD_InitAllFonts)
 #include <runtime/inmatch/host_config.h>
@@ -37,7 +39,8 @@ namespace opennova::serve {
 namespace {
 
 const char kUsage[] =
-		"usage: opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]\n"
+		"usage: opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>]\n"
+		"                      [/exp <name>] [/d]\n"
 		"                      [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] [--log-debug]\n"
 		"                      [--master-host <gate>] [--master-gate-port <n>]\n"
 		"                      [--credentials <file>] [--allow-public]\n"
@@ -46,6 +49,7 @@ const char kUsage[] =
 		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per line\n"
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
 		"                   line per rotation entry; the last Mission line is the starting map\n"
+		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code: its keying and the title the server speaks\n"
 		"                   (default jo)\n"
@@ -153,6 +157,12 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			if (!value(out.resource_dir)) return 1;
 		} else if (strutil::iequals(a, "/HOST")) {
 			if (!value(out.host_file)) return 1;
+		} else if (strutil::iequals(a, "/maxplayers")) {
+			// The next token's CRT atol [orig: Game_ParseCommandLineAndInit
+			//  @0x4A76EF..0x4A7710 -> g_MaxPlayerCommandLineArg @0xB4C4F8].
+			std::string n;
+			if (!value(n)) return 1;
+			out.max_player_arg = io::retail_atol(n.c_str());
 		} else if (strutil::iequals(a, "/exp") || strutil::iequals(a, "/mod")) {
 			// The game's one `/mod`/`/exp` arm: the last one wins, its first 32
 			// bytes kept [orig: Game_ParseCommandLineAndInit @ 0x4a76ac].
@@ -438,7 +448,8 @@ bool Server::read_host_file(std::string &error) {
 		error = "the host file '" + options_.host_file + "' does not open";
 		return false;
 	}
-	report_ = inmatch::read_host_file(text.data(), text.size(), config_.cfg(), rotation_, catalog_);
+	report_ = inmatch::read_host_file(text.data(), text.size(), config_.cfg(), rotation_, catalog_,
+			options_.max_player_arg);
 	for (const std::string &key : report_.unknown_keys)
 		io::logf(io::LogLevel::kWarn, "opennova-serve: the host file key '%s' is not a host setting",
 				key.c_str());
@@ -671,8 +682,8 @@ bool Server::route_mission_exit(int32_t reason) {
 // the authority arm @0x4C6AA2 over mplanserverportmin / max / delta
 // (g_GameConfigState+0x244 / +0x248 / +0x24C), the NovaWorld arm
 // @0x4C6AF6..0x4C6B08 over mpnovaworldportmin / max / delta (+0x228 / +0x22C /
-// +0x230); NapiUdpSocket_CreateAndBind @0x62D2A0; net_ports.h]. The
-// mpnovaworldportrandom start (+0x234, off by default) is not ported. The
+// +0x230, its random word +0x234 @0x4C6B08); NapiUdpSocket_CreateAndBind
+// @0x62D2A0; net_ports.h]. The
 // embedder owns the socket layer (net::startup), which is process-wide.
 bool Server::open_socket(std::string &error) {
 	const gamecfg::GameCfg &cfg = config_.cfg();
@@ -684,7 +695,18 @@ bool Server::open_socket(std::string &error) {
 			novaworld_ ? cfg.mp_novaworld_port_max : cfg.mp_lan_server_port_max);
 	const uint32_t delta = static_cast<uint32_t>(
 			novaworld_ ? cfg.mp_novaworld_port_delta : cfg.mp_lan_server_port_delta);
-	for (const uint16_t port : lan_host_bind_ports(first, max, delta)) {
+	// The NovaWorld quad's random word starts the scan at a drawn port; the
+	// authority's LAN arm passes random 0 (net_ports.h bind_scan_attempts).
+	uint32_t start_index = 0;
+	if (novaworld_ && cfg.mp_novaworld_port_random != 0) {
+		const uint32_t attempts = bind_scan_attempts(first, max, delta);
+		if (attempts > 1) {
+			NapiPrng prng(napi_prng_platform_seed());
+			start_index = static_cast<uint32_t>(
+					prng.next_in_range(0, static_cast<int32_t>(attempts) - 1));
+		}
+	}
+	for (const uint16_t port : lan_host_bind_ports(first, max, delta, start_index)) {
 		socket_ = net::udp_bind(port, &bound_port_);
 		if (socket_.is_valid()) break;
 	}

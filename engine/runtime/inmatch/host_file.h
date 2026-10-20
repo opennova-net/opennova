@@ -86,13 +86,16 @@ struct HostFileReport {
 
 // One tokenized line onto the cfg block and the rotation, retail's per-key
 // arms in their order. False for a key no arm owns.
+// `max_player_arg` is the command line's `/maxplayers N` (0: none), which a
+// MaxPlayers line yields to.
 bool apply_host_file_line(const io::ConfigTokens &line, gamecfg::GameCfg &cfg,
 		HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
-		HostFileReport *report = nullptr);
+		HostFileReport *report = nullptr, int32_t max_player_arg = 0);
 
 // The whole file through the game.cfg walk, over the block as it stands (the
 // game.cfg the process read, else its defaults).
 HostFileReport read_host_file(const char *text, size_t size, gamecfg::GameCfg &cfg,
-		HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog);
+		HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
+		int32_t max_player_arg = 0);
 
 } // namespace opennova::inmatch

@@ -29,16 +29,19 @@ inline constexpr uint16_t kRetailLanPortDelta = 1;
 // @ 0x62d440; the random-start leg is the CLIENT arm's, the host passes
 // random=0]. The authored min maps to our session bind_port; max/delta stay
 // the shipped defaults.
+// `start_index` is the random start's draw (bind_scan_attempts, below): the first bind
+// at min + delta * start_index, past max at max; the retries step and wrap as ever.
 inline std::vector<uint16_t> lan_host_bind_ports(uint32_t min_port,
 		uint32_t max_port = kRetailLanPortMax,
-		uint32_t delta = kRetailLanPortDelta) {
+		uint32_t delta = kRetailLanPortDelta, uint32_t start_index = 0) {
 	if (min_port > 0xFFFF) min_port = 0xFFFF;
 	if (delta == 0) delta = 1;
 	if (max_port < min_port) max_port = min_port;
 	if (max_port > 0xFFFF) max_port = 0xFFFF;
 	const uint32_t attempts = (max_port - min_port + 1) / delta;
 	std::vector<uint16_t> ports;
-	uint32_t port = min_port;
+	uint32_t port = min_port + delta * start_index;
+	if (port > max_port) port = max_port;
 	ports.push_back(static_cast<uint16_t>(port));
 	for (int32_t remaining = static_cast<int32_t>(attempts) - 1; remaining > 0;
 			--remaining) {
@@ -47,6 +50,22 @@ inline std::vector<uint16_t> lan_host_bind_ports(uint32_t min_port,
 		ports.push_back(static_cast<uint16_t>(port));
 	}
 	return ports;
+}
+
+// The ports a scan tries, clamped as lan_host_bind_ports clamps them. With the quad's random
+// word set, a scan of more than one port starts at min + delta * the manager PRNG's draw in
+// 0..attempts - 1, its state seeded from the platform (NapiPrng over napi_prng_platform_seed);
+// one port, or random clear, starts at min.
+// [orig: NapiUdpSocket_CreateAndBind @0x62D2A0 - the count @0x62d3b0, the random flag
+//  @0x62d3b6, NapiSession_GenerateId(state) @0x62d3bc / @0x62d3c5, attempts <= 1
+//  @0x62d3cd, NapiPRNG_NextInRange(state, 0, attempts - 1) @0x62d3d9, the start
+//  @0x62d3e0..0x62d3e9, the clamp @0x62d3f9..0x62d403]
+inline uint32_t bind_scan_attempts(uint32_t min_port, uint32_t max_port, uint32_t delta) {
+	if (min_port > 0xFFFF) min_port = 0xFFFF;
+	if (delta == 0) delta = 1;
+	if (max_port < min_port) max_port = min_port;
+	if (max_port > 0xFFFF) max_port = 0xFFFF;
+	return (max_port - min_port + 1) / delta;
 }
 
 // The client arm of the same socket open (D-NET-294): a non-authority LAN

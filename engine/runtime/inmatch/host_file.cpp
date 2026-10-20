@@ -137,7 +137,7 @@ GameConfig host_screen_default_config() {
 
 bool apply_host_file_line(const io::ConfigTokens &line, GameCfg &cfg,
 		HostRotation &host_rotation, const std::vector<mission_catalog::Row> &catalog,
-		HostFileReport *report) {
+		HostFileReport *report, int32_t max_player_arg) {
 	const std::string key = line.token(0);
 	const std::string value = line.token(1);
 	for (const TextKey &entry : kTextKeys) {
@@ -150,13 +150,15 @@ bool apply_host_file_line(const io::ConfigTokens &line, GameCfg &cfg,
 		cfg.*entry.field = io::retail_atol(value.c_str());
 		return true;
 	}
-	// MaxPlayers takes the value without the host screen's 64 clamp; a
-	// `/maxplayers N` on the command line replaces it, and nothing else reads
-	// that switch (not ported: opennova-serve has no such switch).
-	// [orig: maxPlayers_3F4 @0x4A6213..0x4A624B; /maxplayers @0x4A76EF..0x4A7710
-	//  -> g_MaxPlayerCommandLineArg @0xB4C4F8]
+	// MaxPlayers takes the value without the host screen's 64 clamp; a nonzero
+	// `/maxplayers N` from the command line then replaces it, its one reader
+	// (a file with no MaxPlayers line leaves the switch unread).
+	// [orig: maxPlayers_3F4 @0x4A6213..0x4A624B - the atol store @0x4A622E, the
+	//  switch's test @0x4A6233..0x4A623D and store @0x4A6243; /maxplayers
+	//  @0x4A76EF..0x4A7710 -> g_MaxPlayerCommandLineArg @0xB4C4F8]
 	if (strutil::iequals(key, "MaxPlayers")) {
 		cfg.mp_max_players = io::retail_atol(value.c_str());
+		if (max_player_arg != 0) cfg.mp_max_players = max_player_arg;
 		return true;
 	}
 	for (const FlagKey &entry : kFlagKeys) {
@@ -200,12 +202,13 @@ bool apply_host_file_line(const io::ConfigTokens &line, GameCfg &cfg,
 }
 
 HostFileReport read_host_file(const char *text, size_t size, GameCfg &cfg,
-		HostRotation &host_rotation, const std::vector<mission_catalog::Row> &catalog) {
+		HostRotation &host_rotation, const std::vector<mission_catalog::Row> &catalog,
+		int32_t max_player_arg) {
 	HostFileReport report;
 	// The callback returns 0 for every line, so the walk never stops early
 	// [orig: every arm's `xor eax, eax` before its ret, e.g. @0x4A6035].
 	report.lines = io::for_each_config_file_line(text, size, [&](io::ConfigTokens &line) {
-		apply_host_file_line(line, cfg, host_rotation, catalog, &report);
+		apply_host_file_line(line, cfg, host_rotation, catalog, &report, max_player_arg);
 	});
 	return report;
 }
