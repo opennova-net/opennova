@@ -281,16 +281,6 @@ lod	= 0.000;
 	tl32 = 7, 6, 5, 4, 3, 2, 1, 0;
 }
 
-[tabledef_edithandles]
-{
-	handle0 = 0, 0;
-	handle1 = 208, 1;
-	handle2 = 255, 255;
-	handlecount = 3;
-	tableid = lex_fade;
-	tightness = 0;
-};
-
 [tabledef]
 {
 	id = lex_grow;
@@ -327,6 +317,16 @@ lod	= 0.000;
 	tl31 = 240, 241, 242, 243, 244, 245, 246, 247;
 	tl32 = 248, 249, 250, 251, 252, 253, 254, 255;
 }
+
+[tabledef_edithandles]
+{
+	handle0 = 0, 0;
+	handle1 = 208, 1;
+	handle2 = 255, 255;
+	handlecount = 3;
+	tableid = lex_fade;
+	tightness = 0;
+};
 
 [tabledef_edithandles]
 {
