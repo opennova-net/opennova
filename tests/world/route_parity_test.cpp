@@ -639,10 +639,8 @@ void test_far_node_seeds_a_zero_speed_command() {
     helo.bound_radius = 5.0f;
     helo.veh.yaw_bam = 0;
     helo.veh.yaw_seeded = true;
-    AiEntity &ai = *r.w.ai.for_handle(r.helo_h);
-    ai.pos[0] = 100 << 16;
-    ai.pos[1] = 20 << 16;
-    ai.pos[2] = 50 << 16;
+    // The brain reads the hull's position words through its bound entity (D-NET-507:
+    // the AI mirror is gone), so helo.position above is the whole placement.
     NavNodeTable &nav = r.w.ai.nav;
     nav.nodes.resize(1);
     nav.nodes[0].f[1] = 200 << 16; // 100 u dead ahead, level
