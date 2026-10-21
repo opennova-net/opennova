@@ -100,15 +100,6 @@ namespace {
 // @0x506bb0): D-NET-127 closed, its last 0x46 fields with D-NET-295 (net-re §8).
 // ---------------------------------------------------------------------------
 
-bool validates_padding_echo(
-		const NapiNPConnection &conn, const std::vector<uint8_t> &payload) {
-	// The server challenge advertises paddingLen=256. Retail echoes exactly that many bytes,
-	// preserving the first two position dwords and replacing the third with its net-frame counter.
-	return payload.size() == 256 &&
-	       io::read_u32_le(payload.data()) == conn.admission_padding_x &&
-	       io::read_u32_le(payload.data() + 4) == conn.admission_padding_y;
-}
-
 void append_cstr(std::vector<uint8_t> &out, const std::string &s) {
 	out.insert(out.end(), s.begin(), s.end());
 	out.push_back(0);
@@ -504,151 +495,143 @@ ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx 
 	return make_protocol_message(s2c::JOIN_PADDING_PROBE, std::move(challenge));
 }
 
-// See header. The admission FSM ahead of the in-match switch.
-std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
-		NapiNPConnection &conn, const std::vector<ProtocolMessage> &messages,
-		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
-		const ServerDispatchInputs &inputs) {
-	std::vector<ProtocolMessage> replies;
-	SessionReplyState &st = conn.reply;
-	const ProtocolMessage *admission_message = nullptr;
-	for (const ProtocolMessage &message : messages) {
-		if (message.flags.settings_update || message.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
-		// Each leg is a distinct sequenced request/reply turn. Two gameplay records in one
-		// datagram cannot be a valid 0x00 -> 0x01 or 0x01 -> 0x02 exchange because the client
-		// has not received the intervening acknowledgement/challenge.
-		if (admission_message != nullptr) {
-			conn.admission_stage = GameAdmissionStage::Rejected;
-			return {};
-		}
-		admission_message = &message;
-	}
-	// Header-only ACKs are part of the captured flow and do not advance or violate the FSM.
-	if (admission_message == nullptr) return {};
-	// The JOIN's handler acts only on a player in game state 1 (the 0x42 accepted) and the
-	// 0x01's only in game state 2 (the JOIN accepted), each with no server slot; the 0x01 reads
-	// no payload. Out of turn either returns with nothing sent and the node kept.
-	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - `cmp [ebx+0A0h], 1` @0x512AF9 /
-	//  `jnz` @0x512B00 and `cmp [ebx+0C0h], ebp` @0x512B06 / `jnz` @0x512B0C to the return
-	//  @0x512EAC; NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2` @0x512EF1 /
-	//  `jnz` @0x512EF8 and `cmp [edi+0C0h], 0` @0x512EFE / `jnz` @0x512F05 to the return
-	//  @0x512FC2, the handler taking the connection alone] (D-NET-NEW-L1-24)
-	if ((admission_message->tag == 0x00 &&
-				conn.admission_stage != GameAdmissionStage::AwaitJoinRequest) ||
-			(admission_message->tag == 0x01 &&
-					conn.admission_stage != GameAdmissionStage::AwaitFormPost))
-		return {};
-
-	switch (conn.admission_stage) {
-		case GameAdmissionStage::AwaitJoinRequest: {
-			if (admission_message->tag != 0x00) {
-				conn.admission_stage = GameAdmissionStage::Rejected;
-				return {};
-			}
-			// The JOIN handler latches the spectator request before validation;
-			// the local loopback bypasses the complete remote validator.
-			// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0;
-			// Server_ValidatePlayerJoinRequest @0x5121ab..0x5121af -> @0x512a76 (conn+0x2E set = accept unvalidated)]
-			// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
-			// connection on a NovaWorld session decrypts before the validator.
-			conn.join_identity_pairs = parse_join_identity_pairs(
-					admission_message->payload, conn.join_cookie_present);
-			read_join_cd_key_ids(conn, admission_message->payload);
-			if (inputs.server_ctx != nullptr)
-				(void)load_join_account_from_cookie(*inputs.server_ctx, conn);
-			if (conn.type != NapiNPConnection::kTypeClientSide) {
-				conn.link.spectator = conn.join_spectator_request != 0;
-				const uint32_t reject_dpc = Server_ValidatePlayerJoinRequest(config,
-						inputs.server_ctx, conn, roster, admission_message->payload);
-				if (reject_dpc != 0) {
-					(void)stage_join_gate_reject(conn, reject_dpc);
-					conn.admission_stage = GameAdmissionStage::Rejected;
-					return {};
-				}
-			}
-			replies.push_back(make_protocol_message(s2c::INIT, {}));
-			conn.admission_stage = GameAdmissionStage::AwaitFormPost;
-			return replies;
-		}
-
-		case GameAdmissionStage::AwaitFormPost: {
-			if (admission_message->tag != 0x01) {
-				conn.admission_stage = GameAdmissionStage::Rejected;
-				return {};
-			}
-			// The side passwords' second test, whatever the team-choose rule (the 0x00's
-			// validator tests them only under it): with either password set, a joiner that is
-			// no spectator and whose JSP equals neither (case-insensitive; an empty JSP equals
-			// an unset password) is rejected with reason 17 and gets no probe.
-			// [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - the two lengths
-			//  @0x512F0B..0x512F3B, the JSR test @0x512F3D, _stricmp(JSP, A) @0x512F52 and
-			//  (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent(player, "", 17, "")
-			//  @0x512F7E; NapiNetConfig_LoadFromConnTags @0x4C7260 (JSR @0x4C7607, JSP via
-			//  NapiNetConfig_SetJsp @0x4C26B0)] (D-NET-NEW-L1-21)
-			if ((!config.side_a_password.empty() || !config.side_b_password.empty()) &&
-					conn.join_spectator_request == 0 &&
-					!strutil::iequals(conn.join_password, config.side_a_password) &&
-					!strutil::iequals(conn.join_password, config.side_b_password)) {
-				(void)stage_join_gate_reject(conn, 17);
-				conn.admission_stage = GameAdmissionStage::Rejected;
-				return {};
-			}
-			// State 3 under the ticket gate, which returns with no probe: the enter result's
-			// success sends it (Server_ApplyPlayerEnterResult). Else state 6 and the probe at
-			// once. [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - the gate, state 3 and
-			//  the return @0x512F87..0x512FA6; state 6 @0x512FB3, CNetPlayer_SendFileTransferChunk(0)
-			//  called @0x512FBC]
-			conn.join_ticket_validation =
-					inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
-			if (conn.join_ticket_validation) {
-				conn.admission_stage = GameAdmissionStage::AwaitPlayEnter;
-				return replies;
-			}
-			replies.push_back(admission_padding_probe(conn, inputs.server_ctx));
-			return replies;
-		}
-
-		case GameAdmissionStage::AwaitPlayEnter:
-			// The joiner waits for the probe; a gameplay record now is out of turn.
-			conn.admission_stage = GameAdmissionStage::Rejected;
-			return {};
-
-		case GameAdmissionStage::AwaitPaddingEcho:
-			if (admission_message->tag != 0x02 ||
-			    !validates_padding_echo(conn, admission_message->payload)) {
-				conn.admission_stage = GameAdmissionStage::Rejected;
-				return {};
-			}
-			if (!st.admission_metadata_pushed) {
-				emit_admission_metadata(config, conn, inputs.server_ctx, replies);
-				st.admission_metadata_pushed = true;
-				st.admission_completed_tick = now_tick;
-			}
-			conn.admission_stage = GameAdmissionStage::Complete;
-			conn.self_id_seen = true;
-			return replies;
-
-		case GameAdmissionStage::Rejected:
-			return {};
-		case GameAdmissionStage::Complete:
-			break;
-	}
-	return replies;
-}
-
-// See header.
-void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
+// The C2S 0x02's handler, whatever the game state (no gate but the net player's): the holdoff
+// dictation, the 0x01 / 0x7A / 0x7B / 0x03 records and game state 7, every time it runs; the
+// node joins the pending-spawn list once. Its two echoed words are not compared with the probe.
+// [orig: NapiNPServerMsg_0x002 @0x512FD0 - is_authority @0x512FFC, the net player @0x51300B, the
+//  echoed tick and counter read @0x51302C / @0x513044 for NapiNPStats_RecordSample @0x51305A,
+//  NapiNPServer_UpdateHoldoffTicks @0x513068, the sends @0x5130AC / @0x5130E5 / @0x51311E,
+//  NapiNPPlayer_MoveNodeToEntityList @0x513193 (a node already listed stays: @0x4C7E65),
+//  CNetPlayer_SetGameState(7) @0x51319C (leaving 10 zeroes the round watermark @0x4C4135), the
+//  0x03 @0x5131D5] (D-NET-NEW-L1-24)
+static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 		uint32_t now_tick, const ServerDispatchInputs &inputs,
 		std::vector<ProtocolMessage> &replies) {
 	SessionReplyState &st = conn.reply;
-	// The first valid echo is consumed by the admission FSM above. A synthetic
-	// caller entering here gets the same one-shot metadata; spawn metadata and
-	// roster remain tick-owned boundaries.
+	emit_admission_metadata(config, conn, inputs.server_ctx, replies);
 	if (!st.admission_metadata_pushed) {
-		emit_admission_metadata(config, conn, inputs.server_ctx, replies);
 		st.admission_metadata_pushed = true;
 		st.admission_completed_tick = now_tick;
 	}
+	if (conn.burst.game_state == 10) conn.link.round_watermark = 0;
+	conn.burst.game_state = 7;
+	conn.admission_stage = GameAdmissionStage::Complete;
+	conn.self_id_seen = true;
+}
+
+// See header. Each admission record of the datagram reaches its handler in order, as retail's
+// parse walk dispatches record by record, each handler with its own gate: the JOIN in game state
+// 1, the form post in game state 2, the 0x02 in any (D-NET-NEW-L1-24).
+// [orig: CNapiNPConnection_ParseMessages @0x625BC0 (record by record); the server opcode table
+//  registered by CNapiNetwork_Init @0x4CA4A0 (@0x4CA8E7: {id, name, handler, 0} rows)]
+std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
+		NapiNPConnection &conn, const std::vector<ProtocolMessage> &messages,
+		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
+		const ServerDispatchInputs &inputs, size_t *consumed) {
+	std::vector<ProtocolMessage> replies;
+	size_t index = 0;
+	for (; index < messages.size() && conn.admission_stage != GameAdmissionStage::Complete;
+			++index) {
+		const ProtocolMessage &message = messages[index];
+		// Header-only ACKs and settings records are not gameplay records.
+		if (message.flags.settings_update || message.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE)
+			continue;
+		switch (message.tag) {
+			case 0x00:
+				// The JOIN's handler acts only on a player in game state 1 (the 0x42 accepted)
+				// with no server slot: out of turn it returns with nothing sent.
+				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - `cmp [ebx+0A0h], 1`
+				//  @0x512AF9 / `jnz` @0x512B00 and `cmp [ebx+0C0h], ebp` @0x512B06 / `jnz`
+				//  @0x512B0C to the return @0x512EAC]
+				if (conn.admission_stage != GameAdmissionStage::AwaitJoinRequest) break;
+				// The JOIN handler latches the spectator request before validation;
+				// the local loopback bypasses the complete remote validator.
+				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0;
+				// Server_ValidatePlayerJoinRequest @0x5121ab..0x5121af -> @0x512a76 (conn+0x2E set = accept unvalidated)]
+				// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
+				// connection on a NovaWorld session decrypts before the validator.
+				conn.join_identity_pairs = parse_join_identity_pairs(
+						message.payload, conn.join_cookie_present);
+				read_join_cd_key_ids(conn, message.payload);
+				if (inputs.server_ctx != nullptr)
+					(void)load_join_account_from_cookie(*inputs.server_ctx, conn);
+				if (conn.type != NapiNPConnection::kTypeClientSide) {
+					conn.link.spectator = conn.join_spectator_request != 0;
+					const uint32_t reject_dpc = Server_ValidatePlayerJoinRequest(config,
+							inputs.server_ctx, conn, roster, message.payload);
+					if (reject_dpc != 0) {
+						(void)stage_join_gate_reject(conn, reject_dpc);
+						conn.admission_stage = GameAdmissionStage::Rejected;
+						return {};
+					}
+				}
+				replies.push_back(make_protocol_message(s2c::INIT, {}));
+				conn.admission_stage = GameAdmissionStage::AwaitFormPost;
+				break;
+
+			case 0x01:
+				// The form post's handler acts only on a player in game state 2 (the JOIN
+				// accepted) with no server slot and reads no payload: out of turn it returns
+				// with nothing sent.
+				// [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2`
+				//  @0x512EF1 / `jnz` @0x512EF8 and `cmp [edi+0C0h], 0` @0x512EFE / `jnz`
+				//  @0x512F05 to the return @0x512FC2, the handler taking the connection alone]
+				if (conn.admission_stage != GameAdmissionStage::AwaitFormPost) break;
+				// The side passwords' second test, whatever the team-choose rule (the 0x00's
+				// validator tests them only under it): with either password set, a joiner that
+				// is no spectator and whose JSP equals neither (case-insensitive; an empty JSP
+				// equals an unset password) is rejected with reason 17 and gets no probe.
+				// [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - the two lengths
+				//  @0x512F0B..0x512F3B, the JSR test @0x512F3D, _stricmp(JSP, A) @0x512F52 and
+				//  (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent(player, "", 17, "")
+				//  @0x512F7E; NapiNetConfig_LoadFromConnTags @0x4C7260 (JSR @0x4C7607, JSP via
+				//  NapiNetConfig_SetJsp @0x4C26B0)] (D-NET-NEW-L1-21)
+				if ((!config.side_a_password.empty() || !config.side_b_password.empty()) &&
+						conn.join_spectator_request == 0 &&
+						!strutil::iequals(conn.join_password, config.side_a_password) &&
+						!strutil::iequals(conn.join_password, config.side_b_password)) {
+					(void)stage_join_gate_reject(conn, 17);
+					conn.admission_stage = GameAdmissionStage::Rejected;
+					return {};
+				}
+				// State 3 under the ticket gate, which returns with no probe: the enter result's
+				// success sends it (Server_ApplyPlayerEnterResult). Else state 6 and the probe
+				// at once. [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - the gate, state 3
+				//  and the return @0x512F87..0x512FA6; state 6 @0x512FB3,
+				//  CNetPlayer_SendFileTransferChunk(0) called @0x512FBC]
+				conn.join_ticket_validation =
+						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
+				if (conn.join_ticket_validation) {
+					conn.admission_stage = GameAdmissionStage::AwaitPlayEnter;
+					break;
+				}
+				replies.push_back(admission_padding_probe(conn, inputs.server_ctx));
+				break;
+
+			case 0x02:
+				// No game-state gate and no echo test: any 0x02 completes the admission, from
+				// game state 1 too (ahead of the JOIN and its validator), as retail's does.
+				complete_admission(config, conn, now_tick, inputs, replies);
+				break;
+
+			default:
+				// A game record ahead of the admission: its own handler's gates are not
+				// modelled for an unadmitted node yet (the rest of D-NET-NEW-L1-24): the node
+				// is released with no wire output.
+				conn.admission_stage = GameAdmissionStage::Rejected;
+				return {};
+		}
+	}
+	if (consumed != nullptr) *consumed = index;
+	return replies;
+}
+
+// See header. A 0x02 at a completed admission runs the handler again: the records re-sent and
+// game state 7 (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_0x002 @0x512FD0].
+void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
+		uint32_t now_tick, const ServerDispatchInputs &inputs,
+		std::vector<ProtocolMessage> &replies) {
+	complete_admission(config, conn, now_tick, inputs, replies);
 }
 
 // See header. [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]

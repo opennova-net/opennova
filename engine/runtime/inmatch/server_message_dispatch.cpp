@@ -474,10 +474,18 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	const PlayerReplicationState rep = make_rep_state(config, conn, world);
 	const IntegritySources &integrity = config.integrity_sources;
 
-	if (conn.admission_stage != GameAdmissionStage::Complete)
-		return dispatch_admission(config, conn, messages, now_tick, roster, inputs);
+	// The admission records first, each through its handler; the records after the one that
+	// completed the admission go on through the in-match switch (D-NET-NEW-L1-24).
+	size_t first_in_match = 0;
+	if (conn.admission_stage != GameAdmissionStage::Complete) {
+		replies = dispatch_admission(config, conn, messages, now_tick, roster, inputs,
+				&first_in_match);
+		if (conn.admission_stage != GameAdmissionStage::Complete) return replies;
+	}
 
-	for (const ProtocolMessage &msg : messages) {
+	for (size_t message_index = first_in_match; message_index < messages.size();
+			++message_index) {
+		const ProtocolMessage &msg = messages[message_index];
 		// Protocol-control + settings-update frames are not gameplay messages (the original filters
 		// these before the gameplay dispatch). [orig: dispatch_in_match_session_messages gate]
 		if (msg.flags.settings_update || msg.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
@@ -638,7 +646,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				//  CNetPlayer_SetGameState(2) only from NapiNPServer_HandlePlayerJoinMessage
 				//  @0x512AA0 (the call @0x512E7D)]
 				break;
-			case c2s::JOIN_PADDING_ECHO: // duplicate GLB_JOIN reply after admission
+			case c2s::JOIN_PADDING_ECHO: // the 0x02 again: its handler has no gate
 				dispatch_join_padding_echo(config, conn, now_tick, inputs, replies);
 				break;
 			case c2s::PLAYER_SYNC_REQUEST: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.

@@ -21,13 +21,14 @@ class World;
 // in server_dispatch_join.cpp too.
 namespace opennova::inmatch {
 
-// The admission FSM for a connection whose admission is not yet complete: the
-// replies for this datagram (none on a violation, which rejects the
-// connection). Every call returns; the in-match switch never runs for it.
+// The admission records of a datagram for a connection whose admission is not yet complete,
+// each through its handler's gate in order (none on a rejection, which releases or punts the
+// connection). `consumed` receives the records walked: those after the record that completed
+// the admission are the in-match switch's.
 std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 		NapiNPConnection &conn, const std::vector<ProtocolMessage> &messages,
 		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
-		const ServerDispatchInputs &inputs);
+		const ServerDispatchInputs &inputs, size_t *consumed = nullptr);
 
 // The S2C 0x02 padding probe (CNetPlayer_SendFileTransferChunk(0)): its 512-byte body over the
 // host context (the host's GetTickCount, the process's file-transfer session id, the padding
