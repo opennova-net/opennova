@@ -323,16 +323,24 @@ void Match::upsert_player(const MatchPlayerIdentity &identity) {
         by_entity->identity = identity;
         return;
     }
+    // A fresh stats record: every field zero but field 35, the round marker, which starts at 1.
+    // The player add initialises it so, and every mission start resets each slot's record the
+    // same way (the next mission's rows are added fresh here).
+    // [orig: Server_PlayerAdd @0x51D4FE -> CPlayerStats_InitWeaponTracking @0x52BF60 (+0x8C = 1
+    //  @0x52C047); Server_ResetAllPlayerSlotFrameState @0x4FC39E -> CPlayerStats_ResetAllArrays
+    //  @0x52C4C0 (the 0xAC-byte memset @0x52C4CB, +0x8C = 1 @0x52C4DB)]
+    MatchPlayer fresh{identity, {}, 0};
+    fresh.stats[MatchStats::kRoundMarker] = 1;
     // A retail roster slot has one live owner. Rebinding it starts a fresh stats
     // record rather than leaving a disconnected entity's counters addressable.
     auto by_slot = std::find_if(players_.begin(), players_.end(), [&](const MatchPlayer &p) {
         return p.identity.slot == identity.slot;
     });
     if (by_slot != players_.end()) {
-        *by_slot = MatchPlayer{identity, {}, 0};
+        *by_slot = std::move(fresh);
         return;
     }
-    players_.push_back(MatchPlayer{identity, {}, 0});
+    players_.push_back(std::move(fresh));
 }
 
 void Match::remove_player(World &world, EntityHandle entity) {

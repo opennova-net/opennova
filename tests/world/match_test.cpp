@@ -1664,7 +1664,9 @@ void test_alive_count_reads_the_slot_team() {
 // @0x5165A3..0x5165C3 and @0x5167E2..0x5167FD; GameEvent_ProcessScoring @0x52F6FA]
 void test_nonteam_board_order_draw_and_winner_marker() {
     // The non-team award runs after the board freeze, so it is read from the
-    // live roster; the frozen rows keep their field 35.
+    // live roster; the frozen rows keep their field 35. Every row starts with
+    // field 35 at 1 (the add's CPlayerStats_InitWeaponTracking, +0x8C = 1
+    // @0x52C047), so an unawarded row reads 1 and the winner 2.
     // [orig: Server_ProcessRoundEnd — the board @0x516590, the award
     //  @0x5167F6..0x5167FD]
     auto marker = [](const World &world, const char *name) {
@@ -1703,8 +1705,8 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         CHECK(!result.draw);
         CHECK(marker(*world, "Ace") == 2);
         CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 2);
-        CHECK(result.players[0].stats[MatchStats::kRoundMarker] == 0);
-        CHECK(marker(*world, "Bee") == 0 && marker(*world, "Cid") == 0);
+        CHECK(result.players[0].stats[MatchStats::kRoundMarker] == 1);
+        CHECK(marker(*world, "Bee") == 1 && marker(*world, "Cid") == 1);
     }
 
     // (b) Every row tied at zero: a draw, no marker.
@@ -1717,7 +1719,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->process_round_end(0);
         const MatchResult &result = world->match.result();
         CHECK(result.draw);
-        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0);
+        CHECK(marker(*world, "Ace") == 1 && marker(*world, "Bee") == 1);
     }
 
     // (c) A lone row: a draw at zero, a win with any positive score.
@@ -1728,7 +1730,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         player(*world, 3, 1, "Solo");
         world->process_round_end(0);
         CHECK(world->match.result().draw);
-        CHECK(marker(*world, "Solo") == 0);
+        CHECK(marker(*world, "Solo") == 1);
 
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle solo = player(*world, 3, 1, "Solo");
@@ -1752,7 +1754,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(!result.draw);
         CHECK(result.players[0].identity.name == "Ace" && result.players[1].identity.name == "Bee");
-        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0 && marker(*world, "Cid") == 0);
+        CHECK(marker(*world, "Ace") == 1 && marker(*world, "Bee") == 1 && marker(*world, "Cid") == 1);
     }
 
     // (e) KOTH orders by the hill ticks the primary selects, not points.
@@ -1773,7 +1775,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(result.players[0].identity.name == "Red" && result.players[0].primary_score == 9);
         CHECK(!result.draw);
-        CHECK(marker(*world, "Red") == 2 && marker(*world, "Solo") == 0);
+        CHECK(marker(*world, "Red") == 2 && marker(*world, "Solo") == 1);
     }
 
     // (f) A spectator-flagged top scorer receives no award.
@@ -1789,8 +1791,8 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(!result.draw);
         CHECK(result.players[0].identity.name == "Ace");
-        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0);
-        CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 0);
+        CHECK(marker(*world, "Ace") == 1 && marker(*world, "Bee") == 1);
+        CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 1);
     }
 }
 

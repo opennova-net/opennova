@@ -604,8 +604,10 @@ void test_dm_round_wire_kill_order_and_tie() {
 				decoded.draw == 0 && decoded.player_scores[0] == 2 &&
 				decoded.player_names[0] == "Ace",
 				"the named 0x1D form round-trips the kill order and draw byte");
+		// The rows start with field 35 at 1 (the add's seed [orig:
+		// CPlayerStats_InitWeaponTracking +0x8C = 1 @0x52C047]); the award makes it 2.
 		expect(world.match.player(ace)->stats[w::MatchStats::kRoundMarker] == 2 &&
-				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 0,
+				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 1,
 				"the non-team winner marker lands on the top scorer only");
 	}
 
@@ -638,9 +640,9 @@ void test_dm_round_wire_kill_order_and_tie() {
 				decoded.draw == 1 && decoded.player_index == 1 &&
 				decoded.player_scores[0] == 1 && decoded.player_scores[1] == 1,
 				"the tied 0x1D form carries draw = 1");
-		expect(world.match.player(ace)->stats[w::MatchStats::kRoundMarker] == 0 &&
-				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 0,
-				"a tied board awards nobody");
+		expect(world.match.player(ace)->stats[w::MatchStats::kRoundMarker] == 1 &&
+				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 1,
+				"a tied board awards nobody (both keep the add's 1)");
 	}
 }
 
