@@ -16,13 +16,16 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_protocol.h>
 #include <net/admin/admin_server.h>
+#include <net/npwire/idatagram_socket.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h> // client_goodbye_to_bytes, make_disconnect_event
 #include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
@@ -213,6 +216,15 @@ void test_idle_scene() {
 
 static const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
 
+// The joiner's dialed socket: what its role writes.
+struct CaptureSocket final : IDatagramSocket {
+	std::vector<std::vector<uint8_t>> sent;
+	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
+	void send_to(const PeerAddr &, const uint8_t *data, std::size_t len) override {
+		sent.emplace_back(data, data + len);
+	}
+};
+
 // The C2S messages a joiner's frame sends, decoded with its own session key.
 std::vector<ProtocolMessage> joiner_sends(inmatch::ClientRuntime &client, const std::string &scrk,
 		uint32_t tick) {
@@ -233,17 +245,28 @@ std::vector<ProtocolMessage> joiner_sends(inmatch::ClientRuntime &client, const 
 
 // A joiner's console runs over the joined session as its peer: CHAT SEND queues the global
 // sender's C2S 0x0D channel 1 on its connection, CMD queues the line as C2S 0x04 [line][NUL]
-// (the client's own console sender), CHAT GET reads its HUD window, and GOTO MENUSTATE stores
-// exit reason 1 on its client.
+// (the client's own console sender), CHAT GET reads its HUD window, and GOTO MENUSTATE is input
+// action 3: exit reason 1 on its client and the user leave inside the action, its four 0x46
+// goodbyes written at once with the "I.C:CIDEMIS" record, after which no frame sends. Back in the
+// menus the report keeps the last map file while the destroyed session zeroed the game type.
 // [orig: Chat_SendTeamMessage @0x49A900 - the peer test @0x49A979, QueueReliableMessage(0xD, 1,
 //  310) @0x49A9B4; CAdminServer_HandleCmdCommand @0x404997 -> Client_ProcessConsoleCommand
 //  @0x520E80 (QueueReliableMessage(4, 1, 0) @0x520f29); CGameSession_SetConnectionMode
-//  @0x4C49F0 (mode 2); Input_HandleActionBinding case 3 @0x49AF26]
+//  @0x4C49F0 (mode 2); Input_HandleActionBinding case 3 @0x49AF26, @0x49AF38..0x49AF42 ->
+//  CNapiNetwork_DisconnectActiveConnection @0x4C9140 (role 2 for a client @0x4C91CF..0x4C91E8,
+//  DC 2 @0x4C91EF, DP1 / DP2 0 @0x4C91F7 / @0x4C91FB, the tag @0x4C91FF, DPC 0 @0x4C9213, DDSTR
+//  "" @0x4C921A) -> CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the burst
+//  @0x625405..0x625424, recv_max_per_tick 4 for the JO template); CNapiGameSession_FullDestroy
+//  @0x4C977A (g_GameType = 0); GameType_GetAbbreviation @0x5211B2 (STROVER29)]
 void test_joiner_console() {
 	const std::string client_scrk = "CLIENT-ADMIN-JOINER-SCRK";
 	const std::string server_scrk = "SERVER-ADMIN-JOINER-SCRK";
 	uint64_t now = 7000;
-	inmatch::ClientRuntime client("AdminJoiner", [&now] { return now; });
+	auto joiner = std::make_unique<inmatch::JoinerRole>();
+	joiner->runtime = std::make_unique<inmatch::ClientRuntime>("AdminJoiner", [&now] { return now; });
+	inmatch::ClientRuntime &client = *joiner->runtime;
+	CaptureSocket socket;
+	joiner->set_socket(&socket, PeerAddr{0x0100007Fu, 32123});
 	client.set_title(&kJo);
 	client.seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
 	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
@@ -264,10 +287,12 @@ void test_joiner_console() {
 	seams.chat_window = [] { return std::vector<std::string>{"Ann: hi", "", "Bob: yo"}; };
 	seams.game_text = [](std::string_view section, std::string_view key) -> std::string {
 		if (section == "Overlays" && key == "STROVER64") return "Team Deathmatch";
+		if (section == "Overlays" && key == "STROVER29") return "Game Type Zero";
 		return {};
 	};
 	inmatch::RemoteAdminBinding joined;
 	joined.client = &client;
+	joined.joiner = joiner.get();
 	joined.session = 7;
 	consoles.bind(joined, seams);
 	expect(consoles.bound_to(joined), "the joiner's console");
@@ -297,8 +322,7 @@ void test_joiner_console() {
 	expect_eq(c.one("CHAT GET"), "Ann: hi\r\nBob: yo\r\n", "CHAT GET reads the joiner's window");
 
 	// The status report prints the process's g_MapFileName and g_GameType: the joined
-	// session's (the S2C 0x2C's map file, the seeded 0x08 game type), and, back in the menus,
-	// still the last session's: no teardown resets them.
+	// session's (the S2C 0x2C's map file, the seeded 0x08 game type).
 	// [orig: CAdminServer_HandleStatus @0x402FF6, @0x403052; NapiNPClientMsg_MissionMapNames
 	//  @0x427E6C]
 	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
@@ -316,16 +340,32 @@ void test_joiner_console() {
 	const std::string joined_lines = "CURRENT MAP: TDM01.BMS\r\nCURRENT GAME TYPE: Team Deathmatch\r\n";
 	expect(consoles.status_report().find(joined_lines) != std::string::npos,
 	       "a joiner's report: the joined session's map file and game type");
-	inmatch::AdminConsole::Seams menu_seams = seams;
-	consoles.bind(inmatch::RemoteAdminBinding{}, menu_seams);
-	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
-	expect(consoles.status_report().find(joined_lines) != std::string::npos,
-	       "back in the menus the report keeps the last session's");
-	consoles.bind(joined, seams);
-	consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
+
 	expect(client.mission_exit_reason() == inmatch::kMissionExitNone, "no exit yet");
+	expect(socket.sent.empty(), "the joiner's role has written nothing yet");
 	(void)c.command("GOTO MENUSTATE");
 	expect(client.mission_exit_reason() == inmatch::kMissionExitQuit, "GOTO MENUSTATE: the joiner's exit reason 1");
+	const std::vector<uint8_t> goodbye = client_goodbye_to_bytes(
+			0x41444D4Eu, make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, ""));
+	expect(socket.sent.size() == 4, "the action writes the four-datagram goodbye burst at once");
+	for (const std::vector<uint8_t> &datagram : socket.sent) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		expect(nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+		               opcode == SESSION_OPCODE_CLIENT_GOODBYE && body == goodbye,
+		       "each is the keyed 0x46 with the CIDEMIS record");
+	}
+	expect(client.session_lost(), "the connection is torn down");
+	expect(client.Client_ProcessNetworkFrame(6).empty(), "the next frame sends no C2S");
+	joiner->close();
+	expect(socket.sent.size() == 4, "the teardown's close sends nothing more");
+
+	// Back in the menus: the destroyed session zeroed g_GameType, the map file stays.
+	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
+	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
+	const std::string report = consoles.status_report();
+	expect(report.find("CURRENT MAP: TDM01.BMS\r\nCURRENT GAME TYPE: Game Type Zero\r\n") != std::string::npos,
+	       "back in the menus: the last map file and game type 0's abbreviation");
 }
 
 // A listen host's console is a peer over its host context: CMD leaves through its own client
@@ -374,6 +414,28 @@ void test_listen_host_and_single_player() {
 	       "a single player's quit: the world's exit reason 1");
 }
 
+// A paused single player's frame is the Game Loop's under its in-game menu: its exit router
+// reads the stored reason ahead of the pump, so a reason stored by the last pump leaves the
+// mission on the next frame, which pumps nothing; with no reason it pumps. No other idle frame
+// runs the router. [orig: Game_ProcessMainFrame @0x5267F8, @0x52685E..0x526867, ahead of
+//  CAdminServer_ProcessFrame @0x5268F1]
+void test_idle_frame_exit() {
+	using inmatch::RemoteAdminIdleFrame;
+	using inmatch::State;
+	RemoteAdminIdleFrame paused;
+	paused.mission = true;
+	paused.session_state = State::Paused;
+	expect(!inmatch::remote_admin_idle_frame_exits(paused), "no reason: the paused frame pumps");
+	paused.mission_exit_reason = inmatch::kMissionExitQuit;
+	expect(inmatch::remote_admin_idle_frame_exits(paused), "reason 1: the paused frame leaves the mission");
+	RemoteAdminIdleFrame menus;
+	menus.mission_exit_reason = inmatch::kMissionExitQuit;
+	expect(!inmatch::remote_admin_idle_frame_exits(menus), "the menus' frame has no router");
+	RemoteAdminIdleFrame loading = paused;
+	loading.session_state = State::Loading;
+	expect(!inmatch::remote_admin_idle_frame_exits(loading), "nor a load");
+}
+
 } // namespace
 
 int main() {
@@ -382,6 +444,7 @@ int main() {
 	test_idle_scene();
 	test_joiner_console();
 	test_listen_host_and_single_player();
+	test_idle_frame_exit();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "remote_admin: %d failure(s)\n", g_failures);
 		return 1;

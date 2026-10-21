@@ -35,6 +35,8 @@ struct File;
 
 namespace opennova::inmatch {
 
+class JoinerRole;
+
 // The admin server's log, by bare name in the working directory, truncated when the process
 // starts. [orig: "admin_log.txt" @0x7C0860; CAdminServer_Construct @0x402C39, the fopen("w")
 //  @0x402C84]
@@ -62,6 +64,8 @@ struct RemoteAdminIdleFrame {
 	State session_state = State::Unloaded;
 	// A joiner's connect ahead of its world load (the preload).
 	bool join_pending = false;
+	// The exit reason the running session's role reads (0: none).
+	int32_t mission_exit_reason = 0;
 };
 
 // The scene such a frame pumps the admin server in, or none. Retail pumps it in two places only:
@@ -82,6 +86,15 @@ struct RemoteAdminIdleFrame {
 //  @0x4033D0..0x40340B (the Menus / Game / Unknown compare)]
 std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &frame);
 
+// Whether such a frame leaves the mission instead of pumping: the Game Loop's frame under its
+// in-game menu still runs its exit router, ahead of the pump, and a stored exit reason (an
+// admin's GOTO MENUSTATE from the pause menu) pushes the router's mode and returns past the
+// pump. The embedder routes the exit as a tick's terminal outcome does, with no tick run.
+// [orig: Game_ProcessMainFrame @0x5267F8 (the g_MissionExitReason read), the router
+//  @0x526803..0x526878 (a nonzero reason's Post Menu push @0x526867 and return), ahead of
+//  CAdminServer_ProcessFrame @0x5268F1]
+bool remote_admin_idle_frame_exits(const RemoteAdminIdleFrame &frame);
+
 // What the process's console runs over: the running session's host context (a listen or Serve
 // Only host, single player's in-process host), else a joiner's own client, whose console reads as
 // the joined session's peer (retail's joiner sets connection mode 2: not the authority, a session
@@ -93,6 +106,8 @@ struct RemoteAdminBinding {
 	NapiNPServerCtx *host = nullptr;
 	// The process's own client: the listen host's (its loopback) or the joiner's.
 	ClientRuntime *client = nullptr;
+	// A joiner's role (its client is `client`): input action 3 runs its user leave.
+	JoinerRole *joiner = nullptr;
 	// The running mission's world (a single player's quit with no host context).
 	world::World *world = nullptr;
 	// The mount's text-override table (null: none): a joiner's session title.
@@ -100,7 +115,7 @@ struct RemoteAdminBinding {
 	uint64_t session = 0;
 
 	bool operator==(const RemoteAdminBinding &o) const {
-		return host == o.host && client == o.client && world == o.world &&
+		return host == o.host && client == o.client && joiner == o.joiner && world == o.world &&
 				text_override == o.text_override && session == o.session;
 	}
 };
@@ -110,8 +125,8 @@ struct RemoteAdminBinding {
 // context with the embedder's seams, completed here with the process's own client
 // (`host_client`) and GOTO MENUSTATE's input action 3 (`quit_to_menu`): exit reason 1 stored
 // where the running role reads it, so the next frame's mission exit takes the router's reason-1
-// arm (a host's teardown, a joiner's leave with its CIDEMIS goodbye). Rebinding drops the
-// previous console.
+// arm (a host's teardown; a joiner's leave, whose CIDEMIS goodbye the action itself sends,
+// JoinerRole::quit_to_menu). Rebinding drops the previous console.
 // [orig: CAdminServer_DispatchCommand @0x406720 (no session test of its own);
 //  CAdminServer_HandleStatus @0x402E30; CAdminServer_HandleGotoCommand @0x404A5D
 //  (Input_HandleActionBinding(3)); Input_HandleActionBinding case 3 @0x49AF26
@@ -132,12 +147,14 @@ public:
 	// The process's mission globals as the status report last read them.
 	const AdminProcessMission &process_mission() const { return process_mission_; }
 
-private:
-	// The bound session's mission into the process words before a line runs: a host
-	// context's session title, mission file and game type; a joiner's own mission start's
-	// session title over its connection's g_MapFileName, and its g_GameType; with no session
-	// (the menus) they keep the last session's.
+	// The bound session's mission into the process words, before each line runs and on every
+	// frame the embedder pumps: a host context's session title, mission file and game type; a
+	// joiner's own mission start's session title over its connection's g_MapFileName, and its
+	// g_GameType. With no session (the menus) they keep the last session's title and map file;
+	// the session's end zeroed the game type (bind).
 	void refresh_process_mission();
+
+private:
 
 	NapiNPServerCtx session_less_;
 	// A joiner's context: the joined session's peer, not its authority.

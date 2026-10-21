@@ -131,6 +131,17 @@ public:
 	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;
 	void close() override;
+	// Input action 3 on a joiner, the quit to the main menu (the in-game menu's confirmed
+	// exit, the admin's GOTO MENUSTATE): exit reason 1, then the connection's user leave runs
+	// inside the action: the "I.C:CIDEMIS" record latched and its goodbye burst written at
+	// once, the connection torn down (ClientRuntime::session_lost), so no later frame sends a
+	// C2S and the next frame's session_lost leaves the mission (the shell's teardown sends
+	// nothing more). [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
+	//  @0x49AF38..0x49AF42 -> CNapiNetwork_DisconnectActiveConnection @0x4C9140 (the record
+	//  @0x4C91EF..0x4C923E, the request @0x4C924A) ->
+	//  CNapiNPConnection_RequestDisconnect @0x61E0F0 (state 5: SetState(6) @0x61E0FA) ->
+	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0]
+	void quit_to_menu();
 	ClientRuntime *client_runtime() override { return runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
 	// The frame statistics the C2S 0x0C's two stat bytes carry; the frame rate

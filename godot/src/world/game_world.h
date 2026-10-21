@@ -940,7 +940,8 @@ private:
 	// context, else a joiner's own client, else session-less; any change of the binding
 	// rebinds), the CRT stream its challenge draws from outside a mission, and the TCP device.
 	// Pumped by the remote_admin leg in a ticked mission frame and by the internal process step
-	// on the frames remote_admin_idle_scene names (the menus, a paused single player).
+	// on the frames remote_admin_idle_scene names (the menus, a paused single player, whose
+	// stored exit reason leaves the mission instead: remote_admin_idle_frame_exits).
 	opennova::inmatch::RemoteAdminConsoles admin_consoles_;
 	opennova::io::CrtRand admin_rand_;
 	std::unique_ptr<opennova::AdminServer> admin_server_;

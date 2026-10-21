@@ -8,6 +8,7 @@
 #include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/inmatch/client_weapon_replay.h>
 #include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/mission_exit.h> // kMissionExitQuit (input action 3)
 
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/charattr_table.h>
@@ -1645,6 +1646,13 @@ void JoinerRole::close() {
 		kernel_->wire_person_pose = {};
 	}
 	if (!runtime) return;
+	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+}
+
+void JoinerRole::quit_to_menu() {
+	if (!runtime) return;
+	// [orig: Input_HandleActionBinding @0x49AF26, then the disconnect @0x49AF42]
+	runtime->set_mission_exit_reason(kMissionExitQuit);
 	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
 }
 

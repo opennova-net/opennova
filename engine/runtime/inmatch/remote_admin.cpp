@@ -3,6 +3,7 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_settings.h> // mission_session_title
+#include <runtime/inmatch/joiner_role.h>   // JoinerRole::quit_to_menu (input action 3)
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/world/epilog_cine.h> // kWorldMissionExitQuit
 #include <runtime/world/world.h>
@@ -38,8 +39,23 @@ std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &fr
 	return std::nullopt;
 }
 
+bool remote_admin_idle_frame_exits(const RemoteAdminIdleFrame &frame) {
+	// [orig: Game_ProcessMainFrame @0x52685E (`cmp eax, esi`), @0x526860 (zero reaches the pump)]
+	return remote_admin_idle_scene(frame) == AdminScene::GameLoop && frame.mission_exit_reason != 0;
+}
+
 void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::Seams seams) {
 	console_.reset();
+	// The session's end into the menus (a mission's exit, single player's included, or a failed
+	// join) destroys the session, which zeroes g_GameType; g_MapFileName and g_SessionTitle keep
+	// the last session's. A rotation's next mission skips the destroy.
+	// [orig: PostMenu_RouteMissionExit @0x568683 -> CNapiGameSession_FullDestroy @0x4C96A0
+	//  (ebp zeroed @0x4C96ED, g_GameType = 0 @0x4C977A); the failed join's
+	//  UI_JoinSelectedSession @0x569F06, MultiPlayer_JoinSessionStateMachine @0x56A3E3 / @0x56A5A0;
+	//  the rotation's PreMenu push @0x568632]
+	const bool had_session = bound_.host != nullptr || bound_.client != nullptr || bound_.world != nullptr;
+	const bool has_session = binding.host != nullptr || binding.client != nullptr || binding.world != nullptr;
+	if (had_session && !has_session) process_mission_.game_type = 0;
 	bound_ = binding;
 	NapiNPServerCtx *ctx = binding.host;
 	if (ctx == nullptr && binding.client != nullptr) {
@@ -55,14 +71,14 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 	}
 	seams.host_client = binding.client;
 	// Input action 3: exit reason 1 where the running role reads it (a host context's store, else
-	// the joiner's client, else the single-player world); the leave's goodbye is the teardown's.
-	// [orig: Input_HandleActionBinding case 3 @0x49AF26, @0x49AF38..0x49AF42]
+	// the joiner's, whose user leave sends its goodbye inside the action, else the single-player
+	// world). [orig: Input_HandleActionBinding case 3 @0x49AF26, @0x49AF38..0x49AF42]
 	if (binding.host != nullptr) {
 		NapiNPServerCtx *host = binding.host;
 		seams.quit_to_menu = [host] { host->mission_exit_reason = kMissionExitQuit; };
-	} else if (binding.client != nullptr) {
-		ClientRuntime *client = binding.client;
-		seams.quit_to_menu = [client] { client->set_mission_exit_reason(kMissionExitQuit); };
+	} else if (binding.joiner != nullptr) {
+		JoinerRole *joiner = binding.joiner;
+		seams.quit_to_menu = [joiner] { joiner->quit_to_menu(); };
 	} else if (binding.world != nullptr) {
 		world::World *world = binding.world;
 		seams.quit_to_menu = [world] { world->mission_exit_reason = world::kWorldMissionExitQuit; };

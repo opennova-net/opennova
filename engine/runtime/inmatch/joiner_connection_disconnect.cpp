@@ -85,6 +85,12 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 bool JoinerConnection::session_lost() const {
 	// An explicit close is terminal at any stage, and so is a silence the reap latched.
 	if (!host_disconnect_reason_.empty() || silence_timeout_latched_) return true;
+	// A teardown that sent its goodbye burst (the user's leave inside input action 3) is
+	// terminal: the teardown clears the keys and both message queues and the leave callback
+	// zeroes the session's active connection, so no later frame sends on it.
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the burst @0x625405..0x625424);
+	//  CNapiNetwork_OnDisconnectedFromServer @0x4C6495 (active_connection_id = 0)]
+	if (goodbye_sent_) return true;
 	// A self-initiated teardown (the pool-overflow MSGCRE) is terminal with its record latched.
 	return phase_ == Phase::Error && disconnect_event_set_;
 }

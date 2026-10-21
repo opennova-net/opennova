@@ -516,6 +516,7 @@ opennova::inmatch::RemoteAdminBinding Simulation::remote_admin_binding() {
 	opennova::inmatch::RemoteAdminBinding binding;
 	binding.host = host_ctx();
 	binding.client = is_joiner() ? runtime_ : host_client_runtime();
+	binding.joiner = is_joiner() ? joiner_role_ : nullptr;
 	binding.world = kernel_ ? &kernel_->world : nullptr;
 	binding.text_override = net_.mission_text.override_table.get();
 	binding.session = static_cast<uint64_t>(get_instance_id());
