@@ -1678,9 +1678,18 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 	w::World &world = h.kernel->world;
 	if (!expect(!world.rules.auto_scope_zero,
 			"rules stamp: a bare kernel starts without the zero rule")) return false;
+	// The mission data's copy reaches the world at the mission start's load (bring_up), once
+	// [orig: NapiNPClientMsg_HandleMissionDataChunk @0x432410 - the memcpy @0x432470].
+	(void)h.role.bring_up();
+	if (!expect(world.rules.auto_scope_zero == zoom_allowed && world.rules.mpattrib == mp_attributes,
+			"rules stamp: the mission start takes the word; auto_scope_zero follows bit 0x10000"))
+		return false;
+	// An admin SET of the word holds: no frame overwrites it until the next mission start
+	// [orig: CAdminServer_HandleSetCommand @0x405C80..0x40618A writes g_RulesFlags @0x24D1E34].
+	world.rules.mpattrib = 0x200u;
 	h.role.run_tick(h.input);
-	return expect(world.rules.auto_scope_zero == zoom_allowed,
-			"rules stamp: auto_scope_zero follows mpattrib bit 0x10000");
+	h.role.run_tick(h.input);
+	return expect(world.rules.mpattrib == 0x200u, "rules stamp: a SET word holds through the frames");
 }
 
 // A folded S2C 0x1D latches the joiner's round-over gate, so the frame that

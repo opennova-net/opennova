@@ -902,6 +902,9 @@ public:
 	//  test @0x5262A2..0x5262AD]
 	bool in_game_loop() const { return joiner_ && joiner_->in_game_loop(); }
 	bool in_mission_start() const { return joiner_ && joiner_->in_mission_start(); }
+	uint32_t mp_attributes_revision() const {
+		return joiner_ ? joiner_->mp_attributes_revision() : 0u;
+	}
 	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }

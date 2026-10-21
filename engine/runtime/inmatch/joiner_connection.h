@@ -959,6 +959,10 @@ public:
 	// Authoritative mission-session attributes retained from the fixed 180-byte
 	// S2C 0x64 block (little-endian dword at offset 44).
 	uint32_t mp_attributes() const { return mp_attributes_; }
+	// Steps each time a S2C 0x64 chunk's copy writes the word (the mission data's memcpy is
+	// g_RulesFlags' one session writer on a joiner; JoinerRole stamps its world at the step).
+	// [orig: NapiNPClientMsg_HandleMissionDataChunk @0x432410 - the memcpy @0x432470]
+	uint32_t mp_attributes_revision() const { return mp_attributes_revision_; }
 	// The joined session's published player cap, the same block's dword at
 	// offset 36: the host writes it from its own BMS admission limit [orig:
 	// Client_BuildMissionDataRequestBlock @0x51e89f <- dword_24D211C, the limit
@@ -1203,6 +1207,7 @@ private:
 	SelfSpawn spawn_;
 	uint32_t game_type_ = 0;    // authoritative g_GameType learned from S2C 0x08 field 3 / 0x7B extra
 	uint32_t mp_attributes_ = 0; // S2C 0x64 fixed session block, offset 44
+	uint32_t mp_attributes_revision_ = 0; // mp_attributes_revision
 	uint32_t session_max_players_ = 0; // S2C 0x64 fixed session block, offset 36
 	uint32_t mission_metadata_transfer_id_ = 0;
 	uint32_t mission_metadata_total_size_ = 0;

@@ -107,10 +107,29 @@ bool JoinerRole::bring_up() {
 	}
 	runtime->view().begin_mission();
 	reset_for_load(runtime->deployment_release_revision());
+	stamp_mission_rules();
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
 	return rebuild;
 }
 
+
+// The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_RulesFlags @0x24D1E34),
+// whose one session writer on a joiner is the mission data's copy: the world takes it at the
+// copy and at the mission start's load (a fresh world), never per frame, so an admin SET of the
+// word holds until the next copy (its 0x10000 bit gates the scope-zero -1 floor in session, its
+// 0x200 the friendly fire).
+// [orig: NapiNPClientMsg_HandleMissionDataChunk @0x432410 - the block's memcpy into unk_24D1E08
+//  @0x432470 (g_RulesFlags at +44); the other writer CAdminServer_HandleSetCommand
+//  @0x405C80..0x40618A; Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e]
+void JoinerRole::stamp_mission_rules() {
+	if (!kernel_ || !runtime) return;
+	world::World &world = kernel_->world;
+	const uint32_t rules_word = runtime->view().mp_attributes();
+	world.rules.mpattrib = rules_word;
+	world.rules.auto_scope_zero = (rules_word & GameConfig::kMpAttribAutoScopeZero) != 0;
+	world.rules.no_friendly_fire = (rules_word & GameConfig::kMpAttribNoFriendlyFire) != 0;
+	mp_attributes_revision_seen_ = runtime->mp_attributes_revision();
+}
 
 // --- the role's own legs ---------------------------------------------------
 
@@ -751,18 +770,11 @@ void JoinerRole::pump() {
     // The joiner's own roster slot rides a fresh round id [orig:
     //  NapiNPClientMsg_SessionSlotConfig @0x4254A2 -> g_LocalPlayerSlotId].
     world.round_sim.local_slot_id = rt.local_player_slot();
-    // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_RulesFlags
-    // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
-    // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
-	world.rules.mpattrib = rt.view().mp_attributes();
 	// The session's sniper-zoom rule is the S2C 0x08 flags dword's bit 16
 	// [orig: NapiNPClientMsg_HandleSessionConfig @0x42837A..0x428392 -> byte_A821F0].
 	world.rules.allow_sniper_scope_zoom = (rt.state().session_rules_flags & 0x10000u) != 0;
 	world.rules.sniper_zoom_fill = world.rules.allow_sniper_scope_zoom; // an in-session peer
-    world.rules.auto_scope_zero =
-            (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
-    world.rules.no_friendly_fire =
-            (rt.view().mp_attributes() & GameConfig::kMpAttribNoFriendlyFire) != 0;
+	if (rt.mp_attributes_revision() != mp_attributes_revision_seen_) stamp_mission_rules();
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
 	stamp_spectator_motor(kernel, runtime.get(), /*joiner=*/true); // this frame's receive folded
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.

@@ -104,6 +104,8 @@ public:
 	// (ClientRuntime::set_mission_start_loading): sends what its pumps build, the two
 	// 0x2F and the 0x0B; nothing before the release or after the push.
 	void push_mission_start_end();
+	// The mission data's rules word into the world (bring_up and the S2C 0x64 copy's step).
+	void stamp_mission_rules();
 	// The witnessed key handlers queue one C2S 0x1D with the action id; it leaves
 	// inside the next open send boundary [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
 	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7].
@@ -351,6 +353,7 @@ private:
 	// remains separately gated by authoritative_spawn_released(), so C2S 0x0E
 	// cannot kill L and a stale positive tail cannot revive a genuinely dead L.
 	uint64_t deployment_release_revision_seen_ = 0;
+	uint32_t mp_attributes_revision_seen_ = 0; // stamp_mission_rules' last copy
 	// S2C 0x50 re-latched OUR OWN team (the second g_LocalTeam writer). The
 	// join-time team arrives through the spawn, so only later edges apply here.
 	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the latch @0x4319db]

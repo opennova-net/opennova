@@ -861,8 +861,10 @@ void JoinerConnection::retain_mission_metadata_chunk(
 	};
 	if ((mission_metadata_fixed_byte_mask_ & kMaxPlayersMask) == kMaxPlayersMask)
 		session_max_players_ = window_dword(0);
-	if ((mission_metadata_fixed_byte_mask_ & kMpAttributesMask) == kMpAttributesMask)
+	if ((mission_metadata_fixed_byte_mask_ & kMpAttributesMask) == kMpAttributesMask) {
 		mp_attributes_ = window_dword(8);
+		++mp_attributes_revision_;
+	}
 }
 
 void JoinerConnection::retire_self_handle(uint16_t handle) {
