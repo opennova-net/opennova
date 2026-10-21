@@ -362,6 +362,16 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// banned.txt: zeroed and re-read, authority or not
 	// [orig: @0x51cb25..0x51cb3b].
 	Server_ReloadAddressBanList(ctx);
+	// The listing's GameServerBaffleKey, authority or not: (GetTickCount() + rand()) % 900000 +
+	// 100000, the rand the session's CRT stream's next draw (after the slot table's seed and
+	// first draw), the tick the create's (the session's start tick: the same frame).
+	// [orig: Server_InitNewRoundState @0x51C8E0 - GetTickCount @0x51CB69, rand @0x51CB6D, the
+	//  unsigned add @0x51CB74, div 0xDBBA0 @0x51CB7B, + 0x186A0 @0x51CB82, g_GameServerBaffleKey
+	//  @0x51CB88; after Server_AllocatePlayerSlotTable's srand / rand (from @0x51C97B)]
+	{
+		const uint32_t draw = ctx.world != nullptr ? ctx.world->crt_rand.next() : 0u;
+		ctx.game_server_baffle_key = (ctx.np_protocol.host_start_tick + draw) % 0xDBBA0u + 0x186A0u;
+	}
 	// The designation table clears on every round init, authority or not
 	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
 	ctx.designations.fill(ServerDesignation{});

@@ -245,6 +245,12 @@ struct NapiNPServerCtx {
 	// [orig: the validate's test @0x4C61C3; Server_ToggleJoinLock @0x50D75D;
 	//  Server_InitNewRoundState @0x51CAAA]
 	bool join_locked = false;
+	// The listing's GameServerBaffleKey, the round init's draw (Server_InitNewRoundState): a
+	// process global the Host list reads at each server-info update. Not the protocol's magic
+	// key (+0x530, its own draw), which no list carries.
+	// [orig: g_GameServerBaffleKey @0xC8FC70 - its one writer @0x51CB88, its one reader
+	//  Lobby_UpdateServerInfo @0x4FF1CC]
+	uint32_t game_server_baffle_key = 0;
 	// The server-info update a toggle runs at once (Lobby_UpdateServerInfo(0)): a NovaWorld
 	// embedder installs it while its session hosts the match; empty, nothing runs, as retail's
 	// update returns outside a NovaWorld session. [orig: Server_ToggleJoinLock @0x50D762;
