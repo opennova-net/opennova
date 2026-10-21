@@ -5172,6 +5172,11 @@ add_test(NAME npruntime_load_stream_rows COMMAND npruntime_load_stream_rows_test
 add_executable(npruntime_entity_yaw_word_test npruntime/entity_yaw_word_test.cpp)
 target_link_libraries(npruntime_entity_yaw_word_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_entity_yaw_word COMMAND npruntime_entity_yaw_word_test)
+# D-NET-NEW-L6-6 (FX-1): a kill zone queues on every peer that flies the round; a peer's
+# drain pushes its own body and damages nothing.
+add_executable(explosion_push_test world/explosion_push_test.cpp)
+target_link_libraries(explosion_push_test PRIVATE opennova_runtime)
+add_test(NAME explosion_push COMMAND explosion_push_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

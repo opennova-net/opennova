@@ -905,7 +905,11 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         explosion.ammo_index = params.ammo_index;
         explosion.owner = params.owner;
         explosion.hit_word = params.shot_seq;
-        if (authoritative) world.explosions.queue_explosion(world, explosion);
+        // Every peer that spawns the round queues its kill zone: the push tests
+        // no authority, and the drain's own reads keep the damage the
+        // authority's (FX-1) [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
+        //  WeaponEffect_PushExplosionQueueEntry @0x4E83C0 (no gate)].
+        world.explosions.queue_explosion(world, explosion);
 
         if (ammo->kztype == ammo_kz::kKnife) {
             // Knife alone adds the bounded, effects-only ray. It is not a
@@ -1709,7 +1713,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             //  call @0x4E9F1E]
             const AmmoTableEntry *fuze_ammo = world.tables.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr && r.det_at_expiry && fuze_ammo->kztype != 0) {
-                if (authoritative) detonate_round(world, r, r.pos, *fuze_ammo);
+                // On every peer: the head tests no authority, so a joiner's own
+                // grenade queues its blast and the drain's walk pushes the
+                // joiner's body (FX-1) [orig: @0x4E9DC6..0x4E9E03].
+                detonate_round(world, r, r.pos, *fuze_ammo);
                 RoundImpact imp;
                 imp.position = r.pos;
                 imp.direction = Vec3{0.0f, 0.0f, 1.0f};
@@ -2331,8 +2338,12 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //    passes the compiled `!prearm & kztype` bit test, and the halved
         //    age must strictly pass the arm age [orig:
         //    Projectile_SpawnImpactEffect @0x4E9C40..0x4E9C62, push @0x4E9C81].
+        // Only the person handler tests the session authority; the terrain,
+        // item and water producers push on every peer that flies the round
+        // (FX-1) [orig: @0x4E928C..0x4E92C0, @0x4E9866..0x4E98A2,
+        //  @0x4E9C40..0x4E9C81: no authority test].
         bool kill_zone_pushed = false;
-        if (authoritative && ammo != nullptr) {
+        if (ammo != nullptr) {
             const bool armed = r.age_ticks >= ammo->arm_age_ticks;
             bool produce = false;
             switch (collision.hit_class) {
@@ -2345,7 +2356,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     break;
                 }
                 case ProjectileHitClass::Person:
-                    produce = ammo->kztype != 0 && armed && ammo->kz_damage != 0;
+                    produce = authoritative && ammo->kztype != 0 && armed &&
+                              ammo->kz_damage != 0;
                     break;
                 case ProjectileHitClass::Water: {
                     const int32_t remaining = r.max_age_ticks - r.age_ticks;

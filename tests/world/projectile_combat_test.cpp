@@ -896,7 +896,8 @@ void test_network_oneshot_authority_and_session_gate() {
         if (target == nullptr) return;
         // Pin the independent retail world-role gate. Even if a client caller
         // forgets to mark its round VisualOnly, a non-authority network world
-        // cannot normalize entity words or queue the impact kill zone.
+        // cannot normalize entity words or queue the person impact's kill zone
+        // (the one producer that tests the session authority, @0x4E9AF0..0x4E9B00).
         target->health = 0x1FFFF;
         target->health_max = 0x1FFFE;
         AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
@@ -913,7 +914,10 @@ void test_network_oneshot_authority_and_session_gate() {
         // No authority, so no kill-zone push releases it: it passes the person.
         CHECK(r.world.round_sim.active_count == 1);
 
-        // The same world-role gate covers spawn-time instant kill zones.
+        // A spawn-time instant kill zone queues on every peer: its push tests no
+        // authority, and the drain's own damage read is 0 on a peer
+        // (D-NET-NEW-L6-6). [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
+        //  WeaponEffect_PushExplosionQueueEntry @0x4E83C0]
         AmmoTableEntry instant;
         instant.name = "CLIENT_INSTANT";
         instant.valid = true;
@@ -929,7 +933,7 @@ void test_network_oneshot_authority_and_session_gate() {
         instant_params.origin = {1.0f, 0.0f, 1.0f};
         instant_params.ammo_index = instant_index;
         CHECK(r.world.round_sim.spawn(r.world, instant_params) < 0);
-        CHECK(r.world.explosions.queue.empty());
+        CHECK(r.world.explosions.queue.size() == 1);
     }
 }
 
@@ -1007,8 +1011,9 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     const int entities_before = entity_count();
     const size_t devices_before = r.world.throwables.devices.size();
 
-    // Spawn-time instant killzones still emit their visual impact descriptor,
-    // but may not queue the authoritative explosion.
+    // Spawn-time instant killzones emit their visual impact descriptor and
+    // queue the kill zone on the peer too (D-NET-NEW-L6-6) [orig:
+    // RoundData_SpawnRound @0x4EC1F3..0x4EC20E].
     AmmoTableEntry instant;
     instant.name = "VISUAL_INSTANT";
     instant.valid = true;
@@ -1027,7 +1032,8 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     CHECK(r.world.round_sim.spawn(r.world, instant_params,
                                   RoundConsequenceMode::VisualOnly) < 0);
     CHECK(r.world.round_sim.impacts.size() == impacts_before + 1);
-    CHECK(r.world.explosions.queue.empty());
+    CHECK(r.world.explosions.queue.size() == 1);
+    r.world.explosions.queue.clear();
 
     // A visual use-own-move charge reaches the exact retail rest conversion,
     // then releases without cloning a placed-device entity.

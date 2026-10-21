@@ -507,6 +507,10 @@ void medic_interaction_callback(World &world, Entity &target, const ExplosionEnt
     } else if (retail_signed_i16(target.health) >= retail_signed_i16(target.health_max)) {
         return;
     }
+    // Both arms act on the authority alone: a peer's own kit entry (queued on
+    // every peer) revives and heals nothing [orig: `cmp g_NapiNPCtx.is_authority`
+    //  @0x4E67D4 (the dead arm) / @0x4E67FE (the live arm)].
+    if (!world.ai.is_authority) return;
     if (world.entity_update_transactions != nullptr)
         world.entity_update_transactions->medic_interaction(world, interaction);
     else

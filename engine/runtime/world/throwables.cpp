@@ -409,8 +409,7 @@ void follow_parent(World &world, LiveRound &r) {
 // ----------------------------------------------------------------------------
 static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                        const AmmoTableEntry &ammo, CollisionWorld *collision,
-                       const terrain::TerrainHeightField *terrain,
-                       bool allow_consequences) {
+                       const terrain::TerrainHeightField *terrain) {
     MotorFrame f;
     load_frame(r, f);
     // The round's savedLivePose: its last tick's committed position, the
@@ -645,7 +644,9 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             } else {
                 push_motor_effect(world, sim, r, 26, surface, world.logic_tick);
             }
-            if (allow_consequences) detonate_round(world, r, r.pos, ammo);
+            // The submerged push tests no authority either (FX-1) [orig:
+            //  WeaponEffect_PushExplosionQueueEntry call @0x444A0F].
+            detonate_round(world, r, r.pos, ammo);
             r.det_at_expiry = false;
             return false; // slot releases
         }
@@ -1042,8 +1043,7 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
     bool alive = true;
     switch (round.motor) {
     case ThrowClass::kNade:
-        alive = motor_nade(world, sim, round, ammo, collision, terrain,
-                           allow_consequences);
+        alive = motor_nade(world, sim, round, ammo, collision, terrain);
         break;
     case ThrowClass::kSatchel:
     case ThrowClass::kAVMine: // AT mine authors move_function schl
