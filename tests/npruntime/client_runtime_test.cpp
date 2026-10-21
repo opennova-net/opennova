@@ -1335,10 +1335,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 		return false;
 	}
 
-	// Retail frame 14 is a post-handshake metadata bundle. While mission loading
-	// holds the gameplay drive, the client still sends frame 15's header-only ACK
-	// so the reliable server stream can advance.
-	joiner.set_world_ready(false);
+	// Retail frame 14 is a post-handshake metadata bundle. With no semantic reply the
+	// client sends frame 15's header-only ACK so the reliable server stream can advance.
 	server_seq.last_inbound_seq = 5;
 	const std::vector<uint8_t> metadata_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1357,13 +1355,13 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 						client_header, client_messages) &&
 				client_messages.empty() &&
 				matches_client_header(client_header, kServerKey, 6, 4),
-			"held mission load still ACKs the post-handshake metadata packet")) {
+			"the post-handshake metadata packet draws its header-only ACK")) {
 		return false;
 	}
 
 	// Golden retail frame 16: the game-start flag is carried after a second
 	// settings pair and before the authoritative full-player-info row. Retail
-	// reacts immediately, even while the local mission/world remains held.
+	// reacts immediately: no local mission is loaded before the S2C 0x1A.
 	server_seq.last_inbound_seq = 6;
 	const std::vector<uint8_t> game_start_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1398,8 +1396,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 			"game-start emits retail frame 17's grouped pre-world admission request")) {
 		return false;
 	}
-	if (!expect(joiner.mission_known() && !joiner.world_ready(),
-			"full-player-info advertises the mission without releasing the local world hold")) {
+	if (!expect(joiner.mission_known(),
+			"full-player-info advertises the mission")) {
 		return false;
 	}
 
@@ -1512,9 +1510,16 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 		return false;
 	}
 
-	// S2C 0x11 is the safe preload boundary. While the binding still holds the
-	// advertised mission, the only allowed response is its send-boundary ACK:
-	// no spawn-menu 0x0A and no loadout/status packet may escape.
+	// D-NET-NEW-L2-19: the S2C 0x11 ends the sync-tail wait and the mission start goes
+	// straight on, with no mission load, into NapiClient_WaitForGameStart, which queues
+	// the empty reliable C2S 0x0A at its head and pumps it out: the 0x0A answers the 0x11
+	// itself (seq 11, carrying its ACK), ahead of any load, and nothing else leaves (the
+	// loadout and status wait for the 0x1A's mission start).
+	// [orig: NapiNPClientMsg_0x011 @0x4226E0; NapiClient_SendPlayerSyncAndWaitForSyncTail
+	//  @0x42CB20 - the return @0x42CBE7; Game_StartMission @0x524360 - the joiner arm's
+	//  sync-tail wait @0x524DAB, Game_LoadTerrainDuringConnect @0x524DF2,
+	//  Avatars_LoadComboModels @0x524E24, NapiClient_WaitForGameStart @0x524E29;
+	//  NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F, the send pump @0x42CC92]
 	server_seq.last_inbound_seq = 10;
 	const std::vector<uint8_t> sync_tail_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1522,40 +1527,20 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 	const inmatch::JoinerConnection::PollResult sync_tail_result =
 			joiner.handle_datagram(
 					sync_tail_datagram.data(), sync_tail_datagram.size());
-	if (!expect(sync_tail_result.outbound.empty(),
-			"terminal sync tail remains held before the local world is ready")) {
-		return false;
-	}
-	const std::vector<std::vector<uint8_t>> sync_tail_ack = joiner.pump(0);
-	if (!expect(sync_tail_ack.size() == 1 &&
+	if (!expect(sync_tail_result.outbound.size() == 1 &&
 				decode_client_session(
-						sync_tail_ack[0], client_auth.scrk,
+						sync_tail_result.outbound[0], client_auth.scrk,
 						client_header, client_messages) &&
 				matches_client_header(client_header, kServerKey, 11, 9) &&
-				client_messages.empty() &&
-				joiner.preload_ready(),
-			"terminal 0x11 reaches preload_ready with only a header-only ACK")) {
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x0A &&
+				client_messages[0].payload.empty() &&
+				joiner.preload_ready() && !joiner.mission_start_released(),
+			"the terminal 0x11 is answered by the empty 0x0A alone, before any load")) {
 		return false;
 	}
 	if (!expect(joiner.pump(0).empty(),
-			"preload hold prohibits 0x0A and loadout before world_ready")) {
-		return false;
-	}
-
-	// Installing the advertised mission releases exactly the empty 0x0A
-	// spawn-menu request. Loadout remains reactive to the later world-stream
-	// terminator rather than sharing this boundary.
-	joiner.set_world_ready(true);
-	const std::vector<std::vector<uint8_t>> world_release = joiner.pump(0);
-	if (!expect(world_release.size() == 1 &&
-				decode_client_session(
-						world_release[0], client_auth.scrk,
-						client_header, client_messages) &&
-				matches_client_header(client_header, kServerKey, 12, 9) &&
-				client_messages.size() == 1 &&
-				client_messages[0].tag == 0x0A &&
-				client_messages[0].payload.empty(),
-			"world_ready releases only the empty spawn-menu request")) {
+			"the 0x0A carried the 0x11's ACK: no loadout, no second packet")) {
 		return false;
 	}
 
@@ -1582,7 +1567,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 				decode_client_session(
 						mission_start_end[0], client_auth.scrk,
 						client_header, client_messages) &&
-				matches_client_header(client_header, kServerKey, 13, 10) &&
+				matches_client_header(client_header, kServerKey, 12, 10) &&
 				client_messages.size() == 3 &&
 				client_messages[0].tag == 0x2F &&
 				client_messages[0].payload == fresh_no_table_loadout_body(0x02) &&
@@ -1880,7 +1865,7 @@ bool run_early_sync_tail_latch() {
 	}
 
 	// Completing the transfers applies the latch: the final 0x64 queues the 0x09 alone
-	// (no S2C 0x16 needed, D-NET-526), preload_ready trips, and (world_ready default) pump
+	// (no S2C 0x16 needed, D-NET-526), preload_ready trips, and the pump
 	// releases the 0x0A.
 	server_seq.last_inbound_seq = 7;
 	const std::vector<uint8_t> server_info_datagram = frame_server_session(
@@ -2203,7 +2188,6 @@ bool run_roundtrip() {
 	uint64_t client_clock_ms = 1;
 	inmatch::ClientRuntime client(kName, [&client_clock_ms] { return client_clock_ms; });
 	client.set_title(&kJo);
-	client.set_world_ready(false); // discover the authoritative mission before installing its world
 	inmatch::CharacterJoinVars join_profile;
 	join_profile.char_id[0] = 0x0400; // nat 0, div 0, combo 2, good
 	join_profile.char_id[1] = 0x8407; // nat 7, div 0, combo 2, evil
@@ -2230,7 +2214,11 @@ bool run_roundtrip() {
 	bool saw_client_auth = false;
 	bool client_auth_has_retail_environment = false;
 	bool client_auth_has_retail_character_profile = false;
-	bool saw_world_drive_while_held = false;
+	// D-NET-NEW-L2-19: the 0x0A answers the 0x11 (never earlier); the mission start's
+	// 0x2F / 0x0B follow it.
+	bool saw_0a = false;
+	bool saw_0a_before_sync_tail = false;
+	bool saw_submission_before_0a = false;
 	std::string spawn_name;
 	auto note_event = [&](const inmatch::HostAcceptEvent &e) {
 		if (e.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned && !spawned) {
@@ -2341,10 +2329,12 @@ bool run_roundtrip() {
 							message.payload[5] == 0 && message.payload[6] == 0 &&
 							message.payload[7] == 0;
 					}
-					if (!client.world_ready() &&
-					    (message.tag == 0x0A || message.tag == 0x2F ||
-					     message.tag == 0x0B))
-						saw_world_drive_while_held = true;
+					if (message.tag == 0x0A) {
+						if (!client.preload_ready()) saw_0a_before_sync_tail = true;
+						saw_0a = true;
+					}
+					if ((message.tag == 0x2F || message.tag == 0x0B) && !saw_0a)
+						saw_submission_before_0a = true;
 				}
 				break;
 			}
@@ -2398,12 +2388,8 @@ bool run_roundtrip() {
 			for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 		}
 	}
-	if (!expect(!saw_world_drive_while_held &&
-	                    !spawned && !inmatch::connection_spawned(ctx, peer),
-	            "0x0A and loadout/status wait for world-ready")) return false;
-
-	// Install the advertised mission, then resume on the exact authenticated session.
-	client.set_world_ready(true);
+	if (!expect(!saw_0a_before_sync_tail && !saw_submission_before_0a,
+	            "the 0x0A answers the 0x11, and the loadout / status follow it")) return false;
 
 	// --- 2) Spawn-gate burst, driven entirely from the per-frame client role. ---
 	for (int f = 0; f < 120 && !spawned; ++f) {
@@ -2849,7 +2835,6 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 		client_now_ms += 16;
 		return client.Client_ProcessNetworkFrame(now_tick);
 	};
-	client.set_world_ready(false);
 	// The binding seam under test alongside the zones flow: the shell's applied kit
 	// replaces the capture-default 0x2F pair content (D-NET-168). The wire team byte
 	// stays host-owned — this co-op joiner latches the same team 1 reservation
@@ -2932,7 +2917,6 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	for (int f = 0; f < 20 && !client.mission_known(); ++f)
 		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
 	if (!expect(client.mission_known(), "zones: joiner learned the mission")) return false;
-	client.set_world_ready(true);
 
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));

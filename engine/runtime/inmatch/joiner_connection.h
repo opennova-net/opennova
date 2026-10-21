@@ -790,11 +790,7 @@ public:
 	bool release_deployment_on_respawn();
 
 	// Retail completes the 0x00 -> 0x01 -> 0x02 exchange and learns the mission from S2C 0x7B before it
-	// begins the load/spawn drive. A binding that must load that advertised mission sets this false
-	// before start(), keeps pumping the handshake, then flips it true after the world is installed.
-	// Direct-loaded callers retain their historical behavior through the true default.
-	void set_world_ready(bool ready) { world_ready_ = ready; }
-	bool world_ready() const { return world_ready_; }
+	// begins the load/spawn drive.
 	bool mission_known() const { return mission_known_; }
 	// The exact S2C 0x0B body copied by retail into g_BmsHeaderBlock. This is
 	// the non-authority joiner's mission identity source; no canonical encode or
@@ -816,8 +812,14 @@ public:
 	const std::vector<uint8_t> &terrain_til_bytes() const {
 		return terrain_til_bytes_;
 	}
-	// Retail's safe synchronous-load boundary: the pre-world admission exchange has completed and
-	// S2C 0x11 was ACKed, but C2S 0x0A still waits for the local mission to be installed.
+	// The pre-world admission exchange has completed: the S2C 0x11 ended the sync-tail wait and
+	// its C2S 0x0A left with no mission load ahead of it (the load waits for the S2C 0x1A's
+	// mission start, mission_start_released; D-NET-NEW-L2-19). The world stream it asks for
+	// decodes through the item list of the mount the expansion switch left, which retail loads
+	// at start-up and again at the switch ahead of the dial, never in the mission start; an
+	// embedder whose mount reconciles after the auth installs its item catalog here.
+	// [orig: Game_InitSubsystems @0x4A6CD0 - the items.def load @0x4A719E; Expansion_SwitchTo
+	//  @0x5688C0 - @0x5689EC -> ItemDefs_LoadAndValidate @0x5689F1]
 	bool preload_ready() const { return preload_ready_; }
 
 	// SESSION LOSS, from either of the two witnessed causes.
@@ -1118,7 +1120,6 @@ private:
 	bool session_send_clock_armed_ = false;
 	bool goodbye_sent_ = false; // disconnect() burst emitted; retail clears the keys right after
 	bool session_ack_pending_ = false; // admitted S2C messages with no substantive C2S reply yet
-	bool world_ready_ = true;   // binding-controlled: the wire-header world/assets are staged
 	bool mission_known_ = false; // structurally valid authoritative S2C 0x7B received
 	// The joiner's server-assigned team, latched from the S2C 0x04 slot-assignment tail byte —
 	// the 0x2F loadout-submit header byte 0 source [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 ->
@@ -1158,7 +1159,7 @@ private:
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E
 	bool deployment_pick_sequence_unbound_ = false; // queued, its packet not yet built
 	bool deployment_reply_seen_ = false; // applicable spawn release seen; pairs with self H
-	bool pending_spawn_menu_request_ = false; // S2C 0x11 arrived while the local world was held
+	bool pending_spawn_menu_request_ = false; // a latched early S2C 0x11's C2S 0x0A is owed
 	// S2C 0x19 supplies dword 0 of the post-world C2S 0x28 request. Retail clears
 	// this scalar on a malformed body and retains the latest valid value.
 	// [orig: NapiNPClientMsg_0x019 @0x425e80 -> dword_A82360]

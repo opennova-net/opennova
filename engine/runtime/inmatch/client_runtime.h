@@ -859,12 +859,6 @@ public:
 	// it over its loopback to its own server. False out of a session.
 	bool queue_spectator_convert();
 
-	// Pre-load join seam. Handshake and admission traffic continue through terminal S2C 0x11 while
-	// false; only C2S 0x0A and the resulting world/deployment stream are held.
-	void set_world_ready(bool ready) {
-		if (joiner_) joiner_->set_world_ready(ready);
-	}
-	bool world_ready() const { return joiner_ ? joiner_->world_ready() : true; }
 	bool mission_known() const { return joiner_ && joiner_->mission_known(); }
 	bool has_mission_header() const {
 		return joiner_ && joiner_->has_mission_header();
@@ -883,7 +877,8 @@ public:
 		static const std::vector<uint8_t> empty;
 		return joiner_ ? joiner_->terrain_til_bytes() : empty;
 	}
-	// The terminal pre-world sync marker was received and its ACK reached the send boundary.
+	// The terminal pre-world sync marker was received and answered by the C2S 0x0A
+	// (JoinerConnection::preload_ready).
 	bool preload_ready() const { return joiner_ && joiner_->preload_ready(); }
 	// Admission-stage name for diagnostics (the shell's post-load join watchdog).
 	const char *admission_stage_name() const {

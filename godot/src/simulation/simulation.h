@@ -852,11 +852,6 @@ public:
 	// matching Game_Run's continue-after-error behavior.
 	bool load_charattr(
 			const Ref<class ResourceRoot> &p_resource_root);
-	// Retail connects before constructing the wire-header world: drive only the socket/session
-	// legs until the terminal pre-world sync marker has been received and ACKed
-	// (S2C 0x7B identifies the mission earlier), then resume the same connection
-	// after the caller has constructed it. No World tick or gameplay uplink runs here.
-	void set_join_world_ready(bool p_ready);
 	// Freeze the renderer's unique loaded, non-foliage .3DI definition count
 	// into the joiner's C2S 0x3D paging seam. GameWorld calls this once after
 	// mission/render model setup and before revealing the loaded world; later

@@ -375,10 +375,10 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 		return out;
 	}
 
-	// The admission FSM is entirely server-driven. When S2C 0x11 arrived during a synchronous
-	// load hold, release its empty C2S 0x0A world-stream request as soon as the binding reports that
-	// the advertised mission has been installed.
-	if (pending_spawn_menu_request_ && world_ready_) {
+	// The admission FSM is entirely server-driven. A latched early S2C 0x11 (applied when the
+	// final S2C 0x64 entered the sync-tail stage) sends its empty C2S 0x0A world-stream request at
+	// this send boundary [orig: NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F].
+	if (pending_spawn_menu_request_) {
 		// Remains inside ClientRuntime's surrounding logical send boundary.
 		out.push_back(frame_session({make_protocol_message(0x0A, {})}));
 		pending_spawn_menu_request_ = false;

@@ -105,7 +105,6 @@ bool JoinerRole::bring_up() {
 		create_runtime(player_name_, join_role_, spectator_password_, server_password_, join_password_);
 		reset_for_runtime_rebuild();
 	}
-	runtime->set_world_ready(true);
 	runtime->view().begin_mission();
 	reset_for_load(runtime->deployment_release_revision());
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load

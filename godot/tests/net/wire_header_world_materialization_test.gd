@@ -255,7 +255,6 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "WireHeaderJoiner"))
-	joiner.set_join_world_ready(false)
 	var header := PackedByteArray()
 	for _tick in range(800):
 		joiner.poll_join_preload()
@@ -369,7 +368,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "DesignatedGHeaderJoiner"))
-	joiner.set_join_world_ready(false)
 	var header := PackedByteArray()
 	for _tick in range(800):
 		joiner.poll_join_preload()

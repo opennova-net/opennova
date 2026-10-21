@@ -713,8 +713,7 @@ void JoinerConnection::on_server_auth(
 	session_ack_pending_ = false;
 	s2c_reassembly_ = {};
 	// Retail first sends a sequenced settings packet after 0x82. Its receipt drives the header-only
-	// ACK + C2S 0x00 JOIN pair in on_server_session; do not skip straight to 0x01. This remains active
-	// while the binding holds world_ready_ false so a joiner can discover what it must load.
+	// ACK + C2S 0x00 JOIN pair in on_server_session; do not skip straight to 0x01.
 	post_auth_stage_ = PostAuthStage::AwaitServerSettings;
 }
 
@@ -1051,7 +1050,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	auto enter_initial_sync_tail = [&] {
 		post_auth_stage_ = PostAuthStage::AwaitInitialSyncTail;
 		// A latched early 0x11 (see the 0x11 handler) completes this stage immediately;
-		// the held C2S 0x0A then releases at the pump send boundary once world_ready.
+		// its C2S 0x0A then leaves at the pump's next send boundary.
 		if (sync_tail_seen_) {
 			preload_ready_ = true;
 			pending_spawn_menu_request_ = true;
@@ -2001,9 +2000,16 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::DISCONNECT_UNLOCK) {
-			// S2C 0x11 is the terminal pre-world admission marker. Its cumulative ACK is the safe
-			// point at which the binding may pause progress for synchronous mission loading. Hold
-			// retail's empty C2S 0x0A world-stream request until that local world is installed.
+			// S2C 0x11 is the terminal pre-world admission marker. It ends the mission start's
+			// sync-tail wait, and the joiner arm goes straight on into NapiClient_WaitForGameStart,
+			// which queues the empty reliable C2S 0x0A at its head and pumps it: the 0x0A answers
+			// the 0x11 with no mission load ahead of it (the load waits for the S2C 0x1A's mission
+			// start, set_mission_start_loading; D-NET-NEW-L2-19).
+			// [orig: NapiNPClientMsg_0x011 @0x4226E0; Game_StartMission @0x524360 - the joiner
+			//  arm's NapiClient_SendPlayerSyncAndWaitForSyncTail @0x524DAB, then
+			//  Game_LoadTerrainDuringConnect @0x524DF2, Avatars_LoadComboModels @0x524E24,
+			//  NapiClient_WaitForGameStart @0x524E29; NapiClient_WaitForGameStart @0x42CC10 - the
+			//  0x0A @0x42CC3F, the send pump @0x42CC92]
 			// The host emits this marker exactly ONCE, paced behind its C2S 0x02 reply regardless
 			// of our transfer progress (our host: ~13 ticks, §5.5 bundle pacing). Latch an early
 			// arrival — a joiner stalled past that window mid-0x60/0x64 would otherwise drop it
@@ -2013,7 +2019,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				preload_ready_ = true;
 				pending_spawn_menu_request_ = true;
 			}
-			if (pending_spawn_menu_request_ && world_ready_) {
+			if (pending_spawn_menu_request_) {
 				out.outbound.push_back(frame_inner_pending(0x0A, {}));
 				pending_spawn_menu_request_ = false;
 				post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;

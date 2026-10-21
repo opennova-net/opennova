@@ -475,11 +475,9 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "PreloadJoiner"))
-	joiner.set_join_world_ready(false)
 
 	# Retail authenticates before constructing the wire-header world. Drive only
-	# that connection until post-auth 0x7B supplies map_file; no World exists yet and
-	# the spawn/load drive remains held.
+	# that connection until post-auth 0x7B supplies map_file; no World exists yet.
 	var learned := false
 	for _i in range(600):
 		joiner.poll_join_preload()
@@ -503,8 +501,8 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	assert_eq(host.get_host_peer_count(), 1, "one authenticated connection exists before load")
 
 	# This low-level simulation fixture uses a complete mission object to construct
-	# its World and release the same ClientRuntime/socket's world-ready gate; the
-	# production GameWorld path supplies an exact header-only document instead.
+	# its World over the same ClientRuntime/socket; the production GameWorld path
+	# supplies an exact header-only document instead, after the S2C 0x1A.
 	# A reconnect would create a second host node or lose the live session.
 	assert_true(joiner.load_from_mission_data(mission))
 	var reached := false
@@ -2909,7 +2907,6 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "GunnerWatcher"))
-	joiner.set_join_world_ready(false)
 	var header := PackedByteArray()
 	for _tick in range(800):
 		joiner.poll_join_preload()

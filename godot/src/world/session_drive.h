@@ -193,6 +193,11 @@ private:
 	// it. Returns false when the join has been failed and the driver must
 	// stop.
 	bool reconcile_join_expansion();
+	// The S2C 0x11's identification of the joined session, before the world stream: the
+	// expansion reconcile, the promoted map name and header checks, the stream's item
+	// catalog, the identified signal, the stream wait's window. False when the join has
+	// been failed and the driver must stop.
+	bool identify_join_session();
 	// The per-frame admission/deploy/loss observer.
 	void update_joiner_admission_signals();
 	void fail_join_preload(const String &p_reason);
@@ -241,6 +246,9 @@ private:
 	// is never restarted.
 	Ref<Simulation> join_preload_sim_;
 	Ref<ResourceRoot> join_preload_root_;
+	// The S2C 0x11's identification ran (identify_join_session): the world stream
+	// runs until the S2C 0x1A's load.
+	bool join_identified_ = false;
 	// The map change's kept session and the join it came from.
 	Ref<Simulation> kept_sim_;
 	Ref<JoinTarget> last_join_target_;

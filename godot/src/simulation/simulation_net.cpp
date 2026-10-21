@@ -887,10 +887,6 @@ bool Simulation::load_charattr(
 	return net_.charattr_table.loaded;
 }
 
-void Simulation::set_join_world_ready(bool p_ready) {
-	if (is_joiner() && runtime_) runtime_->set_world_ready(p_ready);
-}
-
 void Simulation::finalize_loaded_model_challenge_snapshot() {
 	// The page the C2S 0x3D answers from is the model-def list the mission start's loads
 	// built, computed from the mount and the tables as retail's loads run, not from what

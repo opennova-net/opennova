@@ -14,6 +14,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the listing's columns)
 #include "object/avatar_database.h"
+#include "object/item_database.h"
 #include "resource_index/launch_flags.h"
 #include "rtxt/rtxt_string_file.h" // game_text_lookup (the listing's GateTypeAbbrev text)
 #include "util/string_convert.h"
@@ -176,11 +177,10 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 		world_->emit_signal(kSignalLoadFailed, "join: could not open the LAN session socket");
 		return ERR_CANT_CONNECT;
 	}
-	join_preload_sim_->set_join_world_ready(false);
 	// This shell loads the joiner's mission start after the S2C 0x1A releases it
-	// (the host's streamed assets, the loaded-model freeze), and its end sends the
-	// two 0x2F and the 0x0B (engine: inmatch/joiner_connection.h
-	// set_mission_start_loading, D-NET-531).
+	// (step_preload: the world load, the host's streamed assets, the loaded-model
+	// freeze), and its end sends the two 0x2F and the 0x0B (engine:
+	// inmatch/joiner_connection.h set_mission_start_loading, D-NET-531, D-NET-NEW-L2-19).
 	join_preload_sim_->set_join_mission_start_loading(true);
 	// The JOIN VERSIONCRCSTRING checksum reads the loose
 	// expansion/<name>/version.txt under this install root (D-NET-166).
@@ -196,6 +196,8 @@ void SessionDrive::step_preload() {
 		world_->set_process(false);
 		return;
 	}
+	// The connect exchange, until the S2C 0x11 ends the sync-tail wait, inside the
+	// ConnectOrHost window.
 	if (!join_preload_sim_->is_join_preload_ready()) {
 		join_preload_sim_->poll_join_preload();
 		const int step = policy_->preload_step(join_preload_sim_->get_join_error(), now_ms());
@@ -204,23 +206,28 @@ void SessionDrive::step_preload() {
 		}
 		return;
 	}
-	// Stop the frame pump before the synchronous load transfers or releases
-	// the preload simulation. Every failure below owns its own
-	// cleanup/reporting leg.
+	// The 0x11 answered with the C2S 0x0A and no load ahead of it (the runtime sent it in
+	// the poll that received the 0x11): the session is identified once, then the world
+	// stream runs until the S2C 0x1A releases the mission start, whose load comes only
+	// then (D-NET-NEW-L2-19; engine inmatch/joiner_connection.h preload_ready and
+	// set_mission_start_loading carry the witness).
+	if (!join_identified_) {
+		if (!identify_join_session()) return;
+		join_identified_ = true;
+	}
+	if (!join_preload_sim_->is_join_mission_start_released()) {
+		join_preload_sim_->poll_join_preload();
+		const int step = policy_->preload_step(join_preload_sim_->get_join_error(), now_ms());
+		if (step == NetSessionPolicy::STEP_FAIL) {
+			fail_join_preload(policy_->fail_reason());
+		}
+		return;
+	}
+	// The 0x1A's mission start: its load. Stop the frame pump before the synchronous
+	// load transfers or releases the preload simulation. Every failure below owns its
+	// own cleanup/reporting leg.
 	world_->set_process(false);
 	policy_->disarm_preload();
-	// Reconcile the mount with the host's data set BEFORE any referenced
-	// assets are resolved through it. The mission body itself comes from the
-	// host's world stream; the mount supplies shared terrain/environment/model
-	// definitions (D-NET-178/194).
-	if (!reconcile_join_expansion()) {
-		return;
-	}
-
-	if (!policy_->validate_promote_mission_file(join_preload_sim_->get_join_mission_file())) {
-		fail_join_preload(policy_->fail_reason());
-		return;
-	}
 	const String bms = policy_->promoted_mission_file();
 	Ref<ResourceRoot> resource_root = join_preload_root_;
 	if (resource_root.is_null()) {
@@ -232,26 +239,15 @@ void SessionDrive::step_preload() {
 	// streamed the live world and optional mission .til overlay. Requiring the
 	// map locally made retail-host -> OpenNova-client fail for custom maps
 	// even though the reverse direction worked (D-NET-194).
-	const PackedByteArray wire_header = join_preload_sim_->get_join_mission_header();
-	if (!policy_->validate_promote_header(wire_header.size())) {
-		fail_join_preload(policy_->fail_reason());
-		return;
-	}
 	Ref<MissionData> mission;
 	mission.instantiate();
-	if (mission->open_wire_header(wire_header) != OK) {
+	if (mission->open_wire_header(join_preload_sim_->get_join_mission_header()) != OK) {
 		fail_join_preload(vformat("join: failed to parse host S2C 0x0B mission header for %s: %s",
 				bms, mission->get_last_error()));
 		return;
 	}
-
-	// The authoritative session identity. None of it came from discovery;
-	// every value here came from 0x7B.
 	join_preload_root_.unref();
-	world_->emit_signal(kSignalJoinSessionIdentified,
-			LoadingScreenInfo::make(bms, true, join_preload_sim_->get_join_server_name(),
-					join_preload_sim_->get_join_mission_name(),
-					static_cast<int>(join_preload_sim_->get_join_game_type()), String()));
+	join_identified_ = false;
 	const int err = world_->load_mission_internal(mission, bms, resource_root);
 	if (err != OK) {
 		// load_mission_internal emitted the specific resource/load failure.
@@ -259,17 +255,60 @@ void SessionDrive::step_preload() {
 		clear_pending_session();
 		return;
 	}
-	// Post-load joiner watchdog: the admission tail (C2S 0x0A -> world stream
-	// -> loadout grants) is server-driven with no protocol-level timeout, so a
-	// stalled or incompatible host would leave the player loaded but hidden
-	// forever. The policy reuses the retail ConnectOrHost window from
-	// world-ready and composes a stage-named failure -- the reachable analog of
-	// retail's post-load network-wait failure returns (engine: runtime/inmatch/join_session_policy.h). It covers only SERVER-owed transitions: at the player-paced
-	// deployment pick the watchdog ends (retail's DEATH screen simply waits;
-	// net-re 5.61).
+	// Post-load joiner watchdog: the admission tail (the mission start's loadout and
+	// status -> the grants -> the S2C 0x0F) is server-driven with no protocol-level
+	// timeout, so a stalled or incompatible host would leave the player loaded but hidden
+	// forever. The policy reuses the retail ConnectOrHost window from the load and
+	// composes a stage-named failure -- the reachable analog of retail's post-load
+	// network-wait failure returns (engine: runtime/inmatch/join_session_policy.h). It
+	// covers only SERVER-owed transitions: at the player-paced deployment pick the
+	// watchdog ends (retail's DEATH screen simply waits; net-re 5.61).
 	// A reload's admission tail has no window either (net-re §5.70.7).
 	if (!reloading_join_) policy_->arm_admission_watch(now_ms());
 	reloading_join_ = false;
+}
+
+bool SessionDrive::identify_join_session() {
+	// Reconcile the mount with the host's data set BEFORE any referenced
+	// assets are resolved through it. The mission body itself comes from the
+	// host's world stream; the mount supplies shared terrain/environment/model
+	// definitions (D-NET-178/194).
+	if (!reconcile_join_expansion()) {
+		return false;
+	}
+	if (!policy_->validate_promote_mission_file(join_preload_sim_->get_join_mission_file())) {
+		fail_join_preload(policy_->fail_reason());
+		return false;
+	}
+	const String bms = policy_->promoted_mission_file();
+	Ref<ResourceRoot> resource_root = join_preload_root_;
+	if (resource_root.is_null()) {
+		fail_join_preload("join: resource root is unavailable after session identification");
+		return false;
+	}
+	if (!policy_->validate_promote_header(join_preload_sim_->get_join_mission_header().size())) {
+		fail_join_preload(policy_->fail_reason());
+		return false;
+	}
+	// The world stream's records resolve through the item list of the mount the
+	// reconcile left, so the stream decodes before any mission load (the 0x0D's class by
+	// items.def; engine inmatch/joiner_connection.h preload_ready carries the witness).
+	Ref<ItemDatabase> items;
+	items.instantiate();
+	if (items->load_from_resource_root(resource_root, "items.def") == OK) {
+		join_preload_sim_->resolve_item_traits(items);
+	}
+	// The authoritative session identity. None of it came from discovery;
+	// every value here came from 0x7B.
+	world_->emit_signal(kSignalJoinSessionIdentified,
+			LoadingScreenInfo::make(bms, true, join_preload_sim_->get_join_server_name(),
+					join_preload_sim_->get_join_mission_name(),
+					static_cast<int>(join_preload_sim_->get_join_game_type()), String()));
+	// The world stream's wait gets its own ConnectOrHost window, as the admission tail
+	// had from its world-ready (a reload's has none).
+	if (!reloading_join_) policy_->arm_preload(now_ms());
+	else policy_->disarm_preload();
+	return true;
 }
 
 // Point the joiner's resource root at the HOST's expansion (S2C 0x7B field 7,
@@ -551,6 +590,7 @@ void SessionDrive::cancel_join_preload() {
 	policy_->disarm_preload();
 	join_preload_sim_.unref();
 	join_preload_root_.unref();
+	join_identified_ = false;
 }
 
 bool SessionDrive::pending_session() const {
@@ -600,12 +640,11 @@ int SessionDrive::reload_as_joiner() {
 	}
 	// The kept connection is the preload's: the reload's legs ran from
 	// Simulation::begin_joiner_reload, and step_preload loads the next map at
-	// its 0x11 as a first join's does, with no window armed.
+	// its 0x1A as a first join's does, with no window armed.
 	policy_->reset_for_join();
 	pending_join_ = last_join_target_;
 	join_preload_sim_ = kept_sim_;
 	kept_sim_.unref();
-	join_preload_sim_->set_join_world_ready(false);
 	join_preload_root_ = resource_root;
 	last_connection_error_.unref();
 	reloading_join_ = true;

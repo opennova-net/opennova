@@ -98,7 +98,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_join_character_profile);
 	ClassDB::bind_method(D_METHOD("set_join_discovered_session", "target"),
 	                     &Simulation::set_join_discovered_session);
-	ClassDB::bind_method(D_METHOD("set_join_world_ready", "ready"), &Simulation::set_join_world_ready);
 	ClassDB::bind_method(D_METHOD("poll_join_preload"), &Simulation::poll_join_preload);
 	ClassDB::bind_method(D_METHOD("is_join_preload_ready"), &Simulation::is_join_preload_ready);
 	ClassDB::bind_method(D_METHOD("get_join_admission_stage"), &Simulation::get_join_admission_stage);
