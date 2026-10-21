@@ -466,6 +466,11 @@ void Lister::teardown(bool stop_hosting) {
 	if (phase_ == Phase::Done) return;
 	phase_ = Phase::Done;
 	if (lobby_.is_open()) {
+		// A refused or failed host request left the role idle: no ClientStopHosting, the burst
+		// alone, as retail's ResetToDisconnected sends it [orig: Game_HostMultiplayerSession
+		//  @0x4A65A0 - CNapiGameSession_ResetToDisconnected @0x4A6718 / @0x4A674F].
+		const bool stop_sent = stop_hosting && role_.phase() != NwuHostRole::Phase::Idle &&
+				lobby_.session() != nullptr;
 		if (stop_hosting) {
 			role_.stop();
 			lobby_.flush();
@@ -476,7 +481,7 @@ void Lister::teardown(bool stop_hosting) {
 			for (const std::vector<uint8_t> &dg : out) lobby_.send(dg);
 			if (!out.empty())
 				io::logf(LogLevel::kInfo, "[session] %s",
-				         stop_hosting ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
+				         stop_sent ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
 		}
 		lobby_.close();
 	}
