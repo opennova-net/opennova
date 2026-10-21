@@ -272,6 +272,9 @@ void HostRole::bring_up(const HostBringup &bringup) {
 			host_cfg.title);
 	state.host_owner.host_loopback = &state.host_loop;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	// The fresh context stands inside the mission load, which holds the spawn gate
+	// until its end (finish_mission_load) [orig: Game_StartMission @0x524398].
+	ctx.net_spawn_suspended = 1;
 	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
 	ctx.mission_text_loaded = bringup.mission_text.loaded;
@@ -296,18 +299,31 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	} else {
 		state.client_runtime.reset();
 	}
+	// Retail's session host stands its session up before its mission load and pumps it
+	// through the load, so a remote's hello, connect and admission legs are answered
+	// inside the load; ours's session exists from here, ahead of the PreMission pass,
+	// where retail's last in-load pumps fall (D-NET-116).
+	// [orig: Server_PumpNetworkTransport @0x4FD960 from Game_StartMission @0x52589D /
+	//  @0x5258E5 / @0x525A5C / @0x525AC5, ahead of the EventTrigger_UpdateAllWithFlag2
+	//  call @0x525B86; the session create ahead of the load, CNapiGameSession_CreateSession
+	//  @0x4C97C0 from CNapiGameSession_BuildAndCreateSession @0x56997D (the PreMenu's
+	//  MultiPlayer_JoinSessionStateMachine @0x56A46A), before GameLoop_Init's
+	//  Game_StartMission call @0x526377]
+	pump_load();
 }
 
 // The map change's bring-up, inside the next mission's kernel boot where a
 // fresh session's starts: the kept session onto the new World (the context
 // keeps its connections; the per-mission tables, the streams and the rule
 // words are the next map's), the CRT stream carried over, the host's own
-// client view rebuilt over the cleared loopback, then a pump of the rebuilt
-// streams. The round init over the kept slots waits for the PreMission pass
-// (init_round_after_premission).
+// client view rebuilt over the cleared loopback, the per-slot reset, then a
+// pump of the rebuilt streams. The round init over the kept slots waits for
+// the PreMission pass (init_round_after_premission).
 // [orig: Game_StartMission's authority arm @0x524492..0x52452B, the stream
-//  rebuild @0x5247EB, the pumps @0x524813 / @0x52481D, the mission-data
-//  block @0x5248A7]
+//  rebuild @0x5247EB, the mission-data block @0x5248A7, the per-slot reset
+//  @0x5248BC, the round-over clear @0x524A1F, then the server pumps
+//  (Server_PumpNetworkTransport @0x4FD960) @0x524A63 .. @0x525AC5 ahead of the
+//  EventTrigger_UpdateAllWithFlag2 call @0x525B86]
 void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
@@ -337,11 +353,13 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 			ctx.config.mission_file);
 	map_change.torn_down = false;
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
-	pump_load();
-	// Then the per-slot reset, after the pumps and the mission-data block
-	// [orig: Game_StartMission @0x5248AC..0x5248BC].
+	// The per-slot reset, after the mission-data block [orig: Game_StartMission
+	//  @0x5248AC..0x5248BC].
 	if (ctx.is_in_session != 0 && ctx.is_authority != 0)
 		inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
+	// Then the load's pumps over the reset slots and the rebuilt streams, the spawn
+	// gate still held (D-NET-116) [orig: Game_StartMission @0x524A63 .. @0x525AC5].
+	pump_load();
 }
 
 // The map change's round init, after the kernel boot's PreMission pass and
@@ -471,11 +489,9 @@ void HostRole::pump_load() {
 }
 
 void HostRole::finish_mission_load() {
-	if (state.host_owner.ctx.is_authority == 0) return;
-	inmatch::Server_BroadcastPlayerInfoToAll(state.host_owner.ctx);
-	if (!map_change.pending) return;
-	map_change.pending = false;
-	pump_load();
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	if (ctx.is_authority != 0) inmatch::Server_BroadcastPlayerInfoToAll(ctx);
+	ctx.net_spawn_suspended = 0;
 }
 
 void HostRole::drain_host_client_gameplay_requests() {

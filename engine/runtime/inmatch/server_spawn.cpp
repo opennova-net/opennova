@@ -863,19 +863,21 @@ void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn
 
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !g_NetSpawnSuspended
 // && !g_RoundOver. The round-over gate is world::Match's sole outcome latch. g_NetSpawnSuspended
-// needs no counterpart (D-NET-116): Game_StartMission sets it at its head and clears it at its end
-// and at every failure exit, and none of its readers runs inside that blocking call: this pump and
-// the timeout walk run only from Server_TickUpdate, the quality sample from Game_ProcessMainFrame,
-// the three server handlers only through the server protocol's pump, while the load's own pumps run
-// on the gate manager's session; ours runs no host tick while the session is Loading.
-// [orig: Game_StartMission @0x524360 (the set @0x524398, the clear @0x52631B, the load's
-//  CNapiGameSession_ProcessPeriodicUpdate on g_GateManager @0x5262F3 / @0x5262F8);
-//  Game_ShowErrorLogAndAbortMission @0x520AA0 (the clear @0x520B6C); the readers: this pump
-//  @0x4C8DDE, CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 (@0x4C8B1B), CNetQuality_UpdateMetrics
-//  @0x4C52C0 (@0x4C52EA / @0x4C5606), NapiNPServerMsg_0x029 @0x514F10 (@0x514F1E),
-//  Server_CollectValidWeaponSlots @0x516000 (@0x516005), NapiNPServerMsg_SendEmptySlots @0x51A600
-//  (@0x51A609); CNapiNetwork_PumpServerProtocolRecv @0x4C4EE0 from Server_TickUpdate @0x51D7E0
-//  (the call @0x51D895)]
+// (NapiNPServerCtx::net_spawn_suspended) is held for the length of a mission load, and this pump
+// never reads it set: like the timeout walk it runs only from Server_TickUpdate, and the quality
+// sample only from Game_ProcessMainFrame, neither of which runs inside the load (ours runs no host
+// tick while the session is Loading). Its other three readers do run inside the load: a session
+// host's load pumps its server protocol (HostRole::pump_load), so the 0x29, 0x32 and 0x28 handlers
+// read the gate (D-NET-116).
+// [orig: Game_StartMission @0x524360 (the set @0x524398, the clear @0x52631B, its
+//  Server_PumpNetworkTransport calls @0x5245E8 .. @0x525AC5); Game_ShowErrorLogAndAbortMission
+//  @0x520AA0 (the clear @0x520B6C); the readers: this pump @0x4C8DDE (its one caller
+//  Server_TickUpdate @0x51DBFD), CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 (@0x4C8B1B; Server_TickUpdate
+//  @0x51DBF3), CNetQuality_UpdateMetrics @0x4C52C0 (@0x4C52EA / @0x4C5606; Game_ProcessMainFrame
+//  @0x52658B), NapiNPServerMsg_0x029 @0x514F10 (@0x514F1E), Server_CollectValidWeaponSlots @0x516000
+//  (@0x516005), NapiNPServerMsg_SendEmptySlots @0x51A600 (@0x51A609), the last three through
+//  CNapiNetwork_PumpServerProtocolRecv @0x4C4EE0 (Server_TickUpdate @0x51D895 and
+//  Server_PumpNetworkTransport @0x4FD981)]
 // The pump runs once per periodic second from the host tick (the caller's
 // gate). Every successful add restarts the walk from the head with the capacity
 // predicate re-evaluated (LABEL_5 @0x4C8E02); a pending player the capacity or

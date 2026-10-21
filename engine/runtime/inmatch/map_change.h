@@ -34,8 +34,9 @@
 //     (HostRole::init_round_after_premission -> init_all_player_entities_for_round).
 //   the boot's phase B ends with the load-end S2C 0x7B to every slot.
 // The host pumps its socket at the load's witnessed points (the 0x25s after
-// the teardown, the rebuilt streams, the load end), so a joiner reloading in
-// place is answered from its kept slot.
+// the teardown, then the rebuilt streams after the per-slot reset) with the
+// load's spawn gate held (D-NET-116), so a joiner reloading in place is
+// answered from its kept slot; the load end's 0x7B leaves at the first tick.
 
 #include <base/io/crt_rand.h>
 #include <runtime/mission/mission_catalog.h>
@@ -60,8 +61,6 @@ struct HostMapChange {
 	// The teardown ran on the current kernel: its entities are gone and its
 	// PostMission pass ran, so the role's close skips both.
 	bool torn_down = false;
-	// The next bring-up continues the session instead of starting one.
-	bool pending = false;
 	// The process CRT stream: retail seeds it once per session (at the slot
 	// table's allocation), so the next mission's World continues it.
 	// [orig: Server_AllocatePlayerSlotTable @0x51C1AA, srand's only session

@@ -258,10 +258,13 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	if (!next) return MapChangeStep::RotationEnded;
 	// The next mission's start re-applies the cfg block to the session.
 	if (cfg_block != nullptr && session != nullptr) *session = host_session_settings(*cfg_block);
-	role.map_change.pending = true;
-	// The 0x25s leave at the next load's first pumps, ahead of the streams'
-	// rebuild [orig: Game_StartMission -> Server_PumpNetworkTransport
-	// @0x5245E8; the teardown's own pump @0x522588 precedes the reset].
+	// The next mission's load holds the spawn gate from its head (D-NET-116); the 0x25s
+	// leave at its first pump, ahead of the streams' rebuild, the old map's round-over
+	// latch still set (ours: no World until the bring-up).
+	// [orig: Game_StartMission @0x524360 - the set @0x524398, Server_PumpNetworkTransport
+	//  @0x5245E8, the stream rebuild @0x5247EB, the round-over clear @0x524A1F; the
+	//  teardown's own pump @0x522588 precedes the reset]
+	ctx.net_spawn_suspended = 1;
 	role.pump_load();
 	return MapChangeStep::NextMission;
 }

@@ -392,6 +392,16 @@ struct NapiNPServerCtx {
 	// 2790 store @0x5166C4]
 	bool round_end_announced = false;
 	uint32_t round_end_linger_ticks = 0;
+	// The mission load's spawn gate (g_NetSpawnSuspended): set for the length of a
+	// host's mission load, whose in-load pumps run the server handlers (HostRole::pump_load),
+	// so the C2S 0x28, 0x29 and 0x32 that arrive then are consumed and answered with
+	// nothing (D-NET-116). Its other readers (the spawn pump, the timeout walk, the quality
+	// sample) run only from the tick and the main frame, never inside the load. A failed
+	// load leaves it set: no handler runs before the next load's head sets it again.
+	// [orig: g_NetSpawnSuspended @0x24D1DE0 - Game_StartMission @0x524360 sets it @0x524398
+	//  and clears it @0x52631B; the readers NapiNPServerMsg_0x029 @0x514F1E,
+	//  NapiNPServerMsg_SendEmptySlots @0x51A609, Server_CollectValidWeaponSlots @0x516005]
+	uint32_t net_spawn_suspended = 0;
 	// The frozen end-of-round board stream (stru_C947D8): built once by the
 	// round-end producer before the per-slot 0x61/0x1D push, then only READ by
 	// the C2S 0x2B chunk service; empty until a round ends and cleared with the

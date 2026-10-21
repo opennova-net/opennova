@@ -110,7 +110,12 @@ public:
 	// The map change's state between its steps (inmatch/map_change.h).
 	HostMapChange map_change;
 	// The host's network pump while it loads a mission (host_session_load_pump
-	// over the role's socket).
+	// over the role's socket): an in-session authority's load runs the server
+	// protocol's receive, its handlers and its send at the load's pump points,
+	// with the load's spawn gate set (NapiNPServerCtx::net_spawn_suspended,
+	// D-NET-116): the map change's first pump, then one after each bring-up
+	// [orig: Server_PumpNetworkTransport @0x4FD960, called by Game_StartMission
+	//  @0x5245E8 .. @0x525AC5].
 	void pump_load();
 	// The map change's round init over the kept slots, which the host boot
 	// runs after the kernel boot's PreMission pass and the round counters
@@ -138,9 +143,11 @@ public:
 	// installed with the client view), ahead of finish_mission_load
 	// [orig: Game_StartMission @0x526189..0x526255, ahead of @0x526267].
 	void send_own_mission_status();
-	// The mission load's end on the authority: the S2C 0x7B to every slot,
-	// and after a map change's bring-up a pump. Phase B of the host boot runs
-	// it [orig: Game_StartMission @0x52625F..0x526267].
+	// The mission load's end: on the authority the S2C 0x7B to every slot, then
+	// the load's spawn gate clears. No pump follows: the 0x7B leaves at the first
+	// tick's send pump. Phase B of the host boot runs it [orig: Game_StartMission
+	//  @0x52625F..0x526267, the clear @0x52631B; its last server pump @0x525AC5;
+	//  Server_TickUpdate's send pump @0x51E487].
 	void finish_mission_load();
 	// The shell's items.def catalog for the HostClient's view (the wire class
 	// and the def facts of a type id); re-installed whenever the role rebuilds

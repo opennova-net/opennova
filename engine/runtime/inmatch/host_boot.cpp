@@ -445,8 +445,8 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 		if (ctx.logs.profile != nullptr) ctx.logs.profile->write_mission_roster(ctx, kernel.world);
 	}
 
-	// The authority's load end: the S2C 0x7B to every slot, and a map change's
-	// last pump [orig: Game_StartMission @0x52625F..0x526267].
+	// The load end: the authority's S2C 0x7B to every slot, then the load's spawn
+	// gate clears (D-NET-116) [orig: Game_StartMission @0x52625F..0x526267, @0x52631B].
 	if (boot.host != nullptr) boot.host->finish_mission_load();
 	// The load ends with the mission start: the Game Loop reads its clock only
 	// after Game_StartMission returns (Session::complete_load carries it).

@@ -216,13 +216,18 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg);
 // @0x5248A7)]
 void continue_host_session(HostOwner &owner, const HostConfig &cfg);
 
-// The host's network pump while it loads a mission: the receive drain with
-// its handlers (a joiner's 0x33 / 0x37 / 0x47 / 0x48 are answered from the
-// kept slot) and the send flush, with no connection burst and no server
-// tick, and the owner's clock not advanced. [orig: Server_PumpNetworkTransport
-// @0x4FD960 -- CNapiNetwork_PumpManagerReceive, PumpServerProtocolRecv,
-// PumpServerProtocolSend; called through Game_StartMission's load, e.g.
-// @0x5245E8, @0x524A63, @0x524B36]
+// The host's network pump while it loads a mission, on an in-session authority
+// only: the receive drain with its handlers (a joiner's 0x33 / 0x37 / 0x47 / 0x48
+// are answered from the kept slot, an admission leg from the in-load tick; the
+// C2S 0x28 / 0x29 / 0x32 meet the load's spawn gate, D-NET-116) and the send
+// flush, with no connection burst, no server tick (so no timeout walk and no
+// spawn pump), no own-client drain, and the owner's clock not advanced.
+// [orig: Server_PumpNetworkTransport @0x4FD960 -- is_authority / is_in_session
+//  @0x4FD960..0x4FD970, CNapiNetwork_PumpManagerReceive @0x4FD977,
+//  CNapiNetwork_PumpServerProtocolRecv @0x4FD981, CNapiNetwork_PumpServerProtocolSend
+//  @0x4FD98B; a session host's Game_StartMission calls it @0x5245E8, @0x524A63,
+//  @0x524F76 / @0x524F8C (the .bms arm), @0x525256, @0x5253EA, @0x52589D, @0x5258E5,
+//  @0x5259EC (not a dedicated host's), @0x525A5C and @0x525AC5]
 void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock);
 
 } // namespace opennova::inmatch

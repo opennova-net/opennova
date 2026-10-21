@@ -887,14 +887,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// (@0x431cad) and REBINDS CharacterEntity (@0x431cf3) — so the former
 				// unconditional zero-id 0x51 "spawn-confirm" re-bound the joiner's own player
 				// to a vehicle archetype: the retail-join DBuggy1 shadow (D-NET-148). The
-				// gates: the authority (@0x514F11), the round-over latch (@0x514F2B; its
-				// reachable analog is the Match outcome; g_NetSpawnSuspended is set only
-				// inside the blocking mission load, which pumps no server handler, D-NET-116)
-				// and the sender's player slot (@0x514F38..0x514F53; the 0xA0 mask also
+				// gates: the authority (@0x514F11), the load's spawn gate (@0x514F1E, jnz
+				// @0x514F25: set for the length of the mission load, whose in-load pumps run
+				// this handler, D-NET-116), the round-over latch (@0x514F2B, jnz @0x514F32;
+				// its reachable analog is the Match outcome) and the
+				// sender's player slot (@0x514F38..0x514F53; the 0xA0 mask also
 				// needs it in the match). A short body reads index 0 (@0x514F5F..0x514F6A).
 				if (inputs.server_ctx == nullptr || world == nullptr ||
-						inputs.server_ctx->is_authority == 0 || world->match.outcome().ended ||
-						!is_in_match(conn))
+						inputs.server_ctx->is_authority == 0 ||
+						inputs.server_ctx->net_spawn_suspended != 0 ||
+						world->match.outcome().ended || !is_in_match(conn))
 					break;
 				const uint16_t index = msg.payload.size() >= 2
 						? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
@@ -1345,9 +1347,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// EMPTY entry (`entry_dword[7] == 0`); the client destroys whatever it
 				// still holds in those slots (NapiNPClientMsg_DestroyEntityList
 				// @0x429730). The handler reads NO fields from the request. It answers
-				// on the authority only, is SKIPPED while g_NetSpawnSuspended or
-				// g_RoundOver (round over) is set — our reachable analog of the
-				// latter is world->match.outcome().ended — and answers only a requester
+				// on the authority only, is SKIPPED while g_NetSpawnSuspended (the
+				// mission load's gate, ctx.net_spawn_suspended: the load's pumps run
+				// this handler, D-NET-116) or g_RoundOver (round over) is set — our
+				// reachable analog of the latter is world->match.outcome().ended —
+				// and answers only a requester
 				// whose session player (conn+0x160) and its server slot (+0xC0) are
 				// bound, which our PlayerAdded phase stands for (the 0x22 and 0x0F
 				// gates' analogue). The walk covers pool 0's used
@@ -1356,7 +1360,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// of a type items.def lacks (the lookup's miss answers row 0).
 				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600 — the authority
 				//  @0x51A600..0x51A607, g_NetSpawnSuspended @0x51A609..0x51A610
-				//  (set only inside the blocking mission load, D-NET-116), the round-over
+				//  (set for the length of the mission load, D-NET-116), the round-over
 				//  gate @0x51A612..0x51A619, the
 				//  session player @0x51A61F..0x51A627 and its slot @0x51A62A..0x51A632;
 				//  body builder Server_CollectEmptyPool0Slots @0x5160f0, the used read
@@ -1368,6 +1372,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world == nullptr ||
 				    !decode_empty_slots_request(
 						msg.payload.data(), msg.payload.size(), consumed) ||
+				    inputs.server_ctx->net_spawn_suspended != 0 ||
 				    world->match.outcome().ended) {
 					break;
 				}

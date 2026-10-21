@@ -5018,6 +5018,11 @@ add_executable(npruntime_sp_join_placement_test npruntime/sp_join_placement_test
 target_link_libraries(npruntime_sp_join_placement_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_sp_join_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_sp_join_placement COMMAND npruntime_sp_join_placement_test)
+# The session host's in-load server pump and the load's spawn gate (D-NET-116).
+add_executable(npruntime_host_load_pump_test npruntime/host_load_pump_test.cpp)
+target_link_libraries(npruntime_host_load_pump_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_load_pump_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_load_pump COMMAND npruntime_host_load_pump_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B
