@@ -91,7 +91,7 @@ struct OrganicSpawnFacts {
 // Whether an item's ai_function class runs that init: the event-callback table's org0 and org1
 // rows (found by the table walk's whole-tag stricmp) name Entity_InitOrganicAI as their second
 // function, and no other row does [orig: g_EntityClassEventCallbackTable @0x813000, its rows
-// @0x813018 / @0x813030; the lookup EntityDef_LookupClassCallbacks @0x407dc0, stricmp @0x407de2].
+// @0x813018 / @0x813030; the lookup EntityDef_LookupClassCallbacks @0x407dc0, the stricmp call @0x407DD8].
 bool organic_init_class(const char *ai_function);
 
 // The facts a placed record hands the init through its spawn, before any mount, parent or rotor's

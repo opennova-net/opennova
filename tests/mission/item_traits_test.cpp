@@ -937,7 +937,7 @@ int main() {
         CHECK(helo_vt->physics == 0);
         // The ai_function binds the CHel event row in any case; the render
         // tag compares exactly, so `CHel` is not the lowercase chel bone row.
-        // [orig: EntityDef_LookupClassCallbacks stricmp @0x407de2;
+        // [orig: EntityDef_LookupClassCallbacks @0x407DC0 - the stricmp call @0x407DD8;
         //  BoneCallback_LookupByTag @0x4e32c6, row 'chel' @0x82cfd0]
         CHECK(helo_vt->brain_class == VehicleBrainClass::Air);
         CHECK(helo_vt->render_family == VehicleRenderFamily::None);
@@ -954,7 +954,7 @@ int main() {
         CHECK(!prefix_tank_vt->amphibian);
         // `cvehX`: the event row is whole-name (no brain), while the render
         // tag is the first four characters (the cveh bone row).
-        // [orig: EntityDef_LookupClassCallbacks stricmp @0x407de2; the tag
+        // [orig: EntityDef_LookupClassCallbacks @0x407DC0 - the stricmp call @0x407DD8; the tag
         //  packed from def+0x13C..0x13F @0x4a5ace..0x4a5af1]
         CHECK(prefix_tank_vt->brain_class == VehicleBrainClass::Unset);
         CHECK(prefix_tank_vt->render_family == VehicleRenderFamily::Ground);

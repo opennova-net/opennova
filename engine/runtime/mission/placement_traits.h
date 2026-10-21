@@ -133,7 +133,7 @@ inline bool uses_submodel_renderer(std::string_view render_function) {
 // other world callbacks apply, the generic one's and the bldg, door, tree,
 // ewep, chel, cveh, tank and cpln rows', is not this predicate's.)
 // [orig: rows 'psec' @ 0x82D010 / 'cesp' @ 0x82D020 -> BoneCallback_psec_World
-//  @ 0x53C130; Entity_LookupRenderCallbacks stricmp @ 0x407DD8, rows 'palm'
+//  @ 0x53C130; EntityDef_LookupClassCallbacks stricmp @ 0x407DD8, rows 'palm'
 //  @ 0x813270 -> WeaponOverlay_HandleDamage @ 0x53C4C0, 'towr' @ 0x813240 ->
 //  Entity_UpdateSectionDamage @ 0x4406A0; EntityDef_LookupPhysicsCallback
 //  stricmp @ 0x4A9258, row 'psec' @ 0x82AD54 -> Entity_UpdatePhysicsStep

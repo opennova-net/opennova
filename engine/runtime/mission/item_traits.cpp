@@ -603,7 +603,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // section clone's template pins its event and update callbacks, so
         // neither door row reaches it on any resolve; a palm fragment takes
         // item 900's own pair.
-        // [orig: EntityDef_LookupClassCallbacks @0x407dc0, stricmp @0x407de2;
+        // [orig: EntityDef_LookupClassCallbacks @0x407dc0, the stricmp call @0x407DD8;
         //  Entity_SpawnSectionEntity @0x440365 / @0x440370;
         //  Palm_SpawnFragment @0x53C35D / @0x53C36F]
         e->door_event = !e->section_clone && def != nullptr &&
@@ -782,7 +782,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				// ctrn @0x8133c0 -> EntityAI_ProcessGroundStateMachine @0x4583c0.
 				// [orig: g_EntityClassEventCallbackTable @0x813000 resolved by
 				// EntityDef_InitAllCallbacks @0x4a5aae -> EntityDef_LookupClassCallbacks
-				// @0x407dc0, the whole name stricmp'd @0x407de2]
+				// @0x407dc0, the whole name stricmp'd @0x407DD8]
 				const auto brain_is = [def](const char *row) {
 					return strutil::iequals(def->ai_function, row);
 				};

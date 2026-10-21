@@ -141,7 +141,7 @@ static void test_bone_row_predicates() {
 // palm and towr event rows and the move_function's psec physics row (whole
 // name, case ignored). A name on another field binds no section row.
 // [orig: rows 'psec' @ 0x82d010 / 'cesp' @ 0x82d020 -> BoneCallback_psec_World
-//  @ 0x53c130; Entity_LookupRenderCallbacks stricmp @ 0x407dd8, rows 'palm'
+//  @ 0x53c130; EntityDef_LookupClassCallbacks stricmp @ 0x407dd8, rows 'palm'
 //  @ 0x813270 / 'towr' @ 0x813240; EntityDef_LookupPhysicsCallback stricmp
 //  @ 0x4a9258, row 'psec' @ 0x82ad54]
 static void test_section_renderer_rows() {
