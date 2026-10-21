@@ -919,16 +919,19 @@ void check_connect_log_give_ups() {
 //  the count's -9 with no line @0x4CF4F1..0x4CF51E; CNapiGateManager_WaitForConnect @0x4CE6B0 -
 //  the kept test @0x4CE6CF]
 void check_connect_log_gate_failures() {
-	// No port of the gate quad bound: the manager's two lines, the start failure with the gate
-	// state -6, the menu's NWEC22; no probe. [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 -
-	//  @0x4CE84D, @0x4CE88C, "%s : GATE GATE SERVICE START FAILED [%ld]." (the append @0x4CE8E7);
-	//  CNapiGateManager_ProcessConnectStateMachine @0x633D10 - SetState(-6) @0x633E64]
+	// No port of the gate quad bound: the manager's two lines, the start failure over the
+	// context's state 2 (its SetState(-6) refused), the wait's -1, the menu's NWEC15; no probe.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CE84D, @0x4CE88C, "%s : GATE GATE
+	//  SERVICE START FAILED [%ld]." (the append @0x4CE8E7), -1 @0x4CEA41;
+	//  CNapiGateManager_ProcessConnectStateMachine @0x633D10 - @0x633E3C, SetState(-6) @0x633E64;
+	//  CNapiGateManager_SetState @0x633880 - @0x633886..0x63388B; UI_ProcessLANSessionStateMachine
+	//  @0x558DE0 - NWEC15 @0x559016]
 	{
 		Rig rig;
 		rig.log_on = true;
-		CHECK(rig.lobby.gate_start_failed() == "NWEC22");
+		CHECK(rig.lobby.gate_start_failed() == "NWEC15");
 		CHECK((rig.log == std::vector<std::string>{ "GATE CONFIGURING GATE MANAGER.",
-				"GATE STARTING GATE SERVICE.", "GATE GATE SERVICE START FAILED [-6]." }));
+				"GATE STARTING GATE SERVICE.", "GATE GATE SERVICE START FAILED [2]." }));
 		CHECK(rig.gate.sent.empty());
 	}
 	const auto gate_lines = [](const std::string &body) {

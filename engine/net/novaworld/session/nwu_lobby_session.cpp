@@ -245,14 +245,17 @@ void NwuLobbySession::log_gate_service_start() {
 }
 
 std::string NwuLobbySession::gate_start_failed() {
-	// The gate state a socket no port bound leaves. [orig:
-	//  CNapiGateManager_ProcessConnectStateMachine @0x633D10 - SetState(-6) @0x633E64]
-	constexpr int kGateStartFailedState = -6;
+	// The context's state at the failure: the start's 2, its SetState(-6) refused; then the wait's
+	// default leg's -1. [orig: CNapiGateManager_ProcessConnectStateMachine @0x633D10 - @0x633E3C,
+	//  @0x633E64; CNapiGateManager_SetState @0x633880 - @0x633886..0x63388B;
+	//  CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CEA18, @0x4CEA41]
+	constexpr int kGateContextStateAtFailure = 2;
+	constexpr int kGateWaitResult = -1;
 	log_gate_service_start();
 	if (connect_log_on())
-		connect_log("GATE GATE SERVICE START FAILED [" + std::to_string(kGateStartFailedState) +
-				"].");
-	return novaworld_gate_error_tag(kGateStartFailedState, /*response_phase=*/false);
+		connect_log("GATE GATE SERVICE START FAILED [" +
+				std::to_string(kGateContextStateAtFailure) + "].");
+	return novaworld_gate_error_tag(kGateWaitResult, /*response_phase=*/false);
 }
 
 void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {

@@ -328,7 +328,7 @@ void NovaWorldClient::start() {
 		}
 	}
 	if (!gate_bound) {
-		// The gate service's start failure: its connect-log lines and the menu's NWEC22.
+		// The gate service's start failure: its connect-log lines and the menu's NWEC15.
 		enter_state(STATE_ERROR, opennova::to_gd(lobby_.gate_start_failed()));
 		return;
 	}

@@ -223,13 +223,17 @@ public:
 	//  @0x4d149f, the port @0x4d14af]
 	void probe(const std::string &gate_host, uint16_t gate_port);
 	// The gate service's start where no port of the gate quad bound (the embedder's bind before
-	// open): the manager's two lines, then the start failure with the gate state -6, and no probe;
-	// returns the menu's tag for -6 (NWEC22).
+	// open): the manager's two lines, then the start failure over the gate context's state, which
+	// the start left at 2 (its SetState(-6) is refused), and no probe; the wait's default leg then
+	// returns -1, which the menu shows as NWEC15.
 	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - @0x4CE84D, @0x4CE88C,
 	//  CNapiGateManager_ProcessConnectStateMachine (the call @0x4CE89D), "%s : GATE GATE SERVICE
-	//  START FAILED [%ld]." over the gate state (the append @0x4CE8E7);
-	//  CNapiGateManager_ProcessConnectStateMachine @0x633D10 - CNapiGateManager_CreateAndBindSocket
-	//  (the call @0x633E48), SetState(-6) @0x633E64; novaworld_gate_error_tag's state-1 map]
+	//  START FAILED [%ld]." over the context's +0x20 (@0x4CE8C2, the append @0x4CE8E7), the
+	//  switch's default -1 (@0x4CEA18, stored @0x4CEA35, returned @0x4CEA41);
+	//  CNapiGateManager_ProcessConnectStateMachine @0x633D10 - +0x20 = 2 @0x633E3C,
+	//  CNapiGateManager_CreateAndBindSocket (the call @0x633E43), SetState(-6) @0x633E64;
+	//  CNapiGateManager_SetState @0x633880 - below -5 refused @0x633886..0x63388B;
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - the result @0x558EAD, NWEC15 @0x559016]
 	std::string gate_start_failed();
 	// Drop the session and the sockets (the embedder closes them). Owners send their goodbye
 	// datagrams BEFORE closing (send()/session() are still live).
