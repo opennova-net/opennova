@@ -1607,6 +1607,64 @@ void add_initial(wire::ParityTrace &trace, char dir, uint16_t host, uint16_t ide
 	}
 }
 
+// The host's admission reply and the spawn pump's add (S2C 0x03, the add's settings
+// records, 0x05, 0x04, 0x7B), a periodic-second phase draw apart: RR's two packets and
+// a run that carries both in one group alike (initial.S.spawn_pump_boundary); a
+// merged pair of other groups still fails.
+void test_spawn_pump_boundary() {
+	auto record = [](uint16_t tag) {
+		wire::ParityWireRecord r;
+		r.full_tag = tag;
+		r.raw_flags = 0x20;
+		r.encoded_length = 4;
+		return r;
+	};
+	const std::vector<uint16_t> reply = { 0x100, 0x100, 0x001, 0x07A, 0x07B, 0x003 };
+	const std::vector<uint16_t> add = { 0x003, 0x100, 0x100, 0x005, 0x004, 0x07B };
+	auto admit = [&](wire::ParityTrace &trace, bool merged, bool add_only_tail) {
+		// Ahead of the scripted initial stream (its first S2C packet's frame), at fresh
+		// sequence numbers.
+		size_t at = 0;
+		while (at < trace.packets.size() && trace.packets[at].dir != 'S')
+			++at;
+		wire::ParityPacket model = trace.packets[at];
+		model.flags = 0x00;
+		auto packet = [&](const std::vector<uint16_t> &tags, uint32_t seq) {
+			wire::ParityPacket p = model;
+			p.seq = seq;
+			p.tags = tags;
+			p.records.clear();
+			for (const uint16_t tag : tags)
+				p.records.push_back(record(tag));
+			return p;
+		};
+		std::vector<uint16_t> second = add;
+		if (add_only_tail)
+			second.erase(second.begin()); // no 0x03: not the pump's add
+		std::vector<wire::ParityPacket> inserted;
+		if (merged) {
+			std::vector<uint16_t> both = reply;
+			both.insert(both.end(), second.begin(), second.end());
+			inserted.push_back(packet(both, 7001));
+		} else {
+			inserted.push_back(packet(reply, 7001));
+			inserted.push_back(packet(second, 7002));
+		}
+		trace.packets.insert(trace.packets.begin() + long(at), inserted.begin(), inserted.end());
+	};
+	wire::ParityTrace rr = scripted(1), aa = scripted(2), merged = scripted(3), other = scripted(3);
+	admit(rr, false, false);
+	admit(aa, false, false);
+	admit(merged, true, false);
+	expect_row(judge_case(rr, aa, merged), 'S', "initial_grouping", "", "pass");
+	wire::ParityTrace rr2 = scripted(1), aa2 = scripted(2);
+	admit(rr2, false, true);
+	admit(aa2, false, true);
+	admit(other, true, true);
+	expect_row(judge_case(rr2, aa2, other), 'S', "initial_grouping", "", "fail",
+			"INITIAL_PACKET_GROUPING");
+}
+
 void test_initial_rules() {
 	{
 		// S2C 0x16 rides the scoreboard clock: leaving the 0x75/0x64 packet (its first
@@ -2146,6 +2204,7 @@ int main() {
 	test_evidence();
 	test_document();
 	test_handshake_rules();
+	test_spawn_pump_boundary();
 	test_initial_rules();
 	test_world_records();
 	test_reply_rules();

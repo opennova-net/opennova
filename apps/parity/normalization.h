@@ -360,6 +360,14 @@ inline constexpr Normalization kNormalizations[] = {
 			"OR ran 12 s longer than RR): the tag histogram takes each run's first packet "
 			"plus the shorter interval of the pair, so a stream on the mission clock (03TR's "
 			"0x40 overlay bursts every 1792 ticks) is not counted over different lengths" },
+	{ "initial.S.spawn_pump_boundary", MaskKind::Field, 'S', 0, "initial packet boundary", 0,
+			"the host admits a joiner in two legs: the reply to its C2S 0x02, then the spawn "
+			"pump's add (S2C 0x03, the add's settings records, 0x05, 0x04, 0x7B: "
+			"CNapiServer_ProcessPendingPlayerSpawns @0x4C9034..0x4C9111), which runs only in "
+			"the periodic second (Server_TickUpdate's g_PeriodicSecondTimer @0x51DB6D..0x51DB93, "
+			"the pump @0x51DBFD), a phase draw in [0, 1 s) after the admission, so the two share "
+			"a packet or not (x1 fragrespawn: RR 0.595 s apart, RO the same packet): the add "
+			"opens its own initial group" },
 	{ "window.tag_stream_anchor", MaskKind::Field, '*', 0, "stream count span", 0,
 			"a stream starts at the joiner's own join or deploy, which lands at a different "
 			"offset from each run's first packet (the joiner's load: x1 kick RR joined 34.6 s "

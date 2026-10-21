@@ -28,6 +28,25 @@ namespace opennova::parity {
 
 namespace {
 
+// Whether records[at] opens the spawn pump's add of an admitted joiner: S2C 0x03,
+// the settings records the add queues, then 0x05, 0x04 and 0x7B
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 (the 0x03 @0x4C9034, the add
+//  @0x4C903A, the 0x05 @0x4C909D, the 0x04 @0x4C90D7, the 0x7B @0x4C9111)].
+bool spawn_pump_add_at(const std::vector<wire::ParityWireRecord> &records, size_t at) {
+	if (at >= records.size() || records[at].full_tag != 0x003)
+		return false;
+	size_t i = at + 1;
+	while (i < records.size() && records[i].full_tag == identity_of(0x00, true))
+		++i;
+	static const uint16_t kTail[] = { 0x005, 0x004, 0x07B };
+	for (const uint16_t tag : kTail) {
+		if (i >= records.size() || records[i].full_tag != tag)
+			return false;
+		++i;
+	}
+	return true;
+}
+
 // Each origin packet's grouping, through the first gameplay packet. A NACK replay
 // repeats an earlier (SID, sequence); only the origin counts. A timer-phase
 // identity (a FirstOrder exclusion) leaves the key, and a packet left with no
@@ -67,7 +86,18 @@ std::vector<std::string> initial_groups(const RunFacts &run, char dir) {
 			for (const wire::ParityWireRecord &record : kept.records)
 				groups.push_back(std::string(flags) + "|" + wire_key(dir, record));
 		} else if (!kept.records.empty()) {
-			groups.push_back(group_key(kept));
+			// The spawn pump's add opens its own group (initial.S.spawn_pump_boundary).
+			static_assert(has_normalization("initial.S.spawn_pump_boundary"));
+			size_t from = 0;
+			for (size_t i = 1; i <= kept.records.size(); ++i) {
+				if (i < kept.records.size() && !(dir == 'S' && spawn_pump_add_at(kept.records, i)))
+					continue;
+				wire::ParityPacket part = kept;
+				part.records.assign(kept.records.begin() + from, kept.records.begin() + i);
+				part.tags.assign(kept.tags.begin() + from, kept.tags.begin() + i);
+				groups.push_back(group_key(part));
+				from = i;
+			}
 		}
 		if (carries_low_tag(packet, gameplay_identity(dir)))
 			break;
