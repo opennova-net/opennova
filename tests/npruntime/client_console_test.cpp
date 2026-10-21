@@ -254,6 +254,17 @@ int main() {
 		};
 		seams.in_session = true;
 		check(client_process_local_command("/PB_SV_RESTART", seams), "a pb_ line is taken");
+		// The WAC overlay toggle comes after the pb_ arm and ahead of SAVEKEYS: a line it
+		// takes goes no further (D-NET-371) [orig: Client_ProcessLocalCommand @0x520CF1].
+		std::vector<std::string> toggled;
+		seams.toggle_overlay = [&](const std::string &line) {
+			toggled.push_back(line);
+			return line == "savekeys";
+		};
+		check(client_process_local_command("savekeys", seams) && keys == 0 &&
+						toggled == std::vector<std::string>{"savekeys"},
+				"a line the overlay toggle takes goes no further");
+		seams.toggle_overlay = nullptr;
 		check(client_process_local_command("savekeys", seams) && keys == 1, "SAVEKEYS");
 		check(client_process_local_command("SAVENFO now", seams) && nfo == 1, "SAVENFO");
 		check(client_process_local_command("VERSION", seams) &&

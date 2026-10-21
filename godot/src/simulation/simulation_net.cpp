@@ -431,6 +431,10 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	seams.items_table = [this]() -> const opennova::def::DefItemsFile * {
 		return kernel_ ? kernel_->items_table() : nullptr;
 	};
+	// The local command's WAC overlay toggle, the authority's (D-NET-371).
+	seams.toggle_overlay = [this](const std::string &p_line) {
+		return kernel_ && kernel_->wac.toggle_cheat(p_line, !is_joiner(), kernel_->world);
+	};
 	// The status report's game type abbreviation reads the mounted gametext, the mount's
 	// override table first (D-NET-675; engine inmatch/admin_console.h Seams::game_text).
 	if (assets_.root.is_valid()) {
@@ -491,6 +495,11 @@ void Simulation::install_console_seams() {
 		(void)net_.log_devices->files().write("keylist.key",
 				opennova::controls::keylist_text(controls_model_->native_bindings()),
 				/*append=*/false);
+	};
+	// The WAC overlay toggle, the authority's alone (a joiner's runtime never flips one)
+	// [orig: WacScript_ToggleOverlayByName @0x4EE750 - @0x4EE757; D-NET-371].
+	seams.toggle_overlay = [this](const std::string &p_line) {
+		return kernel_ && kernel_->wac.toggle_cheat(p_line, !is_joiner(), kernel_->world);
 	};
 	runtime_->set_local_command_seams(std::move(seams));
 	// [orig: Client_ProcessConsoleCommand @0x520F49..0x520F6D - Server_HandleAdminNetlogCommand

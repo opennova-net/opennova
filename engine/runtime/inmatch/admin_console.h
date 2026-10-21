@@ -120,6 +120,9 @@ public:
 		std::function<void(const std::string &text, uint32_t argb)> system_message;
 		// The mission's items.def rows, which CMD SAVENFO's dump names (null: none loaded).
 		std::function<const def::DefItemsFile *()> items_table;
+		// The local command's WAC overlay toggle over the running mission's script
+		// (ClientLocalCommandSeams::toggle_overlay; wac::WacSystem::toggle_cheat). Unset: none.
+		std::function<bool(const std::string &line)> toggle_overlay;
 		// The process's mission globals the status report prints (RemoteAdminConsoles keeps
 		// them); null reads the context's own mission (a console whose session is the process's).
 		const AdminProcessMission *process_mission = nullptr;

@@ -278,6 +278,7 @@ int client_binding_by_crc(int32_t crc) {
 bool client_process_local_command(const std::string &line, const ClientLocalCommandSeams &seams) {
 	const std::size_t skip = !line.empty() && (line[0] == '/' || line[0] == '\\') ? 1 : 0;
 	if (strutil::starts_with_icase(std::string_view(line).substr(skip), "pb_")) return true;
+	if (seams.toggle_overlay && seams.toggle_overlay(line)) return true;
 	if (strutil::starts_with_icase(line, "SAVEKEYS")) {
 		if (seams.save_keys) seams.save_keys();
 		return true;

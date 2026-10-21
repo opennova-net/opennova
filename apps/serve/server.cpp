@@ -985,6 +985,10 @@ void Server::bind_admin_console() {
 	seams.items_table = [this]() -> const def::DefItemsFile * {
 		return kernel_ ? kernel_->items_table() : nullptr;
 	};
+	// CMD's WAC overlay toggle on this authority (D-NET-371).
+	seams.toggle_overlay = [this](const std::string &line) {
+		return kernel_ && kernel_->wac.toggle_cheat(line, true, kernel_->world);
+	};
 	// GOTO MENUSTATE's input action 3 on this host: exit reason 1 on the context (the binding's
 	// quit); the active connection's disconnect drops nothing, as a Serve Only host has no client
 	// connection. The next frame's mission exit takes the router's reason-1 arm, which destroys

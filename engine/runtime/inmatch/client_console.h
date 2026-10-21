@@ -57,6 +57,9 @@ int client_binding_by_crc(int32_t crc);
 // Client_ProcessLocalCommand's seams: what its arms reach outside the line.
 struct ClientLocalCommandSeams {
 	bool in_session = false; // g_NapiNPCtx.is_in_session: the binding CRC arm runs out of one
+	// WacScript_ToggleOverlayByName: true when a CHEAT the line names flipped (the authority's
+	// alone, wac::WacSystem::toggle_cheat); unset: no toggle takes a line.
+	std::function<bool(const std::string &line)> toggle_overlay;
 	// KeyBinding_DumpAllToFile (keylist.key); unset: the line is taken, nothing written.
 	std::function<void()> save_keys;
 	// Entity_DumpUsageStatistics("debug.nfo"); unset: taken, nothing written.
@@ -69,7 +72,7 @@ struct ClientLocalCommandSeams {
 };
 // Client_ProcessLocalCommand: true when an arm took the line. A `pb_` line, behind
 // one leading '/' or '\', is PunkBuster's and taken (no PunkBuster here, D-NET-371);
-// the WAC overlay toggles by name are not modeled (D-NET-371); then SAVEKEYS,
+// then the WAC overlay toggles by name (toggle_overlay, D-NET-371); then SAVEKEYS,
 // SAVENFO and VERSION by prefix; then, out of a session, the line's CRC against the
 // binding table queues the hit record's action code.
 // [orig: Client_ProcessLocalCommand @0x520BF0]

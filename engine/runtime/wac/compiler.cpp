@@ -211,6 +211,7 @@ public:
 		// script may consume an FX handle already held in a mission variable.
 		if (env_.effects) prog_.effect_names = env_.effects->interned_names();
 		if (env_.sounds) prog_.sound_names = env_.sounds->names();
+		for (const Declaration &d : declarations_) prog_.declarations.push_back({d.name, d.type});
 		return std::move(prog_);
 	}
 

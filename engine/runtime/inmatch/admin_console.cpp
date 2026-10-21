@@ -665,6 +665,7 @@ bool AdminConsole::local_command(const std::string &line) {
 	seams.version_line = [this](const std::string &text) {
 		if (seams_.system_message) seams_.system_message(text, 0xFFFFFFFFu);
 	};
+	seams.toggle_overlay = seams_.toggle_overlay;
 	return client_process_local_command(line, seams);
 }
 
