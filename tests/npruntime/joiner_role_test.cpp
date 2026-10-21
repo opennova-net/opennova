@@ -347,6 +347,49 @@ bool run_spawn_edge_takes_a_self_team_assign() {
 			"self team: the spawn edge's latch reads the assigned team");
 }
 
+// D-NET-570: a self S2C 0x50 on the local entity in match re-runs Player_InitPlayer(1):
+// L takes the class word of the side its Team names (the session start's, or a 0x5A
+// grant's for that side) and its hidden bit clears; then the handler stores the
+// message's animSlot and NetId, so L ends with the 0x50's identity pair.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - @0x431B0A, Player_InitPlayer(1)
+//  @0x431B14, animSlot @0x431B3A, NetId @0x431B46; Player_InitPlayer @0x4E15F0 - the
+//  class by Team @0x4E1809..0x4E1832, the hidden clear @0x4E19C2]
+bool run_a_self_team_assign_reinits_l() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u);
+	inmatch::CharacterJoinVars vars;
+	vars.char_class[0] = 6; // team 1 / 3
+	vars.char_class[1] = 7; // team 0 / 2
+	h.role.runtime->set_character_join_vars(vars);
+	h.role.run_tick(h.input); // the spawn frame
+	auto &row = h.role.runtime->state().upsert(0x0005);
+	row.cls = EntityClass::Player;
+	row.type_id = w::kPlayerInfantryTypeId;
+	w::Entity *L = h.kernel->local.player();
+	if (!expect(h.role.local_spawned() && L != nullptr, "self 0x50: L spawned")) return false;
+	L->player_class = 8;
+	L->hidden = true;
+	TeamAssign assign;
+	assign.entity_handle = 0x0005;
+	assign.team = 1;
+	assign.net_id = 0x0213;
+	assign.anim_slot = 0x2C;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+	L = h.kernel->local.player();
+	return expect(L != nullptr && L->team == 1 && L->player_class == 6 && !L->hidden &&
+					L->anim_slot == 0x2C && L->minimap_net_id == 0x0213,
+			"self 0x50: L takes team 1's class, unhides, and keeps the 0x50's identity pair");
+}
+
 // L spawns on the in-match edge, after the boot's definition sweeps: the edge
 // binds its items.def row like the host's boot did, so L's body sounds resolve
 // through its own profile instead of the slotless "default" (silent footsteps
@@ -3196,6 +3239,7 @@ int main() {
 	ok &= run_a_preround_death_latches_when_the_round_opens();
 	ok &= run_a_console_action_dispatches_by_code();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
+	ok &= run_a_self_team_assign_reinits_l();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_deploy_action_head_resets_input_and_dialogs();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();

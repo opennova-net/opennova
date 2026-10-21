@@ -1277,8 +1277,13 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485]
 	if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
 		loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
-		if (world::Entity *local = world.registry.get(world.cached.local_player))
+		if (world::Entity *local = world.registry.get(world.cached.local_player)) {
 			world::rebind_player_camouflage_row(world, *local);
+			// Off the authority the grant's class is also its side's class word
+			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the Team test
+			//  @0x429411..0x42941D, g_CharClassTeam2 @0x42941F, g_CharClassTeam1 @0x429427].
+			granted_side_class_[local->team == 1 || local->team == 3 ? 0 : 1] = local->player_class;
+		}
 	}
 	// The team selector may only just have become known (the S2C 0x04 latch landing
 	// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
@@ -1323,6 +1328,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			// reaches only this re-arm, which is what retail's unconditional re-submit
 			// does too.
 			if (kit_seams.push) kit_seams.push();
+			reinit_local_player_on_team_assign();
 		}
 	}
 	const uint64_t deployment_release_revision =
@@ -1383,6 +1389,41 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		world.script.subgoals.show_lose = client.objective_show_lose;
 	}
 	return decoded;
+}
+
+// A self S2C 0x50 on the local entity re-runs Player_InitPlayer(1) after its local arm:
+// the class (and avatar) words of the side L's Team names, the weapon leg (the slots
+// reset and reloaded from the resident kit the arm re-copied, the spawn default
+// selected) with the view and map resets, and the hidden bit cleared; then the
+// handler stores the message's animSlot and NetId on the entity, so L ends with the
+// 0x50's identity pair (D-NET-570). L that does not exist yet has its pair from the
+// spawn. The NetId's fallback for an id the avatar table lacks
+// (CAvatarDefs_HasPackedId) is not modeled: every stock host sends a table id.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the compare @0x431B0A, Player_InitPlayer(1)
+//  @0x431B14, animSlot @0x431B3A, NetId @0x431B46, the fallback @0x431B4D..0x431B77;
+//  Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, the class and avatar
+//  @0x4E181F..0x4E1843, the weapon leg @0x4E1909..0x4E19A1, the hidden clear @0x4E19C2]
+void JoinerRole::reinit_local_player_on_team_assign() {
+	mission::MissionKernel &kernel = *kernel_;
+	world::World &world = kernel.world;
+	ClientRuntime &rt = *runtime;
+	world::Entity *local = world.registry.get(world.cached.local_player);
+	if (local == nullptr) return;
+	const int side = local->team == 1 || local->team == 3 ? 0 : 1;
+	const CharacterJoinVars *vars = rt.character_join_vars();
+	const uint8_t side_class = granted_side_class_[side] != 0 ? granted_side_class_[side]
+			: vars != nullptr ? vars->char_class[side] : 0;
+	if (side_class >= 5 && side_class <= 9) local->player_class = side_class;
+	kernel.local.respawn_init(/*rebuild_kit=*/true);
+	local->hidden = false;
+	local->flags &= ~world::kEntityFlagCarried;
+	// The pair the pipeline folded onto the self row from this 0x50 (a player row's).
+	const replication::ClientEntityState *self =
+			rt.has_self_handle() ? rt.state().find(rt.self_handle()) : nullptr;
+	if (self != nullptr && self->cls == EntityClass::Player) {
+		local->anim_slot = self->spawn_anim_slot;
+		local->minimap_net_id = self->net_id;
+	}
 }
 
 // Drain typed S2C gameplay events after the client recv pump: tag-2 fires

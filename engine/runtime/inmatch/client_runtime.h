@@ -641,6 +641,11 @@ public:
 	const JoinerConnection::LoadoutKit *host_loadout_kit() const {
 		return host_loadout_kit_set_ ? &host_loadout_kit_ : nullptr;
 	}
+	// The session start's per-side class and avatar words (g_CharClassTeam1/2,
+	// g_AvatarTeam1/2) a joiner holds; null on the host's own view.
+	const CharacterJoinVars *character_join_vars() const {
+		return joiner_ ? &joiner_->character_join_vars() : nullptr;
+	}
 	void set_character_join_vars(CharacterJoinVars vars) {
 		if (joiner_) joiner_->set_character_join_vars(vars);
 	}

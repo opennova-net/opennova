@@ -544,6 +544,7 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		character_join_vars_ = vars;
 	}
+	const CharacterJoinVars &character_join_vars() const { return character_join_vars_; }
 	// The current profile's inverse OPTIONS_AUTOMEDIC word (+1660), raw: the
 	// C2S 0x03 the game-start reply groups carries it. 0 (a fresh record's)
 	// asks the host for automatic medic requests.

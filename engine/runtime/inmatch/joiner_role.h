@@ -367,6 +367,12 @@ private:
 	uint64_t weapon_availability_revision_seen_ = 0;
 	// The last 0x5A grant whose class re-resolved L's row (run_client_net_frame).
 	uint64_t loadout_row_revision_seen_ = 0;
+	// g_CharClassTeam1/2 as the joiner's 0x5A grants leave them: a grant stores its
+	// class for L's side off the authority (0 = the session start's, the join vars').
+	uint8_t granted_side_class_[2] = {0, 0};
+	// A self S2C 0x50's re-run of Player_InitPlayer(1) on L, then its identity pair
+	// (D-NET-570).
+	void reinit_local_player_on_team_assign();
 
 	// ~1 Hz frozen-session tripwire state.
 	uint32_t last_frontier_seq_ = 0;
