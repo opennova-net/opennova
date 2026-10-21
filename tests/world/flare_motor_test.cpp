@@ -478,18 +478,21 @@ void test_a_dead_target_gives_way_to_a_ground_flare() {
     rig.round(b).pos.set_q16({-150 << 16, 50 << 16, 30 << 16});
     rig.ring_pair(g, b);
     rig.w.registry.get(target)->health = 0;
-    rig.w.round_sim.guided_updates.clear();
+    rig.w.out.entity_events.clear();
     const int32_t at[3] = {rig.round(g).pos.x.q16, rig.round(g).pos.y.q16, rig.round(g).pos.z.q16};
     rig.tick(); // the missile (slot 0) ticks ahead of the flare
     CHECK(missile.guided.target == 0xFFFF && missile.guided.target_round == g);
     CHECK((missile.guided.flags & 2) != 0 && missile.guided.timer == 62);
     CHECK(missile.guided.steer[0] == at[0] && missile.guided.steer[1] == at[1] &&
           missile.guided.steer[2] == at[2]);
-    CHECK(!rig.w.round_sim.guided_updates.empty());
-    if (rig.w.round_sim.guided_updates.empty()) return;
-    const auto &update = rig.w.round_sim.guided_updates.back();
-    CHECK(update.groups == ((1u << 2) | (1u << 3)));
-    CHECK(update.state.target == 0xFFFF && update.state.target_round == g);
+    // The motor's update joins the entity pass's inline sends.
+    const GuidedUpdateEvent *update = nullptr;
+    for (const auto &event : rig.w.out.entity_events)
+        if (const auto *guided = std::get_if<GuidedUpdateEvent>(&event)) update = guided;
+    CHECK(update != nullptr);
+    if (update == nullptr) return;
+    CHECK(update->groups == ((1u << 2) | (1u << 3)));
+    CHECK(update->state.target == 0xFFFF && update->state.target_round == g);
 }
 
 // Inside 400 u of the steer point the authority queues event 12 for the held target's

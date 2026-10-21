@@ -18,8 +18,40 @@
 
 namespace opennova::inmatch {
 
-// Item callbacks' state packets, explosion effects, authoritative removals and
-// the HUD relays, fanned and released.
+namespace {
+
+// One guided motor's sends, S2C 0x44 per serializer group in the round's update, each
+// with its call site's finite lifetime: SendFiltered(0x44, 1, 124) for group 1, 62 for
+// group 5, 310 for the rest (groups 4 and 6 take 310 only on the authority, which alone
+// queues them). The body is the shooter's and the round's handles, the group, then the
+// group's fields.
+// [orig: Entity_SendEffectPacket @0x445C40 (NetPacket_SerializeEntityForServer @0x4D6240
+//  called @0x445C6C, NapiNPServer_SendFiltered called @0x445CA2); its callers'
+//  (subType, userParam, msgClass): Entity_UpdateGuidedMissile_0 @0x446060 - group 1 with
+//  0x7C @0x4460BD / @0x4464AE / @0x4464F8, group 2 with 0x136 @0x4461E6 / @0x44645A,
+//  group 5 with 0x3E @0x446324, group 3 with 0x136 @0x446345; Entity_UpdateGuidedMissile
+//  @0x446690 - group 1 with 0x7C @0x4467F7 / @0x446AAB, groups 6 and 4 with ebp
+//  @0x44685C / @0x4469F9, ebp = is_authority ? 0x136 : 0 @0x4466EB..0x4466F5]
+void send_guided_update(NapiNPConnection &conn, const world::GuidedUpdateEvent &update) {
+    for (int group = 1; group <= 6; ++group) {
+        if (!(update.groups & (1u << group))) continue;
+        GuidedRecord record;
+        record.target_slot = update.state.target; record.weapon_type = update.state.phase;
+        record.pos_x = update.state.steer[0]; record.pos_y = update.state.steer[1]; record.pos_z = update.state.steer[2];
+        record.attach_x = update.state.saved[0]; record.attach_y = update.state.saved[1]; record.attach_z = update.state.saved[2];
+        std::vector<uint8_t> body;
+        io::append_u16_le(body, update.shooter); io::append_u16_le(body, update.net_id); body.push_back(uint8_t(group));
+        const auto payload = encode_guided_field_group(GuidedMode::WriteFull, GuidedFieldGroup(group), record);
+        body.insert(body.end(), payload.begin(), payload.end());
+        const uint32_t retention = group == 1 ? 0x7Cu : group == 5 ? 0x3Eu : 0x136u;
+        conn.link.transport->host_send(0x44, std::move(body), true, 0, false, retention);
+    }
+}
+
+} // namespace
+
+// Item callbacks' state packets, explosion effects, authoritative removals, the
+// guided motors' updates and the HUD relays, fanned and released.
 void Server_FanEntityEvents(NapiNPServerCtx &ctx, world::World &world) {
     // Item callbacks' state packets and authoritative removals: mask 0x90
     // includes active remote slots regardless of health, excluding the local host.
@@ -59,6 +91,8 @@ void Server_FanEntityEvents(NapiNPServerCtx &ctx, world::World &world) {
                     row.number = door->number;
                     conn.link.transport->host_send(s2c::DOOR_SLOT_ACTION,
                             encode_door_slot_action(row), true, 0);
+                } else if (const auto *guided = std::get_if<world::GuidedUpdateEvent>(&event)) {
+                    send_guided_update(conn, *guided);
                 }
             }
             // The HUD relays ride the same 0x90 mask: every active remote
@@ -137,40 +171,6 @@ void Server_RouteWaterCrossings(NapiNPServerCtx &ctx, world::World &world) {
 		}
 	}
 	world.out.water_crossings.clear();
-}
-
-// The guided-round updates, queued behind the tick's 0x0A so each follows the
-// frame that carried its round's birth.
-void Server_RouteGuidance(NapiNPServerCtx &ctx, world::World &world) {
-    // Guidance follows the frame carrying the corresponding fired-round birth.
-    // [orig: Entity_SendEffectPacket @0x445C40, routed serializer @0x4D6240]
-    if (ctx.is_in_session) for (const auto &update : world.round_sim.guided_updates) {
-        for (int group = 1; group <= 6; ++group) {
-            if (!(update.groups & (1u << group))) continue;
-            GuidedRecord record;
-            record.target_slot = update.state.target; record.weapon_type = update.state.phase;
-            record.pos_x = update.state.steer[0]; record.pos_y = update.state.steer[1]; record.pos_z = update.state.steer[2];
-            record.attach_x = update.state.saved[0]; record.attach_y = update.state.saved[1]; record.attach_z = update.state.saved[2];
-            std::vector<uint8_t> body;
-            io::append_u16_le(body, update.shooter); io::append_u16_le(body, update.net_id); body.push_back(uint8_t(group));
-            const auto payload = encode_guided_field_group(GuidedMode::WriteFull, GuidedFieldGroup(group), record);
-            body.insert(body.end(), payload.begin(), payload.end());
-            for (auto &conn : ctx.np_protocol.connection_list)
-                if (active_player_recipient(conn) && conn.link.mode != replication::TransportMode::Loopback)
-                    conn.pending_guidance.push_back(body);
-        }
-    }
-    world.round_sim.guided_updates.clear();
-    for (auto &conn : ctx.np_protocol.connection_list) {
-        if (!ctx.is_in_session || !active_player_recipient(conn)) {
-            conn.pending_guidance.clear();
-            continue;
-        }
-        if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-        for (const auto &body : conn.pending_guidance)
-            conn.link.transport->host_send(0x44, body, true, 0);
-        conn.pending_guidance.clear();
-    }
 }
 
 // The host side of a client's door request -- see server_entity_routes.h.

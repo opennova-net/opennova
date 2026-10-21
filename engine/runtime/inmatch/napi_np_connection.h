@@ -562,8 +562,6 @@ struct NapiNPConnection {
 	//  0x0A @0x51E3D6..0x51E450), then the Entity_UpdateAllEntities call @0x52674B]
 	std::vector<uint8_t> staged_frame_update;
 	bool frame_update_staged = false;
-	// Hold routed guidance until the frame that can carry its fire descriptor.
-	std::vector<std::vector<uint8_t>> pending_guidance;
 	// The configured period is known when the node is allocated, but +0x648 is
 	// not armed until NapiNPServer_UpdateHoldoffTicks dictates CS field 3 and
 	// resets the counter. Pre-dictation hello/auth/admission turns stay open.

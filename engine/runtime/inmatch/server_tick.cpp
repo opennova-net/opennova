@@ -540,7 +540,9 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 // send pump, so they lead the next frame's queue. The placed-device records,
 // the deaths and their tallies, the medic interactions the kill-zone pass
 // admitted (after the deaths it also produced), the match's gameplay events and
-// the water crossings. (The guidance waits behind this tick's 0x0A.)
+// the water crossings. The guided motors' 0x44s ride the entity fan in the pass's
+// own order, ahead of this tick's 0x0A like every other inline send [orig:
+//  Entity_SendEffectPacket @0x445C40 from Weapon_UpdateAllProjectiles, called @0x4C223A].
 // [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call @0x52674B
 //  follows Server_TickUpdate's send pump @0x51E487; Projectile_ProcessExplosionQueue
 //  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790 ->
@@ -1235,7 +1237,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 					: kMissionExitMapCycle;
 		}
 	}
-	Server_RouteGuidance(ctx, world);
 
 	// The frame clock steps after the send pump, so the entity update below stamps its rounds
 	// with the next frame's clock (NEW-L1-8) [orig: Server_TickUpdate @0x51E48C].

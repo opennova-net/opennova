@@ -3640,7 +3640,15 @@ bool check_host_tracks_the_remote_equipped_slot() {
 			"an accepted fire re-points the EquippedSlot at the fired combo");
 }
 
-bool check_guidance_waits_for_spawn_frame() {
+// A guided motor's 0x44 is queued at the motor, in the entity pass's send order, so the
+// next tick routes it with the pass's other inline records at its head, ahead of its
+// 0x0A, and no slot frame boundary holds it (the queue's build waits for the boundary,
+// not the send). A group-3 update keeps its call site's 310-flush lifetime.
+// [orig: Entity_SendEffectPacket @0x445C40 (NapiNPServer_SendFiltered called @0x445CA2)
+//  from Entity_UpdateGuidedMissile_0 @0x446060 (group 3 with 0x136 @0x446345), run by
+//  Weapon_UpdateAllProjectiles, called @0x4C223A in Entity_UpdateAllEntities, which
+//  Game_ProcessMainFrame calls @0x52674B after Server_TickUpdate @0x5266B6]
+bool check_guidance_leads_the_next_frame() {
     inmatch::NapiNPServerCtx ctx;
     inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
     ctx.is_in_session=1;
@@ -3656,31 +3664,36 @@ bool check_guidance_waits_for_spawn_frame() {
     ctx.np_protocol.connection_list.push_back(make_seeded_conn(3,1,&transport,ns::TransportMode::Client,player,true));
     auto &conn=ctx.np_protocol.connection_list.front();
     conn.s2c_send_boundary_open=false;
-    w::RoundSim::GuidedUpdate update{};
+    w::GuidedUpdateEvent update{};
     update.shooter=player.packed; update.net_id=9; update.groups=1u<<3;
     update.state.target=0x1001; update.state.steer[0]=1234;
-    world.round_sim.guided_updates.push_back(update);
+    world.out.entity_events.push_back(update); // the entity pass's queued send
     inmatch::Server_TickUpdate(ctx);
-    for (const auto &d:drain(transport))
-        if (!expect(d.tag!=0x44,"guidance waits while the spawn frame boundary is closed")) return false;
-    if (!expect(conn.pending_guidance.size()==1,"guidance survives the closed send boundary")) return false;
+    int held=0;
+    for (const auto &d:drain(transport)) {
+        if (d.tag!=0x44) continue;
+        ++held;
+        if (!expect(d.retention_flushes==0x136,"group 3 keeps its 310-flush lifetime")) return false;
+    }
+    if (!expect(held==1,"a closed frame boundary holds no guidance")) return false;
     conn.s2c_send_boundary_open=true;
+    world.out.entity_events.push_back(update);
     inmatch::Server_TickUpdate(ctx);
     bool frame=false, guidance=false;
     for (const auto &d:drain(transport)) {
-        if (d.tag==0x0A) frame=true;
         if (d.tag==0x44) {
-            if (!expect(frame,"the fire-bearing frame precedes queued guidance")) return false;
+            if (!expect(!frame,"the pass's guidance leads the tick's 0x0A")) return false;
             guidance=true;
         }
+        if (d.tag==0x0A) frame=true;
     }
-    return expect(guidance && conn.pending_guidance.empty(),"queued guidance drains once at the open boundary");
+    return expect(guidance && frame,"the open tick carries the guidance, then its frame");
 }
 
 } // namespace
 
 int main() {
-	bool ok = check_shared_loaded_ammo_fire_and_reload() && check_guidance_waits_for_spawn_frame();
+	bool ok = check_shared_loaded_ammo_fire_and_reload() && check_guidance_leads_the_next_frame();
 	ok = check_validated_fire_scores_one_shot() && ok;
 	ok = check_host_tracks_the_remote_equipped_slot() && ok;
 	ok = check_spawn_protection_seeded_at_creation() && ok;

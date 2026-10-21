@@ -853,7 +853,6 @@ void RoundSim::reset() noexcept {
 	impacts.clear();
 	hits.clear();
 	fired.clear();
-	guided_updates.clear();
 	next_impact_order = 1;
 	next_presentation_generation_ = 1;
 	debug_trail = {};

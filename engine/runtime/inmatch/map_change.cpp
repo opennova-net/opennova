@@ -150,7 +150,6 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	conn.discard_pre_deploy_uplinks = false;
 	conn.staged_frame_update.clear();
 	conn.frame_update_staged = false;
-	conn.pending_guidance.clear();
 	conn.world_stream_announced = false;
 	conn.spawned_announced = false;
 	const uint8_t game_state = conn.burst.game_state;

@@ -781,8 +781,6 @@ public:
     //  client-built pool-0 entity; world/wire_person_hit.h]
     std::function<bool(uint16_t wire_handle,
             const std::function<void(WirePersonBody &)> &visit)> wire_person_body;
-    struct GuidedUpdate { uint16_t shooter, net_id; uint8_t groups; GuidedFlightState state; };
-    std::vector<GuidedUpdate> guided_updates;
     void init_guided(World &, LiveRound &, const AmmoTableEntry &);
     void tick_guided(World &, LiveRound &, const AmmoTableEntry &, bool authority);
     void present_fire(World &world, const RoundSpawnParams &params);

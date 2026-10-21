@@ -912,11 +912,13 @@ struct DialogLineOrder {
 // an outbox back; the drains clear them.
 struct WorldOutbox {
     // Preserve the callback's send order across 0x21 explosions, 0x26 state,
-    // and 0x12 removal. The host drains this once, excluding its loopback.
+    // 0x12 removal and the guided motors' 0x44s. The host drains this once,
+    // excluding its loopback.
     // [orig: Entity_HandleDeathEvent @ 0x4070F0; Entity_HandleDeathOnAuthority @ 0x407CC0;
-    // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270]
+    // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270;
+    // Entity_SendEffectPacket @0x445C40]
     using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent,
-            DoorRowEvent>;
+            DoorRowEvent, GuidedUpdateEvent>;
     std::vector<EntityNetworkEvent> entity_events;
     // A client's door section requests (C2S 0x1A, doors.cpp carries the
     // witness); the joiner role drains them into its send queue. The authority

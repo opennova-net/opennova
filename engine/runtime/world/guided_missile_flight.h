@@ -51,6 +51,19 @@ struct GuidedMotorEvents {
     // player's radar when the target is theirs (world/radar_contacts.h).
     bool threat_note = false;
 };
+// A guided round's update the authority's motor sends: one S2C 0x44 per serializer
+// group set in `groups` (bits 1..6), the shooter's and the round's handles ahead of the
+// group's fields, mask 0x90. Each is queued at the motor's call, so the round pass's
+// sends keep their place among the entity pass's other inline records
+// (WorldOutbox::entity_events) and lead the next frame's queue.
+// [orig: Entity_SendEffectPacket @0x445C40 (mask 0x90 @0x445C98, NapiNPServer_SendFiltered
+//  called @0x445CA2) from Entity_UpdateGuidedMissile_0 @0x446060 / Entity_UpdateGuidedMissile
+//  @0x446690; Weapon_UpdateAllProjectiles called @0x4C223A in Entity_UpdateAllEntities]
+struct GuidedUpdateEvent {
+    uint16_t shooter = 0, net_id = 0;
+    uint8_t groups = 0;
+    GuidedFlightState state;
+};
 enum class GuidedStepResult : uint8_t {
     kNone, kCoincident, kOvershoot, kGuard, kProximityNotify,
 };
