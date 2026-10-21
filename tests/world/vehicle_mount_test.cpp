@@ -4959,8 +4959,8 @@ static void test_seat_bone_failure_runs_the_seat_tail() {
 // A player body's seat-bone lookup failing poses nothing and requests no seat
 // animation: the authority detaches the rider and kills no one, a client keeps it
 // seated, and both run the seat block's tail (groundEntity from parentEntity, the
-// legs and their targets to the body heading) and end the pass at the mounted
-// site. A carrier whose bone resolves poses the rider on its moved frame.
+// legs and their targets to the body heading). The pass's end is the next case's.
+// A carrier whose bone resolves poses the rider on its moved frame.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the bone call @0x4B6510, its
 //  test @0x4B6518..0x4B651A, the seat animation @0x4B65A8..0x4B65C3 (posed arm
 //  only), Entity_DetachFromVehicleIfServer @0x4359D0 called @0x4B6627, the tail
@@ -5032,6 +5032,68 @@ static void test_player_seat_bone_failure_detaches_on_the_authority() {
             CHECK(body.inf.anim_state == anim_before);
         }
     }
+}
+
+// The authority's REMOTE rider through its whole body update: the seat block is
+// the pass's one pose, after the org2 head, so a seat-bone failure detaches the
+// rider there and the pass still ends at the mounted site the selector chose: the
+// body stays where it sat, its held lean key takes no on-foot ramp (and no seated
+// one, its seat type 0 by then), and the 4th-tick selection does not run.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the selector @0x4B6386, the
+//  Entity_DetachFromVehicleIfServer call @0x4B6627, the non-local mounted eye
+//  @0x4B66D9 and its return @0x4B6907, ahead of the 4th-tick selector @0x4B70CE
+//  and the on-foot ramp @0x4B7DBF]
+static void test_remote_rider_detach_pass_ends_at_the_mounted_site() {
+    struct NoSeatBone final : IPoseProvider {
+        bool resolve_seat_bone(World &, const Entity &, int) override { return false; }
+    };
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    w.ai.root_motion = &channel_only; // the rider holds its channel
+    NoSeatBone no_bone;
+    w.pose_provider = &no_bone;
+    Entity vehicle;
+    vehicle.net_id = 200;
+    vehicle.kind = EntityKind::Item;
+    vehicle.has_item_def = true;
+    vehicle.has_graphic_model = true;
+    vehicle.position = {10.0f, 20.0f, 30.0f};
+    vehicle.health = 100;
+    vehicle.alive = true;
+    Seat seat;
+    seat.type = SeatType::Passenger;
+    seat.bone_index = 1;
+    vehicle.seats.push_back(seat);
+    const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+    Entity player;
+    player.net_id = 100;
+    player.kind = EntityKind::Organic;
+    player.player_class = 8;
+    player.health = 100;
+    player.alive = true;
+    const EntityHandle player_h = w.registry.spawn(0, player);
+    AiEntity &body = *w.ai.at(w.ai.attach(player_h));
+    body.inf.active = true;
+    body.health = 100;
+    body.net_is_remote_peer = true;
+    CHECK(w.vehicles.process_attach(player_h, vehicle_h, 1));
+    Entity &rider = *w.registry.get(player_h);
+    rider.net_move_input = 0x40; // standing, the lean-left key held
+    body.inf.lean_angle = 0;
+    body.inf.idle_counter = 0;
+    const auto seated_at = rider.position.words();
+    w.ai.is_authority = true;
+    // A 4th tick: an on-foot standing body's selection counts its idle pass
+    // [orig: @0x4B727B..0x4B7293].
+    w.ai.update_organic(body, w, 4);
+    CHECK(!rider.mounted);
+    CHECK(rider.health == 100);
+    CHECK(rider.position.words() == seated_at);
+    CHECK(body.inf.lean_left);
+    CHECK(body.inf.lean_angle == 0);
+    CHECK(body.inf.idle_counter == 0);
 }
 
 // Through the whole entity update: the pool-1 walk and the attached-child
@@ -5384,6 +5446,7 @@ int main() {
     test_request_snaps_to_the_seat_bone_yaw();
     test_seat_bone_failure_runs_the_seat_tail();
     test_player_seat_bone_failure_detaches_on_the_authority();
+    test_remote_rider_detach_pass_ends_at_the_mounted_site();
     test_board_pass_on_an_attached_gun_stays_on_foot();
     test_use_scan_and_label_follow_live_seat_pose();
     test_seat_and_emplacement_keep_subdegree_carrier_pose();

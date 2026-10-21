@@ -567,7 +567,7 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // Joiners retain seat-follow presentation for wire-owned peers. The
     // authority continues into the remote org2 animation/collision tail:
     // mounted contact callbacks remain live while model push is suppressed.
-    if (e.net_is_remote_peer && pose_if_mounted(e, world) && !is_authority)
+    if (e.net_is_remote_peer && !is_authority && pose_if_mounted(e, world))
         return;
     // A client-only wire peer has no authority collision tail, so its
     // blink/indoors presentation state comes from the position-only refresh.

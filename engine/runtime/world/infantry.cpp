@@ -1346,10 +1346,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     //  eye @0x4B66D9..0x4B68FC; the on-foot eye @0x4B699F..0x4B6BAB, the ramp
     //  @0x4B7DBF / @0x4B7DD6]
     // The site is chosen ahead of the seat block, so a body its seat-bone arm detached on the
-    // authority (pose_if_mounted) ends this pass at the mounted site still: no ramp (its
-    // seat type is 0 by then), the local eye unfloored.
-    // [orig: the selector @0x4B6386 ahead of Entity_DetachFromVehicleIfServer @0x4B6627;
-    //  Entity_DetachFromVehicle @0x4355F0 zeroes +0x168 @0x435921]
+    // authority (pose_if_mounted, this pass's one call for the local and the remote rider
+    // alike) ends this pass at the mounted site still: no ramp (its seat type is 0 by then),
+    // no 4th-tick selection, the local eye unfloored.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (the selector @0x4B6386 ahead of the
+    //  Entity_DetachFromVehicleIfServer call @0x4B6627; the mounted returns @0x4B6907 /
+    //  @0x4B6977 ahead of the 4th-tick selector @0x4B70CE); Entity_DetachFromVehicle
+    //  @0x4355F0 zeroes +0x168 @0x435921]
     const bool seated_body = !npc_body && tick_entity != nullptr &&
             (mounted || (tick_entity->mounted && tick_entity->mount_target.valid()));
     if (seated_body && tick_entity->mount_type == SeatType::Passenger)
@@ -1379,7 +1382,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // The jump itself runs AFTER the vertical resolve (step 9b), as the original
         // orders it (integrate -> resolver -> edges -> jump @0x4b7e8c).
         const Entity *ent = world.registry.get(e.handle);
-        const bool carried = ent != nullptr && ent->mounted;
+        // The mounted site returns ahead of the selector, a detach pass's site included.
+        const bool carried = seated_body || (ent != nullptr && ent->mounted);
         if ((logic_tick & 3u) == 0 && !inf.airborne && !carried) {
             player_body_select(e, world,
                     ent != nullptr ? (ent->flags | ent->engine_flags) : 0u, logic_tick);
