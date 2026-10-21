@@ -93,7 +93,7 @@ struct HostRegistration {
 	uint32_t uptime_ms = 0;                   // Age: GetTickCount() - dword_C8FC74
 	int time_of_day = 0;                      // TimeOfDay (g_EnvTimeOfDayEnum 0..4)
 	uint32_t pcid_key = 0;                    // PCIDKey (the SessionIdRing's current key)
-	uint32_t game_server_baffle_key = 0;      // GameServerBaffleKey (dword_C8FC70)
+	uint32_t game_server_baffle_key = 0;      // GameServerBaffleKey (g_GameServerBaffleKey)
 	int bb_mode = 0;                          // BBMode (dword_24D21A4)
 	std::string gcc;                          // GCC (byte_C87044)
 	std::string version;                      // GV and Version (g_VersionText)

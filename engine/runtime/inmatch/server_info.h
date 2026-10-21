@@ -24,9 +24,9 @@ namespace opennova::inmatch {
 struct NapiNPServerCtx;
 
 // Overwrite `r`'s session-owned columns from the host context (its config, its
-// join lock, its world's round clock and its mission). `gametext` resolves the
-// GateTypeAbbrev text of the session's game type (an empty lookup or a missing
-// key: "").
+// join lock, its world's round clock, its mission and the round init's GameServerBaffleKey).
+// `gametext` resolves the GateTypeAbbrev text of the session's game type (an empty lookup or a
+// missing key: "").
 void read_session_listing_columns(
 		HostRegistration &r, const NapiNPServerCtx &ctx, const hud::GameTextLookup &gametext);
 

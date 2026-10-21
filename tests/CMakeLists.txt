@@ -5289,6 +5289,10 @@ target_include_directories(npruntime_session_title_test PRIVATE ${CMAKE_CURRENT_
 add_test(NAME npruntime_session_title COMMAND npruntime_session_title_test)
 
 # --- parity lane L9 (NovaWorld) ---
+add_executable(npruntime_listing_baffle_key_test npruntime/listing_baffle_key_test.cpp)
+target_link_libraries(npruntime_listing_baffle_key_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_listing_baffle_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_listing_baffle_key COMMAND npruntime_listing_baffle_key_test)
 
 # --- parity lane LP (proof) ---
 
