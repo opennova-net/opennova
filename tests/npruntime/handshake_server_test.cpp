@@ -561,6 +561,11 @@ bool run_mission_transfers_match_retail_lan_contract() {
 	               &server_sk, &seq)) {
 		return false;
 	}
+	// The spawn pump's add binds the node's server slot, which the 0x33 / 0x37 handlers test
+	// first (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
+	//  @0x515250..0x515258].
+	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+		if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
 
 	auto request = [&](uint8_t tag, uint32_t now,
 	                   ProtocolMessage &out) -> bool {
@@ -832,6 +837,9 @@ bool run_tag60_mission_name_selects_by_game_type() {
 		if (!handshake(ctx, peer, client_scrk, client_key++, server_scrk,
 				&server_sk, &sequence))
 			return false;
+		// The add binds the server slot the 0x33 handler tests (D-NET-NEW-L1-24).
+		for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+			if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
 
 		const std::vector<uint8_t> request = craft_session(
 				client_scrk, server_sk, sequence,
@@ -879,6 +887,11 @@ bool run_reactive_replies() {
 				&server_sk, &seq)) {
 		return false;
 	}
+	// The spawn pump's add binds the node's server slot, which the 0x33 / 0x37 handlers test
+	// first (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
+	//  @0x515250..0x515258].
+	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+		if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
 
 	auto send_session = [&](std::vector<ProtocolMessage> msgs, uint32_t now,
 	                        std::vector<ProtocolMessage> &out) -> bool {
@@ -1574,7 +1587,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		replication::Datagram staged;
 		DisconnectEvent event;
 		if (!expect(result.outbound.empty() && inmatch::connection_count(ctx) == 1 &&
-				conn.admission_stage == inmatch::GameAdmissionStage::Rejected &&
+				conn.admission_stage == inmatch::GameAdmissionStage::AwaitJoinRequest &&
 				transport.pop_outbound(staged) && parse_disconnect_event(staged.body.data(), staged.body.size(), event) &&
 				event.ds == 1 && event.dc == 2 && event.dpc == bad.reason,
 				"game JOIN retains the connection and stages the exact compatibility DPC")) return false;
@@ -3012,7 +3025,7 @@ bool run_side_password_admission() {
 			const bool has_punt = transport.pop_outbound(staged) &&
 					parse_disconnect_event(staged.body.data(), staged.body.size(), event);
 			if (!expect(replies.empty() &&
-					conn.admission_stage == inmatch::GameAdmissionStage::Rejected &&
+					conn.admission_stage == inmatch::GameAdmissionStage::AwaitJoinRequest &&
 					has_punt && event.ds == 1 && event.dc == 2 && event.dpc == test.reject,
 					"wrong side password emits the exact retail description reject")) {
 				std::fprintf(stderr, "expected DPC %u, observed %u (punt %d, replies %zu)\n",
@@ -3165,8 +3178,10 @@ bool run_spectator_admission_codes_match_retail() {
 		out.valid = true;
 		for (const ProtocolMessage &reply : replies)
 			if (reply.tag == s2c::INIT) out.got_init = true;
-		out.rejected =
-				conn.admission_stage == inmatch::GameAdmissionStage::Rejected;
+		// A reject keeps the JOIN's stage (game state 1) with its description staged
+		// (D-NET-NEW-L1-24, reject_join_record).
+		out.rejected = conn.host_disconnect_sent &&
+				conn.admission_stage == inmatch::GameAdmissionStage::AwaitJoinRequest;
 		replication::Datagram staged;
 		if (transport.pop_outbound(staged)) {
 			out.punt_staged = parse_disconnect_event(
