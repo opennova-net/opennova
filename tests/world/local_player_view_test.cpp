@@ -1051,6 +1051,7 @@ void test_detach_mount_latch_target() {
         WeaponInventory inventory;
         inventory.reset(world.tables.weapons);
         inventory.equipped_combo = 3 * 65;
+        inventory.current_slot = 3 * 65; // the fallback's g_CurrentWeaponSlot
         inventory.slots[3 * 65].adm_index = c.current ? 1 : -1;
         LocalPlayerWeapon w;
         w.active = true;
@@ -1076,6 +1077,7 @@ void test_detach_mount_latch_target() {
         WeaponInventory inventory;
         inventory.reset(world.tables.weapons);
         inventory.equipped_combo = 3 * 65;
+        inventory.current_slot = 3 * 65; // the fallback's g_CurrentWeaponSlot
         inventory.slots[3 * 65].adm_index = c.current ? 1 : -1;
         if (c.saved != 0xFF) {
             inventory.selected_combo = 7 * 65;

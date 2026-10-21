@@ -143,7 +143,10 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 		world.loadout_weapon_names->set = true;
 	}
 	const world::WeaponInventory *inventory = local.inventory_valid ? &local.inventory : nullptr;
-	const int32_t current_slot = inventory != nullptr ? inventory->equipped_combo : -1;
+	// The current slot word, not the EquippedSlot: 195 from Player_InitPlayer until a walk,
+	// a cycle, an equip or a 0x5A apply stores a slot, whatever the select found
+	// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (g_CurrentWeaponSlot @0x565D73)].
+	const int32_t current_slot = local.inventory.current_slot;
 	// The slot pool's entries alone, off the authority alone: the current slot word
 	// stays for the 0x2F and its readers until the 0x5A's select.
 	// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the call @0x565D66) ->
@@ -174,7 +177,7 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
-		const world::LocalPlayerLoadout &loadout, int equipped_combo,
+		const world::LocalPlayerLoadout &loadout, int current_slot,
 		const world::WeaponInventory *inventory,
 		JoinerConnection::LoadoutKit &out) {
 	// The side selector. The host's S2C 0x04 tail byte is retail's g_LocalTeam, and
@@ -196,14 +199,15 @@ void build_joiner_loadout_kit(const world::World &world,
 	uint8_t player_class = side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
 	out.player_class = player_class;
-	// The pair's SECOND submit carries the live equipped slot instead of the fixed 195.
-	// The sender re-resolves that slot against the populated local pool and the
-	// assigned side; the pre-Player_InitPlayer first submit and team-change submit
-	// retain their separate raw-195 paths because they never consume this field
-	// [orig: Game_StartMission @0x525c2e; NetPacket_SendLoadoutSubmit
-	// @0x42ce2d..0x42ce8b].
+	// The pair's SECOND submit carries the current slot word instead of the fixed 195:
+	// 195 again after a spawn whose select missed that slot, a stored slot after a walk,
+	// a cycle, an equip or a 0x5A apply. The sender re-resolves it against the populated
+	// local pool and the assigned side; the pre-Player_InitPlayer first submit and
+	// team-change submit retain their separate raw-195 paths because they never consume
+	// this field [orig: Game_StartMission @0x525c2e (g_CurrentWeaponSlot @0x525C1A);
+	// NetPacket_SendLoadoutSubmit @0x42ce2d..0x42ce8b].
 	out.equipped_combo = resolve_loadout_submit_combo(
-			world.tables.weapons, inventory, team, equipped_combo);
+			world.tables.weapons, inventory, team, current_slot);
 	// The RESIDENT rows are the resident kit buffer, not a fresh read of the profile
 	// page: Game_StartMission copies the profile page into restrictionData
 	// (g_SpawnLoadoutBuffer), Player_InitPlayer builds the local display list from it,

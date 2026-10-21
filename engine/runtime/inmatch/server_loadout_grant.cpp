@@ -630,20 +630,22 @@ void weapon_slot_list_own_legs(NapiNPConnection &conn, world::World *world) {
 		// it applies the list, at its next receive (ClientRuntime's own-client fold:
 		// apply_weapon_loadout_name_list), after this tick's spawn pump (D-NET-143).
 	}
-	// After the rows, the slot whose entity is the local player: g_CurrentWeaponSlot from
-	// the body's equipped AdmDef (category * 65 + rank; the current one when the index
-	// names no weapon), Player_SelectWeaponSlot of it, then Player_MountWeaponSlot of the
-	// EquippedSlot [orig: g_LocalPlayerEntity against the slot's entity @0x5028B8..0x5028CB,
-	//  AdmDef_GetEntryByIndex(entity+0x2B0) @0x5028D5, the combo @0x5028E1..0x5028ED, the
-	//  current @0x5028F5, the select @0x5028FC, the mount of entity+0x118 @0x502907..0x50290E].
+	// After the rows, the slot whose entity is the local player: the current slot word takes
+	// the body's equipped AdmDef's combo (category * 65 + rank; the word stays when the index
+	// names no weapon), Player_SelectWeaponSlot of the word, then Player_MountWeaponSlot of
+	// the EquippedSlot [orig: g_LocalPlayerEntity against the slot's entity @0x5028B8..0x5028CB,
+	//  AdmDef_GetEntryByIndex(entity+0x2B0) @0x5028D5, the combo and its g_CurrentWeaponSlot
+	//  store @0x5028E1..0x5028ED, the word's read @0x5028F5, the select @0x5028FC, the mount
+	//  of entity+0x118 @0x502907..0x50290E].
 	if (world == nullptr) return;
 	world::LocalPlayer *local = own_slot_local_player(conn, *world);
 	const world::Entity *body = world->registry.get(conn.link.owned_entity);
 	if (local == nullptr || body == nullptr) return;
 	const world::WeaponTable &table = world->tables.weapons;
-	int32_t combo = local->inventory.equipped_combo;
 	if (const world::WeaponTableEntry *def = table.by_index(body->equipped_adm_index))
-		combo = def->category * world::weapon_combo::kRanksPerCategory + def->rank;
+		local->inventory.current_slot =
+				def->category * world::weapon_combo::kRanksPerCategory + def->rank;
+	const int32_t combo = local->inventory.current_slot;
 	const world::WeaponSwitchGates gates =
 			world::local_weapon_switch_gates(*world, local->weapon, &local->inventory);
 	world::weapon_select_slot(table, local->inventory, combo, !gates.equip_blocked);

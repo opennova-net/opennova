@@ -192,7 +192,29 @@ struct WeaponInventory {
     // Shared loaded rounds, distinct from carried reserves [orig: WeaponSlot_GetSharedLoadedRounds
     // @0x5405F0 / WeaponSlot_SetSharedLoadedRounds @0x540670, local table @0xB761E8].
     std::vector<int32_t> shared_clips;
-    int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118 / g_CurrentWeaponSlot]
+    int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118]
+    // g_CurrentWeaponSlot, the local player's current slot word: a word apart from the
+    // EquippedSlot, which no select writes. Player_InitPlayer stamps 195 (the spawn's
+    // select then reads it); the category walk, the cycle and the quick-switch equip
+    // store the slot they mount; the 0x5A apply, the single player's armory apply and
+    // the listen host's own list send store the held weapon's combo (its AdmDef's
+    // rank + 65 * category) when the body holds one and otherwise read the word for
+    // their select. The 0x2F sends carry it (the mission start's second, the in-session
+    // ACCEPT's) and a detach without a saved slot of category < 11 mounts it. So a
+    // spawn whose select misses slot 195 (no category-3 weapon, or no weapon) keeps 195
+    // here while the EquippedSlot names another slot or none. It starts at the 195 the
+    // first Player_InitPlayer stamps (every reader runs after one; the image's 0 is never
+    // read). The pool resets never write it.
+    // [orig: g_CurrentWeaponSlot @0xB76474 - Player_InitPlayer @0x4E15F0 (the store
+    //  @0x4E17FF, the select and switch @0x4E198E / @0x4E199A);
+    //  Player_SwitchToWeaponByHandle @0x4E0170 (@0x4E035C); Player_CycleWeaponSlot
+    //  @0x4DFE70 (@0x4DFF4A); Player_EquipWeaponByEntity @0x4E0370 (@0x4E03A1..0x4E03B2);
+    //  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296BC..0x4296E3);
+    //  WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566250..0x566285, the 0x2F's read
+    //  @0x565D73); Server_SendWeaponSlotListToPlayer @0x502550 (@0x5028D5..0x5028FC);
+    //  Game_StartMission @0x524360 (@0x525C1A); Entity_DetachFromVehicle @0x4355F0
+    //  (@0x435650)]
+    int32_t current_slot = weapon_combo::kDefaultSpawnCombo;
     // The slot a mount stages for the switch-out's completion to commit.
     // [orig: g_PendingWeaponSlot, Player_MountWeaponSlot @0x4DFB16]
     int32_t pending_combo = -1;

@@ -484,7 +484,7 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 				? table.by_index(static_cast<uint8_t>(saved->adm_index))
 				: nullptr;
 		if (saved_def == nullptr || saved_def->category >= 11)
-			target = inventory->equipped_combo;
+			target = inventory->current_slot; // [orig: Entity_DetachFromVehicle @0x4355F0 (@0x435650)]
 		local_player_mount_weapon_slot(world, w, *inventory, view, target);
 		return;
 	}
@@ -492,8 +492,10 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 		const WeaponTable &table = world.tables.weapons;
 		const WeaponTableEntry *target = table.by_index(w.usegun_saved_adm);
 		if (target == nullptr || target->category >= 11) {
+			// The fallback is the current slot word [orig: Entity_DetachFromVehicle
+			//  @0x4355F0 (@0x43564E..0x435658)].
 			const WeaponInventorySlot *current =
-					inventory != nullptr ? inventory->slot(inventory->equipped_combo) : nullptr;
+					inventory != nullptr ? inventory->slot(inventory->current_slot) : nullptr;
 			target = current != nullptr && current->adm_index >= 0
 					? table.by_index(static_cast<uint8_t>(current->adm_index))
 					: nullptr;
@@ -666,6 +668,10 @@ bool local_player_equip_weapon_slot(World &world, LocalPlayerWeapon &w,
 		w.events.push_back(std::move(event));
 		return false;
 	}
+	// The current slot word takes the def's own combo, rank + 65 * category
+	// [orig: Player_EquipWeaponByEntity @0x4E0370 (@0x4E03A1..0x4E03B2)].
+	const WeaponTableEntry *def = world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+	inventory.current_slot = def->category * weapon_combo::kRanksPerCategory + def->rank;
 	local_player_mount_weapon_slot(world, w, inventory, view, combo); // @0x4E03B8
 	return true;
 }

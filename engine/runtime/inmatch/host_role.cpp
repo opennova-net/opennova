@@ -501,8 +501,8 @@ void HostRole::send_own_mission_status() {
 	// In a session the own client's mission start submits its profile's kit twice
 	// ahead of the 0x0B, as a joiner's does: the side block the local team names, its
 	// class byte and the kit page it selects, first with the fixed slot 195, then
-	// (after Player_InitPlayer) with g_CurrentWeaponSlot, the live equipped slot
-	// resolved against the local table; all three leave in the 0x0B's pump, in queue
+	// (after Player_InitPlayer) with g_CurrentWeaponSlot, the current slot word (195 unless
+	// a later store moved it) resolved against the local table; all three leave in the 0x0B's pump, in queue
 	// order (D-NET-695). The page copy into the spawn buffer is the shell's
 	// (seed_session_kit_from_profile). A title whose submit ignores the class sends 8,
 	// or 7 for a mission of type 2 (DFX2-12). The session test is retail's is_in_session
@@ -533,7 +533,7 @@ void HostRole::send_own_mission_status() {
 			if (alternate && kernel.local.inventory_valid)
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
 						weapons, &kernel.local.inventory, team,
-						kernel.local.inventory.equipped_combo));
+						kernel.local.inventory.current_slot));
 			if (title_in_match(title).loadout_class_fixed)
 				submit.player_class =
 						kernel.mission.header.mission_type == bms::MissionType::CombatVehicleMission

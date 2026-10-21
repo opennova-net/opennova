@@ -832,6 +832,9 @@ WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
             out.kind = WeaponSwitchOutcome::kMount;
             out.combo = handle;
             out.same_category = false;
+            // The current slot word [orig: Player_SwitchToWeaponByHandle @0x4E0170 (the
+            //  g_CurrentWeaponSlot store @0x4E035C)].
+            inv.current_slot = handle;
             inv.pending_combo = handle; // [orig: MountWeaponSlot g_PendingWeaponSlot]
             return out;
         }
@@ -845,6 +848,8 @@ WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
             out.kind = WeaponSwitchOutcome::kMount;
             out.combo = c;
             out.same_category = (eq->category == group);
+            // [orig: Player_SwitchToWeaponByHandle @0x4E0170 (the store @0x4E0359..0x4E035C)]
+            inv.current_slot = c;
             inv.pending_combo = c;
             return out;
         }
@@ -895,6 +900,9 @@ WeaponSwitchOutcome weapon_cycle_slot(const WeaponTable &table, WeaponInventory 
                 out.combo = idx;
                 out.same_category =
                         (def != nullptr && def->category == eq->category);
+                // The current slot word [orig: Player_CycleWeaponSlot @0x4DFE70 (the
+                //  g_CurrentWeaponSlot store @0x4DFF4A, past `cmp edi, ebx` @0x4DFF45)].
+                inv.current_slot = idx;
                 inv.pending_combo = idx;
             }
             return out; // reaching start again returns silently [orig: @ 0x4dff47]

@@ -461,7 +461,7 @@ public:
 	// The shell's kit for the retail loadout-submission pair the world-stream terminator (S2C 0x1A)
 	// releases. Retail sends the SAME per-side profile kit twice: first with the fixed Primary-key
 	// slot 195 (pre-Player_InitPlayer, the empty slot table leaves the argument unresolved), then
-	// with the live g_CurrentWeaponSlot (the equipped combo after the spawn fill). The wire team
+	// with the live g_CurrentWeaponSlot (the current slot word after the spawn fill). The wire team
 	// byte is NOT part of this seam — it is latched from the host's S2C 0x04 tail byte, exactly
 	// like retail's g_LocalTeam. Unset keeps the capture-default kit, so headless callers (ctests,
 	// seed_in_match) preserve today's auto behavior byte-for-byte.

@@ -138,7 +138,7 @@ bool VehicleSystem::resolve_spawn_pose(const Entity &e, int32_t pose[6]) const {
 // S2C 0x20 streams them and the spawn's pose turns them back (spawn_select's
 // marker_pose). [orig: Game_StartMission @0x524360 (the pool-3 walk
 // @0x525E6D..0x525F58, the probe @0x525F25..0x525F34, the transform
-// @0x525F39..0x525F50); Entity_FindGroundObjectByRay @0x414380 (the ray @0x414392..0x4143C4,
+// @0x525F39..0x525F50); Entity_FindGroundObjectByRay @0x414380 (the ray @0x414388..0x4143C4,
 // Entity_FindNearestByRay @0x4143C8, the store @0x4143D0)]
 void VehicleSystem::localize_deck_spawn_markers() {
 	static constexpr int32_t kTypes[] = {6001, 6094, 6003, 6096, 6004, 6097, 6002, 6095};

@@ -106,6 +106,10 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     //  +0x15E58 sites: Weapon_CalcImpactDamage @0x4ECA24, Server_SendWeaponSlotListToPlayer
     //  @0x502871, the accept @0x515E92, WeaponLoadout_ApplyFromBuffer @0x56618C].
     Entity *e = world.registry.get(world.cached.local_player);
+    // The current slot word starts every Player_InitPlayer at 195, whatever the
+    // select below finds [orig: Player_InitPlayer @0x4E15F0 (g_CurrentWeaponSlot = 195
+    //  @0x4E17FF)].
+    inventory.current_slot = weapon_combo::kDefaultSpawnCombo;
     const WeaponTable &table = world.tables.weapons;
     if (table.empty()) return;
     const std::vector<WeaponKitEntry> kit = local_loadout_kit(world, loadout);
@@ -139,7 +143,9 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     if (!select_spawn_default) return;
     const WeaponSwitchGates gates =
             local_weapon_switch_gates(world, weapon, &inventory);
-    if (!weapon_select_slot(table, inventory, weapon_combo::kDefaultSpawnCombo,
+    // The select of the word [orig: Player_InitPlayer @0x4E15F0 (the
+    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)].
+    if (!weapon_select_slot(table, inventory, inventory.current_slot,
                 !gates.equip_blocked)) {
         // An empty table (the armory all-NONE kit) equips nothing.
         if (e != nullptr) e->equipped_adm_index = 0xFF;
@@ -201,8 +207,15 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // empty kit stays empty (the armory all-NONE accept leaves the table bare).
     loadout.spawn_kit_set = true;
     loadout.spawn_kit = std::move(accepted);
+    // The apply runs no Player_InitPlayer: the current slot word keeps its value
+    // through the rebuild's stamp, and the held weapon (the body's AdmDef index,
+    // read before the rebuild's select restamps it) decides it below.
+    const Entity *holder = world.registry.get(world.cached.local_player);
+    const uint8_t held_adm = holder != nullptr ? holder->equipped_adm_index : kAdmSlotNone;
+    const int32_t current_slot = inventory.current_slot;
     local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
             /*select_spawn_default=*/true);
+    inventory.current_slot = current_slot;
     // Out of a session the apply stores each entry's fourth value, raw, into the
     // local slot's damage-class bytes, clearing nothing; in a session it sends the
     // 0x2F instead and the accept stores (D-NET-691). [orig: WeaponLoadout_ApplyFromBuffer
@@ -262,6 +275,14 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // entity's +0x37C (the run-promotion band) [orig:
     // NapiNPClientMsg_HandleWeaponLoadoutSync @0x4296f9 -> @0x425220].
     loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory, seat);
+    // The apply's select target: the held weapon's combo (its AdmDef's rank + 65 *
+    // category), stored into the current slot word; a body holding no weapon leaves the
+    // word, which the select then reads. [orig: NapiNPClientMsg_HandleWeaponLoadoutSync
+    //  @0x4290E0 (AdmDef_GetEntryByIndex(+0x2B0) @0x4296B4..0x4296BC, the store
+    //  @0x4296C8..0x4296D4, the word's read @0x4296DC); WeaponLoadout_ApplyFromBuffer
+    //  @0x565CD0 (@0x566250..0x566276, the word's read @0x56627E)]
+    if (const WeaponTableEntry *held = table.by_index(held_adm))
+        inventory.current_slot = held->category * weapon_combo::kRanksPerCategory + held->rank;
     return true;
 }
 

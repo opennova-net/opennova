@@ -261,7 +261,7 @@ void Simulation::respawn_local_player_loadout() {
 void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// The Player_InitPlayer weapon leg — world/player_loadout.h
 	// local_loadout_rebuild (engine: runtime/inmatch/joiner_role.cpp). The 0x2F pair's SECOND submit
-	// carries the LIVE equipped slot, not the fixed 195 (engine: runtime/inmatch/loadout_submit.cpp), so the seam re-arms here AFTER the inventory
+	// carries the current slot word, not the fixed 195 (engine: runtime/inmatch/loadout_submit.cpp), so the seam re-arms here AFTER the inventory
 	// settles. push_joiner_loadout_kit never rebuilds (it holds a one-way
 	// re-entry latch), so this cannot recurse.
 	if (!kernel_) return;
@@ -338,7 +338,7 @@ void Simulation::push_joiner_loadout_kit() {
 	opennova::inmatch::JoinerConnection::LoadoutKit wire_kit;
 	opennova::inmatch::build_joiner_loadout_kit(kernel_->world, player_.weapon_profile,
 			is_joiner() ? runtime_->assigned_team() : uint8_t{0}, kernel_->local.loadout,
-			kernel_->local.inventory_valid ? kernel_->local.inventory.equipped_combo : -1,
+			kernel_->local.inventory_valid ? kernel_->local.inventory.current_slot : -1,
 			kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr,
 			wire_kit);
 	runtime_->set_loadout_kit(std::move(wire_kit));

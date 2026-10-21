@@ -81,9 +81,10 @@ bool reseed_session_kit_on_side_change(world::World &world,
 // both the wire class and the page pick (retail reads it straight out of the
 // assigned side's profile block [orig: Game_StartMission @0x5257a0], never
 // from the sim-side class pick), the resident-buffer rows, and both
-// side blocks for the S2C 0x50 resubmission path. `equipped_combo` is the
-// live equipped slot for the pair's SECOND submit (-1 = none)
-// [orig: Game_StartMission @0x525c2e passes g_CurrentWeaponSlot].
+// side blocks for the S2C 0x50 resubmission path. `current_slot` is the
+// current slot word (WeaponInventory::current_slot) for the pair's SECOND
+// submit, -1 before any fill (the seam then sends 195)
+// [orig: Game_StartMission @0x525c2e passes g_CurrentWeaponSlot (@0x525C1A)].
 // The S2C 0x5A authoritative grant -> spawn-kit rows: names resolve through
 // the weapon table (retail drops failed AdmDef lookups); the wire bytes are
 // SIGNED clip counts — 0xFF is the authored/default sentinel, not 255 clips
@@ -119,9 +120,9 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 // list); off the authority the slot table empties; and the 0x2F
 // the apply sends is returned for the caller's queue: the local body's team byte, the
 // armory's class (g_ArmorySelectedClass, the class picked on the armory screen), the
-// selection through the sender's name gate and g_CurrentWeaponSlot resolved against the
-// table as the sender resolves it (after the reset, which leaves retail's slot word where
-// ours' clears equipped_combo, so the word is taken first). DFX2's sender fixes the class.
+// selection through the sender's name gate and g_CurrentWeaponSlot (WeaponInventory::
+// current_slot, which the pool reset leaves) resolved against the table as the sender
+// resolves it: past the joiner's reset, the raw word. DFX2's sender fixes the class.
 // Nothing else applies locally: the host's 0x5A grant rebuilds the slots, and a listen
 // host's own slot accepts the 0x2F into the local table (D-NET-695, D-NET-NEW-L2-17).
 // [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - the class's buffer copied into
@@ -140,7 +141,7 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
-		const world::LocalPlayerLoadout &loadout, int equipped_combo,
+		const world::LocalPlayerLoadout &loadout, int current_slot,
 		const world::WeaponInventory *inventory,
 		JoinerConnection::LoadoutKit &out);
 
