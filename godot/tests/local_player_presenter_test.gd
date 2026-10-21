@@ -123,7 +123,12 @@ func _stage_root() -> String:
 	var base_items := FileAccess.get_file_as_string(items_path)
 	var items := FileAccess.open(items_path, FileAccess.WRITE)
 	assert_not_null(items, "staged items.def is writable")
-	items.store_string(TestFs.crlf("""begin "Player Character"
+	# The "Null" marker leads, as in the shipped table: the player's row at
+	# ordinal 0 would build its body no proximity slice, so it would meet no
+	# building, ground probe or USE target [orig: Entity_BuildProximityListsFromPools
+	# @0x4B8EB0, the +0x1C test @0x4B8EF9].
+	items.store_string(TestFs.crlf(ItemDbFixture.NULL_ROW + """
+begin "Player Character"
   id 105305
   type person
   unit_type 9

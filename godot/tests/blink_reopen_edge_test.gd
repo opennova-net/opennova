@@ -106,8 +106,12 @@ func _stage_root() -> String:
 	for clip in ["soldier.adm", "idle.bad", "walk.bad"]:
 		TestFs.copy(self, "res://../fixtures/anim/" + clip, root_dir.path_join(clip))
 	var items := FileAccess.get_file_as_string(root_dir.path_join("items.def"))
-	TestFs.write_text(self, root_dir.path_join("items.def"), PLAYER_ITEM_DEF + "\n"
-			+ items + "\n" + BUILDING_ITEM_DEF)
+	# The "Null" marker leads, as in the shipped table: the player's row at
+	# ordinal 0 would build its body no proximity slice, so it would meet no
+	# building [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, the +0x1C
+	# test @0x4B8EF9].
+	TestFs.write_text(self, root_dir.path_join("items.def"), ItemDbFixture.NULL_ROW + "\n"
+			+ PLAYER_ITEM_DEF + "\n" + items + "\n" + BUILDING_ITEM_DEF)
 	return root_dir
 
 

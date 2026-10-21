@@ -100,18 +100,6 @@ begin "Player #1, Single player"
   sound_profileFemale SP_JO_SP_PlayerF1
 end
 
-begin "Player #1, Multiplayer"
-  id 105305
-  type person
-  graphic US01
-  graphicenemy Indo01
-  sid player1_mp
-  anim_def US01
-  hp 150
-  sound_profile SP_JO_SP_PlayerM1
-  sound_profileFemale SP_JO_SP_PlayerF1
-end
-
 begin "Generic Soldier"
   id 105311
   type person
