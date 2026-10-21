@@ -372,6 +372,25 @@ void test_commander_menu_row() {
 	k.commander_menu = false;
 	k.local_alive = true;
 	hud_toggles_poll(s, k);
+	// A dedicated host in a session (the authority bit alone): the head's operand is the
+	// constant 2 whatever the body, so a live local player's press drops too (D-NET-433)
+	// [orig: Input_HandleActionBinding @0x49AD52..0x49AD6F].
+	k.commander_menu = true;
+	k.in_session = true;
+	k.authority = true;
+	k.mp_session_peer = false;
+	CHECK(hud_toggles_poll(s, k) == 0);
+	k.commander_menu = false;
+	hud_toggles_poll(s, k);
+	// A listen host (both bits) reads the dead bit.
+	k.commander_menu = true;
+	k.mp_session_peer = true;
+	CHECK((hud_toggles_poll(s, k) & kCommandMapOpened) != 0);
+	k.commander_menu = false;
+	k.in_session = false;
+	k.authority = false;
+	k.mp_session_peer = false;
+	hud_toggles_poll(s, k);
 	// No gameplay input (a menu screen is up): nothing.
 	k.commander_menu = true;
 	k.active = false;

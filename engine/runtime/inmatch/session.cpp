@@ -112,8 +112,11 @@ void Role::apply_input(const TickInput &input) {
 	//  @0x497AC0 -> Input_QueueEvent]
 	if (input.consume_one_shots && (input.player.held_action_bits & HELD_MENU_OPEN) == 0) {
 		const bool held = (input.player.held_action_bits & HELD_TO_SPECIAL) != 0;
+		// The head's bit-0 operand: a joiner's replica dead bit; on the authority the
+		// constant 2 on a dedicated host in a session, else the dead bit
+		// (LocalPlayer::action_dispatch_drops, D-NET-433).
 		const bool local_dead = joiner && runtime != nullptr ? runtime->local_player_dead()
-				: kernel.local.local_player_dead();
+				: kernel.local.action_dispatch_drops();
 		const bool round_over = joiner ? runtime != nullptr && runtime->state().spawn_success_gate
 				: kernel.world.match.outcome().ended;
 		const bool deploy_hold = runtime != nullptr && runtime->state().deploy_overlay_active;
@@ -148,8 +151,8 @@ bool Role::request_respawn() {
 	mission::MissionKernel &kernel = *kernel_;
 	ClientRuntime *runtime = client_runtime();
 	const bool joiner = kind() == RoleKind::Joiner;
-	// The row's head gates, its flags 0x0C000C01 (a dedicated host has no
-	// player to press it; the menu pause, bit 0's third gate, holds a session
+	// The row's head gates, its flags 0x0C000C01 (a dedicated host's bit-0
+	// operand drops it; the menu pause, bit 0's third gate, holds a session
 	// that then takes no input): bit 0 drops it for a dead local player and
 	// under the round-over gate, 0x400 while the pre-round timer runs,
 	// 0x8000000 under the deploy overlay. None of the head's filters takes
@@ -168,8 +171,10 @@ bool Role::request_respawn() {
 	if (joiner ? runtime == nullptr || !runtime->local_entity_bound()
 	           : !kernel.world.cached.local_player.valid())
 		return false;
+	// Bit 0's operand on the authority: the constant 2 on a dedicated host in a
+	// session, else the dead bit (LocalPlayer::action_dispatch_drops, D-NET-433).
 	const bool local_dead = joiner ? runtime->local_player_dead()
-			: kernel.local.local_player_dead();
+			: kernel.local.action_dispatch_drops();
 	const bool round_over = joiner ? runtime->state().spawn_success_gate
 			: kernel.world.match.outcome().ended;
 	if (local_dead || round_over || kernel.world.preround_delay_seconds != 0 ||

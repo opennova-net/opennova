@@ -127,6 +127,13 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// view1st, viewwithgun (0x0C0008xx / 0x0C000Cxx), commander_menu
 	// (0x04000801), AudioEmote and RadioMacro (0x0C000C01).
 	const bool bit0_active = k.active && !s.paused;
+	// The rows below that read the dead bit take the head's whole operand: the constant 2
+	// on a dedicated host in a session (an authority that is no session peer), else the
+	// local player's dead bit (D-NET-433) [orig: Input_HandleActionBinding - is_in_session
+	//  @0x49AD52, is_authority @0x49AD5D, is_mp_session_peer @0x49AD66, `mov eax, 2`
+	//  @0x49AD6F, Flags & 2 @0x49AD76..0x49AD7E].
+	const bool bit0_operand_clear =
+			!(k.in_session && k.authority && !k.mp_session_peer) && k.local_alive;
 	// A key both rows carry reaches one of them: the key scan's first match
 	// (controls::BindingSet::pressed_key, the sampler) gives it to hudcolor
 	// (code 10) before huddetail (19) [orig: the first-match key scan
@@ -268,7 +275,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  @0x49b8fa — UI_IsMenuScreenOpen @0x49b902 (dword_255110C), Game_InitRespawnState
 	//  @0x49b90f, UI_OpenMenuScreen("cmap.mnu", "CMAP", 0) @0x49b920,
 	//  g_CmapScreenOpen = 1 @0x49b928]
-	if (s.commander.step(k.commander_menu, bit0_active && k.local_alive))
+	if (s.commander.step(k.commander_menu, bit0_active && bit0_operand_clear))
 		events |= kCommandMapOpened | respawn_init(s, k.in_session);
 	// The single-player pause: out of a session the word flips and the quit
 	// dialog closes; the embedder applies the word to the session and stops
@@ -288,11 +295,11 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// [orig: case 33 `xor dword_24C18D4, 1` @0x49b6c9 + the wrapper @0x49b6d5;
 	//  case 54 `xor dword_24C18D8, 1` @0x49b6e2 + the wrapper @0x49b6ee; the
 	//  row flag test @0x49ad8a..0x49ada0]
-	if (s.audio_emote.step(k.audio_emote, bit0_active && k.local_alive)) {
+	if (s.audio_emote.step(k.audio_emote, bit0_active && bit0_operand_clear)) {
 		s.emotes_menu_open = !s.emotes_menu_open;
 		events |= respawn_init_keeping(s, &s.emotes_menu_open, k.in_session);
 	}
-	if (s.radio_macro.step(k.radio_macro, bit0_active && k.local_alive)) {
+	if (s.radio_macro.step(k.radio_macro, bit0_active && bit0_operand_clear)) {
 		s.radio_menu_open = !s.radio_menu_open;
 		events |= respawn_init_keeping(s, &s.radio_menu_open, k.in_session);
 	}

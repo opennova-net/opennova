@@ -93,15 +93,18 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 
 UseItemArm LocalPlayer::take_use_item_press() {
 	// The held USE row (code 0xB1) carries the dispatcher's flag 0x1, which drops it ahead of
-	// its handler while the local player's dead bit is set: a dead player's press arms
-	// nothing and latches no hold, so no release toggles a mount (D-NET-433). The mount
-	// toggle and the seat pick themselves carry no dead test.
-	// [orig: Input_HandleActionBinding @0x49AD40 - the local player's Flags & 2
-	//  @0x49AD76..0x49AD7E, the row's flag 0x1 @0x49AD8A..0x49ADA0 (the catalog @0x8159A8,
-	//  the code-0xB1 row's flags 0x0C000805 before KeyBinding_SortBySequentialId); the hold
-	//  Input_HandleActionBinding_0 @0x4E0B5E..0x4E0B71; Entity_ToggleVehicleMount @0x436950,
-	//  Entity_FindAvailableSeat @0x436790: no dead test]
-	if (local_player_dead()) return UseItemArm::kDropped;
+	// its handler on a nonzero operand: the constant 2 on a dedicated host in a session (an
+	// authority that is no session peer, whatever its body), else the local player's dead
+	// bit. A dropped press arms nothing and latches no hold, so no release toggles a mount
+	// (D-NET-433). The mount toggle and the seat pick themselves carry no dead test.
+	// [orig: Input_HandleActionBinding @0x49AD40 - is_in_session @0x49AD52..0x49AD5B,
+	//  is_authority @0x49AD5D..0x49AD64, is_mp_session_peer @0x49AD66..0x49AD6D, `mov eax, 2`
+	//  @0x49AD6F; else the local player's Flags & 2 @0x49AD76..0x49AD7E; the row's flag 0x1
+	//  @0x49AD8A..0x49ADA0 (the catalog @0x8159A8, the code-0xB1 row's flags 0x0C000805
+	//  before KeyBinding_SortBySequentialId); the hold Input_HandleActionBinding_0
+	//  @0x4E0B5E..0x4E0B71; Entity_ToggleVehicleMount @0x436950, Entity_FindAvailableSeat
+	//  @0x436790: no dead test]
+	if (action_dispatch_drops()) return UseItemArm::kDropped;
 	const UseItemArm arm = w::local_player_use_item_arm(world_, view_session_inputs);
 	if (arm != UseItemArm::kArmory && arm != UseItemArm::kArmoryRefused) return arm;
 	// A latched press does nothing; an unlatched one latches before the
@@ -496,6 +499,13 @@ bool LocalPlayer::local_player_dead() const {
 	if (!world.cached.local_player.valid()) return false;
 	const w::Entity *e = world.registry.get(world.cached.local_player);
 	return e != nullptr && ((e->flags | e->engine_flags) & w::kEntityFlagDead) != 0;
+}
+
+bool LocalPlayer::action_dispatch_drops() const {
+	const World &world = world_;
+	if (world.rules.mp_session && world.rules.logic_authority && !world.rules.mp_session_peer)
+		return true; // the operand 2 [orig: @0x49AD52..0x49AD6F]
+	return local_player_dead(); // [orig: @0x49AD76..0x49AD7E]
 }
 
 void LocalPlayer::stamp_medic_request() {

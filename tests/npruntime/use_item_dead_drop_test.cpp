@@ -55,6 +55,31 @@ void test_a_dead_players_press_is_dropped() {
 	CHECK(r.local->take_use_item_press() == w::UseItemArm::kMountChain);
 }
 
+// The operand is the constant 2 on a dedicated host in a session (an authority that is no
+// session peer), whatever its body: a Serve Only shell's live hidden body (D-NET-352) drops
+// the press too. A listen host (a session peer), a joiner (no authority) and the single
+// player (out of a session) read the dead bit.
+// [orig: Input_HandleActionBinding - is_in_session @0x49AD52..0x49AD5B, is_authority
+//  @0x49AD5D..0x49AD64, is_mp_session_peer @0x49AD66..0x49AD6D, `mov eax, 2` @0x49AD6F]
+void test_a_dedicated_host_in_session_drops_every_press() {
+	Rig r;
+	r.world.rules.mp_session = true;
+	r.world.rules.logic_authority = true;
+	r.world.rules.mp_session_peer = false;
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kDropped);
+	// A listen host is a session peer: the dead bit decides.
+	r.world.rules.mp_session_peer = true;
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kMountChain);
+	// A joiner is no authority.
+	r.world.rules.mp_session_peer = false;
+	r.world.rules.logic_authority = false;
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kMountChain);
+	// Out of a session (the single player) the dead bit decides.
+	r.world.rules.mp_session = false;
+	r.world.rules.logic_authority = true;
+	CHECK(r.local->take_use_item_press() == w::UseItemArm::kMountChain);
+}
+
 void test_the_toggle_carries_no_dead_test() {
 	Rig r;
 	r.body().health = 0;
@@ -66,6 +91,7 @@ void test_the_toggle_carries_no_dead_test() {
 
 int main() {
 	test_a_dead_players_press_is_dropped();
+	test_a_dedicated_host_in_session_drops_every_press();
 	test_the_toggle_carries_no_dead_test();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

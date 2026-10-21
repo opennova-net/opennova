@@ -254,6 +254,13 @@ public:
     // The authority's read of the local player's dead bit (the entity flags;
     // a joiner reads its replica through inmatch::ClientRuntime::local_player_dead).
     bool local_player_dead() const;
+    // The action dispatcher's drop operand for a binding row flagged 0x1, on the
+    // authority: the constant 2 on a dedicated host in a session (an authority that is
+    // no session peer, whatever its body), else the local player's dead bit (a joiner
+    // reads its replica's bit). [orig: Input_HandleActionBinding @0x49AD40 -
+    //  is_in_session @0x49AD52, is_authority @0x49AD5D, is_mp_session_peer @0x49AD66,
+    //  `mov eax, 2` @0x49AD6F, Flags & 2 @0x49AD76..0x49AD7E]
+    bool action_dispatch_drops() const;
     // --- the medic call (the dead player's C2S 0x2E) -------------------------
     // The retail client medic-call cooldown: 310 ticks stamped at the send
     // [orig: Input_HandleActionBinding case 217 @0x49b511 `dword_B76804 =
