@@ -242,24 +242,48 @@ void ControlsModel::advance_scripted_input(int64_t p_logic_tick) {
 	const std::vector<int> after = script.held_codes();
 	Input *input = Input::get_singleton();
 	if (input == nullptr) return;
-	const auto replay = [&](int p_code, bool p_pressed) {
+	// The row's bound key (slot 1, else slot 2) with that slot's modifier, as
+	// Godot keys: a keyboard press of a modified binding (Ctrl+1's seat1,
+	// Ctrl+F6's hudcolor) holds the modifier, without which the bare key would
+	// reach the row the key alone binds (the 1's Knife, the F6's huddetail).
+	struct Slot {
+		int key = 0;
+		int mod = 0;
+	};
+	const auto slot_of = [&](int p_code) {
+		Slot slot;
 		const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
-		if (def == nullptr) return false;
+		if (def == nullptr) return slot;
 		const opennova::controls::BindingRecord *r =
 				bindings_.record(bindings_.index_of_token(def->token));
-		if (r == nullptr) return false;
-		const int key = godot_key_from_vk(r->primary != 0 ? r->primary : r->secondary);
-		if (key == 0) return false;
+		if (r == nullptr) return slot;
+		const bool first = r->primary != 0;
+		slot.key = godot_key_from_vk(first ? r->primary : r->secondary);
+		slot.mod = godot_key_from_vk(first ? r->primary_mod : r->secondary_mod);
+		return slot;
+	};
+	const auto key_event = [input](int p_key, bool p_pressed) {
 		Ref<InputEventKey> event;
 		event.instantiate();
-		event->set_keycode(static_cast<Key>(key));
-		event->set_physical_keycode(static_cast<Key>(key));
+		event->set_keycode(static_cast<Key>(p_key));
+		event->set_physical_keycode(static_cast<Key>(p_key));
 		event->set_pressed(p_pressed);
 		input->parse_input_event(event);
-		return true;
 	};
 	const auto holds = [](const std::vector<int> &p_codes, int p_code) {
 		return std::find(p_codes.begin(), p_codes.end(), p_code) != p_codes.end();
+	};
+	const auto replay = [&](int p_code, bool p_pressed) {
+		const Slot slot = slot_of(p_code);
+		if (slot.key == 0) return false;
+		if (p_pressed && slot.mod != 0) key_event(slot.mod, true);
+		key_event(slot.key, p_pressed);
+		// The modifier comes up with its last scripted row.
+		if (!p_pressed && slot.mod != 0 &&
+				std::none_of(after.begin(), after.end(),
+						[&](int p_held) { return slot_of(p_held).mod == slot.mod; }))
+			key_event(slot.mod, false);
+		return true;
 	};
 	bool replayed = false;
 	for (const int code : after) {

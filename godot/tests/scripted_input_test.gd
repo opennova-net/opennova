@@ -144,6 +144,22 @@ func test_the_seam_replays_scripted_holds_as_bound_key_events() -> void:
 	assert_true(driver.is_done())
 	assert_eq(driver.get_state(), ScriptedInput.STATE_FINISHED)
 	assert_false(model.is_token_pressed("move_jump"), "the end leaves nothing held")
+	# A modified row's key arrives with its modifier: seat1's Ctrl+1 holds
+	# Ctrl, so the replayed 1 is not the bare 1 the Knife row binds.
+	assert_eq(driver.load_steps([
+		{"tick": 0, "press": 182},
+		{"tick": 4, "end": true},
+	]), OK, driver.get_error())
+	assert_true(driver.start())
+	model.advance_scripted_input(20)
+	assert_true(Input.is_key_pressed(KEY_CTRL) and Input.is_key_pressed(KEY_1),
+			"seat1's press holds Ctrl+1")
+	assert_true(model.is_token_pressed("seat1"), "the seat row reads held")
+	assert_false(model.is_token_pressed("Knife"), "the Knife's bare 1 does not read the key")
+	model.advance_scripted_input(21)
+	assert_false(Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_1),
+			"the modifier comes up with its row")
+	model.advance_scripted_input(24)
 	model.set_scripted_input(null)
 	assert_null(model.get_scripted_input(), "null detaches")
 
