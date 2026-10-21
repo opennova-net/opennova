@@ -501,10 +501,12 @@ char datagram_direction(const wire::ParityDatagram &datagram, int session) {
 		case CaptureDatagramClass::ClientHello:
 		case CaptureDatagramClass::ClientAuth:
 		case CaptureDatagramClass::ClientProtocol:
+		case CaptureDatagramClass::ClientGoodBye:
 			return 'C';
 		case CaptureDatagramClass::ServerHello:
 		case CaptureDatagramClass::ServerAuth:
 		case CaptureDatagramClass::ServerProtocol:
+		case CaptureDatagramClass::ServerGoodBye:
 			return 'S';
 		default:
 			return datagram.src_port == session ? 'C' : 'S';

@@ -79,7 +79,8 @@ const std::vector<std::regex> &contract_patterns() {
 		std::regex("^PARITY_DATAGRAM frame=(\\d+) ts_ns=(\\d+) src=(\\d+) dst=(\\d+) "
 				   "len=(\\d+) outer=([01]) opcode=(0x[0-9a-fA-F]{2}|--) "
 				   "class=(invalid|unknown|client_hello|client_auth|server_hello|"
-				   "server_auth|client_protocol|server_protocol) decode=([01])$"),
+				   "server_auth|client_protocol|server_protocol|client_goodbye|"
+				   "server_goodbye) decode=([01])$"),
 		std::regex("^PARITY_HANDSHAKE frame=(\\d+) ts_ns=(\\d+) dir=([SC]) session=(\\d+) "
 				   "opcode=0x(41|42|81|82) decode=([01]) len=(\\d+) body=([0-9a-fA-F]*)$"),
 		std::regex("^PARITY_PACKET frame=(\\d+) ts_ns=(\\d+) dir=([SC]) session=(\\d+) "

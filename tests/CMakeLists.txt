@@ -5375,3 +5375,7 @@ add_test(NAME inmatch_tick_input_source COMMAND inmatch_tick_input_source_test)
 
 # --- parity lane LP (proof) ---
 
+# --- parity lane LX (cases/judge) ---
+add_executable(npwire_capture_goodbye_test npwire/capture_goodbye_test.cpp)
+target_link_libraries(npwire_capture_goodbye_test PRIVATE opennova_net opennova_base)
+add_test(NAME npwire_capture_goodbye COMMAND npwire_capture_goodbye_test)

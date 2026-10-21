@@ -47,6 +47,14 @@ enum class CaptureDatagramClass : uint8_t {
 	ServerAuth,
 	ClientProtocol,
 	ServerProtocol,
+	// The session-opcode goodbyes a teardown sends (C2S 0x46, S2C 0x86): the
+	// receiver's key dword, then the sender's latched disconnect record, its
+	// seven fields in the writer's order. One that does not carry that shape
+	// stays Unknown. [orig: CNapiNPConnection_SendDisconnectPacket @0x61F2A0
+	// (the key dword @0x61F3AF, the fields @0x61F3D0..0x61F4AA); the receiver
+	// Nwu_HandleDisconnect @0x623CE0]
+	ClientGoodBye,
+	ServerGoodBye,
 };
 
 struct CapturedDatagramResult {
@@ -59,7 +67,8 @@ struct CapturedDatagramResult {
 	CaptureDatagramClass datagram_class = CaptureDatagramClass::Invalid;
 	// Opcode-specific acceptance. For hello/auth this means its body parsed;
 	// for 0x43/0x83 it means an SCRK was present and the protocol packet
-	// decrypted/decoded successfully. Invalid/unknown datagrams stay false.
+	// decrypted/decoded successfully; for a goodbye that its record carried
+	// the writer's seven fields. Invalid/unknown datagrams stay false.
 	bool decoded = false;
 };
 

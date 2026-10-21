@@ -142,6 +142,10 @@ const char *parity_datagram_class_name(CaptureDatagramClass datagram_class) {
 			return "client_protocol";
 		case CaptureDatagramClass::ServerProtocol:
 			return "server_protocol";
+		case CaptureDatagramClass::ClientGoodBye:
+			return "client_goodbye";
+		case CaptureDatagramClass::ServerGoodBye:
+			return "server_goodbye";
 	}
 	return "invalid";
 }

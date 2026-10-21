@@ -117,7 +117,7 @@ function ConvertFrom-ParityLines {
         $line = "$rawLine".TrimEnd([char]13, [char]10)
         if (-not $line.StartsWith('PARITY_', [StringComparison]::Ordinal)) { continue }
 
-        if ($line -match '^PARITY_DATAGRAM frame=(\d+) ts_ns=(\d+) src=(\d+) dst=(\d+) len=(\d+) outer=([01]) opcode=(0x[0-9a-fA-F]{2}|--) class=(invalid|unknown|client_hello|client_auth|server_hello|server_auth|client_protocol|server_protocol) decode=([01])$') {
+        if ($line -match '^PARITY_DATAGRAM frame=(\d+) ts_ns=(\d+) src=(\d+) dst=(\d+) len=(\d+) outer=([01]) opcode=(0x[0-9a-fA-F]{2}|--) class=(invalid|unknown|client_hello|client_auth|server_hello|server_auth|client_protocol|server_protocol|client_goodbye|server_goodbye) decode=([01])$') {
             $opcodeText = $Matches[7].ToLowerInvariant()
             $outerDecoded = $Matches[6] -eq '1'
             $datagramClass = $Matches[8]
@@ -131,6 +131,7 @@ function ConvertFrom-ParityLines {
                 client_hello = 0x41; client_auth = 0x42
                 server_hello = 0x81; server_auth = 0x82
                 client_protocol = 0x43; server_protocol = 0x83
+                client_goodbye = 0x46; server_goodbye = 0x86
             }
             if ((-not $outerDecoded -and
                     ($opcodeText -cne '--' -or $datagramClass -cne 'invalid' -or $decoded)) -or
