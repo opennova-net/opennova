@@ -1756,7 +1756,8 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 			"the joiner publishes the decoded pool-1 dune buggy")
 	if host_vehicle.is_finite() and joiner_vehicle.is_finite():
 		assert_lt(joiner_vehicle.distance_to(host_vehicle), 0.05,
-				"the joiner vehicle does not collapse onto or float over its player")
+				"the joiner vehicle does not collapse onto or float over its player (host %s, joiner %s)"
+				% [host_vehicle, joiner_vehicle])
 		var player_pos: Vector3 = joiner.get_local_player_position()
 		assert_gt(joiner_vehicle.distance_to(player_pos), 20.0,
 				"the authored distant vehicle stays distant from the joiner")
