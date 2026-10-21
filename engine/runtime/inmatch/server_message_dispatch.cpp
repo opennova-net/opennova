@@ -770,9 +770,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				st.loadout_buffer.entries = grant.kept_entries;
 				st.loadout_buffer.player_class = grant.reply.avatar_class;
 				st.loadout_buffer_set = true;
-				// The accepted class is the slot's class and its PlayerType, at its store and its
-				// list send [orig: the slot store @0x515AA8; @0x515AE2; the
-				// Server_SendWeaponSlotListToPlayer call @0x515F95].
+				// The accepted class is the slot's class and its PlayerType, at its store
+				// [orig: the slot store @0x515AA8; @0x515AE2].
 				conn.slot_class = grant.reply.avatar_class;
 				conn.player_list_type = grant.reply.avatar_class;
 				write_ammo_damage_classes(conn, grant);
@@ -800,6 +799,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						equipped.adm = submitted->second.adm_index;
 					}
 				}
+				// The list send, its own legs ahead of its rows [orig: the
+				//  Server_SendWeaponSlotListToPlayer call @0x515F95].
+				weapon_slot_list_own_legs(conn);
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.

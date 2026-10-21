@@ -150,18 +150,30 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
                                    world::Entity &player);
 
-// The player's live soldier class (entity+660), the header byte a current-slot-list
-// re-send carries.
-uint8_t current_player_class(const NapiNPConnection &conn, const world::World *world);
+// The slot's class (+0x15EDC, NapiNPConnection::slot_class), which every weapon-slot
+// list send stores as the slot's PlayerType and writes as the list's header byte.
+// [orig: Server_SendWeaponSlotListToPlayer @0x502550 - the PlayerType from +0x15EDC
+//  @0x5025A8..0x5025DB, the header byte @0x5025E0..0x5025E6]
+uint8_t current_player_class(const NapiNPConnection &conn);
+
+// Every weapon-slot list send's own legs, ahead of its rows: the slot's PlayerType set to
+// its class, and for the authority's own slot (its local byte +5: the listen host's own
+// connection) the class stored into the profile's class for the slot team's side
+// (g_CharClassTeam1 for team 1 or 3, else g_CharClassTeam2: the own connection's
+// char_vars.char_class[0 / 1], which Player_InitPlayer re-stamps the own body's class
+// from at the next mission start).
+// [orig: Server_SendWeaponSlotListToPlayer @0x502550 - @0x5025A8..0x5025DB, the local
+//  test `cmp byte [ebp+5], 0` @0x5025EC, the class stores @0x502629..0x50264B]
+void weapon_slot_list_own_legs(NapiNPConnection &conn);
 
 // The tag=0x5A body for every re-send that grants NOTHING new: the retained granted body
 // when one exists, else the empty-table shape headed by the player's live class.
 std::vector<uint8_t> build_current_loadout_reply(const std::vector<uint8_t> &retained,
                                                  uint8_t player_class);
 
-// Server_SendWeaponSlotListToPlayer for a re-send that grants nothing new: the slot's
-// PlayerType set to its live class (NapiNPConnection::player_list_type), then that
-// class's current-list body (build_current_loadout_reply over the retained body).
+// Server_SendWeaponSlotListToPlayer for a re-send that grants nothing new: the list's own
+// legs (weapon_slot_list_own_legs), then the slot class's current-list body
+// (build_current_loadout_reply over the retained body).
 std::vector<uint8_t> current_weapon_slot_list(NapiNPConnection &conn, const world::World *world);
 
 } // namespace opennova::inmatch

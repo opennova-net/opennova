@@ -74,6 +74,19 @@ std::optional<uint8_t> Server_ReservePlayerSlot(
 //  @0x51E457..0x51E467]
 void Server_AdvanceFreeRowTicks(NapiNPServerCtx &ctx);
 
+// The session create's profile init of the listen host's own slot class (+0x15EDC):
+// side A's profile class (g_CharClassTeam1, the own connection's char_vars.char_class[0])
+// when the side requirement (g_SideRequirement, the cfg's side_req: GameConfig::
+// host_side_request) is 0, else side B's, stored raw. The own add stores no class
+// (its local arm): the create's profile init follows it, so ours runs this in the
+// own add's first arm, after its PlayerList entry; its own accepts store theirs.
+// [orig: CNapiGameSession_CreateSession @0x4C97C0 - `cmp g_SideRequirement, ebx`
+//  @0x4C9952, g_CharClassTeam1 @0x4C995A / g_CharClassTeam2 @0x4C9966, the profile init
+//  call @0x4C9CCE; PlayerSession_InitFromProfile @0x50CA80 - the store `mov [esi+15EDCh],
+//  edx` @0x50CB7C; Game_ApplySessionSettingsToGlobals: g_SideRequirement from
+//  sideRequirement_424 @0x551B91..0x551BA2]
+void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection &own);
+
 // §5.2a step 1 — [orig: Server_InitNewRoundState @0x51c8e0]. Set up the local-player/round context
 // for an authority host. Structural: clears the loading-progress counter for a fresh round (the
 // timeout gate, NOT the spawn-success gate, which the per-frame 0x0A drops, §5.2a step 4). No-op

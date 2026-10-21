@@ -520,12 +520,23 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	player.carry_flags = (player.carry_flags & ~0x18u) | inv.carry_flags;
 }
 
-// The player's live soldier class (entity+660), the header byte a current-slot-list re-send carries
-// [orig: Server_SendWeaponSlotListToPlayer @0x502550 reads player+89820 = player[22455]].
-uint8_t current_player_class(const NapiNPConnection &conn, const world::World *world) {
-	if (world == nullptr || !conn.link.owned_entity.valid()) return 0;
-	const world::Entity *pe = world->registry.get(conn.link.owned_entity);
-	return pe != nullptr ? pe->player_class : 0;
+// The slot's class, which the list reads for its PlayerType and its header byte, the
+// entity's never (D-NET-695) [orig: Server_SendWeaponSlotListToPlayer @0x502550 -
+//  `mov eax, [ebp+15EDCh]` @0x5025A8, `mov cl, [ebp+15EDCh]` @0x5025E0].
+uint8_t current_player_class(const NapiNPConnection &conn) {
+	return static_cast<uint8_t>(conn.slot_class);
+}
+
+void weapon_slot_list_own_legs(NapiNPConnection &conn) {
+	// The PlayerType from the slot's class, no test ahead of it [orig: @0x5025A8..0x5025DB].
+	conn.player_list_type = conn.slot_class;
+	// The authority's own slot only: its class into the profile class of the slot
+	// team's side [orig: `cmp byte [ebp+5], 0; jz` @0x5025EC / @0x502615; the team
+	//  +0x1A0 against 1 and 3 @0x502629..0x502635, g_CharClassTeam2 @0x50263D,
+	//  g_CharClassTeam1 @0x50264B].
+	if (conn.type != NapiNPConnection::kTypeClientSide) return;
+	const bool side_a = conn.assigned_team == 1 || conn.assigned_team == 3;
+	conn.char_vars.char_class[side_a ? 0 : 1] = static_cast<uint8_t>(conn.slot_class);
 }
 
 // The tag=0x5A body for every re-send that grants NOTHING new (the 0x2F envelope abort, the deploy
@@ -541,13 +552,12 @@ std::vector<uint8_t> build_current_loadout_reply(const std::vector<uint8_t> &ret
 	return encode_weapon_loadout(current);
 }
 
-// The list send first sets the slot's PlayerType to its class, then builds the list.
-// [orig: Server_SendWeaponSlotListToPlayer @0x502550: slot+0x15EDC @0x5025A8, the
-//  SetOrCreate @0x5025DB, no test ahead of it]
+// The list send's own legs first, then the list.
+// [orig: Server_SendWeaponSlotListToPlayer @0x502550]
 std::vector<uint8_t> current_weapon_slot_list(NapiNPConnection &conn, const world::World *world) {
-	const uint8_t player_class = current_player_class(conn, world);
-	conn.player_list_type = player_class;
-	return build_current_loadout_reply(conn.reply.last_loadout_reply, player_class);
+	(void)world;
+	weapon_slot_list_own_legs(conn);
+	return build_current_loadout_reply(conn.reply.last_loadout_reply, current_player_class(conn));
 }
 
 } // namespace opennova::inmatch

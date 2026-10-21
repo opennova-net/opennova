@@ -105,41 +105,50 @@ void in_match_writers() {
 	       "the add bound the host's player on team 1, side A's class 8");
 	if (player == nullptr) return;
 
-	// The add: the entity's team and class.
-	expect(conn.player_list_team == 1 && conn.player_list_type == 8,
-	       "the add stamps the entity's team and class");
+	// The own add: the bodyless arm, the slot's team and its class as the add finds it,
+	// zeroed: the create's profile init stores the class (side B's, 6, the side
+	// requirement being -1) only after the add (D-NET-659, D-NET-695).
+	// [orig: Server_PlayerAdd @0x51D398..0x51D3B5; Server_AllocatePlayerSlotTable's memset
+	//  @0x51C1CB; CNapiGameSession_CreateSession @0x4C9952..0x4C996C, @0x4C9CCE]
+	expect(conn.player_list_team == 1 && conn.player_list_type == 0,
+	       "the own add stamps the slot's team and its zeroed class");
+	expect(conn.slot_class == 6, "the create's profile init stores side B's class");
 
 	// A team change: PlayerTeam alone.
 	inmatch::Server_ChangeEntityTeam(ctx, world, conn.link.owned_entity, 2);
-	expect(conn.player_list_team == 2 && conn.player_list_type == 8,
+	expect(conn.player_list_team == 2 && conn.player_list_type == 0,
 	       "a team change rewrites PlayerTeam alone");
 
 	// A map change: the teardown frees the entity and swaps the kept slot's
 	// side (2 -> 1), then the round init re-adds it with side A's class, now 5.
 	// Neither writes the PlayerList: the slot keeps the previous mission's
-	// PlayerTeam 2 and PlayerType 8. Between the two, with no entity, an
+	// PlayerTeam 2 and PlayerType 0. Between the two, with no entity, an
 	// envelope abort draws nothing and writes nothing.
 	world.registry.despawn(conn.link.owned_entity);
 	conn.link.owned_entity = {};
 	conn.assigned_team = 1;
 	conn.char_vars.char_class[0] = 5;
 	expect(!submit_loadout(ctx, conn, world, /*team=*/0, /*class=*/0, 100) &&
-	               conn.player_list_type == 8,
+	               conn.player_list_type == 0,
 	       "with no entity an envelope abort draws no 0x5A and keeps PlayerType");
 	(void)submit_loadout(ctx, conn, world, /*team=*/1, /*class=*/9, 100);
-	expect(conn.player_list_type == 8, "with no entity an accepted 0x2F keeps PlayerType");
+	expect(conn.player_list_type == 0, "with no entity an accepted 0x2F keeps PlayerType");
 	inmatch::init_all_player_entities_for_round(*role_storage);
 	player = world.registry.get(conn.link.owned_entity);
 	expect(player != nullptr && player->team == 1 && player->player_class == 5,
 	       "the round init re-adds the kept slot on team 1 with class 5");
 	if (player == nullptr) return;
-	expect(conn.player_list_team == 2 && conn.player_list_type == 8,
+	expect(conn.player_list_team == 2 && conn.player_list_type == 0,
 	       "the round init's re-add writes neither PlayerTeam nor PlayerType");
 
-	// An abort's weapon-slot list: the slot's live class.
+	// An abort's weapon-slot list: the slot's class (the create's 6), never the entity's
+	// (5); the own slot's list also stores it as its team's side class (side A for team 1).
+	// [orig: Server_SendWeaponSlotListToPlayer @0x5025A8, @0x502629..0x50264B]
 	expect(submit_loadout(ctx, conn, world, /*team=*/0, /*class=*/0, 101) &&
-	               conn.player_list_type == 5 && conn.player_list_team == 2,
-	       "a weapon-slot list re-send stamps the slot's live class");
+	               conn.player_list_type == 6 && conn.player_list_team == 2,
+	       "a weapon-slot list re-send stamps the slot's class");
+	expect(conn.char_vars.char_class[0] == 6 && conn.char_vars.char_class[1] == 6,
+	       "the own slot's list stores its class as its team's side class");
 
 	// The accept: the accepted class.
 	(void)submit_loadout(ctx, conn, world, /*team=*/1, /*class=*/7, 102);

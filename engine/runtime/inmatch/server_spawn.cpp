@@ -239,6 +239,12 @@ void init_host_slot_row(NapiNPServerCtx &ctx) {
 
 } // namespace
 
+void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection &own) {
+	const uint8_t side_class = ctx.config.host_side_request == 0 ? own.char_vars.char_class[0]
+	                                                             : own.char_vars.char_class[1];
+	own.slot_class = static_cast<int8_t>(side_class); // movsx of the class byte
+}
+
 std::optional<uint8_t> Server_ReservePlayerSlot(
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
 		uint32_t slot_capacity, PlayerRowFreeTicks *free_ticks) {
@@ -463,25 +469,27 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// [orig: Player_InitPlayer @0x4e15f0 (@0x4e1843) <- g_AvatarTeam1/2 + g_CharClassTeam1/2
 		// <- Game_ApplySessionSettingsToGlobals @0x551500 (class clamp @0x5516ab..0x5516ec, avatar
 		// via Avatars_ResolveSelectionIndex (ex sub_57AE60)); ids validated + stored by PlayerSession_InitFromProfile @0x50ca80]
-		// Retail's round init spawns the own slot with the slot's class (the session create's
-		// side-requirement pick, then its own accepts'), and Player_InitPlayer re-stamps the
-		// class word from g_CharClassTeam1/2 by the team, which every weapon-slot list sent to
-		// the own slot rewrites with the slot's class; this arm takes the session start's
-		// per-side selection, which no own accept or list updates (D-NET-695)
-		// [orig: CNapiGameSession_CreateSession @0x4C9952..0x4C996C, the profile init
-		//  @0x4C9CCE; Player_InitPlayer @0x4E1809..0x4E1832;
+		// The class word is Player_InitPlayer's re-stamp from g_CharClassTeam1/2 by the
+		// team, which every weapon-slot list sent to the own slot rewrites with the slot's
+		// class (weapon_slot_list_own_legs) (D-NET-695)
+		// [orig: Player_InitPlayer @0x4E1809..0x4E1832;
 		//  Server_SendWeaponSlotListToPlayer @0x502629..0x50264B].
 		spawn.anim_slot = conn.char_vars.avatar[side];
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
 		const uint8_t cls = conn.char_vars.char_class[side];
 		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
-		// The body's camouflage row binds by the class it spawns with (D-NET-348).
-		// Retail's own add attaches the local entity once the slot table is up and
-		// the round init spawns the slot with its class byte, which the own
-		// client's mission-start accepts leave at this side's class; that byte's
-		// path is D-NET-695's [orig: Server_PlayerAdd's own arm @0x51CC24..0x51CC60;
-		//  Server_InitAllPlayerEntitiesForRound @0x516B56].
-		spawn.item_class = spawn.player_class;
+		// The session's own add is the create's, whose profile init stores the slot's
+		// class after it (the add's PlayerList entry reads the zeroed class:
+		// stamp_player_list_add); a map change's round init keeps the class.
+		if (!round_init) PlayerSession_InitOwnSlotClass(ctx, conn);
+		// The body itself is the round init's spawn with the slot's class byte, which
+		// binds its camouflage row (D-NET-348): retail's own add attaches the local
+		// entity and never spawns, and every mission start's round init spawns the own
+		// slot by +0x15EDC, the session create's side class or its last accept's
+		// (D-NET-695); Player_InitPlayer then re-stamps the class word alone, above.
+		// [orig: Server_PlayerAdd's own arm @0x51CC24..0x51CC60;
+		//  Server_InitAllPlayerEntitiesForRound @0x516B56 / @0x516B67]
+		spawn.item_class = static_cast<uint8_t>(conn.slot_class);
 	} else if (round_init) {
 		spawn.anim_slot = conn.char_vars.avatar[side];
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
@@ -670,6 +678,19 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 // entity+0x294 @0x51D382; the bodyless arm's slot+0x1A0 @0x51D398 and
 // slot+0x15EDC @0x51D3AF; the SetOrCreates @0x51D48F / @0x51D4AA].
 void stamp_player_list_add(NapiNPConnection &conn, const world::World &world) {
+	// The listen host's own add finds no entity (the create's round init zeroed the
+	// slot's, and the own body is a mission start's), so it takes the bodyless arm:
+	// the slot's team, the round init's, and its class, which the slot table's
+	// allocation zeroed and the create's profile init stores only after the add
+	// (D-NET-659's residual) [orig: Server_InitNewRoundState - the slot table
+	//  Server_AllocatePlayerSlotTable's memset @0x51C1CB, the team
+	//  Server_AssignPlayerTeam @0x51CAC8, the entity 0 @0x51CA2F;
+	//  CNapiGameSession_CreateSession - the profile init @0x4C9CCE after the add].
+	if (conn.type == NapiNPConnection::kTypeClientSide) {
+		conn.player_list_team = conn.assigned_team_valid ? conn.assigned_team : 0;
+		conn.player_list_type = 0;
+		return;
+	}
 	const world::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (player == nullptr) {
 		conn.player_list_team = conn.assigned_team_valid ? conn.assigned_team : 0;
