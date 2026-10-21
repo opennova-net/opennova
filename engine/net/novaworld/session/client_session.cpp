@@ -669,8 +669,10 @@ void ClientSession::teardown_connection(std::vector<std::vector<uint8_t>> &out) 
 				disconnect_latched_ ? client_goodbye_to_bytes(server_sk_, disconnect_event_)
 				                    : client_goodbye_to_bytes(server_sk_));
 		for (size_t i = 0; i < disconnect_burst_count(); ++i) out.push_back(goodbye);
-		// The state-5 leg's callback after the burst, OnDisconnect: its connect-log line ahead of
-		// the session's reset. [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 -
+		// The state-5 leg's callback after the burst, OnDisconnect: its connect-log line composed
+		// ahead of the session's reset (the driver writes it once the burst in `out` has gone
+		// out, NwuLobbySession::log_connection_down).
+		// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 -
 		//  @0x6254E7; CNapiGameSession_OnDisconnect @0x4CFAA0 - the line @0x4CFB5C, SetState(0)
 		//  @0x4CFB68]
 		if (cfg_.on_connection_down) cfg_.on_connection_down();

@@ -336,8 +336,12 @@ private:
 	// code's NWEC to on_fatal, then the connection dropped (session() null from here).
 	void fail_connect(int code);
 	// The connection's state-5 callbacks' lines (ClientSession::Config::on_connection_up / _down).
+	// The down line is composed at the teardown (ahead of the session's reset) and written once
+	// the teardown's 0x46 burst has gone out through send() (its SENDING lines first), or at the
+	// next close() / connect when the burst never went through this driver.
 	void log_connection_up();
 	void log_connection_down();
+	void write_pending_connection_down();
 	// The enumerator's session records: a taken 0x81's record (its sender and SN) with its
 	// DISCOVERED line, one already kept for that sender with another SN replaced (its REMOVED line
 	// first); the session's drains (ClientSession::enumerator_drains) and the connection's
@@ -373,6 +377,9 @@ private:
 	};
 	std::vector<SessionRecord> records_;
 	uint32_t drains_seen_ = 0;
+	// OnDisconnect's line while its teardown's burst is still to go out, and the burst's sends left.
+	std::string pending_down_line_;
+	std::size_t pending_down_sends_ = 0;
 	// The kept gate state, none of it reset by open() (GateMemory).
 	GateMemory own_memory_;
 	GateMemory *shared_memory_ = nullptr;

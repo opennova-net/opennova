@@ -112,6 +112,8 @@ struct Rig {
 	std::vector<std::string> log;
 	// The NWU packet lines (SENDING / PROCESSING), kept apart so the other pins read the rest.
 	std::vector<std::string> packet_log;
+	// Every connect-log line in order, the packet lines included.
+	std::vector<std::string> all;
 	// The first connect's validated hook: how many times, and the log's size when it ran.
 	int validated = 0;
 	std::size_t validated_at_log = 0;
@@ -149,6 +151,7 @@ struct Rig {
 		};
 		out.connect_log_on = [this]() { return log_on; };
 		out.connect_log = [this](const std::string &text) {
+			all.push_back(text);
 			if (text.rfind("NWU SENDING ", 0) == 0 || text.rfind("NWU PROCESSING ", 0) == 0)
 				packet_log.push_back(text);
 			else
@@ -582,6 +585,94 @@ void check_disconnect_request_by_state() {
 		CHECK(decode(dg, op, body) && op == SESSION_OPCODE_CLIENT_GOODBYE);
 	}
 	rig.lobby.close();
+}
+
+// The teardown's lines: the 0x46 burst's SENDING lines, then OnDisconnect's DISCONNECTING, as
+// TeardownActiveConnection sends the burst before its callback: an escape's abort, a punt, and an
+// owner's disconnect request sent through the driver; one whose burst never goes out through the
+// driver writes its line at the close.
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the state-5 burst
+//  @0x6254B5..0x6254D3, the conn+0xC4 callback @0x6254E7; CNapiNPConnection_SendDisconnectPacket
+//  @0x61F2A0 - the SENDING line's +0x270 load @0x61F514; CNapiGameSession_OnDisconnect @0x4CFAA0 -
+//  @0x4CFB5C]
+void check_teardown_line_order() {
+	const auto order_ok = [](const std::vector<std::string> &all, std::size_t burst) {
+		std::size_t down = all.size();
+		for (std::size_t i = 0; i < all.size(); ++i)
+			if (all[i].rfind("NWU DISCONNECTING FROM NOVAWORLD ", 0) == 0) {
+				if (down != all.size()) return false; // one line
+				down = i;
+			}
+		if (down == all.size()) return false;
+		std::size_t before = 0;
+		std::size_t after = 0;
+		for (std::size_t i = 0; i < all.size(); ++i) {
+			const bool goodbye = all[i].rfind("NWU SENDING ", 0) == 0 &&
+					all[i].find("[0x46, p#0]") != std::string::npos;
+			if (goodbye) (i < down ? before : after) += 1;
+		}
+		return before == burst && after == 0 && down > 0 &&
+				all[down - 1].find("[0x46, p#0]") != std::string::npos;
+	};
+	{
+		Rig rig;
+		rig.log_on = true;
+		bring_to_verify(rig);
+		CHECK(rig.lobby.session() != nullptr);
+		if (rig.lobby.session() == nullptr) return;
+		const std::size_t burst = rig.lobby.session()->disconnect_burst_count();
+		rig.all.clear();
+		CHECK(rig.lobby.escape());
+		rig.lobby.tick(300);
+		CHECK(order_ok(rig.all, burst));
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.log_on = true;
+		const std::vector<uint8_t> auth = bring_to_verify(rig);
+		rig.session.inbound.push_back({ kServer,
+				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+		rig.lobby.tick(300);
+		CHECK(rig.lobby.session() != nullptr);
+		if (rig.lobby.session() == nullptr) return;
+		const std::size_t burst = rig.lobby.session()->disconnect_burst_count();
+		rig.all.clear();
+		rig.session.inbound.push_back({ kServer,
+				server_statement_to(auth, "ServerLeaveNovaWorld", { { "MsgCode", "7" } }, 2) });
+		rig.lobby.tick(400);
+		CHECK(order_ok(rig.all, burst));
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.log_on = true;
+		bring_to_verify(rig);
+		ClientSession *session = rig.lobby.session();
+		CHECK(session != nullptr);
+		if (session == nullptr) return;
+		const std::size_t burst = session->disconnect_burst_count();
+		rig.all.clear();
+		std::vector<std::vector<uint8_t>> out;
+		session->request_disconnect(out);
+		CHECK(rig.all.empty()); // the line waits for the burst
+		for (const auto &dg : out) rig.lobby.send(dg);
+		CHECK(order_ok(rig.all, burst));
+		rig.lobby.close();
+	}
+	{
+		Rig rig;
+		rig.log_on = true;
+		bring_to_verify(rig);
+		ClientSession *session = rig.lobby.session();
+		CHECK(session != nullptr);
+		if (session == nullptr) return;
+		rig.all.clear();
+		std::vector<std::vector<uint8_t>> out;
+		session->request_disconnect(out);
+		rig.lobby.close();
+		CHECK(!rig.all.empty() && rig.all.front().rfind("NWU DISCONNECTING FROM NOVAWORLD ", 0) == 0);
+	}
 }
 
 // D-NET-719: a 0x83 too short for its header does not end the connection. Retail reads each
@@ -1495,6 +1586,7 @@ int main() {
 	check_gate_response_lines();
 	check_short_protocol_packets_keep_the_connection();
 	check_disconnect_request_by_state();
+	check_teardown_line_order();
 	check_state_one_give_up();
 	check_verify_give_up();
 	check_rejected_connect();

@@ -105,18 +105,33 @@ void NwuLobbySession::log_connection_up() {
 
 // OnDisconnect's line, ahead of its reset: the server, the 0x82's NovaworldName and the
 // connection's disconnect record (its role, class, the two parameters, the text, the reason code
-// and the tag; zeroed at the state-5 entry, so a teardown with none latched prints zeros).
+// and the tag; zeroed at the state-5 entry, so a teardown with none latched prints zeros). The
+// callback runs after the teardown's 0x46 burst, each of whose sends writes its SENDING line
+// first, so the line waits for the burst's last send (send_datagram).
 // [orig: CNapiGameSession_OnDisconnect @0x4CFAA0 - Napi_FormatAddress @0x4CFAF0, the record
 //  conn+0x658..0x664 / +0x668 / +0x6E8 / +0x6EC, "%s : NWU DISCONNECTING FROM NOVAWORLD %s [%s]
-//  [%ld,%ld,%ld,%ld,\"%s\",%ld,\"%s\"]" @0x4CFB5C]
+//  [%ld,%ld,%ld,%ld,\"%s\",%ld,\"%s\"]" @0x4CFB5C; CNapiNPConnection_TeardownActiveConnection
+//  @0x6253C0 - the state-5 burst's CNapiNPConnection_SendDisconnectPacket calls
+//  @0x6254B5..0x6254D3 (each writing its SENDING line, the +0x270 load @0x61F514), then the
+//  conn+0xC4 callback (the call @0x6254E7)]
 void NwuLobbySession::log_connection_down() {
 	if (!connect_log_on() || !session_) return;
+	write_pending_connection_down(); // an earlier teardown's whose burst never went out here
 	const DisconnectEvent &record = session_->disconnect_event();
 	const auto value = [](uint32_t v) { return std::to_string(static_cast<int32_t>(v)); };
-	connect_log("NWU DISCONNECTING FROM NOVAWORLD " + peer_addr_to_string(nw_peer_) + " [" +
-			session_->server_novaworld_name() + "] [" + value(record.ds) + "," + value(record.dc) +
-			"," + value(record.dp1) + "," + value(record.dp2) + ",\"" + record.dstr + "\"," +
-			value(record.dpc) + ",\"" + record.ddstr + "\"]");
+	pending_down_line_ = "NWU DISCONNECTING FROM NOVAWORLD " + peer_addr_to_string(nw_peer_) +
+			" [" + session_->server_novaworld_name() + "] [" + value(record.ds) + "," +
+			value(record.dc) + "," + value(record.dp1) + "," + value(record.dp2) + ",\"" +
+			record.dstr + "\"," + value(record.dpc) + ",\"" + record.ddstr + "\"]";
+	pending_down_sends_ = session_->disconnect_burst_count();
+}
+
+void NwuLobbySession::write_pending_connection_down() {
+	if (pending_down_line_.empty()) return;
+	std::string line;
+	line.swap(pending_down_line_);
+	pending_down_sends_ = 0;
+	connect_log(line);
 }
 
 // The record's lines over its sender and SN. [orig: Network_LogSessionDiscovered @0x4CF960 -
@@ -351,6 +366,7 @@ void NwuLobbySession::send_gate_probe() {
 // The connection's destroy drains the enumerator's records. [orig: CNapiNPConnection_Destroy
 //  @0x62A4B0 - NapiNPEnumerator_DrainTimerList (the call @0x62A554)]
 void NwuLobbySession::close() {
+	write_pending_connection_down();
 	drain_records();
 	session_.reset();
 	probe_sent_ = false;
@@ -915,6 +931,7 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 					std::to_string(bytes) + " bytes]");
 	};
 
+	write_pending_connection_down();
 	session_ = std::make_unique<ClientSession>(cfg);
 	drains_seen_ = 0; // the new connection's enumerator has drained nothing
 	session_->set_clock_ms(clock_ms_);
@@ -1011,6 +1028,13 @@ void NwuLobbySession::send_datagram(const PeerAddr &to, const std::vector<uint8_
 	}
 	session_socket_->send_to(to, dg.data(), dg.size());
 	if (hooks_.on_sent) hooks_.on_sent(to, dg);
+	// The teardown's burst out: OnDisconnect's line follows its last send.
+	if (pending_down_sends_ != 0) {
+		uint8_t opcode = 0;
+		if (stripped_opcode(dg.data(), dg.size(), opcode) && opcode == SESSION_OPCODE_CLIENT_GOODBYE &&
+				--pending_down_sends_ == 0)
+			write_pending_connection_down();
+	}
 }
 
 void NwuLobbySession::send_to(const PeerAddr &to, const std::vector<uint8_t> &dg) {
