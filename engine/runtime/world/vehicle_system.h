@@ -41,6 +41,10 @@ public:
     // prediction and sound legs. A row without traits has no vehicle mover.
     void update_motor(Entity &row, bool is_authority);
 	void initialize_mission_vehicles();
+	// The mission start's deck pass over the player spawn markers, ahead of the
+	// vehicle settle (initialize_mission_vehicles calls it). [orig:
+	//  Game_StartMission @0x525E6D..0x525F58]
+	void localize_deck_spawn_markers();
 	void build_spawn_markers();
 	void tick_spawn_markers();
 	void capture_spawn_pose(Entity &vehicle);

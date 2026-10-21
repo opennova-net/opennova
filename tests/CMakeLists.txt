@@ -5225,6 +5225,11 @@ add_test(NAME damage_class_bytes COMMAND damage_class_bytes_test)
 add_executable(fire_cadence_test world/fire_cadence_test.cpp)
 target_link_libraries(fire_cadence_test PRIVATE opennova_runtime)
 add_test(NAME fire_cadence COMMAND fire_cadence_test)
+# D-NET-161 (b): the mission start's deck pass: a player spawn marker on a carrier takes it as its
+# ground link and its words in the carrier's frame.
+add_executable(deck_spawn_markers_test world/deck_spawn_markers_test.cpp)
+target_link_libraries(deck_spawn_markers_test PRIVATE opennova_runtime)
+add_test(NAME deck_spawn_markers COMMAND deck_spawn_markers_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

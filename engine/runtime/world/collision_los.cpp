@@ -105,6 +105,62 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
     return nearest;
 }
 
+EntityHandle CollisionWorld::find_nearest_by_ray(World &world, EntityHandle source,
+                                                 const int32_t start[3], const int32_t end[3]) {
+    // [orig: Entity_FindNearestByRay @0x413AF0]
+    int32_t clipped[3] = {end[0], end[1], end[2]};
+    const Entity *se = world.registry.get(source);
+    // [orig: `!sourceEntity || !(Flags & 0x800000)` @0x413B12 ->
+    //  Terrain_RaycastHeightmapHiRes_0 @0x413B1E]
+    if (terrain != nullptr && terrain->valid() &&
+            (se == nullptr || (se->flags & kEntityFlagIndoors) == 0))
+        (void)terrain_clip_segment(*terrain, start, clipped, clipped);
+    CollisionRay ray;
+    for (int axis = 0; axis < 3; ++axis) {
+        ray.start[axis] = start[axis];
+        ray.end[axis] = clipped[axis];
+    }
+    ray.refresh();
+    EntityHandle nearest;
+    CollisionTargetView view;
+    std::vector<CollisionMatrix> mats;
+    const auto test_row = [&](EntityHandle ch, const int32_t p[3], int32_t radius) {
+        // The ray box, Y then X then Z, then the line distance at the table's
+        // position and radius. [orig: @0x413C44..0x413CAA, @0x413D02..0x413DA7;
+        //  the dynamic twin @0x413E6A..0x413ED4, @0x413F2C..0x414004]
+        if (abs32(ray.mid[1] - p[1]) > radius + static_cast<int32_t>(ray.half[1]) ||
+                abs32(ray.mid[0] - p[0]) > radius + static_cast<int32_t>(ray.half[0]) ||
+                abs32(ray.mid[2] - p[2]) > radius + static_cast<int32_t>(ray.half[2]))
+            return;
+        if (ray_line_distance(ray.start, ray.dir, p) > radius) return;
+        const Entity *ce = world.registry.get(ch);
+        if (ce == nullptr) return;
+        // [orig: `test dword ptr [esi+24h], 2000001h` @0x413DB4; the
+        //  groundEntity chain @0x413DBD..0x413DDA]
+        if ((ce->flags & 0x2000001u) != 0) return;
+        EntityHandle g = ce->ground_target;
+        for (int depth = 0; depth < 3 && g.valid(); ++depth) {
+            if (g == source) return;
+            const Entity *ge = world.registry.get(g);
+            g = ge != nullptr ? ge->ground_target : EntityHandle{};
+        }
+        const CollisionTargetView *tv = target_view(world, ch, view, mats);
+        if (tv == nullptr) return;
+        // [orig: Entity_RaycastCollisionModel @0x413DE2 / @0x41400C]
+        if (collision_raycast_model(*tv, ray)) nearest = ch;
+    };
+    for (const StaticSlot &s : statics_) {
+        const int32_t p[3] = {static_slot_coord_q16(s.x), static_slot_coord_q16(s.y),
+                              static_slot_coord_q16(s.z)};
+        test_row(s.h, p, static_cast<int32_t>(s.radius) << 16);
+    }
+    for (const DynSlot &d : dynamics_) {
+        const int32_t p[3] = {d.x, d.y, d.z};
+        test_row(d.h, p, d.radius);
+    }
+    return nearest;
+}
+
 int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const int32_t pos[3],
                                        int32_t dx, int32_t dy, int32_t z_up, int32_t z_drop,
                                        EntityHandle *out_hit_entity) {

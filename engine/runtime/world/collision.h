@@ -1434,6 +1434,19 @@ public:
                                                    const int32_t start[3],
                                                    int32_t inout_end[3]);
 
+    // The nearest solid a segment crosses over the published proximity tables
+    // (the statics, then the dynamics), not a candidate slice: the terrain clips
+    // the end first (an indoors source skips it), each table row passes the ray
+    // box and the line distance at its table position and radius, a row with
+    // Flags 0x2000001 or standing on the source (three levels) is skipped, and
+    // the collision model clips the ray; the last clip is the nearest. Returns
+    // the hit entity, invalid on a miss. [orig: Entity_FindNearestByRay
+    // @0x413AF0 (the terrain clip @0x413B12..0x413B1E, the static walk
+    // @0x413C1F..0x413E0D, the dynamic walk @0x413E2C..0x41403A, the end's
+    // restore @0x413E40..0x413E4B)]
+    EntityHandle find_nearest_by_ray(World &world, EntityHandle source, const int32_t start[3],
+                                     const int32_t end[3]);
+
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain
     // column, clips against candidate solids; returns the resolved ground Z and

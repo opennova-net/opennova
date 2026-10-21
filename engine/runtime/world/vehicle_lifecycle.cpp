@@ -3,11 +3,14 @@
 #include "ai.h"
 #include "angle.h"
 #include "collision.h"
+#include "player_spawn.h" // item_index_by_type_id
 #include "vehicle_motor_detail.h"
 #include <base/io/bam.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
+#include <vector>
 
 namespace opennova::world {
 namespace {
@@ -28,6 +31,22 @@ struct Trig {
 };
 void read_pose(const Entity &e, int32_t pose[6]) {
 	carrier_pose_fixed(e, pose, pose[3], pose[4], pose[5]);
+}
+// A pose into its reference's frame, in place: the position turned by the
+// reference's inverse attitude, the yaw less the reference's, pitch and roll
+// kept. [orig: Entity_TransformWorldToLocal @0x43BB50]
+void transform_world_to_local(const int32_t parent[6], int32_t pose[6]) {
+	const Trig t(parent, true);
+	const int32_t x = bam_sub(pose[0], parent[0]);
+	const int32_t y = bam_sub(pose[1], parent[1]);
+	const int32_t z = bam_sub(pose[2], parent[2]);
+	const int32_t tx = bam_sub(mul22(x, t.c[0]), mul22(y, t.s[0]));
+	const int32_t ty = bam_add(mul22(x, t.s[0]), mul22(y, t.c[0]));
+	const int32_t tz = bam_add(mul22(tx, t.s[1]), mul22(z, t.c[1]));
+	pose[0] = bam_sub(mul22(tx, t.c[1]), mul22(z, t.s[1]));
+	pose[1] = bam_sub(mul22(ty, t.c[2]), mul22(tz, t.s[2]));
+	pose[2] = bam_add(mul22(ty, t.s[2]), mul22(tz, t.c[2]));
+	pose[3] = bam_sub(pose[3], parent[3]);
 }
 void write_pose(Entity &e, const int32_t pose[6]) {
 	e.position.set_q16({pose[0], pose[1], pose[2]});
@@ -80,17 +99,7 @@ void VehicleSystem::capture_spawn_pose(Entity &e) {
 	if (const Entity *support = world_.registry.get(m.spawn_support)) {
 		int32_t parent[6];
 		read_pose(*support, parent);
-		const Trig t(parent, true);
-		const int32_t x = bam_sub(m.spawn_pose[0], parent[0]);
-		const int32_t y = bam_sub(m.spawn_pose[1], parent[1]);
-		const int32_t z = bam_sub(m.spawn_pose[2], parent[2]);
-		const int32_t tx = bam_sub(mul22(x, t.c[0]), mul22(y, t.s[0]));
-		const int32_t ty = bam_add(mul22(x, t.s[0]), mul22(y, t.c[0]));
-		const int32_t tz = bam_add(mul22(tx, t.s[1]), mul22(z, t.c[1]));
-		m.spawn_pose[0] = bam_sub(mul22(tx, t.c[1]), mul22(z, t.s[1]));
-		m.spawn_pose[1] = bam_sub(mul22(ty, t.c[2]), mul22(tz, t.s[2]));
-		m.spawn_pose[2] = bam_add(mul22(ty, t.s[2]), mul22(tz, t.c[2]));
-		m.spawn_pose[3] = bam_sub(m.spawn_pose[3], parent[3]);
+		transform_world_to_local(parent, m.spawn_pose);
 	}
 	m.spawn_pose_valid = true;
 }
@@ -121,6 +130,48 @@ bool VehicleSystem::resolve_spawn_pose(const Entity &e, int32_t pose[6]) const {
 	return true;
 }
 
+// The player spawn markers (types 6001..6004 and 6094..6097, each compared by
+// its items.def row: ItemList_FindIndexByTypeId answers 0 for a type no row
+// carries) take the entity a ray from 1 u over them to 7 u under them finds as
+// their ground link, null on a miss, and a marker that found one moves into
+// that entity's frame in place: its position and yaw carrier-local, as the
+// S2C 0x20 streams them and the spawn's pose turns them back (spawn_select's
+// marker_pose). [orig: Game_StartMission @0x524360 (the pool-3 walk
+// @0x525E6D..0x525F58, the probe @0x525F25..0x525F34, the transform
+// @0x525F39..0x525F50); Entity_FindGroundObjectByRay @0x414380 (the ray @0x414392..0x4143C4,
+// Entity_FindNearestByRay @0x4143C8, the store @0x4143D0)]
+void VehicleSystem::localize_deck_spawn_markers() {
+	static constexpr int32_t kTypes[] = {6001, 6094, 6003, 6096, 6004, 6097, 6002, 6095};
+	int32_t rows[8];
+	for (int i = 0; i < 8; ++i)
+		rows[i] = item_index_by_type_id(world_, kTypes[i]);
+	std::vector<EntityHandle> markers;
+	world_.registry.for_each_in_pool(3, [&](const Entity &e) {
+		if (std::find(std::begin(rows), std::end(rows), e.item_type_index) != std::end(rows))
+			markers.push_back(e.handle);
+	});
+	for (EntityHandle handle : markers) {
+		Entity *marker = world_.registry.get(handle);
+		if (marker == nullptr)
+			continue;
+		const int32_t start[3] = {marker->position.x.q16, marker->position.y.q16,
+				bam_add(marker->position.z.q16, 0x10000)};
+		const int32_t end[3] = {start[0], start[1], bam_sub(start[2], 0x80000)};
+		marker->ground_target = world_.ai.collision != nullptr
+				? world_.ai.collision->find_nearest_by_ray(world_, handle, start, end)
+				: EntityHandle{};
+		const Entity *ground = world_.registry.get(marker->ground_target);
+		if (ground == nullptr)
+			continue;
+		int32_t parent[6], pose[6];
+		read_pose(*ground, parent);
+		read_pose(*marker, pose);
+		transform_world_to_local(parent, pose);
+		marker->position.set_q16({pose[0], pose[1], pose[2]});
+		marker->heading = pose[3];
+	}
+}
+
 // [orig: Game_StartMission @0x525F80..0x526071]
 void VehicleSystem::initialize_mission_vehicles() {
 	std::vector<EntityHandle> handles;
@@ -137,6 +188,7 @@ void VehicleSystem::initialize_mission_vehicles() {
 		if (Entity *entry = world_.registry.get(handle))
 			setup_gunner_attachments(*entry);
 	}
+	localize_deck_spawn_markers();
 	for (EntityHandle handle : handles) {
 		Entity *entry = world_.registry.get(handle);
 		if (entry == nullptr)
