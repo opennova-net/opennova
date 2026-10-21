@@ -1995,7 +1995,7 @@ func _process(delta: float) -> void:
 	# state holds the tick, and the paused frame's own legs (the main-frame counter, the
 	# weather tick ahead of the pause test, the cine pass and the HUD radar) run through
 	# the session's paused branch exactly as under the debug pause row
-	# (engine inmatch::Session::step_paused_frame_counters carries the witness).
+	# (engine inmatch::Session::run_paused_update_legs carries the witness).
 	# A joiner's mission start owes its input reset once its game-start wait
 	# ends (engine inmatch::ClientRuntime::take_input_reset).
 	var reset_sim: Simulation = _world.get_sim()

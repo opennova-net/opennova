@@ -399,7 +399,7 @@ GameWorld::LegResult GameWorld::leg_session(FrameContext &r_ctx) {
 	// A paused single-player session still takes its frame: Session::advance runs the paused
 	// frame's own legs (the main-frame counter, the weather tick ahead of the pause test, the
 	// cine and HUD-radar passes) and ticks nothing, as retail's main frame runs under the
-	// menu pause (engine inmatch::Session::step_paused_frame_counters carries the witness).
+	// menu pause (engine inmatch::Session::run_paused_update_legs carries the witness).
 	if (presentation == nullptr ||
 			!(presentation->is_playing() || presentation->is_session_paused())) {
 		return kLegSkipped;

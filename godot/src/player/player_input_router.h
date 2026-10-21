@@ -34,11 +34,14 @@ class Simulation;
 // shell's ControlsBindings singleton owns (persistence stays shell-side); a
 // null model reads every token released.
 //
-// The router is also the session's per-tick input source (engine
+// The router is also the session's per-update input source (engine
 // inmatch::TickInputSource carries the witness): before_world_tick's sample is
-// the frame's first tick's input frame, and each later tick the frame banks
-// samples the devices again at the logic tick it runs as, under the gates the
-// frame's sample took.
+// the frame's first update's movement and action rows, each later update the
+// frame banks samples the devices again at the logic tick it runs as, under the
+// gates the frame's sample took, and every update the session runs, a paused one
+// too, polls its talk and HUD rows (run_update_rows). A frame that runs no update
+// polls no row; the rows it saw down stay latched for the next update's poll, as
+// retail's queue keeps a key event for the next update's drain.
 class PlayerInputRouter final : public opennova::inmatch::TickInputSource {
 public:
 	// The world serves the sim; the presenter serves the presentation surfaces
@@ -57,8 +60,13 @@ public:
 	// returned frame names this router as its per-tick source.
 	Ref<MissionFrameInput> before_world_tick(double p_delta, bool p_capture_mouse,
 			bool p_gameplay_input_active, bool p_menu_open = false);
-	// A later tick's input frame of the frame before_world_tick sampled.
+	// A later tick's movement and action rows of the frame before_world_tick
+	// sampled, over the device state its run_update_rows stepped to.
 	opennova::inmatch::InputPacket sample_tick(uint32_t p_logic_tick) override;
+	// An update's talk and HUD rows: true when its pause row flipped the
+	// single-player pause word. `p_new_sample` steps the device to the update's
+	// logic tick first (a later update of a running frame).
+	bool run_update_rows(uint32_t p_logic_tick, bool p_new_sample) override;
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	// Drop the trigger latches (the presenter's reset-state path). The
@@ -111,20 +119,24 @@ private:
 	// The token's binding held RIGHT NOW (released with no model).
 	bool pressed(const char *p_token) const;
 	// An input frame's head at the logic tick it runs as: the scripted device
-	// stepped to it (its look pixels taken), the key scan's gates set and the
-	// talk rows polled. Returns whether the death screen is up.
+	// stepped to it (its look pixels taken) and the key scan's gates set.
+	// Returns whether the death screen is up.
 	bool begin_input_frame(const Ref<Simulation> &p_sim, int64_t p_logic_tick,
 			Vector2 &r_scripted_look);
 	// The input frame's device sample into `p_input` (movement, view keys,
 	// look, the action rows and their requests), under the frame's gates.
 	void sample_input_frame(const Ref<MissionFrameInput> &p_input, const Vector2 &p_scripted_look,
 			bool p_spectating);
-	// The input frame's HUD toggle rows through the HUD's toggles, ahead of the
-	// action rows, which read the menus the rows open.
-	void poll_hud_toggles(const Ref<Simulation> &p_sim);
-	// The input frame's talk rows through the HUD's chat line, with or
-	// without a local player.
-	void poll_talk_rows(const Ref<Simulation> &p_sim);
+	// The input frame's HUD toggle rows (`p_rows_down`, 1 << HudToggles::Row)
+	// through the HUD's toggles, ahead of a later update's action rows, which
+	// read the menus the rows open. True when the pause row flipped the pause word.
+	bool poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_down);
+	// The input frame's talk rows (`p_rows_down`, 1 << HudChatEntry row) through
+	// the HUD's chat line, with or without a local player.
+	void poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_down);
+	// The rows' bindings held RIGHT NOW, one bit each.
+	int hud_rows_down() const;
+	int talk_rows_down() const;
 	void read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
 			bool &r_lean_left, bool &r_lean_right, bool &r_jump) const;
 
@@ -151,6 +163,13 @@ private:
 	bool frame_player_ = false;
 	bool frame_gameplay_input_active_ = false;
 	bool frame_menu_open_ = false;
+	// The talk and HUD rows the samples since the last update's poll saw down.
+	int latched_talk_rows_ = 0;
+	int latched_hud_rows_ = 0;
+	// A later update's device step (run_update_rows): the look pixels and the
+	// death screen its sample_tick reads.
+	Vector2 tick_scripted_look_;
+	bool tick_spectating_ = false;
 };
 
 } // namespace godot

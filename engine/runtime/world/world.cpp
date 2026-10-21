@@ -582,8 +582,11 @@ TickContext World::begin_tick(bool is_authority, TickPhase phase) {
     // boundary. [orig: WacScript_ExecuteBytecode @0x4F58F4]
     // The frame's HUD counters, ahead of its input, server tick and entity
     // update [orig: Game_ProcessMainFrame @0x5265D5 -> Game_TickHudFrameCounters];
-    // the menu pause runs no tick here (HudFrameCounters).
-    hud_frames.step(/*menu_paused=*/false, epilog_screen_active());
+    // the menu pause runs no tick here (HudFrameCounters). The resuming update's
+    // counters already stepped as paused ahead of its input frame
+    // (SessionRules::update_head_stepped).
+    if (!rules.update_head_stepped)
+        hud_frames.step(/*menu_paused=*/false, epilog_screen_active());
     TickContext ctx;
     ctx.world = this;
     ctx.logic_tick = logic_tick;

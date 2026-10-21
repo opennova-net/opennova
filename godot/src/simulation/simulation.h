@@ -669,7 +669,7 @@ public:
 		return session_.state() == opennova::inmatch::State::Running;
 	}
 	// A single-player session the pause holds: its frames still take Session::advance's
-	// paused branch (engine inmatch::Session::step_paused_frame_counters).
+	// paused branch (engine inmatch::Session::run_paused_update_legs).
 	bool is_session_paused() const {
 		return session_.state() == opennova::inmatch::State::Paused;
 	}

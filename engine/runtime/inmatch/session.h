@@ -128,10 +128,31 @@ struct CameraSample {
 //  test @0x52640E, the Input_PumpAndCenterCursor call @0x526458); Game_MainLoop
 //  @0x52B630 (g_MainLoopFirstUpdate raised @0x52B9FC, dropped after each update
 //  @0x52BA5E); Input_PumpAndCenterCursor @0x7616D0].
+// An input frame belongs to an update: a frame whose bank drains no update runs
+// none, so its key events wait in the queue for the next update's drain, and a
+// paused update runs its input frame as a running one does (no menu screen up).
+// The session therefore calls run_update_rows at EVERY update it runs, the
+// paused ones included: the update's talk and HUD rows, the rows whose dispatch
+// changes their own state at once (the HUD toggles, the chat line). `new_sample`
+// is true for a later update of a running frame, whose device sample is its own
+// (the source steps its device to `logic_tick` first; that update's movement and
+// action rows then come from sample_tick); false for the frame's first update
+// and each paused update, whose device state is the frame's sample. The return
+// is true when the update's pause row flipped the single-player pause word
+// (case 25): the session applies it at that update (Session::run_updates).
+// [orig: Game_MainLoop @0x52B630 (the drain @0x52BA08, the update call @0x52BA58);
+//  Game_ProcessMainFrame @0x5263F0 (Input_ProcessFrame @0x52661D under no menu
+//  screen, after the pause word's first test @0x5265A0); Input_HandleActionBinding
+//  @0x49AD40 (case 25 @0x49B520: `xor dword_A87050, 1` @0x49B52D)]
 class TickInputSource {
 public:
 	virtual ~TickInputSource() = default;
 	virtual InputPacket sample_tick(uint32_t logic_tick) = 0;
+	virtual bool run_update_rows(uint32_t logic_tick, bool new_sample) {
+		(void)logic_tick;
+		(void)new_sample;
+		return false;
+	}
 };
 
 struct FrameInput {
@@ -169,6 +190,10 @@ struct TickInput {
 	// catches up: the outer loop's "<16 ms of backlog left" flag the fire-loop
 	// emitter and the lock tone read (World::rules.last_tick_of_batch).
 	bool last_tick_of_batch = true;
+	// The update's head already ran under the pause word: the resuming update,
+	// whose HUD counters stepped as paused ahead of its input frame, so its tick
+	// steps them no more (World::rules.update_head_stepped).
+	bool head_stepped = false;
 };
 
 enum class TickStatus : uint8_t {
@@ -201,6 +226,9 @@ enum class FrameStatus : uint8_t {
 struct FramePerf {
 	int64_t tick_us = 0;
 	int32_t ticks = 0;
+	// The updates the frame's drain ran, paused ones included (the CPU share's
+	// update count, world::TickAccumulator::record_frame_work).
+	int32_t updates = 0;
 };
 
 struct FrameOutcome {
@@ -472,11 +500,19 @@ public:
 	// through the same target and terminal-state handling as realtime cadence.
 	FrameOutcome drive_one(const FrameInput &input = {});
 
+	// The shell's pause and resume (the in-game menu's share of the pause word, the
+	// escape chain's clear, the debug transport). Neither touches the frame-time
+	// bank: retail's pause word gates the update's legs, never the main loop's bank
+	// (world::TickAccumulator); the pending one-shots drop, as nothing consumes a
+	// queued event under the menu and its close resets the queue. The pause row's
+	// own flip applies inside the update that reads it (run_updates).
 	TransitionResult pause();
 	TransitionResult resume();
 	TransitionResult reset_to_baseline();
 	TransitionResult close();
 
+	// A mode change's reset: the bank, its smoothing history and the FR counter
+	// (the mode init, Game_MainLoop @0x52B715..0x52B757), and the input latch.
 	void reset_bank();
 
 private:
@@ -489,13 +525,23 @@ private:
 	// One update of the main frame's mouse pump: the first update of `due` takes the
 	// cursor offset the frame banked; `axis` is the update's two-tap sum.
 	void step_mouse_pump(int32_t update, int32_t due, bool menu_open, int32_t (&axis)[2]);
-	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
+	// The frame's `due` updates, each in retail's update order: its input frame
+	// (TickInputSource::run_update_rows, a later update's sample_tick), the mouse
+	// pump, then the running update's role tick, the pausing update (its pause row
+	// raised the pause word), the paused update's legs or the resuming update's
+	// tick. `transport`: the debug transport's forced step (step_once, drive_one),
+	// whose updates run the role's tick whatever the state and apply no flip.
+	FrameOutcome run_updates(int32_t due, const FrameInput &input, bool transport);
 	TickOutcome run_one_tick(const TickInput &input);
 	void step_cine_render_frame();
-	// The paused frame's banked updates: the legs retail's main frame runs past
-	// its pause tests (the mouse pump, the main-frame counter, the fire-sound
-	// slots, the tracer pool, the weather, the 62-update second).
-	void step_paused_frame_counters(const FrameInput &input);
+	// The legs a paused update runs past the pause word's tests, in its order (the
+	// pending-sound pass, the tracer pool, the third-person camera, the weather, the
+	// 62-update second, the /PROFILE frame), the pausing update's and every paused
+	// one's. A new paused leg goes here.
+	void run_paused_update_legs();
+	// Every state change, with the pause word the action rows' head reads
+	// (world::SessionRules::pause_word).
+	void set_state(State to);
 	// One update into the 62-update second, and one rendered frame into the
 	// frames it publishes, for the running and the paused frame alike.
 	void count_update_into_second();

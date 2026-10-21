@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -425,6 +426,63 @@ void test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch() {
 	}
 }
 
+// An input frame belongs to an update (D-NET-NEW-LI-8): a frame whose bank drains
+// no update polls no row, the next frame's first update polls over the frame's
+// sample, each later one over its own, and a paused update polls its rows too.
+// [orig: Game_MainLoop @0x52B630 (the drain @0x52BA08, the update call @0x52BA58);
+//  Game_ProcessMainFrame @0x5263F0 (Input_ProcessFrame @0x52661D)]
+void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
+	struct Rows final : TickInputSource {
+		std::vector<std::pair<uint32_t, bool>> calls;
+		int samples = 0;
+		InputPacket sample_tick(uint32_t) override {
+			++samples;
+			return {};
+		}
+		bool run_update_rows(uint32_t logic_tick, bool new_sample) override {
+			calls.emplace_back(logic_tick, new_sample);
+			return false;
+		}
+	};
+	{
+		// A cold bank drains nothing under 4 ms, then a 14 ms frame drains one
+		// quantum on the tick phase (inmatch_session_test's zero-tick frame).
+		auto idle_role = std::make_unique<TickRecorder>();
+		Rows idle_rows;
+		Session idle_session(*idle_role);
+		CHECK(load(idle_session), "the session runs");
+		FrameInput idle;
+		idle.delta_seconds = 0.002;
+		idle.tick_source = &idle_rows;
+		CHECK(idle_session.advance(idle).ticks_run() == 0 && idle_rows.calls.empty(),
+				"a frame that drains no update polls no row");
+		FrameInput next;
+		next.delta_seconds = 0.014;
+		next.tick_source = &idle_rows;
+		CHECK(idle_session.advance(next).ticks_run() == 1 &&
+						idle_rows.calls == std::vector<std::pair<uint32_t, bool>>({{500u, false}}),
+				"the next frame's one update polls once over its sample");
+	}
+	auto role = std::make_unique<TickRecorder>();
+	Rows rows;
+	Session session(*role);
+	CHECK(load(session), "the session runs");
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	three.tick_source = &rows;
+	CHECK(session.advance(three).ticks_run() == 3, "three updates");
+	CHECK(rows.calls == std::vector<std::pair<uint32_t, bool>>({{500u, false}, {501u, true}, {502u, true}}) &&
+					rows.samples == 2,
+			"the first update polls over the frame's sample, each later one over its own");
+	rows.calls.clear();
+	CHECK(session.pause().applied(), "the pause");
+	const int ran = session.advance(three).ticks_run();
+	CHECK(ran == 0 && !rows.calls.empty(), "a paused frame runs no tick");
+	bool frozen = true;
+	for (const auto &call : rows.calls) frozen = frozen && call.first == 503u && !call.second;
+	CHECK(frozen, "each paused update polls its rows at the frozen tick over the frame's sample");
+}
+
 } // namespace
 
 int main() {
@@ -436,6 +494,7 @@ int main() {
 	test_the_pump_across_the_single_player_pause();
 	test_an_input_reset_leaves_the_pumps_words();
 	test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch();
+	test_rows_poll_once_per_update_and_never_in_a_no_update_frame();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

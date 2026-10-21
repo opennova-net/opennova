@@ -1,11 +1,13 @@
 #include <runtime/inmatch/session.h>
 
+#include <runtime/controls/controls.h> // action_code (the head gate pins)
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/radar_contacts.h>
 
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -24,6 +26,8 @@ struct TickProbe final : Role {
 	opennova::mission::MissionKernel kernel;
 	std::vector<TickInput> inputs;
 	std::vector<bool> rules_batch_flags; // World::rules.last_tick_of_batch as the tick saw it
+	std::vector<bool> head_flags;        // World::rules.update_head_stepped as the tick saw it
+	std::vector<uint32_t> ticks_seen;    // World::logic_tick at the tick's head
 	std::vector<int32_t> frame_rates;     // every FR-counter value the session handed over
 	int32_t logic_tick = 100;
 	int reset_calls = 0;
@@ -36,6 +40,8 @@ struct TickProbe final : Role {
 	void run_tick(const TickInput &input) override {
 		inputs.push_back(input);
 		rules_batch_flags.push_back(kernel.world.rules.last_tick_of_batch);
+		head_flags.push_back(kernel.world.rules.update_head_stepped);
+		ticks_seen.push_back(kernel.world.logic_tick);
 		if (next_status == TickStatus::Ran) kernel.world.logic_tick = static_cast<uint32_t>(++logic_tick);
 	}
 	bool session_lost(SessionError &error) const override {
@@ -209,17 +215,23 @@ int main() {
 		if (!expect(session.advance(slow).ticks_run() == 2,
 				"after the start frames the full frame time banks again")) return 1;
 
-		// An unsampled render clock falls back to the frame delta.
+		// An unsampled render clock falls back to the frame delta. The restart is no
+		// mode init, so the bank keeps its history: the residual 16 plus the 48 ms
+		// (768 units), smoothed against 336: (7 * 336 + 784 + 4) >> 3 = 392 units,
+		// 6 quanta from phase 5, one tick (phase 8).
 		if (!expect(session.reset_to_baseline().applied() &&
 				session.resume().applied(), "restart runs again")) return 1;
 		FrameInput unsampled;
 		unsampled.delta_seconds = TickAccumulator::kTickDt * 3.0;
-		if (!expect(session.advance(unsampled).ticks_run() == 3,
+		if (!expect(session.advance(unsampled).ticks_run() == 1,
 				"no render sample: the frame delta banks")) return 1;
 	}
 
-	// Pause clears the bank and its smoothing history; manual step and reset
-	// stay local-only.
+	// Pause, a manual step and a reset keep the bank and its smoothing history
+	// (D-NET-NEW-LI-8): no pause writes g_TickPhase or g_FrameTimeSmoothedFp4, and
+	// a restart is no mode init [orig: Game_MainLoop @0x52B630 (the mode init
+	// @0x52B715 / @0x52B71B, the EMA @0x52B845, the drain's phase @0x52BA6B);
+	// Game_RestartRoundSP @0x5263A0]. Manual step and reset stay local-only.
 	{
 		TickProbe target;
 		Session session(target);
@@ -234,12 +246,110 @@ int main() {
 				session.state() == State::Paused,
 				"reset restores baseline and remains paused")) return 1;
 		if (!expect(session.resume().applied(), "resume after reset")) return 1;
-		// Without the resets this 1 ms frame would fast-forward 27 ticks
-		// through the stall's clamped history; a cold bank drains nothing.
+		// The stall drained its clamped 8000 units to 0 at phase 125; the 1 ms frame
+		// fast-forwards through that history: (7 * 8000 + 16 + 4) >> 3 = 7002 units,
+		// 109 quanta from phase 125, 27 ticks (a cold bank would drain nothing).
 		FrameInput tiny;
 		tiny.delta_seconds = 0.001;
-		if (!expect(session.advance(tiny).ticks_run() == 0,
-				"pause/reset discarded the stall's bank history")) return 1;
+		if (!expect(session.advance(tiny).ticks_run() == 27,
+				"pause/reset kept the stall's bank history")) return 1;
+	}
+
+	// The pause row's flip applies at the update whose input frame reads it: a
+	// three-update catch-up frame whose second update pauses runs one role tick, not
+	// three; the pausing update has stepped its HUD counters unpaused ahead of its
+	// input frame and then runs the paused legs, and the frozen tick is its own. The
+	// next frame's second update resumes: its counters stepped paused ahead of its
+	// input frame, its tick runs with the head stepped (no second step), and the
+	// frame's last update samples anew. The action rows' head drops a bit-0 row
+	// (the weapon select, the stance) while the word holds and passes the radar zoom
+	// (0x04000800, no bit 0). [orig: Game_ProcessMainFrame @0x5263F0 (`add
+	// g_CurrentTick` @0x5265B4, Game_TickHudFrameCounters @0x5265D5, Input_ProcessFrame
+	// @0x52661D, Server_TickUpdate @0x5266AE, Entity_UpdateAllEntities @0x52674B);
+	// Entity_UpdateAllEntities @0x4C2100 (@0x4C2103); Input_HandleActionBinding
+	// @0x49AD40 (case 25 @0x49B520, the pause gate @0x49ADDD..0x49ADE8)]
+	{
+		struct PauseRow final : TickInputSource {
+			std::vector<std::pair<uint32_t, bool>> calls; // (logic tick, new sample)
+			int flip_at = -1;                              // the call whose pause row fires
+			InputPacket sample_tick(uint32_t) override { return {}; }
+			bool run_update_rows(uint32_t logic_tick, bool new_sample) override {
+				calls.emplace_back(logic_tick, new_sample);
+				return static_cast<int>(calls.size()) - 1 == flip_at;
+			}
+		};
+		auto target = std::make_unique<TickProbe>();
+		Session session(*target);
+		if (!load(session)) return 1;
+		opennova::world::World &world = target->kernel.world;
+		world.registry.configure_pool(0, 8);
+		opennova::world::Entity seed;
+		seed.kind = opennova::world::EntityKind::Organic;
+		seed.alive = true;
+		world.cached.local_player = world.registry.spawn(0, seed);
+		const int32_t weapon = opennova::controls::action_code(30); // Primary, 0x0C000801
+		const int32_t stance = opennova::controls::action_code(10); // Crouch, 0x0C000C01
+		const int32_t zoom = opennova::controls::action_code(48);   // radarout, 0x04000800
+		if (!expect(world.cached.local_player.valid() && target->action_head_admits(weapon) &&
+				target->action_head_admits(stance) && target->action_head_admits(zoom),
+				"the rows pass the head while running")) return 1;
+		PauseRow rows;
+		rows.flip_at = 1;
+		const opennova::world::HudFrameCounters before = world.hud_frames;
+		FrameInput frame;
+		frame.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		frame.tick_source = &rows;
+		const FrameOutcome paused = session.advance(frame);
+		if (!expect(paused.status == FrameStatus::Ok && paused.ticks_run() == 1 &&
+				target->inputs.size() == 1 && session.state() == State::Paused &&
+				paused.state == State::Paused,
+				"the second update pauses: one role tick, not three")) return 1;
+		if (!expect(world.logic_tick == 101 && target->profile_ticks ==
+				std::vector<uint32_t>({101u, 101u}),
+				"the frozen tick is the pausing update's own, its paused legs and the "
+				"next update's at it")) return 1;
+		if (!expect(rows.calls == std::vector<std::pair<uint32_t, bool>>(
+				{{100u, false}, {101u, true}, {101u, false}}),
+				"every update polls its rows, a later running one over its own sample")) return 1;
+		if (!expect(world.hud_frames.main_frame - before.main_frame == 2 &&
+				world.hud_frames.session_frame - before.session_frame == 1 &&
+				world.hud_frames.hud_frame - before.hud_frame == 1,
+				"the pausing update's counters step unpaused, the paused one's paused")) return 1;
+		if (!expect(world.rules.pause_word && !target->action_head_admits(weapon) &&
+				!target->action_head_admits(stance) && target->action_head_admits(zoom),
+				"the pause word drops the bit-0 rows and passes the radar zoom")) return 1;
+		rows.calls.clear();
+		rows.flip_at = 1;
+		const opennova::world::HudFrameCounters paused_counters = world.hud_frames;
+		const FrameOutcome resumed = session.advance(frame);
+		if (!expect(resumed.status == FrameStatus::Ok && resumed.ticks_run() == 2 &&
+				session.state() == State::Running && target->inputs.size() == 3,
+				"the second update resumes and the frame's last runs too")) return 1;
+		if (!expect(target->head_flags == std::vector<bool>({false, true, false}) &&
+				target->inputs[1].head_stepped && target->ticks_seen[1] == 101 &&
+				target->ticks_seen[2] == 102 && world.logic_tick == 103,
+				"the resuming tick runs at the frozen tick with its head stepped")) return 1;
+		if (!expect(rows.calls == std::vector<std::pair<uint32_t, bool>>(
+				{{101u, false}, {101u, false}, {102u, true}}),
+				"the resuming update reads the frame's sample, the next its own")) return 1;
+		if (!expect(world.hud_frames.main_frame - paused_counters.main_frame == 2 &&
+				world.hud_frames.session_frame == paused_counters.session_frame,
+				"the probe's ticks step no counters: the paused and the resuming head's "
+				"paused steps alone")) return 1;
+		if (!expect(!world.rules.pause_word && target->action_head_admits(weapon) &&
+				target->action_head_admits(stance),
+				"the resume admits the rows again")) return 1;
+		// World::begin_tick skips its own step on the resuming tick.
+		const opennova::world::HudFrameCounters head = world.hud_frames;
+		world.rules.update_head_stepped = true;
+		(void)world.begin_tick(true, opennova::world::TickPhase::Gameplay);
+		if (!expect(world.hud_frames.main_frame == head.main_frame,
+				"a stepped head steps no counter at the tick")) return 1;
+		world.rules.update_head_stepped = false;
+		(void)world.begin_tick(true, opennova::world::TickPhase::Gameplay);
+		if (!expect(world.hud_frames.main_frame == head.main_frame + 1 &&
+				world.hud_frames.hud_frame == head.hud_frame + 1,
+				"an unstepped head steps them at the tick")) return 1;
 	}
 
 	// A paused frame runs no tick but still runs the weather tick: retail's main

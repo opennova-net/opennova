@@ -138,13 +138,19 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	if (owner == nullptr) {
 		return frame_input;
 	}
-	// The frame's sample is its first tick's input frame, at the logic tick
-	// that tick runs as; the session asks for each later tick's (sample_tick).
+	// The frame's sample is its first update's movement and action rows, at the
+	// logic tick that update runs as; the session asks for each later update's
+	// (sample_tick) and for every update's talk and HUD rows (run_update_rows).
 	frame_input->set_tick_source(this, ObjectID(owner->get_instance_id()));
 	const Ref<Simulation> tick_sim = sim();
 	Vector2 scripted_look;
 	const bool spectating = begin_input_frame(
 			tick_sim, tick_sim.is_valid() ? tick_sim->get_logic_tick() : -1, scripted_look);
+	// The rows this sample sees down wait for the next update's poll: a frame whose
+	// bank drains no update runs no input frame, and its key events stay queued
+	// (engine inmatch::TickInputSource carries the witness).
+	latched_talk_rows_ |= talk_rows_down();
+	latched_hud_rows_ |= hud_rows_down();
 	if (!owner->has_player()) {
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
@@ -164,13 +170,45 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 }
 
 opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_tick) {
+	// The device already stands at p_logic_tick: this update's run_update_rows
+	// stepped it and polled the rows ahead of the action rows.
+	(void)p_logic_tick;
 	Ref<MissionFrameInput> tick_input;
 	tick_input.instantiate();
 	tick_input->set_sequence(frame_sequence_);
-	Vector2 scripted_look;
-	const bool spectating = begin_input_frame(sim(), p_logic_tick, scripted_look);
-	if (frame_player_) sample_input_frame(tick_input, scripted_look, spectating);
+	if (frame_player_) sample_input_frame(tick_input, tick_scripted_look_, tick_spectating_);
+	tick_scripted_look_ = Vector2();
 	return tick_input->native_value().player;
+}
+
+bool PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample) {
+	// An update's input frame polls its talk and HUD rows, a paused update's too:
+	// the pause row's case dispatches from the drain of the update that reads it
+	// (engine inmatch::TickInputSource carries the witness). A later update of a
+	// running frame steps the device to the logic tick it runs as first.
+	const Ref<Simulation> rows_sim = sim();
+	if (p_new_sample)
+		tick_spectating_ = begin_input_frame(rows_sim, p_logic_tick, tick_scripted_look_);
+	const int talk_rows = talk_rows_down() | latched_talk_rows_;
+	const int hud_rows = hud_rows_down() | latched_hud_rows_;
+	latched_talk_rows_ = 0;
+	latched_hud_rows_ = 0;
+	poll_talk_rows(rows_sim, talk_rows);
+	return poll_hud_toggles(rows_sim, hud_rows);
+}
+
+int PlayerInputRouter::talk_rows_down() const {
+	int rows_down = 0;
+	for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
+		if (pressed(opennova::hud::chat_talk_row_token(row))) rows_down |= 1 << row;
+	return rows_down;
+}
+
+int PlayerInputRouter::hud_rows_down() const {
+	int rows_down = 0;
+	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
+		if (pressed(opennova::hud::hud_toggle_row_token(row))) rows_down |= 1 << row;
+	return rows_down;
 }
 
 bool PlayerInputRouter::begin_input_frame(const Ref<Simulation> &p_sim, int64_t p_logic_tick,
@@ -195,15 +233,10 @@ bool PlayerInputRouter::begin_input_frame(const Ref<Simulation> &p_sim, int64_t 
 		controls_->set_scan_gates(spectating, p_sim.is_valid() &&
 				(p_sim->session_role() == Simulation::ROLE_DEDICATED_HOST ||
 						p_sim->local_player_dead()));
-	poll_talk_rows(p_sim);
-	// The HUD rows too poll with or without a local player: a Serve Only host's
-	// drain dispatches lockgame, help and the status page's score list (the
-	// role's head admits them, Role::action_head_admits).
-	poll_hud_toggles(p_sim);
 	return spectating;
 }
 
-void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim) {
+void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_down) {
 	// The talk rows are action bindings the input frame's drain dispatches
 	// every tick, after any typed keys reached an open line, so a one-tick
 	// press inside a multi-tick frame opens its line on its tick; the command
@@ -214,10 +247,7 @@ void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim) {
 	// debounce and the flood are the engine's chat entry (ChatEntryFacts::frame,
 	// inmatch/chat_flood.h); the HUD presenter draws the line at its frame.
 	if (hud_chat_.is_null() || p_sim.is_null()) return;
-	int rows_down = 0;
-	for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
-		if (pressed(opennova::hud::chat_talk_row_token(row))) rows_down |= 1 << row;
-	hud_chat_->poll_rows(rows_down, frame_gameplay_input_active_, p_sim, chat_gametext_,
+	hud_chat_->poll_rows(p_rows_down, frame_gameplay_input_active_, p_sim, chat_gametext_,
 			p_sim->get_main_frame_counter());
 }
 
@@ -327,7 +357,7 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	}
 }
 
-void PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim) {
+bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_down) {
 	// The HUD's key rows are action bindings like the rest: the input frame's
 	// key scan fires them and its drain dispatches them, every tick, so a row
 	// pressed for one tick of a multi-tick frame fires on that tick. hudcolor
@@ -345,10 +375,7 @@ void PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim) {
 	// The key sampling is this router's; the edge latches, the cycles and the
 	// window toggles are the engine's poll (engine hud/hud_toggles.h); the HUD
 	// presenter applies the event words at its frame.
-	if (hud_toggles_.is_null() || p_sim.is_null()) return;
-	int rows_down = 0;
-	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
-		if (pressed(opennova::hud::hud_toggle_row_token(row))) rows_down |= 1 << row;
+	if (hud_toggles_.is_null() || p_sim.is_null()) return false;
 	// Each row's event passes the dispatcher's head by its catalog row's flags
 	// (the pre-round timer, the deploy overlay, the round-over gate, the dead
 	// operand): the rows the role's head drops this input frame (engine
@@ -362,7 +389,7 @@ void PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim) {
 	// session peer any role but a dedicated host. The mousescale row steps by
 	// its fire's sign bit (Shift on a modifier-less key).
 	const int role = p_sim->session_role();
-	const int64_t events = hud_toggles_->poll(rows_down, frame_gameplay_input_active_,
+	const int64_t events = hud_toggles_->poll(p_rows_down, frame_gameplay_input_active_,
 			p_sim->is_mp_session(),
 			opennova::game_type::is_objective(static_cast<uint32_t>(p_sim->get_session_game_type())),
 			!p_sim->local_player_dead(), role != Simulation::ROLE_JOINER,
@@ -372,6 +399,10 @@ void PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim) {
 							HudToggles::ROW_MOUSE_SCALE))),
 			head_drops);
 	if (events != 0) hud_toggle_events_.push_back(events);
+	// The pause row's flip reaches the session at this update (engine
+	// inmatch::Session::run_updates); the HUD presenter's later apply of the event
+	// finds the session already there.
+	return (events & HudToggles::EVENT_PAUSE_TOGGLED) != 0;
 }
 
 PackedInt64Array PlayerInputRouter::take_hud_toggle_events() {
@@ -401,6 +432,9 @@ bool PlayerInputRouter::take_vehicle_menu_request() {
 void PlayerInputRouter::reset_input_state() {
 	if (controls_.is_valid()) controls_->reset_key_state();
 	actions_.clear_key_press_latches();
+	// The key queue's reset drops the rows a no-update frame left waiting.
+	latched_talk_rows_ = 0;
+	latched_hud_rows_ = 0;
 	const Ref<Simulation> reset_sim = sim();
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
@@ -461,6 +495,9 @@ void PlayerInputRouter::reset() {
 	actions_.reset();
 	look_delta_ = Vector2();
 	close_axis_ = Vector2();
+	latched_talk_rows_ = 0;
+	latched_hud_rows_ = 0;
+	tick_scripted_look_ = Vector2();
 }
 
 void PlayerInputRouter::release_mouse_capture() {

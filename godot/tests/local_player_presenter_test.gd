@@ -402,7 +402,7 @@ func test_the_paused_frame_pumps_the_cursor_on_each_update() -> void:
 	# The pause row's paused frames still run the main frame's mouse pump on the
 	# live cursor: no input frame consumes their axis, and the last paused
 	# update's share pairs with the first tick after the resume (engine
-	# inmatch::Session::step_paused_frame_counters carries the witness).
+	# inmatch::Session::run_paused_update_legs carries the witness).
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)

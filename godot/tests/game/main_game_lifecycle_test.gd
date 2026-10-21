@@ -1220,7 +1220,7 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 			"the shell marks the overlay as the in-game menu")
 	# The pause menu's frames still run the session's paused branch: the main-frame
 	# counter steps on every banked frame while the pause holds the session counter
-	# (engine inmatch::Session::step_paused_frame_counters carries the witness, the
+	# (engine inmatch::Session::run_paused_update_legs carries the witness, the
 	# weather tick beside it, D-NET-NEW-L5-7).
 	var paused_sim: Simulation = world.get_sim()
 	var menu_main0: int = paused_sim.get_main_frame_counter()

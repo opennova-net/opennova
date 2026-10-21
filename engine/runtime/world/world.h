@@ -690,6 +690,19 @@ struct SessionRules {
     //  WeaponAction_ProcessFrame @0x5412a7, Entity_UpdateInfantryPlayerBody
     //  @0x4b5229]
     bool last_tick_of_batch = true;
+    // The update's head already ran under the pause word: the resuming update,
+    // whose HUD counters stepped as paused ahead of its input frame, so
+    // begin_tick steps them no more. The session stamps it per tick; a bare
+    // kernel keeps false (inmatch::Session::run_updates carries the witness).
+    // [orig: Game_ProcessMainFrame @0x5263F0 (Game_TickHudFrameCounters @0x5265D5
+    //  ahead of Input_ProcessFrame @0x52661D)]
+    bool update_head_stepped = false;
+    // The single-player pause word as the session holds it (its Paused state): the
+    // action rows' head drops every row whose flags carry bit 0 while it is set
+    // (inmatch::Role::action_head_admits). The session stamps it at each state
+    // change. [orig: dword_A87050; Input_HandleActionBinding @0x49AD40 (`test ecx,
+    //  ecx` @0x49ADDD, `cmp dword_A87050, 0` @0x49ADE1)]
+    bool pause_word = false;
     bool ignore_weapon_ammo_cost = false; // dword_24C1930 bit 0x100
     bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
     // The player profile's auto-reload word as the mission start's session copy

@@ -214,8 +214,9 @@ bool Role::action_head_admits(int32_t code) {
 	//  NapiNPClientMsg_0x00A @0x430064]
 	const uint32_t preround = joiner ? kernel.world.preround_delay_seconds
 			: kernel.world.cached.client_preround_timer;
-	// The gates in the head's order (the menu pause, bit 0's third gate, holds a session
-	// that then takes no input; the out-of-session round-over leg is the same drop).
+	// The gates in the head's order; bit 0's third gate is the single-player pause word,
+	// which the paused frame's sample meets (its action rows poll while the pause row's
+	// pause holds; the out-of-session round-over leg is the same drop).
 	// [orig: Input_HandleActionBinding @0x49AD40 - bit 0 with a6 @0x49AD95..0x49ADA0;
 	//  0x40 with !a6 @0x49ADA6..0x49ADAD; 0x400 @0x49ADB3..0x49ADC2; 0x8000000 with
 	//  g_DeployScreenActive @0x49ADC8..0x49ADD7; the pause @0x49ADDD..0x49ADE8;
@@ -226,6 +227,7 @@ bool Role::action_head_admits(int32_t code) {
 	if ((flags & 0x8000000u) != 0 && runtime != nullptr &&
 			runtime->state().deploy_overlay_active)
 		return false;
+	if ((flags & 0x1u) != 0 && w.rules.pause_word) return false;
 	if ((flags & 0x1u) != 0 && round_over) return false;
 	return !((flags & 0x10u) != 0 && kernel.world.rules.mp_session);
 }
@@ -470,9 +472,17 @@ TransitionResult Session::transition(State to) {
 		out.code = TransitionCode::NoOp;
 		return out;
 	}
-	state_ = to;
+	set_state(to);
 	out.code = TransitionCode::Applied;
 	return out;
+}
+
+void Session::set_state(State to) {
+	state_ = to;
+	// The pause word the action rows' head reads: a single-player session's Paused
+	// state (the pause row's, the in-game menu's and the transport's pause alike).
+	if (role_ != nullptr && role_->kernel() != nullptr)
+		role_->kernel()->world.rules.pause_word = to == State::Paused;
 }
 
 TransitionResult Session::rejected(
@@ -602,19 +612,116 @@ void Session::step_mouse_pump(int32_t update, int32_t due, bool menu_open, int32
 	mouse_pump_.step(update == 0, update + 1 == due, due, menu_open, cursor, axis);
 }
 
-FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
+// The frame's updates. Retail's update runs, in order: the head (the mouse pump on
+// the frame's first update; behind the pause word's first test the dialog step and
+// `add g_CurrentTick`; Game_TickHudFrameCounters, paused or not), the input frame
+// (Input_ProcessFrame under no menu screen, its drain dispatching the queued key
+// events, the pause row's case 25 among them), then the body: Server_TickUpdate
+// unpaused only, Entity_UpdateAllEntities (which returns on the pause at its
+// entry), the tracer pool, the third-person camera, the weather, the weapon walk
+// behind the second pause test, the 62-update second, the exit tests and the
+// /PROFILE frame. So the update whose input frame raises the pause has already
+// advanced the tick and stepped its HUD counters unpaused, and runs as a paused
+// update from its input frame on, as does every later update of the frame; the
+// update whose input frame lowers it advanced no tick and stepped its counters
+// paused, and runs its body unpaused. Ours' logic tick steps at the end of a
+// tick's entity pass, so World::logic_tick at a tick's head already equals
+// retail's g_CurrentTick after the head's add: the pausing update leaves it as
+// it stands (the frozen tick is the pausing update's own) and the resuming
+// update's tick ends with the step retail's next head takes. The dialog step,
+// which the shell runs at the end of each tick, stands for the next update's
+// head step on the same reading, so the pausing update runs no tick for it.
+// [orig: Game_ProcessMainFrame @0x5263F0 (the pump @0x52640E..0x526508; the pause
+//  word's test @0x5265A0, Dialog_UpdatePlayback @0x5265AF, `add g_CurrentTick`
+//  @0x5265B4; Game_TickHudFrameCounters @0x5265D5; Input_ProcessFrame @0x52661D;
+//  Server_TickUpdate behind the pause test @0x5266AE; Entity_UpdateAllEntities
+//  @0x52674B; the second pause test @0x526779; the 62-update second
+//  @0x5267AB..0x5267DF); Entity_UpdateAllEntities @0x4C2100 (the pause return
+//  @0x4C2103); Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520: the
+//  in-session return @0x49B527, `xor dword_A87050, 1` @0x49B52D,
+//  Input_ResetKeyQueue @0x49B53E)]
+FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool transport) {
 	FrameOutcome out;
 	out.status = FrameStatus::Ok;
 	out.state = state_;
 	const int64_t tick_start = now_us();
+	mission::MissionKernel *kernel = role_ != nullptr ? role_->kernel() : nullptr;
+	TickInputSource *source = kernel != nullptr ? input.tick_source : nullptr;
+	// The pause word flips only out of a session (case 25's return @0x49B527).
+	const bool flips_apply = !transport && kind_ == RoleKind::SinglePlayer;
+	// The transport's forced step runs the role's tick as a running update does,
+	// the action rows' head with it: the pause word is down for its tick.
+	if (transport && kernel != nullptr) kernel->world.rules.pause_word = false;
 	bool consume_one_shots = true;
+	// Whether the update before ran a tick: a later update then samples the device
+	// at the logic tick it runs as; the frame's first update and a paused one read
+	// the frame's sample.
+	bool previous_ran = false;
 	for (int32_t i = 0; i < due; ++i) {
-		// Each later tick of the batch runs its own input frame at the logic
-		// tick it runs as (TickInputSource carries the witness): its sample
-		// replaces the held state and its edges are its own to consume.
-		if (i > 0 && input.tick_source != nullptr && role_ != nullptr &&
-				role_->kernel() != nullptr) {
-			latch_packet(input.tick_source->sample_tick(role_->kernel()->world.logic_tick));
+		++out.perf.updates;
+		if (state_ == State::Paused && !transport) {
+			// A paused update: the mouse pump heads it (no input frame consumes the
+			// axis under a menu screen; under the pause row's pause the head drops
+			// the look rows), the HUD counters step paused ahead of its input frame,
+			// then the input frame, whose pause row may lower the word.
+			const bool menu_open = (input.player.held_action_bits & HELD_MENU_OPEN) != 0;
+			int32_t axis[2] = {};
+			step_mouse_pump(i, due, menu_open, axis);
+			if (kernel == nullptr) continue;
+			world::World &world = kernel->world;
+			world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
+			const bool resumes = source != nullptr &&
+					source->run_update_rows(world.logic_tick, /*new_sample=*/false) && flips_apply;
+			if (!resumes) {
+				run_paused_update_legs();
+				previous_ran = false;
+				continue;
+			}
+			// The resuming update: its body runs unpaused over the frame's sample
+			// (the cursor excluded: the paused head pumped it), with no tick step of
+			// its own at the head and its counters already stepped.
+			set_state(State::Running);
+			InputPacket sample = input.player;
+			sample.cursor_dx = sample.cursor_dy = 0;
+			latch_packet(sample);
+			latest_camera_ = input.camera;
+			consume_one_shots = true;
+			TickInput tick_input = merged_tick_input(input, true);
+			tick_input.head_stepped = true;
+			if (!menu_open) {
+				tick_input.player.look_delta_x += static_cast<float>(axis[0]);
+				tick_input.player.look_delta_y += static_cast<float>(axis[1]);
+			}
+			tick_input.last_tick_of_batch = i + 1 == due;
+			TickOutcome tick = run_one_tick(tick_input);
+			if (tick.terminal()) {
+				out.status = tick.status == TickStatus::SessionLost
+						? FrameStatus::SessionLost : FrameStatus::Fatal;
+				out.error = tick.error;
+				fail(tick.error ? tick.error : SessionError{
+						SessionErrorCode::TickFailed, "mission tick failed"});
+				break;
+			}
+			previous_ran = tick.ran();
+			if (!tick.ran()) continue;
+			out.ticks.push_back(std::move(tick));
+			consume_pending_one_shots();
+			consume_one_shots = false;
+			count_update_into_second();
+			continue;
+		}
+		// A running update's input frame: its talk and HUD rows, then (a later
+		// update) its own device sample at the logic tick it runs as, which
+		// replaces the held state with edges of its own to consume
+		// (TickInputSource carries the witness).
+		const bool new_sample = previous_ran && kernel != nullptr;
+		const bool pauses = source != nullptr &&
+				source->run_update_rows(kernel->world.logic_tick, new_sample) && flips_apply;
+		// The pause row raised the word in this input frame: the frame's later
+		// events meet the action rows' head with it set.
+		if (pauses) set_state(State::Paused);
+		if (new_sample && source != nullptr) {
+			latch_packet(source->sample_tick(kernel->world.logic_tick));
 			consume_one_shots = true;
 		}
 		TickInput tick_input = merged_tick_input(input, consume_one_shots);
@@ -625,6 +732,19 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 		const bool menu_open = (tick_input.player.held_action_bits & HELD_MENU_OPEN) != 0;
 		int32_t axis[2] = {};
 		step_mouse_pump(i, due, menu_open, axis);
+		if (pauses) {
+			// The pausing update: case 25's key-queue reset drops the input frame's
+			// events still queued, the head's HUD counters stepped unpaused before
+			// the input frame, and the body runs paused: no role tick (no server
+			// tick, entity update or weapon walk), only the paused legs.
+			consume_pending_one_shots();
+			consume_one_shots = false;
+			world::World &world = kernel->world;
+			world.hud_frames.step(/*menu_paused=*/false, world.epilog_screen_active());
+			run_paused_update_legs();
+			previous_ran = false;
+			continue;
+		}
 		if (!menu_open) {
 			tick_input.player.look_delta_x += static_cast<float>(axis[0]);
 			tick_input.player.look_delta_y += static_cast<float>(axis[1]);
@@ -641,16 +761,20 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 			out.error = tick.error;
 			fail(tick.error ? tick.error : SessionError{
 					SessionErrorCode::TickFailed, "mission tick failed"});
-			out.state = state_;
 			break;
 		}
+		previous_ran = tick.ran();
 		if (!tick.ran()) continue;
 		out.ticks.push_back(std::move(tick));
 		if (consume_one_shots) {
 			consume_pending_one_shots();
 			consume_one_shots = false;
 		}
+		// The transport's forced step is no main-loop update.
+		if (!transport) count_update_into_second();
 	}
+	if (transport && kernel != nullptr) kernel->world.rules.pause_word = state_ == State::Paused;
+	out.state = state_;
 	out.perf.tick_us = now_us() - tick_start;
 	out.perf.ticks = out.ticks_run();
 	return out;
@@ -666,6 +790,7 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 		return out;
 	}
 	role_->kernel()->world.rules.last_tick_of_batch = input.last_tick_of_batch;
+	role_->kernel()->world.rules.update_head_stepped = input.head_stepped;
 	role_->apply_input(input);
 	const int64_t tick_start = now_us();
 	role_->run_tick(input);
@@ -696,31 +821,20 @@ void Session::step_cine_render_frame() {
 	role_->kernel()->world.epilog.render_pass();
 }
 
-void Session::step_paused_frame_counters(const FrameInput &input) {
-	// Under the menu pause retail's frames still run, their pause-gated legs
-	// held: each banked frame steps the main-frame counter (the session and HUD
-	// counters wait on the pause, as the tick does), and the weather tick, which
-	// the frame runs ahead of its pause test, so the time of day and the weather
-	// keep stepping through the pause [orig: Game_ProcessMainFrame @0x5263F0 --
-	// `cmp dword_A87050, 0` @0x5265A0 around the tick's ++g_CurrentTick,
-	// Game_TickHudFrameCounters @0x5265D5 every frame, Environment_UpdateWeatherTick
-	// @0x57E9B0 called @0x526774 ahead of the pause test @0x526779; the entity
-	// update's own pause return, Entity_UpdateAllEntities @0x4C2100 (@0x4C2103)].
+void Session::run_paused_update_legs() {
+	// Under the pause retail's updates still run, their pause-gated legs held:
+	// each steps the main-frame counter (the session and HUD counters wait on the
+	// pause, as the tick does; run_updates steps them ahead of the input frame),
+	// and the weather tick, which the update runs ahead of its pause test, so the
+	// time of day and the weather keep stepping through the pause [orig:
+	// Game_ProcessMainFrame @0x5263F0 -- `cmp dword_A87050, 0` @0x5265A0 around the
+	// tick's ++g_CurrentTick, Game_TickHudFrameCounters @0x5265D5 every update,
+	// Environment_UpdateWeatherTick @0x57E9B0 called @0x526774 ahead of the pause test
+	// @0x526779; the entity update's own pause return, Entity_UpdateAllEntities
+	// @0x4C2100 (@0x4C2103)].
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	mission::MissionKernel &kernel = *role_->kernel();
 	world::World &world = kernel.world;
-	const int32_t due = accumulator_.bank(input.delta_seconds);
-	// The mouse pump heads every main frame, ahead of the pause word's test, so its
-	// words hold what the paused frames pumped: the paused frame's cursor waits for
-	// its first update as a running frame's does, and no input frame consumes the
-	// axis (a menu screen skips the input frame; under the pause row's pause the
-	// dispatcher head drops the look rows, whose flags carry bit 0) [orig:
-	// Game_ProcessMainFrame @0x5263F0 (the pump @0x52640E..0x526508, the pause word's
-	// test @0x5265A0); Input_HandleActionBinding @0x49AD40 (the pause gate
-	// @0x49ADDD..0x49ADE8)].
-	pending_input_.cursor_dx += input.player.cursor_dx;
-	pending_input_.cursor_dy += input.player.cursor_dy;
-	const bool menu_open = (input.player.held_action_bits & HELD_MENU_OPEN) != 0;
 	// The paused update's other unconditional legs, in its order: the whole
 	// pending-sound pass (the fire-sound slots count down, then the incoming-lock
 	// tone drains) and the trigger holds count down, the tracer pool ages and
@@ -739,19 +853,14 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 	// @0x526779); Sound_TickPendingSlots @0x529310 (the g_LockOnMeToneTicks drain
 	// @0x5293A5..0x5293AF); CEffectEmitterPool_Tick @0x5DB830;
 	// Sound_TickTriggerHolds @0x5292D0].
-	for (int32_t i = 0; i < due; ++i) {
-		int32_t axis[2] = {};
-		step_mouse_pump(i, due, menu_open, axis);
-		world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
-		world.tick_pending_sound_slots();
-		world.round_sim.trails.tick();
-		kernel.local.run_paused_camera_update();
-		kernel.tick_weather();
-		count_update_into_second();
-		// The /PROFILE frame leg past the exit tests, at the frozen tick
-		// [orig: Game_ProcessMainFrame @0x526879..0x5268E7].
-		role_->write_profile_frame();
-	}
+	world.tick_pending_sound_slots();
+	world.round_sim.trails.tick();
+	kernel.local.run_paused_camera_update();
+	kernel.tick_weather();
+	count_update_into_second();
+	// The /PROFILE frame leg past the exit tests, at the frozen tick
+	// [orig: Game_ProcessMainFrame @0x526879..0x5268E7].
+	role_->write_profile_frame();
 }
 
 void Session::count_update_into_second() {
@@ -792,18 +901,37 @@ void Session::step_hud_radar_frame() {
 FrameOutcome Session::advance(const FrameInput &input) {
 	FrameOutcome out;
 	out.state = state_;
-	if (state_ != State::Running) {
-		out.status = FrameStatus::NotRunning;
+	if (state_ == State::Paused) {
+		// The paused frame banks its time as every main frame does, and its updates
+		// run the one update loop: the paused legs (the lock tone's word drains
+		// there) until an update's pause row lowers the word (run_updates). The frame
+		// then renders and runs its HUD pass, where the menu pause keeps the lock
+		// tone unregistered.
+		const int32_t due = accumulator_.bank(input.delta_seconds);
+		// The mouse pump heads every main frame, ahead of the pause word's test, so its
+		// words hold what the paused frames pumped: the paused frame's cursor waits for
+		// its first update as a running frame's does, and no input frame consumes the
+		// axis (a menu screen skips the input frame; under the pause row's pause the
+		// dispatcher head drops the look rows, whose flags carry bit 0) [orig:
+		// Game_ProcessMainFrame @0x5263F0 (the pump @0x52640E..0x526508, the pause word's
+		// test @0x5265A0); Input_HandleActionBinding @0x49AD40 (the pause gate
+		// @0x49ADDD..0x49ADE8)].
+		pending_input_.cursor_dx += input.player.cursor_dx;
+		pending_input_.cursor_dy += input.player.cursor_dy;
+		out = run_updates(due, input, /*transport=*/false);
+		// A frame whose updates all stayed paused ran no tick.
+		if (out.ticks.empty() && !out.terminal()) out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
-		// The paused frame's updates run their unpaused legs (the lock tone's
-		// word drains there), then the frame renders and runs its HUD pass,
-		// where the menu pause keeps the lock tone unregistered.
-		if (state_ == State::Paused) {
-			step_paused_frame_counters(input);
-			count_rendered_frame();
+		count_rendered_frame();
+		if (!out.terminal()) {
 			step_cine_render_frame();
 			step_hud_radar_frame();
 		}
+		return out;
+	}
+	if (state_ != State::Running) {
+		out.status = FrameStatus::NotRunning;
+		last_perf_ = out.perf;
 		return out;
 	}
 	latch_input(input);
@@ -824,15 +952,14 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		role_->observe_frame_rate(accumulator_.average_fps());
 		role_->observe_cpu_share(accumulator_.cpu_percent());
 	}
-	out = run_ticks(due, input);
+	out = run_updates(due, input, /*transport=*/false);
 	// The CPU share's inputs: this frame's work from its start stamp to the
-	// end of the drain, and the updates the drain ran [orig: @0x52ba4f;
-	// @0x52ba9b..0x52baa1].
+	// end of the drain, and the updates the drain ran, a paused one too [orig:
+	// @0x52ba4f; @0x52ba9b..0x52baa1].
 	accumulator_.record_frame_work(
-			static_cast<uint32_t>(now_us() / 1000 - frame_start_ms), out.ticks_run());
-	// Every logic update counts toward the 62-update second, then this frame's
-	// render counts.
-	for (int32_t i = 0; i < out.ticks_run(); ++i) count_update_into_second();
+			static_cast<uint32_t>(now_us() / 1000 - frame_start_ms), out.perf.updates);
+	// Each update counted toward the 62-update second inside the loop; this
+	// frame's render counts now.
 	count_rendered_frame();
 	// Each of the first frames drawn after the mission start counts down and
 	// raises the re-base flag [orig: Render_ProcessMainSceneFrame
@@ -862,7 +989,7 @@ FrameOutcome Session::step_once(const FrameInput &input) {
 		return out;
 	}
 	latch_input(input);
-	out = run_ticks(1, input);
+	out = run_updates(1, input, /*transport=*/true);
 	last_perf_ = out.perf;
 	if (!out.terminal()) step_cine_render_frame();
 	return out;
@@ -879,7 +1006,7 @@ FrameOutcome Session::drive_one(const FrameInput &input) {
 		return out;
 	}
 	latch_input(input);
-	out = run_ticks(1, input);
+	out = run_updates(1, input, /*transport=*/true);
 	last_perf_ = out.perf;
 	if (!out.terminal()) step_cine_render_frame();
 	return out;
@@ -897,10 +1024,17 @@ TransitionResult Session::pause() {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("pause requires Running"));
 	}
-	reset_bank();
+	// The frame-time bank runs on through the pause: g_TickPhase is written only by
+	// the main loop's mode init and its drain, g_FrameTimeSmoothedFp4 only by the
+	// mode init, the EMA and the cine fade's scale, so no pause restarts the phase,
+	// the smoothing history or the FR counter (D-NET-NEW-LI-8). The pending one-shots
+	// drop: no input frame consumes them under the menu and its close resets the
+	// queue. [orig: Game_MainLoop @0x52B630 (the mode init @0x52B715 / @0x52B71B, the
+	//  EMA @0x52B845 / @0x52B866, the drain's phase @0x52BA6B)]
+	consume_pending_one_shots();
 	// The in-game menu's paused frames run the mouse pump under the menu: the
 	// paused frame's first update under the menu zeroes the shares and its
-	// two-tap clears the previous one (step_paused_frame_counters), so all six
+	// two-tap clears the previous one (run_updates' paused update), so all six
 	// words are zero by the resume; the pause row's paused frames pump the
 	// cursor, overwriting them at their first update. Retail runs at least one
 	// such update between a pause and its resume; the zero here stands in for a
@@ -918,7 +1052,8 @@ TransitionResult Session::resume() {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("resume requires Paused"));
 	}
-	reset_bank();
+	// The bank runs on (pause() carries the witness); the pending one-shots drop.
+	consume_pending_one_shots();
 	return transition(State::Running);
 }
 
@@ -940,12 +1075,17 @@ TransitionResult Session::reset_to_baseline() {
 				"mission baseline reset failed"};
 		return fail(error);
 	}
-	reset_bank();
-	// A restart is a mission start [orig: Game_RestartRoundSP @0x5263a0 ->
-	// Game_StartMission @0x525e1f].
+	// A restart is a mission start inside the running mode, no mode init: the
+	// update's exit test calls it, so the main loop's bank runs on (pause() carries
+	// the witness) and only the input latch restarts [orig: Game_ProcessMainFrame
+	// @0x5263F0 (the Game_RestartRoundSP call @0x52682C); Game_RestartRoundSP
+	// @0x5263a0 -> Game_StartMission @0x525e1f (the call @0x5263DB)].
+	pending_input_ = {};
+	latest_camera_ = {};
+	last_perf_ = {};
 	start_rebase_frames_ = kStartRebaseFrames;
 	rebase_clock_ = true;
-	state_ = State::Paused;
+	set_state(State::Paused);
 	return {TransitionCode::Applied, from,
 			State::Paused, {}};
 }
@@ -954,7 +1094,7 @@ TransitionResult Session::close() {
 	if (state_ == State::Unloaded)
 		return rejected(TransitionCode::NoOp);
 	const State from = state_;
-	state_ = State::Stopping;
+	set_state(State::Stopping);
 	if (role_ != nullptr) role_->close();
 	reset_bank();
 	start_rebase_frames_ = 0;
@@ -962,11 +1102,12 @@ TransitionResult Session::close() {
 	last_error_ = {};
 	hud_radar_gates_ = kHudRadarGatesDefault;
 	hud_radar_ = {};
-	state_ = State::Unloaded;
+	set_state(State::Unloaded);
 	return {TransitionCode::Applied, from, state_, {}};
 }
 
 void Session::reset_bank() {
+	// [orig: Game_MainLoop @0x52B630 (the mode init @0x52B715..0x52B757)]
 	accumulator_.reset();
 	pending_input_ = {};
 	latest_camera_ = {};
