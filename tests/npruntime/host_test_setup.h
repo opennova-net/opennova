@@ -59,7 +59,7 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 // order (the two zero map checksums every 0x0B carries; the own slot is never punted)
 // (D-NET-NEW-L4-5). The own slot is in state 5, its world stream ended.
 // [orig: Game_StartMission @0x52624B; NapiNPServerMsg_PlayerJoinRequest @0x51AB10 ->
-//  Server_OnPlayerJoin @0x51ABA1]
+//  Server_OnPlayerJoin @0x51A680 (the call @0x51ABA1)]
 inline std::vector<InitialStateMessage> host_own_join(NapiNPServerCtx &ctx, NapiNPConnection &own,
                                                       uint32_t now_tick) {
 	return Server_OnPlayerJoin(ctx, own, now_tick, {0, 0});

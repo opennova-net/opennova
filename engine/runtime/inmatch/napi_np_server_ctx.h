@@ -268,10 +268,11 @@ struct NapiNPServerCtx {
 	//  @0x5244B4) and Server_TickUpdate @0x51D7E0 (the add @0x51D820), read by
 	//  CNetPlayer_SendFileTransferChunk @0x4C9440 (the read @0x4C9468)]
 	FileTransferSession *file_transfer_session = nullptr;
-	// dword_C8FC74, the round-state init's GetTickCount stamp in the host clock (host_start_tick's
-	// milliseconds): the status report's UP-TIME counts from it (session_uptime_ms). Every
-	// session create's round init stamps it; a single player's restart runs no round init and
-	// keeps the first start's (HostRole::bring_up, from ClientProcessState).
+	// g_RoundStateInitTick, the round-state init's GetTickCount stamp in the host clock
+	// (host_start_tick's milliseconds): the status report's UP-TIME counts from it
+	// (session_uptime_ms). Every session create's round init stamps it; a single player's
+	// restart runs no round init and keeps the first start's (HostRole::bring_up, from
+	// ClientProcessState).
 	// [orig: Server_InitNewRoundState - GetTickCount @0x51CB93, the store @0x51CBA0;
 	//  Server_BuildStatusReport @0x530B84..0x530B8C; Lobby_UpdateServerInfo @0x4FEFAB]
 	uint32_t round_state_init_tick = 0;
@@ -722,7 +723,7 @@ struct NapiNPServerCtx {
 // The status report's UP-TIME: the host clock now (the start tick plus the run) less the
 // round-state init's stamp, in u32 arithmetic; a session's own run whenever its create
 // stamped it. [orig: Server_BuildStatusReport - GetTickCount @0x530B84, `sub eax,
-//  dword_C8FC74` @0x530B86, +0x70 @0x530B8C]
+//  g_RoundStateInitTick` @0x530B86, +0x70 @0x530B8C]
 inline uint32_t session_uptime_ms(const NapiNPServerCtx &ctx) {
 	return ctx.np_protocol.host_start_tick + ctx.np_protocol.host_run_duration_ms -
 			ctx.round_state_init_tick;

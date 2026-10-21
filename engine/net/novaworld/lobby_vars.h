@@ -90,7 +90,7 @@ struct HostRegistration {
 	// [orig: Config_SetDefaults @0x54D324 (ping = 1); Game_ApplySessionSettingsToGlobals
 	//  @0x551D4F -> g_NWAllowPing; Lobby_UpdateServerInfo read @0x4FEF72]
 	bool allow_ping = true;
-	uint32_t uptime_ms = 0;                   // Age: GetTickCount() - dword_C8FC74
+	uint32_t uptime_ms = 0;                   // Age: GetTickCount() - g_RoundStateInitTick
 	int time_of_day = 0;                      // TimeOfDay (g_EnvTimeOfDayEnum 0..4)
 	uint32_t pcid_key = 0;                    // PCIDKey (the SessionIdRing's current key)
 	uint32_t game_server_baffle_key = 0;      // GameServerBaffleKey (g_GameServerBaffleKey)

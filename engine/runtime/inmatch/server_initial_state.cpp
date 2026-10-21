@@ -1050,8 +1050,8 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// the bot arms behind the slot's +0x178E3 bot byte). The host's own client queues its 0x0B
 	// at its mission start's end (HostRole::send_own_mission_status), and the next frame's
 	// receive pump hands it to the receiver, as a joiner's (D-NET-NEW-L4-5).
-	// [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin @0x51ABA1 /
-	//  @0x51ABB5; Game_StartMission @0x526189 (the is_mp_session_peer gate) -> the C2S 0x0B
+	// [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin @0x51A680 (the
+	//  calls @0x51ABA1 / @0x51ABB5); Game_StartMission @0x526189 (the is_mp_session_peer gate) -> the C2S 0x0B
 	//  @0x52624B; the bot arms' calls @0x51B93A / @0x51D2E1, behind @0x51B928 / @0x51D2CF]
 
 	// Instrumentation (paced): log this tick's emitted tags, and a one-line summary when the burst

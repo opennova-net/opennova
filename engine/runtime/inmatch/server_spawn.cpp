@@ -443,7 +443,7 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	ctx.designations.fill(ServerDesignation{});
 	// Between the memset's pushes, the round init's GetTickCount stamp, the status report's
 	// UP-TIME base, authority or not: the create's frame, the start tick (session_uptime_ms)
-	// [orig: GetTickCount @0x51CB93, `mov dword_C8FC74, eax` @0x51CBA0].
+	// [orig: GetTickCount @0x51CB93, `mov g_RoundStateInitTick, eax` @0x51CBA0].
 	ctx.round_state_init_tick = ctx.np_protocol.host_start_tick;
 	// The punt table clears on every round init too [orig: memset(&g_PuntLog,
 	//  0, 0x7000) @0x51c990, outside the authority test].
