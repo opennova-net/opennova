@@ -112,6 +112,58 @@ bool seen_between(const RunFacts &run, char dir, uint16_t identity, uint64_t fro
 	return false;
 }
 
+// A run's join: its first C2S 0x0B, which the host runs through Server_OnPlayerJoin
+// [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 (the call @0x51ABA1)], setting the
+// slot's state 6 [orig: Server_OnPlayerJoin @0x51A680 (the store @0x51A712)]; else the
+// first S2C 0x0F; 0 when neither (window.tag_stream_anchor).
+uint64_t join_anchor(const RunFacts &run) {
+	uint64_t join = 0, load = 0;
+	for (const wire::ParityEvent &event : run.trace.events) {
+		const uint16_t identity = event_identity(event);
+		if (event.dir == 'C' && identity == 0x00B && (join == 0 || event.ts_ns < join))
+			join = event.ts_ns;
+		if (event.dir == 'S' && identity == 0x00F && (load == 0 || event.ts_ns < load))
+			load = event.ts_ns;
+	}
+	return join != 0 ? join : load;
+}
+
+// The overlay buffer: 16 six-byte entries behind a count byte, flushed first when full
+// [orig: Server_QueueOverlayStateEntry @0x50FEA0 (the full test @0x50FEA0..0x50FEAE, the
+// entry store @0x50FECA..0x50FEFF)].
+constexpr size_t kOverlayEntry = 6;
+constexpr size_t kOverlayFull = 1 + 16 * kOverlayEntry;
+
+// A run's S2C 0x40 lengths by kind (length.S.0x40.burst_tail): `drawn` holds the last
+// 0x40 after a full one in the same datagram (one visit's burst) of every visit but
+// the session's first (the join's, no draw); `fixed` every other short 0x40 (the join
+// burst's tail, a lone visit's 0x40).
+struct BurstTails {
+	std::set<size_t> drawn, fixed;
+};
+
+BurstTails burst_tails(const RunFacts &run, uint64_t end_ns) {
+	std::vector<const wire::ParityEvent *> overlay;
+	for (const wire::ParityEvent &event : run.trace.events)
+		if (event.dir == 'S' && event_identity(event) == 0x040 && event.ts_ns <= end_ns)
+			overlay.push_back(&event);
+	BurstTails out;
+	for (size_t i = 0; i < overlay.size(); ++i) {
+		const wire::ParityEvent &event = *overlay[i];
+		if (event.length == kOverlayFull)
+			continue;
+		const bool last_of_visit = i + 1 == overlay.size() || overlay[i + 1]->frame != event.frame;
+		const bool after_full = i > 0 && overlay[i - 1]->frame == event.frame &&
+				overlay[i - 1]->length == kOverlayFull;
+		const bool join_visit = overlay[0]->frame == event.frame;
+		if (last_of_visit && after_full && !join_visit)
+			out.drawn.insert(event.length);
+		else
+			out.fixed.insert(event.length);
+	}
+	return out;
+}
+
 void compare_tags(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("event.gameplay_body"));
@@ -158,21 +210,26 @@ void compare_tags(
 			const double span_ms = end_b > first ? double(end_b - first) / 1e6 : 0.0;
 			cadence_count_metric(count, double(sa.count), cadence, double(sb.count), span_ms);
 		} else if (sa.count >= 20) {
-			// A stream counts from its own first occurrence over the pair's
-			// shorter span from it (window.tag_stream_anchor).
+			// A stream counts from each run's join over the pair's shorter span from
+			// it; a timer-phase stream from its own first occurrence
+			// (window.tag_stream_anchor).
 			static_assert(has_normalization("window.tag_stream_anchor"));
-			const uint64_t first_a = *std::min_element(sa.times.begin(), sa.times.end());
-			const uint64_t first_b = *std::min_element(sb.times.begin(), sb.times.end());
+			const uint64_t own_a = *std::min_element(sa.times.begin(), sa.times.end());
+			const uint64_t own_b = *std::min_element(sb.times.begin(), sb.times.end());
+			const uint64_t join_a = join_anchor(rr), join_b = join_anchor(other);
+			const bool joined = !first_order_excluded(dir, identity) && join_a != 0 && join_b != 0;
+			const uint64_t first_a = joined ? std::min(join_a, own_a) : own_a;
+			const uint64_t first_b = joined ? std::min(join_b, own_b) : own_b;
 			const uint64_t span = std::min(end_a - first_a, end_b - first_b);
 			auto within = [span](const std::vector<uint64_t> &times, uint64_t first) {
 				return double(std::count_if(times.begin(), times.end(),
-						[&](uint64_t t) { return t - first <= span; }));
+						[&](uint64_t t) { return t >= first && t - first <= span; }));
 			};
 			const double span_ms = double(span) / 1e6;
 			count_metric(count, within(sa.times, first_a), span_ms, within(sb.times, first_b),
 					span_ms);
 			count.detail += " over " + std::to_string(int64_t(span_ms / 1000.0)) +
-					" s from each run's first";
+					(joined ? " s from each run's join" : " s from each run's first");
 		} else {
 			count_metric(count, double(sa.count), common_ms, double(sb.count), common_ms);
 		}
@@ -198,20 +255,23 @@ void compare_tags(
 			MetricValue lengths = metric(dir, "length_set", key, "LENGTH_SET_MISMATCH");
 			std::set<size_t> na = sa.lengths, nb = sb.lengths;
 			if (dir == 'S' && identity == 0x040) {
-				// A multi-entry 0x40 one entry from the other run's length is the
-				// burst's tail (length.S.0x40.burst_tail).
+				// A drawn burst tail one entry from a drawn tail of the other run is
+				// that draw (length.S.0x40.burst_tail).
 				static_assert(has_normalization("length.S.0x40.burst_tail"));
-				constexpr size_t kEntry = 6, kOneEntry = 1 + kEntry;
-				auto tail = [&](size_t length, const std::set<size_t> &other) {
-					return length > kOneEntry && !other.count(length) &&
-							(other.count(length + kEntry) || other.count(length - kEntry));
+				const BurstTails ta = burst_tails(rr, end_a), tb = burst_tails(other, end_b);
+				auto drawn = [](size_t length, const BurstTails &own,
+									 const std::set<size_t> &other_lengths, const BurstTails &other) {
+					return own.drawn.count(length) && !own.fixed.count(length) &&
+							!other_lengths.count(length) &&
+							(other.drawn.count(length + kOverlayEntry) ||
+									other.drawn.count(length - kOverlayEntry));
 				};
 				std::set<size_t> fa, fb;
 				for (const size_t length : na)
-					if (!tail(length, nb))
+					if (!drawn(length, ta, nb, tb))
 						fa.insert(length);
 				for (const size_t length : nb)
-					if (!tail(length, na))
+					if (!drawn(length, tb, na, ta))
 						fb.insert(length);
 				na = std::move(fa);
 				nb = std::move(fb);
@@ -1005,11 +1065,16 @@ std::vector<std::string> milestones(const RunFacts &run) {
 	//   [orig: NapiNPClientMsg_0x01D @0x430840 (the queue @0x430B03)], answered with
 	//   S2C 0x56 [orig: NapiNPServerMsg_HandleReplayDataRequest @0x514FE0 (the send @0x51505A)];
 	// - the 2790-tick linger [orig: Server_ProcessRoundEnd @0x5164F0 (the arm @0x5166C4)]
-	//   ends in the teardown, which sends every slot S2C 0x25
-	//   [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 (the state-7 send @0x516385)]
-	//   [orig: Game_TeardownMission @0x522350 (the call @0x52269B)];
-	// - the joiner answers the 0x25 with its reload's C2S 0x48 while the host loads, the
-	//   host's load end sends S2C 0x7B
+	//   ends in the teardown, which QUEUES every slot S2C 0x25
+	//   [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 (the state-7 queue @0x516385)]
+	//   [orig: Game_TeardownMission @0x522350 (the call @0x52269B)]; the 0x25s leave at the
+	//   first load pump whose send countdown is 0: the load's head pump
+	//   [orig: Game_StartMission @0x524360 (the pump @0x5245E8)] or another ahead of the
+	//   terrain load (@0x524F76, before @0x524F7C) for a residual of 1 to 3, a later pump
+	//   for a later residual, or the first tick beside the 0x7B under holdoff 12 (the
+	//   suite's LAN mode 1);
+	// - the joiner answers the 0x25 with its reload's C2S 0x48, the host's load end
+	//   sends S2C 0x7B
 	//   [orig: Game_StartMission @0x524360 (the Server_BroadcastPlayerInfoToAll call @0x526267)],
 	//   and the joiner's reload takes the next mission's 0x0B in its player-sync track,
 	//   then its first 0x0A.
@@ -1052,9 +1117,10 @@ std::vector<std::string> milestones(const RunFacts &run) {
 		const size_t frame = header != none ? first_from(0x00A, header + 1) : none;
 		auto frame_of = [&](size_t i) { return i != none ? s2c[i]->frame : -1; };
 		// The joiner's reload opens with C2S 0x48
-		// [orig: Game_StartMission @0x524360 (the 0x48 queue @0x524470)], answering the 0x25
-		// while the host still loads: retail's 0x25 leaves before the host's load and its
-		// 0x7B after it, so the 0x48 falls between them.
+		// [orig: Game_StartMission @0x524360 (the 0x48 queue @0x524470)], answering the 0x25:
+		// a 0x25 that leaves at a load pump puts the 0x48 ahead of the host's load-end 0x7B,
+		// one that rides the first tick beside the 0x7B puts it after (a retail draw under
+		// holdoff 12, which milestone_order's own A/A carries).
 		int reload = -1;
 		if (reset != none)
 			for (const wire::ParityEvent &event : run.trace.events)
@@ -1082,6 +1148,9 @@ std::vector<std::string> milestones(const RunFacts &run) {
 	return names;
 }
 
+// Presence and order are two rows, each judged against its own A/A: a window that
+// cuts one retail run between legs widens the presence threshold only, so an
+// inversion of ours still fails while the A/A order distance is 0.
 void compare_milestones(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
 	const std::vector<std::string> a = milestones(rr), b = milestones(other);
 	const std::set<std::string> sa(a.begin(), a.end()), sb(b.begin(), b.end());
@@ -1091,11 +1160,17 @@ void compare_milestones(const RunFacts &rr, const RunFacts &other, std::vector<M
 	for (const std::string &name : sb)
 		presence += sa.count(name) ? 0 : 1;
 	MetricValue value = metric('B', "milestones", "", "MILESTONE_MISMATCH");
-	value.distance = double(presence + order_inversions(a, b));
+	value.distance = double(presence);
 	value.subject = render_list(b);
 	value.reference = render_list(a);
-	value.detail = "milestones present on one side plus order inversions";
+	value.detail = "milestones present on one side";
 	out.push_back(value);
+	MetricValue order = metric('B', "milestone_order", "", "MILESTONE_ORDER");
+	order.distance = double(order_inversions(a, b));
+	order.subject = value.subject;
+	order.reference = value.reference;
+	order.detail = "order inversions over the milestones both carry";
+	out.push_back(order);
 }
 
 void compare_rates(

@@ -6,6 +6,7 @@
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cmath>
@@ -120,6 +121,45 @@ template <typename T, typename Keep> void keep_if(std::vector<T> &records, Keep 
 constexpr uint64_t kBoundaryToleranceNs = 500000000ull; // a sample within 500 ms of each edge
 constexpr uint64_t kMaximumGameplayGapNs = 1000000000ull; // and none further apart than 1 s
 
+// The round ends of a declared rotation: each S2C 0x1D board in the steady window
+// (window.rotation_load_gap).
+std::vector<uint64_t> round_end_boards(const RunFacts &facts) {
+	std::vector<uint64_t> boards;
+	if (facts.info.rotation)
+		for (const wire::ParityEvent &event : facts.trace.events)
+			if (event.dir == 'S' && event.full_tag == 0x01D && !event.settings_update &&
+					facts.in_steady(event.ts_ns))
+				boards.push_back(event.ts_ns);
+	std::sort(boards.begin(), boards.end());
+	return boards;
+}
+
+// The round end lingers 2790 ticks in session before the teardown queues the 0x25
+// [orig: Server_ProcessRoundEnd @0x5164F0 (the arm @0x5166C4)]
+// [orig: Server_TickUpdate @0x51D7E0 (the drain @0x51D9A5..0x51D9CC)], one tick per
+// 16 ms quantum [orig: Game_MainLoop @0x52B630]; the board leaves at most one send
+// interval after its tick, so a 0x25 cannot follow its board by less than the linger
+// less the 500 ms edge tolerance (window.rotation_load_gap).
+constexpr uint64_t kRoundEndLingerTicks = 2790;
+constexpr uint64_t kRoundEndLingerNs = kRoundEndLingerTicks * uint64_t(io::kTickMs) * 1000000ull;
+
+void check_round_linger(const RunFacts &facts, std::vector<EvidenceFinding> &out) {
+	for (const uint64_t board : round_end_boards(facts))
+		for (const wire::ParityEvent &event : facts.trace.events)
+			if (event.dir == 'S' && event.full_tag == 0x025 && event.ts_ns > board &&
+					facts.in_steady(event.ts_ns)) {
+				if (event.ts_ns - board + kBoundaryToleranceNs < kRoundEndLingerNs) {
+					char buf[160];
+					std::snprintf(buf, sizeof(buf),
+							"the S2C 0x25 follows its round end's 0x1D by %.1f s, short of the "
+							"2790-tick linger (%.2f s)",
+							double(event.ts_ns - board) / 1e9, double(kRoundEndLingerNs) / 1e9);
+					out.push_back({ "ROUND_LINGER_SHORT", buf });
+				}
+				break;
+			}
+}
+
 void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<EvidenceFinding> &out) {
 	std::vector<uint64_t> samples;
 	if (dir == 'C') {
@@ -160,18 +200,17 @@ void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<Eviden
 	// 0x1D raises its round-over gate
 	// [orig: NapiNPClientMsg_0x01D @0x430840 (the store @0x430858)], which holds its 0x0C
 	// [orig: Client_ProcessNetworkFrame @0x42C180 (the gate @0x42C467)] until the next
-	// mission's load clears it. The gap holding the round end's board (the run's first
-	// S2C 0x1D), or the window's tail when it ends inside that pause, is the pause, not a
-	// stall.
+	// mission's load clears it. So retail's last sample before the pause lies within a
+	// tick or a frame of the round end's board: a gap (or the window's tail) whose first
+	// sample lies within 500 ms of an S2C 0x1D, on either side, is the pause; a stall of
+	// ours that merely ends in the round end is not. Every round end is excused alike.
 	static_assert(has_normalization("window.rotation_load_gap"));
-	uint64_t round_end_ns = 0;
-	if (facts.info.rotation)
-		for (const wire::ParityEvent &event : facts.trace.events)
-			if (event.dir == 'S' && event.full_tag == 0x01D && !event.settings_update &&
-					(round_end_ns == 0 || event.ts_ns < round_end_ns))
-				round_end_ns = event.ts_ns;
+	const std::vector<uint64_t> round_ends = round_end_boards(facts);
 	auto paused = [&](uint64_t after, uint64_t until) {
-		return round_end_ns > after && round_end_ns < until;
+		for (const uint64_t board : round_ends)
+			if (board < until && (board > after ? board - after : after - board) <= kBoundaryToleranceNs)
+				return true;
+		return false;
 	};
 	const bool start_missing =
 			samples.front() > facts.info.steady_start_ns + kBoundaryToleranceNs &&
@@ -415,6 +454,7 @@ RunFacts make_run_facts(RunInfo info, wire::ParityTrace trace) {
 	} else {
 		check_gameplay_coverage(facts, 'C', facts.evidence);
 		check_gameplay_coverage(facts, 'S', facts.evidence);
+		check_round_linger(facts, facts.evidence);
 	}
 	check_datagram_accounting(facts, facts.evidence);
 	return facts;
