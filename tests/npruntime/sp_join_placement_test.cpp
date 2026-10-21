@@ -9,6 +9,15 @@
 // [orig: Server_OnPlayerJoin `cmp g_NapiNPCtx.is_in_session, ebx` @0x51A824, `jz` @0x51A82A,
 //  the Server_SendEntityStateToPlayer call @0x51A82D; PlayerSlot_ResetNetworkState @0x4F9FD0,
 //  `cmp` @0x4F9FD3, `jz` @0x4F9FD9, the 744 countdown @0x4FA021]
+// The single player's own loopback 0x08 tail and 0x0F flags carry no session bit: retail's
+// BuildFlags returns 0 out of a session and the 0x0F's 0x02 bit (the target-less spawn
+// restriction) needs is_in_session; ours reads the session fact off the socket mode at the
+// create (BuildFlags) and off the world at the join (the 0x0F), as the join's other reads do.
+// [orig: CNapiServerConfig_BuildFlags @0x4C4DC0 (`if (this->is_in_session)` @0x4C4DC4),
+//  reached through Server_SendInitialGameStateToPlayer @0x51BF95 -> ServerConfig_SerializeToPacket
+//  @0x505D29; NetPacket_WriteWorldStateLoad0x0F `cmp g_RespawnRequiresTeamDead, 0` @0x502DB2,
+//  `cmp g_NapiNPCtx.is_in_session, 0` @0x502DBB, `or bl, 2` @0x502DC4, sent by
+//  Server_OnPlayerJoin @0x51A869]
 // The host's own add files no /PROFILE row (the local arm jumps past it); the mission
 // start's roster pass files it. [orig: Server_PlayerAdd - the local arm @0x51CC29 ->
 //  `jmp loc_51D314` @0x51CC60, past the write @0x51D2FD..0x51D30F]
@@ -56,6 +65,8 @@ struct JoinResult {
 	int32_t x = 0;
 	int frames = 0;              // S2C 0x0A records among the join's sends
 	uint32_t control_countdown = 0; // the slot's quartet countdown after the join
+	int world_state_flags = -1;  // the join's 0x0F flags byte
+	uint32_t build_flags = 0;    // the create's BuildFlags word (the 0x08 tail)
 };
 
 JoinResult join_after_moving(bool mp_session) {
@@ -74,8 +85,11 @@ JoinResult join_after_moving(bool mp_session) {
 	settings.server_name = "DM";
 	settings.max_players = 2;
 	settings.game_type = 0;
+	settings.default_spawn_requires_no_team_zone = 1; // g_RespawnRequiresTeamDead set
+	// The shell's single player is socketless; a session host has a socket.
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
-			inmatch::SocketMode::Socketless, /*host_key=*/0, &loop, settings);
+			mp_session ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless,
+			/*host_key=*/0, &loop, settings);
 	ctx.world = world.get();
 	inmatch::Server_InitNewRoundState(ctx);
 	expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, *world) == 1, "the own add runs");
@@ -87,8 +101,12 @@ JoinResult join_after_moving(bool mp_session) {
 	expect(own.slot_state != inmatch::PlayerSlotState::Joined, "the join is the slot's state-6 entry");
 	own.reply.control_request_countdown = 5; // a word the state-6 entry's reset would reseed
 	JoinResult out;
-	for (const inmatch::InitialStateMessage &m : inmatch::Server_OnPlayerJoin(ctx, own, 1, {0, 0}))
+	out.build_flags = ctx.np_protocol.build_flags;
+	for (const inmatch::InitialStateMessage &m : inmatch::Server_OnPlayerJoin(ctx, own, 1, {0, 0})) {
 		out.frames += m.tag == s2c::PER_FRAME_UPDATE ? 1 : 0;
+		// The flags byte follows the tick, the three position words and the three angles.
+		if (m.tag == s2c::WORLD_STATE_LOAD && m.body.size() > 22) out.world_state_flags = m.body[22];
+	}
 	out.x = world->registry.get(world->cached.local_player)->position.x.q16;
 	out.control_countdown = own.reply.control_request_countdown;
 	return out;
@@ -141,6 +159,9 @@ void test_the_single_player_join_keeps_the_body_where_it_stands() {
 	expect(r.frames == 0, "single player: the join sends its own loopback no 0x0A (@0x51A82A)");
 	expect(r.control_countdown == 5,
 			"single player: the state-6 entry resets no network word (@0x4F9FD9)");
+	expect(r.build_flags == 0, "single player: BuildFlags is 0 out of a session (@0x4C4DC4)");
+	expect(r.world_state_flags == 0,
+			"single player: the 0x0F carries no target-less spawn bit (@0x502DBB)");
 }
 
 void test_the_session_join_places_the_body_again() {
@@ -150,6 +171,10 @@ void test_the_session_join_places_the_body_again() {
 	expect(r.frames == 1, "session: the join sends the slot one 0x0A ahead of the 0x0F (@0x51A82D)");
 	expect(r.control_countdown == inmatch::CONTROL_REQUEST_PERIOD_TICKS,
 			"session: the state-6 entry seeds the quartet countdown (@0x4FA021)");
+	// A LAN session's word: the LAN bit and 0x800 (@0x4C4DF1, @0x4C4E04).
+	expect((r.build_flags & 0x900u) == 0x900u, "session: BuildFlags carries the LAN session's bits");
+	expect(r.world_state_flags == 0x02,
+			"session: the 0x0F carries the target-less spawn bit (@0x502DC4)");
 }
 
 } // namespace

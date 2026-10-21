@@ -63,11 +63,18 @@ std::vector<uint8_t> serialize_server_name_map(const GameConfig &cfg) {
 }
 
 // [orig: CNapiServerConfig_BuildFlags @0x4c4dc0] The trailing flags dword of the 0x08 block.
+// Retail's single player runs with is_in_session 0 (CNapiNetwork_SetNetworkType(0)), so its own
+// loopback's 0x08 carries 0; ours's single-player listen host keeps ctx.is_in_session 1, so the
+// session fact is the socket mode's, read when the create builds the word ahead of the World's
+// rules (HostRole's rules_in_session, D-NET-405; D-NET-NEW-L1-19).
+// [orig: CNapiServerConfig_BuildFlags - `if (this->is_in_session)` @0x4C4DC4; reached in the
+//  single player by Server_SendInitialGameStateToPlayer @0x51BF95 (ServerConfig_SerializeToPacket
+//  @0x505D29); CNapiNetwork_SetNetworkType @0x4C4A85]
 uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	const GameConfig &r = ctx.config;   // rule-flag inputs (squad / perm-death / config_flag_*)
 	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords / game_type / mp_attributes)
 	uint32_t flags = 0;
-	if (!ctx.is_in_session) return flags;     // gated on is_in_session (+0x58)
+	if (!ctx.is_in_session || ctx.socket_state == SocketMode::Socketless) return flags;
 	// dword_2550A04 is the one live mp-attribute store. Its TeamChoose bit feeds
 	// BuildFlags even for a non-team game (fresh retail DM advertises 0x904).
 	if ((r.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
@@ -233,8 +240,10 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	const bool spawn_zone_flag =
 			has_spawn_zones || title_in_match(ctx.np_protocol.identity).spawn_zone_flag_always;
 	uint8_t game_flags = spawn_zone_flag ? 0x01u : 0x00u;
-	if (ctx.config.default_spawn_requires_no_team_zone != 0 &&
-			ctx.is_in_session != 0) {
+	// The session test is retail's is_in_session, 0 in its single player; ours reads the
+	// world's session fact, as the join's own 0x0A does (D-NET-NEW-L1-19).
+	if (ctx.config.default_spawn_requires_no_team_zone != 0 && ctx.world != nullptr &&
+			ctx.world->rules.mp_session) {
 		game_flags |= 0x02u;
 	}
 	// [orig: NetPacket_WriteWorldStateLoad0x0F @ 0x502D10, flag store @ 0x502DC7]
@@ -242,7 +251,9 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	b.push_back(game_flags);
 	// bit0 = SpawnZoneList nonempty; bit1 = the target-less spawn restriction
 	// while in session. [orig: NetPacket_WriteWorldStateLoad0x0F
-	// @0x502DA7..0x502DC4; g_RespawnRequiresTeamDead @0x24D2260]
+	// @0x502DA7..0x502DC4 (`cmp g_RespawnRequiresTeamDead, 0` @0x502DB2, `cmp
+	// g_NapiNPCtx.is_in_session, 0` @0x502DBB, `or bl, 2` @0x502DC4); g_RespawnRequiresTeamDead
+	// @0x24D2260]
 	// The fixed 128-i32 block is the authority player's per-ammo-class pool
 	// table (serverPlayer+88664 -> client g_LocalAmmoPools @0xB75FE8), retained
 	// when this connection's C2S 0x2F loadout is accepted.

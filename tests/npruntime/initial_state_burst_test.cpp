@@ -185,7 +185,9 @@ int main_impl() {
 	config.class_allow_mask = 0x0155u; // non-default pins config sourcing, not a hard-coded golden
 	config.game_type = 0x00010020u;
 	config.default_spawn_requires_no_team_zone = 1;
-	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
+	// A LAN session host: BuildFlags reads the session fact off the socket mode, so the 0x08
+	// tail is the session's word (a socketless single player's is 0, D-NET-NEW-L1-19).
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Lan,
 	                        /*host_key=*/0, &loopback, config);
 	ctx.world = &world;
 	ctx.mission = &mission;
