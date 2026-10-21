@@ -127,7 +127,9 @@ void test_a_deck_marker_moves_into_its_carrier_frame() {
 
 	const w::Entity &a = *world->registry.get(on_deck);
 	CHECK(a.ground_target == deck_h);
-	CHECK(a.position.x.q16 == 0);
+	// The turn reads the deck's yaw through the x87 radian constant, which leaves
+	// cos(90 deg) at -201 / 2^22, so the one unit along X lands at -4, not 0.
+	CHECK(a.position.x.q16 == -4);
 	CHECK(a.position.y.q16 == -(1 << 16));
 	CHECK(a.position.z.q16 == (5 << 16) + 0x8000);
 	CHECK(a.heading == 0x10000000);
@@ -137,7 +139,7 @@ void test_a_deck_marker_moves_into_its_carrier_frame() {
 	CHECK(b.heading == 0x50000000);
 	const w::Entity &c = *world->registry.get(row_zero);
 	CHECK(c.ground_target == deck_h);
-	CHECK(c.position.x.q16 == 0 && c.position.y.q16 == -(1 << 16));
+	CHECK(c.position.x.q16 == -4 && c.position.y.q16 == -(1 << 16));
 	const w::Entity &d = *world->registry.get(off_deck);
 	CHECK(!d.ground_target.valid());
 	CHECK(d.position.x.q16 == (160 << 16) && d.heading == 0);
