@@ -496,12 +496,15 @@ ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx 
 }
 
 // The C2S 0x02's handler, whatever the game state (no gate but the net player's): the holdoff
-// dictation, the 0x01 / 0x7A / 0x7B / 0x03 records and game state 7, every time it runs; the
-// node joins the pending-spawn list once. Its two echoed words are not compared with the probe.
+// dictation, the 0x01 / 0x7A / 0x7B / 0x03 records and game state 7, every time it runs. Retail
+// lists the node on the pending-spawn list while it is unlisted (the pump unlinks it at the add),
+// ours once (the re-list after the add and the ticket wait's leg are L1-s14's, Q7-31 (b)). Its
+// two echoed words are not compared with the probe.
 // [orig: NapiNPServerMsg_0x002 @0x512FD0 - is_authority @0x512FFC, the net player @0x51300B, the
-//  echoed tick and counter read @0x51302C / @0x513044 for NapiNPStats_RecordSample @0x51305A,
-//  NapiNPServer_UpdateHoldoffTicks @0x513068, the sends @0x5130AC / @0x5130E5 / @0x51311E,
-//  NapiNPPlayer_MoveNodeToEntityList @0x513193 (a node already listed stays: @0x4C7E65),
+//  echoed tick and counter read @0x51302C / @0x513044 for NapiNPStats_RecordSample (called
+//  @0x51305A), NapiNPServer_UpdateHoldoffTicks (called @0x513068), the sends @0x5130AC /
+//  @0x5130E5 / @0x51311E, NapiNPPlayer_MoveNodeToEntityList (called @0x513193; it lists the node
+//  while unlisted @0x4C7E65; the pump unlinks it @0x4C8FF6),
 //  CNetPlayer_SetGameState(7) @0x51319C (leaving 10 zeroes the round watermark @0x4C4135), the
 //  0x03 @0x5131D5] (D-NET-NEW-L1-24)
 static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
@@ -514,6 +517,10 @@ static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 		st.admission_completed_tick = now_tick;
 	}
 	if (conn.burst.game_state == 10) conn.link.round_watermark = 0;
+	// Entering game state 7 zeroes the net player's hold-nag stamp (+0x24), so a spawn pump that
+	// holds the node nags it with its 0x03 at once (the stamp's zero test @0x4C8F7A..0x4C8F7F)
+	// [orig: CNetPlayer_SetGameState @0x4C4060 - case 7 @0x4C4184].
+	st.admission_hold_nag_host_ms_valid = false;
 	conn.burst.game_state = 7;
 	conn.admission_stage = GameAdmissionStage::Complete;
 	conn.self_id_seen = true;

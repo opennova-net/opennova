@@ -36,7 +36,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 // connection, which then awaits that echo. The C2S 0x01 sends it at once, or under the
 // join-ticket gate the enter result's success does. [orig: CNetPlayer_SendFileTransferChunk
 //  @0x4C9440; NapiNPServerMsg_HandleJoinRequest @0x512ED0 (the call @0x512FBC);
-//  CNapiGameSession_HandlePlayEnterResponse @0x4D1C19]
+//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 (the call @0x4D1C19)]
 ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx *ctx);
 
 // The case bodies of the in-match switch.

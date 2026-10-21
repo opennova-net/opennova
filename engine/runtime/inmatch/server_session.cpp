@@ -212,7 +212,8 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// ahead of the create: CNapiGameSession_BuildAndCreateSession @0x5694D0, the round init's
 	// call @0x5695B3, then the create's @0x56997D), the tick the create's (the session's start
 	// tick, as the round init's key takes it); any other create zeroes both. Retail draws it
-	// ahead of NapiNPProtocol_StartServer, which never touches either word. (D-NET-NEW-L1-20)
+	// ahead of the create's NapiNPProtocol_StartServer call (@0x4C9B52), which never touches
+	// either word. (D-NET-NEW-L1-20)
 	// [orig: CNapiGameSession_CreateSession @0x4C97C0 - in session `cmp [ebp+58h]` @0x4C9B05, the
 	//  authority @0x4C9B0A, transport_mode == 1 @0x4C9B0F, +0x52C = 1 @0x4C9B1A, the draw
 	//  @0x4C9B26, else +0x52C = 0 @0x4C9B33, +0x530 = 0 @0x4C9B3F; NapiNPTimer_GenerateRandomId

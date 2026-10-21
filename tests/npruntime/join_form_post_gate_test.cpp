@@ -19,7 +19,8 @@
 //  @0x512B00 to the return @0x512EAC; state 2 @0x512E7D);
 //  NapiNPServerMsg_0x002 @0x512FD0 (is_authority @0x512FFC, the net player @0x51300B, the sends
 //  @0x5130AC / @0x5130E5 / @0x51311E, game state 7 @0x51319C, the 0x03 @0x5131D5);
-//  CNetPlayer_SetGameState @0x4C4060 (leaving 10 @0x4C4135);
+//  CNetPlayer_SetGameState @0x4C4060 (leaving 10 @0x4C4135; case 7 zeroes +0x24 @0x4C4184, the
+//  spawn pump's hold-nag stamp, tested @0x4C8F7A..0x4C8F7F);
 //  NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260 (the slot @0x513280..0x513288);
 //  NapiNPServerMsg_PlayerJoinRequest @0x51AB10 (the slot @0x51AB30..0x51AB38);
 //  NapiNPServerMsg_HandlePlayerLoadout @0x515790 (the slot @0x5157CF..0x5157DB);
@@ -249,6 +250,29 @@ void test_the_echo_has_no_gate() {
 	CHECK(run.stage == S::Complete && run.game_state == 7 && run.watermark == 0);
 }
 
+// Game state 7 zeroes the net player's hold-nag stamp (+0x24): a node the spawn pump held and
+// nagged a moment ago is nagged again at the next hold after a repeated 0x02.
+void test_the_echo_zeroes_the_nag_stamp() {
+	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+	inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.world = world.get();
+	ns::LoopbackChannel wire;
+	ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
+			20, inmatch::NapiNPConnection::kTypeServerSide, &wire, ns::TransportMode::Client,
+			w::EntityHandle{}, false));
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	conn.admission_stage = inmatch::GameAdmissionStage::Complete;
+	conn.reply.admission_hold_nag_host_ms = 4000;
+	conn.reply.admission_hold_nag_host_ms_valid = true;
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	(void)inmatch::dispatch_session_replies(ctx.config, conn, {make_protocol_message(0x02, {})}, 7,
+			ctx.np_protocol.connection_list, world.get(), inputs);
+	CHECK(!conn.reply.admission_hold_nag_host_ms_valid);
+}
+
 void test_each_admission_record_reaches_its_handler() {
 	using S = inmatch::GameAdmissionStage;
 	// JOIN then form post in one datagram: the INIT, then the probe (500 draws).
@@ -295,6 +319,7 @@ int main() {
 	test_out_of_turn_join_records_answer_nothing();
 	test_the_echo_has_no_gate();
 	test_each_admission_record_reaches_its_handler();
+	test_the_echo_zeroes_the_nag_stamp();
 	std::printf("join_form_post_gate: %d failure(s)\n", g_failures);
 	return g_failures == 0 ? 0 : 1;
 }
