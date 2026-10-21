@@ -75,8 +75,13 @@ public:
 	// the session's teardown. Clears the roster.
 	void stop();
 	// The 60 s host poll and, while hosting, the Host-list refresh on the logic clock. Call every
-	// tick after the lobby's tick, with the same clock.
+	// tick after the lobby's tick and its notices, with the same clock.
 	void tick(uint32_t now_ms);
+	// The host poll's pass alone (tick's while the request is out): the 60 s test, then the
+	// session's leaving state 5 without its success, which ends the wait with the not-hosting
+	// line and the MsgCode word's NWEC. An embedder whose own state stopped pumping the session
+	// runs it every frame the request is out, so the wait ends whatever ended the session.
+	void poll_request(uint32_t now_ms);
 	// The mission start's server-info update on a NovaWorld authority in session, outside the
 	// 1860-tick timer: both lists marked changed, the server-info update, whose tail sends the
 	// marked lists, then in state 6 the lists forced out once more (two ClientHostUpdates, each

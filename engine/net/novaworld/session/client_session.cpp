@@ -205,6 +205,9 @@ std::vector<uint8_t> ClientSession::start() {
 	lobby_state_ = 0;
 	session_flags_ = 0;
 	session_role_ = kSessionRoleNone;
+	// The MsgCode word starts each connection at 0 [orig: CNapiGameSession_InitNPConnection
+	//  @0x4D3BE0 - +0x130 = 0 @0x4D40D9].
+	server_msg_code_ = 0;
 	set_lobby_state(1);
 	// The first probe runs from here (InitPlayerConnection's NapiTimer_Start) until its 0x81 or a
 	// give-up stops it. [orig: CNapiGameSession_InitPlayerConnection - NapiTimer_Start @0x4D43C2]
@@ -1227,6 +1230,8 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			if (session_role_ >= kSessionRoleNone && session_role_ <= kSessionRolePlaying)
 				session_role_ = kSessionRoleHosting;
 		} else {
+			// The refusal's MsgCode into the session's word [orig: @0x4D5AE1].
+			server_msg_code_ = host_result_.msg_code;
 			host_state_ = HostState::Failed;
 			set_lobby_state(4);
 			// [orig: @0x4d5ae7..0x4d5b27 — any word 0..3 becomes 1]
@@ -1248,6 +1253,8 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			// [orig: @0x4d1f35..0x4d1f53 — an unsigned word <= 2 becomes 3]
 			if (static_cast<uint32_t>(session_role_) <= 2u) session_role_ = kSessionRolePlaying;
 		} else {
+			// The refusal's MsgCode into the session's word [orig: @0x4D1EDC].
+			server_msg_code_ = play_result_.msg_code;
 			play_state_ = PlayState::Failed;
 			set_lobby_state(4);
 			// [orig: @0x4d1eee..0x4d1f13 — any word 0..3 becomes 1]
@@ -1265,6 +1272,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		notice.fields = parse_server_result_fields(container);
 		notice.msg_key = novaworld_server_msg_code_key(notice.fields.msg_code);
 		host_result_ = notice.fields;
+		server_msg_code_ = notice.fields.msg_code; // [orig: @0x4D1D17]
 		host_state_ = HostState::Idle;
 		set_lobby_state(4);
 		// [orig: @0x4d1d29..0x4d1d4f — any word 0..3 becomes 1]
@@ -1280,6 +1288,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		notice.kind = Notice::Kind::StopPlaying;
 		notice.fields = parse_server_result_fields(container);
 		play_result_ = notice.fields;
+		server_msg_code_ = notice.fields.msg_code; // [orig: @0x4D2041]
 		play_state_ = PlayState::Idle;
 		set_lobby_state(4);
 		// [orig: @0x4d2057..0x4d207c — any word 0..3 becomes 1]
@@ -1295,6 +1304,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		Notice notice;
 		notice.kind = Notice::Kind::LeaveNovaWorld;
 		notice.fields = parse_server_result_fields(container);
+		server_msg_code_ = notice.fields.msg_code; // [orig: @0x4D2177]
 		host_state_ = HostState::Idle;
 		play_state_ = PlayState::Idle;
 		set_lobby_state(0);
@@ -1512,6 +1522,7 @@ bool ClientSession::send_play_request(int currently_playing) {
 	play_state_ = PlayState::Requested;
 	play_result_ = ServerResultFields{};
 	set_lobby_state(7);
+	server_msg_code_ = 0; // [orig: StartPlayingSession @0x4D460D, after its SetState(7)]
 	if (queue_lobby_record(make_client_play_request(currently_playing, cookie_vars(), play_setup_)))
 		return true;
 	play_state_ = previous;
@@ -1550,6 +1561,7 @@ std::vector<uint8_t> ClientSession::build_goodbye() {
 	// The reset drops the hosting/playing word to 0 (the reconnect disarmed with it), and the
 	// connection's teardown runs the disconnect callback. [orig: @0x4d08fc..0x4d0927]
 	session_role_ = kSessionRoleNone;
+	server_msg_code_ = 0; // [orig: ResetToDisconnected @0x4D08EA]
 	on_disconnected();
 	receive_clock_armed_ = false;
 	// The connection is destroyed and its enumerator with it, so a probe window open at the

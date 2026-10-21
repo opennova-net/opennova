@@ -299,8 +299,10 @@ private:
 	// layer via joined_game(host, port, app_id, cd_cookie). Does NOT send an
 	// in-match hello; Simulation's joiner owns the single ClientHello (see the .cpp).
 	void resolve_join_target();
-	// The play leg failed / timed out / was cancelled: ClientStopPlaying + join_failed(tag).
-	void abort_playing(const String &tag);
+	// The play poll's pass after the session's pump (engine: connect_or_host.h's
+	// play_leg_exit_tag): the 60 s test, the key read, then the session's state; it ends the
+	// leg on the result's state 8 (the join target) or any state but 7 (join_failed).
+	void poll_play();
 
 	// Snapshot the gate/session outputs into the flow's LobbyHttpContext. Called at
 	// each leg-initiation point (login / GSB / join) — never inside a leg callback,

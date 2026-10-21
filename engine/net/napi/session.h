@@ -181,6 +181,14 @@ inline constexpr char NWEC_PLAY_TIMEOUT[] = "NWEC02";
 inline constexpr char NWEC_PLAY_CANCELLED[] = "NWEC03";
 inline constexpr char NWEC_PLAY_START_FAILED[] = "NWEC59";
 inline constexpr char NWEC_WRONG_SESSION_STATE[] = "NWEC49";
+// The play leg's map over the session's nonzero MsgCode word (dword_B60110, session+0x130):
+// 3000 -> NWEC04, 3001..3006 -> NWEC05..NWEC10, 200 -> NWEC11, 203 -> NWEC12, 1009 -> NWEC14,
+// any other code NWEC13 (signed compares: a negative code is NWEC13 too). A zero word maps
+// nothing (connect_or_host.h's play_leg_exit_tag keeps the leg's tag).
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the word @0x4D55F7, `cmp eax,0BB8h / jg`
+//  @0x4D5604..0x4D5609, 3000 @0x4D560B, 200 @0x4D560D, 203 @0x4D5614, 1009 @0x4D5619, the
+//  3001..3006 switch @0x4D564C..0x4D5656, NWEC13 @0x4D569F]
+std::string novaworld_play_error_tag(int msg_code);
 // The start-hosting leg: gate info not OK (NWEC50), SendHostRequest failed (NWEC51), the 60 s
 // poll timeout (NWEC52), and the rejection map over the ServerHostResult MsgCode stored at
 // session+304: 0x3E9 -> NWEC53, 0x3EC -> NWEC54, 0x3ED -> NWEC55, 0x3F0 -> NWEC56,

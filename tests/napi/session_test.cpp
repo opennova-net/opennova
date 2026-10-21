@@ -105,6 +105,18 @@ bool check_host_and_gate_error_maps() {
 	if (!expect(novaworld_host_error_tag(0x3F3) == "NWEC60", "1011 -> NWEC60")) return false;
 	if (!expect(novaworld_host_error_tag(1010) == "NWEC58", "other -> NWEC58")) return false;
 	if (!expect(std::string(NWEC_HOST_TIMEOUT) == "NWEC52", "host poll timeout NWEC52")) return false;
+	// The play leg's map over the session's MsgCode word [orig: CNapiGameSession_ConnectOrHost
+	//  @0x4D4F10 - @0x4D5604..0x4D569F]: signed compares, so -1 / -2 are NWEC13, not the poll's
+	//  own NWEC02 / NWEC03.
+	if (!expect(novaworld_play_error_tag(3000) == "NWEC04", "play 3000 -> NWEC04")) return false;
+	if (!expect(novaworld_play_error_tag(3001) == "NWEC05", "play 3001 -> NWEC05")) return false;
+	if (!expect(novaworld_play_error_tag(3006) == "NWEC10", "play 3006 -> NWEC10")) return false;
+	if (!expect(novaworld_play_error_tag(3007) == "NWEC13", "play 3007 -> NWEC13")) return false;
+	if (!expect(novaworld_play_error_tag(200) == "NWEC11", "play 200 -> NWEC11")) return false;
+	if (!expect(novaworld_play_error_tag(203) == "NWEC12", "play 203 -> NWEC12")) return false;
+	if (!expect(novaworld_play_error_tag(1009) == "NWEC14", "play 1009 -> NWEC14")) return false;
+	if (!expect(novaworld_play_error_tag(-1) == "NWEC13", "play -1 -> NWEC13")) return false;
+	if (!expect(novaworld_play_error_tag(-2) == "NWEC13", "play -2 -> NWEC13")) return false;
 	if (!expect(novaworld_gate_error_tag(-2, false) == "NWEC18", "gate -2 -> NWEC18")) return false;
 	if (!expect(novaworld_gate_error_tag(-8, false) == "NWEC24", "gate -8 -> NWEC24")) return false;
 	if (!expect(novaworld_gate_error_tag(-9, false) == "NWEC15", "gate -9 in phase 1 -> the NWEC15 default")) return false;

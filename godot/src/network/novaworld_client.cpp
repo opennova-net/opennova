@@ -486,6 +486,12 @@ void NovaWorldClient::stop() {
 
 void NovaWorldClient::_process(double delta) {
 	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) {
+		// A leg whose session a punt, the reap or an error ended still ends its wait on the
+		// session's state (engine: NwuHostRole::poll_request, connect_or_host.h's
+		// play_leg_exit_tag), so the menus' admin pump and the panel's Close come back.
+		if (host_role_.phase() == opennova::NwuHostRole::Phase::Requested)
+			host_role_.poll_request(clock_ms_);
+		poll_play();
 		publish_connect_or_host_wait();
 		return;
 	}
@@ -500,19 +506,7 @@ void NovaWorldClient::_process(double delta) {
 	drain_session_notices();
 	host_role_.tick(clock_ms_);
 
-	// The start-playing poll: the ServerPlayResult must land within the connect
-	// window (SESSION_CONNECT_TIMEOUT_MS), else the play is cancelled (NWEC02).
-	if (play_in_flight_ && lobby_.session() &&
-	    lobby_.clock_ms() - play_started_ms_ > opennova::SESSION_CONNECT_TIMEOUT_MS) {
-		lobby_.connect_log(opennova::kPlayTimeoutLine);
-		abort_playing(String(opennova::NWEC_PLAY_TIMEOUT));
-	} else if (play_in_flight_ && lobby_.session() && play_escape_requested_) {
-		// The frame's key read past the timeout test (engine: connect_or_host.h's
-		// kPlayEscapedLine carries the witness; NWEC03, then the play's StopPlaying).
-		play_escape_requested_ = false;
-		lobby_.connect_log(opennova::kPlayEscapedLine);
-		abort_playing(String(opennova::NWEC_PLAY_CANCELLED));
-	}
+	poll_play();
 	publish_connect_or_host_wait();
 }
 
@@ -748,7 +742,6 @@ void NovaWorldClient::sync_session_state() {
 		// reconnecting, which it does on its own while its word is set.
 		if (session->reconnecting()) break;
 		if (session->disconnected_by_peer() && state_ != STATE_DISCONNECTED) {
-			play_in_flight_ = false;
 			enter_state(STATE_DISCONNECTED, opennova::to_gd(session->last_error()));
 		}
 		break;
@@ -771,24 +764,14 @@ void NovaWorldClient::drain_session_notices() {
 		if (host_role_.handle_notice(notice)) continue;
 		switch (notice.kind) {
 		case Notice::Kind::PlayResult:
-			if (!play_in_flight_) break;
-			if (notice.fields.success) {
-				play_in_flight_ = false;
-				lobby_.connect_log(opennova::kMovingOnLine);
-				resolve_join_target();
-			} else {
-				// The rejected play maps through the dword_B60110 switch (NWEC04..14).
-				abort_playing(opennova::to_gd(opennova::novaworld_error_tag(
-						opennova::novaworld_error_from_code(notice.fields.msg_code))));
-			}
+			// The result's state (8, or 4 with the refusal's MsgCode in the session's word) is
+			// what the play poll reads after this drain (poll_play).
 			break;
 		case Notice::Kind::StopPlaying:
-			play_in_flight_ = false;
 			trace(String("ServerStopPlaying msgcode=")
 			    + String::num_int64(notice.fields.msg_code));
 			break;
 		case Notice::Kind::LeaveNovaWorld:
-			play_in_flight_ = false;
 			trace(String("ServerLeaveNovaWorld msgcode=")
 			    + String::num_int64(notice.fields.msg_code));
 			emit_signal("punted", notice.fields.msg_code);
@@ -1146,9 +1129,9 @@ void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	play_escape_requested_ = false;
 }
 
-// A play the poll leaves: a timeout's (or an escape's) StopPlaying, then, as for a rejected
-// result, the not-playing line with the session's state (engine: connect_or_host.h's
-// play_not_playing_line carries the witness).
+// The player's ESC while a leg waits: the play poll takes it at its next key read (poll_play);
+// the host leg's wait never reads one; otherwise the first connect's polls take it
+// (NwuLobbySession::escape).
 bool NovaWorldClient::escape_connect() {
 	if (play_in_flight_) {
 		play_escape_requested_ = true;
@@ -1160,16 +1143,41 @@ bool NovaWorldClient::escape_connect() {
 	return lobby_.escape();
 }
 
-void NovaWorldClient::abort_playing(const String &tag) {
-	play_escape_requested_ = false;
-	if (play_in_flight_ && lobby_.session()) {
-		lobby_.session()->stop_playing();
+// Each frame after the session's pump and its notices, as retail's play loop runs after each
+// periodic update: the 60 s test (the timeout's line, NWEC02), else the frame's key read (the
+// escape's line, NWEC03), either stopping the play (ClientStopPlaying); then the session's state:
+// still 7 waits on, 8 hands the join target on, any other writes the not-playing line and fails
+// with the leg's tag or the MsgCode word's map (engine: connect_or_host.h's play_leg_exit_tag).
+// A shell already DISCONNECTED or ERROR stays there.
+void NovaWorldClient::poll_play() {
+	if (!play_in_flight_) return;
+	opennova::ClientSession *session = lobby_.session();
+	std::string tag = opennova::NWEC_SESSION_NOT_SET_UP; // the leg's preset
+	bool stopped = false;
+	if (session != nullptr &&
+			lobby_.clock_ms() - play_started_ms_ > opennova::SESSION_CONNECT_TIMEOUT_MS) {
+		lobby_.connect_log(opennova::kPlayTimeoutLine);
+		tag = opennova::NWEC_PLAY_TIMEOUT;
+		stopped = true;
+	} else if (session != nullptr && play_escape_requested_) {
+		lobby_.connect_log(opennova::kPlayEscapedLine);
+		tag = opennova::NWEC_PLAY_CANCELLED;
+		stopped = true;
 	}
-	if (play_in_flight_ && lobby_.session())
-		lobby_.connect_log(opennova::play_not_playing_line(lobby_.session()->lobby_state()));
+	if (stopped) session->stop_playing();
+	const int state = session != nullptr ? session->lobby_state() : 0;
+	if (!stopped && state == 7) return;
 	play_in_flight_ = false;
-	enter_state(STATE_CONNECTED);
-	emit_signal("join_failed", tag);
+	play_escape_requested_ = false;
+	if (state == 8) {
+		lobby_.connect_log(opennova::kMovingOnLine);
+		resolve_join_target();
+		return;
+	}
+	lobby_.connect_log(opennova::play_not_playing_line(state));
+	if (state_ != STATE_DISCONNECTED && state_ != STATE_ERROR) enter_state(STATE_CONNECTED);
+	emit_signal("join_failed", opennova::to_gd(opennova::play_leg_exit_tag(
+			tag, session != nullptr ? session->server_msg_code() : 0)));
 }
 
 // The hosting half's outcomes, mapped onto our State + signals.
@@ -1375,10 +1383,9 @@ void NovaWorldClient::enter_state(State next, const String &reason) {
 	const State previous = state_;
 	state_ = next;
 	if (next == STATE_DISCONNECTED || next == STATE_ERROR) {
-		// A play in flight dies with the session: the rest of this _process (the notice
-		// drain, the play timeout) must not resolve or abort it back into CONNECTED.
+		// A play in flight ends on the session's state at its poll, which leaves the shell in
+		// DISCONNECTED / ERROR (poll_play).
 		authenticated_ = false;
-		play_in_flight_ = false;
 	}
 	trace(String(state_name(previous)) + " -> " + state_name(next)
 		+ (reason.is_empty() ? String() : (String(" (") + reason + String(")"))));

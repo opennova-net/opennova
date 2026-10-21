@@ -84,6 +84,18 @@ inline constexpr char kMovingOnLine[] = "NWU MOVING ON TO HOSTING OR PLAYING..."
 //  @0x4D519A..0x4D519D), the play loop @0x4D54C0..0x4D54EE (ProcessPeriodicUpdate @0x4D54C5,
 //  Game_PumpWindowMessages @0x4D54D5, Input_DequeueKeyEvent @0x4D54DA); its one caller
 //  UI_DispatchScreenEvent (the call @0x54F33B)]
+// The play poll's exit: a pass whose timeout or key read stopped the play (StopPlaying), or one
+// that finds the session out of state 7, leaves the loop; state 8 is the result's success
+// (kMovingOnLine), any other writes play_not_playing_line and shows the leg's tag: the preset
+// NWEC01, the timeout's NWEC02 or the escape's NWEC03, replaced by the MsgCode word's map when
+// the word is nonzero (a refusal, a ServerStopPlaying, a punt; the play request cleared it, so
+// the reap and a reconnect's state leave the tag).
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the preset @0x4D4F89, the loop's state test
+//  @0x4D54E7..0x4D54EE, StopPlaying @0x4D5592, `cmp dword_B600FC,8` @0x4D559C, @0x4D55E7, the
+//  word's zero test @0x4D55F7..0x4D55FE, the map @0x4D5604..0x4D569F]
+inline std::string play_leg_exit_tag(const std::string &tag, int msg_code_word) {
+	return msg_code_word != 0 ? novaworld_play_error_tag(msg_code_word) : tag;
+}
 inline constexpr char kHostAttemptLine[] = "NWU ATTEMPTING TO START HOSTING";        // @0x4D5038
 inline constexpr char kHostGateNotOkLine[] = "NWU HOSTING FAILED...GATEINFO NOT OK!!!"; // @0x4D50C9
 inline constexpr char kHostStartFailedLine[] =

@@ -460,6 +460,17 @@ public:
 	// [orig: CGameSession_SetState @0x4CE140 - the store @0x4CE1CD, the stamp @0x4CE1D5]
 	int lobby_state() const { return lobby_state_; }
 	uint32_t lobby_state_entered_ms() const { return lobby_state_entered_ms_; }
+	// The session's MsgCode word (session+0x130, dword_B60110): the last refusal's or server
+	// statement's MsgCode. ConnectOrHost's legs map it to their NWEC when the session leaves the
+	// leg's requested state without its success (host_leg_exit_tag / play_leg_exit_tag,
+	// connect_or_host.h). 0 at each connection's start and the reset; the play request clears
+	// it, the host request does not.
+	// [orig: the writers HandleHostVerifyResponse @0x4D59D0 (the refusal @0x4D5AE1),
+	//  HandleVerifyResponse @0x4D1E00 (@0x4D1EDC), HandleServerMessage @0x4D1C50 (@0x4D1D17),
+	//  HandleServerDisconnectMsg @0x4D1FA0 (@0x4D2041), HandlePuntNotification @0x4D20B0
+	//  (@0x4D2177); the clears InitNPConnection @0x4D40D9, ResetToDisconnected @0x4D08EA,
+	//  StartPlayingSession @0x4D460D; the readers ConnectOrHost @0x4D51F3 and @0x4D55F7]
+	int server_msg_code() const { return server_msg_code_; }
 
 	// ---- the first connect's give-ups ---------------------------------------
 	// RequestDisconnect: an NP connection that is up (its state 5) tears down (the 0x46 burst into
@@ -693,6 +704,7 @@ private:
 	bool first_probe_stopped_ = false; // a give-up stopped the first connect's probe
 	uint32_t session_flags_ = 0;         // session+0x120
 	int32_t session_role_ = kSessionRoleNone; // session+0x128
+	int server_msg_code_ = 0;            // session+0x130
 
 	// The session-owned var lists the host and play legs serialize: HostSetup (session+0x1CC),
 	// Host (+0x214), PlayerList (+0x25C) and the play leg's PlaySetup

@@ -1261,6 +1261,13 @@ void check_connect_or_host_lines() {
 	CHECK(play_leg_refusal(true, 0x2u) == std::string(NWEC_WRONG_SESSION_STATE));
 	CHECK(play_leg_refusal(true, 0xAu) == nullptr);
 	CHECK(play_not_playing_line(4) == "NWU STARTPLAYING failed.  Not in playing state[4]!!!");
+	// The play poll's exit tag: the leg's own (the preset NWEC01, the timeout's NWEC02, the
+	// escape's NWEC03) while the MsgCode word is 0, else the word's map, which overwrites it
+	// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - @0x4D55F7..0x4D569F].
+	CHECK(play_leg_exit_tag(NWEC_SESSION_NOT_SET_UP, 0) == "NWEC01");
+	CHECK(play_leg_exit_tag(NWEC_PLAY_TIMEOUT, 0) == "NWEC02");
+	CHECK(play_leg_exit_tag(NWEC_SESSION_NOT_SET_UP, 3001) == "NWEC05");
+	CHECK(play_leg_exit_tag(NWEC_PLAY_CANCELLED, 7) == "NWEC13");
 
 	const auto hosting = [](bool command_line_host, const char *success, uint32_t result_at) {
 		Rig rig(command_line_host);
@@ -1302,6 +1309,76 @@ void check_connect_or_host_lines() {
 	CHECK(served.first.empty());
 	const auto waits = hosting(true, nullptr, 310 + SESSION_CONNECT_TIMEOUT_MS + 1);
 	CHECK(waits.first.empty() && waits.second.empty());
+
+	// The host poll ends the moment the session leaves state 5 without its success: a punt, a
+	// ServerStopHosting or a lost session during the request writes the not-hosting line last and
+	// fails with the session's MsgCode word through the host switch (a punt's 1001 -> NWEC53, a
+	// stop's 1009 -> NWEC57, no session -> NWEC58); the role is idle again, so the wait no longer
+	// holds the menus' admin pump nor the panel's Close; the command-line host writes no line.
+	// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the state test @0x4D5195..0x4D519D,
+	//  @0x4D51DF, the +0x130 switch @0x4D51F3..0x4D5207; HandlePuntNotification @0x4D20B0 - the
+	//  word @0x4D2177, SetState(0) @0x4D21FA; HandleServerMessage @0x4D1C50 - @0x4D1D17,
+	//  SetState(4) @0x4D1D29; Game_HostMultiplayerSession @0x4A671D..0x4A674F]
+	struct Exit {
+		std::vector<std::string> log;
+		std::vector<std::string> failed;
+		int stopped = 0;
+		NwuHostRole::Phase phase = NwuHostRole::Phase::Requested;
+	};
+	const auto host_exit = [](bool command_line_host, const char *statement, const char *msg_code) {
+		Rig rig(command_line_host);
+		rig.log_on = true;
+		const std::vector<uint8_t> auth = bring_to_verify(rig);
+		rig.session.inbound.push_back({ kServer,
+				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+		rig.lobby.tick(300);
+		Exit out;
+		NwuHostRole::Hooks hooks;
+		hooks.on_failed = [&out](const std::string &tag) { out.failed.push_back(tag); };
+		hooks.on_stopped = [&out](const std::string &) { ++out.stopped; };
+		NwuHostRole role(rig.lobby, hooks);
+		HostRegistration reg;
+		reg.server_name = "Exit";
+		role.request(reg);
+		rig.lobby.tick(310);
+		role.tick(310);
+		CHECK(role.phase() == NwuHostRole::Phase::Requested);
+		rig.log.clear();
+		if (statement != nullptr) {
+			rig.session.inbound.push_back({ kServer,
+					server_statement_to(auth, statement, { { "MsgCode", msg_code } }, 2) });
+			rig.lobby.tick(320);
+			if (ClientSession *session = rig.lobby.session())
+				for (const auto &notice : session->take_notices()) role.handle_notice(notice);
+		} else {
+			rig.lobby.close();
+		}
+		role.tick(320);
+		role.tick(330); // the wait ended once
+		out.log = rig.log;
+		out.phase = role.phase();
+		rig.lobby.close();
+		return out;
+	};
+	const auto punted = host_exit(false, "ServerLeaveNovaWorld", "1001");
+	CHECK(!punted.log.empty() &&
+			punted.log.back() == "NWU HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!");
+	CHECK(std::count(punted.log.begin(), punted.log.end(),
+				  std::string("NWU HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!")) == 1);
+	CHECK((punted.failed == L{ "NWEC53" }));
+	CHECK(punted.phase == NwuHostRole::Phase::Idle);
+	const auto stopped = host_exit(false, "ServerStopHosting", "1009");
+	CHECK((stopped.log == L{ "NWU HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!" }));
+	CHECK((stopped.failed == L{ "NWEC57" }) && stopped.stopped == 0);
+	CHECK(stopped.phase == NwuHostRole::Phase::Idle);
+	const auto lost = host_exit(false, nullptr, nullptr);
+	CHECK(!lost.log.empty() &&
+			lost.log.back() == "NWU HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!");
+	CHECK((lost.failed == L{ "NWEC58" }));
+	const auto served_punt = host_exit(true, "ServerLeaveNovaWorld", "1001");
+	CHECK(std::count(served_punt.log.begin(), served_punt.log.end(),
+				  std::string("NWU HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!")) == 0);
+	CHECK(served_punt.failed.size() == 1 && served_punt.phase == NwuHostRole::Phase::Idle);
 }
 
 // D-NET-490: a player's add on a hosting session sends ClientHostPlayerAdded and then, at once,
