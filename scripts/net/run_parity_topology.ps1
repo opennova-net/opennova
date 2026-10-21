@@ -1449,7 +1449,7 @@ function Begin-SteadyWindow {
         catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady start: $($_.Exception.Message)" }
     }
     $script:SteadyStartedUtc = [DateTime]::UtcNow.ToString("o")
-    Start-MachineLoadSampler
+    if (-not $script:MachineLoadStart) { Start-MachineLoadSampler }
 }
 
 function Publish-MotionGate {
@@ -1891,6 +1891,14 @@ function Invoke-ScenarioSetupBeforeWindow {
     } else {
         $RetailJoinerInstanceId
     }
+    # The machine-load sampler starts here, ahead of the setup, not at the
+    # window's start: its Start-Job spins up a child PowerShell, which took
+    # 0.1..0.2 s on x5's aikill cells and 1.3 s on its OO cell, and in between
+    # the staging and the first step a staged actor in a fight has none of that
+    # to spare (x5 aikill OO: the camp's AI killed the joiner 1.31 s into the
+    # window, and its steps began at 1.32 s; the other four fired at
+    # 0.21..0.43 s).
+    Start-MachineLoadSampler
     # The steady start's desktop reset (two window enumerations, about 1 s) runs
     # before the setup, so the window opens and the steps follow the pose as
     # closely as they did inside one stage: a posed actor in a fight (x1's
