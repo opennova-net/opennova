@@ -282,10 +282,14 @@ JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 	case PostAuthStage::AwaitMissionData:
 		return SendPumpLoop::MissionDataWait;
 	case PostAuthStage::AwaitInitialSyncTail:
-		return pending_spawn_menu_request_ ? SendPumpLoop::WorldStreamWait
-		                                   : SendPumpLoop::SyncTailWait;
+		return pending_spawn_menu_request_ && !sync_tail_loading_ ? SendPumpLoop::WorldStreamWait
+		                                                          : SendPumpLoop::SyncTailWait;
 	case PostAuthStage::AwaitWorldStreamEnd:
-		return SendPumpLoop::WorldStreamWait;
+		// The 0x11's own pass under a declared load is the sync-tail wait's last: its paced
+		// send (set_sync_tail_loading) [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail
+		// @0x42CB20 - @0x42CBB5..0x42CBC0 ahead of @0x42CBE7].
+		return sync_tail_load_running() ? SendPumpLoop::SyncTailWait
+		                                : SendPumpLoop::WorldStreamWait;
 	case PostAuthStage::AwaitMissionStart:
 		return SendPumpLoop::MissionStart;
 	case PostAuthStage::AwaitDeployment:
@@ -412,21 +416,28 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 		return out;
 	}
 
-	// The admission FSM is entirely server-driven. A latched early S2C 0x11 (applied when the
-	// final S2C 0x64 entered the sync-tail stage) sends its empty C2S 0x0A world-stream request at
-	// this send boundary [orig: NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F].
-	if (pending_spawn_menu_request_) {
-		// Remains inside ClientRuntime's surrounding logical send boundary.
-		out.push_back(frame_session({make_protocol_message(0x0A, {})}));
-		pending_spawn_menu_request_ = false;
-		if (post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail)
-			post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
-	}
+	// The admission FSM is entirely server-driven. The 0x11's C2S 0x0A is no datagram of its
+	// own: the client runtime queues it behind its queue (take_world_stream_request).
 
 	// Carry a pending cumulative ACK only when no substantive C2S producer above already did so.
 	// All semantic join messages are emitted at their captured S2C trigger in on_server_session.
 	if (session_ack_pending_) out.push_back(frame_session({}));
 	return out;
+}
+
+// The game-start wait's head: the 0x11's empty reliable 0x0A, once the sync-tail pass ended
+// and any declared load has run (set_sync_tail_loading carries the witness). A latched early
+// 0x11 (applied when the final S2C 0x64 entered the sync-tail stage) owes it the same way.
+// [orig: NapiClient_WaitForGameStart @0x42CC10 - CNapiNetwork_QueueReliableMessage(0x0A)
+//  @0x42CC3F]
+std::optional<ProtocolMessage> JoinerConnection::take_world_stream_request() {
+	if (!pending_spawn_menu_request_ || sync_tail_loading_ || phase_ != Phase::Driving ||
+			session_lost())
+		return std::nullopt;
+	pending_spawn_menu_request_ = false;
+	if (post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail)
+		post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
+	return make_protocol_message(0x0A, {});
 }
 
 uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {

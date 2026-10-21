@@ -1159,6 +1159,14 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	if (joiner_ != nullptr && joiner_->mission_start_released() &&
 			joiner_->mission_start_loading())
 		return outbound;
+	// The 0x11's declared load runs the same way: no pump on the game connection until it has
+	// ended; the frame after it is the game-start wait's first, whose head queues the 0x0A
+	// ahead of its receive (JoinerConnection::set_sync_tail_loading carries the witness).
+	if (joiner_ != nullptr && joiner_->sync_tail_load_running()) return outbound;
+	if (joiner_ != nullptr) {
+		if (std::optional<ProtocolMessage> request = joiner_->take_world_stream_request())
+			send_queue_.push_back(std::move(*request));
+	}
 	// A mission start the round-over gate abandoned has loaded nothing: the game loop's
 	// exit 4, which the previous frame's linger stored, for a session peer that is not the
 	// authority re-enters the game loop. The main frame's tail reads the exit after that
@@ -2059,6 +2067,11 @@ void ClientRuntime::build_send_boundary(std::vector<std::vector<uint8_t>> &outbo
 		send_messages.push_back(std::move(send_queue_.front()));
 		send_queue_.pop_front();
 	}
+	// The 0x11's 0x0A, owed since this frame's receive (its sync-tail pass): the game-start
+	// wait queues it behind everything that pass queued, so it leaves in this build behind them
+	// (JoinerConnection::set_sync_tail_loading carries the witness).
+	if (std::optional<ProtocolMessage> request = joiner_->take_world_stream_request())
+		send_messages.push_back(std::move(*request));
 	if (append) append(send_messages);
 	JoinerConnection::FrameMessagesResult framed;
 	if (packets_built < build_budget) {

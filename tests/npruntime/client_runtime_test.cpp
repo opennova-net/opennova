@@ -1581,6 +1581,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 		(void)fork.handle_datagram(round_end.data(), round_end.size());
 		(void)fork.finish_receive_pump();
 		bool sent_0a = false;
+		sent_0a = fork.take_world_stream_request().has_value();
 		for (const std::vector<uint8_t> &dg : fork.pump(0)) {
 			std::vector<ProtocolMessage> messages;
 			ProtocolPacketHeader header;
@@ -1605,7 +1606,10 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 			"the 0x11 sets the wait's flag: its 0x0A is owed to the send boundary")) {
 		return false;
 	}
-	const std::vector<std::vector<uint8_t>> sync_tail_answer = joiner.pump(0);
+	// The game-start wait's head queues it; the send frames it (the client runtime's queue).
+	const std::optional<ProtocolMessage> owed_0a = joiner.take_world_stream_request();
+	const std::vector<std::vector<uint8_t>> sync_tail_answer =
+			owed_0a ? joiner.frame_messages({*owed_0a}) : std::vector<std::vector<uint8_t>>{};
 	if (!expect(sync_tail_answer.size() == 1 &&
 				decode_client_session(
 						sync_tail_answer[0], client_auth.scrk,
@@ -2005,7 +2009,9 @@ bool run_early_sync_tail_latch() {
 			"early-tail: the 0x09 leaves alone at its send boundary")) {
 		return false;
 	}
-	const std::vector<std::vector<uint8_t>> world_release = joiner.pump(0);
+	const std::optional<ProtocolMessage> latched_0a = joiner.take_world_stream_request();
+	const std::vector<std::vector<uint8_t>> world_release =
+			latched_0a ? joiner.frame_messages({*latched_0a}) : std::vector<std::vector<uint8_t>>{};
 	if (!expect(world_release.size() == 1 &&
 				decode_client_session(
 						world_release[0], client_auth.scrk, client_header, client_messages) &&

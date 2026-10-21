@@ -1055,6 +1055,59 @@ bool run_the_sync_request_needs_no_player_list() {
 			"sync: the later list draws exactly one 0x22 for its unbound row");
 }
 
+// The 0x11's 0x0A joins the connection's one queue (D-NET-NEW-L2-19): the game-start wait
+// queues it at its head, behind everything the sync-tail pass queued, so a player list that
+// rode the 0x11's packet sends its 0x22 in the same packet, ahead of the 0x0A (the retail pair's
+// [0x22, 0x0A] after a [0x16 .. 0x11] packet; ours sent the 0x0A alone first). Under a declared
+// 0x11 load the joiner pumps nothing until the load has ended, and the frame after it queues
+// the 0x0A at its head, ahead of what its receive folds: a list that arrived during the load
+// sends its 0x22 behind the 0x0A, in one packet.
+// [orig: Game_StartMission @0x524360 - the sync-tail wait (the call @0x524DAB), the loads
+//  @0x524DF2..0x524E24, NapiClient_WaitForGameStart (the call @0x524E29);
+//  NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F ahead of the receive
+//  @0x42CC7E / @0x42CC88 and the send @0x42CC92; NapiNPClientMsg_PlayerList - the 0x22
+//  @0x42FC35]
+bool run_the_sync_tail_0x0a_joins_the_queue() {
+	for (const bool declared_load : {false, true}) {
+		Harness h;
+		if (!expect(h.handshake(), "0x0A queue: handshake")) return false;
+		h.frame({settings_record(0), settings_record(1)});
+		h.frame({make_protocol_message(0x00, {})});
+		std::vector<uint8_t> probe(64, 0);
+		probe[8] = 16;
+		h.frame({make_protocol_message(0x02, probe)});
+		h.frame({holdoff_record(12), make_protocol_message(0x03, {0x01})});
+		h.frame({make_protocol_message(0x05, {0x01}),
+				make_protocol_message(0x04, slot_assignment(0x02)),
+				make_protocol_message(0x7B, full_player_info())});
+		(void)frame_until_sent(h, 16);
+		(void)h.frame({make_protocol_message(0x60, transfer_chunk(1, 171, 0, 171, 0xA5))});
+		(void)h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 0, 180, 0x5A))});
+		if (!expect(h.one_packet(frame_until_sent(h, 16), {0x09}),
+				"0x0A queue: the 0x09 leaves at the sync-tail wait's pace"))
+			return false;
+		if (!declared_load) {
+			if (!expect(h.one_packet(h.frame({make_protocol_message(0x16, player_list({{0, 1}})),
+						 make_protocol_message(0x11, {})}),
+						{0x22, 0x0A}),
+					"0x0A queue: the list's 0x22 and the 0x0A leave in one packet, the 0x22 first"))
+				return false;
+			continue;
+		}
+		h.client.set_sync_tail_loading(true);
+		if (!expect(h.frame({make_protocol_message(0x11, {})}).empty() &&
+						h.frame({make_protocol_message(0x16, player_list({{0, 1}}))}).empty() &&
+						h.frame().empty(),
+				"0x0A queue: the declared load pumps nothing, a list arriving meanwhile waits"))
+			return false;
+		h.client.set_sync_tail_loading(false);
+		if (!expect(h.one_packet(h.frame(), {0x0A, 0x22}),
+				"0x0A queue: after the load the 0x0A leads, the waiting list's 0x22 behind it"))
+			return false;
+	}
+	return true;
+}
+
 // The join screen reads where the join stands: the dial until ServerAuth
 // accepts, the connect until the host's S2C 0x00, the verification until its
 // S2C 0x01 reads 1, the host's S2C 0x03 queue record, and the game start at
@@ -1104,6 +1157,7 @@ int main() {
 	ok = run_a_bodyless_joiner_pings() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_sync_request_needs_no_player_list() && ok;
+	ok = run_the_sync_tail_0x0a_joins_the_queue() && ok;
 	ok = run_the_mission_start_submissions_follow_the_countdown() && ok;
 	ok = run_the_joiner_mission_start_keeps_the_folded_round_clock() && ok;
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;

@@ -20,6 +20,7 @@
 #include <array>
 #include <deque>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -595,6 +596,38 @@ public:
 	//  @0x52620e..0x52624b, CNapiNetwork_PumpClientProtocolSend @0x526255]
 	void set_mission_start_loading(bool loading) { mission_start_loading_ = loading; }
 	bool mission_start_loading() const { return mission_start_loading_; }
+
+	// The S2C 0x11's answer (D-NET-NEW-L2-19). The 0x11 ends the sync-tail wait, which reads
+	// its flag after the whole pass and that pass's paced send; the mission start then runs the
+	// 0x0B header's terrain and environment load and the avatar combo models, pumping nothing
+	// on the game connection, and the game-start wait queues the empty reliable 0x0A at its
+	// head, ahead of its first receive and send. So the 0x0A joins the connection's one queue
+	// behind everything the sync-tail pass queued (a player list's 0x22 re-requests that rode
+	// the 0x11's packet leave in the same packet, ahead of it), and what the game-start wait's
+	// receives fold queues behind it. An embedder whose load runs at the 0x11 declares it
+	// before the 0x11 arrives and clears it once the load has ended: while the 0x0A is owed
+	// under the declaration, the 0x11's own pass keeps the sync-tail wait's pace, later frames
+	// neither receive nor send (the client runtime's frame returns at its head), and the
+	// frame after the release queues the 0x0A at its head. Without the declaration the 0x0A
+	// joins the queue at the 0x11's own send boundary.
+	// [orig: Game_StartMission @0x524360 - NapiClient_SendPlayerSyncAndWaitForSyncTail (the
+	//  call @0x524DAB, the return test @0x524DB0), Game_LoadTerrainDuringConnect (the call
+	//  @0x524DF2), LoadingScreen_UpdateAndPresent @0x524E09, the gate manager's
+	//  CNapiGameSession_ProcessPeriodicUpdate @0x524E13, Avatars_LoadComboModels (the call
+	//  @0x524E24), NapiClient_WaitForGameStart (the call @0x524E29);
+	//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the receive @0x42CB95 /
+	//  @0x42CB9F, the paced send @0x42CBB5..0x42CBC0, the flag's test @0x42CBE7;
+	//  NapiClient_WaitForGameStart @0x42CC10 - CNapiNetwork_QueueReliableMessage(0x0A)
+	//  @0x42CC3F, the receive @0x42CC7E / @0x42CC88, the send @0x42CC92]
+	void set_sync_tail_loading(bool loading) { sync_tail_loading_ = loading; }
+	bool sync_tail_loading() const { return sync_tail_loading_; }
+	// The declared 0x11 load runs: the 0x11 came and its 0x0A is still owed.
+	bool sync_tail_load_running() const {
+		return sync_tail_loading_ && pending_spawn_menu_request_;
+	}
+	// The game-start wait's 0x0A for the client runtime's one queue: nullopt when none is owed
+	// or the declared load still runs. Taking it moves the join on to the world stream's wait.
+	std::optional<ProtocolMessage> take_world_stream_request();
 	bool mission_start_released() const {
 		return post_auth_stage_ == PostAuthStage::AwaitMissionStart;
 	}
@@ -1344,6 +1377,7 @@ private:
 	bool loadout_kit_set_ = false;
 	const world::WeaponTable *weapons_ = nullptr; // set_weapon_table
 	bool mission_start_loading_ = false;          // set_mission_start_loading
+	bool sync_tail_loading_ = false;              // set_sync_tail_loading
 	CharacterJoinVars character_join_vars_{};
 	uint32_t auto_medic_disabled_ = 0; // profile +1660 (set_auto_medic_preference)
 	uint8_t current_player_class_ = 0; // authoritative S2C 0x5A avatarClass

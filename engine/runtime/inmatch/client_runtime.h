@@ -801,6 +801,13 @@ public:
 	void set_mission_start_loading(bool loading) {
 		if (joiner_) joiner_->set_mission_start_loading(loading);
 	}
+	// The S2C 0x11's load (JoinerConnection::set_sync_tail_loading): an embedder whose 0x0B
+	// header terrain / environment load and avatar combo models run at the 0x11 declares it
+	// before the 0x11 arrives and clears it once that load has ended; meanwhile the frame
+	// neither receives nor sends, and the next frame queues the 0x0A at its head.
+	void set_sync_tail_loading(bool loading) {
+		if (joiner_) joiner_->set_sync_tail_loading(loading);
+	}
 	bool mission_start_released() const { return joiner_ && joiner_->mission_start_released(); }
 	// Game_StartMission's network pumps from the 0x1A to the final wait for the S2C 0x0F,
 	// in its order: its receive pumps step the send-holdoff countdown, its send pumps build

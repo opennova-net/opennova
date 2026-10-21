@@ -1283,7 +1283,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 	auto enter_initial_sync_tail = [&] {
 		post_auth_stage_ = PostAuthStage::AwaitInitialSyncTail;
 		// A latched early 0x11 (see the 0x11 handler) completes this stage immediately;
-		// its C2S 0x0A then leaves at the pump's next send boundary.
+		// its C2S 0x0A is then owed to the next send boundary (take_world_stream_request).
 		if (sync_tail_seen_) {
 			preload_ready_ = true;
 			pending_spawn_menu_request_ = true;
@@ -2260,8 +2260,9 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 				mission_start_aborted_ = true;
 			// The 0x11 sets the wait's flag alone: the wait reads it after the whole pass and
 			// its send, behind the round-over test, and the game-start wait that follows
-			// queues the 0x0A at its head, so the 0x0A is owed to the send boundary (pump())
-			// and a gate a later message of this pass raises still withdraws it
+			// queues the 0x0A at its head, so the 0x0A is owed to the send boundary
+			// (take_world_stream_request) and a gate a later message of this pass raises still
+			// withdraws it
 			// (finish_receive_pump). The world stream's stage starts now. (A 0x1A in this same
 			// pass cannot come from a stock host, which sends it only after the joiner's 0x0A;
 			// retail's game-start wait would clear its flag at its head.)
