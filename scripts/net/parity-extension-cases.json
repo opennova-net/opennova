@@ -120,11 +120,11 @@
       "note": "The retail-side spectator convert stays unexercised: onhook_host_lan zeroes the retail host's spectator quota (g_GameConfigState+0x26C; opennova-int lan_host.c ConfigureLanSession) for the whole session, and the pinned game.cfg holds mpnumspectatorsmax 0 for the OpenNova host. The case pins SPACE sends nothing (no C2S 0x51; the joiner stays dead) on every topology."
     },
     {
-      "id": "01tr-coop-revive",
-      "mission": "01TR.bms",
-      "mission_sha256": "7ceb5dac231f6dd0a78a41302889cb325629369cf7599ee31b506a98ea2cd590",
-      "game_type": 65568,
-      "port": 32786,
+      "id": "cp04-objcoop-revive",
+      "mission": "CP04.bms",
+      "mission_sha256": "ade019ca4b3d8cd6851abeec6ca8ffa2357d2b9b83a2cd348eebf4a82f9e8346",
+      "game_type": 196640,
+      "port": 32784,
       "readiness": "in_match",
       "steady_seconds": 60,
       "exercise_input": false,
