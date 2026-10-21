@@ -289,61 +289,6 @@ static void test_missing_husk_assets_leave_the_live_model_gate_clear() {
     CHECK(t->kz_points.empty());
 }
 
-// Terrain_SpawnEffectsAtUserPoint first selects one hard-coded retail
-// model/surface pair, then resolves that exact point case-insensitively: the
-// eurhr2 row maps GLASS, a near-name model is not in the static table.
-static void test_retail_glass_model_maps_exact_userpoint_into_death_traits() {
-    const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
-    CHECK(!armory.empty());
-    if (armory.empty()) return;
-    const std::vector<uint8_t> glass_bytes = with_renamed_user_point(armory, "Armory", "gLaSs");
-    std::vector<Vec3> expected_pos;
-    std::vector<Vec3> expected_dir;
-    expected_points(glass_bytes, "GLASS", expected_pos, expected_dir);
-    CHECK(expected_pos.size() == 1 && expected_dir.size() == 1);
-    {
-        const Items items(text_bytes(
-                "begin \"Retail glass witness\"\r\n"
-                "  id 105099\r\n"
-                "  type object\r\n"
-                "  graphic eurhr2\r\n"
-                "  hp 1000\r\n"
-                "end\r\n"));
-        CHECK(items.ok);
-        if (!items.ok) return;
-        const TempRoot root("glass");
-        root.put("eurhr2.3di", glass_bytes);
-        const Rig rig(root, items, 5099);
-        const ItemDeathTraits *t = rig.traits(5099);
-        CHECK(t != nullptr);
-        if (t == nullptr) return;
-        CHECK(t->glass_points.size() == 1);
-        if (t->glass_points.size() == 1 && expected_pos.size() == 1) {
-            CHECK(same(t->glass_points[0].local_pos, expected_pos[0])); // mission-local point axes
-            CHECK(same(t->glass_points[0].local_dir, expected_dir[0])); // the authored shatter orientation
-        }
-    }
-    {
-        // A near-name is not in retail's static table, even with the same userpoint.
-        const Items items(text_bytes(
-                "begin \"Near-name glass witness\"\r\n"
-                "  id 105098\r\n"
-                "  type object\r\n"
-                "  graphic eurhr2x\r\n"
-                "  hp 1000\r\n"
-                "end\r\n"));
-        CHECK(items.ok);
-        if (!items.ok) return;
-        const TempRoot root("glassx");
-        root.put("eurhr2x.3di", glass_bytes);
-        const Rig rig(root, items, 5098);
-        const ItemDeathTraits *t = rig.traits(5098);
-        CHECK(t != nullptr);
-        if (t == nullptr) return;
-        CHECK(t->glass_points.empty()); // retail's model table is an exact case-insensitive match
-    }
-}
-
 // The class init seeds the vehicle brain's two floors from the models it
 // binds: brain[11] from the intact model's CMDL floor and brain[12] from the
 // husk, both under one class gate: the helicopter family always, the vehicle
@@ -425,7 +370,6 @@ int main() {
     test_first_husk_kz_and_dead_points_feed_death_traits();
     test_final_only_husk_supplies_the_gate_but_no_kz_source();
     test_missing_husk_assets_leave_the_live_model_gate_clear();
-    test_retail_glass_model_maps_exact_userpoint_into_death_traits();
     test_class_init_seeds_the_brain_floors();
     if (failures == 0) std::printf("OK: item_death_traits_resolve\n");
     return failures == 0 ? 0 : 1;

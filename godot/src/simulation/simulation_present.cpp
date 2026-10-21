@@ -378,7 +378,6 @@ void Simulation::drain_destruction_events(opennova::world::DestructionEvents &r_
 	r_events.items_destroyed = ev.items_destroyed;
 	r_events.crackles = ev.crackles;
 	r_events.debris_triangles = ev.debris_triangles;
-	r_events.glass_points = ev.glass_points;
 	ev.clear();
 }
 

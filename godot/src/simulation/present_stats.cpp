@@ -63,7 +63,6 @@ void DestructionPresentStats::_bind_methods() {
 	STAT_BIND(DestructionPresentStats, debris_triangles)
 	STAT_BIND(DestructionPresentStats, effects)
 	STAT_BIND(DestructionPresentStats, sounds)
-	STAT_BIND(DestructionPresentStats, glass_points)
 	STAT_BIND(DestructionPresentStats, crackles)
 }
 

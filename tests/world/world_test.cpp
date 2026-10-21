@@ -351,7 +351,6 @@ int main() {
     w.out.destruction.sounds.push_back({});
     w.out.destruction.husk_swaps.push_back({});
     w.out.destruction.debris_triangles = 11;
-    w.out.destruction.glass_points = 5;
     w.out.destruction.explosions_processed = 7;
     w.out.destruction.items_destroyed = 3;
     // CachedFrameState is transient, not part of Snapshot. A local player
@@ -395,7 +394,6 @@ int main() {
     CHECK(w.out.destruction.sounds.empty());
     CHECK(w.out.destruction.husk_swaps.empty());
     CHECK(w.out.destruction.debris_triangles == 0);
-    CHECK(w.out.destruction.glass_points == 0);
     CHECK(w.out.destruction.explosions_processed == 0);
     CHECK(w.out.destruction.items_destroyed == 0);
     CHECK(w.cached.local_player == blast_victim);

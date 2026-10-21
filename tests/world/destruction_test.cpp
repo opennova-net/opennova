@@ -910,24 +910,20 @@ void test_section_debris_samples_collision_faces() {
         CHECK(effect.section_tagged == (effect.effect == "Effect_TreeFoliageExp"));
 }
 
-// Static-building glass is a model-authored point, not a coarse building
-// burst. The point uses the entity's complete placement pose, tests against
-// the AMMO'S authored maximum radius (not the queue override), breaks once,
-// and consumes two retail PRNG draws for each of the four probabilistic effect
-// slots. Seed 0x200 yields visible Glass/Paper/Dust rows and no Fire row.
-// [orig: Projectile_ProcessExplosionQueue @0x4eb814-0x4eb84d;
-// Terrain_SpawnEffectsAtUserPoint @0x5cee20]
-void test_glass_userpoints_shatter_once_at_authored_radius() {
+// A blast at a building's window changes nothing: every row of retail's static
+// model / GLASS table sets the projected-decal word (+0xBC), and the window call leaves
+// the point at it, before its scar and its four effect rolls. The blast that used to
+// break a window here (seed 0x200, the point in reach) emits no effect and draws
+// nothing from the death stream; the building's own callback runs as before.
+// [orig: Projectile_ProcessExplosionQueue @0x4EAD80 (the GLASS1..GLASS4 calls
+//  @0x4EB814..0x4EB84D); Terrain_SpawnEffectsAtUserPoint @0x5CEE20 (`cmp [ecx+0BCh], 0;
+//  jnz` @0x5CF04D..0x5CF054 to the next point @0x5CF180); the table @0x841980]
+void test_a_blast_at_a_window_changes_nothing() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(2, 4);
-
-    ItemDeathTraits traits = barrel_traits();
-    traits.glass_points = {
-            GlassPointTrait{Vec3{1.5f, -0.5f, 0.75f}, Vec3{0.0f, 1.0f, 0.0f}},
-            GlassPointTrait{Vec3{20.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f}}};
-    w.tables.item_death_traits.set(900, traits);
+    w.tables.item_death_traits.set(900, barrel_traits());
 
     Entity seed;
     seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
@@ -941,11 +937,8 @@ void test_glass_userpoints_shatter_once_at_authored_radius() {
     seed.heading = placed_heading_bam(0);
     seed.pitch_bam = spawn_angle_bam(90);
     seed.roll_bam = spawn_angle_bam(90);
-    const EntityHandle building = w.registry.spawn(2, seed);
+    w.registry.spawn(2, seed);
 
-    // Rz(90-yaw)*Ry(-pitch)*Rx(roll) maps local (x,y,z) to
-    // (z,-y,x): the first point lands at (4.75,6.5,11.5), and its local +Y
-    // direction becomes world -Y.
     ExplosionEntry explosion;
     explosion.pos = Vec3{4.75f, 6.5f, 11.5f};
     explosion.type = ammo_kz::kStandard;
@@ -954,49 +947,9 @@ void test_glass_userpoints_shatter_once_at_authored_radius() {
     w.destruction_rng.state = 0x200u;
     w.explosions.queue_explosion(w, explosion);
     w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
-
-    CHECK(w.out.destruction.glass_points == 1);
-    CHECK(w.registry.get(building)->broken_glass_point_bits.size() == 1);
-    CHECK((w.registry.get(building)->broken_glass_point_bits[0] & 1u) != 0);
-    CHECK((w.registry.get(building)->broken_glass_point_bits[0] & 2u) == 0);
-    CHECK(w.out.destruction.effects.size() == 3);
-    if (w.out.destruction.effects.size() == 3) {
-        CHECK(w.out.destruction.effects[0].effect == "Effect_BldGlassExp");
-        CHECK(w.out.destruction.effects[1].effect == "Effect_BldPaperExp");
-        CHECK(w.out.destruction.effects[2].effect == "Effect_BldDustExp");
-        for (const DestructionEffectEvent &effect : w.out.destruction.effects) {
-            CHECK(std::abs(effect.pos.x - 4.75f) < 1.0e-4f);
-            CHECK(std::abs(effect.pos.y - 6.5f) < 1.0e-4f);
-            CHECK(std::abs(effect.pos.z - 11.5f) < 1.0e-4f);
-            CHECK(std::abs(effect.dir.x) < 1.0e-4f);
-            CHECK(std::abs(effect.dir.y + 1.0f) < 1.0e-4f);
-            CHECK(std::abs(effect.dir.z) < 1.0e-4f);
-        }
-    }
-    CHECK(w.destruction_rng.state == 0xd8651b5fu);
-
-    // Replaying the same blast neither emits nor advances the stream: the
-    // first exact point is already broken and the second remains outside the
-    // authored kz_maxradius=8 despite radius_override=30.
-    w.out.destruction.effects.clear();
-    const uint32_t state_after_first = w.destruction_rng.state;
-    w.explosions.queue_explosion(w, explosion);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
-    CHECK(w.out.destruction.glass_points == 1);
+    CHECK(w.out.destruction.explosions_processed == 1);
     CHECK(w.out.destruction.effects.empty());
-    CHECK(w.destruction_rng.state == state_after_first);
-    CHECK((w.registry.get(building)->broken_glass_point_bits[0] & 2u) == 0);
-
-    // A husk's glass is gone with it: the same blast against the husked
-    // building, its broken bits cleared, neither emits nor draws.
-    // [orig: Projectile_ProcessExplosionQueue — the husk gate @0x4eb814..0x4eb84d]
-    w.registry.get(building)->engine_flags |= kEntityFlagHusk;
-    w.registry.get(building)->broken_glass_point_bits.assign(1, 0u);
-    w.explosions.queue_explosion(w, explosion);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
-    CHECK(w.out.destruction.effects.empty());
-    CHECK(w.destruction_rng.state == state_after_first);
-    CHECK(w.registry.get(building)->broken_glass_point_bits[0] == 0u);
+    CHECK(w.destruction_rng.state == 0x200u);
 }
 
 // The death blast's radius falls back from the def kz to the bound word in whole
@@ -5218,7 +5171,7 @@ int main() {
     test_explosion_resolves_attacker_chain_for_events();
     test_destructible_death_chain();
     test_section_debris_samples_collision_faces();
-    test_glass_userpoints_shatter_once_at_authored_radius();
+    test_a_blast_at_a_window_changes_nothing();
     test_death_blast_radius_falls_back_to_the_bound_word();
     test_a_peer_death_chain_queues_no_kz_blast();
     test_mitem_blast_spares_indestructible_items();

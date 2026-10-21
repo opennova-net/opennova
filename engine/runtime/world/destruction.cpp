@@ -246,12 +246,6 @@ void queue_named_landing_blast(World &world, const Entity &entity,
     world.explosions.queue_explosion_on_authority(world, blast);
 }
 
-float vec_len(const Vec3 &v) {
-    return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-}
-
-Vec3 vec_sub(const Vec3 &a, const Vec3 &b) { return Vec3{a.x - b.x, a.y - b.y, a.z - b.z}; }
-
 // Retail uses the entity's complete placement matrix for model-local death
 // anchors: Rz(90-yaw) * Ry(-pitch) * Rx(roll).  Reuse the same Q22 builder
 // as collision so KZ points, death pieces, and the intact/husk shell cannot
@@ -776,67 +770,6 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
     apply_item_blast_damage(world, target, damage, attacker, e.ammo_index);
 }
 
-bool glass_point_is_broken(const Entity &target, size_t point_index) {
-    const size_t word = point_index / 64u;
-    if (word >= target.broken_glass_point_bits.size()) return false;
-    return (target.broken_glass_point_bits[word] &
-            (uint64_t{1} << (point_index & 63u))) != 0;
-}
-
-void mark_glass_point_broken(Entity &target, size_t point_index) {
-    const size_t word = point_index / 64u;
-    if (target.broken_glass_point_bits.size() <= word)
-        target.broken_glass_point_bits.resize(word + 1u, 0);
-    target.broken_glass_point_bits[word] |=
-            uint64_t{1} << (point_index & 63u);
-}
-
-// One exact static-building window point. The containing building was already
-// admitted by the explosion's resolved-radius sweep; each point independently
-// uses the AMMO definition's authored kz_maxradius. Retail marks the point
-// broken before four probability slots, and every slot consumes two PRNG draws
-// even when its effect does not fire.
-// [orig: Projectile_ProcessExplosionQueue @0x4eb814-0x4eb84d;
-// Terrain_SpawnEffectsAtUserPoint @0x5cee20]
-void shatter_glass_points(World &world, Entity &target, const Vec3 &blast_pos,
-                          float authored_radius, DestructionEvents &events) {
-    if (authored_radius <= 0.0f ||
-        (target.engine_flags & kEntityFlagHusk) != 0)
-        return;
-    const ItemDeathTraits *traits =
-            world.tables.item_death_traits.get(target.item_id);
-    if (traits == nullptr || traits->glass_points.empty()) return;
-
-    const CollisionMatrix orientation = destruction_orientation(target);
-    for (size_t point_index = 0;
-         point_index < traits->glass_points.size(); ++point_index) {
-        if (glass_point_is_broken(target, point_index)) continue;
-        const GlassPointTrait &point = traits->glass_points[point_index];
-        const Vec3 offset = rotate_authored_point(orientation, point.local_pos);
-        const Vec3 world_pos{target.position.x + offset.x,
-                             target.position.y + offset.y,
-                             target.position.z + offset.z};
-        if (vec_len(vec_sub(world_pos, blast_pos)) > authored_radius) continue;
-
-        mark_glass_point_broken(target, point_index);
-        ++events.glass_points;
-        const Vec3 world_dir =
-                rotate_authored_point(orientation, point.local_dir);
-        for (size_t effect_index = 0; effect_index < 4; ++effect_index) {
-            // Effect_RollSurfaceEffectProbability reseeds the process CRT from
-            // the first PRNG_Next16 draw even though its percentage roll comes
-            // from the second PRNG draw. Later scorch texture selection sees
-            // this side effect. [orig: @0x5CC1F0]
-            crt_srand(death_rand16(world));
-            const uint16_t roll = death_rand16(world) % 100u;
-            if (static_cast<int>(roll) <= static_cast<int>(
-                        kGlassShatterAltProbability[effect_index] * 100.0f))
-                events.effects.push_back(DestructionEffectEvent{
-                        kGlassShatterEffects[effect_index], world_pos, world_dir});
-        }
-    }
-}
-
 } // namespace
 
 const DeathPieceType &death_piece_type(int index) {
@@ -1213,12 +1146,18 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                                         radius_q16, distance))
                     continue;
                 if (pair_protected(*t)) continue; // [orig: @0x4eb7f6]
-                // Window shatter at the GLASS1..4 user points [orig:
-                // Terrain_SpawnEffectsAtUserPoint x4 @ 0x4eb814-0x4eb85d].
-                // Collision resolution retained the intact-model point; this
-                // leg emits the already transformed transient effect rows.
-                shatter_glass_points(
-                        world, *t, e.pos, ammo->kz_maxradius, events);
+                // The four window calls (GLASS1..GLASS4) change nothing: every row
+                // of retail's static model / GLASS table (35 rows, 192 bytes each)
+                // carries the projected-decal word (+0xBC) set, and a set word
+                // leaves the point before its scar and its four effect rolls, so
+                // no scar, no effect, no PRNG draw and no CRT reseed follows a
+                // blast's window point (the bullet leg owns window glass).
+                // [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - the calls
+                //  @0x4EB814 / @0x4EB827 / @0x4EB83A / @0x4EB84D;
+                //  Terrain_SpawnEffectsAtUserPoint @0x5CEE20 - `cmp [ecx+0BCh], 0;
+                //  jnz` @0x5CF04D..0x5CF054 past Scar_AddEntry @0x5CF072 and the
+                //  rolls @0x5CF0CA..0x5CF154 to the next point @0x5CF180;
+                //  Terrain_FindSurfaceMaterialEntry @0x5CC280 over the table @0x841980]
                 // Pool 2 stores no blast center, and hands the callback the box
                 // distance [orig: `push ebx` @0x4EB85E].
                 run_callback(*t, distance);

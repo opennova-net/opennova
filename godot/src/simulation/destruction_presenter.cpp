@@ -164,7 +164,6 @@ void DestructionPresenter::present_drained(const opennova::world::DestructionEve
 		}
 	}
 	stat_debris_triangles_ += p_events.debris_triangles;
-	stat_glass_points_ += p_events.glass_points;
 	// Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
 	// drain above; its sound rides the fire pass's drain_fire_sounds.
 	stat_crackles_ += p_events.crackles;
@@ -755,7 +754,6 @@ Ref<DestructionPresentStats> DestructionPresenter::get_stats() const {
 	stats->debris_triangles = stat_debris_triangles_;
 	stats->effects = stat_effects_;
 	stats->sounds = stat_sounds_;
-	stats->glass_points = stat_glass_points_;
 	stats->crackles = stat_crackles_;
 	return stats;
 }

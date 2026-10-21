@@ -901,11 +901,6 @@ struct Entity {
     // attacker [orig: @ 0x4eb319/@ 0x4eb593; the dead-attacker chain walk
     // @ 0x4eae95..0x4eaece].
     EntityHandle last_attacker;
-    // Per-intact-model glass userpoint one-shot state. Retail marks the exact
-    // point broken before rolling its four presentation effects; the dynamic
-    // bit bank keeps the state entity-local when one item type has many placed
-    // instances. [orig: Terrain_SpawnEffectsAtUserPoint @0x5cee20]
-    std::vector<uint64_t> broken_glass_point_bits;
     // The death tick (entity+0x1AC, first write wins) [orig:
     // Entity_ProcessDestructibleDeath @ 0x43fc0c / AI_TransitionToDestroyed_Vehicle].
     uint32_t death_tick = 0;

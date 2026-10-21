@@ -201,7 +201,6 @@ private:
 	int64_t stat_debris_triangles_ = 0;
 	int64_t stat_effects_ = 0;
 	int64_t stat_sounds_ = 0;
-	int64_t stat_glass_points_ = 0;
 	int64_t stat_crackles_ = 0;
 };
 

@@ -48,11 +48,6 @@ class CollisionWorld;
 // Per-item destruction traits, host-fed from items.def by the item-traits sweep
 // (Simulation::resolve_item_traits) — the def fields the death chain reads.
 // ----------------------------------------------------------------------------
-struct GlassPointTrait {
-    Vec3 local_pos;
-    Vec3 local_dir;
-};
-
 struct DeathEffectPoint {
 	Vec3 local_pos;
 	Vec3 local_dir;
@@ -247,11 +242,6 @@ struct ItemDeathTraits {
     // the raw mission water plane; an empty bank has no origin fallback.
     // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0]
     std::vector<Vec3> bridge_dead_points;
-    // Exact intact-model window userpoint selected by retail's static
-    // model/surface table. Positions and directions use mission-local axes;
-    // the explosion sweep applies the entity's complete authored pose.
-    // [orig: Terrain_SpawnEffectsAtUserPoint @0x5cee20]
-    std::vector<GlassPointTrait> glass_points;
 };
 
 struct ItemDeathTraitsTable {
@@ -438,7 +428,6 @@ struct DestructionEvents {
     int32_t items_destroyed = 0;
     int32_t crackles = 0; // wreck-fire crackle rolls that fired (S12b)
     int32_t debris_triangles = 0; // resolved CFAC samples in this drain
-    int32_t glass_points = 0;     // newly broken exact userpoints in this drain
 
     void clear() {
         effects.clear();
@@ -446,7 +435,6 @@ struct DestructionEvents {
         husk_swaps.clear();
         death_lights.clear();
         debris_triangles = 0;
-        glass_points = 0;
     }
 };
 
@@ -455,21 +443,6 @@ inline constexpr const char *kSectionDebrisFoliageEffect =
 inline constexpr const char *kSectionDebrisWoodEffect =
         "Effect_TreeWoodExp"; // [orig: g_FxTreeWoodExp @0x2C25BF4]
 
-inline constexpr const char *kGlassShatterEffects[4] = {
-        "Effect_BldGlassExp", "Effect_BldPaperExp",
-        "Effect_BldFireExp", "Effect_BldDustExp"};
-// The glass userpoint path rolls each effect's ALT probability column from the
-// surface-effect table (40 B rows {name[32], prob_main f32, prob_alt f32}) and
-// spawns on rand16 % 100 <= ftol(prob_alt * 100.0f). Glass's alt cell holds
-// 0x3EA8F5C3 (exactly 0.33f); the product 33.0000013 truncates to 33 in every
-// intermediate precision, so the <= admits rolls 0..33 — 34 of 100.
-// [orig: Effect_RollSurfaceEffectProbability @ 0x5CC1F0 scale flt_7C4654=100.0
-//  @ 0x5CC25A; g_SurfaceEffectProbTable @ 0x8418B8; useAltProbability=1 pushes
-//  @ 0x5CF0B3/0x5CF0F4 in Terrain_SpawnEffectsAtUserPoint]
-inline constexpr float kGlassShatterAltProbability[4] = {
-        0.33f, 0.05f, 0.05f, 0.1f};
-static_assert(static_cast<int>(kGlassShatterAltProbability[0] * 100.0f) == 33,
-              "glass gate boundary: ftol(0.33f * 100) is 33, admitting 34 rolls");
 
 // The wreck-fire random crackle, rolled per tick per masked fire-bone slot at
 // the bone's position on World's stream C (World::next_prng16_c, retail's
