@@ -2875,6 +2875,10 @@ static void test_structural_bms_actions() {
     CHECK(pool1_ai.self->position.z.q16 == (30 << 16));
     CHECK(pool1_ai.heading ==
           world::bam_heading_from_mission_yaw_deg(45.0));
+    // The group action stores no savedLivePose, AI row or not [orig:
+    //  Entity_TeleportTeamToSpawn @0x43D390].
+    for (world::EntityHandle handle : {pool0_h, pool1_h, pool2_h})
+        CHECK(!w.registry.get(handle)->saved_live_valid);
 
     dispatch(bms::ActionType::ChangeSteamAction, 100, 5);
     CHECK(w.registry.get(pool0_h)->team == 5);
@@ -2891,6 +2895,17 @@ static void test_structural_bms_actions() {
     CHECK((w.registry.get(pool0_h)->flags & world::kEntityFlagParachute) != 0);
     CHECK((w.registry.get(pool0_h)->engine_flags &
            world::kEntityFlagParachute) != 0);
+    // The single action stores the marker's whole pose into savedLivePose ahead
+    // of the reset, which levels the entity's Roll and not the saved one.
+    // [orig: EventAction_TeleportEntityToSpawn @0x43E05F..0x43E096]
+    {
+        const world::Entity &moved = *w.registry.get(pool0_h);
+        CHECK(moved.saved_live_valid && moved.saved_live_pos[0] == (10 << 16) &&
+              moved.saved_live_pos[1] == (20 << 16) && moved.saved_live_pos[2] == (30 << 16));
+        CHECK(moved.saved_live_yaw == world::placed_heading_bam(45) &&
+              moved.saved_live_pitch == world::spawn_angle_bam(5) &&
+              moved.saved_live_roll == world::spawn_angle_bam(-3));
+    }
 
     dispatch(bms::ActionType::VaporizeGroup, 4);
     CHECK(w.registry.get(pool1_h) == nullptr);

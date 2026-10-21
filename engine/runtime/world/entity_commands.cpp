@@ -1625,19 +1625,26 @@ const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
 }
 
 // The split-pose translation of retail's teleport stores: retail writes the
-// ONE entity pose the motor reads (Position/Yaw + savedLivePose + the body
-// pose [orig: @0x43e05f..0x43e096]); the position is the entity's own words
-// and savedLivePose (+0x80..+0x88) takes them (the one store, D-NET-507),
-// while our AI row carries its own heading/pitch working copies, so a teleport
-// must land there too or the next motor tick snaps back.
+// ONE entity pose the motor reads (Position / Yaw [orig: @0x43e038..0x43e059]);
+// our AI row carries its own heading/pitch working copies, so a teleport must
+// land there too or the next motor tick snaps back.
 void sync_teleported_ai(World &world, Entity &entity) {
     AiEntity *ae = world.ai.for_handle(entity.handle);
     if (ae == nullptr) return;
     ae->heading = entity.heading;
     ae->pitch = bam_from_degrees_wrapped(static_cast<double>(entity.pitch));
     ae->roll = bam_from_degrees_wrapped(static_cast<double>(entity.roll));
-    const auto words = entity.position.words();
+}
+
+// savedLivePose (+0x80..+0x94) takes a pose's words whole: Position, then the
+// Yaw / Pitch / Roll words (a placed row's Pitch / Roll the spawn form), the
+// one store (D-NET-507).
+void stamp_pose_words(Entity &entity, const Entity &pose) {
+    const auto words = pose.position.words();
     std::copy_n(words.data(), 3, entity.saved_live_pos);
+    entity.saved_live_yaw = pose.heading;
+    entity.saved_live_pitch = spawn_angle_bam(pose.pitch);
+    entity.saved_live_roll = spawn_angle_bam(pose.roll);
     entity.saved_live_valid = true;
 }
 
@@ -1658,6 +1665,12 @@ void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
     entity.roll = marker.roll;
     if (single_action || entity.handle.pool() != 0)
         entity.engine_flags &= ~kEntityFlagMatrixBuilt;
+    // The single action also stores the marker's whole pose into savedLivePose
+    // for every pool, ahead of the pool-0 reset; the group action stores none.
+    // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 - pool 0
+    //  @0x43E05F..0x43E096, pool 1 @0x43E10F..0x43E144, pool 2
+    //  @0x43E1B2..0x43E1E7; Entity_TeleportTeamToSpawn @0x43D390 (no store)]
+    if (single_action) stamp_pose_words(entity, marker);
     if (single_action && entity.handle.pool() == 0 &&
         ((marker.flags | marker.engine_flags) & kEntityFlagParachute) != 0) {
         entity.flags |= kEntityFlagParachute;
@@ -1819,6 +1832,9 @@ bool EntityCommands::wac_teleport_ssn(EntityTarget source, int32_t marker_wp_num
     const Entity *found = find_teleport_marker(world_, marker_wp_number);
     if (found == nullptr) return false;
     Entity &marker = *world_.registry.get(found->handle);
+    // The marker's own pose into its savedLivePose, whole [orig: WacCmd_TeleSsn
+    //  @0x4F7E00 - +0x80..+0x94 @0x4F7EAC..0x4F7ED9, ahead of the reset @0x4F7F07].
+    stamp_pose_words(marker, marker);
     sync_teleported_ai(world_, marker);
     if (AiEntity *body = world_.ai.for_handle(marker.handle)) {
         body->inf.body_heading = body->heading;

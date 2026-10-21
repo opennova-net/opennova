@@ -13,6 +13,7 @@
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/carrier_motion.h>
 
 #include "../common/synthetic_mission.h"
 #include "../world/channel_clip_source.h"
@@ -103,6 +104,9 @@ static void test_bms_record_index_is_pool_slot() {
     bms::File m{};
     m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
     m.items[0].id = 21;
+    m.items[0].yaw = 30;
+    m.items[0].pitch = 10;
+    m.items[0].roll = -7;
     m.items.push_back(item(/*type_id=*/164, 30 << 16, 20 << 16, 3 << 16));
     m.items[1].id = 22;
     m.organics.push_back(organic((300 << 16) | 0x1235, -((400 << 16) | 0x0C07), 0x2A0001, 1, 0, 0));
@@ -132,6 +136,25 @@ static void test_bms_record_index_is_pool_slot() {
     CHECK(item21 != nullptr && item21->saved_live_valid &&
           item21->saved_live_pos[0] == (10 << 16) && item21->saved_live_pos[1] == (20 << 16) &&
           item21->saved_live_pos[2] == (3 << 16));
+    // The attitude triple too (+0x8C / +0x90 / +0x94): the placed Yaw word and
+    // the spawn-form Pitch / Roll words, so a rider of the unmoved rotated row
+    // reads a zero delta: the carry leaves its position and its yaw as they are.
+    // [orig: Entity_InitFromModel @0x40E166..0x40E18C;
+    //  Entity_InterpolateFromParentDelta @0x4A8D60]
+    CHECK(item21 != nullptr && item21->saved_live_yaw == placed_heading_bam(30) &&
+          item21->saved_live_pitch == spawn_angle_bam(10) &&
+          item21->saved_live_roll == spawn_angle_bam(-7));
+    if (item21 != nullptr) {
+        CarrierMotionPose rider;
+        rider.pos[0] = (12 << 16) | 0x1234;
+        rider.pos[1] = (21 << 16) | 0x0567;
+        rider.pos[2] = (4 << 16);
+        rider.yaw_bam = 0x12345678;
+        follow_carrier_motion(*item21, rider);
+        CHECK(rider.pos[0] == ((12 << 16) | 0x1234) && rider.pos[1] == ((21 << 16) | 0x0567) &&
+              rider.pos[2] == (4 << 16) && rider.yaw_bam == 0x12345678 &&
+              rider.pitch_bam == 0 && rider.roll_bam == 0);
+    }
 }
 
 static void test_emplacement_attachments() {

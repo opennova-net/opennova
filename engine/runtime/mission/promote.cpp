@@ -7,6 +7,7 @@
 #include <formats/mission/mission_params.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/vehicle_motor.h> // stamp_saved_live_pose
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 
@@ -1066,17 +1067,18 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             ++r.spawned;
             if (Entity *spawned = world.registry.get(h)) {
                 initialize_item_seats(*spawned, opts.item_seat_specs);
-                // savedLivePose (+0x80..+0x88) takes the Position words at the
-                // model init, which runs for every row before the def's init
-                // callbacks, so the organic AI init's aim basis is the spawn
-                // position (D-NET-507: the one store). [orig: Entity_InitFromModel
-                //  @0x40DC30 - `mov ecx, [edi]; mov [esi+80h], ecx` @0x40E14B..0x40E14D,
-                //  +0x84 @0x40E15D / @0x40E160, +0x88 @0x40E153 / @0x40E169;
+                // savedLivePose (+0x80..+0x94) takes the Position words and the
+                // Yaw / Pitch / Roll words at the model init, which runs for every
+                // row before the def's init callbacks, so the organic AI init's aim
+                // basis is the spawn position and a static carrier's delta is zero
+                // (D-NET-507: the one store). [orig: Entity_InitFromModel @0x40DC30 -
+                //  @0x40E14B..0x40E18C: `mov ecx, [edi]; mov [esi+80h], ecx`
+                //  @0x40E14B..0x40E14D, +0x84 @0x40E15D / @0x40E160, +0x88
+                //  @0x40E153 / @0x40E169, +0x8C @0x40E166 / @0x40E172, +0x90
+                //  @0x40E16F / @0x40E17B, +0x94 @0x40E178 / @0x40E18C;
                 //  Entity_InitAllFromModels @0x40E460; Entity_InitOrganicAI
                 //  @0x4BFCC0 - +0x30C @0x4C01E8, +0x310 @0x4C01EE, +0x314 @0x4C01FB]
-                const auto words = spawned->position.words();
-                std::copy_n(words.data(), 3, spawned->saved_live_pos);
-                spawned->saved_live_valid = true;
+                stamp_saved_live_pose(*spawned);
                 // The spawn-phase stagger: every spawned record takes the load
                 // counter modulo 60 into entity+0x2AC and the counter steps by
                 // 11, so the first blink/indoors refresh of the statics is spread
