@@ -345,7 +345,7 @@ bool MissionObjectPlacer::register_object_data(const String &p_graphic,
 	if (p_graphic.is_empty() || p_data.is_null()) {
 		return false;
 	}
-	object_data_cache_[p_graphic] = p_data;
+	object_data_cache_[_object_data_key(p_graphic)] = p_data;
 	static_sources_.bump_shadow_revision();
 	return true;
 }
@@ -409,7 +409,7 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 						p_data->native_model(), 0, 0, true);
 	}
 	_complete_static_lod_profile(profile, retained);
-	object_data_cache_[p_graphic] = p_data;
+	object_data_cache_[_object_data_key(p_graphic)] = p_data;
 	static_batch_cache_[p_graphic] = retained;
 	static_face_cache_.erase(p_graphic);
 	static_lod_profile_cache_[p_graphic] = profile;

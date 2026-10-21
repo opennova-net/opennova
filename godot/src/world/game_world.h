@@ -787,7 +787,11 @@ private:
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
-	int warm_effect_world_catalog();
+	int warm_effect_world_catalog(const PackedStringArray &p_models);
+	// The mission start's models (Simulation::get_mission_start_model_files) built under one
+	// container at `p_at` through MissionObjectPlacer::warm_models; null when none built. The
+	// caller frees it (FX-5).
+	Node3D *build_model_warm(const PackedStringArray &p_models, const Vector3 &p_at);
 	void start_effect_world();
 	void apply_occlusion_culling_policy();
 

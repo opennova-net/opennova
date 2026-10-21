@@ -320,7 +320,7 @@ void MissionObjectPlacer::_place_static_group(MissionPlacementRun &p_run, int p_
 	}
 	Ref<ObjectData> shadow_data;
 	if (const Ref<ObjectData> *resolved =
-				object_data_cache_.getptr(graphic)) {
+				object_data_cache_.getptr(_object_data_key(graphic))) {
 		shadow_data = *resolved;
 	}
 	for (int i = 0; i < group.xforms.size(); ++i) {

@@ -218,6 +218,17 @@ void test_the_mission_start_list() {
 	const std::vector<uint32_t> page = list.freeze();
 	CHECK(page.size() == created_count - 2);
 	for (const uint32_t v : page) CHECK(v == 0u);
+	// The files the shell builds at the load (FX-5): the page's nodes in load order, every
+	// listed row's husk family among them (SOLXA / solxb, wreck / wreckfin, crate_s), the
+	// marked foliage (the terrain's foliage pass's) left out [orig: EntityDef_LoadModelsAnd-
+	// Callbacks @0x439F50 - husk @0x43A0B6, the "xb" final husk @0x43A1C8, huskfinal
+	// @0x43A26E, huskshadow @0x43A38A; CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
+	std::vector<std::string> expected_files;
+	for (size_t i = 0; i < created_count; ++i)
+		if (std::strcmp(created[i], "pine.3DI") != 0 && std::strcmp(created[i], "bush.3DI") != 0)
+			expected_files.push_back(created[i]);
+	CHECK(list.model_files() == expected_files);
+	CHECK(list.model_files().size() == page.size());
 	// The variant falls back to the base where the part has none; the arms' file did not
 	// load, asked once per combo (the second combo's line has no fourth token, and the
 	// tokenizer's stale slot still names ARMS_A, as retail's does: io::ConfigTokens::slot);

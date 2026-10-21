@@ -121,6 +121,13 @@ std::vector<uint32_t> LoadedModelList::freeze() const {
 	return std::vector<uint32_t>(count, 0u);
 }
 
+std::vector<std::string> LoadedModelList::model_files() const {
+	std::vector<std::string> files;
+	for (const Node &node : created_)
+		if (!node.foliage) files.push_back(node.name);
+	return files;
+}
+
 std::vector<LoadedModelList::Node> LoadedModelList::nodes() const {
 	return std::vector<Node>(created_.rbegin(), created_.rend());
 }
@@ -320,6 +327,12 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &kernel,
 		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
 		bool dedicated) {
+	return mission_start_model_list(kernel, files, charattr, authority, dedicated).freeze();
+}
+
+LoadedModelList mission_start_model_list(const mission::MissionKernel &kernel,
+		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
+		bool dedicated) {
 	const mission::MissionInfo info = mission::mission_info(kernel.mission);
 	MissionStartModelSources sources;
 	sources.files = &files;
@@ -336,7 +349,7 @@ std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &ker
 	sources.in_session = kernel.world.rules.mp_session;
 	sources.special_event = authority && mission_has_special_event(kernel.mission);
 	sources.foliage = !dedicated;
-	return build_mission_start_model_list(sources).freeze();
+	return build_mission_start_model_list(sources);
 }
 
 } // namespace opennova::inmatch

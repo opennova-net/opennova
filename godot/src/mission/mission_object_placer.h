@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -270,6 +271,16 @@ public:
 
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
+	// The load's model warm (FX-5): one model built under `parent` from each file (the mission
+	// start's list, Simulation::get_mission_start_model_files), so each file's data, its LOD
+	// meshes, textures and shaders are built before the first frame and a later build of the
+	// same file (a death's husk swap) only instances them, as retail's loads build every
+	// listed model and the freeze its buffers at the mission start [orig:
+	// EntityDef_LoadModelsAndCallbacks @0x439F50 - husk @0x43A0B6, the "xb" final husk
+	// @0x43A1C8, huskfinal @0x43A245 / @0x43A26E, huskshadow @0x43A38A;
+	// CEffectWorld_RebuildAllModelBuffers @0x5B3A80]. The caller draws them once and frees
+	// `parent`. Returns the models built.
+	int warm_models(const PackedStringArray &p_files, Node3D *p_parent);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
 	// Diagnostic/read-back identity for the entity's graphic/reflection group.
@@ -472,6 +483,10 @@ private:
 	String _graphic_for(int p_item_id) const;
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
 	String _model_name_for(const String &p_graphic) const;
+	// The data cache's key: the model file's name without case, so every spelling of one file
+	// (items.def's, the mission start list's) finds one entry, as ThreediGp_LoadModel finds a
+	// loaded model again [orig: CEffectDef_FindByTypeName @0x5B01A0 (the stricmp @0x5B01C2)].
+	String _object_data_key(const String &p_graphic) const;
 	bool _needs_individual_node(int p_item_id);
 	bool _graphic_needs_live_panm(const String &p_graphic);
 	bool _has_occlusion_records(int p_item_id);

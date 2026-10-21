@@ -701,9 +701,14 @@ String MissionObjectPlacer::_model_name_for(const String &p_graphic) const {
 	return basename.is_empty() ? String() : basename + String(".3di");
 }
 
+String MissionObjectPlacer::_object_data_key(const String &p_graphic) const {
+	return _model_name_for(p_graphic).to_lower();
+}
+
 Ref<ObjectData> MissionObjectPlacer::_load_object_data(
 		const String &p_graphic) {
-	const Ref<ObjectData> *cached = object_data_cache_.getptr(p_graphic);
+	const String key = _object_data_key(p_graphic);
+	const Ref<ObjectData> *cached = object_data_cache_.getptr(key);
 	if (cached != nullptr) {
 		return *cached;
 	}
@@ -721,7 +726,7 @@ Ref<ObjectData> MissionObjectPlacer::_load_object_data(
 					"what draws it is not drawn");
 		}
 	}
-	object_data_cache_[p_graphic] = data;
+	object_data_cache_[key] = data;
 	return data;
 }
 
@@ -1603,6 +1608,19 @@ String MissionObjectPlacer::graphic_for(int p_item_id) {
 Ref<ObjectData> MissionObjectPlacer::object_data_for(const String &p_graphic) {
 	_check_epoch();
 	return _load_object_data(p_graphic);
+}
+
+int MissionObjectPlacer::warm_models(const PackedStringArray &p_files, Node3D *p_parent) {
+	_check_epoch();
+	int built = 0;
+	for (const String &file : p_files) {
+		// The same build a husk swap runs (husk_swap.cpp: the authored LODs retained), so its
+		// meshes, textures and shaders are the ones a death's swap asks for.
+		if (build_model_from_graphic(file, String(), p_parent, String(), String(), true) != nullptr) {
+			++built;
+		}
+	}
+	return built;
 }
 
 Node3D *MissionObjectPlacer::_ensure_container(Node3D *p_parent) {

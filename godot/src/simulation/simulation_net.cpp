@@ -898,17 +898,29 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 	// foliage.
 	namespace inmatch = opennova::inmatch;
 	std::vector<uint32_t> page;
+	net_.mission_start_model_files.clear();
 	if (kernel_ && assets_.root.is_valid()) {
 		const opennova::mission::BootFileSource files =
 				opennova::mission::boot_files_from_index(assets_.root->native_index());
-		page = inmatch::mission_start_model_page(*kernel_, files, &net_.charattr_table, !is_joiner(),
+		const inmatch::LoadedModelList list = inmatch::mission_start_model_list(*kernel_, files,
+				&net_.charattr_table, !is_joiner(),
 				/*dedicated=*/!is_joiner() && !net_.host_serve_and_play);
+		page = list.freeze();
+		net_.mission_start_model_files = list.model_files();
 	}
 	// The same frozen count is a host's S2C 0x68 cursor wrap (the role reads
 	// it every tick) [orig: Server_SendLoadedModelPageRequest @0x511375 / @0x511391].
 	net_.loaded_model_list_count = static_cast<uint32_t>(page.size());
 	if (!is_joiner() || !runtime_) return;
 	runtime_->set_loaded_model_challenge_snapshot(std::move(page));
+}
+
+PackedStringArray Simulation::get_mission_start_model_files() const {
+	PackedStringArray files;
+	for (const std::string &file : net_.mission_start_model_files) {
+		files.push_back(opennova::to_gd(file));
+	}
+	return files;
 }
 
 void Simulation::set_join_mission_start_loading(bool p_loading) {

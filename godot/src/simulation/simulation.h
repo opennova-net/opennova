@@ -863,6 +863,11 @@ public:
 	// mission/render model setup and before revealing the loaded world; later
 	// S2C entity spawns and presentation loads deliberately cannot mutate it.
 	void finalize_loaded_model_challenge_snapshot();
+	// The model files that list's loads created, in load order, its foliage left out
+	// (engine: LoadedModelList::model_files): the shell's load builds each before the first
+	// frame, as retail's loads build every listed row's husk family at the mission start
+	// (FX-5). Empty until the snapshot is finalized.
+	PackedStringArray get_mission_start_model_files() const;
 	// The joiner's mission start (engine: inmatch/joiner_connection.h
 	// set_mission_start_loading): the shell declares its load runs after the S2C 0x1A,
 	// reads the release, and once the load has ended pushes the two 0x2F and the 0x0B.

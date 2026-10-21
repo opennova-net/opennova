@@ -365,7 +365,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
 	timeline->span("effects_warm");
-	warm_effect_world_catalog();
+	// The mission start's models warm in the same forced frames (FX-5); a header-only
+	// joiner's list exists once its world stream lands (finish_join_wire_assets).
+	warm_effect_world_catalog(challenge_sim.is_valid() && !wire_header_join
+					? challenge_sim->get_mission_start_model_files()
+					: PackedStringArray());
     route_script_effects(); // initial WAC/BMS descriptors survived the warm-scene reset
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_FINISH));
@@ -777,6 +781,14 @@ bool GameWorld::settle_join_wire_assets() {
 	place_streamed_mission_objects(sim);
 	player_visuals_->prewarm_loaded_model_challenge_definitions();
 	sim->finalize_loaded_model_challenge_snapshot();
+	// The joiner's mission start models, its list known now: built and freed undrawn (the
+	// load's forced frames ran before the stream landed), so a death's husk swap finds its
+	// data, meshes, textures and shaders built [orig: EntityDef_LoadModelsAndCallbacks
+	// @0x439F50 - husk @0x43A0B6].
+	if (Node3D *model_warm = build_model_warm(sim->get_mission_start_model_files(), Vector3())) {
+		model_warm->set_visible(false);
+		model_warm->queue_free();
+	}
 	join_wire_assets_pending_ = false;
 	return true;
 }
@@ -1089,13 +1101,37 @@ void GameWorld::build_minimap_water_mask() {
 	emit_signal(kSignalMinimapWaterChanged, minimap_water_mask_);
 }
 
+Node3D *GameWorld::build_model_warm(const PackedStringArray &p_models, const Vector3 &p_at) {
+	if (placer_.is_null() || p_models.is_empty()) {
+		return nullptr;
+	}
+	Node3D *container = memnew(Node3D);
+	container->set_name("MissionStartModelWarm");
+	add_child(container);
+	if (container->is_inside_tree()) {
+		container->set_global_position(p_at);
+	}
+	if (placer_->warm_models(p_models, container) == 0) {
+		container->queue_free();
+		return nullptr;
+	}
+	return container;
+}
+
 // The load-time effect warm pass: spawn every catalog effect in front of the
 // load camera, advance the fixed tick so fresh emitters actually emit,
 // force-draw two frames SYNCHRONOUSLY so every new material/pipeline draws
 // once (no coroutine — the load path stays callable without await), then
 // clear the warm spawns exactly like the sim-restart path (reset +
-// re-register the persistent item effects). Returns the count.
-int GameWorld::warm_effect_world_catalog() {
+// re-register the persistent item effects). Returns the count. The mission
+// start's models (`p_models`) build in front of the same camera and draw in
+// the same frames, then free with the spawns: retail's mission start loads
+// every listed row's models, its husk family among them, and the freeze
+// builds their buffers, so a death's swap builds nothing (FX-5)
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - husk @0x43A0B6, the "xb"
+// final husk @0x43A1C8, huskfinal @0x43A245 / @0x43A26E, huskshadow @0x43A38A;
+// CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
+int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models) {
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world == nullptr) {
 		return 0;
@@ -1114,7 +1150,8 @@ int GameWorld::warm_effect_world_catalog() {
 		effect_world->set_particles_hidden(false);
 	}
 	const int spawned = effect_world->warm_all_effects(warm_pos);
-	if (spawned <= 0) {
+	Node3D *model_warm = build_model_warm(p_models, warm_pos);
+	if (spawned <= 0 && model_warm == nullptr) {
 		effect_world->reset_runtime_state();
 		if (restore_particles_hidden) {
 			effect_world->set_particles_hidden(true);
@@ -1148,6 +1185,9 @@ int GameWorld::warm_effect_world_catalog() {
 		// the forced draws first so threaded renderers cannot race that cancel.
 		rs->force_sync();
 		set_visible(was_visible);
+	}
+	if (model_warm != nullptr) {
+		model_warm->queue_free();
 	}
 	effect_world->reset_runtime_state();
 	if (restore_particles_hidden) {
