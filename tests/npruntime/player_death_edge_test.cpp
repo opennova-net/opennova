@@ -619,10 +619,53 @@ void test_the_recent_spawn_hold_reads_the_arm_on_the_frame_clock() {
 	CHECK(f.conn(0).seed_armed_clock == 1000u); // the disarm leaves the arm's stamp
 }
 
+// A row a re-add orphaned (a repeated C2S 0x02 left player 0's first row active, its body in
+// the world, while the player's connection took a fresh row) is an active row Entity_ValidatePtr
+// finds, so its body's death runs the whole transaction: the 0x13 fan, the row's own holds and
+// revive window, and the disarm's four-zero 0x61 and the death camera to its net player. Past
+// that player's leave the row's words still take the transaction and nothing goes to the gone
+// player (Q7-36 (a)).
+// [orig: GameEvent_PlayerDeath @0x516DD0 - Entity_ValidatePtr @0x516E48 (the slot walk
+//  @0x500930..0x500944), the 0x13 @0x516E9A, the holds @0x516E9F..0x516EEB, the disarm call
+//  @0x516EF4; Server_SendRandomSeedToPlayer @0x5101A0 (the enable==0 arm @0x510237..0x510278, the
+//  row as the 0x20 target @0x510273); NapiNPServer_SendFiltered's 0x20 arm, the row's +0x1C
+//  @0x4C8A1F]
+void test_an_orphaned_rows_body_runs_the_transaction() {
+	for (const bool left : {false, true}) {
+		Fixture f;
+		f.ctx.config.respawn_timeout = 9;
+		f.world.out.rounds.frame_clock = 5000u;
+		f.conn(0).net_player_serial = ++f.ctx.last_net_player_serial; // the re-add's draw
+		inmatch::OrphanedPlayerRow orphan;
+		orphan.row = f.conn(0); // the row as the re-add found it
+		orphan.row.link.transport = nullptr; // its sends go through its net player
+		f.ctx.orphaned_player_rows.push_back(orphan);
+		f.conn(0).link.owned_entity = {}; // the connection's fresh row holds no body yet
+		if (left) f.ctx.np_protocol.connection_list.erase(f.ctx.np_protocol.connection_list.begin());
+		f.entity(0).health = 0;
+		w::RoundDeath d;
+		d.victim = f.players[0];
+		d.victim_handle = f.players[0].packed;
+		d.killer = f.players[1];
+		d.killer_handle = f.players[1].packed;
+		inmatch::Server_ProcessPlayerDeath(f.ctx, f.world, d);
+		const inmatch::NapiNPConnection &row = f.ctx.orphaned_player_rows[0].row;
+		CHECK(row.link.respawn_delay_seconds == 9u);
+		CHECK(row.link.downed_revive_seconds == 120u); // another player's kill
+		CHECK(row.fire_disarmed_at == 5000u && row.tick_seed == 0u);
+		const std::vector<ns::Datagram> own = f.drain(0);
+		CHECK((Fixture::first(own, s2c::TICK_SEED) >= 0) == !left);
+		CHECK((Fixture::first(own, s2c::DEATH_CAMERA_TARGET) >= 0) == !left);
+		const std::vector<ns::Datagram> other = f.drain(1);
+		CHECK(f.deaths(other) == std::vector<uint16_t>{f.players[0].packed});
+	}
+}
+
 } // namespace
 
 int main() {
 	test_the_recent_spawn_hold_reads_the_arm_on_the_frame_clock();
+	test_an_orphaned_rows_body_runs_the_transaction();
 	test_health_write_dies_in_its_frames_entity_update();
 	test_raise_ahead_of_the_walk_cancels_it();
 	test_two_bodies_die_in_slot_order();

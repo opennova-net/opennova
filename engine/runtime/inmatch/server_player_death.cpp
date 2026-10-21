@@ -260,14 +260,36 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 	const world::Entity *killer_entity = world.registry.get(d.killer);
 	const bool victim_is_player = victim_entity != nullptr &&
 			(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
+	// The victim's row: Entity_ValidatePtr walks every active row of the slot table, a row a
+	// re-add orphaned included (OrphanedPlayerRow, D-NET-NEW-L1-24). The row's words are its
+	// own (the latch, the holds, the revive window, the seed stamps); the sends to the victim go
+	// to its net player (+0x1C), the connection itself for its own row, none once an orphaned
+	// row's player has left (Q7-36 (a)). [orig: Entity_ValidatePtr @0x500910 - the slot walk
+	//  @0x500930..0x500944 (the active byte +4, the entity +0); Server_SendRandomSeedToPlayer
+	//  @0x5101A0 - the row as the 0x20 target @0x510273; NapiNPServer_SendFiltered's 0x20 arm,
+	//  the row's +0x1C @0x4C8A1F]
 	NapiNPConnection *victim_connection = nullptr;
+	NapiNPConnection *victim_net_player = nullptr;
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (!c.link.owned_entity.valid() ||
 				c.link.owned_entity.packed != d.victim_handle)
 			continue;
-		victim_connection = &c;
+		victim_connection = victim_net_player = &c;
 		break;
 	}
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+		if (victim_connection != nullptr) break;
+		if (!orphan.row.link.owned_entity.valid() ||
+				orphan.row.link.owned_entity.packed != d.victim_handle)
+			continue;
+		victim_net_player = orphan_net_player(ctx, orphan);
+		victim_connection = &orphan.row;
+	}
+	const auto victim_reachable = [&]() {
+		return victim_connection != nullptr && victim_net_player != nullptr &&
+				slot_in_match(*victim_connection) && !victim_net_player->host_disconnect_sent &&
+				victim_net_player->link.transport != nullptr;
+	};
 	// The player transaction's head: a mounted victim leaves its seat, every
 	// pool-0 AI body's link to it goes, and a slot whose spectator latch is set
 	// stops there: no 0x13, holds, scoring or carried-object drop. A body no
@@ -422,13 +444,17 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 		// camera/feed tail: the death sender passes enable=0, which zeroes the
 		// slot's seed/freshness stamp and ships the four-zero 0x61. The zero
 		// seed freezes the client's network-role tick until the deploy release
-		// re-arms it with a fresh roll. [orig: GameEvent_PlayerDeath @0x516EF4
-		// -> Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237]
-		if (victim_connection != nullptr &&
-				is_in_match(*victim_connection) &&
-				victim_connection->link.transport != nullptr) {
-			send_entity_update_message(ctx, *victim_connection, s2c::TICK_SEED,
-					Server_DisarmPlayerTickSeed(*victim_connection, world.out.rounds.frame_clock));
+		// re-arms it with a fresh roll. The row's stores precede the send, so a
+		// row with no net player to reach (an orphaned row past its player's
+		// leave) is disarmed all the same. [orig: GameEvent_PlayerDeath @0x516EF4
+		// -> Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237
+		// (the stores @0x510237..0x51024A ahead of the send @0x510278)]
+		if (victim_connection != nullptr) {
+			std::vector<uint8_t> seed = Server_DisarmPlayerTickSeed(
+					*victim_connection, world.out.rounds.frame_clock);
+			if (victim_reachable())
+				send_entity_update_message(ctx, *victim_net_player, s2c::TICK_SEED,
+						std::move(seed));
 		}
 
 		// Then target the victim with the fixed-point position used by the
@@ -436,9 +462,7 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 		// the victim position. Mask 0x20 includes the listen host.
 		// [orig: GameEvent_PlayerDeath @0x516DD0 ->
 		// NetPacket_WriteThreeInt32s @0x506CB0]
-		if (victim_connection != nullptr &&
-				is_in_match(*victim_connection) &&
-				victim_connection->link.transport != nullptr) {
+		if (victim_reachable()) {
 			const world::Entity *camera_entity = killer_entity;
 			if (camera_entity == nullptr) camera_entity = victim_entity;
 			DeathCameraTarget target;
@@ -447,7 +471,7 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 				target.y = camera_entity->position.y.q16;
 				target.z = camera_entity->position.z.q16;
 			}
-			send_entity_update_message(ctx, *victim_connection, s2c::DEATH_CAMERA_TARGET,
+			send_entity_update_message(ctx, *victim_net_player, s2c::DEATH_CAMERA_TARGET,
 					encode_death_camera_target(target));
 		}
 
@@ -493,10 +517,8 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 										victim_connection->link.downed_revive_seconds)
 								: uint8_t{0});
 			}
-			if (!victim_connection->link.auto_medic_enabled &&
-					is_in_match(*victim_connection) &&
-					victim_connection->link.transport != nullptr) {
-				send_downed(*victim_connection,
+			if (!victim_connection->link.auto_medic_enabled && victim_reachable()) {
+				send_downed(*victim_net_player,
 						static_cast<uint8_t>(
 								victim_connection->link.downed_revive_seconds));
 			}
