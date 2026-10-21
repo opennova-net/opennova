@@ -269,7 +269,7 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     // (@0x540907..0x540913), WeaponSlot_ReloadAmmo @0x541720 (@0x54183D..0x541850),
     // WeaponSlots_RecalculateAmmoFromCapacity @0x542280 (@0x54238F..0x54239E),
     // WeaponSlots_ClearLoadedRounds @0x5423C0 (@0x54242B..0x54243A); the bucket
-    // def+0xDC WeaponDefs_ParseLineCallback @0x544045]
+    // def+0xDC WeaponDefs_ParseLineCallback @0x543680 (the store @0x544045)]
     out.fired_clip_before_consume = slot.shared_clip ? 0 : slot.clip;
     out.fired = true; // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     if (def.clip_capacity >= 0) { // [orig: Weapon_ConsumeAmmo @ 0x542c75, clip leg]

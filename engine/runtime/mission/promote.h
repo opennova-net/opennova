@@ -236,6 +236,14 @@ struct PromoteResult {
 PromoteResult promote_mission(const bms::File &mission, world::World &world,
                               const PromoteOptions &opts = {});
 
+// The mission's item_availability chunk as (name, status) pairs: an empty name
+// is skipped and the status byte widens SIGNED, -1 being the "mission allowed"
+// sentinel the availability builder maps to 3 [orig:
+// WeaponDef_BuildItemRestrictionTable @0x54DDB0 (`(char)name[strlen+1]`
+// @0x54DE3F, `== -1 -> 3`)]. The stash below and the host's first-mission
+// weapon table read the chunk through it.
+std::vector<std::pair<std::string, int32_t>> mission_availability_pairs(const bms::File &mission);
+
 // The mission's loadout/availability chunks -> plain world rows, with retail's
 // own atol truncation semantics on the string tuples (a non-numeric prefix
 // parses as 0; trailing text is ignored) [orig: Mission_LoadBMSFile @ 0x40F4E0;

@@ -20,7 +20,8 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/weapon_inventory.h> // the availability builder's two modes
 #include <runtime/world/world.h>
-#include <formats/mission/bms.h> // the mission's item_availability chunk
+#include <formats/mission/bms.h>
+#include <runtime/mission/promote.h> // mission_availability_pairs (the item_availability chunk)
 #include <net/title/title_identity.h> // title_in_match (the availability values, DFX2-10)
 
 #include <algorithm>
@@ -679,8 +680,8 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 
 // The session's first mission builds the host's class mask and weapon table; a later
 // mission keeps both (the round-count gate), and out of a session neither is built.
-// [orig: Game_ApplySessionSettingsToGlobals @0x551790 (in session @0x5517A7, round 0
-//  @0x5517AD..0x5517B3)]
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (the session block @0x551790: in
+//  session @0x55179C..0x5517A7, round 0 @0x5517AD..0x5517B3)]
 void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	NapiNPServerCtx &ctx = owner.ctx;
 	if (cfg.socket_mode == SocketMode::Socketless) return;
@@ -689,8 +690,8 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	// its bit, which every entry's scan stores as 0x3FF.
 	// [orig: @0x55184C (the authority), the entry @0x551858..0x55186F, the words
 	//  @0x551882..0x551990, the store @0x551996; dfx2.exe @0x54EAD7..0x54EB07 (the same
-	//  1 / 2 tests); the entry mask MissionList_ScanAndBuildFromFiles @0x56334A,
-	//  Mission_BuildMapListFromPFF @0x562B12]
+	//  1 / 2 tests); the entry mask MissionList_ScanAndBuildFromFiles @0x563170 (the store
+	//  @0x56334A), Mission_BuildMapListFromPFF @0x562910 (the store @0x562B12)]
 	ctx.config.class_allow_mask =
 			class_allow_mask_from_words(cfg.config.class_availability, ctx.mission != nullptr);
 	// The weapon table: each cfg word equal to the title's mission value (Jointops.exe 3,
@@ -700,7 +701,7 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	// 0x66 and the C2S 0x2F accept read its 0 and armory-only entries.
 	// [orig: the merge @0x5517C5..0x55181A, the build @0x551831; dfx2.exe's merge
 	//  `cmp ecx, 2` @0x54EA1B; the mission entry's words MissionList_ScanAndBuildFromFiles
-	//  @0x563345 over Mission_LoadBMSFromLooseFile's item_availability read
+	//  @0x563170 (the build @0x563345) over Mission_LoadBMSFromLooseFile's item_availability read
 	//  @0x40D59C..0x40D5B1; WeaponDef_BuildItemRestrictionTable @0x54DDB0]
 	ctx.weapon_restrictions.clear();
 	if (ctx.world == nullptr) return;
@@ -708,14 +709,7 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	const int32_t armory = title_in_match(ctx.np_protocol.identity).armory_only_availability;
 	const int32_t mission_value = armory == 2 ? 3 : 2;
 	std::vector<std::pair<std::string, int32_t>> pairs;
-	if (ctx.mission != nullptr) {
-		for (const bms::ItemAvailabilityEntry &row : ctx.mission->item_availability) {
-			if (row.name.empty()) continue;
-			// The status byte is signed: -1 is the mission-allowed sentinel
-			// [orig: @0x54DE3F `(char)name[strlen+1]`].
-			pairs.emplace_back(row.name, static_cast<int32_t>(static_cast<int8_t>(row.status)));
-		}
-	}
+	if (ctx.mission != nullptr) pairs = mission::mission_availability_pairs(*ctx.mission);
 	world::WeaponAvailability mission_words;
 	world::weapon_availability_apply_pairs(mission_words, table, pairs, mission_value);
 	std::array<int32_t, 255> words = cfg.config.weapon_availability;

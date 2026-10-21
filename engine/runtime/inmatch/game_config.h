@@ -88,10 +88,10 @@ inline std::array<int32_t, 255> filled_weapon_availability(int32_t value) {
 // host dialog's ALWAYS), a word of 2 enables it while the mission-list entry's mask holds
 // its bit (MISSION; every entry's scan stores 0x3FF), any other word disables it (NEVER).
 // The host dialog's class list cycles each word 0 -> 1 -> 2 -> 0; it writes no mask.
-// [orig: Game_ApplySessionSettingsToGlobals @0x551790 (the words @0x551882..0x551990,
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (the words @0x551882..0x551990,
 //  the store @0x551996); HostDialog_OnWeaponRestrictionListClick (the cycle
-//  @0x55781A..0x557839); the entry mask MissionList_ScanAndBuildFromFiles @0x56334A,
-//  Mission_BuildMapListFromPFF @0x562B12]
+//  @0x55781A..0x557839); the entry mask MissionList_ScanAndBuildFromFiles @0x563170 (the
+//  store @0x56334A), Mission_BuildMapListFromPFF @0x562910 (the store @0x562B12)]
 inline uint16_t class_allow_mask_from_words(
 		const std::array<int32_t, 10> &words, bool has_mission_entry) {
 	constexpr uint16_t kMissionEntryClassMask = 0x3FF;
@@ -264,13 +264,13 @@ struct GameConfig {
 	// (Jointops.exe 3, dfx2.exe 2) takes the first mission's own (start_host_session builds
 	// the host's table from them). Config_SetDefaults fills 3; host_screen_from_block copies
 	// game.cfg's. [orig: g_GameConfigState.weaponAvailability_5F0; Config_SetDefaults
-	//  memset32(3, 0xFF) @0x54D410]
+	//  @0x54D030 (the memset32(3, 0xFF) @0x54D410)]
 	std::array<int32_t, 255> weapon_availability = filled_weapon_availability(3);
 	// The cfg's per-class availability words (classes 0..9), from which the authority's
 	// first mission builds class_allow_mask: 1 enables a class, 2 enables it under the
 	// mission entry's mask. Config_SetDefaults stores 1 in each; host_screen_from_block
 	// copies game.cfg's. [orig: g_GameConfigState.classAvailability_9EC; Config_SetDefaults
-	//  @0x54D412..0x54D448]
+	//  @0x54D030 (the stores @0x54D412..0x54D448)]
 	std::array<int32_t, 10> class_availability = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 	// Authoritative projectile game-option globals. These do not alter the
 	// advertised mp_attributes word; the host simulation consumes them directly.

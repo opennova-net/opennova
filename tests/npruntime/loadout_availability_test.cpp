@@ -208,7 +208,7 @@ bool tail_bodies(inmatch::NapiNPServerCtx &ctx, w::World &world, std::vector<uin
 // template mode, where a parent's sub-entries keep the parent's value whatever their own
 // word; the 0 and armory-only (2) entries are the table the S2C 0x66 and the 0x2F accept
 // read. A session-less (single player) host builds none.
-// [orig: Game_ApplySessionSettingsToGlobals @0x551790 (@0x5517A7, @0x5517AD..0x5517B3, the
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x55179C..0x5517A7, @0x5517AD..0x5517B3, the
 //  merge @0x5517C5..0x55181A, the build @0x551831); WeaponDef_BuildItemRestrictionTable
 //  @0x54DDB0 (the name list @0x54DDC3..0x54DE6C, the template @0x54DE7E..0x54DF3D)]
 void test_the_first_mission_builds_the_table() {

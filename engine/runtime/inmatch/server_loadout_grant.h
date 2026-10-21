@@ -99,7 +99,8 @@ struct GrantedWeaponLoadout {
 world::LocalPlayer *own_slot_local_player(const NapiNPConnection &conn, world::World &world);
 
 // The accept's availability gate over the host's weapon table (g_ArmoryWeaponAvailability,
-// 255 dwords, every entry 1 unless the admin's WEAPON SET restricted it): an entry at 0
+// 255 dwords: the session's first mission builds it from the cfg words and the mission's
+// availability, apply_first_mission_settings, and the admin's WEAPON SET writes it): an entry at 0
 // is refused, one at the title's armory-only value (2 in Jointops.exe, 3 in dfx2.exe)
 // only while the requester's entity carries the armory-zone bit (Flags 0x400000).
 // [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515A3F..0x515A58; dfx2.exe @0x5129d0

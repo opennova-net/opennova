@@ -1164,21 +1164,25 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     return r;
 }
 
-void stash_mission_loadout_rules(
-        const bms::File &mission,
-        std::vector<std::pair<std::string, int32_t>> &r_availability_rows,
-        std::vector<world::WeaponKitEntry> &r_kit_rows) {
-    r_availability_rows.clear();
-    r_kit_rows.clear();
+std::vector<std::pair<std::string, int32_t>> mission_availability_pairs(const bms::File &mission) {
+    std::vector<std::pair<std::string, int32_t>> pairs;
     for (const bms::ItemAvailabilityEntry &row : mission.item_availability) {
         if (row.name.empty()) continue;
         // The status byte is SIGNED in retail: -1 is the "mission allowed"
         // sentinel the availability builder maps to 3 [orig:
         // WeaponDef_BuildItemRestrictionTable @0x54ddb0 reads `(char)name[strlen+1]`,
         // `== -1 -> 3`]; an unsigned widen (255) would never hit that arm.
-        r_availability_rows.emplace_back(row.name,
-                                         static_cast<int32_t>(static_cast<int8_t>(row.status)));
+        pairs.emplace_back(row.name, static_cast<int32_t>(static_cast<int8_t>(row.status)));
     }
+    return pairs;
+}
+
+void stash_mission_loadout_rules(
+        const bms::File &mission,
+        std::vector<std::pair<std::string, int32_t>> &r_availability_rows,
+        std::vector<world::WeaponKitEntry> &r_kit_rows) {
+    r_availability_rows = mission_availability_pairs(mission);
+    r_kit_rows.clear();
     for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
         if (row.name.empty()) continue;
         world::WeaponKitEntry entry;
