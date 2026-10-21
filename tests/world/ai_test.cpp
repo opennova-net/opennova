@@ -2595,7 +2595,11 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
     CHECK(npc.inf.anim_blend_weight == 1.0f);
 }
 
-static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models() {
+// `player_body`: the seated body is a player's (Flags 0x100: the org2 body update),
+// whose mounted site returns ahead of its one resolver call, so no tick resolves it.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the mounted returns @0x4B6907 /
+//  @0x4B6977, the resolver call @0x4B7CF4; Entity_UpdateInfantryAI @0x4bf5a5..0x4bf5c3]
+static void run_mounted_collision_tail_phase(bool player_body) {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 4);
@@ -2618,6 +2622,7 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x10;
+    if (player_body) npc_seed.engine_flags |= kEntityFlagPlayer;
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
     CollisionWorld collision;
@@ -2648,7 +2653,13 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     // [orig: Entity_UpdateInfantryAI @0x4bf5a5..0x4bf5c3]
     ctx.logic_tick = 8;
     w->update_all_entities(ctx);
-    CHECK((npc_live->flags & kEntityFlagArmoryZone) == 0);
+    // A seated player body's update never reaches the resolver (L7-s10's FOUND).
+    CHECK((npc_live->flags & kEntityFlagArmoryZone) == (player_body ? kEntityFlagArmoryZone : 0u));
+}
+
+static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models() {
+    run_mounted_collision_tail_phase(false);
+    run_mounted_collision_tail_phase(true);
 }
 
 // A joiner still runs each vehicle's retail physics callback for presentation

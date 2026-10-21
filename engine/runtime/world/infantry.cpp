@@ -1411,8 +1411,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // and part channels remain live.
     // [orig: mounted fire tail @0x4bf4bb..0x4bf5c6]
     if (mounted) {
-        // The live mounted tail invokes the movement resolver on its exact
-        // eight-tick entity phase. Contact/trigger work remains live while the
+        // The org1 mounted tail invokes the movement resolver on its exact
+        // eight-tick entity phase; a seated player body's (org2) update never
+        // reaches its one resolver call, its mounted site returning first
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the mounted returns
+        //  @0x4B6907 / @0x4B6977 ahead of the resolver call @0x4B7CF4].
+        // Contact/trigger work remains live while the
         // mounted source latch suppresses push-out, preserving the parent pose.
         // The ladder IO rides along — retail has ONE resolver, so a mounted
         // resolve runs the same gated CL block (the latch-only channel here
@@ -1422,7 +1426,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // @0x4b9910 kong 155519-155521 before either resolver call].
         const int32_t eye_offset[3] = {inf.eye_offset_x, inf.eye_offset_y,
                                        inf.eye_offset_z};
-        if ((key & 7u) == 0 && collision != nullptr) {
+        if (npc_body && (key & 7u) == 0 && collision != nullptr) {
             const LadderResolveIO mounted_lio = make_ladder_resolve_io(e, tick_start_z);
             const devtools::ProfileScope collision_scope(
                     world.profile, devtools::Slot::SIM_AI_INFANTRY_COLLISION);
