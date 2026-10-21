@@ -295,6 +295,16 @@ inline constexpr Normalization kNormalizations[] = {
 			"answers S2C 0x30, whose half of the 0x30/0x31 alternation is process-global" },
 	{ "order.C.0x21", MaskKind::FirstOrder, 'C', 0x021, "CHECKSUM_REPLY", 0,
 			"answers S2C 0x31, whose half of the 0x30/0x31 alternation is process-global" },
+	{ "order.C.0x22.phase", MaskKind::Field, 'C', 0x022, "PLAYER_SYNC_REQUEST", 0,
+			"the joiner re-requests every S2C 0x16 row whose slot its roster has not bound with "
+			"a reliable C2S 0x22 (NapiNPClientMsg_PlayerList @0x42FAE0, the queue call "
+			"@0x42FC35), so the 0x22 inherits the 0x16's scoreboard phase (order.S.0x16): where "
+			"it lands against the C2S 0x0A answering the S2C 0x11 is that phase, unless the "
+			"0x16 rode the 0x11's own packet. x5's retail joiners order the two both ways with "
+			"the 0x16 apart (cp04-objcoop-deploy RR 0x22 first, RR-aa 0x0A first) and send "
+			"them in one packet, the 0x22 first, every time it rode along (RR-aa on ten cases, "
+			"RR and OR on four each). A pair where either run's first 0x11 packet carries no "
+			"0x16 leaves the 0x22 out of the C2S first-occurrence order and initial grouping" },
 
 	// --- packet grouping keys
 	{ "group.S.0x0a.length", MaskKind::GroupLength, 'S', 0x00A, "PER_FRAME_UPDATE", 0,
@@ -314,6 +324,14 @@ inline constexpr Normalization kNormalizations[] = {
 	{ "group.S.0x10.length", MaskKind::GroupLength, 'S', 0x010, "STATIC_ENTITY_BATCH", 0,
 			"a world-stream page's length carries retail's uninitialized zone blocks "
 			"(world.S.0x10.zone_prefix)" },
+	{ "group.S.0x10.run", MaskKind::Field, 'S', 0x010, "page count and boundaries", 0,
+			"the pool-2 static stream's records carry retail's uninitialized zone blocks "
+			"(world.S.0x10.zone_prefix, D-NET-394), whose bytes decide whether the last statics "
+			"spill into one more S2C 0x10 message (x5's 01tr-coop-drive A/A: RR 53 messages of "
+			"33150 bytes, RR-aa 54 of 33170), so how many groups the stream takes and where its "
+			"last page shares a packet follow that residue. The 0x10 pages leave the grouping "
+			"key, and the stream stands as one element at its first page; its records compare "
+			"by slot (initial_records)" },
 	{ "group.S.0x20.length", MaskKind::GroupLength, 'S', 0x020, "POOL3_SYNC", 0,
 			"a world-stream page's length is its records' value-gated fields (judged by "
 			"length_set and initial_body): where the page cut falls follows them" },
@@ -343,6 +361,21 @@ inline constexpr Normalization kNormalizations[] = {
 			"the connection queue (CNapiNPConnection_QueueMessage @0x628640) is packed in "
 			"queue order at the boundary (BuildOutgoingPackets @0x628430). A steady packet "
 			"groups as its record multiset; steady_order_distribution judges the order" },
+	{ "initial.S.0x5a.reply", MaskKind::Field, 'S', 0x05A, "loadout reply boundary", 0,
+			"the host answers each C2S 0x2F loadout submit with an S2C 0x5A "
+			"(NapiNPServerMsg_HandlePlayerLoadout @0x515790, Server_SendWeaponSlotListToPlayer "
+			"called @0x515F95, its send @0x502948) on its next boundary, so whether a joiner's "
+			"two 0x5A share a packet follows how its send pump batched the two 0x2F "
+			"(initial.C.pump_boundary): x5's 03tr-dm RR joiner sent them 3.1 s apart and the "
+			"0x5A answering the lone first one left alone, RR-aa sent both in one packet and "
+			"got both together. Each 0x5A stands as its own element of the S2C initial "
+			"grouping, ahead of its packet's other records" },
+	{ "steady.distribution_floor", MaskKind::Field, '*', 0, "share distribution samples", 0,
+			"a share distribution's tolerance unit is max(0.08, RR share / 2): one sample moves a "
+			"key's share by 1 / n, so under 13 samples (1 / 13 < 0.08) one sample's phase alone "
+			"crosses a unit. x5's kick (11 to 14 steady packets before the punt) read 1.21 units "
+			"between RR and RR-aa on S2C. A distribution compares at 13 samples or more on both "
+			"sides" },
 	{ "initial.C.pump_boundary", MaskKind::GroupBoundary, 'C', 0, "group boundary", 0,
 			"the per-frame send pump (PumpClientProtocolSend @0x42c4bc) flushes what each "
 			"frame queued; whether the game-start 0x4E (@0x42e1d9) and Game_StartMission's "
@@ -435,7 +468,10 @@ inline constexpr Normalization kNormalizations[] = {
 			"(CNapiNPConnection_SetState @0x626250, the teardown call @0x62628F), so no "
 			"gameplay follows in either direction. Such a run's gameplay coverage ends at "
 			"the first S2C 0x103 in the steady window; the flag is the run's scenario's, "
-			"never read off the capture" },
+			"never read off the capture. Its rates (bandwidth, gameplay_cadence) count that "
+			"covered play over its own length, since the window's rate is the punt's timing: "
+			"x5's kick covered 1.08 to 1.29 s of a 45 s window, S2C 75 B/s on RR against 90 on "
+			"RR-aa over the window and 3149 against 3451 over the play" },
 	{ "window.dead_joiner_uplink", MaskKind::Field, 'C', 0x00C, "uplink gap while dead", 0,
 			"a joiner whose own body has no health sends no C2S 0x0C: the uplink build "
 			"returns nothing on a zero health word or the dead flag "
@@ -483,6 +519,12 @@ inline constexpr Normalization kNormalizations[] = {
 			"Server_SendEntityStateToPlayer @0x517BE8): which 8-bit values fall in the "
 			"steady window depends on how many frames preceded it, so the route nibble and "
 			"the modal step compare" },
+	{ "frame.mount_phase", MaskKind::Field, 'S', 0x00A, "mount record", 0,
+			"the mounted-ammo record rides only a 0x0A whose flags2 low nibble is 8 "
+			"(NetPacket_WritePlayerState @0x4FF6B0, the test @0x4FFD94..0x4FFD9A), one frame "
+			"in 16: a window shorter than the cycle holds it or not by the counter's phase "
+			"(x5's kick, five or six frames before the punt: RR {0, none} against RO's {0}), so "
+			"the mount set compares over a full cycle on both sides, as frame_flags2 does" },
 	{ "frame.env_tod", MaskKind::Field, 'S', 0x00A, "tod_fixed", 0,
 			"the time of day advances with the session clock: the env block compares the "
 			"weather fields" },

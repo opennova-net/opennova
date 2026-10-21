@@ -1241,6 +1241,29 @@ void test_session_end() {
 	const Case unrecorded = judge_case(punt(scripted(1), false), punt(scripted(2), false),
 			punt(scripted(3), false), "RO", false, true);
 	check(coverage(unrecorded), "a declared run whose capture holds no record keeps its window");
+
+	// Its rates count the covered play over that play's length: a punt landing 1.5 s
+	// sooner (x5's kick covered 1.08 to 1.29 s) reads the same gameplay cadence.
+	auto punt_at = [](wire::ParityTrace trace, uint64_t at) {
+		auto drop = [](auto &records, auto gone) {
+			records.erase(std::remove_if(records.begin(), records.end(), gone), records.end());
+		};
+		drop(trace.uplinks, [at](const wire::ParityUplinkState &u) { return u.ts_ns > at; });
+		drop(trace.frames, [at](const wire::ParityFrameState &f) { return f.ts_ns > at; });
+		drop(trace.events, [at](const wire::ParityEvent &e) {
+			return e.ts_ns > at && (e.full_tag == 0x00C || e.full_tag == 0x00A);
+		});
+		splice(trace, 'S', 0x103, at + 90 * kMs, bytes({ 0x44, 0x53, 0, 4, 0, 1, 0, 0, 0 }));
+		for_events(trace, 'S', 0x103, [](wire::ParityEvent &e) { e.settings_update = true; });
+		return trace;
+	};
+	const Case sooner = judge_case(punt_at(scripted(1), kPunt), punt_at(scripted(2), kPunt),
+			punt_at(scripted(3), kPunt - 1500 * kMs), "RO", false, true);
+	expect_row(sooner, 'S', "gameplay_cadence", "", "pass");
+	expect_row(sooner, 'C', "gameplay_cadence", "", "pass");
+	const Case undeclared_sooner = judge_case(punt_at(scripted(1), kPunt),
+			punt_at(scripted(2), kPunt), punt_at(scripted(3), kPunt - 1500 * kMs));
+	expect_row(undeclared_sooner, 'S', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
 }
 
 void test_aa_widening() {
@@ -1873,11 +1896,40 @@ void test_initial_rules() {
 			}
 		std::stable_sort(split.packets.begin(), split.packets.end(),
 				[](const auto &x, const auto &y) { return x.frame < y.frame; });
-		add_initial(extra, 'C', 0x022, 0x022, bytes({ 1 }));
+		add_initial(extra, 'C', 0x022, 0x009, bytes({ 2, 2 }));
 		expect_row(judge_case(scripted(1), scripted(2), split), 'C', "initial_grouping", "",
 				"pass");
 		expect_row(judge_case(scripted(1), scripted(2), extra), 'C', "initial_grouping", "",
 				"fail", "INITIAL_PACKET_GROUPING");
+	}
+	{
+		// The joiner's C2S 0x22 re-requests an unbound S2C 0x16 row, so it rides the
+		// 0x16's phase (order.C.0x22.phase): with the 0x16 apart from the 0x11 (the
+		// scripted case) a 0x22 sent after the 0x0A moves no order and no group; with
+		// the 0x16 in the 0x11's packet on every run the joiner answers both in one
+		// pass, the 0x22 first, and the same move fails.
+		auto late_request = [](wire::ParityTrace trace) {
+			for (wire::ParityPacket &p : trace.packets)
+				if (p.dir == 'C' && p.tags.size() == 2 && p.tags[0] == 0x022) {
+					p.tags.erase(p.tags.begin());
+					p.records.erase(p.records.begin());
+					break;
+				}
+			erase_events(trace, 'C', 0x022);
+			add_initial(trace, 'C', 0x00A, 0x022, bytes({ 1 }));
+			return trace;
+		};
+		auto riding = [](wire::ParityTrace trace) {
+			add_initial(trace, 'S', 0x01C, 0x016, bytes({ 7, 7, 7 }));
+			return trace;
+		};
+		const Case apart = judge_case(scripted(1), scripted(2), late_request(scripted(3)));
+		expect_row(apart, 'C', "first_order", "", "pass");
+		expect_row(apart, 'C', "initial_grouping", "", "pass");
+		const Case rode = judge_case(riding(scripted(1)), riding(scripted(2)),
+				riding(late_request(scripted(3))));
+		expect_row(rode, 'C', "first_order", "", "fail", "FIRST_ORDER_MISMATCH");
+		expect_row(rode, 'C', "initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
 	}
 	{
 		// A gameplay or world-page record's length and a fragment's length leave the
@@ -1942,6 +1994,46 @@ void test_initial_rules() {
 				[](wire::ParityEvent &e) { e.body = player_sync(0, 5, 0, 3); });
 		expect_row(judge_case(scripted(1), scripted(2), subject), 'S', "initial_body_set", "0x46:0",
 				"fail", "INITIAL_BODY_MISMATCH");
+	}
+	{
+		// The host answers each C2S 0x2F with its S2C 0x5A on the next boundary
+		// (initial.S.0x5a.reply): two replies in one packet and two in their own
+		// packets group alike; a missing reply does not.
+		auto replies = [](uint32_t seed, const std::vector<std::vector<uint16_t>> &packets) {
+			wire::ParityTrace trace = scripted(seed);
+			for (size_t i = 0; i < trace.packets.size(); ++i) {
+				if (trace.packets[i].dir != 'S' || trace.packets[i].tags.empty() ||
+						trace.packets[i].tags[0] != 0x07B)
+					continue;
+				const wire::ParityPacket host = trace.packets[i];
+				uint32_t seq = 8100;
+				std::vector<wire::ParityPacket> added;
+				for (const std::vector<uint16_t> &tags : packets) {
+					wire::ParityPacket p = host;
+					p.seq = ++seq;
+					p.tags = tags;
+					p.records.clear();
+					for (const uint16_t tag : tags) {
+						wire::ParityWireRecord r;
+						r.full_tag = tag;
+						r.raw_flags = 0x20;
+						r.encoded_length = 4;
+						p.records.push_back(r);
+					}
+					added.push_back(p);
+				}
+				trace.packets.insert(trace.packets.begin() + long(i), added.begin(), added.end());
+				break;
+			}
+			return trace;
+		};
+		const std::vector<std::vector<uint16_t>> together = { { 0x05A, 0x05A } };
+		const std::vector<std::vector<uint16_t>> apart = { { 0x05A }, { 0x05A } };
+		const std::vector<std::vector<uint16_t>> one = { { 0x05A } };
+		expect_row(judge_case(replies(1, together), replies(2, together), replies(3, apart)), 'S',
+				"initial_grouping", "", "pass");
+		expect_row(judge_case(replies(1, together), replies(2, together), replies(3, one)), 'S',
+				"initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
 	}
 }
 
@@ -2035,6 +2127,49 @@ void test_world_records() {
 		const Case flags = judge_case(with(1, organic, base_statics),
 				with(2, organic, base_statics), with(3, organic, statics(0, 0, 0x00020000)));
 		expect_row(flags, 'S', "initial_records", "0x10:0", "fail", "INITIAL_RECORD_MISMATCH");
+	}
+	{
+		// The residue decides whether the last statics spill into one more page (x5's
+		// 01tr-coop-drive A/A: 53 against 54 S2C 0x10 messages), so the stream stands
+		// as one group at its first page however many packets carry it
+		// (group.S.0x10.run); a run with no stream at all still differs.
+		const std::vector<uint8_t> organic = organics(100, 5, 0);
+		auto spilled = [](wire::ParityTrace trace, const std::vector<uint8_t> &page) {
+			for (size_t i = 0; i < trace.packets.size(); ++i) {
+				const wire::ParityPacket &host = trace.packets[i];
+				if (host.dir != 'S' || host.tags.empty() || host.tags[0] != 0x07B)
+					continue;
+				wire::ParityPacket p = host;
+				p.seq = 8001;
+				p.tags = { 0x010 };
+				wire::ParityWireRecord r;
+				r.full_tag = 0x010;
+				r.raw_flags = 0x20;
+				r.encoded_length = uint32_t(page.size());
+				p.records = { r };
+				wire::ParityEvent e;
+				e.frame = p.frame;
+				e.ts_ns = p.ts_ns;
+				e.dir = 'S';
+				e.session = kClientPort;
+				e.participant = 1;
+				e.full_tag = 0x010;
+				e.length = page.size();
+				e.material = true;
+				e.body = page;
+				trace.packets.insert(trace.packets.begin() + long(i) + 1, p);
+				trace.events.push_back(e);
+				break;
+			}
+			return trace;
+		};
+		expect_row(judge_case(with(1, organic, base_statics), with(2, organic, base_statics),
+						   spilled(with(3, organic, base_statics), base_statics)),
+				'S', "initial_grouping", "", "pass");
+		wire::ParityTrace none = scripted(3);
+		add_initial(none, 'S', 0x07B, 0x00C, organic);
+		expect_row(judge_case(with(1, organic, base_statics), with(2, organic, base_statics), none),
+				'S', "initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
 	}
 }
 
@@ -2271,6 +2406,35 @@ void test_frame_rules() {
 				"frame_flags2", "", "skip");
 	}
 	{
+		// The mounted-ammo record rides the route nibble 8's frame alone
+		// (frame.mount_phase): over full windows a run that never carries it fails;
+		// six frames that hold it against six that do not are a phase slice (x5's
+		// kick: RR {0, none} against RO's {0}), which the set does not compare.
+		auto mounted = [](uint32_t seed, bool mount, size_t keep) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityFrameState> frames;
+			size_t steady = 0;
+			for (wire::ParityFrameState f : trace.frames) {
+				const bool in_steady = f.ts_ns >= kSteadyStart;
+				if (in_steady && steady++ >= keep)
+					continue;
+				if (mount && ((f.flags2 & 0x0Fu) == 8u || (in_steady && steady == 1))) {
+					f.mount_present = true;
+					f.mount_handle = 0xFFFF;
+				}
+				frames.push_back(f);
+			}
+			trace.frames = std::move(frames);
+			return trace;
+		};
+		constexpr size_t kAll = ~size_t(0);
+		expect_row(judge_case(mounted(1, true, kAll), mounted(2, true, kAll),
+						   mounted(3, false, kAll)),
+				'S', "frame_mount", "", "fail", "FRAME_PASSENGER_PHASE_MISMATCH");
+		expect_row(judge_case(mounted(1, true, 6), mounted(2, true, 6), mounted(3, false, 6)),
+				'S', "frame_mount", "", "skip");
+	}
+	{
 		// The fps and CPU bytes are measurements; a CPU byte never written is not.
 		auto cpu = [](uint32_t seed, uint32_t fps, uint32_t share) {
 			wire::ParityTrace trace = scripted(seed);
@@ -2373,6 +2537,28 @@ void test_steady_rules() {
 				"steady_group_distribution", "", "pass");
 		expect_row(judge_case(scripted(1), scripted(2), alone), 'S', "steady_group_distribution",
 				"", "fail", "GAMEPLAY_GROUP_DISTRIBUTION");
+	}
+	{
+		// A share distribution compares at 13 samples or more on both sides
+		// (steady.distribution_floor): one sample's 1 / n share stays under the 0.08
+		// unit. x5's kick held 11 to 14 steady packets before the punt.
+		auto trimmed = [](uint32_t seed, size_t keep) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityPacket> packets;
+			size_t steady = 0;
+			for (const wire::ParityPacket &p : trace.packets) {
+				if (p.dir == 'S' && p.ts_ns >= kSteadyStart && !p.records.empty() &&
+						steady++ >= keep)
+					continue;
+				packets.push_back(p);
+			}
+			trace.packets = std::move(packets);
+			return trace;
+		};
+		expect_row(judge_case(trimmed(1, 13), trimmed(2, 13), trimmed(3, 13)), 'S',
+				"steady_group_distribution", "", "skip");
+		expect_row(judge_case(trimmed(1, 14), trimmed(2, 14), trimmed(3, 14)), 'S',
+				"steady_group_distribution", "", "pass");
 	}
 }
 

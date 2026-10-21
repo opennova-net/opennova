@@ -88,6 +88,9 @@ std::string wire_key(char dir, const wire::ParityWireRecord &record);
 std::string group_key(const wire::ParityPacket &packet);
 bool carries_low_tag(const wire::ParityPacket &packet, uint16_t identity);
 bool carries_identity(const wire::ParityPacket &packet, uint16_t identity);
+// Whether a run's C2S 0x22 re-requests ride the S2C 0x16's scoreboard phase: its
+// first S2C packet carrying 0x11 carries no 0x16 (order.C.0x22.phase).
+bool sync_request_phase_bound(const RunFacts &run);
 double jaccard_distance(const std::set<std::string> &a, const std::set<std::string> &b);
 // Pairwise order inversions between the items `a` and `b` share.
 size_t order_inversions(const std::vector<std::string> &a, const std::vector<std::string> &b);

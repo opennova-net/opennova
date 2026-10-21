@@ -169,7 +169,7 @@ void check_round_linger(const RunFacts &facts, std::vector<EvidenceFinding> &out
 // and leaving state 5 tears the connection down at once
 // [orig: CNapiNPConnection_SetState @0x626250 (the teardown call @0x62628F)], so no
 // gameplay follows it (window.session_end).
-uint64_t coverage_end(const RunFacts &facts) {
+uint64_t session_coverage_end(const RunFacts &facts) {
 	static_assert(has_normalization("window.session_end"));
 	if (facts.info.ends_session)
 		for (const wire::ParityEvent &event : facts.trace.events)
@@ -180,7 +180,7 @@ uint64_t coverage_end(const RunFacts &facts) {
 }
 
 void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<EvidenceFinding> &out) {
-	const uint64_t end = coverage_end(facts);
+	const uint64_t end = session_coverage_end(facts);
 	std::vector<uint64_t> samples;
 	if (dir == 'C') {
 		for (const wire::ParityUplinkState &state : facts.trace.uplinks)
@@ -296,6 +296,10 @@ void check_datagram_accounting(const RunFacts &facts, std::vector<EvidenceFindin
 }
 
 } // namespace
+
+uint64_t coverage_end(const RunFacts &facts) {
+	return session_coverage_end(facts);
+}
 
 bool parse_utc_ns(std::string_view text, uint64_t &out) {
 	int64_t year, month, day, hour, minute, second;

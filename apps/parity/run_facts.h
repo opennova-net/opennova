@@ -92,6 +92,11 @@ struct RunFacts {
 	}
 };
 
+// The end of a run's gameplay coverage: the steady end, or, for a run whose scenario
+// ends the joiner's session, the first S2C 0x103 in the steady window
+// (window.session_end).
+uint64_t coverage_end(const RunFacts &facts);
+
 // Bind `trace` to its one gameplay session, measure the comparison interval and
 // check the evidence (the steady window's gameplay coverage, the datagram
 // accounting). Never fails: what is wrong lands in `evidence`.

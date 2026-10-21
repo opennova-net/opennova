@@ -460,6 +460,17 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 				(bound ? std::to_string(f.mount_clip) + ":" + std::to_string(f.mount_reserve)
 					   : std::string("-:-"));
 	});
+	// The mounted-ammo record rides only the frame whose route nibble is 8
+	// [orig: NetPacket_WritePlayerState @0x4FF6B0 (the test @0x4FFD94..0x4FFD9A)],
+	// one in 16, so a window shorter than the cycle holds it by the counter's phase
+	// (frame.mount_phase).
+	static_assert(has_normalization("frame.mount_phase"));
+	if (a.size() < kRouteCycle || b.size() < kRouteCycle) {
+		MetricValue &mount = out.back();
+		mount.comparable = false;
+		mount.reference_short = a.size() < kRouteCycle;
+		mount.detail = "fewer than 16 steady frames: the mount record is a phase slice";
+	}
 
 	auto any = [](const std::vector<const F *> &frames, const std::function<bool(const F &)> &f) {
 		for (const F *frame : frames)

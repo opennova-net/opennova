@@ -129,6 +129,18 @@ bool carries_identity(const wire::ParityPacket &packet, uint16_t identity) {
 	return false;
 }
 
+// The joiner re-requests an unbound S2C 0x16 row with C2S 0x22
+// [orig: NapiNPClientMsg_PlayerList @0x42FAE0 (the queue call @0x42FC35)]; only a
+// 0x16 riding the 0x11's own packet fixes the 0x22's place against the 0x0A
+// answering it.
+bool sync_request_phase_bound(const RunFacts &run) {
+	static_assert(has_normalization("order.C.0x22.phase"));
+	for (const wire::ParityPacket &packet : run.trace.packets)
+		if (packet.dir == 'S' && carries_identity(packet, 0x011))
+			return !carries_identity(packet, 0x016);
+	return true;
+}
+
 double p90(std::vector<double> values) {
 	if (values.empty())
 		return 0.0;

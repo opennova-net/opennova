@@ -313,13 +313,19 @@ void compare_tags(
 		}
 	}
 
-	// First-occurrence order of the tags both carry.
+	// First-occurrence order of the tags both carry. A C2S 0x22 re-request rides the
+	// S2C 0x16's phase unless both runs' 0x16 rode the 0x11 (order.C.0x22.phase).
+	const bool sync_phase = dir == 'C' &&
+			(sync_request_phase_bound(rr) || sync_request_phase_bound(other));
+	auto ordered = [dir, sync_phase](uint16_t identity) {
+		return !first_order_excluded(dir, identity) && !(sync_phase && identity == 0x022);
+	};
 	std::vector<std::string> order_a, order_b;
 	for (const uint16_t identity : a.first_order)
-		if (b.tags.count(identity) && !first_order_excluded(dir, identity))
+		if (b.tags.count(identity) && ordered(identity))
 			order_a.push_back(identity_key(identity));
 	for (const uint16_t identity : b.first_order)
-		if (a.tags.count(identity) && !first_order_excluded(dir, identity))
+		if (a.tags.count(identity) && ordered(identity))
 			order_b.push_back(identity_key(identity));
 	MetricValue order = metric(dir, "first_order", "", "FIRST_ORDER_MISMATCH");
 	order.distance = double(order_inversions(order_a, order_b));
@@ -426,11 +432,14 @@ void tally(Distribution &d, const std::string &key) {
 	++d.total;
 }
 
-constexpr size_t kDistributionMinSamples = 8;
+// One sample moves a key's share by 1 / n against the max(0.08, RR / 2) unit, so
+// under 13 samples one sample's phase alone crosses a unit (steady.distribution_floor).
+constexpr size_t kDistributionMinSamples = 13;
 
 // Share delta in tolerance units: max(0.08, RR share / 2) is one unit.
 MetricValue distribution_metric(char dir, const char *name, const char *code, const Distribution &a,
 		const Distribution &b) {
+	static_assert(has_normalization("steady.distribution_floor"));
 	MetricValue value = metric(dir, name, "", code);
 	value.floor = 1.0;
 	value.subject =
@@ -441,7 +450,7 @@ MetricValue distribution_metric(char dir, const char *name, const char *code, co
 		value.comparable = false;
 		value.reference_short = a.total < kDistributionMinSamples;
 		value.code = "GAMEPLAY_DISTRIBUTION_UNEXERCISED";
-		value.detail = "fewer than 8 samples after the first gameplay packet";
+		value.detail = "fewer than 13 samples after the first gameplay packet";
 		return value;
 	}
 	std::set<std::string> keys;
@@ -1176,23 +1185,39 @@ void compare_milestones(const RunFacts &rr, const RunFacts &other, std::vector<M
 
 void compare_rates(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
-	auto bytes_per_second = [dir](const RunFacts &run) {
+	// A run whose scenario ends the joiner's session counts its covered play over
+	// that play's length: the steady window's rate would be the punt's timing
+	// (window.session_end).
+	static_assert(has_normalization("window.session_end"));
+	auto seconds = [](const RunFacts &run, uint64_t end) {
+		if (end <= run.info.steady_start_ns || end >= run.info.steady_end_ns)
+			return run.info.steady_seconds;
+		return double(end - run.info.steady_start_ns) / 1e9;
+	};
+	auto bytes_per_second = [dir, &seconds](const RunFacts &run) {
+		const uint64_t end = coverage_end(run);
 		double bytes = 0.0;
 		for (const wire::ParityDatagram &datagram : run.trace.datagrams)
-			if (run.in_steady(datagram.ts_ns) && datagram_direction(datagram, run.session) == dir)
+			if (run.in_steady(datagram.ts_ns) && datagram.ts_ns <= end &&
+					datagram_direction(datagram, run.session) == dir)
 				bytes += double(datagram.length);
-		return bytes / run.info.steady_seconds;
+		return bytes / seconds(run, end);
 	};
-	auto gameplay_per_second = [dir](const RunFacts &run) {
+	auto gameplay_per_second = [dir, &seconds](const RunFacts &run) {
+		const uint64_t end = coverage_end(run);
 		double samples = 0.0;
 		if (dir == 'C') {
 			for (const wire::ParityUplinkState &state : run.trace.uplinks)
-				samples += state.decoded && run.in_steady(state.ts_ns) ? 1.0 : 0.0;
+				samples += state.decoded && run.in_steady(state.ts_ns) && state.ts_ns <= end
+						? 1.0
+						: 0.0;
 		} else {
 			for (const wire::ParityFrameState &state : run.trace.frames)
-				samples += state.decoded && run.in_steady(state.ts_ns) ? 1.0 : 0.0;
+				samples += state.decoded && run.in_steady(state.ts_ns) && state.ts_ns <= end
+						? 1.0
+						: 0.0;
 		}
-		return samples / run.info.steady_seconds;
+		return samples / seconds(run, end);
 	};
 	const double ba = bytes_per_second(rr), bb = bytes_per_second(other);
 	MetricValue bandwidth = metric(dir, "bandwidth", "", "BANDWIDTH_MISMATCH");

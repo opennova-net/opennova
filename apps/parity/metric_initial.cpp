@@ -52,10 +52,17 @@ bool spawn_pump_add_at(const std::vector<wire::ParityWireRecord> &records, size_
 // identity (a FirstOrder exclusion) leaves the key, and a packet left with no
 // record drops out. A boundary-tolerant direction yields one element per record,
 // its packet's flags with its framing, so a merged or split packet costs nothing.
-std::vector<std::string> initial_groups(const RunFacts &run, char dir) {
+// With `sync_phase` the C2S 0x22 re-requests leave too (order.C.0x22.phase); the
+// S2C 0x10 pages leave the key and the stream stands as one element at its first
+// page (group.S.0x10.run).
+std::vector<std::string> initial_groups(const RunFacts &run, char dir, bool sync_phase) {
 	static_assert(has_normalization("packet.sid_seq_ack"));
 	static_assert(has_normalization("order.S.0x16"));
 	static_assert(has_normalization("initial.C.pump_boundary"));
+	static_assert(has_normalization("order.C.0x22.phase"));
+	static_assert(has_normalization("group.S.0x10.run"));
+	static_assert(has_normalization("initial.S.0x5a.reply"));
+	bool static_run = false;
 	std::map<std::pair<uint32_t, uint32_t>, int> earliest;
 	for (const wire::ParityPacket &packet : run.trace.packets) {
 		if (packet.dir != dir)
@@ -75,11 +82,30 @@ std::vector<std::string> initial_groups(const RunFacts &run, char dir) {
 		wire::ParityPacket kept = packet;
 		kept.records.clear();
 		kept.tags.clear();
-		for (const wire::ParityWireRecord &record : packet.records)
+		bool static_page = false;
+		size_t loadout_replies = 0;
+		for (const wire::ParityWireRecord &record : packet.records) {
+			if (dir == 'S' && record.full_tag == 0x010) {
+				static_page = true;
+				continue;
+			}
+			if (dir == 'S' && record.full_tag == 0x05A) {
+				++loadout_replies;
+				continue;
+			}
+			if (dir == 'C' && sync_phase && record.full_tag == 0x022)
+				continue;
 			if (!first_order_excluded(dir, record.full_tag)) {
 				kept.records.push_back(record);
 				kept.tags.push_back(record.full_tag);
 			}
+		}
+		if (static_page && !static_run) {
+			static_run = true;
+			groups.push_back("S2C 0x10 stream");
+		}
+		for (size_t i = 0; i < loadout_replies; ++i)
+			groups.push_back("S2C 0x5a reply");
 		if (flat) {
 			char flags[8];
 			std::snprintf(flags, sizeof(flags), "0x%02x", unsigned(packet.flags));
@@ -416,7 +442,10 @@ MetricValue compare_records(char dir, uint16_t identity, const std::vector<std::
 
 void compare_initial(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
-	const std::vector<std::string> ga = initial_groups(rr, dir), gb = initial_groups(other, dir);
+	const bool sync_phase =
+			dir == 'C' && (sync_request_phase_bound(rr) || sync_request_phase_bound(other));
+	const std::vector<std::string> ga = initial_groups(rr, dir, sync_phase),
+								   gb = initial_groups(other, dir, sync_phase);
 	const char *unit = group_boundary_tolerant(dir) ? " records" : " groups";
 	MetricValue grouping = make_metric(dir, "initial_grouping", "", "INITIAL_PACKET_GROUPING");
 	grouping.distance = double(edit_distance(ga, gb));
