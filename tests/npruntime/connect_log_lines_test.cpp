@@ -7,7 +7,8 @@
 // (TOSSED [3]); PunkBuster's datagrams go to their own handler unpacked. A server's first
 // new connection turns the log off for the process, a listen host's own one included, so a
 // host's lines cover the probes and the first join before it. The protocol's NET lines are
-// the client side's (the server side's callback slots hold empty stubs).
+// the client side's (the server side's slots write no line: +0x2DC / +0x2E0 / +0x2E4 /
+// +0x2EC are empty stubs, +0x2F0 sets only the net-quality error bit).
 // [orig: NapiNPManager_PumpReceive @0x623010 (cb_on_raw @0x623121, the PunkBuster arm
 //  @0x6231A7..0x6231D9, NapiNP_UnpackPacket @0x623206, cb_on_error(3) @0x623229, cb_on_packet
 //  @0x623254); NapiNPManager_HandlePacket @0x622F10 (the magic test @0x622F1B..0x622F36,

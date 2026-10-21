@@ -133,8 +133,9 @@ std::string napi_got_protocol_text(int32_t bytes, const PeerAddr &from,
 		const std::string &protocol_name);
 std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason reason);
 // The protocol's client-side callbacks (proto +0x26C / +0x270 / +0x274 / +0x27C /
-// +0x280 / +0x284); the server side's slots (+0x2DC / +0x2E0 / +0x2E4 / +0x2EC /
-// +0x2F0) hold empty stubs, so a host writes none of these.
+// +0x280 / +0x284); a host writes none of these: the server side's slots +0x2DC /
+// +0x2E0 / +0x2E4 / +0x2EC are empty stubs and +0x2F0 (byte_4C4680) only sets the
+// net-quality error bit 2 and code 0x9B past its tick threshold, with no line.
 // [orig: CNapiNetwork_Init @0x4CA908..0x4CA9CD; NapiLog_OnRecv @0x4C46B0 ("NET GOT",
 //  the opcode as two hex digits), NapiLog_OnSend @0x4C4760 ("NET SENDING", the
 //  opcode and p#), NapiLog_OnProcess @0x4C67D0, Network_LogUnknownNETMessage

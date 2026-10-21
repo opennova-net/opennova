@@ -139,14 +139,15 @@ void test_handlers_drop_under_the_load_gate() {
 	// The kill page's request: the whole window, the walk from handle 0.
 	const std::vector<uint8_t> page_request = {0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0};
 	for (const uint32_t suspended : {0u, 1u}) {
-		HandlerFixture f;
-		f.ctx.net_spawn_suspended = suspended;
+		// The World on the heap (the 1 MB Windows stack).
+		const auto f = std::make_unique<HandlerFixture>();
+		f->ctx.net_spawn_suspended = suspended;
 		const size_t expected = suspended != 0 ? 0 : 1;
-		CHECK(count_tag(f.dispatch(c2s::TEAM_SPAWN_ACK, {0, 0}), s2c::TEAM_CHANGE_CONFIRM) ==
+		CHECK(count_tag(f->dispatch(c2s::TEAM_SPAWN_ACK, {0, 0}), s2c::TEAM_CHANGE_CONFIRM) ==
 				expected);
-		CHECK(count_tag(f.dispatch(c2s::EMPTY_SLOT_SWEEP_REQUEST, {}), s2c::EMPTY_SLOT_SWEEP) ==
+		CHECK(count_tag(f->dispatch(c2s::EMPTY_SLOT_SWEEP_REQUEST, {}), s2c::EMPTY_SLOT_SWEEP) ==
 				expected);
-		CHECK(count_tag(f.dispatch(c2s::LOADOUT_REQUEST, page_request), s2c::KILL_BY_SLOT) ==
+		CHECK(count_tag(f->dispatch(c2s::LOADOUT_REQUEST, page_request), s2c::KILL_BY_SLOT) ==
 				expected);
 	}
 }
