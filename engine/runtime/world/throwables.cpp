@@ -1046,7 +1046,7 @@ static void refresh_round_indoors(World &world, LiveRound &round,
 // into the water, under the terrain or into a pool-2/1 entity stops there and arms the
 // 0x1000 bit the update head detonates on (the terrain and hit arms also clear the +0x114
 // bit 0x400000, which ours' rounds do not carry). The arti name binds no event row, so the
-// shell takes no class init. [orig: Entity_UpdateVehicleWreck @0x445500 (the physics row
+// shell takes no class init. [orig: Entity_UpdateArtiShell @0x445500 (the physics row
 // "arti" @0x82AC7C); the event table @0x813000 holds no "arti" row]
 static bool motor_arti(World &world, RoundSim &sim, LiveRound &r, const AmmoTableEntry &ammo,
                        CollisionWorld *collision, const terrain::TerrainHeightField *terrain) {

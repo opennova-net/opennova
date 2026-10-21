@@ -4,7 +4,7 @@
 // quarters the horizontal words and arms the 0x1000 bit; under the terrain the shell arms
 // where it stands; the update head then releases the armed shell. The values are the cited
 // arithmetic's over the test's own words.
-// [orig: Entity_UpdateVehicleWreck @0x445500 (the drag @0x445530, the advance
+// [orig: Entity_UpdateArtiShell @0x445500 (the drag @0x445530, the advance
 //  @0x445535..0x44557D, the speed floor @0x4455AE..0x4455BE, the water arm
 //  @0x4455C0..0x44566C, the terrain arm @0x445686..0x4456CA); the physics row "arti"
 //  @0x82AC7C; Projectile_UpdatePhysics @0x4E9D70 (the useownmove +452 call @0x4E9F1E, the

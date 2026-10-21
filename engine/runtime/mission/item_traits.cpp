@@ -822,7 +822,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // too (the ballistic leg's one-shot latch), and an arti def (the mortar shell's
         // motor) [orig: Entity_InitFromItemDef @0x49E550 (@0x49E586..0x49E58C); the rokt
         // row @0x82AD18 -> Entity_UpdateRocketFlag @0x443DD0; the arti row @0x82AC7C ->
-        // Entity_UpdateVehicleWreck @0x445500].
+        // Entity_UpdateArtiShell @0x445500].
         const world::PhysicsClass move_row =
                 world::physics_class_from_move_function(def->move_function);
         if (think == world::ThrowClass::kNone && motor == world::ThrowClass::kNone &&
