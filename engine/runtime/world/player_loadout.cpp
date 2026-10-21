@@ -97,6 +97,44 @@ bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
     return true;
 }
 
+namespace {
+
+// The select of the current slot word and the mount of what it selected, the tail
+// Player_InitPlayer and both loadout applies share: Player_SelectWeaponSlot(word), then
+// the EquippedSlot's mount [orig: Player_InitPlayer @0x4E15F0 (the select @0x4E1995, its
+//  read of the word @0x4E198E); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the
+//  select @0x4296E3, Player_MountWeaponSlot @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer
+//  @0x565CD0 (the select @0x566285, the mount @0x56628A..0x566297)].
+void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventory &inventory) {
+    const WeaponTable &table = world.tables.weapons;
+    const WeaponSwitchGates gates =
+            local_weapon_switch_gates(world, weapon, &inventory);
+    // An empty table (an empty buffer, the armory all-NONE kit) selects nothing, and
+    // the body keeps its equipped byte: the no-slot arm stores no +0x2B0 [orig:
+    // Player_SelectWeaponSlot @0x4DD680 - the global walk's return 0 @0x4DD794..0x4DD79C;
+    // Player_SwitchToWeaponByHandle @0x4E0170 stores none].
+    if (!weapon_select_slot(table, inventory, inventory.current_slot,
+                !gates.equip_blocked))
+        return;
+    // Player_InitPlayer follows the select with SwitchToWeaponByHandle(195)
+    // [orig: @ 0x4e1995/@ 0x4e19a1], but the switch's mount walk rides the
+    // entity's AI-slot binding gate [orig: entity+0x68 test @ 0x4e023a; writer
+    // Entity_AllocateAISlot @ 0x40d2f4] — modeled here as not-yet-bound during
+    // the spawn rebuild (the motor/presentation bind after load), so the spawn
+    // equips exactly the selected slot and plays no switch actions. The gate's
+    // init-time value is an open question (D-WPN-21, docs/divergence-ledger.md).
+    // The select cleared the NVG scope restore latch [orig:
+    // Player_SelectWeaponSlot @0x4dd730 / @0x4dd7fe, every successful select;
+    // called @0x4e1995 (Player_InitPlayer), @0x566285
+    // (WeaponLoadout_ApplyFromBuffer), @0x4296e3 (the 0x5A apply)].
+    weapon.nvg_scope_restore = false;
+    inventory.pending_combo = inventory.equipped_combo;
+    commit_pending_weapon_switch(world, weapon, &inventory);
+    weapon.start_in_switchto = false;
+}
+
+} // namespace
+
 void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
                            LocalPlayerWeapon &weapon, WeaponInventory &inventory,
                            bool &inventory_valid, bool select_spawn_default) {
@@ -142,32 +180,9 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     weapon.switch_in_flight = false;
     weapon.switch_deferred_action = -1;
     if (!select_spawn_default) return;
-    const WeaponSwitchGates gates =
-            local_weapon_switch_gates(world, weapon, &inventory);
     // The select of the word [orig: Player_InitPlayer @0x4E15F0 (the
-    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)]. An empty table (an
-    // empty buffer, the armory all-NONE kit) selects nothing, and the body keeps its
-    // equipped byte: the no-slot arm stores no +0x2B0 [orig: Player_SelectWeaponSlot
-    // @0x4DD680 - the global walk's return 0 @0x4DD794..0x4DD79C;
-    // Player_SwitchToWeaponByHandle @0x4E0170 stores none].
-    if (!weapon_select_slot(table, inventory, inventory.current_slot,
-                !gates.equip_blocked))
-        return;
-    // Player_InitPlayer follows the select with SwitchToWeaponByHandle(195)
-    // [orig: @ 0x4e1995/@ 0x4e19a1], but the switch's mount walk rides the
-    // entity's AI-slot binding gate [orig: entity+0x68 test @ 0x4e023a; writer
-    // Entity_AllocateAISlot @ 0x40d2f4] — modeled here as not-yet-bound during
-    // the spawn rebuild (the motor/presentation bind after load), so the spawn
-    // equips exactly the selected slot and plays no switch actions. The gate's
-    // init-time value is an open question (D-WPN-21, docs/divergence-ledger.md).
-    // The select cleared the NVG scope restore latch [orig:
-    // Player_SelectWeaponSlot @0x4dd730 / @0x4dd7fe, every successful select;
-    // called @0x4e1995 (Player_InitPlayer), @0x566285
-    // (WeaponLoadout_ApplyFromBuffer), @0x4296e3 (the 0x5A apply)].
-    weapon.nvg_scope_restore = false;
-    inventory.pending_combo = inventory.equipped_combo;
-    commit_pending_weapon_switch(world, weapon, &inventory);
-    weapon.start_in_switchto = false;
+    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E)].
+    select_current_slot(world, weapon, inventory);
 }
 
 bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
@@ -209,13 +224,13 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // empty kit stays empty (the armory all-NONE accept leaves the table bare).
     loadout.spawn_kit() = std::move(accepted);
     // The apply runs no Player_InitPlayer: the current slot word keeps its value
-    // through the rebuild's stamp, and the held weapon (the body's AdmDef index,
-    // read before the rebuild's select restamps it) decides it below.
+    // through the rebuild's stamp, the rebuild selects nothing, and the held weapon (the
+    // body's AdmDef index) decides the word ahead of the apply's own select below.
     const Entity *holder = world.registry.get(world.cached.local_player);
     const uint8_t held_adm = holder != nullptr ? holder->equipped_adm_index : kAdmSlotNone;
     const int32_t current_slot = inventory.current_slot;
     local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
-            /*select_spawn_default=*/true);
+            /*select_spawn_default=*/false);
     inventory.current_slot = current_slot;
     // Out of a session the apply stores each entry's fourth value, raw, into the
     // local slot's damage-class bytes, clearing nothing; in a session it sends the
@@ -284,6 +299,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     //  @0x565CD0 (@0x566250..0x566276, the word's read @0x56627E)]
     if (const WeaponTableEntry *held = table.by_index(held_adm))
         inventory.current_slot = held->category * weapon_combo::kRanksPerCategory + held->rank;
+    select_current_slot(world, weapon, inventory);
     return true;
 }
 

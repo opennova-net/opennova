@@ -1148,13 +1148,27 @@ void test_the_current_slot_word() {
     CHECK(!local_player_equip_weapon_slot(*world, local->weapon, inv, local->view, 141));
     CHECK(inv.current_slot == 196);
 
-    // The apply: the held weapon's combo; a body holding none leaves the word.
+    // The apply: the held weapon's combo; a body holding none leaves the word. Either
+    // way the apply then selects the word and mounts what it selected, so a body holding
+    // its pistol keeps the pistol, never the rebuild's 195.
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the word @0x4296B4..0x4296DC,
+    //  the select @0x4296E3, the mount @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer
+    //  @0x565CD0 (@0x566250..0x566297)]
     Entity &body = *world->registry.get(world->cached.local_player);
     body.equipped_adm_index = static_cast<uint8_t>(f.pistol);
     CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
             local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}, {"WPN_PISTOL", -1, -1, -1}},
             8, false));
     CHECK(inv.current_slot == 130);
+    CHECK(inv.equipped_combo == 130);
+    CHECK(body.equipped_adm_index == static_cast<uint8_t>(f.pistol));
+    body.equipped_adm_index = kAdmSlotNone;
+    inv.current_slot = 130;
+    CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
+            local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}, {"WPN_PISTOL", -1, -1, -1}},
+            8, false));
+    CHECK(inv.current_slot == 130);
+    CHECK(inv.equipped_combo == 130);
     body.equipped_adm_index = kAdmSlotNone;
     inv.current_slot = 196;
     CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
