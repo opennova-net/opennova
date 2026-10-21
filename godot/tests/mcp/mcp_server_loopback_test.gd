@@ -113,6 +113,36 @@ func test_tool_call_response_carries_the_server_stamps() -> void:
 	assert_between(responded, received, after, "It stamps when it wrote the response, after the parse.")
 
 
+func test_a_long_frame_during_a_call_is_stamped_as_the_frame_gap() -> void:
+	var server := _server()
+	server.registry.register(_tool_def("stall"), func(_args, ctx):
+		await ctx.frames(1)
+		OS.delay_msec(300)  # the main thread holds this frame, as a mission load does
+		return "ok")
+	var client: RefCounted = await _client(server.get_port())
+	var envelope: Variant = await client.call_tool(get_tree(), "stall")
+	assert_eq(envelope["result"]["isError"], false)
+	var gap := int(String(client.last_headers.get("x-mcp-frame-gap", "-1")))
+	var received := int(String(client.last_headers.get("x-mcp-received", "0")))
+	var responded := int(String(client.last_headers.get("x-mcp-responded", "0")))
+	assert_gte(gap, 300, "A frame the call waited through is its frame gap.")
+	assert_lte(gap, responded - received + 1000, "The gap is a stretch of the call's own life.")
+
+
+func test_a_long_frame_before_the_parse_is_stamped_as_the_frame_gap() -> void:
+	var server := _server()
+	server.registry.register(_tool_def("echo"), func(args, _ctx): return { "echo": args })
+	var client: RefCounted = await _client(server.get_port())
+	var quick: Variant = await client.call_tool(get_tree(), "echo")
+	assert_eq(quick["result"]["isError"], false)
+	await get_tree().process_frame
+	OS.delay_msec(300)  # the main thread holds the frame the request goes out in
+	var envelope: Variant = await client.call_tool(get_tree(), "echo")
+	assert_eq(envelope["result"]["isError"], false)
+	var gap := int(String(client.last_headers.get("x-mcp-frame-gap", "-1")))
+	assert_gte(gap, 300, "The frame that ended in the request's first read is its frame gap.")
+
+
 func test_unknown_tool_is_invalid_params() -> void:
 	var server := _server()
 	var client: RefCounted = await _client(server.get_port())

@@ -14,7 +14,10 @@ extends RefCounted
 ## The response to a parsed request carries the endpoint's own account of it
 ## (docs/mcp.md): X-Mcp-Received and X-Mcp-Responded, the Unix time in ms at
 ## which this side parsed the request and wrote the response, so a client on
-## the same machine tells the game's time from the transport's and its own.
+## the same machine tells the game's time from the transport's and its own;
+## and X-Mcp-Frame-Gap, the longest the main thread went without polling the
+## endpoint while the request was in, from the poll that first saw its bytes to
+## the response: a long frame (a mission load) holds every request across it.
 
 const IDLE_TIMEOUT_MS := 120000
 const MID_REQUEST_TIMEOUT_MS := 10000
@@ -35,23 +38,38 @@ var _last_activity_ms := 0
 var _mid_request := false
 # When the request now being answered was parsed (Unix ms); 0 when none was.
 var _received_unix_ms := 0
+# The last poll (ticks ms), and the longest poll gap since this request's first
+# bytes (X-Mcp-Frame-Gap); the gap is -1 between requests.
+var _polled_ms := 0
+var _frame_gap_ms := -1
 
 
-func setup(socket: StreamPeerTCP, now_ms: int) -> void:
+## `polled_ms` is the server's previous poll: a connection it accepts now may
+## have waited in the backlog since then.
+func setup(socket: StreamPeerTCP, now_ms: int, polled_ms: int) -> void:
 	peer = socket
 	peer.set_no_delay(true)
 	_last_activity_ms = now_ms
+	_polled_ms = polled_ms
 
 
 ## Pump the socket and return the next complete request, or {} (also {} while
 ## busy or after a parser error — the server checks parser_error_status()).
 func poll(now_ms: int) -> Dictionary:
+	var frame_gap_ms := now_ms - _polled_ms
+	_polled_ms = now_ms
+	if _frame_gap_ms >= 0:
+		_frame_gap_ms = maxi(_frame_gap_ms, frame_gap_ms)
 	if peer == null:
 		return {}
 	peer.poll()
 	if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED:
 		return {}
 	var available := peer.get_available_bytes()
+	if available > 0 and _frame_gap_ms < 0:
+		# A request's first bytes: the gap that ended in this poll is how long
+		# they could have waited in the socket.
+		_frame_gap_ms = frame_gap_ms
 	while available > 0:
 		var chunk := peer.get_partial_data(mini(available, READ_CHUNK))
 		if int(chunk[0]) != OK:
@@ -70,6 +88,8 @@ func poll(now_ms: int) -> Dictionary:
 		_mid_request = false
 		_last_activity_ms = now_ms
 		_received_unix_ms = _unix_ms()
+		if _frame_gap_ms < 0:
+			_frame_gap_ms = frame_gap_ms  # a pipelined request, its bytes already in
 	return request
 
 
@@ -114,7 +134,11 @@ func respond(status: int, headers: Dictionary, body: PackedByteArray, keep_alive
 		text += "%s: %s\r\n" % [name, headers[name]]
 	if _received_unix_ms > 0:
 		text += "X-Mcp-Received: %d\r\nX-Mcp-Responded: %d\r\n" % [_received_unix_ms, _unix_ms()]
+		# A coroutine's response is written before this frame's poll: the
+		# stretch since the last one counts too.
+		text += "X-Mcp-Frame-Gap: %d\r\n" % maxi(_frame_gap_ms, Time.get_ticks_msec() - _polled_ms)
 		_received_unix_ms = 0
+	_frame_gap_ms = -1
 	text += "Content-Length: %d\r\n" % body.size()
 	text += "Connection: %s\r\n\r\n" % ("keep-alive" if keep_alive else "close")
 	var bytes := text.to_ascii_buffer()

@@ -534,7 +534,8 @@ catch {
 # window's responsiveness and its memory. A game MCP call carries where its
 # time went: the endpoint's own stamps (X-Mcp-Received / X-Mcp-Responded,
 # docs/mcp.md) split it into the wait until the game parsed it, the game's
-# time on it and the time from its response to our return, and the runner's
+# time on it and the time from its response to our return, X-Mcp-Frame-Gap
+# names the longest frame the game ran meanwhile, and the runner's
 # own CPU time across it says whether this side was working. A slow call
 # overruns its own long-poll wait by 2 s or more, and it also prints a run note.
 $script:McpCallLog = Join-Path $RunRoot "mcp-calls.jsonl"
@@ -605,6 +606,13 @@ function Write-McpCallTiming {
             $record.server_ms = [long] $ServerTiming.responded_unix_ms - [long] $ServerTiming.received_unix_ms
             $record.from_server_ms = $startedMs + $ElapsedMs - [long] $ServerTiming.responded_unix_ms
             $detail += " to_server_ms=$($record.to_server_ms) server_ms=$($record.server_ms) from_server_ms=$($record.from_server_ms)"
+            # The longest frame the game's main thread ran while the request
+            # was in (it polls its endpoint once a frame): one that covers the
+            # slow part held the call (a mission load), not the endpoint.
+            if ($null -ne $ServerTiming.frame_gap_ms) {
+                $record.frame_gap_ms = [long] $ServerTiming.frame_gap_ms
+                $detail += " frame_gap_ms=$($record.frame_gap_ms)"
+            }
         }
         if ($null -ne $RunnerCpuMs) {
             $record.runner_cpu_ms = [long] $RunnerCpuMs

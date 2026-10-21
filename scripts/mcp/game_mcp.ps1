@@ -20,7 +20,8 @@ $script:GameMcpSessions = @{}
 $script:GameMcpRequestId = 0
 # The endpoint's own stamps of the last message Send-GameMcpMessage sent: the
 # Unix ms at which the game parsed it and wrote its response (X-Mcp-Received /
-# X-Mcp-Responded, docs/mcp.md); $null when the response carried none.
+# X-Mcp-Responded, docs/mcp.md) and the longest frame its main thread ran while
+# the request was in (X-Mcp-Frame-Gap); $null when the response carried none.
 $script:GameMcpLastServerTiming = $null
 # The endpoint never answers "Expect: 100-continue", which Windows PowerShell's
 # .NET sends with every POST: the first request of each connection pool would
@@ -360,10 +361,12 @@ function Send-GameMcpMessage {
     if ($session) { $script:GameMcpSessions[$Port] = [string] $session }
     $received = $response.Headers["X-Mcp-Received"]
     $responded = $response.Headers["X-Mcp-Responded"]
+    $frameGap = $response.Headers["X-Mcp-Frame-Gap"]
     if ($received -and $responded) {
         $script:GameMcpLastServerTiming = [pscustomobject]@{
             received_unix_ms = [long] $received
             responded_unix_ms = [long] $responded
+            frame_gap_ms = if ($frameGap) { [long] $frameGap } else { $null }
         }
     }
     if (-not $response.RawContentStream -or $response.RawContentStream.Length -eq 0) { return $null }

@@ -322,7 +322,13 @@ and the game's next poll of its endpoint, once a frame on its main thread),
 `server_ms` from the parse to the response (the game's time on it, a long-poll
 wait included) and `from_server_ms` from the response to the runner's return
 (the transport and the runner's decoding), with `runner_cpu_ms`, the runner's
-own CPU time across the call. A game MCP call that overruns its wait by 2 s or
+own CPU time across the call, and `frame_gap_ms` (`X-Mcp-Frame-Gap`), the longest
+frame the game's main thread ran while the request was in. The game polls its
+endpoint once a frame, so a long frame holds every call across it: when
+`frame_gap_ms` covers a call's slow part (its `to_server_ms`, or its `server_ms`
+past the long-poll wait), one frame of the game held the call, not the endpoint
+(x3's slow joiner calls were its synchronous world load after the host's S2C
+0x11, 5 to 8 s). A game MCP call that overruns its wait by 2 s or
 more also records the window's `responding` state, the thread count and the
 working set, and prints a `PARITY_RUN_NOTE mcp slow:` line with the split.
 

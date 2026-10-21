@@ -38,6 +38,7 @@ var _tool_queue: Array = []
 var _tool_running := false
 var _active_ctx: McpToolContext = null
 var _active_request_id: Variant = null
+var _polled_ms := 0
 
 
 func start(port: int, bind_address := "127.0.0.1") -> Error:
@@ -88,7 +89,9 @@ func _process(_delta: float) -> void:
 	if not _tcp.is_listening():
 		return
 	var now := Time.get_ticks_msec()
-	_accept_connections(now)
+	# A connection accepted now dates from the previous poll (X-Mcp-Frame-Gap).
+	_accept_connections(now, _polled_ms if _polled_ms > 0 else now)
+	_polled_ms = now
 	for conn: McpHttpConnection in _connections.duplicate():
 		var request: Dictionary = conn.poll(now)
 		if conn.parser_error_status() != 0:
@@ -105,13 +108,13 @@ func _process(_delta: float) -> void:
 	_prune_sessions(now)
 
 
-func _accept_connections(now: int) -> void:
+func _accept_connections(now: int, polled_ms: int) -> void:
 	while _tcp.is_connection_available():
 		var socket := _tcp.take_connection()
 		if socket == null:
 			break
 		var conn := McpHttpConnection.new()
-		conn.setup(socket, now)
+		conn.setup(socket, now, polled_ms)
 		if _connections.size() >= MAX_CONNECTIONS:
 			conn.respond_json(503, McpProtocol.error_envelope(null, McpProtocol.INTERNAL_ERROR,
 					"Too many connections"), {}, false)
