@@ -305,7 +305,8 @@ public:
 	// does not: its sweep call finds the event list already freed.
 	void run_post_mission_pass(bool is_authority);
 	// Its two halves, for a session host's teardown, whose server pump runs between them: the
-	// pools' destroy, then (the authority's) PostMission sweep.
+	// pools' destroy (a person's carried objective drops first, Entity_Destroy's person arm),
+	// then (the authority's) PostMission sweep.
 	void destroy_mission_pools();
 	void run_post_mission_events(bool is_authority);
 	// --- the local player ----------------------------------------------------

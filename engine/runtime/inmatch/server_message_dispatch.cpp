@@ -1431,8 +1431,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const bool peer = inputs.server_ctx != nullptr
 						? inputs.server_ctx->is_mp_session_peer != 0
 						: (world != nullptr && world->rules.mp_session_peer);
+				// The mission teardown destroyed the bodies ahead of its pump: the requester's
+				// row reads as zeroed (D-NET-NEW-L1-25) [orig: Game_TeardownMission - Entity_Destroy
+				//  over pools 0..2 @0x52236F..0x5223C0 before Server_PumpNetworkTransport @0x522588].
+				const bool body_destroyed = world != nullptr && conn.link.owned_entity.valid() &&
+						world->registry.get(conn.link.owned_entity) == nullptr;
 				replies.push_back(make_protocol_message(s2c::VISIBLE_PLAYERS,
-						build_visible_players_snapshot(conn, roster, config.game_type, peer)));
+						build_visible_players_snapshot(conn, roster, config.game_type, peer,
+								body_destroyed)));
 				break;
 			}
 			case c2s::LOADOUT_REQUEST: // the join-window kill page -> S2C 0x4E (server_kill_page.h)

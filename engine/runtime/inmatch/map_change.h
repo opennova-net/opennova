@@ -19,8 +19,9 @@
 //
 // The port's steps, in that order:
 //   begin_host_map_change -- the teardown's authority arms and the router,
-//     on the live HostRole: the swap or the latch, the PostMission pass, the
-//     slot reset (each kept connection loses its per-mission state and its
+//     on the live HostRole: the pools' destroy (each carrier's flag drop and
+//     its 0x2F), the swap or the latch, the teardown's pump over the destroyed
+//     rows, the PostMission pass, the slot reset (each kept connection loses its per-mission state and its
 //     entity, keeps its identity, its keys, its sequencing and its team), the
 //     half toggle and the advance. NextMission: the embedder boots the next
 //     map through the one host boot (inmatch/host_boot.h) with
@@ -48,6 +49,10 @@
 
 namespace opennova::gamecfg {
 struct GameCfg;
+}
+
+namespace opennova::world {
+struct World;
 }
 
 namespace opennova::inmatch {
@@ -112,6 +117,14 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation);
 //  Game_StartMission @0x5248BC behind `cmp is_in_session` @0x5248AC and
 //  `cmp is_authority` @0x5248B4]
 void Server_ResetAllPlayerSlotFrameState(NapiNPServerCtx &ctx);
+
+// The teardown's pool destroy drops each carrier's flag (MissionKernel::destroy_mission_pools);
+// on an in-session authority each drop's S2C 0x2F is queued right there, to every in-match slot,
+// ahead of the teardown's pump (D-NET-NEW-L1-25). Single player (out of a session) sends none.
+// [orig: Entity_Destroy @0x43E810 -> Entity_DropCarriedObject @0x43E8B8; Entity_DropCarriedObject
+//  @0x439DF0 - `cmp is_authority` @0x439F29, `cmp is_in_session` @0x439F31,
+//  Server_SendDestructibleDeathPacket called @0x439F34 (mask 0x80 @0x50D922)]
+void route_teardown_drops(NapiNPServerCtx &ctx, world::World &world);
 
 // A kept slot's per-mission state back to a fresh mission's, around what the
 // map change keeps (its identity, team and kit). [orig:

@@ -1067,13 +1067,24 @@ void MissionKernel::run_post_mission_pass(bool is_authority) {
 	run_post_mission_events(is_authority);
 }
 
+// Each row goes in pool and slot order. A person's destroy drops what it carries before its
+// fields are wiped, so a carried flag (a pool-1 item, still live while pool 0 is walked) lands
+// at its carrier's pose with its 0x2F state raised for the session host's route
+// (D-NET-NEW-L1-25).
+// [orig: Entity_Destroy @0x43E810 - the def+0x5C == 3 test @0x43E8B1, Entity_DropCarriedObject
+//  called @0x43E8B8; Entity_DropCarriedObject @0x439DF0]
 void MissionKernel::destroy_mission_pools() {
 	for (int pool = 0; pool <= 2; ++pool) {
 		std::vector<w::EntityHandle> rows;
 		world.registry.for_each_in_pool(pool, [&](const w::Entity &row) {
 			rows.push_back(row.handle);
 		});
-		for (const w::EntityHandle row : rows) world.registry.despawn(row);
+		for (const w::EntityHandle row : rows) {
+			if (const w::Entity *e = world.registry.get(row);
+					e != nullptr && e->kind == w::EntityKind::Organic)
+				world.match.drop_carried_object(world, row);
+			world.registry.despawn(row);
+		}
 	}
 }
 

@@ -1076,7 +1076,12 @@ void HostRole::close() {
 	// pools 0, 1 and 2 @0x52236F / @0x52239A / @0x5223C0]. A map change's teardown already
 	// ran it, its pump and its PostMission sweep on this kernel (map_change.h).
 	const bool tear_down = kernel_ != nullptr && !map_change.torn_down;
-	if (tear_down) kernel_->destroy_mission_pools();
+	if (tear_down) {
+		kernel_->destroy_mission_pools();
+		// A carrier's destroy drops its flag, whose 0x2F state is queued at the destroy on an
+		// in-session authority: it leads everything the teardown's pump sends (D-NET-NEW-L1-25).
+		route_teardown_drops(state.host_owner.ctx, kernel_->world);
+	}
 	// The /PROFILE log closes next, before the teardown's pump, the post-mission pass and the
 	// slot disconnects, so their markers never reach the file (a closed log's marker writes
 	// nothing: CServerLog_WriteDisconnectMarker @0x4E1C50 tests the file @0x4E1C53..0x4E1C57)

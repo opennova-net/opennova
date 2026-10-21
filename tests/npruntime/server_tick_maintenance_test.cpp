@@ -1827,7 +1827,8 @@ bool check_slot_team_readers_ignore_a_body_team_write() {
 	world.registry.get(a.link.owned_entity)->team = 2; // the script's write to the body
 	VisiblePlayers seen;
 	const std::vector<uint8_t> snapshot = inmatch::build_visible_players_snapshot(
-			a, ctx.np_protocol.connection_list, game_type::kTeamDeathmatch, false);
+			a, ctx.np_protocol.connection_list, game_type::kTeamDeathmatch, false,
+			/*requester_body_destroyed=*/false);
 	decode_visible_players(snapshot.data(), snapshot.size(), seen);
 	if (!expect(seen.entries.size() == 2 && seen.entries[0].slot == 1 && seen.entries[1].slot == 2,
 	            "the snapshot lists the requester's slot-team mates"))

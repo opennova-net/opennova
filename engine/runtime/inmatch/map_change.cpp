@@ -11,6 +11,7 @@
 #include <runtime/inmatch/server_loadout_grant.h>    // PlayerSlot_RebuildKitForRound
 #include <runtime/inmatch/server_spawn.h>            // Server_BuildPlayerInfoAndAdd
 #include <runtime/inmatch/server_team_change.h>      // the auto-balance pair
+#include <runtime/inmatch/server_tick.h>             // route_match_objective_records
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/inmatch/session_transport.h>
 
@@ -207,18 +208,29 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	mission::MissionKernel *kernel = role.kernel();
 	const bool authority_in_session = ctx.is_in_session != 0 && ctx.is_authority != 0;
 
-	// The /PROFILE log closes first, as every mission teardown closes it, so
+	// The Game Loop's shutdown heads with pools 0..2: every body and item is destroyed before
+	// the log closes, the swap arm runs and the teardown's pump answers anything, so that pump's
+	// handlers see the destroyed rows (D-NET-NEW-L1-25), as the session close's does. A carrier's
+	// destroy drops its flag, whose 0x2F is queued right there.
+	// [orig: Game_TeardownMission - Entity_Destroy over pools 0, 1 and 2 @0x52236F / @0x52239A /
+	//  @0x5223C0, ahead of CServerLog_CloseAndFree @0x5223F0, the swap arm @0x522435..0x522520
+	//  and Server_PumpNetworkTransport @0x522588]
+	if (kernel != nullptr) {
+		kernel->destroy_mission_pools();
+		route_teardown_drops(ctx, kernel->world);
+	}
+
+	// The /PROFILE log closes next, as every mission teardown closes it, so
 	// the next mission's start opens the next numbered file
 	// [orig: Game_TeardownMission @0x5223e2..0x5223f0 -> CServerLog_CloseAndFree,
 	//  ahead of the Post Menu test @0x522413].
 	if (ctx.logs.profile != nullptr) ctx.logs.profile->close();
 
-	// The Game Loop's shutdown with the Post Menu pending: the swap arm, then
-	// the per-mission teardown (pools 0..2, the authority's PostMission
-	// sweep), then the slot reset.
+	// With the Post Menu pending: the swap arm, then the teardown's pump, the authority's
+	// PostMission sweep over the destroyed pools, then the slot reset.
 	// [orig: Game_TeardownMission @0x522413..0x52241D (the Post Menu test),
-	//  the entities @0x52236F..0x5223C0, EventTrigger_UpdateAllWithFlag4
-	//  @0x52266C, Server_DisconnectAndResetAllPlayerSlots @0x52269B]
+	//  EventTrigger_UpdateAllWithFlag4 @0x52266C, Server_DisconnectAndResetAllPlayerSlots
+	//  @0x52269B]
 	if (authority_in_session && rotation != nullptr && rotation->list.map_launch_option != 0)
 		swap_sides_or_latch(ctx, *rotation);
 	// The teardown has emptied the server-info stream ahead of its pump; the next mission
@@ -232,7 +244,7 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	//  EventTrigger_UpdateAllWithFlag4 @0x52266C and the reset @0x52269B].
 	role.pump_load();
 	if (kernel != nullptr) {
-		kernel->run_post_mission_pass(/*is_authority=*/true);
+		kernel->run_post_mission_events(/*is_authority=*/true);
 		role.map_change.crt_rand = kernel->world.crt_rand;
 	}
 	role.map_change.torn_down = true;
@@ -277,6 +289,12 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	ctx.net_spawn_suspended = 1;
 	role.pump_load();
 	return MapChangeStep::NextMission;
+}
+
+// See map_change.h.
+void route_teardown_drops(NapiNPServerCtx &ctx, world::World &world) {
+	if (ctx.is_authority == 0 || !world.rules.mp_session) return;
+	route_match_objective_records(ctx, world);
 }
 
 // See map_change.h.

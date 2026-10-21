@@ -5049,6 +5049,13 @@ add_test(NAME npruntime_own_client_exit COMMAND npruntime_own_client_exit_test)
 add_executable(npruntime_host_clock_legs_test npruntime/host_clock_legs_test.cpp)
 target_link_libraries(npruntime_host_clock_legs_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_host_clock_legs COMMAND npruntime_host_clock_legs_test)
+# D-NET-NEW-L1-25 (F1b, Q7-10 (a)): the mission teardown's pump reads the destroyed rows (the 0x46
+# downed byte, the 0x4C team rule); a carrier's destroy sends its flag's 0x2F; the map change's
+# pools go before its pump.
+add_executable(npruntime_teardown_zeroed_rows_test npruntime/teardown_zeroed_rows_test.cpp)
+target_link_libraries(npruntime_teardown_zeroed_rows_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_teardown_zeroed_rows_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_teardown_zeroed_rows COMMAND npruntime_teardown_zeroed_rows_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

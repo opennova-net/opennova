@@ -32,15 +32,19 @@ uint8_t slot_team(const NapiNPConnection &c) {
 
 std::vector<uint8_t> build_visible_players_snapshot(const NapiNPConnection &requester,
 		const std::vector<NapiNPConnection> &roster, uint32_t game_type,
-		bool mp_session_peer) {
+		bool mp_session_peer, bool requester_body_destroyed) {
 	VisiblePlayers out;
 	// An inactive requester writes count 0 [orig: @0x50635a..0x5063ac].
 	if (!slot_live(requester)) return encode_visible_players(out);
 	// Outside the team types the requester's player carries the AI-record
 	// 0x200 bit from its spawn, which reads as team 255: no other slot matches.
-	// [orig: @0x506372..0x50638c; the set @0x43c546..0x43c54f]
+	// A destroyed body (the teardown's pump) reads the record pointer as 0 and
+	// keeps the slot's team (D-NET-NEW-L1-25).
+	// [orig: @0x506372..0x50638c (the +0x68 test @0x50637C..0x506381); the set
+	//  @0x43c546..0x43c54f; Entity_Destroy's memset @0x43EA70]
 	const uint8_t requester_team =
-			(game_type & 0x10000u) == 0 ? uint8_t{0xFF} : slot_team(requester);
+			(game_type & 0x10000u) == 0 && !requester_body_destroyed ? uint8_t{0xFF}
+			                                                       : slot_team(requester);
 	// The slot table walks in slot order [orig: g_PlayerSlots stride 100584
 	// @0x5063c0..0x50649b].
 	std::vector<const NapiNPConnection *> slots;
