@@ -90,7 +90,21 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                                          actrl->handle.pool() == 0 &&
                                          actrl->player_class != 0 &&
                                          !watercraft_driver_submerged(world, *actrl);
-                    if (aplayer) {
+                    // A dead hull's mover runs its head (the health cadence, the
+                    // ground probe, the carrier ride) and bails to its matrix tail
+                    // at the dead bit, ahead of the occupant and AI block: no
+                    // player stamp, no parked arm (its PRETTY stamp, stuck count
+                    // and airborne yaw). The mover's authority head is our AI-drive
+                    // admission, so it is raised without the AI leg.
+                    // [orig: Entity_UpdateAircraftPhysics @0x490310 (`test byte ptr
+                    //  [esi+24h], 2; jnz` @0x490CD0..0x490CD4 -> @0x49274C..0x492766,
+                    //  ahead of the parked arm @0x491C09..0x491C6D)]
+                    const bool hull_dead =
+                            ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0;
+                    if (hull_dead) {
+                        veh->veh.ai_drive = true;
+                        world.vehicles.aircraft_client_tick(*veh, *traits);
+                    } else if (aplayer) {
                         // The player leg parks the brain at PRETTY every visit, so
                         // an AI state left from an earlier pilot stops running.
                         // [orig: Entity_UpdateAircraftPhysics `mov dword ptr

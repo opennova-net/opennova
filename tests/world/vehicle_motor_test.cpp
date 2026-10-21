@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -2907,9 +2908,46 @@ void test_a_dead_hull_bails_to_its_tail() {
     }
 }
 
+// A dead aircraft hull runs the shared aircraft mover's head and bails to its
+// matrix tail at the dead bit, ahead of the occupant and AI block: the parked
+// arm (its PRETTY stamp and stuck count) never runs, so the dead state's word
+// stands for the dead tick's aircraft count. A live uncrewed hull takes the
+// parked arm.
+// [orig: Entity_UpdateAircraftPhysics @0x490310 (`test byte ptr [esi+24h], 2;
+//  jnz` @0x490CD0..0x490CD4 -> @0x49274C..0x492766; the parked arm
+//  @0x491C09..0x491C6D, AI_CheckVehicleStuckState @0x491C5E, PRETTY @0x491C66)]
+void test_a_dead_aircraft_bails_ahead_of_its_ai_block() {
+    for (const bool dead : {true, false}) {
+        auto r = std::make_unique<Rig>();
+        VehicleTraits t = buggy_traits();
+        t.family = VehicleFamily::Helicopter;
+        r->w.vehicles.traits.set(r->veh().item_id, t);
+        r->w.ai.attach(r->veh_h);
+        AiEntity *brain = r->w.ai.for_handle(r->veh_h);
+        CHECK(brain != nullptr);
+        if (brain == nullptr) return;
+        brain->brain.f[AiBrain::kCurState] = 15;
+        if (dead) r->veh().engine_flags |= kEntityFlagDead;
+        r->veh().engine_flags &= ~kEntityFlagMatrixBuilt;
+        r->veh().veh.stuck_ticks = 9;
+        const int32_t x0 = r->veh().position.x.q16;
+        r->w.vehicles.update_motor(r->veh(), /*is_authority=*/true);
+        CHECK((r->veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+        if (dead) {
+            CHECK(r->veh().position.x.q16 == x0);
+            CHECK(brain->brain.f[AiBrain::kCurState] == 15);
+            CHECK(r->veh().veh.stuck_ticks == 9);
+        } else {
+            CHECK(brain->brain.f[AiBrain::kCurState] == 14);
+            CHECK(r->veh().veh.stuck_ticks == 10);
+        }
+    }
+}
+
 int main() {
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
+    test_a_dead_aircraft_bails_ahead_of_its_ai_block();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();
