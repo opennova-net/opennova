@@ -31,6 +31,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>   // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <runtime/world/geom.h>
+#include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x5A row)
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/local_player_view.h> // local_player_view_refresh (the mount-change edge)
 #include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
@@ -1269,6 +1270,16 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
 	}
 	if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
+	// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
+	// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
+	//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
+	//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485]
+	if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
+		loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
+		if (world::Entity *local = world.registry.get(world.cached.local_player))
+			world::rebind_player_camouflage_row(world, *local);
+	}
 	// The team selector may only just have become known (the S2C 0x04 latch landing
 	// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
 	// resident kit buffer follows the side, exactly as retail re-copies restrictionData

@@ -365,6 +365,8 @@ private:
 	uint32_t weather_revision_seen_ = 0;
 	// The accepted S2C 0x1D headers already latched into the world's Match.
 	uint64_t weapon_availability_revision_seen_ = 0;
+	// The last 0x5A grant whose class re-resolved L's row (run_client_net_frame).
+	uint64_t loadout_row_revision_seen_ = 0;
 
 	// ~1 Hz frozen-session tripwire state.
 	uint32_t last_frontier_seq_ = 0;

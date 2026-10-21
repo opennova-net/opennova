@@ -16,6 +16,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/client_replica_present.h>
 #include <runtime/inmatch/joiner_role.h>
@@ -23,6 +24,7 @@
 #include <runtime/replication/connection_fan.h>
 #include <formats/def/def.h>
 #include <formats/mission/mission.h>
+#include <runtime/mission/item_traits.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <runtime/world/vehicle_motor.h>
@@ -2530,6 +2532,74 @@ bool run_respawn_key_before_the_first_tail() {
 			"respawn before the tail: one bodiless 0x41 leaves");
 }
 
+// D-NET-348's joiner half: every self record re-resolves L's row by L's class, the
+// camouflage item by the mission climate, rebound when its index differs. Desert (climate
+// 0): class 6's camouflage is 5311, the third person row (index 3).
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the local jump to @0x4C1248, the
+//  climate pick @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId @0x4C129D, the compare
+//  @0x4C12A5, the stores @0x4C12B8..0x4C12D6]
+bool run_the_self_record_rebinds_ls_camouflage_row() {
+	static const char kItems[] =
+			"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
+			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n type person\r\n hp 150\r\nend\r\n"
+			"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\nend\r\n"
+			"begin \"Generic Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\nend\r\n";
+	static const char kCharattr[] =
+		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER3]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER4]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER5]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5311\r\n"
+		"[CHARACTER6]\r\nJUNGLE_CAMMO\t= 9999\r\nDESERT_CAMMO\t= 5311\r\nARCTIC_CAMMO\t= 5305\r\n";
+	opennova::def::DefItemsFile items{};
+	if (!expect(opennova::def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+						sizeof(kItems) - 1, &items) == 0,
+				"camouflage row: the items parse"))
+		return false;
+	Harness h;
+	w::World &world = h.kernel->world;
+	opennova::mission::resolve_item_traits(world, items, {}, nullptr);
+	world.tables.bms_climate = 0;
+	inmatch::CharAttrTable table;
+	inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(kCharattr), sizeof(kCharattr) - 1);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	// The joiner's charattr.def words reach the world at each frame's end
+	// (JoinerRole::sync_class_attribute_flags).
+	h.role.runtime->set_charattr_table(table);
+	h.role.run_tick(h.input);
+	auto &row = h.role.runtime->state().upsert(0x0005);
+	row.cls = EntityClass::Player;
+	row.type_id = w::kPlayerInfantryTypeId;
+	w::Entity *local = h.kernel->local.player();
+	bool ok = expect(local != nullptr, "camouflage row: L spawned");
+	if (ok) {
+		local->player_class = 6;
+		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = 100;
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+		local = h.kernel->local.player();
+		ok = expect(local != nullptr && local->item_type_index == 3 && local->item_id == 0x14BF,
+				"camouflage row: the self record rebinds L to its class's desert row (5311)");
+	}
+	opennova::def::def_free_items(&items);
+	return ok;
+}
+
 // D-NET-710: a console-queued action dispatches by its code at the next input frame:
 // the Respawn row's code 55 runs the Respawn key's arm (its head gates, the input reset,
 // the bodiless 0x41), a code the role does not own goes to the embedder's dispatch.
@@ -3115,6 +3185,7 @@ int main() {
 	ok &= run_respawn_key_before_the_first_tail();
 	ok &= run_a_preround_death_latches_when_the_round_opens();
 	ok &= run_a_console_action_dispatches_by_code();
+	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_deploy_action_head_resets_input_and_dialogs();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();

@@ -262,6 +262,13 @@ void JoinerRole::fold_local_record() {
 				static_cast<int32_t>(static_cast<uint32_t>(self->pitch_byte) << 24);
 		local_ai->net_interp_progress = 0;
 	}
+	// Every player record, the local one too, re-resolves the body's row by its class:
+	// the camouflage item by the mission climate, rebound when its index differs (the
+	// local record skips the remote stores and lands here) (D-NET-348's joiner half).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the local jump @0x4C11D7..0x4C11DD
+	//  to @0x4C1248, the climate pick @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId
+	//  @0x4C129D, the compare @0x4C12A5, the stores @0x4C12B8..0x4C12D6]
+	world::rebind_player_camouflage_row(world, *local);
 	constexpr uint32_t kLocalRecordFlagsMask = 0xE1u;
 	const uint32_t wire = self->state_flags;
 	local->flags ^= (local->flags ^ wire) & kLocalRecordFlagsMask;
