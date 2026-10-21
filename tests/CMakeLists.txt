@@ -5267,6 +5267,10 @@ add_executable(deployable_spawn_test mission/deployable_spawn_test.cpp)
 target_link_libraries(deployable_spawn_test PRIVATE opennova_test_rig)
 target_include_directories(deployable_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME deployable_spawn COMMAND deployable_spawn_test)
+# D-NET-64: the flare rounds' motor and inits, and the projectile target ring.
+add_executable(flare_motor_test world/flare_motor_test.cpp)
+target_link_libraries(flare_motor_test PRIVATE opennova_runtime)
+add_test(NAME flare_motor COMMAND flare_motor_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

@@ -865,6 +865,7 @@ void RoundSim::reset() noexcept {
 	// [orig: Projectile_InitDragTable's memset @0x4E7921..0x4E7929, run from
 	//  Game_StartMission @0x525729]
 	hit_record = HitRecord{};
+	target_ring.reset(); // [orig: Projectile_InitDragTable @0x4E78D0 (@0x4E792E..0x4E7945)]
 }
 
 void RoundSim::present_fire(World &world, const RoundSpawnParams &params) {
@@ -1236,20 +1237,16 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     // The result becomes round ItemTypeIndex(+28); Entity_InitFromItemDef binds
     // the class motor
     // (+452) / think (+456) from the items.def ai_function/move_function tags,
-    // and the init callback seeds 1 deg/tick spin @ 0x4435A0].
+    // and the init callback, throwable_round_init].
     r.yaw_bam = final_yaw;
     r.pitch_bam = final_pitch;
     const int32_t item_id = throwable_item_for_viewer(
             ammo->tracer_item_friendly, ammo->tracer_item_enemy, r.team, local_team);
     if (item_id != 0 && (!no_tracers_rule || forcetracer)) {
         r.item_type_id = item_id;
-        if (const ThrowableClassRow *row = world.throwables.classes.get(item_id)) {
-            r.motor = row->motor;
-            r.think = row->think;
-        }
-        r.spin_yaw = 11930464;   // 1 deg/tick [orig: Entity_InitThrowableSpin_*]
-        r.spin_pitch = 11930464;
-        r.spin_roll = 11930464;
+        const ThrowableClassRow *row = world.throwables.classes.get(item_id);
+        if (row != nullptr) { r.motor = row->motor; r.think = row->think; }
+        throwable_round_init(world, r, row);
     }
 
     init_guided(world, r, *ammo);
@@ -1742,8 +1739,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             event.p1 = r.pos;
             event.hit = r.pos;
             push_round_debug(*this, event);
-            r.active = false;
-            --active_count;
+            retire_round(r);
             continue;
         }
         ++r.age_ticks;
@@ -1754,6 +1750,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
 
         if (ammo && r.guided_family != GuidedFamily::None) tick_guided(world, r, *ammo, authoritative);
+        // The ballistic leg's +452 call, the flares' (no other class motor is ported there)
+        // [orig: Projectile_UpdatePhysics @0x4E9D70 (@0x4EA06A..0x4EA085)].
+        else if ((ammo_flags & kAmmoFlagUseOwnMove) == 0 && (r.motor == ThrowClass::kAirFlare ||
+                         r.motor == ThrowClass::kGroundFlare)) flare_motor_tick(world, *this, r, terrain);
 
         // `ignore` rounds skip the stock sweep after their class motor.
         if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;
@@ -1768,8 +1768,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             (ammo_flags & def::DEF_AMMO_FLAG_NOCOLLIDE) == 0 && !r.indoors_word &&
             r.pos.z.q16 < -io::kFp16OneInt) {
             if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-            r.active = false;
-            --active_count;
+            retire_round(r);
             continue;
         }
 
@@ -1830,8 +1829,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     trails.append(r.trail_slot, trail_anchor(r));
                     trails.request_kill(r.trail_slot);
                 }
-                r.active = false;
-                --active_count;
+                retire_round(r);
             }
             continue;
         }
@@ -1867,8 +1865,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             r.vel.set_q16(velocity_q16); // [orig: `vz -= 167` @0x4EA162]
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-                r.active = false;
-                --active_count;
+                retire_round(r);
             }
             continue;
         }
@@ -1887,8 +1884,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //  @0x4E9E6D (Projectile_ReleaseEffects @0x4E8280)]
         if (end_q16.z < static_cast<int32_t>(0xC1800000u)) {
             if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-            r.active = false;
-            --active_count;
+            retire_round(r);
             continue;
         }
 
@@ -1924,15 +1920,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // sweep [orig: Projectile_UpdatePhysics @0x4ea98e].
             round_tracer_whiz(world, r, ammo, position_q16, end_q16, incoming_velocity_q16);
             r.pos.set_q16(end_q16); // [orig: the commit @0x4EAA3F..0x4EAA45]
-            if (r.guided_family == GuidedFamily::None && (ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
-            if (ammo != nullptr && r.guided_family == GuidedFamily::None)
+            if (!round_class_motor_bound(r) && (ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
+            if (ammo != nullptr && !round_class_motor_bound(r))
                 apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z,
                                        /*surface_normal=*/0);
             r.vel.set_q16(velocity_q16); // [orig: @0x4EAA5A, the drag @0x4EAA69]
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-                r.active = false;
-                --active_count;
+                retire_round(r);
             }
             continue;
         }
@@ -2432,7 +2427,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.z, incoming_velocity_q16.z)};
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
-            if (r.guided_family == GuidedFamily::None) {
+            if (!round_class_motor_bound(r)) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
                 if (ammo != nullptr)
                     apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
@@ -2470,7 +2465,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.z, incoming_velocity_q16.z)};
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
-            if (r.guided_family == GuidedFamily::None) {
+            if (!round_class_motor_bound(r)) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
                 if (ammo != nullptr)
                     apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
@@ -2489,11 +2484,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (has_dud_replacement) {
             r = dud_replacement;
         } else {
-            r.active = false;
-            --active_count;
+            retire_round(r);
         }
     }
-
+    target_ring.count_down(); // [orig: Weapon_UpdateAllProjectiles @0x4EC020 (@0x4EC0A1..0x4EC0CF)]
     trails.tick();
 }
 

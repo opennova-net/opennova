@@ -64,6 +64,12 @@ enum class ThrowClass : uint8_t {
     kAVMine,   // think only — no motor row in retail [orig fn1 @ 0x443BB0]
     kLandmine, // mission minefield item: its think is world/minefield.cpp's
                // [orig: Entity_LandmineThink @ 0x441A40]
+    // The flares: the aflr and gflr rows' init callbacks (@0x4434B0 / @0x443510, the
+    // event rows @0x813330 / @0x813348) and their one motor, Entity_UpdateShellBounce
+    // @0x443DF0 (the physics rows @0x82AD00 / @0x82AD0C, gflr's through the jump
+    // @0x443F40).
+    kAirFlare,
+    kGroundFlare,
 };
 
 ThrowClass throw_class_from_tag(const char *tag);
@@ -304,5 +310,30 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           const AmmoTableEntry &ammo, CollisionWorld *collision,
                           const terrain::TerrainHeightField *terrain,
                           bool allow_consequences = true);
+
+// The flare rounds' motor, both legs' (a ballistic flare runs it ahead of the stock
+// sweep, whose gravity and drag tail it then suppresses): drag on the horizontal words,
+// gravity on the vertical one, the move, the ring record refreshed (a lost record ends
+// the round), the heat word decayed, then the ground (the terrain under it while it
+// drifts, else its +0x88 word) and the water plane: under the water ends it; under the
+// ground puts it on the ground and, eight bounces in, ends it, else halves its drift,
+// turns and quarters its fall and counts the bounce; a round left with no fall ends.
+// Ending stores life -1, which the next pass's head releases (here: the round's age
+// reaches its lifetime). [orig: Entity_UpdateShellBounce @0x443DF0; the ballistic leg's
+// motor call Projectile_UpdatePhysics @0x4E9D70 (@0x4EA06A..0x4EA085), its tail test
+// @0x4EAA34..0x4EAA4C; the head @0x4E9DA7..0x4E9DAE]
+void flare_motor_tick(World &world, RoundSim &sim, LiveRound &round,
+                      const terrain::TerrainHeightField *terrain);
+
+// The TrcrID item's init callback at the round's spawn: a flare row's (the aflr init
+// adds the source's last move to the round's drift, the gflr init takes the source's
+// velocity words with 0x538 more fall, or that fall alone without a source; each takes
+// the item's heatsig with a source (aflr always) and the ground under the round into
+// +0x88), else the one-degree spin every other class row binds here.
+// [orig: RoundData_SpawnRound @0x4EC0D0 -> Entity_InitFromItemDef @0x49E550 (the call
+//  @0x4EC7B7, the init callback @0x49E5D5..0x49E5EA); the aflr init @0x4434B0
+//  (@0x4434B5..0x443505); the gflr init @0x443510 (@0x443515..0x44358A);
+//  Entity_InitThrowableSpin_Nade @0x4435A0]
+void throwable_round_init(World &world, LiveRound &round, const ThrowableClassRow *row);
 
 } // namespace opennova::world

@@ -60,6 +60,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/impact_damage.h>
+#include <runtime/world/projectile_target_ring.h>
 #include <runtime/world/tracer_trails.h>
 
 namespace opennova::terrain {
@@ -360,7 +361,22 @@ struct LiveRound {
     // Weapon_SpawnProjectileBurstWithSpread @0x4EBDCE..0x4EBDDC]
     bool indoors_word = false;
     bool indoors_flags = false;
+    // A flare's heat word (+0x1A4): its TrcrID item's heatsig from the flare init,
+    // decayed by its motor each tick [orig: the aflr row's init callback @0x4434B0 (the
+    // store @0x4434EA), the gflr row's @0x443510 (@0x443554); Entity_UpdateShellBounce
+    // @0x443DF0 (@0x443E6E..0x443EA7)].
+    uint16_t heat_sig = 0;
+    // Its ProjectileTargetRing record (+0x29C), -1 for none [orig: Entity_UpdateShellBounce
+    // @0x443E5F..0x443E7B; Projectile_ReleaseEffects @0x4E8280 (@0x4E82D1..0x4E82F2)].
+    int32_t target_ring_slot = -1;
 };
+
+// Whether the round's +452 motor is bound (its TrcrID item's move row, or a guided
+// family's): the ballistic tail then skips its gravity and drag. ThrowClass{} is kNone.
+// [orig: Projectile_UpdatePhysics @0x4E9D70 (the tail's test @0x4EAA34..0x4EAA4C)]
+inline bool round_class_motor_bound(const LiveRound &round) {
+    return round.guided_family != GuidedFamily::None || round.motor != ThrowClass{};
+}
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer
 // cadence (@0x4ec79b..0x4ec7b7), but clears the round+0x30 visible-model
@@ -667,6 +683,12 @@ public:
     std::array<RoundDebugEvent, kDebugTrailCap> debug_trail{};
     int debug_trail_next = 0;  // ring cursor (next write slot)
     int debug_trail_count = 0; // valid entries, saturates at the cap
+
+    // The flare rounds' target ring (world/projectile_target_ring.h).
+    ProjectileTargetRing target_ring;
+    // A round's release: its ring record freed, then the slot.
+    // [orig: Projectile_ReleaseEffects @0x4E8280 (@0x4E82E3..0x4E82F2)]
+    void retire_round(LiveRound &round);
 
     // The tracer trail channels — appended per round tick, drained per pool tick,
     // styled and drawn by the host present pass (world/tracer_trails.h witness map).

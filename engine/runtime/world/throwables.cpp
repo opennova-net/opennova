@@ -102,6 +102,8 @@ ThrowClass throw_class_from_tag(const char *tag) {
     if (eq("nade")) return ThrowClass::kNade;
     if (eq("schl")) return ThrowClass::kSatchel;
     if (eq("clym")) return ThrowClass::kClaymore;
+    if (eq("aflr")) return ThrowClass::kAirFlare;    // [orig: the event row @0x813330]
+    if (eq("gflr")) return ThrowClass::kGroundFlare; // [orig: the event row @0x813348]
     if (eq("vmne")) return ThrowClass::kAVMine;
     if (eq("lndm")) return ThrowClass::kLandmine;
     return ThrowClass::kNone;
@@ -115,6 +117,8 @@ ThrowClass throw_motor_from_move_function(const char *move_function) {
     case PhysicsClass::Nade: return ThrowClass::kNade;
     case PhysicsClass::Schl: return ThrowClass::kSatchel;
     case PhysicsClass::Clym: return ThrowClass::kClaymore;
+    case PhysicsClass::Aflr: return ThrowClass::kAirFlare;
+    case PhysicsClass::Gflr: return ThrowClass::kGroundFlare;
     default: return ThrowClass::kNone;
     }
 }
@@ -1054,6 +1058,10 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
         alive = motor_charge(world, sim, round, ammo, collision, terrain, true,
                              allow_consequences);
         break;
+    case ThrowClass::kAirFlare:
+    case ThrowClass::kGroundFlare:
+        flare_motor_tick(world, sim, round, terrain);
+        break;
     default:
         // A charge round at rest on a non-authority peer follows its parent
         // (its +452 is the parent follow) and takes the BB refresh after it
@@ -1071,6 +1079,105 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
     }
     refresh_round_indoors(world, round, collision);
     return alive;
+}
+
+namespace {
+
+// The 16.16 product the flare motor's words take: the 64-bit product plus the half
+// unit, its bits 16..47 [orig: `imul`, `add eax, 8000h`, `adc edx, 0`, `shrd eax, edx,
+// 10h` - Entity_UpdateShellBounce @0x443E00..0x443E11 / @0x443E25..0x443E36 /
+// @0x443E85..0x443E96].
+int32_t flare_q16_mul(int32_t value, int32_t factor) {
+    return static_cast<int32_t>(static_cast<uint32_t>(
+            static_cast<uint64_t>(static_cast<int64_t>(value) * factor + 0x8000) >> 16));
+}
+
+} // namespace
+
+void flare_motor_tick(World &world, RoundSim &sim, LiveRound &r,
+                      const terrain::TerrainHeightField *terrain) {
+    // [orig: Entity_UpdateShellBounce @0x443DF0]
+    const int32_t vx = flare_q16_mul(r.vel.x.q16, 0xFC28); // @0x443DF5..0x443E1B
+    const int32_t vy = flare_q16_mul(r.vel.y.q16, 0xFC28); // @0x443E15..0x443E36
+    r.pos.y.q16 += vy;                                     // @0x443E3A
+    const int32_t vz = r.vel.z.q16 - 167;                  // @0x443E3D
+    r.pos.x.q16 += vx;                                     // @0x443E53
+    r.pos.z.q16 += vz;                                     // @0x443E56
+    r.vel.x.q16 = vx;
+    r.vel.y.q16 = vy;                                      // @0x443E59
+    r.vel.z.q16 = vz;
+    // The ring record [orig: ProjectileTargetRing_Update(round, +0x29C, 10)
+    //  @0x443E5F..0x443E7B].
+    r.target_ring_slot = sim.target_ring.update(
+            static_cast<int32_t>(&r - sim.rounds.data()), r.target_ring_slot, 10);
+    // The heat word: (heat << 16) times 0xFD70, its high half arithmetic
+    // [orig: @0x443E6E..0x443E9A, the store @0x443EA7].
+    const int32_t heat = flare_q16_mul(
+            static_cast<int32_t>(static_cast<uint32_t>(r.heat_sig) << 16), 0xFD70);
+    r.heat_sig = static_cast<uint16_t>(heat >> 16);
+    bool ends = r.target_ring_slot < 0; // @0x443EA0..0x443EB0
+    // The ground: the terrain under it while it drifts, else its +0x88 word
+    // [orig: @0x443EB6..0x443ED8].
+    const int32_t ground = (vx != 0 || vy != 0)
+            ? ground_q16(terrain, r.pos.x.q16, r.pos.y.q16)
+            : r.prev_z_q16;
+    if (r.pos.z.q16 < throwable_water_q16(world)) { // @0x443EE0..0x443EE9
+        ends = true;
+    } else if (r.pos.z.q16 < ground) {               // @0x443EEB..0x443EED
+        r.pos.z.q16 = ground;                        // @0x443EEF
+        // A signed byte compare [orig: `cmp al, 8; jge` @0x443EF8..0x443EFA].
+        if (static_cast<int8_t>(r.bounce_count) >= 8) {
+            ends = true;                             // @0x443F23
+        } else {
+            r.vel.x.q16 >>= 1;                       // @0x443F02
+            r.vel.y.q16 >>= 1;                       // @0x443F08
+            r.vel.z.q16 = -r.vel.z.q16 >> 2;         // @0x443F0E..0x443F15
+            ++r.bounce_count;                        // @0x443F13..0x443F1B
+        }
+        if (r.vel.z.q16 == 0) ends = true;           // @0x443F29..0x443F32
+    }
+    // Life -1 [orig: the +0x2AC stores @0x443EB0 / @0x443F23 / @0x443F32], which the
+    // next pass's head releases [orig: Projectile_UpdatePhysics @0x4E9D70
+    //  (@0x4E9DA7..0x4E9DAE)].
+    if (ends) r.max_age_ticks = r.age_ticks;
+}
+
+void throwable_round_init(World &world, LiveRound &r, const ThrowableClassRow *row) {
+    const ThrowClass think = row != nullptr ? row->think : ThrowClass::kNone;
+    if (think != ThrowClass::kAirFlare && think != ThrowClass::kGroundFlare) {
+        // [orig: Entity_InitThrowableSpin_Nade @0x4435A0]
+        r.spin_yaw = 11930464; // 1 deg/tick
+        r.spin_pitch = 11930464;
+        r.spin_roll = 11930464;
+        return;
+    }
+    // The round's source (+0x170) [orig: RoundData_SpawnRound @0x4EC0D0 (@0x4EC670)].
+    const Entity *source = world.registry.get(r.owner);
+    if (think == ThrowClass::kAirFlare) {
+        // The source's last move joins the drift: its Position less its savedLivePose
+        // (a source never stamped reads no move) [orig: the aflr init @0x4434B0 -
+        //  @0x4434B5..0x4434D7].
+        if (source != nullptr && source->saved_live_valid) {
+            r.vel.x.q16 += source->position.x.q16 - source->saved_live_pos[0];
+            r.vel.y.q16 += source->position.y.q16 - source->saved_live_pos[1];
+        }
+        r.heat_sig = static_cast<uint16_t>(row->heat_sig); // @0x4434DD..0x4434EA
+    } else if (source != nullptr) {
+        // The source's velocity words, 0x538 more fall [orig: the gflr init @0x443510 -
+        //  @0x443521..0x443554].
+        r.vel.x.q16 = source->veh.vel_x;
+        r.vel.y.q16 = source->veh.vel_y;
+        r.vel.z.q16 = source->veh.slide_z + 0x538;
+        r.heat_sig = static_cast<uint16_t>(row->heat_sig);
+    } else {
+        r.vel.x.q16 = 0; // @0x443564..0x443570
+        r.vel.y.q16 = 0;
+        r.vel.z.q16 = 0x538;
+    }
+    // The ground under the round into +0x88 [orig: @0x4434F4..0x443505 /
+    //  @0x44357A..0x44358A]. The ItemTypeIndex -1 store beside the heat word
+    // (@0x4434F6 / @0x44355B) only feeds the +0x1C readers, which test it nonzero.
+    r.prev_z_q16 = ground_q16(world.tables.terrain, r.pos.x.q16, r.pos.y.q16);
 }
 
 // ----------------------------------------------------------------------------
