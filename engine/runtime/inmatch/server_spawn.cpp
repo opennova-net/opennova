@@ -895,7 +895,8 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 						conn.link.transport != nullptr && conn.reply.admission_metadata_pushed &&
 						!conn.reply.spawn_metadata_pushed) {
 					for (ProtocolMessage &m : build_spawn_pump_metadata(ctx.config,
-							ctx.mission_text_title, conn, ctx.np_protocol.connection_list, &world,
+							ctx.mission_text_title, ctx.session_title, conn,
+							ctx.np_protocol.connection_list, &world,
 							ctx.rotation, &ctx.host_slot))
 						conn.link.transport->host_send(m.tag, std::move(m.payload), m.reliable,
 								m.flags.raw, m.capacity_exempt, m.retention_flushes);

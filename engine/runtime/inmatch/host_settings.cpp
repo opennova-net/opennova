@@ -235,4 +235,19 @@ int32_t session_player_cap(int32_t player_limit, int title) {
     return player_limit > session_cap ? session_cap : player_limit;
 }
 
+std::string mission_session_title(const rtxt::File *text_override, const std::string &map_file) {
+    // [orig: Game_ApplySessionSettingsToGlobals @0x552112..0x55219E]
+    const size_t dot = map_file.rfind('.');
+    if (text_override != nullptr && dot != std::string::npos) {
+        static const rtxt::File kNoTable;
+        if (const rtxt::Entry *entry =
+                rtxt::find_with_override(text_override, kNoTable, "TITLE", map_file.substr(0, dot))) {
+            const size_t cr = entry->text.find('\r');
+            const size_t count = cr == std::string::npos || cr > 31 ? 31 : cr;
+            return entry->text.substr(0, count);
+        }
+    }
+    return map_file.substr(0, 31);
+}
+
 } // namespace opennova::inmatch

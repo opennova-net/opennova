@@ -1,4 +1,5 @@
 #include <runtime/inmatch/host_role.h>
+#include <runtime/inmatch/host_settings.h> // mission_session_title (the session title)
 
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h> // the title's version text (the own 0x0B's dword)
@@ -280,6 +281,11 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	if (rotation_ != nullptr) rotation_->round_count = 0;
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	// The mission start's session title, the mount's text-override table answering first
+	// (inmatch::mission_session_title) [orig: Game_ApplySessionSettingsToGlobals
+	//  @0x552145..0x55219E].
+	ctx.session_title = inmatch::mission_session_title(bringup.mission_text.override_table.get(),
+			ctx.config.mission_file);
 	install_spawned_body_bind();
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);
@@ -322,6 +328,10 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.mission_text_title = bringup.mission_text.get_string("info", "title");
 	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
 	inmatch::continue_host_session(state.host_owner, host_cfg);
+	// The next mission's start sets the session title again, over a SetServerName's
+	// [orig: Game_ApplySessionSettingsToGlobals @0x552145..0x55219E].
+	ctx.session_title = inmatch::mission_session_title(bringup.mission_text.override_table.get(),
+			ctx.config.mission_file);
 	map_change.torn_down = false;
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
 	pump_load();

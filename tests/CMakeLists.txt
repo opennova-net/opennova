@@ -5245,6 +5245,12 @@ add_executable(opennova_serve_lister_gate_bind_test serve/opennova_serve_lister_
 target_link_libraries(opennova_serve_lister_gate_bind_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_lister_gate_bind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_lister_gate_bind COMMAND opennova_serve_lister_gate_bind_test)
+# D-NET-NEW-L8-16: the session title g_SessionTitle (the mission start's rule, SetServerName, the
+# Co-op 0x7B and MISSIONNAME).
+add_executable(npruntime_session_title_test npruntime/session_title_test.cpp)
+target_link_libraries(npruntime_session_title_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_session_title_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_session_title COMMAND npruntime_session_title_test)
 
 # --- parity lane L9 (NovaWorld) ---
 

@@ -29,6 +29,10 @@ namespace opennova::world {
 struct World;
 }
 
+namespace opennova::rtxt {
+struct File;
+}
+
 namespace opennova::inmatch {
 
 // The admin server's log, by bare name in the working directory, truncated when the process
@@ -91,10 +95,13 @@ struct RemoteAdminBinding {
 	ClientRuntime *client = nullptr;
 	// The running mission's world (a single player's quit with no host context).
 	world::World *world = nullptr;
+	// The mount's text-override table (null: none): a joiner's session title.
+	const rtxt::File *text_override = nullptr;
 	uint64_t session = 0;
 
 	bool operator==(const RemoteAdminBinding &o) const {
-		return host == o.host && client == o.client && world == o.world && session == o.session;
+		return host == o.host && client == o.client && world == o.world &&
+				text_override == o.text_override && session == o.session;
 	}
 };
 
@@ -127,8 +134,9 @@ public:
 
 private:
 	// The bound session's mission into the process words before a line runs: a host
-	// context's mission file and game type, a joiner's connection's g_MapFileName and
-	// g_GameType; with no session (the menus) they keep the last session's.
+	// context's session title, mission file and game type; a joiner's own mission start's
+	// session title over its connection's g_MapFileName, and its g_GameType; with no session
+	// (the menus) they keep the last session's.
 	void refresh_process_mission();
 
 	NapiNPServerCtx session_less_;

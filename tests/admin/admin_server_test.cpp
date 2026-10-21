@@ -21,6 +21,8 @@
 #include <net/npwire/protocol_message.h> // hightag::DESCRIPTION_PACKET
 #include <net/npwire/session_hello.h>    // parse_disconnect_event
 #include <runtime/inmatch/admin_console.h>
+#include <runtime/inmatch/host_settings.h> // mission_session_title
+#include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (SetServerName)
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_console.h> // Server_SendConsoleChat
 #include <runtime/hud/hud_chat_entry.h>     // kChatDispatchGlobal
@@ -154,6 +156,8 @@ struct Host {
 		ctx.config.max_players = 8;
 		ctx.config.server_name = "Admin Host";
 		ctx.config.mission_file = "TDM01.BMS";
+		// The mission start's session title (g_SessionTitle): the map file, no override table.
+		ctx.session_title = inmatch::mission_session_title(nullptr, ctx.config.mission_file);
 		ctx.np_protocol.host_run_duration_ms = ((1u * 24u + 2u) * 3600u + 3u * 60u + 4u) * 1000u;
 		world.rules.mp_session = true;
 		world.rules.logic_authority = true;
@@ -384,7 +388,7 @@ void test_login_rules() {
 		std::vector<uint8_t> raw = admin_encode_command("QUERY");
 		raw[3] = 'r'; // "QUEry": stricmp
 		const auto r = c.send_payload(raw);
-		expect(r.size() == 1 && r.front().rfind("SERVER: Admin Host\r\n", 0) == 0 && !c.open,
+		expect(r.size() == 1 && r.front().rfind("SERVER: TDM01.BMS\r\n", 0) == 0 && !c.open,
 		       "a plaintext QUERY (any case) answers the report and closes");
 	}
 	// A user line without a password admits any password; `ip_restrict=x` is a user.
@@ -871,11 +875,19 @@ void test_reply_plan() {
 
 void test_query_report() {
 	Host host;
+	// SERVER prints the session title g_SessionTitle, which the mission start's settings apply
+	// leaves as the map file (the cfg's server name is copied in first, then replaced: the
+	// title table answers nothing) and a ServerCommand's SetServerName overwrites.
+	// [orig: CAdminServer_HandleStatus @0x402E83; Game_ApplySessionSettingsToGlobals
+	//  @0x551FDA, @0x552145..0x55219E; CNapiGameSession_HandleServerCommand @0x4D2D0D]
 	const std::string report = host.console->status_report();
 	expect_eq(report.substr(0, report.find("CURRENT PLAYERS:")),
-	          "SERVER: Admin Host\r\nUP-TIME: 1 02:03:04\r\nCURRENT TOD: 3072\r\nCURRENT # PLAYERS: 3\r\n"
+	          "SERVER: TDM01.BMS\r\nUP-TIME: 1 02:03:04\r\nCURRENT TOD: 3072\r\nCURRENT # PLAYERS: 3\r\n"
 	          "CURRENT MAP: TDM01.BMS\r\nCURRENT GAME TYPE: Team Deathmatch\r\n",
 	          "the header lines, the host's own slot 0 counted (D-NET-352)");
+	(void)inmatch::Server_ExecuteServerCommand(host.ctx, &host.world, "SetServerName", "", {"Night Ops"});
+	const std::string renamed = host.console->status_report();
+	expect(renamed.rfind("SERVER: Night Ops\r\n", 0) == 0, "SetServerName reaches the SERVER line");
 	expect(report.find("PING\nHost            \t 0\t 1\t8\t0\t0\t0\nP1 ") != std::string::npos,
 	       "the table leads with the host's row");
 	expect(report.find("CURRENT PLAYERS: \r\nNAME            \t #\tTEAM") != std::string::npos &&

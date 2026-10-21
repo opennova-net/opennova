@@ -11,6 +11,7 @@
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/role_feeds.h>
+#include <runtime/inmatch/host_settings.h> // mission_session_title
 #include <runtime/hud/hud_math.h> // friendly_tag_fallback_name
 #include <runtime/replication/client_world_materializer.h>
 #include <runtime/mission/mission_kernel.h>
@@ -142,6 +143,9 @@ int main() {
 		host.config.mission_name = "Dormant Volcano Isle";
 		host.config.mission_file = "ASH_I5A.BMS";
 		host.config.game_type = 0x10010;
+		// The mission start's session title (g_SessionTitle): the map file with no override table,
+		// which the stock Co-op MISSIONNAME advertises (D-NET-NEW-L8-16).
+		host.session_title = mission_session_title(nullptr, host.config.mission_file);
 		RoleView view;
 		view.host = &host;
 		host.is_mp_session_peer = 0;

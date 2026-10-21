@@ -2,6 +2,7 @@
 
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_settings.h> // mission_session_title
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/world/epilog_cine.h> // kWorldMissionExitQuit
 #include <runtime/world/world.h>
@@ -72,10 +73,14 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 
 void RemoteAdminConsoles::refresh_process_mission() {
 	if (const NapiNPServerCtx *host = bound_.host) {
+		process_mission_.session_title = host->session_title;
 		process_mission_.map_file = host->config.mission_file;
 		process_mission_.game_type =
 				host->world != nullptr ? host->world->match.rules().game_type : host->config.game_type;
 	} else if (const ClientRuntime *client = bound_.client) {
+		// [orig: Game_ApplySessionSettingsToGlobals @0x552145..0x55219E at the joiner's own
+		//  mission start, over the final 0x64's copy @0x4324F5]
+		process_mission_.session_title = mission_session_title(bound_.text_override, client->map_file());
 		process_mission_.map_file = client->map_file();
 		process_mission_.game_type = client->game_type();
 	}

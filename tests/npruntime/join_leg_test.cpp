@@ -716,7 +716,8 @@ bool run_slot_table_is_the_slot_limit() {
 	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
 	            "the spawn pump adds the joiner")) return false;
 	const std::vector<opennova::ProtocolMessage> metadata = inmatch::build_spawn_pump_metadata(
-			f.ctx->config, f.ctx->mission_text_title, f.joiner(), f.ctx->np_protocol.connection_list,
+			f.ctx->config, f.ctx->mission_text_title, f.ctx->session_title, f.joiner(),
+			f.ctx->np_protocol.connection_list,
 			f.world.get(), f.ctx->rotation, &f.ctx->host_slot);
 	for (const opennova::ProtocolMessage &m : metadata) {
 		if (m.tag != 0x04) continue;
@@ -943,7 +944,8 @@ bool run_a_bodyless_add_keeps_its_row() {
 		return false;
 	std::vector<uint8_t> metadata;
 	const std::vector<opennova::ProtocolMessage> pump_records = inmatch::build_spawn_pump_metadata(
-			f.ctx->config, f.ctx->mission_text_title, j, f.ctx->np_protocol.connection_list,
+			f.ctx->config, f.ctx->mission_text_title, f.ctx->session_title, j,
+			f.ctx->np_protocol.connection_list,
 			f.world.get(), f.ctx->rotation, &f.ctx->host_slot);
 	for (const opennova::ProtocolMessage &m : pump_records) metadata.push_back(m.tag);
 	const opennova::ProtocolMessage *assignment = nullptr;

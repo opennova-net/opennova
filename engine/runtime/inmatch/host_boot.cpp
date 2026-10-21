@@ -9,6 +9,7 @@
 #include <net/npwire/entity_class.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/inmatch/host_settings.h> // mission_session_title (the loading band)
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
@@ -125,7 +126,8 @@ HostLoadingBand host_loading_band(const mission::BootFileSource &files,
 	band.game_type = game_type_auto ? game_type::for_mission_attribs(header.attrib_flags) : game_type;
 	const mission::MissionText text = read_host_mission_text(
 			files, mission::mission_base_name(mission_file), text_override_table);
-	band.mission_name = session_mission_name(band.game_type, mission_file,
+	band.mission_name = session_mission_name(band.game_type,
+			mission_session_title(text.override_table.get(), mission_file),
 			text.get_string("info", "title"),
 			std::string(header.mission_name, ::strnlen(header.mission_name, sizeof(header.mission_name))));
 	return band;

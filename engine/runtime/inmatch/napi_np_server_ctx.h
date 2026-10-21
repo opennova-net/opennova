@@ -449,6 +449,14 @@ struct NapiNPServerCtx {
 	// [orig: MissionText_GetString("info", "title") from Lobby_UpdateServerInfo @0x4FE993;
 	//  Game_SerializeMissionInfoToDataStream @0x5237df; NapiNPMsg_0x7B_BuildPayload @0x507835]
 	std::string mission_text_title;
+	// The session title g_SessionTitle (inmatch::mission_session_title carries the witness): every
+	// mission start sets it from the map file (the override table's [TITLE] entry, else the map
+	// file); SetServerName overwrites it. The status report's SERVER line, the Co-op 0x7B and the
+	// stock Co-op MISSIONNAME read it. [orig: Game_ApplySessionSettingsToGlobals
+	//  @0x552145..0x55219E; CNapiGameSession_HandleServerCommand @0x4D2D0D; CAdminServer_HandleStatus
+	//  @0x402E83; NapiNPMsg_0x7B_BuildPayload @0x507824; Game_SerializeMissionInfoToDataStream
+	//  @0x52375A]
+	std::string session_title;
 	// MissionText [Locations]/LOCATION%03i labels for each BMS type-2044
 	// marker the spawn admitted, in spawn order, each keyed by its record's
 	// name_index (install_mission_location_names). The S2C 0x0F writer copies

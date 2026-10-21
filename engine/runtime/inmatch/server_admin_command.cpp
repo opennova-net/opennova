@@ -358,6 +358,9 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		outcome.config_changed = true;
 		ctx.config.server_name = args[0].substr(0, 31);
 		ctx.np_protocol.session_name = ctx.config.server_name;
+		// The session title, which the status report, the Co-op 0x7B and MISSIONNAME read
+		// [orig: Napi_CopyString(g_SessionTitle, .., 32) @0x4D2D0D].
+		ctx.session_title = ctx.config.server_name;
 		return outcome;
 	}
 	if (strutil::iequals(verb, "SetServerMsg")) {

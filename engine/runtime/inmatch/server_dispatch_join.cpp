@@ -1,6 +1,7 @@
 // The admission and join legs of the host's C2S dispatch (split off
 // server_message_dispatch.cpp) -- see server_dispatch_join.h.
 #include <runtime/inmatch/server_dispatch_join.h>
+#include <runtime/inmatch/host_settings.h> // mission_session_title (the session title with no context)
 
 #include <runtime/inmatch/server_join_check.h>    // the 0x00 JOIN's validation ladder
 #include <net/npwire/nw_session_framing.h> // make_random_session_u32 (the 0x64 block's random regions)
@@ -124,6 +125,12 @@ const std::string &context_mission_text_title(const NapiNPServerCtx *ctx) {
 	return ctx != nullptr ? ctx->mission_text_title : kNone;
 }
 
+// The host context's session title (g_SessionTitle); with no context, the mission start's
+// value with no text-override table: the map file's first 31 bytes (mission_session_title).
+std::string context_session_title(const NapiNPServerCtx *ctx, const GameConfig &cfg) {
+	return ctx != nullptr ? ctx->session_title : mission_session_title(nullptr, cfg.mission_file);
+}
+
 // ---------------------------------------------------------------------------
 // §5.1 reply bodies — handshake + server-info + mission-metadata.
 // ---------------------------------------------------------------------------
@@ -159,11 +166,12 @@ std::vector<uint8_t> build_tag7a_pcid(const NapiNPConnection &conn) {
 // (The PCID slot previously carried an invented "DEV-A02-0001" literal — D-NET-127; now sourced.)
 std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
                                                  const std::string &mission_text_title,
+                                                 const std::string &session_title,
                                                  const NapiNPConnection &conn) {
 	std::vector<uint8_t> payload;
 	const std::string &advertised_mission =
 			game_type::is_waypoint_family(cfg.game_type)
-					? cfg.mission_file
+					? session_title // [orig: g_SessionTitle @0x507824]
 					: mission_title_or_header(mission_text_title, cfg.mission_name);
 	append_cstr(payload, conn.player_name.empty() ? conn.reply.player_name
 	                                             : conn.player_name); // recipient player_data+128
@@ -224,9 +232,10 @@ uint32_t chunk_request_offset(const std::vector<uint8_t> &payload, uint32_t live
 // the stream Game_SerializeMissionInfoToDataStream @0x523620]
 std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg,
                                              const std::string &mission_text_title,
+                                             const std::string &session_title,
                                              uint32_t transfer_id, uint32_t offset) {
 	const std::vector<uint8_t> info_body =
-			encode_session_vars(host_session_vars(cfg, mission_text_title));
+			encode_session_vars(host_session_vars(cfg, mission_text_title, session_title));
 	return build_transfer_chunk(transfer_id, info_body.data(),
 	                            static_cast<uint32_t>(info_body.size()), offset);
 }
@@ -317,7 +326,8 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(conn)));
 	out.push_back(make_protocol_message(
 			s2c::FULL_PLAYER_INFO,
-			build_tag7b_session_summary(cfg, context_mission_text_title(ctx), conn)));
+			build_tag7b_session_summary(cfg, context_mission_text_title(ctx),
+					context_session_title(ctx, cfg), conn)));
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
 	out.push_back(make_protocol_message(s2c::SYNC_TICK, {0x01, 0x01, 0x00, 0x01, 0x00}));
 }
@@ -381,18 +391,19 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 //  [info]/title @0x5237df, GAMETYPE @0x5238c7, CUSTOMTEXT @0x523914,
 //  MISSIONFILENAME @0x5239a6, EXP_FANFARE word_24C1170 @0x523a39;
 //  NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
-std::string session_mission_name(uint32_t game_type, const std::string &mission_file,
+std::string session_mission_name(uint32_t game_type, const std::string &session_title,
 		const std::string &mission_text_title, const std::string &header_name) {
 	return game_type::is_stock_coop(game_type)
-			? mission_file
+			? session_title // [orig: g_SessionTitle @0x52375A]
 			: mission_title_or_header(mission_text_title, header_name);
 }
 
-SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title) {
+SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title,
+		const std::string &session_title) {
 	SessionVars vars;
 	vars.server_name = cfg.server_name;
 	vars.mission_name = session_mission_name(
-			cfg.game_type, cfg.mission_file, mission_text_title, cfg.mission_name);
+			cfg.game_type, session_title, mission_text_title, cfg.mission_name);
 	vars.game_type = cfg.game_type;
 	vars.custom_text = cfg.custom_text;
 	vars.mission_file = cfg.mission_file;
@@ -401,7 +412,8 @@ SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_
 }
 
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
-		const GameConfig &config, const std::string &mission_text_title, NapiNPConnection &conn,
+		const GameConfig &config, const std::string &mission_text_title,
+		const std::string &session_title, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world,
 		const HostRotation *rotation, const HostSlotRow *host_slot) {
 	std::vector<ProtocolMessage> messages;
@@ -442,7 +454,8 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 			0x04, build_tag04_slot_assignment(
 					config.config_bytes[6], *player_slot, capacity, team)));
 	messages.push_back(make_protocol_message(
-			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(config, mission_text_title, conn)));
+			s2c::FULL_PLAYER_INFO,
+			build_tag7b_session_summary(config, mission_text_title, session_title, conn)));
 	// A later add's 0x6A follows the block: retail's pump finishes this slot's
 	// block and restarts its walk before the next add sends [orig:
 	//  CNapiServer_ProcessPendingPlayerSpawns - the 0x7B @0x4C9111, goto LABEL_5
@@ -601,6 +614,7 @@ void dispatch_file_chunk_request(const GameConfig &config, const ProtocolMessage
 			s2c::FILE_TRANSFER_CHUNK,
 			build_tag60_server_info(
 					config, context_mission_text_title(inputs.server_ctx),
+					context_session_title(inputs.server_ctx, config),
 					inputs.server_info_transfer_id,
 					chunk_request_offset(msg.payload, inputs.server_info_transfer_id))));
 }

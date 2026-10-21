@@ -60,10 +60,13 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool m
 
 // The recipient's S2C 0x7B session summary (its name and PCID, the server
 // name, the advertised mission, the map file, the game type, the expansion);
-// `mission_text_title` is the host context's (NapiNPServerCtx).
-// [orig: NapiNPMsg_0x7B_BuildPayload @0x507740]
+// `mission_text_title` and `session_title` are the host context's (NapiNPServerCtx):
+// the waypoint family advertises the session title.
+// [orig: NapiNPMsg_0x7B_BuildPayload @0x507740 - the waypoint test @0x507810..0x507822,
+//  g_SessionTitle @0x507824]
 std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
-		const std::string &mission_text_title, const NapiNPConnection &conn);
+		const std::string &mission_text_title, const std::string &session_title,
+		const NapiNPConnection &conn);
 
 // Build the second, pending-player-spawn boundary of a retail join. The C2S
 // 0x02 handler deliberately does not return these records: retail processes an
@@ -71,7 +74,8 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 // 0x03(reset), settings x2, 0x05, 0x04 and the 0x7B replay. The host tick calls
 // this only after the player's live entity/team exists.
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
-		const GameConfig &config, const std::string &mission_text_title, NapiNPConnection &conn,
+		const GameConfig &config, const std::string &mission_text_title,
+		const std::string &session_title, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world,
 		const HostRotation *rotation, const HostSlotRow *host_slot = nullptr);
 
@@ -172,22 +176,24 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       const ServerDispatchInputs &inputs = {});
 
 // MISSIONNAME as the authority serializes it: the stock Co-op selector
-// (waypoint family, objective bit clear) advertises the map file (the coop
-// arm); every other mode the mission text's [info]/title (`mission_text_title`,
+// (waypoint family, objective bit clear) advertises the session title (the coop
+// arm, g_SessionTitle: the map file unless a [TITLE] override or a SetServerName
+// replaced it, inmatch::mission_session_title); every other mode the mission text's [info]/title (`mission_text_title`,
 // MissionText_GetString's, the override table searched first), or, when that
 // reads empty, the mission header's name (`header_name`, dword_A761D4: the
 // session config's mission_name).
 // [orig: Game_SerializeMissionInfoToDataStream @0x523620 -- the coop arm
-//  @0x523758, TextResource_FindEntryBySectionAndKey(g_TextMission, "info",
-//  "title") @0x5237df, the strlen test and dword_A761D4 @0x5237f8..0x52380d]
-std::string session_mission_name(uint32_t game_type, const std::string &mission_file,
+//  @0x523758 (g_SessionTitle @0x52375A), TextResource_FindEntryBySectionAndKey(g_TextMission,
+//  "info", "title") @0x5237df, the strlen test and dword_A761D4 @0x5237f8..0x52380d]
+std::string session_mission_name(uint32_t game_type, const std::string &session_title,
 		const std::string &mission_text_title, const std::string &header_name);
 
 // The authority's session variables, the S2C 0x60 server-info stream's content
 // (npwire/session_vars.h) and, re-parsed, a listen host's own g_SessionVar*
-// copies; `mission_text_title` is the host context's (NapiNPServerCtx).
+// copies; `mission_text_title` and `session_title` are the host context's (NapiNPServerCtx).
 // [orig: Game_SerializeMissionInfoToDataStream @0x523620]
-SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title);
+SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title,
+		const std::string &session_title);
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the

@@ -44,15 +44,18 @@ enum class AdminScene : uint8_t {
 	Other,
 };
 
-// The process's mission globals the status report prints: g_MapFileName (CURRENT MAP) and
-// g_GameType (CURRENT GAME TYPE). The running session writes them (a host's mission, a joiner's
-// join, its S2C 0x64 / 0x2C / 0x08) and no teardown resets them, so a joiner's report reads the
+// The process's mission globals the status report prints: the session title g_SessionTitle
+// (SERVER), g_MapFileName (CURRENT MAP) and g_GameType (CURRENT GAME TYPE). The running session
+// writes them (a host's mission start and SetServerName; a joiner's join, its S2C 0x64 / 0x2C /
+// 0x08 and its own mission start) and no teardown resets them, so a joiner's report reads the
 // joined session's and the menus' the last session's.
-// [orig: CAdminServer_HandleStatus @0x402FF6 (&g_MapFileName), @0x403052
-//  (GameType_GetAbbreviation(g_GameType)); the joiner's writers NapiNPClientMsg_MissionMapNames
-//  @0x427E6C, NapiNPClientMsg_HandleMissionDataChunk @0x4324D8,
+// [orig: CAdminServer_HandleStatus @0x402E83 (g_SessionTitle), @0x402FF6 (&g_MapFileName),
+//  @0x403052 (GameType_GetAbbreviation(g_GameType)); the joiner's writers
+//  NapiNPClientMsg_MissionMapNames @0x427E6C, NapiNPClientMsg_HandleMissionDataChunk @0x4324D8
+//  (and g_SessionTitle @0x4324F5, which its mission start's apply then replaces),
 //  NapiNPClientMsg_HandleSessionConfig @0x42836D, UI_EnumerateAndJoinSession @0x56A207]
 struct AdminProcessMission {
+	std::string session_title;
 	std::string map_file;
 	uint32_t game_type = 0;
 };

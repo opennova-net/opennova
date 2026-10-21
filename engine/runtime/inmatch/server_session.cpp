@@ -9,6 +9,7 @@
 #include <base/io/log.h>
 #include <net/npwire/nw_session_framing.h> // next_connection_index (the self-join's two creates)
 #include <runtime/inmatch/server_console.h> // the /INOUT host line
+#include <runtime/inmatch/host_settings.h> // mission_session_title
 
 namespace opennova::inmatch {
 
@@ -105,6 +106,9 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 	ctx.mission_metadata_blob =
 			build_mission_metadata_blob(ctx.config, ctx.is_mp_session_peer != 0, title);
 	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
+	// The mission start's session title with no text-override table (the host role's
+	// bring-up sets the mount's) [orig: Game_ApplySessionSettingsToGlobals @0x55219E].
+	ctx.session_title = mission_session_title(nullptr, config.mission_file);
 	// The MP TLV (the 0x82 and the LAN discovery 0x81) carries the session's
 	// cap, never the slot limit's dedicated slot [orig: protocol +0x524 =
 	// ctx+0xF28, CNapiGameSession_CreateSession @0x4C9A80;

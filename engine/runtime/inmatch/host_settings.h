@@ -2,6 +2,8 @@
 
 #include "game_config.h"
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/rtxt/rtxt.h>
+#include <string>
 #include <string_view>
 
 namespace opennova::inmatch {
@@ -58,5 +60,20 @@ inline constexpr uint32_t kSessionNoPointLimit = 65000u;
 inline constexpr uint32_t kSessionNoKothLimitMinutes = 0x2222222u;
 uint32_t session_point_limit(int32_t cfg_limit);
 uint32_t session_koth_limit_minutes(int32_t cfg_limit);
+
+// The session title (g_SessionTitle), as every mission start's settings apply leaves it: after
+// copying the cfg's server name in, it zeroes the word and fills it with the [TITLE] entry the
+// mission-title table holds under the map file's name cut at its last '.' (the entry's text up to
+// its first CR, at most 31 bytes), else the map file's first 31 bytes. The title table is never
+// loaded (no writer), so the lookup answers from the mount's text-override table alone (null:
+// none), and a map name with no '.' looks nothing up. The status report prints it (SERVER:), the
+// Co-op S2C 0x7B and the stock Co-op MISSIONNAME advertise it; SetServerName and a joiner's final
+// S2C 0x64 overwrite it.
+// [orig: Game_ApplySessionSettingsToGlobals - the cfg copy @0x551FDA, the '.' cut @0x552112..
+//  0x552127, TextResource_FindEntryBySectionAndKey(g_MissionTitleTextResource, "TITLE", ..)
+//  @0x55213D, the zero @0x552145..0x552168, the CR cut and the 31 cap @0x552174..0x552190, the
+//  map file @0x55219E; g_MissionTitleTextResource @0x2550194 (read @0x5520C7 / @0x55212A, no
+//  writer); TextResource_FindEntryBySectionAndKey @0x75D250 (the override table first @0x75D27B)]
+std::string mission_session_title(const rtxt::File *text_override, const std::string &map_file);
 
 } // namespace opennova::inmatch

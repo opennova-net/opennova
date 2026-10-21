@@ -428,7 +428,7 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 // The plaintext QUERY's report: the session header (CR LF lines), PLAYER LIST's table, and
 // the map queue in MISSION LIST's format with empty fillers (LF lines); built unbounded where
 // retail writes a 16 KB report and a 2 KB queue (D-NET-363).
-// [orig: CAdminServer_HandleStatus @0x402E30 — SERVER: the session name dword_24D1FA4
+// [orig: CAdminServer_HandleStatus @0x402E30 — SERVER: the session name g_SessionTitle
 //  @0x402E83; UP-TIME `%ld %2.2ld:%2.2ld:%2.2ld` of CSessionTimer_GetElapsedMS; CURRENT TOD the
 //  signed high word of g_EnvCurTimeFixed24 @0x402F6F; the active-slot count; g_MapFileName;
 //  GameType_GetAbbreviation(g_GameType, NULL); the table @0x40314D..0x403182; MAP QUEUE in the
@@ -439,9 +439,14 @@ std::string AdminConsole::status_report() {
 	const bool host = ctx_.host_slot.active;
 	std::string out;
 	char line[96];
-	// dword_24D1FA4 is the session's copy of the cfg name; SET ServerName does not reach it,
-	// the ServerCommand's SetServerName does (server_admin_command.cpp).
-	out += "SERVER: " + ctx_.config.server_name + "\r\n";
+	// The process's session title, g_MapFileName and g_GameType (AdminProcessMission). The
+	// title, g_SessionTitle, is the map file (or an override [TITLE] entry) from the mission
+	// start, and a ServerCommand's SetServerName afterwards; SET ServerName does not reach it.
+	// [orig: CAdminServer_HandleStatus @0x402E83, @0x402FF6, @0x403052]
+	const AdminProcessMission own{ctx_.session_title, ctx_.config.mission_file,
+			world != nullptr ? world->match.rules().game_type : ctx_.config.game_type};
+	const AdminProcessMission &mission = seams_.process_mission != nullptr ? *seams_.process_mission : own;
+	out += "SERVER: " + mission.session_title + "\r\n";
 	// The session clock the 0x58 status block reports (session_status.h).
 	const uint32_t seconds = ctx_.np_protocol.host_run_duration_ms / 1000u;
 	std::snprintf(line, sizeof(line), "UP-TIME: %ld %2.2ld:%2.2ld:%2.2ld\r\n", static_cast<long>(seconds / 86400u),
@@ -452,11 +457,6 @@ std::string AdminConsole::status_report() {
 	out += "CURRENT TOD: " + std::to_string(tod_high) + "\r\n";
 	// Every active slot, a Serve Only host's own slot 0 included.
 	out += "CURRENT # PLAYERS: " + std::to_string(slots.size() + (host ? 1u : 0u)) + "\r\n";
-	// The process's g_MapFileName and g_GameType (AdminProcessMission).
-	// [orig: CAdminServer_HandleStatus @0x402FF6, @0x403052]
-	const AdminProcessMission own{ctx_.config.mission_file,
-			world != nullptr ? world->match.rules().game_type : ctx_.config.game_type};
-	const AdminProcessMission &mission = seams_.process_mission != nullptr ? *seams_.process_mission : own;
 	out += "CURRENT MAP: " + mission.map_file + "\r\n";
 	// The NULL arm's Overlays key; the waypoint family's "&" rides the debug word
 	// dword_24C1930's 0x10000 (an input-binding toggle), clear on a server.
