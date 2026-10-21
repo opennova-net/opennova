@@ -30,16 +30,19 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity_commands.h>
+#include <runtime/world/entity_spawn.h> // player_class_init_animation
 #include <runtime/world/round_sim.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <variant>
+#include <vector>
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -642,6 +645,122 @@ void test_a_device_rows_body_runs_the_device_think() {
 	}
 }
 
+
+// A motion source holding the reset and idle clips: each update moves a channel one tick on and
+// offers a vertical root delta, which the plyr warm-up drops.
+struct Clips final : w::IRootMotionSource {
+	std::vector<int> calls;
+	bool has_clip(int, int state) const override {
+		return state == w::anim_state::kReset || state == w::anim_state::kIdle;
+	}
+	int32_t clip_length_ticks(int, int, int) const override { return 10000; }
+	bool advance(int, int state, int32_t &phase, w::RootMotionFrame &out) override {
+		if (!has_clip(0, state)) return false;
+		calls.push_back(state);
+		++phase;
+		out = {};
+		out.dz = 0x8000;
+		out.capsule_bottom = 0x10000;
+		out.capsule_top = 0x20000;
+		return true;
+	}
+};
+
+// The plyr class init on the authority's spawn, its body registered: the hold and body requests
+// 43 with nothing pending, then 8 * ((c & 12) + 8 * ((c & 2) + 4 * (c & 1))) + 10 dual updates
+// for the owning connection id c (+0x78), each the secondary's 43 then the primary's, their root
+// output dropped (the body stays put). An org0 or item row's body runs none of it, nor does a
+// body holding no animation channel.
+// [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B115B, @0x4B1161, @0x4B1176, the channel test
+//  @0x4B116D / @0x4B11D0, the count @0x4B11D2..0x4B11E8, the loop @0x4B11F3..0x4B1225 (the
+//  AnimMap_UpdateDualChannels call @0x4B11FB into a stack buffer)]
+void test_the_plyr_class_init_warms_up_its_channels() {
+	const uint32_t owners[] = {0, 1, 2, 3, 4, 12, 15};
+	const int32_t steps[] = {10, 266, 138, 394, 42, 106, 490};
+	for (size_t i = 0; i < 7; ++i) {
+		Clips clips;
+		Rig r;
+		r.world->ai.root_motion = &clips;
+		w::PlayerSpawn s;
+		s.player_class = kPlyr;
+		s.net_id = r.next_net_id++;
+		s.owner_connection_id = owners[i];
+		s.equipped_adm_index = kEquipped;
+		w::Entity *body = r.bind(w::spawn_remote_player(*r.world, s));
+		CHECK(body != nullptr);
+		if (body == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		const int32_t z = body->position.z.q16;
+		w::player_class_init_animation(*r.world, *body);
+		const w::AiEntity *ae = r.world->ai.for_handle(body->handle);
+		CHECK(ae != nullptr);
+		if (ae != nullptr) {
+			CHECK(ae->inf.anim_state == w::anim_state::kIdle);
+			CHECK(ae->inf.wpn_state == w::anim_state::kIdle);
+			CHECK(ae->inf.anim_pending == 0);
+			CHECK(ae->inf.clip_phase == steps[i]);
+			CHECK(ae->inf.wpn_clip_phase == steps[i]);
+		}
+		CHECK(body->position.z.q16 == z);
+		CHECK(body->net_anim_phase == std::min(steps[i], int32_t{255}));
+		std::vector<int> targets;
+		for (const int state : clips.calls)
+			if (state != w::anim_state::kReset) targets.push_back(state);
+		CHECK(targets.size() == static_cast<size_t>(2 * steps[i]));
+		CHECK(std::all_of(targets.begin(), targets.end(),
+				[](int state) { return state == w::anim_state::kIdle; }));
+		r.world->ai.root_motion = nullptr;
+	}
+	for (const uint8_t player_class : {kOrg, kBrrl, kPlyr}) {
+		Clips clips;
+		Rig r;
+		// The plyr case holds no channel: no source.
+		if (player_class != kPlyr) r.world->ai.root_motion = &clips;
+		w::Entity *body = r.spawn_remote(player_class);
+		CHECK(body != nullptr);
+		if (body == nullptr) {
+			r.world->ai.root_motion = nullptr;
+			continue;
+		}
+		w::player_class_init_animation(*r.world, *body);
+		const w::AiEntity *ae = r.world->ai.for_handle(body->handle);
+		CHECK(ae != nullptr && ae->inf.clip_phase == 0 && ae->inf.wpn_clip_phase == 0);
+		CHECK(clips.calls.empty());
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
+
+// The placement's warm-up counts by the body's DcbId (+0x7C): 10000 + the slot byte on a plyr
+// row (its class init's stamp), the spawn memset's 0 on an org0 or item row (their inits write
+// none); then one more update on an unparented body.
+// [orig: Entity_WarmUpOrganicAnimation @0x4B8B20 - `mov eax, [esi+7Ch]` @0x4B8B3F, the loop
+//  @0x4B8B3F..0x4B8BA3, the final update @0x4B8BC1; PlayerClass_InitEntity @0x4B1060 -
+//  @0x4B1149..0x4B1173; Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE]
+void test_the_placement_warm_up_counts_by_the_dcb_id() {
+	struct Case {
+		uint8_t player_class;
+		uint8_t slot;
+		int32_t updates;
+	};
+	for (const Case c : {Case{kPlyr, 0, 11}, Case{kPlyr, 1, 267}, Case{kPlyr, 3, 395},
+				Case{kOrg, 1, 11}, Case{kBrrl, 3, 11}}) {
+		Clips clips;
+		Rig r;
+		w::Entity *body = r.spawn_remote(c.player_class);
+		CHECK(body != nullptr);
+		if (body == nullptr) continue;
+		body->player_slot_id = c.slot;
+		r.world->ai.root_motion = &clips;
+		w::warm_up_player_body(*r.world, *body);
+		const w::AiEntity *ae = r.world->ai.for_handle(body->handle);
+		CHECK(ae != nullptr && ae->inf.clip_phase == c.updates);
+		r.world->ai.root_motion = nullptr;
+	}
+}
+
 } // namespace
 
 int main() {
@@ -657,6 +776,8 @@ int main() {
 	test_the_barrel_rows_dying_flag_reaches_the_uplink_gate();
 	test_the_nade_row_has_no_callback();
 	test_a_device_rows_body_runs_the_device_think();
+	test_the_plyr_class_init_warms_up_its_channels();
+	test_the_placement_warm_up_counts_by_the_dcb_id();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

@@ -10,6 +10,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/player_spawn.h> // player_item_row (the bound row's class)
 #include <runtime/world/world.h>
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
@@ -90,13 +91,15 @@ int32_t warm_up_channels(InfantryState &inf, uint32_t net_id, bool parented, IRo
 }
 
 // Entity_WarmUpOrganicAnimation on the body's channels as they stand: only for
-// a body holding its animation channel; the net-ID count of dual updates, the
+// a body holding its animation channel; the DcbId's (+0x7C) count of dual updates, the
 // vertical root motion and capsule bottom added to an unparented body's z, then
 // one ground solve that sets it down when it stands under one unit.
 // [orig: Entity_WarmUpOrganicAnimation @0x4B8B20 - the channel test
 //  @0x4B8B32..0x4B8B39, the loop @0x4B8B3F..0x4B8BA3, the parent test
-//  @0x4B8BA5, the resolver @0x4B8BDF, the settle @0x4B8BE7..0x4B8BF5]
-void warm_up_organic_body(World &world, AiSystem &ai, Entity &entity, AiEntity &body) {
+//  @0x4B8BA5, the resolver @0x4B8BDF, the settle @0x4B8BE7..0x4B8BF5; the count's
+//  `mov eax, [esi+7Ch]` @0x4B8B3F]
+void warm_up_organic_body(World &world, AiSystem &ai, Entity &entity, AiEntity &body,
+                          uint32_t dcb_id) {
     InfantryState &inf = body.inf;
     if (!infantry_has_anim_channel(inf, ai.root_motion)) return;
     RootMotionFrame frame{};
@@ -104,7 +107,7 @@ void warm_up_organic_body(World &world, AiSystem &ai, Entity &entity, AiEntity &
     // The entity's own Position words (D-NET-507).
     EntityPosition &position = body.self->position;
     position.z.q16 = io::bam_add(position.z.q16,
-            warm_up_channels(inf, uint32_t(body.net_id), parented, *ai.root_motion, ai.anim_rings, frame));
+            warm_up_channels(inf, dcb_id, parented, *ai.root_motion, ai.anim_rings, frame));
     if (parented) return;
     body.collide_state.skip_counter = 0;
     if (ai.collision != nullptr) {
@@ -127,8 +130,34 @@ void warm_up_organic_body(World &world, AiSystem &ai, Entity &entity, AiEntity &
 void warm_up_player_body(World &world, Entity &entity) {
     AiEntity *body = world.ai.for_handle(entity.handle);
     if (body == nullptr || !body->inf.active) return;
-    // The placement wrote the entity's words; the warm-up works on them.
-    warm_up_organic_body(world, world.ai, entity, *body);
+    // The placement wrote the entity's words; the warm-up works on them. Its count reads the
+    // DcbId (+0x7C): the plyr class init stamps 10000 + the slot byte, which ours keeps off
+    // Entity::net_id (player bodies carry 0 there); the organic init and an item row write
+    // none, so their body keeps the spawn memset's 0.
+    // [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B1149..0x4B1173; Entity_InitOrganicAI
+    //  @0x4BFCC0; Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE]
+    const uint32_t dcb_id = player_item_row(world, entity).body_class == PlayerBodyClass::kPlayer
+            ? 10000u + entity.player_slot_id
+            : 0u;
+    warm_up_organic_body(world, world.ai, entity, *body, dcb_id);
+}
+
+// See entity_spawn.h.
+void player_class_init_animation(World &world, Entity &entity) {
+    if (player_item_row(world, entity).body_class != PlayerBodyClass::kPlayer) return;
+    AiSystem &ai = world.ai;
+    AiEntity *body = ai.for_handle(entity.handle);
+    if (body == nullptr || !body->inf.active) return;
+    InfantryState &inf = body->inf;
+    if (!infantry_has_anim_channel(inf, ai.root_motion)) return;
+    // [orig: PlayerClass_InitEntity @0x4B115B / @0x4B1161 / @0x4B1176]
+    begin_spawn_channels(inf, anim_state::kIdle, ai.root_motion, ai.anim_rings);
+    // The count is the organic warm-up's arithmetic over +0x78, recomputed each pass from a
+    // word nothing in the loop writes. [orig: @0x4B11D2..0x4B11E8, @0x4B1200..0x4B1225]
+    RootMotionFrame frame{};
+    const uint32_t steps = organic_warmup_updates(entity.owner_connection_id);
+    for (uint32_t i = 0; i < steps; ++i) infantry_dual_update(inf, ai.root_motion, ai.anim_rings, frame);
+    ai.mirror_wire_anim(*body, world);
 }
 
 bool organic_init_class(const char *ai_function) {
@@ -248,7 +277,7 @@ void initialize_organic_ai(World &world, Entity &entity) {
 
     // Entity_WarmUpOrganicAnimation @0x4B8B20: secondary then primary,
     // net-ID permutation, vertical root motion only, one final ground solve.
-    warm_up_organic_body(world, ai, entity, *body);
+    warm_up_organic_body(world, ai, entity, *body, uint32_t(body->net_id));
     // The source is savedLivePose, deliberately not the grounded position; the
     // offset is 3 u along the heading in the Q22 trig of retail's
     // radians-per-BAM double. [orig: Entity_InitOrganicAI @0x4C01CD..0x4C022C,

@@ -49,6 +49,22 @@ void initialize_organic_ai(World &world, Entity &e);
 //  @0x517842]
 void warm_up_player_body(World &world, Entity &e);
 
+// The plyr row's class init on a player body the authority spawned, once its animation map
+// registered: the hold and body requests 43 with the pending state cleared on the channels the
+// registration started, then the warm-up's dual updates, as many as the organic warm-up's
+// arithmetic gives for the owning connection id (+0x78), their root output dropped (the body
+// does not move). A body holding no animation channel runs neither: its spawn's 43 / 43 stand
+// with nothing to update them. Another row's body (org0 / org1, an item class) runs none of it.
+// A joiner's 0x0C body takes the class init ahead of any registration, so a joiner never calls
+// this. [orig: PlayerClass_InitEntity @0x4B1060 - the hold @0x4B115B, the body @0x4B1161, the
+//  pending clear @0x4B1176, the channel test @0x4B116D / @0x4B11D0, the count from +0x78
+//  @0x4B11D2..0x4B11E8, the loop @0x4B11F3..0x4B1225 (AnimMap_UpdateDualChannels @0x40B8C0
+//  called @0x4B11FB into a stack buffer); Entity_SpawnFromAnimSlotProperty @0x43C390 -
+//  AnimMap_RegisterEntity called @0x43C4DF ahead of the class init @0x43C4FE;
+//  NapiNPClientMsg_0x00C @0x42E730 - Entity_InitFromItemDef called @0x42E84D, its tail
+//  call @0x49E5EA]
+void player_class_init_animation(World &world, Entity &e);
+
 // What the organic init reads to choose the body state a person starts in: its definition
 // callback, which both person classes run (the org0 and org1 rows of the event-callback table
 // name it as their second function) [orig: g_EntityClassEventCallbackTable @0x813000, its rows

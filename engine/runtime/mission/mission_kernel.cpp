@@ -190,6 +190,13 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 	// pump adds is grounded before its first update [orig: Entity_SpawnFromAnimSlotProperty
 	// @0x43C390 - the AnimMap_RegisterEntity @0x40BB60 call @0x43C4DF].
 	resolve_new_infantry_adm_ids();
+	// Then the row's class init: the authority's spawn runs it after the registration (a plyr
+	// row's requests and warm-up); a joiner's own body is its 0x0C's, whose class init ran
+	// ahead of any registration [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the class
+	// init called @0x43C4FE; NapiNPClientMsg_0x00C @0x42E730 - @0x42E84D].
+	if (world.rules.logic_authority)
+		if (w::Entity *body = world.registry.get(handle))
+			w::player_class_init_animation(world, *body);
 }
 
 int MissionKernel::resolve_collision_instances() {
@@ -479,6 +486,10 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 		world.collision->refresh_after_registry_change(world);
 	}
 	resolve_new_infantry_adm_ids();
+	// The row's class init after the registration, as bind_spawned_body's [orig:
+	// Entity_SpawnFromAnimSlotProperty @0x43C390 - @0x43C4DF, @0x43C4FE].
+	if (world.rules.logic_authority)
+		if (w::Entity *body = world.registry.get(h)) w::player_class_init_animation(world, *body);
 	// The look yaw starts at the spawn's heading word [orig:
 	// Entity_FindBestSpawnPoint @0x50CF4D].
 	local.reset_local_player_input(spawn.heading);
