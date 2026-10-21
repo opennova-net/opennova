@@ -1001,13 +1001,77 @@ static int repeated_weapon_name() {
 	return 0;
 }
 
+// The members the game is witnessed never to read (Ignored) or no reader is witnessed for (Unverified), as their
+// words say (def_words): the schema and a record's use agree. Such a member is written where it differs from the
+// table's default, the writer's rule for a line, with no tick to take (a Clear is refused: its value alone says),
+// so an item that sets none of them holds none written; a member the game reads stays always written.
+static int unread_members() {
+	struct Row {
+		DefRecordKind kind;
+		const char *id;
+		Applicability applies;
+	};
+	const Row rows[] = {
+	        {DefRecordKind::Item, "top_heavy", Applicability::Ignored},
+	        {DefRecordKind::Item, "shadow_texture", Applicability::Ignored},
+	        {DefRecordKind::Item, "shadow_offset_y", Applicability::Ignored},
+	        {DefRecordKind::Item, "max_attack_dist", Applicability::Ignored},
+	        {DefRecordKind::Item, "attrib_evil", Applicability::Ignored},
+	        {DefRecordKind::Item, "particlefxw4.secondary_effect", Applicability::Ignored},
+	        {DefRecordKind::Item, "husk_swap_at", Applicability::Unverified},
+	        {DefRecordKind::Item, "soundloops[6]", Applicability::Unverified},
+	        {DefRecordKind::Item, "graphic_enemy", Applicability::Reads},
+	        {DefRecordKind::Item, "text_id", Applicability::Reads},
+	        {DefRecordKind::Weapon, "gfx1a", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "gfx1b", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "heat_sound", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "loadout_menu_ttdesc", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "classrounds[4]", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "classrounds[5]", Applicability::Reads},
+	        {DefRecordKind::Weapon, "statid", Applicability::Unverified},
+	        {DefRecordKind::Action, "function_args[0]", Applicability::Unverified},
+	        {DefRecordKind::Ammo, "mf_light_value", Applicability::Unverified},
+	        {DefRecordKind::Effect, "value", Applicability::Ignored},
+	        {DefRecordKind::PowerupAction, "action_value", Applicability::Unverified},
+	        {DefRecordKind::PowerupAction, "soundset", Applicability::Reads},
+	};
+	for (const Row &row : rows) {
+		const FieldSchema *found = nullptr;
+		for (const FieldSchema &f : catalog_table().fields(node_kind(row.kind)))
+			if (f.id == row.id) found = &f;
+		TEST_EXPECT(found && found->applies == row.applies);
+		if (!found || found->applies != row.applies) std::printf("FAIL %s: not as its words say\n", row.id);
+	}
+
+	test_temp::TempDir dir("opennova_catalog_unread_members");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Plain\"\nid 100001\ntype vehicle\nhp 10\nend\n"
+	                                                        "begin \"Heavy\"\nid 100002\ntype vehicle\ntop_heavy 3\nend\n"));
+	DefCatalogDocument items; Diagnostic error;
+	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error) && items.rows().size() == 2);
+	if (items.rows().size() != 2) return 1;
+	const NodeKind kItem = node_kind(DefRecordKind::Item);
+	const NodeAddress plain{items.rows()[0]->id, kItem, 0}, heavy{items.rows()[1]->id, kItem, 0};
+	const FieldSchema *top_heavy = nullptr;
+	for (const FieldSchema &f : items.fields(kItem))
+		if (f.id == "top_heavy") top_heavy = &f;
+	TEST_EXPECT(top_heavy && !top_heavy->optional && items.field_on(heavy, *top_heavy).applies == Applicability::Ignored);
+	TEST_EXPECT(!items.present(plain, "top_heavy") && items.present(heavy, "top_heavy"));
+	TEST_EXPECT(!items.present(plain, "husk_swap_at") && !items.present(plain, "shadow_texture"));
+	TEST_EXPECT(items.present(plain, "hp") && items.present(plain, "score"));
+	Edit clear; clear.operation = EditOperation::Clear; clear.address = heavy; clear.field = "top_heavy";
+	TEST_EXPECT(!items.apply(clear, error) && items.present(heavy, "top_heavy"));
+	TEST_EXPECT(items.apply(field(heavy, "top_heavy", int64_t(0)), error) && !items.present(heavy, "top_heavy"));
+	return 0;
+}
+
 int main() {
 	// Every test runs (a failure in one does not hide another's).
 	int failures = 0;
 	for (int (*test)() : {repeated_weapon_name, type_words, adds_keep_the_ending, item_name_cut, unticked_line_saves_alone,
 	                      code_page_names, history_and_save, two_new_items, collections, nested_rows_follow_the_record,
 	                      session_gate, malformed, ignored_input, replaced_action_block, go_to_record, remove_last_item,
-	                      changes_since_save, written_units, witnessed_enums, powerup_weapon, duplicates_apart, plain_words})
+	                      changes_since_save, written_units, witnessed_enums, powerup_weapon, duplicates_apart, plain_words,
+	                      unread_members})
 		failures += test() ? 1 : 0;
 	return failures ? 1 : 0;
 }
