@@ -149,7 +149,15 @@ public:
 	bool reload_main_menu(const MenuMount &mount, std::string &error);
 	// A join's switch to the host's expansion: the new mount's weapon table
 	// for the reads and saves after, with no read and no save, so the next
-	// main-menu entry over that mount is a plain read. The switch rebuilds the
+	// main-menu entry over that mount is a plain read. The switch keeps the
+	// expansion it leaves, and the return to the main menu restores it right
+	// after the MainMenu push, handing the block that mount's table the same way
+	// (the embedder's mount; D-NET-622) [orig: Expansion_SwitchTo @0x5688C0 - the
+	// kept name @0x568921..0x568932; Expansion_ReloadAllAssets @0x568370 - the compare
+	// @0x56837A, the restore and clear @0x568390..0x5683A3, the archives
+	// @0x5683A9..0x5683B5, WeaponDef_LoadAll @0x5683F5, the profile load @0x5683FA;
+	// its calls @0x56870B (PostMenu_RouteMissionExit) and @0x56A401
+	// (MultiPlayer_JoinSessionStateMachine)]. The switch rebuilds the
 	// weapon table and reloads the profile, and it neither reads game.cfg nor
 	// raises the reload flag MainMenu's update tests, which only the front-end
 	// Options ACCEPT sets. The default texts stay: gametext.bin loads once.

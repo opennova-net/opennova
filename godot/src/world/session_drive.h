@@ -166,12 +166,8 @@ public:
 	// expansion, `p_root` mounts it again and the cfg block takes its weapon table, reading
 	// and saving nothing, so the menu entry's game.cfg read and profile load run over the
 	// menu's own expansion (D-NET-622). A host or single-player start switches nothing, so
-	// its return restores nothing.
-	// [orig: Expansion_SwitchTo @0x5688C0 - the kept name @0x568927; Expansion_ReloadAllAssets
-	//  @0x568370 - the compare @0x56837A, the restore and clear @0x568390..0x5683A3, the
-	//  archives @0x5683A9..0x5683B5, WeaponDef_LoadAll @0x5683F5, the profile load @0x5683FA;
-	//  its calls right after the MainMenu push @0x56870B (PostMenu_RouteMissionExit) and
-	//  @0x56A401 (MultiPlayer_JoinSessionStateMachine)]
+	// its return restores nothing (engine inmatch/game_config_block.h switch_expansion
+	// carries the witness).
 	void restore_kept_expansion(const Ref<ResourceRoot> &p_root);
 
 	// The bound signal targets of the hosting session (the world forwards).

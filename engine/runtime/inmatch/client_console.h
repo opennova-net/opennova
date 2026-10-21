@@ -60,9 +60,13 @@ struct ClientLocalCommandSeams {
 	// WacScript_ToggleOverlayByName: true when a CHEAT the line names flipped (the authority's
 	// alone, wac::WacSystem::toggle_cheat); unset: no toggle takes a line.
 	std::function<bool(const std::string &line)> toggle_overlay;
-	// KeyBinding_DumpAllToFile (keylist.key); unset: the line is taken, nothing written.
+	// KeyBinding_DumpAllToFile (keylist.key, deleted then opened "a+t": the whole text);
+	// unset: the line is taken, nothing written [orig: Client_ProcessLocalCommand @0x520D10
+	// -> KeyBinding_DumpAllToFile @0x54C0A0, DeleteFileA / fopen @0x54C0BA..0x54C0CA].
 	std::function<void()> save_keys;
-	// Entity_DumpUsageStatistics("debug.nfo"); unset: taken, nothing written.
+	// Entity_DumpUsageStatistics("debug.nfo"), fopen("w+") in text mode (each '\n' a CR
+	// LF); unset: taken, nothing written [orig: Client_ProcessLocalCommand @0x520D4B ->
+	// Entity_DumpUsageStatistics @0x40E620, fopen @0x40E6B2].
 	std::function<void()> save_nfo;
 	// VERSION's line "Version <version>  - <title>" (Chat_AddMessageChannel2(.., -1, 930)).
 	std::string version_text;

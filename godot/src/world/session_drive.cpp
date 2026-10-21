@@ -383,8 +383,7 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 	const String dir = resource_root->get_root_dir();
 	const String previous = resource_root->get_expansion();
 	// The switch keeps the expansion it leaves for the return to the main menu (the pre-dial
-	// leg's switch, not the reconcile after it, is a join's first) [orig: Expansion_SwitchTo
-	// @0x5688C0 - @0x568921..0x568932].
+	// leg's switch, not the reconcile after it, is a join's first; D-NET-622).
 	if (!expansion_kept_) {
 		kept_expansion_ = previous;
 		expansion_kept_ = true;
