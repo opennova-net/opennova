@@ -164,6 +164,15 @@ void finish_manager_receive(NapiNPServerCtx &ctx);
 ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hello,
 		const PeerAddr &peer);
 
+// Input action 3 on a host with its own client (a listen host): the own client disconnects as
+// a user leave, {2, 2, 0, 0, "I.C:CIDEMIS", 0, ""} latched on the own node (the first latch
+// wins), its /INOUT CLIENT line written, and its goodbye queued on the manager's loopback for
+// `drain`: the next tick's receive pump (tick_connections' pending walk then tears down the own
+// pair's server-side twin: its /INOUT SERVER line and the host player's removal, the leave
+// line and the 0x46 removal to the others), or the mission teardown's pump. A host with no own
+// client (a dedicated host) and a second call do nothing. (D-NET-NEW-L8-21)
+void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain);
+
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while
 // handle_server_datagram drains; only here, after later datagrams could have closed the gap, does
 // the host emit one 0x84 per connection whose ordered queue is still nonempty. This is the

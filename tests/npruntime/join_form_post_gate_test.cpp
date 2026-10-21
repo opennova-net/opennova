@@ -9,8 +9,9 @@
 //  `cmp [edi+0C0h], 0` @0x512EFE, the two lengths @0x512F0B..0x512F3B, the JSR test @0x512F3D,
 //  _stricmp(JSP, A) @0x512F52 and (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent
 //  (player, "", 17, "") @0x512F7E; state 6 @0x512FB3 and the probe's call @0x512FBC;
-//  NapiNPServer_HandlePlayerJoinMessage @0x512AA0 (state 2 @0x512E7D); Server_ValidatePlayerJoinRequest
-//  @0x512100 (its side-password leg only under BuildFlags & 4 @0x5124A2)]
+//  NapiNPServer_HandlePlayerJoinMessage @0x512AA0 (state 2 @0x512E7D);
+//  Server_ValidatePlayerJoinRequest @0x512100 (its side-password leg only under BuildFlags & 4
+//  @0x5124A2)]
 
 #include "npruntime/conn_fixture.h"
 

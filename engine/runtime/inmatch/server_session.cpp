@@ -281,7 +281,12 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 			reply = host_server_hello(ctx, hello, internal);
 		}
 		const ConnectionKeys own_keys = manager_connection_keys();
+		// The pair's name: the session's player name, "???" when empty, the client's
+		// SetName and the twin's NA (D-NET-NEW-L8-21 reads it in the pair's /INOUT lines).
+		const std::string name =
+				config.player_name.empty() ? "???" : config.player_name.substr(0, 63);
 		NapiNPConnection self;
+		self.player_name = name;
 		// The host's own player dcb (entity+0x78). NOT 0 — dcb 0 is the dedicated-server reservation
 		// that makes the joining client drop the player slot and flood C2S 0x0F (see kHostPlayerDcb).
 		// The host knows its own ConnectionId locally, so latch self_id_seen (no 0x48 ack arrives for
@@ -322,8 +327,6 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 				const int32_t reply_len =
 						static_cast<int32_t>(server_hello_to_bytes(reply).size() + 1);
 				log.line(napi_got_protocol_text(reply_len, internal, pn));
-				const std::string name =
-						config.player_name.empty() ? "???" : config.player_name.substr(0, 63);
 				const ClientAuth auth = make_title_client_auth(
 						*identity, own_index, own_keys.key, reply.hk, name, own_keys.scrk);
 				const int32_t join_len =

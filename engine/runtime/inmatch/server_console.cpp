@@ -199,13 +199,15 @@ std::string host_address(const NapiNPServerCtx &ctx) {
 	return peer_addr_to_string(ctx.local_address); // Napi_FormatAddress "%s:%ld" @0x62df22
 }
 
-const char *connection_kind(const NapiNPConnection &conn) {
+const char *connection_kind(int type) {
 	// is_server (+0x2B) for a node the server created (type 1), is_client
 	// (+0x2A) for type 2 [orig: CNapiNPConnection_Create @0x62ad7b..0x62ae95].
-	if (conn.type == NapiNPConnection::kTypeServerSide) return "SERVER ";
-	if (conn.type == NapiNPConnection::kTypeClientSide) return "CLIENT ";
+	if (type == NapiNPConnection::kTypeServerSide) return "SERVER ";
+	if (type == NapiNPConnection::kTypeClientSide) return "CLIENT ";
 	return "";
 }
+
+const char *connection_kind(const NapiNPConnection &conn) { return connection_kind(conn.type); }
 
 } // namespace
 
@@ -403,6 +405,10 @@ std::string entity_usage_text(const world::World &world, const def::DefItemsFile
 }
 
 std::string inout_player_removed_line(const NapiNPConnection &conn) {
+	return inout_player_removed_line(conn, conn.type);
+}
+
+std::string inout_player_removed_line(const NapiNPConnection &conn, int type) {
 	// [orig: CNapiNPConnection_LogPlayerRemoved @0x61e940 — the disconnect
 	//  record's DS/DC/DP1/DP2 (+0x658..+0x664), DSTR (+0x668), DPC (+0x6E8),
 	//  DDSTR (+0x6EC) @0x61e99e..0x61e9c6, read whether latched or not]
@@ -411,7 +417,7 @@ std::string inout_player_removed_line(const NapiNPConnection &conn) {
 	std::snprintf(tail, sizeof(tail), "[%ld,%ld,%ld,%ld,\"%s\",%ld,\"%s\"]",
 			static_cast<long>(e.ds), static_cast<long>(e.dc), static_cast<long>(e.dp1),
 			static_cast<long>(e.dp2), e.dstr.c_str(), static_cast<long>(e.dpc), e.ddstr.c_str());
-	return peer_addr_to_string(conn.peer) + " : " + connection_kind(conn) + "PLAYER REMOVED \"" +
+	return peer_addr_to_string(conn.peer) + " : " + connection_kind(type) + "PLAYER REMOVED \"" +
 			conn.player_name + "\". " + tail;
 }
 

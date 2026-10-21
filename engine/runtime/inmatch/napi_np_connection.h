@@ -132,6 +132,20 @@ enum class GameAdmissionStage : uint8_t {
 //  NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260 - 4 @0x5132B1; Server_OnPlayerJoin
 //  @0x51A680 - 6 @0x51A712, 7 @0x51AA5C; Server_DisconnectAndResetAllPlayerSlots @0x516160 -
 //  1 @0x5161FD..0x5163AA; NapiNPServer_SendFiltered 0x80 @0x4C8948..0x4C8953]
+// The listen host's own client's goodbye after input action 3 (CIDEMIS), waiting for the manager
+// receive that moves it from the loopback FIFO to the server's queue: the next tick's receive
+// pump (an action after the frame's exit test: the admin's GOTO MENUSTATE), or the mission
+// teardown's pump (an action inside the frame's input pass). The server-side twin's teardown
+// (the host player's removal) runs there. (D-NET-NEW-L8-21)
+// [orig: CNapiNPManager_SendTo @0x61EC20 (the address-0 arm @0x61EC59, the FIFO write @0x61ECC6);
+//  Game_ProcessMainFrame @0x5263F0 - the frame head's CNapiNetwork_PumpManagerReceive call
+//  @0x526528, the admin pump @0x5268F1; Game_TeardownMission @0x522350 - the pump @0x522588]
+enum class OwnGoodbye : uint8_t {
+	None = 0,
+	NextReceivePump,
+	TeardownPump,
+};
+
 enum class PlayerSlotState : uint8_t {
 	Free = 0,              // the add's row memset [orig: Server_PlayerAdd @0x51CD06]
 	Added = 1,             // the add's, awaiting the C2S 0x09
@@ -693,6 +707,8 @@ struct NapiNPConnection {
 	// the node — the 0x86 burst then the player teardown — instead of tearing down inline.
 	// [orig: CNapiNPConnection_RequestDisconnect @0x61e107 -> NapiNPProtocol_Pump @0x62a6fd]
 	bool pending_disconnect = false;
+	// The listen host's own client node only: where its queued goodbye is taken (OwnGoodbye).
+	OwnGoodbye own_goodbye = OwnGoodbye::None;
 	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
 	                               // seqs it confirmed (the retransmitted 0x42's settings re-send reads
 	                               // it). The initial-state backlog gate counts messages instead

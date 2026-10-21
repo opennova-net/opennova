@@ -1073,7 +1073,9 @@ void Simulation::escape_input_reset() {
 void Simulation::input_action_exit() {
 	// Input action 3 over the running role (engine inmatch/remote_admin.h
 	// input_action_exit carries the witness).
-	if (kernel_) opennova::inmatch::input_action_exit(remote_admin_binding());
+	if (kernel_)
+		opennova::inmatch::input_action_exit(
+				remote_admin_binding(), opennova::inmatch::ExitSite::Input);
 }
 
 bool Simulation::take_input_reset() {

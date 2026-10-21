@@ -230,6 +230,9 @@ uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 std::string inout_host_line(const NapiNPServerCtx &ctx, bool started);
 std::string inout_player_added_line(const NapiNPConnection &conn);
 std::string inout_player_removed_line(const NapiNPConnection &conn);
+// The same for one half of the listen host's own pair, which our one own node stands for: its
+// client connection (type 2) or the server-side node its own 0x42 created (type 1).
+std::string inout_player_removed_line(const NapiNPConnection &conn, int type);
 
 // THE NAPI LOG: the buffered text log the network keeps, here two of them: the
 // protocol manager's net log, which the process creates with its network and

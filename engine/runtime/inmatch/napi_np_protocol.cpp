@@ -38,6 +38,7 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
+#include <optional>
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
@@ -287,6 +288,8 @@ std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
 			disconnect_burst_count(conn.timeouts.recv_max_per_tick), std::move(datagram));
 }
 
+void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving);
+
 // The one player/session teardown path shared by keyed goodbye, receive timeout, pending
 // disconnect, StopServer, owner eviction, and same-address replacement. The original's Destroy runs
 // TeardownActiveConnection: the disconnect-packet burst to the departing peer FIRST, then the
@@ -322,19 +325,33 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 				std::make_move_iterator(burst.end()));
 	}
 
-	const bool had_player = it->type == NapiNPConnection::kTypeServerSide &&
-			(it->link.owned_entity.valid() || it->phase >= ConnectionPhase::PlayerAdded);
-	const world::EntityHandle owned_entity = it->link.owned_entity;
-	const uint8_t player_slot = it->reply.player_slot;
+	if (it->type == NapiNPConnection::kTypeServerSide) remove_connection_player(ctx, *it);
+
+	list.erase(it);
+	return true;
+}
+
+// The removal callback's player teardown (Server_HandlePlayerDisconnect) for one node whose
+// player was added: the leave line, the squad leg, the match and spawn-wave removal, the /PROFILE
+// marker, the entity's removal and the 0x46 removal record to the others. A remote's node, or
+// the server-side twin of the listen host's own pair (teardown_own_connection).
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the callback @0x625426..0x625438
+//  -> Server_HandlePlayerDisconnect @0x51B5C0]
+void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving) {
+	auto &list = ctx.np_protocol.connection_list;
+	const bool had_player =
+			leaving.link.owned_entity.valid() || leaving.phase >= ConnectionPhase::PlayerAdded;
+	const world::EntityHandle owned_entity = leaving.link.owned_entity;
+	const uint8_t player_slot = leaving.reply.player_slot;
 	if (had_player) {
 		// The leave line first, while the leaver's entity still stands
 		// [orig: Server_HandlePlayerDisconnect @0x51b6d3, before the teardown
 		// @0x51b809..0x51b82e].
-		broadcast_player_leaving_text(list, *it);
+		broadcast_player_leaving_text(list, leaving);
 		// The squad leg, with the leaver still counted: a squad's last slot
 		// sends its squadron line and the registry removal and frees the node
 		// [orig: Server_HandlePlayerDisconnect @0x51B6D8..0x51B7FD].
-		Server_ReleaseSquadRegistryNode(ctx, *it);
+		Server_ReleaseSquadRegistryNode(ctx, leaving);
 		const bool freed_pool0_entity = ctx.world != nullptr && owned_entity.valid() &&
 				owned_entity.pool() == 0;
 		const uint16_t freed_pool0_slot =
@@ -375,7 +392,7 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// The leaver's squad breaks up after its entity is gone and before its
 		// removal record [orig: Server_SendPlayerStateAndSquad from
 		// Server_HandlePlayerDisconnect @0x51b837].
-		Server_DissolveSquadOf(ctx, *it);
+		Server_DissolveSquadOf(ctx, leaving);
 		// The witnessed leave broadcast is S2C 0x46 bit15, which clears the peer's
 		// ROSTER BOOKKEEPING ONLY — PlayerSlot_ClearAndUnlink @0x434730 never
 		// destroys the entity (@0x431411..0x43144c; the entity-field wipes @0x431437
@@ -391,7 +408,7 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		DestroyEntityList leave_sweep;
 		if (freed_pool0_entity) leave_sweep.pool0_indices.push_back(freed_pool0_slot);
 		for (NapiNPConnection &other : list) {
-			if (&other == &*it || !is_in_match(other) || other.link.transport == nullptr)
+			if (&other == &leaving || !is_in_match(other) || other.link.transport == nullptr)
 				continue;
 			other.link.transport->host_send(
 					0x46, encode_player_sync_removal(player_slot, /*with_ack=*/false));
@@ -400,7 +417,29 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 						0x5D, encode_destroy_entity_list(leave_sweep));
 		}
 	}
+}
 
+// The listen host's own pair as a receive pump takes its own client's goodbye: the server-side
+// twin its own 0x42 created gets the goodbye's record (the client's, role 2, already on our one
+// own node; the pump's PDESTME only when nothing is), is set pending and is destroyed in the
+// same pump's connection walk: its /INOUT SERVER line, its 0x86 burst back to the own client over
+// the loopback (no wire face), then the host player's removal. Our one node stands for the pair
+// and leaves the list.
+// [orig: Nwu_HandleClientGoodbye @0x624250 -> Nwu_HandleDisconnect @0x623CE0 (the record latched
+//  if none @0x6240A8..0x6240BA, role 2 @0x624005; RequestDisconnect @0x6240C4 -> pending
+//  @0x61E107); NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793;
+//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - CNapiNPConnection_LogPlayerRemoved
+//  @0x61E940 (the call @0x6253D2), the state-1 burst @0x6253EF..0x625424, the callback
+//  @0x625438] (D-NET-NEW-L8-21)
+bool teardown_own_connection(NapiNPServerCtx &ctx) {
+	auto &list = ctx.np_protocol.connection_list;
+	auto it = std::find_if(list.begin(), list.end(), [](const NapiNPConnection &c) {
+		return c.type == NapiNPConnection::kTypeClientSide;
+	});
+	if (it == list.end()) return false;
+	latch_disconnect_event(*it, make_disconnect_event(1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"));
+	write_inout_line(ctx, inout_player_removed_line(*it, NapiNPConnection::kTypeServerSide));
+	remove_connection_player(ctx, *it);
 	list.erase(it);
 	return true;
 }
@@ -1392,6 +1431,27 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 } // namespace
 
+// See header. [orig: CNapiNetwork_DisconnectActiveConnection @0x4C9140 - the connected test
+//  @0x4C918F..0x4C919D, the record @0x4C91C3..0x4C921A (role 2 for the client side, DC 2, DP1 /
+//  DP2 0, DSTR the caller's, DPC 0, DDSTR ""), latched if none @0x4C922D..0x4C923E,
+//  CNapiNPConnection_RequestDisconnect @0x61E0F0 (the call @0x4C924A; state 5 -> SetState(6)
+//  @0x61E0FA); CNapiNPConnection_TeardownActiveConnection @0x6253C0 - LogPlayerRemoved
+//  @0x6253D2, the state-5 arm's goodbye burst @0x6254BF..0x6254D3 (to the own pair's address 0:
+//  the loopback FIFO, CNapiNPManager_SendTo @0x61EC20 (@0x61EC59, @0x61ECC6)), the client
+//  callback @0x6254E7; Input_HandleActionBinding case 3 (the string @0x49AF38, the call
+//  @0x49AF42)] (D-NET-NEW-L8-21)
+void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type != NapiNPConnection::kTypeClientSide) continue;
+		// Torn down already: its connected byte is clear, so a later exit does nothing.
+		if (conn.own_goodbye != OwnGoodbye::None) return;
+		latch_disconnect_event(conn, make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, ""));
+		write_inout_line(ctx, inout_player_removed_line(conn, NapiNPConnection::kTypeClientSide));
+		conn.own_goodbye = drain;
+		return;
+	}
+}
+
 // See header. [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0]
 ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hello,
 		const PeerAddr &peer) {
@@ -1611,8 +1671,16 @@ std::vector<TickOut> tick_connections(
 	//  @0x61e107; NapiNPProtocol_Pump @0x62A650 then destroys every pending node after its
 	//  per-connection pump @0x62a6fd..0x62a793, latching {1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"}
 	//  only when nothing else was @0x62a72f..0x62a788]
-	std::vector<PeerAddr> destroy_pending;
+	// The walk is the protocol's connection list in order, so the listen host's own pair, made
+	// at the session create, comes ahead of every remote: its twin goes first when the own
+	// client's goodbye is due at this pump (OwnGoodbye::NextReceivePump; no peer: nullopt).
+	std::vector<std::optional<PeerAddr>> destroy_pending;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type == NapiNPConnection::kTypeClientSide &&
+				conn.own_goodbye == OwnGoodbye::NextReceivePump) {
+			destroy_pending.push_back(std::nullopt);
+			continue;
+		}
 		if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined) continue;
 		if (elapsed_ms > 0) {
 			const uint64_t total =
@@ -1636,7 +1704,12 @@ std::vector<TickOut> tick_connections(
 			destroy_pending.push_back(conn.peer);
 		}
 	}
-	for (const PeerAddr &peer : destroy_pending) {
+	for (const std::optional<PeerAddr> &pending : destroy_pending) {
+		if (!pending.has_value()) {
+			(void)teardown_own_connection(ctx); // no wire face, no peer event
+			continue;
+		}
+		const PeerAddr &peer = *pending;
 		TickOut destroyed;
 		destroyed.peer = peer;
 		if (!teardown_connection(ctx, peer, &destroyed.outbound)) continue;

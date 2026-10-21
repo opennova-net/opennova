@@ -133,10 +133,25 @@ struct RemoteAdminBinding {
 	}
 };
 
+// Where input action 3 runs in the frame. The admin's GOTO MENUSTATE runs in the admin pump,
+// after the frame's exit test, so a listen host's own goodbye waits for the next frame's head
+// receive and the server receive pump of that frame's tick takes it; the frame's input pass (the
+// HUD quit dialog's yes, a console-queued code 3, the in-game CONFIRM_YES) runs after the frame
+// head's receive, so the goodbye waits through the frame's tick for the mission teardown's pump.
+// [orig: Game_ProcessMainFrame @0x5263F0 - the head's CNapiNetwork_PumpManagerReceive call
+//  @0x526528, Server_TickUpdate's receive pump @0x51D895, the admin pump @0x5268F1;
+//  Game_TeardownMission @0x522350 - the pump @0x522588] (D-NET-NEW-L8-21)
+enum class ExitSite : uint8_t {
+	Admin,
+	Input,
+};
+
 // Input action 3, the exit (the admin's GOTO MENUSTATE, the in-game CONFIRM_YES, a console-queued
 // code 3): exit reason 1 where the running role reads it, a host context's store, else the
 // joiner's, whose user leave sends its CIDEMIS goodbye inside the action
-// (JoinerRole::quit_to_menu), else the single-player world's.
+// (JoinerRole::quit_to_menu), else the single-player world's. A host context with its own client
+// (a listen host) disconnects that client as a user leave too (request_own_client_disconnect),
+// its goodbye taken where `site` says.
 // The in-game CONFIRM_YES and the HUD quit dialog's yes run it inline, so a joiner's goodbye
 // leaves at the click (the game's quit legs call it ahead of their return to the menu).
 // [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
@@ -144,7 +159,7 @@ struct RemoteAdminBinding {
 //  @0x49AF38..0x49AF42; UI_RegisterIngameCallbacks @0x555510 -> UI_IngameConfirmExitCommand
 //  @0x555460 - Game_CloseInGameScreens @0x55546A, Input_HandleActionBinding(3) @0x555479;
 //  the quit dialog's yes in Input_HandleSpecialKeys @0x49C5C0]
-void input_action_exit(const RemoteAdminBinding &binding);
+void input_action_exit(const RemoteAdminBinding &binding, ExitSite site);
 
 // The admin server's command half for a process whose sessions come and go, as retail's
 // dispatcher runs over the process's globals whatever the scene: the console over the binding's

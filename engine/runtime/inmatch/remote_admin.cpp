@@ -7,6 +7,7 @@
 #include <runtime/inmatch/joiner_role.h>   // JoinerRole::quit_to_menu (input action 3)
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_server_ctx.h> // session_uptime_ms (UP-TIME)
+#include <runtime/inmatch/napi_np_protocol.h> // request_own_client_disconnect (input action 3)
 #include <runtime/world/epilog_cine.h> // kWorldMissionExitQuit
 #include <runtime/world/world.h>
 
@@ -81,10 +82,15 @@ std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &fr
 	return std::nullopt;
 }
 
-void input_action_exit(const RemoteAdminBinding &binding) {
-	if (binding.host != nullptr)
+void input_action_exit(const RemoteAdminBinding &binding, ExitSite site) {
+	if (binding.host != nullptr) {
 		binding.host->mission_exit_reason = kMissionExitQuit;
-	else if (binding.joiner != nullptr)
+		// [orig: CNapiNetwork_DisconnectActiveConnection(&g_NapiNPCtx, "I.C:CIDEMIS") @0x49AF42
+		//  on ctx+0xE60, the own client a listen host's create made (@0x4C9B9C)]
+		request_own_client_disconnect(*binding.host, site == ExitSite::Admin
+						? OwnGoodbye::NextReceivePump
+						: OwnGoodbye::TeardownPump);
+	} else if (binding.joiner != nullptr)
 		binding.joiner->quit_to_menu();
 	else if (binding.world != nullptr)
 		binding.world->mission_exit_reason = world::kWorldMissionExitQuit;
@@ -137,7 +143,7 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 	// Input action 3 (input_action_exit) [orig: Input_HandleActionBinding case 3 @0x49AF26,
 	//  @0x49AF38..0x49AF42].
 	if (binding.host != nullptr || binding.joiner != nullptr || binding.world != nullptr)
-		seams.quit_to_menu = [binding] { input_action_exit(binding); };
+		seams.quit_to_menu = [binding] { input_action_exit(binding, ExitSite::Admin); };
 	seams.process_mission = &process_mission_;
 	console_ = std::make_unique<AdminConsole>(ctx != nullptr ? *ctx : session_less_, std::move(seams));
 }

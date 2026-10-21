@@ -1,0 +1,245 @@
+// D-NET-NEW-L8-21: input action 3 on a listen host disconnects its own client as a user leave.
+// The own client latches {2, 2, 0, 0, "I.C:CIDEMIS", 0, ""} (the first latch wins), its teardown
+// writes the /INOUT CLIENT line and sends its goodbye burst to the pair's address 0, the manager's
+// loopback. The admin's GOTO MENUSTATE runs after the frame's exit test, so the next tick's
+// receive pump takes the goodbye: the server-side twin is set pending and destroyed in that
+// pump's connection walk, its /INOUT SERVER line, then the host player's removal (the leave line
+// and the 0x46 removal to the others, the body gone). An exit from the frame's input pass waits
+// for the mission teardown's pump (held here). A dedicated host has no own client: nothing.
+// [orig: Input_HandleActionBinding case 3 (the call @0x49AF42);
+//  CNapiNetwork_DisconnectActiveConnection @0x4C9140 (the record @0x4C91C3..0x4C921A, the latch
+//  @0x4C922D..0x4C923E, RequestDisconnect @0x4C924A); CNapiNPConnection_TeardownActiveConnection
+//  @0x6253C0 (LogPlayerRemoved @0x6253D2, the state-5 burst @0x6254BF..0x6254D3, the state-1
+//  callback @0x625438); CNapiNPConnection_LogPlayerRemoved @0x61E940; Nwu_HandleDisconnect
+//  @0x623CE0 (role 2 @0x624005, the latch @0x6240A8..0x6240BA, RequestDisconnect @0x6240C4);
+//  NapiNPProtocol_Pump @0x62A650 (the pending walk @0x62A6FD..0x62A793);
+//  Server_HandlePlayerDisconnect @0x51B5C0; Game_ProcessMainFrame @0x5263F0 (the head receive
+//  @0x526528, the admin pump @0x5268F1)]
+#include "npruntime/conn_fixture.h"
+
+#include <net/npwire/ingame_decode_session.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/remote_admin.h>
+#include <runtime/inmatch/server_console.h>
+#include <runtime/inmatch/server_files.h>
+#include <runtime/inmatch/server_session.h>
+#include <runtime/inmatch/udp_session_transport.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
+
+#include <cstdio>
+#include <map>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+using namespace opennova;
+namespace w = opennova::world;
+namespace ns = opennova::replication;
+
+namespace {
+
+int failures = 0;
+#define CHECK(c)                                                                     \
+	do {                                                                             \
+		if (!(c)) {                                                                  \
+			std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c);                 \
+			++failures;                                                              \
+		}                                                                            \
+	} while (0)
+
+class MemoryFiles final : public inmatch::ServerFileSink {
+public:
+	std::map<std::string, std::string> files;
+	bool exists(const std::string &name) override { return files.count(name) != 0; }
+	void remove(const std::string &name) override { files.erase(name); }
+	bool write(const std::string &name, std::string_view bytes, bool append) override {
+		std::string &f = files[name];
+		if (!append) f.clear();
+		f.append(bytes.data(), bytes.size());
+		return true;
+	}
+};
+
+constexpr const char *kStamp = "T: ";
+const std::string kCidemis = " [2,2,0,0,\"I.C:CIDEMIS\",0,\"\"]";
+// The pair's two /INOUT lines: the client's at the action, the twin's at the pump.
+const std::string kClientRemoved = "0.0.0.0:0 : CLIENT PLAYER REMOVED \"Host\"." + kCidemis;
+const std::string kServerRemoved = "0.0.0.0:0 : SERVER PLAYER REMOVED \"Host\"." + kCidemis;
+
+// A listen host (its own pair, the host's body in slot 0) and one remote in match (slot 1), or a
+// dedicated host with the remote alone. Heap-held: the World.
+struct ListenHost {
+	inmatch::NapiNPServerCtx ctx;
+	w::World world;
+	MemoryFiles files;
+	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
+	ns::LoopbackChannel own_loop;
+	ns::UdpSessionTransport remote{ns::UdpSessionTransport::Role::Host};
+	w::EntityHandle host_body;
+	w::EntityHandle remote_body;
+
+	explicit ListenHost(bool own_client) {
+		inmatch::set_connection_mode(ctx, own_client ? inmatch::ConnectionMode::HostClient
+		                                             : inmatch::ConnectionMode::HostOnly);
+		ctx.is_in_session = 1;
+		ctx.config.max_players = 4;
+		world.rules.mp_session = true;
+		world.registry.configure_pool(0, 32);
+		ctx.world = &world;
+		inout.set_stamp_text([] { return std::string(kStamp); });
+		inout.set_enabled(true);
+		ctx.logs.inout = &inout;
+		w::PlayerSpawn spawn;
+		spawn.team = 1;
+		if (own_client) {
+			host_body = w::spawn_remote_player(world, spawn);
+			inmatch::NapiNPConnection own = conn_fixture::make_conn(inmatch::kHostPlayerDcb,
+					inmatch::NapiNPConnection::kTypeClientSide, &own_loop,
+					ns::TransportMode::Loopback, host_body, true);
+			own.player_name = "Host";
+			own.reply.player_name = "Host";
+			own.reply.player_slot = 0;
+			own.assigned_team = 1;
+			own.assigned_team_valid = true;
+			ctx.np_protocol.connection_list.push_back(std::move(own));
+		}
+		spawn.position = {10.0f, 0.0f, 0.0f};
+		remote_body = w::spawn_remote_player(world, spawn);
+		inmatch::NapiNPConnection joiner = conn_fixture::make_conn(inmatch::kFirstJoinerDcb,
+				inmatch::NapiNPConnection::kTypeServerSide, &remote, ns::TransportMode::Client,
+				remote_body, true);
+		joiner.player_name = "Joe";
+		joiner.reply.player_name = "Joe";
+		joiner.reply.player_slot = 1;
+		ctx.np_protocol.connection_list.push_back(std::move(joiner));
+	}
+
+	const inmatch::NapiNPConnection *own() const {
+		for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+			if (c.type == inmatch::NapiNPConnection::kTypeClientSide) return &c;
+		return nullptr;
+	}
+	std::vector<ns::Datagram> to_remote() {
+		std::vector<ns::Datagram> out;
+		ns::Datagram d;
+		while (remote.pop_outbound(d)) out.push_back(d);
+		return out;
+	}
+	// The /INOUT entries since the last call, without their stamps.
+	std::vector<std::string> inout_lines() {
+		std::vector<std::string> out;
+		const std::string &text = inout.pending();
+		size_t at = consumed;
+		while (at < text.size()) {
+			const size_t end = text.find("\r\n", at);
+			if (end == std::string::npos) break;
+			std::string line = text.substr(at, end - at);
+			if (line.rfind(kStamp, 0) == 0) line = line.substr(std::string(kStamp).size());
+			out.push_back(line);
+			at = end + 2;
+		}
+		consumed = at;
+		return out;
+	}
+	size_t consumed = 0;
+};
+
+// The admin's GOTO MENUSTATE: the own client's CLIENT line at the action, nothing on the wire
+// until the next receive pump, whose walk tears down the twin and removes the host's player.
+void test_admin_exit_removes_the_host_player_at_the_next_receive_pump() {
+	auto host = std::make_unique<ListenHost>(true);
+	(void)host->inout_lines(); // the log's start line
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &host->ctx;
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Admin);
+	CHECK(host->ctx.mission_exit_reason == inmatch::kMissionExitQuit);
+	const inmatch::NapiNPConnection *own = host->own();
+	CHECK(own != nullptr && own->disconnect_event_valid && own->disconnect_event.ds == 2 &&
+			own->disconnect_event.dc == 2 && own->disconnect_event.dstr == "I.C:CIDEMIS" &&
+			own->own_goodbye == inmatch::OwnGoodbye::NextReceivePump);
+	std::vector<std::string> lines = host->inout_lines();
+	CHECK(lines.size() == 1 && lines[0] == kClientRemoved);
+	CHECK(host->to_remote().empty()); // the goodbye rides the loopback
+	// A second exit finds the client torn down: nothing more.
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Admin);
+	CHECK(host->inout_lines().empty());
+
+	// The next tick's receive pump.
+	(void)inmatch::tick_connections(host->ctx, 0, 2, /*respect_s2c_send_boundary=*/false,
+			/*run_spawn_pump=*/false);
+	CHECK(host->own() == nullptr);
+	CHECK(host->world.registry.get(host->host_body) == nullptr);
+	CHECK(host->world.registry.get(host->remote_body) != nullptr);
+	lines = host->inout_lines();
+	CHECK(lines.size() == 1 && lines[0] == kServerRemoved);
+	// The remote hears the host player leave: the leave line, then the slot's removal record.
+	const std::vector<ns::Datagram> sent = host->to_remote();
+	size_t leave = sent.size(), removal = sent.size();
+	for (size_t i = 0; i < sent.size(); ++i) {
+		if (sent[i].tag == s2c::FORMATTED_GAME_TEXT && leave == sent.size()) {
+			FormattedGameText text;
+			if (decode_formatted_game_text(sent[i].body.data(), sent[i].body.size(), text) &&
+					text.subtype == kGameTextPlayerLeaving && text.text == "Host")
+				leave = i;
+		}
+		if (sent[i].tag == 0x46 && sent[i].body == encode_player_sync_removal(0, false))
+			removal = i;
+	}
+	CHECK(leave < sent.size() && removal < sent.size() && leave < removal);
+	// The remote stays.
+	CHECK(host->ctx.np_protocol.connection_list.size() == 1);
+}
+
+// An exit from the frame's input pass: the same CLIENT line, the twin held for the mission
+// teardown's pump; the next tick's receive pump removes nothing.
+void test_input_exit_holds_the_twin() {
+	auto host = std::make_unique<ListenHost>(true);
+	(void)host->inout_lines();
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &host->ctx;
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Input);
+	const inmatch::NapiNPConnection *own = host->own();
+	CHECK(own != nullptr && own->own_goodbye == inmatch::OwnGoodbye::TeardownPump);
+	std::vector<std::string> lines = host->inout_lines();
+	CHECK(lines.size() == 1 && lines[0] == kClientRemoved);
+	(void)inmatch::tick_connections(host->ctx, 0, 2, false, false);
+	CHECK(host->own() != nullptr);
+	CHECK(host->world.registry.get(host->host_body) != nullptr);
+	CHECK(host->inout_lines().empty());
+	CHECK(host->to_remote().empty());
+}
+
+// A dedicated host has no own client: the exit stores the reason and nothing else.
+void test_dedicated_host_exit() {
+	auto host = std::make_unique<ListenHost>(false);
+	(void)host->inout_lines();
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &host->ctx;
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Admin);
+	CHECK(host->ctx.mission_exit_reason == inmatch::kMissionExitQuit);
+	(void)inmatch::tick_connections(host->ctx, 0, 2, false, false);
+	CHECK(host->inout_lines().empty());
+	CHECK(host->to_remote().empty());
+	CHECK(host->ctx.np_protocol.connection_list.size() == 1);
+}
+
+} // namespace
+
+int main() {
+	test_admin_exit_removes_the_host_player_at_the_next_receive_pump();
+	test_input_exit_holds_the_twin();
+	test_dedicated_host_exit();
+	if (failures != 0) {
+		std::printf("own_client_exit: %d failure(s)\n", failures);
+		return 1;
+	}
+	std::printf("own_client_exit: ok\n");
+	return 0;
+}

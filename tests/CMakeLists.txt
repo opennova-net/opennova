@@ -5038,6 +5038,12 @@ add_executable(npruntime_join_form_post_gate_test npruntime/join_form_post_gate_
 target_link_libraries(npruntime_join_form_post_gate_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_join_form_post_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_join_form_post_gate COMMAND npruntime_join_form_post_gate_test)
+# D-NET-NEW-L8-21: input action 3 on a listen host disconnects its own client (CIDEMIS); the admin
+# exit's next receive pump removes the host's player.
+add_executable(npruntime_own_client_exit_test npruntime/own_client_exit_test.cpp)
+target_link_libraries(npruntime_own_client_exit_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_own_client_exit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_own_client_exit COMMAND npruntime_own_client_exit_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B
