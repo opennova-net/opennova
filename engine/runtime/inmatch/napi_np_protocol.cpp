@@ -1005,6 +1005,11 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	conn.dcnt = auth.dcnt;
 	conn.rcnt = static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
 	conn.receive_inactive_ms = 0;
+	// The accept's state change stamps the receive clock; a retransmitted 0x42 to a node already
+	// in state 1 runs no state change (ours returns before this) (D-NET-256).
+	// [orig: NapiNPProtocol_HandleClientJoin - the state-1 skip @0x62C2A9..0x62C2AC, the state set
+	//  @0x62C2D4, CNapiNPConnection_OnStateChange called @0x62C2D7; OnStateChange @0x626060 -
+	//  GetTickCount @0x6260E8, `mov [esi+5E8h], ebp` @0x62612F]
 	conn.receive_stamp_ms = ctx.np_protocol.receive_clock_ms;
 	conn.c2s_reassembly = {};
 	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character

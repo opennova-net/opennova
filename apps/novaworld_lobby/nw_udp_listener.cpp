@@ -310,6 +310,10 @@ void NwUdpListener::initialize_jo_host() {
 	config.config.dedicated_server = true;
 	config.socket_mode = inmatch::SocketMode::Lan;
 	config.serve_and_play = false;
+	// The process clock the send-interval legs and the receive reap measure (GetTickCount's),
+	// as serve's and the shell's hosts run (D-NET-256).
+	// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 - `sub esi, [ebp+5E8h]` @0x62935C]
+	config.clock_ms = inmatch::host_monotonic_milliseconds;
 	inmatch::start_host_session(*jo_owner_, config);
 }
 

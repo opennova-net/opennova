@@ -682,10 +682,12 @@ struct NapiNPConnection {
 	// (session_keys.rtt_ms; stored when the peer answers our MS without WR).
 	// [orig: Nwu_HandlePing @0x623C9B]
 	uint32_t session_ping_rtt_ms = 0;
-	// The host clock at the last IN-ORDER admitted session packet or ping (conn+0x5E8): the reap
-	// measures its clock minus this stamp (D-NET-256).
-	// [orig: CNapiNPConnection_ParseMessages @0x625D54; Nwu_HandlePing @0x623C56;
-	//  CNapiNPConnection_PumpStateMachine @0x6292E0 - `sub esi, [ebp+5E8h]` @0x62935C]
+	// The host clock at the 0x42's accept (its state change), the last IN-ORDER admitted session
+	// packet or ping (conn+0x5E8): the reap measures its clock minus this stamp (D-NET-256).
+	// [orig: CNapiNPConnection_OnStateChange @0x626060 - `mov [esi+5E8h], ebp` @0x62612F (called
+	//  from NapiNPProtocol_HandleClientJoin @0x62C2D7); CNapiNPConnection_ParseMessages @0x625D54;
+	//  Nwu_HandlePing @0x623C56; CNapiNPConnection_PumpStateMachine @0x6292E0 - `sub esi,
+	//  [ebp+5E8h]` @0x62935C]
 	uint32_t receive_stamp_ms = 0;
 	uint32_t receive_inactive_ms = 0;     // elapsed since the last IN-ORDER admitted session packet
 	                                     // (a zero-message keepalive counts; duplicates, futures,
