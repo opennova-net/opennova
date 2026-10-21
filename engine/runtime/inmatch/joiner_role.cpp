@@ -992,6 +992,10 @@ void JoinerRole::wire_frame_providers() {
         out.pos[1] = row->y;
         out.pos[2] = row->z;
         out.flags = row->rm_entity_flags;
+        // The row's ride link, which a guided round's lock note reads (D-NET-196)
+        // [orig: Entity_UpdateGuidedMissile_0 @0x4465C0 - @0x4465DB..0x4465F5].
+        out.ride_link_is_local = runtime->has_self_handle() &&
+                row->ride_occupant == runtime->self_handle();
         return true;
     };
     // The damage pass's wire-built persons: a remote player or infantry is a
@@ -1087,6 +1091,25 @@ void JoinerRole::wire_frame_providers() {
 						w, world::player_cammo_type_id(w, player_class));
 				type_id = static_cast<uint16_t>(
 						w.tables.item_rows[static_cast<size_t>(index)].type_id);
+				return true;
+			});
+	// The replica rows' ride link reads the ground entity's occupant (+0x170)
+	// and its own ground entity (+0x28) off this world's twin; an occupant that
+	// is L answers the client's own wire handle, its decoded row (D-NET-196).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5EA9..0x4B5EF1]
+	rt.view().set_ground_occupant_provider(
+			[this](uint16_t ground, uint16_t &occupant, uint16_t &ground_of_ground) {
+				if (world_ == nullptr) return false;
+				const world::Entity *e = world_->registry.get(world::EntityHandle{ground});
+				if (e == nullptr) return false;
+				occupant = e->primary_occupant.valid() ? e->primary_occupant.packed
+				                                       : world::EntityHandle::kInvalid;
+				if (e->primary_occupant.valid() &&
+						e->primary_occupant == world_->cached.local_player &&
+						runtime->has_self_handle())
+					occupant = runtime->self_handle();
+				ground_of_ground = e->ground_target.valid() ? e->ground_target.packed
+				                                            : world::EntityHandle::kInvalid;
 				return true;
 			});
 	// The 0x13's class callback reads the joiner world's hit record, which

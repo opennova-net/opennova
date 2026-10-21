@@ -5204,6 +5204,11 @@ add_test(NAME netsim_joiner_usegun_rider_compose COMMAND netsim_joiner_usegun_ri
 add_executable(npruntime_full_entity_spawn_ai_state_test npruntime/full_entity_spawn_ai_state_test.cpp)
 target_link_libraries(npruntime_full_entity_spawn_ai_state_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_full_entity_spawn_ai_state COMMAND npruntime_full_entity_spawn_ai_state_test)
+# D-NET-196: the decoded player rows' org2 ride link (+0x170 / +0x174), which a guided round's
+# lock note reads on its target.
+add_executable(netsim_client_replica_pipeline_ride_link_test netsim/client_replica_pipeline_ride_link_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_ride_link_test PRIVATE opennova_runtime)
+add_test(NAME netsim_client_replica_pipeline_ride_link COMMAND netsim_client_replica_pipeline_ride_link_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

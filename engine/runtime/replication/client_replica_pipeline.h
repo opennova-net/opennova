@@ -303,6 +303,17 @@ public:
 	void set_carrier_pose_provider(CarrierPoseProvider provider) {
 		carrier_pose_provider_ = std::move(provider);
 	}
+	// The ride link's ground words: the embedder's entity at a ground handle,
+	// its occupant (+0x170) and its own ground entity (+0x28) as wire
+	// handles (0xFFFF for none); false where it has no entity there. A remote
+	// person on a joiner is a decoded row, so the occupant's team is read from
+	// the rows. [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	//  @0x4B5EA9..0x4B5EF1]
+	using GroundOccupantProvider =
+			std::function<bool(uint16_t ground, uint16_t &occupant, uint16_t &ground_of_ground)>;
+	void set_ground_occupant_provider(GroundOccupantProvider provider) {
+		ground_occupant_provider_ = std::move(provider);
+	}
 
 	// Mission water plane for the replica water/float channel (16.16), compared
 	// raw: retail keeps no dry sentinel (the word is 0 with no water authored).
@@ -689,6 +700,7 @@ private:
 	std::vector<ReplicaPeerSphere> contact_peer_scratch_;
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
+	GroundOccupantProvider ground_occupant_provider_;
 	int32_t water_z_ = 0;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
 	std::shared_ptr<const ItemReplicationCatalog> item_catalog_; // the items.def def facts

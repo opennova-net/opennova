@@ -746,6 +746,9 @@ public:
         int32_t pos[3] = {};      // entity+4..+0xC, 16.16
         uint32_t flags = 0;       // entity+0x24, the row's Flags word
         bool is_local = false;    // the handle is the local player's own
+        // The person's ride link (+0x170) names the local player (a joiner's
+        // decoded row keeps its own, D-NET-196) [orig: @0x4465DB..0x4465F5].
+        bool ride_link_is_local = false;
     };
     std::function<bool(uint16_t wire_handle, WireActor &out)> wire_actor_provider;
     // A joiner's wire-built persons as the damage pass sees them: the role

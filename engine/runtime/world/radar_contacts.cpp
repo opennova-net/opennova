@@ -354,15 +354,19 @@ void radar_note_guided_missile(World &world, const LiveRound &round, uint32_t sl
 	// The target's first occupant, then the target itself; each arm stores
 	// the lock tone before the list note [orig: @0x4465db..0x446602 (the
 	// store @0x4465f8); @0x44660a..0x446622 (the store @0x446618)].
-	if (target != nullptr && target->primary_occupant.valid() && target->primary_occupant == self) {
+	// A wire target's +0x170 is its decoded row's ride link (D-NET-196).
+	RoundSim::WireActor actor;
+	const bool wire_actor = wire_target && world.round_sim.wire_actor_provider(target_handle, actor);
+	const bool occupant_is_local = wire_target
+			? wire_actor && actor.ride_link_is_local
+			: target != nullptr && target->primary_occupant.valid() &&
+					target->primary_occupant == self;
+	if (occupant_is_local) {
 		local->radar.lock_tone = kRadarLockToneTicks;
 		radar_note_missile(local->radar, source, round.guided.pos);
 	}
 	bool target_is_local = target != nullptr && target->handle == self;
-	if (wire_target) {
-		RoundSim::WireActor actor;
-		target_is_local = world.round_sim.wire_actor_provider(target_handle, actor) && actor.is_local;
-	}
+	if (wire_target) target_is_local = wire_actor && actor.is_local;
 	if (target_is_local) {
 		local->radar.lock_tone = kRadarLockToneTicks;
 		radar_note_missile(local->radar, source, round.guided.pos);

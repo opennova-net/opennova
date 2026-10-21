@@ -632,6 +632,15 @@ struct ClientEntityState {
 	// [orig: Entity_RaycastGroundHeightAndObject @0x414370]. The deck-ride
 	// consumes it: the row follows the hit entity's per-tick pose delta.
 	uint16_t resolved_ground = 0xFFFF;
+	// A player row's ride link (retail +0x170 on a person) and its hold
+	// (+0x174): the same-team occupant of the entity it stands on, or of that
+	// entity's own ground entity, refreshed by the body pass every tick, held
+	// +4 per finding tick up to 0xF0 and spent one per missing tick before
+	// it clears. A guided missile's lock note reads it on its target (D-NET-196).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5EA9..0x4B5F2C;
+	//  Entity_UpdateGuidedMissile_0 @0x4465C0 - @0x4465DB..0x4465F5]
+	uint16_t ride_occupant = 0xFFFF;
+	int32_t ride_link_hold = 0;
 	// The row's persistent retail entity-Flags mirror — the caller-owned word
 	// the resolver's latch sites and the mover flag channels read and write on
 	// a registry entity (InAir 0x2000, Drowning/float 0x8000, LadderContact

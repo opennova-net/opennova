@@ -80,6 +80,46 @@ constexpr int32_t kTerminalVelZ = -32768;
 // order. [orig: org2 @0x4b52a0..0x4b5726 (z biased by capsule_bottom/2,
 // restored @0x4b5649); org1 @0x4ba45d..0x4ba891; the standalone twin
 // Entity_InterpolateFromParentDelta @0x4a8dc0]
+// The org2 body pass's ride link, the replica twin of world::infantry_ride_link:
+// the occupant of the entity the row stands on, else of that entity's own
+// ground entity, when it is another body of the row's team, becomes the row's
+// link and climbs the hold by 4 while under 0xF0; a tick without one spends a
+// hold tick and clears the link once the hold is spent (the link keeps its
+// last occupant while held). The occupant's team is its decoded row's.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ground's occupant
+//  @0x4B5EA9..0x4B5ECA (same team @0x4B5EBE..0x4B5ECA), the ground's ground's
+//  @0x4B5ECC..0x4B5EF1, the link @0x4B5EF3, the hold @0x4B5EF9..0x4B5F09, the
+//  spend @0x4B5F11..0x4B5F1E, the clear @0x4B5F26]
+void row_ride_link(ClientEntityState &es, const ClientState &state,
+                   const ClientReplicaPipeline::GroundOccupantProvider &ground_words) {
+	const auto team_of = [](const ClientEntityState &row) {
+		return row.team_known ? row.team : uint8_t{0};
+	};
+	const auto rider_of = [&](uint16_t ground, uint16_t &next_ground) -> uint16_t {
+		uint16_t occupant = 0xFFFF;
+		next_ground = 0xFFFF;
+		if (ground == 0xFFFF || !ground_words(ground, occupant, next_ground)) return 0xFFFF;
+		if (occupant == 0xFFFF || occupant == es.handle) return 0xFFFF;
+		const ClientEntityState *row = state.find(occupant);
+		if (row == nullptr || team_of(*row) != team_of(es)) return 0xFFFF;
+		return occupant;
+	};
+	uint16_t next_ground = 0xFFFF;
+	uint16_t link = rider_of(es.resolved_ground, next_ground);
+	if (link == 0xFFFF && es.resolved_ground != 0xFFFF) {
+		uint16_t unused = 0xFFFF;
+		link = rider_of(next_ground, unused);
+	}
+	if (link != 0xFFFF) {
+		es.ride_occupant = link;
+		if (es.ride_link_hold < 0xF0) es.ride_link_hold += 4;
+	} else if (es.ride_link_hold > 0) {
+		--es.ride_link_hold;
+	} else {
+		es.ride_occupant = 0xFFFF;
+	}
+}
+
 void row_deck_ride(ClientEntityState &es,
                    const ClientReplicaPipeline::CarrierPoseProvider &carrier) {
 	if (es.resolved_ground == 0xFFFF) return;
@@ -941,6 +981,10 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	                              bool starved = false) {
 		if (!is_self && !starved && carrier_pose_provider_)
 			row_deck_ride(es, carrier_pose_provider_);
+		// The body pass's ride link, after the ride and ahead of the integrate
+		// [orig: @0x4B5EA9..0x4B5F2C]; the client's own body runs the World's.
+		if (!is_self && es.cls == EntityClass::Player && ground_occupant_provider_)
+			row_ride_link(es, state_, ground_occupant_provider_);
 		if (root_motion_ != nullptr)
 			row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
 			                     rm_key, is_self, starved, &replica_contact_resolver_,
@@ -980,7 +1024,16 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		// reused; carrier_handle still records that the row is blocked on an
 		// attachment. Hold its last world pose until a resolvable carried sample
 		// (or an explicit free-standing sample) arrives.
-		if (es.carrier_handle != wire_handle::kInvalid) continue;
+		if (es.carrier_handle != wire_handle::kInvalid) {
+			// A seated body's pass still refreshes its ride link off the seat's
+			// ground link (the record's store) [orig: @0x4B5EA9..0x4B5F2C;
+			// the ground store @0x4C1353].
+			if (es.cls == EntityClass::Player && es.handle != self_handle &&
+					ground_occupant_provider_ &&
+					!(es.state_flags_known && (es.state_flags & 0x01u) != 0u))
+				row_ride_link(es, state_, ground_occupant_provider_);
+			continue;
+		}
 		// The organic mover-skip: wire bit0 (carried-object/killed/not-ready
 		// — NOT seat mounts, which stream 0x40) freezes the row at its staged
 		// pose [orig: the Flags&1 early return @0x4b9a03 / the body-pass twin;
