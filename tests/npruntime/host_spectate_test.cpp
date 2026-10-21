@@ -68,8 +68,10 @@ struct Rig {
 		cfg.serve_and_play = true;
 		gamecfg::GameCfg block;
 		block.join_spectate = spectate;
-		block.side_req = side_req;
 		inmatch::apply_session_create_words(cfg.config, block);
+		// The net config's side byte, the cfg block's side_req (+0x424), as the host's session
+		// config carries it (host_config.cpp) [orig: @0x5697C3].
+		cfg.config.host_side_request = static_cast<int8_t>(side_req);
 		cfg.config.side_a_password = side_a_password;
 		cfg.config.side_b_password = side_b_password;
 		inmatch::start_host_session(*owner, cfg);
