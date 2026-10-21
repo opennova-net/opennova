@@ -622,8 +622,8 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	reconnect_.next_ms = 0;
 	// The state-5 callback, OnNovaWorldConnected: its connect-log line, then the session's state 2,
 	// which marks every var list for a whole resend. [orig: CNapiNPConnection_OnStateChange
-	//  @0x626060 - @0x626231; CNapiGameSession_OnNovaWorldConnected @0x4D1570 - the line
-	//  @0x4D1871, SetState(2) @0x4D187D]
+	//  @0x626060 - the state-5 call @0x62622A; CNapiGameSession_OnNovaWorldConnected @0x4D1570 -
+	//  the line @0x4D1871, SetState(2) @0x4D187D]
 	if (cfg_.on_connection_up) cfg_.on_connection_up();
 	set_lobby_state(2);
 }

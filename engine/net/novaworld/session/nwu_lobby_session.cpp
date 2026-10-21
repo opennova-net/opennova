@@ -373,10 +373,11 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	// The dedicated host's wait outlives the worker: past SESSION_DEDICATED_GATE_WAIT_MS with no
 	// response the gate service stops, its line naming the worker's socket, still open after a
 	// worker that left at its deadline, and the hosting ends. [orig:
-	//  CNapiGameSession_WaitForStateChange @0x4D1510 - @0x4D1546, the call @0x4D154A;
-	//  CNapiGameSession_StopHosting @0x4CEC10 - the socket +0x30 @0x4CEC3A, Napi_FormatAddress
-	//  @0x4CEC53 ("n/a" @0x4CEC63), "%s : GATE STOPPING GATE SERVICE... [%s]" @0x4CECA4, the stamp
-	//  @0x4CECB2, the context freed @0x4CECC7, the gate state 1 -> 0 @0x4CECEC]
+	//  CNapiGameSession_WaitForStateChange @0x4D1510 - the compare @0x4D1541 (jbe @0x4D1546), the
+	//  call @0x4D154A; CNapiGameSession_StopHosting @0x4CEC10 - the socket +0x30 @0x4CEC3A,
+	//  Napi_FormatAddress @0x4CEC53 ("n/a" @0x4CEC63), "%s : GATE STOPPING GATE SERVICE... [%s]"
+	//  @0x4CECA4, the stamp @0x4CECB2, the context freed @0x4CECC7, the gate state 1 -> 0
+	//  @0x4CECEC]
 	if (env_.command_line_host && probe_sent_ && !session_ && !gate_answered_ &&
 			!dedicated_wait_over_ && clock_ms_ - gate_started_ms_ > SESSION_DEDICATED_GATE_WAIT_MS) {
 		dedicated_wait_over_ = true;
@@ -887,12 +888,14 @@ void NwuLobbySession::send_one(const PeerAddr &to, const std::vector<uint8_t> &d
 	// (0 for the others). [orig: Network_LogNWUSendPacket @0x4CDED0 - "%s : NWU SENDING %ld
 	//  BYTES TO %s [0x%2.2lx, p#%ld]" @0x4CDF5C, installed as the protocol's +0x270 @0x4D42B5;
 	//  its calls ahead of CNapiNPManager_SendTo: CNapiNPConnection_SendSessionPacket @0x61EDD0
-	//  (the opcode, packet_seq and total_len @0x61EFEA..0x61F00D), CNapiNPConnection_SendPing
-	//  @0x61F21A, CNapiNPConnection_SendDisconnectPacket @0x61F514,
-	//  CNapiNPConnection_SendEncryptedPayload @0x61F759, NapiNPSession_SendAnnouncePacket
-	//  @0x61FDAC (0x41, the target's address, p# 0, the length @0x61FD77..0x61FD7B),
-	//  CNapiNPConnection_SendClientJoin @0x6203C3 (0x42), CNapiNPConnection_SendMissingSeqList
-	//  @0x623720, each p# 0]
+	//  (the +0x270 load @0x61EFE0; the opcode, packet_seq and total_len @0x61EFEA..0x61F00D),
+	//  CNapiNPConnection_SendPing @0x61F080 (the +0x270 load @0x61F21A),
+	//  CNapiNPConnection_SendDisconnectPacket @0x61F2A0 (the +0x270 load @0x61F514),
+	//  CNapiNPConnection_SendEncryptedPayload @0x61F5A0 (the +0x270 load @0x61F759),
+	//  NapiNPSession_SendAnnouncePacket @0x61FA00 (the +0x270 load @0x61FDAC; 0x41, the target's
+	//  address, p# 0, the length @0x61FD77..0x61FD7B), CNapiNPConnection_SendClientJoin @0x61FE20
+	//  (the +0x270 load @0x6203C3; 0x42), CNapiNPConnection_SendMissingSeqList @0x623560 (the
+	//  +0x270 load @0x623720), each p# 0]
 	if (connect_log_on()) {
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;

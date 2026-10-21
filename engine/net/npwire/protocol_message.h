@@ -382,9 +382,9 @@ struct SessionDeframeAdmission {
 		std::vector<ProtocolMessage> messages;
 		// The packet's body length past its opcode, what the parse is handed (a queued packet's
 		// as it was queued). [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 -
-		//  CNapiNPConnection_ParseMessages(conn, payload, payload_len) @0x626BFC, the queued
-		//  copy NapiNPPacket_CreateAndInsert @0x626C32; NapiNPProtocol_PumpRecvQueues @0x6266A0
-		//  - its ParseMessages (the call @0x62696B)]
+		//  CNapiNPConnection_ParseMessages(conn, payload, payload_len) (the call @0x626BF4), the
+		//  queued copy NapiNPPacket_CreateAndInsert @0x626C32; NapiNPProtocol_PumpRecvQueues
+		//  @0x6266A0 - its ParseMessages (the call @0x62696B)]
 		std::size_t body_bytes = 0;
 	};
 

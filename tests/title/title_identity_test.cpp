@@ -152,7 +152,8 @@ void dfx2_row() {
 	CHECK(std::string(dfx2->lobby_bdat) == "Jul  7 2009 11:33:09");
 	CHECK(std::string(dfx2->ver1) == "1" && std::string(dfx2->ver2) == "9013");
 	// The _connectlog.txt header's TITLE. [orig: Game_ParseCommandLineAndInit @0x4A7360 -
-	//  @0x4A7D60 (dfx2.exe); Game_ParseCommandLineAndInit @0x4A7D30]
+	//  @0x4A7D60 (dfx2.exe); Game_ParseCommandLineAndInit @0x4A7310 (the title sprintf
+	//  @0x4A7D30..0x4A7D3C)]
 	CHECK(dfx2->connect_log_title != nullptr &&
 			std::string(dfx2->connect_log_title) == "DeltaForce: Xtreme 2");
 	CHECK(std::string(title_identity(gameprofile::GAME_JO)->connect_log_title) ==

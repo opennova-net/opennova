@@ -904,7 +904,7 @@ void check_gate_probe_cadence() {
 // The dedicated host's gate wait: the worker's five probes and its silent end at 10 s, no reply
 // read after it, then at 20 s past the probe the gate service's stop line naming the worker's
 // socket and the hosting's end (NWEC15 to the hook), once. [orig:
-// CNapiGameSession_WaitForStateChange @0x4D1510 - the 0x4E20 compare @0x4D1546,
+// CNapiGameSession_WaitForStateChange @0x4D1510 - the 0x4E20 compare @0x4D1541 (jbe @0x4D1546),
 // CNapiGameSession_StopHosting (the call @0x4D154A); CNapiGameSession_StopHosting @0x4CEC10 -
 // "%s : GATE STOPPING GATE SERVICE... [%s]" @0x4CECA4]
 void check_command_line_host_gate_wait() {

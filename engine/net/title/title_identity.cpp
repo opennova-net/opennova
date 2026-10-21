@@ -89,7 +89,8 @@ TitleIdentity jo_row() {
 	//  @0x4cdb9f / @0x4cdbb6 - the literals @0x7c9730 / @0x7c9714]
 	t.ver1 = "3";
 	t.ver2 = "2345";
-	// [orig: Game_ParseCommandLineAndInit @0x4A7D30, off_8154D8's literal, into g_TitleText]
+	// [orig: Game_ParseCommandLineAndInit @0x4A7310 (the title sprintf @0x4A7D30..0x4A7D3C),
+	//  off_8154D8's literal, into g_TitleText]
 	t.connect_log_title = "Joint Operations: Typhoon Rising";
 	// [orig: Mission_DeobfuscateDescription @0x4cdbfe]
 	t.product_code = "jop";
@@ -213,7 +214,8 @@ TitleIdentity dfx2_row() {
 	t.ver1 = "1";
 	t.ver2 = "9013";
 	// [orig: Game_ParseCommandLineAndInit @0x4A7360 (dfx2.exe) - off_8144D8's literal into
-	//  g_TitleText @0x4A7D60..0x4A7D6C, the twin of Game_ParseCommandLineAndInit @0x4A7D30]
+	//  g_TitleText @0x4A7D60..0x4A7D6C, the twin of Game_ParseCommandLineAndInit @0x4A7310 (the
+	//  title sprintf @0x4A7D30..0x4A7D3C)]
 	t.connect_log_title = "DeltaForce: Xtreme 2";
 	// [orig: [PRODUCTCODE] @0x4cdce8 (dfx2.exe)]
 	t.product_code = "dfx2";
