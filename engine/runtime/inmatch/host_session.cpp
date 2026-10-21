@@ -795,6 +795,10 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			owner.ctx, cfg.config, startup,
 			cfg.serve_and_play ? owner.host_loopback : nullptr);
 	if (created == CreateSessionResult::ProcessExit) return created;
+	// The create resets g_NetQuality, the flag cooldown stamped with the clock: a Serve Only
+	// host's lives on its context (D-NET-NEW-L8-24) [orig: CNapiGameSession_CreateSession
+	// @0x4C97C0 - CNetQuality_Reset @0x4C58C0 (the call @0x4C9CFC)].
+	hud::net_quality_reset(owner.ctx.net_quality_indicators, host_clock_ms(owner));
 	// The connection template every server-side node is created with and the 0x82
 	// advertises: 120000 ms / 1200 records, or the game directory's loose
 	// `_NSTMOUT.TXT` override [orig: CNapiNetwork_Init @0x4ca9d7..0x4caa4b, stores
@@ -869,6 +873,9 @@ void continue_host_session(HostOwner &owner, const HostConfig &cfg) {
 	// screen or the host file still names.
 	replication::set_entity_send_budget(static_cast<int>(cfg.config.entity_send_budget));
 	continue_session(owner.ctx, cfg.config, cfg.text_override);
+	// Every mission start resets g_NetQuality (D-NET-NEW-L8-24) [orig: Game_StartMission
+	// @0x524360 - CNetQuality_Reset @0x4C58C0 (the call @0x5243B4)].
+	hud::net_quality_reset(owner.ctx.net_quality_indicators, host_clock_ms(owner));
 	configure_session_world(owner, cfg);
 }
 

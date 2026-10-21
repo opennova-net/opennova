@@ -21,6 +21,7 @@
 #include <runtime/inmatch/server_designations.h> // the designation table (S2C 0x6B)
 #include <runtime/inmatch/server_files.h>      // ServerLogs (the /PROFILE and punt log devices)
 #include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
+#include <runtime/hud/net_quality_indicators.h> // a Serve Only host's g_NetQuality
 #include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
 #include <runtime/world/entity_update_transactions.h> // the entity update's inline transactions
 #include <runtime/world/match.h>               // world::MatchStats (the host slot's stats)
@@ -383,11 +384,23 @@ struct NapiNPServerCtx {
 	// [orig: Game_ProcessMainFrame @0x52655d..0x52657c]
 	bool nwu_in_use = false;
 	int32_t nwu_session_role = 0;
+	// The NWU game session's flags (session+0x120, byte_B60100), the shell's report beside
+	// those two: the connection indicators' N icon steps on its bits 2 and 8 (hud
+	// net_quality_indicators.h nwu_session_ready) (D-NET-NEW-L8-24).
+	uint8_t nwu_session_flags = 0;
 	int32_t mission_exit_reason = 0;
 	// The server protocol's link-error callbacks since the host role last
 	// drained them (kNetQualityLinkError* bits): a joiner's 0x44 resend list
 	// that named a sequence, our 0x84 missing-sequence request that named one.
 	uint32_t net_quality_link_errors = 0;
+	// g_NetQuality on a host with no client of its own (a Serve Only host): every in-session
+	// main frame stores the sample's level in it, steps its indicators and raises the link-error
+	// flags, client or not, and the status page draws it; a listen host's lives on its own
+	// client runtime (ClientRuntime::net_quality_indicators). Reset at the session create and
+	// every mission start (D-NET-NEW-L8-24).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - CNetQuality_SetLevel @0x52659B,
+	//  CNetQuality_UpdateIndicators @0x52668D (no client test); CNetQuality_Reset @0x4C58C0]
+	hud::NetQualityIndicators net_quality_indicators;
 	// The main loop's FR counter (world::TickAccumulator::average_fps), handed
 	// over by the session once per banked frame (HostRole::observe_frame_rate):
 	// the send window's frame-pressure input and, copied at the head of every

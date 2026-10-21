@@ -22,6 +22,7 @@
 #include <runtime/world/player_loadout.h> // local_loadout_rebuild
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/role_feeds.h>
+#include <runtime/inmatch/novaworld_link.h> // kNwuSessionRoleHosting
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -463,6 +464,82 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 		}
 		std::printf("host_role: the remade client's 0x4C stored at frame %d\n", stored_at);
 		CHECK(stored_at == 312);
+	}
+}
+
+// A Serve Only host's g_NetQuality: retail's main frame stores the sample's level in it, steps
+// its indicators in a session and raises the link-error flags with no client of its own, and
+// the status page draws it (D-NET-NEW-L8-24). In a NovaWorld session whose NWU session is in
+// use but not yet ready the N sits at 255 (then fades 10 a frame once ready), the stored
+// level 3 ramps its channel 4 a frame, an incoming link error raises its bit; the HUD facts
+// read all of it off the context. A LAN host's N stays dark and the facts carry no N gate.
+// [orig: Game_ProcessMainFrame @0x5263F0 - CNetQuality_SetLevel @0x52659B, `cmp is_in_session`
+//  @0x526680 -> CNetQuality_UpdateIndicators @0x52668D, Server_TickUpdate @0x5266B6;
+//  CNetQuality_UpdateIndicators @0x4C3090; CNetQuality_SetLinkErrorFlag @0x4C34F0;
+//  CNetQuality_DrawIndicators @0x4C3200 (the N gate @0x4C33F0)]
+void check_serve_only_net_quality_indicators(std::map<std::string, std::string> &files) {
+	for (const bool novaworld : {true, false}) {
+		inmatch::ClientProcessState process;
+		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		ms::MissionKernel &kernel = *kernel_owner;
+		inmatch::HostRole &role = *role_owner;
+		role.bind(kernel);
+		kernel.open_document(two_entity_mission(), "serve_only_indicators", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
+			cfg.config.server_name = "serve_only_indicators";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = false;
+			cfg.client_process = &process;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(role.state.client_runtime == nullptr);
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		inmatch::NapiNPServerCtx &ctx = role.state.host_owner.ctx;
+		CHECK(ctx.is_in_session != 0);
+		if (novaworld) ctx.transport_mode = inmatch::NetworkType::NovaWorld;
+		ctx.nwu_in_use = novaworld;
+		// Hosting, so the sample's NovaWorld exit stays clear [orig: Game_ProcessMainFrame
+		//  @0x52656D..0x52657C (dword_B60108 2 / 3 skip the exit store)].
+		ctx.nwu_session_role = inmatch::kNwuSessionRoleHosting;
+		ctx.nwu_session_flags = 0;
+		role.run_tick(tick_input(0)); // the first frame's sample opens the 62-frame block
+		// A later sample's level 3 (off the block's frame, so no sample rewrites it) and this
+		// tick's incoming link error.
+		ctx.net_quality_level = 3;
+		ctx.net_quality_link_errors = inmatch::kNetQualityLinkErrorIncoming;
+		role.run_tick(tick_input(0));
+		const hud::NetQualityIndicators &q = ctx.net_quality_indicators;
+		CHECK(q.level == 3 && q.level3_alpha == 4); // one frame's ramp step
+		CHECK(q.link_error_bits == static_cast<uint32_t>(hud::kNetLinkErrorIncoming) &&
+				q.link_error_countdown == hud::kNetLinkErrorFrames);
+		CHECK(q.novaworld_alpha == (novaworld ? 255 : 0));
+		inmatch::RoleView view;
+		view.kernel = &kernel;
+		view.host = &ctx;
+		const inmatch::HudRoleFacts facts = inmatch::hud_role_facts(view);
+		CHECK(facts.net_quality.in_session && facts.net_quality.novaworld_icon == novaworld);
+		CHECK(facts.net_quality.indicators.level == 3 &&
+				facts.net_quality.indicators.novaworld_alpha == q.novaworld_alpha);
+		if (novaworld) {
+			// Bits 2 and 8: the NWU session is ready, so the N fades 10 a frame.
+			ctx.nwu_session_flags = 0x0A;
+			role.run_tick(tick_input(0));
+			CHECK(ctx.net_quality_indicators.novaworld_alpha == 245);
+		}
 	}
 }
 
@@ -1665,6 +1742,7 @@ int main() {
 
 	check_quality_report_runs_on(files);
 	check_serve_only_steps_quality_count(files);
+	check_serve_only_net_quality_indicators(files);
 
 	check_own_world_state_location_names(files);
 

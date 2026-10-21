@@ -1005,11 +1005,32 @@ void HostRole::run_tick(const TickInput &input) {
 		apply_replica_track(kernel.world, state.client_runtime->state(),
 				state.client_runtime->game_type(), /*route_from_wire=*/false, track_seen_);
 	} else {
-		// A Serve Only host has no client runtime, but its main frame runs the client net
-		// frame all the same, which steps the process's 0x4C count (no report: not a session
-		// peer). [orig: Game_ProcessMainFrame @0x526692 (no role test); Client_ProcessNetworkFrame
-		//  @0x42C239 / @0x42C246]
+		// A Serve Only host has no client runtime, but its main frame runs the same g_NetQuality
+		// legs on the process's object (its context's): the sample's level stored, the
+		// indicators stepped in a session, then this tick's server link-error callbacks
+		// raised, which its status page draws (D-NET-NEW-L8-24).
+		// [orig: Game_ProcessMainFrame @0x5263F0 - CNetQuality_SetLevel @0x52659B (the level
+		//  @0x526590), `cmp is_in_session` @0x526680 -> CNetQuality_UpdateIndicators @0x52668D
+		//  (no client test), Server_TickUpdate @0x5266B6; CNetQuality_SetLinkErrorFlag @0x4C34F0]
+		hud::NetQualityIndicators &indicators = ctx.net_quality_indicators;
+		hud::net_quality_set_level(indicators, ctx.net_quality_level);
+		if (ctx.is_in_session != 0) {
+			hud::NovaWorldLinkFacts nw;
+			nw.novaworld = ctx.transport_mode == NetworkType::NovaWorld;
+			nw.nwu_in_use = ctx.nwu_in_use;
+			nw.nwu_session_flags = ctx.nwu_session_flags;
+			nw.nwu_session_role = ctx.nwu_session_role;
+			hud::net_quality_update_indicators(indicators, nw);
+		}
+		// Its main frame runs the client net frame all the same, which steps the process's
+		// 0x4C count (no report: not a session peer). [orig: Game_ProcessMainFrame @0x526692
+		//  (no role test); Client_ProcessNetworkFrame @0x42C239 / @0x42C246]
 		(void)client_process_->step_net_quality_report();
+		const uint32_t now_ms = host_clock_ms(state.host_owner);
+		if ((ctx.net_quality_link_errors & kNetQualityLinkErrorOutgoing) != 0)
+			hud::net_quality_set_flag(indicators, hud::kNetLinkErrorOutgoing, now_ms);
+		if ((ctx.net_quality_link_errors & kNetQualityLinkErrorIncoming) != 0)
+			hud::net_quality_set_flag(indicators, hud::kNetLinkErrorIncoming, now_ms);
 	}
 	ctx.net_quality_link_errors = 0;
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;

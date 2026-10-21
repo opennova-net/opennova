@@ -379,6 +379,7 @@ void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role
 		facts.novaworld = ctx->transport_mode == opennova::inmatch::NetworkType::NovaWorld;
 		ctx->nwu_in_use = p_in_use;
 		ctx->nwu_session_role = p_role;
+		ctx->nwu_session_flags = facts.nwu_session_flags; // a Serve Only host's N icon (D-NET-NEW-L8-24)
 		if (p_exit_reason != 0) ctx->mission_exit_reason = p_exit_reason;
 	} else {
 		facts.novaworld = net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld;
