@@ -789,6 +789,14 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			connection.join_spectator_request = spectate;
 		}
 	}
+	// A Serve Only host's own row takes the profile the host runs under (the shell's player
+	// profile; a fresh record's on a host with none) from the create's profile init, as the
+	// listen host's own connection does above (D-NET-352's FOUND 5).
+	// [orig: CNapiGameSession_CreateSession @0x4C9C9A..0x4C9CCE -> PlayerSession_InitFromProfile
+	//  @0x50CA80]
+	PlayerSession_InitHostRowFromProfile(owner.ctx, cfg.local_character_vars
+			? *cfg.local_character_vars
+			: fresh_profile_character_vars(owner.ctx.characters));
 	configure_session_world(owner, cfg);
 	apply_first_mission_settings(owner, cfg);
 	if (cfg.serve_and_play && owner.ctx.world != nullptr) {

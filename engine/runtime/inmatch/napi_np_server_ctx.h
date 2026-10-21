@@ -165,6 +165,10 @@ struct HostSlotRow {
 	uint8_t team = 0;             // +0x1A0
 	int32_t player_class = 0;     // +0x15EDC, the admin tables' Class column
 	world::MatchStats stats;      // +0x48 CPlayerStats: Kills (5) and Deaths (7)
+	// The session create's profile init's side bytes: the char ids (+0x1B8 / +0x1BC) and
+	// avatars (+0x15F01..+0x15F03) the host's player profile carries, a fresh record's on a
+	// host with no profile of its own (PlayerSession_InitHostRowFromProfile).
+	CharacterJoinVars char_vars;
 	// +0: the row's hidden body, every mission start's round init's spawn (D-NET-352;
 	// Server_SpawnHostSlotBody).
 	world::EntityHandle body{};

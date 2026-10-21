@@ -87,6 +87,19 @@ void Server_AdvanceFreeRowTicks(NapiNPServerCtx &ctx);
 //  sideRequirement_424 @0x551B91..0x551BA2]
 void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection &own);
 
+// The session create's profile init of a Serve Only host's own row (HostSlotRow): the side
+// bytes the host's player profile carries (its char ids and avatars) and the class by the side
+// requirement, as PlayerSession_InitOwnSlotClass picks a listen host's (side A's profile class
+// when the cfg's side_req is 0, else side B's, stored raw). Retail's game-launched Serve Only
+// host reads the player profile it runs under; a host with no profile of its own
+// (opennova-serve) passes a fresh record's, which the round init already left. Nothing for an
+// inactive row. [orig: CNapiGameSession_CreateSession @0x4C97C0 - a non-peer jumps into the
+//  profile init @0x4C9C9A..0x4C9CCE, the class @0x4C9952..0x4C996C; PlayerSession_InitFromProfile
+//  @0x50CA80 - the side ids +0x1B8 / +0x1BC @0x50CB67..0x50CB8F, the avatars
+//  @0x50CB96..0x50CBA2, the class @0x50CB7C; their source Game_ApplySessionSettingsToGlobals
+//  @0x551500 over the current profile]
+void PlayerSession_InitHostRowFromProfile(NapiNPServerCtx &ctx, const CharacterJoinVars &vars);
+
 // A Serve Only host's own slot 0's body (HostSlotRow::body), the round init's spawn of the
 // row at every mission start, first in slot order: the slot's class (+0x15EDC) and team, the
 // side's character id and avatar, owner connection 0, a spawn marker as a joiner's add takes

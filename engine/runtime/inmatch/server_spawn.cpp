@@ -236,9 +236,18 @@ void init_host_slot_row(NapiNPServerCtx &ctx) {
 	const int8_t side = ctx.config.host_side_request;
 	host.team = side == 1 || side == 2 ? static_cast<uint8_t>(side) : uint8_t{1};
 	host.player_class = kFreshProfileSideClass;
+	host.char_vars = fresh_profile_character_vars(ctx.characters);
 }
 
 } // namespace
+
+void PlayerSession_InitHostRowFromProfile(NapiNPServerCtx &ctx, const CharacterJoinVars &vars) {
+	HostSlotRow &host = ctx.host_slot;
+	if (!host.active) return;
+	host.char_vars = vars;
+	host.player_class = static_cast<int8_t>(ctx.config.host_side_request == 0 ? vars.char_class[0]
+	                                                                        : vars.char_class[1]);
+}
 
 void PlayerSession_InitOwnSlotClass(const NapiNPServerCtx &ctx, NapiNPConnection &own) {
 	const uint8_t side_class = ctx.config.host_side_request == 0 ? own.char_vars.char_class[0]
@@ -258,10 +267,11 @@ world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World 
 		host.team = 1;
 	world::PlayerSpawn spawn;
 	spawn.team = host.team;
-	// The row's side bytes are the session create's profile init's, a fresh record's on
-	// a host with no profile of its own [orig: PlayerSession_InitFromProfile @0x50CA80 -
+	// The row's side bytes are the session create's profile init's: the host's player
+	// profile's, a fresh record's on a host with no profile of its own
+	// (PlayerSession_InitHostRowFromProfile) [orig: PlayerSession_InitFromProfile @0x50CA80 -
 	//  +0x1B8 / +0x1BC, +0x15F01..+0x15F03].
-	const CharacterJoinVars vars = fresh_profile_character_vars(ctx.characters);
+	const CharacterJoinVars &vars = host.char_vars;
 	const int side = (spawn.team == 1 || spawn.team == 3 || (game_type & 0x10000u) == 0) ? 0 : 1;
 	spawn.anim_slot = vars.avatar[side];
 	spawn.minimap_net_id = vars.char_id[side];

@@ -115,6 +115,34 @@ void test_the_row_body_is_first_hidden_and_local() {
 	CHECK(seen);
 }
 
+// The row's side bytes and class are the create's profile init's from the profile the host
+// runs under (a game-launched Serve Only host's player profile), the class by the side
+// requirement (-1: side B's, as the listen host's own slot picks it); the round init left a
+// fresh record's (D-NET-352's FOUND 5).
+// [orig: CNapiGameSession_CreateSession @0x4C9952..0x4C996C, @0x4C9C9A..0x4C9CCE ->
+//  PlayerSession_InitFromProfile @0x50CA80 - @0x50CB67..0x50CBA2, the class @0x50CB7C]
+void test_the_row_takes_the_hosts_profile() {
+	Rig r;
+	CHECK(r.ctx->config.host_side_request == -1);
+	inmatch::CharacterJoinVars profile;
+	profile.char_id[0] = 0x0301;
+	profile.char_id[1] = 0x0402;
+	profile.char_class[0] = 5;
+	profile.char_class[1] = 6;
+	profile.avatar[0] = 3;
+	profile.avatar[1] = 4;
+	inmatch::PlayerSession_InitHostRowFromProfile(*r.ctx, profile);
+	const inmatch::HostSlotRow &host = r.ctx->host_slot;
+	CHECK(host.player_class == 6);
+	const w::EntityHandle body = inmatch::Server_SpawnHostSlotBody(*r.ctx, r.world);
+	const w::Entity *e = r.world.registry.get(body);
+	CHECK(e != nullptr);
+	if (e == nullptr) return;
+	// Team 1: side A's char id and avatar.
+	CHECK(e->team == 1 && e->player_class == 6);
+	CHECK(e->minimap_net_id == 0x0301 && e->anim_slot == 3);
+}
+
 void test_player_kill_0_runs_the_rows_transaction() {
 	Rig r;
 	w::MatchRules rules;
@@ -144,6 +172,7 @@ void test_player_kill_0_runs_the_rows_transaction() {
 
 int main() {
 	test_the_row_body_is_first_hidden_and_local();
+	test_the_row_takes_the_hosts_profile();
 	test_player_kill_0_runs_the_rows_transaction();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
