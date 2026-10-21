@@ -1932,6 +1932,14 @@ end
 	sim.enable_listen_server(true)
 	_install_native_seat_table(sim, fixture_dir, item_db, PackedInt32Array([1294]))
 	sim.set_sound_profiles(FileAccess.get_file_as_bytes(sndprof_path))
+	# A map with no water leaves the water word 0, which this flat rig's hull settles
+	# on at the mission start: the hull's in-water test compares the word raw, and a
+	# hull in water drains two health per tick, so the plane goes well below the rig
+	# before the load, clear of that edge (the hull stays dry and whole).
+	# [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (@0x47D516..0x47D53A);
+	#  Entity_UpdateVehiclePhysics @0x48AF00 (the drain @0x48D05A..0x48D083);
+	#  Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
+	sim.set_water_z(-100.0)
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
 	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
