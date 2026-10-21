@@ -36,6 +36,11 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
     if (native_handle == world.cached.local_player) {
         if (const auto *local = world.registry.get(native_handle)) { out = *local; return true; }
     }
+    // The listen host's own client reads the authority's entity behind the handle:
+    // its 0x50 fold stores no Team (D-NET-736) [orig: NapiNPClientMsg_TeamAssign
+    // @0x4319E1..0x4319EE; the pool resolve @0x430BEC reads the host's own row].
+    if (runtime.is_authority())
+        if (const auto *entity = world.registry.get(native_handle)) { out = *entity; return true; }
     if (native_handle.pool() >= 1 && native_handle.pool() <= 3)
         if (const auto *twin = world.registry.get(native_handle)) { out = *twin; return true; }
     if (const auto *row = runtime.state().find(handle)) {

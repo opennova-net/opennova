@@ -191,11 +191,10 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 				static_cast<std::size_t>(assigned.slot()) <
 						world::retail_pool_capacity(assigned.pool())) {
 			// Retail stores the entity's Team off the authority only [orig: `cmp
-			// g_NapiNPCtx.is_authority` @0x4319e1, the store @0x4319ee]; the listen
-			// host's view still takes it, because two host-view readers (the deploy
-			// zone teams, the effects' sound actor) read it there. D-NET-736:
-			// the host view's 0x50 Team store.
-			apply_team_assign(assign.entity_handle, assign.team);
+			// g_NapiNPCtx.is_authority` @0x4319E1, the store @0x4319EE]: the listen
+			// host's readers take the authority's own entity (the deploy zone teams
+			// through zone_team_byte, the effects' sound actor off its world).
+			if (!authority_recipient_) apply_team_assign(assign.entity_handle, assign.team);
 			// A player's team change asks for its 0x46 team field and a fresh
 			// 0x4C snapshot; the 0x22 slot byte is the handle's low byte (the
 			// pool-0 index) [orig: NapiNPClientMsg_TeamAssign @0x431a15 (the

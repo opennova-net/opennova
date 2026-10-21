@@ -209,6 +209,10 @@ BreathBarFacts breath_bar_facts(const RoleView &view) {
 
 namespace {
 
+// A spawn zone's Team byte as this client holds it (defined with the death
+// screen's readers below).
+uint8_t zone_team_byte(const RoleView &view, const world::Entity &zone);
+
 // One F9 / F10 menu's title and rows over the local player (hud_role_facts'
 // doc carries the witness).
 void fill_voice_macro_menu(const RoleView &view, const world::Entity &local, bool radio,
@@ -560,9 +564,10 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 				if (zone == nullptr) continue;
 				const auto found = view.runtime->zone_states().find(handle.packed);
 				if (found == view.runtime->zone_states().end()) continue;
-				const auto *replica = cs.find(handle.packed);
-				const auto team = replica != nullptr && replica->team_known ? replica->team
-																			: zone->team;
+				// The zone entity's own Team byte as this client holds it: the
+				// authority's entity on the host, the 0x50 / 0x51 store on a joiner
+				// [orig: NapiNPClientMsg_TeamAssign @0x4319E1..0x4319EE].
+				const auto team = zone_team_byte(view, *zone);
 				const auto &entry = found->second.entry;
 				if (team == instructions.team && entry.value_target >= entry.value_limit)
 					instructions.has_full_team_spawn = true;
