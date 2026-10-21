@@ -304,7 +304,8 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 			? loadout->engine_input()
 			: opennova::world::SpawnLoadoutInput();
 	const opennova::world::SpawnLoadoutPlan plan =
-			opennova::world::spawn_loadout_plan(input, spawn_sim->has_explicit_spawn_loadout());
+			opennova::world::spawn_loadout_plan(input, spawn_sim->has_explicit_spawn_loadout(),
+					spawn_sim->is_host_listening() || spawn_sim->is_joiner());
 	if (plan.set_player_class) {
 		spawn_sim->set_local_player_class(plan.player_class);
 	}

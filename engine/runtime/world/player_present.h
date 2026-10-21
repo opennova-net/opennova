@@ -363,7 +363,8 @@ struct SpawnLoadoutPlan {
 };
 
 // The mission-start projection of the staged PLAYER_INFO kit onto the local
-// player: the profile class commits whenever it was carried; mission-authored
+// player: the profile class commits whenever it was carried in a session (out of
+// one the body keeps the mission's class word, D-PLAYERINFO-33); mission-authored
 // kits outrank the profile selection (unlike the inventory itself, that
 // source bit stays false for load_weapon_table's WPN_M4AUTO fallback, so a
 // real default weapon cannot masquerade as mission policy); a staged kit
@@ -372,6 +373,6 @@ struct SpawnLoadoutPlan {
 // authoritative inventory (a syntactically nonempty kit can still be
 // rejected by mission/class rules).
 SpawnLoadoutPlan spawn_loadout_plan(const SpawnLoadoutInput &input,
-                                    bool has_explicit_spawn_loadout);
+                                    bool has_explicit_spawn_loadout, bool in_session);
 
 } // namespace opennova::world

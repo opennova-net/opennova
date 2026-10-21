@@ -176,7 +176,7 @@ bool viewmodel_def_memo_hit(const std::string &name, const std::string &memo_nam
 }
 
 SpawnLoadoutPlan spawn_loadout_plan(const SpawnLoadoutInput &input,
-                                    bool has_explicit_spawn_loadout) {
+                                    bool has_explicit_spawn_loadout, bool in_session) {
     SpawnLoadoutPlan plan;
     bool has_loadout = false;
     for (const SpawnLoadoutSlot &slot : input.slots) {
@@ -185,8 +185,12 @@ SpawnLoadoutPlan spawn_loadout_plan(const SpawnLoadoutInput &input,
             break;
         }
     }
-    plan.set_player_class = input.has_player_class;
-    plan.player_class = input.has_player_class ? input.player_class : 0;
+    // Out of a session the single player's body class is the mission's word, which the
+    // mission start's Player_InitPlayer stamped and nothing after writes from the profile
+    // (D-PLAYERINFO-33) [orig: Game_ApplySessionSettingsToGlobals @0x551500 -
+    //  @0x551707..0x551725; Player_InitPlayer @0x4E15F0 - @0x4E182C..0x4E1832].
+    plan.set_player_class = input.has_player_class && in_session;
+    plan.player_class = plan.set_player_class ? input.player_class : 0;
     // Mission-authored kits outrank the profile selection.
     if (has_explicit_spawn_loadout) {
         plan.action = SpawnLoadoutAction::kSyncInventory;

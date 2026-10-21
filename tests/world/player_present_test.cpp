@@ -242,26 +242,31 @@ void test_spawn_loadout_projection() {
 	CHECK(std::strcmp(w::kSpawnLoadoutSlotKeys[2], "accessory") == 0);
 	// Nothing staged: no class, nothing applied.
 	w::SpawnLoadoutInput empty;
-	const w::SpawnLoadoutPlan none = w::spawn_loadout_plan(empty, false);
+	const w::SpawnLoadoutPlan none = w::spawn_loadout_plan(empty, false, true);
 	CHECK(!none.set_player_class && none.action == w::SpawnLoadoutAction::kNone);
 	// A class alone commits the class and applies nothing.
 	w::SpawnLoadoutInput class_only;
 	class_only.has_player_class = true;
 	class_only.player_class = 8;
-	const w::SpawnLoadoutPlan classed = w::spawn_loadout_plan(class_only, false);
+	const w::SpawnLoadoutPlan classed = w::spawn_loadout_plan(class_only, false, true);
 	CHECK(classed.set_player_class && classed.player_class == 8);
 	CHECK(classed.action == w::SpawnLoadoutAction::kNone);
+	// Out of a session the single player's body keeps the mission's class word: the profile
+	// class commits nothing (D-PLAYERINFO-33) [orig: Player_InitPlayer @0x4E15F0 -
+	//  @0x4E182C..0x4E1832; Game_ApplySessionSettingsToGlobals @0x551707..0x551725].
+	const w::SpawnLoadoutPlan single = w::spawn_loadout_plan(class_only, false, false);
+	CHECK(!single.set_player_class && single.player_class == 0);
 	// A mission kit outranks the profile: sync the inventory, apply nothing.
 	w::SpawnLoadoutInput staged;
 	staged.slots[0] = {true, "WPN_M4AUTO", -1};
 	staged.slots[2] = {true, "WPN_SATCHEL_CHARGE", 2};
 	staged.has_player_class = true;
 	staged.player_class = 8;
-	const w::SpawnLoadoutPlan mission = w::spawn_loadout_plan(staged, true);
+	const w::SpawnLoadoutPlan mission = w::spawn_loadout_plan(staged, true, true);
 	CHECK(mission.set_player_class && mission.action == w::SpawnLoadoutAction::kSyncInventory);
 	CHECK(mission.kit.empty());
 	// The profile kit applies its non-empty slots in kit order with clips.
-	const w::SpawnLoadoutPlan profile = w::spawn_loadout_plan(staged, false);
+	const w::SpawnLoadoutPlan profile = w::spawn_loadout_plan(staged, false, true);
 	CHECK(profile.action == w::SpawnLoadoutAction::kApplyKit);
 	CHECK(profile.kit.size() == 2);
 	if (profile.kit.size() == 2) {
@@ -274,7 +279,7 @@ void test_spawn_loadout_projection() {
 	all_none.slots[0] = {true, "", -1};
 	all_none.slots[1] = {true, "", -1};
 	all_none.slots[2] = {true, "", -1};
-	const w::SpawnLoadoutPlan cleared = w::spawn_loadout_plan(all_none, false);
+	const w::SpawnLoadoutPlan cleared = w::spawn_loadout_plan(all_none, false, true);
 	CHECK(cleared.action == w::SpawnLoadoutAction::kApplyKit);
 	CHECK(cleared.kit.empty());
 	CHECK(cleared.after_apply == w::SpawnLoadoutAfterApply::kClearWeapon);

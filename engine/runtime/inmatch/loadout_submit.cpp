@@ -42,6 +42,11 @@ bool seed_session_kit_from_profile(world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
 	if (world.tables.weapons.empty()) return false;
+	// A session PEER copies its side's page; a dedicated host is no peer and copies nothing,
+	// so a Serve Only row keeps the process buffer as it stands (D-NET-143, D-NET-352)
+	// [orig: Game_StartMission @0x524360 - `cmp is_in_session` @0x525767,
+	//  `cmp is_mp_session_peer` @0x525773 / jz @0x525779 past the copy call @0x525818].
+	if (!world.rules.mp_session_peer) return false;
 	const uint8_t team = loadout_side_team(world, assigned_team);
 	// An UNLATCHED team must not commit a page. The side selector is the S2C 0x04 tail
 	// byte [orig: g_LocalTeam @0x425499], and retail cannot reach this copy before it is

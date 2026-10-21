@@ -32,10 +32,12 @@
 #include <base/gameprofile/game_type.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/loadout_submit.h> // seed_session_kit_from_profile (the shell seed)
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/null_datagram_socket.h>
 #include <net/npwire/ingame_decode.h> // decode_loadout_submit (the own 0x2F pair)
 #include <formats/mission/bms.h>
+#include <formats/playersav/weapon_sav.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/infantry.h> // IRootMotionSource (the warm-up pin)
@@ -115,7 +117,10 @@ struct ServeOnlyStart {
 	uint8_t equipped = 0xFF;
 	size_t slots = 0;
 };
-ServeOnlyStart run_serve_only_start(inmatch::ClientProcessState &process) {
+// `shell_page`, when given, is the game shell's profile side page: the shell's boot offers it to
+// the session seed (Simulation::seed_session_kit_from_profile), as a Godot-game Serve Only host does.
+ServeOnlyStart run_serve_only_start(inmatch::ClientProcessState &process,
+		const char *shell_page = nullptr) {
 	ServeOnlyStart out;
 	std::map<std::string, std::string> files;
 	files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
@@ -132,6 +137,19 @@ ServeOnlyStart run_serve_only_start(inmatch::ClientProcessState &process) {
 	options.bringup_net_session = [&] { role.bring_up(serve_only_bringup(options.game_type, &process)); };
 	std::string error;
 	CHECK(kernel.boot(options, error));
+	if (shell_page != nullptr) {
+		// The row's team 1 selects side A; its page names `shell_page`. A dedicated host is no
+		// session peer, so the seed copies nothing and the buffer stands.
+		playersav::Record profile;
+		profile.blue.player_class = 8;
+		profile.blue.pages[3].entries.push_back(playersav::KitEntry{shell_page, 1, 0, -1});
+		int seeded_side = -1;
+		const size_t before = process.spawn_loadout_buffer.entries.size();
+		CHECK(!inmatch::seed_session_kit_from_profile(kernel.world, profile, /*assigned_team=*/1,
+				kernel.local.loadout, seeded_side));
+		CHECK(seeded_side == -1);
+		CHECK(process.spawn_loadout_buffer.entries.size() == before);
+	}
 	role.seed_own_slot_at_first_round_init();
 	role.init_local_player_at_mission_start();
 	const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
@@ -722,6 +740,57 @@ void run_single_player_class_is_the_missions_type() {
 	}
 }
 
+// A single player's restart keeps the class word the start stored: Game_StartMission(1) skips the
+// session apply, runs no round init, and no other writer of g_CharClassTeam1 runs out of a session
+// (the 0x5A handler is a joiner's, the slot-list send answers a 0x2F or a deploy), so the restart's
+// own row and Player_InitPlayer's re-stamp read the start's mission type; a profile class changed
+// between the two boots is never read (D-PLAYERINFO-33). The two boots share the process words.
+// [orig: Game_RestartRoundSP @0x5263A0 - the push 1 @0x5263D9; Game_StartMission @0x524360 - the
+//  `cmp esi, ebx` / jz @0x52465E..0x524660 over the apply @0x524662, the own row's class
+//  @0x524EE3; Game_ApplySessionSettingsToGlobals @0x551500 (@0x551707..0x551725); Player_InitPlayer
+//  @0x4E15F0 (@0x4E182C..0x4E1832)]
+void run_single_player_restart_keeps_the_class_word() {
+	auto process = std::make_unique<inmatch::ClientProcessState>();
+	const bool restarts[2] = {false, true};
+	const uint8_t profile_class[2] = {6, 7};
+	for (int pass = 0; pass < 2; ++pass) {
+		std::map<std::string, std::string> files;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>(
+				inmatch::RoleKind::SinglePlayer, nullptr);
+		inmatch::HostRole &role = *role_storage;
+		role.bind(kernel);
+		bms::File mission = two_entity_mission();
+		mission.header.mission_type = static_cast<bms::MissionType>(2);
+		kernel.open_document(std::move(mission), "sp_restart_class", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = false;
+		options.restart = restarts[pass];
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostBringup bringup = single_player_bringup(options.game_type, process.get());
+			inmatch::CharacterJoinVars vars;
+			vars.char_class[0] = profile_class[pass];
+			vars.char_class[1] = profile_class[pass];
+			bringup.host_cfg.local_character_vars = vars;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		const inmatch::NapiNPConnection *own = nullptr;
+		for (const inmatch::NapiNPConnection &conn : role.state.host_owner.ctx.np_protocol.connection_list)
+			if (conn.type == inmatch::NapiNPConnection::kTypeClientSide) own = &conn;
+		CHECK(own != nullptr);
+		if (own == nullptr) continue;
+		CHECK(own->char_vars.char_class[0] == 2);
+		role.init_local_player_at_mission_start();
+		const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
+		CHECK(body != nullptr);
+		if (body != nullptr) CHECK(body->team != 1 || body->player_class == 2);
+	}
+}
+
 // A single player's restart runs no round-state init (Game_RestartRoundSP -> Game_StartMission(1)),
 // so its status UP-TIME keeps counting from the first start's stamp, where a fresh start's create
 // stamps its own; and the restart's spawn raises read the word the previous start left, the
@@ -800,6 +869,30 @@ void run_a_fresh_dedicated_process_runs_on_an_empty_buffer() {
 	CHECK(start.equipped == 2); // WPN_M4AUTO: the name list initializer's first name
 }
 
+// A Godot-game Serve Only host's shell offers its profile's side page to the session seed; the
+// mission start copies a side page only on a session peer, so the row keeps the process buffer:
+// a fresh process's empty one (the spawn's WPN_M4AUTO), one that ran a single player mission
+// that mission's kit (D-NET-143, D-NET-352; V-L4-s11).
+// [orig: Game_StartMission @0x524360 - `cmp is_in_session` @0x525767, `cmp is_mp_session_peer`
+//  @0x525773 / jz @0x525779 past the copy call @0x525818; Player_InitPlayer @0x4E15F0
+//  (@0x4E1872..0x4E1882, @0x4E1995)]
+void run_a_game_serve_only_row_copies_no_side_page() {
+	{
+		auto process = std::make_unique<inmatch::ClientProcessState>();
+		const ServeOnlyStart start = run_serve_only_start(*process, "WPN_KNIFE");
+		CHECK(process->spawn_loadout_buffer.entries.empty());
+		CHECK(start.slots == 0);
+		CHECK(start.equipped == 2); // WPN_M4AUTO, not the side page's knife
+	}
+	auto process = std::make_unique<inmatch::ClientProcessState>();
+	process->spawn_loadout_buffer.entries.push_back(w::WeaponKitEntry{"WPN_KNIFE", 1, 0, -1});
+	const ServeOnlyStart start = run_serve_only_start(*process, "WPN_M4AUTO");
+	CHECK(process->spawn_loadout_buffer.entries.size() == 1 &&
+			process->spawn_loadout_buffer.entries[0].name == "WPN_KNIFE");
+	CHECK(start.slots == 1);
+	CHECK(start.equipped == 1); // the single player's kit, not the side page's WPN_M4AUTO
+}
+
 // The buffer lives as long as the process: a single player mission's fill (its kit chunk here)
 // is still the buffer when the same process hosts Serve Only, whose start fills nothing, so the
 // row's Player_InitPlayer builds its table from it and its select of 195 equips the kit's knife
@@ -855,8 +948,10 @@ int main() {
 	run_single_player_restart_repromotes_the_mission_kit();
 	run_single_player_restart_keeps_the_uptime_stamp();
 	run_single_player_class_is_the_missions_type();
+	run_single_player_restart_keeps_the_class_word();
 	run_a_fresh_dedicated_process_runs_on_an_empty_buffer();
 	run_a_single_player_fill_carries_into_a_serve_only_row();
+	run_a_game_serve_only_row_copies_no_side_page();
 	if (failures == 0) std::printf("host_mission_start: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
