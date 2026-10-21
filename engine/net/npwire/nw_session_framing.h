@@ -136,9 +136,16 @@ uint32_t next_connection_index();
 // Decode an inbound NW-UDP datagram. On success, populates `opcode_out`
 // (byte 0 of the CRC-stripped packet, plaintext) and `body_out` (the
 // NWU-decrypted payload after byte 0). Names are swapped vs onnet —
-// server-side decrypt is our nwu_encrypt.
+// server-side decrypt is our nwu_encrypt. The two steps are
+// nw_unpack_inbound (the envelope: the CRC-stripped packet, false when the
+// unpack fails) and nw_split_unpacked (the opcode byte and the NWU-decrypted
+// body; false for an empty packet).
+// [orig: NapiNP_UnpackPacket @0x62CA20, from NapiNPManager_PumpReceive @0x623206]
 bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,
                        uint8_t &opcode_out, std::vector<uint8_t> &body_out);
+bool nw_unpack_inbound(const uint8_t *raw, size_t raw_len, std::vector<uint8_t> &unpacked_out);
+bool nw_split_unpacked(const std::vector<uint8_t> &unpacked, uint8_t &opcode_out,
+                       std::vector<uint8_t> &body_out);
 
 // Encode an outbound reply: prepend `opcode`, NWU-encrypt the body part
 // (server-side encrypt is our nwu_decrypt), then NAPI envelope-wrap.

@@ -38,6 +38,7 @@
 //
 // Every write goes through the embedder's file seam (server_files.h).
 
+#include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/server_files.h>
 
 #include <array>
@@ -98,6 +99,68 @@ private:
 	std::function<std::string()> now_;
 	bool enabled_ = false;
 };
+
+// The _connectlog.txt packet and session lines' texts, each written as
+// ConnectLog::line's `"<time> : <text>"` while the log is on. An address is
+// Napi_FormatAddress's "a.b.c.d:port" (peer_addr_to_string: inet_ntoa, then
+// the host-order port as %ld) [orig: Napi_FormatAddress @0x62DED0 - inet_ntoa
+// @0x62DF05, sprintf("%s:%ld") @0x62DF22; the port host-ordered by
+// CNapiUdpSocket_RecvFromWithFilter @0x62D189].
+//
+// The NAPI manager's five packet callbacks, installed on the game's manager
+// (ctx +0xE58, mgr +0x110..+0x120) only while the log is on [orig:
+// NapiLib_SetManagerCallbacks @0x4C6F50, @0x4C6F64..0x4C6FAC] and called from
+// its receive [orig: NapiNPManager_PumpReceive @0x623010; NapiNPManager_HandlePacket
+// @0x622F10]: every datagram the socket hands over (RAW, its socket length), the
+// unpacked packet (COOKED, the CRC-stripped length), the 0x1071 magic packet
+// (BAFFLE), a packet a protocol's opcode handler took (PROTOCOL, the protocol's
+// name, proto +0xDC) and a dropped one (TOSSED with its reason: 1 the receive
+// rate at 100 or more, 2 the receive-rate draw, 3 an unpack failure, 4 no
+// protocol took it).
+// [orig: Network_LogRawPacketReceived @0x4C43A0; Network_LogCookedPacketReceived
+//  @0x4C4440; Network_LogBaffledPacket @0x4C44E0; Network_LogNapiProtocolRecv
+//  @0x4C6100; Network_LogTossedPacket @0x4C4580]
+enum class NapiTossReason : int32_t {
+	RecvRateFull = 1,
+	RecvRateDraw = 2,
+	Unpack = 3,
+	NoProtocol = 4,
+};
+std::string napi_got_raw_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_cooked_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_baffle_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_protocol_text(int32_t bytes, const PeerAddr &from,
+		const std::string &protocol_name);
+std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason reason);
+// The protocol's client-side callbacks (proto +0x26C / +0x270 / +0x274 / +0x27C /
+// +0x280 / +0x284); the server side's slots (+0x2DC / +0x2E0 / +0x2E4 / +0x2EC /
+// +0x2F0) hold empty stubs, so a host writes none of these.
+// [orig: CNapiNetwork_Init @0x4CA908..0x4CA9CD; NapiLog_OnRecv @0x4C46B0 ("NET GOT",
+//  the opcode as two hex digits), NapiLog_OnSend @0x4C4760 ("NET SENDING", the
+//  opcode and p#), NapiLog_OnProcess @0x4C67D0, Network_LogUnknownNETMessage
+//  @0x4C4810, Network_LogIncomingPacketError @0x4C4890,
+//  Network_LogOutgoingPacketError @0x4C4920; the side tests
+//  CNapiNPConnection_SendSessionPacket @0x61EFCA..0x61EFE8 and
+//  CNapiNPConnection_ParseMessages @0x625D06..0x625D1A]
+std::string net_got_text(int32_t bytes, const PeerAddr &from, uint32_t opcode);
+std::string net_sending_text(int32_t bytes, const PeerAddr &to, uint32_t opcode, int32_t packet);
+std::string net_processing_text(int32_t bytes, const PeerAddr &from);
+std::string net_unknown_message_text(uint32_t message, int32_t bytes);
+std::string net_incoming_packet_error_text();
+std::string net_outgoing_packet_error_text();
+// The socket's teardown [orig: CNapiNetwork_TearDownSocket @0x4C4C90, the line
+// @0x4C4CBE..0x4C4CE7 ahead of NapiNPManager_CloseSocket @0x4C4CF5].
+std::string net_tearing_down_socket_text();
+// The client's session callbacks [orig: CNapiNetwork_OnConnectedToServer @0x4C62E0
+//  (@0x4C6348 / @0x4C6362); CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 (the
+//  record's ds, dc, dp1, dp2, dstr, dpc, ddstr, @0x4C6421); CNapiNetwork_OnSessionRemoved
+//  @0x4C68C0 (@0x4C693D); CNapiNetwork_OnSessionDiscovered @0x4C8470 (@0x4C8631); the
+//  session's name at +508]
+std::string net_connected_to_server_text(const PeerAddr &server, const PeerAddr &yours);
+std::string net_disconnecting_from_server_text(const PeerAddr &server, int32_t ds, int32_t dc,
+		int32_t dp1, int32_t dp2, const std::string &dstr, int32_t dpc, const std::string &ddstr);
+std::string net_session_removed_text(const PeerAddr &at, const std::string &session_name);
+std::string net_session_discovered_text(const PeerAddr &at, const std::string &session_name);
 
 // One _PUNT.TXT line, line ending excluded: with a slot
 // `"<time> : NN : \"<name>\" : <reason> : <details>"`, without one

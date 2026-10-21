@@ -22,6 +22,7 @@
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/server_ban_lists.h>
+#include <runtime/inmatch/punt_log.h> // the connect log's socket teardown line
 #include <runtime/inmatch/server_console.h> // the chat display wrap
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
@@ -882,6 +883,13 @@ void Server::stop() {
 	// @0x4A8009..0x4A800E DeleteFileA("activesrvr.txt")].
 	const bool exit_tail = exit_save_owed_;
 	exit_save_owed_ = false;
+	// The game socket's teardown line, once, while the _connectlog.txt log is still on (no
+	// connection ever came): the session's FullDestroy on the rotation's end or the quit, else
+	// the shutdown's (D-NET-NEW-L8-8) [orig: CNapiNetwork_TearDownSocket @0x4C4C90 (the line
+	// @0x4C4CBE..0x4C4CE7) from CNapiGameSession_FullDestroy @0x4C9763 / @0x4C976F and
+	// NapiLib_Shutdown @0x4C9663 / @0x4C9674, each behind a nonzero socket state, the
+	// shutdown's ahead of the net log's close]
+	if (role_) log_devices_.connect().line(inmatch::net_tearing_down_socket_text());
 	if (role_ && (rotation_ended_ || quit_)) {
 		// The rotation's end and the quit left through CNapiGameSession_FullDestroy, whose
 		// round init frees banlist.txt's list (off a session it is not reloaded) and re-reads

@@ -3,6 +3,7 @@
 
 #include <runtime/inmatch/napi_np_connection.h>
 
+#include <cstdarg>
 #include <cstdio>
 
 namespace opennova::inmatch {
@@ -189,6 +190,95 @@ void ConnectLog::disable_at_client_session_key() {
 	if (!enabled_) return;
 	line("NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.");
 	enabled_ = false;
+}
+
+namespace {
+
+std::string format_text(const char *format, ...) {
+	char buf[1024];
+	va_list args;
+	va_start(args, format);
+	std::vsnprintf(buf, sizeof(buf), format, args);
+	va_end(args);
+	return buf;
+}
+
+} // namespace
+
+std::string napi_got_raw_text(int32_t bytes, const PeerAddr &from) {
+	return format_text("NAPI GOT RAW %ld BYTES FROM %s", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str());
+}
+
+std::string napi_got_cooked_text(int32_t bytes, const PeerAddr &from) {
+	return format_text("NAPI GOT COOKED %ld BYTES FROM %s", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str());
+}
+
+std::string napi_got_baffle_text(int32_t bytes, const PeerAddr &from) {
+	return format_text("NAPI GOT BAFFLE %ld BYTES FROM %s", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str());
+}
+
+std::string napi_got_protocol_text(int32_t bytes, const PeerAddr &from,
+		const std::string &protocol_name) {
+	return format_text("NAPI GOT PROTOCOL %ld BYTES FROM %s [%s]", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str(), protocol_name.c_str());
+}
+
+std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason reason) {
+	return format_text("NAPI TOSSED %ld BYTES FROM %s [%ld]", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str(), static_cast<long>(reason));
+}
+
+std::string net_got_text(int32_t bytes, const PeerAddr &from, uint32_t opcode) {
+	return format_text("NET GOT %ld BYTES FROM %s [0x%2.2lx]", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str(), static_cast<unsigned long>(opcode));
+}
+
+std::string net_sending_text(int32_t bytes, const PeerAddr &to, uint32_t opcode, int32_t packet) {
+	return format_text("NET SENDING %ld BYTES TO %s [0x%2.2lx, p#%ld]", static_cast<long>(bytes),
+			peer_addr_to_string(to).c_str(), static_cast<unsigned long>(opcode),
+			static_cast<long>(packet));
+}
+
+std::string net_processing_text(int32_t bytes, const PeerAddr &from) {
+	return format_text("NET PROCESSING %ld BYTES FROM %s", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str());
+}
+
+std::string net_unknown_message_text(uint32_t message, int32_t bytes) {
+	return format_text("NET UNKNOWN MESSAGE!! [%ld, %ld bytes]", static_cast<long>(message),
+			static_cast<long>(bytes));
+}
+
+std::string net_incoming_packet_error_text() { return "NET INCOMING PACKET ERROR!!"; }
+
+std::string net_outgoing_packet_error_text() { return "NET OUTGOING PACKET ERROR!!"; }
+
+std::string net_tearing_down_socket_text() { return "NET TEARING DOWN SOCKET"; }
+
+std::string net_connected_to_server_text(const PeerAddr &server, const PeerAddr &yours) {
+	return format_text("NET CONNECTED TO SERVER %s [yourip=%s]",
+			peer_addr_to_string(server).c_str(), peer_addr_to_string(yours).c_str());
+}
+
+std::string net_disconnecting_from_server_text(const PeerAddr &server, int32_t ds, int32_t dc,
+		int32_t dp1, int32_t dp2, const std::string &dstr, int32_t dpc, const std::string &ddstr) {
+	return format_text("NET DISCONNECTING FROM SERVER %s [%ld,%ld,%ld,%ld,\"%s\",%ld,\"%s\"]",
+			peer_addr_to_string(server).c_str(), static_cast<long>(ds), static_cast<long>(dc),
+			static_cast<long>(dp1), static_cast<long>(dp2), dstr.c_str(), static_cast<long>(dpc),
+			ddstr.c_str());
+}
+
+std::string net_session_removed_text(const PeerAddr &at, const std::string &session_name) {
+	return format_text("NET SESSION AT %s [%s] HAS BEEN REMOVED.", peer_addr_to_string(at).c_str(),
+			session_name.c_str());
+}
+
+std::string net_session_discovered_text(const PeerAddr &at, const std::string &session_name) {
+	return format_text("NET SESSION DISCOVERED AT %s [%s]", peer_addr_to_string(at).c_str(),
+			session_name.c_str());
 }
 
 void PuntLog::arm_punt_log() {

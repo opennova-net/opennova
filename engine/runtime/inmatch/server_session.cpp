@@ -10,6 +10,7 @@
 #include <net/npwire/nw_session_framing.h> // next_connection_index (the self-join's two creates)
 #include <runtime/inmatch/server_console.h> // the /INOUT host line
 #include <runtime/inmatch/host_settings.h> // mission_session_title
+#include <runtime/inmatch/punt_log.h> // ConnectLog (a listen host's own connection turns it off)
 
 namespace opennova::inmatch {
 
@@ -217,9 +218,12 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		//  @0x62B282..0x62B296]
 		(void)next_connection_index();
 		(void)next_connection_index();
-		// The host's own connection coming up counts a login like every
-		// other [orig: NapiNPServer_HandleNewConnection @0x4c8203 runs before
-		// its local-connection arm @0x4c8213].
+		// The host's own connection coming up turns the _connectlog.txt debug log off and
+		// counts a login like every other [orig: NapiNPServer_HandleNewConnection - the
+		// disable @0x4C8054..0x4C80AF at its head, the login @0x4c8203, ahead of its
+		// local-connection arm @0x4c8213].
+		if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled())
+			ctx.logs.connect->disable_at_server_connection();
 		++ctx.total_logins;
 	}
 	return CreateSessionResult::Created;

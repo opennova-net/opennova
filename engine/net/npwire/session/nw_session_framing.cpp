@@ -164,24 +164,35 @@ uint32_t next_connection_index() {
 	return advance_connection_index(counter);
 }
 
-bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,
-                       uint8_t &opcode_out, std::vector<uint8_t> &body_out) {
-	std::vector<uint8_t> stripped(raw_len);
+bool nw_unpack_inbound(const uint8_t *raw, size_t raw_len, std::vector<uint8_t> &unpacked_out) {
+	unpacked_out.assign(raw_len, 0);
 	size_t out_size = 0;
-	if (napi_envelope_decode(raw, raw_len, stripped.data(), stripped.size(),
+	if (napi_envelope_decode(raw, raw_len, unpacked_out.data(), unpacked_out.size(),
 	                         &out_size) != 0) {
+		unpacked_out.clear();
 		return false;
 	}
-	stripped.resize(out_size);
-	if (stripped.empty()) return false;
+	unpacked_out.resize(out_size);
+	return true;
+}
 
-	opcode_out = stripped[0];
-	body_out.assign(stripped.begin() + 1, stripped.end());
+bool nw_split_unpacked(const std::vector<uint8_t> &unpacked, uint8_t &opcode_out,
+                       std::vector<uint8_t> &body_out) {
+	if (unpacked.empty()) return false;
+	opcode_out = unpacked[0];
+	body_out.assign(unpacked.begin() + 1, unpacked.end());
 	// Names swapped vs onnet — server-side decrypt is our nwu_encrypt.
 	if (!body_out.empty()) {
 		nwu_encrypt(body_out.data(), body_out.size(), SESSION_NWU_KEY);
 	}
 	return true;
+}
+
+bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,
+                       uint8_t &opcode_out, std::vector<uint8_t> &body_out) {
+	std::vector<uint8_t> unpacked;
+	return nw_unpack_inbound(raw, raw_len, unpacked) &&
+	       nw_split_unpacked(unpacked, opcode_out, body_out);
 }
 
 std::vector<uint8_t> nw_encode_outbound(uint8_t opcode, std::vector<uint8_t> body) {

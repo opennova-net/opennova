@@ -101,6 +101,13 @@ struct HandleResult {
 	// retail send-boundary batching seam (for example S2C 0x57 + 0x0A).
 	std::vector<ProtocolMessage>       deferred_session_replies;
 	std::vector<HostAcceptEvent>      events;
+	// Whether an opcode handler took the unpacked packet: the NAPI manager's dispatch
+	// result, which its _connectlog.txt PROTOCOL or TOSSED [4] line reports (punt_log.h),
+	// and whether that line went out.
+	// [orig: NapiNPManager_HandlePacket @0x622F10 - NapiNPProtocol_DispatchOpcode
+	//  @0x622F96, cb_on_dispatch @0x622FCD, cb_on_error(.., 4) @0x622FF9]
+	bool taken = false;
+	bool dispatch_logged = false;
 };
 
 struct TickOut {

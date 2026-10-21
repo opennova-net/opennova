@@ -5023,6 +5023,11 @@ add_executable(npruntime_host_load_pump_test npruntime/host_load_pump_test.cpp)
 target_link_libraries(npruntime_host_load_pump_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_host_load_pump_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_load_pump COMMAND npruntime_host_load_pump_test)
+# The _connectlog.txt packet and session lines; a host's manager-receive lines (D-NET-NEW-L8-8).
+add_executable(npruntime_connect_log_lines_test npruntime/connect_log_lines_test.cpp)
+target_link_libraries(npruntime_connect_log_lines_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_connect_log_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_connect_log_lines COMMAND npruntime_connect_log_lines_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

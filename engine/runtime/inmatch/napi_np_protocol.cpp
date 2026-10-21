@@ -135,6 +135,64 @@ NapiNPConnection *find_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 	return nullptr;
 }
 
+namespace {
+
+// The client probe (C2S NWU 0x47), the last client-side opcode of the manager's table
+// [orig: g_NPOpcodeHandlers @0x849D90, index 6; Nwu_HandleClientProbe @0x624280].
+constexpr uint8_t kClientProbeOpcode = 0x47;
+
+// PunkBuster's datagrams: 0xFF, then the "\xFF\xFF\xFFPB_" prefix (case-insensitive), more
+// than 7 bytes; the manager hands them to its PunkBuster handler unpacked (ours runs no
+// PunkBuster leg, D-NET-171) [orig: NapiNPManager_PumpReceive @0x6231A7..0x6231D9; the
+// prefix byte_7DFE30].
+bool punkbuster_datagram(const uint8_t *raw, std::size_t len) {
+	if (len <= 7 || raw[0] != 0xFF) return false;
+	static const uint8_t kPrefix[] = {0xFF, 0xFF, 0xFF, 'P', 'B', '_'};
+	for (std::size_t i = 0; i < sizeof(kPrefix); ++i) {
+		uint8_t got = raw[1 + i];
+		if (got >= 'a' && got <= 'z') got = static_cast<uint8_t>(got - 'a' + 'A');
+		if (got != kPrefix[i]) return false;
+	}
+	return true;
+}
+
+// The NAT magic ("baffle") packet: the words 0x1071 and '0', 48 bytes or more
+// [orig: NapiNPManager_HandlePacket @0x622F1B..0x622F36; NapiNP_HandleMagicPacket @0x622E70].
+bool baffle_packet(const std::vector<uint8_t> &unpacked) {
+	return unpacked.size() >= 0x30 && unpacked[0] == 0x71 && unpacked[1] == 0x10 &&
+			unpacked[2] == 0x30 && unpacked[3] == 0x00;
+}
+
+void connect_log_line(const NapiNPServerCtx &ctx, const std::string &text) {
+	if (ctx.logs.connect != nullptr) ctx.logs.connect->line(text);
+}
+
+// A server-side connection for the peer: the first test of the session-level handlers
+// (0x43..0x47), each of which returns 0 without one [orig: NapiNPProtocol_HandleSessionPacket
+// @0x626AA8 / @0x626B01; NapiNP_HandleResendList @0x623899; Nwu_HandlePing @0x623B04;
+// Nwu_HandleDisconnect @0x623D8E; Nwu_HandleClientProbe @0x62428E].
+bool server_connection_exists(NapiNPServerCtx &ctx, const PeerAddr &peer) {
+	const NapiNPConnection *conn = find_connection(ctx, peer);
+	return conn != nullptr && conn->type == NapiNPConnection::kTypeServerSide;
+}
+
+// The manager's dispatch line for one unpacked packet, once: PROTOCOL with the protocol's
+// name (proto +0xDC, the identity's PN) when a handler took it, else TOSSED [4].
+// [orig: NapiNPManager_HandlePacket @0x622FB0..0x622FCD (Network_LogNapiProtocolRecv
+//  @0x4C6100) / @0x622FDC..0x622FF9 (Network_LogTossedPacket @0x4C4580)]
+void log_manager_dispatch(const NapiNPServerCtx &ctx, const PeerAddr &peer, int32_t unpacked_len,
+		HandleResult &out) {
+	if (out.dispatch_logged) return;
+	out.dispatch_logged = true;
+	const TitleIdentity *identity = ctx.np_protocol.identity;
+	connect_log_line(ctx, out.taken
+			? napi_got_protocol_text(unpacked_len, peer,
+					identity != nullptr && identity->pn != nullptr ? identity->pn : "")
+			: napi_tossed_text(unpacked_len, peer, NapiTossReason::NoProtocol));
+}
+
+} // namespace
+
 // Linear scan + create-on-miss over connection_list — faithful to the original intrusive-list walk
 // (NapiNPServer_SendFiltered @0x4C87E0 -> SendToConn per node). connection_list stays authoritative
 // (the single-owner table; there is no parallel connection table). A fresh node is a server-side connection (type 1).
@@ -714,6 +772,10 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	reply.hk = ctx.np_protocol.host_key;
 	out.outbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply)));
+	// The handler answers a PM-carrying announce too, but takes only a probe without PM
+	// [orig: NapiNPProtocol_HandleClientHello @0x6218FC, `return protocol_version == 0`
+	//  @0x62190B].
+	out.taken = hello.pm == 0;
 }
 
 // 0x42 ClientAuth -> 0x82 ServerAuth (per-session SCRK established).
@@ -728,15 +790,29 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - the length bound @0x62BBEB..0x62BBF1,
 	//  the count bound @0x62BBF7..0x62BBFA, the socket-pass return @0x62C32A..0x62C331, the
 	//  queued-pass rejections @0x62C344 / @0x62C359]
+	// The socket pass takes the 0x42 once its TLV walk ends on a CU bound or its identity
+	// holds, and the manager logs its dispatch line there, ahead of the queued pass whose
+	// new connection turns the log off (its line comes after the PROTOCOL line).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the head gate @0x62B7E6 / @0x62B802
+	//  (return 0), the CU bounds' return 1 @0x62C331, the identity gate's return 0;
+	//  NapiNPManager_HandlePacket @0x622FCD]
+	const int32_t unpacked_len = static_cast<int32_t>(body.size() + 1);
+	const bool head_gate = ctx.is_authority != 0 && ctx.np_protocol.host_running != 0;
 	ClientAuth auth;
-	if (!parse_client_auth(body.data(), body.size(), auth)) return;
-	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
+	if (!parse_client_auth(body.data(), body.size(), auth)) {
+		out.taken = head_gate && !body.empty(); // the walk's CU bound
+		log_manager_dispatch(ctx, peer, unpacked_len, out);
+		return;
+	}
+	if (!head_gate) return;
 	const TitleIdentity *identity = ctx.np_protocol.identity;
 	if (identity == nullptr) return;
 	// Only the NVS/PN/PG/PV1 envelope is silent. The subsequent server-side
 	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750, gates @0x62bdf2]
 	if (!matches_title_identity(*identity, auth)) return;
+	out.taken = true;
+	log_manager_dispatch(ctx, peer, unpacked_len, out);
 	// The PW and PV2 compares are case-insensitive C-string compares
 	// [orig: Napi_StrCaseEqual @0x616e70].
 	uint32_t reject = 0;
@@ -1339,11 +1415,43 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
                                     bool defer_in_match_replies) {
 	HandleResult out;
 
-	uint8_t opcode = 0;
-	std::vector<uint8_t> body;
-	if (!nw_decode_inbound(raw, len, opcode, body)) {
+	// The NAPI manager's receive, its packet lines with it (_connectlog.txt while the log
+	// is on): the datagram as the socket hands it over, then PunkBuster's aside, the unpack
+	// (its failure tossed with reason 3), the magic packet, and the dispatch, whose result
+	// the handlers below set (PROTOCOL with the protocol's name, else tossed with reason 4).
+	// The receive-rate tosses (1, 2) need a nonzero rate, which nothing here sets.
+	// [orig: NapiNPManager_PumpReceive @0x623010 - cb_on_raw @0x623121, the rate test
+	//  @0x623126..0x62317F, the PunkBuster arm @0x6231A7..0x6231D9, NapiNP_UnpackPacket
+	//  @0x623206, cb_on_error(3) @0x623229, cb_on_packet @0x623254, HandlePacket @0x623284;
+	//  NapiNPManager_HandlePacket @0x622F10 - cb_on_unpack @0x622F53 ahead of
+	//  NapiNP_HandleMagicPacket @0x622F62, cb_on_dispatch @0x622FCD, cb_on_error(4) @0x622FF9;
+	//  NapiLib_SetManagerCallbacks @0x4C6F50]
+	connect_log_line(ctx, napi_got_raw_text(static_cast<int32_t>(len), peer));
+	if (punkbuster_datagram(raw, len)) return out;
+	std::vector<uint8_t> unpacked;
+	if (!nw_unpack_inbound(raw, len, unpacked)) {
+		connect_log_line(ctx, napi_tossed_text(static_cast<int32_t>(len), peer,
+				NapiTossReason::Unpack));
 		return out; // bad envelope — drop quietly
 	}
+	const int32_t unpacked_len = static_cast<int32_t>(unpacked.size());
+	connect_log_line(ctx, napi_got_cooked_text(unpacked_len, peer));
+	if (baffle_packet(unpacked)) {
+		connect_log_line(ctx, napi_got_baffle_text(unpacked_len, peer));
+		return out;
+	}
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!nw_split_unpacked(unpacked, opcode, body)) {
+		log_manager_dispatch(ctx, peer, unpacked_len, out); // no opcode: no handler takes it
+		return out;
+	}
+	// The session-level opcodes are taken by a server-side connection for the peer (their
+	// handlers' first test); a host's _connectlog.txt is off from its first connection on
+	// (NapiNPServer_HandleNewConnection @0x4C8054..0x4C80AF), so their later refusals never
+	// reach a line.
+	if (opcode >= SESSION_OPCODE_PROTOCOL_MESSAGE && opcode <= kClientProbeOpcode)
+		out.taken = server_connection_exists(ctx, peer);
 
 	// Once the host has staged its terminal connection-description record, the
 	// resident node exists only long enough to receive the matching teardown
@@ -1354,7 +1462,10 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// cannot tear down this node.
 	if (opcode != SESSION_OPCODE_CLIENT_GOODBYE) {
 		const NapiNPConnection *conn = find_connection(ctx, peer);
-		if (conn != nullptr && conn->host_disconnect_sent) return out;
+		if (conn != nullptr && conn->host_disconnect_sent) {
+			log_manager_dispatch(ctx, peer, unpacked_len, out);
+			return out;
+		}
 	}
 
 	switch (opcode) {
@@ -1379,6 +1490,7 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	default:
 		break;
 	}
+	log_manager_dispatch(ctx, peer, unpacked_len, out);
 	return out;
 }
 
