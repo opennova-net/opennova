@@ -51,6 +51,17 @@ bool is_opcode(const std::vector<uint8_t> &datagram, uint8_t expected) {
 			opcode == expected;
 }
 
+// A join from a discovered session sends nothing from start(): its first 0x42 leaves at the
+// first pump whose clock reads past the start (D-NET-NEW-L2-24). Steps the clock 1 ms and pumps.
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - last send = now - 2000
+//  @0x626490..0x626499; PumpStateMachine case 3 @0x629508 - @0x629588 -> @0x629595]
+std::vector<uint8_t> first_join_datagram(inmatch::JoinerConnection &joiner, uint64_t &now_ms) {
+	if (!joiner.start().empty()) return {};
+	now_ms += 1;
+	std::vector<std::vector<uint8_t>> sent = joiner.pump(0);
+	return sent.size() == 1 ? std::move(sent[0]) : std::vector<uint8_t>{};
+}
+
 bool decode_session(const std::vector<uint8_t> &datagram, uint8_t expected_opcode,
 		const std::string &scrk, ProtocolPacketHeader &header,
 		std::vector<ProtocolMessage> &messages) {
@@ -260,6 +271,70 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 			"past 30000 ms the join fails with connect error 2 (NCC002) and stops sending");
 }
 
+// D-NET-NEW-L2-24: a join from a discovered session enters the connect state with its start at
+// now and its last send one resend interval (2000 ms) back, and sends nothing itself: the 0x42's
+// one send site is the connect state's pump, so the first leaves at the first pump whose clock
+// reads past the start (none at the start's own millisecond), the next once more than 2000 ms
+// passed since it, and the 30000 ms window counts from the start. The stamp's difference is
+// unsigned: a clock that starts below 2000 sends the same way.
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - the start @0x62648a, the last send
+//  now - conn+0x5B0 @0x626490..0x626499; CNapiNetwork_StartClientConnection @0x4ca160 -
+//  +0x5B0 = 2000 @0x4ca2ab, +0x5B4 = 30000 @0x4ca2bb; PumpStateMachine case 3 @0x629508 -
+//  the window @0x62951c, the resend @0x629580..0x629588 (unsigned jbe), SendClientJoin @0x629595]
+bool run_discovered_join_sends_its_0x42_at_the_next_pump() {
+	uint64_t now_ms = 5000;
+	inmatch::JoinerConnection joiner("NextPump", [&now_ms] { return now_ms; });
+	joiner.set_title(&kJo);
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E118u;
+	joiner.set_discovered_session(session);
+	if (!expect(joiner.start().empty() &&
+	                    joiner.phase() == inmatch::JoinerConnection::Phase::Auth &&
+	                    joiner.join_screen_stage() == inmatch::JoinScreenStage::Joining,
+	            "next pump: the start enters the connect state and sends nothing"))
+		return false;
+	if (!expect(joiner.pump(0).empty(),
+	            "next pump: a pump at the start's own millisecond sends nothing"))
+		return false;
+	now_ms = 5001;
+	std::vector<std::vector<uint8_t>> sent = joiner.pump(0);
+	if (!expect(sent.size() == 1 && is_opcode(sent[0], SESSION_OPCODE_CLIENT_AUTH),
+	            "next pump: the first pump past the start sends the 0x42"))
+		return false;
+	now_ms = 7001;
+	if (!expect(joiner.pump(0).empty(), "next pump: 2000 ms after it, no resend"))
+		return false;
+	now_ms = 7002;
+	sent = joiner.pump(0);
+	if (!expect(sent.size() == 1 && is_opcode(sent[0], SESSION_OPCODE_CLIENT_AUTH),
+	            "next pump: more than 2000 ms after the last send, the resend"))
+		return false;
+	now_ms = 5000 + 30000;
+	(void)joiner.pump(0);
+	if (!expect(joiner.phase() == inmatch::JoinerConnection::Phase::Auth,
+	            "next pump: the window has not run out 30000 ms after the start"))
+		return false;
+	now_ms = 5000 + 30001;
+	if (!expect(joiner.pump(0).empty() &&
+	                    joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
+	                    joiner.last_join_reject().jfc == 2u,
+	            "next pump: the window counts from the start, not the first send"))
+		return false;
+
+	uint64_t early_ms = 0;
+	inmatch::JoinerConnection early("EarlyClock", [&early_ms] { return early_ms; });
+	early.set_title(&kJo);
+	early.set_discovered_session(session);
+	if (!expect(early.start().empty() && early.pump(0).empty(),
+	            "next pump: a clock at 0 sends nothing at the start"))
+		return false;
+	early_ms = 1;
+	sent = early.pump(0);
+	return expect(sent.size() == 1 && is_opcode(sent[0], SESSION_OPCODE_CLIENT_AUTH),
+	              "next pump: a clock below the interval sends at its next millisecond");
+}
+
 // A join from a discovered row goes straight to the 0x42: the browse record already holds the
 // host's 0x81, so the connection starts in the connect state with the record's HK (no new 0x41),
 // and the host admits it. A bare dial still sends the 0x41 first.
@@ -292,9 +367,15 @@ bool run_discovered_row_join_skips_the_hello() {
 	session.password_required = row.password_required;
 	session.expansion = row.expansion;
 	client.set_discovered_session(session);
-	const std::vector<uint8_t> first = client.start();
-	if (!expect(is_opcode(first, SESSION_OPCODE_CLIENT_AUTH) &&
+	if (!expect(client.start().empty() &&
 	                    client.phase() == inmatch::JoinerConnection::Phase::Auth,
+	            "a discovered-row join enters the connect state and sends nothing at once")) {
+		return false;
+	}
+	now_ms += 1;
+	const std::vector<std::vector<uint8_t>> sent = client.Client_ProcessNetworkFrame(0);
+	const std::vector<uint8_t> first = sent.size() == 1 ? sent[0] : std::vector<uint8_t>{};
+	if (!expect(is_opcode(first, SESSION_OPCODE_CLIENT_AUTH),
 	            "a discovered-row join's first datagram is the 0x42, not a 0x41")) {
 		return false;
 	}
@@ -399,7 +480,7 @@ bool run_connect_writes_pv3_and_its_peer() {
 	session.host_key = 0x0FE0E117u;
 	row.set_discovered_session(session);
 	row.set_host_address(host_addr);
-	const std::vector<uint8_t> row_first = row.start();
+	const std::vector<uint8_t> row_first = first_join_datagram(row, now_ms);
 	ClientAuth row_auth;
 	if (!expect(nw_decode_inbound(row_first.data(), row_first.size(), opcode, body) &&
 						opcode == SESSION_OPCODE_CLIENT_AUTH &&
@@ -468,7 +549,7 @@ bool run_one_connection_index_per_join() {
 	session.password_required = row.password_required;
 	session.client_index = browse_ci;
 	join.set_discovered_session(session);
-	const std::vector<uint8_t> first = join.start();
+	const std::vector<uint8_t> first = first_join_datagram(join, now_ms);
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientAuth auth;
@@ -631,7 +712,7 @@ bool run_client_keys_draw_from_the_manager_lcg() {
 	session.present = true;
 	session.host_key = 0x0FE0E115u;
 	joiner.set_discovered_session(session);
-	const std::vector<uint8_t> first = joiner.start();
+	const std::vector<uint8_t> first = first_join_datagram(joiner, now_ms);
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientAuth auth;
@@ -649,7 +730,7 @@ bool run_client_keys_draw_from_the_manager_lcg() {
 	inmatch::JoinerConnection fresh("ManagerJoiner", [&now_ms] { return now_ms; });
 	fresh.set_title(&kJo);
 	fresh.set_discovered_session(session);
-	const std::vector<uint8_t> second = fresh.start();
+	const std::vector<uint8_t> second = first_join_datagram(fresh, now_ms);
 	ClientAuth fresh_auth;
 	return expect(nw_decode_inbound(second.data(), second.size(), opcode, body) &&
 	                      parse_client_auth(body.data(), body.size(), fresh_auth) &&
@@ -666,12 +747,12 @@ bool run_client_keys_draw_from_the_manager_lcg() {
 //  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6, the reject's JFC store @0x629CF0]
 bool run_server_auth_acceptance_follows_retail() {
 	uint64_t now_ms = 9000;
-	const auto connect = [](inmatch::JoinerConnection &joiner, ClientAuth &auth) {
+	const auto connect = [&now_ms](inmatch::JoinerConnection &joiner, ClientAuth &auth) {
 		inmatch::JoinerConnection::DiscoveredSession session;
 		session.present = true;
 		session.host_key = 0x0FE0E115u;
 		joiner.set_discovered_session(session);
-		const std::vector<uint8_t> first = joiner.start();
+		const std::vector<uint8_t> first = first_join_datagram(joiner, now_ms);
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
 		return nw_decode_inbound(first.data(), first.size(), opcode, body) &&
@@ -1175,7 +1256,7 @@ bool run_join_reject_text_keeps_sixty_three() {
 	session.present = true;
 	session.host_key = 0x0FE0E116u;
 	joiner.set_discovered_session(session);
-	const std::vector<uint8_t> first = joiner.start();
+	const std::vector<uint8_t> first = first_join_datagram(joiner, now_ms);
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientAuth auth;
@@ -1207,6 +1288,7 @@ int main() {
 	if (!run_idle_keepalive_waits_while_a_packet_is_held()) return 1;
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
+	if (!run_discovered_join_sends_its_0x42_at_the_next_pump()) return 1;
 	if (!run_discovered_row_join_skips_the_hello()) return 1;
 	if (!run_connect_writes_pv3_and_its_peer()) return 1;
 	if (!run_one_connection_index_per_join()) return 1;

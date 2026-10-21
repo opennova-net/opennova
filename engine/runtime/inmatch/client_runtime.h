@@ -159,7 +159,8 @@ public:
 	bool is_authority() const { return role_ == Role::HostClient; }
 
 	// --- connect / recv (Joiner) ---
-	// Begin the handshake; returns the framed ClientHello to ship (Idle->Hello). Empty for HostClient.
+	// Begin the handshake; returns the framed ClientHello to ship (Idle->Hello). Empty for HostClient
+	// and for a join from a discovered session, whose 0x42 the next frame's pump sends.
 	std::vector<uint8_t> start();
 
 	// The joiner's in-place reload into the host's next mission, which the

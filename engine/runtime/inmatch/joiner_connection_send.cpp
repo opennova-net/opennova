@@ -41,20 +41,6 @@ namespace {
 constexpr uint64_t kEnumerateAnnounceMilliseconds =
 		static_cast<uint64_t>(kLanAnnounceIntervalSeconds * 1000.0);
 
-// The connect state (retail state 3) of a JO game join: the 0x42 ClientJoin is re-sent once
-// MORE than 2000 ms passed since the last send, and the join fails once MORE than 30000 ms passed
-// since the state was entered, latching connect error 2, whose text is gameerr
-// "MPNetConnectCodes" NCC002. A ServerAuth (state 5) ends both.
-// [orig: CNapiNetwork_StartClientConnection @0x4ca160 stores conn+0x5B0 = 2000 @0x4ca2ab and
-//  +0x5B4 = 30000 @0x4ca2bb (CNapiGameSession_CreateSession @0x4c9c27 stores the same pair);
-//  CNapiNPConnection_InitFromSession @0x626320 enters state 3, stamping the start +0x5E0
-//  @0x62648a and the last send +0x5E4 = now - 2000 @0x626499; CNapiNPConnection_PumpStateMachine
-//  case 3: `now - start > +0x5B4` @0x62951c -> +0x5F0 = 2 @0x629525, state 4 @0x629564; else
-//  `now - last > +0x5B0` @0x629588 -> last = now @0x62958f, SendClientJoin @0x629595;
-//  {2, "NCC002"} in g_MPNetConnectCodes @0x82ba58, its row @0x82ba60, read by
-//  CNapiNetwork_GetDisconnectReasonString @0x4c703d]
-constexpr uint64_t kClientJoinRetryMilliseconds = 2000;
-constexpr uint64_t kClientJoinTimeoutMilliseconds = 30000;
 constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 
 // The established session's two send-interval legs read this connection's cs_dir0 (CS fields 5
@@ -335,8 +321,11 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 				fail("The host did not answer the join request (NCC002)");
 				return out;
 			}
-			if (now_ms >= handshake_last_send_ms_ &&
-			    now_ms - handshake_last_send_ms_ > kClientJoinRetryMilliseconds) {
+			// The elapsed time is an unsigned difference: a join from a discovered
+			// session stamps its last send one interval before its start (start()), so
+			// its first 0x42 leaves once the clock reads past the start.
+			// [orig: @0x629580..0x629588, `sub edx, [ebp+5E4h]; cmp edx, eax; jbe`]
+			if (now_ms - handshake_last_send_ms_ > kClientJoinRetryMilliseconds) {
 				handshake_last_send_ms_ = now_ms;
 				out.push_back(handshake_retry_datagram_);
 			}

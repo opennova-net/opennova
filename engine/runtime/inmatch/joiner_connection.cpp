@@ -296,18 +296,22 @@ std::vector<uint8_t> JoinerConnection::start() {
 	receive_clock_armed_ = true;
 	if (discovered_.present) {
 		// A join from a discovered session: the record already holds the 0x81, so the
-		// connection starts in the connect state with its HK and SF and sends the 0x42
+		// connection starts in the connect state with its HK and SF. Nothing leaves here:
+		// the state's start is now and its last send one resend interval back, so the
+		// first 0x42 goes at the first pump whose clock reads past the start (pump()).
 		// [orig: CNapiNPConnection_InitFromSession @0x626320, state 3 @0x626496, its
-		//  window's start @0x62648a; PumpStateMachine case 3 @0x629508].
+		//  window's start @0x62648a, the last send now - conn+0x5B0 @0x626490..0x626499;
+		//  PumpStateMachine case 3 @0x629508, the resend test @0x629588 -> SendClientJoin
+		//  @0x629595, its one send site]
 		server_hk_ = discovered_.host_key;
 		server_password_required_ = discovered_.password_required;
 		advertised_expansion_ = discovered_.expansion;
 		phase_ = Phase::Auth;
 		handshake_retry_datagram_ = build_client_auth();
-		handshake_last_send_ms_ = monotonic_milliseconds_();
-		client_join_start_ms_ = handshake_last_send_ms_;
+		client_join_start_ms_ = monotonic_milliseconds_();
+		handshake_last_send_ms_ = client_join_start_ms_ - kClientJoinRetryMilliseconds;
 		handshake_retry_clock_armed_ = true;
-		return handshake_retry_datagram_;
+		return {};
 	}
 	// No row: retail's enumerate-and-join on one connection. The enumerator announces
 	// to the target at once and then every > 3000 ms, with no time limit, until a

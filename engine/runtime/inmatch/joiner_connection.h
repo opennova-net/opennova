@@ -38,6 +38,8 @@
 // retail JO helper; this LAN/game-session state machine has no NovaWorld service dependency.
 //
 //   start()                         -> ClientHello (0x41)   [Idle -> Hello]
+//                                      (a discovered session: nothing; the next pump
+//                                      sends the ClientAuth 0x42)    [Idle -> Auth]
 //   <- ServerHello (0x81)             : learn host key hk; send ClientAuth (0x42)
 //   <- ServerAuth  (0x82)             : learn server keys                       [-> Driving]
 //   <- initial S2C settings            : header-only ACK; send C2S 0x00 JOIN
@@ -270,7 +272,8 @@ public:
 	void set_title(const TitleIdentity *title) { title_ = title; }
 	const TitleIdentity *title() const { return title_; }
 
-	// Begin the join. From a discovered session: the ClientAuth (Idle -> Auth). Without
+	// Begin the join. From a discovered session: nothing (Idle -> Auth; the first pump past the
+	// start sends the ClientAuth, D-NET-NEW-L2-24). Without
 	// one: retail's enumerate-and-join on this one connection, the announce to the host
 	// (Idle -> Hello) re-sent every > 3000 ms with no time limit until the session answers
 	// and the connect goes on with this connection (D-NET-703). Empty, with last_error()
@@ -1111,6 +1114,21 @@ private:
 	void invalidate_terrain_load();
 	void on_host_disconnect(const DisconnectEvent &event);
 	void fail(std::string reason);
+
+	// The connect state (retail state 3) of a JO game join: the 0x42 ClientJoin is re-sent once
+	// MORE than 2000 ms passed since the last send, and the join fails once MORE than 30000 ms passed
+	// since the state was entered, latching connect error 2, whose text is gameerr
+	// "MPNetConnectCodes" NCC002. A ServerAuth (state 5) ends both.
+	// [orig: CNapiNetwork_StartClientConnection @0x4ca160 stores conn+0x5B0 = 2000 @0x4ca2ab and
+	//  +0x5B4 = 30000 @0x4ca2bb (CNapiGameSession_CreateSession @0x4c9c27 stores the same pair);
+	//  CNapiNPConnection_InitFromSession @0x626320 enters state 3, stamping the start +0x5E0
+	//  @0x62648a and the last send +0x5E4 = now - 2000 @0x626499; CNapiNPConnection_PumpStateMachine
+	//  case 3: `now - start > +0x5B4` @0x62951c -> +0x5F0 = 2 @0x629525, state 4 @0x629564; else
+	//  `now - last > +0x5B0` @0x629588 -> last = now @0x62958f, SendClientJoin @0x629595;
+	//  {2, "NCC002"} in g_MPNetConnectCodes @0x82ba58, its row @0x82ba60, read by
+	//  CNapiNetwork_GetDisconnectReasonString @0x4c703d]
+	static constexpr uint64_t kClientJoinRetryMilliseconds = 2000;
+	static constexpr uint64_t kClientJoinTimeoutMilliseconds = 30000;
 
 	uint32_t client_index_ = 0; // start(): the row's browse CI, else next_connection_index()
 	uint32_t client_key_ = 1;
