@@ -73,9 +73,11 @@ struct RoleView {
 };
 
 // The session rules word the role's HUD gates test (g_RulesFlags, the
-// mission-data block's +0x2C dword): a joiner's S2C 0x64 fixed-block word, any
-// other role's live World::rules.mpattrib (the host config's word in a session,
-// 0x4204 out of one, as an admin SET moves it); 0 with no kernel.
+// mission-data block's +0x2C dword): the role's live World::rules.mpattrib, a
+// joiner's the S2C 0x64 fixed-block word its mission data copied
+// (JoinerRole::stamp_mission_rules), any other role's the host config's word in a
+// session (0x4204 out of one); an admin SET moves it (a joiner's until the next
+// copy); 0 with no kernel.
 // [orig: g_RulesFlags @0x24D1E34 -- HUD_DrawFriendlyTagsPass @0x5A4480,
 //  Entity_GetDisplayName @0x59BF70; the FriendlyTags SET @0x405EF6 / @0x405F05]
 uint32_t session_rules_word(const RoleView &view);

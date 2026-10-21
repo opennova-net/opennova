@@ -674,8 +674,9 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	// The MP NoTracers rule: bit 0 of the same rules word kills the tracer
 	// visual at round spawn unless the ammo is FORCETRACER; the lobby
 	// publishes its inverse as the "Tracers" key [orig: g_RulesFlags
-	// @ 0x24D1E34 & 1 at RoundData_SpawnRound @ 0x4ec41f; admin set
-	// @ 0x405c80; Lobby_UpdateServerInfo "Tracers" @ 0x4fee4f]
+	// @ 0x24D1E34 & 1 at RoundData_SpawnRound @0x4EC0D0 (@0x4EC72F, @0x4EC79D); the admin
+	// SET's Tracers stores CAdminServer_HandleSetCommand @0x405A60 (@0x405F7A / @0x405F86);
+	// Lobby_UpdateServerInfo @0x4FE8C0 (the "Tracers" test @0x4FEE48, its jz @0x4FEE4F)]
 	owner.ctx.world->round_sim.no_tracers_rule =
 			(owner.ctx.config.mp_attributes & GameConfig::kMpAttribNoTracers) != 0;
 }

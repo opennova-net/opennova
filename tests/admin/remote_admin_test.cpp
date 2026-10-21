@@ -31,7 +31,9 @@
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/remote_admin.h>
+#include <runtime/inmatch/role_feeds.h> // session_rules_word
 #include <runtime/inmatch/server_tick.h> // Server_TickUpdate
+#include <runtime/mission/mission_kernel.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
@@ -720,6 +722,104 @@ void test_exit_frame_words() {
 	       "the menus read that session's words");
 }
 
+// A joiner's admin SET writes the globals its own session reads, as retail's SET writes them in
+// place: a rule bit lands in g_RulesFlags, the joiner world's copy of the mission data's word,
+// with the caches its readers take (the friendly fire, the round spawn's tracers, the claymore
+// sweep) and the HUD's session_rules_word; GameTime lands in g_RoundTimeRemaining, the client's
+// S2C 0x0A clock. Both hold across the frames; the next mission's data copy replaces the word.
+// [orig: CAdminServer_HandleSetCommand @0x405A60 - FriendlyFire @0x405EB4 / @0x405EC3, Tracers
+//  @0x405F7A / @0x405F86, TeamTriggerClaymore @0x405F38 / @0x405F47, GameTime @0x405E80..0x405E86;
+//  NapiNPClientMsg_HandleMissionDataChunk @0x432410 (the memcpy @0x432470, g_RulesFlags at +44);
+//  Projectile_DamagePairEligible @0x4E74FD; RoundData_SpawnRound @0x4EC72F / @0x4EC79D;
+//  Entity_FindEnemyInCone @0x43CC2C; HUD_DrawFriendlyTagsPass @0x5A4480]
+void test_joiner_set_holds() {
+	const std::string client_scrk = "CLIENT-ADMIN-SET-SCRK";
+	const std::string server_scrk = "SERVER-ADMIN-SET-SCRK";
+	auto kernel = std::make_unique<mission::MissionKernel>();
+	kernel->world.registry.configure_pool(0, 16);
+	auto role = std::make_unique<inmatch::JoinerRole>();
+	role->bind(*kernel);
+	CaptureSocket socket;
+	role->set_socket(&socket, PeerAddr{0x0100007Fu, 32123});
+	role->set_title(&kJo);
+	role->create_runtime("SetJoiner", inmatch::JoinRole::Player, "", "");
+	role->kit_seams.apply_authoritative = [] {};
+	role->kit_seams.reseed_on_side_change = [] { return false; };
+	role->kit_seams.push = [] {};
+	role->poll_preload();
+	inmatch::ClientRuntime &client = *role->runtime;
+	client.seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0005,
+	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
+	                    /*replay_mode=*/false);
+	// The joined mission's data: the default cfg word 0x3A02 (NoFriendlyFire 0x200, tracers on,
+	// no claymore preference), copied at the mission start.
+	client.view().set_mp_attributes(0x3A02u);
+	(void)role->bring_up();
+	world::World &world = kernel->world;
+	inmatch::RoleView view;
+	view.kernel = kernel.get();
+	view.runtime = &client;
+	view.joiner = true;
+	expect(world.rules.mpattrib == 0x3A02u && world.rules.no_friendly_fire &&
+	               !world.round_sim.no_tracers_rule && !world.throwables.team_trigger_claymore &&
+	               inmatch::session_rules_word(view) == 0x3A02u,
+	       "the mission start's copy of the rules word");
+
+	inmatch::RemoteAdminConsoles consoles;
+	gamecfg::GameCfg block = gamecfg::defaults();
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &block;
+	inmatch::RemoteAdminBinding joined;
+	joined.client = &client;
+	joined.joiner = role.get();
+	joined.world = &world;
+	joined.session = 9;
+	consoles.bind(joined, seams);
+	consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
+	const AdminSession admin{"boss", 0xFFFFFFFFu};
+	const auto line = [&](const std::string &text) {
+		std::vector<std::string> replies;
+		(void)consoles.dispatch(admin, text, replies);
+		return replies.size() == 1 ? replies[0] : std::string("<" + std::to_string(replies.size()) + ">");
+	};
+	expect_eq(line("SET FriendlyFire 1"), "OK - Setting Changed.", "SET FriendlyFire on a joiner");
+	expect_eq(line("SET Tracers 0"), "OK - Setting Changed.", "SET Tracers on a joiner");
+	expect_eq(line("SET TeamTriggerClaymore 1"), "OK - Setting Changed.", "SET TeamTriggerClaymore on a joiner");
+	expect_eq(line("SET GameTime 7"), "OK - Setting Changed.", "SET GameTime on a joiner");
+	// 0x3A02 & ~0x200 | 0x1 | 0x8000 = 0xB803; 7 x 3720 = 26040 ticks.
+	const auto set_words_hold = [&](const char *what) {
+		expect(world.rules.mpattrib == 0xB803u && !world.rules.no_friendly_fire &&
+		               world.round_sim.no_tracers_rule && world.throwables.team_trigger_claymore &&
+		               inmatch::session_rules_word(view) == 0xB803u &&
+		               client.state().round_time_remaining_ticks == 26040,
+		       what);
+	};
+	set_words_hold("the SET words reach the joiner's world, its HUD word and its round clock");
+	inmatch::TickInput input;
+	role->run_tick(input);
+	role->run_tick(input);
+	consoles.refresh_process_mission();
+	set_words_hold("they hold across the joiner's frames");
+	const std::string settings = line("GET GAMESETTINGS");
+	expect(settings.find("GameTime             = 7/7\n") != std::string::npos &&
+	               settings.find("FriendlyFire         = 1\n") != std::string::npos &&
+	               settings.find("Tracers              = 0\n") != std::string::npos &&
+	               settings.find("TeamTriggerClaymore  = 1\n") != std::string::npos,
+	       "GET reads the held words");
+
+	// The next mission's data (a map change's S2C 0x64, word 0x3A06, which the connection folds
+	// into the view) is copied again at that mission's start and replaces the word and its caches;
+	// the round clock stays the 0x0A's.
+	client.view().set_mp_attributes(0x3A06u);
+	(void)role->bring_up();
+	expect(world.rules.mpattrib == 0x3A06u && world.rules.no_friendly_fire &&
+	               !world.round_sim.no_tracers_rule && !world.throwables.team_trigger_claymore &&
+	               inmatch::session_rules_word(view) == 0x3A06u,
+	       "the next mission data's copy replaces the SET word");
+	consoles.refresh_process_mission();
+	expect(consoles.process_mission().rules_word == 0x3A06u, "the admin reads the new copy");
+}
+
 } // namespace
 
 int main() {
@@ -732,6 +832,7 @@ int main() {
 	test_single_player_cycle();
 	test_idle_frame_exit();
 	test_exit_frame_words();
+	test_joiner_set_holds();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "remote_admin: %d failure(s)\n", g_failures);
 		return 1;

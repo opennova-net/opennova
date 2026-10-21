@@ -4,6 +4,7 @@
 // See joiner_role.h for the ownership split; every phase keeps its witnesses.
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/spectator_session.h>
+#include <runtime/inmatch/admin_console.h> // apply_rules_word (the mission data's rules word)
 #include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/inmatch/client_weapon_replay.h>
@@ -117,17 +118,15 @@ bool JoinerRole::bring_up() {
 // whose one session writer on a joiner is the mission data's copy: the world takes it at the
 // copy and at the mission start's load (a fresh world), never per frame, so an admin SET of the
 // word holds until the next copy (its 0x10000 bit gates the scope-zero -1 floor in session, its
-// 0x200 the friendly fire).
+// 0x200 the friendly fire, its bit 0 the round spawn's tracers, its 0x8000 the claymore sweep:
+// apply_rules_word).
 // [orig: NapiNPClientMsg_HandleMissionDataChunk @0x432410 - the block's memcpy into unk_24D1E08
 //  @0x432470 (g_RulesFlags at +44); the other writer CAdminServer_HandleSetCommand
-//  @0x405C80..0x40618A; Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e]
+//  @0x405C80..0x40618A; Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e; RoundData_SpawnRound
+//  @0x4EC72F / @0x4EC79D (NoTracers, bit 0)]
 void JoinerRole::stamp_mission_rules() {
 	if (!kernel_ || !runtime) return;
-	world::World &world = kernel_->world;
-	const uint32_t rules_word = runtime->view().mp_attributes();
-	world.rules.mpattrib = rules_word;
-	world.rules.auto_scope_zero = (rules_word & GameConfig::kMpAttribAutoScopeZero) != 0;
-	world.rules.no_friendly_fire = (rules_word & GameConfig::kMpAttribNoFriendlyFire) != 0;
+	apply_rules_word(kernel_->world, runtime->view().mp_attributes());
 	mp_attributes_revision_seen_ = runtime->mp_attributes_revision();
 }
 

@@ -207,24 +207,26 @@ std::string AdminConsole::game_settings_reply() const {
 	return out;
 }
 
+void apply_rules_word(world::World &world, uint32_t word) {
+	world.rules.mpattrib = word;
+	world.rules.no_friendly_fire = (word & GameConfig::kMpAttribNoFriendlyFire) != 0;
+	world.rules.auto_scope_zero = (word & GameConfig::kMpAttribAutoScopeZero) != 0;
+	world.throwables.team_trigger_claymore = (word & GameConfig::kMpAttribClaymorePref) != 0;
+	world.round_sim.no_tracers_rule = (word & GameConfig::kMpAttribNoTracers) != 0;
+}
+
 namespace {
 
-// The rules word onto the world the round reads it from: the word itself and the per-mission
-// facts the boot derives from it (host_role.cpp, host_session.cpp), so a SET of a rule bit is
-// live at once, as retail's single g_RulesFlags is.
+// The rules word onto the world the round reads it from (apply_rules_word), so a SET of a rule
+// bit is live at once, as retail's single g_RulesFlags is; with no world, the context's word.
 // [orig: g_RulesFlags @0x24D1E34 — the FriendlyFire / FriendlyTags / TeamTriggerClaymore /
 //  Tracers sets @0x405DE1..0x405F48]
 void set_live_rules_word(NapiNPServerCtx &ctx, uint32_t word) {
-	world::World *world = ctx.world;
-	if (world == nullptr) {
+	if (ctx.world == nullptr) {
 		ctx.config.mp_attributes = word;
 		return;
 	}
-	world->rules.mpattrib = word;
-	world->rules.no_friendly_fire = (word & GameConfig::kMpAttribNoFriendlyFire) != 0;
-	world->rules.auto_scope_zero = (word & GameConfig::kMpAttribAutoScopeZero) != 0;
-	world->throwables.team_trigger_claymore = (word & GameConfig::kMpAttribClaymorePref) != 0;
-	world->round_sim.no_tracers_rule = (word & GameConfig::kMpAttribNoTracers) != 0;
+	apply_rules_word(*ctx.world, word);
 }
 
 uint32_t live_rules_word(const NapiNPServerCtx &ctx) {

@@ -34,7 +34,9 @@ bool local_death_screen_active(const RoleView &view) {
 }
 
 uint32_t session_rules_word(const RoleView &view) {
-	if (view.joiner && view.runtime != nullptr) return view.runtime->view().mp_attributes();
+	// A joiner's word is the world's copy of the mission data's, which an admin SET then holds
+	// until the next copy [orig: NapiNPClientMsg_HandleMissionDataChunk @0x432410 (the memcpy
+	//  @0x432470); CAdminServer_HandleSetCommand @0x405A60 (@0x405C80..0x405F86)].
 	return view.kernel != nullptr ? view.kernel->world.rules.mpattrib : 0u;
 }
 
@@ -439,8 +441,8 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 	world::FriendlyTagPassContext ctx;
 	ctx.death_screen = local_death_screen_active(view);
 	ctx.game_type = view.runtime != nullptr ? view.runtime->game_type() : 0;
-	// The session's rules word (session_rules_word): a joiner's S2C 0x64 fixed
-	// block (+44), the host's live World word. Bit 0x400 = the host option
+	// The session's rules word (session_rules_word): the World word, a joiner's
+	// copy of the S2C 0x64 fixed block (+44). Bit 0x400 = the host option
 	// FriendlyTag 0 [orig: `test g_RulesFlags, 400h` @0x5A4480].
 	ctx.rules_no_friendly_tags =
 			(session_rules_word(view) & GameConfig::kMpAttribNoFriendlyTag) != 0;

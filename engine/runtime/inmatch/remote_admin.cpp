@@ -209,7 +209,20 @@ void RemoteAdminConsoles::session_exit_frame(const RemoteAdminBinding &binding, 
 bool RemoteAdminConsoles::dispatch(const AdminSession &session, std::string_view line,
 		std::vector<std::string> &replies) {
 	refresh_process_mission();
-	return console_ != nullptr ? console_->dispatch(session, line, replies) : true;
+	const bool kept = console_ != nullptr ? console_->dispatch(session, line, replies) : true;
+	// A joiner's SET writes the globals its own session reads, as retail's writes them in
+	// place: g_RulesFlags, the joiner world's word (the mission data's copy, which the next
+	// copy replaces, JoinerRole::stamp_mission_rules), and g_RoundTimeRemaining, its client's
+	// S2C 0x0A clock (the next 0x0A's replaces it). A host context's SET wrote its world.
+	// [orig: CAdminServer_HandleSetCommand @0x405A60 - the rule bits @0x405C80..0x405F86,
+	//  GameTime @0x405E80..0x405E86; NapiNPClientMsg_HandleMissionDataChunk @0x432410 (the
+	//  memcpy @0x432470); NapiNPClientMsg_0x00A @0x430219..0x430235]
+	if (bound_.host == nullptr && bound_.client != nullptr) {
+		if (bound_.world != nullptr && bound_.world->rules.mpattrib != process_mission_.rules_word)
+			apply_rules_word(*bound_.world, process_mission_.rules_word);
+		bound_.client->state().round_time_remaining_ticks = process_mission_.round_ticks_remaining;
+	}
+	return kept;
 }
 
 std::string RemoteAdminConsoles::status_report() {
