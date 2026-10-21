@@ -573,6 +573,22 @@ public:
 	void set_replica_seat_type_resolver(ReplicaSeatTypeResolver resolver) {
 		replica_seat_type_resolver_ = std::move(resolver);
 	}
+	// A seated row's seat carry: the frame of the carrier's seat bone the record
+	// names, which a seated body's pass writes into its body heading (+0x8C), Roll
+	// and savedLivePitch (+0x90) each tick. The embedder resolves it over its own
+	// carrier and seat table; false = no frame (the row keeps its words).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - Entity_GetBoneTransformAndOrientation
+	//  @0x4B6510, +0x8C @0x4B654E, Roll @0x4B6572, +0x90 @0x4B6575]
+	struct ReplicaSeatFrame {
+		int32_t heading = 0;
+		int32_t pitch = 0;
+		int32_t roll = 0;
+	};
+	using ReplicaSeatFrameResolver = std::function<bool(
+			uint16_t carrier_handle, uint16_t carrier_type_id, uint8_t bone, ReplicaSeatFrame &out)>;
+	void set_replica_seat_frame_resolver(ReplicaSeatFrameResolver resolver) {
+		replica_seat_frame_resolver_ = std::move(resolver);
+	}
 
 	// The phase-3 0x0A objective block has no on-wire discriminator. apply()
 	// learns the shared g_GameType from S2C 0x08 field 3 / 0x7B `extra`;
@@ -716,6 +732,9 @@ private:
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
+	// A seated player row's body pass (client_replica_motion.cpp): its primary
+	// channel, the seat carry, a passenger's lean keys and the mounted eye.
+	void tick_seated_body(ClientEntityState &es);
 	void erase_entity_tree(uint16_t root_handle);
 	// Entity_DropCarriedObject over a person carrier's row: the carried flag
 	// leaves it and keeps the carrier's pose for the drop the client runs
@@ -757,6 +776,7 @@ private:
 	ReplicaGroundProbe replica_ground_probe_;
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;
 	ReplicaSeatTypeResolver replica_seat_type_resolver_;
+	ReplicaSeatFrameResolver replica_seat_frame_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
 	GroundOccupantProvider ground_occupant_provider_;
 	int32_t water_z_ = 0;

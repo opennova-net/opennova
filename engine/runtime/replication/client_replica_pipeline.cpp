@@ -1367,10 +1367,15 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.heading_known = true;
 			++es.compact_revision;
 		}
-		// Root-channel lifecycle at the organic freeze/respawn edges: a frozen
-		// row (bit0/carried) never root-ticks, so its channel is DISARMED —
+		// Root-channel lifecycle at the organic freeze/respawn edges: a bit0
+		// row never runs its body pass, so its channel is DISARMED —
 		// presentation falls back to the per-record wire anim byte exactly as
-		// retail applies it [orig: @0x4c1153] (the seat clips dispatch). A
+		// retail applies it [orig: @0x4c1153]; so are the other carried rows. A
+		// seated player row's pass runs its
+		// channel at its head (tick_seated_body: the mounted eye's capsule,
+		// D-NET-330) while it presents through its seat path (the seat clips
+		// dispatch) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the bit0
+		// test @0x4B411E, the dual update @0x4B41DF]. A
 		// dead row is not frozen: its mover runs and the death edge commits
 		// the death clip to the channel. The respawn edge keeps the channel
 		// (the next state blends out of the death clip) and resets what
@@ -1380,9 +1385,11 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// savedLiveYaw and the four leg yaws = Yaw]. (The one-shot phase seed
 		// rides the arbitration's direct-commit leg — net_anim_ratio.)
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
+			const bool seated_player = rec.cls == EntityClass::Player &&
+					es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0;
 			const bool row_frozen =
 					(has_state_flags && (state_flags & 0x01u) != 0u) ||
-					es.carrier_handle != wire_handle::kInvalid;
+					(es.carrier_handle != wire_handle::kInvalid && !seated_player);
 			if (row_frozen) {
 				row_channel_disarm(es);
 			} else if (respawned_this_record) {

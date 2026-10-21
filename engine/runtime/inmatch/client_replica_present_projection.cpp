@@ -171,8 +171,10 @@ void project_client_replica_present_row(
 	// death edge commits it). Frozen (bit0/seated) or unresolved rows are
 	// disarmed by the fold and fall back to the latest wire state (the seat
 	// clips).
-	const bool root_motion_armed =
-			entity.rm_adm_id >= 0 && entity.rm_state >= 0;
+	// A seated player row runs its channel for its eye (D-NET-330) but presents
+	// through its seat path, the wire byte, as every carried row does.
+	const bool root_motion_armed = entity.rm_adm_id >= 0 && entity.rm_state >= 0 &&
+			entity.carrier_handle == world::EntityHandle::kInvalid;
 	if (root_motion_armed) {
 		// The channel already ran the per-record receive arbitration + the
 		// deferred promotion in the fold/tick (D-NET-209), so it presents
@@ -311,7 +313,9 @@ bool skeletal_pose_inputs_for_client(
 	out.collapse_right_hand = collapse_right_hand;
 	// The projection's armed branch: the row's own primary channel, current,
 	// playhead, served ring entry, armed park and the blending source pair.
-	if (entity.rm_adm_id < 0 || entity.rm_state < 0) return false;
+	if (entity.rm_adm_id < 0 || entity.rm_state < 0 ||
+			entity.carrier_handle != world::EntityHandle::kInvalid)
+		return false;
 	out.primary_state = entity.rm_state;
 	out.primary_phase = entity.rm_phase;
 	out.primary_variant = entity.rm_variant;

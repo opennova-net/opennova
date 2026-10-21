@@ -1137,6 +1137,75 @@ static bool row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org
 	return false;
 }
 
+// A seated body's pass, which ends at the mounted site: the primary channel at its
+// head (its capsule is the eye's extent), the seat carry, then the site's four leg
+// words, a passenger's lean keys and the eye, in that order. The seated row presents
+// through its seat path (the wire byte), not this channel.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF; the
+//  seat carry Entity_GetBoneTransformAndOrientation @0x4B6510 (+0x8C @0x4B654E, the legs
+//  @0x4B6554 / @0x4B655A, Roll @0x4B6572, +0x90 @0x4B6575); the site's leg words
+//  @0x4B668B..0x4B66A3; the passenger test `cmp [esi+168h], 1` @0x4B6684, left
+//  @0x4B66B5, right @0x4B66C3; the local test @0x4B66CD; the eye @0x4B66D9..0x4B68FC (the
+//  extent cap @0x4B66D9..0x4B66EC)]
+void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es) {
+	world::RootMotionFrame frame;
+	bool have = false;
+	if (root_motion_ != nullptr && es.rm_adm_id >= 0) {
+		int target_state = es.net_anim_current >= 0
+				? static_cast<int>(es.net_anim_current)
+				: static_cast<int>(es.anim_state_id);
+		const bool bottom_reset_state =
+				(target_state >= world::anim_state::kClimbIdle &&
+				 target_state <= world::anim_state::kClimbIdle + 3) ||
+				(target_state >= world::anim_state::kDeathGrenadeBase &&
+				 target_state <= world::anim_state::kDeathGrenadeBase + 3);
+		const bool released = row_channel_prepare(es, *root_motion_, anim_rings_, target_state);
+		if (bottom_reset_state) es.rm_prev_bottom_live = false;
+		have = row_channel_advance(es, *root_motion_, anim_rings_, released, frame);
+		// The capsule-bottom history the AnimMap update rewrites every update
+		// [orig: AnimMap_UpdateEntity @0x40B88E..0x40B8A0].
+		if (have) {
+			es.rm_prev_bottom = frame.capsule_bottom;
+			es.rm_prev_bottom_live = true;
+		}
+	}
+	// The seat carry: the seat bone's yaw into the body heading, its roll into
+	// Roll, its pitch into savedLivePitch.
+	const ClientEntityState *carrier = state_.find(es.carrier_handle);
+	ReplicaSeatFrame seat;
+	if (carrier != nullptr && replica_seat_frame_resolver_ &&
+			replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat)) {
+		es.rm_body_heading = seat.heading;
+		es.roll_bam = seat.roll;
+		es.rm_body_pitch = seat.pitch;
+	}
+	// The mounted site: the four leg words take the body heading, so the legs
+	// leave the seat from it.
+	es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.rm_body_heading;
+	es.rm_leg_target[0] = es.rm_leg_target[1] = es.rm_body_heading;
+	es.rm_leg_seeded = true;
+	// A passenger's keys move its lean 0x1400000 a tick with no other gate, ahead
+	// of its eye; a remote body's +0x168 is the seat type the record's attach
+	// stamps off the carrier's userpoint (ReplicaSeatTypeResolver).
+	const uint8_t seat_type = carrier != nullptr && replica_seat_type_resolver_
+			? replica_seat_type_resolver_(carrier->type_id, es.mount_bone)
+			: 0u;
+	if (seat_type == static_cast<uint8_t>(world::SeatType::Passenger)) {
+		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
+			es.lean_angle = io::bam_sub(es.lean_angle, 0x1400000);
+		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
+			es.lean_angle = io::bam_add(es.lean_angle, 0x1400000);
+	}
+	// The eye: the channel's capsule extent capped at 0xD000, the four turns over
+	// the seat's words (world::player_body_capsule_eye, the authority's seated leg
+	// too).
+	if (!have) return;
+	int32_t extent = frame.capsule_top - frame.capsule_bottom;
+	if (extent > 0xD000) extent = 0xD000;
+	world::player_body_capsule_eye(extent, es.lean_angle, es.heading_bam, es.rm_body_heading,
+	                               es.roll_bam, es.rm_body_pitch, es.eye_offset);
+}
+
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	// The entity update steps the replica clock (frame_tick()).
@@ -1241,6 +1310,14 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 					ground_occupant_provider_ &&
 					!(es.state_flags_known && (es.state_flags & 0x01u) != 0u))
 				row_ride_link(es, state_, ground_occupant_provider_);
+			// A seated body's pass runs its channel and ends at the mounted site
+			// (bone 0 is a deck, not a seat) [orig: Entity_UpdateInfantryPlayerBody
+			// @0x4B40E0 - the bit0 test @0x4B411E, the dual update call @0x4B41DF, the
+			// site selector on the mount word +0x16C @0x4B637C..0x4B638F].
+			if (es.cls == EntityClass::Player && es.handle != self_handle &&
+					es.mount_bone != 0 &&
+					!(es.state_flags_known && (es.state_flags & 0x01u) != 0u))
+				tick_seated_body(es);
 			continue;
 		}
 		// The organic mover-skip: wire bit0 (carried-object/killed/not-ready

@@ -26,23 +26,11 @@ void ClientReplicaPipeline::tick_lean_ramp() {
 		// The on-foot ramp is the player body pass's (the NPC pass ramps none).
 		if (es.cls != EntityClass::Player) continue;
 		// A seated body's pass ends at the mounted site, ahead of the on-foot
-		// ramp; only a passenger's keys move its lean there, 0x1400000 a tick
-		// with no other gate, ahead of its eye (the replica's seated rows restamp
-		// none) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the passenger
-		// test `cmp [esi+168h], 1` @0x4B6684, left @0x4B66B5, right @0x4B66C3,
-		// the mounted site's end @0x4B6510 / @0x4B66D9..0x4B68FC].
-		if (es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0) {
-			const ClientEntityState *carrier = state_.find(es.carrier_handle);
-			const uint8_t seat = carrier != nullptr && replica_seat_type_resolver_
-					? replica_seat_type_resolver_(carrier->type_id, es.mount_bone)
-					: 0u;
-			if (seat != static_cast<uint8_t>(world::SeatType::Passenger)) continue;
-			if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
-				es.lean_angle = io::bam_sub(es.lean_angle, 0x1400000);
-			if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
-				es.lean_angle = io::bam_add(es.lean_angle, 0x1400000);
-			continue;
-		}
+		// ramp: its passenger keys ramp there, ahead of its eye
+		// (tick_seated_body) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+		// the site selector @0x4B637C..0x4B638F, the passenger ramp
+		// @0x4B6684..0x4B66C3, the eye @0x4B66D9..0x4B68FC].
+		if (es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0) continue;
 		// Its gates: a ladder contact or a chute (Flags 0x100020; a remote body's
 		// chute bit is the record's, whose low byte bar the dead bit lands on the
 		// row's Flags mirror), the prone latch with none of Flags 0x10A000 (a remote body's

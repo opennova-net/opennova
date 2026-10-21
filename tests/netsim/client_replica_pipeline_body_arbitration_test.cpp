@@ -565,13 +565,14 @@ void test_remote_lean_ramp_gates() {
 	}
 
 	// A seated body's pass ends at the mounted site: no on-foot ramp; a passenger's
-	// keys move its lean 0x1400000 a tick, any other seat's not at all; a row standing
-	// on a deck (bone 0) is on foot.
+	// keys move its lean 0x1400000 a tick (the seated body tick, ahead of its eye),
+	// any other seat's not at all; a row standing on a deck (bone 0) is on foot.
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp [esi+168h], 1` @0x4B6684,
 	//  @0x4B66B5 / @0x4B66C3]
 	static constexpr uint16_t kCarrier = 0x1010;
 	static constexpr uint16_t kCarrierType = 0x0400;
 	ns::ClientReplicaPipeline seated;
+	seated.set_remote_motion_mode(true);
 	seated.set_replica_seat_type_resolver([](uint16_t carrier_type, uint8_t bone) -> uint8_t {
 		if (carrier_type != kCarrierType) return 0;
 		return bone == 3 ? static_cast<uint8_t>(world::SeatType::Passenger)
@@ -602,12 +603,93 @@ void test_remote_lean_ramp_gates() {
 		row.mount_bone = r.bone;
 		row.move_input = r.keys;
 		row.lean_angle = 0;
+		row.net_has_compact = true;
 	}
+	seated.tick_remote_motion(0xFFFF);
 	seated.tick_lean_ramp();
 	for (const Seated &r : rows) {
 		const ns::ClientEntityState *row = seated.state().find(r.handle);
 		expect(row != nullptr && row->lean_angle == r.lean, r.what);
 	}
+}
+
+// D-NET-330: a seated player row's body pass runs its channel at its head and ends
+// at the mounted site: the seat carry writes the seat bone's yaw, roll and pitch into
+// the body heading, Roll and savedLivePitch, the four leg words take the body heading,
+// a passenger's keys ramp its lean, and the eye is the four-turn capsule leg over the
+// channel's capsule (the extent capped at 0xD000) and those words, after the ramp.
+// The row keeps presenting through its seat path, not the channel.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF; the
+//  seat carry @0x4B6510..0x4B6575; the leg words @0x4B668B..0x4B66A3; the passenger
+//  ramp @0x4B6684..0x4B66C3; the eye @0x4B66D9..0x4B68FC]
+void test_seated_row_eye_reads_its_channel_capsule() {
+	static constexpr uint16_t kCarrier = 0x1010;
+	static constexpr uint16_t kCarrierType = 0x0400;
+	static constexpr int32_t kSeatYaw = 0x20000000;
+	static constexpr int32_t kSeatPitch = 0x02000000;
+	static constexpr int32_t kSeatRoll = -0x01000000;
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	CapsuleSource src;
+	src.extent = 0x9000; // under the 0xD000 cap: the eye's height is the clip's
+	view.set_root_motion_source(&src);
+	view.set_replica_seat_type_resolver([](uint16_t carrier_type, uint8_t bone) -> uint8_t {
+		return carrier_type == kCarrierType && bone == 3
+				? static_cast<uint8_t>(world::SeatType::Passenger) : 0u;
+	});
+	int frame_calls = 0;
+	view.set_replica_seat_frame_resolver([&frame_calls](uint16_t carrier, uint16_t carrier_type,
+			uint8_t bone, ns::ClientReplicaPipeline::ReplicaSeatFrame &out) {
+		++frame_calls;
+		if (carrier != kCarrier || carrier_type != kCarrierType || bone != 3) return false;
+		out.heading = kSeatYaw;
+		out.pitch = kSeatPitch;
+		out.roll = kSeatRoll;
+		return true;
+	});
+	view.state().upsert(kCarrier).type_id = kCarrierType;
+	ns::ClientEntityState &row = view.state().upsert(kPlayerHandle);
+	row.type_id = kPlayerType;
+	row.cls = EntityClass::Player;
+	row.carrier_handle = kCarrier;
+	row.mount_bone = 3;
+	row.net_has_compact = true;
+	row.rm_adm_id = 0;
+	row.anim_state_id = as::kIdle;
+	row.heading_bam = kSeatYaw + 0x08000000; // the look, a twist off the seat
+	row.move_input = static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft);
+	view.tick_remote_motion(0xFFFF);
+	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	expect(frame_calls == 1, "the seated pass carries its seat bone's frame");
+	expect(es->rm_state == as::kIdle && es->rm_phase == 1, "the seated row's channel runs");
+	expect(es->rm_body_heading == kSeatYaw && es->roll_bam == kSeatRoll &&
+					es->rm_body_pitch == kSeatPitch,
+			"the seat carry writes the body heading, Roll and savedLivePitch");
+	expect(es->rm_leg_yaw[0] == kSeatYaw && es->rm_leg_yaw[1] == kSeatYaw &&
+					es->rm_leg_target[0] == kSeatYaw && es->rm_leg_target[1] == kSeatYaw,
+			"the mounted site's leg words take the body heading");
+	expect(es->lean_angle == -0x1400000, "a passenger's left key ramps 0x1400000");
+	int32_t eye[3] = {};
+	world::player_body_capsule_eye(0x9000, -0x1400000, kSeatYaw + 0x08000000, kSeatYaw,
+	                               kSeatRoll, kSeatPitch, eye);
+	expect(es->eye_offset[0] == eye[0] && es->eye_offset[1] == eye[1] &&
+					es->eye_offset[2] == eye[2],
+			"the eye is the capsule leg over the channel's extent, after the ramp");
+	int32_t unramped[3] = {};
+	world::player_body_capsule_eye(0x9000, 0, kSeatYaw + 0x08000000, kSeatYaw, kSeatRoll,
+	                               kSeatPitch, unramped);
+	expect(unramped[0] != eye[0] || unramped[1] != eye[1],
+			"(the ramp moves the eye, so the order is pinned)");
+	// The cap: a taller capsule reads 0xD000.
+	src.extent = 0x10000;
+	view.tick_remote_motion(0xFFFF);
+	int32_t capped[3] = {};
+	world::player_body_capsule_eye(0xD000, -0x2800000, kSeatYaw + 0x08000000, kSeatYaw,
+	                               kSeatRoll, kSeatPitch, capped);
+	expect(es->eye_offset[2] == capped[2], "the seated extent caps at 0xD000");
+	// The seated row presents through its seat path, not the channel.
+	expect(es->rm_state >= 0, "(the channel stays armed while seated)");
 }
 
 // D-NET-196: a decoded row's two channels serve the one ring table every body of
@@ -686,6 +768,7 @@ void test_row_channels_serve_the_shared_variant_rings() {
 }
 
 int main() {
+	test_seated_row_eye_reads_its_channel_capsule();
 	test_row_channels_serve_the_shared_variant_rings();
 	test_record_flags_land_on_the_mirror();
 	test_remote_lean_ramp_gates();
