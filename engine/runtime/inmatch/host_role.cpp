@@ -491,6 +491,46 @@ void HostRole::init_local_player_at_mission_start() {
 	if (player != nullptr) player->flags |= world::kEntityFlagCarried;
 }
 
+// The 0x0F handler's local-player block has no authority test, so on a playing host its
+// own client writes the host's own body, the one g_LocalPlayerEntity the host and its
+// client share, as a joiner's does (JoinerRole::apply_world_state_load): the Position, the
+// Yaw (and the look yaw), the Pitch and the Roll from the 0x0F words, and the hidden bit
+// cleared unless the death screen is up. The own join's 0x0F reaches the client at the
+// head of the next frame, ahead of that frame's server tick, so a held host's body counts
+// as a human at that tick's slot lists and the frame's entity update runs once (at the
+// second frame's tick) before that frame's 0x0A writer hides the undeployed body again.
+// [orig: NapiNPClientMsg_0x00F @0x42E200 - the g_LocalPlayerEntity test @0x42E3AF, the
+//  stores @0x42E3B9..0x42E3F2 (g_LocalPlayerLookYaw @0x42E3E3), `cmp g_DeathScreenActive`
+//  @0x42E3F5, `and [eax+24h], 0FFFFFFFEh` @0x42E403; its authority tests gate only the
+//  spawn globals @0x42E369 and the ack burst @0x42E5B7; Game_ProcessMainFrame -
+//  Client_ProcessNetworkFrame @0x526692 ahead of Server_TickUpdate @0x5266B6 (the slot
+//  lists Server_BuildEntitySlotLists @0x4F97A0, called @0x51D89A), the gate
+//  @0x52671C..0x52672A, Entity_UpdateAllEntities @0x52674B; Server_OnPlayerJoin's 0x0F
+//  @0x51A869; NetPacket_WritePlayerState's re-hide @0x4FF7B8]
+void HostRole::apply_own_world_state_load(mission::MissionKernel &kernel,
+		const replication::ClientState &own) {
+	world::World &world = kernel.world;
+	world::Entity *local = world.registry.get(world.cached.local_player);
+	world::AiEntity *local_ai = world.ai.for_handle(world.cached.local_player);
+	if (local == nullptr || local_ai == nullptr) return;
+	const replication::ClientWorldStateLoad &ws = own.world_state;
+	local->position.set_q16({ws.pos_x, ws.pos_y, ws.pos_z});
+	local->heading = ws.yaw_bam;
+	local->pitch_bam = ws.pitch_bam;
+	local->roll_bam = ws.roll_bam;
+	local_ai->heading = ws.yaw_bam;
+	local_ai->pitch = ws.pitch_bam;
+	local_ai->roll = ws.roll_bam;
+	local_ai->inf.target_heading = ws.yaw_bam;
+	local_ai->inf.look_pitch = ws.pitch_bam;
+	kernel.local.input.look_heading = ws.yaw_bam;
+	kernel.local.input.look_pitch = ws.pitch_bam;
+	if (!own.death_screen_active) {
+		local->hidden = false;
+		local->flags &= ~world::kEntityFlagCarried;
+	}
+}
+
 // See host_role.h. The 0x0B is the side password (g_SidePassword, the game
 // config's own entry, which a host's join menu never writes), the two map
 // checksums Mission_GetMapChecksums leaves zero and the packed build version;
@@ -920,8 +960,10 @@ void HostRole::run_tick(const TickInput &input) {
 		// tests gate the spawn-position store @0x42e360..0x42e369 and the ack
 		// burst @0x42e5b7)].
 		const replication::ClientState &own = state.client_runtime->state();
-		if (own.world_state.revision != track_seen_.world_state_revision)
+		if (own.world_state.revision != track_seen_.world_state_revision) {
 			ctx.mission_location_names = own.location_names;
+			apply_own_world_state_load(kernel, own);
+		}
 		// The own client's 0x0F / 0x50 track legs: the map POI list outside
 		// the waypoint gametypes (the route stays the promotion's).
 		apply_replica_track(kernel.world, state.client_runtime->state(),

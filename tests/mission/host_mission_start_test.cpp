@@ -166,10 +166,33 @@ void run_held_host(bool mission_start) {
 	CHECK(own->link.respawn_pending);
 	CHECK(kernel.world.cached.humans == 0);
 	CHECK(kernel.world.entity_update_counter == updates);
+	// The join's 0x0F reaches the host's own client after the frame's server tick (retail:
+	// at the head of the next frame, ahead of its Server_TickUpdate), and its local-player
+	// block, which has no authority test, clears the shared body's hidden bit: the death
+	// screen is down.
+	// [orig: Server_OnPlayerJoin's 0x0F @0x51A869; NapiNPClientMsg_0x00F @0x42E3F5..0x42E403;
+	//  Game_ProcessMainFrame - Client_ProcessNetworkFrame @0x526692, Server_TickUpdate @0x5266B6]
+	CHECK(role.client_runtime() != nullptr && role.client_runtime()->state().world_state.revision == 1 &&
+			!role.client_runtime()->state().death_screen_active);
+	CHECK(!hidden());
+	// So the second frame's slot lists count the held body as a human and its entity update
+	// runs once, at the frame's tick 2 (an even key tick: the org1 block's gravity, water and
+	// landing legs run), before that frame's 0x0A writer hides the undeployed body again; the
+	// third frame holds. Retail's CP04 host streams its AI records exactly this one update past
+	// the mission start (the x4 cp04 RR records against OR's).
+	// [orig: Server_BuildEntitySlotLists @0x4F97A0 (+1 @0x4F98B1) from @0x51D89A; the gate
+	//  @0x52671C..0x52672A; Entity_UpdateAllEntities @0x52674B (frameTickCount g_CurrentTick,
+	//  stepped @0x5265B4 from the mission start's zero @0x525B9F); NetPacket_WritePlayerState
+	//  @0x4FF6D7 / @0x4FF7B8; Entity_UpdateInfantryAI's key parity @0x4BF146 / @0x4BF6A5..0x4BF6B2]
+	CHECK(kernel.world.logic_tick == 2);
+	role.run_tick(tick_input());
+	CHECK(kernel.world.cached.humans == 1);
+	CHECK(kernel.world.entity_update_counter == updates + 1);
 	CHECK(hidden());
 	role.run_tick(tick_input());
 	CHECK(kernel.world.cached.humans == 0);
-	CHECK(kernel.world.entity_update_counter == updates);
+	CHECK(kernel.world.entity_update_counter == updates + 1);
+	CHECK(hidden());
 }
 
 // A root-motion source whose every clip lifts the root and stands its capsule

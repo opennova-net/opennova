@@ -239,6 +239,10 @@ private:
 	// (NapiNPServerCtx::bind_spawned_body), installed after a bring-up's own spawn.
 	void install_spawned_body_bind();
 	void make_client_runtime(uint32_t game_type);
+	// The own client's S2C 0x0F local-player block on the host's own body (the one body the
+	// host and its client share), run once per decoded 0x0F.
+	static void apply_own_world_state_load(mission::MissionKernel &kernel,
+			const replication::ClientState &own);
 	// The session create's UP-TIME stamp, kept across a single player's restart boot.
 	void keep_round_state_init_tick();
 public:
