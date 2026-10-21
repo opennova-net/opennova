@@ -1744,9 +1744,15 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 
 	# Runtime type 1291 is items.def id 101291 after the BMS namespace strip.
 	# Compare the two presentation feeds, not either local mission copy.
+	# DIAGNOSTIC (L5-s8, the joiner hull's sink): each peer's buggy row as the
+	# ground motor sees it, before and through the settle.
+	print("vehicle-diag pre host %s joiner %s" % [
+			host.debug_vehicle_motor_rows(1291), joiner.debug_vehicle_motor_rows(1291)])
 	for _settle in range(20):
 		host.step()
 		joiner.step()
+		print("vehicle-diag step %d host %s joiner %s" % [_settle,
+				host.debug_vehicle_motor_rows(1291), joiner.debug_vehicle_motor_rows(1291)])
 		OS.delay_msec(2)
 	var host_vehicle := _present_position_for_type(host, 1291)
 	var joiner_vehicle := _present_position_for_type(joiner, 1291)

@@ -957,6 +957,42 @@ void Simulation::set_mission_variable(int index, int value) {
 	if (kernel_) kernel_->world.script.vars.set_mission(index, value);
 }
 
+// DEBUG ONLY: reads the rows; writes nothing. The solve kind repeats tick_motor's
+// selection (vehicle_motor.cpp, the ContactSolveKind block) and the tracked
+// solve's box test (vehicle_contact_solve.cpp ground_contact_solve_active).
+Array Simulation::debug_vehicle_motor_rows(int p_type_id) const {
+	Array out;
+	if (!kernel_) return out;
+	const opennova::world::World &w = kernel_->world;
+	w.registry.for_each([&](const opennova::world::Entity &e) {
+		if (e.handle.pool() != 1 || static_cast<int>(e.item_id) != p_type_id) return;
+		const opennova::world::VehicleTraits *t = w.vehicles.traits.get(e.item_id);
+		Dictionary d;
+		d["handle"] = static_cast<int>(e.handle.packed);
+		d["has_graphic_model"] = e.has_graphic_model;
+		String kind = "no traits";
+		if (t != nullptr) {
+			const bool boxes = t->box_z_hi != t->box_z_lo && t->box_y_hi != t->box_y_lo &&
+					((t->box_y_hi - t->box_y_lo) >> 2) > 0;
+			if (t->physics == 0)
+				kind = "selector zero";
+			else if (t->family == opennova::world::VehicleFamily::Ground)
+				kind = (!e.has_graphic_model || boxes) ? "Tracked" : "None";
+			else
+				kind = vformat("family %d", static_cast<int>(t->family));
+			d["physics"] = t->physics;
+		}
+		d["solve_kind"] = kind;
+		d["slide_z"] = e.veh.slide_z;
+		d["flags_2040"] = static_cast<int64_t>((e.flags | e.engine_flags) & 0x2040u);
+		d["grounded"] = e.veh.grounded;
+		d["z_q16"] = e.position.z.q16;
+		d["net_predicted"] = e.veh.net_predicted;
+		out.push_back(d);
+	});
+	return out;
+}
+
 Error Simulation::debug_kill_player_entity(int p_handle) {
 	if (!kernel_ || is_joiner()) return ERR_UNAVAILABLE;
 	// The engine transaction (EntityCommands::kill_player): the health write

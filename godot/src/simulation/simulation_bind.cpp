@@ -332,6 +332,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("entity_card", "handle"), &Simulation::entity_card);
 	ClassDB::bind_method(D_METHOD("entity_card_by_ai_index", "index"), &Simulation::entity_card_by_ai_index);
 	ClassDB::bind_method(D_METHOD("entity_card_by_net_id", "net_id"), &Simulation::entity_card_by_net_id);
+	ClassDB::bind_method(D_METHOD("debug_vehicle_motor_rows", "type_id"),
+			&Simulation::debug_vehicle_motor_rows);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &Simulation::debug_set_entity_health);
 	ClassDB::bind_method(D_METHOD("debug_input_action_bits"), &Simulation::debug_input_action_bits);
 	ClassDB::bind_method(D_METHOD("debug_crew_local_player", "vehicle_ssn"),
