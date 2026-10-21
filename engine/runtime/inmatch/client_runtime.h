@@ -139,9 +139,9 @@ struct ClientProcessState {
 	//  by Game_StartMission @0x524360 (@0x524662)]
 	const gamecfg::GameCfg *config_block = nullptr;
 	// ctx+0xD94, the client callback's disconnect latch (mission_exit.h ProcessDisconnectLatch):
-	// process-lived, first-wins, cleared at a join's start. The host's own client writes it at
-	// its teardown (NapiNPServerCtx::client_disconnect_latch); the joiner's callback leg moves
-	// onto it next (D-NET-NEW-L1-26).
+	// process-lived, first-wins, cleared at a join's connect start. The host's own client writes
+	// it at its teardown (NapiNPServerCtx::client_disconnect_latch), a joiner at its connected
+	// teardown (JoinerConnection::use_disconnect_latch) (D-NET-NEW-L1-26).
 	ProcessDisconnectLatch disconnect_latch;
 };
 
@@ -151,6 +151,8 @@ public:
 	void use_process_state(ClientProcessState *state) {
 		external_process_ = state;
 		if (joiner_) joiner_->use_local_player_entity_word(state != nullptr ? &state->local_player_entity : nullptr);
+		// The joiner's leave callback writes the process latch (D-NET-NEW-L1-26).
+		if (joiner_) joiner_->use_disconnect_latch(&process_state().disconnect_latch);
 		view_.use_vehicle_spawn_store(&process_state().vehicle_spawn_availability);
 	}
 	enum class Role : uint8_t { Joiner, HostClient };

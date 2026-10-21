@@ -18,6 +18,7 @@
 #include <base/io/log.h>
 #include <base/vfs/vfs.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
+#include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the connect start's clear)
 
 #include <algorithm>
 #include <chrono>
@@ -239,6 +240,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	client_join_start_ms_ = 0;
 	enumerated_session_recorded_ = false;
 	enumerate_pass_ended_ = false;
+	teardown_exit_reason_ = 0;
 	post_auth_stage_ = PostAuthStage::Inactive;
 	goodbye_sent_ = false;
 	session_last_send_ms_ = 0;
@@ -331,6 +333,11 @@ std::vector<uint8_t> JoinerConnection::start() {
 }
 
 void JoinerConnection::enter_session_connect_state() {
+	// The connect start clears the process's disconnect latch, so the join never reads a record
+	// an earlier session left there (D-NET-NEW-L1-26).
+	// [orig: CNapiNetwork_StartClientConnection @0x4CA160 - the memset of ctx+0xD94
+	//  @0x4CA1A6..0x4CA1B4]
+	if (disconnect_latch_ != nullptr) disconnect_latch_->clear();
 	// [orig: CNapiNetwork_StartClientConnection @0x4ca160 -> CNapiNPConnection_InitFromSession
 	//  @0x626320 (the call @0x4ca41b) - state 3 @0x626496, the start @0x62648a, the last send
 	//  now - conn+0x5B0 @0x626490..0x626499]

@@ -4,6 +4,7 @@
 // ping, the other CK-keyed outer opcode that stamps the same reap clock. Split out of
 // joiner_connection.cpp; the class header is the shared declaration.
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the leave callback)
 
 #include <base/io/log.h>
 #include <net/npwire/nw_session_framing.h> // nw_encode_outbound (the 0x46 / 0x45 envelope)
@@ -191,8 +192,18 @@ std::vector<std::vector<uint8_t>> JoinerConnection::disconnect(std::string_view 
 	std::vector<uint8_t> datagram = nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_GOODBYE,
 			client_goodbye_to_bytes(conn_.server_sk, last_disconnect_event_));
-	return std::vector<std::vector<uint8_t>>(
+	std::vector<std::vector<uint8_t>> burst(
 			disconnect_burst_count(conn_.timeouts.recv_max_per_tick), std::move(datagram));
+	// The leave callback after the burst: the process latch keeps the first record (a
+	// connection with none latches zeros), and the exit reason is the switch over the latch.
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the callback
+	//  @0x6254D5..0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - @0x4C6535,
+	//  the copy @0x4C6545, the memset @0x4C6551, valid @0x4C6559, the switch from @0x4C655F]
+	if (disconnect_latch_ != nullptr) {
+		disconnect_latch_->latch(disconnect_event_set_ ? last_disconnect_event_ : DisconnectEvent{});
+		teardown_exit_reason_ = disconnect_latch_->exit_reason();
+	}
+	return burst;
 }
 
 // [orig: Nwu_HandleServerGoodbye @0x624310 -> Nwu_HandleDisconnect(type 2) @0x623CE0]: the

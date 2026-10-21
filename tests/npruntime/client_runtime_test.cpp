@@ -5754,6 +5754,57 @@ bool run_mission_exit_routes() {
 			"a healthy joiner has stored nothing");
 }
 
+// D-NET-NEW-L1-26, the joiner's leg: a connected joiner's teardown runs the client callback, which
+// keeps the first record in the process's latch and stores the switch over the LATCH: a host 0x86
+// with DC 2 / DPC 35 latches that record and exits 7. The latch outlives the session (a later
+// listen host's own leave reads it) until the next join's connect start clears it.
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the callback @0x6254D5..0x6254E7;
+//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the empty test @0x4C6535, the copy @0x4C6545,
+//  valid @0x4C6559, the switch from @0x4C655F (35 -> 7 @0x4C65A2);
+//  CNapiNetwork_StartClientConnection @0x4CA160 - the clear @0x4CA1A6..0x4CA1B4]
+bool run_kicked_joiner_latches_the_process_record() {
+	constexpr uint32_t kClientKey = 0x00C0FFEEu;
+	inmatch::ClientProcessState process;
+	inmatch::ClientRuntime kicked("LatchKicked", [] { return uint64_t{50000}; });
+	kicked.set_title(&kJo);
+	kicked.use_process_state(&process);
+	kicked.seed_session(0x0BADF00Du, kClientKey, "CLIENT-LATCH-SCRK", "SERVER-LATCH-SCRK",
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	DisconnectEvent kick;
+	kick.dc = 2;
+	kick.dpc = 35;
+	kick.dstr = "KICKED";
+	const std::vector<uint8_t> goodbye = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(kClientKey, kick));
+	kicked.receive(goodbye.data(), goodbye.size());
+	const std::vector<std::vector<uint8_t>> burst = kicked.Client_ProcessNetworkFrame(1);
+	if (!expect(!burst.empty() && kicked.session_lost(),
+	            "latch: the host's 0x86 tears the joiner down with its burst"))
+		return false;
+	if (!expect(process.disconnect_latch.valid && process.disconnect_latch.event.dc == 2u &&
+	                    process.disconnect_latch.event.dpc == 35u,
+	            "latch: the teardown's callback keeps the kick record in the process latch"))
+		return false;
+	if (!expect(kicked.mission_exit_reason() == inmatch::kMissionExitPirate,
+	            "latch: the switch over the latch stores exit 7"))
+		return false;
+	// The next join of the process: the latch holds until its connect start.
+	uint64_t now_ms = 60000;
+	inmatch::ClientRuntime next("LatchNext", [&now_ms] { return now_ms; });
+	next.set_title(&kJo);
+	next.use_process_state(&process);
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E120u;
+	next.set_discovered_session(session);
+	if (!expect(process.disconnect_latch.valid, "latch: the record survives the session"))
+		return false;
+	(void)next.start();
+	return expect(!process.disconnect_latch.valid &&
+	                      next.mission_exit_reason() == inmatch::kMissionExitNone,
+	              "latch: the next join's connect start clears it");
+}
+
 bool run_direct_uplink_framing_is_transient() {
 	const std::string client_scrk = "CLIENT-DIRECT-UPLINK-SCRK";
 	inmatch::JoinerConnection joiner("DirectUplink");
@@ -8976,6 +9027,7 @@ int main() {
 	                run_rtt_echo_waits_out_the_round_over_gate() &&
 	                run_novaworld_exit_on_a_joiner() &&
 	                run_mission_exit_routes() &&
+	                run_kicked_joiner_latches_the_process_record() &&
 	                run_joiner_goodbye_tears_down_host();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

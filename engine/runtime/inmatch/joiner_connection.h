@@ -126,6 +126,7 @@ enum class TerrainTilState : uint8_t {
 };
 
 class ConnectLog; // punt_log.h
+struct ProcessDisconnectLatch; // mission_exit.h
 
 class JoinerConnection {
 public:
@@ -739,6 +740,19 @@ public:
 	const DisconnectEvent &last_disconnect_event() const {
 		return last_disconnect_event_;
 	}
+	// The client callback's process latch (ctx+0xD94; ClientProcessState::disconnect_latch, the
+	// embedder's, null: none): the connected teardown's leave callback copies the connection's
+	// record into it first-wins after the burst, and its switch over the LATCH is the exit reason
+	// the teardown stores (teardown_exit_reason); the join's connect start clears it
+	// (enter_session_connect_state) (D-NET-NEW-L1-26's joiner leg).
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the leave callback
+	//  @0x6254D5..0x6254E7 after the burst @0x6254B4..0x6254D3;
+	//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the empty test @0x4C6535, the copy
+	//  @0x4C6545, the null record's memset @0x4C6551, valid @0x4C6559, the switch over the latch
+	//  from @0x4C655F; CNapiNetwork_StartClientConnection @0x4CA160 - the clear
+	//  @0x4CA1A6..0x4CA1B4]
+	void use_disconnect_latch(ProcessDisconnectLatch *latch) { disconnect_latch_ = latch; }
+	int32_t teardown_exit_reason() const { return teardown_exit_reason_; }
 	// The error record retail's reason text is built from: the CR=0 join
 	// failure fields and the latched disconnect record (disconnect_reason.h).
 	ConnectionErrorRecord connection_error_record() const;
@@ -1210,6 +1224,8 @@ private:
 	//  UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9)]
 	bool enumerated_session_recorded_ = false;
 	bool enumerate_pass_ended_ = false; // the record's own pass ran its pump
+	ProcessDisconnectLatch *disconnect_latch_ = nullptr; // use_disconnect_latch
+	int32_t teardown_exit_reason_ = 0; // the leave callback's switch over the latch (0: none)
 	// The connect state from a session record (a browse row's, or the enumerate's 0x81): retail's
 	// StartClientConnection -> InitFromSession, state 3, start = now, last = now - 2000, no send.
 	void enter_session_connect_state();

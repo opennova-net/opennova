@@ -104,6 +104,7 @@ ClientRuntime::ClientRuntime(std::string player_name)
 		: role_(Role::Joiner),
 		  joiner_(std::make_unique<JoinerConnection>(std::move(player_name))) {
 	view_.use_vehicle_spawn_store(&own_process_.vehicle_spawn_availability);
+	joiner_->use_disconnect_latch(&own_process_.disconnect_latch);
 	// A remote joiner's folds STAGE and its rows chase (net-re §5.38e,
 	// D-NET-196); the HostClient loopback keeps the snap fold (full-rate view;
 	// the authority never interpolates, D-NET-89).
@@ -116,6 +117,7 @@ ClientRuntime::ClientRuntime(std::string player_name,
 		  joiner_(std::make_unique<JoinerConnection>(
 		          std::move(player_name), std::move(monotonic_milliseconds))) {
 	view_.use_vehicle_spawn_store(&own_process_.vehicle_spawn_availability);
+	joiner_->use_disconnect_latch(&own_process_.disconnect_latch);
 	view_.set_remote_motion_mode(true);
 }
 
@@ -923,10 +925,13 @@ void ClientRuntime::poll_vehicle_menu(const world::World &world, const def::DefI
 // increments it: the term is the floor 1.
 int32_t ClientRuntime::mission_exit_reason() const {
 	if (mission_exit_reason_ != kMissionExitNone) return mission_exit_reason_;
-	if (joiner_ != nullptr && joiner_->has_disconnect_event()) {
-		const int32_t reason = mission_exit_reason_for_disconnect(joiner_->last_disconnect_event());
-		if (reason != kMissionExitNone) return reason;
-	}
+	// The connected teardown's leave callback stores the switch over the process latch, not
+	// over this connection's own record (D-NET-NEW-L1-26; JoinerConnection::use_disconnect_latch
+	// carries the witness).
+	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the switch over ctx+0xD94 from
+	//  @0x4C655F]
+	if (joiner_ != nullptr && joiner_->teardown_exit_reason() != kMissionExitNone)
+		return joiner_->teardown_exit_reason();
 	// A reload wait that loses its link returns into the Post Menu with exit
 	// 1, which takes the main menu [orig: Game_StartMission
 	// @0x524E87..0x524ECD; g_LoadingTimeoutFlag, set by
