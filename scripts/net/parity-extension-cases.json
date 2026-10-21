@@ -54,7 +54,9 @@
       "exercise_input": false,
       "auto_deploy": true,
       "scenario": "kick.json",
-      "topologies": ["RR", "RR-aa", "RO"]
+      "serve_only": true,
+      "topologies": ["RR", "RR-aa", "RO"],
+      "note": "The host is retail's Serve Only server: a listen host is a session peer, so its console line goes to its own server as C2S 0x04 (Client_ProcessConsoleCommand @0x520EFE..0x520F29), whose handler runs NETLOG and STAT only (NapiNPServerMsg_HandleConsoleLine @0x5199D0), and PUNT ALL (Server_HandleBanPuntCommand, reason 33 S.C:SPA @0x50B951) runs from the console of an authority that is not a peer (@0x520F63). OR and OO wait for the runner to host opennova-serve."
     },
     {
       "id": "tdh-i3a-tdm-hostkill",
