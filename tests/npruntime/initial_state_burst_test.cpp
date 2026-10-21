@@ -1061,7 +1061,7 @@ int pool1_fixture_bytes_impl() {
 // [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 -- the start word
 //  @0x5034C5, the zero word @0x503673, the count @0x503687, the budget
 //  @0x50368B..0x503694 (the cursor step @0x503696 skipped on the cross);
-//  Server_SendInitialGameStateToPlayer @0x51BBA0, the call @0x51BD8E]
+//  Server_SendPlayerSlotStateFrame @0x51BBA0, the call @0x51BD8E]
 int pool3_page_start_impl() {
 	auto world_storage = std::make_unique<w::World>();
 	w::World &world = *world_storage;
