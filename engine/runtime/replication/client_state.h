@@ -791,6 +791,11 @@ struct ClientEntityState {
 	// the decay @0x4B6DBD, the chase @0x4B6FC1; Entity_BuildBoneTransformMatrices
 	// @0x4B1290 (the body build @0x4B182E)].
 	int32_t rm_body_pitch = 0;
+	// The aim word +0x2D0 a player body's dead in-air tumble aims the pitch at
+	// (a + b every fourth tick; the pitch chases it every tick); no other leg of
+	// the player body pass writes it [orig: Entity_UpdateInfantryPlayerBody
+	// @0x4B40E0 - the store @0x4B6D44, the read @0x4B6D5B].
+	int32_t rm_aim_word = 0;
 	bool rm_leg_seeded = false;
 	// --- The secondary (upper-body weapon) AnimMap channel, advanced locally
 	// for every armed player row, as retail's client runs it for every player

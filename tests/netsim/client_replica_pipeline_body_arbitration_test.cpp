@@ -767,7 +767,42 @@ void test_row_channels_serve_the_shared_variant_rings() {
 			"a single-entry state plays its one entry");
 }
 
+// D-NET-196 (V-ROLL's edge): a dead player row in the air tumbles where the conform
+// selector would decay it: the body pitch and Roll hold on three ticks of four, and
+// on the fourth they ease an eighth toward the tick-phase ramps a and b while the
+// aim word takes a + b.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the gate @0x4B6CCB..0x4B6CDE,
+//  tick & 3 @0x4B6CE8, the ramps @0x4B6CEC..0x4B6D12, the chases @0x4B6D18..0x4B6D41,
+//  the aim store @0x4B6D44]
+void test_dead_row_in_the_air_tumbles() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	BodySource src;
+	view.set_root_motion_source(&src);
+	ns::ClientEntityState &row = view.state().upsert(kPlayerHandle);
+	row.type_id = kPlayerType;
+	row.cls = EntityClass::Player;
+	row.net_has_compact = true;
+	row.rm_adm_id = -1; // no channel: the conform leg alone
+	row.rm_entity_flags = world::kEntityFlagDead | world::kEntityFlagInAir;
+	row.rm_body_pitch = 0x100000;
+	row.roll_bam = 0x100000;
+	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	for (int tick = 1; tick <= 3; ++tick) view.tick_remote_motion(0xFFFF);
+	expect(es->rm_body_pitch == 0x100000 && es->roll_bam == 0x100000 && es->rm_aim_word == 0,
+			"ticks 1..3: no decay, no ramp");
+	view.tick_remote_motion(0xFFFF); // tick 4: a = 28 * 0xFFFFFF, b = -28 * 0xFFFFFF
+	const int32_t a = 28 * 0xFFFFFF;
+	const int32_t b = -28 * 0xFFFFFF;
+	expect(es->rm_body_pitch == 0x100000 + ((a - 0x100000 + 4) >> 3) &&
+					es->roll_bam == 0x100000 + ((b - 0x100000 + 4) >> 3),
+			"tick 4: the body pitch and Roll ease an eighth toward a and b");
+	expect(es->rm_aim_word == a + b, "tick 4: the aim word takes a + b");
+}
+
 int main() {
+	test_dead_row_in_the_air_tumbles();
 	test_seated_row_eye_reads_its_channel_capsule();
 	test_row_channels_serve_the_shared_variant_rings();
 	test_record_flags_land_on_the_mirror();

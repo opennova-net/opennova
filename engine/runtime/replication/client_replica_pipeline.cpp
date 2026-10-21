@@ -1142,7 +1142,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			// record's class (entity+0x294) for its class readers [orig:
 			// NetPacket_SerializePlayerState @0x4C09C0 - the dead arms' Health = 0
 			// @0x4C1027 / @0x4C10FB and their jumps past the
-			// Entity_SetHealthFromDifficultyByte call @0x4C11B4 (@0x4C102E /
+			// Entity_SetHealthFromDifficultyByte call @0x4C11BA (@0x4C102E /
 			// @0x4C1104 -> @0x4C11D7)].
 			es.health_class_byte = wire_dead
 					? static_cast<uint8_t>((rec.player.health_class_byte & 0xF0u) |
@@ -1336,7 +1336,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// carries the new type, so the next record of the old one fails the
 		// pre-apply check above and queues the C2S 0x0F (D-NET-348).
 		// [orig: NetPacket_SerializePlayerState @0x4C09C0 -
-		//  Entity_SetHealthFromDifficultyByte @0x4C11B4 (the class store @0x4AD5A2),
+		//  the Entity_SetHealthFromDifficultyByte @0x4AD580 call @0x4C11BA (its class store
+		//  @0x4AD5A2),
 		//  the dead arms' jumps past it @0x4C102E / @0x4C1104, the remote stores
 		//  @0x4C11DF..0x4C1242, the climate pick @0x4C1248..0x4C129C,
 		//  ItemList_FindIndexByTypeId @0x4C129D, the compare @0x4C12A5..0x4C12A8, the

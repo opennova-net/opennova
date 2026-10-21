@@ -435,6 +435,36 @@ struct RowConformIo {
 void row_body_conform(ClientEntityState &es, int arbitrated_state, const RowConformIo &io_in) {
 	const uint32_t flags = es.rm_entity_flags;
 	const bool dead = (flags & world::kEntityFlagDead) != 0u;
+	// A dead body in the air tumbles instead of the decay or the conform: on every
+	// fourth tick two tick-phase ramps a and b pull the body pitch and Roll an
+	// eighth of the way to a and b, turn the heading by b >> 3 and aim the +0x2D0
+	// word at a + b; every tick the pitch chases that word a quarter step, floored
+	// at -0x2800000 (the upper clamp compares against 0x28000000, which no step
+	// reaches). world::infantry_slope's org2 leg is the authority's twin.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the gate @0x4B6CCB..0x4B6CDE,
+	//  tick & 3 @0x4B6CE8, the ramps @0x4B6CEC..0x4B6D12, the chases @0x4B6D18..0x4B6D41,
+	//  the heading @0x4B6D3B..0x4B6D3E, the aim store @0x4B6D44, the pitch chase
+	//  @0x4B6D58..0x4B6D90]
+	if (dead && (flags & world::kEntityFlagInAir) != 0u) {
+		const uint32_t tick = io_in.tick;
+		if ((tick & 3u) == 0u) {
+			const int32_t a = (32 - static_cast<int32_t>(tick & 63u)) * 0xFFFFFF;
+			const int32_t b = (32 - static_cast<int32_t>(((tick >> 6) - tick) & 63u)) * 0xFFFFFF;
+			es.rm_body_pitch = io::bam_add(es.rm_body_pitch,
+					io::bam_sar(io::bam_add(io::bam_sub(a, es.rm_body_pitch), 4), 3));
+			es.roll_bam = io::bam_add(es.roll_bam,
+					io::bam_sar(io::bam_add(io::bam_sub(b, es.roll_bam), 4), 3));
+			es.heading_bam = io::bam_add(es.heading_bam, io::bam_sar(b, 3));
+			es.rm_aim_word = io::bam_add(a, b);
+		}
+		int32_t step = io::bam_sar(io::bam_add(io::bam_sub(es.rm_aim_word, es.pitch_bam), 2), 2);
+		if (step > 0x28000000)
+			step = 0x2800000;
+		else if (step < -0x2800000)
+			step = -0x2800000;
+		es.pitch_bam = io::bam_add(es.pitch_bam, step);
+		return;
+	}
 	const uint32_t attrib = io_in.def_attrib != nullptr && *io_in.def_attrib
 			? (*io_in.def_attrib)(es.type_id) : 0u;
 	const bool conform = (attrib & world::kItemAttribLandable) != 0u ||
