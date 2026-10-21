@@ -4523,7 +4523,8 @@ bool run_host_startup_maps_claymore_preference() {
 }
 
 // The advertised NoTracers mission attribute (rules word bit 0) feeds the authoritative
-// tracer-visual gate the same way [orig: g_RulesFlags @ 0x24D1E34 & 1 @ 0x4ec41f].
+// tracer-visual gate the same way [orig: RoundData_SpawnRound @0x4EC0D0 - g_RulesFlags @0x24D1E34
+// & 1 @0x4EC72F / @0x4EC79D].
 bool run_host_startup_maps_no_tracers_rule() {
 	{
 		w::World world;
