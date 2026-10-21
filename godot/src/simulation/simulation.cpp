@@ -684,8 +684,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	options.joiner = is_joiner();
 	options.mp_session = is_host_listening() || is_joiner();
 	// The single player's restart: Game_StartMission(1), which skips the fresh start's
-	// profile word and intro cine and keeps the first start's UP-TIME stamp (D-PWR-8)
-	// [orig: Game_RestartRoundSP @0x5263A0 - the push 1 @0x5263D9].
+	// profile word and intro cine and keeps the first start's UP-TIME stamp (D-PWR-8; the
+	// engine's KernelBootOptions::restart carries the witness).
 	options.restart = restart_boot_ && !options.mp_session;
 	// The shell owns the terrain field's parsed-document entry (the store the
 	// seam below builds, or none): the kernel never loads one from files here.
