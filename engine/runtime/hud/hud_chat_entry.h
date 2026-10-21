@@ -178,7 +178,7 @@ public:
 	// @0x524360 (the Player_InitPlayer call @0x525BBC); Player_InitPlayer
 	// @0x4E15F0 (the Player_FindLocalPlayerEntity store @0x4E17EB, the fatal
 	// @0x4E17F2); EntityDef_InitAllCallbacks @0x4A5A70 (the def's +0x168 name,
-	// "Null" when empty, @0x4A5B50..0x4A5B67); Entity_LookupPhysicsCallbacks
+	// "Null" when empty, @0x4A5B50..0x4A5B67); EntityDef_LookupInputCallbacks
 	// @0x497910 (the table @0x829DA8, the +0x170 stores @0x497949 / @0x497965);
 	// Input_HandleActionBindingNull @0x497980; Input_HandleActionBinding_0
 	// @0x4E0420 (the range test @0x4E0475..0x4E047E, the default @0x4E13F9);

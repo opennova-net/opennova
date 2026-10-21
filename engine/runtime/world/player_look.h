@@ -122,7 +122,7 @@ inline constexpr int32_t kCursorCentreY = 0xF0;
 // drops as any axis input. `client_x` / `client_y` are the cursor's client-area
 // position at the close; the next update's head pump re-centres again and
 // overwrites the words, so only that one update reads it.
-// [orig: UI_TeardownScene @0x54E650 (the UI_CloseMenuScreen call @0x54E659, the
+// [orig: UI_ProcessMenuScreenFrame @0x54E650 (the UI_CloseMenuScreen call @0x54E659, the
 //  g_MenuInputPassThrough test @0x54E686, the Input_ProcessFrame call @0x54E695;
 //  its caller under a menu screen Game_ProcessMainFrame @0x5263F0, the call
 //  @0x52667B); UI_CloseMenuScreen @0x54E5E0 (UIScene_ReturnToHistoryScreen(menu, 0)

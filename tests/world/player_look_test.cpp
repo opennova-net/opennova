@@ -160,7 +160,7 @@ int main() {
     //     4x share: 200 px right and 100 px above the centre at setting 128 turn
     //     (200 * (128 << 11) + 0x8000) >> 16 = 800 units right, 4.39453125 deg,
     //     and look up. [orig: Input_PumpAndCenterCursor @0x7616D0 (@0x761718..
-    //     0x76172A); UI_TeardownScene @0x54E650 (@0x54E659, @0x54E686, @0x54E695)]
+    //     0x76172A); UI_ProcessMenuScreenFrame @0x54E650 (@0x54E659, @0x54E686, @0x54E695)]
     {
         int32_t axis[2] = {};
         pass_through_close_axis(520, 140, axis);

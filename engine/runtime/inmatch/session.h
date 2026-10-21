@@ -111,7 +111,7 @@ struct CameraSample {
 //  Game_ProcessMainFrame); Game_ProcessMainFrame @0x5263F0 (the pause word's test
 //  @0x5265A0..0x5265A6 around ++g_CurrentTick @0x5265B4, the Game_PumpWindowMessages
 //  call @0x526608, the UI_IsMenuScreenOpen call @0x52660D, the
-//  Input_ProcessFrame(g_CurrentTick) call @0x52661D); UI_TeardownScene @0x54E650
+//  Input_ProcessFrame(g_CurrentTick) call @0x52661D); UI_ProcessMenuScreenFrame @0x54E650
 //  (g_MenuInputPassThrough tested @0x54E686, the Input_ProcessFrame call @0x54E695),
 //  the word raised through UI_SetMenuInputPassThrough @0x54B980 by DeathScreen_UpdateUI
 //  @0x553150 (the call @0x55316E) and StatScreen_ShowCallback @0x562840 (the calls
