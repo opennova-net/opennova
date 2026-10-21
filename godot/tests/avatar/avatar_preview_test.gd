@@ -205,7 +205,7 @@ func test_runtime_portrait_idle_spins_and_holds_the_camera() -> void:
 
 # Every frame the visible pane processes is a draw, which retail's PLAYER_PREVIEW custom draw
 # turns into its time-of-day store (the shell routes `drawn` to GameWorld.player_preview_drawn);
-# a hidden pane draws nothing. [orig: PlayerInfo_RenderPlayerPreview3D @ 0x560af5]
+# a hidden pane draws nothing (the witness: engine inmatch::kPlayerPreviewTodFixed24).
 func test_each_processed_frame_is_a_draw() -> void:
 	watch_signals(_preview)
 	await get_tree().process_frame

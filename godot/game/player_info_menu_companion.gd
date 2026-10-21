@@ -58,7 +58,7 @@ var _restored_voice := 0
 signal avatar_chosen(profile: Dictionary)
 ## The PLAYER_PREVIEW portrait drew a frame: retail's draw stores 16:00 into the process's
 ## time of day, never restored, which the menus' remote admin reads (MainGame routes it to
-## GameWorld.player_preview_drawn) [orig: PlayerInfo_RenderPlayerPreview3D @ 0x560af5].
+## GameWorld.player_preview_drawn; the witness: engine inmatch::kPlayerPreviewTodFixed24).
 signal player_preview_drawn
 
 
