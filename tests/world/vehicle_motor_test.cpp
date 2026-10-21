@@ -2132,7 +2132,7 @@ void test_slope_factor_samples_quantized_table() {
 		t.player_control = false;
 		auto &m = r.veh().veh;
 		m.yaw_seeded = true;
-		r.veh().pitch = pitch;
+		r.veh().pitch_bam = spawn_angle_bam(pitch);
 		m.speed = 20000;
 		m.cmd_speed = 20000;
 		const int32_t pitch_bam = spawn_angle_bam(pitch);
@@ -2319,8 +2319,8 @@ void test_mover_prologue_stamps_saved_live_pose() {
 		Rig r;
 		r.w.vehicles.traits.set(r.veh().item_id, t);
 		r.veh().heading = placed_heading_bam(1);
-		r.veh().pitch = 5;
-		r.veh().roll = -3;
+		r.veh().pitch_bam = spawn_angle_bam(5);
+		r.veh().roll_bam = spawn_angle_bam(-3);
 		const int32_t entry[3] = { to_fixed(r.veh().position.x), to_fixed(r.veh().position.y),
 			to_fixed(r.veh().position.z) };
 		CHECK(!r.veh().saved_live_valid);

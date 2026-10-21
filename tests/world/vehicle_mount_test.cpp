@@ -133,7 +133,7 @@ void look_at(World &w, EntityHandle player_h, const Vec3 &target) {
 	const double heading = std::atan2(dy, dx);
 	const double pitch = std::atan2(dz, std::hypot(dx, dy));
 	player->heading = placed_heading_bam(static_cast<int16_t>(std::lround(90.0 - heading * 180.0 / 3.14159265358979323846)));
-	player->pitch = static_cast<int16_t>(std::lround(pitch * 180.0 / 3.14159265358979323846));
+	player->pitch_bam = spawn_angle_bam(static_cast<int>(std::lround(pitch * 180.0 / 3.14159265358979323846)));
 	if (AiEntity *body = w.ai.for_handle(player_h)) {
 		body->heading = static_cast<int32_t>(heading * opennova::io::kBamPerRadian);
 		body->pitch = static_cast<int32_t>(pitch * opennova::io::kBamPerRadian);
@@ -205,8 +205,8 @@ void check_pose(const Entity &entity, const MountedPose &expected) {
     CHECK(std::abs(entity.position.y - expected.position.y) < 0.0001f);
     CHECK(std::abs(entity.position.z - expected.position.z) < 0.0001f);
     CHECK(mission_yaw_whole_deg(entity.heading) == std::lround(mission_yaw_deg_from_bam_heading(expected.heading)));
-    CHECK(entity.pitch == std::lround(expected.pitch * kDegreesPerBam));
-    CHECK(entity.roll == std::lround(expected.roll * kDegreesPerBam));
+    CHECK(entity.pitch_bam == expected.pitch); // the live words (D-NET-NEW-L6-3)
+    CHECK(entity.roll_bam == expected.roll);
 }
 
 // Entity_RequestVehicleAttach pre-snaps the requester's Yaw to the chosen seat
@@ -480,8 +480,8 @@ void test_live_pose_provider_and_static_fallback() {
         vehicle.has_graphic_model = true;
         vehicle.position = {10.0f, 20.0f, 30.0f};
         vehicle.heading = placed_heading_bam(90);
-        vehicle.pitch = 4;
-        vehicle.roll = 5;
+        vehicle.pitch_bam = spawn_angle_bam(4);
+        vehicle.roll_bam = spawn_angle_bam(5);
         vehicle.health = 100;
         vehicle.alive = true;
         Seat seat;
@@ -552,8 +552,8 @@ void test_live_pose_provider_and_static_fallback() {
             CHECK(attached.position.x.q16 == 0 && attached.position.y.q16 == 0 &&
                   attached.position.z.q16 == 0);
             CHECK(mission_yaw_whole_deg(attached.heading) == std::lround(mission_yaw_deg_from_bam_heading(provider.pose.heading)));
-            CHECK(attached.pitch == std::lround(provider.pose.pitch * kDegreesPerBam));
-            CHECK(attached.roll == std::lround(provider.pose.roll * kDegreesPerBam));
+            CHECK(attached.pitch_bam == provider.pose.pitch); // the seat's words (D-NET-NEW-L6-3)
+            CHECK(attached.roll_bam == provider.pose.roll);
         }
 
         // The carrier changes the BODY frame; idle LOOK remains independent.
@@ -644,8 +644,8 @@ void test_live_pose_provider_and_static_fallback() {
         CHECK(body->self->position.x.q16 == to_fixed(2.0));
         CHECK(body->self->position.y.q16 == to_fixed(1.0));
         CHECK(mounted->heading == kChasedHeading); // the Yaw word is the independent chased look, not the provider body yaw 12
-        CHECK(mounted->pitch == 21);
-        CHECK(mounted->roll == -30);
+        CHECK(mounted->pitch_bam == spawn_angle_bam(21));
+        CHECK(mounted->roll_bam == spawn_angle_bam(-30));
         CHECK(body->inf.body_heading == bam_heading_from_mission_yaw_deg(12));
         CHECK(body->body_pitch == bam_from_degrees_wrapped(21.0));
         CHECK(body->roll == bam_from_degrees_wrapped(-30.0));
@@ -715,8 +715,8 @@ void test_live_pose_provider_and_static_fallback() {
         Entity vehicle;
         vehicle.position = {10.0f, 20.0f, 30.0f};
         vehicle.heading = placed_heading_bam(90);
-        vehicle.pitch = 4;
-        vehicle.roll = 5;
+        vehicle.pitch_bam = spawn_angle_bam(4);
+        vehicle.roll_bam = spawn_angle_bam(5);
         Seat seat;
         seat.type = SeatType::Passenger;
         seat.seat_local = {2.0f, 3.0f, 4.0f};
@@ -1721,7 +1721,7 @@ void test_toggle_dismount_and_swap() {
 	// Seated, looking along the carrier (+y) with the sitex 90 deg to the side:
 	// outside the 5 deg cone -> the scan is empty -> dismount.
 	r.player().heading = placed_heading_bam(0);
-	r.player().pitch = 0;
+	r.player().pitch_bam = 0;
 	CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
 	CHECK(!r.player().mounted);
 	// Back in the control seat and looking straight at the sitex 3.0 u across
@@ -3950,7 +3950,7 @@ void test_driver_animation() {
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB89..0x40EBA6; the roll cmps
 		//  Entity_UpdateInfantryPlayerBody @0x4B65D0 / Entity_UpdateInfantryAI @0x4BEE3D]
 		r.veh().veh.yaw_seeded = false;
-		r.veh().roll = 180;
+		r.veh().roll_bam = spawn_angle_bam(180);
 		r.veh().veh.speed = 200;
 		CHECK(r.sys.pose_if_mounted(body, r.w));
 		CHECK(body.inf.anim_state == 110);
@@ -4489,8 +4489,8 @@ void test_seat_frame_matches_collision_frame() {
     // (a) flat carrier: bit-compatible with the legacy 2D rotate.
     for (float yaw : {0.0f, 37.0f, 145.0f, 270.0f}) {
         veh.heading = placed_heading_bam(static_cast<int16_t>(yaw));
-        veh.pitch = 0;
-        veh.roll = 0;
+        veh.pitch_bam = 0;
+        veh.roll_bam = 0;
         const Vec3 got = entity_local_point_world(veh, L);
         const double a = -static_cast<double>(mission_yaw_whole_deg(veh.heading)) * 3.14159265358979323846 / 180.0;
         const double ca = std::cos(a), sa = std::sin(a);
@@ -4504,13 +4504,13 @@ void test_seat_frame_matches_collision_frame() {
     // Rz(heading) * Ry(-pitch) * Rx(roll) over the RAW model point (seat_local
     // is pre-swizzled, raw = (L.y, -L.x, L.z)), heading = bam(90 - yaw).
     veh.heading = placed_heading_bam(20);
-    veh.pitch = -6;
-    veh.roll = 16;
+    veh.pitch_bam = spawn_angle_bam(-6);
+    veh.roll_bam = spawn_angle_bam(16);
     const Vec3 got = entity_local_point_world(veh, L);
     const double d2r = 3.14159265358979323846 / 180.0;
     const double h = (90.0 - static_cast<double>(mission_yaw_whole_deg(veh.heading))) * d2r;
-    const double pt = -static_cast<double>(veh.pitch) * d2r;
-    const double rl = static_cast<double>(veh.roll) * d2r;
+    const double pt = -degrees_from_angle_bam(veh.pitch_bam) * d2r;
+    const double rl = degrees_from_angle_bam(veh.roll_bam) * d2r;
     // raw model frame (un-swizzle), then Rx(roll)
     double v0[3] = {L.y, -L.x, L.z};
     double v1[3] = {v0[0], v0[1] * std::cos(rl) - v0[2] * std::sin(rl),
@@ -4528,8 +4528,8 @@ void test_seat_frame_matches_collision_frame() {
     // offset point's world z off the flat-frame value (pure roll 25 on a
     // 1.5-u lateral offset shifts z by 1.5*sin(25) ~= 0.63).
     veh.heading = placed_heading_bam(0);
-    veh.pitch = 0;
-    veh.roll = 25;
+    veh.pitch_bam = 0;
+    veh.roll_bam = spawn_angle_bam(25);
     const Vec3 lat = entity_local_point_world(veh, Vec3{1.5f, 0.0f, 0.0f});
     CHECK(std::fabs(lat.z - veh.position.z) > 0.5);
 }

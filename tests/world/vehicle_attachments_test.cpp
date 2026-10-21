@@ -155,7 +155,7 @@ void test_per_tick_follow() {
 
     const Entity &ea = *r.w.registry.get(a);
     CHECK(close_to(ea.position.x, 108.0f) && close_to(ea.position.y, 50.0f) && close_to(ea.position.z, 5.0f));
-    CHECK(ea.heading == placed_heading_bam(90) && ea.pitch == 0 && ea.roll == 0);
+    CHECK(ea.heading == placed_heading_bam(90) && ea.pitch_bam == 0 && ea.roll_bam == 0);
     CHECK(ea.veh.vel_x == 123 && ea.veh.vel_y == -45 && ea.veh.slide_z == 7);
     CHECK(ea.veh.wheel_rate_bam == 99 && ea.veh.air_pitch_rate == 5 && ea.veh.air_roll_rate == -6);
     const Entity &eb = *r.w.registry.get(b);
