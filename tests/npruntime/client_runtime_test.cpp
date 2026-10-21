@@ -6829,8 +6829,8 @@ bool run_missing_sequence_request_leaves_from_the_receive_pump() {
 // original carried and without touching the flush counter. A WR-flagged 0x85
 // is answered the same way by its pong.
 // [orig: NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
-//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039; Nwu_HandlePing @0x623a70 ->
-//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61f261]
+//  @0x6239b6 -> CNapiNPManager_SendTo @0x61F032; Nwu_HandlePing @0x623a70 ->
+//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61F25A]
 bool run_resend_answer_and_pong_leave_from_the_receive_pump() {
 	constexpr uint32_t kServerKey = 0x55667788u;
 	const std::string client_scrk = "CLIENT-HOLDOFF-RETAINED-SCRK";

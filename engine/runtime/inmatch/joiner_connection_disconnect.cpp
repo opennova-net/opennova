@@ -29,7 +29,7 @@ namespace opennova::inmatch {
 // @0x61F080: opcode 0x45 for a client, `[u32 remote key][WR][MS]`) or the rtt
 // lands in session_keys.rtt_ms @0x623C9B. The pong leaves from inside the
 // receive pump: SendPing writes it straight to the socket (CNapiNPManager_SendTo
-// @0x61F261), so the host's round trip never includes our send-holdoff wait.
+// @0x61F25A), so the host's round trip never includes our send-holdoff wait.
 bool JoinerConnection::on_server_ping(const std::vector<uint8_t> &body,
 		std::vector<std::vector<uint8_t>> &immediate_outbound) {
 	SessionPingBody ping;

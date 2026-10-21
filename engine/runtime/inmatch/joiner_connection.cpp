@@ -593,7 +593,7 @@ JoinerConnection::ManagerPass JoinerConnection::manager_receive(const uint8_t *r
 	}
 	// The sends the handler wrote from inside this receive write their NET SENDING lines
 	// there, ahead of the dispatch's line [orig: CNapiNPConnection_SendSessionPacket
-	//  @0x61EE00 - NapiLog_OnSend (the call @0x61F00D); CNapiNPConnection_SendPing @0x61F080 -
+	//  @0x61EDD0 - NapiLog_OnSend (the call @0x61F00D); CNapiNPConnection_SendPing @0x61F080 -
 	//  @0x61F241; NapiNPManager_HandlePacket @0x622FCD after DispatchOpcode returned].
 	for (const std::vector<uint8_t> &sent : out.immediate_outbound) connect_log_send(sent);
 	connect_log_line(taken
@@ -2360,7 +2360,7 @@ bool JoinerConnection::on_server_resend_list(
 	// receive pump: retail's SendSessionPacket writes the packet straight to the socket, so a
 	// resend never waits for the send-holdoff gate and never touches the flush counter.
 	// [orig: NapiNP_HandleResendList @0x623980..0x6239da -> CNapiNPConnection_SendSessionPacket
-	//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039]
+	//  @0x6239b6 -> CNapiNPManager_SendTo @0x61F032]
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
 				? conn_.seq.next_outbound_seq

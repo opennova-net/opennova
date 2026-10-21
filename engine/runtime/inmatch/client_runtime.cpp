@@ -512,7 +512,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 // [orig: NapiLog_OnSend @0x4C4760 (proto+0x270, installed by CNapiNetwork_Init @0x4CA978) -
 //  NapiNPSession_SendAnnouncePacket @0x61FA00 (0x41, the call @0x61FDCA),
 //  CNapiNPConnection_SendClientJoin @0x61FE20 (0x42, @0x6203F0),
-//  CNapiNPConnection_SendSessionPacket @0x61EE00 (0x43 with its packet_seq, @0x61F00D),
+//  CNapiNPConnection_SendSessionPacket @0x61EDD0 (0x43 with its packet_seq, @0x61F00D),
 //  CNapiNPConnection_SendMissingSeqList @0x623560 (0x44, @0x62374A), CNapiNPConnection_SendPing
 //  @0x61F080 (0x45, @0x61F241), CNapiNPConnection_SendDisconnectPacket @0x61F2A0 (0x46,
 //  @0x61F53B); CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst

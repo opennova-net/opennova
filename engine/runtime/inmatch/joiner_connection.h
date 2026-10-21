@@ -165,10 +165,10 @@ public:
 		// client pump) and the 0x45 pong of a WR-flagged 0x85; they never wait for the
 		// send-holdoff gate. The opcode handlers run in the manager's dispatch, never queued.
 		// [orig: NapiNPManager_HandlePacket @0x622F10 -> NapiNPProtocol_DispatchOpcode (the call
-		//  @0x622F9B) -> Nwu_HandleServerResendList @0x6242B0 / Nwu_HandleServerPing @0x6242E0;
+		//  @0x622F96) -> Nwu_HandleServerResendList @0x6242B0 / Nwu_HandleServerPing @0x6242E0;
 		//  NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
-		//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039; Nwu_HandlePing @0x623a70 ->
-		//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61f261]
+		//  @0x6239b6 -> CNapiNPManager_SendTo @0x61F032; Nwu_HandlePing @0x623a70 ->
+		//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61F25A]
 		std::vector<std::vector<uint8_t>> immediate_outbound;
 		// Receive handlers queue reliable semantic replies here, in the order they ran.
 		// ClientRuntime appends them to its one C2S queue as it folds the reducer stream.
@@ -350,7 +350,7 @@ public:
 	//  @0x6231A7..0x6231D9, NapiNP_UnpackPacket @0x623206, cb_on_error(3) @0x623229, cb_on_packet
 	//  @0x623254, NapiNPManager_HandlePacket (the call @0x623284); NapiNPManager_HandlePacket
 	//  @0x622F10 - cb_on_unpack @0x622F53 ahead of NapiNP_HandleMagicPacket (the call @0x622F62),
-	//  NapiNPProtocol_DispatchOpcode (the call @0x622F9B), cb_on_dispatch @0x622FCD, cb_on_error(4)
+	//  NapiNPProtocol_DispatchOpcode (the call @0x622F96), cb_on_dispatch @0x622FCD, cb_on_error(4)
 	//  @0x622FF9; g_NPOpcodeHandlers @0x849D90 rows 7..13 (0x81..0x87);
 	//  NapiLib_SetManagerCallbacks @0x4C6F50 - the five lines while the log is on @0x4C6F64..0x4C6FAC]
 	struct ManagerPass {
