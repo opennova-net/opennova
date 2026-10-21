@@ -1005,6 +1005,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	conn.dcnt = auth.dcnt;
 	conn.rcnt = static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
 	conn.receive_inactive_ms = 0;
+	conn.receive_stamp_ms = ctx.np_protocol.receive_clock_ms;
 	conn.c2s_reassembly = {};
 	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character
 	// selection Server_PlayerAdd folds into the player record (CharacterJoinVars). Values are
@@ -1156,7 +1157,10 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 	// [orig: HandleSessionPacket @0x626A00 — in-order leg @0x626beb..0x626bfc -> ParseMessages
 	//  @0x625BC0 stamp @0x625d54; seq 0 @0x626bcc / duplicate @0x626c03 / future @0x626c0c..0x626c3a
 	//  stamp nothing]
-	if (admission.admitted) conn.receive_inactive_ms = 0;
+	if (admission.admitted) {
+		conn.receive_inactive_ms = 0;
+		conn.receive_stamp_ms = ctx.np_protocol.receive_clock_ms;
+	}
 	// An admitted packet that carried any message record owes the peer an ACK: retail's
 	// ParseMessages raises has_pending_out (+0x650) once its record region is non-empty, and
 	// the next open send boundary builds a packet even with nothing queued — a header-only one
@@ -1407,6 +1411,7 @@ void handle_client_ping(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (!parse_session_ping_body(body.data(), body.size(), ping)) return;
 	if (ping.receiver_local_key != conn->server_sk) return;
 	conn->receive_inactive_ms = 0;
+	conn->receive_stamp_ms = ctx.np_protocol.receive_clock_ms;
 	if (ping.wants_reply) {
 		out.outbound.push_back(nw_encode_outbound(SESSION_OPCODE_SERVER_PING,
 				build_session_ping_body(conn->client_ck, /*wants_reply=*/false,

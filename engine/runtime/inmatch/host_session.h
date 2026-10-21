@@ -79,9 +79,6 @@ struct HostOwner {
 	// From HostConfig::clock_ms at the session start; empty is the tick clock (now_tick x 16 ms,
 	// the deterministic stand-in a test harness runs on). host_clock_ms reads it.
 	std::function<uint32_t()> clock_ms;
-	// The clock at the last receive reap walk, whose elapsed time the walk adds to every
-	// connection's silence (armed at the session start; the tick clock adds one tick a walk).
-	uint32_t reap_clock_ms = 0;
 	// false (dedicated/headless): HostOnly registers no local-player connection; an embedder-supplied
 	// unused channel may be defensively drained. true (serve-and-play): HostClient registers the
 	// loopback and the owner folds it into ClientState, so the pump must preserve it.

@@ -244,6 +244,8 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock,
 		uint32_t now, HostEventObserverFn event_observer, void *event_observer_context) {
 	auto &pending_session_messages = owner.pending_session_messages;
+	// The receive stamps its connections with the host clock (D-NET-256).
+	owner.ctx.np_protocol.receive_clock_ms = host_clock_ms(owner);
 	// One handled datagram's (or replayed packet's) output, consumed in place.
 	auto consume = [&](const PeerAddr &peer, HandleResult &r) {
 		// Same-address replacement reports PeerGoodbye for the OLD occupant after
@@ -396,19 +398,18 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
 		lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
 		// (2) tick_connections: drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
-		// The reap adds the clock's time since its last walk, a long load's included: retail's
-		// reap compares GetTickCount with the last in-order receive's stamp.
-		// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 state 1 - elapsed = now - conn+0x5E8
-		//  @0x62935c, `elapsed > timeout_ms` @0x629362] (D-NET-256)
-		int reap_elapsed_ms = static_cast<int>(io::kTickMs);
-		if (owner.clock_ms) {
-			const uint32_t clock_now = owner.clock_ms();
-			const uint32_t since = clock_now - owner.reap_clock_ms;
-			reap_elapsed_ms = since < 0x7FFFFFFFu ? static_cast<int>(since) : 0x7FFFFFFF;
-			owner.reap_clock_ms = clock_now;
-		}
+		// The reap measures the host clock against each connection's last receive stamp, so a
+		// connection heard during a long load is charged only the time since that receive, and a
+		// silent one the whole time since its last.
+		// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 state 1 - elapsed = GetTickCount -
+		//  conn+0x5E8 (`sub esi, [ebp+5E8h]` @0x62935C), `elapsed > timeout_ms` @0x629362; the
+		//  stamps CNapiNPConnection_ParseMessages @0x625D54, Nwu_HandlePing @0x623C56] (D-NET-256)
+		const uint32_t clock_now = host_clock_ms(owner);
+		for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list)
+			if (c.type == NapiNPConnection::kTypeServerSide && c.phase >= ConnectionPhase::Joined)
+				c.receive_inactive_ms = clock_now - c.receive_stamp_ms;
 		for (TickOut &t : tick_connections(
-				owner.ctx, reap_elapsed_ms, now,
+				owner.ctx, /*elapsed_ms=*/0, now,
 				/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false)) {
 			for (const std::vector<uint8_t> &dg : t.outbound) {
 				send_or_stage_established_datagram(owner, sock, t.peer, dg);
@@ -759,7 +760,6 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.now_tick = 0;
 	owner.clock_ms = cfg.clock_ms;
-	owner.reap_clock_ms = host_clock_ms(owner);
 	// The process's log devices and the socket address, ahead of the session
 	// create whose server start logs HOST STARTED and whose round init clears
 	// the punt table.

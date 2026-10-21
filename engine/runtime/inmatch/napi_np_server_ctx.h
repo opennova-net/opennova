@@ -110,6 +110,10 @@ struct NapiNPProtocol {
 	uint32_t host_start_tick = 0;       // [orig +0x53C] GetTickCount at StartServer (uptime base)
 	uint32_t host_stop_tick = 0;        // [orig +0x540] GetTickCount at StopServer
 	uint32_t host_run_duration_ms = 0;  // [orig +0x544] live elapsed ms; frozen at stop
+	// The host's millisecond clock at this pump's receive (HostOwner::clock_ms, GetTickCount's
+	// stand-in): the stamp an in-order receive or a ping writes on its connection (D-NET-256).
+	// [orig: CNapiNPConnection_ParseMessages @0x625D54; Nwu_HandlePing @0x623C56]
+	uint32_t receive_clock_ms = 0;
 
 	// [orig +0xECC: protocol[947]] Monotonic, non-zero connection-id source. CNapiNPConnection_Create
 	// @0x62acb0 stamps each new connection's dcb (connection_id, +0x18) from ++protocol[947] (wrapping
