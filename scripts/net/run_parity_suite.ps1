@@ -153,8 +153,9 @@ function Get-CaseTimeLimit { param($Case) return [int] (Get-CaseField $Case "tim
 # the SERVER copy's weapon.sav record; 0 keeps the copy's).
 function Get-CasePermanentDeath { param($Case) return [bool] (Get-CaseField $Case "permanent_death" $false) }
 function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Case "host_player_class" 0) }
-# serve_only (E5's kick): the retail host as retail's Serve Only server, whose
-# console runs PUNT (run_parity_topology.ps1 -ServeOnly); retail hosts only.
+# serve_only: the retail host as retail's Serve Only server, whose console
+# runs PUNT (run_parity_topology.ps1 -ServeOnly); retail hosts only. No case
+# sets it (E4's kick stages a listen host's SERVER PUNT ALL).
 function Get-CaseServeOnly { param($Case) return [bool] (Get-CaseField $Case "serve_only" $false) }
 function Get-CaseTopologies {
     param($Case)
@@ -269,15 +270,16 @@ function Read-ParityCases {
                 @($caseTopologies | Where-Object { $_ -cin @("RO", "OR", "OO") }).Count -eq 0) {
             throw "Parity case '$($case.id)': topologies needs RR, RR-aa and at least one subject"
         }
-        # char and click steps are onHook's: the OpenNova scenario_play driver
-        # plays neither (run_parity_topology.ps1), so their actor stays retail.
+        # click steps are onHook's: the OpenNova scenario_play driver types
+        # char steps but clicks no menu widget (run_parity_topology.ps1), so a
+        # clicking actor stays retail.
         if ($case.PSObject.Properties.Name -contains "scenario") {
             $play = Get-Content -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $case.scenario)) -Raw | ConvertFrom-Json
-            $typed = @(@($play.steps) + @(if ($play.PSObject.Properties.Name -contains "prelude") { @($play.prelude) }) |
-                Where-Object { $_.PSObject.Properties.Name -contains "char" -or $_.PSObject.Properties.Name -contains "click" })
+            $clicks = @(@($play.steps) + @(if ($play.PSObject.Properties.Name -contains "prelude") { @($play.prelude) }) |
+                Where-Object { $_.PSObject.Properties.Name -contains "click" })
             $openNovaActorCells = if ([string] $play.actor -eq "host") { @("OR", "OO") } else { @("RO", "OO") }
-            if ($typed.Count -gt 0 -and @($caseTopologies | Where-Object { $_ -cin $openNovaActorCells }).Count -gt 0) {
-                throw "Parity case '$($case.id)': its scenario types or clicks, so its $($play.actor) stays retail (no $($openNovaActorCells -join ' or '))"
+            if ($clicks.Count -gt 0 -and @($caseTopologies | Where-Object { $_ -cin $openNovaActorCells }).Count -gt 0) {
+                throw "Parity case '$($case.id)': its scenario clicks, so its $($play.actor) stays retail (no $($openNovaActorCells -join ' or '))"
             }
         }
         # The host's class is written for a retail host (run_parity_topology.ps1).

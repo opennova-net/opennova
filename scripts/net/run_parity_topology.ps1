@@ -90,15 +90,16 @@ param(
     [ValidateSet(0, 5, 6, 7, 8, 9)]
     [int] $HostPlayerClass = 0,
 
-    # E5's kick: the retail host as retail's Serve Only (dedicated) server
+    # The retail host as retail's Serve Only (dedicated) server
     # (onhook_host_lan serve_only, connection mode 1). Its console line runs
     # the BAN / PUNT verbs only on an authority that is not a session peer
     # [orig: Client_ProcessConsoleCommand @0x520E80 (Server_HandleBanPuntCommand
     # @0x520F63)]; a listen host is a peer and queues the line to its own server
     # as C2S 0x04 [orig: @0x520EFE..0x520F29], whose handler runs NETLOG and STAT
-    # only [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]. A retail host
-    # only: the OpenNova Serve Only host (opennova-serve) is not wired, so OR and
-    # OO refuse it.
+    # only [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0] and echoes the
+    # rest, so E4's kick stages a listen host's SERVER PUNT ALL instead and no
+    # case sets this. A retail host only: the OpenNova Serve Only host
+    # (opennova-serve) is not wired, so OR and OO refuse it.
     [switch] $ServeOnly,
 
     # The pinned SHA-256 of the SERVER copy's game.cfg (the case table's
@@ -285,16 +286,17 @@ function Read-ParityScenario {
             }
         }
     }
-    # A typed character or a menu click is onHook's (char: opennova-int #73;
-    # click: #75, a named menu widget the menu's own pump clicks). The
-    # OpenNova scenario_play driver (ScriptedInput) plays down, up, press,
-    # look_px and end only, so an OpenNova actor refuses such a script.
+    # A menu click is onHook's (click: opennova-int #75, a named menu widget
+    # the menu's own pump clicks). The OpenNova scenario_play driver
+    # (ScriptedInput) plays down, up, press, look_px, char (a keystroke in its
+    # tick's input frame, as onHook's char: #73) and end, so an OpenNova actor
+    # refuses a clicking script.
     $openNovaActor = ([string] $spec.actor -eq "joiner" -and $Topology -in @("RO", "OO")) -or
         ([string] $spec.actor -eq "host" -and $Topology -in @("OR", "OO"))
     $retailOnly = @(@($spec.steps) + @(if ($spec.PSObject.Properties.Name -contains "prelude") { @($spec.prelude) }) |
-        Where-Object { $_.PSObject.Properties.Name -contains "char" -or $_.PSObject.Properties.Name -contains "click" })
+        Where-Object { $_.PSObject.Properties.Name -contains "click" })
     if ($retailOnly.Count -gt 0 -and $openNovaActor) {
-        throw "Scenario $($spec.name) types or clicks (char/click steps); the OpenNova $($spec.actor) plays neither yet, so a retail $($spec.actor) only"
+        throw "Scenario $($spec.name) clicks (click steps); the OpenNova $($spec.actor) plays none yet, so a retail $($spec.actor) only"
     }
     foreach ($step in $retailOnly) {
         if ($step.PSObject.Properties.Name -contains "click") {
@@ -309,16 +311,15 @@ function Read-ParityScenario {
     }
     # E4's kick: the host's play ends the joiner's session (PUNT ALL,
     # Server_HandleBanPuntCommand @0x50B380), so the steady window's end does
-    # not wait for that joiner in match. A retail host actor only (the
-    # OpenNova host's scenario_play driver types no char steps yet), on an
-    # in-match RR or RO run; OR and OO keep their steady-end checks.
+    # not wait for that joiner in match: a retail joiner's closing state is
+    # read (RR, OR), an OpenNova joiner's closing readiness skipped (RO, OO).
+    # A host actor on an in-match run without a late joiner.
     if ($spec.PSObject.Properties.Name -contains "ends_joiner_session") {
         if ($spec.ends_joiner_session -isnot [bool] -or -not $spec.ends_joiner_session) {
             throw "Scenario $($spec.name): ends_joiner_session is true or absent"
         }
-        if ([string] $spec.actor -cne "host" -or $Topology -notin @("RR", "RO") -or
-                $ReadinessMode -ne "in_match" -or $LateJoiner) {
-            throw "Scenario $($spec.name) ends the joiner's session: a retail host actor on an in-match RR or RO run without a late joiner"
+        if ([string] $spec.actor -cne "host" -or $ReadinessMode -ne "in_match" -or $LateJoiner) {
+            throw "Scenario $($spec.name) ends the joiner's session: a host actor on an in-match run without a late joiner"
         }
     }
     return $spec
@@ -3281,9 +3282,16 @@ try {
                 if ($script:RetailProcess.HasExited -or $script:OpenNovaHost.HasExited) {
                     throw "An OR endpoint exited during the steady window"
                 }
-                $instance = Wait-RetailProcessForPeer -ProcessId $script:RetailProcess.Id `
+                $instance = if (Test-ScenarioEndsJoinerSession) {
+                    # The scenario ends the joiner's session (E4's kick): its
+                    # closing state is read, not waited for (as RR).
+                    @(Get-StructuredResult (Invoke-OnHookTool -Name "onhook_instances")).instances |
+                        Where-Object { [int] $_.pid -eq $script:RetailProcess.Id } | Select-Object -First 1
+                } else {
+                    Wait-RetailProcessForPeer -ProcessId $script:RetailProcess.Id `
                     -Role joiner -RequireInMatch:($ReadinessMode -eq "in_match") `
                     -AllowScenarioDeploy:([bool] $script:ScenarioSpec)
+                }
                 & $ProbeExe --host 127.0.0.1 --port $Port --timeout-ms 5000 `
                     --interval-ms 250 --expect-name $ServerName
                 if ($LASTEXITCODE -ne 0) {
@@ -3291,7 +3299,7 @@ try {
                 }
                 $endOwnership = Assert-OpenNovaHostOwnsPort
                 $script:Acceptance = [pscustomobject]@{
-                    retail_joiner = $instance.run_state
+                    retail_joiner = $(if ($instance) { $instance.run_state } else { $null })
                     retail_pid = $script:RetailProcess.Id
                     wire_ready = $script:WireReadyWitness
                     opennova_host = [pscustomobject]@{
@@ -3346,12 +3354,16 @@ try {
                 throw "OpenNova host stopped answering matching discovery during OO"
             }
             $endOwnership = Assert-OpenNovaHostOwnsPort
-            $joinerAcceptance = if (Test-RotationCell) { Wait-OpenNovaJoinerAfterRotation } else {
+            # A scenario that ends the joiner's session (E4's kick) skips the
+            # OpenNova joiner's closing readiness (as RO).
+            $joinerAcceptance = if (Test-RotationCell) { Wait-OpenNovaJoinerAfterRotation }
+                elseif (Test-ScenarioEndsJoinerSession) { $null } else {
                 Wait-OpenNovaJoinerReady `
                 -MinimumTicksMsec $initialJoinerTicks -RequireMotionComplete `
                 -AllowPostDeathRedeploy:($ReadinessMode -eq 'in_match') `
                 -AllowScenarioDeploy:([bool] $script:ScenarioSpec) }
-            if (-not (Test-RotationCell) -and -not (Test-OpenNovaJoinerReadinessTransition `
+            if (-not (Test-RotationCell) -and -not (Test-ScenarioEndsJoinerSession) -and
+                    -not (Test-OpenNovaJoinerReadinessTransition `
                     -Initial $initialJoinerAcceptance -Final $joinerAcceptance `
                     -ReadinessMode $ReadinessMode `
                     -AllowPostDeathRedeploy:($ReadinessMode -eq 'in_match') `
