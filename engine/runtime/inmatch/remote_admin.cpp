@@ -80,6 +80,15 @@ std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &fr
 	return std::nullopt;
 }
 
+void input_action_exit(const RemoteAdminBinding &binding) {
+	if (binding.host != nullptr)
+		binding.host->mission_exit_reason = kMissionExitQuit;
+	else if (binding.joiner != nullptr)
+		binding.joiner->quit_to_menu();
+	else if (binding.world != nullptr)
+		binding.world->mission_exit_reason = world::kWorldMissionExitQuit;
+}
+
 bool remote_admin_idle_frame_exits(const RemoteAdminIdleFrame &frame) {
 	// [orig: Game_ProcessMainFrame @0x52685E (`cmp eax, esi`), @0x526860 (zero reaches the pump)]
 	return remote_admin_idle_scene(frame) == AdminScene::GameLoop && frame.mission_exit_reason != 0;
@@ -123,19 +132,10 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 		ctx = &joined_;
 	}
 	seams.host_client = binding.client;
-	// Input action 3: exit reason 1 where the running role reads it (a host context's store, else
-	// the joiner's, whose user leave sends its goodbye inside the action, else the single-player
-	// world). [orig: Input_HandleActionBinding case 3 @0x49AF26, @0x49AF38..0x49AF42]
-	if (binding.host != nullptr) {
-		NapiNPServerCtx *host = binding.host;
-		seams.quit_to_menu = [host] { host->mission_exit_reason = kMissionExitQuit; };
-	} else if (binding.joiner != nullptr) {
-		JoinerRole *joiner = binding.joiner;
-		seams.quit_to_menu = [joiner] { joiner->quit_to_menu(); };
-	} else if (binding.world != nullptr) {
-		world::World *world = binding.world;
-		seams.quit_to_menu = [world] { world->mission_exit_reason = world::kWorldMissionExitQuit; };
-	}
+	// Input action 3 (input_action_exit) [orig: Input_HandleActionBinding case 3 @0x49AF26,
+	//  @0x49AF38..0x49AF42].
+	if (binding.host != nullptr || binding.joiner != nullptr || binding.world != nullptr)
+		seams.quit_to_menu = [binding] { input_action_exit(binding); };
 	seams.process_mission = &process_mission_;
 	console_ = std::make_unique<AdminConsole>(ctx != nullptr ? *ctx : session_less_, std::move(seams));
 }

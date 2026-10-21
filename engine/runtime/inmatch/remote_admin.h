@@ -127,6 +127,15 @@ struct RemoteAdminBinding {
 	}
 };
 
+// Input action 3, the exit (the admin's GOTO MENUSTATE, the in-game CONFIRM_YES, a console-queued
+// code 3): exit reason 1 where the running role reads it, a host context's store, else the
+// joiner's, whose user leave sends its CIDEMIS goodbye inside the action
+// (JoinerRole::quit_to_menu), else the single-player world's.
+// [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
+//  Sound_PlayInterfaceTriggerSet @0x49AF30 (the shell's tone), the disconnect
+//  @0x49AF38..0x49AF42]
+void input_action_exit(const RemoteAdminBinding &binding);
+
 // The admin server's command half for a process whose sessions come and go, as retail's
 // dispatcher runs over the process's globals whatever the scene: the console over the binding's
 // context with the embedder's seams, completed here with the process's own client
