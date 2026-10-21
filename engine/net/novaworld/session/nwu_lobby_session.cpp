@@ -913,6 +913,7 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 	};
 
 	session_ = std::make_unique<ClientSession>(cfg);
+	drains_seen_ = 0; // the new connection's enumerator has drained nothing
 	session_->set_clock_ms(clock_ms_);
 	if (hooks_.on_session_created)
 		hooks_.on_session_created(cfg.cu_vars.size(), cfg.cookie_vars ? cfg.cookie_vars().size() : 0);

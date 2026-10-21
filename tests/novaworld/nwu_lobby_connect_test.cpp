@@ -1189,6 +1189,28 @@ void check_escape_legs() {
 		CHECK(rig.session.sent.size() > sent); // the 0x46 burst
 		rig.lobby.close();
 	}
+	// A second connect on the same driver: its escape's drain writes the record's line where the
+	// first's did, ahead of HIT ESCAPE2.
+	{
+		Rig rig;
+		rig.log_on = true;
+		bring_to_verify(rig);
+		CHECK(rig.lobby.escape());
+		rig.lobby.tick(300);
+		rig.lobby.close();
+		rig.log.clear();
+		rig.fatals.clear();
+		bring_to_verify(rig);
+		CHECK(rig.log.size() >= 1);
+		rig.log.clear();
+		CHECK(rig.lobby.escape());
+		rig.lobby.tick(300);
+		CHECK((rig.log == std::vector<std::string>{ "NWU USER ESCAPED2",
+				"NWU DISCONNECTING FROM NOVAWORLD 127.0.0.1:64206 [NWServer] [0,0,0,0,\"\",0,\"\"]",
+				kRemoved, "NWU USER HIT ESCAPE2!!!" }));
+		CHECK(rig.fatals == std::vector<std::string>{ "NWEC47" });
+		rig.lobby.close();
+	}
 	// An ESC taken in the tick the 0x82 lands: the connect poll reads the state first and passes
 	// to the validation wait, whose pass to the verify poll empties the key queue: the key is
 	// dropped and the verify goes on. [orig: CGameSession_WaitForNWUValidation @0x4D0F20 -
