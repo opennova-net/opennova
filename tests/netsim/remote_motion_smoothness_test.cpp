@@ -841,6 +841,9 @@ bool run_terrain_settle_respects_retail_probe_window() {
 bool run_terrain_settle_wraps_the_fixedpoint_seam() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
+	// The replica water channel compares the raw plane (no dry sentinel): set it
+	// below this scenario's rows so the channel stays out of it.
+	view.set_water_z(std::numeric_limits<int32_t>::min());
 	StanceSource src;
 	FlatTerrain terrain(0);
 	view.set_root_motion_source(&src);
@@ -873,6 +876,9 @@ bool run_terrain_settle_wraps_the_fixedpoint_seam() {
 bool run_reset_bottom_state_keeps_raw_vertical_root() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
+	// The replica water channel compares the raw plane (no dry sentinel): set it
+	// below this scenario's rows so the channel stays out of it.
+	view.set_water_z(std::numeric_limits<int32_t>::min());
 	ResetBottomSource src;
 	view.set_root_motion_source(&src);
 
@@ -1418,6 +1424,9 @@ bool run_root_transition_blends() {
 bool run_dead_row_takes_its_death_clip_and_respawn_rearms() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
+	// The replica water channel compares the raw plane (no dry sentinel): set it
+	// below this scenario's rows so the channel stays out of it.
+	view.set_water_z(std::numeric_limits<int32_t>::min());
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0047;
