@@ -2879,6 +2879,50 @@ bool run_a_console_action_dispatches_by_code() {
 			"the reset drops 202");
 }
 
+// L8-s9 FOUND (routed to L2): a link the connection lost with a record outside the
+// description class stores no exit reason; once the round-over gate is up the HUD's overlay
+// runs input action 3: exit reason 1 and its Exit Mission tone. With the gate down nothing is
+// stored by the joiner's tick.
+// [orig: HUD_DrawOverlayPanels @0x5C0060 - g_LoadingTimeoutFlag @0x5C00FC, g_RoundOver @0x5C0105,
+//  Input_HandleActionBinding(3) @0x5C0118; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 -
+//  @0x4C64A4, the description-class gate @0x4C6563]
+bool run_a_lost_link_at_round_over_runs_input_action_3() {
+	bool ok = true;
+	for (const bool round_over : {false, true}) {
+		Harness h;
+		h.kernel->world.load_systems();
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		h.role.runtime->state().spawn_success_gate = round_over;
+		// The host's stop record (class 9), outside the description class.
+		DisconnectEvent stop;
+		stop.ds = 1;
+		stop.dc = 9;
+		stop.ddstr = "NP.C:SH:STOP";
+		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(0x03, connection_description_to_bytes(stop), 0xA0)},
+				packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.kernel->world.out.script_sounds.clear();
+		h.role.run_tick(h.input);
+		bool tone = false;
+		for (const w::ScriptSoundEvent &s : h.kernel->world.out.script_sounds)
+			tone |= s.kind == w::ScriptSoundEvent::Kind::Interface && s.name == "PU_EXIT_CONFIRM";
+		ok &= expect(h.role.runtime->session_lost(), "lost link: the stop record ends the link");
+		ok &= expect(h.role.runtime->mission_exit_reason() ==
+						(round_over ? inmatch::kMissionExitQuit : inmatch::kMissionExitNone) &&
+						tone == round_over,
+				round_over ? "lost link: at round over the HUD runs action 3 (reason 1, the tone)"
+				           : "lost link: mid-round the tick stores no reason and plays no tone");
+	}
+	return ok;
+}
+
 // L2-s8 FOUND 4: the mission start's block on a non-null local player runs on a joiner's L
 // too: the indoors bit and the medic-revive latch cleared, the hidden bit cleared, the
 // proximity rebuild, the hidden bit set again; so a spawned L with no record folded and no
@@ -3813,6 +3857,7 @@ int main() {
 	ok &= run_a_stance_select_and_the_look_take_the_rows_head();
 	ok &= run_the_console_quit_stores_the_reset_exit();
 	ok &= run_the_mission_start_leaves_l_hidden();
+	ok &= run_a_lost_link_at_round_over_runs_input_action_3();
 	ok &= run_a_console_deploy_pick_ends_the_drain();
 	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
 	ok &= run_the_teardown_goodbye_follows_the_exit_route();
