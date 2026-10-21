@@ -990,7 +990,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     //  AmmoDef_ProcessImpactEffect @0x40a170 (its
                     //  Impact_SpawnGlassEffectsOrScar call @0x40a264);
                     //  Projectile_ProcessExplosionQueue's type-1 skip
-                    //  @0x4eb340..0x4eb343; Entity_ApplyVehicleCollisionDamage
+                    //  @0x4eb340..0x4eb343; Entity_ApplyKnifeKillZoneDamage
                     //  @0x4e6620].
                 }
             }

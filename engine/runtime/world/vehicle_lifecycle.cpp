@@ -234,7 +234,7 @@ void VehicleSystem::initialize_mission_vehicles() {
 // (promote's item_has_brain), so the row is always known here. The model-range
 // words brain+0x2C/+0x30 come from the same models the first init read, so the
 // re-run leaves them as they are.
-// [orig: Entity_LookupRenderCallbacks @0x407E33..0x407E36 binds the row's fn2;
+// [orig: EntityDef_LookupClassCallbacks @0x407E33..0x407E36 binds the row's fn2;
 //  Entity_InitVehicleAIFromDef @0x4686C0 (stamp @0x4686D3..0x468703, slot gate
 //  @0x46878D, re-seed @0x46885B..0x468964); Entity_InitHelicopterAIFromDef
 //  @0x4683C0 (@0x4683D4..0x468404, @0x46848E, @0x46852A..0x468692)]

@@ -264,7 +264,7 @@ struct AiSlot {
     // round's -(slot + 1) (the heat-seeker query's 0x200 leg returns a round of the
     // projectile array, D-NET-64), or 0. One word, so a writer of either kind replaces
     // the other, as retail's one pointer store does.
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init @0x445EF0 (@0x445F10);
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init StngClass_InitFromDef @0x445EF0 (@0x445F10);
     //  Entity_FindTargets @0x53A610 (the ring leg @0x53ACF0..0x53ADE0)]
     static int32_t target_word(const TargetRef &t) {
         if (t.round >= 0) return -(t.round + 1);

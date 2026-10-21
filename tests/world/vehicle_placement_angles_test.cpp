@@ -5,7 +5,7 @@
 // [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66 (heading), @0x40EB69..0x40EBA6
 //  (pitch, roll); the movers' entry copies Entity_UpdateVehiclePhysics @0x48AF7A..0x48AF8C,
 //  Entity_UpdateWatercraftPhysics @0x48D4B2..0x48D4CB, Entity_UpdateAircraftPhysics
-//  @0x49034C..0x49035E, Entity_ProcessInfantryPhysics @0x46E133..0x46E14C]
+//  @0x49034C..0x49035E, Vehicle_ProcessSelectorZeroGround @0x46E133..0x46E14C]
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>

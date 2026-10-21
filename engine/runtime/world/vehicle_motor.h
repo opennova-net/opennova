@@ -114,7 +114,7 @@ enum class VehicleRenderFamily : uint8_t { None, Ground, Tank, Helicopter, Plane
 // ai_function names no vehicle class (the tick then falls back to the mover
 // family). [orig: g_EntityClassEventCallbackTable @0x813000, rows @0x8132a0
 // CHel / @0x813378 cveh / @0x813390 cbot / @0x8133a8 cpln / @0x8133c0 ctrn;
-// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks @0x407dc0]
+// EntityDef_InitAllCallbacks @0x4a5aae -> EntityDef_LookupClassCallbacks @0x407dc0]
 enum class VehicleBrainClass : uint8_t { Unset, Air, Ground };
 
 enum VehicleControlMask : uint16_t {

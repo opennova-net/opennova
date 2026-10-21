@@ -65,10 +65,10 @@ enum class ThrowClass : uint8_t {
     kAVMine,   // think only — no motor row in retail [orig fn1 @ 0x443BB0]
     kLandmine, // mission minefield item: its think is world/minefield.cpp's
                // [orig: Entity_LandmineThink @ 0x441A40]
-    // The flares: the aflr and gflr rows' init callbacks (@0x4434B0 / @0x443510, the
-    // event rows @0x813330 / @0x813348) and their one motor, Entity_UpdateShellBounce
-    // @0x443DF0 (the physics rows @0x82AD00 / @0x82AD0C, gflr's through the jump
-    // @0x443F40).
+    // The flares: the aflr and gflr rows' init callbacks (AflrClass_InitFromDef
+    // @0x4434B0 / GflrClass_InitFromDef @0x443510, the event rows @0x813330 / @0x813348)
+    // and their one motor, Entity_UpdateShellBounce @0x443DF0 (the physics rows
+    // @0x82AD00 / @0x82AD0C, gflr's through the jump Entity_UpdateGroundFlare @0x443F40).
     kAirFlare,
     kGroundFlare,
 };
@@ -359,8 +359,8 @@ void flare_motor_tick(World &world, RoundSim &sim, LiveRound &round,
 // the item's heatsig with a source (aflr always) and the ground under the round into
 // +0x88), else the one-degree spin every other class row binds here.
 // [orig: RoundData_SpawnRound @0x4EC0D0 -> Entity_InitFromItemDef @0x49E550 (the call
-//  @0x4EC7B7, the init callback @0x49E5D5..0x49E5EA); the aflr init @0x4434B0
-//  (@0x4434B5..0x443505); the gflr init @0x443510 (@0x443515..0x44358A);
+//  @0x4EC7B7, the init callback @0x49E5D5..0x49E5EA); the aflr init AflrClass_InitFromDef @0x4434B0
+//  (@0x4434B5..0x443505); the gflr init GflrClass_InitFromDef @0x443510 (@0x443515..0x44358A);
 //  Entity_InitThrowableSpin_Nade @0x4435A0]
 void throwable_round_init(World &world, LiveRound &round, const ThrowableClassRow *row);
 

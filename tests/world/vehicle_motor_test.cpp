@@ -608,8 +608,8 @@ void test_physics_selector_gate() {
 }
 
 // Numeric witnesses for the separate selector-zero callbacks and suspension.
-// [orig: Entity_ProcessInfantryPhysics @0x46E100;
-// Entity_ProcessAirVehiclePhysics @0x46FA00; Entity_ProcessVehicleSuspension @0x463C60]
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100;
+// Vehicle_ProcessSelectorZeroBoat @0x46FA00; Entity_ProcessVehicleSuspension @0x463C60]
 // A zero playerSpeed pins the steering blend fraction at 0 in every ground
 // family, so the effective rate is minRate, not turnRate [orig:
 // Entity_UpdateVehiclePhysics @0x48AF00 (site @0x48C0A9..0x48C0D8 `cmp eax, edx;
@@ -771,7 +771,7 @@ void test_simple_motors_and_contact() {
 	CHECK(remote.veh.air_pitch_bam == e.veh.air_pitch_bam);
 	CHECK(remote.position.x == e.position.x && remote.position.z == e.position.z);
 
-	// Nonzero phases pin the wave's x87 formula [orig: Entity_ProcessAirVehiclePhysics
+	// Nonzero phases pin the wave's x87 formula [orig: Vehicle_ProcessSelectorZeroBoat
 	// @0x46FA00 (site @0x47115D..0x4711D9)]: P = (((x+y)>>10) + tick*4) * (1/256).
 	// Case A: x = 2.0 u (131072 >> 10 = 128), tick 0 -> P = 0.5:
 	//   pitch  = ftol(cos(0.7)*327680 + cos(0.5)*655360)
@@ -1423,7 +1423,7 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
 // heading pinned to its own, both command words zeroed, powered bit dropped.
 // The rotor is gated on the OCCUPANT rather than on power, so the blades keep
 // turning through the wait -- engine running, going nowhere.
-// [orig: the wait-for-boarders block of Entity_ProcessAirVehiclePhysics,
+// [orig: the wait-for-boarders block of Vehicle_ProcessSelectorZeroBoat,
 //  kong line 94590]
 static void test_helo_waits_for_its_boarders() {
     World w;
@@ -1762,9 +1762,9 @@ void test_engine_and_light_sound_edges() {
 // and claimant edges (slot 24, then slot 30 while the occupant eye is above
 // water, once), the boat twin has only its lights leg beside the movement fold
 // and never latches the engine.
-// [IDB: Entity_ProcessInfantryPhysics @0x46E100 (the selector-zero ground
+// [IDB: Vehicle_ProcessSelectorZeroGround @0x46E100 (the selector-zero ground
 // mover) lights @0x46F8C3..0x46F8FC, claimant edge @0x46F8FC..0x46F99C;
-// Entity_ProcessAirVehiclePhysics @0x46FA00 (the selector-zero boat mover)
+// Vehicle_ProcessSelectorZeroBoat @0x46FA00 (the selector-zero boat mover)
 // lights @0x4714EA..0x471523, fold @0x471523..0x4715D7, tail @0x47166F]
 void test_selector_zero_sound_tails() {
 	static constexpr char profile[] =
@@ -1799,7 +1799,7 @@ void test_selector_zero_sound_tails() {
 	// first tick with a fresh claimant and the lights order emits the engine
 	// start BEFORE the lights one-shot; the claimant's departure fires the stop
 	// one-shot on the hull +0x18000 above the water plane.
-	// [orig: Entity_ProcessAirVehiclePhysics @0x46FA00 claimant edge
+	// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 claimant edge
 	//  @0x470055..0x4700EB, lights @0x4714EA..0x471523]
 	Rig boat;
 	CHECK(boat.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
@@ -2992,7 +2992,7 @@ void test_a_dead_aircraft_bails_ahead_of_its_ai_block() {
 // ahead of its player test: a script-disabled hull with a player seated takes no
 // input. Neither twin reads the occupant's life: a seated player at zero health
 // still drives (its death edge, not the mover, takes it out of the seat).
-// [orig: Entity_ProcessInfantryPhysics @0x46E9FC..0x46EA11 -> the parked arm
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E9FC..0x46EA11 -> the parked arm
 //  @0x46F09E..0x46F0C7; the player test @0x46EA21..0x46EA28]
 void test_selector_zero_park_reads_the_hull_not_the_occupant() {
     for (const int arm : {0, 1, 2}) {

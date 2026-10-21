@@ -8,7 +8,7 @@
 // the cited arithmetic's, the rows and ammo the test's own.
 // [orig: ProjectileTargetRing_Update @0x4E70F0; Weapon_UpdateAllProjectiles @0x4EC020
 //  (@0x4EC0A1..0x4EC0CF); Projectile_ReleaseEffects @0x4E8280 (@0x4E82E3..0x4E82F2);
-//  Entity_UpdateShellBounce @0x443DF0; the aflr init @0x4434B0; the gflr init @0x443510;
+//  Entity_UpdateShellBounce @0x443DF0; the aflr init AflrClass_InitFromDef @0x4434B0; the gflr init GflrClass_InitFromDef @0x443510;
 //  Projectile_UpdatePhysics @0x4E9D70 (@0x4EA06A..0x4EA085, @0x4EAA34..0x4EAA4C)]
 #include <cstdio>
 #include <memory>
@@ -372,7 +372,7 @@ void test_the_in_flight_query_takes_an_air_flare() {
 
 
 // The +0xC word as one word: an entity's handle + 1, a round's -(slot + 1), 0 for none.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init @0x445EF0 (@0x445F10)]
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init StngClass_InitFromDef @0x445EF0 (@0x445F10)]
 void test_the_target_word() {
     const EntityHandle h = EntityHandle::make(1, 5);
     CHECK(AiSlot::target_word(TargetRef{h}) == int32_t(h.packed) + 1);
@@ -390,7 +390,7 @@ void test_the_target_word() {
 // its Position. Its release clears neither its Health nor its Position, so the missile
 // keeps the frozen point; a bullet spawned into the slot reads Health 0 and the missile
 // drops it.
-// [orig: the stng init @0x445EF0 (@0x445F02..0x445F22); PersonClass_GetTarget @0x4B0DD0;
+// [orig: the stng init StngClass_InitFromDef @0x445EF0 (@0x445F02..0x445F22); PersonClass_GetTarget @0x4B0DD0;
 //  Entity_UpdateGuidedMissile_0 @0x446060 (the first tick @0x4460FD..0x44612C, the
 //  liveness @0x4461A6..0x4461E6, the sample @0x4463A3); Projectile_ReleaseEffects
 //  @0x4E8280; CEntityManager_AllocateSlot @0x4EAAD0]
