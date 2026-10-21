@@ -3924,6 +3924,11 @@ bool run_loadout_envelope_gates() {
 	};
 	if (!expect(joiner_entity() != nullptr, "the joiner's player entity resolves")) return false;
 	joiner_entity()->player_class = 6; // the live class an aborted submission must not disturb
+	// The list's header byte is the slot's class (+0x15EDC), which the add stored from the
+	// join's class word; the slot's 6 here [orig: Server_SendWeaponSlotListToPlayer
+	// @0x5025E0..0x5025E6] (D-NET-695).
+	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+		if (c.peer == peer) c.slot_class = 6;
 
 	// One 0x2F in, the last 0x5A body out (empty when the handler produced none).
 	auto submit = [&](const std::vector<uint8_t> &req, uint32_t now) -> std::vector<uint8_t> {
@@ -3950,7 +3955,7 @@ bool run_loadout_envelope_gates() {
 		if (!expect(decode_weapon_loadout(body.data(), body.size(), lo),
 		            "team 0 still draws a 0x5A (the current-list re-send)")) return false;
 		if (!expect(lo.avatar_class == 6 && lo.slots.empty(),
-		            "the re-send carries the LIVE class and the player's current (empty) slots"))
+		            "the re-send carries the slot's class and the player's current (empty) slots"))
 			return false;
 		const inmatch::NapiNPConnection *c = joiner_conn();
 		if (!expect(c != nullptr && !c->reply.loadout_synced && !c->burst.loadout_received &&
