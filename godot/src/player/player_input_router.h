@@ -40,8 +40,8 @@ class Simulation;
 // frame banks samples the devices again at the logic tick it runs as, under the
 // gates the frame's sample took, and every update the session runs, a paused one
 // too, polls its talk and HUD rows (run_update_rows). A frame that runs no update
-// polls no row; the rows it saw down stay latched for the next update's poll, as
-// retail's queue keeps a key event for the next update's drain.
+// polls no row; the row states it saw queue, in order, for the next update's poll,
+// as retail's queue keeps each key event for the next update's drain.
 class PlayerInputRouter final : public opennova::inmatch::TickInputSource {
 public:
 	// The world serves the sim; the presenter serves the presentation surfaces
@@ -163,9 +163,15 @@ private:
 	bool frame_player_ = false;
 	bool frame_gameplay_input_active_ = false;
 	bool frame_menu_open_ = false;
-	// The talk and HUD rows the samples since the last update's poll saw down.
-	int latched_talk_rows_ = 0;
-	int latched_hud_rows_ = 0;
+	// The talk and HUD rows' states the samples since the last update's poll saw,
+	// in order, each kept when it differs from the one before: the update polls
+	// each in turn, as the drain dispatches the queued key events.
+	struct RowSample {
+		int talk = 0;
+		int hud = 0;
+	};
+	std::vector<RowSample> row_samples_;
+	void queue_row_sample();
 	// A later update's device step (run_update_rows): the look pixels and the
 	// death screen its sample_tick reads.
 	Vector2 tick_scripted_look_;

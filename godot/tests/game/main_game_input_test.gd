@@ -179,6 +179,7 @@ func test_h_is_the_sp_pause_key_and_no_hud_key() -> void:
 	var nvg_before: bool = world.local_player_view().nvg_active
 
 	await _tap(KEY_H)
+	await _await_pause_word(hud, true)
 	assert_true(hud.toggles().is_paused(), "H flips the SP pause word")
 	assert_eq(hud.friendly_tag_mode(), tags_before, "H drives no other HUD presenter action")
 	assert_eq(hud.hud_detail_level(), detail_before, "H is not a declutter key")
@@ -188,8 +189,18 @@ func test_h_is_the_sp_pause_key_and_no_hud_key() -> void:
 	assert_eq(world.local_player_view().nvg_active, nvg_before,
 			"the router's NVG leg is N, not H")
 	await _tap(KEY_H)
+	await _await_pause_word(hud, false)
 	assert_false(hud.toggles().is_paused(), "a second H clears the pause word")
 	assert_true(shell.is_gameplay_input_active(), "play continues after the unpause")
+
+
+# A key event dispatches at the next update's drain (D-NET-NEW-LI-8): a headless
+# frame can bank under one 16 ms quantum, so the H press may wait a few frames for
+# the update that reads it. Bounded by wall time, not frames.
+func _await_pause_word(hud: GameHudPresenter, paused: bool) -> void:
+	var deadline := Time.get_ticks_msec() + 2000
+	while hud.toggles().is_paused() != paused and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
 
 
 # F9 / F10 open the emotes and radio menus (keep-one with each other); Esc

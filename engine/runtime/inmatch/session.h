@@ -139,11 +139,18 @@ struct CameraSample {
 // action rows then come from sample_tick); false for the frame's first update
 // and each paused update, whose device state is the frame's sample. The return
 // is true when the update's pause row flipped the single-player pause word
-// (case 25): the session applies it at that update (Session::run_updates).
+// (case 25): the session applies it at that update (Session::run_updates). The
+// key events the frames since the last update queued wait in order, a press, its
+// release and a new press each its own event, and the drain dispatches them in
+// that order; case 25 resets the key queue, so the events behind the pause row
+// never dispatch (the source polls each row state its samples saw, in order, and
+// stops at a pause flip).
 // [orig: Game_MainLoop @0x52B630 (the drain @0x52BA08, the update call @0x52BA58);
 //  Game_ProcessMainFrame @0x5263F0 (Input_ProcessFrame @0x52661D under no menu
-//  screen, after the pause word's first test @0x5265A0); Input_HandleActionBinding
-//  @0x49AD40 (case 25 @0x49B520: `xor dword_A87050, 1` @0x49B52D)]
+//  screen, after the pause word's first test @0x5265A0); Input_ProcessFrame @0x49D520
+//  (the drain's Input_HandleActionBinding call @0x49D5D8); Input_HandleActionBinding
+//  @0x49AD40 (case 25 @0x49B520: `xor dword_A87050, 1` @0x49B52D, the
+//  Input_ResetKeyQueue call @0x49B53E)]
 class TickInputSource {
 public:
 	virtual ~TickInputSource() = default;

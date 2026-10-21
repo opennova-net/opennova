@@ -100,6 +100,7 @@ void PlayerInputRouter::teardown() {
 	if (controls_.is_valid()) controls_->set_scan_gates(false, false);
 	controls_.unref();
 	input_override_.unref();
+	row_samples_.clear();
 }
 
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
@@ -146,11 +147,11 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	Vector2 scripted_look;
 	const bool spectating = begin_input_frame(
 			tick_sim, tick_sim.is_valid() ? tick_sim->get_logic_tick() : -1, scripted_look);
-	// The rows this sample sees down wait for the next update's poll: a frame whose
-	// bank drains no update runs no input frame, and its key events stay queued
-	// (engine inmatch::TickInputSource carries the witness).
-	latched_talk_rows_ |= talk_rows_down();
-	latched_hud_rows_ |= hud_rows_down();
+	// The rows' state this sample sees waits for the next update's poll: a frame
+	// whose bank drains no update runs no input frame, and its key events stay
+	// queued, a release and a new press included (engine inmatch::TickInputSource
+	// carries the witness).
+	queue_row_sample();
 	if (!owner->has_player()) {
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
@@ -187,14 +188,33 @@ bool PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 	// (engine inmatch::TickInputSource carries the witness). A later update of a
 	// running frame steps the device to the logic tick it runs as first.
 	const Ref<Simulation> rows_sim = sim();
-	if (p_new_sample)
+	if (p_new_sample) {
 		tick_spectating_ = begin_input_frame(rows_sim, p_logic_tick, tick_scripted_look_);
-	const int talk_rows = talk_rows_down() | latched_talk_rows_;
-	const int hud_rows = hud_rows_down() | latched_hud_rows_;
-	latched_talk_rows_ = 0;
-	latched_hud_rows_ = 0;
-	poll_talk_rows(rows_sim, talk_rows);
-	return poll_hud_toggles(rows_sim, hud_rows);
+		queue_row_sample();
+	}
+	// A later paused update of the same frame reads the state the frame left.
+	if (row_samples_.empty()) queue_row_sample();
+	// The drain dispatches the queued states in their order, so a press, its
+	// release and a new press seen by frames that ran no update each reach the
+	// rows; the pause row's case resets the key queue, which drops every state
+	// queued behind it (engine inmatch::TickInputSource carries the witness).
+	bool pause_flipped = false;
+	for (const RowSample &sample : row_samples_) {
+		poll_talk_rows(rows_sim, sample.talk);
+		if (poll_hud_toggles(rows_sim, sample.hud)) {
+			pause_flipped = true;
+			break;
+		}
+	}
+	row_samples_.clear();
+	return pause_flipped;
+}
+
+void PlayerInputRouter::queue_row_sample() {
+	const RowSample sample{talk_rows_down(), hud_rows_down()};
+	if (row_samples_.empty() || row_samples_.back().talk != sample.talk ||
+			row_samples_.back().hud != sample.hud)
+		row_samples_.push_back(sample);
 }
 
 int PlayerInputRouter::talk_rows_down() const {
@@ -433,8 +453,7 @@ void PlayerInputRouter::reset_input_state() {
 	if (controls_.is_valid()) controls_->reset_key_state();
 	actions_.clear_key_press_latches();
 	// The key queue's reset drops the rows a no-update frame left waiting.
-	latched_talk_rows_ = 0;
-	latched_hud_rows_ = 0;
+	row_samples_.clear();
 	const Ref<Simulation> reset_sim = sim();
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
@@ -495,8 +514,7 @@ void PlayerInputRouter::reset() {
 	actions_.reset();
 	look_delta_ = Vector2();
 	close_axis_ = Vector2();
-	latched_talk_rows_ = 0;
-	latched_hud_rows_ = 0;
+	row_samples_.clear();
 	tick_scripted_look_ = Vector2();
 }
 
