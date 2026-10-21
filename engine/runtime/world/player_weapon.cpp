@@ -1403,9 +1403,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// Ordinary presses and deferred auto-fire requests pass through WAC's
 		// category gate before the seat/fireability rejection. PowerThrow uses
 		// its separate press/release path above. Do not cancel an accepted FIRE:
-		// only refuse the new binding request, including a deferred one.
-		// [orig: Input_HandleActionBinding_0 @0x4E0968..0x4E097B]
-		if (player_alive && (w.fire_pressed || active_slot.refire_queued)) {
+		// only refuse the new binding request, including a deferred one. A
+		// deferred one reaches the gate only while the binding is still active
+		// (weapon_fsm_tick drops it otherwise).
+		// [orig: Input_HandleActionBinding_0 @0x4E0420 (Input_IsBindingActive(149)
+		//  @0x4E07D9 ahead of the gate @0x4E0968..0x4E097B)]
+		if (player_alive && (w.fire_pressed || (active_slot.refire_queued && in.fire_held))) {
 			const WeaponTableEntry *def =
 					world.tables.weapons.by_index(player->equipped_adm_index);
 			if (def != nullptr && !world.script.weapon_input.record_fire_request(def->category)) {

@@ -536,12 +536,12 @@ void test_empty_clip_held_auto_reload() {
     CHECK(s.current == wa::kFire);
 }
 
-void test_tap_during_fire_banks_one() {
+void test_tap_during_fire_drops_at_dispatch() {
     // A fire press landing DURING the FIRE delayend window re-queues as a deferred
-    // event; the loop self-sustains through the FIRE ticks and the recoil dispatch
-    // banks exactly ONE follow-up shot — even though the trigger is already released
-    // when the recoil runs. [orig: WeaponSlot_RequestFire case FIRE @ 0x53effd
-    // re-queues; the RECOIL dispatch consumes -> next = FIRE]
+    // event, and the next tick's dispatch requests fire only while the binding is
+    // still active: a tap (the trigger up again by that dispatch) banks nothing.
+    // [orig: WeaponSlot_RequestFire case FIRE @ 0x53effd re-queues;
+    //  Input_HandleActionBinding_0 case 0x95's Input_IsBindingActive(149) @0x4E07D9]
     WeaponFsmDef def = make_ak_def();
     WeaponSlotState s = make_ak_slot();
     WeaponFsmInputs in;
@@ -552,8 +552,8 @@ void test_tap_during_fire_banks_one() {
         weapon_fsm_tick(def, s, in, ev);
         if (ev.fired) ++fired;
     }
-    CHECK(fired == 2);
-    CHECK(s.current == wa::kIdle); // the bank is one shot deep, then the volley dies
+    CHECK(fired == 1);
+    CHECK(s.current == wa::kIdle);
 }
 
 void test_auto_reload_from_recoil() {
@@ -1672,7 +1672,7 @@ int main() {
     test_burst3();
     test_empty_clip_paths();
     test_empty_clip_held_auto_reload();
-    test_tap_during_fire_banks_one();
+    test_tap_during_fire_drops_at_dispatch();
     test_auto_reload_from_recoil();
     test_reload_scope_stash();
     test_reload_request_gate();

@@ -259,7 +259,18 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         begin_active(desc, slot, in, out); // [orig: @ 0x542db9]
         return;
     }
-    out.fired_clip_before_consume = slot.clip;
+    // The mode byte's high bits are the slot's own word +0x10, which only a
+    // weapon without an ammo bucket (def+0xDC == 0) ever writes: a bucket
+    // weapon's loaded rounds are the bucket's, so its word keeps the slot
+    // init's zero and every shot's byte is 0x02. [orig: WeaponAction_Fire
+    // @0x542B10 (`movzx edx, byte ptr [esi+10h]` @0x542BFC..0x542C11); the
+    // word's writers, each on the bucketless leg alone: WeaponSlot_InitFromDef
+    // @0x53EE70 (the memset @0x53EE86), Weapon_ConsumeAmmo @0x540850
+    // (@0x540907..0x540913), WeaponSlot_ReloadAmmo @0x541720 (@0x54183D..0x541850),
+    // WeaponSlots_RecalculateAmmoFromCapacity @0x542280 (@0x54238F..0x54239E),
+    // WeaponSlots_ClearLoadedRounds @0x5423C0 (@0x54242B..0x54243A); the bucket
+    // def+0xDC WeaponDefs_ParseLineCallback @0x544045]
+    out.fired_clip_before_consume = slot.shared_clip ? 0 : slot.clip;
     out.fired = true; // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     if (def.clip_capacity >= 0) { // [orig: Weapon_ConsumeAmmo @ 0x542c75, clip leg]
         if (slot.clip > 0) --slot.clip;
@@ -734,9 +745,11 @@ bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
                 return false;
             case weapon_action::kFire:
                 // A fire request landing mid-FIRE re-queues itself as a deferred
-                // event — the loop self-sustains until a state that accepts the
-                // dispatch consumes it (RECOIL banks the shot, even if the trigger
-                // was already released). [orig: @ 0x53effd Input_QueueDeferredEvent]
+                // event: the loop self-sustains, one dispatch a tick, while the
+                // trigger stays down, until a state that accepts the dispatch
+                // consumes it (RECOIL banks the shot); a release drops it at the
+                // next dispatch (weapon_fsm_tick). [orig: @ 0x53effd
+                // Input_QueueDeferredEvent; the dispatch's binding test @0x4E07D9]
                 slot.refire_queued = true;
                 return false;
             default:
@@ -910,8 +923,16 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     // starts the volley and the recoil window's deferred re-queue sustains it,
     // consumed here one tick after it was queued — the deferred dispatch
     // [orig: Input_QueueDeferredEvent @ 0x4993e0 -> WeaponSlot_RequestFire @ 0x53efa0].
+    // The deferred event reaches the fire binding's case, which requests fire
+    // only while the binding is still active at that dispatch: a trigger released
+    // before the tick after the re-queue drops it (the release leg fires only a
+    // pending PowerThrow charge). [orig: Input_ProcessFrame @0x49D520
+    // (Input_FlushDeferredEvents @0x49D591, the dispatch @0x49D5D8);
+    // Input_HandleActionBinding_0 @0x4E0420 (case 0x95: Input_IsBindingActive(149)
+    // @0x4E07D9, the release leg @0x4E07E9..0x4E07F1); Input_IsBindingActive
+    // @0x498320]
     if (in.reload_pressed) weapon_fsm_request_reload(slot);
-    const bool fire_request = in.fire_pressed || slot.refire_queued;
+    const bool fire_request = in.fire_pressed || (slot.refire_queued && in.fire_held);
     slot.refire_queued = false; // consumed (RequestFire may re-queue it mid-FIRE)
     if (fire_request) weapon_fsm_request_fire(def, slot);
 

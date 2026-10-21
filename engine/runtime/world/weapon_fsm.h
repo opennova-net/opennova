@@ -464,7 +464,9 @@ struct WeaponFsmEvents {
     int32_t fireloop_lifetime_ticks = 0; // signed kick byte, sign-extended by the original
     bool fired = false;            // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     int32_t fired_clip_before_consume = 0; // MountSlot+0x10 low u16 sampled for the
-                                           // fire-mode high bits BEFORE ammo consume
+                                           // fire-mode high bits BEFORE ammo consume:
+                                           // 0 for a bucket weapon (shared_clip), whose
+                                           // word nothing writes
                                            // [orig: @ 0x542c11, consume @ 0x542c75]
     bool dry_fired = false;        // the EMPTY one-shot entered
     bool reload_requested = false; // C2S 0x25 seam [orig: @ 0x5430ff; net-re §5.58]

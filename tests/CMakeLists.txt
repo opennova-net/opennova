@@ -5175,6 +5175,11 @@ add_test(NAME npruntime_loadout_availability COMMAND npruntime_loadout_availabil
 add_executable(damage_class_bytes_test world/damage_class_bytes_test.cpp)
 target_link_libraries(damage_class_bytes_test PRIVATE opennova_runtime)
 add_test(NAME damage_class_bytes COMMAND damage_class_bytes_test)
+# D-NET-NEW-L7-8: the local fire cadence: a held trigger's deferred refire needs the binding at
+# its dispatch; the round event's mode byte reads the slot's own word (0x02 for a bucket weapon).
+add_executable(fire_cadence_test world/fire_cadence_test.cpp)
+target_link_libraries(fire_cadence_test PRIVATE opennova_runtime)
+add_test(NAME fire_cadence COMMAND fire_cadence_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the
