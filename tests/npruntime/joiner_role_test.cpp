@@ -2655,9 +2655,12 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 
 // D-NET-710: a console-queued action dispatches by its code at the next input frame:
 // the Respawn row's code 55 runs the Respawn key's arm (its head gates, the input reset,
-// the bodiless 0x41), a code the role does not own goes to the embedder's dispatch.
+// the bodiless 0x41), a code the role does not own goes to the embedder's dispatch. The
+// local entity is bound from the mission start, so the 55's reset clears the event queue
+// and a code queued after it never dispatches (FOUND 4, D-NET-560).
 // [orig: Input_ProcessFrame @0x49D520 - the drain @0x49D599..0x49D5E7 ->
-//  Input_HandleActionBinding @0x49D5D8, case 55 @0x49B20B..0x49B22A]
+//  Input_HandleActionBinding @0x49D5D8, case 55 @0x49B20B..0x49B22A; Player_ResetLocalInput
+//  @0x4B2B80 - Input_ResetAllState @0x4B2B99]
 bool run_a_console_action_dispatches_by_code() {
 	Harness h;
 	h.kernel->world.load_systems();
@@ -2668,14 +2671,16 @@ bool run_a_console_action_dispatches_by_code() {
 	std::vector<int32_t> sunk;
 	h.role.runtime->set_console_action_sink(
 			[&sunk](int32_t code, int32_t, int32_t, int32_t) { sunk.push_back(code); });
-	(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
 	(void)h.role.runtime->queue_console_action(201, 0, 0, 0);
+	(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
+	(void)h.role.runtime->queue_console_action(202, 0, 0, 0);
 	h.role.apply_input(h.input);
 	for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
 	ProtocolMessage m;
 	return expect(h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m) && m.payload.empty() &&
 					sunk == std::vector<int32_t>{201},
-			"console actions: code 55 sends the bodiless 0x41; code 201 goes to the embedder");
+			"console actions: code 55 sends the bodiless 0x41; code 201 goes to the embedder; "
+			"the reset drops 202");
 }
 
 // D-NET-562's pre-round leg: a client runs no entity update while its pre-round timer
@@ -2720,6 +2725,29 @@ bool run_a_preround_death_latches_when_the_round_opens() {
 	deliver_dead_tail(0);
 	ok &= expect(h.role.runtime->local_player_dead(),
 			"pre-round death: the round's first body tick latches the dead bit");
+	return ok;
+}
+
+// V-L2-s6 FOUND 4: Player_ResetLocalInput tests g_LocalPlayerEntity and its def, which a
+// joiner has from its mission start's Player_InitPlayer, before L spawns at the name-match:
+// a Respawn / Escape press in that window resets the devices and the event queue; the
+// key-input leg waits for L. Before the mission start nothing resets.
+// [orig: Player_ResetLocalInput @0x4B2B80 - the entity and def tests @0x4B2B85..0x4B2B8D,
+//  Input_ResetAllState @0x4B2B99; Player_InitPlayer @0x4E15F0 - the store @0x4E17EB]
+bool run_a_pre_l_reset_takes_the_device_legs() {
+	Harness unbound;
+	unbound.role.reset_local_input();
+	bool ok = expect(!unbound.role.take_input_reset(),
+			"pre-L reset: before the mission start nothing resets");
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	ok &= expect(h.role.runtime->local_entity_bound() && !h.role.local_spawned(),
+			"pre-L reset: the local entity is bound, L is not spawned");
+	h.role.reset_local_input();
+	ok &= expect(h.role.take_input_reset(),
+			"pre-L reset: the device and queue legs run from the mission start");
 	return ok;
 }
 
@@ -3311,6 +3339,7 @@ int main() {
 	ok &= run_respawn_key_before_the_first_tail();
 	ok &= run_a_preround_death_latches_when_the_round_opens();
 	ok &= run_an_alive_self_record_floors_a_zero_tail();
+	ok &= run_a_pre_l_reset_takes_the_device_legs();
 	ok &= run_a_console_action_dispatches_by_code();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();

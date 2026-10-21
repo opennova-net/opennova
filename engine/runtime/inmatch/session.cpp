@@ -219,7 +219,18 @@ void Role::reset_local_input() {
 	//  @0x4B2B99, @0x4B2B9E..0x4B2BC2]
 	mission::MissionKernel &kernel = *kernel_;
 	const world::Entity *local = kernel.local.player();
-	if (local == nullptr || !local->has_item_def) return;
+	if (local == nullptr) {
+		// A joiner's local entity is its own from the mission start's Player_InitPlayer
+		// on (ClientRuntime::local_entity_bound; a spectator's alike), before L spawns at
+		// the name-match: the device and queue legs reset from then, and the key-input
+		// leg waits for L's body (D-NET-560, V-L2-s6 FOUND 4). [orig: Player_InitPlayer
+		//  @0x4E15F0 - the store @0x4E17EB]
+		const ClientRuntime *runtime = client_runtime();
+		if (kind() != RoleKind::Joiner || runtime == nullptr || !runtime->local_entity_bound())
+			return;
+	} else if (!local->has_item_def) {
+		return;
+	}
 	kernel.local.clear_deferred_input();
 	input_reset_pending_ = true;
 	input_queue_reset_ = true;

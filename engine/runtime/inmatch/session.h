@@ -248,9 +248,10 @@ public:
 	// (ClientRuntime::set_console_action_sink).
 	void dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
 	// Player_ResetLocalInput, which the Respawn key (case 55) and the Escape key (case
-	// 18, ahead of its spawn gate; the embedder's escape runs it) run: the input reset
-	// (D-NET-560) [orig: Input_HandleActionBinding @0x49AD40 - case 55 @0x49B20B, case 18
-	//  Player_ResetLocalInput @0x49B234 ahead of the spawn gate @0x49B243].
+	// 18, ahead of its `!is_in_session && g_RoundOver` test; the embedder's escape runs it)
+	// run: the input reset (D-NET-560) [orig: Input_HandleActionBinding @0x49AD40 - case 55
+	//  @0x49B20B, case 18 Player_ResetLocalInput @0x49B234 ahead of the test
+	//  @0x49B23B..0x49B249].
 	void reset_local_input();
 	// The deploy action (dispatch 12) with its pick's [i16] wire value: a dead
 	// local player under permanent death converts to a spectator (the C2S
