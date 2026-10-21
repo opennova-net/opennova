@@ -2648,6 +2648,20 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 		local = h.kernel->local.player();
 		ok = expect(local != nullptr && local->item_type_index == 3 && local->item_id == 0x14BF,
 				"camouflage row: the self record rebinds L to its class's desert row (5311)");
+		if (ok) {
+			// The index compares first: a record whose row is the body's own stores
+			// nothing, so a word another writer moved keeps its value
+			// [orig: @0x4C12A5..0x4C12A8 -> @0x4C12F4].
+			local->health_max = 77;
+			std::vector<uint8_t> again;
+			frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+					{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, again);
+			auto second = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(again));
+			h.role.runtime->receive(second.data(), second.size());
+			h.role.run_tick(h.input);
+			ok = expect(local->item_type_index == 3 && local->health_max == 77,
+					"camouflage row: a record naming the body's own row stores nothing");
+		}
 	}
 	opennova::def::def_free_items(&items);
 	return ok;

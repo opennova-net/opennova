@@ -263,12 +263,21 @@ void JoinerRole::fold_local_record() {
 		local_ai->net_interp_progress = 0;
 	}
 	// Every player record, the local one too, re-resolves the body's row by its class:
-	// the camouflage item by the mission climate, rebound when its index differs (the
-	// local record skips the remote stores and lands here) (D-NET-348's joiner half).
+	// the camouflage item by the mission climate, rebound only when its index differs
+	// from the body's (the local record skips the remote stores and lands here)
+	// (D-NET-348's joiner half). A climate past the three the format names reads the
+	// record's move-order byte as the type there (retail's quirk, no stock mission;
+	// ours keeps the desert row: the PERMANENT note in D-NET-348's record).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the local jump @0x4C11D7..0x4C11DD
-	//  to @0x4C1248, the climate pick @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId
-	//  @0x4C129D, the compare @0x4C12A5, the stores @0x4C12B8..0x4C12D6]
-	world::rebind_player_camouflage_row(world, *local);
+	//  to @0x4C1248, the climate pick @0x4C1248..0x4C129C (the byte @0x4C0EE1, @0x4C1298),
+	//  ItemList_FindIndexByTypeId @0x4C129D, the compare `cmp eax, [edi+1Ch]; jz`
+	//  @0x4C12A5..0x4C12A8, the stores @0x4C12B8..0x4C12D6, AnimMap_InitBoneTypes
+	//  @0x4C12E0 / @0x4C12EC]
+	if (!world.tables.item_rows.empty() && world.tables.class_cammo_installed &&
+			world::item_index_by_type_id(
+					world, world::player_cammo_type_id(world, local->player_class)) !=
+					local->item_type_index)
+		world::rebind_player_camouflage_row(world, *local);
 	constexpr uint32_t kLocalRecordFlagsMask = 0xE1u;
 	const uint32_t wire = self->state_flags;
 	local->flags ^= (local->flags ^ wire) & kLocalRecordFlagsMask;

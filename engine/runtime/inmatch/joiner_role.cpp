@@ -1275,7 +1275,8 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
 	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
 	//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
-	//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485]
+	//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485, no index compare, the model
+	//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
 	if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
 		loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
 		if (world::Entity *local = world.registry.get(world.cached.local_player)) {
