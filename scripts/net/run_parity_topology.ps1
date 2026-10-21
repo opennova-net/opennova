@@ -2027,7 +2027,9 @@ function Wait-RetailRunForPeer {
     param(
         [Parameter(Mandatory = $true)] [string] $OwnedRunId,
         [int] $TimeoutSeconds = 90,
-        [switch] $AfterRotation
+        [switch] $AfterRotation,
+        # The run is this cell's Serve Only host: no local player stands.
+        [switch] $ServeOnlyHost
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -2040,6 +2042,10 @@ function Wait-RetailRunForPeer {
         }
         if ($state.phase -eq "in_match" -and $state.peer -and
                 $state.local_player -and
+                $state.capture_counters.packets -ge 40) {
+            return $status
+        }
+        if ($ServeOnlyHost -and $state.peer -and $state.authority -and $state.serve_only -and
                 $state.capture_counters.packets -ge 40) {
             return $status
         }
@@ -2077,9 +2083,12 @@ function Assert-RetailEndpointState {
         return $false
     }
     if ($Role -eq "host") {
+        # A Serve Only host takes host-only connection mode 1 (onhook_host_lan
+        # serve_only) and reports retail's live Serve Only flag.
+        $hostMode = if ($ServeOnly) { 1 } else { 3 }
         if (-not [bool] $state.authority -or -not [bool] $state.responder_ready -or
-                [int] $state.socket_mode -ne 3 -or [int] $state.connection_mode -ne 3 -or
-                [int] $state.local_port -ne $Port) {
+                [int] $state.socket_mode -ne 3 -or [int] $state.connection_mode -ne $hostMode -or
+                [int] $state.local_port -ne $Port -or ($ServeOnly -and -not [bool] $state.serve_only)) {
             return $false
         }
     }
@@ -2090,7 +2099,8 @@ function Assert-RetailEndpointState {
         }
     }
     if ($RequireInMatch -and
-            ([string] $state.phase -ne "in_match" -or -not [bool] $state.local_player)) {
+            ([string] $state.phase -ne "in_match" -or
+                (-not [bool] $state.local_player -and -not ($ServeOnly -and $Role -eq "host")))) {
         return $false
     }
     if (-not $RequireInMatch -and $ReadinessMode -eq "deploy_hold" -and
@@ -2897,7 +2907,9 @@ try {
 
     switch ($Topology) {
         "RR" {
-            if ($ReadinessMode -eq "deploy_hold") {
+            # onhook_run_lan_pair takes no serve_only: a Serve Only RR launches its
+            # host (onhook_host_lan serve_only) and its joiner one by one.
+            if ($ReadinessMode -eq "deploy_hold" -or $ServeOnly) {
                 $retailHost = Start-RetailHostExact
                 $retailJoiner = Start-RetailJoinerExact
                 $hostInstance = Wait-RetailProcessForPeer `
@@ -2928,12 +2940,20 @@ try {
                 Wait-UntilSteadyDeadline
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
-                $joinerInstance = Wait-RetailProcessForPeer `
+                $joinerInstance = if (Test-ScenarioEndsJoinerSession) {
+                    # The scenario ends the joiner's session (E4's kick): its
+                    # closing state is read, not waited for.
+                    @(Get-StructuredResult (Invoke-OnHookTool -Name "onhook_instances")).instances |
+                        Where-Object { [int] $_.pid -eq $script:RetailJoinerProcess.Id } | Select-Object -First 1
+                } else {
+                    Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailJoinerProcess.Id -Role joiner `
+                    -RequireInMatch:($ReadinessMode -eq "in_match") `
                     -AllowScenarioDeploy:([bool] $script:ScenarioSpec)
+                }
                 $script:Acceptance = [pscustomobject]@{
                     host = $hostInstance.run_state
-                    joiner = $joinerInstance.run_state
+                    joiner = $(if ($joinerInstance) { $joinerInstance.run_state } else { $null })
                     host_pid = $script:RetailHostProcess.Id
                     joiner_pid = $script:RetailJoinerProcess.Id
                     wire_ready = $script:WireReadyWitness
@@ -3110,7 +3130,7 @@ try {
             $script:EvidenceRole = "host"
             $script:EvidenceInstanceId = [string] $retailHost.instance_id
             Start-OpenNovaJoinerExact
-            $retailAcceptance = Wait-RetailRunForPeer -OwnedRunId ([string] $retailHost.run_id)
+            $retailAcceptance = Wait-RetailRunForPeer -OwnedRunId ([string] $retailHost.run_id) -ServeOnlyHost:$ServeOnly
             $joinerAcceptance = Wait-OpenNovaJoinerReady
             $initialJoinerAcceptance = $joinerAcceptance
             $initialJoinerTicks = [long] $joinerAcceptance.ticks_msec
@@ -3132,7 +3152,7 @@ try {
             if ($script:OpenNovaJoiner.HasExited) {
                 throw "OpenNova joiner exited during the RO steady window"
             }
-            $retailAcceptance = Wait-RetailRunForPeer -OwnedRunId ([string] $retailHost.run_id) `
+            $retailAcceptance = Wait-RetailRunForPeer -OwnedRunId ([string] $retailHost.run_id) -ServeOnlyHost:$ServeOnly `
                 -AfterRotation:(Test-RotationCell)
             $joinerAcceptance = $null
             if (Test-RotationCell) {
