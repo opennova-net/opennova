@@ -78,8 +78,9 @@ struct PlayerSpawn {
     int32_t item_type_id = -1;
     uint8_t item_class = 0;
     // Equipped-weapon AdmDef index (entity+0x2B0) — the 0x0A off-16 echo default. The inmatch
-    // spawn resolves the WPN_M4AUTO table index when the armory is fed [orig: PlayerClass_InitEntity
-    // @0x4B1116 resolves by name]; 0xFF = none (table-less hosts). (D-NET-143)
+    // spawn resolves the process's loadout name list's first name when the armory is fed
+    // (player_spawn_equipped_default) [orig: PlayerClass_InitEntity @0x4B1116 resolves by
+    // name]; 0xFF = none (table-less hosts). (D-NET-143)
     uint8_t equipped_adm_index = 0xFF;
     // GamePlayerEntity.animSlot (entity+0x374): the character-model/avatar selector — the joiner's
     // per-side VCA/VCB 0x42 join var picked by ASSIGNED team, or the host's own avatar (retail
@@ -98,6 +99,15 @@ struct PlayerSpawn {
     //  and Server_InitAllPlayerEntitiesForRound @0x516B67]
     bool berserk = false;
 };
+
+// PlayerClass_InitEntity's equipped weapon for every player body the process spawns: the
+// first name of the process's loadout name list (World::loadout_weapon_names; the image's
+// initializer, the title's default kit, when none is bound or nothing wrote it) resolved by
+// name; 0xFF when the written list is empty or its first name is no weapon (the lookup's
+// -1 stored as a byte). (D-NET-143)
+// [orig: PlayerClass_InitEntity @0x4B1060 - `push offset g_LoadoutWeaponNameList`
+//  @0x4B1100, AdmDef_FindIndexByName @0x4B110E, `mov [esi+2B0h], al` @0x4B1116]
+uint8_t player_spawn_equipped_default(const World &world);
 
 // The class's camouflage item type id for the mission's climate: g_BmsClimate 1
 // JUNGLE_CAMMO, 2 ARCTIC_CAMMO, any other DESERT_CAMMO, of the class row

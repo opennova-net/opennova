@@ -86,7 +86,9 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 
 // The armory ACCEPT in a session: WeaponLoadout_ApplyFromBuffer's session leg, the one
 // apply a joiner's client and a listen host's own client run alike. The selection becomes
-// the resident kit on both legs; off the authority the slot table empties; and the 0x2F
+// the process's loadout name list on both legs (World::loadout_weapon_names, whose first name
+// every body the process spawns takes; the resident kit, spawn_kit, waits for the host's
+// list); off the authority the slot table empties; and the 0x2F
 // the apply sends is returned for the caller's queue: the local body's team byte, the
 // armory's class (g_ArmorySelectedClass, the class picked on the armory screen), the
 // selection through the sender's name gate and g_CurrentWeaponSlot resolved against the

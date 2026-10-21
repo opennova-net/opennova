@@ -1,0 +1,191 @@
+// D-NET-143 (L4-s8 FOUND 1): a player body's equipped weapon at its spawn is the first name of
+// the process's loadout name list (g_LoadoutWeaponNameList), not a fixed WPN_M4AUTO. The list is
+// the image's initializer (WPN_M4AUTO first) until an armory ACCEPT copies the accepted class's
+// buffer over it (every leg) or a 0x5A apply rebuilds it from the list's rows (a listen host's
+// own client's included). So after a listen host's own ACCEPT or its own list, every body the
+// host spawns carries the host's first weapon in its records' equipped byte until its owner's
+// uplink; a dedicated host never writes the list and keeps WPN_M4AUTO. The ACCEPT leaves the
+// resident kit (the spawn buffer every other 0x2F serializes) to the host's list.
+// [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116; g_LoadoutWeaponNameList @0x8333F8;
+//  WeaponLoadout_ApplyFromBuffer @0x565D46; NapiNPClientMsg_HandleWeaponLoadoutSync
+//  @0x42920C..0x4293BF, the spawn buffer copy off the authority @0x4293D1..0x4293E9;
+//  NetPacket_SendLoadoutSubmit's restrictionData g_SpawnLoadoutBuffer @0x52582F / @0x525C24 /
+//  @0x431AA3]
+// The world and the process words are the test's own.
+
+#include <runtime/inmatch/client_runtime.h> // ClientProcessState
+#include <runtime/inmatch/loadout_submit.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_loadout_grant.h>
+#include <runtime/inmatch/server_spawn.h>
+#include <net/npwire/ingame_encode.h>
+#include <formats/mission/bms.h>
+#include <formats/playersav/player_sav.h>
+#include <runtime/world/local_player.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/weapon_inventory.h>
+#include <runtime/world/world.h>
+
+#include <cstdint>
+#include <cstdio>
+#include <memory>
+#include <vector>
+
+#include "host_test_setup.h"
+
+namespace {
+
+using namespace opennova;
+namespace inmatch = opennova::inmatch;
+namespace w = opennova::world;
+
+int failures = 0;
+#define CHECK(c)                                                                               \
+	do {                                                                                       \
+		if (!(c)) {                                                                            \
+			std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c);                           \
+			++failures;                                                                        \
+		}                                                                                      \
+	} while (0)
+
+constexpr uint8_t kM4 = 1;
+constexpr uint8_t kAk = 2;
+
+struct Rig {
+	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	w::World &world = *wp;
+	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	std::unique_ptr<inmatch::ClientProcessState> process =
+			std::make_unique<inmatch::ClientProcessState>();
+	replication::LoopbackChannel loop;
+
+	explicit Rig(inmatch::ConnectionMode mode) {
+		world.registry.configure_pool(0, 8);
+		world.rules.mp_session = true;
+		world.tables.player.has_item_def = true;
+		world.tables.player.item_type_index = 1;
+		world.tables.player.item_type = 3;
+		for (const char *name : {"WPN_KNIFE", "WPN_M4AUTO", "WPN_AK47AUTO"}) {
+			w::WeaponTableEntry def;
+			def.name = name;
+			def.valid = true;
+			world.tables.weapons.entries.push_back(def);
+		}
+		// The role's binding of the process's list (HostRole::apply_rule_words).
+		world.loadout_weapon_names = &process->loadout_weapon_names;
+		inmatch::GameConfig settings;
+		settings.max_players = 4;
+		settings.game_type = 0x10000u;
+		inmatch::test::bring_up_host(*ctx, mode, inmatch::SocketMode::Socketless, 0,
+				mode == inmatch::ConnectionMode::HostClient ? &loop : nullptr, settings);
+		ctx->world = &world;
+		ctx->is_in_session = 1;
+		inmatch::Server_InitNewRoundState(*ctx);
+	}
+	inmatch::NapiNPConnection &add_joiner(uint32_t id) {
+		inmatch::NapiNPConnection joiner;
+		joiner.type = 1;
+		joiner.connection_id = id;
+		joiner.self_id_seen = true;
+		joiner.phase = inmatch::ConnectionPhase::Joined;
+		ctx->np_protocol.connection_list.push_back(joiner);
+		CHECK(inmatch::Server_ProcessPendingPlayerSpawns(*ctx, world) >= 1);
+		return ctx->np_protocol.connection_list.back();
+	}
+	inmatch::NapiNPConnection *own() {
+		for (inmatch::NapiNPConnection &c : ctx->np_protocol.connection_list)
+			if (c.type == inmatch::NapiNPConnection::kTypeClientSide) return &c;
+		return nullptr;
+	}
+	uint8_t equipped(const inmatch::NapiNPConnection &c) const {
+		const w::Entity *e = world.registry.get(c.link.owned_entity);
+		return e != nullptr ? e->equipped_adm_index : uint8_t{0xEE};
+	}
+};
+
+// A dedicated host writes the list never: its row body and every joiner's body take the
+// initializer's first name, WPN_M4AUTO.
+void test_a_dedicated_host_keeps_the_initializers_first_weapon() {
+	Rig r(inmatch::ConnectionMode::HostOnly);
+	CHECK(!r.process->loadout_weapon_names.set);
+	CHECK(w::player_spawn_equipped_default(r.world) == kM4);
+	const w::EntityHandle row = inmatch::Server_SpawnHostSlotBody(*r.ctx, r.world);
+	const w::Entity *body = r.world.registry.get(row);
+	CHECK(body != nullptr && body->equipped_adm_index == kM4);
+	const inmatch::NapiNPConnection &joiner = r.add_joiner(inmatch::kFirstJoinerDcb);
+	CHECK(r.equipped(joiner) == kM4);
+}
+
+// A listen host's own client applies the list its slot is sent and rebuilds the process's
+// list from the list's rows: every body spawned after it takes the first granted weapon.
+void test_a_listen_hosts_own_list_names_every_later_body() {
+	Rig r(inmatch::ConnectionMode::HostClient);
+	CHECK(inmatch::Server_ProcessPendingPlayerSpawns(*r.ctx, r.world) >= 1);
+	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb)) == kM4);
+	inmatch::NapiNPConnection *own = r.own();
+	CHECK(own != nullptr);
+	if (own == nullptr) return;
+	WeaponLoadout list;
+	list.avatar_class = 7;
+	list.slots.push_back(WeaponLoadoutSlot{kAk, 3, 0xFF, 0});
+	list.slots.push_back(WeaponLoadoutSlot{kM4, 2, 0xFF, 0});
+	own->reply.last_loadout_reply = encode_weapon_loadout(list);
+	inmatch::weapon_slot_list_own_legs(*own, &r.world);
+	const w::LoadoutWeaponNameList &names = r.process->loadout_weapon_names;
+	CHECK(names.set && names.entries.size() == 2);
+	if (names.entries.size() == 2)
+		CHECK(names.entries[0].name == "WPN_AK47AUTO" && names.entries[1].name == "WPN_M4AUTO");
+	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb + 1)) == kAk);
+	// A body spawned before the list keeps its own.
+	CHECK(r.equipped(r.ctx->np_protocol.connection_list[1]) == kM4);
+	// A list of no rows empties it: the lookup's miss, 0xFF.
+	own = r.own();
+	if (own == nullptr) return;
+	WeaponLoadout empty;
+	empty.avatar_class = 7;
+	own->reply.last_loadout_reply = encode_weapon_loadout(empty);
+	inmatch::weapon_slot_list_own_legs(*own, &r.world);
+	CHECK(r.process->loadout_weapon_names.set && r.process->loadout_weapon_names.entries.empty());
+	CHECK(w::player_spawn_equipped_default(r.world) == 0xFF);
+}
+
+// The ACCEPT copies the accepted kit into the list on either leg and leaves the resident kit:
+// the next 0x2F that serializes the spawn buffer (the mission start's pair, the team assign's
+// resubmit) still carries the pre-ACCEPT rows until the host's list reaches it.
+void test_the_accept_writes_the_list_not_the_resident_kit() {
+	for (const bool authority : {true, false}) {
+		Rig r(inmatch::ConnectionMode::HostOnly);
+		auto local = std::make_unique<w::LocalPlayer>(r.world);
+		local->loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", 3, -1, -1}};
+		local->loadout.spawn_kit_set = true;
+		const std::vector<w::WeaponKitEntry> accepted = {w::WeaponKitEntry{"WPN_AK47AUTO", 4, -1, -1},
+				w::WeaponKitEntry{"WPN_KNIFE", -1, -1, -1}};
+		(void)inmatch::armory_accept_in_session(r.world, *local, accepted, 6, authority,
+				bms::MissionType{});
+		const w::LoadoutWeaponNameList &names = r.process->loadout_weapon_names;
+		CHECK(names.set && names.entries.size() == 2);
+		if (!names.entries.empty()) CHECK(names.entries[0].name == "WPN_AK47AUTO");
+		CHECK(w::player_spawn_equipped_default(r.world) == kAk);
+		CHECK(local->loadout.spawn_kit.size() == 1 && local->loadout.spawn_kit[0].name == "WPN_M4AUTO");
+		inmatch::JoinerConnection::LoadoutKit kit;
+		inmatch::build_joiner_loadout_kit(r.world, playersav::Record{}, 1, local->loadout, -1,
+				nullptr, kit);
+		CHECK(kit.rows.size() == 1);
+		if (!kit.rows.empty()) CHECK(kit.rows[0].adm_index == kM4 && kit.rows[0].ammo_primary == 3);
+	}
+}
+
+} // namespace
+
+int main() {
+	test_a_dedicated_host_keeps_the_initializers_first_weapon();
+	test_a_listen_hosts_own_list_names_every_later_body();
+	test_the_accept_writes_the_list_not_the_resident_kit();
+	if (failures != 0) {
+		std::printf("%d failure(s)\n", failures);
+		return 1;
+	}
+	std::printf("PASS npruntime_loadout_name_list\n");
+	return 0;
+}

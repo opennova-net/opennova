@@ -548,12 +548,13 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	weapon_defs_ok = true;
 	mission::stamp_seat_spec_turret_limits(world, seat_specs);
 	// The authoritative side's own player spawned before this feed: re-stamp
-	// its equipped default now that WPN_M4AUTO resolves by name
-	// [orig: PlayerClass_InitEntity @0x4B1116] (D-NET-143). A fresh session's
+	// its equipped default now that the process's loadout name list's first name
+	// resolves by name (w::player_spawn_equipped_default)
+	// [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116] (D-NET-143). A fresh session's
 	// own player only: a map change's kept slots spawn after the PreMission
 	// pass and take it at the spawn (D-NET-354).
-	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
-	if (m4 >= 0) {
+	const uint8_t equipped_default = w::player_spawn_equipped_default(world);
+	if (equipped_default != w::kAdmSlotNone) {
 		std::vector<w::EntityHandle> handles;
 		world.registry.for_each([&](const w::Entity &e) {
 			// A player body by its Player bit, whatever its camouflage row (D-NET-348).
@@ -562,7 +563,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 				handles.push_back(e.handle);
 		});
 		for (const w::EntityHandle h : handles)
-			if (w::Entity *e = world.registry.get(h)) e->equipped_adm_index = static_cast<uint8_t>(m4);
+			if (w::Entity *e = world.registry.get(h)) e->equipped_adm_index = equipped_default;
 	}
 	// The mission's stashed local.loadout/availability chunks promote NOW, through
 	// the witnessed SP-vs-net gate [orig: Mission_LoadBMSFile @ 0x40F4E0 — gate

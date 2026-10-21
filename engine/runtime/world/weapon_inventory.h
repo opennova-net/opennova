@@ -93,6 +93,21 @@ struct WeaponKitEntry {
     int32_t flags = -1;
 };
 
+// g_LoadoutWeaponNameList, the process's loadout name list, a buffer apart from the spawn
+// buffer (LocalPlayerLoadout::spawn_kit): the image's initializer (the title's default kit,
+// weapon_kit_default) until an armory ACCEPT copies the accepted class's buffer over it, on
+// every leg in a session or out of one, or a 0x5A apply rebuilds it from the list's rows,
+// the listen host's own client's included. Every player body the process spawns takes its
+// first name as its equipped weapon (player_spawn_equipped_default). One per process
+// (inmatch::ClientProcessState); a world reads it through World::loadout_weapon_names.
+// [orig: g_LoadoutWeaponNameList @0x8333F8 (0x800 bytes, "WPN_M4AUTO" "-1" "-1" "-1" ..
+//  "WPN_KNIFE"); PlayerClass_InitEntity @0x4B1100..0x4B1116; WeaponLoadout_ApplyFromBuffer
+//  @0x565D27..0x565D4B; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4291FC..0x4293BF]
+struct LoadoutWeaponNameList {
+    std::vector<WeaponKitEntry> entries;
+    bool set = false; // false: the image's initializer
+};
+
 // The engine defaults: the profile-less spawn kit, the static single-player page
 // blob `title` (gameprofile::GameId) compiles in (Jointops.exe's is
 // playersav::default_single_player_page; dfx2.exe's names WPN_MK23 for

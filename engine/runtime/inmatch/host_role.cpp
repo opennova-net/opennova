@@ -121,6 +121,10 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play,
 		bool in_session, const TitleIdentity *title) {
 	mission::MissionKernel &kernel = *kernel_;
+	// The process's loadout name list, whose first name every body the session spawns takes
+	// as its equipped weapon (world::player_spawn_equipped_default) [orig:
+	//  g_LoadoutWeaponNameList @0x8333F8; PlayerClass_InitEntity @0x4B1100..0x4B1116].
+	kernel.world.loadout_weapon_names = &client_process_->loadout_weapon_names;
 	kernel.world.rules.fat_bullets = config.fat_bullets != 0;
 	kernel.world.rules.one_shot_kill = config.one_shot_kill != 0;
 	// The mission-data block's unlimited-vehicles word, rebuilt from the host

@@ -7,6 +7,7 @@
 #include <runtime/world/geom.h>         // to_fixed
 #include <runtime/world/infantry.h>     // anim_state
 #include <runtime/world/local_player.h> // LocalPlayer::radar (the lock tone reset)
+#include <runtime/world/weapon_inventory.h> // LoadoutWeaponNameList, weapon_kit_default
 #include <runtime/world/world.h>        // World, registry, cached
 
 namespace opennova::world {
@@ -22,6 +23,19 @@ int32_t player_cammo_type_id(const World &world, uint8_t player_class) {
     const size_t property = climate == 1 ? 0 : climate == 2 ? 2 : 1;
     const size_t row = static_cast<size_t>((player_class - 1) & 0xF);
     return world.tables.class_cammo_type_ids[row][property];
+}
+
+uint8_t player_spawn_equipped_default(const World &world) {
+    const LoadoutWeaponNameList *list = world.loadout_weapon_names;
+    std::string first;
+    if (list != nullptr && list->set) {
+        if (!list->entries.empty()) first = list->entries.front().name;
+    } else {
+        const std::vector<WeaponKitEntry> initializer = weapon_kit_default(world.rules.title);
+        if (!initializer.empty()) first = initializer.front().name;
+    }
+    const int index = world.tables.weapons.index_of(first.c_str());
+    return index >= 0 ? static_cast<uint8_t>(index) : uint8_t{0xFF};
 }
 
 int32_t item_index_by_type_id(const World &world, int32_t type_id) {

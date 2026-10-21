@@ -113,9 +113,17 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &local,
 		const std::vector<world::WeaponKitEntry> &kit, uint8_t armory_class, bool authority,
 		bms::MissionType mission_type) {
-	// The whole selection, unfiltered, on both legs [orig: the rep movsd @0x565D4B].
-	local.loadout.spawn_kit_set = true;
-	local.loadout.spawn_kit = kit;
+	// The whole selection, unfiltered, on both legs, into the process's loadout name list
+	// (g_LoadoutWeaponNameList, whose first name every body the process spawns takes), not the
+	// spawn buffer: the resident kit (LocalPlayerLoadout::spawn_kit, g_SpawnLoadoutBuffer)
+	// keeps its rows until the host's list reaches it (a joiner's 0x5A apply copies the rebuilt
+	// list over it, a listen host's own list send its slot's buffer) [orig: the rep movsd into
+	// g_LoadoutWeaponNameList @0x565D46..0x565D4B; NapiNPClientMsg_HandleWeaponLoadoutSync
+	// @0x4293D1..0x4293E9; Server_SendWeaponSlotListToPlayer @0x502617..0x502627].
+	if (world.loadout_weapon_names != nullptr) {
+		world.loadout_weapon_names->entries = kit;
+		world.loadout_weapon_names->set = true;
+	}
 	const world::WeaponInventory *inventory = local.inventory_valid ? &local.inventory : nullptr;
 	const int32_t current_slot = inventory != nullptr ? inventory->equipped_combo : -1;
 	// The slot pool's entries alone, off the authority alone: the current slot word
@@ -179,15 +187,17 @@ void build_joiner_loadout_kit(const world::World &world,
 	out.equipped_combo = resolve_loadout_submit_combo(
 			world.tables.weapons, inventory, team, equipped_combo);
 	// The RESIDENT rows are the resident kit buffer, not a fresh read of the profile
-	// page. Retail has exactly ONE buffer: Game_StartMission copies the profile page
-	// into restrictionData, Player_InitPlayer builds the local display list from that
-	// same restrictionData, and NetPacket_SendLoadoutSubmit serializes it — so what we
-	// hold locally and what we tell the host are the same bytes by construction. An
-	// in-session armory ACCEPT overwrites restrictionData and its re-send therefore
-	// carries the ACCEPTED kit [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 ->
-	// @0x565d94], which reading the profile back here would silently undo.
-	// `loadout.spawn_kit` is our restrictionData; `seed_session_kit_from_profile` is
-	// the Game_StartMission copy that fills it.
+	// page: Game_StartMission copies the profile page into restrictionData
+	// (g_SpawnLoadoutBuffer), Player_InitPlayer builds the local display list from it,
+	// and every submit but the ACCEPT's serializes it (the mission start's pair, the
+	// team assign's resubmit). The in-session ACCEPT sends its own class buffer and
+	// writes the loadout name list, not restrictionData, so a resubmit between an ACCEPT
+	// and the host's list carries the pre-ACCEPT rows; the list's apply copies the grant
+	// over it [orig: NetPacket_SendLoadoutSubmit's restrictionData argument: g_SpawnLoadoutBuffer
+	// @0x52582F / @0x525C24 / @0x431AA3, the ACCEPT's class buffer @0x565D7F..0x565D85;
+	// WeaponLoadout_ApplyFromBuffer @0x565D46; NapiNPClientMsg_HandleWeaponLoadoutSync
+	// @0x4293D1..0x4293E9]. `loadout.spawn_kit` is our restrictionData;
+	// `seed_session_kit_from_profile` is the Game_StartMission copy that fills it.
 	{
 		const std::vector<world::WeaponKitEntry> &resident =
 				loadout.spawn_kit_set ? loadout.spawn_kit

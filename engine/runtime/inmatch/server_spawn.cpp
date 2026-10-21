@@ -307,8 +307,10 @@ world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World 
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	spawn.net_id = 0;
 	spawn.owner_connection_id = 0;
-	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
-	spawn.equipped_adm_index = m4 >= 0 ? static_cast<uint8_t>(m4) : 0xFF;
+	// The process's loadout name list's first name, as every body's (D-NET-143): a dedicated
+	// host writes the list never, so its row takes the initializer's WPN_M4AUTO
+	// [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116].
+	spawn.equipped_adm_index = world::player_spawn_equipped_default(world);
 	spawn.berserk = (game_type & 0x10000u) == 0;
 	const world::EntityHandle h = world::spawn_player(world, spawn);
 	if (!h.valid()) return h;
@@ -560,12 +562,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// entity+0x78 = the owning connection's dcb (host loopback dcb / a joiner's ack dcb).
 	// [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
 	spawn.owner_connection_id = conn.connection_id;
-	// Equipped-weapon spawn default = the WPN_M4AUTO armory index, resolved BY NAME like retail
-	// [orig: PlayerClass_InitEntity @0x4B1116 -> AdmDef_FindIndexByName("WPN_M4AUTO")];
-	// 0xFF (none) when no armory table is fed (unit-test hosts). A joiner's own extended uplink
-	// overwrites it on the first drained 0x0C. (D-NET-143)
-	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
-	spawn.equipped_adm_index = m4 >= 0 ? static_cast<uint8_t>(m4) : 0xFF;
+	// Equipped-weapon spawn default = the first name of the process's loadout name list
+	// (g_LoadoutWeaponNameList: WPN_M4AUTO until the host's own ACCEPT or its own client's 0x5A
+	// writes it), resolved BY NAME like retail; 0xFF (none) when no armory table is fed
+	// (unit-test hosts). A joiner's own extended uplink overwrites it on the first drained
+	// 0x0C. (D-NET-143) [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116]
+	spawn.equipped_adm_index = world::player_spawn_equipped_default(world);
 
 	// Character stamp from the joiner's 0x42 CU vars, picked per ASSIGNED team — side A for teams
 	// 1/3 or any non-team-based game type, side B otherwise [orig: Server_PlayerAdd @0x51cbc0

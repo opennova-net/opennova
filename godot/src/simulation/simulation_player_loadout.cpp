@@ -223,7 +223,7 @@ bool Simulation::apply_local_player_loadout_rows(
 		bool p_submit_joiner_request) {
 	if (!kernel_) return false;
 	// The armory ACCEPT in a session, a joiner's client and a listen host's own client
-	// alike: the selection becomes the resident kit, off the authority the slot table
+	// alike: the selection becomes the process's loadout name list, off the authority the slot table
 	// empties, and the one 0x2F (the armory's class, the live slot) goes out; nothing else
 	// applies locally until the host's grant (engine: inmatch::armory_accept_in_session
 	// carries the witness; D-NET-695, D-NET-NEW-L2-17).

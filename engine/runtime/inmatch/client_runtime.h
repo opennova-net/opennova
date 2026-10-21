@@ -13,6 +13,7 @@
 #include <runtime/replication/net_quality.h>             // the CNetQuality window (the client half)
 #include <runtime/inmatch/session_transport.h>        // ISessionTransport
 #include <runtime/inmatch/vehicle_menu.h>             // VehicleMenu (vehicle.mnu VEHICLE)
+#include <runtime/world/weapon_inventory.h>          // LoadoutWeaponNameList (the process's name list)
 
 #include <net/npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
@@ -110,6 +111,12 @@ struct ClientProcessState {
 	// local_player_entity): bound by each mission start's Player_InitPlayer, never cleared.
 	// [orig: Player_InitPlayer @0x4E15F0 - the store @0x4E17EB]
 	uint16_t local_player_entity = 0xFFFFu;
+	// g_LoadoutWeaponNameList (world/weapon_inventory.h): the image's initializer until an
+	// armory ACCEPT or a 0x5A apply writes it; no session or mission start touches it. The
+	// host role binds its worlds to it (World::loadout_weapon_names).
+	// [orig: g_LoadoutWeaponNameList @0x8333F8; its writers WeaponLoadout_ApplyFromBuffer
+	//  @0x565D46 and NapiNPClientMsg_HandleWeaponLoadoutSync @0x42920C..0x4292F0]
+	world::LoadoutWeaponNameList loadout_weapon_names;
 };
 
 class ClientRuntime {

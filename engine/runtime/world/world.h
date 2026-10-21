@@ -87,6 +87,7 @@ namespace opennova::world {
 
 class CollisionWorld;
 class LocalPlayer;
+struct LoadoutWeaponNameList;
 struct WeaponInventory;
 
 // One sound-profile slot fire (footstep, foley, landing, death scream),
@@ -1091,6 +1092,9 @@ public:
     // Non-owning local state, bound by the mission kernel for synchronous
     // deployment resets; bare authoritative worlds need no local view.
     LocalPlayer *local_player_state = nullptr;
+    // The process's loadout name list (g_LoadoutWeaponNameList, weapon_inventory.h), bound by
+    // the role that runs the world; null reads the image's initializer.
+    LoadoutWeaponNameList *loadout_weapon_names = nullptr;
     EntityCommands commands;
     // The AI/motor system: every brain plus the organic bodies. Owned here so
     // the command layer, the sims, the wire and the tools reach brains without

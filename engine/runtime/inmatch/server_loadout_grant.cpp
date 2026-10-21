@@ -1,6 +1,8 @@
 #include <runtime/inmatch/server_loadout_grant.h>
 
+#include <net/npwire/ingame_decode.h>          // decode_weapon_loadout (the own client's 0x5A apply)
 #include <net/npwire/ingame_encode.h>          // encode_weapon_loadout (the 0x5A body)
+#include <runtime/inmatch/loadout_submit.h>    // kit_from_authoritative_grant (the 0x5A rows' names)
 #include <runtime/world/weapon_inventory.h>    // the slot table's fill, pools and clips
 #include <runtime/world/weapon_table_build.h>  // loadout_entry_permitted (D-NET-141)
 #include <runtime/world/entity.h>
@@ -626,6 +628,24 @@ void weapon_slot_list_own_legs(NapiNPConnection &conn, world::World *world) {
 			copy_buffer_to_spawn_kit(conn, *world, world->local_player_state->loadout);
 		const bool side_a = conn.assigned_team == 1 || conn.assigned_team == 3;
 		conn.char_vars.char_class[side_a ? 0 : 1] = static_cast<uint8_t>(conn.slot_class);
+		// The own client's apply of the list it is sent rebuilds the process's loadout name
+		// list from the list's rows (each row whose weapon the table has: its name and its
+		// three values), with no authority test ahead of it, so every body the host spawns
+		// from then on takes the first granted weapon (D-NET-143). Ours' own client folds no
+		// S2C 0x5A: the rebuild runs here, at the send, where its receive applies it.
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C,
+		//  the rows' names @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name
+		//  @0x4292F0); PlayerClass_InitEntity @0x4B1100..0x4B1116]
+		if (world != nullptr && world->loadout_weapon_names != nullptr) {
+			const std::vector<uint8_t> body = build_current_loadout_reply(
+					conn.reply.last_loadout_reply, current_player_class(conn));
+			WeaponLoadout list;
+			if (decode_weapon_loadout(body.data(), body.size(), list)) {
+				world::LoadoutWeaponNameList &names = *world->loadout_weapon_names;
+				kit_from_authoritative_grant(world->tables.weapons, list, names.entries);
+				names.set = true;
+			}
+		}
 	}
 	// After the rows, the slot whose entity is the local player: g_CurrentWeaponSlot from
 	// the body's equipped AdmDef (category * 65 + rank; the current one when the index
