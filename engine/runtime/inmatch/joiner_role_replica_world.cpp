@@ -184,13 +184,10 @@ void JoinerRole::spawn_and_arm_local_player() {
 			if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
 			L->flags |= world::kEntityFlagCarried;
 			// The mission start's Player_InitPlayer class word: the side L's Team names, as
-			// it is (no range test), whatever class the shell's pre-spawn apply latched; a
-			// runtime with no join vars (a harness) keeps that latch [orig: Player_InitPlayer
-			//  @0x4E15F0 - @0x4E1809..0x4E1832; Game_StartMission @0x525BBC].
-			if (!stamp_init_player_class(*L) && lp.loadout.pending_player_class >= 5 &&
-					lp.loadout.pending_player_class <= 9)
-				L->player_class =
-						static_cast<uint8_t>(lp.loadout.pending_player_class);
+			// it is (no range test), whatever class the shell's pre-spawn apply latched
+			// [orig: Player_InitPlayer @0x4E15F0 - @0x4E1809..0x4E1832; Game_StartMission
+			//  @0x525BBC].
+			stamp_init_player_class(*L);
 			// No damage-class bytes: in a session only the host's accept writes them
 			// (D-NET-691) [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E92;
 			//  WeaponLoadout_ApplyFromBuffer's in-session leg sends @0x565D94].

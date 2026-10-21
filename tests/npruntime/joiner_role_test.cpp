@@ -462,9 +462,11 @@ bool run_the_spawn_takes_the_mission_starts_identity() {
 
 // L's spawn takes the mission start's Player_InitPlayer class word: the class byte of the side
 // its Team names (team 1 or 3 the first side), stored with no range test, whatever class the
-// shell's pre-spawn apply latched (here 5); a harness with no join vars keeps that latch.
+// shell's pre-spawn apply latched (here 5); a joiner whose shell installed no join vars holds
+// the fresh profile's 8 on both sides.
 // [orig: Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_CharClassTeam2
-//  @0x4E1819..0x4E181F, g_CharClassTeam1 @0x4E182C..0x4E1832; Game_StartMission @0x525BBC]
+//  @0x4E1819..0x4E181F, g_CharClassTeam1 @0x4E182C..0x4E1832; Game_StartMission @0x525BBC;
+//  PlayerProfile_InitDefaults - the two class bytes 8 @0x54BBE0 / @0x54BBE3]
 bool run_the_spawn_takes_its_sides_class_word() {
 	struct Case {
 		uint8_t self_team;
@@ -472,7 +474,7 @@ bool run_the_spawn_takes_its_sides_class_word() {
 		uint8_t expected;
 	};
 	bool ok = true;
-	for (const Case c : {Case{2, true, 7}, Case{1, true, 4}, Case{2, false, 5}}) {
+	for (const Case c : {Case{2, true, 7}, Case{1, true, 4}, Case{2, false, 8}}) {
 		Harness h;
 		h.role.poll_preload();
 		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
@@ -492,7 +494,7 @@ bool run_the_spawn_takes_its_sides_class_word() {
 		const w::Entity *L = h.kernel->local.player();
 		ok &= expect(h.role.local_spawned() && L != nullptr && L->team == c.self_team &&
 						L->player_class == c.expected,
-				"spawn class: the side word of L's team, unranged (the latch only without vars)");
+				"spawn class: the side word of L's team, unranged, never the shell's latch");
 	}
 	return ok;
 }

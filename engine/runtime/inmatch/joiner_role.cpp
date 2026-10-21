@@ -1484,21 +1484,19 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 
 // Player_InitPlayer's class word: the side L's Team names (team 1 or 3 the first side),
 // stored with no range test: the 0x5A's grant for that side, else the session start's
-// (the join vars' class bytes, which the session start clamped). A runtime with no join
-// vars installed (a harness) has no word to store.
+// (the join vars' class bytes, which the session start clamped; a joiner whose shell
+// installed none holds the fresh profile's, 8 on both sides).
 // [orig: Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_CharClassTeam2
 //  @0x4E1819..0x4E181F, g_CharClassTeam1 @0x4E182C..0x4E1832; NapiNPClientMsg_HandleWeaponLoadoutSync
 //  @0x4290E0 - @0x42941F / @0x429427]
-bool JoinerRole::stamp_init_player_class(world::Entity &local) const {
+void JoinerRole::stamp_init_player_class(world::Entity &local) const {
 	const int side = local.team == 1 || local.team == 3 ? 0 : 1;
 	if (granted_side_class_[side] != 0) {
 		local.player_class = granted_side_class_[side];
-		return true;
+		return;
 	}
-	const CharacterJoinVars *vars = runtime->character_join_vars();
-	if (vars == nullptr) return false;
-	local.player_class = vars->char_class[side];
-	return true;
+	if (const CharacterJoinVars *vars = runtime->character_join_vars())
+		local.player_class = vars->char_class[side];
 }
 
 // A self S2C 0x50 on the local entity re-runs Player_InitPlayer(1) after its local arm:
