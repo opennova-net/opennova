@@ -282,8 +282,8 @@ void ModelViewportView::Tools::rig_chooser(Workspace &workspace, ui_kit::WrapRow
 				options.rig_model = entry.logical_name;
 		ImGui::EndCombo();
 	}
-	ui_kit::tooltip("The model the animation plays on. Auto takes the graphic of an item whose "
-	                "anim_def names the map. A clip's bones pair with the model's parts by their order.");
+	ui_kit::tooltip("The model the animation plays on: Auto takes the graphic of an item whose anim_def names the map. A "
+	                "clip's bones pair with the model's parts by their order.");
 	if (options != model.options()) set_options(workspace, model, options);
 }
 
@@ -303,17 +303,15 @@ void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row,
 		int surface = int(sound.surface);
 		ImGui::SetNextItemWidth(unit * 8.0f);
 		if (ImGui::Combo("Surface", &surface, kSurfaces, IM_ARRAYSIZE(kSurfaces))) sound.surface = audio::FootSurface(surface);
-		ui_kit::tooltip("What is under the feet, as the game tests it for each footstep, in this order: feet under "
-		                "the water plane play SSFootWater (both feet); standing on an object, SSLFootOBJ or "
-		                "SSRFootOBJ; on snow (the terrain's surface class 3), SSLFootSnow or SSRFootSnow; else the "
-		                "ground, SSLFootGND or SSRFootGND (Entity_UpdateInfantryAI @ 0x4bf23e, the player body's "
-		                "@ 0x4b77c6). The sounds 1 to 6 play SSAudio1 to SSAudio6 whatever is underfoot.");
+		ui_kit::tooltip("What is under the feet, tested in this order for each footstep: under the water plane SSFootWater "
+		                "(both feet), on an object SSLFootOBJ or SSRFootOBJ, on snow (surface class 3) SSLFootSnow or "
+		                "SSRFootSnow, else SSLFootGND or SSRFootGND. The sounds 1 to 6 play SSAudio1 to SSAudio6 whatever "
+		                "is underfoot.");
 		static const char *const kBodies[] = {"Auto", "NPC body", "Player body"};
 		int body = int(sound.body);
 		ImGui::SetNextItemWidth(unit * 8.0f);
 		if (ImGui::Combo("Body", &body, kBodies, IM_ARRAYSIZE(kBodies))) sound.body = ClipSoundBody(body);
-		ui_kit::tooltip(binding.body_words + "\nAn NPC's body reads a clip's events on odd game ticks, a player's on "
-		                "even ones (Entity_UpdateInfantryAI @ 0x4bf144, Entity_UpdateInfantryPlayerBody @ 0x4b76e6); "
+		ui_kit::tooltip(binding.body_words + "\nAn NPC's body reads a clip's events on odd ticks, a player's on even ones; "
 		                "Auto takes the body the paired item's move_function runs.");
 		ImGui::BeginDisabled(!binding.player);
 		ImGui::Checkbox("Female", &sound.female);
@@ -377,8 +375,8 @@ void ModelViewportView::Tools::fire(Workspace &workspace, ui_kit::WrapRow &row, 
 			ui_kit::tooltip("The target's distance down the body's line of fire, metres.");
 		}
 		ImGui::Checkbox("Seen by the enemy", &fire.enemy);
-		ui_kit::tooltip("The shots as the other side sees them: the ammo's enemy tracer style (RoundData_SpawnRound "
-		                "@ 0x4EC740 selects it against the seeing client's team).");
+		ui_kit::tooltip("The shots as the other side sees them: the ammo's enemy tracer style, picked against the seeing "
+		                "client's team.");
 		ImGui::EndPopup();
 	}
 	if (options != model.options()) set_options(workspace, model, options);
@@ -405,8 +403,7 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 		ImGui::SameLine();
 		ImGui::RadioButton("Eye", &view, 1);
 		ui_kit::tooltip("The camera the game draws the weapon before: the model at the weapon's pos at the hip, turned by "
-		                "its cant, seen through its renderfov (Player_UpdateFirstPersonCamera @ 0x4dd380, "
-		                "Player_RenderFirstPersonViewModel @ 0x4ded60). Nothing moves it.");
+		                "its cant, seen through its renderfov. Nothing moves it.");
 		chosen.eye = view == 1;
 		const FirstPersonCharacter *who = sources.character();
 		ImGui::SetNextItemWidth(unit * 16.0f);
@@ -818,7 +815,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		const char *label = destroyed ? "Damage (destroyed)###damage" : "Damage###damage";
 		if (ui_kit::tool_popup(row, label, "damage", true,
 		                       "The model intact or destroyed, as the game destroys the item naming it: the husk swapped "
-		                       "in, the pieces, the destroy fade on the preview clock; Play destroy runs it from the death.")) {
+		                       "in, the pieces, the destroy fade on the preview clock.")) {
 			damage(workspace, model, context.input.clock);
 			ImGui::EndPopup();
 		}

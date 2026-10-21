@@ -779,9 +779,8 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Water", &options.water);
 	ImGui::Checkbox("Models", &options.models);
 	ImGui::Checkbox("Shadows", &options.shadows);
-	ui_kit::tooltip("The shadows as the game casts them, together: the terrain's static shadows under the placed "
-					"models, and the moving ground shadows of the people and the items that cast one (the game's "
-					"render slots).");
+	ui_kit::tooltip("The shadows as the game casts them: the terrain's static shadows under the placed models, and the "
+					"moving ground shadows of the people and the items that cast one.");
 	// DI-31: the game's own foliage, effects and lights.
 	ImGui::Checkbox("Foliage", &options.foliage);
 	ui_kit::tooltip("The terrain's foliage as the game grows it from its foliage map around the camera (its .trn's "
@@ -815,9 +814,8 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ui_kit::tooltip("A ring in each group's colour (the editor's own: no game colours a group), group 0 none, and a "
 					"legend of the groups in view.");
 	ImGui::Checkbox("Links", &options.links);
-	ui_kit::tooltip("The selected event's links: what its triggers watch and what its actions act on, ringed, a line "
-					"from one to the other, and a distance trigger's reach as the game measures it (a sphere about its "
-					"subject). And on each mark some event names, how many events name it.");
+	ui_kit::tooltip("The selected event's links: what its triggers watch and its actions act on, ringed and joined, and a "
+					"distance trigger's reach as the game measures it. On each mark an event names, how many name it.");
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 	float range = options.mark_range;
 	if (ImGui::SliderFloat("Mark range", &range, 0.0f, 2000.0f, range <= 0.0f ? "no limit" : "%.0f m",
