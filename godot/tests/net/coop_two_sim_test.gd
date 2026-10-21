@@ -1744,15 +1744,9 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 
 	# Runtime type 1291 is items.def id 101291 after the BMS namespace strip.
 	# Compare the two presentation feeds, not either local mission copy.
-	# DIAGNOSTIC (L5-s8, the joiner hull's sink): each peer's buggy row as the
-	# ground motor sees it, before and through the settle.
-	print("vehicle-diag pre host %s joiner %s" % [
-			host.debug_vehicle_motor_rows(1291), joiner.debug_vehicle_motor_rows(1291)])
 	for _settle in range(20):
 		host.step()
 		joiner.step()
-		print("vehicle-diag step %d host %s joiner %s" % [_settle,
-				host.debug_vehicle_motor_rows(1291), joiner.debug_vehicle_motor_rows(1291)])
 		OS.delay_msec(2)
 	var host_vehicle := _present_position_for_type(host, 1291)
 	var joiner_vehicle := _present_position_for_type(joiner, 1291)
@@ -1761,8 +1755,21 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	assert_true(joiner_vehicle.is_finite(),
 			"the joiner publishes the decoded pool-1 dune buggy")
 	if host_vehicle.is_finite() and joiner_vehicle.is_finite():
-		assert_lt(joiner_vehicle.distance_to(host_vehicle), 0.05,
-				"the joiner vehicle does not collapse onto or float over its player (host %s, joiner %s)"
+		# The planar pose only: this rig has no ground under the buggy, and retail's
+		# client falls there too. Each record lands the host's slideDecay (-162 after
+		# its sleep) on the row [orig: Entity_SerializeVehicleState @0x460560 (the
+		# +0xA0 store @0x46091e)]. The row's contact byte is the spawn's 0 (D-NET-433),
+		# so the first predicted tick moves nothing, and gravity leaves slideDecay
+		# past the tracked sleep gate's (-350, 0) window [orig:
+		# Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (@0x47C2BD..0x47C2D1)]. The
+		# full solve then finds no pad and sets Flags 0x2000 [orig: @0x47E57B], which
+		# keeps the gate shut; the hull falls between records and the airborne chase
+		# pulls it back. The host never leaves its gate, so its Z holds. With ground
+		# under it the joiner's solve rests the hull, which a groundless rig cannot pin.
+		var planar_gap := Vector2(joiner_vehicle.x - host_vehicle.x,
+				joiner_vehicle.z - host_vehicle.z).length()
+		assert_lt(planar_gap, 0.05,
+				"the joiner vehicle keeps the authority's planar pose (host %s, joiner %s)"
 				% [host_vehicle, joiner_vehicle])
 		var player_pos: Vector3 = joiner.get_local_player_position()
 		assert_gt(joiner_vehicle.distance_to(player_pos), 20.0,
@@ -1784,6 +1791,10 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 				joiner_snapshot[joiner_base + Simulation.PF_ROLL_DEG],
 				host_snapshot[host_base + Simulation.PF_ROLL_DEG], 0.01,
 				"the joiner publishes the decoded/predicted vehicle roll")
+		assert_almost_eq(
+				wrapf(joiner_snapshot[joiner_base + Simulation.PF_YAW_DEG]
+						- host_snapshot[host_base + Simulation.PF_YAW_DEG], -180.0, 180.0),
+				0.0, 0.01, "the joiner publishes the decoded/predicted vehicle heading")
 	# The physics family is the item's def trait, so it is read from the
 	# placed row's own card. A placed item owns an AI brain only when its row
 	# carries the AI-class attrib AND a brain-class ai_function at spawn

@@ -1788,12 +1788,6 @@ public:
 	Ref<EntityCard> entity_card(int p_handle) const;
 	Ref<EntityCard> entity_card_by_ai_index(int p_index) const;
 	Ref<EntityCard> entity_card_by_net_id(int p_net_id) const;
-	// DEBUG ONLY (a CI diagnostic for the joiner hull's sink, no behaviour change):
-	// every pool-1 world row of runtime type `type_id`, as the ground motor sees it
-	// this tick: has_graphic_model, the contact solve kind tick_motor picks,
-	// slide_z, (flags | engine_flags) & 0x2040, the contact byte, position z (Q16),
-	// net_predicted and the dispatch selector.
-	Array debug_vehicle_motor_rows(int p_type_id) const;
 	// Probe seam: write an AI entity's health via the scripted-SETHP stores (registry + motor
 	// copy) so in-game probes can shorten a fight. Returns ERR_UNAVAILABLE without a live sim,
 	// ERR_INVALID_PARAMETER for a missing AI index, and OK only after both mirrors are mutated.
