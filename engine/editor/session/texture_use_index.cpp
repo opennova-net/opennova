@@ -30,12 +30,33 @@ TextureModelSource TextureUseIndex::models(const SessionView &view) const {
 	};
 }
 
+namespace {
+
+// What a texture's uses read of the view: the graph, the files, and the documents (an open model's rows).
+RevisionKey uses_key(const SessionView &view) {
+	return revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files, ViewConcern::Documents, ViewConcern::DocumentSet});
+}
+
+} // namespace
+
+const TextureEdgeNames &TextureUseIndex::edge_names(const SessionView &view) const {
+	const AssetGraph &graph = *view.findings.graph;
+	const RevisionKey key = uses_key(view);
+	if (!names_made_ || names_key_ != key || names_graph_ != &graph || names_generation_ != graph.generation()) {
+		names_ = texture_edge_names(graph);
+		names_key_ = key;
+		names_graph_ = &graph;
+		names_generation_ = graph.generation();
+		names_made_ = true;
+	}
+	return names_;
+}
+
 const std::vector<TextureUse> &TextureUseIndex::kept(const SessionView &view, const std::string &key,
                                                      const std::function<std::vector<TextureUse>()> &make) const {
 	static const std::vector<TextureUse> kNone;
 	if (!view.findings.graph || !view.project.scan) return kNone;
-	const RevisionKey revisions = revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files, ViewConcern::Documents,
-	                                                            ViewConcern::DocumentSet});
+	const RevisionKey revisions = uses_key(view);
 	Made &made = made_by_file_[key];
 	if (made.made && made.key == revisions) return made.uses;
 	made.made = true;
@@ -48,7 +69,7 @@ const std::vector<TextureUse> &TextureUseIndex::kept(const SessionView &view, co
 const std::vector<TextureUse> &TextureUseIndex::uses_of(const SessionView &view, const std::string &file) const {
 	return kept(view, file, [&] {
 		const AssetGraph &graph = *view.findings.graph;
-		std::vector<TextureUse> uses = texture_uses(graph, *view.project.scan, file, models(view),
+		std::vector<TextureUse> uses = texture_uses(graph, edge_names(view), *view.project.scan, file, models(view),
 		                                            [&graph](const std::string &name) { return graph.has_file(name); });
 		// What each use's texture costs the game, from the header of the file its loader opens (the use check's
 		// read of it, kept by its stamp): a model row's, the HUD's, a menu's, the terrain's (S23 C).
@@ -64,7 +85,7 @@ const std::vector<TextureUse> &TextureUseIndex::uses_of(const SessionView &view,
 const std::vector<TextureUse> &TextureUseIndex::uses_named(const SessionView &view, const std::string &stem) const {
 	return kept(view, "\x01" + strutil::to_lower(stem), [&] {
 		const AssetGraph &graph = *view.findings.graph;
-		return texture_uses_named(graph, *view.project.scan, stem, models(view),
+		return texture_uses_named(graph, edge_names(view), *view.project.scan, stem, models(view),
 		                          [&graph](const std::string &name) { return graph.has_file(name); });
 	});
 }

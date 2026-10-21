@@ -25,6 +25,7 @@ struct BakeTestHold;
 struct PollBudget;
 struct SessionView;
 struct ValidationStats;
+class FrameTimes;
 struct ViewportMouse;
 
 // The one open project and everything the editor does to it (ADR 0046 S13 A2): open and
@@ -105,6 +106,11 @@ public:
 	// How much a poll steps (kDefaultPollBudget; a test's ms 0 is one step of the validation and one
 	// of the running operation per poll).
 	void set_poll_budget(const PollBudget &budget);
+	// Whether the polls have work under way (the Shell's frame pacing keeps the display's rate while they do):
+	// the validation due or under way and the game's own data's check after it, an operation, the disk watch's
+	// files waiting to hold still or its sweep, a terrain bake, thumbnails the windows asked for, a sound the
+	// Shell decodes to play.
+	bool busy() const;
 	// Whether an Open reopens the documents a project was left with and a close or a quit keeps them in its
 	// local settings (the editor's, true by default); a command line's run sets it false, its verbs then
 	// neither loading the documents local.json lists nor writing them.
@@ -137,6 +143,9 @@ public:
 	// How many times the Problems rows were composed: a validation that finds nothing they are
 	// made of moved composes none (for the tests).
 	size_t problems_compositions() const;
+	// The Shell's frames as they ran (session/frame_times.h, the perf query): the Shell begins and ends each,
+	// adding its own phases; the poll adds its parts.
+	FrameTimes &frame_times();
 	// The game's own data's baseline (S15, session/original_files.h): the install validated once (for the
 	// tests and the measure).
 	const OriginalFiles &originals() const;

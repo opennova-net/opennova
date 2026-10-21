@@ -75,4 +75,10 @@ bool refresh_project_findings(const ProjectFindingsInput &input, AssetGraph &gra
 ProjectFindings collect_project_findings(const ProjectFindingsInput &input, const AssetGraph &graph,
                                          const ValidationCache &cache, const ProjectChecks &checks);
 
+// What a composition keeps from one call to the next let go: the cross-file checks' answers
+// (graph/use_checks.h forget_use_checks), the notes of the files a mission's name finds and the build plan's
+// word on the files, each kept while what it was made of stands (the scan's serial, the graph's generation, the
+// project's expansion). The next composition makes each again, which is the answer it kept (a test's).
+void forget_kept_answers();
+
 } // namespace opennova::editor

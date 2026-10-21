@@ -407,7 +407,7 @@ static int test_fold_follows_the_view() {
 	OriginalFiles fold;
 	const int scan = 0; // the session's scan stands in: the same one throughout
 	const auto settle = [&](const std::shared_ptr<const ProjectDocument> &document) {
-		fold.want(install, document, &scan);
+		fold.want(install, document, &scan, {normalized_logical_name("jxm.bin")});
 		while (!fold.step(1 << 20)) {
 		}
 		const OriginalData &data = *fold.data();

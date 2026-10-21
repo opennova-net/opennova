@@ -19,6 +19,11 @@ struct FilePageCache {
 	FileCard card;
 };
 
+// The head of a file's card: its name (where `named`: Files' About card has it in its title), its kind and size on
+// one line, and behind a help mark what it holds, what in the game reads it (the witness cited), where a build puts
+// it and what the editor does with it.
+void draw_file_card_head(const FileCard &card, bool named = true);
+
 // The page of a file the editor has no editor for (the plain-words lane, the audit's 4.6), in its tab of
 // the Document window, drawn from the file's card (session/file_card.h's model): the file's name, kind and
 // size, what it holds and what in the game reads it, where a build puts it, what the editor does with it, its

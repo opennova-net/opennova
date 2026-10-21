@@ -20,10 +20,9 @@ namespace {
 // goes where it belongs (a symbol's file), or for a file the project lacks to its finding in Problems, with
 // its fixes (DI-17: a Go to never dead-ends).
 void line_of(Workspace &workspace, const FileCard::Line &line, bool missing, const std::string &name, bool reveal) {
-	const std::string shown = ui_kit::fit(line.text, ImGui::GetContentRegionAvail().x);
 	const bool to_problems = missing && line.target.file.empty() && !name.empty();
 	if (missing) ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::reference_color(ReferenceStatus::Missing));
-	if (ImGui::Selectable((shown + "###line").c_str(), line.at)) {
+	if (ui_kit::fitted_selectable(line.text, "line", line.at)) {
 		if (!line.target.file.empty()) {
 			window_requests::go_to(workspace, line.target);
 		} else if (to_problems) {
@@ -36,8 +35,8 @@ void line_of(Workspace &workspace, const FileCard::Line &line, bool missing, con
 	}
 	if (missing) ImGui::PopStyleColor();
 	if (line.at && reveal) ImGui::SetScrollHereY(0.3f);
-	ui_kit::tooltip(line.text + (!line.target.file.empty() ? "\nA click goes there: " + window_requests::go_to_words(line.target)
-	                             : to_problems ? "\nA click shows it in Problems, with what can make it."
+	ui_kit::tooltip(line.text + (!line.target.file.empty() ? "\n" + window_requests::go_to_words(line.target)
+	                             : to_problems ? "\nShown in Problems, with what can make it."
 	                                           : std::string()));
 }
 
@@ -100,6 +99,16 @@ void definitions(Workspace &workspace, const FileCard &card, bool reveal) {
 
 } // namespace
 
+void draw_file_card_head(const FileCard &card, bool named) {
+	if (named) {
+		ImGui::TextUnformatted(card.name.c_str());
+		ImGui::SameLine();
+	}
+	ImGui::TextDisabled("%s, %s", card.kind_label.c_str(), strutil::byte_size_text(card.size).c_str());
+	ui_kit::help_mark(card.what + "\nRead by the game: " + card.read_by + "\n" + card.build + " " + card.editor +
+	                  (card.cite.empty() ? std::string() : "\nAs the original game was seen to do: " + card.cite));
+}
+
 void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache &cache, bool reveal) {
 	const SessionView &view = workspace.view();
 	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files, ViewConcern::Findings,
@@ -124,17 +133,9 @@ void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache
 		if (ImGui::SmallButton("Close")) workspace.request(request::close_document(path));
 		return;
 	}
-	ImGui::TextUnformatted(card.name.c_str());
-	ImGui::SameLine();
-	ImGui::TextDisabled("%s, %s", card.kind_label.c_str(), strutil::byte_size_text(card.size).c_str());
-	ImGui::TextWrapped("%s", card.what.c_str());
-	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-	ImGui::TextWrapped("Read by the game: %s", card.read_by.c_str());
-	ImGui::PopStyleColor();
-	ui_kit::tooltip("As the original game was seen to do: " + card.cite);
-	ImGui::TextWrapped("%s %s", card.build.c_str(), card.editor.c_str());
+	draw_file_card_head(card);
 	if (card.errors || card.warnings)
-		ImGui::TextWrapped("Problems: %s, %s.", counted(card.errors, "error").c_str(), counted(card.warnings, "warning").c_str());
+		ImGui::Text("Problems: %s, %s.", counted(card.errors, "error").c_str(), counted(card.warnings, "warning").c_str());
 	if (ImGui::SmallButton("Show in Files")) workspace.request(request::show_in_files(card.path));
 	ImGui::SameLine();
 	if (ImGui::SmallButton("Show in folder")) workspace.request(request::reveal_path(join_path(view.project.root, card.path)));

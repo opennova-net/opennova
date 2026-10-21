@@ -49,6 +49,11 @@ struct AssetScan {
 	// is read, and again after its entries change; until it does, the two lookups walk the
 	// entries (a warning on the log sink says so) and never read past them.
 	void index();
+	// A value of a process-wide counter, taken anew by every index() (the walk's, an update's, a scan made by
+	// hand's): two scans of one serial list the same entries (a copy keeps it), so what is made of the entries
+	// (the cross-file checks' caches, the graph's walk) is kept while it stands. 0: never indexed, which nothing
+	// keeps an answer for.
+	uint64_t serial() const { return serial_; }
 
 	// What the walk made of one project file (assets/project_scan.h, S13 A3): its entries (the file
 	// itself, or the outputs an import record lists) and its findings, and the file's own size and last
@@ -100,6 +105,7 @@ private:
 	void compose();
 
 	std::vector<size_t> by_path_;         // the entries' indexes, by relative path
+	uint64_t serial_ = 0;                 // serial()
 	std::map<std::string, Visit> visits_; // the walk's visits, by project-relative path
 	std::map<std::string, int64_t> folders_; // the walk's folders and their stamps (folders())
 	std::vector<Diagnostic> import_findings_;

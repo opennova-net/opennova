@@ -75,22 +75,18 @@ bool ExpansionFields::draw(ExpansionChoice &choice, const std::vector<ProjectVie
 	                "project's folder when relative, as ../../assets), whose export is the base game the expansion "
 	                "imports from, builds over and plays over, Strict Play included. Export it first.");
 	if (!choice.base_project.empty() && !choice.builds_on.empty()) {
-		ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f),
-		                   "An expansion builds on an installed expansion or on a base game's project, never both.");
+		ui_kit::refusal_text("An expansion builds on an installed expansion or on a base game's project, never both.");
 		return false;
 	}
 	if (choice.value() == current && !current.standalone()) return true; // as the project holds it: nothing to weigh again
 	const std::string problem = expansion_name_problem(choice.name, ExpansionNameUse::Own);
 	if (!problem.empty()) {
-		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 28.0f);
-		ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s", problem.c_str());
-		ImGui::PopTextWrapPos();
+		ui_kit::refusal_text(problem);
 		return false;
 	}
 	for (const ProjectView::InstallExpansion &installed : expansions)
 		if (strutil::iequals(installed.name, choice.name)) {
-			ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "The game install has an expansion named %s already.",
-			                   installed.name.c_str());
+			ui_kit::refusal_text("The game install has an expansion named " + installed.name + " already.");
 			return false;
 		}
 	return true;

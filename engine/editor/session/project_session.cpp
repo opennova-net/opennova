@@ -243,10 +243,23 @@ void ProjectSession::poll() {
 	session.core.lapse_wire_gestures();
 	const PollBudget budget = session.core.poll_budget();
 	const int64_t started = budget.ms > 0 ? steady_clock_ms() : 0;
+	// The frame under way learns what each part cost (the perf query): the validation's steps less the
+	// composition and the game's own data's steps they ran, which it learns apart.
+	FrameTimes &times = session.core.frame_times();
+	const ProblemsService::Spent before = session.problems.spent();
+	const int64_t validation_start = steady_clock_us();
 	session.problems.step_validation(budget, steady_clock_ms);
+	const int64_t validation_end = steady_clock_us();
+	const ProblemsService::Spent &after = session.problems.spent();
+	const int64_t composed = after.compose_us - before.compose_us;
+	const int64_t originals = after.originals_us - before.originals_us;
+	times.add(FramePhase::Validation, validation_end - validation_start - composed - originals);
+	times.add(FramePhase::Compose, composed);
+	times.add(FramePhase::Originals, originals);
 	PollBudget rest = budget;
 	if (budget.ms > 0) rest.ms = std::max<int64_t>(0, budget.ms - (steady_clock_ms() - started));
 	session.core.step_operation(rest);
+	times.add(FramePhase::Operation, steady_clock_us() - validation_end);
 	session.play.poll();
 	// S25: a bake that finished lands in its stroke's step; a stroke that ended starts its file's bake.
 	session.sculpt.poll();
@@ -264,8 +277,22 @@ void ProjectSession::poll() {
 	}
 }
 
+FrameTimes &ProjectSession::frame_times() {
+	return impl_->core.frame_times();
+}
+
 void ProjectSession::set_poll_budget(const PollBudget &budget) {
 	impl_->core.set_poll_budget(budget);
+}
+
+bool ProjectSession::busy() const {
+	const Impl &session = *impl_;
+	const SessionView &view = session.core.view();
+	// The validation's status runs through the game's own data's check too (ProblemsService::show_validation).
+	return session.problems.validating() || view.activity.validation.running || view.activity.operation.running() ||
+	       view.project.outside_waiting > 0 || view.project.outside_sweeping || !view.documents.baking.empty() ||
+	       (view.project.open && view.documents.thumbnails && view.documents.thumbnails->pending()) ||
+	       view.workspace.sound.state == WorkspaceView::SoundState::Starting;
 }
 
 void ProjectSession::set_workspace_kept(bool kept) {

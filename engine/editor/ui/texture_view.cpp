@@ -271,10 +271,9 @@ void TextureView::draw_import(Workspace &workspace, const DocumentBase &document
 	if (!import_.imported) return;
 	const TextureImportState &state = import_.state;
 	const std::string heading = "Made from " + basename_of(state.source) + "###made_from";
-	if (!ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) return;
-	ImGui::PushTextWrapPos(0.0f);
-	ImGui::TextDisabled("Its import makes this file from %s: change how it is made here.", state.source.c_str());
-	ImGui::PopTextWrapPos();
+	const bool open = ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+	ui_kit::tooltip("Its import makes this file from " + state.source + ": change how it is made here.");
+	if (!open) return;
 	// Set while the busy gate takes a set_import_options (an operation holding the files waits).
 	const bool allowed = view.allows(EditorRequestKind::SetImportOptions);
 	const auto set = [&](const std::string &option, const std::string &value) {
@@ -335,10 +334,9 @@ void TextureView::draw_import(Workspace &workspace, const DocumentBase &document
 		if (ImGui::Button("Make it as its uses ask") && allowed)
 			workspace.request(request::set_import_options(state.source, {needs.options.begin(), needs.options.end()}));
 	} else if (needs.uses > 0 && needs.conflicts.empty()) {
-		ImGui::TextDisabled("It is made as its uses ask.");
+		ui_kit::quiet_text("It is made as its uses ask.");
 	}
-	for (const std::string &conflict : needs.conflicts)
-		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", conflict.c_str());
+	for (const std::string &conflict : needs.conflicts) ui_kit::warning_line(conflict);
 	// No one file serves them all: the uses that ask otherwise given a copy of their own (split_texture),
 	// each file's import then made as its own uses ask.
 	if (!needs.split_referrers.empty()) {
@@ -389,7 +387,7 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 	const std::string heading = "Used as (" + std::to_string(uses.size()) + ")###used_as";
 	if (!ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) return;
 	if (!view.findings.graph) {
-		ui_kit::empty_state("The project's references are not read yet.");
+		ui_kit::empty_state(ui_kit::reading_references());
 		return;
 	}
 	if (uses.empty()) {
@@ -404,9 +402,8 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 		std::string line = use.words;
 		if (!use.reads_file)
 			line += use.served.empty() ? " - the game finds nothing for it" : " - the game loads " + basename_of(use.served);
-		const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
 		if (!use.reads_file) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		const bool pressed = ImGui::Selectable((shown + "###use").c_str());
+		const bool pressed = ui_kit::fitted_selectable(line, "use");
 		if (!use.reads_file) ImGui::PopStyleColor();
 		ReferenceTarget target;
 		if (!use.fixed) {
@@ -466,8 +463,7 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 				if (role.size != renderer::TextureSizeRule::Any) tip += "\nSize: " + texture_size_words(role);
 				tip += std::string("\nWitness: ") + (use.fixed ? use.fixed_witness.c_str() : role.witness);
 			}
-			if (!use.fixed)
-				tip += target.editable ? "\nA click opens " + target.file + " at it." : "\nA click shows " + target.file + " in Files.";
+			if (!use.fixed) tip += target.editable ? "\nOpens " + target.file + " at it." : "\nShows " + target.file + " in Files.";
 			return tip;
 		};
 		ui_kit::tooltip_lazy(use_tooltip);
@@ -481,11 +477,9 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(document.path()) : nullptr;
 	const bool unread = std::none_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.reads_file; });
 	if (unread && entry && entry->imported_from.empty()) {
-		ImGui::PushTextWrapPos(0.0f);
-		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "The game never reads this file: %s.",
-		                   uses.front().served.empty() ? "no loader opens it"
-		                                               : ("its loader opens " + basename_of(uses.front().served) + " in its place").c_str());
-		ImGui::PopTextWrapPos();
+		ui_kit::warning_line("The game never reads this file.",
+		                     uses.front().served.empty() ? std::string("No loader opens it.")
+		                                                 : "Its loader opens " + basename_of(uses.front().served) + " in its place.");
 		ui_kit::WrapRow row;
 		if (ui_kit::tool(row, "Set it aside", view.allows(EditorRequestKind::SetAsideTexture) && !document.dirty(),
 		                 "Moves " + document.path() + " under " + std::string(kReplacedFolder) +
@@ -501,10 +495,8 @@ void TextureView::draw_budget(const TextureBudget &budget) {
 	std::string line = "In the game: " + texture_bytes_words(full.bytes);
 	if (budget.offers_dds) line += ", " + texture_bytes_words(budget.as_dds.bytes) + " as its .dds";
 	ImGui::Indent();
-	ImGui::PushTextWrapPos(0.0f);
-	if (full.bytes > kTextureMemoryWarnBytes) ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", line.c_str());
-	else ImGui::TextDisabled("%s", line.c_str());
-	ImGui::PopTextWrapPos();
+	if (full.bytes > kTextureMemoryWarnBytes) ui_kit::warning_line(line);
+	else ui_kit::quiet_text(line);
 	ImGui::Unindent();
 	ui_kit::tooltip_lazy([&] {
 		std::string tip = "What the game makes of " + budget.file + " for this use, every level of which it keeps in its memory:";

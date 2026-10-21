@@ -58,26 +58,8 @@ public:
 	bool ground_at(double x, double y, double &height) const override;
 	bool reads_scene_state() const override { return false; }
 
-	// What it holds, for the GUT device test: the overlay holding the map's state, the terrain read, what the last
-	// compiled pass drew (its terrain triangles, its sprites, its labels).
+	// The overlay holding the map's state.
 	HudOverlay *overlay() const;
-	Ref<TerrainData> terrain_data() const { return terrain_data_; }
-	int pass_terrain_tris() const { return pass_terrain_tris_; }
-	int pass_sprites() const { return pass_sprites_; }
-	int pass_labels() const { return pass_labels_; }
-	bool pass_visible() const { return pass_visible_; }
-	// The wireframes' edges drawn, and how many chunks of them it has uploaded in all (a drag of one record uploads its
-	// own chunks alone).
-	int outline_edges() const { return outline_edges_; }
-	int outline_chunks_uploaded() const { return chunks_uploaded_; }
-	// S25: the map's background picture the overlay holds (null: the colour map), and how many it has uploaded.
-	Ref<ImageTexture> background_picture() const { return picture_; }
-	int background_uploads() const { return picture_uploads_; }
-	// Texels converted to the texture's bytes since the applier began (S25: a stroke's patch converts its rects alone).
-	int background_converted() const { return picture_converted_; }
-	// The placed tiles drawn over the map (S25), and the times they were drawn again.
-	int tiles_drawn() const { return tiles_drawn_; }
-	int tiles_redrawn() const { return tiles_redrawn_; }
 
 private:
 	// The terrain and its water mask given the overlay; the grid's origin.
@@ -99,7 +81,6 @@ private:
 	uint64_t outline_serial_ = UINT64_MAX; // the viewport's outline serial drawn
 	std::vector<RID> chunk_items_; // a canvas item a chunk of edges, under outline_item_
 	std::vector<uint64_t> chunk_drawn_; // each chunk's serial drawn
-	int chunks_uploaded_ = 0;
 	int outline_edges_ = 0;
 	// S25: the placed tiles over the map, MED's 2D view's way: a canvas item of their quads under the wireframes, the
 	// tile set (the terrain's tilestrip as it loaded) with each texel's alpha 0 or opaque, sampled nearest.
@@ -108,7 +89,7 @@ private:
 	uint64_t tile_set_from_ = 0; // the terrain data it was made from
 	int tile_set_width_ = 0, tile_set_height_ = 0;
 	uint64_t tiles_serial_ = UINT64_MAX; // the viewport's tiles serial drawn
-	int tiles_drawn_ = 0, tiles_redrawn_ = 0;
+	int tiles_drawn_ = 0;
 	Ref<ResourceRoot> root_;
 	std::shared_ptr<opennova::StampedFiles> stamped_;
 	Ref<TerrainData> loading_; // the terrain a build loads

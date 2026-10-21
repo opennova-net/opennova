@@ -1,4 +1,5 @@
 #include "authoring/model_viewport_applier.h"
+#include "authoring/orbit_stage.h"
 #include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/node3d.hpp>
@@ -35,26 +36,15 @@ const opennova::editor::ModelViewport &model_of(const opennova::editor::Viewport
 } // namespace
 
 ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&viewport) {
-	// Single-sampled, as the game's own view draws: the particle renderer's passes a clip's fire draws through
-	// bind the view's depth (DI-14's rule: under MSAA every particle went undrawn).
-	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
-	// The editor's preview background, behind everything the picture draws.
-	backdrop_ = make_preview_backdrop_3d();
-	viewport.add_child(backdrop_);
-	Node3D *root = memnew(Node3D);
-	viewport.add_child(root);
+	// The orbit devices' stage (authoring/orbit_stage): retail shaders write gamma-domain values and rely on its one
+	// terminal display decode per 3D view.
+	OrbitStage stage = make_orbit_stage(viewport, false);
+	backdrop_ = stage.backdrop;
+	frame_effects_ = std::move(stage.frame_effects);
+	environment_ = stage.environment;
+	camera_ = stage.camera;
+	Node3D *root = stage.root;
 	root_ = root;
-	// Retail shaders write gamma-domain values and rely on one terminal display decode per 3D view: the game's
-	// FrameFx's (with the distortion row a clip's class-7 particles draw on); the environment with no .env lights like
-	// the retail noon.
-	frame_effects_ = std::make_unique<PreviewFrameEffects>(*root, viewport, false);
-	environment_ = memnew(MissionEnvironment);
-	root->add_child(environment_);
-	camera_ = memnew(Camera3D);
-	camera_->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
-	camera_->set_fov(opennova::editor::OrbitCamera::fov_horizontal_degrees());
-	camera_->set_current(true);
-	root->add_child(camera_);
 	object_ = memnew(ObjectModel);
 	// Every level kept, the level the viewport picks applied as it changes (the build makes every
 	// level's meshes): a level change swaps rows, the scene is not built again.
@@ -295,14 +285,8 @@ void ModelViewportApplier::apply_registers_(const opennova::editor::ViewportMode
 
 void ModelViewportApplier::place_camera_(const opennova::editor::ViewportModel &viewport) {
 	const opennova::editor::ModelViewport &model = model_of(viewport);
-	const opennova::editor::OrbitCamera &camera = model.camera();
-	opennova::editor::PreviewVec3 right, up, back;
-	camera.axes(right, up, back);
-	camera_->set_transform(Transform3D(Basis(to_godot(right), to_godot(up), to_godot(back)), to_godot(camera.eye())));
-	camera_->set_near(camera.near_plane);
-	camera_->set_far(camera.far_plane);
 	// The first-person eye sees with the weapon's renderfov (DI-13), else the game's view.
-	camera_->set_fov(camera.fov_degrees());
+	place_orbit_camera(*camera_, model.camera(), true);
 	if (model.status() != opennova::editor::ViewportStatus::Ready || data_.is_null()) return;
 	const int lod = model.lod();
 	if (lod >= 0 && lod != applied_lod_) {

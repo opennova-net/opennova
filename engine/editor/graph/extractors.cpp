@@ -9,7 +9,8 @@
 // native kinds (the HUD layout, the
 // avatar table, a particle file, a face animation) read their parsed structs. The names a native text (a
 // terrain, an environment, a particle file, the HUD layout, a face animation) writes are rewritable: a
-// rename finds each in the text by reading it again (graph/native_text_sites.h).
+// file's rename finds each in the text by reading it again (graph/native_text_sites.h); a particle file's
+// parser keeps its places, so its names are spans as a text document's are (native_text_places).
 #include <editor/graph/asset_graph.h>
 
 #include <algorithm>
@@ -25,6 +26,7 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/particle_keys.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/graph_names.h>
 #include <editor/graph/reference_kinds.h>
@@ -232,6 +234,11 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 	return true;
 }
 
+// A particle file (DI-14), through the game's reader, with the places it keeps: each name the text writes is a span, at
+// its locator, which a Go to opens the text at, Problems names and a rename replaces (a text document's way, S13 D9).
+// The ids are definitions (`field` "id"): an effect's, a table's and a particle's; the names inside the blocks uses: an
+// effect's pdefs members and a particle's child_id, each a [particledef]'s id; a particle's curves, each a [tabledef]'s
+// id; a graphic's texture.
 bool extract_particles(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	particle::ParticleFile file;
 	particle::ParticlePlaces places;
@@ -241,36 +248,85 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The particle file could not be read.", name);
 		return false;
 	}
-	// Each effect at the place its id is written (DI-14: the particle type is a text, so a Go to opens it
-	// there and its effect preview shows the effect).
-	for (const particle::EffectDef &effect : file.effects) {
+	using particle::BlockKind;
+	const std::string text(bytes.begin(), bytes.end());
+	const std::vector<size_t> lines = text_line_starts(text);
+	// The span of `value`, the `nth` name of the value `place` holds (particle_value_name); a line of 0 for none.
+	const auto span_in = [&](const particle::KeyPlace *place, size_t nth, const std::string &value) {
+		size_t at = 0;
+		if (!place || value.empty() || !particle_value_name(text, place->offset, place->length, nth, value, at))
+			return TextSpan();
+		return text_span_at(lines, at, value.size());
+	};
+	const auto placed = [](auto &named, const TextSpan &span) {
+		if (!span.line) return;
+		named.span = span;
+		named.locator = TextDocument::locator(span.line, span.column);
+	};
+	const auto id_symbol = [&](ReferenceKind kind, const std::string &id, BlockKind block, size_t index) -> GraphSymbol & {
+		out.symbols.push_back(symbol_of(kind, id, name, id));
+		GraphSymbol &symbol = out.symbols.back();
+		symbol.field = "id";
+		placed(symbol, span_in(particle_key_place(places, block, index, "id"), 0, id));
+		symbol.line = symbol.span.line;
+		return symbol;
+	};
+	// Each effect at the place its id is written (DI-14: the particle type is a text, so a Go to opens it there and its
+	// effect preview shows the effect): its block's id line, else the line of an earlier block the id came from (the
+	// reader's one name buffer outlives a block), which holds no span of its own.
+	for (size_t e = 0; e < file.effects.size(); ++e) {
+		const particle::EffectDef &effect = file.effects[e];
 		if (effect.id.empty()) continue;
-		out.symbols.push_back(symbol_of(ReferenceKind::Particle, effect.id, name, effect.id));
-		if (effect.id_line > 0) {
-			out.symbols.back().locator = TextDocument::locator(size_t(effect.id_line), size_t(effect.id_column));
-			out.symbols.back().line = size_t(effect.id_line);
+		GraphSymbol &symbol = id_symbol(ReferenceKind::Particle, effect.id, BlockKind::Effect, e);
+		if (!symbol.span.line && effect.id_line > 0) {
+			symbol.locator = TextDocument::locator(size_t(effect.id_line), size_t(effect.id_column));
+			symbol.line = size_t(effect.id_line);
 		}
 	}
 	// Each table a particle's curve finds by its id among every particle file's [tabledef]s, without case [orig:
-	// CParticleManager_FindTableDefByName @ 0x5E9540] (the reader keeps no place: a Go to finds its line by reading
-	// the text again, native_text_place).
-	for (const particle::TableDef &table : file.tables)
-		if (!table.id.empty()) out.symbols.push_back(symbol_of(ReferenceKind::ParticleTable, table.id, name, table.id));
+	// CParticleManager_FindTableDefByName @ 0x5E9540]; each particle an effect's pdefs member and a particle's child_id
+	// find by its id among every particle file's [particledef]s, without case [orig: CEffectWorld_FindParticleDefByName
+	// @ 0x5E41D0].
+	for (size_t t = 0; t < file.tables.size(); ++t)
+		if (!file.tables[t].id.empty()) id_symbol(ReferenceKind::ParticleTable, file.tables[t].id, BlockKind::Table, t);
+	for (size_t p = 0; p < file.particles.size(); ++p)
+		if (!file.particles[p].id.empty())
+			id_symbol(ReferenceKind::ParticleDefinition, file.particles[p].id, BlockKind::Particle, p);
+	// A use the text writes at a span: a site a rename rewrites, at its locator.
+	const auto use = [&](const std::string &record, const std::string &field, ReferenceKind kind, const std::string &value,
+	                     const TextSpan &span) -> GraphEdge & {
+		out.edges.push_back(edge_of(name, record, field, kind, value, std::string(), true));
+		placed(out.edges.back(), span);
+		return out.edges.back();
+	};
+	// Each effect's particles, of the last pdefs line its block writes, each member resolved among every file's
+	// [particledef]s [orig: CEffectBank_ResolveAllEntries @ 0x5E4920], its name in a slot of 64 bytes (from +340); a
+	// member of no name (a slot past the line's words, the editor's Add writes one) names none.
+	for (size_t e = 0; e < file.effects.size(); ++e) {
+		const particle::EffectDef &effect = file.effects[e];
+		const particle::KeyPlace *place = particle_key_place(places, BlockKind::Effect, e, "pdefs");
+		size_t word = 0;
+		for (const std::string &member : effect.pdefs) {
+			if (member.empty()) continue;
+			GraphEdge &edge = use(effect.id, "pdefs", ReferenceKind::ParticleDefinition, member, span_in(place, word++, member));
+			edge.width = kPdefsNameSlot;
+		}
+	}
 	for (size_t index = 0; index < file.particles.size(); ++index) {
 		const particle::ParticleDef &definition = file.particles[index];
+		// The particle its emitter spawns into, by its id as a member finds one [orig: CEffectDef_ResolveAllReferences @
+		// 0x5E9D70].
+		if (!definition.child_id.empty())
+			use(definition.id, "child_id", ReferenceKind::ParticleDefinition, definition.child_id,
+			    span_in(particle_key_place(places, BlockKind::Particle, index, "child_id"), 0, definition.child_id));
 		// Each curve the particle names, its own and each graphic's, as the game resolves them once every particle
 		// file is loaded [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630], each key the site a rename rewrites.
 		// A graphic's curve a graphicN line copied from the particle's is no line of its own: the particle's
 		// line it came from is the site [orig: CParticleDefEntry_ParseGraphicProperty @ 0x5e3550].
-		const auto written = [&](const std::string &key) {
-			return std::any_of(places.keys.begin(), places.keys.end(), [&](const particle::KeyPlace &place) {
-				return place.block == particle::BlockKind::Particle && place.index == index &&
-				       opennova::strutil::iequals(place.key, key);
-			});
-		};
 		const auto curve = [&](const particle::CurveRef &ref, const std::string &key) {
-			if (ref.present && !ref.name.empty() && written(key))
-				out.edges.push_back(edge_of(name, definition.id, key, ReferenceKind::ParticleTable, ref.name, std::string(), true));
+			const particle::KeyPlace *place = particle_key_place(places, BlockKind::Particle, index, key);
+			if (ref.present && !ref.name.empty() && place)
+				use(definition.id, key, ReferenceKind::ParticleTable, ref.name, span_in(place, 0, ref.name));
 		};
 		curve(definition.scale_func, "scale_func");
 		curve(definition.alpha_func, "alpha_func");
@@ -287,6 +343,18 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 			curve(layer.red_func, prefix + "red_func");
 			curve(layer.green_func, prefix + "green_func");
 			curve(layer.blue_func, prefix + "blue_func");
+		}
+		// The graphic line each layer took its texture from, the last of the layer's: graphic1 the first layer, any
+		// other graphicN the next, up to the fourth, whatever its N [orig: CParticleDefEntry_ParseGraphicProperty @
+		// 0x5E357E..0x5E35B9].
+		std::array<const particle::KeyPlace *, 4> graphic_lines{};
+		int line_layer = -1;
+		for (const particle::KeyPlace &place : places.keys) {
+			if (place.block != BlockKind::Particle || place.index != index) continue;
+			const std::string key = strutil::to_lower(place.key);
+			if (key.rfind("graphic", 0) != 0) continue;
+			line_layer = key == "graphic1" ? 0 : std::min(line_layer + 1, 3);
+			graphic_lines[size_t(line_layer)] = &place;
 		}
 		for (size_t g = 0; g < definition.graphics.size(); ++g) {
 			const particle::GraphicLayer &layer = definition.graphics[g];
@@ -305,6 +373,7 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 			if (frames <= 1) {
 				out.edges.push_back(texture_edge(name, definition.id, field, layer.texture, renderer::TextureRoleId::ParticleGraphic));
 				out.edges.back().use_context = mode;
+				placed(out.edges.back(), span_in(g < graphic_lines.size() ? graphic_lines[g] : nullptr, 0, layer.texture));
 				continue;
 			}
 			for (int frame = 1; frame <= frames; ++frame) {
@@ -447,6 +516,7 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		for (const TextDefinition &definition : definitions) {
 			GraphSymbol symbol = symbol_of(definition.kind, cp1252_to_utf8(definition.name), document.path());
 			symbol.locator = TextDocument::locator(definition.span.line, definition.span.column);
+			symbol.span = definition.span;
 			out.symbols.push_back(std::move(symbol));
 		}
 	}

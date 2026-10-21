@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 
 #include <imgui.h>
@@ -17,6 +18,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/reference_fields.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_widgets.h>
 #include <editor/ui/workspace.h>
@@ -30,6 +32,32 @@ std::string seconds(int32_t ticks) {
 	char text[32];
 	std::snprintf(text, sizeof(text), "%.2f s", ticks / io::kTickHz);
 	return text;
+}
+
+// A line of a log (the range's, the death's): its time, each name it plays a link (name_link: its Go to and its
+// jumps), then its words cut to the column, whole in its tooltip after `tip`.
+void log_line(Workspace &workspace, const std::string &when, std::initializer_list<ReferenceSubject> names,
+              const std::string &words, const std::string &tip = std::string()) {
+	ImGui::TextUnformatted(when.c_str());
+	int id = 0;
+	for (const ReferenceSubject &name : names) {
+		++id;
+		if (name.target.empty()) continue;
+		ImGui::SameLine();
+		name_link(workspace, name, std::to_string(id).c_str());
+	}
+	ImGui::SameLine();
+	ui_kit::clipped_text(words, tip.empty() ? words : words + "\n" + tip);
+}
+
+// What a death's leg names, by its kind (DamageLeg::kind): the husk or the piece model a model, a sound a set, an
+// effect a particle effect, a blast an ammo; a flash names none.
+ReferenceKind leg_reference(const std::string &kind) {
+	if (kind == "swap" || kind == "pieces" || kind == "fade") return ReferenceKind::Model;
+	if (kind == "sound") return ReferenceKind::Sound;
+	if (kind == "effect") return ReferenceKind::Particle;
+	if (kind == "blast") return ReferenceKind::Ammo;
+	return ReferenceKind::None;
 }
 
 const char *state_label(DefinitionState state) {
@@ -185,14 +213,17 @@ void weapon_row(Workspace &workspace, const DefinitionViewport &model, const Pre
 	if (!range.ammo_alone())
 		ui_kit::clipped_text(std::string(line) + (range.ammo().empty() ? std::string() : " of " + range.ammo()));
 	if (weapon.card_up())
-		ui_kit::clipped_text("The sights card is up: the game draws the scope's card in the gun's place (the HUD "
-		                     "preview draws cards).");
+		ui_kit::quiet_text("The sights card is up.",
+		                   "The game draws the scope's card in the gun's place (the HUD preview draws cards).");
 	const std::vector<WeaponRangeEvent> &events = range.events();
 	if (!events.empty() && ImGui::TreeNode("fired", "What it did (%d)", int(events.size()))) {
 		const size_t shown = std::min<size_t>(events.size(), 48);
 		for (size_t i = 0; i < shown; ++i) {
 			const WeaponRangeEvent &event = events[events.size() - 1 - i];
-			ImGui::TextWrapped("%s", (seconds(event.tick) + "  " + event.words).c_str());
+			ImGui::PushID(int(i));
+			log_line(workspace, seconds(event.tick), {{ReferenceKind::Sound, event.set}, {ReferenceKind::Particle, event.effect}},
+			         event.words);
+			ImGui::PopID();
 		}
 		ImGui::TreePop();
 	}
@@ -265,32 +296,6 @@ void play_row(Workspace &workspace, const DefinitionViewport &model, int tag) {
 	workspace.request(request::set_viewport(model.path(), io::json_write(change)));
 }
 
-// A name the board shows, its Go to the definition the game finds for it (an effect in its particle file, a sound
-// set in its bank, a texture's file): "none" where the row names nothing.
-void board_name(Workspace &workspace, const std::string &name, ReferenceKind kind, const std::string &id) {
-	const SessionView &view = workspace.view();
-	if (name.empty()) {
-		ImGui::TextDisabled("none");
-		return;
-	}
-	ReferenceTarget target;
-	bool found = false;
-	if (kind == ReferenceKind::Texture) {
-		const AssetEntry *entry = view.project.scan ? view.project.scan->find(name) : nullptr;
-		if (entry) {
-			target = file_target(*view.project.scan, entry->relative_path);
-			found = true;
-		}
-	} else if (const GraphSymbol *symbol = view.findings.graph ? view.findings.graph->resolve_symbol(kind, name) : nullptr) {
-		if (view.project.scan) {
-			target = symbol_target(*view.project.scan, *symbol);
-			found = true;
-		}
-	}
-	if (ImGui::Selectable((name + "##" + id).c_str()) && found) window_requests::go_to(workspace, target);
-	ui_kit::tooltip(found ? "Go to " + name + "." : name + ": nothing of the project defines it (the game plays nothing for it).");
-}
-
 // An ammo's impact rows as a board (DI-23): each surface class's row as the game picks it (the class + 4; a row the
 // ammo lacks played from ammo def 0's bank at the tag's place), its effect and sound (Play fires a round at a face of
 // it; the sound's play plays the set), the scar it leaves, each name a Go to; then the rows no surface reaches.
@@ -304,11 +309,12 @@ void impact_board(Workspace &workspace, const DefinitionViewport &model) {
 	if (!ImGui::TreeNodeEx("impacts", ImGuiTreeNodeFlags_DefaultOpen, "Impact rows by surface (%d)",
 	                       int(board.surfaces.size())))
 		return;
-	ui_kit::clipped_text("A round plays its row for the class it strikes (the class + 4); a row " + board.ammo +
-	                             " lacks plays " + (board.null_ammo.empty() ? std::string("ammo def 0") : board.null_ammo) +
-	                             "'s bank at the tag's place (" + std::to_string(board.null_rows) + " rows authored there).",
-	                     "AmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd: the ammo's rows searched for the tag, else "
-	                     "word_A2EB28 + 16 x tag, ammo def 0's packed bank.");
+	ui_kit::quiet_text("A round plays the row of the class it strikes.",
+	                   "Its row is the class + 4; a row " + board.ammo + " lacks plays " +
+	                           (board.null_ammo.empty() ? std::string("ammo def 0") : board.null_ammo) +
+	                           "'s bank at the tag's place (" + std::to_string(board.null_rows) +
+	                           " rows authored there).\nAmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd: the ammo's rows "
+	                           "searched for the tag, else word_A2EB28 + 16 x tag, ammo def 0's packed bank.");
 	{
 		ui_kit::WrapRow row;
 		const std::string mission = place_in_mission_target(view);
@@ -358,21 +364,21 @@ void impact_board(Workspace &workspace, const DefinitionViewport &model) {
 			ImGui::TableNextColumn();
 			ImGui::Text("%s (%d)", world::kImpactEffectTagNames[row.tag], row.tag);
 			ImGui::TableNextColumn();
-			board_name(workspace, row.pick.effect, ReferenceKind::Particle, "effect");
+			name_link(workspace, {ReferenceKind::Particle, row.pick.effect}, "effect");
 			ImGui::TableNextColumn();
 			if (!row.pick.sound.empty()) {
 				if (ImGui::SmallButton(">")) workspace.request(request::play_set(row.pick.sound));
 				ui_kit::tooltip("Play " + row.pick.sound + " as the game plays the set.");
 				ImGui::SameLine();
 			}
-			board_name(workspace, row.pick.sound, ReferenceKind::Sound, "sound");
+			name_link(workspace, {ReferenceKind::Sound, row.pick.sound}, "sound");
 			ImGui::TableNextColumn();
 			if (row.scar_textures.empty()) {
 				ImGui::TextDisabled("none");
 				if (!row.scar_words.empty()) ui_kit::tooltip(row.scar_words);
 			} else {
 				// The first of the textures it draws one of (a Go to), the rest counted; the radius.
-				board_name(workspace, row.scar_textures.front(), ReferenceKind::Texture, "scar");
+				name_link(workspace, {ReferenceKind::Texture, row.scar_textures.front()}, "scar");
 				ImGui::SameLine();
 				if (row.scar_textures.size() > 1) {
 					ImGui::Text("+%d, %.3g m", int(row.scar_textures.size() - 1), double(row.scar_radius));
@@ -416,7 +422,6 @@ void DefinitionViewportView::draw_empty(Workspace &workspace, const ViewportMode
 
 void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportModel &viewport, ViewportContext &context) {
 	const auto &model = static_cast<const DefinitionViewport &>(viewport);
-	const SessionView &view = workspace.view();
 	const PreviewClock &clock = context.input.clock;
 	ui_kit::WrapRow row;
 	options_row(workspace, model, row);
@@ -466,26 +471,21 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 	if (model.ammo_record()) impact_board(workspace, model);
 	if (!model.particle_slot().effect.empty() && !model.particle_slot().words.empty())
 		ui_kit::clipped_text("Particle slot " + model.particle_slot().effect + ": " + model.particle_slot().words);
-	// The effects it spawns, each a Go to of the definition the game spawns for its name.
+	// The effects it spawns, each name a link to the definition the game spawns for it.
 	const DefinitionEffects &effects = model.effects();
 	if (!effects.spawns().empty() &&
 	    ImGui::TreeNode("effects", "Effects (%d)", int(effects.spawns().size()))) {
 		for (size_t i = 0; i < effects.spawns().size(); ++i) {
 			const DefinitionSpawn &spawn = effects.spawns()[i];
 			ImGui::PushID(int(i));
-			std::string line = spawn.effect + (spawn.point.empty() ? std::string(" at the item") : " at " + spawn.point) +
-			                   ", " + seconds(spawn.tick) + " (" + spawn.source + ")";
+			std::string line = (spawn.point.empty() ? std::string("at the item") : "at " + spawn.point) + ", " +
+			                   seconds(spawn.tick) + " (" + spawn.source + ")";
 			const particle::EffectClosure *closure = effects.closure_of(spawn.effect);
 			if (closure && !closure->spawns()) line += ": the game spawns nothing for it";
 			else if (closure && closure->stock) line += ": no file defines it (the stock effect)";
-			const GraphSymbol *symbol = view.findings.graph
-			                                    ? view.findings.graph->resolve_symbol(ReferenceKind::Particle, spawn.effect)
-			                                    : nullptr;
-			if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###spawn").c_str()) && symbol &&
-			    view.project.scan)
-				window_requests::go_to(workspace, symbol_target(*view.project.scan, *symbol));
-			ui_kit::tooltip(symbol ? "Go to " + spawn.effect + " in " + symbol->file + "."
-			                       : spawn.effect + ": no particle file of the project defines it.");
+			name_link(workspace, {ReferenceKind::Particle, spawn.effect}, "spawn");
+			ImGui::SameLine();
+			ui_kit::clipped_text(line, line);
 			ImGui::PopID();
 		}
 		ImGui::TreePop();
@@ -493,12 +493,14 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 	// The death in order while it plays, each leg lit as the clock passes it.
 	if (model.drawn().kind == "item" && options.state == DefinitionState::Destroying && model.plan().swaps &&
 	    ImGui::TreeNode("death", "The death, in order (%s)", model.plan().class_words.c_str())) {
-		for (const DamageLeg &leg : model.plan().legs) {
+		for (size_t i = 0; i < model.plan().legs.size(); ++i) {
+			const DamageLeg &leg = model.plan().legs[i];
 			const bool due = clock.ticks() >= leg.tick;
+			ImGui::PushID(int(i));
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(due ? ImGuiCol_Text : ImGuiCol_TextDisabled));
-			ImGui::TextWrapped("%s", (seconds(leg.tick) + "  " + leg.words).c_str());
+			log_line(workspace, seconds(leg.tick), {{leg_reference(leg.kind), leg.name}}, leg.words, leg.cite);
 			ImGui::PopStyleColor();
-			ui_kit::tooltip(leg.cite);
+			ImGui::PopID();
 		}
 		ImGui::TreePop();
 	}

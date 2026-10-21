@@ -26,18 +26,19 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/script_assist.h>
+#include <editor/documents/sound_bank_document.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_mark_menu.h>
 #include <editor/ui/mission_palette_view.h>
 #include <editor/ui/overlay_legend.h>
 #include <editor/ui/project_find.h>
+#include <editor/ui/reference_fields.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
 #include <formats/mission/mission.h>
-#include <formats/trn/charmap_legend.h>
 
 namespace opennova::editor {
 
@@ -134,7 +135,7 @@ struct MissionViewportView::Tools {
 	void toolbar(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void show_popup(MissionViewportOptions &options);
 	void time_popup(MissionViewportOptions &options, const MissionViewport &mission);
-	void heard_popup(const MissionViewport &mission);
+	void heard_popup(Workspace &workspace, const MissionViewport &mission);
 	void numbers(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void path_list(Workspace &workspace, const MissionViewport &mission);
 	void shoot_list(Workspace &workspace, const MissionViewport &mission);
@@ -142,8 +143,6 @@ struct MissionViewportView::Tools {
 			const MissionCanvas &canvas);
 	void entity_jumps(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context,
 			const MissionEntityMark &entity);
-	void notes(const MissionViewport &mission);
-	void ground_line();
 	float snap_metres() const { return snap; }
 };
 
@@ -357,11 +356,12 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		}
 		ImGui::EndChild();
 	}
-	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-	ui_kit::clipped_text(tools.hint);
-	ImGui::PopStyleColor();
-	if (terrain) tools.ground_line();
-	if (!mission.missing().empty()) tools.notes(mission);
+	ui_kit::quiet_text(tools.hint);
+	if (terrain)
+		ground_line(tools.ground, tools.ground_surface,
+		            "Point at the terrain to read its surface class, the footsteps a body plays there and the row a round "
+		            "plays.");
+	missing_files_line(mission.missing());
 	if (stop) set_tool(workspace, mission, MissionTool::Select);
 }
 
@@ -391,29 +391,23 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		put_brush_down();
 		options.tool = !brushing && tool == chosen ? MissionTool::Select : chosen;
 	};
-	if (lit_tool(row, "Select", !brushing && tool == MissionTool::Select, true,
-				"Click a mark to select it (Shift adds, Ctrl toggles), drag it to move it (Alt-drag copies it), "
-				"drag on nothing for a box. Esc.")) {
+	// Each tool's tooltip its verb and key: the line under the picture says what a click does with it.
+	if (lit_tool(row, "Select", !brushing && tool == MissionTool::Select, true, "Select and move marks (Esc).")) {
 		put_brush_down();
 		options.tool = MissionTool::Select;
 	}
 	if (lit_tool(row, "Place", !brushing && tool == MissionTool::Place, edits,
-				edits ? "Pick an item in the palette, then click the ground to place one, facing the way the camera "
-						"looks; or drag it from the palette onto the picture. Esc stops."
-					  : held))
+				edits ? "Place the palette's items (Esc stops)." : held))
 		pick(MissionTool::Place);
 	if (lit_tool(row, "Path stops", !brushing && tool == MissionTool::Path, edits,
-				edits ? "Pick a waypoint path, then click the ground to add its next stop (a marker the path visits). "
-						"Esc stops."
-					  : held))
+				edits ? "Add a waypoint path's stops (Esc stops)." : held))
 		pick(MissionTool::Path);
 	if (lit_tool(row, "Area", !brushing && tool == MissionTool::Area, edits,
-				edits ? "Drag a box on the ground to make an area trigger over it. Esc stops." : held))
+				edits ? "Drag an area trigger on the ground (Esc stops)." : held))
 		pick(MissionTool::Area);
 	// Shoot (DI-23) edits nothing: a held mission takes it too.
 	if (lit_tool(row, "Shoot", !brushing && tool == MissionTool::Shoot, true,
-				"Pick an ammo, then click the terrain or an object to fire it there: the impact plays as the game "
-				"plays it (its effect, its sound and its scar, the object's damage). Esc stops."))
+				"Fire an ammo where you click, as the game plays its impact (Esc stops)."))
 		pick(MissionTool::Shoot);
 	// A step of the options (the snap, the turn) picked from its list; one the wire set off the list shown as
 	// its value.
@@ -445,16 +439,14 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	combo("Turn", options.turn, kMissionTurns, kTurnNames, IM_ARRAYSIZE(kTurnNames), "deg",
 			"What a turned entity's heading snaps to. Hold Ctrl while turning to turn freely.");
 	ui_kit::check(row, "Stick", &options.stick, "A move keeps each entity's height over the ground; off, its height stands.");
-	if (ui_kit::tool(row, "Show", true, "What the picture draws (terrain, sky, water, models), what the viewport marks "
-										"over it, the labels and how far a mark is drawn."))
-		ImGui::OpenPopup("show");
-	if (ImGui::BeginPopup("show")) {
+	if (ui_kit::tool_popup(row, "Show", "show", true,
+	                       "What the picture draws (terrain, sky, water, models), what the viewport marks over it, the "
+	                       "labels and how far a mark is drawn.")) {
 		show_popup(options);
 		ImGui::EndPopup();
 	}
-	if (ui_kit::tool(row, "Time", true, "The time of day the picture shows: the mission's start time, or an hour."))
-		ImGui::OpenPopup("time");
-	if (ImGui::BeginPopup("time")) {
+	if (ui_kit::tool_popup(row, "Time", "time", true,
+	                       "The time of day the picture shows: the mission's start time, or an hour.")) {
 		time_popup(options, mission);
 		ImGui::EndPopup();
 	}
@@ -467,10 +459,9 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 									  "the script's own sounds. The sources' reach is ringed on the ground.")))
 		options.listen.on = !options.listen.on;
 	if (options.listen.on) {
-		if (ui_kit::tool(row, "Heard", true, "What plays on each of the game's channels now, the weather and the script."))
-			ImGui::OpenPopup("heard");
-		if (ImGui::BeginPopup("heard")) {
-			heard_popup(mission);
+		if (ui_kit::tool_popup(row, "Heard", "heard", true,
+		                       "What plays on each of the game's channels now, the weather and the script.")) {
+			heard_popup(workspace, mission);
 			ImGui::EndPopup();
 		}
 	}
@@ -743,20 +734,12 @@ void MissionViewportView::Tools::canvas_menu(Workspace &workspace, const Mission
 		viewport_command(workspace, mission, "duplicate", { east * step, north * step });
 	}
 	if (ImGui::MenuItem("Delete", "Delete", false, edits && selected)) {
-		// A selected stop takes its marker (S24), as Delete on the picture does.
-		std::vector<Edit> removes;
+		// A selected stop takes its marker (S24), as Delete on the picture does (the map's Delete too).
 		const DocumentBase *open = nullptr;
 		for (const auto &each : view.documents.open)
 			if (each && each->path() == mission.path()) open = each.get();
-		const MissionDocument *document = open ? dynamic_cast<const MissionDocument *>(records_of(*open)) : nullptr;
-		for (const NodeAddress &record : document ? mission_view_removals(*document, view.documents.selection.records)
-		                                          : view.documents.selection.records) {
-			Edit edit;
-			edit.operation = EditOperation::Remove;
-			edit.address = record;
-			removes.push_back(std::move(edit));
-		}
-		workspace.request(request::edit_record(mission.path(), std::move(removes)));
+		if (const auto *document = open ? dynamic_cast<const MissionDocument *>(records_of(*open)) : nullptr)
+			delete_mission_selection(workspace, *document);
 	}
 	ImGui::Separator();
 	const MissionEntityMark *entity = menu_record.row ? mission.scene().entity(menu_record.row) : nullptr;
@@ -826,17 +809,7 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Separator();
 	// DI-29: what the game reads at each point of the ground, tinted over the terrain with its legend.
 	ImGui::TextDisabled("Over the terrain");
-	const auto overlay = [&](const char *label, MissionGroundOverlay kind, const char *tip) {
-		if (ImGui::RadioButton(label, options.overlay == kind)) options.overlay = kind;
-		ui_kit::tooltip(tip);
-	};
-	overlay("Nothing", MissionGroundOverlay::None, "The terrain as the game draws it.");
-	overlay("Surface classes", MissionGroundOverlay::Surfaces,
-			"Each point's surface class as the game reads it (its char map, the placed tiles outlined over it): what "
-			"footsteps play and what a round's impact plays there. The legend names each class.");
-	overlay("Foliage", MissionGroundOverlay::Foliage,
-			"Where the terrain's foliage map grows each foliage definition (its codes to the .trn's foliage blocks), "
-			"and what the placed tiles keep off. The legend names each definition's model.");
+	options.overlay = ground_overlay_choice(options.overlay);
 	ImGui::Separator();
 	ImGui::TextDisabled("The marks");
 	ImGui::Checkbox("Items", &options.items);
@@ -884,9 +857,10 @@ void MissionViewportView::Tools::time_popup(MissionViewportOptions &options, con
 	ImGui::EndDisabled();
 }
 
-// What the Listen plays now (DI-36): each channel the loudest-first mix binds, the weather the script made and the
-// script's own state, the sources by what they do.
-void MissionViewportView::Tools::heard_popup(const MissionViewport &mission) {
+// What the Listen plays now (DI-36): each channel the loudest-first mix binds, its set, its bank and its wave each a link
+// to where it is defined (the set and the wave in that bank), the weather the script made and the script's own state,
+// the sources by what they do, and the last sound heard.
+void MissionViewportView::Tools::heard_popup(Workspace &workspace, const MissionViewport &mission) {
 	const MissionListen &listen = mission.listen();
 	if (!listen.open()) {
 		ImGui::TextDisabled("Not listening yet.");
@@ -898,8 +872,20 @@ void MissionViewportView::Tools::heard_popup(const MissionViewport &mission) {
 		if (channel.candidate < 0) continue;
 		++shown;
 		const std::string from = std::string(channel.source) == "rain" ? "rain" : "source";
-		ImGui::Text("%d. %s (%s), %s, volume %d, %.0f m (%s)", channel.channel + 1, channel.set.c_str(),
-				channel.bank.c_str(), channel.wave.c_str(), channel.volume, double(channel.distance), from.c_str());
+		const std::string bank = sound_bank_scope(channel.bank);
+		ImGui::PushID(channel.channel);
+		ImGui::Text("%d.", channel.channel + 1);
+		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::Sound, channel.set, bank}, "set");
+		ImGui::SameLine();
+		ImGui::TextDisabled("in");
+		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::SoundBank, channel.bank}, "bank");
+		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::BankWave, channel.wave, bank}, "wave");
+		ImGui::SameLine();
+		ImGui::Text("volume %d, %.0f m (%s)", channel.volume, double(channel.distance), from.c_str());
+		ImGui::PopID();
 	}
 	if (shown == 0) ImGui::TextDisabled("Nothing is heard here.");
 	ImGui::Separator();
@@ -919,49 +905,19 @@ void MissionViewportView::Tools::heard_popup(const MissionViewport &mission) {
 				double(weather->overcast_blend_q16()) * 100.0 / 65535.0);
 	}
 	if (!script.error().empty()) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
-		ImGui::TextWrapped("%s", script.error().c_str());
-		ImGui::PopStyleColor();
+		ui_kit::warning_line(script.error());
 	} else {
 		ImGui::TextDisabled("Script: %s, run %u times", script.scripted() ? "compiled" : "none", script.script_runs());
 	}
 	const std::vector<ClipSoundFired> &fired = listen.sounds_fired();
-	if (!fired.empty()) ImGui::TextDisabled("Last heard: %s", ui_kit::fit(fired.back().words, ImGui::GetFontSize() * 30.0f).c_str());
-}
-
-void MissionViewportView::Tools::ground_line() {
-	if (ground.empty()) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ui_kit::clipped_text("Ground: point at the terrain to read its surface class, the footsteps a body plays there and "
-							 "the row a round plays.");
-		ImGui::PopStyleColor();
-		return;
-	}
-	// The class's colour in the char map legend, the colour a surface map paints it (formats/trn/charmap_legend.h).
-	if (ground_surface >= 0 && ground_surface < kCharmapLegendCount) {
-		const CharmapLegendColour &c = kCharmapLegend[ground_surface];
-		const float side = ImGui::GetTextLineHeight();
-		// Its own id: the canvas's surface is "##surface" in the same window (ImGui's conflicting-id warning).
-		ImGui::ColorButton("##ground_class", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
-				ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoDragDrop,
-				ImVec2(side, side));
+	if (!fired.empty()) {
+		// The set a link (in its bank where one is named), the sentence in its tooltip.
+		const ClipSoundFired &last = fired.back();
+		ImGui::TextDisabled("Last heard:");
 		ImGui::SameLine();
+		name_link(workspace, {ReferenceKind::Sound, last.set, last.bank.empty() ? std::string() : sound_bank_scope(last.bank)},
+		          "last heard", last.words);
 	}
-	ui_kit::clipped_text("Ground: " + ground);
-}
-
-void MissionViewportView::Tools::notes(const MissionViewport &mission) {
-	const std::vector<std::string> &missing = mission.missing();
-	std::string line = std::to_string(missing.size()) + (missing.size() == 1 ? " file missing: " : " files missing: ");
-	std::string all;
-	for (size_t i = 0; i < missing.size(); ++i) {
-		if (i < 3) line += (i ? ", " : "") + missing[i];
-		all += (i ? "\n" : "") + missing[i];
-	}
-	if (missing.size() > 3) line += ", ...";
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
-	ui_kit::clipped_text(line, all + "\nImport them to see them (Problems).");
-	ImGui::PopStyleColor();
 }
 
 } // namespace opennova::editor

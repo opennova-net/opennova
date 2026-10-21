@@ -613,7 +613,11 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		plan.refusals.push_back(refusal(CoreFinding::RenameUnchanged, what + " already has that name.", symbol.file, symbol.field));
 		return plan;
 	}
-	if (symbol.field.empty() || !defining || !document_type_for(defining->kind)) {
+	// A text's definition is its span (a particle file's id, native_text_places): one the text spells otherwise (an
+	// effect's id an earlier block wrote) is no place a rename sets.
+	const DocumentType *defining_type = defining ? document_type_for(defining->kind) : nullptr;
+	if (symbol.field.empty() || !defining_type ||
+	    (document_content(*defining_type) == DocumentContent::Text && !symbol.span.line)) {
 		plan.refusals.push_back(refusal(CoreFinding::RenameSite, symbol.file + " defines " + what + " and the editor cannot rewrite that file yet.",
 		                                symbol.file));
 		return plan;
@@ -656,6 +660,7 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 	definition.record = symbol.record;
 	definition.locator = symbol.locator;
 	definition.field = symbol.field;
+	definition.span = symbol.span; // a text's definition: its span, set as a use's is
 	definition.before = symbol.display;
 	definition.after = new_name;
 	definition.target = symbol.file;
@@ -668,14 +673,19 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		if (listed) continue; // a field naming it twice (a font through a variable) is one site
 		const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
 		const AssetEntry *source = find_asset(scan, edge->source);
-		if (!graph.rewrites(*edge) || !source) {
+		// A native text whose parser keeps its places names it at its span (native_text_places): a use its text spells
+		// otherwise than the name (no span of it) is no place a rename sets.
+		const bool unplaced = source && native_text_places(source->kind) && !edge->span.line;
+		if (!graph.rewrites(*edge) || !source || unplaced) {
 			// A text's use is at its span; the file is the editor's to write, that use not (a key of a
 			// script that runs with whichever mission's table plays: game.wac's, server.wac's, one of a
 			// mission the project lacks, AssetGraph::rewrites).
 			plan.refusals.push_back(refusal(CoreFinding::RenameSite,
 			                                edge->span.line ? where + " names " + what + " at " + edge->locator +
 			                                                          ", a use the editor cannot rewrite yet."
-			                                                : where + " names " + what + " and the editor cannot rewrite that file yet.",
+			                                : unplaced ? where + " names " + what + " in its " + edge->field +
+			                                                     " where its text spells it otherwise, a use the editor cannot rewrite."
+			                                           : where + " names " + what + " and the editor cannot rewrite that file yet.",
 			                                edge->source, edge->field));
 			continue;
 		}
@@ -709,6 +719,18 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 				continue;
 			}
 			site.after = std::to_string(number);
+		}
+		// A use whose reader keeps the name in a slot of its own (GraphEdge::width: a pdefs member's 64 bytes) takes no
+		// name the slot cannot hold.
+		if (edge->width) {
+			std::string stored;
+			if (utf8_to_cp1252(site.after, stored) && stored.size() >= edge->width) {
+				plan.refusals.push_back(refusal(CoreFinding::RenameTooLong,
+				                                where + " holds at most " + std::to_string(edge->width - 1) + " characters in its " +
+				                                        edge->field + ": '" + site.after + "' has " + std::to_string(stored.size()) + ".",
+				                                edge->source, edge->field));
+				continue;
+			}
 		}
 		// A use whose lookup takes a second name (its fallback: a script's AMMO_X, then "ammo_X"):
 		// where the new name begins with the prefix that second name puts before the value, the span
@@ -854,12 +876,12 @@ std::unique_ptr<DocumentBase> read_site_file(const ProjectPaths &paths, const Pr
 }
 
 // A text document's sites (S13 D9): each span found by its place and the name it held (a use still
-// reaching the renamed definition), all replaced in one batch from the last to the first (each
+// reaching the renamed definition; the definition itself where the text defines the name at a span, a
+// particle file's id, read back as the symbol), all replaced in one batch from the last to the first (each
 // replacement then leaves the places before it where they were), and each read back from the text
 // as the new name at its place. False with the findings.
-bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite *> &sites,
-                      const std::function<bool(const GraphEdge &)> &reaches, const std::string &old_name,
-                      std::vector<Diagnostic> &findings) {
+bool stage_text_sites(TextDocument &document, const SymbolRenamePlan &plan, const std::vector<const RenameSite *> &sites,
+                      const std::function<bool(const GraphEdge &)> &reaches, std::vector<Diagnostic> &findings) {
 	const std::string &file = document.path();
 	Extracted extracted;
 	extract_from_text(document, extracted);
@@ -871,11 +893,26 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 		std::string after;   // in the document's code page
 		size_t length = 0;   // the old name's bytes there
 		std::string reads;   // the name the new text reads there: `after`, plus the edge's offset where it has one
+		bool definition = false; // the renamed definition's span, read back as the symbol it defines
 	};
 	std::vector<Found> found;
 	std::vector<bool> taken(extracted.edges.size(), false);
 	bool ok = true;
 	for (const RenameSite *site : sites) {
+		// The definition, where the text defines the name at a span (a particle file's id): found by its place and the
+		// name it holds.
+		if (file == plan.file && site->locator == plan.locator && site->field == plan.field) {
+			std::string after, before;
+			size_t offset = 0;
+			const auto defined = std::find_if(extracted.symbols.begin(), extracted.symbols.end(), [&](const GraphSymbol &symbol) {
+				return symbol.kind == plan.kind && symbol.span.line && symbol.locator == site->locator &&
+				       symbol.field == site->field && symbol.display == site->before;
+			});
+			if (defined != extracted.symbols.end() && utf8_to_cp1252(site->after, after) &&
+			    utf8_to_cp1252(site->before, before) && document.offset_of(defined->span.line, defined->span.column, offset))
+				found.push_back({site, offset, std::move(after), before.size(), site->after, true});
+			continue;
+		}
 		size_t match = extracted.edges.size();
 		for (size_t i = 0; i < extracted.edges.size() && match == extracted.edges.size(); ++i) {
 			const GraphEdge &edge = extracted.edges[i];
@@ -919,9 +956,12 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 	for (const Found &place : found) {
 		const TextSpan at = document.span_at(size_t(std::ptrdiff_t(place.offset) + moved), place.after.size());
 		const std::string locator = TextDocument::locator(at.line, at.column);
-		const bool read = std::any_of(again.edges.begin(), again.edges.end(), [&](const GraphEdge &edge) {
-			return edge.locator == locator && edge.value == place.reads;
-		});
+		const auto read_edge = [&](const GraphEdge &edge) { return edge.locator == locator && edge.value == place.reads; };
+		const auto read_symbol = [&](const GraphSymbol &symbol) {
+			return symbol.kind == plan.kind && symbol.locator == locator && symbol.display == place.reads;
+		};
+		const bool read = place.definition ? std::any_of(again.symbols.begin(), again.symbols.end(), read_symbol)
+		                                   : std::any_of(again.edges.begin(), again.edges.end(), read_edge);
 		if (!read) {
 			findings.push_back(refusal(CoreFinding::RenameName,
 			                           file + " at " + place.site->locator + " would not read '" + place.site->after +
@@ -933,7 +973,7 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 	}
 	if (found.size() < sites.size()) {
 		findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error,
-		                                file + " would still name '" + old_name + "' in " +
+		                                file + " would still name '" + plan.old_name + "' in " +
 		                                        std::to_string(sites.size() - found.size()) + " of its " +
 		                                        counted(sites.size(), "planned place") + ".",
 		                                file));
@@ -967,10 +1007,10 @@ bool stage_symbol_file(const ProjectPaths &paths, const ProjectDocument &project
 	const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
 	const DocumentContent content = type ? document_content(*type) : DocumentContent::Other;
 	// A file held whole (a texture, S18; a wave, S23) or as planes (a raster, S25) names nothing either, nor a text whose type reads no names from its text
-	// (a native kind held as a text, DI-06's and the particle file's of DI-14: its engine reader keeps
-	// no places).
+	// (a native kind held as a text, DI-06's: its engine reader keeps no places), but one whose engine reader keeps
+	// them (the particle file of DI-14, native_text_places), whose names are its spans.
 	if (content == DocumentContent::Other || content == DocumentContent::Bytes || content == DocumentContent::Raster ||
-	    (content == DocumentContent::Text && !type->references)) {
+	    (content == DocumentContent::Text && !type->references && !native_text_places(asset->kind))) {
 		findings.push_back(cannot_rewrite(type, file));
 		return false;
 	}
@@ -978,7 +1018,7 @@ bool stage_symbol_file(const ProjectPaths &paths, const ProjectDocument &project
 	if (!read) return false;
 	bool ok = true;
 	if (content == DocumentContent::Text) {
-		ok = stage_text_sites(*text_of(*read), sites, reaches, plan.old_name, findings);
+		ok = stage_text_sites(*text_of(*read), plan, sites, reaches, findings);
 		const SerializeResult written = read->serialize();
 		if (!written.ok()) {
 			findings.push_back(refusal(CoreFinding::RenameSite, file + " would not write with the new name: " +

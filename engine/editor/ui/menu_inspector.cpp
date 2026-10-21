@@ -56,13 +56,15 @@ bool draw_menu_inspector(Workspace &workspace, const Document &document, const N
 		if (ui_kit::tool(row, label.c_str(), !sound.set.empty() && !sound.bank.empty(),
 		                 std::string("What the game plays ") + menu_sound_state_words(sound.state) + " (its SOUND of state " +
 		                         menu::menu_sound_state_token(sound.state) + ", the last of them): " + sound.set +
-		                         ", from " + sound.bank + " alone. Click to play it as the game picks and pitches it.",
+		                         ", from " + sound.bank + " alone, played as the game picks and pitches it.",
 		                 true))
 			workspace.request(request::play_set(sound.set, sound.bank));
 		ImGui::PopID();
 	}
 	if (read->type == mnu::WindowType::SpinList)
-		ui_kit::note("A click on one of its arrows plays the arrow's own SELECTED instead: each arrow is a button of its own.");
+		ui_kit::quiet_text("Its arrows play their own SELECTED.",
+		                   "A click on one of its arrows plays the arrow's own SELECTED instead: each arrow is a button of "
+		                   "its own.");
 	return true;
 }
 

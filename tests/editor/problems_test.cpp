@@ -22,15 +22,25 @@
 #include <utility>
 #include <vector>
 
+#include <editor/assets/asset_import.h>
+#include <editor/assets/asset_type_registry.h>
+#include <editor/assets/install_view.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/documents/project_checks.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/graph/texture_checks.h>
 #include <editor/model/core_finding.h>
+#include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
+#include <editor/project/project_findings.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
@@ -43,13 +53,17 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include "common/file_io.h"
+#include "common/test_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/minted_install.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -1397,6 +1411,332 @@ static int test_original_data() {
 	return 0;
 }
 
+// The game's own data's check reads a texture through the install as the game is served it (ProjectPaths::files,
+// the texture checks' file-source fix): the default loading screen the install packs in its archive, of a size
+// other than the 800 x 600 the game lays the screen out for, makes the finding the project's copy of it makes, which
+// is then the game's own. The check read the install's folder before, where a packed file is not, and found nothing.
+static int test_original_textures() {
+	test_temp::TempDir dir("opennova_editor_problems_original_textures");
+	// An 8-bit PCX of 640 x 480: its header, its rows, its palette.
+	std::vector<uint8_t> screen(128, 0);
+	screen[0] = 0x0A;
+	screen[1] = 5;
+	screen[2] = 1;
+	screen[3] = 8;
+	screen[8] = uint8_t(639 & 0xFF);
+	screen[9] = uint8_t(639 >> 8);
+	screen[10] = uint8_t(479 & 0xFF);
+	screen[11] = uint8_t(479 >> 8);
+	screen[65] = 1;
+	screen[66] = uint8_t(640 & 0xFF);
+	screen[67] = uint8_t(640 >> 8);
+	screen.resize(screen.size() + size_t(640) * 480, 0);
+	screen.push_back(0x0C);
+	screen.resize(screen.size() + 768, 0);
+	const std::string install = dir.file("install");
+	const opennova::pff::PffWriteEntry entries[] = {{"loadscrn.pcx", screen.data(), uint32_t(screen.size()), 0, 0, 0}};
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Original textures"));
+	const SessionView &v = session.view();
+	TEST_EXPECT(test_io::write_file(v.project.root + "/textures/loadscrn.pcx", screen));
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	size_t row = SIZE_MAX;
+	for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
+		if (v.findings.diagnostics[i].code() == "texture.loading_screen_size" && v.findings.diagnostics[i].asset == "textures/loadscrn.pcx")
+			row = i;
+	TEST_EXPECT(row != SIZE_MAX && session.originals().validations() == 1);
+	TEST_EXPECT(row != SIZE_MAX && in_original_data(row, v));
+	std::printf("original textures: read through the install's archive, the game's own\n");
+	return 0;
+}
+
+// The install validated whole, as the game's own data's check did before it was scoped: listed and typed as the
+// check lists it, every file validated (the graph, each file's own findings, the project checks), every finding
+// about a file keyed by its name.
+static OriginalData whole_install(const std::string &install, const ProjectDocument &document) {
+	OriginalData data;
+	auto view = std::make_unique<InstallView>();
+	std::string why;
+	if (!view->open(install_spec(install, document), why)) return data;
+	const auto files = std::make_shared<InstallFileSource>(std::move(view));
+	ProjectPaths paths = ProjectPaths::for_root(install);
+	paths.files = files;
+	AssetScan scan;
+	for (const InstallFile &file : files->view().files()) {
+		AssetEntry entry;
+		entry.logical_name = entry.relative_path = file.name;
+		entry.size_bytes = files->size_of(file.name);
+		entry.kind = classify_asset(file.name, nullptr);
+		std::vector<uint8_t> content;
+		if ((opennova::editor::asset_classification_needs_bytes(file.name) || entry.kind == AssetKind::Unknown) &&
+		    files->read(file.name, content))
+			entry.kind = classify_asset(file.name, &content);
+		scan.entries.push_back(std::move(entry));
+	}
+	scan.index();
+	AssetGraph graph;
+	ValidationCache cache;
+	GraphReadings readings;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const ValidationInput input{paths, document, scan, open};
+	ProjectValidation validation(graph, cache, readings);
+	while (!validation.step(input, UINT64_MAX)) {
+	}
+	ProjectChecks checks;
+	checks.update({input, cache, *files});
+	std::vector<Diagnostic> rows = project_rows(input, graph, cache);
+	checks.append_findings(rows);
+	data.ready = true;
+	for (const Diagnostic &d : rows)
+		if (!d.asset.empty()) ++data.findings[normalized_logical_name(basename_of(d.asset))][original_finding_key(d)];
+	return data;
+}
+
+// The game's own data's check validates the install only for the names the project's rows are about (the editor
+// speed pass: OriginalData::covered), and each finding about one of them is the game's own as a validation of the
+// whole install would say: a missing reference both make; one only the project's menu makes; a cross-file one, the
+// texture a model's row names and its loader passes over for its .dds (texture.not_read), made by the model's use;
+// a texture's own finding the install's copy makes too, once the project holds the texture (its name validated then,
+// in a round of its own, over the run as it stood), and in that round the project checks' rows on a menu and a
+// mission the first round left unread (a render note, an entity off the ground), as the whole install's run marks
+// them. Its own files are far fewer than the install lists.
+static int test_original_scope() {
+	test_temp::TempDir dir("opennova_editor_problems_original_scope");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Original scope"));
+	editor_test::set_missions(session, true);
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const auto menu = [](const char *name, const char *image) {
+		return std::string("<SCREEN>\r\n\t<NAME>") + name + "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+		       "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+		       "\t\t<APPEARANCE type=\"image\" state=\"default\">" + image + "</APPEARANCE>\r\n\t</WINDOW>\r\n</SCREEN>\r\n";
+	};
+	// A model naming wall.tga in a stage row, whose loader opens wall.dds where the files have it.
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
+	                                "o3d 2\nmodel THING\nmaterial FF_ST_OP\ntexture wall.tga 2 0\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
+	                                "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	ImportChoice model;
+	model.path = scene + "/thing.o3d";
+	const ImportResult imported = import_assets({model}, ProjectPaths::for_root(root), *v.project.document, false);
+	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/thing.3di"}));
+	std::vector<uint8_t> top = editor_test::tga_bytes();
+	top[17] |= 0x20; // rows stored top first: the texture's own finding
+	const std::string shipped = menu("SHIPPED", "logo.tga"), filler = "filler";
+	const std::vector<uint8_t> thing = test_io::read_file(root + "/models/thing.3di"), wall = editor_test::tga_bytes();
+	TEST_EXPECT(!thing.empty());
+	// A menu whose colour reads with no alpha (a render check's row, menu.render.color_transparent), and a mission
+	// on the minted terrain with a crate high above it (the mission ground check's, mission.off_ground).
+	const std::string paint = "<SCREEN>\r\n\t<NAME>PAINT</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	                          "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	                          "\t\t<APPEARANCE type=\"color\" state=\"default\">00FF00</APPEARANCE>\r\n\t</WINDOW>\r\n"
+	                          "</SCREEN>\r\n";
+	const std::string catalog = "begin \"Null\"\r\nid 100000\r\ntype marker\r\nend\r\n"
+	                            "begin \"Crate\"\r\nid 101001\r\ntype decoration\r\ngraphic crate\r\nend\r\n";
+	std::vector<uint8_t> floating;
+	{
+		opennova::bms::File mission;
+		std::string error;
+		opennova::mission::BlankMission blank;
+		blank.name = "Float";
+		blank.terrain = "Tmap";
+		TEST_EXPECT(opennova::mission::make_blank(mission, blank, error));
+		opennova::bms::Entity crate = opennova::mission::new_entity(opennova::mission::EntityKind::Item, 101001, 1);
+		crate.x = opennova::bms::to_fixed_16_16(0.0);
+		crate.y = opennova::bms::to_fixed_16_16(0.0);
+		crate.z = opennova::bms::to_fixed_16_16(500.0);
+		mission.items.push_back(crate);
+		opennova::mission::sync_counts(mission);
+		TEST_EXPECT(opennova::bms::write(mission, floating, error));
+	}
+	const std::vector<std::pair<std::string, std::vector<uint8_t>>> later = {
+	        {"paint.mnu", std::vector<uint8_t>(paint.begin(), paint.end())},
+	        {"float.bms", floating},
+	        {"items.def", std::vector<uint8_t>(catalog.begin(), catalog.end())},
+	        {"crate.3di", test_io::read_file(test_paths_fixture("threedi/synth/crate.3di"))},
+	        {"Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"))},
+	        {"Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"))}};
+	// The install: those files, and twenty more no row is about.
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
+	        {"shipped.mnu", std::vector<uint8_t>(shipped.begin(), shipped.end())}, {"thing.3di", thing},
+	        {"wall.tga", wall}, {"wall.dds", wall}, {"top.tga", top}};
+	files.insert(files.end(), later.begin(), later.end());
+	for (int i = 0; i < 20; ++i) files.push_back({"note" + std::to_string(i) + ".txt", std::vector<uint8_t>(filler.begin(), filler.end())});
+	std::vector<opennova::pff::PffWriteEntry> entries;
+	for (const auto &[name, bytes] : files) entries.push_back({name.c_str(), bytes.data(), uint32_t(bytes.size()), 0, 0, 0});
+	const std::string install = dir.file("install");
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install") &&
+	            opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                             entries.data(), uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK);
+	// The project: the same files but the upside-down texture, and a menu of its own naming a texture neither has.
+	TEST_EXPECT(test_io::write_text(root + "/menus/shipped.mnu", shipped) && test_io::write_text(root + "/menus/mine.mnu", menu("MINE", "other.tga")) &&
+	            test_io::write_file(root + "/textures/wall.tga", wall) && test_io::write_file(root + "/textures/wall.dds", wall));
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	const auto row_of = [&v](const char *code, const char *asset, const char *about = "") {
+		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i) {
+			const Diagnostic &d = v.findings.diagnostics[i];
+			if (d.code() == code && d.asset == asset && d.message.find(about) != std::string::npos) return i;
+		}
+		std::fprintf(stderr, "no %s on %s\n", code, asset);
+		return SIZE_MAX;
+	};
+	const auto theirs = [&v](size_t row) { return row != SIZE_MAX && in_original_data(row, v); };
+	TEST_EXPECT(theirs(row_of("reference.missing", "menus/shipped.mnu", "logo.tga")) &&
+	            !theirs(row_of("reference.missing", "menus/mine.mnu", "other.tga")) &&
+	            theirs(row_of("texture.not_read", "textures/wall.tga")));
+	const OriginalFiles &fold = session.originals();
+	TEST_EXPECT(v.findings.originals && v.findings.originals->scoped);
+	if (!v.findings.originals) return 1;
+	const std::set<std::string> &covered = v.findings.originals->covered;
+	TEST_EXPECT(covered.count(normalized_logical_name("wall.tga")) && covered.count(normalized_logical_name("shipped.mnu")) &&
+	            !covered.count(normalized_logical_name("top.tga")) && !covered.count(normalized_logical_name("note0.txt")));
+	TEST_EXPECT(fold.validations() == 1 && fold.files() * 4 < fold.listed());
+	std::printf("original scope: %zu of %zu files validated\n", fold.files(), fold.listed());
+	// The texture the project now holds too, its own finding a row, and the menu and the mission with the files the
+	// mission reads, the project checks' rows on them: their names validated in a round of its own, over the run as it
+	// stood (whose project checks start over: the first round kept the menu and the mission unread), the rows before
+	// as they were, each row marked as a validation of the whole install marks it.
+	TEST_EXPECT(test_io::write_file(root + "/textures/top.tga", top));
+	for (const auto &[name, bytes] : later) TEST_EXPECT(test_io::write_file(root + "/" + name, bytes));
+	editor_test::handle_to_end(session, request::rescan());
+	const OriginalData whole = whole_install(install, *v.project.document);
+	const auto as_whole = [&](size_t row) {
+		if (row == SIZE_MAX) return false;
+		const Diagnostic &d = v.findings.diagnostics[row];
+		const auto found = whole.findings.find(served_name(d));
+		const bool made = found != whole.findings.end() && found->second.count(original_finding_key(d)) != 0;
+		return made && in_original_data(row, v);
+	};
+	TEST_EXPECT(theirs(row_of("texture.tga_upside_down", "textures/top.tga")) &&
+	            theirs(row_of("reference.missing", "menus/shipped.mnu", "logo.tga")) &&
+	            theirs(row_of("texture.not_read", "textures/wall.tga")));
+	TEST_EXPECT(as_whole(row_of("menu.render.color_transparent", "paint.mnu")));
+	TEST_EXPECT(as_whole(row_of("mission.off_ground", "float.bms")));
+	TEST_EXPECT(fold.validations() == 2 && v.findings.originals->covered.count(normalized_logical_name("top.tga")) &&
+	            v.findings.originals->covered.count(normalized_logical_name("paint.mnu")) &&
+	            v.findings.originals->covered.count(normalized_logical_name("float.bms")));
+	std::printf("original scope: names validated in a round of their own, the project checks' rows the whole's\n");
+	return 0;
+}
+
+// The game's own data's check over a game install minted from OpenNova's own game (minted_install.h: menus,
+// missions, terrains, models, textures, definitions) finds of each name it is asked about what a validation of the
+// whole install finds: asked every name the install serves, every finding; asked a few (every name the whole finds
+// something in, a menu, the stylesheet, the item table, overcast.def and one file of each other kind), each one's
+// findings, and none of a name not asked, from far fewer files than it lists.
+static int test_original_scope_whole() {
+	test_temp::TempDir dir("opennova_editor_problems_original_whole");
+	const std::string install = dir.file("install");
+	std::string error;
+	TEST_EXPECT(minted_install::mint(install, error));
+	ProjectDocument document;
+	Diagnostic created;
+	TEST_EXPECT(create_project(dir.file("project"), "Whole", "jo", document, created));
+	const auto shared = std::make_shared<const ProjectDocument>(document);
+	const OriginalData whole = whole_install(install, document);
+	TEST_EXPECT(whole.ready && !whole.findings.empty());
+	const int scan = 0; // the session's scan stands in: the same one throughout
+	const auto settle = [&](OriginalFiles &fold, const std::vector<std::string> &names) {
+		fold.want(install, shared, &scan, names);
+		while (!fold.step(1 << 20)) {
+		}
+		return *fold.data();
+	};
+	// Every name the install serves.
+	std::vector<std::string> every;
+	{
+		InstallView view;
+		TEST_EXPECT(view.open(install_spec(install, document), error));
+		for (const InstallFile &file : view.files()) every.push_back(normalized_logical_name(file.name));
+	}
+	{
+		OriginalFiles fold;
+		const OriginalData all = settle(fold, every);
+		TEST_EXPECT(all.ready && all.scoped && all.findings == whole.findings);
+		std::printf("original scope: every name, %zu files with findings as the whole install's\n", all.findings.size());
+	}
+	// A few names: every one the whole install finds something in, the menus' stylesheet, the item table and
+	// overcast.def, and one of each other kind.
+	std::vector<std::string> some;
+	std::set<std::string> kinds;
+	for (const auto &[name, findings] : whole.findings) {
+		some.push_back(name);
+		kinds.insert(minted_install::extension_of(name));
+	}
+	for (const char *name : {"main.mnu", "menu_style.mns", "items.def", "overcast.def"}) some.push_back(normalized_logical_name(name));
+	for (const std::string &name : every)
+		if (kinds.insert(minted_install::extension_of(name)).second) some.push_back(name);
+	std::sort(some.begin(), some.end());
+	some.erase(std::unique(some.begin(), some.end()), some.end());
+	OriginalFiles fold;
+	const OriginalData narrowed = settle(fold, some);
+	TEST_EXPECT(narrowed.covered == std::set<std::string>(some.begin(), some.end()));
+	size_t compared = 0;
+	for (const std::string &name : some) {
+		const auto mine = narrowed.findings.find(name), theirs = whole.findings.find(name);
+		const bool same = (mine == narrowed.findings.end()) == (theirs == whole.findings.end()) &&
+		                  (mine == narrowed.findings.end() || mine->second == theirs->second);
+		if (!same) std::fprintf(stderr, "original scope: %s's findings differ from the whole install's\n", name.c_str());
+		TEST_EXPECT(same);
+		compared += theirs != whole.findings.end() ? 1 : 0;
+	}
+	for (const auto &[name, findings] : narrowed.findings) TEST_EXPECT(narrowed.covered.count(name) != 0);
+	TEST_EXPECT(compared == whole.findings.size() && fold.files() * 4 < fold.listed());
+	std::printf("original scope: %zu names (%zu with findings), %zu of %zu files validated\n", some.size(), compared,
+	            fold.files(), fold.listed());
+	// A finding about a file made of every file's uses: the shell's stylesheet with a variable a menu no row is about
+	// names (zzuse.mnu) and one no menu names (style.unused). Asked the stylesheet alone, its findings are the whole
+	// install's: the graph reads the menu, whose own findings are not made.
+	std::vector<minted_install::File> game, expansion;
+	TEST_EXPECT(minted_install::base_game(game, error) && minted_install::expansion_game(expansion, error));
+	const std::string uses = "<SCREEN>\r\n\t<NAME>ZZUSE</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	                         "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	                         "\t\t<APPEARANCE type=\"color\" state=\"default\">%ZZ_USED%</APPEARANCE>\r\n\t</WINDOW>\r\n"
+	                         "</SCREEN>\r\n";
+	bool styled_sheet = false;
+	for (minted_install::File &file : game)
+		if (normalized_logical_name(file.name) == normalized_logical_name("menu_style.mns")) {
+			std::string style(file.bytes->begin(), file.bytes->end());
+			style += "\r\nZZ_USED FF00FF00\r\nZZ_UNUSED FF00FF00\r\n";
+			file.bytes = minted_install::share(std::vector<uint8_t>(style.begin(), style.end()));
+			styled_sheet = true;
+		}
+	game.push_back({"zzuse.mnu", minted_install::share(std::vector<uint8_t>(uses.begin(), uses.end()))});
+	const std::string styled = dir.file("styled");
+	TEST_EXPECT(styled_sheet && minted_install::write_install(styled, game, minted_install::kExpansion, expansion, error));
+	const OriginalData styled_whole = whole_install(styled, document);
+	const std::string sheet = normalized_logical_name("menu_style.mns");
+	const auto unused_of = [](const OriginalData &data, const std::string &name) {
+		size_t unused = 0;
+		const auto found = data.findings.find(name);
+		if (found != data.findings.end())
+			for (const auto &[key, count] : found->second) unused += key.rfind("style.unused", 0) == 0 ? count : 0;
+		return unused;
+	};
+	TEST_EXPECT(unused_of(styled_whole, sheet) > 0);
+	OriginalFiles styled_fold;
+	styled_fold.want(styled, shared, &scan, {sheet});
+	while (!styled_fold.step(1 << 20)) {
+	}
+	const OriginalData &styled_scope = *styled_fold.data();
+	const auto mine = styled_scope.findings.find(sheet), theirs = styled_whole.findings.find(sheet);
+	TEST_EXPECT(mine != styled_scope.findings.end() && theirs != styled_whole.findings.end() &&
+	            mine->second == theirs->second && unused_of(styled_scope, sheet) == unused_of(styled_whole, sheet));
+	std::printf("original scope: the stylesheet's findings over every menu's uses, %zu unused\n",
+	            unused_of(styled_scope, sheet));
+	return 0;
+}
+
 // The rows' marks over the install's findings by hand (the UX round's problems lane): each of the install's
 // findings of a file taken by one row (an item and its duplicate name the same missing shadow, the install
 // has it once: the first row's is the game's own, the duplicate's the modder's); a finding the install
@@ -1653,6 +1993,196 @@ static int test_plan_refusals_are_rows() {
 	return 0;
 }
 
+// The perf query's counter of the build plans the rows' marks made (problems.blocker_plans).
+static size_t blocker_plans(ProjectSession &session) {
+	std::string error;
+	const opennova::io::JsonValue answer = session.query("perf", opennova::io::JsonValue(), error);
+	const opennova::io::JsonValue *problems = answer.get("problems");
+	return problems ? size_t(problems->get_number("blocker_plans", 0)) : 0;
+}
+
+// The rows' marks are planned again only when what the plan reads moved (plan_blockers over the scan, the
+// requirements, the gate, the build's target, the base's names and the files packed as shipped): a validation
+// that composes the rows and leaves those as they were (a document opened, then closed) plans none and marks the
+// rows as they were; a file the plan refuses, added, plans again, its rows marked as blocking (the scan's rule on
+// its name and the plan's word).
+static int test_marks_planned_once() {
+	test_temp::TempDir dir("opennova_editor_problems_marks_planned");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Marks planned"));
+	const SessionView &v = session.view();
+	TEST_EXPECT(test_io::write_text(v.project.root + "/scripts/plain.wac", "// a script\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(v.findings.marks && v.findings.marks->rows == v.findings.diagnostics.size());
+	if (!v.findings.marks) return 1;
+	const FindingMarks marks = *v.findings.marks;
+	const std::vector<Diagnostic> rows = v.findings.diagnostics;
+	const size_t plans = blocker_plans(session), compositions = session.problems_compositions();
+	const size_t blocking = count_problems(v).blocking;
+	TEST_EXPECT(plans > 0);
+	editor_test::handle_to_end(session, request::open_document("scripts/plain.wac"));
+	editor_test::handle_to_end(session, request::close_document("scripts/plain.wac"));
+	TEST_EXPECT(blocker_plans(session) == plans && v.findings.diagnostics == rows && v.findings.marks &&
+	            *v.findings.marks == marks);
+	std::printf("marks planned once: %zu composition(s) since, no plan\n", session.problems_compositions() - compositions);
+	TEST_EXPECT(test_io::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(blocker_plans(session) > plans);
+	size_t unstorable = SIZE_MAX;
+	for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
+		if (v.findings.diagnostics[i].code() == "build.name_unstorable") unstorable = i;
+	TEST_EXPECT(unstorable != SIZE_MAX && blocks_the_build(unstorable, v) && count_problems(v).blocking == blocking + 2);
+	std::printf("marks planned once: planned again when the plan's own word moved\n");
+	return 0;
+}
+
+// The cross-file checks' answers are kept between compositions by what they were made of (graph/use_checks.h:
+// the texture uses' walk by the graph's texture uses, the scan's serial and the files' source): an edit of a menu
+// that leaves its references as they were (its window moved) walks the uses no more, the rows as they were, nor does
+// one that moves the graph but none of its texture uses (a window of another menu renamed; a texture use's own
+// menu's window renamed renames the record its findings name); the image it names retargeted walks them once; every kept answer let go (forget_kept_answers), the next composition makes
+// each again, the rows as the kept answers made them.
+static int test_use_checks_kept() {
+	test_temp::TempDir dir("opennova_editor_problems_use_checks_kept");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Kept"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const std::string menu = "<SCREEN>\r\n\t<NAME>KEPT</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	                         "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	                         "\t\t<APPEARANCE type=\"image\" state=\"default\">logo.tga</APPEARANCE>\r\n\t</WINDOW>\r\n"
+	                         "</SCREEN>\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/menus/kept.mnu", menu) && test_io::write_text(root + "/menus/b.mnu", kMenuB) &&
+	            test_io::write_file(root + "/textures/logo.tga", editor_test::tga_bytes()) &&
+	            test_io::write_file(root + "/textures/other.tga", editor_test::tga_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("menus/kept.mnu"));
+	const Document *opened = records_of(*session.document_for("menus/kept.mnu"));
+	TEST_EXPECT(opened != nullptr);
+	if (!opened) return 1;
+	// The window and its appearance, by the graph's edge naming the image.
+	NodeAddress appearance, window;
+	std::string image_field;
+	for (const GraphEdge *edge : v.findings.graph->references_of("menus/kept.mnu"))
+		if (edge->value == "logo.tga") {
+			appearance = edge->address;
+			image_field = edge->field;
+		}
+	TEST_EXPECT(appearance.row != 0 && !image_field.empty());
+	const std::vector<NodeAddress> owners = opened->ancestors(appearance);
+	TEST_EXPECT(!owners.empty());
+	if (owners.empty()) return 1;
+	window = owners.back();
+	const auto move_window = [&](int64_t left) {
+		Edit moved;
+		moved.address = window;
+		moved.field = "position.left";
+		moved.value = left;
+		editor_test::handle_to_end(session, request::edit_record("menus/kept.mnu", moved));
+	};
+	const uint64_t walks = texture_check_stats().use_walks;
+	const std::vector<Diagnostic> rows = v.findings.diagnostics;
+	move_window(10);
+	TEST_EXPECT(texture_check_stats().use_walks == walks && v.findings.diagnostics == rows);
+	// A window of a menu that names no texture renamed: the graph moves (its symbol), its texture uses do not.
+	editor_test::handle_to_end(session, request::open_document("menus/b.mnu"));
+	const Document *other = records_of(*session.document_for("menus/b.mnu"));
+	NodeAddress main;
+	TEST_EXPECT(other && find_definition(AssetGraph(), *other, "MAIN", main));
+	const uint64_t generation = v.findings.graph->generation();
+	Edit renamed;
+	renamed.address = main;
+	renamed.field = "name";
+	renamed.value = std::string("BACKDROP");
+	editor_test::handle_to_end(session, request::edit_record("menus/b.mnu", renamed));
+	TEST_EXPECT(v.findings.graph->generation() != generation && texture_check_stats().use_walks == walks);
+	Edit retarget;
+	retarget.address = appearance;
+	retarget.field = image_field;
+	retarget.value = std::string("other.tga");
+	editor_test::handle_to_end(session, request::edit_record("menus/kept.mnu", retarget));
+	TEST_EXPECT(texture_check_stats().use_walks == walks + 1);
+	const std::vector<Diagnostic> retargeted = v.findings.diagnostics;
+	forget_kept_answers();
+	move_window(20);
+	TEST_EXPECT(texture_check_stats().use_walks == walks + 2 && v.findings.diagnostics == retargeted);
+	std::printf("use checks kept: walked again only when the texture uses moved, the rows as before\n");
+	return 0;
+}
+
+// A single edit costs what it touched (the editor speed pass): over the scan the last validation read, the graph
+// visits only the open document's file (GraphStats::files_walked) and the validation asks only it
+// (files_validated), an edit that renames a window and so moves the graph included; the rows and their marks are
+// those a validation of every file with nothing kept makes (compose_project_findings over a graph, a cache and
+// project checks made afresh; the plan's refusals over its gate, mark_findings).
+static int test_edit_costs_what_it_touched() {
+	test_temp::TempDir dir("opennova_editor_problems_edit_cost");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Edit cost"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const std::string logo = "<SCREEN>\r\n\t<NAME>C</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	                         "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	                         "\t\t<APPEARANCE type=\"image\" state=\"default\">gone.tga</APPEARANCE>\r\n\t</WINDOW>\r\n"
+	                         "</SCREEN>\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/menus/a.mnu", kMenuA) && test_io::write_text(root + "/menus/b.mnu", kMenuB) &&
+	            test_io::write_text(root + "/menus/c.mnu", logo) &&
+	            test_io::write_file(root + "/textures/here.tga", editor_test::tga_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("menus/a.mnu"));
+	const Document *menu = records_of(*session.document_for("menus/a.mnu"));
+	NodeAddress go;
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "GO", go));
+	if (!menu) return 1;
+	const auto perf = [&session](const char *section, const char *count) {
+		std::string error;
+		const opennova::io::JsonValue answer = session.query("perf", opennova::io::JsonValue(), error);
+		const opennova::io::JsonValue *part = answer.get(section);
+		return part ? size_t(part->get_number(count, -1)) : SIZE_MAX;
+	};
+	for (const char *name : {"GONE", "GO"}) {
+		Edit renamed;
+		renamed.address = go;
+		renamed.field = "name";
+		renamed.value = std::string(name);
+		editor_test::handle_to_end(session, request::edit_record("menus/a.mnu", renamed));
+		TEST_EXPECT(perf("graph", "files_walked") == 1 && perf("graph", "files_extracted") == 1 &&
+		            perf("validation", "files_validated") == 1);
+		// Every file validated afresh, nothing kept.
+		const ProjectPaths paths = ProjectPaths::for_root(root);
+		AssetGraph graph;
+		ValidationCache cache;
+		ProjectChecks checks;
+		ProjectAssetSource source;
+		source.set_scan(root, *v.project.scan, v.project.document->target_game);
+		source.set_open(v.documents.open);
+		const std::vector<Diagnostic> none;
+		const ProjectFindings cold = compose_project_findings(
+		        {paths, *v.project.document, *v.project.scan, *v.project.requirements, v.documents.open,
+		         v.activity.boot_missing, none, none, none},
+		        graph, cache, checks, source);
+		TEST_EXPECT(cold.rows == v.findings.diagnostics);
+		const std::vector<Diagnostic> gate(cold.rows.begin() + std::ptrdiff_t(cold.gate_begin),
+		                                   cold.rows.begin() + std::ptrdiff_t(cold.gate_end));
+		ShippedFiles shipped;
+		shipped.unsaved = {"menus/a.mnu"};
+		BuildTarget target;
+		target.game = v.project.document->target_game;
+		const BaseNames base{&v.project.base_files};
+		const std::vector<Diagnostic> blockers =
+		        plan_blockers(paths, *v.project.scan, *v.project.requirements, gate, target, &base, &shipped);
+		TEST_EXPECT(v.findings.marks && *v.findings.marks == mark_findings(cold.rows, v.findings.originals.get(), &blockers));
+	}
+	std::printf("edit cost: one file walked and validated, the rows and marks a fresh validation's\n");
+	return 0;
+}
+
 // The demo round's bug 10: the required files landing take their "required file missing" rows out of
 // Problems at once, while the validation the change left due has yet to run (an import's 27 such rows
 // stood until the validation after it ended); the other rows wait for it, which then composes them.
@@ -1682,6 +2212,9 @@ static int test_requirements_at_once() {
 int main() {
 	int failures = 0;
 	failures += test_requirements_at_once();
+	failures += test_marks_planned_once();
+	failures += test_use_checks_kept();
+	failures += test_edit_costs_what_it_touched();
 	failures += test_original_marks();
 	failures += test_blocking();
 	failures += test_fix_all_served_whole();
@@ -1699,6 +2232,9 @@ int main() {
 	failures += test_optional_group();
 	failures += test_placeholders();
 	failures += test_original_data();
+	failures += test_original_textures();
+	failures += test_original_scope();
+	failures += test_original_scope_whole();
 	if (failures == 0) std::printf("editor_problems: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

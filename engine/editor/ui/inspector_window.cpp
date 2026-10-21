@@ -18,6 +18,7 @@
 #include <editor/model/field_text.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/project_find.h>
+#include <editor/ui/reference_fields.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/rename_dialog.h>
 #include <editor/ui/text_edit.h>
@@ -61,7 +62,6 @@ constexpr int kTableRows = 8; // the rows a table shows before it scrolls
 constexpr double kFlashSeconds = 1.2; // how long a field a request showed keeps its row lit
 constexpr size_t kSavedLines = 8; // the records a changed field's tooltip names, of several
 
-const ImVec4 kIgnored(0.95f, 0.75f, 0.35f, 1.0f);
 const ImVec4 kMixed(0.60f, 0.75f, 0.95f, 1.0f);
 const char *const kIgnoredTip = "The game does not read this here; the file still writes it.";
 const char *const kMixedTip = "The selected records differ here; a change sets it on every one.";
@@ -202,40 +202,6 @@ void place(ui_kit::WrapRow *row, float width) {
 	else ImGui::SameLine();
 }
 
-// Where a Go to leads, in its tooltip: the file opened at the record, or its page (DI-17).
-std::string go_to_words(const std::vector<ReferenceTarget> &targets) {
-	if (targets.size() > 1) return "Go to one of the " + std::to_string(targets.size()) + " places it leads.";
-	return window_requests::go_to_words(targets.front());
-}
-
-// A reference's Go to, to the places the game's lookup reaches (reference_targets,
-// made only while the tool is hovered, pressed or its menu open): one gone to, or several
-// offered in a menu (a font through a style variable: the variable where the game reads it,
-// or the file its value names). `pressed` is the tool's press; its tooltip is `tip`, then
-// where it leads after `lead`.
-void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value, bool pressed,
-                const std::string &tip, const char *lead) {
-	const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
-	const SessionView &view = workspace.view();
-	if (!view.findings.graph) return;
-	if (pressed || hovered) {
-		const std::vector<ReferenceTarget> targets =
-				reference_targets(*view.findings.graph, *view.project.scan, field, value);
-		if (pressed && targets.size() == 1) go_to(workspace, targets.front());
-		else if (pressed && !targets.empty()) ImGui::OpenPopup("go to");
-		if (hovered)
-			ui_kit::tooltip(targets.empty() ? tip
-			                                : tip + (tip.empty() ? "" : "\n") + lead + go_to_words(targets) +
-			                                          "\nThe keys: F12 with the pointer on the value, or Ctrl+click it; "
-			                                          "Shift+F12 lists its uses.");
-	}
-	if (!ImGui::BeginPopup("go to")) return;
-	for (const ReferenceTarget &target :
-			reference_targets(*view.findings.graph, *view.project.scan, field, value))
-		if (ImGui::MenuItem(target.label.c_str())) go_to(workspace, target);
-	ImGui::EndPopup();
-}
-
 // Whether a reference's Play sounds what it names: a sound set, a wave, or a dialog (DI-32: its lines as the game
 // plays them).
 bool plays_sound(ReferenceKind kind) {
@@ -278,10 +244,10 @@ void reference_status(Workspace &workspace, ReferencePicker &picker, const Docum
 	                                            ImGui::GetColorU32(colour));
 	tip = std::string(word) + ": " + tip;
 	if (present) {
-		go_to_tool(workspace, field, value, pressed, tip, "A click: ");
+		go_to_tool(workspace, field, value, pressed, tip);
 	} else if (status == ReferenceStatus::Missing) {
 		// A missing value's dot opens what Problems offers for it (DI-15): Add it there, Open the file, Import.
-		ui_kit::tooltip(tip + "\nA click: what fixes it.");
+		ui_kit::tooltip(tip);
 		picker.draw_fixes(workspace, document, address, field, value, pressed);
 	} else {
 		ui_kit::tooltip(tip);
@@ -298,7 +264,7 @@ void reference_status(Workspace &workspace, ReferencePicker &picker, const Docum
 		return;
 	}
 	place(row, ui_kit::button_width("Go to"));
-	go_to_tool(workspace, field, value, ImGui::SmallButton("Go to"), std::string(), "");
+	go_to_tool(workspace, field, value, ImGui::SmallButton("Go to"), std::string());
 	// A sound it names plays from here, through the one preview player (the sound lane, DI-02): a set as the
 	// game finds it (in the bank the field's scope names, a menu's SOUND's own), a wave as recorded.
 	const ReferenceKind named = value_reference(field, value);
@@ -396,72 +362,6 @@ void reference_tools(Workspace &workspace, ReferencePicker &picker, const Docume
 	texture_preview::reference_field(workspace, field, value, compact);
 }
 
-// Where a reference's jumps lead (DI-18): what the game's lookup reaches (reference_targets); a name nothing
-// resolves, where it belongs (missing_target: DI-17's Go to that always lands).
-std::vector<ReferenceTarget> jump_targets(const SessionView &view, const FieldUse &field, const Value &value) {
-	std::vector<ReferenceTarget> out = reference_targets(*view.findings.graph, *view.project.scan, field, value);
-	ReferenceTarget home;
-	if (out.empty() && editor::reference_status(*view.findings.graph, field, value) == ReferenceStatus::Missing &&
-	    missing_target(field, value, view, home))
-		out.push_back(std::move(home));
-	return out;
-}
-
-// A reference's jumps over its value's control, drawn just before (DI-18; the control drawn after
-// SetNextItemAllowOverlap): while it is under the pointer or has the keyboard, what F12 (Go to definition) and
-// Shift+F12 (Find usages) act on, the uses those of what it names; with Ctrl held over it a hand, and a click
-// there its Go to, taken from the control under it (an invisible button over it, so the click neither types nor
-// opens a list); and its right-click menu: Go to definition, Find usages, Show in Files.
-void reference_jumps(Workspace &workspace, const FieldUse &field, const Value &value) {
-	const SessionView &view = workspace.view();
-	if (!view.findings.graph || !view.project.scan) return;
-	const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
-	const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_AllowWhenOverlappedByItem);
-	const bool focused = ImGui::IsItemFocused() || ImGui::IsItemActive();
-	const bool menu = ImGui::BeginPopupContextItem("reference jumps");
-	// Over its value with Ctrl held (the click's button over it active through the click, its release too).
-	const bool ctrl = ImGui::GetIO().KeyCtrl && ImGui::IsMouseHoveringRect(min, max) &&
-	                  ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-	if (!hovered && !focused && !menu && !ctrl) return;
-	const std::vector<ReferenceTarget> targets = jump_targets(view, field, value);
-	const auto usages = [&] {
-		ProjectFind::open_usages(workspace, targets.front().file, targets.front().missing ? std::string() : targets.front().locator);
-	};
-	if (menu) {
-		if (targets.empty()) ImGui::TextDisabled("It names nothing the project holds.");
-		for (size_t i = 0; i < targets.size(); ++i) {
-			ImGui::PushID(static_cast<int>(i));
-			const std::string label = targets.size() == 1 ? std::string("Go to definition") : "Go to " + targets[i].label;
-			if (ImGui::MenuItem(label.c_str(), i == 0 ? "F12" : nullptr)) go_to(workspace, targets[i]);
-			ui_kit::tooltip(window_requests::go_to_words(targets[i]) + (i == 0 ? " (F12, or Ctrl+click the value)" : ""));
-			ImGui::PopID();
-		}
-		if (!targets.empty()) {
-			if (ImGui::MenuItem("Find usages", "Shift+F12")) usages();
-			ui_kit::tooltip("Who names " + targets.front().label + ", each a Go to.");
-			const bool reveals = view.allows(EditorRequestKind::ShowInFiles);
-			if (ImGui::MenuItem("Show in Files", nullptr, false, reveals) && reveals)
-				workspace.request(request::show_in_files(targets.front().file));
-			ui_kit::tooltip("Select " + targets.front().file + " in Files.");
-		}
-		ImGui::EndPopup();
-	}
-	if (targets.empty()) return;
-	JumpSubject subject;
-	subject.definition = targets;
-	subject.usages_file = targets.front().file;
-	if (!targets.front().missing) subject.usages_locator = targets.front().locator;
-	subject.pointer = hovered || ctrl;
-	workspace.offer_jump(subject);
-	if (!ctrl) return;
-	// Ctrl held over the value: a hand, and a click goes where it names.
-	ImGui::SetCursorScreenPos(min);
-	const bool clicked = ImGui::InvisibleButton("##ctrl go to", ImVec2(std::max(max.x - min.x, 1.0f), std::max(max.y - min.y, 1.0f)));
-	ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-	ui_kit::tooltip(window_requests::go_to_words(targets.front()) + " (Ctrl+click)");
-	if (clicked) go_to(workspace, targets.front());
-}
-
 // A Files row dropped on a text reference's value: the file set on every target, when it is one
 // the field's kind loads. An image the OS dropped on a texture field's value (S18): the file the game loads
 // for the field made from it, asked first (preview_texture_source: the file its loader opens, a .dds beside
@@ -527,10 +427,10 @@ void rename_hint(Workspace &workspace, const Document &document, const NodeAddre
 	for (const GraphEdge *edge : view.findings.graph->referrers_of(field.defines, old, field.scope))
 		if (edge->source != document.path()) ++others;
 	if (!others) return;
-	ImGui::PushStyleColor(ImGuiCol_Text, kIgnored);
-	ImGui::TextWrapped("%zu use%s in other files still name%s '%s'.", others, others == 1 ? "" : "s", others == 1 ? "s" : "",
-	                   old.c_str());
-	ImGui::PopStyleColor();
+	ui_kit::warning_line(std::to_string(others) + (others == 1 ? " use elsewhere still names '" : " uses elsewhere still name '") +
+	                     old + "'.",
+	                     std::to_string(others) + (others == 1 ? " use in other files still names '" : " uses in other files still name '") +
+	                     old + "'.");
 	if (ImGui::SmallButton("Rename everywhere...")) {
 		window_requests::revert(workspace, document, {address}, {field.schema->id});
 		workspace.request(RenameDialog::preview(document.path(), document.locator(address), field.schema->id, now, true));
@@ -623,7 +523,7 @@ void field_name(Workspace &workspace, const Document &document, const Targets &t
 		return [which](const FieldUse *field) { return field->applies == which; };
 	};
 	if (std::all_of(fields.begin(), fields.end(), applies(Applicability::Ignored)))
-		tags.push_back({"(ignored)", kIgnored, kIgnoredTip});
+		tags.push_back({"(ignored)", ui_kit::warning_color(), kIgnoredTip});
 	else if (std::any_of(fields.begin(), fields.end(), applies(Applicability::Unverified)))
 		tags.push_back({"(?)", ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), kUnverifiedTip});
 	float tags_width = 0.0f;
@@ -732,13 +632,11 @@ void string_words(Workspace &workspace, InspectorWindow::WordsBox &box, const Do
 		}
 		ui_kit::tooltip("The words the player sees: the string " + words.raw + " in " + string.file +
 		                " of the data this project builds on. The project has no copy of that table to change.");
-		const bool allowed = view.allows(EditorRequestKind::PreviewInstallImport);
-		ImGui::BeginDisabled(!allowed);
-		if (ImGui::SmallButton(("Import " + string.file + "...").c_str()))
+		if (ui_kit::named_action("Import", string.file, "...", view.allows(EditorRequestKind::PreviewInstallImport),
+		                         "Plans importing the table from the game install into the project; once it is the "
+		                         "project's, its words are edited here.",
+		                         true))
 			workspace.request(request::preview_install_import({string.file}));
-		ImGui::EndDisabled();
-		ui_kit::tooltip("Plans importing the table from the game install into the project; once it is the "
-		                "project's, its words are edited here.");
 		ImGui::TextDisabled("String id in %s:", words.source.c_str());
 		return;
 	}
@@ -1019,7 +917,7 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 		reference_tools(workspace, controls.picker, document, {address}, field, value, true, true);
 	if (ignored) {
 		ImGui::SameLine();
-		ImGui::TextColored(kIgnored, "!");
+		ImGui::TextColored(ui_kit::warning_color(), "!");
 		ui_kit::tooltip(kIgnoredTip);
 	}
 	ImGui::EndDisabled();
@@ -1171,11 +1069,7 @@ void collection_block(Workspace &workspace, Controls &controls, const Document &
 		ImGui::SeparatorText(ui_kit::fit(heading, ImGui::GetContentRegionAvail().x - padding).c_str());
 		ui_kit::tooltip(heading + "\n" + token);
 	}
-	if (spec.applies == Applicability::Ignored) {
-		ImGui::PushStyleColor(ImGuiCol_Text, kIgnored);
-		ImGui::TextWrapped("The game does not read these here.");
-		ImGui::PopStyleColor();
-	}
+	if (spec.applies == Applicability::Ignored) ui_kit::warning_line("The game does not read these here.", kIgnoredTip);
 	size_t selected = SIZE_MAX;
 	for (size_t i = 0; i < ids.size(); ++i)
 		if (workspace.view().documents.selection.primary.kind == spec.kind && workspace.view().documents.selection.primary.child == ids[i]) selected = i;
@@ -1327,9 +1221,8 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
 		ImGui::SameLine();
 		ImGui::AlignTextToFramePadding();
 		const NodeKind kind = d.record_kind ? d.record_kind : selection.kind;
-		ImGui::TextWrapped("%s", d.field.empty() ? d.message.c_str()
-		                                         : (field_title(document, kind, d.field) + ": " + d.message).c_str());
-		if (!d.field.empty()) ui_kit::tooltip(d.field);
+		const std::string line = d.field.empty() ? d.message : field_title(document, kind, d.field) + ": " + d.message;
+		ui_kit::clipped_text(line, d.field.empty() ? line : line + "\n" + d.field);
 	}
 }
 
@@ -1381,8 +1274,7 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 			const Use &use = users_[size_t(i)];
 			ImGui::PushID(i);
-			const std::string shown = ui_kit::fit(use.line, ImGui::GetContentRegionAvail().x);
-			const bool pressed = ImGui::Selectable((shown + "###use").c_str());
+			const bool pressed = ui_kit::fitted_selectable(use.line, "use");
 			if (pressed || ImGui::IsItemHovered()) {
 				const ReferenceTarget target = usage_target(*view.project.scan, *use.edge);
 				if (pressed) go_to(workspace_, target);
@@ -1415,16 +1307,16 @@ void InspectorWindow::used_by(const DocumentBase &document) {
 	const std::string heading = basename_of(document.path()) + ": used by " + std::to_string(users.count) +
 	                            (users.count == 1 ? " field" : " fields") +
 	                            (users.further_count ? ", " + std::to_string(users.further_count) + " more through them" : "");
-	ImGui::TextWrapped("%s", heading.c_str());
-	ui_kit::tooltip("The records of the project that name this file or what it defines, by file; under a record "
-	                "that defines what others name (an item naming a model), those uses too. A click goes there.");
-	if (users.reading) ui_kit::empty_state("The project's references are still being read: the list may grow.");
+	ui_kit::clipped_text(heading, heading + "\nThe records of the project that name this file or what it defines, by "
+	                              "file; under a record that defines what others name (an item naming a model), those "
+	                              "uses too.");
+	if (users.reading) ui_kit::empty_state(ui_kit::reading_references(), "The list may grow.");
 	if (users.groups.empty()) {
 		if (!users.reading) ui_kit::empty_state("No file of the project names it or what it defines.");
 		return;
 	}
 	const auto line = [&](const FileUsers::Line &shown) {
-		const bool pressed = ImGui::Selectable((ui_kit::fit(shown.words, ImGui::GetContentRegionAvail().x) + "###use").c_str());
+		const bool pressed = ui_kit::fitted_selectable(shown.words, "use");
 		if (pressed) go_to(workspace_, shown.target);
 		ui_kit::tooltip_lazy([&] { return shown.file + ": " + shown.words + "\n" + shown.field + "\n" + go_to_words({shown.target}); });
 	};
@@ -1506,13 +1398,7 @@ void InspectorWindow::send_filter(const std::string &path, const std::string &be
 	window_requests::set_workspace(workspace_, "document", std::move(members));
 }
 
-void InspectorWindow::nothing_matches(char *filter, const char *what) {
-	const std::string said = std::string("No ") + what + " matches \"" + filter + "\".";
-	ImGui::TextDisabled("%s", said.c_str());
-	ImGui::SameLine();
-	if (ImGui::SmallButton("Clear##nothing")) filter[0] = '\0';
-	ui_kit::tooltip("Clear the filter: every field and list again. Each file keeps a filter of its own.");
-}
+void InspectorWindow::nothing_matches(char *filter, const char *what) { ui_kit::nothing_matches(filter, what); }
 
 void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
@@ -1600,9 +1486,8 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		return;
 	}
 	if (together.size() > 1) {
-		const std::string note = std::to_string(together.size()) +
-		                         " records of different kinds selected; the fields below are the primary one's.";
-		ui_kit::empty_state(note.c_str());
+		ui_kit::quiet_text(std::to_string(together.size()) + " records of different kinds selected",
+		                   "The fields below are the primary one's.");
 	}
 	// The type's own part first (S15: a mission's event, trigger or action in words), and what it
 	// draws itself the generic form leaves out.
@@ -1645,7 +1530,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 // marked where they differ and where any of them changed since the last save; a change is
 // one batch over all of them, one undo step. Their lists stay with each record's own form.
 void InspectorWindow::draw_together(const Document &document, const std::vector<NodeAddress> &records) {
-	ui_kit::empty_state((selected_words(document, records) + ": a change here sets every one of them.").c_str());
+	ui_kit::quiet_text(selected_words(document, records), "A change here sets every one of them, one undo step.");
 	const float line = ImGui::GetTextLineHeightWithSpacing();
 	if (ImGui::BeginChild("together", ImVec2(0.0f, line * float(std::min<size_t>(records.size(), 4)) + 4.0f),
 	                      ImGuiChildFlags_Borders)) {
@@ -1657,8 +1542,8 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 			titles += document.record_title(record);
 			const std::string path = document.record_path(record);
 			const float x = ImGui::GetCursorScreenPos().x;
-			const std::string shown = ui_kit::fit(ui_kit::kChangeRoom + titles, ImGui::GetContentRegionAvail().x);
-			if (ImGui::Selectable((shown + "###record").c_str(), record == records.front())) select(workspace_, document, record);
+			if (ui_kit::fitted_selectable(ui_kit::kChangeRoom + titles, "record", record == records.front()))
+				select(workspace_, document, record);
 			ui_kit::change_dot(document.record_change(record), x);
 			ui_kit::tooltip_lazy([&] {
 				const std::string above = titles != path ? titles + "\n" : std::string();

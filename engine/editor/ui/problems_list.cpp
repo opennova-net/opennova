@@ -79,6 +79,7 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	if (!stale_ && view_ == &view && key_ == key && caches.refreshed == caches.query &&
 			answered_ == answered && fixed_ == fixed)
 		return answer;
+	const bool new_view = view_ != &view;
 	view_ = &view;
 	key_ = key;
 	caches.refreshed = caches.query;
@@ -86,18 +87,25 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	fixed_ = fixed;
 	stale_ = false;
 	++made_;
-	keys_.clear();
-	index_.clear();
-	std::unordered_map<std::string, size_t> alike;
-	for (const Diagnostic &d : view.findings.diagnostics) {
-		const std::string id = problem_finding_identity(d);
-		std::string key = id + '\x1e' + std::to_string(alike[id]++);
-		std::replace(key.begin(), key.end(), '#', '\x1d'); // a key is an ImGui id: no "###" in it
-		index_.emplace(key, keys_.size());
-		keys_.push_back(std::move(key));
+	// The keys are the findings' alone: made again only when they moved (a new view, the Findings concern).
+	const uint64_t findings = view.revisions.of(ViewConcern::Findings);
+	if (new_view || keys_.size() != view.findings.diagnostics.size() || keys_findings_ != findings) {
+		keys_findings_ = findings;
+		keys_.clear();
+		index_.clear();
+		std::unordered_map<std::string, size_t> alike;
+		for (const Diagnostic &d : view.findings.diagnostics) {
+			const std::string id = problem_finding_identity(d);
+			std::string finding_key = id + '\x1e' + std::to_string(alike[id]++);
+			std::replace(finding_key.begin(), finding_key.end(), '#', '\x1d'); // a key is an ImGui id: no "###" in it
+			index_.emplace(finding_key, keys_.size());
+			keys_.push_back(std::move(finding_key));
+		}
 	}
 	selected_index_ = resolve(view, selected_);
 	lines_.clear();
+	group_rows_.clear();
+	group_original_.clear();
 	group_fixes_.clear();
 	// The groups folded and seen are the project's.
 	if (view.project.root != groups_root_) {
@@ -111,6 +119,8 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 			const ProblemGroup &group = answer.groups[g];
 			// The modder's findings listed as one before the game's own data's: no header, never folded.
 			if (!group.header) {
+				group_rows_.emplace_back();
+				group_original_.push_back(true);
 				group_fixes_.push_back(Proposal());
 				for (const size_t finding : group.rows) lines_.push_back({false, g, finding});
 				continue;
@@ -129,8 +139,11 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 			}
 			lines_.push_back({true, g, 0});
 			// No Fix all over the game's own data (S15): it would change the original's files in bulk; a
-			// finding there is fixed one at a time, marked as editing a file the game ships.
-			group_fixes_.push_back(group.original ? Proposal() : propose(view, fix_all_of(view, group.rows)));
+			// finding there is fixed one at a time, marked as editing a file the game ships. Any other
+			// group's is proposed when its header asks (group_fixes).
+			group_rows_.push_back(group.original ? std::vector<size_t>() : group.rows);
+			group_original_.push_back(group.original);
+			group_fixes_.push_back(group.original ? std::optional<Proposal>(Proposal()) : std::nullopt);
 			if (folded_.count(group.key)) continue;
 			for (const size_t finding : group.rows) lines_.push_back({false, g, finding});
 		}
@@ -138,8 +151,29 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 		for (const size_t finding : answer.rows) lines_.push_back({false, 0, finding});
 	}
 	required_ = required_findings(view);
-	required_fixes_ = propose(view, fix_all_of(view, required_));
+	required_fixes_.reset();
 	return answer;
+}
+
+const ProblemsList::Proposal &ProblemsList::group_fixes(size_t group) {
+	static const Proposal kNone;
+	if (group >= group_fixes_.size() || !view_) return kNone;
+	std::optional<Proposal> &proposal = group_fixes_[group];
+	if (!proposal) {
+		proposal = propose(*view_, fix_all_of(*view_, group_rows_[group]));
+		++proposed_;
+	}
+	return *proposal;
+}
+
+const ProblemsList::Proposal &ProblemsList::required_fixes() {
+	static const Proposal kNone;
+	if (!view_) return kNone;
+	if (!required_fixes_) {
+		required_fixes_ = propose(*view_, fix_all_of(*view_, required_));
+		++proposed_;
+	}
+	return *required_fixes_;
 }
 
 size_t ProblemsList::resolve(const SessionView &view, const FindingRef &ref) const {

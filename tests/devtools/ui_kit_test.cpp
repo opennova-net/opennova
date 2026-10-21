@@ -1,10 +1,13 @@
 // The tool kit both products' windows draw with (engine/runtime/devtools/ui_kit.h, ADR 0046 d11),
 // over a null ImGui backend: the row that wraps whole controls and each control's measure, the text
 // cut to a width (at its end, in its middle, a fitted button), a tool that acts only while it is
-// enabled, and the controls over a value their owner holds.
+// enabled, the controls over a value their owner holds, and the quiet pieces of the prose rule (an
+// empty state's hint, a quiet line's whole text and a help mark's how-to in tooltips; a filter's
+// nothing with its Clear; a selectable cut to its line; a tool that opens its popup).
 #include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
 #include <cmath>
@@ -140,12 +143,137 @@ void test_held_values() {
 	CHECK(text.sent() == "a longe", "a moved text is taken, cut to the buffer");
 }
 
+// The kit's quiet pieces, frame by frame in a window 220 wide with the pointer at `mouse`: what
+// `draw` writes as text (ImGui's log, the tooltips drawn included), and the centre of the item it
+// names by `at` (the last one drawn when it is not set otherwise).
+template <class Draw> std::string quiet_frame(ImVec2 mouse, Draw &&draw, ImVec2 *at = nullptr) {
+	ImGui::GetIO().AddMousePosEvent(mouse.x, mouse.y);
+	ImGui::NewFrame();
+	ImGui::LogToBuffer();
+	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+	ImGui::SetNextWindowSize(ImVec2(220.0f, 200.0f));
+	ImGui::Begin("quiet");
+	draw();
+	if (at)
+		*at = ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) * 0.5f,
+		             (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) * 0.5f);
+	ImGui::End();
+	const std::string text = GImGui->LogBuffer.c_str();
+	ImGui::LogFinish();
+	ImGui::Render();
+	return text;
+}
+
+// The text drawn by `draw` with the pointer away, then over its item: a hint or the whole of a
+// cut text is the item's tooltip, never a line of its own.
+template <class Draw> void away_and_over(Draw &&draw, std::string &away, std::string &over) {
+	ImVec2 at;
+	away = quiet_frame(ImVec2(-100.0f, -100.0f), draw, &at);
+	quiet_frame(at, draw);
+	over = quiet_frame(at, draw);
+}
+
+void test_quiet_lines() {
+	NullBackend backend;
+	std::string away, over;
+	// An empty state: one line, what to do in its tooltip.
+	away_and_over([] { ui_kit::empty_state("Nothing yet.", "Add one with New."); }, away, over);
+	CHECK(away.find("Nothing yet.") != std::string::npos && away.find("Add one with New.") == std::string::npos,
+	      "an empty state's hint is no line of its own");
+	CHECK(over.find("Add one with New.") != std::string::npos, "the hint is the line's tooltip");
+	// A quiet line cut to the window, whole in its tooltip; with a tip, the tip.
+	const std::string text = "A note that runs much longer than the window it is drawn in, cut.";
+	away_and_over([&] { ui_kit::quiet_text(text); }, away, over);
+	CHECK(away.find("...") != std::string::npos && away.find(text) == std::string::npos, "a quiet line is cut to the window");
+	CHECK(over.find(text) != std::string::npos, "whole in its tooltip");
+	away_and_over([] { ui_kit::quiet_text("Short.", "Why it is so."); }, away, over);
+	CHECK(away.find("Why it is so.") == std::string::npos && over.find("Why it is so.") != std::string::npos,
+	      "a quiet line's tip in its tooltip");
+	// A help mark: "(?)" on the line, the how-to in its tooltip.
+	away_and_over(
+			[] {
+				ImGui::TextUnformatted("Brush");
+				ui_kit::help_mark("Drag over the ground to paint.");
+			},
+			away, over);
+	CHECK(away.find("(?)") != std::string::npos && away.find("Drag over") == std::string::npos &&
+	              over.find("Drag over the ground to paint.") != std::string::npos,
+	      "a help mark's how-to is its tooltip");
+}
+
+// A filtered list's nothing: the filter named on one line, and a Clear (its id "Clear##nothing")
+// that empties it.
+void test_nothing_matches() {
+	NullBackend backend;
+	char filter[32] = "zebra";
+	bool cleared = false;
+	ImGuiID id = 0;
+	ImVec2 at;
+	const auto draw = [&] {
+		cleared = ui_kit::nothing_matches(filter, "field") || cleared;
+		id = ImGui::GetItemID();
+	};
+	const std::string text = quiet_frame(ImVec2(-100.0f, -100.0f), draw, &at);
+	CHECK(text.find("No field matches") != std::string::npos, "the filter named");
+	CHECK(id == ImHashStr("Clear##nothing", 0, ImHashStr("quiet")), "its Clear keeps its id");
+	quiet_frame(at, draw);
+	ImGui::GetIO().AddMouseButtonEvent(0, true);
+	quiet_frame(at, draw);
+	ImGui::GetIO().AddMouseButtonEvent(0, false);
+	quiet_frame(at, draw);
+	CHECK(cleared && filter[0] == '\0', "Clear empties the filter");
+}
+
+// A selectable cut to its line, its id the same whatever the cut; a tool that opens its popup.
+void test_fitted_selectable_and_tool_popup() {
+	{
+		NullBackend backend;
+		const std::string line = "A line that goes somewhere much further than the window shows";
+		ImGuiID id = 0;
+		std::string away, over;
+		away_and_over(
+				[&] {
+					ui_kit::fitted_selectable(line, "jump");
+					id = ImGui::GetItemID();
+				},
+				away, over);
+		CHECK(id == ImHashStr("###jump", 0, ImHashStr("quiet")), "a fitted selectable's id is its own whatever the cut");
+		CHECK(away.find("...") != std::string::npos && away.find(line) == std::string::npos, "its text is cut to its line");
+		CHECK(over.find(line) != std::string::npos, "whole in its tooltip");
+	}
+	for (const bool enabled : {true, false}) {
+		NullBackend backend;
+		bool open = false;
+		ImVec2 at;
+		const auto draw = [&] {
+			ui_kit::WrapRow row;
+			const bool drawing = ui_kit::tool_popup(row, "Show", "show", enabled, "What the picture draws.");
+			if (drawing) {
+				ImGui::TextUnformatted("in the popup");
+				ImGui::EndPopup();
+			}
+			open = drawing || open;
+		};
+		quiet_frame(ImVec2(-100.0f, -100.0f), draw, &at);
+		quiet_frame(at, draw, &at);
+		ImGui::GetIO().AddMouseButtonEvent(0, true);
+		quiet_frame(at, draw);
+		ImGui::GetIO().AddMouseButtonEvent(0, false);
+		quiet_frame(at, draw);
+		quiet_frame(at, draw);
+		CHECK(open == enabled, enabled ? "a tool popup opens on a click" : "a disabled tool popup never opens");
+	}
+}
+
 }  // namespace
 
 int main() {
 	test_rows_and_fits();
 	test_tool_acts_only_enabled();
 	test_held_values();
+	test_quiet_lines();
+	test_nothing_matches();
+	test_fitted_selectable_and_tool_popup();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

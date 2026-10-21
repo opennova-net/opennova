@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -146,6 +147,14 @@ public:
 	// How many times the rows were composed: a validation that finds nothing they are made of
 	// moved composes none (for the tests).
 	size_t compositions() const { return compositions_; }
+	// What the rows and their marks cost (the perf query): the composition's and the game's own data's
+	// steps' microseconds all told, and how many build plans marking the rows made.
+	struct Spent {
+		int64_t compose_us = 0;
+		int64_t originals_us = 0;
+	};
+	const Spent &spent() const { return spent_; }
+	size_t blocker_plans() const { return blocker_plans_; }
 
 	// The Problems query as the query seam's problems row asks it (editor_queries.h, S13 A5): the
 	// rows the query shows, kept while the view and the query stand, and their fixes, kept while
@@ -187,15 +196,13 @@ private:
 	// The rows, from the pass that ended (its files' findings moved or not, a pass it took the place
 	// of having moved them, and the project checks') and, with `keep_reported`, what was reported.
 	void compose_rows(bool keep_reported);
+	void compose_rows_now(bool keep_reported); // compose_rows untimed
 	// The check of the game's own data asked again of the rows as they stand; one step of it within
 	// `bytes`, true when none is left.
 	void want_originals();
 	bool step_originals(uint64_t bytes);
 	// The view's originals made the check's where they moved, the rows marked again (Findings then moves).
 	void show_originals();
-	// The gate as it stands among the rows (gate_findings' range), never composing: none when the rows
-	// no longer hold it.
-	std::vector<Diagnostic> gate_rows() const;
 
 	SessionCore &core_;
 	SessionView &view_;
@@ -218,6 +225,8 @@ private:
 	// show_requirements put in their place since).
 	std::vector<Diagnostic> lead_scan_, lead_requirements_;
 	size_t compositions_ = 0;
+	Spent spent_;
+	size_t blocker_plans_ = 0;
 	// The last build's own findings (those its report adds to the Problems rows it was gated on:
 	// the plan's own, a step that failed), Problems rows until the next build starts or the
 	// project closes.
@@ -239,8 +248,15 @@ private:
 	// a name it serves).
 	std::unique_ptr<OriginalFiles> originals_;
 	bool originals_needed_ = false;
+	// The install's names (ProjectView::retail_files) as want_originals last read them, and normalized.
+	std::vector<std::string> served_listing_;
+	std::unordered_set<std::string> served_;
 	// The plan's refusals the rows were last marked against (mark_rows), which a reported finding's mark reads.
 	std::vector<Diagnostic> blockers_;
+	// What they were planned over (problems_service.cpp), kept while it stands: a composition that leaves the
+	// gate, the scan and the build's target as they were plans none.
+	struct BlockerMemo;
+	std::unique_ptr<BlockerMemo> blocker_memo_;
 };
 
 } // namespace opennova::editor

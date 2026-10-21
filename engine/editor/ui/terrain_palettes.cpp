@@ -55,14 +55,13 @@ void draw_palette(TerrainPaneContext &context, const TilDocument *placement) {
 	const SessionView &view = workspace.view();
 	const TerrainFamily &family = context.family;
 	if (family.tile_set.empty()) {
-		ImGui::TextDisabled("The terrain names no tile set.");
+		ui_kit::empty_state("The terrain names no tile set.");
 		return;
 	}
 	const AssetEntry *entry = view.project.scan ? view.project.scan->find(family.tile_set) : nullptr;
 	if (!entry) {
-		ImGui::TextWrapped("The tile set %s is not in the project or its base: its tiles draw as the game's missing "
-		                   "texture.",
-		                   family.tile_set.c_str());
+		ui_kit::warning_line("The tile set " + family.tile_set + " is not in the project.",
+		                     "Nor in its base: its tiles draw as the game's missing texture.");
 		return;
 	}
 	const std::shared_ptr<const TextureThumbnail> picture =
@@ -70,19 +69,19 @@ void draw_palette(TerrainPaneContext &context, const TilDocument *placement) {
 	                                  : nullptr;
 	ImGui::Text("Tile set %s", basename_of(entry->relative_path).c_str());
 	if (!picture) {
-		ImGui::TextDisabled("Reading the tile set...");
+		ui_kit::empty_state("Reading the tile set...");
 		return;
 	}
 	if (picture->state != TextureThumbnail::State::Ready || !picture->source_width || !picture->source_height) {
-		ImGui::TextWrapped("%s", picture->refusal.empty() ? "The tile set does not read." : picture->refusal.c_str());
+		ui_kit::refusal_text(picture->refusal.empty() ? "The tile set does not read." : picture->refusal);
 		return;
 	}
 	const TilFile file = placement ? placement->file() : TilFile();
 	const std::vector<TileCell> cells =
 	        tile_palette(int(picture->source_width), int(picture->source_height), placement ? &file : nullptr);
 	if (cells.empty()) {
-		ImGui::TextWrapped("The tile set is %u texels high: the game cuts no row of cells from a set under 64 (D-TIL-8).",
-		                   picture->source_height);
+		ui_kit::warning_line("The tile set is " + std::to_string(picture->source_height) + " texels high: no cells.",
+		                     "The game cuts no row of cells from a set under 64 (D-TIL-8).");
 		return;
 	}
 	TextureThumbnailImages *images = workspace.thumbnail_images();
@@ -109,7 +108,7 @@ void draw_palette(TerrainPaneContext &context, const TilDocument *placement) {
 		std::string tip = "Cell " + std::to_string(cell.index) + ": texels " + std::to_string(cell.x) + ", " +
 		                  std::to_string(cell.y) + ", " + std::to_string(cell.w) + " x " + std::to_string(cell.h);
 		if (placement) tip += "; " + std::to_string(cell.uses) + " of the placement's tiles draw it";
-		ui_kit::tooltip(tip + ". Click to stamp it.");
+		ui_kit::tooltip(tip + ".");
 		if (pressed) {
 			io::JsonValue members = io::JsonValue::make_object();
 			members.set("cell", io::json_number(double(cell.index)));
@@ -126,6 +125,7 @@ void draw_stamp(TerrainPaneContext &context) {
 	const TerrainBrush &brush = context.brush;
 	ImGui::Text("Cell %d, turned %d degrees clockwise%s%s", brush.cell, brush.rotation * 90, brush.flip_h ? ", flipped across" : "",
 	            brush.flip_v ? ", flipped down" : "");
+	ui_kit::help_mark("Click the ground to lay it, its corner under the pointer (Shift: on the 16-unit grid).");
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Turn", true, "Turn the stamp a quarter clockwise (R in the view; Shift+R the other way)."))
 		window_requests::set_workspace(workspace, "terrain_brush", "rotation", io::json_number(double((brush.rotation + 1) % 4)));
@@ -133,7 +133,6 @@ void draw_stamp(TerrainPaneContext &context) {
 		window_requests::set_workspace(workspace, "terrain_brush", "flip_h", io::JsonValue::make_bool(!brush.flip_h));
 	if (ui_kit::tool(row, "Flip V", true, "Mirror the stamp north to south (V in the view)."))
 		window_requests::set_workspace(workspace, "terrain_brush", "flip_v", io::JsonValue::make_bool(!brush.flip_v));
-	ImGui::TextDisabled("Click the ground to lay it, its corner under the pointer (Shift: on the 16-unit grid).");
 }
 
 // The selected tiles' operations, in the original tools' words.
@@ -142,6 +141,7 @@ void draw_selected(TerrainPaneContext &context, const TilDocument *placement) {
 	const std::string &at = context.document.path();
 	const size_t selected = placement ? workspace.view().workspace.document(at).tiles.size() : 0;
 	ImGui::Text("%zu tile%s selected", selected, selected == 1 ? "" : "s");
+	ui_kit::help_mark("Arrows nudge the selection a unit (Shift: 16), as JO's mission editor does.");
 	const bool any = selected > 0;
 	const std::string none = "Select tiles first: click one in the view (Shift adds, Ctrl toggles).";
 	const auto tip = [&](const char *what) { return any ? std::string(what) : none; };
@@ -163,7 +163,6 @@ void draw_selected(TerrainPaneContext &context, const TilDocument *placement) {
 		tile_command(workspace, at, "tile_delete", {});
 	if (ui_kit::tool(order, "Duplicate", any, tip("Copy the selected tiles a square east, over the others (Ctrl+D).")))
 		tile_command(workspace, at, "tile_duplicate", {16.0, 0.0});
-	ImGui::TextDisabled("Arrows nudge the selection a unit (Shift: 16), as JO's mission editor does.");
 	const bool group = selected > 1;
 	const std::string alone = "Select two tiles or more: the group turns about their middle.";
 	ui_kit::WrapRow turn;
@@ -189,7 +188,7 @@ Swatch swatch_of(MissionGroundOverlay kind, int value, const std::vector<Foliage
 	Swatch out;
 	out.value = value;
 	std::copy(std::begin(row.rgb), std::end(row.rgb), out.rgb);
-	out.tip = std::to_string(value) + "  " + row.words + ". Click to paint it.";
+	out.tip = std::to_string(value) + "  " + row.words + ".";
 	return out;
 }
 
@@ -276,13 +275,11 @@ void draw_paint_part(TerrainPaneContext &context) {
 				workspace.request(request::terrain_stroke(context.document.path(), ask));
 			}
 		}
-		if (file.missing && !file.name.empty()) {
-			ui_kit::WrapRow row;
-			if (ui_kit::tool(row, ("Copy " + file.name + " into the project...").c_str(), true,
-			                 "Open the import dialog on the game install's " + file.name +
-			                         ": once the project holds it, the brush paints it in place."))
-				workspace.request(request::preview_install_import({file.name}));
-		}
+		if (file.missing && !file.name.empty() &&
+		    ui_kit::named_action("Copy", file.name, " into the project...", true,
+		                         "Open the import dialog on the game install's " + file.name +
+		                                 ": once the project holds it, the brush paints it in place."))
+			workspace.request(request::preview_install_import({file.name}));
 	}
 	switch (brush.tool) {
 	case TerrainTool::Surface: {
@@ -296,11 +293,10 @@ void draw_paint_part(TerrainPaneContext &context) {
 		row.next(ui_kit::field_width(ImGui::GetFontSize() * 7.0f, "Class"));
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
 		ImGui::InputInt("Class", &held);
-		ui_kit::tooltip("The surface class the brush paints: the class the game reads under a body or a round there (its "
-		                "footsteps, its impacts, its tyres). Any class, 0 to 255: the tile set tables name the first 20. The "
-		                "game reads one past them as it "
-		                "stands: its footsteps and weather treat it as no class they name, and a round striking there "
-		                "takes an impact row no shipped table authors (20 to 23) or the ammo's obj row (24 and past).");
+		ui_kit::tooltip("The surface class the brush paints, which the game reads under a body or a round (footsteps, "
+		                "impacts, tyres). Any class 0 to 255: the tile set tables name the first 20, and one past them "
+		                "takes no named footstep and an impact row no shipped table authors (20 to 23) or the ammo's obj "
+		                "row (24 and past).");
 		if (ImGui::IsItemDeactivatedAfterEdit()) set("surface", io::json_number(std::clamp(held, 0, 255)));
 		const std::string name = mission_surface_words(brush.surface);
 		row.next(ui_kit::text_width(name.c_str()));
@@ -361,7 +357,7 @@ void draw_paint_part(TerrainPaneContext &context) {
 		ui_kit::tooltip("The detail texture whose weight the brush raises, the others' falling: the blend map's channel.");
 		break;
 	}
-	default: ImGui::TextDisabled("Pick a Paint tool: Surface, Foliage, Colour or Detail."); break;
+	default: ui_kit::empty_state("Pick a Paint tool.", "Surface, Foliage, Colour or Detail."); break;
 	}
 	if (brush.tool == TerrainTool::Colour || brush.tool == TerrainTool::Detail) {
 		ui_kit::WrapRow row;
@@ -373,11 +369,11 @@ void draw_tiles_part(TerrainPaneContext &context) {
 	Workspace &workspace = context.workspace;
 	const TerrainFamilyFile &tiles = context.family.tiles;
 	if (!tiles.refusal.empty()) {
-		ImGui::TextWrapped("%s", tiles.refusal.c_str());
+		ui_kit::refusal_text(tiles.refusal);
 		return;
 	}
 	if (tiles.path.empty()) {
-		ImGui::TextDisabled("No tile placement: the terrain names none.");
+		ui_kit::empty_state("No tile placement.", "The terrain names none.");
 		return;
 	}
 	const TilDocument *placement = open_tiles(workspace.view(), tiles.path);
@@ -392,7 +388,7 @@ void draw_tiles_part(TerrainPaneContext &context) {
 	ImGui::Separator();
 	if (context.brush.tool == TerrainTool::Stamp) draw_stamp(context);
 	else if (context.brush.tool == TerrainTool::Tiles) draw_selected(context, placement);
-	else ImGui::TextDisabled("Stamp lays the palette's cell; Select picks, turns, flips and layers the laid tiles.");
+	else ui_kit::empty_state("Pick Stamp or Select.", "Stamp lays the palette's cell; Select picks, turns, flips and layers the laid tiles.");
 }
 
 } // namespace opennova::editor

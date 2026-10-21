@@ -4,7 +4,8 @@
 // find_definition, over the graph's slot while it is current for the document and over the
 // document's own extraction when it is not, giving the same record each way, each definition as
 // the document's own lookup makes it (a stylesheet's line brand.mns overrides is still the one its
-// own file reads last).
+// own file reads last); a readout's Go to by a name equal to a field's by its value, a particle's name
+// without case.
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -463,12 +464,77 @@ static int test_file_uses() {
 	return 0;
 }
 
+// A readout's Go to (a name a viewport shows, a name a text writes: reference_targets over the kind, the name, its
+// scope and its loader's argument) is the field's over the name its value gives, for every field of every record of
+// the blank project's main menu that names something (a font through a style variable: the variable, then its file).
+// A particle's name (ReferenceKind::ParticleDefinition) resolves without case to the first of two definitions in the
+// graph's order, at its span; a name no file defines leads nowhere.
+static int test_readout_targets() {
+	test_temp::TempDir dir("opennova_reference_queries_readout");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Readout"));
+	editor_test::create_missing_files(session);
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_text(root + "/a.ptl", "[particledef]\r\n{\r\n\tid = Puff;\r\n}\r\n") &&
+	            test_io::write_text(root + "/b.ptl", "[particledef]\r\n{\r\n\tid = puff;\r\n}\r\n") &&
+	            test_io::write_text(root + "/c.ptl", "[effectdef]\r\n{\r\n\tid = Hit;\r\n\tpdefs = PUFF;\r\n}\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
+	const SessionView &view = session.view();
+	const AssetGraph &graph = *view.findings.graph;
+	const AssetScan &scan = *view.project.scan;
+	const std::vector<ReferenceTarget> puff = reference_targets(graph, scan, ReferenceKind::ParticleDefinition, "PUFF", "");
+	TEST_EXPECT(puff.size() == 1 && puff[0].file == "a.ptl" && puff[0].locator == "3:7" && puff[0].field == "id");
+	TEST_EXPECT(reference_targets(graph, scan, ReferenceKind::ParticleDefinition, "ghost", "").empty());
+	const auto same = [](const std::vector<ReferenceTarget> &a, const std::vector<ReferenceTarget> &b) {
+		if (a.size() != b.size()) return false;
+		for (size_t i = 0; i < a.size(); ++i)
+			if (a[i].file != b[i].file || a[i].locator != b[i].locator || a[i].field != b[i].field || a[i].label != b[i].label ||
+			    a[i].editable != b[i].editable)
+				return false;
+		return true;
+	};
+	const Document *menu = session.document_for("main.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	// The lambda counts what differs (TEST_EXPECT returns from it, which would make it return a value on one
+	// path only); the count is checked after the walk.
+	size_t compared = 0, through_variable = 0, differing = 0;
+	const auto compare = [&](const NodeAddress &address) {
+		for (const FieldSchema &schema : menu->fields(address.kind)) {
+			Value value;
+			if (!menu->get(address, schema.id, value)) continue;
+			const FieldUse field = menu->field_on(address, schema);
+			ReferenceKind kind;
+			std::string name, scope;
+			if (!reference_target(field, value, kind, name, scope)) continue;
+			const std::vector<ReferenceTarget> by_field = reference_targets(graph, scan, field, value);
+			if (!same(by_field, reference_targets(graph, scan, kind, name, scope, field.loader_arg))) ++differing;
+			++compared;
+			through_variable += by_field.size() > 1 ? 1 : 0;
+		}
+	};
+	for (const auto &row : menu->rows()) {
+		compare({row->id, row->kind, 0});
+		menu->walk_records(*row, [&](const NodeAddress &nested, const Document::Placement &) {
+			compare(nested);
+			return true;
+		});
+	}
+	TEST_EXPECT(differing == 0 && compared >= 5 && through_variable > 0);
+	std::printf("readout targets: %zu fields' Go to alike, %zu through a style variable\n", compared, through_variable);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_menu_references();
 	failures += test_go_to_targets();
 	failures += test_find_definition();
 	failures += test_file_uses();
+	failures += test_readout_targets();
 	if (failures == 0) std::printf("editor_reference_queries: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

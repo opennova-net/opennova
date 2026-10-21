@@ -199,28 +199,34 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 		}
 	}
 	if (graph) {
-		std::vector<ReferenceChoice> listed = field.picks != ReferenceKind::None && picking.key_prefix
-		                                              ? keyed_choices(*graph, field)
-		                                              : reference_choices(*graph, picking);
-		// A number naming its definition by itself plus an offset (an ammo's tracer id, FieldUse::name_offset):
-		// each definition by the number that names it (an item's id less 100000), one no such number names
-		// (none above 0) left out; its own name kept as the symbol it stands for.
-		if (picking.name_offset) {
-			std::vector<ReferenceChoice> offset;
-			for (ReferenceChoice &choice : listed) {
-				const std::optional<int> id = strutil::parse_int(choice.name);
-				if (!id || int64_t(*id) - picking.name_offset <= 0) continue;
-				choice.symbol = std::move(choice.name);
-				choice.symbol_scope = picking.scope;
-				choice.name = std::to_string(int64_t(*id) - picking.name_offset);
-				offset.push_back(std::move(choice));
-			}
-			listed = std::move(offset);
-		}
+		std::vector<ReferenceChoice> listed = picker_choices(graph, field, names);
 		choices.insert(choices.end(), listed.begin(), listed.end());
 	}
 	word_choices(document, address, picking, names, choices);
 	return choices;
+}
+
+std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const FieldUse &field, const NameSource *) {
+	if (!graph) return {};
+	const FieldUse picking = picked_as(field);
+	std::vector<ReferenceChoice> listed = field.picks != ReferenceKind::None && picking.key_prefix ? keyed_choices(*graph, field)
+	                                                                                             : reference_choices(*graph, picking);
+	// A number naming its definition by itself plus an offset (an ammo's tracer id, FieldUse::name_offset):
+	// each definition by the number that names it (an item's id less 100000), one no such number names
+	// (none above 0) left out; its own name kept as the symbol it stands for.
+	if (picking.name_offset) {
+		std::vector<ReferenceChoice> offset;
+		for (ReferenceChoice &choice : listed) {
+			const std::optional<int> id = strutil::parse_int(choice.name);
+			if (!id || int64_t(*id) - picking.name_offset <= 0) continue;
+			choice.symbol = std::move(choice.name);
+			choice.symbol_scope = picking.scope;
+			choice.name = std::to_string(int64_t(*id) - picking.name_offset);
+			offset.push_back(std::move(choice));
+		}
+		listed = std::move(offset);
+	}
+	return listed;
 }
 
 size_t field_name_limit(const FieldUse &field) {

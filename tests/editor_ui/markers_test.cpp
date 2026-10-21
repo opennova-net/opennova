@@ -841,6 +841,90 @@ void test_shortcuts() {
 	CHECK(ui.drain().empty(), "raising nothing");
 }
 
+// The editor's quiet lines (the prose rule, ui/ui_kit.h): a warning and a refusal on one line cut to it,
+// whole in their tooltips, each in its severity's colour; a button naming what it acts on cut in its middle,
+// its id its verb's whatever the name, never acting while disabled.
+// A finding's words cut to a line drop their witness citations; the rest stands as written.
+void test_without_citations() {
+	CHECK(ui_kit::without_citations("Reads past it [orig: ItemDef_ParseProperty @ 0x49eb00]; fix it.") ==
+	              "Reads past it; fix it.",
+	      "a citation and the blank before it go");
+	CHECK(ui_kit::without_citations("A [orig: A @ 0x1] and B [orig: B @ 0x2]") == "A and B", "every citation goes");
+	CHECK(ui_kit::without_citations("No citation [here] at all.") == "No citation [here] at all.",
+	      "other brackets stand");
+	CHECK(ui_kit::without_citations("Cut [orig: never closed") == "Cut [orig: never closed", "an unclosed one stands");
+}
+
+void test_quiet_lines() {
+	NullBackend backend;
+	ImGuiIO &io = ImGui::GetIO();
+	const std::string long_name = "a_texture_whose_name_runs_far_past_the_window_end.tga";
+	const std::string warning = "The save drops the lines the game skips, and the comments with them.";
+	bool pressed = false;
+	ImGuiID id = 0;
+	ImVec2 at;
+	ImVec2 button_max;
+	float edge = 0.0f;
+	bool enabled = true;
+	const auto frame_of = [&](ImVec2 mouse) {
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(240.0f, 300.0f));
+		ImGui::Begin("quiet");
+		edge = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+		ui_kit::warning_line(warning);
+		at = ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) * 0.5f,
+		            (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) * 0.5f);
+		ui_kit::refusal_text("Refused.");
+		pressed = ui_kit::named_action("Import", long_name, "...", enabled, "Opens the import dialog.") || pressed;
+		id = ImGui::GetItemID();
+		button_max = ImGui::GetItemRectMax();
+		ImGui::End();
+		const std::string text = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return text;
+	};
+	const std::string away = frame_of(ImVec2(-100.0f, -100.0f));
+	CHECK(away.find(warning) == std::string::npos && away.find("The save drops") != std::string::npos &&
+	              away.find("...") != std::string::npos,
+	      "a warning line is one line, cut to the window");
+	CHECK(away.find("Refused.") != std::string::npos, "a refusal's words");
+	CHECK(id == ImHashStr("###Import", 0, ImHashStr("quiet")) && button_max.x <= edge + 0.5f &&
+	              away.find("Import a_") != std::string::npos && away.find("end.tga...") != std::string::npos,
+	      "a named action cut in its middle, its id its verb's");
+	ImGuiWindow *window = ImGui::FindWindowByName("quiet");
+	bool warned = false, refused = false;
+	const ImU32 amber = ImGui::GetColorU32(ui_kit::warning_color());
+	const ImU32 red = ImGui::GetColorU32(ui_kit::refusal_color());
+	for (const ImDrawVert &vertex : window->DrawList->VtxBuffer) {
+		warned = warned || vertex.col == amber;
+		refused = refused || vertex.col == red;
+	}
+	CHECK(warned && refused, "a warning in the warning's colour, a refusal in the refusal's");
+	CHECK(ui_kit::warning_color().x == ui_kit::severity_color(DiagnosticSeverity::Warning).x &&
+	              ui_kit::refusal_color().y == ui_kit::severity_color(DiagnosticSeverity::Error).y,
+	      "the colours are the severities'");
+	frame_of(at);
+	CHECK(frame_of(at).find(warning) != std::string::npos, "the whole warning in its tooltip");
+	CHECK(std::string(ui_kit::reading_references()).find("references") != std::string::npos,
+	      "one wording while the references are read");
+	// Disabled, a named action never acts on a click.
+	for (const bool on : {false, true}) {
+		enabled = on;
+		pressed = false;
+		const ImVec2 button(button_max.x - 4.0f, button_max.y - 4.0f);
+		frame_of(button);
+		io.AddMouseButtonEvent(0, true);
+		frame_of(button);
+		io.AddMouseButtonEvent(0, false);
+		frame_of(button);
+		CHECK(pressed == on, on ? "a named action acts on a click" : "a disabled named action never acts");
+	}
+}
+
 } // namespace
 
 void run_marker_tests() {
@@ -855,6 +939,8 @@ void run_marker_tests() {
 	test_output_window();
 	test_output_follows();
 	test_shortcuts();
+	test_quiet_lines();
+	test_without_citations();
 }
 
 } // namespace editor_ui_test

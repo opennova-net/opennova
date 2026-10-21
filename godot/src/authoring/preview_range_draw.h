@@ -45,11 +45,6 @@ public:
 	void show_tracers(const std::vector<opennova::editor::DefinitionTrail> &trails, Camera3D &camera,
 			int64_t time_ms);
 
-	// Its nodes, for the device tests.
-	MeshInstance3D *target() const { return target_; }
-	Ref<ArrayMesh> tracer_mesh() const { return tracer_mesh_; }
-	ScarPresenter *scars() const { return scars_; }
-
 private:
 	MeshInstance3D *target_ = nullptr;
 	Ref<ArrayMesh> target_mesh_;

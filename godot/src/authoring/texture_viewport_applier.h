@@ -38,12 +38,6 @@ public:
 	// The editor's preview background around the texture (its own 0.16 grey on Dark).
 	void background(opennova::editor::PreviewBackground background) override;
 
-	// What it holds (a GUT device test reads it): the levels uploaded, the level bound, the shader's
-	// placement.
-	int levels() const { return int(levels_.size()); }
-	int bound_level() const { return bound_; }
-	ShaderMaterial *material() const { return material_.ptr(); }
-
 private:
 	ColorRect *rect_ = nullptr;
 	uint64_t rect_id_ = 0;

@@ -172,6 +172,39 @@ void layout_at(const std::string &text, const ParticleKeyBlock &block, const std
 
 } // namespace
 
+const particle::KeyPlace *particle_key_place(const particle::ParticlePlaces &places, BlockKind kind, size_t index,
+		const std::string &key) {
+	const particle::KeyPlace *found = nullptr;
+	for (const particle::KeyPlace &place : places.keys)
+		if (place.block == kind && place.index == index && strutil::iequals(place.key, key)) found = &place;
+	return found;
+}
+
+bool particle_value_name(const std::string &text, size_t offset, size_t length, size_t nth, const std::string &name,
+		size_t &at) {
+	const size_t end = std::min(text.size(), offset + length);
+	const auto cuts = [](char c, bool quoted) { return c == '"' || (!quoted && (c == ' ' || c == '\t' || c == ',')); };
+	bool quoted = false;
+	size_t count = 0;
+	for (size_t i = std::min(offset, end); i < end;) {
+		if (cuts(text[i], quoted)) {
+			if (text[i] == '"') quoted = !quoted;
+			++i;
+			continue;
+		}
+		size_t j = i;
+		while (j < end && !cuts(text[j], quoted)) ++j;
+		const bool separator = j - i == 1 && text[i] == '=';
+		if (!separator && count++ == nth) {
+			if (text.compare(i, j - i, name) != 0) return false;
+			at = i;
+			return true;
+		}
+		i = j;
+	}
+	return false;
+}
+
 std::vector<ParticleKeyBlock> particle_key_blocks(const TextDocument &document, bool *read) {
 	std::vector<ParticleKeyBlock> out;
 	particle::ParticleFile file;
@@ -367,6 +400,33 @@ bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::str
 }
 
 } // namespace
+
+bool particle_name_edit(const ParticleKeyField &field, const TextSpan &name, const std::string &to, Edit &out,
+		std::string &why) {
+	if (!field.row || !field.present || name.line != field.span.line || name.column < field.span.column ||
+	    name.column + name.length > field.span.column + field.span.length) {
+		why = "the name is not in the value the block writes";
+		return false;
+	}
+	if (to.empty() || to.find_first_of(" \t,") != std::string::npos) {
+		why = to.empty() ? "an empty name, which the game reads as none"
+		                 : "the game's tokenizer ends a name at a blank or a ',': it would read '" +
+		                           to.substr(0, to.find_first_of(" \t,")) + "' and more words after it";
+		return false;
+	}
+	// An effect's member goes in a name slot of the effect's (kPdefsNameSlot), as Rename everywhere refuses a member's
+	// name the slot cannot hold (GraphEdge::width).
+	if (field.row->value == particle::KeyValueKind::Members && to.size() >= kPdefsNameSlot) {
+		why = "the game keeps an effect's member in a slot of " + std::to_string(kPdefsNameSlot - 1) + " characters: '" +
+		      to + "' has " + std::to_string(to.size());
+		return false;
+	}
+	std::string value = field.value;
+	value.replace(name.column - field.span.column, name.length, to);
+	if (!particle_key_value_ok(*field.row, value, why)) return false;
+	out = TextDocument::replace(name, to);
+	return true;
+}
 
 bool particle_key_edit(const TextDocument &document, const ParticleKeyBlock &block, const std::string &key,
 		const std::string &value, Edit &out, std::string &why, const ParticleKeyField *field) {

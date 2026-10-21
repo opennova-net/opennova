@@ -90,6 +90,57 @@ ImVec4 severity_color(DiagnosticSeverity severity) {
 	return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
+ImVec4 warning_color() { return severity_color(DiagnosticSeverity::Warning); }
+
+ImVec4 refusal_color() { return severity_color(DiagnosticSeverity::Error); }
+
+void warning_line(const std::string &text, const std::string &tip) {
+	ImGui::PushStyleColor(ImGuiCol_Text, warning_color());
+	clipped_text(text, tip);
+	ImGui::PopStyleColor();
+}
+
+void refusal_text(const std::string &text) {
+	ImGui::PushStyleColor(ImGuiCol_Text, refusal_color());
+	clipped_text(text);
+	ImGui::PopStyleColor();
+}
+
+const char *reading_references() { return "Reading the project's references..."; }
+
+std::string without_citations(const std::string &text) {
+	std::string out;
+	out.reserve(text.size());
+	size_t at = 0;
+	while (at < text.size()) {
+		const size_t cite = text.find("[orig:", at);
+		if (cite == std::string::npos) break;
+		const size_t end = text.find(']', cite);
+		if (end == std::string::npos) break;
+		out.append(text, at, cite - at);
+		while (!out.empty() && out.back() == ' ') out.pop_back();
+		at = end + 1;
+	}
+	out.append(text, at, std::string::npos);
+	return out;
+}
+
+bool named_action(const std::string &verb, const std::string &name, const char *tail, bool enabled,
+                  const std::string &tip, bool small) {
+	const ImGuiStyle &style = ImGui::GetStyle();
+	const std::string before = verb + " ", after = tail ? tail : "";
+	const float room = ImGui::GetContentRegionAvail().x - style.FramePadding.x * 2.0f -
+	                   text_width(before.c_str()) - text_width(after.c_str());
+	const std::string label = before + fit_middle(name, std::max(0.0f, room)) + after + "###" + verb;
+	ImGui::BeginDisabled(!enabled);
+	const bool pressed = small ? ImGui::SmallButton(label.c_str()) : ImGui::Button(label.c_str());
+	// Held back by an enclosing BeginDisabled too (the busy gate), as a tool is.
+	const bool held = (ImGui::GetItemFlags() & ImGuiItemFlags_Disabled) != 0;
+	ImGui::EndDisabled();
+	tooltip(tip);
+	return pressed && enabled && !held;
+}
+
 void severity_marker(DiagnosticSeverity severity) {
 	const float size = ImGui::GetFrameHeight();
 	const ImVec2 at = ImGui::GetCursorScreenPos();

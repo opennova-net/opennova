@@ -55,9 +55,6 @@ char g_filter[64] = {};
 // What the Move to another event picker's filter holds.
 char g_events_filter[64] = {};
 
-const ImVec4 kMuted(0.70f, 0.70f, 0.70f, 1.0f);
-const ImVec4 kWarn(0.95f, 0.75f, 0.35f, 1.0f);
-
 // The types of a list in a popup's body, by group, a line each in its tooltip, filtered by name or
 // group: the one chosen (the popup closed), null while none is.
 const LogicType *type_menu(bool actions, const LogicType *current) {
@@ -82,7 +79,7 @@ const LogicType *type_menu(bool actions, const LogicType *current) {
 			ImGui::PopID();
 			ImGui::PopID();
 		}
-		if (!shown) ui_kit::empty_state("No type matches the filter.");
+		if (!shown) ui_kit::nothing_matches(g_filter, "type");
 	}
 	ImGui::EndChild();
 	if (chosen) {
@@ -127,9 +124,8 @@ void record_tools(Workspace &workspace, const MissionDocument &mission, const Vi
 	if (ui_kit::tool(row, "Down", editable && index + 1 < count,
 	                 index + 1 < count ? "Moves it after the one below it." : "It is the last.", true))
 		window_requests::edit(workspace, mission, EditOperation::Move, record, index + 1);
-	if (ui_kit::tool(row, "Move to event...", editable, "Moves it to the end of another event's list (one undo step).", true))
-		ImGui::OpenPopup("move_to");
-	if (ImGui::BeginPopup("move_to")) {
+	if (ui_kit::tool_popup(row, "Move to event...", "move_to", editable,
+	                       "Moves it to the end of another event's list (one undo step).", true)) {
 		if (const NodeId to = event_menu(mission, names, record.row)) {
 			std::vector<Edit> edits;
 			std::string refusal;
@@ -148,7 +144,7 @@ CardState &inspector_cards() {
 	return state;
 }
 
-// An event's card as the board draws it (S24 A7), over the Inspector's width: its sentence above it.
+// An event's card as the board draws it (S24 A7), over the Inspector's width: its sentence above it, on one line.
 void event_form(Workspace &workspace, const MissionDocument &mission, NodeId event, InspectorTaken &taken, bool editable) {
 	const SessionView &view = workspace.view();
 	const ViewNames names(view, mission);
@@ -158,8 +154,7 @@ void event_form(Workspace &workspace, const MissionDocument &mission, NodeId eve
 		return;
 	taken.fields = {"flags", "reset_after", "delay"};
 	taken.collections = {node_kind(MissionKind::Trigger), node_kind(MissionKind::Action)};
-	ImGui::TextWrapped("%s", card.words.sentence.c_str());
-	ImGui::Spacing();
+	ui_kit::clipped_text(card.words.sentence);
 	CardContext context{workspace, mission, names.source(), editable, view.documents.selection.primary,
 	                    view.workspace.document(mission.path()).pick, inspector_cards()};
 	draw_mission_card(context, card);
@@ -181,11 +176,8 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 		if (!unread) taken.fields.push_back("param" + std::to_string(slot + 1));
 	}
 	taken.collections = {node_kind(MissionKind::Trigger), node_kind(MissionKind::Action)};
-	// Its event, in words: a click goes there.
-	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-	const std::string event = mission.record_name(form.event) + ": " + form.sentence;
-	ImGui::TextWrapped("%s", event.c_str());
-	ImGui::PopStyleColor();
+	// Its event, in words, on one line (whole in its tooltip); Go to its event selects it.
+	ui_kit::quiet_text(mission.record_name(form.event) + ": " + form.sentence);
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Go to its event", true, "Selects the event this " + std::string(form.action ? "action" : "trigger") + " is in.", true))
 		window_requests::select(workspace, mission, form.event);
@@ -257,11 +249,8 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 			ImGui::PopID();
 		}
 	}
-	if (!form.unread.empty()) {
-		ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
-		ImGui::TextWrapped("It holds values its type does not read (shown below, marked ignored).");
-		ImGui::PopStyleColor();
-	}
+	if (!form.unread.empty())
+		ui_kit::warning_line("It holds values its type does not read.", "They are shown below, marked ignored.");
 	record_tools(workspace, mission, names, record, form.index, form.count, editable);
 	ImGui::Separator();
 }
@@ -305,12 +294,8 @@ void draw_mission_uses(Workspace &workspace, const Document &document, const Nod
 	                                              : "Used by " + std::to_string(uses.uses.size()) + " trigger" +
 	                                                        (uses.uses.size() == 1 ? "" : "s") + " or action" +
 	                                                        (uses.uses.size() == 1 ? "" : "s") + " of the events";
-	ImGui::TextWrapped("%s", heading.c_str());
-	if (!uses.inert.empty()) {
-		ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
-		ImGui::TextWrapped("%s", uses.inert.c_str());
-		ImGui::PopStyleColor();
-	}
+	ui_kit::clipped_text(heading);
+	if (!uses.inert.empty()) ui_kit::warning_line(uses.inert);
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(uses.uses.size()));
 	while (clipper.Step())
@@ -320,7 +305,7 @@ void draw_mission_uses(Workspace &workspace, const Document &document, const Nod
 			const std::string line = "Event " + std::to_string(use.event_index + 1) + ": " + use.words;
 			if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()))
 				workspace.request(request::open_record(document.path(), use.record, use.field));
-			ui_kit::tooltip(line + "\n\n" + use.sentence + "\n\nA click goes there.");
+			ui_kit::tooltip(line + "\n\n" + use.sentence);
 			ImGui::PopID();
 		}
 	ImGui::PopID();

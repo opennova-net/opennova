@@ -21,6 +21,7 @@
 #include <editor/graph/project_validation.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
+#include <formats/env/env.h>
 
 namespace fs = std::filesystem;
 
@@ -85,9 +86,14 @@ struct OriginalFiles::Run {
 	ProjectChecks checks;
 	size_t slot = 0;
 	bool begun = false;
-	std::chrono::steady_clock::duration spent{};
+	// The round under way: the files it validates and the names they are of; its missions added once the graph
+	// holds the install (add_scope_missions).
+	ValidationScope scope;
+	std::set<std::string> round;
+	bool scope_missions = false;
+	std::chrono::steady_clock::duration spent{}, round_spent{};
 
-	ValidationInput input() const { return {paths, *document, *scan, open}; }
+	ValidationInput input() const { return {paths, *document, *scan, open, &scope}; }
 };
 
 OriginalFiles::OriginalFiles() : data_(std::make_shared<const OriginalData>()) {}
@@ -95,7 +101,7 @@ OriginalFiles::OriginalFiles() : data_(std::make_shared<const OriginalData>()) {
 OriginalFiles::~OriginalFiles() = default;
 
 void OriginalFiles::want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document,
-                         const void *scan) {
+                         const void *scan, const std::vector<std::string> &names) {
 	const std::string game = document ? document->target_game : std::string();
 	// The install as the project imports it moves with the project's expansion (install_spec): another one
 	// is another install to judge against (ADR 0046 S16).
@@ -107,10 +113,14 @@ void OriginalFiles::want(const std::string &install, const std::shared_ptr<const
 		expansion_ = expansion;
 		document_ = document;
 		scan_ = scan;
+		wanted_.insert(names.begin(), names.end());
 		if (!install_.empty() && document_) start();
 		return;
 	}
 	document_ = document;
+	// The names not wanted before, validated at the next round (one under way goes on).
+	for (const std::string &name : names)
+		if (wanted_.insert(name).second && !covered_.count(name)) pending_.insert(name);
 	if (scan == scan_) return;
 	scan_ = scan;
 	// A new scan (a Refresh, a save, an import): the install's folder looked at again, and validated again
@@ -122,6 +132,60 @@ void OriginalFiles::start() {
 	run_.reset();
 	folder_ = folder_state();
 	phase_ = Phase::Mount;
+	mounted_ = false;
+	covered_.clear();
+	pending_ = wanted_;
+}
+
+void OriginalFiles::begin_round() {
+	Run &run = *run_;
+	run.round = wanted_;
+	pending_.clear();
+	run.scope.paths.clear();
+	run.scope.tiles = false;
+	for (const std::string &name : run.round)
+		if (const AssetEntry *entry = run.scan->find(name)) {
+			run.scope.paths.insert(entry->relative_path);
+			run.scope.tiles = run.scope.tiles || entry->kind == AssetKind::TileInfo;
+		}
+	run.scope.taken();
+	run.scope_missions = false;
+	// The project checks start over: what each kept of the round before was made over that round's files whose
+	// records were checked (a menu outside it kept unread, its stamps standing), which this round's widen, and a
+	// check keeps a file until its stamps move.
+	run.checks.clear();
+	run.validation = std::make_unique<ProjectValidation>(run.graph, run.cache, run.readings);
+	run.slot = 0;
+	run.begun = false;
+	run.round_spent = {};
+	phase_ = Phase::Validate;
+}
+
+void OriginalFiles::add_scope_missions() {
+	Run &run = *run_;
+	run.scope_missions = true;
+	// The terrain gate's findings (graph/use_checks.cpp check_terrain_admission) land on a mission, on the line of
+	// overcast.def or of its environment that set what the gate refuses, and take a terrain's own refusal back
+	// where every mission reading it loads it: each mission whose terrain or environment is one of the scope's
+	// files is judged with them (every mission for overcast.def, which every terrain's load reads).
+	std::set<std::string> missions;
+	for (const std::string &path : run.scope.paths) {
+		const AssetEntry *entry = run.scan->at_path(path);
+		if (!entry) continue;
+		if (pff::normalized_logical_name(entry->logical_name) == pff::normalized_logical_name(env::kOvercastFile)) {
+			for (const AssetEntry &each : run.scan->entries)
+				if (each.kind == AssetKind::Mission) missions.insert(each.relative_path);
+			continue;
+		}
+		if (entry->kind != AssetKind::Terrain && entry->kind != AssetKind::Environment) continue;
+		for (const GraphEdge *edge : run.graph.referrers_of_file(path)) {
+			const AssetEntry *source = run.scan->at_path(edge->source);
+			if (source && source->kind == AssetKind::Mission) missions.insert(source->relative_path);
+		}
+	}
+	const size_t before = run.scope.paths.size();
+	run.scope.paths.insert(missions.begin(), missions.end());
+	if (run.scope.paths.size() != before) run.scope.taken();
 }
 
 // The install folder's files (their names, sizes and last writes), what a patch over it moves.
@@ -146,7 +210,10 @@ bool OriginalFiles::step(uint64_t bytes) {
 	if (settled()) return true;
 	const auto began = std::chrono::steady_clock::now();
 	const auto spent = [&] {
-		if (run_) run_->spent += std::chrono::steady_clock::now() - began;
+		if (!run_) return;
+		const auto took = std::chrono::steady_clock::now() - began;
+		run_->spent += took;
+		run_->round_spent += took;
 	};
 	switch (phase_) {
 	case Phase::Mount: {
@@ -160,12 +227,14 @@ bool OriginalFiles::step(uint64_t bytes) {
 		if (!game->open(install_spec(install_, *document_), why)) {
 			// An install that does not mount: none of the project's findings is the original's.
 			run_.reset();
+			pending_.clear();
 			phase_ = Phase::Done;
 			OriginalData none;
 			none.ready = true;
 			publish(std::move(none));
 			return true;
 		}
+		mounted_ = true;
 		run_->files = std::make_shared<InstallFileSource>(std::move(game));
 		run_->paths = ProjectPaths::for_root(install_);
 		run_->paths.files = run_->files;
@@ -197,16 +266,21 @@ bool OriginalFiles::step(uint64_t bytes) {
 		}
 		if (run_->scanned == run_->names.size()) {
 			run_->scan->index();
-			run_->validation = std::make_unique<ProjectValidation>(run_->graph, run_->cache, run_->readings);
-			phase_ = Phase::Validate;
+			listed_ = run_->scan->entries.size();
+			begin_round();
 		}
 		spent();
 		return false;
 	}
-	case Phase::Validate:
-		if (run_->validation->step(run_->input(), bytes)) phase_ = Phase::Checks;
+	case Phase::Validate: {
+		const bool done = run_->validation->step(run_->input(), bytes);
+		// The graph holds the install from its update's step on: the scope's missions, before the uses' headers
+		// and the files' own findings are asked.
+		if (!run_->scope_missions && run_->validation->graph_read()) add_scope_missions();
+		if (done) phase_ = Phase::Checks;
 		spent();
 		return false;
+	}
 	case Phase::Checks: {
 		// The document types' project checks over the install's files, each stepped (a menu a step).
 		const ValidationInput input = run_->input();
@@ -233,25 +307,57 @@ bool OriginalFiles::step(uint64_t bytes) {
 		return false;
 	}
 	case Phase::Rows: {
-		// Every finding about a file of the install, keyed, by the file's logical name; then everything the
-		// run held let go (its graph, its files' findings, its checks, the mount).
+		// Every finding about a file of a name the round covers, keyed, by the file's logical name. The run is
+		// kept (its listing, graph, files' findings and checks) for the names a later row is about.
 		std::vector<Diagnostic> rows = project_rows(run_->input(), run_->graph, run_->cache);
 		run_->checks.append_findings(rows);
 		OriginalData data;
 		data.ready = true;
-		for (const Diagnostic &d : rows)
-			if (!d.asset.empty()) ++data.findings[pff::normalized_logical_name(basename_of(d.asset))][original_finding_key(d)];
+		data.scoped = true;
+		data.covered = run_->round;
+		for (const Diagnostic &d : rows) {
+			if (d.asset.empty()) continue;
+			const std::string name = pff::normalized_logical_name(basename_of(d.asset));
+			if (data.covered.count(name)) ++data.findings[name][original_finding_key(d)];
+		}
 		spent();
-		files_ = run_->scan->entries.size();
-		last_ms_ = std::chrono::duration<double, std::milli>(run_->spent).count();
+		files_ = run_->scope.paths.size();
+		last_ms_ = std::chrono::duration<double, std::milli>(validations_ ? run_->round_spent : run_->spent).count();
 		++validations_;
-		run_.reset();
+		covered_ = run_->round;
+		for (const std::string &name : wanted_)
+			if (!covered_.count(name)) pending_.insert(name);
+		// The mount let go, the install's archives free for a patch: the next round mounts it again.
+		run_->files.reset();
+		run_->paths.files.reset();
 		phase_ = Phase::Done;
 		publish(std::move(data));
-		return true;
+		return pending_.empty();
 	}
-	case Phase::Idle:
-	case Phase::Done: break;
+	case Phase::Done:
+		// Names wanted since the last round: another round over the run as it stands, the install mounted again
+		// (one that moved since starts over: what the run holds is of its files as they were).
+		if (run_ && mounted_ && !pending_.empty()) {
+			const auto began_round = std::chrono::steady_clock::now();
+			if (folder_state() != folder_) {
+				start();
+				return false;
+			}
+			auto game = std::make_unique<InstallView>();
+			std::string why;
+			if (!game->open(install_spec(install_, *document_), why)) {
+				start(); // the next step finds it does not mount
+				return false;
+			}
+			run_->files = std::make_shared<InstallFileSource>(std::move(game));
+			run_->paths.files = run_->files;
+			begin_round();
+			run_->round_spent = std::chrono::steady_clock::now() - began_round;
+			run_->spent += run_->round_spent;
+			return false;
+		}
+		break;
+	case Phase::Idle: break;
 	}
 	return true;
 }
@@ -271,6 +377,10 @@ void OriginalFiles::clear() {
 	scan_ = nullptr;
 	run_.reset();
 	phase_ = Phase::Idle;
+	mounted_ = false;
+	wanted_.clear();
+	covered_.clear();
+	pending_.clear();
 	publish(OriginalData());
 }
 

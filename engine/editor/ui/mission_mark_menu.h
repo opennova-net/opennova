@@ -29,5 +29,8 @@ NodeAddress mission_menu_event(const NodeAddress &primary);
 
 void draw_mission_mark_items(Workspace &workspace, const MissionDocument &mission, const MissionMarkMenu &menu,
 		bool editable);
+// The view's Delete over the selection (the 3D view's menu, the map's): one batch removing each selected record of
+// `mission`, a selected stop taking its marker as Delete on the picture does (mission_view_removals).
+void delete_mission_selection(Workspace &workspace, const MissionDocument &mission);
 
 } // namespace opennova::editor

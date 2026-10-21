@@ -80,13 +80,12 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	ui_kit::check(row, "Grid", &options.grid,
 	              "A metre's squares on the ground the effect spawns on (the editor's aid).");
 	// The mission wind every GLOBALWIND particle drifts with, as a mission's header gives it.
-	row.next(ui_kit::button_width("Wind"));
-	if (ImGui::Button("Wind")) ImGui::OpenPopup("wind");
-	ui_kit::tooltip(options.play.wind_speed ? "The mission wind: speed " + std::to_string(options.play.wind_speed) +
-	                                                  ", from " + std::to_string(options.play.wind_direction) + " degrees."
-	                                        : std::string("No wind: a mission's header sets the wind its GLOBALWIND "
-	                                                      "particles drift with."));
-	if (ImGui::BeginPopup("wind")) {
+	if (ui_kit::tool_popup(row, "Wind", "wind", true,
+	                       options.play.wind_speed ? "The mission wind: speed " + std::to_string(options.play.wind_speed) +
+	                                                         ", from " + std::to_string(options.play.wind_direction) +
+	                                                         " degrees."
+	                                               : std::string("No wind: a mission's header sets the wind its GLOBALWIND "
+	                                                             "particles drift with."))) {
 		int speed = options.play.wind_speed, direction = options.play.wind_direction;
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
 		if (ImGui::InputInt("Speed", &speed)) options.play.wind_speed = std::clamp(speed, 0, 1000);
@@ -115,8 +114,8 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	// graphics the project lacks.
 	const particle::EffectClosure &closure = model.closure();
 	if (!model.loaded())
-		ui_kit::clipped_text("The game does not load this file (a gore set the project does not pick): it shows what "
-		                     "the game spawns for the name.");
+		ui_kit::warning_line("The game does not load this file.",
+		                     "A gore set the project does not pick: the picture shows what the game spawns for the name.");
 	if (closure.found && closure.source != model.path()) {
 		ui_kit::WrapRow note;
 		const std::string said = "The game spawns " + model.shown_effect() + " as " + closure.source + " defines it, which it reads first.";
@@ -129,7 +128,8 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 		ui_kit::clipped_text(said);
 	}
 	else if (closure.stock)
-		ui_kit::clipped_text("No file the game loads defines " + model.shown_effect() + ": it spawns the stock effect in its place.");
+		ui_kit::warning_line("No file the game loads defines " + model.shown_effect() + ".",
+		                     "The game spawns the stock effect in its place.");
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y));
 }
 

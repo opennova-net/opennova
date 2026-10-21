@@ -23,6 +23,7 @@ namespace opennova::editor {
 // (S13 A8): the first's outputs pack, the second the game never asks for.
 struct BuildEntry {
 	std::string logical_name;  // the engine-facing name (the archive entry name)
+	std::string key;           // its normalized form (the scan's AssetEntry::key), which an archive sorts by
 	std::string source_path;   // absolute path of the project file
 	std::string relative_path; // the project file's path, project-relative (what a finding about it names)
 	uint64_t size_bytes = 0;
@@ -98,6 +99,15 @@ struct BuildPlan {
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target = BuildTarget(),
                      const BaseNames *base = nullptr, const ShippedFiles *shipped = nullptr);
+// The plan's refusals alone (BuildPlan::blockers), no file placed: what Problems marks "Blocks the build" and the
+// build_gate query lists, made over the same arguments. plan_build makes its own through it, so the two never
+// differ; `diagnostics`, when given, receives the plan's findings (BuildPlan::diagnostics) as well.
+std::vector<Diagnostic> plan_blockers(const ProjectPaths &paths, const AssetScan &scan,
+                                      const RequirementReport &requirements,
+                                      const std::vector<Diagnostic> &document_findings,
+                                      const BuildTarget &target = BuildTarget(), const BaseNames *base = nullptr,
+                                      const ShippedFiles *shipped = nullptr,
+                                      std::vector<Diagnostic> *diagnostics = nullptr);
 
 // The plan's own findings over the scan alone, which plan_build adds to the gate it reads (each one the gate
 // holds already it leaves): an archive the project holds (refused), a player's own file (left out), a

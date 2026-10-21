@@ -35,8 +35,7 @@ std::string name_list(const std::vector<std::string> &names) {
 }
 
 std::string missing_banner(const std::vector<std::string> &missing) {
-	return name_list(missing) + (missing.size() == 1 ? " is" : " are") +
-	       " not in the project (Refresh in Files after adding files outside the editor).";
+	return name_list(missing) + (missing.size() == 1 ? " is" : " are") + " not in the project.";
 }
 
 std::string unreadable_banner(const std::vector<std::string> &unreadable) {
@@ -259,14 +258,9 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 	ImGui::EndDisabled();
 
 	// Arrange: the selected windows aligned to the primary, spread, or reordered.
-	row.next(ui_kit::button_width("Arrange"));
-	ImGui::BeginDisabled(frame.windows.empty() || !frame.editable);
-	if (ImGui::Button("Arrange")) ImGui::OpenPopup("arrange");
-	ImGui::EndDisabled();
-	ui_kit::tooltip("Align the selected windows to the primary one (the last selected), spread "
-	                "them evenly, or change their drawing order. Shift+click or drag a box to "
-	                "select several.");
-	if (ImGui::BeginPopup("arrange")) {
+	if (ui_kit::tool_popup(row, "Arrange", "arrange", !frame.windows.empty() && frame.editable,
+	                       "Align the selected windows to the primary one (the last selected), spread them evenly, or "
+	                       "change their drawing order. Shift+click or drag a box to select several.")) {
 		arrange_items(workspace, frame);
 		ImGui::EndPopup();
 	}
@@ -295,7 +289,7 @@ void MenuViewportView::Tools::try_tools(Workspace &workspace, ui_kit::WrapRow &r
 	if (!menu.try_error().empty()) {
 		row.next(ui_kit::text_width(menu.try_error().c_str()));
 		ImGui::AlignTextToFramePadding();
-		ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", menu.try_error().c_str());
+		ui_kit::warning_line(menu.try_error());
 	}
 	if (!tried || !tried->started()) return;
 	// The screens it went through, the last few; whole in the tooltip.
@@ -440,14 +434,10 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 		draw_empty(workspace, &model, model.path());
 		return;
 	}
-	if (!menu.missing().empty() || !menu.unreadable().empty()) {
-		ImGui::PushTextWrapPos(0.0f);
-		if (!menu.missing().empty())
-			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", missing_banner(menu.missing()).c_str());
-		if (!menu.unreadable().empty())
-			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", unreadable_banner(menu.unreadable()).c_str());
-		ImGui::PopTextWrapPos();
-	}
+	if (!menu.missing().empty())
+		ui_kit::warning_line(missing_banner(menu.missing()),
+		                     missing_banner(menu.missing()) + "\nRefresh in Files after adding files outside the editor.");
+	if (!menu.unreadable().empty()) ui_kit::warning_line(unreadable_banner(menu.unreadable()));
 	const MenuClipboard board = menu_canvas_clipboard(frame, !view.documents.clipboard.empty());
 	// The zoom and the snap the viewport holds, taken where they moved (a client's set_viewport) before the
 	// toolbar and the canvas draw.
@@ -552,13 +542,11 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 			const std::string name =
 					note.widget >= 0 ? menu.render().compiler().widget_name(note.widget) : screen.name();
 			const std::string line = name + ": " + menu_note_message(note);
-			const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
 			ImGui::PushID(int(i));
-			if (ImGui::Selectable((shown + "###note").c_str())) {
+			if (ui_kit::fitted_selectable(line, "note")) {
 				const NodeAddress address = menu_note_address(note, document, screen, nullptr);
 				window_requests::select(workspace, document, address);
 			}
-			if (shown != line) ui_kit::tooltip(line);
 			ImGui::PopID();
 		}
 	}
