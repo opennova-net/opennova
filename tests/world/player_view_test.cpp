@@ -345,13 +345,24 @@ void test_anchor_chase_quarter_step_and_seeding() {
     CHECK(v.tp_anchor_q16[0] == 0xB8001);
     CHECK(v.tp_anchor[0] > 11.5f && v.tp_anchor[0] < 11.5001f); // the float mirrors the words
 
-    // Leaving third person invalidates; re-entering re-seeds at the current eye.
+    // The anchor runs whatever the view mode: first person keeps easing it
+    // (0x48003 >> 2 = 0x12000), and third person again does not reseed it
+    // (0x36003 >> 2 = 0xD800). [orig: ThirdPersonCamera_Update @0x437AF0 - the
+    // tracked test @0x437AFB, no mode test]
     v.debug_third_person_on_foot = false;
     player_view_tick(v, eye);
-    CHECK(!v.third_person && !v.tp_anchor_valid);
+    CHECK(!v.third_person && v.tp_anchor_valid && v.tp_anchor_q16[0] == 0xCA001);
     v.debug_third_person_on_foot = true;
     player_view_tick(v, eye);
-    CHECK(v.tp_anchor_valid && v.tp_anchor[0] == 16.0f);
+    CHECK(v.tp_anchor_valid && v.tp_anchor_q16[0] == 0xD7801);
+    // A tracked-entity change reseeds it at the Position after that update's
+    // ease. [orig: Camera_SetTrackedEntity @0x4391D0 (@0x439201, the anchor
+    // stores @0x439227..0x43923B)]
+    player_view_track_entity(v, kCameraTrackedTargetKey | 5, false, false);
+    const int32_t target_pos[3] = {-3 * 0x10000, 2 * 0x10000, 0};
+    player_view_anchor_tick(v, target_pos, eye);
+    CHECK(v.tp_anchor_valid && !v.tp_anchor_reseed && v.tp_anchor_q16[0] == -3 * 0x10000 &&
+          v.tp_anchor_q16[1] == 2 * 0x10000 && v.tp_anchor_q16[2] == 0);
 }
 
 // THE MODE ARBITER [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca1f4]:
@@ -368,14 +379,14 @@ void test_mode_arbiter() {
     CHECK(v.third_person_selected);
     player_view_tick(v, eye);
     CHECK(!v.third_person);          // on foot: first person despite the preference
-    CHECK(!v.tp_anchor_valid);
+    CHECK(v.tp_anchor_valid);        // the follow anchor runs whatever the mode
     v.mount.control_seat = true;     // boarded a driver/control seat
     player_view_tick(v, eye);
     CHECK(v.third_person);           // the chase, without any camera write on board
     CHECK(v.tp_anchor_valid);
     v.mount.control_seat = false;    // dismounted (or a gunner/passenger seat)
     player_view_tick(v, eye);
-    CHECK(!v.third_person && !v.tp_anchor_valid);
+    CHECK(!v.third_person && v.tp_anchor_valid);
     // view1st / viewwithgun: first person selected keeps a driver in first person.
     player_view_set_third_person_selected(v, false);
     v.mount.control_seat = true;
@@ -1405,31 +1416,40 @@ void test_bias_view_units() {
 void test_motion_lead_tracker() {
     PlayerViewMotionLead lead;
     int32_t out[3];
-    const float still[3] = {0.0f, 0.0f, 0.0f};
-    player_view_motion_lead_update(lead, still, out);
+    const int32_t still[3] = {0, 0, 0};
+    player_view_motion_lead_step(lead, still);
+    player_view_motion_lead_read(lead, out);
     CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);
 
-    // A 0.2 u/tick onset: the first frame swings the lead opposite the delta.
-    const float onset[3] = {0.2f, 0.0f, 0.0f};
-    player_view_motion_lead_update(lead, onset, out);
+    // A 0.2 u/tick onset (13107 words): the first update swings the lead
+    // opposite the displacement.
+    const int32_t onset[3] = {13107, 0, 0};
+    player_view_motion_lead_step(lead, onset);
+    player_view_motion_lead_read(lead, out);
     CHECK(out[0] < 0);
     CHECK(out[1] == 0 && out[2] == 0);
+    // Reading never steps the tracker.
+    int32_t again[3];
+    player_view_motion_lead_read(lead, again);
+    CHECK(again[0] == out[0]);
 
     // Steady movement decays the lead toward zero (the tracker responds to
     // speed changes, not speed).
     int32_t first = out[0];
     for (int i = 0; i < 300; ++i)
-        player_view_motion_lead_update(lead, onset, out);
+        player_view_motion_lead_step(lead, onset);
+    player_view_motion_lead_read(lead, out);
     CHECK(std::abs(out[0]) < std::abs(first));
     CHECK(std::abs(out[0]) <= 1);
 
-    // A violent delta clamps at the witnessed bounds.
+    // A violent displacement clamps at the witnessed bounds.
     PlayerViewMotionLead hard;
-    const float lurch[3] = {50.0f, 50.0f, 50.0f};
+    const int32_t lurch[3] = {50 * 65536, 50 * 65536, 50 * 65536};
     for (int i = 0; i < 8; ++i)
-        player_view_motion_lead_update(hard, lurch, out);
-    const float stop[3] = {-50.0f, -50.0f, -50.0f};
-    player_view_motion_lead_update(hard, stop, out);
+        player_view_motion_lead_step(hard, lurch);
+    const int32_t stop[3] = {-50 * 65536, -50 * 65536, -50 * 65536};
+    player_view_motion_lead_step(hard, stop);
+    player_view_motion_lead_read(hard, out);
     CHECK(std::abs(out[0]) <= 1024);
     CHECK(std::abs(out[1]) <= 1024);
     CHECK(std::abs(out[2]) <= 4096);

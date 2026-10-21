@@ -220,11 +220,14 @@ void player_view_chase_orbit_look(PlayerViewState &v, int32_t yaw_delta, int32_t
 void player_view_track_entity(PlayerViewState &v, uint32_t tracked, bool mode_changed,
                               bool tracked_dead) {
     if (tracked != v.camera_tracked) {
-        // [orig: Camera_SetTrackedEntity @0x439201..0x43921d]
+        // [orig: Camera_SetTrackedEntity @0x439201..0x43921d; the anchor's reseed
+        //  at the Position @0x439227..0x43923B, which the next anchor tick lands
+        //  after its ease (player_view_anchor_tick)]
         v.camera_tracked = tracked;
         v.chase_orbit_yaw = 0;
         v.chase_orbit_pitch = kTpTrackedOrbitPitchBam;
         v.chase_distance_q16 = kTpTrackedDistanceQ16;
+        v.tp_anchor_reseed = true;
     }
     // [orig: @0x43925f..0x439275 — `test byte [tracked+24h], 2`]
     if (mode_changed && tracked_dead) v.chase_distance_q16 = kTpDeadTargetDistanceQ16;
@@ -303,7 +306,7 @@ void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_c
 
 void player_view_tick(PlayerViewState &v, const int32_t eye_q16[3]) {
     player_view_promote_tick(v);
-    player_view_anchor_tick(v, eye_q16);
+    player_view_anchor_tick(v, eye_q16, eye_q16);
 }
 
 void player_view_promote_tick(PlayerViewState &v) {
@@ -326,19 +329,14 @@ void player_view_promote_tick(PlayerViewState &v) {
     }
 }
 
-void player_view_anchor_tick(PlayerViewState &v, const int32_t eye_q16[3]) {
+void player_view_anchor_tick(PlayerViewState &v, const int32_t position_q16[3],
+                             const int32_t eye_q16[3]) {
     // ThirdPersonCamera_Update's follow anchor, run on every main-frame update
-    // (the single-player pause included: local_player_camera_update).
-    if (v.third_person) {
-        if (!v.tp_anchor_valid) {
-            // Entering third person seeds the track at the eye.
-            // [orig: Camera_SetTrackedEntity @ 0x4391d0 resets on change]
-            for (int i = 0; i < 3; ++i) {
-                v.tp_anchor_q16[i] = eye_q16[i];
-                v.tp_anchor[i] = static_cast<float>(from_fixed(eye_q16[i]));
-            }
-            v.tp_anchor_valid = true;
-        } else if (v.mount.control_seat) {
+    // (the single-player pause included: local_player_camera_update) for the
+    // tracked entity, whatever the view mode [orig: ThirdPersonCamera_Update
+    // @0x437AF0 - the tracked test @0x437AFB, no mode test].
+    if (v.tp_anchor_valid) {
+        if (v.mount.control_seat) {
             // MOUNTED: the anchor chases the CARRIER position lifted
             // max(1.0, 0.375 r) — not Position + CameraOffset — a sixteenth
             // per tick on x/y and a thirty-second on z, in 16.16 with the
@@ -372,8 +370,18 @@ void player_view_anchor_tick(PlayerViewState &v, const int32_t eye_q16[3]) {
                 v.tp_anchor[i] = static_cast<float>(from_fixed(v.tp_anchor_q16[i]));
             }
         }
-    } else {
-        v.tp_anchor_valid = false;
+    }
+    // The track's seed: the first tracked entity, or a change of it after this
+    // update's ease, sets the anchor at the entity's Position, with no
+    // CameraOffset [orig: Camera_SetTrackedEntity @0x4391D0 - the change test
+    // @0x439201, the anchor stores @0x439227..0x43923B].
+    if (!v.tp_anchor_valid || v.tp_anchor_reseed) {
+        for (int i = 0; i < 3; ++i) {
+            v.tp_anchor_q16[i] = position_q16[i];
+            v.tp_anchor[i] = static_cast<float>(from_fixed(position_q16[i]));
+        }
+        v.tp_anchor_valid = true;
+        v.tp_anchor_reseed = false;
     }
 }
 
@@ -934,24 +942,28 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
     if (eye[2] < floor_z) eye[2] = floor_z;
 }
 
-void player_view_motion_lead_update(PlayerViewMotionLead &lead,
-                                    const float tick_delta_units[3],
-                                    int32_t out_lead_q16[3]) {
+void player_view_motion_lead_step(PlayerViewMotionLead &lead,
+                                  const int32_t displacement_q16[3]) {
     // [orig: @0x437bac..0x437c0e — all three lanes compute the SAME recurrence
-    // vel += (prev - new - vel + 16) >> 5 with prev_sample = (tick position
-    // delta) << 8; the x lane merely SCHEDULES it differently (its fresh
-    // sample is computed inline, so the compiler folds `- new` into the final
-    // add) — an instruction-order artifact, not a per-lane asymmetry.]
+    // vel += (prev - new - vel + 16) >> 5 with the sample (Position -
+    // savedLivePose) << 8 @0x437B92..0x437BB2; the x lane merely SCHEDULES it
+    // differently (its fresh sample is computed inline, so the compiler folds
+    // `- new` into the final add) — an instruction-order artifact, not a
+    // per-lane asymmetry.]
     for (int i = 0; i < 3; ++i) {
         // << via uint32: the original's 32-bit shl wraps; signed << would be UB.
         const int32_t sample = static_cast<int32_t>(
-                static_cast<uint32_t>(static_cast<int32_t>(
-                        static_cast<double>(tick_delta_units[i]) * 65536.0))
-                << 8);
-        lead.vel[i] +=
-                (lead.prev_sample[i] - sample - lead.vel[i] + 16) >> 5;
+                static_cast<uint32_t>(displacement_q16[i]) << 8);
+        lead.vel[i] = io::bam_add(lead.vel[i],
+                io::bam_sar(io::bam_add(io::bam_sub(io::bam_sub(lead.prev_sample[i], sample),
+                                                    lead.vel[i]),
+                                        16),
+                            5));
         lead.prev_sample[i] = sample;
     }
+}
+
+void player_view_motion_lead_read(const PlayerViewMotionLead &lead, int32_t out_lead_q16[3]) {
     // [orig: the >> 7 + clamps @ 0x4dd4f2..0x4dd54f]
     for (int i = 0; i < 3; ++i) {
         int32_t v = lead.vel[i] >> 7;

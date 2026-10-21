@@ -1666,7 +1666,7 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
     CHECK(v.on_foot);
     CHECK(!v.in_session);
     CHECK(v.view_tick == 100);
-    CHECK(t.tick_prev_valid);
+    CHECK(v.tp_anchor_valid); // the camera update tracks the local player from here
     // The local dead edge: stamped once at the transition tick, the lerp
     // camera computed on the mode-4 entry, both stable while dead.
     lw.w.logic_tick = 101;
@@ -1679,11 +1679,27 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
     local_player_view_tick(&lw.w, v, t, s, nullptr);
     CHECK(v.camera_mode == 4);
     CHECK(v.death_cam.start_tick == 101); // no re-stamp while dead
-    // The movement delta sampler follows the entity between ticks.
-    lw.entity().position.x += 2.0f;
+    // The FP motion lead steps on the tracked update from the entity's
+    // displacement since its mover-entry stamp, (Position - savedLivePose) << 8
+    // [orig: ThirdPersonCamera_Update @0x437AF0 (@0x437B92..0x437BB2, the
+    // recurrence @0x437BAC..0x437C0E)].
+    Entity &body = lw.entity();
+    body.saved_live_pos[0] = body.position.x.q16;
+    body.saved_live_pos[1] = body.position.y.q16;
+    body.saved_live_pos[2] = body.position.z.q16;
+    body.saved_live_valid = true;
+    body.position.x.q16 += 2 << 16;
+    const PlayerViewMotionLead before = t.motion_lead;
     local_player_view_tick(&lw.w, v, t, s, nullptr);
-    CHECK(t.tick_delta[0] == 2.0f);
-    CHECK(t.tick_delta[1] == 0.0f);
+    const int32_t sample = static_cast<int32_t>(static_cast<uint32_t>(2 << 16) << 8);
+    CHECK(t.motion_lead.prev_sample[0] == sample && t.motion_lead.prev_sample[1] == 0 &&
+          t.motion_lead.prev_sample[2] == 0);
+    // The recurrence in 32-bit words: vel += (prev - new - vel + 16) >> 5.
+    const int32_t inner = static_cast<int32_t>(static_cast<uint32_t>(before.prev_sample[0]) -
+            static_cast<uint32_t>(sample) - static_cast<uint32_t>(before.vel[0]) + 16u);
+    const int32_t expected_vel = static_cast<int32_t>(
+            static_cast<uint32_t>(before.vel[0]) + static_cast<uint32_t>(inner >> 5));
+    CHECK(t.motion_lead.vel[0] == expected_vel);
 }
 
 void test_tick_without_a_player_resolves_first_person() {
@@ -2326,9 +2342,9 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     // Only the ADS contribution drops: the independently clamped motion lead
     // and 4:3 framing drop still follow the hip offset on an airborne frame.
     lw.entity().flags |= kEntityFlagInAir;
-    tracker.tick_delta[0] = 1.0f;
-    tracker.tick_delta[1] = -1.0f;
-    tracker.tick_delta[2] = 4.0f;
+    tracker.motion_lead = PlayerViewMotionLead{};
+    const int32_t displacement[3] = {0x10000, -0x10000, 4 * 0x10000};
+    player_view_motion_lead_step(tracker.motion_lead, displacement);
     float bias[3];
     local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, 800, 600, bias);
     CHECK(bias[0] == 1.0f - 1024.0f / 65536.0f);
@@ -2562,10 +2578,19 @@ void test_view_uses_current_motor_offset_and_live_position() {
     view.debug_third_person_on_foot = true;
     LocalPlayerViewTracker tracker;
     LocalViewSessionInputs session;
+    // The first tracked update seeds the anchor at the Position, with no
+    // CameraOffset; the next one eases a quarter of the way to Position +
+    // CameraOffset in 16.16 [orig: Camera_SetTrackedEntity @0x4391D0
+    // (@0x439227..0x43923B); ThirdPersonCamera_Update @0x437AF0 (@0x437B67..0x437B76,
+    // @0x437C83..0x437CB5)].
     local_player_view_tick(&lw.w, view, tracker, session, nullptr);
-    CHECK(view.tp_anchor[0] == entity.position.x + 0.25f);
-    CHECK(view.tp_anchor[1] == entity.position.y - 0.5f);
-    CHECK(view.tp_anchor[2] == entity.position.z + 1.5f);
+    CHECK(view.tp_anchor_valid && view.tp_anchor_q16[0] == entity.position.x.q16 &&
+          view.tp_anchor_q16[1] == entity.position.y.q16 &&
+          view.tp_anchor_q16[2] == entity.position.z.q16);
+    local_player_view_tick(&lw.w, view, tracker, session, nullptr);
+    CHECK(view.tp_anchor_q16[0] == entity.position.x.q16 + ((0x4000 + 4) >> 2));
+    CHECK(view.tp_anchor_q16[1] == entity.position.y.q16 + ((-0x8000 + 4) >> 2));
+    CHECK(view.tp_anchor_q16[2] == entity.position.z.q16 + ((0x18000 + 4) >> 2));
 
     // A moving carrier/body re-anchors without another render or input sample.
     entity.position.x += 20.0f;
@@ -3976,15 +4001,15 @@ void test_on_foot_anchor_quarter_step_is_integer() {
     PlayerViewState v;
     v.third_person = true;
     const int32_t seed[3] = {0x10000, -0x20000, 0x8000};
-    player_view_anchor_tick(v, seed);
+    player_view_anchor_tick(v, seed, seed);
     CHECK(v.tp_anchor_valid && v.tp_anchor_q16[0] == 0x10000 &&
           v.tp_anchor_q16[1] == -0x20000 && v.tp_anchor_q16[2] == 0x8000);
     const int32_t moved[3] = {0x10007, -0x20000 - 5, 0x8000 - 4};
-    player_view_anchor_tick(v, moved);
+    player_view_anchor_tick(v, moved, moved);
     CHECK(v.tp_anchor_q16[0] == 0x10002);
     CHECK(v.tp_anchor_q16[1] == -0x20001);
     CHECK(v.tp_anchor_q16[2] == 0x8000);
-    player_view_anchor_tick(v, moved);
+    player_view_anchor_tick(v, moved, moved);
     CHECK(v.tp_anchor_q16[0] == 0x10004); // (5 + 4) >> 2
     CHECK(v.tp_anchor_q16[1] == -0x20001); // 4 below now: (-4 + 4) >> 2 = 0
     CHECK(v.tp_anchor_q16[2] == 0x8000);

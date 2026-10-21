@@ -83,15 +83,17 @@ constexpr float kTpMarchGate = 8.0f;
 // 16.16 view position — the net world offset is file_value / 256].
 constexpr float kWeaponDefPosScale = 256.0f;
 
-// The FP viewmodel motion lead: a per-render-frame damped tracker of the
-// tracked entity's per-tick movement delta (<<8), whose output >> 7 — clamped
-// ±1024 on x/y and ±4096 on z (16.16) — is added component-wise onto the
-// view-LOCAL camera offset BEFORE the view rotation (the witnessed
-// pre-rotation add takes the world-delta components raw; no frame
-// conversion). Steady velocity decays the lead toward zero — it responds to
-// speed changes, not speed. [orig: the tracker
-// vel += (prev_sample - new_sample - vel + 16) >> 5 @ 0x437bac..0x437c0e in
-// ThirdPersonCamera_Update; the >> 7 + clamps @ 0x4dd4f2..0x4dd54f in
+// The FP viewmodel motion lead: a per-UPDATE damped tracker of the tracked
+// entity's displacement since its mover-entry stamp (Position - savedLivePose,
+// << 8), stepped by the camera update on every main-frame update, paused ones
+// included; each rendered frame reads it >> 7 — clamped ±1024 on x/y and ±4096
+// on z (16.16) — and adds it component-wise onto the view-LOCAL camera offset
+// BEFORE the view rotation (the witnessed pre-rotation add takes the
+// world-delta components raw; no frame conversion). Steady velocity decays the
+// lead toward zero — it responds to speed changes, not speed. [orig: the
+// tracker vel += (prev_sample - new_sample - vel + 16) >> 5 @ 0x437bac..0x437c0e
+// in ThirdPersonCamera_Update, its samples (Position - +0x80..+0x88) << 8
+// @0x437B92..0x437BB2; the >> 7 + clamps @ 0x4dd4f2..0x4dd54f in
 // Player_UpdateFirstPersonCamera]
 struct PlayerViewMotionLead {
     int32_t vel[3] = {0, 0, 0};
@@ -99,12 +101,13 @@ struct PlayerViewMotionLead {
 };
 constexpr int32_t kFpLeadClampXy = 1024;
 constexpr int32_t kFpLeadClampZ = 4096;
-// Advances the tracker one render frame from the entity's current per-tick
-// movement delta (world units) and returns the clamped lead (16.16, the same
-// value order the retail camera adds).
-void player_view_motion_lead_update(PlayerViewMotionLead &lead,
-                                    const float tick_delta_units[3],
-                                    int32_t out_lead_q16[3]);
+// Steps the tracker one update from the entity's displacement since its
+// mover-entry stamp (16.16 words).
+void player_view_motion_lead_step(PlayerViewMotionLead &lead,
+                                  const int32_t displacement_q16[3]);
+// The clamped lead a rendered frame adds (16.16, the same value order the
+// retail camera adds); reading never steps the tracker.
+void player_view_motion_lead_read(const PlayerViewMotionLead &lead, int32_t out_lead_q16[3]);
 
 // The 4:3 framing compensation: with the viewport aspect at 4:3 or narrower
 // (3*width <= 4*height), the FP camera offset drops 0x500 (0.0195 u) on the
@@ -476,7 +479,13 @@ struct PlayerViewState {
     bool binoculars_view_active = false; // [orig: first-person view g_BinocularsViewActive @ 0xB76538]
     bool nvg_active = false;
     int32_t nvg_gain = kNvgGainMin;
+    // The follow anchor is seeded (a tracked entity is set): it eases on every
+    // update from then on, whatever the view mode; a tracked-entity change
+    // reseeds it at the Position after that update's ease (tp_anchor_reseed)
+    // [orig: g_CameraTrackedEntity, the `if` @0x437AFB; Camera_SetTrackedEntity
+    //  @0x4391D0 (the anchor stores @0x439227..0x43923B)].
     bool tp_anchor_valid = false;
+    bool tp_anchor_reseed = false;
     float tp_anchor[3] = {0.0f, 0.0f, 0.0f}; // mission space (Z-up)
     // The mounted anchor's exact 16.16 carrier: the mounted ease integrates
     // it (>> 4 on x/y, >> 5 on z, half-step rounded) and `tp_anchor` mirrors
@@ -603,7 +612,8 @@ inline constexpr int kViewActionChase = 402;       // viewchase, F4
 void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bits,
                                    int action);
 
-// One 62.5 Hz tick: player_view_promote_tick, then player_view_anchor_tick.
+// One 62.5 Hz tick: player_view_promote_tick, then player_view_anchor_tick over
+// a body whose CameraOffset is zero (its Position is `eye_q16`).
 void player_view_tick(PlayerViewState &v, const int32_t eye_q16[3]);
 
 // The tick's Player_UpdatePerFrame leg: resolve the camera mode, step the
@@ -619,18 +629,21 @@ void player_view_tick(PlayerViewState &v, const int32_t eye_q16[3]);
 // under the pause word [orig: @0x42C184..0x42C18E].
 void player_view_promote_tick(PlayerViewState &v);
 
-// The follow anchor's update: chase the third-person anchor toward `eye_q16`
-// a quarter step in 16.16, `(target - anchor + 4) >> 2` [orig:
-// ThirdPersonCamera_Update @0x437AF0 (@0x437C83..0x437CB5)]. Entering third
-// person seeds the anchor at the eye [orig:
-// Camera_SetTrackedEntity @ 0x4391d0 resets the track on change]; leaving
-// invalidates it. In a control seat the anchor chases the carrier position
-// lifted max(1.0, 0.375 r) instead, a sixteenth per tick horizontally and a
-// thirty-second vertically in 16.16 [orig: ThirdPersonCamera_Update @0x437AF0
-// — the lift @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79]. It runs on
-// every main-frame update, paused ones included (local_player_camera_update).
-// `eye_q16`: the tracked body's Position + CameraOffset, 16.16 words.
-void player_view_anchor_tick(PlayerViewState &v, const int32_t eye_q16[3]);
+// The follow anchor's update, whatever the view mode: a seeded anchor chases
+// `eye_q16` a quarter step in 16.16, `(target - anchor + 4) >> 2` [orig:
+// ThirdPersonCamera_Update @0x437AF0 (@0x437C83..0x437CB5)]; in a control seat
+// it chases the carrier position lifted max(1.0, 0.375 r) instead, a sixteenth
+// per tick horizontally and a thirty-second vertically in 16.16 [orig:
+// ThirdPersonCamera_Update @0x437AF0 — the lift @0x437B1F..0x437B4B, the ease
+// @0x437C56..0x437C79]. An unseeded anchor (no tracked entity yet) or a
+// tracked-entity change (tp_anchor_reseed, after this update's ease) seeds it
+// at `position_q16`, with no CameraOffset [orig: the tracked test @0x437AFB;
+// Camera_SetTrackedEntity @0x4391D0 (@0x439227..0x43923B)]. It runs on every
+// main-frame update, paused ones included (local_player_camera_update).
+// `position_q16` / `eye_q16`: the tracked body's Position, and Position +
+// CameraOffset, 16.16 words.
+void player_view_anchor_tick(PlayerViewState &v, const int32_t position_q16[3],
+                             const int32_t eye_q16[3]);
 
 // Whether the scope-camera interp is mid-ease: its active latch, which holds
 // one call past the last lane snap. Every scope toggle is REFUSED while it

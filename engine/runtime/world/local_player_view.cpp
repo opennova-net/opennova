@@ -763,18 +763,6 @@ void local_player_view_tick(World *world, PlayerViewState &v,
                 v.binoculars_requested && v.binoculars_view_active ? hud::kTipEventBinocularsOn
                                                                    : hud::kTipEventBinocularsOff));
     t.binocular_tip_prev = v.binoculars_requested;
-    // The per-tick movement delta the FP motion lead samples per render frame
-    // (retail: the (position - entity+0x80 prev-position) << 8 samples
-    // @0x437bb2/0x437b92/0x437ba2 -- player_view.h carries the witness).
-    if (t.tick_prev_valid) {
-        t.tick_delta[0] = e->position.x - t.tick_prev_pos[0];
-        t.tick_delta[1] = e->position.y - t.tick_prev_pos[1];
-        t.tick_delta[2] = e->position.z - t.tick_prev_pos[2];
-    }
-    t.tick_prev_pos[0] = e->position.x;
-    t.tick_prev_pos[1] = e->position.y;
-    t.tick_prev_pos[2] = e->position.z;
-    t.tick_prev_valid = true;
     // The tick's Player_UpdatePerFrame leg, then the camera update past the
     // entity update [orig: Client_ProcessNetworkFrame @0x42c18e; Game_ProcessMainFrame
     // @0x5263F0 -- the ThirdPersonCamera_Update call @0x52676F].
@@ -806,17 +794,29 @@ void local_player_camera_update(World &world, PlayerViewState &v, LocalPlayerVie
     const Entity *e = world.cached.local_player.valid()
             ? world.registry.get(world.cached.local_player) : nullptr;
     if (e == nullptr) return;
-    // The orbit legs, whatever the mode [orig: ThirdPersonCamera_Update @0x437AF0
-    // (@0x437c1b..0x437d02)], then the anchor's chase of the current motor's
-    // CameraOffset, re-anchored after movement [orig: ThirdPersonCamera_Update
-    // @0x437AF0 (@0x437B70..0x437B76, the ease @0x437C56..0x437CB5)].
-    player_view_chase_tick(v, world.script.input_action_bits, t.camera_tracked_dead);
-    // The target words: Position + CameraOffset, integer adds [orig:
-    //  ThirdPersonCamera_Update @0x437AF0 (@0x437B67..0x437B76)].
-    const int32_t eye_q16[3] = {io::bam_add(e->position.x.q16, e->eye_offset_x),
-            io::bam_add(e->position.y.q16, e->eye_offset_y),
-            io::bam_add(e->position.z.q16, e->eye_offset_z)};
-    player_view_anchor_tick(v, eye_q16);
+    const int32_t position_q16[3] = {e->position.x.q16, e->position.y.q16, e->position.z.q16};
+    // With a tracked entity set, the update runs whatever the mode: the FP
+    // motion lead steps from the entity's displacement since its mover-entry
+    // stamp, then the orbit legs [orig: ThirdPersonCamera_Update @0x437AF0 - the
+    // tracked test @0x437AFB, the samples (Position - +0x80..+0x88) << 8
+    // @0x437B92..0x437BB2, the recurrence @0x437BAC..0x437C0E, the orbit keys
+    // @0x437C1B..0x437C27, the reel @0x437CC0..0x437D02].
+    if (v.tp_anchor_valid) {
+        int32_t displacement_q16[3] = {0, 0, 0};
+        if (e->saved_live_valid)
+            for (int i = 0; i < 3; ++i)
+                displacement_q16[i] = io::bam_sub(position_q16[i], e->saved_live_pos[i]);
+        player_view_motion_lead_step(t.motion_lead, displacement_q16);
+        player_view_chase_tick(v, world.script.input_action_bits, t.camera_tracked_dead);
+    }
+    // The anchor's chase of the current motor's CameraOffset, re-anchored after
+    // movement, or its seed at the Position on a tracked-entity change. The target
+    // words: Position + CameraOffset, integer adds [orig: ThirdPersonCamera_Update
+    // @0x437AF0 (@0x437B67..0x437B76, the ease @0x437C56..0x437CB5)].
+    const int32_t eye_q16[3] = {io::bam_add(position_q16[0], e->eye_offset_x),
+            io::bam_add(position_q16[1], e->eye_offset_y),
+            io::bam_add(position_q16[2], e->eye_offset_z)};
+    player_view_anchor_tick(v, position_q16, eye_q16);
 }
 
 bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,
@@ -1409,12 +1409,12 @@ void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,
         world != nullptr ? active_local_weapon_slot(*world, w) : nullptr;
     player_view_bias_view_units(v, suppress_view_bias(w, active_slot, local_entity(world)),
                                 pos_raw_units, out);
-    // The per-frame motion lead: the witnessed pre-rotation add takes the
-    // world-delta components RAW onto the view-frame lanes (no frame
-    // conversion) [orig: Player_UpdateFirstPersonCamera @0x4dd549..0x4dd56c,
-    // see player_view.h].
+    // The motion lead the camera update stepped, read: the witnessed
+    // pre-rotation add takes the world-delta components RAW onto the view-frame
+    // lanes (no frame conversion) [orig: Player_UpdateFirstPersonCamera
+    // @0x4dd549..0x4dd56c, see player_view.h].
     int32_t lead[3];
-    player_view_motion_lead_update(t.motion_lead, t.tick_delta, lead);
+    player_view_motion_lead_read(t.motion_lead, lead);
     for (int i = 0; i < 3; ++i) out[i] += static_cast<float>(lead[i]) / 65536.0f;
     // The 4:3 framing drop -- the 3w<=4h rule [orig: Player_UpdateFirstPersonCamera
     // @0x4dd571..0x4dd578 -> player_view_narrow_aspect]; the caller only

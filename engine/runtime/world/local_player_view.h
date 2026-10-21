@@ -60,13 +60,11 @@ struct LocalPlayerViewTracker {
     // respawn does not reseed them].
     bool binocular_tip_prev = false;
     bool binocular_tip_seeded = false;
-    // The FP viewmodel motion-lead tracker (per render frame) and the local
-    // entity's per-62.5 Hz-tick movement delta it samples
+    // The FP viewmodel motion-lead tracker, stepped by the camera update on
+    // every main-frame update from the tracked entity's Position minus its
+    // mover-entry stamp, read by each rendered frame
     // [orig: the (position - entity+0x80) samples @0x437bb2/0x437b92/0x437ba2].
     PlayerViewMotionLead motion_lead;
-    float tick_delta[3] = {0.0f, 0.0f, 0.0f};
-    float tick_prev_pos[3] = {0.0f, 0.0f, 0.0f};
-    bool tick_prev_valid = false;
     // The death stamp's edge detector [orig: g_CameraLerpStartTick =
     // current_tick on the local death path @0x4b4d00 / @0x42ec0f].
     bool camera_local_dead_seen = false;
