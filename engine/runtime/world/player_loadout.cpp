@@ -162,6 +162,18 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     weapon.start_in_switchto = false;
 }
 
+void local_loadout_submit_in_session(World &world, LocalPlayerLoadout &loadout,
+                                     WeaponInventory &inventory,
+                                     const std::vector<WeaponKitEntry> &kit,
+                                     bool authority) {
+    // The whole selection, unfiltered: the host's accept filters it
+    // [orig: the rep movsd @0x565D4B].
+    loadout.spawn_kit_set = true;
+    loadout.spawn_kit = kit;
+    // [orig: WeaponSlotPool_ResetAllEntries @0x565D66, off the authority alone]
+    if (!authority && !world.tables.weapons.empty()) inventory.reset(world.tables.weapons);
+}
+
 bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
                                 LocalPlayerWeapon &weapon,
                                 WeaponInventory &inventory,

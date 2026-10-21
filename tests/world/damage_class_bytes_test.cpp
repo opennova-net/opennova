@@ -72,6 +72,39 @@ struct Rig {
 	}
 };
 
+// L4-s6b FOUND 3: in a session a joiner's ACCEPT applies nothing locally: the
+// selection becomes the resident kit and the slot table empties, the class and the
+// damage bytes untouched, until the host's 0x5A grant; an authority keeps its slots
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - @0x565D27..0x565D4B, @0x565D4F,
+//  WeaponSlotPool_ResetAllEntries @0x565D58..0x565D66, NetPacket_SendLoadoutSubmit @0x565D94].
+void test_a_session_accept_resets_the_slots_and_applies_nothing() {
+	Rig r;
+	r.world.rules.mp_session = true;
+	CHECK(r.accept(2)); // a kit in the slots first
+	CHECK(r.local->inventory.slot(r.local->inventory.equipped_combo) != nullptr &&
+			r.local->inventory.slot(r.local->inventory.equipped_combo)->adm_index == 1);
+	r.body().player_class = 8;
+	r.body().ammo_damage_class = {7, 7, 7, 7, 7, 7};
+	const std::vector<w::WeaponKitEntry> selection = {w::WeaponKitEntry{"WPN_M4AUTO", 3, -1, 5}};
+	w::local_loadout_submit_in_session(r.world, r.local->loadout, r.local->inventory,
+			selection, /*authority=*/false);
+	CHECK(r.local->loadout.spawn_kit_set && r.local->loadout.spawn_kit.size() == 1 &&
+			r.local->loadout.spawn_kit[0].ammo_primary == 3);
+	bool empty = true;
+	for (const w::WeaponInventorySlot &slot : r.local->inventory.slots)
+		empty = empty && slot.adm_index < 0;
+	CHECK(empty);
+	CHECK(r.body().player_class == 8 && r.body().ammo_damage_class[4] == 7);
+	// The authority keeps its slots.
+	Rig a;
+	a.world.rules.mp_session = true;
+	CHECK(a.accept(2));
+	w::local_loadout_submit_in_session(a.world, a.local->loadout, a.local->inventory,
+			selection, /*authority=*/true);
+	CHECK(a.local->inventory.slot(a.local->inventory.equipped_combo) != nullptr &&
+			a.local->inventory.slot(a.local->inventory.equipped_combo)->adm_index == 1);
+}
+
 void test_the_spawn_rebuild_writes_no_byte() {
 	Rig r;
 	r.body().ammo_damage_class = {7, 7, 7, 7, 7, 7};
@@ -106,6 +139,7 @@ void test_an_in_session_apply_stores_nothing() {
 } // namespace
 
 int main() {
+	test_a_session_accept_resets_the_slots_and_applies_nothing();
 	test_the_spawn_rebuild_writes_no_byte();
 	test_the_offline_apply_stores_the_raw_byte();
 	test_an_in_session_apply_stores_nothing();

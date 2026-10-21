@@ -235,6 +235,19 @@ bool Simulation::apply_local_player_loadout_rows(
 		return runtime_->queue_host_message(opennova::c2s::LOADOUT_SUBMIT,
 				opennova::encode_loadout_submit(submit));
 	}
+	// A joiner's mid-session ACCEPT applies nothing locally: the selection becomes the
+	// resident kit, the 0x2F seam re-arms with the live slot ahead of the slot table's
+	// reset, and the 0x2F goes out; the host's 0x5A grant rebuilds (engine
+	// world/player_loadout.h local_loadout_submit_in_session carries the witness).
+	if (p_submit_joiner_request && is_joiner() && runtime_ && runtime_->in_match()) {
+		kernel_->local.loadout.spawn_kit_set = true;
+		kernel_->local.loadout.spawn_kit = p_kit;
+		push_joiner_loadout_kit();
+		opennova::world::local_loadout_submit_in_session(kernel_->world, kernel_->local.loadout,
+				kernel_->local.inventory, p_kit, /*authority=*/false);
+		runtime_->queue_loadout_resubmit();
+		return true;
+	}
 	if (!opennova::world::local_loadout_apply_accept(kernel_->world, kernel_->local.loadout,
 				kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid, p_kit,
 				p_player_class, /*validate_banned=*/p_submit_joiner_request))
