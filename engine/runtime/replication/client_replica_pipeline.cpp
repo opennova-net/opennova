@@ -1136,7 +1136,16 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.equipped_adm_index = rec.player.anim_def_index;
 			es.state_flags = rec.player.state_flags;
 			es.move_input = rec.player.move_input_byte;
-			es.health_class_byte = rec.player.health_class_byte;
+			// A dead record skips the class store, so the row keeps the last live
+			// record's class (entity+0x294) for its class readers [orig:
+			// NetPacket_SerializePlayerState @0x4C09C0 - the dead arms' Health = 0
+			// @0x4C1027 / @0x4C10FB and their jumps past the
+			// Entity_SetHealthFromDifficultyByte call @0x4C11B4 (@0x4C102E /
+			// @0x4C1104 -> @0x4C11D7)].
+			es.health_class_byte = wire_dead
+					? static_cast<uint8_t>((rec.player.health_class_byte & 0xF0u) |
+							prior_player_class)
+					: rec.player.health_class_byte;
 			if (es.carrier_handle != wire_handle::kInvalid) {
 				es.pitch_bam = static_cast<int32_t>(static_cast<uint32_t>(es.pitch_byte) << 24);
 				pending_carrier_poses.push_back(PendingCarrierPose{

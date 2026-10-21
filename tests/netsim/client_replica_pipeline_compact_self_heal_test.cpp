@@ -230,8 +230,13 @@ bool run_dead_record_keeps_the_class_it_had() {
 	// so the re-pick reads class 5 and keeps the row.
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame_byte(kHandle, kPlayerType, 0x06, 0x02));
 	const ns::ClientEntityState *row = view.state().find(kHandle);
-	return expect(row != nullptr && row->compact_revision == 2 && row->type_id == kPlayerType,
-	              "a dead record re-picks by the class the body had");
+	if (!expect(row != nullptr && row->compact_revision == 2 && row->type_id == kPlayerType,
+	            "a dead record re-picks by the class the body had")) return false;
+	// Its class readers keep the live record's class too (entity+0x294 holds
+	// the last stored nibble) [orig: @0x4C102E / @0x4C1104 jump past the class
+	// store @0x4C11B4].
+	return expect((row->health_class_byte & 0x0Fu) == 5u,
+	              "a dead record leaves the row's class byte at the live record's class");
 }
 
 bool run_classless_row_repicks_the_first_row_and_self_is_left() {
