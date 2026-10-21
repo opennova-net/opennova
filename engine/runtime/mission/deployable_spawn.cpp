@@ -70,7 +70,7 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 	//  @0x51C349, the team @0x51C368, pitch / roll 0 @0x51C36F / @0x51C376, +0x11C 0
 	//  @0x51C37D, +0x7C = 12000 @0x51C385, +0x215 0 @0x51C390, +0x2AC 0 @0x51C3CB]
 	Entity seed;
-	seed.kind = EntityKind::Item;
+	seed.kind = world::EntityKind::Item;
 	seed.item_id = item_id;
 	seed.position.set_q16({position[0], position[1], position[2]});
 	seed.spawn_position = seed.position;
