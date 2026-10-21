@@ -5057,6 +5057,12 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	# Listen-host player creation rebuilds the authoritative registry. Bind the
 	# collision instance to that final registry identity, as GameWorld does.
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	# The heat window closes for a walked body at or below the water word, which a
+	# map with no water leaves 0 and this rig's bodies sit on: the plane goes well
+	# below them so the window's water gate is clear of its edge.
+	# [orig: WeaponAction_ProcessFrame @0x540E60 (@0x541004..0x54100D);
+	#  Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
+	sim.set_water_z(-100.0)
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
