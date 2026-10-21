@@ -260,9 +260,9 @@ private:
     uint64_t local_round_reset_seen_ = 0;
     // The own client's 0x0F / local 0x50 track legs consumed (replica_track.h).
     ReplicaTrackSeen track_seen_;
-    // The host's own connection as the last mission start left it, beside the kernel's
-    // baseline (captured at the same point, ahead of the start's own 0x0B): a rewind
-    // restores both (reset_to_baseline).
+    // The host's own connection as the kernel's last baseline capture found it (the
+    // mission start's, ahead of its own 0x0B, or a later one): a rewind restores both
+    // (reset_to_baseline).
     std::optional<NapiNPConnection> own_connection_at_baseline_;
 };
 

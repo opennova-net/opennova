@@ -197,13 +197,14 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	// Its mission start ends with the /PROFILE roster pass, then its C2S 0x0B
 	// (D-NET-NEW-L4-5) [orig: Game_StartMission - CServerLog_WritePlayerNameRecord
 	//  @0x52617B ahead of CNapiNetwork_QueueReliableMessage @0x52624B].
+	// The own connection beside every baseline the kernel takes (reset_to_baseline).
+	kernel.baseline_captured = [this] {
+		own_connection_at_baseline_.reset();
+		for (const NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
+			if (conn.type == NapiNPConnection::kTypeClientSide) own_connection_at_baseline_ = conn;
+	};
 	kernel.net_mission_start_end = [this] {
 		const NapiNPServerCtx &ctx = state.host_owner.ctx;
-		// The own connection beside the kernel's baseline, which the start captured
-		// just now (reset_to_baseline).
-		own_connection_at_baseline_.reset();
-		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list)
-			if (conn.type == NapiNPConnection::kTypeClientSide) own_connection_at_baseline_ = conn;
 		if (ctx.logs.profile != nullptr && kernel_ != nullptr)
 			ctx.logs.profile->write_mission_roster(ctx, kernel_->world);
 		send_own_mission_status();
@@ -1010,13 +1011,13 @@ void HostRole::close() {
 	inmatch::write_inout_line(ctx, inmatch::inout_host_line(ctx, /*started=*/false));
 }
 
-// The editor Stop/Start rewind: the kernel's own restore, then a fresh
-// HostClient view re-fed from the restored world's pools (the static, spawn,
-// organic and marker batches) and the minimap's initial scan re-armed. The
-// restore is a mission start, as retail's single-player restart is: the own slot
-// back where the start left it (its net player short of game state 10, its body
-// the baseline's), and the start's end, the own client's 0x0B, queued again, so
-// the next frame's receive pump runs the own join, whose clear unhides the body
+// The editor Stop/Start rewind: the kernel's own restore with the own connection as
+// the baseline's capture left it, then a fresh HostClient view re-fed from the
+// restored world's pools (the static, spawn, organic and marker batches) and the
+// minimap's initial scan re-armed. A baseline the mission start took holds the own
+// slot short of its join: that restore is a mission start, as retail's
+// single-player restart is, and ends as the start did, with the own client's 0x0B,
+// so the next frame's receive pump runs the own join, whose clear unhides the body
 // the start's local-player block hid (out of a session no 0x0A re-sets it).
 // [orig: Game_RestartRoundSP @0x5263A0 - Server_DisconnectAndResetAllPlayerSlots
 //  @0x5263D4, Game_StartMission(1) @0x5263DB; Game_StartMission - the hide @0x525C9E,
@@ -1054,7 +1055,9 @@ bool HostRole::reset_to_baseline(SessionError &error) {
 		view.apply(0x20, opennova::encode_pool3_sync_batch(
 				replication::build_pool3_marker_batch(kernel.world)));
 		inmatch::Server_RearmMinimapInitialScan(state.host_owner.ctx);
-		if (own_connection_at_baseline_) send_own_mission_status();
+		if (own_connection_at_baseline_ &&
+				own_connection_at_baseline_->slot_state == PlayerSlotState::AwaitJoin)
+			send_own_mission_status();
 	}
 	return true;
 }
