@@ -75,24 +75,29 @@ static void inset_target_name_cases() {
 	world::AiEntity *body = kernel.world.ai.for_handle(me);
 	CHECK(body != nullptr);
 	if (body != nullptr) {
+		// The targeting update writes the lock into both (local_player_targeting.cpp).
+		const auto lock = [body](world::EntityHandle h) {
+			body->inf.combat_target = h;
+			body->slot.f[3] = world::AiSlot::target_word(world::TargetRef{h});
+		};
 		CHECK(hud_role_facts(host).inset_target_name.empty()); // no cursor
 		body->inf.head_look_target = mate_h;
 		CHECK(hud_role_facts(host).inset_target_name == "Mate");
 		// The lock outranks the head-look target; another team names none.
-		body->inf.combat_target = foe_h;
+		lock(foe_h);
 		CHECK(hud_role_facts(host).inset_target_name.empty());
 		// An unnamed teammate: '^' + the fallback at its pool-encoded id.
-		body->inf.combat_target = unnamed_h;
+		lock(unnamed_h);
 		CHECK(hud_role_facts(host).inset_target_name ==
 				hud::friendly_tag_fallback_name(unnamed_h.packed));
 		// FriendlyTag 0 in the live rules word nulls every name.
 		kernel.world.rules.mpattrib = 0x400;
-		body->inf.combat_target = mate_h;
+		lock(mate_h);
 		CHECK(hud_role_facts(host).inset_target_name.empty());
 		kernel.world.rules.mpattrib = 0;
 		// A player names the first 0x4C slot driving it, never its body's
 		// name; with none it is unnamed.
-		body->inf.combat_target = player_h;
+		lock(player_h);
 		CHECK(hud_role_facts(host).inset_target_name.empty());
 		replication::ClientRosterSlot &slot = host_runtime.state().roster[3];
 		slot.bound = true;
@@ -105,14 +110,25 @@ static void inset_target_name_cases() {
 		// pool holds a round, so the inset names nothing, whatever the head-look target
 		// [orig: HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B882D); Render_WeaponInsetScene
 		//  @0x5C9740 (the pool test @0x5C9F78)] (D-NET-64).
-		body->inf.combat_target = world::EntityHandle{};
+		lock(world::EntityHandle{});
 		body->inf.head_look_target = mate_h;
 		CHECK(hud_role_facts(host).inset_target_name == "Mate");
 		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef::of_round(3));
 		CHECK(hud_role_facts(host).inset_target_name.empty());
 		// An entity lock in the same word names its entity again.
-		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef{mate_h});
-		body->inf.combat_target = mate_h;
+		lock(mate_h);
+		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		// The cursor is the word alone, read once: a word the guided round's init wrote
+		// without the combat target names the word's entity, and a combat target over a
+		// zero word is no cursor, so the head-look target names itself
+		// [orig: HUD_BuildEntityInfo @0x4B8440 - the word @0x4B87F0, the head-look store
+		//  only for a zero word (`cmp dword ptr [esi+168h], 0` @0x4B8816, @0x4B881F)].
+		body->inf.combat_target = world::EntityHandle{};
+		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef{unnamed_h});
+		CHECK(hud_role_facts(host).inset_target_name ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		body->inf.combat_target = foe_h;
+		body->slot.f[3] = 0;
 		CHECK(hud_role_facts(host).inset_target_name == "Mate");
 	}
 }

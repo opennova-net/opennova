@@ -271,27 +271,27 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// The drawer's session gate, the same session bit as the MP lines below
 	// [orig: `cmp is_in_session, 0` @0x4c3210].
 	out.net_quality.in_session = view.kernel->world.rules.mp_session;
-	// The weapon inset's friendly name: the HUD target cursor is the aim lock,
-	// else the head-look target, and its display name the lookup's over the
-	// session rules word, the HUD's team and the role's 0x4C slot table. A lock
-	// on a round (a flare the heat lock took) is the cursor too: no pool holds a
-	// round, so the inset's pool test draws neither brackets nor a name for it.
+	// The weapon inset's friendly name: the HUD target cursor is the lock word,
+	// whatever it holds, else (a zero word only) the head-look target, and its
+	// display name the lookup's over the session rules word, the HUD's team and
+	// the role's 0x4C slot table. A lock on a round (a flare the heat lock took)
+	// is the cursor too: pool 0 holds no round, so the inset's pool test draws
+	// neither brackets nor a name for it. The word is read once, as L6's
+	// crosshair leg reads it (world/hud_combat_feed.cpp).
 	// [orig: HUD_BuildEntityInfo @0x4B8440 -- the lock (aiRuntime+0xC) @0x4B87F0,
-	//  a round included (@0x4B87ED..0x4B882D), else headLookTarget (+0x344)
-	//  @0x4B881F; Render_WeaponInsetScene @0x5C9740 -- the pool test @0x5C9F78,
-	//  the call @0x5CA0AB; Entity_GetDisplayName @0x59BF70 (its pool test
-	//  @0x59BF87..0x59BF94)]
+	//  a round included (@0x4B87ED..0x4B882D), headLookTarget (+0x344) @0x4B881F
+	//  only for a zero word (`cmp [esi+168h], 0` @0x4B8816); Render_WeaponInsetScene
+	//  @0x5C9740 -- the pool test @0x5C9F78, the call @0x5CA0AB; Entity_GetDisplayName
+	//  @0x59BF70 (its pool test @0x59BF87..0x59BF94)]
 	{
 		const world::World &tw = view.kernel->world;
 		const world::Entity *local = tw.registry.get(tw.cached.local_player);
 		const world::AiEntity *body =
 				local != nullptr ? tw.ai.for_handle(local->handle) : nullptr;
-		const bool round_lock =
-				body != nullptr && world::AiSlot::target_of(body->slot.f[3]).round >= 0;
-		const world::Entity *cursor = body != nullptr && !round_lock
-				? tw.registry.get(body->inf.combat_target)
-				: nullptr;
-		if (cursor == nullptr && body != nullptr && !round_lock)
+		const world::TargetRef word =
+				body != nullptr ? world::AiSlot::target_of(body->slot.f[3]) : world::TargetRef{};
+		const world::Entity *cursor = word.entity.valid() ? tw.registry.get(word.entity) : nullptr;
+		if (!word.valid() && body != nullptr)
 			cursor = tw.registry.get(body->inf.head_look_target);
 		if (cursor != nullptr)
 			(void)entity_display_name(*cursor, local->team, session_rules_word(view),
