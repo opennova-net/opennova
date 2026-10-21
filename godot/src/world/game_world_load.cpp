@@ -960,6 +960,9 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	opts->set_player_profiles(player_profiles_);
 	opts->set_game_config(game_config_);
 	opts->set_host_rotation(&host_rotation_);
+	// The process cfg block a joiner's mission start seeds its round clock from
+	// (inmatch::ClientProcessState::config_block).
+	client_process_.config_block = game_config_.is_valid() ? &game_config_->native().cfg() : nullptr;
 	opts->set_client_process(&client_process_);
 	// The single player's restart, which this load consumes (set_restart_boot).
 	opts->set_restart_boot(restart_boot_);

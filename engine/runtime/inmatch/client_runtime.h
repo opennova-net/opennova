@@ -58,6 +58,7 @@
 namespace opennova::world { class World; }
 namespace opennova::audio { struct DialogLineRef; }
 namespace opennova::def { struct DefItemsFile; }
+namespace opennova::gamecfg { struct GameCfg; }
 
 namespace opennova::inmatch {
 
@@ -129,6 +130,13 @@ struct ClientProcessState {
 	// round init, keeps it. [orig: Server_InitNewRoundState @0x51CBA0; Game_RestartRoundSP
 	//  @0x5263A0 -> Game_StartMission(1) @0x5263DB, no round init]
 	uint32_t round_state_init_tick = 0;
+	// The process's cfg block (g_GameConfigState, the embedder's game.cfg, which the host
+	// dialog and an admin SET write): every mission start copies its timeLimit into
+	// g_RoundTimeLimitMinutes, which a joiner's start seeds its round clock from
+	// (ClientRuntime::push_mission_start_end). Null: none (a fixture's), no seed.
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (the copy @0x551CCC..0x551CD2), called
+	//  by Game_StartMission @0x524360 (@0x524662)]
+	const gamecfg::GameCfg *config_block = nullptr;
 };
 
 class ClientRuntime {
