@@ -527,7 +527,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		}
 		if (ImGui::BeginPopup("make_script")) {
 			ImGui::TextUnformatted(("Make " + script.create_at + "?").c_str());
-			ImGui::TextDisabled("The game compiles it with the mission; an empty script does nothing.");
+			popup_line("The game compiles it with the mission.", "An empty script does nothing.", LineTone::Quiet);
 			if (ImGui::Button("Make it")) {
 				workspace.request(request::create_file(script.create_at));
 				ImGui::CloseCurrentPopup();
@@ -870,7 +870,9 @@ void MissionViewportView::Tools::heard_popup(Workspace &workspace, const Mission
 		ImGui::SameLine();
 		name_link(workspace, {ReferenceKind::BankWave, channel.wave, bank}, "wave");
 		ImGui::SameLine();
-		ImGui::Text("volume %d, %.0f m (%s)", channel.volume, double(channel.distance), from.c_str());
+		char heard[64];
+		std::snprintf(heard, sizeof(heard), "volume %d, %.0f m (%s)", channel.volume, double(channel.distance), from.c_str());
+		popup_line(heard, "Its volume, its distance from the camera, and what plays it: an ambient source or the rain.");
 		ImGui::PopID();
 	}
 	if (shown == 0) ImGui::TextDisabled("Nothing is heard here.");
@@ -882,8 +884,11 @@ void MissionViewportView::Tools::heard_popup(Workspace &workspace, const Mission
 		outranked += status == "outranked" ? 1 : 0;
 		silent += status != "playing" && status != "outranked" ? 1 : 0;
 	}
-	ImGui::Text("%zu ambient sources: %zu playing, %zu outranked, %zu silent here", listen.sources().size(), playing,
-			outranked, silent);
+	char sources[96];
+	std::snprintf(sources, sizeof(sources), "%zu ambient sources: %zu playing, %zu outranked, %zu silent", listen.sources().size(),
+			playing, outranked, silent);
+	popup_line(sources, "Outranked: heard here, but not among the loudest the channels take. Silent: out of reach, with "
+						"nothing for this hour, or with no set or wave the game finds.");
 	const MissionScriptRun &script = listen.script();
 	if (const world::WeatherState *weather = script.weather()) {
 		ImGui::Text("Rain %.0f%% (to %.0f%%), overcast %.0f%%", double(weather->rain_pct_current_q16()) * 100.0 / 65535.0,
@@ -891,7 +896,7 @@ void MissionViewportView::Tools::heard_popup(Workspace &workspace, const Mission
 				double(weather->overcast_blend_q16()) * 100.0 / 65535.0);
 	}
 	if (!script.error().empty()) {
-		ui_kit::warning_line(script.error());
+		popup_line(script.error(), std::string(), LineTone::Warning);
 	} else {
 		ImGui::TextDisabled("Script: %s, run %u times", script.scripted() ? "compiled" : "none", script.script_runs());
 	}

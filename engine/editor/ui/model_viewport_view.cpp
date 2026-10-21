@@ -210,9 +210,7 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 		} else if (!paired.empty()) {
 			row.next(std::min(ui_kit::text_width(paired.c_str()), ImGui::GetFontSize() * 8.0f));
 			ImGui::AlignTextToFramePadding();
-			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-			ui_kit::clipped_text(paired, "The item whose graphic and anim_def pair this model with the map.");
-			ImGui::PopStyleColor();
+			ui_kit::quiet_text(paired, "The item whose graphic and anim_def pair this model with the map.");
 		}
 		const std::string &key = model.clip_key();
 		if (!key.empty()) {
@@ -230,7 +228,7 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 	// A LOD with no part draws nothing (retail ships empty LODs): said, not left a blank picture.
 	const int lod = model.lod();
 	if (lod >= 0 && size_t(lod) < model.model()->lod_count && model.model()->lods[lod].render_object_count == 0)
-		ImGui::TextDisabled("LOD %d holds no part: there is nothing to draw at it.", lod);
+		ui_kit::quiet_text("LOD " + std::to_string(lod) + " holds no part: nothing draws.");
 	snap = model.options().snap;
 	context.snap = snap;
 	// The timeline's rows: the transport, the track, the legend and the last sound heard (DI-04).
@@ -297,9 +295,7 @@ void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row,
 	ClipSoundOptions &sound = options.sound;
 	const ClipSoundBinding &binding = model.sound_binding();
 	const char *label = sound.mute ? "Sound (muted)###sound" : "Sound###sound";
-	if (ui_kit::tool_popup(row, label, "sound", true,
-	                       "What the clip's events play as it runs, as the game plays them: " + binding.profile_words + "\n" +
-	                               binding.body_words)) {
+	if (ui_kit::tool_popup(row, label, "sound", true, "What the clip's events play as it runs, as the game plays them.")) {
 		const float unit = ImGui::GetFontSize();
 		ImGui::Checkbox("Mute", &sound.mute);
 		ui_kit::tooltip("The events still fire and say what they play; nothing is heard.");
@@ -336,9 +332,7 @@ void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row,
 			ui_kit::tooltip("The SndProf.def profile whose slots the events play: Auto is the paired item's.");
 			reference_jumps(workspace, {ReferenceKind::SoundProfile, binding.profile});
 		}
-		ImGui::PushTextWrapPos(unit * 24.0f);
-		ImGui::TextDisabled("%s", binding.profile_words.c_str());
-		ImGui::PopTextWrapPos();
+		popup_line(binding.profile_words, std::string(), LineTone::Quiet, 24.0f);
 		ImGui::EndPopup();
 	}
 	if (options != model.options()) set_options(workspace, model, options);
@@ -353,11 +347,9 @@ void ModelViewportView::Tools::fire(Workspace &workspace, ui_kit::WrapRow &row, 
 	const ClipFire &clip_fire = model.clip_fire();
 	const char *label = clip_fire.armed() ? "Fire###fire" : "Fire (none)###fire";
 	if (ui_kit::tool_popup(row, label, "fire", true,
-	                       "What the clip's fire events fire as it runs, as the game's NPC body fires them: " +
-	                               clip_fire.words())) {
+	                       "What the clip's fire events fire as it runs, as the game's NPC body fires them.")) {
 		const float unit = ImGui::GetFontSize();
-		ImGui::PushTextWrapPos(unit * 26.0f);
-		ImGui::TextUnformatted(clip_fire.words().c_str());
+		popup_line(clip_fire.words());
 		// The item's ammo by slot, as its organic init resolves them.
 		const world::OrganicWeapons &weapons = clip_fire.weapons();
 		for (int slot = 0; slot < world::kOrganicAmmoSlots; ++slot) {
@@ -366,7 +358,6 @@ void ModelViewportView::Tools::fire(Workspace &workspace, ui_kit::WrapRow &row, 
 			const world::AmmoTableEntry *ammo = table && byte != 0 ? table->by_index(byte) : nullptr;
 			ImGui::TextDisabled("%s: %s", world::kOrganicAmmoFields[slot], ammo ? ammo->name.c_str() : "none");
 		}
-		ImGui::PopTextWrapPos();
 		ImGui::Checkbox("Target", &fire.target.shown);
 		ui_kit::tooltip("A wall down the body's line of fire, whose face plays the ammo's impact row for its surface; "
 		                "off, the rounds fly on until they age out.");
@@ -402,12 +393,12 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 	FirstPersonOptions &chosen = options.first_person;
 	const FirstPersonSources &sources = model.first_person();
 	const char *label = model.eye_view() ? "First person (eye)###first_person" : "First person###first_person";
-	if (ui_kit::tool_popup(row, label, "first_person", true, sources.words())) {
+	if (ui_kit::tool_popup(row, label, "first_person", true,
+	                       "The weapon in first person as the game draws it: its gun, the arms, and the sets its action plays "
+	                       "with the row.")) {
 		const float unit = ImGui::GetFontSize();
-		ImGui::PushTextWrapPos(unit * 26.0f);
-		ImGui::TextUnformatted(sources.words().c_str());
-		if (!sources.arms_note().empty()) ImGui::TextColored(ui_kit::warning_color(), "%s", sources.arms_note().c_str());
-		ImGui::PopTextWrapPos();
+		popup_line(sources.words());
+		if (!sources.arms_note().empty()) popup_line(sources.arms_note(), std::string(), LineTone::Warning);
 		int view = chosen.eye ? 1 : 0;
 		ImGui::RadioButton("Orbit", &view, 0);
 		ui_kit::tooltip("Turn around the gun and the arms with the orbit camera.");
@@ -443,8 +434,7 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 			ui_kit::tooltip("The weapons whose animadm names this map: the one seen in first person, its gun (gfx1), its "
 			                "view record and its actions.");
 		}
-		if (!sources.weapon_note().empty())
-			ImGui::TextColored(ui_kit::warning_color(), "%s", sources.weapon_note().c_str());
+		if (!sources.weapon_note().empty()) popup_line(sources.weapon_note(), std::string(), LineTone::Warning);
 		const std::vector<const WeaponActionRun *> playing = sources.actions_playing(model.clip_key());
 		const WeaponActionRun *action = model.first_person_action();
 		if (playing.size() > 1) {
@@ -456,11 +446,10 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 			}
 			ui_kit::tooltip("Several of the weapon's actions play this row: the sets of the one chosen play.");
 		}
-		ImGui::PushTextWrapPos(unit * 26.0f);
 		if (!action) {
-			ImGui::TextDisabled("No action of %s plays this row: no set plays with it.", sources.weapon().c_str());
+			popup_line("No action of " + sources.weapon() + " plays this row.", "No set plays with it.", LineTone::Quiet);
 		} else {
-			ImGui::TextUnformatted(action->words.c_str());
+			popup_line(action->words);
 			for (size_t i = 0; i < action->legs.size(); ++i) {
 				const WeaponActionLeg &leg = action->legs[i];
 				ImGui::PushID(int(i));
@@ -468,13 +457,12 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 				if (ImGui::SmallButton("Play")) workspace.request(request::play_action_leg(model.path(), leg.end));
 				ImGui::EndDisabled();
 				ImGui::SameLine();
-				ImGui::TextUnformatted(leg.words.c_str());
+				popup_line(leg.words);
 				ImGui::PopID();
 			}
-			if (action->legs.empty()) ImGui::TextDisabled("Its row plays no set.");
+			if (action->legs.empty()) popup_line("Its row plays no set.", std::string(), LineTone::Quiet);
 		}
-		ImGui::TextDisabled("The game reads no first-person clip event; Mute (Sound) mutes the sets too.");
-		ImGui::PopTextWrapPos();
+		popup_line("The game reads no first-person clip event.", "Mute (Sound) mutes the sets too.", LineTone::Quiet);
 		ImGui::EndPopup();
 	}
 	if (options != model.options()) set_options(workspace, model, options);
@@ -488,10 +476,10 @@ void ModelViewportView::Tools::first_person(Workspace &workspace, ui_kit::WrapRo
 void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock) {
 	const int32_t length = model.clip_length_ticks();
 	if (model.clip_key().empty() || length <= 0) {
-		ImGui::TextDisabled("%s", !model.clip_note().empty() ? "Nothing plays here."
-		                          : model.rig().table.empty() || model.clip_key().empty()
-		                                  ? "Select a row of the map (or a clip of a row) to play it."
-		                                  : "The clip does not load in the rig.");
+		if (!model.clip_note().empty()) ui_kit::empty_state("Nothing plays here.");
+		else if (model.rig().table.empty() || model.clip_key().empty())
+			ui_kit::empty_state("No clip plays.", "Select a row of the map, or a clip of a row, to play it.");
+		else ui_kit::empty_state("The clip does not load in the rig.");
 		return;
 	}
 	const int32_t ticks = model.clip_ticks(clock);
@@ -684,9 +672,7 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		const std::string shots = clip_fire.armed()
 		                                  ? "Shots: " + std::to_string(clip_fire.range().shots()) + " fired to this tick."
 		                                  : "Shots: none. " + clip_fire.words();
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ui_kit::clipped_text(shots, clip_fire.words());
-		ImGui::PopStyleColor();
+		ui_kit::quiet_text(shots, clip_fire.words());
 	}
 	// The last sound the clip's events fired (DI-04): its set a link (in its bank where one is named) and its profile's,
 	// the sentence in the set's tooltip.
@@ -930,8 +916,8 @@ void ModelViewportView::Tools::registers(Workspace &workspace, const ModelViewpo
 void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock) {
 	const SessionView &view = workspace.view();
 	ModelViewportOptions options = model.options();
-	const float unit = ImGui::GetFontSize();
-	ImGui::PushTextWrapPos(unit * 30.0f);
+	// Its lines a line each, cut 30 font sizes wide (popup_line), whole in their tooltips.
+	constexpr float kWide = 30.0f;
 	// Who names the model: the uses read from the graph as it stands now (their edges are what Go to opens).
 	const std::vector<DamageUse> uses =
 			view.findings.graph ? model_damage_uses(*view.findings.graph, model.path()) : std::vector<DamageUse>();
@@ -963,7 +949,7 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 			const AssetEntry *entry = view.project.scan->find(name);
 			if (!entry && !strutil::ends_with_icase(name, ".3di")) entry = view.project.scan->find(name + ".3di");
 			if (!entry) {
-				ImGui::TextDisabled("%s %s (the project has none)", words, name.c_str());
+				popup_line(std::string(words) + " " + name + " (the project has none)", std::string(), LineTone::Quiet, kWide);
 				return;
 			}
 			ImGui::PushID(id);
@@ -988,13 +974,9 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 	const bool play = ImGui::Button("Play destroy");
 	ImGui::EndDisabled();
 	ui_kit::tooltip("Destroy the item from its death: the clock from tick 0, run.");
-	if (!model.damage_note().empty()) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::warning_color());
-		ImGui::TextWrapped("%s", model.damage_note().c_str());
-		ImGui::PopStyleColor();
-	}
+	if (!model.damage_note().empty()) popup_line(model.damage_note(), std::string(), LineTone::Warning, kWide);
 	if (item.found) {
-		ImGui::TextDisabled("%s", plan.class_words.c_str());
+		popup_line(plan.class_words, std::string(), LineTone::Quiet, kWide);
 		// Where the death stands on the clock.
 		if (model.damage_playing()) {
 			const DamageFrame frame = model.damage_frame_at(clock);
@@ -1003,23 +985,17 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 			std::snprintf(where, sizeof(where), "%s of the death: %s; the fade %s.", seconds_text(clock.ticks() / io::kTickHz).c_str(),
 			              frame.husked ? "the husk drawn" : "intact still",
 			              frame.fade_elapsed < 0 ? "waits" : clock.ticks() >= end ? "done" : "runs");
-			ImGui::TextUnformatted(where);
+			popup_line(where, std::string(), LineTone::Plain, kWide);
 		}
 		ImGui::SeparatorText("The death, in order");
 		for (const DamageLeg &leg : plan.legs) {
+			// A leg the clock has passed lit, one still to come muted (an effect leg is named: not drawn here).
 			const bool due = model.damage_playing() && clock.ticks() >= leg.tick;
-			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(due ? ImGuiCol_Text : ImGuiCol_TextDisabled));
 			std::string line = seconds_text(leg.tick / io::kTickHz) + "  " + leg.words;
 			if (leg.shown == "named") line += " (named: not drawn here)";
-			ImGui::TextWrapped("%s", line.c_str());
-			ImGui::PopStyleColor();
-			ui_kit::tooltip(leg.cite + (leg.kind == "effect"
-			                                    ? std::string("\nNo effect preview on this branch: the effect is named, "
-			                                                  "not drawn.")
-			                                    : std::string()));
+			popup_line(line, std::string(), due ? LineTone::Plain : LineTone::Quiet, kWide);
 		}
 	}
-	ImGui::PopTextWrapPos();
 	if (play) options.damage.state = DamageState::Destroyed;
 	if (options != model.options()) set_options(workspace, model, options);
 	// The death from its tick: the clock at 0, run.

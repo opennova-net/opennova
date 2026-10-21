@@ -169,13 +169,13 @@ void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const
 	}
 	const bool any_ammo = std::any_of(weapons_.ammo.begin(), weapons_.ammo.end(), [](uint8_t b) { return b != 0; });
 	armed_ = has_clip_ && fire_bits && reads_ && any_ammo && range_.ready();
-	// Why, in words.
+	// Why, in words: what fires first (the line the Fire popup shows of it), then the body that reads the bits.
 	if (!has_clip_) {
 		words_ = "No clip plays.";
 	} else if (!fire_bits) {
 		words_ = "The clip carries no fire bit: nothing fires.";
 	} else if (!reads_) {
-		words_ = binding.body_words + " A player's body has no fire block: its fire bits fire nothing.";
+		words_ = "A player's body has no fire block: its fire bits fire nothing. " + binding.body_words;
 	} else if (!item.found) {
 		words_ = "No item pairs the clip, so no organic init sets an ammo byte: its fire bits fire nothing.";
 	} else if (!person) {
@@ -187,7 +187,7 @@ void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const
 		words_ = item.name + " names no ammo of ammo.def (ammo_closeattack, ammo_easyrocket, ammo_advancedrocket, "
 		                     "ammo_marker3): its fire bits fire nothing.";
 	} else {
-		words_ = binding.body_words + " Its fire bits fire " + item.name + "'s ammo on those ticks.";
+		words_ = "Its fire bits fire " + item.name + "'s ammo. " + binding.body_words;
 	}
 	// The range's frame stands at the height of the item's first launch point at rest, so its target faces the gun.
 	height_ = 0.0f;

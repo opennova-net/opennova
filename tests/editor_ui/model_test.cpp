@@ -237,8 +237,7 @@ void test_damage_popup() {
 	std::string text = logged_frame(ui);
 	CHECK(text.find("Pump station (items.def) draws it intact") != std::string::npos, "the item naming the model");
 	CHECK(text.find("Its husk: armory.3di") != std::string::npos, "the husk the game swaps in");
-	CHECK(text.find("The husk swap: armory is drawn in the item's place from here on.") != std::string::npos,
-	      "the death in order, in words");
+	CHECK(text.find("The husk swap: armory is drawn") != std::string::npos, "the death in order, a line a leg");
 	ui.activate(popup_item(ImHashStr("damage", 0, scope), "Play destroy"));
 	settle(2);
 	CHECK(model->options().damage.state == DamageState::Destroyed, "Play destroy: the destroyed state");
