@@ -1305,6 +1305,15 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 	std::copy(std::begin(ctrl_bus), std::end(ctrl_bus), controls.begin());
 	const uint32_t time_ms = world::mounted_pose_time_ms(world.logic_tick,
 			panm_time_override_ms);
+	// A UseGun rider's frame is the carrier model's bone pass over the carrier's own
+	// matrix, so the per-model part cache below does not serve it.
+	// [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0 (@0x5464CB..0x54656F)]
+	if (!seat.attachment_frame) {
+		const bool usegun = world::resolve_usegun_seat_pose(model, carrier, seat, ctrl_bus,
+				time_ms, out);
+		if (!usegun) ++mounted_declines;
+		return usegun;
+	}
 	if (mounted_cache_tick_ != world.logic_tick) {
 		mounted_live_cache_.clear();
 		mounted_cache_tick_ = world.logic_tick;

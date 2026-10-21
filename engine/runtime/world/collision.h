@@ -310,6 +310,15 @@ bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose_row_major[16],
                                         CollisionMatrix &out);
 
+// The two halves of that sandwich on their own, for a caller that runs the bone pass
+// over the entity's render float itself: the fixed matrix as the row-major render
+// float (the (-y, z, x) swizzle; rotation / 2^22, translation / 2^16), and a render
+// float back to Q22 / 16.16, each entry truncated toward zero (false on a non-finite
+// or out-of-range entry). [orig: Math_FixedPointToFloatMatrix4x4_Swizzled @0x611080;
+// Math_FloatMatrixToFixedPoint22 @0x611140]
+void collision_matrix_to_render_float(const CollisionMatrix &fixed, float out_row_major[16]);
+bool collision_matrix_from_render_float(const float in_row_major[16], CollisionMatrix &out);
+
 // An addeweap child's fixed matrix on a userpoint of its carrier's root part:
 // the carrier matrix as render floats, the userpoint's 16.16 position words
 // (x, y, z) through it, its direction words (x, y, z) as a look-at frame
