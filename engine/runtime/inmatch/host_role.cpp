@@ -311,6 +311,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	// The authority's start steps the process's file-transfer session words, which the context
 	// reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
 	state.host_owner.ctx.file_transfer_session = &client_process_->file_transfer_session;
+	state.host_owner.ctx.client_disconnect_latch = &client_process_->disconnect_latch;
 	client_process_->file_transfer_session.start_mission();
 	inmatch::HostConfig host_cfg;
 	host_cfg.config = config;
@@ -343,6 +344,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// The authority's mission start steps the process's file-transfer session words, which the
 	// context reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
+	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
 	client_process_->file_transfer_session.start_mission();
 	// The fresh context stands inside the mission load, which holds the spawn gate
 	// until its end (finish_mission_load) [orig: Game_StartMission @0x524398].
@@ -408,6 +410,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	// [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6), as the
 	//  bring-up's]
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
+	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
 	client_process_->file_transfer_session.start_mission();
 	state.client_runtime.reset();
 	local_round_reset_seen_ = kernel.local.round_reset_revision;
@@ -1108,6 +1111,20 @@ void HostRole::close() {
 					/*reliable=*/false);
 	}
 	inmatch::host_session_flush_s2c(state.host_owner, socket);
+	// The post-mission router's error arms (5, 6, 7, 20 and the disconnect reasons 9..19) clear
+	// the network, connection and transport modes and skip CNapiGameSession_FullDestroy, whose
+	// session reset stops the server: such an exit leaves the server unstopped and its joiners
+	// with no goodbye burst. The reason is the one the teardown's pump left: a listen host's own
+	// leave maps the process latch's record there, a stale kick's turning exit 1 into 7 or 9..19
+	// (D-NET-NEW-L1-26); a NovaWorld session's end stores 12.
+	// [orig: PostMenu_RouteMissionExit @0x568460 - 7 @0x568500..0x568526, 9..19
+	//  @0x56852B..0x568588 -> loc_5686DA (@0x5686DA..0x5686F9), the destroy @0x568683;
+	//  CNapiGameSession_FullDestroy @0x4C96A0 - CNapiGameSession_ResetActiveSession (the call
+	//  @0x4C96E2)]
+	const int32_t exit_reason = ctx.mission_exit_reason != 0 ? ctx.mission_exit_reason
+			: kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
+	if (route_mission_exit(exit_reason, /*novaworld=*/false).error != PostMissionError::None)
+		return;
 	// NapiNPProtocol_StopServer: latch STOP and destroy every server-side node in
 	// list order; the burst rides the socket directly, like retail's SendTo.
 	std::vector<PeerAddr> peers;

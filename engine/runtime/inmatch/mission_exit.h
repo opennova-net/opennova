@@ -44,7 +44,8 @@ inline constexpr int32_t kMissionExitBadMission = 20;
 
 // The exit reason an in-match disconnect stores: a description-family record (class 2) maps its
 // reason code (DPC) through the client's switch; any other class leaves the reason alone.
-// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 — the `dc == 2` gate @0x4c6563, the
+// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 — the `dc == 2` test @0x4C655F (its jnz
+//  @0x4c6563), the
 //  DPC switch @0x4c6583..0x4c677c: 1 / 33 / an unlisted code queue input event 3 (reason 1),
 //  34 queues event 36 (reason 5), 35 -> 7, 36..45 -> 9..18, 46 and 49 -> 19, 0 nothing]
 inline int32_t mission_exit_reason_for_disconnect(const DisconnectEvent &event) {
@@ -61,6 +62,33 @@ inline int32_t mission_exit_reason_for_disconnect(const DisconnectEvent &event) 
 	}
 	return kMissionExitQuit;
 }
+
+// The client callback's process-lifetime disconnect latch (ctx+0xD94): the disconnected callback
+// copies the record it is handed only while the latch is empty, so the first record wins until a
+// join's StartClientConnection (or the process's start or exit) clears it, and the callback's
+// exit-reason switch reads the LATCH, not the fresh record. A listen host's or single player's
+// own client runs the same callback at its teardown, so its own leave maps the record a kicked
+// joiner session left there (D-NET-NEW-L1-26). Written by every client connection's callback
+// (the joiner's and the own client's), cleared at the join's start.
+// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the empty test @0x4C6535, the copy of
+//  the connection's record (conn+0x654) @0x4C6545, the null record's memset @0x4C6551, valid
+//  @0x4C6559, the switch over the latch from `cmp [ebx+8], 2` @0x4C655F; the clears
+//  CNapiNetwork_StartClientConnection @0x4CA1A6..0x4CA1B4, CNapiNetwork_Init @0x4CA56D..0x4CA57A,
+//  CNapiNetwork_Shutdown @0x4CA475..0x4CA483]
+struct ProcessDisconnectLatch {
+	DisconnectEvent event{};
+	bool valid = false;
+	void latch(const DisconnectEvent &record) {
+		if (valid) return;
+		event = record;
+		valid = true;
+	}
+	void clear() { *this = ProcessDisconnectLatch{}; }
+	// The callback's exit reason: the switch over the latch (none while it is empty).
+	int32_t exit_reason() const {
+		return valid ? mission_exit_reason_for_disconnect(event) : kMissionExitNone;
+	}
+};
 
 // What the main frame does with the exit reason its update stored, after the logic update.
 enum class MainFrameExit : uint8_t {

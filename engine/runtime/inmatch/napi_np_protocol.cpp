@@ -1461,11 +1461,32 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 } // namespace
 
+// The own client's disconnected callback, which its teardown runs after the goodbye burst: the
+// process latch keeps the first record it is handed (one an earlier session's callback left
+// there, a kicked joiner's, else this leave's own), and the exit reason maps from the latch, so
+// a stale kick record turns the own leave's exit 1 into the kick's (7, 9..19) (D-NET-NEW-L1-26).
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the client callback called
+//  @0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the latch @0x4C6535..0x4C6559,
+//  the switch from @0x4C655F (35 -> 7 @0x4C65A2, 36 -> 9 @0x4C65C9, on to 45 -> 18)]
+static void own_client_disconnected(NapiNPServerCtx &ctx, const DisconnectEvent &record) {
+	if (ctx.client_disconnect_latch == nullptr) return;
+	ctx.client_disconnect_latch->latch(record);
+	const int32_t reason = ctx.client_disconnect_latch->exit_reason();
+	if (reason != kMissionExitNone) ctx.mission_exit_reason = reason;
+}
+
 // See header.
 bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain) {
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.type == NapiNPConnection::kTypeClientSide && conn.own_goodbye == drain)
-			return teardown_own_connection(ctx);
+		if (conn.type != NapiNPConnection::kTypeClientSide || conn.own_goodbye != drain) continue;
+		// The record the callback is handed: the connection's (a null one reads as zeros).
+		// [orig: OnDisconnectedFromServer - the copy of conn+0x654 @0x4C6545, the memset
+		//  @0x4C6551]
+		const DisconnectEvent record =
+				conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{};
+		if (!teardown_own_connection(ctx)) return false;
+		own_client_disconnected(ctx, record);
+		return true;
 	}
 	return false;
 }

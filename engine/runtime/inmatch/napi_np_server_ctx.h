@@ -14,6 +14,7 @@
 #include <runtime/inmatch/chat_flood.h>        // the console chat's flood table
 #include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
+#include <runtime/inmatch/mission_exit.h>      // ProcessDisconnectLatch (the own client's callback)
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/server_ban_lists.h>  // banlist.txt / banned.txt (the join refusals)
 #include <runtime/inmatch/server_console.h>    // the client-less host's CHAT ring
@@ -286,6 +287,12 @@ struct NapiNPServerCtx {
 	//  @0x5244B4) and Server_TickUpdate @0x51D7E0 (the add @0x51D820), read by
 	//  CNetPlayer_SendFileTransferChunk @0x4C9440 (the read @0x4C9468)]
 	FileTransferSession *file_transfer_session = nullptr;
+	// The process's client disconnect latch (ClientProcessState::disconnect_latch), which the
+	// host's own client's disconnected callback writes at its teardown and maps its exit reason
+	// from (D-NET-NEW-L1-26); null on a context no host role brought up (no callback runs).
+	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0, installed on the session's own
+	//  type-2 by CNapiGameSession_CreateSession @0x4C9BEC]
+	ProcessDisconnectLatch *client_disconnect_latch = nullptr;
 	// g_RoundStateInitTick, the round-state init's GetTickCount stamp in the host clock
 	// (host_start_tick's milliseconds): the status report's UP-TIME counts from it
 	// (session_uptime_ms). Every session create's round init stamps it; a single player's

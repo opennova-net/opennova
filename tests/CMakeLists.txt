@@ -5056,6 +5056,13 @@ add_executable(npruntime_teardown_zeroed_rows_test npruntime/teardown_zeroed_row
 target_link_libraries(npruntime_teardown_zeroed_rows_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_teardown_zeroed_rows_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_teardown_zeroed_rows COMMAND npruntime_teardown_zeroed_rows_test)
+# D-NET-NEW-L1-26: the client callback's process disconnect latch maps a listen host's own leave
+# from a stale kick record; the router's error arm skips StopServer (HostRole::close).
+add_executable(npruntime_host_close_order_test npruntime/host_close_order_test.cpp)
+target_link_libraries(npruntime_host_close_order_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_close_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(npruntime_host_close_order_test PRIVATE cxx_std_17)
+add_test(NAME npruntime_host_close_order COMMAND npruntime_host_close_order_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

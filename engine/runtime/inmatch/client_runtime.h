@@ -4,6 +4,7 @@
 #include <runtime/inmatch/client_console.h> // the S2C 0x06 echo's command walk (D-NET-710)
 #include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the process latch)
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
 #include <runtime/hud/net_quality_indicators.h> // g_NetQuality's display state
@@ -137,6 +138,11 @@ struct ClientProcessState {
 	// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (the copy @0x551CCC..0x551CD2), called
 	//  by Game_StartMission @0x524360 (@0x524662)]
 	const gamecfg::GameCfg *config_block = nullptr;
+	// ctx+0xD94, the client callback's disconnect latch (mission_exit.h ProcessDisconnectLatch):
+	// process-lived, first-wins, cleared at a join's start. The host's own client writes it at
+	// its teardown (NapiNPServerCtx::client_disconnect_latch); the joiner's callback leg moves
+	// onto it next (D-NET-NEW-L1-26).
+	ProcessDisconnectLatch disconnect_latch;
 };
 
 class ClientRuntime {
