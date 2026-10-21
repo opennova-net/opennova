@@ -161,7 +161,8 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e);
 //  reader Entity_UpdateDeadWreckEffects @0x493140 (the slots @0x4931DA);
 //  Entity_UpdateChildAttachment @0x4409A0
 //  (the ewep death `or [esi+24h], 6` @0x440B72 / @0x440C28, no +0x2B4 store),
-//  Entity_DetachFromVehicle @0x4355F0 (the 0x20 arm's 7 @0x435765..0x435772);
+//  Entity_DetachFromVehicle @0x4355F0 (the 0x20 arm's 7 @0x435765..0x435772; the same 7
+//  in Entity_DetachFromMount @0x546D00, @0x546D29, has no code or data reference);
 //  Entity_SpawnFromBMSRecord @0x40E9F0 (the
 //  6088 strncpy @0x40F136..0x40F14F); PowerupEntity_InitFromDef @0x442D00 (-1 @0x442D65),
 //  PowerupAction_Pickup @0x4428A0 (@0x442AE1), Powerup_TickRespawn @0x442850 (@0x442878 /
