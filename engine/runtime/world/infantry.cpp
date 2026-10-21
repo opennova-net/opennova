@@ -1481,7 +1481,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Local player: entity Yaw/Pitch come STRAIGHT from the mouse — instant, no
     // body-turn smoothing. The original drives entity+0x10/+0x14 directly from input;
     // the slope pass only writes +0x14 for corpses (the slope lean lives in
-    // body_pitch/roll). [orig: Input_HandleActionBinding_0 @0x4e1330; net-re
+    // body_pitch/roll). [orig: Input_HandleActionBinding_0 @0x4E0420
+    //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C); net-re
     // section 5.38]
     if (inf.is_local_player) {
         e.pitch = inf.look_pitch;

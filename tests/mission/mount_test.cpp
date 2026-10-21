@@ -748,7 +748,8 @@ int main() {
         CHECK(occ != nullptr);
         CHECK(occ->heading == look_heading); // the registry/wire/motor Yaw word is the look
         // The Pitch word is the mouse look too (D-NET-NEW-L6-3) [orig:
-        //  Input_HandleActionBinding_0 @0x4E1330 writes +0x14]; the Roll word the seat's.
+        //  Input_HandleActionBinding_0 @0x4E0420
+        //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes +0x14]; the Roll word the seat's.
         CHECK(occ->pitch_bam == kLookPitch);
         CHECK(occ->roll_bam == world::spawn_angle_bam(17));
         CHECK(ae->heading == look_heading); // full precision, never the seat heading

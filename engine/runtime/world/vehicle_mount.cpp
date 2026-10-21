@@ -382,7 +382,18 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
     // frame's are the child's own.
     // [orig: Math_FixedPointMatrixToEulerAngles @0x613481..0x61348C]
     occ.position = live.position;
-    occ.heading = live.heading;
+    // The Yaw word: an addeweap child takes the bone's (the whole attitude); an
+    // organic occupant's stays its look, the seat carry writing the bone yaw into
+    // the body frame only (bodyHeading and the legs; apply_resolved_mounted_seat_frame)
+    // and the look legs owning +0x10 (a remote player's chase @0x4B4361, the
+    // local input, the org1 look chase). A non-organic occupant keeps ours' seat
+    // yaw (no retail mover of it was witnessed). [orig: Entity_UpdateTransformAndTurret
+    //  @0x4410DD; Entity_UpdateInfantryPlayerBody - the seat carry @0x4B6510..0x4B6575
+    //  (+0x8C / +0x2E8 / +0x2E4 @0x4B654E..0x4B655A, no +0x10), the remote chase
+    //  @0x4B4361; Entity_UpdateInfantryAI - @0x4BED72..0x4BEDDA, the look chase @0x4BEF84]
+    const AiEntity *organic = world.ai.for_handle(occ.handle);
+    if (seat.attachment_frame || organic == nullptr || !organic->inf.active)
+        occ.heading = live.heading;
     // The Roll word takes the seat bone's roll; an organic occupant's Pitch word
     // stays its look (the carry writes the bone pitch into the body frame only;
     // the look legs write the Pitch word); an addeweap child takes the whole

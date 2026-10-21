@@ -471,6 +471,68 @@ void test_remote_player_control_seat_preserves_wire_look() {
     }
 }
 
+// A remote player in a passenger seat keeps its wire look in its Yaw word and
+// its motor heading while the seat owns the body frame: the organic seat carry
+// writes the bone yaw into bodyHeading and the legs alone, and the remote chase
+// owns +0x10 (FOUND V2). [orig: Entity_UpdateInfantryPlayerBody - the remote chase
+//  @0x4B4361, the seat carry @0x4B6510..0x4B6575 (+0x8C / +0x2E8 / +0x2E4
+//  @0x4B654E..0x4B655A, no +0x10)]
+void test_remote_passenger_keeps_its_wire_look() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    AiSystem &ai = w.ai;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.has_item_def = true; // seats need the def (D-NET-422)
+    vehicle.has_graphic_model = true;
+    vehicle.position = {10.0f, 20.0f, 30.0f};
+    vehicle.heading = placed_heading_bam(0);
+    vehicle.health = 100;
+    vehicle.alive = true;
+    Seat seat;
+    seat.type = SeatType::Passenger;
+    seat.bone_index = 1;
+    seat.seat_local = {1.0f, 2.0f, 3.0f};
+    vehicle.seats.push_back(seat);
+    const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+
+    Entity player;
+    player.kind = EntityKind::Organic;
+    player.player_class = 8;
+    player.health = 100;
+    player.alive = true;
+    const EntityHandle player_h = w.registry.spawn(0, player);
+    const int ai_index = ai.attach(player_h);
+    AiEntity &body = *ai.at(ai_index);
+    body.inf.active = true;
+    body.net_is_remote_peer = true;
+
+    CHECK(w.vehicles.process_attach(player_h, vehicle_h, 1));
+
+    const int32_t look_heading = bam_heading_from_mission_yaw_deg(45.0);
+    constexpr int32_t look_pitch = 0x06000000;
+    body.heading = look_heading;
+    body.pitch = look_pitch;
+    w.registry.get(player_h)->heading = placed_heading_bam(45);
+
+    CHECK(ai.pose_if_mounted(body, w));
+    CHECK(body.heading == look_heading);
+    CHECK(body.pitch == look_pitch);
+    CHECK(w.registry.get(player_h)->heading == placed_heading_bam(45));
+    CHECK(body.inf.body_heading == 0x40000000); // yaw 0: the spawn form of 90
+
+    Entity *live_vehicle = w.registry.get(vehicle_h);
+    live_vehicle->heading = placed_heading_bam(20);
+    CHECK(ai.refresh_mounted_pose(body, w));
+    CHECK(body.heading == look_heading);
+    CHECK(body.pitch == look_pitch);
+    CHECK(w.registry.get(player_h)->heading == placed_heading_bam(45));
+    CHECK(body.inf.body_heading == 835125248); // ((70 << 16) / 360) << 16
+}
+
 // A model-aware host supplies the complete live seat-bone frame at the shared
 // World seam. Every attach entry point consumes it immediately, and mounted AI
 // consumes a newly evaluated frame on its next tick. A missing/declining host
@@ -558,14 +620,16 @@ void test_live_pose_provider_and_static_fallback() {
         CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
         // The attach stores no Position: the bodied occupant keeps its words
         // until its motor's seat block poses it on the next pass (below); ours'
-        // attach-edge pose gives it the seat's Yaw and Roll words, and its Pitch
-        // word stays its own (the attach writes no angle). [orig:
-        // Entity_AttachToVehicleSlot @0x4946D0 - the stores @0x494752..0x494775]
+        // attach-edge pose gives it the seat's Roll word, and its Yaw and Pitch
+        // words stay its own (the attach writes no angle; an organic's seat carry
+        // writes no Yaw word, FOUND V2). [orig: Entity_AttachToVehicleSlot
+        // @0x4946D0 - the stores @0x494752..0x494775; Entity_UpdateInfantryPlayerBody
+        // - the seat carry @0x4B6510..0x4B6575]
         {
             const Entity &attached = *w.registry.get(occupant_h);
             CHECK(attached.position.x.q16 == 0 && attached.position.y.q16 == 0 &&
                   attached.position.z.q16 == 0);
-            CHECK(mission_yaw_whole_deg(attached.heading) == std::lround(mission_yaw_deg_from_bam_heading(provider.pose.heading)));
+            CHECK(attached.heading == Entity{}.heading); // the occupant's own word
             CHECK(attached.pitch_bam == 0); // the occupant's own word (D-NET-NEW-L6-3)
             CHECK(attached.roll_bam == provider.pose.roll);
         }
@@ -3937,7 +4001,8 @@ void test_local_player_drive_mirror() {
     // The seated LOOK stays mouse-instant at FULL precision on the AiEntity mirrors
     // the camera reads — a mid-ride look change lands the same tick, both axes
     // (tick_infantry's own mirrors are skipped for the whole ride)
-    // [orig: Input_HandleActionBinding_0 @0x4e1330 -> entity+0x10/+0x14].
+    // [orig: Input_HandleActionBinding_0 @0x4E0420
+    //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) -> entity+0x10/+0x14].
     pe.inf.target_heading = bam_heading_from_mission_yaw_deg(137.25);
     pe.inf.look_pitch = 12345678;
     CHECK(r.sys.pose_if_mounted(pe, r.w));
@@ -5204,6 +5269,7 @@ int main() {
     test_epilog_entity_update();
     test_same_team_hold_scan_follows_the_session();
     test_remote_player_control_seat_preserves_wire_look();
+    test_remote_passenger_keeps_its_wire_look();
     test_live_pose_provider_and_static_fallback();
     test_npc_seat_bone_failure_kills_boarders_and_detaches();
     test_entity_pose_seat_bone_lookup();

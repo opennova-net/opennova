@@ -75,14 +75,17 @@ bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
 } // namespace
 
 // The mounted body's heading refresh after the seat frame is applied: every
-// rider keeps its full-precision LOOK heading/pitch after the seat transform.
-// The attach's tail restores both look words saved at its entry, whatever the
-// rider (D-NET-NEW-L6-3); ours' seat-heading arm for other wire riders had no
-// witness. [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0 - the saves
-// @0x546416..0x54642C, the seat Yaw into +0x2D4 / +0x2D8 / +0x2E4 / +0x2E8
-// @0x546635..0x54665B, the restores @0x546661 (Yaw) / @0x546664 (Pitch), no
-// rider branch; org1 mounted @0x4BEF57..0x4BEF97; world-wac-ai-re.md §22.4 /
-// §5.38]
+// organic rider keeps its full-precision LOOK heading/pitch after the seat
+// transform. The organic movers reach the UseGun attach for seat type 3 alone,
+// whose tail restores both look words saved at its entry; their other seats'
+// carry writes no look word (D-NET-NEW-L6-3). A non-organic brain keeps the
+// words the seat pose gave it (no retail mover of it was witnessed).
+// [orig: Entity_UpdateInfantryPlayerBody `cmp [esi+168h], 3` @0x4B63A5..0x4B63BF,
+//  the carry @0x4B6510..0x4B6575; Entity_UpdateInfantryAI @0x4BEC0F..0x4BEC1B;
+//  Entity_AttachToBoneAndUpdateTransform @0x5463D0 - the saves @0x546416..0x54642C,
+//  the seat Yaw into +0x2D4 / +0x2D8 / +0x2E4 / +0x2E8 @0x546635..0x54665B, the
+//  restores @0x546661 (Yaw) / @0x546664 (Pitch); org1 mounted @0x4BEF57..0x4BEF97;
+//  world-wac-ai-re.md §22.4 / §5.38]
 bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
     Entity *occupant = world.registry.get(e.handle);
     if (occupant == nullptr || occupant->motor_suspended || !occupant->mounted || occupant->health <= 0) return false;
@@ -93,7 +96,12 @@ bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
     const Seat &seat = vehicle->seats[occupant->mount_seat];
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
-    apply_resolved_mounted_seat_frame(e, world, *occupant, *vehicle, seat);
+    const int32_t seat_heading =
+            apply_resolved_mounted_seat_frame(e, world, *occupant, *vehicle, seat);
+    if (!e.inf.active) {
+        e.heading = seat_heading;
+        return true;
+    }
     // Independent LOOK was already promoted/chased in pose_if_mounted. Restore
     // that exact value without consulting input latches or advancing aim again;
     // the Yaw and Pitch words both take the look back.
@@ -860,7 +868,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         //  Entity_UpdateVehiclePhysics steer source @0x48ba59/v61->Yaw].
         occ->heading = e.inf.target_heading;
         // So is its Pitch word the look, not the seat's (D-NET-NEW-L6-3)
-        // [orig: Input_HandleActionBinding_0 @0x4e1330 writes +0x14].
+        // [orig: Input_HandleActionBinding_0 @0x4E0420
+        //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes +0x14].
         occ->pitch_bam = e.inf.look_pitch;
         // Mirror the live inputs into the wire fields the motor consumes — tick_infantry's
         // per-tick mirror is skipped while mounted (one entity struct in the original; the
@@ -877,9 +886,14 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // bank a jump for dismount [orig: the mounted-leg flag scrub &= 0xFF8F57DF].
         e.inf.jump_requested = false;
     }
-    // Occupants present their carried body in the captured seat frame. Independent
-    // player/gunner LOOK restored below must not rotate that body/collision pose.
-    e.heading = seat_heading;
+    // Occupants present their carried body in the captured seat frame (the body
+    // heading and the legs). An organic rider's Yaw word stays its look: the seat
+    // carry writes no +0x10, so a remote passenger keeps the yaw its chase set; the
+    // arms below restore or chase the look for the other riders. A non-organic
+    // brain takes the seat yaw (no retail mover of it was witnessed).
+    // [orig: Entity_UpdateInfantryPlayerBody - the seat carry @0x4B6510..0x4B6575,
+    //  the remote chase @0x4B4361; Entity_UpdateInfantryAI @0x4BED72..0x4BEDDA]
+    if (!e.inf.active) e.heading = seat_heading;
     if (e.inf.active && e.inf.is_local_player) {
         // The seated LOOK stays mouse-instant at FULL precision: retail drives entity
         // Yaw/Pitch straight from input regardless of mount (the mounted body leg
@@ -888,7 +902,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // word) must not freeze it. tick_infantry's own
         // mirrors (its lines `e.heading = inf.target_heading` / `e.pitch =
         // inf.look_pitch`) are skipped for the whole ride.
-        // [orig: Input_HandleActionBinding_0 @0x4e1330 writes entity+0x10/+0x14;
+        // [orig: Input_HandleActionBinding_0 @0x4E0420
+        //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes entity+0x10/+0x14;
         //  §23.5 — the entity Yaw is the LOOK, player-owned while seated]
         e.heading = e.inf.target_heading;
         e.pitch = e.inf.look_pitch;

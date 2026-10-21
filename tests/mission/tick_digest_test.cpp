@@ -102,7 +102,7 @@ namespace {
 // The registry row now carries the Yaw word (D-NET-NEW-L6-2) and the chain
 // digests it in place of the whole-degree mirror, which moves it from
 // 0x517e7adde3a32d91; digesting the word's rounded whole degrees gives that
-// value back, so no tick behaviour moved.
+// value back, so no tick of this synthetic run moved.
 // The synthetic mission has no player-start marker, so its player keeps the
 // zeroed entity's heading word 0, as retail's mission-start spawn leaves it
 // (D-NET-NEW-L1-19), where the spawn had stored the placed default
@@ -111,7 +111,8 @@ namespace {
 // The registry row carries its Pitch / Roll words (D-NET-NEW-L6-3) and the
 // chain digests them in place of the whole-degree mirrors, which moves it from
 // 0xdcc41c0472d7226d; digesting the words' rounded whole degrees gives that
-// value back, so no tick behaviour moved.
+// value back, so no tick of this synthetic run moved (it carries no section
+// piece and no body on a tilted placed row).
 constexpr uint64_t kSyntheticDigest = 0xa7c762a945b847fdULL;
 constexpr int kSyntheticTicks = 240;
 
