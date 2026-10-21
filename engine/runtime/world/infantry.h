@@ -1251,4 +1251,23 @@ bool org2_owns_death_transaction(const World &world, EntityHandle victim);
 // Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
 void infantry_ride_link(World &world, Entity &self);
 
+// The player body's capsule eye (CameraOffset +0x6C / +0x70 / +0x74) for a body the
+// local player does not drive: the eye height `extent` (the capsule's, capped at
+// 0xD000 by the caller) stands on the lean's arc, x 0, y sin, z cos of -lean; the
+// vector then turns about z by the twist (Yaw - the body heading +0x8C), about x by
+// Roll (+0x18), about y by the body pitch (+0x90) and about z by the body heading,
+// each angle's sine and cosine an x87 product of the BAM word and the radians per
+// BAM, scaled by 2^22 and truncated, each product a Q22 multiply truncated to a
+// dword; the height is floored at 0x2000. Every player body's pass runs it ahead
+// of its lean ramp and its slope chase, so it reads the lean decayed but unramped
+// and last tick's Roll and body pitch. Defined in infantry.cpp.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the extent cap
+//  @0x4B698C..0x4B6997, -lean @0x4B699F..0x4B69A7, the lean's pair
+//  @0x4B69AB..0x4B69D4, the twist @0x4B69D9..0x4B6A08, the first turn
+//  @0x4B6A0C..0x4B6A6D, Roll @0x4B6A68..0x4B6A8A, +0x90 @0x4B6A8F..0x4B6AAE,
+//  +0x8C @0x4B6AB3..0x4B6AD2, the turns @0x4B6ADB..0x4B6B96, the floor
+//  @0x4B6B98..0x4B6BA0, the stores @0x4B6BA5..0x4B6BAB]
+void player_body_capsule_eye(int32_t extent, int32_t lean, int32_t yaw, int32_t body_heading,
+                             int32_t roll, int32_t body_pitch, int32_t out[3]);
+
 } // namespace opennova::world

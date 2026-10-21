@@ -573,24 +573,20 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	es.rm_prev_bottom = frame.capsule_bottom;
 	es.rm_prev_bottom_live = true;
 	// A remote player's eye: the body update's non-local arm restamps CameraOffset
-	// from this tick's capsule, the extent capped at 0xD000 times the cosine of the
-	// lean, the vertical floored at 0x2000, as the authority's body leg ports it
-	// (world infantry.cpp's capsule fallback, whose 3-angle lateral tilt is the
-	// tracked residue there too: x / y stay 0). The local player's own eye is its
-	// local arm's (LocalPlayer).
+	// from this tick's capsule, the extent capped at 0xD000 on the lean's arc, then
+	// turned by the twist, Roll, the body pitch and the body heading
+	// (world::player_body_capsule_eye, the authority's body leg's too), from the
+	// decayed, unramped lean (tick_lean_ramp runs after this pass). A decoded row
+	// runs no slope chase, so its body pitch is 0 (D-NET-196's body-conform
+	// remainder). The local player's own eye is its local arm's (LocalPlayer).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the on-foot non-local arm,
-	//  the extent cap @0x4B6991..0x4B6997, the lean cosine @0x4B69A7..0x4B69D4, the
-	//  floor @0x4B6B9E..0x4B6BA0, the stores @0x4B6BA5..0x4B6BAB]
+	//  the extent cap @0x4B698C..0x4B6997, the turns @0x4B699F..0x4B6B96, the floor
+	//  @0x4B6B98..0x4B6BA0, the stores @0x4B6BA5..0x4B6BAB]
 	if (es.cls == EntityClass::Player && !is_self) {
 		int32_t extent = frame.capsule_top - frame.capsule_bottom;
 		if (extent > 0xD000) extent = 0xD000;
-		const int32_t lean_cos = static_cast<int32_t>(
-				std::cos(static_cast<double>(es.lean_angle) * io::kRadiansPerBamX87) * io::kQ22One);
-		int32_t eye_z = static_cast<int32_t>((static_cast<int64_t>(extent) * lean_cos) >> 22);
-		if (eye_z < 0x2000) eye_z = 0x2000;
-		es.eye_offset[0] = 0;
-		es.eye_offset[1] = 0;
-		es.eye_offset[2] = eye_z;
+		world::player_body_capsule_eye(extent, es.lean_angle, es.heading_bam, es.rm_body_heading,
+		                               es.roll_bam, /*body_pitch=*/0, es.eye_offset);
 	}
 	// Rotation heading: org2 = the leg-chased body heading loaded from
 	// entity+0x8C [orig: Entity_UpdateInfantryPlayerBody @0x4B41E4, Q22 rotate

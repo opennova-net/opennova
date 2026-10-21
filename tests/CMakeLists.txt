@@ -5209,6 +5209,11 @@ add_test(NAME npruntime_full_entity_spawn_ai_state COMMAND npruntime_full_entity
 add_executable(netsim_client_replica_pipeline_ride_link_test netsim/client_replica_pipeline_ride_link_test.cpp)
 target_link_libraries(netsim_client_replica_pipeline_ride_link_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_ride_link COMMAND netsim_client_replica_pipeline_ride_link_test)
+# D-NET-330: the player body's capsule eye, the four-turn leg the authority's body and a
+# joiner's decoded rows share.
+add_executable(player_body_capsule_eye_test world/player_body_capsule_eye_test.cpp)
+target_link_libraries(player_body_capsule_eye_test PRIVATE opennova_runtime)
+add_test(NAME player_body_capsule_eye COMMAND player_body_capsule_eye_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

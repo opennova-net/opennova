@@ -1637,10 +1637,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: Game_ProcessMainFrame @0x5263F0 - the pause test @0x5265A0, `add
 	//  g_CurrentTick, ebx` @0x5265B4, the entity gates @0x52672C..0x526742]
 	if (main_frame && entity_update_skipped) view_.step_frame_tick();
-	// The remote lean integrator runs once per client frame regardless of role —
-	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp
-	// @0x4b7dbf/@0x4b7dd6]
-	if (!entity_update_skipped) view_.tick_lean();
+	// The remote lean integrator runs once per client frame regardless of role,
+	// the body tick that owns it in retail: its decay heads the pass, its ramp
+	// follows the movers (whose eye reads the unramped lean) below.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the
+	//  eye @0x4B699F..0x4B6BAB, the ramp @0x4B7DBF / @0x4B7DD6]
+	if (!entity_update_skipped) view_.tick_lean_decay();
 	// The remote arms dip rides the same body tick as the lean integrator.
 	// [orig: lean @0x4b5c97 and dip @0x4b5cab, both inside Entity_UpdateInfantryPlayerBody]
 	if (!entity_update_skipped) view_.tick_arms_dip();
@@ -1656,6 +1658,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		view_.tick_remote_motion(joiner_ != nullptr && joiner_->has_self_handle()
 		                                 ? joiner_->self_handle()
 		                                 : 0xFFFFu);
+	// The lean ramp closes the body pass, after its eye [orig: @0x4B7DBF / @0x4B7DD6].
+	if (!entity_update_skipped) view_.tick_lean_ramp();
 	lap.mark(devtools::Slot::SIM_CLIENT_MAINTENANCE);
 
 	// The end-round linger: in session, not the authority, the round-over gate

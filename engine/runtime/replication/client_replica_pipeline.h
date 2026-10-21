@@ -124,9 +124,13 @@ public:
 	// role) so frames_applied / seen_this_frame stay coherent.
 	void apply(uint8_t tag, const std::vector<uint8_t> &body);
 
-	// Advance the remote lean integrator one body tick (called once per client
-	// frame). [orig: decay @0x4b5c97, then the ramp @0x4b7dbf/@0x4b7dd6]
-	void tick_lean();
+	// The remote lean integrator, one body tick per client frame in retail's two
+	// halves: the decay at the body pass's head, the held keys' ramp at its end,
+	// so the pass's eye (tick_remote_motion) reads the decayed, unramped lean.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the
+	//  eye @0x4B699F..0x4B6BAB, the ramp @0x4B7DBF / @0x4B7DD6]
+	void tick_lean_decay();
+	void tick_lean_ramp();
 	void tick_arms_dip();
 	// Wire handles whose compact record was dropped because its carrier could
 	// not be resolved (the retail bail queues a C2S 0x0F entity request); the

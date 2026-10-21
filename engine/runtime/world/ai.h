@@ -1310,13 +1310,16 @@ public:
     //  (the 8-case jumptable @0x4b7411: 0 -> 37, 1/2 -> 38, 3..5 -> 40, 6/7 -> 39,
     //  default 36 @0x4b7448); 4th-tick gate @0x4b70ce]
     void player_body_select(AiEntity &e, World &world, uint32_t entity_flags, uint32_t logic_tick);
-    // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
+    // The lean-angle producer, every body tick in two halves around the body's eye:
+    // the decay lean -= (lean+8)>>4 at the pass's head, then, after the eye, the
     // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated
     // alive + not prone + not latched on a ladder or under a deployed chute
     // (entity_flags carries the retail Flags view for the 0x100020 gate).
-    // [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6 under the (Flags & 0x100020)
-    // gate @0x4b7dad; the seated (+0x168==1) +-0x1400000 variant unported]
-    void infantry_lean_tick(AiEntity &e, uint32_t entity_flags);
+    // [orig: decay @0x4b5c97; the eye @0x4B699F..0x4B6BAB; ramp @0x4b7dbf/@0x4b7dd6
+    // under the (Flags & 0x100020) gate @0x4b7dad; the seated (+0x168==1)
+    // +-0x1400000 variant unported]
+    void infantry_lean_decay(AiEntity &e);
+    void infantry_lean_ramp(AiEntity &e, uint32_t entity_flags);
     // The D-COL-5 climb legs (infantry_ladder.cpp; record world-wac-ai-re.md §30).
     // org2, EVERY tick: the on-ladder state override (32/33/34 by the dir fan +
     // look-pitch sign) and the side/back dismounts.

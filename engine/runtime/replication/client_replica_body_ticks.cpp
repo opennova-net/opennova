@@ -11,12 +11,19 @@
 
 namespace opennova::replication {
 
-void ClientReplicaPipeline::tick_lean() {
+void ClientReplicaPipeline::tick_lean_decay() {
 	for (ClientEntityState &es : state_.entities) {
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
 			continue;
 		es.lean_angle = io::bam_sub(es.lean_angle,
 				io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
+	}
+}
+
+void ClientReplicaPipeline::tick_lean_ramp() {
+	for (ClientEntityState &es : state_.entities) {
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
+			continue;
 		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
 			es.lean_angle = io::bam_sub(es.lean_angle, 0x3000000);
 		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)

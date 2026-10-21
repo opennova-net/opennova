@@ -297,12 +297,14 @@ void test_row_weapon_channel_plays_an_emote_then_returns() {
 }
 
 // D-NET-330: a remote player's eye (CameraOffset +0x6C..+0x74) is its body update's
-// non-local arm over the clip's capsule, every tick: the extent capped at 0xD000 times
-// the cosine of the lean, the vertical floored at 0x2000 (x / y the tracked tilt residue,
-// 0); the local player's own row is its local arm's and keeps none.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the cap @0x4B6991..0x4B6997, the lean
-//  cosine @0x4B69A7..0x4B69D4, the floor @0x4B6B9E..0x4B6BA0, the stores
-//  @0x4B6BA5..0x4B6BAB]
+// non-local arm over the clip's capsule, every tick: the extent capped at 0xD000 on the
+// lean's arc, turned by the twist, Roll, the body pitch and the body heading
+// (world::player_body_capsule_eye), the vertical floored at 0x2000; it reads the lean
+// decayed but not yet ramped; the local player's own row is its local arm's and keeps
+// none.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the cap
+//  @0x4B698C..0x4B6997, the turns @0x4B699F..0x4B6B96, the floor @0x4B6B98..0x4B6BA0, the
+//  stores @0x4B6BA5..0x4B6BAB, the ramp @0x4B7DBF / @0x4B7DD6]
 struct CapsuleSource final : public opennova::world::IRootMotionSource {
 	int32_t extent = 0;
 	bool has_clip(int, int) const override { return true; }
@@ -334,7 +336,7 @@ void test_remote_eye_restamps_from_the_capsule() {
 	}
 	view.tick_remote_motion(0xFFFF);
 	expect(es->eye_offset[2] == 0xD000 && es->eye_offset[0] == 0 && es->eye_offset[1] == 0,
-			"eye: the extent caps at 0xD000, no lateral tilt");
+			"eye: the extent caps at 0xD000; a level, unleaned row has no lateral words");
 	src.extent = 0x8000;
 	view.tick_remote_motion(0xFFFF);
 	expect(es->eye_offset[2] == 0x8000, "eye: a crouched capsule's extent");
@@ -350,6 +352,35 @@ void test_remote_eye_restamps_from_the_capsule() {
 	es->move_input = 0;
 	view.tick_remote_motion(0xFFFF);
 	expect(es->eye_offset[2] == 23169, "eye: the extent times the lean's cosine");
+	// The row's own words drive the turns: the eye is the shared leg over the row's
+	// lean, chased heading, body heading and Roll, and a body pitch of 0 (a decoded row
+	// runs no slope chase).
+	{
+		int32_t want[3] = {};
+		opennova::world::player_body_capsule_eye(0x8000, es->lean_angle, es->heading_bam,
+				es->rm_body_heading, es->roll_bam, 0, want);
+		expect(es->eye_offset[0] == want[0] && es->eye_offset[1] == want[1] &&
+						es->eye_offset[1] != 0,
+				"eye: the lean's sine turns into the lateral words");
+	}
+	// The order (V-L5-s5 0b): the body pass's eye reads the decayed lean, the held key's
+	// ramp lands after it. A held left lean from 0x20000000: the decay takes
+	// (0x20000000 + 8) >> 4 = 0x2000000, the eye reads 0x1E000000, then the ramp adds
+	// -0x3000000 for 0x1B000000.
+	es->lean_angle = 0x20000000;
+	es->move_input = opennova::world::Entity::kMoveOrderLeanLeft;
+	view.tick_lean_decay();
+	view.tick_remote_motion(0xFFFF);
+	view.tick_lean_ramp();
+	{
+		int32_t want[3] = {};
+		opennova::world::player_body_capsule_eye(0x8000, 0x1E000000, es->heading_bam,
+				es->rm_body_heading, es->roll_bam, 0, want);
+		expect(es->eye_offset[2] == want[2] && es->eye_offset[1] == want[1],
+				"eye: the pass reads the decayed, unramped lean");
+		expect(es->lean_angle == 0x1B000000, "eye: the held key's ramp follows the eye");
+	}
+	es->move_input = 0;
 	// The self row is the local arm's: the replica restamps none.
 	es->eye_offset[2] = 0;
 	view.tick_remote_motion(kPlayerHandle);

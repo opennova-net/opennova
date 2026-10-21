@@ -493,13 +493,17 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 
 	// Tick 1 from a level angle: the decay takes (0+8)>>4 == 0, so the ramp step lands
 	// whole. Ramp-first would already read ∓0x2D00000.
-	view.tick_lean();
+	view.tick_lean_decay();
+	view.tick_lean_ramp();
 	if (!expect(l->lean_angle == -0x3000000 && r->lean_angle == 0x3000000,
 	            "first tick decays the level angle, then applies one whole ramp step"))
 		return false;
 
 	// Held: the decay cancels exactly one ramp step at ~16x it, not ~15x.
-	for (int tick = 1; tick < 400; ++tick) view.tick_lean();
+	for (int tick = 1; tick < 400; ++tick) {
+		view.tick_lean_decay();
+		view.tick_lean_ramp();
+	}
 	if (!expect(l->lean_angle < -0x2F000000 && l->lean_angle > -0x31000000 &&
 	                    r->lean_angle > 0x2F000000 && r->lean_angle < 0x31000000,
 	            "held lean settles on the witnessed ±0x30000000 equilibrium")) return false;
@@ -512,12 +516,16 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	l = view.state().find(0x0001);
 	r = view.state().find(0x0002);
-	view.tick_lean();
+	view.tick_lean_decay();
+	view.tick_lean_ramp();
 	if (!expect(l != nullptr && r != nullptr && l->lean_angle > held_left &&
 	                    l->lean_angle < 0 && r->lean_angle > 0,
 	            "released lean decays back toward level")) return false;
 	// The decay's +8 rounding parks the tail a few BAM units off zero rather than on it.
-	for (int tick = 1; tick < 400; ++tick) view.tick_lean();
+	for (int tick = 1; tick < 400; ++tick) {
+		view.tick_lean_decay();
+		view.tick_lean_ramp();
+	}
 	return expect(l->lean_angle > -0x1000 && l->lean_angle <= 0 &&
 	                      r->lean_angle >= 0 && r->lean_angle < 0x1000,
 	              "released lean settles level");

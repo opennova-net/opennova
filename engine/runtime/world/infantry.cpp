@@ -317,10 +317,14 @@ void infantry_rain_ambient(World &world, const Entity &ent) {
 // every infantry body (the corpse keeps decaying, matching the original's placement
 // before the weapon-channel block); the ramp needs a live, non-prone body.
 // [orig: decay @0x4b5c97 lean -= (lean+8)>>4; ramp @0x4b7dbf/@0x4b7dd6]
-void AiSystem::infantry_lean_tick(AiEntity &e, uint32_t entity_flags) {
+void AiSystem::infantry_lean_decay(AiEntity &e) {
     InfantryState &inf = e.inf;
     inf.lean_angle =
         io::bam_sub(inf.lean_angle, io::bam_sar(io::bam_add(inf.lean_angle, 8), 4));
+}
+
+void AiSystem::infantry_lean_ramp(AiEntity &e, uint32_t entity_flags) {
+    InfantryState &inf = e.inf;
     if (e.health <= 0) return;                      // [orig: the Flags&2 gate legs]
     // The ladder latch (hands on the rungs) and a deployed chute block the ramp.
     // [orig: (Flags & 0x100020) gate @0x4b7dad]
@@ -1289,13 +1293,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     // The lean angle decays every body tick (corpse included — the decay sits before
-    // the weapon-channel block in the original) and ramps while a lean key is held;
+    // the weapon-channel block in the original); its ramp waits for the eye below;
     // the torso roll chases the slope roll in the same pass [orig: @0x4b5cff].
-    // [orig: @0x4b5c97 / @0x4b7dbf; see infantry_lean_tick]
+    // [orig: @0x4b5c97 / @0x4b7dbf; see infantry_lean_decay / infantry_lean_ramp]
     if (!npc_body) {
-        infantry_lean_tick(e, tick_entity != nullptr
-                                  ? (tick_entity->flags | tick_entity->engine_flags)
-                                  : 0u);
+        infantry_lean_decay(e);
         infantry_torso_roll_tick(e);
     }
 
@@ -1326,6 +1328,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // the clip gate, which stands in for their own unported channel exit
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B412D..0x4B4135].
     if (have_clip || npc_body) infantry_restamp_eye(e, world, frame);
+    // The held lean keys ramp after the eye, which read the decayed lean (D-NET-330).
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the eye @0x4B699F..0x4B6BAB,
+    //  the ramp @0x4B7DBF / @0x4B7DD6]
+    if (!npc_body)
+        infantry_lean_ramp(e, tick_entity != nullptr
+                                  ? (tick_entity->flags | tick_entity->engine_flags)
+                                  : 0u);
 
     // Org2 selects its next gait only after the current head pose was built.
     // [orig: head @0x4B6BB3; fourth-tick selector @0x4B70CE; ladder @0x4B7484]
@@ -2041,6 +2050,54 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     finish_infantry_tick(e, world);
 }
 
+namespace {
+// One eye angle's x87 pair: the BAM word times the radians per BAM, its sine and
+// cosine scaled by 2^22 and truncated (`_ftol2_sse`).
+struct EyeTurn {
+    int32_t s = 0;
+    int32_t c = 0;
+};
+EyeTurn eye_turn(int32_t word) {
+    const double a = static_cast<double>(word) * io::kRadiansPerBamX87;
+    return {static_cast<int32_t>(std::sin(a) * io::kQ22One),
+            static_cast<int32_t>(std::cos(a) * io::kQ22One)};
+}
+// `imul; shrd eax, edx, 16h`: the Q22 product's low dword.
+int32_t eye_q22(int32_t a, int32_t b) {
+    return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
+}
+} // namespace
+
+void player_body_capsule_eye(int32_t extent, int32_t lean, int32_t yaw, int32_t body_heading,
+                             int32_t roll, int32_t body_pitch, int32_t out[3]) {
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `neg ecx` @0x4B69A5, the
+    //  lean's pair @0x4B69AB..0x4B69D4, the twist `sub edx, [esi+8Ch]` @0x4B69DC,
+    //  Roll @0x4B6A68, +0x90 @0x4B6A8F, +0x8C @0x4B6AB3]
+    const EyeTurn l = eye_turn(io::bam_sub(0, lean));
+    const EyeTurn tw = eye_turn(io::bam_sub(yaw, body_heading));
+    const EyeTurn r = eye_turn(roll);
+    const EyeTurn p = eye_turn(body_pitch);
+    const EyeTurn h = eye_turn(body_heading);
+    // The lean's arc in the y / z plane, x 0 [orig: @0x4B6A0C..0x4B6A2A].
+    const int32_t x0 = 0;
+    const int32_t y0 = eye_q22(l.s, extent);
+    const int32_t z0 = eye_q22(l.c, extent);
+    // About z by the twist [orig: @0x4B6A32..0x4B6A6D, x @0x4B6ADB].
+    const int32_t x1 = io::bam_sub(eye_q22(tw.c, x0), eye_q22(tw.s, y0));
+    const int32_t y1 = io::bam_add(eye_q22(tw.c, y0), eye_q22(tw.s, x0));
+    // About x by Roll [orig: @0x4B6AE1..0x4B6B19, y @0x4B6B39].
+    const int32_t y2 = io::bam_sub(eye_q22(r.c, y1), eye_q22(r.s, z0));
+    const int32_t z2 = io::bam_add(eye_q22(r.c, z0), eye_q22(r.s, y1));
+    // About y by the body pitch [orig: @0x4B6B1D..0x4B6B37, @0x4B6B43..0x4B6B5D].
+    const int32_t x3 = io::bam_sub(eye_q22(p.c, x1), eye_q22(p.s, z2));
+    const int32_t z3 = io::bam_add(eye_q22(p.c, z2), eye_q22(p.s, x1));
+    // About z by the body heading [orig: @0x4B6B60..0x4B6B96].
+    out[0] = io::bam_sub(eye_q22(h.c, x3), eye_q22(h.s, y2));
+    out[1] = io::bam_add(eye_q22(h.c, y2), eye_q22(h.s, x3));
+    // [orig: the floor @0x4B6B98..0x4B6BA0; the stores @0x4B6BA5..0x4B6BAB]
+    out[2] = z3 < 0x2000 ? 0x2000 : z3;
+}
+
 void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame) {
     // The local on-foot path terrain-floors the absolute eye; the mounted path
     // does not. The capsule fallback retains the org1/org2 extent and lean
@@ -2089,6 +2146,20 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         const int32_t extent = frame.capsule_top - frame.capsule_bottom;
         const int32_t delta = org2 ? std::min(extent, 0xD000)
                                                   : std::max(extent, 0x9000);
+        // An on-foot player body's eye is the four-turn capsule leg, lateral words
+        // included (D-NET-330); a seated one keeps the leg below (its mounted arm
+        // @0x4B66D9..0x4B68FC is the tracked remainder).
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B698C..0x4B6BAB]
+        const Entity *seat_probe = world.registry.get(e.handle);
+        if (org2 && (seat_probe == nullptr || !seat_probe->mounted)) {
+            int32_t eye[3] = {};
+            player_body_capsule_eye(delta, inf.lean_angle, e.heading, inf.body_heading, e.roll,
+                                    e.body_pitch, eye);
+            inf.eye_offset_x = eye[0];
+            inf.eye_offset_y = eye[1];
+            inf.eye_offset_z = eye[2];
+            return;
+        }
         // The NPC (org1) restamp reads the Q22 sine table at the rounded top
         // ten bits of the lean and of the heading; the player-body fallback
         // takes the Q22 ftol cosine of the lean times retail's radians-per-BAM
@@ -2107,8 +2178,8 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         inf.eye_offset_z = eye_z;
         if (org2) {
             // A lost sample must not leave a stale head-frame lateral pair
-            // behind: the capsule fallback carries no lateral model (the
-            // 3-angle tilt is the tracked residue), so the lanes reset.
+            // behind: the seated capsule leg carries no lateral model (the
+            // mounted arm is the tracked residue), so the lanes reset.
             inf.eye_offset_x = 0;
             inf.eye_offset_y = 0;
         } else {
