@@ -329,7 +329,11 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// row's type index takes its visual item; EntityDef_LoadModelsAndCallbacks
 		// - the store @0x439FDC; the persistent-bank gate
 		// MapOverlay_RenderAllByLayer @0x5BE6C4].
-		if (def != nullptr) e->has_graphic_model = render_model != nullptr;
+		if (def != nullptr) {
+			e->has_graphic_model = render_model != nullptr;
+			e->graphic_model_userpoints = render_model != nullptr
+					? static_cast<uint32_t>(render_model->user_point_count) : 0;
+		}
 		if (render_model != nullptr) {
 			deps.occlusion.assign_render_model(h, world::collision_projection_sphere_from_3di(
 					*render_model, 0, 0, world::item_def_zero_bbox_center(def->type, def->attrib)));

@@ -453,6 +453,10 @@ struct Entity {
     // the persistent map bank draws only model-bearing slots.
     // [orig: MapOverlay_RenderAllByLayer @0x5BE6C4..0x5BE6C9]
     bool has_graphic_model = false;
+    // That model's userpoint count (the model +0xBC; 0 with no model): the
+    // entry admission refuses a carrier whose model holds none.
+    // [orig: Entity_CanEnterVehicle @0x435480 (@0x43549C..0x4354A3)]
+    uint32_t graphic_model_userpoints = 0;
     // The graphic model's XY half-extents (mission axes, 16.16), stamped by
     // the same model-resolve seam. The minimap blip drawer sizes footprint-
     // class blips from these; 0 = unstamped (the 10-wu class fallback).

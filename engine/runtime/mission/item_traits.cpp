@@ -106,6 +106,14 @@ bool graphic_model_loads(const DefItemDef *def, const assets::AssetStore *models
             models->has_source() && models->model(std::string(def->graphic)) != nullptr;
 }
 
+// The userpoint count of the model that load returned (the model's +0xBC), 0
+// when none loaded.
+uint32_t graphic_model_userpoints(const DefItemDef *def, const assets::AssetStore *models) {
+    if (!graphic_model_loads(def, models)) return 0;
+    const assets::Model model = models->model(std::string(def->graphic));
+    return static_cast<uint32_t>(model->user_point_count);
+}
+
 // One row's spawn traits (world::PlayerTemplate) from its def; a missing row
 // (null) reads none and keeps the seed's type id. The model slot is what the
 // row's graphic load returned, which a spawn copies into +0x30.
@@ -290,6 +298,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		//  persistent-bank gate MapOverlay_RenderAllByLayer @0x5BE6C4]
 		e->has_graphic_model = graphic_model_loads(def, models) &&
 				e->kind != world::EntityKind::Marker;
+		e->graphic_model_userpoints =
+				e->has_graphic_model ? graphic_model_userpoints(def, models) : 0;
 		// The physics callback table's ewep row selects the gun update. A
 		// section clone's template pins its update callback (the floating
 		// physics) whatever its def, on every resolve.

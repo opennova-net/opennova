@@ -34,6 +34,9 @@ static void stamp_fixture_carrier_defs(World &world) {
 			Entity &def = *world.registry.get(v.handle);
 			def.has_item_def = true;
 			def.has_graphic_model = true; // the def's graphic, the seats' model
+			// That model's userpoints are the seat bones (the entry admission refuses
+			// a model holding none) [orig: Entity_CanEnterVehicle @0x43549C..0x4354A3].
+			def.graphic_model_userpoints = static_cast<uint32_t>(v.seats.size());
 			def.item_type = 1;
 			def.item_attrib |= kItemAttribPlayerControl;
 		}

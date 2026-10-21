@@ -1175,6 +1175,7 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     carrier.item_type = 1;
     carrier.has_item_def = true;
     carrier.has_graphic_model = true;
+    carrier.graphic_model_userpoints = 1; // its model's userpoint: the seat bone
     carrier.item_attrib = kItemAttribPlayerControl;
     Seat seat;
     seat.type = SeatType::Passenger;

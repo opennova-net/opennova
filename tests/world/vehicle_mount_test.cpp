@@ -77,6 +77,9 @@ struct Rig {
         veh.kind = EntityKind::Item;
         veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
         veh.has_graphic_model = true;
+        // The model's userpoints are the seat bones below (the entry admission
+        // refuses a model holding none) [orig: Entity_CanEnterVehicle @0x43549C..0x4354A3].
+        veh.graphic_model_userpoints = 2;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         veh.item_attrib = kItemAttribPlayerControl;
         veh.item_id = 1294;
@@ -2136,6 +2139,12 @@ void test_carrier_without_a_model_takes_no_rider() {
 		child.seats.push_back(sit);
 		(void)r.w.registry.spawn(1, child);
 		CHECK(vehicle_can_enter(r.w, nullptr, r.veh()));
+		// A carrier whose model holds no userpoints is refused the same way,
+		// whatever its child carries (D-NET-587) [orig: Entity_CanEnterVehicle
+		// @0x435480 (the count +0xBC @0x43549C..0x4354A3, ahead of the walk @0x4354FB)].
+		r.veh().graphic_model_userpoints = 0;
+		CHECK(!vehicle_can_enter(r.w, nullptr, r.veh()));
+		r.veh().graphic_model_userpoints = 2;
 		r.veh().has_graphic_model = false;
 		CHECK(!vehicle_can_enter(r.w, nullptr, r.veh()));
 	}

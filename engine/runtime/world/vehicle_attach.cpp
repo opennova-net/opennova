@@ -550,12 +550,13 @@ bool find_best_vehicle_seat(
 }
 
 bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &carrier) {
-	// The dead bit in either view, then the def and the graphic model; no Health
-	// read (D-NET-580). The model's userpoint-count test is not ported
+	// The dead bit in either view, then the def, the graphic model and its
+	// userpoint count; no Health read (D-NET-580). A carrier whose model holds
+	// no userpoints is refused before the walk, whatever its children carry
 	// (D-NET-587) [orig: Entity_CanEnterVehicle @0x435485, @0x435492; the model
 	//  @0x435498..0x43549A, its +0xBC @0x43549C..0x4354A3].
 	if (((carrier.flags | carrier.engine_flags) & kEntityFlagDead) != 0 || !carrier.has_item_def ||
-			!carrier.has_graphic_model)
+			!carrier.has_graphic_model || carrier.graphic_model_userpoints == 0)
 		return false;
 	VehicleSeatSelection seat;
 	if (!find_best_vehicle_seat(

@@ -1395,6 +1395,7 @@ static void test_helo_waits_for_its_boarders() {
     helo.health = 100;
     helo.has_item_def = true;
     helo.has_graphic_model = true;
+    helo.graphic_model_userpoints = 2; // its model's userpoints: the two seat bones
     Seat ctrl; ctrl.type = SeatType::Controller;
     Seat pax;  pax.type  = SeatType::Passenger;
     helo.seats.push_back(ctrl);
