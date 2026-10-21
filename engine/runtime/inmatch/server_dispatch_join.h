@@ -39,8 +39,6 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx *ctx);
 
 // The case bodies of the in-match switch.
-void dispatch_join(NapiNPConnection &conn, const ProtocolMessage &msg,
-		std::vector<ProtocolMessage> &replies);                            // C2S 0x00
 void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
 		uint32_t now_tick, const ServerDispatchInputs &inputs,
 		std::vector<ProtocolMessage> &replies);                            // C2S 0x02

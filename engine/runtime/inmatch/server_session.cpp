@@ -257,20 +257,20 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		//  key's draw @0x6263F4, the SCRK's @0x626401), the pumps to state 5 @0x62B47D..0x62B4BB;
 		//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 (NapiNPSession_SendAnnouncePacket
 		//  (conn, 0, 0, ..) @0x629170); NapiNPSession_SendAnnouncePacket @0x61FA00 (PM only
-		//  without the flag @0x61FCCA, the send callback proto+0x270 @0x61FDCA, the send
-		//  @0x61FDE4); CNapiNetwork_Init @0x4CA4A0 (NapiLog_OnSend into proto+0x270 @0x4CA978,
+		//  without the flag @0x61FCCA, the send callback proto+0x270 @0x61FDCA, the SendTo
+		//  call @0x61FDDD); CNapiNetwork_Init @0x4CA4A0 (NapiLog_OnSend into proto+0x270 @0x4CA978,
 		//  the server send slot proto+0x2E0 an empty stub @0x4CA918); NapiLog_OnSend @0x4C4760;
 		//  CNapiNPManager_SendTo @0x61EC20 (the address-0 arm @0x61EC59, the FIFO write
 		//  @0x61ECC6); NapiNPManager_RecvFrom @0x61ECE0; NapiNPManager_PumpReceive @0x623010 (the
 		//  FIFO read @0x6230B3, no RAW / COOKED for it @0x62318B, HandlePacket @0x623284);
 		//  NapiNPManager_HandlePacket @0x622F10 (cb_on_dispatch @0x622FCD);
 		//  NapiNPProtocol_HandleClientHello @0x6213B0 (the reply @0x6218FC);
-		//  NapiNPProtocol_SendServerInfoPacket @0x6204B0 (NC @0x620A55, the send @0x620C9A);
+		//  NapiNPProtocol_SendServerInfoPacket @0x6204B0 (NC @0x620A55, the SendTo call @0x620C89);
 		//  Nwu_HandleServerHello @0x626D20 (the socket pass's queue @0x627F45 and return 1
 		//  @0x627F5A, the discovered callback skipped under the flag @0x6278D7);
 		//  CNapiNPConnection_PumpStateMachine @0x6292E0 (CNapiNPConnection_SendClientJoin
 		//  called @0x629595); CNapiNPConnection_SendClientJoin @0x61FE20 (the send callback
-		//  @0x6203F0, the send @0x620413); NapiNPProtocol_HandleClientJoin @0x62B750 (the
+		//  @0x6203F0, the SendTo call @0x62040C); NapiNPProtocol_HandleClientJoin @0x62B750 (the
 		//  type-1 create @0x62BF06, the SK's draw @0x62BF5E)]
 		const TitleIdentity *identity = ctx.np_protocol.identity;
 		const PeerAddr internal{}; // address 0, port 0

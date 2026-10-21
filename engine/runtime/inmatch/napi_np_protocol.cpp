@@ -295,7 +295,7 @@ void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving);
 // TeardownActiveConnection: the disconnect-packet burst to the departing peer FIRST, then the
 // removal callback (Server_HandlePlayerDisconnect) before the node is cleared; a bare list erase
 // leaks the entity and roster identity. `goodbye_out` receives the burst (null = no wire output:
-// the owner's dead-endpoint eviction and the D-NET-171 silent admission legs).
+// the owner's dead-endpoint eviction and the silent admission legs, D-NET-NEW-L1-24).
 // [orig: CNapiNPConnection_Destroy @0x62A4B0 -> CNapiNPConnection_TeardownActiveConnection
 //  @0x6253C0 (the burst @0x6253ef..0x625424 precedes the callback @0x625426..0x625438) ->
 //  Server_HandlePlayerDisconnect @0x51B5C0]
@@ -1262,10 +1262,12 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 		// teardown. [orig: the @0x512aa0 failure return keeps the connection;
 		// teardown is the client's goodbye or the receive reap]
 		if (conn.host_disconnect_sent) return;
-		// The remaining silent legs are not modeled (D-NET-171). Release the
-		// pending node immediately: an out-of-order or malformed admission
-		// must not retain capacity or become an entity. No wire output: retail
-		// keeps this node and sends nothing on these legs.
+		// The admission FSM's remaining silent legs (two admission records in
+		// one datagram, a game record ahead of the admission, a C2S 0x02 out of
+		// turn or with a foreign echo) release the pending node with no wire
+		// output; retail dispatches each record to its handler, whose own gates
+		// keep the node (the 0x00 and 0x01 out of turn are ignored above, in
+		// dispatch_admission) (D-NET-NEW-L1-24).
 		if (teardown_connection(ctx, peer, nullptr)) {
 			HostAcceptEvent ev;
 			ev.kind = HostAcceptEvent::Kind::PeerGoodbye;

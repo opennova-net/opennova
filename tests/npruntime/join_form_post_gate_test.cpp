@@ -2,16 +2,18 @@
 // game state 2 (the JOIN accepted) with no server slot; there it runs the side passwords' second
 // test, whatever the team-choose rule the 0x00's validator follows: with either password set, a
 // joiner that is no spectator (JSR 0) and whose JSP equals neither password, case-insensitively,
-// is rejected with reason 17 and gets no probe (an empty JSP equals an unset password). A 0x01
-// after the admission completed (state 6 on) answers nothing and draws nothing from the CRT
-// stream.
+// is rejected with reason 17 and gets no probe (an empty JSP equals an unset password). The
+// handler reads no payload. D-NET-NEW-L1-24: a 0x01 out of turn (ahead of the JOIN, or past the
+// form post) and a JOIN out of turn (past game state 1) answer nothing, draw nothing from the
+// CRT stream and keep the node in its stage.
 // [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2` @0x512EF1,
 //  `cmp [edi+0C0h], 0` @0x512EFE, the two lengths @0x512F0B..0x512F3B, the JSR test @0x512F3D,
 //  _stricmp(JSP, A) @0x512F52 and (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent
 //  (player, "", 17, "") @0x512F7E; state 6 @0x512FB3 and the probe's call @0x512FBC;
-//  NapiNPServer_HandlePlayerJoinMessage @0x512AA0 (state 2 @0x512E7D);
-//  Server_ValidatePlayerJoinRequest @0x512100 (its side-password leg only under BuildFlags & 4
-//  @0x5124A2)]
+//  NapiNPServer_HandlePlayerJoinMessage @0x512AA0 (`cmp [ebx+0A0h], 1` @0x512AF9 / `jnz`
+//  @0x512B00 to the return @0x512EAC; state 2 @0x512E7D);
+//  Server_ValidatePlayerJoinRequest @0x512100 (its side-password leg only under BuildFlags & 4,
+//  `test al, 4` @0x51249A, with JSR 0 @0x5124A2)]
 
 #include "npruntime/conn_fixture.h"
 
@@ -50,6 +52,7 @@ struct Case {
 	std::string jsp;
 	uint8_t jsr = 0;
 	bool probes = false; // else rejected with 17
+	std::vector<uint8_t> body{0x00}; // the 0x01's body, which the handler never reads
 };
 
 // One joiner in the form-post state (the JOIN accepted), no team-choose rule, a 0x01 read.
@@ -76,7 +79,7 @@ void run_form_post(const Case &c) {
 	inputs.server_ctx = &ctx;
 	const io::CrtRand before = world->crt_rand;
 	const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(ctx.config,
-			conn, {make_protocol_message(0x01, {0x00})}, 7, ctx.np_protocol.connection_list,
+			conn, {make_protocol_message(0x01, c.body)}, 7, ctx.np_protocol.connection_list,
 			world.get(), inputs);
 	ns::Datagram d;
 	if (c.probes) {
@@ -114,10 +117,13 @@ void test_the_side_passwords_second_test() {
 	run_form_post({"", "Bravo", "", 0, true});         // an empty JSP equals the unset A
 	run_form_post({"", "Bravo", "wrong", 0, false});   // a JSP equals neither the unset A nor B
 	run_form_post({"Alpha", "Bravo", "wrong", 1, true}); // a spectator request skips the test
+	run_form_post({"", "", "", 0, true, {}});          // the body is not read: empty
+	run_form_post({"", "", "", 0, true, {0x07, 0x01}}); // or anything
 }
 
-// A completed admission (state 6 on): a repeated 0x01 answers nothing and draws nothing.
-void test_a_repeated_form_post_answers_nothing() {
+// A JOIN or a 0x01 out of its handler's game state: nothing sent, nothing drawn, the node kept
+// in its stage. A completed admission is state 6 on, so a repeated 0x01 or JOIN is one of these.
+void run_out_of_turn(inmatch::GameAdmissionStage stage, uint8_t tag) {
 	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
 	world->crt_rand.seed(0x1234u);
 	inmatch::NapiNPServerCtx ctx;
@@ -130,25 +136,34 @@ void test_a_repeated_form_post_answers_nothing() {
 			20, inmatch::NapiNPConnection::kTypeServerSide, &wire, ns::TransportMode::Client,
 			w::EntityHandle{}, false));
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
-	conn.admission_stage = inmatch::GameAdmissionStage::Complete;
+	conn.admission_stage = stage;
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &ctx;
 	const uint32_t before = world->crt_rand.state;
 	const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(ctx.config,
-			conn, {make_protocol_message(0x01, {0x00})}, 7, ctx.np_protocol.connection_list,
+			conn, {make_protocol_message(tag, {0x00})}, 7, ctx.np_protocol.connection_list,
 			world.get(), inputs);
 	CHECK(replies.empty());
 	CHECK(world->crt_rand.state == before);
-	CHECK(conn.admission_stage == inmatch::GameAdmissionStage::Complete);
+	CHECK(conn.admission_stage == stage);
+	CHECK(!conn.host_disconnect_sent);
 	ns::Datagram d;
 	CHECK(!wire.client_recv(d));
+}
+
+void test_out_of_turn_join_records_answer_nothing() {
+	using S = inmatch::GameAdmissionStage;
+	for (const S stage : {S::AwaitJoinRequest, S::AwaitPlayEnter, S::AwaitPaddingEcho, S::Complete})
+		run_out_of_turn(stage, 0x01);
+	for (const S stage : {S::AwaitFormPost, S::AwaitPlayEnter, S::AwaitPaddingEcho, S::Complete})
+		run_out_of_turn(stage, 0x00);
 }
 
 } // namespace
 
 int main() {
 	test_the_side_passwords_second_test();
-	test_a_repeated_form_post_answers_nothing();
+	test_out_of_turn_join_records_answer_nothing();
 	std::printf("join_form_post_gate: %d failure(s)\n", g_failures);
 	return g_failures == 0 ? 0 : 1;
 }

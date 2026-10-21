@@ -525,6 +525,19 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 	}
 	// Header-only ACKs are part of the captured flow and do not advance or violate the FSM.
 	if (admission_message == nullptr) return {};
+	// The JOIN's handler acts only on a player in game state 1 (the 0x42 accepted) and the
+	// 0x01's only in game state 2 (the JOIN accepted), each with no server slot; the 0x01 reads
+	// no payload. Out of turn either returns with nothing sent and the node kept.
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - `cmp [ebx+0A0h], 1` @0x512AF9 /
+	//  `jnz` @0x512B00 and `cmp [ebx+0C0h], ebp` @0x512B06 / `jnz` @0x512B0C to the return
+	//  @0x512EAC; NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2` @0x512EF1 /
+	//  `jnz` @0x512EF8 and `cmp [edi+0C0h], 0` @0x512EFE / `jnz` @0x512F05 to the return
+	//  @0x512FC2, the handler taking the connection alone] (D-NET-NEW-L1-24)
+	if ((admission_message->tag == 0x00 &&
+				conn.admission_stage != GameAdmissionStage::AwaitJoinRequest) ||
+			(admission_message->tag == 0x01 &&
+					conn.admission_stage != GameAdmissionStage::AwaitFormPost))
+		return {};
 
 	switch (conn.admission_stage) {
 		case GameAdmissionStage::AwaitJoinRequest: {
@@ -559,8 +572,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 		}
 
 		case GameAdmissionStage::AwaitFormPost: {
-			if (admission_message->tag != 0x01 ||
-			    admission_message->payload != std::vector<uint8_t>{0x00}) {
+			if (admission_message->tag != 0x01) {
 				conn.admission_stage = GameAdmissionStage::Rejected;
 				return {};
 			}
@@ -622,13 +634,6 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 			break;
 	}
 	return replies;
-}
-
-// See header. [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0]
-void dispatch_join(NapiNPConnection &conn, const ProtocolMessage &msg,
-		std::vector<ProtocolMessage> &replies) {
-	conn.join_identity_pairs = parse_join_identity_pairs(msg.payload, conn.join_cookie_present);
-	replies.push_back(make_protocol_message(s2c::INIT, {}));
 }
 
 // See header.

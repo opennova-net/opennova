@@ -483,8 +483,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 		if (msg.flags.settings_update || msg.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
 
 		switch (msg.tag) {
-			case c2s::JOIN: // JOIN ack [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0]
-				dispatch_join(conn, msg, replies);
+			case c2s::JOIN:
+				// Answered only in net-player game state 1 with no server slot: the admission
+				// FSM's first arm. A completed admission is past it (7 on; a map change's
+				// rejoin is the 0x0B's), so a repeated 0x00 answers nothing.
+				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - `cmp [ebx+0A0h], 1`
+				//  @0x512AF9 / `jnz` @0x512B00 to the return @0x512EAC] (D-NET-NEW-L1-24)
 				break;
 			case c2s::AUTO_MEDIC_PREFERENCE: {
 				// One inverse checkbox dword copied to playerSlot+372: zero is
