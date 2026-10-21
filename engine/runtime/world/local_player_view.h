@@ -312,6 +312,9 @@ enum class UseItemArm : uint8_t {
     kArmory = 1,
     kArmoryRefused = 2,
     kVehicleLoadout = 3,
+    // The dispatcher dropped the press ahead of its handler (a dead local player's:
+    // LocalPlayer::take_use_item_press): no arm, no hold.
+    kDropped = 4,
 };
 UseItemArm local_player_use_item_arm(const World &world, const LocalViewSessionInputs &session);
 

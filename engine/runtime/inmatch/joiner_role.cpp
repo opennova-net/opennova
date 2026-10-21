@@ -308,8 +308,10 @@ void JoinerRole::collect_hostile_mounts(const world::Entity &requester,
 bool JoinerRole::queue_mount_toggle() {
 	if (!kernel_ || !runtime) return false;
 	world::World &world = kernel_->world;
+	// No dead test: the USE press's dispatcher dropped a dead player's
+	// (LocalPlayer::take_use_item_press) [orig: Entity_ToggleVehicleMount @0x436950].
 	const world::Entity *player = kernel_->local.player();
-	if (player == nullptr || !player->alive || player->health <= 0) return false;
+	if (player == nullptr) return false;
 	if (player->mounted && world.script.wac_values.seatbelt != 0)
 		return false;
 	world::VehicleSeatSelection hit;

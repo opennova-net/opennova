@@ -5108,6 +5108,11 @@ add_test(NAME npruntime_own_slot_table COMMAND npruntime_own_slot_table_test)
 add_executable(npruntime_stale_slot_alias_test npruntime/stale_slot_alias_test.cpp)
 target_link_libraries(npruntime_stale_slot_alias_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_stale_slot_alias COMMAND npruntime_stale_slot_alias_test)
+# D-NET-433: a dead player's USE press is dropped by the dispatcher's flag 0x1; the
+# mount toggle carries no dead test.
+add_executable(npruntime_use_item_dead_drop_test npruntime/use_item_dead_drop_test.cpp)
+target_link_libraries(npruntime_use_item_dead_drop_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_use_item_dead_drop COMMAND npruntime_use_item_dead_drop_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

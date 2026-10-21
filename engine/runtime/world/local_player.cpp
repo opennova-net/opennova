@@ -92,6 +92,16 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 }
 
 UseItemArm LocalPlayer::take_use_item_press() {
+	// The held USE row (code 0xB1) carries the dispatcher's flag 0x1, which drops it ahead of
+	// its handler while the local player's dead bit is set: a dead player's press arms
+	// nothing and latches no hold, so no release toggles a mount (D-NET-433). The mount
+	// toggle and the seat pick themselves carry no dead test.
+	// [orig: Input_HandleActionBinding @0x49AD40 - the local player's Flags & 2
+	//  @0x49AD76..0x49AD7E, the row's flag 0x1 @0x49AD8A..0x49ADA0 (the catalog @0x8159A8,
+	//  the code-0xB1 row's flags 0x0C000805 before KeyBinding_SortBySequentialId); the hold
+	//  Input_HandleActionBinding_0 @0x4E0B5E..0x4E0B71; Entity_ToggleVehicleMount @0x436950,
+	//  Entity_FindAvailableSeat @0x436790: no dead test]
+	if (local_player_dead()) return UseItemArm::kDropped;
 	const UseItemArm arm = w::local_player_use_item_arm(world_, view_session_inputs);
 	if (arm != UseItemArm::kArmory && arm != UseItemArm::kArmoryRefused) return arm;
 	// A latched press does nothing; an unlatched one latches before the
@@ -359,8 +369,10 @@ void LocalPlayer::dispatch_to_special(bool keys_held) {
 
 bool LocalPlayer::mount_toggle_allowed() {
 	World &world = world_;
+	// No dead test: the press's dispatcher dropped a dead player's (take_use_item_press)
+	// [orig: Entity_ToggleVehicleMount @0x436950].
 	const w::Entity *toggle_player = player();
-	if (toggle_player == nullptr || !toggle_player->alive || toggle_player->health <= 0) return false;
+	if (toggle_player == nullptr) return false;
 	w::sync_local_usegun_weapon_transition(world, weapon);
 	const w::WeaponSlotState *active_slot = w::active_local_weapon_slot(world, weapon);
 	return active_slot == nullptr ||
@@ -393,8 +405,9 @@ bool LocalPlayer::toggle_mount() {
 bool LocalPlayer::find_numbered_seat(int index, VehicleSeatSelection &out,
 		const VehicleOccupancySource *source) {
 	out = {};
+	// No dead test (the press that holds USE carries the dispatcher's).
 	const w::Entity *local = player();
-	if (local == nullptr || !local->alive || local->health <= 0) return false;
+	if (local == nullptr) return false;
 	w::sync_local_usegun_weapon_transition(world_, weapon);
 	const w::WeaponSlotState *slot = w::active_local_weapon_slot(world_, weapon);
 	// This is currentAction == 11, not the USE toggle's pending-action gate.
