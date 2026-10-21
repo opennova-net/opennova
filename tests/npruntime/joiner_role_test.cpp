@@ -41,6 +41,8 @@
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_inventory.h>
+#include <runtime/world/wire_person_hit.h> // WirePersonBody (the person pass's row view)
+#include <net/npwire/entity_class.h> // class_from_tag (the row's class)
 #include <runtime/world/world.h>
 
 #include <base/io/bam.h>
@@ -2288,6 +2290,58 @@ bool run_a_weapon_loadout_rebuilds_the_process_name_list() {
 	return ok;
 }
 
+// D-NET-348 (V-L4-s10 c): the joiner's person pass keys a body's class event on its def's
+// ai_function, as retail looks ONE class row up by that tag ("Null" for an empty one) and
+// takes the event (+0x138) and the serializer (+0x164) from it together: a plyr row takes
+// the plyr arm (its +0x2AC = 64), an org row the organic arm (no store), and a brrl row's
+// Player-bit body classifies as no person at all, so the pass never reaches it.
+// [orig: EntityDef_InitAllCallbacks @0x4A5A70 (@0x4A5AA7 / "Null" @0x4A5AAE);
+//  Entity_LookupRenderCallbacks @0x407DC0; Projectile_ProcessDamageOnTarget @0x4E7FB0
+//  (the +0x1C8 call @0x4E81FF..0x4E820E)]
+bool run_the_person_pass_keys_the_class_row() {
+	Harness h;
+	def::DefItemDef defs[3]{};
+	const char *tags[3] = {"plyr", "org0", "brrl"};
+	for (int i = 0; i < 3; ++i) {
+		defs[i].id = 0x2000 + i + mission::kItemIdOffset;
+		std::strncpy(defs[i].ai_function, tags[i], sizeof(defs[i].ai_function) - 1);
+	}
+	def::DefItemsFile items{defs, 3};
+	h.kernel->set_items_table(&items);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::World &world = h.kernel->world;
+	bool ok = expect(static_cast<bool>(world.round_sim.wire_person_body),
+			"person pass: the joiner binds the wire person view");
+	for (int i = 0; i < 3; ++i) {
+		replication::ClientEntityState &row = h.role.runtime->state().upsert(
+				static_cast<uint16_t>(0x0010 + i));
+		row.type_id = static_cast<uint16_t>(0x2000 + i);
+		row.cls = class_from_tag(tags[i]); // the row's class, from the same tag
+		row.rm_entity_flags = w::kEntityFlagPlayer;
+	}
+	ok &= expect(class_from_tag("brrl") == EntityClass::NoNetworkCallback,
+			"person pass: a brrl row is no person row");
+	bool plyr_visited = false, plyr_class = false;
+	ok &= expect(world.round_sim.wire_person_body(0x0010, [&](w::WirePersonBody &b) {
+		plyr_visited = true;
+		plyr_class = b.plyr_class;
+	}) && plyr_visited && plyr_class, "person pass: a plyr row takes the plyr arm");
+	bool org_visited = false, org_plyr = true;
+	ok &= expect(world.round_sim.wire_person_body(0x0011, [&](w::WirePersonBody &b) {
+		org_visited = true;
+		org_plyr = b.plyr_class;
+	}) && org_visited && !org_plyr, "person pass: an org row's Player-bit body takes the organic arm");
+	bool brrl_visited = false;
+	ok &= expect(!world.round_sim.wire_person_body(0x0012, [&](w::WirePersonBody &) {
+		brrl_visited = true;
+	}) && !brrl_visited, "person pass: a brrl row's Player-bit body is never visited (no 64)");
+	h.kernel->set_items_table(nullptr);
+	return ok;
+}
+
 // D-NET-588: an S2C 0x13 naming the joiner's own player lands on L: Health 0,
 // the word as L's deathAnimStateId and the plyr class callback with event 4
 // (its think re-arm to 64), as retail's handler runs on the slot entity at the
@@ -3659,6 +3713,7 @@ int main() {
 	ok &= run_tail_carried_word_lands_on_l();
 	ok &= run_entity_death_names_l();
 	ok &= run_a_weapon_loadout_rebuilds_the_process_name_list();
+	ok &= run_the_person_pass_keys_the_class_row();
 	ok &= run_a_seated_death_sends_the_seat_leave();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
