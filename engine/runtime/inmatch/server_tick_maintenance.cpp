@@ -683,7 +683,8 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 	const bool entity_integrity_family = ctx.integrity_entity_family_next;
 	ctx.integrity_entity_family_next = !ctx.integrity_entity_family_next;
 	const ProtocolMessage scoreboard =
-			build_player_list_message(ctx.config, ctx.np_protocol.connection_list, &world);
+			build_player_list_message(ctx.config, ctx.np_protocol.connection_list, &world,
+					&ctx.orphaned_player_rows);
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (scoreboard_recipient(conn))
 			conn.link.transport->host_send(

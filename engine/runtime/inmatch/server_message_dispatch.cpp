@@ -131,7 +131,8 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // this is just the inmatch-side roster walk (it reads NapiNPConnection) that builds the entry list.
 std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	                                    const std::vector<NapiNPConnection> &roster,
-                                        world::World *world) {
+                                        world::World *world,
+                                        const std::vector<OrphanedPlayerRow> *orphaned) {
 	PlayerListFrame frame;
 	world::MatchLiveScoreboard scoreboard;
 	if (world != nullptr) {
@@ -154,6 +155,17 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		PlayerListEntry row;
 	};
 	std::vector<ScoredPlayerListEntry> rows;
+	// One row's scores: the mode stat and the points of its body's match record.
+	auto score_row = [&](PlayerListEntry &row, world::EntityHandle body) {
+		int32_t computed_score = 0;
+		if (world == nullptr) return computed_score;
+		if (const world::MatchPlayer *player = world->match.player(body)) {
+			row.score1 = static_cast<uint16_t>(world->match.primary_score(*player));
+			row.score2 = static_cast<uint16_t>(player->stats[world::MatchStats::kPoints]);
+			computed_score = world->match.computed_score(*player, scoreboard.team_mode);
+		}
+		return computed_score;
+	};
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
 		// Rows carry slots in state 6 exactly with a bound entity: a loading joiner is no row
@@ -194,6 +206,23 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		}
 		rows.push_back({computed_score, row});
 	}
+	// An orphaned row is a slot row like any other: active, in state 6 when the re-add left it
+	// there, its slot team byte, its spectator latch and its body's score (D-NET-NEW-L1-24).
+	// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 - the slot walk, state 6 @0x50D9F6,
+	//  the slot team @0x50DAF2]
+	const bool round_over = world != nullptr && world->match.outcome().ended;
+	if (orphaned != nullptr && !round_over) {
+		for (const OrphanedPlayerRow &orphan : *orphaned) {
+			if (!orphan.in_match || !orphan.body.valid()) continue;
+			PlayerListEntry row;
+			row.slot = orphan.slot;
+			row.team = orphan.team;
+			row.spectator = orphan.spectator;
+			row.status_flags = 0;
+			const int32_t computed_score = score_row(row, orphan.body);
+			rows.push_back({computed_score, row});
+		}
+	}
 	// Retail scans the slots in numeric order, pairs each row with
 	// Player_ComputeScore's value, then shell-sorts the pair list by that value
 	// before serializing — the wire row order IS the board order, and the
@@ -229,7 +258,8 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	//  +100579 = 0 @0x51CD5D; Server_HandlePlayerDisconnect's memset @0x51b87d]
 	frame.in_game_count = static_cast<uint8_t>(std::min<size_t>(
 			static_cast<size_t>(std::count_if(roster.begin(), roster.end(),
-					[](const NapiNPConnection &c) { return player_slot_active(c); })),
+					[](const NapiNPConnection &c) { return player_slot_active(c); })) +
+					(orphaned != nullptr ? orphaned->size() : size_t{0}),
 			0xFFu));
 	// The spectator count rides the row loop: each emitted row whose spectator
 	// latch (slot+100567) is set, the same byte the row's bit 0 carries
@@ -1498,9 +1528,10 @@ bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, 
 
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
-                                          world::World *world) {
+                                          world::World *world,
+                                          const std::vector<OrphanedPlayerRow> *orphaned) {
 	ProtocolMessage message = make_protocol_message(
-			s2c::PLAYER_LIST, build_reply_tag_16(config, roster, world));
+			s2c::PLAYER_LIST, build_reply_tag_16(config, roster, world, orphaned));
 	message.reliable = false; // Server_BuildAndBroadcastScoreboard @0x50DE00 userParam=1
 	return message;
 }

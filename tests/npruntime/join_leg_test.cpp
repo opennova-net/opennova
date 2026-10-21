@@ -1091,6 +1091,44 @@ bool run_a_repeated_echo_adds_the_player_again() {
 	              "the next joiner's pick passes the orphaned row over");
 }
 
+// D-NET-NEW-L1-24 (the orphaned row's other walks): the 0x16's slot walk takes an orphaned row as
+// any other: a re-add that found the first row in the match (state 6) leaves it a 0x16 row with its
+// slot and team, and it counts in the trailer's in-game count (every active row).
+// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 - the slot walk, state 6 @0x50D9F6, the slot
+//  team @0x50DAF2, the in-game count @0x50DD5B..0x50DDA9 (+4 @0x50DD82)]
+bool run_an_orphaned_row_is_a_player_list_row() {
+	JoinFixture f(/*with_existing=*/false);
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the joiner")) return false;
+	const uint8_t first_row = j.reply.player_slot;
+	const uint8_t first_team = j.assigned_team_valid ? j.assigned_team : uint8_t{0};
+	// Its burst done (state 6), then a repeated 0x02 lists it again.
+	j.burst.spawned = true;
+	j.spawn_queue_unlinked = false;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    f.ctx->orphaned_player_rows.size() == 1 &&
+	                    f.ctx->orphaned_player_rows[0].in_match,
+	            "the re-add orphans the in-match first row")) return false;
+	auto list_of = [&](const std::vector<inmatch::OrphanedPlayerRow> *orphaned) {
+		const opennova::ProtocolMessage m = inmatch::build_player_list_message(
+				f.ctx->config, f.ctx->np_protocol.connection_list, f.world.get(), orphaned);
+		opennova::PlayerList list;
+		(void)opennova::decode_player_list(m.payload.data(), m.payload.size(), list);
+		return list;
+	};
+	const opennova::PlayerList without = list_of(nullptr);
+	const opennova::PlayerList with = list_of(&f.ctx->orphaned_player_rows);
+	const opennova::PlayerListRow *orphan_row = nullptr;
+	for (const opennova::PlayerListRow &row : with.players)
+		if (row.slot_id == first_row) orphan_row = &row;
+	return expect(with.players.size() == without.players.size() + 1 && orphan_row != nullptr &&
+	                      (orphan_row->flags >> 1) == first_team &&
+	                      with.in_game_count == without.in_game_count + 1,
+	              "the orphaned row is a 0x16 row with its slot and team, counted in game");
+}
+
 // D-NET-NEW-L1-24 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
 // / 4) enters game state 7 and lists the node: the validation watchdog visits states 3 / 4 alone,
 // so it no longer punts it, the pump adds the player with no ticket, and the enter result (its
@@ -1198,6 +1236,7 @@ int main() {
 	if (!run_a_bodyless_add_keeps_its_row()) ++failures;
 	if (!run_the_add_queues_its_records_ahead_of_a_later_list()) ++failures;
 	if (!run_a_repeated_echo_adds_the_player_again()) ++failures;
+	if (!run_an_orphaned_row_is_a_player_list_row()) ++failures;
 	if (!run_an_echo_in_the_ticket_wait_spawns_without_a_ticket()) ++failures;
 	if (!run_a_repeated_echo_keeps_the_held_nag_stamp()) ++failures;
 	if (failures != 0) return 1;

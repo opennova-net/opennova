@@ -366,6 +366,44 @@ void run_chat_reads_the_squad_key() {
 }
 
 // A session create clears the previous session's registry.
+// D-NET-NEW-L1-24 (the orphaned row's other walks): a re-add's orphaned row stays active with the
+// squad key it was filed under, so the slot walk counts it: the second add of the same player files
+// no 0x6A and sends no squadron line, and the squad keeps two active slots.
+// [orig: CSlotArray152_CountActiveByKey @0x500660 - the active byte @0x500690, the key @0x500699;
+//  Server_PlayerAdd @0x51CBC0 - the fresh row (PlayerSlot_PickFreeSlot, the call @0x51CC95)]
+void run_an_orphaned_row_keeps_its_squad_key() {
+	SquadFixture f;
+	f.queue_joiner(0, "Able", 7, "Alpha Squad", "ALF");
+	expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1, "the pump adds Able");
+	inmatch::NapiNPConnection *able = f.by_peer(30002);
+	if (able == nullptr) return;
+	const uint8_t first_row = able->reply.player_slot;
+	(void)drain(f.lan_transport);
+	(void)drain(f.transports[0]);
+	// A repeated 0x02 lists the node again (complete_admission's listing).
+	able->spawn_queue_unlinked = false;
+	expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	       "the pump adds Able again");
+	able = f.by_peer(30002);
+	if (able == nullptr) return;
+	expect(f.ctx->orphaned_player_rows.size() == 1 &&
+	               f.ctx->orphaned_player_rows[0].slot == first_row &&
+	               f.ctx->orphaned_player_rows[0].squad_key == 7 && able->squad_key == 7 &&
+	               able->reply.player_slot != first_row,
+	       "the first row is orphaned under squad 7, the fresh row keys it too");
+	expect(inmatch::count_active_slots_by_squad_key(*f.ctx, 7) == 2,
+	       "the orphaned row counts among the squad's active slots");
+	const std::vector<ns::Datagram> lan = drain(f.lan_transport);
+	opennova::FormattedGameText text;
+	bool squadron_line = false;
+	for (const ns::Datagram &d : lan)
+		if (game_text(d, text) && text.subtype == opennova::kGameTextSquadronEntered)
+			squadron_line = true;
+	expect(count_of(lan, opennova::s2c::CLAN_ROSTER) == 0 && !squadron_line,
+	       "the second add files no 0x6A and no squadron line");
+	expect(able->squad_roster_add_staged.empty(), "the second add stages no own 0x6A");
+}
+
 void run_session_create_clears_the_registry() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
 	ctx->squad_registry.push_back({3, "Old", "OLD"});
@@ -381,6 +419,7 @@ int main() {
 	run_two_squads_added_in_one_pass();
 	run_chat_reads_the_squad_key();
 	run_session_create_clears_the_registry();
+	run_an_orphaned_row_keeps_its_squad_key();
 	if (failures == 0) std::printf("npruntime_squad_registry: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

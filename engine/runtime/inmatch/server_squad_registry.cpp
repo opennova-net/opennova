@@ -69,6 +69,9 @@ int32_t count_active_slots_by_squad_key(const NapiNPServerCtx &ctx, int32_t key)
 	int32_t count = 0;
 	for (const NapiNPConnection &c : ctx.np_protocol.connection_list)
 		if (player_slot_active(c) && c.squad_key == key) ++count;
+	// An orphaned row is active with the key it was filed under (D-NET-NEW-L1-24).
+	for (const OrphanedPlayerRow &row : ctx.orphaned_player_rows)
+		if (row.squad_key == key) ++count;
 	return count;
 }
 

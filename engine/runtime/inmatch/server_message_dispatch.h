@@ -43,6 +43,7 @@ struct HostRotation;
 struct HostSlotRow;
 
 struct NapiNPServerCtx;
+struct OrphanedPlayerRow;
 class ServerLogRecorder;
 
 using MissionMetadataBlob = std::array<uint8_t, 180>;
@@ -200,11 +201,13 @@ SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the
 // per-tick host loop can RE-PUSH it when a joiner spawns (the golden re-sends 0x16 with the grown
-// roster just before the joiner deploys). [orig: Server_BuildAndBroadcastScoreboard @0x50D960 /
+// roster just before the joiner deploys). The slot walk takes the orphaned rows too, when given
+// (D-NET-NEW-L1-24). [orig: Server_BuildAndBroadcastScoreboard @0x50D960 /
 // client NapiNPClientMsg_PlayerList @0x42FAE0]
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
-                                          world::World *world);
+                                          world::World *world,
+                                          const std::vector<OrphanedPlayerRow> *orphaned = nullptr);
 
 // Broadcast one just-spawned player's 0x46 slot-state (fieldFlags 0x1CF7) to every OTHER in-match
 // connection — the join-time roster push that lets existing clients ACCEPT the new player's 0x16
