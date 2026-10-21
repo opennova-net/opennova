@@ -89,7 +89,7 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"gnl2", ItemDeathClass::kGnl2},          // @0x8130F0 -> 0x4070F0
 		{"flag", ItemDeathClass::kFlag},   // @0x813108 -> 0x408430
 		{"squib", ItemDeathClass::kSquib},  // @0x813120 -> 0x449810
-		{"nade", ItemDeathClass::kNull},          // @0x813138 -> no event callback (0)
+		{"nade", ItemDeathClass::kNoCallback},    // @0x813138 -> no event callback (0)
 		{"schl", ItemDeathClass::kUnwitnessed},   // @0x813150 -> 0x443670
 		{"clym", ItemDeathClass::kUnwitnessed},   // @0x813168 -> 0x4438C0
 		{"vmne", ItemDeathClass::kUnwitnessed},   // @0x813180 -> 0x443BB0
@@ -451,8 +451,9 @@ void barrel_event(World &world, Entity &target) {
                 target.heading, 10);
         if (world.rules.mp_session) world.out.entity_events.push_back(EntityRemoveEvent{target.handle.packed});
         // A Player-bit body (a player bound to a brrl row, D-NET-348) takes its placed
-        // devices with it [orig: Server_RemoveEntityAndNotify @0x50A270 - the bit
-        //  @0x50A2B8, Entity_RemovePlacedDevicesByOwner @0x50A2BB, Entity_Destroy @0x50A2C4].
+        // devices with it [orig: Server_RemoveEntityAndNotify @0x50A270 - the test
+        //  @0x50A2B1 (its jz @0x50A2B8), Entity_RemovePlacedDevicesByOwner @0x50A2BB,
+        //  Entity_Destroy @0x50A2C4].
         if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
             world.commands.remove_placed_devices_by_owner(target.handle);
         world.commands.remove_ssn(target.handle);
@@ -461,6 +462,10 @@ void barrel_event(World &world, Entity &target) {
     } else {
         world.out.scars.clear_entity(target.handle);
         mark_class_dead(target); // [orig: `or [esi+24h],2` @0x407D34]
+        // A player body's dead bit is the Flags word every player path reads (the uplink's
+        // pose gate drops its pose from here) [orig: `test byte [edi+24h], 2` @0x4C2000].
+        if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
+            target.flags |= kEntityFlagDead;
         target.class_think_ticks = 10;
     }
 }
@@ -763,6 +768,12 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
 		return; // [orig: 0x406FF0 — +0x2AC = 0x1000000 and nothing else]
 	case ItemDeathClass::kNone:
 		return; // [orig: AflrClass_HandleEvent @0x443650 / GflrClass_HandleEvent @0x443660 — retn]
+	case ItemDeathClass::kNoCallback:
+		// The row's event word is 0: the think and the round hit test it and call nothing
+		// [orig: the nade row @0x813138; Entity_UpdateInfantryPlayerBody @0x4B4BD2..0x4B4BDA;
+		//  Projectile_ProcessDamageOnTarget @0x4E8205]. The blast and knife sites call it
+		// unguarded, which crashes retail (PERMANENT, Q7-21: ours calls nothing).
+		return;
 	case ItemDeathClass::kGnrc:
 		gnrc_death_event(world, target, phase, hit.section, hit.event_flags);
 		return;

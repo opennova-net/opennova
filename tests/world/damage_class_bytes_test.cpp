@@ -5,7 +5,7 @@
 // @0x515E92; WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566182..0x56618C)].
 // Player_InitPlayer holds none, so the spawn kit's rebuild writes nothing; the apply,
 // out of a session, stores each entry's fourth value raw and clears nothing, and in a
-// session sends the 0x2F instead (is_in_session @0x565D4D, the send @0x565D94). The
+// session sends the 0x2F instead (is_in_session @0x565D3A, the send @0x565D94). The
 // weapons are a model of the test's own.
 
 #include <runtime/inmatch/loadout_submit.h>

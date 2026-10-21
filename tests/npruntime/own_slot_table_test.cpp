@@ -217,7 +217,7 @@ void test_the_round_init_seeds_the_own_buffer() {
 // A listen host's in-session armory ACCEPT submits the armory's kit, its class, the body's
 // team and the live slot as its own client's 0x2F and applies nothing itself; the own
 // slot's accept grants it into the local table.
-// [orig: WeaponLoadout_ApplyFromBuffer @0x565D4D -> NetPacket_SendLoadoutSubmit @0x565D94
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the session test @0x565D3A) -> NetPacket_SendLoadoutSubmit @0x565D94
 //  (the team `movsx ecx, byte [eax+162h]` @0x565D8C); the name gate @0x42cf0b]
 void test_the_armory_submit_feeds_the_own_accept() {
 	Rig r(/*own=*/true);

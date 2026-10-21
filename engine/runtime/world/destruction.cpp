@@ -559,16 +559,17 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     target.death_anim_state = compute_death_anim_state(
             kCollisionDeathBone, quadrant, kCollisionDeathCause); // [orig: @0x4E674C]
     target.cause_flags |= kDamageFlagCollision; // [orig: @0x4E6740]
-    // deathCallback(target, 3, 0) [orig: @0x4E6752]: the person callbacks
-    // take event 3 like the blast's event 2, except that the plyr body keeps
-    // its cause bits (3 is in the no-clear set) and only re-arms its think
-    // before its waypoint tail [orig: Entity_HandleDamageAndTriggerZones
-    //  @0x407B3B..0x407B4F, @0x407B5E, the tail @0x407B64..0x407C6B]. The AI
-    // reaction rides the RoundHit drain, as for a blast.
+    // deathCallback(target, 3, 0), no null test [orig: the event word @0x4E673A, the call
+    // @0x4E6752]: a player body runs its bound row's callback (player_body_row_event,
+    // D-NET-348): the plyr body keeps its cause bits (3 is in the no-clear set), runs its
+    // health tail and re-arms its think before its waypoint tail [orig:
+    // Entity_HandleDamageAndTriggerZones @0x407B3B..0x407B4F, @0x407B5E, the tail
+    // @0x407B64..0x407C6B]. The AI reaction rides the RoundHit drain, as for a blast.
     world.round_sim.hits.push_back(RoundHit{target.handle, target.last_attacker, damage});
+    const EntityHandle victim = target.handle; // a barrel row's dead arm removes the body
     if ((flags & kEntityFlagPlayer) != 0) {
-        target.spawn_phase = 64;
-        player_body_waypoint_visits(world, target);
+        player_body_row_event(world, target, 3);
+        if (world.registry.get(victim) == nullptr) return;
     }
     if (collision_kill_fires(before, target.health)) {
         // The kill event credits the entry's source itself, not the walk

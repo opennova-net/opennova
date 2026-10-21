@@ -457,7 +457,7 @@ struct ScriptState {
 // (world::player_body_class_from_tag).
 // [orig: g_EntityClassEventCallbackTable @0x813000 (24-byte rows: the name, the event +0x138,
 //  the init +0x148, +0x14C, the serializer +0x164); Entity_LookupRenderCallbacks @0x407DC0 -
-//  the stricmp @0x407DE2, the row-0 default @0x407DEE..0x407E1E; EntityDef_InitAllCallbacks
+//  the stricmp call @0x407DD8, the row-0 default @0x407DEE..0x407E1E; EntityDef_InitAllCallbacks
 //  @0x4A5A70 ("Null" for an empty tag @0x4A5AAE)]
 enum class PlayerBodyClass : uint8_t { kPlayer, kOrganic, kItem };
 

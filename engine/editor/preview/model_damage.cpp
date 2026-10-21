@@ -377,6 +377,9 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 	} else if (item.death_class == ItemDeathClass::kNull) {
 		plan.class_words = "null (" + tag + "): its callback only re-arms its think; the item never dies, so the game "
 		                   "never draws its husk.";
+	} else if (item.death_class == ItemDeathClass::kNoCallback) {
+		plan.class_words = tag + ": the class has no callback; nothing runs when it is hit, so the game "
+		                   "never draws its husk.";
 	} else if (item.death_class == ItemDeathClass::kBarrel) {
 		plan.class_words = "brrl: dead without the husk; it explodes and is removed.";
 	} else {

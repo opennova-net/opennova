@@ -267,6 +267,13 @@ void organic_class_event(World &world, Entity &body, int event) {
 }
 
 // See the infantry.h contract.
+PlayerBodyClass person_hit_row_class(const World &world, const Entity &body, bool person) {
+    if (!person || ((body.flags | body.engine_flags) & kEntityFlagPlayer) == 0)
+        return PlayerBodyClass::kOrganic;
+    return player_item_row(world, body).body_class;
+}
+
+// See the infantry.h contract.
 void player_body_row_event(World &world, Entity &body, int event, int32_t flags) {
     const PlayerTemplate &row = player_item_row(world, body);
     switch (row.body_class) {

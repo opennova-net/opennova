@@ -1475,6 +1475,8 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             // [orig: Entity_HandleDamageAndTriggerZones @0x40772f]
             const bool target_not_dead =
                 ((target->flags | target->engine_flags) & kEntityFlagDead) == 0;
+            const PlayerBodyClass row_class =
+                person_hit_row_class(world, *target, damage_target_is_person);
             // The local player's damage feedback (red vignette + camera shake +
             // radar blip) arms on every hit that beats the 5-point floor, after
             // the class damage callback and ahead of the kill routing; retail
@@ -1537,7 +1539,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                             static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
                     hits.push_back(RoundHit{damage_entity, r.owner, damage,
                                             primary_section, secondary_section});
-                    if (damage_target_is_person) {
+                    if (damage_target_is_person && row_class != PlayerBodyClass::kItem) {
                         // [orig: OrganicClass_HandleEvent @0x4074BA; twin @0x407822]
                         apply_collision_force(world, *target, ammo->secondary_anim, ammo->kz_physics, r.pos.q16(), r.owner);
                     }
@@ -1557,43 +1559,41 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     // slot, which the death edge's fallback also restores.
                     if ((target->item_attrib & kItemAttribEweap) == 0)
                         target->last_attacker = r.owner;
-                    // The person class callback, event 1 with a projectile:
-                    // EVERY hit (lethal or not, damage 0 included) selects the
-                    // death anim from the hit bone + attack quadrant into +0x2C0
-                    // and tips the body on a torso-stack bone; a later kill
-                    // that stamps nothing (WAC kill/SSNHP/GroupHP) plays this
-                    // hit's clip, while killSSN and KillSingle clear it first
-                    // [orig: WacCmd_KillSsn @0x4F1EBD;
-                    // Entity_KillByNetId @0x43DC1B].
-                    // The roll, the mask switch, and the anim selector all
-                    // consume the SAME hit-record bone (hitRecord[14]);
+                    // The person class callback, event 1 with a projectile: EVERY hit (lethal
+                    // or not, damage 0 included) selects the death anim from the hit bone +
+                    // attack quadrant into +0x2C0 and tips the body on a torso-stack bone; a
+                    // later kill that stamps nothing (WAC kill/SSNHP/GroupHP) plays this hit's
+                    // clip, while killSSN and KillSingle clear it first [orig: WacCmd_KillSsn
+                    // @0x4F1EBD; Entity_KillByNetId @0x43DC1B]. The roll, the mask switch, and
+                    // the anim selector all consume the SAME hit-record bone (hitRecord[14]);
                     // death_section is our preserved copy of that record field.
-                    // [orig: OrganicClass_HandleEvent @0x407478 quadrant,
-                    //  @0x407483 select, @0x40755e / @0x4075f6 gates;
-                    //  Entity_HandleDamageAndTriggerZones @0x4077e0 / @0x4077eb
-                    //  / @0x4078c6]
+                    // [orig: OrganicClass_HandleEvent @0x407478 quadrant, @0x407483 select,
+                    //  @0x40755e / @0x4075f6 gates; Entity_HandleDamageAndTriggerZones
+                    //  @0x4077e0 / @0x4077eb / @0x4078c6]
                     const int32_t heading_bam =
                         target->heading;
                     const int quadrant =
                         death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
                     const int32_t death_section =
                         primary_section >= 0 ? primary_section : 1;
-                    if (target_not_dead) {
+                    if (target_not_dead && row_class != PlayerBodyClass::kItem) {
                         target->death_anim_state =
                             compute_death_anim_state(death_section, quadrant,
                                                      death_cause::kBullet);
                         AiEntity *victim_body = world.ai.for_handle(target->handle);
                         apply_hit_body_roll(victim_body, death_section, quadrant);
-                        // The plyr callback re-arms the player body's 64-tick
-                        // think cadence on every event it handles, around its
-                        // waypoint tail.
+                        // The plyr callback re-arms its 64-tick think on every event it
+                        // handles, around its waypoint tail.
                         // [orig: Entity_HandleDamageAndTriggerZones @0x407b5e /
                         //  @0x407c71; the tail @0x407B64..0x407C6B]
-                        if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0) {
+                        if (row_class == PlayerBodyClass::kPlayer) {
                             target->spawn_phase = 64;
                             player_body_waypoint_visits(world, *target);
                         }
                     }
+                    if (row_class == PlayerBodyClass::kItem) // its row's (a barrel may remove it)
+                        player_body_row_event(world, *target, 1);
+                    if ((target = world.registry.get(damage_entity)) == nullptr) return;
                     if (authoritative && damage != 0 && pre_hit_health > 0 &&
                         target->health <= 0) {
                         // A lethal player-flag hit counts on the ROUND; past the

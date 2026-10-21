@@ -849,7 +849,7 @@ int main() {
     CHECK(class_of(500) == ItemDeathClass::kUnwitnessed); // cveh: the AI machine's death
     CHECK(item_death_class_from_tag("") == ItemDeathClass::kNull);
     CHECK(item_death_class_from_tag("null") == ItemDeathClass::kNull);
-    CHECK(item_death_class_from_tag("nade") == ItemDeathClass::kNull);   // fn1 = 0
+    CHECK(item_death_class_from_tag("nade") == ItemDeathClass::kNoCallback); // fn1 = 0: no callback
     CHECK(item_death_class_from_tag("psec") == ItemDeathClass::kNull);   // row 27 -> 0x406FF0
     CHECK(item_death_class_from_tag("pwrp") == ItemDeathClass::kNull);   // row 36 -> 0x406FF0
     CHECK(item_death_class_from_tag("Tree") == ItemDeathClass::kTree);

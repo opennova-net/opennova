@@ -44,7 +44,8 @@ PlayerBodyClass player_body_class_from_tag(const char *ai_function) {
     // The person rows by whole name ignoring case; every other row, the row-0 default for an
     // empty tag or a miss included, is an item class.
     // [orig: g_EntityClassEventCallbackTable @0x813000 - org0 @0x813018, org1 @0x813030, plyr
-    //  @0x813048; the stricmp @0x407DE2, the row-0 default @0x407DEE]
+    //  @0x813048; Entity_LookupRenderCallbacks @0x407DC0 - the stricmp call @0x407DD8 (its jz
+    //  @0x407DE2), the row-0 default @0x407DEE]
     if (ai_function == nullptr) return PlayerBodyClass::kItem;
     if (strutil::iequals(ai_function, "plyr")) return PlayerBodyClass::kPlayer;
     if (strutil::iequals(ai_function, "org0") || strutil::iequals(ai_function, "org1"))

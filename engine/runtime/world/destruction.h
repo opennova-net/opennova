@@ -80,8 +80,8 @@ enum class ItemDeathClass : uint8_t {
 	// and the organic/vehicle rows that never
 	// reach this notify): the pre-dispatch body, i.e. the tree callback.
 	kUnwitnessed = 0,
-	kNull, // "null" @0x813000 (and psec @0x813288, pwrp @0x813360, the
-	       // callback-less nade @0x813138, an empty/unknown tag) -> 0x406FF0:
+	kNull, // "null" @0x813000 (and psec @0x813288, pwrp @0x813360, an empty/unknown
+	       // tag) -> 0x406FF0:
 	       // +0x2AC = 0x1000000 and nothing else — the item never dies.
 	       // The missile rows rokt/stng/hlfr/jvln @0x8132B8..0x813300 ->
 	       // MissileClass_HandleEvent @0x443630 and arty @0x813318 -> ArtyClass_HandleEvent @0x443640
@@ -108,6 +108,9 @@ enum class ItemDeathClass : uint8_t {
     // @0x813348 -> GflrClass_HandleEvent @0x443660: a bare `retn` — no +0x2AC write, no
     // body at all. Never the tree body. (IDA 2026-09-14)
     kNone,
+    // The nade row @0x813138, whose event word is 0: no callback runs (the think and the
+    // round hit test the word, @0x4B4BD8 / @0x4E8205).
+    kNoCallback,
 };
 
 // The class row for an items.def ai_function tag — the retail table walk

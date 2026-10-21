@@ -214,6 +214,17 @@ void organic_class_event(World &world, Entity &body, int event);
 // `flags` is the callback's third argument (ItemHitContext::event_flags).
 void player_body_row_event(World &world, Entity &body, int event, int32_t flags = 0);
 
+// The class row whose callback a round's hit on `body` runs (D-NET-348): a person
+// (`person`, the hit's item type) with the Player bit takes its bound row's; any other
+// person the organic class's (kOrganic). The hit runs the person legs (the plyr and
+// organic callbacks' twins @0x4074BA / @0x407822) for plyr and organic rows, plyr's alone
+// re-arming 64 around its waypoint tail; an item row's is player_body_row_event's (the
+// nade row, whose event word is 0, runs nothing).
+// [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 - the event word @0x4E81FF, its null
+//  test @0x4E8205, the call (entity, 1, 0) @0x4E820E]
+enum class PlayerBodyClass : uint8_t; // world.h
+PlayerBodyClass person_hit_row_class(const World &world, const Entity &body, bool person);
+
 class World;
 // The plyr class callback's waypoint tail, run on every event it handles for a
 // live body: a team 1 or 2 player whose AI slot carries a route channel

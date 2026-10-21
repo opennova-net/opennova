@@ -184,7 +184,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // unfiltered, into the process's loadout name list ahead of its session test, so an
     // out-of-session ACCEPT writes it too: every body the process spawns later takes its
     // first weapon (D-NET-143) [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the class
-    //  buffer copy @0x565D27..0x565D4B ahead of `cmp is_in_session` @0x565D4D)].
+    //  buffer copy @0x565D27..0x565D4B ahead of `cmp is_in_session` @0x565D3A's jz @0x565D4D)].
     if (validate_banned && world.loadout_weapon_names != nullptr) {
         world.loadout_weapon_names->entries = kit;
         world.loadout_weapon_names->set = true;
@@ -220,7 +220,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // Out of a session the apply stores each entry's fourth value, raw, into the
     // local slot's damage-class bytes, clearing nothing; in a session it sends the
     // 0x2F instead and the accept stores (D-NET-691). [orig: WeaponLoadout_ApplyFromBuffer
-    //  @0x565CD0 - is_in_session @0x565D4D (the send @0x565D94), the local entity
+    //  @0x565CD0 - is_in_session @0x565D3A (its jz @0x565D4D; the send @0x565D94), the local entity
     //  @0x565DA8, the store @0x566182..0x56618C]
     if (!world.rules.mp_session) {
         if (Entity *local = world.registry.get(world.cached.local_player))

@@ -120,7 +120,7 @@ int32_t player_cammo_type_id(const World &world, uint8_t player_class);
 // The class-table row an items.def row's ai_function names, as a person body takes it
 // (PlayerBodyClass, world.h): the whole name ignoring case; an empty tag reads "Null" and a
 // name no row carries the walk's row-0 default, both the null row, an item class.
-// [orig: Entity_LookupRenderCallbacks @0x407DC0 - the stricmp @0x407DE2, the row-0 default
+// [orig: Entity_LookupRenderCallbacks @0x407DC0 - the stricmp call @0x407DD8, the row-0 default
 //  @0x407DEE..0x407E1E; EntityDef_InitAllCallbacks @0x4A5AAE]
 PlayerBodyClass player_body_class_from_tag(const char *ai_function);
 

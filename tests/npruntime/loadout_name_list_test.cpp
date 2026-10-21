@@ -201,7 +201,8 @@ void test_the_accept_writes_the_list_not_the_resident_kit() {
 // process's loadout name list too, ahead of the session test, so a process that ACCEPTs in single
 // player and then hosts spawns every body with that selection's first weapon; the 0x5A grant's
 // apply (its rebuild is the 0x5A's own) writes nothing here.
-// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x565D27..0x565D4B ahead of @0x565D4D)]
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x565D27..0x565D4B ahead of the session test
+//  @0x565D3A, its jz @0x565D4D)]
 void test_an_out_of_session_accept_writes_the_list() {
 	Rig r(inmatch::ConnectionMode::HostOnly);
 	r.world.rules.mp_session = false;
