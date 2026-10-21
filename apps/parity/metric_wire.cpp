@@ -211,13 +211,14 @@ void compare_tags(
 			cadence_count_metric(count, double(sa.count), cadence, double(sb.count), span_ms);
 		} else if (sa.count >= 20) {
 			// A stream counts from each run's join over the pair's shorter span from
-			// it; a timer-phase stream from its own first occurrence
+			// it, a timer-phase one too (its first send's phase costs one occurrence);
+			// a stream that reaches the joiner before its join keeps its own first
 			// (window.tag_stream_anchor).
 			static_assert(has_normalization("window.tag_stream_anchor"));
 			const uint64_t own_a = *std::min_element(sa.times.begin(), sa.times.end());
 			const uint64_t own_b = *std::min_element(sb.times.begin(), sb.times.end());
 			const uint64_t join_a = join_anchor(rr), join_b = join_anchor(other);
-			const bool joined = !first_order_excluded(dir, identity) && join_a != 0 && join_b != 0;
+			const bool joined = join_a != 0 && join_b != 0;
 			const uint64_t first_a = joined ? std::min(join_a, own_a) : own_a;
 			const uint64_t first_b = joined ? std::min(join_b, own_b) : own_b;
 			const uint64_t span = std::min(end_a - first_a, end_b - first_b);

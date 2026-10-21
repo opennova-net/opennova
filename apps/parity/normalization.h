@@ -369,21 +369,28 @@ inline constexpr Normalization kNormalizations[] = {
 			"a packet or not (x1 fragrespawn: RR 0.595 s apart, RO the same packet): the add "
 			"opens its own initial group" },
 	{ "window.tag_stream_anchor", MaskKind::Field, '*', 0, "stream count span", 0,
-			"a joiner's join (its C2S 0x0B: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> "
-			"Server_OnPlayerJoin @0x51ABA1, slot state 6 @0x51A712) lands at a different offset "
+			"a joiner's join (its C2S 0x0B: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 calls "
+			"Server_OnPlayerJoin @0x51A680 (the call @0x51ABA1), slot state 6 @0x51A712) lands "
+			"at a different offset "
 			"from each run's first packet (the joiner's load: x1 kick RR joined 34.6 s after its "
 			"hello, RO 24.2 s), while a stream of the slot opens a fixed time after it (the "
 			"overlay visit runs only for a state-6 slot, Server_UpdateAllActivePlayerSlots "
 			"@0x518878, one visit every 14 ticks over 128 indices @0x5188CB..0x518906, 29 of "
 			"which carry an S2C 0x40 entry on TDH_I3A): a stream of 20 or more counts from each "
 			"run's join (its first C2S 0x0B, else the first S2C 0x0F) over the pair's shorter "
-			"span from it, so a stream that starts late counts short; a timer-phase stream "
-			"(one the first-occurrence order leaves out) counts from its own first occurrence" },
+			"span from it, so a stream that starts late counts short (it fails once the "
+			"lateness passes the count floor, about a fifth of the span); a timer-phase stream "
+			"(one the first-occurrence order leaves out: retail draws only its first send's "
+			"phase, within one period of the join, plus the joiner's 0x28 / 0x23 round trip "
+			"for 0x6E / 0x6F) counts from the join too, about one occurrence short; a stream "
+			"that reaches the joiner before its join (an S2C 0x16 during the load) keeps its "
+			"own first" },
 	{ "length.S.0x40.burst_tail", MaskKind::Field, 'S', 0x040, "multi-entry 0x40 length", 0,
 			"the overlay visit queues 6-byte entries into a 16-entry buffer "
 			"(Server_QueueOverlayStateEntry: the store @0x50FECA..0x50FEFF) that is flushed "
 			"first when full (@0x50FEA0..0x50FEAE) and sent as [count][entries] "
-			"(Server_SendPendingOverlayState @0x50FE94), so a burst is full 97-byte 0x40s and a "
+			"(Server_SendPendingOverlayState @0x50FE20, the send @0x50FE94), so a burst is full "
+			"97-byte 0x40s and a "
 			"shorter last one. A deploy's visit (or a rejoin's after a rotation, whose slot keeps "
 			"its index) stages every pool-2 entry plus that visit's own pool-1 entry when its row "
 			"is populated, a phase draw (the visit index, Server_BuildOverlayStateForPlayer "

@@ -917,6 +917,32 @@ void test_stream_anchor_and_burst_tail() {
 		expect_row(judge_case(rr, aa, fast), 'S', "tag_count", "0x40:0", "fail", "COUNT_MISMATCH");
 	}
 	{
+		// A timer-phase stream (S2C 0x6F, one the first-occurrence order leaves out)
+		// counts from the join too: retail draws only its first send's phase, so one
+		// opening at another phase passes and one opening 10.6 s after its join fails,
+		// where counting from its own first passed it.
+		auto timer = [](wire::ParityTrace &trace, uint64_t from) {
+			const wire::ParityEvent model = trace.events.back();
+			for (uint64_t ts = from; ts <= 22 * kSec; ts += 500 * kMs) {
+				wire::ParityEvent e = model;
+				e.dir = 'S';
+				e.full_tag = 0x06F;
+				e.ts_ns = ts;
+				e.body = bytes({ 1, 0 });
+				e.length = e.body.size();
+				trace.events.push_back(e);
+			}
+		};
+		static_assert(first_order_excluded('S', 0x06F));
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), phase = scripted(3), late = scripted(3);
+		timer(rr, 2 * kSec);
+		timer(aa, 2 * kSec);
+		timer(phase, 2300 * kMs);
+		timer(late, 12 * kSec);
+		expect_row(judge_case(rr, aa, phase), 'S', "tag_count", "0x6f:0", "pass");
+		expect_row(judge_case(rr, aa, late), 'S', "tag_count", "0x6f:0", "fail", "COUNT_MISMATCH");
+	}
+	{
 		const std::vector<std::vector<size_t>> reference = { { 97, 79 }, { 7 }, { 7 }, { 97, 79 }, { 7 } };
 		wire::ParityTrace rr = scripted(1), aa = scripted(2), tail = scripted(3), off = scripted(3),
 						  extra = scripted(3), join_off = scripted(3);
