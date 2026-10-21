@@ -3544,23 +3544,24 @@ bool run_a_preround_death_latches_when_the_round_opens() {
 // V-L2-s6 FOUND 4: Player_ResetLocalInput tests g_LocalPlayerEntity and its def, which a
 // joiner has from its mission start's Player_InitPlayer, before L spawns at the name-match:
 // a Respawn / Escape press in that window resets the devices and the event queue; the
-// key-input leg waits for L. Before the mission start nothing resets.
+// key-input leg waits for L. Before the mission start nothing resets. The reset's return
+// owes the embedder the Scroll Lock turn-off past the same tests (D-NET-563).
 // [orig: Player_ResetLocalInput @0x4B2B80 - the entity and def tests @0x4B2B85..0x4B2B8D,
-//  Input_ResetAllState @0x4B2B99; Player_InitPlayer @0x4E15F0 - the store @0x4E17EB]
+//  Input_DisableScrollLock @0x4B2B91, Input_ResetAllState @0x4B2B99; Player_InitPlayer
+//  @0x4E15F0 - the store @0x4E17EB]
 bool run_a_pre_l_reset_takes_the_device_legs() {
 	Harness unbound;
-	unbound.role.reset_local_input();
-	bool ok = expect(!unbound.role.take_input_reset(),
-			"pre-L reset: before the mission start nothing resets");
+	bool ok = expect(!unbound.role.reset_local_input() && !unbound.role.take_input_reset(),
+			"pre-L reset: before the mission start nothing resets, the Scroll Lock leg neither");
 	Harness h;
 	h.role.poll_preload();
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	ok &= expect(h.role.runtime->local_entity_bound() && !h.role.local_spawned(),
 			"pre-L reset: the local entity is bound, L is not spawned");
-	h.role.reset_local_input();
-	ok &= expect(h.role.take_input_reset(),
-			"pre-L reset: the device and queue legs run from the mission start");
+	ok &= expect(h.role.reset_local_input() && h.role.take_input_reset(),
+			"pre-L reset: the device and queue legs, the Scroll Lock turn-off among them, run "
+			"from the mission start");
 	return ok;
 }
 

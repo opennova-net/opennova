@@ -203,6 +203,38 @@ private:
 	int32_t remainder_ = 0;
 };
 
+// The keyboard locks the process forces, the embedder's device work. The command line's init
+// saves Num Lock's state and forces it on; the subsystems' init, after game.cfg's load (whose
+// mpreset exit leaves by crt_exit, running no shutdown), turns Scroll Lock off; the
+// subsystems' shutdown at the main loop's end, after the cursor's show, turns Scroll Lock off,
+// puts Num Lock back as the start found it and turns Caps Lock off. A forced state is a press
+// and release of the key (VK and scan alike, the release KEYEVENTF_KEYUP with time 10) sent
+// only when the keyboard state's byte for it, nonzero while the toggle is on or the key is
+// held, disagrees with the state wanted; the window's messages are read after it. The start's
+// Scroll Lock and Caps Lock reads reach no reader: the exit pushes them as arguments its
+// callees ignore. The Escape key's Player_ResetLocalInput turns Scroll Lock off too
+// (inmatch::Role::reset_local_input's return; PlayerActionFrame::scroll_lock_off carries the
+// device's turn-off).
+// [orig: WinMain @0x763A80 (Game_ParseCommandLineAndInit @0x763B5B, then Game_Run @0x763BA9);
+//  Game_ParseCommandLineAndInit @0x4A7310 (Input_IsScrollLockOn @0x4A7362 into dword_B49844
+//  @0x4A7367; Input_IsCapsLockOn @0x4A736C; Input_IsNumLockOn @0x4A7376 into
+//  g_SavedNumLockState @0x4A7381; Input_SetNumLockState(1) @0x4A7386); Game_Run @0x4A7FB0
+//  (Game_LoadConfig @0x4A7FBB, Game_InitSubsystems @0x4A7FD5, Game_SaveConfig @0x4A7FFF,
+//  Game_ShutdownSubsystems @0x4A8004); Game_LoadConfig @0x551480 (mpreset's crt_exit
+//  @0x5514A1..0x5514AC); Game_InitSubsystems
+//  @0x4A6CD0 (Input_DisableScrollLock @0x4A7260); Game_ShutdownSubsystems @0x4A5300
+//  (Cursor_Show @0x4A53A2, dword_B49844 pushed @0x4A53A7..0x4A53AC,
+//  Input_DisableScrollLock @0x4A53B7, Input_SetNumLockState(g_SavedNumLockState)
+//  @0x4A53BC..0x4A53C3, Input_ReleaseCapsLockIfActive @0x4A53CF); Input_IsNumLockOn @0x760ED0
+//  (the byte @0x760F17); Input_SetNumLockState @0x761240 (Input_SetKeyState(0x90, state)
+//  @0x76124A); Input_SetKeyState @0x760F60 (the byte against the state wanted
+//  @0x760FA6..0x760FB2, SendInput @0x761002, the pump @0x761009);
+//  Input_ReleaseCapsLockIfActive @0x7611A0 (the VK_CAPITAL byte @0x7611CA, SendInput
+//  @0x76121B, the pump @0x761224); Input_DisableScrollLock @0x7610F0 (no read of its argument)]
+inline constexpr int kVkCapital = 0x14;
+inline constexpr int kVkNumLock = 0x90;
+inline constexpr int kVkScroll = 0x91;
+
 // Owns the action table's gates and latches across frames and mission rebuilds.
 // A host without a player (including spectator mode) does not poll this state.
 // Request refusal and all gameplay effects belong to the simulation.

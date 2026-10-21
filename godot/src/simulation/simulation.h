@@ -959,8 +959,9 @@ public:
 	void reset_all_input_state();
 	// The Escape key over live play runs Player_ResetLocalInput ahead of its own chain
 	// (engine inmatch::Role::reset_local_input; D-NET-560); its device legs reach the
-	// shell through take_input_reset.
-	void escape_input_reset();
+	// shell through take_input_reset. True when it ran past its local-entity test: the
+	// shell's device then owes the Scroll Lock turn-off (D-NET-563).
+	bool escape_input_reset();
 	// Input action 3, the exit: the in-game CONFIRM_YES runs it inline and a console-queued
 	// code 3 at its input frame (engine inmatch/remote_admin.h input_action_exit carries the
 	// witness): a joiner's CIDEMIS goodbye leaves inside it.

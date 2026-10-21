@@ -457,6 +457,22 @@ void LocalPlayerPresenter::release_capture_for_screen() {
 	input_router_.release_capture_for_screen();
 }
 
+void LocalPlayerPresenter::start_process_num_lock() {
+	PlayerInputRouter::start_process_num_lock();
+}
+
+void LocalPlayerPresenter::start_process_scroll_lock() {
+	PlayerInputRouter::start_process_scroll_lock();
+}
+
+void LocalPlayerPresenter::exit_process_key_locks() {
+	PlayerInputRouter::exit_process_key_locks();
+}
+
+void LocalPlayerPresenter::owe_scroll_lock_turn_off() {
+	input_router_.owe_scroll_lock_turn_off();
+}
+
 
 void LocalPlayerPresenter::set_hud_toggles(const Ref<HudToggles> &p_toggles) {
 	input_router_.set_hud_toggles(p_toggles);
@@ -1261,6 +1277,14 @@ void LocalPlayerPresenter::_bind_methods() {
 			&LocalPlayerPresenter::close_pass_through_screen);
 	ClassDB::bind_method(D_METHOD("release_capture_for_screen"),
 			&LocalPlayerPresenter::release_capture_for_screen);
+	ClassDB::bind_static_method("LocalPlayerPresenter", D_METHOD("start_process_num_lock"),
+			&LocalPlayerPresenter::start_process_num_lock);
+	ClassDB::bind_static_method("LocalPlayerPresenter", D_METHOD("start_process_scroll_lock"),
+			&LocalPlayerPresenter::start_process_scroll_lock);
+	ClassDB::bind_static_method("LocalPlayerPresenter", D_METHOD("exit_process_key_locks"),
+			&LocalPlayerPresenter::exit_process_key_locks);
+	ClassDB::bind_method(D_METHOD("owe_scroll_lock_turn_off"),
+			&LocalPlayerPresenter::owe_scroll_lock_turn_off);
 	ClassDB::bind_method(D_METHOD("handle_input", "event", "active"), &LocalPlayerPresenter::handle_input);
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);
 	ClassDB::bind_method(D_METHOD("is_local_spectator"), &LocalPlayerPresenter::is_local_spectator);

@@ -50,6 +50,17 @@ public:
 	void setup(Node *p_world, LocalPlayerPresenter *p_presenter, const Ref<ControlsModel> &p_controls);
 	void teardown();
 
+	// The process's keyboard-lock legs, under a display with a keyboard (engine
+	// controls::kVkNumLock carries the witness): the start forces Num Lock on, saving its
+	// state, and turns Scroll Lock off; the normal exit turns Scroll Lock off, puts Num Lock
+	// back and turns Caps Lock off, once the start ran.
+	static void start_process_num_lock();
+	static void start_process_scroll_lock();
+	static void exit_process_key_locks();
+	// The Escape key's Player_ResetLocalInput ran past its local-entity test: the next
+	// frame's head turns Scroll Lock off (inmatch::Role::reset_local_input's return).
+	void owe_scroll_lock_turn_off();
+
 	// Scripted input (probes, automation, the presenter test): the same seven
 	// movement bits a device produces, so the sim sees one contract. Null =
 	// poll the live bindings again.
@@ -187,6 +198,8 @@ private:
 	// it only once the window's messages are read, so the frame's later samples read the word
 	// off and send no second one.
 	bool scroll_lock_turned_off_ = false;
+	// The Escape key's reset owes the next frame's head a Scroll Lock turn-off.
+	bool scroll_lock_turn_off_owed_ = false;
 };
 
 } // namespace godot

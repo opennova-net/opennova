@@ -258,7 +258,7 @@ bool Role::request_respawn() {
 	// The input reset, then in a session on a peer the bodiless 0x41
 	// [orig: case 55 -- Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
 	//  is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A].
-	reset_local_input();
+	(void)reset_local_input(); // the device's turn-off rides the row's code
 	return kernel.world.rules.mp_session && send_respawn_request();
 }
 
@@ -330,9 +330,9 @@ void Role::dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t
 		runtime->dispatch_to_console_action_sink({code, p1, p2, p3});
 }
 
-void Role::reset_local_input() {
+bool Role::reset_local_input() {
 	// Player_ResetLocalInput: the local entity and its def, then Input_DisableScrollLock
-	// (no auto-run here: D-NET-563), Input_ResetAllState (the deferred queue here; the key
+	// (the embedder's device, on this return: D-NET-563), Input_ResetAllState (the deferred queue here; the key
 	// state and the key-press latches the embedder's devices, take_input_reset; the event
 	// queue's memset, which ends the frame's drain, apply_input's input_queue_reset_),
 	// then g_InputFlags, the pack and the idle snap (LocalPlayer::reset_key_input)
@@ -349,14 +349,15 @@ void Role::reset_local_input() {
 		//  @0x4E15F0 - the store @0x4E17EB]
 		const ClientRuntime *runtime = client_runtime();
 		if (kind() != RoleKind::Joiner || runtime == nullptr || !runtime->local_entity_bound())
-			return;
+			return false;
 	} else if (!local->has_item_def) {
-		return;
+		return false;
 	}
 	kernel.local.clear_deferred_input();
 	input_reset_pending_ = true;
 	input_queue_reset_ = true;
 	kernel.local.reset_key_input();
+	return true;
 }
 
 void Role::reset_all_input_state() {

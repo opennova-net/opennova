@@ -283,12 +283,17 @@ func _ready() -> void:
 		push_warning("OpenNova: --resource-dir needs a path. Usage: opennova.exe [-- --resource-dir <path> [--loose-root] [/d]]")
 		get_tree().quit(2)
 		return
+	# The command line's init forces Num Lock on, saving its state for the exit
+	# (engine controls::kVkNumLock carries the witness, D-NET-563).
+	LocalPlayerPresenter.start_process_num_lock()
 	# The start's read of game.cfg (GameCfgStore, the first use of the block):
 	# a file that sets mpreset ends the process here with exit code 0, before
 	# anything mounts and with nothing saved (docs/gamecfg/game-cfg-re.md).
 	if GameCfgStore.block().is_reset_exit():
 		exit_process(0)
 		return
+	# The subsystems' init turns Scroll Lock off (the same witness).
+	LocalPlayerPresenter.start_process_scroll_lock()
 	_previous_auto_accept_quit = get_tree().auto_accept_quit
 	get_tree().auto_accept_quit = false
 	_quit_policy_installed = true
@@ -1068,7 +1073,12 @@ func request_quit() -> void:
 	# The main loop's exit saves game.cfg before the shutdown
 	# (docs/gamecfg/game-cfg-re.md, the save points).
 	GameCfgStore.save()
-	_complete_runtime_shutdown(begin_runtime_shutdown())
+	var load_operation := begin_runtime_shutdown()
+	# The subsystems' shutdown, after the cursor's show: Scroll Lock off, Num Lock
+	# as the start found it, Caps Lock off (engine controls::kVkNumLock carries the
+	# witness, D-NET-563).
+	LocalPlayerPresenter.exit_process_key_locks()
+	_complete_runtime_shutdown(load_operation)
 
 
 ## The process exit on the cfg block's mpreset word: a read of game.cfg that
@@ -1565,8 +1575,10 @@ func _on_camera_escape() -> void:
 	# Over live play the Escape key's action first resets the input (its
 	# Player_ResetLocalInput, ahead of its spawn gate; engine
 	# inmatch::Role::reset_local_input, D-NET-560).
+	# Its Scroll Lock turn-off goes out at the next frame's head (D-NET-563).
 	if _state == State.WORLD and _world != null and _world.get_sim() != null:
-		_world.get_sim().escape_input_reset()
+		if _world.get_sim().escape_input_reset() and _player_presenter != null:
+			_player_presenter.owe_scroll_lock_turn_off()
 	# Over live play the HUD's escape chain closes one open HUD window first;
 	# only with none open does the in-game menu open.
 	if _state == State.WORLD and _hud_presenter != null and _hud_presenter.handle_escape():

@@ -1098,10 +1098,10 @@ bool Simulation::is_joined_in_match() const {
 	return is_joiner() && runtime_ && runtime_->in_match();
 }
 
-void Simulation::escape_input_reset() {
+bool Simulation::escape_input_reset() {
 	// The Escape key's reset (engine inmatch/session.h Role::reset_local_input carries
-	// the witness).
-	if (role_ != nullptr && kernel_) active_role().reset_local_input();
+	// the witness); true when the device owes the Scroll Lock turn-off.
+	return role_ != nullptr && kernel_ && active_role().reset_local_input();
 }
 
 void Simulation::input_action_exit() {

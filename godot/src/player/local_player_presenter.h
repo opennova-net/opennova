@@ -260,6 +260,12 @@ public:
 	// A game screen frees the captured cursor at the re-centre point
 	// (PlayerInputRouter::release_capture_for_screen).
 	void release_capture_for_screen();
+	// The process's keyboard-lock legs and the Escape key's Scroll Lock turn-off
+	// (PlayerInputRouter::start_process_num_lock and its siblings).
+	static void start_process_num_lock();
+	static void start_process_scroll_lock();
+	static void exit_process_key_locks();
+	void owe_scroll_lock_turn_off();
 	// Mouse-look rides the input router: the motion events' cursor offset,
 	// which the session's mouse pump spreads into the axis words the SIM's
 	// witnessed integer pipeline scales (engine: runtime/world/player_look.h).
