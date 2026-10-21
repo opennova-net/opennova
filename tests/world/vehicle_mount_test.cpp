@@ -5115,6 +5115,26 @@ void test_an_anchorless_child_copies_only_a_stale_carrier() {
         w.vehicles.pose_mounted_occupant(*w.registry.get(child_h), *w.registry.get(carrier_h),
                                          anchor);
     };
+    // The carrier's savedLivePose words (+0x80..+0x94), unlike its live words.
+    const auto stamp_carrier_saved = [&](int32_t base) {
+        Entity &c = *w.registry.get(carrier_h);
+        c.saved_live_pos[0] = base + 1;
+        c.saved_live_pos[1] = base + 2;
+        c.saved_live_pos[2] = base + 3;
+        c.saved_live_yaw = base + 4;
+        c.saved_live_pitch = base + 5;
+        c.saved_live_roll = base + 6;
+        c.saved_live_valid = true;
+    };
+    const auto child_saved_is = [&](int32_t base) {
+        const Entity &c = *w.registry.get(child_h);
+        return c.saved_live_valid && c.saved_live_pos[0] == base + 1 &&
+               c.saved_live_pos[1] == base + 2 && c.saved_live_pos[2] == base + 3 &&
+               c.saved_live_yaw == base + 4 && c.saved_live_pitch == base + 5 &&
+               c.saved_live_roll == base + 6;
+    };
+    stamp_carrier_saved(0x10000);
+    CHECK(!w.registry.get(child_h)->saved_live_valid);
     // The carrier's bit clear (a mover not yet ticked): the root copy.
     compose();
     CHECK(w.registry.get(child_h)->position.x.q16 == w.registry.get(carrier_h)->position.x.q16);
@@ -5122,20 +5142,26 @@ void test_an_anchorless_child_copies_only_a_stale_carrier() {
     // The copy takes the carrier's Yaw word as it is, no seat offset
     // [orig: @0x441151..0x441177].
     CHECK(w.registry.get(child_h)->heading == w.registry.get(carrier_h)->heading);
+    // ... and its savedLivePose words as they are [orig: @0x44117A..0x4411B6].
+    CHECK(child_saved_is(0x10000));
     CHECK((w.registry.get(child_h)->engine_flags & kEntityFlagMatrixBuilt) != 0);
-    // A mover tick moves the carrier and sets its bit: the child holds.
+    // A mover tick moves the carrier, restamps its savedLivePose and sets its bit:
+    // the child holds both.
     w.registry.get(carrier_h)->position = {30.0f, 40.0f, 5.0f};
+    stamp_carrier_saved(0x20000);
     w.registry.get(carrier_h)->engine_flags |= kEntityFlagMatrixBuilt;
     compose();
     CHECK(w.registry.get(child_h)->position.x == 10.0f &&
           w.registry.get(child_h)->position.y == 20.0f &&
           w.registry.get(child_h)->position.z == 3.0f);
+    CHECK(child_saved_is(0x10000));
     // A teleport clears the carrier's bit: the next compose copies again.
     w.registry.get(carrier_h)->engine_flags &= ~kEntityFlagMatrixBuilt;
     compose();
     CHECK(w.registry.get(child_h)->position.x == 30.0f &&
           w.registry.get(child_h)->position.y == 40.0f &&
           w.registry.get(child_h)->position.z == 5.0f);
+    CHECK(child_saved_is(0x20000));
 }
 
 // D-NET-586: the process refuses the requester on its dead bit alone: a body at zero
