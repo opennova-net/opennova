@@ -79,7 +79,11 @@ bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
 // transform. The organic movers reach the UseGun attach for seat type 3 alone,
 // whose tail restores both look words saved at its entry; their other seats'
 // carry writes no look word (D-NET-NEW-L6-3). A non-organic brain keeps the
-// words the seat pose gave it (no retail mover of it was witnessed).
+// words the seat pose gave it: retail runs no seat mover for one (the seat bone's
+// readers are the organic movers, the request, the rope renderer and the suspension
+// bounce; its only non-organic mount is the WAC's) [orig:
+// Entity_GetBoneTransformAndOrientation @0x4B0C50, its callers @0x436540 / @0x4561F6 /
+// @0x4567F7 / @0x4B6510 / @0x4BED72; WacScript_TryMountEntityToVehicle @0x4F70F0].
 // [orig: Entity_UpdateInfantryPlayerBody `cmp [esi+168h], 3` @0x4B63A5..0x4B63BF,
 //  the carry @0x4B6510..0x4B6575; Entity_UpdateInfantryAI @0x4BEC0F..0x4BEC1B;
 //  Entity_AttachToBoneAndUpdateTransform @0x5463D0 - the saves @0x546416..0x54642C,
@@ -889,7 +893,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     // heading and the legs). An organic rider's Yaw word stays its look: the seat
     // carry writes no +0x10, so a remote passenger keeps the yaw its chase set; the
     // arms below restore or chase the look for the other riders. A non-organic
-    // brain takes the seat yaw (no retail mover of it was witnessed).
+    // brain takes the seat yaw: retail runs no seat mover for one (see
+    // refresh_mounted_pose's head).
     // [orig: Entity_UpdateInfantryPlayerBody - the seat carry @0x4B6510..0x4B6575,
     //  the remote chase @0x4B4361; Entity_UpdateInfantryAI @0x4BED72..0x4BEDDA]
     if (!e.inf.active) e.heading = seat_heading;

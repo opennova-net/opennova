@@ -387,10 +387,16 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
     // the body frame only (bodyHeading and the legs; apply_resolved_mounted_seat_frame)
     // and the look legs owning +0x10 (a remote player's chase @0x4B4361, the
     // local input, the org1 look chase). A non-organic occupant keeps ours' seat
-    // yaw (no retail mover of it was witnessed). [orig: Entity_UpdateTransformAndTurret
-    //  @0x4410DD; Entity_UpdateInfantryPlayerBody - the seat carry @0x4B6510..0x4B6575
-    //  (+0x8C / +0x2E8 / +0x2E4 @0x4B654E..0x4B655A, no +0x10), the remote chase
-    //  @0x4B4361; Entity_UpdateInfantryAI - @0x4BED72..0x4BEDDA, the look chase @0x4BEF84]
+    // yaw: retail runs no seat mover for one, the seat bone's only readers being the
+    // two organic movers, the attach request, the rope renderer and the suspension
+    // bounce, and its only non-organic mount the WAC's. [orig:
+    //  Entity_UpdateTransformAndTurret @0x4410DD; Entity_UpdateInfantryPlayerBody - the
+    //  seat carry @0x4B6510..0x4B6575 (+0x8C / +0x2E8 / +0x2E4 @0x4B654E..0x4B655A, no
+    //  +0x10), the remote chase @0x4B4361; Entity_UpdateInfantryAI - @0x4BED72..0x4BEDDA,
+    //  the look chase @0x4BEF84; Entity_GetBoneTransformAndOrientation @0x4B0C50's other
+    //  callers Entity_RequestVehicleAttach @0x4364A0 (@0x436540),
+    //  Entity_RenderRopeTrailGeometry @0x456140 (@0x4561F6), Entity_UpdateSuspensionBounce
+    //  @0x456710 (@0x4567F7); WacScript_TryMountEntityToVehicle @0x4F70F0]
     const AiEntity *organic = world.ai.for_handle(occ.handle);
     if (seat.attachment_frame || organic == nullptr || !organic->inf.active)
         occ.heading = live.heading;

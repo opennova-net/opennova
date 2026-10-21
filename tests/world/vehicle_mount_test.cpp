@@ -272,9 +272,10 @@ void test_usegun_attach_presnaps_local_look() {
     // 0x0400 << 16. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
     const int32_t expected_heading = 589037568;
     // The attach writes no Yaw word: the entity's stays the request's snap, the
-    // gun frame (D-NET-NEW-L6-3). [orig: Entity_AttachToVehicleSlot @0x4946D0 -
-    //  the stores @0x494752..0x494775; Entity_UpdateInfantryPlayerBody - the seat
-    //  carry @0x4B6510..0x4B6575, no +0x10]
+    // gun frame (D-NET-NEW-L6-3); the UseGun carry restores the Yaw it saved at its
+    // entry. [orig: Entity_AttachToUseGunSlot @0x546B80 - the stores
+    //  @0x546C5C..0x546C7C, no Yaw; Entity_AttachToBoneAndUpdateTransform @0x5463D0 -
+    //  the Yaw restore @0x546661]
     CHECK(w.registry.get(player_h)->heading == expected_heading);
     CHECK(body.heading == expected_heading);
     CHECK(body.inf.target_heading == expected_heading);

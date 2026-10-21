@@ -477,8 +477,9 @@ void queue_class_blast(World &world, const Entity &entity, const char *name, flo
     blast.hit_word = 1;
     blast.radius_override = radius;
     // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330 (@0x4E8333..0x4E8339),
-    //  from Entity_ProcessBld2Destruction @0x43F2A6 / @0x43F2C7 and
-    //  Entity_ProcessCraneCollapse @0x44014A / @0x44016B].
+    //  from Entity_ProcessBld2Destruction @0x43F2A6 / @0x43F2C7,
+    //  Entity_ProcessCraneCollapse @0x44014A / @0x44016B and the genx row's husk tail
+    //  Entity_UpdateWaterPhysicsAndEffects @0x4A939C / @0x4A93BD].
     world.explosions.queue_explosion_on_authority(world, blast);
 }
 

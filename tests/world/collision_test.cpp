@@ -3348,6 +3348,71 @@ int32_t resolve_test_vehicle_probe(CollisionWorld &collision, World &world, Enti
 	return severity;
 }
 
+// D-NET-133: both callers of the bone-collision query store its door-touch mask onto
+// the target: a query past a building's broad phase starts the building's mask at 0,
+// so a bit an earlier query left is gone and only this query's door bits stand, on
+// the movement resolver's pass and on the vehicle pass alike.
+// [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the reset @0x4AE281, the OR
+//  @0x4AEB22; its callers Entity_MovementCollisionResolver @0x4B2BD0 (@0x4B2F9B,
+//  @0x4B35D1) and Entity_CheckCollisionState @0x462A30 (@0x462F63)]
+void test_door_mask_store_clears_a_stale_mask() {
+	auto rig = std::make_unique<Rig>(box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0));
+	Entity &door = *rig->world.registry.get(rig->building);
+	door.item_type = 5;
+	door.door_count = 1;
+	door.door_event = door.door_motion = true;
+	rig->world.doors.initialize(door, 528, 0);
+	rig->move_soldier(10, 10, 0);
+	door.door_touch_mask = 0x6u; // bits no query of this pass touches
+	int32_t pos[3] = {fx(10), fx(10), 0};
+	int32_t velocity[3]{};
+	int16_t health = 100;
+	CollisionWorld::ResolveState state;
+	rig->cw.resolve_entity(rig->world, rig->soldier, state, pos, velocity, velocity[2],
+			0, fx(1.8), 0, 0, false, false, 0, 43, 0u, health);
+	CHECK(door.door_touch_mask == 1u);
+
+	auto world = std::make_unique<World>();
+	world->registry.configure_pool(1, 4);
+	world->registry.configure_pool(2, 4);
+	auto collision = std::make_unique<CollisionWorld>();
+	Entity vehicle_seed;
+	vehicle_seed.kind = EntityKind::Item;
+	vehicle_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
+	vehicle_seed.item_id = 900;
+	vehicle_seed.has_item_def = true;
+	vehicle_seed.has_graphic_model = true;
+	vehicle_seed.item_type = 1;
+	vehicle_seed.position = {10.0f, 10.0f, 0.0f};
+	vehicle_seed.bound_radius = 1.0f;
+	vehicle_seed.alive = true;
+	const EntityHandle vehicle = world->registry.spawn(1, vehicle_seed);
+	VehicleTraits traits;
+	traits.physics = 1;
+	world->vehicles.traits.set(vehicle_seed.item_id, traits);
+	Entity building_seed;
+	building_seed.kind = EntityKind::Building;
+	building_seed.position = {10.0f, 10.0f, 0.0f};
+	building_seed.heading = placed_heading_bam(90);
+	building_seed.alive = true;
+	const EntityHandle building = world->registry.spawn(2, building_seed);
+	collision->assign_entity(building, collision->add_model(box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0)));
+	for (int i = 0; i < 17; ++i) collision->build_tick_tables(*world);
+	CHECK(collision->candidate_count(vehicle) == 1);
+	Entity *walled = world->registry.get(building);
+	CHECK(walled != nullptr);
+	if (walled == nullptr) return;
+	walled->door_touch_mask = 0x6u;
+	CountingMatrixProvider provider;
+	collision->set_pose_provider(&provider);
+	const int32_t at[3] = {fx(10.0), fx(10.0), 0};
+	int32_t push[2] = {};
+	// The hull's probe stands in the door volume: the stale bits go, its door bit stands.
+	(void)resolve_test_vehicle_probe(*collision, *world, vehicle, at, at, push);
+	CHECK(provider.calls_for(building) == 1);
+	CHECK(walled->door_touch_mask == 1u);
+}
+
 void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     World world;
     world.registry.configure_pool(1, 4);
@@ -6441,6 +6506,7 @@ int main() {
 	test_fixed_matrix_euler_witnessed_vector();
 	test_fixed_matrix_euler_round_trip();
 	test_door_contact_and_player_collision_split();
+	test_door_mask_store_clears_a_stale_mask();
 	test_door_mask_resets_per_query();
 	test_matrix_roundtrip();
 	test_retail_render_pose_matrix_roundtrip_and_order();
