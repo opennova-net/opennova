@@ -860,8 +860,29 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         tick_emplaced_weapon_channel(world, *veh, *occ, e);
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
-    const int32_t seat_heading = apply_resolved_mounted_seat_frame(
-            e, world, *occ, *veh, seat);
+    // A player body's ordinary seat resolves through the carrier's seat bone too. When that
+    // lookup fails the body takes no pose and no seat animation; the authority detaches it
+    // (the player body's arm kills no one), a client keeps it seated. The seat block's tail
+    // still runs (groundEntity from parentEntity, the blink quad, the legs and their targets
+    // to the body heading) and the pass ends at the mounted site.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the UseGun test @0x4B63A5..0x4B63BF,
+    //  the bone call @0x4B6510, its test @0x4B6518..0x4B651A, Entity_DetachFromVehicleIfServer
+    //  @0x4359D0 called @0x4B6627, the tail @0x4B662F..0x4B66A3, the site's returns @0x4B6907
+    //  / @0x4B6977]
+    const bool player_seat_bone_lost = e.inf.active && !npc_mounted_body(e, *occ) &&
+            veh->has_item_def && seat.type != SeatType::Gunner && world.pose_provider != nullptr &&
+            !world.pose_provider->resolve_seat_bone(world, *veh, seat.bone_index);
+    int32_t seat_heading = e.inf.body_heading;
+    if (player_seat_bone_lost) {
+        if (is_authority) {
+            world.vehicles.detach(e.handle);
+            occ->ground_target = {};
+        }
+        e.inf.leg_yaw[0] = e.inf.leg_yaw[1] = e.inf.body_heading;
+        e.inf.leg_target[0] = e.inf.leg_target[1] = e.inf.body_heading;
+    } else {
+        seat_heading = apply_resolved_mounted_seat_frame(e, world, *occ, *veh, seat);
+    }
     ride_parent_blink_quad(world, *occ);
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
@@ -962,11 +983,15 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         occ->pitch_bam = e.pitch;
     }
     if (e.inf.active) {
-        const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
-        if (e.inf.anim_state != mounted_state) {
-            e.inf.request_body_animation(mounted_state);
+        // The seat animation (+0x2BC, the deferred +0x2B8 cleared) is the posed arm's.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B65A8..0x4B65C3]
+        if (!player_seat_bone_lost) {
+            const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
+            if (e.inf.anim_state != mounted_state) {
+                e.inf.request_body_animation(mounted_state);
+            }
+            e.inf.anim_pending = 0;
         }
-        e.inf.anim_pending = 0;
         e.inf.move_mode = 0;
         e.inf.target_dist = 0;
         occ->body_anim_slot = body_anim_slot_from_state(e.inf.anim_state);

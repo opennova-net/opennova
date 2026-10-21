@@ -259,8 +259,9 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     }
     // [orig: @0x4BE8FD..0x4BEBE7, @0x4BEF97, @0x4BEFC5..0x4BEFED]
     infantry_org1_heading_chase(e, self, key);
-    // Unconditional for a body with its channel [orig: @0x4B9A48, @0x4BF078..0x4BF094].
-    infantry_restamp_eye(e, world, frame);
+    // Unconditional for a body with its channel [orig: @0x4B9A48, @0x4BF078..0x4BF094]; the
+    // still body is on foot by its contract above.
+    infantry_restamp_eye(e, world, frame, false);
     finish_infantry_tick(e, world);
     return frame;
 }

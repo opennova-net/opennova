@@ -1269,10 +1269,13 @@ public:
     void finish_infantry_tick(AiEntity &e, World &world);
     // The camera offset (+0x74) restamped from the head the motor head just posed: the local
     // player's from its skeletal head anchor, floored on foot; else from the frame's capsule
-    // extent and the lean, an NPC's tilted laterally along its look heading.
+    // extent and the lean, an NPC's tilted laterally along its look heading. mounted_site is
+    // the site the player body's pass took (the selector reads the parent ahead of the
+    // seat block's detach).
     // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66CD;
     //  org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8; org1 @0x4BF078..0x4BF14C]
-    void infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame);
+    void infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame,
+                              bool mounted_site);
     // Mirror the selected body-anim state + channel phase (and, for the local player, the
     // packed MoveOrder low byte) onto the world Entity the 0x0A snapshot reads.
     void mirror_wire_anim(AiEntity &e, World &world);
