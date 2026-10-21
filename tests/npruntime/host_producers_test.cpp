@@ -476,6 +476,34 @@ bool check_chat_routing() {
 	return expect(replies.empty(), "a spectator cannot chat");
 }
 
+// A punted sender's records still reach their handlers: the punt fills the connection's
+// description alone, and the chat handler's gate is the net player's game state (10 / 11) or the
+// local byte, neither of which the punt writes, so P1's team line still reaches P3. P1's own
+// queue is closed behind its description: a send to it after the record returns unqueued.
+// (D-NET-NEW-L1-27)
+// [orig: NapiNPServer_HandleChatMessage @0x513760 - the gate @0x5137AD..0x5137C1;
+//  CNapiNPConnection_SendDescriptionOnce @0x629750 - the store @0x629772;
+//  CNapiNPConnection_QueueMessage @0x628640 - the test @0x62864D..0x628654]
+bool check_punted_sender_chat_relays() {
+	HostFixture f(4);
+	for (auto &t : f.transports) (void)drain(t);
+	if (!expect(inmatch::Server_StageHostPunt(f.conn(0), 35) && f.conn(0).host_disconnect_sent,
+			"the punt stages P1's description"))
+		return false;
+	f.transports[0].host_send(s2c::CHAT_BROADCAST, {0x01});
+	const std::vector<ProtocolMessage> replies =
+			f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(2, "go"));
+	const std::vector<ns::Datagram> to_p1 = drain(f.transports[0]);
+	if (!expect(to_p1.size() == 1 && to_p1[0].tag == hightag::DESCRIPTION_PACKET &&
+					to_p1[0].protocol_flags_raw == 0xA0,
+			"P1's queue holds its description alone: a later send returns unqueued"))
+		return false;
+	return expect(replies.size() == 1 && replies[0].tag == s2c::CHAT_BROADCAST &&
+					count_tag(drain(f.transports[2]), s2c::CHAT_BROADCAST) == 1 &&
+					count_tag(drain(f.transports[1]), s2c::CHAT_BROADCAST) == 0,
+			"a punted sender's team line still reaches its team");
+}
+
 // --------------------------------------------------------------------------
 // 0x3D, 0x42 -> 0x70, 0x51.
 // --------------------------------------------------------------------------
@@ -2025,6 +2053,7 @@ int main() {
 	ok = check_host_novaworld_exit() && ok;
 	ok = check_chat_helpers() && ok;
 	ok = check_chat_routing() && ok;
+	ok = check_punted_sender_chat_relays() && ok;
 	ok = check_loaded_model_reply_stamp() && ok;
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_duplicate_pcid_kick_at_the_quality_boundary() && ok;

@@ -679,7 +679,19 @@ bool check_host_control_punts_are_ordered_before_the_countdown() {
 	return check_host_control_punt(7, 8, 24);
 }
 
-bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
+// A connection whose description went keeps taking its packets until its teardown: retail's
+// session receive, resend list and ping test the connection's active byte (+0x28) and drop
+// byte (+0x2D, which nothing sets), never the description's sent byte, so a punted joiner's
+// in-flight records stamp its receive, run through the fragment fold and reach their handlers;
+// what a handler answers it dies in its queue, closed behind the description (QueueMessage
+// tests the sent byte the description set). Only the correctly keyed goodbye tears it down.
+// (D-NET-NEW-L1-27)
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - @0x626AE0 / @0x626AEA;
+//  CNapiNPConnection_ParseMessages @0x625BC0 - the drop byte @0x625C3D, the stamp @0x625D54,
+//  the record walk @0x625DF5..0x625F1B; NapiNP_HandleResendList @0x623800 - @0x6238C9 /
+//  @0x6238D3; CNapiNPConnection_SendDescriptionOnce @0x629750 - the store @0x629772;
+//  CNapiNPConnection_QueueMessage @0x628640 - the test @0x62864D..0x628654]
+bool check_described_connection_keeps_taking_records() {
 	inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -687,6 +699,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	ctx.np_protocol.host_key = 0xA1B2C3D4u;
 	ctx.np_protocol.max_players = 8;
 	const PeerAddr peer{0x0100007Fu, 34046};
+	replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 
 	inmatch::NapiNPConnection conn;
 	conn.peer = peer;
@@ -701,36 +714,39 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	conn.client_scrk = kClientScrk;
 	conn.server_scrk = kServerScrk;
 	conn.receive_inactive_ms = 4321;
+	conn.link.transport = &transport;
 
-	// Retain one real S2C message so a valid 0x44 would have something to
-	// replay if the staged-close gate accidentally admitted it.
+	// One retained S2C message, which a keyed 0x44 asks for again.
 	std::vector<uint8_t> retained_body;
 	if (!expect(frame_session_packet(
 				conn.seq, SessionCrypto{kServerScrk, {}, kClientKey},
 				{make_protocol_message(s2c::SPECTATOR_FLAGS, {0x5A})},
 				retained_body) &&
 				conn.seq.retained_outbound_message_count == 1,
-			"staged-close fixture retains one replayable S2C record"))
+			"described-connection fixture retains one replayable S2C record"))
 		return false;
-	conn.host_disconnect_sent = true;
+	// The punt: the description queued, then its sent byte closes the queue.
+	const DisconnectEvent punt =
+			make_disconnect_event(1, 2, 0, 0, "t35", 33, "LogPuntEvent");
+	if (!expect(inmatch::Server_StageHostDisconnect(conn, punt) &&
+				conn.host_disconnect_sent && transport.outbound_pending() == 1,
+			"the punt queues the description"))
+		return false;
 	// The staged punt latched its record when the description was admitted (the
 	// port's SendChatMessage latch rides send_session_batches); this fixture never
 	// runs that pump, so it installs the same record by hand.
 	// [orig: CNapiNPConnection_QueueDisconnectEvent @0x4c7ff2..0x4c8004]
-	const DisconnectEvent punt =
-			make_disconnect_event(1, 2, 0, 0, "t35", 33, "LogPuntEvent");
 	inmatch::latch_disconnect_event(conn, punt);
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 
-	auto ignored = [](const inmatch::HandleResult &result) {
+	auto nothing_sent = [](const inmatch::HandleResult &result) {
 		return result.outbound.empty() &&
 				result.immediate_outbound.empty() &&
-				result.deferred_session_replies.empty() && result.events.empty();
+				result.deferred_session_replies.empty();
 	};
 	auto &live = ctx.np_protocol.connection_list.front();
 
-	// A physical FIRST fragment would normally enter c2s_reassembly even
-	// though it is not yet a semantic message.
+	// A physical FIRST fragment stamps the receive and enters the fold.
 	SessionSequencing client_tx{1, 0};
 	const std::vector<uint8_t> first_fragment = frame_c2s(
 			client_tx,
@@ -740,14 +756,15 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	const inmatch::HandleResult first_result = inmatch::handle_server_datagram(
 			ctx, peer, first_fragment.data(), first_fragment.size(), 1,
 			/*defer_in_match_replies=*/true);
-	if (!expect(ignored(first_result) && live.receive_inactive_ms == 4321 &&
-				live.seq.last_inbound_seq == 0 &&
-				live.c2s_reassembly.buffer.empty(),
-			"a staged close drops C2S before activity, sequencing, or reassembly"))
+	if (!expect(nothing_sent(first_result) && first_result.events.empty() &&
+				live.receive_inactive_ms == 0 &&
+				!live.c2s_reassembly.buffer.empty(),
+			"a described connection's packet stamps its receive and enters the fold"))
 		return false;
 
-	// Completing that record would normally surface PeerC2SInMatch, and a
-	// following PING would normally append a deferred reply to the owner queue.
+	// The FINAL fragment completes the 0x0C, which reaches dispatch (the World-less unit
+	// path surfaces it for the transport FIFO); the in-match 0x47 reaches its handler, whose
+	// 0x75 answer the closed queue drops: the description stays the last record queued.
 	const std::vector<uint8_t> final_fragment = frame_c2s(
 			client_tx,
 			{make_protocol_message(c2s::ENTITY_UPLINK, {0x33, 0x44},
@@ -761,54 +778,46 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	const inmatch::HandleResult ping_result = inmatch::handle_server_datagram(
 			ctx, peer, ping.data(), ping.size(), 3,
 			/*defer_in_match_replies=*/true);
-	if (!expect(ignored(final_result) && ignored(ping_result) &&
-				live.seq.last_inbound_seq == 0 &&
+	if (!expect(nothing_sent(final_result) && final_result.events.size() == 1 &&
+				final_result.events[0].kind ==
+						inmatch::HostAcceptEvent::Kind::PeerC2SInMatch &&
 				live.c2s_reassembly.buffer.empty(),
-			"a staged close surfaces no C2S event or deferred reply"))
+			"a described connection's completed record reaches dispatch"))
+		return false;
+	replication::Datagram queued;
+	if (!expect(nothing_sent(ping_result) && ping_result.events.empty() &&
+				transport.outbound_pending() == 1 && transport.pop_outbound(queued) &&
+				queued.tag == hightag::DESCRIPTION_PACKET &&
+				queued.protocol_flags_raw == kDescriptionFlags,
+			"the handler's answer dies in the closed queue behind the description"))
 		return false;
 
-	// A future sequence is the queue-growth case: it must not enter the
-	// ordered-recovery map or arm a missing-sequence resend after closure.
+	// A future sequence is held for its gap and the gap requested, as for any connection.
 	SessionSequencing future_tx{5, 0};
 	const std::vector<uint8_t> future = frame_c2s(
 			future_tx, {make_protocol_message(c2s::KEEPALIVE, {})});
 	const inmatch::HandleResult future_result = inmatch::handle_server_datagram(
 			ctx, peer, future.data(), future.size(), 4,
 			/*defer_in_match_replies=*/true);
-	if (!expect(ignored(future_result) && live.seq.queued_inbound.empty() &&
-				!live.seq.missing_request_pending &&
-				inmatch::flush_server_missing_requests(ctx).empty(),
-			"a staged close cannot grow or drain the ordered receive queue"))
+	if (!expect(nothing_sent(future_result) && live.seq.queued_inbound.size() == 1 &&
+				live.seq.missing_request_pending &&
+				inmatch::flush_server_missing_requests(ctx).size() == 1,
+			"a described connection's future packet is held and its gap requested"))
 		return false;
 
+	// A keyed resend list is answered from the retained record, and is no receive activity.
+	live.receive_inactive_ms = 4321;
 	std::vector<uint8_t> resend_body;
 	if (!expect(encode_session_resend_list(kServerKey, {1}, resend_body),
-			"staged-close fixture encodes a keyed resend request"))
+			"described-connection fixture encodes a keyed resend request"))
 		return false;
 	const std::vector<uint8_t> resend = nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(resend_body));
 	const inmatch::HandleResult resend_result = inmatch::handle_server_datagram(
 			ctx, peer, resend.data(), resend.size(), 5);
-	if (!expect(ignored(resend_result) && live.receive_inactive_ms == 4321 &&
-				live.seq.retained_outbound_message_count == 1,
-			"a staged close neither refreshes nor answers a keyed resend request"))
-		return false;
-
-	const ClientHello hello = make_title_client_hello(kJo, 99);
-	const std::vector<uint8_t> hello_datagram = nw_encode_outbound(
-			SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
-	const ClientAuth auth = make_retail_client_auth(
-			live.client_ci, live.client_ck, ctx.np_protocol.host_key);
-	const std::vector<uint8_t> auth_datagram = nw_encode_outbound(
-			SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
-	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
-			ctx, peer, hello_datagram.data(), hello_datagram.size(), 6);
-	const inmatch::HandleResult auth_result = inmatch::handle_server_datagram(
-			ctx, peer, auth_datagram.data(), auth_datagram.size(), 7);
-	if (!expect(ignored(hello_result) && ignored(auth_result) &&
-				ctx.np_protocol.connection_list.size() == 1 &&
-				live.host_disconnect_sent && live.receive_inactive_ms == 4321,
-			"a staged close ignores same-endpoint hello/auth retries"))
+	if (!expect(resend_result.immediate_outbound.size() == 1 &&
+				live.receive_inactive_ms == 4321,
+			"a described connection's keyed resend request is answered"))
 		return false;
 
 	const std::vector<uint8_t> wrong_goodbye = nw_encode_outbound(
@@ -816,9 +825,9 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 			client_goodbye_to_bytes(kServerKey + 1));
 	const inmatch::HandleResult wrong_result = inmatch::handle_server_datagram(
 			ctx, peer, wrong_goodbye.data(), wrong_goodbye.size(), 8);
-	if (!expect(ignored(wrong_result) &&
+	if (!expect(nothing_sent(wrong_result) && wrong_result.events.empty() &&
 				ctx.np_protocol.connection_list.size() == 1,
-			"a staged close rejects an unkeyed ClientGoodbye"))
+			"a described connection rejects an unkeyed ClientGoodbye"))
 		return false;
 
 	const std::vector<uint8_t> keyed_goodbye = nw_encode_outbound(
@@ -837,7 +846,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 				close.events.size() == 1 &&
 				close.events[0].kind == inmatch::HostAcceptEvent::Kind::PeerGoodbye &&
 				ctx.np_protocol.connection_list.empty(),
-			"only the correctly keyed ClientGoodbye completes staged teardown"))
+			"only the correctly keyed ClientGoodbye completes the described teardown"))
 		return false;
 	const std::vector<uint8_t> expected_body = server_goodbye_to_bytes(kClientKey, punt);
 	for (const std::vector<uint8_t> &datagram : close.outbound) {
@@ -846,7 +855,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 		if (!expect(nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
 					opcode == SESSION_OPCODE_SERVER_GOODBYE && body == expected_body &&
 					datagram == close.outbound.front(),
-				"the staged teardown's 0x86 burst echoes the punt record keyed by the client CK"))
+				"the described teardown's 0x86 burst echoes the punt record keyed by the client CK"))
 			return false;
 	}
 	return true;
@@ -2150,7 +2159,7 @@ int main() {
 	ok = check_initial_settings_and_close_emit_only_goodbyes() && ok;
 	ok = check_ordinary_settings_traffic_is_undisturbed() && ok;
 	ok = check_host_control_punts_are_ordered_before_the_countdown() && ok;
-	ok = check_staged_host_disconnect_accepts_only_keyed_goodbye() && ok;
+	ok = check_described_connection_keeps_taking_records() && ok;
 	ok = check_host_description_bypasses_saturated_message_capacity() && ok;
 	ok = check_host_pool_overflow_disconnects_with_msgcre() && ok;
 	ok = check_joiner_pool_overflow_disconnects_with_msgcre() && ok;

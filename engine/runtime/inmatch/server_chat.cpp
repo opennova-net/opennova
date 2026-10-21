@@ -247,7 +247,9 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	if (sender_entity == nullptr) return replies;
 	const bool local_slot = sender.link.mode == replication::TransportMode::Loopback;
 	// (state 10/11 || slot+5) && (!spectator || g_RoundOver) [orig: @0x5137D7]
-	if (!(is_in_match(sender) || local_slot)) return replies;
+	// The game state is the net player's (@0x5137AD..0x5137C1), which a description writes no
+	// part of: a described sender's line still goes out (slot_in_match, D-NET-NEW-L1-27).
+	if (!(slot_in_match(sender) || local_slot)) return replies;
 	if (sender.link.spectator) return replies;
 	// The 1000 ms per-sender throttle [orig: slot+100360 @0x5137FF..0x513820].
 	if (sender.reply.chat_last_ms != 0 && now_ms < sender.reply.chat_last_ms + kChatThrottleMs)

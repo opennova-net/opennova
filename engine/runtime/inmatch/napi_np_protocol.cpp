@@ -1630,20 +1630,20 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (opcode >= SESSION_OPCODE_PROTOCOL_MESSAGE && opcode <= kClientProbeOpcode)
 		out.taken = server_connection_exists(ctx, peer);
 
-	// Once the host has staged its terminal connection-description record, the
-	// resident node exists only long enough to receive the matching teardown
-	// acknowledgement. Drop every other leg before it can refresh activity,
-	// mutate sequencing/reassembly, surface gameplay, enqueue a deferred reply,
-	// or replay retained packets. The 0x46 handler below still validates the
-	// receiver-local key, so a delayed goodbye for an older endpoint occupant
-	// cannot tear down this node.
-	if (opcode != SESSION_OPCODE_CLIENT_GOODBYE) {
-		const NapiNPConnection *conn = find_connection(ctx, peer);
-		if (conn != nullptr && conn->host_disconnect_sent) {
-			log_manager_dispatch(ctx, peer, unpacked_len, out);
-			return out;
-		}
-	}
+	// A connection whose description went (a punt, a kick, a join-gate reject) keeps taking
+	// every leg until its teardown: the session packet, the resend list and the ping test the
+	// connection's active byte (+0x28, set at its state-1 entry, cleared at its teardown) and
+	// its drop byte (+0x2D, which nothing sets), never the description's sent byte, so its
+	// in-flight records reach their handlers and stamp its receive. What its handlers answer
+	// it the closed queue drops (close_host_queue); their sends to the others go out
+	// (D-NET-NEW-L1-27).
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - processing disabled @0x626A76 /
+	//  @0x626A84, the active byte @0x626AE0, the drop byte @0x626AEA, the size @0x626AFB;
+	//  CNapiNPConnection_ParseMessages @0x625BC0 - the drop byte @0x625C3D, the stamp @0x625D54,
+	//  the record walk @0x625DF5..0x625F1B; NapiNP_HandleResendList @0x623800 - @0x6238C9 /
+	//  @0x6238D3; Nwu_HandlePing @0x623A70 - @0x623B34 / @0x623B3E; the drop byte's writers
+	//  store zero alone, CNapiNPConnection_Create @0x62ADFD and
+	//  CNapiGameSession_InitTransportConnection @0x4CA00B]
 
 	switch (opcode) {
 	case SESSION_OPCODE_CLIENT_HELLO:
@@ -1681,8 +1681,10 @@ std::vector<ReplayedSessionPacket> replay_ready_session_packets(
 	for (const PeerAddr &peer : walk) {
 		for (;;) {
 			NapiNPConnection *conn = find_connection(ctx, peer);
-			// The punted node replays nothing, as it takes no datagram (handle_server_datagram).
-			if (conn == nullptr || conn->host_disconnect_sent) break;
+			// A described node replays its queued successors as any other (D-NET-NEW-L1-27):
+			// ParseMessages tests the drop byte, not the description [orig:
+			// CNapiNPConnection_ParseMessages @0x625BC0 - @0x625C3D].
+			if (conn == nullptr) break;
 			SessionDeframeAdmission admission;
 			if (!take_ready_session_packet(conn->seq, admission)) break;
 			ReplayedSessionPacket replayed;
