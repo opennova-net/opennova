@@ -317,11 +317,18 @@ namespace {
 // "spectator flags" fixture. Byte 0 is the spectator/death-screen bit and byte
 // 1 is playerSlot+416 (team), the slot's own byte whatever its body's team
 // (D-NET-651), written straight into the retail client's g_LocalTeam loadout
-// selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890
-// - `mov dl, [eax+1A0h]` @0x5108D0; NapiNPClientMsg_SetSpectatorMode @0x4259E0]
-std::vector<uint8_t> build_tag75_player_state(const NapiNPConnection &conn) {
+// selector. The authority's own slot's byte 0 reads the host's pre.mnu SPECTATE
+// word itself (GameConfig::join_spectate), normalized to 1.
+// [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890 - the own
+//  slot's (+5) word @0x5108A1..0x5108A7, the normalization @0x5108B9..0x5108BF,
+//  `mov dl, [eax+1A0h]` @0x5108D0; NapiNPClientMsg_SetSpectatorMode @0x4259E0]
+std::vector<uint8_t> build_tag75_player_state(const GameConfig &config,
+		const NapiNPConnection &conn) {
 	const uint8_t team = conn.assigned_team_valid ? conn.assigned_team : 0;
-	return {static_cast<uint8_t>(conn.link.spectator ? 0x01u : 0x00u), team};
+	const bool spectator = conn.type == NapiNPConnection::kTypeClientSide
+			? static_cast<uint8_t>(config.join_spectate) != 0
+			: conn.link.spectator;
+	return {static_cast<uint8_t>(spectator ? 0x01u : 0x00u), team};
 }
 
 // Build a 0x46 player-sync for a SPECIFIC roster slot (the one the client's C2S 0x22 requests). Finds
@@ -679,7 +686,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::PING: // re-broadcast entity-state request -> 0x75 [orig: handler @0x510ED0]
 				replies.push_back(make_protocol_message(
 						s2c::SPECTATOR_FLAGS,
-						build_tag75_player_state(conn)));
+						build_tag75_player_state(config, conn)));
 				break;
 			case c2s::FILE_CHUNK_REQUEST: // server-info request -> 0x60 chunk [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]
 				dispatch_file_chunk_request(config, msg, inputs, replies);

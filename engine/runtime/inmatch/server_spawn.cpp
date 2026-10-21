@@ -659,7 +659,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	//  @0x51A882]
 	if (round_init)
 		if (world::Entity *pe = world.registry.get(h)) pe->damage_state = 620;
-	if (conn.link.spectator) {
+	// The host's own add takes no spectator leg: its arm attaches the local entity and jumps
+	// past the remote arm's (a host that ticked SPECTATE, D-NET-NEW-L4-10: its own join's
+	// spectator arm and its slot's 0x0A writer apply theirs) [orig: Server_PlayerAdd - the own
+	// arm @0x51CC24..0x51CC60 -> @0x51D314, the remote arm's leg @0x51D0B7..0x51D0ED].
+	if (conn.link.spectator && !is_host_own) {
 		// Retail still creates a player entity for a spectator, but leaves it
 		// hidden and permanently damage-disabled while S2C 0x75 drives the
 		// client's free-fly camera: the spectator leg stores entity+36 |= 1

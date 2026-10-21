@@ -181,6 +181,15 @@ struct GameConfig {
 	//  Server_ValidatePlayerJoinRequest @0x512771..0x512778; the cfg row
 	//  @0x833350]
 	int32_t punt_duplicate_pcids = 0;
+	// The host's own pre.mnu SPECTATE choice, game.cfg's +0x428 word: on a session peer (a
+	// listen host, the single player) the create's round-state init latches the own slot's
+	// spectator byte from it, the create puts it in the own connection's JSR word, and the own
+	// slot's S2C 0x75 flag byte reads it. Zero keeps a bare config a player.
+	// [orig: g_GameConfigState.unknownHostOption_428 (0x2550AE0): Server_InitNewRoundState
+	//  @0x51CA4D..0x51CA6D, CNapiGameSession_BuildAndCreateSession @0x5697FD..0x569817,
+	//  NetPacket_SerializeHostEntityState @0x5108A1..0x5108A7; the pre.mnu commit's store
+	//  UI_PreGameMenuStateMachine @0x568BF0]
+	int32_t join_spectate = 0;
 	// The session's player cap: the cfg max the session create put into 1..65
 	// (session_player_cap), without the dedicated host's own slot. The MP TLV,
 	// the LAN discovery reply, the join gate, the spawn pump and the status

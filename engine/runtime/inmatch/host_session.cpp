@@ -777,6 +777,16 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			// The round init's copy of the host's own profile word into its
 			// slot +372 [orig: Server_InitNewRoundState @0x51ca55..0x51ca61].
 			connection.link.auto_medic_enabled = cfg.local_auto_medic_disabled == 0;
+			// And of the host's own pre.mnu SPECTATE word's low byte into the own slot's
+			// spectator latch (+0x188D7), which the create also puts in the own connection's
+			// JSR word: a host that ticked SPECTATE plays as a spectator (its join's spectator
+			// arm, its 0x0A writer's restamp, its 0x75 byte).
+			// [orig: Server_InitNewRoundState - is_mp_session_peer @0x51CA4D, the byte
+			//  @0x51CA67..0x51CA6D; CNapiGameSession_BuildAndCreateSession - netConfig+0xFC
+			//  @0x5697FD..0x569817]
+			const uint8_t spectate = static_cast<uint8_t>(cfg.config.join_spectate);
+			connection.link.spectator = spectate != 0;
+			connection.join_spectator_request = spectate;
 		}
 	}
 	configure_session_world(owner, cfg);

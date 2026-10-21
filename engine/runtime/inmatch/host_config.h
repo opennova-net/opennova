@@ -154,7 +154,8 @@ std::string transport_socket_setup_text(uint32_t address, uint32_t port);
 // The cfg block's words every session create reads, single player's and a
 // host's alike: mpreset (a nonzero word ends the create, server_session.h),
 // the lineup queue the 0x42 gate admits past the cap and its size, and the
-// join validator's duplicate-PCID word. host_session_settings copies them with
+// join validator's duplicate-PCID word, and the host's own pre.mnu SPECTATE word
+// (GameConfig::join_spectate). host_session_settings copies them with
 // the rest of the block; the game shell's in-process hosts take them alone.
 // [orig: CNapiGameSession_BuildAndCreateSession -- game_settings.use_lineup_queue
 //  @0x569632, lineup_queue_size @0x569646; the mpreset exit @0x4C97E7;

@@ -74,6 +74,10 @@ void apply_session_create_words(GameConfig &config, const gamecfg::GameCfg &cfg)
 	config.use_lineup_queue = cfg.mp_use_lineup_queue;
 	config.lineup_queue_size = cfg.mp_lineup_queue_size;
 	config.punt_duplicate_pcids = cfg.mp_host_punt_same_pcids;
+	// The host's own pre.mnu SPECTATE word, which the create reads for its own slot and
+	// connection [orig: Server_InitNewRoundState @0x51CA67; CNapiGameSession_BuildAndCreateSession
+	//  @0x5697FD].
+	config.join_spectate = cfg.join_spectate;
 	// The per-weapon availability words the first mission's table build reads
 	// [orig: Game_ApplySessionSettingsToGlobals @0x5517C5 (weaponAvailability_5F0)].
 	for (size_t i = 0; i < config.weapon_availability.size() &&

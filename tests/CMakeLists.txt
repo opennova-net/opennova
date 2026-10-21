@@ -5128,6 +5128,11 @@ add_test(NAME npruntime_use_item_dead_drop COMMAND npruntime_use_item_dead_drop_
 add_executable(npruntime_host_slot_body_test npruntime/host_slot_body_test.cpp)
 target_link_libraries(npruntime_host_slot_body_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_host_slot_body COMMAND npruntime_host_slot_body_test)
+# D-NET-NEW-L4-10: the host's own pre.mnu SPECTATE word: the own slot's latch, the own
+# connection's JSR and the own slot's S2C 0x75 byte.
+add_executable(npruntime_host_spectate_test npruntime/host_spectate_test.cpp)
+target_link_libraries(npruntime_host_spectate_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_host_spectate COMMAND npruntime_host_spectate_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same
