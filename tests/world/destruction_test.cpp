@@ -3828,10 +3828,12 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	CHECK(count_effect(w, "Effect_LrgOrdExp", 1) == 1); // the Dead-bone bank
-	// The kz chain blast takes the gated entry, which a peer drops (FOUND V1)
+	// The kz chain blast: the authority passes the gated entry (FOUND V1)
 	// [orig: Entity_QueueKzBlastAtUserPoints @0x493B57 -> WeaponEffect_QueueExplosion
 	//  @0x4E8330, `cmp is_authority` / `jz` @0x4E8333..0x4E8339].
-	CHECK(w.explosions.queue.empty());
+	CHECK(w.explosions.queue.size() == 1);
+	if (w.explosions.queue.size() == 1)
+		CHECK(w.explosions.queue[0].radius_override == 4.0f);
 	CHECK(count_active_pieces(w) == 3); // husk sections 1..3
 	CHECK(b->spawned_piece_mask == 0xEu);
 	CHECK(b->death_motion == DeathMotionMode::Generic);
@@ -3842,7 +3844,7 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	step_item_pool(w, h.pool());
 	destruction_notify_item_damage(w, *b, 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
-	CHECK(w.explosions.queue.empty());
+	CHECK(w.explosions.queue.size() == 1);
 	CHECK(count_active_pieces(w) == 3);
 }
 

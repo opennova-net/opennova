@@ -268,11 +268,14 @@ void test_usegun_attach_presnaps_local_look() {
     body.inf.look_pitch = 0x12345678;
 
     CHECK(w.vehicles.request_attach(player_h, {gun_h, 0, SeatType::Gunner}));
-    const int16_t expected_yaw = 23; // the carried frame: vehicle yaw 35 - UseGun offset 12
     // The unmoved gun's spawn heading ((55 << 16) / 360) << 16 = 656146432 less
     // 0x0400 << 16. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
     const int32_t expected_heading = 589037568;
-    CHECK(mission_yaw_whole_deg(w.registry.get(player_h)->heading) == expected_yaw);
+    // The attach writes no Yaw word: the entity's stays the request's snap, the
+    // gun frame (D-NET-NEW-L6-3). [orig: Entity_AttachToVehicleSlot @0x4946D0 -
+    //  the stores @0x494752..0x494775; Entity_UpdateInfantryPlayerBody - the seat
+    //  carry @0x4B6510..0x4B6575, no +0x10]
+    CHECK(w.registry.get(player_h)->heading == expected_heading);
     CHECK(body.heading == expected_heading);
     CHECK(body.inf.target_heading == expected_heading);
     CHECK(body.inf.look_pitch == 0x12345678); // request pre-snap is yaw-only
