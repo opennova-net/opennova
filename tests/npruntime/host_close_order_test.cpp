@@ -306,8 +306,9 @@ void test_close_sweeps_post_mission_then_resets_each_slot() {
 		return;
 	}
 	const std::string server_scrk = "SERVER-CLOSE-SCRK";
+	constexpr uint32_t kSyncedCk = 0x11223344u;
 	inmatch::NapiNPConnection &synced = host->ctx().np_protocol.connection_list.back();
-	synced.client_ck = 0x11223344u;
+	synced.client_ck = kSyncedCk;
 	synced.server_sk = 0x55667788u;
 	synced.client_scrk = "CLIENT-CLOSE-SCRK";
 	synced.server_scrk = server_scrk;
@@ -333,8 +334,10 @@ void test_close_sweeps_post_mission_then_resets_each_slot() {
 	host->role->close();
 	CHECK(host->kernel->world.script.vars.get_mission(9) == 1); // the sweep ran once
 
+	// The STOP goodbye leads with the joiner's own client CK [orig:
+	// CNapiNPConnection_SendDisconnectPacket @0x61F2A0 - the peer key written @0x61F3AF].
 	const std::vector<uint8_t> stop = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
-			server_goodbye_to_bytes(0, make_disconnect_event(1, 9, 0, 0, "", 0,
+			server_goodbye_to_bytes(kSyncedCk, make_disconnect_event(1, 9, 0, 0, "", 0,
 					"NP.C:SH:STOP")));
 	int resets = 0;
 	std::size_t reset_at = host->socket.sent.size();

@@ -479,7 +479,9 @@ bool check_chat_routing() {
 // A punted sender's records still reach their handlers: the punt fills the connection's
 // description alone, and the chat handler's gate is the net player's game state (10 / 11) or the
 // local byte, neither of which the punt writes, so P1's team line still reaches P3. P1's own
-// queue is closed behind its description: a send to it after the record returns unqueued.
+// queue is closed behind its description: its own copy, like any later send to it, returns
+// unqueued, so P1 is sent nothing past the description (ours drops the own copy at the fan's
+// is_in_match punt leg; the session's flush hands whatever the dispatch returns to P1's queue).
 // (D-NET-NEW-L1-27)
 // [orig: NapiNPServer_HandleChatMessage @0x513760 - the gate @0x5137AD..0x5137C1;
 //  CNapiNPConnection_SendDescriptionOnce @0x629750 - the store @0x629772;
@@ -490,16 +492,16 @@ bool check_punted_sender_chat_relays() {
 	if (!expect(inmatch::Server_StageHostPunt(f.conn(0), 35) && f.conn(0).host_disconnect_sent,
 			"the punt stages P1's description"))
 		return false;
-	f.transports[0].host_send(s2c::CHAT_BROADCAST, {0x01});
 	const std::vector<ProtocolMessage> replies =
 			f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(2, "go"));
+	for (const ProtocolMessage &m : replies) f.transports[0].host_send(m.tag, m.payload);
+	f.transports[0].host_send(s2c::CHAT_BROADCAST, {0x01});
 	const std::vector<ns::Datagram> to_p1 = drain(f.transports[0]);
 	if (!expect(to_p1.size() == 1 && to_p1[0].tag == hightag::DESCRIPTION_PACKET &&
 					to_p1[0].protocol_flags_raw == 0xA0,
-			"P1's queue holds its description alone: a later send returns unqueued"))
+			"P1's queue holds its description alone: its own copy and a later send return unqueued"))
 		return false;
-	return expect(replies.size() == 1 && replies[0].tag == s2c::CHAT_BROADCAST &&
-					count_tag(drain(f.transports[2]), s2c::CHAT_BROADCAST) == 1 &&
+	return expect(count_tag(drain(f.transports[2]), s2c::CHAT_BROADCAST) == 1 &&
 					count_tag(drain(f.transports[1]), s2c::CHAT_BROADCAST) == 0,
 			"a punted sender's team line still reaches its team");
 }
