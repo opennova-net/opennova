@@ -562,9 +562,9 @@ void ClientRuntime::receive(const uint8_t *raw, std::size_t len) {
 	recv_fifo_.emplace_back(raw, raw + len);
 }
 
-std::vector<std::vector<uint8_t>> ClientRuntime::disconnect() {
+std::vector<std::vector<uint8_t>> ClientRuntime::disconnect(std::string_view leave_tag) {
 	if (role_ != Role::Joiner || joiner_ == nullptr) return {};
-	return joiner_->disconnect();
+	return joiner_->disconnect(leave_tag);
 }
 
 bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {

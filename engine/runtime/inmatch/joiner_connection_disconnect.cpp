@@ -168,17 +168,25 @@ const char *JoinerConnection::post_auth_stage_name() const {
 //  @0x6254B4..0x6254D3, the leave callback @0x6254D5..0x6254E7;
 //  CNapiNPConnection_SendDisconnectPacket @0x61f2a0; CNapiNetwork_Init @0x4ca4a0 stores
 //  recv_max_per_tick = 4 @0x4cab60]
-std::vector<std::vector<uint8_t>> JoinerConnection::disconnect() {
+std::vector<std::vector<uint8_t>> JoinerConnection::disconnect(std::string_view leave_tag) {
 	if (goodbye_sent_ || conn_.server_sk == 0) return {};
 	goodbye_sent_ = true;
-	// A leave with nothing latched is the user's: CNapiNetwork_DisconnectActiveConnection
-	// latches {role, DC 2, 0, 0, <caller tag>, 0, ""} — the in-match leave action's tag is
-	// "I.C:CIDEMIS". Every other producer (a host punt or goodbye, the CLNTTMOUT reap, the
-	// MSGCRE overflow) latched its record first, so the burst echoes that.
+	// A leave through CNapiNetwork_DisconnectActiveConnection latches {role, DC 2, 0, 0, <caller
+	// tag>, 0, ""} when nothing is latched: the in-match leave action's "I.C:CIDEMIS", the
+	// session destroy's "N.C:SWWAD[1]:<reason>". Every other producer (a host punt or goodbye,
+	// the CLNTTMOUT reap, the MSGCRE overflow) latched its record first, so the burst echoes
+	// that. The session reset's CNapiNPConnection_Destroy latches nothing: the burst writes the
+	// connection's record as it stands, all zeros when nothing was latched.
 	// [orig: Input_HandleActionBinding case 3 @0x49af38..0x49af42 ->
 	//  CNapiNetwork_DisconnectActiveConnection @0x4C9140 (DC=2 @0x4c91ef, DSTR=message
-	//  @0x4c91ff, latch-if-!valid @0x4c922d..0x4c923e); SendDisconnectPacket @0x61f3b1..0x61f4aa]
-	latch_disconnect_event(make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, ""), 2);
+	//  @0x4c91ff, latch-if-!valid @0x4c922d..0x4c923e); CNapiGameSession_FullDestroy @0x4C96A0
+	//  - the "N.C:SWWAD[1]:%d" sprintf @0x4C96CC, the leave @0x4C96DB;
+	//  CNapiGameSession_ResetActiveSession @0x4C8A70 - CNapiNPConnection_Destroy @0x4C8A93;
+	//  SendDisconnectPacket @0x61F2A0 - the record's fields written unconditionally
+	//  @0x61f3b1..0x61f4aa]
+	if (!leave_tag.empty())
+		latch_disconnect_event(
+				make_disconnect_event(2, 2, 0, 0, std::string(leave_tag), 0, ""), 2);
 	std::vector<uint8_t> datagram = nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_GOODBYE,
 			client_goodbye_to_bytes(conn_.server_sk, last_disconnect_event_));

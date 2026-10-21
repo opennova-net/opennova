@@ -1642,7 +1642,17 @@ bool JoinerRole::reset_to_baseline(SessionError &error) {
 	return true;
 }
 
-// Leaving: the disconnect datagrams ride the shell's send leg.
+// Leaving: the session's teardown at the mission's exit, by its post-mission route, its
+// datagrams riding the shell's send leg. A route that destroys the session leaves through
+// FullDestroy, which latches "N.C:SWWAD[1]:<exit reason>" when nothing is latched (a load
+// wait's ESC or timeout: reason 1); the session reset (reason 2, the "quit" row's exit) bursts
+// the record as it stands, zeros when nothing was latched; the error arms (5, 6, 7, 20 and the
+// disconnect classes 9..19) tear nothing down, so a connection still up sends no goodbye.
+// [orig: PostMenu_RouteMissionExit @0x568460 - reason 2's CNapiGameSession_ResetActiveSession
+//  @0x56846F (-> CNapiNPConnection_Destroy @0x4C8A93), the error arms' loc_5686DA..0x568715 (no
+//  teardown), CNapiGameSession_FullDestroy(g_MissionExitReason) @0x568677..0x568683;
+//  CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C96CC, @0x4C96DB;
+//  Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1 @0x5202A8]
 void JoinerRole::close() {
 	if (kernel_) {
 		kernel_->world.round_sim.guided_inputs_provider = {};
@@ -1651,14 +1661,23 @@ void JoinerRole::close() {
 		kernel_->wire_person_pose = {};
 	}
 	if (!runtime) return;
-	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+	// The shell's abort of a mission-start wait (its ESC, a window's expiry) is the wait's
+	// return, which stores reason 1 ahead of the Post Menu.
+	int32_t reason = runtime->mission_exit_reason();
+	if (reason == kMissionExitNone && runtime->in_mission_start()) reason = kMissionExitQuit;
+	std::vector<std::vector<uint8_t>> burst;
+	if (route_mission_exit(reason, /*novaworld=*/false).destroys_session)
+		burst = runtime->disconnect("N.C:SWWAD[1]:" + std::to_string(reason));
+	else if (reason == kMissionExitReset)
+		burst = runtime->disconnect();
+	for (const std::vector<uint8_t> &dg : burst) send(dg);
 }
 
 void JoinerRole::quit_to_menu() {
 	if (!runtime) return;
-	// [orig: Input_HandleActionBinding @0x49AF26, then the disconnect @0x49AF42]
+	// [orig: Input_HandleActionBinding @0x49AF26, then the disconnect @0x49AF38..0x49AF42]
 	runtime->set_mission_exit_reason(kMissionExitQuit);
-	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+	for (const std::vector<uint8_t> &dg : runtime->disconnect("I.C:CIDEMIS")) send(dg);
 }
 
 void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {

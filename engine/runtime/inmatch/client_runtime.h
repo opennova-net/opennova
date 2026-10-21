@@ -177,7 +177,8 @@ public:
 	// Frame the retail leave burst (0x46 ClientGoodBye x4) for the owner to ship before dropping
 	// the socket. Empty for HostClient, before ServerAuth, or on a repeat call.
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0]
-	std::vector<std::vector<uint8_t>> disconnect();
+	// `leave_tag`: JoinerConnection::disconnect's.
+	std::vector<std::vector<uint8_t>> disconnect(std::string_view leave_tag = {});
 
 	// Queue one reliable C2S 0x1D stance change (0xA9 crouch / 0xAA prone / 0xAC stand) from
 	// the stance key SELECT; it leaves inside the next open send boundary in queue order.
@@ -900,6 +901,7 @@ public:
 	//  Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5, its ESC
 	//  test @0x5262A2..0x5262AD]
 	bool in_game_loop() const { return joiner_ && joiner_->in_game_loop(); }
+	bool in_mission_start() const { return joiner_ && joiner_->in_mission_start(); }
 	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }

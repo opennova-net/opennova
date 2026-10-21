@@ -2835,6 +2835,55 @@ bool run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it() {
 	return ok;
 }
 
+// L2-s8 row 2 iii: the joiner's teardown at the mission's exit leaves by its post-mission
+// route: a route that destroys the session latches "N.C:SWWAD[1]:<exit reason>" (FullDestroy's
+// leave), the session reset (reason 2, the "quit" row's) bursts the record as it stands (zeros:
+// nothing latched), and an error arm (reason 5) tears nothing down. Input action 3's own leave
+// latched "I.C:CIDEMIS" first (remote_admin's GOTO MENUSTATE pin).
+// [orig: PostMenu_RouteMissionExit @0x568460 - CNapiGameSession_ResetActiveSession @0x56846F,
+//  loc_5686DA (no teardown), CNapiGameSession_FullDestroy(g_MissionExitReason) @0x568683;
+//  CNapiGameSession_FullDestroy @0x4C96A0 - the sprintf @0x4C96CC, the leave @0x4C96DB;
+//  SendDisconnectPacket @0x61F2A0 - the record's fields @0x61F3B1..0x61F4AA]
+bool run_the_teardown_goodbye_follows_the_exit_route() {
+	struct Case {
+		int32_t reason;
+		bool burst;
+		uint32_t dc;
+		const char *dstr;
+	};
+	const Case cases[] = {{0, true, 2, "N.C:SWWAD[1]:0"}, {1, true, 2, "N.C:SWWAD[1]:1"},
+			{2, true, 0, ""}, {5, false, 0, ""}};
+	bool ok = true;
+	for (const Case &c : cases) {
+		Harness h;
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input);
+		h.role.runtime->set_mission_exit_reason(c.reason);
+		h.socket.datagrams.clear();
+		h.role.close();
+		std::vector<DisconnectEvent> goodbyes;
+		for (const std::vector<uint8_t> &datagram : h.socket.datagrams) {
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			DisconnectEvent event;
+			if (nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+					opcode == SESSION_OPCODE_CLIENT_GOODBYE && body.size() >= 4 &&
+					parse_disconnect_event(body.data() + 4, body.size() - 4, event))
+				goodbyes.push_back(event);
+		}
+		ok &= expect(goodbyes.size() == (c.burst ? 4u : 0u),
+				c.burst ? "teardown: the route's teardown writes the four-datagram burst"
+				        : "teardown: an error arm tears nothing down");
+		if (!goodbyes.empty())
+			ok &= expect(goodbyes[0].dc == c.dc && goodbyes[0].dstr == c.dstr &&
+							goodbyes[0].dp1 == 0 && goodbyes[0].dp2 == 0 && goodbyes[0].dpc == 0,
+					"teardown: the burst carries the route's record");
+	}
+	return ok;
+}
+
 // D-NET-562's pre-round leg: a client runs no entity update while its pre-round timer
 // (the 0x0A's phase-0 byte) is nonzero, so a Health of 0 a tail stores in the pre-round
 // latches no dead bit; the first frame whose tail reads the timer 0 runs the body tick
@@ -3496,6 +3545,7 @@ int main() {
 	ok &= run_a_stance_select_and_the_look_take_the_rows_head();
 	ok &= run_a_console_deploy_pick_ends_the_drain();
 	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
+	ok &= run_the_teardown_goodbye_follows_the_exit_route();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();

@@ -372,7 +372,12 @@ public:
 	// cs_dir0.recv_max_per_tick (JO template: 4 — CNapiNetwork_Init @0x4ca4a0 stores @0x4cab60);
 	// the leave record Input_HandleActionBinding case 3 @0x49af38..0x49af42 ->
 	// CNapiNetwork_DisconnectActiveConnection @0x4C9140 @0x4c91ef..0x4c923e]
-	std::vector<std::vector<uint8_t>> disconnect();
+	// `leave_tag` is the leave's own record tag, latched {2, DC 2, 0, 0, tag, 0, ""} when nothing
+	// is latched yet (CNapiNetwork_DisconnectActiveConnection's): input action 3's "I.C:CIDEMIS",
+	// the session destroy's "N.C:SWWAD[1]:<exit reason>". Empty = a teardown that latches
+	// nothing (the session reset's CNapiNPConnection_Destroy): the burst carries the connection's
+	// record as it stands, zeros when nothing was latched.
+	std::vector<std::vector<uint8_t>> disconnect(std::string_view leave_tag = {});
 
 	// Build a C2S 0x0C player uplink datagram: 5-byte sub-header (handle = H, item_type_id = type,
 	// sub_op = 0x0A extended) + the 43-byte extended body, wrapped as one 0x43 SESSION packet.
@@ -900,6 +905,15 @@ public:
 	//  on g_ClientWorldStateLoaded, cleared @0x5243be and set only by NapiNPClientMsg_0x00F
 	//  @0x42e2cd]
 	bool in_game_loop() const { return in_session() && initial_admission_complete_; }
+	// Inside Game_StartMission's waits, from the game-start flag's server-info leg to the final
+	// wait's S2C 0x0F: an abort there (a wait's ESC or expiry) is exit reason 1.
+	// [orig: Game_StartMission @0x524360 - the sync-tail wait's returns 2 / 3 / 4 store 1
+	//  @0x524EAF, NapiClient_WaitForGameStart's @0x524E87; Client_CheckDisconnectOrEscDuringLoad
+	//  @0x520270 - the ESC's 1 @0x5202A8]
+	bool in_mission_start() const {
+		return !in_game_loop() && post_auth_stage_ >= PostAuthStage::AwaitServerInfo &&
+				post_auth_stage_ <= PostAuthStage::AwaitDeployment;
+	}
 	// The host's session-variable list parsed from the reassembled S2C 0x60
 	// server-info transfer (npwire/session_vars.h): the server name and
 	// mission title the Tab board's header reads, and the EXP_FANFARE u16 (lo

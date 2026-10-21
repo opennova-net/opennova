@@ -1396,8 +1396,9 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 			"game-start emits retail frame 17's grouped pre-world admission request")) {
 		return false;
 	}
-	if (!expect(joiner.mission_known(),
-			"full-player-info advertises the mission")) {
+	if (!expect(joiner.mission_known() && joiner.in_mission_start(),
+			"full-player-info advertises the mission; the game-start flag enters the mission "
+			"start's waits (the server-info leg)")) {
 		return false;
 	}
 
@@ -1535,7 +1536,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 				client_messages.size() == 1 &&
 				client_messages[0].tag == 0x0A &&
 				client_messages[0].payload.empty() &&
-				joiner.preload_ready() && !joiner.mission_start_released(),
+				joiner.preload_ready() && !joiner.mission_start_released() &&
+				joiner.in_mission_start(),
 			"the terminal 0x11 is answered by the empty 0x0A alone, before any load")) {
 		return false;
 	}
