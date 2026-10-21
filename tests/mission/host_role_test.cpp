@@ -12,6 +12,7 @@
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 #include <runtime/inmatch/local_role.h>
+#include <runtime/controls/controls.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -927,6 +928,17 @@ int main() {
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
 		CHECK(!kernel.local.has_local_player());
+
+		// Its HUD rows pass the dispatcher's head with no player of ours: the non-peer
+		// authority's operand is the constant 2, read without the local entity, so help
+		// (row 106, flags 0x05000800), lockgame (84) and playerlist_alt (63) pass and a
+		// bit-0 row (dotsize, 38, 0x0C000C01) drops by the operand.
+		// [orig: Input_HandleActionBinding @0x49AD40 - the 2 @0x49AD52..0x49AD74; bit 0
+		//  with the operand @0x49AD95..0x49ADA0]
+		CHECK(role.action_head_admits(controls::action_code(106)));
+		CHECK(role.action_head_admits(controls::action_code(84)));
+		CHECK(role.action_head_admits(controls::action_code(63)));
+		CHECK(!role.action_head_admits(controls::action_code(38)));
 	}
 
     // The shared deployment transaction resets local view state immediately,

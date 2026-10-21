@@ -194,6 +194,10 @@ bool PlayerInputRouter::begin_input_frame(const Ref<Simulation> &p_sim, int64_t 
 				(p_sim->session_role() == Simulation::ROLE_DEDICATED_HOST ||
 						p_sim->local_player_dead()));
 	poll_talk_rows(p_sim);
+	// The HUD rows too poll with or without a local player: a Serve Only host's
+	// drain dispatches lockgame, help and the status page's score list (the
+	// role's head admits them, Role::action_head_admits).
+	poll_hud_toggles(p_sim);
 	return spectating;
 }
 
@@ -261,7 +265,6 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	}
 	p_input->set_look_delta(active && captured ? p_scripted_look : Vector2());
 	const Ref<Simulation> action_sim = sim();
-	poll_hud_toggles(action_sim);
 	opennova::controls::PlayerActionPoll gate;
 	gate.active = active;
 	gate.captured = captured;

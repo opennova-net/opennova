@@ -481,6 +481,32 @@ func set_frame_stats(board: FrameStats) -> void:
 	_frame_stats = board
 
 
+## A dedicated host has no player of ours, and its frame is the status page
+## (engine hud_server_status.h; a dedicated host's session starts on that
+## view). Its HUD rows still dispatch: the router polls them in every input
+## frame with or without a player and the role's head admits them (a Serve
+## Only host's lockgame, help and the status page's score list;
+## Role::action_head_admits carries the witness). This frame applies them and
+## draws the page with the quit dialog and the chat line over it.
+func _tick_dedicated_host(sim: Simulation) -> void:
+	ensure_game_hud()
+	if _game_hud == null:
+		return
+	_game_hud.set_frame_clocks(sim.get_logic_tick(), sim.get_main_frame_counter(),
+			sim.get_session_frame_counter(), sim.get_hud_frame_counter())
+	_game_hud.set_chat_input(_chat, sim.is_mp_session())
+	if _player_presenter != null:
+		for toggle_events in _player_presenter.take_hud_toggle_events():
+			if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
+				sim.request_hud_map_close()
+			_apply_toggle_events(toggle_events)
+	var status_gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	_game_hud.set_quit_dialog(_toggles.is_quit_dialog_open(), sim.is_mp_session(),
+			_authority(sim), status_gametext)
+	_game_hud.set_server_status_page(_toggles.is_server_status_view(),
+			_toggles.is_server_status_score_list_open(), status_gametext, sim)
+
+
 ## Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
 ## original rebuilding its HUD info struct each frame. Call once per frame while the
 ## player is in-world (the shells gate on their own state).
@@ -490,6 +516,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 	if _world == null or not _world.is_loaded():
 		return
 	var sim: Simulation = _world.get_sim()
+	if sim != null and not sim.has_local_player() \
+			and sim.session_role() == Simulation.ROLE_DEDICATED_HOST:
+		_tick_dedicated_host(sim)
+		return
 	if sim == null or not sim.has_local_player():
 		if not _warned_no_player:
 			_warned_no_player = true

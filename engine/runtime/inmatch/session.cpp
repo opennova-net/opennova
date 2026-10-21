@@ -181,9 +181,17 @@ bool Role::action_head_admits(int32_t code) {
 	const bool joiner = kind() == RoleKind::Joiner;
 	// The head reads the local entity, which a joiner has from its mission start's
 	// Player_InitPlayer whether or not L has spawned (D-NET-562) [orig:
-	// Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC].
+	// Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC]. A dedicated host
+	// in a session takes its operand as the constant 2 without reading it, so its
+	// rows pass the head with no player of ours (a Serve Only host's lockgame, help
+	// and the status page's score list) [orig: Input_HandleActionBinding @0x49AD40 -
+	// the non-peer authority's 2 @0x49AD52..0x49AD74; the entity's Flags & 2 only on
+	// the other arm @0x49AD76..0x49AD7E].
+	const world::World &w = kernel.world;
+	const bool dedicated_operand =
+			w.rules.mp_session && w.rules.logic_authority && !w.rules.mp_session_peer;
 	if (joiner ? runtime == nullptr || !runtime->local_entity_bound()
-	           : !kernel.world.cached.local_player.valid())
+	           : !dedicated_operand && !w.cached.local_player.valid())
 		return false;
 	// The flags word of the binding record the code names (the catalog row whose code it
 	// is); a code no row carries reads the zero record (D-NET-710, V-L2-s8).
