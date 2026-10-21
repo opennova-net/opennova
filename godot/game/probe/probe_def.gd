@@ -413,11 +413,11 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, false, 120_000),
 		ProbeDef.make("retail_parity_visual",
-				"The D-HUD-11 / D-ITEM-16 / D-ITEM-17 annotated stages through the public "
+				"The D-HUD-11 / D-ITEM-16 annotated stages through the public "
 				+ "runtime/presentation seams: attach (the attach-label gate), debris "
-				+ "(collision-triangle section debris), glass (glass userpoint shatter).",
+				+ "(collision-triangle section debris).",
 				STAGE + "retail_parity_visual_probe.gd", {
-					"mode": { "type": "string", "enum": ["attach", "debris", "glass"] },
+					"mode": { "type": "string", "enum": ["attach", "debris"] },
 					"output_dir": { "type": "string", "default": "" },
 				}, ["mode"], true, false, 120_000),
 		ProbeDef.make("loading_screen_stage",

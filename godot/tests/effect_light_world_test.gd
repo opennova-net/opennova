@@ -297,7 +297,7 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup_passes(null, null, null, null, null, director, null, null)
-	var drain := DestructionDrain.make([], [], 0, 0, 0,
+	var drain := DestructionDrain.make([], [], 0, 0,
 			PackedVector3Array([Vector3(2.0, 0.0, 0.0)]), PackedFloat32Array([6.0]))
 	presenter.present_destruction_drained(drain, [])
 	assert_eq(director.get_report().live, 1,

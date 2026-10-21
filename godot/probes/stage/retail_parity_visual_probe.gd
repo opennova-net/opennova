@@ -1,13 +1,13 @@
 extends GameProbe
 
 ## retail_parity_visual: reproducible visual evidence for the D-HUD-11 /
-## D-ITEM-16 / D-ITEM-17 closure. Each mode consumes the same public
+## D-ITEM-16 closure. Each mode consumes the same public
 ## runtime/presentation seam as the game on a probe stage, then annotates the
-## result so non-pixel gameplay rules remain legible. The debris/glass stages
-## are deterministic probe fixtures, not retail mission captures; their
+## result so non-pixel gameplay rules remain legible. The debris stage
+## is a deterministic probe fixture, not a retail mission capture; its
 ## particle families are loaded from the mounted catalog (the launch's root).
 ## Modes: attach (the attach-label gate), debris (collision-triangle section
-## debris), glass (glass userpoint shatter). Needs a window.
+## debris). Needs a window.
 
 const STAGE_SIZE := Vector2i(960, 540)
 const TICK_DT := 1.0 / 62.5
@@ -62,8 +62,6 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			built = _build_attach_stage()
 		"debris":
 			built = _build_debris_stage()
-		"glass":
-			built = _build_glass_stage()
 		_:
 			return ProbeVerdict.failed("unknown mode %s" % mode)
 	if not built:
@@ -244,38 +242,6 @@ func _build_debris_stage() -> bool:
 	return true
 
 
-func _build_glass_stage() -> bool:
-	if not _build_particle_stage("D-ITEM-17  •  GLASS USERPOINT SHATTER",
-			"Exact stock model mapping, authored-radius gate, break-once state, and ordered effect rolls",
-			Color("66dcff")):
-		return false
-	_add_box("Facade", Vector3(11.8, 5.2, 0.35),
-			Vector3(0.0, 2.65, -2.5), Color("343e49"), 0.88, 0.08)
-	_add_window_frame(Vector3(-2.7, 2.7, -2.28), true)
-	_add_window_frame(Vector3(2.7, 2.7, -2.28), false)
-	var point := Vector3(-2.7, 2.7, -2.02)
-	var direction := Vector3(0.0, 0.0, 1.0)
-	var effects := [
-		DestructionEffectEvent.make("Effect_BldGlassExp", point, 0, direction),
-		DestructionEffectEvent.make("Effect_BldPaperExp", point, 0, direction),
-		DestructionEffectEvent.make("Effect_BldDustExp", point, 0, direction),
-	]
-	var presenter := EntityPresenter.new()
-	_scene.add_child(presenter)
-	presenter.setup_passes(null, null, null, null, _fx, null, null, null)
-	presenter.present_destruction_drained(DestructionDrain.make([], effects, 0, 1), [])
-	_add_marker(point + Vector3(0, 0, 0.2), Color("66dcff"),
-			"eurhr2  →  GLASS\nBROKEN ONCE", 0.26)
-	_add_marker(Vector3(2.7, 2.7, -2.02), Color("94a9bd"),
-			"outside authored r=8\nSTAYS INTACT", 0.22)
-	_add_legend([
-		{"color": Color("66dcff"), "text": "first exact case-insensitive userpoint, full Euler transform"},
-		{"color": Color("ffbe62"), "text": "seed 0x200  →  Glass / Paper / Dust; Fire roll misses"},
-		{"color": Color("94a9bd"), "text": "queue override r=30 never widens the authored r=8 glass gate"},
-	], "Second identical blast emits nothing and consumes no PRNG draws")
-	return true
-
-
 func _build_particle_stage(title: String, subtitle: String, accent: Color) -> bool:
 	var root := _ctx.resource_root()
 	if root == null:
@@ -341,37 +307,6 @@ func _add_triangle_grid() -> void:
 	lines.mesh = mesh
 	lines.material_override = _unshaded_material(Color("718398"))
 	_scene.add_child(lines)
-
-
-func _add_window_frame(center: Vector3, shattered: bool) -> void:
-	var frame_color := Color("697785")
-	_add_box("WindowTop", Vector3(3.25, 0.17, 0.22),
-			center + Vector3(0, 1.35, 0.0), frame_color, 0.45, 0.55)
-	_add_box("WindowBottom", Vector3(3.25, 0.17, 0.22),
-			center + Vector3(0, -1.35, 0.0), frame_color, 0.45, 0.55)
-	_add_box("WindowLeft", Vector3(0.17, 2.85, 0.22),
-			center + Vector3(-1.55, 0, 0.0), frame_color, 0.45, 0.55)
-	_add_box("WindowRight", Vector3(0.17, 2.85, 0.22),
-			center + Vector3(1.55, 0, 0.0), frame_color, 0.45, 0.55)
-	if not shattered:
-		_add_box("IntactGlass", Vector3(2.95, 2.52, 0.06), center,
-				Color(0.20, 0.62, 0.78, 0.47), 0.12, 0.05, true)
-		return
-	for index in range(9):
-		var fragment := MeshInstance3D.new()
-		var mesh := BoxMesh.new()
-		mesh.size = Vector3(0.18 + (index % 3) * 0.08,
-				0.08 + (index % 2) * 0.07, 0.035)
-		fragment.mesh = mesh
-		@warning_ignore("integer_division")
-		fragment.position = center + Vector3(
-				-1.0 + (index % 5) * 0.48,
-				-1.0 + (index / 5) * 0.52,
-				0.35 + (index % 3) * 0.12)
-		fragment.rotation_degrees = Vector3(index * 13.0, index * 17.0,
-				index * 29.0)
-		fragment.material_override = _unshaded_material(Color("83e7ff"))
-		_scene.add_child(fragment)
 
 
 func _add_legend(rows: Array, footer_text: String) -> void:

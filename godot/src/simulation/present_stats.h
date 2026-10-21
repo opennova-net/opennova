@@ -90,7 +90,7 @@ protected:
 // Typed diagnostic counters of the destruction present pass
 // (DestructionPresenter): husk swaps presented, swaps with no husk graft
 // (the intact graphic keeps standing), the peak live piece count, the
-// resolved debris triangles and glass points, effects and sounds played,
+// resolved debris triangles, effects and sounds played,
 // and the wreck-fire crackle rolls that fired.
 class DestructionPresentStats : public RefCounted {
 	GDCLASS(DestructionPresentStats, RefCounted)

@@ -11,8 +11,7 @@ namespace opennova::crt {
 // death roll) own the session-seeded `World::crt_rand` (io/crt_rand.h),
 // while this thread-local owner carries the ported RENDER/EFFECTS consumers
 // — scorch texture rolls, material/PANM waveform noise, the GRM gaze jitter
-// (CScarDecal_Update @0x57FA50, gated on the display counter) and the
-// Effect_RollSurfaceEffectProbability glass-reseed target, and the PLAYER_INFO
+// (CScarDecal_Update @0x57FA50, gated on the display counter), and the PLAYER_INFO
 // preview's clock reseed and initial-yaw draw (PlayerInfo_InitPreviewModel
 // @0x560128 / @0x5601a2, menu/player_info_avatars.h) — so their draw and
 // reseed order stays shared among themselves in retail order.

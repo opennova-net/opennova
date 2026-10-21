@@ -41,8 +41,8 @@ class Simulation;
 // destruction_present_pass.gd, ADR 0043 d9), an owned member of
 // EntityPresenter: presents the sim's item destruction on the viewing peer —
 // the husk model swap on destroyed items, the death-piece debris (trail
-// effects riding the sim's piece pool), resolved section-triangle debris and
-// glass userpoint effects, the death/fire/other wreck effect families with
+// effects riding the sim's piece pool), resolved section-triangle debris,
+// the death/fire/other wreck effect families with
 // the random fire crackle, and the destruction sounds. Drains
 // Simulation.drain_destruction_events() + get_death_pieces() once per
 // present, the fire pass precedent. Joiners run it too: their world raises
@@ -71,7 +71,7 @@ class Simulation;
 //
 // Remaining stand-ins (tracked in the §24 record + D-ITEM ledger rows): effect
 // anchors ride the entity origin, not the husk Dead/Fire/Other user points.
-// Section debris and glass already arrive as resolved transient effect rows
+// Section debris already arrives as resolved transient effect rows
 // from the simulation.
 //
 // The husk render pick, the presentation identity key and the settle tilt
