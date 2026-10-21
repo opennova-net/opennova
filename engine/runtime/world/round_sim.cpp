@@ -2315,7 +2315,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // AmmoDef_ProcessImpactEffect @0x40a24e..0x40a264 passes the entity,
         // the hit record and the kind (ammo word +0x76) to
         // Impact_SpawnGlassEffectsOrScar @0x5CF1B0 -> Scar_AddEntry @0x5CC830;
-        // the GLASS userpoint leg's residual is recorded in world/impact_scar.h].
+        // the GLASS userpoint leg runs first inside scar_add_entry, world/impact_scar.h].
         if (impact_target != nullptr && !(entity_impact_handler_leg && !handler_has_def)) {
             const AmmoTableEntry *scar_ammo = world.tables.ammo.by_index(impact_ammo_index);
             scar_add_entry(world, collision, *impact_target,

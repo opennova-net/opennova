@@ -135,6 +135,28 @@ static uint8_t userpoint_index_by_name(const Threedi3di3 &model, const char *nam
 	return found >= 0 && found < 255 ? static_cast<uint8_t>(found + 1) : 0;
 }
 
+// A loaded model's userpoint records as the runtime model keeps them (every
+// record, raw 16.16 position and direction, the name cut at its NUL)
+// [orig: the model's +0xBC count and +0xC0 48-byte records the GLASS leg walks,
+//  Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEB43..0x5CEB49].
+static void model_user_points(const Threedi3di3 &model, std::vector<world::ModelUserPoint> &out) {
+	out.clear();
+	if (model.user_points == nullptr) return;
+	out.reserve(model.user_point_count);
+	for (size_t i = 0; i < model.user_point_count; ++i) {
+		const ThreediUserPoint &p = model.user_points[i];
+		world::ModelUserPoint point;
+		point.name = std::string(threedi_user_point_name(p));
+		point.pos_q16[0] = p.x;
+		point.pos_q16[1] = p.y;
+		point.pos_q16[2] = p.z;
+		point.dir_q16[0] = p.rot_x;
+		point.dir_q16[1] = p.rot_y;
+		point.dir_q16[2] = p.rot_z;
+		out.push_back(std::move(point));
+	}
+}
+
 static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
 		const Threedi3di3 &model, world::Entity &e) {
 	static constexpr int kSlotDefBase[4] = {3, 0, 9, 6};
@@ -322,6 +344,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					break;
 				}
 				traits->graphic_name = model->header.name;
+				model_user_points(*model, traits->graphic_userpoints);
 				traits->model_radius_q16 = world::model_bound_radius_q16_from_3di(*model);
 				// GPM+24/+28 remain zero in the retail 3DI3 load path. These
 				// legacy fields are distinct from CMDL's XY/Z radii.
@@ -584,6 +607,12 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			if (world::ItemDeathTraits *t =
 						world.tables.item_death_traits.get_mutable(e->item_id)) {
 				t->primary_husk_loaded = first_husk_m3 != nullptr;
+				// The primary husk's name and userpoints, the GLASS leg's model
+				// under Flags & 4 [orig: Terrain_SpawnSurfaceEffectsAtUserPoints
+				//  @0x5CEABC..0x5CEAD5 (entity+0x34)].
+				t->husk_name = first_husk_m3 != nullptr ? std::string(first_husk_m3->header.name) : std::string();
+				t->husk_userpoints.clear();
+				if (first_husk_m3 != nullptr) model_user_points(*first_husk_m3, t->husk_userpoints);
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
 				// The PIECE model — huskFinal first [orig: @ 0x4934af

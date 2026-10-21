@@ -158,6 +158,18 @@ struct RegionalItemSound {
     int32_t range_ticks = 0;
 };
 
+// One userpoint of a loaded model as the runtime model keeps it: the 48-byte
+// record's raw 16.16 position @0, direction @12 and name @32, model axes
+// [orig: the model's userpoint array +0xC0, count +0xBC, read by
+//  Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEA90 (@0x5CEB43..0x5CEB49,
+//  the name @0x5CEBBE, the position @0x5CEBD1..0x5CEBE8, the direction
+//  @0x5CECCD..0x5CECE5)].
+struct ModelUserPoint {
+    std::string name;
+    int32_t pos_q16[3] = {};
+    int32_t dir_q16[3] = {};
+};
+
 struct ItemDeathTraits {
     // The event/death callback row (item_death_class_from_tag on the def's
     // ai_function) — destruction_notify_item_damage dispatches on it.
@@ -184,6 +196,12 @@ struct ItemDeathTraits {
     int32_t model_min_q16[3] = {};
     int32_t model_max_q16[3] = {};
     std::string graphic_name;
+    // The bullet GLASS leg's model words (impact_scar.h): the graphic model's
+    // userpoints (entity+0x30) and the primary husk's GHDR name and userpoints
+    // (entity+0x34), which the leg walks instead under Flags & 4.
+    std::vector<ModelUserPoint> graphic_userpoints;
+    std::string husk_name;
+    std::vector<ModelUserPoint> husk_userpoints;
     std::string particlefx;
     bool has_particlefx_point = false;
     int32_t particlefx_point_q16[3] = {};

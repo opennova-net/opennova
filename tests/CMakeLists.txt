@@ -5269,6 +5269,11 @@ add_executable(mission_start_tick_test mission/mission_start_tick_test.cpp)
 target_link_libraries(mission_start_tick_test PRIVATE opennova_test_rig)
 target_include_directories(mission_start_tick_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_start_tick COMMAND mission_start_tick_test)
+# D-ITEM-6: the bullet GLASS leg: the surface-material rows' userpoints ahead of the ring scar,
+# the first-hit rule, and the shared stream's words and the effects CRT's reseeds per hit.
+add_executable(glass_leg_test world/glass_leg_test.cpp)
+target_link_libraries(glass_leg_test PRIVATE opennova_runtime)
+add_test(NAME glass_leg COMMAND glass_leg_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the
