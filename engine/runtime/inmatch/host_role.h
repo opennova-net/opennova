@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -258,6 +259,10 @@ private:
     uint64_t local_round_reset_seen_ = 0;
     // The own client's 0x0F / local 0x50 track legs consumed (replica_track.h).
     ReplicaTrackSeen track_seen_;
+    // The host's own connection as the last mission start left it, beside the kernel's
+    // baseline (captured at the same point, ahead of the start's own 0x0B): a rewind
+    // restores both (reset_to_baseline).
+    std::optional<NapiNPConnection> own_connection_at_baseline_;
 };
 
 } // namespace opennova::inmatch
