@@ -657,6 +657,25 @@ bool vehicle_at_spawn_anchor(const World &world, const Entity &veh);
 // ai_waypoints.cpp.
 int count_mounted_entities(const World &world, const Entity &veh);
 
+// Which pool-1 neighbours the avoid-brake walk considers, by their ItemTypeIndex
+// (entity+0x1C). The ground forms skip index 0 only; the boat and aircraft forms
+// load 1 into ecx for the walk's decrement and compare the index against that
+// register, so they consider ONLY neighbours of ItemTypeIndex 1 (the second
+// items.def row).
+// [orig: ground `cmp dword ptr [edi+1Ch],0; jz` — Entity_UpdateVehiclePhysics
+//  @0x48BDD9, Entity_UpdateTankVehiclePhysics @0x4899A2,
+//  Entity_UpdateLightVehiclePhysics @0x484F7F, Vehicle_ProcessSelectorZeroGround
+//  @0x46E100 (@0x46EE70); boat/air `mov ecx,1; sub [count],ecx ... cmp [edi+1Ch],ecx;
+//  jnz` — Entity_UpdateWatercraftPhysics @0x48E5AA/@0x48E5C5,
+//  Vehicle_ProcessSelectorZeroBoat @0x46FA00 (@0x470B08/@0x470B23),
+//  Entity_UpdateAircraftPhysics @0x4919D1/@0x4919E6]
+enum class AvoidBrakeWalk { SkipIndexZero, OnlyIndexOne };
+
+// The pool-1 avoid brake the AI drive legs share: the command speed after every
+// admitted neighbour ahead has braked it. Body in ai_waypoints.cpp.
+int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading, int32_t cmd_speed,
+		AvoidBrakeWalk walk);
+
 // A PLAYER driver whose head is under the water plane hands the boat to the
 // AI leg [orig: Entity_UpdateWatercraftPhysics @0x48DFD3..0x48DFDF —
 // `occupant->Position.z + CameraOffset.z <= g_EnvWaterHeightFixed`]. Body in

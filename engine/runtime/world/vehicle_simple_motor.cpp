@@ -205,6 +205,65 @@ int32_t boat_step(
 }
 } // namespace
 
+// The selector-zero ground mover's AI leg, in place in the mover after its parked
+// and player tests: instruction for instruction the cveh core's leg
+// (AiSystem::vehicle_ai_drive). The brain's target word seeds +0x21C and its
+// out-speed +0x220, capped at playerSpeed; the def's crew cap bleeds an undercrewed
+// hull to criticalHp; a spent turn budget (+0x80) refreshes the waypoint and is
+// re-derived from the divisor read ahead of the refresh; the bearing delta,
+// clamped to the budget, damps the speed on a sharp leg and steers +0x210 to
+// Yaw + delta + delta/8; the pool-1 avoid walk brakes +0x220; and a body still
+// walking over to board holds the hull. The player leg's ramp (+0x224) is written
+// only by that hold.
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100: 22 -> 16 @0x46ECB1..0x46ECB7;
+//  the seeds @0x46ECBE..0x46ECD0, the def+0x8E8 cap @0x46ECD6..0x46ECE3; the crew cap
+//  @0x46ECE9..0x46ED28 (Entity_IsBoneInProximity called @0x46ECF8,
+//  Entity_CountMountedEntities @0x46ED08); the refresh @0x46ED35..0x46ED76 (the
+//  divisor @0x46ED47..0x46ED54, AIWaypoint_UpdateTarget called @0x46ED57, the idiv
+//  and shl 5 @0x46ED71..0x46ED73); the clamp @0x46ED7C..0x46ED96; the damp
+//  @0x46ED98..0x46EE10 (def+0x928 << 6 @0x46ED9B..0x46EDA6, 0x15555540 / 0x2AAAAA80,
+//  the 0xC000 product @0x46EDD0..0x46EDE0); the steer @0x46EE16..0x46EE20; the avoid
+//  walk @0x46EE26..0x46F005; the hold @0x46F00A..0x46F09C]
+void VehicleSystem::simple_ground_ai_leg(Entity &e, const VehicleTraits &t, AiBrain &b) {
+	auto &m = e.veh;
+	if (b.f[AiBrain::kCurState] == 22)
+		b.f[AiBrain::kCurState] = 16;
+	b.f[135] = b.f[AiBrain::kTargetRef];
+	m.cmd_speed = b.f[AiBrain::kOutSpeed];
+	if (m.cmd_speed > t.player_speed)
+		m.cmd_speed = t.player_speed;
+	world_.ai.apply_min_ai_crew_clamp(world_, e, t);
+	if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
+		const int32_t divisor = io::bam_add(io::bam_sar(b.f[AiBrain::kStoredKeyTime], 15), 32);
+		const auto position = e.position.words();
+		ai_waypoint_update_target(b, position.data(), world_.ai.nav);
+		const int32_t error = io::bam_abs(io::bam_sub(m.yaw_bam, b.f[AiBrain::kWpBearing]));
+		b.f[AiBrain::kAnimFlag] = bam_shl_wrap(error / divisor, 5);
+	}
+	const int32_t budget = b.f[AiBrain::kAnimFlag];
+	int32_t delta = io::bam_sub(b.f[AiBrain::kWpBearing], m.yaw_bam);
+	if (delta > budget)
+		delta = budget;
+	if (delta < io::bam_sub(0, budget))
+		delta = io::bam_sub(0, budget);
+	if (bam_shl_wrap(t.turn_rate2, 6) < budget) {
+		const int32_t turn = io::bam_abs(delta);
+		if (turn > 0x15555540)
+			m.cmd_speed = retail_q16_mul_rhu(m.cmd_speed, 0xC000);
+		if (turn > 0x2AAAAA80)
+			m.cmd_speed = retail_q16_mul_rhu(m.cmd_speed, 0xC000);
+	}
+	m.steer_target_bam = io::bam_add(io::bam_add(m.yaw_bam, delta), io::bam_sar(delta, 3));
+	m.cmd_speed = vehicle_avoid_brake(
+			world_, e, m.yaw_bam, m.cmd_speed, AvoidBrakeWalk::SkipIndexZero);
+	if (world_.ai.vehicle_waits_for_boarders(world_, e)) {
+		m.steer_target_bam = m.yaw_bam;
+		m.cmd_speed = 0;
+		m.steer_ramp_bam = 0;
+		e.flags &= ~0x80u;
+	}
+}
+
 // Selector-zero callbacks, reached by cveh/ctrn/catv/cbot dispatchers.
 // The amphibian selects the entire dry/wet motor before staging input.
 // [orig: Vehicle_ProcessSelectorZeroGround @0x46E100;
@@ -286,11 +345,27 @@ void VehicleSystem::tick_simple_motor(
 		// [orig: Vehicle_ProcessSelectorZeroGround @0x46E9FC..0x46EA11 -> the parked
 		//  arm @0x46F09E..0x46F0C7; Vehicle_ProcessSelectorZeroBoat
 		//  @0x4704F0..0x470502 -> @0x470D4E]
+		// The ground twin's block runs in place, its brain's words and all (the cveh
+		// staging ahead of the mover does not serve it); the boat twin still takes
+		// the cbot staging's command. Retail's ground mover reaches this block only
+		// with a brain (its head jumps a brainless hull to the matrix tail); ours'
+		// brainless rigs keep the command registers alone.
+		// [orig: Vehicle_ProcessSelectorZeroGround: the brain test @0x46E165 ->
+		//  @0x46F9B2; the PlayerControl gate @0x46E9D4..0x46E9DB, the authority /
+		//  local-occupant test @0x46E9E1..0x46E9F6]
+		AiEntity *ground_brain = boat ? nullptr : world_.ai.for_handle(e.handle);
 		if (controller == nullptr || (!boat && vehicle_hull_parked(e))) {
+			// [orig: the ground parked arm @0x46F09E..0x46F0C7: +0x210 = Yaw, +0x220 =
+			//  +0x224 = 0, AI_CheckVehicleStuckState called @0x46F0B8, Flags &= ~0x80,
+			//  state 22]
 			m.steer_target_bam = m.yaw_bam;
 			m.cmd_speed = 0;
 			m.steer_ramp_bam = 0;
+			if (ground_brain != nullptr)
+				world_.ai.check_vehicle_stuck(world_, e);
 			e.flags &= ~0x80u;
+			if (ground_brain != nullptr)
+				ground_brain->brain.f[AiBrain::kCurState] = 22;
 		} else if (controller->handle.pool() == 0 && controller->player_class != 0 &&
 				!watercraft_driver_submerged(world_, *controller)) {
 			// A player driver whose eye (CameraOffset.z + Z) sits at or below the
@@ -298,8 +373,17 @@ void VehicleSystem::tick_simple_motor(
 			// not only the boat [orig: Vehicle_ProcessSelectorZeroGround @0x46E100
 			// (site @0x46EA2E..0x46EA3A `add eax,[ecx+0Ch]; cmp eax,
 			// g_EnvWaterHeightFixed; jle loc_46ECB1` — the AI waypoint leg)].
+			// The player leg parks the brain at state 22 [orig: @0x46EA52].
+			if (ground_brain != nullptr)
+				ground_brain->brain.f[AiBrain::kCurState] = 22;
 			stage_player_vehicle_input(world_, e, *controller, t);
 			m.stuck_ticks = 0;
+		} else if (!boat) {
+			// The occupied hull rests its stuck count ahead of the player test
+			// [orig: `mov dword ptr [esi+148h], 0` @0x46EA17].
+			m.stuck_ticks = 0;
+			if (ground_brain != nullptr)
+				simple_ground_ai_leg(e, t, ground_brain->brain);
 		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
 			m.steer_target_bam = ai_cmd->steer_target_bam;
 			m.cmd_speed = ai_cmd->cmd_speed;

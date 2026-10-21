@@ -174,7 +174,16 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
             // [esi+24h], 2; jnz` @0x48B810..0x48B814; ctan @0x4893E9..0x4893ED; cbik
             // @0x484936..0x48493A; cbot @0x48DDFA..0x48DDFE]
             const bool hull_dead = ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0;
-            if (traits->player_control && !hull_dead) {
+            // The selector-zero GROUND mover runs its own occupant block, parked, player
+            // and AI legs, in place after its head (VehicleSystem::tick_simple_motor);
+            // only the boat twin takes a staged command. [orig: Entity_DispatchPhysics_cveh
+            //  @0x48EFC7 / Entity_DispatchPhysicsUpdate @0x48F053 ->
+            //  Vehicle_ProcessSelectorZeroGround @0x46E100 (@0x46E9D4..0x46F0D0)]
+            const bool simple_ground = traits->physics == 0 &&
+                    traits->family != VehicleFamily::Tank &&
+                    traits->family != VehicleFamily::Bike &&
+                    traits->family != VehicleFamily::Watercraft;
+            if (traits->player_control && !hull_dead && !simple_ground) {
                 Entity *ctrl = world.vehicles.resolve_controller(*veh);
                 // The parked test (an empty seat, or the hull's Flags 0x10000002 /
                 // the boat's dead bit) precedes the player test, and the occupant's

@@ -223,32 +223,19 @@ static int32_t avoid_sin22(int32_t bam) {
     return static_cast<int32_t>(std::sin(a) * io::kQ22One);
 }
 
-// Which pool-1 neighbours the avoid-brake walk considers, by their ItemTypeIndex
-// (entity+0x1C). The ground forms skip index 0 only; the boat and aircraft forms
-// load 1 into ecx for the walk's decrement and compare the index against that
-// register, so they consider ONLY neighbours of ItemTypeIndex 1 (the second
-// items.def row).
-// [orig: ground `cmp dword ptr [edi+1Ch],0; jz` — Entity_UpdateVehiclePhysics
-//  @0x48BDD9, Entity_UpdateTankVehiclePhysics @0x4899A2,
-//  Entity_UpdateLightVehiclePhysics @0x484F7F, Entity_ProcessInfantryPhysics
-//  @0x46EE70; boat/air `mov ecx,1; sub [count],ecx ... cmp [edi+1Ch],ecx; jnz`
-//  — Entity_UpdateWatercraftPhysics @0x48E5AA/@0x48E5C5,
-//  Entity_ProcessAirVehiclePhysics @0x470B08/@0x470B23,
-//  Entity_UpdateAircraftPhysics @0x4919D1/@0x4919E6]
-enum class AvoidBrakeWalk { SkipIndexZero, OnlyIndexOne };
-
-// The pool-1 avoid BRAKE, shared by the ground, cbot and aircraft AI legs: the
-// sites are instruction-identical (footprint ellipse, dead-ahead cone,
-// id/frame-keyed factor) apart from the walk gate above [orig: ground
-// @0x48bd8f-0x48bf26; cbot @0x48E577..0x48E756; Entity_UpdateAircraftPhysics
+// The pool-1 avoid BRAKE (see ai.h), shared by the ground, selector-zero, cbot and
+// aircraft AI legs: the sites are instruction-identical (footprint ellipse, dead-ahead
+// cone, id/frame-keyed factor) apart from the walk gate (AvoidBrakeWalk, ai.h)
+// [orig: ground @0x48bd8f-0x48bf26; Vehicle_ProcessSelectorZeroGround @0x46E100
+// (@0x46EE26..0x46F005); cbot @0x48E577..0x48E756; Entity_UpdateAircraftPhysics
 // @0x4919A4..0x491B67]:
 // for every admitted pool-1 neighbor whose heading-aware footprint ellipse
 // overlaps ours (+1.0 u) AND that sits within ~30 deg of dead ahead, the
 // command speed multiplies by an id/frame-keyed factor in [0.25, 0.75) per
 // tick — vehicles brake behind obstacles; deflecting off them through the hull
 // contact was never the retail path-follow behavior.
-static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
-                                   int32_t cmd_speed, AvoidBrakeWalk walk) {
+int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
+                            int32_t cmd_speed, AvoidBrakeWalk walk) {
     const int32_t self_bound = veh.bound_radius.q16;
     const int32_t sx = veh.position.x.q16;
     const int32_t sy = veh.position.y.q16;
@@ -319,8 +306,9 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         // [orig: @0x48bf17-0x48bf26; the counter reads in
         //  Entity_UpdateVehiclePhysics @0x48BF26, Entity_UpdateTankVehiclePhysics
         //  @0x489AEF, Entity_UpdateLightVehiclePhysics @0x4850CC,
-        //  Entity_ProcessInfantryPhysics @0x46EFC1, Entity_UpdateWatercraftPhysics
-        //  @0x48E712, Entity_ProcessAirVehiclePhysics @0x470C70 and
+        //  Vehicle_ProcessSelectorZeroGround @0x46E100 (@0x46EFC1),
+        //  Entity_UpdateWatercraftPhysics @0x48E712, Vehicle_ProcessSelectorZeroBoat
+        //  @0x46FA00 (@0x470C70) and
         //  Entity_UpdateAircraftPhysics @0x491B2D].
         const int32_t f = static_cast<int32_t>(
                 ((static_cast<uint32_t>(veh.net_id) +
@@ -967,10 +955,11 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // where it stands instead of leaving the moment its first passenger climbs
     // in. Retail runs this AFTER the flight computation, overriding it, so the
     // override lives at the tail here too.
-    // [orig: Entity_ProcessAirVehiclePhysics, the Entity_CanEnterVehicle block
-    //  (kong line 94590) — work_heading = entity->Yaw, aiComp[136]/[137] = 0,
-    //  Flags &= ~0x80; identical twins in the watercraft (@0x48E75B), light,
-    //  infantry and mounted-infantry movers]
+    // [orig: Entity_UpdateAircraftPhysics @0x490310, the Entity_CanEnterVehicle
+    //  block (the call @0x491B7A) — work_heading = entity->Yaw, aiComp[136]/[137]
+    //  = 0, Flags &= ~0x80; identical twins in the watercraft (@0x48E75B), light
+    //  (@0x48511D), selector-zero ground (@0x46F010) and boat (@0x470CC1) and
+    //  mounted-infantry (@0x487A40) movers]
     if (vehicle_waits_for_boarders(world, veh)) {
         m.steer_target_bam = m.yaw_bam;
         m.cmd_speed = 0;

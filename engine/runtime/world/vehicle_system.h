@@ -21,6 +21,7 @@
 namespace opennova::world {
 
 class World;
+struct AiBrain;
 struct WeaponTableEntry;
 
 class VehicleSystem {
@@ -394,6 +395,12 @@ public:
 	void tick_health(Entity &veh, const VehicleTraits &traits);
 	void tick_simple_motor(
 			Entity &, const VehicleTraits &, const VehicleDriveCmd *, bool prediction);
+	// The selector-zero ground mover's AI leg, run in place in the mover over the
+	// brain's words (a client's are zero): it writes the command registers
+	// (steer_target_bam, cmd_speed; steer_ramp_bam only in the boarders' hold) and
+	// the brain's state, +0x21C and turn-budget words.
+	// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100 (@0x46ECB1..0x46F0D0)]
+	void simple_ground_ai_leg(Entity &e, const VehicleTraits &traits, AiBrain &brain);
 	void slew_turret(Entity &veh, int32_t step);
 	// ActionDef+52 rocks the tank carrying an occupied emplacement, against
 	// the direction of the gun's point for the fired slot (`fired` def, its

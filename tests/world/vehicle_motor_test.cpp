@@ -3016,11 +3016,85 @@ void test_selector_zero_park_reads_the_hull_not_the_occupant() {
     }
 }
 
+// The selector-zero ground mover runs its AI leg in place, after its head: the
+// health cadence regenerates the hull first, then the leg's crew cap bleeds the
+// undercrewed hull to criticalHp (a cap staged ahead of the head would have put
+// the hull in the critical band, whose cadence drains it the same pass: 285). The
+// leg hands state 22 back to 16, seeds +0x21C from the target word and the speed
+// from the out-speed capped at playerSpeed, refreshes the spent turn budget
+// ((|Yaw - bearing| / ((+0x8C >> 15) + 32)) << 5), clamps the bearing delta to it,
+// damps the speed 0.75x per threshold the delta crosses and steers to
+// Yaw + delta + delta/8. A driverless hull takes the parked arm: the stuck count,
+// state 22, the heading held and a zero command.
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100: the health cadence
+//  @0x46E1C4..0x46E201 ahead of the AI leg @0x46ECB1..0x46F0D0 (the seeds
+//  @0x46ECBE..0x46ECE3, the cap @0x46ED18..0x46ED28, the refresh @0x46ED35..0x46ED76,
+//  the clamp @0x46ED7C..0x46ED96, the damp @0x46ED98..0x46EE10, the steer
+//  @0x46EE16..0x46EE20); the parked arm @0x46F09E..0x46F0C7; AIWaypoint_UpdateTarget
+//  @0x457380 (the type-3 bearing @0x45743A)]
+void test_selector_zero_ground_ai_leg_runs_in_the_mover() {
+	for (const bool driven : {true, false}) {
+		auto r = std::make_unique<Rig>();
+		if (driven) {
+			r->mount();
+			r->drv().player_class = 0; // an NPC driver: the AI leg
+		}
+		VehicleTraits t = buggy_traits();
+		t.physics = 0;
+		t.min_ai = 2; // the driver has no def: no counted crew, so the cap bleeds the hull
+		t.critical_hp = 300;
+		t.critical_drain = 15;
+		t.non_critical_regen = 10;
+		r->w.vehicles.traits.set(r->veh().item_id, t);
+		r->w.ai.is_authority = true;
+		AiBrain &b = r->w.ai.at(r->w.ai.attach(r->veh_h))->brain;
+		b.f[AiBrain::kCurState] = 22;
+		b.f[AiBrain::kTargetRef] = 0x1234;
+		b.f[AiBrain::kOutSpeed] = t.player_speed + 1000;
+		b.f[AiBrain::kAnimFlag] = 0; // a spent turn budget: the leg refreshes it
+		b.f[AiBrain::kStoredKeyTime] = 0; // divisor (0 >> 15) + 32 = 32
+		b.f[AiBrain::kWpType] = 3; // a literal target 100 u along +X: bearing 0
+		b.f[AiBrain::kWpCoordX] = 200 << 16;
+		b.f[AiBrain::kWpCoordY] = 200 << 16;
+		b.f[AiBrain::kWpCoordZ] = 10 << 16;
+		Entity &veh = r->veh();
+		CHECK(veh.heading == 0x40000000); // the placed yaw 0: BAM 90 degrees
+		veh.veh.spawn_pose_valid = true; // spawned at the origin, far from its anchor
+		veh.health = 2000;
+		r->w.logic_tick = 32; // (32 + 36 * 200) & 63 == 0: the health cadence's tick
+		r->w.vehicles.update_motor(veh, true);
+		if (!driven) {
+			CHECK(b.f[AiBrain::kCurState] == 22);
+			CHECK(veh.veh.stuck_ticks == 1);
+			CHECK(veh.veh.steer_target_bam == 0x40000000);
+			CHECK(veh.veh.cmd_speed == 0);
+			CHECK(veh.health == 2010); // the cadence's regen; no crew cap while parked
+			continue;
+		}
+		CHECK(veh.health == 300);
+		CHECK(b.f[AiBrain::kCurState] == 16);
+		CHECK(b.f[135] == 0x1234);
+		// (0x40000000 / 32) << 5: the budget is the whole quarter turn, so the delta
+		// 0 - 0x40000000 stands unclamped.
+		CHECK(b.f[AiBrain::kAnimFlag] == 0x40000000);
+		// 41 * 192426 << 6 = 504925824 sits below the budget, and |delta| crosses
+		// both 0x15555540 and 0x2AAAAA80: 27542 -> (27542 * 0xC000 + 0x8000) >> 16 =
+		// 20657 -> (20657 * 0xC000 + 0x8000) >> 16 = 15493.
+		CHECK(veh.veh.cmd_speed == 15493);
+		CHECK(b.f[136] == 15493);
+		// 0x40000000 - 0x40000000 + (-0x40000000 >> 3)
+		CHECK(veh.veh.steer_target_bam == -0x08000000);
+		CHECK(b.f[AiBrain::kWorkHeading] == -0x08000000);
+		CHECK(veh.veh.stuck_ticks == 0);
+	}
+}
+
 int main() {
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
     test_a_dead_aircraft_bails_ahead_of_its_ai_block();
     test_selector_zero_park_reads_the_hull_not_the_occupant();
+    test_selector_zero_ground_ai_leg_runs_in_the_mover();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();
