@@ -1,5 +1,6 @@
 #include "player/player_input_router.h"
 
+#include "player/key_lock_device.h"
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
 
@@ -16,69 +17,19 @@
 
 #include <cmath>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
 using namespace godot;
 
 namespace {
 
-// Retail's keyboard-lock device (D-NET-563; engine controls::PlayerActionPoll::scroll_lock_on,
-// PlayerActionFrame::scroll_lock_off and controls::kVkNumLock carry the witnesses): a lock
-// key's keyboard-state byte, nonzero while its toggle is on or the key is held, and the
-// forced state, a synthetic press and release of the key (VK and scan alike; the release
-// with KEYEVENTF_KEYUP and time 10) when that byte disagrees with the state wanted. A
-// platform without a keyboard state reads every lock off and forces none.
-bool key_lock_device_on(int p_vk) {
-#ifdef _WIN32
-	BYTE state[256] = {};
-	return ::GetKeyboardState(state) != 0 && state[p_vk] != 0;
-#else
-	(void)p_vk;
-	return false;
-#endif
-}
-
-// True when it sent the press and release.
-bool key_lock_device_set(int p_vk, bool p_on) {
-#ifdef _WIN32
-	BYTE state[256] = {};
-	if (::GetKeyboardState(state) == 0 || (state[p_vk] != 0) == p_on) return false;
-	INPUT inputs[2] = {};
-	for (INPUT &input : inputs) {
-		input.type = INPUT_KEYBOARD;
-		input.ki.wVk = static_cast<WORD>(p_vk);
-		input.ki.wScan = static_cast<WORD>(p_vk);
-	}
-	inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-	inputs[1].ki.time = 10;
-	return ::SendInput(2, inputs, sizeof(INPUT)) != 0;
-#else
-	(void)p_vk;
-	(void)p_on;
-	return false;
-#endif
-}
-
+// Retail's auto-run word and its turn-off over the keyboard-lock device (D-NET-563; engine
+// controls::PlayerActionPoll::scroll_lock_on and PlayerActionFrame::scroll_lock_off carry
+// the witness).
 bool scroll_lock_device_on() {
-	return key_lock_device_on(opennova::controls::kVkScroll);
+	return key_lock_device::on(opennova::controls::kVkScroll);
 }
 
 bool scroll_lock_device_turn_off() {
-	return key_lock_device_set(opennova::controls::kVkScroll, false);
-}
-
-// The process's keyboard-lock legs run where a keyboard is: never under the headless display.
-bool keyboard_device_present() {
-	DisplayServer *display = DisplayServer::get_singleton();
-	return display != nullptr && display->get_name() != "headless";
+	return key_lock_device::set(opennova::controls::kVkScroll, false);
 }
 
 // The Num Lock state the process start found, which its exit puts back; the exit runs only
@@ -164,24 +115,23 @@ void PlayerInputRouter::setup(Node *p_world, LocalPlayerPresenter *p_presenter,
 // witness).
 void PlayerInputRouter::start_process_num_lock() {
 	// The command line's init: Num Lock's state saved and the lock forced on.
-	if (!keyboard_device_present()) return;
 	s_key_locks_started = true;
-	s_saved_num_lock = key_lock_device_on(opennova::controls::kVkNumLock);
-	key_lock_device_set(opennova::controls::kVkNumLock, true);
+	s_saved_num_lock = key_lock_device::on(opennova::controls::kVkNumLock);
+	key_lock_device::set(opennova::controls::kVkNumLock, true);
 }
 
 void PlayerInputRouter::start_process_scroll_lock() {
 	// The subsystems' init: Scroll Lock off, ahead of any input frame.
-	if (keyboard_device_present()) key_lock_device_set(opennova::controls::kVkScroll, false);
+	key_lock_device::set(opennova::controls::kVkScroll, false);
 }
 
 void PlayerInputRouter::exit_process_key_locks() {
 	// The subsystems' shutdown: Scroll Lock off, Num Lock as the start found it, Caps Lock off.
-	if (!s_key_locks_started || !keyboard_device_present()) return;
+	if (!s_key_locks_started) return;
 	s_key_locks_started = false;
-	key_lock_device_set(opennova::controls::kVkScroll, false);
-	key_lock_device_set(opennova::controls::kVkNumLock, s_saved_num_lock);
-	key_lock_device_set(opennova::controls::kVkCapital, false);
+	key_lock_device::set(opennova::controls::kVkScroll, false);
+	key_lock_device::set(opennova::controls::kVkNumLock, s_saved_num_lock);
+	key_lock_device::set(opennova::controls::kVkCapital, false);
 }
 
 void PlayerInputRouter::owe_scroll_lock_turn_off() {

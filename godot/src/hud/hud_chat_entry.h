@@ -31,6 +31,7 @@ public:
 		EVENT_CANCELLED = opennova::hud::chat_entry_event::kCancelled,
 		EVENT_EDITED = opennova::hud::chat_entry_event::kEdited,
 		EVENT_FLOOD_ECHO = opennova::hud::chat_entry_event::kFloodEcho,
+		EVENT_CAPS_LOCK_RELEASE = opennova::hud::chat_entry_event::kCapsLockRelease,
 	};
 	enum Row {
 		ROW_COMMAND = opennova::hud::kChatRowCommand, // the first command-entry row
@@ -67,6 +68,9 @@ protected:
 private:
 	opennova::hud::ChatEntry entry_;
 	int last_events_ = 0;
+	// The device side effects the event bits name: the denied tone through the sim, the
+	// Caps Lock release through the keyboard-lock device.
+	void apply_device_events(Simulation *p_sim) const;
 };
 
 } // namespace godot

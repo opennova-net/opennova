@@ -125,6 +125,17 @@ inline constexpr uint32_t kSubmitted = 0x4;   // Enter ran the sender
 inline constexpr uint32_t kCancelled = 0x8;   // Esc closed the capture
 inline constexpr uint32_t kEdited = 0x10;     // the line text changed
 inline constexpr uint32_t kFloodEcho = 0x20;  // the sender flooded: echo the line
+// The row released Caps Lock: a talk row past its arm's gates (ahead of the debounce, so a
+// debounced press releases it too) and the command rows, never the host-only pair. The
+// embedder's keyboard device turns the toggle off when it is on (a VK_CAPITAL press and
+// release, the release KEYEVENTF_KEYUP with time 10, then the window's messages).
+// [orig: Input_HandleActionBinding @0x49AD40 - the talk arms' join @0x49B9CF (the team arm
+//  past its team-game test @0x49B9BF, the squad's past its NovaWorld test @0x49BA20, the
+//  crew's past its vehicle test @0x49BA42, the others' @0x49BA25), the call @0x49B9D1 ahead
+//  of the debounce @0x49B9D6; the command arm, cases 1 and 20, @0x49AEF7..0x49AEF9;
+//  Input_ReleaseCapsLockIfActive @0x7611A0 (the VK_CAPITAL byte @0x7611CA, SendInput
+//  @0x76121B, the pump @0x761224)]
+inline constexpr uint32_t kCapsLockRelease = 0x40;
 } // namespace chat_entry_event
 
 // The talk rows the embedder samples, in catalog order (the first-match key

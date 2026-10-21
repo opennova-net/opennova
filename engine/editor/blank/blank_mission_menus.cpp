@@ -118,7 +118,7 @@ std::string confirm_exit(const char *wrapper) {
 
 // cmap.mnu: the command map, CMAP, loaded as a mission starts [orig: Game_StartMission @ 0x526316,
 // @ 0x526332] and opened by the commander key, action 221 (V) [orig: Input_HandleActionBinding @
-// 0x49b91b]. With a menu up that key is gated off, so OK, its close [orig: CRenderManager_FreeLoadScreen
+// 0x49b91b]. With a menu up that key is gated off, so OK, its close [orig: CMap_OnOk
 // @ 0x547980, registered @ 0x54adb9: Game_CloseInGameScreens and g_CmapScreenOpen = 0], takes Esc
 // and the commander key both: the key that opened the map closes it.
 bool make_blank_cmap_menu(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
