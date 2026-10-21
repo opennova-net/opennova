@@ -5687,6 +5687,10 @@ bool run_mission_exit_routes() {
 			!expect(!route(1, false).keep_session, "a LAN session has nothing to keep") ||
 			!expect(!route(2, true).keep_session && route(2, true).error == E::None,
 					"a reset drops it without a text") ||
+			// [orig: PostMenu_RouteMissionExit @0x568460 - UI_NavHistoryPush(0) @0x56849A]
+			!expect(route(2, false).exits_game && !route(2, false).destroys_session &&
+							!route(1, false).exits_game && !route(4, false).exits_game,
+					"the reset's arm ends the game, the only arm that does") ||
 			!expect(route(5, true).error == E::CdTrouble && route(6, true).error == E::System &&
 							route(7, true).error == E::Pirate &&
 							route(20, true).error == E::BadMission && !route(20, true).keep_session,

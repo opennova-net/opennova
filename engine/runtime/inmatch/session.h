@@ -250,6 +250,9 @@ public:
 	// A stance select past request_stance's head: the key's own refusals, then the
 	// C2S 0x1D on the role's client connection (JoinerRole, HostRole); a role with
 	// no client sends nothing. 0 stand / 1 crouch / 2 prone. False = nothing sent.
+	// The process's g_MissionExitReason as this role keeps it: the world's (the bare
+	// authority's), the listen host's session context, a joiner's runtime.
+	virtual void store_mission_exit(int32_t reason);
 	virtual bool send_stance_request(int stance) {
 		(void)stance;
 		return false;

@@ -15,6 +15,14 @@ inline constexpr int32_t kMissionExitNone = 0;
 inline constexpr int32_t kMissionExitQuit = 1;
 // The session reset [orig: Input_HandleActionBinding case 4 @0x49af4c].
 inline constexpr int32_t kMissionExitReset = 2;
+// Input action 3's Exit Mission tone, the interface trigger set it plays between its exit
+// reason and its disconnect: the trigger-set resolver's PU_EXIT_CONFIRM row. The console's
+// code 3 raises it on the world's interface channel, which a session frame the exit ends
+// still plays ahead of the frame's stop (the shell's session leg).
+// [orig: Input_HandleActionBinding @0x49AD40 - case 3: the handle dword_24E09C4 @0x49AF1F,
+//  Sound_PlayInterfaceTriggerSet @0x527BE0 (the call @0x49AF30); the resolver row's name
+//  @0x82FF44, its handle slot @0x82FF64]
+inline constexpr const char *kExitMissionSoundset = "PU_EXIT_CONFIRM";
 // A host's round linger expiring into the map cycle [orig: Server_TickUpdate @0x51db63].
 inline constexpr int32_t kMissionExitMapCycle = 3;
 // A joiner's round linger expiring [orig: Client_ProcessNetworkFrame @0x42c3d3]; out of a
@@ -98,6 +106,14 @@ struct PostMissionRoute {
 	//  authority's rotation end @0x56864F; reason 2's ResetActiveSession @0x56846F and the error
 	//  arms' loc_5686DA (@0x5686DA..0x5686F9) skip it]
 	bool destroys_session = false;
+	// Reason 2's arm ends the game: the session reset, the three modes cleared, then a null
+	// mode pushed, which ends the main loop, whose return saves game.cfg and shuts the
+	// subsystems down (the process exits). The arm returns 1, so the Post Menu is never shown.
+	// [orig: PostMenu_RouteMissionExit @0x568460 - UI_NavHistoryPush(0) @0x56849A, `mov eax, 1`
+	//  @0x5684A2; UI_NavHistoryPush @0x52BB30 - the null mode @0x52BB3B; Game_MainLoop @0x52B630
+	//  (no next mode ends the loop); Game_Run @0x4A7FB0 - Game_SaveConfig @0x4A7FFF,
+	//  Game_ShutdownSubsystems @0x4A8004]
+	bool exits_game = false;
 };
 
 // The gameerr.bin key an error text resolves through (empty for None / DisconnectReason).
@@ -123,7 +139,7 @@ inline const char *post_mission_error_key(PostMissionError error) {
 inline PostMissionRoute route_mission_exit(int32_t reason, bool novaworld) {
 	PostMissionRoute route;
 	switch (reason) {
-	case kMissionExitReset: return route;
+	case kMissionExitReset: route.exits_game = true; return route;
 	case kMissionExitCdTrouble: route.error = PostMissionError::CdTrouble; return route;
 	case kMissionExitSystem: route.error = PostMissionError::System; return route;
 	case kMissionExitPirate: route.error = PostMissionError::Pirate; return route;

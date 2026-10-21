@@ -6,6 +6,7 @@
 #include "network/connection_error.h"
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/mission_exit.h> // kExitMissionSoundset (input action 3's tone)
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
 #include <runtime/inmatch/loaded_model_list.h> // the C2S 0x3D page (D-NET-527)
 #include <runtime/mission/runtime_boot.h>      // boot_files_from_index
@@ -513,6 +514,16 @@ void Simulation::install_console_seams() {
 	runtime_->set_console_action_sink([this](int32_t p_code, int32_t p_param, int32_t, int32_t) {
 		switch (p_code) {
 		case 3:
+			// The action's Exit Mission tone, then its exit: the tone rides the world's
+			// interface sound channel, which the session leg's terminal frame still plays
+			// (GameWorld::leg_session; engine inmatch/mission_exit.h kExitMissionSoundset
+			// carries the witness).
+			if (kernel_) {
+				opennova::world::ScriptSoundEvent tone;
+				tone.kind = opennova::world::ScriptSoundEvent::Kind::Interface;
+				tone.name = opennova::inmatch::kExitMissionSoundset;
+				kernel_->world.out.script_sounds.push_back(std::move(tone));
+			}
 			input_action_exit();
 			break;
 		case 6:

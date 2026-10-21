@@ -154,6 +154,9 @@ public:
 	//  CNapiGameSession_FullDestroy(-1) @0x56A3E3; CNapiGameSession_FullDestroy @0x4C96A0 -
 	//  the sprintf @0x4C96CC, the leave @0x4C96DB]
 	void cancel_join();
+	void store_mission_exit(int32_t reason) override {
+		if (runtime) runtime->set_mission_exit_reason(reason);
+	}
 	ClientRuntime *client_runtime() override { return runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
 	// The frame statistics the C2S 0x0C's two stat bytes carry; the frame rate

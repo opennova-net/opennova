@@ -1730,6 +1730,13 @@ func mcp_open_armory() -> Error:
 func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void:
 	var route: PostMissionRoute = _world.post_mission_route(exit_reason) if _world != null \
 			else PostMissionRoute.new()
+	if route.exits_game:
+		# The "quit" row's exit (reason 2): the mission comes down (its session's reset sends
+		# the record as it stands), and the game ends as the main loop's does, game.cfg saved
+		# (engine inmatch/mission_exit.h PostMissionRoute::exits_game carries the witness).
+		_teardown_world(false)
+		request_quit()
+		return
 	var novaworld_client: NovaWorldClient = null
 	if route.keep_session:
 		novaworld_client = _world.release_novaworld_client() as NovaWorldClient

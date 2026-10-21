@@ -863,6 +863,7 @@ Ref<PostMissionRoute> SessionDrive::post_mission_route(int p_reason) const {
 	Ref<PostMissionRoute> out;
 	out.instantiate();
 	out->set_keep_session(route.keep_session);
+	out->set_exits_game(route.exits_game);
 	out->set_error(route.error != opennova::inmatch::PostMissionError::None);
 	out->set_error_key(String(opennova::inmatch::post_mission_error_key(route.error)));
 	if (route.error == opennova::inmatch::PostMissionError::DisconnectReason && sim.is_valid()) {

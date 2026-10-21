@@ -21,6 +21,7 @@
 #include <runtime/inmatch/client_replica_present.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/mission_exit.h>
 #include <runtime/replication/connection_fan.h>
 #include <formats/def/def.h>
 #include <formats/mission/mission.h>
@@ -2875,6 +2876,46 @@ bool run_a_console_action_dispatches_by_code() {
 			"the reset drops 202");
 }
 
+// D-NET-710 (L2-s8 FOUND 1): the console's "quit" (row 78, code 4, flags 0x04000000: no head
+// gate) stores exit reason 2 alone, on the joiner's runtime: the session leaves the mission
+// (the shell's Post Menu route ends the game), nothing is sent at the action, and the
+// teardown's session reset bursts the record as it stands (zeros: nothing latched).
+// [orig: Input_HandleActionBinding @0x49AD40 - case 4 @0x49AF4C; PostMenu_RouteMissionExit
+//  @0x568460 - CNapiGameSession_ResetActiveSession @0x56846F, UI_NavHistoryPush(0) @0x56849A]
+bool run_the_console_quit_stores_the_reset_exit() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.kernel->world.rules.mp_session = true;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	std::vector<int32_t> sunk;
+	h.role.runtime->set_console_action_sink(
+			[&sunk](int32_t code, int32_t, int32_t, int32_t) { sunk.push_back(code); });
+	(void)h.role.runtime->queue_console_action(4, 0, 0, 0);
+	h.socket.datagrams.clear();
+	h.role.apply_input(h.input);
+	inmatch::SessionError lost;
+	bool ok = expect(h.role.runtime->mission_exit_reason() == inmatch::kMissionExitReset &&
+					sunk.empty() && h.socket.datagrams.empty() && h.role.session_lost(lost),
+			"console quit: code 4 stores exit reason 2 on the runtime and sends nothing");
+	h.role.close();
+	std::size_t goodbyes = 0;
+	for (const std::vector<uint8_t> &datagram : h.socket.datagrams) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		DisconnectEvent event;
+		if (nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_GOODBYE && body.size() >= 4 &&
+				parse_disconnect_event(body.data() + 4, body.size() - 4, event) &&
+				event.dc == 0 && event.dstr.empty())
+			++goodbyes;
+	}
+	ok &= expect(goodbyes == 4, "console quit: the session reset bursts the unlatched record");
+	return ok;
+}
+
 // D-NET-710 (V-L2-s7): the stance rows 9..11 carry flags 0x0C000C01, so the dispatcher's head
 // drops a stance select in the pre-round, under the deploy overlay and at round over, a
 // console-queued one (the role's own arm now) and a key's alike; with none held the select
@@ -3740,6 +3781,7 @@ int main() {
 	ok &= run_a_pre_l_reset_takes_the_device_legs();
 	ok &= run_a_console_action_dispatches_by_code();
 	ok &= run_a_stance_select_and_the_look_take_the_rows_head();
+	ok &= run_the_console_quit_stores_the_reset_exit();
 	ok &= run_a_console_deploy_pick_ends_the_drain();
 	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
 	ok &= run_the_teardown_goodbye_follows_the_exit_route();

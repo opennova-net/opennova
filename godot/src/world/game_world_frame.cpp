@@ -395,6 +395,17 @@ GameWorld::LegResult GameWorld::leg_session(FrameContext &r_ctx) {
 		perf_runtime_us_ = now_us() - runtime_start;
 	}
 	if (r_ctx.outcome.is_valid() && r_ctx.outcome->is_terminal()) {
+		// The frame stops here, ahead of the audio leg: the sounds its ticks raised on the
+		// interface channel still play, as retail plays each at its call (input action 3's
+		// Exit Mission tone ahead of its disconnect; engine inmatch/mission_exit.h
+		// kExitMissionSoundset carries the witness).
+		const Ref<Simulation> sim = presentation->get_sim();
+		MissionAudio *audio = get_mission_audio();
+		if (sim.is_valid() && audio != nullptr) {
+			std::vector<opennova::world::ScriptSoundEvent> script_sounds;
+			sim->drain_script_sounds(script_sounds);
+			audio->play_script_sounds(script_sounds, frame_camera_xform_);
+		}
 		session_frame_failed(r_ctx.outcome->get_error());
 		return kLegStop;
 	}

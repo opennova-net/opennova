@@ -4,6 +4,7 @@
 #include <runtime/controls/controls.h> // action_code (the console's by-code dispatch)
 #include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit row's exit)
 #include <runtime/inmatch/role_feeds.h> // step_hud_radar
 #include <runtime/inmatch/spectator_session.h>
 #include <runtime/mission/mission_kernel.h>
@@ -252,6 +253,10 @@ bool Role::request_stance(int stance) {
 	return send_stance_request(stance);
 }
 
+void Role::store_mission_exit(int32_t reason) {
+	if (kernel_ != nullptr) kernel_->world.mission_exit_reason = reason;
+}
+
 void Role::dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3) {
 	// Input_HandleActionBinding's switch by the record's code: the Respawn row
 	// (catalog row 68, code 55) and the medic call (row 64 MedicReq, code 217) are
@@ -261,6 +266,16 @@ void Role::dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t
 	//  @0x49B4B4; the catalog codes word_8159A8 + 108 * row]
 	constexpr int kRespawnRow = 68;
 	constexpr int kMedicRequestRow = 64;
+	// The "quit" row 78 (code 4, flags 0x04000000: no head gate) stores exit reason 2 and
+	// nothing else; the main frame's tail takes it to the Post Menu, whose reason-2 arm resets
+	// the session and ends the game (PostMissionRoute::exits_game).
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 4 @0x49AF4C; the catalog row 78
+	//  @0x817A90; Game_ProcessMainFrame @0x5263F0 - @0x526860..0x526867]
+	constexpr int kQuitRow = 78;
+	if (code == controls::action_code(kQuitRow)) {
+		store_mission_exit(kMissionExitReset);
+		return;
+	}
 	if (code == controls::action_code(kRespawnRow)) {
 		(void)request_respawn();
 		return;
