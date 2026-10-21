@@ -9,7 +9,6 @@
     "output": "build/export"
   },
   "features": {
-    "menu": true,
     "mission": true,
     "multiplayer": true
   },

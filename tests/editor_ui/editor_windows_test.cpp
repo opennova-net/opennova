@@ -345,6 +345,48 @@ void test_inspector_plan() {
 	CHECK(hidden && is_yes_no(*hidden) && !written(*document, back, *hidden), "a flag is a switch, left out while no");
 }
 
+// A def member the game never reads is in a record's plan only where the file sets it (it differs from the
+// table's default), tagged there; one no reader is witnessed for shows set or not; a read member always shows.
+void test_inspector_hides_unread_defaults() {
+	test_temp::TempDir dir("opennova_editor_ui_unread_defs");
+	CHECK(test_io::write_text(dir.file("items.def"), "begin \"Plain\"\nid 100001\ntype vehicle\nend\n"
+	                                                 "begin \"Heavy\"\nid 100002\ntype vehicle\ntop_heavy 3\nend\n") &&
+	              test_io::write_text(dir.file("weapon.def"), "weapon \"WPN_PLAIN\"\nend\nweapon \"WPN_ARMS\"\ngfx1a arms\nend\n"),
+	      "an item and a weapon table");
+	DefCatalogDocument items, weapons;
+	Diagnostic error;
+	CHECK(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error) && items.rows().size() == 2 &&
+	              weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error) &&
+	              weapons.rows().size() == 2,
+	      "the two tables load");
+	if (items.rows().size() != 2 || weapons.rows().size() != 2) return;
+	const auto shown = [](const Document &document, const NodeAddress &record, const char *id, Applicability *applies) {
+		for (const InspectorSection &section : plan_inspector(document, record, record, ""))
+			for (const FieldUse &field : section.fields)
+				if (field.schema->id == id) {
+					if (applies) *applies = field.applies;
+					return true;
+				}
+		return false;
+	};
+	const NodeKind item = node_kind(opennova::def::DefRecordKind::Item);
+	const NodeKind weapon = node_kind(opennova::def::DefRecordKind::Weapon);
+	const NodeAddress plain{items.rows()[0]->id, item, 0}, heavy{items.rows()[1]->id, item, 0};
+	Applicability applies = Applicability::Reads;
+	CHECK(!shown(items, plain, "top_heavy", nullptr) && shown(items, heavy, "top_heavy", &applies) &&
+	              applies == Applicability::Ignored,
+	      "top_heavy: hidden at its default, shown and ignored where the file sets it");
+	CHECK(!shown(items, plain, "shadow_texture", nullptr) && !shown(items, plain, "max_attack_dist", nullptr),
+	      "the shadow line and the mission editor's keys: hidden while unset");
+	CHECK(shown(items, plain, "husk_swap_at", &applies) && applies == Applicability::Unverified,
+	      "an unwitnessed member shows unset, marked");
+	CHECK(shown(items, plain, "hp", &applies) && applies == Applicability::Reads, "a member the game reads shows");
+	const NodeAddress bare{weapons.rows()[0]->id, weapon, 0}, arms{weapons.rows()[1]->id, weapon, 0};
+	CHECK(!shown(weapons, bare, "gfx1a", nullptr) && shown(weapons, arms, "gfx1a", &applies) &&
+	              applies == Applicability::Ignored,
+	      "gfx1a: shown only where the file names one");
+}
+
 // --- driving the real windows ------------------------------------------------------------
 
 // The Problems list as ImGui laid it out in the last frame, for a test to press on what a
@@ -2713,6 +2755,7 @@ void test_menu_sounds_inspector_ui() {
 
 void run_inspector_tests() {
 	test_inspector_plan();
+	test_inspector_hides_unread_defaults();
 	test_inspector_ui();
 	test_menu_sounds_inspector_ui();
 	test_inspector_kinds_alike();

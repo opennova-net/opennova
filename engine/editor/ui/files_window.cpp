@@ -9,6 +9,7 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kind_words.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
@@ -789,10 +790,14 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		open_to_.clear();
 	}
 	draw_file_menu(view, entry);
+	// A file the game never reads (a .def of no name it opens): muted, and said in its tooltip.
+	const bool never_read = game_never_reads(entry.kind, entry.logical_name,
+	                                         view.project.document ? view.project.document->target_game : std::string());
 	// Its path, kind and size, made only while its tooltip shows; a texture's picture above them (S18).
 	const auto tip = [&] {
 		std::string tip = entry.relative_path + "\n" + asset_kind_label(entry.kind) + ", " +
 		                  strutil::byte_size_text(entry.size_bytes);
+		if (never_read) tip += "\nThe game never reads it";
 		if (!entry.imported_from.empty()) tip += "\nImported from " + entry.imported_from;
 		if (dirty) tip += "\nUnsaved changes";
 		const auto said = [](size_t errors, size_t warnings) {
@@ -824,6 +829,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	const auto via = in_tree ? via_.end() : via_.find(entry.relative_path);
 	const std::string name = ui_kit::fit(entry.logical_name, ImGui::GetContentRegionAvail().x - marks);
 	if (open) ImGui::TextColored(kOpenColor, "%s", name.c_str());
+	else if (never_read) ImGui::TextDisabled("%s", name.c_str());
 	else ImGui::TextUnformatted(name.c_str());
 	if (via != via_.end()) {
 		ImGui::SameLine(0.0f, spacing * 2.0f);

@@ -107,6 +107,10 @@ void draw_file_card_head(const FileCard &card, bool named) {
 	ImGui::TextDisabled("%s, %s", card.kind_label.c_str(), strutil::byte_size_text(card.size).c_str());
 	ui_kit::help_mark(card.what + "\nRead by the game: " + card.read_by + "\n" + card.build + " " + card.editor +
 	                  (card.cite.empty() ? std::string() : "\nAs the original game was seen to do: " + card.cite));
+	if (card.never_read)
+		ui_kit::quiet_text("The game never reads it.",
+		                   "The game opens no file of this name. The build still packs it, as the game's own archives "
+		                   "carry such files.");
 }
 
 void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache &cache, bool reveal) {

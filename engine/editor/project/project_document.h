@@ -25,9 +25,8 @@ inline constexpr const char *kDefaultTargetGame = "jo";
 inline constexpr const char *kDefaultExportOutput = "build/export";
 
 // Which requirement groups the project turns on (ADR 0046 d7): the menu set is always
-// required, the mission set only when the project enables missions.
+// required, so no switch names it; the mission set only when the project enables missions.
 struct ProjectFeatures {
-	bool menu = true;
 	bool mission = false;
 	bool multiplayer = false;
 };
