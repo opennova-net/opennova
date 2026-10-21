@@ -73,7 +73,8 @@ void weapon_inventory_set_loaded_rounds(const WeaponTable &table,
 
 void weapon_availability_apply_pairs(
         WeaponAvailability &avail, const WeaponTable &table,
-        const std::vector<std::pair<std::string, int32_t>> &pairs) {
+        const std::vector<std::pair<std::string, int32_t>> &pairs,
+        int32_t mission_allowed) {
     // The name-list mode of WeaponDef_BuildItemRestrictionTable @ 0x54DDB0: default 1,
     // matched names take the pair value (-1 -> 3), sub-entries inherit the parent's
     // value through the loadout_subclasses skip walk.
@@ -94,11 +95,33 @@ void weapon_availability_apply_pairs(
                     if (opennova::strutil::iequals(p.first.c_str(),
                                                    entry->name.c_str())) {
                         value = p.second;
-                        if (value == -1) value = weapon_availability_value::kMissionAllowed;
+                        if (value == -1) value = mission_allowed;
                         break; // [orig: first stricmp match @ 0x54de0c]
                     }
                 }
             }
+        }
+        avail.values[i] = value;
+    }
+}
+
+void weapon_availability_apply_template(
+        WeaponAvailability &avail, const WeaponTable &table,
+        const std::array<int32_t, 255> &words, int32_t mission_allowed) {
+    // The template mode of WeaponDef_BuildItemRestrictionTable @0x54DDB0: a word per
+    // entry, -1 mapped (@0x54DEAA..0x54DEAC); while a parent's sub-entry count runs
+    // (entry+36), each entry keeps the value last written (@0x54DEA2..0x54DEB7).
+    int32_t value = weapon_availability_value::kAllowed;
+    int skip_count = 0;
+    for (size_t i = 0; i < avail.values.size(); ++i) {
+        if (skip_count > 0) {
+            --skip_count;
+        } else {
+            value = words[i];
+            if (value == -1) value = mission_allowed;
+            skip_count = (i < table.entries.size() && table.entries[i].valid)
+                    ? table.entries[i].loadout_subclasses
+                    : 0;
         }
         avail.values[i] = value;
     }

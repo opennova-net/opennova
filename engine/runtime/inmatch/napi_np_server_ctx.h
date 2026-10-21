@@ -260,7 +260,8 @@ struct NapiNPServerCtx {
 	// [§5.2a] The advertised weapon-restriction set (S2C 0x66). The original reads a 255-entry
 	// restriction table (unused6 @0x24D5600); weapon_restrictions holds only the RESTRICTED
 	// (index,value) entries (value 0 or the title's armory-only value, TitleInMatch); empty = no
-	// restrictions -> 0x66 emits a single count byte 0 (golden frame 160).
+	// restrictions -> 0x66 emits a single count byte 0 (golden frame 160). The session's first
+	// mission builds it (start_host_session, D-NET-693) and the admin's WEAPON SET edits it.
 	std::vector<std::pair<uint8_t, uint8_t>> weapon_restrictions;
 
 	// [orig +0x1198] the SendFiltered send mask (preserved name). Present but the

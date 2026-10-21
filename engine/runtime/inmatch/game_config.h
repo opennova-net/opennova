@@ -77,6 +77,13 @@ enum class GameSessionChannel : uint8_t {
 	NovaWorld,
 };
 
+// A 255-word availability table with every word `value`.
+inline std::array<int32_t, 255> filled_weapon_availability(int32_t value) {
+	std::array<int32_t, 255> words;
+	words.fill(value);
+	return words;
+}
+
 struct GameConfig {
 	// The title whose rules the session runs (gameprofile::GameId; CONTEXT.md "Title"): its player
 	// caps (title_player_caps), its built-in score table and the in-match rules the session stamps on
@@ -218,11 +225,23 @@ struct GameConfig {
 	//  2026-09-10); the TEAM_CHOOSE spin is the shell's to set there.]
 	uint32_t mp_attributes = 14850;
 	// The host-global class availability word sent to every joining client as
-	// S2C 0x76. Retail derives its ten low bits from the per-class host settings
-	// and the selected mission-list entry; all classes enabled is the stock
-	// default. [orig: g_HostClassAllowMask @0x24D59FC;
+	// S2C 0x76. A session's first mission derives its ten low bits from
+	// class_availability and the mission-list entry (start_host_session); all
+	// classes enabled is the stock result. [orig: g_HostClassAllowMask @0x24D59FC;
 	// NetPacket_WriteClassAllowMask @0x510350]
 	uint16_t class_allow_mask = 0x03FFu;
+	// The cfg's per-weapon availability words, by weapon.def row: the title's mission value
+	// (Jointops.exe 3, dfx2.exe 2) takes the first mission's own (start_host_session builds
+	// the host's table from them). Config_SetDefaults fills 3; host_screen_from_block copies
+	// game.cfg's. [orig: g_GameConfigState.weaponAvailability_5F0; Config_SetDefaults
+	//  memset32(3, 0xFF) @0x54D410]
+	std::array<int32_t, 255> weapon_availability = filled_weapon_availability(3);
+	// The cfg's per-class availability words (classes 0..9), from which the authority's
+	// first mission builds class_allow_mask: 1 enables a class, 2 enables it under the
+	// mission entry's mask. Config_SetDefaults stores 1 in each; host_screen_from_block
+	// copies game.cfg's. [orig: g_GameConfigState.classAvailability_9EC; Config_SetDefaults
+	//  @0x54D412..0x54D448]
+	std::array<int32_t, 10> class_availability = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 	// Authoritative projectile game-option globals. These do not alter the
 	// advertised mp_attributes word; the host simulation consumes them directly.
 	// The rule words below hold the raw dword retail stores (the apply's `mov`,

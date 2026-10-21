@@ -8,12 +8,19 @@
 // NapiNPServerCtx::weapon_restrictions (an absent index reads 1). The weapons and the
 // table are a model of the test's own.
 
+#include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <base/gameprofile/gameprofile.h>
+#include <formats/mission/bms.h>
+#include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/title/title_identity.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
@@ -89,6 +96,7 @@ struct Rig {
 		roster[0].assigned_team = 1;
 	}
 	w::Entity &entity() { return *world.registry.get(player); }
+	std::vector<ProtocolMessage> replies;
 	void submit() {
 		LoadoutSubmit req;
 		req.team = 1;
@@ -99,9 +107,26 @@ struct Rig {
 		req.terminated = true;
 		inmatch::ServerDispatchInputs inputs;
 		inputs.server_ctx = ctx.get();
-		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[0],
+		replies = inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[0],
 				{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(req))}, 100,
 				roster, &world, inputs);
+	}
+	// The accept's S2C 0x5A slot list names the weapon [orig:
+	// Server_SendWeaponSlotListToPlayer @0x515F95].
+	bool listed(uint8_t adm) const {
+		for (const ProtocolMessage &m : replies) {
+			if (m.tag != s2c::WEAPON_LOADOUT) continue;
+			WeaponLoadout list;
+			if (!decode_weapon_loadout(m.payload.data(), m.payload.size(), list)) continue;
+			for (const WeaponLoadoutSlot &slot : list.slots)
+				if (slot.type_id == adm) return true;
+		}
+		return false;
+	}
+	bool replied() const {
+		for (const ProtocolMessage &m : replies)
+			if (m.tag == s2c::WEAPON_LOADOUT) return true;
+		return false;
 	}
 	bool kept(uint8_t adm) const {
 		for (const LoadoutSubmitEntry &e : roster[0].reply.loadout_buffer.entries)
@@ -125,6 +150,10 @@ void test_a_banned_entry_is_not_kept() {
 	CHECK(!r.kept(kMortarAdm));
 	CHECK(r.entity().weapon_slots.count(kRifleCombo) == 1);
 	CHECK(r.entity().weapon_slots.count(kMortarCombo) == 0);
+	// The wire half: the accept's 0x5A lists the kept rifle and no row for the mortar.
+	CHECK(r.replied());
+	CHECK(r.listed(kRifleAdm));
+	CHECK(!r.listed(kMortarAdm));
 }
 
 void test_an_armory_only_entry_needs_the_zone() {
@@ -145,9 +174,105 @@ void test_an_armory_only_entry_needs_the_zone() {
 	}
 }
 
+// The first mission's tables on the wire: the joiner's player-sync tail carries the S2C 0x66
+// (count, then each (index, value)) and the 0x76 (the class mask, u16 LE).
+// [orig: NetPacket_SerializeWeaponRestrictionTable @0x5102C0; NetPacket_WriteClassAllowMask
+//  @0x510350; Server_SendInitialGameStateToPlayer @0x51BBA0]
+bool tail_bodies(inmatch::NapiNPServerCtx &ctx, w::World &world, std::vector<uint8_t> &table,
+		std::vector<uint8_t> &mask) {
+	inmatch::NapiNPConnection &joiner = ctx.np_protocol.connection_list.emplace_back();
+	joiner.type = 1;
+	joiner.connection_id = inmatch::kFirstJoinerDcb;
+	joiner.phase = inmatch::ConnectionPhase::PlayerAdded;
+	joiner.slot_state = inmatch::PlayerSlotState::Added;
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	(void)inmatch::dispatch_session_replies(ctx.config, joiner,
+			{make_protocol_message(c2s::CHECKSUM_RESPONSE, {})}, 1,
+			ctx.np_protocol.connection_list, &world, inputs);
+	for (int i = 0; i < 64; ++i) {
+		const inmatch::InitialStateStep step =
+				inmatch::Server_SendInitialGameStateToPlayer(ctx, joiner, 1);
+		for (const inmatch::InitialStateMessage &m : step.messages) {
+			if (m.tag == s2c::WEAPON_RESTRICTIONS) table = m.body;
+			if (m.tag == s2c::CLASS_ALLOW_MASK) mask = m.body;
+		}
+		if (!table.empty() && !mask.empty()) return true;
+	}
+	return false;
+}
+
+// The table's source: the session's first mission builds it from the cfg's per-weapon words,
+// each 3 (Jointops.exe's mission value) taking the mission's own word from its
+// item_availability chunk through the name-list mode (unnamed entries 1, -1 -> 3), then the
+// template mode, where a parent's sub-entries keep the parent's value whatever their own
+// word; the 0 and armory-only (2) entries are the table the S2C 0x66 and the 0x2F accept
+// read. A session-less (single player) host builds none.
+// [orig: Game_ApplySessionSettingsToGlobals @0x551790 (@0x5517A7, @0x5517AD..0x5517B3, the
+//  merge @0x5517C5..0x55181A, the build @0x551831); WeaponDef_BuildItemRestrictionTable
+//  @0x54DDB0 (the name list @0x54DDC3..0x54DE6C, the template @0x54DE7E..0x54DF3D)]
+void test_the_first_mission_builds_the_table() {
+	for (const bool session : {true, false}) {
+		auto world = std::make_unique<w::World>();
+		w::WeaponTable &table = world->tables.weapons;
+		table.ammo_class_names = {"CLASS_556MM"};
+		table.ammo_class_caps = {1000};
+		table.entries.resize(kMortarAdm + 1);
+		table.entries[0].name = "null";
+		table.entries[0].valid = true;
+		make_weapon(table.entries[1], "WPN_PARENT", 3, 0);
+		table.entries[1].loadout_subclasses = 1;
+		make_weapon(table.entries[2], "WPN_PARENT_SUB", 3, 1);
+		make_weapon(table.entries[3], "WPN_PISTOL", 2, 0);
+		make_weapon(table.entries[4], "WPN_SMG", 4, 0);
+		make_weapon(table.entries[kRifleAdm], "WPN_RIFLE", 3, 2);
+		make_weapon(table.entries[kMortarAdm], "WPN_MORTAR", 7, 0);
+		auto mission = std::make_unique<bms::File>();
+		mission->item_availability = {
+				{"wpn_parent", 0},   // banned (the name match ignores case)
+				{"WPN_MORTAR", 2},   // armory only
+				{"WPN_SMG", 0xFF},   // -1: the mission allows it (3)
+				{"WPN_RIFLE", 0},    // banned by the mission, but the cfg word is not 3
+		};
+		auto owner = std::make_unique<inmatch::HostOwner>();
+		replication::LoopbackChannel loop;
+		owner->host_loopback = &loop;
+		owner->ctx.world = world.get();
+		owner->ctx.mission = mission.get();
+		inmatch::HostConfig cfg;
+		cfg.title = opennova::title_identity(gameprofile::GAME_JO);
+		cfg.config.server_name = "availability";
+		cfg.config.max_players = 4;
+		cfg.socket_mode = session ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
+		cfg.serve_and_play = !session;
+		// The cfg's words: the stock 3s, the sub-entry's own word 1 (its parent's value
+		// wins), the pistol banned outright, the rifle allowed outright.
+		cfg.config.weapon_availability[2] = 1;
+		cfg.config.weapon_availability[3] = 0;
+		cfg.config.weapon_availability[kRifleAdm] = 1;
+		// The class words: class 1 off, class 2 on through the mission entry's mask (2),
+		// the rest the stock 1.
+		cfg.config.class_availability[1] = 0;
+		cfg.config.class_availability[2] = 2;
+		world->registry.configure_pool(0, 4);
+		inmatch::start_host_session(*owner, cfg);
+		const std::vector<std::pair<uint8_t, uint8_t>> expected = session
+				? std::vector<std::pair<uint8_t, uint8_t>>{{1, 0}, {2, 0}, {3, 0}, {kMortarAdm, 2}}
+				: std::vector<std::pair<uint8_t, uint8_t>>{};
+		CHECK(owner->ctx.weapon_restrictions == expected);
+		CHECK(owner->ctx.config.class_allow_mask == (session ? 0x03FDu : 0x03FFu));
+		if (!session) continue;
+		std::vector<uint8_t> table_body, mask_body;
+		CHECK(tail_bodies(owner->ctx, *world, table_body, mask_body));
+		CHECK(table_body == std::vector<uint8_t>({4, 1, 0, 2, 0, 3, 0, kMortarAdm, 2}));
+		CHECK(mask_body == std::vector<uint8_t>({0xFD, 0x03}));
+	}
+}
+
 } // namespace
 
 int main() {
+	test_the_first_mission_builds_the_table();
 	test_an_unrestricted_table_keeps_every_entry();
 	test_a_banned_entry_is_not_kept();
 	test_an_armory_only_entry_needs_the_zone();

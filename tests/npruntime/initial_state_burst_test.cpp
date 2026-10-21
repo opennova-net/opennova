@@ -74,7 +74,8 @@ void write_u16_le(std::vector<uint8_t> &bytes, std::size_t offset, uint16_t valu
 int main_impl() {
 	// A World with the host player spawned + one 6002 marker (both the spawn-select start AND a
 	// pool-3 spawn-marker the 0x20 batch streams).
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
@@ -172,7 +173,8 @@ int main_impl() {
 	            "fixture distinguishes canonical and loaded header lengths")) return 1;
 
 	ns::LoopbackChannel loopback;
-	inmatch::NapiNPServerCtx ctx;
+	auto ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_storage;
 	inmatch::GameConfig config;
 	if (!expect(config.class_allow_mask == 0x03FFu,
 	            "GameConfig defaults to retail's all-ten-classes mask")) return 1;
@@ -427,7 +429,8 @@ int main_impl() {
 	// !spawned-gated F3 predicate would drop F3 entirely on the World path (losing the dcb-timing
 	// signal). This drives a fresh host loopback (unspawned) so tick_connections runs the full burst. ---
 	{
-		w::World w2;
+		auto w2_storage = std::make_unique<w::World>();
+		w::World &w2 = *w2_storage;
 		w::AiSystem &ai2 = w2.ai;
 		w2.registry.configure_pool(0, 16);
 		w2.registry.configure_pool(3, 16);
@@ -441,7 +444,8 @@ int main_impl() {
 			w2.registry.spawn(3, m);
 		}
 		ns::LoopbackChannel lb2;
-		inmatch::NapiNPServerCtx ctx2;
+		auto ctx2_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+		inmatch::NapiNPServerCtx &ctx2 = *ctx2_storage;
 		inmatch::test::bring_up_host(ctx2, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &lb2);
 		ctx2.world = &w2;
@@ -487,7 +491,8 @@ int main_impl() {
 	// A bound World entity without an AiEntity keeps the historical zero-pitch fallback. In
 	// particular, world::Entity::pitch is not a substitute: it has different ownership/units.
 	{
-		w::World no_ai_world;
+		auto no_ai_world_storage = std::make_unique<w::World>();
+		w::World &no_ai_world = *no_ai_world_storage;
 		no_ai_world.registry.configure_pool(0, 1);
 		w::Entity entity;
 		entity.kind = w::EntityKind::Organic;
@@ -497,7 +502,8 @@ int main_impl() {
 		if (!expect(entity_handle.valid(), "missing-AI pose fixture entity spawned")) return 1;
 
 		ns::LoopbackChannel no_ai_loopback;
-		inmatch::NapiNPServerCtx no_ai_ctx;
+		auto no_ai_ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+		inmatch::NapiNPServerCtx &no_ai_ctx = *no_ai_ctx_storage;
 		inmatch::test::bring_up_host(no_ai_ctx, inmatch::ConnectionMode::HostClient,
 		                        inmatch::SocketMode::Socketless, /*host_key=*/0, &no_ai_loopback);
 		no_ai_ctx.world = &no_ai_world;
@@ -526,7 +532,8 @@ int main_impl() {
 	// (client sends loadout request) -> S 0x5A + game-start. Without the gate, 0x1A and the
 	// game-start would land together and the client couldn't send 0x2F between them. ---
 	{
-		w::World w3;
+		auto w3_storage = std::make_unique<w::World>();
+		w::World &w3 = *w3_storage;
 		w::AiSystem &ai3 = w3.ai;
 		w3.registry.configure_pool(0, 16);
 		w3.registry.configure_pool(3, 16);
@@ -539,7 +546,8 @@ int main_impl() {
 			m.has_item_def = true;
 			w3.registry.spawn(3, m);
 		}
-		inmatch::NapiNPServerCtx ctx3;
+		auto ctx3_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+		inmatch::NapiNPServerCtx &ctx3 = *ctx3_storage;
 		ns::LoopbackChannel lb3;
 		inmatch::test::bring_up_host(ctx3, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &lb3);
@@ -811,7 +819,8 @@ int main_impl() {
 // [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503ae1..0x503aed;
 //  Entity_InitFromModel @0x40e204..0x40e20a]
 int pool1_flags_field_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(1, 8);
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
@@ -884,7 +893,8 @@ std::vector<uint8_t> hex_bytes(const char *hex) {
 //  @0x503E7F..0x503EC0; Entity_InitFromModel @0x40E10C..0x40E11E;
 //  Entity_SpawnFromBMSRecord @0x40ED80/@0x40ED8C]
 int pool1_fixture_bytes_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(1, 0x50);
 	const auto place = [&](int slot, w::Entity item) {
 		item.item_type_index = 1; // the trait sweep's row (D-NET-487)
@@ -918,7 +928,8 @@ int pool1_fixture_bytes_impl() {
 	// one empty passenger seat, the 0xFF byte, the AI trailer with its spawn x/y
 	// and ai_textfile "d_buggy", and the brain byte 0x00 — every one of them
 	// present exactly as retail gates it.
-	w::World vworld;
+	auto vworld_storage = std::make_unique<w::World>();
+	w::World &vworld = *vworld_storage;
 	vworld.registry.configure_pool(1, 0x20);
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
@@ -967,7 +978,8 @@ int pool1_fixture_bytes_impl() {
 	// slot index 1 as subType. The position is float-exact near the record's.
 	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940; Entity_SpawnAddEWeapChildren
 	//  refNum @0x40F3B1, Flags @0x40F404, subType @0x40F40E]
-	w::World cworld;
+	auto cworld_storage = std::make_unique<w::World>();
+	w::World &cworld = *cworld_storage;
 	cworld.registry.configure_pool(1, 0x60);
 	w::Entity tank;
 	tank.kind = w::EntityKind::Item;
@@ -1006,7 +1018,8 @@ int pool1_fixture_bytes_impl() {
 
 	// The 0x10 static record streams the same live dword: the runtime word joins
 	// the spawn-composed one. [orig: NetPacket_SerializePool2StaticToBuffer @0x5044E6]
-	w::World sworld;
+	auto sworld_storage = std::make_unique<w::World>();
+	w::World &sworld = *sworld_storage;
 	sworld.registry.configure_pool(2, 4);
 	w::Entity building;
 	building.kind = w::EntityKind::Building;
@@ -1041,7 +1054,8 @@ int pool1_fixture_bytes_impl() {
 //  @0x50368B..0x503694 (the cursor step @0x503696 skipped on the cross);
 //  Server_SendInitialGameStateToPlayer @0x51BBA0, the call @0x51BD8E]
 int pool3_page_start_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 96);
 	for (int i = 0; i < 80; ++i) {
@@ -1058,7 +1072,8 @@ int pool3_page_start_impl() {
 	for (const std::size_t slot : freed)
 		world.registry.despawn(w::EntityHandle::make(3, static_cast<int>(slot)));
 	ns::LoopbackChannel loopback;
-	inmatch::NapiNPServerCtx ctx;
+	auto ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_storage;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;
@@ -1127,7 +1142,8 @@ int pool3_page_start_impl() {
 //  @0x40EB1C..0x40EB2E; NetPacket_WriteWorldStateLoad0x0F @0x502D10, the strlen
 //  @0x502EA0..0x502EAC; NapiNPClientMsg_0x00F's bounded copy @0x42e538..0x42e584]
 int location_names_by_name_index_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	opennova::bms::File mission;
@@ -1164,7 +1180,8 @@ int location_names_by_name_index_impl() {
 	}
 
 	ns::LoopbackChannel loopback;
-	inmatch::NapiNPServerCtx ctx;
+	auto ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_storage;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;
@@ -1207,7 +1224,8 @@ int location_names_by_name_index_impl() {
 // tool or test embedder) names the 0x0F deploy-map labels from the promoted
 // type-2044 markers' own labels, in spawn order.
 int location_names_fall_back_to_marker_labels_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	const auto add_marker = [&](int32_t type_id, const char *label) {
@@ -1224,7 +1242,8 @@ int location_names_fall_back_to_marker_labels_impl() {
 	add_marker(2044, "North Ridge");
 	add_marker(2044, "South Pier");
 	ns::LoopbackChannel loopback;
-	inmatch::NapiNPServerCtx ctx;
+	auto ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_storage;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;

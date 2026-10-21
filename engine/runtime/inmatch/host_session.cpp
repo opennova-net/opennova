@@ -18,7 +18,10 @@
 #include <net/npwire/session_keys.h>
 
 #include <runtime/world/entity.h>
+#include <runtime/world/weapon_inventory.h> // the availability builder's two modes
 #include <runtime/world/world.h>
+#include <formats/mission/bms.h> // the mission's item_availability chunk
+#include <net/title/title_identity.h> // title_in_match (the availability values, DFX2-10)
 
 #include <algorithm>
 #include <chrono>
@@ -666,6 +669,66 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 			(owner.ctx.config.mp_attributes & GameConfig::kMpAttribNoTracers) != 0;
 }
 
+// The session's first mission builds the host's class mask and weapon table; a later
+// mission keeps both (the round-count gate), and out of a session neither is built.
+// [orig: Game_ApplySessionSettingsToGlobals @0x551790 (in session @0x5517A7, round 0
+//  @0x5517AD..0x5517B3)]
+void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
+	NapiNPServerCtx &ctx = owner.ctx;
+	if (cfg.socket_mode == SocketMode::Socketless) return;
+	// The class mask (the S2C 0x76, the 0x2F accept's class test): a class word of 1
+	// enables its class, a word of 2 enables it while the mission-list entry's mask holds
+	// its bit, which every entry's scan stores as 0x3FF.
+	// [orig: @0x55184C (the authority), the entry @0x551858..0x55186F, the words
+	//  @0x551882..0x551990, the store @0x551996; dfx2.exe @0x54EAD7..0x54EB07 (the same
+	//  1 / 2 tests); the entry mask MissionList_ScanAndBuildFromFiles @0x56334A,
+	//  Mission_BuildMapListFromPFF @0x562B12]
+	constexpr uint16_t kMissionEntryClassMask = 0x3FF;
+	uint16_t mask = 0;
+	for (size_t i = 0; i < cfg.config.class_availability.size(); ++i) {
+		const int32_t word = cfg.config.class_availability[i];
+		const uint16_t bit = static_cast<uint16_t>(1u << i);
+		if (word == 1 || (ctx.mission != nullptr && word == 2 &&
+				(kMissionEntryClassMask & bit) != 0))
+			mask = static_cast<uint16_t>(mask | bit);
+	}
+	ctx.config.class_allow_mask = mask;
+	// The weapon table: each cfg word equal to the title's mission value (Jointops.exe 3,
+	// dfx2.exe 2, the one of 2 and 3 that is not its armory-only value) takes the mission's
+	// own word, the mission's item_availability chunk through the builder's name-list mode
+	// (every other entry 1), and the merged words run the builder's template mode. The S2C
+	// 0x66 and the C2S 0x2F accept read its 0 and armory-only entries.
+	// [orig: the merge @0x5517C5..0x55181A, the build @0x551831; dfx2.exe's merge
+	//  `cmp ecx, 2` @0x54EA1B; the mission entry's words MissionList_ScanAndBuildFromFiles
+	//  @0x563345 over Mission_LoadBMSFromLooseFile's item_availability read
+	//  @0x40D59C..0x40D5B1; WeaponDef_BuildItemRestrictionTable @0x54DDB0]
+	ctx.weapon_restrictions.clear();
+	if (ctx.world == nullptr) return;
+	const world::WeaponTable &table = ctx.world->tables.weapons;
+	const int32_t armory = title_in_match(ctx.np_protocol.identity).armory_only_availability;
+	const int32_t mission_value = armory == 2 ? 3 : 2;
+	std::vector<std::pair<std::string, int32_t>> pairs;
+	if (ctx.mission != nullptr) {
+		for (const bms::ItemAvailabilityEntry &row : ctx.mission->item_availability) {
+			if (row.name.empty()) continue;
+			// The status byte is signed: -1 is the mission-allowed sentinel
+			// [orig: @0x54DE3F `(char)name[strlen+1]`].
+			pairs.emplace_back(row.name, static_cast<int32_t>(static_cast<int8_t>(row.status)));
+		}
+	}
+	world::WeaponAvailability mission_words;
+	world::weapon_availability_apply_pairs(mission_words, table, pairs, mission_value);
+	std::array<int32_t, 255> words = cfg.config.weapon_availability;
+	for (size_t i = 0; i < words.size(); ++i)
+		if (words[i] == mission_value) words[i] = mission_words.values[i];
+	world::WeaponAvailability built;
+	world::weapon_availability_apply_template(built, table, words, mission_value);
+	for (size_t i = 0; i < built.values.size(); ++i)
+		if (built.values[i] == 0 || built.values[i] == armory)
+			ctx.weapon_restrictions.emplace_back(static_cast<uint8_t>(i),
+					static_cast<uint8_t>(built.values[i]));
+}
+
 } // namespace
 
 CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) {
@@ -724,6 +787,7 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 		}
 	}
 	configure_session_world(owner, cfg);
+	apply_first_mission_settings(owner, cfg);
 	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
 		// Serve-and-play: spawn the host's own player and queue its load-time stream before it gets the
 		// per-frame 0x0A its local view renders from. A dedicated/headless HostOnly session has no

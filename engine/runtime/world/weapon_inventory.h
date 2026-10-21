@@ -66,10 +66,21 @@ struct WeaponAvailability {
 // WeaponDef_BuildItemRestrictionTable @ 0x54DDB0: default 1 per entry, matched names take
 // their pair value (-1 maps to 3 kMissionAllowed), and a parent's loadout_subclasses
 // sub-entries INHERIT the parent's value (the skip_count walk). Pair source: the .mis
-// item_availability chunk ({name, status} records).
+// item_availability chunk ({name, status} records). `mission_allowed` is the value -1 maps
+// to: Jointops.exe's 3, dfx2.exe's 2 [orig: @0x54DE47..0x54DE49; dfx2.exe @0x54B0C7..0x54B0C9].
 void weapon_availability_apply_pairs(
         WeaponAvailability &avail, const WeaponTable &table,
-        const std::vector<std::pair<std::string, int32_t>> &pairs);
+        const std::vector<std::pair<std::string, int32_t>> &pairs,
+        int32_t mission_allowed = weapon_availability_value::kMissionAllowed);
+
+// The template mode of the same builder: each entry takes its template word (-1 maps to
+// `mission_allowed`), and a parent's loadout_subclasses sub-entries inherit the parent's
+// value. [orig: WeaponDef_BuildItemRestrictionTable @0x54DDB0 (the template leg
+// @0x54DE7E..0x54DF3D)]
+void weapon_availability_apply_template(
+        WeaponAvailability &avail, const WeaponTable &table,
+        const std::array<int32_t, 255> &words,
+        int32_t mission_allowed = weapon_availability_value::kMissionAllowed);
 
 // One spawn-kit / loadout tuple {name, ammoPrimary, ammoSecondary, flags} — the
 // 4-string record of the 2048-B loadout buffers ({name\0 ammoPri\0 ammoSec\0 flags\0}*)
