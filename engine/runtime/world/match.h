@@ -14,7 +14,6 @@
 namespace opennova::world {
 
 class World;
-struct RoundDeath;
 
 // score.ini FIELD records use these one-based IDs and retain their byte-sized
 // visibility flag in file order. They are both the match's board schema and the
@@ -455,12 +454,15 @@ class Match {
     // @0x516E07..0x516E45, ahead of the latch return @0x516E5A..0x516E60]
     void unlink_point_share_links(World &world, EntityHandle victim);
 
-    // The kill accounting a damage-pass lethal edge runs (RoundDeath::
-    // kill_event): with a killer and a victim whose ItemDef `score` word is
-    // nonzero, scorer event 12 in every session, then outside a network
-    // session the single-player tallies world.kill_stats.
-    // [orig: Score_ProcessKillEvent @0x4FD400]
-    void process_kill_event(World &world, const RoundDeath &death);
+    // The kill accounting a damage-pass lethal edge runs: with a killer and a
+    // victim whose ItemDef `score` word is nonzero, scorer event 12 in every
+    // session, then outside a network session the single-player tallies
+    // world.kill_stats. The projectile site calls it at once, while the victim
+    // exists; the other edges' records carry RoundDeath::kill_event to the
+    // death routing, which calls it.
+    // [orig: Score_ProcessKillEvent @0x4FD400 (killer, victim); the projectile
+    //  call Projectile_ProcessDamageOnTarget @0x4E8133]
+    void process_kill_event(World &world, EntityHandle killer, EntityHandle victim);
     // Scorer event 12: the victim's `score` word adds to the killer's field 30
     // (and its team row in team modes).
     // [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438)]

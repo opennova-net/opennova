@@ -72,9 +72,10 @@ void push_death(w::World &world, w::EntityHandle victim, w::EntityHandle killer)
 	world.round_sim.deaths.push_back(d);
 }
 
-// A death raised at a damage-pass lethal edge, the only producer of the kill
-// accounting [orig: Score_ProcessKillEvent @0x4FD400 from
-// Projectile_ProcessDamageOnTarget @0x4E8133].
+// A death raised at a damage-pass lethal edge whose kill accounting the death
+// routing runs (the projectile site scores at once and raises none)
+// [orig: Score_ProcessKillEvent @0x4FD400 from Entity_ApplyWeaponDamage
+// @0x4E6BFE].
 void push_kill(w::World &world, w::EntityHandle victim, w::EntityHandle killer) {
 	push_death(world, victim, killer);
 	world.round_sim.deaths.back().kill_event = true;

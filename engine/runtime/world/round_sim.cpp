@@ -1490,11 +1490,42 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                 player_on_damage_received(world, radar_round_source(world, r,
                         static_cast<uint32_t>(&r - rounds.data())), at);
             };
-            // The record every event-1 callback reads, on both peers: this
-            // round, the damage, the struck section and the target.
-            // [orig: Projectile_ProcessDamageOnTarget
-            //  Projectile_CopyEntityToHitRecord @0x4E81BA..0x4E81C0, +0x30
-            //  @0x4E81C9, +0x38 @0x4E81D2, +0x48 @0x4E81D7]
+            // On the authority every hit sets the shot relations; the lethal gate reads the health
+            // word BEFORE this hit's subtraction (+0x124: damage_state's zero above). The kill
+            // scores at once, while the victim exists, unless it is flagged dead; a player body
+            // then counts on the round (0x100 past the first), takes the attacker and fires its
+            // bound row's event 4 over the previous hit's record (a device row may destroy the
+            // body there: Q7-34 (a)). [orig: Projectile_ProcessDamageOnTarget relations
+            //  @0x4E809C..0x4E80EF, the gate @0x4E80F7..0x4E8119 (damage >= health @0x4E810A),
+            //  the dead test @0x4E811F, Score_ProcessKillEvent @0x4FD400 (the call @0x4E8133),
+            //  Flags & 0x100 @0x4E8151..0x4E8159, the count @0x4E815B..0x4E816B, +0x178
+            //  @0x4E8186, the callback @0x4E819C..0x4E81A1, ahead of Health -= damage @0x4E81B3]
+            const int32_t pre_hit_health = target->health;
+            if (authoritative) {
+                if (shooter != nullptr) {
+                    auto &rel = world.script.relations;
+                    const int sg = shooter->group_id, ss = shooter->net_id;
+                    const int vg = target->group_id, vs = target->net_id;
+                    rel.set_group_group(TriggerRelations::kShot, sg, vg);
+                    rel.set_single_group(TriggerRelations::kShot, ss, vg);
+                    rel.set_group_single(TriggerRelations::kShot, sg, vs);
+                    rel.set_single_single(TriggerRelations::kShot, ss, vs);
+                }
+                if (pre_hit_health > 0 && damage >= pre_hit_health) {
+                    if (target_not_dead)
+                        world.match.process_kill_event(world, r.owner, damage_entity);
+                    if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0) {
+                        if (++r.player_kills > 1) target->cause_flags |= 0x100u;
+                        target->last_attacker = r.owner;
+                        player_body_row_event(world, *target, 4);
+                        if ((target = world.registry.get(damage_entity)) == nullptr) return;
+                    }
+                }
+            }
+            // The record every event-1 callback reads, on both peers: this round, the damage,
+            // the struck section and the target. [orig: Projectile_ProcessDamageOnTarget
+            //  Projectile_CopyEntityToHitRecord @0x4E81BA..0x4E81C0, +0x30 @0x4E81C9, +0x38
+            //  @0x4E81D2, +0x48 @0x4E81D7]
             copy_round_to_hit_record(hit_record, r, velocity_q16);
             hit_record.damage = damage;
             hit_record.section =
@@ -1508,32 +1539,16 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
                 local_damage_feedback();
             } else {
-                // The lethal edge reads the health word BEFORE this hit's
-                // subtraction: a body already at or below zero never re-enters
-                // the kill chain [orig: Projectile_ProcessDamageOnTarget
-                // @0x4E80F7..0x4E8101 `test ax, ax; jle`, damage >= health
-                // @0x4E810A].
-                const int32_t pre_hit_health = target->health;
                 // Only the health write waits on a nonzero damage. The shot
-                // relations, the attacker stamp and the class callback run on
-                // every hit, a zero-damage one (armor, the Indestructible bit,
-                // a damage_state hull) included, so a vehicle brain still takes
-                // its event 1 and a person its alert.
-                // [orig: Projectile_ProcessDamageOnTarget relations
-                //  @0x4E809C..0x4E80EF, health `test ebx, ebx` @0x4E81AB..0x4E81B3,
-                //  callback @0x4E81FF..0x4E820E; the ground brain queues the event
-                //  EntityAI_ProcessGroundStateMachine @0x4584F6..0x458530]
+                // relations (above), the attacker stamp and the class callback
+                // run on every hit, a zero-damage one (armor, the Indestructible
+                // bit, a damage_state hull) included, so a vehicle brain still
+                // takes its event 1 and a person its alert.
+                // [orig: Projectile_ProcessDamageOnTarget health `test ebx, ebx`
+                //  @0x4E81AB..0x4E81B3, callback @0x4E81FF..0x4E820E; the ground
+                //  brain queues the event EntityAI_ProcessGroundStateMachine
+                //  @0x4584F6..0x458530]
                 if (authoritative) {
-                    if (shooter != nullptr) {
-                        auto &rel = world.script.relations;
-                        const int sg = shooter->group_id, ss = shooter->net_id;
-                        const int vg = target->group_id, vs = target->net_id;
-                        rel.set_group_group(TriggerRelations::kShot, sg, vg);
-                        rel.set_single_group(TriggerRelations::kShot, ss, vg);
-                        rel.set_group_single(TriggerRelations::kShot, sg, vs);
-                        rel.set_single_single(TriggerRelations::kShot, ss, vs);
-                    }
-
                     // The original writes the subtraction back through a signed 16-bit
                     // entity+286 field. Preserve its modulo-2^16 wrap explicitly.
                     if (damage != 0)
@@ -1602,15 +1617,6 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     local_damage_feedback();
                     if (authoritative && damage != 0 && pre_hit_health > 0 &&
                         target->health <= 0) {
-                        // A lethal player-flag hit counts on the ROUND; past the
-                        // first kill the victim takes the same-projectile cause
-                        // bit 0x100 before the death is reported.
-                        // [orig: Projectile_ProcessDamageOnTarget @0x4e8112 lethal
-                        //  gate, @0x4e8159 Flags&0x100, @0x4e8169..0x4e816b]
-                        if (target_was_alive &&
-                            ((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0 &&
-                            ++r.player_kills > 1)
-                            target->cause_flags |= 0x100u;
                         try_spawn_dismemberment_piece(
                             world, *target, velocity_q16,
                             death_section, target->death_anim_state,
@@ -1629,11 +1635,6 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         // cause bits at the death edge [orig: @0x516f4d /
                         // @0x517188..0x517206]; the sim snapshots them here.
                         d.event_flags = target->cause_flags & 0xF00u;
-                        // The kill accounting skips a body already flagged
-                        // dead [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0,
-                        // `test byte ptr [esi+24h], 2` @0x4E811F around the
-                        // Score_ProcessKillEvent call @0x4E8133].
-                        d.kill_event = target_not_dead;
                         deaths.push_back(d);
                     }
                 } else if (authoritative && damage != 0) {
@@ -1649,7 +1650,6 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         d.adm_index = r.adm_index;
                         d.ammo_index = r.ammo_index;
                         d.event_flags = target->cause_flags & 0xF00u;
-                        d.kill_event = target_not_dead; // [orig: @0x4E811F]
                         deaths.push_back(d);
                     }
                 }

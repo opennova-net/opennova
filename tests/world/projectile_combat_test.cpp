@@ -3562,12 +3562,19 @@ void test_same_projectile_second_player_kill_latches_0x100() {
     }
 }
 
-// The kill accounting's lethal edge reads the health word BEFORE the hit: a
-// body an unclamped path left below zero is raised back to zero by the clamped
-// hit but restages no death, and a lethal hit on a dead-flagged body stages
-// its death without the kill event. [orig: Projectile_ProcessDamageOnTarget
+// The kill accounting's lethal edge reads the health word BEFORE the hit and
+// scores at the damage site, ahead of the subtraction: a scored victim's kill
+// tallies there (a teamless victim, a killer that is not the local player, out
+// of a session: by others, the team-0 count), so its death record carries no
+// kill event for the death routing to score again; a body an unclamped path
+// left below zero is raised back to zero by the clamped hit but restages no
+// death and scores nothing; a lethal hit on a dead-flagged body stages its
+// death and scores nothing. [orig: Projectile_ProcessDamageOnTarget
 // @0x4E80F7..0x4E8101 pre-hit health > 0, @0x4E810A damage >= health,
-// @0x4E811F Flags & 2 skipping the Score_ProcessKillEvent call @0x4E8133]
+// @0x4E811F Flags & 2 skipping the Score_ProcessKillEvent call @0x4E8133,
+// ahead of Health -= damage @0x4E81B3; Score_ProcessKillEvent @0x4FD400 - the
+// victim's score word @0x4FD422, the session test @0x4FD447,
+// Score_TallyKillByOthers @0x4FD300]
 void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     HeapWorldFixture fixture;
     World &world = fixture.world;
@@ -3589,6 +3596,7 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
         t.health = health;
         t.flags = flags;
         t.engine_flags = flags;
+        t.item_score = 25; // the ItemDef `score` word the kill accounting reads
         return world.registry.spawn(0, t);
     };
 
@@ -3617,18 +3625,21 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
         world.round_sim.process_damage_hit(world, round, hit, velocity);
     };
 
+    CHECK(!world.rules.mp_session && world.cached.local_player != shooter);
     const EntityHandle live = spawn_victim(10, 0);
     hit_person(live);
     CHECK(world.registry.get(live)->health == 0);
+    CHECK(world.kill_stats.friendly_kills_by_others == 1);
     CHECK(world.round_sim.deaths.size() == 1);
     if (world.round_sim.deaths.size() == 1)
-        CHECK(world.round_sim.deaths[0].kill_event);
+        CHECK(!world.round_sim.deaths[0].kill_event);
 
     world.round_sim.deaths.clear();
     const EntityHandle below_zero = spawn_victim(-5, 0);
     hit_person(below_zero);
     CHECK(world.registry.get(below_zero)->health == 0);
     CHECK(world.round_sim.deaths.empty());
+    CHECK(world.kill_stats.friendly_kills_by_others == 1);
 
     world.round_sim.deaths.clear();
     const EntityHandle flagged = spawn_victim(10, kEntityFlagDead);
@@ -3637,6 +3648,7 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     CHECK(world.round_sim.deaths.size() == 1);
     if (world.round_sim.deaths.size() == 1)
         CHECK(!world.round_sim.deaths[0].kill_event);
+    CHECK(world.kill_stats.friendly_kills_by_others == 1);
 }
 
 // On a non-authority in-session peer the person class callback still fires

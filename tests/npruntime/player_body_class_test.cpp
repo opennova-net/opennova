@@ -21,6 +21,7 @@
 // Every items.def / charattr.def row is the test's own; core-only, heap-held worlds.
 
 #include <formats/def/def.h>
+#include <runtime/hud/tip_system.h> // kTipEventDetach (the local seat leave)
 #include <runtime/inmatch/charattr_table.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/replication/entity_wire_bridge.h> // apply_player_intent (the pose gate)
@@ -56,8 +57,9 @@ static int failures = 0;
 namespace {
 
 // Row 0 the "Null" marker; then a plyr person (5305), an org0 person (5311), a person with no
-// ai_function (5320: the null row), a brrl person (5321), an ele0 person (5322) and a nade
-// person (5323: the row with no event callback).
+// ai_function (5320: the null row), a brrl person (5321), an ele0 person (5322), a nade
+// person (5323: the row with no event callback), a schl person (5324, the one row with a
+// nonzero `score` word) and a clym person (5325).
 const char kItems[] =
 		"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
 		"begin \"Player\"\r\n id 105305\r\n type person\r\n hp 150\r\n ai_function plyr\r\nend\r\n"
@@ -66,7 +68,8 @@ const char kItems[] =
 		"begin \"Barrel man\"\r\n id 105321\r\n type person\r\n hp 100\r\n ai_function brrl\r\nend\r\n"
 		"begin \"Lift man\"\r\n id 105322\r\n type person\r\n hp 100\r\n ai_function ele0\r\nend\r\n"
 		"begin \"Grenade man\"\r\n id 105323\r\n type person\r\n hp 100\r\n ai_function nade\r\nend\r\n"
-		"begin \"Satchel man\"\r\n id 105324\r\n type person\r\n hp 100\r\n ai_function schl\r\nend\r\n"
+		"begin \"Satchel man\"\r\n id 105324\r\n type person\r\n hp 100\r\n score 25\r\n"
+		" ai_function schl\r\nend\r\n"
 		"begin \"Claymore man\"\r\n id 105325\r\n type person\r\n hp 100\r\n ai_function clym\r\nend\r\n";
 
 // Class 5 the plyr row, 6 the org0 row, 7 the classless row, 8 the brrl row, 9 the ele0 row
@@ -646,6 +649,134 @@ void test_a_device_rows_body_runs_the_device_think() {
 }
 
 
+// The rigs' shooter: a team-2 organic person, no player.
+w::EntityHandle spawn_shooter(Rig &r) {
+	w::Entity s;
+	s.kind = w::EntityKind::Organic;
+	s.item_type_index = 3;
+	s.item_type = 3;
+	s.team = 2;
+	s.health = 100;
+	return r.world->registry.spawn(0, s);
+}
+
+// One round's hit straight into a body at the round sim's damage site: the ZONE ammo at 10
+// units a tick, a person hit of far more than the health any case below gives the body, so the
+// damage is that health (the clamp to Health) and the hit is lethal.
+void hit_body(Rig &r, w::EntityHandle shooter, w::EntityHandle victim) {
+	if (r.world->tables.ammo.entries.empty()) {
+		w::AmmoTableEntry ammo;
+		ammo.name = "ZONE";
+		ammo.valid = true;
+		ammo.velocity = 620;
+		ammo.max_age_ticks = 20;
+		ammo.weight_in_grains = 875;
+		r.world->tables.ammo.entries.push_back(ammo);
+	}
+	w::LiveRound &round = r.world->round_sim.rounds[0];
+	round = w::LiveRound{};
+	round.active = true;
+	round.owner = shooter;
+	round.shooter_handle = shooter.packed;
+	round.ammo_index = 0;
+	round.vel = {10.0f, 0.0f, 0.0f};
+	w::ProjectileHit hit;
+	hit.hit_class = w::ProjectileHitClass::Person;
+	hit.geometry_entity = victim;
+	hit.section_index = 1;
+	hit.bone_index = 1;
+	hit.hit_zone = 1;
+	w::FixedVec3 velocity{10 * 65536, 0, 0};
+	r.world->round_sim.process_damage_hit(*r.world, round, hit, velocity);
+}
+
+// The projectile site's lethal gate runs ahead of the subtraction and the hit record
+// (D-NET-NEW-L4-16): a scored body's kill tallies there, while the body exists, so a satchel
+// row's body, which its event 1 then destroys, still scores once (by the local player: a team-1
+// person, the blue count) and leaves no record for the death routing; an org row's body takes
+// its event 4 (Health 0) before the subtraction and so ends at Health == -damage; a seated plyr
+// row's body leaves its seat at event 4: on a dedicated host by the detach, on a listen host
+// its own body by the one local detach (one tip), while a remote player's body keeps its seat
+// (its own 0x27 is the joiner's).
+// [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 - the gate @0x4E80F7..0x4E8119, the dead
+//  test @0x4E811F, the Score_ProcessKillEvent call @0x4E8133, Flags & 0x100 @0x4E8151..0x4E8159,
+//  the callback (victim, 4, 0) @0x4E819C..0x4E81A1, Health -= damage @0x4E81B3, the record
+//  @0x4E81BA, the event-1 callback @0x4E820E; Score_ProcessKillEvent @0x4FD400 - the score word
+//  @0x4FD422, `cmp edi, g_LocalPlayerEntity` @0x4FD449, Score_TallyKillByLocalPlayer @0x4FD160;
+//  OrganicClass_HandleEvent @0x407310 (the event-4 arm @0x407343); Entity_HandleDamageAndTriggerZones
+//  @0x407720 (the event-4 leave @0x407A8D..0x407ABD); Entity_SendDetachPacket @0x435510 (the
+//  local-player gate @0x43552A); Entity_SatchelThink @0x443670]
+void test_the_projectile_kill_runs_ahead_of_the_subtraction() {
+	{
+		Rig r;
+		r.world->ai.is_authority = true;
+		const w::EntityHandle shooter = spawn_shooter(r);
+		r.world->cached.local_player = shooter;
+		w::Entity *body = r.spawn_remote(kSchl);
+		CHECK(body != nullptr);
+		if (body == nullptr) return;
+		const w::EntityHandle victim = body->handle;
+		CHECK(body->item_score == 25 && body->item_type == 3);
+		body->team = 1;
+		body->health = 7;
+		hit_body(r, shooter, victim);
+		CHECK(r.world->registry.get(victim) == nullptr); // its event 1 destroyed it
+		CHECK(r.world->kill_stats.bluekills_by_player == 1);
+		CHECK(r.world->round_sim.deaths.empty());
+	}
+	{
+		Rig r;
+		r.world->ai.is_authority = true;
+		const w::EntityHandle shooter = spawn_shooter(r);
+		w::Entity *body = r.spawn_remote(kOrg);
+		CHECK(body != nullptr);
+		if (body == nullptr) return;
+		const w::EntityHandle victim = body->handle;
+		body->team = 1;
+		body->health = 7;
+		hit_body(r, shooter, victim);
+		const w::Entity *hit = r.world->registry.get(victim);
+		CHECK(hit != nullptr && hit->health == -7);
+		CHECK(r.world->round_sim.deaths.size() == 1);
+		if (r.world->round_sim.deaths.size() == 1)
+			CHECK(!r.world->round_sim.deaths[0].kill_event); // the site scored
+	}
+	for (const bool listen : {false, true}) {
+		Rig r;
+		r.world->registry.configure_pool(1, 4);
+		r.world->ai.is_authority = true;
+		const w::EntityHandle shooter = spawn_shooter(r);
+		const w::Entity *own_body = r.spawn_local(kPlyr);
+		const w::Entity *remote_body = r.spawn_remote(kPlyr);
+		CHECK(own_body != nullptr && remote_body != nullptr);
+		if (own_body == nullptr || remote_body == nullptr) return;
+		const w::EntityHandle own = own_body->handle;
+		const w::EntityHandle remote = remote_body->handle;
+		CHECK(r.world->cached.local_player == own);
+		// The session host: a dedicated one is no session peer, a listen host is.
+		r.world->rules.mp_session = true;
+		r.world->rules.projectile_authority = true;
+		r.world->rules.mp_session_peer = listen;
+		for (const w::EntityHandle h : {own, remote}) {
+			w::Entity *e = r.world->registry.get(h);
+			e->team = 1;
+			e->health = 7;
+			e->mounted = true;
+			e->flags |= w::kEntityFlagMounted;
+			e->mount_target = w::EntityHandle::make(1, 2);
+			e->mount_type = w::SeatType::Passenger;
+		}
+		r.world->out.tip_events.clear();
+		hit_body(r, shooter, own);
+		hit_body(r, shooter, remote);
+		CHECK(!r.world->registry.get(own)->mounted);
+		CHECK(r.world->registry.get(remote)->mounted == listen);
+		CHECK(std::count(r.world->out.tip_events.begin(), r.world->out.tip_events.end(),
+				static_cast<uint8_t>(hud::kTipEventDetach)) == 1);
+		CHECK(r.world->out.detach_requests.empty());
+	}
+}
+
 // A motion source holding the reset and idle clips: each update moves a channel one tick on and
 // offers a vertical root delta, which the plyr warm-up drops.
 struct Clips final : w::IRootMotionSource {
@@ -769,6 +900,7 @@ int main() {
 	test_the_think_runs_its_rows_callback();
 	test_the_barrel_rows_dying_body();
 	test_a_kill_event_runs_its_rows_callback();
+	test_the_projectile_kill_runs_ahead_of_the_subtraction();
 	test_a_knife_runs_its_rows_callback();
 	test_a_round_hit_runs_its_rows_callback();
 	test_a_round_hit_runs_the_callbacks_tails();

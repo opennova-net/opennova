@@ -1166,9 +1166,9 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
     add_team_points(killer_team, score_value(37));
 }
 
-// Only the damage-pass lethal edges call Score_ProcessKillEvent
-// (RoundDeath::kill_event), and it returns without a killer or when the
-// VICTIM's ItemDef `score` word is zero, so a Player (no score on any Player
+// Only the damage-pass lethal edges call Score_ProcessKillEvent (the
+// projectile site at once, the others through RoundDeath::kill_event), and it
+// returns without a killer or when the VICTIM's ItemDef `score` word is zero, so a Player (no score on any Player
 // definition) never enters it, not even for a self-kill. Scorer event 12 runs
 // in every session; the SP tallies (the epilog score screen's counts and the
 // WAC bluekills/greenkills builtins) only outside one, by the local player
@@ -1189,18 +1189,18 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
 //  Score_TallyKillByLocalPlayer @0x4FD160 (persons @0x4FD1F6 / @0x4FD213; the
 //  class switch @0x4FD242, the overflows @0x4FD264 / @0x4FD293 / @0x4FD2C2);
 //  Score_TallyKillByOthers @0x4FD300 (@0x4FD325..0x4FD366)]
-void Match::process_kill_event(World &world, const RoundDeath &death) {
-    if (!death.kill_event || !death.killer.valid())
+void Match::process_kill_event(World &world, EntityHandle killer, EntityHandle victim_handle) {
+    if (!killer.valid())
         return;
-    const Entity *victim = world.registry.get(death.victim);
+    const Entity *victim = world.registry.get(victim_handle);
     if (victim == nullptr || !victim->has_item_def || victim->item_score == 0)
         return;
-    record_kill_event(world, death.killer, death.victim);
+    record_kill_event(world, killer, victim_handle);
     if (world.rules.mp_session)
         return;
     MissionKillStats &ks = world.kill_stats;
     const bool person = victim->item_type == 3;
-    if (death.killer == world.cached.local_player) {
+    if (killer == world.cached.local_player) {
         if (victim->team == 1) {
             if (person) ++ks.bluekills_by_player;
         } else if (victim->team == 0) {

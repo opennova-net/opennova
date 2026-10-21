@@ -216,7 +216,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world,
 			continue;
 		}
 		if (!d.motor_edge && world::org2_owns_death_transaction(world, d.victim)) {
-			world.match.process_kill_event(world, d);
+			if (d.kill_event) world.match.process_kill_event(world, d.killer, d.victim);
 			continue;
 		}
 		Server_ProcessPlayerDeath(ctx, world, d);
@@ -251,7 +251,7 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 	// [orig: Entity_UpdateInfantryAI @0x4B9D4D -> Entity_CheckAndProcessDeath
 	//  @0x51B550; Score_ProcessKillEvent @0x4FD400 is called from damage paths only]
 	if (!d.motor_edge && world::org1_owns_death_transaction(world, d.victim)) {
-		world.match.process_kill_event(world, d);
+		if (d.kill_event) world.match.process_kill_event(world, d.killer, d.victim);
 		if (world::Entity *victim_entity = world.registry.get(d.victim))
 			victim_entity->alive = false; // health is already <= 0
 		return;
@@ -503,7 +503,8 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 		}
 	}
 
-	if (!d.motor_edge && !direct) world.match.process_kill_event(world, d);
+	if (!d.motor_edge && !direct && d.kill_event)
+		world.match.process_kill_event(world, d.killer, d.victim);
 
 	// The killer-less arm names the victim its own last attacker, which a
 	// later medic test and a later edge's transaction read.
