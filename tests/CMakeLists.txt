@@ -5258,6 +5258,12 @@ add_test(NAME explosion_push COMMAND explosion_push_test)
 add_executable(seat_bone_pose_test world/seat_bone_pose_test.cpp)
 target_link_libraries(seat_bone_pose_test PRIVATE opennova_runtime)
 add_test(NAME seat_bone_pose COMMAND seat_bone_pose_test)
+# D-NET-515: the mission start runs at the zeroed frame tick, the pool-1 settle's mover call
+# included (its every-64-tick health key), and leaves the first frame's tick 1.
+add_executable(mission_start_tick_test mission/mission_start_tick_test.cpp)
+target_link_libraries(mission_start_tick_test PRIVATE opennova_test_rig)
+target_include_directories(mission_start_tick_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_start_tick COMMAND mission_start_tick_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 # D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the

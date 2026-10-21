@@ -892,11 +892,11 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// on every client alike [orig: Game_StartMission `mov tick, ebx` (ebx = 0)
 	// @0x525B9F, past the is_authority-gated pre pass @0x525B78..0x525B90;
 	// Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of the
-	// Entity_UpdateAllEntities call @0x52674B]. World::run_logic_tick advances its
-	// clock after the tick, so the same first frame starts from 1 here; a
-	// joiner, which runs no pre pass, otherwise ran every even/odd cadence one
-	// tick out of phase.
-	world.logic_tick = 1;
+	// Entity_UpdateAllEntities call @0x52674B]. The rest of the start runs at
+	// tick 0, the pool-1 settle's mover call included (complete_mission_start
+	// stores the first frame's 1 at its end); a joiner, which runs no pre pass,
+	// otherwise ran every even/odd cadence one tick out of phase.
+	world.logic_tick = 0;
 	// The HUD's frame counters restart with it [orig: Game_StartMission
 	// @0x525BAA -> Game_ResetSessionHudState @0x434BD0].
 	world.hud_frames = w::HudFrameCounters{};
@@ -1009,6 +1009,11 @@ bool MissionKernel::complete_mission_start() {
 		// Entity_BuildProximityListsFromPools @0x525E68, ahead of the pool-1 settle
 		// @0x525F68..0x526095].
 		if (world.collision != nullptr) world.collision->rebuild_pool01_and_slices(world);
+		// The settle's mover call runs at the start's zeroed tick: its staggered legs
+		// (the aircraft and boat ground refresh's tick + 36 * DcbId, the regen cadence)
+		// and its stamps read 0 (D-NET-515) [orig: Game_StartMission - the zero @0x525B9F,
+		// the settle @0x525F80..0x526095 (`call ecx` @0x526010), no tick store between;
+		// Entity_UpdateAircraftPhysics @0x490316 (the read) / @0x4903A8 (`test cl, 7`)].
 		world.vehicles.initialize_mission_vehicles();
 	}
 	// The Attack & Defend side latch (world/local_player.h), after the round
@@ -1017,6 +1022,11 @@ bool MissionKernel::complete_mission_start() {
 	// here; it latches again at its spawn edge (joiner_role.cpp).
 	// [orig: Game_StartMission @0x524360 -- the Game_LatchAttackDefendRole call @0x5260C1]
 	local.latch_attack_defend_role(mission_game_type_);
+	// The first frame's add, ahead of its entity update: World::run_logic_tick steps its
+	// clock after the tick, so the first frame starts from 1, and the baseline holds it
+	// [orig: Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of the
+	//  Entity_UpdateAllEntities call @0x52674B].
+	world.logic_tick = 1;
 	capture_baseline();
 	mission_start_pending = false;
 	// The start ends with a session peer's C2S 0x0B, the playing host's own
