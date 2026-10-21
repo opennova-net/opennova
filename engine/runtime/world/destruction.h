@@ -525,19 +525,21 @@ struct DeathPiece {
     uint8_t section = 0;       // the ONE section this piece renders [piece+116]
     uint8_t type_index = 0;    // debris-type table row
     float render_scale = 1.0f; // def debrisScale ?: 1.0 [piece+136]
-    Vec3 pos;                  // [piece+4..12]
-    Vec3 vel;                  // units/tick [piece+28..36]
-    float spin_a = 0.0f;       // [piece+40] spin rates, degrees per tick
-    float spin_b = 0.0f;       // [piece+44] (max*(rand%100)/100 clamped >= min
-                               // [orig: sub @ 0x57b940])
-    // The piece orientation, degrees: the wrecked entity's live heading
-    // (entity+0x10, the BAM heading), pitch and roll at the spawn, then heading
-    // and pitch spin per tick; roll keeps its spawn value
-    // [orig: the pose copy @ 0x4936be..0x4936de; Yaw/Pitch += spin
-    // @ 0x492db9/0x492dc2].
-    float heading = 0.0f;      // [piece+16]
-    float pitch = 0.0f;        // [piece+20]
-    float roll = 0.0f;         // [piece+24]
+    // The piece is an entity-shaped row on words (D-NET-507): Position
+    // (+4..+0xC), the velocity words per tick (+0x1C..+0x24), the BAM32
+    // spin words per tick (+0x28 / +0x2C, Death_RandomSpinRateBam @0x57B940)
+    // and the Yaw / Pitch / Roll words (+0x10..+0x18): the wrecked entity's
+    // live words at the spawn, then Yaw and Pitch spin per tick; Roll keeps
+    // its spawn word. [orig: the pose copy @0x4936BE..0x4936DE; the
+    // velocity stores @0x4937E1 / @0x4937F2 / @0x49380E; the spin stores
+    // @0x4937B0 / @0x4937C5; Entity_ApplyGravitySimple @0x492D80]
+    EntityPosition pos;        // [piece+4..12]
+    int32_t vel[3] = {};       // [piece+28..36]
+    int32_t spin_a = 0;        // [piece+40]
+    int32_t spin_b = 0;        // [piece+44]
+    int32_t heading = 0;       // [piece+16]
+    int32_t pitch = 0;         // [piece+20]
+    int32_t roll = 0;          // [piece+24]
     // Every piece-model section except this piece's own: the sections its
     // draw collapses [piece+124, orig: @ 0x493897..0x4938b0].
     uint32_t hidden_mask = 0;

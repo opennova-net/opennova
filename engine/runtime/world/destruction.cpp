@@ -73,15 +73,6 @@ int32_t world_water_q16(const World &world) {
 // stream C instead (World::next_prng16_c).]
 uint16_t death_rand16(World &world) { return world.destruction_rng.next16(); }
 
-// Piece spin rate: max * (rand % 100)/100, floored at min — NOT uniform in
-// [min, max]; a quarter of WHEEL rolls land exactly on the floor. Degrees per
-// tick (retail stores deg * 2^32/360 as BAM32/tick). [orig: @ 0x57b940]
-float spin_rate_roll(World &world, const DeathPieceType &tp) {
-    const float t = static_cast<float>(death_rand16(world) % 100) * 0.01f;
-    const float v = tp.spin_max * t;
-    return v < tp.spin_min ? tp.spin_min : v;
-}
-
 // The BAM32/tick spin rate the aircraft death initializer stores directly, in
 // the retail evaluation order: floor = ftol(min * 11930464.0f); r = PRNG % 100;
 // t = r * 0.01f stays on the x87 stack in extended precision (0.01f is exactly
@@ -1419,9 +1410,9 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         // def+0x1BC unless it is zero [orig: fcomp/jnp @ 0x4936f1..0x493708].
         p.render_scale = traits->debris_scale != 0.0f ? traits->debris_scale : 1.0f;
         p.pos = target.position;
-        p.heading = static_cast<float>(pose_bam[0] * kDegreesPerBam);
-        p.pitch = static_cast<float>(pose_bam[1] * kDegreesPerBam);
-        p.roll = static_cast<float>(pose_bam[2] * kDegreesPerBam);
+        p.heading = pose_bam[0];
+        p.pitch = pose_bam[1];
+        p.roll = pose_bam[2];
         p.radius_q16 = traits->piece_model.radius_q16;
         // The piece collapses every other LOD-0 section of the piece model
         // [orig: @ 0x493889..0x4938b0 — shl wraps the count mod 32].
@@ -1436,9 +1427,9 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
             orientation.rotate_point(
                     traits->piece_model.section_origin_q16[static_cast<size_t>(s)].data(),
                     offset);
-            p.pos.x += offset[0] * io::kInvFp16One;
-            p.pos.y += offset[1] * io::kInvFp16One;
-            p.pos.z += offset[2] * io::kInvFp16One;
+            p.pos.set_q16({io::bam_add(p.pos.x.q16, offset[0]),
+                           io::bam_add(p.pos.y.q16, offset[1]),
+                           io::bam_add(p.pos.z.q16, offset[2])});
         }
         // Launch direction, the witnessed two-stage build [orig: @ 0x493718-
         // 0x49380e]: (1) 2D-normalize the +-0.5 random spread around the wreck
@@ -1461,13 +1452,21 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
             hy /= hlen;
         }
         const float vz = static_cast<int32_t>(death_rand16(world)) / io::kFp16One;
-        p.vel = Vec3{hx * tp.vel_scale, hy * tp.vel_scale,
-                     vz * tp.vel_scale * 1.25f};
-        // Spin rates: max*(rand%100)/100 floored at min, DEGREES PER TICK
-        // [orig: the sub pair @ 0x4937b0 -> @ 0x57b940 — deg * 2^32/360 BAM32
-        // per tick, uniform{0..99}/100 of max clamped up to min].
-        p.spin_a = spin_rate_roll(world, tp);
-        p.spin_b = spin_rate_roll(world, tp);
+        // Spin rates: the BAM32 words per tick, max * (rand % 100) / 100 floored
+        // at min [orig: the pair @0x4937AB / @0x4937C0 -> Death_RandomSpinRateBam
+        // @0x57B940, stored @0x4937B0 / @0x4937C5], drawn after the vertical's
+        // rand and ahead of the velocity words.
+        p.spin_a = death_random_spin_rate_bam(world, tp.spin_min, tp.spin_max);
+        p.spin_b = death_random_spin_rate_bam(world, tp.spin_min, tp.spin_max);
+        // The velocity words: vel_scale times the unit direction times 65536,
+        // truncated (_ftol2); the vertical lifts by 1.25 [orig: `fld [edi+10h];
+        // fmul hx; fld flt_7C32BC; fmul st(1), st` @0x4937C8..0x4937DC -> +0x1C;
+        // `fmul hy; fmul st, st(1)` @0x4937E4..0x4937ED -> +0x20; `fmul
+        // flt_7C6F18; fmul vz; fmulp` @0x4937F5..0x493804 -> +0x24].
+        const double scale = static_cast<double>(tp.vel_scale);
+        p.vel[0] = io::retail_ftol_sse2(scale * hx * io::kFp16OneD);
+        p.vel[1] = io::retail_ftol_sse2(scale * hy * io::kFp16OneD);
+        p.vel[2] = io::retail_ftol_sse2(scale * 1.25 * static_cast<double>(vz) * io::kFp16OneD);
         // Bounce budget: rand % lifetime + 1, floored at lifetime/8
         // [orig: @ 0x49385b-0x493885].
         int bounces = tp.lifetime > 0 ? (death_rand16(world) % tp.lifetime) + 1 : 1;
@@ -2067,78 +2066,90 @@ DeathPiece &DeathPieceSim::alloc() {
 void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                          float water_height, DestructionEvents &events) {
     // [orig: DeathPiece_TickAll @ 0x57b900 -> Entity_ProcessDeathPiecePhysics
-    // @ 0x492dd0]
-    constexpr float kGravity = 334.0f / io::kFp16One; // the falling-death gravity
+    // @ 0x492dd0] The piece is a row on words (D-NET-507).
+    const int32_t water = death_water_q16(water_height);
     for (DeathPiece &p : pieces) {
         if (!p.active || p.settled) continue;
         const DeathPieceType &tp = death_piece_type(p.type_index);
-        // Gravity or the underwater sink, keyed on the PRE-move position
-        // [orig: Entity_ApplyGravitySimple @ 0x492d80 — above water
-        // vel.z -= 334; below it the horizontal halves per tick and the fall
-        // pins at -4096].
-        if (p.pos.z >= water_height) {
-            p.vel.z -= kGravity;
+        // Gravity or the underwater sink, keyed on the PRE-move Z word: above
+        // the water word vz += -334; below it the horizontal words halve
+        // (`sar 1`) and the fall pins at -4096; then Position += velocity and
+        // Yaw / Pitch += the spin words. [orig: Entity_ApplyGravitySimple
+        // @0x492D80 - `cmp ecx, g_EnvWaterHeightFixed; jge` @0x492D84..0x492D8D,
+        // @0x492D8F..0x492D95, `add [eax+24h], 0FFFFFEB2h` @0x492D9E, the adds
+        // @0x492DA5..0x492DC2]
+        if (p.pos.z.q16 < water) {
+            p.vel[0] = io::bam_sar(p.vel[0], 1);
+            p.vel[1] = io::bam_sar(p.vel[1], 1);
+            p.vel[2] = -4096;
         } else {
-            p.vel.x *= 0.5f;
-            p.vel.y *= 0.5f;
-            p.vel.z = -4096.0f / io::kFp16One;
+            p.vel[2] = io::bam_add(p.vel[2], -334);
         }
-        p.pos.x += p.vel.x;
-        p.pos.y += p.vel.y;
-        p.pos.z += p.vel.z;
-        // Spin integrates per tick, no scaling — the rates ARE degrees/tick
-        // [orig: Yaw += spin_a / Pitch += spin_b @ 0x492db9/0x492dc2].
-        p.heading += p.spin_a;
-        p.pitch += p.spin_b;
-        float ground = -1.0e9f;
-        if (terrain != nullptr && terrain->valid())
-            ground = terrain::height_field_height_mission_bilinear(*terrain, p.pos.x, p.pos.y);
-        ground += 1024.0f / 65536.0f; // [orig: the +1024 rest offset @ 0x492e0d]
-        if (p.pos.z < water_height) {
-            // Water: splash at the surface crossing, sink, free at ground
-            // [orig: @ 0x492e1b-0x492ebe].
-            if (p.pos.z - p.vel.z > water_height) { // strict [orig: @ 0x492e20]
-                const Vec3 at{p.pos.x, p.pos.y, water_height};
+        p.pos.set_q16({io::bam_add(p.pos.x.q16, p.vel[0]), io::bam_add(p.pos.y.q16, p.vel[1]),
+                       io::bam_add(p.pos.z.q16, p.vel[2])});
+        p.heading = io::bam_add(p.heading, p.spin_a);
+        p.pitch = io::bam_add(p.pitch, p.spin_b);
+        // The ground word under the moved X / Y words plus the 1024 rest offset
+        // [orig: Terrain_SampleHeightBilinear @0x492DFA, `add edi, 400h`
+        // @0x492E0D].
+        // A world with no terrain bound (a bare rig) has no ground.
+        const int32_t ground = terrain != nullptr && terrain->valid()
+                ? io::bam_add(terrain::height_field_height_bilinear_fixed(
+                          *terrain, p.pos.x.q16, p.pos.y.q16), 0x400)
+                : INT32_MIN;
+        const int32_t z = p.pos.z.q16;
+        if (z < water) {
+            // Water: a splash where the move crossed the plane (the pre-move Z
+            // strictly above it), at the X / Y words and the water word; freed
+            // at or under the ground word [orig: `sub eax, [esi+24h]; cmp eax,
+            // ecx; jle` @0x492E1B..0x492E20, the point @0x492E45..0x492E58, the
+            // free `cmp [esi+0Ch], edi; jg` @0x492E90..0x492E93].
+            if (io::bam_sub(z, p.vel[2]) > water) {
+                const EntityPosition at = EntityPosition::of_q16({p.pos.x.q16, p.pos.y.q16, water});
                 if (tp.splash_fx != nullptr)
                     events.effects.push_back(
                             DestructionEffectEvent{tp.splash_fx, at, Vec3{}, 0, 0});
                 if (tp.splash_snd != nullptr)
                     events.sounds.push_back(DestructionSoundEvent{tp.splash_snd, at});
             }
-            if (p.pos.z <= ground) p.active = false;
+            if (z <= ground) p.active = false;
             continue;
         }
-        if (p.pos.z >= ground) continue; // still airborne
+        if (z >= ground) continue; // still airborne [orig: `cmp eax, edi; jge` @0x492ECE]
         // Ground contact.
         if (p.bounces_left > 0) {
-            // [orig: @ 0x492ed6-0x492fb2 — spin halves, velocity x0.95, the
-            // vertical negates through the type bounce factor, dust + the
-            // speed-gated bounce sound.]
+            // The spin words halve (`sar 1`), the horizontal words take 0.95
+            // truncated, the vertical the type's bounce factor negated, the Z
+            // word lands on the ground word; then dust, and the bounce sound when
+            // the velocity words' saturated x87 length passes 0x5000 [orig:
+            // @0x492ED6..0x492F22, `cmp eax, 5000h; jle` @0x492F87..0x492F8C].
             --p.bounces_left;
-            p.spin_a *= 0.5f;
-            p.spin_b *= 0.5f;
-            p.vel.x *= 0.95f;
-            p.vel.y *= 0.95f;
-            p.vel.z = -p.vel.z * tp.bounce;
-            p.pos.z = ground;
+            p.spin_a = io::bam_sar(p.spin_a, 1);
+            p.spin_b = io::bam_sar(p.spin_b, 1);
+            constexpr double kBounceKeep = static_cast<double>(0.95f); // flt_7C6FB8
+            p.vel[0] = io::retail_ftol_sse2(static_cast<double>(p.vel[0]) * kBounceKeep);
+            p.vel[1] = io::retail_ftol_sse2(kBounceKeep * static_cast<double>(p.vel[1]));
+            p.vel[2] = static_cast<int32_t>(0u - static_cast<uint32_t>(io::retail_ftol_sse2(
+                    static_cast<double>(p.vel[2]) * static_cast<double>(tp.bounce))));
+            p.pos.z.q16 = ground;
             if (tp.bounce_fx != nullptr)
                 events.effects.push_back(
                         DestructionEffectEvent{tp.bounce_fx, p.pos, Vec3{}, 0, 0});
-            const float speed = vec_len(p.vel);
-            if (speed > 20480.0f / io::kFp16One && tp.bounce_snd != nullptr)
+            if (x87_length(p.vel[0], p.vel[1], p.vel[2]) > 0x5000 && tp.bounce_snd != nullptr)
                 events.sounds.push_back(DestructionSoundEvent{tp.bounce_snd, p.pos});
         } else {
-            // Exhausted [orig: @0x492EDB..0x493048]: release the trail, add a
-            // permanent scorch unless the debris row carries bit 1 (CACTUS_),
-            // then final effect/sound and persist (bit 0) or free. Scorch
-            // texture selection therefore advances the shared CRT before the
-            // presentation events below. [orig: flag test @0x492FDF; scorch 7
-            // call @0x492FE7]
-            p.pos.z = ground;
+            // Exhausted [orig: the bounce count's `jle` @0x492EDB ->
+            // @0x492FBC..0x493048]: release the trail, add a
+            // permanent scorch at the X / Y words unless the debris row carries
+            // bit 1 (CACTUS_), then the final sound and effect and persist (bit
+            // 0: the spin and velocity words and the update callback zeroed) or
+            // free. The Z word stays where the move left it (no landing store on
+            // this arm). Scorch texture selection advances the shared CRT before
+            // the presentation events below. [orig: flag test @0x492FD7; scorch 7
+            // call @0x492FE7; the persist stores @0x493039..0x493048]
             if ((p.flags & 0x2u) == 0) {
                 world.out.terrain_scorches.emit_standard(
-                        to_fixed(p.pos.x), to_fixed(p.pos.y),
-                        7, world.logic_tick);
+                        p.pos.x.q16, p.pos.y.q16, 7, world.logic_tick);
             }
             if (tp.final_fx != nullptr)
                 events.effects.push_back(
@@ -2147,7 +2158,8 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
                 events.sounds.push_back(DestructionSoundEvent{tp.final_snd, p.pos});
             if ((p.flags & 0x1u) != 0) {
                 p.settled = true; // stays visible where it landed
-                p.vel = Vec3{};
+                p.vel[0] = p.vel[1] = p.vel[2] = 0;
+                p.spin_a = p.spin_b = 0;
             } else {
                 p.active = false; // [orig: the memset free @ 0x493029]
             }

@@ -350,8 +350,8 @@ void test_death_pieces() {
 	p.type_index = 4;
 	p.render_scale = 0.5f;
 	p.pos = {7.0f, 8.0f, 9.0f};
-	p.heading = 30.0f;
-	p.pitch = 10.0f;
+	p.heading = 0x15555555; // 30 deg, the presentation view of the word
+	p.pitch = 0x071C71C7;   // 10 deg
 	p.settled = true;
 	DeathPiece &idle = w.death_pieces.pieces[4];
 	idle.item_id = 13; // never allocated: skipped

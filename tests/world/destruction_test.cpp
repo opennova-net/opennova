@@ -1326,13 +1326,13 @@ void test_death_pieces() {
     // Pieces fall under gravity with no terrain (never land, stay active).
     const float z_before = [&] {
         for (const DeathPiece &p : w.death_pieces.pieces)
-            if (p.active) return p.pos.z;
-        return 0.0f;
+            if (p.active) return p.pos.z.q16;
+        return 0;
     }();
     for (int i = 0; i < 10; ++i)
         w.death_pieces.tick(w, nullptr, -1.0e9f, w.out.destruction);
     for (const DeathPiece &p : w.death_pieces.pieces)
-        if (p.active) { CHECK(p.pos.z != z_before); break; }
+        if (p.active) { CHECK(p.pos.z.q16 != z_before); break; }
 }
 
 void test_death_piece_ring_generation() {
@@ -1419,20 +1419,27 @@ void test_death_piece_launch_and_spin() {
         ++live;
         if (first == nullptr) first = &p;
         const DeathPieceType &tp = death_piece_type(p.type_index);
-        const float hspeed = std::sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
-        CHECK(std::abs(hspeed - tp.vel_scale) < 1.0e-4f);
-        CHECK(p.vel.z >= 0.0f);
-        CHECK(p.vel.z <= tp.vel_scale * 1.25f);
-        CHECK(p.spin_a >= tp.spin_min && p.spin_a <= tp.spin_max);
-        CHECK(p.spin_b >= tp.spin_min && p.spin_b <= tp.spin_max);
+        // The velocity words: vel_scale along the unit direction, x 65536,
+        // truncated (D-NET-507), so the horizontal length sits within a word
+        // per axis of vel_scale.
+        const double hspeed = std::sqrt(double(p.vel[0]) * p.vel[0] + double(p.vel[1]) * p.vel[1]);
+        CHECK(std::abs(hspeed - tp.vel_scale * 65536.0) < 2.0);
+        CHECK(p.vel[2] >= 0);
+        CHECK(p.vel[2] <= static_cast<int32_t>(tp.vel_scale * 1.25f * 65536.0f));
+        // The spin words per tick: Death_RandomSpinRateBam's floor and max.
+        const int32_t spin_floor = static_cast<int32_t>(static_cast<double>(tp.spin_min) * 11930464.0);
+        const int32_t spin_max = static_cast<int32_t>(static_cast<double>(tp.spin_max) * 11930464.0);
+        CHECK(p.spin_a >= spin_floor && p.spin_a <= spin_max);
+        CHECK(p.spin_b >= spin_floor && p.spin_b <= spin_max);
     }
     CHECK(live == 3);
     CHECK(first != nullptr);
     if (first != nullptr) {
-        const float spin = first->spin_a;
-        const float h0 = first->heading;
+        const int32_t spin = first->spin_a;
+        const int32_t h0 = first->heading;
         w.death_pieces.tick(w, nullptr, -1.0e9f, w.out.destruction);
-        CHECK(std::abs((first->heading - h0) - spin) < 1.0e-4f);
+        CHECK(first->heading == static_cast<int32_t>(static_cast<uint32_t>(h0) +
+                                                     static_cast<uint32_t>(spin)));
     }
 }
 
@@ -1476,9 +1483,11 @@ void test_ai_wreck_pieces_follow_its_travel() {
     if (a.size() != b.size()) return;
     for (size_t i = 0; i < a.size(); ++i) {
         CHECK(a[i]->type_index == b[i]->type_index);
-        CHECK(a[i]->vel.x > 0.0f && b[i]->vel.x > 0.0f); // about the travel, +x
-        const float off_ai = std::abs(std::atan2(a[i]->vel.y, a[i]->vel.x));
-        const float off_plain = std::abs(std::atan2(b[i]->vel.y, b[i]->vel.x));
+        CHECK(a[i]->vel[0] > 0 && b[i]->vel[0] > 0); // about the travel, +x
+        const double off_ai = std::abs(std::atan2(static_cast<double>(a[i]->vel[1]),
+                static_cast<double>(a[i]->vel[0])));
+        const double off_plain = std::abs(std::atan2(static_cast<double>(b[i]->vel[1]),
+                static_cast<double>(b[i]->vel[0])));
         if (death_piece_type(a[i]->type_index).launch_add > 0.0f)
             CHECK(off_ai < off_plain || off_plain < 1.0e-6f);
         else
@@ -1516,11 +1525,8 @@ void test_death_piece_rng_is_world_local() {
         if (p.active) { pb = &p; break; }
     CHECK(pa != nullptr && pb != nullptr);
     if (pa != nullptr && pb != nullptr) {
-        CHECK(std::abs(pa->vel.x - pb->vel.x) < 1.0e-6f);
-        CHECK(std::abs(pa->vel.y - pb->vel.y) < 1.0e-6f);
-        CHECK(std::abs(pa->vel.z - pb->vel.z) < 1.0e-6f);
-        CHECK(std::abs(pa->spin_a - pb->spin_a) < 1.0e-6f);
-        CHECK(std::abs(pa->spin_b - pb->spin_b) < 1.0e-6f);
+        CHECK(pa->vel[0] == pb->vel[0] && pa->vel[1] == pb->vel[1] && pa->vel[2] == pb->vel[2]);
+        CHECK(pa->spin_a == pb->spin_a && pa->spin_b == pb->spin_b);
         CHECK(pa->bounces_left == pb->bounces_left);
     }
 }
@@ -1600,9 +1606,10 @@ void test_death_piece_render_contract() {
         ++seen;
         CHECK(q.section >= 1 && q.section <= 3);
         CHECK(q.hidden_mask == (0xFu & ~(1u << q.section)));
-        CHECK(std::abs(q.heading - 59.996338f) < 1.0e-3f); // the placed word 0x2AAA0000 in degrees
-        CHECK(std::abs(q.pitch + 20.0f) < 1.0e-3f);
-        CHECK(std::abs(q.roll - 15.0f) < 1.0e-3f);
+        // The wreck's live Yaw / Pitch / Roll words, copied (D-NET-507).
+        CHECK(q.heading == 0x2AAA0000);
+        CHECK(q.pitch == spawn_angle_bam(-20));
+        CHECK(q.roll == spawn_angle_bam(15));
         CHECK(q.radius_q16 == fixed16(2.25));
         CHECK(q.render_scale == 1.0f);
     }
@@ -1626,17 +1633,61 @@ void test_death_piece_render_contract() {
     CHECK(scaled == 3);
 }
 
-// Underwater pieces: the horizontal halves per tick and the fall pins at
-// -4096; the surface crossing splashes once [orig: Entity_ApplyGravitySimple
-// @0x492d80 / the water leg @0x492e1b-0x492ebe].
+// A death piece runs on words (D-NET-507), 21,000 units out with low bits set:
+// above the water word gravity adds -334 to the vertical word, Position adds
+// the velocity words and Yaw / Pitch the spin words; on the ground a bounce
+// halves the spin words (`sar 1`), keeps 0.95f of the horizontal words and the
+// type's 0.25 of the vertical, each truncated, the vertical negated, and lands
+// the Z word on the ground word plus 0x400 (CHUNK_M, flat ground 0).
+// [orig: Entity_ApplyGravitySimple @0x492D80 - @0x492D9E..0x492DC2;
+//  Entity_ProcessDeathPiecePhysics @0x492DD0 - @0x492DFA..0x492E0D,
+//  @0x492ED6..0x492F22]
+void test_death_piece_words() {
+    constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap(kDim * kDim, 0);
+    std::vector<int> sector_grid(256, 1);
+    TerrainHeightField flat;
+    flat.heightmap = heightmap.data();
+    flat.dim = kDim;
+    flat.layout.sector_grid = sector_grid.data();
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    DeathPiece &p = w.death_pieces.alloc();
+    p.active = true;
+    p.type_index = 3; // CHUNK_M: bounce 0.25
+    p.bounces_left = 2;
+    const int32_t x0 = (21000 << 16) | 0x1235;
+    const int32_t y0 = (300 << 16) | 0x77;
+    p.pos.set_q16({x0, y0, 0x2000});
+    p.vel[0] = 0x12345;
+    p.vel[1] = -0x6789;
+    p.vel[2] = -0x3000;
+    p.spin_a = 0x01000001;
+    p.spin_b = -0x00800003;
+    p.heading = 0x10000000;
+    p.pitch = 0;
+    w.death_pieces.tick(w, &flat, -1.0e9f, w.out.destruction);
+    CHECK(p.active && p.bounces_left == 1);
+    CHECK(p.pos.x.q16 == x0 + 0x12345 && p.pos.y.q16 == y0 - 0x6789 && p.pos.z.q16 == 0x400);
+    CHECK(p.heading == 0x11000001 && p.pitch == -0x00800003);
+    CHECK(p.spin_a == 0x00800000 && p.spin_b == -0x00400002);
+    CHECK(p.vel[0] == 70836 && p.vel[1] == -25179 && p.vel[2] == 3155);
+}
+
+// Underwater pieces: the horizontal words halve per tick (`sar 1`, so an odd
+// negative word rounds down) and the fall pins at -4096; the surface crossing
+// splashes once [orig: Entity_ApplyGravitySimple @0x492d80 - @0x492D8F..0x492D95
+// / the water leg @0x492e1b-0x492ebe].
 void test_death_piece_water() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
     DeathPiece &p = w.death_pieces.alloc();
     p.active = true;
-    p.type_index = 2; // CHUNK_M — authors splash slots
-    p.pos = Vec3{0.0f, 0.0f, 0.05f};
-    p.vel = Vec3{0.8f, 0.0f, -0.2f};
+    p.type_index = 2; // CHUNK_S — authors splash slots
+    p.pos.set_q16({0, 0, 0x0CCC});
+    p.vel[0] = 0xCCCD;
+    p.vel[1] = -0x4CCD;
+    p.vel[2] = -0x3333;
     p.bounces_left = 3;
     // Tick 1: starts above water 0 -> gravity leg, integrates below, splashes.
     w.death_pieces.tick(w, nullptr, 0.0f, w.out.destruction);
@@ -1645,11 +1696,9 @@ void test_death_piece_water() {
         if (s.sound == "IMP_DEBSML_WATER" || s.sound == "IMP_DEBMED_WATER")
             splashed = true;
     CHECK(splashed);
-    // Tick 2: below water -> horizontal halves, vertical pins at -4096.
-    const float vx = p.vel.x;
+    // Tick 2: below water -> horizontal words halve, vertical pins at -4096.
     w.death_pieces.tick(w, nullptr, 0.0f, w.out.destruction);
-    CHECK(std::abs(p.vel.x - vx * 0.5f) < 1.0e-5f);
-    CHECK(std::abs(p.vel.z + 4096.0f / 65536.0f) < 1.0e-6f);
+    CHECK(p.vel[0] == 0x6666 && p.vel[1] == -0x2667 && p.vel[2] == -4096);
 }
 
 // Exhausted debris marks terrain with standard scorch 7 before its final
@@ -1678,7 +1727,8 @@ void test_death_piece_ground_scorch_routing() {
         p.type_index = type_index;
         p.flags = flags;
         p.pos = Vec3{x, 8.0f, 0.001f};
-        p.vel = Vec3{0.0f, 0.0f, -1.0f};
+        p.vel[0] = p.vel[1] = 0;
+        p.vel[2] = -0x10000;
         p.bounces_left = bounces_left;
         return p;
     };
@@ -5136,6 +5186,7 @@ int main() {
     test_death_piece_section_center();
     test_death_piece_render_contract();
     test_death_piece_water();
+    test_death_piece_words();
     test_death_piece_ground_scorch_routing();
     test_bullet_gates();
     test_dead_item_settle();

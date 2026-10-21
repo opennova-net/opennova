@@ -249,10 +249,11 @@ void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces)
 		// @ 0x8404f0 +0x2C]; "" = no trail authored.
 		d.type_index = static_cast<int32_t>(p.type_index);
 		d.scale = p.render_scale;
+		// The presentation view of the piece's words (D-NET-507).
 		d.pos = p.pos;
-		d.heading = p.heading;
-		d.pitch = p.pitch;
-		d.roll = p.roll;
+		d.heading = static_cast<float>(degrees_from_angle_bam(p.heading));
+		d.pitch = static_cast<float>(degrees_from_angle_bam(p.pitch));
+		d.roll = static_cast<float>(degrees_from_angle_bam(p.roll));
 		d.settled = p.settled;
 		d.trail = p.trail;
 		r_pieces.push_back(std::move(d));
