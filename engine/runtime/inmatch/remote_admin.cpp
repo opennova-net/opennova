@@ -173,14 +173,15 @@ void RemoteAdminConsoles::refresh_process_mission() {
 		process_mission_.game_type = client->game_type();
 		// g_SessionStatus from the joined session's S2C 0x58; g_EnvCurTimeFixed24 the joiner's
 		// world clock, which the S2C 0x0A sets and the weather tick advances.
-		// [orig: NapiNPClientMsg_SessionStatus @0x4228CA; NapiNPClientMsg_0x00A @0x4302AE;
+		// [orig: NapiNPClientMsg_SessionStatus @0x4228C0 (@0x4228CA); NapiNPClientMsg_0x00A
+		//  @0x42FEC0 (@0x4302AE);
 		//  Environment_UpdateWeatherTick @0x57E9B0 (the read @0x57E9B8)]
 		process_mission_.session_elapsed_ms = client->session_elapsed_ms();
 		if (bound_.world != nullptr) process_mission_.tod_fixed24 = bound_.world->weather.tod_fixed24;
 		// g_RulesFlags, the joined mission's S2C 0x64 word (the joiner's world keeps it), and
 		// g_RoundTimeRemaining, the S2C 0x0A clock.
 		// [orig: CAdminServer_HandleGet @0x403591..0x403A02 (g_RulesFlags), @0x4038C5
-		//  (g_RoundTimeRemaining); NapiNPClientMsg_0x00A @0x430219..0x430235]
+		//  (g_RoundTimeRemaining); NapiNPClientMsg_0x00A @0x42FEC0 (@0x430219..0x430235)]
 		if (bound_.world != nullptr) process_mission_.rules_word = bound_.world->rules.mpattrib;
 		process_mission_.round_ticks_remaining = client->state().round_time_remaining_ticks;
 		session_less_.config = joined_.config;
@@ -193,7 +194,7 @@ void RemoteAdminConsoles::refresh_process_mission() {
 	} else {
 		// No session (the menus): every mission teardown cleared g_SessionStatus; the time of
 		// day keeps the last mission's clock (no teardown writer).
-		// [orig: Game_TeardownMission @0x5223FA (CPlayerStats_Init(&g_SessionStatus))]
+		// [orig: Game_TeardownMission @0x522350 (@0x5223FA, CPlayerStats_Init(&g_SessionStatus))]
 		process_mission_.session_elapsed_ms = 0;
 	}
 }
@@ -216,7 +217,7 @@ bool RemoteAdminConsoles::dispatch(const AdminSession &session, std::string_view
 	// S2C 0x0A clock (the next 0x0A's replaces it). A host context's SET wrote its world.
 	// [orig: CAdminServer_HandleSetCommand @0x405A60 - the rule bits @0x405C80..0x405F86,
 	//  GameTime @0x405E80..0x405E86; NapiNPClientMsg_HandleMissionDataChunk @0x432410 (the
-	//  memcpy @0x432470); NapiNPClientMsg_0x00A @0x430219..0x430235]
+	//  memcpy @0x432470); NapiNPClientMsg_0x00A @0x42FEC0 (@0x430219..0x430235)]
 	if (bound_.host == nullptr && bound_.client != nullptr) {
 		if (bound_.world != nullptr && bound_.world->rules.mpattrib != process_mission_.rules_word)
 			apply_rules_word(*bound_.world, process_mission_.rules_word);

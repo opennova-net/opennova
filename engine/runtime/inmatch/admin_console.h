@@ -85,10 +85,11 @@ void validated_punt(NapiNPServerCtx &ctx, int32_t index, uint32_t code, const ch
 // g_RulesFlags into a world: the word itself and the caches its readers take, so the word
 // is live at once wherever it is written (a host's boot and admin SET, a joiner's mission-data
 // copy and admin SET), as retail's one global is for every process that reads it.
-// [orig: g_RulesFlags @0x24D1E34 - its readers Projectile_DamagePairEligible @0x4E74FD
-//  (0x200), Player_AdjustWeaponZoomLevel @0x4DBD15 (0x10000), Entity_FindEnemyInCone @0x43CC2C
-//  and Entity_FindEnemyVehicleInCone @0x43CA81 (0x8000), RoundData_SpawnRound @0x4EC72F /
-//  @0x4EC79D (NoTracers, bit 0); its writers CAdminServer_HandleSetCommand @0x405A60 (the rule
+// [orig: g_RulesFlags @0x24D1E34 - its readers Projectile_DamagePairEligible @0x4E74F0
+//  (@0x4E74FD, 0x200), Player_AdjustWeaponZoomLevel @0x4DBCC0 (@0x4DBD15, 0x10000),
+//  Entity_FindEnemyInCone @0x43CBA0 (@0x43CC2C) and Entity_FindEnemyVehicleInCone @0x43C9F0
+//  (@0x43CA81) (0x8000), RoundData_SpawnRound @0x4EC0D0 (@0x4EC72F / @0x4EC79D, NoTracers,
+//  bit 0); its writers CAdminServer_HandleSetCommand @0x405A60 (the rule
 //  bits' stores @0x405C80..0x405F86) and the mission data's copy
 //  NapiNPClientMsg_HandleMissionDataChunk @0x432410 (the memcpy @0x432470)]
 void apply_rules_word(world::World &world, uint32_t word);
