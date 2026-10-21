@@ -500,6 +500,11 @@ public:
 	// of the game loop, after the client net frame (the roles call
 	// poll_vehicle_menu there).
 	VehicleMenu &vehicle_menu() { return process_state().vehicle_menu; }
+	// The process's loadout name list (g_LoadoutWeaponNameList, D-NET-143): a JoinerRole binds
+	// its worlds to it and rebuilds it at each S2C 0x5A apply.
+	world::LoadoutWeaponNameList &loadout_weapon_names() {
+		return process_state().loadout_weapon_names;
+	}
 	const VehicleMenu &vehicle_menu() const { return process_state().vehicle_menu; }
 	void poll_vehicle_menu(const world::World &world, const def::DefItemsFile *items);
 	// The main loop's measured frame rate for the quality metric's
@@ -539,7 +544,7 @@ public:
 	// The host protocol's link-error callbacks of one server tick, bit 0 a
 	// joiner's resend request (flag 1), bit 1 our own missing-sequence
 	// request (flag 2) [orig: NapiNP_HandleResendList cb_server_6 = NapiNPServer_OnResendListCallback
-	// @0x4c62a0, its call @0x623a0e; SendMissingSeqList cb_server_5 = @0x4c4681 @0x62379b ->
+	// @0x4c62a0, its call @0x623a0e; SendMissingSeqList cb_server_5 = @0x4C4680 @0x62379b ->
 	// the g_NetQuality flag stores]. The host role hands them over after
 	// this client frame, as retail's server tick runs after the indicators'
 	// update.

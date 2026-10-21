@@ -2242,6 +2242,52 @@ bool run_tail_carried_word_lands_on_l() {
 	return expect(!local->mounted_child.valid(), "carried: a word naming no def'd entity is none");
 }
 
+// D-NET-143 (L4-s9 FOUND 3): every S2C 0x5A the joiner applies rebuilds the process's
+// loadout name list from the list's rows, and the joiner's world reads that list for the
+// equipped default of every body it spawns (the image's initializer, WPN_M4AUTO first,
+// until a list arrives).
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the rows
+//  @0x429230..0x4293B9; PlayerClass_InitEntity @0x4B1100..0x4B1116]
+bool run_a_weapon_loadout_rebuilds_the_process_name_list() {
+	Harness h;
+	for (const char *name : {"WPN_KNIFE", "WPN_M4AUTO", "WPN_AK47AUTO"}) {
+		w::WeaponTableEntry def;
+		def.name = name;
+		def.valid = true;
+		h.kernel->world.tables.weapons.entries.push_back(def);
+	}
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	bool ok = expect(h.kernel->world.loadout_weapon_names == &h.role.runtime->loadout_weapon_names(),
+			"name list: the joiner's world reads the process's list");
+	ok &= expect(w::player_spawn_equipped_default(h.kernel->world) == 1,
+			"name list: the initializer's WPN_M4AUTO before any list");
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	WeaponLoadout list;
+	list.avatar_class = 6;
+	WeaponLoadoutSlot ak;
+	ak.type_id = 2;
+	ak.ammo_primary = 3;
+	WeaponLoadoutSlot m4;
+	m4.type_id = 1;
+	list.slots = {ak, m4};
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::WEAPON_LOADOUT, encode_weapon_loadout(list))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+	const w::LoadoutWeaponNameList &names = h.role.runtime->loadout_weapon_names();
+	ok &= expect(names.set && names.entries.size() == 2 && names.entries[0].name == "WPN_AK47AUTO" &&
+					names.entries[1].name == "WPN_M4AUTO",
+			"name list: the 0x5A's rows, in order");
+	ok &= expect(w::player_spawn_equipped_default(h.kernel->world) == 2,
+			"name list: a body spawned now takes the list's first weapon");
+	return ok;
+}
+
 // D-NET-588: an S2C 0x13 naming the joiner's own player lands on L: Health 0,
 // the word as L's deathAnimStateId and the plyr class callback with event 4
 // (its think re-arm to 64), as retail's handler runs on the slot entity at the
@@ -3612,6 +3658,7 @@ int main() {
 	ok &= run_tail_armor_lands_on_l();
 	ok &= run_tail_carried_word_lands_on_l();
 	ok &= run_entity_death_names_l();
+	ok &= run_a_weapon_loadout_rebuilds_the_process_name_list();
 	ok &= run_a_seated_death_sends_the_seat_leave();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();

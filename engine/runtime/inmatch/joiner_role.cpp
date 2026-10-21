@@ -33,6 +33,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>   // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <runtime/world/geom.h>
+#include <runtime/inmatch/loadout_submit.h> // apply_weapon_loadout_name_list (the 0x5A name list)
 #include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x5A row)
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/local_player_view.h> // local_player_view_refresh (the mount-change edge)
@@ -664,6 +665,11 @@ void JoinerRole::pump() {
 	// A joiner is never the logic authority (run_logic_tick restamps it; events applied
 	// before the first tick read it; the default is true), and runs its title's rules.
 	world.rules.logic_authority = false;
+	// The process's loadout name list, whose first name every body the joiner spawns takes as
+	// its equipped weapon (world::player_spawn_equipped_default), as HostRole::apply_rule_words
+	// binds the host's [orig: g_LoadoutWeaponNameList @0x8333F8; PlayerClass_InitEntity
+	//  @0x4B1100..0x4B1116].
+	world.loadout_weapon_names = &rt.loadout_weapon_names();
 	world.rules.title = title_ != nullptr ? title_->game_id : gameprofile::GAME_JO;
 	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*
 	// rows of the world's profile; an inactive profile reads no clock at all.
@@ -1289,6 +1295,13 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
 	if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
 		loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
+		// The apply first rebuilds the process's loadout name list from the list's rows (each
+		// row whose weapon the table has: its name and three values), ahead of its L test, so
+		// the next body the joiner spawns takes the list's first weapon (D-NET-143).
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the
+		//  rows @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name @0x4292F0), the
+		//  L test @0x4293F2]
+		apply_weapon_loadout_name_list(world, rt.authoritative_loadout());
 		if (world::Entity *local = world.registry.get(world.cached.local_player)) {
 			world::rebind_player_camouflage_row(world, *local);
 			// Off the authority the grant's class is also its side's class word
