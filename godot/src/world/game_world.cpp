@@ -505,35 +505,38 @@ bool GameWorld::open_remote_admin() {
 	return true;
 }
 
+opennova::inmatch::AdminConsole::Seams GameWorld::remote_admin_seams(const Ref<Simulation> &p_sim,
+		const opennova::inmatch::RemoteAdminBinding &p_binding) {
+	Ref<GameConfigBlock> block = game_config_;
+	std::function<void()> save = [block]() { (void)block->save(); };
+	opennova::gamecfg::GameCfg *cfg = &game_config_->native().cfg();
+	opennova::inmatch::AdminConsole::Seams seams;
+	if (p_sim.is_valid()) {
+		seams = p_sim->remote_admin_seams(cfg, std::move(save));
+	} else {
+		seams.config_block = cfg;
+		seams.save_config = std::move(save);
+	}
+	// The process's own client's HUD (a listen host, a joiner): CHAT GET reads its CHAT
+	// window and a refused CHAT SEND echoes into it (the HUD device, by its group).
+	if (p_binding.client != nullptr) {
+		seams.chat_window = [this]() {
+			const HudOverlay *hud = admin_hud_overlay();
+			return hud != nullptr ? hud->chat_window_lines() : std::vector<std::string>();
+		};
+		seams.chat_echo = [this](const std::string &p_text) {
+			if (HudOverlay *hud = admin_hud_overlay()) hud->echo_admin_chat(p_text);
+		};
+	}
+	return seams;
+}
+
 void GameWorld::pump_remote_admin(opennova::inmatch::AdminScene p_scene) {
 	if (!open_remote_admin() || !admin_pump_->listening()) return;
 	const Ref<Simulation> sim = get_sim();
 	const opennova::inmatch::RemoteAdminBinding binding =
 			sim.is_valid() ? sim->remote_admin_binding() : opennova::inmatch::RemoteAdminBinding{};
-	if (!admin_consoles_.bound_to(binding)) {
-		Ref<GameConfigBlock> block = game_config_;
-		std::function<void()> save = [block]() { (void)block->save(); };
-		opennova::gamecfg::GameCfg *cfg = &game_config_->native().cfg();
-		opennova::inmatch::AdminConsole::Seams seams;
-		if (sim.is_valid()) {
-			seams = sim->remote_admin_seams(cfg, std::move(save));
-		} else {
-			seams.config_block = cfg;
-			seams.save_config = std::move(save);
-		}
-		// The process's own client's HUD (a listen host, a joiner): CHAT GET reads its CHAT
-		// window and a refused CHAT SEND echoes into it (the HUD device, by its group).
-		if (binding.client != nullptr) {
-			seams.chat_window = [this]() {
-				const HudOverlay *hud = admin_hud_overlay();
-				return hud != nullptr ? hud->chat_window_lines() : std::vector<std::string>();
-			};
-			seams.chat_echo = [this](const std::string &p_text) {
-				if (HudOverlay *hud = admin_hud_overlay()) hud->echo_admin_chat(p_text);
-			};
-		}
-		admin_consoles_.bind(binding, std::move(seams));
-	}
+	if (!admin_consoles_.bound_to(binding)) admin_consoles_.bind(binding, remote_admin_seams(sim, binding));
 	// The process words follow the session every pumped frame, so the menus' report keeps the
 	// last session's whether or not a line ran in it.
 	admin_consoles_.refresh_process_mission();
@@ -701,10 +704,14 @@ Ref<EffectLightReport> GameWorld::get_effect_light_report() const {
 }
 
 void GameWorld::session_frame_failed(const String &p_reason) {
-	// The exit frame's process words, which no pump of this frame took (engine
+	// The exit frame's process words, which no pump of this frame took, over the exiting
+	// session's console, bound now if no pump of the session bound it (engine
 	// RemoteAdminConsoles::session_exit_frame).
 	const Ref<Simulation> sim = get_sim();
-	if (sim.is_valid()) admin_consoles_.session_exit_frame(sim->remote_admin_binding());
+	if (sim.is_valid() && open_remote_admin() && admin_pump_->listening()) {
+		const opennova::inmatch::RemoteAdminBinding binding = sim->remote_admin_binding();
+		admin_consoles_.session_exit_frame(binding, remote_admin_seams(sim, binding));
+	}
 	const String message = !p_reason.is_empty() ? p_reason : String("mission session lost");
 	emit_signal(kSignalSessionLost, message);
 }

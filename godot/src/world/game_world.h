@@ -965,6 +965,9 @@ private:
 	bool open_remote_admin();
 	// One frame's pump in `p_scene` over the running session (none: session-less).
 	void pump_remote_admin(opennova::inmatch::AdminScene p_scene);
+	// The console's seams over `p_binding` (the session's, else the process block's).
+	opennova::inmatch::AdminConsole::Seams remote_admin_seams(const Ref<Simulation> &p_sim,
+			const opennova::inmatch::RemoteAdminBinding &p_binding);
 	// The HUD the console's CHAT window and echo reach (its group); null with none.
 	HudOverlay *admin_hud_overlay() const;
 	// The last frame's world-tick leg counters (RuntimePerfCounters).

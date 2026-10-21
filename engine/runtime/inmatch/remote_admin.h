@@ -225,15 +225,20 @@ public:
 	// The session's exit frame, where the embedder's frame stops before its pump: retail's last
 	// main frame runs its whole tick (the round clock, the client and server net frames, the
 	// weather) ahead of its exit test, which routes to the Post Menu without pumping the admin,
-	// so the words the menus' admin reads next are that frame's. A console over `binding` takes
-	// them now; one over another session (or none) is left alone.
+	// so the words the menus' admin reads next are that frame's: the round clock and the time
+	// of day (no teardown writes them; UP-TIME's g_SessionStatus is cleared by the teardown).
+	// Retail's words are process globals whatever the console, so a console that never pumped
+	// the exiting session (its first frame was its last: a NovaWorld session that ended during
+	// its load, whose 62-frame check runs on frame 1 since the start zeroes its countdown) binds
+	// to it with `seams` first; a console already over it is kept.
 	// [orig: Game_ProcessMainFrame @0x5263F0 - g_RoundTimeRemaining @0x526602,
 	//  Client_ProcessNetworkFrame @0x526692, Server_TickUpdate @0x5266B6,
 	//  Environment_UpdateWeatherTick @0x526774, the exit test @0x52685E and the Post Menu push
-	//  @0x526862, ahead of CAdminServer_ProcessFrame @0x5268F1]
-	void session_exit_frame(const RemoteAdminBinding &binding) {
-		if (bound_to(binding)) refresh_process_mission();
-	}
+	//  @0x526862, ahead of CAdminServer_ProcessFrame @0x5268F1; the NovaWorld check
+	//  @0x52655D..0x52657C, run once g_NetQualityUpdateCountdown's decrement @0x526541 leaves it
+	//  at or below 0 (the `jg` @0x52654D), which Game_StartMission @0x524360 zeroes (@0x52439E);
+	//  Game_TeardownMission @0x522350 (CPlayerStats_Init(&g_SessionStatus) @0x5223FA)]
+	void session_exit_frame(const RemoteAdminBinding &binding, AdminConsole::Seams seams);
 
 private:
 

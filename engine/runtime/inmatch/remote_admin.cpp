@@ -198,6 +198,13 @@ void RemoteAdminConsoles::refresh_process_mission() {
 	}
 }
 
+void RemoteAdminConsoles::session_exit_frame(const RemoteAdminBinding &binding, AdminConsole::Seams seams) {
+	// [orig: Game_ProcessMainFrame @0x52685E..0x526867 (the exit's Post Menu push, past
+	//  CAdminServer_ProcessFrame @0x5268F1): the globals the exit frame wrote, whatever pumped]
+	if (!bound_to(binding)) bind(binding, std::move(seams));
+	refresh_process_mission();
+}
+
 // [orig: CAdminServer_DispatchCommand @0x406720]
 bool RemoteAdminConsoles::dispatch(const AdminSession &session, std::string_view line,
 		std::vector<std::string> &replies) {

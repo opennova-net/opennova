@@ -626,11 +626,16 @@ void test_idle_frame_exit() {
 
 // The session's exit frame: retail's last main frame runs its whole tick ahead of its exit test,
 // which routes to the Post Menu without pumping the admin, so the menus' report reads that
-// frame's clock and time of day; ours' frame stops before its pump, so the console over the
-// session takes them at the stop. A console over another session takes nothing.
-// [orig: Game_ProcessMainFrame @0x5263F0 - Server_TickUpdate @0x5266B6,
-//  Environment_UpdateWeatherTick @0x526774, the exit test @0x52685E ahead of
-//  CAdminServer_ProcessFrame @0x5268F1; Menu_UpdateFrame @0x5528A0 (its pump @0x552901)]
+// frame's round clock and time of day (no teardown writes them); UP-TIME's g_SessionStatus is
+// cleared by the teardown. Ours' frame stops before its pump, so the console over the session
+// takes them at the stop. Retail's words are process globals whatever the console, so an exiting
+// session whose console never pumped (its first frame was its last) is bound first and read.
+// [orig: Game_ProcessMainFrame @0x5263F0 - g_RoundTimeRemaining @0x526602, Server_TickUpdate
+//  @0x5266B6, Environment_UpdateWeatherTick @0x526774, the exit test @0x52685E ahead of
+//  CAdminServer_ProcessFrame @0x5268F1; the NovaWorld check @0x52655D..0x52657C on frame 1
+//  (g_NetQualityUpdateCountdown zeroed by Game_StartMission @0x524360 (@0x52439E));
+//  Game_TeardownMission @0x522350 (@0x5223FA); Menu_UpdateFrame @0x5528A0 (its pump @0x552901);
+//  CAdminServer_HandleGet @0x403390 (g_RoundTimeRemaining @0x40388D, / 60 / 62)]
 void test_exit_frame_words() {
 	inmatch::RemoteAdminConsoles consoles;
 	gamecfg::GameCfg block = gamecfg::defaults();
@@ -641,36 +646,77 @@ void test_exit_frame_words() {
 	host->world = world.get();
 	host->is_authority = 1;
 	host->is_in_session = 1;
+	host->config.round_time_limit_minutes = 5;
 	inmatch::RemoteAdminBinding hosted;
 	hosted.host = host.get();
 	hosted.world = world.get();
 	hosted.session = 5;
 	consoles.bind(hosted, seams);
-	// The last pumped frame.
+	// The last pumped frame: five minutes on the round clock (5 x 3720 ticks).
 	world->weather.tod_fixed24 = 0x0C000000u;
+	world->match.set_remaining_ticks(18600);
 	host->np_protocol.host_run_duration_ms = 60000u;
 	consoles.refresh_process_mission();
 	expect(consoles.process_mission().tod_fixed24 == 0x0C000000u &&
-	               consoles.process_mission().session_elapsed_ms == 60000u,
+	               consoles.process_mission().session_elapsed_ms == 60000u &&
+	               consoles.process_mission().round_ticks_remaining == 18600,
 	       "the pumped frame's words");
-	// The exit frame ticks once more and stops before its pump.
+	// The exit frame ticks once more (the round clock's step, the weather) and stops before its
+	// pump: the console over the session is kept and takes its words.
 	world->weather.tod_fixed24 = 0x0C000100u;
+	world->match.set_remaining_ticks(18599);
 	host->np_protocol.host_run_duration_ms = 60016u;
-	inmatch::RemoteAdminBinding other = hosted;
-	other.session = 6;
-	consoles.session_exit_frame(other);
-	expect(consoles.process_mission().tod_fixed24 == 0x0C000000u,
-	       "a console over another session keeps its words");
-	consoles.session_exit_frame(hosted);
+	const inmatch::AdminConsole *console = consoles.console();
+	consoles.session_exit_frame(hosted, seams);
+	expect(consoles.console() == console, "the console over the exiting session is kept");
 	expect(consoles.process_mission().tod_fixed24 == 0x0C000100u &&
-	               consoles.process_mission().session_elapsed_ms == 60016u,
+	               consoles.process_mission().session_elapsed_ms == 60016u &&
+	               consoles.process_mission().round_ticks_remaining == 18599,
 	       "the exit frame's words");
-	// Back in the menus: the clock cleared by the teardown, the time of day the exit frame's.
+	// Back in the menus: UP-TIME cleared by the teardown; the round clock and the time of day
+	// the exit frame's, GameTime reading 18599 / 60 / 62 = 4 whole minutes.
 	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
+	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
 	consoles.refresh_process_mission();
 	expect(consoles.process_mission().tod_fixed24 == 0x0C000100u &&
+	               consoles.process_mission().session_elapsed_ms == 0u &&
+	               consoles.process_mission().round_ticks_remaining == 18599,
+	       "the menus keep the exit frame's round clock and time of day");
+	std::vector<std::string> replies;
+	(void)consoles.dispatch(AdminSession{"boss", 0xFFFFFFFFu}, "GET GAMESETTINGS", replies);
+	expect(replies.size() == 1 && replies[0].find("GameTime             = 4/5\n") != std::string::npos,
+	       "the menus' GameTime reads the exit frame's clock");
+
+	// A session whose first frame is its last (a NovaWorld session ended during its load): no
+	// pump bound its console, the menus' is still bound; its exit frame binds and reads it.
+	auto world2 = std::make_unique<world::World>();
+	auto host2 = std::make_unique<inmatch::NapiNPServerCtx>();
+	host2->world = world2.get();
+	host2->is_authority = 1;
+	host2->is_in_session = 1;
+	host2->session_title = "Second Session";
+	host2->config.mission_file = "SECOND.BMS";
+	world2->weather.tod_fixed24 = 0x0E000000u;
+	world2->match.set_remaining_ticks(37200);
+	host2->np_protocol.host_run_duration_ms = 16u;
+	inmatch::RemoteAdminBinding first_frame;
+	first_frame.host = host2.get();
+	first_frame.world = world2.get();
+	first_frame.session = 6;
+	consoles.session_exit_frame(first_frame, seams);
+	expect(consoles.bound_to(first_frame), "the exiting session's console is bound");
+	expect(consoles.process_mission().tod_fixed24 == 0x0E000000u &&
+	               consoles.process_mission().round_ticks_remaining == 37200 &&
+	               consoles.process_mission().map_file == "SECOND.BMS" &&
+	               consoles.process_mission().session_title == "Second Session",
+	       "the never-pumped session's words: time of day, round clock, map and title");
+	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
+	consoles.refresh_process_mission();
+	expect(consoles.process_mission().tod_fixed24 == 0x0E000000u &&
+	               consoles.process_mission().round_ticks_remaining == 37200 &&
+	               consoles.process_mission().map_file == "SECOND.BMS" &&
 	               consoles.process_mission().session_elapsed_ms == 0u,
-	       "the menus keep the exit frame's time of day");
+	       "the menus read that session's words");
 }
 
 } // namespace
