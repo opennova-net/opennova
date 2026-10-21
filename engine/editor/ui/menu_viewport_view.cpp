@@ -27,21 +27,17 @@ namespace {
 
 constexpr int kMaxDevice = 8192;
 
-// "logo.tga, gunpl22b.fnt": the names as a banner lists them.
-std::string name_list(const std::vector<std::string> &names) {
-	std::string out;
-	for (const std::string &name : names) out += (out.empty() ? "" : ", ") + name;
-	return out;
-}
-
-std::string missing_banner(const std::vector<std::string> &missing) {
-	return name_list(missing) + (missing.size() == 1 ? " is" : " are") + " not in the project.";
-}
-
-std::string unreadable_banner(const std::vector<std::string> &unreadable) {
-	const bool one = unreadable.size() == 1;
-	return name_list(unreadable) + " did not load: the project has " + (one ? "the file" : "the files") +
-	       ", but the game could not read " + (one ? "it." : "them.");
+// The files the picture lacks or could not read as one amber line, what they are after their count ("2 files not in the
+// project: logo.tga, gunpl22b.fnt"), the first three named: every one, and `then`, in its tooltip.
+void files_line(const std::vector<std::string> &names, const char *what, const char *then) {
+	std::string line = std::to_string(names.size()) + (names.size() == 1 ? " file " : " files ") + what + ": ";
+	std::string all;
+	for (size_t i = 0; i < names.size(); ++i) {
+		if (i < 3) line += (i ? ", " : "") + names[i];
+		all += (i ? "\n" : "") + names[i];
+	}
+	if (names.size() > 3) line += ", ...";
+	ui_kit::warning_line(line, all + "\n" + then);
 }
 
 // The viewport's options set (a SetViewport of them).
@@ -275,10 +271,9 @@ void MenuViewportView::Tools::mode(Workspace &workspace, ui_kit::WrapRow &row, c
 	ui_kit::tooltip("Edit the menu: a click selects the window under it, a drag moves or resizes it.");
 	ImGui::SameLine();
 	if (ImGui::RadioButton("Try", menu.try_on()) && !menu.try_on()) set_try(workspace, menu, true);
-	ui_kit::tooltip("Try the menu as the game runs it, from the screen shown: its buttons run their actions, "
-	                "the keys and the pointer are the game's, its sounds play. What it changes is a sandbox: nothing "
-	                "of your settings or the project's files. What would leave the menu (a mission started, a quit, "
-	                "a game joined) is said instead of done.");
+	ui_kit::tooltip("Run the menu as the game does, from the screen shown: its buttons act; its keys, pointer and sounds "
+	                "are the game's. It changes no setting or file, and what would leave the menu (a mission, a quit, a "
+	                "join) is said, not done.");
 }
 
 void MenuViewportView::Tools::try_tools(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu) {
@@ -344,9 +339,8 @@ void MenuViewportView::Tools::pointer_and_sound(Workspace &workspace, ui_kit::Wr
 	// else the screen's own), a click going to the window whose CURSOR it is.
 	bool pointer_shown = menu.pointer().shown;
 	if (ui_kit::check(row, "Pointer", &pointer_shown,
-	                  "Draw the game's mouse pointer where the mouse is over the picture, as the game does: the "
-	                  "CURSOR of the window under it, else of that window's root window, else of the first root "
-	                  "window whose CURSOR loads, at the image's own size whatever the zoom."))
+	                  "Draw the game's pointer at the mouse, at its image's own size: the CURSOR of the window under it, "
+	                  "else of its root window, else of the first root window whose CURSOR loads."))
 		set_pointer(workspace, menu, pointer_shown);
 	// Off the picture: where a client holds it, else the screen's own (the screen Try shows while trying).
 	const MenuPointer now = mouse_on_picture ? pointer
@@ -356,7 +350,7 @@ void MenuViewportView::Tools::pointer_and_sound(Workspace &workspace, ui_kit::Wr
 		const std::string label = now.file + "###pointer";
 		const std::string tip = (mouse_on_picture ? "The pointer here: " : "The screen's pointer: ") + now.file + ", " +
 		                        std::to_string(now.width) + " x " + std::to_string(now.height) + ", the CURSOR of " +
-		                        now.name + ". Click to go to it.";
+		                        now.name + ".";
 		if (ui_kit::tool(row, label.c_str(), now.window.child != 0, tip)) go_to_pointer(workspace, document, now);
 	} else {
 		row.next(ui_kit::text_width("No pointer"));
@@ -368,10 +362,9 @@ void MenuViewportView::Tools::pointer_and_sound(Workspace &workspace, ui_kit::Wr
 	// The windows' sounds (DI-34): heard or muted, and what was heard last.
 	bool heard = !menu.sound().mute;
 	if (ui_kit::check(row, "Sound", &heard,
-	                  "Play the windows' sounds as the game does with the mouse there: a window's SOUND of state "
-	                  "MOUSEIN as the mouse comes onto it, SELECTED on a click (and MOUSEIN again while the mouse stays), "
-	                  "MOUSEOUT as it leaves, each a set of the bank the SOUND names. Off, they are fired and listed, "
-	                  "and nothing is heard."))
+	                  "Play the windows' sounds as the game does: a window's MOUSEIN SOUND as the mouse comes onto it, "
+	                  "SELECTED on a click (then MOUSEIN again while it stays), MOUSEOUT as it leaves. Off, they fire and "
+	                  "are listed, and nothing is heard."))
 		set_mute(workspace, menu, !heard);
 	if (!menu.sounds_fired().empty()) {
 		const MenuSoundFired &last = menu.sounds_fired().back();
@@ -435,9 +428,9 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 		return;
 	}
 	if (!menu.missing().empty())
-		ui_kit::warning_line(missing_banner(menu.missing()),
-		                     missing_banner(menu.missing()) + "\nRefresh in Files after adding files outside the editor.");
-	if (!menu.unreadable().empty()) ui_kit::warning_line(unreadable_banner(menu.unreadable()));
+		files_line(menu.missing(), "not in the project", "Refresh in Files after adding files outside the editor.");
+	if (!menu.unreadable().empty())
+		files_line(menu.unreadable(), "did not load", "The project has them, but the game could not read them.");
 	const MenuClipboard board = menu_canvas_clipboard(frame, !view.documents.clipboard.empty());
 	// The zoom and the snap the viewport holds, taken where they moved (a client's set_viewport) before the
 	// toolbar and the canvas draw.
