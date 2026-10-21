@@ -6,6 +6,11 @@
 // pump's connection walk, its /INOUT SERVER line, then the host player's removal (the leave line
 // and the 0x46 removal to the others, the body gone). An exit from the frame's input pass waits
 // for the mission teardown's pump (held here). A dedicated host has no own client: nothing.
+// Single player is the same mode-3 session with no wire (ours: the in-process listen server, the
+// socketless host role of the SinglePlayer kind): the admin's exit runs the host player's
+// disconnect at the next receive pump (its /INOUT SERVER line, the /PROFILE disconnect marker,
+// the body's removal); an exit from the input pass leaves the latched record and the client's
+// line alone, since single player never runs the teardown pump (out of a session).
 // [orig: Input_HandleActionBinding case 3 (the call @0x49AF42);
 //  CNapiNetwork_DisconnectActiveConnection @0x4C9140 (the record @0x4C91C3..0x4C921A, the latch
 //  @0x4C922D..0x4C923E, RequestDisconnect @0x4C924A); CNapiNPConnection_TeardownActiveConnection
@@ -13,13 +18,18 @@
 //  callback @0x625438); CNapiNPConnection_LogPlayerRemoved @0x61E940; Nwu_HandleDisconnect
 //  @0x623CE0 (role 2 @0x624005, the latch @0x6240A8..0x6240BA, RequestDisconnect @0x6240C4);
 //  NapiNPProtocol_Pump @0x62A650 (the pending walk @0x62A6FD..0x62A793);
-//  Server_HandlePlayerDisconnect @0x51B5C0; Game_ProcessMainFrame @0x5263F0 (the head receive
-//  @0x526528, the admin pump @0x5268F1)]
+//  Server_HandlePlayerDisconnect @0x51B5C0 (the /PROFILE marker's call @0x51B822);
+//  Game_ProcessMainFrame @0x5263F0 (the head receive @0x526528, the admin pump @0x5268F1);
+//  Server_PumpNetworkTransport @0x4FD960 (`cmp is_in_session` @0x4FD969, jz @0x4FD970), the
+//  teardown's call @0x522588; SinglePlayer_StartMission @0x561AF0 (network type 0 @0x561BD4,
+//  CNapiGameSession_CreateSession @0x561E65); CNapiGameSession_CreateSession's success flag
+//  ctx+0x68 @0x4C9D16; CNapiNetwork_PumpServerProtocolRecv @0x4C4EE0]
 #include "npruntime/conn_fixture.h"
 
 #include <net/npwire/ingame_decode_session.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/serverlog_decode.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -27,6 +37,7 @@
 #include <runtime/inmatch/remote_admin.h>
 #include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_files.h>
+#include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/world/player_spawn.h>
@@ -85,7 +96,7 @@ struct ListenHost {
 	w::EntityHandle host_body;
 	w::EntityHandle remote_body;
 
-	explicit ListenHost(bool own_client) {
+	explicit ListenHost(bool own_client, bool with_remote = true) {
 		inmatch::set_connection_mode(ctx, own_client ? inmatch::ConnectionMode::HostClient
 		                                             : inmatch::ConnectionMode::HostOnly);
 		ctx.is_in_session = 1;
@@ -110,6 +121,7 @@ struct ListenHost {
 			own.assigned_team_valid = true;
 			ctx.np_protocol.connection_list.push_back(std::move(own));
 		}
+		if (!with_remote) return;
 		spawn.position = {10.0f, 0.0f, 0.0f};
 		remote_body = w::spawn_remote_player(world, spawn);
 		inmatch::NapiNPConnection joiner = conn_fixture::make_conn(inmatch::kFirstJoinerDcb,
@@ -230,12 +242,64 @@ void test_dedicated_host_exit() {
 	CHECK(host->ctx.np_protocol.connection_list.size() == 1);
 }
 
+// Single player (the socketless host role, its own pair, no remote, /PROFILE and /INOUT on): the
+// admin's exit is path A, the host player's disconnect at the next receive pump with its /INOUT
+// SERVER line and its /PROFILE disconnect marker; an exit from the input pass is path B, which
+// single player never drains: the client's line and the latched record, nothing more.
+void test_single_player_admin_exit_is_path_a() {
+	auto sp = std::make_unique<ListenHost>(true, /*with_remote=*/false);
+	sp->world.rules.mp_session = false; // single player is out of a session (network type 0)
+	inmatch::ServerLogRecorder profile(sp->files, "sp");
+	CHECK(profile.open("mission.bms"));
+	sp->ctx.logs.profile = &profile;
+	(void)sp->inout_lines();
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &sp->ctx;
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Admin);
+	std::vector<std::string> lines = sp->inout_lines();
+	CHECK(lines.size() == 1 && lines[0] == kClientRemoved);
+	(void)inmatch::tick_connections(sp->ctx, 0, 2, false, false);
+	CHECK(sp->own() == nullptr);
+	CHECK(sp->world.registry.get(sp->host_body) == nullptr);
+	lines = sp->inout_lines();
+	CHECK(lines.size() == 1 && lines[0] == kServerRemoved);
+	CHECK(sp->ctx.np_protocol.connection_list.empty());
+	sp->ctx.logs.profile = nullptr;
+	profile.close();
+	const std::string &bytes = sp->files.files["sp.sph"];
+	const std::vector<uint8_t> file(bytes.begin(), bytes.end());
+	ServerLogDocument doc;
+	CHECK(decode_server_log(file.data(), file.size(), doc));
+	CHECK(doc.events.size() == 1 && doc.events[0].kind == ServerLogEventKind::Disconnect);
+}
+
+void test_single_player_input_exit_leaves_the_record_only() {
+	auto sp = std::make_unique<ListenHost>(true, /*with_remote=*/false);
+	sp->world.rules.mp_session = false;
+	(void)sp->inout_lines();
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &sp->ctx;
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Input);
+	const inmatch::NapiNPConnection *own = sp->own();
+	CHECK(own != nullptr && own->disconnect_event_valid &&
+			own->disconnect_event.dstr == "I.C:CIDEMIS" &&
+			own->own_goodbye == inmatch::OwnGoodbye::TeardownPump);
+	std::vector<std::string> lines = sp->inout_lines();
+	CHECK(lines.size() == 1 && lines[0] == kClientRemoved);
+	(void)inmatch::tick_connections(sp->ctx, 0, 2, false, false);
+	CHECK(sp->own() != nullptr);
+	CHECK(sp->world.registry.get(sp->host_body) != nullptr);
+	CHECK(sp->inout_lines().empty());
+}
+
 } // namespace
 
 int main() {
 	test_admin_exit_removes_the_host_player_at_the_next_receive_pump();
 	test_input_exit_holds_the_twin();
 	test_dedicated_host_exit();
+	test_single_player_admin_exit_is_path_a();
+	test_single_player_input_exit_leaves_the_record_only();
 	if (failures != 0) {
 		std::printf("own_client_exit: %d failure(s)\n", failures);
 		return 1;
