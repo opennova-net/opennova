@@ -23,6 +23,12 @@
 
 namespace opennova::editor {
 
+namespace {
+
+// Whether the project's references are still being read (the uses' lists may grow).
+bool reading(const SessionView &view) { return !view.activity.validation.read || view.activity.validation.files_unread; }
+
+} // namespace
 
 bool draw_animation_map_inspector(Workspace &workspace, const Document &document, const NodeAddress &record,
                                   InspectorTaken &) {
@@ -30,9 +36,15 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 	if (!map) return false;
 	const SessionView &view = workspace.view();
 	const ClipLoads loads = view.project.scan ? project_clip_loads(*view.project.scan) : ClipLoads();
-	// What the game does with the row (or the row of the clip selected).
+	// What the game does with the row (or the row of the clip selected): its first note on one line, the others
+	// counted after it, every one in its tooltip.
 	const std::vector<std::string> notes = map_row_notes(*map, record, loads);
-	for (const std::string &line : notes) ui_kit::quiet_text(line);
+	if (!notes.empty()) {
+		std::string all;
+		for (const std::string &line : notes) all += (all.empty() ? "" : "\n") + line;
+		ui_kit::quiet_text(notes.size() > 1 ? notes.front() + " (+" + std::to_string(notes.size() - 1) + ")" : notes.front(),
+		                   notes.size() > 1 ? all : std::string());
+	}
 	// The reset row: the slots the map leaves out, by what the game does with each.
 	const Node *row = document.row(record.row);
 	if (row && !record.child &&
@@ -68,13 +80,12 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 			ImGui::TreePop();
 		}
 	}
-	// Who plays the map: the items (on their models) and the weapons naming it.
+	// Who plays the map: the items (on their models) and the weapons naming it; none, what the game does with it.
 	if (view.findings.graph && view.project.scan) {
 		const std::vector<MapPlayer> players = map_players(*view.findings.graph, *view.project.scan, map->path());
-		if (players.empty()) {
-			ui_kit::quiet_text(map_unused_words(*view.findings.graph, map->path()));
-		} else {
-			ImGui::Text("Played by (%zu):", players.size());
+		const std::string unused = players.empty() ? map_unused_words(*view.findings.graph, map->path()) : std::string();
+		if (ui_kit::uses_heading("Played by", players.size(), reading(view), "The items (on their models) and the weapons naming it.",
+		                         unused.c_str())) {
 			int id = 0;
 			for (const MapPlayer &player : players) {
 				std::string line = player.record + (player.first_person ? " (its first-person view)" : "");
@@ -104,20 +115,17 @@ bool draw_clip_inspector(Workspace &workspace, const Document &document, const N
 	std::snprintf(length, sizeof(length), "%u frames at %u a second: %.2f s in the game; %s.", frames, clip->fps,
 	              ticks > 0 ? ticks / io::kTickHz : 0.0,
 	              loops ? "it loops" : "it plays once and holds its last frame");
-	ui_kit::quiet_text(length);
-	// Its frame events: one a frame and the end pose, whose event never fires (animation_end_pose).
-	if (clip->events.size() == size_t(frames) + 1 && frames > 0) {
-		std::snprintf(length, sizeof(length),
-		              "Its %zu frame events are its %u frames (0 to %u) and the end pose (%u), whose event never fires.",
-		              clip->events.size(), frames, frames - 1, frames);
-		ui_kit::quiet_text(length);
-	}
+	// Its frame events, in its tooltip: one a frame and the end pose, whose event never fires (animation_end_pose).
+	char events[160] = "";
+	if (clip->events.size() == size_t(frames) + 1 && frames > 0)
+		std::snprintf(events, sizeof(events), "%s\nIts %zu frame events are its %u frames (0 to %u) and the end pose (%u), "
+		              "whose event never fires.", length, clip->events.size(), frames, frames - 1, frames);
+	ui_kit::quiet_text(length, events);
 	if (view.findings.graph && view.project.scan) {
 		const std::vector<ClipUse> uses = clip_uses(*view.findings.graph, *view.project.scan, clip_document->path());
-		if (uses.empty()) {
-			ui_kit::quiet_text(clip_unused_words(*view.findings.graph, clip_document->path()));
-		} else {
-			ImGui::Text("Played by these map rows (%zu):", uses.size());
+		const std::string unused = uses.empty() ? clip_unused_words(*view.findings.graph, clip_document->path()) : std::string();
+		if (ui_kit::uses_heading("Played by", uses.size(), reading(view), "The rows of the animation maps that play it.",
+		                         unused.c_str())) {
 			int id = 0;
 			for (const ClipUse &use : uses)
 				inspector_jump_line(workspace, use.edge ? usage_target(*view.project.scan, *use.edge) : ReferenceTarget(),

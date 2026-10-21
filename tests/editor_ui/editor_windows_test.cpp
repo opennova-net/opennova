@@ -2604,10 +2604,12 @@ void test_used_by_ui() {
 	ui.away();
 	ui.drain();
 	const std::string text = logged_frame(ui);
-	CHECK(text.find("skinned.3di: used by 1 field") != std::string::npos, "the file's uses, counted");
+	// The toolbar's chip and the Inspector's heading, each counted.
+	const size_t chip = text.find("Used by (1)");
+	CHECK(chip != std::string::npos && text.find("Used by (1)", chip + 1) != std::string::npos,
+	      "the file's uses, counted, on the toolbar's chip and over the Inspector's list");
 	CHECK(text.find(items->logical_name + " (1)") != std::string::npos, "grouped by the file naming it");
 	CHECK(text.find("Skinned Thing") != std::string::npos, "the item naming it, in its words");
-	CHECK(text.find("Used by (1)") != std::string::npos, "the toolbar's chip, counted");
 	InspectorWindow *inspector_window = nullptr;
 	for (int i = 0; i < ui.windows.pass().window_count() && !inspector_window; ++i)
 		inspector_window = dynamic_cast<InspectorWindow *>(&ui.windows.pass().window(i));

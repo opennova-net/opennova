@@ -108,6 +108,28 @@ void refusal_text(const std::string &text) {
 
 const char *reading_references() { return "Reading the project's references..."; }
 
+const char *nothing_names_it(bool file) {
+	return file ? "No file of the project names it or what it defines." : "No file of the project names it.";
+}
+
+const char *undo_brings_it_back(bool file) {
+	return file ? "Edit > Undo file brings it back." : "Undo brings it back.";
+}
+
+bool no_uses(size_t count, bool reading, const char *none, const char *how) {
+	if (reading) empty_state(reading_references(), count ? "The list may grow." : nullptr);
+	else if (!count) empty_state(none, how);
+	return count == 0;
+}
+
+bool uses_heading(const std::string &title, size_t count, bool reading, const std::string &tip, const char *none,
+                  const char *how) {
+	const std::string heading = title + " (" + std::to_string(count) + ")";
+	ImGui::SeparatorText(fit(heading, ImGui::GetContentRegionAvail().x - ImGui::GetStyle().SeparatorTextPadding.x * 2.0f).c_str());
+	tooltip(tip);
+	return !no_uses(count, reading, none, how);
+}
+
 bool named_action(const std::string &verb, const std::string &name, const char *tail, bool enabled,
                   const std::string &tip, bool small) {
 	const ImGuiStyle &style = ImGui::GetStyle();

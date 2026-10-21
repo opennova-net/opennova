@@ -386,16 +386,11 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 			view.documents.texture_uses ? view.documents.texture_uses->uses_of(view, document.path()) : kNone;
 	const std::string heading = "Used as (" + std::to_string(uses.size()) + ")###used_as";
 	if (!ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) return;
-	if (!view.findings.graph) {
-		ui_kit::empty_state(ui_kit::reading_references());
+	if (ui_kit::no_uses(uses.size(), !view.findings.graph, ui_kit::nothing_names_it(false),
+	                    "A model, a terrain, a sky, a particle effect, the HUD, a definition, a menu or a mission names a "
+	                    "texture by its file name; the game opens some by name itself.") ||
+	    !view.findings.graph)
 		return;
-	}
-	if (uses.empty()) {
-		ui_kit::empty_state("Nothing in the project uses this file.",
-		                    "A model, a terrain, a sky, a particle effect, the HUD, a definition, a menu or a mission names a "
-		                    "texture by its file name; the game opens some by name itself.");
-		return;
-	}
 	for (size_t i = 0; i < uses.size(); ++i) {
 		const TextureUse &use = uses[i];
 		ImGui::PushID(int(i));

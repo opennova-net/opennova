@@ -1180,9 +1180,8 @@ void FilesWindow::draw_card(const SessionView &view) {
 	// A kind whose files name none (a wave, a texture) says nothing of it.
 	const bool names_any = !card.names.empty() || asset_kind_row(card.kind).names_files;
 	if (names_any && ImGui::CollapsingHeader(names.c_str(), card.names.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
-		if (card.names.empty())
-			ui_kit::empty_state(card.reading ? ui_kit::reading_references() : "No other file or record.");
-		else if (ImGui::BeginTable("names", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+		if (!ui_kit::no_uses(card.names.size(), card.reading, "No other file or record.") &&
+		    ImGui::BeginTable("names", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 			ImGui::TableSetupColumn("##state", ImGuiTableColumnFlags_WidthStretch, 1.0f);
@@ -1219,9 +1218,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	// Who names it, or what it defines: a click goes to the use.
 	const std::string users = "Named by (" + count(card.used_by.size()) + ")###users";
 	if (ImGui::CollapsingHeader(users.c_str(), card.used_by.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
-		if (card.used_by.empty())
-			ui_kit::empty_state(card.reading ? ui_kit::reading_references()
-			                                 : "No file of the project names it or what it defines.");
+		ui_kit::no_uses(card.used_by.size(), card.reading, ui_kit::nothing_names_it(true));
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(card.used_by.size()));
 		while (clipper.Step())

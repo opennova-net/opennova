@@ -75,7 +75,7 @@ void draw_import(Workspace &workspace, const AssetScan &scan, const TerrainImpor
 		ui_kit::quiet_text(std::to_string(made.foliage) + (made.foliage == 1 ? " foliage definition" : " foliage definitions"),
 		                   "Written into the terrain as its foliage blocks.");
 	for (const TerrainImportOption &option : made.options)
-		ui_kit::quiet_text(option.label + ": " + option.value + (option.set ? "" : " (the importer's own)"));
+		ui_kit::quiet_text(option.label + ": " + option.value, option.set ? std::string() : "The importer's own.");
 	ImGui::Unindent();
 	const bool can = workspace.view().allows(EditorRequestKind::Reimport);
 	ImGui::BeginDisabled(!can);
@@ -99,7 +99,9 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 		draw_import(workspace, scan, uses.import);
 		ImGui::Separator();
 	}
-	if (!mission_uses_heading(uses.missions.size(), uses.reading, "A mission's header names its terrain (Terrain).")) {
+	if (!ui_kit::uses_heading("Missions on it", uses.missions.size(), uses.reading,
+	                          "The missions whose header names this terrain, with what each lays over it.",
+	                          "No mission runs on it.", "A mission's header names its terrain (Terrain).")) {
 		ImGui::Separator();
 		return true;
 	}
@@ -113,7 +115,8 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 			inspector_jump_line(workspace, file_target(scan, use.environment_file),
 			                    "Under the environment " + io::utf8_file_name(use.environment_file), "e" + tag);
 		else if (!use.environment.empty())
-			ui_kit::quiet_text("Under the environment " + use.environment + " (not in the project)");
+			ui_kit::quiet_text("Under the environment " + use.environment + " (missing)",
+			                   "The project has no " + use.environment + ".");
 		if (!use.tile_set.empty()) ui_kit::quiet_text("Its tiles from the tile set " + use.tile_set, "Not the terrain's own.");
 		if (use.tiles) ui_kit::quiet_text("It places its own tiles (" + use.name + ".til)");
 		// The terrain keys overcast.def and its environment set after this file's (the game's terrain reader reads
@@ -125,10 +128,9 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 			ReferenceTarget target = file_target(scan, file);
 			target.locator = environment ? terrain_key_locator(line.index) : TextDocument::locator(size_t(line.line), 1);
 			if (environment) target.field = "value";
-			inspector_jump_line(workspace, target,
-			                    "Its " + line.key + " " + line.value + " from " + io::utf8_file_name(file) + " (line " +
-			                            std::to_string(line.line) + "), read after this file",
-			                    "k" + tag + "." + std::to_string(int(line.file)) + "." + std::to_string(line.line));
+			inspector_jump_line(workspace, target, "Its " + line.key + " " + line.value + " from " + io::utf8_file_name(file),
+			                    "k" + tag + "." + std::to_string(int(line.file)) + "." + std::to_string(line.line),
+			                    "Line " + std::to_string(line.line) + ", read after this file: the mission's terrain has it from there.");
 		}
 		ImGui::Unindent();
 	}

@@ -77,6 +77,19 @@ void warning_line(const std::string &text, const std::string &tip = std::string(
 void refusal_text(const std::string &text);
 // The words a view shows while the project's references are still being read.
 const char *reading_references();
+// What a list of who uses a thing says when no file of the project names it (`file`: "or what it defines" too).
+const char *nothing_names_it(bool file);
+// What a confirmation says of its way back: a document's Undo, or a file's chore's Edit > Undo file (`file`).
+const char *undo_brings_it_back(bool file);
+// Under a list of who uses a thing, one line while it lists none or the project's references are being read: the
+// reading's words (`reading`; while it lists some already, that the list may grow in its tooltip), else `none` with
+// `how` (what would name the thing) in its tooltip. True when it lists none.
+bool no_uses(size_t count, bool reading, const char *none, const char *how = nullptr);
+// A list of who uses a thing, headed (a record's Referenced by, a file's Used by, a clip's Played by, the
+// missions on a terrain): "<title> (<count>)" on a separator line, `tip` (what it lists) in its tooltip, then
+// no_uses. True when there are uses to list under it.
+bool uses_heading(const std::string &title, size_t count, bool reading, const std::string &tip, const char *none,
+                  const char *how = nullptr);
 // A button that names what it acts on, `verb` then `name` ("Import gametext.bin..."; `tail` after the name),
 // cut to what is left of the line in its middle (a name's end tells two apart), its id the verb's whatever the
 // name: pressed only while `enabled`, `tip` its tooltip.

@@ -46,11 +46,12 @@ void line_of(Workspace &workspace, const FileCard::Named &named, bool reveal) {
 	line_of(workspace, named, named.missing(), named.value, reveal);
 }
 
-// A list of the card's lines under its heading, the one a Go to landed on kept drawn to be scrolled to.
+// A list of the card's lines under its heading (`tip` what it lists), the one a Go to landed on kept drawn to be
+// scrolled to.
 template <typename LineType>
-void lines(Workspace &workspace, const char *heading, const std::vector<LineType> &list, const char *none, bool reveal) {
-	ImGui::SeparatorText((std::string(heading) + " (" + std::to_string(list.size()) + ")").c_str());
-	if (list.empty()) return ui_kit::empty_state(none);
+void lines(Workspace &workspace, const char *heading, const char *tip, const std::vector<LineType> &list, bool reading,
+           const char *none, bool reveal) {
+	if (!ui_kit::uses_heading(heading, list.size(), reading, tip, none)) return;
 	ImGui::PushID(heading);
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(list.size()));
@@ -139,8 +140,10 @@ void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache
 	ImGui::SameLine();
 	if (ImGui::SmallButton("Show in folder")) workspace.request(request::reveal_path(join_path(view.project.root, card.path)));
 	definitions(workspace, card, reveal);
-	lines(workspace, "Used by", card.used_by, "No file of the project names it.", false);
-	lines(workspace, "Names", card.names, "It names no other file or name the editor follows.", reveal);
+	lines(workspace, "Used by", "The fields of the project that name it or what it defines.", card.used_by, card.reading,
+	      ui_kit::nothing_names_it(true), false);
+	lines(workspace, "Names", "The files and names its fields name.", card.names, card.reading,
+	      "It names no other file or name the editor follows.", reveal);
 }
 
 } // namespace opennova::editor

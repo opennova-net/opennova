@@ -41,16 +41,17 @@ namespace {
 // while uses name it, only while `allowed`) and Cancel. The button pressed: 1 Delete, -1 Cancel, 0 none.
 int delete_dialog_body(const std::string &named_by, size_t count, const std::vector<std::string> &uses, const char *none,
                        const char *trash, bool allowed) {
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
 	if (count) {
 		ui_kit::warning_line(named_by);
-		for (const std::string &place : uses) ImGui::BulletText("%s", place.c_str());
+		for (const std::string &place : uses) {
+			ImGui::Bullet();
+			ui_kit::clipped_text(place);
+		}
 		if (count > uses.size()) ImGui::TextDisabled("and %zu more", count - uses.size());
 	} else if (none) {
-		ImGui::TextDisabled("%s", none);
+		ui_kit::quiet_text(none);
 	}
-	ImGui::PopTextWrapPos();
-	ui_kit::quiet_text("Edit > Undo file brings it back.",
+	ui_kit::quiet_text(ui_kit::undo_brings_it_back(true),
 	                   std::string(trash) +
 	                           (count ? " Deleted, what names it shows as Problems rows until it is changed." : ""));
 	ImGui::BeginDisabled(!allowed);
@@ -240,8 +241,8 @@ void FilesWindow::draw_folder_menu(const SessionView &view, const std::string &f
 		else folder_delete_ = folder;
 	}
 	ui_kit::tooltip(empty ? std::string("It holds nothing. Edit > Undo file makes it again.")
-	                      : std::string("With what it holds, to the project's trash, once who names it is shown. Edit > "
-	                                    "Undo file brings it back."));
+	                      : std::string("With what it holds, to the project's trash, once who names it is shown. ") +
+	                                ui_kit::undo_brings_it_back(true));
 	if (ImGui::MenuItem("Show in folder", nullptr, false, view.allows(EditorRequestKind::RevealPath)))
 		workspace_.request(request::reveal_path(join_path(view.project.root, folder)));
 }
@@ -270,7 +271,8 @@ void FilesWindow::draw_chore_entries(const SessionView &view, const AssetEntry &
 	const bool deletes = !output && view.allows(EditorRequestKind::DeleteAsset);
 	if (ImGui::MenuItem(("Delete" + several + "...").c_str(), "Del", false, deletes)) start_delete(entry, others);
 	ui_kit::tooltip(output ? "Made by the import of " + entry.imported_from + ": delete the source."
-	                       : std::string("To the project's trash, once who names it is shown. Edit > Undo file brings it back."));
+	                       : std::string("To the project's trash, once who names it is shown. ") +
+	                                 ui_kit::undo_brings_it_back(true));
 }
 
 void FilesWindow::start_delete(const AssetEntry &entry, const std::vector<std::string> &others) {

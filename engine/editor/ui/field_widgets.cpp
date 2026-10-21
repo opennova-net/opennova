@@ -151,10 +151,6 @@ size_t typed_capacity(const FieldSchema &field) {
 
 std::string field_tip(const FieldSchema &field) { return details(field); }
 
-std::string column_header(const FieldSchema &field) {
-	return field_title(field) + (field.unit.empty() ? std::string() : " (" + field.unit + ")");
-}
-
 Edited number(const FieldSchema &field, Value &value, bool unit) {
 	Edited out;
 	const ImGuiStyle &style = ImGui::GetStyle();

@@ -63,7 +63,7 @@ constexpr double kFlashSeconds = 1.2; // how long a field a request showed keeps
 constexpr size_t kSavedLines = 8; // the records a changed field's tooltip names, of several
 
 const ImVec4 kMixed(0.60f, 0.75f, 0.95f, 1.0f);
-const char *const kIgnoredTip = "The game does not read this here; the file still writes it.";
+const char *const kIgnoredTip = "The game does not read this here.";
 const char *const kMixedTip = "The selected records differ here; a change sets it on every one.";
 const char *const kUnverifiedTip = "Whether the game reads this here is not witnessed yet.";
 
@@ -870,7 +870,7 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 	const bool ignored = field.applies == Applicability::Ignored;
 	if (ignored && !written(document, address, schema)) {
 		ImGui::TextDisabled("-");
-		ui_kit::tooltip("The game does not read this for this record.");
+		ui_kit::tooltip(kIgnoredTip);
 		return;
 	}
 	ImGui::PushID(schema.id.c_str());
@@ -994,7 +994,7 @@ void records_table(Workspace &workspace, Controls &controls, const Document &doc
 	ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed,
 	                        ui_kit::text_width(ui_kit::kChangeRoom) + ui_kit::text_width("000") + style.FramePadding.x * 2.0f);
 	for (const FieldSchema &field : fields)
-		ImGui::TableSetupColumn(field_widgets::column_header(field).c_str(), ImGuiTableColumnFlags_WidthFixed,
+		ImGui::TableSetupColumn(field_title(field).c_str(), ImGuiTableColumnFlags_WidthFixed,
 		                        column_width(field));
 	ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
 	// Each heading under its column's id, as TableHeadersRow scopes them: two fields may share a
@@ -1069,7 +1069,7 @@ void collection_block(Workspace &workspace, Controls &controls, const Document &
 		ImGui::SeparatorText(ui_kit::fit(heading, ImGui::GetContentRegionAvail().x - padding).c_str());
 		ui_kit::tooltip(heading + "\n" + token);
 	}
-	if (spec.applies == Applicability::Ignored) ui_kit::warning_line("The game does not read these here.", kIgnoredTip);
+	if (spec.applies == Applicability::Ignored) ui_kit::warning_line("The game does not read these here.");
 	size_t selected = SIZE_MAX;
 	for (size_t i = 0; i < ids.size(); ++i)
 		if (workspace.view().documents.selection.primary.kind == spec.kind && workspace.view().documents.selection.primary.child == ids[i]) selected = i;
@@ -1080,7 +1080,6 @@ void collection_block(Workspace &workspace, Controls &controls, const Document &
 		tools.count = ids.size();
 		tools.selected = selected;
 		tools.max = spec.max;
-		tools.pick = "Select a row (its number) first.";
 		tools.small = true;
 		const NodeAddress address = selected == SIZE_MAX ? NodeAddress() : NodeAddress{owner.row, spec.kind, ids[selected]};
 		switch (ui_kit::row_tools(row, tools)) {
@@ -1263,8 +1262,9 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 		}
 	}
 	if (users_.empty()) return;
-	ImGui::Separator();
-	ImGui::Text(others_only ? "Referenced by %zu field(s) in other files" : "Referenced by %zu field(s)", users_.size());
+	ui_kit::uses_heading("Referenced by", users_.size(), false,
+	                     others_only ? "The fields of the other files that name it." : "The fields that name it.",
+	                     ui_kit::nothing_names_it(false));
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(users_.size()));
 	while (clipper.Step())
@@ -1300,18 +1300,14 @@ void InspectorWindow::used_by(const DocumentBase &document) {
 		used_by_ = file_users(view, document.path());
 	}
 	const FileUsers &users = used_by_;
-	ImGui::Separator();
-	const std::string heading = basename_of(document.path()) + ": used by " + std::to_string(users.count) +
-	                            (users.count == 1 ? " field" : " fields") +
-	                            (users.further_count ? ", " + std::to_string(users.further_count) + " more through them" : "");
-	ui_kit::clipped_text(heading, heading + "\nThe records of the project that name this file or what it defines, by "
-	                              "file; under a record that defines what others name (an item naming a model), those "
-	                              "uses too.");
-	if (users.reading) ui_kit::empty_state(ui_kit::reading_references(), "The list may grow.");
-	if (users.groups.empty()) {
-		if (!users.reading) ui_kit::empty_state("No file of the project names it or what it defines.");
+	const std::string further = users.further_count ? ", " + std::to_string(users.further_count) + " more through them"
+	                                                : std::string();
+	if (!ui_kit::uses_heading("Used by", users.count, users.reading,
+	                          "The fields of the project that name " + basename_of(document.path()) + " or what it "
+	                          "defines" + further + ", by file.",
+	                          ui_kit::nothing_names_it(true)) ||
+	    users.groups.empty())
 		return;
-	}
 	const auto line = [&](const FileUsers::Line &shown) {
 		const bool pressed = ui_kit::fitted_selectable(shown.words, "use");
 		if (pressed) go_to(workspace_, shown.target);
