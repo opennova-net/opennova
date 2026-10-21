@@ -185,12 +185,13 @@ SpawnLoadoutPlan spawn_loadout_plan(const SpawnLoadoutInput &input,
             break;
         }
     }
-    // Out of a session the single player's body class is the mission's word, which the
-    // mission start's Player_InitPlayer stamped and nothing after writes from the profile
-    // (D-PLAYERINFO-33) [orig: Game_ApplySessionSettingsToGlobals @0x551500 -
-    //  @0x551707..0x551725; Player_InitPlayer @0x4E15F0 - @0x4E182C..0x4E1832].
-    plan.set_player_class = input.has_player_class && in_session;
-    plan.player_class = plan.set_player_class ? input.player_class : 0;
+    // The body's class word is the mission start's Player_InitPlayer's and nothing after
+    // writes it from the profile: in a session the side word its Team names, which the
+    // session start set from the record's two class bytes, out of one the mission's word
+    // (D-PLAYERINFO-33). The profile class rides the kit apply alone, in a session.
+    // [orig: Game_ApplySessionSettingsToGlobals @0x551500 - @0x5516EE..0x5516FD,
+    //  @0x551707..0x551725; Player_InitPlayer @0x4E15F0 - @0x4E1809..0x4E1832]
+    plan.player_class = input.has_player_class && in_session ? input.player_class : 0;
     // Mission-authored kits outrank the profile selection.
     if (has_explicit_spawn_loadout) {
         plan.action = SpawnLoadoutAction::kSyncInventory;

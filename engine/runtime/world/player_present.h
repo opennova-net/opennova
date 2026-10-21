@@ -355,16 +355,18 @@ enum class SpawnLoadoutAfterApply : uint8_t {
 };
 
 struct SpawnLoadoutPlan {
-    bool set_player_class = false;
-    int32_t player_class = 0;       // the class to commit / apply (0 = unclassed)
+    int32_t player_class = 0;       // the class the kit apply carries (0 = unclassed)
     SpawnLoadoutAction action = SpawnLoadoutAction::kNone;
     std::vector<SpawnLoadoutKitRow> kit;
     SpawnLoadoutAfterApply after_apply = SpawnLoadoutAfterApply::kSyncInventory;
 };
 
 // The mission-start projection of the staged PLAYER_INFO kit onto the local
-// player: the profile class commits whenever it was carried in a session (out of
-// one the body keeps the mission's class word, D-PLAYERINFO-33); mission-authored
+// player. It commits no class to the body: the body's class word is the mission
+// start's Player_InitPlayer's, in a session the side word its Team names (the host's
+// Player_InitPlayerSideWords, a joiner's JoinerRole::stamp_init_player_class), out of
+// one the mission's word (D-PLAYERINFO-33); the profile class reaches the kit apply
+// alone, in a session (`player_class`, 0 out of one). Mission-authored
 // kits outrank the profile selection (unlike the inventory itself, that
 // source bit stays false for load_weapon_table's WPN_M4AUTO fallback, so a
 // real default weapon cannot masquerade as mission policy); a staged kit

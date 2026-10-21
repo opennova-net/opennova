@@ -306,9 +306,9 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 	const opennova::world::SpawnLoadoutPlan plan =
 			opennova::world::spawn_loadout_plan(input, spawn_sim->has_explicit_spawn_loadout(),
 					spawn_sim->is_host_listening() || spawn_sim->is_joiner());
-	if (plan.set_player_class) {
-		spawn_sim->set_local_player_class(plan.player_class);
-	}
+	// No class commit: the body's class word is the mission start's Player_InitPlayer's (in a
+	// session the side word its Team names), which nothing after writes from the profile
+	// (the engine's spawn_loadout_plan carries the witness).
 	// Whatever the plan, the viewmodel then follows the inventory the spawn
 	// settled: the FP renderer reads the equipped slot's def and draws nothing
 	// without one (the engine's viewmodel_def_pick carries the witness).

@@ -71,8 +71,9 @@ public:
 	void set_spawn_loadout(const Ref<PlayerSpawnLoadout> &p_loadout) { spawn_loadout_ = p_loadout; }
 	Ref<PlayerSpawnLoadout> spawn_loadout() const { return spawn_loadout_; }
 	// The runtime-start projection of the staged loadout (the engine's
-	// spawn_loadout_plan, world/player_present.h): the class commit, the
-	// mission-kit precedence, the kit apply and the inventory sync.
+	// spawn_loadout_plan, world/player_present.h): the mission-kit precedence,
+	// the kit apply and the inventory sync (no class commit: the body keeps the
+	// mission start's class word).
 	void apply_local_player_spawn_loadout();
 
 	// The soldier's THIRD-PERSON gun. Built as a SIBLING of the avatar rather

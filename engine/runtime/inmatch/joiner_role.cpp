@@ -1482,6 +1482,25 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	return decoded;
 }
 
+// Player_InitPlayer's class word: the side L's Team names (team 1 or 3 the first side),
+// stored with no range test: the 0x5A's grant for that side, else the session start's
+// (the join vars' class bytes, which the session start clamped). A runtime with no join
+// vars installed (a harness) has no word to store.
+// [orig: Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_CharClassTeam2
+//  @0x4E1819..0x4E181F, g_CharClassTeam1 @0x4E182C..0x4E1832; NapiNPClientMsg_HandleWeaponLoadoutSync
+//  @0x4290E0 - @0x42941F / @0x429427]
+bool JoinerRole::stamp_init_player_class(world::Entity &local) const {
+	const int side = local.team == 1 || local.team == 3 ? 0 : 1;
+	if (granted_side_class_[side] != 0) {
+		local.player_class = granted_side_class_[side];
+		return true;
+	}
+	const CharacterJoinVars *vars = runtime->character_join_vars();
+	if (vars == nullptr) return false;
+	local.player_class = vars->char_class[side];
+	return true;
+}
+
 // A self S2C 0x50 on the local entity re-runs Player_InitPlayer(1) after its local arm:
 // the class (and avatar) words of the side L's Team names, the weapon leg (the slots
 // reset and reloaded from the resident kit the arm re-copied, the spawn default
@@ -1508,16 +1527,8 @@ void JoinerRole::reinit_local_player_on_team_assign() {
 			post_start_identity_pending_ = true;
 		return;
 	}
-	const int side = local->team == 1 || local->team == 3 ? 0 : 1;
-	const CharacterJoinVars *vars = rt.character_join_vars();
-	// The side's word, stored as it is (Player_InitPlayer has no range test): the 0x5A's
-	// grant, else the session start's; only a runtime with no join vars installed (a
-	// harness) has no word to store. [orig: Player_InitPlayer @0x4E15F0 - @0x4E181F /
-	//  @0x4E1832]
-	if (granted_side_class_[side] != 0)
-		local->player_class = granted_side_class_[side];
-	else if (vars != nullptr)
-		local->player_class = vars->char_class[side];
+	// The side's word, stored as it is (stamp_init_player_class).
+	stamp_init_player_class(*local);
 	kernel.local.respawn_init(/*rebuild_kit=*/true);
 	local->hidden = false;
 	local->flags &= ~world::kEntityFlagCarried;

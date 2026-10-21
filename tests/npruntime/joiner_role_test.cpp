@@ -460,6 +460,43 @@ bool run_the_spawn_takes_the_mission_starts_identity() {
 	return ok;
 }
 
+// L's spawn takes the mission start's Player_InitPlayer class word: the class byte of the side
+// its Team names (team 1 or 3 the first side), stored with no range test, whatever class the
+// shell's pre-spawn apply latched (here 5); a harness with no join vars keeps that latch.
+// [orig: Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_CharClassTeam2
+//  @0x4E1819..0x4E181F, g_CharClassTeam1 @0x4E182C..0x4E1832; Game_StartMission @0x525BBC]
+bool run_the_spawn_takes_its_sides_class_word() {
+	struct Case {
+		uint8_t self_team;
+		bool vars;
+		uint8_t expected;
+	};
+	bool ok = true;
+	for (const Case c : {Case{2, true, 7}, Case{1, true, 4}, Case{2, false, 5}}) {
+		Harness h;
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+		                             /*game_type=*/0x10002u, 0, true, c.self_team);
+		if (c.vars) {
+			inmatch::CharacterJoinVars vars;
+			vars.char_class[0] = 4; // team 1 / 3: a byte outside 5..9, stored as it is
+			vars.char_class[1] = 7; // team 0 / 2
+			h.role.runtime->set_character_join_vars(vars);
+		}
+		h.kernel->local.loadout.pending_player_class = 5; // the shell's pre-spawn latch
+		auto &row = h.role.runtime->state().upsert(0x0005);
+		row.cls = EntityClass::Player;
+		row.type_id = w::kPlayerInfantryTypeId;
+		h.role.run_tick(h.input); // the spawn frame
+		const w::Entity *L = h.kernel->local.player();
+		ok &= expect(h.role.local_spawned() && L != nullptr && L->team == c.self_team &&
+						L->player_class == c.expected,
+				"spawn class: the side word of L's team, unranged (the latch only without vars)");
+	}
+	return ok;
+}
+
 // L spawns on the in-match edge, after the boot's definition sweeps: the edge
 // binds its items.def row like the host's boot did, so L's body sounds resolve
 // through its own profile instead of the slotless "default" (silent footsteps
@@ -4086,6 +4123,7 @@ int main() {
 	ok &= run_the_teardown_goodbye_follows_the_exit_route();
 	ok &= run_the_join_screen_abort_bursts_the_minus_one_record();
 	ok &= run_the_spawn_takes_the_mission_starts_identity();
+	ok &= run_the_spawn_takes_its_sides_class_word();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_remote_record_repicks_its_rows_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();

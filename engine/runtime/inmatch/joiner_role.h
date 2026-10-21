@@ -399,6 +399,9 @@ private:
 	// g_CharClassTeam1/2 as the joiner's 0x5A grants leave them: a grant stores its
 	// class for L's side off the authority (0 = the session start's, the join vars').
 	uint8_t granted_side_class_[2] = {0, 0};
+	// Player_InitPlayer's class word on L: the side its Team names (team 1 or 3 the first),
+	// stored as it is; false, storing nothing, on a runtime with no join vars (a harness).
+	bool stamp_init_player_class(world::Entity &local) const;
 	// A self S2C 0x50's re-run of Player_InitPlayer(1) on L, then its identity pair
 	// (D-NET-570).
 	void reinit_local_player_on_team_assign();

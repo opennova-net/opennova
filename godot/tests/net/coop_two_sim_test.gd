@@ -2723,6 +2723,49 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 
 
 
+# The joiner's body takes the mission start's Player_InitPlayer class word: the class byte
+# of the side its team names from the join's character profile (team 1 or 3 the first
+# side), whatever class the shell's pre-spawn kit apply carried (the engine's
+# JoinerRole::stamp_init_player_class and spawn_loadout_plan carry the witness).
+func test_joiner_body_takes_its_sides_class_word_over_the_prespawn_apply() -> void:
+	var mission := _combat_mission()
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+
+	var joiner := Simulation.new()
+	var avatars := AvatarDatabase.new()
+	assert_eq(avatars.load(ProjectSettings.globalize_path(AVATARS_FIXTURE)), OK)
+	var profile := avatars.character_join_profile({
+		"team": 0,
+		"side_profiles": [{"team": 0, "player_class": 6}, {"team": 1, "player_class": 7}],
+	}, true)
+	assert_eq([profile.get_player_class(0), profile.get_player_class(1)], [6, 7],
+			"the join carries the two side class bytes")
+	joiner.set_join_character_profile(profile)
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "SideClassJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	# The shell's runtime-start apply, ahead of the spawn, with the profile's own class 5.
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 5),
+			"the pre-spawn apply latches the kit")
+
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		return
+	var team := joiner.get_local_player_team()
+	var expected := 6 if team == 1 or team == 3 else 7
+	assert_eq(joiner.get_local_player_class(), expected,
+			"the body's class is its team's side word, not the pre-spawn apply's 5")
+
+
+
 func _subrate_walk_mission() -> MissionData:
 	# A populated-enough entity set that the BANDWIDTH-capped 0x0A rotates
 	# entities across frames (the D-NET-154 regime): eight parked AI organics
