@@ -510,61 +510,20 @@ void row_body_conform(ClientEntityState &es, int arbitrated_state, const RowConf
 		es.roll_bam += (roll_slope - es.roll_bam + 2) >> 2;
 }
 
-void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
-                          world::AnimVariantRings *rings,
-                          const terrain::TerrainHeightField *terrain,
-                          const RowConformIo &conform_io,
-                          uint32_t key, bool is_self, bool starved,
-                          const ClientReplicaPipeline::ReplicaContactResolver *resolver,
-                          const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
-                          const ClientReplicaPipeline::ReplicaPeerSphere *peers,
-                          int32_t peer_count, uint32_t tick, int32_t water_z,
-                          std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds) {
-	if (es.rm_adm_id < 0) {
-		// The body pass's slope conform does not wait on the animation table.
-		if (es.cls == EntityClass::Player && !is_self && !starved)
-			row_body_conform(es, es.net_anim_current >= 0
-					? static_cast<int>(es.net_anim_current)
-					: static_cast<int>(es.anim_state_id), conform_io);
-		return;
-	}
-	const auto play_slot_at = [&](uint8_t slot, int32_t x, int32_t y, int32_t z) {
-		ClientReplicaPipeline::ReplicaSlotSound sound;
-		sound.handle = es.handle;
-		sound.type_id = es.type_id;
-		sound.character_id = es.cls == EntityClass::Player
-				? static_cast<uint16_t>(es.net_id) : 0;
-		sound.slot = slot;
-		sound.pos[0] = x;
-		sound.pos[1] = y;
-		sound.pos[2] = z;
-		sounds.push_back(sound);
-	};
-	const auto play_slot = [&](uint8_t slot) { play_slot_at(slot, es.x, es.y, es.z); };
-	// Channel state machine (the begin_body_transition mirror). The channel
-	// chases the ARBITRATED current (+0x2BC, written per record by the fold's
-	// @0x4c1153 apply — D-NET-209), never the raw coalesced wire byte; the
-	// phase seed is ONE-SHOT per direct commit [orig: AnimMap_UpdateEntity
-	// zeroes entity+0x377 after use @0x40B7E4]; the bottom-history slot
-	// resets on EVERY update of climbs 32..35 and grenade deaths 176..179,
-	// before the same-state fast path [orig: @0x40B607..0x40B645].
-	int target_state = es.net_anim_current >= 0
-			? static_cast<int>(es.net_anim_current)
-			: static_cast<int>(es.anim_state_id);
-	const bool bottom_reset_state =
-			(target_state >= world::anim_state::kClimbIdle &&
-			 target_state <= world::anim_state::kClimbIdle + 3) ||
-			(target_state >= world::anim_state::kDeathGrenadeBase &&
-			 target_state <= world::anim_state::kDeathGrenadeBase + 3);
-	// The gait->stance transition insert [orig: AnimMap_UpdateEntity
-	// @0x40b662..0x40b737]: with no deferred armed, a forward gait
-	// committing to the crouch/prone walk first plays the run2crouch-family
-	// clip and defers the real target — gated on the adm actually carrying
-	// the transition clip (retail: table entry != entry 0; here: the state
-	// resolves a track).
-	// The blend duration is picked from the REQUESTED state's flags before
-	// the insert replaces the played clip [orig: the +0x2BC flags test
-	// @0x40b64b..0x40b65d precedes the insert @0x40b662..0x40b737].
+// One served ring entry for a decoded row's channel (world::AnimVariantRings,
+// D-NET-196): entry 0 without the shared table.
+int32_t row_serve_ring(world::AnimVariantRings *rings, const world::IRootMotionSource &src,
+                       const ClientEntityState &es, int state) {
+	return rings != nullptr ? rings->serve(&src, es.rm_adm_id, state) : 0;
+}
+
+// A decoded row's AnimMap primary channel, its state half: the gait insert, the
+// re-init onto `target_state` (the insert's, when one replaces the request) and
+// the deferred promotion. Returns whether the promotion released a loop parked on
+// its boundary this tick (row_channel_advance treats that as the wrap).
+// [orig: AnimMap_UpdateEntity @0x40B5F0]
+bool row_channel_prepare(ClientEntityState &es, world::IRootMotionSource &src,
+                         world::AnimVariantRings *rings, int &target_state) {
 	const int blend_key_state = target_state;
 	if (es.net_anim_pending == 0 && es.rm_state >= 0 &&
 			es.net_anim_current >= 0 && target_state != es.rm_state) {
@@ -581,9 +540,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// the heads every body of the .adm shares (the client's own World body too)
 	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778: the head read @0x40B740,
 	// table[S] = node+0x24 @0x40B746..0x40B749, slot+0x44 = node @0x40B76F].
-	const auto serve = [&](int state) -> int32_t {
-		return rings != nullptr ? rings->serve(&src, es.rm_adm_id, state) : 0;
-	};
+	const auto serve = [&](int state) { return row_serve_ring(rings, src, es, state); };
 	if (es.rm_state < 0) {
 		es.rm_state = static_cast<int16_t>(target_state);
 		es.rm_prev_state = static_cast<int16_t>(target_state);
@@ -653,23 +610,17 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			es.net_anim_ratio_live = false;
 		}
 	}
-	if (bottom_reset_state) es.rm_prev_bottom_live = false;
-	// The legs keep chasing whatever the clip coverage is — the body heading
-	// is presentation state, not clip state (a clipless wire state must not
-	// freeze the torso mid-twist).
-	// A starved row (the chase capped at 512) advances its channel only: the
-	// body pass returns right after the chase, and the AnimMap update ran at
-	// its top [orig: org2 @0x4b4669..0x4b4670 -> @0x4b83a8; org1 @0x4b9c39;
-	// AnimMap_UpdateDualChannels @0x4B41C9 / @0x4b9a26].
-	if (es.cls == EntityClass::Player && !starved) row_leg_chase(es, key);
-	// The org2 dead tail: a latched-dead body's view yaw follows the leg-chased
-	// body heading every tick (the local player's look is its own motor's)
-	// [orig: Entity_UpdateInfantryPlayerBody @0x4b4d30..0x4b4d4c].
-	if (es.cls == EntityClass::Player && !is_self && !starved &&
-			(es.rm_entity_flags & world::kEntityFlagDead) != 0)
-		es.heading_bam = es.rm_body_heading;
-	world::RootMotionFrame frame;
+	return released;
+}
+
+// The channel's playhead half: the advance (parked while armed) and an unarmed
+// loop wrap's ring serve, or the blend's two halves. False = no track.
+// [orig: AnimMap_UpdateEntity @0x40B5F0 (the advance @0x40B7FE)]
+bool row_channel_advance(ClientEntityState &es, world::IRootMotionSource &src,
+                         world::AnimVariantRings *rings, bool released,
+                         world::RootMotionFrame &frame) {
 	bool have = false;
+	const auto serve = [&](int state) { return row_serve_ring(rings, src, es, state); };
 	if (es.rm_blend_weight >= 1.0f) {
 		int32_t phase = es.rm_phase;
 		const int state = es.rm_state;
@@ -722,6 +673,82 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		es.rm_prev_phase = pphase;
 		es.rm_phase = tphase;
 	}
+	return have;
+}
+
+void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
+                          world::AnimVariantRings *rings,
+                          const terrain::TerrainHeightField *terrain,
+                          const RowConformIo &conform_io,
+                          uint32_t key, bool is_self, bool starved,
+                          const ClientReplicaPipeline::ReplicaContactResolver *resolver,
+                          const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
+                          const ClientReplicaPipeline::ReplicaPeerSphere *peers,
+                          int32_t peer_count, uint32_t tick, int32_t water_z,
+                          std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds) {
+	if (es.rm_adm_id < 0) {
+		// The body pass's slope conform does not wait on the animation table.
+		if (es.cls == EntityClass::Player && !is_self && !starved)
+			row_body_conform(es, es.net_anim_current >= 0
+					? static_cast<int>(es.net_anim_current)
+					: static_cast<int>(es.anim_state_id), conform_io);
+		return;
+	}
+	const auto play_slot_at = [&](uint8_t slot, int32_t x, int32_t y, int32_t z) {
+		ClientReplicaPipeline::ReplicaSlotSound sound;
+		sound.handle = es.handle;
+		sound.type_id = es.type_id;
+		sound.character_id = es.cls == EntityClass::Player
+				? static_cast<uint16_t>(es.net_id) : 0;
+		sound.slot = slot;
+		sound.pos[0] = x;
+		sound.pos[1] = y;
+		sound.pos[2] = z;
+		sounds.push_back(sound);
+	};
+	const auto play_slot = [&](uint8_t slot) { play_slot_at(slot, es.x, es.y, es.z); };
+	// Channel state machine (the begin_body_transition mirror). The channel
+	// chases the ARBITRATED current (+0x2BC, written per record by the fold's
+	// @0x4c1153 apply — D-NET-209), never the raw coalesced wire byte; the
+	// phase seed is ONE-SHOT per direct commit [orig: AnimMap_UpdateEntity
+	// zeroes entity+0x377 after use @0x40B7E4]; the bottom-history slot
+	// resets on EVERY update of climbs 32..35 and grenade deaths 176..179,
+	// before the same-state fast path [orig: @0x40B607..0x40B645].
+	int target_state = es.net_anim_current >= 0
+			? static_cast<int>(es.net_anim_current)
+			: static_cast<int>(es.anim_state_id);
+	const bool bottom_reset_state =
+			(target_state >= world::anim_state::kClimbIdle &&
+			 target_state <= world::anim_state::kClimbIdle + 3) ||
+			(target_state >= world::anim_state::kDeathGrenadeBase &&
+			 target_state <= world::anim_state::kDeathGrenadeBase + 3);
+	// The gait->stance transition insert [orig: AnimMap_UpdateEntity
+	// @0x40b662..0x40b737]: with no deferred armed, a forward gait
+	// committing to the crouch/prone walk first plays the run2crouch-family
+	// clip and defers the real target — gated on the adm actually carrying
+	// the transition clip (retail: table entry != entry 0; here: the state
+	// resolves a track).
+	// The blend duration is picked from the REQUESTED state's flags before
+	// the insert replaces the played clip [orig: the +0x2BC flags test
+	// @0x40b64b..0x40b65d precedes the insert @0x40b662..0x40b737].
+	const bool released = row_channel_prepare(es, src, rings, target_state);
+	if (bottom_reset_state) es.rm_prev_bottom_live = false;
+	// The legs keep chasing whatever the clip coverage is — the body heading
+	// is presentation state, not clip state (a clipless wire state must not
+	// freeze the torso mid-twist).
+	// A starved row (the chase capped at 512) advances its channel only: the
+	// body pass returns right after the chase, and the AnimMap update ran at
+	// its top [orig: org2 @0x4b4669..0x4b4670 -> @0x4b83a8; org1 @0x4b9c39;
+	// AnimMap_UpdateDualChannels @0x4B41C9 / @0x4b9a26].
+	if (es.cls == EntityClass::Player && !starved) row_leg_chase(es, key);
+	// The org2 dead tail: a latched-dead body's view yaw follows the leg-chased
+	// body heading every tick (the local player's look is its own motor's)
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4b4d30..0x4b4d4c].
+	if (es.cls == EntityClass::Player && !is_self && !starved &&
+			(es.rm_entity_flags & world::kEntityFlagDead) != 0)
+		es.heading_bam = es.rm_body_heading;
+	world::RootMotionFrame frame;
+	const bool have = row_channel_advance(es, src, rings, released, frame);
 	// The player body's slope conform follows the eye in the body pass, ahead of
 	// its velocity and integrate; a starved body returns before both [orig:
 	// Entity_UpdateInfantryPlayerBody @0x4B40E0 - the eye @0x4B699F..0x4B6BAB,
@@ -1164,8 +1191,11 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		// [orig: @0x4B5EA9..0x4B5F2C]; the client's own body runs the World's.
 		if (!is_self && es.cls == EntityClass::Player && ground_occupant_provider_)
 			row_ride_link(es, state_, ground_occupant_provider_);
+		// The own row's channel shadows the World body's, which serves the rings
+		// for that body: a second serve would double its plays (D-NET-196).
 		if (root_motion_ != nullptr)
-			row_root_motion_tick(es, *root_motion_, anim_rings_, remote_motion_terrain_, conform_io,
+			row_root_motion_tick(es, *root_motion_, is_self ? nullptr : anim_rings_,
+			                     remote_motion_terrain_, conform_io,
 			                     rm_key, is_self, starved, &replica_contact_resolver_,
 			                     &replica_bound_radius_resolver_,
 			                     contact_peers.data(),
