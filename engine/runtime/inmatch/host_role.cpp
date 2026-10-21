@@ -414,14 +414,20 @@ void HostRole::send_own_mission_status() {
 	// resolved against the local table; all three leave in the 0x0B's pump, in queue
 	// order (D-NET-695). The page copy into the spawn buffer is the shell's
 	// (seed_session_kit_from_profile). A title whose submit ignores the class sends 8,
-	// or 7 for a mission of type 2 (DFX2-12).
-	// [orig: Game_StartMission - is_in_session @0x525767, is_mp_session_peer @0x525773,
+	// or 7 for a mission of type 2 (DFX2-12). The session test is retail's is_in_session
+	// fact, the rules' mp_session (a socket session; the socketless single player is out
+	// of one, as SinglePlayer_StartMission's network type 0 leaves it clear): our
+	// context's is_in_session word is set for every session create, the single player's
+	// too, so it cannot stand for it.
+	// [orig: SinglePlayer_StartMission @0x561AF0 - CNapiNetwork_SetNetworkType(0) @0x561BD4;
+	//  CNapiNetwork_SetNetworkType @0x4C4A50 - is_in_session = (type in 1..3) @0x4C4A85;
+	//  Game_StartMission - is_in_session @0x525767, is_mp_session_peer @0x525773,
 	//  g_LocalTeam @0x525793..0x5257C0, the class byte @0x5257C6, the page
 	//  @0x5257C9..0x525818, NetPacket_SendLoadoutSubmit(.., 195) @0x525836; is_in_session
 	//  @0x525BC4, is_mp_session_peer @0x525BCC, the class @0x525BE8..0x525C20,
 	//  g_CurrentWeaponSlot @0x525C1A, the call @0x525C2E; NetPacket_SendLoadoutSubmit
 	//  @0x42cdc0 - the slot resolve @0x42ce2d..0x42ce8b; dfx2.exe @0x42ec1f..0x42ec3e]
-	if (state.host_owner.ctx.is_in_session != 0 && kernel_ != nullptr) {
+	if (kernel_ != nullptr && kernel_->world.rules.mp_session) {
 		const mission::MissionKernel &kernel = *kernel_;
 		uint8_t team = 0;
 		for (const NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)

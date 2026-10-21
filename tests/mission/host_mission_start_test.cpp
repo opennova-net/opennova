@@ -323,6 +323,52 @@ void run_own_mission_start_submits_its_kit() {
 	CHECK(own->reply.loadout_buffer_set && own->reply.loadout_buffer.player_class == 8);
 }
 
+// The single player's mission start submits no kit: SinglePlayer_StartMission creates its
+// session with the network type 0, which leaves is_in_session clear, so both submits' session
+// tests fail and its own client queues the 0x0B alone (its slot is never accepted, its local
+// table stays the one the load and the shell built). Our session create sets the context's
+// is_in_session word for the single player too; the test is the rules' mp_session, the
+// socketless session's false.
+// [orig: SinglePlayer_StartMission @0x561AF0 - CNapiNetwork_SetNetworkType(0) @0x561BD4;
+//  CNapiNetwork_SetNetworkType - is_in_session = (type in 1..3) @0x4C4A85;
+//  Game_StartMission - is_in_session @0x525767 / @0x525BC4 ahead of the submits
+//  @0x525836 / @0x525C2E; the 0x0B @0x52624B]
+void run_single_player_mission_start_submits_no_kit() {
+	std::map<std::string, std::string> files;
+	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	ms::MissionKernel &kernel = *kernel_storage;
+	auto role_storage = std::make_unique<inmatch::HostRole>(
+			inmatch::RoleKind::SinglePlayer, nullptr);
+	inmatch::HostRole &role = *role_storage;
+	role.bind(kernel);
+	inmatch::ListenHostState &host = role.state;
+	kernel.open_document(two_entity_mission(), "sp_no_kit_pair", source_over(&files));
+	ms::KernelBootOptions options;
+	options.mp_session = false;
+	options.game_type = mission_game_type(kernel.mission);
+	options.bringup_net_session = [&] {
+		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
+		cfg.config.server_name = "SINGLEPLAYERGAME";
+		cfg.config.max_players = 1;
+		cfg.config.game_type = options.game_type;
+		cfg.socket_mode = inmatch::SocketMode::Socketless;
+		cfg.serve_and_play = true;
+		inmatch::HostBringup bringup;
+		bringup.host_cfg = cfg;
+		role.bring_up(bringup);
+	};
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	CHECK(!kernel.world.rules.mp_session);
+	CHECK(kernel.world.cached.local_player.valid());
+	std::vector<opennova::replication::Datagram> queued;
+	opennova::replication::Datagram dg;
+	while (host.host_loop.host_recv(dg)) queued.push_back(dg);
+	CHECK(queued.size() == 1);
+	if (queued.size() == 1) CHECK(queued[0].tag == 0x0B);
+}
+
 // The first mission start's round init seeds the own slot's loadout buffer from the spawn
 // buffer, which the mission load filled by then (here the title's default kit, the two of its
 // weapons the mission's weapon.def carries, in the kit's order); the session's own add, inside
@@ -382,6 +428,7 @@ int main() {
 	run_held_host(/*mission_start=*/false);
 	run_own_join_warms_the_wired_body();
 	run_own_mission_start_submits_its_kit();
+	run_single_player_mission_start_submits_no_kit();
 	run_first_round_init_seeds_the_own_buffer();
 	if (failures == 0) std::printf("host_mission_start: all passed\n");
 	return failures == 0 ? 0 : 1;
