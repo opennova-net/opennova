@@ -16,6 +16,8 @@
 #include <editor/preview/definition_viewport.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
+#include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_widgets.h>
 
 #include "editor_ui_test_support.h"
 
@@ -237,8 +239,7 @@ void test_damage_popup() {
 	std::string text = logged_frame(ui);
 	CHECK(text.find("Pump station (items.def) draws it intact") != std::string::npos, "the item naming the model");
 	CHECK(text.find("Its husk: armory.3di") != std::string::npos, "the husk the game swaps in");
-	CHECK(text.find("The husk swap: armory is drawn in the item's place from here on.") != std::string::npos,
-	      "the death in order, in words");
+	CHECK(text.find("The husk swap: armory is drawn") != std::string::npos, "the death in order, a line a leg");
 	ui.activate(popup_item(ImHashStr("damage", 0, scope), "Play destroy"));
 	settle(2);
 	CHECK(model->options().damage.state == DamageState::Destroyed, "Play destroy: the destroyed state");
@@ -544,6 +545,100 @@ void test_place_in_mission() {
 	settle(1);
 }
 
+// The viewports' shared lines (ui/viewport_widgets): a popup's line is cut at the popup's least width, not at its
+// narrow controls', whole in its tooltip, a warning's in the warning's colour.
+void test_popup_line() {
+	NullBackend backend;
+	ImGuiIO &io = ImGui::GetIO();
+	const std::string sentence = "No item pairs the clip, so no organic init sets an ammo byte: its fire bits fire nothing.";
+	const std::string warning = "WPN_B does not play GUN.adm.";
+	ImVec2 line_at;
+	float popup_width = 0.0f;
+	ImGuiWindow *popup = nullptr;
+	const auto frame_of = [&](ImVec2 mouse) {
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(200.0f, 100.0f));
+		ImGui::Begin("lines");
+		if (!ImGui::IsPopupOpen("popup")) ImGui::OpenPopup("popup");
+		ImGui::SetNextWindowPos(ImVec2(300.0f, 100.0f));
+		if (ImGui::BeginPopup("popup")) {
+			ImGui::Button("Ok");
+			popup_line(sentence);
+			line_at = ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) * 0.5f,
+			                 (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) * 0.5f);
+			popup_line(warning, std::string(), LineTone::Warning);
+			popup_width = ImGui::GetWindowWidth();
+			popup = ImGui::GetCurrentWindow();
+			ImGui::EndPopup();
+		}
+		ImGui::End();
+		const std::string text = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return text;
+	};
+	const ImVec2 away(1200.0f, 700.0f);
+	for (int i = 0; i < 3; ++i) frame_of(away);
+	const std::string text = frame_of(away);
+	CHECK(popup && popup_width >= ImGui::GetFontSize() * 26.0f, "a popup's line holds the popup at its least width");
+	CHECK(text.find(sentence) == std::string::npos && text.find("No item pairs the clip") != std::string::npos &&
+	              text.find("...") != std::string::npos,
+	      "a sentence past it is one line, cut");
+	CHECK(text.find(warning) != std::string::npos, "a line inside it stands whole");
+	bool amber = false;
+	const ImU32 warned = ImGui::GetColorU32(ui_kit::warning_color());
+	if (popup)
+		for (const ImDrawVert &vertex : popup->DrawList->VtxBuffer) amber = amber || vertex.col == warned;
+	CHECK(amber, "a warning's line in the warning's colour");
+	frame_of(line_at);
+	CHECK(frame_of(line_at).find(sentence) != std::string::npos, "the whole sentence in its tooltip");
+}
+
+// The files a picture lacks are one amber line naming the first three, every one and what brings them in its tooltip,
+// and no line for none; Play from here's words say where the player stands and its key.
+void test_files_line() {
+	NullBackend backend;
+	ImGuiIO &io = ImGui::GetIO();
+	std::vector<std::string> missing = {"a.tga", "b.tga", "c.fnt", "d.wav"};
+	ImVec2 at;
+	const auto frame_of = [&](ImVec2 mouse) {
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(400.0f, 100.0f));
+		ImGui::Begin("files");
+		files_line(missing, "missing", "Import them to see them (Problems).");
+		at = ImVec2(ImGui::GetItemRectMin().x + 20.0f, (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) * 0.5f);
+		ImGui::End();
+		const std::string text = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return text;
+	};
+	const ImVec2 away(1200.0f, 700.0f);
+	frame_of(away);
+	std::string text = frame_of(away);
+	CHECK(text.find("4 files missing: a.tga, b.tga, c.fnt, ...") != std::string::npos && text.find("d.wav") == std::string::npos,
+	      "the files a picture lacks: counted, the first three named");
+	frame_of(at);
+	text = frame_of(at);
+	CHECK(text.find("d.wav") != std::string::npos && text.find("Import them to see them (Problems).") != std::string::npos,
+	      "every one, and what brings them, in its tooltip");
+	missing.clear();
+	CHECK(frame_of(away).find("missing") == std::string::npos, "no line while none is");
+	CHECK(play_from_here_words("here") ==
+	              "Build, then start the game in this mission with the player on the ground here, facing the way the camera "
+	              "looks. The build's copy of the mission gets the start; its own file is left as it is.",
+	      "Play from here's words, the player where the menu was opened");
+	CHECK(play_from_here_words("under the camera", "Alt+F5").find("under the camera, facing the way the camera looks (Alt+F5).") !=
+	              std::string::npos,
+	      "... and with its key");
+}
+
 } // namespace
 
 void run_model_tests() {
@@ -553,6 +648,8 @@ void run_model_tests() {
 	test_weapon_fire_view();
 	test_ammo_board_view();
 	test_place_in_mission();
+	test_popup_line();
+	test_files_line();
 }
 
 } // namespace editor_ui_test
