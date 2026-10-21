@@ -990,8 +990,16 @@ bool MissionKernel::complete_mission_start() {
 	// [orig: Game_StartMission — Score_CountMissionSubgoalsAndUnits @0x525D5D,
 	//  then Cine_ReleaseAll @0x525DA8 and the intro arm @0x525DAF..0x525DD6].
 	world.epilog.mission_start(!restart_boot_, world.rules.mp_session, world);
-	if (world.rules.projectile_authority)
+	if (world.rules.projectile_authority) {
+		// The authority rebuilds the pool-0/1 tables and every slice once more, after the
+		// WAC initial run, so the settle's ground rays and the first update walk slices of
+		// the positions the start left [orig: Game_StartMission @0x524360 - the
+		// is_authority arm @0x525E58, Entity_BuildProximityLists_Pool01 @0x525E63,
+		// Entity_BuildProximityListsFromPools @0x525E68, ahead of the pool-1 settle
+		// @0x525F68..0x526095].
+		if (world.collision != nullptr) world.collision->rebuild_pool01_and_slices(world);
 		world.vehicles.initialize_mission_vehicles();
+	}
 	// The Attack & Defend side latch (world/local_player.h), after the round
 	// init and Player_InitPlayer (a map change's host player exists only from
 	// there), the initial WAC run and the weather settle. A joiner has no L

@@ -1097,6 +1097,14 @@ void CollisionWorld::rebuild_candidate_slices(World &world) {
     build_candidate_slices(world);
 }
 
+void CollisionWorld::rebuild_pool01_and_slices(World &world) {
+    // The direct builder call bypasses the cadence gate. [orig: Game_StartMission
+    //  @0x524360 - the calls @0x525E63 / @0x525E68; the builder zeroes its counter
+    //  @0x4B8ECA]
+    slice_refresh_counter_ = 16;
+    build_tables(world, true);
+}
+
 void CollisionWorld::refresh_after_registry_change(World &world) {
     // Clear even when no table has been published yet: refresh is the public
     // registry-lifetime edge and may follow a direct headless trace.

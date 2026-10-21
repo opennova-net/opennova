@@ -5313,6 +5313,11 @@ add_test(NAME model_less_hull COMMAND model_less_hull_test)
 add_executable(bone_slot_attach_test world/bone_slot_attach_test.cpp)
 target_link_libraries(bone_slot_attach_test PRIVATE opennova_runtime)
 add_test(NAME bone_slot_attach COMMAND bone_slot_attach_test)
+# The mission start's authority rebuild of the pool-0/1 tables and the slices after the WAC run.
+add_executable(mission_start_slices_test mission/mission_start_slices_test.cpp)
+target_link_libraries(mission_start_slices_test PRIVATE opennova_test_rig)
+target_include_directories(mission_start_slices_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_start_slices COMMAND mission_start_slices_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

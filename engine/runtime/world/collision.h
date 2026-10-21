@@ -1266,6 +1266,12 @@ public:
     // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
     //  Entity_RespawnVehicle @0x460133]
     void rebuild_candidate_slices(World &world);
+    // The mission start's authority rebuild after the WAC initial run: the pool-0/1
+    // tables, then every source's slice (which restarts the 17-tick cadence); the
+    // statics table stands as the @0x525C90 rebuild left it.
+    // [orig: Game_StartMission @0x524360 - Entity_BuildProximityLists_Pool01 @0x525E63,
+    //  Entity_BuildProximityListsFromPools @0x525E68]
+    void rebuild_pool01_and_slices(World &world);
 
     // Atomically replace the persistent decoded collision projection. Sorting
     // by wire handle gives both domains deterministic order; the wire-keyed
