@@ -265,7 +265,7 @@ int check_S_1E_game_event() {
 // S2C 0x61 — the per-player TICK SEED (not an SCRK exchange). Four LE bytes, and a body
 // shorter than that seeds ZERO rather than failing: zero is itself the witnessed round-end
 // disarm value, so the decode always succeeds and the caller applies whatever it yields.
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — the four-byte guard @0x4297eb;
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 — the four-byte guard @0x4297eb;
 //  the sender Server_SendRandomSeedToPlayer @0x5101a0 rolls ((rand() & 0xFE) + 1) << 16]
 int check_S_61_tick_seed() {
 	LE w;

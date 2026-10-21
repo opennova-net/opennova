@@ -501,8 +501,8 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	// The dedicated host's wait outlives the worker: past SESSION_DEDICATED_GATE_WAIT_MS with no
 	// response the gate service stops, its line naming the worker's socket, still open after a
 	// worker that left at its deadline, and the hosting ends. [orig:
-	//  CNapiGameSession_WaitForStateChange @0x4D1510 - the compare @0x4D1541 (jbe @0x4D1546), the
-	//  call @0x4D154A; CNapiGameSession_StopHosting @0x4CEC10 - the socket +0x30 @0x4CEC3A,
+	//  CNapiGateManager_WaitForGateResponse @0x4D1510 - the compare @0x4D1541 (jbe @0x4D1546), the
+	//  call @0x4D154A; CNapiGateManager_StopGateService @0x4CEC10 - the socket +0x30 @0x4CEC3A,
 	//  Napi_FormatAddress @0x4CEC53 ("n/a" @0x4CEC63), "%s : GATE STOPPING GATE SERVICE... [%s]"
 	//  @0x4CECA4, the stamp @0x4CECB2, the context freed @0x4CECC7, the gate state 1 -> 0
 	//  @0x4CECEC]
@@ -889,7 +889,7 @@ void NwuLobbySession::poll_gate() {
 
 // The command-line host's gate wait returns once the gate state leaves 1 and the host goes on
 // to the connect at once (a failure ends the hosting); the menu runs its next states one a frame.
-// [orig: Game_HostMultiplayerSession @0x4A65A0 - CNapiGameSession_WaitForStateChange (the call
+// [orig: Game_HostMultiplayerSession @0x4A65A0 - CNapiGateManager_WaitForGateResponse (the call
 //  @0x4A66B6), CNapiGameSession_ConnectAndWaitForValidation (@0x4A66E2) -> ConnectToNovaWorld
 //  (@0x4D4EC3); UI_ProcessLANSessionStateMachine @0x558DE0 - state 2 @0x55906B..0x559094]
 void NwuLobbySession::gate_processed(int gate_state) {

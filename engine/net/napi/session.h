@@ -90,10 +90,10 @@ constexpr uint32_t SESSION_GATE_PROBE_TIMEOUT_MS = 10000u; // 0x2710
 // The dedicated host's gate wait: the command-line host polls the gate response while the gate
 // state is 1 and stops the gate service once more than 20000 ms passed since the probe started,
 // past the worker's own 10 s, so a gate that never answers ends its hosting at 20 s.
-// [orig: Game_HostMultiplayerSession @0x4A65A0 - CNapiGameSession_WaitForStateChange (the call
-//  @0x4A66B6); CNapiGameSession_WaitForStateChange @0x4D1510 - the stamp @0x4D152B, the 0x4E20
-//  compare @0x4D1541 (jbe @0x4D1546), CNapiGameSession_StopHosting (the call @0x4D154A), -1 (`or
-//  eax,-1` @0x4D1551, the retn @0x4D1555)]
+// [orig: Game_HostMultiplayerSession @0x4A65A0 - CNapiGateManager_WaitForGateResponse (the call
+//  @0x4A66B6); CNapiGateManager_WaitForGateResponse @0x4D1510 - the stamp @0x4D152B, the 0x4E20
+//  compare @0x4D1541 (jbe @0x4D1546), CNapiGateManager_StopGateService (the call @0x4D154A),
+//  -1 (`or eax,-1` @0x4D1551, the retn @0x4D1555)]
 constexpr uint32_t SESSION_DEDICATED_GATE_WAIT_MS = 20000u; // 0x4E20
 // The periodic-update GLSVSS poll: once the NP connection is established (conn_state 5) and the
 // lobby session sits in state 4 (verified), the session checks its GLSVSS deadline at most once
@@ -353,7 +353,7 @@ NapiMessage make_client_host_update(const std::vector<ClientVar> &host, bool wri
 // slot index), PlayerName, PlayerIpAndPort ("a.b.c.d:port" of the player's game endpoint),
 // PlayerPCID, PlayerTeam and PlayerType, in that order. Fired only while the session is in
 // state 6 (hosting established). [orig: CNapiGameSession_SendPlayerAdded @0x4cfec0; the
-//  state-6 wrapper CNapiGameSession_OnPlayerChat @0x4d0e20 (a Kong misnomer)]
+//  state-6 wrapper CNapiGameSession_SendPlayerAddedIfHosting @0x4d0e20]
 NapiMessage make_client_host_player_added(int player_number, const std::string &player_name,
                                           const std::string &ip_and_port,
                                           const std::string &pcid, const std::string &team,

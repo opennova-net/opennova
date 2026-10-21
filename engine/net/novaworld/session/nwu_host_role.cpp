@@ -235,8 +235,9 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 // it, the local player's slot keeps the round init's 1, so the listen host's own add sends its
 // statement alone (HostPlayerSlot::local, D-NET-659). A removal runs none (the update's callers
 // are the server-info update, the add and the mission start).
-// [orig: Server_PlayerAdd @0x51cbc0 - @0x51d3f0, @0x51d421..0x51d4b5 (CNapiGameSession_OnPlayerChat
-//  @0x4d0e20, the state-6 wrapper around CNapiGameSession_SendPlayerAdded), the +5 byte cleared
+// [orig: Server_PlayerAdd @0x51cbc0 - @0x51d3f0, @0x51d421..0x51d4b5
+//  (CNapiGameSession_SendPlayerAddedIfHosting @0x4d0e20, the state-6 wrapper around
+//  CNapiGameSession_SendPlayerAdded), the +5 byte cleared
 //  @0x51cf02 and tested @0x51d4ba, CPlayerManager_RebuildLists(edi = 0 @0x51d35f) @0x51d4c6;
 //  CPlayerManager_RebuildLists @0x4d4590 - the state-6 test @0x4D4593, its other callers
 //  @0x4ff63a / @0x524903]

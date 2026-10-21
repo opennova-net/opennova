@@ -100,7 +100,7 @@ public:
 		// then the gate-error map's NWEC15 to on_fatal), and its host request waits for the
 		// result with no timeout and writes none of ConnectOrHost's lines (NwuHostRole). False:
 		// the menu's legs. [orig: Game_HostMultiplayerSession @0x4A65A0 -
-		//  CNapiGameSession_WaitForStateChange @0x4D1510 (the call @0x4A66B6), the hosting wait
+		//  CNapiGateManager_WaitForGateResponse @0x4D1510 (the call @0x4A66B6), the hosting wait
 		//  while state 5 @0x4A6725..0x4A6735]
 		bool command_line_host = false;
 	};
