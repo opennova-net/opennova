@@ -12,7 +12,7 @@
       "game_type": 65536,
       "port": 32787,
       "readiness": "in_match",
-      "steady_seconds": 120,
+      "steady_seconds": 200,
       "exercise_input": true,
       "auto_deploy": true,
       "rotation": ["TDH_G11A.bms"],

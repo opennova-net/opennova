@@ -340,6 +340,11 @@ so the default suite is unchanged. An extension case may add:
   selected rows. Our host leaves out a mission its catalog does not list, so
   an OR or OO cell whose second mission header never arrives names a rotation
   our host did not take.
+  `tdh-i3a-tdm-round` holds a 200 s window: in x2 the round ended (S2C 0x61)
+  at +64 to +73 s, gameplay stopped for the round-end linger, and the second
+  0x7B and the next mission's 0x0B came about 55 to 58 s later (OR: +118.3 s
+  and +121.8 s), past the 120 s window it had then, so the window now reaches
+  TDH_G11A's first gameplay.
 - `time_limit_minutes`: E2's round limit (`-TimeLimitMinutes`). Both hosts read
   it from the SERVER copy's `game.cfg` `time_limit` (retail starts a round
   that is not co-op with `time_limit` x 3720 ticks on its round timer;
