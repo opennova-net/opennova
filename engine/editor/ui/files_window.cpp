@@ -136,9 +136,9 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	// it makes).
 	const std::string file = terrain ? std::string(name) + ".trn" : std::string(name);
 	const bool in_use = named && v.project.scan->find(file) != nullptr;
-	// Why Create waits, whole: the prompt grows to hold it.
-	if (named && !fits) ImGui::TextColored(ui_kit::refusal_color(), "%s", message.c_str());
-	else if (in_use) ImGui::TextColored(ui_kit::refusal_color(), "The project has a file named %s already.", file.c_str());
+	// Why Create waits, on one line, whole in its tooltip.
+	if (named && !fits) ui_kit::refusal_text(message);
+	else if (in_use) ui_kit::refusal_text(file + " is taken.");
 	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
 	// text, or one of the project's files its reference loads. A project is its own files, so a
 	// kind the project has no file of says to import one.
@@ -170,9 +170,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 			} else {
 				for (const AssetEntry &entry : v.project.scan->entries) offered += entry.kind == wanted ? 1 : 0;
 			}
-			if (offered == 0)
-				ImGui::TextColored(ui_kit::refusal_color(), "The project has no %s: import one first (Files > Import).",
-				                   param.token);
+			if (offered == 0) ui_kit::refusal_text("No " + std::string(param.token) + " in the project: import one.");
 		}
 		ImGui::PopID();
 		given = given && (!param.required || !values_[i].empty());
@@ -943,7 +941,7 @@ void FilesWindow::draw_move_menu(const SessionView &view, const AssetEntry &entr
 	ImGui::BeginDisabled(!named || folder == here);
 	const bool move = ImGui::Button("Move");
 	ImGui::EndDisabled();
-	if (new_folder_[0] != '\0' && !named) ImGui::TextColored(ui_kit::refusal_color(), "%s", why.c_str());
+	if (new_folder_[0] != '\0' && !named) ui_kit::refusal_text(why);
 	if ((move || enter) && named && folder != here) move_to(folder);
 	ImGui::EndMenu();
 }
@@ -1016,13 +1014,7 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	}
 	const DialogsView::RenamePreview &plan = view.dialogs.rename_preview;
 	if (changed && !plan.symbol && plan.path == entry->relative_path && plan.requested == name) {
-		for (const Diagnostic &refusal : plan.refusals) {
-			ui_kit::severity_marker(refusal.severity);
-			ImGui::SameLine();
-			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 24.0f);
-			ImGui::TextWrapped("%s", refusal.message.c_str());
-			ImGui::PopTextWrapPos();
-		}
+		for (const Diagnostic &refusal : plan.refusals) ui_kit::finding_line(refusal.severity, refusal.message);
 		const std::vector<RenameSite> &sites = *plan.sites;
 		if (plan.refusals.empty())
 			ImGui::TextDisabled("%s", sites.empty() ? "Nothing names it." :

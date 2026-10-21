@@ -73,11 +73,7 @@ void RenameDialog::draw(Workspace &workspace) {
 	if (!current) {
 		ui_kit::empty_state("Planning...");
 	} else {
-		for (const Diagnostic &refusal : plan.refusals) {
-			ui_kit::severity_marker(refusal.severity);
-			ImGui::SameLine();
-			ImGui::TextWrapped("%s", refusal.message.c_str());
-		}
+		for (const Diagnostic &refusal : plan.refusals) ui_kit::finding_line(refusal.severity, refusal.message);
 		const std::vector<RenameSite> &sites = *plan.sites;
 		const size_t uses = sites.empty() ? 0 : sites.size() - 1;
 		ImGui::TextDisabled("The definition and %zu use%s:", uses, uses == 1 ? "" : "s");
@@ -143,11 +139,7 @@ void RenameDialog::draw_back(Workspace &workspace) {
 	// A file's way back may rewrite nothing (a move, a file nothing named); a name's has its definition at least.
 	const bool ready = plan.refusals.empty() && plan.sites && (!plan.sites->empty() || !plan.symbol);
 	ImGui::BeginChild("sites", ImVec2(em * 40.0f, em * 14.0f), ImGuiChildFlags_Borders);
-	for (const Diagnostic &refusal : plan.refusals) {
-		ui_kit::severity_marker(refusal.severity);
-		ImGui::SameLine();
-		ImGui::TextWrapped("%s", refusal.message.c_str());
-	}
+	for (const Diagnostic &refusal : plan.refusals) ui_kit::finding_line(refusal.severity, refusal.message);
 	if (plan.sites)
 		for (size_t i = 0; i < plan.sites->size(); ++i) {
 			ImGui::PushID(static_cast<int>(i));

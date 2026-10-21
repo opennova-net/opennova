@@ -1,6 +1,7 @@
 #include <editor/ui/editor_windows.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -83,9 +84,10 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 	const bool others = one_file && prompt.action == EditorRequestKind::CloseDocument &&
 	                    std::any_of(prompt.files.begin(), prompt.files.end(),
 	                                [&](const std::string &file) { return file != prompt.target; });
-	if (others && prompt.can_discard)
-		ImGui::TextWrapped("Don't save closes %s without its own edits; the other files stay open with theirs.",
-		                   basename_of(prompt.target).c_str());
+	if (others && prompt.can_discard) {
+		ImGui::Text("Don't save drops the edits of %s alone.", basename_of(prompt.target).c_str());
+		ui_kit::tooltip("It closes without its own edits; the other files stay open with theirs.");
+	}
 	const char *save = row.save_label ? row.save_label : "Save all";
 	const auto answer = [&](UnsavedChoice choice) {
 		workspace.request(request::resolve_unsaved(choice));
@@ -811,6 +813,9 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 	// Kept in the editor's own window: it comes forward on its own, so it never pops out as a window
 	// of its own over the desktop (a floating window that cannot merge into a minimized editor would).
 	ImGui::SetNextWindowViewport(viewport->ID);
+	// Its lines cut to a width it keeps whatever its files' table makes of it, each whole in its tooltip.
+	const float em = ImGui::GetFontSize();
+	ImGui::SetNextWindowSizeConstraints(ImVec2(em * 30.0f, 0.0f), ImVec2(em * 48.0f, FLT_MAX));
 	bool open = true;
 	if (!ImGui::Begin("Build result", &open,
 	                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
@@ -820,21 +825,24 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 		return;
 	}
 	if (!open) close();
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 36.0f);
 	const bool refused = result.outcome == BuildResult::Outcome::Refused;
 	const bool failed = result.outcome == BuildResult::Outcome::Failed;
 	if (refused || failed) {
 		ui_kit::severity_marker(DiagnosticSeverity::Error);
 		ImGui::SameLine();
+		ImGui::AlignTextToFramePadding();
 	}
-	ImGui::TextWrapped("%s", result.headline.c_str());
-	for (const std::string &refusal : result.refusals) ImGui::BulletText("%s", refusal.c_str());
-	if (!result.failure.empty()) ImGui::TextWrapped("%s", result.failure.c_str());
+	ui_kit::clipped_text(result.headline);
+	for (const std::string &refusal : result.refusals) {
+		ImGui::Bullet();
+		ui_kit::clipped_text(ui_kit::without_citations(refusal), refusal);
+	}
+	if (!result.failure.empty()) ui_kit::refusal_text(ui_kit::without_citations(result.failure));
 	if (!result.where.empty()) {
 		ImGui::Spacing();
 		ImGui::TextDisabled("In");
 		ImGui::SameLine();
-		ImGui::TextWrapped("%s", result.where.c_str());
+		ui_kit::clipped_text(ui_kit::fit_middle(result.where, ImGui::GetContentRegionAvail().x), result.where);
 	}
 	if (!result.files.empty() && ImGui::BeginTable("built", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
 		for (const BuildResult::File &file : result.files) {
@@ -848,14 +856,9 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 	}
 	if (!result.players.empty()) {
 		ImGui::Spacing();
-		ImGui::TextWrapped("%s", result.players.c_str());
+		ui_kit::quiet_text(result.players);
 	}
-	if (!result.others.empty()) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ImGui::TextWrapped("%s", result.others.c_str());
-		ImGui::PopStyleColor();
-	}
-	ImGui::PopTextWrapPos();
+	if (!result.others.empty()) ui_kit::quiet_text(result.others);
 	ImGui::Spacing();
 	if (refused && problems_window_ && ImGui::Button("Show them in Problems")) {
 		problems_window_->show_blocking();
@@ -912,11 +915,7 @@ void EditorWindows::draw_new_project() {
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel")) window_requests::set_workspace(*this, "new_project", "open", io::JsonValue::make_bool(false));
 	// Why the last New project was refused, here as on the welcome page.
-	if (!v.project.refused.empty()) {
-		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-		ImGui::TextColored(ui_kit::refusal_color(), "%s", v.project.refused.c_str());
-		ImGui::PopTextWrapPos();
-	}
+	if (!v.project.refused.empty()) ui_kit::refusal_text(v.project.refused);
 	ImGui::EndPopup();
 }
 

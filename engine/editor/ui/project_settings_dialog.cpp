@@ -156,13 +156,8 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	                "Where the game is installed, kept with the project: its game data is imported from it.");
 	// What the folder holds, checked once it is not being typed (the UX round's project lane).
 	bool found = false;
-	const std::string words = check_.words(workspace, game_install_.text, install.typing, std::string(), found);
-	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
-	ImGui::PushStyleColor(ImGuiCol_Text, words.empty() || found ? ui_kit::reference_color(ReferenceStatus::Present)
-	                                                            : ui_kit::refusal_color());
-	ImGui::TextWrapped("%s", words.empty() ? "Checking the folder..." : words.c_str());
-	ImGui::PopStyleColor();
-	ImGui::PopTextWrapPos();
+	draw_install_line(check_.words(workspace, game_install_.text, install.typing, std::string(), found), found,
+	                  game_install_.text[0] != '\0');
 	if (v.activity.source_run) {
 		const std::string runtime = "OpenNova runtime: " + v.activity.runtime_executable;
 		ImGui::TextUnformatted(ui_kit::fit(runtime, field_width() * 1.5f).c_str());
@@ -195,11 +190,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	ui_kit::tooltip("Play writes every file with unsaved edits first, as Save all does, and starts at once. Off, Play "
 	                "asks first, as Build does.");
 
-	if (!error_.empty()) {
-		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
-		ImGui::TextColored(ui_kit::refusal_color(), "%s", error_.c_str());
-		ImGui::PopTextWrapPos();
-	}
+	if (!error_.empty()) ui_kit::refusal_text(error_);
 	const bool can_apply = !waiting_ && !held.title.empty() && expansion_ok;
 	ImGui::BeginDisabled(!can_apply);
 	if (ImGui::Button("Apply") && can_apply) apply(workspace);

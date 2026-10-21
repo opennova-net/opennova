@@ -22,17 +22,6 @@ template <size_t N> void copy_into(char (&buffer)[N], const std::string &text) {
 	buffer[n] = '\0';
 }
 
-// The check's line under an install field: found in green, no game in red, none named (or not checked yet)
-// muted.
-void install_line(const std::string &words, bool ok, bool named) {
-	if (words.empty()) return;
-	ImGui::PushStyleColor(ImGuiCol_Text, !named ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)
-	                                     : ok   ? ui_kit::reference_color(ReferenceStatus::Present)
-	                                            : ui_kit::refusal_color());
-	ImGui::TextWrapped("%s", words.c_str());
-	ImGui::PopStyleColor();
-}
-
 // One recent project: its title, then its game, its expansion and its folder (the middle of a long folder
 // giving way), a click opening it; Forget.
 void recent_row(Workspace &workspace, const std::string &root, const ProjectView::RecentProject *details, bool opens) {
@@ -104,7 +93,7 @@ std::string InstallFieldCheck::words(Workspace &workspace, const std::string &pa
                                      bool &ok) {
 	ok = false;
 	if (path.empty())
-		return fallback.empty() ? std::string("No game install chosen: the project can still take files from the disk.")
+		return fallback.empty() ? std::string("No game install chosen: files come from the disk.")
 		                        : "Left empty, the project takes the editor's game install, " + fallback + ".";
 	const std::string root = absolute_install_path(path);
 	const InstallCheck &slot = workspace.view().project.install_check;
@@ -125,6 +114,14 @@ std::string InstallFieldCheck::words(Workspace &workspace, const std::string &pa
 		workspace.request(request::check_install(path));
 	}
 	return std::string();
+}
+
+void draw_install_line(const std::string &words, bool ok, bool named) {
+	if (words.empty() || !named) return ui_kit::quiet_text(words.empty() ? "Checking the folder..." : words);
+	if (!ok) return ui_kit::refusal_text(words);
+	ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::reference_color(ReferenceStatus::Present));
+	ui_kit::clipped_text(words);
+	ImGui::PopStyleColor();
 }
 
 const InstallCheck *InstallFieldCheck::answer(const std::string &path) const {
@@ -163,7 +160,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	ui_kit::tooltip("The game's folder: the project imports its files from it and plays in it. Kept with the project.");
 	bool found = false;
 	const std::string words = check_.words(workspace, install_.text, field.typing, v.project.editor_install, found);
-	install_line(words.empty() ? std::string("Checking the folder...") : words, found, install_.text[0] != '\0' && !words.empty());
+	draw_install_line(words, found, install_.text[0] != '\0');
 	// What it builds on: the expansions of the install named, once it is checked.
 	std::vector<ProjectView::InstallExpansion> installed;
 	if (const InstallCheck *check = found ? check_.answer(install_.text) : nullptr)
@@ -219,7 +216,6 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 	const float width = std::min(room, em * 80.0f);
 	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (room - width) * 0.5f);
 	ImGui::BeginGroup();
-	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
 	ImGui::Dummy(ImVec2(width, em * 0.5f));
 	ImGui::SetWindowFontScale(1.6f);
 	ImGui::TextUnformatted("OpenNova Editor");
@@ -229,11 +225,8 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 	// project is open, so this is where it shows.
 	if (!v.project.refused.empty()) {
 		ImGui::Spacing();
-		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::refusal_color());
-		ImGui::TextWrapped("%s", v.project.refused.c_str());
-		ImGui::PopStyleColor();
+		ui_kit::refusal_text(v.project.refused);
 	}
-	ImGui::PopTextWrapPos();
 	ImGui::Spacing();
 	const bool beside = width >= em * 56.0f;
 	if (beside && ImGui::BeginTable("welcome", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_PadOuterX,
@@ -257,9 +250,7 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 	}
 	if (!v.activity.status.empty() && v.activity.status != v.project.refused) {
 		ImGui::Spacing();
-		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
-		ImGui::TextWrapped("%s", v.activity.status.c_str());
-		ImGui::PopTextWrapPos();
+		ui_kit::clipped_text(v.activity.status);
 	}
 	ImGui::EndGroup();
 }

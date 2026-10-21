@@ -6,6 +6,7 @@
 #include <editor/ui/files_window.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -195,7 +196,7 @@ void FilesWindow::draw_folder_menu(const SessionView &view, const std::string &f
 	ImGui::BeginDisabled(!makes);
 	const bool make = ImGui::Button("Make");
 	ImGui::EndDisabled();
-	if (folder_new_[0] != '\0' && !named) ImGui::TextColored(ui_kit::refusal_color(), "%s", why.c_str());
+	if (folder_new_[0] != '\0' && !named) ui_kit::refusal_text(why);
 	if ((make || make_enter) && makes) {
 		workspace_.request(request::new_folder(made));
 		ImGui::CloseCurrentPopup();
@@ -285,6 +286,8 @@ void FilesWindow::draw_delete(const SessionView &view) {
 	const WorkspaceView::FileDelete &held = view.workspace.file_delete;
 	const AssetEntry *entry = held.path.empty() ? nullptr : chore_entry_at(view, held.path);
 	const auto close = [this] { window_requests::set_workspace(workspace_, "file_delete", "path", io::JsonValue::make_string("")); };
+	// Its lines cut to a width of their own, each whole in its tooltip.
+	ImGui::SetNextWindowSizeConstraints(ImVec2(ImGui::GetFontSize() * 30.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 	if (!delete_popup_.begin("Delete", entry != nullptr && modal_may_show(view, HeldModal::FileDelete), false,
 	                         ImGuiWindowFlags_AlwaysAutoResize, false, view.workspace.opened)) {
 		if (delete_popup_.dismissed()) close();
@@ -320,13 +323,13 @@ void FilesWindow::draw_delete(const SessionView &view) {
 		if (const AssetEntry *file = chore_entry_at(view, other)) sources = sources || file->kind == AssetKind::ImportSource;
 	if (held.paths.empty()) ImGui::Text("Delete %s?", entry->logical_name.c_str());
 	else ImGui::Text("Delete %s?", counted(held.paths.size() + 1, "file").c_str());
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+	// The files by name, what goes with them and what stays, a line each, whole in its tooltip.
 	if (!held.paths.empty()) {
 		std::string names = entry->logical_name;
 		for (const std::string &other : held.paths) names += ", " + basename_of(other);
-		ImGui::TextWrapped("%s.", names.c_str());
+		ui_kit::clipped_text(names + ".");
 	}
-	for (const std::string &refusal : delete_refusals_) ImGui::TextColored(ui_kit::refusal_color(), "%s", refusal.c_str());
+	for (const std::string &refusal : delete_refusals_) ui_kit::refusal_text(refusal);
 	// An import source: with its outputs, or alone, its outputs kept as files of the project.
 	if (sources) {
 		bool alone = held.alone;
@@ -340,14 +343,13 @@ void FilesWindow::draw_delete(const SessionView &view) {
 	if (!delete_with_.empty()) {
 		std::string with;
 		for (const std::string &file : delete_with_) with += (with.empty() ? "" : ", ") + file;
-		ImGui::TextWrapped("With %s: %s.", held.paths.empty() ? "it" : "them", with.c_str());
+		ui_kit::clipped_text(std::string("With ") + (held.paths.empty() ? "it" : "them") + ": " + with + ".");
 	}
 	if (!delete_kept_.empty()) {
 		std::string kept;
 		for (const std::string &file : delete_kept_) kept += (kept.empty() ? "" : ", ") + file;
-		ImGui::TextWrapped("Kept as files of the project: %s.", kept.c_str());
+		ui_kit::clipped_text("Kept: " + kept + ".", "Kept as files of the project: " + kept + ".");
 	}
-	ImGui::PopTextWrapPos();
 	// Who names it, before anything goes (DI-05's uses).
 	const int pressed = delete_dialog_body("Named by " + counted(delete_use_count_, "use") + ":", delete_use_count_,
 	                                       delete_uses_, delete_refusals_.empty() ? (held.paths.empty() ? "Nothing names it."
@@ -392,9 +394,7 @@ void FilesWindow::draw_folder_delete(const SessionView &view) {
 	}
 	ImGui::Text("Delete %s with what it holds (%s)?", folder_words(folder_delete_).c_str(),
 	            counted(folder_delete_files_, "file").c_str());
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-	for (const std::string &refusal : folder_delete_refusals_) ImGui::TextColored(ui_kit::refusal_color(), "%s", refusal.c_str());
-	ImGui::PopTextWrapPos();
+	for (const std::string &refusal : folder_delete_refusals_) ui_kit::refusal_text(refusal);
 	const int pressed =
 	        delete_dialog_body("What it holds is named by " + counted(folder_delete_use_count_, "use") + ":",
 	                           folder_delete_use_count_, folder_delete_uses_,
@@ -414,14 +414,12 @@ void FilesWindow::draw_empty_trash(const SessionView &view) {
 		if (trash_popup_.dismissed() || !view.project.open) trash_asked_ = false;
 		return;
 	}
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-	if (trash_files_) ImGui::TextWrapped("Remove the %s the project's trash holds for good?", counted(trash_files_, "file").c_str());
-	else ImGui::TextWrapped("The project's trash holds nothing.");
+	if (trash_files_) ImGui::Text("Remove the %s in the trash for good?", counted(trash_files_, "file").c_str());
+	else ImGui::TextUnformatted("The trash holds nothing.");
 	const size_t steps = view.activity.file_history.undo_steps + view.activity.file_history.redo_steps;
 	if (steps)
-		ImGui::TextColored(ui_kit::warning_color(), "The file history goes with it (%s): Undo file brings nothing back after.",
-		                   counted(steps, "step").c_str());
-	ImGui::PopTextWrapPos();
+		ui_kit::warning_line("The file history goes with it (" + counted(steps, "step") + ").",
+		                     "Undo file brings nothing back after.");
 	const bool allowed = (trash_files_ || steps) && view.allows(EditorRequestKind::EmptyTrash);
 	ImGui::BeginDisabled(!allowed);
 	const bool empty = ImGui::Button("Empty the trash");

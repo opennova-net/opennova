@@ -132,6 +132,13 @@ void severity_marker(DiagnosticSeverity severity) {
 	draw_mark(severity, ImVec2(at.x + size * 0.5f, at.y + size * 0.5f));
 }
 
+void finding_line(DiagnosticSeverity severity, const std::string &words, const std::string &tip) {
+	severity_marker(severity);
+	ImGui::SameLine();
+	ImGui::AlignTextToFramePadding();
+	clipped_text(without_citations(words), tip);
+}
+
 bool severity_mark_on_item(DiagnosticSeverity severity) {
 	if (!ImGui::IsItemVisible()) return false;
 	const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();

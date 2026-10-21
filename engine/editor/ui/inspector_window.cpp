@@ -1217,12 +1217,9 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
               const Node &row, const NodeAddress &selection) {
 	for (const size_t i : index.of_record(document.path(), row.id, selection.child)) {
 		const Diagnostic &d = view.findings.diagnostics[i];
-		ui_kit::severity_marker(d.severity);
-		ImGui::SameLine();
-		ImGui::AlignTextToFramePadding();
 		const NodeKind kind = d.record_kind ? d.record_kind : selection.kind;
 		const std::string line = d.field.empty() ? d.message : field_title(document, kind, d.field) + ": " + d.message;
-		ui_kit::clipped_text(line, d.field.empty() ? line : line + "\n" + d.field);
+		ui_kit::finding_line(d.severity, line, d.field.empty() ? line : line + "\n" + d.field);
 	}
 }
 

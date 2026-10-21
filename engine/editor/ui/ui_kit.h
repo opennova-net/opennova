@@ -86,6 +86,9 @@ bool named_action(const std::string &verb, const std::string &name, const char *
 // symbols): an error a filled red circle, a warning an amber triangle, a note a grey ring.
 // Hovered, it says which.
 void severity_marker(DiagnosticSeverity severity);
+// A finding on one line (a refusal of a plan, a record's finding): the mark of its `severity`, then `words`
+// without their citations, cut to the line; hovered, `tip` when one is given, else the whole words where cut.
+void finding_line(DiagnosticSeverity severity, const std::string &words, const std::string &tip = std::string());
 // The same mark over the right end of the item just drawn, inside what the window shows of it (an
 // outline's line that spans the window), taking no room: true while the pointer is over it.
 bool severity_mark_on_item(DiagnosticSeverity severity);
