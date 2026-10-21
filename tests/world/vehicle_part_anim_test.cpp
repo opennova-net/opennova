@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <memory>
 
 using namespace opennova::world;
 
@@ -337,6 +338,31 @@ void test_helo_family_decays_at_the_helo_rate() {
 	r.w.vehicles.part_anim_tick(r.veh(), g);
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo - kRotorDecayGround,
 			"a ground-family row decays at the ground rate");
+}
+
+// A predicted aircraft row skips the mover but still runs its tail's rotor call,
+// under the mover's own gate: a live (Health > 0), shown (Flags bit 0 clear) hull.
+// [orig: Entity_UpdateAircraftPhysics @0x490310 - `cmp word ptr [esi+11Eh], 0; jle`
+//  @0x490592..0x49059A, `test byte ptr [esi+24h], 1; jnz` @0x49059C..0x4905A0, the
+//  call @0x4905A6]
+void test_predicted_aircraft_rotor_keeps_the_movers_gate() {
+	auto r = std::make_unique<Rig>();
+	VehicleTraits t = buggy_traits(true);
+	t.family = VehicleFamily::Helicopter;
+	r->w.vehicles.traits.set(r->veh().item_id, t);
+	r->mount();
+	r->veh().veh.net_predicted = true;
+	r->veh().health = 0;
+	r->w.vehicles.update_motor(r->veh(), /*is_authority=*/true);
+	CHECK(r->veh().veh.part_spin.speed == 0, "a zero-Health predicted aircraft's rotor stays");
+	r->veh().health = 3000;
+	r->veh().flags |= 1u;
+	r->w.vehicles.update_motor(r->veh(), /*is_authority=*/true);
+	CHECK(r->veh().veh.part_spin.speed == 0, "a hidden predicted aircraft's rotor stays");
+	r->veh().flags &= ~1u;
+	r->w.vehicles.update_motor(r->veh(), /*is_authority=*/true);
+	CHECK(r->veh().veh.part_spin.speed == kRotorRateFull,
+			"a live shown predicted aircraft spins up one tick");
 }
 
 } // namespace
@@ -881,6 +907,7 @@ int main() {
 	test_register_projection_through_the_mover();
 	test_rotor_machines_by_profile_type();
 	test_helo_family_decays_at_the_helo_rate();
+	test_predicted_aircraft_rotor_keeps_the_movers_gate();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

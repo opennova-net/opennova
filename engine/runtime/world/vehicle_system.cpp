@@ -140,11 +140,15 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                     // runs the aircraft function (and therefore the tail) for
                     // every vehicle it is not driving, seeding the drive
                     // command from the wire — so advancing the accumulator here
-                    // restores that, it does not add a new one.
-                    // [orig: the HELO twin @0x48FA70 called from the aircraft
-                    //  mover's tail @0x4905A6; the not-driven client leg is
-                    //  @0x48B7F0]
-                    world.vehicles.part_anim_tick(*veh, *traits);
+                    // restores that, it does not add a new one. The tail's call
+                    // keeps the mover's own gate: a live (Health > 0), shown
+                    // (Flags bit 0 clear) aircraft.
+                    // [orig: the HELO twin Entity_UpdateHeloRotorSpin @0x48FA70 called from the aircraft
+                    //  mover's tail, Entity_UpdateAircraftPhysics @0x490310 (the
+                    //  gate @0x490592..0x4905A0, the call @0x4905A6); the
+                    //  not-driven client leg is @0x48B7F0]
+                    if (veh->health > 0 && (veh->flags & 1u) == 0)
+                        world.vehicles.part_anim_tick(*veh, *traits);
 				}
 				// The installed +0x1C4 callback: the saved mover above, then the
 				// same-refNum children ride the 'agun' points [orig:
