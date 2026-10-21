@@ -268,30 +268,28 @@ void organic_class_event(World &world, Entity &body, int event) {
 
 // See the infantry.h contract.
 void player_body_row_event(World &world, Entity &body, int event) {
-    switch (player_item_row(world, body).body_class) {
+    const PlayerTemplate &row = player_item_row(world, body);
+    switch (row.body_class) {
     case PlayerBodyClass::kOrganic:
         organic_class_event(world, body, event);
         return;
-    case PlayerBodyClass::kNull:
-        body.spawn_phase = 0x1000000;
+    case PlayerBodyClass::kItem: {
+        // The item row's body over the player body. Its +0x2AC word is the body's think
+        // countdown (Entity::spawn_phase), which the item bodies write as class_think_ticks.
+        // An item body reads the hit record's section, damage and angles.
+        // [orig: entity+0x1C8 = def+0x138 @0x43C530..0x43C536; the think's +0x2AC test
+        //  Entity_UpdateInfantryPlayerBody @0x4B4BC9]
+        const HitRecord &record = world.round_sim.hit_record;
+        const EntityHandle handle = body.handle; // the barrel's dead arm removes the body
+        body.class_think_ticks = body.spawn_phase;
+        run_item_class_event(world, body, row.item_event_class,
+                world.tables.item_death_traits.get(body.item_id), event,
+                {record.section, record.damage, record.round_yaw_bam, record.round_pitch_bam,
+                 record.round_roll_bam, 0});
+        if (Entity *still = world.registry.get(handle)) still->spawn_phase = still->class_think_ticks;
         return;
-    case PlayerBodyClass::kBarrel:
-        // Every event alike, on the authority alone. A body already dead takes the row's
-        // explosion and removal arm (@0x407CDE..0x407D14), which retail runs on an entity its
-        // player slot still points at: not run here (D-NET-NEW-L4-13, PERMANENT candidate).
-        if (!world.rules.logic_authority) return;
-        if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
-        if (retail_signed_i16(body.health) > 0) {
-            body.spawn_phase = 1920;
-            return;
-        }
-        world.out.scars.clear_entity(body.handle);
-        body.flags |= kEntityFlagDead;
-        body.engine_flags |= kEntityFlagDead;
-        body.spawn_phase = 10;
-        return;
+    }
     case PlayerBodyClass::kPlayer:
-    case PlayerBodyClass::kOther:
         player_body_class_event(world, body, event);
         return;
     }

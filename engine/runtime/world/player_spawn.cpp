@@ -41,41 +41,15 @@ uint8_t player_spawn_equipped_default(const World &world) {
 }
 
 PlayerBodyClass player_body_class_from_tag(const char *ai_function) {
-    // The 41 rows' names in table order, by the class a person body takes from each.
-    // [orig: g_EntityClassEventCallbackTable @0x813000 - null @0x813000, org0 @0x813018,
-    //  org1 @0x813030, plyr @0x813048, brrl @0x813060, psec @0x813288 (the null row's
-    //  event 0x406FF0 and no init), the 35 other rows @0x813078..0x8133C0]
-    struct Row {
-        const char *name;
-        PlayerBodyClass cls;
-    };
-    static constexpr Row kRows[] = {
-        {"null", PlayerBodyClass::kNull}, {"org0", PlayerBodyClass::kOrganic},
-        {"org1", PlayerBodyClass::kOrganic}, {"plyr", PlayerBodyClass::kPlayer},
-        {"brrl", PlayerBodyClass::kBarrel}, {"envs", PlayerBodyClass::kOther},
-        {"ewep", PlayerBodyClass::kOther}, {"ele0", PlayerBodyClass::kOther},
-        {"gnrc", PlayerBodyClass::kOther}, {"gnrl", PlayerBodyClass::kOther},
-        {"gnl2", PlayerBodyClass::kOther}, {"flag", PlayerBodyClass::kOther},
-        {"squib", PlayerBodyClass::kOther}, {"nade", PlayerBodyClass::kOther},
-        {"schl", PlayerBodyClass::kOther}, {"clym", PlayerBodyClass::kOther},
-        {"vmne", PlayerBodyClass::kOther}, {"lndm", PlayerBodyClass::kOther},
-        {"bldg", PlayerBodyClass::kOther}, {"bld2", PlayerBodyClass::kOther},
-        {"cran", PlayerBodyClass::kOther}, {"door", PlayerBodyClass::kOther},
-        {"target", PlayerBodyClass::kOther}, {"emit", PlayerBodyClass::kOther},
-        {"towr", PlayerBodyClass::kOther}, {"tree", PlayerBodyClass::kOther},
-        {"palm", PlayerBodyClass::kOther}, {"psec", PlayerBodyClass::kNull},
-        {"CHel", PlayerBodyClass::kOther}, {"rokt", PlayerBodyClass::kOther},
-        {"stng", PlayerBodyClass::kOther}, {"hlfr", PlayerBodyClass::kOther},
-        {"jvln", PlayerBodyClass::kOther}, {"arty", PlayerBodyClass::kOther},
-        {"aflr", PlayerBodyClass::kOther}, {"gflr", PlayerBodyClass::kOther},
-        {"pwrp", PlayerBodyClass::kOther}, {"cveh", PlayerBodyClass::kOther},
-        {"cbot", PlayerBodyClass::kOther}, {"cpln", PlayerBodyClass::kOther},
-        {"ctrn", PlayerBodyClass::kOther},
-    };
-    if (ai_function == nullptr || ai_function[0] == '\0') return PlayerBodyClass::kNull;
-    for (const Row &row : kRows)
-        if (strutil::iequals(row.name, ai_function)) return row.cls;
-    return PlayerBodyClass::kNull;
+    // The person rows by whole name ignoring case; every other row, the row-0 default for an
+    // empty tag or a miss included, is an item class.
+    // [orig: g_EntityClassEventCallbackTable @0x813000 - org0 @0x813018, org1 @0x813030, plyr
+    //  @0x813048; the stricmp @0x407DE2, the row-0 default @0x407DEE]
+    if (ai_function == nullptr) return PlayerBodyClass::kItem;
+    if (strutil::iequals(ai_function, "plyr")) return PlayerBodyClass::kPlayer;
+    if (strutil::iequals(ai_function, "org0") || strutil::iequals(ai_function, "org1"))
+        return PlayerBodyClass::kOrganic;
+    return PlayerBodyClass::kItem;
 }
 
 int32_t item_index_by_type_id(const World &world, int32_t type_id) {
@@ -188,12 +162,13 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // The row's class init, called once the body is placed [orig: Entity_SpawnFromAnimSlotProperty
     // - `mov eax, [ecx+148h]` @0x43C4F3, the call @0x43C4FE]: the player class's stores the
     // equipped default (D-NET-143) and resets the local body's lock tone (below); the organic
-    // class's, the null row (no init) and the barrel row (no init) store neither, the body
-    // keeping the spawn memset's 0. A kOther row keeps the player class's legs (D-NET-348).
-    // [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B1100..0x4B1116; Entity_InitOrganicAI
-    //  @0x4BFCC0 (no +0x2B0 store); the memset @0x43C3FE]
-    const bool player_class_init = row.body_class == PlayerBodyClass::kPlayer ||
-            row.body_class == PlayerBodyClass::kOther;
+    // class's init stores neither, nor does a row with no init (the null row, brrl and the item
+    // rows whose def+0x148 is 0), the body keeping the spawn memset's 0 (D-NET-348). The item
+    // rows with an init of their own (some store +0x2B0: Entity_InitSquibFromDef @0x448D0F,
+    // Entity_InitFromWeaponDef @0x4422DA) are not run here yet (the L4-s11 row).
+    // [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B10D0..0x4B10DE, @0x4B1100..0x4B1116;
+    //  Entity_InitOrganicAI @0x4BFCC0 (no +0x2B0 or lock-tone store); the memset @0x43C3FE]
+    const bool player_class_init = row.body_class == PlayerBodyClass::kPlayer;
     seed.equipped_adm_index = player_class_init ? spawn.equipped_adm_index : uint8_t{0};
     // entity+0x374 character selector + entity+0x15C wire NetId, picked per assigned team from
     // the joiner's 0x42 join vars by the inmatch add. [orig: Server_PlayerAdd @0x51cbc0

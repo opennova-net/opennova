@@ -742,6 +742,14 @@ void apply_item_state_event(World &world, Entity &target, int16_t section,
 void destruction_notify_item_damage(World &world, Entity &target, int phase,
         ItemHitContext hit = {});
 
+// The item class row `cls`'s event callback body over `target` (destruction_notify_item_damage's
+// dispatch past its organic, AI and section-clone gates; `traits` the row's death traits, null
+// when unswept): the +0x2AC word it writes is Entity::class_think_ticks. A player body bound to an
+// item class row runs it too (world::player_body_row_event, D-NET-348).
+// [orig: g_EntityClassEventCallbackTable @0x813000 - the row's def+0x138 callback]
+void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
+        const ItemDeathTraits *traits, int phase, ItemHitContext hit = {});
+
 // The pool-2/3 cohort walks: cb(entity, 0, 0) at slot&7 with positive-clock
 // -8 (pool 2), at slot&63 with -64 (pool 3), then the update callback. Both
 // peers run class callbacks; each callback owns its authority gates. Pool 1 is

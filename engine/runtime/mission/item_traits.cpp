@@ -135,7 +135,10 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
     row.heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
     // The row's class by its ai_function (D-NET-348) [orig: EntityDef_InitAllCallbacks
     //  @0x4A5A70 -> Entity_LookupRenderCallbacks @0x407DC0].
-    if (def != nullptr) row.body_class = world::player_body_class_from_tag(def->ai_function);
+    if (def != nullptr) {
+        row.body_class = world::player_body_class_from_tag(def->ai_function);
+        row.item_event_class = world::item_death_class_from_tag(def->ai_function);
+    }
 }
 
 } // namespace

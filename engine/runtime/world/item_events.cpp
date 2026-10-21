@@ -450,6 +450,11 @@ void barrel_event(World &world, Entity &target) {
                 {target.position.x.q16,target.position.y.q16,target.position.z.q16},
                 target.heading, 10);
         if (world.rules.mp_session) world.out.entity_events.push_back(EntityRemoveEvent{target.handle.packed});
+        // A Player-bit body (a player bound to a brrl row, D-NET-348) takes its placed
+        // devices with it [orig: Server_RemoveEntityAndNotify @0x50A270 - the bit
+        //  @0x50A2B8, Entity_RemovePlacedDevicesByOwner @0x50A2BB, Entity_Destroy @0x50A2C4].
+        if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
+            world.commands.remove_placed_devices_by_owner(target.handle);
         world.commands.remove_ssn(target.handle);
     } else if (target.health > 0) {
         target.class_think_ticks = 1920;
@@ -745,7 +750,13 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
         return;
     }
 	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
-	switch (traits != nullptr ? traits->death_class : ItemDeathClass::kUnwitnessed) {
+	run_item_class_event(world, target,
+			traits != nullptr ? traits->death_class : ItemDeathClass::kUnwitnessed, traits, phase, hit);
+}
+
+void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
+		const ItemDeathTraits *traits, int phase, ItemHitContext hit) {
+	switch (cls) {
 	case ItemDeathClass::kNull:
         target.class_think_ticks = 0x1000000;
 		return; // [orig: 0x406FF0 — +0x2AC = 0x1000000 and nothing else]
@@ -803,7 +814,7 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
         palm_item_event(world, target, phase, hit);
         return;
     case ItemDeathClass::kEmitter:
-        world.item_emitters.event(world, target, *traits, phase);
+        if (traits != nullptr) world.item_emitters.event(world, target, *traits, phase);
         return;
     case ItemDeathClass::kCrane:
         collapsing_building_event(world, target, phase, true);

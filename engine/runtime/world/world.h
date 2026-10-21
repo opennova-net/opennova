@@ -451,15 +451,15 @@ struct ScriptState {
 // The class-table row a player body's bound items.def row names by its ai_function, the row
 // giving the body its class init (def+0x148, which the spawn calls) and its class event
 // callback (def+0x138, copied into entity+0x1C8: the player-body update's think, the damage
-// sites): "plyr" the player class, "org0" / "org1" the organic class, "brrl" the barrel row;
-// the "null" row also for "psec", an empty tag and a name no row carries (the walk's row-0
-// default); every other row (an item, throwable, missile, flare or vehicle class) is kOther,
-// which the port keeps on the player class's legs (world::player_body_class_from_tag).
+// sites): "plyr" the player class, "org0" / "org1" the organic class, every other row an item
+// class (the null row also for an empty tag and a name no row carries, the walk's row-0
+// default), whose event body is the item row's (PlayerTemplate::item_event_class)
+// (world::player_body_class_from_tag).
 // [orig: g_EntityClassEventCallbackTable @0x813000 (24-byte rows: the name, the event +0x138,
 //  the init +0x148, +0x14C, the serializer +0x164); Entity_LookupRenderCallbacks @0x407DC0 -
 //  the stricmp @0x407DE2, the row-0 default @0x407DEE..0x407E1E; EntityDef_InitAllCallbacks
 //  @0x4A5A70 ("Null" for an empty tag @0x4A5AAE)]
-enum class PlayerBodyClass : uint8_t { kPlayer, kOrganic, kNull, kBarrel, kOther };
+enum class PlayerBodyClass : uint8_t { kPlayer, kOrganic, kItem };
 
 // One items.def row's spawn traits: a player spawn binds its class's camouflage
 // row from MissionTables::item_rows (the sweep's copy of g_ItemDefs); a World
@@ -506,8 +506,9 @@ struct PlayerTemplate {
     int32_t radar_sig = 0;
     int32_t heat_sig = 0;
     // The row's class (its ai_function's class-table row); the harness seed's is the stock
-    // player rows' "plyr".
+    // player rows' "plyr". An item class row's event body (item_death_class_from_tag).
     PlayerBodyClass body_class = PlayerBodyClass::kPlayer;
+    ItemDeathClass item_event_class = ItemDeathClass::kNull;
 };
 
 // The per-mission tables the embedder feeds once (the def files, the terrain

@@ -203,13 +203,14 @@ void organic_class_event(World &world, Entity &body, int event);
 
 // A player body's class event callback (entity+0x1C8), by its bound row's class
 // (PlayerTemplate::body_class, D-NET-348): the plyr row's player_body_class_event, the organic
-// rows' organic_class_event, the null row's +0x2AC = 0x1000000, the barrel row's authority think
-// (alive: +0x2AC = 1920; at or below 0 health: the scars cleared, Flags |= 2, +0x2AC = 10);
-// a kOther row keeps the player class's. The player-body update's think, the damage sites and
-// the drowning call it.
+// rows' organic_class_event, an item class row's event body (world::run_item_class_event of
+// PlayerTemplate::item_event_class: the null row's +0x2AC = 0x1000000, the barrel row's
+// authority think with its dead-body explosion and removal, every ported item row's), the one
+// +0x2AC word being the body's think countdown (Entity::spawn_phase). The player-body update's
+// think, the damage sites and the drowning call it.
 // [orig: Entity_SpawnFromAnimSlotProperty - def+0x138 into entity+0x1C8 @0x43C530..0x43C536;
-//  NullClass_HandleEvent @0x406FF0 (@0x406FF4); Entity_HandleDeathOnAuthority @0x407CC0 - the
-//  authority @0x407CCA, the dead test @0x407CD9, 1920 @0x407D47, @0x407D2C..0x407D38]
+//  Entity_UpdateInfantryPlayerBody's think @0x4B4BC9..0x4B4BE0; NullClass_HandleEvent
+//  @0x406FF0; Entity_HandleDeathOnAuthority @0x407CC0]
 void player_body_row_event(World &world, Entity &body, int event);
 
 class World;
