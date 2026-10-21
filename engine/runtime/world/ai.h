@@ -1316,10 +1316,12 @@ public:
     // alive + not prone + not latched on a ladder or under a deployed chute
     // (entity_flags carries the retail Flags view for the 0x100020 gate).
     // [orig: decay @0x4b5c97; the eye @0x4B699F..0x4B6BAB; ramp @0x4b7dbf/@0x4b7dd6
-    // under the (Flags & 0x100020) gate @0x4b7dad; the seated (+0x168==1)
-    // +-0x1400000 variant unported]
+    // under the (Flags & 0x100020) gate @0x4b7dad]; a seated body runs no on-foot ramp:
+    // a passenger (+0x168 == 1) ramps +-0x1400000 ahead of its eye instead
+    // [orig: @0x4B6684..0x4B66C3].
     void infantry_lean_decay(AiEntity &e);
     void infantry_lean_ramp(AiEntity &e, uint32_t entity_flags);
+    void infantry_lean_seated_ramp(AiEntity &e);
     // The D-COL-5 climb legs (infantry_ladder.cpp; record world-wac-ai-re.md §30).
     // org2, EVERY tick: the on-ladder state override (32/33/34 by the dir fan +
     // look-pitch sign) and the side/back dismounts.

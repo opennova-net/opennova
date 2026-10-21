@@ -11,10 +11,13 @@
 //  @0x4B69D9..0x4B6A08, Roll @0x4B6A68, +0x90 @0x4B6A8F, +0x8C @0x4B6AB3, the turns
 //  @0x4B6A0C..0x4B6B96, the floor @0x4B6B98..0x4B6BA0, the stores @0x4B6BA5..0x4B6BAB]
 
+#include <runtime/world/ai.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 
 namespace {
 
@@ -55,6 +58,27 @@ int main() {
 	// A short capsule floors the height; the lateral words do not floor.
 	eye(0x1000, 0, 0, 0, 0, 0, out);
 	check(out[2] == 0x2000, "the height floors at 0x2000");
+
+	// The lean's halves around the eye: the decay (lean+8)>>4 at the pass's head, the
+	// on-foot ramp 0x3000000 after the eye, a seated passenger's 0x1400000 before it
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the on-foot
+	//  ramp @0x4B7DBF / @0x4B7DD6, the passenger test @0x4B6684 and its ramp
+	//  @0x4B66B5 / @0x4B66C3].
+	auto world = std::make_unique<w::World>();
+	w::AiEntity body;
+	body.health = 100;
+	body.inf.lean_angle = 0x20000000;
+	body.inf.lean_left = true;
+	world->ai.infantry_lean_decay(body);
+	check(body.inf.lean_angle == 0x1E000000, "the decay takes (lean + 8) >> 4");
+	world->ai.infantry_lean_ramp(body, 0);
+	check(body.inf.lean_angle == 0x1B000000, "the on-foot ramp steps 0x3000000");
+	world->ai.infantry_lean_seated_ramp(body);
+	check(body.inf.lean_angle == 0x19C00000, "a seated passenger's ramp steps 0x1400000");
+	body.inf.lean_left = false;
+	body.inf.lean_right = true;
+	world->ai.infantry_lean_seated_ramp(body);
+	check(body.inf.lean_angle == 0x1B000000, "its right key steps back by 0x1400000");
 	if (g_failures == 0) std::printf("player_body_capsule_eye: OK\n");
 	return g_failures == 0 ? 0 : 1;
 }

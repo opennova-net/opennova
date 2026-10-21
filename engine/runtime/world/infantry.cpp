@@ -323,6 +323,16 @@ void AiSystem::infantry_lean_decay(AiEntity &e) {
         io::bam_sub(inf.lean_angle, io::bam_sar(io::bam_add(inf.lean_angle, 8), 4));
 }
 
+// A seated passenger's lean ramp: the held keys move the lean by 0x1400000 a tick, no
+// other gate. [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp [esi+168h], 1`
+// @0x4B6684, left `add [esi+0B0h], 0FEC00000h` @0x4B66B5, right `add [esi+0B0h],
+// 1400000h` @0x4B66C3]
+void AiSystem::infantry_lean_seated_ramp(AiEntity &e) {
+    InfantryState &inf = e.inf;
+    if (inf.lean_left) inf.lean_angle = io::bam_add(inf.lean_angle, -0x1400000);
+    if (inf.lean_right) inf.lean_angle = io::bam_add(inf.lean_angle, 0x1400000);
+}
+
 void AiSystem::infantry_lean_ramp(AiEntity &e, uint32_t entity_flags) {
     InfantryState &inf = e.inf;
     if (e.health <= 0) return;                      // [orig: the Flags&2 gate legs]
@@ -1327,11 +1337,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // call @0x4B9A48, the restamp @0x4BF078..0x4BF094]. The player bodies keep
     // the clip gate, which stands in for their own unported channel exit
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B412D..0x4B4135].
+    // A seated player body takes the mounted site: a passenger (+0x168 == 1) ramps its
+    // held lean keys by 0x1400000 ahead of its eye, and no seat runs the on-foot ramp
+    // (the mounted site ends the pass). An on-foot body ramps after its eye, which read
+    // the decayed lean (D-NET-330).
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the site selector @0x4B6386,
+    //  the passenger test @0x4B6684, the seated ramp @0x4B66AB..0x4B66C3, the mounted
+    //  eye @0x4B66D9..0x4B68FC; the on-foot eye @0x4B699F..0x4B6BAB, the ramp
+    //  @0x4B7DBF / @0x4B7DD6]
+    const bool seated_body = !npc_body && tick_entity != nullptr && tick_entity->mounted &&
+            tick_entity->mount_target.valid();
+    if (seated_body && tick_entity->mount_type == SeatType::Passenger)
+        infantry_lean_seated_ramp(e);
     if (have_clip || npc_body) infantry_restamp_eye(e, world, frame);
-    // The held lean keys ramp after the eye, which read the decayed lean (D-NET-330).
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the eye @0x4B699F..0x4B6BAB,
-    //  the ramp @0x4B7DBF / @0x4B7DD6]
-    if (!npc_body)
+    if (!npc_body && !seated_body)
         infantry_lean_ramp(e, tick_entity != nullptr
                                   ? (tick_entity->flags | tick_entity->engine_flags)
                                   : 0u);
@@ -2071,7 +2090,8 @@ int32_t eye_q22(int32_t a, int32_t b) {
 void player_body_capsule_eye(int32_t extent, int32_t lean, int32_t yaw, int32_t body_heading,
                              int32_t roll, int32_t body_pitch, int32_t out[3]) {
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `neg ecx` @0x4B69A5, the
-    //  lean's pair @0x4B69AB..0x4B69D4, the twist `sub edx, [esi+8Ch]` @0x4B69DC,
+    //  lean's pair @0x4B69AB..0x4B69D4 (`fld dbl_7C3608` @0x4B69AF, the cosine
+    //  @0x4B69CC), the twist `sub edx, [esi+8Ch]` @0x4B69DC,
     //  Roll @0x4B6A68, +0x90 @0x4B6A8F, +0x8C @0x4B6AB3]
     const EyeTurn l = eye_turn(io::bam_sub(0, lean));
     const EyeTurn tw = eye_turn(io::bam_sub(yaw, body_heading));
@@ -2146,12 +2166,15 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         const int32_t extent = frame.capsule_top - frame.capsule_bottom;
         const int32_t delta = org2 ? std::min(extent, 0xD000)
                                                   : std::max(extent, 0x9000);
-        // An on-foot player body's eye is the four-turn capsule leg, lateral words
-        // included (D-NET-330); a seated one keeps the leg below (its mounted arm
-        // @0x4B66D9..0x4B68FC is the tracked remainder).
-        // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B698C..0x4B6BAB]
-        const Entity *seat_probe = world.registry.get(e.handle);
-        if (org2 && (seat_probe == nullptr || !seat_probe->mounted)) {
+        // A player body's eye is the four-turn capsule leg, lateral words included,
+        // on foot and seated alike: the mounted site's arm is the same leg over the
+        // same words (D-NET-330).
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - on foot
+        //  @0x4B698C..0x4B6BAB; seated @0x4B66D9..0x4B68FC, the body heading
+        //  `mov edi, [esi+8Ch]` @0x4B668B, the twist @0x4B672E..0x4B6731, Roll
+        //  @0x4B67B9, +0x90 @0x4B67E0, `fimul [esi+8Ch]` @0x4B6804, the floor
+        //  @0x4B68E7, the stores @0x4B68F5..0x4B68FC]
+        if (org2) {
             int32_t eye[3] = {};
             player_body_capsule_eye(delta, inf.lean_angle, e.heading, inf.body_heading, e.roll,
                                     e.body_pitch, eye);
@@ -2161,44 +2184,28 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
             return;
         }
         // The NPC (org1) restamp reads the Q22 sine table at the rounded top
-        // ten bits of the lean and of the heading; the player-body fallback
-        // takes the Q22 ftol cosine of the lean times retail's radians-per-BAM
-        // double, as the player body's own eye leg does.
+        // ten bits of the lean and of the heading.
         // [orig: org1 @0x4BF09F..0x4BF14C (lean +0xB0 @0x4BF09F..0x4BF0BA,
-        //  heading +0x10 @0x4BF0EE..0x4BF114); org2 `fild; fld dbl_7C3608`
-        //  @0x4B69AB..0x4B69AF, the cosine @0x4B69CC..0x4B69D4]
+        //  heading +0x10 @0x4BF0EE..0x4BF114)]
         const int lean_index = io::bam_table_index(static_cast<uint32_t>(inf.lean_angle) + 0x200000u);
-        const int32_t lean_cos = org2
-            ? static_cast<int32_t>(std::cos(static_cast<double>(inf.lean_angle) *
-                                            io::kRadiansPerBamX87) * io::kQ22One)
-            : static_cast<int32_t>(io::bam_table_cos(lean_index) * io::kQ22One);
-        int32_t eye_z =
+        const int32_t lean_cos = static_cast<int32_t>(io::bam_table_cos(lean_index) * io::kQ22One);
+        inf.eye_offset_z =
             static_cast<int32_t>((static_cast<int64_t>(delta) * lean_cos) >> 22);
-        if (org2 && eye_z < 0x2000) eye_z = 0x2000;
-        inf.eye_offset_z = eye_z;
-        if (org2) {
-            // A lost sample must not leave a stale head-frame lateral pair
-            // behind: the seated capsule leg carries no lateral model (the
-            // mounted arm is the tracked residue), so the lanes reset.
-            inf.eye_offset_x = 0;
-            inf.eye_offset_y = 0;
-        } else {
-            const int32_t lean_sin =
-                static_cast<int32_t>(io::bam_table_sin(lean_index) * io::kQ22One);
-            const int32_t lat_raw = static_cast<int32_t>(
-                (static_cast<int64_t>(delta) * lean_sin) >> 22);
-            const int32_t lat = (lat_raw * 3) >> 2;
-            const int yaw_index =
-                io::bam_table_index(static_cast<uint32_t>(e.heading) + 0x200000u);
-            const int32_t yaw_sin =
-                static_cast<int32_t>(io::bam_table_sin(yaw_index) * io::kQ22One);
-            const int32_t yaw_cos =
-                static_cast<int32_t>(io::bam_table_cos(yaw_index) * io::kQ22One);
-            inf.eye_offset_x = static_cast<int32_t>(
-                (static_cast<int64_t>(lat) * yaw_sin) >> 22);
-            inf.eye_offset_y = -static_cast<int32_t>(
-                (static_cast<int64_t>(lat) * yaw_cos) >> 22);
-        }
+        const int32_t lean_sin =
+            static_cast<int32_t>(io::bam_table_sin(lean_index) * io::kQ22One);
+        const int32_t lat_raw = static_cast<int32_t>(
+            (static_cast<int64_t>(delta) * lean_sin) >> 22);
+        const int32_t lat = (lat_raw * 3) >> 2;
+        const int yaw_index =
+            io::bam_table_index(static_cast<uint32_t>(e.heading) + 0x200000u);
+        const int32_t yaw_sin =
+            static_cast<int32_t>(io::bam_table_sin(yaw_index) * io::kQ22One);
+        const int32_t yaw_cos =
+            static_cast<int32_t>(io::bam_table_cos(yaw_index) * io::kQ22One);
+        inf.eye_offset_x = static_cast<int32_t>(
+            (static_cast<int64_t>(lat) * yaw_sin) >> 22);
+        inf.eye_offset_y = -static_cast<int32_t>(
+            (static_cast<int64_t>(lat) * yaw_cos) >> 22);
     }
 }
 
