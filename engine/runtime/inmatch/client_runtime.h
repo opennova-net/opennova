@@ -203,6 +203,15 @@ public:
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0]
 	// `leave_tag`: JoinerConnection::disconnect's.
 	std::vector<std::vector<uint8_t>> disconnect(std::string_view leave_tag = {});
+	// The session destroy, FullDestroy(reason): the leave burst latching "N.C:SWWAD[1]:<reason>"
+	// (disconnect), then the transport's teardown, which writes NET TEARING DOWN SOCKET while the
+	// connect log is on, unless the join runs on NovaWorld (`novaworld_join`: the menu's connect
+	// type 1 keeps the transport).
+	// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the sprintf @0x4C96CC, the leave @0x4C96DB,
+	//  `networkConnectType_480 != 1` @0x4C9722, the socket state @0x4C974E,
+	//  CNapiNetwork_TearDownSocket (the calls @0x4C9763 / @0x4C976F); CNapiNetwork_TearDownSocket
+	//  @0x4C4C90 - the line @0x4C4CBE..0x4C4CE7 ahead of NapiNPManager_CloseSocket @0x4C4CF5]
+	std::vector<std::vector<uint8_t>> destroy_session(int32_t reason, bool novaworld_join);
 
 	// Queue one reliable C2S 0x1D stance change (0xA9 crouch / 0xAA prone / 0xAC stand) from
 	// the stance key SELECT; it leaves inside the next open send boundary in queue order.

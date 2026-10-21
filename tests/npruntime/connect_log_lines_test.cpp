@@ -417,6 +417,37 @@ void test_remote_joiner_client_lines() {
 	for (std::size_t i = 0; i < want.size(); ++i) CHECK(lines[4 + i] == want[i]);
 }
 
+// The joiner's session destroy (FullDestroy): the leave's lines, then the transport's teardown,
+// NET TEARING DOWN SOCKET, unless the join runs on NovaWorld (the menu's connect type 1 keeps
+// the transport). A destroy ahead of the 0x82 has no session to leave, so the teardown line
+// follows the announce's.
+// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C96DB, `networkConnectType_480 != 1`
+//  @0x4C9722, CNapiNetwork_TearDownSocket (the call @0x4C9763); CNapiNetwork_TearDownSocket
+//  @0x4C4C90 - the line @0x4C4CBE..0x4C4CE7]
+void test_remote_joiner_destroy_tears_down_the_socket() {
+	const PeerAddr host_addr = peer_addr_from_octets({10, 0, 0, 1}, 32786);
+	for (const bool novaworld : {false, true}) {
+		MemoryFiles files;
+		inmatch::ConnectLog log{files};
+		log.set_clock([] { return std::string("T"); });
+		log.start(inmatch::ConnectLogHeader{});
+		uint64_t now_ms = 1000;
+		inmatch::ClientRuntime client("TeardownJoiner", [&now_ms] { return now_ms; });
+		client.set_title(&kJo);
+		client.set_host_address(host_addr);
+		client.set_connect_log(&log);
+		const std::vector<uint8_t> hello = client.start();
+		CHECK(!hello.empty());
+		CHECK(client.destroy_session(-1, novaworld).empty());
+		const std::vector<std::string> lines = log_lines(files);
+		if (novaworld) {
+			CHECK(lines.size() == 1);
+		} else {
+			CHECK(lines.size() == 2 && lines[1] == "NET TEARING DOWN SOCKET");
+		}
+	}
+}
+
 } // namespace
 
 int main() {
@@ -424,6 +455,7 @@ int main() {
 	test_dedicated_host_receive_lines();
 	test_listen_host_self_join_lines();
 	test_remote_joiner_client_lines();
+	test_remote_joiner_destroy_tears_down_the_socket();
 	if (failures != 0) {
 		std::printf("connect_log_lines: %d failure(s)\n", failures);
 		return 1;

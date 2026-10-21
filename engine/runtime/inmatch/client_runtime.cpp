@@ -619,6 +619,18 @@ std::vector<std::vector<uint8_t>> ClientRuntime::disconnect(std::string_view lea
 	return log_client_sends(joiner_->disconnect(leave_tag), lost_before);
 }
 
+std::vector<std::vector<uint8_t>> ClientRuntime::destroy_session(
+		int32_t reason, bool novaworld_join) {
+	if (role_ != Role::Joiner || joiner_ == nullptr) return {};
+	std::vector<std::vector<uint8_t>> burst = disconnect("N.C:SWWAD[1]:" + std::to_string(reason));
+	// The transport's teardown, after the leave's lines (a joiner's socket is always open:
+	// SetTransportMode 2 / 4 at the enumerate) [orig: CNapiGameSession_FullDestroy @0x4C96A0 -
+	// @0x4C9722, @0x4C974E, @0x4C9763; CNapiNetwork_TearDownSocket @0x4C4C90 - @0x4C4CBE..0x4C4CE7].
+	if (!novaworld_join && connect_log_ != nullptr && connect_log_->enabled())
+		connect_log_->line(net_tearing_down_socket_text());
+	return burst;
+}
+
 bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_input_frame() ||
 	    !is_deployed() || !joiner_->has_self_handle() ||
@@ -2076,12 +2088,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
 	// @0x525B9F].
 	view_.zero_frame_tick();
 	// Game_StartMission's pumps between the 0x1A and the final wait for the S2C 0x0F.
-	// A receive pump steps the countdown (the load's two drain what arrived; ours waits in
-	// the queue for the next frame); a send pump builds only at a spent countdown and
+	// A receive pump steps the countdown and reads no socket: the load's two pump the
+	// protocol's client queue alone, which the game-start wait's last pass drained, so what
+	// arrives during the load waits for the final wait's first manager receive, as ours waits
+	// in the queue for the next frame; a send pump builds only at a spent countdown and
 	// reloads it from the dictated period, and every send pump call ages the flush.
 	// [orig: CNapiNPConnection_PumpFlags @0x629780 - the step @0x6297ac, the flush
 	//  @0x6297d5, the reload @0x629802; CNapiNPConnection_PumpEnumeratorAndSend
-	//  @0x6290c0 - the build gate @0x62927b]
+	//  @0x6290c0 - the build gate @0x62927b; CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0
+	//  (flags 26, no manager receive); NapiNPManager_Pump @0x62AC40 - the socket read only
+	//  under flag 4 (NapiNPManager_PumpReceive @0x623010)]
 	const uint32_t now_tick = current_tick_;
 	auto receive_pump = [this] {
 		if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;

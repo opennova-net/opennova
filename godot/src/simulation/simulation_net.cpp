@@ -712,6 +712,11 @@ void Simulation::set_join_network_type(int p_type) {
 			p_type == static_cast<int>(opennova::inmatch::NetworkType::NovaWorld)
 			? opennova::inmatch::NetworkType::NovaWorld
 			: opennova::inmatch::NetworkType::Lan;
+	// A NovaWorld join's session destroy keeps its transport (engine:
+	// inmatch::ClientRuntime::destroy_session).
+	if (joiner_role_ != nullptr)
+		joiner_role_->set_join_novaworld(
+				net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
 }
 
 void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
@@ -827,6 +832,9 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// The process's _connectlog.txt, which the session key's handler closes.
 	runtime_->set_connect_log(net_.log_devices != nullptr ? net_.log_devices->logs().connect
 	                                                     : nullptr);
+	// The join's network type: a NovaWorld join's session destroy keeps its transport.
+	joiner_role_->set_join_novaworld(
+			net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
 	install_console_seams();
 	install_charattr_table();
 	install_character_join_vars();
