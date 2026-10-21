@@ -31,6 +31,7 @@
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/remote_admin.h>
+#include <runtime/inmatch/server_tick.h> // Server_TickUpdate
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
@@ -551,6 +552,43 @@ void test_listen_host_and_single_player() {
 	       "a single player's quit: the world's exit reason 1");
 }
 
+// Single player's MISSION CYCLE: the round ends at once (no winner) and the 620-tick linger is
+// stored, but single player is out of a session (its network type 0), so its server tick never
+// drains the linger: no exit, the player stays on the round's end. A session host's tick drains
+// the same linger into exit 3. (Ours keeps the context in session; the world's mp_session word is
+// single player's is_in_session.)
+// [orig: CAdminServer_HandleMissionCommand @0x40660B (Server_ProcessRoundEnd(0)), @0x40661F (the
+//  620 store); Server_TickUpdate @0x51D9A5 (the is_in_session test ahead of the drain), @0x51D9B1,
+//  the drain @0x51D9BD..0x51D9CC, 3 @0x51DB63; SinglePlayer_StartMission @0x561BD4]
+void test_single_player_cycle() {
+	for (const bool session : {false, true}) {
+		auto world = std::make_unique<world::World>();
+		world->registry.configure_pool(0, 8);
+		world->rules.mp_session = session;
+		auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+		ctx->world = world.get();
+		ctx->is_authority = 1;
+		ctx->is_in_session = 1;
+		gamecfg::GameCfg block = gamecfg::defaults();
+		inmatch::AdminConsole::Seams seams;
+		seams.config_block = &block;
+		inmatch::AdminConsole console(*ctx, std::move(seams));
+		console.set_scene(inmatch::AdminScene::GameLoop);
+		std::vector<std::string> replies;
+		(void)console.dispatch(AdminSession{"boss", 0xFFFFFFFFu}, "MISSION CYCLE", replies);
+		expect(replies.size() == 1 && replies[0] == "OK - Server is cycling...", "the cycle runs");
+		expect(world->match.outcome().ended && ctx->round_end_linger_ticks == 620,
+		       "the round ends with the 620 linger");
+		for (int i = 0; i < 640; ++i) inmatch::Server_TickUpdate(*ctx);
+		if (session)
+			expect(ctx->mission_exit_reason == inmatch::kMissionExitMapCycle,
+			       "a session host drains the linger into exit 3");
+		else
+			expect(ctx->mission_exit_reason == inmatch::kMissionExitNone && ctx->round_end_linger_ticks == 620,
+			       "single player never drains it");
+	}
+}
+
 // A paused single player's frame is the Game Loop's under its in-game menu: its exit router
 // reads the stored reason ahead of the pump, so a reason stored by the last pump leaves the
 // mission on the next frame, which pumps nothing; with no reason it pumps. No other idle frame
@@ -582,6 +620,7 @@ int main() {
 	test_joiner_console();
 	test_session_destroy_routes();
 	test_listen_host_and_single_player();
+	test_single_player_cycle();
 	test_idle_frame_exit();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "remote_admin: %d failure(s)\n", g_failures);

@@ -1124,12 +1124,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// count; automatic multiplayer announcements start draining next tick. At expiry
 	// the authority stores its mission exit: 4 when REPLAY is on and the LASTGAME
 	// toggle off, else 3. Both take the map change (inmatch/map_change.h); the
-	// session stays up through it (§5.70.3).
-	// [orig: store @0x5166C4; Server_TickUpdate -- the session and gate tests
-	//  @0x51D9A5..0x51D9B7, the drain @0x51D9BD..0x51D9CC, the reason
+	// session stays up through it (§5.70.3). Only in a session: single player's
+	// network type 0 leaves is_in_session clear, so a linger an admin's MISSION
+	// CYCLE or GOTO stored there never drains (world.rules.mp_session is our
+	// single player's is_in_session; the context's is always 1).
+	// [orig: store @0x5166C4; Server_TickUpdate -- the session test @0x51D9A5,
+	//  the round-over test @0x51D9B1, the drain @0x51D9BD..0x51D9CC, the reason
 	//  @0x51DB47..0x51DB63 (`cmp g_ReplayEnabled` @0x51DB47, `cmp
-	//  g_LastGameToggle` @0x51DB50, 4 @0x51DB57, 3 @0x51DB63)]
-	if ((round_was_announced || round_ended_at_retail_linger_phase) &&
+	//  g_LastGameToggle` @0x51DB50, 4 @0x51DB57, 3 @0x51DB63);
+	//  SinglePlayer_StartMission @0x561BD4 (SetNetworkType(0))]
+	if (world.rules.mp_session && (round_was_announced || round_ended_at_retail_linger_phase) &&
 			ctx.round_end_linger_ticks > 0) {
 		--ctx.round_end_linger_ticks;
 		if (ctx.round_end_linger_ticks == 0 && ctx.mission_exit_reason == kMissionExitNone) {
