@@ -783,8 +783,7 @@ bool GameWorld::settle_join_wire_assets() {
 	sim->finalize_loaded_model_challenge_snapshot();
 	// The joiner's mission start models, its list known now: built and freed undrawn (the
 	// load's forced frames ran before the stream landed), so a death's husk swap finds its
-	// data, meshes, textures and shaders built [orig: EntityDef_LoadModelsAndCallbacks
-	// @0x439F50 - husk @0x43A0B6].
+	// data, meshes, textures and shaders built (D-NET-NEW-L5-8).
 	if (Node3D *model_warm = build_model_warm(sim->get_mission_start_model_files(), Vector3())) {
 		model_warm->set_visible(false);
 		model_warm->queue_free();
@@ -1127,10 +1126,8 @@ Node3D *GameWorld::build_model_warm(const PackedStringArray &p_models, const Vec
 // start's models (`p_models`) build in front of the same camera and draw in
 // the same frames, then free with the spawns: retail's mission start loads
 // every listed row's models, its husk family among them, and the freeze
-// builds their buffers, so a death's swap builds nothing (FX-5)
-// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - husk @0x43A0B6, the "xb"
-// final husk @0x43A1C8, huskfinal @0x43A245 / @0x43A26E, huskshadow @0x43A38A;
-// CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
+// builds their buffers, so a death's swap builds nothing (D-NET-NEW-L5-8; the
+// witness: engine inmatch/loaded_model_list.h, mission_start_model_list).
 int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models) {
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world == nullptr) {
