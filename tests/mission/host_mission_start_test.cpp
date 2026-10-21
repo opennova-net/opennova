@@ -542,6 +542,28 @@ void run_single_player_restart_repromotes_the_mission_kit() {
 				kits[0][i].ammo_secondary == kits[1][i].ammo_secondary);
 	CHECK(!kits[0].empty() && kits[0][0].name == "WPN_KNIFE");
 	CHECK(knife[0] == knife[1] && m4[0] == m4[1]);
+	// A mission with no kit row: the fresh start's and the restart's buffer are the literal
+	// default page, WPN_M4AUTO first (with no profile page of the shell's)
+	// [orig: Game_ApplySessionSettingsToGlobals @0x5519A2..0x5519E4 (out of a session);
+	//  Game_StartMission @0x524683..0x5246C8 (the restart's copy), "WPN_M4AUTO" @0x5246BE].
+	std::vector<world::WeaponKitEntry> literal[2];
+	for (int pass = 0; pass < 2; ++pass) {
+		std::map<std::string, std::string> files;
+		files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		kernel.open_document(two_entity_mission(), "sp_restart_literal", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = false;
+		options.restart = pass == 1;
+		options.game_type = mission_game_type(kernel.mission);
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		literal[pass] = world::local_loadout_kit(kernel.world, kernel.local.loadout);
+	}
+	CHECK(literal[0].size() == literal[1].size());
+	CHECK(!literal[0].empty() && literal[0][0].name == "WPN_M4AUTO");
+	CHECK(!literal[1].empty() && literal[1][0].name == "WPN_M4AUTO");
 }
 
 // A single player's restart runs no round-state init (Game_RestartRoundSP -> Game_StartMission(1)),
