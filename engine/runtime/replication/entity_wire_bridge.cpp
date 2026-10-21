@@ -1256,9 +1256,9 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 uint16_t uplink_hud_target_wire_handle(const world::World &world, const world::AiEntity &ae,
 		uint16_t self_wire_handle, uint16_t aim_wire_person) {
 	// A lock on a round (a flare the heat lock took) is the cursor too, and the interest
-	// list's compares match it to no entity [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B882D
-	//  (the +0xC word, a round included); Server_BuildEntityPriorityListForPlayer
-	//  @0x50E1C6 / @0x50E42C].
+	// list's compares match it to no entity [orig: HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B882D:
+	//  the +0xC word, a round included); Server_BuildEntityPriorityListForPlayer
+	//  @0x50DF20 (@0x50E1C6 / @0x50E42C)].
 	if (world::AiSlot::target_of(ae.slot.f[3]).round >= 0) return 0xFFFF;
 	const world::EntityHandle cursor =
 			ae.inf.combat_target.valid() ? ae.inf.combat_target : ae.inf.head_look_target;

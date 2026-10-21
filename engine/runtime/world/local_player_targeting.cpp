@@ -280,7 +280,7 @@ void LocalPlayer::update_aim_target() {
             } else {
                 // The heat lock is the shared query's winner, an entity or a round (the
                 // ring leg: a flare); the roll's attacker is the body's +368.
-                // [orig: Entity_UpdateInfantryPlayerBody @0x4B51FE..0x4B520A ->
+                // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B51FE..0x4B520A) ->
                 //  Entity_SpawnWeaponEffect @0x545840 (the query entity @0x5458B7)]
                 const int index = world_.tables.weapons.index_of(weapon.def_name.c_str());
                 const WeaponTableEntry *def = index < 0 ? nullptr : world_.tables.weapons.by_index(uint8_t(index));
@@ -293,7 +293,7 @@ void LocalPlayer::update_aim_target() {
             body->slot.f[3] = AiSlot::target_word(target);
             e->last_fire_target = target;
         }
-        // The tone flag tests the +0xC word, a round included [orig: @0x4B520D..0x4B5222].
+        // The tone flag tests the +0xC word, a round included [orig: @0x4B40E0 (@0x4B520D..0x4B5222)].
         if (allowed && body->slot.f[3] != 0) body->slot.f[2] |= 1;
         else body->slot.f[2] = -2;
     }

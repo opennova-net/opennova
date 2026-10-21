@@ -485,7 +485,8 @@ void test_lock_tone() {
 	radar_note_guided_missile(world, world.round_sim.rounds[9], 9);
 	CHECK(state.lock_tone == 31, "the lock note stores 31");
 	// A round target (a flare the missile holds): its +368, its source, is the arm; a
-	// round is never the local player [orig: @0x4465DB..0x446602 over the round]. (D-NET-64)
+	// round is never the local player [orig: Entity_UpdateGuidedMissile_0 @0x446060
+	// (@0x4465DB..0x446602)]. (D-NET-64)
 	{
 		const int32_t count = state.missile_count;
 		state.lock_tone = 0;

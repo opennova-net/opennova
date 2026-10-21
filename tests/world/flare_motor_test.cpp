@@ -372,7 +372,7 @@ void test_the_in_flight_query_takes_an_air_flare() {
 
 
 // The +0xC word as one word: an entity's handle + 1, a round's -(slot + 1), 0 for none.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B520A; the stng init @0x445F10]
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init @0x445EF0 (@0x445F10)]
 void test_the_target_word() {
     const EntityHandle h = EntityHandle::make(1, 5);
     CHECK(AiSlot::target_word(TargetRef{h}) == int32_t(h.packed) + 1);

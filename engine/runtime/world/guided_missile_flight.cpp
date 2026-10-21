@@ -133,8 +133,8 @@ GuidedMotorEvents GuidedFlight::motor(GuidedFlightState &s, GuidedFamily family,
         // The held target's liveness is tested ahead of the acquisition, and the steer
         // samples whatever target the acquisition then stored: a target this tick's
         // acquisition took is sampled, not the one it replaced.
-        // [orig: the liveness @0x4461A6..0x4461E6 ahead of the acquisition
-        //  @0x4461F2..0x446345; the sample @0x44637B..0x4463A3]
+        // [orig: Entity_UpdateGuidedMissile_0 @0x446060 (the liveness @0x4461A6..0x4461E6 ahead of the acquisition
+        //  @0x4461F2..0x446345; the sample @0x44637B..0x4463A3)]
         bool sample_present = in.target_present;
         const int32_t *sample = in.target_origin;
         if ((s.flags & 2) && has_target(s) && (!in.target_present || !in.target_alive)) {

@@ -837,8 +837,8 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 // head-look target. A decoded remote person on the aim ray has no registry
 // entity, so the head-look target stays empty and the cursor names the aim
 // acquisition's wire row; the lock and a live head-look target win over it.
-// [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B8825; Entity_UpdateInfantryPlayerBody
-//  headLookTarget @0x4b4f75 / @0x4b5036]
+// [orig: HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B8825);
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (headLookTarget @0x4b4f75 / @0x4b5036)]
 // The uplink is written after the frame's receive: when that receive folded
 // the joiner's own record, its apply has already re-pointed the ground link
 // the writer reads. A record that seats the player names the seat's own

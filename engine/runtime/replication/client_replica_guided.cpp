@@ -16,9 +16,9 @@ void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body
     if (!decode_guided_field_group(GuidedMode::ReadFull, group, packet.body, packet.body_size, rec, used)) return;
     auto &s = round->guided;
     if (rec.launched) { s.flags |= 1; round->det_at_expiry = true; }
-    // The read-apply stores the wire's target into +0x2D4 whole, so a round the local
+    // The full read stores the wire's target into +0x2D4 whole, so a round the local
     // launch held goes with it (D-NET-64) [orig: Entity_SerializeGuidedMissileState
-    //  @0x447C50 - the clear @0x447E7D, the bound target @0x44808C].
+    //  @0x447C50 (ReadFull) - the clear @0x447E7D, the bound target @0x447ECE / @0x447F74].
     if (rec.target_cleared) { s.flags &= ~2u; s.target = 0xFFFF; s.target_round = -1; s.timer = -1; }
     if (rec.target_bound) { s.flags |= 2; s.target = rec.target_slot; s.target_round = -1; s.timer = -1; }
     if (group == GuidedFieldGroup::TargetTypePos) s.phase = rec.weapon_type;
