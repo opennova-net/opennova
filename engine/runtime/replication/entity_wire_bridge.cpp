@@ -402,7 +402,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		if (e.item_type_index == 0 || !e.has_item_def || ae == nullptr) return;
 		// The dismemberment clone is included: the original's join download
 		// serializes every pool-0 slot (single caller
-		// Server_SendInitialGameStateToPlayer @0x51bd24), and the 0x0C record
+		// Server_SendPlayerSlotStateFrame @0x51bd24), and the 0x0C record
 		// carries no section mask — a late joiner materializes the clone as a
 		// whole-body corpse, exactly like retail (world-wac-ai-re §19.2).
 		OrganicSpawnRecord rec;

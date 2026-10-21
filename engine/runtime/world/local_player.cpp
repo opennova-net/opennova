@@ -757,7 +757,7 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// [orig: Game_ProcessMainFrame -- the menu test @0x52660D..0x526614,
 	//  Input_ProcessFrame @0x52661D, the block @0x526625..0x526679: the latch
 	//  test @0x526625, g_InputFlags = 0 @0x526632, MoveOrder (entity+0x12C)
-	//  &= 0x300 @0x52666F; UI_TeardownScene's pass @0x54E68D..0x54E695 under
+	//  &= 0x300 @0x52666F; UI_ProcessMenuScreenFrame's pass @0x54E68D..0x54E695 under
 	//  sub_54B980's flag from StatScreen_ShowCallback @0x56287D and
 	//  DeathScreen_UpdateUI @0x55316E]
 	if (armory_press_latched) {

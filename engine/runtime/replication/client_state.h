@@ -1138,7 +1138,7 @@ struct ClientVehicleSpawnAvailability {
 //  unread); ServerCommandTable_AddEntry @0x422920 (a misnomer) - the slot walk
 //  @0x422927..0x422947, the copy @0x422957..0x422963; read by
 //  NapiClientCmd_HandleServerCommandTable @0x42CCE0 (@0x42CD00, @0x42CD6F); the host's table
-//  byte_82F1DC sent by Server_SendInitialGameStateToPlayer @0x51BBA0 (@0x51BFF6)]
+//  byte_82F1DC sent by Server_SendPlayerSlotStateFrame @0x51BBA0 (@0x51BFF6)]
 inline constexpr std::size_t kServerCommandSlots = 16;
 inline constexpr std::size_t kServerCommandEntryBytes = 10;
 using ServerCommandEntry = std::array<uint8_t, kServerCommandEntryBytes>;

@@ -485,7 +485,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	}
 	// Retail's handler stores nothing here: an empty body.
 	// [orig: NapiNPClientMsg_0x007 @0x422730, NapiNPClientMsg_0x01C @0x4227F0 (the
-	//  host's join tail sends it, Server_SendInitialGameStateToPlayer @0x51BBA0 (the
+	//  host's join tail sends it, Server_SendPlayerSlotStateFrame @0x51BBA0 (the
 	//  send @0x51C021)), NapiNPClientMsg_0x05E @0x4297B0, NapiNPClientMsg_0x05F @0x4228F0,
 	//  NapiNPClientMsg_0x065 @0x429870, NapiNPClientMsg_0x07F @0x429E60: each a
 	//  bare retn]

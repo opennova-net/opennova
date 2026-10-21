@@ -90,7 +90,7 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 
 // ---------------------------------------------------------------------------
 // Per-pool LOAD-TIME spawn batches — the full world the host streams to a joiner
-// during its world-load sequence [orig: Server_SendInitialGameStateToPlayer @0x51bba0,
+// during its world-load sequence [orig: Server_SendPlayerSlotStateFrame @0x51bba0,
 // phases 0x10 -> 0x0D -> 0x0C -> 0x20]. SEPARATE from the per-frame 0x0A motion path
 // (snapshot_world): these carry IDENTITY/TYPE/SPAWN-POSE for every pool, including the
 // statics/markers that have no compact 0x0A form. Routing is by handle.pool(), which
@@ -118,7 +118,7 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w);
 // (ZoneSlotChain_GetZoneInfo), whose two out bytes are the call's stack locals, written only by a
 // hit, so a static the chain does not hold streams the last hit's byte from the same call, then its
 // own radius. Before the call's first hit the bytes are uninitialized stack, read here as zero
-// (D-NET-394). Each S2C 0x10 page is one call [orig: Server_SendInitialGameStateToPlayer @0x51bba0,
+// (D-NET-394). Each S2C 0x10 page is one call [orig: Server_SendPlayerSlotStateFrame @0x51bba0,
 // the call @0x51bc50 per page].
 void stream_pool2_zone_blocks(const world::World &w, StaticEntityBatch &page);
 // The 0x0D zone bytes of one serializer call, its page: each numbered entity asks the zone chain,
