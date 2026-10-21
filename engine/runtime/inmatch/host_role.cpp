@@ -15,6 +15,7 @@
 #include <runtime/inmatch/game_config_block.h> // kSinglePlayerMpAttrib
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h> // build_mission_status (the own C2S 0x0B)
+#include <runtime/inmatch/loadout_submit.h> // resolve_loadout_submit_combo (the own 0x2F pair)
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/server_chat.h> // Server_BroadcastDialogLine
@@ -395,6 +396,48 @@ void HostRole::init_local_player_at_mission_start() {
 void HostRole::send_own_mission_status() {
 	if (state.host_owner.ctx.is_mp_session_peer == 0 || !state.client_runtime) return;
 	const TitleIdentity *title = state.host_owner.ctx.np_protocol.identity;
+	// In a session the own client's mission start submits its profile's kit twice
+	// ahead of the 0x0B, as a joiner's does: the side block the local team names, its
+	// class byte and the kit page it selects, first with the fixed slot 195, then
+	// (after Player_InitPlayer) with g_CurrentWeaponSlot, the live equipped slot
+	// resolved against the local table; all three leave in the 0x0B's pump, in queue
+	// order (D-NET-695). The page copy into the spawn buffer is the shell's
+	// (seed_session_kit_from_profile). A title whose submit ignores the class sends 8,
+	// or 7 for a mission of type 2 (DFX2-12).
+	// [orig: Game_StartMission - is_in_session @0x525767, is_mp_session_peer @0x525773,
+	//  g_LocalTeam @0x525793..0x5257C0, the class byte @0x5257C6, the page
+	//  @0x5257C9..0x525818, NetPacket_SendLoadoutSubmit(.., 195) @0x525836; is_in_session
+	//  @0x525BC4, is_mp_session_peer @0x525BCC, the class @0x525BE8..0x525C20,
+	//  g_CurrentWeaponSlot @0x525C1A, the call @0x525C2E; NetPacket_SendLoadoutSubmit
+	//  @0x42cdc0 - the slot resolve @0x42ce2d..0x42ce8b; dfx2.exe @0x42ec1f..0x42ec3e]
+	if (state.host_owner.ctx.is_in_session != 0 && kernel_ != nullptr) {
+		const mission::MissionKernel &kernel = *kernel_;
+		uint8_t team = 0;
+		for (const NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
+			if (conn.type == NapiNPConnection::kTypeClientSide && conn.link.transport == &state.host_loop)
+				team = conn.assigned_team;
+		const JoinerConnection::LoadoutKit *kit = state.client_runtime->host_loadout_kit();
+		const world::WeaponTable &weapons = kernel.world.tables.weapons;
+		auto submit_for = [&](bool alternate) {
+			LoadoutSubmit submit = kit != nullptr
+					? profile_loadout_submit(*kit, team, false)
+					: fresh_profile_loadout_submit(&weapons, team);
+			if (alternate && kernel.local.inventory_valid)
+				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
+						weapons, &kernel.local.inventory, team,
+						kernel.local.inventory.equipped_combo));
+			if (title_in_match(title).loadout_class_fixed)
+				submit.player_class =
+						kernel.mission.header.mission_type == bms::MissionType::CombatVehicleMission
+						? uint8_t{7}
+						: uint8_t{8};
+			return submit;
+		};
+		(void)state.client_runtime->queue_host_message(c2s::LOADOUT_SUBMIT,
+				encode_loadout_submit(submit_for(/*alternate=*/false)));
+		(void)state.client_runtime->queue_host_message(c2s::LOADOUT_SUBMIT,
+				encode_loadout_submit(submit_for(/*alternate=*/true)));
+	}
 	const gameprofile::GameProfile *profile =
 			title != nullptr ? gameprofile::gameprofile_by_id(title->game_id) : nullptr;
 	if (!state.client_runtime->queue_host_message(c2s::MISSION_FILE_STATUS,
@@ -498,6 +541,10 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// the host's own slot as for a joiner's (D-NET-NEW-L4-5)
 		// [orig: Game_StartMission @0x52624B; NapiNPServerMsg_PlayerJoinRequest
 		//  @0x51AB10, from the receive pump @0x51D895].
+		// So do its mission start's two C2S 0x2F, ahead of its 0x0B: the accept
+		// grants the own slot, whose table is the local one (D-NET-695)
+		// [orig: Game_StartMission @0x525836 / @0x525C2E;
+		//  NapiNPServerMsg_HandlePlayerLoadout @0x515790].
 		// So do its console line (a session peer's CMD queues the reliable 0x04,
 		// whose handler echoes an untaken line back as S2C 0x06) and the 0x24 its
 		// own client's SERVER / BAN commands send back over the walk; both
@@ -527,11 +574,13 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET &&
 				dg.tag != c2s::SPECTATOR_RESPAWN && dg.tag != c2s::CLIENT_QUALITY &&
 				dg.tag != c2s::KEEPALIVE && dg.tag != c2s::ADMIN_NETLOG_COMMAND &&
-				dg.tag != c2s::BAN_PUNT_COMMAND && dg.tag != c2s::MISSION_FILE_STATUS) {
+				dg.tag != c2s::BAN_PUNT_COMMAND && dg.tag != c2s::MISSION_FILE_STATUS &&
+				dg.tag != c2s::LOADOUT_SUBMIT) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
-		// The 0x0B's receiver reads the host context too.
+		// The 0x0B's receiver reads the host context too, and the 0x2F accept its
+		// availability table and title.
 		// The chat handler, the snapshot builder, the radio call (its
 		// designation table and zone test), the squad handlers, the team
 		// change, the Respawn key's 0x41 (the authority and the respawn
@@ -541,7 +590,8 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
 				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET ||
 				dg.tag == c2s::SPECTATOR_RESPAWN || dg.tag == c2s::ADMIN_NETLOG_COMMAND ||
-				dg.tag == c2s::BAN_PUNT_COMMAND || dg.tag == c2s::MISSION_FILE_STATUS;
+				dg.tag == c2s::BAN_PUNT_COMMAND || dg.tag == c2s::MISSION_FILE_STATUS ||
+				dg.tag == c2s::LOADOUT_SUBMIT;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;

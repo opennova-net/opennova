@@ -1231,4 +1231,14 @@ private:
 	bool disconnect_event_set_ = false;
 };
 
+// The PROFILE-sourced C2S 0x2F body for a wire team byte from a shell's kit: the side
+// block that team names when the kit carries it, else the kit's applied class and rows;
+// `alternate` selects the second submission's live equipped slot (the first's is the
+// fixed 195). The class is the profile's, before a title's wire mapping.
+// [orig: Game_StartMission @0x525793..0x525836 / NapiNPClientMsg_TeamAssign
+//  @0x431a35..0x431a9a -> NetPacket_SendLoadoutSubmit @0x42cdc0; @0x525836 passes 195,
+//  @0x525c2e g_CurrentWeaponSlot]
+LoadoutSubmit profile_loadout_submit(const JoinerConnection::LoadoutKit &kit, uint8_t team,
+		bool alternate);
+
 } // namespace opennova::inmatch

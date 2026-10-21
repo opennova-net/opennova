@@ -604,11 +604,22 @@ public:
 	                  uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
 	                  uint32_t tick_seed = 0, bool replay_mode = true, uint8_t self_team = 0);
 
-	// The shell's kit for the 0x1A-released loadout-submission pair (Joiner only; see
-	// JoinerConnection::set_loadout_kit). HostClient has no 0x2F leg — its player fills
-	// server-side [orig: Server_InitAllPlayerEntitiesForRound @0x516aa0].
+	// The shell's kit for the mission start's loadout-submission pair: a joiner's
+	// (JoinerConnection::set_loadout_kit, released by the S2C 0x1A), or the listen
+	// host's own client's, whose pair HostRole queues at its mission start's end
+	// (D-NET-695) [orig: Game_StartMission @0x525836 / @0x525c2e, the session peer's
+	// gates @0x525767..0x525779 / @0x525BC4..0x525BD2].
 	void set_loadout_kit(JoinerConnection::LoadoutKit kit) {
-		if (joiner_) joiner_->set_loadout_kit(std::move(kit));
+		if (joiner_) {
+			joiner_->set_loadout_kit(std::move(kit));
+			return;
+		}
+		host_loadout_kit_ = std::move(kit);
+		host_loadout_kit_set_ = true;
+	}
+	// The listen host's own kit, null until the shell set one.
+	const JoinerConnection::LoadoutKit *host_loadout_kit() const {
+		return host_loadout_kit_set_ ? &host_loadout_kit_ : nullptr;
 	}
 	void set_character_join_vars(CharacterJoinVars vars) {
 		if (joiner_) joiner_->set_character_join_vars(vars);
@@ -1063,6 +1074,9 @@ private:
 	WeaponLoadout authoritative_loadout_;
 	uint64_t authoritative_loadout_revision_ = 0;
 	std::array<int32_t, kWorldStateAmmoPoolCount> authoritative_ammo_pools_{};
+	// The HostClient's kit (set_loadout_kit).
+	JoinerConnection::LoadoutKit host_loadout_kit_;
+	bool host_loadout_kit_set_ = false;
 	uint64_t authoritative_ammo_pools_revision_ = 0;
 	bool deployed_ = false;
 	bool input_reset_pending_ = false;

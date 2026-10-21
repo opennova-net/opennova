@@ -306,7 +306,10 @@ void Simulation::push_joiner_loadout_kit() {
 	// rule, the resident-buffer rows, and both side blocks live there, with
 	// their witnesses). This binding keeps the seam wiring: the role gate,
 	// the empty-catalog arm delay, the re-entry latch, and the pump handoff.
-	if (!is_joiner() || !runtime_ || !kernel_) return;
+	// A listen host's own client submits the same pair at its mission start
+	// (HostRole::send_own_mission_status, D-NET-695) [orig: Game_StartMission
+	// @0x525767..0x525836 / @0x525C2E, a session peer's whatever its authority].
+	if (!(is_joiner() || is_host_listening()) || !runtime_ || !kernel_) return;
 	// The role hook runs before the shell loads weapon.def (MissionRoot orders
 	// load_from_mission_data ahead of load_weapon_table), and a kit resolved against an
 	// EMPTY catalog would skip every row — latching that would submit a zero-entry 0x2F
@@ -319,7 +322,7 @@ void Simulation::push_joiner_loadout_kit() {
 	player_.pushing_joiner_loadout_kit = true;
 	opennova::inmatch::JoinerConnection::LoadoutKit wire_kit;
 	opennova::inmatch::build_joiner_loadout_kit(kernel_->world, player_.weapon_profile,
-			runtime_->assigned_team(), kernel_->local.loadout,
+			is_joiner() ? runtime_->assigned_team() : uint8_t{0}, kernel_->local.loadout,
 			kernel_->local.inventory_valid ? kernel_->local.inventory.equipped_combo : -1,
 			kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr,
 			wire_kit);

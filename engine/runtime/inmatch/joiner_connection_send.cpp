@@ -413,21 +413,27 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 		submit.player_class = loadout_wire_class(submit.player_class);
 		return submit;
 	}
+	LoadoutSubmit submit = profile_loadout_submit(loadout_kit_, team, alternate);
+	submit.player_class = loadout_wire_class(submit.player_class);
+	return submit;
+}
+
+LoadoutSubmit profile_loadout_submit(const JoinerConnection::LoadoutKit &kit, uint8_t team,
+		bool alternate) {
 	LoadoutSubmit submit;
 	submit.team = team;
-	const LoadoutKit::SideKit &side = loadout_kit_.side_for_team(team);
+	const JoinerConnection::LoadoutKit::SideKit &side = kit.side_for_team(team);
 	if (side.set) {
 		submit.player_class = side.player_class;
 		submit.entries = side.rows;
 	} else {
 		// The binding supplied only the applied kit (the historical single-kit seam).
-		submit.player_class = loadout_kit_.player_class;
-		submit.entries = loadout_kit_.rows;
+		submit.player_class = kit.player_class;
+		submit.entries = kit.rows;
 	}
-	submit.player_class = loadout_wire_class(submit.player_class);
 	// [orig: @0x525836 passes 195, @0x525c2e passes g_CurrentWeaponSlot]
-	submit.weapon_slot_index = alternate && loadout_kit_.equipped_combo >= 0
-			? static_cast<uint32_t>(loadout_kit_.equipped_combo)
+	submit.weapon_slot_index = alternate && kit.equipped_combo >= 0
+			? static_cast<uint32_t>(kit.equipped_combo)
 			: 195u;
 	return submit;
 }

@@ -31,6 +31,7 @@
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/null_datagram_socket.h>
+#include <net/npwire/ingame_decode.h> // decode_loadout_submit (the own 0x2F pair)
 #include <formats/mission/bms.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/ai.h>
@@ -136,7 +137,8 @@ void run_held_host(bool mission_start) {
 	// WacScript_InitAndLoad @0x4F9665 / @0x4F9770].
 	CHECK(own->slot_state == inmatch::PlayerSlotState::AwaitJoin && !own->burst.spawned);
 	CHECK(!own->link.respawn_pending && hidden());
-	CHECK(host.host_loop.c2s_pending() == 1);
+	// The own client's mission start queued its two 0x2F and its 0x0B (D-NET-695).
+	CHECK(host.host_loop.c2s_pending() == 3);
 	kernel.world.cached.wac_ticks = 1;
 	if (mission_start) {
 		role.init_local_player_at_mission_start();
@@ -229,7 +231,8 @@ void run_own_join_warms_the_wired_body() {
 	if (body == nullptr || motor == nullptr) return;
 	// Not joined at the bring-up: the own 0x0B waits on the loopback.
 	CHECK(own->slot_state == inmatch::PlayerSlotState::AwaitJoin && !own->burst.spawned);
-	CHECK(host.host_loop.c2s_pending() == 1);
+	// The own client's mission start queued its two 0x2F and its 0x0B (D-NET-695).
+	CHECK(host.host_loop.c2s_pending() == 3);
 	// The body's animation channel, which the mission start wires
 	// (MissionKernel::resolve_new_infantry_adm_ids over the infantry ADM).
 	Source source;
@@ -255,12 +258,78 @@ void run_own_join_warms_the_wired_body() {
 	kernel.world.ai.root_motion = nullptr;
 }
 
+// D-NET-695: in a session the listen host's own client submits its profile's kit at its
+// mission start as a joiner's does: the side block its team names (the fresh profile's
+// side A, class 8), first with the fixed slot 195, then with g_CurrentWeaponSlot (no
+// local table here: the raw 195), both ahead of its 0x0B in queue order; the server's
+// next receive accepts them for the own slot, whose class and PlayerType become the
+// accepted class and whose loadout buffer the accept fills.
+// [orig: Game_StartMission - is_in_session @0x525767, is_mp_session_peer @0x525773, the
+//  side block @0x525793..0x5257C6, NetPacket_SendLoadoutSubmit(.., 195) @0x525836; the
+//  second @0x525BC4..0x525C2E; the 0x0B @0x52624B, the pump @0x526255;
+//  NapiNPServerMsg_HandlePlayerLoadout @0x515790 - the slot class @0x515AA8, the list
+//  @0x515F95 (Server_SendWeaponSlotListToPlayer's PlayerType @0x5025A8)]
+void run_own_mission_start_submits_its_kit() {
+	std::map<std::string, std::string> files;
+	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	ms::MissionKernel &kernel = *kernel_storage;
+	auto role_storage = std::make_unique<inmatch::HostRole>();
+	inmatch::HostRole &role = *role_storage;
+	role.bind(kernel);
+	inmatch::ListenHostState &host = role.state;
+	kernel.open_document(two_entity_mission(), "own_kit_pair", source_over(&files));
+	ms::KernelBootOptions options;
+	options.mp_session = true;
+	options.game_type = mission_game_type(kernel.mission);
+	options.bringup_net_session = [&] {
+		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
+		cfg.config.server_name = "own_kit_pair";
+		cfg.config.max_players = 4;
+		cfg.config.game_type = options.game_type;
+		cfg.socket_mode = inmatch::SocketMode::Lan;
+		cfg.serve_and_play = true;
+		inmatch::HostBringup bringup;
+		bringup.host_cfg = cfg;
+		role.bring_up(bringup);
+	};
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	inmatch::NapiNPConnection *own = nullptr;
+	for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+		if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+	CHECK(own != nullptr);
+	if (own == nullptr) return;
+	std::vector<opennova::replication::Datagram> queued;
+	opennova::replication::Datagram dg;
+	while (host.host_loop.host_recv(dg)) queued.push_back(dg);
+	CHECK(queued.size() == 3);
+	if (queued.size() != 3) return;
+	CHECK(queued[0].tag == 0x2F && queued[1].tag == 0x2F && queued[2].tag == 0x0B);
+	LoadoutSubmit first;
+	LoadoutSubmit second;
+	CHECK(decode_loadout_submit(queued[0].body.data(), queued[0].body.size(), first));
+	CHECK(decode_loadout_submit(queued[1].body.data(), queued[1].body.size(), second));
+	CHECK(first.team == own->assigned_team && first.player_class == 8 &&
+			first.weapon_slot_index == 195u);
+	CHECK(second.team == own->assigned_team && second.player_class == 8 &&
+			second.weapon_slot_index == 195u);
+	// The create stored side B's class (the side requirement -1); the accept stores 8.
+	own->slot_class = 6;
+	for (opennova::replication::Datagram &q : queued)
+		host.host_loop.deliver_c2s(q.tag, std::move(q.body));
+	role.drain_host_client_gameplay_requests();
+	CHECK(own->slot_class == 8 && own->player_list_type == 8);
+	CHECK(own->reply.loadout_buffer_set && own->reply.loadout_buffer.player_class == 8);
+}
+
 } // namespace
 
 int main() {
 	run_held_host(/*mission_start=*/true);
 	run_held_host(/*mission_start=*/false);
 	run_own_join_warms_the_wired_body();
+	run_own_mission_start_submits_its_kit();
 	if (failures == 0) std::printf("host_mission_start: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
