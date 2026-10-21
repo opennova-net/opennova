@@ -20,11 +20,11 @@ namespace opennova::inmatch {
 
 namespace {
 
-// One guided motor's sends, S2C 0x44 per serializer group in the round's update, each
-// with its call site's finite lifetime: SendFiltered(0x44, 1, 124) for group 1, 62 for
-// group 5, 310 for the rest (groups 4 and 6 take 310 only on the authority, which alone
-// queues them). The body is the shooter's and the round's handles, the group, then the
-// group's fields.
+// One guided motor send, S2C 0x44 with its call site's finite lifetime:
+// SendFiltered(0x44, 1, 124) for group 1, 62 for group 5, 310 for the rest (groups 4 and
+// 6 take 310 only on the authority, which alone queues them). The body is the shooter's
+// and the round's handles, the group, then the group's fields from the round as it stood
+// at the call.
 // [orig: Entity_SendEffectPacket @0x445C40 (NetPacket_SerializeEntityForServer @0x4D6240
 //  called @0x445C6C, NapiNPServer_SendFiltered called @0x445CA2); its callers'
 //  (subType, userParam, msgClass): Entity_UpdateGuidedMissile_0 @0x446060 - group 1 with
@@ -33,19 +33,16 @@ namespace {
 //  @0x446690 - group 1 with 0x7C @0x4467F7 / @0x446AAB, groups 6 and 4 with ebp
 //  @0x44685C / @0x4469F9, ebp = is_authority ? 0x136 : 0 @0x4466EB..0x4466F5]
 void send_guided_update(NapiNPConnection &conn, const world::GuidedUpdateEvent &update) {
-    for (int group = 1; group <= 6; ++group) {
-        if (!(update.groups & (1u << group))) continue;
-        GuidedRecord record;
-        record.target_slot = update.state.target; record.weapon_type = update.state.phase;
-        record.pos_x = update.state.steer[0]; record.pos_y = update.state.steer[1]; record.pos_z = update.state.steer[2];
-        record.attach_x = update.state.saved[0]; record.attach_y = update.state.saved[1]; record.attach_z = update.state.saved[2];
-        std::vector<uint8_t> body;
-        io::append_u16_le(body, update.shooter); io::append_u16_le(body, update.net_id); body.push_back(uint8_t(group));
-        const auto payload = encode_guided_field_group(GuidedMode::WriteFull, GuidedFieldGroup(group), record);
-        body.insert(body.end(), payload.begin(), payload.end());
-        const uint32_t retention = group == 1 ? 0x7Cu : group == 5 ? 0x3Eu : 0x136u;
-        conn.link.transport->host_send(0x44, std::move(body), true, 0, false, retention);
-    }
+    GuidedRecord record;
+    record.target_slot = update.state.target; record.weapon_type = update.state.phase;
+    record.pos_x = update.state.steer[0]; record.pos_y = update.state.steer[1]; record.pos_z = update.state.steer[2];
+    record.attach_x = update.state.saved[0]; record.attach_y = update.state.saved[1]; record.attach_z = update.state.saved[2];
+    std::vector<uint8_t> body;
+    io::append_u16_le(body, update.shooter); io::append_u16_le(body, update.net_id); body.push_back(update.group);
+    const auto payload = encode_guided_field_group(GuidedMode::WriteFull, GuidedFieldGroup(update.group), record);
+    body.insert(body.end(), payload.begin(), payload.end());
+    const uint32_t retention = update.group == 1 ? 0x7Cu : update.group == 5 ? 0x3Eu : 0x136u;
+    conn.link.transport->host_send(0x44, std::move(body), true, 0, false, retention);
 }
 
 } // namespace

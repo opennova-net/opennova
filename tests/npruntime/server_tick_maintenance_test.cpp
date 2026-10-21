@@ -3665,7 +3665,7 @@ bool check_guidance_leads_the_next_frame() {
     auto &conn=ctx.np_protocol.connection_list.front();
     conn.s2c_send_boundary_open=false;
     w::GuidedUpdateEvent update{};
-    update.shooter=player.packed; update.net_id=9; update.groups=1u<<3;
+    update.shooter=player.packed; update.net_id=9; update.group=3;
     update.state.target=0x1001; update.state.steer[0]=1234;
     world.out.entity_events.push_back(update); // the entity pass's queued send
     inmatch::Server_TickUpdate(ctx);

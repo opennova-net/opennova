@@ -193,11 +193,12 @@ void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
     if (events.threat_note)
         radar_note_guided_missile(world, r, static_cast<uint32_t>(&r - rounds.data()));
     if (events.detonate) r.det_at_expiry = true;
-    // Queued at the motor, in the entity pass's send order [orig: Entity_SendEffectPacket
-    //  @0x445C40 from the guided motors].
-    if (authority && events.groups)
-        world.out.entity_events.push_back(
-                GuidedUpdateEvent{r.shooter_handle, r.shot_seq, events.groups, s});
+    // Queued at the motor, one per call in the motor's call order, in the entity pass's
+    // send order [orig: Entity_SendEffectPacket @0x445C40 from the guided motors].
+    if (authority)
+        for (const GuidedSend &send : events.sends)
+            world.out.entity_events.push_back(
+                    GuidedUpdateEvent{r.shooter_handle, r.shot_seq, send.group, send.state});
     copy_motion(r);
 }
 } // namespace opennova::world

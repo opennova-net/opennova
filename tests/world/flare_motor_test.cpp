@@ -480,19 +480,26 @@ void test_a_dead_target_gives_way_to_a_ground_flare() {
     rig.w.registry.get(target)->health = 0;
     rig.w.out.entity_events.clear();
     const int32_t at[3] = {rig.round(g).pos.x.q16, rig.round(g).pos.y.q16, rig.round(g).pos.z.q16};
+    const int32_t held[3] = {missile.guided.steer[0], missile.guided.steer[1], missile.guided.steer[2]};
     rig.tick(); // the missile (slot 0) ticks ahead of the flare
     CHECK(missile.guided.target == 0xFFFF && missile.guided.target_round == g);
     CHECK((missile.guided.flags & 2) != 0 && missile.guided.timer == 62);
     CHECK(missile.guided.steer[0] == at[0] && missile.guided.steer[1] == at[1] &&
           missile.guided.steer[2] == at[2]);
-    // The motor's update joins the entity pass's inline sends.
-    const GuidedUpdateEvent *update = nullptr;
+    // The motor's sends join the entity pass's inline sends, one per call in call order,
+    // each serialized at its call: group 2 with the target cleared, then group 3 with the
+    // flare kept and the steer it held before the sample.
+    std::vector<const GuidedUpdateEvent *> updates;
     for (const auto &event : rig.w.out.entity_events)
-        if (const auto *guided = std::get_if<GuidedUpdateEvent>(&event)) update = guided;
-    CHECK(update != nullptr);
-    if (update == nullptr) return;
-    CHECK(update->groups == ((1u << 2) | (1u << 3)));
-    CHECK(update->state.target == 0xFFFF && update->state.target_round == g);
+        if (const auto *guided = std::get_if<GuidedUpdateEvent>(&event)) updates.push_back(guided);
+    CHECK(updates.size() == 2);
+    if (updates.size() != 2) return;
+    CHECK(updates[0]->group == 2 && updates[0]->state.target == 0xFFFF &&
+          updates[0]->state.target_round == -1 && (updates[0]->state.flags & 2) == 0);
+    CHECK(updates[1]->group == 3 && updates[1]->state.target == 0xFFFF &&
+          updates[1]->state.target_round == g && (updates[1]->state.flags & 2) != 0);
+    CHECK(updates[1]->state.steer[0] == held[0] && updates[1]->state.steer[1] == held[1] &&
+          updates[1]->state.steer[2] == held[2]);
 }
 
 // Inside 400 u of the steer point the authority queues event 12 for the held target's

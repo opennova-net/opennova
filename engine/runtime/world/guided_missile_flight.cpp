@@ -116,8 +116,22 @@ GuidedMotorEvents GuidedFlight::motor(GuidedFlightState &s, GuidedFamily family,
     if (family == GuidedFamily::None) return ev;
     if (family != GuidedFamily::Stinger && !in.owner) s.flags |= 1;
     if (s.flags & 1) return ev;
-    const auto emit = [&](int group) { if (in.session) ev.groups |= uint8_t(1u << group); };
-    const auto detonate = [&] { s.flags |= 1; ev.detonate = true; if (in.authority) emit(1); };
+    // Each send serializes the round as it stands at its call [orig: Entity_SendEffectPacket
+    //  @0x445C40]. The Stinger's group 1 at the motor's head (on a life of -1) never fires:
+    // the round pass's head releases a life of 0 or less before either motor call.
+    // [orig: Entity_UpdateGuidedMissile_0 @0x446060 (@0x4460A5..0x4460BD);
+    //  Projectile_UpdatePhysics @0x4E9D70 (the head @0x4E9DA7..0x4E9DAE, the motor calls
+    //  @0x4E9F1E / @0x4EA085)]
+    const auto emit = [&](int group) { if (in.session) ev.sends.push_back({uint8_t(group), s}); };
+    // The Stinger and Hellfire motors send group 1 at a detonation on the authority; the
+    // Javelin motor sends nothing at either of its detonations.
+    // [orig: Entity_UpdateGuidedMissile_0 @0x446060 (@0x4464AE, @0x4464F8);
+    //  Entity_UpdateGuidedMissile @0x446690 (@0x4467F7, @0x446AAB); Missile_UpdateGuidance
+    //  @0x446BA0 (@0x446E1E..0x446E37, @0x44704F..0x447057)]
+    const auto detonate = [&] {
+        s.flags |= 1; ev.detonate = true;
+        if (in.authority && family != GuidedFamily::Javelin) emit(1);
+    };
     int32_t err[4] = {};
     if (family == GuidedFamily::Stinger) {
         if (s.timer > 0) --s.timer;

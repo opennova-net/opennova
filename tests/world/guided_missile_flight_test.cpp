@@ -168,6 +168,84 @@ void test_converges_on_steer_point() {
     CHECK(ticks < 400);
 }
 
+// A Stinger pass on a session's authority sends each group at its own call, in call
+// order, with the round as it stands there: the held target's liveness loss (group 2),
+// the acquisition of a new target (group 3, with the steer held before the sample) and
+// the track loss past the tracking cone (group 2 again, with the sampled steer).
+// [orig: Entity_UpdateGuidedMissile_0 @0x446060 - the liveness loss @0x4461C1..0x4461E6,
+//  the kept target @0x44632B..0x446345, the sample @0x4463A3, the track loss
+//  @0x446435..0x44645A; Entity_SendEffectPacket @0x445C40 (the serialize @0x445C6C)]
+void test_stinger_sends_each_group_at_its_call() {
+    GuidedFlightState st = launch_at_origin();
+    st.age = GuidedFlight::kBoostFullAge;
+    st.flags = 2 | 4; st.target = 0x1001; st.timer = 0;
+    st.steer[0] = 500 * kUnit;
+    GuidedInputs in;
+    in.authority = true; in.session = true;
+    in.target_present = true; in.target_alive = false;
+    in.acquisition_ran = true; in.acquired = true; in.acquired_target = 0x1002;
+    in.acquired_present = true;
+    in.acquired_sample[0] = 1000 * kUnit; in.acquired_sample[1] = 600 * kUnit;
+    // A tracking word of 0x100000 is a cone of 0x800000 BAM; the sample sits about 31
+    // degrees off the nose, inside the overshoot.
+    const GuidedMotorEvents ev = GuidedFlight::motor(st, GuidedFamily::Stinger, {300, 0, 0, 0x100000}, in);
+    CHECK(ev.sends.size() == 3);
+    if (ev.sends.size() != 3) return;
+    CHECK(ev.sends[0].group == 2 && ev.sends[0].state.target == 0xFFFF &&
+          (ev.sends[0].state.flags & 2) == 0 && ev.sends[0].state.timer == 0);
+    CHECK(ev.sends[1].group == 3 && ev.sends[1].state.target == 0x1002 &&
+          (ev.sends[1].state.flags & 2) != 0 && ev.sends[1].state.timer == 62);
+    CHECK(ev.sends[1].state.steer[0] == 500 * kUnit && ev.sends[1].state.steer[1] == 0);
+    CHECK(ev.sends[2].group == 2 && ev.sends[2].state.target == 0x1002 &&
+          (ev.sends[2].state.flags & 2) == 0 && ev.sends[2].state.timer == 0);
+    CHECK(ev.sends[2].state.steer[0] == 1000 * kUnit && ev.sends[2].state.steer[1] == 600 * kUnit);
+    CHECK(!ev.detonate);
+}
+
+// A Hellfire pass that closes the last approach phase sends group 4 at its call, with
+// the phase-3 steer (the owner's aim raised by the row's 9830 share of the range), ahead
+// of the terminal arm's re-target to the owner's aim.
+// [orig: Entity_UpdateGuidedMissile @0x446690 - case 3 @0x446916..0x4469AB, the step to
+//  phase 4 @0x4469AD..0x4469CA, group 4 @0x4469D2..0x4469F9, the terminal re-target
+//  @0x446A06..0x446A36; the row table @0x814FFC]
+void test_hellfire_group_four_carries_the_phase_three_steer() {
+    GuidedFlightState st = launch_at_origin();
+    st.age = GuidedFlight::kBoostFullAge;
+    st.flags = 4; st.phase = 3; st.initial_range = 300 * kUnit;
+    GuidedInputs in;
+    in.authority = true; in.session = true; in.owner = true;
+    in.owner_aim = true; in.owner_target = 0x1003;
+    in.aim[0] = 50 * kUnit;
+    const GuidedMotorEvents ev = GuidedFlight::motor(st, GuidedFamily::Hellfire, {300, 0, 0, 0}, in);
+    CHECK(ev.sends.size() == 1);
+    if (ev.sends.size() != 1) return;
+    CHECK(ev.sends[0].group == 4 && ev.sends[0].state.phase == 4 && ev.sends[0].state.target == 0x1003);
+    // (19660800 * 9830 + 0x8000) >> 16 = 2949000: the 50-unit closure is under the row's
+    // 19660 ratio, so the pass steps to phase 4.
+    CHECK(ev.sends[0].state.steer[0] == 50 * kUnit && ev.sends[0].state.steer[2] == 2949000);
+    CHECK(st.phase == 4 && st.steer[0] == 50 * kUnit && st.steer[2] == 0);
+}
+
+// The Javelin motor marks a detonation with no send; the Hellfire's same first-pass mark
+// sends group 1 on the authority.
+// [orig: Missile_UpdateGuidance @0x446BA0 (the zero range @0x446E0E..0x446E37; the
+//  terminal mark @0x44704F..0x447057, likewise with no send); Entity_UpdateGuidedMissile
+//  @0x446690 (@0x4467C3..0x4467F7)]
+void test_javelin_detonates_without_a_send() {
+    GuidedInputs in;
+    in.authority = true; in.session = true; in.owner = true;
+    GuidedFlightState jv = launch_at_origin();
+    jv.age = GuidedFlight::kBoostFullAge;
+    const GuidedMotorEvents ev = GuidedFlight::motor(jv, GuidedFamily::Javelin, {300, 0, 0, 0}, in);
+    CHECK(ev.detonate && (jv.flags & 1) != 0);
+    CHECK(ev.sends.empty());
+    GuidedFlightState hf = launch_at_origin();
+    hf.age = GuidedFlight::kBoostFullAge; hf.timer = 6;
+    const GuidedMotorEvents hev = GuidedFlight::motor(hf, GuidedFamily::Hellfire, {300, 0, 0, 0}, in);
+    CHECK(hev.detonate && (hf.flags & 1) != 0);
+    CHECK(hev.sends.size() == 1 && hev.sends[0].group == 1);
+}
+
 // BAM wrap: the short way across the seam.
 void test_wrap_bam() {
     CHECK(GuidedFlight::wrap_bam(0x7FFFFFFFLL + 2LL) == static_cast<int32_t>(0x80000001u));
@@ -227,6 +305,9 @@ int main() {
     test_steer_guard();
     test_proximity_notifies_without_terminating();
     test_converges_on_steer_point();
+    test_stinger_sends_each_group_at_its_call();
+    test_hellfire_group_four_carries_the_phase_three_steer();
+    test_javelin_detonates_without_a_send();
     test_wrap_bam();
     if (failures == 0) std::printf("guided_missile_flight_test: all passed\n");
     return failures == 0 ? 0 : 1;
