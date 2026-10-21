@@ -488,6 +488,14 @@ struct Entity {
     // entry admission refuses a carrier whose model holds none.
     // [orig: Entity_CanEnterVehicle @0x435480 (@0x43549C..0x4354A3)]
     uint32_t graphic_model_userpoints = 0;
+    // That model's collision object count (the CMDL header's, its collision block's
+    // +0x68; 0 with no model or no block): a one-object model on a def without the
+    // EWeap bit takes BoneCallback_Simple as a vehicle's does, so its seat bone is the
+    // userpoint through the carrier's own matrix (vehicle_mount.cpp).
+    // [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (the second arm
+    //  @0x43A060..0x43A070 -> BoneCallback_Simple @0x43A072);
+    //  Threedi_BuildCollisionModelFromChunks @0x5B3BF0 (the +0x68 store @0x5B3D3C)]
+    uint32_t graphic_model_collision_objects = 0;
     // That model's first "boat" userpoint, else its first "helo" one: the
     // model-space position words (16.16) a vehicle bay's C2S 0x40 spawns its
     // deployable at, through the bay's placement; invalid with neither (or no

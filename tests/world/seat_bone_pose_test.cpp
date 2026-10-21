@@ -12,6 +12,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/mounted_pose.h>
 #include <runtime/world/vehicle_mount.h>
+#include <runtime/world/world.h>
 
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
@@ -20,6 +21,7 @@
 #include <cstdio>
 #include <climits>
 #include <cstring>
+#include <memory>
 
 using namespace opennova::threedi;
 using namespace opennova::world;
@@ -229,6 +231,56 @@ void test_a_usegun_on_an_animated_part_rides_its_bone() {
 	CHECK(pose.heading == 0 && pose.pitch == 0 && pose.roll == 0);
 }
 
+// A non-vehicle carrier takes the same seat bone when its graphic model's collision
+// block holds one object and its def lacks the EWeap bit (the stock chair, Chair01's
+// sitex17): BoneCallback_Simple then hands its bone slots the carrier's matrix, so the
+// seat is test_a_seat_point_rides_the_carrier_matrix's pose. Two objects, or the EWeap
+// bit, bind no Simple callback: ours' seat frame then stands in (the seat-local point,
+// here the carrier's origin).
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (def+0x5C == 1 @0x43A05A; the
+//  collision block's +0x68 == 1 @0x43A060..0x43A066 and def+0x54 & 0x20 clear @0x43A06B
+//  -> BoneCallback_Simple @0x43A072); Threedi_BuildCollisionModelFromChunks @0x5B3BF0
+//  (the +0x68 store @0x5B3D3C)]
+void test_a_one_object_carrier_takes_the_simple_seat_bone() {
+	struct Case {
+		uint32_t objects;
+		uint32_t attrib;
+		bool simple;
+	};
+	const Case cases[] = {{1, 0u, true}, {2, 0u, false}, {1, kItemAttribEweap, false}};
+	for (const Case &c : cases) {
+		auto world = std::make_unique<World>();
+		Entity carrier;
+		carrier.item_type = 9; // a decoration, no vehicle
+		carrier.item_attrib = c.attrib;
+		carrier.graphic_model_collision_objects = c.objects;
+		carrier.heading = 0x40000000;
+		carrier.position.set_q16({10 * kOne, 20 * kOne, 3 * kOne});
+		Seat seat;
+		seat.type = SeatType::Passenger;
+		seat.bone_index = 3;
+		seat.bone_point[0] = kOne;
+		seat.bone_point[1] = 2 * kOne;
+		seat.bone_point[2] = kOne / 2;
+		seat.bone_direction[0] = 3 * kOne;
+		seat.bone_direction[1] = 4 * kOne;
+		seat.bone_direction[2] = 2 * kOne;
+		Entity rider;
+		rider.kind = EntityKind::Organic;
+		const MountedPose pose = world->vehicles.pose_mounted_occupant(rider, carrier, seat);
+		if (c.simple) {
+			CHECK(pose.position.x.q16 == 524285);
+			CHECK(pose.position.y.q16 == 1376250);
+			CHECK(pose.position.z.q16 == 229376);
+			CHECK(pose.heading == 1707641595);
+		} else {
+			CHECK(pose.position.x.q16 == 10 * kOne);
+			CHECK(pose.position.y.q16 == 20 * kOne);
+			CHECK(pose.position.z.q16 == 3 * kOne);
+		}
+	}
+}
+
 } // namespace
 
 int main() {
@@ -236,6 +288,7 @@ int main() {
 	test_an_unturned_carrier_keeps_the_userpoint_bearing();
 	test_a_usegun_bone_is_the_carrier_matrix_through_render_floats();
 	test_a_usegun_on_an_animated_part_rides_its_bone();
+	test_a_one_object_carrier_takes_the_simple_seat_bone();
 	if (failures != 0) return 1;
 	std::printf("seat_bone_pose: all passed\n");
 	return 0;

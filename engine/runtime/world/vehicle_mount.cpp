@@ -308,13 +308,19 @@ EntityPosition entity_local_point_world(const Entity &vehicle, const Vec3 &local
 
 namespace {
 
-// A vehicle's model takes BoneCallback_Simple, which hands every bone slot the
-// carrier's own matrix, so its sitex / ctrlx / drvrx bone is the userpoint through
-// that matrix (seat_bone_pose_on_carrier_matrix); a UseGun bone attaches through the
-// bone attach instead. [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (def+0x5C ==
-//  1 @0x43A05A -> BoneCallback_Simple @0x43A072); BoneCallback_Simple @0x4E2600]
+// A vehicle's model takes BoneCallback_Simple, and so does a one-object collision
+// model on a def without the EWeap bit (the stock chair, Chair01's sitex17); the
+// callback hands every bone slot the carrier's own matrix, so its sitex / ctrlx /
+// drvrx bone is the userpoint through that matrix (seat_bone_pose_on_carrier_matrix);
+// a UseGun bone attaches through the bone attach instead.
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (def+0x5C == 1 @0x43A05A, else the
+//  collision block's +0x68 == 1 @0x43A060..0x43A066 and def+0x54 & 0x20 clear
+//  @0x43A06B -> BoneCallback_Simple @0x43A072); BoneCallback_Simple @0x4E2600]
 bool seat_bone_is_carrier_matrix(const Entity &carrier, const Seat &seat) {
-    return carrier.item_type == 1 && !seat.attachment_frame && seat.type != SeatType::Gunner;
+    const bool simple = carrier.item_type == 1 ||
+            (carrier.graphic_model_collision_objects == 1 &&
+                    (carrier.item_attrib & kItemAttribEweap) == 0u);
+    return simple && !seat.attachment_frame && seat.type != SeatType::Gunner;
 }
 
 } // namespace

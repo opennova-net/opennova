@@ -316,6 +316,11 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			e->has_graphic_model = render_model != nullptr;
 			e->graphic_model_userpoints = render_model != nullptr
 					? static_cast<uint32_t>(render_model->user_point_count) : 0;
+			e->graphic_model_collision_objects = render_model != nullptr &&
+							render_model->collision != nullptr &&
+							render_model->collision->model_data.num_objects > 0
+					? static_cast<uint32_t>(render_model->collision->model_data.num_objects)
+					: 0;
 		}
 		if (render_model != nullptr) {
 			deps.occlusion.assign_render_model(h, world::collision_projection_sphere_from_3di(

@@ -114,6 +114,16 @@ uint32_t graphic_model_userpoints(const DefItemDef *def, const assets::AssetStor
     return static_cast<uint32_t>(model->user_point_count);
 }
 
+// That model's collision object count (the CMDL header's, the collision block's
+// +0x68), 0 when none loaded or it carries no collision block.
+// [orig: Threedi_BuildCollisionModelFromChunks @0x5B3BF0 (the +0x68 store @0x5B3D3C)]
+uint32_t graphic_model_collision_objects(const DefItemDef *def, const assets::AssetStore *models) {
+    if (!graphic_model_loads(def, models)) return 0;
+    const assets::Model model = models->model(std::string(def->graphic));
+    if (model->collision == nullptr || model->collision->model_data.num_objects <= 0) return 0;
+    return static_cast<uint32_t>(model->collision->model_data.num_objects);
+}
+
 // That model's first "boat" userpoint, else its first "helo" one, as the
 // model-space words a vehicle bay's spawn transforms; false with neither.
 // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 (the
@@ -329,6 +339,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				e->kind != world::EntityKind::Marker;
 		e->graphic_model_userpoints =
 				e->has_graphic_model ? graphic_model_userpoints(def, models) : 0;
+		e->graphic_model_collision_objects =
+				e->has_graphic_model ? graphic_model_collision_objects(def, models) : 0;
 		e->deploy_point_valid = e->has_graphic_model &&
 				graphic_model_deploy_point(def, models, e->deploy_point);
 		// The physics callback table's ewep row selects the gun update. A
