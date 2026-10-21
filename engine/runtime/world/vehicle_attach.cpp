@@ -26,8 +26,8 @@ constexpr std::size_t kEntityHandleDomain =
 
 // A pool-0 row blocks the requester while it lives by its dead bit alone (no Health
 // or life fold), has an ItemDef, is not the requester and sits on the other team.
-// [orig: Vehicle_HasEnemyOccupant @0x4359F0 (the dead bit @0x435A4D, the ItemDef
-//  @0x435A4F, the requester and team tests @0x435A65)]
+// [orig: Vehicle_HasEnemyOccupant @0x4359F0 (the dead bit @0x435A49..0x435A4D, the
+//  ItemDef @0x435A4F, the requester and team tests @0x435A55..0x435A65)]
 bool is_blocking_enemy_rider(const Entity &entity, const Entity &requester) {
     if (entity.handle == requester.handle) return false;
     if (((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0) return false;

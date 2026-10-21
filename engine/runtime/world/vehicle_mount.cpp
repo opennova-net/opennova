@@ -362,10 +362,13 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
         live.roll = vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
                 : spawn_angle_bam(vehicle.roll);
         // An addeweap child with no anchor copies its carrier's root pose (the
-        // carrier's matrix bit clear): the position words as they are.
-        // [orig: Entity_UpdateTransformAndTurret @0x441153..0x4411BC]
-        if (seat.attachment_frame && seat.bone_index == 0)
+        // carrier's matrix bit clear): the position and the Yaw / Pitch / Roll words
+        // as they are, no seat offset. [orig: Entity_UpdateTransformAndTurret
+        // @0x441151..0x441177 (the six words), the rest of the copy @0x44117C..0x4411BC]
+        if (seat.attachment_frame && seat.bone_index == 0) {
             live.position = vehicle.position;
+            live.heading = vehicle.veh.yaw_seeded ? vehicle.veh.yaw_bam : vehicle.heading;
+        }
     }
     // The seat point's words are the occupant's (D-NET-507); a composed addeweap
     // frame's are the child's own.

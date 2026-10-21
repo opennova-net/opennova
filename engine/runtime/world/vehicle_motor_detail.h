@@ -264,7 +264,8 @@ inline void plat_second_pass(World &world, Entity &vehicle, int32_t (&probes)[N]
 // against the hull-bottom reference and the world water word, compared raw: a
 // map with no water authored keeps the word 0, a plane at Z 0. [orig:
 // Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (@0x47D516..0x47D53A, `cmp edx, ebx;
-// jge`); Entity_ProcessAircraftContactPhysics @0x47EF10 (@0x48021A..0x480226);
+// jge`); Entity_ProcessAircraftContactPhysics @0x47EF10 (the average and hysteresis
+// @0x48021A..0x480226, the compare @0x480239..0x48023B);
 // Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
 void vehicle_water_entry(World &, Entity &, int32_t x, int32_t y, bool was_water);
 void vehicle_trail_water_transition(Entity &e, const VehicleTraits &traits, bool was_water);

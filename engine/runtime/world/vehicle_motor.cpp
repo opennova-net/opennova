@@ -1784,12 +1784,11 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
 	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
 }
 
-// The inmatch headless host boots World without the shell's model-box
-// resolution (VehicleTraits.box_z_* is stamped only by the binding's
-// simulation_assets resolve), so its watercraft have no platform
-// geometry and the solver cannot produce an afloat latch. This water-plane
-// stand-in covers exactly that path; resolved hulls always consume the
-// prior platform solve.
+// A row with no model collision boxes (a model-less or source-less row:
+// mission/collision_resolve.cpp stamps VehicleTraits.box_z_* from the 3DI
+// collision whenever the model source has it) has no platform geometry, and
+// the solver cannot produce an afloat latch. This water-plane stand-in covers
+// exactly that path; resolved hulls always consume the prior platform solve.
 void watercraft_refresh_fallback_afloat(World &world, Entity &veh, const VehicleTraits &traits) {
 	Entity::VehicleMotorState &m = veh.veh;
 	bool afloat = false;

@@ -5075,6 +5075,7 @@ void test_an_anchorless_child_copies_only_a_stale_carrier() {
     anchor.type = SeatType::Gunner;
     anchor.bone_index = 0; // no anchor row
     anchor.attachment_frame = true;
+    anchor.yaw_offset = 30; // an authored row offset the root copy never applies
     const auto compose = [&]() {
         w.vehicles.pose_mounted_occupant(*w.registry.get(child_h), *w.registry.get(carrier_h),
                                          anchor);
@@ -5083,6 +5084,9 @@ void test_an_anchorless_child_copies_only_a_stale_carrier() {
     compose();
     CHECK(w.registry.get(child_h)->position.x.q16 == w.registry.get(carrier_h)->position.x.q16);
     CHECK(w.registry.get(child_h)->position.y.q16 == w.registry.get(carrier_h)->position.y.q16);
+    // The copy takes the carrier's Yaw word as it is, no seat offset
+    // [orig: @0x441151..0x441177].
+    CHECK(w.registry.get(child_h)->heading == w.registry.get(carrier_h)->heading);
     CHECK((w.registry.get(child_h)->engine_flags & kEntityFlagMatrixBuilt) != 0);
     // A mover tick moves the carrier and sets its bit: the child holds.
     w.registry.get(carrier_h)->position = {30.0f, 40.0f, 5.0f};
