@@ -128,9 +128,9 @@ bool JoinerRole::bring_up() {
 // 0x200 the friendly fire, its bit 0 the round spawn's tracers, its 0x8000 the claymore sweep:
 // apply_rules_word).
 // [orig: NapiNPClientMsg_HandleMissionDataChunk @0x432410 - the block's memcpy into unk_24D1E08
-//  @0x432470 (g_RulesFlags at +44); the other writer CAdminServer_HandleSetCommand
-//  @0x405C80..0x40618A; Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e; RoundData_SpawnRound
-//  @0x4EC72F / @0x4EC79D (NoTracers, bit 0)]
+//  @0x432470 (g_RulesFlags at +44); the other writer CAdminServer_HandleSetCommand @0x405A60
+//  (@0x405C80..0x40618A); Player_AdjustWeaponZoomLevel @0x4DBCC0 (@0x4DBD0C..0x4DBD2E);
+//  RoundData_SpawnRound @0x4EC0D0 (@0x4EC72F / @0x4EC79D, NoTracers, bit 0)]
 void JoinerRole::stamp_mission_rules() {
 	if (!kernel_ || !runtime) return;
 	apply_rules_word(kernel_->world, runtime->view().mp_attributes());

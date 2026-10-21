@@ -445,7 +445,7 @@ void test_joiner_console() {
 	expect(report.find("CURRENT MAP: TDM01.BMS\r\nCURRENT GAME TYPE: Game Type Zero\r\n") != std::string::npos,
 	       "back in the menus: the last map file and game type 0's abbreviation");
 	// The teardown cleared g_SessionStatus; the time of day keeps the last mission's clock.
-	// [orig: Game_TeardownMission @0x5223FA]
+	// [orig: Game_TeardownMission @0x522350 (@0x5223FA)]
 	expect(report.find("UP-TIME: 0 00:00:00\r\nCURRENT TOD: 3840\r\n") != std::string::npos,
 	       "back in the menus: no session clock, the last time of day");
 	// The PLAYER_INFO screen's portrait draws: its 16:00 (0x10000000) is the process's time of
@@ -730,8 +730,9 @@ void test_exit_frame_words() {
 // [orig: CAdminServer_HandleSetCommand @0x405A60 - FriendlyFire @0x405EB4 / @0x405EC3, Tracers
 //  @0x405F7A / @0x405F86, TeamTriggerClaymore @0x405F38 / @0x405F47, GameTime @0x405E80..0x405E86;
 //  NapiNPClientMsg_HandleMissionDataChunk @0x432410 (the memcpy @0x432470, g_RulesFlags at +44);
-//  Projectile_DamagePairEligible @0x4E74FD; RoundData_SpawnRound @0x4EC72F / @0x4EC79D;
-//  Entity_FindEnemyInCone @0x43CC2C; HUD_DrawFriendlyTagsPass @0x5A4480]
+//  Projectile_DamagePairEligible @0x4E74F0 (@0x4E74FD); RoundData_SpawnRound @0x4EC0D0
+//  (@0x4EC72F / @0x4EC79D); Entity_FindEnemyInCone @0x43CBA0 (@0x43CC2C);
+//  HUD_DrawFriendlyTagsPass @0x5A4480]
 void test_joiner_set_holds() {
 	const std::string client_scrk = "CLIENT-ADMIN-SET-SCRK";
 	const std::string server_scrk = "SERVER-ADMIN-SET-SCRK";
