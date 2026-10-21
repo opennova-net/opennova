@@ -106,15 +106,28 @@ struct MouseAxisPump {
 			const int32_t (&cursor)[2], int32_t (&axis)[2]);
 };
 
-// The cursor's re-centre point, in the window's client pixels
-// [orig: Input_PumpAndCenterCursor @0x7616D0 (SetCursorPos(client + (0x140, 0xF0)) @0x761706)].
+// The cursor's re-centre point, in the window's client pixels. Every update under
+// no menu screen puts the cursor there at its head, and nothing moves it as a menu
+// screen opens or runs: the open only clips it, and the head under a menu pumps the
+// messages and zeroes the shares without a re-centre. So a menu screen's free cursor
+// starts there, where the shell puts it as it frees the captured cursor for a game
+// screen.
+// [orig: Input_PumpAndCenterCursor @0x7616D0 (SetCursorPos(client + (0x140, 0xF0)) @0x761706);
+//  Game_ProcessMainFrame @0x5263F0 (the menu test @0x52642F, the menu head
+//  @0x526438..0x526453, the Input_PumpAndCenterCursor call @0x526458); UI_OpenMenuScreen
+//  @0x54E520 (its one cursor call, ClipCursor @0x54E5CF); SetCursorPos's other callers
+//  Input_CenterCursorToClientMidpoint @0x761660 (@0x7616BB) and Input_CenterCursor
+//  @0x416950 (@0x416996)]
 inline constexpr int32_t kCursorCentreX = 0x140;
 inline constexpr int32_t kCursorCentreY = 0xF0;
 
 // The close of a pass-through screen (death.mnu's DEATH, stat.mnu's STAT): their
 // activation raises the menu input pass-through, and only their deactivation, which
-// the next screen's open dispatches, or the death screen's back clears it; the close
-// navigates nowhere, so the flag holds through it. The update that closes the screen
+// the next screen's open dispatches, or the death screen's LEAVE MISSION button
+// (HIDDEN_BACK, which shows its exit confirmation) clears it; the confirmation's NO
+// raises it again. The close navigates nowhere, so the flag holds through it, and a
+// death screen closed with its confirmation up runs no pass-through frame (the shell
+// tracks the word on its deploy screen). The update that closes the screen
 // re-centres the cursor the menu left free, which writes the axis words as the
 // cursor's client offset from the centre, then runs the pass-through input frame,
 // whose axis read takes that offset whole (no share, no two-tap, no 4x): one
@@ -134,7 +147,9 @@ inline constexpr int32_t kCursorCentreY = 0xF0;
 //  StatScreen_ShowCallback @0x562840 (@0x562877 / @0x5628D6); the clears
 //  DeathScreen_OnDeactivate @0x553510 (UI_DispatchScreenEvent @0x54E6A0's event 6,
 //  @0x54F29B), StatScreen_OnDeactivate @0x562120 (@0x54F267) and DeathScreen_OnHiddenBack
-//  @0x553660 (@0x55366C); CUIScene_SelectNodeByName @0x63B6B0 (the deactivate of the
+//  @0x553660 (@0x55366C; registered on HIDDEN_BACK @0x5546AE); the raise
+//  DeathScreen_OnConfirmNo @0x553680 (@0x55368C; registered on CONFIRM_NO @0x554654), both
+//  on the click event 0x3000001; CUIScene_SelectNodeByName @0x63B6B0 (the deactivate of the
 //  current screen @0x63B787, from UI_OpenMenuScreen @0x54E520's call @0x54E599); the
 //  death screen's close request Render_ProcessMainSceneFrame @0x5CA0F0
 //  (Game_CloseInGameScreens @0x5CAC9C)]

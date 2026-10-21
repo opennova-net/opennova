@@ -14,6 +14,10 @@ static func stage(test: GutTest, res_dir: String, targets: PackedStringArray) ->
 			"STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG", "STATIC_INSTRUCTIONS_MSG",
 			"STATIC_INSTRUCTIONS2_MSG", "SWAP_TEAMS", "BUTTON_TEAMLIST"]:
 		body += MenuDriverFixture.wnd("static", name, 200)
+	# The LEAVE MISSION button and the exit confirmation's NO, which lower and raise
+	# the screen's input pass-through word.
+	body += MenuDriverFixture.wnd("button", "HIDDEN_BACK", 560)
+	body += MenuDriverFixture.wnd("button", "CONFIRM_NO", 580)
 	# The custom-draw MAP window inside the DEATH_SHROUD window, as death.mnu
 	# nests them; placed right of the control column so it never covers a row.
 	body += ('<WINDOW type="window" name="DEATH_SHROUD"><POSITION><LEFT>300</LEFT>'

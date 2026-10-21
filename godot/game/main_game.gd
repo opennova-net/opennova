@@ -1612,10 +1612,12 @@ func _on_command_map_requested() -> void:
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 	if _state == from_state:
 		_state = State.WORLD
-		# death.mnu's DEATH and stat.mnu's STAT pass input through, so their close's
-		# input frame takes the menu cursor's offset from the re-centre point (engine
+		# death.mnu's DEATH and stat.mnu's STAT pass input through while their word
+		# holds, so their close's input frame takes the menu cursor's offset from the
+		# re-centre point; DEATH's exit confirmation holds the word down (engine
 		# world::pass_through_close_axis carries the witness).
-		if from_state in [State.DEPLOY, State.END_ROUND] and _player_presenter != null:
+		if _player_presenter != null and (from_state == State.END_ROUND \
+				or (from_state == State.DEPLOY and _deploy_presenter.is_input_pass_through())):
 			_player_presenter.close_pass_through_screen()
 		_reset_screen_close_input()
 
@@ -1960,11 +1962,17 @@ func _process(delta: float) -> void:
 	var dev_tools_open := is_dev_tools_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	var dev_tools_interacting := dev_tools_open and not _dev_tools.is_game_playing()
-	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND, State.COMMAND_MAP,
-			State.VEHICLE] \
-			or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
+	var screen_state: bool = _state in [State.PAUSED, State.ARMORY, State.DEPLOY,
+			State.END_ROUND, State.COMMAND_MAP, State.VEHICLE]
+	if screen_state or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
-			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+			# A game screen's free cursor starts at the re-centre point every gameplay
+			# update left the cursor on (engine world::kCursorCentreX / kCursorCentreY
+			# carry the witness).
+			if screen_state and _player_presenter != null:
+				_player_presenter.release_capture_for_screen()
+			else:
+				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# The open-menu-screen flag the HUD's armory line yields to, every frame
 	# ahead of the early returns (the SP pause stops the HUD tick): every state
 	# but WORLD holds an in-game screen (PAUSED the in-game menu, ARMORY,

@@ -12,7 +12,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <runtime/controls/controls.h> // action_code (the HUD rows' dispatch codes)
-#include <runtime/world/player_look.h> // pass_through_close_axis
+#include <runtime/world/player_look.h> // pass_through_close_axis, kCursorCentreX / Y
 
 #include <cmath>
 
@@ -586,6 +586,14 @@ void PlayerInputRouter::release_mouse_capture() {
 	if (input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED) {
 		input->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
 	}
+}
+
+void PlayerInputRouter::release_capture_for_screen() {
+	Input *input = Input::get_singleton();
+	if (input->get_mouse_mode() != Input::MOUSE_MODE_CAPTURED) return;
+	input->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
+	DisplayServer::get_singleton()->warp_mouse(
+			Vector2i(opennova::world::kCursorCentreX, opennova::world::kCursorCentreY));
 }
 
 // The live binding table drives every key below (defaults: WASD move, Q/E

@@ -45,6 +45,10 @@ const SHROUD_WIDGET := "DEATH_SHROUD"
 # The team-service pair, shown together; only SWAP_TEAMS has a DEATH callback.
 const SWAP_TEAMS := "SWAP_TEAMS"
 const TEAM_LIST := "BUTTON_TEAMLIST"
+# The LEAVE MISSION button (its Esc hotkey shows CONFIRM_EXIT) and the
+# confirmation's NO.
+const HIDDEN_BACK := "HIDDEN_BACK"
+const CONFIRM_NO := "CONFIRM_NO"
 
 signal opened
 signal closed
@@ -87,6 +91,11 @@ var _hud_source: Callable = Callable()
 # The DEATH map's pan/zoom state, held for the presenter's (the process's)
 # lifetime and handed to every MapViewWindow the menu rebuild mounts.
 var _map_view_state := MapViewState.new()
+# The menu input pass-through word while DEATH is up: its show raises it, the
+# exit confirmation (HIDDEN_BACK) lowers it and the confirmation's NO raises it
+# again; the close leaves it as it stands (engine world::pass_through_close_axis
+# carries the witness).
+var _input_pass_through := false
 
 
 func setup(view: WorldView, ui_parent: Node) -> void:
@@ -98,6 +107,12 @@ func setup(view: WorldView, ui_parent: Node) -> void:
 
 func is_open() -> bool:
 	return _frame != null and is_instance_valid(_frame) and _frame.visible
+
+
+## Whether the screen passes input through: its close then runs the input frame
+## that takes the menu cursor's offset (the shell's _leave_screen).
+func is_input_pass_through() -> bool:
+	return _input_pass_through
 
 
 ## The HUD overlay getter the MAP window draws through (the shell hands the HUD
@@ -170,6 +185,7 @@ func open() -> bool:
 	# The show hides the shroud; the per-frame reveal shows it and runs the
 	# content refresh (_process).
 	_set_shroud_shown(false)
+	_input_pass_through = true
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
 	_show_map_window(sim)
@@ -381,8 +397,15 @@ func _apply_team_service_buttons(shown: bool) -> void:
 
 
 # SWAP_TEAMS asks the host for the other side (C2S 0x4D; the engine's
-# ClientRuntime::queue_team_change_request carries the witness).
+# ClientRuntime::queue_team_change_request carries the witness). HIDDEN_BACK
+# and CONFIRM_NO lower and raise the pass-through word (_input_pass_through).
 func _on_widget_activated(_id: int, widget_name: String) -> void:
+	if widget_name.nocasecmp_to(HIDDEN_BACK) == 0:
+		_input_pass_through = false
+		return
+	if widget_name.nocasecmp_to(CONFIRM_NO) == 0:
+		_input_pass_through = true
+		return
 	if widget_name.nocasecmp_to(SWAP_TEAMS) != 0:
 		return
 	var sim: Simulation = _view.sim() if _view != null else null

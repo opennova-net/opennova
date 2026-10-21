@@ -243,6 +243,30 @@ func test_open_and_close_emit_the_shell_state_signals() -> void:
 	assert_signal_emit_count(presenter, "closed", 1, "closing an already-closed screen is a no-op")
 
 
+# DEATH's menu input pass-through word (engine world::pass_through_close_axis
+# carries the witness): the show raises it, the LEAVE MISSION button's exit
+# confirmation lowers it, the confirmation's NO raises it again, and the close
+# leaves it as it stands, so a close with the confirmation up runs no
+# pass-through input frame (the shell's _leave_screen reads it).
+func test_the_exit_confirmation_holds_the_pass_through_word_down() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_false(presenter.is_input_pass_through(), "no word before the show")
+	assert_true(presenter.open(), "a pending pick opens the screen")
+	assert_true(presenter.is_input_pass_through(), "the show raises the word")
+	var driver := presenter.get_menu_driver()
+	driver.activate(driver.widget_id("HIDDEN_BACK"))
+	assert_false(presenter.is_input_pass_through(), "the exit confirmation lowers it")
+	driver.activate(driver.widget_id("CONFIRM_NO"))
+	assert_true(presenter.is_input_pass_through(), "the confirmation's NO raises it again")
+	driver.activate(driver.widget_id("HIDDEN_BACK"))
+	presenter.close()
+	assert_false(presenter.is_input_pass_through(),
+			"the close leaves the word as the confirmation left it")
+	assert_true(presenter.open(), "the pick still owed reopens the screen")
+	assert_true(presenter.is_input_pass_through(), "a new show raises it again")
+
+
 # The MAP window (hud-re D-HUD-19): the presenter mounts the windowed map view
 # over the authored MAP widget inside DEATH_SHROUD, follows its frame rect, and
 # the show event fits the zoom; the window's model takes the mouse-class events.

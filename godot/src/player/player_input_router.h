@@ -77,6 +77,11 @@ public:
 	// frame.
 	void reset();
 	void release_mouse_capture();
+	// A game screen frees the captured cursor: the free menu cursor starts at the
+	// re-centre point in the window's client pixels, where every gameplay update
+	// left the cursor (engine world::kCursorCentreX / kCursorCentreY carry the
+	// witness), the frame close_pass_through_screen reads.
+	void release_capture_for_screen();
 	// The shell consumed the live USE-ITEM hold for a chord of its own (the
 	// debug pick rides Shift+F6; the tools window opening mid-hold): the
 	// release edge then runs no mount toggle. Applied after this frame's

@@ -257,6 +257,9 @@ public:
 	// A pass-through screen's close: the next input frame takes the menu
 	// cursor's offset (PlayerInputRouter::close_pass_through_screen).
 	void close_pass_through_screen();
+	// A game screen frees the captured cursor at the re-centre point
+	// (PlayerInputRouter::release_capture_for_screen).
+	void release_capture_for_screen();
 	// Mouse-look rides the input router: the motion events' cursor offset,
 	// which the session's mouse pump spreads into the axis words the SIM's
 	// witnessed integer pipeline scales (engine: runtime/world/player_look.h).
