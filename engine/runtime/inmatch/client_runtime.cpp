@@ -1155,6 +1155,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			while (loopback_->client_recv(datagram)) {
 				if (!apply_zone_timer_body(datagram.tag, datagram.body))
 					view_.apply(datagram.tag, datagram.body);
+				// The 0x58's parse stamps GetTickCount [orig: SessionStatus_ParseFromBuffer @0x53109F].
+				if (datagram.tag == s2c::SESSION_STATUS) session_status_receipt_ms_ = console_tick_ms();
 				// The host's own console line comes back to its own client too: the
 				// handler has no role gate [orig: NapiNPClientMsg_HandleConsoleEcho
 				// @0x432BC0; the authority's echo @0x519AB0..0x519AC5].
@@ -1313,6 +1315,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// (D-NET-687) [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0 - the
 				// Position reads @0x428C19..0x428CB1].
 				if (!apply_zone_timer_body(tb.first, tb.second)) view_.apply(tb.first, tb.second);
+				// The 0x58's parse stamps GetTickCount [orig: SessionStatus_ParseFromBuffer @0x53109F].
+				if (tb.first == s2c::SESSION_STATUS) session_status_receipt_ms_ = console_tick_ms();
 				// The echo of our console line runs the client's command walk at its
 				// place [orig: NapiNPClientMsg_HandleConsoleEcho @0x432BC0].
 				if (tb.first == s2c::CLIENT_CONSOLE_COMMAND) run_console_echo(tb.second);
@@ -1724,6 +1728,12 @@ void ClientRuntime::run_console_echo(const std::vector<uint8_t> &body) {
 	for (std::string &line : lines)
 		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
 				hud::kHudColorWhite, std::move(line), false});
+}
+
+uint32_t ClientRuntime::session_elapsed_ms() const {
+	const replication::ClientSessionStatus &status = view_.state().session_status;
+	if (!status.valid) return 0; // [orig: @0x52D5F3]
+	return status.uptime_ms - session_status_receipt_ms_ + console_tick_ms();
 }
 
 uint32_t ClientRuntime::console_tick_ms() const {

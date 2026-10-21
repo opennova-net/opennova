@@ -290,9 +290,13 @@ void test_joiner_console() {
 		if (section == "Overlays" && key == "STROVER29") return "Game Type Zero";
 		return {};
 	};
+	// The joiner's world: its clock at 15:00, as the S2C 0x0A left it.
+	auto world = std::make_unique<world::World>();
+	world->weather.tod_fixed24 = 0x0F000000u;
 	inmatch::RemoteAdminBinding joined;
 	joined.client = &client;
 	joined.joiner = joiner.get();
+	joined.world = world.get();
 	joined.session = 7;
 	consoles.bind(joined, seams);
 	expect(consoles.bound_to(joined), "the joiner's console");
@@ -341,6 +345,30 @@ void test_joiner_console() {
 	expect(consoles.status_report().find(joined_lines) != std::string::npos,
 	       "a joiner's report: the joined session's map file and game type");
 
+	// UP-TIME is g_SessionStatus' clock: none before the S2C 0x58; then the 0x58's uptime plus
+	// the GetTickCount time since its receipt (90061 s on receipt, 2 s later: 1 day 01:01:03).
+	// CURRENT TOD is the high word of the joiner's g_EnvCurTimeFixed24 (0x0F000000 -> 3840).
+	// [orig: CSessionTimer_GetElapsedMS @0x52D5F0; SessionStatus_ParseFromBuffer @0x530ED0 (the
+	//  uptime +0x70 @0x531003, the stamp +0x74 @0x5310A7); CAdminServer_HandleStatus @0x402ECD
+	//  (the d / h / m / s split), the TOD's high word @0x402F6F]
+	expect(consoles.status_report().find("UP-TIME: 0 00:00:00\r\nCURRENT TOD: 3840\r\n") != std::string::npos,
+	       "no 0x58 yet: the session clock reads 0; the world's time of day");
+	std::vector<uint8_t> status = {'H', 'o', 's', 't', 'e', 'd', 0, 'T', 'D', 'M', '0', '1', 0, 0, 0, 0};
+	const uint32_t uptime_ms = 90061000u;
+	for (int i = 0; i < 4; ++i) status.push_back(static_cast<uint8_t>(uptime_ms >> (8 * i)));
+	status.resize(status.size() + 39 * 4, 0);
+	status.push_back(0); // no option pairs
+	body.clear();
+	expect(frame_session_packet(server_seq, crypto, {make_protocol_message(s2c::SESSION_STATUS, status)}, body),
+	       "the 0x58 frames");
+	const std::vector<uint8_t> status_datagram =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+	client.receive(status_datagram.data(), status_datagram.size());
+	(void)joiner_sends(client, client_scrk, 6);
+	now += 2000;
+	expect(consoles.status_report().find("UP-TIME: 1 01:01:03\r\n") != std::string::npos,
+	       "the 0x58's uptime plus the time since its receipt");
+
 	expect(client.mission_exit_reason() == inmatch::kMissionExitNone, "no exit yet");
 	expect(socket.sent.empty(), "the joiner's role has written nothing yet");
 	(void)c.command("GOTO MENUSTATE");
@@ -356,7 +384,7 @@ void test_joiner_console() {
 		       "each is the keyed 0x46 with the CIDEMIS record");
 	}
 	expect(client.session_lost(), "the connection is torn down");
-	expect(client.Client_ProcessNetworkFrame(6).empty(), "the next frame sends no C2S");
+	expect(client.Client_ProcessNetworkFrame(7).empty(), "the next frame sends no C2S");
 	joiner->close();
 	expect(socket.sent.size() == 4, "the teardown's close sends nothing more");
 
@@ -366,6 +394,10 @@ void test_joiner_console() {
 	const std::string report = consoles.status_report();
 	expect(report.find("CURRENT MAP: TDM01.BMS\r\nCURRENT GAME TYPE: Game Type Zero\r\n") != std::string::npos,
 	       "back in the menus: the last map file and game type 0's abbreviation");
+	// The teardown cleared g_SessionStatus; the time of day keeps the last mission's clock.
+	// [orig: Game_TeardownMission @0x5223FA]
+	expect(report.find("UP-TIME: 0 00:00:00\r\nCURRENT TOD: 3840\r\n") != std::string::npos,
+	       "back in the menus: no session clock, the last time of day");
 }
 
 // A listen host's console is a peer over its host context: CMD leaves through its own client

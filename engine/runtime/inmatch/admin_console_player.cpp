@@ -451,16 +451,18 @@ std::string AdminConsole::status_report() {
 	// start, and a ServerCommand's SetServerName afterwards; SET ServerName does not reach it.
 	// [orig: CAdminServer_HandleStatus @0x402E83, @0x402FF6, @0x403052]
 	const AdminProcessMission own{ctx_.session_title, ctx_.config.mission_file,
-			world != nullptr ? world->match.rules().game_type : ctx_.config.game_type};
+			world != nullptr ? world->match.rules().game_type : ctx_.config.game_type,
+			ctx_.np_protocol.host_run_duration_ms, world != nullptr ? world->weather.tod_fixed24 : 0u};
 	const AdminProcessMission &mission = seams_.process_mission != nullptr ? *seams_.process_mission : own;
 	out += "SERVER: " + mission.session_title + "\r\n";
-	// The session clock the 0x58 status block reports (session_status.h).
-	const uint32_t seconds = ctx_.np_protocol.host_run_duration_ms / 1000u;
+	// The session clock: the authority's own status block's (session_status.h), a joiner's
+	// last S2C 0x58's (ClientRuntime::session_elapsed_ms).
+	const uint32_t seconds = mission.session_elapsed_ms / 1000u;
 	std::snprintf(line, sizeof(line), "UP-TIME: %ld %2.2ld:%2.2ld:%2.2ld\r\n", static_cast<long>(seconds / 86400u),
 			static_cast<long>(seconds / 3600u % 24u), static_cast<long>(seconds / 60u % 60u),
 			static_cast<long>(seconds % 60u));
 	out += line;
-	const int16_t tod_high = world != nullptr ? static_cast<int16_t>(world->weather.tod_fixed24 >> 16) : int16_t{0};
+	const int16_t tod_high = static_cast<int16_t>(mission.tod_fixed24 >> 16);
 	out += "CURRENT TOD: " + std::to_string(tod_high) + "\r\n";
 	// Every active slot, a Serve Only host's own slot 0 included.
 	out += "CURRENT # PLAYERS: " + std::to_string(slots.size() + (host ? 1u : 0u)) + "\r\n";

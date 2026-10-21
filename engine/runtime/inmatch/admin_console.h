@@ -58,6 +58,10 @@ struct AdminProcessMission {
 	std::string session_title;
 	std::string map_file;
 	uint32_t game_type = 0;
+	// CSessionTimer_GetElapsedMS(&g_SessionStatus) when the report is built.
+	uint32_t session_elapsed_ms = 0;
+	// g_EnvCurTimeFixed24.
+	uint32_t tod_fixed24 = 0;
 };
 
 // The usage reply for a rights word: `USAGE - [QUIT`, then each listed verb by its usage bit

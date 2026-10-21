@@ -807,6 +807,13 @@ public:
 		return joiner_ ? joiner_->session_loss_reason() : std::string();
 	}
 	bool session_lost() const { return joiner_ && joiner_->session_lost(); }
+	// The session clock of the last S2C 0x58 (g_SessionStatus): 0 while none is held (the
+	// mission start's reset), else its uptime plus the GetTickCount time since its receipt,
+	// in u32 arithmetic. The status report's UP-TIME on a joiner, and its CMAP RULES text.
+	// [orig: CSessionTimer_GetElapsedMS @0x52D5F0 (`+0x70 - +0x74 + GetTickCount()`
+	//  @0x52D609); SessionStatus_ParseFromBuffer @0x530ED0 (the receipt stamp +0x74
+	//  @0x53109F..0x5310A7)]
+	uint32_t session_elapsed_ms() const;
 	// Accept the player's C2S 0x0E pick (0xFFFF default, 0xFFFE auto, else a
 	// spawn-target handle). Input case 12 closes retail's gameplay dword and queues
 	// the 0x0E now [orig: @0x49b17b]; framing waits for the next open send boundary,
@@ -1191,9 +1198,11 @@ private:
 	ClientConsoleQueueAction console_action_sink_;
 	std::function<bool(const std::string &line)> authority_console_;
 	std::vector<ConsoleAction> console_actions_; // Input_QueueEvent's (queue_console_action)
-	// GetTickCount for the console guard: the joiner's monotonic clock, else the
-	// process's steady clock.
+	// GetTickCount (the console guard, the S2C 0x58's receipt stamp): the joiner's
+	// monotonic clock, else the process's steady clock.
 	uint32_t console_tick_ms() const;
+	// The GetTickCount stamp of the S2C 0x58 the replica last folded (session_elapsed_ms).
+	uint32_t session_status_receipt_ms_ = 0;
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

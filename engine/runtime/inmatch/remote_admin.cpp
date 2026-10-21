@@ -93,12 +93,25 @@ void RemoteAdminConsoles::refresh_process_mission() {
 		process_mission_.map_file = host->config.mission_file;
 		process_mission_.game_type =
 				host->world != nullptr ? host->world->match.rules().game_type : host->config.game_type;
+		process_mission_.session_elapsed_ms = host->np_protocol.host_run_duration_ms;
+		if (host->world != nullptr) process_mission_.tod_fixed24 = host->world->weather.tod_fixed24;
 	} else if (const ClientRuntime *client = bound_.client) {
 		// [orig: Game_ApplySessionSettingsToGlobals @0x552145..0x55219E at the joiner's own
 		//  mission start, over the final 0x64's copy @0x4324F5]
 		process_mission_.session_title = mission_session_title(bound_.text_override, client->map_file());
 		process_mission_.map_file = client->map_file();
 		process_mission_.game_type = client->game_type();
+		// g_SessionStatus from the joined session's S2C 0x58; g_EnvCurTimeFixed24 the joiner's
+		// world clock, which the S2C 0x0A sets and the weather tick advances.
+		// [orig: NapiNPClientMsg_SessionStatus @0x4228CA; NapiNPClientMsg_0x00A @0x4302AE;
+		//  Environment_UpdateWeatherTick @0x57E9B8]
+		process_mission_.session_elapsed_ms = client->session_elapsed_ms();
+		if (bound_.world != nullptr) process_mission_.tod_fixed24 = bound_.world->weather.tod_fixed24;
+	} else {
+		// No session (the menus): every mission teardown cleared g_SessionStatus; the time of
+		// day keeps the last mission's clock (no teardown writer).
+		// [orig: Game_TeardownMission @0x5223FA (CPlayerStats_Init(&g_SessionStatus))]
+		process_mission_.session_elapsed_ms = 0;
 	}
 }
 

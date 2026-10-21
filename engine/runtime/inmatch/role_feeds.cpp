@@ -1309,7 +1309,9 @@ bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gam
 	sv.server_name = status.server_name;
 	sv.mission_name = status.mission_name;
 	sv.max_players = status.max_players;
-	sv.elapsed_ms = replication::session_status_elapsed_ms(status, state.local_clock_ms);
+	// A joiner's clock runs from its 0x58's GetTickCount receipt (ClientRuntime::session_elapsed_ms).
+	sv.elapsed_ms = view.joiner ? view.runtime->session_elapsed_ms()
+	                            : replication::session_status_elapsed_ms(status, state.local_clock_ms);
 	sv.stats = status.stats;
 	for (const replication::ClientSessionStatus::Option &o : status.options)
 		sv.options.emplace_back(o.key, o.value);
