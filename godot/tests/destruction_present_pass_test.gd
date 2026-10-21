@@ -814,11 +814,9 @@ func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
 			[
 					DestructionEffectEvent.make('Effect_TreeFoliageExp', Vector3.ZERO, 0, Vector3.RIGHT),
 					DestructionEffectEvent.make('Effect_BldGlassExp', Vector3(1, 2, 3), 0, Vector3.UP)],
-			1,
 			1), [])
 
 	assert_eq(presenter.get_destruction_present_stats().debris_triangles, 1)
-	assert_eq(presenter.get_destruction_present_stats().glass_points, 1)
 	var transients := _transient_rows(fx)
 	assert_eq(transients.size(), 2)
 	assert_eq(fx.get_debug_group_report().size(), 2, 'both resolved rows spawn unowned transients')

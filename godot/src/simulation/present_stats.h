@@ -102,7 +102,6 @@ public:
 	STAT_FIELD(debris_triangles)
 	STAT_FIELD(effects)
 	STAT_FIELD(sounds)
-	STAT_FIELD(glass_points)
 	STAT_FIELD(crackles)
 
 protected:
