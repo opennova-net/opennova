@@ -748,6 +748,13 @@ static bool process_bone_attach(World &world, Entity &occ, Entity &veh, uint8_t 
     return true;
 }
 
+// Retail poses a rider by its bone (+0x157) whatever slot it holds: its slot row when that
+// row holds the bone, else the table row holding it (a ninth sitex, which the def walk
+// stores in slot 8 while the sitex search covers slots 0..7, so its rider holds no slot),
+// else the off-table row. [orig: Entity_AttachToVehicleSlot @0x4946D0 (the bone store
+// @0x494769); Entity_UpdateInfantryAI @0x4B9910 (the bone read @0x4BED58 into
+// Entity_GetBoneTransformAndOrientation @0x4BED72); the def walk's ninth sitex
+// @0x43A4F0, the scan end @0x43A5AF]
 bool VehicleSystem::rider_seat(const Entity &occ, const Entity &carrier, Seat &out) const {
     const bool slot_in_range = occ.mount_seat >= 0 &&
             occ.mount_seat < static_cast<int>(carrier.seats.size());
@@ -755,6 +762,12 @@ bool VehicleSystem::rider_seat(const Entity &occ, const Entity &carrier, Seat &o
             carrier.seats[static_cast<size_t>(occ.mount_seat)].bone_index == occ.mount_bone) {
         out = carrier.seats[static_cast<size_t>(occ.mount_seat)];
         return true;
+    }
+    for (const Seat &s : carrier.seats) {
+        if (s.bone_index == occ.mount_bone) {
+            out = s;
+            return true;
+        }
     }
     for (const Seat &s : carrier.off_table_seats) {
         if (s.bone_index == occ.mount_bone) {

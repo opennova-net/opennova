@@ -160,6 +160,32 @@ void test_a_client_detaches_the_holder() {
 	CHECK(!r.w.registry.get(other_h)->mounted);
 }
 
+// A ninth sitex: the def walk stores it in slot 8 (a table row), the sitex search covers
+// slots 0..7, so its rider holds no slot; retail still poses the rider by its bone, so the
+// rider's seat is the table row holding that bone.
+// [orig: the def walk's ninth sitex @0x43A4F0, the scan end @0x43A5AF;
+//  Entity_AttachToVehicleSlot @0x4946D0 (@0x4946F3..0x494706 -> @0x494752, the bone store
+//  @0x494769); Entity_UpdateInfantryAI @0x4B9910 (@0x4BED58 -> @0x4BED72)]
+void test_a_ninth_sitex_rider_is_posed_on_its_row() {
+	Rig r;
+	Entity &veh = r.veh();
+	veh.seats.clear();
+	veh.off_table_seats.clear();
+	static const char *const names[9] = {"sitex00", "sitex01", "sitex02", "sitex03", "sitex04",
+			"sitex05", "sitex06", "sitex07", "sitex08"};
+	for (uint8_t i = 0; i < 9; ++i)
+		veh.seats.push_back(seat_row(SeatType::Passenger, uint8_t(i + 1), i, names[i]));
+	veh.graphic_model_userpoints = 9;
+	CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 9));
+	const Entity &p = r.player();
+	CHECK(p.mounted && p.mount_bone == 9 && p.mount_type == SeatType::Passenger);
+	CHECK(p.mount_seat == -1);
+	for (const Seat &s : r.veh().seats) CHECK(!s.occupant.valid());
+	Seat seat;
+	CHECK(r.w.vehicles.rider_seat(p, r.veh(), seat));
+	CHECK(seat.bone_index == 9 && seat.retail_slot == 8);
+}
+
 } // namespace
 
 int main() {
@@ -169,6 +195,7 @@ int main() {
 	test_an_untyped_bone_refuses_after_the_detach();
 	test_the_authority_refuses_the_requesters_own_slot();
 	test_a_client_detaches_the_holder();
+	test_a_ninth_sitex_rider_is_posed_on_its_row();
 	if (failures == 0) std::printf("PASS bone_slot_attach\n");
 	return failures == 0 ? 0 : 1;
 }
