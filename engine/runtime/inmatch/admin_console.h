@@ -62,6 +62,12 @@ struct AdminProcessMission {
 	uint32_t session_elapsed_ms = 0;
 	// g_EnvCurTimeFixed24.
 	uint32_t tod_fixed24 = 0;
+	// GET GAMESETTINGS' two live words: g_RulesFlags and g_RoundTimeRemaining (a host's world,
+	// a joined mission's S2C 0x64 word and S2C 0x0A clock, single player's world; the last
+	// session's in the menus, zero before any). SET writes them as retail's SET writes the
+	// globals, whatever the scene.
+	uint32_t rules_word = 0;
+	int32_t round_ticks_remaining = 0;
 };
 
 // The usage reply for a rights word: `USAGE - [QUIT`, then each listed verb by its usage bit
@@ -127,9 +133,10 @@ public:
 		// The local command's WAC overlay toggle over the running mission's script
 		// (ClientLocalCommandSeams::toggle_overlay; wac::WacSystem::toggle_cheat). Unset: none.
 		std::function<bool(const std::string &line)> toggle_overlay;
-		// The process's mission globals the status report prints (RemoteAdminConsoles keeps
-		// them); null reads the context's own mission (a console whose session is the process's).
-		const AdminProcessMission *process_mission = nullptr;
+		// The process's mission globals the status report prints and GET GAMESETTINGS' live
+		// words (RemoteAdminConsoles keeps them; SET writes the live words); null reads the
+		// context's own mission (a console whose session is the process's).
+		AdminProcessMission *process_mission = nullptr;
 	};
 
 	AdminConsole(NapiNPServerCtx &ctx, Seams seams);
@@ -163,6 +170,9 @@ private:
 	void handle_fun(const Args &args, std::vector<std::string> &replies);
 
 	std::string game_settings_reply() const;
+	// g_RulesFlags: the process words' when kept, else the context's live word.
+	uint32_t rules_flags() const;
+	void set_rules_flags(uint32_t word);
 	std::string player_table() const;
 	// The rotation's lines in MISSION LIST's format, or with QUERY's empty fillers.
 	std::string rotation_lines(bool query_fillers) const;

@@ -2,6 +2,7 @@
 
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_config.h>   // host_screen_from_block (the joiner's applied settings)
 #include <runtime/inmatch/host_settings.h> // mission_session_title
 #include <runtime/inmatch/joiner_role.h>   // JoinerRole::quit_to_menu (input action 3)
 #include <runtime/inmatch/mission_exit.h>
@@ -9,6 +10,43 @@
 #include <runtime/world/world.h>
 
 namespace opennova::inmatch {
+
+namespace {
+
+// The settings globals GET GAMESETTINGS prints are zero in the process image; no writer runs
+// before a mission start's apply (Game_ApplySessionSettingsToGlobals' four callers) or an admin
+// SET. [orig: g_ScoreLimit @0x24D2134 .. dword_24D2284 and g_RulesFlags @0x24D1E34, zero in
+// the image; Game_ApplySessionSettingsToGlobals @0x551500 called by Game_StartMission @0x524662,
+// SinglePlayer_StartMission @0x561C28, CNapiGameSession_BuildAndCreateSession @0x5695B8,
+// UI_JoinSelectedSession @0x569B07]
+void zero_settings_globals(GameConfig &c) {
+	c.auto_balance_enabled = 0;
+	c.voting_enabled = 0;
+	c.voting_percent = 0.0f;
+	c.voting_min_players = 0;
+	c.change_team_interval_seconds = 0;
+	c.change_team_penalty_seconds = 0;
+	c.capture_duration_seconds = 0;
+	c.start_delay = 0;
+	c.do_min_ping_check = 0;
+	c.min_ping = 0;
+	c.do_max_ping_check = 0;
+	c.max_ping = 0;
+	c.max_friendly_kills = 0;
+	c.round_time_limit_minutes = 0;
+	c.time_limit_minutes = 0;
+	c.score_limit = 0;
+	c.max_score = 0;
+	c.fat_bullets = 0;
+	c.one_shot_kill = 0;
+	c.mp_attributes = 0;
+}
+
+} // namespace
+
+RemoteAdminConsoles::RemoteAdminConsoles() {
+	zero_settings_globals(session_less_.config);
+}
 
 uint16_t remote_admin_listen_port(const gamecfg::GameCfg &cfg) {
 	// [orig: Game_InitSubsystems @0x4A72C7, the movzx of the word]
@@ -56,6 +94,12 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 	const bool had_session = bound_.host != nullptr || bound_.client != nullptr || bound_.world != nullptr;
 	const bool has_session = binding.host != nullptr || binding.client != nullptr || binding.world != nullptr;
 	if (had_session && !has_session) process_mission_.game_type = 0;
+	// Single player's console is the session-less one over its world; its mission start applied
+	// the block. [orig: SinglePlayer_StartMission @0x561C28 -> Game_ApplySessionSettingsToGlobals]
+	const bool single_player = binding.host == nullptr && binding.client == nullptr && binding.world != nullptr;
+	session_less_.world = single_player ? binding.world : nullptr;
+	if (single_player && !(bound_ == binding) && seams.config_block != nullptr)
+		session_less_.config = host_screen_from_block(*seams.config_block).config;
 	bound_ = binding;
 	NapiNPServerCtx *ctx = binding.host;
 	if (ctx == nullptr && binding.client != nullptr) {
@@ -67,6 +111,12 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 		joined_.is_authority = 0;
 		joined_.is_mp_session_peer = 1;
 		joined_.is_in_session = 1;
+		// Its settings globals are what its own mission start copied from its process cfg
+		// block (the copies run unconditionally, a joiner's start included); its slot table
+		// is empty (the start's clear leaves it unallocated off the authority).
+		// [orig: Game_ApplySessionSettingsToGlobals @0x551B6D..0x551DF1; Server_InitNewRoundState
+		//  @0x51C939 (PlayerSlotTable_ClearEntryArray), @0x51C946 (the authority's allocation)]
+		if (seams.config_block != nullptr) joined_.config = host_screen_from_block(*seams.config_block).config;
 		ctx = &joined_;
 	}
 	seams.host_client = binding.client;
@@ -95,6 +145,12 @@ void RemoteAdminConsoles::refresh_process_mission() {
 				host->world != nullptr ? host->world->match.rules().game_type : host->config.game_type;
 		process_mission_.session_elapsed_ms = host->np_protocol.host_run_duration_ms;
 		if (host->world != nullptr) process_mission_.tod_fixed24 = host->world->weather.tod_fixed24;
+		process_mission_.rules_word =
+				host->world != nullptr ? host->world->rules.mpattrib : host->config.mp_attributes;
+		process_mission_.round_ticks_remaining =
+				host->world != nullptr ? host->world->match.remaining_ticks() : 0;
+		// The session's settings globals stay the process's after it ends.
+		session_less_.config = host->config;
 	} else if (const ClientRuntime *client = bound_.client) {
 		// [orig: Game_ApplySessionSettingsToGlobals @0x552145..0x55219E at the joiner's own
 		//  mission start, over the final 0x64's copy @0x4324F5]
@@ -107,6 +163,19 @@ void RemoteAdminConsoles::refresh_process_mission() {
 		//  Environment_UpdateWeatherTick @0x57E9B8]
 		process_mission_.session_elapsed_ms = client->session_elapsed_ms();
 		if (bound_.world != nullptr) process_mission_.tod_fixed24 = bound_.world->weather.tod_fixed24;
+		// g_RulesFlags, the joined mission's S2C 0x64 word (the joiner's world keeps it), and
+		// g_RoundTimeRemaining, the S2C 0x0A clock.
+		// [orig: CAdminServer_HandleGet @0x403591..0x403A02 (g_RulesFlags), @0x4038C5
+		//  (g_RoundTimeRemaining); NapiNPClientMsg_0x00A @0x430219..0x430235]
+		if (bound_.world != nullptr) process_mission_.rules_word = bound_.world->rules.mpattrib;
+		process_mission_.round_ticks_remaining = client->state().round_time_remaining_ticks;
+		session_less_.config = joined_.config;
+	} else if (const world::World *world = bound_.world) {
+		// Single player: its world's live words (no host clock).
+		process_mission_.session_elapsed_ms = 0;
+		process_mission_.tod_fixed24 = world->weather.tod_fixed24;
+		process_mission_.rules_word = world->rules.mpattrib;
+		process_mission_.round_ticks_remaining = world->match.remaining_ticks();
 	} else {
 		// No session (the menus): every mission teardown cleared g_SessionStatus; the time of
 		// day keeps the last mission's clock (no teardown writer).

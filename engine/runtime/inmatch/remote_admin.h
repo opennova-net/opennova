@@ -133,6 +133,9 @@ struct RemoteAdminBinding {
 //  (g_MissionExitReason = 1), the disconnect @0x49AF38..0x49AF42]
 class RemoteAdminConsoles final : public AdminCommandHandler {
 public:
+	// The process's settings globals start zeroed: no mission start has applied the block yet.
+	RemoteAdminConsoles();
+
 	void bind(const RemoteAdminBinding &binding, AdminConsole::Seams seams);
 	// Whether the console is the one over `binding`.
 	bool bound_to(const RemoteAdminBinding &binding) const {
@@ -150,12 +153,16 @@ public:
 	// The bound session's mission into the process words, before each line runs and on every
 	// frame the embedder pumps: a host context's session title, mission file and game type; a
 	// joiner's own mission start's session title over its connection's g_MapFileName, and its
-	// g_GameType. With no session (the menus) they keep the last session's title and map file;
-	// the session's end zeroed the game type (bind).
+	// g_GameType; the session clock, the time of day and GET GAMESETTINGS' live words; and the
+	// session's settings globals into the menus' context. With no session (the menus) they keep
+	// the last session's (the session's end zeroed the game type, bind; the teardown the clock).
 	void refresh_process_mission();
 
 private:
 
+	// The console's context with no host or joiner session: the menus', and single player's
+	// (its world bound). Its config holds the process's settings globals: zero before the first
+	// mission start, then the last session's.
 	NapiNPServerCtx session_less_;
 	// A joiner's context: the joined session's peer, not its authority.
 	NapiNPServerCtx joined_;

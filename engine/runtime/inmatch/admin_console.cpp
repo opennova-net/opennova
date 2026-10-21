@@ -166,10 +166,13 @@ std::string AdminConsole::game_settings_reply() const {
 	const GameConfig &c = ctx_.config;
 	const world::World *world = ctx_.world;
 	const gamecfg::GameCfg *block = seams_.config_block;
-	const uint32_t rules = world != nullptr ? world->rules.mpattrib : c.mp_attributes;
+	const AdminProcessMission *process = seams_.process_mission;
+	const uint32_t rules = rules_flags();
 	// GameTime's remaining whole minutes: g_RoundTimeRemaining / 60 / 62, the C division
 	// truncating toward zero, so an untimed round (-1) reads 0.
-	const int32_t remaining = world != nullptr ? world->match.remaining_ticks() : 0;
+	const int32_t remaining = process != nullptr
+			? process->round_ticks_remaining
+			: (world != nullptr ? world->match.remaining_ticks() : 0);
 	std::string out;
 	out += settings_row("AutoBalanceOnRecycle", itos(c.auto_balance_enabled));
 	out += settings_row("PuntVote", itos(c.voting_enabled));
@@ -227,6 +230,19 @@ void set_live_rules_word(NapiNPServerCtx &ctx, uint32_t word) {
 uint32_t live_rules_word(const NapiNPServerCtx &ctx) {
 	return ctx.world != nullptr ? ctx.world->rules.mpattrib : ctx.config.mp_attributes;
 }
+
+} // namespace
+
+uint32_t AdminConsole::rules_flags() const {
+	return seams_.process_mission != nullptr ? seams_.process_mission->rules_word : live_rules_word(ctx_);
+}
+
+void AdminConsole::set_rules_flags(uint32_t word) {
+	set_live_rules_word(ctx_, word);
+	if (seams_.process_mission != nullptr) seams_.process_mission->rules_word = word;
+}
+
+namespace {
 
 // strncpy(field, value, 0x11): a 17-character value keeps no terminator (D-NET-359).
 std::string password_field(const std::string &value) {
@@ -293,10 +309,10 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	const std::string &value = args[1];
 	const int32_t v = atol_of(value);
 	bool not_found = false;
-	uint32_t rules = live_rules_word(ctx_);
+	uint32_t rules = rules_flags();
 	const auto set_rule_bit = [&](uint32_t bit, bool on) {
 		rules = on ? (rules | bit) : (rules & ~bit);
-		set_live_rules_word(ctx_, rules);
+		set_rules_flags(rules);
 	};
 	if (strutil::iequals(key, "AutoBalanceOnRecycle")) {
 		// No shadow write: the save keeps the old autoBalanceOnRecycle_528. [orig: @0x405BC3]
@@ -349,6 +365,9 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 			world->match.live_rules().game_time_minutes = static_cast<uint32_t>(v);
 			world->match.set_remaining_ticks(static_cast<int32_t>(3720u * static_cast<uint32_t>(v)));
 		}
+		// [orig: `imul eax, 0E88h` @0x405E80, g_RoundTimeRemaining @0x405E86, whatever the scene]
+		if (seams_.process_mission != nullptr)
+			seams_.process_mission->round_ticks_remaining = static_cast<int32_t>(3720u * static_cast<uint32_t>(v));
 	} else if (strutil::iequals(key, "FriendlyFire")) {
 		set_rule_bit(GameConfig::kMpAttribNoFriendlyFire, v == 0); // inverted
 	} else if (strutil::iequals(key, "FriendlyTags")) {
@@ -418,7 +437,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	}
 	// The rules word into its shadows: the cfg block's, and the port's one dword_2550A04
 	// store (GameConfig::mp_attributes). [orig: @0x406185]
-	rules = live_rules_word(ctx_);
+	rules = rules_flags();
 	c.mp_attributes = rules;
 	if (block != nullptr) block->mpattrib = static_cast<int32_t>(rules);
 	if (not_found) {

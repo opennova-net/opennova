@@ -152,13 +152,20 @@ void test_consoles() {
 	expect(settings.find("ServerName           = Menu Block\n") != std::string::npos,
 	       "the menus' settings read the process block's name");
 	expect(settings.find("ArmoryTimer          = 45\n") != std::string::npos, "and its armory timer");
+	// No mission start has applied the block: the settings globals are the image's zeros.
+	// [orig: g_VoteKickMinPlayers @0x24D2270, zero in the image; CAdminServer_HandleGet]
+	expect(settings.find("VoteNumPlayersReq    = 0\n") != std::string::npos &&
+	               settings.find("ChangeTeamInterval   = 0\n") != std::string::npos,
+	       "before any mission the settings globals read zero");
 	expect_eq(c.one("SET ServerName Renamed"), "OK - Setting Changed.", "a SET in the menus");
 	// Each value token followed by one space [orig: CAdminServer_HandleSetCommand @0x4060BF..0x40615A].
 	expect(block.game_name == "Renamed " && saves == 1, "writes the block and saves it");
 	expect_eq(c.one("GOTO MENUSTATE"), "<2 replies>", "GOTO MENUSTATE in the menus: the error and the cycle tail");
 
-	inmatch::NapiNPServerCtx host;
+	auto host_ptr = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &host = *host_ptr;
 	host.config.server_name = "Hosted";
+	host.config.voting_min_players = 9;
 	inmatch::RemoteAdminBinding hosted;
 	hosted.host = &host;
 	hosted.session = 1;
@@ -176,6 +183,13 @@ void test_consoles() {
 	consoles.bind(menus, seams);
 	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
 	expect_eq(c.one("GET GAMESTATE"), "OK - Current State = Menus", "back in the menus");
+	// The session's settings globals stay the process's; a SET writes the round clock in any
+	// scene. [orig: CAdminServer_HandleSetCommand @0x405E6A, @0x405E80..0x405E86]
+	expect(c.one("GET GAMESETTINGS").find("VoteNumPlayersReq    = 9\n") != std::string::npos,
+	       "the menus keep the last session's settings");
+	expect_eq(c.one("SET GameTime 10"), "OK - Setting Changed.", "SET GameTime in the menus");
+	expect(c.one("GET GAMESETTINGS").find("GameTime             = 10/10\n") != std::string::npos,
+	       "the round clock restarted at the new limit");
 }
 
 // The scene a frame outside the running mission's main frame pumps in: the menus' frame is the
@@ -280,6 +294,9 @@ void test_joiner_console() {
 	Client c{server};
 	expect(c.connect_and_login("boss", "pw"), "the joiner's admin login");
 	gamecfg::GameCfg block = gamecfg::defaults();
+	block.time_limit = 25;
+	block.max_kills = 500;
+	block.autobalance_on_recycle_enabled = 1;
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
 	std::vector<std::string> echoes;
@@ -293,6 +310,7 @@ void test_joiner_console() {
 	// The joiner's world: its clock at 15:00, as the S2C 0x0A left it.
 	auto world = std::make_unique<world::World>();
 	world->weather.tod_fixed24 = 0x0F000000u;
+	world->rules.mpattrib = 0x200; // the joined mission's S2C 0x64 word: NoFriendlyFire
 	inmatch::RemoteAdminBinding joined;
 	joined.client = &client;
 	joined.joiner = joiner.get();
@@ -301,6 +319,20 @@ void test_joiner_console() {
 	consoles.bind(joined, seams);
 	expect(consoles.bound_to(joined), "the joiner's console");
 	consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
+
+	// GET GAMESETTINGS reads the globals the joiner's own mission start copied from its block,
+	// the joined mission's rules word and the received round clock (none yet: -1, 0 minutes);
+	// its slot table is empty. [orig: Game_ApplySessionSettingsToGlobals @0x551B6D..0x551B75
+	//  (500 -> 65000), @0x551BCE, @0x551CD2; CAdminServer_HandleGet @0x403449, @0x4038C5,
+	//  @0x403915; Server_InitNewRoundState @0x51C939, @0x51C946]
+	const std::string settings = c.one("GET GAMESETTINGS");
+	expect(settings.find("AutoBalanceOnRecycle = 1\n") != std::string::npos, "the block's auto-balance word");
+	expect(settings.find("GameTime             = 0/25\n") != std::string::npos,
+	       "the block's time limit; no round clock received");
+	expect(settings.find("KillLimit            = 65000\n") != std::string::npos, "max_kills 500 reads 65000");
+	expect(settings.find("FriendlyFire         = 0\n") != std::string::npos, "the joined mission's rules word");
+	expect(consoles.status_report().find("CURRENT # PLAYERS: 0\r\n") != std::string::npos,
+	       "a joiner's slot table is empty");
 
 	expect_eq(c.one("CHAT SEND hello there"), "OK - Chat sent.", "CHAT SEND on a joiner");
 	std::vector<ProtocolMessage> sent = joiner_sends(client, client_scrk, 2);
