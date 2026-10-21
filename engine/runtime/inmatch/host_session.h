@@ -139,13 +139,6 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		HostOwnClientDrainFn own_client_drain = nullptr,
 		void *own_client_drain_context = nullptr);
 
-// The pump's step (4) alone, with every boundary treated as open: the
-// teardown's final flush, so the round-reset 0x25 and the "NP.C:SH:STOP"
-// description staged by the host's close reach every remote before the
-// sockets go away [orig: the StopServer walk NapiNPProtocol_StopServer
-// @0x62A820 stamps and destroys each connection in turn].
-void host_session_flush_s2c(HostOwner &owner, opennova::IDatagramSocket &sock);
-
 // Host bring-up config. The owner sets owner.ctx.world / owner.ctx.mission and owner.host_loopback (its
 // dcb-2 LoopbackChannel) BEFORE start_host_session; this fills the rest.
 struct HostConfig {

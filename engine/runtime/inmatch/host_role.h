@@ -214,8 +214,9 @@ public:
 	//  read by Game_ProcessMainFrame @0x526806..0x526867].
 	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;
-	// The host's mission exit: the round-reset 0x25 to every in-match remote,
-	// the "NP.C:SH:STOP" description on every connection, one final flush.
+	// The host's mission exit: the round-reset 0x25 queued to every in-match remote
+	// (nothing transmits it), then on the destroy arm the "NP.C:SH:STOP" burst to
+	// every connection.
 	void close() override;
 	ClientRuntime *client_runtime() override { return state.client_runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }

@@ -236,8 +236,7 @@ void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEven
 	}
 }
 
-static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now,
-		bool force_open);
+static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now);
 
 // The pump's step (1): the receive drain with its handlers, the 0x84 tail,
 // and each established remote's send-boundary clock.
@@ -440,7 +439,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	lap.mark(devtools::Slot::SIM_SERVER_TICK);
 
 	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.
-	flush_s2c_boundaries(owner, sock, now, /*force_open=*/false);
+	flush_s2c_boundaries(owner, sock, now);
 	// The protocol's pump flushes its _inout.txt log, and the manager's pump the net
 	// log, each once its interval has passed [orig: NapiNPProtocol_Pump @0x62A7EA,
 	// NapiNPManager_Pump @0x62AC98 -> NapiLog_FlushIfExpired @0x62F2F0].
@@ -464,14 +463,10 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	lap.mark(devtools::Slot::SIM_HOST_SEND);
 }
 
-void host_session_flush_s2c(HostOwner &owner, opennova::IDatagramSocket &sock) {
-	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/true);
-}
-
 void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock) {
 	if (owner.ctx.is_authority == 0 || owner.ctx.is_in_session == 0) return;
 	receive_and_advance_boundaries(owner, sock, owner.now_tick, nullptr, nullptr);
-	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/false);
+	flush_s2c_boundaries(owner, sock, owner.now_tick);
 }
 
 void host_session_teardown_pump(HostOwner &owner, opennova::IDatagramSocket &sock) {
@@ -479,7 +474,7 @@ void host_session_teardown_pump(HostOwner &owner, opennova::IDatagramSocket &soc
 	receive_and_advance_boundaries(owner, sock, owner.now_tick, nullptr, nullptr);
 	// The own pair heads the protocol's list: its twin goes first in the pending walk.
 	(void)drain_own_goodbye(owner.ctx, OwnGoodbye::TeardownPump);
-	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/false);
+	flush_s2c_boundaries(owner, sock, owner.now_tick);
 }
 
 // BuildOutgoingPackets over this connection's queue: the packets framed
@@ -583,12 +578,10 @@ static bool pump_send_interval_legs(HostOwner &owner, opennova::IDatagramSocket 
 }
 
 // The pump's step (4). Drain each remote transport into the ordered pending
-// queue every tick; only an open boundary frames and sends it (force_open
-// ships regardless — the teardown's last flush), then the send-interval legs
-// run whatever the boundary says. The host's own type-2 loopback is consumed
-// in-process and skipped here.
-static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now,
-		bool force_open) {
+// queue every tick; only an open boundary frames and sends it, then the
+// send-interval legs run whatever the boundary says. The host's own type-2
+// loopback is consumed in-process and skipped here.
+static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now) {
 	auto &pending_session_messages = owner.pending_session_messages;
 	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
 		if (c.type != NapiNPConnection::kTypeServerSide) continue;
@@ -614,7 +607,7 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 		// themselves @0x62907b..0x629082).
 		const uint32_t sequence_before = c.seq.next_outbound_seq;
 		bool built = false;
-		const bool open = c.s2c_send_boundary_open || force_open;
+		const bool open = c.s2c_send_boundary_open;
 		if (open) {
 			built = build_s2c_queue(owner, sock, c, now);
 			// The owed ACK (D-NET-233): a C2S packet with records arrived since the last

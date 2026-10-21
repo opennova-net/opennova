@@ -1187,12 +1187,15 @@ bool check_server_goodbye_closes_the_joiner() {
 			"a 0x86 before the connection is active is ignored");
 }
 
-// The host's mission exit: the round-reset 0x25 to every in-match remote, then the StopServer
-// walk — {1, 9, 0, 0, "", 0, "NP.C:SH:STOP"} latched and the node Destroyed while host_running
-// is still set, so every connection gets the four-datagram 0x86 burst carrying that record, and
-// only afterwards is host_running cleared. [orig: NapiNPProtocol_StopServer @0x62A820 — the
-//  record @0x62a8c3..0x62a8f6, latch @0x62a904..0x62a919, Destroy @0x62a924, host_running = 0
-//  @0x62a95c; SendDisconnectPacket's host_running gate @0x61f329]
+// The host's mission exit: the round-reset 0x25 queued to every in-match remote, then the
+// StopServer walk — {1, 9, 0, 0, "", 0, "NP.C:SH:STOP"} latched and the node Destroyed while
+// host_running is still set, so every connection gets the four-datagram 0x86 burst carrying that
+// record, and only afterwards is host_running cleared. The destroy drains the queued 0x25 after
+// the burst, and no pump runs between, so the burst is all the wire carries.
+// [orig: NapiNPProtocol_StopServer @0x62A820 — the record @0x62a8c3..0x62a8f6, latch
+//  @0x62a904..0x62a919, Destroy @0x62a924, host_running = 0 @0x62a95c; SendDisconnectPacket's
+//  host_running gate @0x61f329; CNapiNPConnection_Destroy @0x62A4B0 - the teardown called
+//  @0x62A4F9, CNapiNPConnection_DrainMessageQueues called @0x62A50A]
 bool check_host_close_bursts_stop_to_every_connection() {
 	inmatch::HostRole role;
 	inmatch::HostOwner &owner = role.state.host_owner;
@@ -1227,35 +1230,18 @@ bool check_host_close_bursts_stop_to_every_connection() {
 	CaptureDatagramSocket socket;
 	role.set_socket(&socket);
 	role.close();
-	// Per connection: one 0x83 carrying the 0x25, then the four 0x86 STOP datagrams.
-	if (!expect(socket.sent.size() == 10 && owner.ctx.np_protocol.connection_list.empty() &&
+	// Per connection: the four 0x86 STOP datagrams and nothing else (no 0x83 carries the 0x25).
+	if (!expect(socket.sent.size() == 8 && owner.ctx.np_protocol.connection_list.empty() &&
 				owner.ctx.np_protocol.host_running == 0,
-			"close sends 0x25 + four 0x86 to each of two connections, erases them and stops the host"))
+			"close sends four 0x86 to each of two connections, erases them and stops the host"))
 		return false;
 	uint8_t opcode = 0;
-	std::vector<uint8_t> session_body;
-	ProtocolPacketHeader header;
-	std::vector<ProtocolMessage> messages;
-	for (int i = 0; i < 2; ++i) {
-		const PeerAddr &peer = i == 0 ? first_peer : second_peer;
-		const std::vector<uint8_t> &reset = socket.sent[static_cast<std::size_t>(i)];
-		messages.clear();
-		if (!expect(socket.sent_to[static_cast<std::size_t>(i)] == peer &&
-					nw_decode_inbound(reset.data(), reset.size(), opcode, session_body) &&
-					opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
-					decode_protocol_packet_plaintext(session_body.data(),
-							session_body.size(), kServerScrk, header, messages) &&
-					messages.size() == 1 && messages[0].tag == s2c::GAME_RESET &&
-					messages[0].payload.empty(),
-				"each in-match remote first receives the empty round-reset 0x25"))
-			return false;
-	}
 	const DisconnectEvent stop = make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP");
 	for (int i = 0; i < 2; ++i) {
 		const PeerAddr &peer = i == 0 ? first_peer : second_peer;
 		const std::vector<uint8_t> expected_body = server_goodbye_to_bytes(
 				kClientKey + static_cast<uint32_t>(i), stop);
-		const std::size_t first = 2u + static_cast<std::size_t>(i) * 4u;
+		const std::size_t first = static_cast<std::size_t>(i) * 4u;
 		for (std::size_t j = first; j < first + 4; ++j) {
 			std::vector<uint8_t> body;
 			if (!expect(socket.sent_to[j] == peer &&

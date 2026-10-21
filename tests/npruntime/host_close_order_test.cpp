@@ -278,16 +278,51 @@ void test_close_runs_the_pump_before_the_stop() {
 	host->ctx().logs.inout = nullptr;
 }
 
+// The S2C 0x25s the socket carried to `to`, decoded under that connection's key.
+int wire_resets(const CaptureSocket &socket, const PeerAddr &to, const std::string &key) {
+	int resets = 0;
+	for (const auto &[peer, bytes] : socket.sent) {
+		if (!(peer == to)) continue;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) ||
+				opcode != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
+			continue;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_protocol_packet_plaintext(body.data(), body.size(), key, header, messages))
+			continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == s2c::GAME_RESET && !m.flags.settings_update) ++resets;
+	}
+	return resets;
+}
+
+// The S2C 0x25s still queued on a connection's transport, unframed.
+int queued_resets(ns::UdpSessionTransport &transport) {
+	int resets = 0;
+	ns::Datagram staged;
+	while (transport.pop_outbound(staged))
+		if (staged.tag == s2c::GAME_RESET) ++resets;
+	return resets;
+}
+
 // The rest of the close's order: after the teardown's pump the authority's one-shot PostMission
 // sweep runs (an authored PostMission entry's action, once, at the close), then the per-slot
-// reset: a remote slot in states 2..7 gets its S2C 0x25 in the close's flush, ahead of
-// StopServer's STOP burst; a slot in state 1 gets none.
+// reset queues an S2C 0x25 to a remote slot in states 2..7 and none to a slot in state 1. No
+// pump runs after the walk, so neither arm puts it on the wire: the destroy arm's STOP burst
+// is all the joiner gets (the destroy drains the queue after the burst), an error arm sends
+// nothing and leaves the connection, its 0x25 still queued.
 // [orig: Game_TeardownMission @0x522350 - the pump called @0x522588, EventTrigger_UpdateAllWithFlag4
 //  called @0x52266C, Server_DisconnectAndResetAllPlayerSlots called @0x52269B;
 //  Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, the state switch
-//  over 2..7 @0x51619F..0x5161AB, the 0x25 @0x5161BB sent @0x5161D4; NapiNPProtocol_StopServer
-//  @0x62A820 (the STOP record @0x62A8C3..0x62A8F6)]
-void test_close_sweeps_post_mission_then_resets_each_slot() {
+//  over 2..7 @0x51619F..0x5161AB, the 0x25 @0x5161BB queued @0x5161D4 (NapiNPServer_SendToConn
+//  @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640); PostMenu_RouteMissionExit @0x568460 -
+//  Server_EndMissionSession called @0x568672, the destroy @0x568683, the error arms'
+//  SetTransportMode(0) @0x5686F9; NapiNPProtocol_StopServer @0x62A820 (the STOP record
+//  @0x62A8C3..0x62A8F6); CNapiNPConnection_Destroy @0x62A4B0 - the teardown called @0x62A4F9,
+//  CNapiNPConnection_DrainMessageQueues called @0x62A50A]
+void test_close_sweeps_post_mission_then_queues_each_slots_reset(int32_t exit_reason) {
 	opennova::bms::File mission = test_mission::two_entity_mission();
 	opennova::bms::Event post{};
 	post.flags = opennova::bms::EventFlags::PostMission;
@@ -330,7 +365,7 @@ void test_close_sweeps_post_mission_then_resets_each_slot() {
 	host->ctx().np_protocol.connection_list.push_back(added);
 	CHECK(host->kernel->world.script.vars.get_mission(9) == 0);
 
-	host->ctx().mission_exit_reason = inmatch::kMissionExitQuit;
+	host->ctx().mission_exit_reason = exit_reason;
 	host->role->close();
 	CHECK(host->kernel->world.script.vars.get_mission(9) == 1); // the sweep ran once
 
@@ -339,40 +374,26 @@ void test_close_sweeps_post_mission_then_resets_each_slot() {
 	const std::vector<uint8_t> stop = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
 			server_goodbye_to_bytes(kSyncedCk, make_disconnect_event(1, 9, 0, 0, "", 0,
 					"NP.C:SH:STOP")));
-	int resets = 0;
-	std::size_t reset_at = host->socket.sent.size();
-	std::size_t first_stop = host->socket.sent.size();
-	int added_resets = 0;
-	for (std::size_t i = 0; i < host->socket.sent.size(); ++i) {
-		const auto &[to, bytes] = host->socket.sent[i];
-		if (to == kPeer && bytes == stop && first_stop == host->socket.sent.size()) first_stop = i;
-		uint8_t opcode = 0;
-		std::vector<uint8_t> body;
-		if (!nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) ||
-				opcode != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
-			continue;
-		ProtocolPacketHeader header;
-		std::vector<ProtocolMessage> messages;
-		const std::string &key = to == kPeer ? server_scrk : std::string("SERVER-ADDED-SCRK");
-		if (!decode_protocol_packet_plaintext(body.data(), body.size(), key, header, messages))
-			continue;
-		for (const ProtocolMessage &m : messages) {
-			if (m.tag != s2c::GAME_RESET || m.flags.settings_update) continue;
-			if (to == kPeer) {
-				++resets;
-				if (reset_at == host->socket.sent.size()) reset_at = i;
-			} else if (to == added_peer) {
-				++added_resets;
-			}
-		}
+	int stops = 0;
+	for (const auto &[to, bytes] : host->socket.sent)
+		if (to == kPeer && bytes == stop) ++stops;
+	CHECK(wire_resets(host->socket, kPeer, server_scrk) == 0);
+	CHECK(wire_resets(host->socket, added_peer, "SERVER-ADDED-SCRK") == 0);
+	CHECK(queued_resets(host->remote) == 1 && queued_resets(added_wire) == 0);
+	bool kept = false;
+	for (const inmatch::NapiNPConnection &conn : host->ctx().np_protocol.connection_list)
+		if (conn.peer == kPeer) kept = true;
+	if (exit_reason == inmatch::kMissionExitQuit) {
+		CHECK(stops > 0 && !kept);
+	} else {
+		CHECK(stops == 0 && kept); // the error arm leaves the server unstopped
 	}
-	CHECK(resets == 1 && added_resets == 0);
-	CHECK(reset_at < first_stop && first_stop < host->socket.sent.size());
 }
 
 // D-NET-NEW-L1-24 (L1-s16): the close's per-row 0x25 walk takes an orphaned row as any active row:
-// a row in states 2..7 takes its 0x25 through its net player (send_mask 0x20 sends through the
-// row's +0x1C), so the joiner whose re-add orphaned a state-6 row gets two in the close's flush.
+// a row in states 2..7 queues its 0x25 through its net player (send_mask 0x20 sends through the
+// row's +0x1C), so the joiner whose re-add orphaned a state-6 row has two queued, and none on the
+// wire (the walk runs after the teardown's last pump).
 // [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, the 0x25 to
 //  the row @0x5161C2..0x5161D4; NapiNPServer_SendFiltered @0x4C87E0 - the 0x20 arm, the row's
 //  +0x1C @0x4C8A1F]
@@ -396,22 +417,8 @@ void test_close_resets_an_orphaned_row_through_its_net_player() {
 	host->ctx().orphaned_player_rows.push_back(orphan);
 	host->ctx().mission_exit_reason = inmatch::kMissionExitQuit;
 	host->role->close();
-	int resets = 0;
-	for (const auto &[to, bytes] : host->socket.sent) {
-		if (!(to == kPeer)) continue;
-		uint8_t opcode = 0;
-		std::vector<uint8_t> body;
-		if (!nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) ||
-				opcode != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
-			continue;
-		ProtocolPacketHeader header;
-		std::vector<ProtocolMessage> messages;
-		if (!decode_protocol_packet_plaintext(body.data(), body.size(), server_scrk, header, messages))
-			continue;
-		for (const ProtocolMessage &m : messages)
-			if (m.tag == s2c::GAME_RESET && !m.flags.settings_update) ++resets;
-	}
-	CHECK(resets == 2);
+	CHECK(wire_resets(host->socket, kPeer, server_scrk) == 0);
+	CHECK(queued_resets(host->remote) == 2);
 }
 
 } // namespace
@@ -422,7 +429,8 @@ int main() {
 	test_a_stale_unlisted_code_keeps_the_stop();
 	test_the_router_arm_decides_the_stop();
 	test_close_runs_the_pump_before_the_stop();
-	test_close_sweeps_post_mission_then_resets_each_slot();
+	test_close_sweeps_post_mission_then_queues_each_slots_reset(inmatch::kMissionExitQuit);
+	test_close_sweeps_post_mission_then_queues_each_slots_reset(inmatch::kMissionExitNovaWorld);
 	test_close_resets_an_orphaned_row_through_its_net_player();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;

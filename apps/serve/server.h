@@ -152,8 +152,8 @@ public:
 	// quit() when the remote admin quit it), and
 	// stop() has run.
 	bool frame(double delta_seconds);
-	// The host's exit: the round reset to every joiner, the STOP description,
-	// the final flush; the NovaWorld deregistration (ClientStopHosting and the
+	// The host's exit: the round reset queued to every joiner (never sent), the
+	// STOP burst; the NovaWorld deregistration (ClientStopHosting and the
 	// goodbye); then game.cfg saved, the socket closed and the lock deleted, as
 	// Game_Run's exit. Idempotent.
 	void stop();

@@ -1084,7 +1084,7 @@ bool HostRole::session_lost(SessionError &error) const {
 }
 
 // The host's mission exit. Retail's authority teardown walks every active
-// player slot in the in-match states 2..7 and sends each one S2C 0x25 (empty
+// player slot in the in-match states 2..7 and queues each one S2C 0x25 (empty
 // body, one-send to that slot), sets its net player to game state 8 and its
 // slot state back to 1; the session reset then stops the server: while
 // host_running is still set, every connection has the record {ds 1, dc 9, dp
@@ -1094,13 +1094,18 @@ bool HostRole::session_lost(SessionError &error) const {
 // teardown — and only after the walk is host_running cleared. A joiner (retail
 // or ours) therefore leaves the match at once instead of sitting through the
 // 120 s silence reap; the burst, not a reliable description record, is what
-// retail puts on the wire here.
+// retail puts on the wire here. The queued 0x25s never leave: no pump runs after the
+// teardown's own (the Post Menu's router is the next update), the destroy drains a
+// connection's message queues after its burst, and an error arm closes the socket.
 // [orig: Game_TeardownMission @0x522350 -> Server_DisconnectAndResetAllPlayerSlots
-//  @0x516160 (the six `push 25h` / NapiNPServer_SendFiltered @0x5161bb..0x516385);
+//  @0x516160 (the six `push 25h` / NapiNPServer_SendFiltered @0x5161bb..0x516385;
+//  NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640);
 //  CNapiGameSession_ResetActiveSession @0x4C8A70 -> NapiNPProtocol_StopServer
 //  @0x62A820 (the record @0x62a8c3..0x62a8f6 latched-if-invalid @0x62a904..0x62a919,
 //  CNapiNPConnection_Destroy @0x62a924 per connection, host_running cleared
-//  @0x62a95c) -> TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
+//  @0x62a95c) -> TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0;
+//  CNapiNPConnection_Destroy @0x62A4B0 - the teardown called @0x62A4F9, then
+//  CNapiNPConnection_DrainMessageQueues called @0x62A50A]
 void HostRole::close() {
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();
@@ -1154,7 +1159,16 @@ void HostRole::close() {
 			net_player->link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
 					/*reliable=*/false);
 	}
-	inmatch::host_session_flush_s2c(state.host_owner, socket);
+	// Nothing transmits the walk's 0x25s: the teardown's pump ran ahead of the walk and its
+	// tail runs none, the main loop pumps nothing across the mode change, and the Post Menu's
+	// router neither, on the destroy arm (Server_EndMissionSession, then the destroy) or an
+	// error arm (the modes cleared, the socket closed). So a stock joiner gets the STOP burst
+	// below, or nothing.
+	// [orig: Game_TeardownMission - Server_PumpNetworkTransport called @0x522588, the walk
+	//  called @0x52269B, the tail @0x5226AA..0x5227A2; Game_MainLoop @0x52B630 - the shutdown
+	//  @0x52BAFF, the next mode's init @0x52B70D and update @0x52BA5A; PostMenu_RouteMissionExit
+	//  @0x568460 - Server_EndMissionSession called @0x568672 (@0x51E850: no pump), the destroy
+	//  @0x568683, the error arms' SetTransportMode(0) @0x5686F9]
 	// The post-mission router's error arms (5, 6, 7, 20 and the disconnect reasons 9..19) clear
 	// the network, connection and transport modes and skip CNapiGameSession_FullDestroy, whose
 	// session reset stops the server: such an exit leaves the server unstopped and its joiners
