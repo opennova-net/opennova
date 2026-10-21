@@ -157,6 +157,22 @@ void compare_tags(
 			const uint64_t first = *std::min_element(sb.times.begin(), sb.times.end());
 			const double span_ms = end_b > first ? double(end_b - first) / 1e6 : 0.0;
 			cadence_count_metric(count, double(sa.count), cadence, double(sb.count), span_ms);
+		} else if (sa.count >= 20) {
+			// A stream counts from its own first occurrence over the pair's
+			// shorter span from it (window.tag_stream_anchor).
+			static_assert(has_normalization("window.tag_stream_anchor"));
+			const uint64_t first_a = *std::min_element(sa.times.begin(), sa.times.end());
+			const uint64_t first_b = *std::min_element(sb.times.begin(), sb.times.end());
+			const uint64_t span = std::min(end_a - first_a, end_b - first_b);
+			auto within = [span](const std::vector<uint64_t> &times, uint64_t first) {
+				return double(std::count_if(times.begin(), times.end(),
+						[&](uint64_t t) { return t - first <= span; }));
+			};
+			const double span_ms = double(span) / 1e6;
+			count_metric(count, within(sa.times, first_a), span_ms, within(sb.times, first_b),
+					span_ms);
+			count.detail += " over " + std::to_string(int64_t(span_ms / 1000.0)) +
+					" s from each run's first";
 		} else {
 			count_metric(count, double(sa.count), common_ms, double(sb.count), common_ms);
 		}
@@ -180,7 +196,27 @@ void compare_tags(
 			out.push_back(constant);
 		} else if (!length_set_exempt(dir, identity)) {
 			MetricValue lengths = metric(dir, "length_set", key, "LENGTH_SET_MISMATCH");
-			const std::set<std::string> la = length_keys(sa.lengths), lb = length_keys(sb.lengths);
+			std::set<size_t> na = sa.lengths, nb = sb.lengths;
+			if (dir == 'S' && identity == 0x040) {
+				// A multi-entry 0x40 one entry from the other run's length is the
+				// burst's tail (length.S.0x40.burst_tail).
+				static_assert(has_normalization("length.S.0x40.burst_tail"));
+				constexpr size_t kEntry = 6, kOneEntry = 1 + kEntry;
+				auto tail = [&](size_t length, const std::set<size_t> &other) {
+					return length > kOneEntry && !other.count(length) &&
+							(other.count(length + kEntry) || other.count(length - kEntry));
+				};
+				std::set<size_t> fa, fb;
+				for (const size_t length : na)
+					if (!tail(length, nb))
+						fa.insert(length);
+				for (const size_t length : nb)
+					if (!tail(length, na))
+						fb.insert(length);
+				na = std::move(fa);
+				nb = std::move(fb);
+			}
+			const std::set<std::string> la = length_keys(na), lb = length_keys(nb);
 			lengths.distance = jaccard_distance(la, lb);
 			lengths.subject = render_set(lb);
 			lengths.reference = render_set(la);

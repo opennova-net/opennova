@@ -360,6 +360,23 @@ inline constexpr Normalization kNormalizations[] = {
 			"OR ran 12 s longer than RR): the tag histogram takes each run's first packet "
 			"plus the shorter interval of the pair, so a stream on the mission clock (03TR's "
 			"0x40 overlay bursts every 1792 ticks) is not counted over different lengths" },
+	{ "window.tag_stream_anchor", MaskKind::Field, '*', 0, "stream count span", 0,
+			"a stream starts at the joiner's own join or deploy, which lands at a different "
+			"offset from each run's first packet (the joiner's load: x1 kick RR joined 34.6 s "
+			"after its hello, RO 24.2 s), and some run on a cycle of uneven density (the "
+			"per-slot overlay visit, one every 14 ticks over 128 visit indices, of which 29 "
+			"carry an S2C 0x40 entry on TDH_I3A: Server_UpdateAllActivePlayerSlots "
+			"@0x5188CB..0x518906): a count over the common window cuts the same stream at "
+			"different points, so a stream of 20 or more counts from its own first occurrence "
+			"over the pair's shorter span from it" },
+	{ "length.S.0x40.burst_tail", MaskKind::Field, 'S', 0x040, "multi-entry 0x40 length", 0,
+			"the overlay visit queues 6-byte entries in a 16-entry ring flushed first when full "
+			"(Server_QueueOverlayStateEntry @0x50FEC8) and sent as [count][entries] "
+			"(Server_SendPendingOverlayState @0x50FE94); a join's or a deploy's visit stages "
+			"every pool-2 entry plus that visit's own pool-1 entry when its row is populated, "
+			"a phase draw (the visit index at that tick), so the burst's last 0x40 carries one "
+			"entry more or less: a multi-entry 0x40 length one entry (6 bytes) from a length "
+			"the other run holds is that tail; a one-entry visit's length stays exact" },
 	{ "window.rotation_load_gap", MaskKind::Field, 'B', 0, "E2 mission change", 0,
 			"a host whose rotation plays its next mission inside the steady window (E2) "
 			"pauses gameplay from the round end to the next mission: the round end sends "

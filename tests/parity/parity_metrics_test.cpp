@@ -867,6 +867,51 @@ void test_tag_window() {
 	}
 }
 
+// A stream that starts at the joiner's own join (the per-slot overlay visit's
+// S2C 0x40) counts from its first occurrence over the pair's shorter span from it
+// (window.tag_stream_anchor): x1's kick RR joined 34.6 s after its hello and RO
+// 24.2 s, and the same stream counted over the common window read 59 against 88.
+// A multi-entry 0x40 one entry (6 bytes) from the other run's length is a burst's
+// tail, which the visit's own pool-1 entry lengthens or not (length.S.0x40.burst_tail).
+void test_stream_anchor_and_burst_tail() {
+	auto stream = [](wire::ParityTrace &trace, uint64_t from, uint64_t step,
+						  std::vector<size_t> lengths = { 7 }) {
+		const wire::ParityEvent model = trace.events.back();
+		size_t i = 0;
+		for (uint64_t ts = from; ts <= 22 * kSec; ts += step, ++i) {
+			wire::ParityEvent e = model;
+			e.dir = 'S';
+			e.full_tag = 0x040;
+			e.ts_ns = ts;
+			e.body.assign(lengths[i % lengths.size()], uint8_t(i));
+			e.length = e.body.size();
+			trace.events.push_back(e);
+		}
+	};
+	{
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), early = scripted(3), fast = scripted(3);
+		stream(rr, 6 * kSec, 300 * kMs);
+		stream(aa, 6 * kSec, 300 * kMs);
+		stream(early, 2 * kSec, 300 * kMs); // the same stream from an earlier join
+		stream(fast, 2 * kSec, 150 * kMs);
+		expect_row(judge_case(rr, aa, early), 'S', "tag_count", "0x40:0", "pass");
+		expect_row(judge_case(rr, aa, fast), 'S', "tag_count", "0x40:0", "fail", "COUNT_MISMATCH");
+	}
+	{
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), tail = scripted(3), off = scripted(3),
+						  extra = scripted(3);
+		stream(rr, 6 * kSec, 300 * kMs, { 97, 79, 7, 7, 7 });
+		stream(aa, 6 * kSec, 300 * kMs, { 97, 79, 7, 7, 7 });
+		stream(tail, 6 * kSec, 300 * kMs, { 97, 73, 7, 7, 7 });
+		stream(off, 6 * kSec, 300 * kMs, { 97, 67, 7, 7, 7 });
+		stream(extra, 6 * kSec, 300 * kMs, { 97, 79, 7, 97, 73, 7 });
+		expect_row(judge_case(rr, aa, tail), 'S', "length_set", "0x40:0", "pass");
+		expect_row(judge_case(rr, aa, extra), 'S', "length_set", "0x40:0", "pass");
+		expect_row(judge_case(rr, aa, off), 'S', "length_set", "0x40:0", "fail",
+				"LENGTH_SET_MISMATCH");
+	}
+}
+
 // A message spliced into a scripted trace at `at`, in the datagram of the event before it
 // (the trace keeps capture order).
 void splice(wire::ParityTrace &trace, char dir, uint16_t identity, uint64_t at,
@@ -2085,6 +2130,7 @@ int main() {
 	test_cadence_counts();
 	test_pool_live_pose();
 	test_tag_window();
+	test_stream_anchor_and_burst_tail();
 	test_rotation_load_gap();
 	test_dead_joiner_uplink();
 	test_timestamps();
