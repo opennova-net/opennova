@@ -5297,6 +5297,12 @@ add_executable(npruntime_session_title_test npruntime/session_title_test.cpp)
 target_link_libraries(npruntime_session_title_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_session_title_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_session_title COMMAND npruntime_session_title_test)
+# D-NET-NEW-L8-20: the S2C 0x02 probe's words and padding, and the process's file-transfer session
+# id every authority mission start steps.
+add_executable(npruntime_join_probe_words_test npruntime/join_probe_words_test.cpp)
+target_link_libraries(npruntime_join_probe_words_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_join_probe_words_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_join_probe_words COMMAND npruntime_join_probe_words_test)
 
 # --- parity lane L9 (NovaWorld) ---
 add_executable(npruntime_listing_baffle_key_test npruntime/listing_baffle_key_test.cpp)

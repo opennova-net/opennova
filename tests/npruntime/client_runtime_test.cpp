@@ -2331,9 +2331,14 @@ bool run_roundtrip() {
 					}
 					if (message.tag == 0x02) {
 						saw_join_02 = true;
+						// The echo keeps the probe's second word, the host's file-transfer
+						// session id: 0 on this context, which no mission start stepped
+						// (D-NET-NEW-L8-20) [orig: NetPacket_BuildPaddedTimestampPayload
+						// @0x502A76; NapiNPClientMsg_HandleJoinResponse @0x42E119].
 						join_02_shape_ok = message.payload.size() == 256 &&
-							message.payload[4] == 0x02 && message.payload[5] == 0 &&
-							message.payload[6] == 0 && message.payload[7] == 0;
+							message.payload[4] == static_cast<uint8_t>(ctx.file_transfer_session_id) &&
+							message.payload[5] == 0 && message.payload[6] == 0 &&
+							message.payload[7] == 0;
 					}
 					if (!client.world_ready() &&
 					    (message.tag == 0x0A || message.tag == 0x2F ||

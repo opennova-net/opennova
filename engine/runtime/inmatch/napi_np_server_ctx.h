@@ -255,6 +255,10 @@ struct NapiNPServerCtx {
 	// [orig: g_GameServerBaffleKey @0xC8FC70 - its one writer @0x51CB88, its one reader
 	//  Lobby_UpdateServerInfo @0x4FF1CC]
 	uint32_t game_server_baffle_key = 0;
+	// g_FileTransferSessionId as this mission's start stepped it (ClientProcessState): the S2C
+	// 0x02 probe's second word. [orig: Game_StartMission @0x5244B4; CNetPlayer_SendFileTransferChunk
+	//  @0x4C9468]
+	uint32_t file_transfer_session_id = 0;
 	// The server-info update a toggle runs at once (Lobby_UpdateServerInfo(0)): a NovaWorld
 	// embedder installs it while its session hosts the match; empty, nothing runs, as retail's
 	// update returns outside a NovaWorld session. [orig: Server_ToggleJoinLock @0x50D762;

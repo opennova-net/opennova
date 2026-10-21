@@ -596,7 +596,7 @@ bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 			// [orig: @0x4D1C11 SetGameState(6), @0x4D1C19 SendFileTransferChunk(0)]
 			if (conn.admission_stage == GameAdmissionStage::AwaitPlayEnter &&
 					conn.link.transport != nullptr) {
-				ProtocolMessage probe = admission_padding_probe(conn, now_tick);
+				ProtocolMessage probe = admission_padding_probe(conn, &ctx);
 				conn.link.transport->host_send(probe.tag, std::move(probe.payload), probe.reliable,
 						probe.flags.raw, probe.capacity_exempt, probe.retention_flushes);
 			}

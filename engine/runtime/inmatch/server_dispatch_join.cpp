@@ -139,14 +139,35 @@ std::string context_session_title(const NapiNPServerCtx *ctx, const GameConfig &
 // §5.1 reply bodies — handshake + server-info + mission-metadata.
 // ---------------------------------------------------------------------------
 
-// tag=0x02 server push. [orig: NapiNPClientMsg_HandleJoinResponse @0x42E0F0 reads 12 B; D-NET-127 carried 512.]
-std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
-	std::vector<uint8_t> payload(512, 0);
-	io::write_u32_le(payload.data(), now_tick);
-	payload[4] = 0x02;
-	payload[8] = 0x00;
-	payload[9] = 0x01;
+// tag=0x02, the join's padding probe: a file-transfer chunk of 512 bytes whose three words are
+// the host's GetTickCount, g_FileTransferSessionId and the padding length 0x100 the client
+// echoes, then `rand() >> 3` bytes from the process's CRT stream to the size. The client reads
+// the three words (NapiNPClientMsg_HandleJoinResponse @0x42E0F0).
+// [orig: CNetPlayer_SendFileTransferChunk @0x4C9440 - the id @0x4C9468, the size 0x200
+//  @0x4C946E, the extra word 0x100 @0x4C9459 -> NetPacket_BuildPaddedTimestampPayload @0x502A40
+//  - GetTickCount @0x502A4E into +0 @0x502A5F, the id into +4 @0x502A76, the extra word into +8
+//  @0x502A82, the padding loop @0x502A93..0x502AAF (`rand() >> 3` @0x502A9D, its low byte
+//  stored @0x502AAB)]
+std::vector<uint8_t> build_tag02_push(uint32_t tick_count_ms, uint32_t file_transfer_session_id,
+		io::CrtRand &crt) {
+	constexpr size_t kProbeBytes = 0x200;
+	constexpr uint32_t kPaddingLength = 0x100;
+	std::vector<uint8_t> payload(kProbeBytes, 0);
+	io::write_u32_le(payload.data(), tick_count_ms);
+	io::write_u32_le(payload.data() + 4, file_transfer_session_id);
+	io::write_u32_le(payload.data() + 8, kPaddingLength);
+	for (size_t i = 12; i < kProbeBytes; ++i) payload[i] = static_cast<uint8_t>(crt.next() >> 3);
 	return payload;
+}
+
+// The probe over the host context: our GetTickCount (the start's stamp plus the run's
+// milliseconds), this mission start's file-transfer session id and the world's CRT stream (the
+// one the session's draws share). With no context: zero words over a fresh stream.
+std::vector<uint8_t> context_tag02_push(NapiNPServerCtx *ctx) {
+	io::CrtRand fresh;
+	if (ctx == nullptr) return build_tag02_push(0, 0, fresh);
+	return build_tag02_push(ctx->np_protocol.host_start_tick + ctx->np_protocol.host_run_duration_ms,
+			ctx->file_transfer_session_id, ctx->world != nullptr ? ctx->world->crt_rand : fresh);
 }
 
 // tag=0x7A: the recipient's own PCID (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
@@ -472,8 +493,8 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 }
 
 // See header.
-ProtocolMessage admission_padding_probe(NapiNPConnection &conn, uint32_t now_tick) {
-	std::vector<uint8_t> challenge = build_tag02_push(now_tick);
+ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx *ctx) {
+	std::vector<uint8_t> challenge = context_tag02_push(ctx);
 	conn.admission_padding_x = io::read_u32_le(challenge.data());
 	conn.admission_padding_y = io::read_u32_le(challenge.data() + 4);
 	conn.admission_stage = GameAdmissionStage::AwaitPaddingEcho;
@@ -550,7 +571,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				conn.admission_stage = GameAdmissionStage::AwaitPlayEnter;
 				return replies;
 			}
-			replies.push_back(admission_padding_probe(conn, now_tick));
+			replies.push_back(admission_padding_probe(conn, inputs.server_ctx));
 			return replies;
 		}
 
@@ -590,11 +611,11 @@ void dispatch_join(NapiNPConnection &conn, const ProtocolMessage &msg,
 }
 
 // See header. [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0]
-void dispatch_join_form_post(uint32_t now_tick, std::vector<ProtocolMessage> &replies) {
+void dispatch_join_form_post(NapiNPServerCtx *ctx, std::vector<ProtocolMessage> &replies) {
 	// Golden round-trip (f131-134): C 0x01 -> S 0x02 push -> C 0x02 -> S post-handshake
 	// burst. The retail client's join-FSM verification (state 6->7, 0x424740) needs this
 	// SEQUENCED exchange — a collapsed all-at-once burst leaves it stuck at "Verifying".
-	replies.push_back(make_protocol_message(s2c::JOIN_PADDING_PROBE, build_tag02_push(now_tick)));
+	replies.push_back(make_protocol_message(s2c::JOIN_PADDING_PROBE, context_tag02_push(ctx)));
 }
 
 // See header.

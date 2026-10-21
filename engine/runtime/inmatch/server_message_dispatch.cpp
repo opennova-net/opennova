@@ -621,7 +621,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			case c2s::JOIN_FORM_POST: // handshake push -> S2C 0x02 GLB_JOIN push [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0]
-				dispatch_join_form_post(now_tick, replies);
+				dispatch_join_form_post(inputs.server_ctx, replies);
 				break;
 			case c2s::JOIN_PADDING_ECHO: // duplicate GLB_JOIN reply after admission
 				dispatch_join_padding_echo(config, conn, now_tick, inputs, replies);
