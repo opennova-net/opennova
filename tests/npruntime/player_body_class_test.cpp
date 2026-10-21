@@ -530,9 +530,9 @@ void test_a_round_hit_runs_the_callbacks_tails() {
 	CHECK(lethal.motor_anim_pending == 0);
 	CHECK(lethal.shake > 0); // the plyr callback leaves the bit clear: the feedback arms
 	const RoundHitOutcome corpse = fire_one_round(kOrg, 100, /*dead=*/true, false);
-	if (corpse.struck) CHECK(corpse.death_anim_state != 0x1234); // the org select, dead or not
+	CHECK(corpse.struck && corpse.death_anim_state != 0x1234); // the org select, dead or not
 	const RoundHitOutcome plyr_corpse = fire_one_round(kPlyr, 100, /*dead=*/true, false);
-	if (plyr_corpse.struck) CHECK(plyr_corpse.death_anim_state == 0x1234); // the dead return
+	CHECK(plyr_corpse.struck && plyr_corpse.death_anim_state == 0x1234); // the dead return
 	const RoundHitOutcome barrel = fire_one_round(kBrrl, dealt, false, /*local=*/true);
 	CHECK(barrel.struck);
 	CHECK(barrel.shake == 0); // the dying arm's bit, read after the callback

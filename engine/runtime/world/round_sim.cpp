@@ -1477,10 +1477,10 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                 ((target->flags | target->engine_flags) & kEntityFlagDead) == 0;
             const PlayerBodyClass row_class =
                 person_hit_row_class(world, *target, damage_target_is_person);
-            // The local player's damage feedback (vignette, shake, blip): a hit past the 5-point
-            // floor, after the class callback, whose dead bit it re-reads, ahead of the kill routing
-            // [orig: Projectile_ProcessDamageOnTarget - @0x4E81FF..0x4E820E, the test @0x4E8213,
-            //  @0x4E8219..0x4E8224, Player_OnDamageReceived @0x4DD880 (the call @0x4E822B)].
+            // The local player's damage feedback (vignette, shake, blip) past the 5-point floor,
+            // after the event-1 callback, whose dead bit it re-reads (retail scores before both)
+            // [orig: Projectile_ProcessDamageOnTarget - the score @0x4E8133, @0x4E81FF..0x4E820E,
+            //  @0x4E8213, @0x4E8219..0x4E8224, Player_OnDamageReceived @0x4DD880 (@0x4E822B)].
             const auto local_damage_feedback = [&]() {
                 const Entity *victim = world.registry.get(damage_entity);
                 if (victim == nullptr || ((victim->flags | victim->engine_flags) & kEntityFlagDead) ||

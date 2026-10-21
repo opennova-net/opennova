@@ -736,7 +736,7 @@ void run_single_player_class_is_the_missions_type() {
 		role.init_local_player_at_mission_start();
 		const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
 		CHECK(body != nullptr);
-		if (body != nullptr) CHECK(body->team != 1 || body->player_class == c.cls);
+		if (body != nullptr) CHECK(body->team == 1 && body->player_class == c.cls);
 	}
 }
 
@@ -787,7 +787,7 @@ void run_single_player_restart_keeps_the_class_word() {
 		role.init_local_player_at_mission_start();
 		const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
 		CHECK(body != nullptr);
-		if (body != nullptr) CHECK(body->team != 1 || body->player_class == 2);
+		if (body != nullptr) CHECK(body->team == 1 && body->player_class == 2);
 	}
 }
 

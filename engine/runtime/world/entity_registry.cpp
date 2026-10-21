@@ -107,9 +107,10 @@ void EntityRegistry::despawn(EntityHandle h) {
     // The slot keeps its bytes where retail zeroes the struct [orig: Entity_Destroy @0x43E810 -
     // memset(entity, 0, 0x2B4) @0x43EA70]: a caller that reads on after its callee destroyed
     // the body (a device-row player body's own think inside its callback, then the blast's
-    // Health test, the think's decrement, the breath timer's and kill_ssn's tails) reads the
-    // stale row in ours, the zeroed struct in retail. PERMANENT, a retail use-after-destroy
-    // only authored data reaches (D-NET-348, the maintainer, 2026-10-21, via main, Q7-34 (a)).
+    // and the knife's Health tests, the think's decrement, the breath timer's and kill_ssn's
+    // tails) reads the stale row in ours, the zeroed struct in retail. PERMANENT, a retail
+    // use-after-destroy only authored data reaches (D-NET-348, the maintainer, 2026-10-21,
+    // via main, Q7-34 (a)).
 }
 
 void EntityRegistry::clear_destroyed(EntityHandle h) {

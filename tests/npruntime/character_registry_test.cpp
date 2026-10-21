@@ -294,7 +294,7 @@ int main() {
 	// else packs the side's default; over an empty table both are 0.
 	// [orig: PlayerSession_InitFromProfile @0x50CA80 - CAvatarDefs_HasPackedId @0x50CAC4, the
 	//  side-0 pack @0x50CADA; @0x50CAF1, the side-1 pack @0x50CB08; CAvatarDefs_HasPackedId
-	//  @0x57B140 -> CAvatarDefs_FindComboByPackedId @0x57B15A]
+	//  @0x57B140 (the call @0x57B14F) -> CAvatarDefs_FindComboByPackedId]
 	{
 		auto ctx = std::make_unique<NapiNPServerCtx>();
 		ctx->characters = registry;

@@ -36,7 +36,7 @@ struct JoinSideSelection {
 	// avatar table resolves (-1: the selection names its tree indices instead). The
 	// session apply copies it raw into g_CharIdTeams and the join's CI0 / CI1 carry it
 	// as it is [orig: Game_ApplySessionSettingsToGlobals @0x551500 - the reads
-	// @0x551F7A / @0x551F8C, the stores @0x551FA4 / @0x551FB1; UI_JoinSelectedSession
+	// @0x551F85 / @0x551F8C, the stores @0x551FA4 / @0x551FB1; UI_JoinSelectedSession
 	// @0x5699D0 - @0x569C06..0x569C14 / @0x569C0D..0x569C31].
 	int character_id = -1;
 	int nationality_index = -1;
