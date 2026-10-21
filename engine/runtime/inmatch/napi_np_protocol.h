@@ -173,6 +173,12 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 // client (a dedicated host) and a second call do nothing. (D-NET-NEW-L8-21)
 void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain);
 
+// The pending walk of a pump that drains the own client's goodbye held for `drain`: the own
+// pair's twin is torn down (its /INOUT SERVER line, the host player's removal, the leave records
+// to the others) and our one own node leaves the list. False when no goodbye is held for it.
+// [orig: NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793] (D-NET-NEW-L8-21)
+bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain);
+
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while
 // handle_server_datagram drains; only here, after later datagrams could have closed the gap, does
 // the host emit one 0x84 per connection whose ordered queue is still nonempty. This is the

@@ -4,7 +4,11 @@
 // loopback. The admin's GOTO MENUSTATE runs after the frame's exit test, so the next tick's
 // receive pump takes the goodbye: the server-side twin is set pending and destroyed in that
 // pump's connection walk, its /INOUT SERVER line, then the host player's removal (the leave line,
-// the body's S2C 0x12 and the 0x46 removal to the others, no 0x5D; the body gone). An exit from the frame's input pass waits
+// the body's S2C 0x12 and the 0x46 removal to the others, no 0x5D; the body gone). An exit from
+// the frame's input pass waits for the mission teardown's pump (path B): after the pools' destroy,
+// that pump's pending walk takes the held goodbye and removes the host's player over the
+// destroyed bodies (the leave line, the body's 0x12 by its handle, the 0x46), and the /PROFILE
+// marker it writes reaches nothing, the log closed ahead of the pump. An exit from the frame's input pass waits
 // for the mission teardown's pump (held here). A dedicated host has no own client: nothing.
 // Single player is the same mode-3 session with no wire (ours: the in-process listen server, the
 // socketless host role of the SinglePlayer kind): the admin's exit runs the host player's
@@ -19,6 +23,9 @@
 //  @0x623CE0 (role 2 @0x624005, the latch @0x6240A8..0x6240BA, RequestDisconnect @0x6240C4);
 //  NapiNPProtocol_Pump @0x62A650 (the pending walk @0x62A6FD..0x62A793);
 //  Server_HandlePlayerDisconnect @0x51B5C0 (the /PROFILE marker's call @0x51B822);
+//  CServerLog_WriteDisconnectMarker @0x4E1C50 (the file test @0x4E1C53..0x4E1C57);
+//  Game_TeardownMission @0x522350 (Entity_Destroy over pools 0..2 @0x52236F..0x5223C0, the
+//  log's close @0x5223F0, the pump @0x522588);
 //  Game_ProcessMainFrame @0x5263F0 (the head receive @0x526528, the admin pump @0x5268F1);
 //  Server_PumpNetworkTransport @0x4FD960 (`cmp is_in_session` @0x4FD969, jz @0x4FD970), the
 //  teardown's call @0x522588; SinglePlayer_StartMission @0x561AF0 (network type 0 @0x561BD4,
@@ -35,6 +42,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/remote_admin.h>
 #include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_files.h>
@@ -237,6 +245,52 @@ void test_input_exit_holds_the_twin() {
 	CHECK(host->to_remote().empty());
 }
 
+// Path B: an exit from the input pass, then the teardown: the pools go, the /PROFILE log closes,
+// and the teardown pump's pending walk takes the held goodbye; the remote hears the host
+// player's leave line, its body's 0x12 (the destroyed body's handle) and the slot's 0x46; no
+// device sweep and no marker reach anything.
+void test_input_exit_leaves_at_the_teardown_pump() {
+	auto host = std::make_unique<ListenHost>(true);
+	inmatch::ServerLogRecorder profile(host->files, "host");
+	CHECK(profile.open("mission.bms"));
+	host->ctx.logs.profile = &profile;
+	(void)host->inout_lines();
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &host->ctx;
+	inmatch::input_action_exit(binding, inmatch::ExitSite::Input);
+	(void)host->inout_lines();
+	// The teardown's head: the pools' destroy, then the log's close.
+	host->world.registry.despawn(host->host_body);
+	host->world.registry.despawn(host->remote_body);
+	profile.close();
+	// A receive pump's walk does not take it; the teardown pump's does, once.
+	CHECK(!inmatch::drain_own_goodbye(host->ctx, inmatch::OwnGoodbye::NextReceivePump));
+	CHECK(inmatch::drain_own_goodbye(host->ctx, inmatch::OwnGoodbye::TeardownPump));
+	CHECK(!inmatch::drain_own_goodbye(host->ctx, inmatch::OwnGoodbye::TeardownPump));
+	CHECK(host->own() == nullptr);
+	const std::vector<std::string> lines = host->inout_lines();
+	CHECK(lines.size() == 1 && lines[0] == kServerRemoved);
+	std::vector<uint8_t> order;
+	for (const ns::Datagram &d : host->to_remote()) {
+		if (d.tag == s2c::FORMATTED_GAME_TEXT || d.tag == 0x46 || d.tag == s2c::EMPTY_SLOT_SWEEP)
+			order.push_back(d.tag);
+		if (d.tag == s2c::ENTITY_REMOVE) {
+			EntityRemove gone;
+			size_t consumed = 0;
+			CHECK(decode_entity_remove(d.body.data(), d.body.size(), gone, consumed) &&
+					gone.entity_handle == host->host_body.packed);
+			order.push_back(d.tag);
+		}
+	}
+	CHECK(order == (std::vector<uint8_t>{s2c::FORMATTED_GAME_TEXT, s2c::ENTITY_REMOVE, 0x46}));
+	// The marker went to a closed log: the file holds no PREM.
+	const std::string &bytes = host->files.files["host.sph"];
+	const std::vector<uint8_t> file(bytes.begin(), bytes.end());
+	ServerLogDocument doc;
+	CHECK(decode_server_log(file.data(), file.size(), doc) && doc.events.empty());
+	host->ctx.logs.profile = nullptr;
+}
+
 // A dedicated host has no own client: the exit stores the reason and nothing else.
 void test_dedicated_host_exit() {
 	auto host = std::make_unique<ListenHost>(false);
@@ -306,6 +360,7 @@ void test_single_player_input_exit_leaves_the_record_only() {
 int main() {
 	test_admin_exit_removes_the_host_player_at_the_next_receive_pump();
 	test_input_exit_holds_the_twin();
+	test_input_exit_leaves_at_the_teardown_pump();
 	test_dedicated_host_exit();
 	test_single_player_admin_exit_is_path_a();
 	test_single_player_input_exit_leaves_the_record_only();

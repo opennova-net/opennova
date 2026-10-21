@@ -260,4 +260,16 @@ void continue_host_session(HostOwner &owner, const HostConfig &cfg);
 //  call @0x5262F8) only queue what they receive: no game handler runs in them]
 void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock);
 
+// The mission teardown's server pump on a session's authority (the caller tests retail's
+// is_in_session, the rules' mp_session): the load pump's receive and flush, with the protocol
+// pump's pending walk between them for the listen host's own client, whose goodbye an exit from
+// the frame's input pass held for this pump (OwnGoodbye::TeardownPump): the twin is torn down
+// and the host's player removed over the destroyed bodies, its leave records flushed here.
+// [orig: Game_TeardownMission @0x522350 - Server_PumpNetworkTransport called @0x522588, after
+//  Entity_Destroy over pools 0..2 @0x52236F..0x5223C0 and CServerLog_CloseAndFree @0x5223F0;
+//  Server_PumpNetworkTransport @0x4FD960 - the manager receive @0x4FD977, the server receive
+//  @0x4FD981, the send @0x4FD98B; NapiNPProtocol_Pump @0x62A650 - the pending walk
+//  @0x62A6FD..0x62A793] (D-NET-NEW-L8-21 path B)
+void host_session_teardown_pump(HostOwner &owner, opennova::IDatagramSocket &sock);
+
 } // namespace opennova::inmatch

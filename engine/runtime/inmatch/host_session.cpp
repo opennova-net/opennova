@@ -473,6 +473,14 @@ void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock) {
 	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/false);
 }
 
+void host_session_teardown_pump(HostOwner &owner, opennova::IDatagramSocket &sock) {
+	if (owner.ctx.is_authority == 0) return;
+	receive_and_advance_boundaries(owner, sock, owner.now_tick, nullptr, nullptr);
+	// The own pair heads the protocol's list: its twin goes first in the pending walk.
+	(void)drain_own_goodbye(owner.ctx, OwnGoodbye::TeardownPump);
+	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/false);
+}
+
 // BuildOutgoingPackets over this connection's queue: the packets framed
 // before this build (they own the lower sequence numbers) leave first, then
 // every queued semantic record, split at the connection's ceiling. Returns

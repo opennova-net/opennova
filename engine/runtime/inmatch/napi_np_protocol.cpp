@@ -1460,6 +1460,15 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 } // namespace
 
+// See header.
+bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain) {
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type == NapiNPConnection::kTypeClientSide && conn.own_goodbye == drain)
+			return teardown_own_connection(ctx);
+	}
+	return false;
+}
+
 // See header. [orig: CNapiNetwork_DisconnectActiveConnection @0x4C9140 - the connected test
 //  @0x4C918F..0x4C919D, the record @0x4C91C3..0x4C921A (role 2 for the client side, DC 2, DP1 /
 //  DP2 0, DSTR the caller's, DPC 0, DDSTR ""), latched if none @0x4C922D..0x4C923E,

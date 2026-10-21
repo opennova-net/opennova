@@ -994,20 +994,32 @@ bool HostRole::session_lost(SessionError &error) const {
 //  CNapiNPConnection_Destroy @0x62a924 per connection, host_running cleared
 //  @0x62a95c) -> TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 void HostRole::close() {
-	// The /PROFILE log closes first, before the post-mission pass and the
-	// slot disconnects, so their markers never reach the file
-	// [orig: Game_TeardownMission @0x5223e2..0x5223f0 -> CServerLog_CloseAndFree].
-	if (state.host_owner.ctx.logs.profile != nullptr) state.host_owner.ctx.logs.profile->close();
-	// The teardown's head: pools 0..2 go, then the authority's one-shot
-	// PostMission sweep, both ahead of the per-slot 0x25 walk below
-	// [orig: Game_TeardownMission — EventTrigger_UpdateAllWithFlag4 call
-	//  @0x52266C precedes Server_DisconnectAndResetAllPlayerSlots @0x52269B].
-	// A map change's teardown already ran both on this kernel (map_change.h).
-	if (kernel_ != nullptr && !map_change.torn_down)
-		kernel_->run_post_mission_pass(/*is_authority=*/true);
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	// The teardown's head: pools 0..2 go [orig: Game_TeardownMission — Entity_Destroy over
+	// pools 0, 1 and 2 @0x52236F / @0x52239A / @0x5223C0]. A map change's teardown already
+	// ran it, its pump and its PostMission sweep on this kernel (map_change.h).
+	const bool tear_down = kernel_ != nullptr && !map_change.torn_down;
+	if (tear_down) kernel_->destroy_mission_pools();
+	// The /PROFILE log closes next, before the teardown's pump, the post-mission pass and the
+	// slot disconnects, so their markers never reach the file (a closed log's marker writes
+	// nothing: CServerLog_WriteDisconnectMarker @0x4E1C50 tests the file @0x4E1C53..0x4E1C57)
+	// [orig: Game_TeardownMission @0x5223e2..0x5223f0 -> CServerLog_CloseAndFree].
+	if (ctx.logs.profile != nullptr) ctx.logs.profile->close();
+	// The teardown's server pump, on a session's authority only (single player, out of a
+	// session, runs none, so an exit from its input pass leaves the latched record alone): a
+	// held own goodbye removes the host's player over the destroyed bodies, its leave records
+	// sent here (D-NET-NEW-L8-21 path B).
+	// [orig: Game_TeardownMission — Server_PumpNetworkTransport called @0x522588;
+	//  Server_PumpNetworkTransport @0x4FD960 — `cmp is_authority` @0x4FD960, `cmp
+	//  is_in_session` @0x4FD969, jz @0x4FD970]
+	if (tear_down && kernel_->world.rules.mp_session)
+		inmatch::host_session_teardown_pump(state.host_owner, socket);
+	// Then the authority's one-shot PostMission sweep over the destroyed pools, ahead of the
+	// per-slot 0x25 walk below [orig: Game_TeardownMission — EventTrigger_UpdateAllWithFlag4
+	// call @0x52266C precedes Server_DisconnectAndResetAllPlayerSlots @0x52269B].
+	if (tear_down) kernel_->run_post_mission_events(/*is_authority=*/true);
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide || conn.link.transport == nullptr)
 			continue;

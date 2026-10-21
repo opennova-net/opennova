@@ -304,6 +304,10 @@ public:
 	// destroyed pools. The session close runs it. The single-player restart
 	// does not: its sweep call finds the event list already freed.
 	void run_post_mission_pass(bool is_authority);
+	// Its two halves, for a session host's teardown, whose server pump runs between them: the
+	// pools' destroy, then (the authority's) PostMission sweep.
+	void destroy_mission_pools();
+	void run_post_mission_events(bool is_authority);
 	// --- the local player ----------------------------------------------------
 	// The by-name weapon install from the retained weapon.def rows. A
 	// same-name install is the MOUNT path unless `allow_same_weapon_rebake`

@@ -1063,6 +1063,11 @@ void MissionKernel::update_precipitation(int32_t cam_x, int32_t cam_y, int32_t c
 //  Mission_ResetBmsState (the mission reset), whose
 //  EventSystem_FreeAll call @0x40DBEF zeroes the count @0x453266]
 void MissionKernel::run_post_mission_pass(bool is_authority) {
+	destroy_mission_pools();
+	run_post_mission_events(is_authority);
+}
+
+void MissionKernel::destroy_mission_pools() {
 	for (int pool = 0; pool <= 2; ++pool) {
 		std::vector<w::EntityHandle> rows;
 		world.registry.for_each_in_pool(pool, [&](const w::Entity &row) {
@@ -1070,6 +1075,9 @@ void MissionKernel::run_post_mission_pass(bool is_authority) {
 		});
 		for (const w::EntityHandle row : rows) world.registry.despawn(row);
 	}
+}
+
+void MissionKernel::run_post_mission_events(bool is_authority) {
 	if (is_authority) events.run_post_mission_pass(world);
 }
 
