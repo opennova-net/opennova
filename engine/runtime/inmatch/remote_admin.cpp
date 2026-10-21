@@ -94,18 +94,19 @@ bool remote_admin_idle_frame_exits(const RemoteAdminIdleFrame &frame) {
 	return remote_admin_idle_scene(frame) == AdminScene::GameLoop && frame.mission_exit_reason != 0;
 }
 
+void RemoteAdminConsoles::session_destroyed() {
+	// [orig: CNapiGameSession_FullDestroy @0x4C96A0 (ebp zeroed @0x4C96ED, g_GameType = 0
+	//  @0x4C977A; g_MapFileName and g_SessionTitle untouched)]
+	process_mission_.game_type = 0;
+}
+
+void RemoteAdminConsoles::route_mission_exit(int32_t reason) {
+	// [orig: PostMenu_RouteMissionExit @0x568460 -> CNapiGameSession_FullDestroy @0x568683]
+	if (inmatch::route_mission_exit(reason, /*novaworld=*/false).destroys_session) session_destroyed();
+}
+
 void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::Seams seams) {
 	console_.reset();
-	// The session's end into the menus (a mission's exit, single player's included, or a failed
-	// join) destroys the session, which zeroes g_GameType; g_MapFileName and g_SessionTitle keep
-	// the last session's. A rotation's next mission skips the destroy.
-	// [orig: PostMenu_RouteMissionExit @0x568683 -> CNapiGameSession_FullDestroy @0x4C96A0
-	//  (ebp zeroed @0x4C96ED, g_GameType = 0 @0x4C977A); the failed join's
-	//  UI_JoinSelectedSession @0x569F06, MultiPlayer_JoinSessionStateMachine @0x56A3E3 / @0x56A5A0;
-	//  the rotation's PreMenu push @0x568632]
-	const bool had_session = bound_.host != nullptr || bound_.client != nullptr || bound_.world != nullptr;
-	const bool has_session = binding.host != nullptr || binding.client != nullptr || binding.world != nullptr;
-	if (had_session && !has_session) process_mission_.game_type = 0;
 	// Single player's console is the session-less one over its world; its mission start applied
 	// the block. [orig: SinglePlayer_StartMission @0x561C28 -> Game_ApplySessionSettingsToGlobals]
 	const bool single_player = binding.host == nullptr && binding.client == nullptr && binding.world != nullptr;
@@ -163,7 +164,7 @@ void RemoteAdminConsoles::refresh_process_mission() {
 		// g_SessionStatus from the joined session's S2C 0x58; g_EnvCurTimeFixed24 the joiner's
 		// world clock, which the S2C 0x0A sets and the weather tick advances.
 		// [orig: NapiNPClientMsg_SessionStatus @0x4228CA; NapiNPClientMsg_0x00A @0x4302AE;
-		//  Environment_UpdateWeatherTick @0x57E9B8]
+		//  Environment_UpdateWeatherTick @0x57E9B0 (the read @0x57E9B8)]
 		process_mission_.session_elapsed_ms = client->session_elapsed_ms();
 		if (bound_.world != nullptr) process_mission_.tod_fixed24 = bound_.world->weather.tod_fixed24;
 		// g_RulesFlags, the joined mission's S2C 0x64 word (the joiner's world keeps it), and

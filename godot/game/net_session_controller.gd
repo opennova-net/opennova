@@ -367,10 +367,14 @@ func _cancel_spectator_probe() -> void:
 
 
 # ABORT_CANCEL while the join enumerates: retail's state 9 destroys the session
-# and returns to the main menu (engine: inmatch/server_flags.h join_entry_step).
+# and returns to the main menu (engine: inmatch/server_flags.h join_entry_step);
+# the destroy zeroes the process game type the remote admin reads
+# (GameWorld.pre_game_cancelled).
 func _abort_spectator_preflight() -> void:
 	_cancel_spectator_probe()
 	_release_novaworld_client()
+	if _world != null:
+		_world.pre_game_cancelled()
 	if _menu_shell != null:
 		_menu_shell.show_menu()
 
@@ -415,9 +419,12 @@ func _commit_join_choice(game_password: String, spectate: bool, team_password: S
 	_start_lan_join(target)
 
 
+# The choice's BACK or Cancel: retail's state 9 as above.
 func _cancel_join_role_choice() -> void:
 	_join_choice_target = null
 	_release_novaworld_client()
+	if _world != null:
+		_world.pre_game_cancelled()
 	if _menu_shell != null:
 		_menu_shell.show_menu()
 

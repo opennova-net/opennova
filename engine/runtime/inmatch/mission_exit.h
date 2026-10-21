@@ -90,6 +90,14 @@ enum class PostMissionError : uint8_t {
 struct PostMissionRoute {
 	bool keep_session = false;
 	PostMissionError error = PostMissionError::None;
+	// The route destroys the session (CNapiGameSession_FullDestroy): every reason the reset and
+	// error arms do not take. Those arms only clear the network, connection and transport
+	// modes, so the session's process globals (g_GameType) outlive them.
+	// [orig: PostMenu_RouteMissionExit @0x568460 - the destroy @0x568683, reached from reason 1
+	//  @0x5684AB, the out-of-session and non-authority remainder @0x5685C2..0x5685D6 and the
+	//  authority's rotation end @0x56864F; reason 2's ResetActiveSession @0x56846F and the error
+	//  arms' loc_5686DA (@0x5686DA..0x5686F9) skip it]
+	bool destroys_session = false;
 };
 
 // The gameerr.bin key an error text resolves through (empty for None / DisconnectReason).
@@ -127,6 +135,7 @@ inline PostMissionRoute route_mission_exit(int32_t reason, bool novaworld) {
 		return route;
 	}
 	route.keep_session = novaworld;
+	route.destroys_session = true;
 	return route;
 }
 

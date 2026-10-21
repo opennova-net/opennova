@@ -343,8 +343,13 @@ Node *GameWorld::release_novaworld_client() {
 	return drive_.release_nw_client();
 }
 
-Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) const {
+Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) {
+	admin_consoles_.route_mission_exit(p_reason);
 	return drive_.post_mission_route(p_reason);
+}
+
+void GameWorld::pre_game_cancelled() {
+	admin_consoles_.session_destroyed();
 }
 
 int GameWorld::main_frame_exit(int p_reason) const {
@@ -973,6 +978,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restore_join_expansion", "root"), &GameWorld::restore_join_expansion);
 	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
 	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
+	ClassDB::bind_method(D_METHOD("pre_game_cancelled"), &GameWorld::pre_game_cancelled);
 	ClassDB::bind_method(D_METHOD("begin_map_change"), &GameWorld::begin_map_change);
 	ClassDB::bind_method(D_METHOD("load_next_mission", "bms_name"), &GameWorld::load_next_mission);
 	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &GameWorld::begin_joiner_reload);

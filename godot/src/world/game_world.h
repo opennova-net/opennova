@@ -300,8 +300,14 @@ public:
 	// otherwise it goes down with the world.
 	void adopt_novaworld_client(Node *p_client);
 	Node *release_novaworld_client();
-	// The post-mission route for an exit reason (SessionDrive::post_mission_route).
-	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
+	// The post-mission route for an exit reason (SessionDrive::post_mission_route): the
+	// shell's Post Menu router, called once where it routes the session's final exit to the
+	// menus, so its destroy arm also destroys the session's process globals (the remote
+	// admin's game type, inmatch::RemoteAdminConsoles::route_mission_exit).
+	Ref<PostMissionRoute> post_mission_route(int p_reason);
+	// The pre-game menu's cancel (its ABORT_CANCEL, the join choice's BACK): the join
+	// machine's cleanup destroys the session (RemoteAdminConsoles::session_destroyed).
+	void pre_game_cancelled();
 	// What the main frame does with a stored exit reason over the loaded sim's
 	// session facts (inmatch::main_frame_exit): a MAIN_FRAME_EXIT_* value.
 	int main_frame_exit(int p_reason) const;

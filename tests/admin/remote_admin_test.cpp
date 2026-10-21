@@ -278,10 +278,11 @@ std::vector<ProtocolMessage> joiner_sends(inmatch::ClientRuntime &client, const 
 //  310) @0x49A9B4; CAdminServer_HandleCmdCommand @0x404997 -> Client_ProcessConsoleCommand
 //  @0x520E80 (QueueReliableMessage(4, 1, 0) @0x520f29); CGameSession_SetConnectionMode
 //  @0x4C49F0 (mode 2); Input_HandleActionBinding case 3 @0x49AF26, @0x49AF38..0x49AF42 ->
-//  CNapiNetwork_DisconnectActiveConnection @0x4C9140 (role 2 for a client @0x4C91CF..0x4C91E8,
+//  CNapiNetwork_DisconnectActiveConnection @0x4C9140 (role 2 for a client @0x4C91D9..0x4C91E0,
 //  DC 2 @0x4C91EF, DP1 / DP2 0 @0x4C91F7 / @0x4C91FB, the tag @0x4C91FF, DPC 0 @0x4C9213, DDSTR
-//  "" @0x4C921A) -> CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the burst
-//  @0x625405..0x625424, recv_max_per_tick 4 for the JO template); CNapiGameSession_FullDestroy
+//  "" @0x4C921A) -> CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the client's state-5 arm: the
+//  clamp @0x62549E..0x6254B2, the burst @0x6254B4..0x6254D3, recv_max_per_tick 4 for the JO
+//  template, the leave callback @0x6254D5..0x6254E7); CNapiGameSession_FullDestroy
 //  @0x4C977A (g_GameType = 0); GameType_GetAbbreviation @0x5211B2 (STROVER29)]
 void test_joiner_console() {
 	const std::string client_scrk = "CLIENT-ADMIN-JOINER-SCRK";
@@ -431,7 +432,9 @@ void test_joiner_console() {
 	joiner->close();
 	expect(socket.sent.size() == 4, "the teardown's close sends nothing more");
 
-	// Back in the menus: the destroyed session zeroed g_GameType, the map file stays.
+	// Back in the menus through the Post Menu's reason-1 arm: the destroyed session zeroed
+	// g_GameType, the map file stays.
+	consoles.route_mission_exit(client.mission_exit_reason());
 	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
 	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
 	const std::string report = consoles.status_report();
@@ -441,6 +444,65 @@ void test_joiner_console() {
 	// [orig: Game_TeardownMission @0x5223FA]
 	expect(report.find("UP-TIME: 0 00:00:00\r\nCURRENT TOD: 3840\r\n") != std::string::npos,
 	       "back in the menus: no session clock, the last time of day");
+}
+
+// The session's end into the menus zeroes g_GameType only where the session is destroyed: the
+// Post Menu's destroy arm (reason 1, the session's own end, a rotation's end) and the pre-game
+// menu's cancel; its reset (2) and error arms (5, 6, 7, the mapped disconnects 9..19, the
+// NovaWorld session's end 12, 20) skip the destroy, so the menus keep printing the last
+// session's game type. A joiner kicked with a DPC 37 record leaves with exit reason 10.
+// [orig: PostMenu_RouteMissionExit @0x568460 - reason 2 @0x56846F..0x5684A7, the error arms
+//  @0x5684A8..0x5685BD -> loc_5686DA..0x568715, the destroy @0x568683 reached from @0x5684AB
+//  (reason 1), @0x5685C2..0x5685D6 and @0x56864F (the rotation's end);
+//  CNapiGameSession_FullDestroy @0x4C977A (g_GameType = 0); CNapiNetwork_OnDisconnectedFromServer
+//  @0x4C63D0 (DPC 36..45 -> reasons 9..18); PreMenu_OnAbortCancel @0x568CB4 (state 9) ->
+//  MultiPlayer_JoinSessionStateMachine @0x56A3E3; GameType_GetAbbreviation @0x5211B2]
+void test_session_destroy_routes() {
+	inmatch::RemoteAdminConsoles consoles;
+	gamecfg::GameCfg block = gamecfg::defaults();
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &block;
+	seams.game_text = [](std::string_view section, std::string_view key) -> std::string {
+		if (section == "Overlays" && key == "STROVER64") return "Team Deathmatch";
+		if (section == "Overlays" && key == "STROVER29") return "Game Type Zero";
+		return {};
+	};
+	const std::string kept = "CURRENT GAME TYPE: Team Deathmatch\r\n";
+	const std::string zero = "CURRENT GAME TYPE: Game Type Zero\r\n";
+	uint64_t now = 1000;
+	uint64_t session = 0;
+	// A joiner in a Team Deathmatch session, then its exit's route into the menus.
+	auto menus_after = [&](int32_t reason) {
+		inmatch::ClientRuntime client("RouteJoiner", [&now] { return now; });
+		client.seed_session(0x41444D4Eu, 1u, "CLIENT-ROUTE-SCRK", "SERVER-ROUTE-SCRK", 1, 0, 0x0002,
+		                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
+		                    /*replay_mode=*/false);
+		inmatch::RemoteAdminBinding joined;
+		joined.client = &client;
+		joined.session = ++session;
+		consoles.bind(joined, seams);
+		consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
+		expect(consoles.status_report().find(kept) != std::string::npos, "the joined session's game type");
+		consoles.route_mission_exit(reason);
+		consoles.bind(inmatch::RemoteAdminBinding{}, seams);
+		consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
+		return consoles.status_report();
+	};
+	const int32_t kicked = inmatch::mission_exit_reason_for_disconnect(
+			make_disconnect_event(1, 2, 0, 0, "", 37, ""));
+	expect(kicked == 10, "a DPC 37 record maps to exit reason 10");
+	expect(menus_after(kicked).find(kept) != std::string::npos,
+	       "reason 10: the error arm keeps the last session's game type");
+	expect(menus_after(inmatch::kMissionExitQuit).find(zero) != std::string::npos,
+	       "reason 1: the destroy zeroes it");
+	for (const int32_t reason : {2, 5, 6, 7, 9, 12, 19, 20})
+		expect(menus_after(reason).find(kept) != std::string::npos, "the reset and error arms keep it");
+	for (const int32_t reason : {3, 4})
+		expect(menus_after(reason).find(zero) != std::string::npos, "the rotation's end and the rest destroy");
+	// A kept game type, then the pre-game menu's cancel of the next join: its cleanup destroys.
+	expect(menus_after(kicked).find(kept) != std::string::npos, "kept again");
+	consoles.session_destroyed();
+	expect(consoles.status_report().find(zero) != std::string::npos, "the pre-game cancel zeroes it");
 }
 
 // A listen host's console is a peer over its host context: CMD leaves through its own client
@@ -493,7 +555,7 @@ void test_listen_host_and_single_player() {
 // reads the stored reason ahead of the pump, so a reason stored by the last pump leaves the
 // mission on the next frame, which pumps nothing; with no reason it pumps. No other idle frame
 // runs the router. [orig: Game_ProcessMainFrame @0x5267F8, @0x52685E..0x526867, ahead of
-//  CAdminServer_ProcessFrame @0x5268F1]
+//  the pump @0x5268F1 (CAdminServer_ProcessFrame @0x406F50)]
 void test_idle_frame_exit() {
 	using inmatch::RemoteAdminIdleFrame;
 	using inmatch::State;
@@ -518,6 +580,7 @@ int main() {
 	test_consoles();
 	test_idle_scene();
 	test_joiner_console();
+	test_session_destroy_routes();
 	test_listen_host_and_single_player();
 	test_idle_frame_exit();
 	if (g_failures != 0) {

@@ -99,7 +99,7 @@ std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &fr
 // pump. The embedder routes the exit as a tick's terminal outcome does, with no tick run.
 // [orig: Game_ProcessMainFrame @0x5267F8 (the g_MissionExitReason read), the router
 //  @0x526803..0x526878 (a nonzero reason's Post Menu push @0x526867 and return), ahead of
-//  CAdminServer_ProcessFrame @0x5268F1]
+//  the pump @0x5268F1 (CAdminServer_ProcessFrame @0x406F50)]
 bool remote_admin_idle_frame_exits(const RemoteAdminIdleFrame &frame);
 
 // What the process's console runs over: the running session's host context (a listen or Serve
@@ -170,12 +170,31 @@ public:
 	// The process's mission globals as the status report last read them.
 	const AdminProcessMission &process_mission() const { return process_mission_; }
 
+	// The session's destroy: g_GameType goes to 0; g_MapFileName and g_SessionTitle keep the
+	// last session's. Retail destroys it on the Post Menu's destroy arm (route_mission_exit) and
+	// on every pre-game exit to the MainMenu (the join or host machine's cancel and failures);
+	// a rotation's next mission and the Post Menu's reset and error arms keep it.
+	// [orig: CNapiGameSession_FullDestroy @0x4C96A0, its four callers PostMenu_RouteMissionExit
+	//  @0x568683, UI_JoinSelectedSession @0x569F06, MultiPlayer_JoinSessionStateMachine @0x56A3E3
+	//  (state 9, which PreMenu_OnAbortCancel @0x568CB4 and UI_PreGameMenuStateMachine's default
+	//  arm @0x568B61 set) and @0x56A5A0; the rotation's PreMenu push @0x568632]
+	void session_destroyed();
+	// The Post Menu's router over the session's final exit reason, where the embedder routes it
+	// to the menus: its destroy arm (inmatch::route_mission_exit's destroys_session) destroys the
+	// session; the reset (2) and the error arms (5, 6, 7, 9..19, 20) keep g_GameType, so the
+	// menus still print the last session's game type after a mapped disconnect, a NovaWorld
+	// session's end or a CD / system / bad-mission exit.
+	// [orig: PostMenu_RouteMissionExit @0x568460 (the error arms @0x5684A8..0x5685BD ->
+	//  loc_5686DA..0x568715 skip CNapiGameSession_FullDestroy @0x568683)]
+	void route_mission_exit(int32_t reason);
+
 	// The bound session's mission into the process words, before each line runs and on every
 	// frame the embedder pumps: a host context's session title, mission file and game type; a
 	// joiner's own mission start's session title over its connection's g_MapFileName, and its
 	// g_GameType; the session clock, the time of day and GET GAMESETTINGS' live words; and the
 	// session's settings globals into the menus' context. With no session (the menus) they keep
-	// the last session's (the session's end zeroed the game type, bind; the teardown the clock).
+	// the last session's (a destroy zeroed the game type, session_destroyed; the teardown the
+	// clock).
 	void refresh_process_mission();
 
 private:
