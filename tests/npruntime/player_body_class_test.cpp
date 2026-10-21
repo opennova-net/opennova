@@ -425,6 +425,7 @@ struct RoundHitOutcome {
 	int32_t motor_anim_state = -1;
 	int motor_anim_pending = -1;
 	int32_t shake = 0;
+	int32_t health_after = 0;
 };
 RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, bool local) {
 	RoundHitOutcome out;
@@ -452,6 +453,7 @@ RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, 
 	body->health = health;
 	body->death_anim_state = 0x1234; // a clip no select produces
 	if (dead) body->flags |= w::kEntityFlagDead;
+	if (w::AiEntity *motor = r.world->ai.for_handle(victim)) motor->inf.anim_state = 0x777;
 	if (local) r.world->cached.local_player = victim;
 	w::AmmoTableEntry ammo;
 	ammo.name = "ZONE";
@@ -490,6 +492,7 @@ RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, 
 	const w::Entity *hit = r.world->registry.get(victim);
 	if (hit == nullptr) return out;
 	out.death_anim_state = hit->death_anim_state;
+	out.health_after = hit->health;
 	if (const w::AiEntity *motor = r.world->ai.for_handle(victim)) {
 		out.motor_anim_state = motor->inf.anim_state;
 		out.motor_anim_pending = motor->inf.anim_pending;
@@ -508,20 +511,26 @@ RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, 
 //  @0x4E820E, `test byte [esi+24h], 2` @0x4E8213, Player_OnDamageReceived @0x4E822B;
 //  Entity_HandleDeathOnAuthority @0x407CC0 - `or [esi+24h], 2` @0x407D34]
 void test_a_round_hit_runs_the_callbacks_tails() {
-	const RoundHitOutcome lethal = fire_one_round(kPlyr, 10, /*dead=*/false, /*local=*/true);
+	// The round's damage, read off a body it leaves alive (Health > 0: no tail, the motor's
+	// request stands); each lethal case below starts at exactly that health.
+	const RoundHitOutcome alive = fire_one_round(kPlyr, 5000, /*dead=*/false, /*local=*/true);
+	CHECK(alive.struck);
+	CHECK(alive.motor_anim_state == 0x777);
+	CHECK(alive.shake > 0 || 5000 - alive.health_after <= 5);
+	const int32_t dealt = 5000 - alive.health_after;
+	CHECK(dealt > 5);
+	const RoundHitOutcome lethal = fire_one_round(kPlyr, dealt, false, /*local=*/true);
 	CHECK(lethal.struck);
+	CHECK(lethal.health_after <= 0);
 	CHECK(lethal.death_anim_state != 0x1234);
 	CHECK(lethal.motor_anim_state == lethal.death_anim_state);
 	CHECK(lethal.motor_anim_pending == 0);
 	CHECK(lethal.shake > 0); // the plyr callback leaves the bit clear: the feedback arms
-	const RoundHitOutcome alive = fire_one_round(kPlyr, 5000, false, false);
-	CHECK(alive.struck);
-	CHECK(alive.motor_anim_state != alive.death_anim_state); // Health > 0: no tail
 	const RoundHitOutcome corpse = fire_one_round(kOrg, 100, /*dead=*/true, false);
 	if (corpse.struck) CHECK(corpse.death_anim_state != 0x1234); // the org select, dead or not
 	const RoundHitOutcome plyr_corpse = fire_one_round(kPlyr, 100, /*dead=*/true, false);
 	if (plyr_corpse.struck) CHECK(plyr_corpse.death_anim_state == 0x1234); // the dead return
-	const RoundHitOutcome barrel = fire_one_round(kBrrl, 10, false, /*local=*/true);
+	const RoundHitOutcome barrel = fire_one_round(kBrrl, dealt, false, /*local=*/true);
 	CHECK(barrel.struck);
 	CHECK(barrel.shake == 0); // the dying arm's bit, read after the callback
 }
