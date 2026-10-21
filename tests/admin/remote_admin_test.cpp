@@ -14,9 +14,12 @@
 #include <base/io/crt_rand.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/rtxt/rtxt.h>
 #include <net/admin/admin_protocol.h>
 #include <net/admin/admin_server.h>
 #include <net/npwire/idatagram_socket.h>
+#include <net/npwire/ingame_decode.h> // FrameUpdate
+#include <net/npwire/ingame_encode.h> // encode_frame_update
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
@@ -34,6 +37,7 @@
 #include <runtime/inmatch/role_feeds.h> // session_rules_word
 #include <runtime/inmatch/server_tick.h> // Server_TickUpdate
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/mission/runtime_boot.h> // BootFileSource
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
@@ -419,7 +423,15 @@ void test_joiner_console() {
 
 	expect(client.mission_exit_reason() == inmatch::kMissionExitNone, "no exit yet");
 	expect(socket.sent.empty(), "the joiner's role has written nothing yet");
-	(void)c.command("GOTO MENUSTATE");
+	// The cycle tail answers from the frame's game mode, still the Game Loop's after the quit:
+	// x5's retail joiner replied `OK - Server is cycling...`. [orig: CAdminServer_HandleGotoCommand
+	//  @0x4049D0 - Input_HandleActionBinding(3) @0x404A5D, then the Game Loop test @0x404A7E,
+	//  Server_ProcessRoundEnd(0) @0x404A95, the 620 @0x404AA5, the reply @0x404AAF]
+	const std::vector<std::string> goto_menu = c.command("GOTO MENUSTATE");
+	expect(goto_menu.size() == 1 && goto_menu[0] == "OK - Server is cycling...",
+	       "GOTO MENUSTATE on a joiner in the Game Loop: the cycle tail's one reply");
+	expect(client.state().spawn_success_gate && client.state().end_round_linger_ticks == 620,
+	       "the joiner's own round end: its round-over latch and the 620 linger");
 	expect(client.mission_exit_reason() == inmatch::kMissionExitQuit, "GOTO MENUSTATE: the joiner's exit reason 1");
 	const std::vector<uint8_t> goodbye = client_goodbye_to_bytes(
 			0x41444D4Eu, make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, ""));
@@ -518,6 +530,97 @@ void test_session_destroy_routes() {
 	expect(menus_after(kicked).find(kept) != std::string::npos, "kept again");
 	consoles.session_destroyed();
 	expect(consoles.status_report().find(zero) != std::string::npos, "the pre-game cancel zeroes it");
+}
+
+// The menus' console reads the process's gametext, which the process start loads once: a fresh
+// process's QUERY prints game type 0's STROVER29 text, as it does after a destroyed session (x5's
+// A4 / A5 / A6, where ours printed an empty CURRENT GAME TYPE: the menus' console had no gametext).
+// Each lookup searches the mount's override table first; a mount with no gametext gives no seam
+// (GameText_GetString's "" with no table). The expected report is x5's A4 retail reply (a fresh
+// Jointops.exe in the main menu), byte for byte.
+// [orig: Game_InitSubsystems @0x4A6FE3..0x4A6FED (g_TextGameText, its one writer);
+//  GameText_GetString @0x51EBD0; GameType_GetAbbreviation @0x520FD0 (the STROVER29 arm
+//  @0x5211A2..0x5211B2); CAdminServer_HandleStatus @0x402E30]
+void test_menus_game_text() {
+	rtxt::File table;
+	table.sections.push_back({"Overlays", 2});
+	table.entries.push_back({"STROVER29", "Deathmatch", {}, 0});
+	table.entries.push_back({"STROVER64", "Team Deathmatch", {}, 0});
+	std::vector<uint8_t> bin;
+	std::string error;
+	expect(rtxt::write(table, bin, error), "the gametext table writes");
+	mission::BootFileSource files;
+	files.has_file = [](const std::string &name) { return name == "gametext.bin"; };
+	files.read_file = [&bin](const std::string &name, std::vector<uint8_t> &out) {
+		if (name != "gametext.bin") return false;
+		out = bin;
+		return true;
+	};
+	inmatch::RemoteAdminConsoles consoles;
+	gamecfg::GameCfg block = gamecfg::defaults();
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &block;
+	seams.game_text = inmatch::process_game_text(files, nullptr);
+	expect(static_cast<bool>(seams.game_text), "a mounted gametext answers");
+	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
+	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
+	expect_eq(consoles.status_report(),
+	          "SERVER: \r\nUP-TIME: 0 00:00:00\r\nCURRENT TOD: 0\r\nCURRENT # PLAYERS: 0\r\nCURRENT MAP: \r\n"
+	          "CURRENT GAME TYPE: Deathmatch\r\nCURRENT PLAYERS: \r\n"
+	          "NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\nMAP QUEUE: \r\nNo missions in queue.",
+	          "a fresh process's menus: x5's A4 retail QUERY");
+
+	auto override_table = std::make_shared<rtxt::File>();
+	override_table->sections.push_back({"Overlays", 1});
+	override_table->entries.push_back({"STROVER29", "Expansion Deathmatch", {}, 0});
+	seams.game_text = inmatch::process_game_text(files, override_table);
+	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
+	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
+	expect(consoles.status_report().find("CURRENT GAME TYPE: Expansion Deathmatch\r\n") != std::string::npos,
+	       "the override table's entry first");
+
+	mission::BootFileSource bare;
+	bare.has_file = [](const std::string &) { return false; };
+	bare.read_file = [](const std::string &, std::vector<uint8_t> &) { return false; };
+	expect(!inmatch::process_game_text(bare, nullptr), "no gametext in the mount: no seam");
+}
+
+// A joiner's MISSION CYCLE: the cycle tail is gated on the Game Loop alone, so a joiner's console
+// cycles too. Its own round end runs over its empty slot table (nothing to send) and raises its
+// round-over latch, and the cycle stores the 620 linger over the round end's 2790, which the
+// joiner's client frame counts down into exit 4. In the menus it is refused.
+// [orig: CAdminServer_HandleMissionCommand @0x4065E7..0x40662A (Server_ProcessRoundEnd(0)
+//  @0x40660B, the store @0x40661F); Server_ProcessRoundEnd @0x5164F0 (the 2790 @0x5166C4,
+//  g_RoundOver @0x5168E4); Client_ProcessNetworkFrame @0x42C3AB..0x42C3D3]
+void test_joiner_cycle() {
+	inmatch::RemoteAdminConsoles consoles;
+	gamecfg::GameCfg block = gamecfg::defaults();
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = &block;
+	uint64_t now = 1000;
+	inmatch::ClientRuntime client("CycleJoiner", [&now] { return now; });
+	client.seed_session(0x41444D4Eu, 1u, "CLIENT-CYCLE-SCRK", "SERVER-CYCLE-SCRK", 1, 0, 0x0002,
+	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
+	                    /*replay_mode=*/false);
+	inmatch::RemoteAdminBinding joined;
+	joined.client = &client;
+	joined.session = 1;
+	consoles.bind(joined, seams);
+	const AdminSession admin{"boss", 0xFFFFFFFFu};
+	const auto line = [&](const std::string &text) {
+		std::vector<std::string> replies;
+		(void)consoles.dispatch(admin, text, replies);
+		return replies.size() == 1 ? replies[0] : std::string("<" + std::to_string(replies.size()) + ">");
+	};
+	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
+	expect_eq(line("MISSION CYCLE"), "ERROR - Must be in Game State to cycle server.", "a joiner's CYCLE outside");
+	expect(!client.state().spawn_success_gate && client.state().end_round_linger_ticks == 0,
+	       "refused: the joiner's words untouched");
+	consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
+	expect_eq(line("MISSION CYCLE"), "OK - Server is cycling...", "a joiner's CYCLE in the Game Loop");
+	expect(client.state().spawn_success_gate && client.state().end_round_linger_ticks == 620,
+	       "the joiner's round-over latch and the 620 linger");
+	expect(client.mission_exit_reason() == inmatch::kMissionExitNone, "no exit until the linger runs out");
 }
 
 // A listen host's console is a peer over its host context: CMD leaves through its own client
@@ -808,6 +911,26 @@ void test_joiner_set_holds() {
 	               settings.find("TeamTriggerClaymore  = 1\n") != std::string::npos,
 	       "GET reads the held words");
 
+	// A joiner never counts its round clock down (the main frame's decrement is the authority's),
+	// so the SET's minutes hold until the host's next phase-1 0x0A timer block folds its own clock
+	// back in: 28 minutes = 1680 s = 104160 ticks reads 28/7. Retail's host sends that block on
+	// every fourth 0x0A (x5's TDM cells: about 766 ms apart), so a GET 0.6 s after the SET reads
+	// either value on either joiner (x5: retail 5/5 once and 28/5 once, ours 28/5 twice).
+	// [orig: Game_ProcessMainFrame @0x5265DA (`cmp is_authority`), the decrement @0x526602;
+	//  CAdminServer_HandleSetCommand @0x405E80..0x405E86; NapiNPClientMsg_0x00A @0x430174 (off the
+	//  authority), the phase-1 fold @0x43021E..0x430235]
+	FrameUpdate timer;
+	timer.carried_handle = 0xFFFF;
+	timer.local_tail_present = true;
+	timer.flags2 = 1; // the encoder keys the sub-block on flags2
+	timer.sub_block = 1;
+	timer.timer.present = true;
+	timer.timer.timer_seconds = 1680;
+	client.view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(timer));
+	expect(client.state().round_time_remaining_ticks == 104160, "the phase-1 fold replaces the SET's clock");
+	expect(line("GET GAMESETTINGS").find("GameTime             = 28/7\n") != std::string::npos,
+	       "GET reads the folded clock over the SET's limit");
+
 	// The next mission's data (a map change's S2C 0x64, word 0x3A06, which the connection folds
 	// into the view) is copied again at that mission's start and replaces the word and its caches;
 	// the round clock stays the 0x0A's.
@@ -829,6 +952,8 @@ int main() {
 	test_idle_scene();
 	test_joiner_console();
 	test_session_destroy_routes();
+	test_menus_game_text();
+	test_joiner_cycle();
 	test_listen_host_and_single_player();
 	test_single_player_cycle();
 	test_idle_frame_exit();

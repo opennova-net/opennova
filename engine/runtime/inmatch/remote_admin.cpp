@@ -1,6 +1,8 @@
 #include <runtime/inmatch/remote_admin.h>
 
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/rtxt/rtxt.h>
+#include <runtime/hud/game_text_lookup.h> // kGameTextTable
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_config.h>   // host_screen_from_block (the joiner's applied settings)
 #include <runtime/inmatch/host_settings.h> // mission_session_title
@@ -8,6 +10,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_server_ctx.h> // session_uptime_ms (UP-TIME)
 #include <runtime/inmatch/napi_np_protocol.h> // request_own_client_disconnect (input action 3)
+#include <runtime/mission/runtime_boot.h> // BootFileSource (process_game_text)
 #include <runtime/world/epilog_cine.h> // kWorldMissionExitQuit
 #include <runtime/world/world.h>
 
@@ -64,6 +67,23 @@ std::string admin_log_file_text(std::string_view line) {
 		text += c;
 	}
 	return text;
+}
+
+std::function<std::string(std::string_view section, std::string_view key)> process_game_text(
+		const mission::BootFileSource &files, std::shared_ptr<const rtxt::File> override_table) {
+	// [orig: Game_InitSubsystems @0x4A6FE3..0x4A6FED]
+	auto gametext = std::make_shared<rtxt::File>();
+	std::vector<uint8_t> bytes;
+	std::string parse_error;
+	if (!files.valid() || !files.read_file(hud::kGameTextTable, bytes) ||
+			!rtxt::parse(bytes.data(), bytes.size(), *gametext, parse_error))
+		return {};
+	// [orig: GameText_GetString @0x51EBD0 -> TextResource_FindEntryBySectionAndKey @0x75D250]
+	return [gametext, override_table](std::string_view section, std::string_view key) {
+		const rtxt::Entry *entry = rtxt::find_with_override(
+				override_table.get(), *gametext, std::string(section), std::string(key));
+		return entry != nullptr ? entry->text : std::string();
+	};
 }
 
 std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &frame) {

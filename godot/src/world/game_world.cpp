@@ -16,6 +16,8 @@
 #include "network/net_session_policy.h"
 #include "resource_index/launch_flags.h" // the server log switches
 #include "resource_index/resource_root.h" // session_title (the connect log header)
+#include "rtxt/rtxt_string_file.h" // installed_text_override (the admin's process gametext)
+#include <runtime/mission/runtime_boot.h> // boot_files_from_index (the admin's process gametext)
 #include "util/string_convert.h"
 #include "network/novaworld_client.h"
 #include <runtime/inmatch/mission_exit.h>
@@ -525,6 +527,14 @@ opennova::inmatch::AdminConsole::Seams GameWorld::remote_admin_seams(const Ref<S
 		seams.config_block = cfg;
 		seams.save_config = std::move(save);
 	}
+	// The process's gametext, the menus' console included: the shell's mount (else the last
+	// load's root) and its installed override table (engine inmatch/remote_admin.h
+	// process_game_text).
+	const Ref<ResourceRoot> root = injected_root_.is_valid() ? injected_root_ : resource_root_;
+	if (root.is_valid())
+		seams.game_text = opennova::inmatch::process_game_text(
+				opennova::mission::boot_files_from_index(root->native_index()),
+				RtxtStringFile::installed_text_override());
 	// The process's own client's HUD (a listen host, a joiner): CHAT GET reads its CHAT
 	// window and a refused CHAT SEND echoes into it (the HUD device, by its group).
 	if (p_binding.client != nullptr) {

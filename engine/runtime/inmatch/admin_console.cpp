@@ -483,18 +483,29 @@ std::string AdminConsole::rotation_lines(bool query_fillers) const {
 
 // The round end with no winner, run inline (its 0x61 / 0x1D go out here), then the
 // 620-tick linger stored over the round end's, unconditionally, in the Game Loop, else
-// the refusal (D-NET-NEW-L1-16).
+// the refusal (D-NET-NEW-L1-16). The Game Loop test alone gates it, so a joiner's console
+// cycles too: its own round end runs over its empty slot table and raises its process's
+// round-over latch and linger, which its client frame then counts down (the joiner's
+// MISSION CYCLE leaves on exit 4 after 620 ticks; GOTO MENUSTATE's quit leaves first).
 // [orig: CAdminServer_HandleMissionCommand @0x4065E7..0x40662A (Server_ProcessRoundEnd(0)
 //  @0x40660B, the store @0x40661F); CAdminServer_HandleGotoCommand @0x404A74..0x404AAF
-//  (@0x404A95, the store @0x404AA5)]
+//  (UI_GetCurrentGameMode() == &g_GameModeGameLoop @0x404A7E, @0x404A95, the store
+//  @0x404AA5); Server_ProcessRoundEnd @0x5164F0 (g_RoundOver @0x5168E4, the 2790
+//  @0x5166C4 under is_in_session); Client_ProcessNetworkFrame @0x42C3AB..0x42C3D3]
 void AdminConsole::cycle_tail(std::vector<std::string> &replies) {
-	if (in_game() && ctx_.world != nullptr) {
+	if (!in_game()) {
+		replies.emplace_back(kMustBeInGame);
+		return;
+	}
+	if (ctx_.world != nullptr) {
 		Server_ProcessRoundEnd(ctx_, *ctx_.world, 0);
 		ctx_.round_end_linger_ticks = kCycleLingerTicks;
-		replies.emplace_back(kCycling);
-	} else {
-		replies.emplace_back(kMustBeInGame);
+	} else if (seams_.host_client != nullptr) {
+		replication::ClientState &state = seams_.host_client->state();
+		state.spawn_success_gate = true;
+		state.end_round_linger_ticks = static_cast<int32_t>(kCycleLingerTicks);
 	}
+	replies.emplace_back(kCycling);
 }
 
 // [orig: CAdminServer_HandleMissionCommand @0x4062E0 — LIST @0x406338..0x406483, AVAILABLE

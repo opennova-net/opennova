@@ -15,6 +15,7 @@
 #include <runtime/inmatch/session.h> // State (the frame's session state)
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,6 +32,10 @@ class World; // world.h's class key (MSVC mangles the key into every signature)
 
 namespace opennova::rtxt {
 struct File;
+}
+
+namespace opennova::mission {
+struct BootFileSource;
 }
 
 namespace opennova::inmatch {
@@ -61,6 +66,17 @@ uint16_t remote_admin_listen_port(const gamecfg::GameCfg &cfg);
 // One admin_log.txt line as retail's text-mode stream writes it: each "\n" reaches the file as
 // CR LF. [orig: CAdminServer_Construct @0x402C84, fopen(.., "w"), a text-mode stream]
 std::string admin_log_file_text(std::string_view line);
+
+// The process's gametext for AdminConsole::Seams::game_text: g_TextGameText, which the process
+// start loads once from the mount's gametext.bin and keeps for the process, so every console
+// reads it, the menus' included (a fresh process's QUERY prints game type 0's STROVER29 text);
+// each lookup searches the mount's override table first (GameText_GetString, D-NET-675). Empty
+// when the mount has no gametext that parses: GameText_GetString answers "" with no table.
+// [orig: Game_InitSubsystems @0x4A6CD0 (TextResource_LoadFromArchive("gametext.bin")
+//  @0x4A6FE3, g_TextGameText @0x4A6FED, its one writer); GameText_GetString @0x51EBD0;
+//  GameType_GetAbbreviation @0x520FD0 (the STROVER29 arm @0x5211A2..0x5211B2)]
+std::function<std::string(std::string_view section, std::string_view key)> process_game_text(
+		const mission::BootFileSource &files, std::shared_ptr<const rtxt::File> override_table);
 
 // A frame of the game process outside the running mission's main frame (whose frame leg pumps
 // in the Game Loop scene after the session's tick), as the pump reads it.
