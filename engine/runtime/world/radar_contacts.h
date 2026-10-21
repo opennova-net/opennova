@@ -93,14 +93,14 @@ struct RadarContactState {
 	// drains it one per tick, the local player's class init zeroes it, and
 	// while it is nonzero the HUD pass keeps the LPLOCKONME loop registered.
 	// The round's overlay reset (radar_reset) does not touch it.
-	// [orig: dword_B764C0 — stores @0x4465f8 / @0x446618; the drain
+	// [orig: g_LockOnMeToneTicks — stores @0x4465f8 / @0x446618; the drain
 	//  Sound_TickPendingSlots @0x5293a5..0x5293af; the reset
 	//  PlayerClass_InitEntity @0x4b10de; the reader HUD_RenderAllOverlays
 	//  @0x5a8197]
 	int32_t lock_tone = 0;
 };
 
-// The value every lock note stores [orig: `mov dword_B764C0, 1Fh` @0x4465f8].
+// The value every lock note stores [orig: `mov g_LockOnMeToneTicks, 1Fh` @0x4465f8].
 inline constexpr int32_t kRadarLockToneTicks = 31;
 // The HUD pass's lock-tone registration: the LPLOCKONME set resolved at HUD
 // init, on the local player's lane 255 with a 20-tick keep-alive, pitch 1.0
@@ -179,7 +179,7 @@ void resolve_ammo_whiz_radii(AmmoTable &ammo, const audio::SoundSetIndex *sets);
 // The Stinger motor's lock note: a missile whose target is the local player,
 // or a vehicle the local player is the first occupant of, stores the lock
 // tone and rides the missile list [orig: Entity_UpdateGuidedMissile_0
-// @0x4465db..0x446622 -> dword_B764C0 = 31, Radar_TrackMissile]. On a joiner the
+// @0x4465db..0x446622 -> g_LockOnMeToneTicks = 31, Radar_TrackMissile]. On a joiner the
 // target is a wire handle the client resolves to its own pool slot
 // [orig: Entity_SerializeGuidedMissileState @0x447ece]: the local player's
 // own wire handle is the target-is-local arm (RoundSim::wire_actor_provider).

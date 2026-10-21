@@ -721,8 +721,9 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 	pending_input_.cursor_dx += input.player.cursor_dx;
 	pending_input_.cursor_dy += input.player.cursor_dy;
 	const bool menu_open = (input.player.held_action_bits & HELD_MENU_OPEN) != 0;
-	// The paused update's other unconditional legs, in its order: the pending
-	// fire-sound slots and the trigger holds count down, the tracer pool ages and
+	// The paused update's other unconditional legs, in its order: the whole
+	// pending-sound pass (the fire-sound slots count down, then the incoming-lock
+	// tone drains) and the trigger holds count down, the tracer pool ages and
 	// drains its channels (the entity update that appends to them holds), and the
 	// update counts toward the 62-update second. Its tip countdown steps with the
 	// main-frame counter (hud_toggles_tip_frames) and its message rings' lives run
@@ -732,13 +733,14 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 	// @0x526758, the CTipSystem_TickCountdown call @0x526762, the
 	// Input_DecrementCooldownTimers call @0x5267A6, the 62-update second
 	// @0x5267AB..0x5267DF, each outside the pause word's tests @0x5265A0 /
-	// @0x526779); CEffectEmitterPool_Tick @0x5DB830; Sound_TickTriggerHolds
-	// @0x5292D0].
+	// @0x526779); Sound_TickPendingSlots @0x529310 (the g_LockOnMeToneTicks drain
+	// @0x5293A5..0x5293AF); CEffectEmitterPool_Tick @0x5DB830;
+	// Sound_TickTriggerHolds @0x5292D0].
 	for (int32_t i = 0; i < due; ++i) {
 		int32_t axis[2] = {};
 		step_mouse_pump(i, due, menu_open, axis);
 		world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
-		world.out.fire_sounds.tick();
+		world.tick_pending_sound_slots();
 		world.round_sim.trails.tick();
 		kernel.tick_weather();
 		count_update_into_second();
@@ -789,8 +791,9 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
-		// The paused frame still renders and runs its HUD pass: no tick ran,
-		// so nothing ages, and the menu pause holds the lock tone.
+		// The paused frame's updates run their unpaused legs (the lock tone's
+		// word drains there), then the frame renders and runs its HUD pass,
+		// where the menu pause keeps the lock tone unregistered.
 		if (state_ == State::Paused) {
 			step_paused_frame_counters(input);
 			count_rendered_frame();

@@ -1369,7 +1369,7 @@ public:
     // The frame's pending-sound pass, ahead of the script and entity halves:
     // the fire-sound countdown, then the incoming-lock tone drain.
     // [orig: Sound_TickPendingSlots @0x529310 (the slot walk, then the
-    //  dword_B764C0 drain @0x5293a5..0x5293af), from Game_ProcessMainFrame
+    //  g_LockOnMeToneTicks drain @0x5293a5..0x5293af), from Game_ProcessMainFrame
     //  @0x526697]
     void tick_pending_sound_slots();
     TickContext begin_tick(bool is_authority, TickPhase phase);

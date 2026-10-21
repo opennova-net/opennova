@@ -1,6 +1,7 @@
 #include <runtime/inmatch/session.h>
 
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/world/radar_contacts.h>
 
 #include <cstdio>
 #include <memory>
@@ -341,17 +342,20 @@ int main() {
 
 	// A paused single-player frame's updates run the legs retail's main frame
 	// runs outside its pause tests: the pending fire-sound slots count down and
-	// play, the tracer pool ages its channels, and the updates and the renders
-	// count into the 62-update second as a running frame's do.
+	// play, the incoming-lock tone drains one per update (31 -> 28 over three),
+	// the tracer pool ages its channels, and the updates and the renders count
+	// into the 62-update second as a running frame's do.
 	// [orig: Game_ProcessMainFrame @0x5263F0 -- the Sound_TickPendingSlots call
 	//  @0x526697, the CEffectEmitterPool_Tick call @0x526758, the 62-update
 	//  second @0x5267AB..0x5267DF, the pause tests @0x5265A0 / @0x526779;
-	//  GameLoop_RenderFrame @0x521CF9]
+	//  Sound_TickPendingSlots @0x529310 (the g_LockOnMeToneTicks drain
+	//  @0x5293A5..0x5293AF); GameLoop_RenderFrame @0x521CF9]
 	{
 		auto target = std::make_unique<TickProbe>();
 		Session session(*target);
 		if (!load(session)) return 1;
 		opennova::world::World &world = target->kernel.world;
+		target->kernel.local.radar.lock_tone = opennova::world::kRadarLockToneTicks;
 		world.out.fire_sounds.set_listener({});
 		world.out.fire_sounds.play_throttled_interface("PAUSED_SET", {}, 3, 10);
 		const int slot = world.round_sim.trails.alloc(1);
@@ -369,6 +373,8 @@ int main() {
 				"the pending slot counts down and plays through the pause")) return 1;
 		if (!expect(world.round_sim.trails.channels[static_cast<size_t>(slot)].age == 3,
 				"the tracer channel ages once per paused update")) return 1;
+		if (!expect(target->kernel.local.radar.lock_tone == 28,
+				"the incoming-lock tone drains once per paused update")) return 1;
 		// The /PROFILE frame leg sits past the pause tests too: each paused update
 		// runs it at the tick the pause froze [orig: Game_ProcessMainFrame -- the
 		// write @0x526879..0x5268E7; ++g_CurrentTick inside the gate @0x5265A0..0x5265B4].
