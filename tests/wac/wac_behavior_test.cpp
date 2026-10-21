@@ -1723,7 +1723,7 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     marker.item_type = 4;
     marker.wp_number = 9;
     marker.position = {20.0f, 10.0f, 5.0f};
-    marker.heading = placed_heading_bam(30); marker.roll = 4;
+    marker.heading = placed_heading_bam(30); marker.roll_bam = spawn_angle_bam(4);
     marker.flags = marker.engine_flags = kEntityFlagMatrixBuilt;
     const auto first_marker = w.registry.spawn(3, marker);
     marker.position.x = 40.0f;

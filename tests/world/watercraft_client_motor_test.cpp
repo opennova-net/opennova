@@ -2245,7 +2245,9 @@ bool run_authority_capsize_drain_and_dead_skip() {
 	set_zodiac_boxes(r.traits);
 	r.traits.player_control = true;
 	w::Entity *boat = r.world.registry.get(r.boat);
-	boat->roll = 110; // seeds air_roll_bam = 110 * 11930464 > 0x471C7180
+	// The spawn form of 110 degrees, 20024 << 16 = 0x4E380000 > 0x471C7180, seeds
+	// air_roll_bam (D-NET-NEW-L6-3).
+	boat->roll_bam = w::spawn_angle_bam(110);
 	boat->health = 1000;
 	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	bool ok = expect(boat->health == 1000, "client capsize does not drain health");

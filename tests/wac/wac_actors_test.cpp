@@ -271,7 +271,7 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     target.net_id = 2;
     target.item_id = 0; target.has_item_def = false; target.health = 0;
     target.position = {100.0f, 200.0f, 30.0f};
-    target.heading = placed_heading_bam(90); target.pitch = 45; target.roll = -30;
+    target.heading = placed_heading_bam(90); target.pitch_bam = spawn_angle_bam(45); target.roll_bam = spawn_angle_bam(-30);
     const auto h = f.world.registry.spawn(1, target);
     f.world.ai.attach(h);
     const int32_t precise[3] = {6553601, 13107203, 1966105};
@@ -279,7 +279,7 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     for (int axis = 0; axis < 3; ++axis) target_body->self->position.word(axis) = precise[axis];
     f.entity().health = 0; f.entity().alive = false;
     f.entity().flags = kEntityFlagDead;
-    f.entity().heading = placed_heading_bam(31); f.entity().pitch = 7; f.entity().roll = -4;
+    f.entity().heading = placed_heading_bam(31); f.entity().pitch_bam = spawn_angle_bam(7); f.entity().roll_bam = spawn_angle_bam(-4);
     f.entity().saved_live_yaw = 123;
     f.entity().saved_live_pitch = 456;
     f.entity().saved_live_roll = 789;
@@ -300,7 +300,8 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     CHECK(f.entity().ground_target == h && f.entity().mount_toggle_fallback == h);
     CHECK(f.entity().mounted && f.entity().mount_target == h);
     CHECK(f.entity().mount_type == SeatType::Passenger);
-    CHECK(f.entity().heading == placed_heading_bam(31) && f.entity().pitch == 7 && f.entity().roll == -4);
+    CHECK(f.entity().heading == placed_heading_bam(31) && f.entity().pitch_bam == spawn_angle_bam(7) &&
+          f.entity().roll_bam == spawn_angle_bam(-4)); // the words, untouched (D-NET-NEW-L6-3)
     CHECK(f.body().heading == 111 && f.body().pitch == 222 && f.body().roll == 333);
     CHECK(f.entity().saved_live_yaw == 123 && f.entity().saved_live_pitch == 456 &&
           f.entity().saved_live_roll == 789 && f.entity().saved_live_valid);
