@@ -9,6 +9,7 @@
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/mission_rotation.h>
 
 #include "host_test_setup.h"
 
@@ -1112,6 +1113,63 @@ int main() {
 		const w::Entity *released = pool0_player(*bal_world, inmatch::kFirstJoinerDcb + 1);
 		if (!expect(released != nullptr && released->team == 1,
 		            "balance: the released joiner spawns on its requested side")) return 1;
+	}
+
+	// The balance hold's team counts walk the player slots: an active slot with a
+	// net player counts on its slot team (+0x1A0), the rotation's side team of
+	// the index; no entity is read, and a pending reservation is no slot. Here
+	// side A plays team 2 (a swapped half): a bodyless added slot on team 2 holds
+	// a second side-A request (2 vs 0), where a team-1 reservation that was never
+	// added counts nowhere. [orig: Server_CountPlayersOnTeam @0x501630 - the
+	//  active byte @0x501650, the net player @0x501656, g_RotationSideTeam0[index]
+	//  @0x50165E, the slot team @0x501664; the calls `push 0` @0x4C8F10 /
+	//  `push 1` @0x4C8F17]
+	{
+		auto rot_world = std::make_unique<w::World>();
+		make_world(*rot_world);
+		for (const int32_t item_id : {6096, 6097}) {
+			w::Entity start;
+			start.kind = w::EntityKind::Marker;
+			start.item_id = item_id;
+			rot_world->registry.spawn(3, start);
+		}
+		inmatch::NapiNPServerCtx rot_ctx;
+		inmatch::GameConfig settings;
+		settings.max_players = 8;
+		settings.game_type = opennova::game_type::kTeamDeathmatch;
+		settings.side_b_password = "bravo";
+		settings.balance_join = true;
+		settings.balance_join_percent = 0.5f;
+		inmatch::test::bring_up_host(rot_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+		                        /*host_key=*/0, nullptr, settings);
+		rot_ctx.world = rot_world.get();
+		inmatch::HostRotation rotation;
+		rotation.side_team = {2, 1};
+		rot_ctx.rotation = &rotation;
+		inmatch::NapiNPConnection added;
+		added.type = 1;
+		added.connection_id = inmatch::kFirstJoinerDcb + 10;
+		added.self_id_seen = true;
+		added.phase = inmatch::ConnectionPhase::PlayerAdded;
+		added.assigned_team_valid = true;
+		added.assigned_team = 2;
+		rot_ctx.np_protocol.connection_list.push_back(added);
+		inmatch::NapiNPConnection reserved;
+		reserved.type = 1;
+		reserved.connection_id = inmatch::kFirstJoinerDcb + 11;
+		reserved.phase = inmatch::ConnectionPhase::Joined; // never admitted: no slot
+		reserved.assigned_team_valid = true;
+		reserved.assigned_team = 1;
+		rot_ctx.np_protocol.connection_list.push_back(reserved);
+		inmatch::NapiNPConnection joining;
+		joining.type = 1;
+		joining.connection_id = inmatch::kFirstJoinerDcb;
+		joining.self_id_seen = true;
+		joining.phase = inmatch::ConnectionPhase::Joined;
+		joining.char_vars.team_request = 0; // side A
+		rot_ctx.np_protocol.connection_list.push_back(joining);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(rot_ctx, *rot_world) == 0,
+		            "balance: side A's added slot on the swapped team holds a second side-A request")) return 1;
 	}
 
 	// D-COL-21: a deploy's reset ends in the candidate-slice rebuild and the body's

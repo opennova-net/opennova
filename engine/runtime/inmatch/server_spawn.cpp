@@ -805,20 +805,23 @@ uint32_t count_alive_players(const NapiNPServerCtx &ctx) {
 	return count;
 }
 
-// Server_CountPlayersOnTeam(index): the live players on team index+1, plus the
-// pre-spawn reservations already assigned there [orig: @0x501630].
-int32_t count_players_on_team(const NapiNPServerCtx &ctx, const world::World &world,
-		const NapiNPConnection &joining, uint8_t team) {
+// Server_CountPlayersOnTeam(index): the player slots that are active (+4) and
+// carry a net player (+28), the rows count_alive_players counts, whose slot
+// team byte (+0x1A0, assigned_team) is the rotation's side team of index; no
+// entity is read and no pending joiner counts. A Serve Only host's own row
+// carries no net player.
+// [orig: Server_CountPlayersOnTeam @0x501630 - the active byte `cmp byte ptr
+//  [ecx-18h], 0` @0x501650, the net player `cmp dword ptr [ecx], 0` @0x501656,
+//  g_RotationSideTeam0[index] @0x50165E, the slot team `cmp bl, [ecx+184h]`
+//  @0x501664]
+int32_t count_players_on_team(const NapiNPServerCtx &ctx, uint8_t index) {
+	const uint8_t team = ctx.rotation != nullptr ? ctx.rotation->side_team[index]
+			: std::array<uint8_t, 2>{1, 2}[index];
 	int32_t count = 0;
-	world.registry.for_each([&](const world::Entity &e) {
-		// A player body by its Player bit, whatever its camouflage row (D-NET-348).
-		if (e.handle.pool() != 0 || ((e.flags | e.engine_flags) & world::kEntityFlagPlayer) == 0)
-			return;
-		if (e.team == team) ++count;
-	});
 	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
-		if (&c == &joining || !c.assigned_team_valid || c.link.owned_entity.valid()) continue;
-		if (c.assigned_team == team) ++count;
+		if (c.phase < ConnectionPhase::PlayerAdded || c.phase >= ConnectionPhase::Goodbye)
+			continue;
+		if ((c.assigned_team_valid ? c.assigned_team : uint8_t{0}) == team) ++count;
 	}
 	return count;
 }
@@ -831,8 +834,7 @@ int32_t count_players_on_team(const NapiNPServerCtx &ctx, const world::World &wo
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8E89 (BuildFlags & 0xF0),
 //  side-password override @0x4C8ED1/@0x4C8EEC, gate @0x4C8F0A, counts
 //  @0x4C8F19/@0x4C8F1B, ceil @0x4C8F41..0x4C8F53, compare @0x4C8F74]
-bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &conn,
-		const world::World &world) {
+bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	if ((ctx.np_protocol.build_flags & 0xF0u) == 0) return true;
 	int team_id = conn.char_vars.team_request == 0 ? 0
 			: conn.char_vars.team_request == 1 ? 1 : -1;
@@ -846,8 +848,9 @@ bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &con
 		team_id = 1;
 	}
 	if (!ctx.config.balance_join || team_id == -1) return true;
-	int32_t team0_count = count_players_on_team(ctx, world, conn, 1);
-	int32_t team1_count = count_players_on_team(ctx, world, conn, 2);
+	// [orig: `push 0` @0x4C8F10, `push 1` @0x4C8F17]
+	int32_t team0_count = count_players_on_team(ctx, 0);
+	int32_t team1_count = count_players_on_team(ctx, 1);
 	const int32_t min_team_count = std::min(team0_count, team1_count);
 	int32_t max_team_diff = static_cast<int32_t>(std::ceil(
 			static_cast<double>(min_team_count) * ctx.config.balance_join_percent));
@@ -941,7 +944,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 			// [orig: CNetPlayer_SetGameState(player, 4) @0x4C8BCA, back to 6 only
 			//  in HandlePlayEnterResponse @0x4D1C11]
 			if (conn.player_enter_pending()) continue;
-			if (has_spawn_slots && balance_join_admits(ctx, conn, world)) {
+			if (has_spawn_slots && balance_join_admits(ctx, conn)) {
 				// Retail unlinks the node and sends its 0x03 before the add, so a
 				// failed add (no free row) leaves a joiner with no row, no body and
 				// no further message, which the walk never visits again; either
