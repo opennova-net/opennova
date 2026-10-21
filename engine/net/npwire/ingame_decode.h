@@ -841,9 +841,9 @@ bool decode_round_event_record(const uint8_t *body, size_t len,
 // wire as the `sub_op` byte of the 5-byte entity sub-header (EntityPacketSubHeader
 // .sub_op): [orig: NetPacket_DispatchEntityPacketCallback @ 0x4D6A80] copies it to
 // packetCtx[7] and hardwires packetCtx[6]=4 (read-apply) on the host C2S-receive
-// path. The serializer rejects format 11, so guided entities NEVER appear as a
-// §5.10b 0x0A compact record — decode_frame_update correctly fails closed on
-// EntityClass::Guided.
+// path. The serializer has no case for format 11, so a guided entity's §5.10b
+// 0x0A record is its 5-byte header alone: the writer's mode-1 call writes nothing
+// and the reader's mode-2 call reads nothing (D-NET-NEW-L1-28).
 //
 // Per-group payload sizes (the bytes AFTER the sub-header):
 //   group              write-full(1)  read-full(2)  write-delta(3)  read-apply(4)

@@ -462,6 +462,15 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			break;
 		}
 		case EntityClass::Guided:
+			// A guided class (rokt / stng / hlfr / jvln / arty) has a serializer, so its
+			// record goes out: the header, then the serializer's mode-1 call with format 11,
+			// which has no case and writes nothing, its return ignored: a 5-byte record
+			// (D-NET-NEW-L1-28).
+			// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - tag 1 @0x50F257, the
+			//  handle @0x50F298, the type @0x50F2BA, mode 1 @0x50F2C7, format 11 @0x50F2CE, the
+			//  def+0x164 call @0x50F2E2; Entity_SerializeGuidedMissileState @0x447C50 - the
+			//  mode-1 group switch @0x447C80, no case 11]
+			break;
 		case EntityClass::NoNetworkCallback:
 		case EntityClass::Unknown:
 		default:
@@ -598,6 +607,7 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 	case EntityClass::Player:   return 5 + 18;
 	case EntityClass::Vehicle:  return 5 + 11 + ((e.state_flags & kVehicleCompactFlagDeadPose) ? 4 : 10);
 	case EntityClass::Infantry: return 5 + 14;
+	case EntityClass::Guided:   return 5; // the header alone (D-NET-NEW-L1-28)
 	default:                    return 0; // not emitted
 	}
 }

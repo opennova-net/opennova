@@ -992,10 +992,19 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 				ok = true;
 				consumed = 0;
 				break;
+			case EntityClass::Guided:
+				// A guided class's serializer is called with mode 2 and format 11, has no
+				// case for it and reads nothing; the loop goes on behind the header
+				// (D-NET-NEW-L1-28).
+				// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - mode 2 @0x430804, format 11
+				//  @0x43080C, the call @0x430828, the loop @0x43082D;
+				//  Entity_SerializeGuidedMissileState @0x447C50 - the mode-2 group switch
+				//  @0x447E6C, no case 11]
+				ok = true;
+				consumed = 0;
+				break;
 			default:
-				// Guided (§5.15) or unresolved Unknown: not a fixed §5.10b compact.
-				// Guided treats the subtype as a field-group selector and rejects
-				// the 0x0A compact subtype 11; Unknown has no safe width.
+				// Unresolved Unknown: not a fixed §5.10b compact, no safe width.
 				return finish(false);
 			}
 			if (!ok) return finish(false);

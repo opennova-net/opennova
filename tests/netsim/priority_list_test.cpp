@@ -23,8 +23,10 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -108,6 +110,53 @@ void test_bound_radius_moves_a_row_inside_the_gate() {
 		if (row.wire_handle == far.packed) row.bound_radius_q16 = 65536;
 	ns::Connection with{&ch_b, ns::TransportMode::Loopback, me, 0};
 	CHECK(has_record(emit(world, with, ents), far.packed));
+}
+
+// D-NET-NEW-L1-28: a guided class's row streams as its 5-byte header (tag 1, its handle, its
+// type): the serializer's mode-1 call with format 11 has no case and writes nothing; the
+// reader's mode-2 call reads nothing and the loop goes on behind the header.
+// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - tag 1 @0x50F257, the handle
+//  @0x50F298, the type @0x50F2BA, mode 1 @0x50F2C7, format 11 @0x50F2CE, the call @0x50F2E2;
+//  NapiNPClientMsg_0x00A @0x42FEC0 - mode 2 @0x430804, format 11 @0x43080C, the call @0x430828;
+//  Entity_SerializeGuidedMissileState @0x447C50 - the group switches @0x447C80 / @0x447E6C]
+constexpr uint16_t kGuidedType = 0x0777;
+
+void test_a_guided_row_streams_its_header_alone() {
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle me = w::spawn_remote_player(world, at(0.0f, 1));
+	const w::EntityHandle rocket = w::spawn_remote_player(world, at(4.0f, 2));
+	std::vector<GameEntitySnapshot> ents = ns::snapshot_world(world);
+	for (GameEntitySnapshot &row : ents) {
+		if (row.wire_handle != rocket.packed) continue;
+		row.entity_class = EntityClass::Guided;
+		row.type_id = kGuidedType;
+	}
+	ns::LoopbackChannel ch;
+	ns::Connection conn{&ch, ns::TransportMode::Loopback, me, 0};
+	const std::vector<ns::Datagram> run = emit(world, conn, ents);
+	const ns::Datagram *frame = nullptr;
+	for (const ns::Datagram &d : run)
+		if (d.tag == s2c::PER_FRAME_UPDATE) frame = &d;
+	CHECK(frame != nullptr);
+	if (frame == nullptr) return;
+	const uint8_t header[5] = {1, static_cast<uint8_t>(rocket.packed & 0xFFu),
+			static_cast<uint8_t>(rocket.packed >> 8), static_cast<uint8_t>(kGuidedType & 0xFFu),
+			static_cast<uint8_t>(kGuidedType >> 8)};
+	const auto found = std::search(frame->body.begin(), frame->body.end(),
+			std::begin(header), std::end(header));
+	CHECK(found != frame->body.end() && frame->body.end() - found > 5 && found[5] <= 2);
+	FrameUpdate fu;
+	const bool complete = decode_frame_update(frame->body.data(), frame->body.size(),
+			[](uint16_t type) {
+				return type == kGuidedType ? EntityClass::Guided : EntityClass::Player;
+			},
+			fu);
+	bool guided = false;
+	for (const FrameUpdateRecord &r : fu.records)
+		if (r.handle == rocket.packed && r.cls == EntityClass::Guided) guided = true;
+	CHECK(complete && fu.consumed == frame->body.size() && guided);
 }
 
 // The tracked-slot despawn: a freed row, the recipient's own entity and a
@@ -332,6 +381,7 @@ int main() {
 	test_negative_score_keys_at_the_prior();
 	test_tick_displacement_reads_the_saved_pose();
 	test_rows_and_rounds_take_turns();
+	test_a_guided_row_streams_its_header_alone();
 	if (failures == 0) std::printf("priority_list: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

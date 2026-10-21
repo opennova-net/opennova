@@ -996,7 +996,10 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 				continue;
 			}
 		}
-		if (rec.cls == EntityClass::NoNetworkCallback) {
+		// A guided record is its header alone: the serializer's mode-2 call with format 11
+		// reads and writes nothing, so the row stays as it stands (D-NET-NEW-L1-28)
+		// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - @0x430804 / @0x43080C, the call @0x430828].
+		if (rec.cls == EntityClass::NoNetworkCallback || rec.cls == EntityClass::Guided) {
 			record_folded[rec_i] = 1u;
 			continue;
 		}
