@@ -11,7 +11,9 @@
 #include <runtime/inmatch/joiner_connection.h>
 #include <net/npwire/ingame_decode.h>
 
+#include <formats/mission/bms.h>
 #include <formats/playersav/weapon_sav.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/player_loadout.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
@@ -82,18 +84,28 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 		const world::WeaponInventory *inventory, uint8_t team,
 		int32_t requested_combo);
 
-// The armory ACCEPT's in-session submission: the armory's own kit (each entry its
-// weapon resolves, the AdmDef gate), the armory's class, the local body's team byte and
-// g_CurrentWeaponSlot resolved against the local table. In a session the apply sends
-// this 0x2F and applies nothing else; a listen host's own slot accepts it into the local
-// table (D-NET-695). [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - the session test
-//  @0x565D4D, the authority skipping the pool reset @0x565D4F..0x565D56, the team
-//  `movsx ecx, byte [eax+162h]` @0x565D8C, NetPacket_SendLoadoutSubmit @0x565D94, the
-//  return @0x565D9C; NetPacket_SendLoadoutSubmit @0x42cdc0 - the name gate @0x42cf0b,
-//  the slot resolve @0x42ce2d..0x42ce8b]
-LoadoutSubmit armory_loadout_submit(const world::World &world,
-		const std::vector<world::WeaponKitEntry> &kit, uint8_t player_class,
-		const world::WeaponInventory *inventory);
+// The armory ACCEPT in a session: WeaponLoadout_ApplyFromBuffer's session leg, the one
+// apply a joiner's client and a listen host's own client run alike. The selection becomes
+// the resident kit on both legs; off the authority the slot table empties; and the 0x2F
+// the apply sends is returned for the caller's queue: the local body's team byte, the
+// armory's class (g_ArmorySelectedClass, the class picked on the armory screen), the
+// selection through the sender's name gate and g_CurrentWeaponSlot resolved against the
+// table as the sender resolves it (after the reset, which leaves retail's slot word where
+// ours' clears equipped_combo, so the word is taken first). DFX2's sender fixes the class.
+// Nothing else applies locally: the host's 0x5A grant rebuilds the slots, and a listen
+// host's own slot accepts the 0x2F into the local table (D-NET-695, D-NET-NEW-L2-17).
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - the class's buffer copied into
+//  g_LoadoutWeaponNameList @0x565D27..0x565D4B, `cmp is_in_session` @0x565D3A (its jz
+//  @0x565D4D), `cmp is_authority` @0x565D4F (its jnz @0x565D56),
+//  WeaponSlotPool_ResetAllEntries @0x565D58..0x565D66, g_ArmorySelectedClass
+//  @0x565D6B / @0x565D86, g_CurrentWeaponSlot @0x565D73, the team
+//  `movsx ecx, byte [eax+162h]` @0x565D8C, NetPacket_SendLoadoutSubmit @0x565D94, the jmp to
+//  the tail @0x565D9C;
+//  NetPacket_SendLoadoutSubmit @0x42CDC0 - the slot resolve @0x42CE2D..0x42CE8B, the name
+//  gate @0x42CF0B; dfx2.exe NetPacket_SendLoadoutSubmit @0x42EB40 (@0x42EC15..0x42EC3E)]
+LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &local,
+		const std::vector<world::WeaponKitEntry> &kit, uint8_t armory_class, bool authority,
+		bms::MissionType mission_type);
 
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,

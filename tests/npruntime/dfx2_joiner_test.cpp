@@ -18,7 +18,9 @@
 #include <formats/mission/bms.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/npwire/flat_tlv.h>
+#include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_decode_session.h>
+#include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
@@ -73,8 +75,11 @@ bool decode_c2s(const std::vector<uint8_t> &datagram, const std::string &client_
 			decode_protocol_packet_plaintext(body.data(), body.size(), client_scrk, header, messages);
 }
 
-// The class byte of the armory re-submission of an in-match joiner speaking `title`, whose kit is
-// a medic's (5), after the host's BMS header named a mission of `mission_type` (0: no header).
+// The class byte of the 0x2F an in-match joiner speaking `title`, whose kit is a medic's (5),
+// re-submits when an S2C 0x50 moves its own entity, after the host's BMS header named a mission
+// of `mission_type` (0: no header). The sender fixes the class for every 0x2F (the armory's
+// takes it in inmatch::armory_accept_in_session, pinned by damage_class_bytes).
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the reselect's submit @0x431a9e]
 int resubmit_class(const TitleIdentity *title, uint8_t mission_type) {
 	inmatch::JoinerConnection joiner("Dfx2Loadout");
 	joiner.set_title(title);
@@ -82,17 +87,21 @@ int resubmit_class(const TitleIdentity *title, uint8_t mission_type) {
 	kit.player_class = 5;
 	joiner.set_loadout_kit(kit);
 	joiner.seed_in_match(1, kClientKey, kClientScrk, kServerScrk, 1, 0, 0x0001, 0x14B9);
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
 	if (mission_type != 0) {
 		std::vector<uint8_t> header(bms::kHeaderSize, 0);
 		header[offsetof(bms::Header, mission_type)] = mission_type;
-		SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
 		const std::vector<uint8_t> dg =
 				frame_s2c(seq, {make_protocol_message(s2c::BMS_HEADER, header)}, kServerScrk, kClientKey);
 		(void)joiner.handle_datagram(dg.data(), dg.size());
 	}
-	std::vector<ProtocolMessage> messages;
-	if (!decode_c2s(joiner.frame_loadout_resubmit(), kClientScrk, messages)) return -1;
-	for (const ProtocolMessage &m : messages) {
+	TeamAssign assign;
+	assign.entity_handle = 0x0001;
+	assign.team = 1;
+	const std::vector<uint8_t> dg = frame_s2c(seq,
+			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, kServerScrk, kClientKey);
+	const inmatch::JoinerConnection::PollResult result = joiner.handle_datagram(dg.data(), dg.size());
+	for (const ProtocolMessage &m : result.queued_send_messages) {
 		if (m.tag != 0x2F) continue;
 		LoadoutSubmit submit;
 		if (decode_loadout_submit(m.payload.data(), m.payload.size(), submit)) return submit.player_class;

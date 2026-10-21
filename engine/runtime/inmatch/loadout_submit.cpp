@@ -1,5 +1,6 @@
 #include <runtime/inmatch/loadout_submit.h>
 
+#include <net/title/title_identity.h> // DFX2-12, the sender's fixed class
 #include <runtime/world/weapon_table.h>
 
 #include <vector>
@@ -109,16 +110,28 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 	return requested_combo;
 }
 
-LoadoutSubmit armory_loadout_submit(const world::World &world,
-		const std::vector<world::WeaponKitEntry> &kit, uint8_t player_class,
-		const world::WeaponInventory *inventory) {
+LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &local,
+		const std::vector<world::WeaponKitEntry> &kit, uint8_t armory_class, bool authority,
+		bms::MissionType mission_type) {
+	// The whole selection, unfiltered, on both legs [orig: the rep movsd @0x565D4B].
+	local.loadout.spawn_kit_set = true;
+	local.loadout.spawn_kit = kit;
+	const world::WeaponInventory *inventory = local.inventory_valid ? &local.inventory : nullptr;
+	const int32_t current_slot = inventory != nullptr ? inventory->equipped_combo : -1;
+	// [orig: WeaponSlotPool_ResetAllEntries @0x565D66, off the authority alone]
+	if (!authority && !world.tables.weapons.empty()) local.inventory.reset(world.tables.weapons);
 	LoadoutSubmit submit;
-	const world::Entity *local = world.registry.get(world.cached.local_player);
-	submit.team = local != nullptr ? local->team : uint8_t{0};
-	submit.player_class = player_class;
-	const int32_t current = inventory != nullptr ? inventory->equipped_combo : -1;
+	const world::Entity *body = world.registry.get(world.cached.local_player);
+	submit.team = body != nullptr ? body->team : uint8_t{0};
+	submit.player_class = armory_class;
+	// DFX2's sender: 8 (rifleman), or 7 (gunner) in a mission of type 2, whatever the class
+	// [orig: dfx2.exe NetPacket_SendLoadoutSubmit @0x42EB40 (@0x42EC15..0x42EC3E)].
+	if (title_in_match(title_identity(world.rules.title)).loadout_class_fixed)
+		submit.player_class = mission_type == bms::MissionType::CombatVehicleMission
+				? uint8_t{7}
+				: uint8_t{8};
 	submit.weapon_slot_index = static_cast<uint32_t>(
-			resolve_loadout_submit_combo(world.tables.weapons, inventory, submit.team, current));
+			resolve_loadout_submit_combo(world.tables.weapons, inventory, submit.team, current_slot));
 	for (const world::WeaponKitEntry &entry : kit) {
 		const int adm = world.tables.weapons.index_of(entry.name.c_str());
 		if (adm < 0) continue; // [orig: the AdmDef_FindByName gate @0x42cf0b]

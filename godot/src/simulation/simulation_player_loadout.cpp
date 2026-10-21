@@ -9,9 +9,7 @@
 #include "resource_index/launch_flags.h" // the /noreload flag the session copy reads
 #include "util/string_convert.h"
 
-#include <net/npwire/ingame_encode.h> // encode_loadout_submit (a listen host's armory 0x2F)
-#include <net/npwire/ingame_message_id.h> // c2s::LOADOUT_SUBMIT
-#include <runtime/inmatch/client_runtime.h> // ClientRuntime::queue_host_message
+#include <runtime/inmatch/client_runtime.h> // ClientRuntime::queue_loadout_submit
 #include <runtime/inmatch/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
 #include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
@@ -224,29 +222,21 @@ bool Simulation::apply_local_player_loadout_rows(
 		std::vector<opennova::world::WeaponKitEntry> p_kit, int p_player_class,
 		bool p_submit_joiner_request) {
 	if (!kernel_) return false;
-	// A listen host in a session sends the armory's kit as its own client's 0x2F and
-	// applies nothing itself: its own slot's accept grants it into the local table
-	// (engine: inmatch::armory_loadout_submit, its witness there; D-NET-695).
-	if (p_submit_joiner_request && is_host_listening() && !is_joiner() && runtime_ != nullptr &&
-			kernel_->world.rules.mp_session && p_player_class >= 0 && p_player_class <= 0xFF) {
-		const opennova::LoadoutSubmit submit = opennova::inmatch::armory_loadout_submit(
-				kernel_->world, p_kit, static_cast<uint8_t>(p_player_class),
-				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr);
-		return runtime_->queue_host_message(opennova::c2s::LOADOUT_SUBMIT,
-				opennova::encode_loadout_submit(submit));
-	}
-	// A joiner's mid-session ACCEPT applies nothing locally: the selection becomes the
-	// resident kit, the 0x2F seam re-arms with the live slot ahead of the slot table's
-	// reset, and the 0x2F goes out; the host's 0x5A grant rebuilds (engine
-	// world/player_loadout.h local_loadout_submit_in_session carries the witness).
-	if (p_submit_joiner_request && is_joiner() && runtime_ && runtime_->in_match()) {
-		kernel_->local.loadout.spawn_kit_set = true;
-		kernel_->local.loadout.spawn_kit = p_kit;
+	// The armory ACCEPT in a session, a joiner's client and a listen host's own client
+	// alike: the selection becomes the resident kit, off the authority the slot table
+	// empties, and the one 0x2F (the armory's class, the live slot) goes out; nothing else
+	// applies locally until the host's grant (engine: inmatch::armory_accept_in_session
+	// carries the witness; D-NET-695, D-NET-NEW-L2-17).
+	const bool host_own_client = is_host_listening() && !is_joiner() && kernel_->world.rules.mp_session;
+	const bool joiner_in_match = is_joiner() && runtime_ != nullptr && runtime_->in_match();
+	if (p_submit_joiner_request && runtime_ != nullptr && (host_own_client || joiner_in_match) &&
+			p_player_class >= 0 && p_player_class <= 0xFF) {
+		const opennova::LoadoutSubmit submit = opennova::inmatch::armory_accept_in_session(
+				kernel_->world, kernel_->local, p_kit, static_cast<uint8_t>(p_player_class),
+				/*authority=*/host_own_client, kernel_->mission.header.mission_type);
+		// The seam re-arms from the new resident kit.
 		push_joiner_loadout_kit();
-		opennova::world::local_loadout_submit_in_session(kernel_->world, kernel_->local.loadout,
-				kernel_->local.inventory, p_kit, /*authority=*/false);
-		runtime_->queue_loadout_resubmit();
-		return true;
+		return runtime_->queue_loadout_submit(submit);
 	}
 	if (!opennova::world::local_loadout_apply_accept(kernel_->world, kernel_->local.loadout,
 				kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid, p_kit,
@@ -257,12 +247,6 @@ bool Simulation::apply_local_player_loadout_rows(
 	// equipped slot on the seam, exactly retail's second-submit content
 	// [orig: Game_StartMission @0x525c2e].
 	push_joiner_loadout_kit();
-	// A mid-session accept (the armory ACCEPT) re-submits the loadout on the wire;
-	// the initial join pair stays owned by the 0x1A trigger. [orig:
-	// WeaponLoadout_ApplyFromBuffer @0x565d94 — the is_in_session leg sends one 0x2F
-	// with the live team/class/equipped slot; the S2C 0x5A grant then refills]
-	if (p_submit_joiner_request && is_joiner() && runtime_ && runtime_->in_match())
-		runtime_->queue_loadout_resubmit();
 	return true;
 }
 

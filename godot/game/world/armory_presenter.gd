@@ -112,14 +112,10 @@ func open() -> bool:
 	var sim: Simulation = _view.sim()
 	if sim == null:
 		return false
-	# MP is live: a joiner's ACCEPT re-submits C2S 0x2F from the applied kit (the
-	# sim queues it — apply_local_player_loadout's in-match leg), the listen host's
-	# apply is server-authoritative in-process. The client-side S2C 0x5A grant IS
-	# applied (D-NET-170 fixed): Simulation::apply_joiner_authoritative_loadout
-	# folds the server's availability/class-filtered slots into the local ones at the
-	# joiner's recv-before-actions boundary. What stays a tracked divergence is this
-	# screen's OPTIMISTIC local refill on ACCEPT, ahead of the grant — retail resets
-	# the slots and waits for the echo.
+	# MP is live: in a session the ACCEPT sends one C2S 0x2F and applies nothing
+	# locally, a joiner's and the listen host's own client's alike (the sim's
+	# apply_local_player_loadout session leg); the host's S2C 0x5A grant rebuilds
+	# the slots (D-NET-170).
 	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94]
 	if not _ensure_menu():
 		return false
@@ -334,6 +330,14 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 			applied = bool(sim.apply_local_player_loadout(
 					kit, int(loadout.get("player_class", 0))))
 		if not applied:
+			close()
+			return
+		# In a session the apply sent its 0x2F and selects nothing: the screen
+		# closes (the jmp to the tail, g_WeaponScreenOpen = 0 and
+		# Game_CloseInGameScreens) and the host's grant mounts the kit.
+		# [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - @0x565D9C -> @0x56629F,
+		#  @0x5662A9]
+		if sim != null and sim.is_mp_session():
 			close()
 			return
 		if kit.is_empty():

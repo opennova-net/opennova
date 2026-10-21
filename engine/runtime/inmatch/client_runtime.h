@@ -743,14 +743,12 @@ public:
 	void set_weapon_table(const world::WeaponTable *weapons) {
 		if (joiner_) joiner_->set_weapon_table(weapons);
 	}
-	// Queue the armory-ACCEPT loadout re-submission: one C2S 0x2F from the current kit seam,
-	// queued now as NetPacket_SendLoadoutSubmit queues it at the ACCEPT, so it leaves at the
-	// next open boundary in queue order [orig: @0x42d085] (JoinerConnection::prepare_loadout_resubmit).
-	void queue_loadout_resubmit() {
-		ProtocolMessage resubmit;
-		if (joiner_ && joiner_->prepare_loadout_resubmit(resubmit))
-			send_queue_.push_back(std::move(resubmit));
-	}
+	// Queue the armory ACCEPT's C2S 0x2F (inmatch::armory_accept_in_session builds it), as
+	// NetPacket_SendLoadoutSubmit queues it at the ACCEPT, so it leaves at the next open
+	// boundary in queue order [orig: @0x42d085]: a joiner's through its connection's stage
+	// gate (JoinerConnection::prepare_loadout_submit), a listen host's own client's on its
+	// local connection. False when nothing was queued.
+	bool queue_loadout_submit(const LoadoutSubmit &submit);
 
 	bool deployment_pick_pending() const {
 		return joiner_ && joiner_->deployment_pick_pending();

@@ -224,9 +224,9 @@ void test_the_round_init_seeds_the_own_buffer() {
 void test_the_armory_submit_feeds_the_own_accept() {
 	Rig r(/*own=*/true);
 	r.submit(8, static_cast<uint32_t>(kRifleCombo));
-	const LoadoutSubmit armory = inmatch::armory_loadout_submit(r.world,
+	const LoadoutSubmit armory = inmatch::armory_accept_in_session(r.world, *r.local,
 			{w::WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}, w::WeaponKitEntry{"WPN_NONE_SUCH", 1, -1, -1}},
-			6, &r.local->inventory);
+			6, /*authority=*/true, bms::MissionType{});
 	CHECK(armory.team == 1 && armory.player_class == 6);
 	CHECK(armory.weapon_slot_index == static_cast<uint32_t>(kRifleCombo));
 	CHECK(armory.entries.size() == 1);

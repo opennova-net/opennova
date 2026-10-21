@@ -623,6 +623,15 @@ bool ClientRuntime::queue_host_message(uint8_t tag, std::vector<uint8_t> body) {
 	return true;
 }
 
+bool ClientRuntime::queue_loadout_submit(const LoadoutSubmit &submit) {
+	if (role_ == Role::HostClient)
+		return queue_host_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(submit));
+	ProtocolMessage message;
+	if (joiner_ == nullptr || !joiner_->prepare_loadout_submit(submit, message)) return false;
+	send_queue_.push_back(std::move(message));
+	return true;
+}
+
 bool ClientRuntime::queue_deployment_pick(uint16_t wire_value) {
 	// Case 12 has no authority test: the listen host's own client queues the
 	// same [i16] pick on its local connection, and its server dispatches it

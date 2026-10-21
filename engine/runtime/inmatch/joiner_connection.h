@@ -670,17 +670,14 @@ public:
 	}
 	ProtocolMessage make_loaded_model_page_reply(uint32_t start_index) const;
 
-	// The mid-session loadout RE-submission — the armory ACCEPT leg: one C2S 0x2F composed
-	// from the current kit seam under the latched team, slot = the live equipped combo.
-	// Valid only after the initial 0x1A pair went out (retail's armory exists only
-	// in-world); returns an empty vector otherwise. [orig: WeaponLoadout_ApplyFromBuffer
-	// @0x565d94 -> NetPacket_SendLoadoutSubmit(entity Team, armory class, buffer,
-	// g_CurrentWeaponSlot); a non-authority client resets its slot pool first and the
-	// S2C 0x5A grant refills it]
-	std::vector<uint8_t> frame_loadout_resubmit();
+	// The armory ACCEPT's C2S 0x2F (inmatch::armory_accept_in_session builds it): framed as
+	// one session datagram. Valid only after the initial 0x1A pair went out (retail's armory
+	// exists only in-world); returns an empty vector otherwise. [orig:
+	// WeaponLoadout_ApplyFromBuffer @0x565D94 -> NetPacket_SendLoadoutSubmit @0x42CDC0]
+	std::vector<uint8_t> frame_loadout_submit(const LoadoutSubmit &submit);
 	// Semantic-message form for ClientRuntime's shared send boundary. This performs the same stage
-	// validation as frame_loadout_resubmit without allocating a separate sequenced datagram.
-	bool prepare_loadout_resubmit(ProtocolMessage &message_out) const;
+	// validation as frame_loadout_submit without allocating a separate sequenced datagram.
+	bool prepare_loadout_submit(const LoadoutSubmit &submit, ProtocolMessage &message_out) const;
 
 	// Anti-cheat challenge traffic counters. Every field is bookkeeping around
 	// the existing handlers (no wire effect): a live join that punts can be

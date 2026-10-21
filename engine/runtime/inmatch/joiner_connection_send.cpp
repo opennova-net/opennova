@@ -463,43 +463,26 @@ bool JoinerConnection::take_mission_start_submissions(MissionStartSubmissions &o
 	return true;
 }
 
-std::vector<uint8_t> JoinerConnection::frame_loadout_resubmit() {
+std::vector<uint8_t> JoinerConnection::frame_loadout_submit(const LoadoutSubmit &submit) {
 	ProtocolMessage message;
-	if (!prepare_loadout_resubmit(message)) return {};
+	if (!prepare_loadout_submit(submit, message)) return {};
 	std::vector<uint8_t> datagram = frame_session({std::move(message)});
 	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
 	return datagram;
 }
 
-bool JoinerConnection::prepare_loadout_resubmit(
-		ProtocolMessage &message_out) const {
-	// The armory-ACCEPT re-send [orig: WeaponLoadout_ApplyFromBuffer @0x565d94 ->
-	// NetPacket_SendLoadoutSubmit]: one 0x2F, current team + class + kit, slot = the
-	// live equipped combo (retail passes g_CurrentWeaponSlot). Only meaningful once
-	// the initial submission has gone out — the armory opens in-world.
-	// This leg does NOT re-read the profile side blocks: retail hands the ARMORY's
-	// own edited buffer and the armory's class to the builder, so the applied kit
-	// (LoadoutKit::player_class/rows) stays the source here.
+bool JoinerConnection::prepare_loadout_submit(
+		const LoadoutSubmit &submit, ProtocolMessage &message_out) const {
+	// The armory ACCEPT's one 0x2F, queued as NetPacket_SendLoadoutSubmit queues it
+	// [orig: WeaponLoadout_ApplyFromBuffer @0x565D94]. Only once the initial submission
+	// has gone out: the armory opens in-world.
 	if (post_auth_stage_ != PostAuthStage::AwaitDeployment &&
 	    post_auth_stage_ != PostAuthStage::AwaitDeployPick &&
 	    post_auth_stage_ != PostAuthStage::AwaitDeployRelease &&
 	    post_auth_stage_ != PostAuthStage::Complete) {
-		return {};
+		return false;
 	}
-	LoadoutSubmit submit;
-	if (loadout_kit_set_) {
-		submit.team = assigned_team_;
-		submit.player_class = loadout_kit_.player_class;
-		submit.weapon_slot_index = loadout_kit_.equipped_combo >= 0
-				? static_cast<uint32_t>(loadout_kit_.equipped_combo)
-				: 195u;
-		submit.entries = loadout_kit_.rows;
-	} else {
-		submit = fresh_profile_loadout_submit(weapons_, assigned_team_);
-	}
-	submit.player_class = loadout_wire_class(submit.player_class);
-	message_out = make_protocol_message(
-			0x2F, encode_loadout_submit(submit));
+	message_out = make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(submit));
 	return true;
 }
 

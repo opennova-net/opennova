@@ -430,7 +430,11 @@ bool check_runtime_host_close_bypasses_holdoff_and_discards_queued_traffic() {
 	if (!expect(client.queue_fired_round(fire),
 			"gameplay traffic queues while the established session is live"))
 		return false;
-	client.queue_loadout_resubmit();
+	LoadoutSubmit armory; // an armory ACCEPT's 0x2F (its content is not read here)
+	armory.team = 1;
+	armory.player_class = 8;
+	armory.weapon_slot_index = 0xC3;
+	(void)client.queue_loadout_submit(armory);
 
 	const std::vector<uint8_t> time_sync = frame_s2c(
 			server_tx,

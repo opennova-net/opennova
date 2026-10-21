@@ -3064,10 +3064,14 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	if (!expect(submitted_loadouts[1] == expected_second,
 			"zones: second 0x2F carries the injected kit at the equipped combo")) return false;
 
-	// The mid-session re-submission (the armory ACCEPT leg): ONE more 0x2F with the
-	// same kit at the live equipped combo, host re-grants without disturbing the
-	// deployed player. [orig: WeaponLoadout_ApplyFromBuffer @0x565d94]
-	client.queue_loadout_resubmit();
+	// The armory ACCEPT leg: the one 0x2F the apply sends (inmatch::armory_accept_in_session
+	// builds it; here the same kit at the live equipped combo) rides the wire, and the host
+	// re-grants without disturbing the deployed player. [orig: WeaponLoadout_ApplyFromBuffer
+	// @0x565d94]
+	LoadoutSubmit armory;
+	if (!expect(decode_loadout_submit(expected_second.data(), expected_second.size(), armory) &&
+			client.queue_loadout_submit(armory),
+			"zones: the armory's 0x2F queues")) return false;
 	// Allow two of the dictated twelve-tick boundaries for the queued submit.
 	drive_frames(24, [&] { return submitted_loadouts.size() >= 3; });
 	return expect(submitted_loadouts.size() == 3 && submitted_loadouts[2] == expected_second,
@@ -6258,6 +6262,16 @@ bool run_dead_joiner_keeps_pinging_every_boundary() {
 			"the dead player's frame runs the linger out after the 0x25");
 }
 
+// An armory ACCEPT's 0x2F for the queue-order tests (its content is
+// inmatch::armory_accept_in_session's; these read only where it rides).
+LoadoutSubmit armory_accept_submit() {
+	LoadoutSubmit submit;
+	submit.team = 1;
+	submit.player_class = 8;
+	submit.weapon_slot_index = 0xC3;
+	return submit;
+}
+
 bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	const std::string client_scrk = "CLIENT-LIVE-BATCH-SCRK";
 	const std::string server_scrk = "SERVER-LIVE-BATCH-SCRK";
@@ -6271,7 +6285,7 @@ bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	if (!expect(client.queue_vehicle_attach(0x1007, 6),
 			"a deployed joiner can queue C2S 0x26 attach"))
 		return false;
-	client.queue_loadout_resubmit();
+	(void)client.queue_loadout_submit(armory_accept_submit());
 	const std::vector<std::vector<uint8_t>> attach_frame =
 			client.Client_ProcessNetworkFrame(999u);
 	if (!expect(attach_frame.size() == 1,
@@ -6872,7 +6886,7 @@ bool run_c2s_producers_share_one_chronological_queue() {
 		                    client.queue_reload_request(reload),
 				"one-queue: the producers accept"))
 			return false;
-		client.queue_loadout_resubmit();
+		(void)client.queue_loadout_submit(armory_accept_submit());
 		if (!expect(client.queue_door_request(0x1005, 1, 0), "one-queue: the door request queues"))
 			return false;
 		std::vector<uint8_t> tags;
@@ -7255,7 +7269,7 @@ bool run_start_resets_reusable_runtime_state() {
 	if (!expect(client.queue_vehicle_attach(0x1007, 3),
 			"reuse fixture queues session-bound gameplay traffic"))
 		return false;
-	client.queue_loadout_resubmit();
+	(void)client.queue_loadout_submit(armory_accept_submit());
 	client.queue_deployment_pick(0xFFFFu);
 
 	SessionSequencing first_server_tx = inmatch::make_jo_game_session_sequencing();
@@ -7389,8 +7403,8 @@ bool run_joiner_correlates_handshake_echoes() {
 
 // Both witnessed writers of g_LocalTeam must be falsifiable. S2C 0x04 installs
 // the admission team; S2C 0x75 byte 1 refreshes it when the server broadcasts
-// this player's live slot state. Read the result through frame_loadout_resubmit
-// — the same assigned_team_ source the 0x1A pair uses.
+// this player's live slot state. Read the latch the 0x1A pair's team byte uses
+// (the armory's 0x2F takes the body's team byte instead, @0x565D8C).
 // [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> g_LocalTeam @0x425499;
 // NapiNPClientMsg_SetSpectatorMode @0x4259E0 -> g_LocalTeam @0x425A32]
 bool run_team_latch_is_falsifiable() {
@@ -7401,15 +7415,8 @@ bool run_team_latch_is_falsifiable() {
 	joiner.seed_in_match(0x33445566u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0001, w::kPlayerInfantryTypeId);
 
-	ProtocolPacketHeader header;
-	std::vector<ProtocolMessage> messages;
 	auto resubmit_team = [&](uint8_t &team_out) {
-		const std::vector<uint8_t> datagram = joiner.frame_loadout_resubmit();
-		if (datagram.empty() ||
-		    !decode_client_session(datagram, client_scrk, header, messages) ||
-		    messages.size() != 1 || messages[0].tag != 0x2F || messages[0].payload.empty())
-			return false;
-		team_out = messages[0].payload[0];
+		team_out = joiner.assigned_team();
 		return true;
 	};
 

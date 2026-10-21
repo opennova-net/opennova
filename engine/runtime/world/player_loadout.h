@@ -123,20 +123,6 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
                                 const std::vector<WeaponKitEntry> &kit,
                                 int32_t player_class, bool validate_banned);
 
-// The armory ACCEPT in a session: the selection becomes the resident kit (the
-// list the 0x5A grant's rebuild reads), and off the authority the slot table
-// empties; nothing else applies locally (no class, no slots, no ammo) until the
-// host's 0x5A grant rebuilds them. The embedder sends the 0x2F (its slot the live
-// current one, taken before the reset). [orig: WeaponLoadout_ApplyFromBuffer
-// @0x565CD0 - the selection's copy into the resident list @0x565D27..0x565D4B,
-// is_in_session @0x565D3A..0x565D4D, the authority test @0x565D4F,
-// WeaponSlotPool_ResetAllEntries @0x565D58..0x565D66, NetPacket_SendLoadoutSubmit
-// @0x565D94, the exit @0x565D9C]
-void local_loadout_submit_in_session(World &world, LocalPlayerLoadout &loadout,
-                                     WeaponInventory &inventory,
-                                     const std::vector<WeaponKitEntry> &kit,
-                                     bool authority);
-
 // The armory PLAYER_CLASS spin catalog: the five soldier classes in the
 // authored spin order, each pairing its wire class value with the "Menu"
 // section GameText label key. [orig: UI_InitWeaponClassSelection @0x567250 —
