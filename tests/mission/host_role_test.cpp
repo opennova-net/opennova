@@ -31,6 +31,7 @@
 #include <formats/playersav/player_sav.h>
 
 #include <runtime/inmatch/null_datagram_socket.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include "../common/boot_file_source.h"
 #include "../common/synthetic_mission.h"
@@ -330,6 +331,77 @@ void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::s
 	kernel.world.cached.client_preround_timer = 5;
 	CHECK(!role.action_head_admits(182));
 	CHECK(role.action_head_admits(201));
+}
+
+// D-NET-710 (L2-s9 row 5, LX-s8's kick witness): a listen host's console never punts by
+// itself. Its line goes to its own server as C2S 0x04, whose handler runs only NETLOG / STAT
+// and echoes the rest to the sender as S2C 0x06; the echo runs the client's walk, where a
+// bare PUNT ALL is no verb (nobody punted) and the SERVER verb sends the rest of the line
+// back as C2S 0x24, which the server runs with the local slot's authority: PUNT ALL stages
+// reason 33 "S.C:SPA" on every non-local slot (a joiner's 0x46 burst answers it).
+// [orig: Client_ProcessConsoleCommand @0x520E80 - the peer's C2S 0x04 @0x520EFE..0x520F29;
+//  NapiNPServerMsg_HandleConsoleLine @0x5199D0 - the NETLOG arm @0x519A7B, the S2C 0x06
+//  @0x519AB5..0x519AC5; NapiNPClientMsg_HandleConsoleEcho @0x432BC0 ->
+//  NapiClientCmd_ParseAndExecute @0x432C12; NapiClientCmd_HandleDebugCommand @0x42C4D0 - the
+//  SERVER arm @0x42C85D, the match @0x42C867, the C2S 0x24 @0x42C904..0x42C922;
+//  NapiNPServerMsg_0x024 @0x514DC0 -> Server_HandleBanPuntCommand @0x50B380 (the sender's
+//  slot @0x514DE7, the local slot's authority @0x50B3C4, PUNT ALL @0x50B945..0x50B951)]
+void check_listen_host_console_punts_only_through_server(
+		std::map<std::string, std::string> &files, const char *line, bool punts) {
+	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	auto &kernel = *kernel_storage;
+	auto role_storage = std::make_unique<inmatch::HostRole>();
+	auto &role = *role_storage;
+	role.bind(kernel);
+	inmatch::ListenHostState &host = role.state;
+	kernel.open_document(two_entity_mission(), "console_punt", source_over(&files));
+	ms::KernelBootOptions options;
+	options.mp_session = true;
+	options.game_type = mission_game_type(kernel.mission);
+	options.bringup_net_session = [&] {
+		inmatch::HostConfig cfg;
+		cfg.title = &kJo;
+		cfg.config.server_name = "console_punt";
+		cfg.config.max_players = 4;
+		cfg.config.game_type = options.game_type;
+		cfg.socket_mode = inmatch::SocketMode::Lan;
+		cfg.serve_and_play = true;
+		inmatch::HostBringup bringup;
+		bringup.host_cfg = cfg;
+		role.bring_up(bringup);
+	};
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	CHECK(host.client_runtime != nullptr);
+	if (host.client_runtime == nullptr) return;
+	opennova::inmatch::NullDatagramSocket socket;
+	role.set_socket(&socket);
+	for (int i = 0; i < 70; ++i) role.run_tick(tick_input(0)); // past the console's first second
+	// A remote player's slot (a joiner's server-side connection, added and in the match).
+	auto transport = std::make_unique<replication::UdpSessionTransport>(
+			replication::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection remote;
+	remote.peer = PeerAddr{0x0100007Fu, 34100};
+	remote.type = inmatch::NapiNPConnection::kTypeServerSide;
+	remote.phase = inmatch::ConnectionPhase::InMatch;
+	remote.burst.spawned = true;
+	remote.reply.player_slot = 1;
+	remote.server_sk = 0x51525354u;
+	remote.client_ck = 0x61626364u;
+	remote.server_scrk = "CONSOLE-PUNT-SERVER-SCRK";
+	remote.client_scrk = "CONSOLE-PUNT-CLIENT-SCRK";
+	remote.link.mode = replication::TransportMode::Client;
+	remote.link.transport = transport.get();
+	host.host_owner.ctx.np_protocol.connection_list.push_back(std::move(remote));
+	const auto remote_conn = [&]() -> inmatch::NapiNPConnection * {
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.peer.port == 34100) return &conn;
+		return nullptr;
+	};
+	CHECK(host.client_runtime->console_command(line));
+	for (int i = 0; i < 12; ++i) role.run_tick(tick_input(0));
+	const inmatch::NapiNPConnection *punted = remote_conn();
+	CHECK(punted != nullptr && punted->host_disconnect_sent == punts);
 }
 
 // Its own frame: main's locals already fill the 1 MB test stack.
@@ -1179,6 +1251,8 @@ int main() {
 
 	check_listen_host_deploy_convert(files);
 	check_head_preround_reads_the_own_clients_copy(files);
+	check_listen_host_console_punts_only_through_server(files, "PUNT ALL", /*punts=*/false);
+	check_listen_host_console_punts_only_through_server(files, "SERVER PUNT ALL", /*punts=*/true);
 
 	// --- the authority's own stance rides its looped-back C2S 0x1D ----------
 	// The server handler latches the host's own player from the 0x1D its own
