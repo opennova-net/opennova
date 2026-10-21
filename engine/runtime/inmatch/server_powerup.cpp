@@ -74,7 +74,7 @@ bool ServerRemoteWeaponTables::remote_weapon_tables(const world::World &world,
 	return true;
 }
 
-bool ServerRemoteWeaponTables::remote_ammo(const world::World &, world::EntityHandle player,
+bool ServerRemoteWeaponTables::remote_ammo(const world::World &world, world::EntityHandle player,
 		int32_t ammo_class, int32_t bucket, int32_t &pool, int32_t &loaded) const {
 	NapiNPConnection *conn = owning_connection(roster_, player);
 	if (conn == nullptr) return false; // Entity_ValidatePtr finds no slot
@@ -82,7 +82,12 @@ bool ServerRemoteWeaponTables::remote_ammo(const world::World &, world::EntityHa
 	const auto &buckets = conn->reply.shared_clips;
 	pool = ammo_class >= 0 && static_cast<size_t>(ammo_class) < pools.size()
 			? pools[static_cast<size_t>(ammo_class)] : 0;
-	loaded = bucket >= 0 && static_cast<size_t>(bucket) < buckets.size()
+	// A bucket at or past the ammo class count reads no rounds, whatever the
+	// table holds there [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0
+	//  (`cmp esi, g_AmmoClassCount; jl` @0x5405F0..0x5405FE, 0 past it)].
+	const size_t class_count = world.tables.weapons.ammo_class_names.size();
+	loaded = bucket >= 0 && static_cast<size_t>(bucket) < class_count &&
+					static_cast<size_t>(bucket) < buckets.size()
 			? buckets[static_cast<size_t>(bucket)] : 0;
 	return true;
 }

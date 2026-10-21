@@ -294,12 +294,30 @@ void test_a_busy_row_refuses_the_attach() {
 	}
 }
 
+// The shared-clip read is bounded by the ammo class count, not by the table's
+// size: with one class, bucket 0 reads its rounds and bucket 1 reads none
+// [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0 (`cmp esi, g_AmmoClassCount;
+//  jl` @0x5405F0..0x5405FE)].
+void test_a_bucket_past_the_class_count_reads_no_rounds() {
+	Rig r;
+	r.conn().reply.shared_clips[0] = 5;
+	r.conn().reply.shared_clips[1] = 7;
+	inmatch::ServerRemoteWeaponTables tables(r.roster);
+	int32_t pool = 0;
+	int32_t loaded = -1;
+	CHECK(tables.remote_ammo(r.world, r.shooter, 0, 0, pool, loaded));
+	CHECK(pool == 2 && loaded == 5);
+	CHECK(tables.remote_ammo(r.world, r.shooter, 0, 1, pool, loaded));
+	CHECK(loaded == 0);
+}
+
 } // namespace
 
 int main() {
 	test_the_walk_cycles_a_remote_players_reload_until_its_own_request();
 	test_an_empty_pool_requests_nothing();
 	test_a_busy_row_refuses_the_attach();
+	test_a_bucket_past_the_class_count_reads_no_rounds();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
