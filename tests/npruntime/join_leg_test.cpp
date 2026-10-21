@@ -1130,16 +1130,19 @@ bool run_an_orphaned_row_is_a_player_list_row() {
 }
 
 // D-NET-NEW-L1-24 (L1-s16): the tick's per-row walks take an orphaned row as any active row. In
-// state 6 its own 1 Hz 0x57 goes to its net player (send_mask 2, the row's +0x1C), so the player
-// whose re-add orphaned it is sent one per row, and the 0x16's send loop sends to every active
+// state 6 its own 0x0A (its own body's anchor) and its own 1 Hz 0x57 go to its net player (the
+// row's +0x1C), so the player whose re-add orphaned it is sent them for that row too while its
+// fresh row loads, and the 0x16's send loop sends to every active
 // row, an orphaned one through its net player, so that player takes two lists per boundary. Once
 // the player has left, ours reads no net player through the row (Q7-36 (a)): its transport is
 // cleared and nothing is sent.
-// [orig: Server_TickUpdate - the row's +0x1C @0x51E3AA, the cooldown @0x51E3BB..0x51E3C8, state 6
-//  @0x51E40B, the 0x57 to the net player @0x51E44A / @0x51E450; Server_BuildAndBroadcastScoreboard
+// [orig: Server_TickUpdate - the row's +0x1C @0x51E3AA, the boundary @0x51E3D6, the call @0x51E3E4,
+//  the cooldown @0x51E3BB..0x51E3C8, state 6 @0x51E40B, the 0x57 to the net player @0x51E44A /
+//  @0x51E450; Server_SendEntityStateToPlayer @0x517BA0 - the send to the row @0x517CB5;
+//  Server_BuildAndBroadcastScoreboard
 //  @0x50D960 - the active byte @0x50DDC0, the row as the target @0x50DDDC, the send @0x50DE00;
 //  NapiNPServer_SendFiltered @0x4C87E0 - the 0x20 arm, the row's +0x1C @0x4C8A1F]
-bool run_an_orphaned_row_takes_its_own_rtt_and_list() {
+bool run_an_orphaned_row_takes_its_own_frame_rtt_and_list() {
 	JoinFixture f(/*with_existing=*/false);
 	inmatch::NapiNPConnection &j = f.joiner();
 	j.reply.admission_metadata_pushed = true;
@@ -1168,6 +1171,12 @@ bool run_an_orphaned_row_takes_its_own_rtt_and_list() {
 	inmatch::emit_scoreboard_boundary(*f.ctx, *f.world);
 	if (!expect(count(JoinFixture::drain(f.joiner_transport), opennova::s2c::PLAYER_LIST) == 2,
 	            "the player takes a list for each of its two rows"))
+		return false;
+	// The tick: the fresh row is not in the match, the orphaned row is, so its frame is the one.
+	f.joiner().s2c_send_boundary_open = true;
+	inmatch::Server_TickUpdate(*f.ctx);
+	if (!expect(count(JoinFixture::drain(f.joiner_transport), opennova::s2c::PER_FRAME_UPDATE) == 1,
+	            "the orphaned row's own 0x0A reaches its net player"))
 		return false;
 	// The player leaves: the orphaned row stays active and reads no net player.
 	if (!expect(inmatch::destroy_connection(*f.ctx, peer, nullptr) &&
@@ -1290,7 +1299,7 @@ int main() {
 	if (!run_the_add_queues_its_records_ahead_of_a_later_list()) ++failures;
 	if (!run_a_repeated_echo_adds_the_player_again()) ++failures;
 	if (!run_an_orphaned_row_is_a_player_list_row()) ++failures;
-	if (!run_an_orphaned_row_takes_its_own_rtt_and_list()) ++failures;
+	if (!run_an_orphaned_row_takes_its_own_frame_rtt_and_list()) ++failures;
 	if (!run_an_echo_in_the_ticket_wait_spawns_without_a_ticket()) ++failures;
 	if (!run_a_repeated_echo_keeps_the_held_nag_stamp()) ++failures;
 	if (failures != 0) return 1;

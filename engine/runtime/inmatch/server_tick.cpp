@@ -1090,14 +1090,48 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, the pointer
 	// @0x517BC8..0x517BCC with no lifetime test, recipient eye stores @0x517BF5..0x517C13,
 	// phase increment @0x517BE8]
+	// The rows in the slot table's order: each connection's own row, and every orphaned row whose
+	// net player still lives, which takes its own 0x0A (its own list, its own body's anchor) sent
+	// to that player (D-NET-NEW-L1-24; none past the player's leave, Q7-36 (a)). A row's frame
+	// gates on its own state word and on its net player's connection (the description, the
+	// boundary), which for a connection's own row are its own.
+	// [orig: Server_TickUpdate's per-slot block - the row's +0x1C @0x51E3AA, its connection
+	//  @0x51E3B1, the boundary @0x51E3D6, the call @0x51E3E4; Server_SendEntityStateToPlayer
+	//  @0x517BA0 - the row's net player @0x517BDD, the send to the row @0x517CA5..0x517CB5;
+	//  NapiNPServer_SendFiltered's 0x20 arm, the row's +0x1C @0x4C8A1F]
+	struct FrameRow {
+		NapiNPConnection *row;
+		NapiNPConnection *net_player;
+	};
+	std::vector<FrameRow> frame_rows;
+	if (!world.match.outcome().ended) {
+		for (NapiNPConnection *slot : connections_in_slot_order(ctx)) frame_rows.push_back({slot, slot});
+		for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+			NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
+			if (net_player == nullptr) continue;
+			// The writer's rate test reads the net player's connection uptime [orig:
+			//  Server_SendEntityStateToPlayer - CNetPlayer_GetConnectionUptime @0x517C62].
+			orphan.row.receive_inactive_ms = net_player->receive_inactive_ms;
+			frame_rows.push_back({&orphan.row, net_player});
+		}
+		std::stable_sort(frame_rows.begin(), frame_rows.end(), [](const FrameRow &a, const FrameRow &b) {
+			return a.row->reply.player_slot < b.row->reply.player_slot;
+		});
+	}
+	// The host's type-2 loopback is an in-process seam and remains full-rate (its own player
+	// takes the header-only frame inside the fan). Type-1 peers receive one fresh 0x0A only when
+	// their configured S2C send boundary opens; queuing all intervening snapshots would burst
+	// stale frames at that boundary.
+	const auto takes_frame = [](const FrameRow &r) {
+		return r.row->burst.spawned && !r.net_player->host_disconnect_sent &&
+				!(r.net_player->type == NapiNPConnection::kTypeServerSide &&
+						!r.net_player->s2c_send_boundary_open);
+	};
 	if (!world.match.outcome().ended) {
 		// The snapshot is built only for recipients that take entity records.
-		// Type-1 peers take one only at their open send boundary (see the fan below).
 		bool any_record_recipient = false;
-		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn)) continue;
-			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-			if (!entity_state_takes_records(world, conn)) continue;
+		for (const FrameRow &r : frame_rows) {
+			if (!takes_frame(r) || !entity_state_takes_records(world, *r.row)) continue;
 			any_record_recipient = true;
 			break;
 		}
@@ -1105,45 +1139,35 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		if (any_record_recipient) ents = snapshot_entity_states(ctx, world);
 		// The slot table's order, not the join order: each slot's writer stores
 		// show in the records of the slots after it.
-		for (NapiNPConnection *slot : connections_in_slot_order(ctx)) {
-			NapiNPConnection &conn = *slot;
-			if (!is_in_match(conn)) continue;
-			// The host's type-2 loopback is an in-process seam and remains
-			// full-rate (its own player takes the header-only frame inside the
-			// fan). Type-1 peers receive one fresh 0x0A only when their
-			// configured S2C send boundary opens; queuing all intervening
-			// snapshots would burst stale frames at that boundary.
-			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-			// Built here and queued just below: the frame's CONTENT is the world
-			// after the script pass and the maintenance, before the motor step.
-			// Slot by slot, each slot's list, writer stores and records in turn,
-			// so a slot's records read the bodies of the slots written before it
-			// after their stores and those after it before theirs.
+		for (const FrameRow &r : frame_rows) {
+			NapiNPConnection &conn = *r.row;
+			if (!takes_frame(r)) continue;
+			// Built and queued slot by slot: the frame's CONTENT is the world after the script
+			// pass and the maintenance, before the motor step; each slot's list, writer stores,
+			// records and send in turn, so a slot's records read the bodies of the slots written
+			// before it after their stores and those after it before theirs, and a net player
+			// with two rows takes each row's despawns and frame in slot order.
 			// [orig: Server_TickUpdate's per-slot loop @0x51E3A0..0x51E47C, the
 			//  call @0x51E3E4 -> Server_SendPlayerSlotStateFrame @0x51BBA0 (its
 			//  state-6 call @0x51BBDC) -> Server_SendEntityStateToPlayer @0x517BA0]
 			conn.frame_update_staged =
 					write_entity_state(ctx, world, conn, ents, conn.staged_frame_update);
+			if (!conn.frame_update_staged) continue;
+			conn.frame_update_staged = false;
+			// A slot punted by a maintenance leg above is still in state 6 when
+			// retail reaches its per-slot writer (a punt writes no slot state), but
+			// its connection has sent its description, so the queue drops the frame:
+			// the description record is the last thing it is sent. Ours leaves
+			// is_in_match at the punt (takes_frame): the same wire.
+			// [orig: Server_SendEntityStateToPlayer @0x517BA0 - the state-6 test
+			//  `cmp dword ptr [esi+20h], 6` @0x517BD2; CNapiNPConnection_QueueMessage
+			//  @0x628640 - the desc_sent drop `cmp byte ptr [ecx+70Dh], 0` @0x62864D]
+			if (r.net_player->link.transport != nullptr) {
+				r.net_player->link.transport->host_send(s2c::PER_FRAME_UPDATE,
+						std::move(conn.staged_frame_update), /*reliable=*/false);
+			}
+			conn.staged_frame_update.clear();
 		}
-	}
-	// Queue the frames just built, retail's per-slot send.
-	// [orig: Server_TickUpdate per-slot block @0x51E3D6..0x51E450]
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!conn.frame_update_staged) continue;
-		conn.frame_update_staged = false;
-		// A slot punted by a maintenance leg above is still in state 6 when
-		// retail reaches its per-slot writer (a punt writes no slot state), but
-		// its connection has sent its description, so the queue drops the frame:
-		// the description record is the last thing it is sent. Ours leaves
-		// is_in_match at the punt and drops the frame here: the same wire.
-		// [orig: Server_SendEntityStateToPlayer @0x517BA0 - the state-6 test
-		//  `cmp dword ptr [esi+20h], 6` @0x517BD2; CNapiNPConnection_QueueMessage
-		//  @0x628640 - the desc_sent drop `cmp byte ptr [ecx+70Dh], 0` @0x62864D]
-		if (is_in_match(conn) && conn.link.transport != nullptr) {
-			conn.link.transport->host_send(s2c::PER_FRAME_UPDATE,
-					std::move(conn.staged_frame_update), /*reliable=*/false);
-		}
-		conn.staged_frame_update.clear();
 	}
 
 	// Retail holds the multiplayer post-round state for 2790 server ticks. Its
