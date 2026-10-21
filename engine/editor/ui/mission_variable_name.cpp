@@ -58,8 +58,8 @@ void draw_variable_name_field(Workspace &workspace, const MissionDocument &missi
 	                                   "which the script names itself: no name is kept for it.")
 	                     : "What the editor calls V" + std::to_string(index) + " in this mission, up to " +
 	                               std::to_string(mission::kMisDescriptionChars) +
-	                               " characters. The game never reads it: it is kept in the .mis beside the mission, on "
-	                               "a line both original readers skip. Empty takes the name away.");
+	                               " characters; empty takes the name away. The game never reads it: the .mis beside the "
+	                               "mission keeps it on a line both original readers skip.");
 	if ((entered || ImGui::IsItemDeactivatedAfterEdit()) && editable && !past && name != state.text) {
 		std::vector<Edit> edits;
 		state.refusal.clear();
@@ -101,8 +101,9 @@ void draw_variable_live(Workspace &workspace, const MissionDocument &mission, in
 
 void draw_variable_names_left(const MissionDocument &mission) {
 	const size_t left = mission_variable_names_left(mission);
-	ImGui::TextDisabled("%zu more variable%s can take a name (%zu at most).", left, left == 1 ? "" : "s",
-	                    mission::kVariableNameCount);
+	ui_kit::quiet_text("Variable names left: " + std::to_string(left) + " of " + std::to_string(mission::kVariableNameCount),
+	                   "How many more of V0 to V" + std::to_string(mission::kVariableNameIndexMax) +
+	                           " can take a name: the .mis keeps names for those alone.");
 }
 
 } // namespace opennova::editor

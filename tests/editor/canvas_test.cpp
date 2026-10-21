@@ -2051,18 +2051,18 @@ int test_mission_group_turn() {
 	return 0;
 }
 
-// The line under the picture's words (S15 review): the arrows nudge a metre when the snap is free; the
-// Area box says the toolbar's grid, which it takes whatever is held.
+// The line under the picture's words (S15 review), a line of at most about 60 characters: the arrows nudge a
+// metre when the snap is free; the Area box says the toolbar's grid, which it takes whatever is held.
 int test_mission_hint_words() {
 	MissionHintInput in;
 	in.selected = 1;
 	in.grid = 0.0f;
-	TEST_EXPECT(mission_canvas_hint(in).find("arrows nudge (1 m") != std::string::npos);
+	TEST_EXPECT(mission_canvas_hint(in).find("arrows nudge (1 m") != std::string::npos && mission_canvas_hint(in).size() <= 64);
 	in.grid = 5.0f;
 	TEST_EXPECT(mission_canvas_hint(in).find("arrows nudge (5 m") != std::string::npos);
 	in.tool = MissionTool::Area;
 	in.snap = 0.0f; // Ctrl held
-	TEST_EXPECT(mission_canvas_hint(in).find("snaps to 5 m") != std::string::npos);
+	TEST_EXPECT(mission_canvas_hint(in).find("snaps to 5 m") != std::string::npos && mission_canvas_hint(in).size() <= 64);
 	std::printf("test_mission_hint_words passed\n");
 	return 0;
 }

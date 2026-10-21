@@ -63,7 +63,7 @@ constexpr double kFlashSeconds = 1.2; // how long a field a request showed keeps
 constexpr size_t kSavedLines = 8; // the records a changed field's tooltip names, of several
 
 const ImVec4 kMixed(0.60f, 0.75f, 0.95f, 1.0f);
-const char *const kIgnoredTip = "The game does not read this here; the file still writes it.";
+const char *const kIgnoredTip = "The game does not read this here.";
 const char *const kMixedTip = "The selected records differ here; a change sets it on every one.";
 const char *const kUnverifiedTip = "Whether the game reads this here is not witnessed yet.";
 
@@ -492,6 +492,21 @@ void written_tick(Workspace &workspace, const Document &document, const Targets 
 	ui_kit::tooltip(present ? "Written to the file. Untick to leave it out." : "Left out of the file. Tick to write it.");
 }
 
+// A field the game does not read here, marked after its name or its value: a muted ring struck through (drawn: the
+// font has no symbols), a line of text wide in a box as high as a control, its tooltip the caller's.
+void ignored_mark() {
+	const float width = ImGui::GetTextLineHeight(), height = ImGui::GetFrameHeight();
+	const ImVec2 at = ImGui::GetCursorScreenPos();
+	ImGui::Dummy(ImVec2(width, height));
+	if (!ImGui::IsItemVisible()) return;
+	const ImU32 color = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+	const ImVec2 centre(at.x + width * 0.5f, at.y + height * 0.5f);
+	const float r = width * 0.3f, d = r * 0.7f;
+	ImDrawList *draw = ImGui::GetWindowDrawList();
+	draw->AddCircle(centre, r, color, 0, 1.5f);
+	draw->AddLine(ImVec2(centre.x - d, centre.y + d), ImVec2(centre.x + d, centre.y - d), color, 1.5f);
+}
+
 // What the tooltip of a row's name says of its fields: the schema's words of a field alone
 // (field_widgets::field_tip); a group's members by name and id, and their unit.
 std::string row_tip(const RowFields &fields) {
@@ -503,8 +518,8 @@ std::string row_tip(const RowFields &fields) {
 	return tip;
 }
 
-// A row's name, cut to its cell, and the tags after it: (mixed) where the targets differ,
-// (ignored) where the game reads none of its fields here or (?) where it may not read one
+// A row's name, cut to its cell, and the tags after it: (mixed) where the targets differ, the
+// ignored mark where the game reads none of its fields here or (?) where it may not read one
 // (in a cell too narrow for them, their words move into the tooltip, which says what the
 // schema says of its fields (row_tip) after `about`, what the row is, when given). A row
 // whose fields changed since the last save is marked: a thin bar at the row's left edge, the
@@ -513,7 +528,7 @@ std::string row_tip(const RowFields &fields) {
 void field_name(Workspace &workspace, const Document &document, const Targets &targets, const RowFields &fields,
                 const std::string &title, const char *about, bool mixed, const FieldChange &change, float left) {
 	struct Tag {
-		const char *text;
+		const char *text; // null: the ignored mark
 		ImVec4 color;
 		const char *tip;
 	};
@@ -523,11 +538,12 @@ void field_name(Workspace &workspace, const Document &document, const Targets &t
 		return [which](const FieldUse *field) { return field->applies == which; };
 	};
 	if (std::all_of(fields.begin(), fields.end(), applies(Applicability::Ignored)))
-		tags.push_back({"(ignored)", ui_kit::warning_color(), kIgnoredTip});
+		tags.push_back({nullptr, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), kIgnoredTip});
 	else if (std::any_of(fields.begin(), fields.end(), applies(Applicability::Unverified)))
 		tags.push_back({"(?)", ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), kUnverifiedTip});
 	float tags_width = 0.0f;
-	for (const Tag &tag : tags) tags_width += ImGui::GetStyle().ItemSpacing.x + ui_kit::text_width(tag.text);
+	for (const Tag &tag : tags)
+		tags_width += ImGui::GetStyle().ItemSpacing.x + (tag.text ? ui_kit::text_width(tag.text) : ImGui::GetTextLineHeight());
 	const float room = ImGui::GetContentRegionAvail().x;
 	const bool tagged = room - tags_width >= ImGui::GetFontSize() * 3.0f;
 	const std::string shown = ui_kit::fit(title, tagged ? room - tags_width : room);
@@ -551,7 +567,8 @@ void field_name(Workspace &workspace, const Document &document, const Targets &t
 	if (!tagged) return;
 	for (const Tag &tag : tags) {
 		ImGui::SameLine();
-		ImGui::TextColored(tag.color, "%s", tag.text);
+		if (tag.text) ImGui::TextColored(tag.color, "%s", tag.text);
+		else ignored_mark();
 		ui_kit::tooltip(tag.tip);
 	}
 }
@@ -603,6 +620,11 @@ void hotkey_words(const std::string &text) {
 	ImGui::GetWindowDrawList()->AddLine(ImVec2(x0, y), ImVec2(x1, y), ImGui::GetColorU32(ImGuiCol_Text));
 }
 
+// The muted line under a string's words: the id the field's own control under it picks, its table in its tooltip.
+void string_id_line(const DisplayName &words) {
+	ui_kit::quiet_text("String id:", "The id of the string in " + words.source + ": the control under it picks it.");
+}
+
 // A string id's words as an editable box (the plain-words lane, the audit's 3.2: a menu button's Text
 // edited the key, never the words): the string the id names, as the game's lookup reaches it, edited in
 // place and set in the table that defines it when the box lets go (SetStringText: that table opened in
@@ -631,13 +653,12 @@ void string_words(Workspace &workspace, InspectorWindow::WordsBox &box, const Do
 			ImGui::PopTextWrapPos();
 		}
 		ui_kit::tooltip("The words the player sees: the string " + words.raw + " in " + string.file +
-		                " of the data this project builds on. The project has no copy of that table to change.");
+		                " of the data this project builds on, which has no copy of that table to change.");
 		if (ui_kit::named_action("Import", string.file, "...", view.allows(EditorRequestKind::PreviewInstallImport),
-		                         "Plans importing the table from the game install into the project; once it is the "
-		                         "project's, its words are edited here.",
+		                         "Plans importing the table from the game install, whose words are then edited here.",
 		                         true))
 			workspace.request(request::preview_install_import({string.file}));
-		ImGui::TextDisabled("String id in %s:", words.source.c_str());
+		string_id_line(words);
 		return;
 	}
 	// The box shows the string as it stands, but for what is typed while it is edited and what a commit
@@ -664,20 +685,20 @@ void string_words(Workspace &workspace, InspectorWindow::WordsBox &box, const Do
 		workspace.request(request::set_string_text(document.path(), address, field.schema->id, box.text));
 	}
 	ui_kit::tooltip("The words the player sees: the string " + words.raw + " in " + words.source +
-	                ". A change is made there, so every use of the string shows it (Undo there takes it back).\n"
-	                "{hot} before a letter makes it the button's key: the game takes the marker out and underlines "
-	                "the letter (case matters: {HOT} stays as written).");
+	                ", changed there for every use of it.\n{hot} before a letter makes it a button's key, the letter "
+	                "underlined ({HOT} stays as written).");
 	// What a button shows of the words: the marker out, its letter underlined.
 	if (box.text.find("{hot}") != std::string::npos) {
 		ImGui::TextDisabled("Shows as:");
 		ImGui::SameLine();
 		hotkey_words(box.text);
-		ui_kit::tooltip("The words as a button draws them: the game takes out the first {hot} and underlines the "
-		                "letter after it, the button's key.");
+		ui_kit::tooltip("The words as a button draws them: the first {hot} out, the letter after it underlined.");
 	}
-	if (box.pending && !box.editing && box.text != shown)
-		ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "Not set: the status line says why.");
-	ImGui::TextDisabled("String id in %s:", words.source.c_str());
+	if (box.pending && !box.editing && box.text != shown) {
+		ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "Not set");
+		ui_kit::tooltip("The change was refused: the status line says why.");
+	}
+	string_id_line(words);
 }
 
 // One field of the form: its name (the optional tick before it, marked where it changed
@@ -870,7 +891,7 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 	const bool ignored = field.applies == Applicability::Ignored;
 	if (ignored && !written(document, address, schema)) {
 		ImGui::TextDisabled("-");
-		ui_kit::tooltip("The game does not read this for this record.");
+		ui_kit::tooltip(kIgnoredTip);
 		return;
 	}
 	ImGui::PushID(schema.id.c_str());
@@ -887,7 +908,7 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 	// A texture's thumbnail a line high after its dot (S18).
 	if (is_reference(field, value) && is_texture_reference(field.reference))
 		reserve += ImGui::GetFrameHeight() + style.ItemSpacing.x;
-	if (ignored) reserve += ui_kit::text_width("!") + style.ItemSpacing.x;
+	if (ignored) reserve += ImGui::GetTextLineHeight() + style.ItemSpacing.x;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(reserve > 0.0f ? -reserve : -FLT_MIN);
 	// A reference's value: its jumps over it (DI-18).
@@ -917,7 +938,7 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 		reference_tools(workspace, controls.picker, document, {address}, field, value, true, true);
 	if (ignored) {
 		ImGui::SameLine();
-		ImGui::TextColored(ui_kit::warning_color(), "!");
+		ignored_mark();
 		ui_kit::tooltip(kIgnoredTip);
 	}
 	ImGui::EndDisabled();
@@ -994,7 +1015,7 @@ void records_table(Workspace &workspace, Controls &controls, const Document &doc
 	ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed,
 	                        ui_kit::text_width(ui_kit::kChangeRoom) + ui_kit::text_width("000") + style.FramePadding.x * 2.0f);
 	for (const FieldSchema &field : fields)
-		ImGui::TableSetupColumn(field_widgets::column_header(field).c_str(), ImGuiTableColumnFlags_WidthFixed,
+		ImGui::TableSetupColumn(field_title(field).c_str(), ImGuiTableColumnFlags_WidthFixed,
 		                        column_width(field));
 	ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
 	// Each heading under its column's id, as TableHeadersRow scopes them: two fields may share a
@@ -1069,7 +1090,7 @@ void collection_block(Workspace &workspace, Controls &controls, const Document &
 		ImGui::SeparatorText(ui_kit::fit(heading, ImGui::GetContentRegionAvail().x - padding).c_str());
 		ui_kit::tooltip(heading + "\n" + token);
 	}
-	if (spec.applies == Applicability::Ignored) ui_kit::warning_line("The game does not read these here.", kIgnoredTip);
+	if (spec.applies == Applicability::Ignored) ui_kit::warning_line("The game does not read these here.");
 	size_t selected = SIZE_MAX;
 	for (size_t i = 0; i < ids.size(); ++i)
 		if (workspace.view().documents.selection.primary.kind == spec.kind && workspace.view().documents.selection.primary.child == ids[i]) selected = i;
@@ -1080,7 +1101,6 @@ void collection_block(Workspace &workspace, Controls &controls, const Document &
 		tools.count = ids.size();
 		tools.selected = selected;
 		tools.max = spec.max;
-		tools.pick = "Select a row (its number) first.";
 		tools.small = true;
 		const NodeAddress address = selected == SIZE_MAX ? NodeAddress() : NodeAddress{owner.row, spec.kind, ids[selected]};
 		switch (ui_kit::row_tools(row, tools)) {
@@ -1128,6 +1148,22 @@ bool unread_section(const InspectorSection &section) {
 	                   [](const FieldUse &field) { return field.applies != Applicability::Reads; });
 }
 
+// A form's names column: as wide as the longest name it holds (an optional field's written tick with it, and the
+// room of a tag after it), at most two fifths of the form, so a form of short names leaves its values the rest.
+// `block_switch`: its first row the block's switch, named "In the file".
+float name_column(const std::vector<FieldUse> &fields, bool block_switch) {
+	const ImGuiStyle &style = ImGui::GetStyle();
+	const float tick = ImGui::GetFrameHeight() + style.ItemSpacing.x;
+	float widest = block_switch ? ui_kit::text_width("In the file") + tick : 0.0f;
+	for (const FieldUse &field : fields) {
+		const bool grouped = !field.schema->group.empty() && !field.schema->optional;
+		const std::string title = grouped ? field.schema->group : field_title(field);
+		widest = std::max(widest, ui_kit::text_width(title.c_str()) + (field.schema->optional ? tick : 0.0f));
+	}
+	widest += style.ItemSpacing.x + ui_kit::text_width("(mixed)");
+	return std::min(widest, ImGui::GetContentRegionAvail().x * 0.4f);
+}
+
 // One section of the plan: a heading (none for the general fields), then the form: the
 // block's own switch first, its fields after; then the collections it claims. A section
 // that holds something written, or a field changed since the last save, starts open; one
@@ -1159,9 +1195,10 @@ void draw_section(Workspace &workspace, Controls &controls, const Document &docu
 		part_missing = part_missing || (section.key == document.kind_token(collection.spec.kind) &&
 		                                collection.ids.empty());
 	const bool block_switch = section.has_toggle && !part_missing;
+	const float names = name_column(section.fields, block_switch);
 	if ((block_switch || !section.fields.empty()) && ImGui::BeginTable("fields", 2, ImGuiTableFlags_SizingStretchProp)) {
-		ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.4f);
-		ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.6f);
+		ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthFixed, names);
+		ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
 		// The switch is a field like the others: marked, reverted and shown as they are.
 		if (block_switch) field_row(workspace, controls, document, {record}, section.toggle, reveal, true);
 		field_rows(workspace, controls, document, {record}, section.fields, reveal);
@@ -1217,12 +1254,9 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
               const Node &row, const NodeAddress &selection) {
 	for (const size_t i : index.of_record(document.path(), row.id, selection.child)) {
 		const Diagnostic &d = view.findings.diagnostics[i];
-		ui_kit::severity_marker(d.severity);
-		ImGui::SameLine();
-		ImGui::AlignTextToFramePadding();
 		const NodeKind kind = d.record_kind ? d.record_kind : selection.kind;
 		const std::string line = d.field.empty() ? d.message : field_title(document, kind, d.field) + ": " + d.message;
-		ui_kit::clipped_text(line, d.field.empty() ? line : line + "\n" + d.field);
+		ui_kit::finding_line(d.severity, line, d.field.empty() ? line : line + "\n" + d.field);
 	}
 }
 
@@ -1261,20 +1295,24 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 				if (others_only && edge->source == document.path()) continue;
 				// The record in its type's words (the plain-words lane: an action as what it does).
 				const std::string field = edge_field_title(view, *edge), where = edge_record_words(*edge);
-				users_.push_back({edge, edge->source + ": " + (where.empty() ? field : where + " - " + field)});
+				users_.push_back({edge, edge->source + ": " + (where.empty() ? field : where + " - " + field), field});
 			}
 		}
 	}
 	if (users_.empty()) return;
-	ImGui::Separator();
-	ImGui::Text(others_only ? "Referenced by %zu field(s) in other files" : "Referenced by %zu field(s)", users_.size());
+	ui_kit::uses_heading("Referenced by", users_.size(), false,
+	                     others_only ? "The fields of the other files that name it." : "The fields that name it.",
+	                     ui_kit::nothing_names_it(false));
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(users_.size()));
 	while (clipper.Step())
 		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 			const Use &use = users_[size_t(i)];
 			ImGui::PushID(i);
-			const bool pressed = ui_kit::fitted_selectable(use.line, "use");
+			// A long title in its brief words while its file is open (a mission's event), whole in the tooltip.
+			const std::string brief = open_record_brief(view, use.edge->source, use.edge->address);
+			const bool pressed =
+			        ui_kit::fitted_selectable(brief.empty() ? use.line : use.edge->source + ": " + brief + " - " + use.field, "use");
 			if (pressed || ImGui::IsItemHovered()) {
 				const ReferenceTarget target = usage_target(*view.project.scan, *use.edge);
 				if (pressed) go_to(workspace_, target);
@@ -1303,18 +1341,14 @@ void InspectorWindow::used_by(const DocumentBase &document) {
 		used_by_ = file_users(view, document.path());
 	}
 	const FileUsers &users = used_by_;
-	ImGui::Separator();
-	const std::string heading = basename_of(document.path()) + ": used by " + std::to_string(users.count) +
-	                            (users.count == 1 ? " field" : " fields") +
-	                            (users.further_count ? ", " + std::to_string(users.further_count) + " more through them" : "");
-	ui_kit::clipped_text(heading, heading + "\nThe records of the project that name this file or what it defines, by "
-	                              "file; under a record that defines what others name (an item naming a model), those "
-	                              "uses too.");
-	if (users.reading) ui_kit::empty_state(ui_kit::reading_references(), "The list may grow.");
-	if (users.groups.empty()) {
-		if (!users.reading) ui_kit::empty_state("No file of the project names it or what it defines.");
+	const std::string further = users.further_count ? ", " + std::to_string(users.further_count) + " more through them"
+	                                                : std::string();
+	if (!ui_kit::uses_heading("Used by", users.count, users.reading,
+	                          "The fields of the project that name " + basename_of(document.path()) + " or what it "
+	                          "defines" + further + ", by file.",
+	                          ui_kit::nothing_names_it(true)) ||
+	    users.groups.empty())
 		return;
-	}
 	const auto line = [&](const FileUsers::Line &shown) {
 		const bool pressed = ui_kit::fitted_selectable(shown.words, "use");
 		if (pressed) go_to(workspace_, shown.target);
@@ -1486,8 +1520,8 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		return;
 	}
 	if (together.size() > 1) {
-		ui_kit::quiet_text(std::to_string(together.size()) + " records of different kinds selected",
-		                   "The fields below are the primary one's.");
+		ui_kit::quiet_text(std::to_string(together.size()) + " records of different kinds",
+		                   "Selected: the fields below are the primary one's.");
 	}
 	// The type's own part first (S15: a mission's event, trigger or action in words), and what it
 	// draws itself the generic form leaves out.
@@ -1566,9 +1600,10 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 			if (!open) continue;
 		}
 		ImGui::PushID(section.key.c_str());
+		const float names = name_column(section.fields, false);
 		if (ImGui::BeginTable("fields", 2, ImGuiTableFlags_SizingStretchProp)) {
-			ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.4f);
-			ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.6f);
+			ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthFixed, names);
+			ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
 			// The block's own switch (named as its group, leading it) reads as it does alone.
 			const bool has_switch =
 			        !section.key.empty() && std::any_of(section.fields.begin(), section.fields.end(), [&](const FieldUse &field) {

@@ -115,13 +115,10 @@ struct InspectorTaken {
 	bool own_uses = false;
 };
 // A line of a type's part of the Inspector that goes to `target` when clicked (a Selectable cut to the
-// room, the whole line in its tooltip where it is cut); `id` tells lines of the same words apart.
+// room, the whole line in its tooltip where it is cut, `tip` after it when given); `id` tells lines of the
+// same words apart.
 void inspector_jump_line(Workspace &workspace, const ReferenceTarget &target, const std::string &line,
-                         const std::string &id);
-// The heading over the missions that run on a file (an environment, a terrain): "Missions that run on it
-// (N):", or while none does one line, the references being read or "No mission runs on it." with `how` (what
-// names the file) in its tooltip. True when there are missions to list.
-bool mission_uses_heading(size_t count, bool reading, const char *how);
+                         const std::string &id, const std::string &tip = std::string());
 // A type's part of the Inspector over the selected record: its top (true where it drew, saying what
 // it took of the generic form), and its bottom, after the generic form.
 using InspectorTop = bool (*)(Workspace &workspace, const Document &document, const NodeAddress &record,

@@ -79,7 +79,7 @@ void TextureSourceDialog::draw(Workspace &workspace) {
 		ImGui::Text("Give %s a source of its own, which its program edits?", name.c_str());
 	if (!preview.refusal.empty()) {
 		ImGui::Spacing();
-		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Error), "%s", preview.refusal.c_str());
+		ui_kit::refusal_text(preview.refusal);
 	} else {
 		ImGui::Spacing();
 		const float side = em * 9.0f;

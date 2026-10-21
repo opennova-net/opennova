@@ -67,7 +67,7 @@ void draw_palette(TerrainPaneContext &context, const TilDocument *placement) {
 	const std::shared_ptr<const TextureThumbnail> picture =
 	        view.documents.thumbnails ? view.documents.thumbnails->get(view, entry->relative_path, TextureLoadTransform::None)
 	                                  : nullptr;
-	ImGui::Text("Tile set %s", basename_of(entry->relative_path).c_str());
+	ui_kit::clipped_text("Tile set " + basename_of(entry->relative_path));
 	if (!picture) {
 		ui_kit::empty_state("Reading the tile set...");
 		return;
@@ -123,8 +123,9 @@ void draw_palette(TerrainPaneContext &context, const TilDocument *placement) {
 void draw_stamp(TerrainPaneContext &context) {
 	Workspace &workspace = context.workspace;
 	const TerrainBrush &brush = context.brush;
-	ImGui::Text("Cell %d, turned %d degrees clockwise%s%s", brush.cell, brush.rotation * 90, brush.flip_h ? ", flipped across" : "",
-	            brush.flip_v ? ", flipped down" : "");
+	ui_kit::clipped_text("Cell " + std::to_string(brush.cell) + ", turned " + std::to_string(brush.rotation * 90) +
+	                     (brush.flip_h ? ", flipped across" : "") + (brush.flip_v ? ", flipped down" : ""),
+	                     "Turned clockwise, in degrees; flipped across east to west, down north to south.");
 	ui_kit::help_mark("Click the ground to lay it, its corner under the pointer (Shift: on the 16-unit grid).");
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Turn", true, "Turn the stamp a quarter clockwise (R in the view; Shift+R the other way)."))
@@ -294,9 +295,8 @@ void draw_paint_part(TerrainPaneContext &context) {
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
 		ImGui::InputInt("Class", &held);
 		ui_kit::tooltip("The surface class the brush paints, which the game reads under a body or a round (footsteps, "
-		                "impacts, tyres). Any class 0 to 255: the tile set tables name the first 20, and one past them "
-		                "takes no named footstep and an impact row no shipped table authors (20 to 23) or the ammo's obj "
-		                "row (24 and past).");
+		                "impacts, tyres). Any of 0 to 255: past the tile set tables' 20 a class takes no named footstep, "
+		                "and an impact row no shipped table authors (20 to 23) or the ammo's obj row (24 on).");
 		if (ImGui::IsItemDeactivatedAfterEdit()) set("surface", io::json_number(std::clamp(held, 0, 255)));
 		const std::string name = mission_surface_words(brush.surface);
 		row.next(ui_kit::text_width(name.c_str()));

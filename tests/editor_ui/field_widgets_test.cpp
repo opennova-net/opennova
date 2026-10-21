@@ -150,11 +150,16 @@ void test_ranged_number() {
 
 	const std::string tip = widgets::field_tip(field);
 	CHECK(in_order(tip, {"alpha_test", "Written as alphatest", "In px", "From 0 to 255", "Below it a texel"}),
-	      "the tooltip: the id, the key the file writes, the unit, the range, the note");
-	CHECK(widgets::column_header(field) == "Alpha-test threshold (px)", "a column's heading: the name and the unit");
+	      "the tooltip: the id, the key the file writes, the unit, the range, the note (a column's heading is the name "
+	      "alone, its unit in this tooltip)");
 	FieldSchema bare;
 	bare.id = "count";
-	CHECK(widgets::field_tip(bare) == "count" && widgets::column_header(bare) == "count", "nothing made up");
+	CHECK(widgets::field_tip(bare) == "count", "nothing made up");
+	// A description's citations stay in the code: the tooltip says the words alone.
+	field.description = "Below it a texel is cut [orig: Material_AlphaTest @ 0x58b000].";
+	CHECK(widgets::field_tip(field).find("[orig:") == std::string::npos &&
+	              widgets::field_tip(field).find("Below it a texel is cut.") != std::string::npos,
+	      "a description without its citations");
 }
 
 // A Channel group: the three on one row after the swatch, each its own control (green typed

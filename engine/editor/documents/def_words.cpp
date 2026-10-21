@@ -1,6 +1,6 @@
 // The def catalogs' members in a modder's words (def_words.h): a row per member of each record kind,
 // in def_fields' order, each meaning cited by its witness (the RE records, the runtime's cited
-// consumers); "Unknown: ..." where none is witnessed.
+// consumers); a member the game never reads Ignored, one no reader is witnessed for Unverified.
 #include "def_words.h"
 
 #include <cstring>
@@ -10,12 +10,14 @@ namespace opennova::editor {
 namespace {
 
 using def::DefRecordKind;
+constexpr Applicability kIgnored = Applicability::Ignored;
+constexpr Applicability kUnverified = Applicability::Unverified;
 
 const DefWords kItemWords[] = {
 	{"powerup_def", "Powerup row", "Powerup", "The powerup.def row this item binds at mission start; setting it makes the item a powerup, and an unknown name removes the item.", "[orig: PowerupEntity_InitFromDef @ 0x442D00]"},
 	{"score", "Kill score", "Attributes", "The unit score booked when this item is killed; zero means killing it is never scored.", "[orig: Score_ProcessKillEvent @ 0x4FD400]"},
 	{"graphic_enemy", "Enemy model", "Looks", "Unknown: the game loads this model at mission start, but no reader of the loaded model is witnessed.", "[orig: EntityDef_LoadModelsAndCallbacks @ 0x439f50]"},
-	{"text_id", "Text key", "Identity", "Unknown: the parser stores the text key; no reader is witnessed.", "itemdef-re.md, Catalog authoring (the property table)"},
+	{"text_id", "Text key", "Identity", "The key of gametext.bin's item section the HUD's entity info shows the item's text by; empty or missing, the section's text_default.", "[orig: HUD_BuildEntityInfo @ 0x4B8A15..0x4B8A5C]; itemdef-re.md, Catalog authoring (the property table)"},
 	{"display_name", "Name", "Identity", "Not a key: the name on the begin line; the game keeps 46 characters, and a lookup by name finds the first match, ignoring case.", "[orig: ItemDef_ParseProperty @ 0x49eb00, the begin arm's cut @ 0x49ebfb; ItemList_FindIndexByPrimaryName @ 0x49e010]"},
 	{"id", "Item id", "Identity", "The type id missions place this item by; when two items share an id, the first in the file is used.", "[orig: ItemList_FindIndexByTypeId @ 0x49e100]"},
 	{"sid", "Short id", "Identity", "The name hudpos.def vehicle panel blocks use to give this item its mounted HUD panel (silhouette and seat boxes).", "[orig: HUD_ParseHudposToken @ 0x59F370]"},
@@ -31,9 +33,9 @@ const DefWords kItemWords[] = {
 	{"soundloops[1]", "Sound loop 2", "Sound", "Looping sound: an ambient marker's 10am to 5pm loop, a ground vehicle's or boat's forward-drive loop, a helicopter's medium-speed rotor loop.", "[orig: Entity_UpdateEnvSoundEmitter @ 0x4A8080]; [orig: Entity_ProcessMovementSoundEffects @ 0x5294A0]; [orig: VehicleEffect_UpdateEmissions @ 0x528F20]"},
 	{"soundloops[2]", "Sound loop 3", "Sound", "Looping sound: an ambient marker's 5pm to 9pm loop, a ground vehicle's or boat's reverse-drive loop, a helicopter's cruise rotor loop.", "[orig: Entity_UpdateEnvSoundEmitter @ 0x4A8080]; [orig: Entity_ProcessMovementSoundEffects @ 0x5294A0]; [orig: VehicleEffect_UpdateEmissions @ 0x528F20]"},
 	{"soundloops[3]", "Sound loop 4", "Sound", "Looping sound: an ambient marker's 9pm to 4am loop; a tank's turn-on-the-spot loop, its volume following the turn rate.", "[orig: Entity_UpdateEnvSoundEmitter @ 0x4A8080]; [orig: Entity_ProcessMovementSoundEffects @ 0x5294A0]"},
-	{"soundloops[4]", "Sound loop 5", "Sound", "Unknown: resolved with the item like the other loops; no reader is witnessed.", "[orig: ItemDef_ResolveAllResources @ 0x49E5F0]; vehicle-client-movers-re.md section 29"},
-	{"soundloops[5]", "Sound loop 6", "Sound", "Unknown: resolved with the item like the other loops; no reader is witnessed.", "[orig: ItemDef_ResolveAllResources @ 0x49E5F0]; vehicle-client-movers-re.md section 29"},
-	{"soundloops[6]", "Sound loop 7", "Sound", "Unknown: resolved with the item like the other loops; no reader is witnessed.", "[orig: ItemDef_ResolveAllResources @ 0x49E5F0]; vehicle-client-movers-re.md section 29"},
+	{"soundloops[4]", "Sound loop 5", "Sound", "A looping sound, resolved with the item like the other loops.", "[orig: ItemDef_ResolveAllResources @ 0x49E5F0]; vehicle-client-movers-re.md section 29", kUnverified},
+	{"soundloops[5]", "Sound loop 6", "Sound", "A looping sound, resolved with the item like the other loops.", "[orig: ItemDef_ResolveAllResources @ 0x49E5F0]; vehicle-client-movers-re.md section 29", kUnverified},
+	{"soundloops[6]", "Sound loop 7", "Sound", "A looping sound, resolved with the item like the other loops.", "[orig: ItemDef_ResolveAllResources @ 0x49E5F0]; vehicle-client-movers-re.md section 29", kUnverified},
 	{"nightshot", "Night sound", "Sound", "A one-shot sound the item replays at random intervals from 9pm to 4am; a name not found silences the profile's default.", "[orig: Entity_SpawnRegionalEffect @ 0x408290]"},
 	{"dawnshot", "Dawn sound", "Sound", "A one-shot sound the item replays at random intervals from 4am to 10am; a name not found silences the profile's default.", "[orig: Entity_SpawnRegionalEffect @ 0x408290]"},
 	{"duskshot", "Dusk sound", "Sound", "A one-shot sound the item replays at random intervals from 5pm to 9pm; a name not found silences the profile's default.", "[orig: Entity_SpawnRegionalEffect @ 0x408290]"},
@@ -86,7 +88,7 @@ const DefWords kItemWords[] = {
 	{"spring", "Spring stiffness", "Physics", "Suspension stiffness of each wheel, 0 to 10; 0 turns the wheel's spring off.", "[orig: Suspension_CompressWheelQuadratic @ 0x45CFB0]"},
 	{"spring_comp", "Spring travel", "Physics", "The most a wheel's suspension compresses, as a percent of one world unit (0 to 100).", "[orig: Entity_ProcessTrackedVehiclePhysics @ 0x47C1C0]"},
 	{"shock", "Shock damping", "Physics", "Suspension damping, 0 to 10: higher values stop a wheel's bounce sooner after a landing.", "[orig: Suspension_OscillateWheelFast @ 0x45D110]"},
-	{"top_heavy", "Top heavy", "Physics", "The game reads it but never uses it.", "vehicle-client-movers-re.md section 7.3"},
+	{"top_heavy", "Top heavy", "Physics", "The physics block's top_heavy number; the parser and the debug item editor are its only readers.", "[orig: ItemDef_ParsePhysicsProperty @ 0x49dbc2]; vehicle-client-movers-re.md section 7.3", kIgnored},
 	{"critical_hp", "Burning health", "Health and armour", "Health at or below which a vehicle burns (fire, warning sound, helicopter spin); undercrewed AI vehicles are capped here.", "[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]; [orig: Entity_UpdateAircraftPhysics @ 0x490310]"},
 	{"critical_drain", "Burn drain", "Health and armour", "Health a burning vehicle loses every 64 ticks; an aircraft wreck also uses it as its burn-down floor.", "[orig: Entity_UpdateAircraftPhysics @ 0x490310]; [orig: Entity_ProcessAircraftContactPhysics @ 0x47EF10]"},
 	{"non_critical_regen", "Health regen", "Health and armour", "Health a vehicle regains every 64 ticks while above its burning health and below its full health minus this amount.", "[orig: Entity_UpdateAircraftPhysics @ 0x490310]"},
@@ -96,7 +98,7 @@ const DefWords kItemWords[] = {
 	{"unit_type", "Unit type", "Attributes", "The vehicle family (land, air, water; 3 a helicopter, 11 a bridge): sets its minimap icon, voice set, death, fire size and score tally.", "[orig: Entity_ClassifyForMinimap @ 0x50FA70]; itemdef-re.md, witnessed value tables"},
 	{"particlefx.effect", "Effect", "Effects", "An effect spawned at its user point when the mission starts; on drivable items only helicopters and planes show it, while occupied.", "[orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0]; [orig: Entity_UpdateHeloRotorSpin @ 0x48fa70]"},
 	{"particlefx.userpoint", "Effect point", "Effects", "The model user point the effect spawns at, one per match among the first 16 points; no match uses the item's origin.", "[orig: Entity_SpawnBoneTrailEffect @ 0x43bef0]; [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]"},
-	{"particlefx.secondary_effect", "Effect alternate", "Effects", "Not written by any key: the game reads no third word on a particlefx line, so this stays empty.", "[orig: ItemDef_ParseProperty @ 0x4A13BF]"},
+	{"particlefx.secondary_effect", "Effect alternate", "Effects", "No key writes it: the game reads no third word on a particlefx line.", "[orig: ItemDef_ParseProperty @ 0x4A13BF]", kIgnored},
 	{"particlefxs.effect", "Skid effect", "Effects", "An effect spawned at each matching point while a grounded car or bike skids near the camera.", "[orig: Entity_SpawnBoneEffectsAtMask @ 0x458750]"},
 	{"particlefxs.userpoint", "Skid effect point", "Effects", "The model user points the skid effect spawns at (every match among the first 16); no match, no skid effect.", "[orig: Entity_SpawnBoneEffectsAtMask @ 0x458750]"},
 	{"particlefxs.secondary_effect", "Snow skid effect", "Effects", "The skid effect used instead on snow; left out, the normal skid effect plays.", "[orig: Entity_SpawnBoneEffectsAtMask @ 0x458750]"},
@@ -108,10 +110,10 @@ const DefWords kItemWords[] = {
 	{"particlefxw2.secondary_effect", "Trail 2 alternate", "Effects", "Unknown: the trail updater checks it when resetting the trail; no spawn of it is witnessed.", "[orig: Entity_UpdateBoneTrailEffects @ 0x4589C0]"},
 	{"particlefxw3.effect", "Wake 1 effect", "Effects", "A wake spawned while in water; the commanded speed scales its rate and height, and it stops out of water, on death or at rest.", "[orig: Entity_UpdateBoneTrailEffects @ 0x4589C0]"},
 	{"particlefxw3.userpoint", "Wake 1 point", "Effects", "The model user points the wake spawns at, held at the water surface (first 16 points); no match, no wake.", "[orig: Entity_UpdateBoneTrailEffects @ 0x4589C0]; [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]"},
-	{"particlefxw3.secondary_effect", "Wake 1 alternate", "Effects", "Not written by any key: the game reads no third word on a particlefxw3 line, so this stays empty.", "[orig: ItemDef_ParseProperty @ 0x4a158b]"},
+	{"particlefxw3.secondary_effect", "Wake 1 alternate", "Effects", "No key writes it: the game reads no third word on a particlefxw3 line.", "[orig: ItemDef_ParseProperty @ 0x4a158b]", kIgnored},
 	{"particlefxw4.effect", "Wake 2 effect", "Effects", "A second in-water wake driven by the current speed; plain wheeled vehicles and trains never use it.", "[orig: Entity_UpdateBoneTrailEffects @ 0x4589C0]"},
 	{"particlefxw4.userpoint", "Wake 2 point", "Effects", "The model user points the second wake spawns at, held at the water surface (first 16 points); no match, no wake.", "[orig: Entity_UpdateBoneTrailEffects @ 0x4589C0]; [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]"},
-	{"particlefxw4.secondary_effect", "Wake 2 alternate", "Effects", "Not written by any key: the game reads no third word on a particlefxw4 line, so this stays empty.", "[orig: ItemDef_ParseProperty @ 0x4a15eb]"},
+	{"particlefxw4.secondary_effect", "Wake 2 alternate", "Effects", "No key writes it: the game reads no third word on a particlefxw4 line.", "[orig: ItemDef_ParseProperty @ 0x4a15eb]", kIgnored},
 	{"particledeath", "Death effect", "Effects", "Played when the item dies above water, at up to four Dead points of its wreck or its origin; a corpse plays it before removal.", "[orig: Entity_InitDeathSounds @ 0x4939b0]"},
 	{"particleh2odeath", "Underwater death effect", "Effects", "Replaces the death effect at the wreck's Dead points when the item dies fully underwater.", "[orig: Entity_InitDeathSounds @ 0x4939b0]"},
 	{"particlefire", "Wreck fire effect", "Effects", "Started on death at up to four Fire points of the wreck; it follows the wreck, steams underwater and restarts on resurfacing.", "[orig: Entity_InitDeathSounds @ 0x4939b0]; [orig: Entity_UpdateDeadWreckEffects @ 0x493140]"},
@@ -146,12 +148,12 @@ const DefWords kItemWords[] = {
 	{"armor_impact", "Bullet armour", "Health and armour", "Bullets with a lower impact penetration do no damage (-1: immune to bullets); the armor line's second number, else its first.", "[orig: Projectile_ProcessDamageOnTarget @ 0x4e7fb0]"},
 	{"armor_blast", "Blast armour copy", "Health and armour", "Not a key: a copy of the blast armour (the armor line's first number) that the blast damage check reads.", "[orig: Entity_ApplyWeaponDamage @ 0x4e6820]"},
 	{"kz", "Death blast radius", "Death and wreck", "The blast radius used when the wreck has no KZ points (one blast at its origin) and for a falling wreck's landing blast.", "[orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0]; [orig: Entity_UpdateFallingDeathPhysics @ 0x4941be]"},
-	{"husk_swap_at", "Husk swap point", "Death and wreck", "Unknown: parsed as a percent (or as seconds after husk_swap_at_sec); no reader is witnessed.", "world-wac-ai-re.md section 24.7 (D-ITEM-2)"},
-	{"husk_swap_at_sec", "Husk swap time", "Death and wreck", "Unknown: parsed as seconds; no reader is witnessed.", "world-wac-ai-re.md section 24.7 (D-ITEM-2)"},
+	{"husk_swap_at", "Husk swap point", "Death and wreck", "Parsed as a percent, or as seconds after a husk_swap_at_sec line.", "world-wac-ai-re.md section 24.7 (D-ITEM-2)", kUnverified},
+	{"husk_swap_at_sec", "Husk swap time", "Death and wreck", "The husk swap point, parsed as seconds.", "world-wac-ai-re.md section 24.7 (D-ITEM-2)", kUnverified},
 	{"scale_q16", "Model scale", "Looks", "A size multiplier for the item's model, collision and bounds, unless the placed instance sets its own; 0 means unscaled.", "[orig: Entity_InitFromModel @ 0x40dc30]; [orig: Entity_ComputeBoundingSphere @ 0x5c69a0]"},
 	{"debris_scale", "Debris scale", "Death and wreck", "A size multiplier for the flying wreck debris pieces; 0 or left out means normal size.", "[orig: Entity_SpawnDeathPieces @ 0x493400]"},
 	{"husk_sub_parts", "Tower sections", "Death and wreck", "The section count of tower items that collapse section by section; other wrecks ignore it and throw one piece per wreck-model section.", "[orig: Entity_UpdateSectionDamage @ 0x4406A0]"},
-	{"husk_sub_part_types[0]", "Debris piece 1", "Death and wreck", "Unknown: an 01_ entry, the slot of section 1 (the hull), which never flies off; no reader of it is witnessed.", "[orig: Entity_SpawnDeathPieces @ 0x493400]; world-wac-ai-re.md section 24.4"},
+	{"husk_sub_part_types[0]", "Debris piece 1", "Death and wreck", "An 01_ entry, the slot of wreck section 1 (the hull), which never flies off.", "[orig: Entity_SpawnDeathPieces @ 0x493400]; world-wac-ai-re.md section 24.4", kUnverified},
 	{"husk_sub_part_types[1]", "Debris piece 2", "Death and wreck", "The debris type of wreck section 2 (an 02_ entry) when it flies off on death: its odds, speed, spin, bounces, trail and sounds.", "[orig: Entity_SpawnDeathPieces @ 0x493400]"},
 	{"husk_sub_part_types[2]", "Debris piece 3", "Death and wreck", "The debris type of wreck section 3 (an 03_ entry) when it flies off on death: its odds, speed, spin, bounces, trail and sounds.", "[orig: Entity_SpawnDeathPieces @ 0x493400]"},
 	{"husk_sub_part_types[3]", "Debris piece 4", "Death and wreck", "The debris type of wreck section 4 (an 04_ entry) when it flies off on death: its odds, speed, spin, bounces, trail and sounds.", "[orig: Entity_SpawnDeathPieces @ 0x493400]"},
@@ -177,11 +179,15 @@ const DefWords kItemWords[] = {
 	{"emplacement_c_slot", "Commander gun row", "Weapons", "Not a key: the row the last addeweapC line stored; a scoped commander's HUD shows where that gun's gunner aims.", "[orig: HUD_DrawScopeOverlayDetails @ 0x59E420]"},
 	{"light_transfer", "Interior daylight", "Looks", "For buildings: the percent of daylight that reaches inside, lighting the interior and the people in it, and scaling indoor rain volume.", "[orig: Terrain_RenderSectorModels @ 0x5c5df2]; [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7f7a]"},
 	{"reverb", "Interior reverb", "Sound", "While the local player is inside this building, a nonzero value picks the reverb preset (reverb points still win), but presets sound the same.", "[orig: Entity_UpdateInfantryPlayerBody @ 0x4B5F9E]; lwf-dbf-sound-re.md, Reverb selection"},
-	{"shadow_texture", "Shadow texture", "Looks", "The game reads it but never uses it: the shadow decal it names never draws in JO, its texture never being loaded.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md"},
-	{"shadow_width", "Shadow width", "Looks", "The game reads it but never uses it: only the shadow decal that never draws in JO reads it.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md"},
-	{"shadow_length", "Shadow length", "Looks", "The game reads it but never uses it: only the shadow decal that never draws in JO reads it.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md"},
-	{"shadow_offset_x", "Shadow offset X", "Looks", "The game reads it but never uses it: only the shadow decal that never draws in JO reads it.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md"},
-	{"shadow_offset_y", "Shadow offset Y", "Looks", "The game reads it but never uses it: only the shadow decal that never draws in JO reads it.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md"},
+	// The shadow line, stored and never drawn: the authored decal's gate (ItemDef+0x114) is never assigned in JO,
+	// its TGA never loaded, and the slot reads its width and length only for a shadow type no JO caller allocates
+	// [orig: ItemDef_ParseProperty @ 0x49f3a5..0x49f44c; RenderSlot_AllocSlot @ 0x5d572a..0x5d5754; its callers
+	// pass type 1, Entity_InitFromModel @ 0x40E1EA, PlayerClass_InitEntity @ 0x4b10f1].
+	{"shadow_texture", "Shadow texture", "Looks", "The TGA the authored shadow decal would draw; JO never loads it.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md", kIgnored},
+	{"shadow_width", "Shadow width", "Looks", "The authored shadow decal's width, which JO never draws.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md", kIgnored},
+	{"shadow_length", "Shadow length", "Looks", "The authored shadow decal's length, which JO never draws.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md", kIgnored},
+	{"shadow_offset_x", "Shadow offset X", "Looks", "The authored shadow decal's X offset, which JO never draws.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md", kIgnored},
+	{"shadow_offset_y", "Shadow offset Y", "Looks", "The authored shadow decal's Y offset, which JO never draws.", "[orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]; render-lighting-re.md", kIgnored},
 	{"vehicle_spawn_mask", "Spawnable vehicles", "Vehicle spawn", "The vehicle ids this item can spawn: spawn requests and respawn markers accept only these, and a vehicle bay's minimap icon follows them.", "[orig: NapiNPServerMsg_HandleVehicleSpawnRequest @ 0x51C4C0]; [orig: Spawn_AssignOverlaySpawnPoints @ 0x529E60]"},
 	{"music_location", "Location number", "Behaviour", "The location number scripts get for anything inside this building, overriding the mission's location boxes; no music use is witnessed.", "[orig: WacCmd_SsnLoc @ 0x4F0E90]; [orig: WacCmd_Location @ 0x4ED190]"},
 	{"mana", "Mana", "Health and armour", "The entity's starting mana word (also its class 1 ammo pool), set at spawn and on respawn; mana powerups top it up.", "[orig: Entity_InitFromItemDef @ 0x49e550]; [orig: Entity_ResetToSpawnState @ 0x4B9610]"},
@@ -191,12 +197,14 @@ const DefWords kItemWords[] = {
 	{"door_open_sound", "Door open sound", "Doors", "Played at a door section's pivot when it starts opening; also when a carried object such as a flag is dropped.", "[orig: DoorClass_HandleEvent @ 0x43F370]; [orig: Entity_DropCarriedObject @ 0x439DF0]"},
 	{"door_close_sound", "Door close sound", "Doors", "Played at a door section's pivot when it starts closing.", "[orig: DoorClass_HandleEvent @ 0x43F370]"},
 	{"attrib_parent", "Parent", "Attributes", "Set by the Parent attribute: the vehicle carries items sharing its reference number on its agun points and kills them when it dies.", "[orig: Entity_SetupGunnerAttachments @ 0x468100]; [orig: AI_TransitionToDeath_GroundVehicle @ 0x467B90]"},
-	{"max_attack_dist", "Placed attack distance", "Behaviour", "The original mission editor's: a record placed of the item takes it as its attack distance (16 unless set). The game reads nothing of the key.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431a58; MissionItem_InitFromDefinition @ 0x44dc46]; [orig: ItemDef_ParseProperty @ 0x4a1a7b]"},
-	{"max_engagement_dist", "Placed engagement distance (far)", "Behaviour", "The original mission editor's: a record placed of the item takes it as its far engagement distance (320 unless set). The game reads nothing of the key.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431a89; MissionItem_InitFromDefinition @ 0x44dc6b]; [orig: ItemDef_ParseProperty @ 0x4a1a94]"},
-	{"min_engagement_dist", "Placed engagement distance (near)", "Behaviour", "The original mission editor's: a record placed of the item takes it as its near engagement distance (16 unless set). The game reads nothing of the key.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431aba; MissionItem_InitFromDefinition @ 0x44dc58]; [orig: ItemDef_ParseProperty @ 0x4a1aad]"},
-	{"fire_timer", "Placed advance timer", "Behaviour", "The original mission editor's: a record placed of the item takes it as its advance timer (10 unless set). The game reads nothing of the key.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431aeb; MissionItem_InitFromDefinition @ 0x44dcb0]; [orig: ItemDef_ParseProperty @ 0x4a1ac6]"},
-	{"attrib_good", "Good", "Attributes", "The original mission editor's side word: a record placed of the item takes team 1 (Evil over Good). The game matches it and keeps nothing.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431682; MissionItem_InitFromDefinition @ 0x44dd51]; [orig: ItemDef_ParseProperty @ 0x4a06c3]"},
-	{"attrib_evil", "Evil", "Attributes", "The original mission editor's side word: a record placed of the item takes team 2, over Good. The game matches it and keeps nothing.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x43169f; MissionItem_InitFromDefinition @ 0x44dd76]; [orig: ItemDef_ParseProperty @ 0x4a06db]"},
+	// The original mission editor's keys and side words, which the game's parser matches and stores nothing of
+	// (formats/def/def.h, DefItemDef::max_attack_dist and attrib_good): a record placed of the item takes them.
+	{"max_attack_dist", "Placed attack distance", "Behaviour", "The original mission editor's: a record placed of the item takes it as its attack distance (16 unless set).", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431a58; MissionItem_InitFromDefinition @ 0x44dc46]; [orig: ItemDef_ParseProperty @ 0x4a1a7b]", kIgnored},
+	{"max_engagement_dist", "Placed engagement distance (far)", "Behaviour", "The original mission editor's: a record placed of the item takes it as its far engagement distance (320 unless set).", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431a89; MissionItem_InitFromDefinition @ 0x44dc6b]; [orig: ItemDef_ParseProperty @ 0x4a1a94]", kIgnored},
+	{"min_engagement_dist", "Placed engagement distance (near)", "Behaviour", "The original mission editor's: a record placed of the item takes it as its near engagement distance (16 unless set).", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431aba; MissionItem_InitFromDefinition @ 0x44dc58]; [orig: ItemDef_ParseProperty @ 0x4a1aad]", kIgnored},
+	{"fire_timer", "Placed advance timer", "Behaviour", "The original mission editor's: a record placed of the item takes it as its advance timer (10 unless set).", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431aeb; MissionItem_InitFromDefinition @ 0x44dcb0]; [orig: ItemDef_ParseProperty @ 0x4a1ac6]", kIgnored},
+	{"attrib_good", "Good", "Attributes", "The original mission editor's side word: a record placed of the item takes team 1 (Evil over Good).", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431682; MissionItem_InitFromDefinition @ 0x44dd51]; [orig: ItemDef_ParseProperty @ 0x4a06c3]", kIgnored},
+	{"attrib_evil", "Evil", "Attributes", "The original mission editor's side word: a record placed of the item takes team 2, over Good.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x43169f; MissionItem_InitFromDefinition @ 0x44dd76]; [orig: ItemDef_ParseProperty @ 0x4a06db]", kIgnored},
 };
 
 const DefWords kAttachmentWords[] = {
@@ -219,7 +227,7 @@ const DefWords kWeaponWords[] = {
 	{"targetyawrange", "Traverse range", "Handling", "How far a mounted gun turns either side of centre, in degrees, when its vehicle's addeweap line sets no arc; 0 locks the traverse.", "[orig: Entity_GetWeaponTurretLimits @ 0x540E2C..0x540E58]"},
 	{"targetpitchmax", "Elevation limit", "Handling", "How far up a mounted gun aims, in degrees, when its vehicle's addeweap line sets no arc; 0 stops it at level.", "[orig: Entity_GetWeaponTurretLimits @ 0x540E2C..0x540E58]"},
 	{"targetpitchmin", "Depression limit", "Handling", "How far down a mounted gun aims, in degrees below level, when its vehicle's addeweap line sets no arc; 0 stops it at level.", "[orig: Entity_GetWeaponTurretLimits @ 0x540E2C..0x540E58]"},
-	{"statid", "Stat id", "Identity", "Unknown: the parser stores the number; no reader is witnessed.", "[orig: WeaponDefs_ParseLineCallback @ 0x543680]"},
+	{"statid", "Stat id", "Identity", "A number the parser stores with the weapon.", "[orig: WeaponDefs_ParseLineCallback @ 0x543680]", kUnverified},
 	{"maxclips", "Most magazines", "Loadout", "The most magazines the loadout can take: the loadout screen offers 1 to this many, and the host caps a request at it.", "[orig: PlayerInfo_PopulateAmmoComboBoxes @ 0x55def0; NapiNPServerMsg_HandlePlayerLoadout @ 0x515790]"},
 	{"ammobucket", "Shared magazine", "Ammo", "Nonzero: the loaded rounds live in a shared count of that number, so weapons with the same bucket share one magazine.", "[orig: WeaponSlot_GetSharedLoadedRounds @ 0x5405F0; WeaponSlot_ReloadAmmo @ 0x541720]"},
 	{"ammo_class", "Ammo class", "Ammo", "The ammo pool the weapon reloads from: weapons naming the same class share it, and that class's ammoclass_max_carry line caps it.", "[orig: WeaponSlot_ReloadAmmo @ 0x541720; WeaponDefs_ParseLineCallback @ 0x5441CB]"},
@@ -250,11 +258,11 @@ const DefWords kWeaponWords[] = {
 	{"soundlockedtone", "Lock tone", "Sound", "A sound set the local player hears looping while the weapon holds a target lock.", "[orig: Entity_UpdateInfantryPlayerBody @ 0x4b5229]"},
 	{"launch_user_point", "Launch user point", "Models", "The user point on the third-person model where the weapon's shots and muzzle effects start; unnamed or unmatched, the carrier's own point is used.", "[orig: WeaponDef_ResolveAllReferences @ 0x5402C2..0x540316; Entity_ComputeUserpointWorldTransform @ 0x545D06]"},
 	{"gfx1", "First-person model", "Models", "The first-person model: the gun drawn with the soldier's arms in the player's own view.", "[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]"},
-	{"gfx1a", "Arms model", "Models", "Ignored: the game recognises the line and stores nothing; first-person arms come from the soldier's character instead.", "[orig: WeaponDefs_ParseLineCallback, the plain return @ 0x545098]"},
-	{"gfx1b", "Second arms model", "Models", "Ignored: the game recognises the line and stores nothing; first-person arms come from the soldier's character instead.", "[orig: WeaponDefs_ParseLineCallback, the plain return @ 0x545098]"},
+	{"gfx1a", "Arms model", "Models", "A line the game recognises and drops: first-person arms come from the soldier's character.", "[orig: WeaponDefs_ParseLineCallback @ 0x5448d0, the plain return @ 0x545098]", kIgnored},
+	{"gfx1b", "Second arms model", "Models", "A line the game recognises and drops: first-person arms come from the soldier's character.", "[orig: WeaponDefs_ParseLineCallback @ 0x5448e6, the plain return @ 0x545098]", kIgnored},
 	{"gfx3", "Third-person model", "Models", "The third-person model: the gun drawn in a soldier's hands, and the model whose launch user point shots start from.", "[orig: BoneCallback_org0_World @ 0x4e3940; WeaponDef_ResolveAllReferences @ 0x5402D8]"},
 	{"crosshair", "Crosshair", "HUD", "The aim marker a ShowHudPip weapon draws where its barrel's line hits, replacing the ordinary crosshair.", "[orig: HUD_DrawCrosshair @ 0x592973..0x592AB8]"},
-	{"crosshair_secondary", "Second crosshair", "HUD", "Unknown: the game loads it as a HUD texture; no reader of it is witnessed.", "hud-re.md, the HUD texture loaders ([orig: WeaponDefs_ParseLineCallback @ 0x5449A6])"},
+	{"crosshair_secondary", "Second crosshair", "HUD", "A picture the game loads as a HUD texture.", "hud-re.md, the HUD texture loaders ([orig: WeaponDefs_ParseLineCallback @ 0x5449A6])", kUnverified},
 	{"splash", "Impact preview radius", "HUD", "The impact preview's map circle radius, in world units, used when the weapon's aim error is zero (2DImpact weapons such as mortars).", "[orig: Player_UpdatePerFrame @ 0x4DEBBD]"},
 	{"commanders_x", "Commander reticle", "HUD", "The reticle a ShowComander weapon's scoped view draws where an attached gun is aiming, joined to the screen centre by a line.", "[orig: HUD_DrawScopeOverlayDetails @ 0x59E74D..0x59E87F]"},
 	{"hud_loadout_select", "Slot bar icon", "HUD", "The weapon's icon on the HUD weapon slot bar, shown for its category's first weapon; the stock hudpos.def never turns the bar on.", "[orig: HUD_DrawWeaponSlotBar @ 0x599CD0]"},
@@ -290,7 +298,7 @@ const DefWords kWeaponWords[] = {
 	{"tpos_rotation_deg_q16[2]", "Aimed view roll", "Models", "The first-person gun and arms' roll, in degrees, when aiming; eased to from the hip roll as the scope raises.", "[orig: Player_StepFpViewBiasInterp @ 0x4DDD2B..0x4DDFC3]"},
 	{"sights_count", "Sight row count", "Scope", "Set by the sights lines: how many rows the sight card draws; any row at all hides the scope's own cross and grid.", "[orig: HUD_DrawWeaponSightOverlays @ 0x4dce00; Hud_DrawScopeCircleMask @ 0x5d17a0]"},
 	{"loadout_menu_textid", "Loadout name", "Loadout", "The weapon's name in the loadout screen's lists: a key of gametext.bin's WepDes section; absent, the raw weapon name shows.", "[orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430]"},
-	{"loadout_menu_ttdesc", "Loadout tooltip", "Loadout", "Unknown: the loadout reader stores it as the row's tooltip text; no reader of it is witnessed.", "avatars-re.md, the producer field map ([orig: WeaponDef_ParseProperty @ 0x54d730])"},
+	{"loadout_menu_ttdesc", "Loadout tooltip", "Loadout", "The loadout row's tooltip text, stored and never shown.", "avatars-re.md, the producer field map ([orig: WeaponDef_ParseProperty @ 0x54DA5E, the table's +44])", kIgnored},
 	{"loadout_menu_icon", "Loadout icon", "Loadout", "The picture the loadout screen's weapon icon window shows while this weapon is selected.", "[orig: PlayerInfo_UpdateWeightAndWeaponIcons @ 0x55f480]"},
 	{"weapon_class_slot", "Loadout list number", "Loadout", "Set by weapon_class: the list number the loadout screen routes by (0 accessory, 1 primary, 2 secondary, 3 grenade).", "def_weapons.cpp (derived; [orig: WeaponDef_ParseProperty @ 0x54d730])"},
 	{"teamfilter_mask", "Loadout team bits", "Filters", "Set by the teamfilter lines: the loadout screen's team bits (blue or yellow 2, red or violet 1) that decide which side lists it.", "def_weapons.cpp (derived; [orig: WeaponDef_ParseProperty @ 0x54daae..0x54db08])"},
@@ -304,11 +312,11 @@ const DefWords kWeaponWords[] = {
 	{"flags2", "Flags, second set", "Handling", "Set by the same flags lines: the second set of switches (NoSelect, Parachute, Thermal, ViewLock, Inset, NoAutoZero, Invisible and more).", "[orig: the flag token table @ 0x830bf0; e.g. Player_SwitchToWeaponByHandle @ 0x4e02c3]"},
 	{"run_anim", "Run tier bonus", "Animation", "Added to the carried-weight tier that picks the run: 0 walks, 1 jogs (run_2), 2 or more sprints (run_3).", "[orig: Entity_UpdateInfantryPlayerBody @ 0x4b72aa..0x4b731b]"},
 	{"attach_text_id", "Attach label", "HUD", "The floating label drawn over this mounted gun: a key of gametext.bin's Overlays section; absent, the default use-gun label shows.", "[orig: HUD_DrawVehicleSeatAndArmoryLabels @ 0x5a3538; WeaponDefs_ParseLineCallback @ 0x544d6c]"},
-	{"classrounds[0]", "Unused start rounds 1", "Ammo", "Unused: no class token stores here (the class values are 1, 2, 3, 5 and 6), so it stays 0.", "[orig: classrounds handler @ 0x543ab0; class table @ 0x830EE8]"},
+	{"classrounds[0]", "Unused start rounds 1", "Ammo", "A slot no class token stores to (the class values are 1, 2, 3, 5 and 6).", "[orig: classrounds handler @ 0x543ab0; class table @ 0x830EE8]", kIgnored},
 	{"classrounds[1]", "Medic start rounds", "Ammo", "A medic's starting rounds for this weapon, used in place of startrounds; 0 uses startrounds.", "[orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x5416c4]"},
 	{"classrounds[2]", "Sniper start rounds", "Ammo", "A sniper's starting rounds for this weapon, used in place of startrounds; 0 uses startrounds.", "[orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x5416c4]"},
 	{"classrounds[3]", "Gunner start rounds", "Ammo", "A gunner's starting rounds for this weapon, used in place of startrounds; 0 uses startrounds.", "[orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x5416c4]"},
-	{"classrounds[4]", "Unused start rounds 5", "Ammo", "Unused: no class token stores here (the class values are 1, 2, 3, 5 and 6), so it stays 0.", "[orig: classrounds handler @ 0x543ab0; class table @ 0x830EE8]"},
+	{"classrounds[4]", "Unused start rounds 5", "Ammo", "A slot no class token stores to (the class values are 1, 2, 3, 5 and 6).", "[orig: classrounds handler @ 0x543ab0; class table @ 0x830EE8]", kIgnored},
 	{"classrounds[5]", "Rifleman start rounds", "Ammo", "A rifleman's starting rounds for this weapon, used in place of startrounds; 0 uses startrounds.", "[orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x5416c4]"},
 	{"classrounds[6]", "Engineer start rounds", "Ammo", "An engineer's starting rounds for this weapon, used in place of startrounds; 0 uses startrounds.", "[orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x5416c4]"},
 	{"switchcategory", "Switch when empty", "Handling", "When a shot leaves the weapon empty with nothing to reload, the game switches to this category, trying its rank 0 first.", "[orig: WeaponAction_Recoil @ 0x54307c]"},
@@ -317,7 +325,7 @@ const DefWords kWeaponWords[] = {
 	{"heat_decay_per_tick", "Cooling per second", "Heat", "How fast the weapon cools, in percent of the overheat point a second (the game keeps it per 62 Hz tick).", "[orig: WeaponSlot_CalcAccumulatedHeat @ 0x53f780]"},
 	{"heat_glow_threshold", "Glow threshold", "Heat", "The heat level, as a fraction of the overheat point, above which the barrel glow effect shows, brighter as heat climbs.", "[orig: WeaponAction_ProcessFrame @ 0x540fed..0x54125f]"},
 	{"heat_effect", "Heat glow effect", "Heat", "The particle effect drawn at the overheated action's muzzle point while heat is above the glow threshold.", "[orig: WeaponAction_ProcessFrame @ 0x540fed..0x54125f]"},
-	{"heat_sound", "Heat sound", "Heat", "Unused: the game looks the sound set up and stores it, but nothing in the game reads it back.", "novaworld-net-re.md, the weapon heat model ([orig: WeaponDefs_ParseLineCallback @ 0x543eac])"},
+	{"heat_sound", "Heat sound", "Heat", "A sound set the game looks up and stores; nothing reads it back.", "novaworld-net-re.md, the weapon heat model ([orig: WeaponDefs_ParseLineCallback @ 0x543eac])", kIgnored},
 	{"error_fp16[0]", "Hip spread prone (exact)", "Handling", "Set by the error line: Hip spread prone as the game's exact fixed-point number, the value shots and the crosshair read.", "[orig: WeaponDefs_ParseLineCallback @ 0x543B21; Math_ParseFixedPoint16 @ 0x6131F0]"},
 	{"error_fp16[1]", "Hip spread crouched (exact)", "Handling", "Set by the error line: Hip spread crouched as the game's exact fixed-point number, the value shots and the crosshair read.", "[orig: WeaponDefs_ParseLineCallback @ 0x543B21; Math_ParseFixedPoint16 @ 0x6131F0]"},
 	{"error_fp16[2]", "Hip spread standing (exact)", "Handling", "Set by the error line: Hip spread standing as the game's exact fixed-point number, the value shots and the crosshair read.", "[orig: WeaponDefs_ParseLineCallback @ 0x543B21; Math_ParseFixedPoint16 @ 0x6131F0]"},
@@ -362,11 +370,11 @@ const DefWords kActionWords[] = {
 	{"ctrl_increment", "Control step", "Effects", "The step the action's control register animation moves by on each update (with ctrlreg).", "[orig: CtrlRegAnimSlot_Allocate @ 0x401CA0]"},
 	{"duplicate_sound_count", "End sound copies", "Sound", "How many times the end sound plays in all: the finish schedules this many less one delayed repeats (1 counts as 0).", "[orig: ActionSlot_PlayEndSoundAndDupes @ 0x401100; ActionDef_ParseScriptLine @ 0x40260F]"},
 	{"duplicate_sound_delay", "End sound repeat delay", "Sound", "The delay between the end sound's repeated plays.", "[orig: ActionSlot_PlayEndSoundAndDupes @ 0x401100]"},
-	{"text_token", "Text key", "Action", "Unknown: the parser looks the key up as text and stores it; no weapon reader is witnessed (powerup actions show it as HUD text).", "[orig: ActionDef_ParseScriptLine @ 0x4028B7]"},
-	{"function_args[0]", "Handler argument 1", "Function", "Unknown: the parser packs the number written after the handler's name; no handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91]"},
-	{"function_args[1]", "Handler argument 2", "Function", "Unknown: the parser packs the number written after the handler's name; no handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91]"},
-	{"function_args[2]", "Handler argument 3", "Function", "Unknown: the parser packs the number written after the handler's name; no handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91]"},
-	{"function_args[3]", "Handler argument 4", "Function", "Unknown: the parser packs the number written after the handler's name; no handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91]"},
+	{"text_token", "Text key", "Action", "A text key the parser looks up and stores; a powerup action shows its own as HUD text.", "[orig: ActionDef_ParseScriptLine @ 0x4028B7]", kUnverified},
+	{"function_args[0]", "Handler argument 1", "Function", "A number written after the handler's name, which the parser packs.", "[orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91]", kUnverified},
+	{"function_args[1]", "Handler argument 2", "Function", "A number written after the handler's name, which the parser packs.", "[orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91]", kUnverified},
+	{"function_args[2]", "Handler argument 3", "Function", "A number written after the handler's name, which the parser packs.", "[orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91]", kUnverified},
+	{"function_args[3]", "Handler argument 4", "Function", "A number written after the handler's name, which the parser packs.", "[orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91]", kUnverified},
 	{"function_args_count", "Handler argument count", "Function", "Set by the function line: how many numbers follow the handler's name (0 to 4).", "def_weapons.cpp (derived; [orig: ActionDef_ParseScriptLine @ 0x40296E..0x402A91])"},
 };
 
@@ -388,7 +396,7 @@ const DefWords kCarryWords[] = {
 };
 
 const DefWords kAmmoWords[] = {
-	{"doppler_divisor", "Doppler divisor", "Sound", "Unknown: the parser stores the number as a byte (0 to 255); no reader of it is witnessed.", "[orig: AmmoDef_ParseProperty @ 0x40A6E9]"},
+	{"doppler_divisor", "Doppler divisor", "Sound", "A number the parser stores as a byte (0 to 255).", "[orig: AmmoDef_ParseProperty @ 0x40A6E9]", kUnverified},
 	{"kz_sound", "Blast victim sound", "Sound", "The sound set played at full volume on each person the round's blast reaches.", "[orig: Projectile_ProcessExplosionQueue @ 0x4EB1DA]"},
 	{"secondary_effect", "Blast victim effect", "Effects", "The particle effect attached to each person the round's blast reaches.", "[orig: Projectile_ProcessExplosionQueue @ 0x4EB1F2]"},
 	{"name", "Ammo name", "Identity", "Set by the ammo header line: weapons, items and other ammo find this ammo by its name, ignoring case, the first match winning.", "[orig: AmmoDef_LookupByName @ 0x409870]"},
@@ -424,7 +432,7 @@ const DefWords kAmmoWords[] = {
 	{"ai_launch", "AI fire sound", "Sound", "The firing sound when a computer-controlled shooter fires this round, heard after a delay that grows with distance.", "[orig: Sound_PlayWithDistanceAttenuation @ 0x528E40]"},
 	{"ai_launcheffect", "AI muzzle effect", "Effects", "The muzzle effect spawned at the gun each time a computer-controlled shooter fires this round.", "[orig: WeaponSlot_FireAndSpawnEffects @ 0x53F440]"},
 	{"mf_light", "Muzzle light", "Light", "Set by an MF_Light line being present: each shot of this round then lights a brief muzzle-flash glow at the gun.", "[orig: Entity_UpdateMuzzleGlowEffect @ 0x56C960]"},
-	{"mf_light_value", "Muzzle light value", "Light", "Unknown: the parser stores the MF_Light line's number; no reader of it is witnessed, and the muzzle glow does not use it.", "world-wac-ai-re.md, section 18.3"},
+	{"mf_light_value", "Muzzle light value", "Light", "The MF_Light line's number, which the muzzle glow does not use.", "[orig: AmmoDef_ParseProperty @ 0x40a837]; world-wac-ai-re.md, section 18.3", kUnverified},
 	{"tracer_type_friendly", "Friendly tracer style", "Tracer", "The streak drawn behind a tracer seen by its own side: stdred, stdgreen, rocket, at4, grenade, rapidred, rapidgreen, sniperred, snipergreen, df1red or df1green.", "[orig: RoundData_SpawnRound @ 0x4EC740]"},
 	{"tracer_type_enemy", "Enemy tracer style", "Tracer", "The streak drawn behind a tracer seen by the other side; a tracer_type line naming one style sets both.", "[orig: RoundData_SpawnRound @ 0x4EC740]"},
 	{"frndly_trcr_type_id", "Friendly tracer item", "Tracer", "The items.def id of the item a round becomes for its own side: its model shows on tracer shots, its behaviour always applies.", "[orig: RoundData_SpawnRound @ 0x4EC79B]"},
@@ -448,7 +456,7 @@ const DefWords kEffectWords[] = {
 	{"surface_type", "Surface", "", "The surface tag (dirt, metal, glass, flesh, water and so on) whose hits play this row; the move and zip tags dress the round's flight.", "[orig: AmmoDef_ProcessImpactEffect @ 0x40A170]"},
 	{"hit_effect", "Hit effect", "", "The particle effect spawned where the round hits this surface; none spawns nothing.", "[orig: AmmoDef_ProcessImpactEffect @ 0x40A170]"},
 	{"impact_sound", "Hit sound", "", "The sound set played where the round hits this surface; none plays nothing.", "[orig: AmmoDef_ProcessImpactEffect @ 0x40A170]"},
-	{"value", "Count", "", "Ignored: the game reads this fourth number and then zeroes it, so it changes nothing.", "[orig: AmmoDef_ParseProperty @ 0x40A587]"},
+	{"value", "Count", "", "The row's fourth number, which the game reads and then zeroes.", "[orig: AmmoDef_ParseProperty @ 0x40A587]", kIgnored},
 };
 
 const DefWords kPowerupWords[] = {
@@ -470,15 +478,17 @@ const DefWords kPowerupAmmoWords[] = {
 
 const DefWords kPowerupActionWords[] = {
 	{"function", "Handler", "Action", "The handler the block runs (powerup_pickup or powerup_respawn, the defaults when the block is absent); none, null or an unknown name does nothing.", "[orig: PowerUpDef_RegisterNewEntry @ 0x442C00]"},
-	{"anim", "Animation", "Action", "Unknown: the shared action parser stores it; neither powerup handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x402873]"},
+	// The shared action parser's keys neither powerup handler is witnessed reading [orig: PowerupAction_Pickup @
+	// 0x4428A0; PowerupAction_Respawn @ 0x442B40].
+	{"anim", "Animation", "Action", "An animation slot the shared action parser stores.", "[orig: ActionDef_ParseScriptLine @ 0x402873]", kUnverified},
 	{"soundset", "Sound", "Sound", "The sound set played when the block runs: at the taker on pickup, at the powerup when it respawns.", "[orig: ActionSlot_PlaySound @ 0x4010C0]"},
-	{"soundsetend", "End sound", "Sound", "Unknown: the shared action parser stores it; neither powerup handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x4023C0]"},
+	{"soundsetend", "End sound", "Sound", "An end sound set the shared action parser stores.", "[orig: ActionDef_ParseScriptLine @ 0x4023C0]", kUnverified},
 	{"particle", "Particle effect", "Effects", "The particle effect spawned when the block runs: at the taker on pickup, at the powerup when it respawns.", "[orig: ActionSlot_SpawnParticleAtEntity @ 0x442380]"},
-	{"particleuserpoint", "Particle userpoint", "Effects", "Unknown: the parser stores it; the witnessed handlers spawn the particle at the entity's position, never at a userpoint.", "[orig: ActionSlot_SpawnParticleAtEntity @ 0x442380]"},
+	{"particleuserpoint", "Particle userpoint", "Effects", "A user point the parser stores; the handlers spawn the particle at the entity's position.", "[orig: ActionSlot_SpawnParticleAtEntity @ 0x442380]", kUnverified},
 	{"texttoken", "HUD text", "Action", "On pickup, the string-table token whose text the local player's HUD shows.", "[orig: ActionSlot_OnTextTokenCallback @ 0x4011B0]"},
-	{"delaystart", "Start delay", "Timing", "Unknown: the shared action parser stores it (auto reads as -1); neither powerup handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x40279A]"},
-	{"delayend", "End delay", "Timing", "Unknown: the shared action parser stores it (delay is another spelling); neither powerup handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x402B2C]"},
-	{"action_value", "Action value", "Action", "Unknown: the shared action parser stores it; neither powerup handler is witnessed reading it.", "[orig: ActionDef_ParseScriptLine @ 0x4023C0]"},
+	{"delaystart", "Start delay", "Timing", "Ticks the shared action parser stores (auto reads as -1).", "[orig: ActionDef_ParseScriptLine @ 0x40279A]", kUnverified},
+	{"delayend", "End delay", "Timing", "Ticks the shared action parser stores (delay is another spelling).", "[orig: ActionDef_ParseScriptLine @ 0x402B2C]", kUnverified},
+	{"action_value", "Action value", "Action", "A number the shared action parser stores.", "[orig: ActionDef_ParseScriptLine @ 0x4023C0]", kUnverified},
 };
 
 // Each kind's sections in the order the Inspector shows them: who the record is first, then how it

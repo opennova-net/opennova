@@ -112,9 +112,9 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 				}
 			ImGui::EndCombo();
 		}
-		ui_kit::tooltip("The screen the HUD is drawn at. hudpos.def's positions are in 1024 x 768 and scale to the "
-		                "screen; the HUD font is FONTHUD1_HI above 640 pixels wide and FONTHUD1_LO at 640 and below, "
-		                "and the label fonts change at 640 and 800.");
+		ui_kit::tooltip("The screen the HUD is drawn at: hudpos.def's 1024 x 768 positions scale to it. The HUD font is "
+		                "FONTHUD1_HI above 640 pixels wide, FONTHUD1_LO at 640 and below; the label fonts change at 640 "
+		                "and 800.");
 	}
 	// The stance.
 	{
@@ -202,9 +202,8 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 	{
 		bool sights = options.sights;
 		if (ui_kit::check(row, "Sights", &sights,
-		                  "The weapon's sights up, as the game's frame draws them once its scope settles: the weapon's "
-		                  "SIGHTS card, the scoped view's ring, and the scope readouts (range, zero, magnification) at "
-		                  "hudpos.def's HUDSCOPERANGEXY, HUDSCOPEZEROXY and HUDSCOPEMAGXY."))
+		                  "The weapon's sights up, as the game draws them once its scope settles: its SIGHTS card, the "
+		                  "scoped view's ring and the readouts at HUDSCOPERANGEXY, HUDSCOPEZEROXY and HUDSCOPEMAGXY."))
 			options.sights = sights;
 		if (options.sights) {
 			row.next(ui_kit::field_width(digits, "Range"));
@@ -237,7 +236,7 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), hud_options_change(options)));
 	if (options.sights && !model.scope_frame() && !model.scope_why().empty())
-		ui_kit::quiet_text(model.scope_why());
+		ui_kit::quiet_text("No sights drawn.", model.scope_why());
 
 	// The element picked: its lines and its textures, each a Go to.
 	if (const HudPreviewElement *picked = model.picked()) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <editor/assets/asset_kind.h>
 
 namespace opennova::editor {
@@ -16,5 +18,12 @@ struct AssetKindWords {
 	const char *cite;
 };
 const AssetKindWords &asset_kind_words(AssetKind kind);
+
+// Whether the game of `game_code` (a project's target game, gameprofile's code) never reads a file of `kind` named
+// `name` (its basename): a definitions text of no other kind (OtherDefs) under none of the .def names the profile's
+// binary opens, each witnessed at its open site (docs/required-resources.md, "The .def names the game opens"). The
+// build still packs it, as the game's own archives carry such files. False for every other kind, and for a profile
+// whose binary is unwitnessed, which marks nothing.
+bool game_never_reads(AssetKind kind, const std::string &name, const std::string &game_code);
 
 } // namespace opennova::editor

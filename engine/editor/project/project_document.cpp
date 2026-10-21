@@ -70,7 +70,6 @@ io::JsonValue project_document_to_json(const ProjectDocument &doc) {
 	json.set("title", io::JsonValue::make_string(doc.title));
 	json.set("target_game", io::JsonValue::make_string(doc.target_game));
 	io::JsonValue features = io::JsonValue::make_object();
-	features.set("menu", io::JsonValue::make_bool(doc.features.menu));
 	features.set("mission", io::JsonValue::make_bool(doc.features.mission));
 	features.set("multiplayer", io::JsonValue::make_bool(doc.features.multiplayer));
 	json.set("features", std::move(features));
@@ -124,7 +123,6 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 	if (const io::JsonValue *features = json.get("features")) {
 		if (!features->is_object())
 			return fail(error, CoreFinding::ProjectFieldInvalid, "\"features\" must be an object.");
-		doc.features.menu = features->get_bool("menu", true);
 		doc.features.mission = features->get_bool("mission", false);
 		doc.features.multiplayer = features->get_bool("multiplayer", false);
 	}

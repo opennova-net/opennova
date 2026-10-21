@@ -750,8 +750,7 @@ std::string source_issue_words(const TrnSourceIssue &read) {
 		return "polytrn_scale feeds only the multiplayer file check, which the editor's terrain cannot keep: remove the "
 		       "line, or keep editing the file as a text.";
 	case TrnSourceRule::DepthmapKey:
-		return "The game's terrain reader reads polytrn_depthmap, which the editor's terrain cannot keep: remove the line, "
-		       "or keep editing the file as a text.";
+		return "The game stores polytrn_depthmap and never reads it back: a save leaves the line out.";
 	case TrnSourceRule::Skipped: return "The game's readers skip '" + read.token + "': a save leaves the line out.";
 	case TrnSourceRule::ReadAgain:
 		return "'" + read.field + "' is written again on line " + std::to_string(read.again) +
@@ -765,8 +764,9 @@ std::string source_issue_words(const TrnSourceIssue &read) {
 // written again (the last line wins), a grid row before the width or short of it (its cells the slots an earlier
 // line left), a row past the width's columns, a fifth foliage block (from it on the file is read by no arm), a
 // block's line its arms do not read, a match past its fourth code or past a byte, a murk past 0.99, a last line
-// no CR LF ends; and, blocking, an environment keyword the record does not hold (the environment's reader takes
-// it in the terrain's pass), polytrn_scale (the multiplayer check's alone) and polytrn_depthmap.
+// no CR LF ends, a polytrn_depthmap (stored, never read back); and, blocking, an environment keyword the record
+// does not hold (the environment's reader takes it in the terrain's pass) and polytrn_scale (the multiplayer
+// check's alone).
 void terrain_source_issues(const std::string &text, std::vector<SourceIssue> &issues) {
 	// What the readers read otherwise than the record holds (formats/trn trn_source_issues), each a source issue.
 	for (const TrnSourceIssue &read : trn_source_issues(text)) {

@@ -1,7 +1,10 @@
-// Each kind of project file in a modder's words (asset_kind_words.h).
+// Each kind of project file in a modder's words (asset_kind_words.h), and the .def names the game opens.
 #include "asset_kind_words.h"
 
 #include <iterator>
+
+#include <base/gameprofile/gameprofile.h>
+#include <base/io/strutil.h>
 
 namespace opennova::editor {
 namespace {
@@ -46,7 +49,7 @@ constexpr AssetKindWords kWords[] = {
 	{AssetKind::SoundProfileDefs, "Named sound profiles: for each of 51 slots (footsteps, deaths, doors, engines, impacts and more), the sound set an item plays.", "Read at boot, and again when an expansion reloads. Missing, the table the game allocated for it is never cleared, and every item binds its first slot: a mission's items take their sounds from that memory, and the game can hang or crash.", "[orig: Game_InitSubsystems @ 0x4A7141 -> SoundProfile_LoadAll @ 0x527490; ItemDef_AllocateWithDefaults @ 0x49E3EA -> SoundProfile_FindSlotByName @ 0x526E30]"},
 	{AssetKind::CharAttrDefs, "Up to 16 character classes' attributes: stealth, health bonus, recoil, reload, crosshair and scope modifiers, camouflage, run speed and abilities such as medic.", "Read at boot, after the subsystems start; missing, the game logs that it could not load the character attributes and goes on.", "[orig: Game_Run @ 0x4A7FE3 -> CharAttr_LoadFromDef @ 0x412140]"},
 	{AssetKind::PowerupDefs, "The pickups: what each gives (health, all ammunition, a weapon), how often and how many times it respawns, and its pickup sound.", "Read at a mission's start and bound to the items that name a row; missing, the game logs that it is unable to load powerup.def and goes on.", "[orig: Game_StartMission @ 0x5256CD -> PowerUpDef_LoadFromFile @ 0x443350]"},
-	{AssetKind::OtherDefs, "A definitions text under a name no other kind claims, such as overcast.def (the overcast weather's colours) or reverb.def (the audio's reverb presets).", "Unknown: no reader of .def files as such is witnessed; the game reads one only by a name it knows, as overcast.def at a mission's load and reverb.def for the audio.", "[orig: Environment_LoadTimeOfDayConfig @ 0x57DB30 (overcast.def); Audio_LoadReverbDefs @ 0x766D80 (reverb.def)]"},
+	{AssetKind::OtherDefs, "A definitions text under a name no other kind claims, such as overcast.def (the overcast weather's colours) or reverb.def (the audio's reverb presets).", "Read only by a name the game opens: overcast.def as a mission loads, reverb.def as the audio starts (JO ships none); one of any other name the game never reads.", "[orig: Environment_LoadTimeOfDayConfig @ 0x57DB30 (overcast.def @ 0x57DBFD); Audio_LoadReverbDefs @ 0x766D80 (reverb.def @ 0x766D8E)]; docs/required-resources.md (The .def names the game opens)"},
 	{AssetKind::StringTableCoo, "The menu's saved NovaWorld data, its browser cookies among it, every string encrypted with a key from this computer, so it reads back only here.", "Read as the main menu opens, from the game's own folder with the C library (never an archive or an expansion's folder), and rewritten in place when the game quits.", "[orig: CUIStringTable_OpenAndLoad @ 0x63A500 (from @ 0x55262B); CUIStringTable_LoadFromFile @ 0x64F290; CUIScene_SaveCookieJarFile @ 0x63BA9A]; docs/net/novaworld-net-re.md D-NET-267"},
 	{AssetKind::NovaWorldScreen, "A NovaWorld screen as a brace-delimited UI script: the error page (nw_error.mnx) or the login's start page (nw_startup.mnx).", "Loaded by name when the NovaWorld error or login screen opens, or a menu row names it; from the archives only, unless the game runs with /d.", "[orig: UI_ShowNovaWorldErrorMessage @ 0x558449; UI_EnterNovaWorldMenu @ 0x558937; @ 0x63E1B0 -> UI_ProcessScriptBuffer @ 0x63CBE0; FileSystem_OpenFile @ 0x75B1C0]"},
 	{AssetKind::Video, "A Bink video: the prologue and intro films, or the menus' main, header and footer videos.", "Played as the main menu first opens (prolog.bik, intro.bik) or shown in the menus, each from the expansion's folder first, then the install's; a missing one is skipped.", "[orig: Game_PlayIntroVideos @ 0x5637A0; UI_CreateMenuBinkVideos @ 0x54B590]"},
@@ -68,11 +71,47 @@ constexpr bool in_order() {
 }
 static_assert(in_order(), "one row per AssetKind, in the enum's order");
 
+// Every .def name a profile's binary opens, each where it opens it (the name's every push into a loader; the
+// binary holds no other .def name, and none it builds). Only a profile whose binary is witnessed has rows.
+struct ReadDefName {
+	gameprofile::GameId game;
+	const char *name; // as the game opens it, compared without case
+	const char *cite;
+};
+constexpr ReadDefName kReadDefNames[] = {
+	{gameprofile::GAME_JO, "Avatars.def", "[orig: CAvatarDefs_Init @ 0x57B1D0]"},
+	{gameprofile::GAME_JO, "SndProf.def", "[orig: Game_InitSubsystems @ 0x4A713C; Game_ReloadExpansionAndMods @ 0x5527D9; Expansion_ReloadAllAssets @ 0x56841B; Expansion_SwitchTo @ 0x5689DD]"},
+	{gameprofile::GAME_JO, "ammo.def", "[orig: Game_StartMission @ 0x52548A]"},
+	{gameprofile::GAME_JO, "charattr.def", "[orig: CharAttr_LoadFromDef @ 0x412172]"},
+	{gameprofile::GAME_JO, "hudfx.def", "[orig: HUD_InitOverlaySystem @ 0x5A462E]"},
+	{gameprofile::GAME_JO, "hudpos.def", "[orig: HUD_InitOverlaySystem @ 0x5A492C]"},
+	{gameprofile::GAME_JO, "items.def", "[orig: Game_InitSubsystems @ 0x4A719E; Game_ReloadExpansionAndMods @ 0x5527E8; Expansion_ReloadAllAssets @ 0x56842F; Expansion_SwitchTo @ 0x5689EC]"},
+	{gameprofile::GAME_JO, "overcast.def", "[orig: Environment_LoadTimeOfDayConfig @ 0x57DBFD]"},
+	{gameprofile::GAME_JO, "powerup.def", "[orig: Game_StartMission @ 0x5256CD]"},
+	{gameprofile::GAME_JO, "reverb.def", "[orig: Audio_LoadReverbDefs @ 0x766D8E]"},
+	{gameprofile::GAME_JO, "weapon.def", "[orig: WeaponDef_LoadAll @ 0x54DD36; Game_StartMission @ 0x5254B8; Game_ReloadExpansionAndMods @ 0x552845]"},
+	// hud.def's one push is in a loader nothing calls or points at, so JO never reads it [orig: @ 0x5BE21E, the
+	// function @ 0x5BE210], as the second hudpos.def push [orig: @ 0x5A246B, the function @ 0x5A2450].
+};
+
 } // namespace
 
 const AssetKindWords &asset_kind_words(AssetKind kind) {
 	const size_t index = size_t(kind);
 	return kWords[index < std::size(kWords) ? index : 0];
+}
+
+bool game_never_reads(AssetKind kind, const std::string &name, const std::string &game_code) {
+	if (kind != AssetKind::OtherDefs) return false;
+	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(game_code.c_str());
+	if (!profile) return false;
+	bool witnessed = false;
+	for (const ReadDefName &row : kReadDefNames) {
+		if (row.game != profile->id) continue;
+		witnessed = true;
+		if (strutil::iequals(row.name, name)) return false;
+	}
+	return witnessed;
 }
 
 } // namespace opennova::editor

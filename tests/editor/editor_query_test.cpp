@@ -522,7 +522,7 @@ static int test_build_gate() {
 // S26 (A6): the game runs on with what its reader read, so the row is listed over the modder's file too,
 // changed by a byte on disk, and the build lands. The rule itself, for a document with unsaved edits
 // (whose Save the build asks first must write it): it gates. S23: input the model cannot carry where the
-// game reads on (catalog.invalid_input, an items.def value that is no number) gates no closed file, the
+// game reads on (catalog.invalid_input, an items.def attachment of two angles) gates no closed file, the
 // modder's included; only an open one with unsaved edits.
 static int test_build_gate_shipped() {
 	test_temp::TempDir dir("opennova_editor_query_build_gate_shipped");
@@ -579,14 +579,15 @@ static int test_build_gate_shipped() {
 	files.unsaved.insert(relative);
 	TEST_EXPECT(blocks_build(row, nullptr, &files));
 
-	// S23: a value the reader reads on past (no number where one goes), the modder's file: listed, the build lands.
+	// S23: a value the reader reads on past (two angles, the other two read from slots an earlier line left), the
+	// modder's file: listed, the build lands.
 	const AssetEntry *items = session.view().project.scan->find("items.def");
 	TEST_EXPECT(items != nullptr);
 	if (!items) return 1;
 	const std::string items_path = items->relative_path;
 	TEST_EXPECT(test_io::write_text(file, "weapon Shipped\r\nend\r\n") &&
 	            test_io::write_text(dir.file("project") + "/" + items_path,
-	                                    "begin \"Modded\"\r\nid 100001\r\nhp twelve\r\nend\r\n"));
+	                                    "begin \"Modded\"\r\nid 100001\r\naddeweap ewep01 100201 15 37\r\nend\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	Diagnostic unread;
 	for (const Diagnostic &d : session.view().findings.diagnostics)

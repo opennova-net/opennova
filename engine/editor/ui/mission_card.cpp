@@ -154,7 +154,7 @@ void new_text_popup(CardContext &context, const BoardLine &line, const BoardChip
 		ui_kit::warning_line("Enter makes " + table + " for this mission.",
 		                     "The mission has no text table of its own: the game reads " + use.scope_alternate +
 		                     " in its place, which the editor never writes. Enter makes " + table +
-		                     ", which the game then reads for this mission instead (its title and its other texts too).");
+		                     ", which the game then reads for this mission instead.");
 	}
 	if (entered && context.state.new_text[0] && context.editable) {
 		EditorRequest create = request::set_string_text(context.mission.path(), line.record, chip.field, context.state.new_text);
@@ -243,7 +243,7 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 	// take (ReferencePicker::draw_field accepts it): what it is to the slot, one set.
 	ui_kit::tooltip_lazy([&] {
 		return chip.label + ": " + (chip.unset ? std::string("not set") : words) + (by_name ? "\nThe file holds " + raw : std::string()) +
-		       (chip.missing ? "\nIt names nothing the mission holds." : std::string()) + "\nRight-click for more.";
+		       (chip.missing ? "\nIt names nothing the mission holds." : std::string());
 	});
 	// Its menu, and its New text opened as the line's add asked.
 	MissionPickSlot slot;
@@ -306,7 +306,7 @@ void draw_runs(CardContext &context, Flow &flow, const BoardLine &line, bool &re
 			ImGui::PopID();
 		}
 		ImGui::PopStyleColor();
-		if (type_words) ui_kit::tooltip_lazy([&] { return line.type_words + "\nClick to give it another type."; });
+		if (type_words) ui_kit::tooltip(line.type_words);
 	}
 	for (const BoardChip &chip : line.chips) {
 		if (drawn[size_t(chip.slot)]) continue;
@@ -362,9 +362,11 @@ void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t
 			bool untriggered = false;
 			const std::string left = logic_move_left_sentence(context.mission, drag.record, card.event.row, to, *names, &untriggered);
 			if (!sentence.empty()) {
+				// As wide as its sentences wrap, so its one-line headings and warning cut to it.
+				ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 30.0f + ImGui::GetStyle().WindowPadding.x * 2.0f, 0.0f));
 				ImGui::BeginTooltip();
-				ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-				ImGui::TextDisabled("%s then reads:", card.title.c_str());
+				ImGui::PushTextWrapPos(0.0f);
+				ui_kit::quiet_text(card.title + " then reads:");
 				ImGui::TextUnformatted(sentence.c_str());
 				if (!left.empty()) {
 					size_t from = 0;
@@ -373,14 +375,13 @@ void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t
 						if (events[i]->id == drag.record.row) from = i;
 					const std::string title = "Event " + std::to_string(from + 1);
 					ImGui::Spacing();
-					ImGui::TextDisabled("%s then reads:", title.c_str());
+					ui_kit::quiet_text(title + " then reads:");
 					ImGui::TextUnformatted(left.c_str());
 					if (untriggered) {
 						const Node *row = context.mission.row(drag.record.row);
 						const bool waits = row && row->kind == node_kind(MissionKind::Event) &&
 						                   static_cast<const EventRow *>(row)->native.event.delay > 0;
-						ImGui::TextColored(ui_kit::warning_color(), "%s is left with no trigger: it %s, as the mission runs.", title.c_str(),
-						                   waits ? "acts after its wait" : "fires right away");
+						ui_kit::warning_line(std::string("Left with no trigger: it ") + (waits ? "acts after its wait." : "fires right away."));
 					}
 				}
 				ImGui::PopTextWrapPos();
@@ -437,7 +438,7 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 	if (!line.action && line.index > 0) {
 		if (ImGui::IsItemHovered() && context.editable) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 		if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && context.editable) ImGui::OpenPopup("join");
-		ui_kit::tooltip("How it joins the trigger before (the one before holds the join): click to choose.");
+		ui_kit::tooltip("How it joins the trigger before (the one before holds the join).");
 		if (ImGui::BeginPopup("join")) {
 			const BoardLine &before = card.triggers[line.index - 1];
 			for (const LogicJoin join : {LogicJoin::And, LogicJoin::Or, LogicJoin::Xor}) {
@@ -553,11 +554,16 @@ void move_event_popup(CardContext &context, const BoardCard &card) {
 	const std::unique_ptr<MissionNames> names = mission_label_names(mission, context.names);
 	const MissionUses uses = mission_uses(mission, card.event, *names);
 	ImGui::TextUnformatted(("Move " + card.title).c_str());
-	if (uses.uses.empty()) ImGui::TextDisabled("No trigger or action names it.");
+	if (uses.uses.empty()) ui_kit::quiet_text("No trigger or action names it.");
 	else
-		ImGui::TextDisabled("Named by %zu trigger%s or action%s, renumbered with it:", uses.uses.size(), uses.uses.size() == 1 ? "" : "s",
-		                    uses.uses.size() == 1 ? "" : "s");
-	for (const MissionUse &use : uses.uses) ImGui::BulletText("Event %zu: %s", use.event_index + 1, use.words.c_str());
+		ui_kit::quiet_text("Named by " + std::to_string(uses.uses.size()) +
+		                           (uses.uses.size() == 1 ? " trigger or action:" : " triggers or actions:"),
+		                   "The document renumbers each with the move.");
+	// Each a line cut to the room, whole in its tooltip.
+	for (const MissionUse &use : uses.uses) {
+		ImGui::Bullet();
+		ui_kit::clipped_text("Event " + std::to_string(use.event_index + 1) + ": " + use.words);
+	}
 	// The mission's script's event(n) of it: a number, which the move does not follow into the script.
 	const std::vector<ScriptUse> scripted = script_event_uses(context.workspace.view(), mission, card.index);
 	if (!scripted.empty()) {
@@ -573,8 +579,7 @@ void move_event_popup(CardContext &context, const BoardCard &card) {
 		}
 	}
 	ui_kit::warning_line("The events in between are renumbered too.",
-	                     "The events between the place it leaves and the place it takes are renumbered too (each place "
-	                     "says which): the triggers and actions follow, a script's numbers do not.");
+	                     "Each place says which: their triggers and actions follow, a script's numbers do not.");
 	ImGui::Separator();
 	const size_t count = mission.count_of(MissionKind::Event);
 	if (ImGui::BeginChild("places", ImVec2(em * 26.0f, std::min(em * 16.0f, ImGui::GetFrameHeightWithSpacing() * float(count + 1))))) {
@@ -879,9 +884,7 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		ImGui::PopID();
 	};
 	if (card.folded) {
-		ImGui::PushTextWrapPos(0.0f);
-		ImGui::TextDisabled("%s", card.words.sentence.c_str());
-		ImGui::PopTextWrapPos();
+		ui_kit::quiet_text(card.words.sentence);
 		finish();
 		return asked;
 	}
@@ -894,13 +897,13 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		waits.next(ui_kit::text_width("again after"));
 		ImGui::TextDisabled("again after");
 		wait_chip(context, waits, card, true, "##repeat", "reset_after", card.repeat_steps,
-		          "How long after its triggers held it is checked again: it counts down with the wait, and the game checks it on "
-		          "the pass after it ends.");
+		          "How long after its triggers held it is checked again: it counts down with the wait, checked on the pass "
+		          "after it ends.");
 	}
 
 	// The triggers, then the actions.
 	const float lead = std::max({ui_kit::text_width("When "), ui_kit::text_width("or else "), ui_kit::text_width("Then ")});
-	if (card.triggers.empty()) ImGui::TextDisabled("%s", card.words.when.c_str());
+	if (card.triggers.empty()) ui_kit::quiet_text(card.words.when);
 	for (const BoardLine &line : card.triggers) {
 		const char *word = line.index == 0 ? "When" : logic_join_words(card.triggers[line.index - 1].join);
 		draw_line(context, card, line, word, lead, right, asked);
@@ -927,12 +930,17 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		                                      "waypoint marker advancing on it and the script's event() read.");
 	for (const BoardLine &line : card.actions) draw_line(context, card, line, line.index == 0 ? "Then" : "", lead, right, asked);
 	add_button(true);
-	// The notes: the editor's reading, never gating.
-	for (const BoardNote &note : card.notes) {
-		ImGui::PushStyleColor(ImGuiCol_Text, kNote);
-		ui_kit::clipped_text("- " + note.words);
-		ImGui::PopStyleColor();
+	// The notes: the editor's reading, never gating. A line each, cut to the card (whole in its tooltip); past two, one
+	// line that counts them, every note in its tooltip.
+	ImGui::PushStyleColor(ImGuiCol_Text, kNote);
+	if (card.notes.size() > 2) {
+		std::string all;
+		for (const BoardNote &note : card.notes) all += (all.empty() ? "" : "\n") + note.words;
+		ui_kit::clipped_text(std::to_string(card.notes.size()) + " notes: " + card.notes.front().words, all);
+	} else {
+		for (const BoardNote &note : card.notes) ui_kit::clipped_text(note.words);
 	}
+	ImGui::PopStyleColor();
 	(void)em;
 	finish();
 	return asked;

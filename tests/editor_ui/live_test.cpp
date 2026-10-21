@@ -144,7 +144,7 @@ void test_variable_name_field() {
 	run.ui.activate(item_id(pushed(pane->ID, 12), {"alarm_raised (0 uses)###variable"}));
 	run.ui.away();
 	std::string text = logged_frame(run.ui);
-	CHECK(in_order(text, {"alarm_raised (0 uses)", "Name", "255 more variables can take a name (256 at most)."}),
+	CHECK(in_order(text, {"alarm_raised (0 uses)", "Name", "Variable names left: 255 of 256"}),
 	      "the named variable listed, its name field, how many more take a name");
 	const ImGuiID field = item_id(pushed(pane->ID, 12), {"###variable", "variable_name", "##name"});
 	run.ui.activate(field);

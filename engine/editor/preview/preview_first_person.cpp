@@ -387,9 +387,8 @@ bool FirstPersonSources::refresh(const std::shared_ptr<const FileSource> &source
 	// The weapons sharing the map, and the one asked for where it is none of them (the first that pairs it shows).
 	std::string weapon_note;
 	if (!options.weapon.empty() && !strutil::iequals(options.weapon, rig.record))
-		weapon_note = options.weapon + " does not play " + io::utf8_file_name(rig.table) +
-		              " (its animadm names another map, or its gfx1 no model of the project): " + rig.record +
-		              "'s view shows.";
+		weapon_note = options.weapon + " does not play " + io::utf8_file_name(rig.table) + ": " + rig.record +
+		              "'s view shows (its animadm names another map, or its gfx1 no model of the project).";
 	if (rig.weapons != weapons_ || weapon_note != weapon_note_) moved = true;
 	weapons_ = rig.weapons;
 	weapon_note_ = weapon_note;

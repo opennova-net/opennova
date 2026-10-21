@@ -30,10 +30,9 @@ bool picks_by_name(const FieldUse &field);
 Value picked_value(const FieldUse &field, const std::string &picked);
 
 // What a field's tooltip says of it: its name, its id and the key the file writes when that
-// differs, its unit and range, and the format table's note.
+// differs, its unit and range, and the format table's note without its citations (a table column's
+// heading is the field's name alone, field_title, its unit in this tooltip).
 std::string field_tip(const FieldSchema &field);
-// A table column's heading: the field's name, its unit after it.
-std::string column_header(const FieldSchema &field);
 
 // What a control did this frame.
 struct Edited {

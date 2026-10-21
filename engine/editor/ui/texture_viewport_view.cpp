@@ -117,10 +117,10 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 			ImGui::EndCombo();
 		}
 		const bool game_built = source && source->reader != TextureReader::Dds;
-		ui_kit::tooltip(game_built ? "The mip level shown, at the texture's size: the chain the game builds of it, each level the box "
-		                             "filter of the one before; the game samples a smaller level as the texture shrinks on screen."
-		                           : "The mip level shown, at the texture's size: the chain the file holds; the game samples a "
-		                             "smaller level as the texture shrinks on screen.");
+		ui_kit::tooltip(game_built ? "The mip level shown, of the chain the game builds: each level the box filter of the one "
+		                             "before. The game samples a smaller level as the texture shrinks on screen."
+		                           : "The mip level shown, of the chain the file holds. The game samples a smaller level as "
+		                             "the texture shrinks on screen.");
 	}
 	// What it is shown as: the file, or one of its uses as the game draws it (what the use's loader makes
 	// of its texels, a cut-out's test, a tile atlas's cells).
@@ -171,9 +171,9 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				if (ImGui::Selectable(kDetailNames[i], i == current)) options.detail = i == 0 ? -1 : int(4 - i);
 			ImGui::EndCombo();
 		}
-		ui_kit::tooltip("The device texture the game makes at the options' object texture detail (game.cfg object_texdetail, 0 "
-		                "the lowest), for the use shown or the first model row: a diffuse or detail texture is halved once "
-		                "or twice below full detail, a normal map never.");
+		ui_kit::tooltip("The device texture the game makes at game.cfg's object_texdetail (0 the lowest), for the use shown "
+		                "or the first model row. Below full detail a diffuse or detail texture is halved once or twice, a "
+		                "normal map never.");
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), texture_options_change(options)));
 	// What the picture is, in words, a line each (whole in its tooltip): the device texture at the detail shown; the
@@ -184,7 +184,8 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	const TextureShownUse &use_shown = model.shown_use();
 	if (use_shown.index >= 0 && !use_shown.alpha_words.empty()) ui_kit::quiet_text("Alpha: " + use_shown.alpha_words + ".");
 	// What the use's role reads of it: a line (a particle graphic's atlas page), and a legend (a blend map's weights,
-	// a foliage map's codes), each row its swatch, its share and what the game does with it; six rows show, more scroll.
+	// a foliage map's codes), each row its swatch, its share and what the game does with it, cut to the line (whole in its
+	// tooltip); six rows show, more scroll.
 	const TextureRoleView &role = model.role_view();
 	if (!role.words.empty()) ui_kit::quiet_text(role.words);
 	if (!role.title.empty()) {
@@ -192,7 +193,6 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		const float line = ImGui::GetTextLineHeightWithSpacing();
 		const float height = line * float(std::min<size_t>(std::max<size_t>(role.legend.size(), 1), 6)) + ImGui::GetStyle().WindowPadding.y;
 		if (ImGui::BeginChild("legend", ImVec2(0.0f, height))) {
-			ImGui::PushTextWrapPos(0.0f);
 			for (size_t i = 0; i < role.legend.size(); ++i) {
 				const TextureLegendRow &entry = role.legend[i];
 				ImGui::PushID(int(i));
@@ -203,10 +203,9 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				ImGui::SameLine();
 				char share[32];
 				std::snprintf(share, sizeof(share), "%.1f%%", entry.share * 100.0);
-				ImGui::TextUnformatted((entry.key + " (" + share + "): " + entry.words).c_str());
+				ui_kit::clipped_text(entry.key + " (" + share + "): " + entry.words);
 				ImGui::PopID();
 			}
-			ImGui::PopTextWrapPos();
 		}
 		ImGui::EndChild();
 	}

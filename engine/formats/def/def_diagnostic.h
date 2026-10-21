@@ -12,8 +12,16 @@ namespace opennova::def {
 //
 // Reinterpreted names a number the witnessed loader reads as another (a weapon's category
 // past 0..11 read as 0 [orig: WeaponDefs_ParseLineCallback @ 0x5439a8], an item's unit_type
-// past a byte read as its low byte [orig: ItemDef_ParseProperty @ 0x49ee47]): the record
-// holds what the game reads, and the writer writes what the game reads; reported, never a
+// past a byte read as its low byte [orig: ItemDef_ParseProperty @ 0x49ee47], a token its
+// atol, atof or digit walker reads only the start of, a value the line leaves out that the
+// tokenizer's reset slot reads as 0 [orig: Config_TokenizeLine @ 0x53CB71..0x53CB81]): the
+// record holds what the game reads, and the writer writes what the game reads; reported,
+// never a blocker.
+//
+// Unclosed names an item block no `end` closes (the file ends, or the next `begin` opens,
+// first) whose alias the file states: the `end` arm's one act beside closing the block is the
+// alias it derives for an item with none [orig: ItemDef_ParseProperty @ 0x49EB2F..0x49EB5F],
+// so the game reads the item as the writer's form of it, its `end` added; reported, never a
 // blocker.
 //
 // UnknownProperty names input the witnessed loaders read past without storing
@@ -25,10 +33,11 @@ namespace opennova::def {
 // AmmoDef_ParseProperty @ 0x40A2D0 return 0 for an unmatched key]. The other
 // codes name input the typed model cannot carry faithfully: the writer refuses
 // the record until the source is corrected and reloaded.
-enum class DefIssueCode { UnknownProperty, Reinterpreted, InvalidValue, MalformedBlock, Unrepresentable };
+enum class DefIssueCode { UnknownProperty, Reinterpreted, Unclosed, InvalidValue, MalformedBlock, Unrepresentable };
 
 inline bool def_issue_blocks(DefIssueCode code) {
-	return code != DefIssueCode::UnknownProperty && code != DefIssueCode::Reinterpreted;
+	return code != DefIssueCode::UnknownProperty && code != DefIssueCode::Reinterpreted &&
+	       code != DefIssueCode::Unclosed;
 }
 
 struct DefIssue {

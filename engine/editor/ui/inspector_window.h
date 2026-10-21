@@ -105,11 +105,12 @@ public:
 
 private:
 	WordsBox words_;
-	// "Referenced by": each use of what the selected record defines, its edge and its line, and
-	// what they were made from.
+	// "Referenced by": each use of what the selected record defines, its edge, its line and its field's
+	// name (a line's record in its brief words while its file is open), and what they were made from.
 	struct Use {
 		const GraphEdge *edge = nullptr;
 		std::string line;
+		std::string field;
 	};
 	struct UsersKey {
 		uint64_t document = 0, load = 0, revision = 0;

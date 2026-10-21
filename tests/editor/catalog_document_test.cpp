@@ -252,7 +252,7 @@ static int session_gate() {
 }
 static int malformed() {
 	test_temp::TempDir dir("opennova_catalog_malformed_test");
-	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Bad\"\nhp twelve\nend\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Bad\"\naddeweap ewep01 100201 15 37\nend\n"));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.blocked() && document.issues().front().line == 2);
@@ -260,6 +260,37 @@ static int malformed() {
 	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Open\"\nid 100001\n"));
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.blocked());
+	return 0;
+}
+// Lines the game reads as another value open unblocked (formats/def/def_scan.cpp's validate_property): a number token
+// its reading takes the start of (WEAPON.DEF's `ammobucket 9mm`, abs(atol) 9 [orig: WeaponDefs_ParseLineCallback
+// @0x54402B..0x544045]), a value left out of the tokenizer's reset slots (`minai` alone, 0 [orig:
+// Config_TokenizeLine @0x53CB71..0x53CB81]), a kill zone the table lacks (stored nothing [orig: AmmoDef_ParseProperty
+// @0x40ACB0..0x40ACD2]), an item the file's end closes, its last `end` without CR LF [orig: File_ParseASCIIFile
+// @0x53D8E9..0x53D8F5]: each reported, the record editable, and a save writes what the game reads.
+static int game_reads() {
+	test_temp::TempDir dir("opennova_catalog_game_reads_test");
+	const struct {
+		const char *name, *text;
+		AssetKind kind;
+		const char *saved;
+	} files[] = {
+		{"weapon.def", "weapon \"WPN_MP5\"\r\nammobucket 9mm\r\nend\r\n", AssetKind::WeaponDefs, "ammobucket 9\r\n"},
+		{"items.def", "begin \"Car\"\r\nid 100001\r\nsid Car1\r\nminai\r\nend", AssetKind::ItemDefs, "end\r\n"},
+		{"ammo.def", "ammo Round\r\nkztype rounds_kz_bullet\r\nvelocity 10\r\nend\r\n", AssetKind::AmmoDefs, "velocity 10\r\n"},
+	};
+	for (const auto &file : files) {
+		TEST_EXPECT(test_io::write_file(dir.file(file.name), std::vector<uint8_t>(file.text, file.text + std::strlen(file.text))));
+		DefCatalogDocument document; Diagnostic error;
+		TEST_EXPECT(document.load(dir.file(file.name), file.name, file.kind, "jo", error));
+		TEST_EXPECT(!document.blocked() && !document.issues().empty());
+		for (const SourceIssue &issue : document.issues()) TEST_EXPECT(!issue.blocks);
+		TEST_EXPECT(document.save(error));
+		std::string saved, message;
+		TEST_EXPECT(opennova::io::read_file_text(dir.file(file.name), saved, message));
+		TEST_EXPECT(saved.find(file.saved) != std::string::npos && saved.find("9mm") == std::string::npos &&
+		            saved.find("rounds_kz_bullet") == std::string::npos);
+	}
 	return 0;
 }
 // Lines the game ignores never block the document: they are reported, the record
@@ -1001,13 +1032,77 @@ static int repeated_weapon_name() {
 	return 0;
 }
 
+// The members the game is witnessed never to read (Ignored) or no reader is witnessed for (Unverified), as their
+// words say (def_words): the schema and a record's use agree. Such a member is written where it differs from the
+// table's default, the writer's rule for a line, with no tick to take (a Clear is refused: its value alone says),
+// so an item that sets none of them holds none written; a member the game reads stays always written.
+static int unread_members() {
+	struct Row {
+		DefRecordKind kind;
+		const char *id;
+		Applicability applies;
+	};
+	const Row rows[] = {
+	        {DefRecordKind::Item, "top_heavy", Applicability::Ignored},
+	        {DefRecordKind::Item, "shadow_texture", Applicability::Ignored},
+	        {DefRecordKind::Item, "shadow_offset_y", Applicability::Ignored},
+	        {DefRecordKind::Item, "max_attack_dist", Applicability::Ignored},
+	        {DefRecordKind::Item, "attrib_evil", Applicability::Ignored},
+	        {DefRecordKind::Item, "particlefxw4.secondary_effect", Applicability::Ignored},
+	        {DefRecordKind::Item, "husk_swap_at", Applicability::Unverified},
+	        {DefRecordKind::Item, "soundloops[6]", Applicability::Unverified},
+	        {DefRecordKind::Item, "graphic_enemy", Applicability::Reads},
+	        {DefRecordKind::Item, "text_id", Applicability::Reads},
+	        {DefRecordKind::Weapon, "gfx1a", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "gfx1b", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "heat_sound", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "loadout_menu_ttdesc", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "classrounds[4]", Applicability::Ignored},
+	        {DefRecordKind::Weapon, "classrounds[5]", Applicability::Reads},
+	        {DefRecordKind::Weapon, "statid", Applicability::Unverified},
+	        {DefRecordKind::Action, "function_args[0]", Applicability::Unverified},
+	        {DefRecordKind::Ammo, "mf_light_value", Applicability::Unverified},
+	        {DefRecordKind::Effect, "value", Applicability::Ignored},
+	        {DefRecordKind::PowerupAction, "action_value", Applicability::Unverified},
+	        {DefRecordKind::PowerupAction, "soundset", Applicability::Reads},
+	};
+	for (const Row &row : rows) {
+		const FieldSchema *found = nullptr;
+		for (const FieldSchema &f : catalog_table().fields(node_kind(row.kind)))
+			if (f.id == row.id) found = &f;
+		TEST_EXPECT(found && found->applies == row.applies);
+		if (!found || found->applies != row.applies) std::printf("FAIL %s: not as its words say\n", row.id);
+	}
+
+	test_temp::TempDir dir("opennova_catalog_unread_members");
+	TEST_EXPECT(test_io::write_text(dir.file("items.def"), "begin \"Plain\"\nid 100001\ntype vehicle\nhp 10\nend\n"
+	                                                        "begin \"Heavy\"\nid 100002\ntype vehicle\ntop_heavy 3\nend\n"));
+	DefCatalogDocument items; Diagnostic error;
+	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error) && items.rows().size() == 2);
+	if (items.rows().size() != 2) return 1;
+	const NodeKind kItem = node_kind(DefRecordKind::Item);
+	const NodeAddress plain{items.rows()[0]->id, kItem, 0}, heavy{items.rows()[1]->id, kItem, 0};
+	const FieldSchema *top_heavy = nullptr;
+	for (const FieldSchema &f : items.fields(kItem))
+		if (f.id == "top_heavy") top_heavy = &f;
+	TEST_EXPECT(top_heavy && !top_heavy->optional && items.field_on(heavy, *top_heavy).applies == Applicability::Ignored);
+	TEST_EXPECT(!items.present(plain, "top_heavy") && items.present(heavy, "top_heavy"));
+	TEST_EXPECT(!items.present(plain, "husk_swap_at") && !items.present(plain, "shadow_texture"));
+	TEST_EXPECT(items.present(plain, "hp") && items.present(plain, "score"));
+	Edit clear; clear.operation = EditOperation::Clear; clear.address = heavy; clear.field = "top_heavy";
+	TEST_EXPECT(!items.apply(clear, error) && items.present(heavy, "top_heavy"));
+	TEST_EXPECT(items.apply(field(heavy, "top_heavy", int64_t(0)), error) && !items.present(heavy, "top_heavy"));
+	return 0;
+}
+
 int main() {
 	// Every test runs (a failure in one does not hide another's).
 	int failures = 0;
 	for (int (*test)() : {repeated_weapon_name, type_words, adds_keep_the_ending, item_name_cut, unticked_line_saves_alone,
 	                      code_page_names, history_and_save, two_new_items, collections, nested_rows_follow_the_record,
-	                      session_gate, malformed, ignored_input, replaced_action_block, go_to_record, remove_last_item,
-	                      changes_since_save, written_units, witnessed_enums, powerup_weapon, duplicates_apart, plain_words})
+	                      session_gate, malformed, game_reads, ignored_input, replaced_action_block, go_to_record,
+	                      remove_last_item, changes_since_save, written_units, witnessed_enums, powerup_weapon,
+	                      duplicates_apart, plain_words, unread_members})
 		failures += test() ? 1 : 0;
 	return failures ? 1 : 0;
 }

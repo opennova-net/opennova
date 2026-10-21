@@ -30,6 +30,7 @@
   ],
   "counters": {
     "cpp_binding_console_writes": 0,
+    "editor_ui_wrapped_text": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 1,
     "gd_dict_key_sites": 80,
