@@ -122,8 +122,8 @@ void Server_ResetAllPlayerSlotFrameState(NapiNPServerCtx &ctx);
 // on an in-session authority each drop's S2C 0x2F is queued right there, to every in-match slot,
 // ahead of the teardown's pump (D-NET-NEW-L1-25). Single player (out of a session) sends none.
 // [orig: Entity_Destroy @0x43E810 -> Entity_DropCarriedObject @0x43E8B8; Entity_DropCarriedObject
-//  @0x439DF0 - `cmp is_authority` @0x439F29, `cmp is_in_session` @0x439F31,
-//  Server_SendDestructibleDeathPacket called @0x439F34 (mask 0x80 @0x50D922)]
+//  @0x439DF0 - `cmp is_authority` @0x439F23 (jz @0x439F29), `cmp is_in_session` @0x439F2B (jz
+//  @0x439F31), Server_SendDestructibleDeathPacket called @0x439F34 (mask 0x80 @0x50D922)]
 void route_teardown_drops(NapiNPServerCtx &ctx, world::World &world);
 
 // A kept slot's per-mission state back to a fresh mission's, around what the

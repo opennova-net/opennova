@@ -14,10 +14,10 @@
 // [orig: Game_TeardownMission @0x522350 (Entity_Destroy over pools 0, 1 and 2
 //  @0x52236F..0x5223C0, the pump @0x522588, the slot reset @0x52269B); Entity_Destroy @0x43E810
 //  (the def+0x5C == 3 test @0x43E8B1, Entity_DropCarriedObject @0x43E8B8, the memset @0x43EA70);
-//  Entity_DropCarriedObject @0x439DF0 (`cmp is_authority` @0x439F29, `cmp is_in_session`
-//  @0x439F31, Server_SendDestructibleDeathPacket called @0x439F34);
-//  NetPacket_SerializePlayerSync0x46 @0x505E80 (the slot's +0 pointer @0x505EDE, the dead-bit
-//  test @0x506113); NetPacket_SerializeVisiblePlayersSnapshot @0x506320 (the body test
+//  Entity_DropCarriedObject @0x439DF0 (`cmp is_authority` @0x439F23 / jz @0x439F29, `cmp
+//  is_in_session` @0x439F2B / jz @0x439F31, Server_SendDestructibleDeathPacket called @0x439F34);
+//  NetPacket_SerializePlayerSync0x46 @0x505E80 (the slot's +0 pointer's null test
+//  @0x505EDC..0x505EDE, the dead-bit test `test byte ptr [edi+24h], 2` @0x506102, jz @0x506106); NetPacket_SerializeVisiblePlayersSnapshot @0x506320 (the body test
 //  @0x506376..0x50637A, +0x68 @0x50637C..0x506381, the 0x200 test @0x506383..0x50638C)]
 #include "npruntime/conn_fixture.h"
 
