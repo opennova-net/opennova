@@ -330,12 +330,62 @@ void VehicleSystem::tick_simple_motor(
 		// Vehicle_ProcessSelectorZeroGround @0x46E62E..0x46E85A;
 		// Vehicle_ProcessSelectorZeroBoat @0x470129..0x470355].
 		vehicle_client_chase(e, VehicleChaseFamily::Plain, 0);
-		if (controller != nullptr && controller->handle == world_.cached.local_player) {
+		if (controller == nullptr || controller->handle != world_.cached.local_player) {
+			// A hull the local player does not drive takes the record's words, and
+			// its occupant block is the authority's alone [orig:
+			// Vehicle_ProcessSelectorZeroGround @0x46E877..0x46E897, the gate
+			// @0x46E9E1..0x46E9F6; Vehicle_ProcessSelectorZeroBoat @0x470372..0x47038C,
+			// the gate @0x4704D6..0x4704EA].
+			m.cmd_speed = m.net_recv_speed;
+			m.steer_target_bam = m.net_recv_steer_bam;
+		} else if (boat) {
+			// The boat twin's block for its local driver: the stuck count rests,
+			// then the player arm, whose client tail averages the speed with the
+			// record's. A submerged driver's AI leg is the boat leg, which ours
+			// still stages ahead of the mover (the cbot twin's staging), so its
+			// in-place port brings this arm's AI leg with it.
+			// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 - the stuck reset
+			//  @0x470508, the eye test @0x47051B..0x470527 -> the AI leg @0x470795]
+			m.stuck_ticks = 0;
 			stage_player_vehicle_input(world_, e, *controller, t);
 			m.cmd_speed = io::bam_sar(io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
 		} else {
-			m.cmd_speed = m.net_recv_speed;
-			m.steer_target_bam = m.net_recv_steer_bam;
+			// The hull the local player drives runs the occupant block on the
+			// client as on the authority: a parked hull (Flags 0x10000000; the
+			// dead bit took the tail above) takes the parked arm; else the stuck
+			// count rests, and a driver whose eye sits at or below the water plane
+			// takes the AI leg over the client's brain words, which are zero
+			// (D-NET-433), the player arm otherwise, its client tail averaging the
+			// speed with the record's.
+			// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100 - the local-occupant
+			//  gate @0x46E9EA..0x46E9F6, the parked test @0x46E9FC..0x46EA11 -> the
+			//  parked arm @0x46F09E..0x46F0C7, the stuck reset @0x46EA17, the player
+			//  bit @0x46EA21, the eye test @0x46EA2E..0x46EA3A -> the AI leg
+			//  @0x46ECB1 (the seeds @0x46ECBE..0x46ECD0), the player arm's state 22
+			//  @0x46EA52, its client tail @0x46EC79..0x46ECA6]
+			AiEntity *ground_brain = world_.ai.for_handle(e.handle);
+			if (vehicle_hull_parked(e)) {
+				m.steer_target_bam = m.yaw_bam;
+				m.cmd_speed = 0;
+				m.steer_ramp_bam = 0;
+				if (ground_brain != nullptr)
+					world_.ai.check_vehicle_stuck(world_, e);
+				e.flags &= ~0x80u;
+				if (ground_brain != nullptr)
+					ground_brain->brain.f[AiBrain::kCurState] = 22;
+			} else {
+				m.stuck_ticks = 0;
+				if (controller->player_class == 0 ||
+						watercraft_driver_submerged(world_, *controller)) {
+					AiBrain client_words;
+					simple_ground_ai_leg(e, t, client_words);
+				} else {
+					if (ground_brain != nullptr)
+						ground_brain->brain.f[AiBrain::kCurState] = 22;
+					stage_player_vehicle_input(world_, e, *controller, t);
+					m.cmd_speed = io::bam_sar(io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+				}
+			}
 		}
 	} else if (t.player_control) {
 		// Parked is `occupant == 0 || Flags & 0x10000002` on the ground twin, ahead

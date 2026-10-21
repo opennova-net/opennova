@@ -3089,12 +3089,82 @@ void test_selector_zero_ground_ai_leg_runs_in_the_mover() {
 	}
 }
 
+// A client runs the selector-zero ground mover's occupant block for the hull its
+// local player drives, as the authority does for every hull. The three cases:
+// - a parked hull (Flags 0x10000000) takes the parked arm: a zero command and
+//   Flags & ~0x80;
+// - a driver whose eye sits at or below the water plane takes the AI leg over
+//   the client's brain words, which are zero: a zero speed seed, a zero turn
+//   budget, so the command is 0 and the steer holds the leg's Yaw;
+// - a driver above water takes the player arm, its client tail averaging the
+//   staged speed with the record's.
+// The stuck count rests on both unparked arms. The record's words do not reach
+// the local driver's hull.
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100 - the local-occupant gate
+//  @0x46E9EA..0x46E9F6, the parked test @0x46E9FC..0x46EA11, the parked arm
+//  @0x46F09E..0x46F0C7, the stuck reset @0x46EA17, the eye test @0x46EA2E..0x46EA3A,
+//  the AI leg's seeds @0x46ECBE..0x46ECD0, the client tail @0x46EC79..0x46ECA6]
+void test_client_local_driver_runs_the_occupant_block() {
+	enum class Case { Parked, Submerged, Player };
+	for (const Case c : {Case::Parked, Case::Submerged, Case::Player}) {
+		auto r = std::make_unique<Rig>();
+		VehicleTraits t = buggy_traits();
+		t.physics = 0;
+		r->w.vehicles.traits.set(r->veh().item_id, t);
+		r->mount();
+		r->w.ai.is_authority = false;
+		r->w.cached.local_player = r->drv_h;
+		Entity &veh = r->veh();
+		auto &m = veh.veh;
+		m.net_predicted = true;
+		m.yaw_seeded = true;
+		m.yaw_bam = veh.heading;
+		m.net_recv_speed = 20000;
+		m.net_recv_steer_bam = 0x12345678;
+		m.stuck_ticks = 5;
+		veh.flags |= 0x80u;
+		if (c == Case::Parked)
+			veh.flags |= 0x10000000u;
+		// The driver's eye is its Z plus CameraOffset.z (0 here), about 10 u.
+		r->w.env.water_z = c == Case::Submerged ? (100 << 16) : -(1 << 16);
+		r->w.vehicles.ground_client_tick(veh, t);
+		switch (c) {
+		case Case::Parked:
+			CHECK(m.cmd_speed == 0);
+			CHECK(m.steer_ramp_bam == 0);
+			CHECK((veh.flags & 0x80u) == 0);
+			// A brainless rig skips the stuck check, as the authority arm does.
+			CHECK(m.stuck_ticks == 5);
+			break;
+		case Case::Submerged:
+			// The leg's seeds are the zero words; the zero budget clamps the
+			// bearing delta to 0. The leg writes no Flags 0x80 (only the
+			// boarders' hold clears it).
+			CHECK(m.cmd_speed == 0);
+			CHECK(m.steer_target_bam != m.net_recv_steer_bam);
+			CHECK(m.stuck_ticks == 0);
+			CHECK((veh.flags & 0x80u) != 0);
+			break;
+		case Case::Player:
+			// No keys and no analog axis: the staged command is 0, the client
+			// tail averages it with the record's 20000, and the sprint bit's
+			// absence clears Flags 0x80.
+			CHECK(m.cmd_speed == 10000);
+			CHECK(m.stuck_ticks == 0);
+			CHECK((veh.flags & 0x80u) == 0);
+			CHECK(m.steer_target_bam != m.net_recv_steer_bam);
+			break;
+		}
+	}
+}
+
 int main() {
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
     test_a_dead_aircraft_bails_ahead_of_its_ai_block();
     test_selector_zero_park_reads_the_hull_not_the_occupant();
     test_selector_zero_ground_ai_leg_runs_in_the_mover();
+    test_client_local_driver_runs_the_occupant_block();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();
