@@ -5275,6 +5275,10 @@ add_test(NAME flare_motor COMMAND flare_motor_test)
 add_executable(model_less_hull_test world/model_less_hull_test.cpp)
 target_link_libraries(model_less_hull_test PRIVATE opennova_runtime)
 add_test(NAME model_less_hull COMMAND model_less_hull_test)
+# D-NET-445: the attach process's bone typing, its detach-first refusal and the off-table bones.
+add_executable(bone_slot_attach_test world/bone_slot_attach_test.cpp)
+target_link_libraries(bone_slot_attach_test PRIVATE opennova_runtime)
+add_test(NAME bone_slot_attach COMMAND bone_slot_attach_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

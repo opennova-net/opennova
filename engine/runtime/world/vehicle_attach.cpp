@@ -230,10 +230,73 @@ bool equipped_slot_busy(World &world, const Entity &occ) {
 // the flags write; the remaining relationship fields are common. Returns false for a
 // seat retail refuses, before any relationship write. `force_attach` is a client's
 // (Entity_ProcessVehicleAttach passes 1 there, 0 on the authority).
-bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone,
-        bool force_attach) {
-    const bool control_seat = is_vehicle_control_seat(veh.seats[seat_idx].type);
-    const bool use_gun = veh.seats[seat_idx].type == SeatType::Gunner;
+// The carrier model's userpoint name types the requested bone: sitex 1, ctrlx 2,
+// drvrx 5 (5-character prefixes), UseGun 3 (the whole name), anything else 0, and 0
+// with no item def, no model or a bone past the userpoint count. Every typed row is
+// a slot row or an off-table row, so the bone's row carries its type, and a carrier
+// with no model has no rows. Rows are 1-based and no model holds 0x80 userpoints, so
+// bone 0 and a bone of 0x80 or more name no row and stay untyped (Q7-11: retail
+// reads outside the name table for them).
+// [orig: Entity_GetBoneSlotType @0x434ED0 (the reads @0x434EF8 / @0x434F0D, the name
+//  compares @0x434F16 / @0x434F34 / @0x434F52 / @0x434F6E)]
+SeatType bone_slot_type(const Entity &veh, uint8_t bone) {
+    if (!veh.has_item_def) return SeatType::None;
+    for (const Seat &s : veh.seats)
+        if (s.bone_index == bone) return s.type;
+    for (const Seat &s : veh.off_table_seats)
+        if (s.bone_index == bone) return s.type;
+    return SeatType::None;
+}
+
+// The process's occupied-seat test walks the def's ten slot bones for the
+// requested one; a bone of 0x80 or more never matches its signed byte compare.
+// [orig: Entity_ProcessVehicleAttach @0x435AA0 (@0x435B4C..0x435B70)]
+// Entity::seats holds the table's rows alone (the off-table ones live apart).
+int seat_table_row(const Entity &veh, uint8_t bone) {
+    if (bone >= 0x80) return -1;
+    for (int i = 0; i < static_cast<int>(veh.seats.size()); ++i)
+        if (veh.seats[static_cast<size_t>(i)].bone_index == bone)
+            return i;
+    return -1;
+}
+
+// The slot the type's attach writes: a sitex bone its passenger slot (0..7) or
+// none, ctrlx and drvrx slot 8 and UseGun slot 9 whatever the bone. A table bone's
+// own row is its type's slot (a ninth sitex in slot 8 excepted: the sitex search
+// stops at slot 7), so the bone's row answers first and an off-table ctrlx / drvrx
+// / UseGun bone takes the row of its type's fixed slot.
+// [orig: Entity_AttachToVehicleSlot @0x4946D0 (sitex @0x4946E9..0x494706, ctrlx
+//  @0x494804, drvrx @0x494909 / @0x49492F); Entity_AttachToUseGunSlot @0x546B80
+//  (@0x546CBF)]
+int attach_slot_row(const Entity &veh, SeatType type, uint8_t bone) {
+    for (int i = 0; i < static_cast<int>(veh.seats.size()); ++i) {
+        const Seat &s = veh.seats[static_cast<size_t>(i)];
+        if (s.bone_index == bone && s.type == type &&
+                !(type == SeatType::Passenger && s.retail_slot == 8))
+            return i;
+    }
+    uint8_t fixed_slot = 0;
+    if (type == SeatType::Controller || type == SeatType::Driver)
+        fixed_slot = 8;
+    else if (type == SeatType::Gunner)
+        fixed_slot = 9;
+    else
+        return -1;
+    for (int i = 0; i < static_cast<int>(veh.seats.size()); ++i)
+        if (veh.seats[static_cast<size_t>(i)].retail_slot == fixed_slot) return i;
+    return -1;
+}
+
+bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, SeatType type,
+        uint8_t bone, bool force_attach) {
+    const bool control_seat = is_vehicle_control_seat(type);
+    const bool use_gun = type == SeatType::Gunner;
+    // A sitex bone's held passenger slot refuses (the authority's process refused
+    // it already; a client's detached its holder). [orig: Entity_AttachToVehicleSlot
+    //  @0x494708..0x49471A]
+    if (type == SeatType::Passenger && seat_idx >= 0 &&
+            veh.seats[static_cast<size_t>(seat_idx)].occupant.valid())
+        return false;
     // The local player's control-seat attach resets its camera first, EWeap
     // carrier or not, ahead of the +368 claim test: the scope target and
     // ease, the fov, the binoculars and the NVG restore latch. (The function's
@@ -247,7 +310,7 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     //  @0x4947bf, drvrx @0x4948b2..0x4948b4 ahead of @0x4948d2;
     //  Entity_AttachToUseGunSlot @0x546ba2..0x546ba4, after the gate @0x546c07
     //  and ahead of @0x546bb6 / the mount @0x546c38]
-    if ((control_seat || veh.seats[seat_idx].type == SeatType::Gunner) &&
+    if ((control_seat || use_gun) &&
             occ.handle == world.cached.local_player &&
             world.local_player_state != nullptr)
         local_player_camera_reset(&world, world.local_player_state->weapon,
@@ -262,8 +325,7 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     //  the 0 return @0x494714..0x49471a; Entity_ProcessVehicleAttach: the local
     //  player's @0x435c09 -> @0x435c67, any other's @0x435c40, past the tip and the
     //  stance clear; the earlier detach @0x435bce]
-    if (control_seat &&
-            !world.vehicles.claim_primary_occupant(veh, occ.handle, veh.seats[seat_idx].type))
+    if (control_seat && !world.vehicles.claim_primary_occupant(veh, occ.handle, type))
         return false;
     // The authority's UseGun attach succeeds only while +368 is empty or the
     // requester's; a refusal still saves +0x308 and points the EquippedSlot at the
@@ -287,8 +349,11 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
         }
         return false;
     }
-    veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
-    occ.mount_type = veh.seats[seat_idx].type; // [orig: parentSlot(0x168) = slotType]
+    // An off-table sitex bone writes no seat handle. [orig: mountHandles[idx] = handle
+    //  @0x494746; @0x4946F3..0x494706 -> @0x494752]
+    if (seat_idx >= 0)
+        veh.seats[static_cast<size_t>(seat_idx)].occupant = occ.handle;
+    occ.mount_type = type; // [orig: parentSlot(0x168) = slotType @0x49476F]
     static_assert((kEntityFlagDrowning | kEntityFlagInAir) == 0xA000u,
                   "the witnessed gunner-mount scrub mask");
     static_assert((kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted) == 0xA040u,
@@ -312,7 +377,7 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mount_target_bms_id = veh.bms_id;
     occ.mount_target_spawn_origin = veh.spawn_origin;
     occ.mount_bone = bone;                          // [orig: attachBoneId(0x157) = bone]
-    occ.mount_seat = static_cast<int8_t>(seat_idx); // port-local dense seat index
+    occ.mount_seat = static_cast<int8_t>(seat_idx); // port-local dense seat index, -1: none
     occ.mounted = true;
     occ.mounted_config_valid = veh.emplaced_config_valid;
     occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;
@@ -342,7 +407,9 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     // position is one store now, so the seat pose no longer lands early).
     // [orig: Entity_AttachToVehicleSlot @0x4946D0 - the stores @0x494752..0x494775]
     const EntityPosition entry_position = occ.position;
-    world.vehicles.pose_mounted_occupant(occ, veh, veh.seats[seat_idx]);
+    Seat seat;
+    if (world.vehicles.rider_seat(occ, veh, seat))
+        world.vehicles.pose_mounted_occupant(occ, veh, seat);
     if (world.ai.for_handle(occ.handle) != nullptr) occ.position = entry_position;
     // Success clears the movement stance bits and, for the local player, the
     // prone/crouch latches, and copies its Yaw into the look yaw. Neither attach
@@ -618,6 +685,88 @@ void raise_boarding_tip(World &world, EntityHandle player, const Entity &vehicle
 
 } // namespace
 
+// The process from its bone typing on, for the authority (`client` false: the busy
+// and enemy gates, an occupied slot refuses, the UseGun attach unforced) or a client
+// applying the authority's relation (`client` true: the slot's holder detaches, the
+// UseGun attach forced). The bone is typed by name and the ten-slot table serves the
+// occupied test alone; the requester leaves any seat it holds; only then does an
+// untyped bone refuse; the type's attach writes its own slot. Returns true when the
+// relation changed (an attach, or the detach ahead of a refusal).
+// [orig: Entity_ProcessVehicleAttach @0x435AA0 (the type @0x435B09..0x435B14, the busy
+//  gate @0x435B18..0x435B38, the enemy test @0x435B40, the table test
+//  @0x435B4C..0x435BBA, the requester's detach @0x435BC2..0x435BCE, the switch
+//  @0x435BE6, the default's 0 return @0x435CC7..0x435CCC)]
+static bool process_bone_attach(World &world, Entity &occ, Entity &veh, uint8_t bone, bool client) {
+    const EntityHandle player = occ.handle;
+    const SeatType type = bone_slot_type(veh, bone);
+    if (!client) {
+        // The authority's busy gate on the requester's EquippedSlot, then its enemy
+        // test [orig: @0x435B18..0x435B38; Vehicle_HasEnemyOccupant @0x435B40].
+        if (world.ai.is_authority && equipped_slot_busy(world, occ)) return false;
+        if (vehicle_has_enemy_occupant(world, veh, occ)) return false;
+    }
+    const int table_row = seat_table_row(veh, bone);
+    if (table_row >= 0) {
+        Seat &held = veh.seats[static_cast<size_t>(table_row)];
+        if (held.occupant.valid()) {
+            // The authority refuses any holder, the requester itself included; a
+            // client detaches it. A streamed handle can name a not-yet-materialized
+            // pool-0 row: its slot and claim release too.
+            // [orig: @0x435B74..0x435BB1; Entity_DetachFromVehicle @0x435BBA]
+            if (!client) return false;
+            const EntityHandle previous = held.occupant;
+            world.vehicles.detach(previous);
+            world.vehicles.release_primary_occupant(veh, previous);
+            held.occupant = {};
+        }
+    }
+    const bool was_mounted = occ.mounted;
+    if (occ.mounted)
+        world.vehicles.detach(player); // [orig: @0x435BCE]
+    if (type == SeatType::None) return was_mounted; // [orig: @0x435CC7..0x435CCC]
+    // The UseGun attach, which the authority's process calls with forceAttach 0,
+    // refuses a player holding no weapon out of a session, after the detach above
+    // and ahead of its camera reset, so a body that rode elsewhere stays off. Out
+    // of a session the one player body is the local player, whose EquippedSlot
+    // is LocalPlayer::equipped_slot_held (D-WPN-50 for where it differs).
+    // [orig: Entity_ProcessVehicleAttach -- forceAttach 0 on the
+    //  authority @0x435C9C, the call @0x435caa; Entity_AttachToUseGunSlot @0x546B80
+    //  -- is_in_session @0x546bf6..0x546bfc, Flags & 0x100 @0x546bfe..0x546c05,
+    //  EquippedSlot @0x546c07..0x546c0d, the 0 return @0x546c0f..0x546c14, ahead
+    //  of the camera reset @0x546ba4]
+    if (!client && type == SeatType::Gunner && !world.rules.mp_session &&
+            ((occ.flags | occ.engine_flags) & kEntityFlagPlayer) != 0 &&
+            player == world.cached.local_player && world.local_player_state != nullptr &&
+            !world.local_player_state->equipped_slot_held())
+        return was_mounted;
+    // A refused attach writes nothing [orig: @0x435c09 / @0x435c40]; the relation
+    // changed only if the body left a seat first.
+    if (!attach_apply(world, occ, veh, attach_slot_row(veh, type, bone), type, bone, client))
+        return was_mounted;
+    world.out.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
+    raise_boarding_tip(world, player, veh, type); // [orig: the tips @0x435bfd..0x435cc2]
+    return true;
+}
+
+bool VehicleSystem::rider_seat(const Entity &occ, const Entity &carrier, Seat &out) const {
+    const bool slot_in_range = occ.mount_seat >= 0 &&
+            occ.mount_seat < static_cast<int>(carrier.seats.size());
+    if (slot_in_range &&
+            carrier.seats[static_cast<size_t>(occ.mount_seat)].bone_index == occ.mount_bone) {
+        out = carrier.seats[static_cast<size_t>(occ.mount_seat)];
+        return true;
+    }
+    for (const Seat &s : carrier.off_table_seats) {
+        if (s.bone_index == occ.mount_bone) {
+            out = s;
+            return true;
+        }
+    }
+    if (!slot_in_range) return false;
+    out = carrier.seats[static_cast<size_t>(occ.mount_seat)];
+    return true;
+}
+
 bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelection &selection) {
     World &world = world_;
     Entity *occ = world.registry.get(player);
@@ -636,39 +785,11 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     if (selection.seat_index < 0 ||
         selection.seat_index >= static_cast<int>(veh->seats.size()))
         return false;
-    // The authority's busy gate on the requester's EquippedSlot, then its enemy
-    // test [orig: @0x435B18..0x435B38; Vehicle_HasEnemyOccupant @0x435B40].
-    if (world.ai.is_authority && equipped_slot_busy(world, *occ)) return false;
-    if (vehicle_has_enemy_occupant(world, *veh, *occ)) return false;
-    const Seat &seat = veh->seats[static_cast<size_t>(selection.seat_index)];
-    if (seat.type == SeatType::None || seat.type != selection.type) return false;
-    if (seat.occupant.valid() && seat.occupant != player) return false;
-    const bool was_mounted = occ->mounted;
-    if (occ->mounted)
-        world.vehicles.detach(player); // [orig: @0x435BCE]
-    // The UseGun attach, which the authority's process calls with forceAttach 0,
-    // refuses a player holding no weapon out of a session, after the detach above
-    // and ahead of its camera reset, so a body that rode elsewhere stays off. Out
-    // of a session the one player body is the local player, whose EquippedSlot
-    // is LocalPlayer::equipped_slot_held (D-WPN-50 for where it differs).
-    // [orig: Entity_ProcessVehicleAttach -- forceAttach 0 on the
-    //  authority @0x435C9C, the call @0x435caa; Entity_AttachToUseGunSlot @0x546B80
-    //  -- is_in_session @0x546bf6..0x546bfc, Flags & 0x100 @0x546bfe..0x546c05,
-    //  EquippedSlot @0x546c07..0x546c0d, the 0 return @0x546c0f..0x546c14, ahead
-    //  of the camera reset @0x546ba4]
-    if (seat.type == SeatType::Gunner && !world.rules.mp_session &&
-            ((occ->flags | occ->engine_flags) & kEntityFlagPlayer) != 0 &&
-            player == world.cached.local_player && world.local_player_state != nullptr &&
-            !world.local_player_state->equipped_slot_held())
-        return was_mounted;
-    // A refused control seat attaches nothing [orig: @0x435c09 / @0x435c40];
-    // as apply_confirmed_mount reports, the relation changed only if the body
-    // left a seat first.
-    if (!attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index, false))
-        return was_mounted;
-    world.out.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
-    raise_boarding_tip(world, player, *veh, selection.type);
-    return true;
+    // The request names its seat's bone; the process types it by name.
+    // [orig: Entity_RequestVehicleAttach @0x4364A0 -> Entity_ProcessVehicleAttach
+    //  @0x4365E4]
+    return process_bone_attach(world, *occ, *veh,
+            veh->seats[static_cast<size_t>(selection.seat_index)].bone_index, false);
 }
 
 // The request snaps the requester's yaw to the seat whenever the carrier's bone
@@ -710,27 +831,9 @@ bool VehicleSystem::process_attach(EntityHandle player, EntityHandle vehicle, ui
     if (((occ->flags | occ->engine_flags) & kEntityFlagDead) != 0) return false; // @0x435afe
     if (((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false; // @0x435af9
 
-    // 2. Seat classification by the exact wire bone. The byte is a 1-based index into
-    //    the model USRP table (48-byte rows, name at +32), which is exactly how production
-    //    seat specs assign bone_index. Unknown/unrecognized rows reject; retail never
+    // 2. The wire bone, a 1-based USRP row, is typed by its name; retail never
     //    substitutes another free seat.
-    //    [orig: Entity_GetBoneSlotType @0x434ED0 -> slotType 0 reject @0x435B14;
-    //    seat-block index @0x435BA9]
-    int seat_idx = -1;
-    for (int i = 0; i < static_cast<int>(veh->seats.size()); ++i) {
-        if (veh->seats[i].type == SeatType::None) continue;
-        if (veh->seats[i].bone_index == bone) {
-            seat_idx = i;
-            break;
-        }
-    }
-    if (seat_idx < 0) return false;
-
-    VehicleSeatSelection selection;
-    selection.vehicle = vehicle;
-    selection.seat_index = seat_idx;
-    selection.type = veh->seats[static_cast<size_t>(seat_idx)].type;
-    return world.vehicles.attach_to_seat(player, selection);
+    return process_bone_attach(world, *occ, *veh, bone, false);
 }
 
 // The client receive arm, distinct from the authority's request validation.
@@ -753,43 +856,20 @@ bool VehicleSystem::apply_confirmed_mount(
         ((occ->flags | occ->engine_flags) & kEntityFlagDead) != 0 ||
         ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false;
 
-    int seat_idx = -1;
-    for (int i = 0; i < static_cast<int>(veh->seats.size()); ++i) {
-        if (veh->seats[i].type != SeatType::None && veh->seats[i].bone_index == bone) {
-            seat_idx = i;
-            break;
-        }
-    }
-    if (seat_idx < 0) return false;
-    Seat &seat = veh->seats[seat_idx];
-    const bool claims_control = is_vehicle_control_seat(seat.type) ||
-                                seat.type == SeatType::Gunner;
-    if (occ->mounted && occ->mount_target == vehicle && occ->mount_bone == bone &&
-        seat.occupant == player && (!claims_control || veh->primary_occupant == player))
+    // An unchanged relation (the rider already on this bone, holding its slot and,
+    // for a claiming type, +368) applies nothing [orig: Entity_TryAttachOrDetach
+    //  @0x4366DD].
+    const SeatType type = bone_slot_type(*veh, bone);
+    const int slot_row = attach_slot_row(*veh, type, bone);
+    const bool claims_control = is_vehicle_control_seat(type) || type == SeatType::Gunner;
+    if (type != SeatType::None && occ->mounted && occ->mount_target == vehicle &&
+            occ->mount_bone == bone &&
+            (slot_row < 0 || veh->seats[static_cast<size_t>(slot_row)].occupant == player) &&
+            (!claims_control || veh->primary_occupant == player))
         return false;
-
-    // The host has already selected this occupant. Retail's client first
-    // detaches the previous slot holder, whereas its authority rejects it.
-    // A streamed handle can name a not-yet-materialized pool-0 row; release
-    // its retained slot/claim too, just as detaching retail's fixed empty row.
-    const EntityHandle previous = seat.occupant;
-    if (previous.valid()) {
-        detach(previous);
-        release_primary_occupant(*veh, previous);
-        seat.occupant = {};
-    }
-    const bool was_mounted = occ->mounted;
-    if (occ->mounted) detach(player);
-    const SeatType seat_type = seat.type;
-    // The client runs the same refusal on its own +368: the relation changed
-    // only when the body left a seat [orig: Entity_ProcessVehicleAttach
-    // @0x435bce, then Entity_AttachToVehicleSlot @0x494714].
-    if (!attach_apply(world, *occ, *veh, seat_idx, bone, true)) return was_mounted;
-    world.out.scars.clear_entity(player);
-    // The client's attach runs the same function [orig: Entity_TryAttachOrDetach
-    // @0x4366e8 -> Entity_ProcessVehicleAttach, the tip @0x435bfd].
-    raise_boarding_tip(world, player, *veh, seat_type);
-    return true;
+    // The client's process: the slot's holder detaches, the UseGun attach is forced
+    // [orig: Entity_TryAttachOrDetach @0x4366E8 -> Entity_ProcessVehicleAttach]
+    return process_bone_attach(world, *occ, *veh, bone, true);
 }
 
 bool VehicleSystem::detach(EntityHandle player) {

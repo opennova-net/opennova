@@ -71,16 +71,16 @@ static void pose_emplacement_attachments(World &world) {
         if (!snapshot.mounted) return;
         Entity *occupant = world.registry.get(snapshot.handle);
         const Entity *target = world.registry.get(snapshot.mount_target);
+        Seat seat;
         if (occupant == nullptr || target == nullptr ||
             !target->emplacement_parent.valid() ||
-            snapshot.mount_seat < 0 ||
-            snapshot.mount_seat >= static_cast<int>(target->seats.size()))
+            !world.vehicles.rider_seat(snapshot, *target, seat))
             return;
         if (AiEntity *body = world.ai.for_handle(snapshot.handle)) {
             world.ai.refresh_mounted_pose(*body, world);
             return;
         }
-        world.vehicles.pose_mounted_occupant(*occupant, *target, target->seats[snapshot.mount_seat]);
+        world.vehicles.pose_mounted_occupant(*occupant, *target, seat);
     });
     lap.mark(devtools::Slot::SIM_ATTACHMENT_RIDERS);
 }

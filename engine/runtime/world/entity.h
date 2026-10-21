@@ -1087,6 +1087,16 @@ struct Entity {
     // Seats this entity OFFERS as a vehicle/emplacement (mirrors vehicle[400..] + model[605..]).
     // Empty for plain entities; an emplaced gun seeds one Gunner seat.
     std::vector<Seat> seats;
+    // The typed userpoints (sitex / ctrlx / drvrx / UseGun by name) the ten-slot
+    // table above does not hold: sitex rows past the scan's end, the ctrlx / drvrx
+    // and UseGun rows a later one replaced, any typed row after the ninth sitex.
+    // Each still types its bone for the attach process, which parents a rider
+    // there: a sitex one with no seat handle, the others in slot 8 / 9. The rows
+    // carry retail_slot 0xFF and never an occupant.
+    // [orig: Entity_GetBoneSlotType @0x434ED0; EntityDef_LoadModelsAndCallbacks
+    //  @0x439F50 (the table walk @0x43A47B..0x43A5CD); Entity_AttachToVehicleSlot
+    //  @0x4946D0 (@0x4946F3..0x494706 -> @0x494752)]
+    std::vector<Seat> off_table_seats;
     // "armory*" userpoint locals of an Armory-attrib item (items.def attrib 0x80000) —
     // the floating armory-label anchors and the armory leg of the nearest scan. Non-empty
     // ONLY for armory sources (the host feeds points only when the attrib is set, matching

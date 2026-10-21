@@ -559,6 +559,7 @@ void initialize_item_seats(Entity &entity, const std::vector<ItemSeatSpec> &spec
     // the items.def sweep; a seat spec never stands in for a definition row.
     if (spec->seats.empty()) return;
     entity.seats = spec->seats;
+    entity.off_table_seats = spec->off_table_seats;
     for (Seat &seat : entity.seats) {
         seat.occupant = EntityHandle{};
     }

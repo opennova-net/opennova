@@ -90,10 +90,9 @@ bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
     Entity *occupant = world.registry.get(e.handle);
     if (occupant == nullptr || occupant->motor_suspended || !occupant->mounted || occupant->health <= 0) return false;
     Entity *vehicle = world.registry.get(occupant->mount_target);
-    if (vehicle == nullptr || occupant->mount_seat < 0 ||
-        occupant->mount_seat >= static_cast<int>(vehicle->seats.size()))
+    Seat seat;
+    if (vehicle == nullptr || !world.vehicles.rider_seat(*occupant, *vehicle, seat))
         return false;
-    const Seat &seat = vehicle->seats[occupant->mount_seat];
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
     const int32_t seat_heading =
@@ -773,7 +772,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         world.vehicles.detach(e.handle);
         return false;
     }
-    if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
+    Seat seat;
+    if (!world.vehicles.rider_seat(*occ, *veh, seat)) return false;
     // An NPC rider of a parent with an item def scrubs the chute/in-air/afloat/
     // ladder/dive/armory bits and stops its vertical velocity every tick (the
     // in-air bit's motor mirror goes with it). [orig: Entity_UpdateInfantryAI
@@ -791,7 +791,6 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0;
     //  Entity_UpdateInfantryAI @0x4B9910; PLYRONSSN @0x4F1260]
     occ->ground_target = veh->handle;
-    const Seat &seat = veh->seats[occ->mount_seat];
     // An NPC's ordinary seat resolves through the carrier's seat bone. When that
     // lookup fails, the authority kills a rider boarding-ordered at the carrier
     // or at the carrier's ground link (crediting the carrier's last attacker) and

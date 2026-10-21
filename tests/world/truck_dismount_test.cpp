@@ -170,6 +170,7 @@ int main() {
 			w::Seat st{};
 			st.type = w::SeatType::Passenger;
 			st.retail_slot = uint8_t(k);
+			st.bone_index = uint8_t(k + 1); // each seat its own userpoint row
 			st.seat_local = {static_cast<float>(sx6[k]), static_cast<float>(sy6[k]),
 			                 2.539f};
 			truck.seats.push_back(st);

@@ -248,6 +248,14 @@ public:
     // and other seats at vehicle.yaw+yaw_offset. Shared by every attach path and the AI
     // tick's per-frame seat follow. [orig: the UseGun attach Entity_AttachToBoneAndUpdateTransform @0x5463d0; ordinary seats Entity_GetBoneTransformAndOrientation @0x4b0c50]
     MountedPose pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat);
+    // The seat a rider poses on: its slot row when that row holds the rider's bone,
+    // else the carrier's off-table row of that bone (an off-table sitex rider holds
+    // no slot; an off-table ctrlx / drvrx / UseGun rider holds slot 8 / 9 but sits on
+    // its own bone, which retail poses by +0x157), else its slot row. False when the
+    // rider names neither.
+    // [orig: Entity_AttachToVehicleSlot @0x4946D0 (the stores @0x494752..0x494775);
+    //  the per-tick pose by attachBoneId, Entity_GetBoneTransformAndOrientation @0x4B0C50]
+    bool rider_seat(const Entity &occ, const Entity &carrier, Seat &out) const;
     // The controlling occupant of a PlayerControl vehicle: the first live, internally
     // consistent Controller/Driver seat occupant, with the per-tick stale-slot sweep and the
     // +368 claimant validation. [orig: the occupant sweep @0x48b8a1-0x48b944 in

@@ -1543,10 +1543,13 @@ int main() {
         mission::PromoteOptions co{};
         mission::ItemSeatSpec seats{};
         seats.type_id = 1420;
+        // Each seat is its own userpoint row (the process types a seat by its bone).
         Seat s0{};
         s0.type = SeatType::Passenger;
+        s0.bone_index = 1;
         Seat s1{};
         s1.type = SeatType::Passenger;
+        s1.bone_index = 2;
         s1.seat_local = {1.f, 0.f, 0.f};
         seats.seats.push_back(s0);
         seats.seats.push_back(s1);
@@ -1586,9 +1589,11 @@ int main() {
         seats.type_id = 1294;
         Seat passenger{};
         passenger.type = SeatType::Passenger;
+        passenger.bone_index = 1;
         passenger.seat_local = {4.f, 0.f, 0.f};
         Seat driver{};
         driver.type = SeatType::Driver;
+        driver.bone_index = 2;
         driver.seat_local = {1.f, 0.f, 0.f};
         seats.seats.push_back(passenger);
         seats.seats.push_back(driver);
@@ -1621,9 +1626,11 @@ int main() {
         seats.type_id = 1294;
         Seat controller{};
         controller.type = SeatType::Controller;
+        controller.bone_index = 1;
         controller.seat_local = {1.f, 0.f, 0.f};
         Seat driver{};
         driver.type = SeatType::Driver;
+        driver.bone_index = 2;
         driver.seat_local = {5.f, 0.f, 0.f};
         seats.seats.push_back(controller);
         seats.seats.push_back(driver);
@@ -1654,9 +1661,11 @@ int main() {
         seats.type_id = 1294;
         Seat passenger{};
         passenger.type = SeatType::Passenger;
+        passenger.bone_index = 1;
         passenger.seat_local = {5.f, 0.f, 0.f};
         Seat driver{};
         driver.type = SeatType::Driver;
+        driver.bone_index = 2;
         driver.seat_local = {1.f, 0.f, 0.f};
         seats.seats.push_back(passenger);
         seats.seats.push_back(driver);

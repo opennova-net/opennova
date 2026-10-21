@@ -70,6 +70,8 @@ struct ItemSeatSpec {
     int32_t mount_config = 0;
     uint32_t item_attrib2 = 0; // includes the IsTurret gun-channel gate
     std::vector<world::Seat> seats;
+    // The typed userpoints off the ten-slot table (Entity::off_table_seats).
+    std::vector<world::Seat> off_table_seats;
     // "armory*" userpoint locals (the embedder feeds them only for items.def Armory-attrib
     // 0x80000 items) + the ewep 'primary_weapon' link — the attach-label sources.
     std::vector<world::Vec3> armory_points;
