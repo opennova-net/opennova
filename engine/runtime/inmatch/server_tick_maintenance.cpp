@@ -638,6 +638,29 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
 		body.push_back(1);
 		conn.link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
 	}
+	// An orphaned row is an active row of the walk (D-NET-NEW-L1-24): its own cooldown steps,
+	// and in state 6 its 0x57 goes to its net player (send_mask 2, the row's +0x1C) at that
+	// player's open boundary, so the player is sent one per row. Past the player's leave the
+	// row reads no net player (Q7-36 (a)).
+	// [orig: Server_TickUpdate - the row's +0x1C @0x51E3AA, the cooldown @0x51E3BB..0x51E3C8,
+	//  the connection's boundary @0x51E3D6, the session @0x51E3F3, the round, the cooldown and
+	//  state 6 @0x51E40B, the 0x57 to the net player @0x51E44A / @0x51E450]
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+		NapiNPConnection &row = orphan.row;
+		if (row.reply.rtt_request_countdown > 0) --row.reply.rtt_request_countdown;
+		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
+		if (net_player == nullptr || !ctx.is_in_session || world.match.outcome().ended ||
+				!row.burst.spawned || net_player->host_disconnect_sent ||
+				net_player->link.transport == nullptr ||
+				net_player->s2c_send_holdoff_countdown != 0 ||
+				row.reply.rtt_request_countdown != 0)
+			continue;
+		row.reply.rtt_request_countdown = 62;
+		std::vector<uint8_t> body;
+		io::append_u32_le(body, io::host_milliseconds_for_logic_tick(world.logic_tick));
+		body.push_back(1);
+		net_player->link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
+	}
 	Server_AdvanceFreeRowTicks(ctx); // the same walk's inactive rows (D-NET-351)
 }
 
@@ -690,6 +713,19 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (scoreboard_recipient(conn))
 			conn.link.transport->host_send(
+					scoreboard.tag, scoreboard.payload, scoreboard.reliable);
+	}
+	// The send walk sends to every active row, an orphaned one through its net player, so that
+	// player takes one list per row; the bytes are the same for each (no recipient byte is set
+	// in JO). None past the player's leave (D-NET-NEW-L1-24, Q7-36 (a)).
+	// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 - the active byte @0x50DDC0, the row
+	//  as the target @0x50DDDC, NetPacket_SerializeScoreboard0x16 per row @0x50DDE2, the send
+	//  @0x50DE00; NapiNPServer_SendFiltered's 0x20 arm, the row's +0x1C @0x4C8A1F]
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
+		if (net_player != nullptr && !net_player->host_disconnect_sent &&
+				net_player->link.transport != nullptr)
+			net_player->link.transport->host_send(
 					scoreboard.tag, scoreboard.payload, scoreboard.reliable);
 	}
 	if (world.match.outcome().ended) return;

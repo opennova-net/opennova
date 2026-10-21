@@ -195,6 +195,30 @@ void reset_all_player_slots(HostRole &role) {
 		}
 		reset_slot_for_next_mission(conn);
 	}
+	// An orphaned row is an active row to the walk (D-NET-NEW-L1-24): in states 2..7 it takes
+	// its 0x25 through its net player (send_mask 0x20 sends through the row's +0x1C), the walk
+	// moves that net player to game state 8 and the row to state 1, and its per-mission state
+	// goes as any row's. Past its net player's leave ours reads none (Q7-36 (a)).
+	// [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, the
+	//  row's +0x1C @0x51619C, the 0x25 to the row @0x5161C2..0x5161D4, the null test
+	//  @0x5161DB and CNetPlayer_SetGameState(8) called @0x5161E1, state 1 @0x5161FD;
+	//  NapiNPServer_SendFiltered @0x4C87E0 - the 0x20 arm, the row's +0x1C @0x4C8A1F, its
+	//  connection's state @0x4C8A34]
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+		NapiNPConnection &row = orphan.row;
+		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
+		const bool synced = row.slot_state >= PlayerSlotState::PlayerSync;
+		if (synced && net_player != nullptr &&
+				net_player->type == NapiNPConnection::kTypeServerSide &&
+				net_player->link.transport != nullptr)
+			net_player->link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
+					/*reliable=*/false);
+		if (synced) {
+			if (net_player != nullptr) net_player->burst.game_state = 8;
+			row.slot_state = PlayerSlotState::Added;
+		}
+		reset_slot_for_next_mission(row);
+	}
 }
 
 } // namespace
@@ -346,6 +370,13 @@ void init_all_player_entities_for_round(HostRole &role) {
 	std::vector<NapiNPConnection *> slots;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
 		if (slot_active(conn) && !conn.link.owned_entity.valid()) slots.push_back(&conn);
+	// Every active row, an orphaned one too: its body is spawned from the row's own words, its
+	// owner the row's connection id (D-NET-NEW-L1-24) [orig: Server_InitAllPlayerEntitiesForRound
+	//  @0x516AA0 - the active byte @0x516AE0, Entity_SpawnFromAnimSlotProperty called @0x516B67,
+	//  the owner from row+0x18 @0x516B6C..0x516B72].
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+		if (slot_active(orphan.row) && !orphan.row.link.owned_entity.valid())
+			slots.push_back(&orphan.row);
 	std::stable_sort(slots.begin(), slots.end(), [](const NapiNPConnection *a,
 			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
 	const uint32_t game_type = ctx.config.game_type;

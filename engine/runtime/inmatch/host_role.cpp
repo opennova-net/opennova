@@ -1140,6 +1140,20 @@ void HostRole::close() {
 			conn.link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
 					/*reliable=*/false);
 	}
+	// An orphaned row in states 2..7 takes its 0x25 through its live net player too
+	// (D-NET-NEW-L1-24; none past that player's leave, Q7-36 (a)) [orig:
+	//  Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, the 0x25 to
+	//  the row @0x5161C2..0x5161D4; NapiNPServer_SendFiltered's 0x20 arm, the row's +0x1C
+	//  @0x4C8A1F].
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
+		if (net_player == nullptr || net_player->type != NapiNPConnection::kTypeServerSide ||
+				net_player->link.transport == nullptr)
+			continue;
+		if (orphan.row.slot_state >= PlayerSlotState::PlayerSync)
+			net_player->link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
+					/*reliable=*/false);
+	}
 	inmatch::host_session_flush_s2c(state.host_owner, socket);
 	// The post-mission router's error arms (5, 6, 7, 20 and the disconnect reasons 9..19) clear
 	// the network, connection and transport modes and skip CNapiGameSession_FullDestroy, whose

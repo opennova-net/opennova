@@ -1129,6 +1129,59 @@ bool run_an_orphaned_row_is_a_player_list_row() {
 	              "the orphaned row is a 0x16 row with its slot and team, counted in game");
 }
 
+// D-NET-NEW-L1-24 (L1-s16): the tick's per-row walks take an orphaned row as any active row. In
+// state 6 its own 1 Hz 0x57 goes to its net player (send_mask 2, the row's +0x1C), so the player
+// whose re-add orphaned it is sent one per row, and the 0x16's send loop sends to every active
+// row, an orphaned one through its net player, so that player takes two lists per boundary. Once
+// the player has left, ours reads no net player through the row (Q7-36 (a)): its transport is
+// cleared and nothing is sent.
+// [orig: Server_TickUpdate - the row's +0x1C @0x51E3AA, the cooldown @0x51E3BB..0x51E3C8, state 6
+//  @0x51E40B, the 0x57 to the net player @0x51E44A / @0x51E450; Server_BuildAndBroadcastScoreboard
+//  @0x50D960 - the active byte @0x50DDC0, the row as the target @0x50DDDC, the send @0x50DE00;
+//  NapiNPServer_SendFiltered @0x4C87E0 - the 0x20 arm, the row's +0x1C @0x4C8A1F]
+bool run_an_orphaned_row_takes_its_own_rtt_and_list() {
+	JoinFixture f(/*with_existing=*/false);
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the joiner")) return false;
+	const opennova::PeerAddr peer = j.peer;
+	// Its burst done (state 6), then a repeated 0x02 lists it again.
+	j.burst.spawned = true;
+	j.spawn_queue_unlinked = false;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    f.ctx->orphaned_player_rows.size() == 1 && !j.burst.spawned,
+	            "the re-add orphans the in-match row; the fresh row is not in the match"))
+		return false;
+	(void)JoinFixture::drain(f.joiner_transport);
+	auto count = [](const std::vector<uint8_t> &tags, uint8_t tag) {
+		int n = 0;
+		for (uint8_t t : tags) n += t == tag ? 1 : 0;
+		return n;
+	};
+	inmatch::emit_periodic_rtt(*f.ctx, *f.world);
+	if (!expect(count(JoinFixture::drain(f.joiner_transport), opennova::s2c::RTT_ECHO) == 1 &&
+	                    f.ctx->orphaned_player_rows[0].row.reply.rtt_request_countdown == 62,
+	            "the orphaned row's own 0x57 reaches its net player; its cooldown restarts"))
+		return false;
+	f.ctx->scoreboard_broadcast_timer = 0x136u; // the boundary is the next step
+	inmatch::emit_scoreboard_boundary(*f.ctx, *f.world);
+	if (!expect(count(JoinFixture::drain(f.joiner_transport), opennova::s2c::PLAYER_LIST) == 2,
+	            "the player takes a list for each of its two rows"))
+		return false;
+	// The player leaves: the orphaned row stays active and reads no net player.
+	if (!expect(inmatch::destroy_connection(*f.ctx, peer, nullptr) &&
+	                    f.ctx->orphaned_player_rows.size() == 1,
+	            "the leave frees the current row alone")) return false;
+	(void)JoinFixture::drain(f.joiner_transport);
+	for (int i = 0; i < 70; ++i) inmatch::emit_periodic_rtt(*f.ctx, *f.world);
+	f.ctx->scoreboard_broadcast_timer = 0x136u;
+	inmatch::emit_scoreboard_boundary(*f.ctx, *f.world);
+	return expect(f.ctx->orphaned_player_rows[0].row.link.transport == nullptr &&
+	                      JoinFixture::drain(f.joiner_transport).empty(),
+	              "past the leave nothing goes through the orphaned row");
+}
+
 // D-NET-NEW-L1-24 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
 // / 4) enters game state 7 and lists the node: the validation watchdog visits states 3 / 4 alone,
 // so it no longer punts it, the pump adds the player with no ticket, and the enter result (its
@@ -1237,6 +1290,7 @@ int main() {
 	if (!run_the_add_queues_its_records_ahead_of_a_later_list()) ++failures;
 	if (!run_a_repeated_echo_adds_the_player_again()) ++failures;
 	if (!run_an_orphaned_row_is_a_player_list_row()) ++failures;
+	if (!run_an_orphaned_row_takes_its_own_rtt_and_list()) ++failures;
 	if (!run_an_echo_in_the_ticket_wait_spawns_without_a_ticket()) ++failures;
 	if (!run_a_repeated_echo_keeps_the_held_nag_stamp()) ++failures;
 	if (failures != 0) return 1;

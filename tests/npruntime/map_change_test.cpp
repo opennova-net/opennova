@@ -370,6 +370,61 @@ void test_play_host_map_change() {
 	std::printf("map_change: the listen host's own player respawned once, bound, A&D latched\n");
 }
 
+// D-NET-NEW-L1-24 (L1-s16): the map change's slot walks take an orphaned row as any active row.
+// The reset walk moves a row in states 2..7 to state 1 and clears its per-mission state (its body
+// goes with the old world); the round init spawns every active row's body from the row's own
+// words, its owner the row's connection id, so the orphaned row comes back with a body of its own
+// in the new mission. (The row here is a remote row's words over the own connection's id, so its
+// net player is the own connection: a client-side node, which the walk sends no 0x25.)
+// [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, state 1
+//  @0x5161FD; Server_InitAllPlayerEntitiesForRound @0x516AA0 - the active byte @0x516AE0,
+//  Entity_SpawnFromAnimSlotProperty called @0x516B67, the owner from row+0x18 @0x516B6C..0x516B72]
+void test_an_orphaned_row_is_reset_and_respawned_at_the_map_change() {
+	PlayHost host;
+	CHECK(host.boot_map(/*next_mission=*/false));
+	if (host.kernel == nullptr) return;
+	for (int f = 0; f < 120 && !(host.loopback() != nullptr && host.loopback()->link.owned_entity.valid()); ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		(void)host.session.advance(input);
+		host.kernel->world.out.discard_presentation();
+	}
+	inmatch::NapiNPConnection *own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid());
+	if (own == nullptr || !own->link.owned_entity.valid()) return;
+	inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+	inmatch::OrphanedPlayerRow orphan;
+	orphan.row = *own;
+	orphan.row.type = inmatch::NapiNPConnection::kTypeServerSide;
+	orphan.row.reply.player_slot = 3;
+	orphan.row.slot_state = inmatch::PlayerSlotState::Joined;
+	orphan.row.burst.spawned = false;
+	orphan.row.link.owned_entity = {};
+	ctx.orphaned_player_rows.push_back(orphan);
+	CHECK(inmatch::Server_ExecuteServerCommand(ctx, &host.kernel->world, "Cycle", "", {}).handled);
+	bool ended = false;
+	for (int f = 0; f < 4000 && !ended; ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		ended = host.session.advance(input).terminal();
+		host.kernel->world.out.discard_presentation();
+	}
+	CHECK(ended);
+	CHECK(inmatch::begin_host_map_change(host.role, host.catalog) == inmatch::MapChangeStep::NextMission);
+	CHECK(ctx.orphaned_player_rows.size() == 1 &&
+			ctx.orphaned_player_rows[0].row.slot_state == inmatch::PlayerSlotState::Added &&
+			!ctx.orphaned_player_rows[0].row.link.owned_entity.valid());
+	CHECK(host.boot_map(/*next_mission=*/true));
+	own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid() && ctx.orphaned_player_rows.size() == 1);
+	if (own == nullptr || ctx.orphaned_player_rows.size() != 1) return;
+	const world::EntityHandle body = ctx.orphaned_player_rows[0].row.link.owned_entity;
+	CHECK(body.valid() && body != own->link.owned_entity &&
+			host.kernel->world.registry.get(body) != nullptr);
+	CHECK(host.own_bodies() == 2); // the own row's and the orphaned row's, both its id's
+	std::printf("map_change: the orphaned row reset to state 1 and respawned at the round init\n");
+}
+
 // A joiner the host admits mid-match: the spawn pump's body binds its items.def
 // row at its spawn, as every retail body does, so it carries its row's sound
 // profile (the chute slot sounds' source). (D-NET-395)
@@ -489,6 +544,7 @@ void test_round_end_abandons_a_joiners_mission_start() {
 int main() {
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
 	test_play_host_map_change();
+	test_an_orphaned_row_is_reset_and_respawned_at_the_map_change();
 	test_play_host_mid_match_join_binds_body();
 	test_round_end_abandons_a_joiners_mission_start();
 	Host host;

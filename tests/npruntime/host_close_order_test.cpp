@@ -370,6 +370,49 @@ void test_close_sweeps_post_mission_then_resets_each_slot() {
 	CHECK(reset_at < first_stop && first_stop < host->socket.sent.size());
 }
 
+// D-NET-NEW-L1-24 (L1-s16): the close's per-row 0x25 walk takes an orphaned row as any active row:
+// a row in states 2..7 takes its 0x25 through its net player (send_mask 0x20 sends through the
+// row's +0x1C), so the joiner whose re-add orphaned a state-6 row gets two in the close's flush.
+// [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, the 0x25 to
+//  the row @0x5161C2..0x5161D4; NapiNPServer_SendFiltered @0x4C87E0 - the 0x20 arm, the row's
+//  +0x1C @0x4C8A1F]
+void test_close_resets_an_orphaned_row_through_its_net_player() {
+	auto host = std::make_unique<ListenHost>();
+	if (!host->boot()) {
+		++failures;
+		return;
+	}
+	const std::string server_scrk = "SERVER-ORPHAN-SCRK";
+	inmatch::NapiNPConnection &joiner = host->ctx().np_protocol.connection_list.back();
+	joiner.client_ck = 0x13572468u;
+	joiner.server_sk = 0x24681357u;
+	joiner.client_scrk = "CLIENT-ORPHAN-SCRK";
+	joiner.server_scrk = server_scrk;
+	joiner.slot_state = inmatch::PlayerSlotState::Joined;
+	inmatch::OrphanedPlayerRow orphan;
+	orphan.row = joiner; // the joiner's row as its re-add left it, on another slot
+	orphan.row.reply.player_slot = 5;
+	host->ctx().orphaned_player_rows.push_back(orphan);
+	host->ctx().mission_exit_reason = inmatch::kMissionExitQuit;
+	host->role->close();
+	int resets = 0;
+	for (const auto &[to, bytes] : host->socket.sent) {
+		if (to != kPeer) continue;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) ||
+				opcode != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
+			continue;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_protocol_packet_plaintext(body.data(), body.size(), server_scrk, header, messages))
+			continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == s2c::GAME_RESET && !m.flags.settings_update) ++resets;
+	}
+	CHECK(resets == 2);
+}
+
 } // namespace
 
 int main() {
@@ -379,6 +422,7 @@ int main() {
 	test_the_router_arm_decides_the_stop();
 	test_close_runs_the_pump_before_the_stop();
 	test_close_sweeps_post_mission_then_resets_each_slot();
+	test_close_resets_an_orphaned_row_through_its_net_player();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }
