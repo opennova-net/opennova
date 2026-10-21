@@ -8,11 +8,11 @@ namespace opennova::world {
 // Two retail contact-damage legs share these predicates.
 //
 // THE KIND-1 (KNIFE) KILL-ZONE CALLBACK. The explosion drain installs
-// Entity_ApplyVehicleCollisionDamage for entry type 1 [orig: @0x4EAE1C]; the
+// Entity_ApplyKnifeKillZoneDamage for entry type 1 [orig: @0x4EAE1C]; the
 // IDB name is a misnomer, the entry type being the knife's kztype 1 (the
 // instantkillzone spawn queues it @0x4EC20E). Its source argument is the queue
 // entry, not a vehicle entity. Ported as entity_apply_melee_damage
-// (world/destruction.cpp). [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620]
+// (world/destruction.cpp). [orig: Entity_ApplyKnifeKillZoneDamage @0x4E6620]
 //
 // THE RUN-OVER KILL AND BUMP SOUND of the movement resolver, ported in
 // CollisionWorld::resolve_entity (world/collision_resolve.cpp).

@@ -28,8 +28,8 @@ void drain_health(World &world, Entity &e, int amount) {
 }
 
 // Both simple callbacks share this speed-dependent steering chase.
-// [orig: Entity_ProcessInfantryPhysics @0x46E100;
-// Entity_ProcessAirVehiclePhysics @0x46FA00 (the simple boat, despite its IDB name)]
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100;
+// Vehicle_ProcessSelectorZeroBoat @0x46FA00 (the simple boat, despite its IDB name)]
 void steer(Entity &e, const VehicleTraits &t, bool boat) {
 	auto &m = e.veh;
 	const int32_t maximum = boat ? t.water_speed : t.player_speed;
@@ -48,7 +48,7 @@ void steer(Entity &e, const VehicleTraits &t, bool boat) {
 }
 
 // Physics=0 speed, skidding, and the deliberately weaker -167 gravity.
-// [orig: Entity_ProcessInfantryPhysics @0x46E100]
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100]
 void ground_step(World &world, Entity &e, const VehicleTraits &t, int32_t &z) {
 	auto &m = e.veh;
 	const bool grounded = (e.flags & kEntityFlagInAir) == 0;
@@ -126,7 +126,7 @@ void ground_step(World &world, Entity &e, const VehicleTraits &t, int32_t &z) {
 }
 
 // Return signed lateral speed for the post-contact banking write.
-// [orig: Entity_ProcessAirVehiclePhysics @0x46FA00]
+// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00]
 int32_t boat_step(
 		World &world, Entity &e, const VehicleTraits &t, int32_t x, int32_t y, int32_t z) {
 	auto &m = e.veh;
@@ -173,7 +173,7 @@ int32_t boat_step(
 	};
 	if ((e.flags & 0x8000u) != 0) {
 		// The heave/roll wave, the x87 sequence verbatim [orig:
-		// Entity_ProcessAirVehiclePhysics @0x46FA00 (site @0x47115D..0x4711D9)]:
+		// Vehicle_ProcessSelectorZeroBoat @0x46FA00 (site @0x47115D..0x4711D9)]:
 		// P = fild(((x+y)>>10) + tick*4) * flt_7C6950 (1/256);
 		// pitch = ftol(cos(1.4P)*327680 + cos(P)*655360) (dbl_7C6F58/7C6F50/7C6F48);
 		// roll = ftol(sin(0.8P)*524288 + sin(1.2P)*655360) (dbl_7C6F40/7C6F38 and the
@@ -207,8 +207,8 @@ int32_t boat_step(
 
 // Selector-zero callbacks, reached by cveh/ctrn/catv/cbot dispatchers.
 // The amphibian selects the entire dry/wet motor before staging input.
-// [orig: Entity_ProcessInfantryPhysics @0x46E100;
-// Entity_ProcessAirVehiclePhysics @0x46FA00; Entity_DispatchPhysicsUpdate @0x48F010]
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100;
+// Vehicle_ProcessSelectorZeroBoat @0x46FA00; Entity_DispatchPhysicsUpdate @0x48F010]
 void VehicleSystem::tick_simple_motor(
 		Entity &e, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd, bool prediction) {
 	// The family override is the only difference the afloat amphibian needs.
@@ -229,7 +229,7 @@ void VehicleSystem::tick_simple_motor(
 	if (!m.yaw_seeded) {
 		// The unmoved row's placement angles, as the entry copy reads them.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
-		//  Entity_ProcessInfantryPhysics @0x46E133/@0x46E13C/@0x46E14C]
+		//  Vehicle_ProcessSelectorZeroGround @0x46E133/@0x46E13C/@0x46E14C]
 		m.yaw_bam = e.heading;
 		m.air_pitch_bam = e.pitch_bam;
 		m.air_roll_bam = e.roll_bam;
@@ -248,8 +248,8 @@ void VehicleSystem::tick_simple_motor(
 	}
 	// The occupant as the seat holds it: neither mover reads its life (a body
 	// that dies seated has left at its own death edge, which the pool-0 walk runs
-	// ahead of this pool-1 update). [orig: Entity_ProcessInfantryPhysics
-	//  @0x46E9FC..0x46EA04; Entity_ProcessAirVehiclePhysics @0x4704F0..0x4704F8]
+	// ahead of this pool-1 update). [orig: Vehicle_ProcessSelectorZeroGround
+	//  @0x46E9FC..0x46EA04; Vehicle_ProcessSelectorZeroBoat @0x4704F0..0x4704F8]
 	Entity *controller = t.player_control ? resolve_controller(e) : nullptr;
 	if (boat && t.player_control) {
 		// The selector-zero boat's PlayerControl block sits at its HEAD, before
@@ -258,7 +258,7 @@ void VehicleSystem::tick_simple_motor(
 		// edge, then the GROUND-profile part-spin machine (d_lcac is `type
 		// GROUND`; DLCAC1's fan consumes HELO_TAILROTOR) — never the wheel-phase
 		// step, which this mover writes from its command inside boat_step.
-		// [orig: Entity_ProcessAirVehiclePhysics @0x46FA00 (the selector-zero
+		// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 (the selector-zero
 		//  boat mover): `test byte [itemDef+54h],40h` @0x47004B, claimant edge
 		//  @0x470055..0x4700EB, Entity_UpdatePartSpinAccumulator @0x4700F5, the
 		//  is_authority split @0x470109; dispatch Entity_DispatchPhysics_cbot
@@ -268,8 +268,8 @@ void VehicleSystem::tick_simple_motor(
 	}
 	if (prediction) {
 		// Both selector-zero movers run the plain chase template [orig:
-		// Entity_ProcessInfantryPhysics @0x46E62E..0x46E85A;
-		// Entity_ProcessAirVehiclePhysics @0x470129..0x470355].
+		// Vehicle_ProcessSelectorZeroGround @0x46E62E..0x46E85A;
+		// Vehicle_ProcessSelectorZeroBoat @0x470129..0x470355].
 		vehicle_client_chase(e, VehicleChaseFamily::Plain, 0);
 		if (controller != nullptr && controller->handle == world_.cached.local_player) {
 			stage_player_vehicle_input(world_, e, *controller, t);
@@ -283,8 +283,8 @@ void VehicleSystem::tick_simple_motor(
 		// of the player test: a script-disabled hull with a player seated takes no
 		// input. The boat twin's test is `occupant == 0 || Flags & 2`, and its tail
 		// bail above already took the dead bit.
-		// [orig: Entity_ProcessInfantryPhysics @0x46E9FC..0x46EA11 -> the parked
-		//  arm @0x46F09E..0x46F0C7; Entity_ProcessAirVehiclePhysics
+		// [orig: Vehicle_ProcessSelectorZeroGround @0x46E9FC..0x46EA11 -> the parked
+		//  arm @0x46F09E..0x46F0C7; Vehicle_ProcessSelectorZeroBoat
 		//  @0x4704F0..0x470502 -> @0x470D4E]
 		if (controller == nullptr || (!boat && vehicle_hull_parked(e))) {
 			m.steer_target_bam = m.yaw_bam;
@@ -295,7 +295,7 @@ void VehicleSystem::tick_simple_motor(
 				!watercraft_driver_submerged(world_, *controller)) {
 			// A player driver whose eye (CameraOffset.z + Z) sits at or below the
 			// water plane loses the wheel on the ground selector-zero mover too,
-			// not only the boat [orig: Entity_ProcessInfantryPhysics @0x46E100
+			// not only the boat [orig: Vehicle_ProcessSelectorZeroGround @0x46E100
 			// (site @0x46EA2E..0x46EA3A `add eax,[ecx+0Ch]; cmp eax,
 			// g_EnvWaterHeightFixed; jle loc_46ECB1` — the AI waypoint leg)].
 			stage_player_vehicle_input(world_, e, *controller, t);
@@ -343,8 +343,8 @@ void VehicleSystem::tick_simple_motor(
 	e.roll_bam = m.air_roll_bam;
 	// The rebuilt entity matrix sets the matrix bit (Flags 0x20000), homed on
 	// engine_flags, where its clears land.
-	// [orig: Entity_ProcessInfantryPhysics @0x46F9BD, OR @0x46F9C5;
-	//  Entity_ProcessAirVehiclePhysics @0x47167B, OR @0x471683]
+	// [orig: Vehicle_ProcessSelectorZeroGround @0x46F9BD, OR @0x46F9C5;
+	//  Vehicle_ProcessSelectorZeroBoat @0x47167B, OR @0x471683]
 	e.engine_flags |= kEntityFlagMatrixBuilt;
 	slew_turret(e, 34636833);
 	if (boat) {
@@ -361,7 +361,7 @@ void VehicleSystem::tick_simple_motor(
 		// the direction latch inside the fold. It has no high-rev edge; its
 		// claimant start/stop edge and part spin ran at the HEAD (the
 		// PlayerControl block above, before the authority split).
-		// [IDB: Entity_ProcessAirVehiclePhysics @0x46FA00 (a misnomer: the
+		// [IDB: Vehicle_ProcessSelectorZeroBoat @0x46FA00 (a misnomer: the
 		//  selector-zero boat mover): lights @0x4714EA..0x471523 (slot 24,
 		//  +0x318 bit 2), the sound-system gate dword_24E0E80 @0x471523, fold
 		//  gate @0x471533..0x471546, speed substitute @0x47154C..0x4715A5,
@@ -398,14 +398,14 @@ void VehicleSystem::tick_simple_motor(
 	// the lights edge, the claimant start/stop edge (slot 30 on the occupant
 	// eye above water, the all-zero fold plus slot 31 on the hull +0x18000)
 	// and the part spin, then the rev timer.
-	// [IDB: Entity_ProcessInfantryPhysics @0x46E100 (a misnomer: the
+	// [IDB: Vehicle_ProcessSelectorZeroGround @0x46E100 (a misnomer: the
 	//  selector-zero ground mover): gate dword_24E0E80 @0x46F7C8, fold
 	//  @0x46F7D4..0x46F825, direction latch @0x46F828..0x46F888, high-rev
 	//  @0x46F88B..0x46F8C0, lights @0x46F8C3..0x46F8FC, claimant edge
 	//  @0x46F8FC..0x46F99C, part spin @0x46F99E, timer @0x46F9A6]
 	update_ground_sound(e, t, e.health <= 0, m.plat_airborne_ticks > 30);
 	// The high-rev edge sits inside the same last-tick gate as the fold.
-	// [orig: Entity_ProcessInfantryPhysics @0x46F7C8..0x46F7CE]
+	// [orig: Vehicle_ProcessSelectorZeroGround @0x46F7C8..0x46F7CE]
 	if (world_.rules.last_tick_of_batch && controller != nullptr && m.rev_sound_ticks > 124 &&
 			m.plat_airborne_ticks > 30) {
 		play_contact_sound(e, t, 33);

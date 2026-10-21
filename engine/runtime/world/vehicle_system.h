@@ -356,7 +356,7 @@ public:
 	// sits above the water plane, the all-zero fold plus slot 31 (hull +0x18000)
 	// when the claimant leaves. The selector-zero boat runs it at its HEAD, inside
 	// the PlayerControl block before the authority split, with its lights edge
-	// at the tail [orig: Entity_ProcessAirVehiclePhysics @0x470055..0x4700EB].
+	// at the tail [orig: Vehicle_ProcessSelectorZeroBoat @0x470055..0x4700EB].
 	void update_claimant_engine_sound(Entity &vehicle, const VehicleTraits &traits);
 	void play_contact_sound(Entity &vehicle, const VehicleTraits &traits, int slot);
 	void update_rotor_sound(Entity &vehicle, const VehicleTraits &traits);

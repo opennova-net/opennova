@@ -400,7 +400,7 @@ void test_watercraft_runs_no_rotor_machine() {
 // no PRNG draw, spins up 186413/tick to the cap, decays 186413/tick after the
 // dismount, and never touches the wheel phase there (the mover's own
 // command-driven step does). The claimant start/stop sound edge sits in the
-// same block. [orig: Entity_ProcessAirVehiclePhysics @0x46FA00 gate @0x47004B,
+// same block. [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 gate @0x47004B,
 //  claimant edge @0x470055..0x4700EB, Entity_UpdatePartSpinAccumulator
 //  @0x4700F5; Entity_DispatchPhysics_cbot @0x48EFAC;
 //  Entity_DispatchPhysicsUpdate @0x48F035]

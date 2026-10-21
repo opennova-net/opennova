@@ -369,8 +369,8 @@ struct LiveRound {
     bool indoors_word = false;
     bool indoors_flags = false;
     // A flare's heat word (+0x1A4): its TrcrID item's heatsig from the flare init,
-    // decayed by its motor each tick [orig: the aflr row's init callback @0x4434B0 (the
-    // store @0x4434EA), the gflr row's @0x443510 (@0x443554); Entity_UpdateShellBounce
+    // decayed by its motor each tick [orig: the aflr row's init callback AflrClass_InitFromDef @0x4434B0 (the
+    // store @0x4434EA), the gflr row's GflrClass_InitFromDef @0x443510 (@0x443554); Entity_UpdateShellBounce
     // @0x443DF0 (@0x443E6E..0x443EA7)].
     uint16_t heat_sig = 0;
     // Its ProjectileTargetRing record (+0x29C), -1 for none [orig: Entity_UpdateShellBounce
@@ -382,7 +382,7 @@ struct LiveRound {
 // family's): the ballistic tail then skips its gravity and drag. ThrowClass{} is kNone;
 // the rokt row's motor is the one-shot latch (rocket_motor_tick).
 // [orig: Projectile_UpdatePhysics @0x4E9D70 (the tail's test @0x4EAA34..0x4EAA4C); the
-//  rokt row @0x82AD18 -> 0x443DD0]
+//  rokt row @0x82AD18 -> Entity_UpdateRocketFlag @0x443DD0]
 inline bool round_class_motor_bound(const LiveRound &round) {
     return round.guided_family != GuidedFamily::None || round.motor != ThrowClass{} ||
            round.move_row == PhysicsClass::Rokt;
@@ -391,7 +391,7 @@ inline bool round_class_motor_bound(const LiveRound &round) {
 // The rokt row's motor: the round's +0x2BA word (GuidedFlightState::phase, which the
 // Guided serializer sends) goes 0 -> 1 at its first call and stays. Retail calls it from
 // both legs' motor call.
-// [orig: the rokt motor @0x443DD0 (undefined code: the test @0x443DD4, the store
+// [orig: the rokt motor Entity_UpdateRocketFlag @0x443DD0 (undefined code: the test @0x443DD4, the store
 //  @0x443DDE); Projectile_UpdatePhysics @0x4E9D70 (the useownmove call @0x4E9F1E, the
 //  ballistic call @0x4EA06A..0x4EA085); Entity_SerializeGuidedMissileState @0x447C50
 //  (the +0x2BA read @0x447D9F)]
@@ -452,7 +452,7 @@ struct RoundDeath {
     // tallies and the unit-score event). Scripted, drowning, carry-limit and
     // admin deaths never reach it. [orig: Score_ProcessKillEvent @0x4FD400,
     // callers Entity_MovementCollisionResolver @0x4B39E2,
-    // Entity_ApplyVehicleCollisionDamage @0x4E6773, Entity_ApplyWeaponDamage
+    // Entity_ApplyKnifeKillZoneDamage @0x4E6773, Entity_ApplyWeaponDamage
     // @0x4E6BFE / @0x4E6FB4, Projectile_ProcessDamageOnTarget @0x4E8133]
     bool kill_event = false;
     // Raised by an org1 body's own death edge: the death transaction (0x13 +

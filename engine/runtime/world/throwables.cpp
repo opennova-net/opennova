@@ -1254,7 +1254,7 @@ void throwable_round_init(World &world, LiveRound &r, const ThrowableClassRow *r
     const Entity *source = world.registry.get(r.owner);
     if (think == ThrowClass::kAirFlare) {
         // The source's last move joins the drift: its Position less its savedLivePose
-        // (a source never stamped reads no move) [orig: the aflr init @0x4434B0 -
+        // (a source never stamped reads no move) [orig: the aflr init AflrClass_InitFromDef @0x4434B0 -
         //  @0x4434B5..0x4434D7].
         if (source != nullptr && source->saved_live_valid) {
             r.vel.x.q16 += source->position.x.q16 - source->saved_live_pos[0];
@@ -1262,7 +1262,7 @@ void throwable_round_init(World &world, LiveRound &r, const ThrowableClassRow *r
         }
         r.heat_sig = static_cast<uint16_t>(row->heat_sig); // @0x4434DD..0x4434EA
     } else if (source != nullptr) {
-        // The source's velocity words, 0x538 more fall [orig: the gflr init @0x443510 -
+        // The source's velocity words, 0x538 more fall [orig: the gflr init GflrClass_InitFromDef @0x443510 -
         //  @0x443521..0x443554].
         r.vel.x.q16 = source->veh.vel_x;
         r.vel.y.q16 = source->veh.vel_y;

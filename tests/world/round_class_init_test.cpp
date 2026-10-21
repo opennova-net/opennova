@@ -7,7 +7,7 @@
 //  @0x49E5D5..0x49E5EA); Entity_InitThrowableSpin_Nade @0x4435A0, Entity_InitThrowableSpin_Satchel
 //  @0x4435C0, Entity_InitThrowableSpin_AVMine @0x443610, Entity_InitThrowableSpin_Claymore
 //  @0x4435E0; CEntityManager_AllocateSlot @0x4EAAD0 (the memset @0x4EABC8); the rokt motor
-//  @0x443DD0; Projectile_UpdatePhysics @0x4E9D70 (@0x4EA06A..0x4EA085, @0x4EAA34..0x4EAA5A)]
+//  Entity_UpdateRocketFlag @0x443DD0; Projectile_UpdatePhysics @0x4E9D70 (@0x4EA06A..0x4EA085, @0x4EAA34..0x4EAA5A)]
 #include <cstdio>
 #include <memory>
 #include <vector>

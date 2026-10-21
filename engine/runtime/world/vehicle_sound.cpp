@@ -235,7 +235,7 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
     // player, while a passenger or surviving non-claimant controller does not.
     // [orig: caller gate @0x48d181..0x48d1c7; the selector-zero ground mover's
     // twin @0x46f7e2..0x46f7f7 and the selector-zero boat's @0x471533..0x471546
-    // (IDB: Entity_ProcessInfantryPhysics @0x46E100 / Entity_ProcessAirVehiclePhysics
+    // (IDB: Vehicle_ProcessSelectorZeroGround @0x46E100 / Vehicle_ProcessSelectorZeroBoat
     // @0x46FA00, both misnomers)]
     if (traits.player_control && !has_live_primary_claimant(world, vehicle)) {
         anchor_residual_lanes(world, vehicle);
@@ -467,9 +467,9 @@ void VehicleSystem::update_tread_sound(Entity &vehicle, const VehicleTraits &tra
 // in its tail (tick_simple_motor).
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00, tail @0x48D34E..0x48D429;
 // Entity_UpdateWatercraftPhysics @0x48D480, edge @0x48DAD1..0x48DB6B;
-// Entity_ProcessInfantryPhysics @0x46E100 (IDB misnomer, the selector-zero
+// Vehicle_ProcessSelectorZeroGround @0x46E100 (IDB misnomer, the selector-zero
 // ground mover) lights @0x46F8C3..0x46F8FC, claimant edge @0x46F8FC..0x46F99C;
-// Entity_ProcessAirVehiclePhysics @0x46FA00 (the selector-zero boat) claimant
+// Vehicle_ProcessSelectorZeroBoat @0x46FA00 (the selector-zero boat) claimant
 // edge @0x470055..0x4700EB, lights @0x4714EA..0x471523]
 void VehicleSystem::update_engine_sound(Entity &vehicle, const VehicleTraits &traits) {
 	if (vehicle_family_uses_direct_air_mover(traits.family))

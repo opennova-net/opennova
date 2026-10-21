@@ -94,7 +94,7 @@ void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &t, boo
 			t.family != VehicleFamily::Tank && t.family != VehicleFamily::Bike &&
 			!vehicle_family_uses_direct_air_mover(t.family)) {
 		// The simple ground callback only sounds its critical warning.
-		// [orig: Entity_ProcessInfantryPhysics @0x46E100 (IDB misnomer, the
+		// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100 (IDB misnomer, the
 		//  selector-zero ground mover), `test byte ptr [esp+var_84], 1Fh`
 		//  @0x46E250..0x46E266]
 		if (critical && ((world.logic_tick + 36u * uint32_t(e.net_id)) & 31u) == 0)
@@ -108,7 +108,7 @@ void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &t, boo
 		// [orig: Entity_UpdateVehiclePhysics `test bl, 1Fh` @0x48B08C;
 		//  Entity_UpdateLightVehiclePhysics @0x48416C; Entity_UpdateTankVehiclePhysics
 		//  @0x488C44; Entity_UpdateWatercraftPhysics @0x48D61F;
-		//  Entity_ProcessAirVehiclePhysics (IDB misnomer, the selector-zero boat)
+		//  Vehicle_ProcessSelectorZeroBoat (IDB misnomer, the selector-zero boat)
 		//  @0x46FB79; Entity_UpdateAircraftPhysics `test byte ptr [esp+var_A4], 3Fh`
 		//  @0x4904D7..0x4904F0]
 		const uint32_t cadence_mask = vehicle_family_uses_direct_air_mover(t.family) ? 63u : 31u;

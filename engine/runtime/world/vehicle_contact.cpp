@@ -123,10 +123,10 @@ int32_t vehicle_ground_height_at(
 // by 36 * DcbId.
 // [orig: `test byte ptr g_EntityUpdateCounter,7` in Entity_UpdateVehiclePhysics
 //  @0x48AFB9..0x48AFD6, Entity_UpdateLightVehiclePhysics @0x484099,
-//  Entity_UpdateTankVehiclePhysics @0x488B69 and Entity_ProcessInfantryPhysics
+//  Entity_UpdateTankVehiclePhysics @0x488B69 and Vehicle_ProcessSelectorZeroGround
 //  @0x46E178; the tick + 36 * DcbId stagger in Entity_UpdateWatercraftPhysics
 //  @0x48D51F, Entity_UpdateAircraftPhysics @0x4903A8..0x4903D8 and
-//  Entity_ProcessAirVehiclePhysics @0x46FA24/@0x46FA77;
+//  Vehicle_ProcessSelectorZeroBoat @0x46FA24/@0x46FA77;
 //  Entity_RaycastGroundHeightAndObject @0x414320]
 void vehicle_refresh_ground_link(World &world, Entity &vehicle, const VehicleTraits &traits) {
 	auto &m = vehicle.veh;
