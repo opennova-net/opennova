@@ -117,14 +117,17 @@ uint32_t wall_ms() {
 					.count());
 }
 
-// The lister's outcome as start's error text.
-std::string listing_failure(int code) {
+// The lister's outcome as start's error text, naming the cfg word and the gate host the
+// listing ran with (a listing runs only for networkconnecttype 1 with a --master-host).
+std::string listing_failure(int code, int32_t networkconnecttype, const std::string &master_host) {
 	const char *what = code == kExitNetwork ? "a NovaWorld socket did not open"
 			: code == kExitStoppedByService
 			? "the NovaWorld service stopped the hosting"
 			: "the NovaWorld session, the login, the HOSTKEY or the host request failed";
 	return std::string("the NovaWorld listing did not host: ") + what +
-			" (game.cfg networkconnecttype = 2 serves LAN only, as does a start without --master-host)";
+			" (game.cfg networkconnecttype = " + std::to_string(networkconnecttype) +
+			" lists on NovaWorld through --master-host " + master_host +
+			"; networkconnecttype = 2, or a start without --master-host, serves LAN only)";
 }
 
 } // namespace
@@ -826,7 +829,8 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 				return !out.empty();
 			}));
 	if (!lister_->start()) {
-		error = listing_failure(lister_->exit_code());
+		error = listing_failure(lister_->exit_code(), config_.cfg().networkconnecttype,
+				options_.master_host);
 		return false;
 	}
 	while (!lister_->hosting()) {
@@ -835,7 +839,8 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 			return false;
 		}
 		if (!lister_->tick(wall_ms())) {
-			error = listing_failure(lister_->exit_code());
+			error = listing_failure(lister_->exit_code(), config_.cfg().networkconnecttype,
+					options_.master_host);
 			return false;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
