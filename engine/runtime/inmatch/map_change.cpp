@@ -172,6 +172,15 @@ namespace {
 void reset_all_player_slots(HostRole &role) {
 	NapiNPServerCtx &ctx = role.state.host_owner.ctx;
 	HostRotation *rotation = role.rotation();
+	// Each row keeps its live age (+0x184) for the next mission's re-add
+	// (NapiNPConnection::kept_play_ticks): no store of the reset touches it [orig:
+	//  @0x5163A4..0x516432]. A row with no Match row this mission keeps the age it had.
+	mission::MissionKernel *kernel = role.kernel();
+	const auto keep_live_age = [kernel](NapiNPConnection &row) {
+		if (kernel == nullptr) return;
+		if (const world::MatchPlayer *player = kernel->world.match.player(row.link.owned_entity))
+			row.kept_play_ticks = player->play_ticks;
+	};
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!slot_active(conn)) continue;
 		const bool synced = conn.slot_state >= PlayerSlotState::PlayerSync;
@@ -198,6 +207,7 @@ void reset_all_player_slots(HostRole &role) {
 			conn.burst.game_state = 8;
 			conn.slot_state = PlayerSlotState::Added;
 		}
+		keep_live_age(conn);
 		reset_slot_for_next_mission(conn);
 	}
 	// An orphaned row is an active row to the walk (D-NET-NEW-L1-24): in states 2..7 it takes
@@ -223,6 +233,7 @@ void reset_all_player_slots(HostRole &role) {
 			if (net_player != nullptr) net_player->burst.game_state = 8;
 			row.slot_state = PlayerSlotState::Added;
 		}
+		keep_live_age(row);
 		reset_slot_for_next_mission(row);
 	}
 }

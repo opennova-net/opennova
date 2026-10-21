@@ -822,6 +822,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	match_player.slot = *player_slot;
 	match_player.name = resolved_name;
 	world.match.upsert_player(match_player);
+	// The round init's re-add keeps the slot's live age (+0x184) from the last mission
+	// (NapiNPConnection::kept_play_ticks); a fresh add's row starts at 0 (the row memset).
+	// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 stores no +0x184; Server_PlayerAdd
+	//  @0x51CBC0 - the row memset @0x51CD06]
+	if (round_init)
+		if (world::MatchPlayer *row = world.match.player(h)) row->play_ticks = conn.kept_play_ticks;
 	// The roster row mirrors the slot's spectator latch (+100567) so the
 	// end-round winner award skips a spectator-flagged top scorer
 	// [orig: Server_PlayerAdd @0x51CD83], and its undeployed bit so event 25

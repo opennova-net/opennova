@@ -426,6 +426,53 @@ void test_an_orphaned_row_is_reset_and_respawned_at_the_map_change() {
 	std::printf("map_change: the orphaned row reset to state 1 and respawned at the round init\n");
 }
 
+// A kept slot's live age (+0x184, the integrity quartet's 1860-tick gate) outlives the map
+// change: the reset and the round init store none, so the next mission's row starts at the age
+// the slot had, and a slot whose body sits hidden at the deploy screen (which the play-tick walk
+// skips) is past the gate at once; its quartet's first fire then waits only for the join's
+// 744-tick countdown (x5: retail's second-mission quartet 11.9 s after its first 0x0A).
+// [orig: Server_DisconnectAndResetAllPlayerSlots @0x5163A4..0x516432,
+//  Server_ResetAllPlayerSlotFrameState @0x4FC350..0x4FC3C9 and
+//  Server_InitAllPlayerEntitiesForRound @0x516AA0 store no +0x184; Server_OnPlayerJoin's
+//  PlayerSlot_ResetNetworkState call @0x51A72B re-arms the countdown alone]
+void test_a_kept_slots_live_age_outlives_the_map_change() {
+	PlayHost host;
+	CHECK(host.boot_map(/*next_mission=*/false));
+	if (host.kernel == nullptr) return;
+	for (int f = 0; f < 120 && !(host.loopback() != nullptr && host.loopback()->link.owned_entity.valid()); ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		(void)host.session.advance(input);
+		host.kernel->world.out.discard_presentation();
+	}
+	inmatch::NapiNPConnection *own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid());
+	if (own == nullptr || !own->link.owned_entity.valid()) return;
+	inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+	CHECK(inmatch::Server_ExecuteServerCommand(ctx, &host.kernel->world, "Cycle", "", {}).handled);
+	bool ended = false;
+	for (int f = 0; f < 4000 && !ended; ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		ended = host.session.advance(input).terminal();
+		host.kernel->world.out.discard_presentation();
+	}
+	CHECK(ended);
+	world::MatchPlayer *row = host.kernel->world.match.player(own->link.owned_entity);
+	CHECK(row != nullptr);
+	if (row == nullptr) return;
+	row->play_ticks = 2000; // past the quartet's 1860-tick gate
+	CHECK(inmatch::begin_host_map_change(host.role, host.catalog) == inmatch::MapChangeStep::NextMission);
+	CHECK(own->kept_play_ticks == 2000u);
+	CHECK(host.boot_map(/*next_mission=*/true));
+	own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid());
+	if (own == nullptr || !own->link.owned_entity.valid()) return;
+	const world::MatchPlayer *next = host.kernel->world.match.player(own->link.owned_entity);
+	CHECK(next != nullptr && next->play_ticks >= 2000u);
+	std::printf("map_change: the kept slot's live age carried into the next mission's row\n");
+}
+
 // A joiner the host admits mid-match: the spawn pump's body binds its items.def
 // row at its spawn, as every retail body does, so it carries its row's sound
 // profile (the chute slot sounds' source). (D-NET-395)
@@ -546,6 +593,7 @@ int main() {
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
 	test_play_host_map_change();
 	test_an_orphaned_row_is_reset_and_respawned_at_the_map_change();
+	test_a_kept_slots_live_age_outlives_the_map_change();
 	test_play_host_mid_match_join_binds_body();
 	test_round_end_abandons_a_joiners_mission_start();
 	Host host;

@@ -503,6 +503,15 @@ struct NapiNPConnection {
 	// the first one. [orig: Server_SendRandomSeedToPlayer @0x5101A9 / @0x5101B3;
 	//  GameEvent_PlayerDeath @0x516E9F..0x516EB4]
 	uint32_t seed_armed_clock = 0;   // playerSlot+96456
+	// The slot's live age (+0x184, world::MatchPlayer::play_ticks) across a mission change:
+	// the slot keeps it (no mission-change or mission-start store touches it), while ours
+	// builds each mission's Match row fresh, so the map change's slot reset keeps the old
+	// row's age here and the round init's re-add restores it. [orig: no +0x184 store in
+	//  Server_DisconnectAndResetAllPlayerSlots @0x5163A4..0x516432,
+	//  Server_ResetAllPlayerSlotFrameState @0x4FC350..0x4FC3C9 or
+	//  Server_InitAllPlayerEntitiesForRound @0x516AA0; Server_OnPlayerJoin re-arms only the
+	//  744 countdown (PlayerSlot_ResetNetworkState called @0x51A72B)]
+	uint32_t kept_play_ticks = 0;
 	bool fire_tick_mode = false;    // playerSlot+96480
 	// The C2S 0x34 keepalive's high-water: the seed's roll sets it to the seed, the
 	// disarm and the round end clear it, and the 0x34 handler raises it; no other
