@@ -25,6 +25,8 @@ float combo_width(float widest_text);
 void set_viewport_member(Workspace &workspace, const ViewportModel &viewport, const char *member, io::JsonValue value);
 // A SetViewport of the preview clock's `member` (`playing`, `ticks`, `rate`).
 void set_clock(Workspace &workspace, const ViewportModel &viewport, const char *member, io::JsonValue value);
+// The preview clock's ticks in seconds, as a timeline and a log say them ("1.25 s", the game's 62.5 ticks a second).
+std::string tick_seconds(int32_t ticks);
 // The preview clock's buttons on a viewport's toolbar: Run or Pause (Play is the game's), `run_tip` what the clock
 // runs; and, with a `replay_tip`, Replay: the clock at tick 0, run where `replay_runs`.
 void clock_buttons(Workspace &workspace, ui_kit::WrapRow &row, const ViewportModel &viewport, const PreviewClock &clock,

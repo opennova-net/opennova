@@ -491,9 +491,9 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 						  : std::string("Make the mission the active document to start the game in it.")))
 		viewport_command(workspace, mission, "play_from_here");
 	// The mission's 2D map (S23 C) in the Preview window beside the picture, which stands aside for a mission until asked.
-	if (ui_kit::tool(row, "Map", true, "Show the mission's 2D map beside the picture: from straight above, north up (south "
-										 "up where the mission turns its map), the terrain as the game's commander map draws "
-										 "it. Its records are pins you select and move as here.")) {
+	if (ui_kit::tool(row, "Map", true, "The mission's 2D map beside the picture, its terrain as the game's commander map "
+										 "draws it, north up (south up where the mission turns its map). Its records are "
+										 "pins you select and move as here.")) {
 		// The map asked for (the Windows menu's tick shows the kind shown before), and the window brought forward.
 		io::JsonValue change = io::JsonValue::make_object();
 		io::JsonValue document = io::JsonValue::make_object();
@@ -632,7 +632,7 @@ void MissionViewportView::Tools::shoot_list(Workspace &workspace, const MissionV
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Clear shots", !shots.shots().empty(), "Forget the shots: nothing of them runs or is drawn."))
 		viewport_command(workspace, mission, "clear_shots");
-	if (!shots.why().empty()) ui_kit::clipped_text(shots.why(), shots.why());
+	if (!shots.why().empty()) ui_kit::clipped_text(shots.why());
 	const std::vector<MissionShotEvent> &events = shots.events();
 	const DocumentBase *base = nullptr;
 	for (const auto &open : view.documents.open)
@@ -645,9 +645,8 @@ void MissionViewportView::Tools::shoot_list(Workspace &workspace, const MissionV
 			const MissionShotEvent &event = events[events.size() - 1 - i];
 			ImGui::PushID(int(i));
 			const std::string line = std::to_string(event.tick) + "  " + event.words;
-			if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()) && event.row && document)
+			if (ui_kit::fitted_selectable(line, "shot") && event.row && document)
 				workspace.request(request::select_record(mission.path(), document->address_of(event.row)));
-			ui_kit::tooltip(line);
 			ImGui::PopID();
 		}
 	}

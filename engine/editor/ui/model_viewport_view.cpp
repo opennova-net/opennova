@@ -15,7 +15,6 @@
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
-#include <base/io/tick_rate.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_ctrl_words.h>
@@ -89,12 +88,6 @@ EventMark event_mark(uint32_t trigger) {
 	if (*letter == 'L' || *letter == 'R') return {IM_COL32(120, 220, 120, 255), letter};
 	if (*letter == 'S') return {kEventColor, letter};
 	return {IM_COL32(128, 128, 128, 255), letter};
-}
-
-std::string seconds_text(double seconds) {
-	char text[32];
-	std::snprintf(text, sizeof(text), "%.2f s", seconds);
-	return text;
 }
 
 } // namespace
@@ -505,7 +498,7 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	ui_kit::tooltip("A frame on (Right).");
 	char where[96];
 	std::snprintf(where, sizeof(where), "Frame %d of %u, %s of %s", int(std::floor(frame + 1e-6)), frames,
-	              seconds_text(shown / io::kTickHz).c_str(), seconds_text(length / io::kTickHz).c_str());
+	              tick_seconds(shown).c_str(), tick_seconds(length).c_str());
 	row.next(ui_kit::text_width(where));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted(where);
@@ -610,7 +603,7 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		const bool audible = !plays.empty() && !model.first_person().active();
 		const bool shoots = model.clip_fire().armed() && !model.first_person().active() &&
 		                    (under->trigger & anim::kAnimEventFireMask) != 0;
-		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
+		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + tick_seconds(under->tick) +
 		                "): " + animation_trigger_words(under->trigger) + "." + plays + fires);
 		if (clicked) {
 			seek_ticks(workspace, model, under->tick, true);
@@ -979,7 +972,7 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 			const DamageFrame frame = model.damage_frame_at(clock);
 			const int32_t end = damage_fade_end_tick(plan, item);
 			char where[160];
-			std::snprintf(where, sizeof(where), "%s of the death: %s; the fade %s.", seconds_text(clock.ticks() / io::kTickHz).c_str(),
+			std::snprintf(where, sizeof(where), "%s of the death: %s; the fade %s.", tick_seconds(clock.ticks()).c_str(),
 			              frame.husked ? "the husk drawn" : "intact still",
 			              frame.fade_elapsed < 0 ? "waits" : clock.ticks() >= end ? "done" : "runs");
 			popup_line(where, std::string(), LineTone::Plain, kWide);
@@ -988,7 +981,7 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 		for (const DamageLeg &leg : plan.legs) {
 			// A leg the clock has passed lit, one still to come muted (an effect leg is named: not drawn here).
 			const bool due = model.damage_playing() && clock.ticks() >= leg.tick;
-			std::string line = seconds_text(leg.tick / io::kTickHz) + "  " + leg.words;
+			std::string line = tick_seconds(leg.tick) + "  " + leg.words;
 			if (leg.shown == "named") line += " (named: not drawn here)";
 			popup_line(line, std::string(), due ? LineTone::Plain : LineTone::Quiet, kWide);
 		}

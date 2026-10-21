@@ -1,9 +1,11 @@
 #include <editor/ui/viewport_widgets.h>
 
 #include <algorithm>
+#include <cstdio>
 
 #include <imgui.h>
 
+#include <base/io/tick_rate.h>
 #include <formats/trn/charmap_legend.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/preview_clock.h>
@@ -28,6 +30,12 @@ void set_clock(Workspace &workspace, const ViewportModel &viewport, const char *
 	io::JsonValue clock = io::JsonValue::make_object();
 	clock.set(member, std::move(value));
 	set_viewport_member(workspace, viewport, "clock", std::move(clock));
+}
+
+std::string tick_seconds(int32_t ticks) {
+	char text[32];
+	std::snprintf(text, sizeof(text), "%.2f s", ticks / io::kTickHz);
+	return text;
 }
 
 void clock_buttons(Workspace &workspace, ui_kit::WrapRow &row, const ViewportModel &viewport, const PreviewClock &clock,

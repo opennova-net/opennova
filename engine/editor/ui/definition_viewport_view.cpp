@@ -7,7 +7,6 @@
 
 #include <imgui.h>
 
-#include <base/io/tick_rate.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
@@ -28,16 +27,10 @@ namespace opennova::editor {
 
 namespace {
 
-std::string seconds(int32_t ticks) {
-	char text[32];
-	std::snprintf(text, sizeof(text), "%.2f s", ticks / io::kTickHz);
-	return text;
-}
-
 // A line of a log (the range's, the death's): its time, each name it plays a link (name_link: its Go to and its
-// jumps), then its words cut to the column, whole in its tooltip after `tip`.
+// jumps), then its words cut to the column, whole in its tooltip where cut.
 void log_line(Workspace &workspace, const std::string &when, std::initializer_list<ReferenceSubject> names,
-              const std::string &words, const std::string &tip = std::string()) {
+              const std::string &words) {
 	ImGui::TextUnformatted(when.c_str());
 	int id = 0;
 	for (const ReferenceSubject &name : names) {
@@ -47,7 +40,7 @@ void log_line(Workspace &workspace, const std::string &when, std::initializer_li
 		name_link(workspace, name, std::to_string(id).c_str());
 	}
 	ImGui::SameLine();
-	ui_kit::clipped_text(words, tip.empty() ? words : words + "\n" + tip);
+	ui_kit::clipped_text(words);
 }
 
 // What a death's leg names, by its kind (DamageLeg::kind): the husk or the piece model a model, a sound a set, an
@@ -220,7 +213,7 @@ void weapon_row(Workspace &workspace, const DefinitionViewport &model, const Pre
 		for (size_t i = 0; i < shown; ++i) {
 			const WeaponRangeEvent &event = events[events.size() - 1 - i];
 			ImGui::PushID(int(i));
-			log_line(workspace, seconds(event.tick), {{ReferenceKind::Sound, event.set}, {ReferenceKind::Particle, event.effect}},
+			log_line(workspace, tick_seconds(event.tick), {{ReferenceKind::Sound, event.set}, {ReferenceKind::Particle, event.effect}},
 			         event.words);
 			ImGui::PopID();
 		}
@@ -480,13 +473,13 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 			const DefinitionSpawn &spawn = effects.spawns()[i];
 			ImGui::PushID(int(i));
 			std::string line = (spawn.point.empty() ? std::string("at the item") : "at " + spawn.point) + ", " +
-			                   seconds(spawn.tick) + " (" + spawn.source + ")";
+			                   tick_seconds(spawn.tick) + " (" + spawn.source + ")";
 			const particle::EffectClosure *closure = effects.closure_of(spawn.effect);
 			if (closure && !closure->spawns()) line += ": the game spawns nothing for it";
 			else if (closure && closure->stock) line += ": no file defines it (the stock effect)";
 			name_link(workspace, {ReferenceKind::Particle, spawn.effect}, "spawn");
 			ImGui::SameLine();
-			ui_kit::clipped_text(line, line);
+			ui_kit::clipped_text(line);
 			ImGui::PopID();
 		}
 		ImGui::TreePop();
@@ -499,7 +492,7 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 			const bool due = clock.ticks() >= leg.tick;
 			ImGui::PushID(int(i));
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(due ? ImGuiCol_Text : ImGuiCol_TextDisabled));
-			log_line(workspace, seconds(leg.tick), {{leg_reference(leg.kind), leg.name}}, leg.words, leg.cite);
+			log_line(workspace, tick_seconds(leg.tick), {{leg_reference(leg.kind), leg.name}}, leg.words);
 			ImGui::PopStyleColor();
 			ImGui::PopID();
 		}
