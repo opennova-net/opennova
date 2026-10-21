@@ -777,6 +777,12 @@ struct ClientEntityState {
 	int32_t rm_leg_yaw[2] = {};
 	int32_t rm_leg_target[2] = {};
 	int32_t rm_body_heading = 0;
+	// bodyPitch (+0x90), the player body's slope conform's pitch word (its Roll
+	// is roll_bam, +0x18): the aim overlay's body and leg chains and the eye's
+	// third turn read both [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	// the decay @0x4B6DBD, the chase @0x4B6FC1; Entity_BuildBoneTransformMatrices
+	// @0x4B1290 (the body build @0x4B182E)].
+	int32_t rm_body_pitch = 0;
 	bool rm_leg_seeded = false;
 	// --- The secondary (upper-body weapon) AnimMap channel, advanced locally
 	// for every armed player row, as retail's client runs it for every player

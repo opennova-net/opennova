@@ -524,6 +524,32 @@ public:
 		remote_motion_terrain_ = terrain;
 	}
 
+	// The player body's slope conform on a replica row (row_body_conform): one
+	// ground column at the row's position offset by (dx, dy), 0x4000 up and
+	// 0x20000 down, through the row's candidate models as its movement resolve
+	// reads them, and the def's attrib word by wire type. With no probe the
+	// column is the terrain's alone (the world pass's terrain-only fallback);
+	// with no attrib resolver the attrib reads 0.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the probes @0x4B6E41 /
+	//  @0x4B6E5D / @0x4B6E98 / @0x4B6EB3 -> Entity_RaycastGroundHeight @0x4142C0;
+	//  the def attrib test @0x4B6D99]
+	struct ReplicaGroundColumn {
+		uint16_t row_handle = 0xFFFF;
+		uint16_t type_id = 0;
+		int32_t pos[3] = {};
+		int32_t dx = 0, dy = 0;
+		uint32_t entity_flags = 0; // the row's retail-Flags mirror (rm_entity_flags)
+		int32_t source_bound_radius_q16 = 0; // the row's bound (its candidate slice's range)
+	};
+	using ReplicaGroundProbe = std::function<int32_t(const ReplicaGroundColumn &)>;
+	void set_replica_ground_probe(ReplicaGroundProbe probe) {
+		replica_ground_probe_ = std::move(probe);
+	}
+	using ReplicaDefAttribResolver = std::function<uint32_t(uint16_t type_id)>;
+	void set_replica_def_attrib_resolver(ReplicaDefAttribResolver resolver) {
+		replica_def_attrib_resolver_ = std::move(resolver);
+	}
+
 	// The phase-3 0x0A objective block has no on-wire discriminator. apply()
 	// learns the shared g_GameType from S2C 0x08 field 3 / 0x7B `extra`;
 	// replay/bootstrap callers may also seed it explicitly before a midstream 0x0A.
@@ -703,6 +729,8 @@ private:
 	// tick_remote_motion's per-tick replica-peer sphere table (reused capacity).
 	std::vector<ReplicaPeerSphere> contact_peer_scratch_;
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
+	ReplicaGroundProbe replica_ground_probe_;
+	ReplicaDefAttribResolver replica_def_attrib_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
 	GroundOccupantProvider ground_occupant_provider_;
 	int32_t water_z_ = 0;

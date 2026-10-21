@@ -10,7 +10,8 @@
 
 #include <runtime/audio/sound_profile.h>            // kSlot* (the replica mover legs' profile slots)
 #include <runtime/terrain_query/height_field.h>        // remote-person terrain settle
-#include <runtime/world/collision.h>           // ground_probe_origin_z (the settle tail's probe origin)
+#include <runtime/world/collision.h>           // ground_probe_origin_z (the settle tail's probe origin), terrain_clip_segment
+#include <runtime/world/dir_table.h>           // quantized_dir (the slope conform's probe facing)
 #include <runtime/world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/infantry.h>            // IRootMotionSource + the anim flag/state tables
 #include <runtime/world/vehicle_motor.h>       // vehicle_chase_bucket (the vehicle-family interp bucket)
@@ -404,15 +405,125 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 	es.rm_entity_flags = (es.rm_entity_flags & ~0x2000u) | 0x8000u;
 }
 
+// The player body's slope conform on a remote row, the world pass's org2 leg
+// on the row's words (world::AiSystem::infantry_slope_pass keeps the
+// authority's): a non-conforming body decays bodyPitch and Roll a sixteenth
+// toward level every tick; a conforming one (the def's attrib 0x200, an anim
+// state with flag bit 2, or a corpse neither in the air, afloat nor on a
+// ladder) probes four ground columns every second tick, slides on steep ground
+// (dead 48 deg, alive 60), tips a corpse's look pitch an eighth and chases
+// bodyPitch and Roll a quarter of the way to the true slope angles, the roll
+// held while a combat roll plays. The selector and the roll hold read the
+// arbitrated current (+0x2BC), the dead and support bits the Flags word.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the selector
+//  @0x4B6D95..0x4B6DBB, the decay @0x4B6DBD..0x4B6DDC, the tick & 1 gate
+//  @0x4B6DE4, the probes @0x4B6DEF..0x4B6EB3, the slopes @0x4B6E68 / @0x4B6EC8
+//  (fpatan over dbl_7C9BE8 / dbl_7C9BE0, times dbl_7C19D8), the thresholds
+//  @0x4B6EE5..0x4B6EF7, the slide @0x4B6F01..0x4B6FA3, the corpse tip
+//  @0x4B6FA9..0x4B6FBE, the chase @0x4B6FC1..0x4B6FF4]
+struct RowConformIo {
+	const ClientReplicaPipeline::ReplicaGroundProbe *probe = nullptr;
+	const ClientReplicaPipeline::ReplicaDefAttribResolver *def_attrib = nullptr;
+	const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_radius = nullptr;
+	const terrain::TerrainHeightField *terrain = nullptr;
+	uint32_t tick = 0;
+};
+
+void row_body_conform(ClientEntityState &es, int arbitrated_state, const RowConformIo &io_in) {
+	const uint32_t flags = es.rm_entity_flags;
+	const bool dead = (flags & world::kEntityFlagDead) != 0u;
+	const uint32_t attrib = io_in.def_attrib != nullptr && *io_in.def_attrib
+			? (*io_in.def_attrib)(es.type_id) : 0u;
+	const bool conform = (attrib & world::kItemAttribLandable) != 0u ||
+			(world::infantry_anim_flags(arbitrated_state) & 2u) != 0u ||
+			(dead && (flags & 0x10A000u) == 0u);
+	if (!conform) {
+		es.rm_body_pitch -= (es.rm_body_pitch + 8) >> 4;
+		es.roll_bam -= (es.roll_bam + 8) >> 4;
+		return;
+	}
+	if ((io_in.tick & 1u) != 0u) return;
+	const int32_t pos[3] = {es.x, es.y, es.z};
+	auto probe = [&](int32_t dx, int32_t dy) -> int32_t {
+		if (io_in.probe != nullptr && *io_in.probe) {
+			ClientReplicaPipeline::ReplicaGroundColumn q;
+			q.row_handle = es.handle;
+			q.type_id = es.type_id;
+			q.pos[0] = pos[0];
+			q.pos[1] = pos[1];
+			q.pos[2] = pos[2];
+			q.dx = dx;
+			q.dy = dy;
+			q.entity_flags = flags;
+			q.source_bound_radius_q16 = io_in.bound_radius != nullptr && *io_in.bound_radius
+					? (*io_in.bound_radius)(es.type_id) : 0;
+			return (*io_in.probe)(q);
+		}
+		// The terrain column alone, clipped by the terrain (an indoors body skips
+		// it); with no terrain the ray's end comes back [orig: Entity_RaycastGroundHeight
+		// @0x4142C0 -> Entity_RaycastCollision's terrain leg @0x413760].
+		const int32_t start[3] = {io::bam_add(pos[0], dx), io::bam_add(pos[1], dy),
+		                          io::bam_add(pos[2], 0x4000)};
+		int32_t end[3] = {start[0], start[1], io::bam_sub(start[2], 0x20000)};
+		if (io_in.terrain != nullptr && io_in.terrain->valid() &&
+				(flags & world::kEntityFlagIndoors) == 0u)
+			(void)world::terrain_clip_segment(*io_in.terrain, start, end, end);
+		return end[2];
+	};
+	int32_t c, s;
+	world::quantized_dir(es.heading_bam, c, s);
+	const int32_t fx = static_cast<int32_t>((22528LL * c) >> 22);
+	const int32_t fy = static_cast<int32_t>((22528LL * s) >> 22);
+	const int32_t h_ahead = probe(fx, fy);
+	const int32_t h_behind = probe(-fx, -fy);
+	const int32_t lx = -(fy >> 2), ly = fx >> 2;
+	const int32_t h_left = probe(lx, ly);
+	const int32_t h_right = probe(-lx, -ly);
+	const int32_t pitch_slope = static_cast<int32_t>(
+			std::atan2(static_cast<double>(h_ahead - h_behind), 45056.0) * io::kBamPerRadian);
+	const int32_t roll_slope = static_cast<int32_t>(
+			std::atan2(static_cast<double>(h_left - h_right), 11264.0) * io::kBamPerRadian);
+	const int32_t threshold = dead ? 572662272 : 715827840; // 0x22222200 / 0x2AAAAA80
+	const int32_t slide_x = static_cast<int32_t>((static_cast<int64_t>(c) << 9) >> 22);
+	const int32_t slide_y = static_cast<int32_t>((static_cast<int64_t>(s) << 9) >> 22);
+	if (pitch_slope > threshold) {
+		es.rm_vel_xy[0] -= slide_x;
+		es.rm_vel_xy[1] -= slide_y;
+	} else if (pitch_slope < -threshold) {
+		es.rm_vel_xy[0] += slide_x;
+		es.rm_vel_xy[1] += slide_y;
+	}
+	if (roll_slope > threshold) {
+		es.rm_vel_xy[0] += slide_y;
+		es.rm_vel_xy[1] -= slide_x;
+	} else if (roll_slope < -threshold) {
+		es.rm_vel_xy[0] -= slide_y;
+		es.rm_vel_xy[1] += slide_x;
+	}
+	if (dead) es.pitch_bam += (pitch_slope - es.pitch_bam + 4) >> 3;
+	es.rm_body_pitch += (pitch_slope - es.rm_body_pitch + 2) >> 2;
+	if (arbitrated_state != world::anim_state::kRollLeft &&
+			arbitrated_state != world::anim_state::kRollRight)
+		es.roll_bam += (roll_slope - es.roll_bam + 2) >> 2;
+}
+
 void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const terrain::TerrainHeightField *terrain,
+                          const RowConformIo &conform_io,
                           uint32_t key, bool is_self, bool starved,
                           const ClientReplicaPipeline::ReplicaContactResolver *resolver,
                           const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
                           int32_t peer_count, uint32_t tick, int32_t water_z,
                           std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds) {
-	if (es.rm_adm_id < 0) return;
+	if (es.rm_adm_id < 0) {
+		// The body pass's slope conform does not wait on the animation table.
+		if (es.cls == EntityClass::Player && !is_self && !starved)
+			row_body_conform(es, es.net_anim_current >= 0
+					? static_cast<int>(es.net_anim_current)
+					: static_cast<int>(es.anim_state_id), conform_io);
+		return;
+	}
 	const auto play_slot_at = [&](uint8_t slot, int32_t x, int32_t y, int32_t z) {
 		ClientReplicaPipeline::ReplicaSlotSound sound;
 		sound.handle = es.handle;
@@ -560,7 +671,15 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		es.rm_prev_phase = pphase;
 		es.rm_phase = tphase;
 	}
-	if (!have) return;
+	// The player body's slope conform follows the eye in the body pass, ahead of
+	// its velocity and integrate; a starved body returns before both [orig:
+	// Entity_UpdateInfantryPlayerBody @0x4B40E0 - the eye @0x4B699F..0x4B6BAB,
+	// the conform @0x4B6D95..0x4B6FF4, the starved return @0x4B4669..0x4B4670].
+	const bool runs_conform = es.cls == EntityClass::Player && !is_self && !starved;
+	if (!have) {
+		if (runs_conform) row_body_conform(es, target_state, conform_io);
+		return;
+	}
 	int32_t fwd = frame.dx, lat = frame.dy;
 	if (es.rm_state == world::anim_state::kJumpLoop)
 		fwd = 1024; // [data: retail ADM dump root row 4756]
@@ -576,17 +695,20 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// from this tick's capsule, the extent capped at 0xD000 on the lean's arc, then
 	// turned by the twist, Roll, the body pitch and the body heading
 	// (world::player_body_capsule_eye, the authority's body leg's too), from the
-	// decayed, unramped lean (tick_lean_ramp runs after this pass). A decoded row
-	// runs no slope chase, so its body pitch is 0 (D-NET-196's body-conform
-	// remainder). The local player's own eye is its local arm's (LocalPlayer).
+	// decayed, unramped lean (tick_lean_ramp runs after this pass), and the body
+	// pitch and Roll the previous tick's slope conform left (row_body_conform runs
+	// next). A starved body returns before the eye. The local player's own eye is
+	// its local arm's (LocalPlayer).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the on-foot non-local arm,
 	//  the extent cap @0x4B698C..0x4B6997, the turns @0x4B699F..0x4B6B96, the floor
-	//  @0x4B6B98..0x4B6BA0, the stores @0x4B6BA5..0x4B6BAB]
-	if (es.cls == EntityClass::Player && !is_self) {
+	//  @0x4B6B98..0x4B6BA0, the stores @0x4B6BA5..0x4B6BAB; the starved return
+	//  @0x4B4669..0x4B4670]
+	if (runs_conform) {
 		int32_t extent = frame.capsule_top - frame.capsule_bottom;
 		if (extent > 0xD000) extent = 0xD000;
 		world::player_body_capsule_eye(extent, es.lean_angle, es.heading_bam, es.rm_body_heading,
-		                               es.roll_bam, /*body_pitch=*/0, es.eye_offset);
+		                               es.roll_bam, es.rm_body_pitch, es.eye_offset);
+		row_body_conform(es, target_state, conform_io);
 	}
 	// Rotation heading: org2 = the leg-chased body heading loaded from
 	// entity+0x8C [orig: Entity_UpdateInfantryPlayerBody @0x4B41E4, Q22 rotate
@@ -973,6 +1095,12 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	// root motion — for every armed org row with a grounded carrier, clip or no
 	// clip [orig: org2 ride @0x4b52a0 between the chase @0x4b4470 and the
 	// integrate @0x4b7cbf].
+	RowConformIo conform_io;
+	conform_io.probe = &replica_ground_probe_;
+	conform_io.def_attrib = &replica_def_attrib_resolver_;
+	conform_io.bound_radius = &replica_bound_radius_resolver_;
+	conform_io.terrain = remote_motion_terrain_;
+	conform_io.tick = rm_key;
 	auto organic_chase_tail = [&](ClientEntityState &es, bool is_self,
 	                              bool starved = false) {
 		if (!is_self && !starved && carrier_pose_provider_)
@@ -982,7 +1110,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		if (!is_self && es.cls == EntityClass::Player && ground_occupant_provider_)
 			row_ride_link(es, state_, ground_occupant_provider_);
 		if (root_motion_ != nullptr)
-			row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
+			row_root_motion_tick(es, *root_motion_, remote_motion_terrain_, conform_io,
 			                     rm_key, is_self, starved, &replica_contact_resolver_,
 			                     &replica_bound_radius_resolver_,
 			                     contact_peers.data(),

@@ -1016,6 +1016,46 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     // The ad-hoc slice is scratch past the arena's own entries (which a
     // skipped row's kept slice may still read), holding at most the room the
     // current fill leaves, as one more source of the build would.
+    const size_t arena_mark = stage_replica_candidates(pos, source_bound_radius_q16, exclude_handle);
+    replica_peers_ = peers;
+    replica_peer_count_ = peer_count;
+    replica_exclude_handle_ = exclude_handle;
+    stage_replica_peer_index(peers, peer_count, tick);
+    replica_source_bound_radius_q16_ = source_bound_radius_q16;
+    replica_flags_ = entity_flags;
+    int16_t health_dummy = 100; // damage legs are authority-gated off anyway
+    const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
+    const int32_t clearance = resolve_entity(
+        world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
+        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player_class,
+        /*is_authority=*/false, tick, anim_state_id, anim_state_flags,
+        health_dummy, out_ground);
+    replica_peers_ = nullptr;
+    replica_peer_count_ = 0;
+    replica_exclude_handle_ = 0xFFFF;
+    replica_source_bound_radius_q16_ = 0;
+    replica_flags_ = nullptr;
+    unstage_replica_candidates(arena_mark);
+    return clearance;
+}
+
+int32_t CollisionWorld::raycast_ground_replica(World &world, const int32_t pos[3],
+                                               int32_t source_bound_radius_q16,
+                                               uint16_t row_handle, uint32_t entity_flags,
+                                               int32_t dx, int32_t dy, int32_t z_up,
+                                               int32_t z_drop) {
+    const size_t arena_mark = stage_replica_candidates(pos, source_bound_radius_q16, row_handle);
+    replica_flags_ = &entity_flags;
+    const int32_t ground =
+            raycast_ground(world, EntityHandle{}, pos, dx, dy, z_up, z_drop, nullptr);
+    replica_flags_ = nullptr;
+    unstage_replica_candidates(arena_mark);
+    return ground;
+}
+
+size_t CollisionWorld::stage_replica_candidates(const int32_t pos[3],
+                                                int32_t source_bound_radius_q16,
+                                                uint16_t exclude_handle) {
     const size_t arena_mark = arena_.size();
     const int32_t room = kCandidateArenaCap - arena_used_;
     const int32_t range = source_bound_radius_q16 + 0x40000;
@@ -1065,26 +1105,13 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     }
     const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
     candidates_[replica_key.packed] = slice;
-    replica_peers_ = peers;
-    replica_peer_count_ = peer_count;
-    replica_exclude_handle_ = exclude_handle;
-    stage_replica_peer_index(peers, peer_count, tick);
-    replica_source_bound_radius_q16_ = source_bound_radius_q16;
-    replica_flags_ = entity_flags;
-    int16_t health_dummy = 100; // damage legs are authority-gated off anyway
-    const int32_t clearance = resolve_entity(
-        world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
-        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player_class,
-        /*is_authority=*/false, tick, anim_state_id, anim_state_flags,
-        health_dummy, out_ground);
-    replica_peers_ = nullptr;
-    replica_peer_count_ = 0;
-    replica_exclude_handle_ = 0xFFFF;
-    replica_source_bound_radius_q16_ = 0;
-    replica_flags_ = nullptr;
+    return arena_mark;
+}
+
+void CollisionWorld::unstage_replica_candidates(size_t arena_mark) {
+    const EntityHandle replica_key;
     candidates_.erase(replica_key.packed);
     arena_.resize(arena_mark);
-    return clearance;
 }
 
 std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(

@@ -1682,6 +1682,16 @@ public:
                             uint32_t anim_state_flags, const ReplicaPeer *peers,
                             int32_t peer_count, uint16_t exclude_handle,
                             uint32_t *entity_flags, EntityHandle *out_ground);
+    // A wire replica row's ground column (raycast_ground) through the same
+    // candidate slice its resolve reads (resolve_replica's staging), the row's
+    // Flags mirror gating the terrain clamp. The player body's slope conform
+    // probes a remote body this way [orig: Entity_UpdateInfantryPlayerBody
+    // @0x4B40E0 - the probes @0x4B6E41 / @0x4B6E5D / @0x4B6E98 / @0x4B6EB3 ->
+    // Entity_RaycastGroundHeight @0x4142C0, over the body's proximity slice].
+    int32_t raycast_ground_replica(World &world, const int32_t pos[3],
+                                   int32_t source_bound_radius_q16, uint16_t row_handle,
+                                   uint32_t entity_flags, int32_t dx, int32_t dy,
+                                   int32_t z_up, int32_t z_drop);
 
 	// Fold model contacts into the terrain forces, one query per authored
 	// wheel/hull probe. Returns severity 0..3 and the last severe hit entity.
@@ -2123,6 +2133,11 @@ private:
     // resolver's flag latch sites and the ground probe's indoors gate read and
     // write it exactly where they read and write ent->flags on a registry row.
     uint32_t *replica_flags_ = nullptr;
+    // resolve_replica's candidate staging under the reserved invalid key, which
+    // raycast_ground_replica shares; unstage drops it and the scratch arena tail.
+    size_t stage_replica_candidates(const int32_t pos[3], int32_t source_bound_radius_q16,
+                                    uint16_t exclude_handle);
+    void unstage_replica_candidates(size_t arena_mark);
 };
 
 } // namespace opennova::world

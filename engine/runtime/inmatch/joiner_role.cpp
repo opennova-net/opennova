@@ -1054,6 +1054,19 @@ void JoinerRole::wire_frame_providers() {
 			[this](uint16_t type_id) -> int32_t {
 				return kernel_->wire_collision_shape_for_type(type_id).bound_radius_q16;
 			});
+	// The player body's slope conform on a remote row reads the def's attrib
+	// word (the 0x200 conform bit), from the same items.def
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `test [def+54h], 200h`
+	//  @0x4B6D99].
+	rt.view().set_replica_def_attrib_resolver(
+			[this](uint16_t type_id) -> uint32_t {
+				const def::DefItemsFile *items = kernel_->items_table();
+				const def::DefItemDef *item = items != nullptr
+						? mission::find_item_def(*items,
+								  static_cast<int>(type_id) + mission::kItemIdOffset)
+						: nullptr;
+				return item != nullptr ? static_cast<uint32_t>(item->attrib) : 0u;
+			});
 	// The replica dead tail's def fields, from the same items.def the spawn
 	// stream typed the row from: deathtime (the edge's moveTimer seed),
 	// LeaveCorpse, and whether the def names a decay effect.
@@ -1141,6 +1154,17 @@ void JoinerRole::wire_frame_providers() {
 	// @0x4BF7FA; resolver @0x4B2BD0]. The per-row ResolveState persists here
 	// (replica_resolve_states_) across pumps.
 	if (world.ai.collision != nullptr) {
+		// The slope conform's ground columns, through the row's candidate slice
+		// as its resolve reads it (CollisionWorld::raycast_ground_replica)
+		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the probes @0x4B6E41 /
+		//  @0x4B6E5D / @0x4B6E98 / @0x4B6EB3 -> Entity_RaycastGroundHeight @0x4142C0].
+		rt.view().set_replica_ground_probe(
+				[this](const replication::ClientReplicaPipeline::ReplicaGroundColumn &q)
+						-> int32_t {
+					return world_->ai.collision->raycast_ground_replica(*world_, q.pos,
+							q.source_bound_radius_q16, q.row_handle, q.entity_flags,
+							q.dx, q.dy, 0x4000, 0x20000);
+				});
 		rt.view().set_replica_contact_resolver(
 				[this](replication::ClientReplicaPipeline::ReplicaContactQuery
 								&q) -> int32_t {
@@ -1256,6 +1280,7 @@ void JoinerRole::wire_frame_providers() {
 				});
 	} else {
 		rt.view().set_replica_contact_resolver(nullptr);
+		rt.view().set_replica_ground_probe(nullptr);
 		rt.view().set_carrier_pose_provider(nullptr);
 	}
 }

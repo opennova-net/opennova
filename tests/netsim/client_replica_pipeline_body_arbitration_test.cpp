@@ -353,12 +353,12 @@ void test_remote_eye_restamps_from_the_capsule() {
 	view.tick_remote_motion(0xFFFF);
 	expect(es->eye_offset[2] == 23169, "eye: the extent times the lean's cosine");
 	// The row's own words drive the turns: the eye is the shared leg over the row's
-	// lean, chased heading, body heading and Roll, and a body pitch of 0 (a decoded row
-	// runs no slope chase).
+	// lean, chased heading, body heading, Roll and body pitch (a level standing row's
+	// slope conform leaves both at 0).
 	{
 		int32_t want[3] = {};
 		opennova::world::player_body_capsule_eye(0x8000, es->lean_angle, es->heading_bam,
-				es->rm_body_heading, es->roll_bam, 0, want);
+				es->rm_body_heading, es->roll_bam, es->rm_body_pitch, want);
 		expect(es->eye_offset[0] == want[0] && es->eye_offset[1] == want[1] &&
 						es->eye_offset[1] != 0,
 				"eye: the lean's sine turns into the lateral words");
@@ -375,7 +375,7 @@ void test_remote_eye_restamps_from_the_capsule() {
 	{
 		int32_t want[3] = {};
 		opennova::world::player_body_capsule_eye(0x8000, 0x1E000000, es->heading_bam,
-				es->rm_body_heading, es->roll_bam, 0, want);
+				es->rm_body_heading, es->roll_bam, es->rm_body_pitch, want);
 		expect(es->eye_offset[2] == want[2] && es->eye_offset[1] == want[1],
 				"eye: the pass reads the decayed, unramped lean");
 		expect(es->lean_angle == 0x1B000000, "eye: the held key's ramp follows the eye");
@@ -387,7 +387,101 @@ void test_remote_eye_restamps_from_the_capsule() {
 	expect(es->eye_offset[2] == 0, "eye: the local player's own row keeps its local arm's");
 }
 
+// D-NET-196: a remote player row runs the player body's slope conform. A prone body
+// (anim flag bit 2) probes four ground columns on every second tick, ahead, behind,
+// left and right, and chases bodyPitch and Roll a quarter of the way to the true
+// slope angles, holding between; the eye reads the words the previous tick left. A
+// standing body (no flag bit 2, alive) decays both a sixteenth toward level every
+// tick. The slope angles are retail's arithmetic over the probe drops: a 0x3000 drop
+// over the 45056 fore-aft span, atan2 * 2^32 / 2 pi = 182000655.35 (truncated to
+// 182000655), and a -0x800 drop over the 11264 lateral span, -122941607.15 (to
+// -122941607), each clear of its truncation edge at 53 or 64 bits, both under the
+// 60-degree slide threshold.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the selector @0x4B6D95..0x4B6DBB,
+//  the decay @0x4B6DBD..0x4B6DDC, the tick & 1 gate @0x4B6DE4, the probes
+//  @0x4B6E41 / @0x4B6E5D / @0x4B6E98 / @0x4B6EB3, the slopes @0x4B6E68 / @0x4B6EC8, the
+//  chase @0x4B6FC1..0x4B6FF4; the eye @0x4B699F..0x4B6BAB ahead of it]
+void test_remote_body_conform_chases_the_slope() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	CapsuleSource src;
+	src.extent = 0x8000;
+	view.set_root_motion_source(&src);
+	int calls = 0;
+	view.set_replica_ground_probe(
+			[&](const ns::ClientReplicaPipeline::ReplicaGroundColumn &q) -> int32_t {
+				const int which = calls++ % 4;
+				(void)q;
+				// ahead, behind, left, right: the fore-aft drop 0x3000, the lateral -0x800.
+				const int32_t base = 10 << 16;
+				return which == 0 ? base + 0x1800 : which == 1 ? base - 0x1800
+				     : which == 2 ? base - 0x400 : base + 0x400;
+			});
+	seed_row(view);
+	view.apply(0x0A, player_frame(as::kIdleProne, 0));
+	arm_row(view);
+	ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	if (es == nullptr) {
+		expect(false, "conform: the prone row decoded");
+		return;
+	}
+	constexpr int32_t kPitchSlope = 182000655;
+	constexpr int32_t kRollSlope = -122941607;
+	view.tick_remote_motion(0xFFFF); // tick 1: odd, the conform holds
+	expect(calls == 0 && es->rm_body_pitch == 0 && es->roll_bam == 0,
+			"conform: an odd tick probes nothing and holds");
+	view.tick_remote_motion(0xFFFF); // tick 2: the probes and the quarter step
+	const int32_t pitch1 = (kPitchSlope + 2) >> 2;
+	const int32_t roll1 = (kRollSlope + 2) >> 2;
+	expect(calls == 4 && es->rm_body_pitch == pitch1 && es->roll_bam == roll1,
+			"conform: an even tick probes four columns and chases a quarter step");
+	view.tick_remote_motion(0xFFFF); // tick 3: the eye reads tick 2's words, then the hold
+	{
+		int32_t want[3] = {};
+		opennova::world::player_body_capsule_eye(0x8000, es->lean_angle, es->heading_bam,
+				es->rm_body_heading, roll1, pitch1, want);
+		expect(es->eye_offset[0] == want[0] && es->eye_offset[1] == want[1] &&
+						es->eye_offset[2] == want[2] && es->rm_body_pitch == pitch1,
+				"conform: the eye turns by the body pitch and Roll the conform left");
+	}
+	view.tick_remote_motion(0xFFFF); // tick 4: the second quarter step
+	expect(calls == 8 && es->rm_body_pitch == pitch1 + ((kPitchSlope - pitch1 + 2) >> 2) &&
+					es->roll_bam == roll1 + ((kRollSlope - roll1 + 2) >> 2),
+			"conform: the next even tick closes another quarter of the gap");
+
+	// A standing, live body does not conform: both words decay a sixteenth a tick.
+	ns::ClientReplicaPipeline standing;
+	standing.set_item_class_resolver(&classify);
+	standing.set_remote_motion_mode(true);
+	standing.set_root_motion_source(&src);
+	int standing_calls = 0;
+	standing.set_replica_ground_probe(
+			[&](const ns::ClientReplicaPipeline::ReplicaGroundColumn &) -> int32_t {
+				++standing_calls;
+				return 0;
+			});
+	seed_row(standing);
+	standing.apply(0x0A, player_frame(as::kIdle, 0));
+	arm_row(standing);
+	ns::ClientEntityState *row = standing.state().find(kPlayerHandle);
+	if (row == nullptr) {
+		expect(false, "conform: the standing row decoded");
+		return;
+	}
+	row->rm_body_pitch = 0x1000000;
+	row->roll_bam = -0x1000000;
+	standing.tick_remote_motion(0xFFFF);
+	standing.tick_remote_motion(0xFFFF);
+	const int32_t p1 = 0x1000000 - ((0x1000000 + 8) >> 4);
+	const int32_t r1 = -0x1000000 - ((-0x1000000 + 8) >> 4);
+	expect(standing_calls == 0 && row->rm_body_pitch == p1 - ((p1 + 8) >> 4) &&
+					row->roll_bam == r1 - ((r1 + 8) >> 4),
+			"conform: a standing body decays both words every tick and probes nothing");
+}
+
 int main() {
+	test_remote_body_conform_chases_the_slope();
 	test_tapped_roll_locks_and_queues();
 	test_remote_eye_restamps_from_the_capsule();
 	test_pending_promotes_at_clip_end();
