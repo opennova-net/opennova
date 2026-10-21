@@ -2404,6 +2404,10 @@ void test_frame_rules() {
 				"frame_flags2", "", "pass");
 		expect_row(judge_case(phased(1, 0, 6), phased(2, 3, 6), phased(3, 9, 6)), 'S',
 				"frame_flags2", "", "skip");
+		// A full RR window against a subject cut short: the subject is unexercised,
+		// which fails while the A/A compared.
+		expect_row(judge_case(phased(1, 0, kAll), phased(2, 0, kAll), phased(3, 9, 6)), 'S',
+				"frame_flags2", "", "fail");
 	}
 	{
 		// The mounted-ammo record rides the route nibble 8's frame alone
@@ -2433,6 +2437,9 @@ void test_frame_rules() {
 				'S', "frame_mount", "", "fail", "FRAME_PASSENGER_PHASE_MISMATCH");
 		expect_row(judge_case(mounted(1, true, 6), mounted(2, true, 6), mounted(3, false, 6)),
 				'S', "frame_mount", "", "skip");
+		expect_row(judge_case(mounted(1, true, kAll), mounted(2, true, kAll),
+						   mounted(3, true, 6)),
+				'S', "frame_mount", "", "fail");
 	}
 	{
 		// The fps and CPU bytes are measurements; a CPU byte never written is not.

@@ -518,7 +518,10 @@ inline constexpr Normalization kNormalizations[] = {
 			"flags2 is the per-slot send counter (++ before every 0x0A, 1 at the first: "
 			"Server_SendEntityStateToPlayer @0x517BE8): which 8-bit values fall in the "
 			"steady window depends on how many frames preceded it, so the route nibble and "
-			"the modal step compare" },
+			"the modal step compare; the route nibbles a window holds are a phase slice until "
+			"it spans one full cycle, so their set compares only with 16 steady frames or "
+			"more on both sides (x5's kick, five or six frames: RR {6..10} against RR-aa "
+			"{8..13}, 0.625 apart)" },
 	{ "frame.mount_phase", MaskKind::Field, 'S', 0x00A, "mount record", 0,
 			"the mounted-ammo record rides only a 0x0A whose flags2 low nibble is 8 "
 			"(NetPacket_WritePlayerState @0x4FF6B0, the test @0x4FFD94..0x4FFD9A), one frame "
