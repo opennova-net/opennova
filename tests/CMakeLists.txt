@@ -5044,6 +5044,11 @@ add_executable(npruntime_own_client_exit_test npruntime/own_client_exit_test.cpp
 target_link_libraries(npruntime_own_client_exit_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_own_client_exit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_own_client_exit COMMAND npruntime_own_client_exit_test)
+# D-NET-256 (Q7-9 (a)): the send-interval legs and the receive reap measure the host's clock,
+# so a long load fires a due leg and the reap counts the load's time.
+add_executable(npruntime_host_clock_legs_test npruntime/host_clock_legs_test.cpp)
+target_link_libraries(npruntime_host_clock_legs_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_host_clock_legs COMMAND npruntime_host_clock_legs_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

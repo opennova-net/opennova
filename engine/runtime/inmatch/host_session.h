@@ -12,6 +12,7 @@
 // poll-pump test) is a property of the embedder, not this loop.
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -73,11 +74,26 @@ struct HostOwner {
 	std::map<PeerAddr, std::vector<std::vector<uint8_t>>, PeerAddrLess>
 			pending_session_datagrams;
 	uint32_t now_tick = 0;
+	// The host's millisecond clock, GetTickCount's: the send-interval legs and the receive reap
+	// measure it, so a long mission load, which runs no tick, still ages them (D-NET-256).
+	// From HostConfig::clock_ms at the session start; empty is the tick clock (now_tick x 16 ms,
+	// the deterministic stand-in a test harness runs on). host_clock_ms reads it.
+	std::function<uint32_t()> clock_ms;
+	// The clock at the last receive reap walk, whose elapsed time the walk adds to every
+	// connection's silence (armed at the session start; the tick clock adds one tick a walk).
+	uint32_t reap_clock_ms = 0;
 	// false (dedicated/headless): HostOnly registers no local-player connection; an embedder-supplied
 	// unused channel may be defensively drained. true (serve-and-play): HostClient registers the
 	// loopback and the owner folds it into ClientState, so the pump must preserve it.
 	bool serve_and_play = false;
 };
+
+// The process's monotonic millisecond clock, never 0 (GetTickCount's stand-in): the
+// HostConfig::clock_ms an embedder supplies.
+uint32_t host_monotonic_milliseconds();
+
+// The owner's clock now: its supplied clock, else the tick clock (now_tick x 16 ms).
+uint32_t host_clock_ms(const HostOwner &owner);
 
 // Attach a UdpSessionTransport to `peer`'s connection (idempotent) and, ONCE the spawn pipeline has
 // bound owned_entity, latch the peer announced exactly once. The joiner's NAMED dcb-bearing S2C 0x0C
@@ -155,6 +171,11 @@ struct HostConfig {
 	uint32_t host_key = 0;
 	uint32_t host_start_tick = 0;
 	uint32_t session_seed_id = 0;
+	// The process's monotonic millisecond clock (GetTickCount's), which every embedder supplies
+	// (host_monotonic_milliseconds) and a test injects; empty runs the owner on its tick clock.
+	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 and CNapiNPConnection_PumpStateMachine
+	//  @0x6292E0 read GetTickCount]
+	std::function<uint32_t()> clock_ms;
 	bool serve_and_play = false; // true: HostClient + local player; false: HostOnly, no local player
 	// The host's game directory — where CNapiNetwork_Init looks for the loose
 	// `_NSTMOUT.TXT` reap/pool override (session_timeout_config.h). Empty = no

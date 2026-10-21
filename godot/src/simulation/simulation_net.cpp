@@ -114,6 +114,9 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 	// banned.txt and banlist.txt by bare name in the same working directory, as retail opens
 	// them; every host's round init loads them (the witness: engine server_ban_lists.h).
 	if (net_.log_devices != nullptr) cfg.ban_directory = net_.log_devices->files().dir();
+	// The process clock the send-interval legs and the receive reap measure (GetTickCount's):
+	// the mission load runs no tick, its send pumps still fire a due leg (D-NET-256).
+	cfg.clock_ms = inmatch::host_monotonic_milliseconds;
 	// The process's 0x4C report count runs on across sessions (ClientProcessState).
 	cfg.client_process = net_.client_process;
 	// The loose _NSTMOUT.TXT reap/pool override under the install root

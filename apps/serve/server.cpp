@@ -581,6 +581,9 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// banned.txt and banlist.txt by bare name in the working directory, as retail opens them;
 	// the session's round init loads both (server_ban_lists.h).
 	request.host_cfg.ban_directory = std::string();
+	// The process clock the send-interval legs and the receive reap measure (GetTickCount's):
+	// the mission load runs no tick, its send pumps still fire a due leg (D-NET-256).
+	request.host_cfg.clock_ms = inmatch::host_monotonic_milliseconds;
 	request.session_score_ini = true;
 	request.next_mission = next_mission;
 	mission::KernelBootOptions &options = request.boot_options;

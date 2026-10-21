@@ -36,15 +36,22 @@
 
 namespace opennova::inmatch {
 
-namespace {
-
-uint32_t monotonic_milliseconds() {
+// See host_session.h.
+uint32_t host_monotonic_milliseconds() {
 	const uint64_t value = static_cast<uint64_t>(
 			std::chrono::duration_cast<std::chrono::milliseconds>(
 					std::chrono::steady_clock::now().time_since_epoch()).count());
 	const uint32_t low = static_cast<uint32_t>(value);
 	return low != 0 ? low : 1u;
 }
+
+// See host_session.h.
+uint32_t host_clock_ms(const HostOwner &owner) {
+	return owner.clock_ms ? owner.clock_ms()
+	                      : static_cast<uint32_t>(uint64_t{owner.now_tick} * uint64_t(io::kTickMs));
+}
+
+namespace {
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
@@ -55,7 +62,7 @@ SessionStartup make_session_startup(const HostConfig &cfg) {
 	//  protocol's manager @0x62b5f3..0x62b5f5, stored @0x62b5fc]
 	startup.host_key = cfg.host_key != 0 ? cfg.host_key : manager_session_key();
 	startup.host_start_tick =
-			cfg.host_start_tick != 0 ? cfg.host_start_tick : monotonic_milliseconds();
+			cfg.host_start_tick != 0 ? cfg.host_start_tick : host_monotonic_milliseconds();
 	if (cfg.session_seed_id != 0) {
 		startup.session_seed_id = cfg.session_seed_id;
 	} else {
@@ -134,7 +141,7 @@ std::vector<ProtocolMessage> send_session_batches(
 			return rest;
 		}
 		sock.send_to(connection.peer, datagram.data(), datagram.size());
-		connection.last_session_send_tick = owner.now_tick;
+		connection.last_session_send_ms = host_clock_ms(owner);
 	}
 	// The build stops once its packet budget went out; the rest waits for the next build.
 	// [orig: BuildOutgoingPackets @0x62860b..0x628619]
@@ -389,8 +396,19 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
 		lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
 		// (2) tick_connections: drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
+		// The reap adds the clock's time since its last walk, a long load's included: retail's
+		// reap compares GetTickCount with the last in-order receive's stamp.
+		// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 state 1 - elapsed = now - conn+0x5E8
+		//  @0x62935c, `elapsed > timeout_ms` @0x629362] (D-NET-256)
+		int reap_elapsed_ms = static_cast<int>(io::kTickMs);
+		if (owner.clock_ms) {
+			const uint32_t clock_now = owner.clock_ms();
+			const uint32_t since = clock_now - owner.reap_clock_ms;
+			reap_elapsed_ms = since < 0x7FFFFFFFu ? static_cast<int>(since) : 0x7FFFFFFF;
+			owner.reap_clock_ms = clock_now;
+		}
 		for (TickOut &t : tick_connections(
-				owner.ctx, /*elapsed_ms=*/16, now,
+				owner.ctx, reap_elapsed_ms, now,
 				/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false)) {
 			for (const std::vector<uint8_t> &dg : t.outbound) {
 				send_or_stage_established_datagram(owner, sock, t.peer, dg);
@@ -479,7 +497,7 @@ static bool build_s2c_queue(HostOwner &owner, opennova::IDatagramSocket &sock,
 		staged.erase(staged.begin(), staged.begin() + static_cast<std::ptrdiff_t>(sent));
 		if (staged.empty()) owner.pending_session_datagrams.erase(pending_datagrams);
 		budget -= sent;
-		c.last_session_send_tick = now;
+		c.last_session_send_ms = host_clock_ms(owner);
 		released = true;
 	}
 	std::vector<ProtocolMessage> messages;
@@ -502,7 +520,7 @@ static void send_header_only(HostOwner &owner, opennova::IDatagramSocket &sock,
 	std::vector<uint8_t> packet;
 	if (frame_in_match_s2c_batch(owner.ctx, c.peer, {}, packet)) {
 		sock.send_to(c.peer, packet.data(), packet.size());
-		c.last_session_send_tick = now;
+		c.last_session_send_ms = host_clock_ms(owner);
 	}
 }
 
@@ -517,7 +535,9 @@ static void send_header_only(HostOwner &owner, opennova::IDatagramSocket &sock,
 //   reap requires (D-NET-173, D-NET-236).
 // A due leg forces has_pending_out and builds: every queued record leaves (a
 // closed window's queue included), or one header-only packet; the countdown is
-// not touched. The leg clock arms on the first tick it is read (0 = unarmed).
+// not touched. The leg clock arms on the first tick it is read (0 = unarmed). Both legs read the
+// owner's millisecond clock (GetTickCount's), so a mission load, which runs its send pumps and no
+// tick, fires a leg its interval has elapsed in (D-NET-256).
 // The JO template's intervals are 10000 / 30000 ms (CNapiNetwork_Init
 // @0x4caac5/@0x4cab98 and @0x4caab5/@0x4cab88); 1000 ms is the NOVAWORLDUDP
 // service template's active value @0x4d3e60, not the game session's.
@@ -531,12 +551,12 @@ static void send_header_only(HostOwner &owner, opennova::IDatagramSocket &sock,
 static bool pump_send_interval_legs(HostOwner &owner, opennova::IDatagramSocket &sock,
 		NapiNPConnection &c, uint32_t now) {
 	if (c.server_scrk.empty()) return false;
-	if (c.last_session_send_tick == 0) {
-		c.last_session_send_tick = now;
+	const uint32_t now_ms = host_clock_ms(owner);
+	if (c.last_session_send_ms == 0) {
+		c.last_session_send_ms = now_ms;
 		return false;
 	}
-	const uint64_t since_ms =
-			static_cast<uint64_t>(now - c.last_session_send_tick) * uint64_t(io::kTickMs);
+	const uint64_t since_ms = static_cast<uint32_t>(now_ms - c.last_session_send_ms);
 	const int32_t active_ms = c.timeouts.active_send_interval_ms;
 	const int32_t empty_ms = c.timeouts.idle_send_interval_ms;
 	const bool retained = c.seq.retained_outbound_message_count > 0;
@@ -549,7 +569,7 @@ static bool pump_send_interval_legs(HostOwner &owner, opennova::IDatagramSocket 
 	const bool released = build_s2c_queue(owner, sock, c, now);
 	if (!released && c.seq.next_outbound_seq == sequence_before)
 		send_header_only(owner, sock, c, now);
-	c.last_session_send_tick = now;
+	c.last_session_send_ms = now_ms;
 	return true;
 }
 
@@ -730,6 +750,8 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 
 CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.now_tick = 0;
+	owner.clock_ms = cfg.clock_ms;
+	owner.reap_clock_ms = host_clock_ms(owner);
 	// The process's log devices and the socket address, ahead of the session
 	// create whose server start logs HOST STARTED and whose round init clears
 	// the punt table.

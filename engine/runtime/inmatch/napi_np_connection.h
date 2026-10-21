@@ -549,12 +549,12 @@ struct NapiNPConnection {
 	// not armed until NapiNPServer_UpdateHoldoffTicks dictates CS field 3 and
 	// resets the counter. Pre-dictation hello/auth/admission turns stay open.
 	bool s2c_send_holdoff_dictated = false;
-	// Host tick of this connection's most recent built session packet — the
-	// per-connection last-build clock (+0x640) both send-interval legs read.
-	// Zero = not yet armed; the first per-tick read arms it without sending.
+	// The host clock (host_clock_ms, GetTickCount's) at this connection's most recent built
+	// session packet: the per-connection last-build stamp (+0x640) both send-interval legs
+	// read. Zero = not yet armed; the first per-tick read arms it without sending.
 	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 reads +0x640;
 	//  BuildOutgoingPackets stamps it @0x628605]
-	uint32_t last_session_send_tick = 0;
+	uint32_t last_session_send_ms = 0;
 	// Retail's has_pending_out (+0x650): an admitted C2S packet carried message records, so
 	// the next open S2C boundary builds a packet (header-only if nothing else) to ACK it;
 	// cleared by any packet built at a boundary (D-NET-233).
