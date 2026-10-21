@@ -116,11 +116,13 @@ namespace {
 // The player's body binds the row its type word names (D-NET-348: 0x14B9 is
 // "Player #1, Multiplayer", 105305; the presentation's 105310 stand-in is gone),
 // so the player's row is that one: its traits sweep now finds a def where it
-// found none and its table the same soldier rows, which moves the chain from
-// 0xa7c762a945b847fd. The new value is this deterministic stream's own (a
-// self-consistency pin, not a retail value), re-pinned from CI's printed
-// `digest synthetic 240` line.
-constexpr uint64_t kSyntheticDigest = 0xa7c762a945b847fdULL;
+// found none and its table the same soldier rows. Together with the mission
+// start running at the zeroed frame tick (D-NET-515, f69c11f61: the start's end
+// stores the first frame's 1), this moves the chain from 0xa7c762a945b847fd to
+// 0xc5d0b62b98fd422f, the value CI printed on push 137 (run 39686345393). It is
+// this deterministic stream's own value (a self-consistency pin, not a retail
+// value).
+constexpr uint64_t kSyntheticDigest = 0xc5d0b62b98fd422fULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
