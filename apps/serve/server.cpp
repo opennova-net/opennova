@@ -520,13 +520,17 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
 	config.session_channel = novaworld_ ? inmatch::GameSessionChannel::NovaWorld
 										: inmatch::GameSessionChannel::Lan;
-	// The local profile's name (g_LocalProfileName), which the mission start copies onto the
-	// row's body: with no player.sav the boot's seed, named after the process's account, as
-	// the row's side bytes are a fresh record's (D-NET-352) [orig: PlayerProfile_LoadAllFromDisk
-	//  @0x54F4D0 - GetUserNameA @0x54F535; Game_ApplySessionSettingsToGlobals
-	//  @0x551680..0x551695; Player_InitPlayer @0x4E184F..0x4E186A].
-	config.player_name = serve::serve_profile_name(config_.cfg().player_index,
-			serve::process_account_name());
+	// The profile the row runs under, the boot's load over the working directory's player.sav
+	// and weapon.sav (the boot's seed where they are missing, record 0 named after the
+	// process's account): its name is the local profile's (g_LocalProfileName), which the
+	// mission start copies onto the row's body, and its weapon record's sides the session
+	// create's profile init gives the row (D-NET-352) [orig: PlayerProfile_LoadAllFromDisk
+	//  @0x54F4D0 - GetUserNameA @0x54F535, File_CheckExists @0x54F586 / @0x54F6C7;
+	//  Game_ApplySessionSettingsToGlobals @0x551680..0x551695; Player_InitPlayer
+	//  @0x4E184F..0x4E186A; CNapiGameSession_CreateSession @0x4C97C0 - @0x4C9CCE].
+	const serve::ServeProfile row_profile = serve::read_serve_profile(config_.cfg().player_index,
+			serve::process_account_name(), config.expansion, characters_);
+	config.player_name = row_profile.name;
 
 	// Serve Only: the dedicated role over the bound socket's game view, no
 	// player of the host's own, the session coming up inside the boot. The
@@ -566,6 +570,9 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.host_cfg.game_root = options_.resource_dir;
 	// The mounted Avatars.def's combos the player add validates against (D-NET-137).
 	request.host_cfg.characters = characters_;
+	// The row's sides from the profile's weapon record (a fresh record's without weapon.sav,
+	// host_boot's default).
+	if (row_profile.character_vars) request.host_cfg.local_character_vars = row_profile.character_vars;
 	// The log devices and the socket's address (bound on every interface) for
 	// the session's logs (inmatch/server_log_devices.h; inmatch/server_console.h).
 	request.host_cfg.logs = log_devices_.logs();
