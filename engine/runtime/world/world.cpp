@@ -266,12 +266,15 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // non-authority skips that visit) is not carried: its one non-zero writer is
     // the C2S 0x18 weapon drop's template word, which no stock client sends and
     // an opennova host leaves unhandled (D-PWR-5); no other code stores the word
-    // (the spawns zero their template or row, a joiner's S2C 0x22 create zeroes
-    // its row, a clone copies a row whose word is 0), so it is 0 on every row.
+    // (the spawns zero their template or row, a joiner's load records and S2C
+    // 0x22 create zero theirs, a clone copies a row whose word is 0), so it is 0
+    // on every row.
     // [orig: Entity_UpdatePool1Slot @0x4B8DEE..0x4B8E1A (Server_RemoveEntityAndNotify
     //  @0x4B8E11); NapiNPServerMsg_HandleWeaponSpawn @0x51A020 (the template word
     //  @0x51A429, the clone @0x51A487); WeaponOverlay_ResetAuthorityFlagByNetId
-    //  @0x507F20 (@0x507F62); NetPacket_HandleEntityCreate @0x42EC90 (@0x42ED16)]
+    //  @0x507F20 (@0x507F62); NetPacket_HandleEntityCreate @0x42EC90 (@0x42ED16);
+    //  NapiNPClientMsg_0x00D @0x432C40 (@0x432D23); Entity_SpawnFromBMSRecord
+    //  @0x40E9F0 (@0x40EA27)]
     const EntityHandle handle = row.handle;
     const uint64_t lifetime = row.registry_spawn_id;
     // Every leg may destroy the row (and a spawn may reuse its slot), so each
