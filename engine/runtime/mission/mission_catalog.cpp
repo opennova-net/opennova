@@ -42,6 +42,18 @@ std::string bin_sibling_name(const std::string &file) {
 	return (dot == std::string::npos ? file : file.substr(0, dot)) + ".bin";
 }
 
+// An archive entry's name as the mission list copies it: PFF_Open's sort uppercases every
+// entry name of the archive's in-memory directory, so a stored "TDH_G11A.bms" lists as
+// "TDH_G11A.BMS" (and reaches g_MapFileName and the wire so); a loose file keeps the case its
+// directory scan gave it. ASCII letters, as the VFS keys the archives' names.
+// [orig: PFF_Open @0x7682E0 -> PFF_SortEntries @0x768280 (the call @0x7683DD; _strupr over
+//  each entry's name @0x7682A1); Mission_BuildMapListFromPFF @0x562910 (the strncpy of the
+//  table's name @0x562AEA); MissionList_ScanAndBuildFromFiles @0x563170 (the loose name's
+//  strncpy @0x563322)]
+std::string archive_listed_name(const std::string &stored) {
+	return strutil::to_upper(stored);
+}
+
 // [orig: File_HasExtension @ 0x53c640 — stricmp from the FIRST '.' on, so "a.b.bms"
 //  is not a ".bms"; a name with no '.' compares the empty tail]
 bool has_extension(const std::string &name, const char *extension) {
@@ -147,7 +159,7 @@ void walk_pair(const ResourceIndex &index, int mission_slot, int text_slot,
 		if (!lists_as_mission(entry.name)) continue;
 		if (!has_extension(entry.name, ".bms")) continue; // a map project (D-MNU-25)
 		Row row;
-		row.file = entry.name;
+		row.file = archive_listed_name(entry.name);
 		row.loose = false;
 		std::vector<uint8_t> bytes;
 		bms::Header header{};
@@ -208,7 +220,7 @@ std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArc
 		if (!lists_as_mission(name)) continue;
 		if (!has_extension(name, ".bms")) continue; // a map project (D-MNU-25)
 		Row row;
-		row.file = name;
+		row.file = archive_listed_name(name);
 		row.loose = false;
 		std::vector<uint8_t> bytes(entry.size ? entry.size : 1);
 		const bool header_ok = pff::pff_extract(&missions, &entry, bytes.data(), bytes.size()) == 0;

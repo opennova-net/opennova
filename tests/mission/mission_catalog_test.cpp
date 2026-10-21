@@ -22,6 +22,11 @@
 #include <formats/mission/bms.h>
 #include <formats/pff/pff.h>
 #include <runtime/mission/mission_catalog.h>
+#include <base/io/strutil.h>
+#include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/mission_rotation.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_message_dispatch.h> // build_tag7b_session_summary, host_session_vars
 #include <base/resource_index/resource_index.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -215,9 +220,13 @@ int main() {
 	TEST_EXPECT(rows.size() == 10u);
 
 	// Retail order: case-insensitive by FILENAME, no dedupe
-	// [orig: Mission_CompareMapNames @ 0x5628e0; the qsort @ 0x5635f0].
-	const char *order[] = {"alpha.bms", "bad.bms", "exp.bms", "kilo.bms", "lonely.bms",
-		"mike.bms", "oscar.bms", "pack.bms", "pack.bms", "zulu.bms"};
+	// [orig: Mission_CompareMapNames @ 0x5628e0; the qsort @ 0x5635f0]. An archived row's
+	// name is the archive directory's, which PFF_Open's sort uppercased; a loose row keeps
+	// its file's case [orig: PFF_SortEntries @0x768280 (_strupr @0x7682A1);
+	// Mission_BuildMapListFromPFF @0x562910 (the strncpy @0x562AEA);
+	// MissionList_ScanAndBuildFromFiles @0x563170 (the strncpy @0x563322)].
+	const char *order[] = {"alpha.bms", "BAD.BMS", "EXP.BMS", "kilo.bms", "LONELY.BMS",
+		"mike.bms", "oscar.bms", "PACK.BMS", "PACK.BMS", "zulu.bms"};
 	for (size_t i = 0; i < rows.size() && i < 10; ++i) TEST_EXPECT(rows[i].file == order[i]);
 
 	// The loose leg lists the root once for every mission's .bin; each finds its own.
@@ -260,7 +269,7 @@ int main() {
 	const catalog::Row *base_pack = nullptr;
 	const catalog::Row *exp_pack = nullptr;
 	for (const catalog::Row &row : rows) {
-		if (row.file != "pack.bms") continue;
+		if (row.file != "PACK.BMS") continue;
 		TEST_EXPECT(!row.loose);
 		(row.title == "Packed Op" ? base_pack : exp_pack) = &row;
 	}
@@ -272,30 +281,30 @@ int main() {
 	// holding the name: the expansion's [orig: Mission_LoadBMSFromPFF @ 0x40d420].
 	TEST_EXPECT(exp_pack != nullptr && exp_pack->title == "Exp Pack Header" &&
 			exp_pack->briefing.empty());
-	TEST_EXPECT(count_rows(rows, "pack.bms") == 2);
+	TEST_EXPECT(count_rows(rows, "PACK.BMS") == 2);
 
 	// A .bin outside its pair's text archive does not title the row.
-	const catalog::Row *lonely = find_row(rows, "lonely.bms", false);
+	const catalog::Row *lonely = find_row(rows, "LONELY.BMS", false);
 	TEST_EXPECT(lonely != nullptr && lonely->title == "Lonely Header Name" &&
 			lonely->briefing.empty());
 
 	// The expansion pair titles from <n>L.pff.
-	const catalog::Row *exp_row = find_row(rows, "exp.bms", false);
+	const catalog::Row *exp_row = find_row(rows, "EXP.BMS", false);
 	TEST_EXPECT(exp_row != nullptr && exp_row->title == "Expansion Op" &&
 			exp_row->briefing == "From the expansion." &&
 			exp_row->game_mode == static_cast<uint32_t>(AttribFlags::Coop));
 
 	// A header that fails the magic gate reads as zero: no name, no mode.
-	const catalog::Row *bad = find_row(rows, "bad.bms", false);
+	const catalog::Row *bad = find_row(rows, "BAD.BMS", false);
 	TEST_EXPECT(bad != nullptr && bad->title.empty() && bad->game_mode == 0u);
-	TEST_EXPECT(bad != nullptr && catalog::display_text(*bad) == "bad.bms");
+	TEST_EXPECT(bad != nullptr && catalog::display_text(*bad) == "BAD.BMS");
 
 	// Never listed: resource.pff's missions, a .bms in <n>L.pff, a map project, a
 	// name whose first '.' is not the extension's.
-	TEST_EXPECT(count_rows(rows, "res.bms") == 0);
-	TEST_EXPECT(count_rows(rows, "inl.bms") == 0);
-	TEST_EXPECT(count_rows(rows, "asp_g7.npz") == 0);
-	TEST_EXPECT(count_rows(rows, "a.b.bms") == 0);
+	TEST_EXPECT(count_rows(rows, "RES.BMS") == 0);
+	TEST_EXPECT(count_rows(rows, "INL.BMS") == 0);
+	TEST_EXPECT(count_rows(rows, "ASP_G7.NPZ") == 0);
+	TEST_EXPECT(count_rows(rows, "A.B.BMS") == 0);
 
 	// A loose-only mount has no archive slots: its loose files alone.
 	opennova::ResourceIndex loose_index;
@@ -393,18 +402,68 @@ int main() {
 		std::vector<catalog::Row> pair = catalog::archive_rows(missions, &texts, nullptr);
 		TEST_EXPECT(pair.size() == 2u);
 		catalog::sort_rows(pair);
-		TEST_EXPECT(pair.size() == 2u && pair[0].file == "exp.bms" && pair[1].file == "pack.bms");
+		TEST_EXPECT(pair.size() == 2u && pair[0].file == "EXP.BMS" && pair[1].file == "PACK.BMS");
 		TEST_EXPECT(pair.size() == 2u && pair[0].title == "Expansion Op" &&
 				pair[0].briefing == "From the expansion." && !pair[0].loose &&
 				pair[0].game_mode == static_cast<uint32_t>(AttribFlags::Coop));
 		TEST_EXPECT(pair.size() == 2u && pair[1].title == "Exp Pack Header" && pair[1].briefing.empty());
-		TEST_EXPECT(count_rows(pair, "inl.bms") == 0);
+		TEST_EXPECT(count_rows(pair, "INL.BMS") == 0);
 		const std::vector<catalog::Row> untitled = catalog::archive_rows(missions, nullptr, nullptr);
 		TEST_EXPECT(untitled.size() == 2u);
 		for (const catalog::Row &row : untitled)
-			TEST_EXPECT(row.title == (row.file == "exp.bms" ? "Exp Header Name" : "Exp Pack Header"));
+			TEST_EXPECT(row.title == (row.file == "EXP.BMS" ? "Exp Header Name" : "Exp Pack Header"));
 		opennova::pff::pff_close(&missions);
 		opennova::pff::pff_close(&texts);
+	}
+
+	// An archived mission stored in lower case lists upper-cased, so a rotation naming it in
+	// lower case (matched case-insensitively) carries the listed name into g_MapFileName at the
+	// round end, which the S2C 0x2C, the 0x60 stream's MISSIONFILENAME and the 0x7B then send:
+	// "TDH_G11A.BMS" where the archive stores "TDH_G11A.bms".
+	// [orig: PFF_SortEntries @0x768280 (_strupr @0x7682A1); Mission_BuildMapListFromPFF
+	//  @0x562910 (@0x562AEA); MissionList_GetCurrentEntry @0x4FC540 (the name's copy
+	//  @0x4FC620..0x4FC62C); PostMenu_RouteMissionExit @0x568460 (into g_MapFileName
+	//  @0x56861A); NetPacket_WriteServerNameAndMapFile @0x505780 (@0x5057E7);
+	//  Game_SerializeMissionInfoToDataStream @0x523620 (g_MapFileName @0x523992);
+	//  NapiNPMsg_0x7B_BuildPayload @0x507740 (@0x50788C)]
+	{
+		const fs::path tdh = root / "tdh";
+		fs::create_directories(tdh);
+		const uint32_t tdm = static_cast<uint32_t>(AttribFlags::TeamDeathmatch);
+		write_pff(tdh / "localres.pff", {
+				{"tdh_i3a.bms", bms_blob("TDH I3A", tdm)},
+				{"TDH_G11A.bms", bms_blob("TDH G11A", tdm)},
+		});
+		opennova::ResourceIndex tdh_index;
+		TEST_EXPECT(tdh_index.scan(tdh.string(), "", opennova::VfsMountMode::PackedWithLooseOverride,
+				opennova::VfsArchiveDiscovery::RetailTable));
+		const std::vector<catalog::Row> listed = catalog::build(tdh_index, nullptr);
+		TEST_EXPECT(listed.size() == 2u && listed[0].file == "TDH_G11A.BMS" &&
+				listed[1].file == "TDH_I3A.BMS" && listed[0].title == "TDH G11A");
+		// The host's rotation names TDH_I3A first, then TDH_G11A, in lower case.
+		std::vector<int32_t> table;
+		for (const char *name : {"tdh_i3a.bms", "tdh_g11a.bms"})
+			for (size_t i = 0; i < listed.size(); ++i)
+				if (opennova::strutil::iequals(listed[i].file, name)) {
+					table.push_back(static_cast<int32_t>(i));
+					break;
+				}
+		opennova::inmatch::HostRotation rotation;
+		opennova::inmatch::seed_rotation_from_host_screen(
+				rotation, listed, table, std::vector<int32_t>(listed.size(), 0));
+		TEST_EXPECT(rotation.list.map_file == "TDH_I3A.BMS");
+		TEST_EXPECT(rotation.list.advance(listed, /*replay_enabled=*/false) &&
+				rotation.list.map_file == "TDH_G11A.BMS");
+		opennova::inmatch::GameConfig cfg;
+		cfg.mission_file = rotation.list.map_file;
+		cfg.game_type = rotation.list.map_game_type;
+		const opennova::inmatch::NapiNPConnection conn;
+		const std::vector<uint8_t> summary =
+				opennova::inmatch::build_tag7b_session_summary(cfg, "", "", conn);
+		TEST_EXPECT(std::string(summary.begin(), summary.end()).find(std::string("TDH_G11A.BMS") + '\0') !=
+				std::string::npos);
+		TEST_EXPECT(opennova::inmatch::host_session_vars(cfg, "", "").mission_file == "TDH_G11A.BMS");
+		tdh_index.clear();
 	}
 
 	// Release the mounted archive handles before deleting the fixture tree
