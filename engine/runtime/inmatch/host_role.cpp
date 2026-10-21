@@ -324,7 +324,9 @@ void HostRole::bring_up(const HostBringup &bringup) {
 //  rebuild @0x5247EB, the mission-data block @0x5248A7, the per-slot reset
 //  @0x5248BC, the round-over clear @0x524A1F, then the server pumps
 //  (Server_PumpNetworkTransport @0x4FD960) @0x524A63 .. @0x525AC5 ahead of the
-//  EventTrigger_UpdateAllWithFlag2 call @0x525B86]
+//  EventTrigger_UpdateAllWithFlag2 call @0x525B86; the two receives ahead of the
+//  block, the authority's client-protocol receive @0x524813 and the gate
+//  session's update @0x52481D, run no server handler]
 void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;

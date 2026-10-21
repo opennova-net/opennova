@@ -232,7 +232,11 @@ void continue_host_session(HostOwner &owner, const HostConfig &cfg);
 //  CNapiNetwork_PumpServerProtocolRecv @0x4FD981, CNapiNetwork_PumpServerProtocolSend
 //  @0x4FD98B; a session host's Game_StartMission calls it @0x5245E8, @0x524A63,
 //  @0x524F76 / @0x524F8C (the .bms arm), @0x525256, @0x5253EA, @0x52589D, @0x5258E5,
-//  @0x5259EC (not a dedicated host's), @0x525A5C and @0x525AC5]
+//  @0x5259EC (not a dedicated host's), @0x525A5C and @0x525AC5; the single
+//  player's restart, Game_StartMission(1) out of a session, calls it @0x524B36 /
+//  @0x524D73, where its session test returns. The load's gate-session updates
+//  (CNapiGameSession_ProcessPeriodicUpdate on g_GateManager, ecx @0x5262F3, the
+//  call @0x5262F8) only queue what they receive: no game handler runs in them]
 void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock);
 
 } // namespace opennova::inmatch
