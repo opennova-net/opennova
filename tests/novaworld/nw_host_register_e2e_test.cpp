@@ -619,8 +619,10 @@ int main() {
 		for (int i = 0; i < 50 && !hosted_row(rid_before); ++i) std::this_thread::sleep_for(20ms);
 		expect(hosting && rid_before != 0 && !gsid.empty(), "reconnect: the host row is listed");
 
-		// The session's own reap: its 0x46 burst drops the listener's connection.
-		recon_clock = 240001;
+		// The session's own reap: its 0x46 burst drops the listener's connection. The drive's
+		// rounds moved the clock and its last receive with it, so the silence is counted from
+		// there.
+		recon_clock += 240001;
 		recon.set_clock_ms(recon_clock);
 		std::vector<std::vector<uint8_t>> burst;
 		recon.pump(burst);
@@ -636,7 +638,8 @@ int main() {
 
 		// The re-probe: past the 1000 ms first delay the window opens and the 0x41 goes out.
 		bool probed = false;
-		for (uint32_t t = 240002; t < 250000 && !probed; ++t) {
+		const uint32_t reaped_at = recon_clock;
+		for (uint32_t t = reaped_at + 1; t < reaped_at + 10000 && !probed; ++t) {
 			recon_clock = t;
 			recon.set_clock_ms(t);
 			std::vector<std::vector<uint8_t>> pumped;
@@ -883,10 +886,9 @@ int main() {
 		const bool got_replacement_hello = receive_retry(inbound);
 		expect(got_replacement_hello, "replacement auth receives ServerHello");
 		if (got_replacement_hello) {
-			expect(replacement.handle_datagram(
-					       inbound.data(), inbound.size(), out) &&
+			expect(take_hello_at_zero(replacement, inbound.data(), inbound.size(), out) &&
 			               out.size() == 1,
-			       "replacement ServerHello produces distinct ClientAuth");
+			       "replacement ServerHello produces distinct ClientAuth (at the next pump)");
 		}
 		if (out.size() == 1) send_retry(out.front());
 		std::vector<uint8_t> replacement_server_auth;
@@ -954,9 +956,9 @@ int main() {
 		const bool got_restarted_hello = receive_retry(inbound);
 		expect(got_restarted_hello, "restarted same-CI client receives ServerHello");
 		if (got_restarted_hello) {
-			expect(restarted.handle_datagram(inbound.data(), inbound.size(), out) &&
+			expect(take_hello_at_zero(restarted, inbound.data(), inbound.size(), out) &&
 			               out.size() == 1,
-			       "restarted ServerHello produces a fresh-CK ClientAuth");
+			       "restarted ServerHello produces a fresh-CK ClientAuth (at the next pump)");
 		}
 		if (out.size() == 1) send_retry(out.front());
 		std::vector<uint8_t> restarted_server_auth;

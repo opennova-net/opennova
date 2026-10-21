@@ -822,13 +822,13 @@ void test_client_correlates_handshake_echoes() {
 	       "lobby ServerHello for another CI is ignored");
 
 	ServerHello valid_hello = build_server_hello(hello, 0x7F000001u, 5000);
-	const std::vector<uint8_t> valid_hello_datagram = server_encode_outbound(
-			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(valid_hello));
+	const std::vector<uint8_t> valid_hello_datagram =
+			server_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(valid_hello));
 	out.clear();
-	expect(client.handle_datagram(
-			       valid_hello_datagram.data(), valid_hello_datagram.size(), out) &&
-	               out.size() == 1 && client.state() == ClientSession::State::Auth,
-	       "matching lobby ServerHello advances to Auth");
+	if (!expect(take_hello(client, valid_hello_datagram, out) && out.size() == 1 &&
+						client.state() == ClientSession::State::Auth,
+				"matching lobby ServerHello advances to Auth (its 0x42 at the next pump)"))
+		return;
 	ClientAuth auth;
 	expect(server_decode_inbound(out[0], opcode, body) &&
 	               parse_client_auth(body.data(), body.size(), auth),
