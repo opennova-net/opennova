@@ -2107,11 +2107,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// its send, behind the round-over test, and the game-start wait that follows
 			// queues the 0x0A at its head, so the 0x0A is owed to the send boundary (pump())
 			// and a gate a later message of this pass raises still withdraws it
-			// (finish_receive_pump). The world stream's stage starts now, so a 0x1A this pass
-			// carries is the game-start wait's.
+			// (finish_receive_pump). The world stream's stage starts now. (A 0x1A in this same
+			// pass cannot come from a stock host, which sends it only after the joiner's 0x0A;
+			// retail's game-start wait would clear its flag at its head.)
 			// [orig: NapiNPClientMsg_0x011 @0x4226E0 (the flag); NapiClient_SendPlayerSyncAnd
 			//  WaitForSyncTail @0x42CB20 - the receive, the paced send, @0x42CBC5 ahead of
-			//  @0x42CBE7; NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F]
+			//  @0x42CBE7; NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F, the 0x1A's
+			//  flag cleared @0x42CC51 (NapiNPClientMsg_0x01A @0x425EB0 - the store @0x425ECB)]
 			if (!mission_start_aborted_ &&
 					post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail) {
 				preload_ready_ = true;
