@@ -846,7 +846,7 @@ int main() {
     CHECK(class_of(546) == ItemDeathClass::kNull);        // "gnr1": no row
     CHECK(class_of(520) == ItemDeathClass::kNull);        // the bunker authors no tag
     CHECK(class_of(530) == ItemDeathClass::kNull);        // nor the bush
-    CHECK(class_of(500) == ItemDeathClass::kUnwitnessed); // cveh: the AI machine's death
+    CHECK(class_of(500) == ItemDeathClass::kBrainMachine); // cveh: the ground machine's row
     CHECK(item_death_class_from_tag("") == ItemDeathClass::kNull);
     CHECK(item_death_class_from_tag("null") == ItemDeathClass::kNull);
     CHECK(item_death_class_from_tag("nade") == ItemDeathClass::kNoCallback); // fn1 = 0: no callback

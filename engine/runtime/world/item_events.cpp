@@ -93,7 +93,7 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"schl", ItemDeathClass::kSatchel},       // @0x813150 -> 0x443670
 		{"clym", ItemDeathClass::kClaymore},      // @0x813168 -> 0x4438C0
 		{"vmne", ItemDeathClass::kAVMine},        // @0x813180 -> 0x443BB0
-		{"lndm", ItemDeathClass::kUnwitnessed},   // @0x813198 -> 0x441A40
+		{"lndm", ItemDeathClass::kLandmine},      // @0x813198 -> 0x441A40
 		{"bldg", ItemDeathClass::kBuilding},   // @0x8131B0 -> 0x43EE60
 		{"bld2", ItemDeathClass::kCollapsingBuilding},   // @0x8131C8 -> 0x43EEE0
 		{"cran", ItemDeathClass::kCrane},   // @0x8131E0 -> 0x43FC70
@@ -104,7 +104,7 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"tree", ItemDeathClass::kTree},          // @0x813258 -> 0x440210
 		{"palm", ItemDeathClass::kPalm},   // @0x813270 -> 0x53C4C0
 		{"psec", ItemDeathClass::kNull},          // @0x813288 -> 0x406FF0
-		{"CHel", ItemDeathClass::kUnwitnessed},   // @0x8132A0 -> 0x4581B0
+		{"CHel", ItemDeathClass::kBrainMachine},  // @0x8132A0 -> 0x4581B0
 		// [orig: MissileClass_HandleEvent @0x443630 == the Entity null row body @0x406FF0
 		//  (`+0x2AC = 0x1000000; return`), byte-identical]
 		{"rokt", ItemDeathClass::kNull},          // @0x8132B8 -> 0x443630
@@ -117,10 +117,10 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"aflr", ItemDeathClass::kNone},          // @0x813330 -> 0x443650
 		{"gflr", ItemDeathClass::kNone},          // @0x813348 -> 0x443660
 		{"pwrp", ItemDeathClass::kNull},          // @0x813360 -> 0x406FF0
-		{"cveh", ItemDeathClass::kUnwitnessed},   // @0x813378 -> 0x4583C0
-		{"cbot", ItemDeathClass::kUnwitnessed},   // @0x813390 -> 0x462130
-		{"cpln", ItemDeathClass::kUnwitnessed},   // @0x8133A8 -> 0x462120
-		{"ctrn", ItemDeathClass::kUnwitnessed},   // @0x8133C0 -> 0x462140
+		{"cveh", ItemDeathClass::kBrainMachine},  // @0x813378 -> 0x4583C0
+		{"cbot", ItemDeathClass::kBrainMachine},  // @0x813390 -> 0x462130
+		{"cpln", ItemDeathClass::kBrainMachine},  // @0x8133A8 -> 0x462120
+		{"ctrn", ItemDeathClass::kBrainMachine},  // @0x8133C0 -> 0x462140
 	};
 	if (ai_function == nullptr || ai_function[0] == '\0') return ItemDeathClass::kNull;
 	for (const Row &row : kRows)
@@ -787,6 +787,20 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
 						: cls == ItemDeathClass::kClaymore ? ThrowClass::kClaymore
 														   : ThrowClass::kAVMine,
 				phase);
+		return;
+	case ItemDeathClass::kLandmine:
+		// The field's think is its event callback and never reads the phase, so a damage
+		// site runs the same think as the pool-1 visit [orig: lndm @0x813198 ->
+		// Entity_LandmineThink @0x441A40, its phase argument unread]. A player body bound to
+		// the row runs no hardpoint think (Q7-21 (2), PERMANENT: no struct-aliasing emulation).
+		if (target.kind != EntityKind::Organic) world.minefields.think(world, target);
+		return;
+	case ItemDeathClass::kBrainMachine:
+		// The brain machines return at a null +0x64 brain [orig: EntityAI_ProcessAirStateMachine
+		//  @0x4581B0 (@0x4581B9..0x4581BE); EntityAI_ProcessGroundStateMachine @0x4583C0
+		//  (@0x4583CA..0x4583D1)]: an item this notify reaches has none (an AI-slotted item
+		// dies through its machine, hit_record_class_event), and a player body bound to the
+		// row takes no brain (Q7-21 (2), PERMANENT). No +0x2AC write, no death, no sound.
 		return;
 	case ItemDeathClass::kGnrc:
 		gnrc_death_event(world, target, phase, hit.section, hit.event_flags);

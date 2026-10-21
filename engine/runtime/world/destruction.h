@@ -70,10 +70,9 @@ struct DeathEffectBank {
 //  @0x4a5aa9 ("Null" for an empty tag); the notify sites @0x4e6f93 / @0x42ebf5;
 //  the pool-1 think gate @0x4b8e1b, the pool-2 cohort gate @0x4c2291]
 enum class ItemDeathClass : uint8_t {
-	// Rows built without a def (hand-built tests) and the class rows whose
-	// event callback is dispatched by another system (the landmine row
-	// and the organic/vehicle rows that never
-	// reach this notify): the pre-dispatch body, i.e. the tree callback.
+	// Rows built without a def (hand-built tests) and the person rows
+	// (org0 / org1 / plyr), which never reach this notify: the pre-dispatch
+	// body, i.e. the tree callback.
 	kUnwitnessed = 0,
 	kNull, // "null" @0x813000 (and psec @0x813288, pwrp @0x813360, an empty/unknown
 	       // tag) -> 0x406FF0:
@@ -111,6 +110,15 @@ enum class ItemDeathClass : uint8_t {
     kSatchel,  // schl @0x813150 -> Entity_SatchelThink @0x443670
     kClaymore, // clym @0x813168 -> Entity_ClaymoreThink @0x4438C0
     kAVMine,   // vmne @0x813180 -> Entity_AVMineThink @0x443BB0
+    // lndm @0x813198 -> Entity_LandmineThink @0x441A40: the field's think, which never
+    // reads its phase, so every damage phase runs the same think (MinefieldSystem::think).
+    kLandmine,
+    // The brain machines: CHel @0x8132A0 and cpln @0x8133A8 (jmp @0x462120) ->
+    // EntityAI_ProcessAirStateMachine @0x4581B0; cveh @0x813378, cbot @0x813390 and ctrn
+    // @0x8133C0 (jmps @0x462130 / @0x462140) -> EntityAI_ProcessGroundStateMachine
+    // @0x4583C0. Both return at a null +0x64 brain (@0x4581B9..0x4581BE /
+    // @0x4583CA..0x4583D1), which is every item this notify reaches.
+    kBrainMachine,
 };
 
 // The class row for an items.def ai_function tag — the retail table walk

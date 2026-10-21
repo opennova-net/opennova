@@ -4966,6 +4966,93 @@ void test_npc_blast_and_knife_rearm_the_organic_think() {
     }
 }
 
+// The five brain rows' event callback is a brain machine, which returns at a
+// null brain: an item without AIData that a damage site or its think reaches
+// runs nothing (no death, no S2C 0x26, no re-arm), where the tree body killed it.
+// [orig: CHel @0x8132A0 / cpln @0x8133A8 -> EntityAI_ProcessAirStateMachine
+//  @0x4581B0 (the null test @0x4581B9..0x4581BE); cveh @0x813378 / cbot @0x813390 /
+//  ctrn @0x8133C0 -> EntityAI_ProcessGroundStateMachine @0x4583C0 (@0x4583CA..0x4583D1)]
+void test_brain_row_items_without_a_brain_run_nothing() {
+    for (const char *tag : {"CHel", "cpln", "cveh", "cbot", "ctrn"}) {
+        CHECK(item_death_class_from_tag(tag) == ItemDeathClass::kBrainMachine);
+        for (const int phase : {0, 1, 2, 4}) {
+            auto storage = std::make_unique<World>();
+            World &w = *storage;
+            w.rules.mp_session = true;
+            w.rules.logic_authority = true;
+            w.registry.configure_pool(1, 4);
+            Entity seed;
+            seed.item_type_index = 1;
+            seed.kind = EntityKind::Item;
+            seed.item_id = 500;
+            seed.has_item_def = true;
+            seed.health = 0; // the damage drained it
+            seed.class_think_ticks = 5;
+            const EntityHandle item = w.registry.spawn(1, seed);
+            ItemDeathTraits traits = barrel_traits();
+            traits.death_class = item_death_class_from_tag(tag);
+            w.tables.item_death_traits.set(500, traits);
+            destruction_notify_item_damage(w, *w.registry.get(item), phase);
+            const Entity *e = w.registry.get(item);
+            CHECK(e != nullptr);
+            if (e == nullptr) continue;
+            CHECK((e->engine_flags & kEntityFlagDead) == 0);
+            CHECK(e->class_think_ticks == 5);
+            CHECK(w.out.destruction.items_destroyed == 0);
+            CHECK(w.out.entity_events.empty());
+        }
+    }
+}
+
+// The lndm row's event callback is the field's think, which never reads its
+// phase: a damage site runs the think (the authority's +0x2AC = 3), and a field
+// whose every hardpoint is spent is destroyed by it; a player body bound to the
+// row runs no hardpoint think (Q7-21 (2)).
+// [orig: lndm @0x813198 -> Entity_LandmineThink @0x441A40 (the phase unread; the
+//  spent destroy @0x441AF8; +0x2AC @0x441B1A)]
+void test_a_landmine_items_damage_runs_its_think() {
+    CHECK(item_death_class_from_tag("lndm") == ItemDeathClass::kLandmine);
+    for (const bool spent : {false, true}) {
+        auto storage = std::make_unique<World>();
+        World &w = *storage;
+        w.rules.logic_authority = true;
+        w.registry.configure_pool(0, 2);
+        w.registry.configure_pool(1, 4);
+        Entity seed;
+        seed.item_type_index = 1;
+        seed.kind = EntityKind::Item;
+        seed.item_id = 500;
+        seed.has_item_def = true;
+        seed.health = 50;
+        seed.minefield.initialized = true;
+        seed.minefield.think = true;
+        seed.minefield.age = 40;
+        seed.section_mask = spent ? 0x3FFFu : 0u;
+        const EntityHandle field = w.registry.spawn(1, seed);
+        ItemDeathTraits traits = barrel_traits();
+        traits.death_class = ItemDeathClass::kLandmine;
+        w.tables.item_death_traits.set(500, traits);
+        destruction_notify_item_damage(w, *w.registry.get(field), 2);
+        const Entity *e = w.registry.get(field);
+        if (spent) {
+            CHECK(e == nullptr);
+        } else {
+            CHECK(e != nullptr && e->minefield.age == 3);
+            CHECK(e != nullptr && (e->engine_flags & kEntityFlagDead) == 0);
+        }
+        CHECK(w.out.destruction.items_destroyed == 0);
+        // A player body bound to the row: no think.
+        Entity body;
+        body.item_type_index = 1;
+        body.kind = EntityKind::Organic;
+        body.health = 50;
+        body.minefield.age = 40;
+        const EntityHandle person = w.registry.spawn(0, body);
+        run_item_class_event(w, *w.registry.get(person), ItemDeathClass::kLandmine, &traits, 2, {});
+        CHECK(w.registry.get(person) != nullptr && w.registry.get(person)->minefield.age == 40);
+    }
+}
+
 // The kind-1 (knife) kill zone: a live person other than the source inside
 // kz_maxradius takes the full kz_damage as a signed-word subtraction with the
 // knife cause bit, and the kill event credits the source; items are never
@@ -5184,6 +5271,8 @@ int main() {
     test_knife_cone_session_and_zero_half_angle();
     test_player_blast_and_knife_run_the_waypoint_tail();
     test_npc_blast_and_knife_rearm_the_organic_think();
+    test_brain_row_items_without_a_brain_run_nothing();
+    test_a_landmine_items_damage_runs_its_think();
     test_blast_breaks_flagged_sections_at_transformed_box_centers();
     test_mounted_blast_protection_follows_seat_type();
 	test_gnrl_death_is_husk_sound_and_one_effect();
