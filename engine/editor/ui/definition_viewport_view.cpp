@@ -78,10 +78,9 @@ void weapon_options(const DefinitionViewport &model, DefinitionViewportOptions &
 	DefinitionFireOptions &fire = options.fire;
 	if (options.weapon == DefinitionWeaponView::First) {
 		ui_kit::check(row, "Eye", &fire.eye,
-		              "Seen through the game's camera, through the weapon's renderfov: it never moves, and aiming "
-		              "brings the gun up to it, as the game does. Off, the camera orbits a still gun and the arms, "
-		              "and shows the game's camera (the white frustum, which Aim slides from pos to tpos) and its "
-		              "places at the hip (pos) and aimed (tpos), which a drag moves.");
+		              "The game's camera through the weapon's renderfov, which never moves; Aim brings the gun up to "
+		              "it. Off, an orbit shows the game's camera (the white frustum) at the hip (pos) and aimed (tpos), "
+		              "which a drag moves.");
 		const std::vector<FirstPersonCharacter> &characters = model.weapon().first_person().characters();
 		if (!characters.empty()) {
 			const FirstPersonCharacter *who = model.weapon().first_person().character();
@@ -244,9 +243,8 @@ void options_row(Workspace &workspace, const DefinitionViewport &model, ui_kit::
 				if (ImGui::Selectable(state_label(state), state == options.state)) options.state = state;
 			ImGui::EndCombo();
 		}
-		ui_kit::tooltip("The state the item is drawn in: alive as its mission starts; destroying, its death as the game "
-		                "runs it from the clock's start; its husk, the wreck after the death; its final husk, the model "
-		                "its death pieces are cut from.");
+		ui_kit::tooltip("The state the item is drawn in: alive, as its mission starts; destroying, its death from the "
+		                "clock's start; its husk, the wreck after it; its final husk, the model its pieces are cut from.");
 	}
 	if (kind == "item" || kind == "ammo" || (kind == "weapon" && options.weapon == DefinitionWeaponView::Third)) {
 		ui_kit::check(row, "Enemy", &options.enemy,
@@ -309,12 +307,11 @@ void impact_board(Workspace &workspace, const DefinitionViewport &model) {
 	if (!ImGui::TreeNodeEx("impacts", ImGuiTreeNodeFlags_DefaultOpen, "Impact rows by surface (%d)",
 	                       int(board.surfaces.size())))
 		return;
+	const std::string bank = board.null_ammo.empty() ? std::string("ammo def 0") : board.null_ammo;
 	ui_kit::quiet_text("A round plays the row of the class it strikes.",
-	                   "Its row is the class + 4; a row " + board.ammo + " lacks plays " +
-	                           (board.null_ammo.empty() ? std::string("ammo def 0") : board.null_ammo) +
-	                           "'s bank at the tag's place (" + std::to_string(board.null_rows) +
-	                           " rows authored there).\nAmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd: the ammo's rows "
-	                           "searched for the tag, else word_A2EB28 + 16 x tag, ammo def 0's packed bank.");
+	                   "Its row's tag is the class + 4: the game searches " + board.ammo + "'s rows for the tag, else "
+	                           "plays " + bank + "'s packed bank at the tag's place. " + bank + " authors " +
+	                           std::to_string(board.null_rows) + " rows there.");
 	{
 		ui_kit::WrapRow row;
 		const std::string mission = place_in_mission_target(view);
@@ -452,8 +449,9 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		ui_kit::WrapRow line;
 		file_link(workspace, line, drawn.file, "Open " + drawn.file + ".");
 		ImGui::SameLine();
-		ui_kit::clipped_text("Draws " + drawn.name + " (" + drawn.field + ")" +
-		                     (drawn.via.empty() ? std::string() : ", the model of " + drawn.via + ", the item its rounds become."));
+		const std::string field = drawn.via.empty() ? drawn.field : drawn.via + "'s " + drawn.field;
+		ui_kit::clipped_text("Draws " + drawn.name + " (" + field + ")",
+		                     drawn.via.empty() ? std::string() : "The model of " + drawn.via + ", the item its rounds become.");
 	}
 	if (!drawn.via_file.empty()) {
 		ui_kit::WrapRow line;
@@ -461,16 +459,19 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 			window_requests::go_to(workspace, window_requests::target_at(drawn.via_file, drawn.via_locator));
 		}
 	}
-	if (!model.person().status.empty() && model.person().status == "posed")
-		ui_kit::clipped_text("Posed as its spawn poses it: " + model.person().adm + "'s " +
-		                     world::infantry_anim_key(model.person().pose.state) + " after " +
-		                     std::to_string(model.person().updates) + " warm-up updates.");
+	if (!model.person().status.empty() && model.person().status == "posed") {
+		const std::string posed = model.person().adm + "'s " + world::infantry_anim_key(model.person().pose.state);
+		ui_kit::clipped_text("Posed: " + posed, "Posed as its spawn poses it: " + posed + " after " +
+		                                                std::to_string(model.person().updates) + " warm-up updates.");
+	}
 	for (const std::string &note : model.notes())
-		if (!note.empty()) ui_kit::clipped_text(note, note);
+		if (!note.empty()) ui_kit::clipped_text(note);
 	if (model.range_shown()) weapon_row(workspace, model, clock);
 	if (model.ammo_record()) impact_board(workspace, model);
 	if (!model.particle_slot().effect.empty() && !model.particle_slot().words.empty())
-		ui_kit::clipped_text("Particle slot " + model.particle_slot().effect + ": " + model.particle_slot().words);
+		ui_kit::clipped_text("Particle slot " + model.particle_slot().effect +
+		                             (model.particle_slot().admitted ? ": attached" : ": not attached"),
+		                     model.particle_slot().words);
 	// The effects it spawns, each name a link to the definition the game spawns for it.
 	const DefinitionEffects &effects = model.effects();
 	if (!effects.spawns().empty() &&
