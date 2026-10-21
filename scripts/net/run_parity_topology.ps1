@@ -1594,7 +1594,8 @@ function Write-ScenarioPoseSnapshot {
 }
 
 # E5: the scenario's staging positions, given by the host to each listed slot
-# in order, after the prelude and before the actor's setup and steps. A
+# in order: just before the window after the actor's setup pose (a scenario
+# with no prelude), or after the prelude and before the setup and steps. A
 # retail host applies them through onhook_load_debug_snapshot target_slot
 # (opennova-int #74); an OpenNova host through the stage_slot probe
 # (godot/probes/net/stage_slot_probe.gd: the authority's three Position words
@@ -1722,7 +1723,7 @@ function Invoke-ScenarioStage {
     return [pscustomobject]@{ driver = "scenario_play"; setup = $record.setup; record = $record }
 }
 
-# A scenario with no prelude takes its staging and its setup pose BEFORE the
+# A scenario with no prelude takes its setup pose and its staging BEFORE the
 # steady window opens, so every run's window starts on the posed state.
 # Applied inside the window, the pose landed 0.03..0.44 s in, and the S2C frame
 # period (about 190 ms) decided whether one pre-pose frame fell inside the
@@ -1763,12 +1764,23 @@ function Invoke-ScenarioSetupBeforeWindow {
     catch { Write-Host "PARITY_RUN_NOTE desktop probe failed at the steady start: $($_.Exception.Message)" }
     $script:DesktopResetBeforeWindow = $true
     $startedUtc = [DateTime]::UtcNow.ToString("o")
-    $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
+    # The actor's setup pose first, the staging last, so the window opens on
+    # the staging. A client keeps its own heading through the host's snap
+    # (the copy skipped for the local player @0x4B434D..0x4B4353), so a staged
+    # joiner actor turns while still at its spawn and is exposed only from the
+    # staging on (x1's coop_ai_kill: the AI killed the joiner 0.55 s after it).
+    # A joiner actor staged at its own setup position lands there from either
+    # side of the two-unit snap: past it the client snaps to the host's copy
+    # (@0x4B42C1..0x4B434A), within it the client glides to it over 48 or 512
+    # ticks (+0x27E @0x4B4490 / @0x4B449E), and its own pose already put it
+    # there (x1's drive: a joiner pushed 3.9 units off its spawn never reached
+    # the buggy; RO's joiner glided back 0.6 units).
     $setup = $null
     if ($spec.PSObject.Properties.Name -contains "setup" -and $null -ne $spec.setup) {
         $setup = (Invoke-ScenarioStage -Steps @([pscustomobject]@{ tick = 0; end = $true }) `
             -Setup $spec.setup -RetailInstanceId $retailInstanceId -SetupOnly).setup
     }
+    $staging = Invoke-ScenarioStaging -RetailHostInstanceId $RetailHostInstanceId
     $script:ScenarioEarlySetup = [pscustomobject]@{
         started_utc = $startedUtc
         applied_utc = [DateTime]::UtcNow.ToString("o")
@@ -1780,7 +1792,7 @@ function Invoke-ScenarioSetupBeforeWindow {
 # Plays -Scenario on its actor (the joiner or the host) right after the
 # steady window starts: its prelude stage when it has one (e.g. the deploy
 # key on a deploy_hold run), then the setup pose and the steps, then the
-# settle; a scenario with no prelude took its staging and setup pose just
+# settle; a scenario with no prelude took its setup pose and staging just
 # before the window (Invoke-ScenarioSetupBeforeWindow). A pose sticks only on
 # the authority's own player: a client snaps
 # its players to the host's replicated pose past 2 units
@@ -1813,7 +1825,7 @@ function Invoke-ScenarioIfRequested {
     $early = $script:ScenarioEarlySetup
     if (Test-ScenarioSetupBeforeWindow) {
         if (-not $early) {
-            throw "Scenario $($spec.name) has no prelude: its staging and setup must land before the steady window"
+            throw "Scenario $($spec.name) has no prelude: its setup and staging must land before the steady window"
         }
         $staging = $early.staging
         $setup = $null

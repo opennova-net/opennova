@@ -4,7 +4,7 @@
   "mission": "TDH_I3A.bms",
   "game_type": 65536,
   "actor": "host",
-  "setup": {"pose": {"position_bms": [37.4, -16.0, 17.1], "yaw": 270, "pitch": -10}},
+  "setup": {"pose": {"position_bms": [33.4, -18.5, 16.8], "yaw": 0, "pitch": -12}},
   "steps": [
     {"tick": 30, "down": 149},
     {"tick": 36, "up": 149},
