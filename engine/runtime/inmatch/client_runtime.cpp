@@ -9,8 +9,10 @@
 
 #include <runtime/world/world.h>
 
+#include <base/gameprofile/game_type.h> // the round-clock seed's Co-op test
 #include <base/gameprofile/gameprofile.h> // VERSION's version text
 #include <net/title/title_identity.h> // the title the VERSION line reads
+#include <formats/gamecfg/game_cfg.h> // the process cfg block's timeLimit (the round-clock seed)
 #include <base/io/le.h>
 #include <base/io/tick_rate.h>
 
@@ -1999,6 +2001,18 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
 	JoinerConnection::MissionStartSubmissions submissions;
 	if (joiner_ == nullptr || !joiner_->take_mission_start_submissions(submissions))
 		return outbound;
+	// Past the two waits the joiner's start seeds the round clock from its own cfg's limit
+	// (in session, outside the Co-op waypoint family, a nonzero limit; imul wraps), over
+	// whatever 0x0A the waits folded; the next phase-1 0x0A replaces it.
+	// [orig: Game_StartMission @0x524360 - NapiClient_SendPlayerSyncAndWaitForSyncTail
+	//  @0x524DAB, NapiClient_WaitForGameStart @0x524E29, then the seed @0x525229..0x525251
+	//  (`imul eax, 0E88h` @0x52524B), ahead of the load's pumps @0x5253EF;
+	//  g_RoundTimeLimitMinutes from Game_ApplySessionSettingsToGlobals @0x551CCC..0x551CD2]
+	if (const gamecfg::GameCfg *cfg = process_state().config_block) {
+		if (!opennova::game_type::is_waypoint_family(game_type()) && cfg->time_limit != 0)
+			view_.state().round_time_remaining_ticks =
+					static_cast<int32_t>(3720u * static_cast<uint32_t>(cfg->time_limit));
+	}
 	// The load's zero of the frame tick, between its pumps (no main frame runs until the
 	// final wait ends) [orig: Game_StartMission @0x524360 - `mov g_CurrentTick, ebx`
 	// @0x525B9F].
