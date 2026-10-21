@@ -131,9 +131,14 @@ public:
 	void stop();
 	// The player's ESC while the NovaWorld menu waits: the first connect's poll gives the connect
 	// up with NWEC41 / NWEC47 (the error signal, a frame later), the play leg's poll leaves the
-	// play with NWEC03 (join_failed). False when neither waits (engine: NwuLobbySession::escape;
-	// connect_or_host.h's play lines).
+	// play with NWEC03 (join_failed), and the host leg's wait takes the key and does nothing (it
+	// reads no key). False when none waits (engine: NwuLobbySession::escape; connect_or_host.h's
+	// play lines).
 	bool escape_connect();
+	// ConnectOrHost's play or host leg awaits its result: the menu frame that runs it does not end
+	// until the leg does, so the process pumps no remote admin meanwhile (GameWorld feeds this
+	// into inmatch::RemoteAdminIdleFrame). Process-wide: the one NovaWorld session's.
+	static bool process_connect_or_host_wait();
 	// The process exit's teardown (a session create's mpreset exit): the
 	// verified session's disconnect burst alone, with no ClientStopPlaying or
 	// ClientStopHosting, as the exit's atexit teardown of the NovaWorld session
@@ -386,6 +391,11 @@ private:
 	uint32_t play_started_ms_ = 0;
 	// The player's ESC the play poll reads at its next frame (escape_connect).
 	bool play_escape_requested_ = false;
+	// ConnectOrHost's play leg in flight, or the host leg's request awaiting its result.
+	bool connect_or_host_wait() const;
+	// The process-wide wait (process_connect_or_host_wait) from this client's legs; a client
+	// going away (alive false) leaves it.
+	void publish_connect_or_host_wait(bool alive = true);
 	opennova::ProxyRendezvousConfig join_proxy_;
 };
 

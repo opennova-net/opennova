@@ -67,6 +67,9 @@ std::string admin_log_file_text(std::string_view line) {
 std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &frame) {
 	// The PreMenu mode's join [orig: MultiPlayer_JoinSessionStateMachine @0x56A320].
 	if (frame.join_pending) return std::nullopt;
+	// A menu frame inside ConnectOrHost's play or host wait [orig: CNapiGameSession_ConnectOrHost
+	//  @0x4D4F10 - @0x4D5180..0x4D519D, @0x4D54C0..0x4D54EE].
+	if (frame.novaworld_wait) return std::nullopt;
 	// The MainMenu mode's frame [orig: Menu_UpdateFrame @0x552901].
 	if (!frame.mission) return AdminScene::MainMenu;
 	// The Game Loop's frame under its in-game menu [orig: Input_HandleActionBinding @0x49B3B6;

@@ -85,6 +85,7 @@ NovaWorldClient::NovaWorldClient() :
 // this lobby once it is gone.
 NovaWorldClient::~NovaWorldClient() {
 	if (nw_pump_.is_valid()) nw_pump_->demux().set_session_claim(nullptr);
+	publish_connect_or_host_wait(/*alive=*/false);
 }
 
 void NovaWorldClient::_bind_methods() {
@@ -386,7 +387,32 @@ namespace {
 opennova::inmatch::ConnectLog *g_process_connect_log = nullptr;
 opennova::inmatch::ServerLogs g_process_server_logs;
 bool g_process_server_logs_set = false;
+// The client whose ConnectOrHost leg waits, or null.
+const NovaWorldClient *g_process_leg_waiter = nullptr;
 } // namespace
+
+// The legs that block inside one menu frame: the play poll and the host poll, each a GetTickCount
+// loop that pumps the session's periodic update (the play loop the window messages and the key
+// read too) until its result or 60 s; the gate wait and the connect polls run frame by frame.
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the host loop @0x4D5180..0x4D519D
+//  (ProcessPeriodicUpdate @0x4D5185, the 0xEA60 compare @0x4D518E), the play loop
+//  @0x4D54C0..0x4D54EE (ProcessPeriodicUpdate @0x4D54C5, Game_PumpWindowMessages @0x4D54D5,
+//  Input_DequeueKeyEvent @0x4D54DA); its one caller UI_DispatchScreenEvent (the call @0x54F33B)]
+bool NovaWorldClient::connect_or_host_wait() const {
+	return play_in_flight_ || host_role_.phase() == opennova::NwuHostRole::Phase::Requested;
+}
+
+void NovaWorldClient::publish_connect_or_host_wait(bool alive) {
+	if (alive && connect_or_host_wait()) {
+		g_process_leg_waiter = this;
+	} else if (g_process_leg_waiter == this) {
+		g_process_leg_waiter = nullptr;
+	}
+}
+
+bool NovaWorldClient::process_connect_or_host_wait() {
+	return g_process_leg_waiter != nullptr;
+}
 
 void NovaWorldClient::set_process_server_logs(const opennova::inmatch::ServerLogs *logs) {
 	g_process_server_logs_set = logs != nullptr;
@@ -464,6 +490,7 @@ void NovaWorldClient::stop() {
 
 void NovaWorldClient::_process(double delta) {
 	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) {
+		publish_connect_or_host_wait();
 		return;
 	}
 
@@ -490,6 +517,7 @@ void NovaWorldClient::_process(double delta) {
 		lobby_.connect_log(opennova::kPlayEscapedLine);
 		abort_playing(String(opennova::NWEC_PLAY_CANCELLED));
 	}
+	publish_connect_or_host_wait();
 }
 
 // The role-specific halves of the shared NwuLobbySession driver: what to do
@@ -1125,6 +1153,10 @@ bool NovaWorldClient::escape_connect() {
 		play_escape_requested_ = true;
 		return true;
 	}
+	// The host leg's wait reads no key and pumps no window message: its ESC is never taken, and
+	// the request stands. [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the host loop
+	//  @0x4D5180..0x4D519D]
+	if (host_role_.phase() == opennova::NwuHostRole::Phase::Requested) return true;
 	return lobby_.escape();
 }
 

@@ -226,6 +226,17 @@ void test_idle_scene() {
 			for (int j = 0; j < 2; ++j)
 				expect(scene(m != 0, static_cast<State>(s), j != 0) != AdminScene::Other,
 				       "no frame pumps as Other (\"Unknown\")");
+	// The NovaWorld menu's play or host wait blocks inside its menu frame: no pump while it
+	// waits, the menus' pump again once it is over. [orig: CNapiGameSession_ConnectOrHost
+	//  @0x4D4F10 - the host loop @0x4D5180..0x4D519D, the play loop @0x4D54C0..0x4D54EE;
+	//  Menu_UpdateFrame @0x552901]
+	RemoteAdminIdleFrame waiting;
+	waiting.novaworld_wait = true;
+	expect(!inmatch::remote_admin_idle_scene(waiting).has_value(),
+	       "a NovaWorld play or host wait pumps nothing");
+	waiting.novaworld_wait = false;
+	expect(inmatch::remote_admin_idle_scene(waiting) == AdminScene::MainMenu,
+	       "the menus pump again once the wait is over");
 }
 
 static const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);

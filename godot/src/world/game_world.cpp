@@ -151,10 +151,10 @@ void GameWorld::_notification(int p_what) {
 	if (p_what == NOTIFICATION_INTERNAL_PROCESS) {
 		// A frame outside the running mission's ticked frame (whose remote_admin leg pumps): the
 		// menus pump as MainMenu, a paused single player as the Game Loop, a joiner's connect,
-		// a load, a held start and a teardown not at all (engine inmatch/remote_admin.h
-		// remote_admin_idle_scene). The paused frame's exit router runs ahead of its pump: a
-		// stored exit reason leaves the mission as a tick's terminal outcome does
-		// (remote_admin_idle_frame_exits).
+		// the NovaWorld menu's play or host wait, a load, a held start and a teardown not at all
+		// (engine inmatch/remote_admin.h remote_admin_idle_scene). The paused frame's exit router
+		// runs ahead of its pump: a stored exit reason leaves the mission as a tick's terminal
+		// outcome does (remote_admin_idle_frame_exits).
 		MissionRoot *runtime = get_runtime();
 		if (runtime != nullptr && runtime->is_playing()) return;
 		const Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
@@ -164,6 +164,7 @@ void GameWorld::_notification(int p_what) {
 				? static_cast<opennova::inmatch::State>(sim->session_state())
 				: opennova::inmatch::State::Unloaded;
 		frame.join_pending = drive_.is_preload_pending();
+		frame.novaworld_wait = NovaWorldClient::process_connect_or_host_wait();
 		frame.mission_exit_reason = sim.is_valid() ? sim->get_mission_exit_reason() : 0;
 		if (opennova::inmatch::remote_admin_idle_frame_exits(frame)) {
 			session_frame_failed(String("mission exit ") + itos(frame.mission_exit_reason));

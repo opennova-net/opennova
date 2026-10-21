@@ -66,6 +66,9 @@ struct RemoteAdminIdleFrame {
 	bool join_pending = false;
 	// The exit reason the running session's role reads (0: none).
 	int32_t mission_exit_reason = 0;
+	// The NovaWorld menu's ConnectOrHost leg awaiting its result (its play or host request): the
+	// menu frame that runs it ends when the leg does.
+	bool novaworld_wait = false;
 };
 
 // The scene such a frame pumps the admin server in, or none. Retail pumps it in two places only:
@@ -76,14 +79,18 @@ struct RemoteAdminIdleFrame {
 // the frame is the menus' (MainMenu, whatever world the process keeps); a paused single player is
 // the Game Loop's frame with its in-game menu up (game.mnu opens inside the Game Loop, no mode
 // change); any other state of a loaded mission (its load, a held start, its teardown) pumps
-// nothing. GET GAMESTATE's "Unknown" reply is therefore never sent.
+// nothing. Nor does a menu frame running the NovaWorld menu's play or host leg: each blocks inside
+// the frame until its result or 60 s (the gate wait and the connect polls run frame by frame and
+// pump). GET GAMESTATE's "Unknown" reply is therefore never sent.
 // [orig: the two callers of CAdminServer_ProcessFrame, Game_ProcessMainFrame @0x5268F1 and
 //  Menu_UpdateFrame @0x552901 (no early return ahead of it); the PreMenu mode's update
 //  MultiPlayer_JoinSessionStateMachine @0x56A320 (its mode descriptor stru_83C9D0, pushed by
 //  UI_HandleLANGameListEvent @0x556C35 and UI_HandleHostSessionStart @0x556EDC) and the Post
 //  Menu's PostMenu_RouteMissionExit @0x568460 call neither; GameLoop_Init's Game_StartMission(0)
 //  @0x526377; game.mnu opened by Input_HandleActionBinding @0x49B3B6; CAdminServer_HandleGet
-//  @0x4033D0..0x40340B (the Menus / Game / Unknown compare)]
+//  @0x4033D0..0x40340B (the Menus / Game / Unknown compare); CNapiGameSession_ConnectOrHost
+//  @0x4D4F10 - the host loop @0x4D5180..0x4D519D, the play loop @0x4D54C0..0x4D54EE, its one
+//  caller UI_DispatchScreenEvent (the call @0x54F33B)]
 std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &frame);
 
 // Whether such a frame leaves the mission instead of pumping: the Game Loop's frame under its
