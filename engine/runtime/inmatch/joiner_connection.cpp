@@ -9,6 +9,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
 #include <net/npwire/session_hello.h>
+#include <runtime/inmatch/punt_log.h> // ConnectLog and the client callbacks' line texts
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
 #include <base/gameprofile/gameprofile.h>
@@ -579,6 +580,19 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	//  @0x62758B / @0x627624 / @0x627643]
 	if (title_ == nullptr || sh.ci != client_index_) return;
 	if (!server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_))) return;
+	// The connect log's client callbacks (while it is on): the packet the handler queued is
+	// read by the protocol's client pump, NET GOT; its second pass records the enumerated
+	// session, whose discovered callback (the enumerate's own, installed by
+	// InitTransportConnection) writes NET SESSION DISCOVERED with the record's SN.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627541, the identity compares
+	//  @0x62758B.., the queue @0x627F45; NapiNPProtocol_PumpRecvQueues @0x6266A0 - the client
+	//  queue's NapiLog_OnRecv (proto+0x26C) @0x6268AA; NapiLog_OnRecv @0x4C46B0; the record's
+	//  SN @0x627775, the callback test @0x6278D7; CNapiNetwork_OnSessionDiscovered @0x4C8470
+	//  (the line @0x4C8631); CNapiGameSession_InitTransportConnection @0x4C9E10 - the install
+	//  @0x4C9FCB]
+	connect_log_line(net_got_text(static_cast<int32_t>(body.size() + 1), host_address_,
+			SESSION_OPCODE_SERVER_HELLO));
+	connect_log_line(net_session_discovered_text(host_address_, sh.sn.substr(0, 63)));
 	// An absent HK reads 0, and the 0x42 then omits it. [orig: Nwu_HandleServerHello @0x626D20 -
 	//  HK @0x626E97; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK gate @0x6200F2]
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk
@@ -603,6 +617,10 @@ uint32_t g_client_net_frame_counter = 0;
 } // namespace
 
 uint32_t JoinerConnection::client_net_frame_counter() { return g_client_net_frame_counter; }
+
+void JoinerConnection::connect_log_line(const std::string &text) const {
+	if (connect_log_ != nullptr && connect_log_->enabled()) connect_log_->line(text);
+}
 
 void JoinerConnection::step_client_net_frame_counter() { ++g_client_net_frame_counter; }
 
@@ -661,6 +679,11 @@ void JoinerConnection::on_server_auth(
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
 	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
 	if (sa.ci != client_index_ || sa.ck != client_key_) return;
+	// The connect log's NET GOT for the queued 0x82 [orig: NapiNP_HandleServerJoinResponse
+	//  @0x629840 - the CI / CK match @0x629CBF ahead of the queue @0x629F01;
+	//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv @0x6268AA].
+	connect_log_line(net_got_text(static_cast<int32_t>(body.size() + 1), host_address_,
+			SESSION_OPCODE_SERVER_AUTH));
 	if (sa.cr == 0) {
 		// A CR=0 0x82 carries the NP-layer failure family in JFC (1 when absent) and, for the
 		// validate-callback family (JFC=14), the sub-reason in JFP. Spectator
@@ -716,6 +739,13 @@ void JoinerConnection::on_server_auth(
 	//  conn+0x5E8 store @0x62612f; PumpStateMachine case 5 @0x6295a2..0x62961c]
 	last_receive_ms_ = monotonic_milliseconds_();
 	receive_clock_armed_ = true;
+	// The connected state's callback writes NET CONNECTED TO SERVER: the host, and as
+	// "yourip" the address the 0x82's RIP / RPN reported.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - RIP / RPN onto the connection
+	//  @0x629D8F / @0x629D92, state 5 @0x629EAC -> CNapiNPConnection_OnStateChange @0x629EB1;
+	//  CNapiNetwork_OnConnectedToServer @0x4C62E0 - the line @0x4C6348..0x4C639B]
+	connect_log_line(net_connected_to_server_text(host_address_,
+			PeerAddr{sa.rip, static_cast<uint16_t>(sa.rpn)}));
 	handshake_retry_datagram_.clear();
 	handshake_retry_clock_armed_ = false;
 	session_ack_pending_ = false;
@@ -909,6 +939,16 @@ void JoinerConnection::apply_self_spawn(uint16_t handle, bool has_body, uint32_t
 }
 
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
+	// The connect log: the handler queues a packet whose first dword is this connection's key
+	// (the protocol's client pump then writes NET GOT), and every packet the in-order parse
+	// takes writes NET PROCESSING with the parse's length plus its opcode byte.
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the key test @0x626B72, the queue
+	//  @0x626C8C; NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv @0x6268AA;
+	//  CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess (proto+0x274, len + 1)
+	//  @0x625D3E; NapiLog_OnProcess @0x4C67D0]
+	if (body.size() >= 4 && io::read_u32_le(body.data()) == client_key_)
+		connect_log_line(net_got_text(static_cast<int32_t>(body.size() + 1), host_address_,
+				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE));
 	// Joiner recv: decrypt inbound 0x83 with the server's SCRK; deframe latches conn_.seq.last_inbound_seq.
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
@@ -918,6 +958,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	                            body.size(), hdr, messages, &admission)) {
 		return; // lenient: an in-match streaming packet we can't parse is not fatal
 	}
+	for (const SessionDeframeAdmission::Packet &packet : admission.packets)
+		connect_log_line(net_processing_text(
+				static_cast<int32_t>(packet.body_bytes + 1), host_address_));
 	if (admission.admitted) {
 		acknowledge_session_packets(conn_.seq, admission.max_ack_count);
 		// The reap clock: stamped by ParseMessages, which only an in-order packet (or the

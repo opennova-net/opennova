@@ -141,8 +141,13 @@ public:
 	}
 	enum class Role : uint8_t { Joiner, HostClient };
 	// The process's _connectlog.txt (punt_log.h ConnectLog; null: off): every S2C 0x61
-	// this client handles closes it (ConnectLog::disable_at_client_session_key).
-	void set_connect_log(ConnectLog *log) { connect_log_ = log; }
+	// this client handles closes it (ConnectLog::disable_at_client_session_key); while it
+	// is on a joiner writes its client callbacks' lines (log_client_sends, the connection's
+	// receive-side lines).
+	void set_connect_log(ConnectLog *log) {
+		connect_log_ = log;
+		if (joiner_) joiner_->set_connect_log(log);
+	}
 
 	// Remote-joiner runtime. Transport-less: framed bytes in via receive(), framed bytes out via
 	// the start()/Client_ProcessNetworkFrame() return values (the owner pumps the socket).
@@ -1094,6 +1099,10 @@ private:
 	// no-uplink frame.
 	std::vector<std::vector<uint8_t>> run_frame(
 			const UplinkBuilder *build_uplink, uint32_t now_tick);
+	// A joiner's datagrams as they leave, their connect-log lines written (NET SENDING each,
+	// then NET DISCONNECTING when the call ended the session that was up at its start).
+	std::vector<std::vector<uint8_t>> log_client_sends(
+			std::vector<std::vector<uint8_t>> datagrams, bool session_lost_before) const;
 	devtools::TickProfile *profile_ = nullptr;
 	void stage_reload_notifications_before_body_tick();
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);

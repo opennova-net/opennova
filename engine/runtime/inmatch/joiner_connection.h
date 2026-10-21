@@ -125,6 +125,8 @@ enum class TerrainTilState : uint8_t {
 	Invalid = 3,
 };
 
+class ConnectLog; // punt_log.h
+
 class JoinerConnection {
 public:
 	using MonotonicMilliseconds = std::function<uint64_t()>;
@@ -312,6 +314,10 @@ public:
 	// row connects to the row's address, the ServerHello's source the browse kept
 	// [orig: Nwu_HandleServerHello @0x626d20 - @0x62769d / @0x6276a1].
 	void set_host_address(const PeerAddr &host) { host_address_ = host; }
+	const PeerAddr &host_address() const { return host_address_; }
+	// The process's _connectlog.txt (punt_log.h; null: off): this connection's receive-side
+	// client callbacks write their lines while it is on (connect_log_line).
+	void set_connect_log(ConnectLog *log) { connect_log_ = log; }
 
 	// Feed one inbound datagram (off the socket, CRC envelope intact). Returns the reply datagrams +
 	// any surfaced 0x0A bodies + whether this datagram learned H.
@@ -1153,6 +1159,9 @@ private:
 	static constexpr uint64_t kClientJoinTimeoutMilliseconds = 30000;
 
 	bool loading_cancel_ = false; // g_LoadingCancelFlag: an ESC left the final wait (cancel_final_wait)
+	ConnectLog *connect_log_ = nullptr; // set_connect_log
+	// One "<time> : <text>" line while the process's connect log is on.
+	void connect_log_line(const std::string &text) const;
 	uint32_t client_index_ = 0; // start(): the row's browse CI, else next_connection_index()
 	uint32_t client_key_ = 1;
 	NapiPrng *key_prng_ = nullptr;

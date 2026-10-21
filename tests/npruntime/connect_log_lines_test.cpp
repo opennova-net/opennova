@@ -22,6 +22,8 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h>
+#include <net/npwire/protocol_message.h>
+#include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -299,12 +301,123 @@ void test_listen_host_self_join_lines() {
 	CHECK(lines[5] == "NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.");
 }
 
+
+// The remote joiner's client half (L2-s10): while the log is on, every datagram the joiner
+// sends writes NET SENDING (its packet before the manager's pack, the host, the opcode, the
+// 0x43's packet sequence else 0); each packet the client queue takes writes NET GOT (the
+// 0x81 after its CI and identity, the 0x82 after its CI / CK, the 0x83 whose key is the
+// connection's, the 0x86); the enumerate's new session writes NET SESSION DISCOVERED with its
+// SN, the accepted 0x82 NET CONNECTED TO SERVER with its RIP / RPN as yourip, and every packet
+// the in-order parse takes NET PROCESSING with the parse's length plus its opcode byte.
+// [orig: NapiLog_OnSend @0x4C4760 - SendAnnouncePacket @0x61FDCA, SendClientJoin @0x6203F0,
+//  SendSessionPacket @0x61F00D; NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv
+//  @0x6268AA; Nwu_HandleServerHello @0x626D20 - @0x6278D7; CNapiNetwork_OnSessionDiscovered
+//  @0x4C8470; CNapiNetwork_OnConnectedToServer @0x4C62E0; CNapiNPConnection_ParseMessages
+//  @0x625D3E]
+void test_remote_joiner_client_lines() {
+	MemoryFiles files;
+	inmatch::ConnectLog log{files};
+	log.set_clock([] { return std::string("T"); });
+	log.start(inmatch::ConnectLogHeader{});
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			/*host_key=*/0x0FE0E119u);
+	const PeerAddr host_addr = peer_addr_from_octets({10, 0, 0, 1}, 32786);
+	const PeerAddr joiner_peer = peer_addr_from_octets({10, 0, 0, 9}, 4200);
+	const std::string host_at = "10.0.0.1:32786";
+	uint64_t now_ms = 1000;
+	inmatch::ClientRuntime client("LogJoiner", [&now_ms] { return now_ms; });
+	client.set_title(&kJo);
+	client.set_host_address(host_addr);
+	client.set_connect_log(&log);
+	const auto sending = [&](const std::vector<uint8_t> &dg, const char *opcode, int packet) {
+		return "NET SENDING " + std::to_string(unpacked_len(dg)) + " BYTES TO " + host_at + " [" +
+				opcode + ", p#" + std::to_string(packet) + "]";
+	};
+	const auto got = [&](const std::vector<uint8_t> &dg, const char *opcode) {
+		return "NET GOT " + std::to_string(unpacked_len(dg)) + " BYTES FROM " + host_at + " [" +
+				opcode + "]";
+	};
+	const auto opcode_of = [](const std::vector<uint8_t> &dg) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		return nw_decode_inbound(dg.data(), dg.size(), opcode, body) ? opcode : uint8_t{0};
+	};
+	// The enumerate's announce.
+	const std::vector<uint8_t> hello = client.start();
+	std::vector<std::string> lines = log_lines(files);
+	CHECK(lines.size() == 1 && lines[0] == sending(hello, "0x41", 0));
+	// The host's 0x81: queued (NET GOT), its new session (DISCOVERED), the 0x42 it draws.
+	const inmatch::HandleResult reply =
+			inmatch::handle_server_datagram(host, joiner_peer, hello.data(), hello.size(), 0);
+	CHECK(reply.outbound.size() == 1);
+	if (reply.outbound.size() != 1) return;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ServerHello sh;
+	CHECK(nw_decode_inbound(reply.outbound[0].data(), reply.outbound[0].size(), opcode, body) &&
+			parse_server_hello(body.data(), body.size(), sh));
+	client.receive(reply.outbound[0].data(), reply.outbound[0].size());
+	now_ms += 16;
+	std::vector<std::vector<uint8_t>> sent = client.Client_ProcessNetworkFrame(1);
+	CHECK(sent.size() == 1 && opcode_of(sent[0]) == SESSION_OPCODE_CLIENT_AUTH);
+	if (sent.size() != 1) return;
+	lines = log_lines(files);
+	CHECK(lines.size() == 4);
+	if (lines.size() != 4) {
+		for (const std::string &l : lines) std::printf("  got: %s\n", l.c_str());
+		return;
+	}
+	CHECK(lines[1] == got(reply.outbound[0], "0x81"));
+	CHECK(lines[2] == "NET SESSION DISCOVERED AT " + host_at + " [" + sh.sn + "]");
+	CHECK(lines[3] == sending(sent[0], "0x42", 0));
+	// The 0x82 (and what the host bundles behind it): NET GOT, then NET CONNECTED with the
+	// RIP / RPN the host saw; a 0x83 queued and parsed writes NET GOT then NET PROCESSING.
+	const std::vector<uint8_t> join = sent[0];
+	const inmatch::HandleResult admitted =
+			inmatch::handle_server_datagram(host, joiner_peer, join.data(), join.size(), 1);
+	CHECK(!admitted.outbound.empty() &&
+			opcode_of(admitted.outbound[0]) == SESSION_OPCODE_SERVER_AUTH);
+	if (admitted.outbound.empty()) return;
+	for (const std::vector<uint8_t> &dg : admitted.outbound) client.receive(dg.data(), dg.size());
+	now_ms += 16;
+	sent = client.Client_ProcessNetworkFrame(2);
+	lines = log_lines(files);
+	std::vector<std::string> want = {got(admitted.outbound[0], "0x82"),
+			"NET CONNECTED TO SERVER " + host_at + " [yourip=10.0.0.9:4200]"};
+	for (std::size_t i = 1; i < admitted.outbound.size(); ++i) {
+		if (opcode_of(admitted.outbound[i]) != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE) continue;
+		want.push_back(got(admitted.outbound[i], "0x83"));
+		want.push_back("NET PROCESSING " + std::to_string(unpacked_len(admitted.outbound[i])) +
+				" BYTES FROM " + host_at);
+	}
+	for (const std::vector<uint8_t> &dg : sent) {
+		std::vector<uint8_t> unpacked;
+		uint8_t sent_opcode = 0;
+		std::vector<uint8_t> sent_body;
+		ProtocolPacketHeader header;
+		const bool session = nw_unpack_inbound(dg.data(), dg.size(), unpacked) &&
+				nw_split_unpacked(unpacked, sent_opcode, sent_body) &&
+				sent_opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+				parse_protocol_packet_header(sent_body.data(), sent_body.size(), header);
+		CHECK(session);
+		want.push_back(sending(dg, "0x43", session ? static_cast<int>(header.seq_num) : -1));
+	}
+	CHECK(lines.size() == 4 + want.size());
+	if (lines.size() != 4 + want.size()) {
+		for (const std::string &l : lines) std::printf("  got: %s\n", l.c_str());
+		return;
+	}
+	for (std::size_t i = 0; i < want.size(); ++i) CHECK(lines[4 + i] == want[i]);
+}
+
 } // namespace
 
 int main() {
 	test_line_texts();
 	test_dedicated_host_receive_lines();
 	test_listen_host_self_join_lines();
+	test_remote_joiner_client_lines();
 	if (failures != 0) {
 		std::printf("connect_log_lines: %d failure(s)\n", failures);
 		return 1;

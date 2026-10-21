@@ -10,6 +10,7 @@
 #include <net/npwire/session_hello.h>      // DisconnectEvent / parse_disconnect_event / client_goodbye_to_bytes
 #include <net/npwire/session_keys.h>       // SESSION_OPCODE_CLIENT_GOODBYE / SESSION_OPCODE_CLIENT_PING
 #include <net/npwire/session_ping.h>       // the shared 0x45/0x85 body codec
+#include <runtime/inmatch/punt_log.h>        // net_got_text (the connect log)
 
 #include <cstddef>
 #include <cstdint>
@@ -209,6 +210,11 @@ void JoinerConnection::on_server_goodbye(const std::vector<uint8_t> &body, PollR
 			(static_cast<uint32_t>(body[2]) << 16) |
 			(static_cast<uint32_t>(body[3]) << 24);
 	if (receiver_local_key != client_key_) return;
+	// The connect log's NET GOT for the queued 0x86 [orig: Nwu_HandleDisconnect @0x623CE0 -
+	//  the key test @0x623E74 ahead of the queue @0x624125; NapiNPProtocol_PumpRecvQueues
+	//  @0x6266A0 - NapiLog_OnRecv @0x6268AA].
+	connect_log_line(net_got_text(static_cast<int32_t>(body.size() + 1), host_address_,
+			SESSION_OPCODE_SERVER_GOODBYE));
 	DisconnectEvent event;
 	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, event);
 	// Teardown owns this receive result, exactly like the H:0x03 description punt.

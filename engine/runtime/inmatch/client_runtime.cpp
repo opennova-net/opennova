@@ -13,6 +13,8 @@
 #include <net/title/title_identity.h> // the title the VERSION line reads
 #include <base/io/le.h>
 #include <base/io/tick_rate.h>
+#include <net/npwire/nw_session_framing.h> // nw_unpack_inbound / nw_split_unpacked (the sends' lines)
+#include <net/npwire/session_keys.h>       // SESSION_OPCODE_PROTOCOL_MESSAGE
 
 #include <algorithm>
 #include <chrono>
@@ -496,7 +498,54 @@ std::vector<uint8_t> ClientRuntime::start() {
 	view_.drain_effect_commands();
 	view_.set_game_type(0);
 	view_.set_mp_session(true); // a joiner is in-session by definition
-	return joiner_->start();
+	std::vector<std::vector<uint8_t>> sent;
+	sent.push_back(joiner_->start());
+	if (sent.back().empty()) return {};
+	return std::move(log_client_sends(std::move(sent), false).front());
+}
+
+// The protocol's client send callback, one line per datagram as it leaves: the packet's length
+// before the manager's pack (its opcode byte included), the host, the opcode and, for a
+// session packet, its packet sequence (0 for every other send). Then, when this call's
+// teardown ended a session that was up, the connection's leave callback writes NET
+// DISCONNECTING FROM SERVER with the connection's record, after the burst's own lines.
+// [orig: NapiLog_OnSend @0x4C4760 (proto+0x270, installed by CNapiNetwork_Init @0x4CA978) -
+//  NapiNPSession_SendAnnouncePacket @0x61FA00 (0x41, the call @0x61FDCA),
+//  CNapiNPConnection_SendClientJoin @0x61FE20 (0x42, @0x6203F0),
+//  CNapiNPConnection_SendSessionPacket @0x61EE00 (0x43 with its packet_seq, @0x61F00D),
+//  CNapiNPConnection_SendMissingSeqList @0x623560 (0x44, @0x62374A), CNapiNPConnection_SendPing
+//  @0x61F080 (0x45, @0x61F241), CNapiNPConnection_SendDisconnectPacket @0x61F2A0 (0x46,
+//  @0x61F53B); CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst
+//  @0x6254B4..0x6254D3, the leave callback @0x6254D5..0x6254E7;
+//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the line @0x4C6421..0x4C6486]
+std::vector<std::vector<uint8_t>> ClientRuntime::log_client_sends(
+		std::vector<std::vector<uint8_t>> datagrams, bool session_lost_before) const {
+	if (role_ != Role::Joiner || joiner_ == nullptr || connect_log_ == nullptr ||
+			!connect_log_->enabled())
+		return datagrams;
+	for (const std::vector<uint8_t> &datagram : datagrams) {
+		std::vector<uint8_t> unpacked;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!nw_unpack_inbound(datagram.data(), datagram.size(), unpacked) ||
+				!nw_split_unpacked(unpacked, opcode, body))
+			continue;
+		int32_t packet = 0;
+		ProtocolPacketHeader header;
+		if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+				parse_protocol_packet_header(body.data(), body.size(), header))
+			packet = static_cast<int32_t>(header.seq_num);
+		connect_log_->line(net_sending_text(static_cast<int32_t>(unpacked.size()),
+				joiner_->host_address(), opcode, packet));
+	}
+	if (!session_lost_before && joiner_->session_lost() && joiner_->has_disconnect_event()) {
+		const DisconnectEvent &event = joiner_->last_disconnect_event();
+		connect_log_->line(net_disconnecting_from_server_text(joiner_->host_address(),
+				static_cast<int32_t>(event.ds), static_cast<int32_t>(event.dc),
+				static_cast<int32_t>(event.dp1), static_cast<int32_t>(event.dp2), event.dstr,
+				static_cast<int32_t>(event.dpc), event.ddstr));
+	}
+	return datagrams;
 }
 
 bool ClientRuntime::begin_mission_reload() {
@@ -564,7 +613,8 @@ void ClientRuntime::receive(const uint8_t *raw, std::size_t len) {
 
 std::vector<std::vector<uint8_t>> ClientRuntime::disconnect(std::string_view leave_tag) {
 	if (role_ != Role::Joiner || joiner_ == nullptr) return {};
-	return joiner_->disconnect(leave_tag);
+	const bool lost_before = joiner_->session_lost();
+	return log_client_sends(joiner_->disconnect(leave_tag), lost_before);
 }
 
 bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
@@ -2046,7 +2096,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
 	// them. That is the next frame's WorldStateWait loop, its receive then its send.
 	// [orig: Game_StartMission @0x526295..0x5262e5 - PumpManagerReceive @0x5262b4,
 	//  PumpClientProtocolRecv @0x5262be, PumpClientProtocolSend @0x5262da]
-	return outbound;
+	return log_client_sends(std::move(outbound), joiner_->session_lost());
 }
 
 bool ClientRuntime::step_send_pump_loop() {
@@ -2086,18 +2136,21 @@ ClientRuntime::Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
 		out = uplink;
 		return true;
 	};
-	return run_frame(&copy, now_tick);
+	const bool lost_before = joiner_ != nullptr && joiner_->session_lost();
+	return log_client_sends(run_frame(&copy, now_tick), lost_before);
 }
 
 std::vector<std::vector<uint8_t>>
 ClientRuntime::Client_ProcessNetworkFrame(const UplinkBuilder &build_uplink,
 		uint32_t now_tick) {
-	return run_frame(&build_uplink, now_tick);
+	const bool lost_before = joiner_ != nullptr && joiner_->session_lost();
+	return log_client_sends(run_frame(&build_uplink, now_tick), lost_before);
 }
 
 std::vector<std::vector<uint8_t>> ClientRuntime::Client_ProcessNetworkFrame(
 		uint32_t now_tick) {
-	return run_frame(nullptr, now_tick);
+	const bool lost_before = joiner_ != nullptr && joiner_->session_lost();
+	return log_client_sends(run_frame(nullptr, now_tick), lost_before);
 }
 
 } // namespace opennova::inmatch
