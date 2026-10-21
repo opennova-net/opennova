@@ -1095,10 +1095,14 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!conn.frame_update_staged) continue;
 		conn.frame_update_staged = false;
-		// A slot punted by a maintenance leg above is no longer state 6 when
-		// retail reaches its per-slot writer: the description record is the
-		// last thing it is sent.
-		// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate]
+		// A slot punted by a maintenance leg above is still in state 6 when
+		// retail reaches its per-slot writer (a punt writes no slot state), but
+		// its connection has sent its description, so the queue drops the frame:
+		// the description record is the last thing it is sent. Ours leaves
+		// is_in_match at the punt and drops the frame here: the same wire.
+		// [orig: Server_SendEntityStateToPlayer @0x517BA0 - the state-6 test
+		//  `cmp dword ptr [esi+20h], 6` @0x517BD2; CNapiNPConnection_QueueMessage
+		//  @0x628640 - the desc_sent drop `cmp byte ptr [ecx+70Dh], 0` @0x62864D]
 		if (is_in_match(conn) && conn.link.transport != nullptr) {
 			conn.link.transport->host_send(s2c::PER_FRAME_UPDATE,
 					std::move(conn.staged_frame_update), /*reliable=*/false);
