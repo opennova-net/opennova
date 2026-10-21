@@ -178,20 +178,16 @@ bool Lister::start() {
 		gate_udp_ = net::ScopedSocket(net::udp_bind(port, &gate_port_, 0));
 		if (gate_udp_.is_valid()) break;
 	}
-	// A probe whose bind finds no port fails its start, and the gate wait logs the manager's state:
-	// the connect machine stores 2 ahead of the bind, and its fall back to -6 is outside the state
-	// setter's -5..3, so the state stays 2.
-	// [orig: CNapiGateManager_ProcessConnectStateMachine @0x633E3C (state 2), the bind @0x633E43,
-	//  SetState(-6) @0x633E64; CNapiGateManager_SetState @0x633886..0x63388B (below -5: -1, no
-	//  store); CNapiGateManager_WaitForConnect @0x4CE8A4 (the failure), @0x4CE8AA (the log test),
-	//  "%s : GATE GATE SERVICE START FAILED [%ld]." @0x4CE8D2 of the state +0x20 @0x4CE8C2,
-	//  NapiFile_AppendLine @0x4CE8E7]
-	if (!gate_udp_.is_valid() && options_.connect_log != nullptr &&
-			options_.connect_log->enabled()) {
-		constexpr int32_t kGateStateBinding = 2; // [orig: `mov dword ptr [esi+20h], 2` @0x633E3C]
-		options_.connect_log->line(
-				"GATE GATE SERVICE START FAILED [" + std::to_string(kGateStateBinding) + "].");
-	}
+	// A probe whose bind finds no port fails its start: the gate wait writes its CONFIGURING and
+	// STARTING lines ahead of the connect machine, then logs the manager's state, which the
+	// machine left at 2 (its fall back to -6 is outside the state setter's -5..3); no probe
+	// leaves (NwuLobbySession::gate_start_failed).
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE816..0x4CE84D ("GATE CONFIGURING GATE
+	//  MANAGER."), @0x4CE855..0x4CE88C ("GATE STARTING GATE SERVICE."), the machine @0x4CE89D,
+	//  the failure @0x4CE8A4, "%s : GATE GATE SERVICE START FAILED [%ld]." @0x4CE8D2 of the state
+	//  +0x20 @0x4CE8C2, NapiFile_AppendLine @0x4CE8E7; CNapiGateManager_ProcessConnectStateMachine
+	//  @0x633E3C (state 2), the bind @0x633E43, SetState(-6) @0x633E64]
+	if (!gate_udp_.is_valid()) (void)lobby_.gate_start_failed();
 	if (shared_session_socket_ == nullptr) session_udp_ = net::ScopedSocket(net::udp_bind(0));
 	if (!gate_udp_.is_valid() || (shared_session_socket_ == nullptr && !session_udp_.is_valid())) {
 		io::logf(LogLevel::kError, "[net] cannot bind the UDP sockets");

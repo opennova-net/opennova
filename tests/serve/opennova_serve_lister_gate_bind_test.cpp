@@ -106,10 +106,12 @@ int main() {
 		CHECK(lister.gate_port() == next);
 	}
 	// A scan with every port held binds nothing: the start fails, and with the connect log on
-	// the gate wait's line names the manager's state, 2 (the bind's state; the fall back to -6
-	// is out of the setter's range). [orig: CNapiGateManager_ProcessConnectStateMachine
-	// @0x633E3C, @0x633E64; CNapiGateManager_SetState @0x633886; CNapiGateManager_WaitForConnect
-	// @0x4CE8C2..0x4CE8E7]
+	// the gate wait writes its CONFIGURING and STARTING lines ahead of the connect machine, then
+	// the failure line naming the manager's state, 2 (the bind's state; the fall back to -6 is
+	// out of the setter's range). [orig: CNapiGateManager_WaitForConnect @0x4CE816..0x4CE84D,
+	// @0x4CE855..0x4CE88C, the machine @0x4CE89D, @0x4CE8C2..0x4CE8E7;
+	// CNapiGateManager_ProcessConnectStateMachine @0x633E3C, @0x633E64;
+	// CNapiGateManager_SetState @0x633886]
 	options.gate_ports = {held_port};
 	MemoryFiles files;
 	inmatch::ConnectLog log(files);
@@ -123,6 +125,8 @@ int main() {
 		CHECK(lister.exit_code() == serve::kExitNetwork);
 	}
 	CHECK(files.files[inmatch::kConnectLogFile].substr(header_bytes) ==
+	      "T : GATE CONFIGURING GATE MANAGER.\r\n"
+	      "T : GATE STARTING GATE SERVICE.\r\n"
 	      "T : GATE GATE SERVICE START FAILED [2].\r\n");
 	net::shutdown();
 	if (failures != 0) {
