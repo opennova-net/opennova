@@ -303,14 +303,7 @@ void row_leg_chase(ClientEntityState &es, uint32_t key) {
 // AND dive bits (0x208000).
 void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
                        int32_t capsule_bottom, int32_t capsule_top,
-                       int32_t water_z, bool has_water, uint32_t tick) {
-	if (!has_water) {
-		// No mission water plane (the EnvState 0 sentinel): the channel is
-		// off, and any stale float/dive bits clear so the gravity gate can
-		// never wedge on them.
-		es.rm_entity_flags &= ~0x208000u;
-		return;
-	}
+                       int32_t water_z, uint32_t tick) {
 	const bool afloat = (es.rm_entity_flags & 0x8000u) != 0;
 	const int32_t probe = io::bam_add(es.z, afloat ? 0 : 0xA000);
 	if (probe >= water_z || (es.rm_entity_flags & 0x100000u) != 0) {
@@ -378,7 +371,6 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
                           int32_t peer_count, uint32_t tick, int32_t water_z,
-                          bool has_water,
                           std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds) {
 	if (es.rm_adm_id < 0) return;
 	const auto play_slot_at = [&](uint8_t slot, int32_t x, int32_t y, int32_t z) {
@@ -759,7 +751,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			}
 		}
 		row_water_channel(es, z_post_integrate, frame.capsule_bottom,
-		                  frame.capsule_top, water_z, has_water, tick);
+		                  frame.capsule_top, water_z, tick);
 		return;
 	}
 
@@ -794,7 +786,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// behavior (a resolver-less embedder with env water keeps swimmers at
 	// the surface between records).
 	row_water_channel(es, z_post_integrate, frame.capsule_bottom,
-	                  frame.capsule_top, water_z, has_water, tick);
+	                  frame.capsule_top, water_z, tick);
 }
 
 } // namespace
@@ -934,7 +926,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			                     &replica_bound_radius_resolver_,
 			                     contact_peers.data(),
 			                     static_cast<int32_t>(contact_peers.size()),
-			                     rm_key, water_z_, has_water_, slot_sounds_);
+			                     rm_key, water_z_, slot_sounds_);
 	};
 	// The corpse leg's def source (row_corpse_tail), read only for a row
 	// whose dead bit is latched or latches this tick, and the org1 corpses it

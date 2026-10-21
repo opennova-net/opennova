@@ -292,13 +292,12 @@ public:
 		carrier_pose_provider_ = std::move(provider);
 	}
 
-	// Mission water plane for the replica water/float channel (16.16;
-	// has_water false = no water in this world). Fed per pump by the
-	// embedder from the env state [orig: g_EnvWaterHeightFixed @ 0x26C6454].
-	void set_water_z(int32_t z, bool has_water) {
-		water_z_ = z;
-		has_water_ = has_water;
-	}
+	// Mission water plane for the replica water/float channel (16.16), compared
+	// raw: retail keeps no dry sentinel (the word is 0 with no water authored).
+	// Fed per pump by the embedder from the env state [orig:
+	// g_EnvWaterHeightFixed @ 0x26C6454; Environment_InitDefaults @0x57C010,
+	// the memset @0x57C011..0x57C01E].
+	void set_water_z(int32_t z) { water_z_ = z; }
 
 	// The per-class between-update mover, one call per 62.5 Hz logic tick after
 	// the recv fold (retail order: Client_ProcessNetworkFrame first, entity
@@ -316,6 +315,9 @@ public:
 	//    for traitless vehicles and lib-only embedders.
 	// No-op unless remote-motion mode is enabled.
 	void tick_remote_motion(uint16_t self_handle);
+	// The mover ticks run so far: the replica's tick clock (the leg re-plant
+	// window, the stale-carrier sweep's 0x7F phase), g_CurrentTick's stand-in.
+	uint32_t remote_motion_tick() const { return rm_tick_counter_; }
 	// Every armed player row's secondary channel for one tick (the advance,
 	// then the 16-tick selection keyed on `tick`), the own row excepted.
 	void tick_row_weapon_channels(uint16_t self_handle, uint32_t tick);
@@ -327,10 +329,11 @@ public:
 	// poses back into ClientState. Keeping this phase explicit prevents pool
 	// iteration order from leaving an earlier child one mover tick behind a
 	// later carrier.
-	// tick_sweep is true only from the per-tick mover call: it advances the
-	// pure-client 128-tick stale-carrier sweep (C2S 0x0F for carrier + child,
-	// local child destroy pending authority re-spawn) — record applies must
-	// not double-run the cadence [orig: the @0x440d41..0x440e2f sweep].
+	// tick_sweep is true only from the per-tick mover call: it runs the
+	// pure-client stale-carrier sweep on the mover tick's 0x7F phase (C2S 0x0F
+	// for carrier + child, local child destroy pending authority re-spawn) --
+	// record applies must not run it [orig: Entity_UpdateTransformAndTurret
+	// @0x440CA0, the sweep @0x440D2A..0x440E2F].
 	void refresh_carried_entities(bool tick_sweep = false);
 
 	// S2C 0x5D empty-slot sweep: retire one RAW pool-0 slot index and everything
@@ -633,7 +636,7 @@ private:
 	world::IRootMotionSource *root_motion_ = nullptr;
 	const world::WeaponTable *weapon_table_ = nullptr;
 	const terrain::TerrainHeightField *remote_motion_terrain_ = nullptr;
-	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
+	uint32_t rm_tick_counter_ = 0; // the mover tick clock [orig: tick&63, the sweep's tick&0x7F]
 	bool remote_motion_mode_ = false;
 	ReplicaContactResolver replica_contact_resolver_;
 	// tick_remote_motion's per-tick replica-peer sphere table (reused capacity).
@@ -641,7 +644,6 @@ private:
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
 	int32_t water_z_ = 0;
-	bool has_water_ = false;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
 	std::shared_ptr<const ItemReplicationCatalog> item_catalog_; // the items.def def facts
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback

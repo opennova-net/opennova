@@ -203,11 +203,14 @@ int main() {
 	ok &= expect(gun->heading_bam == hull->heading_bam,
 	             "the gun heading tracks the hull heading (verbatim adoption)");
 
-	// --- The pure-client 128-tick stale-carrier sweep [orig:
-	// Entity_UpdateTransformAndTurret @0x440ca0, the sweep @0x440d41..
-	// 0x440e2f]: a child whose structural carrier never resolves requests
-	// BOTH rows over C2S 0x0F after a 128-tick run, then locally destroys
-	// itself pending the authority re-spawn.
+	// --- The pure-client stale-carrier sweep [orig:
+	// Entity_UpdateTransformAndTurret @0x440CA0 - the destroyed mark
+	// @0x440D2A, the 0x7F phase @0x440D3C..0x440D41, the 0x0F pair
+	// @0x440DAB / @0x440E29, Entity_Destroy @0x440E2F]: a child whose
+	// carrier was never written is never swept; once the shared destroy
+	// removes its carrier (Entity_Destroy's mark @0x43EA7F), the first mover
+	// tick whose low seven bits are all set requests BOTH rows over C2S 0x0F
+	// and locally destroys the child pending the authority re-spawn.
 	{
 		constexpr uint16_t kOrphanGun = 0x1018;
 		constexpr uint16_t kMissingHull = 0x1030; // never spawned
@@ -229,21 +232,42 @@ int main() {
 		ok &= expect(view.state().find(kOrphanGun) != nullptr,
 		             "the orphaned gun materializes");
 		(void)view.drain_carrier_repair_requests(); // clear any prior state
-		for (int t = 0; t < 127; ++t) view.tick_remote_motion(0xFFFF);
-		ok &= expect(view.state().find(kOrphanGun) != nullptr,
-		             "127 unresolved ticks keep the child (inside the window)");
-		ok &= expect(view.drain_carrier_repair_requests().empty(),
-		             "no repair request before the 128-tick boundary");
+		for (int t = 0; t < 300; ++t) view.tick_remote_motion(0xFFFF);
+		ok &= expect(view.state().find(kOrphanGun) != nullptr &&
+		                     view.drain_carrier_repair_requests().empty(),
+		             "a carrier never written carries no mark: no sweep");
+
+		// The carrier spawns, then the S2C 0x12 destroys it.
+		nw::PoolSpawnBatch hull_batch;
+		nw::PoolSpawnRecord late_hull;
+		late_hull.slot_id = kMissingHull;
+		late_hull.item_type_id = kHullType;
+		late_hull.entity_name = "Late Hull";
+		late_hull.pos_x = hull_x0;
+		late_hull.pos_y = hull_y0;
+		late_hull.pos_z = hull_z0;
+		hull_batch.records.push_back(late_hull);
+		view.apply(nw::s2c::POOL_SPAWN, nw::encode_pool_spawn_batch(hull_batch));
+		ok &= expect(view.state().find(kMissingHull) != nullptr, "the carrier spawns");
+		nw::EntityRemove removal;
+		removal.entity_handle = kMissingHull;
+		view.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
+		ok &= expect(view.state().find(kMissingHull) == nullptr &&
+		                     view.state().find(kOrphanGun) != nullptr,
+		             "the 0x12 destroys the carrier and leaves the child");
+		// Run to the tick before the 0x7F phase: nothing yet.
+		while (((view.remote_motion_tick() + 1u) & 0x7Fu) != 0x7Fu)
+			view.tick_remote_motion(0xFFFF);
+		ok &= expect(view.state().find(kOrphanGun) != nullptr &&
+		                     view.drain_carrier_repair_requests().empty(),
+		             "no repair request off the 0x7F phase");
 		view.tick_remote_motion(0xFFFF);
+		ok &= expect((view.remote_motion_tick() & 0x7Fu) == 0x7Fu, "the phase tick");
 		const std::vector<uint16_t> repairs =
 				view.drain_carrier_repair_requests();
-		bool asked_carrier = false, asked_child = false;
-		for (uint16_t h : repairs) {
-			if (h == kMissingHull) asked_carrier = true;
-			if (h == kOrphanGun) asked_child = true;
-		}
-		ok &= expect(asked_carrier && asked_child,
-		             "the sweep queues C2S 0x0F for carrier AND child");
+		ok &= expect(repairs.size() == 2u && repairs[0] == kMissingHull &&
+		                     repairs[1] == kOrphanGun,
+		             "the sweep queues C2S 0x0F for the carrier, then the child");
 		ok &= expect(view.state().find(kOrphanGun) == nullptr,
 		             "the sweep locally destroys the child pending re-spawn");
 	}

@@ -58,7 +58,7 @@ public:
 	// received flag, C2S 0x42), then every open's activate event (the
 	// selection forgotten, the list populated).
 	// [orig: Input_HandleActionBinding_0 @0x4E0AF1..0x4E0B05 (UI_OpenMenuScreen
-	//  @0x4E0AFD); UI_OpenMenuScreen @0x54E520 -- the load @0x54E584, the select
+	//  @0x4E0AFD); UI_OpenMenuScreen @0x54E520 -- the load @0x54E57D, the select
 	//  @0x54E599]
 	void open(ClientRuntime &rt, const world::World &world, const def::DefItemsFile *items);
 	// Once per main frame after the client net frame: the poll (its 0x42 leaves
@@ -74,7 +74,7 @@ public:
 	// player standing on a vehicle bay with a selection sends C2S 0x40 [the bay's
 	// handle][the selection]; either closes the screen. Returns true when a 0x40
 	// was queued.
-	// [orig: the VEHICLE button callback @0x563B60 (registered @0x5641D9 /
+	// [orig: VehicleMenu_OnButton @0x563B60 (registered @0x5641D9 /
 	//  @0x5641F7, user arg 0 ACCEPT / 1 CANCEL)]
 	bool click(ClientRuntime &rt, const world::World &world, bool cancel);
 

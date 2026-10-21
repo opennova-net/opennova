@@ -41,8 +41,10 @@ struct TerrainHeightField {
 	bool wrap_x = false;
 	bool wrap_z = false;
 	SectorLayout layout;     // world->source sector remap (the *_world variants)
-	int32_t water_y = 0;     // [orig: worldY @0x26C6454] water plane, 16.16 fixed
-	bool has_water = false;
+	// The water plane, 16.16 fixed, read raw: retail keeps no dry sentinel (the
+	// word is 0 with none authored) [orig: worldY @0x26C6454; Environment_InitDefaults
+	// @0x57C010, the memset @0x57C011..0x57C01E].
+	int32_t water_y = 0;
 
 	bool valid() const { return heightmap != nullptr && dim > 0; }
 };
@@ -64,7 +66,6 @@ struct TerrainHeightFieldNoLocks {
 	int dim;
 	SectorLayout layout;
 	int32_t water_y;
-	bool has_water;
 };
 } // namespace detail
 

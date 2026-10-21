@@ -282,7 +282,7 @@ int main() {
 	{
 		const int32_t z0 = row_a->z;
 		const int32_t water = z0 + 0x18000;
-		view.set_water_z(water, true);
+		view.set_water_z(water);
 		tick_fresh(view);
 		ok &= expect((row_a->rm_entity_flags & 0x8000u) != 0,
 		             "a submerged row latches the float bit");
@@ -305,7 +305,7 @@ int main() {
 		ok &= expect((row_a->rm_entity_flags & 0x200000u) == 0,
 		             "surfacing clears the dive bit");
 		// Leaving the water (row above the plane) clears float + dive.
-		view.set_water_z(row_a->z - 0x20000, true);
+		view.set_water_z(row_a->z - 0x20000);
 		tick_fresh(view);
 		ok &= expect((row_a->rm_entity_flags & 0x208000u) == 0,
 		             "the not-submerged exit clears the float and dive bits");
@@ -317,7 +317,7 @@ int main() {
 	{
 		row_b->cls = nw::EntityClass::Infantry;
 		const int32_t water = row_b->z + 0x18000;
-		view.set_water_z(water, true);
+		view.set_water_z(water);
 		for (int i = 0; i < 80; ++i) tick_fresh(view);
 		const int32_t line = water - (0xD000 >> 1) - 0x4C9;
 		const int32_t err = row_b->z - line;
@@ -325,10 +325,10 @@ int main() {
 		             "the org1 row latches the float bit");
 		ok &= expect(err > -(1224 + 620) && err < (1224 + 620),
 		             "the org1 quarter-chase holds the bob band");
-		view.set_water_z(0, false);
+		view.set_water_z(0); // the plane, raw, under the rows (no dry sentinel)
 		tick_fresh(view);
 		ok &= expect((row_b->rm_entity_flags & 0x208000u) == 0,
-		             "no water plane clears the float and dive bits");
+		             "a plane under the row clears the float and dive bits");
 		row_b->rm_entity_flags = 0;
 		row_b->cls = nw::EntityClass::Player;
 	}
@@ -340,7 +340,7 @@ int main() {
 	// motion, and the MoveOrder-bit3 air-steer nudge plus the 63/64 damp run
 	// [orig: @0x4b78a8..0x4b79dc].
 	{
-		view.set_water_z(0, false);
+		view.set_water_z(0);
 		cap.return_clearance = -0x100; // ground the row first
 		tick_fresh(view);
 		row_a->rm_entity_flags = 0;
@@ -394,7 +394,7 @@ int main() {
 	// the mover-entry stamp; the test plays the carrier's mover by
 	// restamping saved = live after each tick. [orig: org2 @0x4b52a0..0x4b5726]
 	{
-		view.set_water_z(0, false);
+		view.set_water_z(0);
 		cap.return_clearance = 1000;
 		row_a->rm_entity_flags = 0;
 		row_a->rm_vel_xy[0] = 0;

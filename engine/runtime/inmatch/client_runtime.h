@@ -407,10 +407,10 @@ public:
 	// one reliable message with no finite lifetime (a joiner's held one-shot
 	// queue; the listen host's own client over its loopback to its own
 	// server). False when no session carries it.
-	// [orig: NetPacket_SendEmptyType42 @0x42DBE0 -- QueueReliableMessage(0x42,
-	//  1, 0, .., 0) @0x42DC01; NetPacket_SendWeaponSelectType40 @0x42DB50 (a
-	//  misnomer) -- the body @0x42DB64..0x42DB77, QueueReliableMessage(0x40,
-	//  1, 0, .., 3) @0x42DB86]
+	// [orig: NetPacket_SendVehicleSpawnAvailabilityRequest @0x42DBE0 --
+	//  QueueReliableMessage(0x42, 1, 0, .., 0) @0x42DBFC;
+	//  NetPacket_SendVehicleSpawnRequest @0x42DB50 -- the body
+	//  @0x42DB64..0x42DB77, QueueReliableMessage(0x40, 1, 0, .., 3) @0x42DB81]
 	bool queue_vehicle_spawn_availability_request();
 	bool queue_vehicle_spawn_request(uint16_t source_handle, uint8_t type_index);
 	// The S2C 0x70 received flag the screen's first open clears ahead of its

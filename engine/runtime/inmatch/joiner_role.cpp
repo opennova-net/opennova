@@ -998,7 +998,7 @@ void JoinerRole::wire_frame_providers() {
 	// [orig: g_EnvWaterHeightFixed @ 0x26C6454; Environment_InitDefaults
 	//  @0x57C010 (the memset @0x57C011..0x57C01E); Entity_UpdateInfantryPlayerBody @0x4B803C,
 	//  Entity_UpdateInfantryAI @0x4BFAFE]
-	rt.view().set_water_z(world.env.water_z, true);
+	rt.view().set_water_z(world.env.water_z);
 	// Replica peer/source spheres are initialized from the exact same typed
 	// items.def/model result as projectile and lighting projections. The
 	// pipeline retains this callback across frames; it reads the kernel the
@@ -1450,7 +1450,7 @@ void JoinerRole::apply_gameplay_events() {
 		// non-person branch's refill on an EWeap entity's own MountSlot, and the
 		// self-only WeaponSlot_ReloadAmmo branch below.
 		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the non-person
-		//  WeaponSlot_ReloadAmmo call @0x42C109, whose EWeap slot @0x54172D]
+		//  WeaponSlot_ReloadAmmo call @0x42C116, whose EWeap slot @0x54172D]
 		if (!rt.has_self_handle() || reload.entity_handle != rt.self_handle()) {
 			world::Entity *mount = world.registry.get(world::EntityHandle{reload.entity_handle});
 			if (mount != nullptr && mount->has_item_def &&

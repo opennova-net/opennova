@@ -522,15 +522,23 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 				continue;
 			ClientEntityState *parent = find_row(persistent_carrier[child_index]);
 			if (parent == nullptr) {
-				// The pure-client stale-carrier sweep [orig: @0x440d41..
-				// 0x440e2f]: after a 128-tick unresolvable run, request BOTH
-				// rows over C2S 0x0F and locally destroy the child — the
-				// authority's re-spawn re-materializes the pair. A later batch
-				// may still provide the carrier inside the window, which
-				// resets the run below.
-				if (tick_sweep && depth == 0 &&
-				    ++child.carrier_missing_ticks >= 128) {
-					queue_carrier_repair(persistent_carrier[child_index]);
+				// The pure-client stale-carrier sweep: a carrier the shared
+				// destroy removed (its slot's destroyed mark) on a tick whose
+				// low seven bits are all set requests BOTH rows over C2S 0x0F,
+				// the carrier's first, and locally destroys the child; the
+				// authority's re-spawn re-materializes the pair. A carrier no
+				// record ever wrote carries no mark and is never swept. The
+				// role gates (in session, a session peer, not the authority)
+				// are the remote-motion mode's: the authority never runs it.
+				// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the gates
+				//  @0x440D03..0x440D24, the mark @0x440D2A, `and eax, 7Fh` /
+				//  `cmp al, 7Fh` @0x440D3C..0x440D41, the carrier's 0x0F
+				//  @0x440DAB, the child's @0x440E29, Entity_Destroy @0x440E2F]
+				const uint16_t carrier_handle = persistent_carrier[child_index];
+				if (tick_sweep && depth == 0 && (rm_tick_counter_ & 0x7Fu) == 0x7Fu &&
+						std::find(state_.destroyed_marks.begin(), state_.destroyed_marks.end(),
+								carrier_handle) != state_.destroyed_marks.end()) {
+					queue_carrier_repair(carrier_handle);
 					queue_carrier_repair(child.handle);
 					if (std::find(sweep_destroyed.begin(), sweep_destroyed.end(),
 							child.handle) == sweep_destroyed.end())
@@ -538,7 +546,6 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 				}
 				continue;
 			}
-			child.carrier_missing_ticks = 0;
 			// An ewep row the joiner's world composes: the class update poses it
 			// from the carrier's posed model at its subType's anchor and owns the
 			// dead-carrier hide; the world's pose is read back into this row

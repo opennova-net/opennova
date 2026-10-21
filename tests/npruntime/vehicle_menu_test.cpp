@@ -14,7 +14,7 @@
 //     rows [orig: UI_PopulateVehicleWeaponSlotList @0x5638A0; CListWnd_GetRowValue
 //     @0x6445F0].
 //   - ACCEPT on a vehicle bay sends C2S 0x40 [u16 bay][u8 group]
-//     [orig: the VEHICLE button callback @0x563B60; NetPacket_SendWeaponSelectType40
+//     [orig: VehicleMenu_OnButton @0x563B60; NetPacket_SendVehicleSpawnRequest
 //     @0x42DB50].
 // Every value below is an input or follows from the cited arithmetic.
 

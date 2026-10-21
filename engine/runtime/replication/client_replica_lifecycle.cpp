@@ -110,6 +110,10 @@ uint32_t ClientReplicaPipeline::begin_entity_lifetime(uint16_t handle) {
 		if (prior->spawn_revision != 0) revision = prior->spawn_revision;
 	if (++revision == 0) ++revision;
 	discard_entity_notifications(handle);
+	// The record's memset clears the slot's destroyed mark with the rest
+	// [orig: Entity_Destroy's mark @0x43EA7F; the 0x0D memset @0x432D23].
+	state_.destroyed_marks.erase(std::remove(state_.destroyed_marks.begin(),
+			state_.destroyed_marks.end(), handle), state_.destroyed_marks.end());
 	return revision;
 }
 
@@ -184,6 +188,11 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 			state_.entities.end());
 	if (detached || state_.entities.size() != before)
 		state_.mark_topology_changed();
+	// The zeroed slot is marked destroyed [orig: Entity_Destroy @0x43EA70
+	// memset, `mov byte ptr [esi+219h], 1` @0x43EA7F].
+	if (std::find(state_.destroyed_marks.begin(), state_.destroyed_marks.end(), root_handle) ==
+			state_.destroyed_marks.end())
+		state_.destroyed_marks.push_back(root_handle);
 }
 
 // The carried flag leaves its person carrier, keeping the carrier's pose

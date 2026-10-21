@@ -802,8 +802,8 @@ bool ClientRuntime::queue_team_change_request() {
 	return true;
 }
 
-// [orig: NetPacket_SendEmptyType42 @0x42DBE0 -- g_NetMsgLen = 0 @0x42DBF2,
-//  QueueReliableMessage(0x42, 1, 0, .., 0) @0x42DC01]
+// [orig: NetPacket_SendVehicleSpawnAvailabilityRequest @0x42DBE0 -- g_NetMsgLen = 0 @0x42DBF2,
+//  QueueReliableMessage(0x42, 1, 0, .., 0) @0x42DBFC]
 bool ClientRuntime::queue_vehicle_spawn_availability_request() {
 	if (queue_host_message(c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {})) return true;
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
@@ -811,9 +811,9 @@ bool ClientRuntime::queue_vehicle_spawn_availability_request() {
 	return true;
 }
 
-// [orig: NetPacket_SendWeaponSelectType40 @0x42DB50 -- the group byte @0x42DB64,
+// [orig: NetPacket_SendVehicleSpawnRequest @0x42DB50 -- the group byte @0x42DB64,
 //  the handle word @0x42DB71, g_NetMsgLen = 3 @0x42DB77, QueueReliableMessage(0x40,
-//  1, 0, .., 3) @0x42DB86]
+//  1, 0, .., 3) @0x42DB81]
 bool ClientRuntime::queue_vehicle_spawn_request(uint16_t source_handle, uint8_t type_index) {
 	VehicleSpawnRequest pick;
 	pick.source_handle = source_handle;

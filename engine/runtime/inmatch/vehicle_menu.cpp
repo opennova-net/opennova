@@ -99,7 +99,7 @@ void VehicleMenu::populate(const ClientRuntime &rt, const world::World &world,
 		++added;
 	}
 	// The kept index re-selected when it is still a row [orig:
-	// CListWnd_SetRowVisibility @0x563A78 (@0x645190: out of range selects
+	// CListWnd_SetRowVisibility @0x645190, the call @0x563A81 (out of range selects
 	// nothing)]; the selection is that row's value, 0 when the index is past
 	// the rows, -1 with none listed [orig: CListWnd_GetRowValue @0x563A90
 	// (@0x6445F0: 0 out of range), the stores @0x563A95 / @0x563A9C].
@@ -117,7 +117,7 @@ void VehicleMenu::open(ClientRuntime &rt, const world::World &world,
 	// the poll is the scene's destroy, so the first parse and an unarmed poll
 	// are one test here.
 	// [orig: VehicleMenu_Open @0x564240 -- populate @0x56424E when g_VehicleMenuOpen
-	//  is 0, armed @0x564253; the flag clear @0x56425D, NetPacket_SendEmptyType42
+	//  is 0, armed @0x564253; the flag clear @0x56425D, NetPacket_SendVehicleSpawnAvailabilityRequest
 	//  @0x564267]
 	if (!poll_armed_) {
 		populate(rt, world, items);
@@ -134,7 +134,7 @@ void VehicleMenu::open(ClientRuntime &rt, const world::World &world,
 void VehicleMenu::poll(ClientRuntime &rt, const world::World &world,
 		const def::DefItemsFile *items) {
 	// [orig: VehicleMenu_PollAvailability @0x563AF0 -- the armed test @0x563AF0..0x563AF7,
-	//  ++ @0x563AF9..0x563AFE, `test al, 3Fh` @0x563B08, the 0x42 @0x563B0A]
+	//  ++ @0x563AF9..0x563AFE, `test al, 3Fh` @0x563B01, the 0x42 @0x563B0A]
 	if (!poll_armed_) return;
 	++poll_counter_;
 	if ((poll_counter_ & 0x3F) != 0) return;
@@ -157,7 +157,7 @@ void VehicleMenu::select_row(int row) {
 }
 
 bool VehicleMenu::click(ClientRuntime &rt, const world::World &world, bool cancel) {
-	// [orig: the VEHICLE button callback @0x563B60 -- Input_ResetAllState @0x563B60
+	// [orig: VehicleMenu_OnButton @0x563B60 -- Input_ResetAllState @0x563B60
 	//  (the embedder's close resets input), the user-arg test @0x563B65]
 	bool sent = false;
 	if (!cancel) {
@@ -171,7 +171,7 @@ bool VehicleMenu::click(ClientRuntime &rt, const world::World &world, bool cance
 				(ground->item_attrib2 & def::DEF_ITEM_ATTRIB2_VEHICLEBAY) != 0 &&
 				selection_ != -1) {
 			// The bay's handle from its pool and index [orig: @0x563B97..0x563BB1,
-			//  @0x563BE8..0x563C00], then NetPacket_SendWeaponSelectType40 @0x563BCE.
+			//  @0x563BE8..0x563C00], then NetPacket_SendVehicleSpawnRequest @0x563BCE.
 			sent = rt.queue_vehicle_spawn_request(player->ground_target.packed,
 					static_cast<uint8_t>(selection_));
 		}

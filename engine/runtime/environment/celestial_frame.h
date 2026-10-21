@@ -160,6 +160,10 @@ inline SunVeil sun_veil_frame(const EnvironmentState &state, bool sun_model,
 	const float view_dot = forward_m.x * sun_m.x + forward_m.z * sun_m.z + forward_m.y * sun_m.y;
 	SunVeil veil = sun_veil_from_dot(io::float_to_fp16_16(view_dot), occlusion_brightness,
 			sun_dim, overcast);
+	// The water-reflected secondary runs only on a nonzero plane: retail's own
+	// zero test of the word [orig: Environment_ApplySunVeilAndExposureStopdown
+	// @0x5AD8B0, `cmp g_EnvWaterHeightFixed, 0` / `jz` @0x5AD8D5..0x5AD8DC]
+	// (water_height() is 0 with no plane authored).
 	if (!state.has_water_height() || state.water_height() == 0.0f) return veil;
 	Vec3 point_m;
 	// A rejected reflection (camera at or below the plane) adds no secondary

@@ -64,13 +64,10 @@ public:
 	bool valid() const { return field_.valid(); }
 	// The occupant water clamp's plane: the mission water height in the SAME
 	// 16.16 world units the ground solve compares (the retail global the
-	// clamp reads [orig: worldY @0x26C6454 -- g_EnvWaterHeightFixed]); 0 = no
-	// authored water. The kernel feeds it from World::env.water_z whenever
-	// the environment changes; build() resets it to none.
-	void set_water_plane(int32_t water_y_q16) {
-		field_.water_y = water_y_q16;
-		field_.has_water = water_y_q16 != 0;
-	}
+	// clamp reads [orig: worldY @0x26C6454 -- g_EnvWaterHeightFixed]), 0 with
+	// none authored and compared raw. The kernel feeds it from World::env.water_z
+	// whenever the environment changes; build() resets it to 0.
+	void set_water_plane(int32_t water_y_q16) { field_.water_y = water_y_q16; }
 
 	// Writes `rect` (atlas texels: x, z the column and row, w, h the size) of the heights the store holds
 	// from `src` (raw16, `stride` samples a row, stride >= w), in place: the height view keeps pointing at

@@ -91,7 +91,6 @@ void TerrainFieldStore::build(const uint16_t *heightmap, size_t heightmap_count,
 	// The water plane arrives separately (set_water_plane, fed from the
 	// world's environment): a rebuilt field starts without one.
 	field_.water_y = 0;
-	field_.has_water = false;
 
 	// The charmap surface raster for the footstep surface pick (owned copy like
 	// the depth buffer; shares the sector grid + origins)

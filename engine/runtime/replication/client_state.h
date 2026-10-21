@@ -604,17 +604,6 @@ struct ClientEntityState {
 	// spawnPhase, the think cadence the plyr callback re-arms
 	// [orig: Entity_HandleDamageAndTriggerZones @0x407B5E / @0x407C71].
 	int32_t spawn_phase = 0;
-	// The pure-client stale-carrier sweep's run length: consecutive mover
-	// ticks this no-callback child's persistent carrier stayed unresolvable.
-	// At 128 the sweep queues C2S 0x0F for the carrier AND the child, then
-	// locally destroys the child pending the authority re-spawn — retail keys
-	// the same 128-tick cadence on `tick & 0x7F == 127` with the carrier's
-	// staleness marker; the per-child run is this transport layer's
-	// structural translation of that pair (our unresolvable-carrier state IS
-	// the staleness the marker tracks).
-	// [orig: Entity_UpdateTransformAndTurret @0x440ca0, the sweep
-	//  @0x440d41..0x440e2f]
-	int32_t carrier_missing_ticks = 0;
 	// Replica-row vertical velocity — the caller-owned gravity channel of the
 	// org movers, integrated before the contact resolve and zeroed on landing
 	// [orig: org2 vel_z -= 208 then pos += vel @0x4B7CE0..0x4B7CEF; org1
@@ -1485,6 +1474,14 @@ struct ClientState {
 		uint32_t serial = 0;
 	} tracked_target;
 	std::vector<ClientEntityState> entities;
+	// The handles whose row the shared destroy removed and no record has
+	// rewritten since: retail's Entity_Destroy zeroes the slot and then marks
+	// it destroyed (+0x219 = 1), and every record that rewrites the slot
+	// clears it with its memset, so a missing row's handle carries the mark
+	// only when a destroy removed it. The stale-carrier sweep reads it.
+	// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70, the mark
+	//  @0x43EA7F; read by Entity_UpdateTransformAndTurret @0x440D2A]
+	std::vector<uint16_t> destroyed_marks;
 	std::uint32_t frames_applied = 0;
 
 	ClientEntityState *find(uint16_t handle);
