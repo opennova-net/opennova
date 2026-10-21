@@ -573,6 +573,14 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		if personal_index >= 0:
 			sim.set_local_player_weapon(weapons.get_weapon(personal_index), {})
 		sim.drain_local_player_weapon_events()
+		# The host's own join sends its own client the S2C 0x0F, which the client
+		# handles at the head of the next frame and whose local-player block writes
+		# the shared body's Yaw, look yaw, Pitch and Roll (D-NET-NEW-LX-2): one frame
+		# lands it before the player faces the gun, as in play, so it cannot reset
+		# the mounted look below. [orig: Server_OnPlayerJoin's 0x0F, the send
+		# @0x51A869; NapiNPClientMsg_0x00F @0x42E200 - the stores @0x42E3B9..0x42E3F2,
+		# the look yaw @0x42E3E3]
+		sim.step()
 		MountLook.face(self, sim, Vector3(2, 0, 0))
 		assert_true(sim.local_player_toggle_mount(),
 				"the listen-server player mounts the config-%d gun" % config_value)
