@@ -452,11 +452,16 @@ std::string AdminConsole::status_report() {
 	out += "CURRENT TOD: " + std::to_string(tod_high) + "\r\n";
 	// Every active slot, a Serve Only host's own slot 0 included.
 	out += "CURRENT # PLAYERS: " + std::to_string(slots.size() + (host ? 1u : 0u)) + "\r\n";
-	out += "CURRENT MAP: " + ctx_.config.mission_file + "\r\n";
+	// The process's g_MapFileName and g_GameType (AdminProcessMission).
+	// [orig: CAdminServer_HandleStatus @0x402FF6, @0x403052]
+	const AdminProcessMission own{ctx_.config.mission_file,
+			world != nullptr ? world->match.rules().game_type : ctx_.config.game_type};
+	const AdminProcessMission &mission = seams_.process_mission != nullptr ? *seams_.process_mission : own;
+	out += "CURRENT MAP: " + mission.map_file + "\r\n";
 	// The NULL arm's Overlays key; the waypoint family's "&" rides the debug word
 	// dword_24C1930's 0x10000 (an input-binding toggle), clear on a server.
 	// [orig: GameType_GetAbbreviation @0x520FD0]
-	const uint32_t game_type = world != nullptr ? world->match.rules().game_type : ctx_.config.game_type;
+	const uint32_t game_type = mission.game_type;
 	const char *key = game_type::abbreviation_overlay_key(game_type);
 	std::string abbreviation;
 	if (key[0] != '\0' && seams_.game_text) abbreviation = seams_.game_text("Overlays", key);

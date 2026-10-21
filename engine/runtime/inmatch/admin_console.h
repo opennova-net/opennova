@@ -44,6 +44,19 @@ enum class AdminScene : uint8_t {
 	Other,
 };
 
+// The process's mission globals the status report prints: g_MapFileName (CURRENT MAP) and
+// g_GameType (CURRENT GAME TYPE). The running session writes them (a host's mission, a joiner's
+// join, its S2C 0x64 / 0x2C / 0x08) and no teardown resets them, so a joiner's report reads the
+// joined session's and the menus' the last session's.
+// [orig: CAdminServer_HandleStatus @0x402FF6 (&g_MapFileName), @0x403052
+//  (GameType_GetAbbreviation(g_GameType)); the joiner's writers NapiNPClientMsg_MissionMapNames
+//  @0x427E6C, NapiNPClientMsg_HandleMissionDataChunk @0x4324D8,
+//  NapiNPClientMsg_HandleSessionConfig @0x42836D, UI_EnumerateAndJoinSession @0x56A207]
+struct AdminProcessMission {
+	std::string map_file;
+	uint32_t game_type = 0;
+};
+
 // The usage reply for a rights word: `USAGE - [QUIT`, then each listed verb by its usage bit
 // (CHAT, ADMIN and BANLIST by 0x80, 0x100 and 0x200, though the dispatch opens them on 0x40),
 // then `]`. [orig: CAdminServer_DispatchCommand @0x406A8D..0x406D58]
@@ -104,6 +117,9 @@ public:
 		std::function<void(const std::string &text, uint32_t argb)> system_message;
 		// The mission's items.def rows, which CMD SAVENFO's dump names (null: none loaded).
 		std::function<const def::DefItemsFile *()> items_table;
+		// The process's mission globals the status report prints (RemoteAdminConsoles keeps
+		// them); null reads the context's own mission (a console whose session is the process's).
+		const AdminProcessMission *process_mission = nullptr;
 	};
 
 	AdminConsole(NapiNPServerCtx &ctx, Seams seams);

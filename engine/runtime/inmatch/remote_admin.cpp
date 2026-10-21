@@ -66,16 +66,30 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 		world::World *world = binding.world;
 		seams.quit_to_menu = [world] { world->mission_exit_reason = world::kWorldMissionExitQuit; };
 	}
+	seams.process_mission = &process_mission_;
 	console_ = std::make_unique<AdminConsole>(ctx != nullptr ? *ctx : session_less_, std::move(seams));
+}
+
+void RemoteAdminConsoles::refresh_process_mission() {
+	if (const NapiNPServerCtx *host = bound_.host) {
+		process_mission_.map_file = host->config.mission_file;
+		process_mission_.game_type =
+				host->world != nullptr ? host->world->match.rules().game_type : host->config.game_type;
+	} else if (const ClientRuntime *client = bound_.client) {
+		process_mission_.map_file = client->map_file();
+		process_mission_.game_type = client->game_type();
+	}
 }
 
 // [orig: CAdminServer_DispatchCommand @0x406720]
 bool RemoteAdminConsoles::dispatch(const AdminSession &session, std::string_view line,
 		std::vector<std::string> &replies) {
+	refresh_process_mission();
 	return console_ != nullptr ? console_->dispatch(session, line, replies) : true;
 }
 
 std::string RemoteAdminConsoles::status_report() {
+	refresh_process_mission();
 	return console_ != nullptr ? console_->status_report() : std::string();
 }
 

@@ -9,6 +9,7 @@
 //  CAdminServer_DispatchCommand @0x406720; Menu_UpdateFrame @0x552901;
 //  Game_ProcessMainFrame @0x5268F1]
 
+#include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <formats/admincfg/admin_cfg.h>
@@ -24,6 +25,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/remote_admin.h>
 #include <runtime/world/player_spawn.h>
@@ -244,7 +246,8 @@ void test_joiner_console() {
 	inmatch::ClientRuntime client("AdminJoiner", [&now] { return now; });
 	client.set_title(&kJo);
 	client.seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
-	                    world::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
+	                    /*replay_mode=*/false);
 	(void)joiner_sends(client, client_scrk, 1);
 
 	inmatch::RemoteAdminConsoles consoles;
@@ -259,6 +262,10 @@ void test_joiner_console() {
 	std::vector<std::string> echoes;
 	seams.chat_echo = [&](const std::string &text) { echoes.push_back(text); };
 	seams.chat_window = [] { return std::vector<std::string>{"Ann: hi", "", "Bob: yo"}; };
+	seams.game_text = [](std::string_view section, std::string_view key) -> std::string {
+		if (section == "Overlays" && key == "STROVER64") return "Team Deathmatch";
+		return {};
+	};
 	inmatch::RemoteAdminBinding joined;
 	joined.client = &client;
 	joined.session = 7;
@@ -288,6 +295,34 @@ void test_joiner_console() {
 	expect(line, "a joiner's CMD leaves as C2S 0x04 [\"SERVER kick 2 \"][NUL]");
 
 	expect_eq(c.one("CHAT GET"), "Ann: hi\r\nBob: yo\r\n", "CHAT GET reads the joiner's window");
+
+	// The status report prints the process's g_MapFileName and g_GameType: the joined
+	// session's (the S2C 0x2C's map file, the seeded 0x08 game type), and, back in the menus,
+	// still the last session's: no teardown resets them.
+	// [orig: CAdminServer_HandleStatus @0x402FF6, @0x403052; NapiNPClientMsg_MissionMapNames
+	//  @0x427E6C]
+	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> body;
+	SessionCrypto crypto{server_scrk, {}, 1u};
+	const std::vector<uint8_t> names = {'H', 'o', 's', 't', 'e', 'd', 0,
+	                                    'T', 'D', 'M', '0', '1', '.', 'B', 'M', 'S', 0};
+	expect(frame_session_packet(server_seq, crypto,
+	                            {make_protocol_message(s2c::MISSION_MAP_NAMES, names)}, body),
+	       "the 0x2C frames");
+	const std::vector<uint8_t> datagram =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+	client.receive(datagram.data(), datagram.size());
+	(void)joiner_sends(client, client_scrk, 5);
+	const std::string joined_lines = "CURRENT MAP: TDM01.BMS\r\nCURRENT GAME TYPE: Team Deathmatch\r\n";
+	expect(consoles.status_report().find(joined_lines) != std::string::npos,
+	       "a joiner's report: the joined session's map file and game type");
+	inmatch::AdminConsole::Seams menu_seams = seams;
+	consoles.bind(inmatch::RemoteAdminBinding{}, menu_seams);
+	consoles.console()->set_scene(inmatch::AdminScene::MainMenu);
+	expect(consoles.status_report().find(joined_lines) != std::string::npos,
+	       "back in the menus the report keeps the last session's");
+	consoles.bind(joined, seams);
+	consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
 	expect(client.mission_exit_reason() == inmatch::kMissionExitNone, "no exit yet");
 	(void)c.command("GOTO MENUSTATE");
 	expect(client.mission_exit_reason() == inmatch::kMissionExitQuit, "GOTO MENUSTATE: the joiner's exit reason 1");

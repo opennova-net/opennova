@@ -122,12 +122,21 @@ public:
 			std::vector<std::string> &replies) override;
 	std::string status_report() override;
 
+	// The process's mission globals as the status report last read them.
+	const AdminProcessMission &process_mission() const { return process_mission_; }
+
 private:
+	// The bound session's mission into the process words before a line runs: a host
+	// context's mission file and game type, a joiner's connection's g_MapFileName and
+	// g_GameType; with no session (the menus) they keep the last session's.
+	void refresh_process_mission();
+
 	NapiNPServerCtx session_less_;
 	// A joiner's context: the joined session's peer, not its authority.
 	NapiNPServerCtx joined_;
 	std::unique_ptr<AdminConsole> console_;
 	RemoteAdminBinding bound_;
+	AdminProcessMission process_mission_;
 };
 
 } // namespace opennova::inmatch
