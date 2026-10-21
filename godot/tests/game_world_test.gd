@@ -536,6 +536,22 @@ func test_the_frame_elapsed_is_the_measured_wall_time() -> void:
 			"in whole milliseconds")
 
 
+# A mission's unload restarts the frame clock: the next mission's first sampled
+# frame only stamps it, as retail's main loop re-reads its clock after the game
+# mode's initialize (the mission start), so the presentation legs never take the
+# gap since the previous mission's last frame (GameWorld.unload; engine
+# world::TickAccumulator::bank carries the witness, D-NET-NEW-LI-6).
+func test_an_unload_restarts_the_frame_clock() -> void:
+	var world := WorldFixture.make_world(self)
+	world.take_frame_elapsed_seconds()
+	OS.delay_msec(30)
+	world.unload()
+	assert_eq(world.take_frame_elapsed_seconds(), 0.0,
+			"the first sample after an unload only stamps the clock")
+	OS.delay_msec(30)
+	assert_gte(world.take_frame_elapsed_seconds(), 0.030, "the clock runs again")
+
+
 func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 	var world := WorldFixture.boot_minimal(self)
 	var sim := world.get_sim()

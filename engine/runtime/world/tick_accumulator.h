@@ -65,7 +65,15 @@ public:
 	// measures it (the Godot shell's GameWorld::take_frame_elapsed_seconds, the
 	// headless server's steady clock), never an engine step capped below it
 	// (D-NET-NEW-LI-6) [orig: Game_MainLoop @0x52B630 (the elapsed GetTickCount()
-	//  - the previous stamp @0x52B798..0x52B7A4)].
+	//  - the previous stamp @0x52B798..0x52B7A4, the stamp the next frame
+	//  subtracts @0x52B7B4)]. The embedder's stamp restarts at a mission start
+	// (the shell zeroes it when a mission's world unloads): the mission start is
+	// the game mode's initialize, after which the loop re-reads its clock, so the
+	// first frame never banks the gap since the previous mission [orig:
+	// SinglePlayer_StartMission @0x561AF0 (the g_GameModeGameLoop push
+	// @0x561E80..0x561E85); GameLoop_Init @0x526370 (the Game_StartMission call
+	// @0x526377); Game_MainLoop @0x52B630 (the initialize @0x52B70D, GetTickCount
+	// @0x52B75C into the stamp @0x52B766)].
 	int bank(double delta);
 
 	// Discard banked wall-clock, the smoothing history and the FR counter

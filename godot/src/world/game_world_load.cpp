@@ -475,6 +475,11 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 // load_*(). Safe to call when nothing is loaded.
 void GameWorld::unload() {
 	world_ready_ = false;
+	// The next mission's first sampled frame only stamps the frame clock: retail's
+	// mission start is the game mode's initialize, after which the main loop re-reads
+	// its clock, so no leg sees the time since this mission's last frame (engine
+	// world::TickAccumulator::bank carries the witness; D-NET-NEW-LI-6).
+	frame_clock_ms_ = 0;
 	ragdolls_.clear();
 	scene_overlay_bodies_.clear();
 	minimap_water_mask_.unref();
