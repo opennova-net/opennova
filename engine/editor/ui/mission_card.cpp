@@ -154,7 +154,7 @@ void new_text_popup(CardContext &context, const BoardLine &line, const BoardChip
 		ui_kit::warning_line("Enter makes " + table + " for this mission.",
 		                     "The mission has no text table of its own: the game reads " + use.scope_alternate +
 		                     " in its place, which the editor never writes. Enter makes " + table +
-		                     ", which the game then reads for this mission instead (its title and its other texts too).");
+		                     ", which the game then reads for this mission instead.");
 	}
 	if (entered && context.state.new_text[0] && context.editable) {
 		EditorRequest create = request::set_string_text(context.mission.path(), line.record, chip.field, context.state.new_text);
@@ -243,7 +243,7 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 	// take (ReferencePicker::draw_field accepts it): what it is to the slot, one set.
 	ui_kit::tooltip_lazy([&] {
 		return chip.label + ": " + (chip.unset ? std::string("not set") : words) + (by_name ? "\nThe file holds " + raw : std::string()) +
-		       (chip.missing ? "\nIt names nothing the mission holds." : std::string()) + "\nRight-click for more.";
+		       (chip.missing ? "\nIt names nothing the mission holds." : std::string());
 	});
 	// Its menu, and its New text opened as the line's add asked.
 	MissionPickSlot slot;
@@ -306,7 +306,7 @@ void draw_runs(CardContext &context, Flow &flow, const BoardLine &line, bool &re
 			ImGui::PopID();
 		}
 		ImGui::PopStyleColor();
-		if (type_words) ui_kit::tooltip_lazy([&] { return line.type_words + "\nClick to give it another type."; });
+		if (type_words) ui_kit::tooltip(line.type_words);
 	}
 	for (const BoardChip &chip : line.chips) {
 		if (drawn[size_t(chip.slot)]) continue;
@@ -438,7 +438,7 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 	if (!line.action && line.index > 0) {
 		if (ImGui::IsItemHovered() && context.editable) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 		if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && context.editable) ImGui::OpenPopup("join");
-		ui_kit::tooltip("How it joins the trigger before (the one before holds the join): click to choose.");
+		ui_kit::tooltip("How it joins the trigger before (the one before holds the join).");
 		if (ImGui::BeginPopup("join")) {
 			const BoardLine &before = card.triggers[line.index - 1];
 			for (const LogicJoin join : {LogicJoin::And, LogicJoin::Or, LogicJoin::Xor}) {
@@ -897,8 +897,8 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		waits.next(ui_kit::text_width("again after"));
 		ImGui::TextDisabled("again after");
 		wait_chip(context, waits, card, true, "##repeat", "reset_after", card.repeat_steps,
-		          "How long after its triggers held it is checked again: it counts down with the wait, and the game checks it on "
-		          "the pass after it ends.");
+		          "How long after its triggers held it is checked again: it counts down with the wait, checked on the pass "
+		          "after it ends.");
 	}
 
 	// The triggers, then the actions.
