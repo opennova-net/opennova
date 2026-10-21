@@ -83,6 +83,26 @@ int check_bank() {
         TEST_EXPECT(ticks == 64);
     }
 
+    // A 300 ms frame inside a steady 16 ms stream keeps its time: the EMA pays it
+    // back over the following frames, 17 ticks beyond what a 16 ms frame runs,
+    // where the same frame's time capped at 8/60 s (Godot's process step under
+    // its default max_physics_steps_per_frame, which the shell no longer banks:
+    // it hands the session the frame's measured elapsed, D-NET-NEW-LI-6) adds 6
+    // [orig: Game_MainLoop @0x52B630 -- the elapsed @0x52B798..0x52B7A4, the add
+    // @0x52B7B2, the EMA in place @0x52B845..0x52B85B].
+    {
+        const auto catchup = [](double long_frame) {
+            TickAccumulator acc;
+            for (int i = 0; i < 60; ++i) acc.bank(TickAccumulator::kTickDt);
+            int ticks = acc.bank(long_frame);
+            for (int i = 0; i < 120; ++i) ticks += acc.bank(TickAccumulator::kTickDt);
+            return ticks;
+        };
+        const int stream = catchup(TickAccumulator::kTickDt);
+        TEST_EXPECT(catchup(0.300) - stream == 17);
+        TEST_EXPECT(catchup(8.0 / 60.0) - stream == 6);
+    }
+
     // reset() discards the bank, the smoothing history and the phase: the
     // frame after it banks from the 1 ms seed, unsmoothed.
     {

@@ -655,6 +655,12 @@ public:
 	// (MissionFrameInput.since_render_seconds); a synthetic driver stepping
 	// tick() leaves it unsampled and banks its own delta.
 	double get_seconds_since_render() const;
+	// The frame's elapsed wall time since this method's previous call, in whole
+	// milliseconds of the process's monotonic clock (0 on the first call): what
+	// the shell's frame loop hands the session as the frame's delta, as retail's
+	// main loop banks GetTickCount's difference; Godot's process step is capped
+	// (D-NET-NEW-LI-6). A synthetic driver stepping tick() banks its own delta.
+	double take_frame_elapsed_seconds();
 	void on_runtime_simulation_restarted();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
 	void on_frame_stats_capture_changed(bool p_active);
@@ -1011,6 +1017,8 @@ private:
 	double frame_delta_ = 0.0;
 	// Time::get_ticks_usec() at the last frame_post_draw (0: none yet).
 	uint64_t last_post_draw_usec_ = 0;
+	// inmatch::host_monotonic_milliseconds() at the last take_frame_elapsed_seconds (0: none).
+	uint32_t frame_clock_ms_ = 0;
 	bool frame_probe_enabled_ = false;
 	bool frame_stats_on_ = false;
 	bool frame_timing_ = false;

@@ -1989,6 +1989,10 @@ func _process(delta: float) -> void:
 	var reset_sim: Simulation = _world.get_sim()
 	if reset_sim != null and reset_sim.take_input_reset():
 		_reset_key_state()
+	# The session banks the frame's measured elapsed wall time, not Godot's
+	# process delta, which Godot caps (GameWorld.take_frame_elapsed_seconds and
+	# engine world::TickAccumulator::bank carry the witness).
+	var frame_elapsed: float = _world.take_frame_elapsed_seconds()
 	var frame_input: MissionFrameInput
 	if _player_presenter != null:
 		var player_live := is_gameplay_input_active()
@@ -1996,7 +2000,7 @@ func _process(delta: float) -> void:
 		# (command map) screen (engine controls::PlayerActionPoll::menu_open
 		# carries the witness).
 		frame_input = _player_presenter.before_world_tick(
-				delta, player_live, player_live,
+				frame_elapsed, player_live, player_live,
 				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
 						or _state == State.VEHICLE)
 		# The held USE row's armory arm took its open in that poll (engine
@@ -2011,7 +2015,7 @@ func _process(delta: float) -> void:
 			_vehicle_menu_presenter.open()
 	else:
 		frame_input = MissionFrameInput.new()
-		frame_input.delta_seconds = delta
+		frame_input.delta_seconds = frame_elapsed
 	# The frame loop feeds the session the time since the last render: the
 	# mission-start frames bank only that (Session::advance).
 	frame_input.since_render_seconds = _world.get_seconds_since_render()
@@ -2019,7 +2023,7 @@ func _process(delta: float) -> void:
 	var skip_world := probe_enabled and _perf_probe.skip_world
 	if not skip_world:
 		_world.tick(_camera.global_position, _camera.global_transform,
-				delta, frame_input)
+				frame_elapsed, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
 	# Camera placement runs in the world frame now (local-view device leg,
 	# D-RORD-8); this covers frames that skip it (probe world-skip, no live world).

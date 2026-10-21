@@ -520,6 +520,22 @@ func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 					"%s must not self-clock on the physics tick either" % presenter_name)
 
 
+# The shell hands the session the frame's measured elapsed wall time in whole
+# milliseconds, uncapped: a 150 ms stall reads past Godot's 8/60 s process-step
+# cap, as retail's bank takes GetTickCount's difference (GameWorld.
+# take_frame_elapsed_seconds; engine world::TickAccumulator::bank carries the
+# witness, D-NET-NEW-LI-6).
+func test_the_frame_elapsed_is_the_measured_wall_time() -> void:
+	var world := WorldFixture.make_world(self)
+	assert_eq(world.take_frame_elapsed_seconds(), 0.0, "the first sample only stamps the clock")
+	OS.delay_msec(150)
+	var elapsed: float = world.take_frame_elapsed_seconds()
+	assert_gte(elapsed, 0.150, "the stall's whole time")
+	assert_gt(elapsed, 8.0 / 60.0, "past the process step's cap")
+	assert_almost_eq(elapsed * 1000.0, roundf(elapsed * 1000.0), 0.000001,
+			"in whole milliseconds")
+
+
 func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 	var world := WorldFixture.boot_minimal(self)
 	var sim := world.get_sim()

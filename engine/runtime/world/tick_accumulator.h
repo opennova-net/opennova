@@ -60,7 +60,12 @@ public:
 	static constexpr uint32_t kUnitsPerSecond = 1000u * kUnitsPerMs;
 
 	// Bank `delta` seconds of wall-clock; returns the logic ticks due now
-	// (>= 0). The sub-quantum remainder stays banked.
+	// (>= 0). The sub-quantum remainder stays banked. `delta` is the frame's
+	// elapsed wall time since the previous frame's start stamp, as the embedder
+	// measures it (the Godot shell's GameWorld::take_frame_elapsed_seconds, the
+	// headless server's steady clock), never an engine step capped below it
+	// (D-NET-NEW-LI-6) [orig: Game_MainLoop @0x52B630 (the elapsed GetTickCount()
+	//  - the previous stamp @0x52B798..0x52B7A4)].
 	int bank(double delta);
 
 	// Discard banked wall-clock, the smoothing history and the FR counter

@@ -386,6 +386,32 @@ int main() {
 				"paused updates publish the frames drawn before the 62nd's frame")) return 1;
 	}
 
+	// The session banks the frame's elapsed as the shell measures it: a 300 ms
+	// frame in a steady 16 ms stream runs 17 ticks beyond a 16 ms frame's over the
+	// EMA's catch-up, where Godot's process step capped at 8/60 s ran 6
+	// (D-NET-NEW-LI-6; world::TickAccumulator carries the witness).
+	// [orig: Game_MainLoop @0x52B630 -- the elapsed @0x52B798..0x52B7A4]
+	{
+		const auto catchup = [](double long_frame) {
+			auto target = std::make_unique<TickProbe>();
+			Session session(*target);
+			if (!load(session)) return -1;
+			FrameInput in;
+			in.delta_seconds = TickAccumulator::kTickDt;
+			for (int i = 0; i < 60; ++i) session.advance(in);
+			const size_t before = target->inputs.size();
+			FrameInput lng;
+			lng.delta_seconds = long_frame;
+			session.advance(lng);
+			for (int i = 0; i < 120; ++i) session.advance(in);
+			return static_cast<int>(target->inputs.size() - before);
+		};
+		const int stream = catchup(TickAccumulator::kTickDt);
+		if (!expect(stream > 0 && catchup(0.300) - stream == 17 &&
+				catchup(8.0 / 60.0) - stream == 6,
+				"a 300 ms frame keeps its time; the 8/60 s cap dropped it")) return 1;
+	}
+
 	std::printf("OK: in-match session lifecycle/cadence/input/failure\n");
 	return 0;
 }

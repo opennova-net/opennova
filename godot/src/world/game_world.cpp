@@ -1085,6 +1085,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_effect_light_director"),
 			&GameWorld::get_effect_light_director);
 	ClassDB::bind_method(D_METHOD("get_seconds_since_render"), &GameWorld::get_seconds_since_render);
+	ClassDB::bind_method(D_METHOD("take_frame_elapsed_seconds"),
+			&GameWorld::take_frame_elapsed_seconds);
 	ClassDB::bind_method(D_METHOD("tick", "camera_pos", "camera_xform", "delta", "frame_input"),
 			&GameWorld::tick, DEFVAL(Transform3D()), DEFVAL(-1.0), DEFVAL(Variant()));
 	ClassDB::bind_static_method("GameWorld", D_METHOD("current_frame_clock_ms"),

@@ -11,6 +11,7 @@
 #include <runtime/renderer/scene_overlay.h>
 #include <runtime/renderer/scene_pass_gates.h>
 #include <runtime/environment/water_mirror.h>
+#include <runtime/inmatch/host_session.h> // host_monotonic_milliseconds (the frame clock)
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -352,6 +353,20 @@ void GameWorld::on_frame_post_draw() {
 double GameWorld::get_seconds_since_render() const {
 	if (last_post_draw_usec_ == 0) return -1.0;
 	return static_cast<double>(Time::get_singleton()->get_ticks_usec() - last_post_draw_usec_) / 1e6;
+}
+
+double GameWorld::take_frame_elapsed_seconds() {
+	// The session banks the frame's own elapsed wall time, in whole milliseconds
+	// of the monotonic clock, as the main loop banks GetTickCount's difference
+	// from the previous frame's stamp (engine world::TickAccumulator::bank
+	// carries the witness; the bank clamps a frame past 500 ms). Godot's process
+	// step is capped at max_physics_steps_per_frame over the physics rate (8/60 s
+	// by default), so banking it dropped the time past 133 ms that retail's bank
+	// keeps (D-NET-NEW-LI-6).
+	const uint32_t now_ms = opennova::inmatch::host_monotonic_milliseconds();
+	const uint32_t elapsed_ms = frame_clock_ms_ != 0 ? now_ms - frame_clock_ms_ : 0u;
+	frame_clock_ms_ = now_ms;
+	return static_cast<double>(elapsed_ms) / 1000.0;
 }
 
 Error GameWorld::debug_refresh_render_pose(Camera3D *p_camera) {
