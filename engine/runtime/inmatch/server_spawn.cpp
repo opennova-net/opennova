@@ -43,12 +43,15 @@ namespace {
 // Retail's misleading g_Team1Name/g_Team2Name symbols are the live SidePasswordA/B strings
 // (Game_ApplySessionSettingsToGlobals @0x552043/@0x552054), not a second team-name domain.
 // The submitted JSP credential selects a matching protected side before balancing.
+// `side_password` is the call's side password: a remote add's connection JSP, null for
+// the round init's own-slot call.
 bool connection_claims_player_slot(const NapiNPConnection &connection);
 
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &joining,
-		const std::array<uint8_t, 2> &side_team, const HostSlotRow *host_slot) {
+		const std::array<uint8_t, 2> &side_team, const HostSlotRow *host_slot,
+		const std::string *side_password) {
 	// A spectator is a roster player on neutral team zero, bypassing the team
 	// password/selection path. Retail gates the early return on being in a
 	// live MP session; a non-session add ignores the flag and takes team 1.
@@ -64,6 +67,20 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// [orig: Server_AssignPlayerTeam @0x4FE398..0x4FE400]
 	if (!opennova::game_type::is_team(gt)) return 1;
 
+	// A null side password (the round init's own-slot call) takes none of the password,
+	// team-choose or balance legs: 1 for the side requirement -1, else the requirement's
+	// side's team through the side-to-team map. The side requirement is -1 on every host
+	// (Config_SetDefaults, the pre.mnu commit; its cfg key is dead), so the own slot's
+	// round-init team is 1 there; a requirement past the two sides is unreachable.
+	// [orig: Server_AssignPlayerTeam @0x4FE310 - `test edi, edi; jnz` @0x4FE3CA..0x4FE3CC,
+	//  `cmp g_SideRequirement, -1` @0x4FE3CE..0x4FE3D6, 1 @0x4FE3DD,
+	//  g_RotationSideTeam0[g_SideRequirement] @0x4FE401..0x4FE408]
+	if (side_password == nullptr) {
+		const int8_t side = config.host_side_request;
+		if (side == 0 || side == 1) return side_team[static_cast<std::size_t>(side)];
+		return 1;
+	}
+
 	const uint8_t active_teams =
 			opennova::game_type::active_team_count(gt, config.num_teams);
 	const bool side_a_locked = !config.side_a_password.empty();
@@ -76,7 +93,7 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// Server_ValidatePlayerJoinRequest does.
 	// [orig: Server_BuildPlayerInfoAndAdd @0x51D686 (17-byte copy) ->
 	// Server_AssignPlayerTeam @0x4FE43F]
-	const std::string submitted_password = joining.join_password.substr(0, 16);
+	const std::string submitted_password = side_password->substr(0, 16);
 	// Password matches precede the two/four-team split and team preference.
 	// If both side passwords match, side A wins the ordered comparison.
 	// [orig: Server_AssignPlayerTeam @0x4FE424..0x4FE4AD]
@@ -216,7 +233,7 @@ constexpr int32_t kFreshProfileSideClass = 8;
 // A Serve Only host's own slot 0 (HostSlotRow): the round init's row, then the
 // session create's PlayerSession_InitFromProfile over it. A listen host's slot 0
 // is its loopback connection's. The round init's own team assignment
-// (Server_AssignPlayerTeam over teamPref) is overwritten by the create's, so
+// (Server_AssignPlayerTeam with a null side password) is overwritten by the create's, so
 // only the create's rule is kept: the net config's side byte when it is 1 or
 // 2, else 1, the slot being no spectator (+100567 is set on a peer only).
 // [orig: Server_InitNewRoundState @0x51C99A..0x51CA3C, the team call
@@ -385,7 +402,7 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 				assign_player_team(config, is_in_session, roster, conn,
 						rotation != nullptr ? rotation->side_team
 											: std::array<uint8_t, 2>{1, 2},
-						host_slot);
+						host_slot, &conn.join_password);
 		conn.assigned_team_valid = true;
 	}
 	return conn.assigned_team;
@@ -511,22 +528,26 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// §5.2c marker scan; without the split both teams land in team 1's base (net-re §5.61).
 	// [orig: Server_AssignPlayerTeam @0x4fe310 runs in Server_PlayerAdd BEFORE
 	// Server_PositionPlayerForSpawn's team switch @0x50d266]
-	spawn.team = Server_ReservePlayerTeam(
-			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
-			conn, ctx.rotation, &ctx.host_slot); // [orig: Server_AssignPlayerTeam @0x4fe310]
-	// The listen host's own slot at the session create: its add writes its PlayerList entry
-	// from the round init's team (the bodyless arm, stamp_player_list_add; the round init's
-	// team preference is the side requirement, -1 on every host as the own connection's team
-	// request 0xFF is), then the create's profile init overwrites the slot's team, which the
-	// body (the next round init's, ours spawned here) takes: 1 where a locked side sent the
-	// assignment to side B's team or to 0. A map change's re-add keeps the slot's.
-	// [orig: Server_InitNewRoundState - Server_AssignPlayerTeam(slot, 0, g_SideRequirement)
-	//  @0x51CABE..0x51CAC8; Server_PlayerAdd's own arm, the entry @0x51D398;
-	//  CNapiGameSession_CreateSession - PlayerSession_InitFromProfile @0x4C9CCE after the add;
-	//  Server_InitAllPlayerEntitiesForRound - the body's team @0x516B78..0x516B7E]
+	// The listen host's own slot at the session create: its team is the round init's
+	// assignment, a null side password's call (no password, team-choose or balance leg: 1,
+	// or 0 for a session spectator), from which its add writes its PlayerList entry (the
+	// bodyless arm, stamp_player_list_add); then the create's profile init overwrites the
+	// slot's team, which the body (the next round init's, ours spawned here) takes. A map
+	// change's re-add keeps the slot's.
+	// [orig: Server_InitNewRoundState @0x51C8E0 - ebx 0 @0x51C93E, Server_AssignPlayerTeam(slot,
+	//  0, g_SideRequirement, 0) @0x51CABE..0x51CAC8; Server_PlayerAdd's own arm, the entry
+	//  @0x51D398; CNapiGameSession_CreateSession - PlayerSession_InitFromProfile @0x4C9CCE after
+	//  the add; Server_InitAllPlayerEntitiesForRound - the body's team @0x516B78..0x516B7E]
 	if (is_host_own && !round_init) {
-		conn.player_list_team = spawn.team;
+		conn.player_list_team = assign_player_team(ctx.config, ctx.is_in_session,
+				ctx.np_protocol.connection_list, conn,
+				ctx.rotation != nullptr ? ctx.rotation->side_team : std::array<uint8_t, 2>{1, 2},
+				&ctx.host_slot, /*side_password=*/nullptr);
 		spawn.team = PlayerSession_InitOwnSlotTeam(ctx, conn);
+	} else {
+		spawn.team = Server_ReservePlayerTeam(
+				ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
+				conn, ctx.rotation, &ctx.host_slot); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	}
 	// The join spawn enters the no-pick arm (Server_OnPlayerJoin passes spawn
 	// handle low word 0, which Server_ResolveSpawnTargetHandle rejects), where

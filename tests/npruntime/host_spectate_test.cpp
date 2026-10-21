@@ -192,12 +192,18 @@ void test_a_map_changes_re_add_takes_no_spectator_leg() {
 
 // The create's profile init overwrites the own slot's team after the own add: the net config's
 // side byte when it is 1 or 2, else 1 for a slot whose spectator latch is clear and 0 for one
-// that is set; the add's PlayerList entry keeps the round init's assignment (a team game's
-// balance: 1; a spectator's 0), and the body takes the overwritten team. The side byte is -1 on
-// every host (its cfg key is dead and the pre.mnu commit stores -1), so the reachable case is a
-// locked side: side A's password alone sends the round init's assignment to side B's team 2
-// and both to 0, where the profile init leaves 1.
-// [orig: PlayerSession_InitFromProfile @0x50CA92..0x50CAB8, the store @0x50CB72;
+// that is set; the body takes the overwritten team. The add's PlayerList entry keeps the round
+// init's assignment, a null side password's call: the spectator leg's 0 in a session, else (a
+// team game) 1 for the side requirement -1 or the requirement's side's team through the
+// side-to-team map (no rotation: sides 1, 2), and no password leg, so a locked side changes
+// nothing. The side byte is -1 on every host (its cfg key is dead and the pre.mnu commit stores
+// -1); the other side bytes pin the arms as the code reads them (a requirement past the two
+// sides reads past the map: unreachable, not pinned).
+// [orig: Server_InitNewRoundState - ebx 0 @0x51C93E, Server_AssignPlayerTeam(slot, 0,
+//  g_SideRequirement, 0) @0x51CABE..0x51CAC8; Server_AssignPlayerTeam @0x4FE310 - the
+//  spectator leg @0x4FE365..0x4FE368, the null arm @0x4FE3CA..0x4FE3DD,
+//  g_RotationSideTeam0[g_SideRequirement] @0x4FE401..0x4FE408;
+//  PlayerSession_InitFromProfile @0x50CA92..0x50CAB8, the store @0x50CB72;
 //  CNapiGameSession_CreateSession @0x4C9C9A..0x4C9CCE; Server_PlayerAdd's own arm, the
 //  bodyless entry @0x51D398]
 void test_the_create_overwrites_the_own_slots_team() {
@@ -207,8 +213,8 @@ void test_the_create_overwrites_the_own_slots_team() {
 		uint8_t team;
 		int32_t list_team;
 	};
-	for (const Case c : {Case{0, -1, 1, 1}, Case{1, -1, 0, 0}, Case{0, 2, 2, 1}, Case{1, 2, 2, 0},
-				Case{0, 1, 1, 1}, Case{1, 0, 0, 0}, Case{0, 0, 1, 1}}) {
+	for (const Case c : {Case{0, -1, 1, 1}, Case{1, -1, 0, 0}, Case{0, 0, 1, 1}, Case{1, 0, 0, 0},
+				Case{0, 1, 1, 2}, Case{1, 1, 1, 0}, Case{1, 2, 2, 0}}) {
 		Rig r(c.spectate, c.side_req);
 		inmatch::NapiNPConnection *own = r.own();
 		CHECK(own != nullptr);
@@ -218,17 +224,23 @@ void test_the_create_overwrites_the_own_slots_team() {
 		const w::Entity *body = r.world->registry.get(own->link.owned_entity);
 		CHECK(body != nullptr && body->team == c.team);
 	}
+	{
+		// The side byte 2: the profile init's arm alone.
+		Rig r(0, 2);
+		inmatch::NapiNPConnection *own = r.own();
+		CHECK(own != nullptr && own->assigned_team == 2);
+	}
+	// A locked side takes no leg of the round init's call: the entry is 1 for every lock.
 	struct Locked {
 		const char *side_a;
 		const char *side_b;
-		int32_t list_team;
 	};
-	for (const Locked c : {Locked{"alpha", "", 2}, Locked{"", "bravo", 1}, Locked{"alpha", "bravo", 0}}) {
+	for (const Locked c : {Locked{"alpha", ""}, Locked{"", "bravo"}, Locked{"alpha", "bravo"}}) {
 		Rig r(0, -1, c.side_a, c.side_b);
 		inmatch::NapiNPConnection *own = r.own();
 		CHECK(own != nullptr);
 		if (own == nullptr) continue;
-		CHECK(own->assigned_team == 1 && own->player_list_team == c.list_team);
+		CHECK(own->assigned_team == 1 && own->player_list_team == 1);
 		const w::Entity *body = r.world->registry.get(own->link.owned_entity);
 		CHECK(body != nullptr && body->team == 1);
 	}
