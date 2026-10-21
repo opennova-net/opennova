@@ -127,7 +127,7 @@ struct ClientProcessState {
 	world::SpawnLoadoutBuffer spawn_loadout_buffer;
 	// g_RoundStateInitTick as the last session create's round init stamped it
 	// (NapiNPServerCtx::round_state_init_tick): a single player's restart, which runs no
-	// round init, keeps it. [orig: Server_InitNewRoundState @0x51CBA0; Game_RestartRoundSP
+	// round init, keeps it. [orig: Server_InitNewRoundState @0x51C8E0 (the store @0x51CBA0); Game_RestartRoundSP
 	//  @0x5263A0 -> Game_StartMission(1) @0x5263DB, no round init]
 	uint32_t round_state_init_tick = 0;
 	// ctx+0xD94, the client callback's disconnect latch (mission_exit.h ProcessDisconnectLatch):
