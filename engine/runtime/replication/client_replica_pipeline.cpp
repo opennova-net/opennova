@@ -535,7 +535,7 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 				//  `cmp al, 7Fh` @0x440D3C..0x440D41, the carrier's 0x0F
 				//  @0x440DAB, the child's @0x440E29, Entity_Destroy @0x440E2F]
 				const uint16_t carrier_handle = persistent_carrier[child_index];
-				if (tick_sweep && depth == 0 && (rm_tick_counter_ & 0x7Fu) == 0x7Fu &&
+				if (tick_sweep && depth == 0 && (frame_tick_ & 0x7Fu) == 0x7Fu &&
 						std::find(state_.destroyed_marks.begin(), state_.destroyed_marks.end(),
 								carrier_handle) != state_.destroyed_marks.end()) {
 					queue_carrier_repair(carrier_handle);

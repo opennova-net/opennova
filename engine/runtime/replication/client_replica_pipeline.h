@@ -332,9 +332,23 @@ public:
 	const ClientVehicleSpawnAvailability &vehicle_spawn_availability() const {
 		return vehicle_spawn_store_ != nullptr ? *vehicle_spawn_store_ : own_vehicle_spawn_;
 	}
-	// The mover ticks run so far: the replica's tick clock (the leg re-plant
-	// window, the stale-carrier sweep's 0x7F phase), g_CurrentTick's stand-in.
-	uint32_t remote_motion_tick() const { return rm_tick_counter_; }
+	// The replica's tick clock, g_CurrentTick's stand-in: the leg re-plant
+	// window, the radio age, the 16-tick weapon pass and the stale-carrier
+	// sweep's 0x7F phase read it. Retail's main frame steps the word whether or
+	// not its entity update runs (the pre-round and round-gate frames step it
+	// too) and the mission start zeroes it, so the embedder steps it on a main
+	// frame whose entity update is skipped (step_frame_tick), the entity update
+	// steps it itself (tick_remote_motion), and the mission start's end zeroes
+	// it (zero_frame_tick).
+	// [orig: Game_StartMission @0x524360 (`mov g_CurrentTick, ebx` @0x525B9F);
+	//  Game_ProcessMainFrame @0x5263F0 (the pause test @0x5265A0, `add
+	//  g_CurrentTick, ebx` @0x5265B4, the entity gates @0x52672C..0x526742,
+	//  Entity_UpdateAllEntities(g_CurrentTick) @0x526744..0x52674B);
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (curTick @0x4B413E);
+	//  Entity_UpdateTransformAndTurret @0x440CA0 (the read @0x440D37)]
+	uint32_t frame_tick() const { return frame_tick_; }
+	void step_frame_tick() { ++frame_tick_; }
+	void zero_frame_tick() { frame_tick_ = 0; }
 	// Every armed player row's secondary channel for one tick (the advance,
 	// then the 16-tick selection keyed on `tick`), the own row excepted.
 	void tick_row_weapon_channels(uint16_t self_handle, uint32_t tick);
@@ -653,7 +667,7 @@ private:
 	world::IRootMotionSource *root_motion_ = nullptr;
 	const world::WeaponTable *weapon_table_ = nullptr;
 	const terrain::TerrainHeightField *remote_motion_terrain_ = nullptr;
-	uint32_t rm_tick_counter_ = 0; // the mover tick clock [orig: tick&63, the sweep's tick&0x7F]
+	uint32_t frame_tick_ = 0; // g_CurrentTick's stand-in (frame_tick())
 	ClientVehicleSpawnAvailability own_vehicle_spawn_;             // use_vehicle_spawn_store
 	ClientVehicleSpawnAvailability *vehicle_spawn_store_ = nullptr;
 	bool remote_motion_mode_ = false;

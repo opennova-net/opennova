@@ -255,14 +255,21 @@ int main() {
 		ok &= expect(view.state().find(kMissingHull) == nullptr &&
 		                     view.state().find(kOrphanGun) != nullptr,
 		             "the 0x12 destroys the carrier and leaves the child");
-		// Run to the tick before the 0x7F phase: nothing yet.
-		while (((view.remote_motion_tick() + 1u) & 0x7Fu) != 0x7Fu)
-			view.tick_remote_motion(0xFFFF);
+		// The phase is g_CurrentTick's: the mission start zeroes it and every main
+		// frame steps it, the frames whose entity update is skipped (a pre-round, the
+		// round gate) included [orig: Game_StartMission `mov g_CurrentTick, ebx`
+		// @0x525B9F; Game_ProcessMainFrame `add g_CurrentTick, ebx` @0x5265B4, the
+		// entity gates @0x52672C..0x526742; the read @0x440D37]. A zeroed clock
+		// stepped by 0x7E skipped frames (no sweep can run on them) puts the next
+		// entity update on the 0x7F phase.
+		view.zero_frame_tick();
+		ok &= expect(view.frame_tick() == 0u, "the mission start zeroes the clock");
+		for (int f = 0; f < 0x7E; ++f) view.step_frame_tick();
 		ok &= expect(view.state().find(kOrphanGun) != nullptr &&
 		                     view.drain_carrier_repair_requests().empty(),
 		             "no repair request off the 0x7F phase");
 		view.tick_remote_motion(0xFFFF);
-		ok &= expect((view.remote_motion_tick() & 0x7Fu) == 0x7Fu, "the phase tick");
+		ok &= expect(view.frame_tick() == 0x7Fu, "the phase tick");
 		const std::vector<uint16_t> repairs =
 				view.drain_carrier_repair_requests();
 		ok &= expect(repairs.size() == 2u && repairs[0] == kMissingHull &&

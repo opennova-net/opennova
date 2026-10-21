@@ -1544,8 +1544,22 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	//  g_RoundOver @0x52673C..0x526742, Entity_UpdateAllEntities @0x52674B]
 	const bool session_word = role_ == Role::Joiner ? joiner_ != nullptr && joiner_->in_session()
 	                                                : view_.mp_session();
-	const bool entity_update_skipped = view_.state().preround_delay_seconds != 0 ||
+	// A joiner's wait loops are not main frames: they run inside Game_StartMission and
+	// pump the receive and the send alone (no tick step, no entity update).
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cbb5; NapiClient_WaitForGameStart
+	//  @0x42cc92; Game_StartMission's final wait @0x52628d..0x5262df]
+	const bool main_frame = role_ != Role::Joiner || joiner_ == nullptr ||
+			joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::NetworkFrame;
+	const bool entity_update_skipped = !main_frame ||
+			view_.state().preround_delay_seconds != 0 ||
 			(session_word && view_.state().spawn_success_gate);
+	// The main frame steps g_CurrentTick (a joiner never pauses) whether or not its
+	// entity update runs; the update steps the replica clock itself (tick_remote_motion),
+	// a skipped one steps it here, so the clock counts every main frame since the
+	// mission start's zero (push_mission_start_end).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - the pause test @0x5265A0, `add
+	//  g_CurrentTick, ebx` @0x5265B4, the entity gates @0x52672C..0x526742]
+	if (main_frame && entity_update_skipped) view_.step_frame_tick();
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp
 	// @0x4b7dbf/@0x4b7dd6]
@@ -1965,6 +1979,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end() {
 	JoinerConnection::MissionStartSubmissions submissions;
 	if (joiner_ == nullptr || !joiner_->take_mission_start_submissions(submissions))
 		return outbound;
+	// The load's zero of the frame tick, between its pumps (no main frame runs until the
+	// final wait ends) [orig: Game_StartMission @0x524360 - `mov g_CurrentTick, ebx`
+	// @0x525B9F].
+	view_.zero_frame_tick();
 	// Game_StartMission's pumps between the 0x1A and the final wait for the S2C 0x0F.
 	// A receive pump steps the countdown (the load's two drain what arrived; ours waits in
 	// the queue for the next frame); a send pump builds only at a spent countdown and

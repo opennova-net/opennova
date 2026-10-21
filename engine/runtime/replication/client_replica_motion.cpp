@@ -883,7 +883,8 @@ static bool row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org
 
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
-	const uint32_t rm_key = ++rm_tick_counter_;
+	// The entity update steps the replica clock (frame_tick()).
+	const uint32_t rm_key = ++frame_tick_;
 	// The replica-peer sphere table for this tick's contact resolves — every
 	// live organic replica row, one snapshot per tick (replica rows are
 	// ordinary persons to the resolver's repulsion loop; the world person
