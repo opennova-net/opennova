@@ -52,14 +52,19 @@ gamecfg::WeaponRoster game_cfg_weapon_roster(const ResourceIndex &index) {
 	return roster;
 }
 
-gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext) {
+gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext,
+		const rtxt::File *text_override) {
 	gamecfg::DefaultTexts texts;
 	if (gametext == nullptr) return texts;
 	// [orig: GameText_GetStringWithFallback @0x51EB90: the fallback when the
-	//  table lacks the entry, else the entry's text]
-	if (const rtxt::Entry *entry = gametext->find_in_section("Menu", "UNTITLED"))
+	//  table lacks the entry, else the entry's text; the lookup @0x51EBB6
+	//  searches the override table first (TextResource_FindEntryBySectionAndKey
+	//  @0x75D250, @0x75D27B)]
+	if (const rtxt::Entry *entry =
+			rtxt::find_with_override(text_override, *gametext, "Menu", "UNTITLED"))
 		texts.untitled = entry->text;
-	if (const rtxt::Entry *entry = gametext->find_in_section("Menu", "USERMESSAGE"))
+	if (const rtxt::Entry *entry =
+			rtxt::find_with_override(text_override, *gametext, "Menu", "USERMESSAGE"))
 		texts.user_message = entry->text;
 	return texts;
 }

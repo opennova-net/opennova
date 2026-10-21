@@ -100,14 +100,20 @@ std::unordered_set<std::string> root_file_names(const std::string &root) {
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — AI_GetTaskTypeFromFlags(header
 //  +0x88) feeding the code-word switch @ 0x563387..; the title arm @ 0x563489..0x56354f;
 //  Mission_BuildMapListFromPFF @ 0x562910 the same @ 0x562b4b.. and @ 0x562c55..0x562d1f]
-void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::File *text) {
+// Both lookups search the override table first [orig: MissionList_ScanAndBuildFromFiles
+//  @0x563496 / @0x5634E8, Mission_BuildMapListFromPFF @0x562C62 / @0x562CB8 ->
+//  TextResource_FindEntryBySectionAndKey @0x75D250].
+void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::File *text,
+		const rtxt::File *text_override) {
 	// The single-select mode bit the code-word derivation consumes (the switch itself is
 	// game_type::for_mission_mode, game_type_of).
 	row.game_mode = header_ok ? bms::selected_game_mode(header.attrib_flags) : 0u;
 	if (text != nullptr) {
-		if (const rtxt::Entry *title = text->find_in_section(kTextInfoSection, kTextTitleKey))
+		if (const rtxt::Entry *title = rtxt::find_with_override(text_override, *text,
+				kTextInfoSection, kTextTitleKey))
 			row.title = title->text;
-		if (const rtxt::Entry *briefing = text->find_in_section(kTextInfoSection, kTextBriefingKey))
+		if (const rtxt::Entry *briefing = rtxt::find_with_override(text_override, *text,
+				kTextInfoSection, kTextBriefingKey))
 			row.briefing = briefing->text;
 	} else {
 		row.title = header_cstr(header.mission_name, sizeof(header.mission_name));
@@ -136,7 +142,7 @@ bool load_text(const ResourceIndex &index, const std::string &name, rtxt::File &
 //  `textArchive && PFF_FileExists(bin, textArchive)` @ 0x562c2d before
 //  TextResource_LoadFromArchive @ 0x562c47]
 void walk_pair(const ResourceIndex &index, int mission_slot, int text_slot,
-		std::vector<Row> &rows) {
+		const rtxt::File *text_override, std::vector<Row> &rows) {
 	for (const VfsArchiveEntry &entry : index.archive_slot_entries(mission_slot)) {
 		if (!lists_as_mission(entry.name)) continue;
 		if (!has_extension(entry.name, ".bms")) continue; // a map project (D-MNU-25)
@@ -150,14 +156,14 @@ void walk_pair(const ResourceIndex &index, int mission_slot, int text_slot,
 		const std::string bin = bin_sibling_name(row.file);
 		rtxt::File text;
 		const bool text_ok = index.archive_slot_has_file(text_slot, bin) && load_text(index, bin, text);
-		fill_row(row, header, header_ok, text_ok ? &text : nullptr);
+		fill_row(row, header, header_ok, text_ok ? &text : nullptr, text_override);
 		rows.push_back(std::move(row));
 	}
 }
 
 } // namespace
 
-std::vector<Row> build(const ResourceIndex &index) {
+std::vector<Row> build(const ResourceIndex &index, const rtxt::File *text_override) {
 	std::vector<Row> rows;
 	// The loose leg: the mount's loose `.bms` files, flagged loose. Its table is read
 	// only when the `.bin` exists loose in the install's root, then by name through the
@@ -176,14 +182,15 @@ std::vector<Row> build(const ResourceIndex &index) {
 			[&](const std::string &bin, rtxt::File &text) {
 				if (!root_names) root_names = root_file_names(index.root_dir());
 				return root_names->count(strutil::to_lower(bin)) != 0 && load_text(index, bin, text);
-			});
+			},
+			text_override);
 	// Then the two archive pairs: the expansion's <n>.pff with <n>L.pff, then
 	// localres.pff with language.pff. Slot 4 (resource.pff) is never walked, a `.bms` in
 	// <n>L.pff never listed, and a name both pairs carry lists once per pair.
 	// [orig: MissionList_ScanAndBuildFromFiles @ 0x5635a5..0x5635d8 —
 	//  Mission_BuildMapListFromPFF(slot 1, slot 0), then (slot 3, slot 2)]
-	walk_pair(index, kArchiveSlotExpansion, kArchiveSlotExpansionText, rows);
-	walk_pair(index, kArchiveSlotLocalres, kArchiveSlotLanguage, rows);
+	walk_pair(index, kArchiveSlotExpansion, kArchiveSlotExpansionText, text_override, rows);
+	walk_pair(index, kArchiveSlotLocalres, kArchiveSlotLanguage, text_override, rows);
 	// [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0, no dedupe]
 	// The CRT's qsort is a platform primitive the port does not reproduce, and it is not
 	// stable: two rows with the same name (a loose copy of an archived mission, or one
@@ -192,7 +199,8 @@ std::vector<Row> build(const ResourceIndex &index) {
 	return rows;
 }
 
-std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArchive *texts) {
+std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArchive *texts,
+		const rtxt::File *text_override) {
 	std::vector<Row> rows;
 	for (uint32_t i = 0; i < missions.entry_count; ++i) {
 		const pff::PffEntry &entry = missions.entries[i];
@@ -218,24 +226,25 @@ std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArc
 						rtxt::parse(table_bytes.data(), table->size, text, error);
 			}
 		}
-		fill_row(row, header, read_ok, text_ok ? &text : nullptr);
+		fill_row(row, header, read_ok, text_ok ? &text : nullptr, text_override);
 		rows.push_back(std::move(row));
 	}
 	return rows;
 }
 
-Row loose_row(const std::string &file, const std::vector<uint8_t> &bms, const rtxt::File *text) {
+Row loose_row(const std::string &file, const std::vector<uint8_t> &bms, const rtxt::File *text,
+		const rtxt::File *text_override) {
 	Row row;
 	row.file = file;
 	row.loose = true;
 	bms::Header header{};
 	const bool header_ok = read_header(bms, header);
-	fill_row(row, header, header_ok, text);
+	fill_row(row, header, header_ok, text, text_override);
 	return row;
 }
 
 std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms &read_bms,
-		const ReadText &read_text) {
+		const ReadText &read_text, const rtxt::File *text_override) {
 	std::vector<Row> rows;
 	for (const std::string &name : names) {
 		if (!strutil::ends_with_icase(name, ".bms")) continue;
@@ -243,7 +252,7 @@ std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms
 		if (!read_bms || !read_bms(name, bytes)) bytes.clear();
 		rtxt::File text;
 		const bool text_ok = read_text && read_text(bin_sibling_name(name), text);
-		rows.push_back(loose_row(name, bytes, text_ok ? &text : nullptr));
+		rows.push_back(loose_row(name, bytes, text_ok ? &text : nullptr, text_override));
 	}
 	return rows;
 }

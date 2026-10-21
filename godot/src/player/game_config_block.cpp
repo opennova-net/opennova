@@ -30,8 +30,10 @@ inmatch::GameConfigBlock::MenuMount menu_mount(const Ref<ResourceRoot> &p_root,
 		mount.id = mount_id(p_root);
 		mount.weapons = inmatch::game_cfg_weapon_roster(p_root->native_index());
 	}
+	const std::shared_ptr<const opennova::rtxt::File> text_override =
+			RtxtStringFile::installed_text_override();
 	mount.texts = inmatch::game_cfg_default_texts(
-			p_gametext.is_valid() ? &p_gametext->get_native() : nullptr);
+			p_gametext.is_valid() ? &p_gametext->get_native() : nullptr, text_override.get());
 	mount.desktop_width = p_desktop.x;
 	mount.desktop_height = p_desktop.y;
 	return mount;

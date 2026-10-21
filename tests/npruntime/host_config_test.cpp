@@ -65,7 +65,7 @@ int main() {
 	// --- the default texts: the `!` fallbacks with no table or no entry, the
 	//     entry's text when the Menu section holds it.
 	{
-		const gamecfg::DefaultTexts none = game_cfg_default_texts(nullptr);
+		const gamecfg::DefaultTexts none = game_cfg_default_texts(nullptr, nullptr);
 		TEST_EXPECT(none.untitled == "!Untitled");
 		TEST_EXPECT(none.user_message == "!Put your message here");
 		rtxt::File table;
@@ -74,9 +74,24 @@ int main() {
 		entry.key = "UNTITLED";
 		entry.text = "Untitled";
 		table.entries.push_back(entry);
-		const gamecfg::DefaultTexts texts = game_cfg_default_texts(&table);
+		const gamecfg::DefaultTexts texts = game_cfg_default_texts(&table, nullptr);
 		TEST_EXPECT(texts.untitled == "Untitled");
 		TEST_EXPECT(texts.user_message == "!Put your message here");
+		// The override table's entry wins over the gametext's, and a key the
+		// override lacks still reads the gametext's (GameText_GetStringWithFallback
+		// @0x51EBB6 -> TextResource_FindEntryBySectionAndKey @0x75D27B); with no
+		// gametext table the override is never searched (@0x51EB97).
+		rtxt::File override_table;
+		override_table.sections.push_back(rtxt::Section{"Menu", 1});
+		rtxt::Entry message;
+		message.key = "USERMESSAGE";
+		message.text = "Expansion message";
+		override_table.entries.push_back(message);
+		const gamecfg::DefaultTexts over = game_cfg_default_texts(&table, &override_table);
+		TEST_EXPECT(over.untitled == "Untitled");
+		TEST_EXPECT(over.user_message == "Expansion message");
+		const gamecfg::DefaultTexts no_gametext = game_cfg_default_texts(nullptr, &override_table);
+		TEST_EXPECT(no_gametext.user_message == "!Put your message here");
 	}
 
 	// --- the defaults block lands on the host screen's rule baseline: the

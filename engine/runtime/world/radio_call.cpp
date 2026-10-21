@@ -120,10 +120,16 @@ std::string radio_call_key(const World &world, const Entity &speaker, int event,
     return key;
 }
 
+const std::string *voice_macro_text(const World &world, const std::string &key) {
+    const rtxt::Entry *entry = rtxt::find_with_override(
+            world.tables.text_override, world.tables.voice_macros, "macrotext", key);
+    return entry != nullptr ? &entry->text : nullptr;
+}
+
 // [orig: NapiNPClientMsg_HandleEntityDeath @0x430C50; VMacros_GetMacroText @0x5B7170]
 std::string radio_call_text(const World &world, const std::string &key,
         const std::string &name, const std::string *location) {
-    const auto *entry = world.tables.voice_macros.find_in_section("macrotext", key);
-    return name + (location ? ":[" + *location + "]: " : ": ") + (entry ? entry->text : key);
+    const std::string *text = voice_macro_text(world, key);
+    return name + (location ? ":[" + *location + "]: " : ": ") + (text ? *text : key);
 }
 } // namespace opennova::world

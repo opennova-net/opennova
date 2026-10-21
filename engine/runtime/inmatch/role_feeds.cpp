@@ -21,7 +21,7 @@
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
 #include <runtime/world/radar_contacts.h> // radar_hud_frame
-#include <runtime/world/radio_call.h> // capture_zone_max_coverage
+#include <runtime/world/radio_call.h> // capture_zone_max_coverage, voice_macro_text
 #include <runtime/world/user_waypoints.h>
 
 #include <algorithm>
@@ -214,10 +214,11 @@ namespace {
 void fill_voice_macro_menu(const RoleView &view, const world::Entity &local, bool radio,
 		hud::HudVoiceMacroMenuState &menu) {
 	const world::World &w = view.kernel->world;
-	const rtxt::File &macros = w.tables.voice_macros;
-	const auto lookup = [&macros](const std::string &key) -> const std::string * {
-		const rtxt::Entry *entry = macros.find_in_section("macrotext", key);
-		return entry != nullptr ? &entry->text : nullptr;
+	// The override table first, as every section lookup [orig:
+	// HUD_DrawRadioTitleMenu @0x5BFBD5 / @0x5BFC5D, HUD_DrawEmotesMenu
+	// @0x5BFF45 / @0x5BFFCD -> TextResource_FindEntryBySectionAndKey @0x75D250].
+	const auto lookup = [&w](const std::string &key) -> const std::string * {
+		return world::voice_macro_text(w, key);
 	};
 	const std::string *title = lookup(radio ? "RADIO_TITLE" : "EMOTES_TITLE");
 	menu.title = title != nullptr ? *title : (radio ? "!Radio_Title" : "!EMOTES_Title");

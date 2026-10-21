@@ -16,8 +16,10 @@
 #include <runtime/replication/client_world_materializer.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/radio_call.h>
 
 #include <cstdio>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <string>
@@ -102,7 +104,52 @@ static void inset_target_name_cases() {
 	}
 }
 
+// The expansion's override table is searched before vmacros.bin: its entries
+// win, a key it lacks reads vmacros.bin's, and the radio chat line resolves the
+// same way [orig: HUD_DrawRadioTitleMenu @0x5BFBD5 / @0x5BFC5D, HUD_DrawEmotesMenu
+// @0x5BFF45 / @0x5BFFCD, VMacros_GetMacroText @0x5B7196 ->
+// TextResource_FindEntryBySectionAndKey @0x75D27B].
+static void voice_macro_override_cases() {
+	auto runtime_heap = std::make_unique<ClientRuntime>("macros");
+	// The kernel on the heap: main's frame already holds several (1 MB stack).
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 8);
+	world::Entity seed;
+	seed.kind = world::EntityKind::Organic;
+	seed.team = 2;
+	kernel.world.cached.local_player = kernel.world.registry.spawn(0, seed);
+	RoleView view;
+	view.runtime = runtime_heap.get();
+	view.kernel = &kernel;
+	view.joiner = true;
+	auto macro_table = [](std::initializer_list<std::pair<const char *, const char *>> rows) {
+		rtxt::File table;
+		table.sections.push_back(rtxt::Section{"macrotext", static_cast<uint32_t>(rows.size())});
+		for (const auto &row : rows) {
+			rtxt::Entry entry;
+			entry.key = row.first;
+			entry.text = row.second;
+			table.entries.push_back(entry);
+		}
+		return table;
+	};
+	kernel.world.tables.voice_macros =
+			macro_table({{"RADIO_TITLE", "Radio"}, {"EMOTES_TITLE", "Emotes"}, {"EMO_1", "Hello"}});
+	const rtxt::File override_table = macro_table({{"RADIO_TITLE", "Expansion Radio"}, {"EMO_1", "Wave"}});
+	kernel.world.tables.text_override = &override_table;
+	const auto over = std::make_unique<HudRoleFacts>(
+			hud_role_facts(view, kHudVoiceMenuEmotes | kHudVoiceMenuRadio));
+	CHECK(over->radio_menu.title == "Expansion Radio" && over->emotes_menu.title == "Emotes");
+	CHECK(over->emotes_menu.texts[0] == "Wave" && over->emotes_menu.texts[1] == "EMO_2");
+	CHECK(world::radio_call_text(kernel.world, "EMO_1", "Pat", nullptr) == "Pat: Wave");
+	CHECK(world::radio_call_text(kernel.world, "RADIO_TITLE", "Pat", nullptr) == "Pat: Expansion Radio");
+	kernel.world.tables.text_override = nullptr;
+	CHECK(world::radio_call_text(kernel.world, "EMO_1", "Pat", nullptr) == "Pat: Hello");
+}
+
 int main() {
+	voice_macro_override_cases();
 	// The bare local role: nothing folded, nothing gathered.
 	{
 		RoleView bare;

@@ -387,8 +387,13 @@ bool Server::mount(std::string &error) {
 	if (!vfs_expansion_override_table(options_.resource_dir, index_.mounted_expansion(),
 				ExpansionLoadPoint::ArchivesClosed, options_.loose_override, text_override_table_))
 		text_override_table_.clear();
+	text_override_ = rtxt::File{};
+	std::string override_error;
+	have_text_override_ = !text_override_table_.empty() &&
+			rtxt::parse(text_override_table_.data(), text_override_table_.size(), text_override_,
+					override_error);
 	assets_ = std::make_unique<assets::AssetStore>(&index_);
-	catalog_ = mission_catalog::build(index_);
+	catalog_ = mission_catalog::build(index_, have_text_override_ ? &text_override_ : nullptr);
 	// The avatar registry, which the admin console's PETERRABBIT SEXCHANGE walks; an install
 	// without Avatars.def leaves it empty [orig: CAvatarDefs_Init @0x57B180 opens
 	// "Avatars.def"].
@@ -417,8 +422,8 @@ bool Server::read_config_over_weapons(std::string &error) {
 	std::vector<uint8_t> bytes;
 	have_gametext_ = index_.read_file("gametext.bin", bytes) &&
 			rtxt::parse(bytes.data(), bytes.size(), gametext_, gametext_error);
-	config_.set_default_texts(
-			inmatch::game_cfg_default_texts(have_gametext_ ? &gametext_ : nullptr));
+	config_.set_default_texts(inmatch::game_cfg_default_texts(have_gametext_ ? &gametext_ : nullptr,
+			have_text_override_ ? &text_override_ : nullptr));
 	if (!config_.load()) {
 		reset_exit_ = true;
 		error = "game.cfg sets mpreset: the process exits";

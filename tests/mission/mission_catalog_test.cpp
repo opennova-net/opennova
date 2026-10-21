@@ -209,7 +209,7 @@ int main() {
 			opennova::VfsArchiveDiscovery::RetailTable));
 	TEST_EXPECT(index.mounted_expansion() == "jox01");
 
-	const std::vector<catalog::Row> rows = catalog::build(index);
+	const std::vector<catalog::Row> rows = catalog::build(index, nullptr);
 	// alpha, kilo, mike, oscar, zulu (loose); exp, pack (expansion pair); bad, lonely,
 	// pack (base pair).
 	TEST_EXPECT(rows.size() == 10u);
@@ -300,7 +300,7 @@ int main() {
 	// A loose-only mount has no archive slots: its loose files alone.
 	opennova::ResourceIndex loose_index;
 	TEST_EXPECT(loose_index.scan(root.string(), "", opennova::VfsMountMode::LooseOnly));
-	const std::vector<catalog::Row> loose_rows = catalog::build(loose_index);
+	const std::vector<catalog::Row> loose_rows = catalog::build(loose_index, nullptr);
 	TEST_EXPECT(loose_rows.size() == 5u);
 	for (const catalog::Row &row : loose_rows) TEST_EXPECT(row.loose);
 
@@ -324,7 +324,8 @@ int main() {
 					asked.push_back(bin);
 					std::string error;
 					return bin == "Bravo.bin" && opennova::rtxt::parse(bravo_bin.data(), bravo_bin.size(), text, error);
-				});
+				},
+				nullptr);
 		TEST_EXPECT(own.size() == 3u);
 		TEST_EXPECT((asked == std::vector<std::string>{ "Bravo.bin", "Able.bin", "gone.bin" }));
 		TEST_EXPECT(own[0].file == "Bravo.bms" && own[0].loose && own[0].title == "Bravo Op" &&
@@ -337,6 +338,22 @@ int main() {
 		TEST_EXPECT(catalog::game_type_of(own[1]) ==
 				opennova::game_type::for_mission_mode(static_cast<uint32_t>(AttribFlags::Coop)));
 		TEST_EXPECT(catalog::game_type_of(own[0]) == opennova::game_type::for_mission_mode(0));
+		// The override table's [Info] entries win over the mission table's, and a key it
+		// lacks still reads the mission table's; a row with no table of its own never
+		// searches it (the header name stands in) [orig: MissionList_ScanAndBuildFromFiles
+		// @0x563496 / @0x5634E8 -> TextResource_FindEntryBySectionAndKey @0x75D27B].
+		const std::vector<uint8_t> override_bin = info_bin("Expansion Title", "", /*include_title=*/true);
+		opennova::rtxt::File override_table;
+		std::string override_error;
+		TEST_EXPECT(opennova::rtxt::parse(override_bin.data(), override_bin.size(), override_table,
+				override_error));
+		opennova::rtxt::File bravo_table;
+		TEST_EXPECT(opennova::rtxt::parse(bravo_bin.data(), bravo_bin.size(), bravo_table, override_error));
+		const catalog::Row over = catalog::loose_row("Bravo.bms", bravo, &bravo_table, &override_table);
+		TEST_EXPECT(over.title == "Expansion Title");
+		TEST_EXPECT(over.briefing == "Read beside it."); // the override has no BRIEFING
+		const catalog::Row bare = catalog::loose_row("Bravo.bms", bravo, nullptr, &override_table);
+		TEST_EXPECT(bare.title == "Bravo Header Name");
 	}
 
 	// The order's stricmp folds through the ".ACP" locale over the names' cp1252
@@ -373,7 +390,7 @@ int main() {
 		opennova::pff::PffArchive missions{}, texts{};
 		TEST_EXPECT(opennova::pff::pff_open(&missions, (exp / "jox01.pff").string().c_str()) == 0);
 		TEST_EXPECT(opennova::pff::pff_open(&texts, (exp / "jox01L.pff").string().c_str()) == 0);
-		std::vector<catalog::Row> pair = catalog::archive_rows(missions, &texts);
+		std::vector<catalog::Row> pair = catalog::archive_rows(missions, &texts, nullptr);
 		TEST_EXPECT(pair.size() == 2u);
 		catalog::sort_rows(pair);
 		TEST_EXPECT(pair.size() == 2u && pair[0].file == "exp.bms" && pair[1].file == "pack.bms");
@@ -382,7 +399,7 @@ int main() {
 				pair[0].game_mode == static_cast<uint32_t>(AttribFlags::Coop));
 		TEST_EXPECT(pair.size() == 2u && pair[1].title == "Exp Pack Header" && pair[1].briefing.empty());
 		TEST_EXPECT(count_rows(pair, "inl.bms") == 0);
-		const std::vector<catalog::Row> untitled = catalog::archive_rows(missions, nullptr);
+		const std::vector<catalog::Row> untitled = catalog::archive_rows(missions, nullptr, nullptr);
 		TEST_EXPECT(untitled.size() == 2u);
 		for (const catalog::Row &row : untitled)
 			TEST_EXPECT(row.title == (row.file == "exp.bms" ? "Exp Header Name" : "Exp Pack Header"));

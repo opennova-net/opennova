@@ -10,6 +10,8 @@
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
+#include <memory>
+
 #include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h> // the engine's ONE game-text seam
 
@@ -125,6 +127,10 @@ public:
 	// The installed table's text for (section, key), converted as
 	// get_string_in_section converts it; false with none installed or no entry.
 	static bool text_override_lookup(const char *p_section, const char *p_key, std::string &r_out);
+	// The installed table itself (null: none), for the engine lookups that take
+	// the override table as an argument (the mission catalog's titles, the cfg
+	// defaults' texts).
+	static std::shared_ptr<const opennova::rtxt::File> installed_text_override();
 
 	// Native access for the loader/saver.
 	const opennova::rtxt::File &get_native() const { return file_; }

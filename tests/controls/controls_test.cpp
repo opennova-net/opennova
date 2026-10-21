@@ -161,6 +161,24 @@ bool test_key_strings_table() {
   CHECK(key_string("OR", " XXor ") == " or ", "the shipped separator");
   CHECK(key_string("KEY", "KEY") == "Key", "the shipped unknown-key label");
   CHECK(key_string("NOSUCHKEY", "XXFallback") == "Fallback", "a miss still falls back");
+  // The process's override table is searched first: its entry wins, a key it
+  // lacks still reads the Keys table, and forgetting it restores the table's
+  // [orig: KeyHelp_GetStringWithFallback @0x51ED40, the call @0x51ED6C ->
+  // TextResource_FindEntryBySectionAndKey @0x75D250, the override @0x75D27B].
+  {
+    auto override_table = std::make_shared<opennova::rtxt::File>();
+    override_table->sections.push_back(opennova::rtxt::Section{"Keys", 1});
+    opennova::rtxt::Entry entry;
+    entry.key = "Ctrl-";
+    entry.text = "Strg-";
+    override_table->entries.push_back(entry);
+    set_key_strings_override(override_table);
+    CHECK(key_string("Ctrl-", "XXCtrl - ") == "Strg-", "the override's entry wins");
+    CHECK(key_help_string_raw("Keys", "Ctrl-", "!x") == "Strg-", "the raw lookup too");
+    CHECK(key_string("OR", " XXor ") == " or ", "a key the override lacks reads the Keys table");
+    set_key_strings_override(nullptr);
+    CHECK(key_string("Ctrl-", "XXCtrl - ") == "Ctrl-", "no override: the Keys table");
+  }
   return true;
 }
 

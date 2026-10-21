@@ -162,7 +162,8 @@ bool scan_missions(const DataSetRow &data_set, const std::string &dir,
 			why = "the tree does not mount as an install: " + index.last_error();
 			return false;
 		}
-		rows = mission_catalog::build(index);
+		// The service lists a tree's own tables: no expansion override table is installed.
+		rows = mission_catalog::build(index, nullptr);
 		index.clear();
 	} else {
 		const MissionPair pair = mission_pair_of(data_set.kind, data_set.expansion_code);
@@ -182,7 +183,7 @@ bool scan_missions(const DataSetRow &data_set, const std::string &dir,
 			why = pair.texts + " is not a PFF archive";
 			return false;
 		}
-		rows = mission_catalog::archive_rows(missions_archive, &texts_archive);
+		rows = mission_catalog::archive_rows(missions_archive, &texts_archive, nullptr);
 		pff::pff_close(&missions_archive);
 		pff::pff_close(&texts_archive);
 		mission_catalog::sort_rows(rows);

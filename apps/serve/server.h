@@ -254,6 +254,10 @@ private:
 	// The mount's expansion text-override table, read once at the boot's
 	// mount (vfs_expansion_override_table); empty = none.
 	std::vector<uint8_t> text_override_table_;
+	// The same table parsed, for the lookups that search it first (the
+	// catalog's titles, the cfg defaults' texts; D-NET-675).
+	rtxt::File text_override_;
+	bool have_text_override_ = false;
 	std::unique_ptr<assets::AssetStore> assets_;
 	std::vector<mission_catalog::Row> catalog_;
 	// The process's cfg block: game.cfg in the working directory and the

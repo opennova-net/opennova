@@ -12,6 +12,7 @@
 #include <runtime/inmatch/map_change.h>
 
 #include "resource_index/resource_root.h"
+#include "rtxt/rtxt_string_file.h"
 #include "util/string_convert.h"
 
 using namespace sim_internal;
@@ -31,7 +32,10 @@ void seed_host_rotation(SimulationNetState &p_net, const Ref<ResourceRoot> &p_ro
 	p_net.rotation().list = inmatch::MissionRotation{};
 	p_net.rotation_catalog.clear();
 	if (p_root.is_null()) return;
-	p_net.rotation_catalog = opennova::mission_catalog::build(p_root->native_index());
+	const std::shared_ptr<const opennova::rtxt::File> text_override =
+			RtxtStringFile::installed_text_override();
+	p_net.rotation_catalog =
+			opennova::mission_catalog::build(p_root->native_index(), text_override.get());
 	const std::vector<opennova::mission_catalog::Row> &catalog = p_net.rotation_catalog;
 	std::vector<std::string> files = p_net.rotation_missions;
 	std::vector<int32_t> switches = p_net.rotation_launch_options;

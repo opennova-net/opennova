@@ -61,10 +61,14 @@ gamecfg::WeaponRoster game_cfg_weapon_roster(const ResourceIndex &index);
 
 // The defaults' two localized strings from the mounted gametext.bin: its
 // Menu/UNTITLED and Menu/USERMESSAGE entries, each falling back to the `!`
-// text when the table is not loaded or lacks the key.
+// text when the table is not loaded or lacks the key. With the table loaded
+// each lookup searches `text_override` (the mount's override table, null for
+// none) first, as every section lookup does.
 // [orig: Config_SetDefaults @0x54D1A1, @0x54D240 through
-//  GameText_GetStringWithFallback @0x51EB90]
-gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext);
+//  GameText_GetStringWithFallback @0x51EB90 (the null table @0x51EB97, the
+//  lookup @0x51EBB6 -> TextResource_FindEntryBySectionAndKey @0x75D250)]
+gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext,
+		const rtxt::File *text_override);
 
 // The session a host creates from the cfg block, in session as the authority:
 // CNapiGameSession_BuildAndCreateSession's in-session cap on mpmaxplayers

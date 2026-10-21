@@ -270,10 +270,17 @@ std::shared_ptr<const opennova::rtxt::File> g_text_override;
 
 void RtxtStringFile::install_text_override() const {
 	g_text_override = std::make_shared<const opennova::rtxt::File>(file_);
+	// The binding labels search the same table first (KeyHelp_GetStringWithFallback).
+	opennova::controls::set_key_strings_override(g_text_override);
 }
 
 void RtxtStringFile::clear_text_override() {
 	g_text_override.reset();
+	opennova::controls::set_key_strings_override(nullptr);
+}
+
+std::shared_ptr<const opennova::rtxt::File> RtxtStringFile::installed_text_override() {
+	return g_text_override;
 }
 
 bool RtxtStringFile::text_override_lookup(const char *p_section, const char *p_key,
