@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { adminClient } from './client';
 import { fetchCosts, pickCosts } from './costs';
-import { costs, localCosts } from '../test/costFixtures';
+import { combinedCosts, costs, localCosts } from '../test/costFixtures';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn() },
@@ -32,11 +32,22 @@ describe('the costs client', () => {
     expect(read?.budget_error).toBe('refused');
   });
 
+  it('reads account budgets and failures while accepting older replies without accounts', () => {
+    const combined = combinedCosts();
+    combined.error = 'CI: AccessDeniedException';
+    combined.accounts[1].error = 'AccessDeniedException';
+    expect(pickCosts(wire(combined))).toEqual(combined);
+    const { accounts: _accounts, ...legacy } = costs();
+    expect(pickCosts(wire(legacy))).toEqual(costs());
+  });
+
   it('refuses a reply without the month or with a malformed line', () => {
     expect(pickCosts({ available: true })).toBeNull();
     expect(pickCosts({ available: true, month_to_date_cents: 'lots' })).toBeNull();
     expect(pickCosts({ ...(wire(costs()) as object), by_service: [{ service: 'EC2' }] })).toBeNull();
     expect(pickCosts({ ...(wire(costs()) as object), days: [{ cents: 5 }] })).toBeNull();
+    expect(pickCosts({ ...(wire(costs()) as object), accounts: {} })).toBeNull();
+    expect(pickCosts({ ...(wire(costs()) as object), accounts: [{ id: 'ci', label: 'CI' }] })).toBeNull();
   });
 
   it("answers the server's refusal as an error", async () => {

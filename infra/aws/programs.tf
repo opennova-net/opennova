@@ -249,7 +249,9 @@ resource "aws_iam_role_policy" "exec" {
 locals {
   log_group_prefix = "/opennova/${local.deployment}"
   # The monthly cost budget's ARN (Budgets names a budget by account and name).
-  cost_budget_arn = "arn:${local.partition}:budgets::${local.account_id}:budget/${aws_budgets_budget.monthly_cost.name}"
+  cost_budget_arn    = "arn:${local.partition}:budgets::${local.account_id}:budget/${aws_budgets_budget.monthly_cost.name}"
+  ci_cost_role_arn   = "arn:${local.partition}:iam::${var.aws_account_id_ci}:role/opennova-ci-cost-read"
+  ci_cost_budget_arn = "arn:${local.partition}:budgets::${var.aws_account_id_ci}:budget/opennova-ci-monthly-cost"
   # Every group the log view reads, and each one's streams.
   read_log_groups = flatten([
     for g in ["service", "machines", "servers"] : [
@@ -364,6 +366,18 @@ resource "aws_iam_role_policy" "infra_read" {
   policy = data.aws_iam_policy_document.infra_read.json
 }
 
+# Billing is the only runtime read across accounts, and only prod web may
+# assume this narrowly trusted role. Its role boundary permits the same ARN.
+resource "aws_iam_role_policy" "ci_cost_read" {
+  count = var.deployment == "prod" ? 1 : 0
+  name  = "${local.name}-web-ci-cost-read"
+  role  = aws_iam_role.program["web"].id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Resource = local.ci_cost_role_arn }]
+  })
+}
+
 # The game data's store (ADR 0064; fleet.tf names it: the deployment's
 # operations bucket under local.data_prefix, data/), with hosting on: web
 # starts the admin page's uploads (multipart; the browser sends each part
@@ -465,7 +479,7 @@ locals {
   # balancer by its metrics' dimension (the usage view's, metrics_store.h); the
   # start of every alarm's name (the attention list's, alarm_store.h); and the
   # monthly cost budget (the costs view's, cost_store.h).
-  infra_status_env = {
+  infra_status_env = merge({
     ONNET_INFRA_REGION            = local.region
     ONNET_INFRA_CLUSTER           = aws_ecs_cluster.main.name
     ONNET_INFRA_FLEET_CLUSTER     = local.hosted_enabled ? aws_ecs_cluster.fleet[0].name : ""
@@ -476,7 +490,10 @@ locals {
     ONNET_INFRA_LOAD_BALANCER     = aws_lb.public.arn_suffix
     ONNET_INFRA_ALARM_PREFIX      = "${local.name}-"
     ONNET_INFRA_BUDGET            = local.cost_budget_arn
-  }
+    }, var.deployment == "prod" ? {
+    ONNET_INFRA_CI_COST_ROLE = local.ci_cost_role_arn
+    ONNET_INFRA_CI_BUDGET    = local.ci_cost_budget_arn
+  } : {})
 
   # The update service (ADR 0061, 0064): web serves retail UPDATE.EXE on the
   # updater's ports behind the balancer (load_balancer.tf), at the update

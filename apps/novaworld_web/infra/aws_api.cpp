@@ -9,6 +9,7 @@
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -22,9 +23,40 @@ namespace {
 
 // curl's own bounds on one run, in seconds (the runner's timeout_ms sits over
 // them); the agent's link-local endpoint answers at once or not at all.
-constexpr int kConnectTimeoutS = 5;
-constexpr int kMaxTimeS = 12;
-constexpr int kCredentialsMaxTimeS = 4;
+constexpr int kConnectTimeoutMs = 5000;
+constexpr int kMaxTimeMs = 12000;
+constexpr int kCredentialsMaxTimeMs = 4000;
+
+// Milliseconds as curl's decimal seconds, independent of the process locale.
+std::string seconds_text(int milliseconds) {
+	const std::string fraction = std::to_string(1000 + milliseconds % 1000).substr(1);
+	return std::to_string(milliseconds / 1000) + "." + fraction;
+}
+
+int call_timeout(int configured, int requested) {
+	return requested < 0 ? configured : std::min(configured, requested);
+}
+
+// STS credentials are taken from the expected element once, never from a
+// similarly named descendant of another response or an ambiguous duplicate.
+const XmlNode *only_child(const XmlNode &node, std::string_view name) {
+	const XmlNode *found = nullptr;
+	for (const XmlNode &child : node.children) {
+		if (child.name != name)
+			continue;
+		if (found != nullptr)
+			return nullptr;
+		found = &child;
+	}
+	return found;
+}
+
+std::string credential_text(const XmlNode &node, std::string_view name) {
+	const XmlNode *child = only_child(node, name);
+	return child != nullptr && child->children.empty()
+			? std::string(strutil::trim_view(child->text))
+			: std::string();
+}
 
 bool is_unreserved(unsigned char c) {
 	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
@@ -99,14 +131,14 @@ AwsReply unreachable(std::string error) {
 }
 
 // The lines every run's config file ends with.
-std::string common_tail(bool https, int max_time_s) {
+std::string common_tail(bool https, int max_time_ms) {
 	std::string text;
 	text += "user-agent = \"opennova-novaworld\"\n";
 	text += "silent\n";
 	text += "show-error\n";
 	text += std::string("proto = ") + (https ? "\"=https\"" : "\"=http\"") + "\n";
-	text += "connect-timeout = " + std::to_string(kConnectTimeoutS) + "\n";
-	text += "max-time = " + std::to_string(max_time_s) + "\n";
+	text += "connect-timeout = " + seconds_text(std::min(kConnectTimeoutMs, max_time_ms)) + "\n";
+	text += "max-time = " + seconds_text(max_time_ms) + "\n";
 	// The status on a line of its own after the body.
 	text += "write-out = \"\\n%{http_code}\"\n";
 	return text;
@@ -149,16 +181,22 @@ std::string AwsApi::query_encode(const std::vector<std::pair<std::string, std::s
 	return out;
 }
 
-bool AwsApi::credentials(AwsCredentials &out, std::string &error) {
+bool AwsApi::credentials(AwsCredentials &out, std::string &error, int timeout_ms) {
 	out = AwsCredentials();
+	error.clear();
+	const int timeout = call_timeout(config_.timeout_ms, timeout_ms);
+	if (timeout <= 0) {
+		error = "the AWS read deadline was reached";
+		return false;
+	}
 	const auto url = config_value(std::string(kCredentialsHost) + config_.credentials_uri);
 	if (!url) {
 		error = "the credentials path holds a control byte";
 		return false;
 	}
 	std::string text = "url = " + *url + "\n";
-	text += common_tail(false, kCredentialsMaxTimeS);
-	const AwsReply reply = run(text, {});
+	text += common_tail(false, std::min(kCredentialsMaxTimeMs, timeout));
+	const AwsReply reply = run(text, {}, timeout);
 	if (!reply.ok()) {
 		error = reply.outcome == AwsReply::Outcome::Unreachable
 				? "the ECS agent's credentials endpoint did not answer: " + reply.error
@@ -184,30 +222,81 @@ bool AwsApi::credentials(AwsCredentials &out, std::string &error) {
 	return true;
 }
 
+bool AwsApi::assume_role(const AwsCredentials &source, const std::string &role_arn,
+		AwsCredentials &out, std::string &error, int timeout_ms) {
+	const AwsCredentials credentials = source;
+	out = AwsCredentials();
+	error.clear();
+	if (role_arn.empty() || role_arn.size() > 2048 || has_control_byte(role_arn)) {
+		error = "the STS role ARN is missing or invalid";
+		return false;
+	}
+	AwsReply reply = query_call(credentials, "sts",
+			{ { "Action", "AssumeRole" }, { "Version", "2011-06-15" }, { "RoleArn", role_arn },
+					{ "RoleSessionName", "opennova-costs" }, { "DurationSeconds", "900" } },
+			timeout_ms);
+	if (!reply.ok()) {
+		// Scrub before extracting/truncating AWS's error, so even a response
+		// echoing a source credential cannot expose part of it.
+		const std::vector<std::string> secrets = { credentials.key_id, credentials.secret,
+			credentials.token };
+		reply.body = scrub(std::move(reply.body), secrets);
+		reply.error = scrub(std::move(reply.error), secrets);
+		error = failure("sts", reply);
+		return false;
+	}
+	XmlNode root;
+	std::string parse_error;
+	if (!parse_xml(reply.body, root, parse_error) || root.name != "AssumeRoleResponse") {
+		error = "sts answered no AssumeRole response";
+		return false;
+	}
+	const XmlNode *result = only_child(root, "AssumeRoleResult");
+	const XmlNode *node = result != nullptr ? only_child(*result, "Credentials") : nullptr;
+	AwsCredentials assumed;
+	if (node != nullptr) {
+		assumed.key_id = credential_text(*node, "AccessKeyId");
+		assumed.secret = credential_text(*node, "SecretAccessKey");
+		assumed.token = credential_text(*node, "SessionToken");
+	}
+	if (assumed.key_id.empty() || assumed.secret.empty() || assumed.token.empty() ||
+			has_control_byte(assumed.key_id) || has_control_byte(assumed.secret) ||
+			has_control_byte(assumed.token) || assumed.key_id.find(':') != std::string::npos) {
+		error = "sts answered no usable temporary credentials";
+		return false;
+	}
+	out = std::move(assumed);
+	return true;
+}
+
 AwsReply AwsApi::json_call(const AwsCredentials &credentials, std::string_view service,
-		std::string_view target, const std::string &body) {
+		std::string_view target, const std::string &body, int timeout_ms) {
 	return signed_call(credentials, service,
 			std::string(service) + "." + config_.region + ".amazonaws.com", config_.region,
-			"application/x-amz-json-1.1", target, body);
+			"application/x-amz-json-1.1", target, body, timeout_ms);
 }
 
 AwsReply AwsApi::global_json_call(const AwsCredentials &credentials, std::string_view service,
 		std::string_view host, std::string_view signing_region, std::string_view target,
-		const std::string &body) {
-	return signed_call(credentials, service, host, signing_region,
-			"application/x-amz-json-1.1", target, body);
+		const std::string &body, int timeout_ms) {
+	return signed_call(credentials, service, host, signing_region, "application/x-amz-json-1.1",
+			target, body, timeout_ms);
 }
 
 AwsReply AwsApi::query_call(const AwsCredentials &credentials, std::string_view service,
-		const std::vector<std::pair<std::string, std::string>> &params) {
+		const std::vector<std::pair<std::string, std::string>> &params, int timeout_ms) {
 	return signed_call(credentials, service,
 			std::string(service) + "." + config_.region + ".amazonaws.com", config_.region,
-			"application/x-www-form-urlencoded; charset=utf-8", {}, query_encode(params));
+			"application/x-www-form-urlencoded; charset=utf-8", {}, query_encode(params),
+			timeout_ms);
 }
 
 AwsReply AwsApi::signed_call(const AwsCredentials &credentials, std::string_view service,
 		std::string_view host, std::string_view region, std::string_view content_type,
-		std::string_view target, const std::string &body) {
+		std::string_view target, const std::string &body, int timeout_ms) {
+	const int timeout = call_timeout(config_.timeout_ms, timeout_ms);
+	if (timeout <= 0)
+		return unreachable("the AWS read deadline was reached");
 	const std::string name(service);
 	const auto url = config_value("https://" + std::string(host) + "/");
 	const auto sigv4 = config_value("aws:amz:" + std::string(region) + ":" + name);
@@ -232,11 +321,12 @@ AwsReply AwsApi::signed_call(const AwsCredentials &credentials, std::string_view
 	if (!credentials.token.empty())
 		text += "header = " + *token + "\n";
 	text += "data-raw = " + *data + "\n";
-	text += common_tail(true, kMaxTimeS);
-	return run(text, { credentials.secret, credentials.token, credentials.key_id });
+	text += common_tail(true, std::min(kMaxTimeMs, timeout));
+	return run(text, { credentials.secret, credentials.token, credentials.key_id }, timeout);
 }
 
-AwsReply AwsApi::run(const std::string &text, const std::vector<std::string> &secrets) {
+AwsReply AwsApi::run(
+		const std::string &text, const std::vector<std::string> &secrets, int timeout_ms) {
 	const fs::path file = fs::u8path(config_.scratch_dir) / ("aws-" + random_hex(8) + ".cfg");
 	std::string error;
 	std::error_code ec;
@@ -245,7 +335,7 @@ AwsReply AwsApi::run(const std::string &text, const std::vector<std::string> &se
 		return unreachable("cannot write the request file: " + scrub(error, secrets));
 	}
 	const proc::CommandResult result =
-			runner_.run({ config_.curl, "-q", "--config", file.u8string() }, config_.timeout_ms);
+			runner_.run({ config_.curl, "-q", "--config", file.u8string() }, timeout_ms);
 	fs::remove(file, ec);
 
 	switch (result.outcome) {
@@ -253,8 +343,7 @@ AwsReply AwsApi::run(const std::string &text, const std::vector<std::string> &se
 			return unreachable(
 					"curl did not start: " + loggable(scrub(result.error, secrets), 200));
 		case proc::CommandResult::Outcome::TimedOut:
-			return unreachable(
-					"curl timed out after " + std::to_string(config_.timeout_ms) + " ms");
+			return unreachable("curl timed out after " + std::to_string(timeout_ms) + " ms");
 		case proc::CommandResult::Outcome::Exited:
 			break;
 	}

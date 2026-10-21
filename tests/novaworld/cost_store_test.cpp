@@ -41,6 +41,13 @@ namespace {
 constexpr int64_t kNow = 1792411230;
 constexpr const char *kBudgetArn =
 		"arn:aws:budgets::123456789012:budget/opennova-prod-monthly-cost";
+constexpr const char *kCiRole = "arn:aws:iam::444444444444:role/opennova-ci-cost-read";
+constexpr const char *kCiBudget = "arn:aws:budgets::444444444444:budget/opennova-ci-monthly-cost";
+constexpr const char *kCiCredentials =
+		"<AssumeRoleResponse><AssumeRoleResult><Credentials>"
+		"<AccessKeyId>ASIACICOSTKEY</AccessKeyId><SecretAccessKey>ci-secret</SecretAccessKey>"
+		"<SessionToken>ci-token</SessionToken><Expiration>2026-10-19T12:15:30Z</Expiration>"
+		"</Credentials></AssumeRoleResult></AssumeRoleResponse>";
 
 bool contains(const std::string &text, const std::string &part) {
 	return text.find(part) != std::string::npos;
@@ -52,6 +59,8 @@ struct Call {
 	std::string url;
 	std::string sigv4;
 	std::string body;
+	std::string user;
+	int timeout_ms = 0;
 };
 
 class ScriptedAws : public opennova::proc::CommandRunner {
@@ -59,7 +68,7 @@ public:
 	std::function<CommandResult(const Call &)> answer_call;
 	std::vector<Call> calls;
 
-	CommandResult run(const std::vector<std::string> &argv, int) override {
+	CommandResult run(const std::vector<std::string> &argv, int timeout_ms) override {
 		Call call;
 		call.argv = argv;
 		std::string config;
@@ -71,6 +80,8 @@ public:
 		call.url = infra_stub::config_line(config, "url");
 		call.sigv4 = infra_stub::config_line(config, "aws-sigv4");
 		call.body = infra_stub::config_line(config, "data-raw");
+		call.user = infra_stub::config_line(config, "user");
+		call.timeout_ms = timeout_ms;
 		calls.push_back(call);
 		if (call.key == "credentials")
 			return answer(200, infra_stub::kCredentials);
@@ -144,6 +155,237 @@ CommandResult deployment_reply(const Call &c) {
 				R"("TimeUnit":"MONTHLY","BudgetType":"COST","CalculatedSpend":{"ActualSpend":{"Amount":"16.81","Unit":"USD"},)"
 				R"("ForecastedSpend":{"Amount":"124.2","Unit":"USD"}},"LastUpdatedTime":1792400000}})");
 	return infra_stub::curl_failed(7, "no answer");
+}
+
+infra::CostConfig combined(const std::string &scratch) {
+	auto c = deployment(scratch);
+	c.ci_role_arn = kCiRole;
+	c.ci_budget_arn = kCiBudget;
+	return c;
+}
+
+bool is_ci(const Call &c) {
+	return contains(c.user, "ASIACICOSTKEY");
+}
+
+CommandResult combined_reply(const Call &c) {
+	if (c.key == "sts AssumeRole")
+		return answer(200, kCiCredentials);
+	if (!is_ci(c))
+		return deployment_reply(c);
+	if (c.key == "ce GetCostAndUsage")
+		return answer(200,
+				R"({"ResultsByTime":[)" +
+						day("2026-10-01", "2026-10-02",
+								group("Amazon Elastic Compute Cloud - Compute", "10.25") + "," +
+										group("Amazon Simple Storage Service", "2.50")) +
+						"]}");
+	if (c.key == "ce GetCostForecast")
+		return answer(200, R"({"Total":{"Amount":"20","Unit":"USD"}})");
+	if (c.key == "budgets DescribeBudget")
+		return answer(200,
+				R"({"Budget":{"BudgetName":"opennova-ci-monthly-cost","BudgetLimit":{"Amount":"300","Unit":"USD"},)"
+				R"("TimeUnit":"MONTHLY","BudgetType":"COST","CalculatedSpend":{"ForecastedSpend":{"Amount":"90","Unit":"USD"}}}})");
+	return infra_stub::curl_failed(7, "unexpected CI call");
+}
+
+int test_combined() {
+	test_temp::TempDir scratch("costs_combined");
+	ScriptedAws aws;
+	aws.answer_call = combined_reply;
+	infra::CostStore store(aws, combined(scratch.root()), [] { return kNow * 1000; });
+	const auto r = store.read();
+	TEST_EXPECT(r.read && r.error.empty() && r.accounts.size() == 2 && !r.budget);
+	TEST_EXPECT(r.accounts[0].id == "deployment" && r.accounts[0].label == "Production" &&
+			r.accounts[1].id == "ci" && r.accounts[1].label == "CI");
+	TEST_EXPECT(r.month_to_date_cents == 3055 && r.accounts[0].month_to_date_cents == 1780 &&
+			r.accounts[1].month_to_date_cents == 1275);
+	TEST_EXPECT(r.forecast_cents == 14995 && r.accounts[1].forecast_cents == 3275);
+	TEST_EXPECT(r.accounts[0].budget->limit_cents == 25000 &&
+			r.accounts[1].budget->limit_cents == 30000);
+	TEST_EXPECT(r.by_service.size() == 4 && r.by_service[0].cents == 2000 &&
+			r.by_service[2].service == "Amazon Simple Storage Service" &&
+			r.by_service[2].cents == 250);
+	TEST_EXPECT(r.days[0].cents == 1635 && r.days[18].cents == 1100);
+	TEST_EXPECT(aws.count("credentials") == 1 && aws.count("sts AssumeRole") == 1 &&
+			aws.count("ce GetCostAndUsage") == 3);
+	TEST_EXPECT(aws.last("sts AssumeRole")->url == "https://sts.us-west-2.amazonaws.com/" &&
+			contains(aws.last("sts AssumeRole")->user, infra_stub::kKeyId));
+	TEST_EXPECT(is_ci(*aws.last("budgets DescribeBudget")) &&
+			contains(aws.last("budgets DescribeBudget")->body, "444444444444"));
+	const auto calls = aws.calls.size();
+	TEST_EXPECT(store.read().read && aws.calls.size() == calls);
+	return 0;
+}
+
+int test_account_failures() {
+	for (int fail = 1; fail <= 3; ++fail) {
+		test_temp::TempDir scratch("costs_account_failure");
+		ScriptedAws aws;
+		aws.answer_call = [fail](const Call &c) {
+			if (c.key == "ce GetCostAndUsage" && ((is_ci(c) ? 2 : 1) & fail))
+				return answer(
+						400, R"({"__type":"AccessDeniedException","Message":"usage denied"})");
+			return combined_reply(c);
+		};
+		int64_t steady = 0;
+		infra::CostStore store(
+				aws, combined(scratch.root()), [] { return kNow * 1000; }, [&] { return steady; });
+		const auto r = store.read();
+		TEST_EXPECT(!r.read && !r.error.empty() && r.month_to_date_cents == 0 &&
+				r.by_service.empty() && r.days.empty() && !r.forecast_cents);
+		TEST_EXPECT(r.accounts.size() == 2 && r.accounts[0].error.empty() == !(fail & 1) &&
+				r.accounts[1].error.empty() == !(fail & 2));
+		if (!(fail & 1))
+			TEST_EXPECT(r.accounts[0].month_to_date_cents == 1780);
+		if (!(fail & 2))
+			TEST_EXPECT(r.accounts[1].month_to_date_cents == 1275);
+		const auto calls = aws.calls.size();
+		steady = infra::CostStore::kFailureCacheMs - 1;
+		TEST_EXPECT(!store.read().read && aws.calls.size() == calls);
+		steady += 2;
+		aws.answer_call = combined_reply;
+		TEST_EXPECT(store.read().read && aws.calls.size() > calls);
+	}
+	return 0;
+}
+
+int test_ci_refusals() {
+	for (const std::string failure :
+			{ "sts AssumeRole", "ce GetCostForecast", "budgets DescribeBudget" }) {
+		test_temp::TempDir scratch("costs_ci_refusal");
+		ScriptedAws aws;
+		aws.answer_call = [&failure](const Call &c) {
+			if (c.key == failure && (failure == "sts AssumeRole" || is_ci(c)))
+				return answer(400, R"({"__type":"AccessDeniedException","Message":"refused"})");
+			return combined_reply(c);
+		};
+		infra::CostStore store(aws, combined(scratch.root()), [] { return kNow * 1000; });
+		const auto r = store.read();
+		TEST_EXPECT(r.accounts[0].error.empty() && r.accounts[0].month_to_date_cents == 1780);
+		if (failure == "sts AssumeRole") {
+			TEST_EXPECT(!r.read && contains(r.error, "CI:") && !r.accounts[1].error.empty());
+		} else {
+			TEST_EXPECT(r.read && r.error.empty() && r.month_to_date_cents == 3055);
+			if (failure == "ce GetCostForecast")
+				TEST_EXPECT(!r.forecast_cents && contains(r.forecast_error, "CI:") &&
+						r.accounts[1].budget);
+			else
+				TEST_EXPECT(!r.accounts[1].budget && !r.accounts[1].budget_error.empty() &&
+						r.forecast_cents);
+		}
+	}
+	return 0;
+}
+
+int test_incomplete_usage() {
+	for (const std::string failure :
+			{ "pages", "currencies", "budget_currency", "forecast_currency", "malformed" }) {
+		test_temp::TempDir scratch("costs_incomplete");
+		ScriptedAws aws;
+		aws.answer_call = [&failure](const Call &c) {
+			if (is_ci(c) && c.key == "ce GetCostAndUsage" && failure == "pages")
+				return answer(200, R"({"ResultsByTime":[],"NextPageToken":"more"})");
+			if (is_ci(c) && c.key == "ce GetCostAndUsage" && failure == "malformed")
+				return answer(200, "{}");
+			auto result = combined_reply(c);
+			if (is_ci(c) &&
+					((failure == "currencies" && c.key == "ce GetCostAndUsage") ||
+							(failure == "budget_currency" && c.key == "budgets DescribeBudget") ||
+							(failure == "forecast_currency" && c.key == "ce GetCostForecast"))) {
+				size_t at = 0;
+				while ((at = result.out.find("USD", at)) != std::string::npos) {
+					result.out.replace(at, 3, "EUR");
+					at += 3;
+				}
+			}
+			return result;
+		};
+		infra::CostStore store(aws, combined(scratch.root()), [] { return kNow * 1000; });
+		const auto r = store.read();
+		if (failure == "budget_currency")
+			TEST_EXPECT(r.read && !r.accounts[1].budget && !r.accounts[1].budget_error.empty());
+		else if (failure == "forecast_currency")
+			TEST_EXPECT(r.read && !r.forecast_cents && !r.accounts[1].forecast_error.empty());
+		else
+			TEST_EXPECT(!r.read && !r.error.empty() && r.by_service.empty() &&
+					r.month_to_date_cents == 0);
+	}
+	return 0;
+}
+
+int test_deadline_and_rollover() {
+	test_temp::TempDir scratch("costs_deadline");
+	ScriptedAws aws;
+	int64_t steady = 0;
+	aws.answer_call = [&](const Call &c) {
+		steady += 12000;
+		return combined_reply(c);
+	};
+	infra::CostStore store(
+			aws, combined(scratch.root()), [] { return kNow * 1000; }, [&] { return steady; });
+	const auto r = store.read();
+	TEST_EXPECT(!r.read && !r.error.empty() && r.accounts[0].month_to_date_cents == 1780 &&
+			!r.accounts[1].error.empty() && aws.count("sts AssumeRole") == 0);
+	TEST_EXPECT(aws.last("budgets DescribeBudget")->timeout_ms == 9000);
+
+	ScriptedAws rollover;
+	rollover.answer_call = [](const Call &c) {
+		if (c.key == "ce GetCostAndUsage")
+			return answer(200, R"({"ResultsByTime":[]})");
+		return deployment_reply(c);
+	};
+	int64_t wall = 1798761540000LL; // December 31, 23:59 UTC
+	infra::CostStore next(
+			rollover, deployment(scratch.root()), [&] { return wall; }, [] { return 0LL; });
+	TEST_EXPECT(next.read().month_start == "2026-12-01");
+	wall += 120000;
+	TEST_EXPECT(
+			next.read().month_start == "2027-01-01" && rollover.count("ce GetCostAndUsage") == 2);
+	return 0;
+}
+
+int test_invalid_usage_and_config() {
+	for (const std::string body : { R"({"ResultsByTime":[null]})",
+				 R"({"ResultsByTime":[{"TimePeriod":{"Start":"2026-10-01"}}]})",
+				 R"({"ResultsByTime":[{"Groups":[]}]})",
+				 R"({"ResultsByTime":[{"TimePeriod":{"Start":"2026-09-30"},"Groups":[]}]})",
+				 R"({"ResultsByTime":[],"NextPageToken":12})" }) {
+		test_temp::TempDir scratch("costs_invalid_usage");
+		ScriptedAws aws;
+		aws.answer_call = [&](const Call &c) {
+			if (is_ci(c) && c.key == "ce GetCostAndUsage")
+				return answer(200, body);
+			return combined_reply(c);
+		};
+		infra::CostStore store(aws, combined(scratch.root()), [] { return kNow * 1000; });
+		const auto r = store.read();
+		TEST_EXPECT(!r.read && !r.accounts[1].error.empty() &&
+				r.accounts[0].month_to_date_cents == 1780);
+	}
+	for (int invalid = 0; invalid < 5; ++invalid) {
+		test_temp::TempDir scratch("costs_invalid_config");
+		ScriptedAws aws;
+		aws.answer_call = combined_reply;
+		auto config = combined(scratch.root());
+		if (invalid == 0)
+			config.ci_role_arn.clear();
+		if (invalid == 1)
+			config.ci_budget_arn.clear();
+		if (invalid == 2)
+			config.ci_role_arn = "not-a-role";
+		if (invalid == 3)
+			config.ci_budget_arn = kBudgetArn;
+		if (invalid == 4) {
+			config.ci_role_arn = "arn:aws:iam::123456789012:role/opennova-ci-cost-read";
+			config.ci_budget_arn = kBudgetArn;
+		}
+		infra::CostStore store(aws, config, [] { return kNow * 1000; });
+		const auto r = store.read();
+		TEST_EXPECT(!r.read && !r.accounts[1].error.empty() &&
+				r.accounts[0].month_to_date_cents == 1780 && aws.count("sts AssumeRole") == 0);
+	}
+	return 0;
 }
 
 int test_month() {
@@ -357,6 +599,12 @@ int main() {
 		int (*fn)();
 	};
 	const Case cases[] = {
+		{ "combined", test_combined },
+		{ "account_failures", test_account_failures },
+		{ "ci_refusals", test_ci_refusals },
+		{ "incomplete_usage", test_incomplete_usage },
+		{ "deadline_and_rollover", test_deadline_and_rollover },
+		{ "invalid_usage_and_config", test_invalid_usage_and_config },
 		{ "month", test_month },
 		{ "refusals", test_refusals },
 		{ "month_ends", test_month_ends },

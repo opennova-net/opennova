@@ -65,7 +65,7 @@ export const ADMIN_AREAS: readonly AdminArea[] = [
     sections: [
       { to: '/admin/users', label: 'Users', description: 'Accounts, their roles, tiers and servers' },
       { to: '/admin/billing', label: 'Subscriptions', description: 'Support tiers, dedicated machines and addresses, as Stripe has them' },
-      { to: '/admin/costs', label: 'AWS costs', description: "The month's AWS bill against the budget" },
+      { to: '/admin/costs', label: 'AWS costs', description: "The month's AWS bill and account budgets" },
     ],
   },
   {

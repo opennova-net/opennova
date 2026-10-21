@@ -57,7 +57,32 @@ tf_init() {
 # environment alone, from the run's vault cache (the AWS credentials are
 # aws_auth's, inherited).
 tf_op() {
-  TF_DATA_DIR="$TF_DIR/.terraform-$DEP" vault_env_run "$TF_ENV_TPL" terraform -chdir="$TF_DIR" "$@"
+  infra_ci_cost_account || die "$VAULT_ERR. Nothing was run"
+  TF_VAR_aws_account_id_ci="$CI_COST_ACCOUNT_ID" TF_DATA_DIR="$TF_DIR/.terraform-$DEP" \
+    vault_env_run "$TF_ENV_TPL" terraform -chdir="$TF_DIR" "$@"
+}
+
+# Prod's admin includes CI billing. Resolve identifiers only, through the same
+# per-run cache as the templates; staging never needs CI's vault item. Shared
+# by Terraform and secrets check so a missing account cannot silently omit CI.
+infra_ci_cost_account() {
+  CI_COST_ACCOUNT_ID=""
+  [ "$DEP" = prod ] || return 0
+  vault_ref "op://$VAULT/aws-ci/account_id" || return 1
+  local ci_account="$VAULT_VALUE"
+  VAULT_VALUE=""
+  if [[ ! "$ci_account" =~ ^[0-9]{12}$ ]]; then
+    VAULT_ERR="aws-ci/account_id must be a 12-digit account id for prod's AWS costs"
+    return 1
+  fi
+  vault_ref "op://$VAULT/aws-prod/account_id" || return 1
+  if [ "$ci_account" = "$VAULT_VALUE" ]; then
+    VAULT_VALUE=""
+    VAULT_ERR="aws-ci/account_id must differ from aws-prod/account_id"
+    return 1
+  fi
+  VAULT_VALUE=""
+  CI_COST_ACCOUNT_ID="$ci_account"
 }
 
 # The types whose destruction (or replacement) loses what no apply makes again,

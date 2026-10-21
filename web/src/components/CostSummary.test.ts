@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import CostSummary from './CostSummary.vue';
-import { costs, localCosts } from '../test/costFixtures';
+import { combinedCosts, costs, localCosts } from '../test/costFixtures';
 
 function render(value = costs(), shown?: number) {
   return mount(CostSummary, { props: { costs: value, now: Date.now(), ...(shown ? { shown } : {}) } });
@@ -32,6 +32,74 @@ describe('CostSummary', () => {
     expect(tiles[1]).toContain('about $117');
     expect(tiles[2]).toContain('$250');
     expect(tiles[2]).toContain('AWS Budgets counts $41.00 spent');
+  });
+
+  it('shows a combined total and charts with separate production and CI budgets', () => {
+    const page = render(combinedCosts());
+    expect(page.get('.cost-scope').text()).toContain('Production + CI');
+    const tiles = page.findAll('.cost-tiles > div').map((tile) => tile.text());
+    expect(tiles).toHaveLength(2);
+    expect(tiles[0]).toContain('$66.25');
+    expect(tiles[1]).toContain('about $192');
+    expect(page.find('.cost-budget-state').exists()).toBe(false);
+    expect(page.findAll('.cost-service')).toHaveLength(6);
+    expect(page.findAll('svg')).toHaveLength(1);
+    const accounts = page.findAll('.cost-account');
+    expect(accounts).toHaveLength(2);
+    expect(accounts[0].text()).toContain('Production');
+    expect(accounts[0].text()).toContain('47% of the $250 budget');
+    expect(accounts[1].text()).toContain('CI');
+    expect(accounts[1].text()).toContain('75% of the $100 budget');
+    expect(accounts[1].text()).toContain('$25.00');
+  });
+
+  it.each([0, 1])('keeps successful account details when account %i cannot be read', (failed) => {
+    const value = combinedCosts({ error: 'An account could not be read' });
+    value.accounts[failed].error = 'AccessDeniedException';
+    const page = render(value);
+    expect(page.get('.cost-error').text()).toContain('Combined total unavailable');
+    expect(page.find('.cost-tiles').exists()).toBe(false);
+    expect(page.find('.cost-services').exists()).toBe(false);
+    expect(page.find('svg').exists()).toBe(false);
+    const accounts = page.findAll('.cost-account');
+    expect(accounts[failed].get('.cost-account-error').text()).toContain('AccessDeniedException');
+    expect(accounts[failed].find('dl').exists()).toBe(false);
+    expect(accounts[1 - failed].find('dl').exists()).toBe(true);
+  });
+
+  it('shows both account errors without invented amounts when neither can be read', () => {
+    const value = combinedCosts({ error: 'Production and CI could not be read' });
+    for (const account of value.accounts) account.error = 'AccessDeniedException';
+    const page = render(value);
+    expect(page.findAll('.cost-account-error')).toHaveLength(2);
+    expect(page.findAll('dl')).toHaveLength(0);
+  });
+
+  it('keeps an unavailable combined forecast separate from account budget forecasts', () => {
+    const value = combinedCosts({ forecast_cents: null, forecast_error: 'CI: too little history' });
+    value.accounts[1].forecast_cents = null;
+    value.accounts[1].forecast_error = 'too little history';
+    const page = render(value);
+    expect(page.findAll('.cost-tiles > div')[1].text()).toContain('None yet');
+    expect(page.findAll('.cost-tiles > div')[1].text()).toContain('CI: too little history');
+    expect(page.findAll('.cost-account')[1].get('.cost-account-budget-state').text()).toContain('75% of the $100 budget');
+  });
+
+  it('formats each account budget in its own currency without a currency comparison', () => {
+    const value = combinedCosts();
+    value.accounts[1].budget!.currency = 'EUR';
+    const account = render(value).findAll('.cost-account')[1];
+    expect(account.find('.cost-account-budget-state').exists()).toBe(false);
+    expect(account.text()).toContain('€100');
+    expect(account.text()).toContain('different currencies');
+  });
+
+  it('preserves the single-account presentation when source metadata is present', () => {
+    const value = costs({ accounts: combinedCosts().accounts.slice(0, 1) });
+    const page = render(value);
+    expect(page.findAll('.cost-tiles > div')).toHaveLength(3);
+    expect(page.find('.cost-accounts').exists()).toBe(false);
+    expect(page.get('.cost-budget-state').text()).toContain('Within the budget');
   });
 
   it('lists the largest services with a bar each and adds up the rest', () => {

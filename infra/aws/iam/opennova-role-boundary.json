@@ -26,7 +26,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "Parameters",
       "Effect": "Allow",
       "Action": [
         "ssm:GetParameter",
@@ -37,7 +36,6 @@
       "Resource": "arn:aws:ssm:${region}:${account_id}:parameter/opennova/*"
     },
     {
-      "Sid": "Bucket",
       "Effect": "Allow",
       "Action": [
         "s3:ListBucket",
@@ -46,7 +44,6 @@
       "Resource": "arn:aws:s3:::opennova-*"
     },
     {
-      "Sid": "Objects",
       "Effect": "Allow",
       "Action": [
         "s3:GetObject",
@@ -72,7 +69,6 @@
       ]
     },
     {
-      "Sid": "AwsKeysViaSsmEc2",
       "Effect": "Allow",
       "Action": [
         "kms:Decrypt",
@@ -113,7 +109,6 @@
       }
     },
     {
-      "Sid": "LaunchParts",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
@@ -123,7 +118,6 @@
       ]
     },
     {
-      "Sid": "LaunchFromOurs",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
@@ -215,7 +209,6 @@
       "Resource": "arn:aws:route53:::change/*"
     },
     {
-      "Sid": "PassRoles",
       "Effect": "Allow",
       "Action": "iam:PassRole",
       "Resource": "arn:aws:iam::${account_id}:role/opennova-*",
@@ -230,13 +223,11 @@
       }
     },
     {
-      "Sid": "SendMail",
       "Effect": "Allow",
       "Action": "ses:SendEmail",
       "Resource": "arn:aws:ses:${region}:${account_id}:identity/*"
     },
     {
-      "Sid": "RunTasks",
       "Effect": "Allow",
       "Action": "ecs:RunTask",
       "Resource": [
@@ -250,7 +241,6 @@
       }
     },
     {
-      "Sid": "PointServices",
       "Effect": "Allow",
       "Action": [
         "ecs:DescribeServices",
@@ -305,7 +295,6 @@
       "Resource": "arn:aws:ecs:${region}:${account_id}:container-instance/opennova-*/*"
     },
     {
-      "Sid": "PointSchedule",
       "Effect": "Allow",
       "Action": [
         "scheduler:GetSchedule",

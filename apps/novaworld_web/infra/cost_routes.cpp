@@ -18,6 +18,21 @@ void cents_or_null(crow::json::wvalue &out, const char *key, const std::optional
 		out[key] = nullptr;
 }
 
+void budget_or_null(crow::json::wvalue &out, const std::optional<CostBudget> &budget) {
+	if (!budget) {
+		out["budget"] = nullptr;
+		return;
+	}
+	const CostBudget &b = *budget;
+	crow::json::wvalue j;
+	j["name"] = b.name;
+	j["currency"] = b.currency;
+	j["limit_cents"] = b.limit_cents;
+	cents_or_null(j, "actual_cents", b.actual_cents);
+	cents_or_null(j, "forecast_cents", b.forecast_cents);
+	out["budget"] = std::move(j);
+}
+
 } // namespace
 
 void CostRoutes::register_routes(WebApp &app) {
@@ -79,19 +94,23 @@ crow::response CostRoutes::costs(const crow::request &req) {
 		days.push_back(std::move(j));
 	}
 	out["days"] = std::move(days);
-	if (read.budget) {
-		const CostBudget &b = *read.budget;
-		crow::json::wvalue j;
-		j["name"] = b.name;
-		j["currency"] = b.currency;
-		j["limit_cents"] = b.limit_cents;
-		cents_or_null(j, "actual_cents", b.actual_cents);
-		cents_or_null(j, "forecast_cents", b.forecast_cents);
-		out["budget"] = std::move(j);
-	} else {
-		out["budget"] = nullptr;
-	}
+	budget_or_null(out, read.budget);
 	text_or_null(out, "budget_error", read.budget_error);
+	std::vector<crow::json::wvalue> accounts;
+	for (const CostAccount &account : read.accounts) {
+		crow::json::wvalue j;
+		j["id"] = account.id;
+		j["label"] = account.label;
+		j["currency"] = account.currency;
+		text_or_null(j, "error", account.error);
+		j["month_to_date_cents"] = account.month_to_date_cents;
+		cents_or_null(j, "forecast_cents", account.forecast_cents);
+		text_or_null(j, "forecast_error", account.forecast_error);
+		budget_or_null(j, account.budget);
+		text_or_null(j, "budget_error", account.budget_error);
+		accounts.push_back(std::move(j));
+	}
+	out["accounts"] = std::move(accounts);
 	return no_store(json_reply(200, out));
 }
 

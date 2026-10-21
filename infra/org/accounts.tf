@@ -15,11 +15,12 @@ module "prod" {
     aws = aws.prod
   }
 
-  deployment        = "prod"
-  account_id        = var.aws_account_id_prod
-  region            = var.region
-  github_repository = var.github_repository
-  state_stacks      = ["aws", "zone", "github"]
+  deployment           = "prod"
+  account_id           = var.aws_account_id_prod
+  region               = var.region
+  github_repository    = var.github_repository
+  state_stacks         = ["aws", "zone", "github"]
+  cost_reader_role_arn = local.ci_cost_role_arn
 }
 
 module "staging" {

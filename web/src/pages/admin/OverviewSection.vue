@@ -145,7 +145,7 @@ import type { HostedStats } from '../../types/hostedStats';
 import type { JobsOverview } from '../../types/jobs';
 import { ADMIN_AREAS, type AdminArea } from '../../utils/adminNav';
 import { billingRevenue } from '../../utils/billingRevenue';
-import { budgetState, costMoney } from '../../utils/costView';
+import { costMoney, worstCostBudget } from '../../utils/costView';
 import { formatCount, formatMoney } from '../../utils/format';
 import type { Tone } from '../../utils/infraView';
 import { areaAttention, counted, worstStatus, type AreaStatus } from '../../utils/overviewView';
@@ -210,7 +210,7 @@ const revenue = computed(() => {
   if (!billingOn.value || !tiers.value || !billing.value) return null;
   return formatMoney(billingRevenue(billing.value.subscriptions, tiers.value).total, tiers.value.currency);
 });
-const budget = computed(() => (costs.value?.available && !costs.value.error ? budgetState(costs.value) : null));
+const budget = computed(() => costs.value ? worstCostBudget(costs.value) : null);
 const awsTone = computed<Tone | undefined>(() => (budget.value && budget.value.tone !== 'ok' ? budget.value.tone : undefined));
 const awsValue = computed(() => {
   const c = costs.value;
@@ -223,19 +223,22 @@ const awsDetail = computed(() => {
   const c = costs.value;
   if (!c) return 'Not read';
   if (!c.available) return 'AWS costs are not read on this stack';
-  if (c.error) return 'AWS could not be read';
-  if (budget.value) return budget.value.detail;
-  return c.forecast_cents === null ? 'No forecast yet' : `About ${costMoney(c.forecast_cents, c.currency)} by the month's end`;
+  if (c.error) return c.accounts.length > 1 ? `Combined total unavailable: ${c.error}` : 'AWS could not be read';
+  const scope = c.accounts.length > 1 ? `${c.accounts.map((account) => account.label).join(' + ')}. ` : '';
+  if (budget.value && (!budget.value.accountLabel || budget.value.tone !== 'ok')) {
+    return `${scope}${budget.value.accountLabel ? `${budget.value.accountLabel}: ` : ''}${budget.value.detail}`;
+  }
+  return `${scope}${c.forecast_cents === null ? 'No forecast yet' : `About ${costMoney(c.forecast_cents, c.currency)} by the month's end`}`;
 });
 const peopleStatus = computed<AreaStatus>(() => {
   const b = billing.value;
   return worstStatus(
     [
       b?.limits_hold ? { tone: 'bad', label: 'Server limits on hold' } : null,
-      budget.value?.tone === 'bad' ? { tone: 'bad', label: 'Over the AWS budget' } : null,
+      budget.value?.tone === 'bad' ? { tone: 'bad', label: budget.value.accountLabel ? `${budget.value.accountLabel} over its AWS budget` : 'Over the AWS budget' } : null,
       areaAttention(attentionState.attention.value, 'people'),
       billingOn.value && pastDue.value > 0 ? { tone: 'warn', label: counted(pastDue.value, 'payment past due', 'payments past due') } : null,
-      budget.value?.tone === 'warn' ? { tone: 'warn', label: 'Near the AWS budget' } : null,
+      budget.value?.tone === 'warn' ? { tone: 'warn', label: budget.value.accountLabel ? `${budget.value.accountLabel} near its AWS budget` : 'Near the AWS budget' } : null,
     ],
     b ? (b.enabled ? { tone: 'ok', label: 'Up to date' } : { tone: 'idle', label: 'Billing off' }) : { tone: 'idle', label: 'Not read' },
   );

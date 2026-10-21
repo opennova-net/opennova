@@ -15,11 +15,12 @@
 //                  monthly_cost): its limit and AWS's own spend and forecast
 //                  against it; unset, none is read
 //
-// The account holds the deployment alone (DEPLOY.md "Deployments"), so its bill
-// is the deployment's. Cost Explorer charges for each request ($0.01) and
-// refreshes its figures a few times a day, up to a day behind, so a read whose
-// usage AWS answered is kept kCacheMs however many admins look (two Cost
-// Explorer requests a read: at most about $0.08 a day), a failed one
+// Production also reads CI's account through ONNET_INFRA_CI_COST_ROLE, using
+// ONNET_INFRA_CI_BUDGET for its own budget. Combined figures are shown only
+// when both usage reads succeed; account summaries survive a partial failure.
+// Cost Explorer refreshes its figures a few times a day, up to a day behind,
+// so a read whose usage AWS answered is kept kCacheMs however many admins look,
+// a failed one
 // kFailureCacheMs, and one read runs at a time (a caller arriving meanwhile
 // waits for it). Without AWS (the local stack: no task role) nothing is called
 // and the read says why. Service policy, not a port.
@@ -55,6 +56,18 @@ struct CostBudget {
 	std::optional<int64_t> forecast_cents;
 };
 
+struct CostAccount {
+	std::string id; // "deployment" or "ci", not an AWS account id
+	std::string label;
+	std::string currency;
+	std::string error;
+	int64_t month_to_date_cents = 0;
+	std::optional<int64_t> forecast_cents;
+	std::string forecast_error;
+	std::optional<CostBudget> budget;
+	std::string budget_error;
+};
+
 struct CostRead {
 	bool read = false; // Cost Explorer answered the month's usage
 	std::string unavailable; // why AWS is not read here; "" when it is
@@ -76,12 +89,15 @@ struct CostRead {
 	std::vector<CostDay> days; // every day of the period, oldest first
 	std::optional<CostBudget> budget;
 	std::string budget_error; // why the budget was not read ("" for none asked)
+	std::vector<CostAccount> accounts; // summaries, including failed accounts
 };
 
 struct CostConfig {
 	AwsApiConfig aws;
 	// ONNET_INFRA_BUDGET: arn:aws:budgets::<account>:budget/<name>; "" for none.
 	std::string budget_arn;
+	std::string ci_role_arn; // ONNET_INFRA_CI_COST_ROLE; empty for local-only reads
+	std::string ci_budget_arn; // ONNET_INFRA_CI_BUDGET
 };
 
 // The infrastructure view's AWS settings (infra_status.h) and
@@ -95,6 +111,7 @@ class CostStore {
 public:
 	static constexpr int64_t kCacheMs = 6LL * 60 * 60 * 1000;
 	static constexpr int64_t kFailureCacheMs = 10LL * 60 * 1000;
+	static constexpr int kRefreshMs = 45000; // below the portal's proxy timeout
 	// GetCostAndUsage pages one read follows at most.
 	static constexpr int kPages = 5;
 	// Cost Explorer's and Budgets' endpoints and the region they are signed
@@ -121,6 +138,9 @@ public:
 
 private:
 	CostRead read_uncached();
+	CostRead read_account(const AwsCredentials &credentials, const std::string &budget_arn,
+			const char *budget_setting, const CostRead &period, int64_t deadline);
+	int remaining_ms(int64_t deadline) const;
 
 	const CostConfig config_;
 	const std::string unavailable_;
