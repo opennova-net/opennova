@@ -44,8 +44,8 @@ void ClientReplicaPipeline::tick_lean_ramp() {
 			continue;
 		}
 		// Its gates: a ladder contact or a chute (Flags 0x100020; a remote body's
-		// chute bit is the record's, whose low byte bar the dead bit lands on its
-		// Flags), the prone latch with none of Flags 0x10A000 (a remote body's
+		// chute bit is the record's, whose low byte bar the dead bit lands on the
+		// row's Flags mirror), the prone latch with none of Flags 0x10A000 (a remote body's
 		// latch is the record's stance store, net_stance_bits bit 0), and the dead
 		// bit, which skips both keys [orig: Entity_UpdateInfantryPlayerBody
 		// @0x4B40E0 - `test eax, 100020h` @0x4B7DA2, the prone_local test
@@ -53,8 +53,7 @@ void ClientReplicaPipeline::tick_lean_ramp() {
 		// @0x4B7DAF..0x4B7DB4; NetPacket_SerializePlayerState @0x4C09C0 - the
 		// remote Flags mask 0xFD @0x4C1307..0x4C1311, the stance stores
 		// @0x4C11FD..0x4C1242].
-		const uint32_t chute = es.state_flags_known ? (es.state_flags & 0x20u) : 0u;
-		if (((es.rm_entity_flags | chute) & 0x100020u) != 0u) continue;
+		if ((es.rm_entity_flags & 0x100020u) != 0u) continue;
 		if ((es.net_stance_bits & 1u) != 0u && (es.rm_entity_flags & 0x10A000u) == 0u)
 			continue;
 		if ((es.rm_entity_flags & world::kEntityFlagDead) != 0u) continue;

@@ -1352,6 +1352,16 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 				es.cls = classify(row_type);
 			}
 		}
+		// Every player record, dead or alive, then lands its flags byte on a remote
+		// body's Flags bits 0 and 2..7 (the dead bit stays the row's own): the
+		// carried, NVG, binoculars, scope, chute, mounted and climb bits the body's
+		// update reads (the air-steer's chute test among them). The client's own
+		// body takes 0xE1 onto L (joiner_role_replica_world.cpp).
+		// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the byte in bl
+		//  @0x4C0FDD, `xor ebx, [edi+24h]` @0x4C12F4, `and ebx, 0FDh` @0x4C1307,
+		//  `xor [edi+24h], ebx` @0x4C1311]
+		if (rec.cls == EntityClass::Player)
+			es.rm_entity_flags ^= (es.rm_entity_flags ^ rec.player.state_flags) & 0xFDu;
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry ||
 				rec.cls == EntityClass::Vehicle) {
 			es.heading_known = true;

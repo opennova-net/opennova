@@ -244,6 +244,43 @@ void test_dead_park_and_respawn_edges() {
 			"the next record direct-commits over the death state");
 }
 
+// L5-s7 FOUND 4: every player record, dead or alive, lands its flags byte on the
+// row's Flags mirror under 0xFD: bits 0 and 2..7 become the record's (a cleared
+// bit clears), the dead bit and every upper bit stay the row's.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the byte in bl @0x4C0FDD,
+//  `xor ebx, [edi+24h]` @0x4C12F4, `and ebx, 0FDh` @0x4C1307, `xor [edi+24h], ebx`
+//  @0x4C1311]
+void test_record_flags_land_on_the_mirror() {
+	constexpr uint32_t kInAir = 0x2000u;
+	constexpr uint32_t kDead = opennova::world::kEntityFlagDead;
+	constexpr uint32_t kMounted = opennova::world::kEntityFlagMounted;
+	{
+		ns::ClientReplicaPipeline view;
+		view.set_item_class_resolver(&classify);
+		seed_row(view);
+		ns::ClientEntityState &row = *view.state().find(kPlayerHandle);
+		row.rm_entity_flags = kInAir | kMounted;
+		// A dead record with the chute and the binoculars bits.
+		view.apply(0x0A, player_frame(as::kIdle, 0, 0x2Au));
+		expect(row.rm_entity_flags == (kInAir | 0x28u),
+				"flags merge: the record's chute and binoculars land, its dead bit does not, "
+				"the mounted bit it lacks clears, the airborne bit stays");
+		view.apply(0x0A, player_frame(as::kIdle, 0, 0x10u));
+		expect(row.rm_entity_flags == (kInAir | 0x10u),
+				"flags merge: the next record's byte replaces the low bits again");
+	}
+	{
+		ns::ClientReplicaPipeline view;
+		view.set_item_class_resolver(&classify);
+		seed_row(view);
+		ns::ClientEntityState &row = *view.state().find(kPlayerHandle);
+		row.rm_entity_flags = kDead;
+		view.apply(0x0A, player_frame(as::kIdle, 0, 0x20u));
+		expect(row.rm_entity_flags == (kDead | 0x20u),
+				"flags merge: a live record leaves the row's own dead bit");
+	}
+}
+
 } // namespace
 
 // A decoded player row runs its own secondary channel: armed on the hold
@@ -481,7 +518,8 @@ void test_remote_body_conform_chases_the_slope() {
 }
 
 // V-L5-s6 (D-NET-330): a remote player's on-foot lean ramp takes retail's gates: a
-// ladder contact or a chute (Flags 0x100020, the chute bit the record's), the prone
+// ladder contact or a chute (Flags 0x100020, the chute bit the record's, which the
+// apply lands on the row's Flags mirror), the prone
 // latch with none of Flags 0x10A000, and the dead bit stop both keys; an NPC row
 // ramps nothing.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B7DA2, @0x4B7DA9..0x4B7DAD
@@ -501,7 +539,8 @@ void test_remote_lean_ramp_gates() {
 	const Case cases[] = {
 		{0x0101, EntityClass::Player, 0u, 0u, 0u, true, "lean ramp: a free body ramps"},
 		{0x0102, EntityClass::Player, 0x100000u, 0u, 0u, false, "lean ramp: a ladder contact stops it"},
-		{0x0103, EntityClass::Player, 0u, 0x20u, 0u, false, "lean ramp: the record's chute bit stops it"},
+		{0x0103, EntityClass::Player, 0x20u, 0x20u, 0u, false,
+				"lean ramp: the record's chute bit, on the row's Flags mirror, stops it"},
 		{0x0104, EntityClass::Player, 0u, 0u, 1u, false, "lean ramp: the prone latch stops it"},
 		{0x0105, EntityClass::Player, 0x2000u, 0u, 1u, true,
 				"lean ramp: a prone latch in the air does not stop it"},
@@ -572,6 +611,7 @@ void test_remote_lean_ramp_gates() {
 }
 
 int main() {
+	test_record_flags_land_on_the_mirror();
 	test_remote_lean_ramp_gates();
 	test_remote_body_conform_chases_the_slope();
 	test_tapped_roll_locks_and_queues();
