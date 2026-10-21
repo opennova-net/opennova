@@ -10,6 +10,7 @@
 #include <net/npwire/nw_session_framing.h> // next_connection_index, manager_connection_keys
 #include <net/npwire/session_hello.h> // the self-join's 0x41 / 0x42 (their lengths)
 #include <net/npwire/session_keys.h> // SESSION_OPCODE_CLIENT_HELLO / _AUTH
+#include <net/title/title_identity.h> // TitleIdentity::pn (the self-join's PROTOCOL lines)
 #include <runtime/inmatch/napi_np_protocol.h> // host_server_hello (the self-join's 0x81)
 #include <runtime/inmatch/server_console.h> // the /INOUT host line
 #include <runtime/inmatch/host_settings.h> // mission_session_title

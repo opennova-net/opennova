@@ -109,7 +109,8 @@ void test_the_side_passwords_second_test() {
 	run_form_post({"Alpha", "", "aLPHA", 0, true});    // A matches, case-insensitively
 	run_form_post({"Alpha", "Bravo", "bravo", 0, true}); // B matches
 	run_form_post({"Alpha", "", "wrong", 0, false});   // set, matched by neither: 17
-	run_form_post({"Alpha", "", "", 0, false});        // an empty JSP against a set A: 17
+	run_form_post({"Alpha", "", "", 0, true});         // an empty JSP equals the unset B
+	run_form_post({"Alpha", "Bravo", "", 0, false});   // both set, an empty JSP equals neither: 17
 	run_form_post({"", "Bravo", "", 0, true});         // an empty JSP equals the unset A
 	run_form_post({"", "Bravo", "wrong", 0, false});   // a JSP equals neither the unset A nor B
 	run_form_post({"Alpha", "Bravo", "wrong", 1, true}); // a spectator request skips the test

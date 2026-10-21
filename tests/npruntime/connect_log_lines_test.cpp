@@ -297,7 +297,6 @@ void test_listen_host_self_join_lines() {
 	CHECK(lines[3] == sending(join_len, "0x42"));
 	CHECK(lines[4] == taken(join_len));
 	CHECK(lines[5] == "NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.");
-	for (const std::string &l : lines) std::printf("  self-join: %s\n", l.c_str());
 }
 
 } // namespace
