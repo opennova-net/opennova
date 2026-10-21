@@ -37,6 +37,9 @@ const FIELDS: PackedStringArray = [
 	"look_samples_per_phase", "heartbeat_sequence", "ticks_msec", "process_id",
 ]
 
+## The deploy screen's SPACE pick: param 65534, the auto team pick (wire 0xFFFE).
+const DEPLOY_PICK_AUTO_TEAM := 65534
+
 ## The process-wide heartbeat count: every witness any of the three probes
 ## publishes takes the next value, so the runner's initial/final snapshots
 ## (different probe runs) still see a monotonic sequence from one process.
@@ -112,16 +115,13 @@ static func in_match_ready(state: Dictionary, readiness_mode: String, auto_deplo
 ## (param 0) while the post-auth pick is pending; on a mission with deploy
 ## zones, whose joiner the host holds on the deploy screen past the admission
 ## (the S2C 0x0A flags1 bit 1), the screen's SPACE, the auto team pick (param
-## 65534, wire 0xFFFE), as onHook's deploy presses it on a retail role.
-## [orig: Server_OnPlayerJoin @0x51A6E9..0x51A6F2 (the undeployed bit iff
-##  SpawnZoneList_GetCount()); NapiNPClientMsg_0x00A @0x42FF7A..0x42FF82
-##  (g_DeployScreenActive); Input_HandleSpecialKeys, the gate @0x49C9DA, the
-##  SPACE @0x49CA06..0x49CA14: Input_QueueEvent(12, 0xFFFE)]
+## 65534, wire 0xFFFE), as onHook's deploy presses it on a retail role (the
+## retail witnesses: scripts/net/README.md, the deploy_zones case key).
 static func auto_deploy_pick(state: Dictionary) -> int:
 	if bool(state.pick_pending):
 		return 0
 	if bool(state.hold_ready):
-		return 65534
+		return DEPLOY_PICK_AUTO_TEAM
 	return -1
 
 
