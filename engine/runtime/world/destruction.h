@@ -71,7 +71,7 @@ struct DeathEffectBank {
 //  the pool-1 think gate @0x4b8e1b, the pool-2 cohort gate @0x4c2291]
 enum class ItemDeathClass : uint8_t {
 	// Rows built without a def (hand-built tests) and the class rows whose
-	// event callback is dispatched by another system (the throwable rows
+	// event callback is dispatched by another system (the landmine row
 	// and the organic/vehicle rows that never
 	// reach this notify): the pre-dispatch body, i.e. the tree callback.
 	kUnwitnessed = 0,
@@ -106,6 +106,11 @@ enum class ItemDeathClass : uint8_t {
     // The nade row @0x813138, whose event word is 0: no callback runs (the think and the
     // round hit test the word, @0x4B4BD8 / @0x4E8205).
     kNoCallback,
+    // The placed devices' rows: the think is the event callback, so a damage site's
+    // phase runs it too (ThrowableSim::device_class_event).
+    kSatchel,  // schl @0x813150 -> Entity_SatchelThink @0x443670
+    kClaymore, // clym @0x813168 -> Entity_ClaymoreThink @0x4438C0
+    kAVMine,   // vmne @0x813180 -> Entity_AVMineThink @0x443BB0
 };
 
 // The class row for an items.def ai_function tag — the retail table walk

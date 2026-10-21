@@ -1433,6 +1433,85 @@ void test_placed_device_pose_and_ballistic_damage() {
     CHECK(saw_boom);
 }
 
+// A placed satchel ITEM's class row (schl) is its think, which the damage sites call with
+// their phase: on the authority a round that drops it to Health <= 0 booms it AT the hit
+// (the boom round queued, the item gone, before any device visit) and runs no tree body
+// (no S2C 0x26 of the tree's, no destructible death). [orig: schl @0x813150 ->
+// Entity_SatchelThink @0x443670 (the authority's Health test @0x443771, satchelboom
+// @0x4437E2, Entity_Destroy @0x44389E); the round hit's callback call
+// Projectile_ProcessDamageOnTarget @0x4E8205]
+void test_a_shot_device_item_booms_at_the_hit() {
+    Rig rig(0);
+    ItemDeathTraits traits;
+    traits.death_class = item_death_class_from_tag("schl");
+    CHECK(traits.death_class == ItemDeathClass::kSatchel);
+    rig.w.tables.item_death_traits.set(kItemSatchel, traits);
+    rig.w.rules.mp_session = true;
+    LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+    CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                            rig.w.tables.ammo.entries[kAmmoSatchel]));
+    if (rig.w.throwables.devices.empty()) return;
+    PlacedDevice &device = rig.w.throwables.devices[0];
+    device.think_delay_ticks = 5; // still arming: the visit's think would not run
+    const EntityHandle item = device.entity;
+    rig.w.out.entity_events.clear();
+    rig.w.explosions.queue.clear();
+    CollisionWorld collision;
+    collision.assign_entity(item, collision.add_model(projectile_wall_model(0.5)));
+    collision.build_tick_tables(rig.w);
+    RoundSpawnParams bullet;
+    bullet.owner = rig.thrower;
+    bullet.shooter_handle = rig.thrower.packed;
+    bullet.origin = Vec3{device.pos.x - 2.0f, device.pos.y, device.pos.z};
+    bullet.dir_yaw_bam = 0;
+    bullet.ammo_index = kAmmoBullet;
+    CHECK(rig.w.round_sim.spawn(rig.w, bullet) >= 0);
+    rig.w.round_sim.tick(rig.w, nullptr, &collision);
+    bool saw_boom = false;
+    for (const ExplosionEntry &entry : rig.w.explosions.queue)
+        if (entry.ammo_index == kAmmoSatchelBoom) saw_boom = true;
+    CHECK(saw_boom);
+    CHECK(rig.w.registry.get(item) == nullptr);
+    CHECK(!rig.w.throwables.devices[0].active);
+    // One kill packet, the think's (section 0, ahead of the destroy) and no S2C 0x12; the
+    // tree body would have sent its own 0x26 at the hit and left the boom to the next visit.
+    int states = 0;
+    for (const auto &event : rig.w.out.entity_events)
+        if (const auto *state = std::get_if<ItemStateEvent>(&event))
+            if (state->handle == item.packed && state->section == 0) ++states;
+    CHECK(states == 1);
+    CHECK(rig.w.throwables.events.removes.empty());
+}
+
+// Off the authority the same row runs only the net kill's event 4: the boom round from
+// the item's own words, the item destroyed; a think (phase 0) does nothing. [orig:
+// Entity_SatchelThink @0x443670 - `cmp deathType, 4` @0x443698, satchelboom @0x443709,
+// Entity_Destroy @0x443750]
+void test_a_joiners_device_item_booms_on_the_kill() {
+    Rig rig(0);
+    ItemDeathTraits traits;
+    traits.death_class = ItemDeathClass::kSatchel;
+    rig.w.tables.item_death_traits.set(kItemSatchel, traits);
+    rig.w.rules.logic_authority = false;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = kItemSatchel;
+    seed.item_type_index = 1;
+    seed.has_item_def = true;
+    seed.health = 5;
+    seed.position = Vec3{30, 30, 1};
+    const EntityHandle item = rig.w.registry.spawn(1, seed);
+    rig.w.explosions.queue.clear();
+    destruction_notify_item_damage(rig.w, *rig.w.registry.get(item), 0);
+    CHECK(rig.w.registry.get(item) != nullptr && rig.w.explosions.queue.empty());
+    apply_item_state_event(rig.w, *rig.w.registry.get(item), 0);
+    bool saw_boom = false;
+    for (const ExplosionEntry &entry : rig.w.explosions.queue)
+        if (entry.ammo_index == kAmmoSatchelBoom) saw_boom = true;
+    CHECK(saw_boom);
+    CHECK(rig.w.registry.get(item) == nullptr);
+}
+
 void test_parented_device_follows_parent_yaw() {
     Rig rig(0);
     Entity parent_seed;
@@ -1766,15 +1845,27 @@ void test_detonator_chain() {
     if (rig.w.throwables.devices.empty()) return;
     // still arming: the detonator marks it, the think waits for the arm delay
     rig.throw_ammo(kAmmoDetonator, Vec3{50, 50, 1}, 0, 0);
-    const Entity *e = rig.w.registry.get(rig.w.throwables.devices[0].entity);
+    const EntityHandle placed = rig.w.throwables.devices[0].entity;
+    const Entity *e = rig.w.registry.get(placed);
     CHECK(e != nullptr && e->health == -1);
+    rig.w.rules.mp_session = true;
+    rig.w.out.entity_events.clear();
     rig.tick(80); // arm delay expires -> the think sees health <= 0
     CHECK(rig.w.throwables.devices.empty());
     bool saw_boom = false;
     for (const ExplosionEntry &q : rig.w.explosions.queue)
         if (q.ammo_index == kAmmoSatchelBoom) saw_boom = true;
     CHECK(saw_boom);
-    CHECK(rig.w.throwables.events.removes.size() == 1);
+    // The think's tail: the kill packet (S2C 0x26, section 0) in a session, then a
+    // destroy that notifies nobody (no S2C 0x12) [orig: Entity_SatchelThink
+    // @0x443891..0x443895, Entity_Destroy @0x44389E; Server_SendEntityStatePacket @0x509D70]
+    CHECK(rig.w.registry.get(placed) == nullptr);
+    CHECK(rig.w.throwables.events.removes.empty());
+    int kills = 0;
+    for (const auto &event : rig.w.out.entity_events)
+        if (const auto *state = std::get_if<ItemStateEvent>(&event))
+            if (state->handle == placed.packed && state->section == 0) ++kills;
+    CHECK(kills == 1);
 }
 
 // The detonator's mark tests no authority: a peer's visual-only spawn of the round marks
@@ -2696,6 +2787,8 @@ int main() {
     test_placed_device_takes_the_model_init_matrix_and_hp0_legs();
     test_placed_device_reads_its_def_type_and_attrib_words();
     test_placed_device_pose_and_ballistic_damage();
+    test_a_shot_device_item_booms_at_the_hit();
+    test_a_joiners_device_item_booms_on_the_kill();
     test_parented_device_follows_parent_yaw();
     test_parented_device_adopts_parent_pitch();
     test_device_and_owner_handle_reuse();
