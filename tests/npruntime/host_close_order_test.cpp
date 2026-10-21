@@ -29,7 +29,9 @@
 #include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <net/npwire/idatagram_socket.h>
+#include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h>
@@ -102,10 +104,9 @@ struct ListenHost {
 	CaptureSocket socket;
 	ns::UdpSessionTransport remote{ns::UdpSessionTransport::Role::Host};
 
-	bool boot() {
+	bool boot(const opennova::bms::File &mission = test_mission::two_entity_mission()) {
 		role->bind(*kernel);
-		kernel->open_document(test_mission::two_entity_mission(), "close",
-				test_boot::source_over(&files));
+		kernel->open_document(mission, "close", test_boot::source_over(&files));
 		ms::KernelBootOptions options;
 		options.mp_session = true;
 		options.game_type = game_type::for_mission_mode(bms::selected_game_mode(
@@ -277,6 +278,95 @@ void test_close_runs_the_pump_before_the_stop() {
 	host->ctx().logs.inout = nullptr;
 }
 
+// The rest of the close's order: after the teardown's pump the authority's one-shot PostMission
+// sweep runs (an authored PostMission entry's action, once, at the close), then the per-slot
+// reset: a remote slot in states 2..7 gets its S2C 0x25 in the close's flush, ahead of
+// StopServer's STOP burst; a slot in state 1 gets none.
+// [orig: Game_TeardownMission @0x522350 - the pump called @0x522588, EventTrigger_UpdateAllWithFlag4
+//  called @0x52266C, Server_DisconnectAndResetAllPlayerSlots called @0x52269B;
+//  Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, the state switch
+//  over 2..7 @0x51619F..0x5161AB, the 0x25 @0x5161BB sent @0x5161D4; NapiNPProtocol_StopServer
+//  @0x62A820 (the STOP record @0x62A8C3..0x62A8F6)]
+void test_close_sweeps_post_mission_then_resets_each_slot() {
+	opennova::bms::File mission = test_mission::two_entity_mission();
+	opennova::bms::Event post{};
+	post.flags = opennova::bms::EventFlags::PostMission;
+	post.action_index = 0;
+	post.action_count = 1;
+	opennova::bms::Action increment{};
+	increment.action_type = opennova::bms::ActionType::MisvarChange;
+	increment.action_sub_type =
+			static_cast<int32_t>(opennova::bms::MissionVariableActionSubType::Increment);
+	increment.param1 = 9;
+	mission.events = {post};
+	mission.actions = {increment};
+	auto host = std::make_unique<ListenHost>();
+	if (!host->boot(mission)) {
+		++failures;
+		return;
+	}
+	const std::string server_scrk = "SERVER-CLOSE-SCRK";
+	inmatch::NapiNPConnection &synced = host->ctx().np_protocol.connection_list.back();
+	synced.client_ck = 0x11223344u;
+	synced.server_sk = 0x55667788u;
+	synced.client_scrk = "CLIENT-CLOSE-SCRK";
+	synced.server_scrk = server_scrk;
+	synced.slot_state = inmatch::PlayerSlotState::Joined;
+	ns::UdpSessionTransport added_wire{ns::UdpSessionTransport::Role::Host};
+	const PeerAddr added_peer{0x0100007Fu, 31001};
+	inmatch::NapiNPConnection added;
+	added.type = inmatch::NapiNPConnection::kTypeServerSide;
+	added.peer = added_peer;
+	added.connection_id = inmatch::kFirstJoinerDcb + 1;
+	added.phase = inmatch::ConnectionPhase::Joined;
+	added.client_ck = 0x22334455u;
+	added.server_sk = 0x66778899u;
+	added.client_scrk = "CLIENT-ADDED-SCRK";
+	added.server_scrk = "SERVER-ADDED-SCRK";
+	added.slot_state = inmatch::PlayerSlotState::Added;
+	added.link.transport = &added_wire;
+	added.link.mode = ns::TransportMode::Client;
+	host->ctx().np_protocol.connection_list.push_back(added);
+	CHECK(host->kernel->world.script.vars.get_mission(9) == 0);
+
+	host->ctx().mission_exit_reason = inmatch::kMissionExitQuit;
+	host->role->close();
+	CHECK(host->kernel->world.script.vars.get_mission(9) == 1); // the sweep ran once
+
+	const std::vector<uint8_t> stop = nw_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(0, make_disconnect_event(1, 9, 0, 0, "", 0,
+					"NP.C:SH:STOP")));
+	int resets = 0;
+	std::size_t reset_at = host->socket.sent.size();
+	std::size_t first_stop = host->socket.sent.size();
+	int added_resets = 0;
+	for (std::size_t i = 0; i < host->socket.sent.size(); ++i) {
+		const auto &[to, bytes] = host->socket.sent[i];
+		if (to == kPeer && bytes == stop && first_stop == host->socket.sent.size()) first_stop = i;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!nw_decode_inbound(bytes.data(), bytes.size(), opcode, body) ||
+				opcode != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
+			continue;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		const std::string &key = to == kPeer ? server_scrk : std::string("SERVER-ADDED-SCRK");
+		if (!decode_protocol_packet_plaintext(body.data(), body.size(), key, header, messages))
+			continue;
+		for (const ProtocolMessage &m : messages) {
+			if (m.tag != s2c::GAME_RESET || m.flags.settings_update) continue;
+			if (to == kPeer) {
+				++resets;
+				if (reset_at == host->socket.sent.size()) reset_at = i;
+			} else if (to == added_peer) {
+				++added_resets;
+			}
+		}
+	}
+	CHECK(resets == 1 && added_resets == 0);
+	CHECK(reset_at < first_stop && first_stop < host->socket.sent.size());
+}
+
 } // namespace
 
 int main() {
@@ -285,6 +375,7 @@ int main() {
 	test_a_stale_unlisted_code_keeps_the_stop();
 	test_the_router_arm_decides_the_stop();
 	test_close_runs_the_pump_before_the_stop();
+	test_close_sweeps_post_mission_then_resets_each_slot();
 	std::printf("host_close_order: %d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
 }
