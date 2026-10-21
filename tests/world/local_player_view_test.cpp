@@ -1449,7 +1449,7 @@ void test_forced_scope_toggle_sees_the_same_tick_promotion() {
         int steps = 0;
         {
             PlayerViewState probe = v;
-            const float eye[3] = {0.0f, 0.0f, 0.0f};
+            const int32_t eye[3] = {0, 0, 0};
             while (!player_view_scope_settled(probe) && steps < 64) {
                 player_view_tick(probe, eye);
                 ++steps;
@@ -1614,7 +1614,7 @@ void test_water_scope_legs() {
         int steps = 0;
         {
             PlayerViewState probe = v;
-            const float eye[3] = {0.0f, 0.0f, 0.0f};
+            const int32_t eye[3] = {0, 0, 0};
             while (!player_view_scope_settled(probe) && steps < 64) {
                 player_view_tick(probe, eye);
                 ++steps;
@@ -2198,7 +2198,7 @@ void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
     data.view_ads_pose = {{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}};
     local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
     CHECK(local_player_scope_toggle(lw.w, weapon, view, weapon.slot));
-    const float eye[3] = {};
+    const int32_t eye[3] = {};
     for (int i = 0; i < 3; ++i) player_view_tick(view, eye);
     int32_t out[3];
     local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
@@ -2267,7 +2267,7 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
         view.weapon_hip_pose.position_q16[i] = hip[i] * 256.0f;
         view.weapon_ads_pose.position_q16[i] = sight[i] * 256.0f;
     }
-    const float eye[3] = {};
+    const int32_t eye[3] = {};
     const auto check_bias = [&](float x, float y, float z) {
         float bias[3];
         local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, 1920, 1080, bias);
@@ -3140,7 +3140,7 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     data.view_ads_pose = {{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}};
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
     CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
-    const float eye[3] = {};
+    const int32_t eye[3] = {};
     for (int i = 0; i < 3; ++i) player_view_tick(v, eye);
     const PlayerViewBiasInterp before = v.weapon_pose_interp;
     data.name = "POSE_1";
@@ -3226,7 +3226,7 @@ void test_category_request_resets_before_commit_while_cycle_retains_pose() {
     PlayerViewState v;
     local_weapon_install(lw.w, w, data, false, false, &inventory, v);
     CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
-    const float eye[3] = {};
+    const int32_t eye[3] = {};
     player_view_tick(v, eye);
     const uint32_t current = v.weapon_pose_interp.current.rotation_bam[0];
     const uint32_t velocity = v.weapon_pose_interp.velocity.rotation_bam[0];

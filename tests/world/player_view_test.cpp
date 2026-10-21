@@ -190,7 +190,7 @@ PlayerViewState bound_view() {
 // Player_UpdatePerFrame promoter @0x4de4d9..0x4de4f7].
 void test_scope_ease_settles_on_the_call_after_the_last_snap() {
     PlayerViewState v = bound_view();
-    const float eye[3] = {0, 0, 0};
+    const int32_t eye[3] = {0, 0, 0};
     CHECK(player_view_set_engaged(v, true, false));
     CHECK(v.weapon_pose_interp.velocity.position_q16[0] == -21.0f); // (hip - tpos) / 15
     for (int i = 1; i <= kScopeEaseSteps; ++i) {
@@ -231,7 +231,7 @@ void test_scope_ease_settles_on_the_call_after_the_last_snap() {
 void test_zero_span_ease_promotes_when_its_counter_spends() {
     PlayerViewState v;
     v.weapon_pose_bound = true;
-    const float eye[3] = {0, 0, 0};
+    const int32_t eye[3] = {0, 0, 0};
     CHECK(player_view_set_engaged(v, true, false));
     CHECK(v.weapon_pose_interp.remaining == static_cast<uint32_t>(kScopeEaseSteps));
     CHECK(player_view_scope_ease_active(v));
@@ -282,7 +282,7 @@ void test_scope_reset_preserves_original_switch_bookkeeping() {
               interp.velocity.rotation_bam[i] == velocity[i] && interp.target.rotation_bam[i] == target[i]);
         CHECK(interp.position_bias_q16[i] == 11 + i && interp.rotation_bias_bam[i] == 14 + i);
     }
-    const float eye[3] = {};
+    const int32_t eye[3] = {};
     player_view_tick(v, eye);
     CHECK(player_view_scope_settled(v)); // an idle reset does not run the promoter
     player_view_scope_reset(v);
@@ -295,7 +295,7 @@ void test_scope_reset_preserves_original_switch_bookkeeping() {
 // then zero at 15/144 fps, ...). The state is a pure function of the tick
 // count, so any grouping of N ticks lands identically.
 void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
-    const float eye[3] = {100.0f, -40.0f, 12.0f};
+    const int32_t eye[3] = {100 * 0x10000, -40 * 0x10000, 12 * 0x10000};
 
     PlayerViewState per_frame = bound_view(); // "60 fps": one tick per render frame
     CHECK(player_view_set_engaged(per_frame, true, false));
@@ -326,7 +326,7 @@ void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
 
 void test_anchor_chase_quarter_step_and_seeding() {
     PlayerViewState v;
-    float eye[3] = {8.0f, 0.0f, 4.0f};
+    int32_t eye[3] = {8 * 0x10000, 0, 4 * 0x10000};
     // On foot, third person is only ever the debug override (the arbiter
     // resolves the chase preference to first person outside a control seat).
     v.debug_third_person_on_foot = true;
@@ -335,12 +335,15 @@ void test_anchor_chase_quarter_step_and_seeding() {
     CHECK(v.tp_anchor_valid);
     CHECK(v.tp_anchor[0] == 8.0f && v.tp_anchor[2] == 4.0f);
 
-    // Move the eye: each tick closes exactly a quarter of the gap. [orig: @ 0x437c8d]
-    eye[0] = 16.0f;
+    // Move the eye: each tick closes a quarter of the gap in 16.16 with the +4
+    // add, (16 - 8) words: 0x80000 + 4 >> 2 = 0x20001, then (0x60000 - 1) + 4 >> 2
+    // = 0x18000. [orig: ThirdPersonCamera_Update @0x437AF0 (@0x437C83..0x437CB5)]
+    eye[0] = 16 * 0x10000;
     player_view_tick(v, eye);
-    CHECK(v.tp_anchor[0] == 10.0f);
+    CHECK(v.tp_anchor_q16[0] == 0xA0001);
     player_view_tick(v, eye);
-    CHECK(v.tp_anchor[0] == 11.5f);
+    CHECK(v.tp_anchor_q16[0] == 0xB8001);
+    CHECK(v.tp_anchor[0] > 11.5f && v.tp_anchor[0] < 11.5001f); // the float mirrors the words
 
     // Leaving third person invalidates; re-entering re-seeds at the current eye.
     v.debug_third_person_on_foot = false;
@@ -361,7 +364,7 @@ void test_anchor_chase_quarter_step_and_seeding() {
 // re-resolve at once; the debug override is the only on-foot third person.
 void test_mode_arbiter() {
     PlayerViewState v;
-    const float eye[3] = {0.0f, 0.0f, 0.0f};
+    const int32_t eye[3] = {0, 0, 0};
     CHECK(v.third_person_selected);
     player_view_tick(v, eye);
     CHECK(!v.third_person);          // on foot: first person despite the preference
@@ -701,7 +704,7 @@ void test_fresh_profile_aspect_seed() {
 
 void test_view_bias_blend() {
     PlayerViewState v;
-    const float eye[3] = {0, 0, 0};
+    const int32_t eye[3] = {0, 0, 0};
     const float pos[3] = {-19.46f, 21.19f, -161.31f};   // JOX WPN_AK47AUTO pos
     const float tpos[3] = {-62.33f, 29.19f, -152.56f};  // ... and tpos
     // The bound poses are the def's *256 Q16 copies of those file values
@@ -773,7 +776,7 @@ void test_toggle_latch_refusal_and_inset() {
     // !activeFlag refusal @ 0x4df177; Setup 15 @ 0x4df36e / 7 Inset @ 0x4df355 /
     // 1 hipfire-return @ 0x4df1c3; g_ScopeHipfire writes @ 0x4df212/@ 0x4df373].
     PlayerViewState v = bound_view();
-    const float eye[3] = {0, 0, 0};
+    const int32_t eye[3] = {0, 0, 0};
     CHECK(v.scope_hipfire); // [orig: g_ScopeHipfire init 1]
     CHECK(player_view_set_engaged(v, true, false));
     CHECK(v.weapon_pose_interp.velocity.position_q16[0] == -21.0f); // 15 steps, hip -> tpos
@@ -810,7 +813,7 @@ void test_unscope_on_move_and_up_refusal() {
     const int32_t kScoped = 1;         // weapon.def flags: Scoped
     const int32_t kSighted = 2;        // Sighted (no auto-unscope leg of its own)
     PlayerViewState v = bound_view();
-    const float eye[3] = {0, 0, 0};
+    const int32_t eye[3] = {0, 0, 0};
 
     // Movement alone never fires the leg from the hip.
     CHECK(!player_view_move_input(v, true, kScoped));
@@ -852,7 +855,7 @@ bool near_eq(float a, float b, float eps = 0.0005f);
 // [orig: Player_PackInputStateToEntity @0x4df500..0x4df63b].
 void test_move_reversal_and_auto_re_raise() {
     const int32_t kScoped = 1;
-    const float eye[3] = {0, 0, 0};
+    const int32_t eye[3] = {0, 0, 0};
 
     // (a) a movement key during the raise: the interp re-targets the hip FROM
     // ITS OWN POSE over a fresh 15 steps, the engaged target stays latched,
@@ -1311,7 +1314,7 @@ void test_tick_mounted_anchor_ease() {
     // change (the debug override); the arbiter's own transitions are
     // test_mode_arbiter's.
     v.debug_third_person_on_foot = true;
-    const float eye[3] = {0.0f, 0.0f, 0.0f};
+    const int32_t eye[3] = {0, 0, 0};
     player_view_tick(v, eye); // seeds the anchor at the eye
     CHECK(v.tp_anchor_valid);
     v.mount.control_seat = true;
