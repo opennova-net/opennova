@@ -57,7 +57,9 @@ int main() {
 	ctx.is_in_session = 1;
 	ctx.transport_mode = inmatch::NetworkType::NovaWorld;
 	ctx.np_protocol.host_start_tick = 5000u;
-	ctx.file_transfer_session_id = 1u;
+	inmatch::FileTransferSession words; // the process's words after one mission start
+	words.id = 1u;
+	ctx.file_transfer_session = &words;
 	ns::LoopbackChannel wire;
 	ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
 			20, inmatch::NapiNPConnection::kTypeServerSide, &wire, ns::TransportMode::Client,

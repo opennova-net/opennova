@@ -2,6 +2,7 @@
 
 #include <runtime/inmatch/chat_flood.h>
 #include <runtime/inmatch/client_console.h> // the S2C 0x06 echo's command walk (D-NET-710)
+#include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
@@ -89,13 +90,15 @@ struct ClientProcessState {
 	// (the client runtime points its replica's store here: use_vehicle_spawn_store).
 	// [orig: g_VehicleSpawnAvailabilityReceived 0xA81BB0, the table 0xA81BC0]
 	replication::ClientVehicleSpawnAvailability vehicle_spawn_availability;
-	// g_FileTransferSessionId: zero in the image, stepped by every authority mission start
-	// (HostRole's bring-ups, a map change's and single player's included), read by each S2C
-	// 0x02 probe as its second word (NapiNPServerCtx::file_transfer_session_id).
-	// [orig: g_FileTransferSessionId @0xC86FCC; Game_StartMission's authority arm @0x5244B4
-	//  (`add g_FileTransferSessionId, ebp`, ebp = 1 @0x524388); CNetPlayer_SendFileTransferChunk
-	//  @0x4C9468]
-	uint32_t file_transfer_session_id = 0;
+	// The process's file-transfer session words (file_transfer_session.h): the id each S2C 0x02
+	// probe carries and its step countdown, stepped by every authority mission start (HostRole's
+	// bring-ups, a map change's and a single player's included) and by the server tick's head,
+	// which the host context reaches through NapiNPServerCtx::file_transfer_session.
+	// [orig: g_FileTransferSessionId @0xC86FCC, g_FileTransferSessionStepCountdown @0xC86FD0;
+	//  Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6); Server_TickUpdate
+	//  @0x51D7E0 (@0x51D809..0x51D820); CNetPlayer_SendFileTransferChunk @0x4C9440 (the read
+	//  @0x4C9468)]
+	FileTransferSession file_transfer_session;
 	// One client net frame's step, which every mission frame of every role runs (a Serve Only
 	// host's included, with no client runtime): true at the 311th, which zeroes the word before
 	// the session test, so the caller's report (in session, a session peer) is its own.

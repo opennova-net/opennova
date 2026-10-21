@@ -283,8 +283,10 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags), profile);
 	reset_state(config, /*serve_and_play=*/true, /*in_session=*/false, /*title=*/nullptr);
 	state.host_owner.host_loopback = &state.host_loop;
-	// [orig: Game_StartMission @0x5244B4, the authority's start]
-	state.host_owner.ctx.file_transfer_session_id = ++client_process_->file_transfer_session_id;
+	// The authority's start steps the process's file-transfer session words, which the context
+	// reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
+	state.host_owner.ctx.file_transfer_session = &client_process_->file_transfer_session;
+	client_process_->file_transfer_session.start_mission();
 	inmatch::HostConfig host_cfg;
 	host_cfg.config = config;
 	host_cfg.socket_mode = inmatch::SocketMode::Socketless;
@@ -312,9 +314,10 @@ void HostRole::bring_up(const HostBringup &bringup) {
 			host_cfg.title);
 	state.host_owner.host_loopback = &state.host_loop;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
-	// The authority's mission start steps the process's file-transfer session id
-	// [orig: Game_StartMission @0x5244B4].
-	ctx.file_transfer_session_id = ++client_process_->file_transfer_session_id;
+	// The authority's mission start steps the process's file-transfer session words, which the
+	// context reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
+	ctx.file_transfer_session = &client_process_->file_transfer_session;
+	client_process_->file_transfer_session.start_mission();
 	// The fresh context stands inside the mission load, which holds the spawn gate
 	// until its end (finish_mission_load) [orig: Game_StartMission @0x524398].
 	ctx.net_spawn_suspended = 1;
@@ -375,8 +378,10 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
 	if (host_cfg.client_process != nullptr) client_process_ = host_cfg.client_process;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
-	// [orig: Game_StartMission @0x5244B4, as the bring-up's]
-	ctx.file_transfer_session_id = ++client_process_->file_transfer_session_id;
+	// [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6), as the
+	//  bring-up's]
+	ctx.file_transfer_session = &client_process_->file_transfer_session;
+	client_process_->file_transfer_session.start_mission();
 	state.client_runtime.reset();
 	local_round_reset_seen_ = kernel.local.round_reset_revision;
 	state.host_loop.clear();

@@ -552,7 +552,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	const bool preround_active = world.preround_delay_seconds != 0;
 
 	// (0) The head-of-function timers, ahead of the per-player walk and the
-	// receive pump. The 744-tick priority-target sweep is unconditional: zero-armed
+	// receive pump. First the file-transfer session's step countdown, which the
+	// mission start armed: at zero it steps the process's probe id once more
+	// (file_transfer_session.h) [orig: Server_TickUpdate @0x51D7E0
+	// (@0x51D809..0x51D820, after the fps / cpu copies)].
+	if (ctx.file_transfer_session != nullptr) ctx.file_transfer_session->step_server_tick();
+	// The 744-tick priority-target sweep is unconditional: zero-armed
 	// per mission, it fires when the countdown is (or decrements to) zero, strips
 	// Flags 0x4000 off pools 0/1 and reloads 744 — the only decay for pool-1
 	// shooters and for rows that never scan again.

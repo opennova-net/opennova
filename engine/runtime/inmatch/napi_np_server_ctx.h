@@ -12,6 +12,7 @@
 
 #include <runtime/inmatch/character_registry.h> // the host's Avatars.def combos (g_AvatarDefs)
 #include <runtime/inmatch/chat_flood.h>        // the console chat's flood table
+#include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/server_ban_lists.h>  // banlist.txt / banned.txt (the join refusals)
@@ -260,10 +261,13 @@ struct NapiNPServerCtx {
 	// [orig: g_GameServerBaffleKey @0xC8FC70 - its one writer @0x51CB88, its one reader
 	//  Lobby_UpdateServerInfo @0x4FF1CC]
 	uint32_t game_server_baffle_key = 0;
-	// g_FileTransferSessionId as this mission's start stepped it (ClientProcessState): the S2C
-	// 0x02 probe's second word. [orig: Game_StartMission @0x5244B4; CNetPlayer_SendFileTransferChunk
-	//  @0x4C9468]
-	uint32_t file_transfer_session_id = 0;
+	// The process's file-transfer session words (ClientProcessState::file_transfer_session), which
+	// the host role's mission starts and Server_TickUpdate's head step and each S2C 0x02 probe
+	// reads live as its second word; null on a context no host role brought up (its probes carry 0).
+	// [orig: g_FileTransferSessionId @0xC86FCC, stepped by Game_StartMission @0x524360 (the add
+	//  @0x5244B4) and Server_TickUpdate @0x51D7E0 (the add @0x51D820), read by
+	//  CNetPlayer_SendFileTransferChunk @0x4C9440 (the read @0x4C9468)]
+	FileTransferSession *file_transfer_session = nullptr;
 	// dword_C8FC74, the round-state init's GetTickCount stamp in the host clock (host_start_tick's
 	// milliseconds): the status report's UP-TIME counts from it (session_uptime_ms). Every
 	// session create's round init stamps it; a single player's restart runs no round init and
