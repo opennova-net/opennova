@@ -3394,7 +3394,9 @@ bool run_console_command_sends_the_line() {
 		return false;
 	// VERSION's line is "Version <version>  - <title>": the title is the start-up title
 	// text, g_TitleText (the connect log's TITLE word) [orig: Client_ProcessLocalCommand
-	// @0x520D8E - "Version %s  - %s" @0x7D00AC over off_8154D8].
+	// @0x520D8E - "Version %s  - %s" @0x7D00AC over the words dword_3342E6C /
+	// dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit @0x4A7310 -
+	// &g_TitleText @0x4A7CFB, the title sprintf from off_8154D8 @0x4A7D30..0x4A7D3C].
 	bool version_line = false;
 	const std::string title_tail = std::string("  - ") + kJo.connect_log_title;
 	for (const hud::FeedPost &post : client.drain_ring_posts())
@@ -3458,11 +3460,6 @@ bool run_console_command_sends_the_line() {
 			"a non-peer authority queues no C2S 0x04; an untaken line is not taken");
 }
 
-// D-NET-710: the console's input actions go through Input_QueueEvent's queue: the S2C
-// 0x06 walk's binding arm queues the record's code (the "respawn" token: code 55) for the
-// next input frame, and the queue holds 32 records, the 33rd dropped.
-// [orig: NapiClientCmd_ParseAndExecute @0x432a64..0x432ba1 -> Input_QueueEvent @0x4979C0,
-//  the cap @0x4979C8..0x4979CB]
 // L5-s3 / V-L5-s3: the client's entity-update body (the movers, the tracked target's
 // count) skips a frame in a session while the round-over gate is up, as it does in
 // the pre-round [orig: Game_ProcessMainFrame @0x5263F0 - g_ClientPreRoundTimer
@@ -3488,6 +3485,11 @@ bool run_the_round_gate_holds_the_entity_update() {
 			"with the gate down the entity update runs");
 }
 
+// D-NET-710: the console's input actions go through Input_QueueEvent's queue: the S2C
+// 0x06 walk's binding arm queues the record's code (the "respawn" token: code 55) for the
+// next input frame, and the queue holds 32 records, the 33rd dropped.
+// [orig: NapiClientCmd_ParseAndExecute @0x432a64..0x432ba1 -> Input_QueueEvent @0x4979C0,
+//  the cap @0x4979C8..0x4979CB]
 bool run_console_actions_queue_for_the_input_frame() {
 	const std::string client_scrk = "CLIENT-CONSOLE-QUEUE-SCRK";
 	const std::string server_scrk = "SERVER-CONSOLE-QUEUE-SCRK";

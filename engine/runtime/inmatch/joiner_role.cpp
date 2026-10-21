@@ -1413,9 +1413,14 @@ void JoinerRole::reinit_local_player_on_team_assign() {
 	if (local == nullptr) return;
 	const int side = local->team == 1 || local->team == 3 ? 0 : 1;
 	const CharacterJoinVars *vars = rt.character_join_vars();
-	const uint8_t side_class = granted_side_class_[side] != 0 ? granted_side_class_[side]
-			: vars != nullptr ? vars->char_class[side] : 0;
-	if (side_class >= 5 && side_class <= 9) local->player_class = side_class;
+	// The side's word, stored as it is (Player_InitPlayer has no range test): the 0x5A's
+	// grant, else the session start's; only a runtime with no join vars installed (a
+	// harness) has no word to store. [orig: Player_InitPlayer @0x4E15F0 - @0x4E181F /
+	//  @0x4E1832]
+	if (granted_side_class_[side] != 0)
+		local->player_class = granted_side_class_[side];
+	else if (vars != nullptr)
+		local->player_class = vars->char_class[side];
 	kernel.local.respawn_init(/*rebuild_kit=*/true);
 	local->hidden = false;
 	local->flags &= ~world::kEntityFlagCarried;

@@ -1393,8 +1393,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				}
 				// The 0x0F handler writes the local player's Position the same way, past
 				// its g_LocalPlayerEntity null test (local_entity_bound)
-				// [orig: NapiNPClientMsg_0x00F @0x42E200 - the null test @0x42E3AF, the
-				// stores @0x42E3B9..0x42E3CE].
+				// [orig: NapiNPClientMsg_0x00F @0x42E200 - the null test `cmp ecx, eax`
+				// @0x42E38F (its jz @0x42E3AF), the stores @0x42E3B9..0x42E3CE].
 				if (tb.first == s2c::WORLD_STATE_LOAD && local_entity_bound() &&
 						view_.state().world_state.revision != world_state_before) {
 					const replication::ClientWorldStateLoad &ws = view_.state().world_state;
@@ -1802,8 +1802,10 @@ bool ClientRuntime::console_command(const std::string &line) {
 			seams.version_text = profile->version_text;
 	}
 	// VERSION's title is the start-up title text, g_TitleText (the connect log's
-	// TITLE line reads the same word) [orig: Client_ProcessLocalCommand @0x520D8E -
-	// off_8154D8; Game_ParseCommandLineAndInit @0x4A7D30].
+	// TITLE line reads the same word) [orig: Client_ProcessLocalCommand @0x520D8E - the
+	// words dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit
+	// @0x4A7310 - &g_TitleText @0x4A7CFB, the title sprintf from off_8154D8
+	// @0x4A7D30..0x4A7D3C].
 	if (seams.title_text.empty() && title != nullptr && title->connect_log_title != nullptr)
 		seams.title_text = title->connect_log_title;
 	seams.version_line = [this](const std::string &text) {

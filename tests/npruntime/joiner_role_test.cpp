@@ -2285,7 +2285,8 @@ bool run_entity_death_names_l() {
 		// pump, so the 0x13's callback still runs past its dead return (the re-arm to
 		// 64, and on a seated L the seat leave's C2S 0x27)
 		// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - the Health store @0x4305DF;
-		//  the plyr callback's dead return @0x40772A..0x40772F; Entity_UpdateInfantryPlayerBody
+		//  Entity_HandleDamageAndTriggerZones @0x407720 (the dead return @0x40772A..0x40772F);
+		//  Entity_UpdateInfantryPlayerBody
 		//  @0x4B40E0 - the death edge @0x4B4BF1..0x4B4C02].
 		Harness h2;
 		h2.role.poll_preload();

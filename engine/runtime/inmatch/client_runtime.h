@@ -379,7 +379,8 @@ public:
 	//  Client_ProcessLocalCommand @0x520eec, the peer test @0x520EF8, NetPacket_WriteNullableString
 	//  @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29; the authority test @0x520F49,
 	//  Server_HandleAdminNetlogCommand @0x520F55, Server_HandleBanPuntCommand @0x520F63,
-	//  NapiClientCmd_ParseAndExecute @0x520F70; Game_ParseCommandLineAndInit @0x4A7D30 (g_TitleText)]
+	//  NapiClientCmd_ParseAndExecute @0x520F70; Game_ParseCommandLineAndInit @0x4A7310 (the title
+	//  sprintf @0x4A7D30..0x4A7D3C, g_TitleText)]
 	bool console_command(const std::string &line);
 	// The local arms' seams the embedder owns (SAVEKEYS, SAVENFO, VERSION's words);
 	// in_session, version_line and queue_action are this runtime's.
