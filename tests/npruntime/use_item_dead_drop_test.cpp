@@ -87,8 +87,8 @@ void test_a_dedicated_host_in_session_drops_every_press() {
 
 // The role's frame reads the same operand (session.cpp: the dispatcher's head and the
 // ToSpecial block, LocalPlayer::action_dispatch_drops): on a dedicated host in a session a
-// live local body's Respawn key, ToSpecial dispatch and mouse look all drop; the same body on
-// a listen host (a session peer) passes the head. The body is a Serve Only host's row body's
+// live local body's Respawn key, held movement rows, ToSpecial dispatch and mouse look all
+// drop; the same body on a listen host (a session peer) passes the head. The body is a Serve Only host's row body's
 // shape: live, bound as the local player, its def bound (D-NET-352).
 // [orig: Input_HandleActionBinding @0x49AD40 - the operand @0x49AD52..0x49AD7E, bit 0
 //  @0x49AD95..0x49ADA0; case 55 -> Player_ResetLocalInput @0x49B20B; Input_FlushDeferredEvents
@@ -132,7 +132,10 @@ void run_the_roles_frame_reads_the_dedicated_operand() {
 		// memsets the frame's queue (the frame's movement keys never land).
 		r.frame(inmatch::PRESSED_RESPAWN);
 		CHECK(r.role.take_input_reset() == peer);
-		CHECK(lp.input.forward == !peer);
+		CHECK(!lp.input.forward); // the reset's memset, or the head dropping the held row
+		// A held row (the forward key's, flags 0x0C000C05) passes the same head.
+		r.frame(0);
+		CHECK(lp.input.forward == peer);
 		// The ToSpecial release: past the head its deferred dispatch takes the stash
 		// (cleared at the release, @0x4E11D1); dropped, the deferred queue is gone and the
 		// stash stays.
