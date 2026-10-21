@@ -107,7 +107,11 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			if (twin != nullptr && (twin->bms_id != 0 ||
 					twin->spawn_origin != world::kSpawnOriginNone))
 				continue; // a placed row: the registry walk above gated it
-			if (h == kernel.world.cached.local_player) continue;
+			// The listen host's own player at its own handle; a joiner's self row
+			// went above by the self handle, and its H is never compared with L
+			// (D-NET-698): retail collects every drawn entity it built from the
+			// wire [orig: Terrain_CollectVisibleEntities_0 @0x5C6F20].
+			if (!joiner && h == kernel.world.cached.local_player) continue;
 			if (twin != nullptr) {
 				// The host's own runtime spawn (an addeweap gun child, a
 				// runtime-placed item): the listen host walks its OWN pool entity

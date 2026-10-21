@@ -1180,9 +1180,11 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 					: nullptr;
 			// The wire walk defers authored rows to their placed node (or static
 			// batch). Do not repeat the same native ray query and cache an update
-			// for a wire node that deliberately does not exist.
-			if (h == w.cached.local_player ||
-					(joiner_twin != nullptr && joiner_twin->spawn_origin != world::kSpawnOriginNone)) {
+			// for a wire node that deliberately does not exist. The self row went
+			// above by the self handle; H is never compared with L (D-NET-698):
+			// retail lights every drawn entity it built from the wire
+			// [orig: Terrain_SetupEffectForEntity @0x5C74A0 per drawn entity].
+			if (joiner_twin != nullptr && joiner_twin->spawn_origin != world::kSpawnOriginNone) {
 				last_by_wire.erase(handle);
 				continue;
 			}

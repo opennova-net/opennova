@@ -164,6 +164,17 @@ void test_the_walk() {
 	expect(latches.count(0x1FFF) == 0 && latches.count(0x1003) == 1 &&
 					latches.count(0x1004) == 0,
 			"a gone row's latch is dropped; a hidden row's never starts");
+
+	// A joiner walks the decoded row whose wire handle equals its native L's
+	// packed handle like any other (H and L are separate domains; the self row
+	// is the self handle's): a model-less row there is culled, where the L
+	// comparison skipped it (D-NET-698) [orig: Terrain_CollectVisibleEntities_0
+	// @0x5C6F20, every drawn entity built from the wire].
+	add(local.handle.packed, 0x1234, opennova::EntityClass::Player, 15);
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, true}, latches, scratch, cam,
+			culled_bms, culled_wire, anchors);
+	expect(contains(culled_wire, static_cast<int32_t>(local.handle.packed)),
+			"a joiner's wire walk takes the row at L's packed handle");
 }
 
 } // namespace

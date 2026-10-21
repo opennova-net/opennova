@@ -148,8 +148,41 @@ static void voice_macro_override_cases() {
 	CHECK(world::radio_call_text(kernel.world, "EMO_1", "Pat", nullptr) == "Pat: Hello");
 }
 
+// The joiner's lighting wire walk takes the decoded row whose wire handle equals
+// its native L's packed handle like any other (H and L are separate domains; the
+// self row is the self handle's): a cached context there is re-evaluated and
+// emitted, where the L comparison erased it and emitted nothing (D-NET-698)
+// [orig: Terrain_SetupEffectForEntity @0x5C74A0 per drawn entity].
+static void lighting_walk_keeps_the_row_at_l_cases() {
+	auto runtime_heap = std::make_unique<ClientRuntime>("LightAtL");
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	world::World &w = kernel.world;
+	w.registry.configure_pool(0, 8);
+	world::Entity seed;
+	seed.kind = world::EntityKind::Organic;
+	w.cached.local_player = w.registry.spawn_at(world::EntityHandle::make(0, 3), seed);
+	replication::ClientEntityState &row = runtime_heap->state().upsert(w.cached.local_player.packed);
+	row.type_id = 0x0011;
+	row.cls = EntityClass::Player;
+	RoleView jv;
+	jv.kernel = &kernel;
+	jv.runtime = runtime_heap.get();
+	jv.joiner = true;
+	EntityLightingFeed feed;
+	feed.layout_revision_seen = 0; // the layout this cache was built for
+	feed.last_by_wire[w.cached.local_player.packed].quality = 2;
+	const int32_t step[3] = { 0, 0, 65536 * 200 };
+	std::vector<EntityLightingChange> changes;
+	feed.collect(jv, step, {}, {}, 0, changes);
+	// The row keeps its cached context (re-evaluated in place), where the L
+	// comparison erased it as a self row.
+	CHECK(feed.last_by_wire.count(w.cached.local_player.packed) == 1);
+}
+
 int main() {
 	voice_macro_override_cases();
+	lighting_walk_keeps_the_row_at_l_cases();
 	// The bare local role: nothing folded, nothing gathered.
 	{
 		RoleView bare;
