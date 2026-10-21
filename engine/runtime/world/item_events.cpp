@@ -471,7 +471,10 @@ void queue_class_blast(World &world, const Entity &entity, const char *name, flo
     blast.owner = entity.handle;
     blast.hit_word = 1;
     blast.radius_override = radius;
-    world.explosions.queue_explosion(world, blast);
+    // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330 (@0x4E8333..0x4E8339),
+    //  from Entity_ProcessBld2Destruction @0x43F2A6 / @0x43F2C7 and
+    //  Entity_ProcessCraneCollapse @0x44014A / @0x44016B].
+    world.explosions.queue_explosion_on_authority(world, blast);
 }
 
 // [orig: bld2 callback Entity_ProcessBld2Destruction @0x43EEE0]

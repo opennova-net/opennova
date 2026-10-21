@@ -1045,6 +1045,42 @@ void test_death_blast_radius_falls_back_to_the_bound_word() {
     if (!w.explosions.queue.empty()) CHECK(w.explosions.queue[0].radius_override == -1.0f);
 }
 
+// The death chain's kz blast takes the gated entry: a session peer's death
+// transforms (the gnrc client kill leg) present the death but queue no blast; the
+// authority's queue one. The raw push stays ungated (FX-1).
+// [orig: Entity_InitDeathSounds @0x4939B0 -> Entity_QueueKzBlastAtUserPoints
+//  @0x493B57 -> WeaponEffect_QueueExplosion @0x4E8330 (`cmp is_authority` / `jz`
+//  @0x4E8333..0x4E8339); WeaponEffect_PushExplosionQueueEntry @0x4E83C0 (no gate)]
+void test_a_peer_death_chain_queues_no_kz_blast() {
+    for (const bool authority : {false, true}) {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        seed_ammo(w);
+        w.rules.mp_session = true;
+        w.rules.logic_authority = authority;
+        w.registry.configure_pool(1, 4);
+        w.tables.item_death_traits.set(500, barrel_traits());
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = 500;
+        seed.health = 0;
+        seed.position = Vec3{0.0f, 0.0f, 0.0f};
+        seed.bound_radius = 1.0f;
+        Entity *item = w.registry.get(w.registry.spawn(1, seed));
+        entity_update_death_transforms(w, *item, /*silent=*/false);
+        bool death_sound = false;
+        for (const DestructionSoundEvent &s : w.out.destruction.sounds)
+            if (s.sound == "EXPLO_BARREL") death_sound = true;
+        CHECK(death_sound);
+        CHECK(w.explosions.queue.size() == (authority ? 1u : 0u));
+        // The raw push takes the entry on every peer.
+        ExplosionEntry raw;
+        raw.ammo_index = 2;
+        w.explosions.queue_explosion(w, raw);
+        CHECK(w.explosions.queue.size() == (authority ? 2u : 1u));
+    }
+}
+
 // A blast without NoMItems walks pool 1, but an indestructible item in range
 // takes no damage. [orig: Projectile_ProcessExplosionQueue — the pool-1
 //  walk @0x4eb349..0x4eb36c, the Flags 1 / indestructible skip @0x4eb3cb]
@@ -2785,23 +2821,24 @@ void test_vehicle_death_pieces_require_loaded_husk_model() {
 // receives S2C 0x13, zeroes Health, and runs the class death callback
 // (reason 4 = the net kill) — and its per-frame entity update drains the
 // explosion queue, dead-item settle, and the death-piece pool UNGATED on every
-// peer. A joiner therefore detonates the husk chain's kz blast and flies its
-// pieces from its own pools; only the round pool's authority gate keeps
-// gameplay consequences host-side. Regression: the drains used to be
-// is_authority-only, so a joiner's 0x13-driven death queued a chain blast that
-// never processed (no explosion FX, frozen pieces).
+// peer. The husk chain's kz blast takes the gated entry, which a peer drops
+// (FOUND V1): the joiner presents the death and flies its pieces, and its
+// drain runs the raw pushes of the rounds it flies.
 // [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5;
 //  Entity_UpdateAllEntities @0x4c2100 — DeathPiece_TickAll @0x4c221c,
-//  Projectile_ProcessExplosionQueue @0x4c223f, unconditional]
+//  Projectile_ProcessExplosionQueue @0x4c223f, unconditional;
+//  Entity_QueueKzBlastAtUserPoints @0x493B57 -> WeaponEffect_QueueExplosion
+//  @0x4E8330 (@0x4E8333..0x4E8339); WeaponEffect_PushExplosionQueueEntry @0x4E83C0]
 void test_net_kill_runs_client_side_death_chain() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(2, 8);
-    // The joiner role: an MP session without projectile authority.
+    // The joiner role: an MP session without authority.
     w.rules.mp_session = true;
     w.rules.projectile_authority = false;
+    w.rules.logic_authority = false;
 
     Entity seed;
     seed.kind = EntityKind::Building;
@@ -2821,10 +2858,16 @@ void test_net_kill_runs_client_side_death_chain() {
           (kEntityFlagDead | kEntityFlagHusk));
     CHECK(w.out.destruction.husk_swaps.size() == 1);
     CHECK(w.out.destruction.husk_swaps[0].wire_handle == barrel.packed);
-    CHECK(w.explosions.queue.size() == 1); // the chain blast is staged
+    CHECK(w.explosions.queue.empty()); // the gated entry drops the chain blast
 
     // The non-authority client tick drains the queue exactly like retail's
-    // shared per-frame update; the presentation counters advance.
+    // shared per-frame update: a flown round's raw push processes and the
+    // presentation counters advance.
+    ExplosionEntry flown;
+    flown.ammo_index = 1; // 40mm_HE
+    flown.type = w.tables.ammo.entries[1].kztype;
+    flown.pos.set_q16({10 << 16, 0, 0});
+    w.explosions.queue_explosion(w, flown);
     w.run_logic_tick(/*is_authority=*/false);
     CHECK(w.explosions.queue.empty());
     CHECK(w.out.destruction.explosions_processed == 1);
@@ -3785,9 +3828,10 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	CHECK(count_effect(w, "Effect_LrgOrdExp", 1) == 1); // the Dead-bone bank
-	CHECK(w.explosions.queue.size() == 1);              // the kz chain blast
-	if (w.explosions.queue.size() == 1)
-		CHECK(w.explosions.queue[0].radius_override == 4.0f);
+	// The kz chain blast takes the gated entry, which a peer drops (FOUND V1)
+	// [orig: Entity_QueueKzBlastAtUserPoints @0x493B57 -> WeaponEffect_QueueExplosion
+	//  @0x4E8330, `cmp is_authority` / `jz` @0x4E8333..0x4E8339].
+	CHECK(w.explosions.queue.empty());
 	CHECK(count_active_pieces(w) == 3); // husk sections 1..3
 	CHECK(b->spawned_piece_mask == 0xEu);
 	CHECK(b->death_motion == DeathMotionMode::Generic);
@@ -3798,7 +3842,7 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	step_item_pool(w, h.pool());
 	destruction_notify_item_damage(w, *b, 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
-	CHECK(w.explosions.queue.size() == 1);
+	CHECK(w.explosions.queue.empty());
 	CHECK(count_active_pieces(w) == 3);
 }
 
@@ -3825,7 +3869,7 @@ void test_gnrc_client_kill_runs_death_transforms_at_once() {
 	CHECK(b->death_tick == 9);
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
-	CHECK(w.explosions.queue.size() == 1);
+	CHECK(w.explosions.queue.empty()); // the gated entry drops the kz blast (FOUND V1)
 	CHECK(count_active_pieces(w) == 3);
 	// Client callbacks run too; the completed husk remains inert.
 	w.logic_tick = 60;
@@ -3868,7 +3912,9 @@ void test_gnrc_silent_kill_flags() {
 	veh->item_type = 1; // a vehicle def
 	apply_item_state_event(w, *veh, 0, 1);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
-	CHECK(w.explosions.queue.size() == 1);
+	// A peer queues no kz blast even for the loud death (FOUND V1)
+	// [orig: WeaponEffect_QueueExplosion @0x4E8333..0x4E8339].
+	CHECK(w.explosions.queue.empty());
 	int trails = 0;
 	for (const DeathPiece &p : w.death_pieces.pieces)
 		if (p.active && p.trail) ++trails;
@@ -5172,6 +5218,7 @@ int main() {
     test_section_debris_samples_collision_faces();
     test_glass_userpoints_shatter_once_at_authored_radius();
     test_death_blast_radius_falls_back_to_the_bound_word();
+    test_a_peer_death_chain_queues_no_kz_blast();
     test_mitem_blast_spares_indestructible_items();
     test_routed_wreck_lands_on_a_posed_model();
     test_synthetic_husk_events_preserve_distinct_handles();

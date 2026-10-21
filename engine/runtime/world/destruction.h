@@ -577,9 +577,16 @@ public:
     static constexpr int kCapacity = 64;
     std::vector<ExplosionEntry> queue;
 
-    // Authority-only push [orig: WeaponEffect_QueueExplosion @ 0x4e8330 —
-    // non-authority calls and a full queue drop silently].
+    // The raw push every projectile producer shares: no gate, a full queue
+    // drops the entry silently [orig: WeaponEffect_PushExplosionQueueEntry
+    // @0x4E83C0, the 64 cap @0x4E83C7..0x4E83CA].
     void queue_explosion(World &world, const ExplosionEntry &e);
+    // The gated entry the death chain, the collapses, the landing and the item
+    // explosion blasts take: off the authority it returns at once, so a peer's
+    // own death chain queues no blast; else the same 64-entry push
+    // [orig: WeaponEffect_QueueExplosion @0x4E8330 - `cmp is_authority` / `jz`
+    //  @0x4E8333..0x4E8339, the cap @0x4E8342..0x4E8345].
+    void queue_explosion_on_authority(World &world, const ExplosionEntry &e);
 
     // Drain the queue against the entity pools [orig:
     // Projectile_ProcessExplosionQueue @ 0x4ead80]. Kill-zone types 2/4/5/6/7

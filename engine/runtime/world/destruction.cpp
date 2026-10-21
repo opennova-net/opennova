@@ -240,7 +240,10 @@ void queue_named_landing_blast(World &world, const Entity &entity,
     blast.hit_word = 1;
     blast.pos = entity.position;
     blast.radius_override = radius;
-    world.explosions.queue_explosion(world, blast);
+    // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330, from
+    //  DeathPiece_PhysicsUpdate @0x48F6FE / @0x48F71E, Entity_InitDeathState
+    //  @0x48F864, Entity_UpdateFallingDeathPhysics @0x494209].
+    world.explosions.queue_explosion_on_authority(world, blast);
 }
 
 float vec_len(const Vec3 &v) {
@@ -508,8 +511,9 @@ void medic_interaction_callback(World &world, Entity &target, const ExplosionEnt
         return;
     }
     // Both arms act on the authority alone: a peer's own kit entry (queued on
-    // every peer) revives and heals nothing [orig: `cmp g_NapiNPCtx.is_authority`
-    //  @0x4E67D4 (the dead arm) / @0x4E67FE (the live arm)].
+    // every peer) revives and heals nothing [orig: GameEvent_HandleMedicInteraction
+    //  @0x4E6790 - `cmp g_NapiNPCtx.is_authority` @0x4E67CD / `jz` @0x4E67D4 (the
+    //  dead arm), @0x4E67F7 / @0x4E67FE (the live arm)].
     if (!world.ai.is_authority) return;
     if (world.entity_update_transactions != nullptr)
         world.entity_update_transactions->medic_interaction(world, interaction);
@@ -844,9 +848,18 @@ const DeathPieceType &death_piece_type(int index) {
 
 void ExplosionSim::queue_explosion(World &world, const ExplosionEntry &e) {
     (void)world;
-    // [orig: WeaponEffect_QueueExplosion @ 0x4e8330 — authority-only (our sim
-    // runs on the authority by construction, the RoundSim rule), 64-entry cap,
-    // silent drop when full.]
+    // No gate: every peer that flies a round pushes its kill zone (FX-1); the
+    // 64-entry cap drops silently [orig: WeaponEffect_PushExplosionQueueEntry
+    // @0x4E83C0, `cmp edi, 40h; jge` @0x4E83C7..0x4E83CA].
+    if (queue.size() >= static_cast<size_t>(kCapacity)) return;
+    queue.push_back(e);
+}
+
+void ExplosionSim::queue_explosion_on_authority(World &world, const ExplosionEntry &e) {
+    // [orig: WeaponEffect_QueueExplosion @0x4E8330 - `cmp g_NapiNPCtx.is_authority,
+    //  edi; jz` @0x4E8333..0x4E8339, then the cap `cmp ebx, 40h; jge`
+    //  @0x4E8342..0x4E8345]
+    if (!world.rules.logic_authority) return;
     if (queue.size() >= static_cast<size_t>(kCapacity)) return;
     queue.push_back(e);
 }
@@ -1252,7 +1265,10 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
             blast.radius_override = traits->kz != 0.0f
                     ? traits->kz
                     : float(target.bound_radius.q16 / 65536);
-            world.explosions.queue_explosion(world, blast);
+            // The gated entry: a peer's death chain queues no blast (FOUND V1)
+            // [orig: Entity_QueueKzBlastAtUserPoints -> WeaponEffect_QueueExplosion
+            //  @0x4EAD68; @0x4E8333..0x4E8339].
+            world.explosions.queue_explosion_on_authority(world, blast);
         } else {
             const CollisionMatrix orientation = destruction_orientation(target);
             for (const FixedVec3 &p : traits->kz_points) {
@@ -1267,7 +1283,9 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
                                    io::bam_add(target.position.y.q16, offset[1]),
                                    io::bam_add(target.position.z.q16, offset[2])});
                 blast.radius_override = kKzPointBlastRadius; // [orig: the 5.0 at @ 0x4eace7]
-                world.explosions.queue_explosion(world, blast);
+                // [orig: -> WeaponEffect_QueueExplosion @0x4EACE7, gated
+                //  @0x4E8333..0x4E8339]
+                world.explosions.queue_explosion_on_authority(world, blast);
             }
         }
     }
