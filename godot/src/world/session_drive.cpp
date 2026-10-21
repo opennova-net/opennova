@@ -586,6 +586,10 @@ bool SessionDrive::cancel_admission_wait() {
 	// nothing else (no exit reason, no teardown, no goodbye); the 0x0F still applies when
 	// it comes. Only the load's ESC is the abort (engine inmatch::JoinerConnection::
 	// cancel_final_wait carries the witness).
+	// A join the drive already failed (the load's ESC, a stall) left its mission start: there
+	// is no final wait to leave, whatever the doomed runtime reads until the shell's unload
+	// (engine inmatch/join_session_policy.h fail_reason carries the witness).
+	if (!policy_->fail_reason().is_empty()) return false;
 	MissionRoot *runtime = world_->get_runtime();
 	Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
 	if (sim.is_valid() && sim->cancel_join_final_wait()) {

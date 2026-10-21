@@ -175,6 +175,12 @@ public:
 	// Full teardown (the drive's reset()).
 	void reset();
 
+	// The failure this join reported (empty while none; cleared by reset_for_join). A join
+	// that failed left its mission start: the load's ESC stores exit 1 and leaves
+	// Game_StartMission ahead of its final wait, so the drive has no final wait for a later
+	// ESC to leave (SessionDrive::cancel_admission_wait).
+	// [orig: Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1 @0x5202A8;
+	//  Game_StartMission @0x524360 - the final wait @0x526295]
 	const std::string &fail_reason() const { return fail_reason_; }
 	const std::string &session_loss_reason() const { return session_loss_reason_; }
 

@@ -6167,9 +6167,14 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 //  @0x4C52C0, the held test @0x4c5606..0x4c5630; Input_HandleActionBinding @0x49b067]
 // NEW-L8-8's joiner half: the client's S2C 0x61 (the session key) closes the connect
 // log while it is on: its "<time> : NET CLIENT DISABLING CONNECTLOG ..." line, then off
-// for the process; a later 0x61 writes nothing.
+// for the process; a later 0x61 writes nothing. The packet carrying it writes its client
+// lines first: the client queue's NET GOT, then the parse's NET PROCESSING at the head of
+// ParseMessages, ahead of the messages it dispatches (D-NET-NEW-L8-8's joiner half, s10).
 // [orig: NapiNPClientMsg_HandleSessionKey @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
-//  @0x4297F1, the text @0x7C5398, the append @0x429831, the clear @0x42983E]
+//  @0x4297F1, the text @0x7C5398, the append @0x429831, the clear @0x42983E;
+//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv @0x6268AA;
+//  CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess @0x625D3E ahead of the
+//  message walk]
 bool run_the_session_key_closes_the_connect_log() {
 	struct MemoryFiles final : inmatch::ServerFileSink {
 		std::map<std::string, std::string> files;
@@ -6195,18 +6200,26 @@ bool run_the_session_key_closes_the_connect_log() {
 			w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	uint32_t tick = 1;
+	// The packet's length with its opcode byte, as the client lines print it.
+	int32_t packet_bytes = 0;
 	const auto session_key = [&] {
 		const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
 				{make_protocol_message(s2c::TICK_SEED, {0x10, 0x00, 0x00, 0x00})});
+		std::vector<uint8_t> unpacked;
+		packet_bytes = nw_unpack_inbound(dg.data(), dg.size(), unpacked)
+				? static_cast<int32_t>(unpacked.size())
+				: 0;
 		client.receive(dg.data(), dg.size());
 		(void)client.Client_ProcessNetworkFrame(tick++);
 	};
 	if (!expect(log.enabled(), "connect log: /CONNECTLOG armed it")) return false;
 	session_key();
 	const std::string &text = files.files[inmatch::kConnectLogFile];
-	if (!expect(!log.enabled() &&
-				text.substr(header_bytes) ==
-						"T : NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.\r\n",
+	const std::string want =
+			"T : " + inmatch::net_got_text(packet_bytes, PeerAddr{}, 0x83) + "\r\n" +
+			"T : " + inmatch::net_processing_text(packet_bytes, PeerAddr{}) + "\r\n" +
+			"T : NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.\r\n";
+	if (!expect(!log.enabled() && packet_bytes > 0 && text.substr(header_bytes) == want,
 			"connect log: the session key writes the client's disabling line and turns it off"))
 		return false;
 	const std::size_t closed_bytes = text.size();
