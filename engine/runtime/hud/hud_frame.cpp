@@ -2249,10 +2249,9 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 //    single-texture material, one wrap-addressed quad whose UV is
 //    (screen_px + 0.5)/cell, i.e. a screen-anchored tiling at the cell's own
 //    UNSCALED size [orig: the rec+0x3C == 0 arm @0x56b739 ->
-//    HUD_StdboxDrawFillWrapTiled @0x56b5d0]. Sampling cell (3,0) of the
-//    atlas slot here is the same pixels, so the fill matches retail; the
-//    tile loop stands in for hardware wrap (an atlas sub-rect cannot wrap),
-//    anchored to the same absolute screen grid.
+//    HUD_StdboxDrawFillWrapTiled @0x56b5d0]. The compiler emits that one quad
+//    on the lifted cell (kHudTexBoxFill, HudQuad::wrap); the device samples it
+//    wrap-addressed.
 //
 // Every retail quad's diffuse is alpha<<24 | 0x7F7F7F — half-bright under the
 // device's MODULATE2X stage, so 0.5 x 2 = 1 and the material lands at full
@@ -2320,7 +2319,6 @@ void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
 	// [orig: Render_HUDBoxOverlay @0x56b700 — alpha<<24 | 0x7F7F7F
 	//  @0x56b70e..0x56b713]
 	const uint32_t color = ((alpha & 0xFFu) << 24) | 0x7F7F7Fu;
-	constexpr float kCell = 1.0f / 4.0f;   // the 4x4 atlas step in UV
 	// One source cell is a quarter of the atlas (32 px for the shipped 128 px
 	// border.tga) [orig: quarterW/H = dims >> 2 @0x56adb6/@0x56adbd].
 	const float src_cell = static_cast<float>(layout_.box_tex_w) * 0.25f;
@@ -2331,42 +2329,32 @@ void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
 	const float cw = src_cell * s;
 	const float ch = src_cell * s;
 
-	// 1. The interior fill: the brush cell (3,0), wrap-tiled on the ABSOLUTE
-	// screen grid at the cell's own unscaled period, inside the 16*s / 24*s
-	// inset rect [orig: the insets @0x56b7bd-0x56b80d (rec+0x180/0x184);
-	// HUD_StdboxDrawFillWrapTiled @0x56b5d0 — UV = (dest + 0.5)/cell, wrap].
+	// 1. The interior fill: ONE quad over the 16*s / 24*s inset rect, bound to
+	// the lifted brush cell (kHudTexBoxFill), its UV the screen position over the
+	// cell's own unscaled size with retail's half texel, (dest + 0.5) / cell; the
+	// texture's wrap addressing tiles it on the absolute screen grid, so pixel i
+	// samples the cell's texel i mod cell [orig: Render_HUDBoxOverlay @0x56B700 -
+	// the fill material rec+0x34 bound @0x56B7B4..0x56B7B8, the insets
+	// rec+0x180..+0x18C @0x56B7BD..0x56B80D, the cell w / h rec+0x148 / +0x14C
+	// @0x56B811..0x56B821, the one call @0x56B824; HUD_StdboxDrawFillWrapTiled
+	// @0x56B5D0 - 1 / cell @0x56B5E8 / @0x56B5FD, u = (x + 0.5) * (1 / cell_w),
+	// v = (y + 0.5) * (1 / cell_h) at each vertex @0x56B690..0x56B6E9, one
+	// 4-vertex strip GDynamicVB_DrawPrimitive(5, v, 4) @0x56B6F5].
 	const float fx1 = x0 + kBoxFillInsetX * s;
 	const float fy1 = y0 + kBoxFillInsetY * s;
 	const float fx2 = x1 - kBoxFillInsetX * s;
 	const float fy2 = y1 - kBoxFillInsetY * s;
-	if (fx2 > fx1 && fy2 > fy1) {
-		const float fu0 = 3.0f * kCell;
-		const float period = src_cell;
-		const float x_start = std::floor(fx1 / period) * period;
-		const float y_start = std::floor(fy1 / period) * period;
-		for (float ty = y_start; ty < fy2; ty += period) {
-			const float cy1 = std::max(ty, fy1);
-			const float cy2 = std::min(ty + period, fy2);
-			if (cy2 <= cy1) continue;
-			for (float tx = x_start; tx < fx2; tx += period) {
-				const float cx1 = std::max(tx, fx1);
-				const float cx2 = std::min(tx + period, fx2);
-				if (cx2 <= cx1) continue;
-				// A clipped tile samples the matching slice of the cell, so
-				// the texel phase stays locked to the screen grid. Each UV
-				// carries retail's half texel, (dest + 0.5) / cell, so pixel i
-				// samples the centre of the cell's texel i - tile and never
-				// the neighbouring cell's edge [orig: HUD_StdboxDrawFillWrapTiled
-				// @0x56B5D0 -- u = (x + 0.5) * (1 / cell_w), v = (y + 0.5) *
-				// (1 / cell_h) at each vertex @0x56B690..0x56B6E9].
-				emit_rect_uv(cx1, cy1, cx2, cy2,
-						fu0 + kCell * ((cx1 - tx + 0.5f) / period),
-						kCell * ((cy1 - ty + 0.5f) / period),
-						fu0 + kCell * ((cx2 - tx + 0.5f) / period),
-						kCell * ((cy2 - ty + 0.5f) / period), color,
-						kHudTexBoxBorder);
-			}
-		}
+	const int fill_cell_w = layout_.box_tex_w >> 2;
+	const int fill_cell_h = layout_.box_tex_h >> 2;
+	if (fx2 > fx1 && fy2 > fy1 && fill_cell_w > 0 && fill_cell_h > 0) {
+		const double inv_w = 1.0 / static_cast<double>(fill_cell_w);
+		const double inv_h = 1.0 / static_cast<double>(fill_cell_h);
+		const auto wrap_uv = [](float pos, double inv) {
+			return static_cast<float>((static_cast<double>(pos) + 0.5) * inv);
+		};
+		emit_rect_uv(fx1, fy1, fx2, fy2, wrap_uv(fx1, inv_w), wrap_uv(fy1, inv_h),
+				wrap_uv(fx2, inv_w), wrap_uv(fy2, inv_h), color, kHudTexBoxFill);
+		draw_list_.quads.back().wrap = true;
 	}
 
 	// 2. The border pieces, over the fill.

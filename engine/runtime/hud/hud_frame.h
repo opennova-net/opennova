@@ -72,6 +72,13 @@ enum HudTexture : int32_t {
 	// sentinel, which sizes the device slot array.
 	kHudTexBoxBorder,
 	kHudTexBoxTile,
+	// The stdbox's interior brush: the border atlas's cell (3,0), lifted into its own
+	// wrap-addressed texture under the box material 0x651 when the style loads (the
+	// embedder cuts it from border.tga; no file of its own) [orig:
+	// BoxTexture_LoadAndSetupUVRegions @0x56ACD0 - the copy and zero loop
+	// @0x56ADBD..0x56AE44, the "BoxCtr" texture @0x56AE73, its material into rec+0x34
+	// @0x56AE78..0x56AE8C].
+	kHudTexBoxFill,
 	// The 16x16 connection-quality icon, a 4-row vertical atlas
 	// [orig: the quad @0x4241fb; the atlas load CNetworkIcons_LoadTextures @0x4c2cf0].
 	// neticon2.tga, iconPtrs[1] = g_NetConnectionIcon @0xB5E03C; the HUD's
@@ -229,6 +236,11 @@ struct HudQuad {
 	int32_t texture2 = kHudTexNone;
 	float stage2_w = 0.0f;
 	float stage2_h = 0.0f;
+	// The texture is wrap-addressed: the UVs run past [0, 1] and the sampler
+	// repeats the texture across the quad (the stdbox fill, one quad whose UV is the
+	// screen position over the brush cell) [orig: HUD_StdboxDrawFillWrapTiled
+	// @0x56B5D0 - one 4-vertex strip @0x56B6F5].
+	bool wrap = false;
 };
 
 // One textured triangle (the crosshair's tapered arm strips)

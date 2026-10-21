@@ -1832,9 +1832,50 @@ void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
 
 } // namespace
 
+// The end-round overlay's stdbox (the box LD-s3 measured at ~3300 tile quads): at
+// surface 1600 x 1200 the box runs sx(8) = floor((8 * 1600 + 512) / 1024) = 13 ..
+// sx(1015) = 1586 and sy(108) = floor((108 * 1200 + 384) / 768) = 169 .. sy(592) = 925
+// for a safe area of 100 .. 600, so the fill is the one quad (29, 193) .. (1570, 901)
+// with UV (29.5 / 32, 193.5 / 32) .. (1570.5 / 32, 901.5 / 32).
+// [orig: HUD_DrawEndRoundStatsOverlay @0x5B7CD0 (HUD_DrawLabelBox(ctx, 8, top + 8,
+//  1015, bottom - 8) @0x5B7D3E); Render_HUDBoxOverlay @0x56B700 (@0x56B824);
+//  HUD_StdboxDrawFillWrapTiled @0x56B5D0]
+void test_compiler_end_round_box_fills_with_one_quad(const fnt_font_t *font) {
+	using opennova::hud::HudQuad;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.box_texture_valid = true;
+	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	state.ticks = 100;
+	state.end_round.shown = true;
+	state.end_round.top = 100;
+	state.end_round.bottom = 600;
+	const HudDrawList &list = compiler.compile(state, 1600.0f, 1200.0f);
+	std::vector<HudQuad> fill;
+	size_t pieces = 0;
+	for (const HudQuad &q : list.quads) {
+		if (q.texture == opennova::hud::kHudTexBoxFill) fill.push_back(q);
+		if (q.texture == opennova::hud::kHudTexBoxBorder) ++pieces;
+	}
+	CHECK(fill.size() == 1, "the end-round box fills with one quad");
+	CHECK(pieces == 8, "and its eight border pieces");
+	if (fill.size() == 1) {
+		const HudQuad &q = fill[0];
+		CHECK(q.x0 == 29.0f && q.y0 == 193.0f && q.x1 == 1570.0f && q.y1 == 901.0f,
+				"the fill rect is the box inset 16 / 24 px");
+		CHECK(q.u0 == 0.921875f && q.v0 == 6.046875f && q.u1 == 49.078125f &&
+						q.v1 == 28.171875f,
+				"its UVs are (dest + 0.5) / 32");
+		CHECK(q.wrap && q.color == 0xFF7F7F7Fu, "wrap-addressed at the raw diffuse");
+	}
+}
+
 // The stdbox panel geometry: pieces and the fill inset scale with the surface,
-// the fill tiles at a fixed 32 px screen period off the BORDER atlas's own
-// cell (3,0), and the bottom row is cropped rather than squashed.
+// the fill is ONE wrap-addressed quad on the lifted brush cell at its fixed
+// 32 px screen period, and the bottom row is cropped rather than squashed.
 // [orig: Render_HUDBoxOverlay @0x56b700; flt_7CFE3C = 0.000625; rec+0x180/+0x184;
 //  the bottom-row crop flag1 @0x56b456 with flt_7C459C = 0.9]
 void test_compiler_stdbox_geometry(const fnt_font_t *font) {
@@ -1857,7 +1898,8 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 		const HudDrawList &list = compiler.compile(state, surface_w, surface_h);
 		for (const HudQuad &q : list.quads) {
 			if (q.texture == opennova::hud::kHudTexBoxBorder ||
-					q.texture == opennova::hud::kHudTexBoxTile) {
+					q.texture == opennova::hud::kHudTexBoxTile ||
+					q.texture == opennova::hud::kHudTexBoxFill) {
 				out.push_back(q);
 			}
 		}
@@ -1867,20 +1909,22 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	const std::vector<HudQuad> wide = box_quads(1600.0f, 1200.0f);
 	CHECK(!wide.empty(), "the stdbox panel emits quads when its atlas loaded");
 
-	// The fill comes off the BORDER atlas's cell (3,0) — boxtile.tga is a flat
-	// camo sheet with no cell grid, so sampling a quarter-rect of it is wrong.
+	// The fill comes off the BORDER atlas's cell (3,0), lifted into its own
+	// texture — boxtile.tga is a flat camo sheet with no cell grid, so no quad
+	// samples it as stage 0.
 	bool any_tile_slot = false;
 	for (const HudQuad &q : wide) {
 		if (q.texture == opennova::hud::kHudTexBoxTile) any_tile_slot = true;
 	}
 	CHECK(!any_tile_slot,
-			"every stdbox quad samples the border atlas, fill included");
+			"no stdbox quad samples the camo as its first texture");
 
 	// The eight border pieces are the quads whose UV cell is not (3,0).
 	// At surface 1600 the scale is exactly 1, so a piece is one full 32 px cell.
 	auto corner_tl = [](const std::vector<HudQuad> &qs) {
 		for (const HudQuad &q : qs) {
-			if (q.u0 < 0.01f && q.v0 < 0.01f) return q;
+			if (q.texture == opennova::hud::kHudTexBoxBorder && q.u0 < 0.01f && q.v0 < 0.01f)
+				return q;
 		}
 		return HudQuad{};
 	};
@@ -1923,7 +1967,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 		bool pieces_half_texel = true;
 		int pieces_seen = 0;
 		for (const HudQuad &q : wide) {
-			if (q.u0 > 3.0f * kCell - 0.01f) continue; // the fill tiles
+			if (q.texture == opennova::hud::kHudTexBoxFill) continue; // the fill
 			++pieces_seen;
 			const bool cropped = std::fabs(q.v0 - (2.0f * kCell + 0.5f / 128.0f)) < 0.001f;
 			if (!on_half_texel(q.u0) || !on_half_texel(q.u1) || !on_half_texel(q.v0) ||
@@ -1938,63 +1982,47 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 				"the top-left piece samples cell (0,0) from texel 0's centre");
 	}
 
-	// The fill tiles at the cell's own 32 px period, anchored to the ABSOLUTE
-	// screen grid — retail's fill is one wrap-addressed quad, so every tile
-	// boundary sits on a multiple of 32 regardless of where the inset rect
-	// starts [orig: HUD_StdboxDrawFillWrapTiled @0x56b5d0, UV=(dest+0.5)/32].
-	std::vector<HudQuad> fill;
-	float fill_min_x = 1e9f;
-	float fill_max_x = -1e9f;
-	for (const HudQuad &q : wide) {
-		if (q.u0 > 3.0f * kCell - 0.01f) {
-			fill.push_back(q);
-			fill_min_x = std::min(fill_min_x, q.x0);
-			fill_max_x = std::max(fill_max_x, q.x1);
+	// The fill is ONE quad over the inset rect (16 / 24 px at s = 1 inside the
+	// pieces' outer rect) on the lifted brush cell, wrap-addressed, its UV the
+	// screen position over the cell's own 32 px with retail's half texel,
+	// (dest + 0.5) / 32, so the texture's wrap tiles it on the absolute screen grid
+	// [orig: Render_HUDBoxOverlay @0x56B700 - the insets @0x56B7BD..0x56B80D, the
+	// one call @0x56B824; HUD_StdboxDrawFillWrapTiled @0x56B5D0 - the UVs
+	// @0x56B690..0x56B6E9, one strip @0x56B6F5].
+	{
+		std::vector<HudQuad> fill;
+		float box_x0 = 1e9f, box_y0 = 1e9f, box_x1 = -1e9f, box_y1 = -1e9f;
+		for (const HudQuad &q : wide) {
+			if (q.texture == opennova::hud::kHudTexBoxFill) {
+				fill.push_back(q);
+				continue;
+			}
+			box_x0 = std::min(box_x0, q.x0);
+			box_y0 = std::min(box_y0, q.y0);
+			box_x1 = std::max(box_x1, q.x1);
 		}
+		// The bottom row is cropped to 90%, so the outer bottom is the bottom
+		// pieces' top plus a full cell.
+		for (const HudQuad &q : wide)
+			if (q.texture == opennova::hud::kHudTexBoxBorder &&
+					std::fabs(q.v0 - (2.0f * kCell + 0.5f / 128.0f)) < 0.001f)
+				box_y1 = std::max(box_y1, q.y0 + 32.0f);
+		CHECK(fill.size() == 1, "the interior is one quad, not a tile per cell");
+		if (fill.size() == 1) {
+			const HudQuad &q = fill[0];
+			CHECK(q.wrap, "the fill quad is wrap-addressed");
+			CHECK(q.texture2 == opennova::hud::kHudTexNone, "the fill has no second stage");
+			CHECK(q.x0 == box_x0 + 16.0f && q.x1 == box_x1 - 16.0f && q.y0 == box_y0 + 24.0f &&
+							q.y1 == box_y1 - 24.0f,
+					"the fill covers the 16 / 24 px inset rect at s = 1");
+			CHECK(q.u0 == (q.x0 + 0.5f) / 32.0f && q.v0 == (q.y0 + 0.5f) / 32.0f &&
+							q.u1 == (q.x1 + 0.5f) / 32.0f && q.v1 == (q.y1 + 0.5f) / 32.0f,
+					"the fill's UV is (dest + 0.5) / cell at every corner");
+			CHECK(q.color == 0xFF7F7F7Fu, "at the box's raw half-bright diffuse");
+		}
+		for (const HudQuad &q : wide)
+			if (q.texture == opennova::hud::kHudTexBoxBorder) CHECK(!q.wrap, "a piece is not wrapped");
 	}
-	CHECK(fill.size() > 2, "the interior is tiled, not one stretched quad");
-	int full_tiles = 0;
-	bool grid_ok = true;
-	bool slice_ok = true;
-	for (const HudQuad &q : fill) {
-		// Every edge is either the inset rect's edge or a 32-grid boundary.
-		const auto on_grid = [](float v) {
-			return std::fabs(v - std::floor(v / 32.0f + 0.5f) * 32.0f) < 0.01f;
-		};
-		if (!(on_grid(q.x0) || std::fabs(q.x0 - fill_min_x) < 0.01f)) grid_ok = false;
-		if (!(on_grid(q.x1) || std::fabs(q.x1 - fill_max_x) < 0.01f)) grid_ok = false;
-		// Every tile — clipped on either side — samples the slice of the
-		// cell matching its screen-grid phase.
-		const float frac = (q.x1 - q.x0) / 32.0f;
-		if (std::fabs((q.u1 - q.u0) - kCell * frac) > 0.001f) slice_ok = false;
-		if (std::fabs((q.x1 - q.x0) - 32.0f) < 0.01f) ++full_tiles;
-	}
-	CHECK(grid_ok, "every fill tile edge sits on the 32 px screen grid or the inset edge");
-	CHECK(slice_ok, "every tile samples the cell slice matching its grid phase");
-	CHECK(full_tiles > 0, "the interior contains full-period tiles");
-	// The half texel (C-351): each tile's UV is (dest - tile + 0.5) / 32 of
-	// the cell, so a tile on the grid starts at texel coordinate 96.5 of the
-	// 128 px atlas (the centre of the cell's first texel), not on the boundary
-	// with cell (2,0)'s transparent last column [orig:
-	// HUD_StdboxDrawFillWrapTiled @0x56B5D0 -- (pos + 0.5) * (1 / cell)].
-	bool half_texel_ok = true;
-	for (const HudQuad &q : fill) {
-		const float tile_x = std::floor(q.x0 / 32.0f + 1e-4f) * 32.0f;
-		const float tile_y = std::floor(q.y0 / 32.0f + 1e-4f) * 32.0f;
-		const float want_u0 = 3.0f * kCell + kCell * ((q.x0 - tile_x + 0.5f) / 32.0f);
-		const float want_v0 = kCell * ((q.y0 - tile_y + 0.5f) / 32.0f);
-		if (std::fabs(q.u0 - want_u0) > 1e-5f || std::fabs(q.v0 - want_v0) > 1e-5f)
-			half_texel_ok = false;
-	}
-	CHECK(half_texel_ok, "every fill tile's UV carries retail's half texel");
-	bool on_grid_tile = false;
-	for (const HudQuad &q : fill) {
-		if (std::fabs(q.x0 - std::floor(q.x0 / 32.0f + 0.5f) * 32.0f) > 0.01f) continue;
-		on_grid_tile = true;
-		CHECK(std::fabs(q.u0 * 128.0f - 96.5f) < 1e-3f,
-				"a grid-aligned fill tile starts at the centre of the cell's first texel");
-	}
-	CHECK(on_grid_tile, "a fill tile starts on the 32 px grid");
 
 	// The pieces' second texture stage: with the boxtile camo loaded every
 	// border piece carries it at the camo's own dims (the screen-anchored UV1
@@ -2012,7 +2040,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 		bool pieces_ok = true;
 		bool fill_ok = true;
 		for (const HudQuad &q : box_quads(1600.0f, 1200.0f)) {
-			const bool fill_cell = q.u0 > 3.0f * kCell - 0.01f;
+			const bool fill_cell = q.texture == opennova::hud::kHudTexBoxFill;
 			if (fill_cell) {
 				if (q.texture2 != opennova::hud::kHudTexNone) fill_ok = false;
 				continue;
@@ -3446,6 +3474,7 @@ int main() {
 	test_sights_card_element(&font);
 	test_vehicle_panel_element(&font);
 	test_compiler_stdbox_geometry(&font);
+	test_compiler_end_round_box_fills_with_one_quad(&font);
 	test_compiler_scoreboard_rows(&font);
 	test_compiler_scoreboard_paging(&font);
 	test_compiler_chat_input(&font);

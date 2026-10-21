@@ -607,8 +607,31 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// secondary texture (the combined material rec+0x30 gates the whole
 		// drawer) [orig: the combine @0x56af3c, the null gate @0x56b71f,
 		// see docs/interface/hud-re.md].
-		const Ref<Texture2D> border = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxBorder), ResourceRoot::TEXTURE_LOADER_TGA, false,
-				opennova::hud::kBoxMaterialWord);
+		// The style lifts the atlas's interior brush cell (3,0) into its own
+		// texture under the same box material and zeroes it out of the atlas; the
+		// fill's one wrap-addressed quad samples it (hud_frame.h kHudTexBoxFill
+		// carries the witness).
+		const String border_name(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxBorder));
+		const Ref<Image> atlas = root_.is_valid()
+				? root_->load_texture_image(border_name, ResourceRoot::TEXTURE_LOADER_TGA)
+				: Ref<Image>();
+		Ref<Texture2D> border;
+		Ref<Texture2D> fill;
+		if (atlas.is_valid()) {
+			const int32_t cell_w = atlas->get_width() >> 2;
+			const int32_t cell_h = atlas->get_height() >> 2;
+			if (cell_w > 0 && cell_h > 0) {
+				const Rect2i brush(3 * cell_w, 0, cell_w, cell_h);
+				fill = ImageTexture::create_from_image(atlas->get_region(brush));
+				atlas->fill_rect(brush, Color(0.0f, 0.0f, 0.0f, 0.0f));
+			}
+			border = ImageTexture::create_from_image(atlas);
+			for (const Ref<Texture2D> &made : { border, fill })
+				if (made.is_valid())
+					texture_material_words_[made->get_instance_id()] = opennova::hud::kBoxMaterialWord;
+			named_material_words_[opennova::to_std(border_name.to_lower())] =
+					opennova::hud::kBoxMaterialWord;
+		}
 		const Ref<Texture2D> brush = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxTile), ResourceRoot::TEXTURE_LOADER_TGA);
 		// The camo's own dims divide the pieces' screen-anchored second UV
 		// (HudLayout::box_tile_w/h carries the witness).
@@ -618,6 +641,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 				opennova::hud::kNetIconMaterialWord);
 		textures_[opennova::hud::kHudTexBoxBorder] = border;
 		textures_[opennova::hud::kHudTexBoxTile] = brush;
+		textures_[opennova::hud::kHudTexBoxFill] = fill;
 		textures_[opennova::hud::kHudTexNetIcon] = icon;
 		layout_.box_texture_valid = border.is_valid() && brush.is_valid();
 		// The piece size comes off the border atlas's own width, not a
