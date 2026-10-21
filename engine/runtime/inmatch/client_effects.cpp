@@ -245,6 +245,24 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             // Entity_KillBySlotId @ 0x42BCE0]
             if (world.rules.logic_authority) continue;
             const world::EntityHandle handle{death->entity_handle};
+            // A 0x13 naming the joiner's own player lands on L: Health 0, the
+            // word as its deathAnimStateId, then its class callback with event 4
+            // (the plyr row's, whose seat leave queues the C2S 0x27). Any other
+            // pool-0 row is replica-only: the pipeline's fold ran its death.
+            // [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - the resolve
+            //  @0x42EB87..0x42EBCC, Health = 0 @0x42EBD6, +0x2C0 @0x42EBDF, the
+            //  callback cb(entity, 4, 0) @0x42EBF0..0x42EBF5;
+            //  Entity_HandleDamageAndTriggerZones @0x407A88..0x407B33]
+            if (handle.pool() == 0 && !death->item_state && has_self_handle() &&
+                    death->entity_handle == self_handle()) {
+                world::Entity *local = world.registry.get(world.cached.local_player);
+                if (local == nullptr) continue;
+                local->health = 0;
+                if (world::AiEntity *body = world.ai.for_handle(local->handle)) body->health = 0;
+                local->death_anim_state = death->death_anim_state_id;
+                world::hit_record_class_event(world, *local, 4);
+                continue;
+            }
             if (handle.pool() < 1 || handle.pool() > 3) continue;
             world::Entity *victim = world.registry.get(handle);
             if (!victim) continue;
@@ -256,7 +274,13 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 victim->alive = false;
                 victim->death_anim_state = death->death_anim_state_id;
                 victim->last_attacker = world::EntityHandle{};
-                world::destruction_notify_item_damage(world, *victim, 4);
+                // The victim's class callback whatever its class: an AI-data
+                // twin's brain machine (event 4, the death), an item's death
+                // class (D-NET-588) [orig: the callback @0x42EBF5;
+                // g_EntityClassEventCallbackTable @0x813000 - cveh @0x813378 ->
+                // EntityAI_ProcessGroundStateMachine @0x4583C0, CHel @0x8132A0 ->
+                // EntityAI_ProcessAirStateMachine @0x4581B0].
+                world::hit_record_class_event(world, *victim, 4);
             }
         } else if (const auto *door = std::get_if<replication::DoorRowUpdate>(&request)) {
             // The pool row the handle names; an entity this peer never

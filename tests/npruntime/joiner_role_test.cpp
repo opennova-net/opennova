@@ -2188,6 +2188,89 @@ bool run_tail_carried_word_lands_on_l() {
 	return expect(!local->mounted_child.valid(), "carried: a word naming no def'd entity is none");
 }
 
+// D-NET-588: an S2C 0x13 naming the joiner's own player lands on L: Health 0,
+// the word as L's deathAnimStateId and the plyr class callback with event 4
+// (its think re-arm to 64), as retail's handler runs on the slot entity at the
+// handle, whatever its class.
+// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - Health = 0 @0x42EBD6, +0x2C0
+//  @0x42EBDF, cb(entity, 4, 0) @0x42EBF5; Entity_HandleDamageAndTriggerZones
+//  @0x407B5E]
+bool run_entity_death_names_l() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto send = [&](std::vector<ProtocolMessage> messages) {
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey}, messages, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	FrameUpdate fu;
+	fu.carried_handle = 0xFFFF;
+	fu.health = 100;
+	FrameUpdateRecord rec;
+	rec.handle = 0x0005;
+	rec.type_id = w::kPlayerInfantryTypeId;
+	rec.cls = EntityClass::Player;
+	rec.player.carrier_handle = 0xFFFF;
+	fu.records.push_back(rec);
+	send({make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))});
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->health == 100 && local->alive,
+			"0x13 on L: L stands alive at 100"))
+		return false;
+	local->spawn_phase = 0;
+	send({make_protocol_message(s2c::ENTITY_DEATH, std::vector<uint8_t>{0x05, 0x00, 0x2A, 0x00})});
+	// The same frame's tick then runs L's body: its death edge takes the Health
+	// the 0x13 zeroed, and the think the callback re-armed to 64 steps once.
+	if (!expect(local->health == 0 && (local->flags & w::kEntityFlagDead) != 0 &&
+					local->spawn_phase == 63,
+			"0x13 on L: Health 0 kills L, and the plyr callback re-armed its think"))
+		return false;
+
+	// An AI-data twin's callback is its brain machine (event 4, the death): in
+	// session off the authority it ticks the brain's state row and queues the
+	// type-20 event [orig: the callback @0x42EBF5; cveh @0x813378 ->
+	// EntityAI_ProcessGroundStateMachine @0x4583C0, the client death leg
+	// @0x45848B..0x4584D4].
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	w::Entity hull;
+	hull.kind = w::EntityKind::Item;
+	hull.item_id = 901;
+	hull.has_item_def = true;
+	hull.is_ai_capable = true;
+	hull.health = 400;
+	hull.alive = true;
+	const w::EntityHandle hull_h = world.registry.spawn_at(w::EntityHandle::make(1, 3), hull);
+	world.ai.attach(hull_h);
+	w::VehicleTraits ground;
+	ground.brain_class = w::VehicleBrainClass::Ground;
+	world.vehicles.traits.set(901, ground);
+	// A joiner in a multiplayer session (the brain machine's in-session leg).
+	world.rules.mp_session = true;
+	world.ai.is_in_session = true;
+	w::AiEntity *brain = world.ai.for_handle(hull_h);
+	if (!expect(brain != nullptr, "0x13 on an AI-data twin: the twin carries a brain"))
+		return false;
+	brain->health = 400;
+	send({make_protocol_message(s2c::ENTITY_DEATH,
+			std::vector<uint8_t>{static_cast<uint8_t>(hull_h.packed & 0xFF),
+					static_cast<uint8_t>(hull_h.packed >> 8), 0x00, 0x00})});
+	// The machine's in-session death leg zeroes the brain's Health mirror with
+	// the entity's ahead of its state row's tick [orig: @0x45848B].
+	return expect(world.registry.get(hull_h) != nullptr &&
+					world.registry.get(hull_h)->health == 0 && brain->health == 0,
+			"0x13 on an AI-data twin: its brain machine ran the death event");
+}
+
 // D-COL-21: the redeploy release's reset ends in the candidate-slice rebuild and
 // L's own list, so L walks a slice built at its redeployed pose at once, where it
 // kept the one built at its death spot until the next 17-tick edge.
@@ -2961,6 +3044,7 @@ int main() {
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
 	ok &= run_tail_armor_lands_on_l();
 	ok &= run_tail_carried_word_lands_on_l();
+	ok &= run_entity_death_names_l();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();
