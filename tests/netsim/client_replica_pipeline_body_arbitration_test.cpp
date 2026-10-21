@@ -610,7 +610,83 @@ void test_remote_lean_ramp_gates() {
 	}
 }
 
+// D-NET-196: a decoded row's two channels serve the one ring table every body of
+// its .adm reads, the client's own World body included: the dual update re-inits
+// the secondary ahead of the primary, each re-init plays the state's head and
+// advances it, and an unarmed loop wrap serves the head again, fading the next
+// entry in from its first frame over eight ticks.
+// [orig: AnimMap_LinkEntity @0x40BA10 (slot+0x48 = &entry+0x44 @0x40BA77);
+//  AnimMap_UpdateDualChannels @0x40B8C0 (the secondary @0x40B908, the primary
+//  @0x40B94E); AnimMap_UpdateEntity @0x40B737..0x40B778; AnimChannel_AdvancePlayback
+//  @0x40B140 (the callback @0x40B1C8) -> AnimMap_AdvanceToNextAnim @0x40BDF0 (the
+//  serve @0x40BE02..0x40BE07, InitFromParams(.., 8, 0, 0x1000) @0x40BE24)]
+struct RingBodySource final : public opennova::world::IRootMotionSource {
+	bool has_clip(int, int) const override { return true; }
+	// Idle authors three entries, every other state one.
+	int variant_count(int, int state) const override { return state == as::kIdle ? 3 : 1; }
+	bool advance(int adm, int state, int32_t &phase,
+			opennova::world::RootMotionFrame &out) override {
+		return advance_variant(adm, state, 0, phase, out);
+	}
+	bool advance_variant(int, int, int, int32_t &phase,
+			opennova::world::RootMotionFrame &out) override {
+		++phase;
+		out = {};
+		out.capsule_bottom = 1 << 16;
+		out.capsule_top = 2 << 16;
+		return true;
+	}
+	// Each entry its own loop length: entry v runs 10 + v ticks.
+	int32_t clip_length_ticks(int, int, int variant) const override { return 10 + variant; }
+	bool clip_loops(int, int, int) const override { return true; }
+};
+
+void test_row_channels_serve_the_shared_variant_rings() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	RingBodySource src;
+	opennova::world::AnimVariantRings rings;
+	view.set_root_motion_source(&src);
+	view.set_anim_variant_rings(&rings);
+	seed_row(view);
+	view.apply(0x0A, player_frame(as::kIdle, 0));
+	arm_row(view);
+	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	// Registration put idle's head on the row's last entry; the ring runs back.
+	view.tick_remote_motion(0xFFFF);
+	expect(es->wpn_playing == as::kIdle && es->wpn_variant == 2,
+			"the secondary re-inits first and plays the head, entry 2");
+	expect(es->rm_state == as::kIdle && es->rm_variant == 1,
+			"the primary's re-init plays the advanced head, entry 1");
+	// The client's own World body plays idle from the same heads: entry 0, and
+	// the head wraps back to entry 2.
+	expect(rings.serve(&src, 0, as::kIdle) == 0, "the World body serves from the shared heads");
+	for (int tick = 2; tick <= 10; ++tick) view.tick_remote_motion(0xFFFF);
+	expect(es->rm_variant == 1 && es->rm_phase == 10 && es->rm_blend_weight >= 1.0f,
+			"entry 1 runs its 11 ticks");
+	view.tick_remote_motion(0xFFFF); // tick 11: the primary's loop wraps
+	expect(es->rm_variant == 2 && es->rm_prev_variant == 1 && es->rm_prev_state == as::kIdle &&
+					es->rm_phase == 0 && es->rm_blend_weight == 0.0f &&
+					es->rm_blend_step == 0.125f,
+			"the wrap serves entry 2 and fades it in from its first frame over eight ticks");
+	expect(es->wpn_variant == 2 && es->wpn_phase == 11,
+			"the secondary's 12-tick entry has not wrapped yet");
+	view.tick_remote_motion(0xFFFF); // tick 12: the secondary's loop wraps
+	expect(es->wpn_variant == 1 && es->wpn_prev_variant == 2 && es->wpn_prev == as::kIdle &&
+					es->wpn_phase == 0 && es->wpn_blend_weight == 0.0f,
+			"the secondary's wrap serves the next entry back, 1, from the same heads");
+	expect(es->rm_blend_weight == 0.125f && es->rm_phase == 1,
+			"the primary's wrap fade steps an eighth");
+	// A state with one entry always plays it.
+	view.apply(0x0A, player_frame(as::kRunForward, 0));
+	view.tick_remote_motion(0xFFFF);
+	expect(es->rm_state == as::kRunForward && es->rm_variant == 0,
+			"a single-entry state plays its one entry");
+}
+
 int main() {
+	test_row_channels_serve_the_shared_variant_rings();
 	test_record_flags_land_on_the_mirror();
 	test_remote_lean_ramp_gates();
 	test_remote_body_conform_chases_the_slope();

@@ -22,6 +22,7 @@ struct TitleIdentity; // net/title/title_identity.h
 
 namespace opennova::world {
 class IRootMotionSource;
+class AnimVariantRings;
 struct WeaponTable;
 struct LiveRound;
 struct HitRecord;
@@ -376,9 +377,14 @@ public:
 	uint32_t frame_tick() const { return frame_tick_; }
 	void step_frame_tick() { ++frame_tick_; }
 	void zero_frame_tick() { frame_tick_ = 0; }
-	// Every armed player row's secondary channel for one tick (the advance,
-	// then the 16-tick selection keyed on `tick`), the own row excepted.
-	void tick_row_weapon_channels(uint16_t self_handle, uint32_t tick);
+	// Every armed player row's secondary channel, the own row excepted: the
+	// advance runs at the head of the tick's body pass, ahead of the rows'
+	// primaries, as the dual update runs the secondary first (its ring serves
+	// precede the primary's); the 16-tick selection keyed on `tick` follows the
+	// pass. [orig: AnimMap_UpdateDualChannels @0x40B8C0, the secondary @0x40B908
+	// before the primary @0x40B94E; the selection @0x4b5d71..0x4b5ea3]
+	void advance_row_weapon_channels(uint16_t self_handle);
+	void select_row_weapon_channels(uint16_t self_handle, uint32_t tick);
 
 	// Recompose every carried row after its carrier's mover has completed. The
 	// ordinary library-only tick_remote_motion path calls this as its final
@@ -506,6 +512,14 @@ public:
 	void set_root_motion_source(world::IRootMotionSource *source) {
 		root_motion_ = source;
 	}
+	// The joiner World's per-.adm variant-ring heads (world::AiSystem::anim_rings):
+	// every body of an .adm serves its channels' re-inits and loop wraps from the
+	// one table, the client's own World body and every decoded row alike
+	// [orig: AnimMap_LinkEntity @0x40BA10 links each body's slots to the entry's
+	// one table (slot+0x48 = &entry+0x44 @0x40BA77); AnimMap_UpdateEntity
+	// @0x40B737..0x40B778; AnimMap_AdvanceToNextAnim @0x40BDF0]. Null = every row
+	// plays entry 0 (the lib-only embedders).
+	void set_anim_variant_rings(world::AnimVariantRings *rings) { anim_rings_ = rings; }
 	// The joiner's weapon table: the held record's special_hold the player
 	// rows' secondary selection reads by the wire ADM index. Null = kind 0.
 	void set_weapon_table(const world::WeaponTable *weapons) { weapon_table_ = weapons; }
@@ -729,6 +743,7 @@ private:
 
 	ClientState state_;
 	world::IRootMotionSource *root_motion_ = nullptr;
+	world::AnimVariantRings *anim_rings_ = nullptr;
 	const world::WeaponTable *weapon_table_ = nullptr;
 	const terrain::TerrainHeightField *remote_motion_terrain_ = nullptr;
 	uint32_t frame_tick_ = 0; // g_CurrentTick's stand-in (frame_tick())

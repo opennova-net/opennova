@@ -11,6 +11,18 @@ namespace opennova::inmatch {
 
 namespace {
 constexpr double kFixed16 = io::kFp16OneD;
+
+// Whether this tick's primary pose samples the armed park: the unblended
+// channel holding a deferred state sits on the boundary its arm parked it on,
+// where the clip reads its last frame, not the wrapped start (the row's twin of
+// InfantryState::body_phase_parked).
+// [orig: AnimChannel_AdvancePlayback @0x40B140 (the armed wrap @0x40B19E..0x40B1B1)]
+bool row_primary_parked(const replication::ClientEntityState &entity) {
+	return entity.rm_blend_weight >= 1.0f && entity.net_anim_pending != 0 &&
+			entity.net_anim_pending_boundary >= 0 &&
+			entity.net_anim_pending_boundary != world::kEndNotifyNeverLatches &&
+			entity.rm_phase == entity.net_anim_pending_boundary;
+}
 } // namespace
 
 void initialize_client_replica_present_row(float *row) {
@@ -169,12 +181,19 @@ void project_client_replica_present_row(
 		row[world::PF_ANIM_STATE] = static_cast<float>(entity.rm_state);
 		row[world::PF_ANIM_REMOTE_REQUEST] = 0.0f;
 		row[world::PF_ANIM_PHASE_TICKS] = static_cast<float>(entity.rm_phase);
+		// The served ring entry each half plays (D-NET-196), and the armed park,
+		// as an authoritative body presents them (present_rows.cpp
+		// write_present_body).
+		row[world::PF_ANIM_VARIANT] = static_cast<float>(entity.rm_variant);
+		row[world::PF_ANIM_PHASE_PARKED] = row_primary_parked(entity) ? 1.0f : 0.0f;
 		if (entity.rm_blend_weight < 1.0f && entity.rm_prev_state >= 0) {
 			row[world::PF_ANIM_SOURCE_STATE] =
 					static_cast<float>(entity.rm_prev_state);
 			row[world::PF_ANIM_SOURCE_PHASE_TICKS] =
 					static_cast<float>(entity.rm_prev_phase);
 			row[world::PF_ANIM_BLEND_WEIGHT] = entity.rm_blend_weight;
+			row[world::PF_ANIM_SOURCE_VARIANT] =
+					static_cast<float>(entity.rm_prev_variant);
 		}
 	} else {
 		row[world::PF_ANIM_STATE] = static_cast<float>(
@@ -228,6 +247,7 @@ void project_client_replica_present_row(
 				// authority presents a body's (present_rows.cpp).
 				row[world::PF_WPN_ANIM_STATE] = static_cast<float>(entity.wpn_playing);
 				row[world::PF_WPN_PHASE_TICKS] = static_cast<float>(entity.wpn_phase);
+				row[world::PF_WPN_VARIANT] = static_cast<float>(entity.wpn_variant);
 				row[world::PF_WPN_PHASE_PARKED] =
 						entity.wpn_blend_weight >= 1.0f && entity.wpn_deferred != 0 &&
 								entity.wpn_deferred_boundary >= 0 &&
@@ -239,6 +259,8 @@ void project_client_replica_present_row(
 					row[world::PF_WPN_SOURCE_PHASE_TICKS] =
 							static_cast<float>(entity.wpn_prev_phase);
 					row[world::PF_WPN_BLEND_WEIGHT] = entity.wpn_blend_weight;
+					row[world::PF_WPN_SOURCE_VARIANT] =
+							static_cast<float>(entity.wpn_prev_variant);
 				}
 			} else {
 				// Unarmed (no root-motion source): the ladder's pose at frame 0.
@@ -288,14 +310,17 @@ bool skeletal_pose_inputs_for_client(
 		return false;
 	out.collapse_right_hand = collapse_right_hand;
 	// The projection's armed branch: the row's own primary channel, current,
-	// playhead and the blending source pair (variant 0, never parked).
+	// playhead, served ring entry, armed park and the blending source pair.
 	if (entity.rm_adm_id < 0 || entity.rm_state < 0) return false;
 	out.primary_state = entity.rm_state;
 	out.primary_phase = entity.rm_phase;
+	out.primary_variant = entity.rm_variant;
+	out.primary_parked = row_primary_parked(entity);
 	if (entity.rm_blend_weight < 1.0f && entity.rm_prev_state >= 0) {
 		out.blend = true;
 		out.source_state = entity.rm_prev_state;
 		out.source_phase = entity.rm_prev_phase;
+		out.source_variant = entity.rm_prev_variant;
 		out.blend_weight = entity.rm_blend_weight;
 	}
 	// A player row's secondary channel, where the projection presents one.
@@ -306,6 +331,7 @@ bool skeletal_pose_inputs_for_client(
 	if (entity.wpn_playing >= 0) {
 		out.weapon_state = entity.wpn_playing;
 		out.weapon_phase = entity.wpn_phase;
+		out.weapon_variant = entity.wpn_variant;
 		out.weapon_parked = entity.wpn_blend_weight >= 1.0f && entity.wpn_deferred != 0 &&
 				entity.wpn_deferred_boundary >= 0 &&
 				entity.wpn_deferred_boundary != world::kEndNotifyNeverLatches &&
@@ -314,6 +340,7 @@ bool skeletal_pose_inputs_for_client(
 			out.weapon_blend = true;
 			out.weapon_prev_state = entity.wpn_prev;
 			out.weapon_prev_phase = entity.wpn_prev_phase;
+			out.weapon_prev_variant = entity.wpn_prev_variant;
 			out.weapon_blend_weight = entity.wpn_blend_weight;
 		}
 		return true;

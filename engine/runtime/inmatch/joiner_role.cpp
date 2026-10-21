@@ -407,6 +407,8 @@ void JoinerRole::resolve_row_adm_ids() {
 	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
 	// The first decoded row may have registered the first usable model map.
 	runtime->view().set_root_motion_source(kernel.root_motion.empty() ? nullptr : &kernel.root_motion);
+	// The rows serve their channels from the ring heads the World's bodies use (D-NET-196).
+	runtime->view().set_anim_variant_rings(&kernel.world.ai.anim_rings);
 	// The rows' secondary selection reads the held record's hold kind.
 	runtime->view().set_weapon_table(&kernel.world.tables.weapons);
 }

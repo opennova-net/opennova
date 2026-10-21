@@ -309,6 +309,57 @@ bool test_replica_statics_present_their_pitch_and_roll() {
 	return ok;
 }
 
+// D-NET-196: a decoded person row presents the ring entries its channels serve,
+// each half's own, and the armed park, as an authoritative body does
+// (write_present_body): the boundary tick of a channel holding a deferred state
+// samples the parked clip end; the promotion tick after it does not.
+// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778 (slot+0x44 = the served node
+//  @0x40B76F); AnimChannel_AdvancePlayback @0x40B140 (the armed wrap @0x40B19E..0x40B1B1)]
+bool test_replica_rows_present_the_served_ring_entries() {
+	opennova::replication::ClientState state;
+	opennova::replication::ClientEntityState person;
+	person.handle = 0x0007;
+	person.cls = nw::EntityClass::Player;
+	person.rm_adm_id = 0;
+	person.rm_state = 43;
+	person.rm_phase = 3;
+	person.rm_variant = 2;
+	person.rm_prev_state = 43;
+	person.rm_prev_phase = 11;
+	person.rm_prev_variant = 1;
+	person.rm_blend_weight = 0.25f;
+	const im::ClientReplicaPresentContext context{nullptr, nullptr, true, nullptr};
+	float row[w::PF_STRIDE];
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, person, state, context);
+	bool ok = expect(row[w::PF_ANIM_VARIANT] == 2.0f && row[w::PF_ANIM_SOURCE_VARIANT] == 1.0f &&
+					row[w::PF_ANIM_PHASE_PARKED] == 0.0f,
+			"a wrap fade presents the incoming entry over the outgoing one");
+	w::SkeletalPoseInputs inputs;
+	ok = expect(im::skeletal_pose_inputs_for_client(person, state, context, inputs) &&
+					inputs.primary_variant == 2 && inputs.source_variant == 1 &&
+					!inputs.primary_parked,
+			"the pose inputs carry both halves' entries") && ok;
+
+	opennova::replication::ClientEntityState parked = person;
+	parked.rm_blend_weight = 1.0f;
+	parked.net_anim_pending = 44;
+	parked.net_anim_pending_boundary = 22;
+	parked.rm_phase = 22;
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, parked, state, context);
+	ok = expect(row[w::PF_ANIM_PHASE_PARKED] == 1.0f && row[w::PF_ANIM_VARIANT] == 2.0f,
+			"the armed boundary tick presents the parked clip end") && ok;
+	ok = expect(im::skeletal_pose_inputs_for_client(parked, state, context, inputs) &&
+					inputs.primary_parked,
+			"...in the pose inputs too") && ok;
+	parked.net_anim_pending = 0; // the promotion tick cleared the pending
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, parked, state, context);
+	ok = expect(row[w::PF_ANIM_PHASE_PARKED] == 0.0f, "an unarmed channel never parks") && ok;
+	return ok;
+}
+
 } // namespace
 
 bool test_vehicle_suspension_reaches_present_rows() {
@@ -1565,6 +1616,7 @@ int main() {
 	ok = test_host_rows_draw_the_mounted_rider_weapon() && ok;
 	ok = test_rows_carry_the_slot_march_start() && ok;
 	ok = test_replica_statics_present_their_pitch_and_roll() && ok;
+	ok = test_replica_rows_present_the_served_ring_entries() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;

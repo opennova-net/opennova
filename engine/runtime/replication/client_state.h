@@ -760,6 +760,14 @@ struct ClientEntityState {
 	int32_t rm_prev_phase = 0;
 	float rm_blend_weight = 1.0f; // += 0.1/tick, or 1/15 when the target state
 	float rm_blend_step = 0.0f;   // carries flag 0x400 [orig: @0x410640]
+	// The served ring entries of the playing target and the outgoing half
+	// (world::AnimVariantRings, the heads every body of the .adm shares, the
+	// client's own World body included): a re-init serves the played state's
+	// head, an unarmed loop wrap serves it again and fades the next entry in
+	// over eight ticks [orig: AnimMap_UpdateEntity @0x40B737..0x40B778;
+	// AnimMap_AdvanceToNextAnim @0x40BDF0].
+	int32_t rm_variant = 0;
+	int32_t rm_prev_variant = 0;
 	// org2 leg-chain state: the LEGS chase the wire yaw (quarter-step clamp
 	// ±0x3000000, twist ±0x30000000, staggered idle re-plant windows) and the
 	// body heading is their midpoint — the root delta rotates by THIS, not the
@@ -789,8 +797,10 @@ struct ClientEntityState {
 	// body: the wire carries no secondary state. The 16-tick selection with
 	// its locked / emote commit (the hold ladder off the wire ADM index and
 	// Flags byte), the clip-end deferred promotion, the playhead and the blend,
-	// on the replica's variant-0 track (D-NET-196). The S2C 0x2D emote stamps
-	// the target. wpn_state < 0 = unarmed (no root-motion source).
+	// each half on its served ring entry (wpn_variant / wpn_prev_variant, the
+	// heads shared with the primary and every body of the .adm, D-NET-196). The
+	// S2C 0x2D emote stamps the target. wpn_state < 0 = unarmed (no root-motion
+	// source).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4b5d71..0x4b5ea3 (selection +
 	//  commit); AnimMap_UpdateDualChannels @0x40b8c0 (advance);
 	//  NapiNPClientMsg_HandleEmote @0x427f12..0x427f18 (the stamp)]
@@ -803,6 +813,8 @@ struct ClientEntityState {
 	int32_t wpn_deferred_boundary = -1;
 	float wpn_blend_weight = 1.0f;
 	float wpn_blend_step = 0.0f;
+	int32_t wpn_variant = 0;
+	int32_t wpn_prev_variant = 0;
 	int32_t net_seat_local[3] = {};
 	// The record's carrier-LOCAL heading (BAM32): the player/infantry yaw byte
 	// widened (<< 24), the vehicle euler_z high half (<< 16). Every carried class

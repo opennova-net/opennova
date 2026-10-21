@@ -511,6 +511,7 @@ void row_body_conform(ClientEntityState &es, int arbitrated_state, const RowConf
 }
 
 void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
+                          world::AnimVariantRings *rings,
                           const terrain::TerrainHeightField *terrain,
                           const RowConformIo &conform_io,
                           uint32_t key, bool is_self, bool starved,
@@ -576,9 +577,18 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			target_state = trans;
 		}
 	}
+	// A channel re-init plays the played state's ring head and advances it, from
+	// the heads every body of the .adm shares (the client's own World body too)
+	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778: the head read @0x40B740,
+	// table[S] = node+0x24 @0x40B746..0x40B749, slot+0x44 = node @0x40B76F].
+	const auto serve = [&](int state) -> int32_t {
+		return rings != nullptr ? rings->serve(&src, es.rm_adm_id, state) : 0;
+	};
 	if (es.rm_state < 0) {
 		es.rm_state = static_cast<int16_t>(target_state);
 		es.rm_prev_state = static_cast<int16_t>(target_state);
+		es.rm_variant = serve(target_state);
+		es.rm_prev_variant = es.rm_variant;
 		es.rm_phase = (es.cls == EntityClass::Player && es.net_anim_ratio_live)
 				? es.net_anim_ratio
 				: 0;
@@ -591,8 +601,10 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		if (es.rm_blend_weight >= 1.0f) {
 			es.rm_prev_state = es.rm_state;
 			es.rm_prev_phase = es.rm_phase;
+			es.rm_prev_variant = es.rm_variant;
 		}
 		es.rm_state = static_cast<int16_t>(target_state);
+		es.rm_variant = serve(target_state);
 		es.rm_phase = (es.cls == EntityClass::Player && es.net_anim_ratio_live)
 				? es.net_anim_ratio
 				: 0;
@@ -614,19 +626,25 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// armed lazily in the growing-phase convention; a queue behind an
 	// already-finished one-shot (or a track-less state) promotes immediately —
 	// the shipped hold-wedge safety, recorded inside D-NET-209.
+	// The promotion that releases a channel parked on its boundary leaves the
+	// loop on its end, so the old channel wraps on that tick (as
+	// world::advance_primary_channel's kReleased).
+	bool released = false;
 	if (es.net_anim_pending != 0) {
 		if (es.net_anim_pending_boundary < 0) {
-			const int32_t len = src.clip_length_ticks(es.rm_adm_id, es.rm_state, 0);
+			const int32_t len =
+					src.clip_length_ticks(es.rm_adm_id, es.rm_state, es.rm_variant);
 			if (len <= 0) {
 				es.net_anim_pending_boundary = es.rm_phase;
-			} else if (src.clip_loops(es.rm_adm_id, es.rm_state, 0)) { // the replica plays entry 0 (D-NET-196)
+			} else if (src.clip_loops(es.rm_adm_id, es.rm_state, es.rm_variant)) {
 				es.net_anim_pending_boundary = src.clip_boundary_after(
-						es.rm_adm_id, es.rm_state, es.rm_phase);
+						es.rm_adm_id, es.rm_state, es.rm_phase, es.rm_variant);
 			} else {
 				es.net_anim_pending_boundary = len;
 			}
 		}
 		if (es.rm_phase >= es.net_anim_pending_boundary) {
+			released = es.rm_phase == es.net_anim_pending_boundary;
 			es.net_anim_current = es.net_anim_pending;
 			es.net_anim_pending = 0;
 			es.net_anim_pending_boundary = -1;
@@ -654,13 +672,43 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	bool have = false;
 	if (es.rm_blend_weight >= 1.0f) {
 		int32_t phase = es.rm_phase;
+		const int state = es.rm_state;
+		const int32_t variant = es.rm_variant;
+		const bool armed = es.net_anim_pending != 0;
 		// With a deferral armed, the boundary tick samples the parked clip end
 		// (the promote above read the latch first) [orig: AnimChannel_AdvancePlayback
 		// @0x40B193..0x40B1B1; AnimMap_UpdateEntity advance @0x40B7FE].
-		have = src.advance_armed(es.rm_adm_id, es.rm_state, 0, phase,
-		                         es.net_anim_pending != 0 ? es.net_anim_pending_boundary : -1,
-		                         frame);
+		have = src.advance_armed(es.rm_adm_id, state, variant, phase,
+		                         armed ? es.net_anim_pending_boundary : -1, frame);
 		es.rm_phase = phase;
+		// An unarmed loop that wraps serves its playing state's ring: another entry
+		// fades in from its first frame over eight ticks, the same entry plays on;
+		// an armed channel parks instead and serves nothing. The wrap tick reads
+		// both halves at weight 0: the wrapped entry's motion and extents, the
+		// incoming entry's trigger word at t = 0.
+		// [orig: AnimChannel_AdvancePlayback @0x40B140 (the park @0x40B19E, the
+		//  callback @0x40B1C8) -> AnimMap_AdvanceToNextAnim @0x40BDF0: the serve
+		//  @0x40BE02..0x40BE07, the same-entry return @0x40BE09..0x40BE0C, the
+		//  eight-tick init @0x40BE13..0x40BE24; world::advance_primary_channel]
+		const bool wrapped = released
+				? src.clip_loops(es.rm_adm_id, state, variant)
+				: !armed && src.clip_wraps_at(es.rm_adm_id, state, variant, es.rm_phase);
+		if (have && wrapped) {
+			const int32_t served = serve(state);
+			if (served != variant) {
+				es.rm_prev_state = es.rm_state;
+				es.rm_prev_variant = variant;
+				es.rm_prev_phase = es.rm_phase;
+				es.rm_variant = served;
+				es.rm_phase = 0;
+				es.rm_blend_weight = 0.0f;
+				es.rm_blend_step = anim::kWrapFadeStep;
+				int32_t outgoing_phase = es.rm_prev_phase - 1;
+				int32_t incoming_phase = -1;
+				src.advance_blended(es.rm_adm_id, state, variant, outgoing_phase, state, served,
+				                    incoming_phase, es.rm_blend_weight, frame);
+			}
+		}
 	} else {
 		es.rm_blend_weight += es.rm_blend_step;
 		if (es.rm_blend_weight >= 1.0f) {
@@ -668,8 +716,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			es.rm_blend_step = 0.0f;
 		}
 		int32_t pphase = es.rm_prev_phase, tphase = es.rm_phase;
-		have = src.advance_blended(es.rm_adm_id, es.rm_prev_state, 0, pphase,
-		                           es.rm_state, 0, tphase, es.rm_blend_weight,
+		have = src.advance_blended(es.rm_adm_id, es.rm_prev_state, es.rm_prev_variant, pphase,
+		                           es.rm_state, es.rm_variant, tphase, es.rm_blend_weight,
 		                           frame);
 		es.rm_prev_phase = pphase;
 		es.rm_phase = tphase;
@@ -1066,6 +1114,10 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	// The entity update steps the replica clock (frame_tick()).
 	const uint32_t rm_key = ++frame_tick_;
+	// The player rows' secondary advance heads the pass, ahead of their primaries
+	// (client_replica_weapon_channel.cpp): the dual update serves the secondary's
+	// ring entry first [orig: AnimMap_UpdateDualChannels @0x40B908 before @0x40B94E].
+	advance_row_weapon_channels(self_handle);
 	// The replica-peer sphere table for this tick's contact resolves — every
 	// live organic replica row, one snapshot per tick (replica rows are
 	// ordinary persons to the resolver's repulsion loop; the world person
@@ -1113,7 +1165,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		if (!is_self && es.cls == EntityClass::Player && ground_occupant_provider_)
 			row_ride_link(es, state_, ground_occupant_provider_);
 		if (root_motion_ != nullptr)
-			row_root_motion_tick(es, *root_motion_, remote_motion_terrain_, conform_io,
+			row_root_motion_tick(es, *root_motion_, anim_rings_, remote_motion_terrain_, conform_io,
 			                     rm_key, is_self, starved, &replica_contact_resolver_,
 			                     &replica_bound_radius_resolver_,
 			                     contact_peers.data(),
@@ -1460,8 +1512,8 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		erase_entity_tree(handle);
 	}
 	refresh_carried_entities(/*tick_sweep=*/true);
-	// Every player row's secondary channel (client_replica_weapon_channel.cpp).
-	tick_row_weapon_channels(self_handle, rm_key);
+	// Every player row's secondary selection (client_replica_weapon_channel.cpp).
+	select_row_weapon_channels(self_handle, rm_key);
 }
 
 } // namespace opennova::replication
