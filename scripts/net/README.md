@@ -393,6 +393,14 @@ so the default suite is unchanged. An extension case may add:
   records it). A retail host only: whether the OpenNova listen host's player
   takes its class from that record is unchecked, so OR and OO refuse it (and
   `cp04-objcoop-revive` keeps RR, RR-aa and RO until it is).
+- `serve_only`: E5's kick (`-ServeOnly`): the retail host runs as retail's
+  Serve Only server (`onhook_host_lan` `serve_only`, connection mode 1; the
+  summary's `host_kind` is `serve_only`). The console's BAN and PUNT verbs run
+  only on an authority that is not a session peer
+  (`Client_ProcessConsoleCommand @0x520F63`); a listen host queues the line to
+  its own server as C2S 0x04 (`@0x520EFE..0x520F29`), whose handler runs NETLOG
+  and STAT only (`NapiNPServerMsg_HandleConsoleLine @0x5199D0`). A retail host
+  only: the runner does not host `opennova-serve` yet, so OR and OO refuse it.
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's
   kind and joins during the steady window, after the first joiner's scripted
   input. In RR and OR it is retail (`onhook_join_lan`, callsign `ParityLate`,
