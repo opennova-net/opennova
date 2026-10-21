@@ -12,7 +12,7 @@ namespace opennova::serve {
 
 // The process's account name, as retail's profile load reads it into its first record: the
 // Windows account name through GetUserNameA; off Windows, which retail never runs on, the login
-// name (getlogin(), else $USER), an input with no retail counterpart.
+// name (getlogin(), else the login database: getpwuid(getuid())), an input with no retail counterpart.
 // [orig: PlayerProfile_LoadAllFromDisk @0x54F4D0 - GetUserNameA(&profile0+4, 16) @0x54F535]
 std::string process_account_name();
 

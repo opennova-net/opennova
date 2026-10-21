@@ -16,6 +16,7 @@
 #endif
 #include <windows.h>
 #else
+#include <pwd.h>
 #include <unistd.h>
 #endif
 
@@ -29,9 +30,12 @@ std::string process_account_name() {
 	if (GetUserNameA(name, &size) == 0) return std::string();
 	return std::string(name);
 #else
+	// The login name, else the login database's entry for the process's user; no
+	// environment read.
 	if (const char *login = getlogin()) return login;
-	const char *user = std::getenv("USER");
-	return user != nullptr ? std::string(user) : std::string();
+	const struct passwd *entry = getpwuid(getuid());
+	return entry != nullptr && entry->pw_name != nullptr ? std::string(entry->pw_name)
+	                                                     : std::string();
 #endif
 }
 
