@@ -94,7 +94,7 @@ std::string InstallFieldCheck::words(Workspace &workspace, const std::string &pa
 	ok = false;
 	if (path.empty())
 		return fallback.empty() ? std::string("No game install chosen: files come from the disk.")
-		                        : "Left empty, the project takes the editor's game install, " + fallback + ".";
+		                        : "Left empty, it takes the editor's install, " + fallback + ".";
 	const std::string root = absolute_install_path(path);
 	const InstallCheck &slot = workspace.view().project.install_check;
 	// The slot's answer for this folder, kept: another field's check over the slot leaves it.
