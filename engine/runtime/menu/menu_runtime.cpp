@@ -345,7 +345,8 @@ void MenuRuntime::on_screen_shown_() {
 	// [orig: UI_DispatchScreenEvent @0x54e6a0 case 5, stricmp(screen, "STARTUP")
 	//  @0x54eeff -> UI_OnStartupScreenActivate @0x5557f0: UI_FindScreenControl(
 	//  g_GameMenu, "STARTUP", "VERSION") @0x555840, then the control's vtable+76
-	//  (CButtonWnd_SetLabel @0x6572f0) with g_StartupVersionText @0x555857]
+	//  (CButtonWnd_SetLabel @0x6572f0, the call @0x555857) with g_StartupVersionText (its push
+	//  @0x555852)]
 	if (strutil::iequals(current_screen_, "STARTUP")) {
 		const int version = find_screen_control("STARTUP", "VERSION");
 		const char *text = gameprofile::gameprofile_version_text_for_code(game_code_.c_str());

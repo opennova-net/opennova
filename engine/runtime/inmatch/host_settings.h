@@ -71,8 +71,8 @@ uint32_t session_koth_limit_minutes(int32_t cfg_limit);
 // S2C 0x64 overwrite it.
 // [orig: Game_ApplySessionSettingsToGlobals - the cfg copy @0x551FDA, the '.' cut @0x552112..
 //  0x552127, TextResource_FindEntryBySectionAndKey(g_MissionTitleTextResource, "TITLE", ..)
-//  @0x55213D, the zero @0x552145..0x552168, the CR cut and the 31 cap @0x552174..0x552190, the
-//  map file @0x55219E; g_MissionTitleTextResource @0x2550194 (read @0x5520C7 / @0x55212A, no
+//  (the call @0x552135, its result @0x55213D), the zero @0x552145..0x552168, the CR cut and
+//  the 31 cap @0x552174..0x552190, the map file @0x55219E; g_MissionTitleTextResource @0x2550194 (read @0x5520C7 / @0x55212A, no
 //  writer); TextResource_FindEntryBySectionAndKey @0x75D250 (the override table first @0x75D27B)]
 std::string mission_session_title(const rtxt::File *text_override, const std::string &map_file);
 

@@ -453,7 +453,8 @@ void test_get_and_set() {
 	host.console->set_scene(inmatch::AdminScene::MainMenu);
 	expect_eq(c.one("GET GAMESTATE"), "OK - Current State = Menus", "the main menu");
 	host.console->set_scene(inmatch::AdminScene::Other);
-	expect_eq(c.one("get gamestate"), "OK - Current State = Unknown", "a load");
+	expect_eq(c.one("get gamestate"), "OK - Current State = Unknown",
+	          "the Unknown arm, which no pumping mode reaches (the console's three-way compare)");
 	host.console->set_scene(inmatch::AdminScene::GameLoop);
 	expect_eq(c.one("GET"), "USAGE -  GET [GAMESTATE] [GAMESETTINGS]", "GET's usage");
 
