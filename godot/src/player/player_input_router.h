@@ -84,6 +84,12 @@ public:
 	// the key-press latch (controls::PlayerActions::clear_key_press_latches)
 	// and the deferred queue (Simulation::clear_deferred_input).
 	void reset_input_state();
+	// A pass-through screen closed (death.mnu's DEATH, stat.mnu's STAT): its
+	// close's input frame takes the menu cursor's offset from the re-centre
+	// point as one update's axis input, read here from the cursor's
+	// client-area position (engine world::pass_through_close_axis carries the
+	// witness). The next sample takes it.
+	void close_pass_through_screen();
 	// The HUD's key toggles, whose F9 Emotes / F10 Radio menus take a digit
 	// before the weapon rows do (controls::PlayerActions' menu arms); the HUD
 	// presenter hands its process-lifetime instance over. Null = no menus, and
@@ -137,6 +143,8 @@ private:
 	// survives the reset-state path like the switch latches.
 	opennova::controls::WheelRemainder wheel_;
 	Vector2 look_delta_;
+	// The axis input a pass-through screen's close owes the next sample.
+	Vector2 close_axis_;
 	int64_t frame_sequence_ = 0;
 	// The gates the frame's sample took, which its later ticks' samples keep:
 	// whether the frame sampled a player at all, and the shell's live/menu words.

@@ -254,6 +254,9 @@ public:
 	bool take_use_item_vehicle_menu_request();
 	// A menu close's input reset (PlayerInputRouter::reset_input_state).
 	void reset_input_state();
+	// A pass-through screen's close: the next input frame takes the menu
+	// cursor's offset (PlayerInputRouter::close_pass_through_screen).
+	void close_pass_through_screen();
 	// Mouse-look rides the input router: the motion events' cursor offset,
 	// which the session's mouse pump spreads into the axis words the SIM's
 	// witnessed integer pipeline scales (engine: runtime/world/player_look.h).

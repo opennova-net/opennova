@@ -449,6 +449,10 @@ void LocalPlayerPresenter::reset_input_state() {
 	input_router_.reset_input_state();
 }
 
+void LocalPlayerPresenter::close_pass_through_screen() {
+	input_router_.close_pass_through_screen();
+}
+
 
 void LocalPlayerPresenter::set_hud_toggles(const Ref<HudToggles> &p_toggles) {
 	input_router_.set_hud_toggles(p_toggles);
@@ -1235,6 +1239,8 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("take_use_item_vehicle_menu_request"),
 			&LocalPlayerPresenter::take_use_item_vehicle_menu_request);
 	ClassDB::bind_method(D_METHOD("reset_input_state"), &LocalPlayerPresenter::reset_input_state);
+	ClassDB::bind_method(D_METHOD("close_pass_through_screen"),
+			&LocalPlayerPresenter::close_pass_through_screen);
 	ClassDB::bind_method(D_METHOD("handle_input", "event", "active"), &LocalPlayerPresenter::handle_input);
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);
 	ClassDB::bind_method(D_METHOD("is_local_spectator"), &LocalPlayerPresenter::is_local_spectator);

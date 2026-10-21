@@ -154,6 +154,26 @@ int main() {
         CHECK(!s.invert_y); // the step never touches the invert
     }
 
+    // --- a pass-through screen's close (DEATH, STAT): the re-centre writes the
+    //     cursor's client offset from (0x140, 0xF0) into the axis words and the
+    //     close's input frame reads it whole, one update's axis input with no
+    //     4x share: 200 px right and 100 px above the centre at setting 128 turn
+    //     (200 * (128 << 11) + 0x8000) >> 16 = 800 units right, 4.39453125 deg,
+    //     and look up. [orig: Input_PumpAndCenterCursor @0x7616D0 (@0x761718..
+    //     0x76172A); UI_TeardownScene @0x54E650 (@0x54E659, @0x54E686, @0x54E695)]
+    {
+        int32_t axis[2] = {};
+        pass_through_close_axis(520, 140, axis);
+        CHECK(axis[0] == 200 && axis[1] == -100);
+        PlayerLookSettings s;
+        int32_t yaw = 0, pitch = 0;
+        player_look_apply(yaw, pitch, s, axis[0], axis[1], 0, false);
+        CHECK(yaw == -(800 << 16));
+        CHECK(pitch > 0);
+        pass_through_close_axis(kCursorCentreX, kCursorCentreY, axis);
+        CHECK(axis[0] == 0 && axis[1] == 0); // a cursor left at the centre owes nothing
+    }
+
     if (failures == 0) std::printf("player_look_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

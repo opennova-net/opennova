@@ -3,6 +3,7 @@
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
 
+#include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
@@ -11,6 +12,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <runtime/controls/controls.h> // action_code (the HUD rows' dispatch codes)
+#include <runtime/world/player_look.h> // pass_through_close_axis
 
 #include <cmath>
 
@@ -263,7 +265,10 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	} else {
 		look_delta_ = Vector2();
 	}
-	p_input->set_look_delta(active && captured ? p_scripted_look : Vector2());
+	// A pass-through screen's close owes this sample its cursor offset, axis
+	// input of this tick alone (close_pass_through_screen).
+	p_input->set_look_delta(active && captured ? p_scripted_look + close_axis_ : Vector2());
+	close_axis_ = Vector2();
 	const Ref<Simulation> action_sim = sim();
 	opennova::controls::PlayerActionPoll gate;
 	gate.active = active;
@@ -400,6 +405,16 @@ void PlayerInputRouter::reset_input_state() {
 	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
 
+void PlayerInputRouter::close_pass_through_screen() {
+	// The device read: the cursor's position in the window's client pixels, the
+	// coordinates the original's mouse-move handler keeps.
+	DisplayServer *display = DisplayServer::get_singleton();
+	const Vector2i client = display->mouse_get_position() - display->window_get_position();
+	int32_t axis[2] = {};
+	opennova::world::pass_through_close_axis(client.x, client.y, axis);
+	close_axis_ = Vector2(static_cast<real_t>(axis[0]), static_cast<real_t>(axis[1]));
+}
+
 // Mouse-look: the motion events add up the cursor offset the input frame
 // hands the session in whole pixels; the session's mouse pump spreads it into
 // the axis words the SIM's witnessed integer pipeline scales (the sim owns
@@ -445,6 +460,7 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 void PlayerInputRouter::reset() {
 	actions_.reset();
 	look_delta_ = Vector2();
+	close_axis_ = Vector2();
 }
 
 void PlayerInputRouter::release_mouse_capture() {

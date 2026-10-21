@@ -1612,6 +1612,11 @@ func _on_command_map_requested() -> void:
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 	if _state == from_state:
 		_state = State.WORLD
+		# death.mnu's DEATH and stat.mnu's STAT pass input through, so their close's
+		# input frame takes the menu cursor's offset from the re-centre point (engine
+		# world::pass_through_close_axis carries the witness).
+		if from_state in [State.DEPLOY, State.END_ROUND] and _player_presenter != null:
+			_player_presenter.close_pass_through_screen()
 		_reset_screen_close_input()
 
 

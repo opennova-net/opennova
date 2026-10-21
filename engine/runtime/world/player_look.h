@@ -106,6 +106,43 @@ struct MouseAxisPump {
 			const int32_t (&cursor)[2], int32_t (&axis)[2]);
 };
 
+// The cursor's re-centre point, in the window's client pixels
+// [orig: Input_PumpAndCenterCursor @0x7616D0 (SetCursorPos(client + (0x140, 0xF0)) @0x761706)].
+inline constexpr int32_t kCursorCentreX = 0x140;
+inline constexpr int32_t kCursorCentreY = 0xF0;
+
+// The close of a pass-through screen (death.mnu's DEATH, stat.mnu's STAT): their
+// activation raises the menu input pass-through, and only their deactivation, which
+// the next screen's open dispatches, or the death screen's back clears it; the close
+// navigates nowhere, so the flag holds through it. The update that closes the screen
+// re-centres the cursor the menu left free, which writes the axis words as the
+// cursor's client offset from the centre, then runs the pass-through input frame,
+// whose axis read takes that offset whole (no share, no two-tap, no 4x): one
+// update's axis input of (x - 0x140, y - 0xF0), which the look rows' head admits or
+// drops as any axis input. `client_x` / `client_y` are the cursor's client-area
+// position at the close; the next update's head pump re-centres again and
+// overwrites the words, so only that one update reads it.
+// [orig: UI_TeardownScene @0x54E650 (the UI_CloseMenuScreen call @0x54E659, the
+//  g_MenuInputPassThrough test @0x54E686, the Input_ProcessFrame call @0x54E695;
+//  its caller under a menu screen Game_ProcessMainFrame @0x5263F0, the call
+//  @0x52667B); UI_CloseMenuScreen @0x54E5E0 (UIScene_ReturnToHistoryScreen(menu, 0)
+//  @0x54E635, the Input_ResetAllState tail @0x54E63F); UIScene_ReturnToHistoryScreen
+//  @0x63DFA0 (no navigation without pop_extra); Input_ResetAllState @0x497ED0 (the
+//  jump @0x497F22); Input_PumpAndCenterCursor @0x7616D0 (the offset @0x761718..0x76172A);
+//  Input_ProcessMouseAxisBindings @0x499680 (the read @0x4996BE); the raises
+//  DeathScreen_UpdateUI @0x553150 (@0x55316E), the activate's call @0x54EFD8, and
+//  StatScreen_ShowCallback @0x562840 (@0x562877 / @0x5628D6); the clears
+//  DeathScreen_OnDeactivate @0x553510 (UI_DispatchScreenEvent @0x54E6A0's event 6,
+//  @0x54F29B), StatScreen_OnDeactivate @0x562120 (@0x54F267) and DeathScreen_OnHiddenBack
+//  @0x553660 (@0x55366C); CUIScene_SelectNodeByName @0x63B6B0 (the deactivate of the
+//  current screen @0x63B787, from UI_OpenMenuScreen @0x54E520's call @0x54E599); the
+//  death screen's close request Render_ProcessMainSceneFrame @0x5CA0F0
+//  (Game_CloseInGameScreens @0x5CAC9C)]
+inline void pass_through_close_axis(int32_t client_x, int32_t client_y, int32_t (&axis)[2]) {
+	axis[0] = client_x - kCursorCentreX;
+	axis[1] = client_y - kCursorCentreY;
+}
+
 // Held look/turn keys advance 0x1FFFFFF BAM per tick and clamp relative to
 // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090]
 void player_look_keys(int32_t &yaw, int32_t &pitch, bool left, bool right,
