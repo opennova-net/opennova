@@ -171,6 +171,16 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline leg.] A joiner
     // applies its kit before L exists; the inventory is sim-side state and the
     // entity stamps (class + equipped adm) defer to the joiner spawn block.
+    // The armory ACCEPT (validate_banned; the 0x5A grant's apply passes false and its
+    // rebuild is inmatch::apply_weapon_loadout_name_list's) copies the whole selection,
+    // unfiltered, into the process's loadout name list ahead of its session test, so an
+    // out-of-session ACCEPT writes it too: every body the process spawns later takes its
+    // first weapon (D-NET-143) [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the class
+    //  buffer copy @0x565D27..0x565D4B ahead of `cmp is_in_session` @0x565D4D)].
+    if (validate_banned && world.loadout_weapon_names != nullptr) {
+        world.loadout_weapon_names->entries = kit;
+        world.loadout_weapon_names->set = true;
+    }
     loadout_stamp_class(world, loadout, player_class);
     std::vector<WeaponKitEntry> accepted;
     for (const WeaponKitEntry &entry : kit) {

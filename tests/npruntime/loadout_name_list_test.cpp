@@ -24,6 +24,7 @@
 #include <formats/mission/bms.h>
 #include <formats/playersav/player_sav.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/player_loadout.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
@@ -196,6 +197,32 @@ void test_the_accept_writes_the_list_not_the_resident_kit() {
 	}
 }
 
+// An out-of-session ACCEPT (a single player's armory) copies its whole selection into the
+// process's loadout name list too, ahead of the session test, so a process that ACCEPTs in single
+// player and then hosts spawns every body with that selection's first weapon; the 0x5A grant's
+// apply (its rebuild is the 0x5A's own) writes nothing here.
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x565D27..0x565D4B ahead of @0x565D4D)]
+void test_an_out_of_session_accept_writes_the_list() {
+	Rig r(inmatch::ConnectionMode::HostOnly);
+	r.world.rules.mp_session = false;
+	auto local = std::make_unique<w::LocalPlayer>(r.world);
+	const std::vector<w::WeaponKitEntry> selection = {w::WeaponKitEntry{"WPN_AK47AUTO", 4, -1, -1},
+			w::WeaponKitEntry{"WPN_KNIFE", -1, -1, -1}};
+	CHECK(w::local_loadout_apply_accept(r.world, local->loadout, local->weapon, local->inventory,
+			local->inventory_valid, selection, 6, /*validate_banned=*/true));
+	const w::LoadoutWeaponNameList &names = r.process->loadout_weapon_names;
+	CHECK(names.set && names.entries.size() == 2);
+	if (!names.entries.empty()) CHECK(names.entries[0].name == "WPN_AK47AUTO");
+	CHECK(w::player_spawn_equipped_default(r.world) == kAk);
+	// The grant's apply leaves the list.
+	Rig g(inmatch::ConnectionMode::HostOnly);
+	auto joiner_local = std::make_unique<w::LocalPlayer>(g.world);
+	CHECK(w::local_loadout_apply_accept(g.world, joiner_local->loadout, joiner_local->weapon,
+			joiner_local->inventory, joiner_local->inventory_valid, selection, 6,
+			/*validate_banned=*/false));
+	CHECK(!g.process->loadout_weapon_names.set);
+}
+
 // The single player's spawn buffer at its mission start and restart: the current profile's
 // single-player page when the mission's own kit chunk promoted none and the page's first name
 // is not empty; else the static page (the unset buffer's default). Never in a session.
@@ -256,6 +283,7 @@ int main() {
 	test_a_listen_hosts_own_list_names_every_body_after_its_fold();
 	test_the_accept_writes_the_list_not_the_resident_kit();
 	test_the_single_players_page_fills_the_spawn_buffer();
+	test_an_out_of_session_accept_writes_the_list();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

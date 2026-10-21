@@ -12,7 +12,7 @@ add_library(opennova_serve_core STATIC
     credentials.cpp      # the --credentials file
     destination_policy.cpp
     lister.cpp           # the NovaWorld listing's driver: the gate, the NWU session, the login and HOSTKEY
-    profile_name.cpp     # the row's profile name: the boot's seed named after the account
+    profile_name.cpp     # the row's profile: the boot's load over the working directory's player.sav / weapon.sav
     run_reports.cpp      # a supervisor's files: the tick health (--stats-file), the exit's line (--exit-file)
     serve_listing.cpp
     server.cpp
