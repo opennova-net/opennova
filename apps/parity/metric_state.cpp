@@ -395,9 +395,21 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 			[](const F &f) { return std::to_string(f.sub_block); });
 	both("frame_flags1", "FRAME_HEADER_FLAGS_MISMATCH",
 			[](const F &f) { return std::to_string(f.flags1); });
-	// flags2 counts sends: the client routes on its low nibble (D-NET-75).
+	// flags2 counts sends: the client routes on its low nibble (D-NET-75). The
+	// nibbles a window holds are the counter's phase slice until it spans one full
+	// cycle (16 sends at the modal step of one, the mask's width), and the slice's
+	// start is the sends before the window: x5's kick (about six steady frames, the
+	// punt ends the session) read RR {7..12} with RR-aa 0.917 from it. So the set
+	// compares over a full cycle on both sides; frame_phase_step keeps the count.
 	both("frame_flags2", "FRAME_HEADER_FLAGS_MISMATCH",
 			[](const F &f) { return std::to_string(f.flags2 & kFrameFlags2RouteMask); });
+	constexpr size_t kRouteCycle = size_t(kFrameFlags2RouteMask) + 1;
+	if (a.size() < kRouteCycle || b.size() < kRouteCycle) {
+		MetricValue &route = out.back();
+		route.comparable = false;
+		route.reference_short = a.size() < kRouteCycle;
+		route.detail = "fewer than 16 steady frames: the route nibbles are a phase slice";
+	}
 	set_metric(out, 'S', "frame_phase_step", "FRAME_HEADER_FLAGS_MISMATCH", phase_step(a),
 			phase_step(b));
 	both("frame_record_classes", "FRAME_RECORD_CLASS_MISMATCH", [](const F &f) {

@@ -2248,6 +2248,29 @@ void test_frame_rules() {
 				"fail", "FRAME_HEADER_FLAGS_MISMATCH");
 	}
 	{
+		// The route nibbles: over a full cycle (16 sends) every nibble shows, so a
+		// counter at another phase passes; a window cut to a few frames (x5's kick,
+		// about six) holds a phase slice, which the set does not compare.
+		auto phased = [](uint32_t seed, uint32_t shift, size_t keep) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityFrameState> frames;
+			size_t steady = 0;
+			for (wire::ParityFrameState f : trace.frames) {
+				f.flags2 = (f.flags2 + shift) & 0xFFu;
+				if (f.ts_ns >= kSteadyStart && steady++ >= keep)
+					continue;
+				frames.push_back(f);
+			}
+			trace.frames = std::move(frames);
+			return trace;
+		};
+		constexpr size_t kAll = ~size_t(0);
+		expect_row(judge_case(phased(1, 0, kAll), phased(2, 0, kAll), phased(3, 5, kAll)), 'S',
+				"frame_flags2", "", "pass");
+		expect_row(judge_case(phased(1, 0, 6), phased(2, 3, 6), phased(3, 9, 6)), 'S',
+				"frame_flags2", "", "skip");
+	}
+	{
 		// The fps and CPU bytes are measurements; a CPU byte never written is not.
 		auto cpu = [](uint32_t seed, uint32_t fps, uint32_t share) {
 			wire::ParityTrace trace = scripted(seed);
