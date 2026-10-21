@@ -9,6 +9,8 @@
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/global_constants.hpp>
 
+#include <base/gameprofile/game_type.h>
+
 #include <cmath>
 
 using namespace godot;
@@ -230,6 +232,7 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	}
 	p_input->set_look_delta(active && captured ? p_scripted_look : Vector2());
 	const Ref<Simulation> action_sim = sim();
+	poll_hud_toggles(action_sim);
 	opennova::controls::PlayerActionPoll gate;
 	gate.active = active;
 	gate.captured = captured;
@@ -285,6 +288,50 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 					 active))
 			apply_player_action(*action_sim.ptr(), request);
 	}
+}
+
+void PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim) {
+	// The HUD's key rows are action bindings like the rest: the input frame's
+	// key scan fires them and its drain dispatches them, every tick, so a row
+	// pressed for one tick of a multi-tick frame fires on that tick. hudcolor
+	// (row 76) defaults to Ctrl+F6 beside huddetail's bare F6 (row 50): the
+	// binding sampler's two passes keep them apart (Ctrl+F6 fires only
+	// hudcolor, F6 only huddetail), and its first match gives a key both rows
+	// carry to hudcolor alone (code 10 before 19; engine
+	// BindingSet::pressed_key). showhud (row 27) ships unbound. Ctrl is a
+	// binding modifier; Shift or Alt held gates nothing, as the key scan has no
+	// such gate (engine hud::HudKeyEdge carries the witness).
+	// [orig: Input_ProcessFrame @0x49D520 (the Input_ProcessPlayerFrame call
+	//  @0x49D58B, the drain's Input_HandleActionBinding call @0x49D5D8); the key
+	//  scan's fire @0x49d42f (the modifier pass) and @0x49d488 (the fallback);
+	//  huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
+	// The key sampling is this router's; the edge latches, the cycles and the
+	// window toggles are the engine's poll (engine hud/hud_toggles.h); the HUD
+	// presenter applies the event words at its frame.
+	if (hud_toggles_.is_null() || p_sim.is_null()) return;
+	int rows_down = 0;
+	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
+		if (pressed(opennova::hud::hud_toggle_row_token(row))) rows_down |= 1 << row;
+	// The connection mode's two bits: an authority is any role but a joiner, a
+	// session peer any role but a dedicated host. The mousescale row steps by
+	// its fire's sign bit (Shift on a modifier-less key).
+	const int role = p_sim->session_role();
+	const int64_t events = hud_toggles_->poll(rows_down, frame_gameplay_input_active_,
+			p_sim->is_mp_session(),
+			opennova::game_type::is_objective(static_cast<uint32_t>(p_sim->get_session_game_type())),
+			!p_sim->local_player_dead(), role != Simulation::ROLE_JOINER,
+			role != Simulation::ROLE_DEDICATED_HOST,
+			controls_.is_valid() &&
+					controls_->is_token_fire_signed(String(opennova::hud::hud_toggle_row_token(
+							HudToggles::ROW_MOUSE_SCALE))));
+	if (events != 0) hud_toggle_events_.push_back(events);
+}
+
+PackedInt64Array PlayerInputRouter::take_hud_toggle_events() {
+	PackedInt64Array out;
+	for (const int64_t events : hud_toggle_events_) out.push_back(events);
+	hud_toggle_events_.clear();
+	return out;
 }
 
 void PlayerInputRouter::consume_use_hold() {

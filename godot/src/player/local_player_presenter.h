@@ -114,6 +114,10 @@ public:
 	// router's digit arms read and close); the HUD presenter hands its
 	// process-lifetime instance over at setup.
 	void set_hud_toggles(const Ref<HudToggles> &p_toggles);
+	// The HUD toggle rows' event words of the input frames since the last
+	// read, in their order (PlayerInputRouter::take_hud_toggle_events); the
+	// HUD presenter applies them.
+	PackedInt64Array take_hud_toggle_events();
 
 	// A view action (Simulation::VIEW_ACTION_*: view1st F2, viewwithgun F3,
 	// viewchase F4): view1st/viewwithgun select first person, viewchase the
@@ -121,8 +125,9 @@ public:
 	// world/player_view.h player_view_apply_view_action). The preference is
 	// effective only in a control seat: the sim's arbiter resolves the camera mode every tick from
 	// the preference and the seat, so on foot the preference changes nothing
-	// visible (engine: runtime/world/player_view.h). GameHudPresenter polls the rows
-	// (it owns the FP-gun bit two of them also write) and calls this.
+	// visible (engine: runtime/world/player_view.h). The input router polls the rows
+	// in each input frame; GameHudPresenter applies their events (it owns the FP-gun
+	// bit two of them also write) and calls this.
 	void apply_view_action(int p_action);
 	// The debug menu's on-foot third person (the F3 Player page): stock JO
 	// never resolves the chase outside a control seat (net-re §5.39 -- the

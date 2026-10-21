@@ -277,6 +277,41 @@ func test_steps_inside_a_multi_tick_frame_land_on_their_own_ticks() -> void:
 			"the crouch press sampled mid-frame reached the sim")
 
 
+# The HUD's key rows run in every input frame too (PlayerInputRouter::
+# poll_hud_toggles carries the witness): a one-tick hudcolor press inside a
+# six-tick frame fires on its own tick, where one poll after the frame would
+# read the row released and never fire it.
+func test_a_hud_row_pressed_inside_a_multi_tick_frame_fires_on_its_tick() -> void:
+	var rig := _rig()
+	if rig.is_empty():
+		return
+	var presenter: LocalPlayerPresenter = rig.presenter
+	var toggles := HudToggles.new()
+	presenter.set_hud_toggles(toggles)
+	const HUDCOLOR := 10
+	assert_eq(ScriptedInput.token_for_action_code(HUDCOLOR),
+			HudToggles.row_token(HudToggles.ROW_HUD_COLOR), "code 10 is the hudcolor row")
+	_frame(rig, 40, true, 6)
+	assert_eq(presenter.take_hud_toggle_events(), PackedInt64Array(), "no row fired while settling")
+	var color_before := toggles.get_hud_color_index()
+	var driver: ScriptedInput = rig.driver
+	assert_eq(driver.load_steps([
+		{"tick": 3, "press": HUDCOLOR},
+		{"tick": 8, "end": true},
+	]), OK, driver.get_error())
+	assert_true(driver.start())
+	_frame(rig, 2, true, 6)
+	assert_eq(driver.get_state_name(), "finished", driver.get_cancel_reason())
+	var start := driver.get_start_logic_tick()
+	assert_eq(driver.get_applied_logic_ticks()[0], start + 3, "the press lands on tick 3")
+	assert_eq(driver.get_release_logic_ticks()[0], start + 4,
+			"and releases on tick 4, inside the same six-tick frame")
+	assert_eq(presenter.take_hud_toggle_events(),
+			PackedInt64Array([HudToggles.EVENT_HUD_COLOR_CYCLED]), "the row fired once")
+	assert_eq(toggles.get_hud_color_index(), (color_before + 1) % 6, "the colour cycled")
+	assert_eq(presenter.take_hud_toggle_events(), PackedInt64Array(), "reading cleared them")
+
+
 # The packaged world over the minimal mission (its playable load spawns the
 # local player) with the infantry clip set staged so the motor's body
 # selection runs, and a presenter over a ControlsModel carrying a scripted

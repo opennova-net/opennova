@@ -4,10 +4,12 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/object_id.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <cstdint>
 #include <runtime/controls/player_actions.h>
+#include <vector>
 
 #include "hud/hud_toggles.h"
 #include "mnu/controls_model.h"
@@ -82,8 +84,13 @@ public:
 	void reset_input_state();
 	// The HUD's key toggles, whose F9 Emotes / F10 Radio menus take a digit
 	// before the weapon rows do (controls::PlayerActions' menu arms); the HUD
-	// presenter hands its process-lifetime instance over. Null = no menus.
+	// presenter hands its process-lifetime instance over. Null = no menus, and
+	// no HUD rows polled here.
 	void set_hud_toggles(const Ref<HudToggles> &p_toggles) { hud_toggles_ = p_toggles; }
+	// The HUD toggle rows' event words (HudToggles::poll) of the input frames
+	// since the last read, in their order; reading clears them. The HUD
+	// presenter applies them at its frame.
+	PackedInt64Array take_hud_toggle_events();
 
 private:
 	Ref<Simulation> sim() const;
@@ -99,6 +106,9 @@ private:
 	// look, the action rows and their requests), under the frame's gates.
 	void sample_input_frame(const Ref<MissionFrameInput> &p_input, const Vector2 &p_scripted_look,
 			bool p_spectating);
+	// The input frame's HUD toggle rows through the HUD's toggles, ahead of the
+	// action rows, which read the menus the rows open.
+	void poll_hud_toggles(const Ref<Simulation> &p_sim);
 	void read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
 			bool &r_lean_left, bool &r_lean_right, bool &r_jump) const;
 
@@ -107,6 +117,7 @@ private:
 	Ref<ControlsModel> controls_;
 	Ref<PlayerMoveIntent> input_override_;
 	Ref<HudToggles> hud_toggles_;
+	std::vector<int64_t> hud_toggle_events_;
 	opennova::controls::PlayerActions actions_;
 	bool armory_requested_ = false;
 	bool vehicle_menu_requested_ = false;

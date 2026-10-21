@@ -161,8 +161,10 @@ var _map_legend_title := ""
 var _map_legend_labels := PackedStringArray()
 
 # Every HUD key is a polled catalog row (HudToggles.Row: Goals G, ShowFriendly
-# K, help F1, helpmap F12, Briefing I, ...) sampled in tick(); the rows, the
-# cycles and the window toggles are the engine's (runtime/hud/hud_toggles.h).
+# K, help F1, helpmap F12, Briefing I, ...) the player input router polls in
+# each input frame and tick() applies (PlayerInputRouter::poll_hud_toggles);
+# the rows, the cycles and the window toggles are the engine's
+# (runtime/hud/hud_toggles.h).
 # Retail has NO HUD-visibility key: H is only the secondary `pause` binding
 # (SP-only), and the boot /NOHUD switch is the sole whole-overlay master
 # [orig: catalog row 70 vk2 0x48; case 25 @0x49b520; /NOHUD gates
@@ -633,22 +635,11 @@ func tick(gameplay_input_active: bool = false) -> void:
 			if footprints.size() >= 2 and footprints[1] > 0:
 				_map_footprints_fed = true
 				_game_hud.set_minimap_footprints(footprints)
-	# The HUD binding rows. hudcolor (row 76) defaults to Ctrl+F6 beside
-	# huddetail's bare F6 (row 50): the binding sampler's two passes keep them
-	# apart (Ctrl+F6 fires only hudcolor, F6 only huddetail), and its first
-	# match gives a key both rows carry to hudcolor alone (code 10 before 19;
-	# engine BindingSet::pressed_key). showhud (row 27) ships unbound. Ctrl is a
-	# binding modifier; Shift or Alt held gates nothing, as the key scan has no
-	# such gate (engine hud::HudKeyEdge carries the witness).
-	# [orig: the key scan's fire @0x49d42f (the modifier pass) and @0x49d488
-	#  (the fallback); huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
-	# The key sampling is this presenter's (a shared key's first match is the
-	# sampler's, engine BindingSet::pressed_key); the edge latches, the cycles
-	# and the window toggles are the engine's poll.
-	# The talk rows ride the same sampler; the dispatch gates, the capture and
-	# the line editor are the engine's chat entry, its talk-key debounce and
-	# flood on the main-frame counter (engine hud/hud_chat_entry.h
-	# ChatEntryFacts::frame, inmatch/chat_flood.h).
+	# The talk rows, sampled through the binding sampler (a shared key's first
+	# match is the sampler's, engine BindingSet::pressed_key); the dispatch
+	# gates, the capture and the line editor are the engine's chat entry, its
+	# talk-key debounce and flood on the main-frame counter (engine
+	# hud/hud_chat_entry.h ChatEntryFacts::frame, inmatch/chat_flood.h).
 	var talk_rows := 0
 	for row in HudChatEntry.ROW_COUNT:
 		if ControlsBindings.pressed(HudChatEntry.row_token(row)):
@@ -656,23 +647,21 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_chat.poll_rows(talk_rows, gameplay_input_active, sim,
 			Strings.get_table(Strings.TABLE_GAMETEXT), sim.get_main_frame_counter())
 	_game_hud.set_chat_input(_chat, sim.is_mp_session())
-	var rows_down := 0
-	for row in HudToggles.ROW_COUNT:
-		if ControlsBindings.pressed(HudToggles.row_token(row)):
-			rows_down |= 1 << row
-	# The mousescale row's step direction is its fire's sign bit (Shift on a
-	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
-	var toggle_events := _toggles.poll(rows_down,
-			gameplay_input_active, sim.is_mp_session(),
-			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
-			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
-			ControlsBindings.model().is_token_fire_signed(
-					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
-	# The window actions' respawn init also closes the sim's map overlay (the
-	# witness rides hud_toggles.h kOverlayWindowsCleared).
-	if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
-		sim.request_hud_map_close()
-	_apply_toggle_events(toggle_events)
+	# The HUD binding rows' events in input-frame order: the player input
+	# router polls the rows in every input frame, the frame's own sample and
+	# each later tick's (PlayerInputRouter::poll_hud_toggles carries the
+	# witness); with no router this presenter polls the frame's sample.
+	var toggle_frames: PackedInt64Array
+	if _player_presenter != null:
+		toggle_frames = _player_presenter.take_hud_toggle_events()
+	else:
+		toggle_frames = PackedInt64Array([_poll_toggle_rows(sim, gameplay_input_active)])
+	for toggle_events in toggle_frames:
+		# The window actions' respawn init also closes the sim's map overlay (the
+		# witness rides hud_toggles.h kOverlayWindowsCleared).
+		if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
+			sim.request_hud_map_close()
+		_apply_toggle_events(toggle_events)
 	# The quit dialog and the authority's server-status page (engine
 	# hud_toggles.h / hud_server_status.h): while the page is up it stands in
 	# for the whole scene frame.
@@ -1083,6 +1072,24 @@ func _key_press_vk(key: String, fallback: String) -> int:
 ## The connection mode's two bits by role (engine HudKeyPoll): single player
 ## and a listen host carry both, a joiner only the peer bit, a dedicated host
 ## only the authority bit.
+## One poll of the HUD binding rows over the frame's own sample, for a
+## presenter with no player input router (PlayerInputRouter::poll_hud_toggles
+## is the per-input-frame poll and carries the witness); the event bits.
+func _poll_toggle_rows(sim: Simulation, gameplay_input_active: bool) -> int:
+	var rows_down := 0
+	for row in HudToggles.ROW_COUNT:
+		if ControlsBindings.pressed(HudToggles.row_token(row)):
+			rows_down |= 1 << row
+	# The mousescale row's step direction is its fire's sign bit (Shift on a
+	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
+	return _toggles.poll(rows_down,
+			gameplay_input_active, sim.is_mp_session(),
+			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
+			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
+			ControlsBindings.model().is_token_fire_signed(
+					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
+
+
 static func _authority(sim: Simulation) -> bool:
 	return sim.session_role() != Simulation.ROLE_JOINER
 
