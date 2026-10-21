@@ -468,6 +468,12 @@ void Session::consume_pending_one_shots() {
 	pending_input_.pressed_action_bits = 0;
 }
 
+void Session::step_mouse_pump(int32_t update, int32_t due, bool menu_open, int32_t (&axis)[2]) {
+	const int32_t cursor[2] = {pending_input_.cursor_dx, pending_input_.cursor_dy};
+	if (update == 0) pending_input_.cursor_dx = pending_input_.cursor_dy = 0;
+	mouse_pump_.step(update == 0, update + 1 == due, due, menu_open, cursor, axis);
+}
+
 FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 	FrameOutcome out;
 	out.status = FrameStatus::Ok;
@@ -489,10 +495,8 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 		// the frame banked, every tick takes its spread share; under a menu
 		// screen no input frame consumes it.
 		const bool menu_open = (tick_input.player.held_action_bits & HELD_MENU_OPEN) != 0;
-		const int32_t cursor[2] = {pending_input_.cursor_dx, pending_input_.cursor_dy};
-		if (i == 0) pending_input_.cursor_dx = pending_input_.cursor_dy = 0;
 		int32_t axis[2] = {};
-		mouse_pump_.step(i == 0, i + 1 == due, due, menu_open, cursor, axis);
+		step_mouse_pump(i, due, menu_open, axis);
 		if (!menu_open) {
 			tick_input.player.look_delta_x += static_cast<float>(axis[0]);
 			tick_input.player.look_delta_y += static_cast<float>(axis[1]);
@@ -573,8 +577,22 @@ void Session::step_paused_frame_counters(const FrameInput &input) {
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	world::World &world = role_->kernel()->world;
 	const int32_t due = accumulator_.bank(input.delta_seconds);
-	for (int32_t i = 0; i < due; ++i)
+	// The mouse pump heads every main frame, ahead of the pause word's test, so its
+	// words hold what the paused frames pumped: the paused frame's cursor waits for
+	// its first update as a running frame's does, and no input frame consumes the
+	// axis (a menu screen skips the input frame; under the pause row's pause the
+	// dispatcher head drops the look rows, whose flags carry bit 0) [orig:
+	// Game_ProcessMainFrame @0x5263F0 (the pump @0x52640E..0x526508, the pause word's
+	// test @0x5265A0); Input_HandleActionBinding @0x49AD40 (the pause gate
+	// @0x49ADDD..0x49ADE8)].
+	pending_input_.cursor_dx += input.player.cursor_dx;
+	pending_input_.cursor_dy += input.player.cursor_dy;
+	const bool menu_open = (input.player.held_action_bits & HELD_MENU_OPEN) != 0;
+	for (int32_t i = 0; i < due; ++i) {
+		int32_t axis[2] = {};
+		step_mouse_pump(i, due, menu_open, axis);
 		world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
+	}
 }
 
 void Session::step_hud_radar_frame() {
@@ -710,6 +728,15 @@ TransitionResult Session::pause() {
 				invalid_transition("pause requires Running"));
 	}
 	reset_bank();
+	// The in-game menu's paused frames run the mouse pump under the menu: the
+	// first update zeroes the shares and its two-tap clears the previous one, so
+	// all six words are zero by the resume. The shell routes no frame to the
+	// session under that menu, so the zero lands with the pause; the pause row's
+	// paused frames pump the cursor (step_paused_frame_counters), overwriting it
+	// at their first update [orig: Game_ProcessMainFrame @0x5263F0 (the
+	// UI_IsMenuScreenOpen call @0x52642F, the zeroes @0x526438..0x52644D, the
+	// two-tap @0x5264E6..0x526508)].
+	mouse_pump_ = {};
 	return transition(State::Paused);
 }
 

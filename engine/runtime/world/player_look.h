@@ -6,7 +6,7 @@
 // [orig: Input_ProcessMouseAxisBindings @ 0x499680: the deltas it scales are the
 //  pump's per-update sums (g_MouseState.deltaX / deltaY as Game_ProcessMainFrame
 //  rewrites them, MouseAxisPump below), over the center-lock cursor offset
-//  (Input_PumpAndCenterCursor @ 0x7616e0 pins the cursor at 320,240 and reads the
+//  (Input_PumpAndCenterCursor @ 0x7616D0 pins the cursor at 320,240 and reads the
 //  offset); sensitivity = setting << 11 (profile +0x590, default 128
 //  @ PlayerProfile_InitDefaults 0x54bbc0, clamped [1, 0x1FF] by the 'mousescale'
 //  adjust @ 0x49b18b); the scoped reduction divides by the current zoom
@@ -81,15 +81,21 @@ void player_look_apply(int32_t &yaw_bam, int32_t &pitch_bam, const PlayerLookSet
 // (n - 1) on the last), and every update hands the axis bindings its share
 // plus the previous update's, a two-tap sum: one cursor pixel feeds the axis
 // scale eight times over two updates. A menu screen up at the first update
-// zeroes the frame's shares. The words live for the whole process.
-// [orig: Game_ProcessMainFrame @0x5263F0 -- the first update's read @0x52640E
-//  (g_MainLoopFirstUpdate) -> Input_PumpAndCenterCursor @0x526458, the menu's
-//  zeroes @0x52642F..0x52644D, the share and the remainder @0x52645D..0x5264A9
-//  (the divisor g_MainLoopUpdatesDue; x's share @0x526481, its remainder
-//  @0x526491), the last update's remainder
+// zeroes the frame's shares. Retail's words are process words that only the
+// main frame writes, never reset; ours live with the session (Session::
+// mouse_pump_), so a new mission's first update starts from zero where retail's
+// would carry the last frame's shares. Every stock mission end passes a menu
+// screen whose first update zeroes them, a disconnect's exit being the one path
+// without one.
+// [orig: Game_ProcessMainFrame @0x5263F0 -- the first update's read (the
+//  g_MainLoopFirstUpdate test @0x52640E, the Input_PumpAndCenterCursor call
+//  @0x526458), the menu's zeroes @0x52642F..0x52644D, the share and the
+//  remainder @0x52645D..0x5264A9 (the divisor g_MainLoopUpdatesDue; x's share
+//  @0x526481, its remainder @0x526491), the last update's remainder
 //  @0x5264B3..0x5264D4 (dword_24E0E80), the share @0x5264DB, the two-tap sum
 //  into g_MouseState.deltaX / deltaY @0x5264E6..0x526508, which
-//  Input_ProcessMouseAxisBindings @0x4996BE scales (player_look_delta)]
+//  Input_ProcessMouseAxisBindings @0x499680 scales (the read @0x4996BE;
+//  player_look_delta); Input_PumpAndCenterCursor @0x7616D0]
 struct MouseAxisPump {
 	int32_t share[2] = {};     // g_MouseUpdateShareX / Y: this update's
 	int32_t remainder[2] = {}; // g_MouseLastShareX / Y: the last update's

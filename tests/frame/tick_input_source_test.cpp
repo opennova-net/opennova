@@ -3,7 +3,9 @@
 // a scripted step due inside a frame that banks six ticks lands on its own
 // tick, and a hold keeps its scripted length on the ticks the role packs.
 // Driven with the real scenario device (devtools::ScriptedInput) over a probe
-// role that records each tick's input at the logic tick it ran as.
+// role that records each tick's input at the logic tick it ran as. Also the
+// main frame's mouse pump (D-NET-NEW-LI-2), across the frames and the
+// single-player pause.
 #include <runtime/devtools/scripted_input.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
@@ -300,6 +302,69 @@ void test_the_session_spreads_the_frames_cursor_over_its_ticks() {
 	CHECK(none, "no input frame consumes the axis under a menu screen");
 }
 
+// The axis input of the ticks recorded from `from` on.
+std::vector<float> axis_x_from(const TickRecorder &role, size_t from) {
+	std::vector<float> out;
+	for (size_t i = from; i < role.inputs.size(); ++i) out.push_back(role.inputs[i].player.look_delta_x);
+	return out;
+}
+
+FrameOutcome cursor_frame(Session &session, int32_t cursor_dx, uint32_t held = 0) {
+	FrameInput in;
+	in.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	in.player.cursor_dx = cursor_dx;
+	in.player.held_action_bits = held;
+	return session.advance(in);
+}
+
+// The pump across the single-player pause: the in-game menu's paused frames
+// zero all six words, so nothing pumped before the pause reaches the first
+// tick after the resume (the shell routes no frame to the session under the
+// menu: the zero lands with the pause); the pause row's paused frames run the
+// pump on the live cursor, so the first tick after the resume carries the last
+// paused update's share, which no paused input frame consumed.
+void test_the_pump_across_the_single_player_pause() {
+	{
+		auto role = std::make_unique<TickRecorder>();
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		CHECK(cursor_frame(session, 10).ticks_run() == 3, "three ticks");
+		CHECK(axis_x_from(*role, 0) == std::vector<float>({13.0f, 26.0f, 27.0f}),
+				"the frame's spread, the remainder 14 still to pair");
+		CHECK(session.pause().applied() && session.resume().applied(), "the menu pause");
+		const size_t before = role->inputs.size();
+		CHECK(cursor_frame(session, 0).ticks_run() == 3, "three ticks after the resume");
+		CHECK(axis_x_from(*role, before) == std::vector<float>({0.0f, 0.0f, 0.0f}),
+				"nothing pumped before the menu reaches a tick after it");
+	}
+	{
+		auto role = std::make_unique<TickRecorder>();
+		Session session(*role);
+		CHECK(load(session), "the session runs");
+		CHECK(cursor_frame(session, 10).ticks_run() == 3, "three ticks");
+		CHECK(session.pause().applied(), "the pause row's pause");
+		const size_t before = role->inputs.size();
+		// Three paused updates over -5 px: (1 - 20) / 3 truncates to -6 twice,
+		// then the remainder -20 + 12 = -8.
+		CHECK(cursor_frame(session, -5).status == FrameStatus::NotRunning, "a paused frame");
+		CHECK(role->inputs.size() == before, "no tick runs under the pause");
+		CHECK(session.resume().applied(), "the resume");
+		CHECK(cursor_frame(session, 0).ticks_run() == 3, "three ticks after the resume");
+		CHECK(axis_x_from(*role, before) == std::vector<float>({-8.0f, 0.0f, 0.0f}),
+				"the last paused update's share pairs with the first tick after the resume");
+		// A menu screen up at a paused frame's first update zeroes the words.
+		CHECK(session.pause().applied(), "paused again");
+		CHECK(cursor_frame(session, 10).status == FrameStatus::NotRunning, "a pumped frame");
+		CHECK(cursor_frame(session, 10, HELD_MENU_OPEN).status == FrameStatus::NotRunning,
+				"a paused frame under a menu screen");
+		CHECK(session.resume().applied(), "the resume");
+		const size_t after_menu = role->inputs.size();
+		CHECK(cursor_frame(session, 0).ticks_run() == 3, "three ticks");
+		CHECK(axis_x_from(*role, after_menu) == std::vector<float>({0.0f, 0.0f, 0.0f}),
+				"the menu's update left nothing to pair");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -308,6 +373,7 @@ int main() {
 	test_unchanged_input_packs_unchanged_ticks();
 	test_the_mouse_pump_spreads_four_times_the_cursor_over_the_updates();
 	test_the_session_spreads_the_frames_cursor_over_its_ticks();
+	test_the_pump_across_the_single_player_pause();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

@@ -101,24 +101,33 @@ struct CameraSample {
 // mode's update once per 16 ms tick it banked, and each update pumps the
 // window messages (the key state and the key-event ring the window procedure
 // fills) and then runs Input_ProcessFrame(g_CurrentTick), which dequeues the
-// ring and reads the key state for that tick alone, unless a menu screen is up.
-// A catch-up tick therefore sees the device as it stands at that tick (D-NET-NEW-LI-1).
+// ring and reads the key state for that tick alone, unless a menu screen that
+// does not pass input through is up (the death and stat screens pass it
+// through: the menu's scene teardown runs the input frame under them). Each
+// update steps g_CurrentTick unless the pause word is up. A catch-up tick
+// therefore sees the device as it stands at that tick (D-NET-NEW-LI-1).
 // [orig: Game_MainLoop @0x52B630 (the mode's +0x24 update call @0x52BA58 behind
 //  the phase gate @0x52BA40, the Game Loop mode @0x82F340's slot holding
-//  Game_ProcessMainFrame); Game_ProcessMainFrame @0x5263F0 (++g_CurrentTick @0x5265B4,
-//  Game_PumpWindowMessages @0x526608, UI_IsMenuScreenOpen @0x52660D,
-//  Input_ProcessFrame(g_CurrentTick) @0x52661D); Game_WindowProc @0x7624C0 ->
-//  Input_HandleKeyPress @0x760C90 (the key state @0x760CBB, Input_QueueKeyEvent
-//  @0x760CC2); Input_ProcessKeyboardEvents @0x49D1F0 (Input_DequeueKeyEvent
+//  Game_ProcessMainFrame); Game_ProcessMainFrame @0x5263F0 (the pause word's test
+//  @0x5265A0..0x5265A6 around ++g_CurrentTick @0x5265B4, the Game_PumpWindowMessages
+//  call @0x526608, the UI_IsMenuScreenOpen call @0x52660D, the
+//  Input_ProcessFrame(g_CurrentTick) call @0x52661D); UI_TeardownScene @0x54E650
+//  (g_MenuInputPassThrough tested @0x54E686, the Input_ProcessFrame call @0x54E695),
+//  the word raised through UI_SetMenuInputPassThrough @0x54B980 by DeathScreen_UpdateUI
+//  @0x553150 (the call @0x55316E) and StatScreen_ShowCallback @0x562840 (the calls
+//  @0x562877 / @0x5628D6); Game_WindowProc @0x7624C0 -> Input_HandleKeyPress
+//  @0x760C90 (the key state @0x760CBB, the Input_QueueKeyEvent call @0x760CC2);
+//  Input_ProcessKeyboardEvents @0x49D1F0 (the Input_DequeueKeyEvent calls
 //  @0x49D2D2 / @0x49D4A0)]
 // The frame's own sample (FrameInput::player) is its first tick's input frame;
 // every later tick the frame banked asks the source for its own, keyed to the
 // logic tick it runs as (World::logic_tick at the tick's head, which is
 // retail's g_CurrentTick once the tick's increment ran). The mouse motion
 // rides the frame's sample, as retail reads the cursor only in the frame's
-// first update [orig: Game_ProcessMainFrame @0x52640E (g_MainLoopFirstUpdate,
-// raised @0x52B9FC, dropped after each update @0x52BA5E) ->
-// Input_PumpAndCenterCursor @0x526458].
+// first update [orig: Game_ProcessMainFrame @0x5263F0 (the g_MainLoopFirstUpdate
+//  test @0x52640E, the Input_PumpAndCenterCursor call @0x526458); Game_MainLoop
+//  @0x52B630 (g_MainLoopFirstUpdate raised @0x52B9FC, dropped after each update
+//  @0x52BA5E); Input_PumpAndCenterCursor @0x7616D0].
 class TickInputSource {
 public:
 	virtual ~TickInputSource() = default;
@@ -437,6 +446,9 @@ private:
 	void latch_input(const FrameInput &input);
 	void latch_packet(const InputPacket &packet);
 	void consume_pending_one_shots();
+	// One update of the main frame's mouse pump: the first update of `due` takes the
+	// cursor offset the frame banked; `axis` is the update's two-tap sum.
+	void step_mouse_pump(int32_t update, int32_t due, bool menu_open, int32_t (&axis)[2]);
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	TickOutcome run_one_tick(const TickInput &input);
 	void step_cine_render_frame();
@@ -462,7 +474,10 @@ private:
 	int32_t frames_rendered_ = 0;
 	int32_t frames_last_second_ = 0;
 	InputPacket pending_input_;
-	// The main frame's mouse pump; its words never reset with the bank.
+	// The main frame's mouse pump; its words never reset with the bank. Retail's are
+	// process words only the main frame writes; these live with the session, which
+	// differs only where a mission ends with no menu frame between it and the next
+	// one (world::MouseAxisPump carries the witness).
 	world::MouseAxisPump mouse_pump_;
 	CameraSample latest_camera_;
 	SessionError last_error_;
