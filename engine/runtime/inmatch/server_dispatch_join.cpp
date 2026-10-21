@@ -49,6 +49,24 @@ bool stage_join_gate_reject(NapiNPConnection &conn, uint32_t reason_dpc) {
 	return Server_StageHostDisconnect(conn, event);
 }
 
+// An admission handler's reject: the connection's description queued (the first record wins,
+// the description once), the handler returning with the net player's game state unchanged, so
+// the records behind it in the datagram reach their handlers and a later record of the same
+// stage is tested again (D-NET-NEW-L1-24). False only when no description could be queued at
+// all (a node with no remote transport), which the protocol owner releases (Rejected).
+// [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 - the sent byte @0x4C7F58..0x4C7F5F,
+//  DC 2 @0x4C7FAE, the first-wins slot @0x4C7FF2..0x4C8004; NapiNPServer_HandlePlayerJoinMessage
+//  @0x512AA0 (the validator's reject returns @0x512EAC, game state 1 kept);
+//  NapiNPServerMsg_HandleJoinRequest @0x512ED0 (the 17 @0x512F7E, the return @0x512FC2, game
+//  state 2 kept); CNapiNPConnection_ParseMessages @0x625BC0 (the record walk
+//  @0x625DF5..0x625F1B, no test of the description)]
+bool reject_join_record(NapiNPConnection &conn, uint32_t reason_dpc) {
+	(void)stage_join_gate_reject(conn, reason_dpc);
+	if (conn.host_disconnect_sent) return true;
+	conn.admission_stage = GameAdmissionStage::Rejected;
+	return false;
+}
+
 } // namespace
 
 MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
@@ -496,16 +514,17 @@ ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx 
 }
 
 // The C2S 0x02's handler, whatever the game state (no gate but the net player's): the holdoff
-// dictation, the 0x01 / 0x7A / 0x7B / 0x03 records and game state 7, every time it runs. Retail
-// lists the node on the pending-spawn list while it is unlisted (the pump unlinks it at the add),
-// ours once (the re-list after the add and the ticket wait's leg are L1-s14's, Q7-31 (b)). Its
-// two echoed words are not compared with the probe.
+// dictation, the 0x01 / 0x7A / 0x7B / 0x03 records and game state 7, every time it runs. It
+// lists the node on the spawn pump's pending list while it is unlisted (the pump unlinks it at
+// the add), so a repeated 0x02 after the add lists it again and the pump adds the player a
+// second time (Server_ProcessPendingPlayerSpawns: the first row orphaned). Its two echoed words
+// are not compared with the probe.
 // [orig: NapiNPServerMsg_0x002 @0x512FD0 - is_authority @0x512FFC, the net player @0x51300B, the
 //  echoed tick and counter read @0x51302C / @0x513044 for NapiNPStats_RecordSample (called
 //  @0x51305A), NapiNPServer_UpdateHoldoffTicks (called @0x513068), the sends @0x5130AC /
 //  @0x5130E5 / @0x51311E, NapiNPPlayer_MoveNodeToEntityList (called @0x513193; it lists the node
 //  while unlisted @0x4C7E65; the pump unlinks it @0x4C8FF6),
-//  CNetPlayer_SetGameState(7) @0x51319C (leaving 10 zeroes the round watermark @0x4C4135), the
+//  CNetPlayer_SetGameState(7) (called @0x51319C; leaving 10 zeroes the round watermark @0x4C4135), the
 //  0x03 @0x5131D5] (D-NET-NEW-L1-24)
 static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 		uint32_t now_tick, const ServerDispatchInputs &inputs,
@@ -517,13 +536,27 @@ static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 		st.admission_completed_tick = now_tick;
 	}
 	if (conn.burst.game_state == 10) conn.link.round_watermark = 0;
-	// Entering game state 7 zeroes the net player's hold-nag stamp (+0x24), so a spawn pump that
-	// holds the node nags it with its 0x03 at once (the stamp's zero test @0x4C8F7A..0x4C8F7F)
-	// [orig: CNetPlayer_SetGameState @0x4C4060 - case 7 @0x4C4184].
-	st.admission_hold_nag_host_ms_valid = false;
+	// Entering game state 7 from another state zeroes the net player's hold-nag stamp (+0x24),
+	// so a spawn pump that holds the node nags it with its 0x03 at once (the stamp's zero test
+	// @0x4C8F7A..0x4C8F7F); the setter returns early on an unchanged state, so a repeated 0x02 to
+	// a node already in 7 (one the pump holds) keeps the stamp and the next nag still waits its
+	// 1000 ms (@0x4C8F87..0x4C8F8D).
+	// [orig: CNetPlayer_SetGameState @0x4C4060 - the unchanged-state return `cmp [esi+0A0h], ebp`
+	//  @0x4C4074 / `jz` @0x4C407D, case 7 @0x4C4184]
+	if (conn.burst.game_state != 7) st.admission_hold_nag_host_ms_valid = false;
+	// Game state 7 leaves the NovaWorld ticket wait (states 3 / 4): the validation watchdog
+	// visits those two alone and the enter result acts only in state 4, so a 0x02 in the wait
+	// spawns the player with no ticket and a later result (either arm) does nothing.
+	// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 - states 3 / 4 @0x4C8B7C / @0x4C8BD4;
+	//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 - the state-4 gate @0x4D1B40]
+	conn.join_ticket_validation = false;
+	conn.player_enter_requested = false;
 	conn.burst.game_state = 7;
 	conn.admission_stage = GameAdmissionStage::Complete;
+	// On the pending list: listed while unlisted, so again after the pump's unlink.
+	// [orig: NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 - the list test @0x4C7E65]
 	conn.self_id_seen = true;
+	conn.spawn_queue_unlinked = false;
 }
 
 // See header. Each admission record of the datagram reaches its handler in order, as retail's
@@ -568,9 +601,10 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 					const uint32_t reject_dpc = Server_ValidatePlayerJoinRequest(config,
 							inputs.server_ctx, conn, roster, message.payload);
 					if (reject_dpc != 0) {
-						(void)stage_join_gate_reject(conn, reject_dpc);
-						conn.admission_stage = GameAdmissionStage::Rejected;
-						return {};
+						// The handler queues the description and returns, the net player
+						// still in game state 1: the walk goes on (reject_join_record).
+						if (!reject_join_record(conn, reject_dpc)) return {};
+						break;
 					}
 				}
 				replies.push_back(make_protocol_message(s2c::INIT, {}));
@@ -598,9 +632,9 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 						conn.join_spectator_request == 0 &&
 						!strutil::iequals(conn.join_password, config.side_a_password) &&
 						!strutil::iequals(conn.join_password, config.side_b_password)) {
-					(void)stage_join_gate_reject(conn, 17);
-					conn.admission_stage = GameAdmissionStage::Rejected;
-					return {};
+					// The net player stays in game state 2, so a later 0x01 is tested again.
+					if (!reject_join_record(conn, 17)) return {};
+					break;
 				}
 				// State 3 under the ticket gate, which returns with no probe: the enter result's
 				// success sends it (Server_ApplyPlayerEnterResult). Else state 6 and the probe
@@ -715,7 +749,7 @@ void broadcast_player_sync_on_join(const GameConfig &config,
 	// like the other broadcast handlers (0x49 relay / the leave removal); the per-connection
 	// flush frames it with that connection's own sequencing.
 	// A bodyless row (its body did not spawn, D-NET-NEW-L1-10) serializes the 0x8000
-	// header alone [orig: NetPacket_SerializePlayerSync0x46 - the entity test @0x505ede,
+	// header alone [orig: NetPacket_SerializePlayerSync0x46 - the entity's null test @0x505EDC..0x505EDE,
 	// 0x8000 @0x505ee0, the early return @0x505f37].
 	const PlayerReplicationState rep = make_rep_state(config, joined, world);
 	const std::vector<uint8_t> body = joined.link.owned_entity.valid()

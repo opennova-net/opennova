@@ -2920,6 +2920,9 @@ bool check_listen_host_own_slot_takes_no_quartet_or_family() {
 	ctx.np_protocol.connection_list.push_back(std::move(peer));
 	auto &self = ctx.np_protocol.connection_list.front();
 	self.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	// The pump's add unlinked it: off the pending list, which the pump tests alone
+	// (D-NET-NEW-L1-24) [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - @0x4C8E68].
+	self.spawn_queue_unlinked = true;
 	self.burst.spawned = true;
 	self.link.owned_entity = host_player;
 	self.reply.player_name = "ListenHost";

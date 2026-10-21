@@ -10,7 +10,11 @@
 // again at a completed one; each admission record of a datagram reaches its handler in order,
 // the records after the completing one the in-match switch. A game record ahead of the admission
 // reaches its handler, whose server-slot gate (+0xC0, set only by the add) answers nothing: the
-// node stays (the 0x0A, 0x2F and 0x0B pinned).
+// node stays (the 0x0A, 0x2F and 0x0B pinned). The same gate holds past the 0x02 until the
+// spawn pump's add: a 0x33 behind the completing 0x02 answers nothing (the 0x60 only once the
+// slot is bound). A reject queues the description and returns with the game state kept, so the
+// walk goes on: a later 0x01 is tested again (the first description wins, sent once) and a 0x02
+// behind a 17 reject completes the admission.
 // [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2` @0x512EF1,
 //  `cmp [edi+0C0h], 0` @0x512EFE, the two lengths @0x512F0B..0x512F3B, the JSR test @0x512F3D,
 //  _stricmp(JSP, A) @0x512F52 and (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent
@@ -24,6 +28,10 @@
 //  NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260 (the slot @0x513280..0x513288);
 //  NapiNPServerMsg_PlayerJoinRequest @0x51AB10 (the slot @0x51AB30..0x51AB38);
 //  NapiNPServerMsg_HandlePlayerLoadout @0x515790 (the slot @0x5157CF..0x5157DB);
+//  NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230 (the slot @0x515250..0x515258);
+//  CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 (the sent byte @0x4C7F58..0x4C7F5F, the
+//  first-wins slot @0x4C7FF2..0x4C8004); CNapiNPConnection_ParseMessages @0x625BC0 (the record
+//  walk @0x625DF5..0x625F1B);
 //  Server_ValidatePlayerJoinRequest @0x512100 (its side-password leg only under BuildFlags & 4,
 //  `test al, 4` @0x51249A, with JSR 0 @0x5124A2)]
 
@@ -109,7 +117,8 @@ void run_form_post(const Case &c) {
 		reject.dc = 2;
 		reject.dpc = 17;
 		CHECK(replies.empty());
-		CHECK(conn.admission_stage == inmatch::GameAdmissionStage::Rejected);
+		// The handler returns with the net player still in game state 2: the stage is kept.
+		CHECK(conn.admission_stage == inmatch::GameAdmissionStage::AwaitFormPost);
 		CHECK(conn.host_disconnect_sent);
 		CHECK(wire.client_recv(d) && d.tag == hightag::DESCRIPTION_PACKET &&
 				d.body == connection_description_to_bytes(reject));
@@ -250,9 +259,13 @@ void test_the_echo_has_no_gate() {
 	CHECK(run.stage == S::Complete && run.game_state == 7 && run.watermark == 0);
 }
 
-// Game state 7 zeroes the net player's hold-nag stamp (+0x24): a node the spawn pump held and
-// nagged a moment ago is nagged again at the next hold after a repeated 0x02.
+// Entering game state 7 from another state zeroes the net player's hold-nag stamp (+0x24); the
+// setter returns early on an unchanged state, so a 0x02 to a node already in 7 keeps it (the
+// held-node case: join_leg's run_a_repeated_echo_keeps_the_held_nag_stamp).
+// [orig: CNetPlayer_SetGameState @0x4C4060 - `cmp [esi+0A0h], ebp` @0x4C4074, `jz` @0x4C407D,
+//  case 7 @0x4C4184]
 void test_the_echo_zeroes_the_nag_stamp() {
+	for (const uint8_t from : {uint8_t{0}, uint8_t{9}, uint8_t{7}}) {
 	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
 	inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
@@ -264,13 +277,21 @@ void test_the_echo_zeroes_the_nag_stamp() {
 			w::EntityHandle{}, false));
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
 	conn.admission_stage = inmatch::GameAdmissionStage::Complete;
+	conn.burst.game_state = from;
 	conn.reply.admission_hold_nag_host_ms = 4000;
 	conn.reply.admission_hold_nag_host_ms_valid = true;
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &ctx;
 	(void)inmatch::dispatch_session_replies(ctx.config, conn, {make_protocol_message(0x02, {})}, 7,
 			ctx.np_protocol.connection_list, world.get(), inputs);
-	CHECK(!conn.reply.admission_hold_nag_host_ms_valid);
+	CHECK(conn.burst.game_state == 7);
+	if (from != 7) {
+		CHECK(!conn.reply.admission_hold_nag_host_ms_valid);
+	} else {
+		CHECK(conn.reply.admission_hold_nag_host_ms_valid &&
+				conn.reply.admission_hold_nag_host_ms == 4000);
+	}
+	}
 }
 
 void test_each_admission_record_reaches_its_handler() {
@@ -312,6 +333,83 @@ void test_each_admission_record_reaches_its_handler() {
 			run.stage == S::AwaitPaddingEcho);
 }
 
+// Past the completing 0x02 and ahead of the spawn pump's add the net player has no server slot:
+// a 0x33 there answers nothing; once the add binds the slot it is answered with its 0x60.
+void test_records_ahead_of_the_add_answer_nothing() {
+	using S = inmatch::GameAdmissionStage;
+	AdmissionRun run = run_admission(S::AwaitPaddingEcho,
+			{make_protocol_message(0x02, {}),
+					make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0))});
+	CHECK(game_tags(run.replies) == kCompletion && run.stage == S::Complete);
+	run = run_admission(S::Complete,
+			{make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0))});
+	CHECK(run.replies.empty());
+
+	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+	inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.world = world.get();
+	ns::LoopbackChannel wire;
+	ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
+			20, inmatch::NapiNPConnection::kTypeServerSide, &wire, ns::TransportMode::Client,
+			w::EntityHandle{}, false));
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	conn.admission_stage = S::Complete;
+	conn.phase = inmatch::ConnectionPhase::PlayerAdded; // the add bound the slot
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(ctx.config,
+			conn, {make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0))}, 7,
+			ctx.np_protocol.connection_list, world.get(), inputs);
+	CHECK(game_tags(replies) == (std::vector<uint8_t>{s2c::FILE_TRANSFER_CHUNK}));
+}
+
+// A reject queues the description and returns with the game state kept: a second 0x01 in the
+// datagram is tested again (no second description: the first wins and is sent once), and a
+// 0x02 behind the reject completes the admission.
+void test_a_reject_does_not_end_the_walk() {
+	using S = inmatch::GameAdmissionStage;
+	for (const bool echo_behind : {false, true}) {
+		auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+		world->crt_rand.seed(0x1234u);
+		inmatch::NapiNPServerCtx ctx;
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.transport_mode = inmatch::NetworkType::Lan;
+		ctx.world = world.get();
+		ctx.config.side_a_password = "Alpha";
+		ns::LoopbackChannel wire;
+		ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
+				20, inmatch::NapiNPConnection::kTypeServerSide, &wire, ns::TransportMode::Client,
+				w::EntityHandle{}, false));
+		inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+		conn.admission_stage = S::AwaitFormPost;
+		conn.join_password = "wrong";
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &ctx;
+		std::vector<ProtocolMessage> records{make_protocol_message(0x01, {0x00}),
+				make_protocol_message(echo_behind ? 0x02 : 0x01, {0x00})};
+		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
+				ctx.config, conn, records, 7, ctx.np_protocol.connection_list, world.get(), inputs);
+		DisconnectEvent reject;
+		reject.ds = 1;
+		reject.dc = 2;
+		reject.dpc = 17;
+		ns::Datagram d;
+		CHECK(wire.client_recv(d) && d.tag == hightag::DESCRIPTION_PACKET &&
+				d.body == connection_description_to_bytes(reject));
+		CHECK(!wire.client_recv(d)); // one description
+		CHECK(conn.host_disconnect_sent);
+		if (echo_behind) {
+			CHECK(game_tags(replies) == kCompletion);
+			CHECK(conn.admission_stage == S::Complete && conn.burst.game_state == 7);
+		} else {
+			CHECK(replies.empty() && conn.admission_stage == S::AwaitFormPost);
+		}
+	}
+}
+
 } // namespace
 
 int main() {
@@ -320,6 +418,8 @@ int main() {
 	test_the_echo_has_no_gate();
 	test_each_admission_record_reaches_its_handler();
 	test_the_echo_zeroes_the_nag_stamp();
+	test_records_ahead_of_the_add_answer_nothing();
+	test_a_reject_does_not_end_the_walk();
 	std::printf("join_form_post_gate: %d failure(s)\n", g_failures);
 	return g_failures == 0 ? 0 : 1;
 }

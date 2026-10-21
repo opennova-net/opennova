@@ -65,7 +65,8 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 //  @0x502B30 reads the row]
 std::optional<uint8_t> Server_ReservePlayerSlot(
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		uint32_t slot_capacity, PlayerRowFreeTicks *free_ticks = nullptr);
+		uint32_t slot_capacity, PlayerRowFreeTicks *free_ticks = nullptr,
+		const std::vector<OrphanedPlayerRow> *orphaned = nullptr);
 
 // The server tick's tail walk's arm for an inactive row: its free-tick count
 // steps once, saturating at 0x7FFFFFFF (D-NET-351). A row is active while a

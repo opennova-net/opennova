@@ -1287,17 +1287,14 @@ void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const 
 				ctx.np_protocol.connection_list, ctx.world, dispatch_inputs);
 	}
 	if (conn.admission_stage == GameAdmissionStage::Rejected) {
-		// A game-layer join-gate failure that STAGED retail's description punt
-		// (the spectator DPC 14/15/16 legs) must retain the node: the owner
-		// flushes the reliable record on its next boundary and the punted
-		// joiner answers with the CLIENT_GOODBYE burst that performs the real
-		// teardown. [orig: the @0x512aa0 failure return keeps the connection;
-		// teardown is the client's goodbye or the receive reap]
+		// A join-gate reject that staged retail's description keeps the node in its stage and
+		// never reaches here: the records behind it went on through their handlers, and the
+		// punted joiner's CLIENT_GOODBYE burst (or the receive reap) performs the real teardown
+		// (reject_join_record, D-NET-NEW-L1-24). [orig: the @0x512aa0 failure return keeps the
+		// connection] Only a reject whose description could not be staged (a node with no
+		// remote transport) is Rejected, and releases the node at once. A game record ahead of
+		// the admission is no reject: its handler's slot gate answers nothing and keeps the node.
 		if (conn.host_disconnect_sent) return;
-		// A reject whose description could not be staged (a node with no remote
-		// transport) releases the node at once. A game record ahead of the
-		// admission is no reject: its handler's slot gate answers nothing and
-		// keeps the node (dispatch_admission, D-NET-NEW-L1-24).
 		if (teardown_connection(ctx, peer, nullptr)) {
 			HostAcceptEvent ev;
 			ev.kind = HostAcceptEvent::Kind::PeerGoodbye;

@@ -147,6 +147,9 @@ void test_a_remote_0x75_byte_reads_the_connection_latch() {
 	inmatch::NapiNPConnection remote;
 	remote.type = 1;
 	remote.connection_id = 3;
+	// A joined player's server slot is bound: the 0x47 handler tests it first (D-NET-NEW-L1-24)
+	// [orig: NapiNPServerMsg_0x047_SendEntityState @0x510ED0 - the slot @0x510EE7..0x510EEF].
+	remote.phase = inmatch::ConnectionPhase::PlayerAdded;
 	remote.admission_stage = inmatch::GameAdmissionStage::Complete;
 	remote.assigned_team = 2;
 	remote.assigned_team_valid = true;

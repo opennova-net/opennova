@@ -669,8 +669,9 @@ struct NapiNPConnection {
 	bool join_ticket_validation = false;
 	// NetPlayer game state 4 (the NovaWorld ticket wait): the
 	// ClientPlayerEnterRequest went to the service; admitted = its result was
-	// success (state 6), and the spawn pump holds the player until then. The
-	// deadline base stays join_validated_host_ms.
+	// success (state 6), which sends the probe. A C2S 0x02 (game state 7) leaves
+	// the wait: it clears this and join_ticket_validation (complete_admission).
+	// The deadline base stays join_validated_host_ms.
 	// [orig: CNetPlayer_SetGameState(player, 4) @0x4C8BCA;
 	//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — state-4 gate
 	//  @0x4D1B3E, SetGameState(6) @0x4D1C11]
@@ -727,10 +728,12 @@ struct NapiNPConnection {
 	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches. LAN latches the
 	// host-assigned id after admission 0x02; a later 0x48 echo may restamp it (NovaWorld supplies it).
 	bool self_id_seen = false;             // true only once player admission has completed
-	// The spawn pump took the node off its pending list, ahead of its add: it never walks it
-	// again, whether the add succeeded or failed (D-NET-715).
+	// The spawn pump took the node off its pending list, ahead of its add: it walks it again
+	// only once a repeated C2S 0x02 lists it again, whether the add succeeded or failed
+	// (D-NET-715; the re-add, D-NET-NEW-L1-24). The list's members: self_id_seen and not this.
 	// [orig: CNapiServer_ProcessPendingPlayerSpawns - the pending test (net player +0x18)
-	//  @0x4C8E68..0x4C8E6C, NapiNode_UnlinkFromList @0x4C8FF6]
+	//  @0x4C8E68..0x4C8E6C, NapiNode_UnlinkFromList @0x4C8FF6 (cleared @0x4C6054);
+	//  NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 (lists while unlisted @0x4C7E65)]
 	bool spawn_queue_unlinked = false;
 	bool world_stream_announced = false;   // F3 edge-latch (PeerEnteredWorldStreaming fires once)
 	bool spawned_announced = false;        // edge-latch (PeerSpawned fires once)

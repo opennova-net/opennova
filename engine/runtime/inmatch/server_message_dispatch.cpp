@@ -489,6 +489,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 		// Protocol-control + settings-update frames are not gameplay messages (the original filters
 		// these before the gameplay dispatch). [orig: dispatch_in_match_session_messages gate]
 		if (msg.flags.settings_update || msg.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
+		// Ahead of the spawn pump's add the net player has no server slot (+0xC0, which only
+		// the add sets), and every handler of the server table but the admission's three is a
+		// bare return or returns at a zero slot: the records that follow a completing 0x02
+		// before the add (the same datagram, or a later one ahead of the pump) answer nothing,
+		// as does every record of a node whose add failed (D-NET-NEW-L1-24).
+		// [orig: the server table @0x82B5D8..0x82BA47; e.g. NapiNPServerMsg_HandleReplayRequest
+		//  (0x33) @0x515230 - the slot @0x515250..0x515258; NapiNPServerMsg_HandleVehicleDetach
+		//  (0x27) @0x4FC980 -> @0x435D0E..0x435D15; Server_PlayerAdd @0x51CBC0, the slot stores
+		//  @0x51CC52 / @0x51CD51]
+		if (msg.tag > 0x02 && !player_slot_active(conn)) continue;
 
 		switch (msg.tag) {
 			case c2s::JOIN:

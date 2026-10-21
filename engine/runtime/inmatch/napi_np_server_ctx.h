@@ -232,6 +232,20 @@ struct StagedEntityUpdateBatch {
 // One count per player-slot row (at most 251 rows, Server_InitNewRoundState's clamp).
 using PlayerRowFreeTicks = std::array<int32_t, 256>;
 
+// A player row a later add of the same connection left behind: a repeated C2S 0x02 lists the
+// node again and the spawn pump's add picks it a fresh row and rebinds the net player's server
+// slot there, so the earlier row stays active (+4) with its net player (+0x1C) and its body,
+// which no disconnect reaches (the leave frees the net player's current row). It counts in the
+// free-row pick, the free-tick walk, the alive count and the team counts (D-NET-NEW-L1-24).
+// [orig: Server_PlayerAdd @0x51CBC0 - PlayerSlot_PickFreeSlot (the call @0x51CC95), +0x1C
+//  @0x51CD4E, +0xC0 rebound @0x51CD51; Server_CountPlayersOnTeam @0x501630 (@0x501650,
+//  @0x501656)]
+struct OrphanedPlayerRow {
+	uint8_t slot = 0;
+	world::EntityHandle body{};
+	uint8_t team = 0; // the row's +0x1A0
+};
+
 struct NapiNPServerCtx {
 	NetworkType transport_mode = NetworkType::Lan; // [orig +0x50]
 	SocketMode socket_state = SocketMode::Socketless; // [orig +0x54]
@@ -722,6 +736,8 @@ struct NapiNPServerCtx {
 	//  PlayerSlot_PickFreeSlot @0x4FD7D0..0x4FD7EE; the memsets
 	//  Server_AllocatePlayerSlotTable @0x51C1CB, Server_PlayerAdd @0x51CD06]
 	PlayerRowFreeTicks player_row_free_ticks{};
+	// The rows a re-add orphaned (OrphanedPlayerRow); the table's allocation clears them.
+	std::vector<OrphanedPlayerRow> orphaned_player_rows;
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.

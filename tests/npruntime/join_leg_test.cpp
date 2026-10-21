@@ -1001,6 +1001,182 @@ bool run_the_add_queues_its_records_ahead_of_a_later_list() {
 	              "the producer does not send them again at the boundary");
 }
 
+// D-NET-NEW-L1-24 (Q7-31 (b), leg (a)): the C2S 0x02 lists the node on the spawn pump's pending
+// list whenever it is unlisted, and the pump tests only that membership: a repeated 0x02 after
+// the add lists the joiner again and the next pump adds it a second time. The add picks a fresh
+// row and rebinds the net player's server slot there; the pump's 0x03 / 0x05 / 0x04 (the new
+// row) / 0x7B go out again, game state 8, slot state 1. The first row stays active with its body
+// (orphaned): the free-tick walk and the pick pass it over and the alive count keeps it.
+// [orig: NapiNPServerMsg_0x002 @0x512FD0 - NapiNPPlayer_MoveNodeToEntityList called @0x513193
+//  (lists while unlisted @0x4C7E65), game state 7 @0x51319C; CNapiServer_ProcessPendingPlayerSpawns
+//  @0x4C8DC0 - the membership test @0x4C8E68, the unlink @0x4C8FF6 (NapiNode_UnlinkFromList
+//  clears it @0x4C6054), the 0x03 @0x4C9034, the add @0x4C903A, 0x05 @0x4C909D, 0x04 @0x4C90D7,
+//  0x7B @0x4C9111, game state 8 @0x4C911A, slot state 1 @0x4C9123; Server_BuildPlayerInfoAndAdd
+//  @0x51D560 -> Server_PlayerAdd's PlayerSlot_PickFreeSlot (the call @0x51CC95), the row memset
+//  @0x51CD06, +0xC0 rebound @0x51CD51]
+bool run_a_repeated_echo_adds_the_player_again() {
+	JoinFixture f(/*with_existing=*/false);
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.reply.admission_metadata_pushed = true; // its C2S 0x02 was answered
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the joiner")) return false;
+	const uint8_t first_row = j.reply.player_slot;
+	const w::EntityHandle first_body = j.link.owned_entity;
+	(void)JoinFixture::drain(f.joiner_transport);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 0 &&
+	                    j.reply.player_slot == first_row,
+	            "off the pending list: no second add without a 0x02")) return false;
+	// The repeated 0x02: its records (behind the dictation's settings), game state 7, the node
+	// listed again.
+	const std::vector<uint8_t> echo = f.send(0x02);
+	const std::vector<uint8_t> echo_records{opennova::s2c::SYNC_STATE, opennova::s2c::PLAYER_NAME,
+			opennova::s2c::FULL_PLAYER_INFO, opennova::s2c::SYNC_TICK};
+	if (!expect(echo.size() >= echo_records.size() &&
+	                    std::vector<uint8_t>(echo.end() - 4, echo.end()) == echo_records &&
+	                    j.burst.game_state == 7 && !j.spawn_queue_unlinked,
+	            "the 0x02's records again, game state 7, listed again")) return false;
+	// The next pump adds the player again on a fresh row.
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the pump adds the listed node again")) return false;
+	if (!expect(j.reply.player_slot != first_row && j.link.owned_entity.valid() &&
+	                    j.link.owned_entity != first_body &&
+	                    j.phase == inmatch::ConnectionPhase::PlayerAdded &&
+	                    j.burst.game_state == 8 && j.slot_state == inmatch::PlayerSlotState::Added &&
+	                    j.spawn_queue_unlinked,
+	            "a fresh row and body, game state 8, slot state 1, off the list")) return false;
+	const std::vector<uint8_t> tags = JoinFixture::drain(f.joiner_transport);
+	auto at = [&](uint8_t tag) {
+		for (std::size_t i = 0; i < tags.size(); ++i)
+			if (tags[i] == tag) return i;
+		return tags.size();
+	};
+	const std::size_t signal = at(opennova::s2c::GAME_START_SIGNAL);
+	const std::size_t slot = at(0x04);
+	const std::size_t info = at(opennova::s2c::FULL_PLAYER_INFO);
+	if (!expect(!tags.empty() && tags.front() == opennova::s2c::SYNC_TICK && signal < slot &&
+	                    slot < info && info < tags.size(),
+	            "the second burst: the 0x03, 0x05, 0x04 and 0x7B")) return false;
+	const std::vector<opennova::ProtocolMessage> records = inmatch::build_spawn_pump_metadata(
+			f.ctx->config, f.ctx->mission_text_title, f.ctx->session_title, j,
+			f.ctx->np_protocol.connection_list, f.world.get(), f.ctx->rotation, &f.ctx->host_slot);
+	const opennova::ProtocolMessage *assignment = nullptr;
+	for (const opennova::ProtocolMessage &m : records)
+		if (m.tag == 0x04) assignment = &m;
+	if (!expect(assignment != nullptr && assignment->payload.size() == 24 &&
+	                    assignment->payload[17] == j.reply.player_slot,
+	            "the second 0x04 names the new row")) return false;
+	// The first row is orphaned: active, its body in the world.
+	const std::vector<inmatch::OrphanedPlayerRow> &orphans = f.ctx->orphaned_player_rows;
+	if (!expect(orphans.size() == 1 && orphans[0].slot == first_row &&
+	                    orphans[0].body == first_body &&
+	                    f.world->registry.get(first_body) != nullptr,
+	            "the first row is orphaned with its body")) return false;
+	const int32_t before = f.ctx->player_row_free_ticks[first_row];
+	inmatch::Server_AdvanceFreeRowTicks(*f.ctx);
+	if (!expect(f.ctx->player_row_free_ticks[first_row] == before,
+	            "the free-tick walk passes the orphaned row over (it is active)")) return false;
+	const uint8_t second_row = j.reply.player_slot; // j is not used past the list's growth
+	inmatch::NapiNPConnection &next = f.ctx->np_protocol.connection_list.emplace_back();
+	next.type = inmatch::NapiNPConnection::kTypeServerSide;
+	next.peer = opennova::PeerAddr{0x0100007Fu, 30003};
+	next.connection_id = inmatch::kFirstJoinerDcb + 2;
+	next.phase = inmatch::ConnectionPhase::Joined;
+	next.admission_stage = inmatch::GameAdmissionStage::Complete;
+	next.self_id_seen = true;
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	const inmatch::NapiNPConnection &added = f.ctx->np_protocol.connection_list.back();
+	return expect(added.phase == inmatch::ConnectionPhase::PlayerAdded &&
+	                      added.reply.player_slot != first_row &&
+	                      added.reply.player_slot != second_row,
+	              "the next joiner's pick passes the orphaned row over");
+}
+
+// D-NET-NEW-L1-24 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
+// / 4) enters game state 7 and lists the node: the validation watchdog visits states 3 / 4 alone,
+// so it no longer punts it, the pump adds the player with no ticket, and the enter result (its
+// state-4 gate on both arms) then does nothing: no probe, no NWPENTERFAIL record.
+// [orig: NapiNPServerMsg_0x002 @0x512FD0 - game state 7 @0x51319C, the listing called @0x513193;
+//  CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 - states 3 / 4 @0x4C8B7C / @0x4C8BD4;
+//  CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 (no game-state test); CNapiGameSession_
+//  HandlePlayEnterResponse @0x4D1940 - the state-4 gate @0x4D1B40]
+bool run_an_echo_in_the_ticket_wait_spawns_without_a_ticket() {
+	JoinFixture f(/*with_existing=*/false);
+	f.ctx->novaworld_join_tickets_armed = true;
+	inmatch::NapiNPConnection &j = f.joiner();
+	j.self_id_seen = false; // not listed: its 0x01 held it in the wait
+	j.admission_stage = inmatch::GameAdmissionStage::AwaitPlayEnter;
+	j.join_ticket_validation = true;
+	j.player_enter_requested = true; // the watchdog's enter request went (game state 4)
+	j.join_validated_host_ms = f.ctx->np_protocol.host_run_duration_ms;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 0,
+	            "in the wait the node is not listed")) return false;
+	const std::vector<uint8_t> echo = f.send(0x02);
+	if (!expect(!echo.empty() && j.burst.game_state == 7 &&
+	                    j.admission_stage == inmatch::GameAdmissionStage::Complete &&
+	                    !j.join_ticket_validation && !j.player_enter_pending(),
+	            "the 0x02 completes the admission and leaves the wait")) return false;
+	// Past the wait's 120 s deadline the watchdog no longer visits it.
+	f.ctx->np_protocol.host_run_duration_ms = j.join_validated_host_ms + 0x1D4C1u;
+	inmatch::Server_CheckPlayerTimeouts(*f.ctx);
+	if (!expect(!j.host_disconnect_sent, "no NWJTICKTMOUT punt")) return false;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+	                    j.phase == inmatch::ConnectionPhase::PlayerAdded && j.burst.game_state == 8,
+	            "the pump adds the player with no ticket")) return false;
+	(void)JoinFixture::drain(f.joiner_transport);
+	if (!expect(!inmatch::Server_ApplyPlayerEnterResult(*f.ctx, j.connection_id,
+	                    /*success=*/false, 5, f.tick) &&
+	                    !j.host_disconnect_sent,
+	            "a failed enter result afterwards kicks nobody")) return false;
+	const bool applied = inmatch::Server_ApplyPlayerEnterResult(*f.ctx, j.connection_id,
+			/*success=*/true, 0, f.tick);
+	return expect(!applied && !contains(JoinFixture::drain(f.joiner_transport),
+	                                    opennova::s2c::JOIN_PADDING_PROBE),
+	              "a successful one sends no probe");
+}
+
+// V-L1-s13 (row 0c): the setter returns early on an unchanged game state, so the hold-nag stamp
+// (+0x24) clears only on a change into 7: a node the spawn pump holds is already in 7, a repeated
+// 0x02 keeps its stamp and the next 0x03 still waits until the stamp is over 1000 ms old; a 0x02
+// from another state (the re-list after an add, 8 -> 7) clears it.
+// [orig: CNetPlayer_SetGameState @0x4C4060 - `cmp [esi+0A0h], ebp` @0x4C4074, `jz` @0x4C407D,
+//  case 7 @0x4C4184; CNapiServer_ProcessPendingPlayerSpawns - the stamp's tests
+//  @0x4C8F7A..0x4C8F8D, the restamp @0x4C8FD1]
+bool run_a_repeated_echo_keeps_the_held_nag_stamp() {
+	SlotFixture f;
+	f.ctx->config.max_players = 1; // the cap holds the second joiner
+	inmatch::NapiNPConnection &first = f.admit(31401);
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(first.phase >= inmatch::ConnectionPhase::PlayerAdded, "the first joiner is added"))
+		return false;
+	inmatch::NapiNPConnection &held = f.admit(31402);
+	held.burst.game_state = 7; // its 0x02 entered 7
+	f.ctx->np_protocol.host_run_duration_ms = 5000;
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(held.reply.admission_hold_nag_pending && held.reply.admission_hold_nag_host_ms_valid &&
+	                    held.reply.admission_hold_nag_host_ms == 5000,
+	            "the held node is nagged and stamped")) return false;
+	held.reply.admission_hold_nag_pending = false; // its 0x03 went
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = f.ctx.get();
+	std::vector<opennova::ProtocolMessage> replies;
+	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/3, inputs, replies);
+	if (!expect(held.burst.game_state == 7 && held.reply.admission_hold_nag_host_ms_valid &&
+	                    held.reply.admission_hold_nag_host_ms == 5000,
+	            "a repeated 0x02 in game state 7 keeps the stamp")) return false;
+	f.ctx->np_protocol.host_run_duration_ms = 5500;
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(!held.reply.admission_hold_nag_pending, "no 0x03 within 1000 ms of the stamp"))
+		return false;
+	f.ctx->np_protocol.host_run_duration_ms = 6001;
+	(void)inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world);
+	if (!expect(held.reply.admission_hold_nag_pending && held.reply.admission_hold_nag_host_ms == 6001,
+	            "the next 0x03 past 1000 ms")) return false;
+	held.burst.game_state = 8;
+	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/4, inputs, replies);
+	return expect(!held.reply.admission_hold_nag_host_ms_valid,
+	              "a 0x02 from another state (8 -> 7) clears the stamp");
+}
+
 int main() {
 	int failures = 0;
 	if (!run_track_waits_for_player_sync_request()) ++failures;
@@ -1021,6 +1197,9 @@ int main() {
 	if (!run_a_held_joiner_has_no_team()) ++failures;
 	if (!run_a_bodyless_add_keeps_its_row()) ++failures;
 	if (!run_the_add_queues_its_records_ahead_of_a_later_list()) ++failures;
+	if (!run_a_repeated_echo_adds_the_player_again()) ++failures;
+	if (!run_an_echo_in_the_ticket_wait_spawns_without_a_ticket()) ++failures;
+	if (!run_a_repeated_echo_keeps_the_held_nag_stamp()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;
