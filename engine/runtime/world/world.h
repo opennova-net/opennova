@@ -1197,6 +1197,12 @@ public:
     // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
     // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     RoundSim round_sim;
+    // The authority's count of deployed players (g_ServerNumPlayers @0xC8FC54): every
+    // joined slot whose body is not hidden, recounted each periodic second by the host's
+    // server tick; never written on a client or in single player. The heat seekers' flare
+    // roll reads it [orig: Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B), called
+    // from Server_TickUpdate @0x51D7E0 (@0x51DF8C); Weapon_GetFlareDeflectChance @0x5382A0].
+    int32_t server_num_players = 0;
 
     // The explosion queue + AoE damage, the death-piece pool, the per-item death
     // traits, and the destruction presentation events (world/destruction.h;

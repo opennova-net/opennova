@@ -6,34 +6,82 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
+namespace {
+
+// The case-11 roll's chance by the server's deployed players: 10 for at most one, 50 for
+// two, 80 for three, 100 above [orig: Weapon_GetFlareDeflectChance @0x5382A0 (@0x5382A0..0x5382C8)].
+int32_t flare_deflect_chance(int32_t players) {
+    if (players <= 1) return 10;
+    if (players == 2) return 50;
+    return players == 3 ? 80 : 100;
+}
+
+// The MP heat case drops an air flare (a shell projectile: its motor is the shell bounce,
+// a ground flare's being the jump thunk) whose source is no player from a player's missile
+// unless the rotate-LCG's draw admits it: (low 16 bits >> 2) % 101 under the chance, a
+// chance of 100 drawing nothing [orig: Weapon_CalcDamageByType @0x539140 - the
+// Entity_IsShellProjectile call @0x53938D (@0x4E4040: +0x1C4 == Entity_UpdateShellBounce),
+// the source's +368 and Flags 0x100 @0x539399..0x5393AB, the attacker's +368 and its Flags
+// 0x100 @0x5393AD..0x5393C1, the chance @0x5393C3..0x5393D1, the draw @0x5393D3..0x539415;
+// the drop is 0x7FFFFFFF @0x539433].
+bool flare_roll_drops(World &world, const LiveRound &flare, const Entity *attacker_occupant) {
+    if (flare.motor != ThrowClass::kAirFlare) return false;
+    const Entity *source = world.registry.get(flare.owner);
+    if (source == nullptr || ((source->flags | source->engine_flags) & kEntityFlagPlayer) != 0)
+        return false;
+    if (attacker_occupant == nullptr ||
+            ((attacker_occupant->flags | attacker_occupant->engine_flags) & kEntityFlagPlayer) == 0)
+        return false;
+    const int32_t chance = flare_deflect_chance(world.server_num_players);
+    if (chance == 0) return true;
+    if (chance == 100) return false;
+    const uint16_t draw = static_cast<uint16_t>(world.ai.prng_step_a());
+    return static_cast<int32_t>((draw >> 2) % 101) >= chance;
+}
+
+} // namespace
+
 // The heat-seeker arm of the shared target query, contexts 6 and 11: the
-// pool-0 and pool-1 legs. LOS follows the bounded, stable score sort; the
-// query disables it during scan. NOT ported: the ctx-flag 0x200 projectile-
-// list leg (the 128-entry {entity, ttl} ring ProjectileTargetRing_Update keeps, fed by the
-// shell-bounce update and released at round death, walked through the same
-// validator/score with the MP case-11 Entity_IsShellProjectile deflection
-// roll) -- its feeders, the shell-bounce ring, are absent from the port, so
-// live rounds such as flares never enter the candidate list here.
-// [orig: Entity_SpawnWeaponEffect @0x545840 (ctx flags 0x662 @0x54591b);
-// Entity_FindTargets @0x53a610 -- the pool legs ported, the 0x200 ring leg
-// @0x53acf7..0x53ade0 not; ring ProjectileTargetRing_Update @0x4e70f0, feeders
-// Entity_UpdateShellBounce @0x443e69 / Projectile_ReleaseEffects @0x4e82ea,
-// case-11 deflection arm @0x539385..0x539415; Entity_ValidateWeaponTarget
-// @0x53a400; Weapon_CalcDamageByType @0x539140]
-EntityHandle guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
-                         const AmmoTableEntry &ammo) {
+// pool-0 and pool-1 legs and, for a query carrying the 0x200 flag, the
+// projectile-target ring's leg over its counted records, whose rounds are
+// validated and scored as the pool legs' candidates are: no team filter, a
+// round's fire origin its Position (no TARGET userpoint resolves on a round's
+// def; R * bboxCenter 0 + Position, or Position with no model), its target
+// selector words 0, its Health its item's hp, its heat word its own, and the
+// MP case's air-flare roll. LOS follows the bounded, stable score sort; the
+// query disables it during scan. The Stinger's in-flight acquisition walks the
+// ring here (its air-flare decoy); the player's lock and the launch, which
+// carry 0x200 as well, take a round as their target, the target reference
+// L7-s8 ports. [orig: Entity_SpawnWeaponEffect @0x545840 (ctx flags 0x662
+// @0x54591b); Entity_FindTargets @0x53a610 -- the pool legs, the ring leg
+// @0x53ACF0..0x53ADE0 (the 0x200 test's jz @0x53ACF7, the record test @0x53AD14..0x53AD18, the validate
+// @0x53AD71, the score @0x53AD8E, the 128 cut @0x53ADB0..0x53ADC9);
+// Entity_ValidateWeaponTarget @0x53a400 (the Health test @0x53A414..0x53A460,
+// the selectors @0x53A466..0x53A4C3, the heat leg @0x53A54A..0x53A56E);
+// Entity_ComputeWeaponFireOrigin @0x43B4B0 (@0x43B54F / @0x43B619);
+// Weapon_CalcDamageByType @0x539140 (@0x539385..0x539433)]
+HeatTargetPick guided_heat_target_pick(World &world, const Entity &owner, const AiEntity &body,
+        const AmmoTableEntry &ammo, bool ring_leg, const Entity *attacker_occupant) {
     const Entity *occupant = world.registry.get(owner.primary_occupant);
     const int team = occupant ? occupant->team : owner.team;
     if (ammo.heat_det_range == 0 || (team == 0 && (body.slot.f[1] & 0x200) == 0)) return {};
     int32_t pose[6] = {0, 0, 0, body.heading, body.pitch, body.roll};
     world.ai.weapon_aim_origin(world, body, pose);
-    struct Candidate { EntityHandle handle; int32_t score; };
+    struct Candidate { EntityHandle handle; int32_t round; int32_t score; };
     std::vector<Candidate> candidates;
     candidates.reserve(128);
     const auto descending = [](const Candidate &a, const Candidate &b) { return a.score > b.score; };
+    const auto push = [&](Candidate candidate) {
+        candidates.push_back(candidate);
+        if (candidates.size() == 128) {
+            std::stable_sort(candidates.begin(), candidates.end(), descending);
+            candidates.pop_back();
+        }
+    };
     for (int pool = 0; pool <= 1; ++pool) {
         for (size_t index = 0; index < world.registry.pool_capacity(pool); ++index) {
             const EntityHandle h = EntityHandle::make(pool, static_cast<int>(index));
@@ -59,28 +107,62 @@ EntityHandle guided_heat_target(World &world, const Entity &owner, const AiEntit
             if (world.rules.mp_session) score = io::bam_add(uint16_t(target->heat_sig), score >> 12);
             score = owner.target_selectors.adjust_score(score, target->net_id, target->group_id);
             if (score == INT32_MAX) continue;
-            candidates.push_back({h, score});
-            if (candidates.size() == 128) {
-                std::stable_sort(candidates.begin(), candidates.end(), descending);
-                candidates.pop_back();
+            push({h, -1, score});
+        }
+    }
+    if (ring_leg) {
+        const ProjectileTargetRing &ring = world.round_sim.target_ring;
+        for (int32_t i = 0; i < ring.count; ++i) {
+            const int32_t index = ring.records[static_cast<size_t>(i)].round;
+            if (index < 0) continue;
+            const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(index)];
+            const ThrowableClassRow *row = world.throwables.classes.get(round.item_type_id);
+            const int32_t health = row != nullptr ? row->health_max : 0;
+            if (health <= 0 && int32_t(world.logic_tick) > 16) continue;
+            if (!owner.target_selectors.allows(0, 0)) continue;
+            const int32_t aim[3] = {round.pos.x.q16, round.pos.y.q16, round.pos.z.q16};
+            int32_t metrics[6];
+            const uint32_t arc = AiSystem::weapon_relative_metrics(pose, aim, metrics);
+            if (arc > uint32_t(ammo.boresight_maxang) ||
+                metrics[2] > int32_t(uint32_t(ammo.heat_det_range) << 16) ||
+                metrics[2] >= int32_t(uint32_t(round.heat_sig) << 16)) continue;
+            int32_t score = io::bam_sub(0, static_cast<int32_t>(arc));
+            if (world.rules.mp_session) {
+                if (flare_roll_drops(world, round, attacker_occupant)) continue;
+                score = io::bam_add(round.heat_sig, score >> 12);
             }
+            score = owner.target_selectors.adjust_score(score, 0, 0);
+            if (score == INT32_MAX) continue;
+            push({EntityHandle{}, index, score});
         }
     }
     std::stable_sort(candidates.begin(), candidates.end(), descending);
     for (const Candidate &candidate : candidates) {
-        const Entity *target = world.registry.get(candidate.handle);
         int32_t aim[3];
-        world.ai.weapon_aim_origin(world, *target, aim);
-        if (world.ai.line_of_sight_clear(world, pose, aim, owner.handle, candidate.handle)) return candidate.handle;
+        if (candidate.round >= 0) {
+            const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(candidate.round)];
+            aim[0] = round.pos.x.q16;
+            aim[1] = round.pos.y.q16;
+            aim[2] = round.pos.z.q16;
+        } else {
+            world.ai.weapon_aim_origin(world, *world.registry.get(candidate.handle), aim);
+        }
+        const HeatTargetPick pick{candidate.handle, candidate.round};
+        if (world.ai.line_of_sight_clear(world, pose, aim, owner.handle, candidate.handle)) return pick;
         if (((owner.flags | owner.engine_flags) & kEntityFlagIndoors) != 0) {
             const int32_t zero[3] = {}, offset[3] = {24576, 0, 0};
             int32_t shifted[3];
             collision_matrix_from_euler(body.heading, 0, 0, zero).rotate_point(offset, shifted);
             for (int axis = 0; axis < 3; ++axis) shifted[axis] = io::bam_add(pose[axis], shifted[axis]);
-            if (world.ai.line_of_sight_clear(world, shifted, aim, owner.handle, candidate.handle)) return candidate.handle;
+            if (world.ai.line_of_sight_clear(world, shifted, aim, owner.handle, candidate.handle)) return pick;
         }
     }
     return {};
+}
+
+EntityHandle guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
+        const AmmoTableEntry &ammo) {
+    return guided_heat_target_pick(world, owner, body, ammo, /*ring_leg=*/false, nullptr).entity;
 }
 
 // Aim/range acquisition runs every sixteen ticks. The locked tone is refreshed

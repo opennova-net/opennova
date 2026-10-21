@@ -29,7 +29,8 @@ void ProjectileTargetRing::count_down() {
 	}
 }
 
-// [orig: Projectile_ReleaseEffects @0x4E8280 (the ring release @0x4E82E3..0x4E82F2)]
+// [orig: Projectile_ReleaseEffects @0x4E8280 (the ring release @0x4E82E3..0x4E82F2, the
+//  call @0x4E82EA)]
 void RoundSim::retire_round(LiveRound &round) {
 	if (round.target_ring_slot >= 0)
 		(void)target_ring.update(static_cast<int32_t>(&round - rounds.data()),

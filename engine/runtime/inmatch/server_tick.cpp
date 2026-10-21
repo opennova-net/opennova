@@ -433,6 +433,20 @@ private:
 	NapiNPServerCtx &ctx_;
 };
 
+// The deployed players: every added slot that has joined (state 6) with a body whose
+// hidden bit (Flags 1) is clear; the other arm, +96481 with +97536, has no writer on this
+// host. [orig: Server_CountActivePlayers @0x4FD900 (the walk @0x4FD910..0x4FD949, the store
+//  @0x4FD94B)]
+int32_t Server_CountActivePlayers(const NapiNPServerCtx &ctx, const world::World &world) {
+	int32_t count = 0;
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!player_slot_active(conn) || conn.slot_state != PlayerSlotState::Joined) continue;
+		const world::Entity *body = world.registry.get(conn.link.owned_entity);
+		if (body != nullptr && (body->flags & world::kEntityFlagCarried) == 0) ++count;
+	}
+	return count;
+}
+
 } // namespace
 
 
@@ -1022,6 +1036,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// (2c) The periodic second's slot walk after the capture transaction: the
 	// dead-age counter, the 0x6E, the t35 and t7 punts
 	// [orig: Server_TickUpdate @0x51DFB0..0x51E1A5].
+	// The periodic second's count of deployed players, which the heat seekers' flare roll
+	// reads (World::server_num_players) [orig: Server_TickUpdate @0x51D7E0 (@0x51DF8C)].
+	if (periodic_second) world.server_num_players = Server_CountActivePlayers(ctx, world);
 	if (periodic_second) update_periodic_slot_walk(ctx, world);
 
 	// The last statement of retail's periodic-second block: every player's kit

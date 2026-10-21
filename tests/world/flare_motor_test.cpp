@@ -14,7 +14,9 @@
 #include <memory>
 #include <vector>
 
+#include <base/io/rotating_prng.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/projectile_target_ring.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
@@ -246,6 +248,67 @@ void test_a_ballistic_flare_takes_no_tail_gravity() {
     CHECK(r.vel.x.q16 == q16_mul(0x10000, 0xFC28));
 }
 
+
+// The Stinger's in-flight query walks the ring's counted records: an air flare ahead of the
+// missile wins over no entity, past the MP roll (a player's missile, a flare an AI source
+// fired): chance 100 above three deployed players draws nothing; at two the chance is 50 and
+// one rotate-LCG draw, (low 16 >> 2) % 101 under it, admits it. A missile no player fired
+// draws nothing, and the query without the ring leg finds nothing.
+// [orig: Entity_FindTargets @0x53A610 (@0x53ACF0..0x53ADE0); Weapon_CalcDamageByType
+//  @0x539140 (@0x539385..0x539433); Weapon_GetFlareDeflectChance @0x5382A0]
+void test_the_in_flight_query_takes_an_air_flare() {
+    Rig rig;
+    rig.w.rules.mp_session = true;
+    const int a = rig.fire();
+    const int b = rig.fire();
+    CHECK(a >= 0 && b >= 0 && a != b);
+    if (a < 0 || b < 0) return;
+    LiveRound &flare = rig.round(a);
+    flare.pos.set_q16({150 << 16, 50 << 16, 30 << 16});
+    // The first record lands in slot 1 and the count reads [0, count): two records make the
+    // first one visible.
+    ProjectileTargetRing &ring = rig.w.round_sim.target_ring;
+    flare.target_ring_slot = ring.update(a, -1, 10);
+    rig.round(b).target_ring_slot = ring.update(b, -1, 10);
+    CHECK(ring.count == 2 && ring.records[1].round == a);
+    AmmoTableEntry stinger;
+    stinger.heat_det_range = 500;
+    stinger.boresight_maxang = 0x10000000;
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.team = 1;
+    shooter.flags = kEntityFlagPlayer;
+    shooter.health = 100;
+    shooter.position.set_q16({50 << 16, 50 << 16, 30 << 16});
+    Entity seeker = shooter;
+    AiEntity pose;
+    pose.self = &seeker;
+    pose.heading = 0;
+    rig.w.server_num_players = 4;
+    rig.w.ai.prng_a = 0x1234567u;
+    HeatTargetPick pick = guided_heat_target_pick(rig.w, seeker, pose, stinger, true, &shooter);
+    CHECK(pick.round == a && !pick.entity.valid());
+    CHECK(rig.w.ai.prng_a == 0x1234567u);
+    CHECK(guided_heat_target_pick(rig.w, seeker, pose, stinger, false, &shooter).round == -1);
+    // Two players: one draw against 50.
+    rig.w.server_num_players = 2;
+    for (uint32_t seed : {0x1234567u, 0x89ABCDEFu, 0x0F0F0F0Fu}) {
+        rig.w.ai.prng_a = seed;
+        uint32_t state = seed;
+        const uint16_t draw = opennova::io::rotating_prng_next16(state);
+        const bool kept = ((draw >> 2) % 101) < 50;
+        pick = guided_heat_target_pick(rig.w, seeker, pose, stinger, true, &shooter);
+        CHECK(rig.w.ai.prng_a == state);
+        CHECK(pick.round == (kept ? a : -1));
+    }
+    // An AI's missile: no roll.
+    Entity ai_shooter = shooter;
+    ai_shooter.flags = 0;
+    rig.w.ai.prng_a = 0x1234567u;
+    CHECK(guided_heat_target_pick(rig.w, seeker, pose, stinger, true, &ai_shooter).round == a);
+    CHECK(rig.w.ai.prng_a == 0x1234567u);
+}
+
 } // namespace
 
 int main() {
@@ -254,6 +317,7 @@ int main() {
     test_the_ground_flare_init();
     test_the_bounces_the_eighth_and_the_release();
     test_a_ballistic_flare_takes_no_tail_gravity();
+    test_the_in_flight_query_takes_an_air_flare();
     if (failures == 0) std::printf("PASS flare_motor\n");
     return failures == 0 ? 0 : 1;
 }

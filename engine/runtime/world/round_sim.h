@@ -78,6 +78,7 @@ class CollisionWorld;
 class World;
 
 struct AmmoTableEntry; // world/ammo_table.h
+struct AiEntity;       // world/ai.h
 // Shared by live flight and the retail ballistic scope-table solver.
 // [orig: Entity_ApplyDragAndBounceForce @0x4e5ec0, the (proj, 1, 0) flight
 //  call @0x4eaa64]
@@ -377,6 +378,21 @@ struct LiveRound {
 inline bool round_class_motor_bound(const LiveRound &round) {
     return round.guided_family != GuidedFamily::None || round.motor != ThrowClass{};
 }
+
+// The heat-seeker query's winner: an entity, or (the 0x200 leg) a ring round's slot.
+struct HeatTargetPick {
+    EntityHandle entity;
+    int32_t round = -1;
+};
+// The heat-seeker arm of the shared target query (world/local_player_targeting.cpp):
+// `ring_leg` walks the projectile target ring as the 0x200 flag does; `attacker_occupant` is
+// the query entity's +368, which the MP air-flare roll reads.
+HeatTargetPick guided_heat_target_pick(World &world, const Entity &owner, const AiEntity &body,
+        const AmmoTableEntry &ammo, bool ring_leg, const Entity *attacker_occupant);
+// The same without the ring leg (the player's lock and the Stinger's launch until the
+// round-target reference lands).
+EntityHandle guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
+        const AmmoTableEntry &ammo);
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer
 // cadence (@0x4ec79b..0x4ec7b7), but clears the round+0x30 visible-model

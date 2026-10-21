@@ -1107,7 +1107,7 @@ void flare_motor_tick(World &world, RoundSim &sim, LiveRound &r,
     r.vel.y.q16 = vy;                                      // @0x443E59
     r.vel.z.q16 = vz;
     // The ring record [orig: ProjectileTargetRing_Update(round, +0x29C, 10)
-    //  @0x443E5F..0x443E7B].
+    //  @0x443E5F..0x443E7B, the call @0x443E69].
     r.target_ring_slot = sim.target_ring.update(
             static_cast<int32_t>(&r - sim.rounds.data()), r.target_ring_slot, 10);
     // The heat word: (heat << 16) times 0xFD70, its high half arithmetic

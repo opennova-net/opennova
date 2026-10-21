@@ -6,7 +6,6 @@
 #include <algorithm>
 
 namespace opennova::world {
-EntityHandle guided_heat_target(World &, const Entity &, const AiEntity &, const AmmoTableEntry &);
 namespace {
 // The RAW Position copies: the Javelin launch seed, the owner's class
 // get-target callback and the flare decoy.
@@ -112,9 +111,30 @@ void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
             AiEntity pose;
             pose.self = &seeker; // the round's words, s.pos (copy_pose)
             pose.heading = s.yaw_bam; pose.pitch = s.pitch_bam; pose.roll = s.roll_bam;
-            const EntityHandle chosen = guided_heat_target(world, seeker, pose, ammo);
+            // The in-flight query walks the ring; its attacker's +368 is the missile's
+            // source, the shooter [orig: Entity_UpdateGuidedMissile_0 @0x446060 -> Entity_SpawnWeaponEffect
+            //  @0x545840 (the calls @0x44620B / @0x44628A; the query entity @0x5458B7, its
+            //  +368 @0x5458EA)].
+            const HeatTargetPick pick =
+                    guided_heat_target_pick(world, seeker, pose, ammo, /*ring_leg=*/true, owner);
+            const EntityHandle chosen = pick.entity;
             in.acquired_target = chosen.packed;
-            if (const Entity *target = world.registry.get(chosen)) {
+            if (pick.round >= 0) {
+                // An air flare is a decoy: the missile steers at its raw Position and keeps
+                // no target; a ground flare (no shell projectile) the missile keeps as its
+                // target, which the round-target reference (L7-s8) carries
+                // [orig: Entity_UpdateGuidedMissile_0 @0x446060 (the decoy @0x446232..0x44626B);
+                //  Entity_IsShellProjectile @0x4E4040].
+                const LiveRound &flare = rounds[static_cast<size_t>(pick.round)];
+                if (flare.motor == ThrowClass::kAirFlare) {
+                    in.acquired = true;
+                    in.acquired_flare = true;
+                    in.acquired_target = 0xFFFF;
+                    in.acquired_origin[0] = flare.pos.x.q16;
+                    in.acquired_origin[1] = flare.pos.y.q16;
+                    in.acquired_origin[2] = flare.pos.z.q16;
+                }
+            } else if (const Entity *target = world.registry.get(chosen)) {
                 in.acquired = true; in.target_present = true; in.target_alive = target->health > 0;
                 target_sample(world, *target, false, in.target_origin);
                 target_position(*target, in.acquired_origin);
