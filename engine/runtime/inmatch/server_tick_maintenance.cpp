@@ -584,8 +584,8 @@ void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 // the state store discards every token and clears a word already 0 at the player's create:
 // nothing to port (its reader is WacCmd_PlayerIsGold, ported as 0).
 // [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — the player by connection id
-//  @0x4D1B20, the state-4 gate @0x4D1B40, CNapiNetwork_ParseServerVarList @0x4D1C08,
-//  SetGameState(6) @0x4D1C11, the failure record @0x4D1B62..0x4D1BD0, TrySendSessionInit
+//  @0x4D1B20, the state-4 gate @0x4D1B40, NapiNPPlayer_ParseServerVarList (called @0x4D1C08),
+//  CNetPlayer_SetGameState(6) (called @0x4D1C11), the failure record @0x4D1B62..0x4D1BD0, TrySendSessionInit
 //  @0x4D1BF7; the request's state 4 CNapiNetwork_CheckPlayerTimeouts @0x4C8BCA]
 bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 		bool success, int32_t msg_code, uint32_t now_tick) {
@@ -597,7 +597,8 @@ bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 		if (success) {
 			conn.player_enter_admitted = true;
 			// State 6, then the probe the C2S 0x01 held under the ticket gate.
-			// [orig: @0x4D1C11 SetGameState(6), @0x4D1C19 SendFileTransferChunk(0)]
+			// [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940 - CNetPlayer_SetGameState(6)
+			//  called @0x4D1C11, CNetPlayer_SendFileTransferChunk(0) called @0x4D1C19]
 			if (conn.admission_stage == GameAdmissionStage::AwaitPlayEnter &&
 					conn.link.transport != nullptr) {
 				ProtocolMessage probe = admission_padding_probe(conn, &ctx);
