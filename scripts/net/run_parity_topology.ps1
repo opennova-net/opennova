@@ -1994,10 +1994,18 @@ function Stop-OwnedRetailRun {
     $null = $script:OwnedRetailRuns.Remove($OwnedRunId)
 }
 
+# A rotation cell's closing checks (E2): the host has moved the session to the
+# rotation's next mission inside the steady window, so its players stand at that
+# mission's deploy screen, not in the first mission's match (x3's round RR and
+# RR-aa joiners never again reported a local player). After a rotation, a live
+# run that still sees its peer is the closing state; the run state is recorded.
+function Test-RotationCell { return $RotationList.Count -gt 0 }
+
 function Wait-RetailRunForPeer {
     param(
         [Parameter(Mandatory = $true)] [string] $OwnedRunId,
-        [int] $TimeoutSeconds = 90
+        [int] $TimeoutSeconds = 90,
+        [switch] $AfterRotation
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -2011,6 +2019,10 @@ function Wait-RetailRunForPeer {
         if ($state.phase -eq "in_match" -and $state.peer -and
                 $state.local_player -and
                 $state.capture_counters.packets -ge 40) {
+            return $status
+        }
+        if ($AfterRotation -and $state.peer) {
+            Write-Host "PARITY_RUN_NOTE rotation: retail run $OwnedRunId closes in phase $($state.phase) with its peer (local_player=$($state.local_player))"
             return $status
         }
         Start-Sleep -Milliseconds 1000
@@ -2704,6 +2716,51 @@ function Start-OpenNovaJoinerExact {
 # deployment pick when -AutoDeploy); every later call takes one live snapshot
 # through parity_joiner_state. Both carry the same witness the readiness
 # classifiers in lib.ps1 consume unchanged.
+# Our joiner after a rotation (E2): wait up to 60 s for the next mission's match
+# (an in-match or post-death-redeploy class); a joiner still at that mission's
+# deploy screen closes the cell when it is alive and connected: its heartbeat
+# advances, it keeps its self handle, and it has no join error or lost session.
+# x3's round RO and OO joiners failed the first mission's in-match check there.
+function Wait-OpenNovaJoinerAfterRotation {
+    param([int] $TimeoutSeconds = 60)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $first = $null
+    while ($true) {
+        $script:OpenNovaJoiner.Refresh()
+        if ($script:OpenNovaJoiner.HasExited) {
+            throw "OpenNova joiner exited after the rotation"
+        }
+        $status = Invoke-GameProbe -Port $JoinerMcpPort -Name "parity_joiner_state" -Process $script:OpenNovaJoiner `
+            -TimeoutSeconds 30 -PollMs 250 -Arguments @{
+                readiness_mode = $ReadinessMode
+                auto_deploy = [bool] $AutoDeploy
+                exercise_motion = [bool] $ExerciseInput
+            }
+        if ([string] $status.state -ne "passed" -or -not $status.verdict) {
+            throw "OpenNova joiner state snapshot failed after the rotation: state=$($status.state) $($status.error)"
+        }
+        $state = $status.verdict.data
+        if (-not $first) { $first = $state }
+        $class = Get-OpenNovaJoinerReadinessClass -State $state -ReadinessMode $ReadinessMode `
+            -AllowPostDeathRedeploy
+        $live = [int] $state.self_handle -gt 0 -and [string]::IsNullOrEmpty([string] $state.join_error) -and
+            -not [bool] $state.session_lost -and
+            [int64] $state.heartbeat_sequence -gt [int64] $first.heartbeat_sequence
+        if ($class -ne 'invalid' -or ([DateTime]::UtcNow -ge $deadline -and $live)) {
+            Write-Host ("PARITY_RUN_NOTE rotation: OpenNova joiner closes as {0} (in_match={1} local_player={2} deploy_presented={3} phase={4} stage='{5}')" -f
+                $(if ($class -ne 'invalid') { $class } else { 'connected_after_rotation' }), $state.in_match,
+                $state.local_player, $state.deploy_presented, $state.joiner_phase, $state.join_admission_stage)
+            $state | Add-Member -NotePropertyName after_rotation_class -NotePropertyValue $(if ($class -ne 'invalid') { $class } else { 'connected_after_rotation' }) -Force
+            $state | Add-Member -NotePropertyName observed_utc -NotePropertyValue ([DateTime]::UtcNow.ToString("o")) -Force
+            return $state
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "OpenNova joiner is neither in the rotation's next match nor live after $TimeoutSeconds s (session_lost=$($state.session_lost) join_error='$($state.join_error)')"
+        }
+        Start-Sleep -Milliseconds 1000
+    }
+}
+
 function Wait-OpenNovaJoinerReady {
     param(
         [int] $TimeoutSeconds = 240,
@@ -2915,13 +2972,15 @@ try {
             }
             Start-RetailLateJoiner
             Wait-UntilSteadyDeadline
-            $hostStatus = Wait-RetailRunForPeer -OwnedRunId ([string] $pair.host.run_id)
+            $hostStatus = Wait-RetailRunForPeer -OwnedRunId ([string] $pair.host.run_id) `
+                -AfterRotation:(Test-RotationCell)
             $joinerStatus = if (Test-ScenarioEndsJoinerSession) {
                 Get-StructuredResult (Invoke-OnHookTool -Name "onhook_run_status" -Arguments @{
                     run_id = [string] $pair.joiner.run_id
                 })
             } else {
-                Wait-RetailRunForPeer -OwnedRunId ([string] $pair.joiner.run_id)
+                Wait-RetailRunForPeer -OwnedRunId ([string] $pair.joiner.run_id) `
+                    -AfterRotation:(Test-RotationCell)
             }
             $script:Acceptance = [pscustomobject]@{
                 host = $hostStatus.instance.run_state
@@ -3037,9 +3096,13 @@ try {
             if ($script:OpenNovaJoiner.HasExited) {
                 throw "OpenNova joiner exited during the RO steady window"
             }
-            $retailAcceptance = Wait-RetailRunForPeer -OwnedRunId ([string] $retailHost.run_id)
+            $retailAcceptance = Wait-RetailRunForPeer -OwnedRunId ([string] $retailHost.run_id) `
+                -AfterRotation:(Test-RotationCell)
             $joinerAcceptance = $null
-            if (-not (Test-ScenarioEndsJoinerSession)) {
+            if (Test-RotationCell) {
+                $joinerAcceptance = Wait-OpenNovaJoinerAfterRotation
+            }
+            elseif (-not (Test-ScenarioEndsJoinerSession)) {
                 $joinerAcceptance = Wait-OpenNovaJoinerReady `
                     -MinimumTicksMsec $initialJoinerTicks -RequireMotionComplete `
                     -AllowPostDeathRedeploy
@@ -3227,11 +3290,12 @@ try {
                 throw "OpenNova host stopped answering matching discovery during OO"
             }
             $endOwnership = Assert-OpenNovaHostOwnsPort
-            $joinerAcceptance = Wait-OpenNovaJoinerReady `
+            $joinerAcceptance = if (Test-RotationCell) { Wait-OpenNovaJoinerAfterRotation } else {
+                Wait-OpenNovaJoinerReady `
                 -MinimumTicksMsec $initialJoinerTicks -RequireMotionComplete `
                 -AllowPostDeathRedeploy:($ReadinessMode -eq 'in_match') `
-                -AllowScenarioDeploy:([bool] $script:ScenarioSpec)
-            if (-not (Test-OpenNovaJoinerReadinessTransition `
+                -AllowScenarioDeploy:([bool] $script:ScenarioSpec) }
+            if (-not (Test-RotationCell) -and -not (Test-OpenNovaJoinerReadinessTransition `
                     -Initial $initialJoinerAcceptance -Final $joinerAcceptance `
                     -ReadinessMode $ReadinessMode `
                     -AllowPostDeathRedeploy:($ReadinessMode -eq 'in_match') `

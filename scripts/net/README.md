@@ -348,6 +348,13 @@ so the default suite is unchanged. An extension case may add:
   selected rows. Our host leaves out a mission its catalog does not list, so
   an OR or OO cell whose second mission header never arrives names a rotation
   our host did not take.
+  A rotation cell's closing checks take the next mission's state. A retail
+  run that still sees its peer closes in any phase. Our joiner gets up to 60 s
+  to reach the next match; if it is still at that mission's deploy screen, it
+  closes when it is live and connected: its heartbeat advances, it keeps its
+  self handle, and it has no join error or lost session. A run note names the
+  closing state. x3's round RR, RR-aa, RO and OO cells failed the first
+  mission's in-match checks there.
   `tdh-i3a-tdm-round` holds a 200 s window: in x2 the round ended (S2C 0x61)
   at +64 to +73 s, gameplay stopped for the round-end linger, and the second
   0x7B and the next mission's 0x0B came about 55 to 58 s later (OR: +118.3 s
