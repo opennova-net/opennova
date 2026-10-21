@@ -54,6 +54,9 @@ bool run_items_def_catalog() {
 			// A known motion family must not rescue an unknown wire callback.
 			make_item(101501, DEF_ITEM_TYPE_PERSON, "zzzz", "org1"),
 			make_item(101502, DEF_ITEM_TYPE_BUILDING, "", ""),
+			// No ai_function: the network callback is the Null row's 0 whatever the
+			// mover (def+0x164 is the ai_function lookup's alone).
+			make_item(101503, DEF_ITEM_TYPE_VEHICLE, "", "cveh", 0, 1),
 			// Catalogued by full id, but not addressable by the 16-bit wire id.
 			make_item(200000, DEF_ITEM_TYPE_OBJECT, "null", "null"),
 	};
@@ -64,7 +67,7 @@ bool run_items_def_catalog() {
 	const ns::ItemReplicationCatalog catalog =
 			ns::ItemReplicationCatalog::from_items_def(items);
 	if (!expect(catalog.valid(), "unique items.def builds a valid catalog")) return false;
-	if (!expect(catalog.profiles().size() == 9, "all item definitions retained")) return false;
+	if (!expect(catalog.profiles().size() == 10, "all item definitions retained")) return false;
 
 	const ns::ItemReplicationProfile *player = catalog.by_wire_type(5305);
 	if (!expect(player != nullptr, "player Person indexed by wire type")) return false;
@@ -105,6 +108,14 @@ bool run_items_def_catalog() {
 	if (!expect(ns::has_capability(buggy->capabilities,
 	                    ns::ItemReplicationCapability::VehiclePhysics),
 	            "vehicle physics capability retained")) return false;
+
+	// No ai_function: def+0x164 is the Null row's 0, so no network callback, whatever
+	// the mover. [orig: EntityDef_InitAllCallbacks @0x4A5AAE; the admission @0x50E6DA]
+	const ns::ItemReplicationProfile *moverless = catalog.by_wire_type(1503);
+	if (!expect(moverless != nullptr && moverless->callbacks.effective_network_callback.empty() &&
+	                    moverless->wire_path == ns::WireReplicationPath::None &&
+	                    moverless->motion_family == ns::MotionFamily::GroundVehicle,
+	            "an empty ai_function names no network callback, the mover aside")) return false;
 
 	const ns::ItemReplicationProfile *bike = catalog.by_wire_type(1400);
 	if (!expect(bike != nullptr && bike->compact_codec == ns::WireCompactCodec::Vehicle &&
