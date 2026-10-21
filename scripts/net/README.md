@@ -576,7 +576,13 @@ state instead of waiting for it in match (RR), or skips the OpenNova joiner's
 closing readiness (RO). It takes a host actor on an in-match RR or RO run
 without a late joiner: OR and OO keep their steady-end checks until the
 OpenNova host's typed `kick` cells are wired (`scenario_play` types `char`
-steps, above).
+steps, above). The judge reads the flag from the run's `scenario.json` and
+ends that run's gameplay coverage at the first S2C 0x103 description record
+in the window (`window.session_end`): the punt's record moves the joiner's
+connection to state 6, which tears it down at once, so no gameplay follows
+(`CNapiNPConnection_SetState @0x626250`, the teardown call @0x62628F). The
+teardown's goodbyes (four C2S 0x46, four S2C 0x86) decode as
+`client_goodbye` / `server_goodbye`.
 
 A `click` step (`{"tick": n, "click": {"screen": "DEATH", "control":
 "SWAP_TEAMS"}}`) left-clicks a menu widget by retail's own names

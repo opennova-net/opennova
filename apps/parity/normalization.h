@@ -413,7 +413,8 @@ inline constexpr Normalization kNormalizations[] = {
 			"load-end 0x7B for a late residual under holdoff 12), the joiner's reload "
 			"answers with C2S 0x48 (Game_StartMission @0x524470), the host's load end sends "
 			"0x7B (@0x526267) and the joiner's reload takes the next 0x0B. Retail's last "
-			"sample before the pause lies within a tick or a frame of the 0x1D, so a steady "
+			"sample before the pause comes within one send interval of the 0x1D (192 ms or "
+			"less under holdoff 12), so a steady "
 			"gap whose first sample lies within 500 ms of a round end's board (an S2C 0x1D, "
 			"either side), or the window's tail when its last sample does, is the pause, "
 			"not a stall; every round end in the window is excused the same way. A 0x25 "
@@ -423,6 +424,18 @@ inline constexpr Normalization kNormalizations[] = {
 			"the joiner's first 0x48 after it, the first 0x7B and 0x0B after the 0x25, the "
 			"first 0x0A after that header; presence and order are two rows, each against "
 			"its own A/A" },
+	{ "window.session_end", MaskKind::Field, 'B', 0x103, "a scenario's own disconnect", 0,
+			"a scenario whose play ends the joiner's session (its ends_joiner_session, E4's "
+			"kick: a listen host's SERVER PUNT ALL) has the host queue the joiner the "
+			"session disconnect, reason 33 and the tag S.C:SPA (Server_HandleBanPuntCommand "
+			"@0x50B945..0x50B951), which reaches the joiner as the S2C 0x103 description "
+			"record; its receipt moves the connection from state 5 to 6 "
+			"(CNapiNPConnection_HandleDescriptionPacket, SetState(6) @0x621D5F), and "
+			"leaving state 5 tears the connection down at once "
+			"(CNapiNPConnection_SetState @0x626250, the teardown call @0x62628F), so no "
+			"gameplay follows in either direction. Such a run's gameplay coverage ends at "
+			"the first S2C 0x103 in the steady window; the flag is the run's scenario's, "
+			"never read off the capture" },
 	{ "window.dead_joiner_uplink", MaskKind::Field, 'C', 0x00C, "uplink gap while dead", 0,
 			"a joiner whose own body has no health sends no C2S 0x0C: the uplink build "
 			"returns nothing on a zero health word or the dead flag "

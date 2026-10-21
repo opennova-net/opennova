@@ -505,11 +505,12 @@ struct Case {
 };
 
 Case judge_case(wire::ParityTrace rr, wire::ParityTrace aa, wire::ParityTrace subject,
-		const char *topology = "RO", bool rotation = false) {
+		const char *topology = "RO", bool rotation = false, bool ends_session = false) {
 	Case c;
-	auto info = [rotation](const char *label, const char *top) {
+	auto info = [rotation, ends_session](const char *label, const char *top) {
 		RunInfo i = info_for(label, top);
 		i.rotation = rotation;
+		i.ends_session = ends_session;
 		return i;
 	};
 	c.rr = make_run_facts(info("rr", "RR"), std::move(rr));
@@ -1201,6 +1202,45 @@ void test_dead_joiner_uplink() {
 				die(scripted(2), from, until, true), die(scripted(3), from, until, false));
 		check(coverage(alive), "the same hole while the joiner lives is a coverage failure");
 	}
+}
+
+// A scenario whose own play ends the joiner's session (window.session_end, E4's
+// kick): the host's punt reaches the joiner as the S2C 0x103 description record and
+// the connection tears down at once, so no gameplay follows. A run that declares it
+// ends its coverage at the record; the same silence without the declaration, or a
+// declared run with no record, is a coverage failure.
+void test_session_end() {
+	static constexpr uint64_t kPunt = 8 * kSec;
+	auto punt = [](wire::ParityTrace trace, bool record) {
+		auto drop = [](auto &records, auto gone) {
+			records.erase(std::remove_if(records.begin(), records.end(), gone), records.end());
+		};
+		drop(trace.uplinks, [](const wire::ParityUplinkState &u) { return u.ts_ns > kPunt; });
+		drop(trace.frames, [](const wire::ParityFrameState &f) { return f.ts_ns > kPunt; });
+		drop(trace.events, [](const wire::ParityEvent &e) {
+			return e.ts_ns > kPunt && (e.full_tag == 0x00C || e.full_tag == 0x00A);
+		});
+		if (record) {
+			splice(trace, 'S', 0x103, kPunt + 90 * kMs, bytes({ 0x44, 0x53, 0, 4, 0, 1, 0, 0, 0 }));
+			for_events(trace, 'S', 0x103, [](wire::ParityEvent &e) { e.settings_update = true; });
+		}
+		return trace;
+	};
+	auto coverage = [](const Case &c) {
+		for (const EvidenceRow &row : c.verdict.evidence)
+			if (row.code == "STEADY_GAMEPLAY_GAP" || row.code == "STEADY_BOUNDARY_GAMEPLAY_MISSING")
+				return true;
+		return false;
+	};
+	const Case declared = judge_case(punt(scripted(1), true), punt(scripted(2), true),
+			punt(scripted(3), true), "RO", false, true);
+	check(!coverage(declared), "a declared punt's silence after its record is no coverage failure");
+	const Case undeclared = judge_case(punt(scripted(1), true), punt(scripted(2), true),
+			punt(scripted(3), true));
+	check(coverage(undeclared), "the same silence without the declaration is a coverage failure");
+	const Case unrecorded = judge_case(punt(scripted(1), false), punt(scripted(2), false),
+			punt(scripted(3), false), "RO", false, true);
+	check(coverage(unrecorded), "a declared run whose capture holds no record keeps its window");
 }
 
 void test_aa_widening() {
@@ -2324,6 +2364,7 @@ int main() {
 	test_stream_anchor_and_burst_tail();
 	test_rotation_load_gap();
 	test_dead_joiner_uplink();
+	test_session_end();
 	test_timestamps();
 	test_identical();
 	test_tag_histogram();
