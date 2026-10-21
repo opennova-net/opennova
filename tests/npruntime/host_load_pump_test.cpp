@@ -22,7 +22,11 @@
 //     reset: Game_TeardownMission @0x522588), at its load's head (the gate set, no World
 //     yet), then the window's nine after the per-slot reset (the kept slot's ping word
 //     already zeroed), never after the 0x7B;
-//   - the gate is clear once the load ends.
+//   - the gate is clear once the load ends;
+//   - the reset's 0x25 to a kept remote leaves at the load pump its send countdown's
+//     residual names (the head for 1), ahead of the 0x7B, or with the 0x7B at the first
+//     tick once the residual passes the load's pumps (holdoff 12, residual 11), and an
+//     admitting remote's C2S 0x01 read inside the load is answered there (its S2C 0x02).
 #include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -55,6 +59,7 @@
 #include "conn_fixture.h"
 
 #include <cstdint>
+#include <cstddef>
 #include <cstdio>
 #include <deque>
 #include <functional>
@@ -164,6 +169,7 @@ struct RecordingSocket final : opennova::IDatagramSocket {
 	PeerAddr peer{0x0100007Fu, 23456};
 	int empty_drains = 0;
 	std::vector<std::vector<uint8_t>> sent;
+	std::vector<PeerAddr> sent_to;
 	std::function<void()> on_drain;
 
 	int recv_from(uint8_t *buf, std::size_t cap, PeerAddr &from) override {
@@ -179,8 +185,9 @@ struct RecordingSocket final : opennova::IDatagramSocket {
 		if (on_drain) on_drain();
 		return 0;
 	}
-	void send_to(const PeerAddr &, const uint8_t *data, std::size_t len) override {
+	void send_to(const PeerAddr &to, const uint8_t *data, std::size_t len) override {
 		sent.emplace_back(data, data + len);
+		sent_to.push_back(to);
 	}
 };
 
@@ -357,12 +364,196 @@ void test_map_change_load_pumps_after_the_slot_reset() {
 	CHECK(host->session.state() == inmatch::State::Running);
 }
 
+// --------------------------------------------------------------------------
+// The send clock across a map change: the reset's 0x25 and an in-load admission reply.
+// --------------------------------------------------------------------------
+
+const char kServerScrk[] = "SERVERLOADPUMPSCRK123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789A";
+const char kClientScrk[] = "CLIENTLOADPUMPSCRK123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789A";
+
+// A remote past its connect, its socket transport owned by the host's peer table.
+inmatch::NapiNPConnection &add_session_conn(Host &host, const PeerAddr &peer, uint32_t dcb,
+		uint32_t server_sk) {
+	inmatch::HostOwner &owner = host.role.state.host_owner;
+	inmatch::PeerLink &link = owner.peers[peer];
+	link.transport = std::make_unique<ns::UdpSessionTransport>(ns::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection c;
+	c.peer = peer;
+	c.type = inmatch::NapiNPConnection::kTypeServerSide;
+	c.connection_id = dcb;
+	c.server_scrk = kServerScrk;
+	c.client_scrk = kClientScrk;
+	c.server_sk = server_sk;
+	c.client_ck = 0x10203040u;
+	c.link.transport = link.transport.get();
+	c.link.mode = ns::TransportMode::Client;
+	c.seq.outbound_message_limit = JO_SESSION_OUTBOUND_MESSAGE_MAX;
+	host.ctx().np_protocol.connection_list.push_back(std::move(c));
+	return host.ctx().np_protocol.connection_list.back();
+}
+
+// The S2C records of each session datagram sent to `peer`, with the index of the pump that
+// sent it: drain k's mark is the count sent before pump k's send, so a datagram at index i
+// left in the last pump whose mark is <= i.
+struct SentPacket {
+	size_t pump = 0;
+	std::vector<ProtocolMessage> records;
+};
+
+std::vector<SentPacket> packets_to(const RecordingSocket &socket, const PeerAddr &peer,
+		const std::vector<size_t> &marks) {
+	std::vector<SentPacket> out;
+	for (size_t i = 0; i < socket.sent.size(); ++i) {
+		if (!(socket.sent_to[i] == peer)) continue;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!nw_decode_inbound(socket.sent[i].data(), socket.sent[i].size(), opcode, body) ||
+				opcode != SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
+			continue;
+		ProtocolPacketHeader header;
+		SentPacket p;
+		if (!decode_protocol_packet_plaintext(body.data(), body.size(), kServerScrk, header,
+					p.records))
+			continue;
+		for (size_t k = 0; k < marks.size(); ++k)
+			if (marks[k] <= i) p.pump = k;
+		out.push_back(std::move(p));
+	}
+	return out;
+}
+
+constexpr size_t kNoPump = static_cast<size_t>(-1);
+
+// The pump that sent the first record tagged `tag`, or kNoPump.
+size_t pump_of(const std::vector<SentPacket> &packets, uint8_t tag) {
+	for (const SentPacket &p : packets)
+		for (const ProtocolMessage &m : p.records)
+			if (m.tag == tag) return p.pump;
+	return kNoPump;
+}
+
+// Whether the first datagram carrying either tag carries both.
+bool same_packet(const std::vector<SentPacket> &packets, uint8_t a, uint8_t b) {
+	for (const SentPacket &p : packets) {
+		bool has_a = false;
+		bool has_b = false;
+		for (const ProtocolMessage &m : p.records) {
+			has_a = has_a || m.tag == a;
+			has_b = has_b || m.tag == b;
+		}
+		if (has_a || has_b) return has_a && has_b;
+	}
+	return false;
+}
+
+// A synced remote kept across a map change, its send clock dictated (holdoff H) and its
+// countdown at `countdown` when the round's teardown starts. Retail's send build waits for a
+// spent countdown that each receive pump steps once (CNapiNPConnection_PumpFlags 0x10
+// @0x62979A..0x6297AC; the build's gate @0x62927B; the reload @0x6297F3), and queues the
+// reset's 0x25 with class 0, no bypass (NapiNPServer_SendToConn @0x4C4F20, `push 0`
+// @0x4C4F4F): the teardown's pump steps it to r = countdown - 1, the 0x25s are queued behind
+// it, and the datagram leaves at the load's r-th pump (the head @0x5245E8 for r = 1, then
+// @0x524A63, @0x524F76 ... ahead of the 0x7B), or with the 0x7B at the first tick's send pump
+// (Server_TickUpdate @0x51E487) once r passes the load's ten pumps (a dedicated host).
+// Pump indices: 0 the teardown's, 1 the load's head, 2..10 the window, 11 the first tick's.
+// An admitting remote's C2S 0x01 that reached the socket during the load is answered inside
+// it: its S2C 0x02 probe leaves at the window pump that read it.
+// [orig: Game_TeardownMission @0x522588 (ahead of the reset @0x52269B);
+//  Server_DisconnectAndResetAllPlayerSlots @0x516160 (the 0x25 sends @0x5161BB..0x516385);
+//  Game_StartMission @0x5245E8, @0x524A63 .. @0x525AC5, the 0x7B @0x526267;
+//  NapiNPServerMsg_HandleJoinRequest @0x512ED0 (the probe @0x512FAF..0x512FBD)]
+struct ResidualCase {
+	uint32_t holdoff = 0;
+	uint32_t countdown = 0;
+	size_t reset_pump = 0;      // the pump the 0x25 leaves at
+	bool rides_with_7b = false; // the 0x25 and the 0x7B share the datagram
+};
+
+void run_reset_residual(const ResidualCase &rc) {
+	auto host = std::make_unique<Host>();
+	host->role.set_socket(&host->socket);
+	host->role.set_rotation(&host->rotation);
+	inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+	CHECK(host->boot_current(/*next_mission=*/false));
+	host->ctx().mission_exit_reason = inmatch::kMissionExitMapCycle;
+	inmatch::FrameInput input;
+	input.delta_seconds = kFrame;
+	bool ended = false;
+	for (int f = 0; f < 16 && !ended; ++f) ended = host->session.advance(input).terminal();
+	CHECK(ended);
+	// The kept remote, in match on the old mission.
+	const PeerAddr kept_peer{0x0200007Fu, 23457};
+	{
+		inmatch::NapiNPConnection &kept =
+				add_session_conn(*host, kept_peer, inmatch::kFirstJoinerDcb, 0x11223344u);
+		kept.admission_stage = inmatch::GameAdmissionStage::Complete;
+		kept.phase = inmatch::ConnectionPhase::InMatch;
+		kept.slot_state = inmatch::PlayerSlotState::Joined;
+		kept.s2c_send_holdoff_dictated = true;
+		kept.s2c_send_holdoff_ticks = rc.holdoff;
+		kept.s2c_send_holdoff_countdown = rc.countdown;
+		kept.s2c_send_boundary_open = false;
+	}
+	// The admitting remote, its join request answered: its form post comes during the load.
+	const PeerAddr joiner_peer = host->socket.peer;
+	{
+		inmatch::NapiNPConnection &joiner =
+				add_session_conn(*host, joiner_peer, inmatch::kFirstJoinerDcb + 1, 0x55667788u);
+		joiner.phase = inmatch::ConnectionPhase::Joined; // its 0x42 accepted
+		joiner.admission_stage = inmatch::GameAdmissionStage::AwaitFormPost;
+	}
+	std::vector<size_t> marks;
+	host->socket.on_drain = [&host, &marks]() {
+		marks.push_back(host->socket.sent.size());
+		// The load's head: the form post reaches the socket, read by the window's first pump.
+		if (marks.size() == 2) {
+			ProtocolPacketHeader header;
+			header.session_id = 0x55667788u;
+			header.seq_num = 1;
+			std::vector<uint8_t> body;
+			(void)encode_protocol_packet_plaintext(header,
+					{make_protocol_message(c2s::JOIN_FORM_POST, {0x00})}, kClientScrk, body);
+			host->socket.inbound.push_back(
+					nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body)));
+		}
+	};
+	CHECK(inmatch::begin_host_map_change(host->role, host->catalog) ==
+			inmatch::MapChangeStep::NextMission);
+	CHECK(host->boot_current(/*next_mission=*/true));
+	CHECK(marks.size() == 11); // the teardown's, the load's head, the window's nine
+	const size_t load_pumps = marks.size();
+	// Ticks until the kept remote's 0x7B has left.
+	for (int f = 0; f < 16; ++f) (void)host->session.advance(input);
+	const std::vector<SentPacket> to_kept = packets_to(host->socket, kept_peer, marks);
+	CHECK(pump_of(to_kept, s2c::GAME_RESET) == rc.reset_pump);
+	if (rc.rides_with_7b) {
+		CHECK(pump_of(to_kept, s2c::FULL_PLAYER_INFO) == rc.reset_pump);
+		CHECK(same_packet(to_kept, s2c::GAME_RESET, s2c::FULL_PLAYER_INFO));
+	} else {
+		// Ahead of the 0x7B, which waits for the load's end.
+		const size_t info_pump = pump_of(to_kept, s2c::FULL_PLAYER_INFO);
+		CHECK(info_pump != kNoPump && info_pump >= load_pumps);
+	}
+	// The form post read at the window's first pump is answered there, inside the load.
+	const std::vector<SentPacket> to_joiner = packets_to(host->socket, joiner_peer, marks);
+	CHECK(pump_of(to_joiner, s2c::JOIN_PADDING_PROBE) == 2);
+}
+
+void test_map_change_reset_leaves_at_the_residual_pump() {
+	// Holdoff 3: residuals 1..3 put the 0x25 at the head, @0x524A63 and @0x524F76.
+	for (uint32_t r = 1; r <= 3; ++r) run_reset_residual({3, r + 1, r, false});
+	// Holdoff 12, residual 11: past the load's ten pumps, the first tick's send carries the
+	// 0x25 with the 0x7B.
+	run_reset_residual({12, 12, 11, true});
+}
+
 } // namespace
 
 int main() {
 	test_handlers_drop_under_the_load_gate();
 	test_fresh_load_pumps_its_session();
 	test_map_change_load_pumps_after_the_slot_reset();
+	test_map_change_reset_leaves_at_the_residual_pump();
 	if (failures != 0) {
 		std::printf("host_load_pump: %d failure(s)\n", failures);
 		return 1;
