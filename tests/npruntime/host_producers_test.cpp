@@ -358,7 +358,7 @@ bool check_mission_start_resets_the_quality_sample() {
 					f.ctx.net_quality_sample_countdown == 61,
 			"five samples fill the window, the countdown mid-way"))
 		return false;
-	inmatch::continue_session(f.ctx, f.ctx.config);
+	inmatch::continue_session(f.ctx, f.ctx.config, /*text_override=*/nullptr);
 	if (!expect(f.ctx.net_quality_sample_countdown == 0 &&
 					f.ctx.host_quality_window.avg_bandwidth == 0 &&
 					f.ctx.host_quality_window.bandwidth[0] == 0 &&

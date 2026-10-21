@@ -228,7 +228,8 @@ void rules_word() {
 	config.mp_attributes = 0x3A06u;
 	const auto word = [&config](const TitleIdentity *title) {
 		const inmatch::MissionMetadataBlob blob =
-				inmatch::build_mission_metadata_blob(config, /*mp_session_peer=*/true, title);
+				inmatch::build_mission_metadata_blob(config, /*mp_session_peer=*/true, title,
+						config.mission_file);
 		return static_cast<uint32_t>(blob[44]) | (static_cast<uint32_t>(blob[45]) << 8) |
 				(static_cast<uint32_t>(blob[46]) << 16) | (static_cast<uint32_t>(blob[47]) << 24);
 	};

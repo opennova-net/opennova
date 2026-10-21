@@ -18,6 +18,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_session.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -110,11 +111,55 @@ void test_coop_advertises_the_session_title() {
 	                                                              ctx.session_title, conn)) == "Header Name");
 }
 
+// The mission-data block (the S2C 0x64 transfer) carries the session title at +0x74, set by
+// the mission start's settings apply ahead of the block's build, at the create and at every
+// map change's continue.
+// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 - g_MapFileName into +0x54
+//  @0x51E973, g_SessionTitle into +0x74 @0x51E983 (Napi_CopyString(.., 32)); Game_StartMission
+//  @0x524662 (the settings apply) ahead of @0x5248A7 (the block)]
+std::string block_string(const inmatch::MissionMetadataBlob &blob, size_t offset) {
+	std::string out;
+	for (size_t i = offset; i < offset + 32 && blob[i] != 0; ++i) out.push_back(static_cast<char>(blob[i]));
+	return out;
+}
+
+void test_the_mission_block_carries_the_session_title() {
+	rtxt::File override_table;
+	override_table.sections.push_back(rtxt::Section{"TITLE", 1});
+	rtxt::Entry desert;
+	desert.key = "CO01";
+	desert.text = "Desert Storm";
+	override_table.entries = {desert};
+	inmatch::GameConfig config;
+	config.game_type = game_type::kCoop;
+	config.mission_file = "CO01.BMS";
+	config.server_name = "Cfg Host";
+	inmatch::SessionStartup startup;
+	startup.text_override = &override_table;
+	inmatch::NapiNPServerCtx ctx;
+	CHECK(inmatch::create_session(ctx, config, startup) == inmatch::CreateSessionResult::Created);
+	CHECK(ctx.session_title == "Desert Storm");
+	CHECK(block_string(ctx.mission_metadata_blob, 84) == "CO01.BMS");
+	CHECK(block_string(ctx.mission_metadata_blob, 116) == "Desert Storm");
+	// A map change's next mission with no [TITLE] entry: the map file in both slots, over a
+	// SetServerName's title.
+	ctx.session_title = "Night Ops";
+	config.mission_file = "CO02.BMS";
+	inmatch::continue_session(ctx, config, &override_table);
+	CHECK(ctx.session_title == "CO02.BMS");
+	CHECK(block_string(ctx.mission_metadata_blob, 116) == "CO02.BMS");
+	// Without a table the title is the map file's.
+	config.mission_file = "CO01.BMS";
+	inmatch::continue_session(ctx, config, nullptr);
+	CHECK(block_string(ctx.mission_metadata_blob, 116) == "CO01.BMS");
+}
+
 } // namespace
 
 int main() {
 	test_title_rule();
 	test_coop_advertises_the_session_title();
+	test_the_mission_block_carries_the_session_title();
 	if (failures != 0) {
 		std::printf("npruntime_session_title: %d failure(s)\n", failures);
 		return 1;

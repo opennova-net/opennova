@@ -189,6 +189,11 @@ struct HostConfig {
 	ClientProcessState *client_process = nullptr;
 	PeerAddr local_address{};
 	bool local_address_known = false;
+	// The mount's expansion text-override table (null = none), the mission start's session
+	// title lookup searches first (mission_session_title); it outlives the session's
+	// create or continue. HostRole's bring-up sets it from its bring-up record's mission
+	// text. [orig: Game_ApplySessionSettingsToGlobals @0x552112..0x55219E]
+	const rtxt::File *text_override = nullptr;
 	// The directory banned.txt and banlist.txt live in (ServerBanLists::directory): retail's
 	// working directory, "" for the bare names there (opennova-serve's). Unset, the lists
 	// load empty and no file is read or written (the game's hosts, D-NET-295's residual).

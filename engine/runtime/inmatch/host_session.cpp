@@ -48,6 +48,7 @@ uint32_t monotonic_milliseconds() {
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
 	startup.title = cfg.title;
+	startup.text_override = cfg.text_override;
 	// The host key, from the manager's PRNG (D-NET-524).
 	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the
 	//  protocol's manager @0x62b5f3..0x62b5f5, stored @0x62b5fc]
@@ -798,7 +799,7 @@ void continue_host_session(HostOwner &owner, const HostConfig &cfg) {
 	// The same 0x0A byte cap, re-applied from the session config the host
 	// screen or the host file still names.
 	replication::set_entity_send_budget(static_cast<int>(cfg.config.entity_send_budget));
-	continue_session(owner.ctx, cfg.config);
+	continue_session(owner.ctx, cfg.config, cfg.text_override);
 	configure_session_world(owner, cfg);
 }
 

@@ -52,11 +52,13 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // returned block for every chunk request. `mp_session_peer` is the host's
 // connection mode (false for a dedicated host, whose own slot +36 drops);
 // `title` the title the session speaks, whose rules-word bits the +44 word
-// takes (DFX2-18; null: JO's).
+// takes (DFX2-18; null: JO's); `session_title` the mission start's session
+// title (NapiNPServerCtx::session_title), whose first 31 bytes +116 carries.
 // [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
-// CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
+// CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (g_SessionTitle into +0x74
+// @0x51E983..0x51E989)]
 MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
-		const TitleIdentity *title);
+		const TitleIdentity *title, const std::string &session_title);
 
 // The recipient's S2C 0x7B session summary (its name and PCID, the server
 // name, the advertised mission, the map file, the game type, the expansion);

@@ -52,7 +52,7 @@ bool stage_join_gate_reject(NapiNPConnection &conn, uint32_t reason_dpc) {
 } // namespace
 
 MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
-		const TitleIdentity *title) {
+		const TitleIdentity *title, const std::string &session_title) {
 	MissionMetadataBlob blob{};
 	auto write_u32 = [&](std::size_t offset, uint32_t value) {
 		opennova::io::write_u32_le(blob.data() + offset, value);
@@ -80,8 +80,12 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool m
 	write_u32(48, static_cast<uint32_t>(config.unlimited_vehicles));
 	write_fixed_string(52, config.server_name);
 	write_fixed_string(84, config.mission_file);
-	// The 00TRg LAN oracle carries the map filename in both mission slots.
-	write_fixed_string(116, config.mission_file);
+	// +0x74 the session title, which is the map file unless the mount's override
+	// table carries a [TITLE] entry for it (the 00TRg LAN oracle's two slots match).
+	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 - g_ServerNameStr into
+	//  +0x34 @0x51E963, g_MapFileName into +0x54 @0x51E973, g_SessionTitle into +0x74
+	//  @0x51E983, each Napi_CopyString(.., 32)]
+	write_fixed_string(116, session_title);
 	return blob;
 }
 
@@ -246,7 +250,8 @@ std::vector<uint8_t> build_tag64_mission_metadata(
 		uint32_t transfer_id, uint32_t offset) {
 	MissionMetadataBlob fallback{};
 	if (session_blob == nullptr) {
-		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server, nullptr); // no ctx
+		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server, nullptr,
+				context_session_title(nullptr, cfg)); // no ctx
 		session_blob = &fallback;
 	}
 	return build_transfer_chunk(transfer_id, session_blob->data(),

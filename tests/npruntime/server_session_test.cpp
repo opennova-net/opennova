@@ -781,7 +781,7 @@ bool check_create_session_mpreset_exit() {
 	opennova::inmatch::GameConfig next = settings;
 	next.multiplayer_reset = 1;
 	next.mission_name = "Next";
-	opennova::inmatch::continue_session(ctx, next);
+	opennova::inmatch::continue_session(ctx, next, /*text_override=*/nullptr);
 	if (!expect(ctx.is_in_session == 1 && ctx.np_protocol.host_running == 1 &&
 	                    ctx.np_protocol.connection_list.size() == 1 &&
 	                    ctx.config.mission_name == "Next" && ctx.config.multiplayer_reset == 1,

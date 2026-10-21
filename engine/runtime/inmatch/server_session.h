@@ -2,6 +2,10 @@
 
 #include <runtime/inmatch/napi_np_server_ctx.h>
 
+namespace opennova::rtxt {
+struct File;
+}
+
 // Host bring-up sequence — the in-process listen-server creation path (§5.0), mirroring the
 // witnessed order [orig: SinglePlayer_StartMission @0x561af0]:
 //
@@ -37,6 +41,9 @@ struct SessionStartup {
 	uint32_t host_key = 0;
 	uint32_t host_start_tick = 0;
 	uint32_t session_seed_id = 0;
+	// The mount's text-override table (null = none), the session title's first lookup
+	// (HostConfig::text_override).
+	const rtxt::File *text_override = nullptr;
 };
 
 // What the session create hands its caller. Retail's returns 0, or -1 / -2 on
@@ -80,7 +87,10 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 //  stream token `++g_ReplayBlockMagic` @0x5247F3,
 //  CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (its `++dword_C86FC8`
 //  @0x51E9C1), the end-round block @0x5249EA]
-void continue_session(NapiNPServerCtx &ctx, const GameConfig &config);
+// `text_override` is the mount's override table (null = none) the session title
+// searches first (HostConfig::text_override).
+void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
+		const rtxt::File *text_override);
 
 // [orig: NapiNPProtocol_StartServer @0x62b5e0] — host-only. Stamps host_key / host_start_tick /
 // session_seed_id (the latter only when gen_session_seed_flag is set), copies the MP TLV

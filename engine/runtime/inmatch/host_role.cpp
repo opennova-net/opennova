@@ -67,6 +67,8 @@ HostRole::HostRole(RoleKind kind,
 // role holds).
 bool HostRole::bring_up() {
 	session_create_ = CreateSessionResult::Created;
+	// The session title's override table is the bring-up's mission text's (the mount's).
+	staged_bringup_.host_cfg.text_override = staged_bringup_.mission_text.override_table.get();
 	if (staged_bringup_.next_mission)
 		bring_up_next_mission(staged_bringup_);
 	else
@@ -285,13 +287,12 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// A host session's start zeroes the round count [orig: UI_HandleHostSessionStart
 	// @0x556EAB; HostDialog_StartSession @0x5587BD].
 	if (rotation_ != nullptr) rotation_->round_count = 0;
+	// The create sets the mission start's session title ahead of the mission-data block
+	// that copies it, the mount's text-override table answering first (host_cfg.text_override)
+	// [orig: Game_ApplySessionSettingsToGlobals @0x552145..0x55219E;
+	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E983].
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
-	// The mission start's session title, the mount's text-override table answering first
-	// (inmatch::mission_session_title) [orig: Game_ApplySessionSettingsToGlobals
-	//  @0x552145..0x55219E].
-	ctx.session_title = inmatch::mission_session_title(bringup.mission_text.override_table.get(),
-			ctx.config.mission_file);
 	install_spawned_body_bind();
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);
@@ -346,11 +347,10 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.mission_briefing2 = bringup.mission_text.briefing2();
 	ctx.mission_text_title = bringup.mission_text.get_string("info", "title");
 	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
+	// The next mission's start sets the session title again, over a SetServerName's, ahead
+	// of the rebuilt mission-data block [orig: Game_ApplySessionSettingsToGlobals
+	//  @0x552145..0x55219E; CNapiGameSession_InitRandomSeedOrRequest @0x51E983].
 	inmatch::continue_host_session(state.host_owner, host_cfg);
-	// The next mission's start sets the session title again, over a SetServerName's
-	// [orig: Game_ApplySessionSettingsToGlobals @0x552145..0x55219E].
-	ctx.session_title = inmatch::mission_session_title(bringup.mission_text.override_table.get(),
-			ctx.config.mission_file);
 	map_change.torn_down = false;
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
 	// The per-slot reset, after the mission-data block [orig: Game_StartMission
