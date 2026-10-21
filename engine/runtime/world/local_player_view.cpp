@@ -1211,6 +1211,26 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
         t.composed_mounted = false;
         return false;
     }
+    // The compose reads the camera's TRACKED entity: the local player, or the
+    // spectate target the death screen's first-person sub-mode tracks, whose
+    // CameraOffset, recoil pitch, torso roll and lean and carrier legs then make
+    // the view. On an authority world the target's wire handle is its own body's
+    // handle; a joiner's target is a decoded row with no body here, so its view
+    // keeps the local entity, whose pose copies the target's.
+    // [orig: Camera_ComputeThirdPersonView @0x437D10 - `mov esi,
+    //  g_CameraTrackedEntity` @0x437D2B, CameraOffset [esi+6Ch..74h]
+    //  @0x437FA2..0x437FB7, the recoil [esi+380h] @0x437FBD..0x437FC7, the roll
+    //  [esi+2DCh] + ([esi+0B0h] sar 2) @0x437FCD..0x437FE6; Camera_SetTrackedEntity
+    //  @0x4391E0 (sub-mode 2 with a target @0x4391E7..0x4391F9)]
+    if ((v.camera_tracked & kCameraTrackedTargetKey) != 0 && world.rules.logic_authority) {
+        const EntityHandle target{static_cast<uint16_t>(v.camera_tracked & 0xFFFFu)};
+        const Entity *te = world.registry.get(target);
+        const AiEntity *tp = te != nullptr ? world.ai.for_handle(target) : nullptr;
+        if (tp != nullptr) {
+            e = te;
+            p = tp;
+        }
+    }
     // Compose from the body aim. The rendered view adds optical offsets
     // afterwards (LocalPlayer::present_view_frame).
     const float aim_yaw = static_cast<float>(mission_yaw_deg_from_bam_heading(p->heading));

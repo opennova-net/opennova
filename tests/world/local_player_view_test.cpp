@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <cstdlib>
 #include <base/io/rotating_prng.h>
 #include <cstdio>
@@ -361,6 +362,54 @@ void test_unadmitted_seat_takes_the_ground_or_person_leg() {
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
     CHECK(view.ground_leg_lift_q16 == 0);
     CHECK(near(frame.camera.eye[2], 4.0f));
+}
+
+// D-NET-330: the death screen's first-person sub-mode tracks its spectate target
+// and the mode-0 compose reads the TRACKED entity: the target's CameraOffset, aim
+// and torso roll make the view on an authority world. A joiner's target is a
+// decoded row with no body in its world, so its view stays on the local entity.
+// [orig: Camera_ComputeThirdPersonView @0x437D10 - `mov esi, g_CameraTrackedEntity`
+//  @0x437D2B, CameraOffset @0x437FA2..0x437FB7, the roll @0x437FCD..0x437FE6;
+//  Camera_SetTrackedEntity @0x4391E7..0x4391F9]
+void test_first_person_compose_reads_the_tracked_target() {
+    const auto near = [](float a, float b) { return std::fabs(a - b) < 1e-4f; };
+    auto lw = std::make_unique<LocalWorld>();
+    lw->ai.attach(lw->local);
+    AiEntity *body = lw->ai.for_handle(lw->local);
+    body->inf.active = true;
+    body->inf.is_local_player = true;
+    body->heading = 0x40000000;
+    lw->entity().eye_offset_z = 0x18000; // the local entity's 1.5 u
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.item_id = 0x14B9;
+    seed.net_id = 2;
+    seed.position = {30.0f, 40.0f, 5.0f};
+    seed.alive = true;
+    seed.health = 100;
+    seed.eye_offset_z = 0x10000; // the target's 1.0 u
+    const EntityHandle target = lw->w.registry.spawn(0, seed);
+    lw->ai.attach(target);
+    AiEntity *tbody = lw->ai.for_handle(target);
+    tbody->inf.active = true;
+    tbody->heading = 0x40000000; // mission yaw 0: the view faces +Y
+    tbody->inf.torso_roll = bam_from_degrees_wrapped(4.0);
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    view.camera_tracked = kCameraTrackedTargetKey | target.packed;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    local_player_view_frame(&lw->w, weapon, view, tracker, frame);
+    CHECK(frame.camera_pose_valid && !frame.mounted_camera);
+    CHECK(near(frame.camera.eye[0], 30.0f) && near(frame.camera.eye[1], 40.0f - 0.1875f));
+    CHECK(near(frame.camera.eye[2], 6.0f));
+    CHECK(near(frame.camera.roll_deg, 4.0f));
+    // A joiner's world: the target is no body of its own, the local entity composes.
+    lw->w.rules.logic_authority = false;
+    local_player_view_frame(&lw->w, weapon, view, tracker, frame);
+    CHECK(near(frame.camera.eye[0], 10.0f) && near(frame.camera.eye[1], 20.0f - 0.1875f));
+    CHECK(near(frame.camera.eye[2], 4.5f));
+    CHECK(near(frame.camera.roll_deg, 0.0f));
 }
 
 // Both shake legs add their yaw delta to the BAM HEADING, so the mission yaw
@@ -3920,6 +3969,7 @@ int main() {
     test_mounted_first_person_camera_belongs_to_the_carrier();
     test_seat_bone_pose_rider_legs();
     test_unadmitted_seat_takes_the_ground_or_person_leg();
+    test_first_person_compose_reads_the_tracked_target();
     test_shake_turns_the_bam_heading();
     test_chase_lookahead_follows_the_hull_on_every_compose();
     test_scope_toggle_refuses_inactive_weapon();
