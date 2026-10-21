@@ -56,6 +56,10 @@ var _character_state := PlayerCharacterSelectionStateScript.new()
 var _restoring_side := false
 var _restored_voice := 0
 signal avatar_chosen(profile: Dictionary)
+## The PLAYER_PREVIEW portrait drew a frame: retail's draw stores 16:00 into the process's
+## time of day, never restored, which the menus' remote admin reads (MainGame routes it to
+## GameWorld.player_preview_drawn) [orig: PlayerInfo_RenderPlayerPreview3D @ 0x560af5].
+signal player_preview_drawn
 
 
 ## Install the active + per-side weapon.sav character snapshot before the next build.
@@ -493,6 +497,7 @@ func _wire_preview() -> void:
 	_preview_id = preview_id
 	_preview = AvatarPreviewScript.new()
 	_preview.name = "PlayerInfoAvatarPreview"
+	_preview.drawn.connect(player_preview_drawn.emit)
 	frame.add_child(_preview)
 	_place_mount(_preview, preview_id)
 	# Runtime PLAYER_INFO portrait: camera fixed, character facing the viewer,

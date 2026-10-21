@@ -308,6 +308,9 @@ public:
 	// The pre-game menu's cancel (its ABORT_CANCEL, the join choice's BACK): the join
 	// machine's cleanup destroys the session (RemoteAdminConsoles::session_destroyed).
 	void pre_game_cancelled();
+	// The PLAYER_INFO screen's portrait drew a frame: its 16:00 becomes the process's time
+	// of day (RemoteAdminConsoles::player_preview_drawn).
+	void player_preview_drawn();
 	// What the main frame does with a stored exit reason over the loaded sim's
 	// session facts (inmatch::main_frame_exit): a MAIN_FRAME_EXIT_* value.
 	int main_frame_exit(int p_reason) const;

@@ -47,6 +47,12 @@ inline constexpr const char *kAdminLogFileName = "admin_log.txt";
 // [orig: CAdminServer_Listen @0x406E1F (socket(AF_INET, SOCK_STREAM)), @0x406E74 (sin_addr 0)]
 inline constexpr const char *kAdminListenAddress = "0.0.0.0";
 
+// The time of day the PLAYER_INFO screen's player preview stores on every draw (16:00 in the
+// 24.8 fixed day), never restored: the menus' CURRENT TOD reads it once the preview has drawn.
+// [orig: PlayerInfo_RenderPlayerPreview3D @0x5609C0 (the draw, event 1 @0x5609D7), the store
+//  g_EnvCurTimeFixed24 = 0x10000000 @0x560AF5]
+inline constexpr uint32_t kPlayerPreviewTodFixed24 = 0x10000000u;
+
 // The listener's port: game.cfg's remote_admin_port as the 16-bit word it is stored as; 0 opens
 // no listener. [orig: Game_InitSubsystems @0x4A72C7 (movzx of remoteAdminPort_A18),
 //  @0x4A72CE..0x4A72D1 (the nonzero test), CAdminServer_Listen @0x4A72D9]
@@ -187,6 +193,10 @@ public:
 	// [orig: PostMenu_RouteMissionExit @0x568460 (the error arms @0x5684A8..0x5685BD ->
 	//  loc_5686DA..0x568715 skip CNapiGameSession_FullDestroy @0x568683)]
 	void route_mission_exit(int32_t reason);
+	// The PLAYER_INFO screen's player preview drew: the process time of day is its 16:00, which
+	// the menus keep until a mission start sets the clock (a session's refresh reads its world).
+	// [orig: PlayerInfo_RenderPlayerPreview3D @0x560AF5]
+	void player_preview_drawn() { process_mission_.tod_fixed24 = kPlayerPreviewTodFixed24; }
 
 	// The bound session's mission into the process words, before each line runs and on every
 	// frame the embedder pumps: a host context's session title, mission file and game type; a

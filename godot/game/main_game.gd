@@ -883,6 +883,7 @@ func _wire_shell() -> void:
 	_net.wire_menu_companions(_mp_companion)
 	_player_info_companion.set_persisted_profile(_chosen_avatar)
 	_player_info_companion.avatar_chosen.connect(_on_avatar_chosen)
+	_player_info_companion.player_preview_drawn.connect(_on_player_preview_drawn)
 
 
 # The Mods list switched the game: the profile loads again under the expansion it
@@ -918,6 +919,13 @@ func _on_ingame_controls_accepted() -> void:
 # spawn-kit seam.
 func _on_avatar_chosen(profile: Dictionary) -> void:
 	set_local_player_profile(profile)
+
+
+# The PLAYER_INFO portrait's draw stores the time of day it lights by into the process's
+# clock, never restored (engine inmatch::RemoteAdminConsoles::player_preview_drawn).
+func _on_player_preview_drawn() -> void:
+	if _world != null:
+		_world.player_preview_drawn()
 
 
 ## Load the player profile (player.sav, and the mounted expansion's weapon.sav)

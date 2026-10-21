@@ -352,6 +352,10 @@ void GameWorld::pre_game_cancelled() {
 	admin_consoles_.session_destroyed();
 }
 
+void GameWorld::player_preview_drawn() {
+	admin_consoles_.player_preview_drawn();
+}
+
 int GameWorld::main_frame_exit(int p_reason) const {
 	Ref<Simulation> sim = get_sim();
 	const bool in_session = sim.is_valid() && sim->is_mp_session();
@@ -979,6 +983,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
 	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
 	ClassDB::bind_method(D_METHOD("pre_game_cancelled"), &GameWorld::pre_game_cancelled);
+	ClassDB::bind_method(D_METHOD("player_preview_drawn"), &GameWorld::player_preview_drawn);
 	ClassDB::bind_method(D_METHOD("begin_map_change"), &GameWorld::begin_map_change);
 	ClassDB::bind_method(D_METHOD("load_next_mission", "bms_name"), &GameWorld::load_next_mission);
 	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &GameWorld::begin_joiner_reload);

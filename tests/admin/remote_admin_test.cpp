@@ -445,6 +445,16 @@ void test_joiner_console() {
 	// [orig: Game_TeardownMission @0x5223FA]
 	expect(report.find("UP-TIME: 0 00:00:00\r\nCURRENT TOD: 3840\r\n") != std::string::npos,
 	       "back in the menus: no session clock, the last time of day");
+	// The PLAYER_INFO screen's portrait draws: its 16:00 (0x10000000) is the process's time of
+	// day from then on, never restored (0x10000000 >> 16 = 4096).
+	// [orig: PlayerInfo_RenderPlayerPreview3D @0x5609C0, the store @0x560AF5;
+	//  CAdminServer_HandleStatus @0x402F6F]
+	consoles.player_preview_drawn();
+	expect(consoles.status_report().find("CURRENT TOD: 4096\r\n") != std::string::npos,
+	       "after the player preview drew: 16:00");
+	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
+	expect(consoles.status_report().find("CURRENT TOD: 4096\r\n") != std::string::npos,
+	       "kept across the menus' frames");
 }
 
 // The session's end into the menus zeroes g_GameType only where the session is destroyed: the
