@@ -560,6 +560,34 @@ void test_a_dedicated_host_refills_no_gun() {
 	}
 }
 
+// D-NET-NEW-L7-4 (V-L7-s4's FOUND-1): the walk also visits an unoccupied EWeap gun whose
+// heat window is open, and its RELOAD there addresses the gun itself: the authority queues
+// [gun][FF FF], and only a playing authority's echo refills it; a dedicated host refills
+// nothing. [orig: WeaponAction_ProcessAllEntities @0x542690 (the pool-1 walk
+// @0x5426E9..0x542716); WeaponAction_Reload @0x5430B0 (@0x5430CA..0x543103);
+// NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974)]
+void test_an_unoccupied_gun_relays_its_reload() {
+	for (const bool peer : {true, false}) {
+		Rig r(false);
+		r.world.rules.mp_session_peer = peer;
+		r.world.tables.weapons.entries[kGunAdm].action_fsm.clip_capacity = 100;
+		w::WeaponSlotState &slot = r.gun().primary_weapon_slot;
+		slot.clip = 0;
+		slot.reserve = 100;
+		slot.heat_window_end_tick = 1000000; // the window open: the walk visits the gun
+		r.gun().item_type_index = 1;          // a resolved def row (the walk's live test)
+		CHECK(!r.gun().primary_occupant.valid());
+		CHECK(pump_until_reload(r.world));
+		CHECK(r.world.out.weapon_reloads.size() == 1);
+		if (!r.world.out.weapon_reloads.empty()) {
+			CHECK(r.world.out.weapon_reloads[0].entity_handle == r.gun_h.packed);
+			CHECK(r.world.out.weapon_reloads[0].reload_param == 0xFFFF);
+		}
+		CHECK(slot.clip == (peer ? 100 : 0));
+		CHECK(slot.reserve == (peer ? 0 : 100));
+	}
+}
+
 // A joiner whose personal SWITCHFROM is running when the host's forced UseGun attach lands
 // with a gun of the outgoing weapon's category: the mount stores the gun's slot as
 // g_PendingWeaponSlot and its SWITCHRANK queue writes nothing over the running SWITCHFROM,
@@ -702,6 +730,7 @@ int main() {
 	test_a_ctrlx_seat_saves_a_gun_held_on_foot();
 	test_the_walk_relays_an_authority_reload();
 	test_a_dedicated_host_refills_no_gun();
+	test_an_unoccupied_gun_relays_its_reload();
 	test_the_walk_queues_reloads_in_slot_order();
 	test_a_running_switchfrom_commits_the_forced_gun();
 	if (failures != 0) {

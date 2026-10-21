@@ -7,6 +7,41 @@
 #include <runtime/world/world.h>
 
 namespace opennova::world {
+// The S2C 0x49 echo of an authority reload refills the addressed entity only when
+// it is the local player or carries a def other than a person's (WeaponFsmInputs::
+// reload_refills). The request reaches the host's dispatcher only through the
+// authority's own client connection, which only a playing authority (single
+// player, a listen host: is_mp_session_peer) creates; on a dedicated host the
+// queue sends nothing, no echo comes and the walk's RELOAD refills nothing.
+// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 (@0x42C0F8, @0x42C103,
+//  @0x42C109); CNapiNetwork_QueueReliableMessage @0x4C4FA0 (the null connection
+//  @0x4C4FA6..0x4C4FA8); CNapiGameSession_CreateSession @0x4C97C0 (is_authority
+//  and is_mp_session_peer @0x4C9B6A..0x4C9B76, the client connection's store
+//  @0x4C9BA6)]
+bool reload_echo_refills(const World &world, const Entity &addressed) {
+    if (!world.rules.mp_session_peer) return false;
+    return addressed.handle == world.cached.local_player ||
+           (addressed.has_item_def && addressed.item_type != 3);
+}
+
+// A reload the walk began on the authority queues its C2S 0x25 into the host's own
+// dispatcher: a UseGun gunner's addresses the gun (an EWeap, so 0xFFFF), any other
+// row's itself with the slot's combo (D-NET-336).
+// [orig: WeaponAction_Reload @0x5430B6..0x543108 (the authority gate @0x5430D9,
+//  parentSlot 3 @0x5430EA..0x5430FF); NetPacket_SendReloadRequest
+//  @0x43296C..0x432974]
+void queue_walk_reload(World &world, const Entity &addressed,
+                              const WeaponTableEntry &weapon) {
+    WeaponReloadRequest request;
+    request.entity_handle = addressed.handle.packed;
+    request.reload_param = addressed.has_item_def &&
+            (addressed.item_attrib & kItemAttribEweap) != 0
+            ? uint16_t(0xFFFF)
+            : static_cast<uint16_t>(static_cast<uint16_t>(weapon.category) * 65u +
+                                    static_cast<uint16_t>(weapon.rank));
+    world.out.weapon_reloads.push_back(request);
+}
+
 void weapon_fire_environment_inputs(const World &world, const Entity &owner,
                                     WeaponFsmInputs &inputs) {
     // [orig: WeaponSlot_CanFire @0x541bfa..0x541c39]

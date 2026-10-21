@@ -668,10 +668,19 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     inputs.is_authority = world.ai.is_authority;
     inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
     inputs.current_tick = static_cast<int32_t>(frame_tick);
+    // The walked gun is the RELOAD's addressee: an authority queues its C2S 0x25
+    // ([gun][FF FF], the EWeap param), which only a playing authority's own client
+    // sends, and only its S2C 0x49 echo refills the gun (none on a dedicated host).
+    // [orig: WeaponAction_ProcessAllEntities @0x542690 (the pool-1 walk
+    //  @0x5426E9..0x542716); WeaponAction_Reload @0x5430B0 (@0x5430CA..0x543103);
+    //  NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974)]
+    inputs.reload_refills = reload_echo_refills(world, row);
     weapon_fire_environment_inputs(world, row, inputs);
     WeaponFsmEvents events;
     weapon_fsm_tick(weapon->action_fsm, row.primary_weapon_slot, inputs, events);
     weapon_sound_publish(world, row, weapon->action_fsm, events);
+    if (events.reload_requested && world.ai.is_authority)
+        queue_walk_reload(world, row, *weapon);
 }
 
 void World::pump_weapon_actions() {
