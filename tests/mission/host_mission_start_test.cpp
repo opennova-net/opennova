@@ -1,12 +1,14 @@
 // The mission start's Player_InitPlayer body leg on a playing host (L7-s1
 // FOUND-1): with spawn zones the host's own player joins held, and the add hid
 // its body. Every mission start then calls Player_InitPlayer after the round
-// init, which clears the local player's hidden bit, so a server tick's slot
-// lists count it as a human (the empty-world hold, humans 0 with a started WAC
-// clock, lets that frame's entity update run) until the own join: the receive
-// pump that hands over the own client's C2S 0x0B (queued at the mission
-// start's end, D-NET-NEW-L4-5) runs the join, whose own 0x0A writer hides the
-// undeployed body again ahead of the slot lists, so that frame holds. The
+// init, which names the body after the local profile and clears its hidden
+// bit, and the mission start's own local-player block clears it again, builds
+// the proximity lists and sets it again: the body leaves the mission start
+// hidden, so no server tick's slot lists count it as a human before the own
+// join: the receive pump that hands over the own client's C2S 0x0B (queued at
+// the mission start's end, D-NET-NEW-L4-5) runs the join, which clears the bit
+// and whose own 0x0A writer hides the undeployed body again ahead of the slot
+// lists, so that frame holds. The
 // 0x0B reaches the server on the first frame: the own connection's period is
 // one tick and the mission start's two client receives spend its countdown
 // ahead of the 0x0B's send, so a held listen host runs no update before its
@@ -17,7 +19,8 @@
 //  @0x525BD9, the send @0x526255; NetClient_FlushAndSync's authority return
 //  @0x424719; CNapiNPConnection_PumpEnumeratorAndSend's gate @0x62927B]
 // [orig: Game_StartMission -- the round init @0x525BAF, the Player_InitPlayer
-//  call @0x525BBC; Player_InitPlayer @0x4E15F0 -- `Flags &= ~1` @0x4E19C2;
+//  call @0x525BBC, the block @0x525C6B..0x525C9E (the re-hide @0x525C9E);
+//  Player_InitPlayer @0x4E15F0 -- the Name @0x4E184F..0x4E186A, `Flags &= ~1` @0x4E19C2;
 //  Server_BuildEntitySlotLists @0x4F97A0 -- the Player bit @0x4F9815, the
 //  hidden bit @0x4F9820, +1 @0x4F98B1, called from Server_TickUpdate @0x51D89A;
 //  Game_ProcessMainFrame -- the humans/ticks hold @0x52671C..0x52672A, the
@@ -36,6 +39,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/infantry.h> // IRootMotionSource (the warm-up pin)
+#include <runtime/world/player_loadout.h> // local_loadout_kit (the restart's kit)
 #include <runtime/world/world.h>
 
 #include "../common/boot_file_source.h"
@@ -141,16 +145,20 @@ void run_held_host(bool mission_start) {
 	CHECK(host.host_loop.c2s_pending() == 3);
 	kernel.world.cached.wac_ticks = 1;
 	if (mission_start) {
+		// The body leaves the mission start hidden, named after the local profile (the
+		// session config's player name).
 		role.init_local_player_at_mission_start();
-		CHECK(!hidden());
+		CHECK(hidden());
+		const w::Entity *e = kernel.world.registry.get(body);
+		CHECK(e != nullptr && e->name == host.host_owner.ctx.config.player_name);
 	}
 	const uint32_t updates = kernel.world.entity_update_counter;
 	role.run_tick(tick_input());
 	// The receive pump's join holds the undeployed slot; it clears the body's
 	// hidden bit and its own 0x0A's writer sets it again, both inside the
 	// receive pump, ahead of the slot lists: the frame counts no human and its
-	// update holds, the mission start's unhide or not: no frame between the
-	// load and the own join runs an update (N = 0, the header's arithmetic).
+	// update holds: no frame between the load and the own join runs an update
+	// (N = 0, the header's arithmetic).
 	// [orig: Server_OnPlayerJoin - the clear @0x51A7DA, its 0x0A @0x51A82D ->
 	//  NetPacket_WritePlayerState (+89912 & 0x10) @0x4FF7B8; Server_TickUpdate -
 	//  the receive pump @0x51D895, Server_BuildEntitySlotLists @0x51D89A]
@@ -421,6 +429,58 @@ void run_first_round_init_seeds_the_own_buffer() {
 	if (entries.size() == 2) CHECK(entries[0].adm_index == 2 && entries[1].adm_index == 1);
 }
 
+// The single player's restart is a mission start whose armory table and class mask come from
+// the mission entry's template (Game_StartMission(1), from Game_RestartRoundSP): the name-list
+// result over the mission's chunks, which ours promotes at every load; ours boots a fresh
+// kernel for the restart (D-PWR-8), whose table load promotes the same chunks again, so the
+// restart's kit and availability equal the fresh launch's (NOT-A-DIV of FOUND-L7-s5-1's
+// restart arm).
+// [orig: Game_ProcessMainFrame @0x52682A..0x52682C -> Game_RestartRoundSP, its push 1
+//  @0x5263D9 and call @0x5263DB -> Game_StartMission
+//  - the table from the entry's +0xD1C template @0x5246CD..0x5246E8, the mask from +0x1118
+//  @0x5246ED..0x524706; Mission_LoadBMSFile @0x40F4E0 - the SP-vs-net gate @0x40F694]
+void run_single_player_restart_repromotes_the_mission_kit() {
+	std::vector<world::WeaponKitEntry> kits[2];
+	int32_t knife[2] = {0, 0};
+	int32_t m4[2] = {0, 0};
+	for (int pass = 0; pass < 2; ++pass) {
+		std::map<std::string, std::string> files;
+		files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		bms::File mission = two_entity_mission();
+		bms::WeaponLoadoutRecord row;
+		row.name = "WPN_KNIFE";
+		row.ammo_primary = "1";
+		row.ammo_secondary = "0";
+		mission.loadout.entries.push_back(row);
+		bms::ItemAvailabilityEntry banned;
+		banned.name = "WPN_M4AUTO";
+		banned.status = 0;
+		mission.item_availability.push_back(banned);
+		kernel.open_document(std::move(mission), "sp_restart", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = false;
+		options.restart = pass == 1;
+		options.game_type = mission_game_type(kernel.mission);
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.restart_boot() == (pass == 1));
+		kits[pass] = world::local_loadout_kit(kernel.world, kernel.local.loadout);
+		knife[pass] = kernel.local.loadout.availability.value_for(
+				kernel.world.tables.weapons.index_of("WPN_KNIFE"));
+		m4[pass] = kernel.local.loadout.availability.value_for(
+				kernel.world.tables.weapons.index_of("WPN_M4AUTO"));
+	}
+	CHECK(kits[0].size() == kits[1].size());
+	for (size_t i = 0; i < kits[0].size() && i < kits[1].size(); ++i)
+		CHECK(kits[0][i].name == kits[1][i].name &&
+				kits[0][i].ammo_primary == kits[1][i].ammo_primary &&
+				kits[0][i].ammo_secondary == kits[1][i].ammo_secondary);
+	CHECK(!kits[0].empty() && kits[0][0].name == "WPN_KNIFE");
+	CHECK(knife[0] == knife[1] && m4[0] == m4[1]);
+}
+
 } // namespace
 
 int main() {
@@ -430,6 +490,7 @@ int main() {
 	run_own_mission_start_submits_its_kit();
 	run_single_player_mission_start_submits_no_kit();
 	run_first_round_init_seeds_the_own_buffer();
+	run_single_player_restart_repromotes_the_mission_kit();
 	if (failures == 0) std::printf("host_mission_start: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -30,6 +30,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/player_loadout.h>
+#include <runtime/world/collision.h> // the mission start's proximity build (init_local_player_at_mission_start)
 
 #include <string>
 #include <string_view>
@@ -399,19 +400,34 @@ void HostRole::seed_own_slot_at_first_round_init() {
 	(void)Server_SpawnHostSlotBody(state.host_owner.ctx, kernel_->world);
 }
 
-// See host_role.h. The add hid a held host's own body, as retail's spawn hides
-// every body it creates; Player_InitPlayer, which every mission start calls
-// after the round init, clears the local player's hidden bit, so
-// Server_BuildEntitySlotLists counts it until the own join's 0x0A writer sets
-// the bit again for the undeployed slot.
-// [orig: Game_StartMission @0x525BAF / @0x525BBC; Player_InitPlayer
-//  @0x4E19C2; Entity_SpawnFromAnimSlotProperty @0x43C433; Server_BuildEntitySlotLists
-//  @0x4F9815 / @0x4F9820; NetPacket_WritePlayerState @0x4FF7B8]
+// See host_role.h. Player_InitPlayer names the local body after the local profile and
+// clears its hidden bit; the mission start's own local-player block then clears the indoors
+// bit and the medic-revive latch, clears the hidden bit, rebuilds every proximity list (the
+// unhidden body in the person table) and sets the hidden bit again, so every host's local
+// body leaves the mission start hidden. A playing host's own join then clears it inside
+// frame 1's receive pump and its 0x0A writer sets it again for an undeployed slot, both
+// ahead of the slot lists' count; a Serve Only host's row body, which no join reaches,
+// stays hidden.
+// [orig: Game_StartMission @0x525BAF / @0x525BBC; Player_InitPlayer @0x4E15F0 - the Name
+//  from g_LocalProfileName @0x4E184F..0x4E186A, `Flags &= ~1` @0x4E19C2; Game_StartMission -
+//  `and [eax+24h], 0FF7FFFFFh` @0x525C74, +0x1E0 = 0 @0x525C81, `and [eax+24h], 0FFFFFFFEh`
+//  @0x525C8C, Entity_BuildAllProximityLists @0x525C90, `or [eax+24h], edi` @0x525C9E (edi = 1
+//  from @0x5255B9); Server_OnPlayerJoin's clear @0x51A7DA and its 0x0A @0x51A82D ->
+//  NetPacket_WritePlayerState @0x4FF7B8; Server_BuildEntitySlotLists @0x4F9815 / @0x4F9820]
 void HostRole::init_local_player_at_mission_start() {
-	if (!state.host_owner.serve_and_play) return;
-	mission::MissionKernel &kernel = *kernel_;
-	if (world::Entity *player = kernel.world.registry.get(kernel.world.cached.local_player))
-		player->flags &= ~world::kEntityFlagCarried;
+	world::World &world = kernel_->world;
+	world::Entity *player = world.registry.get(world.cached.local_player);
+	if (player == nullptr) return; // the mission start's null test @0x525C70
+	// The local profile's name: the session config's player name, the name a playing
+	// host's own add gives its body too (g_LocalProfileName).
+	player->name = state.host_owner.ctx.config.player_name;
+	player->display_name = player->name;
+	player->flags &= ~world::kEntityFlagCarried;
+	player->flags &= ~world::kEntityFlagIndoors;
+	player->medic_reviving = false;
+	player->flags &= ~world::kEntityFlagCarried;
+	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
+	player->flags |= world::kEntityFlagCarried;
 }
 
 // See host_role.h. The 0x0B is the side password (g_SidePassword, the game

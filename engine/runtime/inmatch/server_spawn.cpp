@@ -299,8 +299,9 @@ world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World 
 	//  @0x516BBA; Server_UpdateAllActivePlayerSlots - the state-6 test @0x518874..0x518878;
 	//  the row's state, the allocation's zero, set to 6 only by a join @0x51A702..0x51A712].
 	body->damage_state = 620;
-	// The mission start hides the local player's body for good on a host that never
-	// deploys [orig: Game_StartMission @0x525C95..0x525C9E].
+	// The spawn hides every body it creates [orig: Entity_SpawnFromAnimSlotProperty
+	// @0x43C433]; the mission start's local-player block leaves it hidden
+	// (HostRole::init_local_player_at_mission_start), and no join ever clears it.
 	body->flags |= world::kEntityFlagCarried;
 	host.body = h;
 	return h;
@@ -749,14 +750,17 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 // entity+0x294 @0x51D382; the bodyless arm's slot+0x1A0 @0x51D398 and
 // slot+0x15EDC @0x51D3AF; the SetOrCreates @0x51D48F / @0x51D4AA].
 void stamp_player_list_add(NapiNPConnection &conn, const world::World &world) {
-	// The listen host's own add finds no entity (the create's round init zeroed the
-	// slot's, and the own body is a mission start's), so it takes the bodyless arm:
-	// the slot's team, the round init's, and its class, which the slot table's
-	// allocation zeroed and the create's profile init stores only after the add
-	// (D-NET-659's residual) [orig: Server_InitNewRoundState - the slot table
-	//  Server_AllocatePlayerSlotTable's memset @0x51C1CB, the team
-	//  Server_AssignPlayerTeam @0x51CAC8, the entity 0 @0x51CA2F;
-	//  CNapiGameSession_CreateSession - the profile init @0x4C9CCE after the add].
+	// The listen host's own add finds no entity: its arm stores g_LocalPlayerEntity as
+	// the slot's entity, which is null at a session create from the menu (zero at boot,
+	// and the last mission's teardown zeroed it; the own body is a mission start's), so it
+	// takes the bodyless arm: the slot's team, the round init's, and its class, which the
+	// slot table's allocation zeroed and the create's profile init stores only after the
+	// add (D-NET-659's residual) [orig: Server_PlayerAdd's own arm - [slot+0] =
+	//  g_LocalPlayerEntity @0x51CC58..0x51CC5D; Game_TeardownMission's memset of
+	//  g_LocalPlayerEntity @0x522774..0x522780; Server_InitNewRoundState - the slot table
+	//  Server_AllocatePlayerSlotTable's memset @0x51C1CB, the team Server_AssignPlayerTeam
+	//  @0x51CAC8, the entity 0 @0x51CA2F; CNapiGameSession_CreateSession - the profile
+	//  init @0x4C9CCE after the add].
 	if (conn.type == NapiNPConnection::kTypeClientSide) {
 		conn.player_list_team = conn.assigned_team_valid ? conn.assigned_team : 0;
 		conn.player_list_type = 0;
