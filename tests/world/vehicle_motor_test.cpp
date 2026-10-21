@@ -2944,10 +2944,39 @@ void test_a_dead_aircraft_bails_ahead_of_its_ai_block() {
     }
 }
 
+// The selector-zero ground mover parks on `occupant == 0 || Flags & 0x10000002`
+// ahead of its player test: a script-disabled hull with a player seated takes no
+// input. Neither twin reads the occupant's life: a seated player at zero health
+// still drives (its death edge, not the mover, takes it out of the seat).
+// [orig: Entity_ProcessInfantryPhysics @0x46E9FC..0x46EA11 -> the parked arm
+//  @0x46F09E..0x46F0C7; the player test @0x46EA21..0x46EA28]
+void test_selector_zero_park_reads_the_hull_not_the_occupant() {
+    for (const int arm : {0, 1, 2}) {
+        auto r = std::make_unique<Rig>();
+        VehicleTraits t = buggy_traits();
+        t.physics = 0;
+        r->mount();
+        r->drv().net_move_input = 0x08;
+        if (arm == 1) r->veh().flags |= kEntityFlagScriptDisabled;
+        if (arm == 2) {
+            r->drv().health = 0;
+            r->drv().alive = false;
+        }
+        r->tick(20, t);
+        if (arm == 1) {
+            CHECK(r->veh().veh.speed == 0);
+            CHECK(r->veh().veh.cmd_speed == 0);
+        } else {
+            CHECK(r->veh().veh.speed > 0);
+        }
+    }
+}
+
 int main() {
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
     test_a_dead_aircraft_bails_ahead_of_its_ai_block();
+    test_selector_zero_park_reads_the_hull_not_the_occupant();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();

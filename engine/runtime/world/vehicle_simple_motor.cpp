@@ -246,9 +246,11 @@ void VehicleSystem::tick_simple_motor(
 		e.engine_flags |= kEntityFlagMatrixBuilt;
 		return;
 	}
+	// The occupant as the seat holds it: neither mover reads its life (a body
+	// that dies seated has left at its own death edge, which the pool-0 walk runs
+	// ahead of this pool-1 update). [orig: Entity_ProcessInfantryPhysics
+	//  @0x46E9FC..0x46EA04; Entity_ProcessAirVehiclePhysics @0x4704F0..0x4704F8]
 	Entity *controller = t.player_control ? resolve_controller(e) : nullptr;
-	if (controller != nullptr && (!controller->alive || controller->health <= 0))
-		controller = nullptr;
 	if (boat && t.player_control) {
 		// The selector-zero boat's PlayerControl block sits at its HEAD, before
 		// the authority split, so it runs for the authority and for a client's
@@ -277,7 +279,14 @@ void VehicleSystem::tick_simple_motor(
 			m.steer_target_bam = m.net_recv_steer_bam;
 		}
 	} else if (t.player_control) {
-		if (controller == nullptr) {
+		// Parked is `occupant == 0 || Flags & 0x10000002` on the ground twin, ahead
+		// of the player test: a script-disabled hull with a player seated takes no
+		// input. The boat twin's test is `occupant == 0 || Flags & 2`, and its tail
+		// bail above already took the dead bit.
+		// [orig: Entity_ProcessInfantryPhysics @0x46E9FC..0x46EA11 -> the parked
+		//  arm @0x46F09E..0x46F0C7; Entity_ProcessAirVehiclePhysics
+		//  @0x4704F0..0x470502 -> @0x470D4E]
+		if (controller == nullptr || (!boat && vehicle_hull_parked(e))) {
 			m.steer_target_bam = m.yaw_bam;
 			m.cmd_speed = 0;
 			m.steer_ramp_bam = 0;
