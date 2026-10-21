@@ -433,7 +433,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		// aiState (+0x2B4), the low byte. [orig: NetPacket_SerializeEntityStatesToBuffer
 		//  @0x5030A0 - read @0x5032A3, stored @0x5032B6; NapiNPClientMsg_0x00C @0x42E730 -
 		//  entity->aiState @0x42E991]
-		rec.ai_state = static_cast<uint8_t>(e.ai_state);
+		rec.ai_state = static_cast<uint8_t>(entity_word_2b4(e));
 		// Field 13 = entity+0x374 animSlot, the character-model/anim-set selector — serialized RAW
 		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0 reads +0x374 @0x5032b8]. For players the
 		// spawn stamped it from the joiner's per-side VCA/VCB join var (golden joiner=4); NEVER the
@@ -476,6 +476,29 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 	});
 	batch.entity_count = static_cast<uint16_t>(batch.records.size());
 	return batch;
+}
+
+// itemDef+0x5C ItemDefType: a vehicle row (its movers' steering filter owns +0x2B4).
+constexpr uint8_t kVehicleItemType = 1;
+
+int32_t entity_word_2b4(const world::Entity &e) {
+	if (e.kind == world::EntityKind::Organic) return e.ai_state;
+	// A squib's death event arms its arc with the def's deathTime in the word, which
+	// its own class keeps (its death runs no husked chain).
+	if (e.squib.interval != 0) return e.squib.interval;
+	if (!e.alive || (e.flags & world::kEntityFlagDead) != 0) return 0;
+	if (!e.script_effect_name.empty()) {
+		uint32_t word = 0;
+		for (size_t i = 0; i < 4 && i < e.script_effect_name.size(); ++i)
+			word |= static_cast<uint32_t>(static_cast<uint8_t>(e.script_effect_name[i])) << (8 * i);
+		return static_cast<int32_t>(word);
+	}
+	if (e.powerup_def_index >= 0) return e.powerup_respawn_timer;
+	if (e.door_slot >= 0) return static_cast<int32_t>(e.door_touch_mask);
+	if (e.has_item_def && e.item_type == kVehicleItemType) return e.veh.steer_state;
+	if (e.has_item_def && (e.item_attrib & world::kItemAttribEweap) != 0)
+		return e.primary_weapon_slot.counter;
+	return e.ai_state;
 }
 
 FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
@@ -534,7 +557,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 	// [orig: NetPacket_SerializeObjectToBuffer movzx word [ebx+12h] @0x505166, [ebx+16h] @0x505179].
 	rec.heading_hi = static_cast<uint16_t>(static_cast<uint32_t>(carrier_heading_bam(e)) >> 16);
 	rec.pitch_hi = static_cast<uint16_t>(static_cast<uint32_t>(carrier_pitch_bam(e)) >> 16);
-	rec.ai_state = static_cast<uint8_t>(e.ai_state); // entity+692 low byte, serialized raw
+	rec.ai_state = static_cast<uint8_t>(entity_word_2b4(e)); // entity+692 low byte, serialized raw
 	// Same field sources as the 0x0C organic record: entity+0x374 raw + the per-team minimap id
 	// (see build_pool0_organic_batch; D-NET-146/137).
 	rec.anim_slot = e.anim_slot;

@@ -5182,6 +5182,11 @@ add_executable(netsim_joiner_usegun_rider_compose_test netsim/joiner_usegun_ride
 target_link_libraries(netsim_joiner_usegun_rider_compose_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(netsim_joiner_usegun_rider_compose_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME netsim_joiner_usegun_rider_compose COMMAND netsim_joiner_usegun_rider_compose_test)
+# D-NET-133: the 0x0C / 0x18 aiState byte is entity+0x2B4's per-class word (a vehicle's steering
+# filter, a powerup's countdown, a gun's MountSlot counter, a door mask, a marker's name, 0 dead).
+add_executable(npruntime_full_entity_spawn_ai_state_test npruntime/full_entity_spawn_ai_state_test.cpp)
+target_link_libraries(npruntime_full_entity_spawn_ai_state_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_full_entity_spawn_ai_state COMMAND npruntime_full_entity_spawn_ai_state_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a
