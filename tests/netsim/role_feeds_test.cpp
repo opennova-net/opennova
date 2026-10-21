@@ -101,6 +101,19 @@ static void inset_target_name_cases() {
 		slot.entity_slot = static_cast<int16_t>(player_h.slot());
 		host_runtime.state().visible_players.push_back({3, player_h.packed});
 		CHECK(hud_role_facts(host).inset_target_name == "Pat <ch>TAG<co>");
+		// A lock on a round (a flare the heat lock took, the +0xC word) is the cursor: no
+		// pool holds a round, so the inset names nothing, whatever the head-look target
+		// [orig: HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B882D); Render_WeaponInsetScene
+		//  @0x5C9740 (the pool test @0x5C9F78)] (D-NET-64).
+		body->inf.combat_target = world::EntityHandle{};
+		body->inf.head_look_target = mate_h;
+		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef::of_round(3));
+		CHECK(hud_role_facts(host).inset_target_name.empty());
+		// An entity lock in the same word names its entity again.
+		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef{mate_h});
+		body->inf.combat_target = mate_h;
+		CHECK(hud_role_facts(host).inset_target_name == "Mate");
 	}
 }
 
