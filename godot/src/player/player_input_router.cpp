@@ -16,9 +16,52 @@
 
 #include <cmath>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 using namespace godot;
 
 namespace {
+
+// Retail's auto-run device (D-NET-563; engine controls::PlayerActionPoll::scroll_lock_on and
+// PlayerActionFrame::scroll_lock_off carry the witness): the keyboard state's VK_SCROLL byte,
+// nonzero while the toggle is on or the key is held, and the turn-off, a synthetic Scroll
+// Lock press and release (VK and scan 0x91; the release with KEYEVENTF_KEYUP and time 10)
+// when that byte is nonzero. A platform without a keyboard state reads it off.
+bool scroll_lock_device_on() {
+#ifdef _WIN32
+	BYTE state[256] = {};
+	return ::GetKeyboardState(state) != 0 && state[VK_SCROLL] != 0;
+#else
+	return false;
+#endif
+}
+
+// True when it sent the press and release.
+bool scroll_lock_device_turn_off() {
+#ifdef _WIN32
+	BYTE state[256] = {};
+	if (::GetKeyboardState(state) == 0 || state[VK_SCROLL] == 0) return false;
+	INPUT inputs[2] = {};
+	for (INPUT &input : inputs) {
+		input.type = INPUT_KEYBOARD;
+		input.ki.wVk = VK_SCROLL;
+		input.ki.wScan = VK_SCROLL;
+	}
+	inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+	inputs[1].ki.time = 10;
+	return ::SendInput(2, inputs, sizeof(INPUT)) != 0;
+#else
+	return false;
+#endif
+}
 
 class GodotActionSource final : public opennova::controls::PlayerActionSource {
 public:
@@ -92,6 +135,14 @@ void PlayerInputRouter::setup(Node *p_world, LocalPlayerPresenter *p_presenter,
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
 	presenter_id_ = p_presenter != nullptr ? ObjectID(p_presenter->get_instance_id()) : ObjectID();
 	controls_ = p_controls;
+	// The subsystems' init turns the auto-run's toggle off once a process, ahead of any input
+	// frame; here at the first router the process sets up (D-NET-563; engine
+	// controls::PlayerActionFrame::scroll_lock_off carries the witness).
+	static bool s_scroll_lock_init = false;
+	if (!s_scroll_lock_init) {
+		s_scroll_lock_init = true;
+		scroll_lock_turned_off_ = scroll_lock_device_turn_off();
+	}
 }
 
 void PlayerInputRouter::teardown() {
@@ -130,6 +181,9 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	Ref<MissionFrameInput> frame_input;
 	frame_input.instantiate();
 	frame_input->set_delta_seconds(p_delta);
+	// The window's messages were read since the last frame: the keyboard state holds any
+	// turn-off sent then (retail pumps them at once after its send).
+	scroll_lock_turned_off_ = false;
 	++frame_sequence_;
 	frame_input->set_sequence(frame_sequence_);
 	frame_player_ = false;
@@ -295,7 +349,6 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	if (active) {
 		read_input_state(forward, back, left, right, lean_left, lean_right, jump);
 	}
-	p_input->set_movement(forward, back, left, right, lean_left, lean_right, jump);
     p_input->set_view_keys(active && pressed("FreeLook"),
         active && pressed("look_up"), active && pressed("look_down"),
         active && pressed("turn_left"), active && pressed("turn_right"));
@@ -329,6 +382,9 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
 	gate.death_screen = p_spectating;
 	gate.menu_open = frame_menu_open_;
+	// The Scroll Lock word is a device the scripted input replaces like the keys.
+	gate.scroll_lock_on =
+			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
 	// The held USE row's arm through the sim's press latch (engine
 	// LocalPlayer::take_use_item_press).
 	gate.take_use_item_arm = [&action_sim]() {
@@ -347,6 +403,17 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 		}
 	};
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
+	// Retail's auto-run rides the forward key (engine controls::PlayerActionFrame::
+	// auto_run_forward). A case that turns its toggle off passes the dispatcher's head by its
+	// code; one turn-off per frame, as the keyboard state reads it only once the window's
+	// messages are read.
+	p_input->set_movement(forward || actions.auto_run_forward, back, left, right, lean_left,
+			lean_right, jump);
+	for (const int code : actions.scroll_lock_off) {
+		if (scroll_lock_turned_off_) break;
+		if (code < 0 || (action_sim.is_valid() && action_sim->action_head_admits(code)))
+			scroll_lock_turned_off_ = scroll_lock_device_turn_off();
+	}
 	p_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
 	p_input->set_to_special_input(actions.to_special_held, actions.to_special_edge);

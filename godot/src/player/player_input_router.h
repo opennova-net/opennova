@@ -176,6 +176,10 @@ private:
 	// death screen its sample_tick reads.
 	Vector2 tick_scripted_look_;
 	bool tick_spectating_ = false;
+	// This display frame sent the Scroll Lock turn-off (D-NET-563): the keyboard state reads
+	// it only once the window's messages are read, so the frame's later samples read the word
+	// off and send no second one.
+	bool scroll_lock_turned_off_ = false;
 };
 
 } // namespace godot

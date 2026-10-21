@@ -157,6 +157,9 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 	// state (KeyStateReset), so the row reads it up too.
 	const bool use_down = source.pressed("useitem");
 	if (gate.active && use_admitted && use_down) {
+		// The case turns the auto-run's toggle off at its head (D-NET-563).
+		// [orig: Input_HandleActionBinding_0 case 0xB1 - Input_DisableScrollLock @0x4E0A84]
+		frame.scroll_lock_off.push_back(row_code("useitem"));
 		const UseItemPressArm arm = gate.take_use_item_arm ? gate.take_use_item_arm()
 		                                                   : UseItemPressArm::kMountChain;
 		if (arm == UseItemPressArm::kMountChain) {
@@ -196,6 +199,11 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 			frame.requests.push_back({Action::SelectSeat, seat});
 		use_hold_consumed_ = true;
 	}
+	// The release tail turns the auto-run's toggle off ahead of its mount toggle, whether or
+	// not a seat pick consumed the hold (D-NET-563).
+	// [orig: Input_ProcessFrame - the release test @0x49D6AD..0x49D6C1, Input_DisableScrollLock
+	//  @0x49D6C5, the consumed test @0x49D6CD]
+	if (!use_latched_ && use_held_prev_) frame.scroll_lock_off.push_back(-1);
 	if (!use_latched_ && use_held_prev_ && !use_hold_consumed_ && gate.simulation_available)
 		frame.requests.push_back({Action::ToggleMount});
 }
@@ -230,6 +238,21 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	//  (the index byte @0x49C3BA, the entry @0x49C32C) -> case 55 @0x49B20B]
 	frame.respawn_edge = world::latched_key_edge(
 			admitted("respawn") && source.pressed("respawn"), gate.active, respawn_was_down_);
+	// Retail's auto-run (D-NET-563, PlayerActionFrame::auto_run_forward): the Scroll Lock word
+	// and the held Last_move row queue the forward event; the forward, back and strafe keys'
+	// own held events (the analog pass, skipped under a text line, where pressed() reads them
+	// up), the Respawn press's input reset and the USE row (sample_use) turn the toggle off.
+	// [orig: Input_ProcessPlayerFrame @0x49D4C0 - @0x49D4E6..0x49D4FA, the analog pass
+	//  Input_ProcessAnalogBindings (the call @0x49D50C; the held rows @0x499635, their mode word
+	//  @0x49963E..0x499650, Input_QueueEvent(code, 0, 0, 0) @0x499660); Input_HandleActionBinding
+	//  case 55 @0x49B20B -> Player_ResetLocalInput (the call @0x4B2B91)]
+	const auto held = [&](const char *token) {
+		return gate.active && admitted(token) && source.pressed(token);
+	};
+	frame.auto_run_forward = gate.active && (gate.scroll_lock_on || held("Last_move"));
+	for (const char *token : {"move_forward", "move_back", "strafe_left", "strafe_right"})
+		if (held(token)) frame.scroll_lock_off.push_back(row_code(token));
+	if (frame.respawn_edge) frame.scroll_lock_off.push_back(row_code("respawn"));
 	// ToSpecial's latch and held state follow its keys by the key state alone
 	// (keys_down), which the handler reads raw (g_InputState.keyState): a key
 	// held through the death (its row scan-gated, @0x49D332..0x49D348)

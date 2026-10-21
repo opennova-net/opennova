@@ -118,6 +118,11 @@ struct PlayerActionPoll {
 	//  frame only in the no-menu branch @0x52661D; Input_ProcessFrame's latch
 	//  aging @0x49D57F..0x49D585 and release edge @0x49D6C1..0x49D6DC]
 	bool menu_open = false;
+	// The Scroll Lock word the device reads every input frame: the keyboard state's VK_SCROLL
+	// byte, nonzero when the toggle is on or the key is held (retail's auto-run, D-NET-563).
+	// [orig: Input_IsScrollLockOn @0x760E10 - GetKeyboardState @0x760E28, `KeyState[145] != 0`
+	//  @0x760E57]
+	bool scroll_lock_on = false;
 	// The held USE row's arm, asked once on every frame either of its keys is
 	// down: the row is a held row (flags 0x0C000805, bit 4), which the analog
 	// pass queues each frame, so case 0xB1 runs each frame the key is held.
@@ -145,6 +150,35 @@ struct PlayerActionFrame {
 	// role's (inmatch::Role::request_respawn) [orig: Input_HandleActionBinding
 	// case 55 @0x49B20B; the row's code @0x817658].
 	bool respawn_edge = false;
+	// Retail's auto-run (D-NET-563): this frame's forward event (code 152 with its fourth
+	// argument 1, which a forward key's own event carries as 0), queued every input frame the
+	// Scroll Lock word reads on, and by the held Last_move row (catalog row 16, code 425,
+	// default key Scroll Lock), whose case queues the same event. The embedder ORs it into the
+	// forward key; it rides the forward key's path from there (the input flags' forward bit).
+	// [orig: Input_ProcessPlayerFrame @0x49D4C0 - Input_IsScrollLockOn (the call @0x49D4E6) ->
+	//  Input_QueueEvent(152, 0, 1, 1) @0x49D4FA, ahead of the capture-mode test @0x49D509;
+	//  Input_HandleActionBinding_0 @0x4E0420 - code 425 @0x4E046F -> Input_QueueEvent(152, 0, 0,
+	//  1) @0x4E13E3..0x4E13ED; case 152 @0x4E0C85 - the fourth argument's test @0x4E0C92, the
+	//  forward bit `g_InputFlags |= 2` @0x4E0CBE]
+	bool auto_run_forward = false;
+	// The dispatch codes whose cases turn the Scroll Lock toggle off this frame
+	// (Input_DisableScrollLock), each through the dispatcher's head by its own code; -1 is the
+	// USE release tail, past no head. A held forward key's own event (its fourth argument 0),
+	// the back and strafe keys, the held USE row and the Respawn press; the embedder's device
+	// turns the toggle off. The case's 0x20 gate on dword_24C1930 is dead (no writer sets the
+	// bit: Game_StartMission's stores @0x525B25 / @0x525B5C / @0x525C3B and the 0x400 / 0x100 /
+	// 0x800 toggles @0x49B937 / @0x4DC9C5 / @0x4E07A4 are its only writes).
+	// The device's turn-off sends a Scroll Lock press and release (VK and scan 0x91, the
+	// release with KEYEVENTF_KEYUP and time 10) only when the keyboard state's byte is nonzero,
+	// then reads the window's messages; the process's init and shutdown turn it off too.
+	// [orig: Input_HandleActionBinding_0 - case 151 @0x4E0C66, case 152 @0x4E0C9E, case 156
+	//  @0x4E1021, case 157 @0x4E105E, case 0xB1 @0x4E0A84; Input_HandleActionBinding case 55
+	//  @0x49B20B -> Player_ResetLocalInput @0x4B2B80 (the call @0x4B2B91); Input_ProcessFrame -
+	//  the USE release tail @0x49D6C5; Input_DisableScrollLock @0x7610F0 - the byte test
+	//  @0x761116..0x76111D, the inputs @0x76111F..0x761166, SendInput @0x76116E, the pump
+	//  @0x76117A; Game_InitSubsystems (the call @0x4A7260); Game_ShutdownSubsystems (the call
+	//  @0x4A53B7)]
+	std::vector<int> scroll_lock_off;
 	// Apply in order: the USE special-key/release arm precedes binding rows.
 	std::vector<PlayerActionRequest> requests;
 };
