@@ -464,16 +464,16 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
     }
 
     // Airborne/water picks: the contact solve (below, at the tick tail)
-    // produced Flags 0x2000/0x8000 LAST tick — the witnessed source for these
-    // branches [orig: the mover reads Flags @0x491E35 region]. Boxless rows
-    // (the solve stand-in) keep the local derivation.
-    const bool solve_active = air_contact_solve_active(traits);
+    // produced Flags 0x2000/0x8000 LAST tick, the witnessed source for these
+    // branches [orig: the mover reads Flags @0x491E35 region]; a hull the solve
+    // leaves alone (no graphic model) keeps the flags as they stand. A model
+    // with no box extents (the solve stand-in) derives the airborne pick from
+    // its ground probe.
+    const bool solve_active = !veh.has_graphic_model || air_contact_solve_active(traits);
     const bool airborne = solve_active
             ? (veh.flags & kEntityFlagInAir) != 0
             : (ground == INT32_MIN || pz - ground > 0x10000);
-    const bool in_water = solve_active
-            ? (veh.flags & 0x8000u) != 0
-            : (world.env.water_z != 0 && pz <= world.env.water_z);
+    const bool in_water = (veh.flags & 0x8000u) != 0;
 
     if (airborne) {
         // ---- 5. Airborne aero block [orig: @0x491E35..0x4922BC].
@@ -678,8 +678,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
     // The contact/suspension solve at the witnessed call site — after
     // integration, before the attitude-rate integration [orig: @0x49254E].
     // It owns Flags 0x2000/0x8000, the grounded Z/attitude conform, and the
-    // planar slope/wall separation; boxless rows keep the terrain-clamp
-    // stand-in inside.
+    // planar slope/wall separation; a model-less hull returns from it after its
+    // prologue, and a model with no box extents keeps the terrain-clamp stand-in
+    // inside.
     aircraft_contact_solve(world, veh, traits, m, start_x, start_y, px, py, pz);
     constexpr int32_t kAttitudeRateClamp = 178956960; // 0xAAAAAA0
     if (m.wheel_rate_bam > kAttitudeRateClamp) m.wheel_rate_bam = kAttitudeRateClamp;

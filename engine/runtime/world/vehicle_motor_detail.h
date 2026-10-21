@@ -371,8 +371,9 @@ void vehicle_apply_wheel_suspension_forces(World &, Entity &, const VehicleTrait
 // The air + ground contact/suspension solves (vehicle_contact_solve.cpp) — the
 // client-executed subsets of Entity_ProcessAircraftContactPhysics
 // [orig: @0x47EF10] and Entity_ProcessTrackedVehiclePhysics [orig: @0x47C1C0].
-// The shared activity predicates keep each mover and its solve agreeing about
-// who owns Z and the flags (boxless rows take the terrain-clamp stand-in).
+// The box predicates mark a model whose collision block holds no box extents,
+// which keeps the terrain-clamp stand-in; a model-less hull runs each solve's
+// prologue only.
 bool air_contact_solve_active(const VehicleTraits &traits);
 void aircraft_contact_solve(World &world, Entity &veh,
                             const VehicleTraits &traits,
@@ -390,7 +391,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 // caller is the tank mover @0x488AB0, call @0x48a9ef, water arg 0 via the
 // ctank dispatcher @0x48f004]. 13 probes: 4 wheel pads + 6 belly stations +
 // 3 spine. Shares ground_contact_solve_active (same box/beam predicate; the
-// retail bail is the same graphicModel NULL return @0x475fe2-region).
+// retail bail is the graphicModel NULL return @0x4760BF..0x47610C -> @0x476016,
+// past the sleep leg's rest-state rows @0x475fe2).
 void wheeled_contact_solve(World &world, Entity &veh,
                            const VehicleTraits &traits,
                            Entity::VehicleMotorState &m,

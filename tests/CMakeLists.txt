@@ -5271,6 +5271,10 @@ add_test(NAME deployable_spawn COMMAND deployable_spawn_test)
 add_executable(flare_motor_test world/flare_motor_test.cpp)
 target_link_libraries(flare_motor_test PRIVATE opennova_runtime)
 add_test(NAME flare_motor COMMAND flare_motor_test)
+# D-NET-433: a model-less hull's contact solves return after their prologue; no mover stand-in.
+add_executable(model_less_hull_test world/model_less_hull_test.cpp)
+target_link_libraries(model_less_hull_test PRIVATE opennova_runtime)
+add_test(NAME model_less_hull COMMAND model_less_hull_test)
 
 # --- parity lane L8 (round/info/serve) ---
 # The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the

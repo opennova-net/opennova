@@ -44,6 +44,7 @@ struct Rig {
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         v.item_attrib = kItemAttribPlayerControl;
         v.item_id = 1291;
+        v.has_graphic_model = true; // the solves run for a modeled hull alone
         v.health = v.health_max = 3000;
         v.alive = true;
         v.position = {10, -10, 0.25f};

@@ -49,6 +49,7 @@ void make_rig(Rig &r) {
 	w::Entity seed;
 	seed.kind = w::EntityKind::Item;
 	seed.item_id = 0x07DA; // Blackhawk wire type (items.def 102010)
+	seed.has_graphic_model = true; // the solve runs for a modeled hull alone
 	seed.position = {100.0f, 200.0f, 60.0f};
 	seed.heading = w::placed_heading_bam(90);
 	r.heli = r.world.registry.spawn(1, seed);

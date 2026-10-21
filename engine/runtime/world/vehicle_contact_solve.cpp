@@ -26,8 +26,8 @@ namespace detail {
 
 // Aircraft ground/water contact, suspension and wreck solve. Shared contact forces include terrain
 // and posed models; authority damage and client prediction keep their original gates. The solve
-// runs after position integration and before attitude-rate integration. Model-less rows use the
-// caller terrain clamp. See vehicle-client-movers-re.md sections 6 and 12-32.
+// runs after position integration and before attitude-rate integration. A model-less hull runs the
+// sleep leg and the wake expiry, then returns. See vehicle-client-movers-re.md sections 6 and 12-32.
 // Witness sites: [orig: @0x47EF10, @0x49254E]
 bool air_contact_solve_active(const VehicleTraits &traits) {
     return traits.box_z_hi != traits.box_z_lo &&
@@ -36,10 +36,10 @@ bool air_contact_solve_active(const VehicleTraits &traits) {
 }
 
 void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
-    // Boxless/degenerate rows keep the terrain-clamp stand-in (lib embedders /
-    // unresolved graphics); the caller derives the branch picks locally for
-    // exactly the same rows.
-    if (!air_contact_solve_active(traits)) {
+    // A model with no box extents would fault the solve, which reads its
+    // collision block unchecked (no stock model lacks one): ours keeps the
+    // terrain-clamp stand-in for it (lib embedders, unit rigs).
+    if (veh.has_graphic_model && !air_contact_solve_active(traits)) {
         if (m.ground_cache != INT32_MIN && pz < m.ground_cache) {
             pz = m.ground_cache;
             if (m.slide_z < 0) m.slide_z = 0;
@@ -65,6 +65,14 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	}
 
 	vehicle_expire_contact_wake(world, veh);
+	// The four drop accumulators clear, then a hull with no graphic model
+	// returns, writing none of the solve's words.
+	// [orig: Entity_ProcessAircraftContactPhysics @0x47EF10 (+0x2C4..+0x2D0 = 0
+	//  @0x47F1B2..0x47F1C4; the +0x30 test @0x47F1CA..0x47F1CF -> the 0 return
+	//  @0x47F176)]
+	std::fill_n(m.plat_acc, 4, 0);
+	if (!veh.has_graphic_model)
+		return;
 
 	// Four gear-pad probes use the footprint corners inset by their radius, followed by three
 	// spine probes. Current spring compression offsets the pads.
@@ -290,6 +298,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	}
 
 	vehicle_expire_contact_wake(world, veh);
+	// A hull with no graphic model returns, writing none of the solve's words.
+	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (the +0x30 test
+	//  @0x47C477..0x47C49F -> the 0 return @0x47C441)]
+	if (!veh.has_graphic_model)
+		return;
 
 	// ---- probe geometry [orig: @0x47C7D0..0x47CB48]: 4 pad probes (the
 	// footprint corners inset by r = beam span >> 2, at Z = box_z_lo + r; the
@@ -642,6 +655,11 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	}
 	if (!m.contact_solved_once && (veh.flags & 0x40u) == 0)
 		vehicle_clear_chassis(m); // [orig: @0x47606E..0x47607D]
+	// A hull with no graphic model returns, writing none of the solve's words.
+	// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 (the +0x30 test
+	//  @0x4760BF..0x4760C2, `jz` @0x47610C -> the 0 return @0x476016)]
+	if (!veh.has_graphic_model)
+		return;
 
 	// Clamp the authored spring, compression and flip settings before advancing their state.
 	// Witness sites: [orig: @0x476070, @0x4760E5, @0x4762B8, @0x476559, @0x4762F2, @0x47653A]
@@ -1275,6 +1293,11 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	}
 
 	vehicle_expire_contact_wake(world, veh);
+	// A hull with no graphic model returns, writing none of the solve's words.
+	// [orig: Entity_ProcessLightVehiclePhysics @0x479600 (the +0x30 test
+	//  @0x479770..0x47977C -> the 0 return @0x479731)]
+	if (!veh.has_graphic_model)
+		return;
 
 	// ---- probe geometry [orig: @0x479960..0x479C20]: r = (box height >> 1)
 	// - 0x4000 [orig: @0x47992A-region]; the two wheels on the FOOT

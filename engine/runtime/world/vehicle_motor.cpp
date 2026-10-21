@@ -527,23 +527,29 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		vehicle_follow_carrier(world, veh);
 	}
 
-	// The per-family contact solve owns Z, attitude, the contact byte and
-	// the airborne/in-water flags for rows with resolved model boxes on a
-	// terrain-backed world; every other row (boxless lib-embedder rows,
-	// terrain-less unit worlds) keeps the 5-tap terrain-clamp stand-in below. Retail keys the same
-	// split on graphicModel presence [orig: the @0x47C49F bail]. The family routing is the physics
-	// table's [orig: @0x82abc8]: cveh/ctrn/catv -> the tracked solve @0x47C1C0; ctank -> the wheeled
-	// solve @0x475DE0 (call @0x48a9ef); cbike -> the light solve @0x479600 (call @0x486672).
+	// The per-family contact solve owns Z, attitude, the contact byte and the
+	// airborne/in-water flags. Each runs its sleep leg and its wake expiry, then
+	// returns at once for a hull whose graphic model (+0x30) is null, writing
+	// none of those words: a model-less hull keeps what its placement (or a
+	// last solve) left and moves by its own velocity words, gravity included.
+	// A model whose collision block holds no box extents would fault the solve,
+	// which reads the block unchecked (no stock model lacks one); ours keeps the
+	// terrain-clamp stand-in below for it (a lib embedder's rows, a unit rig).
+	// The family routing is the physics table's [orig: @0x82abc8]:
+	// cveh/ctrn/catv -> the tracked solve @0x47C1C0; ctank -> the wheeled solve
+	// @0x475DE0 (call @0x48a9ef); cbike -> the light solve @0x479600 (call
+	// @0x486672).
 	enum class ContactSolveKind : uint8_t { None, Tracked, Wheeled, Light };
 	ContactSolveKind solve_kind = ContactSolveKind::None;
 	{
-		if (traits.family == VehicleFamily::Ground && ground_contact_solve_active(traits))
+		if (traits.family == VehicleFamily::Ground &&
+				(!veh.has_graphic_model || ground_contact_solve_active(traits)))
 			solve_kind = ContactSolveKind::Tracked;
 		else if (traits.family == VehicleFamily::Tank &&
-                 ground_contact_solve_active(traits))
+				(!veh.has_graphic_model || ground_contact_solve_active(traits)))
             solve_kind = ContactSolveKind::Wheeled;
         else if (traits.family == VehicleFamily::Bike &&
-                 light_contact_solve_active(traits))
+				(!veh.has_graphic_model || light_contact_solve_active(traits)))
             solve_kind = ContactSolveKind::Light;
 	}
 	const bool wheeled_solve = solve_kind != ContactSolveKind::None;
@@ -731,10 +737,10 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		// Slope factor: cos^2(pitch) in 22-bit fixed [orig: Entity_UpdateVehiclePhysics
 		// @0x48AF00 (site @0x48C1C6..0x48C1FA — off_849934 cos-table sample squared
 		// >> 22, times the command >> 22)]. Retail reads the live entity Pitch the
-		// contact solve conforms; boxless stand-in rows keep the degree-quantized
-		// row pitch (their attitude never advances past the authored pose, so it
-		// is the placement's spawn form [orig: Entity_SpawnFromBMSRecord
-		// @0x40EB69..0x40EB86]).
+		// contact solve conforms, the placement's spawn form until a solve writes
+		// it (air_pitch_bam, seeded at the first tick above); the boxless stand-in
+		// rows keep the row pitch, their attitude never advancing past the
+		// authored pose [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EB86].
 		const int32_t pitch_bam = wheeled_solve
 				? m.air_pitch_bam
 				: veh.pitch_bam;
@@ -930,9 +936,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		// velocity, before the yaw apply [orig: the tracked call @0x48d0b1;
 		// the wheeled call @0x48a9ef; the light call @0x486672]. Each family
 		// solve rests the hull at wheel height above terrain (pads at
-		// box_z_lo + r) and conforms attitude from per-corner lifts; rows
-		// outside their activity predicates keep the 5-tap bilinear
-		// terrain clamp for an embedder that supplies no authored model probes.
+		// box_z_lo + r) and conforms attitude from per-corner lifts; a model with
+		// no box extents keeps the 5-tap bilinear terrain clamp (a model-less
+		// hull's solve returns after its prologue: no stand-in).
 		if (solve_kind == ContactSolveKind::Tracked) {
 			ground_contact_solve(world, veh, traits, m, prev[0], prev[1], px, py, pz);
 		} else if (solve_kind == ContactSolveKind::Wheeled) {
@@ -1357,8 +1363,10 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
 void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &traits) {
     World &world = world_;
     Entity::VehicleMotorState &m = veh.veh;
-    // No resolved model boxes (lib-only embedders / unresolved graphics):
-    // the level-hull + chase-Z stand-in remains for this row.
+    // A hull with no box extents runs no platform solve: its afloat latch,
+    // contact byte and attitude stay as they stand (a model-less hull's
+    // null-model branch waits on Q7-12; a model with no boxes keeps the level
+    // hull and chase-owned Z).
     if (traits.box_z_hi == traits.box_z_lo || traits.box_y_hi == traits.box_y_lo)
         return;
 
@@ -1784,33 +1792,6 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
 	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
 }
 
-// A row with no model collision boxes (a model-less or source-less row:
-// mission/collision_resolve.cpp stamps VehicleTraits.box_z_* from the 3DI
-// collision whenever the model source has it) has no platform geometry, and
-// the solver cannot produce an afloat latch. This water-plane stand-in covers
-// exactly that path; resolved hulls always consume the prior platform solve.
-void watercraft_refresh_fallback_afloat(World &world, Entity &veh, const VehicleTraits &traits) {
-	Entity::VehicleMotorState &m = veh.veh;
-	bool afloat = false;
-	if (world.env.water_z != 0) {
-        if (world.tables.terrain == nullptr) {
-            afloat = true;
-        } else {
-            const int32_t pos[3] = {veh.position.x.q16,
-                                    veh.position.y.q16,
-                                    veh.position.z.q16};
-            const GroundClearance clearance{};
-            const int32_t ground = calc_average_ground_height(
-                    *world.tables.terrain, pos, 0, clearance);
-            afloat = ground == INT32_MIN || ground < world.env.water_z;
-        }
-    }
-    m.plat_afloat = afloat;
-	const bool trail_was_water = (veh.flags & 0x8000u) != 0;
-	veh.flags = afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
-	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
-}
-
 } // namespace
 
 static void watercraft_motor_core(World &world, Entity &veh,
@@ -1864,9 +1845,9 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 
 	// ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
 	vehicle_client_chase(veh, VehicleChaseFamily::Plain, 0);
-	if (!watercraft_has_platform_geometry(traits)) {
-		watercraft_refresh_fallback_afloat(world, veh, traits);
-	} else if (!m.plat_solve_valid) {
+	// A hull with no platform geometry runs no platform solve, so its afloat
+	// latch stays as it stands (see watercraft_platform_solve).
+	if (watercraft_has_platform_geometry(traits) && !m.plat_solve_valid) {
 		// An exact-handle wire-materialized joiner hull has no earlier local frame, but the mover
 		// consumes the PREVIOUS platform solve's afloat/attitude state. Seed
 		// that state before its first thrust/drag pass instead of treating a
@@ -2029,37 +2010,21 @@ static void watercraft_motor_core(World &world, Entity &veh,
     // sheds + yaw-rate shed + gravity slideDecay -= 167 [orig:
     // @0x48EBD3..0x48EC13, the -167 @0x48EBD9]; afloat + at-rest: the heave
     // counterweight slideDecay -= 8350 [orig: @0x48EBBE..0x48EBC7]; afloat +
-    // moving: no vertical write. A BOXLESS row (the solve early-returns)
-    // keeps the terrain-derived stand-in and no gravity (Z stays
-    // chase-owned there).
-    const bool solve_active =
-            traits.box_z_hi != traits.box_z_lo && traits.box_y_hi != traits.box_y_lo;
+    // moving: no vertical write. The latch is the last platform solve's: a hull
+    // no solve runs for keeps it as it stands. A model with no box extents keeps
+    // its chase-owned Z with no gravity (the stand-in for a model retail's solve
+    // would fault on).
+    const bool retail_row = !veh.has_graphic_model || watercraft_has_platform_geometry(traits);
     {
-        bool afloat;
-        if (solve_active) {
-            afloat = m.plat_afloat;
-        } else {
-            afloat = false;
-            int32_t ground_here = INT32_MIN;
-            if (world.tables.terrain != nullptr) {
-                const int32_t pos3[3] = {px, py, pz};
-                const GroundClearance clearance{};
-                ground_here =
-                        calc_average_ground_height(*world.tables.terrain, pos3, 0, clearance);
-            }
-            if (world.env.water_z != 0 && ground_here != INT32_MIN)
-                afloat = ground_here < world.env.water_z;
-            else if (world.env.water_z != 0 && world.tables.terrain == nullptr)
-                afloat = true; // headless/no-terrain world with water: float
-        }
+        const bool afloat = m.plat_afloat;
         if (!afloat) {
             m.vel_x -= (m.vel_x + 4) >> 3;
             m.vel_y -= (m.vel_y + 4) >> 3;
             m.wheel_rate_bam = io::bam_sub(
                     m.wheel_rate_bam,
                     io::bam_sar(io::bam_add(m.wheel_rate_bam, 2), 2));
-            if (solve_active) m.slide_z -= 167; // [orig: @0x48EBD9]
-        } else if (solve_active && m.plat_at_rest) {
+            if (retail_row) m.slide_z -= 167; // [orig: @0x48EBD9]
+        } else if (retail_row && m.plat_at_rest) {
             m.slide_z -= 8350; // [orig: @0x48EBC7]
         }
         // Shore look-ahead: the witnessed single bilinear sample at the NEXT
@@ -2092,11 +2057,10 @@ static void watercraft_motor_core(World &world, Entity &veh,
     // ---- 7. Integration -> solve -> yaw, the witnessed order
     // [orig: Position += velocity (X/Y/Z all UNCONDITIONAL)
     // @0x48ECA8..0x48ECC6; the wheel-rate self-decay @0x48ECC9..0x48ECE1;
-    // the platform call @0x48ECE7; Yaw += modelPtr0 AFTER it @0x48ECF2]. A
-    // boxless row keeps its chase-owned Z (no slide integration).
+    // the platform call @0x48ECE7; Yaw += modelPtr0 AFTER it @0x48ECF2].
     px += m.vel_x;
     py += m.vel_y;
-    if (solve_active) pz += m.slide_z; // [orig: add [esi+0Ch] @0x48ECC6]
+    if (retail_row) pz += m.slide_z; // [orig: add [esi+0Ch] @0x48ECC6]
     {
         const int32_t r = m.wheel_rate_bam;
         m.wheel_rate_bam = io::bam_sub(
@@ -2147,11 +2111,8 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
 	// The platform solve owns Z/attitude/afloat from the first tick; an authored
 	// hull starts with no prior solve frame, so seed the latch exactly like the
 	// client path does before its first thrust pass.
-	if (!watercraft_has_platform_geometry(traits)) {
-		watercraft_refresh_fallback_afloat(world, veh, traits);
-	} else if (!m.plat_solve_valid) {
+	if (watercraft_has_platform_geometry(traits) && !m.plat_solve_valid)
 		watercraft_seed_platform_latch(world, veh, traits);
-	}
 
 	tick_health(veh, traits);
 	update_engine_sound(veh, traits);

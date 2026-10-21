@@ -10,6 +10,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_attach.h>
@@ -75,6 +76,16 @@ struct RampField {
 	}
 };
 
+// The afloat latch as a platform solve writes it (Flags 0x8000, its mirror and
+// the trail lanes' water edge): a hull with no platform geometry runs no solve
+// and keeps it as it stands, with no water-plane stand-in.
+void set_afloat(w::Entity &boat, const w::VehicleTraits &traits, bool afloat) {
+	const bool was_water = (boat.flags & 0x8000u) != 0;
+	boat.veh.plat_afloat = afloat;
+	boat.flags = afloat ? (boat.flags | 0x8000u) : (boat.flags & ~0x8000u);
+	w::detail::vehicle_trail_water_transition(boat, traits, was_water);
+}
+
 void make_rig(Rig &r) {
 	// A joiner's world: its AiSystem runs non-authoritative, the client motor
 	// path [orig: g_NapiNPCtx.is_authority == 0 on a client].
@@ -85,6 +96,7 @@ void make_rig(Rig &r) {
 	w::Entity seed;
 	seed.kind = w::EntityKind::Item;
 	seed.item_id = 0x050D; // Drivable Zodiac wire type
+	seed.has_graphic_model = true; // the solves run for a modeled hull alone
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	seed.item_attrib = w::kItemAttribPlayerControl;
 	seed.position = {100.0f, 200.0f, 10.0f};
@@ -218,6 +230,7 @@ bool run_steer_follows_received_register() {
 	make_rig(r);
 	w::Entity *boat = r.world.registry.get(r.boat);
 	if (!expect(boat != nullptr, "boat spawned")) return false;
+	set_afloat(*boat, r.traits, true);
 	// Received steer says +45 deg while moving: the rudder integrator must turn
 	// the hull toward it (sign witness for the steer chain).
 	const int32_t steer_target = 0x20000000; // +45 deg BAM
@@ -886,7 +899,8 @@ void prime_prediction_tick(w::Entity &boat, int32_t cmd_speed,
 bool run_afloat_latch_controls_drag() {
 	// Contact drag consumes the PREVIOUS platform solve's afloat latch. Two
 	// otherwise identical hulls therefore differ by exactly the witnessed 1/8
-	// landed shed; model-less worlds retain an explicit water-plane fallback.
+	// landed shed; a hull with no platform geometry keeps its latch as it stands
+	// (no water-plane stand-in), here the default clear one.
 	Rig wet, landed, fallback;
 	make_rig(wet);
 	make_rig(landed);
@@ -906,6 +920,8 @@ bool run_afloat_latch_controls_drag() {
 	landed_boat->veh.plat_afloat = false;
 	landed_boat->veh.plat_solve_valid = true;
 	// fallback has no model boxes and starts with the default false latch.
+	fallback_boat->veh.plat_afloat = false;
+	fallback_boat->flags &= ~0x8000u;
 
 	wet.world.vehicles.watercraft_client_tick(*wet_boat, wet.traits);
 	landed.world.vehicles.watercraft_client_tick(*landed_boat, landed.traits);
@@ -916,9 +932,9 @@ bool run_afloat_latch_controls_drag() {
 	             "afloat hull gets only the two exact 1/64 planar sheds");
 	ok &= expect(landed_boat->veh.vel_x == 5427,
 	             "landed hull additionally gets the exact (v+4)>>3 shed");
-	ok &= expect(fallback_boat->veh.vel_x == 6202 &&
-	             fallback_boat->veh.plat_afloat,
-	             "model-less water world seeds the afloat fallback before drag");
+	ok &= expect(fallback_boat->veh.vel_x == 5427 &&
+	             !fallback_boat->veh.plat_afloat,
+	             "a hull with no platform geometry keeps its clear latch and takes the landed shed");
 	return ok;
 }
 
@@ -2425,6 +2441,7 @@ bool run_trail_bank_tracks_motor_motion() {
 		r.traits.trail_points[1] = { { -65536, 0, 0 }, { 0, 0, 65536 } };
 		auto *boat = r.world.registry.get(r.boat);
 		boat->health = boat->health_max = 1000;
+		set_afloat(*boat, r.traits, true);
 		if (authority) {
 			auto *driver = mount_prediction_driver(r, false);
 			if (!driver)
@@ -2479,6 +2496,7 @@ bool run_trail_bank_tracks_motor_motion() {
 				"overlapping masks share the first effect and last controls");
 		r.traits.trails[3].mask = 2;
 		r.world.env.water_z = 0;
+		set_afloat(*boat, r.traits, false);
 		tick(8);
 		ok &= expect(boat->veh.trails.points[0].definition == 1 &&
 						boat->veh.trails.points[1].definition == 2,
