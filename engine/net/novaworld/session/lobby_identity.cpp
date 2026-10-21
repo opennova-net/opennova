@@ -120,12 +120,29 @@ std::string read_exe_basename() {
 #endif
 }
 
+RetailMachineInputs fallback_machine_inputs(std::string_view stable_identity) {
+	// The hash's successive words (an LCG over the FNV-1a seed), one per input position.
+	uint32_t x = fnv1a_32(stable_identity);
+	const auto next = [&x]() {
+		x = x * 1664525u + 1013904223u;
+		return x;
+	};
+	RetailMachineInputs in;
+	in.volume_serial = next();
+	in.maximum_component_length = next();
+	in.filesystem_flags = next();
+	const uint32_t adapter_low = next();
+	const uint32_t adapter_high = next();
+	for (std::size_t i = 0; i < 4; ++i)
+		in.ethernet_address[i] = static_cast<uint8_t>(adapter_low >> (i * 8u));
+	in.ethernet_address[4] = static_cast<uint8_t>(adapter_high);
+	in.ethernet_address[5] = static_cast<uint8_t>(adapter_high >> 8u);
+	in.has_ethernet_address = true;
+	return in;
+}
+
 LobbyMachineTokens fallback_machine_tokens(std::string_view stable_identity) {
-	const uint32_t seed = fnv1a_32(stable_identity);
-	LobbyMachineTokens tokens;
-	tokens.nwpssk = az_fingerprint(seed ^ 0x5053534Bu, kNwpsskLen);
-	tokens.nwusid = az_fingerprint(seed ^ 0x55534944u, kNwusidLen);
-	return tokens;
+	return make_retail_machine_tokens(fallback_machine_inputs(stable_identity));
 }
 
 } // namespace opennova

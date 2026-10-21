@@ -612,8 +612,7 @@ void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
 // engine flow, so cookies issued during login/NWJoin reach the UDP session too.
 std::vector<std::pair<std::string, std::string>> NovaWorldClient::make_cookie_vars() {
 	if (identity_vars_.empty()) {
-		const opennova::LobbyIdentityParams idp = collect_lobby_identity_params(
-				lobby_.client_index(), lobby_.client_key());
+		const opennova::LobbyIdentityParams idp = collect_lobby_identity_params();
 		identity_vars_ = opennova::make_lobby_identity_vars(idp);
 	}
 	sync_flow_context();

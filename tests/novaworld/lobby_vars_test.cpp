@@ -5,6 +5,7 @@
 // [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50; Lobby_UpdateServerInfo @0x4fe8c0;
 //  Server_PlayerAdd @0x51d421; CNapiGameSession_SendHostRequest @0x4d3700]
 
+#include <net/novaworld/lobby_identity.h> // fallback_machine_inputs / fallback_machine_tokens
 #include <net/novaworld/lobby_vars.h>
 
 #include <net/napi/session.h>
@@ -269,11 +270,9 @@ int main() {
 		       "the request's PlayerList is empty");
 	}
 
-	// 6. The NW-S5 identity set: names + order + the three empties + the fingerprint seed math.
+	// 6. The NW-S5 identity set: names + order + the three empties + the embedder's tokens.
 	{
 		nw::LobbyIdentityParams p;
-		p.client_index = 0x11112222u;
-		p.client_key = 0x33334444u;
 		p.tz_bias = "-480";
 		p.country = "Canada";
 		p.language = "French";
@@ -300,18 +299,46 @@ int main() {
 		expect(vars[7].second == p.nwpssk, "NWPSSK passes through from the client environment");
 		expect(vars[8].second == p.nwusid, "NWUSID passes through from the client environment");
 		expect(vars[9].second == p.nwhwi, "NWHWI passes through");
+	}
 
-		// Non-binding callers retain the deterministic fallback when stable machine tokens are absent.
-		p.nwpssk.clear();
-		p.nwusid.clear();
-		const auto fallback = nw::make_lobby_identity_vars(p);
-		expect(fallback[7].second == nw::az_fingerprint(p.client_index ^ 0x5053534Bu, 23),
-		       "NWPSSK fallback remains deterministic");
-		expect(fallback[8].second == nw::az_fingerprint(p.client_key ^ 0x55534944u, 16),
-		       "NWUSID fallback remains deterministic");
-		// az_fingerprint is deterministic and length-exact.
-		expect(nw::az_fingerprint(123, 23).size() == 23, "az_fingerprint length 23");
-		expect(nw::az_fingerprint(123, 16) == nw::az_fingerprint(123, 16), "az_fingerprint deterministic");
+	// 6b. D-NET-NEW-L9-8: the off-Windows fallback runs retail's two encoders over the words the
+	// stable id's hash supplies by position, so its tokens are the Windows encoder's over the same
+	// words: NWPSSK's 23 letters banded A..P / C..R / E..T in turn, NWUSID's pair i both in
+	// 'A'+i..'A'+i+15. [orig: CDKey_GenerateHardwareFingerprint @0x4A4A00 - 'A' + nibble @0x4A4BBA,
+	//  'C' + nibble @0x4A4BE3, 'E' + the xor's high nibble @0x4A4BCD;
+	//  CDKey_GenerateHardwareFingerprint_0 @0x4A4D00 - 'A' + i + nibble @0x4A4E46..0x4A4E4B]
+	{
+		for (const char *id : {"", "machine-a", "machine-b|Fixture GPU", "\x01\x02"}) {
+			const nw::RetailMachineInputs in = nw::fallback_machine_inputs(id);
+			const nw::LobbyMachineTokens fallback = nw::fallback_machine_tokens(id);
+			const nw::LobbyMachineTokens windows = nw::make_retail_machine_tokens(in);
+			expect(fallback.nwpssk == windows.nwpssk && fallback.nwusid == windows.nwusid,
+			       "the fallback is the Windows encoders over the hash's words");
+			expect(in.has_ethernet_address && in.volume_name.empty() && in.filesystem_name.empty(),
+			       "the fallback supplies an adapter and no names");
+			expect(fallback.nwpssk.size() == 23 && fallback.nwusid.size() == 16,
+			       "the fallback's lengths are retail's (23 / 16)");
+			bool banded = fallback.nwpssk.size() == 23;
+			for (std::size_t k = 0; banded && k < fallback.nwpssk.size(); ++k) {
+				const char base = "ACEACE"[k % 6];
+				banded = fallback.nwpssk[k] >= base && fallback.nwpssk[k] <= base + 15;
+			}
+			expect(banded, "NWPSSK's letters are position-banded A..P / C..R / E..T");
+			bool paired = fallback.nwusid.size() == 16;
+			for (std::size_t k = 0; paired && k < fallback.nwusid.size(); ++k) {
+				const char base = static_cast<char>('A' + k / 2);
+				paired = fallback.nwusid[k] >= base && fallback.nwusid[k] <= base + 15;
+			}
+			expect(paired, "NWUSID's pair i is in 'A'+i..'A'+i+15");
+			// The hashed adapter makes NWUSID's lead pair the Ethernet tag 77 (0x4D: 'A'+13,
+			// 'A'+4).
+			expect(fallback.nwusid.substr(0, 2) == "NE", "NWUSID leads with the adapter tag");
+			expect(nw::fallback_machine_tokens(id).nwpssk == fallback.nwpssk,
+			       "the fallback is deterministic");
+		}
+		expect(nw::fallback_machine_tokens("machine-a").nwpssk !=
+		               nw::fallback_machine_tokens("machine-b").nwpssk,
+		       "different ids give different tokens");
 	}
 
 	// 7. Retail's stable volume/MAC identity transforms, pinned independently

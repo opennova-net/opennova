@@ -200,19 +200,6 @@ NapiMessage make_host_request(const HostRegistration &cfg, const std::vector<Cli
 	                                make_host_var_list(cfg, text, /*full=*/false), {});
 }
 
-// [orig: NovaWorldClient::az_fingerprint]
-std::string az_fingerprint(uint32_t seed, int len) {
-	static const char kAlpha[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-	uint32_t x = seed ? seed : 0x12345678u;
-	std::string s;
-	s.reserve(static_cast<size_t>(len < 0 ? 0 : len));
-	for (int i = 0; i < len; ++i) {
-		x = x * 1664525u + 1013904223u;
-		s.push_back(kAlpha[(x >> 24) % 26u]);
-	}
-	return s;
-}
-
 namespace {
 
 void xor_u32_le(std::array<uint8_t, 16> &bytes, std::size_t offset, uint32_t value) {
@@ -308,8 +295,8 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 		{"NWUID", ""},        // echoed from the ServerSessionInit at use
 		{"NWCDKIID", ""},     // empty in retail; verify is not CD-key-gated
 		{"NWCDKIIDEXP1", ""},
-		{"NWPSSK", p.nwpssk.empty() ? az_fingerprint(p.client_index ^ 0x5053534Bu, kNwpsskLen) : p.nwpssk},
-		{"NWUSID", p.nwusid.empty() ? az_fingerprint(p.client_key ^ 0x55534944u, kNwusidLen) : p.nwusid},
+		{"NWPSSK", p.nwpssk},
+		{"NWUSID", p.nwusid},
 		{"NWHWI", p.nwhwi},
 	};
 }

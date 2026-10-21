@@ -190,10 +190,6 @@ LobbyStatusBlob make_host_status_blob(const HostRegistration &cfg, const HostLob
 NapiMessage make_host_request(const HostRegistration &cfg, const std::vector<ClientVar> &cookie,
                               int currently_hosting);
 
-// Deterministic [A-Z] fallback for callers without platform machine inputs.
-// The Godot binding supplies the retail transform below on Windows.
-std::string az_fingerprint(uint32_t seed, int len);
-
 // Inputs consumed by retail's two stable-machine token encoders. Platform
 // discovery (GetVolumeInformation/GetAdaptersInfo in the original) stays in
 // the binding; these byte transforms are portable and testable.
@@ -216,13 +212,10 @@ struct LobbyMachineTokens {
 
 LobbyMachineTokens make_retail_machine_tokens(const RetailMachineInputs &in);
 
-// Inputs for the NW-S5 identity "Cookie" set. Environment collection belongs to the binding;
-// this portable builder only preserves the witnessed names/order and values it is given. The
-// client_index/client_key fallback exists for non-Godot callers, but bindings should supply the
-// stable machine-derived NWPSSK/NWUSID explicitly.
+// Inputs for the NW-S5 identity "Cookie" set. Environment collection belongs to the embedder
+// (the locale, make_retail_machine_tokens over the machine's inputs or fallback_machine_tokens);
+// this portable builder only keeps the witnessed names/order and the values it is given.
 struct LobbyIdentityParams {
-	uint32_t client_index = 0;
-	uint32_t client_key = 0;
 	std::string tz_bias = "0";
 	std::string country = "United States";
 	std::string language = "English";
@@ -233,8 +226,8 @@ struct LobbyIdentityParams {
 };
 
 // The wire-load-bearing NWPSSK/NWUSID token lengths: retail's stable-machine
-// token encoders always emit exactly these many [A-Z] characters, and any
-// fallback generator must match or the verify Cookie is malformed.
+// token encoders always emit exactly these many letters (NWPSSK's position-banded
+// A..T, NWUSID's pairs A..W), the fallback's included (fallback_machine_tokens).
 // [orig: CDKey_GenerateHardwareFingerprint @ 0x4a4a00 /
 // CDKey_GenerateHardwareFingerprint_0 @ 0x4a4d00 output widths]
 inline constexpr int kNwpsskLen = 23;
@@ -242,8 +235,8 @@ inline constexpr int kNwusidLen = 16;
 
 // The NW-S5 10-var identity "Cookie" set (capture frame 10166), built once and reused for BOTH the
 // UDP verify var-list (ClientSession::Config::cookie_vars) and the HTTP login cookies. NWUID
-// is left empty here (the consumer substitutes the SessionInit nwuid at use). The XOR masks + the
-// lengths kNwpsskLen/kNwusidLen (23/16) on NWPSSK/NWUSID are load-bearing.
+// is left empty here (the consumer substitutes the SessionInit nwuid at use). NWPSSK / NWUSID are
+// the embedder's tokens as given.
 // [orig: NovaWorldClient::begin_session identity build]
 std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const LobbyIdentityParams &p);
 

@@ -401,8 +401,6 @@ void Lister::sync_flow_context() {
 // The verify Cookie: the machine's identity set, then the browser jar once the login filled it.
 std::vector<std::pair<std::string, std::string>> Lister::cookie_vars() {
 	if (identity_vars_.empty()) {
-		identity_.client_index = lobby_.client_index();
-		identity_.client_key = lobby_.client_key();
 		read_locale_identity(identity_);
 		LobbyMachineTokens tokens = fallback_machine_tokens(stable_identity());
 		RetailMachineInputs machine;

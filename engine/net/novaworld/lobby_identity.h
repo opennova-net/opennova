@@ -45,9 +45,19 @@ std::string read_exe_basename();
 inline constexpr std::size_t kLobbyApChars = 63;
 inline constexpr std::size_t kLobbyApplicationChars = 511;
 
-// The stand-in tokens where retail's inputs are unavailable: the embedder's platform-stable opaque
-// id, hashed (FNV-1a) so no raw machine identifier reaches the wire, then the same fixed-length A-Z
-// encoding at the wire-load-bearing kNwpsskLen / kNwusidLen. The xor seeds are OpenNova's own.
+// The stand-in inputs where retail's are unavailable (everything but Windows): the embedder's
+// platform-stable opaque id, hashed (FNV-1a) so no raw machine identifier reaches the wire,
+// supplies by position the words the retail reads would: the volume serial, the maximum component
+// length, the filesystem flags and the first Ethernet adapter's six bytes (drawn in that order; no
+// volume or filesystem name). The inputs are OpenNova's own (D-NET-NEW-L9-8, PERMANENT, the inputs
+// facet).
+RetailMachineInputs fallback_machine_inputs(std::string_view stable_identity);
+
+// The stand-in tokens: retail's two encoders (make_retail_machine_tokens) over
+// fallback_machine_inputs, so each token has retail's shape: NWPSSK's 23 position-banded letters
+// (A..P, C..R, E..T in turn), NWUSID's 8 pairs, pair i in 'A'+i..'A'+i+15.
+// [orig: CDKey_GenerateHardwareFingerprint @0x4A4A00 - the bands @0x4A4BBA / @0x4A4BE3 / @0x4A4BCD;
+//  CDKey_GenerateHardwareFingerprint_0 @0x4A4D00 - the pairs @0x4A4E46..0x4A4E4B]
 LobbyMachineTokens fallback_machine_tokens(std::string_view stable_identity);
 
 } // namespace opennova

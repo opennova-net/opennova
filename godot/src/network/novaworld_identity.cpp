@@ -64,11 +64,8 @@ Vector2i usable_size(Vector2i preferred, Vector2i fallback) {
 
 } // namespace
 
-opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_index,
-		uint32_t client_key) {
+opennova::LobbyIdentityParams collect_lobby_identity_params() {
 	opennova::LobbyIdentityParams out;
-	out.client_index = client_index;
-	out.client_key = client_key;
 
 	OS *os = OS::get_singleton();
 	// The engine reads the locale trio where the retail APIs exist (Windows); elsewhere the
@@ -128,10 +125,10 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_inde
 			+ std::to_string(max_texture_size) + "$" + dimensions(window_size) + "$"
 			+ dimensions(screen_size);
 
-	// Retail derives these telemetry-only tokens from stable volume/MAC data.
-	// Godot exposes a platform-stable opaque ID instead; hash it before applying
-	// the existing fixed-length A-Z encoding so raw machine identifiers never
-	// enter the wire or the portable protocol library.
+	// Retail derives these telemetry-only tokens from stable volume/MAC data. Off
+	// Windows, Godot's platform-stable opaque ID stands in: hashed into the words
+	// retail's inputs would supply, then retail's own encoders (engine
+	// fallback_machine_tokens), so no raw machine identifier reaches the wire.
 	std::string stable_identity = os ? to_std(os->get_unique_id()) : std::string();
 	if (stable_identity.empty() && os) {
 		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());
