@@ -1364,9 +1364,13 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     World &world = world_;
     Entity::VehicleMotorState &m = veh.veh;
     // A hull with no box extents runs no platform solve: its afloat latch,
-    // contact byte and attitude stay as they stand (a model-less hull's
-    // null-model branch waits on Q7-12; a model with no boxes keeps the level
-    // hull and chase-owned Z).
+    // contact byte and attitude stay as they stand. A model-less hull's
+    // null-model branch writes the contact byte (+0x2F2) from an uninitialized
+    // stack word and, on the authority, Flags 0x10 from +0x2F0: Q7-12 (a),
+    // PERMANENT, a deliberate fix of retail's unchecked read, leaves both; a model
+    // with no boxes keeps the level hull and chase-owned Z.
+    // [orig: Entity_ProcessPlatformPhysics @0x481870 (@0x481A85..0x481AC1 ->
+    //  @0x481A06..0x481A22)]
     if (traits.box_z_hi == traits.box_z_lo || traits.box_y_hi == traits.box_y_lo)
         return;
 

@@ -147,6 +147,31 @@ void test_a_model_less_boat_keeps_its_latch() {
 	CHECK(e.position.z.q16 == z0 - 167);
 }
 
+// The platform solve's null-model branch: retail writes the contact byte (+0x2F2) from an
+// uninitialized stack word and, on the authority, Flags 0x10 from +0x2F0; ours leaves both
+// as they stand (Q7-12 (a), PERMANENT: a deliberate fix of retail's unchecked read).
+// [orig: Entity_ProcessPlatformPhysics @0x481870 (@0x481A85..0x481AC1 -> @0x481A06..0x481A22)]
+void test_the_platform_solve_leaves_a_model_less_hull_alone() {
+	auto world = std::make_unique<World>();
+	world->registry.configure_pool(1, 4);
+	world->ai.is_authority = true;
+	for (const bool grounded : {true, false}) {
+		const EntityHandle h = world->registry.spawn(1, hull(false));
+		Entity &e = *world->registry.get(h);
+		e.veh.grounded = grounded;
+		e.veh.settle_2f0 = 1;
+		e.flags = grounded ? 0x10u : 0u;
+		VehicleTraits t;
+		t.physics = 1;
+		t.family = VehicleFamily::Watercraft;
+		const int32_t z0 = e.position.z.q16;
+		world->vehicles.watercraft_platform_solve(e, t);
+		CHECK(e.veh.grounded == grounded);
+		CHECK((e.flags & 0x10u) == (grounded ? 0x10u : 0u));
+		CHECK(e.position.z.q16 == z0);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -154,6 +179,7 @@ int main() {
 	test_the_aircraft_solve_returns_for_no_model();
 	test_a_model_less_tracked_hull_takes_no_stand_in();
 	test_a_model_less_boat_keeps_its_latch();
+	test_the_platform_solve_leaves_a_model_less_hull_alone();
 	if (failures == 0) std::printf("PASS model_less_hull\n");
 	return failures == 0 ? 0 : 1;
 }
