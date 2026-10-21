@@ -102,7 +102,6 @@ int main() {
 
         // water clamp: worldY above the ground floor wins, but only with physics.
         TerrainHeightField wf = f;
-        wf.has_water = true;
         wf.water_y = fx(50); // 3276800, well above the 417792 ground
         GroundClearance gcw{};
         gcw.has_occupant = true;
