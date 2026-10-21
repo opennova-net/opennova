@@ -4722,9 +4722,11 @@ int test_dfx2_join_lan(Harness &h) {
 		row.pcid_key = "pcid-key-for-the-lan-join";
 		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
 	}
-	const auto relay_then_joi = [&h](const std::string &link) {
+	// Each link's first leg (the relay page and its tag), then the second (the answer).
+	bool relays_ok = true;
+	const auto relay_then_joi = [&h, &relays_ok](const std::string &link) {
 		const auto first = h.send_to(h.fresh_port, "GET", "/" + link);
-		TEST_EXPECT(first.transport_ok && first.code == 200 && !join_tag(first).empty());
+		relays_ok = relays_ok && first.transport_ok && first.code == 200 && !join_tag(first).empty();
 		return h.send_to(h.fresh_port, "GET", "/NWJoin.dll",
 				{ "Cookie: NWJOINSESSIONTAG=" + join_tag(first) });
 	};
@@ -4769,6 +4771,7 @@ int test_dfx2_join_lan(Harness &h) {
 	TEST_EXPECT(gone.find("{{") == std::string::npos);
 	TEST_EXPECT(reply.transport_ok && reply.code == 200 && body_text(reply) == gone);
 	TEST_EXPECT(body_text(reply).find("[NK=") == std::string::npos);
+	TEST_EXPECT(relays_ok);
 
 	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kLanRid);
 	return 0;
