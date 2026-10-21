@@ -444,6 +444,9 @@ public:
 	// reads its mpreset word at the session create, and a NovaWorld
 	// ServerCommand's config change lands in it and is saved. Null = none.
 	void set_game_config(const Ref<GameConfigBlock> &p_block) { game_config_ = p_block; }
+	// The shell's live binding table (ControlsBindings' model): every session's
+	// Simulation takes it for the console's SAVEKEYS (Simulation::set_controls_model).
+	void set_controls_model(const Ref<ControlsModel> &p_model) { controls_model_ = p_model; }
 	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
 	void set_frame_stats(const Ref<FrameStats> &p_board);
 	bool is_water_render_stats_measured() const;
@@ -912,6 +915,7 @@ private:
 	Ref<CharacterJoinProfile> local_character_profile_;
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
+	Ref<ControlsModel> controls_model_; // set_controls_model
 	// The process's map-rotation words, one for the world's whole run: retail's are
 	// process globals no session start resets, so a session that ended mid-map
 	// hands its half toggle, SETNEXT latch and side-to-team map to the next

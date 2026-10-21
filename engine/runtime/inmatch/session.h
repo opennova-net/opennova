@@ -242,6 +242,11 @@ public:
 	// The Respawn key (dispatch 55) past the row's head gates: the local
 	// player's input reset, then in a session the role's 0x41. True = sent.
 	bool request_respawn();
+	// A console-queued input action (ClientRuntime::queue_console_action), dispatched
+	// by its action code at the input frame: the arms the role owns (the Respawn
+	// key's code, the medic call's), every other code to the embedder's dispatch
+	// (ClientRuntime::set_console_action_sink).
+	void dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
 	// The deploy action (dispatch 12) with its pick's [i16] wire value: a dead
 	// local player under permanent death converts to a spectator (the C2S
 	// 0x51) when spectators are allowed and does nothing when they are not;

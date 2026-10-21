@@ -1705,7 +1705,9 @@ void ClientRuntime::run_console_echo(const std::vector<uint8_t> &body) {
 	ctx.state = &console_state_;
 	ctx.queued = &sends;
 	ctx.system_lines = &lines;
-	ctx.queue_action = console_action_sink_;
+	ctx.queue_action = [this](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+		(void)queue_console_action(code, p1, p2, p3);
+	};
 	(void)client_parse_and_execute(client_console_echo_line(body), ctx);
 	for (ProtocolMessage &message : sends) {
 		if (role_ == Role::HostClient)
@@ -1734,26 +1736,70 @@ bool ClientRuntime::console_command(const std::string &line) {
 	                                        : view_.mp_session();
 	ClientLocalCommandSeams seams = local_command_seams_;
 	seams.in_session = peer;
-	const TitleIdentity *title = joiner_ != nullptr ? joiner_->title() : nullptr;
+	const TitleIdentity *title = joiner_ != nullptr ? joiner_->title() : view_.title();
 	if (seams.version_text.empty() && title != nullptr) {
 		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id);
 		if (profile != nullptr && profile->version_text != nullptr)
 			seams.version_text = profile->version_text;
 	}
+	// VERSION's title is the start-up title text, g_TitleText (the connect log's
+	// TITLE line reads the same word) [orig: Client_ProcessLocalCommand @0x520D8E -
+	// off_8154D8; Game_ParseCommandLineAndInit @0x4A7D30].
+	if (seams.title_text.empty() && title != nullptr && title->connect_log_title != nullptr)
+		seams.title_text = title->connect_log_title;
 	seams.version_line = [this](const std::string &text) {
 		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
 				0xFFFFFFFFu, text, false});
 	};
-	seams.queue_action = console_action_sink_;
+	seams.queue_action = [this](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+		(void)queue_console_action(code, p1, p2, p3);
+	};
 	if (client_process_local_command(line, seams)) return true;
-	if (!peer) return false;
-	std::vector<uint8_t> body(line.begin(), line.end());
-	body.push_back(0);
-	if (role_ == Role::HostClient) return queue_host_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
-	ProtocolMessage message = make_protocol_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
-	message.retention_flushes = 0; // user param 0: held until acknowledged
-	send_queue_.push_back(std::move(message));
+	if (peer) {
+		std::vector<uint8_t> body(line.begin(), line.end());
+		body.push_back(0);
+		if (role_ == Role::HostClient)
+			return queue_host_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
+		ProtocolMessage message = make_protocol_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
+		message.retention_flushes = 0; // user param 0: held until acknowledged
+		send_queue_.push_back(std::move(message));
+		return true;
+	}
+	// An authority that is no peer (a joiner never is one): the NETLOG handler and
+	// BAN / PUNT over the host's context, then the client's walk, whose lines reach
+	// the SYSTEM ring; with no connection, what the walk queues is sent nowhere.
+	// [orig: Client_ProcessConsoleCommand @0x520F49..0x520F7A]
+	if (role_ != Role::HostClient) return false;
+	if (authority_console_ && authority_console_(line)) return true;
+	std::vector<ProtocolMessage> nowhere;
+	std::vector<std::string> lines;
+	ClientConsoleContext walk;
+	walk.authority = true;
+	walk.in_session = view_.mp_session();
+	walk.novaworld = novaworld_link_.novaworld;
+	walk.server_commands = &view_.state().server_commands;
+	walk.state = &console_state_;
+	walk.queued = &nowhere;
+	walk.system_lines = &lines;
+	walk.queue_action = seams.queue_action;
+	const bool taken = client_parse_and_execute(line, walk);
+	for (std::string &text : lines)
+		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
+				hud::kHudColorWhite, std::move(text), false});
+	return taken;
+}
+
+bool ClientRuntime::queue_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+	// [orig: Input_QueueEvent @0x4979C0 - the cap @0x4979C8..0x4979CB]
+	if (console_actions_.size() >= kInputEventQueueCap) return false;
+	console_actions_.push_back({code, p1, p2, p3});
 	return true;
+}
+
+std::vector<ClientRuntime::ConsoleAction> ClientRuntime::take_console_actions() {
+	std::vector<ConsoleAction> out;
+	out.swap(console_actions_);
+	return out;
 }
 
 void ClientRuntime::queue_carrier_repair_requests() {

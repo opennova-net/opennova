@@ -25,6 +25,9 @@
 #include <cstring>
 
 #include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (the NovaWorld ServerCommand verbs)
+#include <runtime/inmatch/server_ban_lists.h> // Server_HandleBanPuntCommand (the console's authority arm)
+#include <runtime/inmatch/server_console.h> // Server_HandleAdminNetlogCommand, entity_usage_text (SAVENFO)
+#include <runtime/controls/binding_set.h> // keylist_text (SAVEKEYS)
 #include <runtime/inmatch/server_info.h> // Server_ToggleJoinLock (the lockgame action)
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
@@ -455,6 +458,53 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	return seams;
 }
 
+void Simulation::install_console_seams() {
+	namespace inmatch = opennova::inmatch;
+	if (runtime_ == nullptr) return;
+	inmatch::ClientLocalCommandSeams seams;
+	const opennova::TitleIdentity *title = session_title(net_.title);
+	if (title != nullptr) {
+		const inmatch::ConnectLogHeader header = inmatch::connect_log_header(title);
+		seams.version_text = header.version;
+		seams.title_text = header.title;
+	}
+	// SAVENFO: Entity_DumpUsageStatistics("debug.nfo"), fopen("w+") in text mode, each
+	// '\n' a CR LF on the disk [orig: Client_ProcessLocalCommand @0x520D4B ->
+	// Entity_DumpUsageStatistics @0x40E620, fopen @0x40E6B2].
+	seams.save_nfo = [this]() {
+		if (!kernel_ || net_.log_devices == nullptr) return;
+		const char *name = "debug.nfo";
+		const std::string file = inmatch::entity_usage_file_name(name);
+		if (file.empty()) return;
+		std::string text;
+		for (const char c : inmatch::entity_usage_text(kernel_->world, kernel_->items_table(), name)) {
+			if (c == '\n') text += '\r';
+			text += c;
+		}
+		(void)net_.log_devices->files().write(file, text, /*append=*/false);
+	};
+	// SAVEKEYS: keylist.key, deleted then opened "a+t", over the live binding table
+	// [orig: Client_ProcessLocalCommand @0x520D10 -> KeyBinding_DumpAllToFile @0x54C0A0,
+	//  DeleteFileA / fopen @0x54C0BA..0x54C0CA].
+	seams.save_keys = [this]() {
+		if (controls_model_.is_null() || net_.log_devices == nullptr) return;
+		(void)net_.log_devices->files().write("keylist.key",
+				opennova::controls::keylist_text(controls_model_->native_bindings()),
+				/*append=*/false);
+	};
+	runtime_->set_local_command_seams(std::move(seams));
+	// [orig: Client_ProcessConsoleCommand @0x520F49..0x520F6D - Server_HandleAdminNetlogCommand
+	//  (line, 0) @0x520F55, Server_HandleBanPuntCommand(line, 0) @0x520F63]
+	runtime_->set_authority_console([this](const std::string &p_line) {
+		inmatch::NapiNPServerCtx *ctx = host_ctx();
+		if (ctx == nullptr) return false;
+		std::vector<opennova::ProtocolMessage> no_slot_replies;
+		if (inmatch::Server_HandleAdminNetlogCommand(*ctx, p_line, nullptr, no_slot_replies))
+			return true;
+		return inmatch::Server_HandleBanPuntCommand(*ctx, p_line);
+	});
+}
+
 opennova::inmatch::RemoteAdminBinding Simulation::remote_admin_binding() {
 	opennova::inmatch::RemoteAdminBinding binding;
 	binding.host = host_ctx();
@@ -726,6 +776,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// The process's _connectlog.txt, which the session key's handler closes.
 	runtime_->set_connect_log(net_.log_devices != nullptr ? net_.log_devices->logs().connect
 	                                                     : nullptr);
+	install_console_seams();
 	install_charattr_table();
 	install_character_join_vars();
 	install_auto_medic_preference();

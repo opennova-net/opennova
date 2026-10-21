@@ -98,6 +98,9 @@ public:
 	// The process's server log devices (Simulation.use_log_devices), C++ only. Null = none.
 	opennova::inmatch::ServerLogDevices *get_log_devices() const { return log_devices_; }
 	void set_log_devices(opennova::inmatch::ServerLogDevices *p_value) { log_devices_ = p_value; }
+	// The shell's live binding table (Simulation.set_controls_model), C++ only. Null = none.
+	Ref<ControlsModel> get_controls_model() const { return controls_model_; }
+	void set_controls_model(const Ref<ControlsModel> &p_value) { controls_model_ = p_value; }
 	// The joiner's profile-to-wire projection (Simulation.set_join_character_profile).
 	// Null = none staged.
 	Ref<CharacterJoinProfile> get_join_character_profile() const {
@@ -177,6 +180,7 @@ private:
 	opennova::inmatch::HostRotation *host_rotation_ = nullptr;
 	opennova::inmatch::ClientProcessState *client_process_ = nullptr;
 	opennova::inmatch::ServerLogDevices *log_devices_ = nullptr;
+	Ref<ControlsModel> controls_model_;
 	Ref<CharacterJoinProfile> join_character_profile_;
 	PackedStringArray spawn_names_;
 	Ref<ResourceRoot> resource_root_;

@@ -167,6 +167,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include "simulation/inmatch_session_values.h"
 #include "simulation/simulation_asset_state.h"   // the retained asset sources (assets_)
 #include "simulation/simulation_net_state.h"     // the net-session shell inputs + sockets (net_)
+#include "mnu/controls_model.h" // SAVEKEYS' binding table (install_console_seams)
 #include "simulation/simulation_constants.h" // the bound constant surface Simulation inherits
 #include "simulation/simulation_player_state.h"  // the local-player profile state (player_)
 #include "simulation/simulation_present_state.h" // the present/occlusion caches (present_)
@@ -226,6 +227,8 @@ private:
 	// the local-player profile state. The session, its role, the kernel and
 	// the live runtime pointer stay here, on the class that is the embedder.
 	SimulationNetState net_;
+	// The shell's live binding table, which SAVEKEYS dumps (set_controls_model).
+	Ref<ControlsModel> controls_model_;
 	// The install root the hosted session's loose _NSTMOUT.TXT reap/pool
 	// override is read from at bring-up (HostConfig::game_root, engine
 	// session_timeout_config.h): the HostSessionOptions game_root the mission
@@ -1415,6 +1418,17 @@ public:
 	// The process's server log devices (simulation_net_state.h), which every hosted
 	// session's context writes. Null = none.
 	void use_log_devices(opennova::inmatch::ServerLogDevices *p_devices) { net_.log_devices = p_devices; }
+	// The shell's live binding table (ControlsBindings' model), which the console's
+	// SAVEKEYS dumps into keylist.key. Null: SAVEKEYS is taken and writes nothing.
+	void set_controls_model(const Ref<ControlsModel> &p_model) { controls_model_ = p_model; }
+	// The console command's seams on the role's client runtime (engine
+	// inmatch/client_runtime.h set_local_command_seams / set_authority_console):
+	// SAVEKEYS' keylist.key over the controls model, SAVENFO's debug.nfo over the
+	// world and its items.def rows, VERSION's version and title words, both files in
+	// the process's working directory (the log devices'); and the authority's arms
+	// (NETLOG, BAN / PUNT) over the host's context for an authority that is no
+	// session peer (D-NET-710). Run whenever the role hands a fresh runtime.
+	void install_console_seams();
 	// The remote-admin console's seams over this session (C++ only; the game world's admin
 	// pump binds them, engine inmatch/remote_admin.h): the process block and its save, the
 	// host's rotation and catalog, the avatars, the mission's items.def rows, the mounted

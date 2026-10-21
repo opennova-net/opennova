@@ -560,6 +560,7 @@ std::function<void()> Simulation::role_bringup_hook() {
 std::function<void(bool)> Simulation::role_bringup_tail() {
 	return [this](bool fresh_joiner_runtime) {
 		runtime_ = active_role().client_runtime();
+		install_console_seams();
 		if (fresh_joiner_runtime) {
 			install_charattr_table();
 			install_character_join_vars();
@@ -809,6 +810,7 @@ void Simulation::build_demo_mission() {
 void Simulation::restore_world_baseline() {
 	if (!world_installed_) return;
 	runtime_ = active_role().client_runtime();
+	install_console_seams();
 	// The host role rebuilt its score-feedback revision stream; joiners retain
 	// theirs. Consume the current baseline so old cursor values cannot hide a
 	// new equal-numbered notification (or replay an old joiner notification).

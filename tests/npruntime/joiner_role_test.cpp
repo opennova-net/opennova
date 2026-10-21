@@ -2490,6 +2490,31 @@ bool run_respawn_key_before_the_first_tail() {
 			"respawn before the tail: one bodiless 0x41 leaves");
 }
 
+// D-NET-710: a console-queued action dispatches by its code at the next input frame:
+// the Respawn row's code 55 runs the Respawn key's arm (its head gates, the input reset,
+// the bodiless 0x41), a code the role does not own goes to the embedder's dispatch.
+// [orig: Input_ProcessFrame @0x49D520 - the drain @0x49D599..0x49D5E7 ->
+//  Input_HandleActionBinding @0x49D5D8, case 55 @0x49B20B..0x49B22A]
+bool run_a_console_action_dispatches_by_code() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.kernel->world.rules.mp_session = true;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	std::vector<int32_t> sunk;
+	h.role.runtime->set_console_action_sink(
+			[&sunk](int32_t code, int32_t, int32_t, int32_t) { sunk.push_back(code); });
+	(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
+	(void)h.role.runtime->queue_console_action(201, 0, 0, 0);
+	h.role.apply_input(h.input);
+	for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+	ProtocolMessage m;
+	return expect(h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m) && m.payload.empty() &&
+					sunk == std::vector<int32_t>{201},
+			"console actions: code 55 sends the bodiless 0x41; code 201 goes to the embedder");
+}
+
 // D-NET-562's pre-round leg: a client runs no entity update while its pre-round timer
 // (the 0x0A's phase-0 byte) is nonzero, so a Health of 0 a tail stores in the pre-round
 // latches no dead bit; the first frame whose tail reads the timer 0 runs the body tick
@@ -3049,6 +3074,7 @@ int main() {
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_respawn_key_before_the_first_tail();
 	ok &= run_a_preround_death_latches_when_the_round_opens();
+	ok &= run_a_console_action_dispatches_by_code();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_deploy_action_head_resets_input_and_dialogs();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();

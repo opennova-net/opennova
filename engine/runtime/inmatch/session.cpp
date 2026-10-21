@@ -1,6 +1,7 @@
 #include <runtime/inmatch/session.h>
 
 #include <base/io/perf_clock.h>
+#include <runtime/controls/controls.h> // action_code (the console's by-code dispatch)
 #include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/role_feeds.h> // step_hud_radar
@@ -45,6 +46,13 @@ void Role::apply_input(const TickInput &input) {
 	// The spectate state the free-fly motor reads, ahead of the pack and the
 	// entity update (a joiner restamps it after its receive).
 	stamp_spectator_motor(kernel, runtime, joiner);
+	// The console's queued actions dispatch first, in queue order: the devices queue
+	// this frame's own events behind them (ClientRuntime::queue_console_action)
+	// [orig: Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame @0x49D58B, the
+	//  drain @0x49D599..0x49D5E7 -> Input_HandleActionBinding @0x49D5D8].
+	if (runtime != nullptr)
+		for (const ClientRuntime::ConsoleAction &action : runtime->take_console_actions())
+			dispatch_console_action(action.code, action.p1, action.p2, action.p3);
 	if (kernel.world.spectator.death_screen && runtime != nullptr) {
 		apply_death_screen_input(kernel, *runtime, joiner, input.player);
 		return;
@@ -148,6 +156,27 @@ bool Role::request_respawn() {
 	//  is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A].
 	kernel.local.reset_key_input();
 	return kernel.world.rules.mp_session && send_respawn_request();
+}
+
+void Role::dispatch_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+	// Input_HandleActionBinding's switch by the record's code: the Respawn row
+	// (catalog row 68, code 55) and the medic call (row 64 MedicReq, code 217) are
+	// the role's arms, behind their own head gates; every other code is the
+	// embedder's (its screens' and devices' arms).
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 55 @0x49B20B, case 217
+	//  @0x49B4B4; the catalog codes word_8159A8 + 108 * row]
+	constexpr int kRespawnRow = 68;
+	constexpr int kMedicRequestRow = 64;
+	if (code == controls::action_code(kRespawnRow)) {
+		(void)request_respawn();
+		return;
+	}
+	if (code == controls::action_code(kMedicRequestRow)) {
+		(void)request_medic();
+		return;
+	}
+	if (ClientRuntime *runtime = client_runtime())
+		runtime->dispatch_to_console_action_sink({code, p1, p2, p3});
 }
 
 bool Role::request_deployment_pick(uint16_t wire_value) {

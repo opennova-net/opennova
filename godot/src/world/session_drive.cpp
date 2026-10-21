@@ -159,6 +159,8 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->use_client_process(&world_->client_process_);
 	// The process's log devices: the join's session key closes the connect log.
 	join_preload_sim_->use_log_devices(world_->log_devices_.get());
+	// The shell's binding table, which the console's SAVEKEYS dumps.
+	join_preload_sim_->set_controls_model(world_->controls_model_);
 	// The join's JSR and JSPP are the cfg block's join-screen words: this target's commit
 	// (an answered choice) writes them, every join sends what they hold, and the next
 	// main-menu entry's read zeroes them (engine: inmatch/game_config_block.h

@@ -176,6 +176,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	sim_->use_host_rotation(options->get_host_rotation());
 	// The process's server log devices, which every hosted session writes.
 	sim_->use_log_devices(options->get_log_devices());
+	sim_->set_controls_model(options->get_controls_model());
 	// The process's client words, which every hosted session's own client steps on.
 	sim_->use_client_process(options->get_client_process());
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE

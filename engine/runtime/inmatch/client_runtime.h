@@ -369,22 +369,57 @@ public:
 	// tick's first second), Client_ProcessLocalCommand's arms (client_console.h),
 	// then a session peer queues the raw line as reliable C2S 0x04 [line][NUL]
 	// (user param 0): a joiner on its connection, the listen host's own client over
-	// its loopback to its own server. True when the line was taken. The authority's
-	// arm (a host that is not a session peer) is AdminConsole::console_command's.
+	// its loopback to its own server. An authority that is not a peer (a single-player
+	// host's own client) runs the authority's arms (set_authority_console: the NETLOG
+	// handler, BAN / PUNT) and then the client's walk (client_parse_and_execute), its
+	// lines to the SYSTEM ring and its sends nowhere (no connection). True when the
+	// line was taken. VERSION's version and title words default to the title's
+	// (gameprofile's version text, g_TitleText) when the embedder sets none.
 	// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
-	//  Client_ProcessLocalCommand @0x520eec, NetPacket_WriteNullableString @0x42A430
-	//  and QueueReliableMessage(4, 1, 0) @0x520f29]
+	//  Client_ProcessLocalCommand @0x520eec, the peer test @0x520EF8, NetPacket_WriteNullableString
+	//  @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29; the authority test @0x520F49,
+	//  Server_HandleAdminNetlogCommand @0x520F55, Server_HandleBanPuntCommand @0x520F63,
+	//  NapiClientCmd_ParseAndExecute @0x520F70; Game_ParseCommandLineAndInit @0x4A7D30 (g_TitleText)]
 	bool console_command(const std::string &line);
-	// The local arms' seams the embedder owns (SAVEKEYS, SAVENFO, VERSION's title);
+	// The local arms' seams the embedder owns (SAVEKEYS, SAVENFO, VERSION's words);
 	// in_session, version_line and queue_action are this runtime's.
 	void set_local_command_seams(ClientLocalCommandSeams seams) {
 		local_command_seams_ = std::move(seams);
 	}
-	// Where the console's input actions go (Input_QueueEvent: the binding arms of the
-	// local command and of the S2C 0x06 walk): the embedder's action dispatch by code.
-	// Unset: a taken line's action goes nowhere.
+	// The authority's arms of a console line on an authority that is no session peer,
+	// over the host's context (Server_HandleAdminNetlogCommand, then
+	// Server_HandleBanPuntCommand, each with no sender): true when one took the line.
+	// The embedder holding the context sets it; unset, the walk alone runs.
+	void set_authority_console(std::function<bool(const std::string &line)> arms) {
+		authority_console_ = std::move(arms);
+	}
+	// Input_QueueEvent's queue as the console fills it (the local command's binding
+	// CRC arm and the S2C 0x06 walk's binding arm): a record per action, up to 32;
+	// one past the cap is dropped (the queue's one live gate: no catalog record
+	// carries 0x2000000 and the 0x1000000 gate is dead). The next input frame
+	// (Role::apply_input) takes them in order and dispatches each by its code ahead of
+	// that frame's own presses, as the devices queue theirs behind.
+	// [orig: Input_QueueEvent @0x4979C0 - `cmp count, 20h; jge` @0x4979C8..0x4979CB,
+	//  the gates @0x4979D1..0x497A0B, the store @0x497A11..0x497A67; Input_ProcessFrame
+	//  @0x49D520 - Input_ProcessPlayerFrame @0x49D58B appends, the drain @0x49D599..0x49D5E7
+	//  into Input_HandleActionBinding @0x49D5D8]
+	struct ConsoleAction {
+		int32_t code = 0;
+		int32_t p1 = 0;
+		int32_t p2 = 0;
+		int32_t p3 = 0;
+	};
+	static constexpr std::size_t kInputEventQueueCap = 32;
+	bool queue_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
+	std::vector<ConsoleAction> take_console_actions();
+	// Where a dispatched console action whose arm the role does not own goes: the
+	// embedder's action dispatch by code (its screens' and devices' arms). Unset: the
+	// action goes nowhere.
 	void set_console_action_sink(ClientConsoleQueueAction sink) {
 		console_action_sink_ = std::move(sink);
+	}
+	void dispatch_to_console_action_sink(const ConsoleAction &action) const {
+		if (console_action_sink_) console_action_sink_(action.code, action.p1, action.p2, action.p3);
 	}
 	// An Emotes / Radio menu pick (1..10): C2S 0x14 / C2S 0x13 [i16 value].
 	// The sender carries no gate of its own: CNapiNetwork_QueueReliableMessage
@@ -1149,6 +1184,8 @@ private:
 	uint32_t console_guard_ms_ = 0;   // [orig: g_ConsoleCommandLastTick @0x24D1E04]
 	ClientLocalCommandSeams local_command_seams_;
 	ClientConsoleQueueAction console_action_sink_;
+	std::function<bool(const std::string &line)> authority_console_;
+	std::vector<ConsoleAction> console_actions_; // Input_QueueEvent's (queue_console_action)
 	// GetTickCount for the console guard: the joiner's monotonic clock, else the
 	// process's steady clock.
 	uint32_t console_tick_ms() const;

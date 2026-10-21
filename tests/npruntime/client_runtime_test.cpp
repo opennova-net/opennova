@@ -3388,11 +3388,18 @@ bool run_console_command_sends_the_line() {
 	if (!expect(client.console_command("version") && lines_sent(3).empty(),
 			"VERSION is a local arm: nothing leaves"))
 		return false;
+	// VERSION's line is "Version <version>  - <title>": the title is the start-up title
+	// text, g_TitleText (the connect log's TITLE word) [orig: Client_ProcessLocalCommand
+	// @0x520D8E - "Version %s  - %s" @0x7D00AC over off_8154D8].
 	bool version_line = false;
+	const std::string title_tail = std::string("  - ") + kJo.connect_log_title;
 	for (const hud::FeedPost &post : client.drain_ring_posts())
 		version_line = version_line ||
-				(post.text.rfind("Version V", 0) == 0 && post.argb == 0xFFFFFFFFu);
-	if (!expect(version_line, "VERSION posts the profile's version text in -1"))
+				(post.text.rfind("Version V", 0) == 0 && post.argb == 0xFFFFFFFFu &&
+						post.text.size() > title_tail.size() &&
+						post.text.compare(post.text.size() - title_tail.size(), title_tail.size(),
+								title_tail) == 0);
+	if (!expect(version_line, "VERSION posts the profile's version text and the title in -1"))
 		return false;
 	// Inside the tick's first second the stamp minus 1000 wraps: the next line is dropped.
 	inmatch::ClientRuntime early("ConsoleEarly", [&now] { return now; });
@@ -3419,7 +3426,62 @@ bool run_console_command_sends_the_line() {
 	while (host_loop.host_recv(datagram))
 		if (datagram.tag == c2s::ADMIN_NETLOG_COMMAND)
 			saw_line = datagram.body == std::vector<uint8_t>{'N', 'E', 'T', 'L', 'O', 'G', 0};
-	return expect(saw_line, "the listen host's own client sends its line over the loopback");
+	if (!expect(saw_line, "the listen host's own client sends its line over the loopback"))
+		return false;
+
+	// An authority that is no session peer (a single-player host's own client): the
+	// authority's arms first (NETLOG, BAN / PUNT over the host's context), then the
+	// client's walk, whose lines reach the SYSTEM ring; a line neither takes is not taken
+	// [orig: Client_ProcessConsoleCommand @0x520F49..0x520F7A].
+	ns::LoopbackChannel sp_loop;
+	inmatch::ClientRuntime sp_view(sp_loop);
+	sp_view.view().set_mp_session(false);
+	std::vector<std::string> authority_lines;
+	sp_view.set_authority_console([&authority_lines](const std::string &line) {
+		authority_lines.push_back(line);
+		return line.rfind("NETLOG", 0) == 0;
+	});
+	if (!expect(sp_view.console_command("NETLOG") && authority_lines.size() == 1,
+			"a non-peer authority's NETLOG goes to the authority's arms"))
+		return false;
+	if (!expect(sp_view.console_command("CLIENTDEBUGMESSAGELIST") && authority_lines.size() == 2,
+			"the authority's arms pass the debug command to the client's walk, which takes it"))
+		return false;
+	sp_view.Client_ProcessNetworkFrame(1);
+	bool sent = false;
+	while (sp_loop.host_recv(datagram)) sent = sent || datagram.tag == c2s::ADMIN_NETLOG_COMMAND;
+	return expect(!sent && !sp_view.console_command("nothing takes this"),
+			"a non-peer authority queues no C2S 0x04; an untaken line is not taken");
+}
+
+// D-NET-710: the console's input actions go through Input_QueueEvent's queue: the S2C
+// 0x06 walk's binding arm queues the record's code (the "respawn" token: code 55) for the
+// next input frame, and the queue holds 32 records, the 33rd dropped.
+// [orig: NapiClientCmd_ParseAndExecute @0x432a64..0x432ba1 -> Input_QueueEvent @0x4979C0,
+//  the cap @0x4979C8..0x4979CB]
+bool run_console_actions_queue_for_the_input_frame() {
+	const std::string client_scrk = "CLIENT-CONSOLE-QUEUE-SCRK";
+	const std::string server_scrk = "SERVER-CONSOLE-QUEUE-SCRK";
+	inmatch::ClientRuntime client("ConsoleQueue", [] { return uint64_t{7000}; });
+	client.set_title(&kJo);
+	client.seed_session(0x434F4E51u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> echo = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::CLIENT_CONSOLE_COMMAND,
+					{'r', 'e', 's', 'p', 'a', 'w', 'n', 0})});
+	client.receive(echo.data(), echo.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	std::vector<inmatch::ClientRuntime::ConsoleAction> actions = client.take_console_actions();
+	if (!expect(actions.size() == 1 && actions[0].code == 55 && client.take_console_actions().empty(),
+			"the echoed respawn token queues code 55 once"))
+		return false;
+	for (int32_t i = 0; i < 33; ++i) (void)client.queue_console_action(i, 0, 0, 0);
+	actions = client.take_console_actions();
+	return expect(actions.size() == inmatch::ClientRuntime::kInputEventQueueCap &&
+					actions.front().code == 0 && actions.back().code == 31,
+			"the queue holds 32 records in order; the 33rd is dropped");
 }
 
 // The S2C 0x57's handler returns at once while the round-over gate is up: no pong for the
@@ -8702,6 +8764,7 @@ int main() {
 	                run_unrelated_loadout_cannot_revive_dead_client() &&
 	                run_self_respawn_edge_releases_a_revive_deploy() &&
 	                run_zone_window_adoption_reads_the_pumps_respawn() &&
+	                run_console_actions_queue_for_the_input_frame() &&
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
 	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
 	                run_dead_joiner_keeps_pinging_every_boundary() &&

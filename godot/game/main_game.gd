@@ -314,6 +314,8 @@ func _ready() -> void:
 	# D-RORD-8 view leg + the fixed-tick weapon drain); the live binding table
 	# is the shell's ControlsBindings model.
 	_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
+	# The console's SAVEKEYS dumps the live binding table (GameWorld.set_controls_model).
+	_world.set_controls_model(ControlsBindings.model())
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
 	# not in _wire_shell, so menu-less entries (the env launch hooks)
 	# still get them; the HUD presenter's

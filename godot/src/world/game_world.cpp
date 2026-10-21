@@ -1024,6 +1024,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"), &GameWorld::set_music_director);
 	ClassDB::bind_method(D_METHOD("set_player_profiles", "profiles"), &GameWorld::set_player_profiles);
 	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &GameWorld::set_game_config);
+	ClassDB::bind_method(D_METHOD("set_controls_model", "model"), &GameWorld::set_controls_model);
 	ClassDB::bind_method(D_METHOD("get_game_config"), &GameWorld::get_game_config);
 	ClassDB::bind_method(D_METHOD("on_nw_host_server_command", "verb", "target", "args"),
 			&GameWorld::on_nw_host_server_command);
