@@ -93,7 +93,8 @@ std::string dialog_line_text(const rtxt::File *text_override, const rtxt::File *
 	// No mission table, no subtitle [orig: `test g_TextMission` @0x44DDCB..0x44DDCD].
 	if (mission_text == nullptr) return std::string();
 	// [Mission Dialog] by the wave's name, the override table first
-	// [orig: @0x44ddd6..0x44dde4 -> TextResource_FindEntryBySectionAndKey @0x75D27B].
+	// [orig: @0x44ddd6..0x44dde4 -> TextResource_FindEntryBySectionAndKey @0x75D250 (the
+	//  override hit @0x75D27B)].
 	if (const rtxt::Entry *text = rtxt::find_with_override(text_override, *mission_text,
 				"Mission Dialog", line.def_id_name))
 		return text->text;

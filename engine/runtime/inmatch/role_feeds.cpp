@@ -219,8 +219,9 @@ void fill_voice_macro_menu(const RoleView &view, const world::Entity &local, boo
 		hud::HudVoiceMacroMenuState &menu) {
 	const world::World &w = view.kernel->world;
 	// The override table first, as every section lookup [orig:
-	// HUD_DrawRadioTitleMenu @0x5BFBD5 / @0x5BFC5D, HUD_DrawEmotesMenu
-	// @0x5BFF45 / @0x5BFFCD -> TextResource_FindEntryBySectionAndKey @0x75D250].
+	// HUD_DrawRadioTitleMenu @0x5BFB90 (the calls @0x5BFBD5 / @0x5BFC5D),
+	// HUD_DrawEmotesMenu @0x5BFF00 (the calls @0x5BFF45 / @0x5BFFCD) ->
+	// TextResource_FindEntryBySectionAndKey @0x75D250].
 	const auto lookup = [&w](const std::string &key) -> const std::string * {
 		return world::voice_macro_text(w, key);
 	};

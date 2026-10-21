@@ -101,8 +101,8 @@ std::unordered_set<std::string> root_file_names(const std::string &root) {
 //  +0x88) feeding the code-word switch @ 0x563387..; the title arm @ 0x563489..0x56354f;
 //  Mission_BuildMapListFromPFF @ 0x562910 the same @ 0x562b4b.. and @ 0x562c55..0x562d1f]
 // Both lookups search the override table first [orig: MissionList_ScanAndBuildFromFiles
-//  @0x563496 / @0x5634E8, Mission_BuildMapListFromPFF @0x562C62 / @0x562CB8 ->
-//  TextResource_FindEntryBySectionAndKey @0x75D250].
+//  @0x563170 (the calls @0x563496 / @0x5634E8), Mission_BuildMapListFromPFF @0x562910
+//  (the calls @0x562C62 / @0x562CB8) -> TextResource_FindEntryBySectionAndKey @0x75D250].
 void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::File *text,
 		const rtxt::File *text_override) {
 	// The single-select mode bit the code-word derivation consumes (the switch itself is

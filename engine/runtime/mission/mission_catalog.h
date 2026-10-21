@@ -55,8 +55,8 @@ struct Row {
 // (vfs.h kArchiveSlotCount), so a loose-only or ScanAll mount lists its loose
 // files alone. Each TITLE / BRIEFING lookup searches `text_override` (the
 // mount's override table, null for none) first, as every section lookup does
-// [orig: MissionList_ScanAndBuildFromFiles @0x563496 / @0x5634E8,
-//  Mission_BuildMapListFromPFF @0x562C62 / @0x562CB8 ->
+// [orig: MissionList_ScanAndBuildFromFiles @0x563170 (the calls @0x563496 / @0x5634E8),
+//  Mission_BuildMapListFromPFF @0x562910 (the calls @0x562C62 / @0x562CB8) ->
 //  TextResource_FindEntryBySectionAndKey @0x75D250].
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — the loose walk, then
 //  Mission_BuildMapListFromPFF @ 0x562910 over (slot 1, slot 0) and (slot 3,

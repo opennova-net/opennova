@@ -38,7 +38,8 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
     }
     // The listen host's own client reads the authority's entity behind the handle:
     // its 0x50 fold stores no Team (D-NET-736) [orig: NapiNPClientMsg_TeamAssign
-    // @0x4319E1..0x4319EE; the pool resolve @0x430BEC reads the host's own row].
+    // @0x4319E1..0x4319EE; NapiNPClientMsg_HandleSpawnEffect @0x430B10 (the pool resolve
+    // @0x430BEC) reads the host's own row].
     if (runtime.is_authority())
         if (const auto *entity = world.registry.get(native_handle)) { out = *entity; return true; }
     if (native_handle.pool() >= 1 && native_handle.pool() <= 3)
@@ -252,7 +253,8 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             // [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - the resolve
             //  @0x42EB87..0x42EBCC, Health = 0 @0x42EBD6, +0x2C0 @0x42EBDF, the
             //  callback cb(entity, 4, 0) @0x42EBF0..0x42EBF5;
-            //  Entity_HandleDamageAndTriggerZones @0x407A88..0x407B33]
+            //  Entity_HandleDamageAndTriggerZones @0x407720 (the event-4 leg
+            //  @0x407A88..0x407B33)]
             if (handle.pool() == 0 && !death->item_state && has_self_handle() &&
                     death->entity_handle == self_handle()) {
                 world::Entity *local = world.registry.get(world.cached.local_player);
@@ -273,7 +275,6 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 victim->health = 0;
                 victim->alive = false;
                 victim->death_anim_state = death->death_anim_state_id;
-                victim->last_attacker = world::EntityHandle{};
                 // The victim's class callback whatever its class: an AI-data
                 // twin's brain machine (event 4, the death), an item's death
                 // class (D-NET-588) [orig: the callback @0x42EBF5;

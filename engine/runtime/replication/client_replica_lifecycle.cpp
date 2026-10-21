@@ -111,7 +111,8 @@ uint32_t ClientReplicaPipeline::begin_entity_lifetime(uint16_t handle) {
 	if (++revision == 0) ++revision;
 	discard_entity_notifications(handle);
 	// The record's memset clears the slot's destroyed mark with the rest
-	// [orig: Entity_Destroy's mark @0x43EA7F; the 0x0D memset @0x432D23].
+	// [orig: Entity_Destroy @0x43E810 (the mark @0x43EA7F); NapiNPClientMsg_0x00D @0x432C40
+	//  (the memset @0x432D23)].
 	state_.destroyed_marks.erase(std::remove(state_.destroyed_marks.begin(),
 			state_.destroyed_marks.end(), handle), state_.destroyed_marks.end());
 	return revision;

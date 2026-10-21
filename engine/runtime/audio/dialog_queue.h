@@ -101,7 +101,8 @@ std::vector<DialogLineRef> dialog_line_refs(const dbf::Group &group, const lwf::
 //  @ 0x75d130]
 // The section lookup searches `text_override` (the expansion's override table,
 // null for none) first; the by-index fallback reads the mission table alone.
-// [orig: TextResource_FindEntryBySectionAndKey @0x75D27B, D-NET-675]
+// [orig: TextResource_FindEntryBySectionAndKey @0x75D250 (the override hit @0x75D27B),
+//  D-NET-675]
 std::string dialog_line_text(const rtxt::File *text_override, const rtxt::File *mission_text,
 		const dbf::Line &line);
 
