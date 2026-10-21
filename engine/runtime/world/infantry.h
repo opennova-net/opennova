@@ -211,7 +211,8 @@ void organic_class_event(World &world, Entity &body, int event);
 // [orig: Entity_SpawnFromAnimSlotProperty - def+0x138 into entity+0x1C8 @0x43C530..0x43C536;
 //  Entity_UpdateInfantryPlayerBody's think @0x4B4BC9..0x4B4BE0; NullClass_HandleEvent
 //  @0x406FF0; Entity_HandleDeathOnAuthority @0x407CC0]
-void player_body_row_event(World &world, Entity &body, int event);
+// `flags` is the callback's third argument (ItemHitContext::event_flags).
+void player_body_row_event(World &world, Entity &body, int event, int32_t flags = 0);
 
 class World;
 // The plyr class callback's waypoint tail, run on every event it handles for a

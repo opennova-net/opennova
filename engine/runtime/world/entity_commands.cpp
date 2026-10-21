@@ -223,11 +223,11 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
 void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
     const HitRecord &record = world.round_sim.hit_record;
     if (e.kind == EntityKind::Organic) {
-        const uint32_t flags = e.flags | e.engine_flags;
+        const uint32_t entity_flags = e.flags | e.engine_flags;
         // A player body runs its bound row's callback (D-NET-348); any other organic the
         // organic class's (org0 / org1).
-        if ((flags & kEntityFlagPlayer) != 0)
-            player_body_row_event(world, e, phase);
+        if ((entity_flags & kEntityFlagPlayer) != 0)
+            player_body_row_event(world, e, phase, flags);
         else
             organic_class_event(world, e, phase);
         return;
@@ -267,7 +267,7 @@ void organic_class_event(World &world, Entity &body, int event) {
 }
 
 // See the infantry.h contract.
-void player_body_row_event(World &world, Entity &body, int event) {
+void player_body_row_event(World &world, Entity &body, int event, int32_t flags) {
     const PlayerTemplate &row = player_item_row(world, body);
     switch (row.body_class) {
     case PlayerBodyClass::kOrganic:
@@ -285,7 +285,7 @@ void player_body_row_event(World &world, Entity &body, int event) {
         run_item_class_event(world, body, row.item_event_class,
                 world.tables.item_death_traits.get(body.item_id), event,
                 {record.section, record.damage, record.round_yaw_bam, record.round_pitch_bam,
-                 record.round_roll_bam, 0});
+                 record.round_roll_bam, flags});
         if (Entity *still = world.registry.get(handle)) still->spawn_phase = still->class_think_ticks;
         return;
     }
