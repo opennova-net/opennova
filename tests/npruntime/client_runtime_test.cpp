@@ -8911,8 +8911,47 @@ bool run_guided_zero_steer_point_is_stored() {
     return expect(m->steer[0] == 65536 && !(m->flags & 1), "a fresh lifetime admits guidance");
 }
 
+// A group-4 read-full stores the target, the type and the point, and binds no
+// lock: the round's flags and its timer stay as they were, so it keeps steering
+// at the decoded point; a group 3 then binds the lock (flag 2, timer -1).
+// [orig: Entity_SerializeGuidedMissileState @0x447C50 read-full - group 4: the
+//  target @0x447F74, the type @0x4480C7, the point @0x4480E5..0x448129, the
+//  return @0x448122; group 3: the target @0x447ECE, LABEL_80 @0x448092 / @0x44809B]
+bool run_guided_group_four_binds_no_lock() {
+	ns::ClientReplicaPipeline view([](uint16_t) { return EntityClass::Player; });
+	auto round = std::make_unique<opennova::world::LiveRound>();
+	round->active = true; round->shot_seq = 5; round->max_age_ticks = 620;
+	round->guided_family = opennova::world::GuidedFamily::Stinger;
+	round->guided.timer = 7;
+	view.set_guided_round_resolver([&](int16_t id) { return id == 5 ? round.get() : nullptr; });
+	auto make_routed = [](GuidedFieldGroup group, const GuidedRecord &rec) {
+		std::vector<uint8_t> body{0x02, 0x00, 0x05, 0x00, static_cast<uint8_t>(group)};
+		const std::vector<uint8_t> payload =
+				encode_guided_field_group(GuidedMode::WriteFull, group, rec);
+		body.insert(body.end(), payload.begin(), payload.end());
+		return body;
+	};
+	GuidedRecord typed;
+	typed.target_slot = 0x1003;
+	typed.weapon_type = 0x0042;
+	typed.pos_x = 0x10000;
+	typed.pos_y = 0x20000;
+	typed.pos_z = 0x30000;
+	view.apply(0x44, make_routed(GuidedFieldGroup::TargetTypePos, typed));
+	const auto &m = round->guided;
+	if (!expect(m.target == 0x1003 && m.phase == 0x0042 && m.steer[0] == 0x10000 &&
+					m.steer[1] == 0x20000 && m.steer[2] == 0x30000,
+			"guided: group 4 stores the target, the type and the point")) return false;
+	if (!expect((m.flags & 2) == 0 && m.timer == 7,
+			"guided: group 4 leaves the lock flag and the timer")) return false;
+	view.apply(0x44, make_routed(GuidedFieldGroup::TargetPos, typed));
+	return expect((m.flags & 2) != 0 && m.timer == -1 && m.target == 0x1003,
+			"guided: group 3 binds the lock and parks the timer");
+}
+
 int main() {
 	const bool ok = run_guided_zero_steer_point_is_stored() &&
+	                run_guided_group_four_binds_no_lock() &&
 	                run_connection_indicators_on_a_joiner() &&
 	                run_connection_indicators_on_the_host_client() &&
 	                run_radio_events_preserve_order_chat_and_mute_state(false) &&

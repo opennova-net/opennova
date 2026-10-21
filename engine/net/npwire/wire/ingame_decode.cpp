@@ -798,7 +798,8 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 		break;                            // 0 payload bytes
 	case GuidedFieldGroup::TargetPos:     // [orig: 0x447e93 (full) / 0x448052 (apply)]
 		out.target_slot = c.u16();        // entity+724
-		out.target_bound = true;
+		out.target_read = true;
+		out.target_bound = true;          // [orig: LABEL_80 @0x448092 / @0x44809B]
 		if (full) {                       // full reads pos; apply reads target only
 			out.pos_x = int32_t(c.u32()); // entity+700
 			out.pos_y = int32_t(c.u32()); // entity+704
@@ -806,12 +807,17 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 		}
 		break;
 	case GuidedFieldGroup::TargetTypePos: // [orig: 0x447f39 (full) / 0x4480ab (apply)]
-		if (full) out.target_slot = c.u16();    // entity+724 (full only)
+		if (full) {                              // entity+724 (full only, @0x447F74)
+			out.target_slot = c.u16();
+			out.target_read = true;
+		}
 		out.weapon_type = uint16_t(c.u32());     // entity+698 (low u16 of a 4-B field)
 		out.pos_x = int32_t(c.u32());
 		out.pos_y = int32_t(c.u32());
 		out.pos_z = int32_t(c.u32());
-		out.target_bound = true;
+		// No flag or timer store: the group returns after the third coordinate
+		// [orig: Entity_SerializeGuidedMissileState @0x447C50 - the type @0x4480C7,
+		//  the point @0x4480E5..0x448129, the return @0x448122].
 		break;
 	case GuidedFieldGroup::Pos:           // [orig: 0x448135] read pos, clear target
 		out.pos_x = int32_t(c.u32());

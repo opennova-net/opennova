@@ -55,7 +55,7 @@ int test_full_roundtrip() {
 	EXPECT(c3 == 14);
 	EXPECT(d3.target_slot == r.target_slot);
 	EXPECT(d3.pos_x == r.pos_x && d3.pos_y == r.pos_y && d3.pos_z == r.pos_z);
-	EXPECT(d3.target_bound);
+	EXPECT(d3.target_read && d3.target_bound);
 
 	// group 4 TargetTypePos: u16 target + i32 type + 3x i32 pos = 18 B.
 	std::vector<uint8_t> w4 =
@@ -68,6 +68,11 @@ int test_full_roundtrip() {
 	EXPECT(d4.target_slot == r.target_slot);
 	EXPECT(d4.weapon_type == r.weapon_type);
 	EXPECT(d4.pos_x == r.pos_x && d4.pos_z == r.pos_z);
+	// The full read stores the target but binds no lock: group 4 returns after
+	// the point, short of group 3's flag-2 / timer stores [orig:
+	// Entity_SerializeGuidedMissileState @0x447C50 - @0x447F74, the return @0x448122;
+	// LABEL_80 @0x448092 / @0x44809B].
+	EXPECT(d4.target_read && !d4.target_bound);
 
 	// group 5 Pos: 3x i32 = 12 B.
 	std::vector<uint8_t> w5 =
@@ -108,6 +113,7 @@ int test_delta_roundtrip() {
 	EXPECT(c3 == 2);
 	EXPECT(d3.target_slot == r.target_slot);
 	EXPECT(d3.pos_x == 0); // pos not in delta group 3
+	EXPECT(d3.target_read && d3.target_bound); // @0x44808C, then LABEL_80
 
 	// group 4 delta: i32 type + 3x i32 pos, NO target = 16 B.
 	std::vector<uint8_t> w4 =
@@ -120,6 +126,7 @@ int test_delta_roundtrip() {
 	EXPECT(d4.weapon_type == r.weapon_type);
 	EXPECT(d4.pos_x == r.pos_x && d4.pos_z == r.pos_z);
 	EXPECT(d4.target_slot == 0xFFFF); // target not in delta group 4
+	EXPECT(!d4.target_read && !d4.target_bound); // @0x4480AB: no target, no lock
 
 	// group 5 is identical full/delta (12 B) — spot-check the delta pairing.
 	std::vector<uint8_t> w5 =

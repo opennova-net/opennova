@@ -892,7 +892,14 @@ struct GuidedRecord {
 	int32_t  attach_z = 0;          // entity+748
 	// Status-bit effects of the read side (entity+696 flags), for callers.
 	bool launched = false;          // group 1 read sets entity+696 |= 1
-	bool target_bound = false;      // group 3/4 read sets entity+696 |= 2
+	// The read stores entity+724 (the target): group 3 (full and apply) and group 4
+	// (full only) [orig: Entity_SerializeGuidedMissileState @0x447C50 - @0x447ECE,
+	// @0x44808C (group 3); @0x447F74 (group 4)].
+	bool target_read = false;
+	// Group 3 alone then sets entity+696 |= 2 and entity+728 = -1; group 4 leaves
+	// both [orig: @0x447C50 - LABEL_80 @0x448092 / @0x44809B, reached from group 3's
+	// full read (@0x447F24) and its apply (@0x44808C); group 4 returns @0x448122].
+	bool target_bound = false;
 	bool target_cleared = false;    // group 2/5 read clears the target
 };
 
