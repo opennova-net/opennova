@@ -571,6 +571,103 @@ void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
 	for (std::size_t i = 0; i < frame.size(); ++i) CHECK(lines[at + i] == frame[i]);
 }
 
+// A later 0x81 in the pass that records the enumerate's session finds the record by the host's
+// address: the same HK and SN update it in place (no second NET SESSION DISCOVERED); another
+// SN replaces it: the old record's REMOVED line, the new record's DISCOVERED line, and the join
+// takes the new record's HK. A 0x81 in a later frame meets the stopped enumerator: no line, no
+// change.
+// [orig: Nwu_HandleServerHello @0x626D20 - the record lookup (the call @0x62766C), the HK test
+//  @0x627917, String_ExactMatch @0x627928, the update @0x627BFA..0x627E34; the replace
+//  NapiNPTimer_Destroy (the call @0x627941) -> NapiNPSession_Create @0x62794C, its callback
+//  @0x627BB6..0x627BCD; NapiNPTimer_Destroy @0x621E50 - the +0x20 callback @0x621E63..0x621E6F
+//  -> CNapiNetwork_OnSessionRemoved @0x4C68C0; the enumerator gate @0x627547..0x62755C;
+//  CNapiNetwork_StartClientConnection @0x4CA160 - NapiTimer_Stop @0x4CA1D8]
+void test_remote_joiner_duplicate_hellos() {
+	const PeerAddr host_addr = peer_addr_from_octets({10, 0, 0, 1}, 32786);
+	const PeerAddr joiner_peer = peer_addr_from_octets({10, 0, 0, 9}, 4200);
+	const std::string host_at = "10.0.0.1:32786";
+	for (const bool same_record : {true, false}) {
+		MemoryFiles files;
+		inmatch::ConnectLog log{files};
+		log.set_clock([] { return std::string("T"); });
+		log.start(inmatch::ConnectLogHeader{});
+		inmatch::NapiNPServerCtx host;
+		inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, /*host_key=*/0x0FE0E11Au);
+		uint64_t now_ms = 1000;
+		inmatch::ClientRuntime client("DupJoiner", [&now_ms] { return now_ms; });
+		client.set_title(&kJo);
+		client.set_host_address(host_addr);
+		client.set_connect_log(&log);
+		const std::vector<uint8_t> hello = client.start();
+		const inmatch::HandleResult reply =
+				inmatch::handle_server_datagram(host, joiner_peer, hello.data(), hello.size(), 0);
+		CHECK(reply.outbound.size() == 1);
+		if (reply.outbound.size() != 1) return;
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ServerHello first;
+		CHECK(nw_decode_inbound(reply.outbound[0].data(), reply.outbound[0].size(), opcode, body) &&
+				parse_server_hello(body.data(), body.size(), first));
+		ServerHello second = first; // the same record: an in-place update, no callback
+		if (!same_record) {
+			second.sn = first.sn + "-B";
+			second.hk = 0x0FE0E11Bu;
+		}
+		const std::vector<uint8_t> second_dg =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(second));
+		const std::size_t at = log_lines(files).size();
+		client.receive(reply.outbound[0].data(), reply.outbound[0].size());
+		client.receive(second_dg.data(), second_dg.size());
+		now_ms += 16;
+		CHECK(client.Client_ProcessNetworkFrame(1).empty());
+		std::vector<std::string> lines = log_lines(files);
+		std::size_t discovered = 0;
+		std::string last_sn;
+		for (std::size_t i = at; i < lines.size(); ++i) {
+			const std::string prefix = "NET SESSION DISCOVERED AT " + host_at + " [";
+			if (lines[i].compare(0, prefix.size(), prefix) != 0) continue;
+			++discovered;
+			last_sn = lines[i].substr(prefix.size(), lines[i].size() - prefix.size() - 1);
+		}
+		CHECK(discovered == (same_record ? 1u : 2u));
+		CHECK(last_sn == (same_record ? first.sn : second.sn));
+		// The replace destroys the old record first: its removed line, then the new record's.
+		const std::string removed = "NET SESSION AT " + host_at + " [" + first.sn +
+				"] HAS BEEN REMOVED.";
+		std::size_t removed_at = 0;
+		std::size_t second_discovered_at = 0;
+		for (std::size_t i = at; i < lines.size(); ++i) {
+			if (lines[i] == removed) removed_at = i;
+			if (lines[i] == "NET SESSION DISCOVERED AT " + host_at + " [" + second.sn + "]")
+				second_discovered_at = i;
+		}
+		if (same_record) {
+			CHECK(removed_at == 0);
+		} else {
+			CHECK(removed_at != 0 && second_discovered_at == removed_at + 1);
+		}
+		// A 0x81 in the next frame meets the stopped enumerator.
+		ServerHello late = first;
+		late.sn = first.sn + "-LATE";
+		late.hk = 0x0FE0E11Cu;
+		const std::vector<uint8_t> late_dg =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(late));
+		client.receive(late_dg.data(), late_dg.size());
+		now_ms += 16;
+		CHECK(client.Client_ProcessNetworkFrame(1).empty());
+		lines = log_lines(files);
+		for (std::size_t i = at; i < lines.size(); ++i)
+			CHECK(lines[i].find("-LATE") == std::string::npos);
+		now_ms += 16;
+		const std::vector<std::vector<uint8_t>> sent = client.Client_ProcessNetworkFrame(1);
+		ClientAuth auth;
+		CHECK(sent.size() == 1 && nw_decode_inbound(sent[0].data(), sent[0].size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH && parse_client_auth(body.data(), body.size(), auth));
+		CHECK(auth.hk == (same_record ? first.hk : second.hk));
+	}
+}
+
 // The joiner's session destroy (FullDestroy): the leave's lines, then the transport's teardown,
 // NET TEARING DOWN SOCKET, unless the join runs on NovaWorld (the menu's connect type 1 keeps
 // the transport). A destroy ahead of the 0x82 has no session to leave, so the teardown line
@@ -610,6 +707,7 @@ int main() {
 	test_listen_host_self_join_lines();
 	test_remote_joiner_client_lines();
 	test_remote_joiner_manager_pass_ahead_of_the_client_pump();
+	test_remote_joiner_duplicate_hellos();
 	test_remote_joiner_destroy_tears_down_the_socket();
 	if (failures != 0) {
 		std::printf("connect_log_lines: %d failure(s)\n", failures);

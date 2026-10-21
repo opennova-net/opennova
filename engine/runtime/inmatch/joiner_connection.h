@@ -1338,6 +1338,7 @@ private:
 	//  UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9)]
 	bool enumerated_session_recorded_ = false;
 	bool enumerate_pass_ended_ = false; // the record's own pass ran its pump (its announce test)
+	std::string enumerated_session_sn_; // the record's SN (its 63-character copy)
 	ProcessDisconnectLatch *disconnect_latch_ = nullptr; // use_disconnect_latch
 	int32_t teardown_exit_reason_ = 0; // the leave callback's switch over the latch (0: none)
 	// The connect state from a session record (a browse row's, or the enumerate's 0x81): retail's

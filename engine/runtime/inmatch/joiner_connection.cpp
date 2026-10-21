@@ -241,6 +241,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	client_join_start_ms_ = 0;
 	enumerated_session_recorded_ = false;
 	enumerate_pass_ended_ = false;
+	enumerated_session_sn_.clear();
 	teardown_exit_reason_ = 0;
 	post_auth_stage_ = PostAuthStage::Inactive;
 	goodbye_sent_ = false;
@@ -656,9 +657,11 @@ bool JoinerConnection::pump_client_queue(PollResult &out) {
 	if (phase_ == Phase::Error) return true;
 	switch (packet.opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
-		// The enumerate reads 0x81s until one records the session; the loop then exits and
-		// reads nothing more before the join's connect state (D-NET-NEW-L2-25).
-		if (phase_ == Phase::Hello && !enumerated_session_recorded_) on_server_hello(packet.body, out);
+		// The enumerate reads 0x81s until the pass that records the session ends: a later one
+		// in that pass finds the record (on_server_hello); the next pass's connect start stops
+		// the enumerator first (D-NET-NEW-L2-25, D-NET-NEW-L8-8).
+		if (phase_ == Phase::Hello && !(enumerated_session_recorded_ && enumerate_pass_ended_))
+			on_server_hello(packet.body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
 		if (phase_ == Phase::Auth) on_server_auth(packet.body, out);
@@ -701,13 +704,16 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 }
 
 bool JoinerConnection::server_hello_queues(const std::vector<uint8_t> &body) const {
-	// The enumerator reads 0x81s while it probes: from the enumerate's start until a reply
-	// records the session (D-NET-NEW-L2-25). Any 0x81 is read (no field is required), then
-	// its CI must name this connection and the host's identity block must be the title's.
+	// The enumerator reads 0x81s while its timer runs: from the enumerate's start through the
+	// pass that records the session, until the next pass's connect start stops it
+	// (D-NET-NEW-L2-25). Any 0x81 is read (no field is required), then its CI must name this
+	// connection and the host's identity block must be the title's.
 	// [orig: Nwu_HandleServerHello @0x626D20 - the size bound @0x626DC9, the enumerator
-	//  @0x627547..0x62755C, the CI lookup @0x627533, the identity compares @0x62758B /
+	//  @0x627547..0x62755C (its timer +0x2C); CNapiNetwork_StartClientConnection @0x4CA160 -
+	//  NapiTimer_Stop @0x4CA1D8; the CI lookup @0x627533, the identity compares @0x62758B /
 	//  @0x627624 / @0x627643, the queue @0x627F45, the return @0x627F4A..0x627F5A]
-	if (phase_ != Phase::Hello || enumerated_session_recorded_) return false;
+	if (phase_ != Phase::Hello || (enumerated_session_recorded_ && enumerate_pass_ended_))
+		return false;
 	ServerHello sh;
 	if (!parse_server_hello(body.data(), body.size(), sh)) return false;
 	if (title_ == nullptr || sh.ci != client_index_) return false;
@@ -747,7 +753,25 @@ void JoinerConnection::on_server_hello(
 	//  SN @0x627775, the callback test @0x6278D7; CNapiNetwork_OnSessionDiscovered @0x4C8470
 	//  (the line @0x4C8631); CNapiGameSession_InitTransportConnection @0x4C9E10 - the install
 	//  @0x4C9FCB]
-	connect_log_line(net_session_discovered_text(host_address_, sh.sn.substr(0, 63)));
+	// A later 0x81 of the record's pass finds the record by its address: the same HK and SN
+	// (the record's 63-character copy against the reply's) update it in place with no
+	// callback; any other replaces it: the old record's destroy runs the enumerator's removed
+	// callback (NET SESSION AT .. HAS BEEN REMOVED, its SN), then the new record's discovered
+	// callback writes its line again. The enumerate then joins the record as it stands.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the HK TLV @0x627148, the SN copy @0x627172; the
+	//  record lookup sub_621EE0 (the call @0x62766C), the HK test @0x627917, the SN's
+	//  String_ExactMatch @0x627928, the update @0x627BFA..0x627E34 (no callback); the replace
+	//  NapiNPTimer_Destroy (the call @0x627941) -> NapiNPSession_Create @0x62794C, its callback
+	//  @0x627BB6..0x627BCD; NapiNPTimer_Destroy @0x621E50 - the enumerator's +0x20 callback
+	//  @0x621E63..0x621E6F; CNapiGameSession_InitTransportConnection - the install @0x4C9FE2;
+	//  CNapiNetwork_OnSessionRemoved @0x4C68C0 - the line @0x4C6926..0x4C6975]
+	const std::string sn = sh.sn.substr(0, 63);
+	const bool same_record =
+			enumerated_session_recorded_ && sh.hk == server_hk_ && sn == enumerated_session_sn_;
+	if (enumerated_session_recorded_ && !same_record)
+		connect_log_line(net_session_removed_text(host_address_, enumerated_session_sn_));
+	if (!same_record) connect_log_line(net_session_discovered_text(host_address_, sn));
+	enumerated_session_sn_ = sn;
 	// An absent HK reads 0, and the 0x42 then omits it. [orig: Nwu_HandleServerHello @0x626D20 -
 	//  HK @0x626E97; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK gate @0x6200F2]
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk
