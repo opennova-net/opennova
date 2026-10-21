@@ -5159,6 +5159,11 @@ add_test(NAME opennova_serve_profile_name COMMAND opennova_serve_profile_name_te
 add_executable(npruntime_loadout_name_list_test npruntime/loadout_name_list_test.cpp)
 target_link_libraries(npruntime_loadout_name_list_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_loadout_name_list COMMAND npruntime_loadout_name_list_test)
+# A player body's class-table row by its bound items.def row: the class init and the class
+# event callback (plyr, org0 / org1, null, brrl) (D-NET-348 FOUND 3).
+add_executable(npruntime_player_body_class_test npruntime/player_body_class_test.cpp)
+target_link_libraries(npruntime_player_body_class_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_body_class COMMAND npruntime_player_body_class_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

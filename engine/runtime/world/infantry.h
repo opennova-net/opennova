@@ -190,6 +190,28 @@ class World;
 //  @0x407B64..0x407C6B]
 void player_body_class_event(World &world, Entity &body, int event);
 
+// The organic class's event callback (org0 / org1): event 1 puts a body without the Player bit
+// and its trigger group on red alert (a player body's kill goes to the network kill scorer,
+// which past its round test only reaches GameEvent_ProcessScoring case 2, as the plyr arm's),
+// then runs the round legs while the hit record holds a round; event 4 zeroes the health word
+// and, with a round, restages the death clip from it; any other event re-arms the think at 62.
+// No dead return.
+// [orig: OrganicClass_HandleEvent @0x407310 - the event-1 arm @0x4073BF..0x4076D5 (the Player
+//  bit @0x4073D6, Score_ProcessNetworkKillEvent @0x407405, the alert @0x4073DB..0x4073EA, the
+//  round test @0x40740F), the event-4 arm @0x407343..0x4073B1, +0x2AC = 62 @0x40732D]
+void organic_class_event(World &world, Entity &body, int event);
+
+// A player body's class event callback (entity+0x1C8), by its bound row's class
+// (PlayerTemplate::body_class, D-NET-348): the plyr row's player_body_class_event, the organic
+// rows' organic_class_event, the null row's +0x2AC = 0x1000000, the barrel row's authority think
+// (alive: +0x2AC = 1920; at or below 0 health: the scars cleared, Flags |= 2, +0x2AC = 10);
+// a kOther row keeps the player class's. The player-body update's think, the damage sites and
+// the drowning call it.
+// [orig: Entity_SpawnFromAnimSlotProperty - def+0x138 into entity+0x1C8 @0x43C530..0x43C536;
+//  NullClass_HandleEvent @0x406FF0 (@0x406FF4); Entity_HandleDeathOnAuthority @0x407CC0 - the
+//  authority @0x407CCA, the dead test @0x407CD9, 1920 @0x407D47, @0x407D2C..0x407D38]
+void player_body_row_event(World &world, Entity &body, int event);
+
 class World;
 // The plyr class callback's waypoint tail, run on every event it handles for a
 // live body: a team 1 or 2 player whose AI slot carries a route channel

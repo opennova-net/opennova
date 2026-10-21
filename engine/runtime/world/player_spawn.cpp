@@ -10,6 +10,8 @@
 #include <runtime/world/weapon_inventory.h> // LoadoutWeaponNameList, weapon_kit_default
 #include <runtime/world/world.h>        // World, registry, cached
 
+#include <base/io/strutil.h> // iequals (the class table walk)
+
 namespace opennova::world {
 
 static_assert(PlayerTemplate{}.type_id == kPlayerInfantryTypeId);
@@ -36,6 +38,44 @@ uint8_t player_spawn_equipped_default(const World &world) {
     }
     const int index = world.tables.weapons.index_of(first.c_str());
     return index >= 0 ? static_cast<uint8_t>(index) : uint8_t{0xFF};
+}
+
+PlayerBodyClass player_body_class_from_tag(const char *ai_function) {
+    // The 41 rows' names in table order, by the class a person body takes from each.
+    // [orig: g_EntityClassEventCallbackTable @0x813000 - null @0x813000, org0 @0x813018,
+    //  org1 @0x813030, plyr @0x813048, brrl @0x813060, psec @0x813288 (the null row's
+    //  event 0x406FF0 and no init), the 35 other rows @0x813078..0x8133C0]
+    struct Row {
+        const char *name;
+        PlayerBodyClass cls;
+    };
+    static constexpr Row kRows[] = {
+        {"null", PlayerBodyClass::kNull}, {"org0", PlayerBodyClass::kOrganic},
+        {"org1", PlayerBodyClass::kOrganic}, {"plyr", PlayerBodyClass::kPlayer},
+        {"brrl", PlayerBodyClass::kBarrel}, {"envs", PlayerBodyClass::kOther},
+        {"ewep", PlayerBodyClass::kOther}, {"ele0", PlayerBodyClass::kOther},
+        {"gnrc", PlayerBodyClass::kOther}, {"gnrl", PlayerBodyClass::kOther},
+        {"gnl2", PlayerBodyClass::kOther}, {"flag", PlayerBodyClass::kOther},
+        {"squib", PlayerBodyClass::kOther}, {"nade", PlayerBodyClass::kOther},
+        {"schl", PlayerBodyClass::kOther}, {"clym", PlayerBodyClass::kOther},
+        {"vmne", PlayerBodyClass::kOther}, {"lndm", PlayerBodyClass::kOther},
+        {"bldg", PlayerBodyClass::kOther}, {"bld2", PlayerBodyClass::kOther},
+        {"cran", PlayerBodyClass::kOther}, {"door", PlayerBodyClass::kOther},
+        {"target", PlayerBodyClass::kOther}, {"emit", PlayerBodyClass::kOther},
+        {"towr", PlayerBodyClass::kOther}, {"tree", PlayerBodyClass::kOther},
+        {"palm", PlayerBodyClass::kOther}, {"psec", PlayerBodyClass::kNull},
+        {"CHel", PlayerBodyClass::kOther}, {"rokt", PlayerBodyClass::kOther},
+        {"stng", PlayerBodyClass::kOther}, {"hlfr", PlayerBodyClass::kOther},
+        {"jvln", PlayerBodyClass::kOther}, {"arty", PlayerBodyClass::kOther},
+        {"aflr", PlayerBodyClass::kOther}, {"gflr", PlayerBodyClass::kOther},
+        {"pwrp", PlayerBodyClass::kOther}, {"cveh", PlayerBodyClass::kOther},
+        {"cbot", PlayerBodyClass::kOther}, {"cpln", PlayerBodyClass::kOther},
+        {"ctrn", PlayerBodyClass::kOther},
+    };
+    if (ai_function == nullptr || ai_function[0] == '\0') return PlayerBodyClass::kNull;
+    for (const Row &row : kRows)
+        if (strutil::iequals(row.name, ai_function)) return row.cls;
+    return PlayerBodyClass::kNull;
 }
 
 int32_t item_index_by_type_id(const World &world, int32_t type_id) {
@@ -145,7 +185,16 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.health = hp;
     seed.critical_hp = retail_signed_i16(row.critical_hp);
     seed.health_max = hp; // the §5.10 field-17 tier denominator (D-NET-144)
-    seed.equipped_adm_index = spawn.equipped_adm_index; // entity+0x2B0 spawn default (D-NET-143)
+    // The row's class init, called once the body is placed [orig: Entity_SpawnFromAnimSlotProperty
+    // - `mov eax, [ecx+148h]` @0x43C4F3, the call @0x43C4FE]: the player class's stores the
+    // equipped default (D-NET-143) and resets the local body's lock tone (below); the organic
+    // class's, the null row (no init) and the barrel row (no init) store neither, the body
+    // keeping the spawn memset's 0. A kOther row keeps the player class's legs (D-NET-348).
+    // [orig: PlayerClass_InitEntity @0x4B1060 - @0x4B1100..0x4B1116; Entity_InitOrganicAI
+    //  @0x4BFCC0 (no +0x2B0 store); the memset @0x43C3FE]
+    const bool player_class_init = row.body_class == PlayerBodyClass::kPlayer ||
+            row.body_class == PlayerBodyClass::kOther;
+    seed.equipped_adm_index = player_class_init ? spawn.equipped_adm_index : uint8_t{0};
     // entity+0x374 character selector + entity+0x15C wire NetId, picked per assigned team from
     // the joiner's 0x42 join vars by the inmatch add. [orig: Server_PlayerAdd @0x51cbc0
     // @0x51d0b1 / slot+440; D-NET-146]
@@ -171,8 +220,11 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     Entity *ent = world.registry.get(h);
 
     // Publish the local-player handle ONLY for the host's own player: the net anchor + present
-    // resolve it. A remote peer never becomes the local player. [ADR 0012] The class init points
-    // it at the new body ahead of its health raise [orig: PlayerClass_InitEntity @0x4B1124].
+    // resolve it. A remote peer never becomes the local player. [ADR 0012] Whatever the row's
+    // class: the player class init points it at the new body out of a session, and every
+    // mission start binds it to the body its local connection owns.
+    // [orig: PlayerClass_InitEntity @0x4B1122..0x4B1124; Player_InitPlayer @0x4E15F0 -
+    //  Player_FindLocalPlayerEntity @0x4E17E4, the store @0x4E17EB]
     if (is_local) world.cached.local_player = h;
     // The authority's spawn zeroes the row (a joiner's own body keeps its record's def word),
     // then the class init and the spawn each raise the health to the ceiling, a signed word
@@ -211,7 +263,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
 
     // The player class init zeroes the incoming-lock tone for the local
     // player's entity [orig: PlayerClass_InitEntity @0x4b10d0..0x4b10de].
-    if (is_local && world.local_player_state != nullptr)
+    if (is_local && player_class_init && world.local_player_state != nullptr)
         world.local_player_state->radar.lock_tone = 0;
     // The registry edge's republish. An embedder that binds the body's def and
     // model after this builds the slices again once the model init stamped

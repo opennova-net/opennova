@@ -141,7 +141,7 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 		player->death_anim_state = world::compute_death_anim_state(
 				0, 0, world::death_cause::kDrown);
 		player->health = -1;
-		world::player_body_class_event(world, *player, 0);
+		world::player_body_row_event(world, *player, 0);
 	}
 }
 

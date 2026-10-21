@@ -558,7 +558,8 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	if (equipped_default != w::kAdmSlotNone) {
 		std::vector<w::EntityHandle> handles;
 		world.registry.for_each([&](const w::Entity &e) {
-			// A player body by its Player bit, whatever its camouflage row (D-NET-348).
+			// A player body by its Player bit; one whose row runs no player class init
+			// holds the spawn's 0, which the none test passes over (D-NET-348).
 			if (((e.flags | e.engine_flags) & w::kEntityFlagPlayer) != 0 &&
 					e.equipped_adm_index == w::kAdmSlotNone)
 				handles.push_back(e.handle);

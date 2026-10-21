@@ -1075,15 +1075,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 stance_bits, tick_flags, parent != nullptr && parent->has_item_def);
     }
 
-    // The player body's think cadence, ahead of the org2 death edge: the plyr class callback
-    // fires as event 0 whenever entity+0x2AC is <= 0, and the counter decrements
-    // every tick, corpse included (the callback then returns on Flags&2, so a
-    // dead body neither clears its kill-cause bits nor re-arms), then its
-    // waypoint tail. [orig: Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9;
-    //  the edge gate follows @0x4b4bf1]
+    // The player body's think cadence, ahead of the org2 death edge: the body's class event
+    // callback (entity+0x1C8, its bound row's: player_body_row_event, D-NET-348) fires as
+    // event 0 whenever entity+0x2AC is <= 0, and the counter decrements every tick, corpse
+    // included (the plyr callback then returns on Flags&2, so a dead body neither clears its
+    // kill-cause bits nor re-arms, then its waypoint tail). [orig:
+    //  Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9; the edge gate follows @0x4b4bf1]
     if (tick_entity != nullptr && !npc_body &&
         (tick_flags & kEntityFlagPlayer) != 0) {
-        if (tick_entity->spawn_phase <= 0) player_body_class_event(world, *tick_entity, 0);
+        if (tick_entity->spawn_phase <= 0) player_body_row_event(world, *tick_entity, 0);
         --tick_entity->spawn_phase;
     }
     // The radio-request latch (0x6D call 6) ages on the body's raw 64-tick

@@ -15,6 +15,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry.h> // org1_owns_death_transaction
+#include <runtime/world/player_spawn.h> // player_item_row (a player body's row class)
 #include <runtime/world/vehicle_attach.h>
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
@@ -223,29 +224,12 @@ void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
     const HitRecord &record = world.round_sim.hit_record;
     if (e.kind == EntityKind::Organic) {
         const uint32_t flags = e.flags | e.engine_flags;
-        if ((flags & kEntityFlagPlayer) == 0) {
-            // org0/org1: the phase-1 arm puts the victim and its trigger group
-            // on red alert, then runs the round legs while the record holds a
-            // round. The phase-4 arm zeroes the health word and, while the
-            // record holds a round, restages the death clip from it.
-            // [orig: OrganicClass_HandleEvent @0x4073BF..0x4073EA, the round
-            //  test @0x40740D; phase-4 arm @0x40733F..0x4073B1]
-            if (phase == 4) {
-                e.health = 0;
-                if (record.has_round)
-                    e.death_anim_state = hit_record_death_anim_state(
-                            record, e.heading);
-                return;
-            }
-            if (phase != 1) return;
-            if (AiEntity *ae = world.ai.for_handle(e.handle))
-                ae->slot.bytes()[AiSlot::kAlertByte] = 2;
-            world.script.relations.group(e.group_id).alert = TriggerRelations::kAlertRed;
-            if (record.has_round) person_class_round_legs(world, e, record);
-            return;
-        }
-        // plyr: the person class callback (infantry.h player_body_class_event).
-        player_body_class_event(world, e, phase);
+        // A player body runs its bound row's callback (D-NET-348); any other organic the
+        // organic class's (org0 / org1).
+        if ((flags & kEntityFlagPlayer) != 0)
+            player_body_row_event(world, e, phase);
+        else
+            organic_class_event(world, e, phase);
         return;
     }
     if (e.is_ai_capable) {
@@ -259,6 +243,58 @@ void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
     destruction_notify_item_damage(world, e, phase,
             {record.section, record.damage, record.round_yaw_bam,
              record.round_pitch_bam, record.round_roll_bam, flags});
+}
+
+// See the infantry.h contract.
+void organic_class_event(World &world, Entity &body, int event) {
+    const HitRecord &record = world.round_sim.hit_record;
+    if (event == 1) {
+        if (((body.flags | body.engine_flags) & kEntityFlagPlayer) == 0) {
+            if (AiEntity *ae = world.ai.for_handle(body.handle))
+                ae->slot.bytes()[AiSlot::kAlertByte] = 2;
+            world.script.relations.group(body.group_id).alert = TriggerRelations::kAlertRed;
+        }
+        if (record.has_round) person_class_round_legs(world, body, record);
+        return;
+    }
+    if (event == 4) {
+        body.health = 0;
+        if (record.has_round)
+            body.death_anim_state = hit_record_death_anim_state(record, body.heading);
+        return;
+    }
+    body.spawn_phase = 62;
+}
+
+// See the infantry.h contract.
+void player_body_row_event(World &world, Entity &body, int event) {
+    switch (player_item_row(world, body).body_class) {
+    case PlayerBodyClass::kOrganic:
+        organic_class_event(world, body, event);
+        return;
+    case PlayerBodyClass::kNull:
+        body.spawn_phase = 0x1000000;
+        return;
+    case PlayerBodyClass::kBarrel:
+        // Every event alike, on the authority alone. A body already dead takes the row's
+        // explosion and removal arm (@0x407CDE..0x407D14), which retail runs on an entity its
+        // player slot still points at: not run here (D-NET-NEW-L4-13, PERMANENT candidate).
+        if (!world.rules.logic_authority) return;
+        if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
+        if (retail_signed_i16(body.health) > 0) {
+            body.spawn_phase = 1920;
+            return;
+        }
+        world.out.scars.clear_entity(body.handle);
+        body.flags |= kEntityFlagDead;
+        body.engine_flags |= kEntityFlagDead;
+        body.spawn_phase = 10;
+        return;
+    case PlayerBodyClass::kPlayer:
+    case PlayerBodyClass::kOther:
+        player_body_class_event(world, body, event);
+        return;
+    }
 }
 
 bool EntityCommands::kill_ssn(EntityTarget ssn) {

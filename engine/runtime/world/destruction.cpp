@@ -693,7 +693,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             // The processed hit feeds the AI reaction stamps, like a round hit
             // [orig: the deathCallback(2) notify @ 0x4e6b72].
             world.round_sim.hits.push_back(RoundHit{target.handle, attacker, damage});
-            // That notify is the class callback with event 2: on a live PLAYER
+            // That notify is the class callback with event 2 (a player body's bound
+            // row's, player_body_row_event): on a live plyr-row PLAYER
             // body the plyr callback runs its health tail, clears the kill-cause
             // bits 8..11 (a latched head-shot bit does not survive a blast, so
             // a blast kill routes as an ordinary death), re-arms the 64-tick
@@ -702,7 +703,7 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm; the
             //  tail @0x407B64..0x407C6B].
             if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
-                player_body_class_event(world, target, 2);
+                player_body_row_event(world, target, 2);
             // Right after that notify, a blast on the LOCAL player arms the red
             // damage vignette + the camera shake and the radar blip, unless the
             // record's kz type is 3 (the medic heal); the source is the entry's

@@ -15,6 +15,7 @@ namespace opennova::world {
 
 class World;
 struct PlayerTemplate;
+enum class PlayerBodyClass : uint8_t;
 
 // The stock class-8 desert camouflage row's type id (items.def 105305, "Player #1,
 // Multiplayer"), the seed a World with no items rows spawns its players as
@@ -115,6 +116,13 @@ uint8_t player_spawn_equipped_default(const World &world);
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C399..0x43C3BE ->
 //  CharAttr_GetCammoTypeId @0x4127B0]
 int32_t player_cammo_type_id(const World &world, uint8_t player_class);
+
+// The class-table row an items.def row's ai_function names (PlayerBodyClass, world.h): the
+// whole name ignoring case; an empty tag reads "Null" and a name no row carries the walk's
+// row-0 default, both the null row.
+// [orig: Entity_LookupRenderCallbacks @0x407DC0 - the stricmp @0x407DE2, the row-0 default
+//  @0x407DEE..0x407E1E; EntityDef_InitAllCallbacks @0x4A5AAE]
+PlayerBodyClass player_body_class_from_tag(const char *ai_function);
 
 // ItemList_FindIndexByTypeId over the World's items rows: the first row of the
 // type, 0 (the first row) when none [orig: @0x49E100].
