@@ -566,6 +566,64 @@ void run_single_player_restart_repromotes_the_mission_kit() {
 	CHECK(!literal[1].empty() && literal[1][0].name == "WPN_M4AUTO");
 }
 
+// Out of a session the side-A class word is the mission's type byte when it is 1, 2 or 3, else 1,
+// and the mission start's Player_InitPlayer re-stamps the single player's team-1 body from it
+// (D-PLAYERINFO-33): never the profile's class.
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x551707..0x551725);
+//  MissionList_ScanAndBuildFromFiles @0x563170 (optionA_1134 @0x563365); Player_InitPlayer
+//  @0x4E15F0 - the team 1 / 3 test @0x4E1809..0x4E1817, g_CharClassTeam1 @0x4E182C..0x4E1832]
+void run_single_player_class_is_the_missions_type() {
+	struct Case {
+		uint8_t type;
+		uint8_t cls;
+	};
+	for (const Case c : {Case{1, 1}, Case{2, 2}, Case{3, 3}, Case{0, 1}, Case{7, 1}}) {
+		std::map<std::string, std::string> files;
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>(
+				inmatch::RoleKind::SinglePlayer, nullptr);
+		inmatch::HostRole &role = *role_storage;
+		role.bind(kernel);
+		bms::File mission = two_entity_mission();
+		mission.header.mission_type = static_cast<bms::MissionType>(c.type);
+		kernel.open_document(std::move(mission), "sp_class", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = false;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
+			cfg.config.server_name = "SINGLEPLAYERGAME";
+			cfg.config.max_players = 1;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Socketless;
+			cfg.serve_and_play = true;
+			// The shell's profile projection: class 6 on both sides.
+			inmatch::CharacterJoinVars vars;
+			vars.char_class[0] = 6;
+			vars.char_class[1] = 6;
+			cfg.local_character_vars = vars;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		const inmatch::NapiNPConnection *own = nullptr;
+		for (const inmatch::NapiNPConnection &conn : role.state.host_owner.ctx.np_protocol.connection_list)
+			if (conn.type == inmatch::NapiNPConnection::kTypeClientSide) own = &conn;
+		CHECK(own != nullptr);
+		if (own == nullptr) continue;
+		CHECK(own->char_vars.char_class[0] == c.cls);
+		CHECK(own->char_vars.char_class[1] == 6);
+		role.init_local_player_at_mission_start();
+		const w::Entity *body = kernel.world.registry.get(kernel.world.cached.local_player);
+		CHECK(body != nullptr);
+		if (body != nullptr) CHECK(body->team != 1 || body->player_class == c.cls);
+	}
+}
+
 // A single player's restart runs no round-state init (Game_RestartRoundSP -> Game_StartMission(1)),
 // so its status UP-TIME keeps counting from the first start's stamp, where a fresh start's create
 // stamps its own; and the restart's spawn raises read the word the previous start left, the
@@ -639,6 +697,7 @@ int main() {
 	run_first_round_init_seeds_the_own_buffer();
 	run_single_player_restart_repromotes_the_mission_kit();
 	run_single_player_restart_keeps_the_uptime_stamp();
+	run_single_player_class_is_the_missions_type();
 	if (failures == 0) std::printf("host_mission_start: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

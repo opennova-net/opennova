@@ -790,6 +790,19 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			const uint8_t spectate = static_cast<uint8_t>(cfg.config.join_spectate);
 			connection.link.spectator = spectate != 0;
 			connection.join_spectator_request = spectate;
+			// Out of a session the side-A class word is the mission's, not the profile's: its
+			// type byte (the header's +0x22A, the mission list entry's +0x1134) when it is 1, 2
+			// or 3, else 1; side B's is left (D-PLAYERINFO-33). The mission start's Player_InitPlayer
+			// re-stamps the single player's team-1 body from it (Player_InitPlayerSideWords).
+			// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x551707..0x551725: the entry
+			//  @0x551707, its +0x1134 into g_CharClassTeam1 @0x55170B..0x551714, 1 @0x551725);
+			//  MissionList_ScanAndBuildFromFiles @0x563170 (optionA_1134 = the header's byte
+			//  @0x563365)]
+			// (Out of a session: the socketless single player, the rules word's fact below.)
+			if (cfg.socket_mode == SocketMode::Socketless && owner.ctx.mission != nullptr) {
+				const uint8_t type = static_cast<uint8_t>(owner.ctx.mission->header.mission_type);
+				connection.char_vars.char_class[0] = type >= 1 && type <= 3 ? type : uint8_t{1};
+			}
 		}
 	}
 	// A Serve Only host's own row takes the profile the host runs under (the shell's player
