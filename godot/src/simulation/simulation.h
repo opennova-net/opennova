@@ -926,6 +926,9 @@ public:
 	// resets at its load) or a role action's (inmatch::Role::take_input_reset, the
 	// deploy action's head); reading clears both.
 	bool take_input_reset();
+	// The armory screen's ACCEPT and CANCEL head: Input_ResetAllState over the running
+	// role (engine inmatch/session.h Role::reset_all_input_state carries the witness).
+	void reset_all_input_state();
 	// The Escape key over live play runs Player_ResetLocalInput ahead of its own chain
 	// (engine inmatch::Role::reset_local_input; D-NET-560); its device legs reach the
 	// shell through take_input_reset.

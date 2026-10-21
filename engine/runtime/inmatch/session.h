@@ -334,6 +334,15 @@ public:
 	// head first: the input reset (the deferred queue here, the devices through
 	// take_input_reset) and the dialog reset (D-NET-685). True = queued.
 	bool request_deployment_pick(uint16_t wire_value);
+	// Input_ResetAllState run outside the input frame, at the armory screen's ACCEPT and
+	// CANCEL head: the event queue's records (the console's queued actions) and the
+	// deferred queue go, and the embedder's devices owe their key queue, key state and
+	// key-press latch reset (take_input_reset).
+	// [orig: Input_ResetAllState @0x497ED0 - Input_ResetKeyQueue, Input_ClearKeyState, the
+	//  event queue's memset @0x497EE6, the deferred queue's @0x497EF7, the key-press latch
+	//  @0x497F08; WeaponLoadout_ApplyFromBuffer @0x565CD0 - the guards @0x565CE4..0x565CF8,
+	//  the call @0x565D01 ahead of the CANCEL test @0x565D06]
+	void reset_all_input_state();
 	// Whether a role action owes the embedder's device input reset (the key state
 	// and the key-press latches of Input_ResetAllState); reading clears it.
 	bool take_input_reset() {

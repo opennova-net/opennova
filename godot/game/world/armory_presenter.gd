@@ -242,7 +242,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # The screen's CANCEL: a close unless the press latch holds it open.
 func _on_cancel() -> void:
 	if can_dismiss():
+		_reset_all_input_state()
 		close()
+
+
+# The ACCEPT's and CANCEL's head past the press latch: the input reset (engine
+# inmatch/session.h Role::reset_all_input_state carries the witness).
+func _reset_all_input_state() -> void:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim != null:
+		sim.reset_all_input_state()
 
 
 func teardown() -> void:
@@ -305,6 +314,7 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 func _on_loadout_accepted(loadout: Dictionary) -> void:
 	if not can_dismiss():
 		return
+	_reset_all_input_state()
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
 	if _view != null:

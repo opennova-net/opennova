@@ -2798,6 +2798,43 @@ bool run_a_console_deploy_pick_ends_the_drain() {
 	return ok;
 }
 
+// V-L2-s7 FOUND 2: no input frame runs under a menu screen, so a console-queued action waits
+// for the screen's close; the armory screen's ACCEPT and CANCEL head runs Input_ResetAllState,
+// whose event-queue memset drops it (and the devices owe their reset). Without the reset the
+// held action dispatches at the first input frame after the close.
+// [orig: Game_ProcessMainFrame @0x5263F0 - UI_IsMenuScreenOpen @0x52660D skips
+//  Input_ProcessFrame @0x52661D; WeaponLoadout_ApplyFromBuffer @0x565CD0 - Input_ResetAllState
+//  @0x565D01; Input_ResetAllState @0x497ED0 - the event queue's memset @0x497EE6]
+bool run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it() {
+	bool ok = true;
+	for (const bool accept_reset : {false, true}) {
+		Harness h;
+		h.kernel->world.load_systems();
+		h.kernel->world.rules.mp_session = true;
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
+		inmatch::TickInput menu = h.input;
+		menu.player.held_action_bits = inmatch::HELD_MENU_OPEN;
+		h.role.apply_input(menu);
+		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+		ProtocolMessage m;
+		ok &= expect(!h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m),
+				"menu screen: the queued Respawn waits under the screen");
+		(void)h.role.take_input_reset();
+		if (accept_reset) h.role.reset_all_input_state();
+		ok &= expect(h.role.take_input_reset() == accept_reset,
+				"menu screen: the ACCEPT's reset owes the devices' reset");
+		h.role.apply_input(h.input);
+		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+		ok &= expect(h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m) == !accept_reset,
+				accept_reset ? "menu screen: the ACCEPT's reset dropped the held Respawn"
+				             : "menu screen: the held Respawn dispatches at the first input frame after");
+	}
+	return ok;
+}
+
 // D-NET-562's pre-round leg: a client runs no entity update while its pre-round timer
 // (the 0x0A's phase-0 byte) is nonzero, so a Health of 0 a tail stores in the pre-round
 // latches no dead bit; the first frame whose tail reads the timer 0 runs the body tick
@@ -3458,6 +3495,7 @@ int main() {
 	ok &= run_a_console_action_dispatches_by_code();
 	ok &= run_a_stance_select_and_the_look_take_the_rows_head();
 	ok &= run_a_console_deploy_pick_ends_the_drain();
+	ok &= run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_self_team_assign_reinits_l();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();

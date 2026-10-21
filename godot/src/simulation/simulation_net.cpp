@@ -1079,6 +1079,10 @@ void Simulation::input_action_exit() {
 				remote_admin_binding(), opennova::inmatch::ExitSite::Input);
 }
 
+void Simulation::reset_all_input_state() {
+	if (kernel_) active_role().reset_all_input_state();
+}
+
 bool Simulation::take_input_reset() {
 	// The joiner's mission start owes one, and a role action (the deploy action's
 	// head, D-NET-685) another; both drain.

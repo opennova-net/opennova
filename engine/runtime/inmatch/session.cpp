@@ -50,8 +50,11 @@ void Role::apply_input(const TickInput &input) {
 	// this frame's own events behind them (ClientRuntime::queue_console_action)
 	// [orig: Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame @0x49D58B, the
 	//  drain @0x49D599..0x49D5E7 -> Input_HandleActionBinding @0x49D5D8].
+	// Under a menu screen no input frame runs, so the queued actions wait for the
+	// screen's close (whose reset may drop them) [orig: Game_ProcessMainFrame @0x5263F0 -
+	// UI_IsMenuScreenOpen @0x52660D skips Input_ProcessFrame @0x52661D].
 	input_queue_reset_ = false;
-	if (runtime != nullptr)
+	if (runtime != nullptr && (input.player.held_action_bits & HELD_MENU_OPEN) == 0)
 		for (const ClientRuntime::ConsoleAction &action : runtime->take_console_actions()) {
 			dispatch_console_action(action.code, action.p1, action.p2, action.p3);
 			if (input_queue_reset_) break; // the queue's memset ends the drain (below)
@@ -278,6 +281,15 @@ void Role::reset_local_input() {
 	input_reset_pending_ = true;
 	input_queue_reset_ = true;
 	kernel.local.reset_key_input();
+}
+
+void Role::reset_all_input_state() {
+	// [orig: Input_ResetAllState @0x497ED0 - the event queue's memset @0x497EE6, the
+	//  deferred queue's @0x497EF7, the key-press latch @0x497F08 (the devices')]
+	if (ClientRuntime *runtime = client_runtime()) (void)runtime->take_console_actions();
+	kernel_->local.clear_deferred_input();
+	input_reset_pending_ = true;
+	input_queue_reset_ = true;
 }
 
 bool Role::request_deployment_pick(uint16_t wire_value) {
